@@ -22,6 +22,8 @@
 // expect-stdout: (None, 7)
 // expect-stdout: 1 None | None None
 
+import ::io;
+
 class Node {
   v: int;
   view fn toString() -> Str { return "N" + Str<int>(self.v); }
@@ -39,8 +41,12 @@ impl Slot {
   fn __init__() { self.p = (None, 0); }
 }
 
-fn take(p: (int?, Str)) -> Str { return "take: " + p.1; }
-fn mk() -> (Node?, int) { return (None, 2); }
+fn take(p: (int?, Str)) -> Str {
+  return "take: " + p.1;
+}
+fn mk() -> (Node?, int) {
+  return (None, 2);
+}
 
 // The first `count` pairs of `xs`.
 fn showPairs(xs: view (Str, int?)[], count: int) -> Str {
@@ -60,8 +66,10 @@ fn showNodes(xs: view Node?[]) -> Str {
   while i < xs.len() {
     if i > 0 { out = out + " "; }
     match xs[i] {
-      n: Node { out = out + n.toString(); }
-      None    { out = out + "None"; }
+      n: Node {
+        out = out + n.toString();
+      }
+      None { out = out + "None"; }
     }
     i = i + 1;
   }
@@ -75,7 +83,7 @@ fn showInts(xs: view int?[]) -> Str {
     if i > 0 { out = out + " "; }
     match xs[i] {
       n: int { out = out + Str(n); }
-      None   { out = out + "None"; }
+      None { out = out + "None"; }
     }
     i = i + 1;
   }
@@ -86,31 +94,31 @@ fn main() -> int {
   // `None` in a tuple literal.
   a: (int?, Str) = (None, "a");
   b: (Node?, int) = (None, 1);
-  println(a);
-  println(b);
-  println(take((None, "x")));
-  println(mk());
+  io::println(a);
+  io::println(b);
+  io::println(take((None, "x")));
+  io::println(mk());
 
   // An array literal of tuples mixing `int` and `int?` elements.
   nb: int? = None;
   tbl: (Str, int?)[4] = [("a", 1), ("b", nb), ("c", 3), ("", 0)];
-  println(showPairs(tbl, 3));
+  io::println(showPairs(tbl, 3));
   tbl[3] = ("d", None);
-  println(showPairs(tbl, 4));
+  io::println(showPairs(tbl, 4));
 
   // `None` among class instances.
   nodes: Node?[3] = [Node(1), None, Node(3)];
-  println(showNodes(nodes));
+  io::println(showNodes(nodes));
 
   // Nested literals.
   nested: (Str, (int?, Node?))[2] = [("a", (1, None)), ("b", (nb, Node(4)))];
-  println(nested[0].toString() + " " + nested[1].toString());
+  io::println(nested[0].toString() + " " + nested[1].toString());
 
   s = Slot();
   s.p = (None, 7);
-  println(s.p);
+  io::println(s.p);
 
   grid: int?[2][2] = [[1, nb], [None, None]];
-  println(showInts(grid[0]) + " | " + showInts(grid[1]));
+  io::println(showInts(grid[0]) + " | " + showInts(grid[1]));
   return 0;
 }

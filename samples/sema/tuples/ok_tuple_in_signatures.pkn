@@ -1,10 +1,12 @@
+import ::io;
+
 // OK: tuples as fields, parameters, return types and array elements; a field
 // tuple copied into a local; and reference elements are covariant
 // (`(int, Str)` to `(int, Obj)`) because tuples are immutable.
 class Holder {
   pair: (int, Str);
   view fn get() -> view (int, Str) { return self.pair; }
-  view fn first() -> int { return self.pair.0; }
+  view fn first() -> int           { return self.pair.0; }
 }
 
 impl Holder {
@@ -21,6 +23,6 @@ fn main() -> int {
   s2, n2 = swap(h.pair);
   copy: (int, Str) = h.pair;
   wide: (int, Obj) = (1, "s");
-  println(h.pair);
+  io::println(h.pair);
   return h.first() + n + n2 + copy.0;
 }

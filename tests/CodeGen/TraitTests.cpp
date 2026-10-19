@@ -14,7 +14,7 @@ using namespace paykan::test;
 
 TEST(Traits, ImplForMethodsRun) {
   LeakGuard guard;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     trait Named { view fn name() -> Str; }
     trait Into<T> { view fn into() -> T; }
     trait Same { view fn same(other: view Self) -> bool; }
@@ -36,7 +36,7 @@ TEST(Traits, ImplForMethodsRun) {
     fn main() -> int {
       a = A(1);
       b = B();
-      println(a.name() + " " + b.name() + " " + Str(a.into() + b.into()) +
+      io::println(a.name() + " " + b.name() + " " + Str(a.into() + b.into()) +
               " " + Str(a.same(b)) + " " + Str(a.same(A(1))));
       return 0;
     }
@@ -47,7 +47,7 @@ TEST(Traits, ImplForMethodsRun) {
 }
 TEST(Traits, BoundedGenericsRun) {
   LeakGuard guard;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     trait Named { view fn name() -> Str; }
     trait Into<T> { view fn into() -> T; }
     trait Same { view fn same(other: view Self) -> bool; }
@@ -87,9 +87,9 @@ TEST(Traits, BoundedGenericsRun) {
       b = B();
       h = Holder<A>(b);
       ab: A[2] = [a, b];
-      println(greet(a) + " " + greet(b) + " " + Str(total(ab)) + " " +
+      io::println(greet(a) + " " + greet(b) + " " + Str(total(ab)) + " " +
               h.label() + " " + Str(a.same(b)) + " " + Str(a.same(A(1))));
-      println(show("s"));
+      io::println(show("s"));
       return 0;
     }
   )pkn");
@@ -116,13 +116,13 @@ impl Box<T> {
   fn __init__(v: T) { self.v = v; }
 }
 )pkn";
-  std::ofstream(dir / "main.pkn") << R"pkn(
+  std::ofstream(dir / "main.pkn") << R"pkn(import ::io;
 import fmt;
 class P { view fn toString() -> Str { return "P"; } }
 impl P { fn __init__() {} }
 fn main() -> int {
   b = fmt::Box<P>(P());
-  println(fmt::show(P()) + " " + b.text() + " " + fmt::show("s"));
+  io::println(fmt::show(P()) + " " + b.text() + " " + fmt::show("s"));
   return 0;
 }
 )pkn";
@@ -135,16 +135,16 @@ fn main() -> int {
 
 TEST(Traits, ScalarsShow) {
   LeakGuard guard;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn show<T: Show>(x: view T) -> Str { return "<" + x.toString() + ">"; }
     fn main() -> int {
       n = 42;
       f = 2.5;
       b = True;
       c = 'z';
-      println(n.toString() + " " + f.toString() + " " + b.toString() + " " +
+      io::println(n.toString() + " " + f.toString() + " " + b.toString() + " " +
               c.toString());
-      println(show(n) + show(f) + show(b) + show(c) + show("s"));
+      io::println(show(n) + show(f) + show(b) + show(c) + show("s"));
       return 0;
     }
   )pkn");
@@ -158,7 +158,7 @@ TEST(Traits, ScalarsShow) {
 // meets a `T: Hashable` bound.
 TEST(Traits, BuiltinHashable) {
   LeakGuard guard;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     class Key { id: int; }
     impl Hashable for Key { view fn hash() -> int { return self.id.hash(); } }
     fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
@@ -166,9 +166,9 @@ TEST(Traits, BuiltinHashable) {
       n = 97;
       one = 1;
       s = "ab";
-      println(Str(h(n) == n.hash()) + " " + Str(h(1) == h(2)) + " " +
+      io::println(Str(h(n) == n.hash()) + " " + Str(h(1) == h(2)) + " " +
               Str(h('a') == h(n)) + " " + Str(True.hash() == one.hash()));
-      println(Str((s + "c").hash() == "abc".hash()) + " " +
+      io::println(Str((s + "c").hash() == "abc".hash()) + " " +
               Str(h(s) == h("ba")) + " " + Str(h(Key(7)) == h(7)));
       return 0;
     }

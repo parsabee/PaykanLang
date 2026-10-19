@@ -1,5 +1,6 @@
 // ERROR: a class name is also its constructor, so a free function cannot share it
-fn Point() -> int {  // sema error: 'Point' is already declared as a class
+fn Point() -> int {
+  // sema error: 'Point' is already declared as a class
   return 0;
 }
 

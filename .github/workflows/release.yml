@@ -75,7 +75,7 @@ jobs:
           ./build/bin/paykan --version
           ./build/bin/paykan --list-backends | grep '^c (default)'
           ./build/bin/paykan --list-backends | grep '^llvm'
-          printf 'fn main() -> int {\n  println("Hello from release CI!");\n  return 0;\n}\n' > /tmp/hello.pkn
+          printf 'import ::io;\nfn main() -> int {\n  io::println("Hello from release CI!");\n  return 0;\n}\n' > /tmp/hello.pkn
           for be in c llvm; do
             ./build/bin/paykan --backend="${be}" /tmp/hello.pkn | grep -Fx "Hello from release CI!"
             ./build/bin/paykan --backend="${be}" -o "/tmp/hello-${be}" build /tmp/hello.pkn
@@ -146,7 +146,7 @@ jobs:
           cd "${work}"
           test "$(command -v paykan)" = /usr/bin/paykan
           paykan --version
-          printf 'fn main() -> int {\n  println("Hello from the .deb!");\n  return 0;\n}\n' > hello.pkn
+          printf 'import ::io;\nfn main() -> int {\n  io::println("Hello from the .deb!");\n  return 0;\n}\n' > hello.pkn
           for be in c llvm; do
             paykan --backend="${be}" run hello.pkn | grep -Fx "Hello from the .deb!"
             paykan --backend="${be}" build -o "hello-${be}" hello.pkn

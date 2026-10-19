@@ -51,9 +51,3 @@ TEST(EqualsNullOther, File) {
   EXPECT_EQ(equalsWithNullOther(PaykanFile_equals, (PaykanObject *)f), 0);
   Paykan_dispose((PaykanObject *)f);
 }
-
-TEST(EqualsNullOther, Error) {
-  PaykanError *e = PaykanError_new("boom", 4);
-  EXPECT_EQ(equalsWithNullOther(PaykanError_equals, (PaykanObject *)e), 0);
-  PaykanError_destroy((PaykanObject *)e);
-}

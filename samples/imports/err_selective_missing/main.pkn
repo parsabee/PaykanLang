@@ -2,4 +2,6 @@
 //   lib/foo.pkn exists, lib/bar.pkn does NOT
 import lib::{foo, bar};  // ERROR: 'lib::bar' not found
 
-fn main() -> int { return foo::val(); }
+fn main() -> int {
+  return foo::val();
+}

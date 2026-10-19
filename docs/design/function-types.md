@@ -59,9 +59,9 @@ type is written or `void`, and its body is a block (no expression bodies).
   float` promotion does not apply to function types.
 * A named function used as a value has the type of its signature.  A
   generic function must be instantiated to be a value, and that is not
-  supported yet (`first<int>` as a value).  A builtin (`print`, a conversion,
-  a constructor) is not a value: it has no single signature or is not a
-  function.
+  supported yet (`first<int>` as a value; `io::println` is generic too).  A
+  builtin (a conversion, a constructor) is not a value: it has no single
+  signature or is not a function.
 * A lambda's type is the function type of its signature.  Its body is
   checked as a function body: `return` matches its result type, a non-void
   body returns on every path, `break` and `continue` do not reach out of it.
@@ -158,14 +158,14 @@ that calls it needs only its signature.  Nothing is added to the runtime:
 | mismatched function types | `f: (int) -> int = fn(x: float) -> int { ... }` |
 | calling a non-function | `n = 1; n(2)` |
 | wrong arguments to a function value | `f(1, 2)` for `f: (int) -> int`; `f("a")`; a `view` argument to an `inout` parameter |
-| a builtin, constructor or generic as a value | `p = println;`, `c = Point;`, `g = first;` |
+| a builtin, constructor or generic as a value | `p = Str;`, `c = Point;`, `g = first;` |
 | a method as a value | `m = p.shift;` |
 | capturing a borrow | `fn f(v: view Str) { g = fn() -> int { return v.len(); }; }` |
 | capturing `self` in a `view fn` or a struct method | `view fn m() { g = fn() { self.x = 1; }; }` |
 | assigning a captured name | `n = 1; g = fn() { n = 2; };` |
 | a captured name as an `inout` argument | `g = fn() { bump(n); };` |
 | a lambda's `break` outside its own loop | `while c { g = fn() { break; }; }` |
-| `toString`, `print` on a function value | `println(f)`, `f.toString()` |
+| `toString`, `print` on a function value | `io::println(f)`, `f.toString()` |
 
 ## Open questions
 

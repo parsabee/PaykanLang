@@ -1,6 +1,10 @@
 // ERROR: 'self' is read-only in 'view fn bad'; cannot assign to its field 'x'
-struct A { x: int; }
+struct A {
+  x: int;
+}
 impl A {
   view fn bad() { self.x = 1; }
 }
-fn main() -> int { return 0; }
+fn main() -> int {
+  return 0;
+}

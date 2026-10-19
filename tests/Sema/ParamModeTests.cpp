@@ -122,7 +122,7 @@ fn main() -> int {
 // no field or element write, no call of a method that is not a `view fn`, no
 // `inout` argument.  Reads and `view fn` calls are fine.
 TEST(ParamMode, ViewReferenceParameters) {
-  auto r = semaCheck(R"(class Counter {
+  auto r = semaCheck(R"(import ::io; class Counter {
   n: int;
   fn tick() { self.n = self.n + 1; }
 }
@@ -139,7 +139,7 @@ fn look(c: view Counter, s: view Str, xs: view int[]) -> int {
   s = "x";
   reset(c);
   bump(c.n);
-  println(c.toString());
+  io::println(c.toString());
   return c.n + s.len() + xs.len() + xs[0];
 }
 fn main() -> int { return 0; })");
@@ -552,7 +552,7 @@ fn main() -> int {
 // `view fn` (`toString`, an override of it, `len`) can be called on it.  A
 // `match` arm's name for it is a `view` too.
 TEST(LocalBorrow, ViewOfReferenceTypes) {
-  auto r = semaCheck(R"(class Counter {
+  auto r = semaCheck(R"(import ::io; class Counter {
   n: int;
   fn tick() { self.n = self.n + 1; }
   view fn toString() -> Str { return "c" + Str(self.n); }
@@ -574,7 +574,7 @@ fn main() -> int {
   fill(a);
   a[0] = 5;
   match v { x: Counter { x.tick(); x = Counter(); } }
-  println(v.toString() + s + Str(s.len() + a.len() + a[0] + v.n));
+  io::println(v.toString() + s + Str(s.len() + a.len() + a[0] + v.n));
   return 0;
 })");
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
@@ -599,7 +599,7 @@ fn main() -> int {
 // tuple) nor returned.  The builtin functions only read, but
 // `Str(s)` returns `s` itself; a value type is copied when it is assigned.
 TEST(LocalBorrow, AViewStaysAView) {
-  auto r = semaCheck(R"(class Counter { n: int; }
+  auto r = semaCheck(R"(import ::io; class Counter { n: int; }
 impl Counter { fn __init__() { self.n = 0; } }
 class Holder { c: Counter; }
 impl Holder { fn __init__(c: Counter) { self.c = c; } }
@@ -628,7 +628,7 @@ fn main() -> int {
   twice(v.n);
   s: view = "s";
   u = Str(s);
-  println(v);
+  io::println(v);
   m = k;
   ints: int[1] = [k];
   ints[0] = k;
@@ -693,7 +693,7 @@ fn main() -> int {
 TEST(ParamMode, ViewParametersOnlyPassToView) {
   // A `view` of a reference (an object, a `Str`, a value holding one) goes
   // only to a `view` parameter; a value type leaves a `view` as a copy.
-  auto r = semaCheck(R"(class Counter { n: int; }
+  auto r = semaCheck(R"(import ::io; class Counter { n: int; }
 struct P { x: int; name: Str; }
 fn twice(n: int) -> int { return 2 * n; }
 fn look(n: view int) -> int { return n; }
@@ -702,7 +702,7 @@ fn peek(c: view Counter) -> int { return c.n; }
 fn tag(s: Str) -> int { return s.len(); }
 fn hold(p: P) -> int { return p.x; }
 fn f(n: view int, c: view Counter, s: view Str, p: view P) -> int {
-  println(Str(n));
+  io::println(Str(n));
   m = n;
   return twice(n) + look(n) + twice(m) + keep(c) + peek(c) + tag(s) + hold(p) + twice(c.n) + twice(p.x);
 }
@@ -773,7 +773,7 @@ fn main() -> int {
 // until its last use in its block, through a whole loop that uses it, and a
 // borrow of a borrow keeps the first variable borrowed.
 TEST(LocalBorrow, Exclusivity) {
-  auto r = semaCheck(R"(class Counter {
+  auto r = semaCheck(R"(import ::io; class Counter {
   n: int;
   fn tick() { self.n = self.n + 1; }
 }
@@ -796,13 +796,13 @@ fn main() -> int {
   c.n = 4;
   c = Counter();
   report(c);
-  println(Str(v.n));
+  io::println(Str(v.n));
   c.tick();
   m = 5;
   w: view = m;
   t = twice(m);
   m = 6;
-  print(Str(w));
+  io::print(Str(w));
   m = 7;
   i = 0;
   a = 1;
@@ -849,7 +849,7 @@ fn main() -> int {
 // subject is: nothing changes through it, it passes on only to `view`
 // parameters, and the subject's variable cannot change until its last use.
 TEST(LocalBorrow, ViewArms) {
-  auto r = semaCheck(R"(class Animal {
+  auto r = semaCheck(R"(import ::io; class Animal {
   n: int;
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
@@ -871,7 +871,7 @@ fn main() -> int {
       keep(d);
       show(d);
       a.tick();
-      println(Str(d.get()));
+      io::println(Str(d.get()));
       a.tick();
     }
     _ { }

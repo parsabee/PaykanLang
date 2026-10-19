@@ -31,12 +31,12 @@ void expectRunsOnEveryFrontend(const char *label, const std::string &source,
 } // namespace
 
 TEST(LiteralObject, Subscript) {
-  expectRunsOnEveryFrontend("Subscript", R"(
+  expectRunsOnEveryFrontend("Subscript", R"(import ::io;
     fn main() -> int {
       c = "ab"[1];
-      println(Str(c));
+      io::println(Str(c));
       i = 0;
-      while i < 3 { println(Str<char>("xyz"[i])); i = i + 1; }
+      while i < 3 { io::println(Str<char>("xyz"[i])); i = i + 1; }
       return 0;
     }
   )",
@@ -44,18 +44,18 @@ TEST(LiteralObject, Subscript) {
 }
 
 TEST(LiteralObject, SubscriptAsMatchSubjectAndConversionArgument) {
-  expectRunsOnEveryFrontend("SubscriptMatch", R"(
+  expectRunsOnEveryFrontend("SubscriptMatch", R"(import ::io;
     fn main() -> int {
       match "a\nb"[1] {
-        '\n' { println("newline"); }
-        _ { println("other"); }
+        '\n' { io::println("newline"); }
+        _ { io::println("other"); }
       }
-      println(Str<char>("xy"[1]));
+      io::println(Str<char>("xy"[1]));
       match "lit" {
-        "lit" { println("lit"); }
-        _ { println("no"); }
+        "lit" { io::println("lit"); }
+        _ { io::println("no"); }
       }
-      println(int<Str>("42"));
+      io::println(int<Str>("42"));
       return 0;
     }
   )",
@@ -63,18 +63,18 @@ TEST(LiteralObject, SubscriptAsMatchSubjectAndConversionArgument) {
 }
 
 TEST(LiteralObject, LiteralInEveryValuePosition) {
-  expectRunsOnEveryFrontend("Positions", R"(
+  expectRunsOnEveryFrontend("Positions", R"(import ::io;
     fn consume(s: Str) -> int { return s.len(); }
     fn give() -> Str { return "ret"; }
     fn main() -> int {
       v = "lit";
-      println(v);
-      println("lit");
-      println(Str<int>(consume("lit")));
+      io::println(v);
+      io::println("lit");
+      io::println(Str<int>(consume("lit")));
       s: Str = "typed";
-      println(s);
-      println("lit" + "x");
-      println(give());
+      io::println(s);
+      io::println("lit" + "x");
+      io::println(give());
       return 0;
     }
   )",
@@ -82,11 +82,11 @@ TEST(LiteralObject, LiteralInEveryValuePosition) {
 }
 
 TEST(LiteralObject, MethodReceiver) {
-  expectRunsOnEveryFrontend("Receiver", R"(
+  expectRunsOnEveryFrontend("Receiver", R"(import ::io;
     fn main() -> int {
-      println(Str<int>("abc".len()));
-      println("str".toString());
-      println(Str<bool>("x" == "x") + Str<bool>("x" != "y"));
+      io::println(Str<int>("abc".len()));
+      io::println("str".toString());
+      io::println(Str<bool>("x" == "x") + Str<bool>("x" != "y"));
       return 0;
     }
   )",
@@ -94,7 +94,7 @@ TEST(LiteralObject, MethodReceiver) {
 }
 
 TEST(LiteralObject, TupleArrayAndOptionalElements) {
-  expectRunsOnEveryFrontend("Elements", R"(
+  expectRunsOnEveryFrontend("Elements", R"(import ::io;
     fn first(t: (Str, int)) -> Str { return t.0; }
     fn opt(b: bool) -> Str? {
       if b { return "some"; }
@@ -102,21 +102,21 @@ TEST(LiteralObject, TupleArrayAndOptionalElements) {
     }
     fn main() -> int {
       t = ("tup", 1);
-      println(t.0);
-      println(first(("arg", 2)));
+      io::println(t.0);
+      io::println(first(("arg", 2)));
       m: (Str, Str) = ("m1", "m2");
-      println(m.0 + m.1);
+      io::println(m.0 + m.1);
       a: Str[3] = ["x", "y", ""];
       a[0] = "z";
       a[2] = "w";
-      println(a[0] + a[1] + a[2]);
-      println(["p", "q"][1]);
+      io::println(a[0] + a[1] + a[2]);
+      io::println(["p", "q"][1]);
       o: Str? = "opt";
-      println(o);
+      io::println(o);
       o2: Str? = "opt2";
-      println(o2);
-      match opt(True) { v: Str { println(v); } None { println("none"); } }
-      match opt(False) { v: Str { println(v); } None { println("none"); } }
+      io::println(o2);
+      match opt(True) { v: Str { io::println(v); } None { io::println("none"); } }
+      match opt(False) { v: Str { io::println(v); } None { io::println("none"); } }
       return 0;
     }
   )",
@@ -124,7 +124,7 @@ TEST(LiteralObject, TupleArrayAndOptionalElements) {
 }
 
 TEST(LiteralObject, ExpressionStatementAndFields) {
-  expectRunsOnEveryFrontend("Fields", R"(
+  expectRunsOnEveryFrontend("Fields", R"(import ::io;
     class K {
       name: Str;
       tag: Str?;
@@ -138,8 +138,8 @@ TEST(LiteralObject, ExpressionStatementAndFields) {
       "ab"[0];
       k = K();
       k.name = "k2";
-      println(k.name);
-      println(k.tag);
+      io::println(k.name);
+      io::println(k.tag);
       return 0;
     }
   )",

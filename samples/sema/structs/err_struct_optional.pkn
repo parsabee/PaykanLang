@@ -1,5 +1,7 @@
 // ERROR: optional struct types are not supported yet (an optional struct cannot be unwrapped with match)
-struct A { x: int; }
+struct A {
+  x: int;
+}
 fn main() -> int {
   a: A? = None;
   return 0;

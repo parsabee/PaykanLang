@@ -43,6 +43,8 @@ get_filename_component(PAYKAN_TEST_SUPPORT_DIR
     "${CMAKE_CURRENT_LIST_DIR}/@PAYKAN_TEST_SUPPORT_RELDIR@" ABSOLUTE)
 get_filename_component(PAYKAN_SAMPLES_DIR
     "${CMAKE_CURRENT_LIST_DIR}/@PAYKAN_SAMPLES_RELDIR@" ABSOLUTE)
+get_filename_component(_PAYKAN_STDLIB_DIR
+    "${CMAKE_CURRENT_LIST_DIR}/@PAYKAN_STDLIB_RELDIR@" ABSOLUTE)
 # Whether the installed libraries were built without assertions.
 set(_PAYKAN_TEST_LIBRARY_NDEBUG @PAYKAN_TEST_LIBRARY_NDEBUG@)
 
@@ -88,6 +90,9 @@ function(paykan_add_frontend_tests frontend)
         add_executable(${exe} ${${suite}_sources}
                               "${dir}/Frontend/LoadTestPlugins.cpp")
         target_include_directories(${exe} PRIVATE "${dir}")
+        # The programs import the installed standard library (TestUtils.h).
+        target_compile_definitions(${exe} PRIVATE
+            PAYKAN_TEST_STDLIB_DIR="${_PAYKAN_STDLIB_DIR}")
         target_link_libraries(${exe} PRIVATE ${ARG_GTEST_MAIN}
                                              Paykan::frontend
                                              Paykan::ast_printer

@@ -76,6 +76,7 @@
 // expect-stdout: a = 6
 // expect-stdout: b = 42
 
+import ::io;
 import calc::parser;
 import calc::hashmap;
 import calc::utils;
@@ -103,7 +104,9 @@ class Ring<T> {
   view fn len() -> int { return self.count; }
 
   // The i-th oldest item (0 <= i < len()).
-  view fn at(i: int) -> view T { return self.items[(self.start + i) % self.items.len()]; }
+  view fn at(i: int) -> view T {
+    return self.items[(self.start + i) % self.items.len()];
+  }
 }
 
 impl Ring<T> {
@@ -128,20 +131,20 @@ fn defineConstants(env: hashmap::HashMap) {
 }
 
 // Evaluate one statement line (an assignment or a bare expression) and print.
-fn evalStatement(src: Str, env: hashmap::HashMap,
-                 history: Ring<(Str, float)>, quiet: bool) {
+fn evalStatement(src: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
+                 quiet: bool) {
   p: parser::Parser = parser::Parser(src, env);
   target, value = p.parseStatement();
 
   match p.error {
     msg: Str {
-      printerrln("error: " + msg);
+      io::printerrln("error: " + msg);
       return;
     }
     None { }
   }
   if !p.done() {
-    printerrln("error: unexpected '" + p.rest() + "'");
+    io::printerrln("error: unexpected '" + p.rest() + "'");
     return;
   }
 
@@ -150,12 +153,18 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
   match target {
     name: Str {
       env.put(name, value);
-      if quiet { println(show(value)); }
-      else { println(name + " = " + show(value)); }
+      if quiet {
+        io::println(show(value));
+      } else {
+        io::println(name + " = " + show(value));
+      }
     }
     None {
-      if quiet { println(show(value)); }
-      else { println(src + " = " + show(value)); }
+      if quiet {
+        io::println(show(value));
+      } else {
+        io::println(src + " = " + show(value));
+      }
     }
   }
 }
@@ -163,7 +172,7 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
 // List every stored variable, walking each bucket's chain of entries.
 fn listVars(env: hashmap::HashMap) {
   if env.count() == 0 {
-    println("(no variables)");
+    io::println("(no variables)");
     return;
   }
   b: int = 0;
@@ -172,7 +181,7 @@ fn listVars(env: hashmap::HashMap) {
     while cur != None {
       match cur {
         e: hashmap::Entry {
-          println("  " + e.key + " = " + show(e.value));
+          io::println("  " + e.key + " = " + show(e.value));
           cur = e.next;
         }
         None { }
@@ -185,14 +194,14 @@ fn listVars(env: hashmap::HashMap) {
 // Print the remembered statements, oldest first, numbered from 1.
 fn listHistory(history: Ring<(Str, float)>) {
   if history.len() == 0 {
-    println("(no history)");
+    io::println("(no history)");
     return;
   }
   i: int = 0;
   while i < history.len() {
     entry: view = history.at(i);   // (source, value)
     value = entry.1;
-    println("  " + Str(i + 1) + ": " + entry.0 + "  => " + show(value));
+    io::println("  " + Str(i + 1) + ": " + entry.0 + "  => " + show(value));
     i = i + 1;
   }
 }
@@ -206,7 +215,9 @@ fn splitCommand(s: Str) -> (Str, Str) {
     word = word + Str<char>(s[i]);
     i = i + 1;
   }
-  while i < s.len() && s[i] == ' ' { i = i + 1; }
+  while i < s.len() && s[i] == ' ' {
+    i = i + 1;
+  }
   arg: Str = "";
   while i < s.len() {
     arg = arg + Str(s[i]);
@@ -238,22 +249,26 @@ fn runCommand(s: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
   if word.equals("clear") {
     env.clear();
     defineConstants(env);
-    if !quiet { println("cleared all variables"); }
+    if !quiet {
+      io::println("cleared all variables");
+    }
     return True;
   }
   if word.equals("del") {
     if arg.len() == 0 {
-      printerrln("usage: :del <name>");
+      io::printerrln("usage: :del <name>");
       return True;
     }
     if env.remove(arg) {
-      if !quiet { println("deleted '" + arg + "'"); }
+      if !quiet {
+        io::println("deleted '" + arg + "'");
+      }
     } else {
-      printerrln("no such variable: '" + arg + "'");
+      io::printerrln("no such variable: '" + arg + "'");
     }
     return True;
   }
-  printerrln("unknown command ':" + word + "' (try :help)");
+  io::printerrln("unknown command ':" + word + "' (try :help)");
   return True;
 }
 
@@ -262,7 +277,9 @@ fn handle(line: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
           quiet: bool) -> bool {
   s: Str = utils::stripLine(line);
   if s.len() == 0 { return True; }
-  if s[0] == ':' { return runCommand(s, env, history, quiet); }
+  if s[0] == ':' {
+    return runCommand(s, env, history, quiet);
+  }
   evalStatement(s, env, history, quiet);
   return True;
 }
@@ -270,11 +287,15 @@ fn handle(line: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
 // Read-evaluate-print loop over standard input.
 fn repl(env: hashmap::HashMap, history: Ring<(Str, float)>, quiet: bool) -> int {
   if !quiet {
-    println("calc — arithmetic with variables.  :help for commands, :quit to exit.");
+    io::println("calc — arithmetic with variables.  :help for commands, :quit to exit.");
   }
   while True {
-    match Stdin.readln() {
-      line: Str { if !handle(line, env, history, quiet) { return 0; } }
+    match io::stdin().readln().value {
+      line: Str {
+        if !handle(line, env, history, quiet) {
+          return 0;
+        }
+      }
       _ { break; } // None — end of input
     }
   }
@@ -282,65 +303,46 @@ fn repl(env: hashmap::HashMap, history: Ring<(Str, float)>, quiet: bool) -> int 
 }
 
 fn printHelp() {
-  println("expressions:  + - * / %, parentheses, unary minus, decimals");
-  println("variables:    x = 3 + 4     assign, then use x later");
-  println("              ans           the last computed result");
-  println("              pi, e         predefined constants");
-  println("commands:     :vars         list all variables");
-  println("              :history      list recent statements and results");
-  println("              :del <name>   delete a variable");
-  println("              :clear        remove all variables");
-  println("              :help         show this help");
-  println("              :quit         exit");
+  io::println("expressions:  + - * / %, parentheses, unary minus, decimals");
+  io::println("variables:    x = 3 + 4     assign, then use x later");
+  io::println("              ans           the last computed result");
+  io::println("              pi, e         predefined constants");
+  io::println("commands:     :vars         list all variables");
+  io::println("              :history      list recent statements and results");
+  io::println("              :del <name>   delete a variable");
+  io::println("              :clear        remove all variables");
+  io::println("              :help         show this help");
+  io::println("              :quit         exit");
 }
 
 // The scripted session: each line goes through handle(), as if typed at the
 // REPL. It covers expressions, assignment, `ans`, the constants, every
 // command and a few errors, and ends with `a` and `b` defined.
 fn demo(env: hashmap::HashMap, history: Ring<(Str, float)>) {
-  script: Str[_] = [
-    "1 + 2 * 3",
-    "(1 + 2) * 3",
-    "x = 6",
-    "y = x * 7",
-    "(x + y) / 4",
-    "ans * 2",
-    "-x + 10 % 4",
-    "2.5 * 2",
-    ":vars",
-    ":history",
-    ":del y",
-    "y + 1",
-    ":del y",
-    "1 / 0",
-    "3 +",
-    "4 4",
-    ":frobnicate",
-    ":clear",
-    ":vars",
-    "a = 6",
-    "b = a * 7"
-  ];
+  script: Str[_] = [ "1 + 2 * 3", "(1 + 2) * 3", "x = 6", "y = x * 7",
+      "(x + y) / 4", "ans * 2", "-x + 10 % 4", "2.5 * 2", ":vars", ":history",
+      ":del y", "y + 1", ":del y", "1 / 0", "3 +", "4 4", ":frobnicate",
+      ":clear", ":vars", "a = 6", "b = a * 7" ];
   i: int = 0;
   while i < script.len() {
-    println("> " + script[i]);
+    io::println("> " + script[i]);
     handle(script[i], env, history, False);
     i = i + 1;
   }
 }
 
 fn printUsage() {
-  println("calc - arithmetic calculator with variables");
-  println("");
-  println("usage: paykan main.pkn [options] [expr ...]");
-  println("");
-  println("options:");
-  println("  -e, --eval <expr>   evaluate <expr> (may be repeated)");
-  println("  -q, --quiet         print only results (no echo, no banner)");
-  println("      --no-demo       skip the scripted demo session");
-  println("  -h, --help          show this help");
-  println("");
-  println("With no expressions, reads one statement per line from stdin.");
+  io::println("calc - arithmetic calculator with variables");
+  io::println("");
+  io::println("usage: paykan main.pkn [options] [expr ...]");
+  io::println("");
+  io::println("options:");
+  io::println("  -e, --eval <expr>   evaluate <expr> (may be repeated)");
+  io::println("  -q, --quiet         print only results (no echo, no banner)");
+  io::println("      --no-demo       skip the scripted demo session");
+  io::println("  -h, --help          show this help");
+  io::println("");
+  io::println("With no expressions, reads one statement per line from stdin.");
 }
 
 // True for an option such as `-q` (a lone `-` is not one).
@@ -369,11 +371,11 @@ fn main(args: view Str[]) -> int {
         i = i + 1;
         nexprs = nexprs + 1;
       } else {
-        printerrln("error: " + a + " requires an argument");
+        io::printerrln("error: " + a + " requires an argument");
         return 2;
       }
     } elif isOption(a) {
-      printerrln("error: unknown option '" + a + "' (try -h)");
+      io::printerrln("error: unknown option '" + a + "' (try -h)");
       return 2;
     } else {
       nexprs = nexprs + 1; // a positional argument is an expression

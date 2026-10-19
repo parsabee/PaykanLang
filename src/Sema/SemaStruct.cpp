@@ -67,9 +67,10 @@ bool Sema::declareStructs(ast::TranslationUnit *tu) {
 namespace {
 
 /// The names of the structs a value of the annotation @p ty holds in place:
-/// a struct named outright, or as an element of a tuple or a fixed-size
-/// array (an optional, a slice, a class and a type argument hold nothing in
-/// place).  @p ty is a parser annotation: a struct is a ClassType stub.
+/// a struct named outright, as an element of a tuple or a fixed-size array,
+/// or as the value of an optional (`P?` holds its P in place; a slice, a
+/// class and a type argument hold nothing in place).  @p ty is a parser
+/// annotation: a struct is a ClassType stub.
 void heldStructNames(const ast::Type *ty, const StringSet &structs,
                      std::vector<std::string> &out) {
   if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
@@ -82,6 +83,8 @@ void heldStructNames(const ast::Type *ty, const StringSet &structs,
       heldStructNames(e, structs, out);
   } else if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
     heldStructNames(ft->getElementType(), structs, out);
+  } else if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
+    heldStructNames(ot->getInnerType(), structs, out);
   }
 }
 
@@ -323,6 +326,9 @@ bool Sema::holdsStruct(const ast::Type *ty, const ast::StructType *target) {
   }
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
     return holdsStruct(ft->getElementType(), target);
+  // An optional struct or tuple holds its value in place.
+  if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return holdsStruct(ot->getInnerType(), target);
   return false;
 }
 

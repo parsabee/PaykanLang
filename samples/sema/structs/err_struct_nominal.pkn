@@ -1,8 +1,14 @@
 // ERROR: initializer of type 'A' does not match declared type 'B'
 // Two structs with the same fields are different types, and a struct is not
 // the tuple of its fields.
-struct A { x: int; y: int; }
-struct B { x: int; y: int; }
+struct A {
+  x: int;
+  y: int;
+}
+struct B {
+  x: int;
+  y: int;
+}
 fn main() -> int {
   a = A(1, 2);
   b: B = a;

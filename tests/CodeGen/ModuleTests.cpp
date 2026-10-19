@@ -237,13 +237,13 @@ fn name(c: Color) -> Str {
 fn favorite() -> Color { return Color::Blue; }
 )");
 
-  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(import ::io;
 import pal::color;
 fn main() -> int {
   c: color::Color = color::Color::Green;
-  println(color::name(c));            // green
+  io::println(color::name(c));            // green
   f: color::Color = color::favorite();
-  println(color::name(f));            // blue
+  io::println(color::name(f));            // blue
   if f == color::Color::Blue { return 0; }
   return 1;
 }
@@ -597,13 +597,13 @@ fn tag() -> Str { return "y"; }
 fn num(n: int) -> int { return n * 10; }
 fn both() -> Str { return tag() + x::tag(); }
 )");
-  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(import ::io;
 import x;
 import lib::y as r;
 fn tag() -> Str { return "m"; }
 fn num(n: int) -> int { return n - 1; }
 fn main() -> int {
-  println(x::tag() + r::tag() + lib::y::tag() + tag() + r::both());
+  io::println(x::tag() + r::tag() + lib::y::tag() + tag() + r::both());
   return x::num(1) + r::num(2) + num(30);
 }
 )");

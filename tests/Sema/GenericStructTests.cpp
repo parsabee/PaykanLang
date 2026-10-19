@@ -218,7 +218,7 @@ fn main() -> int {
 }
 
 TEST(GenericStruct, BoundsAndTraits) {
-  auto r = semaCheck(R"(
+  auto r = semaCheck(R"(import ::io;
 struct H<T: Hashable> { v: T; }
 impl Hashable for H<T> { view fn hash() -> int { return self.v.hash(); } }
 trait Named { view fn name() -> Str; }
@@ -234,7 +234,7 @@ fn main() -> int {
   h = H(2.5);
   g = H("s");
   pair = twice(Tag(1));
-  println(greet(Tag(1)) + show(g) + Str(hashOf(g)) + Str(hashOf(H(1))));
+  io::println(greet(Tag(1)) + show(g) + Str(hashOf(g)) + Str(hashOf(H(1))));
   n = NoName(1);
   return pair.1.v;
 }
@@ -388,9 +388,9 @@ fn main() -> int {
 }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"variable 'o' has type 'Pair<int, int>?': optional struct "
-                "types are not supported yet",
-                "match on a struct ('Pair<int, int>') is not supported yet",
+  // (An optional struct, `o`, is fine.)
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  expectAll(r, {"match on a struct ('Pair<int, int>') is not supported yet",
                 "'q' is declared with 'let'; its fields are part of its value "
                 "and cannot be assigned",
                 "tuple index '.0' applied to struct type 'Pair<int, int>': a "

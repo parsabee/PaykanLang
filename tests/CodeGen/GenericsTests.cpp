@@ -28,7 +28,8 @@ const char *kBox = R"(
 )";
 
 std::string withMain(const std::string &decls, const std::string &body) {
-  return decls + "\nfn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return decls + "import ::io; \nfn main() -> int {\n" + body +
+         "\n  return 0;\n}\n";
 }
 
 } // namespace
@@ -37,11 +38,11 @@ TEST(Generics, BoxStrGetSet) {
   LeakGuard g;
   auto r = compileAndRun(withMain(kBox, R"(
     b: Box<Str> = Box<Str>("hello");
-    println(b.get());
+    io::println(b.get());
     b.set("world");
-    println(b.get());
+    io::println(b.get());
     c = Box<Str>(b.get() + "!");
-    println(c.get());
+    io::println(c.get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hello\nworld\nworld!\n");
@@ -54,8 +55,8 @@ TEST(Generics, BoxIntAndBoxStrCoexist) {
     a: Box<int> = Box<int>(3);
     b: Box<Str> = Box<Str>("s");
     a.set(a.get() * 2);
-    println(Str<int>(a.get()));
-    println(b.get());
+    io::println(Str<int>(a.get()));
+    io::println(b.get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "6\ns\n");
@@ -79,9 +80,9 @@ TEST(Generics, PairStrInt) {
   )",
                                   R"(
     p: Pair<Str, int> = Pair<Str, int>("age", 42);
-    println(p.key() + ":" + Str<int>(p.value()));
-    println(p.toString());
-    println(p);
+    io::println(p.key() + ":" + Str<int>(p.value()));
+    io::println(p.toString());
+    io::println(p);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "age:42\nage=42\nage=42\n");
@@ -93,11 +94,11 @@ TEST(Generics, BoxOfBoxInt) {
   auto r = compileAndRun(withMain(kBox, R"(
     inner: Box<int> = Box<int>(5);
     outer: Box<Box<int>> = Box<Box<int>>(inner);
-    println(Str<int>(outer.get().get()));
+    io::println(Str<int>(outer.get().get()));
     outer.get().set(9);
-    println(Str<int>(inner.get()));
+    io::println(Str<int>(inner.get()));
     fresh = Box<Box<int>>(Box<int>(1));
-    println(Str<int>(fresh.get().get()));
+    io::println(Str<int>(fresh.get().get()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "5\n9\n1\n");
@@ -137,14 +138,14 @@ TEST(Generics, StackOfStrAndInt) {
     s.push("a");
     s.push("b");
     s.push("c");
-    println(Str<int>(s.size()));
-    while !s.empty() { println(s.pop()); }
+    io::println(Str<int>(s.size()));
+    while !s.empty() { io::println(s.pop()); }
     n: Stack<int> = Stack<int>(0);
     n.push(1);
     n.push(2);
     total: int = 0;
     while !n.empty() { total = total + n.pop(); }
-    println(Str<int>(total));
+    io::println(Str<int>(total));
     s.push("left");               // released with the stack
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -160,12 +161,12 @@ TEST(Generics, GenericFirstOnIntAndStrArrays) {
   )",
                                   R"(
     nums: int[3] = [10, 20, 30];
-    println(Str<int>(first(nums)));
+    io::println(Str<int>(first(nums)));
     letters: Str[2] = ["x", "y"];
-    println(first(letters));
+    io::println(first(letters));
     words: Str[3] = ["p", "q", "r"];
-    println(last(words));
-    println(Str<int>(last<int>([7])));
+    io::println(last(words));
+    io::println(Str<int>(last<int>([7])));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "10\nx\nr\n7\n");
@@ -179,8 +180,8 @@ TEST(Generics, GenericFunctionOverInstantiation) {
     fn rebox<T>(b: Box<T>) -> Box<T> { return Box<T>(b.get()); }
   )",
                                   R"(
-    println(Str<int>(unbox(Box<int>(4))));
-    println(unbox(rebox(Box<Str>("z"))));
+    io::println(Str<int>(unbox(Box<int>(4))));
+    io::println(unbox(rebox(Box<Str>("z"))));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "4\nz\n");
@@ -199,9 +200,9 @@ TEST(Generics, MatchOnInstantiation) {
     }
   )",
                                   R"(
-    println(describe(Box<int>(3)));
-    println(describe(Box<Str>("s")));
-    println(describe("plain"));
+    io::println(describe(Box<int>(3)));
+    io::println(describe(Box<Str>("s")));
+    io::println(describe("plain"));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "Box<int> holding 3\nBox<Str>\nother\n");
@@ -216,8 +217,8 @@ TEST(Generics, InstantiationTransfer) {
                                   R"(
     a: Box<Str> = Box<Str>("moved");
     b: Box<Str> = a;
-    println(b.get());
-    println(consume(b));
+    io::println(b.get());
+    io::println(consume(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "moved\nmoved\n");
@@ -246,11 +247,11 @@ TEST(Generics, EqualityDispatchesToEquals) {
     a: Box<int> = Box<int>(1);
     b: Box<int> = Box<int>(1);
     c: Box<int> = Box<int>(2);
-    println(Str<bool>(a == b));
-    println(Str<bool>(a == c));
-    println(Str<bool>(a != c));
+    io::println(Str<bool>(a == b));
+    io::println(Str<bool>(a == c));
+    io::println(Str<bool>(a != c));
     s: Box<Str> = Box<Str>("x");
-    println(Str<bool>(s == Box<Str>("x")));
+    io::println(Str<bool>(s == Box<Str>("x")));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nFalse\nTrue\nTrue\n");
@@ -275,11 +276,11 @@ TEST(Generics, ArrayOfInstantiationsAndFieldOfInstantiation) {
     total: int = 0;
     i: int = 0;
     while i < arr.len() { total = total + arr[i].get(); i = i + 1; }
-    println(Str<int>(total));
+    io::println(Str<int>(total));
     h: Holder = Holder(40);
-    println(Str<int>(h.get().get() + 2));
+    io::println(Str<int>(h.get().get() + 2));
     names: Box<Str>[1] = [Box<Str>("n")];
-    println(names[0].get());
+    io::println(names[0].get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "6\n42\nn\n");
@@ -290,9 +291,9 @@ TEST(Generics, ConstructorInference) {
   LeakGuard g;
   auto r = compileAndRun(withMain(kBox, R"(
     b = Box(5);
-    println(Str<int>(b.get()));
+    io::println(Str<int>(b.get()));
     s = Box("inferred");
-    println(s.get());
+    io::println(s.get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "5\ninferred\n");
@@ -326,7 +327,7 @@ TEST(Generics, GenericWithConcreteSuperclassVirtualDispatch) {
                                   R"(
     w: Wrap<Str> = Wrap<Str>("payload", 5);
     b: Base = w;
-    println(b.name() + " " + Str<int>(b.n) + " " + w.get());
+    io::println(b.name() + " " + Str<int>(b.n) + " " + w.get());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "wrap 5 payload\n");
@@ -366,7 +367,7 @@ fn main() -> int { b = gen::mk(); return b.get() + 1; }
 
 TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Pair<A, B> {
       p: (A, B);
       fn first() -> A { x, _ = self.p; return x; }
@@ -381,15 +382,15 @@ TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
     fn dup<T>(x: T) -> (T, T) { return (x, x); }
     fn main() -> int {
       q = Pair<Str, int>("a", 1);
-      println(q.first());
-      println(Str<int>(q.second()));
-      println(q.swap());
+      io::println(q.first());
+      io::println(Str<int>(q.second()));
+      io::println(q.swap());
       r: Pair<int, Str> = Pair<int, Str>(2, "b");
-      println(r.swap());
-      println(Str<int>(firstOf((7, "x"))));
+      io::println(r.swap());
+      io::println(Str<int>(firstOf((7, "x"))));
       a, b = dup("z");
-      println(a + b);
-      println(dup((1, "q")));
+      io::println(a + b);
+      io::println(dup((1, "q")));
       return 0;
     }
   )");
@@ -400,7 +401,7 @@ TEST(GenericsTypes, TupleFieldLiteralIndexAndDestructuring) {
 
 TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node { v: int; }
     impl Node { fn __init__(x: int) { self.v = x; } }
     class Slot<T> {
@@ -421,15 +422,15 @@ TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
     fn ident<T>(x: T) -> T { return x; }
     fn main() -> int {
       b = Slot<Node>();
-      println(Str<int>(orElse(b.get(), Node(0)).v));
+      io::println(Str<int>(orElse(b.get(), Node(0)).v));
       b.set(Node(5));
-      println(Str<int>(orElse(b.get(), Node(0)).v));
-      println(Str<int>(orElse(None, Node(9)).v));
+      io::println(Str<int>(orElse(b.get(), Node(0)).v));
+      io::println(Str<int>(orElse(None, Node(9)).v));
       s = Slot<Str>();
-      println(orElse(s.get(), "dflt"));
+      io::println(orElse(s.get(), "dflt"));
       n: Node? = None;
       m = ident<Node?>(n);
-      println(Str<bool>(m == None));
+      io::println(Str<bool>(m == None));
       return 0;
     }
   )");
@@ -457,11 +458,11 @@ fn mkBoxTuple() -> Box<(Str, int)> { return Box<(Str, int)>(("t", 3)); }
   auto mainPath = (dir / "main.pkn").string();
   {
     std::ofstream mainFile(mainPath);
-    mainFile << R"(
+    mainFile << R"(import ::io;
 import lib;
 fn main() -> int {
   p = lib::mkPair();
-  println(p.first());
+  io::println(p.first());
   b = lib::mkBoxTuple();
   return b.get().1;
 }

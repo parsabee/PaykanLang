@@ -1,4 +1,10 @@
 // ERROR: class 'A' conflicts with a struct of the same name
-struct A { x: int; }
-class A { y: int; }
-fn main() -> int { return 0; }
+struct A {
+  x: int;
+}
+class A {
+  y: int;
+}
+fn main() -> int {
+  return 0;
+}

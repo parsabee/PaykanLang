@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `::result` (stdlib/result.pkn, imported `as res`): errors as values.  `enum ErrorCode`,
+  the language's standard set of errors (`Ok`, `NotFound`, `PermissionDenied`,
+  `AlreadyExists`, `InvalidArgument`, `OutOfMemory`, `Io`, `EndOfFile`, `OutOfRange`, ...),
+  `struct Error { code: ErrorCode; msg: Str?; }` and
+  `struct Result<T> { error: Error; value: T?; }`, the value present exactly when the code
+  is `Ok`, with `ok(v)`, `none()`, `name(code)`, `fromErrno(errno)` and `isOk()` /
+  `message()`.  Every standard library function that can fail returns one: `io::open`,
+  `io::File`'s methods, `memory::Buffer`'s.  The runtime maps a C `errno` to its code
+  (`Paykan_error_code`) and text (`Paykan_error_text`).
+- `::io` (stdlib/io.pkn): `print`, `println`, `printerr` and `printerrln` take any
+  `T: Show` (so `io::println(5)` needs no `Str(...)`); `class File`, whose `impl` methods
+  `write` returns an `Error` and `readln`, `readbytes` and `read` a `Result<Str>`
+  (`EndOfFile` at the end); `open(path, mode) -> Result<File>`; and `stdin() -> File`.
+- Optionals of enums, tuples and structs (docs/language/10-optionals.md): `Suit?` is held
+  like `int?`, a `(int, Str)?` or a `Point?` in place as a presence flag and the value,
+  `None` all zeros.  They are made, compared (`== None`, `==`), unwrapped by `match`
+  (`p: Point { ... } None { ... }`), printed, and stored in fields, arrays, tuples,
+  parameters and results like any value.  A template's `T?` of an optional `T` is `T`
+  itself, so `Result<Str?>` works (a written `int??` is still an error).
+- An optional of a `Show` type is `Show`: `x.toString()` on an optional is "None" or its
+  value's text.
+- A native function takes and returns an enum, as its ordinal (`int64_t`).
+- The runtime's `PaykanBuffer_isSet`, `PaykanBuffer_tryGrow` and
+  `PaykanBuffer_tryReserve`, which report a failed allocation as `ENOMEM` instead of
+  aborting (`memory::Buffer`'s `OutOfMemory`).
 - `::math`, a standard library module of the C library's math functions on `float`
   (docs/language/13-standard-library.md, "`::math`"): `sqrt`, `cbrt`, `pow`, `hypot`,
   the exponentials and logarithms, the trigonometric and hyperbolic functions,
@@ -391,6 +416,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Printing and files moved to the standard library: the builtins `print`, `println`,
+  `printerr`, `printerrln`, `open`, the classes `File` and `Error` and the identifier
+  `Stdin` are gone.  A program writes `import ::io;` and `io::println(...)`,
+  `io::open(...)`, `io::stdin()`; the samples, tests and docs are rewritten so.  Only `Obj`
+  and `Str` remain builtin classes, and `print`, `open`, `File` and `Error` are free names
+  (a program that imports `::io` still cannot declare a `File`, `Error`, `Result` or
+  `ErrorCode` of its own: type names are global across an import graph).
+- `memory::Buffer<T>` is a struct: a handle to the runtime's storage, so its copies share
+  the slots.  It starts empty, `Buffer<T>()`, and its operations report what goes wrong
+  instead of panicking: `grow`, `reserve`, `push`, `set`, `swap` and `shrink` return a
+  `res::Error` (`OutOfMemory`, `OutOfRange`, `InvalidArgument`, `NotFound`) and `copy(i)` a
+  `res::Result<T>`; `get(i)` and `copyUnchecked(i)` still panic on a bad index, for code
+  that has checked it.  `::collections` uses them so; its own API is unchanged.
 - A function value is a value held in place, not a reference to a closure object
   (docs/design/function-types.md, "Run-time representation"): 16 bytes, the address of its
   code and the box of its closure, the object holding its captures, which is null when it
@@ -570,6 +608,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A process that compiles two programs importing the same source module (the test
+  binaries, an embedding host) no longer fails to lower the second: the module's analysis
+  is cached with its exports (`Sema::ModuleContextCache`), so every compilation that
+  imports it can lower it.
 - A generic class or function of a module whose body calls a `static fn` of one of that
   module's types (`Pub::make()`) no longer fails to lower with "call to undeclared
   function '$m::Pub::make'" when an importer instantiates it.

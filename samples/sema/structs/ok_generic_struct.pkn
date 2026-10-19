@@ -2,27 +2,39 @@
 // (`Pair<int, Str>`) or inferred from a constructor call (`Pair(1, "a")`);
 // its `impl` blocks name the type parameters and apply to every
 // instantiation, and so do `impl Trait for` blocks.
-struct Pair<A, B> { a: A; b: B; }
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
 
 impl Pair<A, B> {
   view fn first() -> view A { return self.a; }
-  fn swapWith(other: inout Pair<A, B>) { t = self.a; self.a = other.a; other.a = t; }
+  fn swapWith(other: inout Pair<A, B>)
+                            { t = self.a; self.a = other.a; other.a = t; }
 }
 
 impl Hashable for Pair<A, B> {
   view fn hash() -> int { return 1; }
 }
 
-struct Box<T> { v: T; }
+struct Box<T> {
+  v: T;
+}
 
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T)       { self.v = v; }
   view fn get() -> view T { return self.v; }
 }
 
-fn sum(p: view Pair<int, int>) -> int { return p.a + p.b; }
-fn firstOf<A, B>(p: view Pair<A, B>) -> view A { return p.a; }
-fn hashOf<T: Hashable>(x: view T) -> int { return x.hash(); }
+fn sum(p: view Pair<int, int>) -> int {
+  return p.a + p.b;
+}
+fn firstOf<A, B>(p: view Pair<A, B>) -> view A {
+  return p.a;
+}
+fn hashOf<T: Hashable>(x: view T) -> int {
+  return x.hash();
+}
 
 fn main() -> int {
   p = Pair(1, "one");

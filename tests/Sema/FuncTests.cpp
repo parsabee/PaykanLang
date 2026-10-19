@@ -8,7 +8,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 // -- Function declaration checks
@@ -86,17 +86,15 @@ TEST(Func, FunctionClassNameCollision) {
 
 // Every builtin function registered by Sema::run(), including those a user
 // might plausibly want to "override".
-TEST(Func, FunctionShadowsBuiltinFunctionRejected) {
+// Printing and files are the standard library's (::io): a program may
+// declare functions of the same names, beside io's.
+TEST(Func, TheStandardLibrarysNamesAreNotReserved) {
   for (const char *name :
        {"print", "println", "printerr", "printerrln", "open"}) {
     auto r = semaCheck(std::string("fn ") + name +
-                       "(x: int) -> int { return x; }\n" + wrapMain(""));
-    EXPECT_FALSE(r.Ok) << name;
-    EXPECT_NE(r.Diagnostics.find(std::string("'") + name +
-                                 "' is a builtin function and cannot be "
-                                 "redeclared"),
-              std::string::npos)
-        << r.Diagnostics;
+                       "(x: int) -> int { return x; }\n" +
+                       wrapMain(std::string("io::println(") + name + "(1));"));
+    EXPECT_TRUE(r.Ok) << name << "\n" << r.Diagnostics;
   }
 }
 
@@ -104,20 +102,20 @@ TEST(Func, FunctionShadowsBuiltinFunctionRejected) {
 // and its body are not checked (neither against the builtin's entry nor on
 // their own), and the builtin keeps its original signature afterwards.
 TEST(Func, FunctionShadowsBuiltinReportsCollisionOnly) {
-  auto r = semaCheck("fn print(x: NoSuchType) { return x + 1; }\n" +
-                     wrapMain("println(\"still one Obj argument\");"));
+  auto r = semaCheck("fn Str(x: NoSuchType) { return x + 1; }\n" +
+                     wrapMain("s = Str(\"still the builtin\");"));
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
-  EXPECT_NE(r.Diagnostics.find(
-                "'print' is a builtin function and cannot be redeclared"),
-            std::string::npos)
+  EXPECT_NE(
+      r.Diagnostics.find("'Str' is a builtin class and cannot be redeclared"),
+      std::string::npos)
       << r.Diagnostics;
   EXPECT_EQ(r.Diagnostics.find("unknown class type"), std::string::npos)
       << r.Diagnostics;
 }
 
 TEST(Func, FunctionShadowsBuiltinClassRejected) {
-  for (const char *name : {"Obj", "Str", "File", "Error"}) {
+  for (const char *name : {"Obj", "Str"}) {
     auto r = semaCheck(std::string("fn ") + name + "() -> int { return 0; }\n" +
                        wrapMain(""));
     EXPECT_FALSE(r.Ok) << name;
@@ -140,8 +138,8 @@ TEST(Func, FunctionShadowsEnumRejected) {
 
 // A name that merely resembles a builtin is fine.
 TEST(Func, FunctionNamedNearBuiltinOk) {
-  auto r = semaCheck(R"(
-    fn print2(x: int) { println(Str<int>(x)); }
+  auto r = semaCheck(R"(import ::io;
+    fn print2(x: int) { io::println(Str<int>(x)); }
     fn Print(x: int) { print2(x); }
     fn main() -> int { Print(1); return 0; }
   )");
@@ -190,7 +188,7 @@ TEST(Func, BlockScopeIsolation) {
     {
       x: int = 1;
     }
-    println(Str<int>(x));
+    io::println(Str<int>(x));
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("undeclared"), std::string::npos);
@@ -209,19 +207,19 @@ TEST(Func, InnerScopeCanAccessOuter) {
 // -- The print family is single-argument (no variadic functions / overloading)
 
 TEST(Func, PrintlnSingleArgOk) {
-  auto r = semaCheck(wrapMain(R"(println("hello" + " world");)"));
+  auto r = semaCheck(wrapMain(R"(io::println("hello" + " world");)"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Func, PrintlnRejectsMultipleArgs) {
-  auto r = semaCheck(wrapMain(R"(println("hello", "world");)"));
+  auto r = semaCheck(wrapMain(R"(io::println("hello", "world");)"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("expects 1 argument"), std::string::npos)
       << r.Diagnostics;
 }
 
 TEST(Func, PrintRejectsMultipleArgs) {
-  auto r = semaCheck(wrapMain(R"(print("a", Str<int>(1), "b");)"));
+  auto r = semaCheck(wrapMain(R"(io::print("a", Str<int>(1), "b");)"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("expects 1 argument"), std::string::npos)
       << r.Diagnostics;

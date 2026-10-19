@@ -1,3 +1,5 @@
+import ::io;
+
 // Optional types: declarations, None, widening, reassignment,
 // optional parameters and returns.
 class Node {
@@ -9,8 +11,12 @@ impl Node {
   fn __init__(x: int) { self.v = x; }
 }
 
-fn wrap(n: Node) -> Node? { return n; }
-fn pass(n: Node?) -> Node? { return n; }
+fn wrap(n: Node) -> Node? {
+  return n;
+}
+fn pass(n: Node?) -> Node? {
+  return n;
+}
 
 fn main() -> int {
   a: Node? = None;
@@ -24,10 +30,11 @@ fn main() -> int {
   d: Node? = wrap(n);
   e: Node? = pass(None);
   f = pass(Node(3));           // inferred Node?
-  match f {                    // an optional is not an Obj: unwrap it
+  match f {
+    // an optional is not an Obj: unwrap it
     x: Node { o: Obj = x; }
     None { }
   }
-  println(f);                  // print takes an optional: None or the value
+  io::println(f);                  // print takes an optional: None or the value
   return 0;
 }

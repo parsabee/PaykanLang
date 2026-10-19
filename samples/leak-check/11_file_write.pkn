@@ -6,18 +6,22 @@
 //
 // args: {tmpdir}
 
+import ::io;
+
 // The path of the scratch file `name`: in the first argument's directory
 // (the samples harnesses pass a fresh one per run, `// args: {tmpdir}`, so
 // parallel runs never share a file), else in /tmp.
 fn scratchPath(args: view Str[], name: Str) -> Str {
-  if args.len() > 1 { return args[1] + "/" + name; }
+  if args.len() > 1 {
+    return args[1] + "/" + name;
+  }
   return "/tmp/" + name;
 }
 
 fn main(args: view Str[]) -> int {
-  match open(scratchPath(args, "pkn_leakcheck_write.txt"), "w") {
-    e: Error { }
-    f: File  { f.write("hello"); }
+  match io::open(scratchPath(args, "pkn_leakcheck_write.txt"), "w").value {
+    f: io::File { f.write("hello"); }
+    None { }
   }
   return 0;
 }

@@ -153,19 +153,6 @@ const char *ModuleLowering::builtinMethodSymbol(ast::ClassType *ct,
       return kPaykanStringLength;
     return nullptr;
   }
-  if (ct == ASTCtx.getFileTy()) {
-    if (name == kMethodDestroy)
-      return kPaykanFileDestroy;
-    if (name == kMethodToString)
-      return kPaykanFileToString;
-    if (name == kMethodEquals)
-      return kPaykanFileEquals;
-    if (name == kMethodWrite)
-      return kPaykanFileWrite;
-    if (name == kMethodReadln)
-      return kPaykanFileReadln;
-    return nullptr;
-  }
   return nullptr;
 }
 
@@ -234,10 +221,6 @@ Val ModuleLowering::emitIsExactType(const Val &rawObjPtr, ast::ClassType *ct) {
     runtimeVT = kPaykanObjectVtable;
   } else if (ct == ASTCtx.getStrTy()) {
     runtimeVT = kPaykanStringVtable;
-  } else if (ct == ASTCtx.getFileTy()) {
-    runtimeVT = kPaykanFileVtable;
-  } else if (ct == ASTCtx.getErrorTy()) {
-    runtimeVT = kPaykanErrorVtable;
   }
   if (runtimeVT) {
     // Runtime class: its vtable global is the type identity.

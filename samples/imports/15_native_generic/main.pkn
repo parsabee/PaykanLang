@@ -10,6 +10,8 @@
 //   cc -std=c11 -fPIC -I<paykan include dir> -c values.c -o values.o
 //   paykan --object=values.o main.pkn
 
+import ::io;
+
 native fn describe<T>(x: view T) -> Str = "sample_describe";
 native fn pick<T>(first: bool, a: view T, b: view T) -> T = "sample_pick";
 native fn swap<T>(a: inout T, b: inout T) = "sample_swap";
@@ -23,30 +25,30 @@ impl Point {
 }
 
 fn main() -> int {
-  println(describe<int>(42));
-  println(describe<float>(2.5));
-  println(describe<bool>(True));
-  println(describe<char>('k'));
-  println(describe<Point>(Point(1)));
+  io::println(describe<int>(42));
+  io::println(describe<float>(2.5));
+  io::println(describe<bool>(True));
+  io::println(describe<char>('k'));
+  io::println(describe<Point>(Point(1)));
   nothing: Point? = None;
-  println(describe<Point?>(nothing));
-  println(describe<(int, Str)>((1, "a")));
-  println(Str<int>(pick<int>(True, 1, 2)));
-  println(pick<Str>(False, "left", "right"));
-  println(Str<int>(pick<Point>(True, Point(3), Point(4)).x));
-  println(pick<(int, Str)>(False, (5, "five"), (6, "six")));
+  io::println(describe<Point?>(nothing));
+  io::println(describe<(int, Str)>((1, "a")));
+  io::println(Str<int>(pick<int>(True, 1, 2)));
+  io::println(pick<Str>(False, "left", "right"));
+  io::println(Str<int>(pick<Point>(True, Point(3), Point(4)).x));
+  io::println(pick<(int, Str)>(False, (5, "five"), (6, "six")));
   left = "left";
   right = "right";
   swap<Str>(left, right);
-  println(left + " " + right);
+  io::println(left + " " + right);
   yes = True;
   no = False;
   swap<bool>(yes, no);
-  println(Str<bool>(yes));
+  io::println(Str<bool>(yes));
   lt = (1, "one");
   rt = (2, "two");
   swap<(int, Str)>(lt, rt);
-  println(lt);
+  io::println(lt);
   return 0;
 }
 // expect-stdout: int 42 (size 8)

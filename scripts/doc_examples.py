@@ -7,7 +7,8 @@ An example is a fenced ```pkn block that is a whole program (it declares
 program prints on stdout:
 
     ```pkn
-    fn main() -> int { println("hi"); return 0; }
+    import ::io;
+    fn main() -> int { io::println("hi"); return 0; }
     ```
 
     Output:

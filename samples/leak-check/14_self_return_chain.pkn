@@ -10,12 +10,11 @@
 //
 // Expected under --track-heap: live blocks : 0.
 
+import ::io;
+
 class Counter {
   n: int;
-  fn bump() -> Counter {
-    self.n = self.n + 1;
-    return self;
-  }
+  fn bump() -> Counter { self.n = self.n + 1; return self; }
 }
 
 impl Counter {
@@ -25,6 +24,6 @@ impl Counter {
 fn main() -> int {
   a: Counter = Counter();
   c: Counter = a.bump().bump().bump();  // each hop retains the same box
-  println(Str<int>(c.n));                 // 3
+  io::println(Str<int>(c.n));                 // 3
   return 0;
 }

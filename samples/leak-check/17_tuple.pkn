@@ -12,6 +12,8 @@
 //
 // Expected under --track-heap: live blocks : 0.
 
+import ::io;
+
 class Holder {
   pair: (int, Str);
   view fn get() -> view (int, Str) { return self.pair; }
@@ -30,16 +32,16 @@ fn main() -> int {
   s: Str = t.1;                  // new owner of the element
   str, n = mk();                 // destructure a returned temporary
   nested = ((1, "x"), (2.5, t)); // nested tuple holding a copy of t
-  println(nested);
-  println(mk().0);               // call-rooted element read
+  io::println(nested);
+  io::println(mk().0);               // call-rooted element read
   arr: (int, Str)[3] = [t, (2, "b"), mk_pair()];
   h: Holder = Holder(t);
   pair: view = h.get();         // a 'view' of h.pair
-  println(Str<bool>(t == (1, "a")));
+  io::println(Str<bool>(t == (1, "a")));
   m = t;                         // a copy: retains t's Str again
   ints = (1, (2, 3));            // only ints: nothing allocated
-  println(m.1 + s + str + pair.1 + arr[2].1);
-  println(Str(n + pair.0 + ints.1.1));
+  io::println(m.1 + s + str + pair.1 + arr[2].1);
+  io::println(Str(n + pair.0 + ints.1.1));
   return 0;
 }
 

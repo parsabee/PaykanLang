@@ -9,9 +9,11 @@
 // expect-stdout: user k user d
 // expect-stdout: 10 20 30 2
 
+import ::io;
+
 class K {
   name: Str;
-  view fn w() -> int { return 1; }
+  view fn w() -> int      { return 1; }
   view fn vtable() -> int { return 10; }
 }
 
@@ -27,17 +29,25 @@ impl D {
   fn __init__() { __super__("d"); }
 }
 
-fn K_w() -> int { return 2; }
-fn K_destroy(k: K) -> Str { return "user " + k.name; }
-fn K_vtable() -> int { return 30; }
-fn K_2Ew() -> int { return 2; }
+fn K_w() -> int {
+  return 2;
+}
+fn K_destroy(k: K) -> Str {
+  return "user " + k.name;
+}
+fn K_vtable() -> int {
+  return 30;
+}
+fn K_2Ew() -> int {
+  return 2;
+}
 
 fn main() -> int {
   k: K = K("k");
   b: K = D();
-  println(Str<int>(k.w() + K_w()));
-  println(K_destroy(k) + " " + K_destroy(b));
-  println(Str<int>(k.vtable()) + " " + Str<int>(b.vtable()) + " " +
-          Str<int>(K_vtable()) + " " + Str<int>(K_2Ew()));
+  io::println(Str<int>(k.w() + K_w()));
+  io::println(K_destroy(k) + " " + K_destroy(b));
+  io::println(Str<int>(k.vtable()) + " " + Str<int>(b.vtable()) + " "
+      + Str<int>(K_vtable()) + " " + Str<int>(K_2Ew()));
   return 0;
 }

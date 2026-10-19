@@ -236,7 +236,8 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   is not supported`) or already optional (`nested optional type 'Str??' is
   not supported`). The other builtin value types have optional forms
   (`int?`, `float?`, `bool?`, `char?`). An enum spelled `Color?` is only
-  known to Sema, which rejects it there.
+  known to Sema, which resolves it there (an enum, a tuple and a struct have
+  optionals; a fixed-size array does not).
 - A tuple type has at least two elements; `(int)` is a syntax error (there
   are no parenthesised types).
 - `Box<int>` is a generic type application (a `GenericType` node that Sema

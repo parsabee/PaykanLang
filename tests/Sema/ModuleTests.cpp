@@ -562,11 +562,11 @@ TEST(Module, EnumAliasQualifierOk) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_alias").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "pal/color.pkn", kColorModule);
-  auto main = writeFile(tmp, "main.pkn", R"(
+  auto main = writeFile(tmp, "main.pkn", R"(import ::io;
 import pal::color as C;
 fn main() -> int {
   c: C::Color = C::Color::Red;
-  println(C::name(c));
+  io::println(C::name(c));
   return 0;
 }
 )");
@@ -579,11 +579,11 @@ TEST(Module, EnumParamAndReturnOk) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_enum_fn").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "pal/color.pkn", kColorModule);
-  auto main = writeFile(tmp, "main.pkn", R"(
+  auto main = writeFile(tmp, "main.pkn", R"(import ::io;
 import pal::color;
 fn main() -> int {
   f: color::Color = color::favorite();
-  println(color::name(f));
+  io::println(color::name(f));
   return 0;
 }
 )");
@@ -611,11 +611,11 @@ impl Widget {
 }
 fn makeBlue() -> Widget { return Widget(color::Color::Blue); }
 )");
-  auto main = writeFile(tmp, "main.pkn", R"(
+  auto main = writeFile(tmp, "main.pkn", R"(import ::io;
 import pal::widget;
 fn main() -> int {
   w: widget::Widget = widget::makeBlue();
-  println(w.tintName());
+  io::println(w.tintName());
   return 0;
 }
 )");
@@ -766,7 +766,7 @@ void expectOneError(const SemaFileResult &r, const std::string &expected,
 TEST(Module, MissingModuleUsesAreSilent) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_missing").string();
   std::filesystem::remove_all(tmp);
-  auto main = writeFile(tmp, "main.pkn", R"(
+  auto main = writeFile(tmp, "main.pkn", R"(import ::io;
 import lib::nothere;
 class Sub : nothere::Base { }
 fn take(t: nothere::T) -> int { return 0; }
@@ -777,7 +777,7 @@ fn main() -> int {
   c: nothere::Color = nothere::Color::Red;
   match t { nothere::T { } _ { } }
   x: Sub = Sub();
-  println(Str(n + take(t)));
+  io::println(Str(n + take(t)));
   return lib::nothere::h<int>(2);
 }
 )");

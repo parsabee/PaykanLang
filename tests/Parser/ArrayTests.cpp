@@ -274,8 +274,9 @@ TEST(Array, RepeatLiteralErrors) {
                           "the array literal"},
         Case{"[0; 3", "2:13: error: unexpected ';'; expected ']' to close the "
                       "array literal"}}) {
-    auto r = parseWithDiags(std::string("fn main() -> int {\n  xs = ") +
-                            c.Literal + ";\n  return 0;\n}\n");
+    auto r =
+        parseWithDiags(std::string("import ::io; fn main() -> int {\n  xs = ") +
+                       c.Literal + ";\n  return 0;\n}\n");
     EXPECT_FALSE(r.Ok) << c.Literal;
     EXPECT_NE(r.Text.find(c.Error), std::string::npos) << c.Literal << "\n"
                                                        << r.Text;
@@ -318,10 +319,10 @@ TEST(Array, SubscriptInExpression) {
 }
 
 TEST(Array, SubscriptPassedToCall) {
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io;
     fn main() -> int {
       a: Str[1] = ["hi"];
-      println(a[0]);
+      io::println(a[0]);
       return 0;
     }
   )");

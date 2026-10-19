@@ -11,13 +11,15 @@
 //     holds the next link, a string and a Node;
 //   * a chain of 200,000 objects linked through tuples: each link's tuple
 //     field holds, in place, a nested tuple with the next link and an `Obj`
-//     slot, which carries an Error from a failed open() in every 10,000th
-//     link.  Releasing a link releases the references its tuple holds.
+//     slot, which carries the message of a failed io::open() in every
+//     10,000th link.  Releasing a link releases the references its tuple holds.
 //
 // Runtime allocation sites: object structs + PaykanShared (Shared.c),
-// PaykanString_new (String.c), PaykanError_new (Error.c).
+// PaykanString_new (String.c), Paykan_error_text (Error.c).
 //
 // Expected under --track-heap: live blocks : 0.
+
+import ::io;
 
 // expect-stdout: list 1000000
 // expect-stdout: tree 200000
@@ -66,7 +68,12 @@ fn leaf() -> Tree {
 fn list(n: int) -> int {
   head: Node? = None;
   i = 0;
-  while i < n { node = Node(i); node.next = head; head = node; i = i + 1; }
+  while i < n {
+    node = Node(i);
+    node.next = head;
+    head = node;
+    i = i + 1;
+  }
   return i;                    // head goes out of scope: the whole list drops
 }
 
@@ -103,7 +110,8 @@ fn tuples(n: int) -> int {
   while i < n {
     e: Obj = None;
     if i % 10000 == 0 {
-      e = open("/nonexistent/paykan/leak-check/deep.txt", "r");
+      e = io::open("/nonexistent/paykan/leak-check/deep.txt",
+          "r").error.message();
     }
     prev = Chain((i, (prev, e)));
     i = i + 1;
@@ -112,10 +120,10 @@ fn tuples(n: int) -> int {
 }
 
 fn main() -> int {
-  println("list " + Str(list(1000000)));
-  println("tree " + Str(tree(200000)));
-  println("arrays " + Str(arrays(200000)));
-  println("tuples " + Str(tuples(200000)));
-  println("done");
+  io::println("list " + Str(list(1000000)));
+  io::println("tree " + Str(tree(200000)));
+  io::println("arrays " + Str(arrays(200000)));
+  io::println("tuples " + Str(tuples(200000)));
+  io::println("done");
   return 0;
 }

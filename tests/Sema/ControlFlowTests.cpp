@@ -8,7 +8,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 // -- if / else
@@ -16,7 +16,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(ControlFlow, IfBoolCondition) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 10;
-    if x > 5 { println("big"); }
+    if x > 5 { io::println("big"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -24,7 +24,7 @@ TEST(ControlFlow, IfBoolCondition) {
 TEST(ControlFlow, IfElse) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 10;
-    if x > 5 { println("big"); } else { println("small"); }
+    if x > 5 { io::println("big"); } else { io::println("small"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -32,7 +32,7 @@ TEST(ControlFlow, IfElse) {
 TEST(ControlFlow, IfNonBoolConditionRejected) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 10;
-    if x { println("nope"); }
+    if x { io::println("nope"); }
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("bool"), std::string::npos);
@@ -41,9 +41,9 @@ TEST(ControlFlow, IfNonBoolConditionRejected) {
 TEST(ControlFlow, IfElseIfChain) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 42;
-    if x > 100 { println("large"); }
-    elif x > 10 { println("medium"); }
-    else { println("small"); }
+    if x > 100 { io::println("large"); }
+    elif x > 10 { io::println("medium"); }
+    else { io::println("small"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -51,7 +51,7 @@ TEST(ControlFlow, IfElseIfChain) {
 TEST(ControlFlow, IfStringConditionRejected) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 1;
-    if x { println("nope"); }
+    if x { io::println("nope"); }
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("bool"), std::string::npos);
@@ -135,7 +135,7 @@ TEST(ControlFlow, LogicalInIfCondition) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 5;
     y: int = 10;
-    if x > 0 && y > 0 { println("both positive"); }
+    if x > 0 && y > 0 { io::println("both positive"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -295,11 +295,11 @@ TEST(ControlFlow, BoolMatchMissingFalseArmRejected) {
 }
 
 TEST(ControlFlow, BoolMatchArmWithoutReturnRejected) {
-  auto r = semaCheck(R"(
+  auto r = semaCheck(R"(import ::io;
     fn pick(b: bool) -> int {
       match b {
         True  { return 1; }
-        False { println("no"); }
+        False { io::println("no"); }
       }
     }
     fn main() -> int { return pick(True); }

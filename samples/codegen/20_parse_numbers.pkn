@@ -6,72 +6,82 @@
 // unwrap the result (the arm binds a plain int / float).  The optionals are
 // values: they print as the number or None and compare by value.
 
+import ::io;
+
 fn tryParseInt(s: Str) -> Str {
   match int<Str>(s) {
-    n: int { return "ok: " + Str<int>(n); }
-    None   { return "invalid: '" + s + "'"; }
+    n: int {
+      return "ok: " + Str<int>(n);
+    }
+    None {
+      return "invalid: '" + s + "'";
+    }
   }
 }
 
 fn tryParseFloat(s: Str) -> Str {
   match float(s) {
     f: float { return "ok: " + Str(f); }
-    None     { return "invalid: '" + s + "'"; }
+    None {
+      return "invalid: '" + s + "'";
+    }
   }
 }
 
 fn main() -> int {
   // === int<Str> ===
-  println("=== int<Str> ===");
+  io::println("=== int<Str> ===");
 
   // valid integers
-  println(tryParseInt("0"));
-  println(tryParseInt("42"));
-  println(tryParseInt("-99"));
-  println(tryParseInt("9223372036854775807"));   // INT64_MAX
+  io::println(tryParseInt("0"));
+  io::println(tryParseInt("42"));
+  io::println(tryParseInt("-99"));
+  io::println(tryParseInt("9223372036854775807"));  // INT64_MAX
 
   // invalid inputs
-  println(tryParseInt("abc"));
-  println(tryParseInt("12abc"));
-  println(tryParseInt(""));
-  println(tryParseInt("3.14"));
-  println(tryParseInt("9223372036854775808"));   // INT64_MAX + 1
+  io::println(tryParseInt("abc"));
+  io::println(tryParseInt("12abc"));
+  io::println(tryParseInt(""));
+  io::println(tryParseInt("3.14"));
+  io::println(tryParseInt("9223372036854775808"));  // INT64_MAX + 1
 
   // === float<Str> ===
-  println("=== float<Str> ===");
+  io::println("=== float<Str> ===");
 
   // valid floats
-  println(tryParseFloat("0"));
-  println(tryParseFloat("3.14"));
-  println(tryParseFloat("-2.718"));
-  println(tryParseFloat("1e10"));
-  println(tryParseFloat("2.5e-3"));
+  io::println(tryParseFloat("0"));
+  io::println(tryParseFloat("3.14"));
+  io::println(tryParseFloat("-2.718"));
+  io::println(tryParseFloat("1e10"));
+  io::println(tryParseFloat("2.5e-3"));
 
   // invalid inputs
-  println(tryParseFloat("abc"));
-  println(tryParseFloat("1.2.3"));
-  println(tryParseFloat(""));
+  io::println(tryParseFloat("abc"));
+  io::println(tryParseFloat("1.2.3"));
+  io::println(tryParseFloat(""));
 
   // === counting valid inputs ===
-  println("=== counting valid inputs ===");
+  io::println("=== counting valid inputs ===");
 
   i: int = 0;
   total = 0;
   inputs: Str[6] = ["10", "20", "bad", "30", "nope", "40"];
   while i < inputs.len() {
-    if int<Str>(inputs[i]) != None { total = total + 1; }
+    if int<Str>(inputs[i]) != None {
+      total = total + 1;
+    }
     i = i + 1;
   }
-  println("valid ints in list: " + Str<int>(total));
+  io::println("valid ints in list: " + Str<int>(total));
 
   // === printing and comparing the optionals ===
-  println("=== print / compare ===");
+  io::println("=== print / compare ===");
 
-  println(int<Str>("7"));
-  println(Str(int<Str>("7") == int("7")));
-  println(Str(int<Str>("7") == int("8")));
-  println(float<Str>("1.5"));
-  println(int("nope"));
+  io::println(int<Str>("7"));
+  io::println(Str(int<Str>("7") == int("7")));
+  io::println(Str(int<Str>("7") == int("8")));
+  io::println(float<Str>("1.5"));
+  io::println(int("nope"));
 
   return 0;
 }

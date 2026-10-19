@@ -40,17 +40,12 @@ class Parser {
   error: Str?;   // the first error, or None
 
   // Record the first error only; later errors are usually cascades.
-  fn fail(msg: Str) {
-    if self.error == None { self.error = msg; }
-  }
+  fn fail(msg: Str)      { if self.error == None { self.error = msg; } }
 
-  view fn done() -> bool {
-    return self.pos >= self.input.len();
-  }
+  view fn done() -> bool { return self.pos >= self.input.len(); }
 
-  view fn atIs(ch: char) -> bool {
-    return !self.done() && self.input[self.pos] == ch;
-  }
+  view fn atIs(ch: char) -> bool
+                         { return !self.done() && self.input[self.pos] == ch; }
 
   view fn atIsOr(a: char, b: char) -> bool {
     if self.done() { return False; }
@@ -80,7 +75,9 @@ class Parser {
   // Current char is '=' and it is NOT the start of '=='.
   view fn atAssign() -> bool {
     if !self.atIs('=') { return False; }
-    if self.pos + 1 >= self.input.len() { return True; }
+    if self.pos + 1 >= self.input.len() {
+      return True;
+    }
     return self.input[self.pos + 1] != '=';
   }
 
@@ -98,18 +95,14 @@ class Parser {
       '7' { return 7; }
       '8' { return 8; }
       '9' { return 9; }
-      _   { return 0; }
+      _ { return 0; }
     }
   }
 
-  fn advance() {
-    self.pos = self.pos + 1;
-  }
+  fn advance()           { self.pos = self.pos + 1; }
 
   fn skipWs() {
-    while !self.done() && self.atIs(' ') {
-      self.advance();
-    }
+    while !self.done() && self.atIs(' ') { self.advance(); }
   }
 
   fn parseIdent() -> Str {
@@ -156,8 +149,11 @@ class Parser {
       self.advance();
       val: float = self.parseExpr();
       self.skipWs();
-      if self.atIs(')') { self.advance(); }
-      else { self.fail("missing ')'"); }
+      if self.atIs(')') {
+        self.advance();
+      } else {
+        self.fail("missing ')'");
+      }
       return val;
     }
     if self.atIs('-') {
@@ -167,7 +163,9 @@ class Parser {
     if self.atIsIdentStart() {
       name: Str = self.parseIdent();
       match self.env.lookup(name) {
-        e: hashmap::Entry { return e.value; }
+        e: hashmap::Entry {
+          return e.value;
+        }
         None {
           self.fail("undefined variable '" + name + "'");
           return 0.0;
@@ -185,8 +183,8 @@ class Parser {
     result: float = self.parseFactor();
     self.skipWs();
     while !self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%')) {
-      op: Op = if self.atIs('*') then Op::Mul
-               else if self.atIs('/') then Op::Div else Op::Mod;
+      op: Op = if self.atIs('*') then Op::Mul else if self.atIs('/')
+          then Op::Div else Op::Mod;
       self.advance();
       rhs: float = self.parseFactor();
       result = applyOp(op, result, rhs);

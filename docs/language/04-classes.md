@@ -49,7 +49,7 @@ impl Point {
 }
 
 p: Point = Point(1, 2);
-println(p.toString());     // (1,2)
+io::println(p.toString());     // (1,2)
 ```
 
 - The keyword is `class`. The body contains **field declarations** then **method declarations**.
@@ -93,6 +93,8 @@ keep their special meaning. The default `__init__` still takes every field in or
 ones included, since a constructor is the class's own code:
 
 ```pkn
+import ::io;
+
 class Counter {
   __count: int;
   step: int;
@@ -106,7 +108,7 @@ fn main() -> int {
   c = Counter(0, 2);                               // the private field is a constructor argument
   c.tick();
   c.tick();
-  println(Str(c.value()) + " " + Str(c.step));
+  io::println(Str(c.value()) + " " + Str(c.step));
   return 0;
 }
 ```
@@ -140,6 +142,8 @@ arguments first, those of its `__init__` (written or default), and passes them t
 `__super__`:
 
 ```pkn
+import ::io;
+
 class Point {
   x: int;
   y: int;
@@ -152,7 +156,7 @@ class Named : Point {
 fn main() -> int {
   p = Point(1, 2);        // x = 1, y = 2
   n = Named(3, 4, "n");   // Point's x and y, then name
-  println(Str(p.x + p.y) + " " + n.name + Str(n.y));
+  io::println(Str(p.x + p.y) + " " + n.name + Str(n.y));
   return 0;
 }
 ```
@@ -208,7 +212,7 @@ impl Counter {
 
 c: Counter = Counter(0);
 c.increment();
-println(Str<int>(c.value()));   // 1
+io::println(Str<int>(c.value()));   // 1
 ```
 
 There is **no method overloading** — each method name must be unique within a class.
@@ -246,7 +250,8 @@ is not a `view fn` may return part of `self` for its caller to change.
 Only a `view fn` can be called on a `view`, a parameter or a local
 ([Functions](02-functions-and-calling.md#view-read-only)): `'c' is a 'view' parameter;
 'increment' is not a 'view fn'`. The builtin methods that only read are `view fn`s:
-`toString`, `equals`, `len`, `length`; `concat` and the `File` methods are not. A `let`
+`toString`, `equals`, `len`, `length`; `concat` is not. (The standard library's
+`io::File` methods are `view fn`s.) A `let`
 local only cannot be reassigned: any method can be called on what it holds.
 
 - `__init__` cannot be a `view fn`: it sets up `self`.
@@ -323,7 +328,7 @@ class Cat : Animal {
 }
 
 d: Animal = Dog();
-println(d.sound());   // woof  (virtual dispatch)
+io::println(d.sound());   // woof  (virtual dispatch)
 ```
 
 - Inheritance is declared with `:` — `class Derived : Base { … }`.
@@ -401,7 +406,7 @@ impl Person {
 }
 
 p: Person = Person("Alice", 30);
-println(p.toString());   // Alice (age 30)
+io::println(p.toString());   // Alice (age 30)
 ```
 
 ---
@@ -434,9 +439,9 @@ Use `match` to test and downcast at runtime. See `07-match-statements.md` for fu
 ```pkn
 a: Animal = Labrador();
 match a {
-  lab: Labrador { println("Labrador: " + lab.name); }
-  Dog           { println("plain Dog"); }
-  _             { println("other"); }
+  lab: Labrador { io::println("Labrador: " + lab.name); }
+  Dog           { io::println("plain Dog"); }
+  _             { io::println("other"); }
 }
 ```
 
@@ -446,7 +451,7 @@ match a {
 
 | Error | Trigger |
 |-------|---------|
-| Class name taken | The class is named like a builtin function (`class print`), a builtin class (`class Str`), an enum, or another class — a class name is also its constructor, so top-level names are shared (see `01-language-basics.md`) |
+| Class name taken | The class is named like a builtin class (`class Str`) or type (`class int`), an enum, or another class — a class name is also its constructor, so top-level names are shared (see `01-language-basics.md`) |
 | Missing field init in `__init__` | `__init__` exits with an uninitialised field on some path |
 | Default `__init__` arguments | A class without an `__init__` is constructed with other than its superclass constructor's arguments followed by its fields (`Point()` for `class Point { x: int; }`) |
 | `__super__(…)` not first | Derived `__init__` body does not begin with `__super__(…)` |

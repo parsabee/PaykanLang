@@ -188,30 +188,30 @@ TEST(FuzzSmoke, RandomTokens) {
 
 TEST(FuzzSmoke, PathologicalNesting) {
   for (const char *open : {"(", "[", "{", "if (", "-", "!", "mov ", "Box<"}) {
-    std::string s = "fn main() -> int { x = ";
+    std::string s = "import ::io; fn main() -> int { x = ";
     for (int i = 0; i < 20000; ++i)
       s += open;
     parseQuietly(s);
   }
-  std::string types = "fn main() -> int { x: ";
+  std::string types = "import ::io; fn main() -> int { x: ";
   for (int i = 0; i < 20000; ++i)
     types += "(int, ";
   parseQuietly(types);
-  std::string arrays = "fn main() -> int { x: int";
+  std::string arrays = "import ::io; fn main() -> int { x: int";
   for (int i = 0; i < 100000; ++i)
     arrays += "[1]";
   parseQuietly(arrays + " = [0; 1]; return 0; }");
 }
 
 TEST(FuzzSmoke, LongTokens) {
-  std::string s = "fn main() -> int { s = \"";
+  std::string s = "import ::io; fn main() -> int { s = \"";
   s.append(1 << 20, 'a');
   parseQuietly(s); // unterminated, 1 MiB
   parseQuietly(s + "\"; return 0; }");
-  std::string ident = "fn main() -> int { ";
+  std::string ident = "import ::io; fn main() -> int { ";
   ident.append(1 << 20, 'x');
   parseQuietly(ident + " = 1; return 0; }");
-  std::string digits = "fn main() -> int { x = ";
+  std::string digits = "import ::io; fn main() -> int { x = ";
   digits.append(1 << 16, '9');
   parseQuietly(digits + "; y = t." + std::string(1 << 16, '9') +
                "; return 0; }");

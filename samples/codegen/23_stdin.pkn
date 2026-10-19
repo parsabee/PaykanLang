@@ -9,12 +9,14 @@
 // Run this sample with piped input, e.g.:
 //   printf "hello\nworld\n42\n" | ./build/bin/paykan samples/codegen/23_stdin.pkn
 
+import ::io;
+
 fn main() -> int {
   // --- readln: read lines until EOF ---
-  println("=== readln ===");
+  io::println("=== readln ===");
   i: int = 0;
   while True {
-    match Stdin.readln() {
+    match io::stdin().readln().value {
       line: Str {
         // strip trailing newline for display
         n: int = line.len();
@@ -27,13 +29,13 @@ fn main() -> int {
           }
           j = j + 1;
         }
-        println("  [" + Str(i) + "] " + display);
+        io::println("  [" + Str(i) + "] " + display);
         i = i + 1;
       }
       _ { break; }
     }
   }
-  println("read " + Str<int>(i) + " lines");
+  io::println("read " + Str<int>(i) + " lines");
 
   return 0;
 }

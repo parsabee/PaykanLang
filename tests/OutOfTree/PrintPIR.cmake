@@ -168,7 +168,11 @@ string(FIND "${STEP_OUTPUT}" "\nstatic-echo: linked in statically\n" at)
 if(at EQUAL -1)
     message(FATAL_ERROR "static-echo is not linked in:\n${STEP_OUTPUT}")
 endif()
+# The driver is not installed beside a standard library: it is told where
+# the installation's is, for the sample's `import ::io`.
+file(GLOB stdlib_dir LIST_DIRECTORIES true "${prefix}/lib*/paykan/stdlib/*")
 run_step("paykan-static-echo --emit-source"
+    ENV PAYKAN_STDLIB=${stdlib_dir}
     COMMAND ${build}/paykan-static-echo --backend=static-echo --emit-source ${sample})
 if(NOT STEP_OUTPUT STREQUAL expected_pir)
     message(FATAL_ERROR "static-echo's output differs from paykan --emit-pir")
@@ -177,6 +181,7 @@ endif()
 # plugin directory (it lives elsewhere), but --plugin works.
 file(GLOB installed "${plugin_dir}/libpaykan_backend_print_pir.*")
 run_step("paykan-static-echo --plugin --backend=print-pir"
+    ENV PAYKAN_STDLIB=${stdlib_dir}
     COMMAND ${build}/paykan-static-echo --plugin=${installed}
             --backend=print-pir --emit-source ${sample})
 if(NOT STEP_OUTPUT STREQUAL expected_pir)

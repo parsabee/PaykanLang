@@ -145,7 +145,7 @@ fn main() -> int { return 0; }
 // parameters, give each instantiation their methods and traits: also one
 // made for a field type, before the module's `impl` blocks are checked.
 TEST(Impl, GenericBlocksJoinEachInstantiation) {
-  auto r = semaCheck(R"(class Box<T> { v: T; }
+  auto r = semaCheck(R"(import ::io; class Box<T> { v: T; }
 impl Box<T> { fn __init__(v: T) { self.v = v; } }
 impl Box<U> {
   view fn get() -> view U { return self.v; }
@@ -160,7 +160,7 @@ fn main() -> int {
   b = Box(1);
   b.set(b.get() + 1);
   h = Holder();
-  println(label(b) + label(h.b));
+  io::println(label(b) + label(h.b));
   return 0;
 }
 )");

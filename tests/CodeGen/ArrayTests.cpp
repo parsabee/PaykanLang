@@ -8,7 +8,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 // -- int[n] subscript assignment
@@ -18,9 +18,9 @@ TEST(ArrayAssign, IntArray) {
     arr: int[3] = [10, 20, 30];
     arr[0] = 99;
     arr[2] = 42;
-    println(Str<int>(arr[0]));
-    println(Str<int>(arr[1]));
-    println(Str<int>(arr[2]));
+    io::println(Str<int>(arr[0]));
+    io::println(Str<int>(arr[1]));
+    io::println(Str<int>(arr[2]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "99\n20\n42\n");
@@ -36,7 +36,7 @@ TEST(ArrayAssign, IntArrayLoopOverwrite) {
     }
     i = 0;
     while i < 5 {
-      println(Str<int>(arr[i]));
+      io::println(Str<int>(arr[i]));
       i = i + 1;
     }
   )"));
@@ -50,9 +50,9 @@ TEST(ArrayAssign, FloatArray) {
   auto r = compileAndRun(wrapMain(R"(
     arr: float[3] = [1.0, 2.0, 3.0];
     arr[1] = 9.5;
-    println(Str<float>(arr[0]));
-    println(Str<float>(arr[1]));
-    println(Str<float>(arr[2]));
+    io::println(Str<float>(arr[0]));
+    io::println(Str<float>(arr[1]));
+    io::println(Str<float>(arr[2]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "1\n9.5\n3\n");
@@ -65,9 +65,9 @@ TEST(ArrayAssign, BoolArray) {
     arr: bool[3] = [True, False, True];
     arr[0] = False;
     arr[2] = False;
-    println(Str<bool>(arr[0]));
-    println(Str<bool>(arr[1]));
-    println(Str<bool>(arr[2]));
+    io::println(Str<bool>(arr[0]));
+    io::println(Str<bool>(arr[1]));
+    io::println(Str<bool>(arr[2]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\nFalse\nFalse\n");
@@ -79,9 +79,9 @@ TEST(ArrayAssign, StrArray) {
   auto r = compileAndRun(wrapMain(R"(
     arr: Str[3] = ["a", "b", "c"];
     arr[1] = "hello";
-    println(arr[0]);
-    println(arr[1]);
-    println(arr[2]);
+    io::println(arr[0]);
+    io::println(arr[1]);
+    io::println(arr[2]);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "a\nhello\nc\n");
@@ -92,7 +92,7 @@ TEST(ArrayAssign, StrArrayMultipleWrites) {
     arr: Str[3] = ["x", "y", "z"];
     arr[0] = "first";
     arr[0] = "second";
-    println(arr[0]);
+    io::println(arr[0]);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "second\n");
@@ -104,8 +104,8 @@ TEST(ArraySubscript, StringIndexRead) {
   // s[i] on a Str yields a char — wrap with Str<char> to print.
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "paykan";
-    println(Str<char>(s[0]));
-    println(Str<char>(s[5]));
+    io::println(Str<char>(s[0]));
+    io::println(Str<char>(s[5]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "p\nn\n");
@@ -115,7 +115,7 @@ TEST(ArraySubscript, StringIndexBuildResult) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "abcdef";
     result: Str = Str<char>(s[2]) + Str<char>(s[1]) + Str<char>(s[0]);
-    println(result);
+    io::println(result);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "cba\n");
@@ -128,7 +128,7 @@ TEST(ArraySubscript, StringIndexBuildResult) {
 // reference type read out of it must be retained, not over-released.
 
 TEST(RefField, SubscriptObjectArrayField) {
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
 class Foo { v: int; }
 impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
@@ -141,8 +141,8 @@ impl Box {
 }
 fn main() -> int {
   b: Box = Box();
-  println(Str<int>(b.items[0].v));   // subscript via local receiver
-  println(Str<int>(b.second()));     // subscript via self.field inside a method
+  io::println(Str<int>(b.items[0].v));   // subscript via local receiver
+  io::println(Str<int>(b.second()));     // subscript via self.field inside a method
   return 0;
 }
 )");
@@ -153,7 +153,7 @@ fn main() -> int {
 TEST(RefField, NestedArrayOfArraysField) {
   // An array-of-arrays field (int[3][3]): the outer element is itself an
   // array, so a row read out of the field is a copy of it.
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
 class Grid {
   rows: int[3][3];
   fn at(r: int, c: int) -> int {
@@ -177,9 +177,9 @@ impl Grid {
 }
 fn main() -> int {
   g: Grid = Grid();
-  println(Str<int>(g.at(0, 0)));   // 0
-  println(Str<int>(g.at(1, 2)));   // 5
-  println(Str<int>(g.at(2, 1)));   // 7
+  io::println(Str<int>(g.at(0, 0)));   // 0
+  io::println(Str<int>(g.at(1, 2)));   // 5
+  io::println(Str<int>(g.at(2, 1)));   // 7
   return 0;
 }
 )");
@@ -192,7 +192,7 @@ TEST(RefField, ThreeDimArrayLiteralsAndSubscripts) {
   // parameter, a return type, nested literals) must all agree on one
   // canonical type so the nested element reads/writes lower consistently at
   // every depth.
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
 fn corner(c: view int[2][2][]) -> int { return c[1][1][1]; }
 fn build() -> int[2][2][2] {
   cube: int[2][2][2] = [[[1, 2], [3, 4]], [[0, 0], [0, 0]]];
@@ -201,14 +201,14 @@ fn build() -> int[2][2][2] {
 }
 fn main() -> int {
   c: int[2][2][2] = build();
-  println(Str<int>(corner(c)));         // 8
+  io::println(Str<int>(corner(c)));         // 8
   c[0][1][0] = 30;
   plane: int[2][2] = c[0];
-  println(Str<int>(plane[1][0]));       // 30
+  io::println(Str<int>(plane[1][0]));       // 30
   c[1] = [[9, 10], [11, 12]];
-  println(Str<int>(c[1][0][0]));        // 9
-  println(Str<int>(c.len()));           // 2
-  println(Str<int>(c[1][1].len()));     // 2
+  io::println(Str<int>(c[1][0][0]));        // 9
+  io::println(Str<int>(c.len()));           // 2
+  io::println(Str<int>(c[1][1].len()));     // 2
   return 0;
 }
 )");
@@ -221,7 +221,7 @@ TEST(RefField, MemberAccessPassedAsClassArg) {
   // user method must retain it: the callee consumes (releases) it, and the
   // holder releases it on destruction, so without the retain the object is
   // freed one time too many and a later use reads freed memory.
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
 class Named { name: Str; }
 impl Named { fn __init__(n: Str){ self.name = n; } }
 class Store {
@@ -241,7 +241,7 @@ fn main() -> int {
   st: Store = Store();
   stash(st);
   stash(st);                 // second call would crash if the first over-freed
-  println(st.get());         // "hello"
+  io::println(st.get());         // "hello"
   return 0;
 }
 )");
@@ -253,7 +253,7 @@ TEST(RefField, ObjectElementFieldSubscriptAssign) {
   // Assigning into an object-element array field (self.items[i] = obj) must
   // store into the field in place and use the object-set path (element type
   // derived from the array expression, not just bare identifiers).
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
 class Foo { v: int; }
 impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
@@ -268,7 +268,7 @@ impl Box {
 fn main() -> int {
   b: Box = Box();
   b.set1(Foo(99));
-  println(Str<int>(b.get1()));   // 99
+  io::println(Str<int>(b.get1()));   // 99
   return 0;
 }
 )");
@@ -281,7 +281,7 @@ fn main() -> int {
 // integer bit pattern, which read back as a denormal double.
 
 TEST(ArrayPromotion, IntElementsIntoFloatArray) {
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class C {
       fs: float[2];
       fn sum(ys: view float[]) -> float { return ys[0] + ys[1]; }
@@ -294,23 +294,23 @@ TEST(ArrayPromotion, IntElementsIntoFloatArray) {
     fn mk() -> float[2] { return [7, 8]; }
     fn main() -> int {
       xs: float[2] = [1, 2];           // all-int literal into float[2]
-      println(Str<float>(xs[0] + xs[1]));
+      io::println(Str<float>(xs[0] + xs[1]));
       ys: float[2] = [1, 2.5];         // mixed literal
-      println(Str<float>(ys[0] + ys[1]));
+      io::println(Str<float>(ys[0] + ys[1]));
       n: int = 4;
       zs: float[2] = [n, n + 1];       // non-constant int elements
-      println(Str<float>(zs[0] + zs[1]));
+      io::println(Str<float>(zs[0] + zs[1]));
       xs[0] = 10;                      // subscript store
-      println(Str<float>(xs[0]));
+      io::println(Str<float>(xs[0]));
       xs = [5, 6];                     // reassignment
-      println(Str<float>(xs[1]));
+      io::println(Str<float>(xs[1]));
       c: C = C();
-      println(Str<float>(c.fs[1]));      // field store
-      println(Str<float>(total([3, 4]))); // function argument
-      println(Str<float>(c.sum([5, 6]))); // method argument
-      println(Str<float>(mk()[1]));      // returned literal
+      io::println(Str<float>(c.fs[1]));      // field store
+      io::println(Str<float>(total([3, 4]))); // function argument
+      io::println(Str<float>(c.sum([5, 6]))); // method argument
+      io::println(Str<float>(mk()[1]));      // returned literal
       grid: float[2][1] = [[1], [2]];  // nested literals
-      println(Str<float>(grid[0][0] + grid[1][0]));
+      io::println(Str<float>(grid[0][0] + grid[1][0]));
       return 0;
     }
   )");

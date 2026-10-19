@@ -1,3 +1,5 @@
+import ::io;
+
 // Optional types: arrays of optionals (`Node?[n]`, None slots).
 class Node {
   v: int;
@@ -15,8 +17,10 @@ fn main() -> int {
   p: Node? = xs[1];
   ys: Node?[_] = [None, None];  // the None elements take the declared type
   match xs[0] {
-    n: Node { println(Str<int>(n.v)); }
-    None    { println("none"); }
+    n: Node {
+      io::println(Str<int>(n.v));
+    }
+    None { io::println("none"); }
   }
   return 0;
 }

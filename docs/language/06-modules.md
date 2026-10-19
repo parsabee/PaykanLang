@@ -104,9 +104,10 @@ library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable
 ordinary module, and it is cached under `.paykan_cache/@system/` (see
 [Module Files](#module-files)).
 
-The standard library ships with the compiler: `::collections` and `::memory` (see
-[the standard library](13-standard-library.md)). The builtins (`println`, `Str`, `File`,
-`open`, `Stdin`, ...) need no import.
+The standard library ships with the compiler: `::io`, `::result`, `::collections` and
+`::memory` (see [the standard library](13-standard-library.md)). Printing and files are
+`::io`, so a program that prints imports it (`import ::io;`, then `io::println(...)`). Only
+the builtins (`Obj`, `Str` and the conversions, the primitive types) need no import.
 
 ---
 
@@ -123,6 +124,7 @@ variant:
 
 ```pkn
 // file: pal/color.pkn
+import ::io;
 enum Color { Red, Green, Blue }
 fn name(c: Color) -> Str { /* … */ }
 
@@ -131,7 +133,7 @@ import pal::color;
 
 fn main() -> int {
   c: color::Color = color::Color::Green;   // qualified type + variant
-  println(color::name(c));                 // pass an enum to an imported function
+  io::println(color::name(c));                 // pass an enum to an imported function
   return 0;
 }
 ```

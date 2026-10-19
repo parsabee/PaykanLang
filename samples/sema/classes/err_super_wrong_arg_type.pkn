@@ -2,7 +2,7 @@
 class Animal {}
 
 impl Animal {
-  fn __init__(x: int) {}
+  fn __init__(x: int) { }
 }
 
 class Dog : Animal {}

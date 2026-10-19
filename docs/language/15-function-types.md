@@ -40,8 +40,10 @@ like any other value and called like any function.
 ## Function Types
 
 ```pkn
+import ::io;
+
 fn square(x: int) -> int { return x * x; }
-fn greet(name: view Str) { println("hi " + name); }
+fn greet(name: view Str) { io::println("hi " + name); }
 
 fn apply(f: (int) -> int, x: int) -> int { return f(x); }
 fn twice(f: (int) -> int) -> (int) -> int {
@@ -59,7 +61,7 @@ fn main() -> int {
   fs: ((int) -> int)[2] = [square, twice(square)];
   pair: ((int) -> int, Str) = (g, "square");
   log("there");
-  println(Str(apply(g, 3)) + " " + Str(fs[1](2)) + " " + Str(pair.0(5)) + " " + pair.1);
+  io::println(Str(apply(g, 3)) + " " + Str(fs[1](2)) + " " + Str(pair.0(5)) + " " + pair.1);
   return 0;
 }
 ```
@@ -95,9 +97,8 @@ argument (`List<(int) -> int>`), a `view` or `inout` parameter or local, and an 
 
 A **named function** used without an argument list is a value of its function type: a
 free function of the module (`square`), an imported one (`m::square`), a `static fn`
-(`Point::origin`).  Not a builtin (`'println' is a builtin and cannot be a function value
-(wrap it in a lambda)`), not a constructor (`'Point' is a constructor, not a function
-value`), not a method (`p.shift` is a field access, and there is no such field), not a
+(`Point::origin`).  Not a constructor or a conversion (`'Point' is a constructor, not a
+function value`, and so is `Str`), not a method (`p.shift` is a field access, and there is no such field), not a
 generic function (`'first' is a generic function; a generic function cannot be a function
 value yet`), and not a function returning a borrow (`'peek' returns a borrow ('-> view');
 it cannot be a function value yet`).
@@ -105,14 +106,16 @@ it cannot be a function value yet`).
 A **lambda** is a function without a name, written where a value goes:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   n = 10;
   add = fn(x: int) -> int { return x + n; };          // captures n
-  log = fn(s: view Str) { println(s); };              // returns void
+  log = fn(s: view Str) { io::println(s); };              // returns void
   cmp = fn(a: view Str, b: view Str) -> bool { return a.len() < b.len(); };
   make = fn() -> () -> int { return fn() -> int { return n * 2; }; };
   log("start");
-  println(Str(add(1)) + " " + Str(cmp("a", "bb")) + " " + Str(make()()));
+  io::println(Str(add(1)) + " " + Str(cmp("a", "bb")) + " " + Str(make()()));
   return 0;
 }
 ```
@@ -149,6 +152,8 @@ as the object while the object is alive and as `None` afterwards (`weak me = sel
 self.onClick = fn() -> Str { match me { ... } };`).
 
 ```pkn
+import ::io;
+
 class Counter { n: int; }
 struct P { x: int; }
 
@@ -159,7 +164,7 @@ fn main() -> int {
   f = fn() -> int { c.n = c.n + 1; return n + p.x + c.n; };   // n, p copied; c shared
   n = 100;
   p.x = 100;
-  println(Str(f()) + " " + Str(f()) + " " + Str(c.n));
+  io::println(Str(f()) + " " + Str(f()) + " " + Str(c.n));
   return 0;
 }
 ```
@@ -188,6 +193,8 @@ capture it (copy it into a variable first)`).  `self` in a class method that is 
 counts as one that changes `self` (the closure may):
 
 ```pkn
+import ::io;
+
 class Counter {
   n: int;
   fn adder() -> (int) -> void { return fn(d: int) { self.n = self.n + d; }; }
@@ -199,7 +206,7 @@ fn main() -> int {
   add = c.adder();
   get = c.reader();
   add(10);
-  println(Str(get()) + " " + Str(c.n));
+  io::println(Str(get()) + " " + Str(c.n));
   return 0;
 }
 ```
@@ -227,6 +234,8 @@ function type's parameters are known by number).  A call through a `view` of a f
 value is fine: calling changes no capture.
 
 ```pkn
+import ::io;
+
 struct Op { name: Str; run: (int, int) -> int; }
 class Handler { cb: ((Str) -> Str)?; }
 
@@ -237,12 +246,12 @@ fn main() -> int {
   h = Handler(None);
   h.cb = fn(s: Str) -> Str { return s + "!"; };
   match h.cb {
-    f: (Str) -> Str { println(f(ops[0].name) + " " + f(ops[1].name)); }
-    None { println("no handler"); }
+    f: (Str) -> Str { io::println(f(ops[0].name) + " " + f(ops[1].name)); }
+    None { io::println("no handler"); }
   }
   i = 0;
   while i < 2 {
-    println(Str(ops[i].run(3, 4)));
+    io::println(Str(ops[i].run(3, 4)));
     i = i + 1;
   }
   return 0;
@@ -299,6 +308,8 @@ an `inout` one is the caller's variable, which the callee may set to another fun
 A function type may name type parameters, and a function value is a type argument:
 
 ```pkn
+import ::io;
+
 import ::collections;
 
 fn mapFirst<T, U>(xs: view T[], f: (view T) -> U) -> U { return f(xs[0]); }
@@ -316,7 +327,7 @@ fn main() -> int {
   fs.push(fn(x: int) -> int { return x * 2; });
   fs.push(fn(x: int) -> int { return x + 2; });
   k = fs.get(1);
-  println(Str(n) + " " + h.run("a") + " " + Str(k(1)) + " " + Str(fs.contains(k)));
+  io::println(Str(n) + " " + h.run("a") + " " + Str(k(1)) + " " + Str(fs.contains(k)));
   return 0;
 }
 ```
@@ -343,12 +354,14 @@ class Button {
 ```
 
 ```pkn
+import ::io;
+
 import ops;
 
 fn main() -> int {
   t = ops::twice(ops::square);
   b = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
-  println(Str(t(3)) + " " + b.click());
+  io::println(Str(t(3)) + " " + b.click());
   return 0;
 }
 ```
@@ -370,13 +383,13 @@ Output:
 | A borrowed result | `(int) -> view Str`; `fn(x: int) -> view Str { ... }` |
 | A `void` parameter | `(void) -> int`; `fn(v: void) {}` |
 | Mismatched function types | `f: (int) -> int = fn(x: float) -> int { ... }`; a mode dropped; `int` where `float` is expected |
-| Not a function value | `p = println`; `c = Point`; `g = first`; `q = peek` (`-> view`); `m = p.shift` |
+| Not a function value | `p = Str`; `c = Point`; `g = first`; `q = peek` (`-> view`); `m = p.shift` |
 | Calling a non-function | `n = 1; n(2)`; `obj.n(1)` with `n: int`; an optional function value without `match` |
 | Wrong arguments | `f(1, 2)` for `f: (int) -> int`; `f("a")`; a `let` or a `view` to an `inout` parameter |
 | Assigning a captured name | `n = 1; g = fn() { n = 2; };`; `bump(n)` inside the lambda; `p.x = 2` for a captured struct |
 | Capturing a borrow or `self` | a `view` or `inout` parameter or local, a `view fn`'s `self`, a struct method's `self` |
 | A lambda body's rule | `break` outside its own loop, a missing `return`, a duplicate parameter |
-| A closure as an object | `println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Show` |
+| A closure as an object | `io::println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Show` |
 
 ---
 

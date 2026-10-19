@@ -11,7 +11,7 @@
 using namespace paykan::test;
 
 static std::string inMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 static void expectOk(const std::string &src) {
@@ -88,7 +88,7 @@ TEST(OptionalPrimitive, EqualityAndObj) {
     x = a == b;
     y = a != None;
     z = None == b;
-    println(b);                              // `None` or the value
+    io::println(b);                              // `None` or the value
   )"));
 }
 
@@ -212,9 +212,11 @@ TEST(OptionalPrimitive, DestructuringDoesNotBox) {
 }
 
 TEST(OptionalPrimitive, EnumVoidAndNestedStayRejected) {
-  expectError(R"(
+  // An optional enum is a value optional now; a nested optional is not.
+  auto r = semaCheck(R"(
     enum Color { Red, Green }
-    fn main() -> int { c: Color? = None; return 0; }
-  )",
-              "optional enum types are not supported yet");
+    fn main() -> int { c: Color? = None; d: Color? = Color::Red; return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // (A written `int??` is a parse error: tests/Parser/OptionalTests.cpp.)
 }

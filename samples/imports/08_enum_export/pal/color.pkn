@@ -3,10 +3,12 @@ enum Color { Red, Green, Blue }
 
 fn name(c: Color) -> Str {
   match c {
-    Red   { return "red"; }
+    Red { return "red"; }
     Green { return "green"; }
-    Blue  { return "blue"; }
+    Blue { return "blue"; }
   }
 }
 
-fn favorite() -> Color { return Color::Blue; }
+fn favorite() -> Color {
+  return Color::Blue;
+}

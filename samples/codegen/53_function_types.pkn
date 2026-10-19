@@ -12,13 +12,23 @@
 // shares the closure, which is released when the last copy goes, together
 // with the captures it owns.
 
-fn square(x: int) -> int { return x * x; }
-fn plus(a: int, b: int) -> int { return a + b; }
+import ::io;
 
-fn apply(f: (int) -> int, x: int) -> int { return f(x); }
+fn square(x: int) -> int {
+  return x * x;
+}
+fn plus(a: int, b: int) -> int {
+  return a + b;
+}
+
+fn apply(f: (int) -> int, x: int) -> int {
+  return f(x);
+}
 
 fn compose(f: (int) -> int, g: (int) -> int) -> (int) -> int {
-  return fn(x: int) -> int { return g(f(x)); };
+  return fn(x: int) -> int {
+    return g(f(x));
+  };
 }
 
 fn sumWith(xs: view int[], f: (view int) -> int) -> int {
@@ -31,11 +41,17 @@ fn sumWith(xs: view int[], f: (view int) -> int) -> int {
   return total;
 }
 
-fn divmod(a: int, b: int) -> (int, int) { return (a / b, a % b); }
+fn divmod(a: int, b: int) -> (int, int) {
+  return (a / b, a % b);
+}
 
-fn bump(n: inout int, by: int) { n = n + by; }
+fn bump(n: inout int, by: int) {
+  n = n + by;
+}
 
-fn mapFirst<T, U>(xs: view T[], f: (view T) -> U) -> U { return f(xs[0]); }
+fn mapFirst<T, U>(xs: view T[], f: (view T) -> U) -> U {
+  return f(xs[0]);
+}
 
 class Button {
   label: Str;
@@ -45,7 +61,7 @@ class Button {
 
 class Counter {
   n: int;
-  fn make() -> () -> int { return fn() -> int { return self.n; }; }   // shares self
+  fn make() -> () -> int      { return fn() -> int { return self.n; }; }  // shares self
   fn adder() -> (int) -> void { return fn(d: int) { self.n = self.n + d; }; }
 }
 
@@ -62,35 +78,40 @@ fn main() -> int {
   // Named functions and lambdas as values, called through a variable.
   sq = square;
   n = 10;
-  addN = fn(x: int) -> int { return x + n; };          // copies n now
+  addN = fn(x: int) -> int {
+    return x + n;
+  };  // copies n now
   n = 20;                                              // ...so this is not seen
-  println(Str(apply(sq, 3)) + " " + Str(addN(1)) + " " + Str(apply(Op::twice, 4)));
+  io::println(Str(apply(sq, 3)) + " " + Str(addN(1)) + " "
+      + Str(apply(Op::twice, 4)));
 
   // Modes and tuple results in a function type.
   dm: (int, int) -> (int, int) = divmod;
   b: (inout int, int) -> void = bump;
   k = 5;
   b(k, 2);
-  println(Str(dm(17, 5).0) + " " + Str(dm(17, 5).1) + " " + Str(k));
+  io::println(Str(dm(17, 5).0) + " " + Str(dm(17, 5).1) + " " + Str(k));
 
   // Composition: a closure that captures two function values.
   h = compose(sq, addN);                               // addN(sq(x))
-  println(Str(h(3)) + " " + Str(sumWith([1, 2, 3], fn(x: view int) -> int { return x * 2; })));
+  io::println(Str(h(3)) + " " + Str(sumWith([1, 2, 3], fn(x: view int) -> int {
+    return x * 2;
+  })));
 
   // Fields of a class and of a struct; elements of an array and a tuple.
   btn = Button("ok", fn(l: Str) -> Str { return l + "!"; });
   op = Op("plus", plus);
   fs: ((int) -> int)[2] = [sq, h];
   t: ((int, int) -> int, Str) = (plus, "t");
-  println(btn.click() + " " + Str(op.run(2, 3)) + " " + Str(fs[1](1)) + " " +
-          Str(t.0(4, 5)) + " " + Str(compose(fs[0], fs[1])(2)));
+  io::println(btn.click() + " " + Str(op.run(2, 3)) + " " + Str(fs[1](1)) + " "
+      + Str(t.0(4, 5)) + " " + Str(compose(fs[0], fs[1])(2)));
 
   // A method's lambda shares its object.
   c = Counter(1);
   get = c.make();
   add = c.adder();
   add(41);
-  println(Str(get()) + " " + Str(c.n));
+  io::println(Str(get()) + " " + Str(c.n));
 
   // Generics infer type parameters through a function type; optionals hold
   // closures and `match` unwraps them.
@@ -98,14 +119,16 @@ fn main() -> int {
   opt: ((int) -> int)? = None;
   if s == "aa" { opt = sq; }
   match opt {
-    f: (int) -> int { println(s + " " + Str(f(6))); }
-    None { println("none"); }
+    f: (int) -> int {
+      io::println(s + " " + Str(f(6)));
+    }
+    None { io::println("none"); }
   }
 
   // Function values are values: equal when they run the same code with the
   // same closure (a copy, a named function), not otherwise.
   g = h;
-  println(Str(g == h) + " " + Str(h == sq) + " " + Str(fs[1] == h) + " " +
-          Str(sq == square));
+  io::println(Str(g == h) + " " + Str(h == sq) + " " + Str(fs[1] == h) + " "
+      + Str(sq == square));
   return apply(addN, 2);
 }

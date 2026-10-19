@@ -1,3 +1,5 @@
+import ::io;
+
 // Optional types: the only operators on an optional are == and !=
 // — against None (a null check) or against another optional of a compatible
 // type (both None -> equal, one None -> not equal, otherwise `equals`).
@@ -18,13 +20,19 @@ fn main() -> int {
   a: Node? = None;
   b: Node? = Node(1);
   l: Leaf? = Leaf(2);
-  if a == None { println("a is none"); }
-  if b != None { println("b is some"); }
-  if None == a { println("none == a"); }
-  println(Str<bool>(a == b));
-  println(Str<bool>(b == l));    // subtype-compatible optionals
+  if a == None {
+    io::println("a is none");
+  }
+  if b != None {
+    io::println("b is some");
+  }
+  if None == a {
+    io::println("none == a");
+  }
+  io::println(Str<bool>(a == b));
+  io::println(Str<bool>(b == l));    // subtype-compatible optionals
   s: Str? = "x";
   t: Str? = "x";
-  println(Str<bool>(s == t));
+  io::println(Str<bool>(s == t));
   return 0;
 }

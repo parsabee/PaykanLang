@@ -15,25 +15,25 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 TEST(SizedTypes, IntegerArithmeticWrapsToTheWidth) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
-    a: u8 = 250;  println(Str(a + 10));          // 4
-    b: u8 = 3;    println(Str(b - 5));           // 254
-    c: i8 = -128; println(Str(c - 1));           // 127
-    d: i8 = 127;  println(Str(d + 1));           // -128
-    e: i16 = 30000; println(Str(e * 2));         // -5536
-    f: u16 = 65535; println(Str(f * f));         // 1
-    g: u32 = 4000000000; println(Str(g + 1000000000)); // 705032704
-    h: i32 = 2147483647; println(Str(h + 1));    // -2147483648
-    n: i8 = -128; println(Str(-n));              // -128
-    println(Str(n / -1));                        // -128: no overflow panic
-    println(Str(n % -1));                        // 0
-    u: u8 = 200; println(Str(u * 2 / 3));        // 144 (400 wraps to 144 first)
-    v: u8 = 7; println(Str(v / 2) + " " + Str(v % 4));  // 3 3
+    a: u8 = 250;  io::println(Str(a + 10));          // 4
+    b: u8 = 3;    io::println(Str(b - 5));           // 254
+    c: i8 = -128; io::println(Str(c - 1));           // 127
+    d: i8 = 127;  io::println(Str(d + 1));           // -128
+    e: i16 = 30000; io::println(Str(e * 2));         // -5536
+    f: u16 = 65535; io::println(Str(f * f));         // 1
+    g: u32 = 4000000000; io::println(Str(g + 1000000000)); // 705032704
+    h: i32 = 2147483647; io::println(Str(h + 1));    // -2147483648
+    n: i8 = -128; io::println(Str(-n));              // -128
+    io::println(Str(n / -1));                        // -128: no overflow panic
+    io::println(Str(n % -1));                        // 0
+    u: u8 = 200; io::println(Str(u * 2 / 3));        // 144 (400 wraps to 144 first)
+    v: u8 = 7; io::println(Str(v / 2) + " " + Str(v % 4));  // 3 3
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "4\n254\n127\n-128\n-5536\n1\n705032704\n-2147483648\n"
@@ -45,20 +45,20 @@ TEST(SizedTypes, UnsignedIsReadUnsigned) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
     u: unsigned = unsigned(-1);
-    println(Str(u));                     // 18446744073709551615
-    println(Str(u / 2));                 // 9223372036854775807
-    println(Str(u % 10));                // 5
-    println(Str(u > 1) + " " + Str(u < 1) + " " + Str(u >= u) + " " + Str(1 <= u));
-    println(Str(u == unsigned(-1)) + " " + Str(u != 0));
-    println(Str(int(u)));                // -1
-    println(Str(float(u)));              // 1.84467e+19
-    println(Str(u + 2));                 // 1 (wraps)
+    io::println(Str(u));                     // 18446744073709551615
+    io::println(Str(u / 2));                 // 9223372036854775807
+    io::println(Str(u % 10));                // 5
+    io::println(Str(u > 1) + " " + Str(u < 1) + " " + Str(u >= u) + " " + Str(1 <= u));
+    io::println(Str(u == unsigned(-1)) + " " + Str(u != 0));
+    io::println(Str(int(u)));                // -1
+    io::println(Str(float(u)));              // 1.84467e+19
+    io::println(Str(u + 2));                 // 1 (wraps)
     v: unsigned = 9223372036854775807;
-    println(Str(v + v + 1));             // 18446744073709551615
-    println(Str(unsigned(1.5)) + " " + Str(unsigned(18446744073709549568.0)));
-    println(u.toString());
+    io::println(Str(v + v + 1));             // 18446744073709551615
+    io::println(Str(unsigned(1.5)) + " " + Str(unsigned(18446744073709549568.0)));
+    io::println(u.toString());
     o: unsigned? = u;
-    println(o);
+    io::println(o);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "18446744073709551615\n9223372036854775807\n5\n"
@@ -72,25 +72,25 @@ TEST(SizedTypes, NarrowFloatsRoundAfterEachOperation) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
     x: f32 = 0.1;
-    println(Str(x));                       // 0.1
-    println(Str(float(x)));                // 0.1 (%g shows six digits)
-    println(Str(float(x) == 0.1));         // False: the f32 is not the f64
+    io::println(Str(x));                       // 0.1
+    io::println(Str(float(x)));                // 0.1 (%g shows six digits)
+    io::println(Str(float(x) == 0.1));         // False: the f32 is not the f64
     y: f32 = 16777216.0;
-    println(Str(y + 1));                   // 1.67772e+07: the f32 cannot hold 16777217
-    println(Str(y + 1 == y));              // True
+    io::println(Str(y + 1));                   // 1.67772e+07: the f32 cannot hold 16777217
+    io::println(Str(y + 1 == y));              // True
     z: f16 = 0.1;
-    println(Str(z));                       // 0.0999756
+    io::println(Str(z));                       // 0.0999756
     w: f16 = 2048.0;
-    println(Str(w + 1));                   // 2048 (the ulp is 2)
-    println(Str(w + 2));                   // 2050
-    println(Str(f16(65519.0)) + " " + Str(f16(65520.0)) + " " + Str(f16(-70000.0)));
-    println(Str(f16(0.00000006)));         // 5.96046e-08: the smallest subnormal
-    println(Str(f16(0.00000002)));         // 0
-    println(Str(f32(16777217)));           // 1.67772e+07
+    io::println(Str(w + 1));                   // 2048 (the ulp is 2)
+    io::println(Str(w + 2));                   // 2050
+    io::println(Str(f16(65519.0)) + " " + Str(f16(65520.0)) + " " + Str(f16(-70000.0)));
+    io::println(Str(f16(0.00000006)));         // 5.96046e-08: the smallest subnormal
+    io::println(Str(f16(0.00000002)));         // 0
+    io::println(Str(f32(16777217)));           // 1.67772e+07
     n: f16 = -1.5;
-    println(Str(-n) + " " + Str(n * n));   // 1.5 2.25
+    io::println(Str(-n) + " " + Str(n * n));   // 1.5 2.25
     i: f32 = 3;
-    println(Str(i));                       // 3
+    io::println(Str(i));                       // 3
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "0.1\n0.1\nFalse\n1.67772e+07\nTrue\n0.0999756\n2048\n"
@@ -102,15 +102,15 @@ TEST(SizedTypes, NarrowFloatsRoundAfterEachOperation) {
 TEST(SizedTypes, ConversionsBetweenIntegersKeepTheLowBits) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
-    println(Str(u8(300)) + " " + Str(u8(-1)) + " " + Str(i8(200)) + " " + Str(i8(-129)));
-    println(Str(u16(65536)) + " " + Str(i16(32768)) + " " + Str(u32(-1)) + " " + Str(i32(2147483648)));
-    println(Str(unsigned(-1)) + " " + Str(int(unsigned(-1))));
+    io::println(Str(u8(300)) + " " + Str(u8(-1)) + " " + Str(i8(200)) + " " + Str(i8(-129)));
+    io::println(Str(u16(65536)) + " " + Str(i16(32768)) + " " + Str(u32(-1)) + " " + Str(i32(2147483648)));
+    io::println(Str(unsigned(-1)) + " " + Str(int(unsigned(-1))));
     a: i8 = -1;
-    println(Str(u8(a)) + " " + Str(u16(a)) + " " + Str(u32(a)) + " " + Str(unsigned(a)) + " " + Str(int(a)));
+    io::println(Str(u8(a)) + " " + Str(u16(a)) + " " + Str(u32(a)) + " " + Str(unsigned(a)) + " " + Str(int(a)));
     b: u8 = 255;
-    println(Str(i8(b)) + " " + Str(i16(b)) + " " + Str(int(b)) + " " + Str(unsigned(b)));
+    io::println(Str(i8(b)) + " " + Str(i16(b)) + " " + Str(int(b)) + " " + Str(unsigned(b)));
     c: u32 = 4294967295;
-    println(Str(i32(c)) + " " + Str(u16(c)) + " " + Str(int(c)));
+    io::println(Str(i32(c)) + " " + Str(u16(c)) + " " + Str(int(c)));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "44 255 -56 127\n0 -32768 4294967295 -2147483648\n"
@@ -123,16 +123,16 @@ TEST(SizedTypes, ConversionsBetweenIntegersKeepTheLowBits) {
 TEST(SizedTypes, ConversionsWithFloatsTruncateAndRound) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
-    println(Str(i8(-128.9)) + " " + Str(i8(127.9)) + " " + Str(u8(255.5)) + " " + Str(u8(0.5)));
-    println(Str(i32(-1.5)) + " " + Str(u16(65535.9)) + " " + Str(int(-2.9)));
+    io::println(Str(i8(-128.9)) + " " + Str(i8(127.9)) + " " + Str(u8(255.5)) + " " + Str(u8(0.5)));
+    io::println(Str(i32(-1.5)) + " " + Str(u16(65535.9)) + " " + Str(int(-2.9)));
     f: f32 = 100.75;
-    println(Str(i8(f)) + " " + Str(u8(f)) + " " + Str(int(f)));
+    io::println(Str(i8(f)) + " " + Str(u8(f)) + " " + Str(int(f)));
     h: f16 = -3.5;
-    println(Str(i16(h)) + " " + Str(int(h)));
-    println(Str(f32(16777217)) + " " + Str(f16(2049)) + " " + Str(float(i8(-5))));
+    io::println(Str(i16(h)) + " " + Str(int(h)));
+    io::println(Str(f32(16777217)) + " " + Str(f16(2049)) + " " + Str(float(i8(-5))));
     a: u8 = 200;  b: i32 = -7;  u: unsigned = 3;
-    println(Str(float(a)) + " " + Str(f32(b)) + " " + Str(f16(u)) + " " + Str(float(u)));
-    println(Str(f16(f)) + " " + Str(f32(h)) + " " + Str(float(f32(0.1))));
+    io::println(Str(float(a)) + " " + Str(f32(b)) + " " + Str(f16(u)) + " " + Str(float(u)));
+    io::println(Str(f16(f)) + " " + Str(f32(h)) + " " + Str(float(f32(0.1))));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "-128 127 255 0\n-1 65535 -2\n100 100 100\n-3 -3\n"
@@ -144,16 +144,16 @@ TEST(SizedTypes, PrintingAndParsing) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
     a: i8 = -5;  b: u16 = 65535;  c: f32 = 0.25;  d: f16 = 0.5;  u: unsigned = 7;
-    println(Str(a) + " " + Str(b) + " " + Str(c) + " " + Str(d) + " " + Str(u));
-    println(a.toString() + " " + Str<u16>(b) + " " + c.toString() + " " + Str<unsigned>(u));
+    io::println(Str(a) + " " + Str(b) + " " + Str(c) + " " + Str(d) + " " + Str(u));
+    io::println(a.toString() + " " + Str<u16>(b) + " " + c.toString() + " " + Str<unsigned>(u));
     p: u8? = u8("255");  q: u8? = u8("256");  r: i8? = i8("-128");  s: i8? = i8("-129");
-    print(p); print(" "); print(q); print(" "); print(r); print(" "); println(s);
+    io::print(p); io::print(" "); io::print(q); io::print(" "); io::print(r); io::print(" "); io::println(s);
     t: unsigned? = unsigned("18446744073709551615");  v: unsigned? = unsigned("18446744073709551616");
     w: unsigned? = unsigned("-1");  x: unsigned? = unsigned("+1");  y: unsigned? = unsigned("");
-    print(t); print(" "); print(v); print(" "); print(w); print(" "); print(x); print(" "); println(y);
+    io::print(t); io::print(" "); io::print(v); io::print(" "); io::print(w); io::print(" "); io::print(x); io::print(" "); io::println(y);
     z: f32? = f32("0.1");  zz: f16? = f16("70000");  zi: i32? = i32(" 5");
-    print(z); print(" "); print(zz); print(" "); println(zi);
-    match u16("65535") { n: u16 { println(Str(n + 1)); } None { println("none"); } }
+    io::print(z); io::print(" "); io::print(zz); io::print(" "); io::println(zi);
+    match u16("65535") { n: u16 { io::println(Str(n + 1)); } None { io::println("none"); } }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "-5 65535 0.25 0.5 7\n-5 65535 0.25 7\n"
@@ -167,10 +167,10 @@ TEST(SizedTypes, HashingAndEquality) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
     a: u8 = 250;  b: u8 = 250;  c: i32 = -1;  d: int = -1;  u: unsigned = unsigned(-1);
-    println(Str(a.hash() == b.hash()) + " " + Str(c.hash() == d.hash()) + " " + Str(u.hash() == d.hash()));
-    println(Str(a == b) + " " + Str(a != b) + " " + Str(c == -1));
+    io::println(Str(a.hash() == b.hash()) + " " + Str(c.hash() == d.hash()) + " " + Str(u.hash() == d.hash()));
+    io::println(Str(a == b) + " " + Str(a != b) + " " + Str(c == -1));
     o: u8? = 250;  p: u8? = None;
-    println(Str(o == p) + " " + Str(p == None) + " " + Str(o != None));
+    io::println(Str(o == p) + " " + Str(p == None) + " " + Str(o != None));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True True True\nTrue False True\nFalse True True\n");
@@ -189,30 +189,30 @@ TEST(SizedTypes, SizedValuesInAggregatesGenericsAndMatch) {
                     "fn bump(n: inout u8) { n = n + 1; }\n" +
                     wrapMain(R"(
     p = Pixel(255, 128, 0, 0.5);
-    println(p.toString() + " " + Str(p == Pixel(255, 128, 0, 0.5)));
+    io::println(p.toString() + " " + Str(p == Pixel(255, 128, 0, 0.5)));
     p.r = p.r + 1;
-    println(Str(p.r));
+    io::println(Str(p.r));
     t = (unsigned(-1), i8(-5), f16(0.1));
-    println(t.toString() + " " + Str(t == (unsigned(-1), i8(-5), f16(0.1))));
+    io::println(t.toString() + " " + Str(t == (unsigned(-1), i8(-5), f16(0.1))));
     xs: u16[3] = [65535, 1, 2];
-    println(Str(sum(xs)));
+    io::println(Str(sum(xs)));
     ys: f16[2] = [0.1, 0.2];
-    println(Str(ys[0] + ys[1]));
+    io::println(Str(ys[0] + ys[1]));
     b = Box<u8>(200);
-    println(Str(b.get() + 100));
+    io::println(Str(b.get() + 100));
     d = Box<unsigned>(unsigned(-1));
-    println(Str(d.get()));
+    io::println(Str(d.get()));
     n: u8 = 255;
     bump(n);
-    println(Str(n));
+    io::println(Str(n));
     k: u32 = 7;
-    match k { 7 { println("seven"); } _ { println("other"); } }
+    match k { 7 { io::println("seven"); } _ { io::println("other"); } }
     m: i8 = -1;
-    match -m { 1 { println("minus one"); } _ { println("other"); } }
+    match -m { 1 { io::println("minus one"); } _ { io::println("other"); } }
     f: f32 = 0.5;
-    match f { 0.5 { println("half"); } _ { println("other"); } }
+    match f { 0.5 { io::println("half"); } _ { io::println("other"); } }
     o: i16? = None;
-    print(o); print(" "); o = -300; println(o);
+    io::print(o); io::print(" "); o = -300; io::println(o);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "Pixel(r: 255, g: 128, b: 0, a: 0.5) True\n0\n"

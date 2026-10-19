@@ -93,7 +93,9 @@ TEST(ASTInterchange, WritesTheDocumentedForm) {
   parser::ParserDriver driver("recursive-descent");
   auto path = std::filesystem::temp_directory_path() /
               ("paykan_interchange_" + std::to_string(::getpid()) + ".pkn");
-  { std::ofstream(path) << "fn main() -> int {\n  return 0;\n}\n"; }
+  {
+    std::ofstream(path) << "fn main() -> int {\n  return 0;\n}\n";
+  }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);
   EXPECT_EQ(write(*driver.getRoot()), "(paykan-ast 1\n"
@@ -910,15 +912,15 @@ TEST(Interchange, FunctionTypesRoundTrip) {
   auto path = std::filesystem::temp_directory_path() /
               ("paykan_interchange_fn_" + std::to_string(::getpid()) + ".pkn");
   {
-    std::ofstream(path)
-        << "fn apply(f: (view Str, inout int) -> bool, g: () -> void) -> "
-           "(int) -> int {\n"
-           "  h = fn(x: int) -> int { return x + 1; };\n"
-           "  log = fn(s: view Str) { println(s); };\n"
-           "  fs: ((int) -> int)[1] = [h];\n"
-           "  n = fs[0](1) + h(2) + apply(f, g)(3);\n"
-           "  return h;\n"
-           "}\n";
+    std::ofstream(path) << "import ::io; fn apply(f: (view Str, inout int) -> "
+                           "bool, g: () -> void) -> "
+                           "(int) -> int {\n"
+                           "  h = fn(x: int) -> int { return x + 1; };\n"
+                           "  log = fn(s: view Str) { io::println(s); };\n"
+                           "  fs: ((int) -> int)[1] = [h];\n"
+                           "  n = fs[0](1) + h(2) + apply(f, g)(3);\n"
+                           "  return h;\n"
+                           "}\n";
   }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);

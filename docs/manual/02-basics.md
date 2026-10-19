@@ -9,13 +9,15 @@ we write the first functions of `tasks`, the to-do list manager this manual buil
 A variable is declared with a name, a colon, a type and an initial value:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   count: int = 3;
   price: float = 2.5;
   ready: bool = True;
   name: Str = "Ada";
-  println(name + " ordered " + Str(count) + " items at " + Str(price));
-  println(Str(ready));
+  io::println(name + " ordered " + Str(count) + " items at " + Str(price));
+  io::println(Str(ready));
   return 0;
 }
 ```
@@ -31,12 +33,14 @@ Every variable needs an initial value: there are no uninitialised variables. Whe
 is obvious from the value, leave it out and the compiler **infers** it:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   count = 3;          // int
   price = 2.5;        // float
   name = "Ada";       // Str
   total = count * 4;  // int
-  println(name + ": " + Str(total));
+  io::println(name + ": " + Str(total));
   return 0;
 }
 ```
@@ -71,16 +75,18 @@ until the block ends. Assigning without a type, on the other hand, assigns to th
 variable:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   x = 1;
   {
     x: int = 10;  // a new x, local to this block
-    println("inner x = " + Str(x));
+    io::println("inner x = " + Str(x));
   }
   {
     x = 2;        // assigns the outer x
   }
-  println("outer x = " + Str(x));
+  io::println("outer x = " + Str(x));
   return 0;
 }
 ```
@@ -96,10 +102,12 @@ A variable declared with `let` keeps its first value: assigning to it again is a
 always has an initial value, and its type can be left out as usual:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   let rate = 3;
   let label: Str = "rate";
-  println(label + " = " + Str(rate));
+  io::println(label + " = " + Str(rate));
   return 0;
 }
 ```
@@ -155,16 +163,19 @@ and every class you declare is a type. Later chapters add arrays (`int[3]`), tup
 
 ### Printing values
 
-`print` and `println` take **one** argument, and it must be an object such as a `Str`, not
-an `int` or a `bool`. To print a number, convert it to a string with `Str(...)` and join the
-pieces with `+`:
+`io::print` and `io::println` take **one** argument of any type that can show itself as
+text: a `Str`, a number, a `bool`, a `char`, an object, and the tuples, structs and
+optionals of later chapters. To print several pieces on one line, convert the numbers to
+strings with `Str(...)` and join the pieces with `+`:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   n = 6;
-  println("n squared is " + Str(n * n));
-  print("no newline, ");
-  println("then a newline");
+  io::println("n squared is " + Str(n * n));
+  io::print("no newline, ");
+  io::println("then a newline");
   return 0;
 }
 ```
@@ -176,8 +187,9 @@ n squared is 36
 no newline, then a newline
 ```
 
-Passing an `int` directly is a compile-time error (`argument 1 of 'println' has type 'int',
-expected 'Obj'`). `printerr` and `printerrln` work the same way but write to standard error.
+`io::println(n)` prints a number on its own; joining it to a string needs `Str(n)`, since
+`+` joins two strings. `io::printerr` and `io::printerrln` work the same
+way but write to standard error.
 [Strings and conversions](03-strings-and-conversions.md) covers `Str(...)` and the other
 conversions.
 
@@ -188,10 +200,12 @@ result is a `float`; otherwise it is an `int`. Integer division truncates toward
 `%` takes the sign of the left operand:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
-  println(Str(7 / 2) + " " + Str(-7 / 2) + " " + Str(7 % 3) + " " + Str(-7 % 3));
-  println(Str(7.0 / 2) + " " + Str(2 + 3 * 4) + " " + Str((2 + 3) * 4));
-  println(Str(7.5 % 2.0));
+  io::println(Str(7 / 2) + " " + Str(-7 / 2) + " " + Str(7 % 3) + " " + Str(-7 % 3));
+  io::println(Str(7.0 / 2) + " " + Str(2 + 3 * 4) + " " + Str((2 + 3) * 4));
+  io::println(Str(7.5 % 2.0));
   return 0;
 }
 ```
@@ -215,11 +229,13 @@ Comparisons (`<`, `>`, `<=`, `>=`, `==`, `!=`) produce a `bool`. They do not cha
 `||` and `!`; `&&` and `||` short-circuit, evaluating their right side only when it is needed.
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   x = 7;
   inRange = 1 < x && x < 10;
   odd = x % 2 != 0;
-  println(Str(inRange) + " " + Str(odd) + " " + Str(!odd || x > 100));
+  io::println(Str(inRange) + " " + Str(odd) + " " + Str(!odd || x > 100));
   return 0;
 }
 ```
@@ -236,10 +252,12 @@ True True False
 otherwise. It chains naturally:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   score = 84;
   grade = if score >= 90 then "A" else if score >= 80 then "B" else "C";
-  println("grade: " + grade);
+  io::println("grade: " + grade);
   return 0;
 }
 ```
@@ -262,14 +280,16 @@ The condition needs no parentheses, must be a `bool`, and the branches are alway
 braces. Further conditions are tested with `elif`:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   temperature = 23;
   if temperature > 30 {
-    println("hot");
+    io::println("hot");
   } elif temperature > 15 {
-    println("pleasant");
+    io::println("pleasant");
   } else {
-    println("cold");
+    io::println("cold");
   }
   return 0;
 }
@@ -287,6 +307,8 @@ pleasant
 `break` leaves the innermost loop and `continue` starts its next iteration:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   i = 0;
   sum = 0;
@@ -296,7 +318,7 @@ fn main() -> int {
     if i > 9 { break; }
     sum = sum + i;
   }
-  println("sum of odd numbers below 10: " + Str(sum));
+  io::println("sum of odd numbers below 10: " + Str(sum));
   return 0;
 }
 ```
@@ -316,6 +338,8 @@ A function declares its parameters with their types, and its return type after `
 function without `->` returns nothing (`void`), and may use a bare `return;` to leave early:
 
 ```pkn
+import ::io;
+
 fn add(a: int, b: int) -> int {
   return a + b;
 }
@@ -324,13 +348,13 @@ fn greet(name: Str) {
   if name == "" {
     return;
   }
-  println("Hello, " + name + "!");
+  io::println("Hello, " + name + "!");
 }
 
 fn main() -> int {
   greet("Grace");
   greet("");
-  println(Str(add(2, 3)));
+  io::println(Str(add(2, 3)));
   return 0;
 }
 ```
@@ -347,9 +371,9 @@ Some rules to know:
 - The compiler checks that every path through a function with a return type ends in a
   `return` with a value of that type.
 - Functions can be declared in any order, and they can be recursive.
-- There is no overloading: each function name is used once. Names of the built-in functions
-  (`print`, `println`, `printerr`, `printerrln`, `open`) and built-in types (`Str`, `Obj`,
-  `File` and others) are reserved.
+- There is no overloading: each function name is used once. The names of the built-in types
+  (`int`, `float`, `bool`, `char`, `Str`, `Obj` and others) are reserved. Names from the
+  standard library, such as `print` or `open`, are not: they live in their module (`io::print`).
 - Arguments are passed by value for `int`, `float`, `bool`, `char` and arrays (the function
   gets a copy). Strings and objects are passed by reference: a function receives the same
   object as its caller (more in [Classes](04-classes.md) and [Memory](12-memory.md)).
@@ -361,6 +385,8 @@ assign to it, nor change the object, string or array it holds, and it can only b
 to other `view` parameters. The call looks the same either way:
 
 ```pkn
+import ::io;
+
 fn addTax(price: inout float, rate: view float) {
   price = price + price * rate;
 }
@@ -368,7 +394,7 @@ fn addTax(price: inout float, rate: view float) {
 fn main() -> int {
   price = 20.0;
   addTax(price, 0.5);
-  println("price = " + Str(price));
+  io::println("price = " + Str(price));
   return 0;
 }
 ```
@@ -385,13 +411,15 @@ call. The full rules are in
 [the language reference](../language/02-functions-and-calling.md#parameter-modes-view-and-inout).
 
 ```pkn
+import ::io;
+
 fn fib(n: int) -> int {
   if n < 2 { return n; }
   return fib(n - 1) + fib(n - 2);
 }
 
 fn main() -> int {
-  println("fib(20) = " + Str(fib(20)));
+  io::println("fib(20) = " + Str(fib(20)));
   return 0;
 }
 ```
@@ -416,6 +444,8 @@ value just by its name, and `fn(...) -> ... { ... }` without a name writes one i
 (a *lambda*):
 
 ```pkn
+import ::io;
+
 fn double(x: int) -> int { return x * 2; }
 
 fn apply(f: (int) -> int, x: int) -> int {
@@ -425,9 +455,9 @@ fn apply(f: (int) -> int, x: int) -> int {
 fn main() -> int {
   step = 3;
   addStep = fn(x: int) -> int { return x + step; };   // uses `step` from main
-  println(Str(apply(double, 5)) + " " + Str(apply(addStep, 5)));
+  io::println(Str(apply(double, 5)) + " " + Str(apply(addStep, 5)));
   step = 100;
-  println(Str(addStep(5)));                           // still 8: the lambda copied `step`
+  io::println(Str(addStep(5)));                           // still 8: the lambda copied `step`
   return 0;
 }
 ```
@@ -453,6 +483,8 @@ functions: `percent` computes how many tasks are done, as a percentage, and `pro
 draws it with a loop:
 
 ```pkn
+import ::io;
+
 // Percentage of `done` out of `total`, rounded down; 0 for an empty list.
 fn percent(done: int, total: int) -> int {
   if total == 0 { return 0; }
@@ -472,9 +504,9 @@ fn progressBar(done: int, total: int, width: int) -> Str {
 }
 
 fn main() -> int {
-  println(progressBar(0, 4, 10) + " " + Str(percent(0, 4)) + "%");
-  println(progressBar(3, 4, 10) + " " + Str(percent(3, 4)) + "%");
-  println(progressBar(4, 4, 10) + " " + Str(percent(4, 4)) + "%");
+  io::println(progressBar(0, 4, 10) + " " + Str(percent(0, 4)) + "%");
+  io::println(progressBar(3, 4, 10) + " " + Str(percent(3, 4)) + "%");
+  io::println(progressBar(4, 4, 10) + " " + Str(percent(4, 4)) + "%");
   return 0;
 }
 ```

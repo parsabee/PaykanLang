@@ -19,7 +19,7 @@ using namespace paykan::test;
 
 TEST(OptionalPrimitive, EveryPrimitiveSomeAndNone) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn si(o: int?) -> Str {
       match o { n: int { return "int " + Str<int>(n); } None { return "no int"; } }
     }
@@ -33,14 +33,14 @@ TEST(OptionalPrimitive, EveryPrimitiveSomeAndNone) {
       match o { c: char { return "char " + Str<char>(c); } None { return "no char"; } }
     }
     fn main() -> int {
-      println(si(42));   println(si(None));
-      println(sf(2.5));  println(sf(None));
-      println(sb(True)); println(sb(False)); println(sb(None));
-      println(sc('z'));  println(sc(None));
+      io::println(si(42));   io::println(si(None));
+      io::println(sf(2.5));  io::println(sf(None));
+      io::println(sb(True)); io::println(sb(False)); io::println(sb(None));
+      io::println(sc('z'));  io::println(sc(None));
       a: int? = 7;  f: float? = 1.25;  b: bool? = False;  c: char? = 'q';
-      println(a); println(f); println(b); println(c);
+      io::println(a); io::println(f); io::println(b); io::println(c);
       a = None; f = None; b = None; c = None;
-      println(a); println(f); println(b); println(c);
+      io::println(a); io::println(f); io::println(b); io::println(c);
       return 0;
     }
   )pkn");
@@ -53,16 +53,16 @@ TEST(OptionalPrimitive, EveryPrimitiveSomeAndNone) {
 
 TEST(OptionalPrimitive, IntPromotesIntoFloatOptional) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn show(o: float?) -> Str {
       match o { f: float { return Str<float>(f / 2.0); } None { return "-"; } }
     }
     fn main() -> int {
       f: float? = 3;
-      println(show(f));
-      println(show(5));
+      io::println(show(f));
+      io::println(show(5));
       f = 9;
-      println(show(f));
+      io::println(show(f));
       return 0;
     }
   )pkn");
@@ -73,23 +73,23 @@ TEST(OptionalPrimitive, IntPromotesIntoFloatOptional) {
 
 TEST(OptionalPrimitive, ExtremeValuesRoundTrip) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn back(o: int?) -> int { match o { n: int { return n; } None { return 0; } } }
     fn backf(o: float?) -> float { match o { f: float { return f; } None { return 0.0; } } }
     fn backc(o: char?) -> char { match o { c: char { return c; } None { return 'a'; } } }
     fn main() -> int {
       big: int = 9223372036854775807;
       small: int = -9223372036854775807 - 1;
-      println(Str<int>(back(big)));
-      println(Str<int>(back(small)));
-      println(Str<bool>(back(small) == small));
+      io::println(Str<int>(back(big)));
+      io::println(Str<int>(back(small)));
+      io::println(Str<bool>(back(small) == small));
       nan: float = 0.0 / 0.0;
       inf: float = 1.0 / 0.0;
-      println(Str<float>(backf(nan)));
-      println(Str<float>(backf(inf)));
-      println(Str<float>(backf(-inf)));
-      println(Str<float>(backf(-0.0)));
-      println(Str<int>(Str<char>(backc('~')).len()));
+      io::println(Str<float>(backf(nan)));
+      io::println(Str<float>(backf(inf)));
+      io::println(Str<float>(backf(-inf)));
+      io::println(Str<float>(backf(-0.0)));
+      io::println(Str<int>(Str<char>(backc('~')).len()));
       return 0;
     }
   )pkn");
@@ -101,18 +101,18 @@ TEST(OptionalPrimitive, ExtremeValuesRoundTrip) {
 
 TEST(OptionalPrimitive, MatchBindingIsAPlainValue) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn main() -> int {
       o: int? = 10;
       match o {
         n: int {
           n = n + 5;                 // the binding is an ordinary int
           o = None;                  // the subject box stays alive for the arm
-          println(Str<int>(n));
+          io::println(Str<int>(n));
         }
-        None { println("none"); }
+        None { io::println("none"); }
       }
-      println(o);
+      io::println(o);
       total = 0;
       xs: int?[4] = [1, 2, 3, None];
       i = 0;
@@ -123,7 +123,7 @@ TEST(OptionalPrimitive, MatchBindingIsAPlainValue) {
         }
         i = i + 1;
       }
-      println(Str<int>(total));
+      io::println(Str<int>(total));
       return 0;
     }
   )pkn");
@@ -134,7 +134,7 @@ TEST(OptionalPrimitive, MatchBindingIsAPlainValue) {
 
 TEST(OptionalPrimitive, WildcardAndNoneArmsAndEarlyReturn) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn sign(o: int?) -> int {
       match o {
         n: int { if (n < 0) { return -1; } return 1; }
@@ -143,9 +143,9 @@ TEST(OptionalPrimitive, WildcardAndNoneArmsAndEarlyReturn) {
       return 0;
     }
     fn main() -> int {
-      println(Str<int>(sign(-4)));
-      println(Str<int>(sign(4)));
-      println(Str<int>(sign(None)));
+      io::println(Str<int>(sign(-4)));
+      io::println(Str<int>(sign(4)));
+      io::println(Str<int>(sign(None)));
       return 0;
     }
   )pkn");
@@ -158,25 +158,25 @@ TEST(OptionalPrimitive, WildcardAndNoneArmsAndEarlyReturn) {
 
 TEST(OptionalPrimitive, CompareAgainstNoneAndEachOther) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn main() -> int {
       a: int? = 5;  b: int? = 5;  c: int? = 6;  n: int? = None;  m: int? = None;
-      println(Str<bool>(a == None));
-      println(Str<bool>(None != a));
-      println(Str<bool>(n == None));
-      println(Str<bool>(a == b));
-      println(Str<bool>(a != c));
-      println(Str<bool>(a == n));
-      println(Str<bool>(n == m));
+      io::println(Str<bool>(a == None));
+      io::println(Str<bool>(None != a));
+      io::println(Str<bool>(n == None));
+      io::println(Str<bool>(a == b));
+      io::println(Str<bool>(a != c));
+      io::println(Str<bool>(a == n));
+      io::println(Str<bool>(n == m));
       t: bool? = True;  u: bool? = True;
-      println(Str<bool>(t == u));
+      io::println(Str<bool>(t == u));
       x: char? = 'a';  y: char? = 'b';
-      println(Str<bool>(x == y));
+      io::println(Str<bool>(x == y));
       z: float? = -0.0;  w: float? = 0.0;
-      println(Str<bool>(z == w));
+      io::println(Str<bool>(z == w));
       nan: float = 0.0 / 0.0;
       p: float? = nan;  q: float? = nan;
-      println(Str<bool>(p == q));
+      io::println(Str<bool>(p == q));
       return 0;
     }
   )pkn");
@@ -190,7 +190,7 @@ TEST(OptionalPrimitive, CompareAgainstNoneAndEachOther) {
 
 TEST(OptionalPrimitive, ParamsAndReturns) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn half(n: int) -> int? {
       if (n % 2 != 0) { return None; }
       return n / 2;
@@ -198,14 +198,14 @@ TEST(OptionalPrimitive, ParamsAndReturns) {
     fn orZero(o: int?) -> int { match o { n: int { return n; } None { return 0; } } }
     fn pass(o: int?) -> int? { return o; }
     fn main() -> int {
-      println(half(10));
-      println(half(7));
-      println(Str<int>(orZero(pass(half(8)))));
-      println(Str<int>(orZero(pass(None))));
+      io::println(half(10));
+      io::println(half(7));
+      io::println(Str<int>(orZero(pass(half(8)))));
+      io::println(Str<int>(orZero(pass(None))));
       i = 0;
       sum = 0;
       while (i < 20) { sum = sum + orZero(half(i)); i = i + 1; }
-      println(Str<int>(sum));
+      io::println(Str<int>(sum));
       return 0;
     }
   )pkn");
@@ -216,7 +216,7 @@ TEST(OptionalPrimitive, ParamsAndReturns) {
 
 TEST(OptionalPrimitive, FieldsStartAsNoneAndAreReleased) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     class Reading {
       value: float?;
       ok: bool?;
@@ -236,12 +236,12 @@ TEST(OptionalPrimitive, FieldsStartAsNoneAndAreReleased) {
     }
     fn main() -> int {
       r = Reading();
-      println(r.value); println(r.ok); println(r.tag); println(r.count);
+      io::println(r.value); io::println(r.ok); io::println(r.tag); io::println(r.count);
       r.value = 2.5; r.ok = True; r.tag = 'k';
       r.bump(); r.bump(); r.bump();
-      println(r.value); println(r.ok); println(r.tag); println(r.get());
+      io::println(r.value); io::println(r.ok); io::println(r.tag); io::println(r.get());
       r.count = None;
-      println(r.get());
+      io::println(r.get());
       r.count = 4;
       return 0;
     }
@@ -256,7 +256,7 @@ TEST(OptionalPrimitive, FieldsStartAsNoneAndAreReleased) {
 // their own arrays without disturbing their neighbours.
 TEST(OptionalPrimitive, SmallOptionalsKeepTheirNeighbours) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     class Mixed {
       a: bool?;
       n: int;
@@ -269,10 +269,10 @@ TEST(OptionalPrimitive, SmallOptionalsKeepTheirNeighbours) {
     }
     fn main() -> int {
       m = Mixed(True, -1, 'x', None, 2.5, 'y', "str", 7);
-      println(m.a); println(Str(m.n)); println(m.b); println(m.c);
-      println(m.f); println(m.d); println(m.s); println(m.e);
+      io::println(m.a); io::println(Str(m.n)); io::println(m.b); io::println(m.c);
+      io::println(m.f); io::println(m.d); io::println(m.s); io::println(m.e);
       m.c = False; m.b = None; m.n = 9;
-      println(m.a); println(m.b); println(m.c); println(m.d); println(Str(m.n));
+      io::println(m.a); io::println(m.b); io::println(m.c); io::println(m.d); io::println(Str(m.n));
       bs: bool?[8] = [True; 8];
       cs: char?[8] = ['a'; 8];
       i: int = 0;
@@ -281,9 +281,9 @@ TEST(OptionalPrimitive, SmallOptionalsKeepTheirNeighbours) {
         else { bs[i] = i % 2 == 0; cs[i] = None; }
         i = i + 1;
       }
-      println(Str(bs.len()) + " " + Str(cs.len()));
-      println(bs[0]); println(bs[1]); println(bs[2]); println(cs[4]);
-      println(cs[5]); println(bs[7]); println(cs[7]);
+      io::println(Str(bs.len()) + " " + Str(cs.len()));
+      io::println(bs[0]); io::println(bs[1]); io::println(bs[2]); io::println(cs[4]);
+      io::println(cs[5]); io::println(bs[7]); io::println(cs[7]);
       return 0;
     }
   )pkn");
@@ -296,18 +296,18 @@ TEST(OptionalPrimitive, SmallOptionalsKeepTheirNeighbours) {
 
 TEST(OptionalPrimitive, ArraysOfOptionalPrimitives) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn main() -> int {
       xs: int?[4] = [1, 2, None, 4];
       xs[1] = None;
       xs[2] = 30;
       i = 0;
-      while (i < xs.len()) { println(xs[i]); i = i + 1; }
+      while (i < xs.len()) { io::println(xs[i]); i = i + 1; }
       last = xs[xs.len() - 1];
-      println(last);
+      io::println(last);
       fs: float?[2] = [1, None];
-      println(fs[0]);
-      println(fs[1]);
+      io::println(fs[0]);
+      io::println(fs[1]);
       return 0;
     }
   )pkn");
@@ -318,7 +318,7 @@ TEST(OptionalPrimitive, ArraysOfOptionalPrimitives) {
 
 TEST(OptionalPrimitive, TupleElements) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn find(xs: view int[], key: int) -> (int?, Str) {
       i = 0;
       while (i < xs.len()) {
@@ -332,10 +332,10 @@ TEST(OptionalPrimitive, TupleElements) {
       xs: int[3] = [4, 5, 6];
       a = find(xs, 6);
       b = find(xs, 9);
-      println(a.0); println(a.1);
-      println(b.0); println(b.1);
+      io::println(a.0); io::println(a.1);
+      io::println(b.0); io::println(b.1);
       idx, msg = find(xs, 4);
-      match idx { n: int { println(Str<int>(n) + " " + msg); } None { } }
+      match idx { n: int { io::println(Str<int>(n) + " " + msg); } None { } }
       return 0;
     }
   )pkn");
@@ -346,24 +346,24 @@ TEST(OptionalPrimitive, TupleElements) {
 
 TEST(OptionalPrimitive, TernaryCopyAndReassignment) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn main() -> int {
       i = 0;
       while (i < 4) {
         e = if i % 2 == 0 then i else None;     // int?
-        println(e);
+        io::println(e);
         i = i + 1;
       }
       a: int? = 1;
       b = if a == None then 5 else a;           // int?: mixes int and int?
-      println(b);
+      io::println(b);
       m = a;
-      println(m);
+      io::println(m);
       x: int? = 1;
       y: int? = x;                              // a copy
       x = 2;
-      println(y);
-      println(x);
+      io::println(y);
+      io::println(x);
       return 0;
     }
   )pkn");
@@ -376,7 +376,7 @@ TEST(OptionalPrimitive, TernaryCopyAndReassignment) {
 // through (None included); a `view` parameter and an override's.
 TEST(OptionalPrimitive, InoutAndViewOptionals) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn bump(o: inout int?) {
       match o { n: int { o = n + 1; } None { o = 0; } }
     }
@@ -403,19 +403,19 @@ TEST(OptionalPrimitive, InoutAndViewOptionals) {
     fn main() -> int {
       x: int? = None;
       bump(x); bump(x);
-      println(show(x));
+      io::println(show(x));
       b = Box2();
       bump(b.n);
-      println(show(b.n));
+      io::println(show(b.n));
       y: inout = b.n;
       bump(y);
-      println(b.n);
+      io::println(b.n);
       b.f = 1.5;
       clear(b.f);
-      println(b.f);
+      io::println(b.f);
       o: Base = Derived();
-      println(o.pick(True));
-      println(o.pick(False));
+      io::println(o.pick(True));
+      io::println(o.pick(False));
       return 0;
     }
   )pkn");
@@ -428,7 +428,7 @@ TEST(OptionalPrimitive, InoutAndViewOptionals) {
 
 TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     class Cell<T> {
       v: T;
       fn get() -> T { return self.v; }
@@ -450,18 +450,18 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
     fn orElse<T>(o: T?, d: T) -> T { match o { v: T { return v; } None { return d; } } }
     fn main() -> int {
       c = Cell<int?>(None);
-      println(c.get());
+      io::println(c.get());
       c.v = 8;
-      println(c.get());
+      io::println(c.get());
       s = Slot<float>();
-      println(s.take());
+      io::println(s.take());
       s.put(2);
-      println(s.take());
-      println(s.take());
-      println(wrap(5));
-      println(Str<int>(orElse(wrap(6), 0)));
+      io::println(s.take());
+      io::println(s.take());
+      io::println(wrap(5));
+      io::println(Str<int>(orElse(wrap(6), 0)));
       none: char? = None;
-      println(Str<char>(orElse(none, '?')));
+      io::println(Str<char>(orElse(none, '?')));
       return 0;
     }
   )pkn");
@@ -476,7 +476,7 @@ TEST(OptionalPrimitive, GenericArgumentsAndOptionalOfTypeParameter) {
 // is kept in place, and nothing is allocated per element.
 TEST(OptionalPrimitive, ArraysHoldOptionalsInline) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn main() -> int {
       xs: int?[9] = [0; 9];
       i = 0;
@@ -491,16 +491,16 @@ TEST(OptionalPrimitive, ArraysHoldOptionalsInline) {
         match xs[i] { n: int { sum = sum + n; } None { nones = nones + 1; } }
         i = i + 1;
       }
-      println(Str<int>(sum) + " " + Str<int>(nones));
-      println(xs[0]); println(xs[1]);
+      io::println(Str<int>(sum) + " " + Str<int>(nones));
+      io::println(xs[0]); io::println(xs[1]);
       cs: char?[3] = ['a', None, 'c'];
       bs: bool?[3] = [True, None, False];
       fs: float?[3] = [1, None, -0.5];
       j = 0;
-      while (j < 3) { print(cs[j]); print(" "); print(bs[j]); print(" "); println(fs[j]); j = j + 1; }
+      while (j < 3) { io::print(cs[j]); io::print(" "); io::print(bs[j]); io::print(" "); io::println(fs[j]); j = j + 1; }
       cs[1] = 'b';
-      println(cs[1]);
-      println(Str<bool>(cs[2] == cs[0]));
+      io::println(cs[1]);
+      io::println(Str<bool>(cs[2] == cs[0]));
       return 0;
     }
   )pkn");
@@ -514,7 +514,7 @@ TEST(OptionalPrimitive, ArraysHoldOptionalsInline) {
 // its payload: printing, equality and the elements after it are unaffected.
 TEST(OptionalPrimitive, TuplesHoldOptionalsInline) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     fn pair(n: int) -> (int?, Str, float?) {
       if (n < 0) { return (None, "neg", None); }
       return (n, "pos", n * 0.5);
@@ -522,16 +522,16 @@ TEST(OptionalPrimitive, TuplesHoldOptionalsInline) {
     fn main() -> int {
       a = pair(3);
       b = pair(-1);
-      println(a); println(b);
-      println(a.1 + " " + b.1);
-      println(a.2); println(b.0);
-      println(Str<bool>(a == pair(3)));
-      println(Str<bool>(a == b));
-      println(Str<bool>(b == pair(-2)));
+      io::println(a); io::println(b);
+      io::println(a.1 + " " + b.1);
+      io::println(a.2); io::println(b.0);
+      io::println(Str<bool>(a == pair(3)));
+      io::println(Str<bool>(a == b));
+      io::println(Str<bool>(b == pair(-2)));
       n, s, f = pair(4);
-      println(n); println(s); println(f);
+      io::println(n); io::println(s); io::println(f);
       t: (char?, bool?) = ('x', None);
-      println(t);
+      io::println(t);
       return 0;
     }
   )pkn");
@@ -545,7 +545,7 @@ TEST(OptionalPrimitive, TuplesHoldOptionalsInline) {
 // array of `T?` in a template.
 TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
   LeakGuard g;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     class Stack<T> {
       items: T[8];
       n: int;
@@ -584,10 +584,10 @@ TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
       while (going) {
         match st.pop() { n: int { total = total + n; } None { going = False; } }
       }
-      println(Str<int>(total));
+      io::println(Str<int>(total));
       sl = Slots<float>();
       sl.put(1, 2.5);
-      println(sl.get(0)); println(sl.get(1));
+      io::println(sl.get(0)); io::println(sl.get(1));
       return 0;
     }
   )pkn");

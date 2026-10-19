@@ -32,7 +32,7 @@ std::string writeTempFile(const std::filesystem::path &dir,
 
 TEST(FunctionType, LambdasNamedFunctionsAndCalls) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn square(x: int) -> int { return x * x; }
     fn apply(f: (int) -> int, x: int) -> int { return f(x); }
     fn twice(f: (int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(f(x)); }; }
@@ -46,14 +46,14 @@ TEST(FunctionType, LambdasNamedFunctionsAndCalls) {
       h = twice(add);
       k: (int) -> int = fn(x: int) -> int { return x; };
       fs: ((int) -> int)[2] = [square, add];
-      b = Button("ok", fn(l: Str) { println(l + s); });
+      b = Button("ok", fn(l: Str) { io::println(l + s); });
       b.onClick("clicked ");
       o = Op("add", fn(a: int, b: int) -> int { return a + b; });
       v = fn(x: view Str, c: inout int) -> bool { c = c + x.len(); return c > 3; };
       m = 0;
       ok = v("abc", m);
       t: ((int) -> int, Str) = (g, "t");
-      println(Str(apply(g, 3)) + " " + Str(h(1)) + " " + Str(fs[1](2)) + " " +
+      io::println(Str(apply(g, 3)) + " " + Str(h(1)) + " " + Str(fs[1](2)) + " " +
               Str(o.run(1, 2)) + " " + Str(t.0(4)) + " " + Str(m) + Str(ok));
       n = 20;                                      // the capture is a copy
       return add(1) + k(2);
@@ -67,7 +67,7 @@ TEST(FunctionType, LambdasNamedFunctionsAndCalls) {
 
 TEST(FunctionType, CapturesAreCopiedAndReleased) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node { n: int; view fn toString() -> Str { return "N" + Str(self.n); } }
     struct P { x: int; y: int; }
     class Counter {
@@ -101,18 +101,18 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
       get = c.make();                  // captures self: the same object
       add = c.adder();
       add(10);
-      println(Str(get()) + " " + Str(c.n));
+      io::println(Str(get()) + " " + Str(c.n));
       fs = makeAdders(3);
-      println(Str(fs[0](1)) + " " + Str(fs[1](2)));
+      io::println(Str(fs[0](1)) + " " + Str(fs[1](2)));
       h = compose(fs[0], fs[1]);
-      println(Str(h(1)) + " " + Str(mapAll([1, 2, 3], h)));
+      io::println(Str(h(1)) + " " + Str(mapAll([1, 2, 3], h)));
       d = describe(Node(7));           // a struct, a tuple, an array and an object, captured
-      println(d(">"));
+      io::println(d(">"));
       opt: (() -> int)? = None;
       opt = get;
       match opt {
-        f: () -> int { println("some " + Str(f())); }
-        None { println("none"); }
+        f: () -> int { io::println("some " + Str(f())); }
+        None { io::println("none"); }
       }
       return 0;
     }
@@ -128,7 +128,7 @@ TEST(FunctionType, ValuesHeldInPlaceCrossTheCall) {
   // and `inout`) and results of function values, and objects by value and
   // `view`: each passed and returned as a function's are.
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     struct P { x: int; name: Str; }
     class Node { n: int; }
     fn main() -> int {
@@ -144,7 +144,7 @@ TEST(FunctionType, ValuesHeldInPlaceCrossTheCall) {
       t = tup((7, "seven"));
       xs = arr([1, 2], ["x", "y", "z"]);
       nd = objs(Node(1), Node(2));
-      println(Str(byView(p)) + " " + Str(q.x) + " " + q.name + " " + t.0 + Str(t.1) + " " +
+      io::println(Str(byView(p)) + " " + Str(q.x) + " " + q.name + " " + t.0 + Str(t.1) + " " +
               Str(xs[0]) + Str(xs[1]) + " " + Str(nd.n));
       return 0;
     }
@@ -161,7 +161,7 @@ TEST(FunctionType, CallsOfValuesWithReferenceAndMemoryResults) {
   // or a value held in memory; a named function in a variable without an
   // annotation, called and copied.
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node { v: int; view fn get() -> int { return self.v; } }
     struct P { x: int; name: Str; }
     fn sq(x: int) -> int { return x * x; }
@@ -172,14 +172,14 @@ TEST(FunctionType, CallsOfValuesWithReferenceAndMemoryResults) {
     fn main() -> int {
       fs: (() -> Str)[1] = [mkS];
       a = fs[0]();
-      println(fs[0]());
-      println(fs[0]() + "!" + a);
+      io::println(fs[0]());
+      io::println(fs[0]() + "!" + a);
       ns: ((int) -> Node)[1] = [mkNode];
-      println(Str(ns[0](3).get()) + " " + Str(ns[0](4).v));
+      io::println(Str(ns[0](3).get()) + " " + Str(ns[0](4).v));
       ps: ((int) -> P)[1] = [mkP];
       p = ps[0](7);
       t: ((int) -> Str, int) = (fn(x: int) -> Str { return "t" + Str(x); }, 0);
-      println(p.name + " " + Str(p.x) + " " + t.0(8) + " " + Str(mkF()(5)) + " " + ps[0](1).name);
+      io::println(p.name + " " + Str(p.x) + " " + t.0(8) + " " + Str(mkF()(5)) + " " + ps[0](1).name);
       g = sq;
       h = g;
       g = fn(x: int) -> int { return x + 1; };
@@ -196,7 +196,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
   // An argument that rebinds the variable or the field holding the closure
   // being called: the call keeps its own reference to the closure.
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class O { cb: (int) -> int; n: int; }
     fn reset(o: O) -> int {
       o.cb = fn(x: int) -> int { return x * 100; };
@@ -215,7 +215,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
       f = fn(x: int) -> int { return x + k; };
       c = f(swap(f));                  // the closure held before, with 10
       d = (f)(swap(f));                // x - 1, with 10
-      println(Str(a) + " " + Str(b) + " " + Str(c) + " " + Str(d));
+      io::println(Str(a) + " " + Str(b) + " " + Str(c) + " " + Str(d));
       return 0;
     }
   )");
@@ -227,7 +227,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
 
 TEST(FunctionType, EqualWhenTheCodeAndTheClosureAre) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Box<T> { v: T; view fn get() -> view T { return self.v; } fn set(v: T) { self.v = v; } }
     impl Box<T> { fn __init__(v: T) { self.v = v; } }
     fn main() -> int {
@@ -239,7 +239,7 @@ TEST(FunctionType, EqualWhenTheCodeAndTheClosureAre) {
       k = b.get() == h;                // a view of a function value: compared, not stored
       fs: ((int) -> int)[2] = [f, h];
       fs[0] = fs[1];
-      println(Str(f == g) + " " + Str(f == h) + " " + Str(k) + " " + Str(fs[0] == h) + " " + Str(f != g));
+      io::println(Str(f == g) + " " + Str(f == h) + " " + Str(k) + " " + Str(fs[0] == h) + " " + Str(f != g));
       i = 0;
       total = 0;
       while i < 3 {
@@ -261,7 +261,7 @@ TEST(FunctionType, FunctionValuesAreValues) {
   // when both are the same, copied with its closure shared, a ValueType,
   // and optional with None as no code.
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn square(x: int) -> int { return x * x; }
     fn cube(x: int) -> int { return x * x * x; }
     fn same() -> (int) -> int { return fn(x: int) -> int { return x + 1; }; }
@@ -277,29 +277,29 @@ TEST(FunctionType, FunctionValuesAreValues) {
     fn main() -> int {
       a = square;
       b = square;
-      println(Str(a == b) + " " + Str(a == cube) + " " + Str(same() == same()) +
+      io::println(Str(a == b) + " " + Str(a == cube) + " " + Str(same() == same()) +
               " " + Str(adder(1) == adder(1)));
       k = keep(square);
       p = Pair(adder(2), None);
       q = p;
-      println(Str(k(3)) + " " + Str(q.f(3)) + " " + Str(p.g == None) + " " +
+      io::println(Str(k(3)) + " " + Str(q.f(3)) + " " + Str(p.g == None) + " " +
               Str(q.f == p.f));
       h = Holder(None);
       e = h.cb == None;
       h.cb = adder(10);
-      println(Str(e) + " " + Str(h.cb != None));
+      io::println(Str(e) + " " + Str(h.cb != None));
       match h.cb {
-        f: (int) -> int { h.cb = None; println(Str(f(1)) + " " + Str(h.cb == None)); }
-        None { println("none"); }
+        f: (int) -> int { h.cb = None; io::println(Str(f(1)) + " " + Str(h.cb == None)); }
+        None { io::println("none"); }
       }
-      match pick(False) { f: (int) -> int { println("some"); } None { println("none"); } }
-      match pick(True) { _ { println("any"); } }
-      match pick(True) { f: (int) -> int { println(Str(f(4))); } _ { } }
+      match pick(False) { f: (int) -> int { io::println("some"); } None { io::println("none"); } }
+      match pick(True) { _ { io::println("any"); } }
+      match pick(True) { f: (int) -> int { io::println(Str(f(4))); } _ { } }
       run = Runner(adder(10));
-      println(Str(run.run(clear(run))) + " " + Str(run.run(2)));
+      io::println(Str(run.run(clear(run))) + " " + Str(run.run(2)));
       v = square;
       swapIn(v);
-      println(Str(v(2)) + " " + Str(callView(v)) + " " + Str(v == cube));
+      io::println(Str(v(2)) + " " + Str(callView(v)) + " " + Str(v == cube));
       fs: ((int) -> int)[3] = [square, adder(1), cube];
       t = (fs[1], 7);
       return t.0(t.1);
@@ -340,7 +340,7 @@ fn applyAll(xs: view int[], f: (int) -> int) -> int {
   return t;
 }
 )");
-  auto mainPath = writeTempFile(tmpDir, "main.pkn", R"(
+  auto mainPath = writeTempFile(tmpDir, "main.pkn", R"(import ::io;
 import lib::ops;
 fn plus(a: int, b: int) -> int { return a + b; }
 fn main() -> int {
@@ -350,7 +350,7 @@ fn main() -> int {
   c = ops::makeCounter(41);
   o = ops::Op("plus", plus);
   k: (int) -> int = ops::twice(fn(x: int) -> int { return x + 1; });
-  println(Str(t(3)) + " " + b.click() + " " + Str(c()) + " " + Str(o.run(2, 3)) + " " + Str(k(0)) + " " + Str(ops::applyAll([1, 2], sq)));
+  io::println(Str(t(3)) + " " + b.click() + " " + Str(c()) + " " + Str(o.run(2, 3)) + " " + Str(k(0)) + " " + Str(ops::applyAll([1, 2], sq)));
   return 0;
 }
 )");

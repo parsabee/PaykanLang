@@ -1,5 +1,6 @@
 // ::collections under many random operations: a LinkedList and a HashMap
 // checked against a List kept in step with them.
+import ::io;
 import ::collections;
 
 class Rng {
@@ -13,12 +14,17 @@ class Rng {
   }
 }
 
-fn same(l: view collections::LinkedList<int>, model: view collections::List<int>) -> bool {
+fn same(l: view collections::LinkedList<int>,
+        model: view collections::List<int>) -> bool {
   xs = l.toList();
-  if xs.len() != model.len() { return False; }
+  if xs.len() != model.len() {
+    return False;
+  }
   i: unsigned = 0;
   while i < xs.len() {
-    if xs.get(i) != model.get(i) { return False; }
+    if xs.get(i) != model.get(i) {
+      return False;
+    }
     i = i + 1;
   }
   return True;
@@ -40,16 +46,25 @@ fn main() -> int {
       l.pushBack(v);
       model.push(v);
     } elif op == 3 && !model.isEmpty() {
-      if l.popFront() != model.removeAt(0) { ok = False; }
+      if l.popFront() != model.removeAt(0) {
+        ok = False;
+      }
     } elif op == 4 && !model.isEmpty() {
-      if l.popBack() != model.pop() { ok = False; }
+      if l.popBack() != model.pop() {
+        ok = False;
+      }
     } elif op == 5 {
-      if l.remove(v) != model.remove(v) { ok = False; }
+      if l.remove(v) != model.remove(v) {
+        ok = False;
+      }
     }
-    if step % 100 == 0 && !same(l, model) { ok = False; }
+    if step % 100 == 0 && !same(l, model) {
+      ok = False;
+    }
     step = step + 1;
   }
-  println("linked list " + Str(ok && same(l, model)) + " len " + Str(l.len()));
+  io::println("linked list " + Str(ok && same(l, model)) + " len "
+      + Str(l.len()));
 
   m = collections::HashMap<int, int>();
   keys = collections::List<int>();
@@ -61,12 +76,17 @@ fn main() -> int {
     found: bool = False;
     at: unsigned = 0;
     match keys.indexOf(k) {
-      i: unsigned { found = True; at = i; }
+      i: unsigned {
+        found = True;
+        at = i;
+      }
       None { }
     }
     if rng.next(3) == 0 {
       removed: bool = m.remove(k);
-      if removed != found { ok = False; }
+      if removed != found {
+        ok = False;
+      }
       if found {
         keys.removeAt(at);
         vals.removeAt(at);
@@ -74,8 +94,9 @@ fn main() -> int {
     } else {
       added: bool = m.put(k, step);
       if added != !found { ok = False; }
-      if found { vals.set(at, step); }
-      else {
+      if found {
+        vals.set(at, step);
+      } else {
         keys.push(k);
         vals.push(step);
       }
@@ -84,9 +105,12 @@ fn main() -> int {
   }
   i: unsigned = 0;
   while i < keys.len() {
-    if m.get(keys.get(i)) != vals.get(i) { ok = False; }
+    if m.get(keys.get(i)) != vals.get(i) {
+      ok = False;
+    }
     i = i + 1;
   }
-  println("hash map " + Str(ok && m.len() == keys.len()) + " len " + Str(m.len()));
+  io::println("hash map " + Str(ok && m.len() == keys.len()) + " len "
+      + Str(m.len()));
   return 0;
 }

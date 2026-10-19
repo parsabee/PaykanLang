@@ -1,16 +1,19 @@
 // ::math: the C library's functions through native declarations, and the
 // constants and classification written in Paykan.  Every value printed is
 // one that rounds the same way on every C library (Str prints %g).
+import ::io;
 import ::math;
 
-fn show(name: Str, v: float) { println(name + " " + Str(v)); }
+fn show(name: Str, v: float) {
+  io::println(name + " " + Str(v));
+}
 
 fn main() -> int {
   show("pi", math::pi());
   show("e", math::e());
   show("inf", math::inf());
   show("-inf", -math::inf());
-  println("nan " + Str(math::isNaN(math::nan())));
+  io::println("nan " + Str(math::isNaN(math::nan())));
 
   show("sqrt", math::sqrt(2.0));
   show("cbrt", math::cbrt(-27.0));
@@ -59,9 +62,10 @@ fn main() -> int {
   show("lgamma", math::lgamma(10.0));
 
   // Domain errors and overflow are NaN and infinities, never a panic.
-  println(Str(math::isNaN(math::sqrt(-1.0))) + " " + Str(math::isNaN(math::log(-1.0))));
-  println(Str(math::isInf(math::exp(1000.0))) + " " + Str(math::log(0.0)));
-  println(Str(math::isFinite(1.0)) + " " + Str(math::isFinite(math::inf()))
-          + " " + Str(math::isFinite(math::nan())) + " " + Str(math::isInf(1e308)));
+  io::println(Str(math::isNaN(math::sqrt(-1.0))) + " "
+      + Str(math::isNaN(math::log(-1.0))));
+  io::println(Str(math::isInf(math::exp(1000.0))) + " " + Str(math::log(0.0)));
+  io::println(Str(math::isFinite(1.0)) + " " + Str(math::isFinite(math::inf()))
+      + " " + Str(math::isFinite(math::nan())) + " " + Str(math::isInf(1e308)));
   return 0;
 }

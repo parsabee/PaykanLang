@@ -3,7 +3,7 @@
 class Base {}
 
 impl Base {
-  fn __init__() {}
+  fn __init__() { }
 }
 
 class Derived : Base {

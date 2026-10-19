@@ -387,6 +387,12 @@ Type *ASTCloner::cloneType(Type *ty) {
   }
   if (auto *ot = dyn_cast<OptionalType>(ty)) {
     Type *inner = cloneType(ot->getInnerType());
+    // `T?` of a type argument that is an optional already is that optional:
+    // a template's `T?` adds a None only where T has none (a written `X??`
+    // is still an error).
+    if (auto *param = dyn_cast<ClassType>(ot->getInnerType());
+        param && Subst.count(param->getName()) && isa<OptionalType>(inner))
+      return inner;
     if (inner == ot->getInnerType() && !Foreign)
       return ty;
     return Ctx.make<OptionalType>(ot->getLocation(), inner);

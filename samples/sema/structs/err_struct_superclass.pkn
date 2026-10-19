@@ -1,4 +1,10 @@
 // ERROR: a struct has no superclass: 'struct X { ... }' (a struct is a value, not an object; use a class to inherit)
-struct Base { n: int; }
-struct X : Base { m: int; }
-fn main() -> int { return 0; }
+struct Base {
+  n: int;
+}
+struct X : Base {
+  m: int;
+}
+fn main() -> int {
+  return 0;
+}

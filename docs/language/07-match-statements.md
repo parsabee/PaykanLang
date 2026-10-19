@@ -5,7 +5,7 @@ first arm that applies. Depending on the subject's type, `match` operates in one
 
 | Subject type | Mode | Arms compare against |
 |--------------|------|----------------------|
-| A class type (`Obj`, `File`, a user class, …) | **type mode** | the **runtime class** of the object |
+| A class type (`Obj`, a user class, `io::File`, …) | **type mode** | the **runtime class** of the object |
 | An `enum` | **variant mode** | the enum's **variants** |
 | A builtin (`int`, `float`, `bool`, `char`, `Str`, a sized numeric type) | **value mode** | **literal** values |
 | An optional `T?` | **optional mode** | **present** (`T` arm) vs **absent** (`None` arm) |
@@ -44,10 +44,10 @@ static type such as `Obj` or a base class.
 ```pkn
 a: Animal = Dog();
 match a {
-  Dog  { println("a dog"); }
-  Cat  { println("a cat"); }
-  Bird { println("a bird"); }
-  _    { println("some other animal"); }
+  Dog  { io::println("a dog"); }
+  Cat  { io::println("a cat"); }
+  Bird { io::println("a bird"); }
+  _    { io::println("some other animal"); }
 }
 ```
 
@@ -66,9 +66,9 @@ impl Labrador { fn __init__() { __super__(); } }
 
 e: Animal = Labrador();
 match e {
-  Dog      { println("Dog"); }       // NOT taken — Labrador is not exactly Dog
-  Labrador { println("Labrador"); }  // taken
-  _        { println("other"); }
+  Dog      { io::println("Dog"); }       // NOT taken — Labrador is not exactly Dog
+  Labrador { io::println("Labrador"); }  // taken
+  _        { io::println("other"); }
 }
 ```
 
@@ -103,8 +103,8 @@ name has the arm's type, so you can access fields and call methods directly:
 x: Obj = Dog("Rex");
 match x {
   d: Dog {
-    println(d.name);          // d has type Dog here
-    println(d.bark());
+    io::println(d.name);          // d has type Dog here
+    io::println(d.bark());
   }
   _ { }
 }
@@ -158,6 +158,8 @@ With `inout`, the binding is the subject's storage, like an `inout` local of it:
 to it writes the matched variable or field.
 
 ```pkn
+import ::io;
+
 class Animal { n: int; }
 impl Animal { fn __init__(n: int) { self.n = n; } }
 class Dog : Animal {}
@@ -169,7 +171,7 @@ fn main() -> int {
     d: inout Dog { d = Dog(d.n + 1); }   // a now holds the new Dog
     _ { }
   }
-  println(Str(a.n));
+  io::println(Str(a.n));
   return 0;
 }
 ```
@@ -229,10 +231,10 @@ a literal (`match "s" { … }`).
 ```pkn
 n: int = 2;
 match n {
-  1 { println("one"); }
-  2 { println("two"); }     // taken
-  3 { println("three"); }
-  _ { println("many"); }
+  1 { io::println("one"); }
+  2 { io::println("two"); }     // taken
+  3 { io::println("three"); }
+  _ { io::println("many"); }
 }
 ```
 
@@ -242,9 +244,9 @@ match n {
   ```pkn
   greeting: Str = "World";
   match greeting {
-    "Hello" { println("hi"); }
-    "World" { println("hello world"); }   // taken — content match
-    _       { println("other"); }
+    "Hello" { io::println("hi"); }
+    "World" { io::println("hello world"); }   // taken — content match
+    _       { io::println("other"); }
   }
   ```
 
@@ -252,8 +254,8 @@ match n {
 
   ```pkn
   match flag {
-    True  { println("yes"); }
-    False { println("no"); }
+    True  { io::println("yes"); }
+    False { io::println("no"); }
   }
   ```
 
@@ -305,7 +307,7 @@ type-checked. Errors inside an arm are reported like any other code:
 match x {
   d: Dog {
     sound: Str = d.bark();   // local to this arm
-    println(sound);
+    io::println(sound);
   }
   Dog {
     y: int = 3.14;           // error: cannot assign float to int
@@ -344,21 +346,25 @@ definitely assigned.
 
 ## Common Patterns
 
-### Distinguishing `File` from `Error`
+### Matching a `Result`
 
-`open()` returns `Obj` — either a `File` or an `Error`. `match` separates the two:
+`io::open()` returns a `res::Result<io::File>` (module `::result`): a struct holding an
+`error` and a `value: io::File?`, present exactly when the open succeeded. A struct is not a
+`match` subject, so match its `value` in optional mode (below), and read the `error` in the
+`None` arm:
 
 ```pkn
-match open("/tmp/data.txt", "r") {
-  err: Error { printerrln("open failed: " + err.toString()); }
-  f: File {
+r = io::open("/tmp/data.txt", "r");
+match r.value {
+  f: io::File {
     while True {
-      match f.readln() {
-        line: Str { print(line); }
+      match f.readln().value {
+        line: Str { io::print(line); }
         _         { break; }      // None — end of file
       }
     }
   }
+  None { io::printerrln("open failed: " + r.error.message()); }
 }
 ```
 
@@ -376,10 +382,11 @@ match int<Str>(s) {
 
 ### Detecting end of input
 
-A `readln` that yields `None` at EOF is matched by falling through to `_`:
+`readln()` returns a `res::Result<Str>` whose `value` is `None` at EOF (its error is then
+`EndOfFile`); the `None` is matched by falling through to `_` (or a `None` arm):
 
 ```pkn
-match f.readln() {
+match f.readln().value {
   line: Str { process(line); }
   _         { break; }   // None
 }
@@ -395,8 +402,8 @@ runtime subclass — and binds it as `T`; a `None` arm (or `_`) covers the absen
 
 ```pkn
 match find(head, key) {          // find returns Node?
-  n: Node { println(Str(n.v)); }
-  None    { println("not found"); }
+  n: Node { io::println(Str(n.v)); }
+  None    { io::println("not found"); }
 }
 ```
 
@@ -408,8 +415,7 @@ Two differences from type mode:
 - A `T` arm alone is **not exhaustive**; `T` together with `None` (or `_`) is, and then the
   `match` satisfies the "always returns" and field-initialisation analyses.
 
-A `None` arm is only valid on an optional subject — matching on an `Obj` (the `readln` idiom
-above) is unchanged.
+A `None` arm is only valid on an optional subject; matching on an `Obj` is unchanged.
 
 ---
 

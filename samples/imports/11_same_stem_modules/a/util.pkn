@@ -8,4 +8,6 @@ impl Counter {
   fn __init__(n: int) { self.n = n; }
 }
 
-fn tag() -> Str { return "a"; }
+fn tag() -> Str {
+  return "a";
+}

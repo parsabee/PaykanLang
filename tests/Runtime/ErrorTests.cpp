@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Unit tests for the PaykanError runtime type.
+// Unit tests for the runtime's errors (Runtime.h, "Errors"): what a C
+// library failure's errno means to the standard library's ::result.
 
+#include <cerrno>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <string>
@@ -10,53 +12,41 @@ extern "C" {
 #include "Runtime.h"
 }
 
-#include "RuntimeEqualsHelper.h"
-
-// -- Helpers
-
-static const char *sharedStr(PaykanShared *s) {
-  return ((PaykanString *)PaykanShared_get(s))->data;
+TEST(ErrorCode, EveryErrnoMapsToItsCode) {
+  EXPECT_EQ(Paykan_error_code(0), PAYKAN_ERROR_OK);
+  EXPECT_EQ(Paykan_error_code(ENOENT), PAYKAN_ERROR_NOT_FOUND);
+  EXPECT_EQ(Paykan_error_code(EACCES), PAYKAN_ERROR_PERMISSION_DENIED);
+  EXPECT_EQ(Paykan_error_code(EPERM), PAYKAN_ERROR_PERMISSION_DENIED);
+  EXPECT_EQ(Paykan_error_code(EEXIST), PAYKAN_ERROR_ALREADY_EXISTS);
+  EXPECT_EQ(Paykan_error_code(EINVAL), PAYKAN_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(Paykan_error_code(EBADF), PAYKAN_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(Paykan_error_code(EISDIR), PAYKAN_ERROR_IS_A_DIRECTORY);
+  EXPECT_EQ(Paykan_error_code(ENOTDIR), PAYKAN_ERROR_NOT_A_DIRECTORY);
+  EXPECT_EQ(Paykan_error_code(EMFILE), PAYKAN_ERROR_TOO_MANY_OPEN_FILES);
+  EXPECT_EQ(Paykan_error_code(ENFILE), PAYKAN_ERROR_TOO_MANY_OPEN_FILES);
+  EXPECT_EQ(Paykan_error_code(ENOSPC), PAYKAN_ERROR_NO_SPACE);
+  EXPECT_EQ(Paykan_error_code(EROFS), PAYKAN_ERROR_READ_ONLY);
+  EXPECT_EQ(Paykan_error_code(EBUSY), PAYKAN_ERROR_BUSY);
+  EXPECT_EQ(Paykan_error_code(EINTR), PAYKAN_ERROR_INTERRUPTED);
+  EXPECT_EQ(Paykan_error_code(EAGAIN), PAYKAN_ERROR_WOULD_BLOCK);
+  EXPECT_EQ(Paykan_error_code(EWOULDBLOCK), PAYKAN_ERROR_WOULD_BLOCK);
+  EXPECT_EQ(Paykan_error_code(EPIPE), PAYKAN_ERROR_BROKEN_PIPE);
+  EXPECT_EQ(Paykan_error_code(ETIMEDOUT), PAYKAN_ERROR_TIMED_OUT);
+  EXPECT_EQ(Paykan_error_code(ENOMEM), PAYKAN_ERROR_OUT_OF_MEMORY);
+  EXPECT_EQ(Paykan_error_code(ENOSYS), PAYKAN_ERROR_UNSUPPORTED);
+  EXPECT_EQ(Paykan_error_code(ENOTSUP), PAYKAN_ERROR_UNSUPPORTED);
+  EXPECT_EQ(Paykan_error_code(EIO), PAYKAN_ERROR_IO);
 }
 
-// -- PaykanError
-
-TEST(ErrorObject, New) {
-  const char *msg = "something went wrong";
-  PaykanError *e = PaykanError_new(msg, (int64_t)strlen(msg));
-  ASSERT_NE(e, nullptr);
-  PaykanError_destroy((PaykanObject *)e);
+TEST(ErrorCode, AnUnknownErrnoIsOther) {
+  EXPECT_EQ(Paykan_error_code(-1), PAYKAN_ERROR_OTHER);
+  EXPECT_EQ(Paykan_error_code(1000000), PAYKAN_ERROR_OTHER);
 }
 
-TEST(ErrorObject, VtableIsErrorVtable) {
-  PaykanError *e = PaykanError_new("err", 3);
-  EXPECT_EQ(e->vtable, PaykanError_vtable);
-  PaykanError_destroy((PaykanObject *)e);
-}
-
-TEST(ErrorObject, ToStringContainsMessage) {
-  PaykanError *e = PaykanError_new("oops", 4);
-  PaykanShared *s = PaykanError_toString((PaykanObject *)e);
-  ASSERT_NE(s, nullptr);
-  std::string str = sharedStr(s);
-  EXPECT_NE(str.find("oops"), std::string::npos);
+TEST(ErrorText, IsStrerror) {
+  PaykanShared *s = Paykan_error_text(ENOENT);
+  auto *str = (PaykanString *)PaykanShared_get(s);
+  EXPECT_EQ(std::string(str->data, (size_t)str->len), strerror(ENOENT));
+  EXPECT_EQ(s->strong, 1);
   Paykan_release(s);
-  PaykanError_destroy((PaykanObject *)e);
-}
-
-TEST(ErrorObject, EqualsSelf) {
-  PaykanError *e = PaykanError_new("err", 3);
-  EXPECT_EQ(paykanTestEquals(PaykanError_equals, (PaykanObject *)e,
-                             (PaykanObject *)e),
-            1);
-  PaykanError_destroy((PaykanObject *)e);
-}
-
-TEST(ErrorObject, NotEqualDifferentErrors) {
-  PaykanError *a = PaykanError_new("a", 1);
-  PaykanError *b = PaykanError_new("b", 1);
-  EXPECT_EQ(paykanTestEquals(PaykanError_equals, (PaykanObject *)a,
-                             (PaykanObject *)b),
-            0);
-  PaykanError_destroy((PaykanObject *)a);
-  PaykanError_destroy((PaykanObject *)b);
 }

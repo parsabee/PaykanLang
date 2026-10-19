@@ -1,13 +1,12 @@
-// OK: only top-level names are reserved — fields and methods live in their
-// own per-class namespace, so they may reuse a builtin function name, and the
-// builtin remains callable.
+import ::io;
+
+// OK: fields and methods live in their own per-class namespace, so they may
+// reuse a standard library function's name (io::print, io::open), which
+// stays callable.
 class Logger {
   count: int;
 
-  fn print(msg: Str) {
-    self.count = self.count + 1;
-    println(msg);
-  }
+  fn print(msg: Str) { self.count = self.count + 1; io::println(msg); }
 }
 
 impl Logger {
@@ -25,7 +24,7 @@ impl Stats {
 fn main() -> int {
   l: Logger = Logger();
   l.print("first");
-  print("second\n");
+  io::print("second\n");
   s: Stats = Stats();
   return s.open - 1;
 }

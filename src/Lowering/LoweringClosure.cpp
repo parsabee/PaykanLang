@@ -53,7 +53,13 @@ ast::TupleType *ModuleLowering::functionValueShape() {
 }
 
 ast::Type *ModuleLowering::memShapeOf(ast::Type *ty) {
-  return ast::isFunctionValue(ty) ? functionValueShape() : ty;
+  if (ast::isFunctionValue(ty))
+    return functionValueShape();
+  // An optional tuple or struct: its presence flag, then the value.
+  if (ast::isMemOptional(ty))
+    return ASTCtx.getTupleType(
+        {ASTCtx.getBoolTy(), ast::cast<ast::OptionalType>(ty)->getInnerType()});
+  return ty;
 }
 
 pir::Signature ModuleLowering::closureSignature(ast::FunctionType *fnt) {
@@ -314,6 +320,19 @@ Val ModuleLowering::emitFunctionValueIsNone(const Val &addr) {
   return B.cmp(CmpPred::Eq, code, Val::i64(0), "fn.isnone");
 }
 
+int64_t ModuleLowering::memOptionalPayloadOffset(ast::Type *optTy) {
+  if (ast::isFunctionValue(optTy))
+    return 0; // the value itself; None has no code
+  return tupleElementOffset(ast::cast<ast::TupleType>(memShapeOf(optTy)), 1);
+}
+
+Val ModuleLowering::emitMemOptionalIsNone(const Val &addr, ast::Type *optTy) {
+  if (ast::isFunctionValue(optTy))
+    return emitFunctionValueIsNone(addr);
+  Val present = B.ptrLoad(addr, Type::Bool, "opt.has");
+  return B.unary(pir::Opcode::Not, present, "opt.isnone");
+}
+
 Val ModuleLowering::emitClosureCall(const Val &addr, ast::FunctionType *fnt,
                                     const std::vector<ast::Expr *> &argExprs,
                                     ast::Type *resultTy) {
@@ -382,11 +401,11 @@ Val ModuleLowering::emitClosureCall(const Val &addr, ast::FunctionType *fnt,
   return result;
 }
 
-Val ModuleLowering::emitFunctionValueMatch(ast::MatchStmt *node) {
+Val ModuleLowering::emitMemOptionalMatch(ast::MatchStmt *node) {
   ast::Type *subjTy = node->getSubject()->getResolvedType();
   auto *optTy = ast::dyn_cast<ast::OptionalType>(subjTy);
   ast::Type *inner = optTy ? optTy->getInnerType() : subjTy;
-  // The subject, copied into a slot of the match's scope: its closure is
+  // The subject, copied into a slot of the match's scope: its references are
   // held until the match ends, on every way out of it.
   ScopeGuard matchGuard(*this);
   MemLayout l = memLayout(subjTy);
@@ -410,7 +429,9 @@ Val ModuleLowering::emitFunctionValueMatch(ast::MatchStmt *node) {
       emitMatchArmBody(wildcard);
   };
 
-  pir::If *s = B.openIf(emitFunctionValueIsNone(addr), /*withElse=*/true);
+  Val isNone =
+      optTy ? emitMemOptionalIsNone(addr, subjTy) : Val::boolean(false);
+  pir::If *s = B.openIf(isNone, /*withElse=*/true);
   B.enter(*s->Then);
   emitArmOrDefault(noneArm);
   B.leave();
@@ -418,14 +439,20 @@ Val ModuleLowering::emitFunctionValueMatch(ast::MatchStmt *node) {
   if (valueArm && valueArm->hasBinding()) {
     ScopeGuard armGuard(*this);
     const std::string &name = valueArm->getBinding();
-    if (valueArm->getMode() == ast::ParamMode::Inout) {
-      // `f: inout T`: f is the subject's storage.
+    if (valueArm->getMode() == ast::ParamMode::Inout &&
+        ast::isFunctionValue(subjTy)) {
+      // `f: inout T`: f is the subject's storage (a function value's is the
+      // whole of it).
       emitInoutBinding(name, node->getSubject(), inner);
     } else {
-      // The binding's own copy of the present function value.
-      pir::LocalId local = B.addMemLocal(name, l.Size, l.Align);
+      // The binding's own copy of the present value.
+      MemLayout il = memLayout(inner);
+      pir::LocalId local = B.addMemLocal(name, il.Size, il.Align);
       Val own = B.localAddr(local, name + ".addr");
-      B.memCopy(own, addr, Val::i64(l.Size));
+      int64_t off = optTy ? memOptionalPayloadOffset(subjTy) : 0;
+      B.memCopy(own,
+                off ? B.ptrAdd(addr, Val::i64(off), "opt.value.addr") : addr,
+                Val::i64(il.Size));
       emitMemRetain(own, inner);
       CurrentScope->declare(name, local, inner);
     }

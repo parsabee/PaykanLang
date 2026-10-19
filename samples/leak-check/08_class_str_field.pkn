@@ -10,9 +10,7 @@ class Named {
 }
 
 impl Named {
-  fn __init__(n: Str) {
-    self.name = n;
-  }
+  fn __init__(n: Str) { self.name = n; }
 }
 
 fn main() -> int {

@@ -8,15 +8,17 @@
 // `let` local, the builtin `view fn`s (toString, len), a generic class.  Run
 // with --track-heap: zero live blocks.
 
+import ::io;
+
 // expect-stdout: counter: 3 ticks, double 6
 // expect-stdout: fast: 20 ticks, double 40
 // expect-stdout: box 7, names 2, printable True
 
 class Counter {
   ticks: int;
-  fn tick() { self.ticks = self.ticks + 1; }
-  view fn count() -> int { return self.ticks; }
-  view fn double() -> int { return 2 * self.count(); }
+  fn tick()                 { self.ticks = self.ticks + 1; }
+  view fn count() -> int    { return self.ticks; }
+  view fn double() -> int   { return 2 * self.count(); }
   view fn describe() -> Str { return "counter"; }
 }
 
@@ -25,7 +27,7 @@ impl Counter {
 }
 
 class Fast : Counter {
-  fn tick() { self.ticks = self.ticks + 10; }
+  fn tick()                 { self.ticks = self.ticks + 10; }
   view fn describe() -> Str { return "fast"; }
 }
 
@@ -43,8 +45,8 @@ impl Box<T> {
 }
 
 fn report(c: view Counter) {
-  println(c.describe() + ": " + Str(c.count()) + " ticks, double " +
-          Str(c.double()));
+  io::println(c.describe() + ": " + Str(c.count()) + " ticks, double "
+      + Str(c.double()));
 }
 
 fn main() -> int {
@@ -62,7 +64,7 @@ fn main() -> int {
 
   let box = Box<int>(7);
   let names = ["a", "b"];
-  println("box " + Str(box.get()) + ", names " + Str(names.len()) +
-          ", printable " + Str(names[0].toString().len() > 0));
+  io::println("box " + Str(box.get()) + ", names " + Str(names.len())
+      + ", printable " + Str(names[0].toString().len() > 0));
   return 0;
 }

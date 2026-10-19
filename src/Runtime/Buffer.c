@@ -13,6 +13,7 @@
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
+#include <errno.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -64,31 +65,54 @@ static void buffer_check_index(const PaykanBuffer *buf, int64_t i) {
                          (long long)i, (long long)buf->len);
 }
 
-static void buffer_realloc(PaykanBuffer *buf, int64_t cap) {
+/// Room for @p cap values: 0, or C's errno (ENOMEM when the size does not
+/// fit) with the buffer unchanged.
+static int buffer_try_realloc(PaykanBuffer *buf, int64_t cap) {
   const size_t size = (size_t)buf->type->size;
   if (size && (size_t)cap > SIZE_MAX / size)
-    Paykan_runtime_panic("out of memory growing a buffer to %lld values",
-                         (long long)cap);
-  buf->data = Paykan_realloc(buf->data, (size_t)cap * size);
-  if (!buf->data && cap > 0 && size > 0)
-    Paykan_runtime_panic("out of memory growing a buffer to %lld values",
-                         (long long)cap);
+    return ENOMEM;
+  errno = 0;
+  void *data = Paykan_realloc(buf->data, (size_t)cap * size);
+  if (!data && cap > 0 && size > 0)
+    return errno ? errno : ENOMEM;
+  buf->data = data;
   buf->cap = cap;
+  return 0;
 }
 
-/// Make the buffer @p len values long, the new ones all zero bytes.  The
-/// allocation at least doubles, so growing a value at a time is amortised
-/// O(1).
-static void buffer_lengthen(PaykanBuffer *buf, int64_t len) {
+/// Make the buffer @p len values long, the new ones all zero bytes: 0, or
+/// C's errno with the buffer unchanged.  The allocation at least doubles, so
+/// growing a value at a time is amortised O(1).
+static int buffer_try_lengthen(PaykanBuffer *buf, int64_t len) {
   if (len <= buf->len)
-    return;
-  if (len > buf->cap)
-    buffer_realloc(buf, buf->cap > len / 2 && buf->cap <= INT64_MAX / 2
-                            ? buf->cap * 2
-                            : len);
+    return 0;
+  if (len > buf->cap) {
+    int err = buffer_try_realloc(
+        buf,
+        buf->cap > len / 2 && buf->cap <= INT64_MAX / 2 ? buf->cap * 2 : len);
+    // The doubled size may be what does not fit: then exactly @p len.
+    if (err && len > buf->cap)
+      err = buffer_try_realloc(buf, len);
+    if (err)
+      return err;
+  }
   memset(buffer_value(buf, buf->len), 0,
          (size_t)(len - buf->len) * (size_t)buf->type->size);
   buf->len = len;
+  return 0;
+}
+
+/// buffer_try_lengthen, for the callers that panic when it fails.
+static void buffer_lengthen(PaykanBuffer *buf, int64_t len) {
+  if (buffer_try_lengthen(buf, len))
+    Paykan_runtime_panic("out of memory growing a buffer to %lld values",
+                         (long long)len);
+}
+
+static void buffer_realloc(PaykanBuffer *buf, int64_t cap) {
+  if (buffer_try_realloc(buf, cap))
+    Paykan_runtime_panic("out of memory resizing a buffer to %lld values",
+                         (long long)cap);
 }
 
 PaykanShared *PaykanBuffer_new(void *t, int64_t n) {
@@ -117,6 +141,12 @@ void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i) {
   if (PaykanType_isUnset((const PaykanType *)t, v))
     Paykan_runtime_panic("buffer value %lld was never set", (long long)i);
   return v;
+}
+
+int64_t PaykanBuffer_isSet(void *t, PaykanObject *b, int64_t i) {
+  PaykanBuffer *buf = (PaykanBuffer *)b;
+  return i >= 0 && i < buf->len &&
+         !PaykanType_isUnset((const PaykanType *)t, buffer_value(buf, i));
 }
 
 void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i) {
@@ -152,6 +182,20 @@ void PaykanBuffer_grow(void *t, void *b, int64_t by) {
     Paykan_runtime_panic("out of memory growing a buffer by %lld values",
                          (long long)n);
   buffer_lengthen(buf, buf->len + n);
+}
+
+int64_t PaykanBuffer_tryGrow(void *t, void *b, int64_t by) {
+  (void)t;
+  PaykanBuffer *buf = buffer_at(b);
+  // A count past INT64_MAX (an `unsigned`'s high half) cannot fit either.
+  if (by < 0 || by > INT64_MAX - buf->len)
+    return ENOMEM;
+  return buffer_try_lengthen(buf, buf->len + by);
+}
+
+int64_t PaykanBuffer_tryReserve(void *t, void *b, int64_t n) {
+  (void)t;
+  return n < 0 ? ENOMEM : buffer_try_lengthen(buffer_at(b), n);
 }
 
 /// Drop the last @p by values.  Once at most a quarter of the allocation is

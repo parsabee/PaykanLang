@@ -1,4 +1,5 @@
 // ::collections LinkedList<T>, Stack<T> and Queue<T>.
+import ::io;
 import ::collections;
 
 enum Suit { Hearts, Spades }
@@ -9,42 +10,42 @@ fn show(l: view collections::LinkedList<Str>) -> Str {
 
 fn main() -> int {
   l = collections::LinkedList<Str>();
-  println(show(l) + " " + Str(l.isEmpty()));
+  io::println(show(l) + " " + Str(l.isEmpty()));
   l.pushBack("b");
   l.pushBack("c");
   l.pushFront("a");
   l.pushBack("d");
-  println(show(l) + " front=" + l.front() + " back=" + l.back());
-  println(l.popFront() + l.popBack() + " " + show(l));
+  io::println(show(l) + " front=" + l.front() + " back=" + l.back());
+  io::println(l.popFront() + l.popBack() + " " + show(l));
   // Removing from the middle relinks the neighbours.
   l.pushFront("z");
   l.pushBack("y");
-  println(show(l));
-  println(Str(l.remove("b")) + " " + Str(l.remove("q")) + " " + show(l));
-  println(Str(l.contains("y")) + " " + Str(l.contains("b")));
-  println(l.popBack() + l.popBack() + l.popFront() + " " + show(l));
+  io::println(show(l));
+  io::println(Str(l.remove("b")) + " " + Str(l.remove("q")) + " " + show(l));
+  io::println(Str(l.contains("y")) + " " + Str(l.contains("b")));
+  io::println(l.popBack() + l.popBack() + l.popFront() + " " + show(l));
   l.pushBack("again");
-  println(show(l));
+  io::println(show(l));
   l.pushBack("more");
   l.clear();
-  println(show(l));
+  io::println(show(l));
   l.pushFront("after clear");
-  println(show(l));
+  io::println(show(l));
 
   // Elements of any type: an enum, an optional, a tuple.
   suits = collections::LinkedList<Suit>();
   suits.pushBack(Suit::Spades);
   suits.pushFront(Suit::Hearts);
-  println(Str(suits.popBack() == Suit::Spades) + " " + Str(suits.len()));
+  io::println(Str(suits.popBack() == Suit::Spades) + " " + Str(suits.len()));
   pairs = collections::LinkedList<(int, Str)>();
   pairs.pushBack((1, "one"));
   pairs.pushBack((2, "two"));
   p = pairs.popFront();
-  println(Str(p.0) + p.1 + " " + Str(pairs.contains((2, "two"))));
+  io::println(Str(p.0) + p.1 + " " + Str(pairs.contains((2, "two"))));
   opts = collections::LinkedList<int?>();
   opts.pushBack(None);
   opts.pushBack(3);
-  println(Str(opts.contains(None)) + " " + Str(opts.len()));
+  io::println(Str(opts.contains(None)) + " " + Str(opts.len()));
 
   s = collections::Stack<int>();
   i: int = 1;
@@ -52,24 +53,27 @@ fn main() -> int {
     s.push(i);
     i = i + 1;
   }
-  println("stack " + collections::listToString(s.toList()) + " peek=" +
-          Str(s.peek()));
+  io::println("stack " + collections::listToString(s.toList()) + " peek="
+      + Str(s.peek()));
   out: Str = "";
-  while !s.isEmpty() { out = out + Str(s.pop()); }
-  println("popped " + out + " len=" + Str(s.len()));
+  while !s.isEmpty() {
+    out = out + Str(s.pop());
+  }
+  io::println("popped " + out + " len=" + Str(s.len()));
 
   q = collections::Queue<Str>();
   q.enqueue("first");
   q.enqueue("second");
   q.enqueue("third");
-  println("queue " + collections::listToString(q.toList()) + " peek=" + q.peek());
-  println(q.dequeue() + " " + q.dequeue() + " len=" + Str(q.len()));
+  io::println("queue " + collections::listToString(q.toList()) + " peek="
+      + q.peek());
+  io::println(q.dequeue() + " " + q.dequeue() + " len=" + Str(q.len()));
   q.enqueue("fourth");
-  println(q.dequeue() + " " + q.dequeue() + " " + Str(q.isEmpty()));
+  io::println(q.dequeue() + " " + q.dequeue() + " " + Str(q.isEmpty()));
   q.enqueue("x");
   q.clear();
   s.push(9);
   s.clear();
-  println(Str(q.len() + s.len()));
+  io::println(Str(q.len() + s.len()));
   return 0;
 }

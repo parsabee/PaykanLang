@@ -1,4 +1,11 @@
 // ERROR: 'Pair' is a generic struct: write 'impl Pair<A, B>'
-struct Pair<A, B> { a: A; b: B; }
-impl Pair { fn f() {} }
-fn main() -> int { return 0; }
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
+impl Pair {
+  fn f() {}
+}
+fn main() -> int {
+  return 0;
+}

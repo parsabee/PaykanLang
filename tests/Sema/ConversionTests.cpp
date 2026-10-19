@@ -12,7 +12,7 @@
 using namespace paykan::test;
 
 static std::string inMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 static void expectOk(const std::string &src) {
@@ -236,7 +236,8 @@ TEST(Conversion, InferredFormRejectsEveryOtherType) {
                             "impl A { fn __init__() { } }\n"
                             "enum Color { Red }\n";
   auto prog = [&](const std::string &body) {
-    return decls + "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+    return decls + "import ::io; fn main() -> int {\n" + body +
+           "\n  return 0;\n}\n";
   };
   const std::string strSet =
       "; its specializations are int, float, bool, char, "

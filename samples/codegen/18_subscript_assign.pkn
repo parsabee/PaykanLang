@@ -7,42 +7,44 @@
 //            arrays (a Str element store releases the string it replaces),
 //            PaykanString_at, subscripts on a Str receiver.
 
+import ::io;
+
 // ---- helpers ---------------------------------------------------------------
 
 fn printBool(b: bool) -> int {
-  println(Str<bool>(b));
+  io::println(Str<bool>(b));
   return 0;
 }
 
 // ---- 1. int array index assignment -----------------------------------------
 
 fn intArrayAssign() -> int {
-  println("=== int array assign ===");
+  io::println("=== int array assign ===");
   arr: int[3] = [10, 20, 30];
   arr[0] = 99;
   arr[2] = 42;
-  println(Str(arr[0]));  // 99
-  println(Str<int>(arr[1]));  // 20
-  println(Str(arr[2]));  // 42
+  io::println(Str(arr[0]));  // 99
+  io::println(Str<int>(arr[1]));  // 20
+  io::println(Str(arr[2]));  // 42
   return 0;
 }
 
 // ---- 2. float array index assignment ---------------------------------------
 
 fn floatArrayAssign() -> int {
-  println("=== float array assign ===");
+  io::println("=== float array assign ===");
   arr: float[3] = [1.0, 2.0, 3.0];
   arr[1] = 9.5;
-  println(Str<float>(arr[0]));  // 1.0
-  println(Str(arr[1]));  // 9.5
-  println(Str<float>(arr[2]));  // 3.0
+  io::println(Str<float>(arr[0]));  // 1.0
+  io::println(Str(arr[1]));  // 9.5
+  io::println(Str<float>(arr[2]));  // 3.0
   return 0;
 }
 
 // ---- 3. bool array index assignment ----------------------------------------
 
 fn boolArrayAssign() -> int {
-  println("=== bool array assign ===");
+  io::println("=== bool array assign ===");
   arr: bool[3] = [True, False, True];
   arr[0] = False;
   arr[2] = False;
@@ -55,19 +57,19 @@ fn boolArrayAssign() -> int {
 // ---- 4. Str array index assignment -----------------------------------------
 
 fn strArrayAssign() -> int {
-  println("=== str array assign ===");
+  io::println("=== str array assign ===");
   arr: Str[3] = ["a", "b", "c"];
   arr[1] = "hello";
-  println(arr[0]);  // a
-  println(arr[1]);  // hello
-  println(arr[2]);  // c
+  io::println(arr[0]);  // a
+  io::println(arr[1]);  // hello
+  io::println(arr[2]);  // c
   return 0;
 }
 
 // ---- 5. In-place loop overwrite --------------------------------------------
 
 fn loopOverwrite() -> int {
-  println("=== loop overwrite ===");
+  io::println("=== loop overwrite ===");
   arr: int[5] = [0; 5];
   i: int = 0;
   while i < 5 {
@@ -76,7 +78,7 @@ fn loopOverwrite() -> int {
   }
   i = 0;
   while i < 5 {
-    println(Str(arr[i]));  // 0 1 4 9 16
+    io::println(Str(arr[i]));  // 0 1 4 9 16
     i = i + 1;
   }
   return 0;
@@ -85,24 +87,24 @@ fn loopOverwrite() -> int {
 // ---- 6. String subscript read (char) ----------------------------------------
 
 fn strSubscript() -> int {
-  println("=== str subscript ===");
+  io::println("=== str subscript ===");
   s: Str = "paykan";
-  println(Str<char>(s[0]));  // p (convert char to Str)
-  println(Str(s[5]));  // n
+  io::println(Str<char>(s[0]));  // p (convert char to Str)
+  io::println(Str(s[5]));  // n
   c: Str = Str<char>(s[3]);  // k (convert char to Str)
-  println(c);
+  io::println(c);
   return 0;
 }
 
 // ---- 7. Iterate over string characters -------------------------------------
 
 fn iterString() -> int {
-  println("=== iter string ===");
+  io::println("=== iter string ===");
   s: Str = "hello";
   n: int = s.len();
   i: int = 0;
   while i < n {
-    println(Str(s[i]));  // convert char to Str
+    io::println(Str(s[i]));  // convert char to Str
     i = i + 1;
   }
   return 0;
@@ -111,10 +113,10 @@ fn iterString() -> int {
 // ---- 8. Build a new string by reading chars --------------------------------
 
 fn reverseFirstThree() -> int {
-  println("=== reverse first three ===");
+  io::println("=== reverse first three ===");
   s: Str = "abcdef";
   result: Str = Str<char>(s[2]) + Str(s[1]) + Str<char>(s[0]);
-  println(result);  // cba
+  io::println(result);  // cba
   return 0;
 }
 

@@ -1,3 +1,5 @@
+import ::io;
+
 // OK: generic class and function templates, instantiated in every type
 // position: variable annotation, field, parameter, return, array element,
 // nested argument, match arm, explicit constructor / call type arguments,
@@ -31,14 +33,20 @@ impl Holder {
   fn __init__() { self.b = Box<int>(1); self.ps = [Pair<Str, int>("p", 0)]; }
 }
 
-fn first<T>(xs: view T[]) -> view T { return xs[0]; }
-fn unbox<T>(b: view Box<T>) -> T { return b.get(); }
+fn first<T>(xs: view T[]) -> view T {
+  return xs[0];
+}
+fn unbox<T>(b: view Box<T>) -> T {
+  return b.get();
+}
 
 fn describe(o: Obj) -> Str {
   match o {
-    b: Box<int> { return Str<int>(b.get()); }
-    Box<Str>    { return "str"; }
-    _           { return "other"; }
+    b: Box<int> {
+      return Str<int>(b.get());
+    }
+    Box<Str> { return "str"; }
+    _ { return "other"; }
   }
 }
 
@@ -51,6 +59,6 @@ fn main() -> int {
   s: view Str = first(["x"]);
   i: int = first<int>([3]);
   inferred = Box(5);
-  println(describe(inferred));
+  io::println(describe(inferred));
   return n + m + i;
 }

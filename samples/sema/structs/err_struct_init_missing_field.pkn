@@ -1,6 +1,11 @@
 // ERROR: field 'y' of struct 'A' is not assigned on every path through '__init__'
-struct A { x: int; y: int; }
+struct A {
+  x: int;
+  y: int;
+}
 impl A {
   fn __init__(x: int) { self.x = x; }
 }
-fn main() -> int { return 0; }
+fn main() -> int {
+  return 0;
+}

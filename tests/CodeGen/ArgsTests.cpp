@@ -32,10 +32,10 @@ TEST(Args, ArgCountViaLen) {
 }
 
 TEST(Args, FirstArgIsScriptPath) {
-  auto r = compileAndRunWithArgs(R"(
+  auto r = compileAndRunWithArgs(R"(import ::io;
     fn main(args: view Str[]) -> int {
       x: view Str = args[0];
-      print(x);
+      io::print(x);
       return 0;
     }
   )",
@@ -46,9 +46,9 @@ TEST(Args, FirstArgIsScriptPath) {
 }
 
 TEST(Args, SecondArgReadable) {
-  auto r = compileAndRunWithArgs(R"(
+  auto r = compileAndRunWithArgs(R"(import ::io;
     fn main(args: view Str[]) -> int {
-      print(args[1]);
+      io::print(args[1]);
       return 0;
     }
   )",
@@ -87,7 +87,7 @@ TEST(Args, ArgLenUsedInLogic) {
 // it and measure it like any other slice.
 TEST(Args, PassedToSliceParameters) {
   LeakGuard g;
-  auto r = compileAndRunWithArgs(R"(
+  auto r = compileAndRunWithArgs(R"(import ::io;
     fn longest(ss: view Str[]) -> int {
       n = 0;
       i = 0;
@@ -107,7 +107,7 @@ TEST(Args, PassedToSliceParameters) {
       return s;
     }
     fn main(args: view Str[]) -> int {
-      println(joined(args, 1));
+      io::println(joined(args, 1));
       return longest(args);
     }
   )",

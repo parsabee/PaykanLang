@@ -7,11 +7,13 @@
 // Usage:
 //   ./build/bin/paykan samples/codegen/24_args.pkn hello world 42
 
+import ::io;
+
 fn main(args: view Str[]) -> int {
-  println("argc: " + Str<int>(args.len()));
+  io::println("argc: " + Str<int>(args.len()));
   i: int = 0;
   while i < args.len() {
-    println("  args[" + Str(i) + "] = " + args[i]);
+    io::println("  args[" + Str(i) + "] = " + args[i]);
     i = i + 1;
   }
   return 0;

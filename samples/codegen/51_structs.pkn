@@ -15,6 +15,8 @@
 // no superclass, no vtable and no identity: two structs are equal when
 // their fields are.
 
+import ::io;
+
 struct Point {
   x: int;
   y: int;
@@ -22,10 +24,11 @@ struct Point {
 
 impl Point {
   static fn origin() -> Point { return Point(0, 0); }
-  view fn sum() -> int { return self.x + self.y; }
-  fn shift(dx: int, dy: int) { self.x = self.x + dx; self.y = self.y + dy; }
-  view fn moved(dx: int, dy: int) -> Point { q = self; q.shift(dx, dy); return q; }
-  fn xSlot() -> inout int { return self.x; }
+  view fn sum() -> int        { return self.x + self.y; }
+  fn shift(dx: int, dy: int)  { self.x = self.x + dx; self.y = self.y + dy; }
+  view fn moved(dx: int, dy: int) -> Point
+                              { q = self; q.shift(dx, dy); return q; }
+  fn xSlot() -> inout int     { return self.x; }
 }
 
 impl Hashable for Point {
@@ -52,7 +55,11 @@ struct Line {
 }
 
 impl Line {
-  fn __init__(a: Point, b: Point) { self.a = a; self.b = b; self.label = "line"; }
+  fn __init__(a: Point, b: Point) {
+    self.a = a;
+    self.b = b;
+    self.label = "line";
+  }
   view fn length2() -> int {
     dx = self.b.x - self.a.x;
     dy = self.b.y - self.a.y;
@@ -73,61 +80,73 @@ class Shape {
   at: Point;           // a struct field of a class: assigned in place
 }
 
-fn show<T: Show>(x: view T) -> Str { return x.toString(); }
-fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
-fn hashOf<T: Hashable>(x: view T) -> int { return x.hash(); }
+fn show<T: Show>(x: view T) -> Str {
+  return x.toString();
+}
+fn twice<T: ValueType>(x: T) -> (T, T) {
+  return (x, x);
+}
+fn hashOf<T: Hashable>(x: view T) -> int {
+  return x.hash();
+}
 
-fn bump(n: inout int) { n = n + 1; }
+fn bump(n: inout int) {
+  n = n + 1;
+}
 fn farthest(ps: view Point[]) -> Point {
   best = ps[0];
   i = 1;
   while i < ps.len() {
-    if ps[i].sum() > best.sum() { best = ps[i]; }
+    if ps[i].sum() > best.sum() {
+      best = ps[i];
+    }
     i = i + 1;
   }
   return best;
 }
-fn normalize(p: inout Point) { p = Point(p.x / 2, p.y / 2); }
+fn normalize(p: inout Point) {
+  p = Point(p.x / 2, p.y / 2);
+}
 
 fn main() -> int {
   p = Point(1, 2);
   p.x = 5;                                 // assigned in place
   q = p;                                   // a copy
   q.shift(1, 1);
-  println(p);                              // Point(x: 5, y: 2)
-  println(q);                              // Point(x: 6, y: 3)
-  println(Str(p == q) + " " + Str(p == Point(5, 2)) + " " + Str(p != q));
+  io::println(p);                              // Point(x: 5, y: 2)
+  io::println(q);                              // Point(x: 6, y: 3)
+  io::println(Str(p == q) + " " + Str(p == Point(5, 2)) + " " + Str(p != q));
 
   bump(p.xSlot());                         // through an `inout` result
   bump(q.x);                               // a field as an `inout` place
-  println(Str(p.x) + " " + Str(q.x));
+  io::println(Str(p.x) + " " + Str(q.x));
 
   l = Line(p, q);
   l.a.y = 0;                               // a field of a field
-  println(show(l) + " " + Str(l.length2()));
+  io::println(show(l) + " " + Str(l.length2()));
 
   s = Shape(Point::origin());
   s.at.shift(3, 4);
-  println(s.at.moved(1, 1));
+  io::println(s.at.moved(1, 1));
 
   item = Item("it", Node(1), (7, 8));
   copy = item;
   copy.name = "copy";                      // copy's own field
   copy.node.n = 2;                         // the shared object
-  println(item);
-  println(copy);
+  io::println(item);
+  io::println(copy);
 
   ps: Point[3] = [Point(1, 1), Point(4, 4), Point(2, 2)];
   ps[2].x = 9;                             // an element's field, in place
-  println(farthest(ps));
+  io::println(farthest(ps));
   far = farthest(ps);
   normalize(far);                          // the caller's variable, replaced
-  println(far);
+  io::println(far);
 
   pair = twice(p);                         // (Point, Point)
   b = Box(Point(2, 3));
   t: (Point, Str) = (b.get(), "boxed");
-  println(Str(pair.1.sum()) + " " + Str(t.0.y) + " " + t.1 + " " +
-          Str(hashOf(p) == Point(6, 2).hash()));
+  io::println(Str(pair.1.sum()) + " " + Str(t.0.y) + " " + t.1 + " "
+      + Str(hashOf(p) == Point(6, 2).hash()));
   return p.sum() + ps[2].x;
 }

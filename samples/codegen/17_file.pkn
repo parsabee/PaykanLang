@@ -1,38 +1,52 @@
-// 17_file.pkn — File builtin type: open, write, readln, equals, toString
-// Exercises: open() returning Obj (File on success, Error on failure),
-//            File.write(), File.readln() returning Obj (Str or None),
-//            File.toString(), File.equals(), destroy on scope exit.
+// 17_file.pkn — io::File: open, write, readln, equals, toString
+// Exercises: io::open() returning an error::Result<io::File> (its value on
+//            success, its error on failure), File.write(), File.readln()
+//            returning a Str? (None at the end), File.toString(),
+//            File.equals(), the file closed when the last reference goes.
 //
 // args: {tmpdir}
+
+import ::result as res;
+import ::io;
 
 // The path of the scratch file `name`: in the first argument's directory
 // (the samples harnesses pass a fresh one per run, `// args: {tmpdir}`, so
 // parallel runs never share a file), else in /tmp.
 fn scratchPath(args: view Str[], name: Str) -> Str {
-  if args.len() > 1 { return args[1] + "/" + name; }
+  if args.len() > 1 {
+    return args[1] + "/" + name;
+  }
   return "/tmp/" + name;
 }
 
 fn writelines(path: Str) -> int {
-  match open(path, "w") {
-    err: Error { printerrln("writelines: " + err.toString()); return 1; }
-    f: File {
+  r = io::open(path, "w");
+  match r.value {
+    f: io::File {
       f.write("line one\n");
       f.write("line two\n");
       f.write("line three\n");
+    }
+    None {
+      io::printerrln("writelines: " + r.error.message());
+      return 1;
     }
   }
   return 0;
 }
 
 fn readlines(path: Str) -> int {
-  match open(path, "r") {
-    err: Error { printerrln("readlines: " + err.toString()); return 1; }
-    f: File {
+  r = io::open(path, "r");
+  match r.value {
+    None {
+      io::printerrln("readlines: " + r.error.message());
+      return 1;
+    }
+    f: io::File {
       while True {
-        match f.readln() {
-          line: Str { print(line); }
-          _          { break; }
+        match f.readln().value {
+          line: Str { io::print(line); }
+          _ { break; }
         }
       }
     }
@@ -41,24 +55,33 @@ fn readlines(path: Str) -> int {
 }
 
 fn showToString(path: Str) {
-  match open(path, "r") {
-    err: Error { printerrln("showToString: " + err.toString()); }
-    f: File {
+  r = io::open(path, "r");
+  match r.value {
+    None {
+      io::printerrln("showToString: " + r.error.message());
+    }
+    f: io::File {
       s: Str = f.toString();
-      println(s);   // File@0x...
+      io::println(s);   // File@0x...
     }
   }
 }
 
 fn showEquals(path: Str) {
-  match open(path, "r") {
-    err: Error { printerrln("showEquals: " + err.toString()); }
-    f: File {
-      match open(path, "r") {
-        err2: Error { printerrln("showEquals inner: " + err2.toString()); }
-        g: File {
+  r = io::open(path, "r");
+  match r.value {
+    None {
+      io::printerrln("showEquals: " + r.error.message());
+    }
+    f: io::File {
+      r2 = io::open(path, "r");
+      match r2.value {
+        None {
+          io::printerrln("showEquals inner: " + r2.error.message());
+        }
+        g: io::File {
           eq: bool = f.equals(g);
-          println(Str<bool>(eq));  // False — different handles
+          io::println(Str<bool>(eq));  // False — different handles
         }
       }
     }
@@ -69,26 +92,32 @@ fn main(args: view Str[]) -> int {
   path: Str = scratchPath(args, "paykan_sample_17.txt");
 
   // --- 1. open for writing, write lines ------------------------------------
-  println("=== write lines ===");
+  io::println("=== write lines ===");
   writelines(path);
 
   // --- 2. open for reading, read lines back --------------------------------
-  println("=== read lines ===");
+  io::println("=== read lines ===");
   readlines(path);
 
   // --- 3. toString shows File@ prefix --------------------------------------
-  println("=== toString ===");
+  io::println("=== toString ===");
   showToString(path);
 
   // --- 4. equals: identity -------------------------------------------------
-  println("=== equals ===");
+  io::println("=== equals ===");
   showEquals(path);
 
-  // --- 5. open nonexistent file — Error arm prints message -----------------
-  println("=== open failure ===");
-  match open("/no/such/file_sample_17.txt", "r") {
-    err: Error { println("error: " + err.toString()); }
-    _          { println("unexpected success"); }
+  // --- 5. open nonexistent file — the result's error says why --------------
+  io::println("=== open failure ===");
+  failed = io::open("/no/such/file_sample_17.txt", "r");
+  match failed.value {
+    None {
+      io::println("error: " + res::name(failed.error.code) + ": "
+          + failed.error.message());
+    }
+    _ {
+      io::println("unexpected success");
+    }
   }
 
   return 0;

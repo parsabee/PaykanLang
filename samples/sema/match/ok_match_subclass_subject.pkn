@@ -1,3 +1,5 @@
+import ::io;
+
 // OK: match on a non-Obj base class — arms must be subclasses of Animal
 class Animal {}
 class Dog : Animal {}
@@ -6,8 +8,8 @@ class Cat : Animal {}
 fn main() -> int {
   a: Animal = Dog();
   match a {
-    Dog { println("woof"); }
-    Cat { println("meow"); }
+    Dog { io::println("woof"); }
+    Cat { io::println("meow"); }
     _ { }
   }
   return 0;

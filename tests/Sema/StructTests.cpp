@@ -19,7 +19,7 @@ void expectAll(const SemaResult &r, std::initializer_list<const char *> diags) {
 }
 
 std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 const char *kPoint = R"(struct Point { x: int; y: int; }
@@ -222,10 +222,9 @@ fn main() -> int {
 }
 )");
   EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics; // an optional struct is fine
   expectAll(r, {"field 'xs' in struct 'A' has type 'int[3]': a struct field "
-                "cannot be a fixed-size array yet",
-                "variable 'b' has type 'B?': optional struct types are not "
-                "supported yet"});
+                "cannot be a fixed-size array yet"});
 }
 
 TEST(Struct, CannotContainItself) {
@@ -240,7 +239,8 @@ fn main() -> int { return 0; }
                 "in place, so it cannot hold one of its own (hold it in a "
                 "class instead)",
                 "struct 'C' contains itself: a field holds a 'C'",
-                "optional struct types are not supported yet"});
+                // An optional struct holds its value in place too.
+                "struct 'D' contains itself: a field holds a 'D'"});
 }
 
 TEST(Struct, AClassMayHoldAStructThatHoldsTheClass) {
@@ -324,7 +324,7 @@ fn main() -> int {
 // -- impl blocks
 
 TEST(Struct, ImplMethodsInitStaticAndTraits) {
-  auto r = semaCheck(R"(
+  auto r = semaCheck(R"(import ::io;
 struct Point { x: int; y: int; }
 impl Point {
   fn __init__(x: int, y: int) { self.x = x; self.y = y; }
@@ -354,7 +354,7 @@ fn main() -> int {
   k = 7;
   m = p.moved(1);
   pair = twice(p);
-  println(show(p) + greet(p) + p.toString());
+  io::println(show(p) + greet(p) + p.toString());
   return p.sum() + m.x + pair.1.y + hashOf(p) + (if p.same(m) then 1 else 0);
 }
 )");
@@ -565,16 +565,16 @@ fn main() -> int { return g(A(1)); }
 }
 
 TEST(Struct, EqualityPrintingAndShow) {
-  auto r = semaCheck(R"(
+  auto r = semaCheck(R"(import ::io;
 struct A { x: int; s: Str; }
 fn main() -> int {
   a = A(1, "a");
   b = A(1, "a");
-  println(a);
-  print(a);
+  io::println(a);
+  io::print(a);
   s: Str = a.toString();
   t = (a, 1);
-  println(t);
+  io::println(t);
   return if a == b && !(a != b) && t == (b, 1) then 0 else 1;
 }
 )");

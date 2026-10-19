@@ -24,7 +24,7 @@ than one value from a function.
 - Tuples are **values held in place**, like arrays: a tuple's elements sit in the
   variable, field or array element that holds it, and assigning or passing a tuple
   copies it.  A tuple is not an `Obj`.
-- `==` / `!=` compare **element-wise**; `toString()` (and `println`) renders `(1, a)`.
+- `==` / `!=` compare **element-wise**; `toString()` (and `io::println`) renders `(1, a)`.
 
 ---
 
@@ -57,9 +57,9 @@ An element cannot be a fixed-size array for now (`tuple element 0: a fixed-size 
 t = (1, "a", 2.5);
 x: int = t.0;
 s: Str = t.1;
-println(Str<float>(t.2));
-println(n.1.0);          // "x" — chained access into a nested tuple
-println(mk().0);         // works on any tuple-valued expression
+io::println(Str<float>(t.2));
+io::println(n.1.0);          // "x" — chained access into a nested tuple
+io::println(mk().0);         // works on any tuple-valued expression
 ```
 
 `t.3` on a 3-tuple is a compile-time error:
@@ -114,6 +114,8 @@ field, a parameter, a result, an array element (`(int, Str)[3]`, `[(0, "k");
 3]`), a type argument (`Box<(Str, int)>`), a branch of a ternary:
 
 ```pkn
+import ::io;
+
 class Range {
   bounds: (int, int);                                   // a field
   view fn get() -> (int, int) { return self.bounds; }   // returned as a copy
@@ -142,8 +144,8 @@ fn main() -> int {
   t = (2, "two");                        // m is still (1, one)
   keys: (int, Str)[3] = [(0, "k"); 3];   // three copies of (0, k)
   b = Box<(Str, int)>(swap(m));          // a tuple type argument
-  println(Str(hi - lo) + " " + m.1 + " " + t.1 + " " + keys[2].1);
-  println(b.get());
+  io::println(Str(hi - lo) + " " + m.1 + " " + t.1 + " " + keys[2].1);
+  io::println(b.get());
   return 0;
 }
 ```
@@ -178,11 +180,11 @@ the tuple in a field of a class.
 ```pkn
 a = (1, "s");
 b = (1, "s");
-println(Str(a == b));               // True  — element-wise, Str by content
-println(Str<bool>(a != (2, "s")));        // True
-println(Str(((1, "x"), 2.5) == ((1, "x"), 2.5)));   // True — nested
-println(a.toString());                  // (1, s)
-println(a);                             // (1, s)
+io::println(Str(a == b));               // True  — element-wise, Str by content
+io::println(Str<bool>(a != (2, "s")));        // True
+io::println(Str(((1, "x"), 2.5) == ((1, "x"), 2.5)));   // True — nested
+io::println(a.toString());                  // (1, s)
+io::println(a);                             // (1, s)
 ```
 
 Both operands of `==` / `!=` must have the **same tuple type**.  Primitive
@@ -193,11 +195,11 @@ tuples.  `toString()` is a tuple's one method: compare with `==`, not
 `equals` (`t.equals(u)` is an error, `method call on non-class type '(int,
 int)'`).
 
-`print`, `println`, `printerr` and `printerrln` take a tuple as they take an
-`Obj`, and print what its `toString()` returns: each element as `println`
-shows it, `None` for an absent optional, an object through its own
-`toString`.  A tuple meets a `Show` bound (`fn show<T: Show>(x: view T)`, see
-`12-traits.md`), as `int` does.
+A tuple's `toString()` shows each element through its own `toString()`:
+`None` for an absent optional, an object through its class's `toString`.  A
+tuple meets a `Show` bound (`fn show<T: Show>(x: view T)`, see
+`12-traits.md`), as `int` does, so `::io`'s `print`, `println`, `printerr`
+and `printerrln` (each `fn println<T: Show>(value: view T)`) print one.
 
 Comparison is element-wise even when both sides are the same variable;
 there is no identity shortcut.  So `float` elements follow IEEE 754: a tuple
@@ -206,12 +208,14 @@ unequal to every tuple, itself included, exactly as the NaN is unequal to
 itself, while `-0.0` and `0.0` elements compare equal:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   nan = 0.0 / 0.0;
   t = (1, nan);
-  println(Str(t == t));               // nan != nan
-  println(Str(t != t));
-  println(Str((1, 2.5) == (1, 2.5)));
+  io::println(Str(t == t));               // nan != nan
+  io::println(Str(t != t));
+  io::println(Str((1, 2.5) == (1, 2.5)));
   return 0;
 }
 ```
@@ -252,14 +256,14 @@ Tuples in `match` patterns, nested destructuring, named elements, mutation,
 1-tuples, and spreading a tuple into call arguments. A `match` arm cannot name a
 tuple type (`(int, int) { … }` is rejected with "match arm type must be a class
 type"): a tuple is not an object, so no `match` subject ever holds one.  An
-optional tuple (`(int, Str)?`) is rejected, as it could not be unwrapped (see
-`10-optionals.md`).
+optional tuple (`(int, Str)?`) is unwrapped by an arm naming the tuple type
+(`t: (int, Str) { … }`) in optional mode (see `10-optionals.md`).
 
 ---
 
 ## Notes
 
-- `toString` prints the elements without quotes, as `println` does, so
+- `toString` prints the elements without quotes, as `io::println` does, so
   `("a, b", 1)` prints as `(a, b, 1)`.
 - At run time a tuple is laid out in place like a C struct: its elements one
   after another at their natural alignment, a reference element as its box, an

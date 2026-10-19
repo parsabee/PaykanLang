@@ -764,6 +764,11 @@ public:
   /// Global cache of already-analyzed modules, keyed by the resolved path
   /// of the file they came from (a source, or a .pkm).
   static StringMap<ModuleInfo> ModuleCache;
+  /// The analysis of each module of ModuleCache built from its source, by
+  /// the same key: a later compilation in the process that imports the
+  /// module gets it too (its importer's ImportedContexts), which an
+  /// in-process lowering of the program needs for the module's code.
+  static StringMap<std::shared_ptr<SemaContext>> ModuleContextCache;
 
   /// The exports of the module this Sema analysed (after run()): what an
   /// importer sees, in the module's own terms.  @p moduleName is its

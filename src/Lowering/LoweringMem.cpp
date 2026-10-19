@@ -51,6 +51,8 @@ std::pair<ast::Type *, int64_t> innermostElements(ast::FixedArrayType *ft) {
 bool holdsRef(const ast::Type *ty) {
   if (ast::isRefType(ty) || ast::isFunctionValue(ty))
     return true;
+  if (ast::isMemOptional(ty))
+    return holdsRef(ast::cast<ast::OptionalType>(ty)->getInnerType());
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
     return holdsRef(ft->getElementType());
   if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty))
@@ -87,8 +89,8 @@ bool ModuleLowering::memHoldsRefs(const ast::Type *ty) {
 }
 
 ModuleLowering::MemLayout ModuleLowering::memLayout(ast::Type *ty) {
-  if (ast::isFunctionValue(ty))
-    return memLayout(functionValueShape());
+  if (ast::Type *shape = memShapeOf(ty); shape != ty)
+    return memLayout(shape);
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
     MemLayout elem = memLayout(ft->getElementType());
     return {elem.Size * ft->getLength(), elem.Align};
@@ -117,18 +119,54 @@ int64_t ModuleLowering::tupleElementOffset(const ast::TupleType *tt, size_t i) {
   return offset;
 }
 
+ast::Type *ModuleLowering::memTypeOf(ast::Expr *e) {
+  ast::Type *coerced = e->getCoercedType();
+  if (coerced && ast::isMemType(coerced) &&
+      (isMemOptionalWrap(e) || ast::isa<ast::NoneLiteral>(e)))
+    return coerced;
+  if (ast::isa<ast::NoneLiteral>(e) && !ast::isMemType(e->getResolvedType()))
+    return functionValueShape(); // an optional function value's, by default
+  return e->getResolvedType();
+}
+
+void ModuleLowering::emitMemOptionalWrap(ast::Expr *e, const Val &dst) {
+  // The flag, then the value in place: its own initialisation, not wrapped
+  // again.
+  ast::Type *optTy = e->getCoercedType();
+  B.memZero(dst, Val::i64(memLayout(optTy).Size));
+  B.ptrStore(dst, Val::boolean(true));
+  const ast::Expr *saved = std::exchange(UnwrappedExpr, e);
+  emitMemInit(e, B.ptrAdd(dst, Val::i64(memOptionalPayloadOffset(optTy)),
+                          "opt.value.addr"));
+  UnwrappedExpr = saved;
+}
+
 ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
-  // A function value made here: a lambda, a named function, or None for an
-  // optional one (no code, no closure), written into a temporary.  A None
-  // held in memory is always an optional function value's.
-  if (ast::isa<ast::NoneLiteral>(e) || isFunctionValueExpr(e)) {
+  // A tuple or a struct made the present value of its optional: the
+  // optional, in a temporary.
+  if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
+    MemLayout l = memLayout(e->getCoercedType());
+    pir::LocalId tmp = B.addMemLocal("opt", l.Size, l.Align);
+    Val addr = B.localAddr(tmp, "opt.addr");
+    emitMemOptionalWrap(e, addr);
+    return {addr, /*Temp=*/true};
+  }
+  // None of an optional held in memory: all zeros.
+  if (ast::isa<ast::NoneLiteral>(e)) {
+    MemLayout l = memLayout(memTypeOf(e));
+    pir::LocalId tmp = B.addMemLocal("none", l.Size, l.Align);
+    Val addr = B.localAddr(tmp, "none.addr");
+    B.memZero(addr, Val::i64(l.Size));
+    return {addr, /*Temp=*/true};
+  }
+  // A function value made here: a lambda or a named function, written into
+  // a temporary.
+  if (isFunctionValueExpr(e)) {
     MemLayout l = memLayout(functionValueShape());
     pir::LocalId tmp = B.addMemLocal("fn", l.Size, l.Align);
     Val addr = B.localAddr(tmp, "fn.addr");
     if (auto *le = ast::dyn_cast<ast::LambdaExpr>(e)) {
       emitLambdaInto(le, addr);
-    } else if (ast::isa<ast::NoneLiteral>(e)) {
-      B.memZero(addr, Val::i64(l.Size));
     } else {
       auto *fnt = ast::cast<ast::FunctionType>(e->getResolvedType());
       auto *ev = ast::dyn_cast<ast::EnumValueExpr>(e);
@@ -225,8 +263,8 @@ void ModuleLowering::forEachMemRef(const Val &addr, ast::Type *ty,
                                    const std::function<void(Val)> &fn) {
   if (!addr || !holdsRef(ty))
     return;
-  if (ast::isFunctionValue(ty)) {
-    forEachMemRef(addr, functionValueShape(), fn);
+  if (ast::Type *shape = memShapeOf(ty); shape != ty) {
+    forEachMemRef(addr, shape, fn);
     return;
   }
   if (ast::isRefType(ty)) {
@@ -327,7 +365,11 @@ Val ModuleLowering::emitElementLoad(const Val &addr, ast::Type *ty) {
 }
 
 void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
-  ast::Type *ty = e->getResolvedType();
+  if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
+    emitMemOptionalWrap(e, dst);
+    return;
+  }
+  ast::Type *ty = e == UnwrappedExpr ? e->getResolvedType() : memTypeOf(e);
   if (auto *tl = ast::dyn_cast<ast::TupleLiteralExpr>(e)) {
     auto *tt = ast::cast<ast::TupleType>(ty);
     for (size_t i = 0; i < tl->getNumElements(); ++i) {
@@ -479,7 +521,7 @@ Val ModuleLowering::emitMemResultSlot(ast::Type *ty) {
 void ModuleLowering::emitMemAssign(const Val &dst, ast::Expr *value) {
   // A literal is built in a temporary first: its elements may read the
   // value it replaces (`xs = [xs[1], xs[0]];`, `t = (t.1, t.0);`).
-  ast::Type *ty = value->getResolvedType();
+  ast::Type *ty = memTypeOf(value);
   size_t mark = MemTemps.size();
   MemValue src = emitMemValue(value);
   if (!src.Addr)
@@ -525,9 +567,20 @@ Val ModuleLowering::emitTupleLayout(ast::TupleType *tt) {
                                     : int64_t{names::kNativeKindTuple})
                              : int64_t{nativeTypeKind(e)});
       words.push_back(tupleElementOffset(t, i));
-      if (nested)
+      if (nested) {
         append(nested);
-      else if (ast::isa<ast::OptionalType>(e))
+      } else if (ast::isMemOptional(e)) {
+        // An optional tuple or struct: the presence flag at the entry's
+        // offset, then a whole entry for the value (Runtime.h, "Tuples").
+        auto *value = ast::cast<ast::TupleType>(ast::stripOptional(e));
+        const int64_t kind = ast::isa<ast::StructType>(value)
+                                 ? int64_t{names::kNativeKindStruct}
+                                 : int64_t{names::kNativeKindTuple};
+        words.push_back(kind);
+        words.push_back(kind);
+        words.push_back(tupleElementOffset(t, i) + memOptionalPayloadOffset(e));
+        append(value);
+      } else if (ast::isa<ast::OptionalType>(e))
         words.push_back(ast::isValueOptional(e)
                             ? int64_t{nativeTypeKind(ast::stripOptional(e))}
                             : int64_t{names::kNativeKindObject});

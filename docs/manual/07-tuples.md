@@ -11,14 +11,16 @@ A tuple type lists its element types in parentheses, `(int, Str)`, and a tuple v
 its elements the same way. Elements are read with `.0`, `.1` and so on:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   pair: (int, Str) = (7, "seven");
   point = (2.5, -1.0, True);          // (float, float, bool)
   nested = ("a", (1, 2));             // (Str, (int, int))
-  println(pair.1 + " is " + Str(pair.0));
-  println(Str(point.0 + point.1));
-  println(Str(nested.1.0 + nested.1.1));
-  println(nested);
+  io::println(pair.1 + " is " + Str(pair.0));
+  io::println(Str(point.0 + point.1));
+  io::println(Str(nested.1.0 + nested.1.1));
+  io::println(nested);
   return 0;
 }
 ```
@@ -35,7 +37,7 @@ seven is 7
 - A tuple has at least two elements; `(x)` is just `x` in parentheses.
 - The index after the dot must be a number written in the source, and the compiler checks
   it: `pair.2` on a pair is an error.
-- `println` prints a tuple as its elements in parentheses, strings without quotes.
+- `io::println` prints a tuple as its elements in parentheses, strings without quotes.
 - There is no implicit `int` to `float` promotion inside a tuple literal:
   `t: (float, int) = (1, 2)` is an error, so write `(1.0, 2)`.
 
@@ -48,6 +50,8 @@ A function returns a tuple by listing the values, and the caller takes it apart 
 **destructuring**: several names on the left of `=`, separated by commas.
 
 ```pkn
+import ::io;
+
 fn divmod(a: int, b: int) -> (int, int) {
   return (a / b, a % b);
 }
@@ -66,17 +70,17 @@ fn minMax(xs: view int[]) -> (int, int) {
 
 fn main() -> int {
   q, r = divmod(17, 5);
-  println("17 = 5 * " + Str(q) + " + " + Str(r));
+  io::println("17 = 5 * " + Str(q) + " + " + Str(r));
 
   lo, hi = minMax([4, -2, 9, 3]);
-  println("range " + Str(lo) + ".." + Str(hi));
+  io::println("range " + Str(lo) + ".." + Str(hi));
 
   _, rem = divmod(100, 7);          // _ skips an element
-  println("100 % 7 = " + Str(rem));
+  io::println("100 % 7 = " + Str(rem));
 
   q, r = divmod(9, 2);              // assigns the existing q and r
   a: float, b: int = (1, 2);        // annotated targets; 1 becomes a float
-  println(Str(q) + " " + Str(r) + " " + Str(a) + " " + Str(b));
+  io::println(Str(q) + " " + Str(r) + " " + Str(a) + " " + Str(b));
   return 0;
 }
 ```
@@ -105,15 +109,17 @@ by element, with each element compared the way `==` compares it on its own (stri
 content):
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   scores: (Str, int)[3] = [("ada", 92), ("alan", 85), ("grace", 97)];
   i = 0;
   while i < scores.len() {
     name, score = scores[i];
-    println(name + ": " + Str(score));
+    io::println(name + ": " + Str(score));
     i = i + 1;
   }
-  println(Str(scores[0] == ("ada", 92)) + " " + Str(scores[0] == ("ada", 91)));
+  io::println(Str(scores[0] == ("ada", 92)) + " " + Str(scores[0] == ("ada", 91)));
   return 0;
 }
 ```
@@ -137,6 +143,8 @@ by a `|`, such as `fix the leak|high`. A `splitOnce` function returns the two pa
 tuple, and a `stats` function counts done and pending tasks in one pass:
 
 ```pkn
+import ::io;
+
 class Task {
   title: Str;
   done: bool;
@@ -176,12 +184,12 @@ fn stats(tasks: view Task[]) -> (int, int) {
 
 fn main() -> int {
   title, priority = splitOnce("fix the leak|high", '|');
-  println("title '" + title + "', priority '" + priority + "'");
-  println(splitOnce("no separator", '|'));
+  io::println("title '" + title + "', priority '" + priority + "'");
+  io::println(splitOnce("no separator", '|'));
 
   tasks = [Task("a", True), Task("b", False), Task("c", True)];
   done, pending = stats(tasks);
-  println(Str(done) + " done, " + Str(pending) + " pending");
+  io::println(Str(done) + " done, " + Str(pending) + " pending");
   return 0;
 }
 ```
@@ -200,6 +208,8 @@ When a group of values has a shape worth naming, declare a **struct**: a value w
 fields. `tasks` keeps its statistics in one:
 
 ```pkn
+import ::io;
+
 struct Stats {
   done: int;
   pending: int;
@@ -220,8 +230,8 @@ fn main() -> int {
   s.pending = s.pending + 10;       // a field is assigned in place
   t = s;                            // a copy
   t.done = 0;
-  println(s);
-  println(Str(s.total()) + " " + Str(t.total()) + " " + Str(s == t));
+  io::println(s);
+  io::println(Str(s.total()) + " " + Str(t.total()) + " " + Str(s == t));
   return 0;
 }
 ```

@@ -14,8 +14,8 @@ TEST(Mov, RemovedKeywordIsOneErrorPerUse) {
       {"fn take(s: Str) -> Str { return mov s; }\n"
        "fn main() -> int { return 0; }",
        1},
-      {"fn make() -> Str { return \"x\"; }\n"
-       "fn main() -> int { t = mov make(); println(mov t); return 0; }",
+      {"import ::io; fn make() -> Str { return \"x\"; }\n"
+       "fn main() -> int { t = mov make(); io::println(mov t); return 0; }",
        2},
   };
   for (const auto &[src, errors] : cases) {

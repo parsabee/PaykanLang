@@ -18,4 +18,6 @@ impl Pair<T, T> {
   fn __init__(a: T) { self.a = a; }
 }
 
-fn main() -> int { return 0; }
+fn main() -> int {
+  return 0;
+}

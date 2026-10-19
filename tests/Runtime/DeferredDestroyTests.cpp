@@ -206,7 +206,7 @@ TEST_F(DeferredDestroy, LongChainDoesNotOverflowTheStack) {
 TEST_F(DeferredDestroy, DeepChainsThroughRuntimeContainers) {
   // A buffer drops its values when it is destroyed, through the same queue:
   // a chain of buffers, each holding one Link value whose first reference is
-  // the previous buffer, with a Str or an Error and a Str of the index
+  // the previous buffer, with a Str or a File and a Str of the index
   // hanging off every one.
   struct Link {
     PaykanShared *prev; // NULL in the first buffer
@@ -227,7 +227,7 @@ TEST_F(DeferredDestroy, DeepChainsThroughRuntimeContainers) {
   for (int i = 0; i < kLen; ++i) {
     PaykanObject *leaf =
         i % 2 ? reinterpret_cast<PaykanObject *>(PaykanString_new("x", 1))
-              : reinterpret_cast<PaykanObject *>(PaykanError_new("e", 1));
+              : reinterpret_cast<PaykanObject *>(PaykanFile_new());
     Link link = {prev, PaykanShared_new(leaf),
                  PaykanShared_new(reinterpret_cast<PaykanObject *>(
                      PaykanString_from_int(i)))};

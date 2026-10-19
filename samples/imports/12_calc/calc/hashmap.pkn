@@ -25,7 +25,7 @@ class Entry {
   fn append(e: Entry) {
     match self.next {
       n: Entry { n.append(e); }
-      None     { self.next = e; }
+      None { self.next = e; }
     }
   }
 
@@ -46,17 +46,15 @@ class Entry {
 }
 
 impl Entry {
-  fn __init__(k: Str, v: float) {
-    self.key = k;
-    self.value = v;
-  }
+  fn __init__(k: Str, v: float) { self.key = k; self.value = v; }
 }
 
 // Ordinal of a character: its 1-based index in a reference alphabet, or 0 for
 // any character outside it. Distinct identifier characters get distinct codes,
 // which is all the hash needs.
 fn charOrd(c: char) -> int {
-  alpha: Str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+  alpha: Str =
+      "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
   i: int = 0;
   while i < alpha.len() {
     if alpha[i] == c { return i + 1; }
@@ -88,7 +86,9 @@ class HashMap {
     while cur != None {
       match cur {
         e: Entry {
-          if e.key.equals(key) { return e; }
+          if e.key.equals(key) {
+            return e;
+          }
           cur = e.next;
         }
         None { }
@@ -108,8 +108,12 @@ class HashMap {
       None {
         b: int = self.indexFor(key);
         match self.buckets[b] {
-          first: Entry { first.append(Entry(key, value)); }
-          None         { self.buckets[b] = Entry(key, value); }
+          first: Entry {
+            first.append(Entry(key, value));
+          }
+          None {
+            self.buckets[b] = Entry(key, value);
+          }
         }
         return True;
       }
@@ -117,7 +121,9 @@ class HashMap {
   }
 
   fn put(key: Str, value: float) {
-    if self.insert(key, value) { self.size = self.size + 1; }
+    if self.insert(key, value) {
+      self.size = self.size + 1;
+    }
   }
 
   // Delete a key. Returns True if it was present.
@@ -142,20 +148,14 @@ class HashMap {
   // bucket order.  `bucket` is not a `view fn`: the entries it reaches can be
   // changed.
   view fn bucketCount() -> int { return self.buckets.len(); }
-  fn bucket(b: int) -> Entry? { return self.buckets[b]; }
+  fn bucket(b: int) -> Entry?  { return self.buckets[b]; }
 
-  view fn count() -> int { return self.size; }
+  view fn count() -> int       { return self.size; }
 
   // Drop all entries.
-  fn clear() {
-    self.buckets = [None; 8];
-    self.size = 0;
-  }
+  fn clear()                   { self.buckets = [None; 8]; self.size = 0; }
 }
 
 impl HashMap {
-  fn __init__() {
-    self.buckets = [None; 8];
-    self.size = 0;
-  }
+  fn __init__() { self.buckets = [None; 8]; self.size = 0; }
 }

@@ -91,7 +91,7 @@ fn main() -> int { return 0; }
 // parameters or bound to a `view` local, never changed or stored.  A value
 // type can still be copied out.
 TEST(BorrowedResult, TheResultIsAView) {
-  auto r = semaCheck(R"(class Counter {
+  auto r = semaCheck(R"(import ::io; class Counter {
   n: int;
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
@@ -110,7 +110,7 @@ impl Box {
   fn __init__() { self.c = Counter(); self.k = 3; }
 }
 fn keep(c: Counter) { }
-fn show(c: view Counter) { println(Str(c.get())); }
+fn show(c: view Counter) { io::println(Str(c.get())); }
 fn twice(n: int) -> int { return 2 * n; }
 fn main() -> int {
   b = Box();
@@ -245,7 +245,7 @@ fn main() -> int { return 0; }
 // receiver and the arguments to its `view` / `inout` parameters) until the
 // local's last use, and so does a `match` arm's `n: view T` of one.
 TEST(BorrowedResult, CallSiteBorrows) {
-  auto r = semaCheck(R"(class Counter {
+  auto r = semaCheck(R"(import ::io; class Counter {
   n: int;
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
@@ -269,15 +269,15 @@ fn main() -> int {
   b = Box();
   v: view = b.peek();
   b.c = Counter();
-  println(Str(v.get()));
+  io::println(Str(v.get()));
   b.c = Counter();
   s = "hello";
   t = "hi";
   w: view = longer(s, t);
   t = "bye";
-  println(w);
+  io::println(w);
   match b.peek() {
-    d: view Counter { b.c.tick(); println(Str(d.get())); }
+    d: view Counter { b.c.tick(); io::println(Str(d.get())); }
     _ { }
   }
   return 0;

@@ -6,23 +6,31 @@ file and takes commands from the command line.
 
 ## Opening files
 
-`open(path, mode)` opens a file. The mode is `"r"` to read, `"w"` to write (creating the
-file, or emptying an existing one) or `"a"` to append. Opening can fail, so `open` returns
-an `Obj` that is either a `File` or an `Error`, and you tell them apart with `match`:
+Files, like printing, come from the standard library's `::io` module. `io::open(path, mode)`
+opens a file. The mode is `"r"` to read, `"w"` to write (creating the file, or emptying an
+existing one) or `"a"` to append. Opening can fail, so `open` returns a **result**: a
+`Result<io::File>` from the `::result` module, holding an `error` and a `value`. The value is
+an `io::File?`, the file when the open succeeded and `None` when it did not, and you tell the
+two apart with `match`:
 
 ```pkn
+import ::io;
+import ::result as res;
+
 fn main() -> int {
-  match open("notes.txt", "w") {
-    f: File {
+  w = io::open("notes.txt", "w");
+  match w.value {
+    f: io::File {
       f.write("first line\n");
       f.write("second line\n");
     }
-    err: Error { printerrln(err.toString()); }
+    None { io::printerrln(w.error.message()); }
   }
 
-  match open("no/such/dir/notes.txt", "r") {
-    f: File    { println("opened?"); }
-    err: Error { println("error: " + err.toString()); }
+  r = io::open("no/such/dir/notes.txt", "r");
+  match r.value {
+    f: io::File { io::println("opened?"); }
+    None { io::println("error: " + res::name(r.error.code) + ": " + r.error.message()); }
   }
   return 0;
 }
@@ -31,51 +39,71 @@ fn main() -> int {
 Output:
 
 ```
-error: open("no/such/dir/notes.txt", "r"): No such file or directory
+error: NotFound: No such file or directory
 ```
 
-An `Error`'s `toString()` is its message. Relative paths are relative to the directory the
-program runs in, not to the source file.
+A result's `error` is a `res::Error`: a `code`, one of the standard `res::ErrorCode`s
+(`Ok`, `NotFound`, `PermissionDenied`, `EndOfFile` and the rest), and a message.
+`error.message()` is the message, here the operating system's, and `res::name(code)` is the
+code's name. The error's code is `Ok` exactly when the value is there; `r.isOk()` tests it.
+Relative paths are relative to the directory the program runs in, not to the source file.
 
-There is no `close`: a `File` is closed automatically when the last reference to it goes
-away, which for the `f` bound in a `match` arm is the end of the `match`. Everything written
-is on disk by then, so the file can be opened again right after.
+`f.write(s)` reports failure the same way: it returns a `res::Error`, whose code is `Ok` when
+it wrote. The example ignores it; `if !f.write(s).isOk() { ... }` checks it.
+
+There is no `close`: a file is closed automatically when the last reference to it goes
+away. The result holds one, so above `notes.txt` stays open until `w` goes away at the end
+of `main`. Everything written is on disk once the file is closed; to read back a file you
+wrote, write it in a function of its own, which closes it when it returns (the next
+example does).
 
 ## Reading
 
-A `File` has three reading methods. Each returns an `Obj`: a `Str` with the data, or `None`
-when there is nothing more to read.
+An `io::File` has three reading methods. Each returns a `Result<Str>`: its `value` is a
+`Str?`, the data read, or `None` when there is nothing more to read (its error is then
+`EndOfFile`).
 
-| Method          | Returns                                                       |
+| Method          | Reads                                                         |
 |-----------------|---------------------------------------------------------------|
 | `readln()`      | the next line, **including** its `\n` if it has one           |
 | `readbytes(n)`  | the next `n` bytes (fewer at the end of the file)             |
 | `read()`        | everything that is left                                       |
 
-Because they return `Obj` rather than `Str?`, the arm for the absent case is `_` (a `None`
-arm is only for optional types). A line-by-line loop looks like this:
+A line-by-line loop matches each read's `value`:
 
 ```pkn
-fn main() -> int {
-  match open("shopping.txt", "w") {
-    f: File    { f.write("eggs\nflour\nsugar\n"); }
-    err: Error { printerrln(err.toString()); return 1; }
-  }
+import ::io;
 
-  match open("shopping.txt", "r") {
-    f: File {
+// Writes `text` to the file at `path`; False if it could not.
+fn writeFile(path: Str, text: Str) -> bool {
+  w = io::open(path, "w");
+  match w.value {
+    f: io::File { return f.write(text).isOk(); }
+    None {
+      io::printerrln(w.error.message());
+      return False;
+    }
+  }
+}   // the file is closed here, when `w` and `f` go away
+
+fn main() -> int {
+  if !writeFile("shopping.txt", "eggs\nflour\nsugar\n") { return 1; }
+
+  r = io::open("shopping.txt", "r");
+  match r.value {
+    f: io::File {
       n = 0;
       while True {
-        match f.readln() {
+        match f.readln().value {
           line: Str {
             n = n + 1;
-            print(Str(n) + ": " + line);   // line ends in \n already
+            io::print(Str(n) + ": " + line);   // line ends in \n already
           }
-          _ { break; }                     // None: end of file
+          None { break; }                   // end of file
         }
       }
     }
-    err: Error { printerrln(err.toString()); return 1; }
+    None { io::printerrln(r.error.message()); return 1; }
   }
   return 0;
 }
@@ -89,20 +117,22 @@ Output:
 3: sugar
 ```
 
-Note `return 1;` inside the `Error` arms: `main` can return from anywhere, and a non-zero
-exit status tells the caller something failed.
+Note `return 1;` in `main` when the file cannot be written or opened: `main` can return
+from anywhere, and a non-zero exit status tells the caller something failed.
 
 ## Standard input
 
-`Stdin` is a built-in `File` connected to the program's standard input. It is always open,
+`io::stdin()` is an `io::File` connected to the program's standard input. It is always open,
 and has the same reading methods:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   total = 0;
   bad = 0;
   while True {
-    match Stdin.readln() {
+    match io::stdin().readln().value {
       line: Str {
         // drop the trailing newline before parsing
         digits = "";
@@ -116,10 +146,10 @@ fn main() -> int {
           None   { bad = bad + 1; }
         }
       }
-      _ { break; }
+      None { break; }
     }
   }
-  println("total " + Str(total) + ", " + Str(bad) + " bad line(s)");
+  io::println("total " + Str(total) + ", " + Str(bad) + " bad line(s)");
   return 0;
 }
 ```
@@ -143,9 +173,9 @@ Run it as `printf '10\n20\n' | paykan sum.pkn`, or type lines and end with Ctrl-
 
 ## Standard error
 
-`printerr(x)` and `printerrln(x)` work like `print` and `println` but write to standard
-error. Use them for diagnostics, so that they do not mix with the program's real output when
-it is redirected to a file or a pipe.
+`io::printerr(x)` and `io::printerrln(x)` work like `io::print` and `io::println` but write
+to standard error. Use them for diagnostics, so that they do not mix with the program's real
+output when it is redirected to a file or a pipe.
 
 ## Command-line arguments
 
@@ -153,14 +183,16 @@ To receive its command-line arguments, `main` takes a `view Str[]`, a slice of t
 arguments (see [Arrays](06-arrays.md#arrays-are-values)):
 
 ```pkn
+import ::io;
+
 fn main(args: view Str[]) -> int {
   if args.len() < 2 {
-    printerrln("usage: greet <name>...");
+    io::printerrln("usage: greet <name>...");
     return 2;
   }
   i = 1;
   while i < args.len() {
-    println("Hello, " + args[i] + "!");
+    io::println("Hello, " + args[i] + "!");
     i = i + 1;
   }
   return 0;
@@ -280,6 +312,7 @@ fn splitOnce(s: Str, sep: char) -> (Str, Str) {
 
 ```pkn
 // file: tasks/list.pkn
+import ::io;
 import tasks::task;
 
 class TaskList {
@@ -320,10 +353,10 @@ class TaskList {
   view fn show() {
     i = 0;
     while i < self.count {
-      println(Str(i + 1) + ". " + self.tasks[i].toString());
+      io::println(Str(i + 1) + ". " + self.tasks[i].toString());
       i = i + 1;
     }
-    println(Str(self.pending()) + " of " + Str(self.count) + " to do");
+    io::println(Str(self.pending()) + " of " + Str(self.count) + " to do");
   }
 }
 
@@ -342,20 +375,21 @@ line it cannot read is reported on standard error and skipped:
 
 ```pkn
 // file: tasks/store.pkn
+import ::io;
 import tasks::{task, text, list};
 
 fn load(path: Str) -> list::TaskList {
   tasks = list::TaskList();
-  match open(path, "r") {
-    f: File {
+  match io::open(path, "r").value {
+    f: io::File {
       while True {
-        match f.readln() {
+        match f.readln().value {
           line: Str { addLine(tasks, text::trim(line)); }
-          _ { break; }
+          None { break; }
         }
       }
     }
-    _ { }   // no file yet: an empty list
+    None { }   // no file yet: an empty list
   }
   return tasks;
 }
@@ -364,17 +398,18 @@ fn addLine(tasks: list::TaskList, line: Str) {
   done, rest = text::splitOnce(line, '|');
   priority, title = text::splitOnce(rest, '|');
   if title == "" || (done != "0" && done != "1") {
-    printerrln("skipping bad line: " + line);
+    io::printerrln("skipping bad line: " + line);
     return;
   }
   t = task::Task(title, task::parsePriority(priority));
   t.done = done == "1";
-  if !tasks.addTask(t) { printerrln("the list is full, skipping: " + line); }
+  if !tasks.addTask(t) { io::printerrln("the list is full, skipping: " + line); }
 }
 
 fn save(tasks: list::TaskList, path: Str) -> bool {
-  match open(path, "w") {
-    f: File {
+  r = io::open(path, "w");
+  match r.value {
+    f: io::File {
       i = 0;
       while i < tasks.count {
         t = tasks.tasks[i];
@@ -384,26 +419,30 @@ fn save(tasks: list::TaskList, path: Str) -> bool {
       }
       return True;
     }
-    err: Error { printerrln("cannot save: " + err.toString()); }
+    None {
+      io::printerrln("cannot save: " + r.error.message());
+      return False;
+    }
   }
-  return False;
 }
 ```
 
-Note the `return False;` after the `match` in `save`. To the compiler, the result of `open`
-is just an `Obj`, which could be of any class, so a `match` with a `File` and an `Error` arm
-does not cover every case. A function that returns from inside the arms needs a `return`
-after the `match` too (or a `_` arm), or it is rejected with "does not always return a
-value".
+`save` needs no `return` after its `match`. The subject `r.value` is an `io::File?`, and an
+`io::File` arm and a `None` arm together cover every case, so the compiler knows each path
+returns. A `match` on an object of a class (an `Obj`, say) is different: an arm for each
+subclass you know of does not cover a class you don't, so a function returning from inside
+such arms needs a `return` after the `match` too (or a `_` arm), or it is rejected with
+"does not always return a value".
 
 And the new `main.pkn`:
 
 ```pkn
 // file: main.pkn
+import ::io;
 import tasks::{task, store, list};
 
 fn usage() -> int {
-  printerrln("usage: tasks add <title> [high|low] | done <number> | list");
+  io::printerrln("usage: tasks add <title> [high|low] | done <number> | list");
   return 2;
 }
 
@@ -434,7 +473,7 @@ fn main(args: view Str[]) -> int {
       if args.len() < 3 { return usage(); }
       title, priority = titleFrom(args, 2);
       if !tasks.add(title, priority) {
-        printerrln("the list is full");
+        io::printerrln("the list is full");
         return 1;
       }
       changed = True;
@@ -444,7 +483,7 @@ fn main(args: view Str[]) -> int {
       match int(args[2]) {
         n: int {
           if !tasks.complete(n) {
-            printerrln("no task " + args[2]);
+            io::printerrln("no task " + args[2]);
             return 1;
           }
         }
@@ -489,6 +528,6 @@ $ cat tasks.txt
 Build it once with `paykan build main.pkn -o tasks` and you have a `tasks` command to put on
 your `PATH`. (It saves `tasks.txt` in the directory you run it from.)
 
-The reference covers the built-in I/O functions in
-[Language basics](../language/01-language-basics.md#file-io). Next: [Memory](12-memory.md),
+The reference covers `::io` and `::result` in [the standard
+library](../language/13-standard-library.md). Next: [Memory](12-memory.md),
 which looks at what happens to all these objects.

@@ -1,5 +1,7 @@
 // ERROR: 'float' does not implement trait 'Hashable', which 'H' requires of 'T'
-struct H<T: Hashable> { v: T; }
+struct H<T: Hashable> {
+  v: T;
+}
 fn main() -> int {
   h = H(2.5);
   return 0;

@@ -8,7 +8,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 // -- Literals & type-checking
@@ -51,7 +51,7 @@ TEST(Arith, TypeMismatchAssign) {
 // -- Variable lifecycle
 
 TEST(Arith, UndeclaredVariable) {
-  auto r = semaCheck(wrapMain("println(x);"));
+  auto r = semaCheck(wrapMain("io::println(x);"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("undeclared"), std::string::npos);
 }
@@ -115,12 +115,12 @@ TEST(Arith, EqualityTypeMismatch) {
 TEST(Arith, OutAcceptsMultipleArgs) {
   auto r = semaCheck(wrapMain(R"(
     a: Str = "hello";
-    println(a + Str<int>(42));
+    io::println(a + Str<int>(42));
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Arith, OutAcceptsLiterals) {
-  auto r = semaCheck(wrapMain("println(\"hello\");"));
+  auto r = semaCheck(wrapMain("io::println(\"hello\");"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }

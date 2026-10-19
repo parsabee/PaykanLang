@@ -9,8 +9,7 @@ namespace ast {
 
 ASTContext::ASTContext()
     : IntTy(nullptr), FloatTy(nullptr), BoolTy(nullptr), CharTy(nullptr),
-      VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr), FileTy(nullptr),
-      ErrorTy(nullptr) {
+      VoidTy(nullptr), ObjTy(nullptr), StrTy(nullptr) {
   Pool.reserve(512); // the bootstrap alone makes ~150 nodes
   for (unsigned k = 0; k < BuiltinType::kNumKinds; ++k)
     BuiltinTys[k] = make<BuiltinType>(SourceLocation(), BuiltinType::Kind(k));
@@ -24,17 +23,13 @@ ASTContext::ASTContext()
   // signature can name any of them.
   ObjTy = make<ClassType>(SourceLocation(), intern(names::kObj), nullptr);
   StrTy = make<ClassType>(SourceLocation(), intern(names::kString), nullptr);
-  FileTy = make<ClassType>(SourceLocation(), intern(names::kFile), nullptr);
-  ErrorTy = make<ClassType>(SourceLocation(), intern(names::kError), nullptr);
   // The compiler builtins: Sema rejects any user class, enum, or function
   // that would reuse one of their names, and the lowering dispatches their
   // methods to the C runtime.
-  for (ClassType *builtin : {ObjTy, StrTy, FileTy, ErrorTy})
+  for (ClassType *builtin : {ObjTy, StrTy})
     builtin->setBuiltin();
   buildObjectType();
   buildStringType();
-  buildFileType();
-  buildErrorType();
 }
 
 // -- Bootstrap of the builtin classes
@@ -67,22 +62,6 @@ void ASTContext::buildStringType() {
       .method(names::kMethodLength, IntTy, {}, MethodDecl::View) // slot 3
       .method(names::kMethodConcat, VoidTy, {StrTy})             // slot 4
       .build();
-}
-
-void ASTContext::buildFileType() {
-  FileTy->setSuperClass(ObjTy);
-  ClassTypeBuilder(*this, FileTy)
-      .objectSlots()
-      .method(names::kMethodWrite, VoidTy, {StrTy}) // slot 3
-      .method(names::kMethodReadln, ObjTy) // slot 4: Str, or None at EOF
-      .method(names::kMethodReadBytes, ObjTy, {IntTy}) // slot 5: up to n bytes
-      .method(names::kMethodRead, ObjTy)               // slot 6: the rest
-      .build();
-}
-
-void ASTContext::buildErrorType() {
-  ErrorTy->setSuperClass(ObjTy);
-  ClassTypeBuilder(*this, ErrorTy).objectSlots().build();
 }
 
 // -- Canonical array and slice types

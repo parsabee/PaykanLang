@@ -2,7 +2,9 @@
 class Bad {
   x: int;
   y: int;
-  view fn toString() -> Str { return Str<int>(self.x) + "," + Str<int>(self.y); }
+  view fn toString() -> Str {
+    return Str<int>(self.x) + "," + Str<int>(self.y);
+  }
 }
 
 impl Bad {

@@ -8,7 +8,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 // -- Arithmetic
@@ -16,7 +16,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(Arith, IntArithmetic) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 2 + 3 * 4;
-    println(Str<int>(x));
+    io::println(Str<int>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "14\n");
@@ -25,7 +25,7 @@ TEST(Arith, IntArithmetic) {
 TEST(Arith, FloatArithmetic) {
   auto r = compileAndRun(wrapMain(R"(
     x: float = 1.5 + 2.5;
-    println(Str<float>(x));
+    io::println(Str<float>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "4\n");
@@ -35,7 +35,7 @@ TEST(Arith, BoolLiterals) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True;
     b: bool = False;
-    println(Str<bool>(a) + Str<bool>(b));
+    io::println(Str<bool>(a) + Str<bool>(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "TrueFalse\n");
@@ -44,7 +44,7 @@ TEST(Arith, BoolLiterals) {
 // -- String primitives
 
 TEST(Arith, StringLiteral) {
-  auto r = compileAndRun(wrapMain(R"(println("hello world");)"));
+  auto r = compileAndRun(wrapMain(R"(io::println("hello world");)"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hello world\n");
 }
@@ -54,7 +54,7 @@ TEST(Arith, StringConcat) {
     a: Str = "hello";
     b: Str = " world";
     c: Str = a + b;
-    println(c);
+    io::println(c);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hello world\n");
@@ -62,7 +62,7 @@ TEST(Arith, StringConcat) {
 
 TEST(Arith, StringBuiltins) {
   auto r = compileAndRun(wrapMain(R"(
-    println(Str<int>(42) + Str<float>(3.14) + Str<bool>(True));
+    io::println(Str<int>(42) + Str<float>(3.14) + Str<bool>(True));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "423.14True\n");
@@ -71,7 +71,7 @@ TEST(Arith, StringBuiltins) {
 TEST(Arith, StringVarBasic) {
   auto r = compileAndRun(wrapMain(R"(
     a: Str = "alpha";
-    println(a);
+    io::println(a);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "alpha\n");
@@ -81,7 +81,7 @@ TEST(Arith, StringReassign) {
   auto r = compileAndRun(wrapMain(R"(
     a: Str = "alpha";
     a = "beta";
-    println(a);
+    io::println(a);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "beta\n");
@@ -100,7 +100,7 @@ std::string floatCompareProgram(const std::vector<std::string> &pairs) {
                      "  one: float = 1.0;\n";
   for (size_t i = 0; i + 1 < pairs.size(); i += 2) {
     const std::string &a = pairs[i], &b = pairs[i + 1];
-    body += "  println(\"\"";
+    body += "  io::println(\"\"";
     for (const char *op : {"!=", "==", "<", "<=", ">", ">="})
       body.append(" + (if ")
           .append(a)
@@ -147,14 +147,14 @@ TEST(FloatCompare, NaNNotEqualAsAConditionAndANegation) {
   auto r = compileAndRun(wrapMain(R"(
     inf: float = 1.0e308 * 10.0;
     n: float = inf - inf;
-    if n != n { println("ne"); } else { println("eq"); }
+    if n != n { io::println("ne"); } else { io::println("eq"); }
     b: bool = n != n;
-    println(Str<bool>(b));
-    println(Str<bool>(!(n != n)));
-    println(Str<bool>(!(n == n)));
+    io::println(Str<bool>(b));
+    io::println(Str<bool>(!(n != n)));
+    io::println(Str<bool>(!(n == n)));
     i = 0;
     while n != n && i < 3 { i = i + 1; }
-    println(Str<int>(i));
+    io::println(Str<int>(i));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
@@ -169,14 +169,14 @@ TEST(FloatCompare, NaNThroughTupleOptionalAndMatch) {
     // Element-wise tuple equality compares the float elements with ==.
     t1: (float, int) = (n, 1);
     t2: (float, int) = (n, 1);
-    println(Str<bool>(t1 == t2) + " " + Str<bool>(t1 != t2));
+    io::println(Str<bool>(t1 == t2) + " " + Str<bool>(t1 != t2));
     // Two present `float?`s compare their values with ==.
     f: float? = float<Str>("nan");
-    println(Str<bool>(f == f) + " " + Str<bool>(f != f));
+    io::println(Str<bool>(f == f) + " " + Str<bool>(f != f));
     // A float value match tests each arm with ==: NaN takes the wildcard.
     match n {
-      1.0 { println("one"); }
-      _ { println("other"); }
+      1.0 { io::println("one"); }
+      _ { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;

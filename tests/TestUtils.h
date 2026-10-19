@@ -6,6 +6,7 @@
 #pragma once
 
 #include "ASTPrinter.h"
+#include "ModuleUtils.h"
 #include "ParserDriver.h"
 #include "Sema.h"
 
@@ -23,6 +24,16 @@
 #include <string>
 
 namespace paykan::test {
+
+#ifdef PAYKAN_TEST_STDLIB_DIR
+/// The standard library the tests' programs import (`import ::io;`): the
+/// build's staged copy, unless $PAYKAN_STDLIB names another.
+inline const bool kTestStdlibFound = [] {
+  if (!std::getenv(names::kPaykanStdlibEnv))
+    module_utils::installedStdlibDir() = PAYKAN_TEST_STDLIB_DIR;
+  return true;
+}();
+#endif
 
 /// A scratch directory private to this test process.  The parser and Sema
 /// suites run once per enabled frontend, and CTest may run those processes

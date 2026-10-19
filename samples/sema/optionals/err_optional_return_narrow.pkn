@@ -11,4 +11,6 @@ fn first(n: Node?) -> Node {
   return n;   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
 }
 
-fn main() -> int { return 0; }
+fn main() -> int {
+  return 0;
+}

@@ -42,18 +42,20 @@ fn find(head: Node?, key: int) -> Node? {
 
 - `T?` is written as a suffix and is allowed in every type position: variables, fields,
   parameters, return types, match arms and array element types (`Node?[3]`).
-- Reference types (classes, `Str`) and the primitives `int`, `float`, `bool`, `char` and
-  the sized numeric types (`u8?`, `f32?`, …) can be optional (see [Optional
-  Primitives](#optional-primitives)). `Enum?`, `void?`, `T??`,
-  optional tuples and optional arrays (`int[3]?`) are rejected.
+- Reference types (classes, `Str`), the primitives `int`, `float`, `bool`, `char` and
+  the sized numeric types (`u8?`, `f32?`, …), enums, tuples and structs can be optional
+  (see [Optional Primitives](#optional-primitives) and [Optional Enums, Tuples and
+  Structs](#optional-enums-tuples-and-structs)). `void?`, a written `T??` and optional
+  fixed-size arrays (`int[3]?`) are rejected.
 - `None` is the absent value. A `T` converts to `T?` implicitly; a `T?` **never** converts back
   to `T` — unwrap it with `match`.
 - On a `T?` you may: assign it, pass and return it, store it in fields and arrays,
-  compare it with `==`/`!=` against `None` or another optional, and `match` on it. Everything
-  else (fields, methods, subscripts, `+`, `toString()`) needs a `match` first.
+  compare it with `==`/`!=` against `None` or another optional, call `toString()` on it
+  (`"None"` or the value's text), and `match` on it. Everything else (fields, other methods,
+  subscripts, `+`) needs a `match` first.
 - A field of type `T?` is `None` unless `__init__` assigns it.
-- A `T?` is not an object: it never becomes an `Obj`, but the print family takes one directly
-  (`println(maybe)` prints `None` or the value).
+- A `T?` is not an object: it never becomes an `Obj`, but an optional of a `Show` type is
+  `Show` itself, so `io::println(maybe)` prints `None` or the value.
 
 ---
 
@@ -89,8 +91,8 @@ stores that would need the unwrapped value.
 
 ```pkn
 match maybe {
-  n: Node { println(Str<int>(n.v)); }   // present — any Node, whatever its runtime subclass
-  None    { println("nothing"); }     // absent
+  n: Node { io::println(Str<int>(n.v)); }   // present — any Node, whatever its runtime subclass
+  None    { io::println("nothing"); }     // absent
 }
 ```
 
@@ -102,8 +104,8 @@ match maybe {
 
   ```pkn
   match maybe {
-    l: Leaf { println("a leaf"); }
-    n: Node { println("some other node"); }
+    l: Leaf { io::println("a leaf"); }
+    n: Node { io::println("some other node"); }
     None    { }
   }
   ```
@@ -124,9 +126,9 @@ match maybe {
 - The subject can be any optional expression: a variable, a field (`match self.next { … }`), a
   call result, an array element.
 
-Matching on an `Obj` subject is unchanged; in particular the `match Stdin.readln() { line: Str
-{ … } _ { … } }` idiom keeps working exactly as before, and a `None` arm is only valid on an
-optional subject.
+Matching on an `Obj` subject is unchanged, and a `None` arm is only valid on an optional
+subject. A read's result holds a `Str?`, so the `match io::stdin().readln().value { line: Str
+{ … } _ { … } }` idiom is an optional-mode match.
 
 ---
 
@@ -137,7 +139,7 @@ optional subject.
 
 ```pkn
 while cur != None { … }
-if find(head, 9) == None { println("not found"); }
+if find(head, 9) == None { io::println("not found"); }
 ```
 
 Two optionals can be compared with each other when their wrapped types are the same or
@@ -196,15 +198,69 @@ fn show(o: int?) -> Str {
 - Optional primitives work everywhere a type is written. That includes fields (implicitly
   `None`), array elements, tuple elements, parameters, returns, ternaries
   (`if c then 3 else None` is an `int?`) and generic arguments (`Box<int?>`). A `T?` inside a
-  generic class or function instantiated with `T = int` is an `int?`.
+  generic class or function instantiated with `T = int` is an `int?`, and so is one
+  instantiated with `T = int?`: a template's `T?` of a `T` that is already optional is `T`
+  itself, never a nested optional (`11-generics.md`).
 - An optional primitive is not an object (see [Optionals are not
-  objects](#optionals-are-not-objects)): `o: Obj = x` is an error. `println(x)` prints `5` or
+  objects](#optionals-are-not-objects)): `o: Obj = x` is an error. `io::println(x)` prints `5` or
   `None`.
-- `Enum?` is not supported yet ("optional enum types are not supported yet").
-
 At runtime an `int?` is a value: the `int` and a presence flag, held inline in a variable, a
 field, a parameter, an array element or a tuple element and copied like an `int`, with no heap
 allocation and no reference count. `None` is the flag being clear.
+
+---
+
+## Optional Enums, Tuples and Structs
+
+An enum, a tuple or a struct has an optional too, and like an optional primitive it is a
+value, held in place with no heap allocation of its own. A `Suit?` is the enum's ordinal
+and a presence flag. A `(int, Str)?` or a `Point?` is a presence flag followed by the
+value, laid out like the tuple `(bool, T)`; `None` is all zeros. Copying one copies the
+value, retaining the references it holds.
+
+They work as an optional primitive does: a present value widens implicitly
+(`p: Point? = Point(1, 2)`), `None` is absent, `== None` / `!= None` test it, two of the
+same type are equal when both are `None` or both are present and `==`, and a `match`
+unwraps one with an arm naming the inner type (`q: Point`, `t: (int, Str)`, `s: Suit`)
+plus `None`. They can be fields (`None` in a new object), array elements (`Point?[2]`),
+tuple elements, parameters, results and ternary branches (`if c then p else None`). An
+optional tuple or struct prints `None` or the value's text; an enum is not `Show`, and
+neither is its optional.
+
+```pkn
+import ::io;
+
+enum Suit { Hearts, Spades }
+struct Point { x: int; y: int; }
+
+fn find(n: int) -> Point? { return if n > 0 then Point(n, n * 2) else None; }
+
+fn main() -> int {
+  ps: Point?[2] = [find(3), find(0)];
+  io::println(ps[0].toString() + " " + ps[1].toString());
+  io::println(ps[0] == find(3));
+  t: (int, Str)? = (2, "two");
+  match t {
+    v: (int, Str) { io::println(v.1); }
+    None          { io::println("nothing"); }
+  }
+  s: Suit? = None;
+  match s {
+    k: Suit { io::println(k == Suit::Spades); }
+    None    { io::println("no suit"); }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+Point(x: 3, y: 6) None
+True
+two
+no suit
+```
 
 ---
 
@@ -276,12 +332,16 @@ own.
 
 An optional is a value that may be absent, not an object: a `T?` never converts to `Obj`, so
 `o: Obj = maybe` (and passing, returning or storing it where an `Obj` is expected) is an error,
-`cannot use optional 'Node?' as 'Obj': an optional is not an object; unwrap it with match`. The
-print family still takes one as it is and prints `None` or the value:
+`cannot use optional 'Node?' as 'Obj': an optional is not an object; unwrap it with match`. It
+still shows itself: an optional of a `Show` type implements `Show` (its `toString()` is
+`"None"` or the value's text), so `io::println` and any other `T: Show` function take one as
+it is:
 
 ```pkn
 maybe: Node? = None;
-println(maybe);        // None
+io::println(maybe);        // None
+n: int? = 5;
+s: Str = n.toString();     // "5"
 ```
 
 A `view` is never converted either: a `view T` cannot be passed to a `view T?` parameter or
@@ -314,9 +374,9 @@ Retaining, releasing and destroying an absent optional are no-ops. See `08-memor
 
 | Error | Trigger |
 |-------|---------|
-| `optional enum types are not supported yet` | `Enum?` |
 | `optional type 'void?' is not supported` | `void?` (at parse time, or a type argument `void`) |
-| `nested optional type 'T??' is not supported` | `T??` |
+| `nested optional type 'T??' is not supported` | a written `T??` |
+| `a fixed-size array ('int[3]') can only be a local variable, a parameter, a result or a field for now` | `int[3]?`: a fixed-size array cannot be optional |
 | `cannot use optional 'T?' as 'T' without unwrapping (use match)` | narrowing on declaration / assignment / return / argument / field or array store; member access, method call, subscript, operator or unary on a `T?` |
 | `cannot compare optional 'T?' with non-optional 'U'; compare against None or unwrap it with match` | `opt == present` |
 | `operands of '==' have mismatched types 'A?' and 'B?'` | two optionals of unrelated types |
@@ -335,7 +395,7 @@ Retaining, releasing and destroying an absent optional are no-ops. See `08-memor
 ## Not supported in v0.1
 
 Flow typing (`if x != None { x.foo(); }` does not narrow `x`), `if let`, the `??` default
-and `?.` chaining operators, optional enums, and typing `None` in a literal that has no
+and `?.` chaining operators, optional fixed-size arrays, and typing `None` in a literal that has no
 declared destination (`xs = [None, n]`).
 
 `None` itself keeps the static type `Obj`: it is accepted wherever a `T?` is expected, but an

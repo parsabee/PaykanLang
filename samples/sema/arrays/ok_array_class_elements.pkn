@@ -5,10 +5,7 @@ class Point {
 }
 
 impl Point {
-  fn __init__(px: int, py: int) {
-    self.x = px;
-    self.y = py;
-  }
+  fn __init__(px: int, py: int) { self.x = px; self.y = py; }
 }
 
 fn main() -> int {

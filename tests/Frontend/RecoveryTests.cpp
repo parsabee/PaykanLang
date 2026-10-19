@@ -42,7 +42,7 @@ std::vector<size_t> errorLines(const Result &r) {
 } // namespace
 
 TEST(Recovery, StatementBoundaries) {
-  auto r = parse("fn main() -> int {\n"
+  auto r = parse("import ::io; fn main() -> int {\n"
                  "  x: int = ;\n"     // 2
                  "  y: int = 1 + ;\n" // 3
                  "  z: int = 2;\n"
@@ -53,7 +53,7 @@ TEST(Recovery, StatementBoundaries) {
 }
 
 TEST(Recovery, BrokenNestedBlockDoesNotSwallowTheEnclosingOne) {
-  auto r = parse("fn main() -> int {\n"
+  auto r = parse("import ::io; fn main() -> int {\n"
                  "  if x {\n"
                  "    a = ;\n" // 3
                  "    b = 1;\n"
@@ -93,7 +93,7 @@ TEST(Recovery, TopLevelBoundaries) {
 }
 
 TEST(Recovery, MatchArmBoundaries) {
-  auto r = parse("fn main() -> int {\n"
+  auto r = parse("import ::io; fn main() -> int {\n"
                  "  match x {\n"
                  "    Foo { a = ; }\n" // 3
                  "    1 + 1 { }\n"     // 4
@@ -106,7 +106,7 @@ TEST(Recovery, MatchArmBoundaries) {
 }
 
 TEST(Recovery, LexicalErrorsDoNotStopTheParse) {
-  auto r = parse("fn main() -> int {\n"
+  auto r = parse("import ::io; fn main() -> int {\n"
                  "  x: int = 1 @ 2;\n" // 2: '@' (the `2` it strands is not
                  "  y: int = 3;\n"     //    reported again)
                  "  return 0 $;\n"     // 4: '$'
@@ -143,7 +143,7 @@ TEST(Recovery, BindingMessagesSurvive) {
 }
 
 TEST(Recovery, DeepNestingIsRejectedNotCrashed) {
-  std::string src = "fn main() -> int { x = ";
+  std::string src = "import ::io; fn main() -> int { x = ";
   for (int i = 0; i < 5000; ++i)
     src += '(';
   src += '1';
@@ -196,7 +196,7 @@ TEST(Recovery, NoFollowOnAfterALexicalError) {
 }
 
 TEST(Recovery, UnclosedBlocksAtEndOfFileAreOneError) {
-  auto r = parse("fn main() -> int {\n"
+  auto r = parse("import ::io; fn main() -> int {\n"
                  "  while True {\n"
                  "    if x {\n"
                  "  return 0;\n");
@@ -212,6 +212,6 @@ TEST(Recovery, UnclosedBlocksAtEndOfFileAreOneError) {
 
   auto c = parse("class A {\n  fn f() {\n");
   EXPECT_EQ(c.Errors, 1u) << c.Text;
-  auto m = parse("fn main() -> int { match 1 { _ { \n");
+  auto m = parse("import ::io; fn main() -> int { match 1 { _ { \n");
   EXPECT_EQ(m.Errors, 1u) << m.Text;
 }

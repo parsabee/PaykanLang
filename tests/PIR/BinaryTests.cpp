@@ -46,7 +46,7 @@ data @.d = [-9223372036854775807, 9223372036854775807, 0, -1, 64, -65]
 bytes @.b = []
 bytes @.k = [0, 127, 128, 255]
 extern obj @$rt.PaykanObject_None
-extern vtable @$rt.PaykanError_vtable
+extern vtable @$rt.PaykanString_vtable
 
 class "ns::Shape" {
   field "w.h": f64
@@ -85,7 +85,7 @@ fn @main() -> i64 {
   %a.8 = vcall %s.1 : "ns::Shape" [1] ()
   %b.9 = vcall %s.1 : (obj) -> f64 [1] ()
   %vt.10 = vtable.addr "ns::Shape"
-  %vt2.11 = vtable.addr @$rt.PaykanError_vtable
+  %vt2.11 = vtable.addr @$rt.PaykanString_vtable
   field.store %s.1, "ns::Shape"."w.h", %a.8
   %fl.12 = field.load %s.1, "ns::Shape"."w.h"
   if %nz.6 {

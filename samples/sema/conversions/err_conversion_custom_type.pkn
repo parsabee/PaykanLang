@@ -1,6 +1,8 @@
 // No user class can be a specialization; toString() stringifies an object.
 class Point {}
-impl Point { fn __init__() { } }
+impl Point {
+  fn __init__() { }
+}
 fn main() -> int {
   s = Str<Point>(Point());   // error: no specialization of 'Str' for 'Point'; its specializations are int, float, bool, char, i8, i16, i32, u8, u16, u32, unsigned, f16, f32
   return 0;

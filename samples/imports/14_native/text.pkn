@@ -10,4 +10,6 @@ native fn find(s: view Str, needle: view Str) -> Str? = "sample_text_find";
 native fn trim(s: inout Str) = "sample_text_trim";
 
 // Ordinary Paykan code can wrap native functions like any others.
-fn shout(s: Str) -> Str { return upper(s) + "!"; }
+fn shout(s: Str) -> Str {
+  return upper(s) + "!";
+}

@@ -2,4 +2,6 @@
 fn keep(v: view Str) -> () -> int {
   return fn() -> int { return v.len(); };
 }
-fn main() -> int { return 0; }
+fn main() -> int {
+  return 0;
+}

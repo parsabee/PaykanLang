@@ -1,28 +1,49 @@
+import ::io;
+
 // OK: a function type `(T1, T2) -> R` names what a function value takes and
 // returns; a value is a lambda or a named function, stored, passed, returned
 // and called like a function; a lambda captures the variables around it by
 // copy.
-fn square(x: int) -> int { return x * x; }
-fn apply(f: (int) -> int, x: int) -> int { return f(x); }
+fn square(x: int) -> int {
+  return x * x;
+}
+fn apply(f: (int) -> int, x: int) -> int {
+  return f(x);
+}
 fn twice(f: (int) -> int) -> (int) -> int {
-  return fn(x: int) -> int { return f(f(x)); };
+  return fn(x: int) -> int {
+    return f(f(x));
+  };
 }
 
-class Button { label: Str; onClick: (Str) -> void; }
-struct Op { name: Str; run: (int, int) -> int; }
+class Button {
+  label: Str;
+  onClick: (Str) -> void;
+}
+struct Op {
+  name: Str;
+  run: (int, int) -> int;
+}
 
 fn main() -> int {
   n = 10;
-  add = fn(x: int) -> int { return x + n; };          // captures n
+  add = fn(x: int) -> int {
+    return x + n;
+  };  // captures n
   g: (int) -> int = square;
   fs: ((int) -> int)[2] = [square, twice(add)];
-  b = Button("ok", fn(l: Str) { println(l); });
+  b = Button("ok", fn(l: Str) { io::println(l); });
   b.onClick("clicked");
   o = Op("add", fn(a: int, b: int) -> int { return a + b; });
-  v = fn(s: view Str, c: inout int) -> bool { c = c + s.len(); return c > 3; };
+  v = fn(s: view Str, c: inout int) -> bool {
+    c = c + s.len();
+    return c > 3;
+  };
   m = 0;
   ok = v("abc", m);
-  opt: (() -> int)? = fn() -> int { return 1; };
+  opt: (() -> int)? = fn() -> int {
+    return 1;
+  };
   match opt {
     f: () -> int { m = m + f(); }
     None { }

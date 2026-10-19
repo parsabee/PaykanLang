@@ -14,4 +14,6 @@ fn value(n: Node?) -> int {
   }
 }   // error: non-void function 'value' does not always return a value
 
-fn main() -> int { return value(None); }
+fn main() -> int {
+  return value(None);
+}

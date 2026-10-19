@@ -1,24 +1,33 @@
 // 19_file_copy.pkn — Copy every line from a source file to a destination file.
-// Demonstrates: open() returning Obj, match on File/Error/Str/None,
-//               File.readln() returning Str or None, File.write().
+// Demonstrates: io::open() and File.readln() returning a res::Result, matched
+//               on its value (present on success, None on failure), and
+//               File.write().
 //
-// open()   -> Obj : File on success, Error on failure
-// readln() -> Obj : Str  on a line,  None  at EOF
+// open()   -> Result<File> : the File, or the Error saying why not
+// readln() -> Result<Str>  : a line, or EndOfFile at the end
 //
 // args: {tmpdir}
+
+import ::io;
 
 // The path of the scratch file `name`: in the first argument's directory
 // (the samples harnesses pass a fresh one per run, `// args: {tmpdir}`, so
 // parallel runs never share a file), else in /tmp.
 fn scratchPath(args: view Str[], name: Str) -> Str {
-  if args.len() > 1 { return args[1] + "/" + name; }
+  if args.len() > 1 {
+    return args[1] + "/" + name;
+  }
   return "/tmp/" + name;
 }
 
 fn writeSource(path: Str) -> int {
-  match open(path, "w") {
-    err: Error { printerrln("writeSource: " + err.toString()); return 1; }
-    f: File {
+  r = io::open(path, "w");
+  match r.value {
+    None {
+      io::printerrln("writeSource: " + r.error.message());
+      return 1;
+    }
+    f: io::File {
       f.write("first line\n");
       f.write("second line\n");
       f.write("third line\n");
@@ -28,22 +37,33 @@ fn writeSource(path: Str) -> int {
   // f destroyed here -> fclose -> data flushed to disk
 }
 
-fn copy(inFile: File, outFile: File) {
+fn copy(inFile: io::File, outFile: io::File) {
   while True {
-    match inFile.readln() {
-        line: Str { outFile.write(line); }
-        _         { break; }
+    match inFile.readln().value {
+      line: Str {
+        outFile.write(line);
+      }
+      _ { break; }
     }
   }
 }
 
 fn copyFile(src: Str, dst: Str) -> int {
-  match open(src, "r") {
-    err: Error { printerrln("copyFile: cannot open src: " + err.toString()); return 1; }
-    inFile: File {
-      match open(dst, "w") {
-        err: Error { printerrln("copyFile: cannot open dst: " + err.toString()); return 1; }
-        outFile: File {
+  input = io::open(src, "r");
+  match input.value {
+    None {
+      io::printerrln("copyFile: cannot open src: " + input.error.message());
+      return 1;
+    }
+    inFile: io::File {
+      output = io::open(dst, "w");
+      match output.value {
+        None {
+          io::printerrln("copyFile: cannot open dst: "
+              + output.error.message());
+          return 1;
+        }
+        outFile: io::File {
           copy(inFile, outFile);
         }
       }
@@ -54,17 +74,20 @@ fn copyFile(src: Str, dst: Str) -> int {
 }
 
 fn printFile(path: Str) -> int {
-  match open(path, "r") {
-    err: Error { printerrln("printFile: " + err.toString()); return 1; }
-    f: File {
+  r = io::open(path, "r");
+  match r.value {
+    None {
+      io::printerrln("printFile: " + r.error.message());
+      return 1;
+    }
+    f: io::File {
       while True {
-        match f.readln() {
-          line: Str { print(line); }
-          _          { break; }
+        match f.readln().value {
+          line: Str { io::print(line); }
+          _ { break; }
         }
       }
     }
-    _ { printerrln("printFile: unexpected open() result"); return 1; }
   }
   return 0;
 }
@@ -80,5 +103,3 @@ fn main(args: view Str[]) -> int {
 
   return 0;
 }
-
-

@@ -8,7 +8,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 // -- Basic char literals and Str<char> conversion
@@ -16,7 +16,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(Char, LiteralAndStrChar) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = 'A';
-    println(Str<char>(c));
+    io::println(Str<char>(c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "A\n");
@@ -25,7 +25,7 @@ TEST(Char, LiteralAndStrChar) {
 TEST(Char, EscapeNewline) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = '\n';
-    print(Str<char>(c));
+    io::print(Str<char>(c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "\n");
@@ -34,7 +34,7 @@ TEST(Char, EscapeNewline) {
 TEST(Char, EscapeTab) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = '\t';
-    print("a" + Str<char>(c) + "b");
+    io::print("a" + Str<char>(c) + "b");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "a\tb");
@@ -43,7 +43,7 @@ TEST(Char, EscapeTab) {
 TEST(Char, EscapeBackslash) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = '\\';
-    println(Str<char>(c));
+    io::println(Str<char>(c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "\\\n");
@@ -55,7 +55,7 @@ TEST(Char, LessThan) {
   auto r = compileAndRun(wrapMain(R"(
     lo: char = 'a';
     hi: char = 'z';
-    if lo < hi { println("true"); }
+    if lo < hi { io::println("true"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "true\n");
@@ -64,8 +64,8 @@ TEST(Char, LessThan) {
 TEST(Char, Equality) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = 'x';
-    if c == 'x' { println("eq"); }
-    if c != 'y' { println("neq"); }
+    if c == 'x' { io::println("eq"); }
+    if c != 'y' { io::println("neq"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "eq\nneq\n");
@@ -73,7 +73,7 @@ TEST(Char, Equality) {
 
 TEST(Char, GreaterThan) {
   auto r = compileAndRun(wrapMain(R"(
-    if 'z' > 'a' { println("true"); }
+    if 'z' > 'a' { io::println("true"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "true\n");
@@ -85,7 +85,7 @@ TEST(Char, StringIndexYieldsChar) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "hello";
     c: char = s[0];
-    println(Str<char>(c));
+    io::println(Str<char>(c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "h\n");
@@ -94,7 +94,7 @@ TEST(Char, StringIndexYieldsChar) {
 TEST(Char, StringIndexLastChar) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "paykan";
-    println(Str<char>(s[5]));
+    io::println(Str<char>(s[5]));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "n\n");
@@ -103,7 +103,7 @@ TEST(Char, StringIndexLastChar) {
 TEST(Char, StringIndexCompare) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "az";
-    if s[0] < s[1] { println("a < z"); }
+    if s[0] < s[1] { io::println("a < z"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "a < z\n");
@@ -114,10 +114,10 @@ TEST(Char, IterateStringViaIndex) {
     s: Str = "hi";
     i: int = 0;
     while i < s.len() {
-      print(Str<char>(s[i]));
+      io::print(Str<char>(s[i]));
       i = i + 1;
     }
-    println("");
+    io::println("");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hi\n");
@@ -128,7 +128,7 @@ TEST(Char, IterateStringViaIndex) {
 TEST(Char, ConcatChars) {
   auto r = compileAndRun(wrapMain(R"(
     sep: char = '-';
-    println(Str<char>(sep) + Str<char>(sep) + Str<char>(sep));
+    io::println(Str<char>(sep) + Str<char>(sep) + Str<char>(sep));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "---\n");

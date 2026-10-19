@@ -90,17 +90,17 @@ fn main() -> int {
 }
 
 TEST(FunctionType, Lambdas) {
-  auto dump = dumpAST(R"(
+  auto dump = dumpAST(R"(import ::io;
 fn main() -> int {
   add = fn(x: int, y: int) -> int { return x + y; };
-  log = fn(s: view Str) { println(s); };
+  log = fn(s: view Str) { io::println(s); };
   nested = fn() -> () -> int { return fn() -> int { return 1; }; };
   return 0;
 }
 )");
   ASSERT_FALSE(dump.empty());
   EXPECT_NE(dump.find("LambdaExpr <3:9-3:52> ->"), std::string::npos) << dump;
-  EXPECT_NE(dump.find("LambdaExpr <4:9-4:40> view 's'"), std::string::npos)
+  EXPECT_NE(dump.find("LambdaExpr <4:9-4:44> view 's'"), std::string::npos)
       << dump;
   // The outer lambda's result type is a function type; the inner lambda is
   // in its body.

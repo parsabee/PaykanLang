@@ -1,6 +1,10 @@
 // A `static fn __mk` is reachable from its type's methods only.
-class C { n: int; }
-impl C { static fn __mk() -> C { return C(1); } }
+class C {
+  n: int;
+}
+impl C {
+  static fn __mk() -> C { return C(1); }
+}
 fn main() -> int {
   c = C::__mk();                // error: '__mk' is private to 'C'
   return c.n;

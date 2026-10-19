@@ -256,9 +256,10 @@ typedef struct PaykanFile {
 PaykanFile *PaykanFile_new(void);
 
 /// Open a file at `path` with the given `mode` string (e.g. "r", "w").
-/// Returns a PaykanShared* wrapping a PaykanFile on success, or a
-/// PaykanShared* wrapping a PaykanError on failure.
-PaykanShared *PaykanFile_open(PaykanObject *path, PaykanObject *mode);
+/// Returns a PaykanShared* wrapping a PaykanFile on success, or NULL with
+/// C's errno in `*err` on failure.
+PaykanShared *PaykanFile_open(PaykanObject *path, PaykanObject *mode,
+                              int64_t *err);
 void PaykanFile_destroy(PaykanObject *self);
 PaykanShared *PaykanFile_toString(PaykanObject *self);
 int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other);
@@ -273,26 +274,60 @@ extern PaykanMethod PaykanFile_vtable[PAYKAN_FILE_SLOTS];
 // Stdin singleton — immortal PaykanFile wrapping C's stdin.
 extern PaykanFile PaykanFile_Stdin;
 
-// -- Error
+// The standard library's ::io (stdlib/io.pkn), whose natives bind to these.
+// An io::File holds a PaykanFile as its handle; each function takes it
+// borrowed and panics if it is not a file.  A failure is reported as C's
+// errno (Runtime.h, "Errors"): a write returns it, 0 when it succeeded; a
+// read returns a fresh Str, or NULL with the errno in `*err`, 0 there meaning
+// the end of the file.  `err` is an int64_t, the native's `inout int`, passed
+// as the address the native ABI gives it.
+
+/// `fopen(path, mode)`: the file (owned +1), or NULL with C's errno in
+/// `*err`.
+PaykanShared *Paykan_io_open(PaykanObject *path, PaykanObject *mode, void *err);
+int64_t Paykan_io_write(PaykanObject *file, PaykanObject *str);
+PaykanShared *Paykan_io_readln(PaykanObject *file, void *err);
+PaykanShared *Paykan_io_readbytes(PaykanObject *file, int64_t n, void *err);
+PaykanShared *Paykan_io_read(PaykanObject *file, void *err);
+/// The process's stdin, PaykanFile_Stdin (owned +1).
+PaykanShared *Paykan_io_stdin(void);
+
+// -- Errors
 //
-// Inherits Object.  Returned by open() when fopen fails.
-// Carries a human-readable message string.
+// An error is a value of the standard library's ::result, which its Paykan
+// code makes; the runtime only says what a C library failure means.
 
-typedef struct PaykanError {
-  PaykanMethod *vtable; // points to PaykanError_vtable
-  int32_t strong;       // object header (see PaykanObject)
-  int32_t weak;
-  PaykanString *message;
-} PaykanError;
+// The codes of the standard library's ErrorCode (stdlib/result.pkn), by its
+// variants' ordinals: the two must list them in the same order.
+enum {
+  PAYKAN_ERROR_OK = 0,
+  PAYKAN_ERROR_NOT_FOUND,
+  PAYKAN_ERROR_PERMISSION_DENIED,
+  PAYKAN_ERROR_ALREADY_EXISTS,
+  PAYKAN_ERROR_INVALID_ARGUMENT,
+  PAYKAN_ERROR_IS_A_DIRECTORY,
+  PAYKAN_ERROR_NOT_A_DIRECTORY,
+  PAYKAN_ERROR_TOO_MANY_OPEN_FILES,
+  PAYKAN_ERROR_NO_SPACE,
+  PAYKAN_ERROR_READ_ONLY,
+  PAYKAN_ERROR_BUSY,
+  PAYKAN_ERROR_INTERRUPTED,
+  PAYKAN_ERROR_WOULD_BLOCK,
+  PAYKAN_ERROR_BROKEN_PIPE,
+  PAYKAN_ERROR_TIMED_OUT,
+  PAYKAN_ERROR_OUT_OF_MEMORY,
+  PAYKAN_ERROR_UNSUPPORTED,
+  PAYKAN_ERROR_IO,
+  PAYKAN_ERROR_END_OF_FILE,  // a read's, never an errno's
+  PAYKAN_ERROR_OUT_OF_RANGE, // an index's, never an errno's
+  PAYKAN_ERROR_OTHER,
+};
 
-// Constructor: creates an Error with the given message.
-PaykanError *PaykanError_new(const char *msg, int64_t len);
-void PaykanError_destroy(PaykanObject *self);
-PaykanShared *PaykanError_toString(PaykanObject *self);
-int64_t PaykanError_equals(PaykanObject *self, PaykanShared *other);
-
-// Global vtable instance.
-extern PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS];
+/// The ErrorCode (its ordinal) of the C `errno` @p err; 0 is `Ok`, and an
+/// errno with no code of its own is `Other`.
+int64_t Paykan_error_code(int64_t err);
+/// C's `strerror` text for @p err, as a fresh Str (owned +1).
+PaykanShared *Paykan_error_text(int64_t err);
 
 // -- Shared: strong and weak references to a PaykanObject
 //
@@ -423,7 +458,10 @@ int PaykanType_isUnset(const PaykanType *type, const void *value);
 //   - for an OPTIONAL, the kind of its payload: OBJECT for a box (NULL for
 //     None), or that of an inline optional's payload, which follows its
 //     bool presence flag at the payload's alignment (1 for a bool or char,
-//     8 for an int or float);
+//     8 for an int or float); for an optional tuple or struct, TUPLE or
+//     STRUCT, then a whole entry for the value (its kind, its offset in the
+//     enclosing value, its layout), the bool presence flag at the
+//     OPTIONAL's own offset;
 //   - for a TUPLE, the nested tuple's layout (offsets within it).
 
 /// The text of the tuple at @p value, `(1, a)`: each element as `print`
@@ -483,10 +521,19 @@ int64_t PaykanBuffer_len(void *t, PaykanObject *b);
 void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i);
 /// Copy value @p i to @p out (uninitialised), retaining its references.
 void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i);
+/// 1 when value @p i is in range and set (a reference slot that may not be
+/// None is unset until stored), else 0: what a checked read tests first.
+int64_t PaykanBuffer_isSet(void *t, PaykanObject *b, int64_t i);
 void PaykanBuffer_set(void *t, void *b, int64_t i, void *v);
 void PaykanBuffer_reserve(void *t, void *b, int64_t n);
 void PaykanBuffer_grow(void *t, void *b, int64_t by);
 void PaykanBuffer_shrink(void *t, void *b, int64_t by);
+/// PaykanBuffer_grow and PaykanBuffer_reserve that report a failure
+/// instead of panicking: 0, or C's errno (ENOMEM when the memory, or the
+/// size, is not there) with the buffer unchanged.  The standard library's
+/// memory::Buffer turns it into an Error.
+int64_t PaykanBuffer_tryGrow(void *t, void *b, int64_t by);
+int64_t PaykanBuffer_tryReserve(void *t, void *b, int64_t n);
 
 // -- Hash: the builtin `Hashable` trait's `hash()` of the scalars and Str
 //
@@ -651,7 +698,6 @@ void Paykan_heap_dump(void);
                        #T " must start with the object header")
 PAYKAN_CHECK_HEADER(PaykanString);
 PAYKAN_CHECK_HEADER(PaykanFile);
-PAYKAN_CHECK_HEADER(PaykanError);
 PAYKAN_CHECK_HEADER(PaykanBuffer);
 #undef PAYKAN_CHECK_HEADER
 

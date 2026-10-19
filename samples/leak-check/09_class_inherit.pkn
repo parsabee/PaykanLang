@@ -7,15 +7,13 @@
 class Base {}
 
 impl Base {
-  fn __init__() {}
+  fn __init__() { }
 }
 
 class Derived : Base {}
 
 impl Derived {
-  fn __init__() {
-    __super__();
-  }
+  fn __init__() { __super__(); }
 }
 
 fn main() -> int {

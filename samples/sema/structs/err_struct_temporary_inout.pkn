@@ -1,7 +1,13 @@
 // ERROR: a field of a struct that is not a variable or a field (a temporary, which dies with the statement) cannot be passed to 'inout' parameter 'n'
-struct A { x: int; }
-fn mk() -> A { return A(1); }
-fn bump(n: inout int) { n = n + 1; }
+struct A {
+  x: int;
+}
+fn mk() -> A {
+  return A(1);
+}
+fn bump(n: inout int) {
+  n = n + 1;
+}
 fn main() -> int {
   bump(mk().x);
   return 0;

@@ -3,4 +3,6 @@ class C {
   x: int;
   view fn reader() -> () -> int { return fn() -> int { return self.x; }; }
 }
-fn main() -> int { return 0; }
+fn main() -> int {
+  return 0;
+}

@@ -1,3 +1,5 @@
+import ::io;
+
 // OK: arm body is fully type-checked — local variables, method calls, assignments
 class Dog {
   name: Str;
@@ -13,7 +15,7 @@ fn main() -> int {
   match x {
     d: Dog {
       sound: Str = d.bark();
-      println(sound);
+      io::println(sound);
     }
     _ { }
   }

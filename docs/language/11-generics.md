@@ -206,12 +206,50 @@ holds the tuple's elements in place, a `T` parameter is a copy of one, and a
 tuple meets a `T: Show` bound.
 
 Because each instantiation is checked separately, a `T?` in a template is
-an optional of whatever `T` is. `Slot<int>` holds an `int?` (an optional
-primitive, see `10-optionals.md`), and `orElse(x, 0)` with `x: int?` works
-as written above. The instantiations where `T?` is not allowed are
-rejected: `Slot<Color>` (optional enums), `Slot<int?>` (a nested `int??`)
-and `Slot<(int, Str)>` (optional tuples). The diagnostic names the
-instantiation.
+an optional of whatever `T` is: `Slot<int>` below holds an `int?` (an
+optional primitive, see `10-optionals.md`), `Slot<Color>` a `Color?` and
+`Slot<(int, Str)>` an `(int, Str)?`, and `orElse(x, 0)` with `x: int?`
+works as written above. When `T` is itself optional, `T?` is `T`: a
+template never makes a nested optional, so `Slot<int?>` holds an `int?`
+(a written `int??` is still an error).
+
+```pkn
+import ::io;
+
+enum Color { Red, Green }
+
+class Slot<T> {
+  v: T?;
+}
+
+impl Slot<T> {
+  fn __init__() { self.v = None; }
+  fn put(x: T) { self.v = x; }
+}
+
+fn main() -> int {
+  a = Slot<int>();
+  a.put(3);
+  b = Slot<(int, Str)>();
+  b.put((1, "one"));
+  c = Slot<Color>();
+  c.put(Color::Green);
+  d = Slot<int?>();                // its v is an int?, not an int??
+  io::println(a.v.toString() + " " + b.v.toString() + " " + d.v.toString());
+  match c.v {
+    k: Color { io::println(k == Color::Green); }
+    None     { io::println("empty"); }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+3 (1, one) None
+True
+```
 
 ## How Errors Are Reported
 

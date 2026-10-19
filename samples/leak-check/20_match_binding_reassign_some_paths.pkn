@@ -9,8 +9,14 @@
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: 7
 
-class A { v: int; }
-impl A { fn __init__(v: int) { self.v = v; } }
+import ::io;
+
+class A {
+  v: int;
+}
+impl A {
+  fn __init__(v: int) { self.v = v; }
+}
 
 fn main() -> int {
   o: A? = A(7);
@@ -18,7 +24,7 @@ fn main() -> int {
   match o {
     a: A {
       if k == 1 { a = A(1); }
-      println(Str<int>(a.v));
+      io::println(Str<int>(a.v));
     }
     None { }
   }

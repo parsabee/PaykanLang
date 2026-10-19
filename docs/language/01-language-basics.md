@@ -48,8 +48,10 @@ primitive is a value, not a box, and no optional converts to `Obj`
 - Modules are imported with `import path::to::module;`. See `06-modules.md` for details.
 
 ```pkn
+import ::io;
+
 fn greet() {
-  println("hello!");
+  io::println("hello!");
 }
 
 fn main() -> int {
@@ -89,13 +91,15 @@ slot in memory, like an `int`, so a struct, tuple or array of them has the layou
 have with `int` and `float`; the width is the range of values the type holds.
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   a: u8 = 250;
   a = a + 10;                        // wraps to 4: a u8 holds 0 to 255
   n: i8 = -128;
   big: unsigned = unsigned(-1);      // 18446744073709551615
   half: f32 = 0.1;
-  println(Str(a) + " " + Str(n - 1) + " " + Str(big / 2) + " " + Str(half));
+  io::println(Str(a) + " " + Str(n - 1) + " " + Str(big / 2) + " " + Str(half));
   return 0;
 }
 ```
@@ -193,7 +197,7 @@ no superclass and no vtable; its methods come from `impl` blocks. See `14-struct
 struct Point { x: int; y: int; }
 p = Point(1, 2);                    // the fields in order
 p.x = 5;                            // assigned in place
-println(p);                         // Point(x: 5, y: 2)
+io::println(p);                         // Point(x: 5, y: 2)
 ```
 
 ### Function types
@@ -232,34 +236,25 @@ n: Node? = None;
 fn find(head: Node?, key: int) -> Node? { ... }
 ```
 
-`File` is a built-in class type representing an open file handle. It extends `Obj` and provides:
-
-| Slot        | Signature                       | Description                                      |
-|-------------|---------------------------------|--------------------------------------------------|
-| `write`     | `fn write(s: Str)`              | Writes `s` to the file                           |
-| `readln`    | `fn readln() -> Obj`            | Returns the next line as `Str` (including its `\n`, if any), or `None` at EOF |
-| `readbytes` | `fn readbytes(n: int) -> Obj`   | Returns the next `n` bytes (fewer at the end of the file) as `Str`, or `None` at EOF or when `n <= 0` |
-| `read`      | `fn read() -> Obj`              | Returns everything left in the file as `Str`, or `None` when nothing is left |
-| `toString`  | `fn toString() -> Str`          | Returns a string description of the handle       |
-| `equals`    | `fn equals(other: Obj) -> bool` | Reference identity comparison                    |
-
-The file handle is closed automatically when the `File` object goes out of scope (ARC destroy).
-The read methods return `Obj`, so use `match` to tell a `Str` from `None` (see
-[File I/O](#file-io)).
-
-`Stdin` is a builtin `File` that reads the program's standard input. It needs no `open` and
-offers the same methods (`readln`, `readbytes`, `read`):
+`Obj` and `Str` are the only builtin classes. Files, standard input and errors come from
+the standard library: `io::File` is an open file, `io::stdin()` the program's standard
+input, and `res::Error` / `res::Result<T>` (module `::result`) say what went wrong when an
+operation fails (see `13-standard-library.md` and [File I/O](#file-io)). A read returns a
+`res::Result<Str>` whose `value` is a `Str?`, so `match` on the `value` to tell a line from
+the end of the input:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   n: int = 0;
   while True {
-    match Stdin.readln() {
+    match io::stdin().readln().value {
       line: Str { n = n + 1; }
       _         { break; }       // None — end of input
     }
   }
-  println(Str(n) + " lines");
+  io::println(Str(n) + " lines");
   return 0;
 }
 ```
@@ -270,16 +265,7 @@ Output (with nothing on standard input):
 0 lines
 ```
 
-`Stdin` cannot be reassigned: `Stdin = x` is an error ("'Stdin' is a type name and cannot be
-used as a variable"). See `samples/codegen/23_stdin.pkn`.
-
-`Error` is a built-in class type returned by operations that can fail (e.g. `open()`). It
-extends `Obj` and provides:
-
-| Slot        | Signature                       | Description                    |
-|-------------|---------------------------------|--------------------------------|
-| `toString`  | `fn toString() -> Str`          | Returns the error message      |
-| `equals`    | `fn equals(other: Obj) -> bool` | Reference identity comparison  |
+See `samples/codegen/23_stdin.pkn`.
 
 ### Enum Types (distinct nominal value types)
 
@@ -297,7 +283,7 @@ variants without a wildcard.
 enum Direction { North, East, South, West }
 
 d: Direction = Direction::East;
-if d == Direction::East { println("heading east"); }
+if d == Direction::East { io::println("heading east"); }
 ```
 
 See `03-enums.md` for the full treatment, including using `enum` with `match`.
@@ -363,11 +349,13 @@ a [parameter](02-functions-and-calling.md#parameter-modes-view-and-inout). The t
 left off; it is the initializer's:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   k = 3;
   v: view = k + 1;     // a read-only local
   w: view float = k;
-  println(Str(v) + " " + Str(w));
+  io::println(Str(v) + " " + Str(w));
   return 0;
 }
 ```
@@ -395,6 +383,8 @@ replaced, as by an assignment to the variable). It can be passed on to an `inout
 parameter:
 
 ```pkn
+import ::io;
+
 class Account {
   balance: int;
 }
@@ -410,7 +400,7 @@ fn main() -> int {
   names = ["x", "y"];
   n: inout = names;
   n = [n[1], "z"];
-  println(Str(a.balance) + " " + names[0] + names[1]);
+  io::println(Str(a.balance) + " " + names[0] + names[1]);
   return 0;
 }
 ```
@@ -439,11 +429,13 @@ that uses it keeps it live for the whole loop:
   change it`. A variable of a value type can still be read and passed on as a copy.
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   k = 1;
   x: inout = k;
   x = 5;               // the last use of x
-  println(Str(k));     // fine: x is no longer live
+  io::println(Str(k));     // fine: x is no longer live
   return 0;
 }
 ```
@@ -627,11 +619,11 @@ if condition {
 }
 
 if x > 100 {
-  println("large");
+  io::println("large");
 } elif x > 10 {
-  println("medium");
+  io::println("medium");
 } else {
-  println("small");
+  io::println("small");
 }
 ```
 
@@ -664,7 +656,7 @@ while i < 10 {
   i = i + 1;
   if i % 2 != 0 { continue; }   // skip odd
   if i == 8     { break; }       // stop at 8
-  println(Str<int>(i));              // prints 2 4 6
+  io::println(Str<int>(i));              // prints 2 4 6
 }
 ```
 
@@ -688,9 +680,9 @@ match <expr> {
 ```pkn
 a: Animal = Dog();
 match a {
-  d: Dog { println(d.speak()); }
-  Cat    { println("cat"); }
-  _      { println("other"); }
+  d: Dog { io::println(d.speak()); }
+  Cat    { io::println("cat"); }
+  _      { io::println("other"); }
 }
 ```
 
@@ -725,20 +717,26 @@ fn main() -> int {
 
 ### Output
 
-| Function          | Description                             |
-|-------------------|-----------------------------------------|
-| `print(o)`        | Print one value (via `toString`), no newline |
-| `println(o)`      | Print one value, then a newline         |
-| `printerr(o)`     | Print to stderr, no newline             |
-| `printerrln(o)`   | Print to stderr, then a newline         |
+Printing is not built in: it is the standard library's `::io` module
+(`13-standard-library.md`), imported with `import ::io;`.
 
-Each takes **exactly one** argument — an `Obj` or a tuple, printed via its `toString`.
-Paykan has no variadic functions or overloading, so there is no multi-argument
-form: compose pieces with `+` (string concatenation).
+| Function             | Description                             |
+|----------------------|-----------------------------------------|
+| `io::print(v)`       | Print one value (via `toString`), no newline |
+| `io::println(v)`     | Print one value, then a newline         |
+| `io::printerr(v)`    | Print to stderr, no newline             |
+| `io::printerrln(v)`  | Print to stderr, then a newline         |
+
+Each is `fn print<T: Show>(value: view T)`: it takes **exactly one** argument of any type
+that implements `Show` (an object, a `Str`, a number, a `bool`, a `char`, a tuple, a struct
+or an optional of one) and writes its `toString()`. Paykan has no variadic functions or
+overloading, so there is no multi-argument form: compose pieces with `+` (string
+concatenation).
 
 ```pkn
-println("x = " + Str(x));
-print("a=" + Str<int>(a) + " b=" + Str(b));
+io::println("x = " + Str(x));
+io::print("a=" + Str<int>(a) + " b=" + Str(b));
+io::println(5);                   // 5
 ```
 
 `print` and `println` write to standard output, `printerr` and `printerrln` to standard
@@ -755,7 +753,7 @@ n = 42;
 s: Str = Str(n);                  // "42"
 half: float = float(n) / 2.0;     // 21
 match int("17") {                 // a parse can fail: an int?
-  v: int { println(Str(v + 1)); } // 18
+  v: int { io::println(Str(v + 1)); } // 18
   None   { }
 }
 ```
@@ -810,15 +808,15 @@ What each specialization does:
 | `u8<Str>(s)`, `unsigned<Str>(s)`, `f32<Str>(s)`, … | `Str` → `T?` | The parsed value, or `None` when the text is not a number of the type: outside its range (`u8("256")`), or signed for an `unsigned` (`unsigned("-1")`) |
 
 ```pkn
-println(Str(42));                 // 42
-println(Str<float>(3.14));        // 3.14
-println(Str(True));               // True
+io::println(Str(42));                 // 42
+io::println(Str<float>(3.14));        // 3.14
+io::println(Str(True));               // True
 n: int = int(-2.9);               // -2
 f: float = float<int>(3) / 2.0;   // 1.5
 code: int = int('a');             // 97
 c: char = char<int>(code + 1);    // 'b'
 match int("7") {
-  x: int { println(Str(x)); }     // 7 (Str<int>)
+  x: int { io::println(Str(x)); }     // 7 (Str<int>)
   None   { }
 }
 ```
@@ -850,7 +848,7 @@ with `match` (see `10-optionals.md`):
 ```pkn
 match int<Str>(line) {
   n: int { total = total + n; }
-  None   { printerrln("not a number: " + line); }
+  None   { io::printerrln("not a number: " + line); }
 }
 ```
 
@@ -891,49 +889,58 @@ unsigned code `0`..`255`, and `char<int>` is its exact inverse over that range.
 
 ### File I/O
 
-| Function           | Description                                                              |
-|--------------------|--------------------------------------------------------------------------|
-| `open(path, mode)` | Open a file. `mode` is `"r"`, `"w"`, or `"a"`. Returns `Obj` — either a `File` on success or an `Error` on failure. |
+Files are the standard library's `::io` module (`13-standard-library.md`):
 
-Because `open()` returns `Obj`, always use `match` to distinguish the two cases:
+| Function               | Description                                                              |
+|------------------------|--------------------------------------------------------------------------|
+| `io::open(path, mode)` | Open a file with C's `fopen` mode (`"r"`, `"w"`, `"a"`, ...). Returns a `res::Result<io::File>`: the file as its `value`, or None and the `error` saying why. |
+| `io::stdin()`          | The program's standard input, an `io::File`.                             |
+
+A `Result`'s `value` is an optional, so `match` on it to tell the two cases apart:
 
 ```pkn
-match open("/tmp/data.txt", "r") {
-  err: Error { printerrln("open failed: " + err.toString()); }
-  f: File {
+r = io::open("/tmp/data.txt", "r");
+match r.value {
+  f: io::File {
     while True {
-      match f.readln() {
-        line: Str { print(line); }
+      match f.readln().value {
+        line: Str { io::print(line); }
         _          { break; }   // None — EOF
       }
     }
   }
+  None { io::printerrln("open failed: " + r.error.message()); }
 }
 ```
 
-The `File` handle and its methods (`write`, `readln`, `readbytes`, `read`, `toString`,
-`equals`) and the `Stdin` file are described in the **File built-in class type** section above.
+An `io::File`'s methods (`write`, `readln`, `readbytes`, `read`) report failure the same
+way: `write` returns a `res::Error`, the reads a `res::Result<Str>` whose error is
+`EndOfFile` when nothing is left. The file is closed when the last reference to it goes.
 
 ### Builtin Names Are Reserved
 
 Top-level declarations — free functions, classes (a class name is also its constructor),
 and enums — share a single namespace with the builtins, and a name identifies exactly one
-entity. Declaring a function, class, or enum whose name is a builtin function (`print`,
-`println`, `printerr`, `printerrln`, `Str`, `open`), a builtin class (`Obj`, `Str`,
-`File`, `Error`) or a builtin type (`int`, `float`, `bool`, `char`, `void` and the
-[sized numeric types](#sized-numeric-types), under any of their spellings) is a
-compile-time error, reported at the declaration:
+entity. Declaring a function, class, or enum whose name is a builtin class (`Obj`, `Str`;
+`Str` is also the builtin conversion function) or a builtin type (`int`, `float`, `bool`,
+`char`, `void` and the [sized numeric types](#sized-numeric-types), under any of their
+spellings) is a compile-time error, reported at the declaration:
 
 ```pkn
-class print {}
-impl print { fn __init__() {} }   // error: 'print' is a builtin function and cannot be redeclared
-fn open(p: Str) -> int { ... }     // error: 'open' is a builtin function and cannot be redeclared
-enum Error { NotFound }            // error: 'Error' is a builtin class and cannot be redeclared
+class Obj {}                       // error: 'Obj' is a builtin class and cannot be redeclared
+fn Str() -> int { ... }            // error: 'Str' is a builtin class and cannot be redeclared
 struct u8 { v: int; }              // error: 'u8' is a builtin type and cannot be redeclared
 fn float(x: int) -> int { ... }    // error: 'float' is a builtin type and cannot be redeclared
 ```
 
+The names of the standard library (`print`, `println`, `open`, `File`, `Error`, ...) are
+not builtins: a program may declare its own `fn print` or `class File`. Type names are
+global across an import graph, though (`06-modules.md`), so a program that imports `::io`
+cannot also declare its own `File`, `Error`, `Result` or `ErrorCode` (`class 'File'
+conflicts with an imported type of the same name`).
+
 The same rule applies between user declarations: `fn Point()` next to `class Point` is
 rejected with `'Point' is already declared as a class`, and a function or class cannot
-reuse an enum's name. Only top-level names are reserved — a field, method, parameter, or
-local variable may be called `print` or `open` without affecting the builtin.
+reuse an enum's name. A builtin class or type name cannot name a field, parameter or local
+variable either: it is a type name (`'Str' is a type name and cannot be used as a
+variable`).

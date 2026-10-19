@@ -111,8 +111,10 @@ plugin directories: ...
 Create a file called `hello.pkn`:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
-  println("Hello, world!");
+  io::println("Hello, world!");
   return 0;
 }
 ```
@@ -136,7 +138,9 @@ A few things to notice:
   `int`, which becomes the program's **exit status**: return `0` for success.
 - `fn` declares a function; its return type comes after `->`.
 - Statements end with a semicolon, and blocks use braces.
-- `println` prints one value followed by a newline. (`print` leaves out the newline.)
+- `import ::io;` brings in the standard library's input/output module, and `io::println`
+  prints one value followed by a newline. (`io::print` leaves out the newline.) Printing is
+  not built into the language: a program that prints imports `::io`.
 - Comments start with `//` and run to the end of the line. There are no block comments.
 
 ## Running and building

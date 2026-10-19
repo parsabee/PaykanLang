@@ -11,12 +11,7 @@ namespace names {
 
 // -- Paykan-level built-in names (visible to user code)
 
-inline constexpr const char *kPrint = "print";
-inline constexpr const char *kPrintln = "println";
-inline constexpr const char *kErrPrint = "printerr";
-inline constexpr const char *kErrPrintln = "printerrln";
 inline constexpr const char *kLen = "len";
-inline constexpr const char *kOpen = "open";
 inline constexpr const char *kMain = "main"; ///< the program's entry point
 /// How an absent optional prints (the None object's toString).
 inline constexpr const char *kNoneText = "None";
@@ -24,9 +19,6 @@ inline constexpr const char *kNoneText = "None";
 // Built-in class names
 inline constexpr const char *kObj = "Obj";
 inline constexpr const char *kString = "Str";
-inline constexpr const char *kFile = "File";
-inline constexpr const char *kError = "Error";
-inline constexpr const char *kStdin = "Stdin";
 
 // Built-in method names
 inline constexpr const char *kMethodInit = "__init__";
@@ -65,10 +57,6 @@ inline constexpr const char *kMethodHash = "hash";
 inline constexpr const char *kSelfType = "Self"; ///< The implementing type
 inline constexpr const char *kMethodLength = "len";
 inline constexpr const char *kMethodConcat = "concat";
-inline constexpr const char *kMethodWrite = "write";
-inline constexpr const char *kMethodReadln = "readln";
-inline constexpr const char *kMethodReadBytes = "readbytes";
-inline constexpr const char *kMethodRead = "read";
 
 // Built-in type keyword names
 inline constexpr const char *kTypeInt = "int";
@@ -159,6 +147,22 @@ inline constexpr const char *kPaykanBufferSet = "PaykanBuffer_set";
 inline constexpr const char *kPaykanBufferReserve = "PaykanBuffer_reserve";
 inline constexpr const char *kPaykanBufferGrow = "PaykanBuffer_grow";
 inline constexpr const char *kPaykanBufferShrink = "PaykanBuffer_shrink";
+inline constexpr const char *kPaykanBufferIsSet = "PaykanBuffer_isSet";
+inline constexpr const char *kPaykanBufferTryGrow = "PaykanBuffer_tryGrow";
+inline constexpr const char *kPaykanBufferTryReserve =
+    "PaykanBuffer_tryReserve";
+
+// The standard library's ::io (stdlib/io.pkn): reached only through its
+// `native fn`s
+inline constexpr const char *kPaykanIoOpen = "Paykan_io_open";
+inline constexpr const char *kPaykanIoWrite = "Paykan_io_write";
+inline constexpr const char *kPaykanIoReadln = "Paykan_io_readln";
+inline constexpr const char *kPaykanIoReadBytes = "Paykan_io_readbytes";
+inline constexpr const char *kPaykanIoRead = "Paykan_io_read";
+inline constexpr const char *kPaykanIoStdin = "Paykan_io_stdin";
+// ... and ::result's (stdlib/result.pkn)
+inline constexpr const char *kPaykanErrorCode = "Paykan_error_code";
+inline constexpr const char *kPaykanErrorText = "Paykan_error_text";
 
 // Reached only through a `native fn` of the standard library
 inline constexpr const char *kPaykanPanicMessage = "Paykan_panic_message";
@@ -168,27 +172,7 @@ inline constexpr const char *kPaykanPanicValue = "Paykan_panic_value";
 inline constexpr const char *kPaykanIntHash = "PaykanInt_hash";
 inline constexpr const char *kPaykanStringHash = "PaykanString_hash";
 
-// File
-inline constexpr const char *kPaykanFileNew = "PaykanFile_new";
-inline constexpr const char *kPaykanFileOpen = "PaykanFile_open";
-inline constexpr const char *kPaykanFileDestroy = "PaykanFile_destroy";
-inline constexpr const char *kPaykanFileToString = "PaykanFile_toString";
-inline constexpr const char *kPaykanFileEquals = "PaykanFile_equals";
-inline constexpr const char *kPaykanFileWrite = "PaykanFile_write";
-inline constexpr const char *kPaykanFileReadln = "PaykanFile_readln";
-inline constexpr const char *kPaykanFileReadBytes = "PaykanFile_readbytes";
-inline constexpr const char *kPaykanFileRead = "PaykanFile_read";
-inline constexpr const char *kPaykanFileVtable = "PaykanFile_vtable";
-inline constexpr const char *kPaykanFileStdin = "PaykanFile_Stdin";
-
-// Error
-inline constexpr const char *kPaykanErrorNew = "PaykanError_new";
-inline constexpr const char *kPaykanErrorDestroy = "PaykanError_destroy";
-inline constexpr const char *kPaykanErrorToString = "PaykanError_toString";
-inline constexpr const char *kPaykanErrorEquals = "PaykanError_equals";
-inline constexpr const char *kPaykanErrorVtable = "PaykanError_vtable";
-
-// IO
+// Printing: reached only through the natives of the standard library's ::io
 inline constexpr const char *kPaykanPrint = "Paykan_print";
 inline constexpr const char *kPaykanPrintln = "Paykan_println";
 inline constexpr const char *kPaykanErrPrint = "Paykan_printerr";
@@ -316,16 +300,8 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanTupleEquals,
     kPaykanStructToString,
     kPaykanStructEquals,
-    // File
-    kPaykanFileOpen,
-    // IO
-    kPaykanPrint,
-    kPaykanPrintln,
-    kPaykanErrPrint,
-    kPaykanErrPrintln,
     // Globals (objects and singletons)
     kPaykanObjectNone,
-    kPaykanFileStdin,
     // Builtin methods inherited into user-class vtable slots
     kPaykanObjectDestroy,
     kPaykanObjectToString,
@@ -333,11 +309,6 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringToString,
     kPaykanStringEquals,
     kPaykanStringLength,
-    kPaykanFileDestroy,
-    kPaykanFileToString,
-    kPaykanFileEquals,
-    kPaykanFileWrite,
-    kPaykanFileReadln,
 };
 
 // -- Kinds of values

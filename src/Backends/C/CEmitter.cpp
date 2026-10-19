@@ -151,7 +151,6 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanStructEquals,
      kInt64,
      {kConstVoidPtr, kConstVoidPtr, kConstInt64Ptr}},
-    {names::kPaykanFileOpen, kRtBoxPtr, {kRtObjPtr, kRtObjPtr}},
     {names::kPaykanPrint, kVoid, {kRtObjPtr}},
     {names::kPaykanPrintln, kVoid, {kRtObjPtr}},
     {names::kPaykanErrPrint, kVoid, {kRtObjPtr}},
@@ -159,11 +158,6 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanObjectDestroy, kVoid, {kRtObjPtr}},
     {names::kPaykanObjectToString, kRtBoxPtr, {kRtObjPtr}},
     {names::kPaykanObjectEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
-    {names::kPaykanFileDestroy, kVoid, {kRtObjPtr}},
-    {names::kPaykanFileToString, kRtBoxPtr, {kRtObjPtr}},
-    {names::kPaykanFileEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
-    {names::kPaykanFileWrite, kVoid, {kRtObjPtr, kRtObjPtr}},
-    {names::kPaykanFileReadln, kRtBoxPtr, {kRtObjPtr}},
 };
 
 const RuntimeProto *findProto(const std::string &name) {

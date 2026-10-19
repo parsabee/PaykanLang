@@ -1,10 +1,16 @@
 // Generic structs in the collections: an instantiation is a struct like any
 // other, an element of a List<T> and, with `impl Hashable for`, a key of a
 // HashMap<K, V> and a HashSet<K>.
+import ::io;
 import ::collections;
 
-struct Pair<A, B> { a: A; b: B; }
-impl Pair<A, B> { view fn first() -> view A { return self.a; } }
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
+impl Pair<A, B> {
+  view fn first() -> view A { return self.a; }
+}
 impl Hashable for Pair<A, B> {
   view fn hash() -> int { return self.a.hash() * 31 + self.b.hash(); }
 }
@@ -21,21 +27,22 @@ fn main() -> int {
   l = collections::List<Pair<int, Str>>();
   l.push(Pair(1, "one"));
   l.push(Pair(2, "two"));
-  println(Str(l.get(1).first()) + " " + Str(l.contains(Pair(1, "one"))) + " " +
-          idx(l.indexOf(Pair(3, "three"))) + " " + Str(l.len()));
-  println(l.get(0));
+  io::println(Str(l.get(1).first()) + " " + Str(l.contains(Pair(1, "one")))
+      + " " + idx(l.indexOf(Pair(3, "three"))) + " " + Str(l.len()));
+  io::println(l.get(0));
 
   m = collections::HashMap<Pair<int, int>, Str>();
   m.put(Pair(0, 0), "origin");
   m.put(Pair(1, 0), "east");
   m.put(Pair(0, 0), "home");
-  println(m.get(Pair(1, 0)) + " " + m.get(Pair(0, 0)) + " " +
-          Str(m.containsKey(Pair(0, 1))) + " " + Str(m.len()));
+  io::println(m.get(Pair(1, 0)) + " " + m.get(Pair(0, 0)) + " "
+      + Str(m.containsKey(Pair(0, 1))) + " " + Str(m.len()));
 
   s = collections::HashSet<Pair<Str, bool>>();
   s.add(Pair("a", True));
   s.add(Pair("a", True));
   s.add(Pair("a", False));
-  println(Str(s.len()) + " " + Str(s.contains(Pair("a", False))) + " " + Str(s.contains(Pair("b", True))));
+  io::println(Str(s.len()) + " " + Str(s.contains(Pair("a", False))) + " "
+      + Str(s.contains(Pair("b", True))));
   return 0;
 }

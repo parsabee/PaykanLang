@@ -1,10 +1,12 @@
 // ERROR: builtin type names (int, float, bool, char, void, the sized numeric
 // types) are reserved, for every kind of declaration
-class u8 {  // sema error: 'u8' is a builtin type and cannot be redeclared
+class u8 {
+  // sema error: 'u8' is a builtin type and cannot be redeclared
   v: int;
 }
 
-fn float(x: int) -> int {  // sema error: 'float' is a builtin type and cannot be redeclared
+fn float(x: int) -> int {
+  // sema error: 'float' is a builtin type and cannot be redeclared
   return x;
 }
 

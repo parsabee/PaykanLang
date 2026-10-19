@@ -16,18 +16,30 @@
 // expect-stdout: (18446744073709551615, -5, 0.0999756) True
 // expect-stdout: 2 44 18446744073709551615 255 seven True 0.428571
 
-struct Pixel { r: u8; g: u8; b: u8; a: f32; }
+import ::io;
 
-class Box<T> { v: T; }
+struct Pixel {
+  r: u8;
+  g: u8;
+  b: u8;
+  a: f32;
+}
+
+class Box<T> {
+  v: T;
+}
 impl Box<T> {
-  fn __init__(v: T) { self.v = v; }
+  fn __init__(v: T)  { self.v = v; }
   view fn get() -> T { return self.v; }
 }
 
 fn sum(xs: view u16[3]) -> u16 {
   t: u16 = 0;
   i = 0;
-  while i < 3 { t = t + xs[i]; i = i + 1; }
+  while i < 3 {
+    t = t + xs[i];
+    i = i + 1;
+  }
   return t;
 }
 
@@ -41,40 +53,57 @@ fn main() -> int {
   f: i16 = e * 2;              // -5536
   g: u32 = 4000000000;
   h: u32 = g + 1000000000;     // 705032704
-  println(Str(b) + " " + Str(d) + " " + Str(f) + " " + Str(h));
+  io::println(Str(b) + " " + Str(d) + " " + Str(f) + " " + Str(h));
 
   // unsigned: the same bits as int, read unsigned.
   u: unsigned = unsigned(-1);
-  println(Str(u) + " " + Str(u / 2) + " " + Str(u % 10) + " " + Str(u > 1) + " " + Str(int(u)));
+  io::println(Str(u) + " " + Str(u / 2) + " " + Str(u % 10) + " " + Str(u > 1)
+      + " " + Str(int(u)));
 
   // f32 and f16 round after each operation.
   x: f32 = 0.1;
   y: f32 = 16777216.0;
   z: f16 = 0.1;
-  println(Str(x) + " " + Str(y + 1) + " " + Str(z) + " " + Str(f16(70000.0)) + " " + Str(f16(65519.0)));
+  io::println(Str(x) + " " + Str(y + 1) + " " + Str(z) + " " + Str(f16(70000.0))
+      + " " + Str(f16(65519.0)));
 
   // Conversions: wrapping, truncating, rounding.
   n: i8 = -128;
-  println(Str(u8(300)) + " " + Str(i8(200)) + " " + Str(i32(-1.5)) + " " + Str(float(u)) + " " + Str(u64(1.5)) + " " + Str(-n) + " " + Str(n / -1));
+  io::println(Str(u8(300)) + " " + Str(i8(200)) + " " + Str(i32(-1.5)) + " " +
+      Str(float(u)) + " " + Str(u64(1.5)) + " " + Str(-n) + " " + Str(n / -1));
 
   // Parsing into T?, printed through println's optional rendering.
   p: u16? = u16("65535");
   match p {
-    v: u16 { match v { 65535 { print("max "); } _ { print("other "); } } }
-    None { print("none "); }
+    v: u16 {
+      match v {
+        65535 { io::print("max "); }
+        _ { io::print("other "); }
+      }
+    }
+    None { io::print("none "); }
   }
   q: u8? = u8("256");
   r: i8? = i8("-128");
   s: unsigned? = unsigned("18446744073709551615");
   t: unsigned? = unsigned("-1");
   w: f32? = f32("0.1");
-  print(q); print(" "); print(r); print(" "); print(s); print(" "); print(t); print(" "); println(w);
+  io::print(q);
+  io::print(" ");
+  io::print(r);
+  io::print(" ");
+  io::print(s);
+  io::print(" ");
+  io::print(t);
+  io::print(" ");
+  io::println(w);
 
   // Sized fields and elements print and compare like int and float ones.
   px = Pixel(255, 128, 0, 0.5);
-  println(px.toString() + " " + Str(px == Pixel(255, 128, 0, 0.5)));
+  io::println(px.toString() + " " + Str(px == Pixel(255, 128, 0, 0.5)));
   tu = (unsigned(-1), i8(-5), f16(0.1));
-  println(tu.toString() + " " + Str(tu == (unsigned(-1), i8(-5), f16(0.1))));
+  io::println(tu.toString() + " "
+      + Str(tu == (unsigned(-1), i8(-5), f16(0.1))));
   xs: u16[3] = [65535, 1, 2];
   bx = Box<u8>(200);
   k: u8 = bx.get() + 100;      // 44
@@ -82,9 +111,14 @@ fn main() -> int {
   arr: u8[3] = [1, 2, 255];
   m: u32 = 7;
   seven: Str = "other";
-  match m { 7 { seven = "seven"; } _ { } }
+  match m {
+    7 { seven = "seven"; }
+    _ { }
+  }
   h250: u8 = 250;
   fr: f32 = 3.0;
-  println(Str(sum(xs)) + " " + Str(k) + " " + Str(big.get()) + " " + Str(arr[2]) + " " + seven + " " + Str(a.hash() == h250.hash()) + " " + Str(fr / 7));
+  io::println(Str(sum(xs)) + " " + Str(k) + " " + Str(big.get()) + " "
+      + Str(arr[2]) + " " + seven + " " + Str(a.hash() == h250.hash()) + " "
+      + Str(fr / 7));
   return 0;
 }

@@ -10,14 +10,16 @@ elements in square brackets; its element type is inferred from them, and its len
 number of elements:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   primes = [2, 3, 5, 7];               // int[4]
   names: Str[2] = ["Ada", "Grace"];
   sizes: float[_] = [1.5, 2, 4];       // float[3]: _ takes the literal's length
   zeros = [0; 6];                      // int[6]: six copies of 0
-  println(Str(primes.len()) + " primes, " + Str(names.len()) + " names, "
+  io::println(Str(primes.len()) + " primes, " + Str(names.len()) + " names, "
           + Str(sizes.len()) + " sizes, " + Str(zeros.len()) + " zeros");
-  println("the first prime is " + Str(primes[0]));
+  io::println("the first prime is " + Str(primes[0]));
   return 0;
 }
 ```
@@ -57,6 +59,8 @@ of bounds (len=3)`.
 There is no `for` loop, so you walk an array with `while` and an index:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   squares = [0; 5];
   i = 0;
@@ -72,7 +76,7 @@ fn main() -> int {
     sum = sum + squares[i];
     i = i + 1;
   }
-  println(Str(squares.len()) + " squares, sum " + Str(sum));
+  io::println(Str(squares.len()) + " squares, sum " + Str(sum));
   return 0;
 }
 ```
@@ -97,6 +101,8 @@ and `len()` tells how long it is. A `view` slice reads the caller's array; an `i
 changes its elements in place:
 
 ```pkn
+import ::io;
+
 fn doubleAll(xs: inout int[]) {
   i = 0;
   while i < xs.len() {
@@ -120,8 +126,8 @@ fn main() -> int {
   a = [1, 2, 3];
   b = a;                 // a copy
   doubleAll(a);
-  println(join(a, ", ") + " / " + join(b, ", "));
-  println(join([7, 8, 9, 10], "-"));
+  io::println(join(a, ", ") + " / " + join(b, ", "));
+  io::println(join([7, 8, 9, 10], "-"));
   return 0;
 }
 ```
@@ -136,7 +142,7 @@ Output:
 Two things to note:
 
 - `==` is not defined on arrays. Write a loop to compare elements.
-- `println` does not take an array, so a helper such as `join` is the way to show its
+- `io::println` does not take an array, so a helper such as `join` is the way to show its
   elements.
 
 ## Keeping a count
@@ -147,6 +153,8 @@ and keeps a **count** of the slots in use beside it. Adding a value writes the s
 count and increments the count; removing the last value decrements it:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   stack = [0; 4];            // room for 4
   count = 0;
@@ -157,7 +165,7 @@ fn main() -> int {
     n = n + 1;
   }
   count = count - 1;         // drop the top value
-  println(Str(count) + " left, top " + Str(stack[count - 1]) + ", room for "
+  io::println(Str(count) + " left, top " + Str(stack[count - 1]) + ", room for "
           + Str(stack.len() - count) + " more");
   return 0;
 }
@@ -178,6 +186,8 @@ The element type can be any type, including another array type or a class. `int[
 two rows of three `int`s, indexed `grid[row][column]`:
 
 ```pkn
+import ::io;
+
 class City {
   name: Str;
   people: int;
@@ -190,7 +200,7 @@ impl City {
 fn main() -> int {
   grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
   grid[1][2] = 60;
-  println("row 1 has " + Str(grid[1].len()) + " cells, the last is " + Str(grid[1][2]));
+  io::println("row 1 has " + Str(grid[1].len()) + " cells, the last is " + Str(grid[1][2]));
 
   cities = [City("Tehran", 9000000), City("Lyon", 520000), City("Oslo", 700000)];
   biggest = cities[0];
@@ -199,7 +209,7 @@ fn main() -> int {
     if cities[i].people > biggest.people { biggest = cities[i]; }
     i = i + 1;
   }
-  println("largest: " + biggest.name);
+  io::println("largest: " + biggest.name);
   return 0;
 }
 ```
@@ -227,6 +237,8 @@ between those numbers and array indices, and they check the number before using 
 than letting a bad one panic:
 
 ```pkn
+import ::io;
+
 class Task {
   title: Str;
   done: bool;
@@ -287,10 +299,10 @@ class TaskList {
   view fn show() {
     i = 0;
     while i < self.count {
-      println(Str(i + 1) + ". " + self.tasks[i].toString());
+      io::println(Str(i + 1) + ". " + self.tasks[i].toString());
       i = i + 1;
     }
-    println(Str(self.pending()) + " of " + Str(self.count) + " to do");
+    io::println(Str(self.pending()) + " of " + Str(self.count) + " to do");
   }
 }
 
@@ -307,9 +319,9 @@ fn main() -> int {
   list.add("fix the leak");
   list.add("call mum");
   list.complete(2);
-  if !list.complete(7) { println("there is no task 7"); }
+  if !list.complete(7) { io::println("there is no task 7"); }
   list.show();
-  println("cleared " + Str(list.clearDone()));
+  io::println("cleared " + Str(list.clearDone()));
   list.show();
   return 0;
 }

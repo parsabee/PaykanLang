@@ -7,13 +7,17 @@
 //            field / parameter / return / array element type, `match` on an
 //            instantiation, an instantiation copied into a new local, and `==` via `equals`.
 
+import ::io;
+
 class Box<T> {
   v: T;
   view fn get() -> view T { return self.v; }
-  fn set(v: T) { self.v = v; }
+  fn set(v: T)            { self.v = v; }
   view fn equals(other: Obj) -> bool {
     match other {
-      o: Box<T> { return o.get() == self.v; }
+      o: Box<T> {
+        return o.get() == self.v;
+      }
       _ { return False; }
     }
   }
@@ -27,7 +31,7 @@ class Pair<K, V> {
   k: K;
   v: V;
   view fn key() -> view K { return self.k; }
-  view fn value() -> V { return self.v; }
+  view fn value() -> V    { return self.v; }
 }
 
 impl Pair<K, V> {
@@ -50,10 +54,7 @@ class Stack<T> {
 
 impl Stack<T> {
   // Up to four items; the free slots hold `blank`.
-  fn __init__(blank: T) {
-    self.items = [blank; 4];
-    self.count = 0;
-  }
+  fn __init__(blank: T) { self.items = [blank; 4]; self.count = 0; }
 }
 
 class Holder {
@@ -65,57 +66,67 @@ impl Holder {
   fn __init__(n: int) { self.b = Box<int>(n); }
 }
 
-fn first<T>(xs: view T[]) -> view T { return xs[0]; }
+fn first<T>(xs: view T[]) -> view T {
+  return xs[0];
+}
 
-fn unbox<T>(b: Box<T>) -> T { return b.get(); }
+fn unbox<T>(b: Box<T>) -> T {
+  return b.get();
+}
 
 fn describe(o: Obj) -> Str {
   match o {
-    b: Box<int> { return "Box<int> holding " + Str<int>(b.get()); }
-    Box<Str>    { return "Box<Str>"; }
-    _           { return "something else"; }
+    b: Box<int> {
+      return "Box<int> holding " + Str<int>(b.get());
+    }
+    Box<Str> { return "Box<Str>"; }
+    _ {
+      return "something else";
+    }
   }
 }
 
 fn main() -> int {
   bi: Box<int> = Box<int>(3);                 // explicit type argument
-  println(Str(bi.get()));                  // 3
+  io::println(Str(bi.get()));                  // 3
   bs = Box<Str>("hello");
   bs.set("world");
-  println(bs.get());                          // world
+  io::println(bs.get());                          // world
 
   p: Pair<Str, int> = Pair<Str, int>("age", 42);
-  println(p.key() + "=" + Str<int>(p.value())); // age=42
+  io::println(p.key() + "=" + Str<int>(p.value()));  // age=42
 
   bb: Box<Box<int>> = Box<Box<int>>(bi);      // nested instantiation
-  println(Str(bb.get().get()));            // 3
+  io::println(Str(bb.get().get()));            // 3
 
   s: Stack<Str> = Stack<Str>("");
   s.push("a");
   s.push("b");
-  while !s.empty() { println(s.pop()); }    // b, a
+  while !s.empty() {
+    io::println(s.pop());
+  }  // b, a
 
-  println(Str<int>(first([10, 20])));           // 10   (T inferred as int)
-  println(first<Str>(["x", "y"]));            // x    (explicit)
-  println(Str(unbox(Box<int>(7))));        // 7    (T inferred through Box<T>)
+  io::println(Str<int>(first([10, 20])));  // 10   (T inferred as int)
+  io::println(first<Str>(["x", "y"]));            // x    (explicit)
+  io::println(Str(unbox(Box<int>(7))));        // 7    (T inferred through Box<T>)
 
   inferred = Box(5);                          // constructor-argument inference
-  println(Str<int>(inferred.get()));            // 5
+  io::println(Str<int>(inferred.get()));            // 5
 
   h: Holder = Holder(40);                     // instantiation as a field type
-  println(Str(h.get().get() + 2));         // 42
+  io::println(Str(h.get().get() + 2));         // 42
 
   arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
-  println(Str<int>(arr[1].get()));              // 2
+  io::println(Str<int>(arr[1].get()));              // 2
 
-  println(describe(bi));                      // Box<int> holding 3
-  println(describe(bs));                      // Box<Str>
-  println(describe(p));                       // something else
+  io::println(describe(bi));                      // Box<int> holding 3
+  io::println(describe(bs));                      // Box<Str>
+  io::println(describe(p));                       // something else
 
-  println(Str(bi == Box<int>(3)));        // True  (== dispatches to equals)
-  println(Str<bool>(bi == Box<int>(4)));        // False
+  io::println(Str(bi == Box<int>(3)));        // True  (== dispatches to equals)
+  io::println(Str<bool>(bi == Box<int>(4)));  // False
 
   shared: Box<int> = bi;                      // shares the box
-  println(Str(shared.get()));               // 3
+  io::println(Str(shared.get()));               // 3
   return 0;
 }

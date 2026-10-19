@@ -25,7 +25,7 @@ methods come from `impl` blocks.
 - Methods: `impl Point { fn shift(d: int) { self.x = self.x + d; } }`.  In a method
   `self` **is the receiver's storage**: `p.shift(1)` changes `p`.  A `view fn` reads
   `self` only; a `static fn` is called as `Point::origin()`.
-- `==` / `!=` compare **field by field**; `toString()` (and `println`) renders
+- `==` / `!=` compare **field by field**; `toString()` (and `io::println`) renders
   `Point(x: 1, y: 2)`.  Every struct implements `Show` and `ValueType`;
   `impl Hashable for` and user traits work as for classes.
 - Parameter modes work as for tuples: a plain parameter is a copy, `view` reads the
@@ -34,8 +34,10 @@ methods come from `impl` blocks.
 - Generic: `struct Pair<A, B> { a: A; b: B; }` is a template, instantiated by its type
   arguments (`Pair<int, Str>`) or inferred from a constructor call (`Pair(1, "a")`),
   with `impl Pair<A, B>` blocks, as a generic class is (`11-generics.md`).
-- Not yet: optional structs (`Point?`), `match` on a struct, a fixed-size array field, a
-  struct that contains itself.
+- A struct has an optional (`Point?`), held in place like the tuple `(bool, Point)` and
+  unwrapped with `match p { q: Point { … } None { … } }` (`10-optionals.md`).
+- Not yet: `match` on a struct itself, a fixed-size array field, a struct that contains
+  itself.
 
 ---
 
@@ -86,6 +88,8 @@ its parameters are the constructor's, and it must assign every field on every pa
 'y' of struct 'A' is not assigned on every path through '__init__'`), as a class's does.
 
 ```pkn
+import ::io;
+
 struct Point { x: int; y: int; }
 
 struct Line {
@@ -105,8 +109,8 @@ impl Line {
 fn main() -> int {
   p = Point(1, 2);                 // the fields in order
   l = Line(p, Point(3, 4));        // through __init__
-  println(p);
-  println(l);
+  io::println(p);
+  io::println(l);
   return 0;
 }
 ```
@@ -131,6 +135,8 @@ variable, the field of an object or of another struct, or the array element.  A 
 fields, tuple elements and array elements is read and assigned through to the place:
 
 ```pkn
+import ::io;
+
 struct Point { x: int; y: int; }
 struct Line { a: Point; b: Point; }
 class Shape { at: Point; }
@@ -145,7 +151,7 @@ fn main() -> int {
   ps: Point[2] = [p, l.b];
   ps[1].x = 9;                     // an element's field
   t = (p, "p");
-  println(Str(p.x + l.a.y + s.at.x + ps[1].x + t.0.x));
+  io::println(Str(p.x + l.a.y + s.at.x + ps[1].x + t.0.x));
   return 0;
 }
 ```
@@ -195,6 +201,8 @@ a tuple does.  Changing a field of the copy leaves the original as it was; chang
 shared object is seen through both.
 
 ```pkn
+import ::io;
+
 class Node { n: int; view fn toString() -> Str { return "Node" + Str(self.n); } }
 struct Item { name: Str; node: Node; }
 
@@ -206,9 +214,9 @@ fn main() -> int {
   b.name = "b";
   b.node.n = 2;                    // the shared object
   c = rename(a);
-  println(a);
-  println(b);
-  println(c.name + " " + Str(a == b) + " " + Str(a == Item("a", a.node)));
+  io::println(a);
+  io::println(b);
+  io::println(c.name + " " + Str(a == b) + " " + Str(a == Item("a", a.node)));
   return 0;
 }
 ```
@@ -243,6 +251,8 @@ replaces whole.  A `view` of a struct of value types is copied when it is assign
 on to a `view` parameter but never stored or returned except as a `view`.
 
 ```pkn
+import ::io;
+
 struct Point { x: int; y: int; }
 
 fn sum(p: view Point) -> int { return p.x + p.y; }
@@ -256,9 +266,9 @@ fn main() -> int {
   bump(p.x);                       // a field is an inout place
   k: inout int = p.y;              // another name for p.y
   k = k + 100;
-  println(Str(sum(p)) + " " + Str(p.x) + " " + Str(p.y));
+  io::println(Str(sum(p)) + " " + Str(p.x) + " " + Str(p.y));
   reset(p);
-  println(p);
+  io::println(p);
   return 0;
 }
 ```
@@ -301,6 +311,8 @@ is read-only in 'view fn name', so part of it can only be returned as a 'view': 
 'view fn' so 'view' parameters can call it`).
 
 ```pkn
+import ::io;
+
 struct Counter {
   n: int;
   name: Str;
@@ -331,7 +343,7 @@ fn main() -> int {
   d = c;                           // a copy
   d.n = 9;
   v: view = c;
-  println(Str(c.get()) + " " + Str(b.c.get()) + " " + Str(d.get()) + " " +
+  io::println(Str(c.get()) + " " + Str(b.c.get()) + " " + Str(d.get()) + " " +
           Str(c.same(d)) + " " + v.label());
   Counter::named("tmp").tick();    // a temporary: changed, then dropped
   return 0;
@@ -359,9 +371,9 @@ compare with `==`).  A method's parameter `other: view Self` names the struct it
 reference fields through their own `equals` (identity unless the class overrides it), two
 absent optionals equal, nested structs and tuples element-wise; a `float` field follows
 IEEE 754, so a struct holding a NaN is unequal to itself.  `toString()` renders the
-struct's name and each field's name and value as `println` shows it:
-`Point(x: 1, y: 2)`, `Item(name: a, node: Node2, pos: (7, 8))`.  `print`, `println`,
-`printerr` and `printerrln` take a struct as they take a tuple.
+struct's name and each field's name and value as its own `toString()` shows it:
+`Point(x: 1, y: 2)`, `Item(name: a, node: Node2, pos: (7, 8))`.  `::io`'s `print`,
+`println`, `printerr` and `printerrln` take a struct as they take a tuple (it is `Show`).
 
 Every struct implements the built-in traits `Show` (its `toString`) and `ValueType` (it
 is held in place), so it meets `T: Show` and `T: ValueType` bounds (`12-traits.md`), and
@@ -370,6 +382,8 @@ implements 'Show'`).  `Hashable` and user traits are implemented with `impl Trai
 Name` blocks, as for a class:
 
 ```pkn
+import ::io;
+
 struct Point { x: int; y: int; }
 
 impl Hashable for Point {
@@ -387,7 +401,7 @@ fn sameHash<T: Hashable>(a: view T, b: view T) -> bool { return a.hash() == b.ha
 fn main() -> int {
   p = Point(1, 2);
   pair = twice(p);
-  println(show(p) + " " + greet(p) + " " + Str(pair.1.y) + " " +
+  io::println(show(p) + " " + greet(p) + " " + Str(pair.1.y) + " " +
           Str(sameHash(p, Point(1, 2))) + " " + Str(p == Point(1, 2)) + " " +
           Str(p != pair.0));
   return 0;
@@ -406,6 +420,8 @@ Values that are `==` must hash the same, so `hash` reads the fields `==` compare
 collections:
 
 ```pkn
+import ::io;
+
 import ::collections;
 
 struct Point { x: int; y: int; }
@@ -420,7 +436,7 @@ fn main() -> int {
   ps = collections::List<Point>();
   ps.push(Point(1, 0));
   ps.push(Point(2, 2));
-  println(names.get(Point(1, 0)) + " " + Str(names.containsKey(Point(2, 2))) + " " +
+  io::println(names.get(Point(1, 0)) + " " + Str(names.containsKey(Point(2, 2))) + " " +
           Str(ps.contains(Point(2, 2))) + " " + Str(ps.get(0).x));
   return 0;
 }
@@ -448,6 +464,8 @@ Pair<A, B>` makes every instantiation implement the trait; a bound (`struct Keye
 Hashable>`) is checked at each instantiation.
 
 ```pkn
+import ::io;
+
 struct Pair<A, B> {
   a: A;
   b: B;
@@ -484,9 +502,9 @@ fn main() -> int {
   b = Box(Pair(3, 4));                   // Box<Pair<int, int>>, through __init__
   bs: Box<int>[2] = [Box(1), Box(2)];
   bs[1].v = 7;
-  println(p);
-  println(f);
-  println(Str(sumInts(b.get())) + " " + firstOf(f) + " " + Str(bs[0].v + bs[1].v) + " " +
+  io::println(p);
+  io::println(f);
+  io::println(Str(sumInts(b.get())) + " " + firstOf(f) + " " + Str(bs[0].v + bs[1].v) + " " +
           Str(sameHash(Keyed("k", 1), Keyed("k", 2))) + " " + Str(p == q));
   return 0;
 }
@@ -540,13 +558,15 @@ fn make(n: int) -> Point { return Point(n, n); }
 ```
 
 ```pkn
+import ::io;
+
 import geo;
 
 fn main() -> int {
   p = geo::Point(1, 2);
   p.shift(3);
   o: geo::Point = geo::Point::origin();
-  println(p.toString() + " " + Str(p.sum()) + " " + Str(o == geo::make(0)));
+  io::println(p.toString() + " " + Str(p.sum()) + " " + Str(o == geo::make(0)));
   return 0;
 }
 ```
@@ -572,7 +592,6 @@ Point(x: 4, y: 2) 6 True
 | Contains itself | `struct A { b: B; } struct B { a: A; }`; `struct C { c: (int, C); }` |
 | Array field | `struct A { xs: int[3]; }` |
 | Generic struct misuse | `Pair<int>` for two parameters; `p: Pair` without arguments; `A<int>` for a plain struct; `impl Pair { }`; a `static fn` in `impl Pair<A, B>`; `Same(1, "a")` for `Same<T> { a: T; b: T; }` |
-| Optional struct | `a: A? = None` |
 | Nominal mismatch | `b: B = a`; `t: (int, int) = a`; `a == b` across types |
 | Not an `Obj` | `o: Obj = a` |
 | Tuple index | `a.0` |
@@ -596,7 +615,7 @@ Point(x: 4, y: 2) 6 True
 
 ## Not Yet Supported
 
-Optional structs (`Point?`), `match` on a struct, a fixed-size array field, an `impl`
+`match` on a struct (other than unwrapping a `Point?`), a fixed-size array field, an `impl`
 block for a struct of another module, a `static fn` in a generic struct's `impl` block, a
 field of an array element as an `inout` place, and a struct crossing into C other than as
 a type argument of a generic native function (`02-functions-and-calling.md`, "Generic

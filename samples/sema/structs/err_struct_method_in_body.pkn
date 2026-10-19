@@ -3,4 +3,6 @@ struct X {
   n: int;
   fn get() -> int { return self.n; }
 }
-fn main() -> int { return 0; }
+fn main() -> int {
+  return 0;
+}

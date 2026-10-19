@@ -8,6 +8,8 @@
 //            side is NaN, every other comparison is false), tuple formatting
 //            of special values.
 
+import ::io;
+
 // expect-stdout: inf:  inf
 // expect-stdout: -inf: -inf
 // expect-stdout: nan:  nan
@@ -33,23 +35,23 @@ fn main() -> int {
   nan1: float = inf - inf;
   nan2: float = 0.0 * inf;
   nan3: float = 0.0 - nan1;
-  println("inf:  " + Str<float>(inf));
-  println("-inf: " + Str(ninf));
-  println("nan:  " + Str<float>(nan1));
-  println("nan:  " + Str(nan2));
-  println("-nan: " + Str<float>(nan3));
-  println("nan == nan: " + Str(nan1 == nan1));
-  println("nan != nan: " + Str<bool>(nan1 != nan1));
-  println("nan != 1:   " + Str(nan1 != 1.0));
-  println("1 != nan:   " + Str<bool>(1.0 != nan1));
-  println("nan != inf: " + Str(nan1 != inf));
-  println("nan < 1:    " + Str<bool>(nan1 < 1.0));
-  println("nan <= nan: " + Str(nan1 <= nan1));
-  println("nan > 1:    " + Str<bool>(nan1 > 1.0));
-  println("nan >= nan: " + Str(nan1 >= nan1));
-  println("inf > big:  " + Str<bool>(inf > big));
+  io::println("inf:  " + Str<float>(inf));
+  io::println("-inf: " + Str(ninf));
+  io::println("nan:  " + Str<float>(nan1));
+  io::println("nan:  " + Str(nan2));
+  io::println("-nan: " + Str<float>(nan3));
+  io::println("nan == nan: " + Str(nan1 == nan1));
+  io::println("nan != nan: " + Str<bool>(nan1 != nan1));
+  io::println("nan != 1:   " + Str(nan1 != 1.0));
+  io::println("1 != nan:   " + Str<bool>(1.0 != nan1));
+  io::println("nan != inf: " + Str(nan1 != inf));
+  io::println("nan < 1:    " + Str<bool>(nan1 < 1.0));
+  io::println("nan <= nan: " + Str(nan1 <= nan1));
+  io::println("nan > 1:    " + Str<bool>(nan1 > 1.0));
+  io::println("nan >= nan: " + Str(nan1 >= nan1));
+  io::println("inf > big:  " + Str<bool>(inf > big));
   t: (float, float, float) = (nan1, inf, ninf);
-  println(t);                                  // (nan, inf, -inf)
-  println(Str(t.0) + " " + Str<float>(t.2));
+  io::println(t);                                  // (nan, inf, -inf)
+  io::println(Str(t.0) + " " + Str<float>(t.2));
   return 0;
 }

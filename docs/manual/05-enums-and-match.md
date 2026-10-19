@@ -7,6 +7,8 @@ This chapter covers both and gives tasks in `tasks` a priority.
 ## Declaring an enum
 
 ```pkn
+import ::io;
+
 enum Direction { North, East, South, West }
 
 fn turnRight(d: Direction) -> Direction {
@@ -36,8 +38,8 @@ fn main() -> int {
     route = route + " -> " + name(d);
     i = i + 1;
   }
-  println(route);
-  println(Str(d == Direction::North));
+  io::println(route);
+  io::println(Str(d == Direction::North));
   return 0;
 }
 ```
@@ -56,7 +58,8 @@ type of its own:
   direction, and no arithmetic on enums.
 - The only operators are `==` and `!=`, between values of the same enum. There is no
   ordering (`<`).
-- It cannot be printed directly (`println(d)` is an error), so a function such as `name`
+- It cannot be printed directly (`io::println(d)` is an error: an enum is not `Show`), so a
+  function such as `name`
   above turns it into a string.
 - It is a plain value like an `int`: copied on assignment, never allocated. Enums can be
   stored in variables, fields and arrays, and passed to and returned from functions.
@@ -79,6 +82,8 @@ every place that needs updating. To handle only some variants, end with the wild
 `_`, which matches anything:
 
 ```pkn
+import ::io;
+
 enum Day { Mon, Tue, Wed, Thu, Fri, Sat, Sun }
 
 fn isWeekend(d: Day) -> bool {
@@ -90,7 +95,7 @@ fn isWeekend(d: Day) -> bool {
 }
 
 fn main() -> int {
-  println(Str(isWeekend(Day::Sun)) + " " + Str(isWeekend(Day::Wed)));
+  io::println(Str(isWeekend(Day::Sun)) + " " + Str(isWeekend(Day::Wed)));
   return 0;
 }
 ```
@@ -107,6 +112,8 @@ On an `int`, `float`, `char`, `bool` or `Str`, the arms are literals, compared b
 (strings by content):
 
 ```pkn
+import ::io;
+
 fn command(word: Str) -> Str {
   match word {
     "add"  { return "adding"; }
@@ -117,14 +124,14 @@ fn command(word: Str) -> Str {
 }
 
 fn main() -> int {
-  println(command("add"));
-  println(command("list"));
-  println(command("frobnicate"));
+  io::println(command("add"));
+  io::println(command("list"));
+  io::println(command("frobnicate"));
   n = 2;
   match n * 3 {
-    0 { println("zero"); }
-    6 { println("six"); }
-    _ { println("something else"); }
+    0 { io::println("zero"); }
+    6 { io::println("six"); }
+    _ { io::println("something else"); }
   }
   return 0;
 }
@@ -172,6 +179,8 @@ and `parsePriority` reads the words a user would type. Since an unknown word mus
 give a priority, it falls back to `Normal`:
 
 ```pkn
+import ::io;
+
 enum Priority { Low, Normal, High }
 
 fn priorityName(p: Priority) -> Str {
@@ -218,9 +227,9 @@ fn main() -> int {
   b = Task("fix the leak", parsePriority("!"));
   c = Task("read a book", parsePriority("whenever"));
   b.complete();
-  println(a);
-  println(b);
-  println(c.title + " has priority " + priorityName(c.priority));
+  io::println(a);
+  io::println(b);
+  io::println(c.title + " has priority " + priorityName(c.priority));
   return 0;
 }
 ```

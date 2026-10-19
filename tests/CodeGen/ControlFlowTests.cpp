@@ -8,7 +8,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 // -- if / else
@@ -16,7 +16,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(ControlFlow, IfTrue) {
   auto r = compileAndRun(wrapMain(R"(
     if True {
-      println("yes");
+      io::println("yes");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -26,9 +26,9 @@ TEST(ControlFlow, IfTrue) {
 TEST(ControlFlow, IfFalse) {
   auto r = compileAndRun(wrapMain(R"(
     if False {
-      println("no");
+      io::println("no");
     }
-    println("done");
+    io::println("done");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "done\n");
@@ -38,9 +38,9 @@ TEST(ControlFlow, IfElseTrueBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 10;
     if x > 5 {
-      println("big");
+      io::println("big");
     } else {
-      println("small");
+      io::println("small");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -51,9 +51,9 @@ TEST(ControlFlow, IfElseFalseBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 3;
     if x > 5 {
-      println("big");
+      io::println("big");
     } else {
-      println("small");
+      io::println("small");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -64,11 +64,11 @@ TEST(ControlFlow, IfElseIfChain) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 42;
     if x > 100 {
-      println("large");
+      io::println("large");
     } elif x > 10 {
-      println("medium");
+      io::println("medium");
     } else {
-      println("small");
+      io::println("small");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -79,11 +79,11 @@ TEST(ControlFlow, IfElseIfLastBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 3;
     if x > 100 {
-      println("large");
+      io::println("large");
     } elif x > 10 {
-      println("medium");
+      io::println("medium");
     } else {
-      println("small");
+      io::println("small");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -95,9 +95,9 @@ TEST(ControlFlow, NestedIf) {
     x: int = 5;
     if x > 0 {
       if x < 10 {
-        println("single digit");
+        io::println("single digit");
       } else {
-        println("big");
+        io::println("big");
       }
     }
   )"));
@@ -106,7 +106,7 @@ TEST(ControlFlow, NestedIf) {
 }
 
 TEST(ControlFlow, IfWithReturn) {
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn classify(x: int) -> int {
       if x > 0 {
         return 1;
@@ -117,9 +117,9 @@ TEST(ControlFlow, IfWithReturn) {
       }
     }
     fn main() -> int {
-      println(Str<int>(classify(42)));
-      println(Str<int>(classify(-5)));
-      println(Str<int>(classify(0)));
+      io::println(Str<int>(classify(42)));
+      io::println(Str<int>(classify(-5)));
+      io::println(Str<int>(classify(0)));
       return 0;
     }
   )");
@@ -133,7 +133,7 @@ TEST(ControlFlow, WhileCountUp) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
     while i < 5 {
-      println(Str<int>(i));
+      io::println(Str<int>(i));
       i = i + 1;
     }
   )"));
@@ -144,9 +144,9 @@ TEST(ControlFlow, WhileCountUp) {
 TEST(ControlFlow, WhileNeverExecutes) {
   auto r = compileAndRun(wrapMain(R"(
     while False {
-      println("nope");
+      io::println("nope");
     }
-    println("done");
+    io::println("done");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "done\n");
@@ -160,7 +160,7 @@ TEST(ControlFlow, WhileSum) {
       sum = sum + i;
       i = i + 1;
     }
-    println(Str<int>(sum));
+    io::println(Str<int>(sum));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "55\n");
@@ -171,7 +171,7 @@ TEST(ControlFlow, WhileWithIf) {
     i: int = 0;
     while i < 6 {
       if i % 2 == 0 {
-        println(Str<int>(i));
+        io::println(Str<int>(i));
       }
       i = i + 1;
     }
@@ -192,7 +192,7 @@ TEST(ControlFlow, NestedWhile) {
       }
       i = i + 1;
     }
-    println(Str<int>(count));
+    io::println(Str<int>(count));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "9\n");
@@ -203,7 +203,7 @@ TEST(ControlFlow, NestedWhile) {
 TEST(ControlFlow, LogicalAndTrueTrue) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True && True;
-    println(Str<bool>(a));
+    io::println(Str<bool>(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n");
@@ -212,7 +212,7 @@ TEST(ControlFlow, LogicalAndTrueTrue) {
 TEST(ControlFlow, LogicalAndTrueFalse) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True && False;
-    println(Str<bool>(a));
+    io::println(Str<bool>(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\n");
@@ -221,7 +221,7 @@ TEST(ControlFlow, LogicalAndTrueFalse) {
 TEST(ControlFlow, LogicalAndFalseShortCircuit) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = False && True;
-    println(Str<bool>(a));
+    io::println(Str<bool>(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\n");
@@ -230,7 +230,7 @@ TEST(ControlFlow, LogicalAndFalseShortCircuit) {
 TEST(ControlFlow, LogicalOrFalseFalse) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = False || False;
-    println(Str<bool>(a));
+    io::println(Str<bool>(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\n");
@@ -239,7 +239,7 @@ TEST(ControlFlow, LogicalOrFalseFalse) {
 TEST(ControlFlow, LogicalOrTrueShortCircuit) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True || False;
-    println(Str<bool>(a));
+    io::println(Str<bool>(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n");
@@ -248,7 +248,7 @@ TEST(ControlFlow, LogicalOrTrueShortCircuit) {
 TEST(ControlFlow, LogicalOrFalseTrue) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = False || True;
-    println(Str<bool>(a));
+    io::println(Str<bool>(a));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n");
@@ -258,9 +258,9 @@ TEST(ControlFlow, LogicalWithRelational) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 5;
     a: bool = x > 0 && x < 10;
-    println(Str<bool>(a));
+    io::println(Str<bool>(a));
     b: bool = x < 0 || x > 3;
-    println(Str<bool>(b));
+    io::println(Str<bool>(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nTrue\n");
@@ -271,9 +271,9 @@ TEST(ControlFlow, LogicalInIfCondition) {
     x: int = 5;
     y: int = 10;
     if x > 0 && y > 0 {
-      println("both positive");
+      io::println("both positive");
     } else {
-      println("not both positive");
+      io::println("not both positive");
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -288,7 +288,7 @@ TEST(ControlFlow, LogicalInWhileCondition) {
       i = i + 1;
       j = j - 1;
     }
-    println(Str<int>(i) + Str<int>(j));
+    io::println(Str<int>(i) + Str<int>(j));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "55\n");
@@ -297,9 +297,9 @@ TEST(ControlFlow, LogicalInWhileCondition) {
 TEST(ControlFlow, LogicalChained) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = True && True || False;
-    println(Str<bool>(a));
+    io::println(Str<bool>(a));
     b: bool = False || False && True;
-    println(Str<bool>(b));
+    io::println(Str<bool>(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nFalse\n");
@@ -308,9 +308,9 @@ TEST(ControlFlow, LogicalChained) {
 TEST(ControlFlow, LogicalNot) {
   auto r = compileAndRun(wrapMain(R"(
     a: bool = !True && False;
-    println(Str<bool>(a));
+    io::println(Str<bool>(a));
     b: bool = !False || False;
-    println(Str<bool>(b));
+    io::println(Str<bool>(b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\nTrue\n");
@@ -321,7 +321,7 @@ TEST(ControlFlow, LogicalNot) {
 TEST(ControlFlow, TernaryTrueBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = if True then 10 else 20;
-    println(Str<int>(x));
+    io::println(Str<int>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "10\n");
@@ -330,7 +330,7 @@ TEST(ControlFlow, TernaryTrueBranch) {
 TEST(ControlFlow, TernaryFalseBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = if False then 10 else 20;
-    println(Str<int>(x));
+    io::println(Str<int>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "20\n");
@@ -340,7 +340,7 @@ TEST(ControlFlow, TernaryWithCondition) {
   auto r = compileAndRun(wrapMain(R"(
     a: int = 5;
     x: int = if a > 3 then 100 else 200;
-    println(Str<int>(x));
+    io::println(Str<int>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "100\n");
@@ -349,7 +349,7 @@ TEST(ControlFlow, TernaryWithCondition) {
 TEST(ControlFlow, TernaryNested) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = if False then 1 else if True then 2 else 3;
-    println(Str<int>(x));
+    io::println(Str<int>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "2\n");
@@ -358,7 +358,7 @@ TEST(ControlFlow, TernaryNested) {
 TEST(ControlFlow, TernaryBoolResult) {
   auto r = compileAndRun(wrapMain(R"(
     x: bool = if True then False else True;
-    println(Str<bool>(x));
+    io::println(Str<bool>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "False\n");
@@ -373,7 +373,7 @@ TEST(ControlFlow, BreakExitsLoop) {
       if i == 3 { break; }
       i = i + 1;
     }
-    println(Str<int>(i));
+    io::println(Str<int>(i));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n");
@@ -388,7 +388,7 @@ TEST(ControlFlow, ContinueSkipsRest) {
       if i == 3 { continue; }
       sum = sum + i;
     }
-    println(Str<int>(sum));
+    io::println(Str<int>(sum));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "12\n");
@@ -407,7 +407,7 @@ TEST(ControlFlow, BreakInnerLoopOnly) {
       }
       i = i + 1;
     }
-    println(Str<int>(count));
+    io::println(Str<int>(count));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "6\n");
@@ -425,7 +425,7 @@ TEST(ControlFlow, ContinueSumEvens) {
       result = result + i;
       i = i + 1;
     }
-    println(Str<int>(result));
+    io::println(Str<int>(result));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "20\n");
@@ -438,7 +438,7 @@ TEST(ControlFlow, BreakWhileTrue) {
       x = x - 7;
       if x < 50 { break; }
     }
-    println(Str<int>(x));
+    io::println(Str<int>(x));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "44\n");

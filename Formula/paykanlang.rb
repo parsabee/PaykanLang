@@ -50,13 +50,14 @@ class Paykanlang < Formula
 
   test do
     # A real end-to-end exercise: the installed compiler must run a program
-    # that uses variables, arithmetic, and println, and exit with the value the
-    # program returns.
+    # that uses variables, arithmetic, and io::println (the installed standard
+    # library), and exit with the value the program returns.
     (testpath/"hello.pkn").write <<~PKN
+      import ::io;
       fn main() -> int {
         x: int = 20;
         y: int = 22;
-        println("Hello from the Homebrew test!");
+        io::println("Hello from the Homebrew test!");
         return x + y;
       }
     PKN

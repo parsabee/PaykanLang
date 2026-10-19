@@ -47,8 +47,10 @@ Code is shown in blocks like this one, and a block labelled **Output** shows exa
 the program prints:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
-  println("Hello from the manual");
+  io::println("Hello from the manual");
   return 0;
 }
 ```

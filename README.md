@@ -280,8 +280,10 @@ To learn PaykanLang:
 A taste:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
-  println("Hello, world!");
+  io::println("Hello, world!");
   return 0;
 }
 ```

@@ -1,4 +1,11 @@
 // ERROR: a 'static fn' in the 'impl' block of a generic struct is not supported yet
-struct Pair<A, B> { a: A; b: B; }
-impl Pair<A, B> { static fn mk() -> int { return 1; } }
-fn main() -> int { return 0; }
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
+impl Pair<A, B> {
+  static fn mk() -> int { return 1; }
+}
+fn main() -> int {
+  return 0;
+}

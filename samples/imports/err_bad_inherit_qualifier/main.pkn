@@ -5,4 +5,6 @@ import shapes::base;
 
 class Circle : shapes::Shape {}  // ERROR: 'shapes::Shape' is not defined
 
-fn main() -> int { return 0; }
+fn main() -> int {
+  return 0;
+}

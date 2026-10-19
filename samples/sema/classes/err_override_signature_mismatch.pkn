@@ -5,7 +5,7 @@ class Animal {
 }
 
 impl Animal {
-  fn __init__() {}
+  fn __init__() { }
 }
 
 class Dog : Animal {

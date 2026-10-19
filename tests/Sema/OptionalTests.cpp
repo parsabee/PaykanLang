@@ -27,7 +27,7 @@ static const char *const kNodeClass =
     "}\n";
 
 static std::string withNode(const std::string &body) {
-  return std::string(kNodeClass) + "fn main() -> int {\n" + body +
+  return std::string(kNodeClass) + "import ::io; fn main() -> int {\n" + body +
          "\n  return 0;\n}\n";
 }
 
@@ -76,10 +76,10 @@ TEST(Optional, OptionalSubclassToOptionalBase) {
 TEST(Optional, OptionalIsPrinted) {
   expectOk(withNode(R"(
     n: Node? = None;
-    println(n);          // `None` or the node
+    io::println(n);          // `None` or the node
     s: Str? = "a";
-    print(s);
-    printerrln(s);
+    io::print(s);
+    io::printerrln(s);
   )"));
 }
 
@@ -218,8 +218,13 @@ TEST(Optional, ConcatOnOptionalStrIsError) {
               "(use match)");
 }
 
-TEST(Optional, ToStringOnOptionalIsError) {
-  expectError(withNode(R"(s: Str? = "a"; t: Str = s.toString();)"),
+// `toString()` is the one method an optional has (the builtin `Show`):
+// "None", or its value's text.  Any other needs the value unwrapped.
+TEST(Optional, ToStringOnOptionalIsItsText) {
+  auto r = semaCheck(withNode(
+      R"(s: Str? = "a"; n: int? = None; t: Str = s.toString() + n.toString();)"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  expectError(withNode(R"(s: Str? = "a"; n = s.len();)"),
               "cannot use optional 'Str?' as 'Str'");
 }
 
@@ -233,9 +238,9 @@ TEST(Optional, UnaryOnOptionalIsError) {
 TEST(Optional, CompareAgainstNone) {
   expectOk(withNode(R"(
     a: Node? = None;
-    if a == None { println("none"); }
-    if a != None { println("some"); }
-    if None == a { println("none"); }
+    if a == None { io::println("none"); }
+    if a != None { io::println("some"); }
+    if None == a { io::println("none"); }
     s: Str? = "x";
     b: bool = s != None;
   )"));
@@ -246,12 +251,12 @@ TEST(Optional, CompareTwoOptionals) {
     a: Node? = None;
     b: Node? = Node(1);
     l: Leaf? = Leaf(2);
-    if a == b { println("eq"); }
-    if a != b { println("ne"); }
-    if b == l { println("subtype ok"); }
+    if a == b { io::println("eq"); }
+    if a != b { io::println("ne"); }
+    if b == l { io::println("subtype ok"); }
     s: Str? = "x";
     t: Str? = "x";
-    if s == t { println("str eq"); }
+    if s == t { io::println("str eq"); }
   )"));
 }
 
@@ -272,8 +277,8 @@ TEST(Optional, MatchWithBindingAndWildcard) {
   expectOk(withNode(R"(
     a: Node? = Node(1);
     match a {
-      n: Node { println(Str<int>(n.val())); }
-      _       { println("none"); }
+      n: Node { io::println(Str<int>(n.val())); }
+      _       { io::println("none"); }
     }
   )"));
 }
@@ -282,8 +287,8 @@ TEST(Optional, MatchWithNoneArm) {
   expectOk(withNode(R"(
     a: Node? = None;
     match a {
-      n: Node { println(Str<int>(n.v)); }
-      None    { println("none"); }
+      n: Node { io::println(Str<int>(n.v)); }
+      None    { io::println("none"); }
     }
   )"));
 }
@@ -292,9 +297,9 @@ TEST(Optional, MatchSubclassArmThenInner) {
   expectOk(withNode(R"(
     a: Node? = Leaf(1);
     match a {
-      l: Leaf { println("leaf"); }
-      n: Node { println("node"); }
-      None    { println("none"); }
+      l: Leaf { io::println("leaf"); }
+      n: Node { io::println("node"); }
+      None    { io::println("none"); }
     }
   )"));
 }
@@ -303,23 +308,23 @@ TEST(Optional, MatchOnOptionalStr) {
   expectOk(withNode(R"(
     s: Str? = "x";
     match s {
-      v: Str { println(v + "!"); }
-      None   { println("none"); }
+      v: Str { io::println(v + "!"); }
+      None   { io::println("none"); }
     }
   )"));
 }
 
 TEST(Optional, MatchOnOptionalFieldAndCallResult) {
-  expectOk(std::string(kNodeClass) + R"(
+  expectOk(std::string(kNodeClass) + R"(import ::io;
     fn find(k: int) -> Node? { return Node(k); }
     fn main() -> int {
       h: Node = Node(1);
       match h.next {
-        n: Node { println("has next"); }
-        _       { println("tail"); }
+        n: Node { io::println("has next"); }
+        _       { io::println("tail"); }
       }
       match find(2) {
-        n: Node { println(Str<int>(n.v)); }
+        n: Node { io::println(Str<int>(n.v)); }
         None    { }
       }
       return 0;
@@ -407,11 +412,11 @@ TEST(Optional, MatchBindingIsNarrowedToArmType) {
 // ─── the existing Obj-subject match is unchanged ────────────────────────────
 
 TEST(Optional, ObjSubjectMatchStillWorks) {
-  expectOk(R"(
+  expectOk(R"(import ::io;
     fn main() -> int {
-      match Stdin.readln() {
-        line: Str { println(line); }
-        _         { println("eof"); }
+      match io::stdin().readln().value {
+        line: Str { io::println(line); }
+        _         { io::println("eof"); }
       }
       return 0;
     }
@@ -501,7 +506,7 @@ TEST(Optional, ArrayOfOptionals) {
     xs[1] = None;
     e: Node? = xs[0];
     match xs[0] {
-      n: Node { println(Str<int>(n.v)); }
+      n: Node { io::println(Str<int>(n.v)); }
       None    { }
     }
   )"));
@@ -534,25 +539,29 @@ TEST(Optional, TernaryOptionalResultCannotNarrow) {
 
 // ─── rejected optional inner types ──────────────────────────────────────────
 
-TEST(Optional, OptionalEnumIsRejected) {
-  expectError(R"(
+// Optionals of enums, tuples and structs (docs/language/10-optionals.md).
+TEST(Optional, OptionalEnumTupleAndStructAreAccepted) {
+  auto r = semaCheck(R"(
     enum Color { Red, Green }
+    struct S { x: int; }
+    class P { c: Color?; t: (int, Str)?; s: S?; }
+    impl P { fn __init__() {} }
+    fn find(ok: bool) -> S? { return if ok then S(1) else None; }
     fn main() -> int {
       c: Color? = None;
+      c = Color::Green;
+      p = P();
+      p.s = S(2);
+      t: (int, Str)? = (1, "a");
+      match t { v: (int, Str) { n = v.0; } None { } }
+      match c { k: Color { b = k == Color::Red; } None { } }
+      match find(True) { s: S { n = s.x; } None { } }
+      e = p.s == None || t != None;
+      txt = t.toString() + p.s.toString();
       return 0;
     }
-  )",
-              "optional enum types are not supported yet");
-}
-
-TEST(Optional, OptionalEnumFieldIsRejected) {
-  expectError(R"(
-    enum Color { Red, Green }
-    class P { c: Color?; }
-    impl P { fn __init__() {} }
-    fn main() -> int { return 0; }
-  )",
-              "optional enum types are not supported yet");
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Optional, UnknownInnerTypeIsRejected) {
@@ -608,7 +617,7 @@ TEST(OptionalModule, ExportedOptionalSignaturesRoundTrip) {
   auto tmp = (paykan::test::tempDir() / "pkn_opt_mod").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "list.pkn", kListModule);
-  auto main = writeFile(tmp, "main.pkn", R"(
+  auto main = writeFile(tmp, "main.pkn", R"(import ::io;
 import list;
 fn main() -> int {
   n: list::Node = list::Node(1);
@@ -621,8 +630,8 @@ fn main() -> int {
   s: Str? = list::first(ss);
   c: int = list::count(ss);
   match t {
-    x: list::Node { println(Str<int>(x.v)); }
-    None { println("none"); }
+    x: list::Node { io::println(Str<int>(x.v)); }
+    None { io::println("none"); }
   }
   return 0;
 }
@@ -795,14 +804,12 @@ TEST(OptionalTuple, ArrayLiteralElementThatDoesNotFitIsReported) {
               "element type '(float, int)' of '(float, int)[1]'");
 }
 
-TEST(OptionalTuple, OptionalTupleTypeRejected) {
-  expectError(R"(
-    fn find(k: int) -> (int, Str)? { return None; }
-    fn main() -> int { return 0; }
-  )",
-              "optional tuple types are not supported yet");
-  expectError("fn main() -> int { x: (int, Str)?[1] = [None]; return 0; }",
-              "optional tuple types are not supported yet");
+TEST(OptionalTuple, OptionalTupleTypeAccepted) {
+  auto r = semaCheck(R"(
+    fn find(k: int) -> (int, Str)? { return if k > 0 then (k, "s") else None; }
+    fn main() -> int { x: (int, Str)?[1] = [None]; y = find(1); return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(OptionalTupleModule, TupleAndOptionalSignaturesRoundTrip) {

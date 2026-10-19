@@ -7,8 +7,8 @@ import containers::util;
 class Box<T> {
   v: T;
   view fn get() -> view T { return self.v; }
-  fn set(v: T) { self.v = v; }
-  view fn tag() -> Str { return util::bracket(Str(_serial())); }
+  fn set(v: T)            { self.v = v; }
+  view fn tag() -> Str    { return util::bracket(Str(_serial())); }
 }
 
 impl Box<T> {
@@ -24,12 +24,20 @@ impl Pair<A, B> {
   fn __init__(a: A, b: B) { self.a = a; self.b = b; }
 }
 
-fn _serial() -> int { return 7; }
+fn _serial() -> int {
+  return 7;
+}
 
-fn pairOf<A, B>(a: A, b: B) -> Pair<A, B> { return Pair(a, b); }
+fn pairOf<A, B>(a: A, b: B) -> Pair<A, B> {
+  return Pair(a, b);
+}
 
-fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> { return Pair(p.b, p.a); }
+fn swap<A, B>(p: Pair<A, B>) -> Pair<B, A> {
+  return Pair(p.b, p.a);
+}
 
 // The module's own Box<int>: importers that instantiate Box<int> get this
 // very class.
-fn one() -> Box<int> { return Box<int>(1); }
+fn one() -> Box<int> {
+  return Box<int>(1);
+}

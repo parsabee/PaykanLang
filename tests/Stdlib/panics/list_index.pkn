@@ -1,8 +1,9 @@
 // expect-panic: List index 3 out of range (len=3)
+import ::io;
 import ::collections;
 
 fn main() -> int {
   xs = collections::listOf([1, 2, 3]);
-  println(Str(xs.get(3)));
+  io::println(Str(xs.get(3)));
   return 0;
 }

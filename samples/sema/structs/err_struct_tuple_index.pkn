@@ -1,5 +1,8 @@
 // ERROR: tuple index '.0' applied to struct type 'A': a struct's fields are named (x, y)
-struct A { x: int; y: int; }
+struct A {
+  x: int;
+  y: int;
+}
 fn main() -> int {
   a = A(1, 2);
   return a.0;

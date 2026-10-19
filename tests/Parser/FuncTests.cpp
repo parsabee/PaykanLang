@@ -18,9 +18,9 @@ TEST(Func, FunctionWithParams) {
 }
 
 TEST(Func, VoidFunction) {
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io;
     fn greet() {
-      println("hi");
+      io::println("hi");
     }
     fn main() -> int { greet(); return 0; }
   )");

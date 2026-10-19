@@ -9,7 +9,7 @@ using namespace paykan::test;
 
 static std::string withClasses(const std::string &classDefs,
                                const std::string &body = "return 0;") {
-  return classDefs + "\nfn main() -> int {\n" + body + "\n}\n";
+  return classDefs + "import ::io; \nfn main() -> int {\n" + body + "\n}\n";
 }
 
 // -- Basic class structure
@@ -134,14 +134,22 @@ TEST(Class, DuplicateMethod) {
 // constructor, so it may not reuse a builtin function, builtin class, or enum.
 
 // Regression: `class print` used to silently replace the builtin `print`.
-TEST(Class, NameShadowsBuiltinFunctionRejected) {
-  auto r = semaCheck(withClasses("class print {}\n"
-                                 "impl print { fn __init__() {} }",
-                                 "print(\"hi\"); return 0;"));
-  EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find(
-                "'print' is a builtin function and cannot be redeclared"),
-            std::string::npos)
+// The standard library's names (io::print, io::File, res::Error) are not
+// reserved: a program may name its own classes so.  (Type names are still
+// global across an import graph, so one that imports ::io cannot also
+// declare a `File`: docs/design/pkm.md, module-local type names.)
+TEST(Class, TheStandardLibrarysNamesAreNotReserved) {
+  auto r = semaCheck("class print {}\n"
+                     "impl print { fn __init__() {} }\n"
+                     "class File {}\nclass Error {}\n"
+                     "fn main() -> int { p = print(); return 0; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  r = semaCheck("import ::io;\nclass File {}\n"
+                "fn main() -> int { return 0; }\n");
+  EXPECT_NE(
+      r.Diagnostics.find(
+          "class 'File' conflicts with an imported type of the same name"),
+      std::string::npos)
       << r.Diagnostics;
 }
 
@@ -182,7 +190,7 @@ TEST(Class, BuiltinTypeNamesAreReserved) {
 }
 
 TEST(Class, NameShadowsBuiltinClassRejected) {
-  for (const char *name : {"Obj", "Str", "File", "Error"}) {
+  for (const char *name : {"Obj", "Str"}) {
     auto r = semaCheck(withClasses(std::string("class ") + name + " {}"));
     EXPECT_FALSE(r.Ok) << name;
     EXPECT_NE(
@@ -205,10 +213,10 @@ TEST(Class, NameShadowsEnumRejected) {
 // Fields and methods have their own per-class namespace: they may reuse a
 // builtin function name, and the builtin stays callable.
 TEST(Class, MemberNamedLikeBuiltinOk) {
-  auto r = semaCheck(withClasses(R"(
+  auto r = semaCheck(withClasses(R"(import ::io;
     class Logger {
       open: int;
-      fn print(msg: Str) { println(msg); }
+      fn print(msg: Str) { io::println(msg); }
       fn StrInt(n: int) -> Str { return "n"; }
     }
 
@@ -219,7 +227,7 @@ TEST(Class, MemberNamedLikeBuiltinOk) {
                                  R"(
     l: Logger = Logger();
     l.print("a");
-    print(l.StrInt(l.open) + Str<int>(2));
+    io::print(l.StrInt(l.open) + Str<int>(2));
     return 0;
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -1159,7 +1167,7 @@ TEST(Class, InitFieldAssignedInBoolMatchArmsOk) {
 }
 
 TEST(Class, InitFieldMissingInOneBoolMatchArmRejected) {
-  auto r = semaCheck(R"(
+  auto r = semaCheck(R"(import ::io;
     class A {
       x: int;
     }
@@ -1168,7 +1176,7 @@ TEST(Class, InitFieldMissingInOneBoolMatchArmRejected) {
       fn __init__(b: bool) {
         match b {
           True  { self.x = 1; }
-          False { println("no"); }
+          False { io::println("no"); }
         }
       }
     }
@@ -1198,10 +1206,10 @@ static size_t errorCount(const std::string &diags) {
 TEST(ClassRecovery, BuiltinNameClassDoesNotHideOtherClasses) {
   auto r = semaCheck(withClasses("class A {}\n"
                                  "impl A { fn __init__() { } }\n"
-                                 "class File { }",
+                                 "class Obj { }",
                                  "a = A();\nreturn 0;"));
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("'File' is a builtin class and cannot be "
+  EXPECT_NE(r.Diagnostics.find("'Obj' is a builtin class and cannot be "
                                "redeclared"),
             std::string::npos)
       << r.Diagnostics;

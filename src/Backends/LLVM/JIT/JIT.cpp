@@ -38,23 +38,7 @@ using namespace paykan::names;
 
 // clang-format off
 const RuntimeSymbol kRuntimeSymbols[] = {
-    {kPaykanFileNew,      reinterpret_cast<void *>(&PaykanFile_new)},
-    {kPaykanFileOpen,     reinterpret_cast<void *>(&PaykanFile_open)},
-    {kPaykanFileDestroy,  reinterpret_cast<void *>(&PaykanFile_destroy)},
-    {kPaykanFileToString, reinterpret_cast<void *>(&PaykanFile_toString)},
-    {kPaykanFileEquals,   reinterpret_cast<void *>(&PaykanFile_equals)},
-    {kPaykanFileWrite,     reinterpret_cast<void *>(&PaykanFile_write)},
-    {kPaykanFileReadln,    reinterpret_cast<void *>(&PaykanFile_readln)},
-    {kPaykanFileReadBytes, reinterpret_cast<void *>(&PaykanFile_readbytes)},
-    {kPaykanFileRead,      reinterpret_cast<void *>(&PaykanFile_read)},
-    {kPaykanFileVtable,    reinterpret_cast<void *>(&PaykanFile_vtable)},
-    {kPaykanFileStdin,     reinterpret_cast<void *>(&PaykanFile_Stdin)},
 
-    {kPaykanErrorNew,      reinterpret_cast<void *>(&PaykanError_new)},
-    {kPaykanErrorDestroy,  reinterpret_cast<void *>(&PaykanError_destroy)},
-    {kPaykanErrorToString, reinterpret_cast<void *>(&PaykanError_toString)},
-    {kPaykanErrorEquals,   reinterpret_cast<void *>(&PaykanError_equals)},
-    {kPaykanErrorVtable,   reinterpret_cast<void *>(&PaykanError_vtable)},
 
     {kPaykanObjectNew,       reinterpret_cast<void *>(&PaykanObject_new)},
     {kPaykanObjectDestroy,   reinterpret_cast<void *>(&PaykanObject_destroy)},
@@ -133,8 +117,22 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanBufferReserve,   reinterpret_cast<void *>(&PaykanBuffer_reserve)},
     {kPaykanBufferGrow,      reinterpret_cast<void *>(&PaykanBuffer_grow)},
     {kPaykanBufferShrink,    reinterpret_cast<void *>(&PaykanBuffer_shrink)},
+    {kPaykanBufferIsSet,     reinterpret_cast<void *>(&PaykanBuffer_isSet)},
+    {kPaykanBufferTryGrow,   reinterpret_cast<void *>(&PaykanBuffer_tryGrow)},
+    {kPaykanBufferTryReserve, reinterpret_cast<void *>(&PaykanBuffer_tryReserve)},
     {kPaykanPanicMessage,    reinterpret_cast<void *>(&Paykan_panic_message)},
     {kPaykanPanicValue,      reinterpret_cast<void *>(&Paykan_panic_value)},
+    // Reached through `native fn`s (the standard library's ::io), with the
+    // print functions above.
+    {kPaykanIoOpen,          reinterpret_cast<void *>(&Paykan_io_open)},
+    {kPaykanIoWrite,         reinterpret_cast<void *>(&Paykan_io_write)},
+    {kPaykanIoReadln,        reinterpret_cast<void *>(&Paykan_io_readln)},
+    {kPaykanIoReadBytes,     reinterpret_cast<void *>(&Paykan_io_readbytes)},
+    {kPaykanIoRead,          reinterpret_cast<void *>(&Paykan_io_read)},
+    {kPaykanIoStdin,         reinterpret_cast<void *>(&Paykan_io_stdin)},
+    // The standard library's ::error.
+    {kPaykanErrorCode,       reinterpret_cast<void *>(&Paykan_error_code)},
+    {kPaykanErrorText,       reinterpret_cast<void *>(&Paykan_error_text)},
 };
 
 // Match dispatch and generated vtable references look builtin vtables up as
@@ -148,8 +146,6 @@ struct VTableAlias {
 const VTableAlias kVTableAliases[] = {
     {kObj,      reinterpret_cast<void *>(&PaykanObject_vtable)},
     {kString,   reinterpret_cast<void *>(&PaykanString_vtable)},
-    {kFile,     reinterpret_cast<void *>(&PaykanFile_vtable)},
-    {kError,    reinterpret_cast<void *>(&PaykanError_vtable)},
 };
 // clang-format on
 

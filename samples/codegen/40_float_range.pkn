@@ -16,33 +16,35 @@
 // expect-stdout: zero: 0
 // expect-stdout: computed: inf
 
+import ::io;
+
 fn show(o: float?) -> Str {
   match o {
     f: float { return Str<float>(f); }
-    None     { return "None"; }
+    None { return "None"; }
   }
 }
 
 fn same(s: Str, want: float) -> bool {
   match float<Str>(s) {
     f: float { return f == want; }
-    None     { return False; }
+    None { return False; }
   }
 }
 
 fn main() -> int {
   least = 5e-324;
   sub: float = 1e-310;
-  println("tiny: " + Str(least) + " " + Str<float>(sub));
-  println("halved: " + Str(least / 2.0) + " doubled: " +
-          Str<float>(least * 2.0));
-  println("normal: " + Str(2.2250738585072014e-308) + " " +
-          Str<float>(1.7976931348623157e308));
-  println("parsed: " + Str(same("5e-324", least)) + " " +
-          Str<bool>(same("1e-310", sub)));
-  println("too large: " + show(float("1e999")));
-  println("too small: " + show(float<Str>("1e-400")));
-  println("zero: " + show(float("0e-999")));
-  println("computed: " + Str(1.7976931348623157e308 * 10.0));
+  io::println("tiny: " + Str(least) + " " + Str<float>(sub));
+  io::println("halved: " + Str(least / 2.0) + " doubled: "
+      + Str<float>(least * 2.0));
+  io::println("normal: " + Str(2.2250738585072014e-308) + " "
+      + Str<float>(1.7976931348623157e308));
+  io::println("parsed: " + Str(same("5e-324", least)) + " "
+      + Str<bool>(same("1e-310", sub)));
+  io::println("too large: " + show(float("1e999")));
+  io::println("too small: " + show(float<Str>("1e-400")));
+  io::println("zero: " + show(float("0e-999")));
+  io::println("computed: " + Str(1.7976931348623157e308 * 10.0));
   return 0;
 }

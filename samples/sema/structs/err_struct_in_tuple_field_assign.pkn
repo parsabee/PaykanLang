@@ -1,5 +1,7 @@
 // ERROR: cannot assign to field 'x' of a struct in element '.1' of type '(int, A)': tuples are immutable; build a new tuple instead
-struct A { x: int; }
+struct A {
+  x: int;
+}
 fn main() -> int {
   t = (1, A(2));
   t.1.x = 3;
