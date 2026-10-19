@@ -35,6 +35,26 @@ TEST(Conversion, StrOfInt) {
   g.expectNoLeaks("Conversion.StrOfInt");
 }
 
+// `Str(s)` with a `Str` argument is the `Str` constructor and returns the
+// string: the fresh box of a method call, a conversion or a concatenation
+// is passed through and released once, like the argument itself would be.
+TEST(Conversion, StrOfAFreshStringIsTheString) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    y: float = 0.5;
+    println(Str(y.toString()));
+    println(Str(Str(3)));
+    println(Str("a" + "b"));
+    t = (1, "one");
+    println(Str(t.toString()));
+    s = Str(y.toString()) + Str(Str<int>(4));
+    println(s);
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "0.5\n3\nab\n(1, one)\n0.54\n");
+  g.expectNoLeaks("Conversion.StrOfAFreshStringIsTheString");
+}
+
 TEST(Conversion, StrOfFloatKeepsCanonicalSpellings) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(

@@ -917,15 +917,18 @@ The `File` handle and its methods (`write`, `readln`, `readbytes`, `read`, `toSt
 Top-level declarations — free functions, classes (a class name is also its constructor),
 and enums — share a single namespace with the builtins, and a name identifies exactly one
 entity. Declaring a function, class, or enum whose name is a builtin function (`print`,
-`println`, `printerr`, `printerrln`, `Str`, `open`) or a builtin class (`Obj`, `Str`,
-`File`, `Error`) is a compile-time error, reported at
-the declaration:
+`println`, `printerr`, `printerrln`, `Str`, `open`), a builtin class (`Obj`, `Str`,
+`File`, `Error`) or a builtin type (`int`, `float`, `bool`, `char`, `void` and the
+[sized numeric types](#sized-numeric-types), under any of their spellings) is a
+compile-time error, reported at the declaration:
 
 ```pkn
 class print {}
 impl print { fn __init__() {} }   // error: 'print' is a builtin function and cannot be redeclared
 fn open(p: Str) -> int { ... }     // error: 'open' is a builtin function and cannot be redeclared
 enum Error { NotFound }            // error: 'Error' is a builtin class and cannot be redeclared
+struct u8 { v: int; }              // error: 'u8' is a builtin type and cannot be redeclared
+fn float(x: int) -> int { ... }    // error: 'float' is a builtin type and cannot be redeclared
 ```
 
 The same rule applies between user declarations: `fn Point()` next to `class Point` is
