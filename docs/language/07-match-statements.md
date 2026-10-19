@@ -191,8 +191,10 @@ Output:
   the subject starts from cannot be used except through it (`'a' is borrowed by 'inout'
   local 'd' until 'd' is last used`).
 - The `match` keeps the object it matched until it ends, so the arm can replace it.
-- A primitive inside an optional (`n: inout int` on an `int?`) cannot be changed this way
-  yet.
+- A tuple or a struct inside an optional (`p: inout Point` on a `Point?`) is bound as the
+  value after the presence flag, so a write through the binding changes the subject. A
+  primitive or an enum inside one (`n: inout int` on an `int?`, `k: inout Suit` on a
+  `Suit?`) cannot be changed this way yet.
 
 The mode goes after the colon: `view d: Dog { }` is a syntax error that shows the fix,
 `d: view Dog`. A binding of a `view` subject is a `view` even without the mode

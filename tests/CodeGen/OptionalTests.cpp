@@ -735,3 +735,99 @@ fn main() -> int {
   EXPECT_EQ(r.ExitCode, 0);
   g.expectNoLeaks("EnumTupleAndStructOptionals");
 }
+
+// -- Optionals of tuples and structs holding references
+
+// A tuple or a struct holding references passed where its optional is
+// expected (an argument, a constructor's field, a generic's `T?`): the
+// temporary that wraps it is released as the optional it is, its references
+// after the presence flag.
+TEST(Optional, StructWithReferencesWrappedAsAnArgument) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+    import ::result as res;
+    import ::collections;
+    class Node { n: int; }
+    impl Node { fn __init__(n: int) { self.n = n; } }
+    struct Item { name: Str; node: Node; }
+    struct Holder { v: Item?; }
+    fn take(p: Item?) -> bool { return p != None; }
+    fn main() -> int {
+      io::println(take(Item("x", Node(1))));
+      h = Holder(Item("y", Node(2)));
+      match h.v {
+        i: Item { io::println(i.name + Str(i.node.n)); }
+        None { io::println("none"); }
+      }
+      r = res::ok((1, "a"));
+      io::println(r.isOk());
+      match r.value {
+        t: (int, Str) { io::println(t); }
+        None { io::println("none"); }
+      }
+      l = collections::List<(int, Str)?>();
+      l.push((2, "b"));
+      io::println(l.get(0));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True\ny2\nTrue\n(1, a)\n(2, b)\n");
+  g.expectNoLeaks("StructWithReferencesWrappedAsAnArgument");
+}
+
+// None of an optional tuple or struct whose value holds references, in a
+// buffer's slot: all zeros is None, not a slot that was never set.
+TEST(Optional, NoneOfAStructWithReferencesInABuffer) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+    import ::collections;
+    import ::memory;
+    import ::result as res;
+    class Node { n: int; }
+    impl Node { fn __init__(n: int) { self.n = n; } }
+    struct Item { name: Str; node: Node; }
+    fn main() -> int {
+      l = collections::List<(int, Str)?>();
+      l.push(None);
+      l.push((1, "a"));
+      io::println(l.get(0));
+      io::println(l.get(1));
+      b = memory::Buffer<Item?>();
+      io::println(res::name(b.push(None).code));
+      c = b.copy(0);
+      io::println(res::name(c.error.code));
+      io::println(c.value == None);
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "None\n(1, a)\nOk\nOk\nTrue\n");
+  g.expectNoLeaks("NoneOfAStructWithReferencesInABuffer");
+}
+
+// An `inout` arm on an optional tuple or struct binds the subject's storage,
+// the value after the presence flag: a write through it changes the subject.
+TEST(Optional, InoutArmOnAnOptionalStruct) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+    struct P { x: int; s: Str; }
+    class Box { p: P?; }
+    impl Box { fn __init__() { self.p = P(1, "a"); } }
+    fn main() -> int {
+      po: P? = P(2, "z");
+      match po { p: inout P { p.x = 9; p.s = "w"; } None { } }
+      io::println(po);
+      t: (int, Str)? = (1, "b");
+      match t { u: inout (int, Str) { u = (3, "c"); } None { } }
+      io::println(t);
+      b = Box();
+      match b.p { p: inout P { p = P(7, "q"); } None { } }
+      io::println(b.p);
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "P(x: 9, s: w)\n(3, c)\nP(x: 7, s: q)\n");
+  g.expectNoLeaks("InoutArmOnAnOptionalStruct");
+}

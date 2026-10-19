@@ -1488,7 +1488,10 @@ ModuleLowering::localNative(const std::string &name) const {
 // and payload (docs/pir.md §1).  A tuple is its elements in place, each
 // reference among them at its offset.
 Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
-  // A function value is described as its shape, a tuple.
+  // A function value, or an optional tuple or struct, is described as its
+  // shape, a tuple; under an optional's shape (the presence flag, then the
+  // value) a reference is null for None: nullable, not unset.
+  const bool optional = ast::isa<ast::OptionalType>(ty);
   ty = memShapeOf(ty);
   const Type slot = toPIRType(ty);
   std::vector<int64_t> words = {pir::storeSize(slot), pir::storeAlign(slot),
@@ -1496,20 +1499,21 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     MemLayout l = memLayout(tt);
     words = {l.Size, l.Align, kNativeKindTuple, 0};
-    std::function<void(ast::TupleType *, int64_t)> refs = [&](ast::TupleType *t,
-                                                              int64_t base) {
-      for (size_t i = 0; i < t->getArity(); ++i) {
-        ast::Type *e = t->getElementType(i);
-        int64_t off = base + tupleElementOffset(t, i);
-        if (auto *nested = ast::dyn_cast<ast::TupleType>(memShapeOf(e))) {
-          refs(nested, off);
-        } else if (ast::isRefType(e)) {
-          ++words[3];
-          words.push_back(off << 1 | (ast::isa<ast::OptionalType>(e) ? 1 : 0));
-        }
-      }
-    };
-    refs(tt, 0);
+    std::function<void(ast::TupleType *, int64_t, bool)> refs =
+        [&](ast::TupleType *t, int64_t base, bool nullable) {
+          for (size_t i = 0; i < t->getArity(); ++i) {
+            ast::Type *e = t->getElementType(i);
+            int64_t off = base + tupleElementOffset(t, i);
+            const bool maybeNull = nullable || ast::isa<ast::OptionalType>(e);
+            if (auto *nested = ast::dyn_cast<ast::TupleType>(memShapeOf(e))) {
+              refs(nested, off, maybeNull);
+            } else if (ast::isRefType(e)) {
+              ++words[3];
+              words.push_back(off << 1 | (maybeNull ? 1 : 0));
+            }
+          }
+        };
+    refs(tt, 0, optional);
   } else if (slot == Type::Box) {
     words[3] = 1;
     words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0

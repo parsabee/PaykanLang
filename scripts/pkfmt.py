@@ -230,12 +230,17 @@ class Parser:
                 if depth > 0:
                     self.raw_block(run)
                     continue
+                # A lambda's body at depth 0 (`fn() -> int { ... }`): the
+                # item goes on when a call or an index follows it,
+                # `n = fn() -> int { return 41; }() + 1;`.
+                lam = any(self.toks[i].text == "fn" for i in run)
                 if run:
                     parts.append(run)
                 run = []
                 parts.append(self.block())
                 nxt = self.peek()
-                if nxt is None or nxt.text not in CHAIN:
+                if nxt is None or (nxt.text not in CHAIN and
+                                   not (lam and nxt.text in ("(", "["))):
                     break
                 continue
             run.append(self.i)

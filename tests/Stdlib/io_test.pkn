@@ -1,0 +1,47 @@
+import ::io;
+import ::result as res;
+
+// ::io's File: open and write (the file closes with its last reference),
+// read back, the error of a write on a file opened for reading (which the
+// reads after it do not inherit), the end of the file, a read whose buffer
+// cannot be allocated, a missing file.
+fn write(path: Str) {
+  w = io::open(path, "w");
+  io::println(w.isOk());
+  match w.value {
+    f: io::File { io::println(res::name(f.write("one\ntwo\n").code)); }
+    None { }
+  }
+}
+
+fn read(path: Str) {
+  r = io::open(path, "r");
+  match r.value {
+    f: io::File {
+      io::println(res::name(f.write("x").code));
+      a = f.readln();
+      io::println(res::name(a.error.code));
+      match a.value {
+        s: Str { io::print(s); }
+        None { }
+      }
+      b = f.read();
+      match b.value {
+        s: Str { io::print(s); }
+        None { }
+      }
+      io::println(res::name(f.readln().error.code));
+      io::println(res::name(f.readbytes(1152921504606846976).error.code));
+    }
+    None { }
+  }
+}
+
+fn main() -> int {
+  write("io_test.txt");
+  read("io_test.txt");
+  m = io::open("io_test_missing.txt", "r");
+  io::println(res::name(m.error.code));
+  io::println(res::fromErrno(0).message());
+  return 0;
+}

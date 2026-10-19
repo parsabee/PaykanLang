@@ -171,7 +171,7 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
       auto *fnt = ast::cast<ast::FunctionType>(e->getResolvedType());
       auto *ev = ast::dyn_cast<ast::EnumValueExpr>(e);
       emitFunctionRefInto(ev ? *ev->getFunctionRef()
-                             : ast::cast<ast::Identifier>(e)->getName(),
+                             : ast::cast<ast::Identifier>(e)->getFunctionRef(),
                           fnt, addr);
     }
     return {addr, /*Temp=*/true};
@@ -243,8 +243,12 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
 
 Val ModuleLowering::emitMemAddress(ast::Expr *e) {
   MemValue v = emitMemValue(e);
-  if (v.Temp && v.Addr && memHoldsRefs(e->getResolvedType()))
-    MemTemps.emplace_back(v.Addr, e->getResolvedType());
+  // The temporary is what emitMemValue built: a tuple or a struct made the
+  // present value of its optional is the optional (memTypeOf), whose
+  // references sit after the presence flag.
+  ast::Type *ty = memTypeOf(e);
+  if (v.Temp && v.Addr && memHoldsRefs(ty))
+    MemTemps.emplace_back(v.Addr, ty);
   return v.Addr;
 }
 

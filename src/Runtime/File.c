@@ -76,6 +76,14 @@ static int file_closed(const PaykanFile *f, const char *op) {
   return 1;
 }
 
+/// None for a read whose buffer could not be allocated, with errno ENOMEM
+/// (a read sets errno to 0 first, so its caller can tell).  Frees @p buf.
+static PaykanShared *file_read_no_memory(char *buf) {
+  Paykan_free(buf);
+  errno = ENOMEM;
+  return PaykanShared_new(&PaykanObject_None);
+}
+
 /// The `Str?` result of a read: the first @p used bytes of @p buf as a fresh
 /// Str, or None when nothing was read.  Frees @p buf.
 static PaykanShared *file_read_result(char *buf, size_t used) {
@@ -103,11 +111,16 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
   size_t cap = 128;
   size_t used = 0;
   char *buf = (char *)Paykan_malloc(cap);
+  if (!buf)
+    return file_read_no_memory(buf);
   int c;
   while ((c = fgetc(f->handle)) != EOF) {
     if (used + 1 >= cap) {
       cap *= 2;
-      buf = (char *)Paykan_realloc(buf, cap);
+      char *grown = (char *)Paykan_realloc(buf, cap);
+      if (!grown)
+        return file_read_no_memory(buf);
+      buf = grown;
     }
     buf[used++] = (char)c;
     if (c == '\n')
@@ -122,6 +135,8 @@ PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n) {
   if (file_closed(f, "readbytes") || n <= 0)
     return PaykanShared_new(&PaykanObject_None);
   char *buf = (char *)Paykan_malloc((size_t)n);
+  if (!buf)
+    return file_read_no_memory(buf);
   return file_read_result(buf, fread(buf, 1, (size_t)n, f->handle));
 }
 
@@ -132,12 +147,17 @@ PaykanShared *PaykanFile_read(PaykanObject *self) {
   size_t cap = 4096;
   size_t used = 0;
   char *buf = (char *)Paykan_malloc(cap);
+  if (!buf)
+    return file_read_no_memory(buf);
   size_t got;
   while ((got = fread(buf + used, 1, cap - used, f->handle)) > 0) {
     used += got;
     if (used == cap) {
       cap *= 2;
-      buf = (char *)Paykan_realloc(buf, cap);
+      char *grown = (char *)Paykan_realloc(buf, cap);
+      if (!grown)
+        return file_read_no_memory(buf);
+      buf = grown;
     }
   }
   return file_read_result(buf, used);
@@ -186,13 +206,17 @@ static PaykanFile *io_file(PaykanObject *h, const char *op) {
 }
 
 /// A read's result as a `Str?`: the text, or NULL with the errno of the
-/// failure in @p err (0 at the end of the file).
+/// failure in @p err (0 at the end of the file).  The caller zeroed errno:
+/// ENOMEM there with no stream error is the read's own buffer failing.
 static PaykanShared *io_read_result(PaykanFile *f, PaykanShared *r,
                                     int64_t *err) {
   if (r != &PaykanObject_None)
     return r;
   Paykan_release(r);
-  *err = ferror(f->handle) ? (errno ? errno : EIO) : 0;
+  if (ferror(f->handle))
+    *err = errno ? errno : EIO;
+  else
+    *err = errno == ENOMEM ? ENOMEM : 0;
   clearerr(f->handle);
   return (PaykanShared *)0;
 }
@@ -208,8 +232,13 @@ int64_t Paykan_io_write(PaykanObject *file, PaykanObject *str) {
   if (!f->handle)
     return EBADF;
   errno = 0;
-  if (fwrite(s->data, 1, (size_t)s->len, f->handle) != (size_t)s->len)
-    return errno ? errno : EIO;
+  if (fwrite(s->data, 1, (size_t)s->len, f->handle) != (size_t)s->len) {
+    int err = errno ? errno : EIO;
+    // The failure is this call's, reported now: the next read of the stream
+    // is not to mistake the error flag for its own.
+    clearerr(f->handle);
+    return err;
+  }
   return 0;
 }
 

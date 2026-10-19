@@ -185,6 +185,18 @@ Val ModuleLowering::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
   Val cond = visit(node->getCondition());
   if (!cond)
     return Val();
+  // Both branches void (a statement, `if c then f() else g();`): one runs
+  // for its effect, and there is no value.
+  if (node->getTrueExpr()->getResolvedType() == L.ASTCtx.getVoidTy()) {
+    pir::If *s = L.B.openIf(cond, true);
+    L.B.enter(*s->Then);
+    visit(node->getTrueExpr());
+    L.B.leave();
+    L.B.enter(*s->Else);
+    visit(node->getFalseExpr());
+    L.B.leave();
+    return Val();
+  }
   bool isClassResult =
       node->getResolvedType() && ast::isRefType(node->getResolvedType());
   Type resultTy =

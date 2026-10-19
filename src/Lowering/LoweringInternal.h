@@ -810,7 +810,7 @@ private:
   /// An `inout` name @p name, of type @p astTy, for the variable or field
   /// @p place: an `inout` local's, or a `match` arm's `n: inout T`.
   void emitInoutBinding(const std::string &name, ast::Expr *place,
-                        ast::Type *astTy);
+                        ast::Type *astTy, int64_t offset = 0);
   /// Release the boxes emitInoutArg kept for a call that has returned.
   void releaseAfterCall(const std::vector<Val> &keep);
   /// For a call of a method of @p ct, a class defined in another module:

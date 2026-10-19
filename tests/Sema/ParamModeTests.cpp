@@ -964,3 +964,16 @@ fn main() -> int {
   // After d's last use the subject can be used again.
   EXPECT_EQ(r.Diagnostics.find(":36:"), std::string::npos) << r.Diagnostics;
 }
+
+// An `inout` arm cannot change a value inside an optional yet: an enum's,
+// held like a primitive's, as much as an `int`'s.
+TEST(LocalBorrow, InoutArmOnAnOptionalEnum) {
+  auto r = semaCheck(R"(enum Suit { Hearts, Spades }
+fn main() -> int {
+  s: Suit? = Suit::Hearts;
+  match s { k: inout Suit { k = Suit::Spades; } None { } }
+  return 0;
+})");
+  expectErrors(r, {":4:9: error: 'inout' arm 'k' cannot change the 'Suit' "
+                   "inside an optional yet"});
+}

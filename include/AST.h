@@ -875,16 +875,21 @@ class Identifier : public Expr {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   // Set by Sema when the name is a function used as a value (`f = square;`,
-  // docs/language/15-function-types.md): the lowering makes a closure of it.
-  bool FunctionRef = false;
+  // docs/language/15-function-types.md): the function's name as the lowering
+  // knows it (the spelling, or, inside another module's template, that
+  // module's qualified name), of which the lowering makes a function value.
+  const std::string *FunctionRef = nullptr;
 
 public:
   Identifier(SourceLocation loc, const std::string &internedName)
       : Expr(NK_Identifier, loc), Name(&internedName) {}
 
   const std::string &getName() const { return *Name; }
-  void setFunctionRef(bool ref) { FunctionRef = ref; }
-  bool isFunctionRef() const { return FunctionRef; }
+  void setFunctionRef(const std::string &internedName) {
+    FunctionRef = &internedName;
+  }
+  bool isFunctionRef() const { return FunctionRef != nullptr; }
+  const std::string &getFunctionRef() const { return *FunctionRef; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_Identifier;

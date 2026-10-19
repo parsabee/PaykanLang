@@ -282,8 +282,9 @@ share one.
 
 Two function values are `==` when they run the same code with the same closure:
 
-- the same named function: `square == square` is `True`, and `List<T>.contains(square)`
-  finds it;
+- the same named function, whatever spelling names it (`lib::square` too): `square ==
+  square` is `True`, and `List<T>.contains(square)` finds it. A value of the function made
+  in another module is a different value for now;
 - the same lambda expression capturing nothing: `same() == same()` is `True` when `same`
   returns `fn(x: int) -> int { return x + 1; }`;
 - a copy of a value: `g = f; g == f` is `True`.

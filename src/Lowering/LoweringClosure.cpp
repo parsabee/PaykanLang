@@ -279,16 +279,21 @@ void ModuleLowering::emitLambdaInto(ast::LambdaExpr *node, const Val &dst) {
 
 const std::string &ModuleLowering::lowerFunctionRef(const std::string &fnName,
                                                     ast::FunctionType *fnt) {
-  if (auto it = FunctionRefCode.find(fnName); it != FunctionRefCode.end())
-    return it->second;
-  const std::string name = std::string(kClosureRefPrefix) + Mod.Name +
-                           kNameSep + fnName + kNameSep + kClosureCall;
   pir::Function *target = lookupFunction(fnName);
   if (!target) {
     reportInternalError("function '" + fnName +
                         "' used as a value is not declared");
-    return FunctionRefCode[fnName] = name;
+    return FunctionRefCode[fnName] = std::string(kClosureRefPrefix) + Mod.Name +
+                                     kNameSep + fnName + kNameSep +
+                                     kClosureCall;
   }
+  // One code per function in this module, however the function is spelled
+  // (`square`, `lib::square`): two values of it compare equal.
+  const std::string &key = target->Name;
+  if (auto it = FunctionRefCode.find(key); it != FunctionRefCode.end())
+    return it->second;
+  const std::string name = std::string(kClosureRefPrefix) + Mod.Name +
+                           kNameSep + key + kNameSep + kClosureCall;
   pir::Function *call = getOrCreateFunction(name, closureSignature(fnt));
   call->Params[0].Name = "closure";
   // The code forwards its parameters: a box given to it is the callee's.
@@ -304,7 +309,7 @@ const std::string &ModuleLowering::lowerFunctionRef(const std::string &fnName,
     else
       B.emitRet(result);
   }
-  return FunctionRefCode[fnName] = name;
+  return FunctionRefCode[key] = name;
 }
 
 void ModuleLowering::emitFunctionRefInto(const std::string &fnName,
@@ -439,11 +444,12 @@ Val ModuleLowering::emitMemOptionalMatch(ast::MatchStmt *node) {
   if (valueArm && valueArm->hasBinding()) {
     ScopeGuard armGuard(*this);
     const std::string &name = valueArm->getBinding();
-    if (valueArm->getMode() == ast::ParamMode::Inout &&
-        ast::isFunctionValue(subjTy)) {
-      // `f: inout T`: f is the subject's storage (a function value's is the
-      // whole of it).
-      emitInoutBinding(name, node->getSubject(), inner);
+    if (valueArm->getMode() == ast::ParamMode::Inout) {
+      // `p: inout T`: p is the subject's storage: the whole of a function
+      // value's (None has no code), the value after the presence flag of a
+      // tuple's or a struct's.
+      emitInoutBinding(name, node->getSubject(), inner,
+                       optTy ? memOptionalPayloadOffset(subjTy) : 0);
     } else {
       // The binding's own copy of the present value.
       MemLayout il = memLayout(inner);

@@ -443,3 +443,22 @@ TEST(ControlFlow, BreakWhileTrue) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "44\n");
 }
+
+// A conditional expression whose branches are calls of functions returning
+// nothing, as a statement, in a function that returns a value: one branch
+// runs for its effect, and the statements after it are the function's.
+TEST(ControlFlow, TernaryStatementWithVoidBranches) {
+  auto r = compileAndRun(R"pkn(import ::io;
+    fn yes() { io::println("yes"); }
+    fn no() { io::println("no"); }
+    fn main() -> int {
+      a = True;
+      if a then yes() else no();
+      if !a then yes() else no();
+      io::println("after");
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "yes\nno\nafter\n");
+}

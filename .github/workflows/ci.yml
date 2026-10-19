@@ -110,6 +110,9 @@ jobs:
       - name: clang-format (check)
         run: python3 scripts/clang_format.py
 
+      - name: pkfmt (check)
+        run: python3 scripts/pkfmt.py
+
       - name: clang-tidy (bug-focused gate)
         run: python3 scripts/run_clang_tidy.py --build-dir build
 

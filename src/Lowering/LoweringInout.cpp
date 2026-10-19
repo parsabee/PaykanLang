@@ -232,11 +232,14 @@ Val ModuleLowering::emitInoutLocal(ast::VarDecl *node) {
 }
 
 void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
-                                      ast::Type *astTy) {
+                                      ast::Type *astTy, int64_t offset) {
   std::vector<Val> keep;
   Val addr = emitInoutArg(place, keep, /*keepObject=*/true);
   if (!addr)
     return;
+  // Part of the place: the value inside an optional held in memory.
+  if (offset)
+    addr = B.ptrAdd(addr, Val::i64(offset), name + ".addr");
   // A field's object stays alive as long as the borrow can be used: a hidden
   // owned local holds it, released with the scope.
   for (const Val &box : keep) {

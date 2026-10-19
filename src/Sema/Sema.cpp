@@ -894,7 +894,8 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
         !ast::isa<ast::MemberAccessExpr>(subject) &&
         !ast::isa<ast::SubscriptExpr>(subject))
       msg = what + " needs a variable or a field to match on";
-    else if (ast::isa<ast::BuiltinType>(bindTy))
+    else if (ast::isa<ast::BuiltinType>(bindTy) ||
+             ast::isa<ast::EnumType>(bindTy))
       msg = what + " cannot change the '" + typeName(bindTy) +
             "' inside an optional yet";
     else
@@ -1076,12 +1077,21 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
                                      "' cannot be used as a value");
     return nullptr;
   }
-  // A function used as a value (`f = square;`): its function type.
+  // A function used as a value (`f = square;`): its function type.  Inside
+  // another module's template, a bare name is that module's function first,
+  // as a call's is (ModuleTemplates' Names), not one the importer declares.
   if (!S.CurrentScope->lookup(node->getName())) {
-    if (const FunctionSig *sig = S.lookupFunction(node->getName())) {
-      if (!S.checkFunctionValue(node->getName(), *sig, node->getLocation()))
+    std::string fnName = node->getName();
+    if (S.CurrentOrigin) {
+      std::string home = Sema::hiddenQualifier(S.CurrentOrigin->Module) +
+                         names::kQualSep + fnName;
+      if (S.lookupFunction(home))
+        fnName = std::move(home);
+    }
+    if (const FunctionSig *sig = S.lookupFunction(fnName)) {
+      if (!S.checkFunctionValue(fnName, *sig, node->getLocation()))
         return nullptr;
-      node->setFunctionRef(true);
+      node->setFunctionRef(S.Ctx.intern(fnName));
       auto *fnt = S.functionTypeOf(*sig);
       node->setResolvedType(fnt);
       return fnt;

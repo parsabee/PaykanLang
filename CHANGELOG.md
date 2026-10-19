@@ -435,7 +435,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   captures nothing.  A named function or a lambda that captures nothing used as a value
   no longer allocates.  Copying one shares the closure; `==` is true for the same code
   and the same closure, so `square == square` is now `True` and `List.contains(square)`
-  finds it, while each evaluation of a capturing lambda still makes a new closure.  A
+  finds it (within a module: a value of the function made in another module is a
+  different value for now), while each evaluation of a capturing lambda still makes a new
+  closure.  A
   function type is a `ValueType`, and `((int) -> int)?` takes the same 16 bytes, `None`
   having no code.  A call loads the code and the closure, keeps the closure for the call
   and calls the code through its address, through the new PIR instructions `fn.addr` and
@@ -453,6 +455,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps parsing.  A statement starting with `if` is a ternary expression statement when
   `then` follows its condition, as before.  The samples, the standard library, the
   tests and the docs are rewritten without the parentheses.
+- `scripts/pkfmt.py` checks (`python3 scripts/pkfmt.py`) or applies (`--apply`) the layout
+  of Paykan source (`.pkn`); every tracked file is formatted with it, and the Lint job
+  checks it.
 - The object header is 16 bytes instead of 24 (src/Runtime/Runtime.h, `PaykanObject`;
   docs/language/08-memory-model.md): the vtable pointer, then a 32-bit strong count and a
   32-bit weak count, so every object is 8 bytes smaller.  A count that would pass
@@ -612,6 +617,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binaries, an embedding host) no longer fails to lower the second: the module's analysis
   is cached with its exports (`Sema::ModuleContextCache`), so every compilation that
   imports it can lower it.
+- A conditional expression whose branches are calls of functions returning nothing, as a
+  statement (`if c then f() else g();`) in a function that returns a value, failed PIR
+  verification (`control can fall off the end of a non-void function`): the rest of the
+  function was emitted inside the branch.  One branch now runs for its effect.
 - A generic class or function of a module whose body calls a `static fn` of one of that
   module's types (`Pub::make()`) no longer fails to lower with "call to undeclared
   function '$m::Pub::make'" when an importer instantiates it.

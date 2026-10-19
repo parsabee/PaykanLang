@@ -617,3 +617,44 @@ fn main() -> int {
 
   std::filesystem::remove_all(tmpDir);
 }
+
+// A module's generic that uses one of the module's own functions as a value
+// names that module's function, as a call does, not one the importer
+// declares; and however the function is spelled, its values compare equal
+// within a module.
+TEST(Module, GenericUsesItsModulesFunctionAsAValue) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_fn_value";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "lib.pkn", R"(
+fn square(x: int) -> int { return x * x; }
+fn pick<T>(x: T) -> (int) -> int { return square; }
+class Keeper<T> {
+  v: T;
+  fn code() -> (int) -> int { return square; }
+  fn same(f: (int) -> int) -> bool { return f == square; }
+}
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import ::io;
+import lib;
+fn square(x: int) -> int { return x + 1000; }
+fn main() -> int {
+  f = lib::pick<int>(1);
+  io::println(f(3));
+  k = lib::Keeper<Str>("a");
+  io::println(k.code()(3));
+  io::println(k.same(lib::square));
+  io::println(k.same(square));
+  return 0;
+}
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "9\n9\nTrue\nFalse\n");
+
+  std::filesystem::remove_all(tmpDir);
+}
