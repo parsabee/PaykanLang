@@ -19,7 +19,7 @@ class Stack<T> {
     self.count = self.count + 1;
   }
   fn pop() -> T? {
-    if (self.count == 0) { return None; }
+    if self.count == 0 { return None; }
     self.count = self.count - 1;
     return self.items[self.count];
   }
@@ -44,16 +44,16 @@ fn main(args: view Str[]) -> int {
   s = Stack<int>(0);
   total = 0;
   i = 0;
-  while (i < n) {
-    while (s.len() < s.capacity()) {
+  while i < n {
+    while s.len() < s.capacity() {
       s.push(i);
       i = i + 1;
     }
-    if (raw) {
-      while (s.len() > 0) { total = total + s.popRaw(); }
+    if raw {
+      while s.len() > 0 { total = total + s.popRaw(); }
     } else {
       done = False;
-      while (!done) {
+      while !done {
         match s.pop() {
           v: int { total = total + v; }
           None   { done = True; }

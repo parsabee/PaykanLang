@@ -6,7 +6,7 @@
 fn main() -> int {
   println("=== basic while ===");
   i: int = 0;
-  while (i < 5) {
+  while i < 5 {
     println(Str<int>(i));
     i = i + 1;
   }
@@ -14,22 +14,22 @@ fn main() -> int {
   println("=== while sum ===");
   sum: int = 0;
   n: int = 1;
-  while (n <= 100) {
+  while n <= 100 {
     sum = sum + n;
     n = n + 1;
   }
   println("sum 1..100=" + Str(sum));   // 5050
 
   println("=== while never executes ===");
-  while (False) {
+  while False {
     println("unreachable");
   }
   println("after never");
 
   println("=== while True + break ===");
   count: int = 0;
-  while (True) {
-    if (count == 5) { break; }
+  while True {
+    if count == 5 { break; }
     count = count + 1;
   }
   println("count=" + Str<int>(count));      // 5
@@ -37,9 +37,9 @@ fn main() -> int {
   println("=== continue skips odd ===");
   evens: int = 0;
   j: int = 0;
-  while (j < 10) {
+  while j < 10 {
     j = j + 1;
-    if (j % 2 != 0) { continue; }
+    if j % 2 != 0 { continue; }
     evens = evens + j;
   }
   println("sum evens 2..10=" + Str(evens));  // 30
@@ -47,9 +47,9 @@ fn main() -> int {
   println("=== nested loops ===");
   total: int = 0;
   r: int = 0;
-  while (r < 4) {
+  while r < 4 {
     c: int = 0;
-    while (c < 4) {
+    while c < 4 {
       total = total + 1;
       c = c + 1;
     }
@@ -60,10 +60,10 @@ fn main() -> int {
   println("=== break inner loop only ===");
   outer: int = 0;
   inner_total: int = 0;
-  while (outer < 3) {
+  while outer < 3 {
     inner: int = 0;
-    while (True) {
-      if (inner == 3) { break; }
+    while True {
+      if inner == 3 { break; }
       inner_total = inner_total + 1;
       inner = inner + 1;
     }
@@ -73,7 +73,7 @@ fn main() -> int {
 
   println("=== Str var per iteration (scope cleanup) ===");
   k: int = 0;
-  while (k < 3) {
+  while k < 3 {
     label: Str = "iter-" + Str<int>(k);
     println(label);
     k = k + 1;
@@ -82,7 +82,7 @@ fn main() -> int {
   println("=== loop with complex condition ===");
   a: int = 0;
   b: int = 100;
-  while (a < 10 && b > 90) {
+  while a < 10 && b > 90 {
     a = a + 1;
     b = b - 1;
   }
@@ -91,10 +91,10 @@ fn main() -> int {
   println("=== countdown with multiple continues ===");
   x: int = 10;
   out_count: int = 0;
-  while (x > 0) {
+  while x > 0 {
     x = x - 1;
-    if (x % 3 == 0) { continue; }
-    if (x % 4 == 0) { continue; }
+    if x % 3 == 0 { continue; }
+    if x % 4 == 0 { continue; }
     out_count = out_count + 1;
   }
   // x=0..9: skip multiples of 3 (0,3,6,9) and multiples of 4 (0,4,8)

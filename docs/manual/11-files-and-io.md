@@ -65,7 +65,7 @@ fn main() -> int {
   match open("shopping.txt", "r") {
     f: File {
       n = 0;
-      while (True) {
+      while True {
         match f.readln() {
           line: Str {
             n = n + 1;
@@ -101,13 +101,13 @@ and has the same reading methods:
 fn main() -> int {
   total = 0;
   bad = 0;
-  while (True) {
+  while True {
     match Stdin.readln() {
       line: Str {
         // drop the trailing newline before parsing
         digits = "";
         i = 0;
-        while (i < line.len() && line[i] != '\n') {
+        while i < line.len() && line[i] != '\n' {
           digits = digits + Str(line[i]);
           i = i + 1;
         }
@@ -154,12 +154,12 @@ arguments (see [Arrays](06-arrays.md#arrays-are-values)):
 
 ```pkn
 fn main(args: view Str[]) -> int {
-  if (args.len() < 2) {
+  if args.len() < 2 {
     printerrln("usage: greet <name>...");
     return 2;
   }
   i = 1;
-  while (i < args.len()) {
+  while i < args.len() {
     println("Hello, " + args[i] + "!");
     i = i + 1;
   }
@@ -254,7 +254,7 @@ fn isSpace(c: char) -> bool {
 fn slice(s: Str, from: int, to: int) -> Str {
   out = "";
   i = from;
-  while (i < to) {
+  while i < to {
     out = out + Str(s[i]);
     i = i + 1;
   }
@@ -264,16 +264,16 @@ fn slice(s: Str, from: int, to: int) -> Str {
 fn trim(s: Str) -> Str {
   start = 0;
   end = s.len();
-  while (start < end && isSpace(s[start])) { start = start + 1; }
-  while (end > start && isSpace(s[end - 1])) { end = end - 1; }
+  while start < end && isSpace(s[start]) { start = start + 1; }
+  while end > start && isSpace(s[end - 1]) { end = end - 1; }
   return slice(s, start, end);
 }
 
 // Splits at the first `sep`: (s, "") when there is none.
 fn splitOnce(s: Str, sep: char) -> (Str, Str) {
   i = 0;
-  while (i < s.len() && s[i] != sep) { i = i + 1; }
-  if (i == s.len()) { return (s, ""); }
+  while i < s.len() && s[i] != sep { i = i + 1; }
+  if i == s.len() { return (s, ""); }
   return (slice(s, 0, i), slice(s, i + 1, s.len()));
 }
 ```
@@ -288,21 +288,21 @@ class TaskList {
 
   // Adds a task; False if the list is full.
   fn add(title: Str, priority: task::Priority) -> bool {
-    if (self.count == self.tasks.len()) { return False; }
+    if self.count == self.tasks.len() { return False; }
     self.tasks[self.count] = task::Task(title, priority);
     self.count = self.count + 1;
     return True;
   }
 
   fn addTask(t: task::Task) -> bool {
-    if (self.count == self.tasks.len()) { return False; }
+    if self.count == self.tasks.len() { return False; }
     self.tasks[self.count] = t;
     self.count = self.count + 1;
     return True;
   }
 
   fn complete(n: int) -> bool {
-    if (n < 1 || n > self.count) { return False; }
+    if n < 1 || n > self.count { return False; }
     self.tasks[n - 1].done = True;
     return True;
   }
@@ -310,8 +310,8 @@ class TaskList {
   view fn pending() -> int {
     count = 0;
     i = 0;
-    while (i < self.count) {
-      if (!self.tasks[i].done) { count = count + 1; }
+    while i < self.count {
+      if !self.tasks[i].done { count = count + 1; }
       i = i + 1;
     }
     return count;
@@ -319,7 +319,7 @@ class TaskList {
 
   view fn show() {
     i = 0;
-    while (i < self.count) {
+    while i < self.count {
       println(Str(i + 1) + ". " + self.tasks[i].toString());
       i = i + 1;
     }
@@ -348,7 +348,7 @@ fn load(path: Str) -> list::TaskList {
   tasks = list::TaskList();
   match open(path, "r") {
     f: File {
-      while (True) {
+      while True {
         match f.readln() {
           line: Str { addLine(tasks, text::trim(line)); }
           _ { break; }
@@ -363,20 +363,20 @@ fn load(path: Str) -> list::TaskList {
 fn addLine(tasks: list::TaskList, line: Str) {
   done, rest = text::splitOnce(line, '|');
   priority, title = text::splitOnce(rest, '|');
-  if (title == "" || (done != "0" && done != "1")) {
+  if title == "" || (done != "0" && done != "1") {
     printerrln("skipping bad line: " + line);
     return;
   }
   t = task::Task(title, task::parsePriority(priority));
   t.done = done == "1";
-  if (!tasks.addTask(t)) { printerrln("the list is full, skipping: " + line); }
+  if !tasks.addTask(t) { printerrln("the list is full, skipping: " + line); }
 }
 
 fn save(tasks: list::TaskList, path: Str) -> bool {
   match open(path, "w") {
     f: File {
       i = 0;
-      while (i < tasks.count) {
+      while i < tasks.count {
         t = tasks.tasks[i];
         f.write((if t.done then "1" else "0") + "|"
                 + task::priorityName(t.priority) + "|" + t.title + "\n");
@@ -411,13 +411,13 @@ fn usage() -> int {
 fn titleFrom(args: view Str[], from: int) -> (Str, task::Priority) {
   last = args.len();
   priority = task::Priority::Normal;
-  if (last - from > 1 && (args[last - 1] == "high" || args[last - 1] == "low")) {
+  if last - from > 1 && (args[last - 1] == "high" || args[last - 1] == "low") {
     priority = if args[last - 1] == "high" then task::Priority::High else task::Priority::Low;
     last = last - 1;
   }
   title = "";
   i = from;
-  while (i < last) {
+  while i < last {
     title = title + (if i > from then " " else "") + args[i];
     i = i + 1;
   }
@@ -425,25 +425,25 @@ fn titleFrom(args: view Str[], from: int) -> (Str, task::Priority) {
 }
 
 fn main(args: view Str[]) -> int {
-  if (args.len() < 2) { return usage(); }
+  if args.len() < 2 { return usage(); }
   path = "tasks.txt";
   tasks: list::TaskList = store::load(path);
   changed = False;
   match args[1] {
     "add" {
-      if (args.len() < 3) { return usage(); }
+      if args.len() < 3 { return usage(); }
       title, priority = titleFrom(args, 2);
-      if (!tasks.add(title, priority)) {
+      if !tasks.add(title, priority) {
         printerrln("the list is full");
         return 1;
       }
       changed = True;
     }
     "done" {
-      if (args.len() != 3) { return usage(); }
+      if args.len() != 3 { return usage(); }
       match int(args[2]) {
         n: int {
-          if (!tasks.complete(n)) {
+          if !tasks.complete(n) {
             printerrln("no task " + args[2]);
             return 1;
           }
@@ -455,7 +455,7 @@ fn main(args: view Str[]) -> int {
     "list" { }
     _ { return usage(); }
   }
-  if (changed && !store::save(tasks, path)) { return 1; }
+  if changed && !store::save(tasks, path) { return 1; }
   tasks.show();
   return 0;
 }

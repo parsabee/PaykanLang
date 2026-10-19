@@ -147,13 +147,13 @@ TEST(FloatCompare, NaNNotEqualAsAConditionAndANegation) {
   auto r = compileAndRun(wrapMain(R"(
     inf: float = 1.0e308 * 10.0;
     n: float = inf - inf;
-    if (n != n) { println("ne"); } else { println("eq"); }
+    if n != n { println("ne"); } else { println("eq"); }
     b: bool = n != n;
     println(Str<bool>(b));
     println(Str<bool>(!(n != n)));
     println(Str<bool>(!(n == n)));
     i = 0;
-    while (n != n && i < 3) { i = i + 1; }
+    while n != n && i < 3 { i = i + 1; }
     println(Str<int>(i));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;

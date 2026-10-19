@@ -24,7 +24,7 @@ argument must implement.
   [Hashable](#hashable)).
 - The built-in trait `ValueType` has no methods. It is implemented by the types held in
   place and copied whole: `int`, `float`, `bool`, `char`, every sized numeric type, every
-  enum, every tuple and every struct (see [ValueType](#valuetype)).
+  enum, every tuple, every struct and every function type (see [ValueType](#valuetype)).
 - `impl Name for S { ... }` declares that struct `S` implements `Name` too, with the same
   rules (see `14-structs.md`).
 - `fn f<T: Show + Into<int>>(...)` and `class Box<T: Named>` bound their type
@@ -147,7 +147,7 @@ error, as for `Show`.
 `ValueType` is a built-in trait with no methods. It is implemented by the types whose
 values are held in place and copied whole by an assignment: `int`, `float`, `bool`,
 `char`, the sized numeric types (`u8`, `i32`, `unsigned`, `f32`, …), every enum, every
-tuple and every struct (see [the memory model](08-memory-model.md)).
+tuple, every struct and every function type (see [the memory model](08-memory-model.md)).
 A fixed-size array is one too, though it cannot be a type argument yet. A class, `Str` and
 an optional are not, and `impl ValueType for` a class is an error: a class is shared by
 reference. A struct implements it already, so `impl ValueType for` a struct is an error

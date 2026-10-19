@@ -22,7 +22,7 @@ fn main() -> int {
   println(color::name(f));                    // blue
 
   // Equality against an imported variant (same enum only).
-  if (c == color::Color::Green) { println("is green"); }
+  if c == color::Color::Green { println("is green"); }
 
   return 0;
 }

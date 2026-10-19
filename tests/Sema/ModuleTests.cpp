@@ -506,7 +506,7 @@ TEST(Module, EnumQualifiedTypeAndVariantOk) {
 import pal::color;
 fn main() -> int {
   c: color::Color = color::Color::Green;
-  if (c == color::Color::Green) { return 0; }
+  if c == color::Color::Green { return 0; }
   return 1;
 }
 )");

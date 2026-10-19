@@ -18,10 +18,10 @@ fn main() -> int {
   // Comparison
   lo: char = 'a';
   hi: char = 'z';
-  if (lo < hi) { println("a < z"); }
-  if (lo != hi) { println("a != z"); }
-  if (lo == lo) { println("a == a"); }
-  if (hi > lo)  { println("z > a"); }
+  if lo < hi { println("a < z"); }
+  if lo != hi { println("a != z"); }
+  if lo == lo { println("a == a"); }
+  if hi > lo  { println("z > a"); }
 
   // char in a variable used multiple times
   sep: char = '-';

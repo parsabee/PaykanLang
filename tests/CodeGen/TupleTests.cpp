@@ -404,9 +404,9 @@ TEST(Tuple, EnumElementsAndScopes) {
     enum Color { Red, Green }
     fn main() -> int {
       i: int = 0;
-      while (i < 3) {
+      while i < 3 {
         t = (Color::Green, "g" + Str<int>(i));   // fresh tuple each iteration
-        if (t.0 == Color::Green) { println(t.1); }
+        if t.0 == Color::Green { println(t.1); }
         i = i + 1;
       }
       return 0;
@@ -530,7 +530,7 @@ TEST(Tuple, ArrayOfTuplesWithReferenceElements) {
       println(xs[1]);
       i: int = 0;
       s = "";
-      while (i < 3) { s = s + xs[i].0; i = i + 1; }
+      while i < 3 { s = s + xs[i].0; i = i + 1; }
       println(s);
       return xs[2].1.v;
     }

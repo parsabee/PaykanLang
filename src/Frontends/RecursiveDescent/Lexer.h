@@ -45,6 +45,7 @@ enum class Tok : uint8_t {
   KwIf,
   KwThen,
   KwElse,
+  KwElif,
   KwWhile,
   KwBreak,
   KwContinue,

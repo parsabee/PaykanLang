@@ -37,7 +37,7 @@ impl Square {
 fn total(shapes: view Shape[]) -> int {
   sum: int = 0;
   i: int = 0;
-  while (i < shapes.len()) { sum = sum + shapes[i].area(); i = i + 1; }
+  while i < shapes.len() { sum = sum + shapes[i].area(); i = i + 1; }
   return sum;
 }
 

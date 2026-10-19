@@ -3,31 +3,31 @@
 //            early return inside if, Str vars in branches (scope cleanup)
 
 fn sign(n: int) -> int {
-  if (n > 0) { return 1; }
-  if (n < 0) { return 0 - 1; }
+  if n > 0 { return 1; }
+  if n < 0 { return 0 - 1; }
   return 0;
 }
 
 fn fizzbuzz(n: int) -> Str {
-  if (n % 15 == 0) { return "FizzBuzz"; }
-  if (n % 3  == 0) { return "Fizz"; }
-  if (n % 5  == 0) { return "Buzz"; }
+  if n % 15 == 0 { return "FizzBuzz"; }
+  if n % 3  == 0 { return "Fizz"; }
+  if n % 5  == 0 { return "Buzz"; }
   return Str<int>(n);
 }
 
 fn main() -> int {
   println("=== if no-else ===");
   x: int = 5;
-  if (x > 0) {
+  if x > 0 {
     println("positive");   // printed
   }
-  if (x < 0) {
+  if x < 0 {
     println("negative");   // NOT printed
   }
   println("after");        // printed
 
   println("=== if-else ===");
-  if (x == 5) {
+  if x == 5 {
     println("is five");
   } else {
     println("not five");
@@ -35,11 +35,11 @@ fn main() -> int {
 
   println("=== if-else-if chain ===");
   v: int = 42;
-  if (v > 100) {
+  if v > 100 {
     println("large");
-  } else if (v > 50) {
+  } elif v > 50 {
     println("medium");
-  } else if (v > 10) {
+  } elif v > 10 {
     println("small");       // printed
   } else {
     println("tiny");
@@ -48,8 +48,8 @@ fn main() -> int {
   println("=== nested if ===");
   a: int = 3;
   b: int = 7;
-  if (a < b) {
-    if (a > 0) {
+  if a < b {
+    if a > 0 {
       println("a: positive and less than b");  // printed
     } else {
       println("a: non-positive");
@@ -58,10 +58,10 @@ fn main() -> int {
 
   println("=== if with complex condition ===");
   p: int = 8;
-  if (p > 0 && p % 2 == 0) {
+  if p > 0 && p % 2 == 0 {
     println("even positive");   // printed
   }
-  if (p < 0 || p > 100) {
+  if p < 0 || p > 100 {
     println("out of range");    // NOT printed
   }
 
@@ -72,14 +72,14 @@ fn main() -> int {
 
   println("=== str vars inside branches (scope cleanup) ===");
   flag: bool = True;
-  if (flag) {
+  if flag {
     msg: Str = "branch_true";
     println(msg);
   } else {
     msg: Str = "branch_false";
     println(msg);
   }
-  if (!flag) {
+  if !flag {
     msg: Str = "branch_true";
     println(msg);
   } else {
@@ -89,7 +89,7 @@ fn main() -> int {
 
   println("=== fizzbuzz 1-15 ===");
   i: int = 1;
-  while (i <= 15) {
+  while i <= 15 {
     println(fizzbuzz(i));
     i = i + 1;
   }

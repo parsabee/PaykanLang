@@ -41,6 +41,7 @@ constexpr Keyword kKeywords[] = {
     {"if", Tok::KwIf},
     {"then", Tok::KwThen},
     {"else", Tok::KwElse},
+    {"elif", Tok::KwElif}, // an if-statement's `else if`
     {"while", Tok::KwWhile},
     {"break", Tok::KwBreak},
     {"continue", Tok::KwContinue},
@@ -104,6 +105,8 @@ const char *describe(Tok k) {
     return "'then'";
   case Tok::KwElse:
     return "'else'";
+  case Tok::KwElif:
+    return "'elif'";
   case Tok::KwWhile:
     return "'while'";
   case Tok::KwBreak:
@@ -232,6 +235,8 @@ const char *tokenKindName(Tok k) {
     return "KW_THEN";
   case Tok::KwElse:
     return "KW_ELSE";
+  case Tok::KwElif:
+    return "KW_ELIF";
   case Tok::KwWhile:
     return "KW_WHILE";
   case Tok::KwBreak:

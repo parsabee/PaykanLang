@@ -9,7 +9,7 @@
 // (the samples harnesses pass a fresh one per run, `// args: {tmpdir}`, so
 // parallel runs never share a file), else in /tmp.
 fn scratchPath(args: view Str[], name: Str) -> Str {
-  if (args.len() > 1) { return args[1] + "/" + name; }
+  if args.len() > 1 { return args[1] + "/" + name; }
   return "/tmp/" + name;
 }
 
@@ -29,7 +29,7 @@ fn readlines(path: Str) -> int {
   match open(path, "r") {
     err: Error { printerrln("readlines: " + err.toString()); return 1; }
     f: File {
-      while (True) {
+      while True {
         match f.readln() {
           line: Str { print(line); }
           _          { break; }

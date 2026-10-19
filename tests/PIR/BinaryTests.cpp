@@ -225,6 +225,8 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::UToF:
     case Opcode::FToU:
     case Opcode::FRound32:
+    case Opcode::FnAddr:
+    case Opcode::ICall:
       check(e.Id);
     }
   }
@@ -256,8 +258,8 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
   for (unsigned c = 26; c < 256; ++c) {
     // some none is_some unwrap weak.load weak.new; local.addr field.addr
     // ptr.load ptr.store ptr.add mem.copy mem.zero; wrap mask udiv urem
-    // ucmp utof ftou fround32 weak.release
-    bool used = c <= 31 || (c >= 34 && c <= 49);
+    // ucmp utof ftou fround32 weak.release; fn.addr icall
+    bool used = c <= 31 || (c >= 34 && c <= 51);
     EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
   }
   for (unsigned c = 8; c < 256; ++c) {
@@ -546,7 +548,7 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
     b[retType] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "type code " << int(code);
   }
-  for (uint8_t code : {32, 33, 50, 255}) {
+  for (uint8_t code : {32, 33, 52, 255}) {
     std::vector<uint8_t> b = good;
     b[opcode] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "opcode " << int(code);
@@ -777,4 +779,38 @@ fn @main() -> i64 {
   EXPECT_EQ(std::get<Instr>(g.Body.Stmts[0]).Slot, 8u);
   EXPECT_EQ(std::get<Instr>(g.Body.Stmts[9]).Slot, 32u);
   EXPECT_EQ(std::get<Instr>(g.Body.Stmts[4]).Pred, CmpPred::Lt);
+}
+
+TEST(PIRBinary, FunctionValueInstructionsRoundTrip) {
+  // A function's address, kept as an i64 and called back through it.
+  Program p = parse(R"(module "m"
+
+fn @twice(%env.1: obj, %x.2: i64) -> i64 {
+  %r.3 = add %x.2, %x.2
+  ret %r.3
+}
+
+fn @main() -> i64 {
+  %f.1 = fn.addr @twice
+  %w.2 = cast %f.1 to i64
+  %g.3 = cast %w.2 to ptr
+  %r.4 = icall %g.3 : (obj, i64) -> i64 (null obj, 21)
+  ret %r.4
+}
+)");
+  ASSERT_EQ(p.Modules.size(), 1u);
+  expectRoundTrip(p.Modules[0]);
+  const Function &f = p.Modules[0].Functions[1];
+  const Instr &addr = std::get<Instr>(f.Body.Stmts[0]);
+  EXPECT_EQ(addr.Op, Opcode::FnAddr);
+  EXPECT_EQ(addr.Callee, "twice");
+  EXPECT_EQ(addr.Result.Ty, Type::Ptr);
+  const Instr &call = std::get<Instr>(f.Body.Stmts[3]);
+  EXPECT_EQ(call.Op, Opcode::ICall);
+  EXPECT_EQ(call.Sig.Params.size(), 2u);
+  EXPECT_EQ(call.Result.Ty, Type::I64);
+  auto back = binary::decode(binary::encode(p.Modules[0]));
+  ASSERT_TRUE(back.isOk());
+  EXPECT_EQ(std::get<Instr>(back.value().Functions[1].Body.Stmts[3]).Sig,
+            call.Sig);
 }

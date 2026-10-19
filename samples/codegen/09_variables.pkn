@@ -75,7 +75,7 @@ fn main() -> int {
 
   println("=== nested scope variable access ===");
   outer: int = 10;
-  if (True) {
+  if True {
     inner: int = 20;
     outer = outer + inner;   // outer accessible from inner scope
     println(Str<int>(outer));   // 30

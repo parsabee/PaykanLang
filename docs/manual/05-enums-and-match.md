@@ -31,7 +31,7 @@ fn main() -> int {
   d = Direction::North;
   i = 0;
   route = name(d);
-  while (i < 4) {
+  while i < 4 {
     d = turnRight(d);
     route = route + " -> " + name(d);
     i = i + 1;

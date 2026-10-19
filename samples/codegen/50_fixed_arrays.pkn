@@ -29,11 +29,11 @@ fn main() -> int {
 
   grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
   i = 0;
-  while (i < grid.len()) {
+  while i < grid.len() {
     line = "";
     sum = 0;
     j = 0;
-    while (j < grid[i].len()) {
+    while j < grid[i].len() {
       line = line + Str(grid[i][j]) + " ";
       sum = sum + grid[i][j];
       j = j + 1;

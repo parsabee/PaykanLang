@@ -24,7 +24,7 @@ class Cell {
 }
 
 impl Cell {
-  fn __init__(v: int) { self.v = v; self.kind = Kind::Even; if (v % 2 != 0) { self.kind = Kind::Odd; } }
+  fn __init__(v: int) { self.v = v; self.kind = Kind::Even; if v % 2 != 0 { self.kind = Kind::Odd; } }
 }
 
 class Splitter {
@@ -40,6 +40,6 @@ enum Kind { Even, Odd }
 fn total(cs: view Cell[]) -> int {
   s: int = 0;
   i: int = 0;
-  while (i < cs.len()) { s = s + cs[i].v; i = i + 1; }
+  while i < cs.len() { s = s + cs[i].v; i = i + 1; }
   return s;
 }

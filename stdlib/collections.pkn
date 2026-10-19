@@ -65,7 +65,7 @@ impl List<T> {
   // Remove and return the last element.
   fn pop() -> T {
     n: unsigned = self.__items.len();
-    if (n == 0) { _panic("pop from an empty List"); }
+    if n == 0 { _panic("pop from an empty List"); }
     v: T = self.__items.copy(n - 1);
     self.__items.shrink(1);
     return v;
@@ -74,7 +74,7 @@ impl List<T> {
   // The last element.
   view fn last() -> T {
     n: unsigned = self.__items.len();
-    if (n == 0) { return _fail<T>("last of an empty List"); }
+    if n == 0 { return _fail<T>("last of an empty List"); }
     return self.__items.copy(n - 1);
   }
 
@@ -91,7 +91,7 @@ impl List<T> {
     self.__check(i, n + 1);
     self.__items.push(v);
     j: unsigned = n;
-    while (j > i) {
+    while j > i {
       self.__items.swap(j, j - 1);
       j = j - 1;
     }
@@ -103,7 +103,7 @@ impl List<T> {
     self.__check(i, n);
     v: T = self.__items.copy(i);
     j: unsigned = i;
-    while (j < n - 1) {
+    while j < n - 1 {
       self.__items.swap(j, j + 1);
       j = j + 1;
     }
@@ -115,8 +115,8 @@ impl List<T> {
   view fn indexOf(v: view T) -> unsigned? {
     i: unsigned = 0;
     n: unsigned = self.__items.len();
-    while (i < n) {
-      if (self.__items.get(i) == v) { return i; }
+    while i < n {
+      if self.__items.get(i) == v { return i; }
       i = i + 1;
     }
     return None;
@@ -136,10 +136,10 @@ impl List<T> {
   // Reverse the order of the elements.
   fn reverse() {
     n: unsigned = self.__items.len();
-    if (n < 2) { return; }
+    if n < 2 { return; }
     i: unsigned = 0;
     j: unsigned = n - 1;
-    while (i < j) {
+    while i < j {
       self.__items.swap(i, j);
       i = i + 1;
       j = j - 1;
@@ -154,7 +154,7 @@ impl List<T> {
     out: List<T> = List<T>();
     i: unsigned = 0;
     n: unsigned = self.__items.len();
-    while (i < n) {
+    while i < n {
       out.push(self.__items.get(i));
       i = i + 1;
     }
@@ -162,7 +162,7 @@ impl List<T> {
   }
 
   view fn __check(i: unsigned, n: unsigned) {
-    if (i >= n) {
+    if i >= n {
       _panic("List index " + Str(i) + " out of range (len=" +
               Str(self.__items.len()) + ")");
     }
@@ -173,7 +173,7 @@ impl List<T> {
 fn listOf<T>(xs: view T[]) -> List<T> {
   out: List<T> = List<T>();
   i: int = 0;
-  while (i < xs.len()) {
+  while i < xs.len() {
     out.push(xs[i]);
     i = i + 1;
   }
@@ -184,8 +184,8 @@ fn listOf<T>(xs: view T[]) -> List<T> {
 fn listToString<T: Show>(xs: view List<T>) -> Str {
   out: Str = "[";
   i: unsigned = 0;
-  while (i < xs.len()) {
-    if (i > 0) { out = out + ", "; }
+  while i < xs.len() {
+    if i > 0 { out = out + ", "; }
     out = out + xs.get(i).toString();
     i = i + 1;
   }
@@ -316,7 +316,7 @@ impl LinkedList<T> {
   view fn toList() -> List<T> {
     out: List<T> = List<T>();
     weak cur = self.__head; // the cursor: no reference copied out of self
-    while (True) {
+    while True {
       match cur {
         n: _Node<T> {
           out.push(n.value);
@@ -346,10 +346,10 @@ impl LinkedList<T> {
   // The first node whose value == v, if any.
   view fn __find(v: view T) -> _Node<T>? {
     weak cur = self.__head; // the cursor: no reference copied out of self
-    while (True) {
+    while True {
       match cur {
         n: _Node<T> {
-          if (n.value == v) { return n; }
+          if n.value == v { return n; }
           cur = n.next;
         }
         None { return None; }
@@ -378,13 +378,13 @@ impl Stack<T> {
 
   // Remove and return the top element.
   fn pop() -> T {
-    if (self.__list.isEmpty()) { _panic("pop from an empty Stack"); }
+    if self.__list.isEmpty() { _panic("pop from an empty Stack"); }
     return self.__list.popFront();
   }
 
   // The top element.
   view fn peek() -> T {
-    if (self.__list.isEmpty()) { _panic("peek at an empty Stack"); }
+    if self.__list.isEmpty() { _panic("peek at an empty Stack"); }
     return self.__list.front();
   }
 
@@ -412,13 +412,13 @@ impl Queue<T> {
 
   // Remove and return the front element.
   fn dequeue() -> T {
-    if (self.__list.isEmpty()) { _panic("dequeue from an empty Queue"); }
+    if self.__list.isEmpty() { _panic("dequeue from an empty Queue"); }
     return self.__list.popFront();
   }
 
   // The front element.
   view fn peek() -> T {
-    if (self.__list.isEmpty()) { _panic("peek at an empty Queue"); }
+    if self.__list.isEmpty() { _panic("peek at an empty Queue"); }
     return self.__list.front();
   }
 
@@ -474,7 +474,7 @@ impl HashMap<K, V> {
       }
       None { }
     }
-    if ((self.__size + 1) * 4 > self.__buckets.len() * 3) {
+    if (self.__size + 1) * 4 > self.__buckets.len() * 3 {
       self.__rehash(self.__buckets.len() * 2);
     }
     b: unsigned = _bucket(h, self.__buckets.len());
@@ -510,10 +510,10 @@ impl HashMap<K, V> {
     b: unsigned = _bucket(h, self.__buckets.len());
     prev: _Entry<K, V>? = None;
     cur: _Entry<K, V>? = self.__buckets.copy(b);
-    while (True) {
+    while True {
       match cur {
         e: _Entry<K, V> {
-          if (e.hash == h && e.key == k) {
+          if e.hash == h && e.key == k {
             match prev {
               p: _Entry<K, V> { p.next = e.next; }
               None { self.__buckets.set(b, e.next); }
@@ -540,9 +540,9 @@ impl HashMap<K, V> {
   view fn keys() -> List<K> {
     out: List<K> = List<K>();
     i: unsigned = 0;
-    while (i < self.__buckets.len()) {
+    while i < self.__buckets.len() {
       cur: _Entry<K, V>? = self.__buckets.copy(i);
-      while (cur != None) {
+      while cur != None {
         match cur {
           e: _Entry<K, V> {
             out.push(e.key);
@@ -560,9 +560,9 @@ impl HashMap<K, V> {
   view fn values() -> List<V> {
     out: List<V> = List<V>();
     i: unsigned = 0;
-    while (i < self.__buckets.len()) {
+    while i < self.__buckets.len() {
       cur: _Entry<K, V>? = self.__buckets.copy(i);
-      while (cur != None) {
+      while cur != None {
         match cur {
           e: _Entry<K, V> {
             out.push(e.value);
@@ -579,10 +579,10 @@ impl HashMap<K, V> {
   // The entry of key `k`, whose hash is `h`, or None.
   view fn __find(k: view K, h: int) -> _Entry<K, V>? {
     cur: _Entry<K, V>? = self.__buckets.copy(_bucket(h, self.__buckets.len()));
-    while (True) {
+    while True {
       match cur {
         e: _Entry<K, V> {
-          if (e.hash == h && e.key == k) { return e; }
+          if e.hash == h && e.key == k { return e; }
           cur = e.next;
         }
         None { return None; }
@@ -596,9 +596,9 @@ impl HashMap<K, V> {
     old: memory::Buffer<_Entry<K, V>?> = self.__buckets;
     self.__buckets = memory::Buffer<_Entry<K, V>?>(n);
     i: unsigned = 0;
-    while (i < old.len()) {
+    while i < old.len() {
       cur: _Entry<K, V>? = old.copy(i);
-      while (cur != None) {
+      while cur != None {
         match cur {
           e: _Entry<K, V> {
             cur = e.next;
@@ -717,15 +717,15 @@ impl _Heap<T> {
   view fn __before(i: unsigned, j: unsigned) -> bool {
     pi: int = self.__priorities.copy(i);
     pj: int = self.__priorities.copy(j);
-    if (pi != pj) {
-      if (self.__max) { return pi > pj; }
+    if pi != pj {
+      if self.__max { return pi > pj; }
       return pi < pj;
     }
     return self.__order.copy(i) < self.__order.copy(j);
   }
 
   fn __swap(i: unsigned, j: unsigned) {
-    if (i == j) { return; }
+    if i == j { return; }
     self.__values.swap(i, j);
     self.__priorities.swap(i, j);
     self.__order.swap(i, j);
@@ -733,9 +733,9 @@ impl _Heap<T> {
 
   fn __siftUp(i: unsigned) {
     k: unsigned = i;
-    while (k > 0) {
+    while k > 0 {
       parent: unsigned = (k - 1) / 2;
-      if (!self.__before(k, parent)) { return; }
+      if !self.__before(k, parent) { return; }
       self.__swap(k, parent);
       k = parent;
     }
@@ -744,20 +744,20 @@ impl _Heap<T> {
   fn __siftDown(i: unsigned) {
     n: unsigned = self.__values.len();
     k: unsigned = i;
-    while (True) {
+    while True {
       best: unsigned = k;
       l: unsigned = 2 * k + 1;
       r: unsigned = l + 1;
-      if (l < n && self.__before(l, best)) { best = l; }
-      if (r < n && self.__before(r, best)) { best = r; }
-      if (best == k) { return; }
+      if l < n && self.__before(l, best) { best = l; }
+      if r < n && self.__before(r, best) { best = r; }
+      if best == k { return; }
       self.__swap(k, best);
       k = best;
     }
   }
 
   view fn __nonEmpty(what: view Str) {
-    if (self.__values.len() == 0) { _panic(what + " on an empty priority queue"); }
+    if self.__values.len() == 0 { _panic(what + " on an empty priority queue"); }
   }
 }
 

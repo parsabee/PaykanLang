@@ -270,10 +270,10 @@ TEST(Generics, LessThanStaysRelational) {
   auto [ok, driver] = parse(R"(
     fn main() -> int {
       i: int = 0; n: int = 3;
-      while (i < n) { i = i + 1; }
+      while i < n { i = i + 1; }
       b: bool = i < n;
       c: bool = (i < n) && (n > i);
-      if (i < n) { return 1; }
+      if i < n { return 1; }
       return 0;
     }
   )");

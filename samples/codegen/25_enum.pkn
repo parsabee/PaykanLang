@@ -110,15 +110,15 @@ fn main() -> int {
   //    later a variant is declared the later this chain reaches it.
   println("== ordering ==");
   probe: Direction = Direction::South;       // index 2
-  if (probe == Direction::North) { println("0"); }
-  if (probe == Direction::East)  { println("1"); }
-  if (probe == Direction::South) { println("2"); } // prints
-  if (probe == Direction::West)  { println("3"); }
+  if probe == Direction::North { println("0"); }
+  if probe == Direction::East  { println("1"); }
+  if probe == Direction::South { println("2"); } // prints
+  if probe == Direction::West  { println("3"); }
 
   // 3. Equality / inequality (same enum only).
   println("== equality ==");
-  if (d == Direction::East)  { println("facing east"); }
-  if (d != Direction::North) { println("not north"); }
+  if d == Direction::East  { println("facing east"); }
+  if d != Direction::North { println("not north"); }
 
   // 4. Returning an enum from a function.
   println("== return enum ==");
@@ -126,8 +126,8 @@ fn main() -> int {
 
   // 5. Match with a wildcard.
   println("== wildcard match ==");
-  if (isRed(Suit::Hearts)) { println("Hearts is red"); }
-  if (isRed(Suit::Spades)) { println("Spades is red"); }
+  if isRed(Suit::Hearts) { println("Hearts is red"); }
+  if isRed(Suit::Spades) { println("Spades is red"); }
   else { println("Spades is black"); }
 
   // 6. Exhaustive match used directly.
@@ -146,7 +146,7 @@ fn main() -> int {
   println("== state machine ==");
   l: Light = Light::Red;
   i: int = 0;
-  while (i < 4) {
+  while i < 4 {
     println(lightName(l));                   // Red, Green, Yellow, Red
     l = nextLight(l);
     i = i + 1;
@@ -158,7 +158,7 @@ fn main() -> int {
                          Direction::West];
   route[0] = opposite(route[0]);             // North -> South
   j: int = 0;
-  while (j < route.len()) {
+  while j < route.len() {
     println(dirName(route[j]));              // South, East, South, West
     j = j + 1;
   }

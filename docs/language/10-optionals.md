@@ -23,10 +23,10 @@ impl Node {
 
 fn find(head: Node?, key: int) -> Node? {
   cur: Node? = head;
-  while (cur != None) {
+  while cur != None {
     match cur {
       n: Node {                      // n is the unwrapped Node
-        if (n.v == key) { return n; }
+        if n.v == key { return n; }
         cur = n.next;
       }
       None { }
@@ -136,8 +136,8 @@ optional subject.
 `equals`:
 
 ```pkn
-while (cur != None) { … }
-if (find(head, 9) == None) { println("not found"); }
+while cur != None { … }
+if find(head, 9) == None { println("not found"); }
 ```
 
 Two optionals can be compared with each other when their wrapped types are the same or
@@ -163,7 +163,7 @@ against `None` or unwrap first.
 
 ```pkn
 fn half(n: int) -> int? {
-  if (n % 2 != 0) { return None; }
+  if n % 2 != 0 { return None; }
   return n / 2;                      // an int widens to int?
 }
 
@@ -334,7 +334,7 @@ Retaining, releasing and destroying an absent optional are no-ops. See `08-memor
 
 ## Not supported in v0.1
 
-Flow typing (`if (x != None) { x.foo(); }` does not narrow `x`), `if let`, the `??` default
+Flow typing (`if x != None { x.foo(); }` does not narrow `x`), `if let`, the `??` default
 and `?.` chaining operators, optional enums, and typing `None` in a literal that has no
 declared destination (`xs = [None, n]`).
 

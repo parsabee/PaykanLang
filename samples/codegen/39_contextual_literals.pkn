@@ -46,8 +46,8 @@ fn mk() -> (Node?, int) { return (None, 2); }
 fn showPairs(xs: view (Str, int?)[], count: int) -> Str {
   out = "";
   i = 0;
-  while (i < count) {
-    if (i > 0) { out = out + " "; }
+  while i < count {
+    if i > 0 { out = out + " "; }
     out = out + xs[i].toString();
     i = i + 1;
   }
@@ -57,8 +57,8 @@ fn showPairs(xs: view (Str, int?)[], count: int) -> Str {
 fn showNodes(xs: view Node?[]) -> Str {
   out = "";
   i = 0;
-  while (i < xs.len()) {
-    if (i > 0) { out = out + " "; }
+  while i < xs.len() {
+    if i > 0 { out = out + " "; }
     match xs[i] {
       n: Node { out = out + n.toString(); }
       None    { out = out + "None"; }
@@ -71,8 +71,8 @@ fn showNodes(xs: view Node?[]) -> Str {
 fn showInts(xs: view int?[]) -> Str {
   out = "";
   i = 0;
-  while (i < xs.len()) {
-    if (i > 0) { out = out + " "; }
+  while i < xs.len() {
+    if i > 0 { out = out + " "; }
     match xs[i] {
       n: int { out = out + Str(n); }
       None   { out = out + "None"; }

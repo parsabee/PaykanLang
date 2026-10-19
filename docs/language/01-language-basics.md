@@ -253,7 +253,7 @@ offers the same methods (`readln`, `readbytes`, `read`):
 ```pkn
 fn main() -> int {
   n: int = 0;
-  while (True) {
+  while True {
     match Stdin.readln() {
       line: Str { n = n + 1; }
       _         { break; }       // None — end of input
@@ -297,7 +297,7 @@ variants without a wildcard.
 enum Direction { North, East, South, West }
 
 d: Direction = Direction::East;
-if (d == Direction::East) { println("heading east"); }
+if d == Direction::East { println("heading east"); }
 ```
 
 See `03-enums.md` for the full treatment, including using `enum` with `match`.
@@ -613,39 +613,41 @@ return expression;                   // return (or bare return; for void)
 
 ## Control Flow
 
-### if / else
+### if / elif / else
 
 ```pkn
-if (condition) {
+if condition {
   // then
 }
 
-if (condition) {
+if condition {
   // then
 } else {
   // else
 }
 
-if (x > 100) {
+if x > 100 {
   println("large");
-} else if (x > 10) {
+} elif x > 10 {
   println("medium");
 } else {
   println("small");
 }
 ```
 
-Condition must be `bool`. Parentheses are required.
+Condition must be `bool`. It is written without parentheses; the body's `{` ends it. A chain
+continues with `elif`, not `else if`; `else if` belongs to the conditional expression
+(`if x > 0 then 1 else if x == 0 then 0 else -1`), and each form rejects the other's spelling.
 
 ### while
 
 ```pkn
 i: int = 0;
-while (i < 5) {
+while i < 5 {
   i = i + 1;
 }
 
-while (True) {   // infinite loop
+while True {   // infinite loop
   // ...
 }
 ```
@@ -658,10 +660,10 @@ while (True) {   // infinite loop
 
 ```pkn
 i: int = 0;
-while (i < 10) {
+while i < 10 {
   i = i + 1;
-  if (i % 2 != 0) { continue; }   // skip odd
-  if (i == 8)     { break; }       // stop at 8
+  if i % 2 != 0 { continue; }   // skip odd
+  if i == 8     { break; }       // stop at 8
   println(Str<int>(i));              // prints 2 4 6
 }
 ```
@@ -899,7 +901,7 @@ Because `open()` returns `Obj`, always use `match` to distinguish the two cases:
 match open("/tmp/data.txt", "r") {
   err: Error { printerrln("open failed: " + err.toString()); }
   f: File {
-    while (True) {
+    while True {
       match f.readln() {
         line: Str { print(line); }
         _          { break; }   // None — EOF

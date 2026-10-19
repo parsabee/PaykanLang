@@ -18,7 +18,7 @@ fn main() -> int {
 
   s = memory::Buffer<Str>(0);
   i: int = 0;
-  while (i < 100) {
+  while i < 100 {
     s.push("s" + Str(i));
     i = i + 1;
   }

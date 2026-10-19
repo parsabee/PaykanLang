@@ -296,9 +296,9 @@ TEST(FunctionType, LambdaBodiesAreFunctionBodies) {
   auto r = semaCheck(R"(
 fn main() -> int {
   i = 0;
-  while (i < 3) {
+  while i < 3 {
     f = fn() -> int { break; };
-    g = fn() -> int { if (i > 1) { return 1; } };
+    g = fn() -> int { if i > 1 { return 1; } };
     h = fn(x: int, x: int) -> int { return x; };
     k = fn(v: void) {};
     l = fn() { return 1; };

@@ -84,7 +84,7 @@ rejected before it can produce a meaningless answer:
 enum A { X, Y }
 enum B { P, Q }
 
-if (A::X == B::P) { }    // error: operands of '==' have mismatched types 'A' and 'B'
+if A::X == B::P { }    // error: operands of '==' have mismatched types 'A' and 'B'
 ```
 
 Referencing a variant the enum does not declare is an error:
@@ -103,8 +103,8 @@ enum:
 ```pkn
 d: Direction = Direction::East;
 
-if (d == Direction::East)  { println("facing east"); }
-if (d != Direction::North) { println("not north"); }
+if d == Direction::East  { println("facing east"); }
+if d != Direction::North { println("not north"); }
 ```
 
 There is no ordering (`<`, `>`) on enums — even though variants have ordinals, the language does
@@ -150,7 +150,7 @@ route: Direction[4] = [Direction::North, Direction::East, Direction::South, Dire
 route[0] = opposite(route[0]);        // North -> South
 
 j: int = 0;
-while (j < route.len()) {
+while j < route.len() {
   println(dirName(route[j]));
   j = j + 1;
 }
@@ -226,7 +226,7 @@ fn nextLight(l: Light) -> Light {
 
 l: Light = Light::Red;
 i: int = 0;
-while (i < 4) {
+while i < 4 {
   println(lightName(l));   // Red, Green, Yellow, Red
   l = nextLight(l);
   i = i + 1;

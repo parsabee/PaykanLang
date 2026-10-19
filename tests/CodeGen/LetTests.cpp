@@ -26,7 +26,7 @@ TEST(Let, LocalsHoldValuesAndReferences) {
       p.x = p.x + n;
       { let n = 10; println(Str(n)); }
       i = 0;
-      while (i < 2) { let k = i * 2; print(Str(k) + " "); i = i + 1; }
+      while i < 2 { let k = i * 2; print(Str(k) + " "); i = i + 1; }
       println(s + " " + Str(f) + " " + Str(p.x) + " " + Str(xs.len()) + " " +
               Str(o == None) + " " + Str(base != None));
       return 0;

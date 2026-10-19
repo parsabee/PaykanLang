@@ -18,9 +18,9 @@ fn main() -> int {
   a: Node? = None;
   b: Node? = Node(1);
   l: Leaf? = Leaf(2);
-  if (a == None) { println("a is none"); }
-  if (b != None) { println("b is some"); }
-  if (None == a) { println("none == a"); }
+  if a == None { println("a is none"); }
+  if b != None { println("b is some"); }
+  if None == a { println("none == a"); }
   println(Str<bool>(a == b));
   println(Str<bool>(b == l));    // subtype-compatible optionals
   s: Str? = "x";

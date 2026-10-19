@@ -1197,6 +1197,11 @@ bool Parser::parseStatement(Stmt *&out) {
     out = parseWhileStmt();
     return out != nullptr;
 
+  case Tok::KwElif:
+    errorAtCurrent("an 'elif' follows the block of an 'if' or another "
+                   "'elif'");
+    return false;
+
   case Tok::KwMatch:
     out = parseMatchStmt();
     return out != nullptr;
@@ -1507,62 +1512,94 @@ bool Parser::parseDestructureStatement(
   return true;
 }
 
-// A statement starting with `if` is an if-statement when the parenthesised
-// condition is followed by `{`; otherwise it is an expression statement whose
-// expression is a ternary (`if c then a else b;`).  Scanning to the matching
-// `)` costs nothing on the token buffer and avoids speculative parsing.
+// A statement starting with `if` is an if-statement when its condition is
+// followed by `{`, and an expression statement whose expression is a ternary
+// (`if c then a else b;`) when it is followed by `then`.  The first of the two
+// that is outside any brackets and not a nested ternary's decides; scanning
+// the token buffer costs nothing and avoids speculative parsing.
 bool Parser::ifStartsStatement() {
-  if (kind(1) != Tok::LParen)
-    return false;
-  unsigned depth = 0;
+  unsigned depth = 0;   // open ( [ {
+  unsigned ternary = 0; // nested `if`s still waiting for their `then`
   for (size_t i = 1;; ++i) {
-    Tok k = kind(i);
-    if (k == Tok::Eof)
+    switch (kind(i)) {
+    case Tok::Eof:
       return true; // unbalanced: report it as a broken if-statement
-    if (k == Tok::LParen) {
+    case Tok::LParen:
+    case Tok::LBracket:
       ++depth;
-    } else if (k == Tok::RParen) {
-      if (--depth == 0)
-        return kind(i + 1) == Tok::LBrace;
+      break;
+    case Tok::RParen:
+    case Tok::RBracket:
+    case Tok::RBrace:
+      if (depth == 0)
+        return true; // reported as a missing block
+      --depth;
+      break;
+    case Tok::LBrace:
+      if (depth == 0)
+        return true;
+      ++depth;
+      break;
+    case Tok::Semi:
+      if (depth == 0)
+        return true; // reported as a missing block
+      break;
+    case Tok::KwIf:
+      if (depth == 0)
+        ++ternary;
+      break;
+    case Tok::KwThen:
+      if (depth == 0 && ternary-- == 0)
+        return false;
+      break;
+    default:
+      break;
     }
   }
 }
 
-// ifStmt ::= "if" "(" expression ")" block ( "else" ( block | ifStmt ) )?
+// ifStmt   ::= "if" expression block elseTail?
+// elseTail ::= "elif" expression block elseTail? | "else" block
+// An `elif` is an IfStmt nested as the else branch, as `else if` was.
 Stmt *Parser::parseIfStmt() {
-  SourceLocation start = consume().Loc; // "if"
-  if (!expect(Tok::LParen, "after 'if'"))
-    return nullptr;
+  SourceLocation start = consume().Loc; // "if" or "elif"
   Expr *cond = parseExpression();
   if (!cond)
     return nullptr;
-  if (!expect(Tok::RParen, "to close the condition"))
+  if (!at(Tok::LBrace)) {
+    errorAtCurrent("expected '{' after the 'if' condition");
     return nullptr;
+  }
   CompoundStmt *thenBlock = parseBlock();
   if (!thenBlock)
     return nullptr;
   Stmt *elseBranch = nullptr;
-  if (accept(Tok::KwElse)) {
-    if (at(Tok::KwIf))
-      elseBranch = parseIfStmt();
-    else
-      elseBranch = parseBlock();
+  if (at(Tok::KwElif)) {
+    elseBranch = parseIfStmt();
+    if (!elseBranch)
+      return nullptr;
+  } else if (accept(Tok::KwElse)) {
+    if (at(Tok::KwIf)) {
+      errorAtCurrent("an if-statement spells 'else if' as 'elif'");
+      return nullptr;
+    }
+    elseBranch = parseBlock();
     if (!elseBranch)
       return nullptr;
   }
   return Ctx.make<IfStmt>(span(start), cond, thenBlock, elseBranch);
 }
 
-// whileStmt ::= "while" "(" expression ")" block
+// whileStmt ::= "while" expression block
 Stmt *Parser::parseWhileStmt() {
   SourceLocation start = consume().Loc; // "while"
-  if (!expect(Tok::LParen, "after 'while'"))
-    return nullptr;
   Expr *cond = parseExpression();
   if (!cond)
     return nullptr;
-  if (!expect(Tok::RParen, "to close the condition"))
+  if (!at(Tok::LBrace)) {
+    errorAtCurrent("expected '{' after the 'while' condition");
     return nullptr;
+  }
   CompoundStmt *body = parseBlock();
   if (!body)
     return nullptr;
@@ -1850,7 +1887,9 @@ Expr *Parser::parseTernary() {
   Expr *f = nullptr;
   if (cond && expect(Tok::KwThen, "after the condition"))
     t = parseExpression();
-  if (t && expect(Tok::KwElse, "after the 'then' branch"))
+  if (t && at(Tok::KwElif))
+    errorAtCurrent("a conditional expression spells 'elif' as 'else if'");
+  else if (t && expect(Tok::KwElse, "after the 'then' branch"))
     f = parseTernary();
   leaveNesting();
   if (!f)

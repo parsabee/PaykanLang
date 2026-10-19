@@ -7,7 +7,7 @@ class Point {
 impl Point {
   fn __init__(a: int) {
     self.x = a;
-    if (a > 0) {
+    if a > 0 {
       self.y = a;
     } else {
       self.y = 0;

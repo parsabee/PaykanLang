@@ -221,7 +221,7 @@ impl Cat {
 fn main() -> int {
   pets: Animal[3] = [Dog("Rex"), Cat("Tom"), Animal("Generic")];
   i = 0;
-  while (i < pets.len()) {
+  while i < pets.len() {
     println(pets[i].speak());
     i = i + 1;
   }

@@ -9,8 +9,8 @@ enum Color {
 fn main() -> int {
   c: Color = Color::Green;
 
-  if (c == Color::Green) { }
-  if (c != Color::Red)   { }
+  if c == Color::Green { }
+  if c != Color::Red   { }
 
   match c {
     Red   { }

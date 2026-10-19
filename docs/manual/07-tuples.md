@@ -56,9 +56,9 @@ fn minMax(xs: view int[]) -> (int, int) {
   lo = xs[0];
   hi = xs[0];
   i = 1;
-  while (i < xs.len()) {
-    if (xs[i] < lo) { lo = xs[i]; }
-    if (xs[i] > hi) { hi = xs[i]; }
+  while i < xs.len() {
+    if xs[i] < lo { lo = xs[i]; }
+    if xs[i] > hi { hi = xs[i]; }
     i = i + 1;
   }
   return (lo, hi);
@@ -108,7 +108,7 @@ content):
 fn main() -> int {
   scores: (Str, int)[3] = [("ada", 92), ("alan", 85), ("grace", 97)];
   i = 0;
-  while (i < scores.len()) {
+  while i < scores.len() {
     name, score = scores[i];
     println(name + ": " + Str(score));
     i = i + 1;
@@ -150,13 +150,13 @@ impl Task {
 fn splitOnce(s: Str, sep: char) -> (Str, Str) {
   left = "";
   i = 0;
-  while (i < s.len() && s[i] != sep) {
+  while i < s.len() && s[i] != sep {
     left = left + Str(s[i]);
     i = i + 1;
   }
   right = "";
   i = i + 1;
-  while (i < s.len()) {
+  while i < s.len() {
     right = right + Str(s[i]);
     i = i + 1;
   }
@@ -167,8 +167,8 @@ fn splitOnce(s: Str, sep: char) -> (Str, Str) {
 fn stats(tasks: view Task[]) -> (int, int) {
   done = 0;
   i = 0;
-  while (i < tasks.len()) {
-    if (tasks[i].done) { done = done + 1; }
+  while i < tasks.len() {
+    if tasks[i].done { done = done + 1; }
     i = i + 1;
   }
   return (done, tasks.len() - done);
@@ -208,7 +208,7 @@ struct Stats {
 impl Stats {
   view fn total() -> int { return self.done + self.pending; }
   fn count(isDone: bool) {
-    if (isDone) { self.done = self.done + 1; } else { self.pending = self.pending + 1; }
+    if isDone { self.done = self.done + 1; } else { self.pending = self.pending + 1; }
   }
 }
 

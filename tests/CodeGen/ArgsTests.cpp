@@ -71,7 +71,7 @@ TEST(Args, EmptyArgList) {
 TEST(Args, ArgLenUsedInLogic) {
   auto r = compileAndRunWithArgs(R"(
     fn main(args: view Str[]) -> int {
-      if (args.len() > 1) {
+      if args.len() > 1 {
         return 1;
       } else {
         return 0;
@@ -91,8 +91,8 @@ TEST(Args, PassedToSliceParameters) {
     fn longest(ss: view Str[]) -> int {
       n = 0;
       i = 0;
-      while (i < ss.len()) {
-        if (ss[i].len() > n) { n = ss[i].len(); }
+      while i < ss.len() {
+        if ss[i].len() > n { n = ss[i].len(); }
         i = i + 1;
       }
       return n;
@@ -100,7 +100,7 @@ TEST(Args, PassedToSliceParameters) {
     fn joined(ss: view Str[], from: int) -> Str {
       s = "";
       i = from;
-      while (i < ss.len()) {
+      while i < ss.len() {
         s = s + ss[i] + ";";
         i = i + 1;
       }

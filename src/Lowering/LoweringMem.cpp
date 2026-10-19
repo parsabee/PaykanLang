@@ -46,9 +46,10 @@ std::pair<ast::Type *, int64_t> innermostElements(ast::FixedArrayType *ft) {
   return {ft->getElementType(), n};
 }
 
-/// Whether a value of @p ty holds a reference: is one, or holds one.
+/// Whether a value of @p ty holds a reference: is one, or holds one (a
+/// function value holds its closure's).
 bool holdsRef(const ast::Type *ty) {
-  if (ast::isRefType(ty))
+  if (ast::isRefType(ty) || ast::isFunctionValue(ty))
     return true;
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
     return holdsRef(ft->getElementType());
@@ -86,6 +87,8 @@ bool ModuleLowering::memHoldsRefs(const ast::Type *ty) {
 }
 
 ModuleLowering::MemLayout ModuleLowering::memLayout(ast::Type *ty) {
+  if (ast::isFunctionValue(ty))
+    return memLayout(functionValueShape());
   if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
     MemLayout elem = memLayout(ft->getElementType());
     return {elem.Size * ft->getLength(), elem.Align};
@@ -115,6 +118,26 @@ int64_t ModuleLowering::tupleElementOffset(const ast::TupleType *tt, size_t i) {
 }
 
 ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
+  // A function value made here: a lambda, a named function, or None for an
+  // optional one (no code, no closure), written into a temporary.  A None
+  // held in memory is always an optional function value's.
+  if (ast::isa<ast::NoneLiteral>(e) || isFunctionValueExpr(e)) {
+    MemLayout l = memLayout(functionValueShape());
+    pir::LocalId tmp = B.addMemLocal("fn", l.Size, l.Align);
+    Val addr = B.localAddr(tmp, "fn.addr");
+    if (auto *le = ast::dyn_cast<ast::LambdaExpr>(e)) {
+      emitLambdaInto(le, addr);
+    } else if (ast::isa<ast::NoneLiteral>(e)) {
+      B.memZero(addr, Val::i64(l.Size));
+    } else {
+      auto *fnt = ast::cast<ast::FunctionType>(e->getResolvedType());
+      auto *ev = ast::dyn_cast<ast::EnumValueExpr>(e);
+      emitFunctionRefInto(ev ? *ev->getFunctionRef()
+                             : ast::cast<ast::Identifier>(e)->getName(),
+                          fnt, addr);
+    }
+    return {addr, /*Temp=*/true};
+  }
   if (auto *id = ast::dyn_cast<ast::Identifier>(e)) {
     pir::LocalId local = CurrentScope->lookup(id->getName());
     if (CurrentScope->inoutType(id->getName()) != Type::Void)
@@ -202,6 +225,10 @@ void ModuleLowering::forEachMemRef(const Val &addr, ast::Type *ty,
                                    const std::function<void(Val)> &fn) {
   if (!addr || !holdsRef(ty))
     return;
+  if (ast::isFunctionValue(ty)) {
+    forEachMemRef(addr, functionValueShape(), fn);
+    return;
+  }
   if (ast::isRefType(ty)) {
     fn(B.ptrLoad(addr, Type::Box, "elem"));
     return;
@@ -490,7 +517,9 @@ Val ModuleLowering::emitTupleLayout(ast::TupleType *tt) {
       ast::Type *e = t->getElementType(i);
       if (st)
         appendName(st->getFieldName(i));
-      auto *nested = ast::dyn_cast<ast::TupleType>(e);
+      ast::TupleType *nested = ast::isFunctionValue(e)
+                                   ? functionValueShape()
+                                   : ast::dyn_cast<ast::TupleType>(e);
       words.push_back(nested ? (ast::isa<ast::StructType>(nested)
                                     ? int64_t{names::kNativeKindStruct}
                                     : int64_t{names::kNativeKindTuple})
@@ -542,7 +571,8 @@ Val ModuleLowering::emitTupleEquals(ast::Expr *a, ast::Expr *b) {
   Val pb = pa ? emitMemAddress(b) : Val();
   if (!pb)
     return Val();
-  auto *tt = ast::cast<ast::TupleType>(a->getResolvedType());
+  // A function value compares as its shape: the same code and closure.
+  auto *tt = ast::cast<ast::TupleType>(memShapeOf(a->getResolvedType()));
   Val eq =
       callRuntime(ast::isa<ast::StructType>(tt) ? names::kPaykanStructEquals
                                                 : names::kPaykanTupleEquals,

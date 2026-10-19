@@ -50,6 +50,9 @@ void ModuleLowering::emitMatchChain(size_t n,
 }
 
 Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
+  // An optional function value is held in memory: matched in place.
+  if (ast::isFunctionValue(node->getSubject()->getResolvedType()))
+    return emitFunctionValueMatch(node);
   // 1. Evaluate the subject once.  A boxed subject (call result, field read)
   //    is owned for the duration of the match and released on every exit.
   Val subjRaw = emitExpr(node->getSubject());
@@ -125,8 +128,7 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
       continue;
     }
     // A class arm is an exact-type test; the arm naming an optional's
-    // wrapped type (a class, or a function type, whose closures have no
-    // class) matches every present value.
+    // wrapped class matches every present value.
     ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm->getArmType());
     ast::Type *bindTy = arm->getArmType();
     bool matchesAnySome = optTy && arm->getArmType() == optTy->getInnerType();

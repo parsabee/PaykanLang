@@ -54,7 +54,7 @@ TEST(Regression, MethodObjectArrayParam) {
       fn total(ps: view P[]) -> int {
         s = 0;
         i = 0;
-        while (i < ps.len()) { s = s + ps[i].x; i = i + 1; }
+        while i < ps.len() { s = s + ps[i].x; i = i + 1; }
         return s;
       }
       fn count(ss: view Str[]) -> int { return ss.len(); }
@@ -181,7 +181,7 @@ TEST(Regression, InferredTupleOptionalTernary) {
       tup = if c then t else (6, q);
       opt = if c then p else None;
       n = 0;
-      if (opt != None) { n = 100; }
+      if opt != None { n = 100; }
       return tup.1.get() * 10 + tup.0 + n;
     }
     fn main() -> int {
@@ -213,7 +213,7 @@ TEST(Regression, CharArrayElements) {
     fn main() -> int {
       cs: char[2] = ['a', 'b'];
       println(Str<char>(cs[1]));
-      if (cs[0] == 'a') { println("eq"); }
+      if cs[0] == 'a' { println("eq"); }
       println(Str<bool>(isA(cs[0])));
       c: char = cs[1];
       d = cs[0];
@@ -481,7 +481,7 @@ impl One {
 fn main() -> int {
   s = Square(4);
   o = One();
-  if (s.tag != "sq") { return 1; }
+  if s.tag != "sq" { return 1; }
   return s.area() + o.n;
 }
 )");
@@ -632,10 +632,10 @@ impl Grid {
   fn __init__() {
     self.rows = [[0; 3]; 3];
     i: int = 0;
-    while (i < 3) {
+    while i < 3 {
       row: int[3] = [0; 3];
       j: int = 0;
-      while (j < 3) { row[j] = i * 3 + j; j = j + 1; }
+      while j < 3 { row[j] = i * 3 + j; j = j + 1; }
       self.rows[i] = row;
       i = i + 1;
     }
@@ -672,9 +672,9 @@ TEST(Regression, MatchOnALiteralSubject) {
       match 'c' { 'c' { println("c"); } _ { println("?"); } }
       match True { True { println("T"); } False { println("F"); } }
       i = 0;
-      while (i < 3) {
+      while i < 3 {
         i = i + 1;
-        match "x" { "x" { if (i == 2) { break; } println("x"); } _ { } }
+        match "x" { "x" { if i == 2 { break; } println("x"); } _ { } }
       }
       return pick();
     }

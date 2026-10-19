@@ -91,7 +91,7 @@ class Ring<T> {
 
   // Append `x`, overwriting the oldest item when the buffer is full.
   fn add(x: T) {
-    if (self.count < self.items.len()) {
+    if self.count < self.items.len() {
       self.items[self.count] = x;
       self.count = self.count + 1;
     } else {
@@ -140,7 +140,7 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
     }
     None { }
   }
-  if (!p.done()) {
+  if !p.done() {
     printerrln("error: unexpected '" + p.rest() + "'");
     return;
   }
@@ -150,11 +150,11 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
   match target {
     name: Str {
       env.put(name, value);
-      if (quiet) { println(show(value)); }
+      if quiet { println(show(value)); }
       else { println(name + " = " + show(value)); }
     }
     None {
-      if (quiet) { println(show(value)); }
+      if quiet { println(show(value)); }
       else { println(src + " = " + show(value)); }
     }
   }
@@ -162,14 +162,14 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
 
 // List every stored variable, walking each bucket's chain of entries.
 fn listVars(env: hashmap::HashMap) {
-  if (env.count() == 0) {
+  if env.count() == 0 {
     println("(no variables)");
     return;
   }
   b: int = 0;
-  while (b < env.bucketCount()) {
+  while b < env.bucketCount() {
     cur: hashmap::Entry? = env.bucket(b);
-    while (cur != None) {
+    while cur != None {
       match cur {
         e: hashmap::Entry {
           println("  " + e.key + " = " + show(e.value));
@@ -184,12 +184,12 @@ fn listVars(env: hashmap::HashMap) {
 
 // Print the remembered statements, oldest first, numbered from 1.
 fn listHistory(history: Ring<(Str, float)>) {
-  if (history.len() == 0) {
+  if history.len() == 0 {
     println("(no history)");
     return;
   }
   i: int = 0;
-  while (i < history.len()) {
+  while i < history.len() {
     entry: view = history.at(i);   // (source, value)
     value = entry.1;
     println("  " + Str(i + 1) + ": " + entry.0 + "  => " + show(value));
@@ -202,13 +202,13 @@ fn listHistory(history: Ring<(Str, float)>) {
 fn splitCommand(s: Str) -> (Str, Str) {
   word: Str = "";
   i: int = 1;
-  while (i < s.len() && s[i] != ' ') {
+  while i < s.len() && s[i] != ' ' {
     word = word + Str<char>(s[i]);
     i = i + 1;
   }
-  while (i < s.len() && s[i] == ' ') { i = i + 1; }
+  while i < s.len() && s[i] == ' ' { i = i + 1; }
   arg: Str = "";
-  while (i < s.len()) {
+  while i < s.len() {
     arg = arg + Str(s[i]);
     i = i + 1;
   }
@@ -220,34 +220,34 @@ fn runCommand(s: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
               quiet: bool) -> bool {
   word, arg = splitCommand(s);
 
-  if (word.equals("quit") || word.equals("q") || word.equals("exit")) {
+  if word.equals("quit") || word.equals("q") || word.equals("exit") {
     return False;
   }
-  if (word.equals("help") || word.equals("h")) {
+  if word.equals("help") || word.equals("h") {
     printHelp();
     return True;
   }
-  if (word.equals("vars")) {
+  if word.equals("vars") {
     listVars(env);
     return True;
   }
-  if (word.equals("history")) {
+  if word.equals("history") {
     listHistory(history);
     return True;
   }
-  if (word.equals("clear")) {
+  if word.equals("clear") {
     env.clear();
     defineConstants(env);
-    if (!quiet) { println("cleared all variables"); }
+    if !quiet { println("cleared all variables"); }
     return True;
   }
-  if (word.equals("del")) {
-    if (arg.len() == 0) {
+  if word.equals("del") {
+    if arg.len() == 0 {
       printerrln("usage: :del <name>");
       return True;
     }
-    if (env.remove(arg)) {
-      if (!quiet) { println("deleted '" + arg + "'"); }
+    if env.remove(arg) {
+      if !quiet { println("deleted '" + arg + "'"); }
     } else {
       printerrln("no such variable: '" + arg + "'");
     }
@@ -261,20 +261,20 @@ fn runCommand(s: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
 fn handle(line: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
           quiet: bool) -> bool {
   s: Str = utils::stripLine(line);
-  if (s.len() == 0) { return True; }
-  if (s[0] == ':') { return runCommand(s, env, history, quiet); }
+  if s.len() == 0 { return True; }
+  if s[0] == ':' { return runCommand(s, env, history, quiet); }
   evalStatement(s, env, history, quiet);
   return True;
 }
 
 // Read-evaluate-print loop over standard input.
 fn repl(env: hashmap::HashMap, history: Ring<(Str, float)>, quiet: bool) -> int {
-  if (!quiet) {
+  if !quiet {
     println("calc — arithmetic with variables.  :help for commands, :quit to exit.");
   }
-  while (True) {
+  while True {
     match Stdin.readln() {
-      line: Str { if (!handle(line, env, history, quiet)) { return 0; } }
+      line: Str { if !handle(line, env, history, quiet) { return 0; } }
       _ { break; } // None — end of input
     }
   }
@@ -322,7 +322,7 @@ fn demo(env: hashmap::HashMap, history: Ring<(Str, float)>) {
     "b = a * 7"
   ];
   i: int = 0;
-  while (i < script.len()) {
+  while i < script.len() {
     println("> " + script[i]);
     handle(script[i], env, history, False);
     i = i + 1;
@@ -355,24 +355,24 @@ fn main(args: view Str[]) -> int {
 
   // -- command-line parsing: flags, repeatable -e, positional expressions --
   i: int = 1;
-  while (i < args.len()) {
+  while i < args.len() {
     a: view = args[i];
-    if (a.equals("-h") || a.equals("--help")) {
+    if a.equals("-h") || a.equals("--help") {
       printUsage();
       return 0;
-    } else if (a.equals("-q") || a.equals("--quiet")) {
+    } elif a.equals("-q") || a.equals("--quiet") {
       quiet = True;
-    } else if (a.equals("--no-demo")) {
+    } elif a.equals("--no-demo") {
       runDemo = False;
-    } else if (a.equals("-e") || a.equals("--eval")) {
-      if (i + 1 < args.len()) {
+    } elif a.equals("-e") || a.equals("--eval") {
+      if i + 1 < args.len() {
         i = i + 1;
         nexprs = nexprs + 1;
       } else {
         printerrln("error: " + a + " requires an argument");
         return 2;
       }
-    } else if (isOption(a)) {
+    } elif isOption(a) {
       printerrln("error: unknown option '" + a + "' (try -h)");
       return 2;
     } else {
@@ -384,19 +384,19 @@ fn main(args: view Str[]) -> int {
   env: hashmap::HashMap = hashmap::HashMap();
   defineConstants(env);
   history: Ring<(Str, float)> = Ring<(Str, float)>(("", 0.0));
-  if (runDemo) { demo(env, history); }
+  if runDemo { demo(env, history); }
 
   // Batch mode: walk the arguments again and evaluate every expression, in
   // order, sharing one environment. The first pass checked the options, so
   // each one here is known. `toString()` gives an argument's string as one
   // of our own, for the parser and the history to keep.
-  if (nexprs > 0) {
+  if nexprs > 0 {
     j: int = 1;
-    while (j < args.len()) {
-      if (args[j].equals("-e") || args[j].equals("--eval")) {
+    while j < args.len() {
+      if args[j].equals("-e") || args[j].equals("--eval") {
         j = j + 1;
         evalStatement(args[j].toString(), env, history, quiet);
-      } else if (!isOption(args[j])) {
+      } elif !isOption(args[j]) {
         evalStatement(args[j].toString(), env, history, quiet);
       }
       j = j + 1;

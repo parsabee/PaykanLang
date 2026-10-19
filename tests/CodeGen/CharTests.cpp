@@ -55,7 +55,7 @@ TEST(Char, LessThan) {
   auto r = compileAndRun(wrapMain(R"(
     lo: char = 'a';
     hi: char = 'z';
-    if (lo < hi) { println("true"); }
+    if lo < hi { println("true"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "true\n");
@@ -64,8 +64,8 @@ TEST(Char, LessThan) {
 TEST(Char, Equality) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = 'x';
-    if (c == 'x') { println("eq"); }
-    if (c != 'y') { println("neq"); }
+    if c == 'x' { println("eq"); }
+    if c != 'y' { println("neq"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "eq\nneq\n");
@@ -73,7 +73,7 @@ TEST(Char, Equality) {
 
 TEST(Char, GreaterThan) {
   auto r = compileAndRun(wrapMain(R"(
-    if ('z' > 'a') { println("true"); }
+    if 'z' > 'a' { println("true"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "true\n");
@@ -103,7 +103,7 @@ TEST(Char, StringIndexLastChar) {
 TEST(Char, StringIndexCompare) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "az";
-    if (s[0] < s[1]) { println("a < z"); }
+    if s[0] < s[1] { println("a < z"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "a < z\n");
@@ -113,7 +113,7 @@ TEST(Char, IterateStringViaIndex) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "hi";
     i: int = 0;
-    while (i < s.len()) {
+    while i < s.len() {
       print(Str<char>(s[i]));
       i = i + 1;
     }

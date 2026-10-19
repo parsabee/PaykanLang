@@ -7,9 +7,10 @@
 //            structs, array and tuple elements, optionals and generics;
 //            calls through each of them (`f(x)`, `obj.cb(x)`, `fs[0](x)`,
 //            `make()(x)`); closures returned from functions and methods (a
-//            method's lambda shares `self`); identity equality of closures.
-// Every closure is a reference: copying one shares it, and it is released
-// when the last holder lets go, together with the captures it owns.
+//            method's lambda shares `self`); equality of function values.
+// A function value is held in place, its code and its closure: copying one
+// shares the closure, which is released when the last copy goes, together
+// with the captures it owns.
 
 fn square(x: int) -> int { return x * x; }
 fn plus(a: int, b: int) -> int { return a + b; }
@@ -23,7 +24,7 @@ fn compose(f: (int) -> int, g: (int) -> int) -> (int) -> int {
 fn sumWith(xs: view int[], f: (view int) -> int) -> int {
   total = 0;
   i = 0;
-  while (i < xs.len()) {
+  while i < xs.len() {
     total = total + f(xs[i]);
     i = i + 1;
   }
@@ -95,14 +96,16 @@ fn main() -> int {
   // closures and `match` unwraps them.
   s = mapFirst(["a", "bb"], fn(x: view Str) -> Str { return x + x; });
   opt: ((int) -> int)? = None;
-  if (s == "aa") { opt = sq; }
+  if s == "aa" { opt = sq; }
   match opt {
     f: (int) -> int { println(s + " " + Str(f(6))); }
     None { println("none"); }
   }
 
-  // Closures are references: equal only to themselves.
+  // Function values are values: equal when they run the same code with the
+  // same closure (a copy, a named function), not otherwise.
   g = h;
-  println(Str(g == h) + " " + Str(h == sq) + " " + Str(fs[1] == h));
+  println(Str(g == h) + " " + Str(h == sq) + " " + Str(fs[1] == h) + " " +
+          Str(sq == square));
   return apply(addN, 2);
 }

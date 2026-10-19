@@ -74,9 +74,9 @@ TEST(ParseInt, ResultIsAnOrdinaryIntOptional) {
     total: int = 0;
     valid: int = 0;
     i: int = 0;
-    while (i < inputs.len()) {
+    while i < inputs.len() {
       v = int<Str>(inputs[i]);            // int?
-      if (v != None) { valid = valid + 1; }
+      if v != None { valid = valid + 1; }
       match v {
         n: int { total = total + n; }
         None   { }

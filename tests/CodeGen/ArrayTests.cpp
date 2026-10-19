@@ -30,12 +30,12 @@ TEST(ArrayAssign, IntArrayLoopOverwrite) {
   auto r = compileAndRun(wrapMain(R"(
     arr: int[5] = [0; 5];
     i: int = 0;
-    while (i < 5) {
+    while i < 5 {
       arr[i] = i * i;
       i = i + 1;
     }
     i = 0;
-    while (i < 5) {
+    while i < 5 {
       println(Str<int>(arr[i]));
       i = i + 1;
     }
@@ -166,10 +166,10 @@ impl Grid {
   fn __init__() {
     self.rows = [[0; 3]; 3];
     i: int = 0;
-    while (i < 3) {
+    while i < 3 {
       row: int[3] = [0; 3];
       j: int = 0;
-      while (j < 3) { row[j] = i * 3 + j; j = j + 1; }
+      while j < 3 { row[j] = i * 3 + j; j = j + 1; }
       self.rows[i] = row;
       i = i + 1;
     }

@@ -55,7 +55,7 @@ binds the value, and an arm for `None`. Together the two are exhaustive:
 
 ```pkn
 fn half(n: int) -> int? {
-  if (n % 2 != 0) { return None; }
+  if n % 2 != 0 { return None; }
   return n / 2;
 }
 
@@ -85,7 +85,7 @@ object of that class *or any subclass*, unlike a class `match` on a non-optional
 which compares exact classes.
 
 To just test for presence, compare with `None`: `x == None` and `x != None` work on any
-optional. But a test does not unwrap: after `if (x != None)` the type of `x` is still `T?`,
+optional. But a test does not unwrap: after `if x != None` the type of `x` is still `T?`,
 so you still need a `match` to use the value. Two optionals of the same type can be
 compared with `==` as well; they are equal when both are `None` or both hold equal values.
 
@@ -144,10 +144,10 @@ impl Node {
 
 fn find(head: Node?, wanted: int) -> Node? {
   cur = head;
-  while (cur != None) {
+  while cur != None {
     match cur {
       n: Node {
-        if (n.value == wanted) { return n; }
+        if n.value == wanted { return n; }
         cur = n.next;
       }
       None { }
@@ -223,7 +223,7 @@ class TaskList {
   count: int;
 
   fn add(title: Str) -> bool {
-    if (self.count == self.tasks.len()) { return False; }
+    if self.count == self.tasks.len() { return False; }
     self.tasks[self.count] = Task(title);
     self.count = self.count + 1;
     return True;
@@ -231,8 +231,8 @@ class TaskList {
 
   fn find(title: Str) -> Task? {
     i = 0;
-    while (i < self.count) {
-      if (self.tasks[i].title == title) { return self.tasks[i]; }
+    while i < self.count {
+      if self.tasks[i].title == title { return self.tasks[i]; }
       i = i + 1;
     }
     return None;

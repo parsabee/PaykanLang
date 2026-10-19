@@ -233,9 +233,9 @@ TEST(Optional, UnaryOnOptionalIsError) {
 TEST(Optional, CompareAgainstNone) {
   expectOk(withNode(R"(
     a: Node? = None;
-    if (a == None) { println("none"); }
-    if (a != None) { println("some"); }
-    if (None == a) { println("none"); }
+    if a == None { println("none"); }
+    if a != None { println("some"); }
+    if None == a { println("none"); }
     s: Str? = "x";
     b: bool = s != None;
   )"));
@@ -246,12 +246,12 @@ TEST(Optional, CompareTwoOptionals) {
     a: Node? = None;
     b: Node? = Node(1);
     l: Leaf? = Leaf(2);
-    if (a == b) { println("eq"); }
-    if (a != b) { println("ne"); }
-    if (b == l) { println("subtype ok"); }
+    if a == b { println("eq"); }
+    if a != b { println("ne"); }
+    if b == l { println("subtype ok"); }
     s: Str? = "x";
     t: Str? = "x";
-    if (s == t) { println("str eq"); }
+    if s == t { println("str eq"); }
   )"));
 }
 
@@ -475,7 +475,7 @@ TEST(Optional, LinkedListTraversal) {
     fn sum(head: Node?) -> int {
       total: int = 0;
       cur: Node? = head;
-      while (cur != None) {
+      while cur != None {
         match cur {
           n: Node { total = total + n.v; cur = n.next; }
           None    { }

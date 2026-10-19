@@ -15,7 +15,7 @@ fn shprintln(s: Str) -> Str {
 fn repeat(s: Str, n: int) -> Str {
   acc: Str = "";
   i: int = 0;
-  while (i < n) {
+  while i < n {
     acc = acc + s;
     i = i + 1;
   }
@@ -110,14 +110,14 @@ fn main() -> int {
 
   println("=== Str vars in loop (scope cleanup per iteration) ===");
   i: int = 0;
-  while (i < 4) {
+  while i < 4 {
     label: Str = "item-" + Str(i);
     println(label);
     i = i + 1;
   }
 
   println("=== Str var in if/else branches ===");
-  if (True) {
+  if True {
     branch: Str = "true-branch";
     println(branch);
   } else {

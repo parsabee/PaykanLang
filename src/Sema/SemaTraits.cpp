@@ -90,8 +90,8 @@ void Sema::registerBuiltinTraits() {
   hashable.push_back(Ctx.getStrTy());
   builtin(names::kTraitHashable, names::kMethodHash, Ctx.getIntTy(), hashable);
   // ValueType by the types held in place and copied whole: the numeric
-  // types, bool and char here, and every enum, tuple and fixed-size array
-  // (traitImplOwner).  Not a class, Str or an optional.
+  // types, bool and char here, and every enum, tuple, fixed-size array and
+  // function type (traitImplOwner).  Not a class, Str or an optional.
   std::vector<ast::Type *> values = numerics;
   values.push_back(Ctx.getBoolTy());
   values.push_back(Ctx.getCharTy());
@@ -276,9 +276,9 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
       return ty;
     return has(ty) ? ty : nullptr;
   }
-  // Every enum, tuple and fixed-size array is a ValueType.
+  // Every enum, tuple, fixed-size array and function type is a ValueType.
   if ((ast::isa<ast::EnumType>(ty) || ast::isa<ast::TupleType>(ty) ||
-       ast::isa<ast::FixedArrayType>(ty)) &&
+       ast::isa<ast::FixedArrayType>(ty) || ast::isa<ast::FunctionType>(ty)) &&
       isBuiltinTrait(names::kTraitValueType))
     return ty;
   // A tuple shows its elements (the builtin `Show`).

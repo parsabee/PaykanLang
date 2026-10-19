@@ -10,7 +10,7 @@
 fn main(args: view Str[]) -> int {
   println("argc: " + Str<int>(args.len()));
   i: int = 0;
-  while (i < args.len()) {
+  while i < args.len() {
     println("  args[" + Str(i) + "] = " + args[i]);
     i = i + 1;
   }

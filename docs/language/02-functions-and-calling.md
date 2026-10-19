@@ -486,12 +486,12 @@ fn main() -> int {
 
 ```pkn
 fn factorial(n: int) -> int {
-  if (n <= 1) { return 1; }
+  if n <= 1 { return 1; }
   return n * factorial(n - 1);
 }
 
 fn fib(n: int) -> int {
-  if (n <= 1) { return n; }
+  if n <= 1 { return n; }
   return fib(n - 1) + fib(n - 2);
 }
 ```

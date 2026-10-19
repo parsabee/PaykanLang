@@ -156,7 +156,7 @@ An array starts with the elements of its initializer, and a loop can set them af
 fn main() -> int {
   squares: int[5] = [0; 5];
   i = 0;
-  while (i < squares.len()) {
+  while i < squares.len() {
     squares[i] = i * i;
     i = i + 1;
   }
@@ -180,8 +180,8 @@ fn main() -> int {
   divisors: int[16] = [0; 16];   // room for 16
   count = 0;                     // divisors[0] to divisors[count - 1] are in use
   d = 1;
-  while (d <= 36 && count < divisors.len()) {
-    if (36 % d == 0) {
+  while d <= 36 && count < divisors.len() {
+    if 36 % d == 0 {
       divisors[count] = d;
       count = count + 1;
     }
@@ -319,7 +319,7 @@ class Point {
 fn main() -> int {
   pts = [Point(0, 0), Point(1, 2), Point(-3, 4)];
   i = 0;
-  while (i < pts.len()) {
+  while i < pts.len() {
     println(pts[i].toString());
     i = i + 1;
   }
@@ -433,7 +433,7 @@ the whole slice (`'xs' is a slice; assign its elements ('xs[i] = ...')`).
 fn sum(xs: view int[]) -> int {
   t = 0;
   i = 0;
-  while (i < xs.len()) {
+  while i < xs.len() {
     t = t + xs[i];
     i = i + 1;
   }
@@ -442,7 +442,7 @@ fn sum(xs: view int[]) -> int {
 
 fn scale(xs: inout int[], by: int) {
   i = 0;
-  while (i < xs.len()) {
+  while i < xs.len() {
     xs[i] = xs[i] * by;
     i = i + 1;
   }

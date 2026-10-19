@@ -1787,7 +1787,7 @@ TEST(Driver, BuildAndRunDefaultToO2) {
   std::ofstream(dir / "opt.pkn")
       << "import lib;\n"
          "fn main() -> int { s = 0; i = 0;\n"
-         "  while (i < 10) { s = s + lib::sq(i); i = i + 1; }\n"
+         "  while i < 10 { s = s + lib::sq(i); i = i + 1; }\n"
          "  println(Str<int>(s)); return 0; }\n";
   std::string src = (dir / "opt.pkn").string();
 

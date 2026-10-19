@@ -25,9 +25,10 @@ like any other value and called like any function.
 - Calls: `f(1)` with `f` a variable, `obj.cb(1)` with `cb` a field, `fs[0](1)` for any
   other expression of function type; the arguments are checked and passed as for a
   function with the same parameters, modes included.
-- A closure is a reference: copying one shares it, `==` is identity, and it is released
-  like an object.  It is not an `Obj`: it cannot be printed, stored in an `Obj` or given to
-  a `Show` or `Hashable` bound.
+- A function value is a value: its code and its closure (the captures), held in place
+  like a tuple.  A copy shares the closure; `==` is true when the code and the closure are
+  the same (`square == square`).  It is a `ValueType`, not an `Obj`: it cannot be printed,
+  stored in an `Obj` or given to a `Show` or `Hashable` bound.
 - Structural: two function types are the same when their parameter types, modes and
   result are.
 - Not yet: borrowed results in a function type, a method as a value (`p.shift`), a generic
@@ -240,7 +241,7 @@ fn main() -> int {
     None { println("no handler"); }
   }
   i = 0;
-  while (i < 2) {
+  while i < 2 {
     println(Str(ops[i].run(3, 4)));
     i = i + 1;
   }
@@ -261,21 +262,35 @@ the function type (`10-optionals.md`).
 
 ---
 
-## Closures Are References
+## Function Values Are Values
 
-A function value is a *closure*: a reference-counted object holding the code and the
-captures.  Copying one (assigning it, passing it, storing it in a field or an element)
-shares it, as with an object, and the last reference releases it and its captures.  Two
-closures are `==` when they are the same closure: each evaluation of a lambda expression
-makes a new one, so `fn() {} == fn() {}` is `False`, and so does each use of a named
-function as a value (`square == square` is `False` too), while a stored closure equals
-itself, which is what `List<T>.contains` needs.  A closure is not an `Obj`: it cannot be printed,
-converted to a `Str`, stored in an `Obj` slot, matched by class, or given to a `T: Show`
-or `T: Hashable` bound.
+A function value is held in place, like a tuple: the code it runs and its *closure*, a
+reference-counted object holding the captures (none at all for a named function or a
+lambda that captures nothing).  Copying one (assigning it, passing it, storing it in a
+field or an element) copies the code and shares the closure; the last copy releases the
+closure and its captures.  Since captures are read-only, two copies cannot tell they
+share one.
 
-Parameter modes work on a function value as on an object: a plain parameter shares the
-closure, a `view` one reads it (it can be called, not stored), an `inout` one is the
-caller's variable, which the callee may point at another closure.
+Two function values are `==` when they run the same code with the same closure:
+
+- the same named function: `square == square` is `True`, and `List<T>.contains(square)`
+  finds it;
+- the same lambda expression capturing nothing: `same() == same()` is `True` when `same`
+  returns `fn(x: int) -> int { return x + 1; }`;
+- a copy of a value: `g = f; g == f` is `True`.
+
+Each evaluation of a lambda that captures something makes a new closure, so `adder(1) ==
+adder(1)` is `False`, and two different lambdas are never equal, even with the same body.
+
+A function type is a [`ValueType`](12-traits.md#valuetype) (`fn keep<T: ValueType>(x: T)`
+takes `square`).  It is not an `Obj`: it cannot be printed, converted to a `Str`, stored
+in an `Obj` slot, matched by class, or given to a `T: Show` or `T: Hashable` bound.  An
+optional function value, `((int) -> int)?`, takes the same 16 bytes: `None` is the value
+with no code.
+
+Parameter modes work on a function value as on any value held in place: a plain
+parameter is the callee's own copy, a `view` one reads it (it can be called, not stored),
+an `inout` one is the caller's variable, which the callee may set to another function.
 
 ---
 

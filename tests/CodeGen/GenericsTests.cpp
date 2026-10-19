@@ -138,12 +138,12 @@ TEST(Generics, StackOfStrAndInt) {
     s.push("b");
     s.push("c");
     println(Str<int>(s.size()));
-    while (!s.empty()) { println(s.pop()); }
+    while !s.empty() { println(s.pop()); }
     n: Stack<int> = Stack<int>(0);
     n.push(1);
     n.push(2);
     total: int = 0;
-    while (!n.empty()) { total = total + n.pop(); }
+    while !n.empty() { total = total + n.pop(); }
     println(Str<int>(total));
     s.push("left");               // released with the stack
   )"));
@@ -274,7 +274,7 @@ TEST(Generics, ArrayOfInstantiationsAndFieldOfInstantiation) {
     arr[2] = Box<int>(3);
     total: int = 0;
     i: int = 0;
-    while (i < arr.len()) { total = total + arr[i].get(); i = i + 1; }
+    while i < arr.len() { total = total + arr[i].get(); i = i + 1; }
     println(Str<int>(total));
     h: Holder = Holder(40);
     println(Str<int>(h.get().get() + 2));

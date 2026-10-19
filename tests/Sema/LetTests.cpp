@@ -47,7 +47,7 @@ TEST(Let, IsAnOrdinaryLocalOtherwise) {
       ps[0].x = p.x;
       { n: int = 4; n = 5; }
       i = 0;
-      while (i < 2) { let k = i; i = i + k + 1; }
+      while i < 2 { let k = i; i = i + k + 1; }
       return n + p.x + ps[0].x;
     }
   )");

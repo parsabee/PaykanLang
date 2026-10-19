@@ -74,7 +74,7 @@ impl Bag {
 }
 fn total(xs: view Item[]) -> int {
   s: int = 0; i: int = 0;
-  while (i < xs.len()) { s = s + xs[i].v; i = i + 1; }
+  while i < xs.len() { s = s + xs[i].v; i = i + 1; }
   return s;
 }
 )");
@@ -85,7 +85,7 @@ fn main() -> int {
   xs: lib::Item[3] = b.items();
   k: lib::Kind = b.kindOf();
   bonus: int = 0;
-  if (k == lib::Kind::Big) { bonus = 100; }
+  if k == lib::Kind::Big { bonus = 100; }
   return lib::total(xs) + b.first.v + bonus;   // 6 + 10 + 100
 }
 )");

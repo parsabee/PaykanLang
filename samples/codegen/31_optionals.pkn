@@ -29,10 +29,10 @@ fn push_front(head: Node?, v: int) -> Node {
 
 fn find(head: Node?, key: int) -> Node? {
   cur: Node? = head;
-  while (cur != None) {
+  while cur != None {
     match cur {
       n: Node {
-        if (n.v == key) { return n; }   // Node widens to Node?
+        if n.v == key { return n; }   // Node widens to Node?
         cur = n.next;
       }
       None { }
@@ -45,10 +45,10 @@ fn render(head: Node?) -> Str {
   out: Str = "[";
   cur: Node? = head;
   first: bool = True;
-  while (cur != None) {
+  while cur != None {
     match cur {
       n: Node {
-        if (!first) { out = out + ", "; }
+        if !first { out = out + ", "; }
         out = out + Str<int>(n.v);
         first = False;
         cur = n.next;

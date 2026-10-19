@@ -91,10 +91,10 @@ TEST(FixedArray, ArraysOfArrays) {
     grid[1][2] = 60;
     println(Str(grid.len()) + " " + Str(grid[0].len()));
     i = 0;
-    while (i < grid.len()) {
+    while i < grid.len() {
       j = 0;
       line = "";
-      while (j < grid[i].len()) {
+      while j < grid[i].len() {
         line = line + Str(grid[i][j]) + " ";
         j = j + 1;
       }
@@ -171,13 +171,13 @@ TEST(FixedArray, IndexesComputedAtRunTime) {
   expectOutput(R"(
     sq: int[5] = [0; 5];
     i = 0;
-    while (i < sq.len()) {
+    while i < sq.len() {
       sq[i] = i * i;
       i = i + 1;
     }
     total = 0;
     k = sq.len() - 1;
-    while (k >= 0) {
+    while k >= 0 {
       total = total + sq[k];
       k = k - 1;
     }
@@ -253,9 +253,9 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
     fn rename(xs: inout Str[2]) { xs[0] = "q"; }
     fn find(xs: view Str[5], s: Str) -> int {
       i = 0;
-      while (i < xs.len()) {
+      while i < xs.len() {
         pair: Str[2] = [xs[i], s];
-        if (pair[0] == pair[1]) {
+        if pair[0] == pair[1] {
           return i;
         }
         i = i + 1;
@@ -265,13 +265,13 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
     fn main() -> int {
       i = 0;
       hits = 0;
-      while (names()[0] == "ann" && i < 3) {
+      while names()[0] == "ann" && i < 3 {
         pair: Str[2] = [Str(i), "x"];
         i = i + 1;
-        if (i == 2) {
+        if i == 2 {
           continue;
         }
-        if (pair[0] == "9") {
+        if pair[0] == "9" {
           break;
         }
         hits = hits + pair[1].len();
@@ -379,7 +379,7 @@ TEST(FixedArray, SliceParameters) {
     fn sum(xs: view int[]) -> int {
       t = 0;
       i = 0;
-      while (i < xs.len()) {
+      while i < xs.len() {
         t = t + xs[i];
         i = i + 1;
       }
@@ -387,7 +387,7 @@ TEST(FixedArray, SliceParameters) {
     }
     fn double(xs: inout int[]) {
       i = 0;
-      while (i < xs.len()) {
+      while i < xs.len() {
         xs[i] = xs[i] * 2;
         i = i + 1;
       }
@@ -427,7 +427,7 @@ TEST(FixedArray, OptionalElements) {
     fn total(xs: view int?[]) -> int {
       t = 0;
       i = 0;
-      while (i < xs.len()) {
+      while i < xs.len() {
         match xs[i] {
           n: int { t = t + n; }
           None { t = t + 100; }
@@ -451,7 +451,7 @@ TEST(FixedArray, OptionalElements) {
       println(fs[1]);
       println(bs[1]);
       println(cs[0]);
-      if (os[1] == None && copy[1] != None) { println("eq ok"); }
+      if os[1] == None && copy[1] != None { println("eq ok"); }
       return 0;
     }
   )");
@@ -512,7 +512,7 @@ TEST(FixedArray, RepeatLiteralsOfScalars) {
     fn sum(xs: view int[]) -> int {
       t = 0;
       i = 0;
-      while (i < xs.len()) {
+      while i < xs.len() {
         t = t + xs[i];
         i = i + 1;
       }

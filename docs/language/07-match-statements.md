@@ -352,7 +352,7 @@ definitely assigned.
 match open("/tmp/data.txt", "r") {
   err: Error { printerrln("open failed: " + err.toString()); }
   f: File {
-    while (True) {
+    while True {
       match f.readln() {
         line: Str { print(line); }
         _         { break; }      // None — end of file

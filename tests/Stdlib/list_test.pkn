@@ -25,7 +25,7 @@ fn main() -> int {
   xs = collections::List<int>();
   println(Str(xs.len()) + " " + Str(xs.isEmpty()));
   i: int = 0;
-  while (i < 10) {
+  while i < 10 {
     xs.push(i * i);
     i = i + 1;
   }

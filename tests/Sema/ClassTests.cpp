@@ -988,7 +988,7 @@ TEST(Class, InitFieldAssignedOnBothBranchesAccepted) {
 
     impl C {
       fn __init__(a: int) {
-        if (a > 0) { self.x = 1; } else { self.x = 2; }
+        if a > 0 { self.x = 1; } else { self.x = 2; }
       }
     }
     fn main() -> int { return 0; }
@@ -1004,7 +1004,7 @@ TEST(Class, InitFieldAssignedOnOnlyOneBranchRejected) {
 
     impl C {
       fn __init__(a: int) {
-        if (a > 0) { self.x = 1; }
+        if a > 0 { self.x = 1; }
       }
     }
     fn main() -> int { return 0; }
@@ -1021,7 +1021,7 @@ TEST(Class, InitFieldAssignedBeforeEarlyReturnAccepted) {
     impl C {
       fn __init__(a: int) {
         self.x = a;
-        if (a > 0) { return; }
+        if a > 0 { return; }
         self.x = 0;
       }
     }
@@ -1040,7 +1040,7 @@ TEST(Class, InitMissingFieldBeforeEarlyReturnRejected) {
     impl C {
       fn __init__(a: int) {
         self.x = a;
-        if (a > 0) { return; }
+        if a > 0 { return; }
         self.y = a;
       }
     }
@@ -1057,7 +1057,7 @@ TEST(Class, InitWhileLoopDoesNotGuaranteeAssignment) {
 
     impl C {
       fn __init__(a: int) {
-        while (a > 0) { self.x = a; }
+        while a > 0 { self.x = a; }
       }
     }
     fn main() -> int { return 0; }

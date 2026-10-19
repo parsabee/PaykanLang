@@ -192,7 +192,7 @@ TEST(Leak, EarlyReturn) {
   auto r = compileAndRun(R"(
     fn maybe(flag: bool) -> int {
       s: Str = "allocated";
-      if (flag) { return 1; }
+      if flag { return 1; }
       return 0;
     }
     fn main() -> int {
@@ -263,7 +263,7 @@ TEST(Leak, ConditionalTransfer) {
   auto r = compileAndRun(R"(
     fn main() -> int {
       s: Str = "cond";
-      if (True) {
+      if True {
         t = s;
         println(t);
       }
@@ -359,7 +359,7 @@ TEST(Leak, CallTemporaryInEquality) {
     }
     fn process() -> Obj { return Thing(5); }
     fn main() -> int {
-      if (process() == None) { println("none"); }
+      if process() == None { println("none"); }
       else { println("something"); }
       return 0;
     }
@@ -374,7 +374,7 @@ TEST(Leak, TwoCallTemporariesInEquality) {
     class Thing {}
     fn make() -> Obj { return Thing(); }
     fn main() -> int {
-      if (make() == make()) { println("same"); } else { println("diff"); }
+      if make() == make() { println("same"); } else { println("diff"); }
       return 0;
     }
   )");

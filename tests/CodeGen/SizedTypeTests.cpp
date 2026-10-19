@@ -185,7 +185,7 @@ TEST(SizedTypes, SizedValuesInAggregatesGenericsAndMatch) {
                     "impl Box<T> { fn __init__(v: T) { self.v = v; } "
                     "view fn get() -> T { return self.v; } }\n"
                     "fn sum(xs: view u16[3]) -> u16 { t: u16 = 0; i = 0; "
-                    "while (i < 3) { t = t + xs[i]; i = i + 1; } return t; }\n"
+                    "while i < 3 { t = t + xs[i]; i = i + 1; } return t; }\n"
                     "fn bump(n: inout u8) { n = n + 1; }\n" +
                     wrapMain(R"(
     p = Pixel(255, 128, 0, 0.5);

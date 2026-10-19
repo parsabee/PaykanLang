@@ -22,9 +22,9 @@ impl Hashable for Point {
 fn sortedKeys(m: view collections::HashMap<Str, int>) -> Str {
   ks = m.keys();
   i: unsigned = 1;
-  while (i < ks.len()) {
+  while i < ks.len() {
     j: unsigned = i;
-    while (j > 0 && ks.get(j - 1).len() > ks.get(j).len()) {
+    while j > 0 && ks.get(j - 1).len() > ks.get(j).len() {
       ks.swap(j - 1, j);
       j = j - 1;
     }
@@ -38,7 +38,7 @@ fn main() -> int {
   println(Str(counts.len()) + " " + Str(counts.isEmpty()));
   words: Str[7] = ["a", "bb", "a", "ccc", "bb", "a", "dddd"];
   i: int = 0;
-  while (i < words.len()) {
+  while i < words.len() {
     counts.put(words[i], counts.getOr(words[i], 0) + 1);
     i = i + 1;
   }
@@ -53,7 +53,7 @@ fn main() -> int {
   total: int = 0;
   vs = counts.values();
   v: unsigned = 0;
-  while (v < vs.len()) {
+  while v < vs.len() {
     total = total + vs.get(v);
     v = v + 1;
   }
@@ -62,12 +62,12 @@ fn main() -> int {
   // Growth: many int keys, then remove the odd ones.
   squares = collections::HashMap<int, int>();
   i = 0;
-  while (i < 1000) {
+  while i < 1000 {
     squares.put(i, i * i);
     i = i + 1;
   }
   i = 1;
-  while (i < 1000) {
+  while i < 1000 {
     squares.remove(i);
     i = i + 2;
   }
@@ -106,7 +106,7 @@ fn main() -> int {
           collections::listToString(seen.toList()));
   nums = collections::HashSet<int>();
   i = 0;
-  while (i < 100) {
+  while i < 100 {
     nums.add(i % 10);
     i = i + 1;
   }

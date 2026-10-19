@@ -764,6 +764,25 @@ private:
       setResult(in, B.CreateCall(functionType(in.Sig), fn, args));
       break;
     }
+    case Opcode::FnAddr: {
+      llvm::Function *fn =
+          M->getFunction(functionName(*S->Mod, S->IsMain, in.Callee));
+      if (!fn) {
+        S->Error = "address of unknown function @" + in.Callee;
+        return;
+      }
+      setResult(in, fn);
+      break;
+    }
+    case Opcode::ICall: {
+      std::vector<llvm::Value *> args;
+      args.reserve(in.Args.size() - 1);
+      for (size_t a = 1; a < in.Args.size(); ++a)
+        args.push_back(operand(in.Args[a]));
+      setResult(in,
+                B.CreateCall(functionType(in.Sig), operand(in.Args[0]), args));
+      break;
+    }
     case Opcode::Retain:
       B.CreateCall(fnRetain(), {operand(in.Args[0])});
       break;

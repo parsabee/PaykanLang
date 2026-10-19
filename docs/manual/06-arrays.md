@@ -60,7 +60,7 @@ There is no `for` loop, so you walk an array with `while` and an index:
 fn main() -> int {
   squares = [0; 5];
   i = 0;
-  while (i < squares.len()) {
+  while i < squares.len() {
     squares[i] = (i + 1) * (i + 1);
     i = i + 1;
   }
@@ -68,7 +68,7 @@ fn main() -> int {
 
   sum = 0;
   i = 0;
-  while (i < squares.len()) {
+  while i < squares.len() {
     sum = sum + squares[i];
     i = i + 1;
   }
@@ -99,7 +99,7 @@ changes its elements in place:
 ```pkn
 fn doubleAll(xs: inout int[]) {
   i = 0;
-  while (i < xs.len()) {
+  while i < xs.len() {
     xs[i] = xs[i] * 2;
     i = i + 1;
   }
@@ -108,8 +108,8 @@ fn doubleAll(xs: inout int[]) {
 fn join(xs: view int[], sep: Str) -> Str {
   out = "";
   i = 0;
-  while (i < xs.len()) {
-    if (i > 0) { out = out + sep; }
+  while i < xs.len() {
+    if i > 0 { out = out + sep; }
     out = out + Str(xs[i]);
     i = i + 1;
   }
@@ -151,7 +151,7 @@ fn main() -> int {
   stack = [0; 4];            // room for 4
   count = 0;
   n = 1;
-  while (n <= 3) {
+  while n <= 3 {
     stack[count] = n * 10;
     count = count + 1;
     n = n + 1;
@@ -195,8 +195,8 @@ fn main() -> int {
   cities = [City("Tehran", 9000000), City("Lyon", 520000), City("Oslo", 700000)];
   biggest = cities[0];
   i = 1;
-  while (i < cities.len()) {
-    if (cities[i].people > biggest.people) { biggest = cities[i]; }
+  while i < cities.len() {
+    if cities[i].people > biggest.people { biggest = cities[i]; }
     i = i + 1;
   }
   println("largest: " + biggest.name);
@@ -245,7 +245,7 @@ class TaskList {
 
   // Adds a task; False if the list is full.
   fn add(title: Str) -> bool {
-    if (self.count == self.tasks.len()) { return False; }
+    if self.count == self.tasks.len() { return False; }
     self.tasks[self.count] = Task(title);
     self.count = self.count + 1;
     return True;
@@ -253,7 +253,7 @@ class TaskList {
 
   // Marks task number `n` (counting from 1) done; False if there is none.
   fn complete(n: int) -> bool {
-    if (n < 1 || n > self.count) { return False; }
+    if n < 1 || n > self.count { return False; }
     self.tasks[n - 1].done = True;
     return True;
   }
@@ -261,8 +261,8 @@ class TaskList {
   view fn pending() -> int {
     count = 0;
     i = 0;
-    while (i < self.count) {
-      if (!self.tasks[i].done) { count = count + 1; }
+    while i < self.count {
+      if !self.tasks[i].done { count = count + 1; }
       i = i + 1;
     }
     return count;
@@ -272,8 +272,8 @@ class TaskList {
   fn clearDone() -> int {
     kept = 0;
     i = 0;
-    while (i < self.count) {
-      if (!self.tasks[i].done) {
+    while i < self.count {
+      if !self.tasks[i].done {
         self.tasks[kept] = self.tasks[i];
         kept = kept + 1;
       }
@@ -286,7 +286,7 @@ class TaskList {
 
   view fn show() {
     i = 0;
-    while (i < self.count) {
+    while i < self.count {
       println(Str(i + 1) + ". " + self.tasks[i].toString());
       i = i + 1;
     }
@@ -307,7 +307,7 @@ fn main() -> int {
   list.add("fix the leak");
   list.add("call mum");
   list.complete(2);
-  if (!list.complete(7)) { println("there is no task 7"); }
+  if !list.complete(7) { println("there is no task 7"); }
   list.show();
   println("cleared " + Str(list.clearDone()));
   list.show();

@@ -338,10 +338,17 @@ free.  Nothing else.
                                               ; signature come from the class item or,
                                               ; for runtime classes, are written out:
 %r = vcall %recv : (obj, box) -> i64 [2] (%b) ; explicit signature form)
+%p = fn.addr @f                               ; the address of function @f: ptr
+%r = icall %p : (obj, i64) -> i64 (%c, %a)    ; indirect: a call through the
+                                              ; function address %p (a function
+                                              ; value's code), signature written out
 ```
 
 The callee signature is always statically known: for `call` it is the
-declaration, for `vcall` it is the vtable slot's signature.  Arguments are
+declaration, for `vcall` it is the vtable slot's signature, for `icall` the
+one written (the verifier checks the arguments against it; that the address
+names a function of that signature is the lowering's guarantee).  `fn.addr`
+names a function of the module or one it declares.  Arguments are
 passed as-is; the lowering has already done every conversion (`bool`→`i64` for
 runtime `int64_t` params, boxing, unboxing).
 
@@ -484,19 +491,18 @@ CodeGen enforced, now in one place.
   and `==`/`!=` pass the address and the `.structN` layout to
   `PaykanStruct_toString` and `PaykanStruct_equals`, with the conventions
   of the tuple calls.
-* **Function values** (docs/language/15-function-types.md) are closures:
-  objects of a class the lowering makes per lambda (`fn.<module>.N`) or per
-  named function used as a value (`fn.ref.<module>.<function>`), with a
-  field per capture and the vtable `[destroy, toString, equals, call]`, the
-  middle two the runtime's object defaults and `call` the function's code
-  with the closure object first, its parameters as a method's.  A lambda
-  expression is `new`, a `field.store` per capture (a reference as a +1 box,
-  a value held in memory copied and its references retained) and `box`, a
-  fresh owned box like a constructor's; a call through a function value is
-  `unbox` of the variable's (or field's, or element's) box and `vcall` of
-  slot 3 with the function type's signature and no class name (the verifier
-  checks the signature, which is all a call site knows).  `Paykan_release`
-  destroys a closure through slot 0 like any object.
+* **Function values** (docs/language/15-function-types.md,
+  docs/design/function-types.md) are held in memory, 16 bytes laid out as
+  the tuple `(i64, box)`: the code's address cast to `i64`, then the box of
+  the closure, or null.  The code of a lambda is `fn.<module>.N.call` and of
+  a named function used as a value `fn.ref.<module>.<function>.call`, each
+  taking the closure object first, its parameters as a method's.  A lambda
+  that captures something has a closure, an object of the class
+  `fn.<module>.N` with a field per capture and an object's vtable.  Making
+  one is `fn.addr` of the code and, for a closure, `new`, a `field.store`
+  per capture and `box`; a call loads both words, retains the closure for
+  the call and `icall`s the code with the function type's signature.  An
+  optional function value is the same 16 bytes, None all zeros.
 * **Fields** own their box; `field.store` is preceded by a retain-or-steal
   of the new value and the old value is released (null-checked).
 * **Weak references** (docs/language/08-memory-model.md): a `weak` local is

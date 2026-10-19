@@ -33,22 +33,22 @@ fn main() -> int {
   line = "";
   valid = 0;
   k = 0;
-  while (k < keys.len()) {
+  while k < keys.len() {
     text = "";
-    if (keys[k] == "ratio") {
+    if keys[k] == "ratio" {
       match float<Str>(vals[k]) { x: float { text = Str<float>(x); } None { } }
-    } else if (keys[k] == "verbose" || keys[k] == "color") {
+    } elif keys[k] == "verbose" || keys[k] == "color" {
       match bool(vals[k]) {                       // bool<Str>
         x: bool { text = Str<bool>(x); }
         None    { }
       }
-      if (text == "") { println("'" + vals[k] + "' is not a bool"); }
+      if text == "" { println("'" + vals[k] + "' is not a bool"); }
     } else {
       match int(vals[k]) { x: int { text = Str(x); } None { } }
     }
-    if (text != "") {
+    if text != "" {
       valid = valid + 1;
-      if (line != "") { line = line + " "; }
+      if line != "" { line = line + " "; }
       line = line + keys[k] + "=" + text;
     }
     k = k + 1;
@@ -65,7 +65,7 @@ fn main() -> int {
   out = "round trip:";
   flags: bool[2] = [True, False];
   j = 0;
-  while (j < flags.len()) {
+  while j < flags.len() {
     match bool(Str(flags[j])) {                   // bool<Str>(Str<bool>(...))
       v: bool { out = out + " " + Str<bool>(v); }
       None    { out = out + " ?"; }

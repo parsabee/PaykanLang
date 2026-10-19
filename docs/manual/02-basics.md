@@ -256,17 +256,17 @@ the unary `!` and `-`; `*` `/` `%`; `+` `-`; the comparisons; `&&`; `||`; and fi
 
 ## Control flow
 
-### if and else
+### if, elif and else
 
-The condition goes in parentheses, must be a `bool`, and the branches are always blocks in
-braces:
+The condition needs no parentheses, must be a `bool`, and the branches are always blocks in
+braces. Further conditions are tested with `elif`:
 
 ```pkn
 fn main() -> int {
   temperature = 23;
-  if (temperature > 30) {
+  if temperature > 30 {
     println("hot");
-  } else if (temperature > 15) {
+  } elif temperature > 15 {
     println("pleasant");
   } else {
     println("cold");
@@ -290,10 +290,10 @@ pleasant
 fn main() -> int {
   i = 0;
   sum = 0;
-  while (True) {
+  while True {
     i = i + 1;
-    if (i % 2 == 0) { continue; }  // skip even numbers
-    if (i > 9) { break; }
+    if i % 2 == 0 { continue; }  // skip even numbers
+    if i > 9 { break; }
     sum = sum + i;
   }
   println("sum of odd numbers below 10: " + Str(sum));
@@ -321,7 +321,7 @@ fn add(a: int, b: int) -> int {
 }
 
 fn greet(name: Str) {
-  if (name == "") {
+  if name == "" {
     return;
   }
   println("Hello, " + name + "!");
@@ -386,7 +386,7 @@ call. The full rules are in
 
 ```pkn
 fn fib(n: int) -> int {
-  if (n < 2) { return n; }
+  if n < 2 { return n; }
   return fib(n - 1) + fib(n - 2);
 }
 
@@ -455,7 +455,7 @@ draws it with a loop:
 ```pkn
 // Percentage of `done` out of `total`, rounded down; 0 for an empty list.
 fn percent(done: int, total: int) -> int {
-  if (total == 0) { return 0; }
+  if total == 0 { return 0; }
   return done * 100 / total;
 }
 
@@ -464,7 +464,7 @@ fn progressBar(done: int, total: int, width: int) -> Str {
   filled = if total == 0 then 0 else done * width / total;
   bar = "[";
   i = 0;
-  while (i < width) {
+  while i < width {
     bar = bar + (if i < filled then "#" else "-");
     i = i + 1;
   }

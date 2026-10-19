@@ -33,9 +33,9 @@ fn parseOr(s: Str, d: int) -> int {
 fn main() -> int {
   line = "";
   i = 0;
-  while (i < 5) {
+  while i < 5 {
     line = line + Str(i);
-    if (i < 4) { line = line + " "; }
+    if i < 4 { line = line + " "; }
     i = i + 1;
   }
   println(line);
@@ -43,7 +43,7 @@ fn main() -> int {
   words: Str[7] = ["1", "2", "x", "3", "", "4", "5"];
   total = 0;
   i = 0;
-  while (i < words.len()) { total = total + parseOr(words[i], 0); i = i + 1; }
+  while i < words.len() { total = total + parseOr(words[i], 0); i = i + 1; }
   println(Str<int>(total));
 
   c = Cell();

@@ -2129,21 +2129,33 @@ inline bool isValueOptional(const Type *ty) {
   return ot && isa<BuiltinType>(ot->getInnerType());
 }
 
+/// Returns true for a function value (docs/design/function-types.md): a
+/// function type or the optional of one.  It is held in place, as the code
+/// to run and the closure holding its captures, so it is a value (isMemType)
+/// and not a reference.
+inline bool isFunctionValue(const Type *ty) {
+  if (const auto *ot = dyn_cast<OptionalType>(ty))
+    ty = ot->getInnerType();
+  return ty && isa<FunctionType>(ty);
+}
+
 /// Returns true for any type whose values are heap-allocated and
 /// reference-counted at runtime: ClassType and the OptionalType of one (a
 /// possibly-NULL PaykanShared* box: it shares the class's box).  An optional
-/// of a value type is a value (isValueOptional).  Use this instead of
-/// spelling out the `||` condition everywhere.
+/// of a value type is a value (isValueOptional), as is a function value.
+/// Use this instead of spelling out the `||` condition everywhere.
 inline bool isRefType(const Type *ty) {
-  return ty && (isa<ClassType>(ty) || isa<FunctionType>(ty) ||
-                (isa<OptionalType>(ty) && !isValueOptional(ty)));
+  return ty && !isFunctionValue(ty) &&
+         (isa<ClassType>(ty) ||
+          (isa<OptionalType>(ty) && !isValueOptional(ty)));
 }
 
 /// Returns true for a type whose values are held in memory, in place: a
-/// fixed-size array (`T[n]`) or a tuple.  A copy copies its bytes and
-/// retains the references among them.
+/// fixed-size array (`T[n]`), a tuple (a struct is one) or a function value.
+/// A copy copies its bytes and retains the references among them.
 inline bool isMemType(const Type *ty) {
-  return ty && (isa<FixedArrayType>(ty) || isa<TupleType>(ty));
+  return ty &&
+         (isa<FixedArrayType>(ty) || isa<TupleType>(ty) || isFunctionValue(ty));
 }
 
 /// If @p ty is an optional type, return its inner type; otherwise @p ty.

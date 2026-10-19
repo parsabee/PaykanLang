@@ -363,6 +363,7 @@ bool hasSideEffects(const pir::Instr &i) {
   switch (i.Op) {
   case Opcode::Call:
   case Opcode::VCall:
+  case Opcode::ICall:
   case Opcode::Box:
   case Opcode::New:
   case Opcode::Retain:
@@ -816,7 +817,7 @@ class Emitter {
           if (i.Result.Ty != Type::Void)
             types[i.Result.Id] = i.Result.Ty;
           noteOptional(i.Result.Ty);
-          if (i.Op == pir::Opcode::VCall)
+          if (i.Op == pir::Opcode::VCall || i.Op == pir::Opcode::ICall)
             noteOptionals(i.Sig);
           if (!uses.live(i))
             return; // not emitted
@@ -1424,6 +1425,31 @@ class Emitter {
               : kSpace + comment(i.ClassName + kSpace + kSlotNote + kSpace +
                                  std::to_string(i.Slot));
       line(stmt(pre + call(slotFn, args)) + note);
+      return;
+    }
+    case Opcode::FnAddr:
+      // A function pointer held as a `void *` (POSIX guarantees the round
+      // trip); ICall converts it back to the function's own type.
+      pre = resultPrefix(i);
+      line(stmt(pre + cast(kVoidPtr) + funcSymbol(*CurMod, i.Callee)));
+      return;
+    case Opcode::ICall: {
+      pre = resultPrefix(i);
+      // ((<ret> (*)(<params>))<fn>)(<args>)
+      std::vector<std::string> params;
+      params.reserve(i.Sig.Params.size());
+      for (Type p : i.Sig.Params)
+        params.emplace_back(cType(p));
+      if (params.empty())
+        params.emplace_back(kVoid);
+      std::string fnTy = cType(i.Sig.Ret) + std::string(kSpace) +
+                         paren(kOpDeref) + paren(list(params));
+      std::string fn = paren(cast(fnTy) + operand(i.Args[0]));
+      std::vector<std::string> args;
+      args.reserve(i.Args.size() - 1);
+      for (size_t a = 1; a < i.Args.size(); ++a)
+        args.push_back(operand(i.Args[a]));
+      line(stmt(pre + call(fn, args)));
       return;
     }
     case Opcode::Retain:

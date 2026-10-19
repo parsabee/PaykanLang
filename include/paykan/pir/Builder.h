@@ -340,6 +340,28 @@ public:
     return emit(std::move(i));
   }
 
+  /// The address of function @p callee, a `ptr`.
+  Val fnAddr(const std::string &callee, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::FnAddr;
+    i.Callee = callee;
+    i.Result = newValue(Type::Ptr, std::move(name));
+    return emit(std::move(i));
+  }
+  /// A call through the function address @p fn, whose signature is @p sig.
+  Val icall(const Val &fn, const Signature &sig, const std::vector<Val> &args,
+            std::string name = "") {
+    Instr i;
+    i.Op = Opcode::ICall;
+    i.Sig = sig;
+    if (sig.Ret != Type::Void)
+      i.Result = newValue(sig.Ret, std::move(name));
+    i.Args.push_back(fn.Op);
+    for (auto &a : args)
+      i.Args.push_back(a.Op);
+    return emit(std::move(i));
+  }
+
   void retain(const Val &box) {
     Instr i;
     i.Op = Opcode::Retain;

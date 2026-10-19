@@ -284,7 +284,7 @@ TEST(Struct, FieldsOfTemporariesAndElementsAreReleased) {
     fn main() -> int {
       total = 0;
       i = 0;
-      while (i < 3) {
+      while i < 3 {
         total = total + mk(i).node.n + mk(i).name.len();
         xs: P[2] = [mk(i), mk(i + 1)];
         xs[0] = xs[1];

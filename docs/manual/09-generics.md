@@ -59,8 +59,8 @@ fn lastOf<T>(xs: view T[]) -> view T {
 
 fn indexOf<T>(xs: view T[], x: view T) -> int? {
   i = 0;
-  while (i < xs.len()) {
-    if (xs[i] == x) { return i; }
+  while i < xs.len() {
+    if xs[i] == x { return i; }
     i = i + 1;
   }
   return None;
@@ -158,14 +158,14 @@ class Stack<T> {
   count: int;
 
   fn push(x: T) -> bool {
-    if (self.count == self.items.len()) { return False; }
+    if self.count == self.items.len() { return False; }
     self.items[self.count] = x;
     self.count = self.count + 1;
     return True;
   }
 
   fn pop() -> T? {
-    if (self.count == 0) { return None; }
+    if self.count == 0 { return None; }
     self.count = self.count - 1;
     top = self.items[self.count];
     self.items[self.count] = None;
@@ -196,7 +196,7 @@ class TaskList {
   removed: Stack<Task>;
 
   fn add(t: Task) -> bool {
-    if (self.count == self.tasks.len()) { return False; }
+    if self.count == self.tasks.len() { return False; }
     self.tasks[self.count] = t;
     self.count = self.count + 1;
     return True;
@@ -204,10 +204,10 @@ class TaskList {
 
   // Removes task number `n`, moving the ones after it down.
   fn remove(n: int) {
-    if (n < 1 || n > self.count) { return; }
+    if n < 1 || n > self.count { return; }
     self.removed.push(self.tasks[n - 1]);
     i = n;
-    while (i < self.count) {
+    while i < self.count {
       self.tasks[i - 1] = self.tasks[i];
       i = i + 1;
     }
@@ -217,7 +217,7 @@ class TaskList {
   fn undo() {
     match self.removed.pop() {
       t: Task {
-        if (self.add(t)) { println("restored '" + t.title + "'"); }
+        if self.add(t) { println("restored '" + t.title + "'"); }
         else { println("no room for '" + t.title + "'"); }
       }
       None    { println("nothing to undo"); }
@@ -227,7 +227,7 @@ class TaskList {
   view fn titles() -> Str {
     out = "";
     i = 0;
-    while (i < self.count) {
+    while i < self.count {
       out = out + (if i > 0 then ", " else "") + self.tasks[i].title;
       i = i + 1;
     }

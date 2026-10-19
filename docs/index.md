@@ -30,7 +30,7 @@ fn describe(n: int) -> (Size, Str) {
 fn main() -> int {
   nums = [7, 250, 42];
   i = 0;
-  while (i < nums.len()) {
+  while i < nums.len() {
     size, label = describe(nums[i]);
     match size {
       Small { println(label + " is small"); }

@@ -47,7 +47,7 @@ fn main() -> int {
 
   light = memory::Box(Light::Red);
   i: int = 0;
-  while (i < 4) {
+  while i < 4 {
     l: inout Light = light.get();
     l = next(l);
     i = i + 1;

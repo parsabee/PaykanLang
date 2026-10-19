@@ -120,7 +120,7 @@ to resolve, which reports unknown names.
 | `(target LOC STR TYPE?)` | one destructuring target: the name (`""` for `_`) and its annotation |
 | `(expr LOC EXPR)` | an expression statement |
 | `(return LOC EXPR?)` | `return;` / `return e;` |
-| `(if LOC EXPR BLOCK ELSE)` | `ELSE` is a `block`, another `if` (`else if`), or `_` |
+| `(if LOC EXPR BLOCK ELSE)` | `ELSE` is a `block`, another `if` (`elif`), or `_` |
 | `(while LOC EXPR BLOCK)` | |
 | `(break LOC)`, `(continue LOC)` | |
 | `(match LOC EXPR ARM...)` | `match e { ... }` |

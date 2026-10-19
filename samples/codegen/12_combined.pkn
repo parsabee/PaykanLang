@@ -14,7 +14,7 @@ fn clamp(v: int, lo: int, hi: int) -> int {
 }
 
 fn gcd(a: int, b: int) -> int {
-  while (b != 0) {
+  while b != 0 {
     t: int = b;
     b = a % b;
     a = t;
@@ -24,12 +24,12 @@ fn gcd(a: int, b: int) -> int {
 fn lcm(a: int, b: int) -> int { return (a / gcd(a, b)) * b; }
 
 fn isPrime(n: int) -> bool {
-  if (n < 2)  { return False; }
-  if (n == 2) { return True; }
-  if (n % 2 == 0) { return False; }
+  if n < 2  { return False; }
+  if n == 2 { return True; }
+  if n % 2 == 0 { return False; }
   d: int = 3;
-  while (d * d <= n) {
-    if (n % d == 0) { return False; }
+  while d * d <= n {
+    if n % d == 0 { return False; }
     d = d + 2;
   }
   return True;
@@ -38,14 +38,14 @@ fn isPrime(n: int) -> bool {
 fn sumRange(lo: int, hi: int) -> int {
   s: int = 0;
   i: int = lo;
-  while (i <= hi) { s = s + i; i = i + 1; }
+  while i <= hi { s = s + i; i = i + 1; }
   return s;
 }
 
 fn power(base: int, exp: int) -> int {
   r: int = 1;
   i: int = 0;
-  while (i < exp) { r = r * base; i = i + 1; }
+  while i < exp { r = r * base; i = i + 1; }
   return r;
 }
 
@@ -58,16 +58,16 @@ fn favg(a: float, b: float) -> float { return (a + b) / 2.0; }
 
 fn padLeft(s: Str, width: int) -> Str {
   result: Str = s;
-  while (result.len() < width) {
+  while result.len() < width {
     result = " " + result;
   }
   return result;
 }
 
 fn fizzbuzz(n: int) -> Str {
-  if (n % 15 == 0) { return "FizzBuzz"; }
-  if (n % 3  == 0) { return "Fizz"; }
-  if (n % 5  == 0) { return "Buzz"; }
+  if n % 15 == 0 { return "FizzBuzz"; }
+  if n % 3  == 0 { return "Fizz"; }
+  if n % 5  == 0 { return "Buzz"; }
   return Str<int>(n);
 }
 
@@ -117,15 +117,15 @@ fn main() -> int {
   // ---------- Control flow --------------------------------------------------
   println("\n--- FizzBuzz 1-20 ---");
   k: int = 1;
-  while (k <= 20) {
+  while k <= 20 {
     println(fizzbuzz(k));
     k = k + 1;
   }
 
   println("\n--- Primes up to 30 ---");
   p: int = 2;
-  while (p <= 30) {
-    if (isPrime(p)) { println(Str(p)); }
+  while p <= 30 {
+    if isPrime(p) { println(Str(p)); }
     p = p + 1;
   }
 
@@ -148,7 +148,7 @@ fn main() -> int {
   // Padded table rows via Str helper
   println("\n--- Padded table ---");
   i: int = 1;
-  while (i <= 5) {
+  while i <= 5 {
     println(tableRow("item-" + Str(i), i * i));
     i = i + 1;
   }
@@ -156,10 +156,10 @@ fn main() -> int {
   // ---------- Nested scopes + cleanup --------------------------------------
   println("\n--- Scope stress ---");
   j: int = 0;
-  while (j < 4) {
+  while j < 4 {
     row: Str = "row-" + Str<int>(j);
     col: int = 0;
-    while (col < 3) {
+    while col < 3 {
       cell: Str = row + "-" + Str(col);
       println(cell);
       col = col + 1;

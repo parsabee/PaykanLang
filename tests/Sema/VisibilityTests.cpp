@@ -188,7 +188,7 @@ impl Box<T> {
 fn main() -> int {
   a = Box("s");
   b = Box(1);
-  if (a.sameAs(b)) { return a.get().len(); }
+  if a.sameAs(b) { return a.get().len(); }
   return b.__v;
 }
 )");

@@ -4,21 +4,26 @@
 // AST -> PIR lowering: function values (docs/language/15-function-types.md,
 // docs/design/function-types.md).
 //
-// A function value is a closure: an object of a class the lowering makes
-// per lambda (`fn.N`), or per named function used as a value (`fn.ref.f`),
-// holding one field per capture.  Its vtable is an object's -- destroy,
-// toString and equals, the last two the runtime's defaults -- followed by
-// `call`, whose signature is the function type's with the closure object
-// first, as a method's.  So a call through a function value is a `vcall`
-// of slot 3 with that signature and no class name (a call site knows only
-// the type), a closure crosses modules as any object does, and the runtime
-// destroys one through slot 0 as it does any object.
+// A function value is a value held in place, laid out as the tuple
+// `(int, Obj?)` (functionValueShape): the address of its code, kept as an
+// i64, then the box of its closure, the object holding its captures, or
+// null when it captures nothing.  So it is copied, retained, released,
+// compared and described to the runtime as that tuple is, and an optional
+// one is the same 16 bytes, None a zero code word.
 //
-// A lambda expression allocates its class, stores a copy of each captured
-// variable (a reference retained, a value held in memory copied with its
-// references retained) and boxes the object: a fresh owned box, like a
-// constructor's.  Its `call` reads the captures back into locals of their
-// names, owned like by-value parameters, then runs the body as a function's.
+// The code of a lambda is a function `fn.<module>.N.call(closure, params...)`
+// and its closure an object of the class `fn.<module>.N`, one field per
+// capture, whose vtable is an object's (its destroy releases the captures).
+// A named function used as a value is the code `fn.ref.<module>.<f>.call`,
+// which forwards to it, and no closure.  A call through a function value
+// loads the code and the closure (kept for the call), then calls the code
+// through its address (icall), the closure object first.
+//
+// A lambda expression writes its code and a new closure, a copy of each
+// captured variable stored in it (a reference retained, a value held in
+// memory copied with its references retained).  Its code reads the captures
+// back into locals of their names, owned like by-value parameters, then
+// runs the body as a function's.
 
 #include "LoweringInternal.h"
 #include "Names.h"
@@ -28,6 +33,7 @@
 namespace paykan::lowering {
 
 using namespace names;
+using pir::CmpPred;
 using pir::Type;
 
 namespace {
@@ -35,7 +41,20 @@ namespace {
 /// The name of the capture field @p i.
 std::string captureField(size_t i) { return "c" + std::to_string(i); }
 
+/// The offsets of a function value's two words (functionValueShape).
+constexpr int64_t kCodeOffset = 0;
+constexpr int64_t kClosureOffset = 8;
+
 } // namespace
+
+ast::TupleType *ModuleLowering::functionValueShape() {
+  return ASTCtx.getTupleType(
+      {ASTCtx.getIntTy(), ASTCtx.getOptionalType(ASTCtx.getObjTy())});
+}
+
+ast::Type *ModuleLowering::memShapeOf(ast::Type *ty) {
+  return ast::isFunctionValue(ty) ? functionValueShape() : ty;
+}
 
 pir::Signature ModuleLowering::closureSignature(ast::FunctionType *fnt) {
   pir::Signature sig;
@@ -52,9 +71,10 @@ pir::Signature ModuleLowering::closureSignature(ast::FunctionType *fnt) {
   return sig;
 }
 
-pir::Class *ModuleLowering::declareClosureClass(
-    const std::string &name, const std::vector<ast::Type *> &captureTys,
-    const std::vector<bool> &captureWeak, const pir::Signature &callSig) {
+pir::Class *
+ModuleLowering::declareClosureClass(const std::string &name,
+                                    const std::vector<ast::Type *> &captureTys,
+                                    const std::vector<bool> &captureWeak) {
   Classes_.emplace_back();
   pir::Class &cls = Classes_.back();
   cls.Name = name;
@@ -70,19 +90,15 @@ pir::Class *ModuleLowering::declareClosureClass(
   }
   ClassByName[name] = &cls;
   PL.ClassOrigins.try_emplace(name, Mod.Name);
-  // The vtable: an object's three slots, then `call`.
+  // An object's vtable: its own destroy, the runtime's toString and equals.
   pir::Function *dtor = getOrCreateFunction(name + kNameSep + kMethodDestroy,
                                             {{Type::Obj}, Type::Void});
   dtor->Params[0].Name = kSelf;
-  pir::Function *call =
-      getOrCreateFunction(name + kNameSep + kClosureCall, callSig);
-  call->Params[0].Name = kSelf;
   const pir::Function &toString = declareRuntime(kPaykanObjectToString);
   const pir::Function &equals = declareRuntime(kPaykanObjectEquals);
   cls.VTable = {{kMethodDestroy, dtor->Name, dtor->Sig},
                 {kMethodToString, toString.Name, toString.Sig},
-                {kMethodEquals, equals.Name, equals.Sig},
-                {kClosureCall, call->Name, call->Sig}};
+                {kMethodEquals, equals.Name, equals.Sig}};
   return &cls;
 }
 
@@ -112,10 +128,10 @@ void ModuleLowering::emitClosureDestructor(
 }
 
 const std::string &ModuleLowering::lowerLambda(ast::LambdaExpr *node) {
-  if (auto it = LambdaClasses.find(node); it != LambdaClasses.end())
+  if (auto it = LambdaCode.find(node); it != LambdaCode.end())
     return it->second;
-  // Class names are global across the program's modules: the module's name
-  // is part of it.
+  // Class and function names are global across the program's modules: the
+  // module's name is part of them.
   const std::string name = std::string(kClosureClassPrefix) + Mod.Name +
                            kNameSep + std::to_string(NextClosureId++);
   auto *fnt = ast::cast<ast::FunctionType>(node->getResolvedType());
@@ -125,8 +141,12 @@ const std::string &ModuleLowering::lowerLambda(ast::LambdaExpr *node) {
     captureTys.push_back(cap.Ty);
     captureWeak.push_back(cap.Weak);
   }
-  declareClosureClass(name, captureTys, captureWeak, closureSignature(fnt));
-  pir::Function *call = FuncByName.at(name + kNameSep + kClosureCall);
+  const bool hasClosure = !captureTys.empty();
+  if (hasClosure)
+    declareClosureClass(name, captureTys, captureWeak);
+  pir::Function *call = getOrCreateFunction(name + kNameSep + kClosureCall,
+                                            closureSignature(fnt));
+  call->Params[0].Name = hasClosure ? kSelf : "closure";
   nameParams(*call, 1, node->getParams());
   if (ast::isMemType(fnt->getReturnType()))
     call->Params.back().Name = "result";
@@ -189,12 +209,29 @@ const std::string &ModuleLowering::lowerLambda(ast::LambdaExpr *node) {
     MemTemps = std::move(savedTemps);
     CurrentScope = savedScope;
   }
-  emitClosureDestructor(name, captureTys, captureWeak);
-  return LambdaClasses[node] = name;
+  if (hasClosure)
+    emitClosureDestructor(name, captureTys, captureWeak);
+  return LambdaCode[node] = name;
 }
 
-Val ModuleLowering::emitLambdaValue(ast::LambdaExpr *node) {
+namespace {
+
+/// Store the address of the function @p code as the code word at @p dst.
+void storeCode(pir::Builder &B, const Val &dst, const std::string &code) {
+  Val fn = B.fnAddr(code, "fn.code");
+  B.ptrStore(dst, B.cast(fn, Type::I64, "fn.code.word"));
+}
+
+} // namespace
+
+void ModuleLowering::emitLambdaInto(ast::LambdaExpr *node, const Val &dst) {
   const std::string &name = lowerLambda(node);
+  storeCode(B, dst, name + kNameSep + kClosureCall);
+  Val closureAddr = B.ptrAdd(dst, Val::i64(kClosureOffset), "fn.closure.addr");
+  if (node->getCaptures().empty()) {
+    B.ptrStore(closureAddr, Val::null(Type::Box));
+    return;
+  }
   Val obj = B.newObject(name, "closure");
   // Each capture: the variable as an expression, copied into its field.
   for (size_t i = 0; i < node->getCaptures().size(); ++i) {
@@ -204,49 +241,51 @@ Val ModuleLowering::emitLambdaValue(ast::LambdaExpr *node) {
                                             ASTCtx.intern(cap.getName()));
     id->setResolvedType(cap.Ty);
     if (ast::isMemType(cap.Ty)) {
+      size_t mark = MemTemps.size();
       Val src = emitMemAddress(id);
       if (!src)
-        return Val();
-      Val dst = B.fieldAddr(obj, name, field, field + ".addr");
-      B.memCopy(dst, src, Val::i64(memLayout(cap.Ty).Size));
-      emitMemRetain(dst, cap.Ty);
+        return;
+      Val at = B.fieldAddr(obj, name, field, field + ".addr");
+      B.memCopy(at, src, Val::i64(memLayout(cap.Ty).Size));
+      emitMemRetain(at, cap.Ty);
+      releaseMemTemps(mark);
     } else if (cap.Weak) {
       // A `weak` variable: the closure holds its object weakly too.
       Val box = emitAsShared(id); // +1, dropped once the weak one is taken
       if (!box)
-        return Val();
+        return;
       B.fieldStore(obj, name, field, B.weakNew(box, field + ".weak"));
       emitRelease(box);
     } else if (ast::isRefType(cap.Ty)) {
       Val box = emitAsShared(id); // +1, the field's own
       if (!box)
-        return Val();
+        return;
       B.fieldStore(obj, name, field, box);
     } else {
       Val v = emitExpr(id);
       if (!v)
-        return Val();
+        return;
       B.fieldStore(obj, name, field, coerceTo(v, toPIRType(cap.Ty)));
     }
   }
-  return emitSharedNew(obj, "closure.shared");
+  B.ptrStore(closureAddr, emitSharedNew(obj, "closure.shared"));
 }
 
 const std::string &ModuleLowering::lowerFunctionRef(const std::string &fnName,
                                                     ast::FunctionType *fnt) {
-  if (auto it = FunctionRefClasses.find(fnName); it != FunctionRefClasses.end())
+  if (auto it = FunctionRefCode.find(fnName); it != FunctionRefCode.end())
     return it->second;
-  const std::string name =
-      std::string(kClosureRefPrefix) + Mod.Name + kNameSep + fnName;
+  const std::string name = std::string(kClosureRefPrefix) + Mod.Name +
+                           kNameSep + fnName + kNameSep + kClosureCall;
   pir::Function *target = lookupFunction(fnName);
   if (!target) {
     reportInternalError("function '" + fnName +
                         "' used as a value is not declared");
-    return FunctionRefClasses[fnName] = name;
+    return FunctionRefCode[fnName] = name;
   }
-  declareClosureClass(name, {}, {}, closureSignature(fnt));
-  pir::Function *call = FuncByName.at(name + kNameSep + kClosureCall);
-  // `call` forwards its parameters: a box given to it is the callee's.
+  pir::Function *call = getOrCreateFunction(name, closureSignature(fnt));
+  call->Params[0].Name = "closure";
+  // The code forwards its parameters: a box given to it is the callee's.
   {
     FunctionStateGuard fnState(*this, call, nullptr, nullptr);
     std::vector<Val> args;
@@ -259,27 +298,39 @@ const std::string &ModuleLowering::lowerFunctionRef(const std::string &fnName,
     else
       B.emitRet(result);
   }
-  emitClosureDestructor(name, {}, {});
-  return FunctionRefClasses[fnName] = name;
+  return FunctionRefCode[fnName] = name;
 }
 
-Val ModuleLowering::emitFunctionRefValue(const std::string &fnName,
-                                         ast::FunctionType *fnt) {
-  const std::string &name = lowerFunctionRef(fnName, fnt);
-  Val obj = B.newObject(name, "closure");
-  return emitSharedNew(obj, "closure.shared");
+void ModuleLowering::emitFunctionRefInto(const std::string &fnName,
+                                         ast::FunctionType *fnt,
+                                         const Val &dst) {
+  storeCode(B, dst, lowerFunctionRef(fnName, fnt));
+  B.ptrStore(B.ptrAdd(dst, Val::i64(kClosureOffset), "fn.closure.addr"),
+             Val::null(Type::Box));
 }
 
-Val ModuleLowering::emitClosureCall(const Val &box, ast::FunctionType *fnt,
+Val ModuleLowering::emitFunctionValueIsNone(const Val &addr) {
+  Val code = B.ptrLoad(addr, Type::I64, "fn.code.word");
+  return B.cmp(CmpPred::Eq, code, Val::i64(0), "fn.isnone");
+}
+
+Val ModuleLowering::emitClosureCall(const Val &addr, ast::FunctionType *fnt,
                                     const std::vector<ast::Expr *> &argExprs,
-                                    ast::Type *resultTy, bool wantAddress) {
+                                    ast::Type *resultTy) {
   const pir::Signature sig = closureSignature(fnt);
-  // The call's own reference to the closure: an argument may rebind the
-  // variable or the field that holds it (`f(swap(f))`, `o.cb(reset(o))`),
-  // which would free it before, or while, it runs.
+  // The code and the closure, read before the arguments: an argument may
+  // rebind the variable or the field that holds the function value
+  // (`f(swap(f))`, `o.cb(reset(o))`).  The call keeps its own reference to
+  // the closure, which would otherwise be freed before, or while, it runs.
+  Val code =
+      B.cast(B.ptrLoad(B.ptrAdd(addr, Val::i64(kCodeOffset), "fn.code.addr"),
+                       Type::I64, "fn.code.word"),
+             Type::Ptr, "fn.code");
+  Val box =
+      B.ptrLoad(B.ptrAdd(addr, Val::i64(kClosureOffset), "fn.closure.addr"),
+                Type::Box, "fn.closure");
   emitRetain(box);
-  Val closure = emitSharedGet(box, "closure.obj");
-  std::vector<Val> args;
+  std::vector<Val> args{emitSharedGet(box, "closure.obj")};
   std::vector<Val> keep;
   size_t fixedMark = MemTemps.size();
   for (ast::Expr *arg : argExprs) {
@@ -288,10 +339,8 @@ Val ModuleLowering::emitClosureCall(const Val &box, ast::FunctionType *fnt,
         return Val();
       continue;
     }
-    // The parameter after the closure object.
-    Type paramTy = args.size() + 1 < sig.Params.size()
-                       ? sig.Params[args.size() + 1]
-                       : Type::Void;
+    Type paramTy =
+        args.size() < sig.Params.size() ? sig.Params[args.size()] : Type::Void;
     if (ast::isMemType(arg->getResolvedType())) {
       Val p = emitMemAddress(arg); // passed by address
       if (!p)
@@ -319,21 +368,73 @@ Val ModuleLowering::emitClosureCall(const Val &box, ast::FunctionType *fnt,
       return Val();
     args.push_back(coerceTo(v, paramTy));
   }
+  Val result;
   if (ast::isMemType(resultTy)) {
-    Val slot = emitMemResultSlot(resultTy);
-    args.push_back(slot);
-    B.vcall(closure, "", kClosureCallSlot, sig, args);
-    releaseAfterCall(keep);
-    releaseMemTemps(fixedMark);
-    emitRelease(box);
-    return slot;
+    result = emitMemResultSlot(resultTy);
+    args.push_back(result);
+    B.icall(code, sig, args);
+  } else {
+    result = B.icall(code, sig, args, "call");
   }
-  Val result = B.vcall(closure, "", kClosureCallSlot, sig, args, "call");
   releaseAfterCall(keep);
   releaseMemTemps(fixedMark);
   emitRelease(box);
-  (void)wantAddress; // a function type's result is never an `inout`
   return result;
+}
+
+Val ModuleLowering::emitFunctionValueMatch(ast::MatchStmt *node) {
+  ast::Type *subjTy = node->getSubject()->getResolvedType();
+  auto *optTy = ast::dyn_cast<ast::OptionalType>(subjTy);
+  ast::Type *inner = optTy ? optTy->getInnerType() : subjTy;
+  // The subject, copied into a slot of the match's scope: its closure is
+  // held until the match ends, on every way out of it.
+  ScopeGuard matchGuard(*this);
+  MemLayout l = memLayout(subjTy);
+  pir::LocalId subj = B.addMemLocal("match.subj", l.Size, l.Align);
+  Val addr = B.localAddr(subj, "match.subj.addr");
+  emitMemInit(node->getSubject(), addr);
+  CurrentScope->declare("match.subj", subj, subjTy);
+
+  ast::MatchArm *noneArm = nullptr;
+  ast::MatchArm *valueArm = nullptr;
+  for (ast::MatchArm *arm : node->getArms())
+    if (arm->isLiteral())
+      noneArm = arm;
+    else if (!arm->isWildcard() && !valueArm)
+      valueArm = arm;
+  ast::MatchArm *wildcard = findWildcardArm(node);
+  auto emitArmOrDefault = [&](ast::MatchArm *arm) {
+    if (arm)
+      emitMatchArmBody(arm);
+    else if (wildcard)
+      emitMatchArmBody(wildcard);
+  };
+
+  pir::If *s = B.openIf(emitFunctionValueIsNone(addr), /*withElse=*/true);
+  B.enter(*s->Then);
+  emitArmOrDefault(noneArm);
+  B.leave();
+  B.enter(*s->Else);
+  if (valueArm && valueArm->hasBinding()) {
+    ScopeGuard armGuard(*this);
+    const std::string &name = valueArm->getBinding();
+    if (valueArm->getMode() == ast::ParamMode::Inout) {
+      // `f: inout T`: f is the subject's storage.
+      emitInoutBinding(name, node->getSubject(), inner);
+    } else {
+      // The binding's own copy of the present function value.
+      pir::LocalId local = B.addMemLocal(name, l.Size, l.Align);
+      Val own = B.localAddr(local, name + ".addr");
+      B.memCopy(own, addr, Val::i64(l.Size));
+      emitMemRetain(own, inner);
+      CurrentScope->declare(name, local, inner);
+    }
+    emitBody(valueArm->getBody());
+  } else {
+    emitArmOrDefault(valueArm);
+  }
+  B.leave();
+  return Val();
 }
 
 } // namespace paykan::lowering

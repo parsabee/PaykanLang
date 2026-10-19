@@ -18,7 +18,7 @@ fn main() -> int {
   println("peek " + mins.peek() + " " + Str(mins.peekPriority()) + " len " +
           Str(mins.len()));
   out: Str = "";
-  while (!mins.isEmpty()) { out = out + mins.pop() + " "; }
+  while !mins.isEmpty() { out = out + mins.pop() + " "; }
   println("min order: " + out);
 
   maxs = collections::MaxPriorityQueue<Task>();
@@ -28,14 +28,14 @@ fn main() -> int {
   maxs.push(Task("mid-b"), 0);
   println("peek " + maxs.peek().name + " " + Str(maxs.peekPriority()));
   out = "";
-  while (!maxs.isEmpty()) { out = out + maxs.pop().name + " "; }
+  while !maxs.isEmpty() { out = out + maxs.pop().name + " "; }
   println("max order: " + out);
 
   // Heap sort: 200 values pushed in a scrambled order come out sorted.
   sorter = collections::MinPriorityQueue<int>();
   rev = collections::MaxPriorityQueue<int>();
   i: int = 0;
-  while (i < 200) {
+  while i < 200 {
     v: int = (i * 73) % 200;
     sorter.push(v, v);
     rev.push(v, v);
@@ -43,16 +43,16 @@ fn main() -> int {
   }
   ok: bool = True;
   prev: int = -1;
-  while (!sorter.isEmpty()) {
+  while !sorter.isEmpty() {
     v: int = sorter.pop();
-    if (v != prev + 1) { ok = False; }
+    if v != prev + 1 { ok = False; }
     prev = v;
   }
   println("sorted " + Str(ok) + " last " + Str(prev));
   prev = 200;
-  while (!rev.isEmpty()) {
+  while !rev.isEmpty() {
     v: int = rev.pop();
-    if (v != prev - 1) { ok = False; }
+    if v != prev - 1 { ok = False; }
     prev = v;
   }
   println("reverse sorted " + Str(ok) + " last " + Str(prev));

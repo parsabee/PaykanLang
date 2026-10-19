@@ -15,7 +15,7 @@ static std::string wrapMain(const std::string &body) {
 
 TEST(ControlFlow, IfTrue) {
   auto r = compileAndRun(wrapMain(R"(
-    if (True) {
+    if True {
       println("yes");
     }
   )"));
@@ -25,7 +25,7 @@ TEST(ControlFlow, IfTrue) {
 
 TEST(ControlFlow, IfFalse) {
   auto r = compileAndRun(wrapMain(R"(
-    if (False) {
+    if False {
       println("no");
     }
     println("done");
@@ -37,7 +37,7 @@ TEST(ControlFlow, IfFalse) {
 TEST(ControlFlow, IfElseTrueBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 10;
-    if (x > 5) {
+    if x > 5 {
       println("big");
     } else {
       println("small");
@@ -50,7 +50,7 @@ TEST(ControlFlow, IfElseTrueBranch) {
 TEST(ControlFlow, IfElseFalseBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 3;
-    if (x > 5) {
+    if x > 5 {
       println("big");
     } else {
       println("small");
@@ -63,9 +63,9 @@ TEST(ControlFlow, IfElseFalseBranch) {
 TEST(ControlFlow, IfElseIfChain) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 42;
-    if (x > 100) {
+    if x > 100 {
       println("large");
-    } else if (x > 10) {
+    } elif x > 10 {
       println("medium");
     } else {
       println("small");
@@ -78,9 +78,9 @@ TEST(ControlFlow, IfElseIfChain) {
 TEST(ControlFlow, IfElseIfLastBranch) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 3;
-    if (x > 100) {
+    if x > 100 {
       println("large");
-    } else if (x > 10) {
+    } elif x > 10 {
       println("medium");
     } else {
       println("small");
@@ -93,8 +93,8 @@ TEST(ControlFlow, IfElseIfLastBranch) {
 TEST(ControlFlow, NestedIf) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 5;
-    if (x > 0) {
-      if (x < 10) {
+    if x > 0 {
+      if x < 10 {
         println("single digit");
       } else {
         println("big");
@@ -108,9 +108,9 @@ TEST(ControlFlow, NestedIf) {
 TEST(ControlFlow, IfWithReturn) {
   auto r = compileAndRun(R"(
     fn classify(x: int) -> int {
-      if (x > 0) {
+      if x > 0 {
         return 1;
-      } else if (x < 0) {
+      } elif x < 0 {
         return -1;
       } else {
         return 0;
@@ -132,7 +132,7 @@ TEST(ControlFlow, IfWithReturn) {
 TEST(ControlFlow, WhileCountUp) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
-    while (i < 5) {
+    while i < 5 {
       println(Str<int>(i));
       i = i + 1;
     }
@@ -143,7 +143,7 @@ TEST(ControlFlow, WhileCountUp) {
 
 TEST(ControlFlow, WhileNeverExecutes) {
   auto r = compileAndRun(wrapMain(R"(
-    while (False) {
+    while False {
       println("nope");
     }
     println("done");
@@ -156,7 +156,7 @@ TEST(ControlFlow, WhileSum) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 1;
     sum: int = 0;
-    while (i <= 10) {
+    while i <= 10 {
       sum = sum + i;
       i = i + 1;
     }
@@ -169,8 +169,8 @@ TEST(ControlFlow, WhileSum) {
 TEST(ControlFlow, WhileWithIf) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
-    while (i < 6) {
-      if (i % 2 == 0) {
+    while i < 6 {
+      if i % 2 == 0 {
         println(Str<int>(i));
       }
       i = i + 1;
@@ -184,9 +184,9 @@ TEST(ControlFlow, NestedWhile) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
     count: int = 0;
-    while (i < 3) {
+    while i < 3 {
       j: int = 0;
-      while (j < 3) {
+      while j < 3 {
         count = count + 1;
         j = j + 1;
       }
@@ -270,7 +270,7 @@ TEST(ControlFlow, LogicalInIfCondition) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 5;
     y: int = 10;
-    if (x > 0 && y > 0) {
+    if x > 0 && y > 0 {
       println("both positive");
     } else {
       println("not both positive");
@@ -284,7 +284,7 @@ TEST(ControlFlow, LogicalInWhileCondition) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
     j: int = 10;
-    while (i < 5 && j > 5) {
+    while i < 5 && j > 5 {
       i = i + 1;
       j = j - 1;
     }
@@ -369,8 +369,8 @@ TEST(ControlFlow, TernaryBoolResult) {
 TEST(ControlFlow, BreakExitsLoop) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
-    while (True) {
-      if (i == 3) { break; }
+    while True {
+      if i == 3 { break; }
       i = i + 1;
     }
     println(Str<int>(i));
@@ -383,9 +383,9 @@ TEST(ControlFlow, ContinueSkipsRest) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
     sum: int = 0;
-    while (i < 5) {
+    while i < 5 {
       i = i + 1;
-      if (i == 3) { continue; }
+      if i == 3 { continue; }
       sum = sum + i;
     }
     println(Str<int>(sum));
@@ -398,10 +398,10 @@ TEST(ControlFlow, BreakInnerLoopOnly) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
     count: int = 0;
-    while (i < 3) {
+    while i < 3 {
       j: int = 0;
-      while (True) {
-        if (j == 2) { break; }
+      while True {
+        if j == 2 { break; }
         j = j + 1;
         count = count + 1;
       }
@@ -417,8 +417,8 @@ TEST(ControlFlow, ContinueSumEvens) {
   auto r = compileAndRun(wrapMain(R"(
     i: int = 0;
     result: int = 0;
-    while (i < 10) {
-      if (i % 2 != 0) {
+    while i < 10 {
+      if i % 2 != 0 {
         i = i + 1;
         continue;
       }
@@ -434,9 +434,9 @@ TEST(ControlFlow, ContinueSumEvens) {
 TEST(ControlFlow, BreakWhileTrue) {
   auto r = compileAndRun(wrapMain(R"(
     x: int = 100;
-    while (True) {
+    while True {
       x = x - 7;
-      if (x < 50) { break; }
+      if x < 50 { break; }
     }
     println(Str<int>(x));
   )"));

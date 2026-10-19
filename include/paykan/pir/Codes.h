@@ -75,7 +75,10 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::FToU, 47, "ftou"},
     {Opcode::FRound32, 48, "fround32"},
     {Opcode::WeakRelease, 49, "weak.release"},
-    // 50-255 reserved.
+    // Function values (docs/design/function-types.md).
+    {Opcode::FnAddr, 50, "fn.addr"},
+    {Opcode::ICall, 51, "icall"},
+    // 52-255 reserved.
 };
 
 struct TypeEntry {
@@ -119,8 +122,7 @@ template <typename T, size_t N> constexpr bool rowsUnique(const T (&table)[N]) {
 // The enumerators are dense from 0, so a complete table has exactly one row
 // per enumerator up to the last one.  Adding an enumerator without a row
 // fails here or in the exhaustive switch of tests/PIR/BinaryTests.cpp.
-static_assert(std::size(kOpcodeTable) ==
-                  static_cast<size_t>(Opcode::WeakRelease) + 1,
+static_assert(std::size(kOpcodeTable) == static_cast<size_t>(Opcode::ICall) + 1,
               "every Opcode needs a row in kOpcodeTable");
 static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::Weak) + 1,
               "every Type needs a row in kTypeTable");

@@ -149,7 +149,7 @@ TEST(GrammarEdge, NestingLimitIsTheSameOnEveryFrontend) {
   expectLimit("blocks",
               [](int n) { return inMain(repeat("{ ", n) + repeat("} ", n)); });
   expectLimit("if statements", [](int n) {
-    return inMain(repeat("if (a) { ", n) + repeat("} ", n));
+    return inMain(repeat("if a { ", n) + repeat("} ", n));
   });
   expectLimit("parentheses", [](int n) {
     return inMain("x = " + repeat("(", n) + "1" + repeat(")", n) + ";");
@@ -202,8 +202,8 @@ TEST(GrammarEdge, NestingTooDeepInBlocksIsTheOnlyError) {
   for (const std::string &src :
        {inMain(blocks),
         inMain(blocks + "x: int = 1; f(x);") + "fn g() -> int { return 1; }\n",
-        inMain("a = True; " + repeat("if (a) { ", 600) + repeat("} ", 600)),
-        inMain("a = True; " + repeat("while (a) { ", 600) + repeat("} ", 600)),
+        inMain("a = True; " + repeat("if a { ", 600) + repeat("} ", 600)),
+        inMain("a = True; " + repeat("while a { ", 600) + repeat("} ", 600)),
         "class C { fn m() -> int { " + blocks + " return 0; } }\n" +
             inMain("")}) {
     auto path = writeTempFile(src);

@@ -1,6 +1,8 @@
 // Function values (docs/language/15-function-types.md) in the collections:
-// a closure is a reference with identity, so it is an element of a
-// List<T>, found by `contains` and `indexOf`, and a value of a HashMap.
+// a function value is held in place and equal to another holding the same
+// code and closure, so it is an element of a List<T>, found by `contains`
+// and `indexOf` (a named function, or a copy of a lambda's value), and a
+// value of a HashMap.
 import ::collections;
 
 fn square(x: int) -> int { return x * x; }
@@ -21,13 +23,14 @@ fn main() -> int {
   fs.push(double);
   i: unsigned = 0;
   total = 0;
-  while (i < fs.len()) {
+  while i < fs.len() {
     f = fs.get(i);
     total = total + f(3);
     i = i + 1;
   }
   println(Str(total) + " " + Str(fs.contains(double)) + " " + idx(fs.indexOf(double)) +
-          " " + Str(fs.contains(fn(x: int) -> int { return x * 2; })));
+          " " + Str(fs.contains(fn(x: int) -> int { return x * 2; })) + " " +
+          Str(fs.contains(square)) + " " + idx(fs.indexOf(square)));
 
   greetings = collections::HashMap<Str, (Str) -> Str>();
   greetings.put("en", fn(n: Str) -> Str { return "hello " + n; });

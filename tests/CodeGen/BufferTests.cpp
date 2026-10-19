@@ -148,14 +148,14 @@ TEST(Buffer, HoldsOptionalValuesOfEverySize) {
       cs.grow(20);
       ns.grow(20);
       i: int = 0;
-      while (i < 23) {
-        if (i % 3 == 0) { cs.set(i, 'a'); ns.set(i, i * 1000); }
+      while i < 23 {
+        if i % 3 == 0 { cs.set(i, 'a'); ns.set(i, i * 1000); }
         i = i + 1;
       }
       cs.set(1, None);
       s = "";
       i = 0;
-      while (i < 7) { s = s + c(cs.get(i)) + n(ns.get(i)) + " "; i = i + 1; }
+      while i < 7 { s = s + c(cs.get(i)) + n(ns.get(i)) + " "; i = i + 1; }
       println(s);
       println(c(cs.copy(21)) + n(ns.copy(21)) + " " + c(cs.get(22)));
       return 0;

@@ -244,7 +244,7 @@ fn main() -> int {
   println(color::name(c));            // green
   f: color::Color = color::favorite();
   println(color::name(f));            // blue
-  if (f == color::Color::Blue) { return 0; }
+  if f == color::Color::Blue { return 0; }
   return 1;
 }
 )");
@@ -557,8 +557,8 @@ class Path { stops: Str[3]; }
 fn longest(ss: view Str[]) -> int {
   n = 0;
   i = 0;
-  while (i < ss.len()) {
-    if (ss[i].len() > n) { n = ss[i].len(); }
+  while i < ss.len() {
+    if ss[i].len() > n { n = ss[i].len(); }
     i = i + 1;
   }
   return n;

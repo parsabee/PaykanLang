@@ -115,10 +115,10 @@ in the table, and `insert` changes it.
 // from: samples/imports/12_calc/calc/hashmap.pkn
   fn lookup(key: Str) -> Entry? {
     cur: Entry? = self.buckets[self.indexFor(key)];
-    while (cur != None) {
+    while cur != None {
       match cur {
         e: Entry {
-          if (e.key.equals(key)) { return e; }
+          if e.key.equals(key) { return e; }
           cur = e.next;
         }
         None { }
@@ -168,9 +168,9 @@ bucket, any other by `Entry.unlink`, which links the entry before it to the one 
     b: int = self.indexFor(key);
     match self.buckets[b] {
       first: Entry {
-        if (first.key.equals(key)) {
+        if first.key.equals(key) {
           self.buckets[b] = first.next; // the chain now starts at the second
-        } else if (!first.unlink(key)) {
+        } elif !first.unlink(key) {
           return False;
         }
         self.size = self.size - 1;
@@ -188,14 +188,14 @@ not a `view fn` either, since the entries it reaches can be changed:
 ```pkn
 // from: samples/imports/12_calc/main.pkn
 fn listVars(env: hashmap::HashMap) {
-  if (env.count() == 0) {
+  if env.count() == 0 {
     println("(no variables)");
     return;
   }
   b: int = 0;
-  while (b < env.bucketCount()) {
+  while b < env.bucketCount() {
     cur: hashmap::Entry? = env.bucket(b);
-    while (cur != None) {
+    while cur != None {
       match cur {
         e: hashmap::Entry {
           println("  " + e.key + " = " + show(e.value));
@@ -243,7 +243,7 @@ class Parser {
 
   // Record the first error only; later errors are usually cascades.
   fn fail(msg: Str) {
-    if (self.error == None) { self.error = msg; }
+    if self.error == None { self.error = msg; }
   }
 // ...
 impl Parser {
@@ -264,7 +264,7 @@ chained conditional expression:
   fn parseTerm() -> float {
     result: float = self.parseFactor();
     self.skipWs();
-    while (!self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%'))) {
+    while !self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%')) {
       op: Op = if self.atIs('*') then Op::Mul
                else if self.atIs('/') then Op::Div else Op::Mod;
       self.advance();
@@ -281,7 +281,7 @@ A factor that is a name is looked up in the variable store. The `match` names th
 
 ```pkn
 // from: samples/imports/12_calc/calc/parser.pkn
-    if (self.atIsIdentStart()) {
+    if self.atIsIdentStart() {
       name: Str = self.parseIdent();
       match self.env.lookup(name) {
         e: hashmap::Entry { return e.value; }
@@ -304,10 +304,10 @@ its type, since a bare `None` in a tuple literal with no declared destination wo
   fn parseStatement() -> (Str?, float) {
     self.skipWs();
     start: int = self.pos;
-    if (self.atIsIdentStart()) {
+    if self.atIsIdentStart() {
       name: Str = self.parseIdent();
       self.skipWs();
-      if (self.atAssign()) {
+      if self.atAssign() {
         self.advance(); // consume '='
         v: float = self.parseExpr();
         self.skipWs();
@@ -342,7 +342,7 @@ class Ring<T> {
 
   // Append `x`, overwriting the oldest item when the buffer is full.
   fn add(x: T) {
-    if (self.count < self.items.len()) {
+    if self.count < self.items.len() {
       self.items[self.count] = x;
       self.count = self.count + 1;
     } else {
@@ -392,7 +392,7 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
     }
     None { }
   }
-  if (!p.done()) {
+  if !p.done() {
     printerrln("error: unexpected '" + p.rest() + "'");
     return;
   }
@@ -402,11 +402,11 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
   match target {
     name: Str {
       env.put(name, value);
-      if (quiet) { println(show(value)); }
+      if quiet { println(show(value)); }
       else { println(name + " = " + show(value)); }
     }
     None {
-      if (quiet) { println(show(value)); }
+      if quiet { println(show(value)); }
       else { println(src + " = " + show(value)); }
     }
   }
@@ -421,9 +421,9 @@ The interactive loop is the standard-input idiom from [Files and I/O](11-files-a
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-  while (True) {
+  while True {
     match Stdin.readln() {
-      line: Str { if (!handle(line, env, history, quiet)) { return 0; } }
+      line: Str { if !handle(line, env, history, quiet) { return 0; } }
       _ { break; } // None — end of input
     }
   }
@@ -444,17 +444,17 @@ fn main(args: view Str[]) -> int {
 
   // -- command-line parsing: flags, repeatable -e, positional expressions --
   i: int = 1;
-  while (i < args.len()) {
+  while i < args.len() {
     a: view = args[i];
-    if (a.equals("-h") || a.equals("--help")) {
+    if a.equals("-h") || a.equals("--help") {
       printUsage();
       return 0;
-    } else if (a.equals("-q") || a.equals("--quiet")) {
+    } elif a.equals("-q") || a.equals("--quiet") {
       quiet = True;
-    } else if (a.equals("--no-demo")) {
+    } elif a.equals("--no-demo") {
       runDemo = False;
-    } else if (a.equals("-e") || a.equals("--eval")) {
-      if (i + 1 < args.len()) {
+    } elif a.equals("-e") || a.equals("--eval") {
+      if i + 1 < args.len() {
         i = i + 1;
         nexprs = nexprs + 1;
       } else {
@@ -471,13 +471,13 @@ history can keep:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-  if (nexprs > 0) {
+  if nexprs > 0 {
     j: int = 1;
-    while (j < args.len()) {
-      if (args[j].equals("-e") || args[j].equals("--eval")) {
+    while j < args.len() {
+      if args[j].equals("-e") || args[j].equals("--eval") {
         j = j + 1;
         evalStatement(args[j].toString(), env, history, quiet);
-      } else if (!isOption(args[j])) {
+      } elif !isOption(args[j]) {
         evalStatement(args[j].toString(), env, history, quiet);
       }
       j = j + 1;

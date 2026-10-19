@@ -313,6 +313,19 @@ private:
       OS << " [" << in.Slot << "] ";
       printArgs(in.Args, 1);
       break;
+    case Opcode::FnAddr:
+      OS << ' ';
+      printSymbol(in.Callee, OS);
+      break;
+    case Opcode::ICall:
+      OS << ' ';
+      if (!in.Args.empty())
+        printOperand(in.Args[0]);
+      OS << " : ";
+      print(in.Sig, OS);
+      OS << ' ';
+      printArgs(in.Args, 1);
+      break;
     case Opcode::New:
       OS << ' ';
       printName(in.ClassName, OS);

@@ -740,7 +740,7 @@ fn sumP(p: P) -> int { return p.x + p.y; }
 fn sumQ(q: Q) -> int { return q.x; }
 fn total(xs: view int[], f: (int) -> int) -> int {
   t = 0; i = 0;
-  while (i < xs.len()) { t = t + f(xs[i]); i = i + 1; }
+  while i < xs.len() { t = t + f(xs[i]); i = i + 1; }
   return t;
 }
 fn main() -> int {
@@ -807,7 +807,7 @@ fn main() -> int {
   i = 0;
   a = 1;
   ai: inout = a;
-  while (i < 3) { a = a + 1; ai = ai + 1; i = i + 1; }
+  while i < 3 { a = a + 1; ai = ai + 1; i = i + 1; }
   p = 1;
   pi: inout = p;
   pj: inout = pi;
@@ -831,7 +831,7 @@ fn main() -> int {
             "'report' is not one",
         std::string(":29:3: error: 'm' is viewed by 'view' local 'w' until "
                     "'w' is last used; it cannot be assigned"),
-        std::string(":35:23: error: 'a' is borrowed by 'inout' local 'ai' "
+        std::string(":35:21: error: 'a' is borrowed by 'inout' local 'ai' "
                     "until 'ai' is last used"),
         std::string(":39:3: error: 'p' is borrowed by 'inout' local 'pj' "
                     "until 'pj' is last used")})

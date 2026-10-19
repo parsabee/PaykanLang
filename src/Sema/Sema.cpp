@@ -449,9 +449,12 @@ int64_t Sema::fixedElementBytes(const ast::Type *ty) {
       return -1;
     }
   }
-  // A reference is held as its box.
+  // A reference is held as its box; a function value as its code and its
+  // closure's box (an optional one the same: None has no code).
   if (ast::isRefType(ty))
     return 8;
+  if (ast::isFunctionValue(ty))
+    return 16;
   // An optional value is a presence flag padded to its value's alignment,
   // then the value (`int?` takes 16 bytes, `bool?` 2).
   if (ast::isValueOptional(ty))
@@ -2143,10 +2146,11 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     ast::Type *result = nullptr;
     if (trueNone != falseNone) {
       ast::Type *valueTy = trueNone ? falseTy : trueTy;
-      // `x` a `T?` already, a reference `T`, or a primitive (`int` -> `int?`).
+      // `x` a `T?` already, a reference `T`, a function value, or a
+      // primitive (`int` -> `int?`).
       if (ast::isa<ast::OptionalType>(valueTy))
         result = valueTy;
-      else if (ast::isRefType(valueTy) ||
+      else if (ast::isRefType(valueTy) || ast::isFunctionValue(valueTy) ||
                (ast::isa<ast::BuiltinType>(valueTy) &&
                 valueTy != S.Ctx.getVoidTy()))
         result = S.Ctx.getOptionalType(valueTy);

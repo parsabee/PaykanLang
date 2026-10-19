@@ -391,6 +391,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A function value is a value held in place, not a reference to a closure object
+  (docs/design/function-types.md, "Run-time representation"): 16 bytes, the address of its
+  code and the box of its closure, the object holding its captures, which is null when it
+  captures nothing.  A named function or a lambda that captures nothing used as a value
+  no longer allocates.  Copying one shares the closure; `==` is true for the same code
+  and the same closure, so `square == square` is now `True` and `List.contains(square)`
+  finds it, while each evaluation of a capturing lambda still makes a new closure.  A
+  function type is a `ValueType`, and `((int) -> int)?` takes the same 16 bytes, `None`
+  having no code.  A call loads the code and the closure, keeps the closure for the call
+  and calls the code through its address, through the new PIR instructions `fn.addr` and
+  `icall` (docs/pir.md); at `-O2` LLVM makes the call direct where the code is known.
+  The generated code and the PIR change: clear every `.paykan_cache` after upgrading.
+- An if-statement chains with the new keyword `elif` instead of `else if`
+  (docs/grammar.md): `if x > 0 { … } elif x == 0 { … } else { … }`.  `else if` after an
+  if-statement's block is a syntax error that names `elif`; the conditional expression
+  keeps `else if` (`if x > 0 then 1 else if x == 0 then 0 else -1`) and rejects `elif`.
+  `elif` is reserved.  The AST is unchanged: an `elif` is an `IfStmt` nested as the else
+  branch.
+- `if` and `while` take their condition without parentheses (docs/grammar.md):
+  `if x > 0 {`, `elif x == 0 {`, `while i < n {`; the block's `{` ends the condition.
+  A parenthesised condition is still a parenthesised expression, so `if (x > 0) {`
+  keeps parsing.  A statement starting with `if` is a ternary expression statement when
+  `then` follows its condition, as before.  The samples, the standard library, the
+  tests and the docs are rewritten without the parentheses.
 - The object header is 16 bytes instead of 24 (src/Runtime/Runtime.h, `PaykanObject`;
   docs/language/08-memory-model.md): the vtable pointer, then a 32-bit strong count and a
   32-bit weak count, so every object is 8 bytes smaller.  A count that would pass

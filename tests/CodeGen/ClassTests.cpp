@@ -485,7 +485,7 @@ TEST(Class, MethodWithIfElse) {
   auto r = compileAndRun(withFns(R"(
     class Sign {
       fn of(n: int) -> Str {
-        if (n > 0) {
+        if n > 0 {
           return "pos";
         } else {
           return "neg";
@@ -509,7 +509,7 @@ TEST(Class, MethodWithLoop) {
       total: int;
       fn sumTo(n: int) {
         i: int = 1;
-        while (i <= n) {
+        while i <= n {
           self.total = self.total + i;
           i = i + 1;
         }
@@ -759,7 +759,7 @@ TEST(MatchCodeGen, ControlFlowInArm) {
     n: Node = Leaf(7);
     match n {
       leaf: Leaf {
-        if (leaf.val > 5) {
+        if leaf.val > 5 {
           println("big");
         } else {
           println("small");
@@ -776,7 +776,7 @@ TEST(MatchCodeGen, ControlFlowInArm) {
 TEST(MatchCodeGen, SubjectIsCallExpr) {
   auto r = compileAndRun(withFns(kMatchHierarchy + R"(
     fn makeAnimal(kind: int) -> Animal {
-      if (kind == 1) { return Dog(); }
+      if kind == 1 { return Dog(); }
       return Cat();
     }
   )",
@@ -983,7 +983,7 @@ TEST(Class, CallTemporaryEqualsNone) {
   auto r = compileAndRun(R"(
     fn process() -> Obj { return None; }
     fn main() -> int {
-      if (process() == None) { println("none"); } else { println("something"); }
+      if process() == None { println("none"); } else { println("something"); }
       return 0;
     }
   )");
@@ -997,7 +997,7 @@ TEST(Class, CallTemporaryNotEqualsNone) {
     impl Thing { fn __init__(x: int) { self.n = x; } }
     fn process() -> Obj { return Thing(5); }
     fn main() -> int {
-      if (process() != None) { println("something"); } else { println("none"); }
+      if process() != None { println("something"); } else { println("none"); }
       return 0;
     }
   )");
@@ -1011,7 +1011,7 @@ TEST(Class, TwoCallTemporariesDistinct) {
     class Thing {}
     fn make() -> Obj { return Thing(); }
     fn main() -> int {
-      if (make() == make()) { println("same"); } else { println("diff"); }
+      if make() == make() { println("same"); } else { println("diff"); }
       return 0;
     }
   )");

@@ -260,11 +260,15 @@ private:
       type(in.CastTo);
       break;
     case Opcode::Call:
+    case Opcode::FnAddr:
       str(in.Callee);
       break;
     case Opcode::VCall:
       str(in.ClassName);
       W.uleb(in.Slot);
+      sig(in.Sig);
+      break;
+    case Opcode::ICall:
       sig(in.Sig);
       break;
     case Opcode::New:
@@ -660,11 +664,16 @@ private:
         return false;
       break;
     case Opcode::Call:
+    case Opcode::FnAddr:
       if (!str(in.Callee))
         return false;
       break;
     case Opcode::VCall:
       if (!str(in.ClassName) || !R.uleb32(in.Slot) || !sig(in.Sig))
+        return false;
+      break;
+    case Opcode::ICall:
+      if (!sig(in.Sig))
         return false;
       break;
     case Opcode::New:

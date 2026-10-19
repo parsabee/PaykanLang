@@ -41,7 +41,7 @@ class Parser {
 
   // Record the first error only; later errors are usually cascades.
   fn fail(msg: Str) {
-    if (self.error == None) { self.error = msg; }
+    if self.error == None { self.error = msg; }
   }
 
   view fn done() -> bool {
@@ -53,25 +53,25 @@ class Parser {
   }
 
   view fn atIsOr(a: char, b: char) -> bool {
-    if (self.done()) { return False; }
+    if self.done() { return False; }
     c: char = self.input[self.pos];
     return c == a || c == b;
   }
 
   view fn atIsDigit() -> bool {
-    if (self.done()) { return False; }
+    if self.done() { return False; }
     c: char = self.input[self.pos];
     return c >= '0' && c <= '9';
   }
 
   view fn atIsIdentStart() -> bool {
-    if (self.done()) { return False; }
+    if self.done() { return False; }
     c: char = self.input[self.pos];
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
   }
 
   view fn atIsIdentChar() -> bool {
-    if (self.done()) { return False; }
+    if self.done() { return False; }
     c: char = self.input[self.pos];
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
         || (c >= '0' && c <= '9') || c == '_';
@@ -79,13 +79,13 @@ class Parser {
 
   // Current char is '=' and it is NOT the start of '=='.
   view fn atAssign() -> bool {
-    if (!self.atIs('=')) { return False; }
-    if (self.pos + 1 >= self.input.len()) { return True; }
+    if !self.atIs('=') { return False; }
+    if self.pos + 1 >= self.input.len() { return True; }
     return self.input[self.pos + 1] != '=';
   }
 
   view fn atDigitVal() -> int {
-    if (self.done()) { return 0; }
+    if self.done() { return 0; }
     c: char = self.input[self.pos];
     match c {
       '0' { return 0; }
@@ -107,14 +107,14 @@ class Parser {
   }
 
   fn skipWs() {
-    while (!self.done() && self.atIs(' ')) {
+    while !self.done() && self.atIs(' ') {
       self.advance();
     }
   }
 
   fn parseIdent() -> Str {
     name: Str = "";
-    while (self.atIsIdentChar()) {
+    while self.atIsIdentChar() {
       name = name + Str<char>(self.input[self.pos]);
       self.advance();
     }
@@ -125,7 +125,7 @@ class Parser {
   view fn rest() -> Str {
     out: Str = "";
     i: int = self.pos;
-    while (i < self.input.len()) {
+    while i < self.input.len() {
       out = out + Str(self.input[i]);
       i = i + 1;
     }
@@ -134,14 +134,14 @@ class Parser {
 
   fn parseNumber() -> float {
     result: float = 0.0;
-    while (self.atIsDigit()) {
+    while self.atIsDigit() {
       result = result * 10.0 + self.atDigitVal();
       self.advance();
     }
-    if (self.atIs('.')) {
+    if self.atIs('.') {
       self.advance();
       frac: float = 0.1;
-      while (self.atIsDigit()) {
+      while self.atIsDigit() {
         result = result + self.atDigitVal() * frac;
         frac = frac * 0.1;
         self.advance();
@@ -152,19 +152,19 @@ class Parser {
 
   fn parseFactor() -> float {
     self.skipWs();
-    if (self.atIs('(')) {
+    if self.atIs('(') {
       self.advance();
       val: float = self.parseExpr();
       self.skipWs();
-      if (self.atIs(')')) { self.advance(); }
+      if self.atIs(')') { self.advance(); }
       else { self.fail("missing ')'"); }
       return val;
     }
-    if (self.atIs('-')) {
+    if self.atIs('-') {
       self.advance();
       return 0.0 - self.parseFactor();
     }
-    if (self.atIsIdentStart()) {
+    if self.atIsIdentStart() {
       name: Str = self.parseIdent();
       match self.env.lookup(name) {
         e: hashmap::Entry { return e.value; }
@@ -174,7 +174,7 @@ class Parser {
         }
       }
     }
-    if (!self.atIsDigit()) {
+    if !self.atIsDigit() {
       self.fail("expected a number, variable, or '('");
       return 0.0;
     }
@@ -184,7 +184,7 @@ class Parser {
   fn parseTerm() -> float {
     result: float = self.parseFactor();
     self.skipWs();
-    while (!self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%'))) {
+    while !self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%')) {
       op: Op = if self.atIs('*') then Op::Mul
                else if self.atIs('/') then Op::Div else Op::Mod;
       self.advance();
@@ -198,7 +198,7 @@ class Parser {
   fn parseExpr() -> float {
     result: float = self.parseTerm();
     self.skipWs();
-    while (self.atIsOr('+', '-')) {
+    while self.atIsOr('+', '-') {
       op: Op = if self.atIs('+') then Op::Add else Op::Sub;
       self.advance();
       rhs: float = self.parseTerm();
@@ -214,10 +214,10 @@ class Parser {
   fn parseStatement() -> (Str?, float) {
     self.skipWs();
     start: int = self.pos;
-    if (self.atIsIdentStart()) {
+    if self.atIsIdentStart() {
       name: Str = self.parseIdent();
       self.skipWs();
-      if (self.atAssign()) {
+      if self.atAssign() {
         self.advance(); // consume '='
         v: float = self.parseExpr();
         self.skipWs();

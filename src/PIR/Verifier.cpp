@@ -618,6 +618,22 @@ private:
         result(in, sig.Ret);
         break;
       }
+      case Opcode::FnAddr:
+        if (!arity(in, 0))
+          break;
+        if (!MV.Index.Functions.count(in.Callee))
+          error("address of undeclared function '@" + in.Callee + "'");
+        result(in, Type::Ptr);
+        break;
+      case Opcode::ICall:
+        if (in.Args.empty()) {
+          error("icall has no callee");
+          break;
+        }
+        expect(in.Args[0], Type::Ptr, "callee of icall");
+        expectArgs(in.Args, 1, in.Sig, "icall");
+        result(in, in.Sig.Ret);
+        break;
       case Opcode::Retain:
       case Opcode::Release:
         if (!arity(in, 1))

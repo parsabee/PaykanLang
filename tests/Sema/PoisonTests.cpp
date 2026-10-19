@@ -78,8 +78,8 @@ TEST(Poison, EveryUseOfAPoisonedVariableIsSilent) {
       "f(a);",                                    // call argument
       "p = P(a); println(Str(p.x));",             // constructor argument
       "println(Str(f(a) + 1));",                  // nested in a call
-      "if (a) { println(\"t\"); }",               // if condition
-      "while (a < 3) { println(\"w\"); }",        // while condition
+      "if a { println(\"t\"); }",                 // if condition
+      "while a < 3 { println(\"w\"); }",          // while condition
       "k = if a then 1 else 2; println(Str(k));", // ternary condition
       "q = -a; r = !a; println(Str(q)); println(Str(r));", // unary ops
       "t = a * 2 + 1 == 3 && a; println(Str(t));",         // binary ops
@@ -144,9 +144,9 @@ TEST(Poison, RedeclaredVariableIsCheckedAgain) {
 
 // A re-assignment in an inner scope re-declares the variable where it lives.
 TEST(Poison, ReassignmentInANestedScopeRedeclaresTheOuterVariable) {
-  expectOnly(wrapMain("a = " + kBad +
-                      ";\n if (True) { a = 5; }\n println(Str(a + 1));"),
-             kBadMsg);
+  expectOnly(
+      wrapMain("a = " + kBad + ";\n if True { a = 5; }\n println(Str(a + 1));"),
+      kBadMsg);
 }
 
 // A failing re-assignment keeps the variable poisoned (and silent).
@@ -187,7 +187,7 @@ TEST(Poison, UndeclaredVariableNextToAPoisonedOneIsStillReported) {
 // The poison is a binding like any other: it ends with its scope.
 TEST(Poison, PoisonDoesNotOutliveItsScope) {
   auto r = semaCheck(
-      wrapMain("if (True) { a = " + kBad + "; println(a); }\n println(a);"));
+      wrapMain("if True { a = " + kBad + "; println(a); }\n println(a);"));
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("use of undeclared variable 'a'"),
             std::string::npos)

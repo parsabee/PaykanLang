@@ -296,6 +296,9 @@ enum class Opcode : uint8_t {
   WeakNew,     // box -> weak   (Paykan_weak_new: the weak count +1)
   WeakLoad,    // weak -> box   (Paykan_weak_load: a +1 box, or null)
   WeakRelease, // weak          (Paykan_weak_release)
+  // function values (docs/pir.md §6)
+  FnAddr, // Callee = @fn -> ptr: the function's address
+  ICall,  // callee (ptr) = Args[0], Sig; Args[1..] = args
 };
 
 enum class CmpPred : uint8_t { Eq, Ne, Lt, Le, Gt, Ge };
@@ -312,11 +315,11 @@ struct Instr {
   // Per-opcode extras (unused fields are left default):
   CmpPred Pred = CmpPred::Eq; // Cmp / UCmp
   Type CastTo = Type::Void;   // Cast
-  std::string Callee;         // Call: function symbol
+  std::string Callee;         // Call / FnAddr: function symbol
   std::string ClassName;      // VCall / New / Field* / VTableAddr
   std::string Field;          // FieldLoad / FieldStore / FieldAddr
   uint32_t Slot = 0;          // VCall; Wrap / Mask: the bit width
-  Signature Sig;              // VCall: the slot's signature
+  Signature Sig;              // VCall: the slot's; ICall: the callee's
   LocalId Local = 0;          // Load / Store / LocalAddr
 };
 

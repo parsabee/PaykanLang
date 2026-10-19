@@ -53,7 +53,7 @@ fn main() -> int {
   counts = collections::HashMap<Str, int>();
   words: Str[5] = ["to", "be", "or", "not", "to"];
   i: int = 0;
-  while (i < words.len()) {
+  while i < words.len() {
     counts.put(words[i], counts.getOr(words[i], 0) + 1);
     i = i + 1;
   }
@@ -64,7 +64,7 @@ fn main() -> int {
   todo.push("plan", 1);
   todo.push("ship", 3);
   out = collections::List<Str>();
-  while (!todo.isEmpty()) { out.push(todo.pop()); }
+  while !todo.isEmpty() { out.push(todo.pop()); }
   println(collections::listToString(out));
   return 0;
 }

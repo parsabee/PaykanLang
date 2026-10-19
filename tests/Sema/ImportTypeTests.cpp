@@ -133,7 +133,7 @@ fn main() -> int {
   a: shapes::Alpha = shapes::Alpha();
   k: shapes::Kind = a.kindOf();
   f: shapes::Kind = a.kind;
-  if (k == shapes::Kind::Round && f == shapes::Kind::Round) { return 0; }
+  if k == shapes::Kind::Round && f == shapes::Kind::Round { return 0; }
   return 1;
 }
 )");
@@ -260,7 +260,7 @@ fn main() -> int {
   t: leaf::Thing = w.get();
   m: leaf::Mode = w.getMode();
   n: int = w.put(leaf::Thing(3));
-  if (m == leaf::Mode::Fast) { return t.val() + n; }
+  if m == leaf::Mode::Fast { return t.val() + n; }
   return 0;
 }
 )");

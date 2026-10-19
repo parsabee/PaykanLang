@@ -41,7 +41,7 @@ fn main() -> int {
   println("\"ab\"[1]:     " + Str(c));
   letters: Str = "";
   i = 0;
-  while (i < 3) {
+  while i < 3 {
     letters = letters + Str<char>("xyz"[i]);
     i = i + 1;
   }

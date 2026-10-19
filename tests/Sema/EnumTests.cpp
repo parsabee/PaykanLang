@@ -83,25 +83,24 @@ TEST(Enum, UnknownEnumNameRejected) {
 
 TEST(Enum, EqualitySameEnumOk) {
   auto r = semaCheck(withEnums("enum Color { Red, Green }",
-                               "if (Color::Red == Color::Green) { }"));
+                               "if Color::Red == Color::Green { }"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Enum, InequalitySameEnumOk) {
   auto r = semaCheck(withEnums("enum Color { Red, Green }",
-                               "if (Color::Red != Color::Green) { }"));
+                               "if Color::Red != Color::Green { }"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 TEST(Enum, CompareDifferentEnumsRejected) {
   auto r = semaCheck("enum A { X, Y }\nenum B { P, Q }\n" +
-                     wrapMain("if (A::X == B::P) { }"));
+                     wrapMain("if A::X == B::P { }"));
   EXPECT_FALSE(r.Ok);
 }
 
 TEST(Enum, CompareEnumWithIntRejected) {
-  auto r =
-      semaCheck(withEnums("enum Color { Red }", "if (Color::Red == 0) { }"));
+  auto r = semaCheck(withEnums("enum Color { Red }", "if Color::Red == 0 { }"));
   EXPECT_FALSE(r.Ok);
 }
 
@@ -117,7 +116,7 @@ TEST(Enum, AssignIntToEnumRejected) {
 
 TEST(Enum, OrderingOperatorRejected) {
   auto r = semaCheck(withEnums("enum Color { Red, Green }",
-                               "if (Color::Red < Color::Green) { }"));
+                               "if Color::Red < Color::Green { }"));
   EXPECT_FALSE(r.Ok);
 }
 

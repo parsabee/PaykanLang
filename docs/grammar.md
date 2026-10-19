@@ -53,7 +53,7 @@ Keywords (reserved; never identifiers):
 
 ```
 import  as  class  struct  enum  match  mov  fn  native  return  if  then  else
-while  break  continue  True  False  None  _  view  inout  let  weak  impl  static  trait
+elif  while  break  continue  True  False  None  _  view  inout  let  weak  impl  static  trait
 ```
 
 `_` alone is the `UNDERSCORE` token (destructuring skip, match wildcard);
@@ -274,8 +274,9 @@ letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
 weakDecl  ::= "weak" IDENT ( ":" typeAnnotation )? ( "=" expression )? ";"
 borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 
-ifStmt    ::= "if" "(" expression ")" block ( "else" ( block | ifStmt ) )?
-whileStmt ::= "while" "(" expression ")" block
+ifStmt    ::= "if" expression block elseTail?
+elseTail  ::= "elif" expression block elseTail? | "else" block
+whileStmt ::= "while" expression block
 
 destructureTargets ::= destructureTarget ( "," destructureTarget )+
 destructureTarget  ::= IDENT | IDENT ":" typeAnnotation | "_"
@@ -306,11 +307,19 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   not written, is its initializer's.  It needs an initializer, is never
   `let` (`let x: view = e;`) and is not a destructuring target.  With the
   mode before the name (`view x = e;`) the syntax error shows the fix.
-- A statement that starts with `if` is an if-statement when the
-  parenthesised condition is followed by `{`; otherwise it is an expression
-  statement whose expression is a ternary (`if c then a else b;`).
-- An `else` is followed by a block or by another if-statement (`else if`
-  chains nest in the AST).
+- A condition is not parenthesised (`if x > 0 {`, `while i < n {`); it ends
+  at the block's `{`, which no expression consumes outside brackets except a
+  lambda's body.  Parentheses around it are a parenthesised expression, so
+  `if (x > 0) {` still parses.
+- A statement that starts with `if` is an if-statement when its condition is
+  followed by `{`, and an expression statement whose expression is a ternary
+  (`if c then a else b;`) when it is followed by `then`: the first of the two
+  outside any brackets, not counting a nested ternary's `then`, decides.
+- An if-statement chains with `elif`, never `else if` (a syntax error that
+  names `elif`); an `else` is followed by a block.  Each `elif` is an
+  `IfStmt` nested as the else branch of the one before it.  The conditional
+  expression keeps `else if` (`if a then x else if b then y else z`), and
+  `elif` there is a syntax error that names `else if`.
 - Match arms: a wildcard `_`, a literal pattern (bare literal tokens only,
   so `-1` is not a pattern), a type with an optional binding, in any order.
   A binding may borrow the subject, `n: view T` or `n: inout T`

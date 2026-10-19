@@ -56,7 +56,7 @@ impl Labeled {
 fn sumArray(a: view int[]) -> int {
   total: int = 0;
   i: int = 0;
-  while (i < a.len()) {
+  while i < a.len() {
     total = total + a[i];
     i = i + 1;
   }
@@ -74,7 +74,7 @@ fn makePoints() -> Point[3] {
 fn concatAll(a: view Str[]) -> Str {
   result: Str = "";
   i: int = 0;
-  while (i < a.len()) {
+  while i < a.len() {
     result = result + a[i];
     i = i + 1;
   }
@@ -85,12 +85,12 @@ fn concatAll(a: view Str[]) -> Str {
 fn matMul(A: view int[2][], B: view int[2][]) -> int[2][2] {
   C: int[2][2] = [[0; 2]; 2];
   i: int = 0;
-  while (i < C.len()) {
+  while i < C.len() {
     j: int = 0;
-    while (j < C[i].len()) {
+    while j < C[i].len() {
       sum: int = 0;
       k: int = 0;
-      while (k < B.len()) {
+      while k < B.len() {
         sum = sum + A[i][k] * B[k][j];
         k = k + 1;
       }
@@ -199,7 +199,7 @@ fn main() -> int {
   println("=== Labeled array ===");
   labels: Labeled[3] = [Labeled("x", 10), Labeled("y", 20), Labeled("z", 30)];
   i: int = 0;
-  while (i < labels.len()) {
+  while i < labels.len() {
     println(labels[i].describe());
     i = i + 1;
   }
@@ -243,9 +243,9 @@ fn main() -> int {
   // --- 18. Iterating a 2D array with nested while loops --------------------
   println("=== 2D iteration ===");
   r: int = 0;
-  while (r < matrix.len()) {
+  while r < matrix.len() {
     c: int = 0;
-    while (c < matrix[r].len()) {
+    while c < matrix[r].len() {
       println(Str<int>(matrix[r][c]));
       c = c + 1;
     }

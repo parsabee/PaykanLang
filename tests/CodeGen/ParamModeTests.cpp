@@ -119,8 +119,8 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
     fn scale(x: view float, by: view float) -> float { y = x * by; return y; }
     fn name(c: view Color, loud: view bool, end: view char) -> Str {
       s = "red";
-      if (c == Color::Green) { s = "green"; }
-      if (loud) { s = s + Str(end); }
+      if c == Color::Green { s = "green"; }
+      if loud { s = s + Str(end); }
       return s;
     }
     fn at<T>(xs: view T[], i: view int) -> T { return xs[i]; }
@@ -175,7 +175,7 @@ TEST(ParamMode, InoutParametersChangeTheCallersVariables) {
       r = 0; s = readBack(r);
       i = 0; total = 0;
       pair: int[2] = [1, 2];
-      while (i < 3) { count(pair, total); i = i + 1; }
+      while i < 3 { count(pair, total); i = i + 1; }
       println(Str(k) + " " + Str(a) + Str(b) + " " + Str(x) + " " + Str(f) +
               " " + Str(ch) + " " + Str(c == Color::Red) + " " + Str(lo) +
               Str(hi) + " " + Str(r) + " " + Str(s) + " " + Str(total));

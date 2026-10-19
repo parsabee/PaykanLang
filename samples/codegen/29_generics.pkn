@@ -93,7 +93,7 @@ fn main() -> int {
   s: Stack<Str> = Stack<Str>("");
   s.push("a");
   s.push("b");
-  while (!s.empty()) { println(s.pop()); }    // b, a
+  while !s.empty() { println(s.pop()); }    // b, a
 
   println(Str<int>(first([10, 20])));           // 10   (T inferred as int)
   println(first<Str>(["x", "y"]));            // x    (explicit)

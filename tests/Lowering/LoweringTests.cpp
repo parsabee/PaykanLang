@@ -160,7 +160,7 @@ TEST(Lowering, ReturnReleasesEveryScopeAfterEvaluatingTheValue) {
   auto l = lower(R"(
     fn pick(flag: bool) -> Str {
       a: Str = "x";
-      if (flag) {
+      if flag {
         b: Str = "y";
         return b;
       }
@@ -427,12 +427,12 @@ TEST(Lowering, FloatComparisonsAreSingleCmpInstructions) {
   auto l = lower(R"(
     fn f(a: float, b: float) -> int {
       r = 0;
-      if (a != b) { r = r + 1; }
-      if (a == b) { r = r + 2; }
-      if (a < b) { r = r + 4; }
-      if (a <= b) { r = r + 8; }
-      if (a > b) { r = r + 16; }
-      if (a >= b) { r = r + 32; }
+      if a != b { r = r + 1; }
+      if a == b { r = r + 2; }
+      if a < b { r = r + 4; }
+      if a <= b { r = r + 8; }
+      if a > b { r = r + 16; }
+      if a >= b { r = r + 32; }
       return r;
     }
     fn main() -> int { return f(1.0, 2.0); }
@@ -658,9 +658,9 @@ TEST(Lowering, ReassigningAMatchBindingIsAnOrdinaryRebind) {
       k: int = 0;
       match o {
         a: A {
-          if (k == 1) { a = A(1); }
+          if k == 1 { a = A(1); }
           i: int = 0;
-          while (i < 3) { a = A(i); i = i + 1; }
+          while i < 3 { a = A(i); i = i + 1; }
           println(Str<int>(a.v));
         }
         None { }
@@ -706,7 +706,7 @@ TEST(Lowering, OptionalMatchTestsNullBeforeTheVTable) {
   auto l = lower(R"(
     class N { v: int; }
     impl N { fn __init__(v: int) { self.v = v; } }
-    fn find(f: bool) -> N? { if (f) { return N(1); } return None; }
+    fn find(f: bool) -> N? { if f { return N(1); } return None; }
     fn main() -> int {
       match find(True) {
         n: N { println(Str<int>(n.v)); }
@@ -904,7 +904,7 @@ TEST(Lowering, OptionalValuesAreNotBoxed) {
     class C { n: int?; }
     impl C { fn __init__() { } }
     fn half(n: int) -> int? {
-      if (n % 2 != 0) { return None; }
+      if n % 2 != 0 { return None; }
       return n / 2;
     }
     fn get(o: int?) -> int {
@@ -917,7 +917,7 @@ TEST(Lowering, OptionalValuesAreNotBoxed) {
       f: float? = 3;
       c = C();
       c.n = x;
-      if (y == None) { x = 7; }
+      if y == None { x = 7; }
       return get(x) + get(c.n) + get(y);
     }
   )");

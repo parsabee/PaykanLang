@@ -13,16 +13,16 @@ fn main() -> int {
   // --- readln: read lines until EOF ---
   println("=== readln ===");
   i: int = 0;
-  while (True) {
+  while True {
     match Stdin.readln() {
       line: Str {
         // strip trailing newline for display
         n: int = line.len();
         display: Str = "";
         j: int = 0;
-        while (j < n) {
+        while j < n {
           c: char = line[j];
-          if (c != '\n') {
+          if c != '\n' {
             display = display + Str<char>(c);
           }
           j = j + 1;

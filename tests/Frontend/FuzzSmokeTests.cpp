@@ -99,6 +99,7 @@ const char *const kFragments[] = {
     "'c'",   "None",  "True",   "_",
     " ",     "\n",    "\"",     "'",
     "//",    "\\",    "@",      "9223372036854775808",
+    "elif",
 };
 
 std::string mutate(const std::string &base, Rng &rng) {

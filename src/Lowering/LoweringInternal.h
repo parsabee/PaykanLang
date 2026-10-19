@@ -536,41 +536,64 @@ private:
   // -- Function values (LoweringClosure.cpp,
   // docs/language/15-function-types.md)
 
-  /// The closure classes made so far: per lambda, and per named function
-  /// used as a value.
-  std::unordered_map<const ast::LambdaExpr *, std::string> LambdaClasses;
-  std::unordered_map<std::string, std::string> FunctionRefClasses;
+  /// A function value is held in place as the tuple `(int, Obj?)` this
+  /// returns: its code's address (as an i64), then the box of its closure,
+  /// the object holding its captures, or null when it captures nothing.  An
+  /// optional function value is the same, None a zero code word.  The
+  /// layout, retains, releases, equality and type descriptors of function
+  /// values are this tuple's.
+  ast::TupleType *functionValueShape();
+  /// @p ty, or functionValueShape() for a function value.
+  ast::Type *memShapeOf(ast::Type *ty);
+
+  /// The code of each lambda (its `call` function, made once), and of each
+  /// named function used as a value (a function forwarding to it).
+  std::unordered_map<const ast::LambdaExpr *, std::string> LambdaCode;
+  std::unordered_map<std::string, std::string> FunctionRefCode;
   unsigned NextClosureId = 0;
-  /// The `call` slot's signature for a closure of type @p fnt: the closure
-  /// object, then the parameters as a method's, a result held in memory
-  /// written through a trailing pointer.
+  /// The signature of the code of a function value of type @p fnt: the
+  /// closure object (null when nothing is captured), then the parameters as
+  /// a method's, a result held in memory written through a trailing pointer.
   pir::Signature closureSignature(ast::FunctionType *fnt);
-  /// A closure class @p name with a field per capture and the vtable
-  /// [destroy, toString, equals, call] (the functions declared, bodies to
-  /// come).
-  /// @p captureWeak marks the captures of `weak` variables: a weak field
-  /// of the closure, loaded as a strong reference for a call's duration.
+  /// A closure class @p name with a field per capture and an object's
+  /// vtable [destroy, toString, equals] (the destructor declared, its body
+  /// to come).  @p captureWeak marks the captures of `weak` variables: a
+  /// weak field of the closure, loaded as a strong reference for a call's
+  /// duration.
   pir::Class *declareClosureClass(const std::string &name,
                                   const std::vector<ast::Type *> &captureTys,
-                                  const std::vector<bool> &captureWeak,
-                                  const pir::Signature &callSig);
+                                  const std::vector<bool> &captureWeak);
   void emitClosureDestructor(const std::string &name,
                              const std::vector<ast::Type *> &captureTys,
                              const std::vector<bool> &captureWeak);
-  /// The class and functions of lambda @p node (made once): its name.
+  /// The code of lambda @p node (and its closure class, when it captures
+  /// anything), made once: the code's function name.
   const std::string &lowerLambda(ast::LambdaExpr *node);
-  /// A new closure of @p node, its captures copied in: a fresh owned box.
-  Val emitLambdaValue(ast::LambdaExpr *node);
-  /// A closure class whose `call` forwards to the function @p fnName (made
-  /// once per function): its name.
+  /// Write a function value of lambda @p node to @p dst: its code, and a new
+  /// closure with its captures copied in (owned by @p dst).
+  void emitLambdaInto(ast::LambdaExpr *node, const Val &dst);
+  /// The code forwarding to the function @p fnName (made once): its name.
   const std::string &lowerFunctionRef(const std::string &fnName,
                                       ast::FunctionType *fnt);
-  Val emitFunctionRefValue(const std::string &fnName, ast::FunctionType *fnt);
-  /// Call the closure object @p closure (borrowed for the call) of type
-  /// @p fnt with @p argExprs; @p resultTy is the call's resolved type.
-  Val emitClosureCall(const Val &box, ast::FunctionType *fnt,
+  /// Write the function value of the named function @p fnName to @p dst:
+  /// its forwarding code and no closure.
+  void emitFunctionRefInto(const std::string &fnName, ast::FunctionType *fnt,
+                           const Val &dst);
+  /// Call the function value at @p addr (whose closure the call keeps for
+  /// its duration) of type @p fnt with @p argExprs; @p resultTy is the
+  /// call's resolved type.
+  Val emitClosureCall(const Val &addr, ast::FunctionType *fnt,
                       const std::vector<ast::Expr *> &argExprs,
-                      ast::Type *resultTy, bool wantAddress);
+                      ast::Type *resultTy);
+  /// Call the function value @p callee (an expression of function type)
+  /// with @p args; @p resultTy is the call's resolved type.
+  Val emitFunctionValueCall(ast::Expr *callee,
+                            const std::vector<ast::Expr *> &args,
+                            ast::Type *resultTy);
+  /// Whether the optional function value at @p addr is None.
+  Val emitFunctionValueIsNone(const Val &addr);
+  /// `match` on an optional function value.
+  Val emitFunctionValueMatch(ast::MatchStmt *node);
 
   // -- Structs (LoweringStruct.cpp, docs/language/14-structs.md)
   //

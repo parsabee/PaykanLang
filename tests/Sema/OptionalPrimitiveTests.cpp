@@ -45,7 +45,7 @@ TEST(OptionalPrimitive, ParamsReturnsFieldsArraysTuples) {
   expectOk(R"(
     class H { n: int?; c: char?; }
     impl H { fn __init__() { } }
-    fn half(n: int) -> int? { if (n % 2 != 0) { return None; } return n / 2; }
+    fn half(n: int) -> int? { if n % 2 != 0 { return None; } return n / 2; }
     fn take(x: float?) -> bool { return x == None; }
     fn main() -> int {
       h = H();                               // optional fields start as None
@@ -75,7 +75,7 @@ TEST(OptionalPrimitive, MatchBindsThePlainValue) {
       c: char? = 'a';
       match c { ch: char { x: char = ch; } _ { } }
       b: bool? = False;
-      match b { v: bool { if (v) { } } None { } }
+      match b { v: bool { if v { } } None { } }
       return value(None);
     }
   )");
@@ -166,7 +166,7 @@ TEST(OptionalPrimitive, NeverNarrowsWithoutMatch) {
               "cannot use optional 'int?' as 'int' without unwrapping");
   expectError(inMain("a: int? = 1;\n n = a + 1;"),
               "cannot use optional 'int?' as 'int' without unwrapping");
-  expectError(inMain("a: bool? = True;\n if (a) { }"),
+  expectError(inMain("a: bool? = True;\n if a { }"),
               "if condition must be 'bool', got 'bool?'");
 }
 

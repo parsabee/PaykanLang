@@ -70,12 +70,12 @@ fn loopOverwrite() -> int {
   println("=== loop overwrite ===");
   arr: int[5] = [0; 5];
   i: int = 0;
-  while (i < 5) {
+  while i < 5 {
     arr[i] = i * i;
     i = i + 1;
   }
   i = 0;
-  while (i < 5) {
+  while i < 5 {
     println(Str(arr[i]));  // 0 1 4 9 16
     i = i + 1;
   }
@@ -101,7 +101,7 @@ fn iterString() -> int {
   s: Str = "hello";
   n: int = s.len();
   i: int = 0;
-  while (i < n) {
+  while i < n {
     println(Str(s[i]));  // convert char to Str
     i = i + 1;
   }

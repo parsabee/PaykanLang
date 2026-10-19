@@ -54,7 +54,7 @@ TEST(Recovery, StatementBoundaries) {
 
 TEST(Recovery, BrokenNestedBlockDoesNotSwallowTheEnclosingOne) {
   auto r = parse("fn main() -> int {\n"
-                 "  if (x) {\n"
+                 "  if x {\n"
                  "    a = ;\n" // 3
                  "    b = 1;\n"
                  "  }\n"
@@ -197,8 +197,8 @@ TEST(Recovery, NoFollowOnAfterALexicalError) {
 
 TEST(Recovery, UnclosedBlocksAtEndOfFileAreOneError) {
   auto r = parse("fn main() -> int {\n"
-                 "  while (True) {\n"
-                 "    if (x) {\n"
+                 "  while True {\n"
+                 "    if x {\n"
                  "  return 0;\n");
   EXPECT_EQ(r.Errors, 1u) << r.Text;
   ASSERT_EQ(r.Diags.size(), 2u) << r.Text;
@@ -208,7 +208,7 @@ TEST(Recovery, UnclosedBlocksAtEndOfFileAreOneError) {
   EXPECT_EQ(r.Diags[1].Level, paykan::sema::Diagnostic::Note);
   EXPECT_EQ(r.Diags[1].Message, "to match this '{'");
   EXPECT_EQ(r.Diags[1].Loc.getLineStart(), 3u); // the innermost open block
-  EXPECT_EQ(r.Diags[1].Loc.getColumnStart(), 12u);
+  EXPECT_EQ(r.Diags[1].Loc.getColumnStart(), 10u);
 
   auto c = parse("class A {\n  fn f() {\n");
   EXPECT_EQ(c.Errors, 1u) << c.Text;

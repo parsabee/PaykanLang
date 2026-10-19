@@ -4,8 +4,9 @@ The design behind `docs/language/15-function-types.md`: what a function value
 is, what it may capture, how it is called, and how it is laid out at run time.
 The decisions were made to fit the language as it is (values held in place,
 objects behind reference-counted boxes, `view` / `inout` borrows checked at
-compile time) and to need no change to the PIR format, the runtime ABI or the
-`.pkm` format, whose versions stay fixed until 0.2.0.  The open questions at
+compile time).  They add two PIR instructions, `fn.addr` and `icall`, and no
+change to the runtime ABI or the `.pkm` format; the versions stay fixed until
+0.2.0.  The open questions at
 the end are the ones a reviewer should answer; each has the default this
 implementation takes.
 
@@ -15,13 +16,13 @@ implementation takes.
 |-------|----------|
 | Type syntax | `(T1, T2) -> R`; `() -> R` for no parameters; `-> void` for no result; a parameter may have a mode, `(view Str, inout int) -> bool`; `->` is right-associative, and a function type is parenthesised to take a suffix (`((int) -> int)[3]`, `((int) -> int)?`) |
 | Values | a lambda `fn(x: int) -> int { return x + 1; }`, or a named function used without calling it (`square`, `m::square`): a free function of the module or an import, a `static fn` (`Point::origin`), not a method, a constructor, a builtin or an uninstantiated generic |
-| Representation | a reference type: a value is a shared, reference-counted object (a *closure*) holding a code pointer and its captures; copying one shares it, like an object; it is not an `Obj`, `==` is identity (the same closure), and it has no `toString` or `hash` |
+| Representation | a value held in place, 16 bytes: the address of its code, and the box of its *closure*, a reference-counted object holding the captures (null when there are none); copying one copies the code and shares the closure; `==` is true for the same code and the same closure; it is a `ValueType`, not an `Obj`, and has no `toString` or `hash`; an optional one is the same 16 bytes, `None` having no code |
 | Captures | a lambda copies, when it is made, each variable of the enclosing function it uses (an `int` is copied, an object or a `Str` is retained, a struct or a tuple is copied like an assignment); only a plain variable (a local or a by-value parameter) or a class method's `self` can be captured, never a `view` or `inout` name, a `view fn`'s `self` or a struct's `self`; inside the lambda a captured name is read-only |
 | Calls | `f(args)` where `f` is a variable or parameter of function type, `obj.f(args)` where `f` is a field of function type (and `self.f(args)`), with the arguments checked and passed exactly as for the function's own parameters, modes included |
 | Nominal? | structural: two function types are the same when their parameter types, modes and result type are |
 | Generics | a function type may name type parameters (`fn map<T, U>(xs: view T[], f: (view T) -> U)`), and a function value is a type argument (`List<(int) -> int>`) |
-| Optionals | `((int) -> int)?` is a nullable reference, unwrapped with `match` like an optional object |
-| Modules | a function type crosses a module boundary in a signature or a field like any type; a closure made in one module is called in another through its vtable |
+| Optionals | `((int) -> int)?` is the same 16 bytes, `None` having no code; unwrapped with `match` like an optional object |
+| Modules | a function type crosses a module boundary in a signature or a field like any type; a function value made in one module is called in another through its code's address |
 | Not yet | borrowed results (`-> view T`) in a function type; methods as values (`p.shift` bound to `p`); generic lambdas; a lambda capturing a `view`, an `inout` or a struct's `self`; printing a function value |
 
 ## Syntax
@@ -98,36 +99,53 @@ outside the lambda) and recorded on the `LambdaExpr`, in first-use order.
 
 ## Run-time representation
 
-A closure is an object of a class the lowering synthesises per lambda (and
-per named function used as a value): the object header, then one field per
-capture (a `weak` variable's a `weak` field, docs/design/weak-references.md);
-its vtable is `[destroy, toString, equals, call]`, the first three the
-runtime's object defaults (`PaykanObject_toString`, `PaykanObject_equals`)
-and a generated `destroy` that releases the captures.  Slot 3, `call`, has the
-signature `(obj self, params...) -> result` with the parameters passed as a
-method's are (a `view` reference as a borrowed box, an `inout` as the address
-of the caller's storage, a value held in memory by address, a result held in
-memory through a trailing pointer).  So:
+A function value is held in place, laid out as the tuple `(int, Obj?)`: the
+address of its *code* (kept as an `i64`), then the box of its *closure*, or
+null.  The lowering treats it as that tuple everywhere a value held in memory
+is handled: a variable is a `mem(16, 8)` local, a field or an element 16
+bytes in place, a parameter or a result passed by address, a copy a
+`mem.copy` that retains the closure, a release the closure's release.  An
+optional function value is the same 16 bytes; `None` is all zeros, so a new
+object's field of type `((int) -> int)?` is `None` already.
 
-* a function value is a `box` in PIR, retained and released like an object's;
-* `f(args)` lowers to `unbox` the variable's box, then `vcall` slot 3 with
-  the function type's signature and no class name (the verifier checks the
-  signature, which is all a call site knows): no new PIR instruction;
-* a lambda expression lowers to `new` of its class, a `field.store` per
-  capture (a reference retained, a value held in memory copied and its
-  references retained) and `box`, a fresh owned box like a constructor's;
-* a named function as a value is a closure class with no captures whose
-  `call` forwards its parameters to the function (ownership passes through:
-  the callee consumes the boxes `call` was given);
-* a `PaykanType` descriptor for a function type (a generic native function's
-  argument) is an object's: one reference at offset 0.
+* The code of a lambda is a function `fn.<module>.N.call(obj closure,
+  params...) -> result`, the parameters passed as a method's are (a `view`
+  reference as a borrowed box, an `inout` as the address of the caller's
+  storage, a value held in memory by address, a result held in memory
+  through a trailing pointer).  It reads its captures from the closure.
+* The closure of a lambda that captures something is an object of the class
+  `fn.<module>.N`: the object header, one field per capture (a `weak`
+  variable's a `weak` field, docs/design/weak-references.md), and an
+  object's vtable, the runtime's `toString` and `equals` and a generated
+  `destroy` that releases the captures.  A lambda that captures nothing has
+  no closure: its value is its code and null.
+* A named function used as a value is the code `fn.ref.<module>.<f>.call`,
+  which ignores the closure and forwards its parameters to the function
+  (ownership passes through), and no closure.
+* A lambda expression or a named function writes its two words into a
+  temporary: `fn.addr` of the code, cast to `i64`, then the closure, `new`
+  of its class with a `field.store` per capture (a reference retained, a
+  value held in memory copied and its references retained) and `box`, or
+  null.
+* `f(args)` loads the code word and the closure from the value's address
+  before evaluating the arguments (an argument may rebind `f`), retains the
+  closure for the call, and calls the code with `icall`, the closure object
+  first, the function type's signature written out (the verifier checks it,
+  which is all a call site knows).
+* `==` passes the two addresses and the tuple's layout to
+  `PaykanTuple_equals`: the code words are compared as integers and the
+  closures by the object's `equals`, identity, two nulls being equal.
+* A `PaykanType` descriptor for a function type (a generic native function's
+  argument, a `Buffer<(int) -> int>`'s element) is the tuple's: 16 bytes,
+  one optional reference at offset 8.
 
-The classes are module items like any other, named `fn.N` (a lambda) and
-`fn.ref.<function>` (a named function): names no Paykan identifier can spell,
-mangled by the C backend like `Box<int>`.  A closure crosses modules as a
-box: the module that calls it needs only its signature.  Nothing is added to
-the runtime: the vtable layout is an object's, so `Paykan_release` destroys a
-closure through slot 0 as it does any object.
+At `-O2` LLVM turns an `icall` whose code is known into a direct call, often
+inlined: a lambda passed straight to the function that calls it costs no
+indirect call.  The code and closure classes are module items like any
+other: names no Paykan identifier can spell, mangled by the C backend like
+`Box<int>`.  A function value crosses modules as its two words: the module
+that calls it needs only its signature.  Nothing is added to the runtime:
+`Paykan_release` destroys a closure through slot 0 as it does any object.
 
 ## Diagnostics
 
@@ -146,7 +164,7 @@ closure through slot 0 as it does any object.
 | capturing `self` in a `view fn` or a struct method | `view fn m() { g = fn() { self.x = 1; }; }` |
 | assigning a captured name | `n = 1; g = fn() { n = 2; };` |
 | a captured name as an `inout` argument | `g = fn() { bump(n); };` |
-| a lambda's `break` outside its own loop | `while (c) { g = fn() { break; }; }` |
+| a lambda's `break` outside its own loop | `while c { g = fn() { break; }; }` |
 | `toString`, `print` on a function value | `println(f)`, `f.toString()` |
 
 ## Open questions
@@ -187,12 +205,13 @@ implementation in the place noted.
    covariance for reference types would be sound but the existing conversion
    rules are representation-preserving (a tuple element must match exactly),
    so function types follow those.
-7. **Equality and printing?**  `==` is identity (the same closure), as
-   for an object without an `equals` of its own: two evaluations of the same
-   lambda are different closures, but a stored closure equals itself, which
-   is what `List<T>.contains` and `indexOf` need to take function values.
-   No `toString`: it would have nothing to show but an address.  An
-   alternative is no `==` at all, which keeps `List<(int) -> int>` out.
+7. **Equality and printing?**  `==` compares the code and the closure: a
+   named function equals itself, as does a lambda that captures nothing,
+   while each evaluation of a capturing lambda makes a different closure.  A
+   stored value equals itself, which is what `List<T>.contains` and
+   `indexOf` need to take function values.  No `toString`: it would have
+   nothing to show but an address.  An alternative is no `==` at all, which
+   keeps `List<(int) -> int>` out.
 8. **Where does a lambda's `self` come from in a class method?**  Captured as
    a reference, like any object; the lambda's body then treats `self` as an
    ordinary variable holding the object (private methods are still the

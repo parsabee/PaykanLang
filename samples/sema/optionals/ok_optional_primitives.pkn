@@ -1,7 +1,7 @@
 // Optional primitives: `int?`, `float?`, `bool?`, `char?` widen from their
 // primitive, take None, and unwrap with a primitive match arm.
 fn half(n: int) -> int? {
-  if (n % 2 != 0) { return None; }
+  if n % 2 != 0 { return None; }
   return n / 2;
 }
 
@@ -15,6 +15,6 @@ fn main() -> int {
     n: int { println(Str<int>(n + 1)); }
     None   { println("odd"); }
   }
-  if (b == None && a != None) { println("ok"); }
+  if b == None && a != None { println("ok"); }
   return 0;
 }

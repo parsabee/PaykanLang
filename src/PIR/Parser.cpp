@@ -1047,9 +1047,9 @@ private:
     if (Cur.Kind != Tok::Word)
       return false;
     static const char *const kStmtWords[] = {
-        "if",          "while", "break",       "continue", "ret",
-        "unreachable", "cond",  "call",        "vcall",    "retain",
-        "release",     "free",  "field.store", "store",    "ptr.store"};
+        "if",   "while",       "break", "continue", "ret",    "unreachable",
+        "cond", "call",        "vcall", "icall",    "retain", "release",
+        "free", "field.store", "store", "ptr.store"};
     for (const char *w : kStmtWords)
       if (Cur.Text == w)
         return true;
@@ -1158,6 +1158,22 @@ private:
         return false;
       needsFixup = true;
       break;
+    case Opcode::FnAddr:
+      if (!parseSymbol(in.Callee))
+        return false;
+      resultTy = Type::Ptr;
+      break;
+    case Opcode::ICall: {
+      Operand fn;
+      if (!parseOperand(fn) || !expect(Tok::Colon, "':'") ||
+          !parseSignature(in.Sig))
+        return false;
+      in.Args.push_back(fn);
+      if (!parseArgs(in.Args))
+        return false;
+      resultTy = in.Sig.Ret;
+      break;
+    }
     case Opcode::VCall: {
       Operand recv;
       if (!parseOperand(recv) || !expect(Tok::Colon, "':'"))

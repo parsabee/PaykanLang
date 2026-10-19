@@ -16,7 +16,7 @@ static std::string wrapMain(const std::string &body) {
 TEST(ControlFlow, IfBoolCondition) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 10;
-    if (x > 5) { println("big"); }
+    if x > 5 { println("big"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -24,7 +24,7 @@ TEST(ControlFlow, IfBoolCondition) {
 TEST(ControlFlow, IfElse) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 10;
-    if (x > 5) { println("big"); } else { println("small"); }
+    if x > 5 { println("big"); } else { println("small"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -32,7 +32,7 @@ TEST(ControlFlow, IfElse) {
 TEST(ControlFlow, IfNonBoolConditionRejected) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 10;
-    if (x) { println("nope"); }
+    if x { println("nope"); }
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("bool"), std::string::npos);
@@ -41,8 +41,8 @@ TEST(ControlFlow, IfNonBoolConditionRejected) {
 TEST(ControlFlow, IfElseIfChain) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 42;
-    if (x > 100) { println("large"); }
-    else if (x > 10) { println("medium"); }
+    if x > 100 { println("large"); }
+    elif x > 10 { println("medium"); }
     else { println("small"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -51,7 +51,7 @@ TEST(ControlFlow, IfElseIfChain) {
 TEST(ControlFlow, IfStringConditionRejected) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 1;
-    if (x) { println("nope"); }
+    if x { println("nope"); }
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("bool"), std::string::npos);
@@ -62,7 +62,7 @@ TEST(ControlFlow, IfStringConditionRejected) {
 TEST(ControlFlow, WhileBoolCondition) {
   auto r = semaCheck(wrapMain(R"(
     i: int = 0;
-    while (i < 5) { i = i + 1; }
+    while i < 5 { i = i + 1; }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -70,7 +70,7 @@ TEST(ControlFlow, WhileBoolCondition) {
 TEST(ControlFlow, WhileNonBoolConditionRejected) {
   auto r = semaCheck(wrapMain(R"(
     i: int = 0;
-    while (i) { i = i + 1; }
+    while i { i = i + 1; }
   )"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("bool"), std::string::npos);
@@ -78,7 +78,7 @@ TEST(ControlFlow, WhileNonBoolConditionRejected) {
 
 TEST(ControlFlow, WhileTrueLiteral) {
   auto r = semaCheck(wrapMain(R"(
-    while (True) { return 0; }
+    while True { return 0; }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -135,7 +135,7 @@ TEST(ControlFlow, LogicalInIfCondition) {
   auto r = semaCheck(wrapMain(R"(
     x: int = 5;
     y: int = 10;
-    if (x > 0 && y > 0) { println("both positive"); }
+    if x > 0 && y > 0 { println("both positive"); }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -144,7 +144,7 @@ TEST(ControlFlow, LogicalInWhileCondition) {
   auto r = semaCheck(wrapMain(R"(
     i: int = 0;
     j: int = 10;
-    while (i < 5 && j > 0) { i = i + 1; j = j - 1; }
+    while i < 5 && j > 0 { i = i + 1; j = j - 1; }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -215,7 +215,7 @@ TEST(ControlFlow, TernaryArrayDimensionMismatchRejected) {
 
 TEST(ControlFlow, BreakInsideLoop) {
   auto r = semaCheck(wrapMain(R"(
-    while (True) { break; }
+    while True { break; }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -223,7 +223,7 @@ TEST(ControlFlow, BreakInsideLoop) {
 TEST(ControlFlow, ContinueInsideLoop) {
   auto r = semaCheck(wrapMain(R"(
     i: int = 0;
-    while (i < 10) { i = i + 1; continue; }
+    while i < 10 { i = i + 1; continue; }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -241,8 +241,8 @@ TEST(ControlFlow, ContinueOutsideLoopRejected) {
 TEST(ControlFlow, BreakInIfInsideLoopOk) {
   auto r = semaCheck(wrapMain(R"(
     i: int = 0;
-    while (i < 10) {
-      if (i == 5) { break; }
+    while i < 10 {
+      if i == 5 { break; }
       i = i + 1;
     }
   )"));
@@ -251,15 +251,15 @@ TEST(ControlFlow, BreakInIfInsideLoopOk) {
 
 TEST(ControlFlow, BreakInIfOutsideLoopRejected) {
   auto r = semaCheck(wrapMain(R"(
-    if (True) { break; }
+    if True { break; }
   )"));
   EXPECT_FALSE(r.Ok);
 }
 
 TEST(ControlFlow, BreakInNestedLoop) {
   auto r = semaCheck(wrapMain(R"(
-    while (True) {
-      while (True) { break; }
+    while True {
+      while True { break; }
       break;
     }
   )"));

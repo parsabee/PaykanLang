@@ -81,8 +81,8 @@ fn bump(n: inout int) { n = n + 1; }
 fn farthest(ps: view Point[]) -> Point {
   best = ps[0];
   i = 1;
-  while (i < ps.len()) {
-    if (ps[i].sum() > best.sum()) { best = ps[i]; }
+  while i < ps.len() {
+    if ps[i].sum() > best.sum() { best = ps[i]; }
     i = i + 1;
   }
   return best;

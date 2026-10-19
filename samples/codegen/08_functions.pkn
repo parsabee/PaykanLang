@@ -52,7 +52,7 @@ fn greeting(name: Str) -> Str {
 fn repeat(s: Str, times: int) -> Str {
   result: Str = "";
   i: int = 0;
-  while (i < times) {
+  while i < times {
     result = result + s;
     i = i + 1;
   }
@@ -62,15 +62,15 @@ fn repeat(s: Str, times: int) -> Str {
 // ---- Recursive functions ---------------------------------------------------
 
 fn factorial(n: int) -> int {
-  if (n <= 1) { return 1; }
+  if n <= 1 { return 1; }
   return n * factorial(n - 1);
 }
 fn fib(n: int) -> int {
-  if (n <= 1) { return n; }
+  if n <= 1 { return n; }
   return fib(n - 1) + fib(n - 2);
 }
 fn gcd(a: int, b: int) -> int {
-  while (b != 0) {
+  while b != 0 {
     tmp: int = b;
     b = a % b;
     a = tmp;
@@ -80,7 +80,7 @@ fn gcd(a: int, b: int) -> int {
 fn power(base: int, exp: int) -> int {
   result: int = 1;
   i: int = 0;
-  while (i < exp) {
+  while i < exp {
     result = result * base;
     i = i + 1;
   }
@@ -90,12 +90,12 @@ fn power(base: int, exp: int) -> int {
 // ---- Multiple return paths -------------------------------------------------
 
 fn abs(n: int) -> int {
-  if (n < 0) { return 0 - n; }
+  if n < 0 { return 0 - n; }
   return n;
 }
 fn classify(n: int) -> Str {
-  if (n > 0) { return "pos"; }
-  if (n < 0) { return "neg"; }
+  if n > 0 { return "pos"; }
+  if n < 0 { return "neg"; }
   return "zero";
 }
 

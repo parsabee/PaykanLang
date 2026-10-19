@@ -370,15 +370,16 @@ inline constexpr const char *kStructLayoutGlobalName = ".struct";
 
 // -- Function values (docs/language/15-function-types.md)
 //
-// A closure is an object of a class the lowering makes: `fn.<module>.N` for
-// a lambda, `fn.ref.<module>.<function>` for a named function used as a value
-// (names no identifier can spell, unique across the program's modules,
-// mangled by the backends like `Box<int>`).  Its vtable is an object's three
-// slots, then `call`.
+// A function value is its code and its closure, held in place.  The code of
+// a lambda is the function `fn.<module>.N.call`, and its closure, when it
+// captures anything, an object of the class `fn.<module>.N` with an object's
+// vtable; a named function used as a value is the code
+// `fn.ref.<module>.<function>.call`, which forwards to it.  The names are
+// ones no identifier can spell, unique across the program's modules, and
+// mangled by the backends like `Box<int>`.
 inline constexpr const char *kClosureClassPrefix = "fn.";
 inline constexpr const char *kClosureRefPrefix = "fn.ref.";
 inline constexpr const char *kClosureCall = "call";
-inline constexpr unsigned kClosureCallSlot = 3;
 
 } // namespace names
 } // namespace paykan

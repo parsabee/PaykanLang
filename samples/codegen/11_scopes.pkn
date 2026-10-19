@@ -6,7 +6,7 @@
 fn innerWork(flag: bool) -> Str {
   // Str declared before the conditional return — must be released on BOTH paths.
   prefix: Str = "result";
-  if (flag) {
+  if flag {
     suffix: Str = "-yes";
     return prefix + suffix;   // emitAllScopesCleanup releases prefix+suffix
   }
@@ -15,9 +15,9 @@ fn innerWork(flag: bool) -> Str {
 
 fn multiReturn(n: int) -> int {
   a: Str = "a";
-  if (n < 0)  { return 0 - 1; }
+  if n < 0  { return 0 - 1; }
   b: Str = "b";
-  if (n == 0) { return 0; }
+  if n == 0 { return 0; }
   c: Str = "c";
   return n * 2;
 }
@@ -25,9 +25,9 @@ fn multiReturn(n: int) -> int {
 fn main() -> int {
   println("=== simple nested scopes ===");
   s0: Str = "outer";
-  if (True) {
+  if True {
     s1: Str = "inner1";
-    if (True) {
+    if True {
       s2: Str = "inner2";
       println(s2);        // inner2  — s2 released when this block ends
     }
@@ -39,7 +39,7 @@ fn main() -> int {
   // Each iteration creates a fresh Str; scope cleanup runs per iteration.
   i: int = 0;
   total: int = 0;
-  while (i < 5) {
+  while i < 5 {
     x: Str = Str<int>(i);
     total = total + x.len();
     i = i + 1;
@@ -59,11 +59,11 @@ fn main() -> int {
   println("=== deeply nested scopes ===");
   // 4 levels of if-nesting each with a Str var; all must be cleaned up.
   level0: Str = "L0";
-  if (True) {
+  if True {
     level1: Str = "L1";
-    if (True) {
+    if True {
       level2: Str = "L2";
-      if (True) {
+      if True {
         level3: Str = "L3";
         println(level3);    // L3
       }
@@ -83,7 +83,7 @@ fn main() -> int {
 
   println("=== scope stress: many short-lived Strs ===");
   j: int = 0;
-  while (j < 10) {
+  while j < 10 {
     tmp: Str = "t" + Str(j);
     println(tmp);
     j = j + 1;

@@ -38,7 +38,7 @@ class Meter {
   step: int;
   view fn add(total: inout int, times: view int) {
     i = 0;
-    while (i < times) {
+    while i < times {
       total = total + self.step;
       i = i + 1;
     }

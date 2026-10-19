@@ -314,7 +314,7 @@ bool ModuleLowering::isFunctionValueExpr(const ast::Expr *expr) {
 }
 
 bool ModuleLowering::isObjectElementType(ast::Type *elemTy) const {
-  if (!elemTy)
+  if (!elemTy || ast::isFunctionValue(elemTy))
     return false;
   if (ast::isa<ast::EnumType>(elemTy) || ast::isa<ast::StructType>(elemTy))
     return false;
@@ -691,9 +691,6 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   // An optional of a value type is a value, never a box.
   if (valueOptionalType(expr))
     return false;
-  // A function value is a closure's box, fresh (LoweringClosure.cpp).
-  if (isFunctionValueExpr(expr))
-    return true;
   // A `weak` variable reads as a fresh +1 box (or null): its slot holds a
   // weak reference, never a box to borrow.
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
@@ -727,8 +724,6 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
 bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (valueOptionalType(expr))
     return false;
-  if (isFunctionValueExpr(expr))
-    return true;
   // A `weak` variable or field is loaded as a fresh +1 box (or null).
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
     return CurrentScope && CurrentScope->isWeak(id->getName());
@@ -1508,6 +1503,8 @@ ModuleLowering::localNative(const std::string &name) const {
 // and payload (docs/pir.md §1).  A tuple is its elements in place, each
 // reference among them at its offset.
 Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
+  // A function value is described as its shape, a tuple.
+  ty = memShapeOf(ty);
   const Type slot = toPIRType(ty);
   std::vector<int64_t> words = {pir::storeSize(slot), pir::storeAlign(slot),
                                 nativeTypeKind(ty), 0};
@@ -1519,7 +1516,7 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
       for (size_t i = 0; i < t->getArity(); ++i) {
         ast::Type *e = t->getElementType(i);
         int64_t off = base + tupleElementOffset(t, i);
-        if (auto *nested = ast::dyn_cast<ast::TupleType>(e)) {
+        if (auto *nested = ast::dyn_cast<ast::TupleType>(memShapeOf(e))) {
           refs(nested, off);
         } else if (ast::isRefType(e)) {
           ++words[3];
@@ -1665,6 +1662,16 @@ Val ModuleLowering::emitOptionalEquality(ast::BinaryExpr *node) {
   bool rhsNone = ast::isa<ast::NoneLiteral>(rhs);
   if (lhsNone || rhsNone) {
     ast::Expr *opt = lhsNone ? rhs : lhs;
+    // An optional function value: no code.
+    if (ast::isFunctionValue(opt->getResolvedType())) {
+      size_t mark = MemTemps.size();
+      Val addr = emitMemAddress(opt);
+      if (!addr)
+        return addr;
+      Val isNone = emitFunctionValueIsNone(addr);
+      releaseMemTemps(mark);
+      return isNone;
+    }
     Val v = emitExpr(opt);
     if (!v)
       return v;
@@ -1675,6 +1682,10 @@ Val ModuleLowering::emitOptionalEquality(ast::BinaryExpr *node) {
     releaseIfOwned(ev);
     return isNone;
   }
+
+  // Two function values, either optional: the same code and closure.
+  if (ast::isFunctionValue(lhs->getResolvedType()))
+    return emitTupleEquals(lhs, rhs);
 
   // Two optional values: their flags and payloads.
   if (valueOptionalType(lhs) && valueOptionalType(rhs)) {

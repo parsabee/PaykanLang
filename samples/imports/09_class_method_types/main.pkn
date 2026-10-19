@@ -19,7 +19,7 @@ fn main() -> int {
   halves: lib::Cell[2] = s.split(c);    // method returning an array of a class
 
   odd: int = 0;
-  if (k == lib::Kind::Odd) { odd = 1; }
+  if k == lib::Kind::Odd { odd = 1; }
 
   println(Str<int>(p.sum()));             // 11
   println(Str(lib::total(halves)));  // 7

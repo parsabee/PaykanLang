@@ -128,7 +128,7 @@ TEST(Func, ScopeCleanupNestedStr) {
   auto r = compileAndRun(wrapMain(R"(
     a: Str = "outer";
     i: int = 0;
-    while (i < 3) {
+    while i < 3 {
       tmp: Str = "inner";
       println(tmp);
       i = i + 1;
@@ -144,7 +144,7 @@ TEST(Func, ScopeCleanupNestedStr) {
 TEST(Func, ScopeCleanupIfElseBranches) {
   auto r = compileAndRun(R"(
     fn pick(flag: bool) -> int {
-      if (flag) {
+      if flag {
         s: Str = "branch_true";
         println(s);
       } else {

@@ -69,7 +69,7 @@ TEST(Conversion, NestedAndInsideExpressions) {
       m = Str<int>(n).len();
       t = (int<Str>("1"), char<int>(65));
       xs = [int<float>(1.0), a < b];
-      if (a < b && b > a) { }
+      if a < b && b > a { }
       return 0;
     }
   )");

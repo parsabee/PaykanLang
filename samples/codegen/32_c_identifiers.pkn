@@ -198,7 +198,7 @@ fn main() -> int {
 
   // Shadowing in a nested scope.
   n: int = 1;
-  if (n == 1) {
+  if n == 1 {
     n: int = 5;
     println(Str<int>(n));
   }

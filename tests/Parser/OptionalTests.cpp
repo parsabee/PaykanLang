@@ -113,8 +113,8 @@ TEST(Optional, ComparisonAgainstNone) {
   auto [ok, _] = parse(R"(
     fn main() -> int {
       s: Str? = None;
-      if (s == None) { return 1; }
-      if (s != None) { return 2; }
+      if s == None { return 1; }
+      if s != None { return 2; }
       return 0;
     }
   )");

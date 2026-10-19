@@ -3,8 +3,8 @@
 // numeric pair.
 struct Pixel { r: u8; g: u8; b: u8; a: f32; }
 fn clamp(v: i32, lo: i32, hi: i32) -> i32 {
-  if (v < lo) { return lo; }
-  if (v > hi) { return hi; }
+  if v < lo { return lo; }
+  if v > hi { return hi; }
   return v;
 }
 fn main() -> int {

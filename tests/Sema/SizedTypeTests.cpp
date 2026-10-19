@@ -72,7 +72,7 @@ TEST(SizedTypes, ALiteralTakesTheTypeItsContextExpects) {
     n: (u8, f16) = (3, 0.5);
     o: u8? = 7;
     q: i8 = -(-5);
-    if (a == 0 && b < 0 && 1 < c && g > 1 && 0.5 <= h) { }
+    if a == 0 && b < 0 && 1 < c && g > 1 && 0.5 <= h { }
     r: u8 = a + 1;  s: i8 = 1 - b;  t: f32 = g * 2;
     match a { 0 { } 255 { } _ { } }
   )"));

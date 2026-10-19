@@ -183,7 +183,7 @@ fn isSpace(c: char) -> bool {
 fn slice(s: Str, from: int, to: int) -> Str {
   out = "";
   i = from;
-  while (i < to) {
+  while i < to {
     out = out + Str(s[i]);
     i = i + 1;
   }
@@ -193,16 +193,16 @@ fn slice(s: Str, from: int, to: int) -> Str {
 fn trim(s: Str) -> Str {
   start = 0;
   end = s.len();
-  while (start < end && isSpace(s[start])) { start = start + 1; }
-  while (end > start && isSpace(s[end - 1])) { end = end - 1; }
+  while start < end && isSpace(s[start]) { start = start + 1; }
+  while end > start && isSpace(s[end - 1]) { end = end - 1; }
   return slice(s, start, end);
 }
 
 // Splits at the first `sep`: (s, "") when there is none.
 fn splitOnce(s: Str, sep: char) -> (Str, Str) {
   i = 0;
-  while (i < s.len() && s[i] != sep) { i = i + 1; }
-  if (i == s.len()) { return (s, ""); }
+  while i < s.len() && s[i] != sep { i = i + 1; }
+  if i == s.len() { return (s, ""); }
   return (slice(s, 0, i), slice(s, i + 1, s.len()));
 }
 ```
@@ -219,14 +219,14 @@ class TaskList {
 
   // Adds a task; False if the list is full.
   fn add(title: Str, priority: task::Priority) -> bool {
-    if (self.count == self.tasks.len()) { return False; }
+    if self.count == self.tasks.len() { return False; }
     self.tasks[self.count] = task::Task(title, priority);
     self.count = self.count + 1;
     return True;
   }
 
   fn complete(n: int) -> bool {
-    if (n < 1 || n > self.count) { return False; }
+    if n < 1 || n > self.count { return False; }
     self.tasks[n - 1].done = True;
     return True;
   }
@@ -234,8 +234,8 @@ class TaskList {
   view fn pending() -> int {
     count = 0;
     i = 0;
-    while (i < self.count) {
-      if (!self.tasks[i].done) { count = count + 1; }
+    while i < self.count {
+      if !self.tasks[i].done { count = count + 1; }
       i = i + 1;
     }
     return count;
@@ -243,7 +243,7 @@ class TaskList {
 
   view fn show() {
     i = 0;
-    while (i < self.count) {
+    while i < self.count {
       println(Str(i + 1) + ". " + self.tasks[i].toString());
       i = i + 1;
     }
@@ -272,11 +272,11 @@ fn run(tasks: tl::TaskList, line: Str) {
   match command {
     "add" {
       title, priority = text::splitOnce(rest, '|');
-      if (!tasks.add(title, task::parsePriority(priority))) { println("the list is full"); }
+      if !tasks.add(title, task::parsePriority(priority)) { println("the list is full"); }
     }
     "done" {
       match int(rest) {
-        n: int { if (!tasks.complete(n)) { println("no task " + rest); } }
+        n: int { if !tasks.complete(n) { println("no task " + rest); } }
         None   { println("not a task number: " + rest); }
       }
     }
@@ -290,7 +290,7 @@ fn main() -> int {
   script = ["add buy milk", "add fix the leak|high", "add call mum|low",
             "done 1", "done 9", "list"];
   i = 0;
-  while (i < script.len()) {
+  while i < script.len() {
     run(tasks, script[i]);
     i = i + 1;
   }

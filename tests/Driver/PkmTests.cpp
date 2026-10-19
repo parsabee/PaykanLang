@@ -989,7 +989,7 @@ TEST(Pkm, FunctionTypesAcrossModules) {
             "fn each(xs: view int[], f: (view int, inout int) -> void) -> int "
             "{\n"
             "  t = 0; i = 0;\n"
-            "  while (i < xs.len()) { f(xs[i], t); i = i + 1; }\n"
+            "  while i < xs.len() { f(xs[i], t); i = i + 1; }\n"
             "  return t; }\n"
             "class Button { label: Str; onClick: (Str) -> Str;\n"
             "  fn click() -> Str { return self.onClick(self.label); } }\n");

@@ -36,7 +36,7 @@ TEST(LiteralObject, Subscript) {
       c = "ab"[1];
       println(Str(c));
       i = 0;
-      while (i < 3) { println(Str<char>("xyz"[i])); i = i + 1; }
+      while i < 3 { println(Str<char>("xyz"[i])); i = i + 1; }
       return 0;
     }
   )",
@@ -97,7 +97,7 @@ TEST(LiteralObject, TupleArrayAndOptionalElements) {
   expectRunsOnEveryFrontend("Elements", R"(
     fn first(t: (Str, int)) -> Str { return t.0; }
     fn opt(b: bool) -> Str? {
-      if (b) { return "some"; }
+      if b { return "some"; }
       return None;
     }
     fn main() -> int {

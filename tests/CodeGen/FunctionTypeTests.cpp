@@ -84,7 +84,7 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
     fn mapAll(xs: view int[], f: (int) -> int) -> int {
       total = 0;
       i = 0;
-      while (i < xs.len()) { total = total + f(xs[i]); i = i + 1; }   // a copy out of the view
+      while i < xs.len() { total = total + f(xs[i]); i = i + 1; }   // a copy out of the view
       return total;
     }
     fn describe(n: Node) -> (Str) -> Str {
@@ -225,7 +225,7 @@ TEST(FunctionType, TheCalleeOutlivesItsArguments) {
   g.expectNoLeaks("TheCalleeOutlivesItsArguments");
 }
 
-TEST(FunctionType, ClosuresAreReferencesWithIdentity) {
+TEST(FunctionType, EqualWhenTheCodeAndTheClosureAre) {
   LeakGuard g;
   auto r = compileAndRun(R"(
     class Box<T> { v: T; view fn get() -> view T { return self.v; } fn set(v: T) { self.v = v; } }
@@ -242,7 +242,7 @@ TEST(FunctionType, ClosuresAreReferencesWithIdentity) {
       println(Str(f == g) + " " + Str(f == h) + " " + Str(k) + " " + Str(fs[0] == h) + " " + Str(f != g));
       i = 0;
       total = 0;
-      while (i < 3) {
+      while i < 3 {
         mk = fn() -> int { return i * 2; };   // a closure per iteration
         total = total + mk();
         i = i + 1;
@@ -253,7 +253,70 @@ TEST(FunctionType, ClosuresAreReferencesWithIdentity) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True False True True False\n");
   EXPECT_EQ(r.ExitCode, 8);
-  g.expectNoLeaks("ClosuresAreReferencesWithIdentity");
+  g.expectNoLeaks("EqualWhenTheCodeAndTheClosureAre");
+}
+
+TEST(FunctionType, FunctionValuesAreValues) {
+  // A function value is its code and its closure, held in place: equal
+  // when both are the same, copied with its closure shared, a ValueType,
+  // and optional with None as no code.
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    fn square(x: int) -> int { return x * x; }
+    fn cube(x: int) -> int { return x * x * x; }
+    fn same() -> (int) -> int { return fn(x: int) -> int { return x + 1; }; }
+    fn adder(n: int) -> (int) -> int { return fn(x: int) -> int { return x + n; }; }
+    fn keep<T: ValueType>(x: T) -> T { return x; }
+    fn pick(c: bool) -> ((int) -> int)? { return if c then square else None; }
+    fn swapIn(f: inout (int) -> int) { f = cube; }
+    fn callView(f: view (int) -> int) -> int { return f(5); }
+    struct Pair { f: (int) -> int; g: ((int) -> int)?; }
+    class Holder { cb: ((int) -> int)?; }
+    class Runner { run: (int) -> int; }
+    fn clear(x: Runner) -> int { x.run = square; return 2; }
+    fn main() -> int {
+      a = square;
+      b = square;
+      println(Str(a == b) + " " + Str(a == cube) + " " + Str(same() == same()) +
+              " " + Str(adder(1) == adder(1)));
+      k = keep(square);
+      p = Pair(adder(2), None);
+      q = p;
+      println(Str(k(3)) + " " + Str(q.f(3)) + " " + Str(p.g == None) + " " +
+              Str(q.f == p.f));
+      h = Holder(None);
+      e = h.cb == None;
+      h.cb = adder(10);
+      println(Str(e) + " " + Str(h.cb != None));
+      match h.cb {
+        f: (int) -> int { h.cb = None; println(Str(f(1)) + " " + Str(h.cb == None)); }
+        None { println("none"); }
+      }
+      match pick(False) { f: (int) -> int { println("some"); } None { println("none"); } }
+      match pick(True) { _ { println("any"); } }
+      match pick(True) { f: (int) -> int { println(Str(f(4))); } _ { } }
+      run = Runner(adder(10));
+      println(Str(run.run(clear(run))) + " " + Str(run.run(2)));
+      v = square;
+      swapIn(v);
+      println(Str(v(2)) + " " + Str(callView(v)) + " " + Str(v == cube));
+      fs: ((int) -> int)[3] = [square, adder(1), cube];
+      t = (fs[1], 7);
+      return t.0(t.1);
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True False True False\n"
+                      "9 5 True True\n"
+                      "True True\n"
+                      "11 True\n"
+                      "none\n"
+                      "any\n"
+                      "16\n"
+                      "12 4\n"
+                      "8 125 True\n");
+  EXPECT_EQ(r.ExitCode, 8);
+  g.expectNoLeaks("FunctionValuesAreValues");
 }
 
 TEST(FunctionType, AcrossModules) {
@@ -273,7 +336,7 @@ struct Op { name: Str; run: (int, int) -> int; }
 fn makeCounter(start: int) -> () -> int { return fn() -> int { return start + 1; }; }
 fn applyAll(xs: view int[], f: (int) -> int) -> int {
   t = 0; i = 0;
-  while (i < xs.len()) { t = t + f(xs[i]); i = i + 1; }
+  while i < xs.len() { t = t + f(xs[i]); i = i + 1; }
   return t;
 }
 )");

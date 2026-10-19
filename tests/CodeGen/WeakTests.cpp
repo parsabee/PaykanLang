@@ -217,12 +217,12 @@ TEST(Weak, LoopsAndEarlyExits) {
     impl P { fn __init__(v: int) { self.v = v; } }
     fn find(limit: int) -> P? {
       i = 0;
-      while (i < 10) {
+      while i < 10 {
         p = P(i);
         weak w = p;
-        if (i == limit) { return w; }
-        if (i % 2 == 0) { i = i + 1; continue; }
-        if (i > 7) { break; }
+        if i == limit { return w; }
+        if i % 2 == 0 { i = i + 1; continue; }
+        if i > 7 { break; }
         i = i + 1;
       }
       return None;
@@ -252,7 +252,7 @@ TEST(Weak, CursorInAViewMethod) {
       view fn sum() -> int {
         total = 0;
         weak cur = self.head;
-        while (cur != None) {
+        while cur != None {
           match cur {
             n: Node { total = total + n.v; cur = n.next; }
             None { }
@@ -262,10 +262,10 @@ TEST(Weak, CursorInAViewMethod) {
       }
       view fn find(v: int) -> Node? {
         weak cur = self.head;
-        while (cur != None) {
+        while cur != None {
           match cur {
             n: Node {
-              if (n.v == v) { return n; }
+              if n.v == v { return n; }
               cur = n.next;
             }
             None { }

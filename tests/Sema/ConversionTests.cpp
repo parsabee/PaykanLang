@@ -77,7 +77,7 @@ TEST(Conversion, ParsesReturnOptionals) {
               "cannot use optional 'float?' as 'float' without unwrapping");
   expectOk(inMain(R"(
     match int<Str>("12") { n: int { x: int = n; } None { } }
-    if (float<Str>("x") == None) { }
+    if float<Str>("x") == None { }
   )"));
 }
 

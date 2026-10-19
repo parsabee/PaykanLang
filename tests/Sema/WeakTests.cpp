@@ -99,7 +99,7 @@ TEST(Weak, LocalMayNameWhatAViewNames) {
       view fn sum() -> int {
         total = 0;
         weak cur = self.head;
-        while (cur != None) {
+        while cur != None {
           match cur {
             n: Node { total = total + n.v; cur = n.next; }
             None { }

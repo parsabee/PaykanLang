@@ -18,7 +18,7 @@ static std::string withEnums(const std::string &enums,
 TEST(EnumCodeGen, EqualityTrueBranch) {
   auto r = compileAndRun(withEnums("enum Color { Red, Green, Blue }", R"(
     c: Color = Color::Green;
-    if (c == Color::Green) { println("yes"); }
+    if c == Color::Green { println("yes"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "yes\n");
@@ -27,7 +27,7 @@ TEST(EnumCodeGen, EqualityTrueBranch) {
 TEST(EnumCodeGen, EqualityFalseBranch) {
   auto r = compileAndRun(withEnums("enum Color { Red, Green, Blue }", R"(
     c: Color = Color::Green;
-    if (c == Color::Red) { println("a"); } else { println("b"); }
+    if c == Color::Red { println("a"); } else { println("b"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "b\n");
@@ -36,7 +36,7 @@ TEST(EnumCodeGen, EqualityFalseBranch) {
 TEST(EnumCodeGen, Inequality) {
   auto r = compileAndRun(withEnums("enum Color { Red, Green, Blue }", R"(
     c: Color = Color::Blue;
-    if (c != Color::Red) { println("ne"); }
+    if c != Color::Red { println("ne"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "ne\n");
@@ -91,9 +91,9 @@ TEST(EnumCodeGen, VariantOrderingValues) {
   // proving variants get implicit increasing values 0,1,2.
   auto r = compileAndRun(withEnums("enum E { A, B, C }", R"(
     e: E = E::C;
-    if (e == E::A) { println("0"); }
-    if (e == E::B) { println("1"); }
-    if (e == E::C) { println("2"); }
+    if e == E::A { println("0"); }
+    if e == E::B { println("1"); }
+    if e == E::C { println("2"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "2\n");
@@ -132,7 +132,7 @@ TEST(EnumCodeGen, ReturnEnumFromFunction) {
              "  }\n"
              "}\n" +
              wrapMain("x: Dir = opp(Dir::North);\n"
-                      "  if (x == Dir::South) { println(\"south\"); }");
+                      "  if x == Dir::South { println(\"south\"); }");
   auto r = compileAndRun(src);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "south\n");
@@ -156,7 +156,7 @@ TEST(EnumCodeGen, ArrayOfEnums) {
                "  xs[2] = Dir::South;\n" // subscript set
                "  xs[0] = Dir::West;\n"
                "  i: int = 0;\n"
-               "  while (i < xs.len()) { println(nm(xs[i])); i = i + 1; }");
+               "  while i < xs.len() { println(nm(xs[i])); i = i + 1; }");
   auto r = compileAndRun(src);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "W\nE\nS\n");

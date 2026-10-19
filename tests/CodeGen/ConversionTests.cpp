@@ -131,7 +131,7 @@ TEST(Conversion, IntOfBoolAndBoolOfInt) {
     println(Str<bool>(bool<int>(0)));
     println(Str<bool>(bool<int>(1)));
     println(Str<bool>(bool<int>(-9223372036854775807 - 1)));
-    if (bool<int>(n)) { println("nonzero"); }
+    if bool<int>(n) { println("nonzero"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "10\n1\nFalse\nTrue\nTrue\nnonzero\n");
@@ -163,8 +163,8 @@ TEST(Conversion, CharOfIntRoundTripsEveryCode) {
     println(Str<char>(char<int>(int<char>('a') + 25)));
     ok = True;
     i = 0;
-    while (i < 256) {
-      if (int<char>(char<int>(i)) != i) { ok = False; }
+    while i < 256 {
+      if int<char>(char<int>(i)) != i { ok = False; }
       i = i + 1;
     }
     println(Str<bool>(ok));
@@ -208,7 +208,7 @@ TEST(Conversion, BoolOfStrParsesExactlyTrueAndFalse) {
   auto r = compileAndRun(R"(
     fn show(s: Str) -> Str {
       match bool<Str>(s) {
-        b: bool { if (b) { return "yes"; } return "no"; }
+        b: bool { if b { return "yes"; } return "no"; }
         None { return "None"; }
       }
     }
@@ -236,7 +236,7 @@ TEST(Conversion, ParseRoundTrips) {
   auto r = compileAndRun(wrapMain(R"(
     inputs: Str[4] = ["0", "-7", "123456789", "x"];
     i = 0;
-    while (i < inputs.len()) {
+    while i < inputs.len() {
       match int<Str>(inputs[i]) {
         n: int { println(Str<bool>(Str<int>(n) == inputs[i])); }
         None { println("None"); }

@@ -69,8 +69,8 @@ fn isDigit(c: char) -> bool {
 fn countDigits(s: Str) -> int {
   n = 0;
   i = 0;
-  while (i < s.len()) {
-    if (isDigit(s[i])) { n = n + 1; }
+  while i < s.len() {
+    if isDigit(s[i]) { n = n + 1; }
     i = i + 1;
   }
   return n;
@@ -185,7 +185,7 @@ number or `None`. You get the number out with `match`:
 fn main() -> int {
   inputs = ["42", "-8", "12abc", " 7", "9223372036854775808"];
   i = 0;
-  while (i < inputs.len()) {
+  while i < inputs.len() {
     match int(inputs[i]) {
       n: int { println("'" + inputs[i] + "' is the number " + Str(n)); }
       None   { println("'" + inputs[i] + "' is not a number"); }
@@ -248,7 +248,7 @@ are 32 above the uppercase ones:
 ```pkn
 fn padRight(s: Str, width: int) -> Str {
   out = s;
-  while (out.len() < width) {
+  while out.len() < width {
     out = out + " ";
   }
   return out;
@@ -262,7 +262,7 @@ fn isSpace(c: char) -> bool {
 fn slice(s: Str, from: int, to: int) -> Str {
   out = "";
   i = from;
-  while (i < to) {
+  while i < to {
     out = out + Str(s[i]);
     i = i + 1;
   }
@@ -272,15 +272,15 @@ fn slice(s: Str, from: int, to: int) -> Str {
 fn trim(s: Str) -> Str {
   start = 0;
   end = s.len();
-  while (start < end && isSpace(s[start])) { start = start + 1; }
-  while (end > start && isSpace(s[end - 1])) { end = end - 1; }
+  while start < end && isSpace(s[start]) { start = start + 1; }
+  while end > start && isSpace(s[end - 1]) { end = end - 1; }
   return slice(s, start, end);
 }
 
 fn capitalize(s: Str) -> Str {
-  if (s.len() == 0) { return s; }
+  if s.len() == 0 { return s; }
   c = s[0];
-  if (c >= 'a' && c <= 'z') {
+  if c >= 'a' && c <= 'z' {
     c = char(int(c) - 32);
   }
   return Str(c) + slice(s, 1, s.len());

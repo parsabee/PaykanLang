@@ -27,7 +27,7 @@ impl Box<T> {
 fn sum(xs: view u16[3]) -> u16 {
   t: u16 = 0;
   i = 0;
-  while (i < 3) { t = t + xs[i]; i = i + 1; }
+  while i < 3 { t = t + xs[i]; i = i + 1; }
   return t;
 }
 
