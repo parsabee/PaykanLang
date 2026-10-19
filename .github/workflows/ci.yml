@@ -507,8 +507,9 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c
 
+      # The samples import the standard library (::io at least), so stage it.
       - name: Build
-        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan paykan_stdlib
 
       - name: Strict C11 on GCC and Clang
         run: |
