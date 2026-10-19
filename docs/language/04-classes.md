@@ -413,6 +413,7 @@ match a {
 | `self` changed in a `view fn` | A `view fn` assigns `self`'s fields or elements, calls a method on `self` that is not a `view fn`, passes them to `inout`, or passes on or stores a reference reached through `self` |
 | Multiple bases | More than one `:` clause |
 | `self` in parameter list | Writing `self` as an explicit method parameter |
+| Assigning `self` | `self = C(1)` in a method: `self` names the object the method was called on (`cannot assign to 'self'`) |
 | `__init__` in the class body | `class A { fn __init__() { … } }`; it goes in `impl A { … }` |
 | `impl` method name taken | An `impl` method or `static fn` has the name of a method of the class or a superclass, or a subclass declares one with an `impl` method's name |
 | `impl` for another type | The block names a built-in type, an enum, or a class of another module |

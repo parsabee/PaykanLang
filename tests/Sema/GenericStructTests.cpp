@@ -59,6 +59,44 @@ SemaResult semaCheckFile(const std::string &path) {
 
 // -- Instantiation
 
+TEST(GenericStruct, BoundsAreCheckedForInstantiationsFromFields) {
+  // A field's type instantiates the template before the trait impls are
+  // known: the bound check is queued and run later, for a struct template
+  // as for a class template (it stopped the compiler).
+  auto r = semaCheck(R"(
+struct Keyed<K: Hashable> { key: K; n: int; }
+struct Outer { k: Keyed<int>; }
+class COuter { k: Keyed<Str>; }
+struct Bad { k: Keyed<float>; }
+fn main() -> int { o = Outer(Keyed(1, 3)); return o.k.n; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("'float' does not implement trait 'Hashable', "
+                               "which 'Keyed' requires of 'K'"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}
+
+TEST(GenericStruct, TypeParametersShadowingLaterTemplatesAreReported) {
+  // Whatever the declaration order (the template is a type throughout).
+  auto r = semaCheck(R"(
+struct S<Box> { v: Box; }
+class K<Box> { v: Box; }
+struct Box<T> { v: T; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("type parameter 'Box' of generic struct 'S' "
+                               "shadows a type of the same name"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("type parameter 'Box' of generic class 'K' "
+                               "shadows a type of the same name"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
 TEST(GenericStruct, InstantiatedByTypeAndByCall) {
   auto r = semaCheck(std::string(kPair) + R"(
 struct Box<T> { v: T; }

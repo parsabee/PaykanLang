@@ -155,6 +155,76 @@ TEST(FunctionType, ValuesHeldInPlaceCrossTheCall) {
   g.expectNoLeaks("ValuesHeldInPlaceCrossTheCall");
 }
 
+TEST(FunctionType, CallsOfValuesWithReferenceAndMemoryResults) {
+  // A call through a function value that is not a name (an element, a
+  // tuple's field, another call's result) returning a reference, an object
+  // or a value held in memory; a named function in a variable without an
+  // annotation, called and copied.
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class Node { v: int; view fn get() -> int { return self.v; } }
+    struct P { x: int; name: Str; }
+    fn sq(x: int) -> int { return x * x; }
+    fn mkS() -> Str { return "s"; }
+    fn mkNode(v: int) -> Node { return Node(v); }
+    fn mkP(x: int) -> P { return P(x, "p" + Str(x)); }
+    fn mkF() -> (int) -> int { return sq; }
+    fn main() -> int {
+      fs: (() -> Str)[1] = [mkS];
+      a = fs[0]();
+      println(fs[0]());
+      println(fs[0]() + "!" + a);
+      ns: ((int) -> Node)[1] = [mkNode];
+      println(Str(ns[0](3).get()) + " " + Str(ns[0](4).v));
+      ps: ((int) -> P)[1] = [mkP];
+      p = ps[0](7);
+      t: ((int) -> Str, int) = (fn(x: int) -> Str { return "t" + Str(x); }, 0);
+      println(p.name + " " + Str(p.x) + " " + t.0(8) + " " + Str(mkF()(5)) + " " + ps[0](1).name);
+      g = sq;
+      h = g;
+      g = fn(x: int) -> int { return x + 1; };
+      return h(3) + g(3);
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "s\ns!s\n3 4\np7 7 t8 25 p1\n");
+  EXPECT_EQ(r.ExitCode, 13);
+  g.expectNoLeaks("CallsOfValuesWithReferenceAndMemoryResults");
+}
+
+TEST(FunctionType, TheCalleeOutlivesItsArguments) {
+  // An argument that rebinds the variable or the field holding the closure
+  // being called: the call keeps its own reference to the closure.
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    class O { cb: (int) -> int; n: int; }
+    fn reset(o: O) -> int {
+      o.cb = fn(x: int) -> int { return x * 100; };
+      o.n = o.n + 1;
+      return o.n;
+    }
+    fn swap(f: inout (int) -> int) -> int {
+      f = fn(x: int) -> int { return x - 1; };
+      return 10;
+    }
+    fn main() -> int {
+      k = 5;
+      o = O(fn(x: int) -> int { return x + k; }, 0);
+      a = o.cb(reset(o));              // the closure held before, with 1
+      b = o.cb(1);                     // the replacement
+      f = fn(x: int) -> int { return x + k; };
+      c = f(swap(f));                  // the closure held before, with 10
+      d = (f)(swap(f));                // x - 1, with 10
+      println(Str(a) + " " + Str(b) + " " + Str(c) + " " + Str(d));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "6 100 15 9\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  g.expectNoLeaks("TheCalleeOutlivesItsArguments");
+}
+
 TEST(FunctionType, ClosuresAreReferencesWithIdentity) {
   LeakGuard g;
   auto r = compileAndRun(R"(

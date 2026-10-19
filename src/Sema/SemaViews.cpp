@@ -61,14 +61,27 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows) {
     return "'" + name + "' is a 'view' local";
   case VarKind::ViewBinding:
     return "'" + name + "' is bound to a 'view'";
-  case VarKind::Captured:
+  case VarKind::Captured: {
     // The lambda's own copy, which its body must not change (the program
     // could not see it); what a captured reference names is an object,
-    // changed through it as through any other reference.
-    if (!ast::isa<ast::ClassType>(
-            ast::stripOptional(CurrentScope->lookup(name))))
-      return "'" + name + "' is captured by copy by the function";
-    break;
+    // changed through it as through any other reference, whether the copy
+    // is the reference or holds it (a struct's or a tuple's field).
+    for (const ast::Expr *p = e;;) {
+      ast::Type *t = p == root ? CurrentScope->lookup(name)
+                               : const_cast<ast::Expr *>(p)->getResolvedType();
+      if (t && ast::isa<ast::ClassType>(ast::stripOptional(t)))
+        return "";
+      if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p))
+        p = ma->getReceiver();
+      else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p))
+        p = se->getArray();
+      else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p))
+        p = ti->getTuple();
+      else
+        break;
+    }
+    return "'" + name + "' is captured by copy by the function";
+  }
   case VarKind::Plain:
   case VarKind::Let:
   case VarKind::Inout:
@@ -100,9 +113,29 @@ bool Sema::checkMethodReceiver(const ast::MethodCallExpr *call,
     CurrentMethodUse->SelfCalls.push_back(call->getMethodName());
     return true;
   }
-  return checkChangeable(call->getReceiver(),
-                         "'" + call->getMethodName() + "' is not a 'view fn'",
-                         call->getLocation());
+  const std::string what = "'" + call->getMethodName() + "' is not a 'view fn'";
+  // A struct method's `self` is the receiver's storage: the method changes
+  // the struct where it is, so the receiver must be a place that can
+  // change (as an assignment to one of its fields must).  A `let` value
+  // and a tuple's element are immutable.
+  if (ast::isa<ast::StructType>(call->getReceiver()->getResolvedType())) {
+    if (std::string let = letValueRoot(call->getReceiver()); !let.empty()) {
+      error(call->getLocation(), "'" + let +
+                                     "' is declared with 'let'; its value "
+                                     "cannot change, and " +
+                                     what);
+      return false;
+    }
+    if (const auto *ti = tupleElementHolding(call->getReceiver())) {
+      error(call->getLocation(),
+            "cannot change a struct in element '." +
+                std::to_string(ti->getIndex()) + "' of type '" +
+                typeName(ti->getTuple()->getResolvedType()) +
+                "': tuples are immutable, and " + what);
+      return false;
+    }
+  }
+  return checkChangeable(call->getReceiver(), what, call->getLocation());
 }
 
 bool Sema::sharesStorage(const ast::Type *ty) {

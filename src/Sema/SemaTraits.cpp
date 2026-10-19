@@ -432,6 +432,9 @@ bool Sema::checkPendingBounds() {
     if (auto *cd = ast::dyn_cast<ast::ClassDecl>(pc.Template)) {
       params = &cd->getTypeParams();
       bounds = &cd->getTypeParamBounds();
+    } else if (auto *sd = ast::dyn_cast<ast::StructDecl>(pc.Template)) {
+      params = &sd->getTypeParams();
+      bounds = &sd->getTypeParamBounds();
     } else {
       auto *fn = ast::cast<ast::FuncDecl>(pc.Template);
       params = &fn->getTypeParams();

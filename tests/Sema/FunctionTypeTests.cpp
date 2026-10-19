@@ -194,6 +194,7 @@ TEST(FunctionType, CapturesAreReadOnlyCopies) {
   auto r = semaCheck(R"(
 struct P { x: int; }
 class Node { n: int; }
+struct W { node: Node; x: int; }
 fn bump(n: inout int) { n = n + 1; }
 fn main() -> int {
   n = 1;
@@ -204,7 +205,12 @@ fn main() -> int {
   u = fn() { bump(n); };
   q = fn() { p.x = 2; };
   a = fn() { xs[0] = 2; };
-  ok = fn() -> int { node.n = 2; return n + p.x + xs[1] + node.n; };
+  w = W(Node(1), 0);
+  ok = fn() -> int {
+    node.n = 2;
+    w.node.n = w.node.n + 7;           // the object the copy holds: shared
+    return n + p.x + xs[1] + node.n + w.node.n;
+  };
   return ok();
 }
 )");

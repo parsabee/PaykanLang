@@ -46,6 +46,21 @@ TEST(Class, ClassMethodUseSelf) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
+TEST(Class, SelfCannotBeAssigned) {
+  // `self` names the object the method was called on; rebinding it would
+  // change nothing the caller sees.
+  auto r = semaCheck(withClasses(R"(
+    class Counter {
+      count: int;
+      fn reset() { self = Counter(0); }
+    }
+  )"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("cannot assign to 'self'"), std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}
+
 TEST(Class, ClassInitSetField) {
   auto r = semaCheck(withClasses(R"(
     class Point {

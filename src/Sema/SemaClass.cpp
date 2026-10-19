@@ -947,6 +947,13 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
   LocalClassNames.clear();
   for (auto *cd : tu->getClassDecls())
     LocalClassNames.insert(cd->getName());
+  // Every template's name, whatever the declaration order: a template is
+  // a type a parameter must not shadow, before and after its registration.
+  StringSet templateNames;
+  for (auto *cd : tu->getGenericClassDecls())
+    templateNames.insert(cd->getName());
+  for (auto *sd : tu->getGenericStructDecls())
+    templateNames.insert(sd->getName());
 
   // A type parameter list must not repeat a name, and a parameter must not
   // shadow a type: inside the template `T` would silently mean the type
@@ -971,7 +978,8 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
         continue;
       }
       if (Ctx.lookupType(*p) || LocalClassNames.count(*p) ||
-          ClassTemplates.count(*p) || StructTemplates.count(*p)) {
+          ClassTemplates.count(*p) || StructTemplates.count(*p) ||
+          templateNames.count(*p)) {
         std::string msg = "type parameter '";
         msg += *p;
         msg += "' of ";
@@ -1239,6 +1247,15 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     }
     error(loc, "instantiation '" + instName +
                    "' conflicts with an imported class of the same name "
+                   "(type names are global across imports)");
+    ClassInstantiations[instName] = nullptr;
+    return nullptr;
+  }
+  if (Ctx.lookupType(instName)) {
+    // A struct (or another type) of that name, from a template of another
+    // module or declared outright: the same rule as for a struct template.
+    error(loc, "instantiation '" + instName +
+                   "' conflicts with an imported type of the same name "
                    "(type names are global across imports)");
     ClassInstantiations[instName] = nullptr;
     return nullptr;

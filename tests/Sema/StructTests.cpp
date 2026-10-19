@@ -29,6 +29,100 @@ const char *kPoint = R"(struct Point { x: int; y: int; }
 
 // -- Declarations and fields
 
+TEST(Struct, MutatingMethodsNeedAChangeablePlace) {
+  // A struct method's `self` is the receiver's storage: calling a method
+  // that changes it needs a place that can change, as assigning a field
+  // does.  A `let` value, a tuple's element and a `let` array's element
+  // cannot; a `view fn` reads anything.
+  auto r = semaCheck(R"(
+struct P { x: int; y: int; }
+impl P {
+  fn shift(d: int) { self.x = self.x + d; }
+  view fn sum() -> int { return self.x + self.y; }
+}
+struct L { a: P; }
+fn main() -> int {
+  let p = P(1, 2);
+  p.shift(1);
+  let l = L(P(1, 2));
+  l.a.shift(10);
+  t = (P(1, 2), 3);
+  t.0.shift(5);
+  let arr: P[2] = [P(1, 1), P(2, 2)];
+  arr[1].shift(7);
+  q = P(0, 0);
+  q.shift(1);
+  qs: P[2] = [P(1, 1), P(2, 2)];
+  qs[0].shift(1);
+  return p.sum() + l.a.sum() + t.0.sum() + arr[1].sum() + q.x + qs[0].x;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'p' is declared with 'let'; its value cannot change, and "
+                "'shift' is not a 'view fn'",
+                "'l' is declared with 'let'; its value cannot change, and "
+                "'shift' is not a 'view fn'",
+                "cannot change a struct in element '.0' of type '(P, int)': "
+                "tuples are immutable, and 'shift' is not a 'view fn'",
+                "'arr' is declared with 'let'; its value cannot change, and "
+                "'shift' is not a 'view fn'"});
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+}
+
+TEST(Struct, FieldsOfLetOrCapturedStructsAreNotInoutPlaces) {
+  auto r = semaCheck(R"(
+struct P { x: int; y: int; }
+struct L { a: P; name: Str; }
+fn bump(n: inout int) { n = n + 1; }
+fn bumpP(p: inout P) { p.x = p.x + 1; }
+fn main() -> int {
+  let p = P(1, 2);
+  bump(p.x);
+  k: inout int = p.y;
+  let l = L(P(1, 2), "n");
+  bumpP(l.a);
+  bump(l.a.x);
+  m = P(3, 4);
+  bump(m.x);
+  f = fn() { bump(m.y); };
+  f();
+  return k + l.a.x + m.x;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'p' is declared with 'let' and cannot be passed to 'inout' "
+                "parameter 'n'",
+                "'p' is declared with 'let' and cannot be named by",
+                "'l' is declared with 'let' and cannot be passed to 'inout' "
+                "parameter 'p'",
+                "'l' is declared with 'let' and cannot be passed to 'inout' "
+                "parameter 'n'",
+                "'m' is captured by copy by the function, and the copy is "
+                "read-only; it cannot be passed to 'inout' parameter 'n'"});
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
+}
+
+TEST(Struct, InitIsNotCalledByName) {
+  auto r = semaCheck(R"(
+struct P { x: int; }
+impl P { fn __init__(x: int) { self.x = x; } }
+class C { n: int; }
+fn main() -> int {
+  p = P(1);
+  p.__init__(2);
+  c = C(1);
+  c.__init__(2);
+  return p.x + c.n;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'__init__' cannot be called directly; it runs when a value "
+                "is constructed ('P(...)')",
+                "'__init__' cannot be called directly; it runs when a value "
+                "is constructed ('C(...)')"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+}
+
 TEST(Struct, FieldsConstructionAccessAndAssignment) {
   auto r = semaCheck(std::string(kPoint) + wrapMain(R"(
     p = Point(1, 2);

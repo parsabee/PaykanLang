@@ -549,7 +549,7 @@ private:
   Val emitFunctionRefValue(const std::string &fnName, ast::FunctionType *fnt);
   /// Call the closure object @p closure (borrowed for the call) of type
   /// @p fnt with @p argExprs; @p resultTy is the call's resolved type.
-  Val emitClosureCall(const Val &closure, ast::FunctionType *fnt,
+  Val emitClosureCall(const Val &box, ast::FunctionType *fnt,
                       const std::vector<ast::Expr *> &argExprs,
                       ast::Type *resultTy, bool wantAddress);
 

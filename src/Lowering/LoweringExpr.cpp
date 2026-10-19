@@ -88,8 +88,7 @@ Val ModuleLowering::ExprEmitter::visitCallValueExpr(ast::CallValueExpr *node) {
   Val box = L.emitBorrowedBox(node->getCallee(), keep);
   if (!box)
     return Val();
-  Val closure = L.emitSharedGet(box, "closure.obj");
-  Val result = L.emitClosureCall(closure, fnt, node->getArguments(),
+  Val result = L.emitClosureCall(box, fnt, node->getArguments(),
                                  node->getResolvedType(), wantAddress);
   L.releaseAfterCall(keep);
   return result;
@@ -580,11 +579,14 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     auto *id = L.ASTCtx.make<ast::Identifier>(
         node->getLocation(), L.ASTCtx.intern(node->getCalleeName()));
     id->setResolvedType(varTy);
-    Val closure = visit(id);
-    if (!closure)
+    std::vector<Val> keep;
+    Val box = L.emitBorrowedBox(id, keep);
+    if (!box)
       return Val();
-    return L.emitClosureCall(closure, fnt, node->getArguments(),
-                             node->getResolvedType(), wantAddress);
+    Val result = L.emitClosureCall(box, fnt, node->getArguments(),
+                                   node->getResolvedType(), wantAddress);
+    L.releaseAfterCall(keep);
+    return result;
   }
   if (Val conv = emitConversion(node))
     return conv;
@@ -799,8 +801,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     Val box = L.emitBorrowedBox(ma, keep);
     if (!box)
       return Val();
-    Val closure = L.emitSharedGet(box, "closure.obj");
-    Val result = L.emitClosureCall(closure, fnt, node->getArguments(),
+    Val result = L.emitClosureCall(box, fnt, node->getArguments(),
                                    node->getResolvedType(), wantAddress);
     L.releaseAfterCall(keep);
     return result;
