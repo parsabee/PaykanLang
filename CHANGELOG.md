@@ -458,6 +458,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/pkfmt.py` checks (`python3 scripts/pkfmt.py`) or applies (`--apply`) the layout
   of Paykan source (`.pkn`); every tracked file is formatted with it, and the Lint job
   checks it.
+- A module-private initializer: `fn ___init__(...)` (three underscores) in a class's or a
+  struct's `impl` block is its `__init__`, and the type is constructed (`T(...)`) and extended
+  (`__super__(...)`) by the module's own code only, its templates included wherever they are
+  instantiated; an importer makes one through the module's functions (`'m::T' cannot be
+  constructed here: its initializer '___init__' is private to module 'm'`).  `io::File`'s is
+  one: `open` and `stdin` make a `File`, a program cannot.
 - The object header is 16 bytes instead of 24 (src/Runtime/Runtime.h, `PaykanObject`;
   docs/language/08-memory-model.md): the vtable pointer, then a 32-bit strong count and a
   32-bit weak count, so every object is 8 bytes smaller.  A count that would pass

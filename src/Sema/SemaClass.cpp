@@ -622,6 +622,7 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   ast::ParamModes modes = ast::paramModes(method->getParams());
   modes.Result = method->getResultMode();
   mdecl->setParamModes(std::move(modes));
+  mdecl->setModulePrivateInit(method->isModulePrivateInit());
   return mdecl;
 }
 

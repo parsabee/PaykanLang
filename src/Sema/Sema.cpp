@@ -1508,6 +1508,11 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       return nullptr;
     }
     auto *superInit = superClass->findMethod(names::kMethodInit);
+    // A superclass whose initializer is `___init__` is extended by its
+    // module only.
+    if (!S.checkConstructible(superClass->getName(), superClass->getName(),
+                              superInit, "extended", node->getLocation()))
+      return nullptr;
     std::vector<ast::Type *> expectedParams;
     if (superInit)
       expectedParams = superInit->getParamTypes();
@@ -1602,6 +1607,19 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       S.Ctx.lookupClassType(node->getCalleeName()))
     S.ConstructsEdges[S.CurrentClassCtx->ClassType->getName()].insert(
         node->getCalleeName());
+
+  // A type whose initializer is `___init__` is constructed by its module.
+  if (auto *ct = S.Ctx.lookupClassType(node->getCalleeName())) {
+    if (!S.checkConstructible(ct->getName(), node->getCalleeName(),
+                              ct->findMethod(names::kMethodInit), "constructed",
+                              node->getLocation()))
+      return nullptr;
+  } else if (auto *st = S.Ctx.lookupStructType(node->getCalleeName())) {
+    if (!S.checkConstructible(st->getName(), node->getCalleeName(),
+                              st->findMethod(names::kMethodInit), "constructed",
+                              node->getLocation()))
+      return nullptr;
+  }
 
   if (argTypes.size() != sig->ParamTypes.size()) {
     std::string msg = "function '" + displayName(node->getCalleeName()) +

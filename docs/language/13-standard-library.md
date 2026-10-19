@@ -109,7 +109,10 @@ which 'io::println' requires of 'T'`). Several pieces are joined into one `Str` 
 first (`io::println("n = " + Str(n))`): there is no variadic form.
 
 A `File` is an open file, closed when the last reference to it goes; its `toString()` is
-`File@0x...`. Its methods are `view fn`s, and each reports failure through `::result`:
+`File@0x...`. A program does not construct one: `open` and `stdin` make it, its initializer
+being `___init__`, private to `::io` (`io::File(...)` is `'io::File' cannot be constructed
+here: its initializer '___init__' is private to module '::io'`). Its methods are `view fn`s,
+and each reports failure through `::result`:
 
 | Method | Description |
 |--------|-------------|

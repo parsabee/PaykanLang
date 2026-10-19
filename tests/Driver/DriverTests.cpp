@@ -1904,6 +1904,7 @@ TEST(Driver, BuildAndRunDefaultToO2) {
 TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
   auto src = writeTmp("import ::collections;\n"
                       "import ::memory;\n"
+                      "import ::io;\n"
                       "fn main() -> int {\n"
                       "  m = collections::HashMap<int, int>();\n"
                       "  n = m.__size;\n"
@@ -1912,6 +1913,7 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
                       "  x = collections::_Entry<int, int>(1, 2, 3, None);\n"
                       "  buf = memory::Buffer<int>(1);\n"
                       "  d = buf.__data;\n"
+                      "  f = io::File(m);\n"
                       "  return 0;\n}\n");
   auto [rc, out] = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
   std::filesystem::remove(src);
@@ -1924,6 +1926,8 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
         "'collections::_bucket' is private to module '::collections'",
         "'collections::_Entry' is private to module '::collections'",
         "'__data' is private to 'Buffer<int>': it is reachable only from its "
-        "own methods"})
+        "own methods",
+        "'io::File' cannot be constructed here: its initializer '___init__' "
+        "is private to module '::io'"})
     EXPECT_NE(out.find(line), std::string::npos) << line << "\n" << out;
 }

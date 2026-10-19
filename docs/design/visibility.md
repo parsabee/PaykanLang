@@ -22,7 +22,7 @@ implementation takes.
 | A type | a class, struct, enum or trait `_T` is nameable anywhere in its module and nowhere else: an importer cannot write `m::_T`, instantiate it, inherit from it or implement it |
 | What is still exported | everything: a private field is part of an object's layout and a private function or type may be used by an exported generic template, so the `.pkm` interface carries them as before; the importer rejects a *written* reference to a private name through a qualifier, while injected template bodies keep using them |
 | A public surface naming a private type | an error in the declaring module: a free function, a public field, or a public method of a public type cannot have a private type in its signature (`fn make() -> _Node` is rejected: an importer could receive what it cannot name); a private member or a private type's own members may |
-| Constructors | the default `__init__` takes every field in order, private ones included: `Counter(0)` constructs from outside, as a constructor is the class's own code |
+| Constructors | the default `__init__` takes every field in order, private ones included: `Counter(0)` constructs from outside, as a constructor is the class's own code; an initializer written `___init__` is private to the module: `T(...)`, and `__super__(...)` into it, only from the module's code (its templates included, wherever they are instantiated), and an importer makes a `T` through the module's functions (`io::open` for `io::File`) |
 | Runtime | nothing changes: `toString`, `==` and `hash` see every field as before |
 
 ## The markers

@@ -1071,12 +1071,16 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
             "class _GenHidden<T> { v: T; }\n"
             "fn useHidden() -> int {\n"
             "  h = _GenHidden<int>(3); p = Pub::_make();\n"
-            "  return h.v + p._twice() - p._w * 2; }\n");
+            "  return h.v + p._twice() - p._w * 2; }\n"
+            "class Conn { v: int; }\n"
+            "impl Conn { fn ___init__(v: int) { self.v = v; }\n"
+            "  static fn open(v: int) -> Conn { return Conn(v); } }\n");
   writeFile(dir / "main.pkn",
             "import ::io; import lib::shapes;\n"
             "fn main() -> int {\n"
             "  p = shapes::Pub::mk();\n"
             "  io::println(Str(p.get()) + \" \" + Str(shapes::useHidden()));\n"
+            "  io::println(shapes::Conn::open(7).v);\n"
             "  return 0;\n}\n");
   // A template's body uses the module's private names in the importer
   // (templates come from the source: a `.pkm` carries none, #160).
@@ -1098,6 +1102,7 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
                              "  u = shapes::Pub::_make();\n"
                              "  h = shapes::_GenHidden<int>(1);\n"
                              "  b: _Node = n;\n"
+                             "  c = shapes::Conn(1);\n"
                              "  return 0;\n}\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
@@ -1105,7 +1110,7 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
   auto check = [&](const char *when) {
     auto ok = paykan("--track-heap main.pkn");
     EXPECT_EQ(ok.exitCode, 0) << when << "\n" << ok.out;
-    EXPECT_TRUE(contains(ok.out, "2 3\n")) << when << "\n" << ok.out;
+    EXPECT_TRUE(contains(ok.out, "2 3\n7\n")) << when << "\n" << ok.out;
     EXPECT_TRUE(contains(ok.out, "live blocks       : 0")) << when << "\n"
                                                            << ok.out;
     auto bad = paykan("--check-only bad.pkn");
@@ -1122,7 +1127,9 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
           "'_twice' of 'Pub' is private to module 'lib::shapes'",
           "'_make' of 'Pub' is private to module 'lib::shapes'",
           "'shapes::_GenHidden' is private to module 'lib::shapes'",
-          "'_Node' is private to module 'lib::shapes'"})
+          "'_Node' is private to module 'lib::shapes'",
+          "'shapes::Conn' cannot be constructed here: its initializer "
+          "'___init__' is private to module 'lib::shapes'"})
       EXPECT_TRUE(contains(bad.out, line)) << when << ": " << line << "\n"
                                            << bad.out;
   };

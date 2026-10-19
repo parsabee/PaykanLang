@@ -414,6 +414,8 @@ private:
   const std::string *NativeSymbol = nullptr;
   bool View = false;   // `view fn`: a method that does not change `self`
   bool Static = false; // `static fn`: an `impl` block's function, no `self`
+  // Written `___init__` (Names.h): the initializer, private to its module.
+  bool ModulePrivateInit = false;
   ParamMode ResultMode = ParamMode::Value; // `-> view T`
 
 public:
@@ -470,6 +472,9 @@ public:
   /// Declared `static fn` in an `impl` block: called as `Type::name()`.
   bool isStatic() const { return Static; }
   void setStatic(bool isStatic) { Static = isStatic; }
+  /// Written `___init__`: the initializer, private to its module (Names.h).
+  bool isModulePrivateInit() const { return ModulePrivateInit; }
+  void setModulePrivateInit(bool v) { ModulePrivateInit = v; }
 
   /// `-> view T` (or `-> inout T`): the result is a borrow of what the
   /// function was given as one; Value for a copy.
@@ -1164,7 +1169,8 @@ private:
   Type *ReturnType;
   std::vector<Type *> ParamTypes;
   uint8_t MethodFlags;
-  ParamModes Modes; // `n: inout int`
+  ParamModes Modes;               // `n: inout int`
+  bool ModulePrivateInit = false; // the type's `___init__` (Names.h)
 
 public:
   MethodDecl(SourceLocation loc, const std::string &internedName, Type *retTy,
@@ -1185,6 +1191,10 @@ public:
   bool isView() const { return MethodFlags & View; }
   /// Declared in an `impl` block: it has no vtable slot.
   bool isImpl() const { return MethodFlags & Impl; }
+  /// The type's `___init__`: constructed, and extended, by its module only
+  /// (Sema::checkConstructible).
+  bool isModulePrivateInit() const { return ModulePrivateInit; }
+  void setModulePrivateInit(bool v) { ModulePrivateInit = v; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodDecl;

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Parser.h"
+#include "Names.h"
 #include "paykan/Frontend.h"
 
 #include <algorithm>
@@ -1021,7 +1022,12 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
     errorAtCurrent("expected a function name after 'fn'");
     return nullptr;
   }
-  const std::string &name = intern(consume().Text);
+  // `___init__` is the initializer `__init__`, private to its module
+  // (Names.h): recorded as the initializer, with the mark.
+  const std::string_view spelled = consume().Text; // into the source
+  const bool modulePrivateInit = spelled == names::kMethodInitModulePrivate;
+  const std::string &name = intern(
+      modulePrivateInit ? std::string_view(names::kMethodInit) : spelled);
 
   std::vector<const std::string *> typeParams;
   TypeParamBounds bounds;
@@ -1067,6 +1073,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
                                   nullptr, std::move(typeParams));
     fn->setNativeSymbol(symbol);
     fn->setResultMode(resultMode);
+    fn->setModulePrivateInit(modulePrivateInit);
     return fn;
   }
 
@@ -1086,6 +1093,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
                                   nullptr);
     fn->setView(view);
     fn->setResultMode(resultMode);
+    fn->setModulePrivateInit(modulePrivateInit);
     return fn;
   }
 
@@ -1096,6 +1104,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
                                 body, std::move(typeParams));
   fn->setView(view);
   fn->setResultMode(resultMode);
+  fn->setModulePrivateInit(modulePrivateInit);
   fn->setTypeParamBounds(std::move(bounds));
   return fn;
 }

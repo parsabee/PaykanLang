@@ -311,7 +311,10 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     localStructs.insert(sd->getName());
   auto methodInfo = [](const ast::MethodDecl *m) {
     ModuleInfo::ClassInfo::MethodInfo mi;
-    mi.Name = m->getName();
+    // A module-private initializer is recorded as spelled, `___init__`.
+    mi.Name = m->isModulePrivateInit()
+                  ? std::string(names::kMethodInitModulePrivate)
+                  : m->getName();
     mi.ReturnTypeName = ast::typeName(m->getReturnType());
     for (auto *pty : m->getParamTypes())
       mi.ParamTypeNames.push_back(ast::typeName(pty));
@@ -788,10 +791,15 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     }
     if (!sigOk)
       return nullptr;
-    auto *md =
-        Ctx.make<ast::MethodDecl>(ast::SourceLocation(), Ctx.intern(m.Name),
-                                  retTy, std::move(params), m.Flags);
+    // `___init__` is the initializer `__init__`, private to its module.
+    const bool modulePrivateInit = m.Name == names::kMethodInitModulePrivate;
+    auto *md = Ctx.make<ast::MethodDecl>(
+        ast::SourceLocation(),
+        Ctx.intern(modulePrivateInit ? std::string(names::kMethodInit)
+                                     : m.Name),
+        retTy, std::move(params), m.Flags);
     md->setParamModes(m.Modes);
+    md->setModulePrivateInit(modulePrivateInit);
     return md;
   };
 
@@ -933,7 +941,14 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
           ok = false;
           continue;
         }
-        builder.method(m.Name, retTy, std::move(params), m.Flags, m.Modes);
+        // `___init__` is the initializer `__init__`, private to its module.
+        const bool modulePrivateInit =
+            m.Name == names::kMethodInitModulePrivate;
+        builder.method(modulePrivateInit ? std::string(names::kMethodInit)
+                                         : m.Name,
+                       retTy, std::move(params), m.Flags, m.Modes);
+        if (modulePrivateInit)
+          ct->findMethod(names::kMethodInit)->setModulePrivateInit(true);
       }
       builder.build();
       if (ci->IsLocal)

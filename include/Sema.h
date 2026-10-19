@@ -424,6 +424,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// `m::__name` written in an importer: reported as private to its
   /// module, true; false when @p name is not of that form.
   bool reportPrivateImport(const std::string &name, ast::SourceLocation loc);
+  /// Whether code here may construct (@p verb "constructed"), or extend
+  /// through `__super__` ("extended"), the type @p typeName whose
+  /// initializer is @p init: always, unless the initializer is `___init__`
+  /// and the type is another module's, outside that module's own templates.
+  /// Reports it otherwise, naming the type as @p written.
+  bool checkConstructible(const std::string &typeName,
+                          const std::string &written,
+                          const ast::MethodDecl *init, const char *verb,
+                          ast::SourceLocation loc);
   /// Whether a declaration's name is its module's own (`_f`, `_T`,
   /// `_T::f`): the first segment is private to the module.
   static bool isModuleOwnName(const std::string &name);

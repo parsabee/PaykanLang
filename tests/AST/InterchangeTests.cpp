@@ -1033,3 +1033,36 @@ TEST(Interchange, SizedTypesRoundTrip) {
   EXPECT_EQ(dump(back), dump(driver.getRoot()));
   EXPECT_EQ(write(*back), text);
 }
+
+// A module-private initializer, `___init__`, is written as spelled and read
+// back as the initializer with its mark.
+TEST(Interchange, ModulePrivateInitializerRoundTrips) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_init_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path) << "class A { n: int; }\n"
+                           "impl A {\n"
+                           "  fn ___init__(n: int) { self.n = n; }\n"
+                           "}\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  const ast::FuncDecl *init =
+      driver.getRoot()->getImplDecls()[0]->getMethods()[0];
+  EXPECT_EQ(init->getName(), "__init__");
+  EXPECT_TRUE(init->isModulePrivateInit());
+  std::string text = write(*driver.getRoot());
+  EXPECT_NE(text.find("(fn @3:3-3:39 \"___init__\""), std::string::npos)
+      << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  const ast::FuncDecl *again = back->getImplDecls()[0]->getMethods()[0];
+  EXPECT_EQ(again->getName(), "__init__");
+  EXPECT_TRUE(again->isModulePrivateInit());
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+}

@@ -131,6 +131,15 @@ not (`'_cache' of 'Counter' is private to module 'm'`). A public field or a publ
 type or signature names a module-private class (`fn make() -> _Node`) is rejected in the
 declaring module, because an importer would receive a value it cannot name; see
 [Modules](06-modules.md#private-to-the-module).
+
+An initializer written `___init__` (three underscores) is **private to the module**. It is
+the class's `__init__` in every other way (the one initializer, in an `impl` block, what a
+subclass's `__super__` calls), but `Counter(...)`, and `__super__(...)` into it from a
+subclass, are allowed only in the module that declares the class: its functions, its other
+types' methods, and its templates wherever they are instantiated. An importer gets
+`'m::Counter' cannot be constructed here: its initializer '___init__' is private to module
+'m'` (`cannot be extended here` from a subclass), and makes one through a function the module
+provides, as `io::open` and `io::stdin` make an `io::File`.
 `toString`, `==` and `hash` see every field as before. The rules are in
 `docs/design/visibility.md`.
 

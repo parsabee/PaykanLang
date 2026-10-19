@@ -23,6 +23,11 @@ inline constexpr const char *kString = "Str";
 // Built-in method names
 inline constexpr const char *kMethodInit = "__init__";
 inline constexpr const char *kMethodSuper = "__super__";
+/// `___init__`: the initializer, private to its module (docs/language/
+/// 04-classes.md, "Private fields and methods").  The parser records it as
+/// `__init__` with FuncDecl::isModulePrivateInit; the AST interchange form
+/// and a `.pkm` interface write the method under this name again.
+inline constexpr const char *kMethodInitModulePrivate = "___init__";
 
 /// A name the `__` prefix makes private to its class or struct
 /// (docs/design/visibility.md): a field or method reachable only from that

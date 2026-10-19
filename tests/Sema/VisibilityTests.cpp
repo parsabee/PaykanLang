@@ -217,3 +217,55 @@ fn main() -> int { return 0; }
                 "enum '__E': the '__' prefix", "trait '__T': the '__' prefix",
                 "function '__g': the '__' prefix"});
 }
+
+// `___init__` is the type's initializer, private to its module: the module's
+// own code constructs the type, extends it, and calls the factories that do;
+// it is still the one initializer, and still not a top-level name.
+TEST(Visibility, ModulePrivateInitializerIsTheModulesOwn) {
+  auto r = semaCheck(R"(
+class Conn { __h: int; }
+impl Conn {
+  fn ___init__(h: int) { self.__h = h; }
+  static fn open(h: int) -> Conn { return Conn(h); }
+  view fn h() -> int { return self.__h; }
+}
+class Sub : Conn {}
+impl Sub { fn __init__() { __super__(9); } }
+class Pool { c: Conn; }
+impl Pool { fn __init__() { self.c = Conn(1); } fn renew() { self.c = Conn(2); } }
+struct P { x: int; }
+impl P {
+  fn ___init__(x: int) { self.x = x; }
+  static fn origin() -> P { return P(0); }
+}
+class Box<T> { v: T; }
+impl Box<T> { fn ___init__(v: T) { self.v = v; } }
+fn boxOf(v: Str) -> Box<Str> { return Box<Str>(v); }
+fn mk() -> Conn { return Conn(3); }
+fn main() -> int {
+  a = Conn(4);
+  b = Conn::open(5);
+  c = mk();
+  d = Sub();
+  p = P(6);
+  q = P::origin();
+  e = Box<int>(7);
+  f = boxOf("s");
+  g = fn() -> Conn { return Conn(8); };
+  return a.h() + b.h() + c.h() + d.h() + p.x + q.x + e.v + g().h();
+})");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  auto bad = semaCheck(R"(
+class Twice { n: int; }
+impl Twice {
+  fn __init__(n: int) { self.n = n; }
+  fn ___init__(n: int) { self.n = n; }
+}
+fn ___init__() {}
+fn main() -> int { return 0; })");
+  EXPECT_FALSE(bad.Ok);
+  expectAll(bad, {"class 'Twice' already has a method '__init__'",
+                  "'___init__' is the initializer of a class or a struct, "
+                  "private to its module; it goes in an 'impl' block"});
+}

@@ -3,6 +3,7 @@
 
 #include "ASTPrinter.h"
 #include "ASTContext.h"
+#include "Names.h"
 
 #include <cstdio>
 #include <ostream>
@@ -584,7 +585,10 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
     OS << " view"; // `view fn`, as written
   if (node->isStatic())
     OS << " static";
-  OS << " '" << node->getName() << "'";
+  OS << " '"
+     << (node->isModulePrivateInit() ? names::kMethodInitModulePrivate
+                                     : node->getName().c_str())
+     << "'";
   printTypeParams(OS, node->getTypeParams(), node->getTypeParamBounds());
   if (node->isNative())
     OS << " native '" << node->getNativeSymbol() << "'";

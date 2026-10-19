@@ -82,10 +82,11 @@ class File {
 }
 
 impl File {
+  /// Made by `open` and `stdin` only: the initializer is the module's.
+  fn ___init__(handle: Obj) { self.__handle = handle; }
   /// Writes @p s to the file: no error, or why it could not.
-  view fn write(s: view Str) -> res::Error {
-    return _error(_write(self.__handle, s));
-  }
+  view fn write(s: view Str) -> res::Error
+                            { return _error(_write(self.__handle, s)); }
   /// The next line, with its newline when it has one.
   view fn readln() -> res::Result<Str> {
     errno = 0;

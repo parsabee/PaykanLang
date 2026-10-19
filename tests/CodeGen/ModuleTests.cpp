@@ -658,3 +658,44 @@ fn main() -> int {
 
   std::filesystem::remove_all(tmpDir);
 }
+
+// A type whose initializer is `___init__` is made through its module's
+// factories, which run like any constructor call.
+TEST(Module, FactoryOfAModulePrivateInitializer) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_private_init";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "lib.pkn", R"(
+class Conn { __h: int; }
+impl Conn {
+  fn ___init__(h: int) { self.__h = h; }
+  static fn open(h: int) -> Conn { return Conn(h); }
+  view fn h() -> int { return self.__h; }
+}
+struct P { x: int; }
+impl P { fn ___init__(x: int) { self.x = x; } }
+fn origin() -> P { return P(0); }
+class Box<T> { v: T; }
+impl Box<T> { fn ___init__(v: T) { self.v = v; } }
+fn boxOf(v: Str) -> Box<Str> { return Box<Str>(v); }
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import ::io;
+import lib;
+fn main() -> int {
+  c = lib::Conn::open(7);
+  io::println(c.h());
+  io::println(lib::origin().x);
+  io::println(lib::boxOf("b").v);
+  return 0;
+}
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "7\n0\nb\n");
+
+  std::filesystem::remove_all(tmpDir);
+}
