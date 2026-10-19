@@ -88,6 +88,7 @@ add_executable(sema_tests
     Sema/StructTests.cpp
     Sema/GenericStructTests.cpp
     Sema/FunctionTypeTests.cpp
+    Sema/VisibilityTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

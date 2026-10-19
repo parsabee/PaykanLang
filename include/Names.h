@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <string_view>
+
 namespace paykan {
 namespace names {
 
@@ -29,6 +31,14 @@ inline constexpr const char *kStdin = "Stdin";
 // Built-in method names
 inline constexpr const char *kMethodInit = "__init__";
 inline constexpr const char *kMethodSuper = "__super__";
+
+/// A name the `__` prefix makes private (docs/design/visibility.md): a field
+/// or method private to its class or struct, a free function or a type
+/// private to its module.  The reserved `__init__` and `__super__` are not.
+inline bool isPrivateName(std::string_view name) {
+  return name.size() > 2 && name[0] == '_' && name[1] == '_' &&
+         name != kMethodInit && name != kMethodSuper;
+}
 inline constexpr const char *kMethodDestroy = "destroy";
 inline constexpr const char *kMethodToString = "toString";
 inline constexpr const char *kMethodEquals = "equals";

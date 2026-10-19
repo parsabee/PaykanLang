@@ -83,6 +83,50 @@ impl User {
 }
 ```
 
+### Private fields and methods
+
+A field or method whose name starts with two underscores is **private to its class**: it can
+be read, assigned or called only from the class's own methods (the ones in its body, in its
+`impl` blocks and in its trait impls), and nowhere else: not from a subclass, not from a free
+function or another class in the same module, not from an importer. A single underscore means
+nothing, and `__init__` and `__super__` keep their special meaning. The default `__init__`
+still takes every field in order, private ones included, since a constructor is the class's
+own code:
+
+```pkn
+class Counter {
+  __count: int;
+  step: int;
+
+  fn tick() { self.__bump(self.step); }          // its own private method
+  view fn value() -> int { return self.__count; }
+  fn __bump(by: int) { self.__count = self.__count + by; }
+}
+
+fn main() -> int {
+  c = Counter(0, 2);                               // the private field is a constructor argument
+  c.tick();
+  c.tick();
+  println(Str(c.value()) + " " + Str(c.step));
+  return 0;
+}
+```
+
+Output:
+
+```
+4 2
+```
+
+`c.__count` or `c.__bump(1)` in `main`, or in a method of another class, is an error:
+`'__count' is private to 'Counter': it is reachable only from its own methods`. The same holds
+in a subclass: `self.__count` inside `class Sub : Counter` is rejected, and a subclass may declare
+its own `__count`, a different field. A public field or a public method whose type or signature
+names a private class (`fn make() -> __Node`) is rejected in the declaring module, because an
+importer would receive a value it cannot name; see [Modules](06-modules.md#private-to-the-module).
+`toString`, `==` and `hash` see every field as before. The rules are in
+`docs/design/visibility.md`.
+
 ### The default `__init__`
 
 A class that declares no `__init__` gets one. It takes one argument per field, in the order
@@ -413,6 +457,8 @@ match a {
 | `self` changed in a `view fn` | A `view fn` assigns `self`'s fields or elements, calls a method on `self` that is not a `view fn`, passes them to `inout`, or passes on or stores a reference reached through `self` |
 | Multiple bases | More than one `:` clause |
 | `self` in parameter list | Writing `self` as an explicit method parameter |
+| Private member used outside its class | `c.__count`, `c.__bump()`, `self.__count` in a subclass, or in a free function: `'__count' is private to 'Counter': it is reachable only from its own methods` |
+| Private type in a public signature | A public field, a public method or a free function naming a `__`-prefixed class, struct, enum or trait: `'make' is public but its result names the private type '__Node'; make the function private or the type public` |
 | Assigning `self` | `self = C(1)` in a method: `self` names the object the method was called on (`cannot assign to 'self'`) |
 | `__init__` in the class body | `class A { fn __init__() { … } }`; it goes in `impl A { … }` |
 | `impl` method name taken | An `impl` method or `static fn` has the name of a method of the class or a superclass, or a subclass declares one with an `impl` method's name |

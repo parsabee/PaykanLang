@@ -391,6 +391,42 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The tuple element, if any, that holds the struct whose field @p e is
   /// (through any structs in between): part of a tuple, so immutable.
   const ast::TupleIndexExpr *tupleElementHolding(const ast::Expr *e);
+
+  // -- Private members (docs/design/visibility.md; SemaVisibility.cpp)
+
+  /// The class or struct whose `static fn` body is being checked (its
+  /// private members are reachable there), or nullptr.
+  ast::Type *CurrentStaticOwner = nullptr;
+  /// Set while a default `__init__` is declared: its parameters repeat the
+  /// fields, whose types were checked already.
+  bool DeclaringDefaultInit = false;
+  /// The class, from @p ct up, that declares field @p name, or nullptr.
+  static ast::ClassType *fieldOwner(ast::ClassType *ct,
+                                    const std::string &name);
+  /// The class, from @p ct up, that declares or overrides method @p name,
+  /// or nullptr.
+  static ast::ClassType *declaringClass(ast::ClassType *ct,
+                                        const std::string &name);
+  /// A use of member @p member of @p owner at @p loc: fine unless the name
+  /// is private and the use is outside the owner's methods (reported).
+  bool checkMemberAccess(ast::Type *owner, const std::string &member,
+                         ast::SourceLocation loc);
+  /// A call or function value `C::__m`: checkMemberAccess for the static
+  /// method of class or struct `C`, when @p qualified has that form.
+  bool checkStaticMemberUse(const std::string &qualified,
+                            ast::SourceLocation loc);
+  /// The private type @p ty names, anywhere in it, or "".
+  std::string privateTypeIn(ast::Type *ty);
+  /// A public declaration's type must not name a private type: @p what
+  /// ("'f' is public but its result"), @p fix ("function"), reported.
+  bool checkPublicSurface(const std::string &what, const std::string &fix,
+                          ast::Type *ty, ast::SourceLocation loc);
+  /// `m::__name` written in an importer: reported as private to its
+  /// module, true; false when @p name is not of that form.
+  bool reportPrivateImport(const std::string &name, ast::SourceLocation loc);
+  /// Whether a declaration's name is its module's own (`__f`, `__T`,
+  /// `__T::f`): the first segment is private.
+  static bool isModulePrivateName(const std::string &name);
   /// False (after reporting it) when @p index is a constant out of
   /// @p fixed's bounds.
   bool checkFixedIndex(ast::FixedArrayType *fixed, const ast::Expr *index);

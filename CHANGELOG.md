@@ -47,6 +47,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A generic class or struct whose method instantiates its template with an ever-growing
   type argument (`Deep<Deep<T>>`) is now reported (`exceeds the maximum instantiation
   depth`) instead of instantiating without end.
+- Private members (docs/language/04-classes.md "Private fields and methods",
+  docs/language/06-modules.md "Private to the module", design in docs/design/visibility.md):
+  a name that starts with two underscores is private.  A field or a method `__x` of a class
+  or struct is reachable only from that type's own methods, `impl` blocks, trait impls and
+  `static fn`s (`'__count' is private to 'Counter': it is reachable only from its own
+  methods`), not from a subclass, the rest of the module or an importer; the default
+  `__init__` still takes every field.  A free function, class, struct, enum or trait `__f`
+  is the module's own: an importer cannot write `m::__f` (`'m::__f' is private to module
+  'm'`), while the module's exported generic templates keep using it.  A public function,
+  field or method cannot name a private type (`'make' is public but its result names the
+  private type '__Node'; make the function private or the type public`).  `__init__` and
+  `__super__` keep their meaning.  The `.pkm` format is unchanged: private names stay in
+  the interface and are refused by name.
 - A value type read through a `view` is passed to a by-value parameter as a copy
   (docs/language/02-functions-and-calling.md, "A `view` of a reference stays a `view`"): `twice(n)` with `n: view int`, `twice(k)` with `k:
   view = 3`, `f(xs[i])` with `xs: view int[]`, `twice(b.num())` with `num() -> view int`,

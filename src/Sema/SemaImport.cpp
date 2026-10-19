@@ -703,6 +703,10 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   // against the import site rather than degraded to Obj/void, which would
   // only surface later as a baffling type mismatch at a call site.
   const std::string diagPrefix = "import of module '" + moduleName + "': ";
+  // Under its hidden qualifier a module's private names are injected too
+  // (its exported templates use them); under a written qualifier they are
+  // the module's own and left out, so that `m::__f` resolves to nothing.
+  const bool hiddenInject = qualifier == hiddenQualifier(moduleName);
 
   auto resolveOrReport = [&](const std::string &tyName,
                              const std::string &what) -> ast::Type * {
@@ -735,16 +739,22 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   };
 
   auto addClassAliases = [&](ast::ClassType *ct, const std::string &name) {
+    if (!hiddenInject && names::isPrivateName(name))
+      return;
     Ctx.addClassTypeAlias(qualifier + names::kQualSep + name, ct);
     if (qualifier != fullModulePath)
       Ctx.addClassTypeAlias(fullModulePath + names::kQualSep + name, ct);
   };
   auto addEnumAliases = [&](ast::EnumType *et, const std::string &name) {
+    if (!hiddenInject && names::isPrivateName(name))
+      return;
     Ctx.addEnumTypeAlias(qualifier + names::kQualSep + name, et);
     if (qualifier != fullModulePath)
       Ctx.addEnumTypeAlias(fullModulePath + names::kQualSep + name, et);
   };
   auto addStructAliases = [&](ast::StructType *st, const std::string &name) {
+    if (!hiddenInject && names::isPrivateName(name))
+      return;
     Ctx.addStructTypeAlias(qualifier + names::kQualSep + name, st);
     if (qualifier != fullModulePath)
       Ctx.addStructTypeAlias(fullModulePath + names::kQualSep + name, st);
@@ -972,6 +982,8 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   // qualifier::name and fullModulePath::name, then templates.
   bool ok = registerExportedTypes();
   for (auto &fi : info.ExportedFunctions) {
+    if (!hiddenInject && isModulePrivateName(fi.Name))
+      continue; // the module's own: a private function or type's constructor
     if (!injectFnAs(fi, qualifier + names::kQualSep + fi.Name))
       ok = false;
     if (qualifier != fullModulePath &&
@@ -1207,12 +1219,17 @@ bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
   }
   for (const std::string &q :
        {qualifier, fullModulePath, hiddenQualifier(mt.Module)}) {
+    // A private template is reachable under the hidden qualifier only.
+    const bool hidden = q == hiddenQualifier(mt.Module);
     for (auto *cd : mt.Classes)
-      ClassTemplates[q + names::kQualSep + cd->getName()] = cd;
+      if (hidden || !names::isPrivateName(cd->getName()))
+        ClassTemplates[q + names::kQualSep + cd->getName()] = cd;
     for (auto *fn : mt.Functions)
-      FuncTemplates[q + names::kQualSep + fn->getName()] = fn;
+      if (hidden || !names::isPrivateName(fn->getName()))
+        FuncTemplates[q + names::kQualSep + fn->getName()] = fn;
     for (auto *sd : mt.Structs)
-      StructTemplates[q + names::kQualSep + sd->getName()] = sd;
+      if (hidden || !names::isPrivateName(sd->getName()))
+        StructTemplates[q + names::kQualSep + sd->getName()] = sd;
   }
   for (auto *cd : mt.Classes)
     ForeignTemplates[cd] = &mt;

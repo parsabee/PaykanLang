@@ -294,7 +294,8 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
         // imported class referenced by a registered alias (e.g.
         // "tmp_import::helper::Adder").  A class of a failed import was
         // reported with the import.
-        if (!isFailedImportUse(superName))
+        if (!reportPrivateImport(superName, cd->getLocation()) &&
+            !isFailedImportUse(superName))
           error(cd->getLocation(), "superclass '" + superName + "' of class '" +
                                        cd->getName() + "' is not defined");
         broken = true;
@@ -403,6 +404,15 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       continue;
     }
     ct->addField(field->getName(), fty, field->isWeak());
+    // A public field of a public class cannot hand an importer a type it
+    // could not name (an instantiation's fields are the template's).
+    if (!names::isPrivateName(field->getName()) &&
+        !isModulePrivateName(cd->getName()) &&
+        cd->getName().find('<') == std::string::npos &&
+        !checkPublicSurface("field '" + field->getName() + "' of '" +
+                                cd->getName() + "' is public but it",
+                            "field", fty, field->getLocation()))
+      ok = false;
   }
 
   // -- methods --
@@ -499,7 +509,9 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
       loc, Ctx.intern(names::kMethodInit), std::move(params), nullptr,
       Ctx.make<ast::CompoundStmt>(loc, std::move(body)));
   bool ok = true;
+  DeclaringDefaultInit = true; // its parameters are the fields, checked
   auto *md = declareMethod(fn, ct, nullptr, ast::MethodDecl::None, ok);
+  DeclaringDefaultInit = false;
   if (!md)
     return false;
   ct->addMethod(md);
@@ -553,6 +565,24 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
       return nullptr;
     p.ParamType = pty;
     paramTys.push_back(pty);
+  }
+
+  // A public method of a public type cannot hand an importer a type it
+  // could not name (an instantiation's methods are the template's).
+  if (!DeclaringDefaultInit && !names::isPrivateName(method->getName()) &&
+      !isModulePrivateName(className) &&
+      className.find('<') == std::string::npos) {
+    const std::string who = "method '" + method->getName() + "' of '" +
+                            className + "' is public but ";
+    bool pub = checkPublicSurface(who + "its result", "method", retTy,
+                                  method->getLocation());
+    for (size_t i = 0; i < paramTys.size(); ++i)
+      pub = checkPublicSurface(who + "parameter '" +
+                                   method->getParams()[i].getName() + "'",
+                               "method", paramTys[i], method->getLocation()) &&
+            pub;
+    if (!pub)
+      return nullptr;
   }
 
   // -- override signature check
@@ -1186,7 +1216,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
       error(loc, "'" + name + "' is a generic function, not a generic class");
     else if (Traits.count(name))
       error(loc, "'" + name + "' is a trait, not a type");
-    else
+    else if (!reportPrivateImport(name, loc))
       error(loc, "unknown generic class '" + name + "'");
     return nullptr;
   }
@@ -1764,7 +1794,9 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   else if (ErroneousNames.count(callee))
     ++SuppressedFollowOns; // a template rejected at its declaration
   else if (!isFailedImportUse(callee))
-    error(loc, "call to undeclared generic function or class '" + callee + "'");
+    if (!reportPrivateImport(callee, loc))
+      error(loc,
+            "call to undeclared generic function or class '" + callee + "'");
   return false;
 }
 

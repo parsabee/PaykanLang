@@ -1,0 +1,30 @@
+// Private members: a `__` field or method is reachable from its type's own
+// methods, `impl` blocks, trait impls and `static fn`s; a `__` function or
+// type is used anywhere in its module.
+class Counter {
+  __count: int;
+  step: int;
+  fn tick() { self.__bump(self.step); }
+  view fn value() -> int { return self.__count; }
+  fn __bump(by: int) { self.__count = self.__count + by; }
+}
+impl Counter {
+  static fn make(n: int) -> Counter { c = Counter(0, n); c.__bump(1); return c; }
+  fn copyFrom(o: view Counter) { self.__count = o.__count; }
+}
+trait Named { view fn name() -> Str; }
+impl Named for Counter { view fn name() -> Str { return "C" + Str(self.__count); } }
+struct P { __x: int; }
+impl P {
+  fn bump() { self.__x = self.__x + 1; }
+  view fn x() -> int { return self.__x; }
+}
+class __Node { v: int; }
+fn __helper(n: view __Node) -> int { return n.v; }
+fn main() -> int {
+  c = Counter::make(3);
+  c.tick();
+  p = P(1);
+  p.bump();
+  return c.value() + p.x() + __helper(__Node(5)) + c.name().len();
+}

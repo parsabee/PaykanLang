@@ -193,7 +193,7 @@ std::optional<Sema::TraitRef> Sema::resolveTraitRef(ast::Type *ref,
     if (Ctx.lookupType(name) || ClassTemplates.count(name) ||
         StructTemplates.count(name))
       error(loc, "'" + name + "' is not a trait");
-    else
+    else if (!reportPrivateImport(name, loc))
       error(loc, "unknown trait '" + name + "'");
     return std::nullopt;
   }
