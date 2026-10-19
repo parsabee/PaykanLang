@@ -142,7 +142,10 @@ and the variable share the object; a value held in place (a struct, a tuple, a f
 array) is copied, with its references retained.  Later assignments to the variable do not
 reach the closure, and the closure does not change the variable.  A closure is an object:
 one that captures an object and is stored in a field of it is a reference cycle, which
-[is not collected](08-memory-model.md#reference-cycles):
+[is not collected](08-memory-model.md#reference-cycles) — unless the captured variable is a
+[`weak`](08-memory-model.md#weak-references) one, which the closure captures weakly: it reads
+as the object while the object is alive and as `None` afterwards (`weak me = self;
+self.onClick = fn() -> Str { match me { ... } };`).
 
 ```pkn
 class Counter { n: int; }

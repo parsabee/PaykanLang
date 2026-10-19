@@ -205,7 +205,8 @@ pir::Class *ModuleLowering::getOrCreateClass(ast::ClassType *ct) {
   cls.Name = ct->getName();
   cls.Super = (super && !super->isBuiltin()) ? super->getName() : "";
   for (auto &[name, ty] : allFieldsInOrder(ct)) {
-    Type t = toPIRType(ty);
+    // A `weak` field holds a weak reference (docs/pir.md §5).
+    Type t = ct->isWeakField(name) ? Type::Weak : toPIRType(ty);
     cls.Fields.push_back({name, t == Type::Void ? Type::Box : t});
     if (t == Type::Mem) { // an array or a tuple, held inline
       MemLayout l = memLayout(ty);
@@ -344,7 +345,8 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
 
 // `void Class.destroy(obj self)`: the user `destroy` body (if any), then a
 // release of every ref-typed field and of the references in every
-// fixed-size array field, then the struct is freed.
+// fixed-size array field.  The runtime frees the object after the destroy
+// (or keeps it for its weak references, docs/pir.md §5).
 void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
   pir::Function *fn =
       FuncByName.at(node->getName() + kNameSep + kMethodDestroy);
@@ -376,7 +378,7 @@ void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
       stmts.pop_back();
   }
 
-  // Release every ref-typed field (null-safe), then free the struct.
+  // Release every ref-typed field (null-safe).
   for (auto &[fname, fty] : allFieldsInOrder(ct)) {
     if (ast::isMemType(fty)) {
       if (memHoldsRefs(fty))
@@ -386,10 +388,13 @@ void ModuleLowering::emitDestructor(ast::ClassDecl *node, ast::ClassType *ct) {
     }
     if (!ast::isRefType(fty))
       continue;
+    if (ct->isWeakField(fname)) {
+      B.weakRelease(B.fieldLoad(self, ct->getName(), fname, Type::Weak, fname));
+      continue;
+    }
     Val box = B.fieldLoad(self, ct->getName(), fname, Type::Box, fname);
     emitRelease(box);
   }
-  B.freeObject(self);
   B.emitRetVoid();
 }
 
@@ -416,7 +421,8 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
                               node->getFieldName() + ".addr"),
                   node->getValue());
   } else if (fieldASTTy && ast::isRefType(fieldASTTy)) {
-    // The slot owns a box: retain/steal the new one, release the old one.
+    // The slot owns a box (or, for a `weak` field, a weak reference):
+    // retain/steal the new one, release the old one.
     Val newShared;
     if (isNoneForOptional(node->getValue()))
       newShared = Val::null(Type::Box);
@@ -433,6 +439,19 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
       newShared = exprAlreadyShared(node->getValue())
                       ? takeSharedOwnership(node->getValue(), rhs)
                       : emitSharedNew(rhs, "field.shared");
+    }
+
+    if (ct->isWeakField(node->getFieldName())) {
+      // The field takes a weak reference to the object; the +1 handed over
+      // is dropped, and so is the old weak reference (null-safe).
+      Val weak = B.weakNew(newShared, node->getFieldName() + ".weak");
+      if (!newShared.isNull())
+        emitRelease(newShared);
+      B.weakRelease(B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
+                                Type::Weak, "old.field"));
+      B.fieldStore(objPtr, ct->getName(), node->getFieldName(), weak);
+      releaseIfOwned(recv.Owned);
+      return Val();
     }
 
     // Release the old value only if it is non-null.
@@ -475,14 +494,19 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
   getOrCreateClass(ct);
   ast::Type *fieldASTTy = fieldASTType(ct, node->getFieldName());
   assert(fieldASTTy && "Sema should have verified field exists");
-  Type fieldTy = toPIRType(fieldASTTy);
+  const bool weak = ct->isWeakField(node->getFieldName());
+  Type fieldTy = weak ? Type::Weak : toPIRType(fieldASTTy);
   if (fieldTy == Type::Void)
     fieldTy = Type::Box;
 
   Val fieldVal = B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
                              fieldTy, node->getFieldName());
+  // A `weak` field reads as a fresh +1 box, or null once the object is
+  // gone (exprProducesFreshBox).
+  if (weak)
+    fieldVal = B.weakLoad(fieldVal, node->getFieldName());
   if (recv.Owned.isOwned()) {
-    if (ast::isRefType(fieldASTTy))
+    if (ast::isRefType(fieldASTTy) && !weak)
       emitRetain(fieldVal);
     releaseIfOwned(recv.Owned);
   }

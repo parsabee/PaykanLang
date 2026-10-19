@@ -435,6 +435,7 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
                                   cloneType(vd->getType()),
                                   cloneExpr(vd->getInitExpr()));
     nvd->setLet(vd->isLet());
+    nvd->setWeak(vd->isWeak());
     nvd->setMode(vd->getMode());
     return Ctx.make<DeclStmt>(loc, nvd);
   }
@@ -520,9 +521,11 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
 ClassDecl *ASTCloner::cloneClassDecl(ClassDecl *cd,
                                      const std::string &newName) {
   std::vector<VarDecl *> fields;
-  for (auto *f : cd->getFields())
+  for (auto *f : cd->getFields()) {
     fields.push_back(Ctx.make<VarDecl>(f->getLocation(), in(f->getName()),
                                        cloneType(f->getType()), nullptr));
+    fields.back()->setWeak(f->isWeak());
+  }
   std::vector<FuncDecl *> methods;
   for (auto *m : cd->getMethods())
     methods.push_back(cloneFuncDecl(m, m->getName()));

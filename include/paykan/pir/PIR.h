@@ -27,7 +27,7 @@ enum class Type : uint8_t {
   F64,
   Bool,
   Char,
-  Box, // PaykanShared* (may be null)
+  Box, // PaykanShared*: a strong reference (may be null)
   Obj, // raw PaykanObject* (any runtime or user class)
   Ptr, // any other pointer: vtable address, literal data, kind descriptor
   // Inline optionals (#96): a bool presence flag, then the payload at its
@@ -40,6 +40,10 @@ enum class Type : uint8_t {
   // or a field that stores an aggregate (a fixed-size array), whose size and
   // alignment the local or field gives (docs/pir.md §1).
   Mem,
+  // A weak reference (PaykanWeak*, may be null): the type of a `weak`
+  // local or field (docs/pir.md §1).  Made from a box by `weak.new`, read
+  // as a box by `weak.load`, dropped by `weak.release`.
+  Weak,
 };
 
 const char *typeName(Type t);
@@ -278,6 +282,10 @@ enum class Opcode : uint8_t {
   None,   // -> Result.Ty (an optional), absent
   IsSome, // optional -> bool
   Unwrap, // optional -> payload (zero for an absent one)
+  // weak references (docs/pir.md §6)
+  WeakNew,     // box -> weak   (Paykan_weak_new: the weak count +1)
+  WeakLoad,    // weak -> box   (Paykan_weak_load: a +1 box, or null)
+  WeakRelease, // weak          (Paykan_weak_release)
 };
 
 enum class CmpPred : uint8_t { Eq, Ne, Lt, Le, Gt, Ge };
@@ -369,7 +377,7 @@ struct Function {
 
 struct Field {
   std::string Name;
-  Type Ty; // I64 F64 Bool Char Box, an inline optional, or Mem
+  Type Ty; // I64 F64 Bool Char Box Weak, an inline optional, or Mem
   /// A `mem` field's bytes and alignment (zero for any other type).
   int64_t Size = 0;
   int64_t Align = 0;

@@ -87,6 +87,10 @@ const RuntimeSymbol kRuntimeSymbols[] = {
 
     {kPaykanSharedNew,       reinterpret_cast<void *>(&PaykanShared_new)},
     {kPaykanSharedGet,       reinterpret_cast<void *>(&PaykanShared_get)},
+    {kPaykanDispose,         reinterpret_cast<void *>(&Paykan_dispose)},
+    {kPaykanWeakNew,         reinterpret_cast<void *>(&Paykan_weak_new)},
+    {kPaykanWeakLoad,        reinterpret_cast<void *>(&Paykan_weak_load)},
+    {kPaykanWeakRelease,     reinterpret_cast<void *>(&Paykan_weak_release)},
 
     {kPaykanPanicDivByZero,  reinterpret_cast<void *>(&Paykan_panic_div_by_zero)},
     {kPaykanPanicDivOverflow, reinterpret_cast<void *>(&Paykan_panic_div_overflow)},

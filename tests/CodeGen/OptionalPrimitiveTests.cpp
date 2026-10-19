@@ -618,7 +618,6 @@ class C {
 }
 
 fn @C.destroy(%self: obj) -> void {
-  free %self
   ret
 }
 

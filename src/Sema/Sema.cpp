@@ -2677,6 +2677,7 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
   case VarKind::ViewBinding:
     error(loc, "cannot assign to '" + name + "': it is bound to a 'view'");
     return false;
+  case VarKind::Weak:
   case VarKind::Plain:
   case VarKind::Inout:
     break;
@@ -3200,8 +3201,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     }
 
     // The variable is still declared after this error.  A local borrow may
-    // name a `view` (checkLocalBorrow).
-    if (node->getMode() == ast::ParamMode::Value)
+    // name a `view` (checkLocalBorrow), and so may a `weak` local: it takes
+    // no reference of its own (a weak reference is not a copy of the
+    // view), and what it reads later is a fresh reference to the object.
+    if (node->getMode() == ast::ParamMode::Value && !node->isWeak())
       viewOk = checkViewNotStored(node->getInitExpr(), initTy);
     if (declTy) {
       if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
@@ -3236,12 +3239,44 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     return false;
   }
 
+  // A `weak` local holds a weak reference: its type is `T?` of a class `T`
+  // (`weak y = x;` with `x: T` or `x: T?` infers `T?`).
+  if (node->isWeak()) {
+    if (!node->getType() && !ast::isa<ast::OptionalType>(declTy) &&
+        ast::isa<ast::ClassType>(declTy))
+      declTy = Ctx.getOptionalType(declTy);
+    if (!checkWeakType(declTy, node->getLocation(),
+                       "variable '" + node->getName() + "'")) {
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
+    CurrentScope->Kinds[node->getName()] = VarKind::Weak;
+  }
+
   // Register the variable in the current scope.  An inferred type (`let x =
   // e;`) is written back like an annotation's, for the lowering.
   if (!node->getType())
     node->setType(declTy);
   CurrentScope->declare(node->getName(), declTy);
   return checkLocalBorrow(node) && viewOk;
+}
+
+bool Sema::checkWeakType(ast::Type *ty, ast::SourceLocation loc,
+                         const std::string &what) {
+  auto *ot = ast::dyn_cast<ast::OptionalType>(ty);
+  if (ot && ast::isa<ast::ClassType>(ot->getInnerType()))
+    return true;
+  if (!ot && ast::isa<ast::ClassType>(ty))
+    error(loc, "'weak' " + what +
+                   " must be optional: a weak reference reads "
+                   "as None once its object is destroyed; "
+                   "write '" +
+                   typeName(ty) + "?'");
+  else
+    error(loc, "'weak' " + what + " has type '" + typeName(ty) +
+                   "'; a weak reference is an optional class type ('Node?'): "
+                   "only an object is referred to weakly");
+  return false;
 }
 
 bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {

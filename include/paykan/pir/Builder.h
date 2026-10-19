@@ -28,6 +28,8 @@ struct Val {
 
   explicit operator bool() const { return Ty != Type::Void; }
   bool isValue() const { return Op.isValue(); }
+  /// A `null` constant (of a box or an obj).
+  bool isNull() const { return std::holds_alternative<Operand::Null>(Op.V); }
   ValueId id() const { return Op.valueId(); }
 
   static Val i64(int64_t x) { return {Operand::i64(x), Type::I64}; }
@@ -315,6 +317,26 @@ public:
     i.Result = newValue(Type::Obj, std::move(name));
     i.Args = {b.Op};
     return emit(std::move(i));
+  }
+  Val weakNew(const Val &box, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::WeakNew;
+    i.Result = newValue(Type::Weak, std::move(name));
+    i.Args = {box.Op};
+    return emit(std::move(i));
+  }
+  Val weakLoad(const Val &weak, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::WeakLoad;
+    i.Result = newValue(Type::Box, std::move(name));
+    i.Args = {weak.Op};
+    return emit(std::move(i));
+  }
+  void weakRelease(const Val &weak) {
+    Instr i;
+    i.Op = Opcode::WeakRelease;
+    i.Args = {weak.Op};
+    emit(std::move(i));
   }
   Val newObject(const std::string &className, std::string name = "") {
     Instr i;
