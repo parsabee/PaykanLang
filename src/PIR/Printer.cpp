@@ -282,7 +282,13 @@ private:
     OS << opcodeName(in.Op);
     switch (in.Op) {
     case Opcode::Cmp:
+    case Opcode::UCmp:
       OS << ' ' << predName(in.Pred) << ' ';
+      printOperandList(in.Args);
+      break;
+    case Opcode::Wrap:
+    case Opcode::Mask:
+      OS << ' ' << in.Slot << ' ';
       printOperandList(in.Args);
       break;
     case Opcode::Cast:

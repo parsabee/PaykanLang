@@ -20,6 +20,7 @@ type-checking (no codegen or JIT execution).
 | `lambdas/` | Function types `(T) -> R`, lambdas and their captures, named functions as values, calls through function values |
 | `visibility/` | Private members: `__` fields and methods reachable only from their type's methods, `__` types kept out of public signatures |
 | `conversions/` | Conversion constructors `Target<Source>(value)`: the supported pairs, result types |
+| `sized/` | Sized numeric types `i8` … `unsigned`, `f16`, `f32`: literals taking the expected type, the one-type rule for operators, conversions between every numeric pair |
 
 ## Running
 
@@ -39,7 +40,7 @@ for f in samples/sema/arrays/*.pkn samples/sema/classes/*.pkn \
          samples/sema/optionals/*.pkn samples/sema/tuples/*.pkn \
          samples/sema/structs/*.pkn samples/sema/lambdas/*.pkn \
          samples/sema/visibility/*.pkn \
-         samples/sema/conversions/*.pkn; do
+         samples/sema/conversions/*.pkn samples/sema/sized/*.pkn; do
   paykan --check-only "$f" 2>&1 && echo "OK: $f" || echo "ERR: $f"
 done
 ```

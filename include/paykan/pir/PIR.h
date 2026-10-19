@@ -282,6 +282,16 @@ enum class Opcode : uint8_t {
   None,   // -> Result.Ty (an optional), absent
   IsSome, // optional -> bool
   Unwrap, // optional -> payload (zero for an absent one)
+  // sized numeric types (docs/design/sized-types.md): every one is held in
+  // an i64 or f64, in canonical form, and these restore the form
+  Wrap,     // i64, Slot = 8/16/32 -> i64: the low Slot bits, sign-extended
+  Mask,     // i64, Slot = 8/16/32 -> i64: the low Slot bits, zero-extended
+  UDiv,     // i64, i64 -> i64: unsigned division (operand b nonzero)
+  URem,     // i64, i64 -> i64: unsigned remainder (operand b nonzero)
+  UCmp,     // Pred, two i64 -> bool: unsigned comparison
+  UToF,     // i64 -> f64: the unsigned reading of the bits, rounded
+  FToU,     // f64 -> i64: toward zero, as uint64 bits (operand in [0, 2^64))
+  FRound32, // f64 -> f64: rounded to the nearest f32
   // weak references (docs/pir.md §6)
   WeakNew,     // box -> weak   (Paykan_weak_new: the weak count +1)
   WeakLoad,    // weak -> box   (Paykan_weak_load: a +1 box, or null)
@@ -300,12 +310,12 @@ struct Instr {
   std::vector<Operand> Args;
 
   // Per-opcode extras (unused fields are left default):
-  CmpPred Pred = CmpPred::Eq; // Cmp
+  CmpPred Pred = CmpPred::Eq; // Cmp / UCmp
   Type CastTo = Type::Void;   // Cast
   std::string Callee;         // Call: function symbol
   std::string ClassName;      // VCall / New / Field* / VTableAddr
   std::string Field;          // FieldLoad / FieldStore / FieldAddr
-  uint32_t Slot = 0;          // VCall
+  uint32_t Slot = 0;          // VCall; Wrap / Mask: the bit width
   Signature Sig;              // VCall: the slot's signature
   LocalId Local = 0;          // Load / Store / LocalAddr
 };

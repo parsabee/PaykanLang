@@ -217,6 +217,14 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::None:
     case Opcode::IsSome:
     case Opcode::Unwrap:
+    case Opcode::Wrap:
+    case Opcode::Mask:
+    case Opcode::UDiv:
+    case Opcode::URem:
+    case Opcode::UCmp:
+    case Opcode::UToF:
+    case Opcode::FToU:
+    case Opcode::FRound32:
       check(e.Id);
     }
   }
@@ -247,8 +255,9 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
   Type ty;
   for (unsigned c = 26; c < 256; ++c) {
     // some none is_some unwrap weak.load weak.new; local.addr field.addr
-    // ptr.load ptr.store ptr.add mem.copy mem.zero; weak.release
-    bool used = c <= 31 || (c >= 34 && c <= 40) || c == 49;
+    // ptr.load ptr.store ptr.add mem.copy mem.zero; wrap mask udiv urem
+    // ucmp utof ftou fround32 weak.release
+    bool used = c <= 31 || (c >= 34 && c <= 49);
     EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
   }
   for (unsigned c = 8; c < 256; ++c) {
@@ -537,7 +546,7 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
     b[retType] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "type code " << int(code);
   }
-  for (uint8_t code : {32, 33, 41, 48, 50, 255}) {
+  for (uint8_t code : {32, 33, 50, 255}) {
     std::vector<uint8_t> b = good;
     b[opcode] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "opcode " << int(code);
@@ -731,4 +740,41 @@ TEST(PIRBinary, BytesGlobalHoldsEveryByteValue) {
   ASSERT_EQ(back.Bytes.size(), 1u);
   EXPECT_EQ(back.Bytes[0].Name, ".all");
   EXPECT_EQ(back.Bytes[0].Bytes, all);
+}
+
+// -- Sized numeric types (docs/design/sized-types.md)
+
+TEST(PIRBinary, SizedTypeInstructionsRoundTrip) {
+  Program p = parse(R"(module "m"
+
+fn @main() -> i64 {
+  %a.1 = wrap 8 300
+  %b.2 = mask 16 %a.1
+  %c.3 = udiv %b.2, 3
+  %d.4 = urem %c.3, 2
+  %e.5 = ucmp lt %c.3, %d.4
+  %f.6 = utof %d.4
+  %g.7 = fround32 %f.6
+  %h.8 = ftou %g.7
+  %i.9 = select %e.5, %h.8, %a.1
+  %j.10 = wrap 32 %i.9
+  ret %j.10
+}
+)");
+  ASSERT_EQ(p.Modules.size(), 1u);
+  expectRoundTrip(p.Modules[0]);
+  // The width and the predicate are the only extras written.
+  const Function &f = p.Modules[0].Functions[0];
+  const Instr &wrap = std::get<Instr>(f.Body.Stmts[0]);
+  EXPECT_EQ(wrap.Op, Opcode::Wrap);
+  EXPECT_EQ(wrap.Slot, 8u);
+  const Instr &ucmp = std::get<Instr>(f.Body.Stmts[4]);
+  EXPECT_EQ(ucmp.Op, Opcode::UCmp);
+  EXPECT_EQ(ucmp.Pred, CmpPred::Lt);
+  auto back = binary::decode(binary::encode(p.Modules[0]));
+  ASSERT_TRUE(back.isOk());
+  const Function &g = back.value().Functions[0];
+  EXPECT_EQ(std::get<Instr>(g.Body.Stmts[0]).Slot, 8u);
+  EXPECT_EQ(std::get<Instr>(g.Body.Stmts[9]).Slot, 32u);
+  EXPECT_EQ(std::get<Instr>(g.Body.Stmts[4]).Pred, CmpPred::Lt);
 }

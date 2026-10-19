@@ -273,7 +273,8 @@ An `inout` local names the array itself (`r: inout = xs;`).
 
 ### Arrays of references
 
-An element can be a scalar (`int`, `float`, `bool`, `char`), an optional of one (`int?`,
+An element can be a scalar (`int`, `float`, `bool`, `char`, a sized numeric type such as
+`u8`, which takes an 8-byte slot like `int`), an optional of one (`int?`,
 held inline, `None` when zeroed), an enum, a reference (a class, `Str`, an optional of one), a
 tuple (held inline, see `09-tuples.md`) or another array. An element of a reference type is
 a reference, as a variable of that type is: copying the array copies the references, so the

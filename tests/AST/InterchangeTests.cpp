@@ -997,3 +997,39 @@ TEST(Interchange, ImplBlockRoundTrips) {
   EXPECT_EQ(dump(back), dump(driver.getRoot()));
   EXPECT_EQ(write(*back), text);
 }
+
+// The sized numeric types (docs/design/sized-types.md) are named types in
+// the interchange form, written under their printed names (`u64` and `i64`
+// are `unsigned` and `int`) and read back to the same builtin types.
+TEST(Interchange, SizedTypesRoundTrip) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_sized_" + std::to_string(::getpid()) + ".pkn");
+  {
+    std::ofstream(path)
+        << "struct P { r: u8; g: i16; b: u32; a: f32; }\n"
+           "fn f(a: u64, b: i64, c: f64, d: f16) -> unsigned {\n"
+           "  x: i8 = -1;\n"
+           "  y: u16? = 5;\n"
+           "  z: f32[2] = [0.5, 1.5];\n"
+           "  return a + unsigned(b);\n"
+           "}\n";
+  }
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  for (const char *name :
+       {"\"u8\"", "\"i16\"", "\"u32\"", "\"f32\"", "\"unsigned\"", "\"int\"",
+        "\"float\"", "\"f16\"", "\"i8\"", "\"u16\""})
+    EXPECT_NE(text.find(name), std::string::npos) << name << "\n" << text;
+  EXPECT_EQ(text.find("\"u64\""), std::string::npos) << text;
+  EXPECT_EQ(text.find("\"i64\""), std::string::npos) << text;
+  EXPECT_EQ(text.find("\"f64\""), std::string::npos) << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+}

@@ -98,7 +98,7 @@ To convert a value to another type, call the target type like a function with th
 
 ### To a string
 
-`Str(x)` works for `int`, `float`, `bool` and `char`:
+`Str(x)` works for `int`, `float`, `bool`, `char` and the sized numeric types:
 
 ```pkn
 fn main() -> int {
@@ -151,6 +151,28 @@ Output:
 3.5
 65 C
 False 1
+```
+
+The sized numeric types (`u8`, `i32`, `unsigned`, `f32`, …) convert the same way, from and
+to every other numeric type: `u8(n)` keeps the low 8 bits of an `int` (`u8(300)` is `44`),
+`int(b)` widens a `u8` back, `i32(f)` truncates a `float` and panics outside the `i32`
+range, and `f32(f)` rounds a `float` to single precision.  Two values of different numeric
+types never meet in an operation without one of these conversions.
+
+```pkn
+fn main() -> int {
+  b: u8 = 200;
+  println(Str(u8(300)) + " " + Str(int(b) + 100) + " " + Str(b + 100));
+  println(Str(unsigned(-1)) + " " + Str(f32(0.1)));
+  return 0;
+}
+```
+
+Output:
+
+```
+44 300 44
+18446744073709551615 0.1
 ```
 
 ### From a string: parsing

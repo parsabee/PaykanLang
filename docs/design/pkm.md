@@ -694,7 +694,11 @@ InstrRec := u8 opcode ; uleb result id (0 = none) ; [type result type ; str resu
 | 36, 37 | `ptr.load ptr.store` | — (the loaded type is the result's) | 1 / 2 |
 | 38 | `ptr.add` | — | 2 |
 | 39, 40 | `mem.copy mem.zero` | — | 3 / 2 |
-| 41–48 | reserved | | |
+| 41, 42 | `wrap mask` (sized numeric types) | `uleb` width (8, 16 or 32) | 1 |
+| 43, 44 | `udiv urem` | — | 2 |
+| 45 | `ucmp` | `u8` pred (as `cmp`) | 2 |
+| 46, 47 | `utof ftou` | — | 1 |
+| 48 | `fround32` | — | 1 |
 | 49 | `weak.release` (#99) | — | 1 |
 | 50–255 | reserved | | |
 

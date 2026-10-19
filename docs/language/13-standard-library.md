@@ -19,8 +19,8 @@ qualifier: `collections::List<int>()`.
   shares an object element with the container.
 - Elements are compared with `==`, so a class compares by its `equals`.
 - The keys of a `HashMap` or `HashSet` implement the builtin trait
-  [`Hashable`](12-traits.md#hashable): `int`, `bool`, `char`, `Str`, or a class with an
-  `impl Hashable for` block.
+  [`Hashable`](12-traits.md#hashable): `int`, `bool`, `char`, `Str`, a sized integer type
+  (`u32`, `unsigned`, …), or a class with an `impl Hashable for` block.
 - A broken precondition panics: `pop` on an empty container, an index out of range,
   `get` of a key a map does not have.
 - The build compiles the library with the compiler and installs it in

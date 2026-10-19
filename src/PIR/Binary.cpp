@@ -249,7 +249,12 @@ private:
     // defaults on both sides.
     switch (in.Op) {
     case Opcode::Cmp:
+    case Opcode::UCmp:
       W.u8(predCode(in.Pred));
+      break;
+    case Opcode::Wrap:
+    case Opcode::Mask:
+      W.uleb(in.Slot);
       break;
     case Opcode::Cast:
       type(in.CastTo);
@@ -636,7 +641,8 @@ private:
         (!type(in.Result.Ty) || !str(in.Result.Name)))
       return false;
     switch (in.Op) {
-    case Opcode::Cmp: {
+    case Opcode::Cmp:
+    case Opcode::UCmp: {
       uint8_t p;
       if (!R.u8(p))
         return false;
@@ -644,6 +650,11 @@ private:
         return R.fail("reserved cmp predicate", R.offset() - 1);
       break;
     }
+    case Opcode::Wrap:
+    case Opcode::Mask:
+      if (!R.uleb32(in.Slot))
+        return false;
+      break;
     case Opcode::Cast:
       if (!type(in.CastTo))
         return false;

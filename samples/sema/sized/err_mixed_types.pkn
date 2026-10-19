@@ -1,0 +1,13 @@
+// The operands of an operation have one type; only a literal adapts to the
+// other operand, and only int promotes to float.
+fn main() -> int {
+  a: i32 = 5;
+  b: int = 6;
+  c = a + b;        // error: operator '+' is not defined for types 'i32' and 'int' (the operands must have one type: convert one with 'i32(...)' or 'int(...)')
+  d: u8 = 1;
+  e = d < a;        // error: operator '<' is not defined for types 'u8' and 'i32' (the operands must have one type: convert one with 'u8(...)' or 'i32(...)')
+  f: f32 = 1.5;
+  g: float = f;     // error: initializer of type 'f32' does not match declared type 'float' for variable 'g'
+  h: i8 = 100 + 100;  // error: initializer of type 'int' does not match declared type 'i8' for variable 'h'
+  return 0;
+}

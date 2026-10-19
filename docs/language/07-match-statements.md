@@ -7,7 +7,7 @@ first arm that applies. Depending on the subject's type, `match` operates in one
 |--------------|------|----------------------|
 | A class type (`Obj`, `File`, a user class, …) | **type mode** | the **runtime class** of the object |
 | An `enum` | **variant mode** | the enum's **variants** |
-| A builtin (`int`, `float`, `bool`, `char`, `Str`) | **value mode** | **literal** values |
+| A builtin (`int`, `float`, `bool`, `char`, `Str`, a sized numeric type) | **value mode** | **literal** values |
 | An optional `T?` | **optional mode** | **present** (`T` arm) vs **absent** (`None` arm) |
 
 The mode is chosen by the static type of the subject — you do not select it explicitly.
@@ -24,7 +24,8 @@ The mode is chosen by the static type of the subject — you do not select it ex
   - `name: TypeName { … }` — type pattern that **binds** the narrowed object to `name`.
   - `name: view TypeName { … }` / `name: inout TypeName { … }` — the binding borrows the
     subject, read-only or as its storage ([Borrowing the subject](#borrowing-the-subject)).
-  - `literal { … }` — value pattern (`int`, `float`, `bool`, `char`, or `Str` literal).
+  - `literal { … }` — value pattern (`int`, `float`, `bool`, `char`, or `Str` literal; a
+    numeric literal takes a sized subject's type, `match b { 255 { … } }` with `b: u8`).
   - `_ { … }` — wildcard catch-all.
 - The first matching arm wins; remaining arms are not considered.
 - `_` must be the **last** arm. Any arm after it is unreachable and rejected.
@@ -220,8 +221,8 @@ treatment.
 
 ## Value Mode — matching on a builtin value
 
-When the subject is a builtin (`int`, `float`, `bool`, `char`, or `Str`), arms are **literal
-patterns** and the subject is compared by value. The first equal literal wins. The subject
+When the subject is a builtin (`int`, `float`, `bool`, `char`, `Str`, or a sized numeric
+type), arms are **literal patterns** and the subject is compared by value. The first equal literal wins. The subject
 can be any expression of a builtin type: a variable, a call, a temporary such as `a + b`, or even
 a literal (`match "s" { … }`).
 

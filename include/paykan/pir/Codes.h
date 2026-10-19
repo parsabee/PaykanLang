@@ -65,7 +65,15 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::PtrAdd, 38, "ptr.add"},
     {Opcode::MemCopy, 39, "mem.copy"},
     {Opcode::MemZero, 40, "mem.zero"},
-    // 41-48 reserved.
+    // Sized numeric types (docs/design/sized-types.md).
+    {Opcode::Wrap, 41, "wrap"},
+    {Opcode::Mask, 42, "mask"},
+    {Opcode::UDiv, 43, "udiv"},
+    {Opcode::URem, 44, "urem"},
+    {Opcode::UCmp, 45, "ucmp"},
+    {Opcode::UToF, 46, "utof"},
+    {Opcode::FToU, 47, "ftou"},
+    {Opcode::FRound32, 48, "fround32"},
     {Opcode::WeakRelease, 49, "weak.release"},
     // 50-255 reserved.
 };

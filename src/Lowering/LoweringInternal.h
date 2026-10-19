@@ -335,6 +335,20 @@ private:
   void releaseIfOwned(const ExprValue &ev);
   Val takeSharedOwnership(ast::Expr *expr, const Val &val);
   Val promoteIntToFloat(const Val &v, ast::Type *targetTy);
+  /// @p v, computed for the numeric type @p ty, in the type's canonical form
+  /// (docs/design/sized-types.md): a narrow integer's low bits sign- or
+  /// zero-extended, a narrow float rounded; a constant is folded.  `int`,
+  /// `unsigned`, `float` and every other type are left as they are.
+  Val canonicalize(const Val &v, ast::Type *ty);
+  /// The kind of the builtin type @p ty; Void for any other type.
+  static ast::BuiltinType::Kind builtinKind(ast::Type *ty);
+  /// The runtime function that prints a value of the builtin kind @p k.
+  static const char *toStringRuntime(ast::BuiltinType::Kind k);
+  /// The target and source of the conversion callee @p callee (`u8<int>`,
+  /// `Str<float>`, `int<Str>`): false when it is not one (a generic class
+  /// instantiation, say).
+  bool conversionTypes(const std::string &callee, ast::Type *&target,
+                       ast::Type *&source) const;
   /// bool -> i64 when the destination is i64 (runtime ABI, user i64 params).
   Val coerceBoolToI64(const Val &v, pir::Type dest);
   /// @p v as the PIR type @p dest of the slot it flows into: int -> float
@@ -396,7 +410,9 @@ private:
   Val emitValueOptionalEquals(const Val &a, const Val &b);
   /// The text of the optional value @p opt, "None" or its value's (what
   /// `Str<int>` & co. give): an owned string temporary.
-  Val emitOptionalToString(const Val &opt);
+  /// The text of the optional value @p opt, of the AST type @p astTy when
+  /// known (an `unsigned?` prints unsigned).
+  Val emitOptionalToString(const Val &opt, ast::Type *astTy = nullptr);
   /// The raw object @p raw of an optional reference printed by a print
   /// builtin, with the None object for a null one.
   Val emitNoneObject(const Val &raw);
@@ -479,7 +495,10 @@ private:
     Val emitStructMethodCall(ast::MethodCallExpr *node, ast::StructType *st,
                              bool wantAddress);
     Val emitShortCircuit(ast::BinaryExpr *node, bool isAnd);
-    Val emitIntDivGuards(const Val &lhs, const Val &rhs, bool isDiv);
+    /// The panics before an integer `/` or `%`: a zero divisor, and for a
+    /// division of `int` values (@p checkOverflow) INT64_MIN / -1.
+    Val emitIntDivGuards(const Val &lhs, const Val &rhs, bool isDiv,
+                         bool checkOverflow);
 
 #define LW_EXPR(Kind, Name, Cast) Val visit##Name(ast::Cast *node);
     PAYKAN_EXPR_NODES(LW_EXPR)

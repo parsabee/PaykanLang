@@ -1090,12 +1090,47 @@ private:
       needsFixup = true;
       break;
     case Opcode::Cmp:
+    case Opcode::UCmp:
       if (Cur.Kind != Tok::Word || !parsePredName(Cur.Text, in.Pred))
         return error("expected a comparison predicate (eq ne lt le gt ge)");
       advance();
       if (!parseCommaOperands(in.Args, 2))
         return false;
       resultTy = Type::Bool;
+      break;
+    case Opcode::Wrap:
+    case Opcode::Mask: {
+      int64_t width;
+      if (!parseInt(width))
+        return false;
+      if (width != 8 && width != 16 && width != 32)
+        return error("expected a width of 8, 16 or 32");
+      in.Slot = static_cast<uint32_t>(width);
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      resultTy = Type::I64;
+      break;
+    }
+    case Opcode::UDiv:
+    case Opcode::URem:
+      if (!parseCommaOperands(in.Args, 2))
+        return false;
+      resultTy = Type::I64;
+      break;
+    case Opcode::UToF:
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      resultTy = Type::F64;
+      break;
+    case Opcode::FToU:
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      resultTy = Type::I64;
+      break;
+    case Opcode::FRound32:
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      resultTy = Type::F64;
       break;
     case Opcode::Select:
       if (!parseCommaOperands(in.Args, 3))

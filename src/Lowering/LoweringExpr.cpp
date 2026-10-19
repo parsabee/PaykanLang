@@ -7,6 +7,7 @@
 #include "Names.h"
 
 #include <cassert>
+#include <cmath>
 #include <cstring>
 #include <utility>
 
@@ -30,11 +31,16 @@ Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
 
 Val ModuleLowering::ExprEmitter::visitIntegerLiteral(
     ast::IntegerLiteral *node) {
+  // `1` flowing into an `f32` or `f16` slot is that float (Sema typed it).
+  ast::Type *ty = node->getResolvedType();
+  if (ast::BuiltinType::isFloatKind(L.builtinKind(ty)))
+    return L.canonicalize(Val::f64(static_cast<double>(node->getValue())), ty);
   return Val::i64(node->getValue());
 }
 
 Val ModuleLowering::ExprEmitter::visitFloatLiteral(ast::FloatLiteral *node) {
-  return Val::f64(node->getValue());
+  // Rounded to the `f32` or `f16` the literal has.
+  return L.canonicalize(Val::f64(node->getValue()), node->getResolvedType());
 }
 
 Val ModuleLowering::ExprEmitter::visitBoolLiteral(ast::BoolLiteral *node) {
@@ -212,13 +218,21 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
   if (!operand)
     return Val();
   switch (node->getOpcode()) {
-  case ast::UnaryOpcode::Neg:
+  case ast::UnaryOpcode::Neg: {
+    Val neg;
     if (auto *i = std::get_if<int64_t>(&operand.Op.V))
-      return Val::i64(static_cast<int64_t>(0ULL - static_cast<uint64_t>(*i)));
-    if (auto *d = std::get_if<double>(&operand.Op.V))
-      return Val::f64(-*d);
-    return L.B.unary(Opcode::Neg, operand,
-                     operand.Ty == Type::F64 ? "fneg" : "neg");
+      neg = Val::i64(static_cast<int64_t>(0ULL - static_cast<uint64_t>(*i)));
+    else if (auto *d = std::get_if<double>(&operand.Op.V))
+      neg = Val::f64(-*d);
+    else
+      neg = L.B.unary(Opcode::Neg, operand,
+                      operand.Ty == Type::F64 ? "fneg" : "neg");
+    // `-(-128)` as an i8 wraps to -128; a float's negation is exact.
+    ast::Type *ty = node->getResolvedType();
+    if (ast::BuiltinType::isIntegerKind(L.builtinKind(ty)))
+      neg = L.canonicalize(neg, ty);
+    return neg;
+  }
   case ast::UnaryOpcode::Not:
     if (auto *b = std::get_if<bool>(&operand.Op.V))
       return Val::boolean(!*b);
@@ -262,7 +276,8 @@ Val ModuleLowering::ExprEmitter::emitShortCircuit(ast::BinaryExpr *node,
 }
 
 Val ModuleLowering::ExprEmitter::emitIntDivGuards(const Val &lhs,
-                                                  const Val &rhs, bool isDiv) {
+                                                  const Val &rhs, bool isDiv,
+                                                  bool checkOverflow) {
   // Divide / modulo by zero: runtime panic (sdiv/srem by zero is UB).
   Val isZero = L.B.cmp(CmpPred::Eq, rhs, Val::i64(0), "divzero.chk");
   pir::If *z = L.B.openIf(isZero, false);
@@ -270,7 +285,8 @@ Val ModuleLowering::ExprEmitter::emitIntDivGuards(const Val &lhs,
   L.callRuntime(kPaykanPanicDivByZero, {});
   L.B.emitUnreachable();
   L.B.leave();
-  if (!isDiv)
+  // Only `int` reaches INT64_MIN: a narrower type's quotient wraps.
+  if (!isDiv || !checkOverflow)
     return rhs;
   // INT64_MIN / -1 overflows: panic like the divide-by-zero case.
   Val isMin = L.B.cmp(CmpPred::Eq, lhs, Val::i64(INT64_MIN));
@@ -335,6 +351,16 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     lhs = L.promoteIntToFloat(lhs, L.ASTCtx.getFloatTy());
   bool isFloat = lhs.Ty == Type::F64;
 
+  // The operands' numeric type (one type, or `int` with `float`): an
+  // `unsigned` divides, takes the remainder and orders unsigned; a narrower
+  // type's arithmetic result is wrapped or rounded back to its form
+  // (docs/design/sized-types.md).
+  const ast::BuiltinType::Kind kind =
+      L.builtinKind(node->getLHS()->getResolvedType());
+  const bool isUnsigned64 = kind == ast::BuiltinType::U64;
+  ast::Type *resultTy = node->getResolvedType();
+  auto canon = [&](const Val &v) { return L.canonicalize(v, resultTy); };
+
   switch (node->getOpcode()) {
   case ast::BinaryOpcode::Add:
     if ((lhs.Ty == Type::Box || lhs.Ty == Type::Obj) &&
@@ -353,32 +379,45 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
       L.trackStringTemp(result);
       return result;
     }
-    return L.B.binary(Opcode::Add, lhs, rhs, isFloat ? "fadd" : "add");
+    return canon(L.B.binary(Opcode::Add, lhs, rhs, isFloat ? "fadd" : "add"));
   case ast::BinaryOpcode::Sub:
-    return L.B.binary(Opcode::Sub, lhs, rhs, isFloat ? "fsub" : "sub");
+    return canon(L.B.binary(Opcode::Sub, lhs, rhs, isFloat ? "fsub" : "sub"));
   case ast::BinaryOpcode::Mul:
-    return L.B.binary(Opcode::Mul, lhs, rhs, isFloat ? "fmul" : "mul");
+    return canon(L.B.binary(Opcode::Mul, lhs, rhs, isFloat ? "fmul" : "mul"));
   case ast::BinaryOpcode::Div:
     if (isFloat)
-      return L.B.binary(Opcode::Div, lhs, rhs, "fdiv");
-    emitIntDivGuards(lhs, rhs, /*isDiv=*/true);
-    return L.B.binary(Opcode::Div, lhs, rhs, "sdiv");
+      return canon(L.B.binary(Opcode::Div, lhs, rhs, "fdiv"));
+    emitIntDivGuards(lhs, rhs, /*isDiv=*/true,
+                     /*checkOverflow=*/kind == ast::BuiltinType::Int);
+    if (isUnsigned64)
+      return L.B.binary(Opcode::UDiv, lhs, rhs, "udiv");
+    return canon(L.B.binary(Opcode::Div, lhs, rhs, "sdiv"));
   case ast::BinaryOpcode::Mod: {
     if (isFloat)
-      return L.B.binary(Opcode::Rem, lhs, rhs, "fmod");
-    emitIntDivGuards(lhs, rhs, /*isDiv=*/false);
+      return canon(L.B.binary(Opcode::Rem, lhs, rhs, "fmod"));
+    emitIntDivGuards(lhs, rhs, /*isDiv=*/false, /*checkOverflow=*/false);
+    if (isUnsigned64)
+      return L.B.binary(Opcode::URem, lhs, rhs, "urem");
     // x % -1 is 0 for every x, but INT64_MIN % -1 traps: divide by 1 instead.
     Val isNegOne = L.B.cmp(CmpPred::Eq, rhs, Val::i64(-1));
     Val safe = L.B.select(isNegOne, Val::i64(1), rhs, "rem.divisor");
-    return L.B.binary(Opcode::Rem, lhs, safe, "srem");
+    return canon(L.B.binary(Opcode::Rem, lhs, safe, "srem"));
   }
   case ast::BinaryOpcode::Lt:
+    if (isUnsigned64)
+      return L.B.ucmp(CmpPred::Lt, lhs, rhs, "ult");
     return L.B.cmp(CmpPred::Lt, lhs, rhs, isFloat ? "flt" : "slt");
   case ast::BinaryOpcode::Gt:
+    if (isUnsigned64)
+      return L.B.ucmp(CmpPred::Gt, lhs, rhs, "ugt");
     return L.B.cmp(CmpPred::Gt, lhs, rhs, isFloat ? "fgt" : "sgt");
   case ast::BinaryOpcode::Le:
+    if (isUnsigned64)
+      return L.B.ucmp(CmpPred::Le, lhs, rhs, "ule");
     return L.B.cmp(CmpPred::Le, lhs, rhs, isFloat ? "fle" : "sle");
   case ast::BinaryOpcode::Ge:
+    if (isUnsigned64)
+      return L.B.ucmp(CmpPred::Ge, lhs, rhs, "uge");
     return L.B.cmp(CmpPred::Ge, lhs, rhs, isFloat ? "fge" : "sge");
   case ast::BinaryOpcode::Eq:
     return L.B.cmp(CmpPred::Eq, lhs, rhs, isFloat ? "feq" : "eq");
@@ -430,7 +469,7 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
       return Val();
     // An optional value printed: its text, "None" or the value's.
     if (pir::isOptional(v.Ty)) {
-      v = L.emitOptionalToString(v);
+      v = L.emitOptionalToString(v, argExpr->getResolvedType());
       ownedArgs.push_back(ExprValue::owned(v));
       args.push_back(v);
       continue;
@@ -460,22 +499,33 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
   return result;
 }
 
-// `int<Str>(s)`, `float<Str>(s)`, `bool<Str>(s)`: the runtime parses the
-// borrowed string into a local and says whether it is valid; the result is
-// that value as the present `int?` & co., or None.
+// `int<Str>(s)`, `float<Str>(s)`, `bool<Str>(s)` and `i8<Str>(s)` & co.: the
+// runtime parses the borrowed string into a local and says whether it is
+// valid; the result is that value as the present `int?` & co., or None.  A
+// sized integer is parsed as a 64-bit one and refused outside its range; a
+// sized float is rounded.
 Val ModuleLowering::ExprEmitter::emitParse(ast::CallExpr *node) {
+  using ast::BuiltinType;
   const std::string &name = node->getCalleeName();
+  ast::Type *target = nullptr;
+  ast::Type *source = nullptr;
+  if (!L.conversionTypes(name, target, source) ||
+      source != L.ASTCtx.getStrTy() || node->getNumArguments() != 1)
+    return Val();
+  const BuiltinType::Kind kind = L.builtinKind(target);
   const char *parse = nullptr;
   Type payload = Type::I64;
-  if (name == kConvIntStr) {
-    parse = kPaykanStringParseInt;
-  } else if (name == kConvFloatStr) {
+  if (kind == BuiltinType::Bool) {
+    parse = kPaykanStringParseBool;
+  } else if (BuiltinType::isFloatKind(kind)) {
     parse = kPaykanStringParseFloat;
     payload = Type::F64;
-  } else if (name == kConvBoolStr) {
-    parse = kPaykanStringParseBool;
+  } else if (kind == BuiltinType::U64) {
+    parse = kPaykanStringParseUint;
+  } else if (BuiltinType::isIntegerKind(kind)) {
+    parse = kPaykanStringParseInt;
   }
-  if (!parse || node->getNumArguments() != 1)
+  if (!parse)
     return Val();
   ast::Expr *argExpr = node->getArguments()[0];
   Val str = visit(argExpr);
@@ -489,17 +539,30 @@ Val ModuleLowering::ExprEmitter::emitParse(ast::CallExpr *node) {
                          "parse.ok");
   L.releaseIfOwned(ev);
   Val v = L.B.load(out, "parsed");
-  if (name == kConvBoolStr)
+  if (kind == BuiltinType::Bool)
     v = L.B.cmp(CmpPred::Ne, v, Val::i64(0), "parsed.bool");
+  Val valid = L.B.cmp(CmpPred::Ne, ok, Val::i64(0), "parse.valid");
+  const unsigned bits = BuiltinType::integerBits(kind);
+  if (BuiltinType::isIntegerKind(kind) && bits < 64) {
+    // Within the type's range, else None.
+    const bool isUnsigned = BuiltinType::isUnsignedKind(kind);
+    const int64_t lo =
+        isUnsigned ? 0 : -static_cast<int64_t>(1ULL << (bits - 1));
+    const int64_t hi = static_cast<int64_t>(
+        (isUnsigned ? (1ULL << bits) : (1ULL << (bits - 1))) - 1);
+    Val notLow = L.B.cmp(CmpPred::Ge, v, Val::i64(lo), "parse.lo");
+    Val notHigh = L.B.cmp(CmpPred::Le, v, Val::i64(hi), "parse.hi");
+    Val inRange = L.B.select(notLow, notHigh, Val::boolean(false), "parse.in");
+    valid = L.B.select(valid, inRange, Val::boolean(false), "parse.valid");
+  }
+  v = L.canonicalize(v, target);
   Val some = L.B.some(v, "some");
   Val none = L.B.none(some.Ty, "none");
-  Val valid = L.B.cmp(CmpPred::Ne, ok, Val::i64(0), "parse.valid");
   return L.B.select(valid, some, none, "parsed.opt");
 }
 
 bool ModuleLowering::isStrConversion(const std::string &callee) {
-  return callee == kConvStrInt || callee == kConvStrFloat ||
-         callee == kConvStrBool || callee == kConvStrChar;
+  return callee.rfind(std::string(kString) + "<", 0) == 0;
 }
 
 // Inline numeric conversions `Target<Source>(value)` (#64).  This is the one
@@ -514,49 +577,80 @@ bool ModuleLowering::isStrConversion(const std::string &callee) {
 //               (Paykan_panic_int_to_char).
 // Returns an invalid Val when @p node is not a numeric conversion.
 Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
-  const std::string &name = node->getCalleeName();
-  bool isNumeric = name == kConvIntFloat || name == kConvFloatInt ||
-                   name == kConvIntBool || name == kConvBoolInt ||
-                   name == kConvIntChar || name == kConvCharInt;
-  if (!isNumeric || node->getNumArguments() != 1)
-    return Val();
+  using ast::BuiltinType;
+  ast::Type *target = nullptr;
+  ast::Type *source = nullptr;
+  if (!L.conversionTypes(node->getCalleeName(), target, source) ||
+      target == L.ASTCtx.getStrTy() || source == L.ASTCtx.getStrTy() ||
+      node->getNumArguments() != 1)
+    return Val(); // `Str<T>` is a runtime call, `T<Str>` emitParse
+  const BuiltinType::Kind tk = L.builtinKind(target);
+  const BuiltinType::Kind sk = L.builtinKind(source);
   Val v = visit(node->getArguments()[0]);
   if (!v)
     return Val();
-  auto panicUnless = [&](const Val &ok, const char *panicFn) {
+  auto panicUnless = [&](const Val &ok, const char *panicFn,
+                         const std::vector<Val> &args) {
     Val bad = L.B.unary(Opcode::Not, ok, "conv.bad");
     pir::If *s = L.B.openIf(bad, false);
     L.B.enter(*s->Then);
-    L.callRuntime(panicFn, {v});
+    L.callRuntime(panicFn, args);
     L.B.emitUnreachable();
     L.B.leave();
   };
-  if (name == kConvIntFloat) {
-    // [-2^63, 2^63) is exactly the doubles whose truncation fits in int64;
-    // both compares are ordered, so NaN fails them.
-    Val lo =
-        L.B.cmp(CmpPred::Ge, v, Val::f64(-9223372036854775808.0), "conv.lo");
-    Val hi =
-        L.B.cmp(CmpPred::Lt, v, Val::f64(9223372036854775808.0), "conv.hi");
-    panicUnless(L.B.select(lo, hi, Val::boolean(false), "conv.ok"),
-                kPaykanPanicFloatToInt);
-    return L.B.ftoi(v, "conv.int");
+  if (BuiltinType::isIntegerKind(tk) && BuiltinType::isFloatKind(sk)) {
+    // The doubles whose truncation fits the target: [-2^63, 2^63) for
+    // `int` (no double lies strictly between -2^63 - 1 and -2^63), (lo - 1,
+    // hi) for the others; both compares are ordered, so NaN fails them.
+    const unsigned bits = BuiltinType::integerBits(tk);
+    const bool isUnsigned = BuiltinType::isUnsignedKind(tk);
+    const double hi = std::ldexp(1.0, isUnsigned ? bits : bits - 1);
+    Val lo = tk == BuiltinType::Int
+                 ? L.B.cmp(CmpPred::Ge, v, Val::f64(-hi), "conv.lo")
+                 : L.B.cmp(CmpPred::Gt, v,
+                           Val::f64(isUnsigned ? -1.0 : -hi - 1.0), "conv.lo");
+    Val inRange =
+        L.B.select(lo, L.B.cmp(CmpPred::Lt, v, Val::f64(hi), "conv.hi"),
+                   Val::boolean(false), "conv.ok");
+    if (tk == BuiltinType::Int) {
+      panicUnless(inRange, kPaykanPanicFloatToInt, {v});
+    } else {
+      const std::string name = ast::typeName(target);
+      panicUnless(inRange, kPaykanPanicFloatToType,
+                  {v, L.internString(name),
+                   Val::i64(static_cast<int64_t>(name.size()))});
+    }
+    if (tk == BuiltinType::U64)
+      return L.B.ftou(v, "conv.uint");
+    return L.B.ftoi(v, "conv.int"); // in range: already canonical
   }
-  if (name == kConvFloatInt)
-    return L.B.itof(v, "conv.float");
-  if (name == kConvIntBool)
+  if (BuiltinType::isFloatKind(tk) && BuiltinType::isIntegerKind(sk)) {
+    Val f;
+    if (sk == BuiltinType::U64)
+      f = L.B.utof(v, "conv.float");
+    else
+      f = L.promoteIntToFloat(v, L.ASTCtx.getFloatTy());
+    return L.canonicalize(f, target);
+  }
+  if (BuiltinType::isIntegerKind(tk) && BuiltinType::isIntegerKind(sk))
+    return L.canonicalize(v, target); // the low bits of the value
+  if (BuiltinType::isFloatKind(tk) && BuiltinType::isFloatKind(sk))
+    return L.canonicalize(v, target); // rounded to the target's precision
+  if (tk == BuiltinType::Int && sk == BuiltinType::Bool)
     return L.coerceBoolToI64(v, Type::I64);
-  if (name == kConvBoolInt)
+  if (tk == BuiltinType::Bool && sk == BuiltinType::Int)
     return L.B.cmp(CmpPred::Ne, v, Val::i64(0), "conv.bool");
-  if (name == kConvIntChar)
+  if (tk == BuiltinType::Int && sk == BuiltinType::Char)
     return L.B.cast(v, Type::I64, "conv.code");
+  if (tk != BuiltinType::Char || sk != BuiltinType::Int)
+    return Val();
   // char<int>: range-check, then map the code 128..255 to the signed byte
   // with the same bits before the truncating cast, so the C backend's
   // `(int8_t)` conversion only ever sees an in-range value.
   Val lo = L.B.cmp(CmpPred::Ge, v, Val::i64(0), "conv.lo");
   Val hi = L.B.cmp(CmpPred::Le, v, Val::i64(255), "conv.hi");
   panicUnless(L.B.select(lo, hi, Val::boolean(false), "conv.ok"),
-              kPaykanPanicIntToChar);
+              kPaykanPanicIntToChar, {v});
   Val high = L.B.cmp(CmpPred::Gt, v, Val::i64(127), "conv.high");
   Val wrapped = L.B.binary(Opcode::Sub, v, Val::i64(256), "conv.wrap");
   Val byte = L.B.select(high, wrapped, v, "conv.byte");
@@ -862,12 +956,8 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     Val v = visit(node->getReceiver());
     if (!v)
       return Val();
-    const char *fn =
-        bt->getTypeKind() == ast::BuiltinType::Int     ? kPaykanStringFromInt
-        : bt->getTypeKind() == ast::BuiltinType::Float ? kPaykanStringFromFloat
-        : bt->getTypeKind() == ast::BuiltinType::Bool  ? kPaykanStringFromBool
-                                                       : kPaykanStringFromChar;
-    const pir::Function &rt = L.declareRuntime(fn);
+    const pir::Function &rt =
+        L.declareRuntime(L.toStringRuntime(bt->getTypeKind()));
     Val str = L.B.call(rt.Name, rt.Sig,
                        {L.coerceBoolToI64(v, rt.Sig.Params[0])}, "str");
     return L.emitSharedNew(str, "str.shared");

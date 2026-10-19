@@ -1,0 +1,10 @@
+// A literal takes the sized type its context expects only when it fits it.
+fn takes(n: u8) -> u8 { return n; }
+fn main() -> int {
+  a: u8 = 256;      // error: the literal 256 does not fit in 'u8' (0 to 255)
+  b: i8 = -129;     // error: the literal -129 does not fit in 'i8' (-128 to 127)
+  c: u8 = -1;       // error: the literal -1 does not fit in 'u8' (0 to 255)
+  d = takes(300);   // error: the literal 300 does not fit in 'u8' (0 to 255)
+  e: f16 = 70000.0; // error: the literal 70000 does not fit in 'f16'
+  return 0;
+}

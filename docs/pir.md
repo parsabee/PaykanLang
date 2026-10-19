@@ -300,6 +300,24 @@ unless stated):
 %r = cast %a to T                              ; reinterpret / resize, see table
 ```
 
+**Sized numeric types** (`docs/design/sized-types.md`): every sized integer is
+held in an `i64` in canonical form (a signed one sign-extended, an unsigned one
+zero-extended) and every sized float in an `f64`; these restore the form after
+an operation, and give `unsigned` (`u64`) its unsigned semantics:
+
+```
+%r = wrap 8 %a                                 ; i64 -> i64: the low 8 bits, sign-extended (8, 16 or 32)
+%r = mask 16 %a                                ; i64 -> i64: the low 16 bits, zero-extended (8, 16 or 32)
+%r = udiv %a, %b | urem                        ; i64: unsigned quotient / remainder (the lowering guards 0)
+%r = ucmp lt %a, %b | le | gt | ge | eq | ne   ; i64 -> bool: unsigned comparison
+%r = utof %a                                   ; i64 -> f64: the unsigned reading of the bits
+%r = ftou %a                                   ; f64 -> i64: toward zero, as uint64 bits; only for
+                                               ; %a in [0, 2^64): the lowering guards the range
+%r = fround32 %a                               ; f64 -> f64: rounded to the nearest f32
+```
+
+(`f16` rounding is the runtime call `@$rt.Paykan_round_f16(f64) -> f64`.)
+
 On `f64`, `cmp` follows IEEE 754: `ne` is *unordered* (true when either
 operand is NaN; it is exactly `not (eq a, b)`), and `eq`, `lt`, `le`, `gt`,
 `ge` are *ordered* (false when either operand is NaN).  So `x != x` is true
@@ -541,6 +559,17 @@ CodeGen enforced, now in one place.
   value.
 * **Division**: integer `div` is preceded by `if %b == 0 { call @$rt.Paykan_panic_div_by_zero(); unreachable }`
   and the `INT64_MIN / -1` check; `rem` replaces a `-1` divisor by `1`.
+* **Sized numeric types**: an arithmetic result of a narrow type is followed
+  by its `wrap N` / `mask N` (`u8` and `i8` & co.), `fround32` (`f32`) or
+  `@$rt.Paykan_round_f16` call (`f16`); an `unsigned` uses `udiv`, `urem`
+  and `ucmp`, and the `INT64_MIN / -1` check is only emitted for `int`.  The
+  conversions between numeric types are the same instructions (`u8<int>` is
+  `mask 8`, `float<unsigned>` is `utof`, `unsigned<float>` guards `[0, 2^64)`
+  then `ftou`, `i8<float>` guards `(-129, 128)` and calls
+  `@$rt.Paykan_panic_float_to_type(%f, @.strN, 2)` otherwise, then `ftoi`);
+  `Str<unsigned>` and `unsigned<Str>` call `PaykanString_from_uint` /
+  `PaykanString_parse_uint`, and a parse into a narrow integer compares the
+  parsed `i64` against the type's range before the `some`.
 
 ## 8. Runtime ABI (extern declarations the lowering may emit)
 
@@ -626,7 +655,9 @@ The verifier rejects a program when:
   `cmp` on different types or on optionals, a disallowed `cast` pair,
   non-`bool` condition, `some` of anything but `i64`/`f64`/`bool`/`char`,
   `none` of a type that is not an optional, `is_some`/`unwrap` of a value that
-  is not one);
+  is not one; `wrap`/`mask`/`udiv`/`urem`/`ucmp`/`utof` of anything but `i64`,
+  `ftou`/`fround32` of anything but `f64`, a `wrap`/`mask` width other than 8,
+  16 or 32);
 * a `call` names an undeclared function or passes the wrong arity/types; a
   `vcall` slot is out of range of the named class's vtable or the argument list
   does not match the slot's signature;

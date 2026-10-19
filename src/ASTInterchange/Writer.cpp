@@ -309,10 +309,8 @@ private:
       return;
     }
     if (const auto *bt = dyn_cast<BuiltinType>(t)) {
-      static const char *const names[] = {"int", "float", "bool", "char",
-                                          "void"};
       open("named-type", bt);
-      str(names[bt->getTypeKind()]);
+      str(builtinKindName(bt->getTypeKind()));
       close();
     } else if (const auto *ct = dyn_cast<ClassType>(t)) {
       open("named-type", ct);

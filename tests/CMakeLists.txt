@@ -89,6 +89,7 @@ add_executable(sema_tests
     Sema/GenericStructTests.cpp
     Sema/FunctionTypeTests.cpp
     Sema/VisibilityTests.cpp
+    Sema/SizedTypeTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -138,6 +139,7 @@ add_executable(codegen_tests
     CodeGen/TupleTests.cpp
     CodeGen/StructTests.cpp
     CodeGen/FunctionTypeTests.cpp
+    CodeGen/SizedTypeTests.cpp
     CodeGen/RegressionTests.cpp
     CodeGen/LiteralObjectTests.cpp
     CodeGen/RuntimeNameTests.cpp
@@ -430,6 +432,7 @@ add_executable(runtime_tests
     Runtime/TupleTests.cpp
     Runtime/StructTests.cpp
     Runtime/TypeTests.cpp
+    Runtime/NumericTests.cpp
 )
 target_include_directories(runtime_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
