@@ -413,7 +413,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opens the tap's formula bump pull request and sends the apt repository its publish
   dispatch, with the `RELEASE_CHANNELS_TOKEN` secret; `packaging/` holds the two
   repositories' initial contents and the one-time setup.  A tap of the compiler repository
-  moves with `brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
+  moves with
+  `brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
+- Versions: PIR 2 (`pir::kPIRVersion`, and `PAYKAN_PIR_TEXT_VERSION`, the text a backend
+  plugin receives) and runtime ABI 7; the `.pkm` format and interface are 1.0, the plugin
+  API and the AST interchange format stay 1.  0.2.0 accepts plugins built with 0.2.0 only:
+  the AST a frontend sees, PIR and the runtime ABI changed since 0.1.
 - Printing and files moved to the standard library: the builtins `print`, `println`,
   `printerr`, `printerrln`, `open`, the classes `File` and `Error` and the identifier
   `Stdin` are gone.  A program writes `import ::io;` and `io::println(...)`,
@@ -483,8 +488,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never boxed).  Deferred destruction keeps its pending objects on a runtime stack (256
   inline slots, then the C heap); the destroy order is unchanged.  Every object struct,
   the runtime's and the generated ones, starts with the header; the runtime's immortal
-  `None` and stdin `File` start with a strong count of 1.  The runtime ABI version is
-  unchanged (6): delete every `.paykan_cache` directory written by an older build.
+  `None` and stdin `File` start with a strong count of 1.  The runtime ABI version is 7
+  (below): delete every `.paykan_cache` directory written by an older build.
 - The program's entry point is `fn main() -> int` or `fn main(args: view Str[]) -> int`
   (docs/language/02-functions-and-calling.md): the arguments are a slice, which `main`
   reads (`args[0]` is the script path, or the executable's) but does not keep.  Any other
