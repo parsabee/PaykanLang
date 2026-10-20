@@ -8,21 +8,19 @@
 
 #pragma once
 
+#include <Version.h>
+
 #include <cstddef>
 #include <cstdint>
 
 namespace paykan::pkm {
 
-/// Container format (§1.2).  A reader accepts exactly the majors it knows
-/// and any minor.
-inline constexpr uint16_t kFormatMajor = 1;
-inline constexpr uint16_t kFormatMinor = 0;
-/// MANIFEST section format (§2.1).
-inline constexpr uint16_t kManifestMajor = 1;
-inline constexpr uint16_t kManifestMinor = 0;
-/// IFACE blob format (§3.2).
-inline constexpr uint16_t kIfaceMajor = 1;
-inline constexpr uint16_t kIfaceMinor = 0;
+/// The versions of the container (§1.2), the MANIFEST section (§2.1) and the
+/// IFACE blob (§3.2): the release's, like every format (kVersionNumber).  A
+/// reader accepts exactly its own.
+inline constexpr uint32_t kFormatVersion = kVersionNumber;
+inline constexpr uint32_t kManifestVersion = kVersionNumber;
+inline constexpr uint32_t kIfaceVersion = kVersionNumber;
 
 /// Section kinds (§1.4).  Bits 8-15 are the class: 0x00 header, 0x01 sema,
 /// 0x02 binary, 0x7F private (never written or required by paykan).

@@ -41,6 +41,10 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// The plugin API and the AST format are versioned by the release.
+const std::string kApi = paykan::versionString(PAYKAN_PLUGIN_API_VERSION);
+const std::string kAst = paykan::versionString(PAYKAN_AST_FORMAT_VERSION);
+
 // The smallest plugin descriptor: up to its backends (the frontend fields
 // were appended after them).
 constexpr size_t kPluginStructSize = offsetof(PaykanPlugin, num_frontends);
@@ -186,7 +190,7 @@ TEST_F(PluginLoader, ExplicitPluginIsListedWithItsFile) {
   EXPECT_TRUE(hasLine(v.Out, "plugin " + good +
                                  " (test-good-plugin 0.1): backend test-good"))
       << v.Out;
-  EXPECT_TRUE(hasLine(v.Out, "plugin API 1")) << v.Out;
+  EXPECT_TRUE(hasLine(v.Out, "plugin API " + kApi)) << v.Out;
   EXPECT_FALSE(ran("test-good", ".called"));
 }
 
@@ -417,8 +421,8 @@ TEST_F(PluginLoader, WrongBuildVersionIsIncompatibleAndNeverCalled) {
 
 TEST_F(PluginLoader, WrongPluginAPIIsRejected) {
   std::string api = plugin("api", "api");
-  std::string why =
-      "built for plugin API 999; this paykan supports plugin API 1";
+  std::string why = "built for plugin API " + paykan::versionString(999) +
+                    "; this paykan supports plugin API " + kApi;
   auto l = paykan("--no-plugins " + flag("plugin", api) + " --list-backends");
   ASSERT_EQ(l.Code, 0) << l.Err;
   EXPECT_TRUE(hasLine(l.Out, "rejected plugin " + api + ": " + why)) << l.Out;
@@ -468,13 +472,13 @@ TEST_F(PluginLoader, BrokenFilesAreRejectedWithTheReason) {
        "invalid descriptor: it provides no frontend and no backend"},
       {plugin("tiny", "tiny"),
        "its descriptor is 4 bytes, too small to hold a plugin API version"},
-      {plugin("short", "short"),
-       "its descriptor is 16 bytes, plugin API 1 needs " +
-           std::to_string(kPluginStructSize)},
-      {plugin("bshort", "bshort"),
-       "invalid descriptor: backend #1: its descriptor is 8 bytes, plugin API "
-       "1 needs " +
-           std::to_string(kBackendStructSize)},
+      {plugin("short", "short"), "its descriptor is 16 bytes, plugin API " +
+                                     kApi + " needs " +
+                                     std::to_string(kPluginStructSize)},
+      {plugin("bshort", "bshort"), "invalid descriptor: backend #1: its "
+                                   "descriptor is 8 bytes, plugin API " +
+                                       kApi + " needs " +
+                                       std::to_string(kBackendStructSize)},
       {plugin("corrupt", "corrupt"), "cannot load it: ..."},
       {pluginDir("good") + "/libmissing" + kSuffix, "no such file"},
   };
@@ -725,8 +729,11 @@ TEST_F(FrontendPlugin, ParseFailures) {
   auto bad = paykan(withFe("--check-only " + quote(file)),
                     "PAYKAN_TEST_FE_MODE=bad-ast");
   EXPECT_EQ(bad.Code, 1);
+  // `(frob` is after `(paykan-ast <version> (unit `.
   EXPECT_NE(bad.Err.find("error: frontend 'test-fe' returned an invalid AST: "
-                         "1:21: (frob ...) is not a top-level declaration "
+                         "1:" +
+                         std::to_string(20 + kAst.size()) +
+                         ": (frob ...) is not a top-level declaration "
                          "(import, enum, class, struct, fn, trait, impl)"),
             std::string::npos)
       << bad.Err;
@@ -819,7 +826,8 @@ TEST_F(FrontendPlugin, Rejections) {
 // it, and deeper text is refused by the reader.
 TEST_F(FrontendPlugin, DeepASTs) {
   auto program = [](unsigned unary) {
-    std::string text = "(paykan-ast 1 (unit (fn \"main\" (type-params) "
+    std::string text = "(paykan-ast " + kAst +
+                       " (unit (fn \"main\" (type-params) "
                        "(params) (named-type \"int\") (block (return ";
     for (unsigned i = 0; i < unary; ++i)
       text += "(unary neg ";

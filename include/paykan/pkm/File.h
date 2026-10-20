@@ -71,8 +71,9 @@ public:
                              const ReadOptions &opts = {},
                              Error *err = nullptr);
 
-  uint16_t formatMajor() const { return Major; }
-  uint16_t formatMinor() const { return Minor; }
+  /// The container format version the file was written with (kVersionNumber
+  /// packing).
+  uint32_t formatVersion() const { return Version; }
   const support::Hash256 &tableHash() const { return TableHash; }
   /// Table order: sorted by (kind, offset).
   const std::vector<SectionEntry> &sections() const { return Sections; }
@@ -98,7 +99,7 @@ private:
   std::vector<uint8_t> Bytes;
   std::vector<SectionEntry> Sections;
   Manifest M;
-  uint16_t Major = 0, Minor = 0;
+  uint32_t Version = 0;
   support::Hash256 TableHash{};
 };
 

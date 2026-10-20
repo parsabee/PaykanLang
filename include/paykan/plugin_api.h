@@ -67,11 +67,10 @@ extern "C" {
 
 /* -- Versions -------------------------------------------------------------- */
 
-/* The version of this interface.  paykan accepts a plugin only if the
- * plugin's PaykanPlugin.api_version is one it supports (today: exactly
- * this one).  It is bumped whenever a struct or callback below changes
- * incompatibly; appending a field is compatible. */
-#define PAYKAN_PLUGIN_API_VERSION 1
+/* The version of this interface: the PaykanLang release's, packed
+ * (PAYKAN_VERSION_NUMBER, 200 for 0.2.0).  paykan accepts a plugin only if
+ * the plugin's PaykanPlugin.api_version is exactly this one. */
+#define PAYKAN_PLUGIN_API_VERSION PAYKAN_VERSION_NUMBER
 
 /* The PaykanLang version a plugin declares it is built with (#103): the
  * version of this header unless the build says otherwise
@@ -82,14 +81,15 @@ extern "C" {
 #define PAYKAN_PLUGIN_BUILD_VERSION PAYKAN_PLUGIN_HEADER_VERSION
 #endif
 
-/* The version of the PIR text form a backend receives (docs/pir.md): the
- * same number as paykan::pir::kPIRVersion (include/paykan/pir/Version.h),
- * which the binary form stores; the PIR tests check the two agree. */
-#define PAYKAN_PIR_TEXT_VERSION 2
+/* The version of the PIR text form a backend receives (docs/pir.md), the
+ * release's like every format: paykan::pir::kPIRVersion, which the binary
+ * form stores. */
+#define PAYKAN_PIR_TEXT_VERSION PAYKAN_VERSION_NUMBER
 
 /* The version of the AST interchange format a frontend returns
- * (docs/plugins/ast-format.md): the number after `paykan-ast`. */
-#define PAYKAN_AST_FORMAT_VERSION 1
+ * (docs/plugins/ast-format.md), the release's too: written after
+ * `paykan-ast` as the dotted version (`0.2.0`). */
+#define PAYKAN_AST_FORMAT_VERSION PAYKAN_VERSION_NUMBER
 
 /* The name of the entry point, for hosts and tests that look it up. */
 #define PAYKAN_PLUGIN_ENTRY_POINT "paykan_plugin_init"

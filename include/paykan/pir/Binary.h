@@ -12,6 +12,7 @@
 
 #include "paykan/Status.h"
 #include "paykan/pir/PIR.h"
+#include "paykan/pir/Version.h"
 #include "paykan/support/Sha256.h"
 
 #include <array>
@@ -23,7 +24,8 @@
 
 namespace paykan::pir::binary {
 
-inline constexpr uint16_t kCodecMajor = 1, kCodecMinor = 0;
+/// The codec's version: the release's, like every format (kVersionNumber).
+inline constexpr uint32_t kCodecVersion = kPIRVersion;
 
 /// Blob flags (§5.2).
 inline constexpr uint32_t kFlagNamesStripped = 1u << 0;
@@ -75,7 +77,7 @@ struct ItemRef {
 /// function body: what a reader needs to find a record or decode one
 /// function on its own.
 struct BlobInfo {
-  uint16_t CodecMajor = 0, CodecMinor = 0;
+  uint32_t CodecVersion = 0;
   uint32_t PIRVersion = 0;
   uint32_t Flags = 0;
   std::string ModuleName;

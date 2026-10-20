@@ -32,8 +32,9 @@ using namespace paykan;
 using namespace paykan::pir;
 using paykan::pir::test::kProgram;
 
-static_assert(PAYKAN_PIR_TEXT_VERSION == kPIRVersion,
-              "the text and binary PIR versions are one number");
+static_assert(PAYKAN_PIR_TEXT_VERSION == kPIRVersion &&
+                  kPIRVersion == paykan::kVersionNumber,
+              "every format is versioned by the release");
 
 namespace {
 
@@ -309,9 +310,12 @@ TEST(PIRBinary, HeaderAndFlags) {
   ASSERT_GE(b.size(), 16u);
   EXPECT_EQ(std::string(b.begin(), b.begin() + 4), "PIRB");
   EXPECT_EQ(std::string(b.end() - 4, b.end()), "BRIP");
-  EXPECT_EQ(b[4], binary::kCodecMajor);
-  EXPECT_EQ(b[6], binary::kCodecMinor);
-  EXPECT_EQ(b[8], kPIRVersion);
+  auto u32At = [&](size_t at) {
+    return uint32_t(b[at]) | uint32_t(b[at + 1]) << 8 |
+           uint32_t(b[at + 2]) << 16 | uint32_t(b[at + 3]) << 24;
+  };
+  EXPECT_EQ(u32At(4), binary::kCodecVersion);
+  EXPECT_EQ(u32At(8), kPIRVersion);
   auto info = binary::inspect(b);
   ASSERT_TRUE(info.isOk()) << info.status().message();
   EXPECT_EQ(info.value().ModuleName, "main");
@@ -506,12 +510,15 @@ TEST(PIRBinary, RejectsBadHeaders) {
     return b;
   };
   EXPECT_FALSE(binary::decode(patched(0, 'X')).isOk()); // magic
-  EXPECT_FALSE(binary::decode(patched(4, 2)).isOk());   // major
+  // The codec and PIR versions are the release's, accepted exactly.
+  EXPECT_FALSE(binary::decode(
+                   patched(4, static_cast<uint8_t>(binary::kCodecVersion + 1)))
+                   .isOk()); // another codec version
   EXPECT_FALSE(binary::decode(patched(8, static_cast<uint8_t>(kPIRVersion + 1)))
                    .isOk());                              // another PIR version
   EXPECT_FALSE(binary::decode(patched(13, 0x80)).isOk()); // reserved flag
   EXPECT_FALSE(binary::decode(patched(good.size() - 1, 'X')).isOk()); // trailer
-  EXPECT_TRUE(binary::decode(patched(6, 7)).isOk()); // a later minor is fine
+  EXPECT_FALSE(binary::decode(patched(6, 7)).isOk()); // its high bytes too
   std::vector<uint8_t> tail = good;
   tail.push_back(0);
   EXPECT_FALSE(binary::decode(tail).isOk()); // bytes after the trailer

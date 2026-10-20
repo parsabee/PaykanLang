@@ -47,7 +47,7 @@ entries, `--no-module-cache` neither reads nor writes them, and deleting
 
 ```text
 $ paykan pkm dump .paykan_cache/geometry/shapes.pkm
-pkm 1.0, 4 sections, ...
+pkm 0.2.0, 4 sections, ...
 sections:
   #0 MANIFEST ...
   #1 IFACE ...
@@ -57,8 +57,8 @@ manifest:
   module geometry::shapes
   contents 0x1 (HAS_CODE)
   core "0.2.0" ...
-  format_versions iface 1.0 tmpl 0 pir 2 code_encoding 2 debug 0
-  runtime_abi 7
+  format_versions iface 0.2.0 tmpl 0 pir 0.2.0 code_encoding 2 debug 0
+  runtime_abi 0.2.0
   ...
 iface:
   module geometry::shapes

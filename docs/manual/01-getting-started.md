@@ -117,7 +117,7 @@ PaykanLang <version>
 accepts plugins built with PaykanLang <version>
 frontend recursive-descent (built with PaykanLang <version>, compatible)
 backend c (built with PaykanLang <version>, compatible)
-plugin API 1
+plugin API <version>
 plugin directories: ...
 ```
 

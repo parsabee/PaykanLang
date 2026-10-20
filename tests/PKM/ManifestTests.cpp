@@ -62,7 +62,8 @@ std::string decodeError(const std::vector<uint8_t> &b) {
 TEST(Manifest, RoundTrip) {
   Manifest m = sampleManifest();
   std::vector<uint8_t> b = encodeManifest(m);
-  EXPECT_EQ(std::memcmp(b.data(), "PKMM\x01\x00\x00\x00", 8), 0);
+  EXPECT_EQ(std::memcmp(b.data(), "PKMM", 4), 0);
+  EXPECT_EQ(getU32(b, 4), kManifestVersion);
   StatusOr<Manifest> back = decodeManifest(b);
   ASSERT_TRUE(back) << back.status().message();
   EXPECT_EQ(*back, m);
@@ -113,12 +114,13 @@ TEST(Manifest, Framing) {
     EXPECT_NE(decodeError(b).find("magic"), std::string::npos);
   }
   {
-    std::vector<uint8_t> b = good;
-    b[4] = 2;
-    EXPECT_NE(decodeError(b).find("manifest format 2.0"), std::string::npos);
-    b[4] = 1;
-    b[6] = 9; // a newer minor is accepted
-    EXPECT_TRUE(decodeManifest(b));
+    // Any other version, older or newer, is rejected.
+    for (uint32_t other : {kManifestVersion - 1, kManifestVersion + 1}) {
+      std::vector<uint8_t> b = good;
+      putU32(b, 4, other);
+      EXPECT_NE(decodeError(b).find("manifest format " + versionString(other)),
+                std::string::npos);
+    }
   }
   // Unknown critical tag rejects; unknown non-critical is skipped.
   EXPECT_NE(decodeError(rebuilt(m, 0x31, {1, 2, 3})).find("critical"),
@@ -251,10 +253,9 @@ TEST(Manifest, Verdicts) {
   using R = Verdict::Reason;
   Manifest m = sampleManifest();
   HostIdentity host;
-  host.IfaceMajor = 1;
-  host.IfaceMinor = 0;
-  host.PirVersion = 2;
-  host.RuntimeAbi = 7;
+  host.IfaceVersion = kIfaceVersion;
+  host.PirVersion = kVersionNumber;
+  host.RuntimeAbi = kVersionNumber;
   host.Target = {8, 8, 1, 64, 64};
   host.CoreVersion = "0.2.0-rc1";
   host.CoreBuild = "abc123";
@@ -272,12 +273,13 @@ TEST(Manifest, Verdicts) {
     EXPECT_FALSE(v.Message.empty());
   };
   Manifest x = m;
-  x.Formats.IfaceMajor = 2;
-  expect(x, Policy::Cache, K::Rejected, R::Format);
-  x = m;
-  x.Formats.IfaceMinor = 1;
-  expect(x, Policy::Cache, K::Stale, R::Interface);
-  expect(x, Policy::Prebuilt, K::Rejected, R::Interface);
+  // Every format is the release's and accepted exactly: an older or a newer
+  // interface is rejected, cached or prebuilt.
+  for (uint32_t other : {kIfaceVersion - 1, kIfaceVersion + 1}) {
+    x.Formats.IfaceVersion = other;
+    expect(x, Policy::Cache, K::Rejected, R::Format);
+    expect(x, Policy::Prebuilt, K::Rejected, R::Format);
+  }
   x = m;
   x.Formats.PirVersion = 1;
   expect(x, Policy::Prebuilt, K::Rejected, R::PIR);

@@ -9,6 +9,9 @@
 
 #pragma once
 
+#include <cstdint>
+#include <string>
+
 namespace paykan {
 
 // Dotted version string, including any pre-release label: e.g. "1.2.3" for a
@@ -21,5 +24,18 @@ inline constexpr int kVersionPatch = @PAYKAN_VERSION_PATCH@;
 
 // Pre-release label ("rc1", "beta", ...); empty for a final release.
 inline constexpr const char *kVersionPrerelease = "@PAYKAN_VERSION_PRERELEASE@";
+
+// The version of every format this build reads and writes: PIR, the runtime
+// ABI, the .pkm container, manifest and interface, the plugin API and the AST
+// interchange format.  It is the release version packed as
+// major * 10000 + minor * 100 + patch (0.2.0 is 200), and a reader accepts
+// exactly this number.
+inline constexpr uint32_t kVersionNumber = @PAYKAN_VERSION_NUMBER@;
+
+// "0.2.0" for 200: how a packed version is shown.
+inline std::string versionString(uint32_t n) {
+  return std::to_string(n / 10000) + "." + std::to_string(n / 100 % 100) +
+         "." + std::to_string(n % 100);
+}
 
 } // namespace paykan

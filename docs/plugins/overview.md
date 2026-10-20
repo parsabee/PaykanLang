@@ -141,7 +141,7 @@ rejected plugin, the first exists and the second never does.
   with one line per rejected file:
 
   ```text
-  rejected plugin /home/me/.paykan/plugins/0.2.0/libold.so: built for plugin API 2; this paykan supports plugin API 1
+  rejected plugin /home/me/.paykan/plugins/0.2.0/libold.so: built for plugin API 0.1.9; this paykan supports plugin API 0.2.0
   ```
 
   A rejected file named with `--plugin` stops a compile with status 2

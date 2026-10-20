@@ -47,8 +47,8 @@ std::optional<Error> fail(ErrorCode code, std::string msg, int section = -1,
 std::optional<Error> readImpl(std::span<const uint8_t> bytes,
                               const ReadOptions &opts,
                               std::vector<SectionEntry> &sections,
-                              uint16_t &major, uint16_t &minor,
-                              Hash256 &tableHash, Manifest &manifest) {
+                              uint32_t &version, Hash256 &tableHash,
+                              Manifest &manifest) {
   // 1. Header.
   if (bytes.size() < kHeaderSize)
     return fail(ErrorCode::Truncated, "file is " +
@@ -62,19 +62,17 @@ std::optional<Error> readImpl(std::span<const uint8_t> bytes,
   r.skip(8);
   uint32_t headerSize = 0, count = 0, entrySize = 0;
   uint64_t tableOffset = 0;
-  r.u16(major);
-  r.u16(minor);
+  r.u32(version);
   r.u32(headerSize);
   r.u32(count);
   r.u32(entrySize);
   r.u64(tableOffset);
   if (!r.ok())
     return fail(ErrorCode::Truncated, "truncated header");
-  if (major != kFormatMajor)
+  if (version != kFormatVersion)
     return fail(ErrorCode::UnsupportedFormat,
-                "format " + std::to_string(major) + "." +
-                    std::to_string(minor) + "; this reader knows format " +
-                    std::to_string(kFormatMajor) + ".x");
+                "format " + versionString(version) + "; this paykan reads " +
+                    versionString(kFormatVersion));
   if (headerSize != kHeaderSize)
     return fail(ErrorCode::BadHeader,
                 "header_size " + std::to_string(headerSize) + ", expected 64");
@@ -239,7 +237,7 @@ StatusOr<File> File::read(std::span<const uint8_t> bytes,
                           const ReadOptions &opts, Error *err) {
   File f;
   std::optional<Error> e =
-      readImpl(bytes, opts, f.Sections, f.Major, f.Minor, f.TableHash, f.M);
+      readImpl(bytes, opts, f.Sections, f.Version, f.TableHash, f.M);
   if (e) {
     if (err)
       *err = *e;
@@ -343,8 +341,7 @@ StatusOr<std::vector<uint8_t>> Writer::finish() const {
   }
   ByteWriter out;
   out.bytes(kMagic, 8);
-  out.u16(kFormatMajor);
-  out.u16(kFormatMinor);
+  out.u32(kFormatVersion);
   out.u32(static_cast<uint32_t>(kHeaderSize));
   out.u32(static_cast<uint32_t>(order.size()));
   out.u32(static_cast<uint32_t>(kEntrySize));

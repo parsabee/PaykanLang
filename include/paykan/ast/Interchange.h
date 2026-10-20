@@ -7,7 +7,7 @@
 // An S-expression form of exactly the AST a frontend builds (before Sema),
 // source locations included:
 //
-//   (paykan-ast 1
+//   (paykan-ast 0.2.0
 //     (unit @1:1-3:2
 //       (fn @1:1-3:2 "main" (type-params) (params) (named-type "int")
 //         (block @1:19-3:2
@@ -23,17 +23,20 @@
 
 #include "AST.h"
 #include "ASTContext.h"
+#include <Version.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <ostream>
 #include <string>
 #include <string_view>
 
 namespace paykan::ast::interchange {
 
-/// The format version write() produces and read() accepts (the number after
-/// `paykan-ast`).  Bumped on any incompatible change.
-inline constexpr unsigned kFormatVersion = 1;
+/// The format version write() produces and read() accepts: the release's,
+/// like every format (kVersionNumber), written after `paykan-ast` as the
+/// dotted version (`0.2.0`).
+inline constexpr uint32_t kFormatVersion = kVersionNumber;
 
 /// The deepest list nesting read() accepts.  Deep enough for any program
 /// within the frontends' nesting limit (frontend::kMaxNesting levels, each a

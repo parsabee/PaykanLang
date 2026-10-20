@@ -207,8 +207,7 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
 
   ByteWriter w;
   w.bytes("PKMI", 4);
-  w.u16(kIfaceMajor);
-  w.u16(kIfaceMinor);
+  w.u32(kIfaceVersion);
   w.u32(iface.System ? kIfaceSystem : 0);
   w.u32(static_cast<uint32_t>(parts.size()));
   uint64_t offset = kBlobHeader + parts.size() * kPartEntry;
@@ -337,17 +336,15 @@ private:
 Status Reader::readParts() {
   ByteReader r(Blob);
   std::span<const uint8_t> magic;
-  uint16_t major = 0, minor = 0;
+  uint32_t version = 0;
   uint32_t n;
-  if (!r.bytes(4, magic) || !r.u16(major) || !r.u16(minor) || !r.u32(Flags) ||
-      !r.u32(n))
+  if (!r.bytes(4, magic) || !r.u32(version) || !r.u32(Flags) || !r.u32(n))
     return fail("truncated interface header");
   if (std::memcmp(magic.data(), "PKMI", 4) != 0)
     return fail("bad interface magic");
-  if (major != kIfaceMajor)
-    return fail("interface format " + std::to_string(major) + "." +
-                std::to_string(minor) + "; this reader knows " +
-                std::to_string(kIfaceMajor) + ".x");
+  if (version != kIfaceVersion)
+    return fail("interface format " + versionString(version) +
+                "; this reader knows " + versionString(kIfaceVersion));
   if (n == 0 || n > kMaxParts || uint64_t(n) * kPartEntry > r.remaining())
     return fail("bad part count " + std::to_string(n));
   uint64_t tableEnd = kBlobHeader + uint64_t(n) * kPartEntry;

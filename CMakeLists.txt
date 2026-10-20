@@ -112,6 +112,15 @@ set(PAYKAN_VERSION       ${PROJECT_VERSION})
 set(PAYKAN_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(PAYKAN_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(PAYKAN_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+# Every format a PaykanLang build reads and writes (PIR, the runtime ABI, the
+# .pkm container, manifest and interface, the plugin API, the AST interchange
+# format) is versioned by this one number, the release version packed as
+# major * 10000 + minor * 100 + patch (0.2.0 is 200).
+if(PAYKAN_VERSION_MINOR GREATER 99 OR PAYKAN_VERSION_PATCH GREATER 99)
+    message(FATAL_ERROR "the minor and patch versions must be below 100")
+endif()
+math(EXPR PAYKAN_VERSION_NUMBER
+     "${PAYKAN_VERSION_MAJOR} * 10000 + ${PAYKAN_VERSION_MINOR} * 100 + ${PAYKAN_VERSION_PATCH}")
 if(PAYKAN_VERSION_PRERELEASE)
     set(PAYKAN_VERSION "${PAYKAN_VERSION}-${PAYKAN_VERSION_PRERELEASE}")
 endif()

@@ -95,8 +95,7 @@ host state; the writer has exactly one encoding of a given module
 | Off | Size | Field | Value |
 |---|---|---|---|
 | 0 | 8 | `magic` | `89 50 4B 4D 0D 0A 1A 0A` (`\x89PKM\r\n\x1a\n`, PNG-style: catches text-mode damage) |
-| 8 | 2 | `format_major` | 1. A reader accepts exactly the majors it knows |
-| 10 | 2 | `format_minor` | 0. Additive changes only; a higher minor is accepted |
+| 8 | 4 | `format_version` | The release version (§11): 200 for 0.2.0. A reader accepts exactly its own |
 | 12 | 4 | `header_size` | 64 |
 | 16 | 4 | `section_count` | 1..1024 |
 | 20 | 4 | `section_entry_size` | 64 |
@@ -162,7 +161,7 @@ bytes; nesting caps per section (§4: 2048 AST levels; §5: 512 PIR levels).
 
 ### 1.7 Reader order
 
-1. `size ≥ 64`; magic; `format_major` known; header fields in range
+1. `size ≥ 64`; magic; `format_version` this reader's; header fields in range
    (overflow-checked in `uint64_t`).
 2. `table_hash` verified.
 3. Every entry decoded and checked (alignment, bounds, `reserved == 0`,
@@ -193,7 +192,7 @@ is an error.
 ### 2.1 Encoding: flat TLV
 
 ```
-manifest := "PKMM" u16 manifest_major(=1) u16 manifest_minor(=0) record*
+manifest := "PKMM" u32 manifest_version(= the release's, §11) record*
 record   := uleb tag, uleb length, value[length]
 ```
 
@@ -216,8 +215,8 @@ G = gating (a mismatch yields a verdict), I = informational.
 | `0x01` | `module` | `str` | G | canonical module name; must equal the name the importer resolved |
 | `0x03` | `contents` | `u32` bitset | G | bit 0 `HAS_CODE`, 1 `HAS_TEMPLATES`, 2 `HAS_MAIN`, 3 `SYSTEM` (name starts with `::`), 4 `HAS_STATIC_INIT` (#170 lazily initialised storage), 5 `EXPORTS_C` (#21). Must agree with the section table |
 | `0x05` | `core` | `{str version; u32 major, minor, patch; str prerelease; str build}` | G | the PaykanLang that produced the file (`include/Version.h.in`). `build` is `""` for a release (configured with `-DPAYKAN_RELEASE=ON`, which the release workflow and the Homebrew formula pass); for every other build, a development build of the last release's version included, it is the build ID: a hash of the contents of `src/` and `include/`, recomputed on every build (`kBuildId` in the generated `BuildId.h`, `cmake/BuildId.cmake`; never an executable size/mtime). A cache entry of another build is Stale (#188) |
-| `0x07` | `format_versions` | `{u32 iface_major, iface_minor, tmpl_version, pir_version, code_encoding, debug_version}` | G | `pir_version` = `pir::kPIRVersion` (new core constant; `PAYKAN_PIR_TEXT_VERSION` is defined from it so text, binary and manifest agree by construction). `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
-| `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, defined in `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this). Becomes 7 with §9's mangling |
+| `0x07` | `format_versions` | `{u32 iface_version, tmpl_version, pir_version, code_encoding, debug_version}` | G | `iface_version` and `pir_version` are the release's (§11), like `PAYKAN_PIR_TEXT_VERSION`, so text, binary and manifest agree by construction. `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
+| `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, defined in `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this): the release version, like every format (§11) |
 | `0x0B` | `target` | `{u8 pointer_size, slot_size, endianness, int_width, float_width}` | G | the abstract target PIR assumes: `8, 8, 1, 64, 64` (`Runtime.h` LP64 LE asserts). Not a triple: PIR and interface are the same for every LP64 LE triple; the triple belongs to a payload |
 | `0x0D` | `deps` | `list<Dep>` | G | direct imports only, sorted by canonical name; §2.3 |
 | `0x0F` | `source` | `{hash sha256; u64 size}` | G (cache) / I (prebuilt) | the module's source file exactly as read. Absent for generated modules |
@@ -262,7 +261,7 @@ and is not recorded by a module; `C_LIBRARY` entries arrive with #21/#171
 
 ### 2.5 Manifest reader
 
-Magic, `manifest_major` known; records in strictly ascending tag order,
+Magic, `manifest_version` this reader's; records in strictly ascending tag order,
 each parsed by a sub-reader bounded to its length and required to consume
 it exactly; unknown critical tag rejects, unknown optional tag is skipped;
 after the loop: required tags present, `module` well formed, `deps` sorted,
@@ -293,7 +292,7 @@ UTF-8.
 
 ```
 IfaceBlob
-  "PKMI"  u16 major(=1)  u16 minor(=0)  u32 flags(bit0 has TMPL section; bit1 system)
+  "PKMI"  u32 version(= the release's)  u32 flags(bit0 has TMPL section; bit1 system)
   u32 n_parts ; parts[n] { u32 tag; u32 flags(bit0 required); u64 offset; u64 size }   offsets blob-relative, 8-aligned
   parts in table order
 ```
@@ -488,7 +487,7 @@ would cost more than it saves) and is bound to `IFACE` by the manifest's
 
 ```
 TmplSection
-  "PKMT"  u16 major(=1)  u16 minor(=0)  u32 flags(0)
+  "PKMT"  u32 version(= the release's)  u32 flags(0)
   uleb n_records ; records[n] { uleb tag (1 class, 2 function); uleb len; payload }
     class:    uleb n_methods ; methods[n] { Str name; Node body }      (plus init body under name "__init__")
     function: Node body
@@ -650,7 +649,7 @@ encoding.
 
 ```
 CODE blob
-  u32  magic "PIRB" ; u16 codec major(=1) ; u16 minor(=0)
+  u32  magic "PIRB" ; u32 codec version(= the release's)
   u32  pir version   (pir::kPIRVersion)
   u32  flags         bit0 names stripped (§5.8) ; bit1 defines @main ; bits 2-3 pass level (0 = lowering output, §5.9) ; others 0
   --- string table: uleb count ; count × bytes (UTF-8, no NUL; entry 0 = "") ---
@@ -866,7 +865,7 @@ the single rulebook for text and binary.
 ### 6.1 `SYMIDX`
 
 ```
-"PKSY" u16 major(=1) u16 minor(=0) ; string table
+"PKSY" u32 version(= the release's) ; string table
 uleb n ; n × { str name ; u8 kind (0 fn, 1 extern fn, 2 class, 3 extern class, 4 cstr, 5 data, 6 bytes, 7 extern global, 8 slot, 9 classobj)
                ; u8 linkage (bit7 linkonce reserved) ; uleb offset into CODE ; uleb length ; hash sha256 of the record bytes }
 sorted by (kind, name) ; u32 trailer "YSKP"
@@ -888,7 +887,7 @@ sets per statement; ignored by the printer). A `Loc` inside every `Instr`
 was rejected (bloats the hot struct, forces the text format to carry it).
 
 ```
-"PKDB" u16 major u16 minor ; string table
+"PKDB" u32 version(= the release's) ; string table
 uleb nFiles ; nFiles × str path                 project-relative, never absolute (#102); one entry today
 uleb nFunctions ; nFunctions × { str name ; uleb file, line, col (declaration) ;
                                  uleb nEntries ; nEntries × { uleb stmtIndexDelta ; sleb lineDelta ; uleb column } }
@@ -1125,10 +1124,9 @@ source required), in this order:
 | Check | Mismatch ⇒ |
 |---|---|
 | container magic/table/hashes | `Rejected(Corrupt)` |
-| `format_major`, `manifest_major`, `iface_major` | `Rejected(Format)` |
-| `iface_minor` newer than the reader's | `Rejected` (prebuilt) / `Stale` (cache) |
-| `pir_version ≠ pir::kPIRVersion` | `Rejected(PIR)` |
-| `runtime_abi ≠ kRuntimeABIVersion` | `Rejected(ABI)` |
+| `format_version`, `manifest_version`, `iface_version` not this release's | `Rejected(Format)` |
+| `pir_version ≠ pir::kPIRVersion` (the release's) | `Rejected(PIR)` |
+| `runtime_abi ≠ kRuntimeABIVersion` (the release's) | `Rejected(ABI)` |
 | `target` ≠ host abstract target | `Rejected(Target)` |
 | `core.version` (+ `build`) | **cache:** ≠ `kVersion`/build id ⇒ `Stale` (a rebuild is free and protects against codegen fixes between versions with unchanged PIR/ABI numbers). **prebuilt:** not on `PAYKAN_PKM_COMPATIBLE_VERSIONS` (new, in `cmake/PluginCompat.cmake`, generated into `PluginCompat.h`, the #103 mechanism #113 and #153 ask to reuse) ⇒ `Rejected(Toolchain)` |
 | no `CODE` and no usable payload | `Usable` for `--check-only`; `NoCode` when code is needed |
@@ -1139,8 +1137,8 @@ source required), in this order:
 `Rejected` without source is an error naming what differs:
 
 ```
-error: module 'a::b' (lib/a/b.pkm) was compiled by paykan 0.1.1 (pkm 1.0, interface 1.0, PIR 1,
-       runtime ABI 6); this paykan 0.2.0 needs PIR 2 and runtime ABI 7. Rebuild it from source.
+error: module 'a::b' (lib/a/b.pkm) was written by another paykan release: format 0.3.0;
+       this paykan reads 0.2.0. Rebuild it from source.
 ```
 
 Consequences: a body edit rebuilds one module; a signature edit rebuilds its
@@ -1398,21 +1396,22 @@ class ModuleGraph : public sema::ImportResolver {
 
 ## 11. Versioning and compatibility policy
 
-| Change | Bump |
-|---|---|
-| new optional section kind, new non-critical manifest tag, new optional `IFACE` record tag or appended record field | `format_minor` / `iface_minor` (old readers skip) |
-| new critical manifest tag, new required section kind | `format_minor` + the critical/required bit (old readers reject with a clear message) |
-| container framing, manifest framing | `format_major` / `manifest_major` |
-| interface record semantics (a field means something else) | `iface_major` |
-| PIR types/opcodes/semantics (#96, #99, #170), the §9.1 mapping | `pir::kPIRVersion` (the `CODE` codec major stays unless the framing changes) |
-| object layout, calling convention, vtable header, mangling (#93, #98, §9.4) | `PAYKAN_RUNTIME_ABI_VERSION` |
-| a backend's payload bytes | that backend's `payloadFormat`/`backendVersion` only |
-
-**Decision: v0.2.0 ships one coordinated bump** (format 1.0, interface 1.0,
-PIR 2, runtime ABI 7) carrying #93/#96/#98/#99/#170 and the mangling,
-rather than four separate bumps. Any PIR change touches `PIR.h`, the
-printer, the parser, the verifier, `docs/pir.md` and the binary codec in
-one PR.
+**Every format is versioned by the release.** The container, the MANIFEST
+section, the IFACE blob, PIR (`pir::kPIRVersion`, the `CODE` codec and the
+text a backend plugin receives), the runtime ABI
+(`PAYKAN_RUNTIME_ABI_VERSION`), the plugin API and the AST interchange format
+all carry one number, the release version packed as
+`major * 10000 + minor * 100 + patch` (`kVersionNumber`, 200 for 0.2.0,
+computed from `project(... VERSION ...)` in `CMakeLists.txt`), stored as a
+`u32` where the formats had a `u16` major and minor. A reader accepts exactly
+its own release's: a file or a plugin of another release is rejected, and a
+cache entry of another release is rebuilt from source. A release therefore
+changes every format at once; nothing is compatible across releases by a
+version number (the plugin compatibility list, `cmake/PluginCompat.cmake`,
+says which older plugin builds a release accepts). `Runtime.h` spells the
+runtime ABI version out for C, and the compiler's build checks it is its
+release's. A backend's payload bytes keep their own
+`payloadFormat`/`backendVersion`.
 
 Reserved now so no later major bump is needed:
 

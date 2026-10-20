@@ -292,10 +292,11 @@ authoritative when it exists. A prebuilt module is type-checked against from its
 and compiled from its PIR, so the program builds and runs identically on either backend
 without the source (see [`samples/imports/13_pkm`](../../samples/imports/13_pkm/README.md)).
 
-A prebuilt file is used only when this `paykan` can: a file written for another PIR or
-runtime ABI version, or built against another interface of a module it imports, is an error
-naming what differs (`module 'a::b' (lib/a/b.pkm) was compiled by paykan 0.1.1 (pkm 1.0,
-interface 1.0, PIR 1, runtime ABI 6); ... Rebuild it from source.`), never a silent mismatch.
+A prebuilt file is used only when this `paykan` can: a file written by another release
+(every format, PIR and the runtime ABI included, is versioned by the release), or built
+against another interface of a module it imports, is an error naming what differs
+(`module 'a::b' (lib/a/b.pkm) was written by another paykan release: format 0.3.0; this
+paykan reads 0.2.0. Rebuild it from source.`), never a silent mismatch.
 
 ---
 

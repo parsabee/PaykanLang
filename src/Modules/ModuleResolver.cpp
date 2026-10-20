@@ -21,6 +21,12 @@
 #include "paykan/pir/Binary.h"
 #include "paykan/pir/Verifier.h"
 #include "paykan/pir/Version.h"
+
+// The runtime ABI version is spelled out in Runtime.h, for C; it is the
+// release's, like every format's.
+static_assert(paykan::kRuntimeABIVersion == paykan::kVersionNumber,
+              "PAYKAN_RUNTIME_ABI_VERSION in src/Runtime/Runtime.h must be "
+              "the release version, major * 10000 + minor * 100 + patch");
 #include "paykan/plugin_api.h"
 
 #include <algorithm>
@@ -76,12 +82,10 @@ bool definesMain(const pir::Module &m) {
 std::string describeProducer(const pkm::File &f) {
   const pkm::Manifest &m = f.manifest();
   return "was compiled by paykan " + m.Core.Version + " (pkm " +
-         std::to_string(f.formatMajor()) + "." +
-         std::to_string(f.formatMinor()) + ", interface " +
-         std::to_string(m.Formats.IfaceMajor) + "." +
-         std::to_string(m.Formats.IfaceMinor) + ", PIR " +
-         std::to_string(m.Formats.PirVersion) + ", runtime ABI " +
-         std::to_string(m.RuntimeAbi) + ")";
+         versionString(f.formatVersion()) + ", interface " +
+         versionString(m.Formats.IfaceVersion) + ", PIR " +
+         versionString(m.Formats.PirVersion) + ", runtime ABI " +
+         versionString(m.RuntimeAbi) + ")";
 }
 
 } // namespace
@@ -268,7 +272,12 @@ Resolution ModuleResolver::load(const std::string &canonical,
     pkm::Error err;
     StatusOr<pkm::File> file = pkm::File::read(*bytes, {}, &err);
     if (!file)
-      return unusable("is corrupt: " + err.str());
+      // Every format is the release's: a file of another release is not
+      // corrupt, only not this paykan's.
+      return unusable(err.Code == pkm::ErrorCode::UnsupportedFormat
+                          ? "was written by another paykan release: " +
+                                err.str()
+                          : "is corrupt: " + err.str());
     auto pending = std::make_unique<Pending>();
     pending->File = std::move(*file);
     pending->SourceBytes.assign(sourceBytes.begin(), sourceBytes.end());
@@ -444,8 +453,8 @@ StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
             static_cast<uint32_t>(kVersionPatch),
             kVersionPrerelease,
             Host.CoreBuild};
-  m.Formats = {pkm::kIfaceMajor, pkm::kIfaceMinor,     0,
-               pir::kPIRVersion, pkm::kCodeBinaryPir1, 0};
+  m.Formats = {pkm::kIfaceVersion, 0, pir::kPIRVersion, pkm::kCodeBinaryPir1,
+               0};
   m.RuntimeAbi = Host.RuntimeAbi;
   m.Target = Host.Target;
   for (const std::string &d : deps) {

@@ -31,8 +31,8 @@ inline Manifest sampleManifest() {
   m.Module = "geometry::shapes";
   m.Contents = kContentsHasCode;
   m.Core = {"0.2.0-rc1", 0, 2, 0, "rc1", "abc123"};
-  m.Formats = {1, 0, 1, 2, kCodeBinaryPir1, 1};
-  m.RuntimeAbi = 7;
+  m.Formats = {kIfaceVersion, 1, kVersionNumber, kCodeBinaryPir1, 1};
+  m.RuntimeAbi = kVersionNumber;
   m.Target = {8, 8, 1, 64, 64};
   m.Deps.push_back({"::io", kDepSystem, hashOf("io iface"), {}, "0.2.0-rc1"});
   m.Deps.push_back({"geometry::vec", 0, hashOf("vec iface"), hashOf("vec tmpl"),
@@ -40,10 +40,11 @@ inline Manifest sampleManifest() {
   m.Deps.back().Flags = kDepInstantiated;
   m.Source = Manifest::SourceInfo{hashOf("source"), 1234};
   m.Libraries.push_back({static_cast<uint8_t>(LibKind::Runtime),
-                         "paykan_runtime", "0.2.0", 7, kLibRequiredAtLink});
+                         "paykan_runtime", "0.2.0", kVersionNumber,
+                         kLibRequiredAtLink});
   m.Frontend = {"recursive-descent", "0.2.0", ""};
   m.Producer = {"paykan", "0.2.0-rc1"};
-  m.PluginApi = 3;
+  m.PluginApi = kVersionNumber;
   m.OptPipeline = "";
   m.Attributes = {"@inline", "@cold"};
   return m;
@@ -56,11 +57,11 @@ inline Manifest minimalManifest(const std::string &name = "m") {
   if (name.starts_with("::"))
     m.Contents = kContentsSystem;
   m.Core.Version = "0.2.0";
-  m.Formats = {1, 0, 0, 2, kCodeNone, 0};
-  m.RuntimeAbi = 7;
+  m.Formats = {kIfaceVersion, 0, kVersionNumber, kCodeNone, 0};
+  m.RuntimeAbi = kVersionNumber;
   m.Target = {8, 8, 1, 64, 64};
-  m.Libraries.push_back(
-      {static_cast<uint8_t>(LibKind::Runtime), "paykan_runtime", "", 7, 0});
+  m.Libraries.push_back({static_cast<uint8_t>(LibKind::Runtime),
+                         "paykan_runtime", "", kVersionNumber, 0});
   return m;
 }
 

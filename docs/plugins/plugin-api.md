@@ -9,8 +9,9 @@ its own tree copies both files. This page
 is its reference; the header's comments say the same, closer to the code.
 [`overview.md`](overview.md) explains how plugins are found and checked.
 
-Version: **plugin API 1** (`PAYKAN_PLUGIN_API_VERSION`), introduced in
-PaykanLang 0.1.0.
+Version: the PaykanLang release's, like every format
+(`PAYKAN_PLUGIN_API_VERSION`, the release version packed as
+major * 10000 + minor * 100 + patch: 200 for 0.2.0); paykan accepts exactly its own.
 
 ## Conventions
 

@@ -95,8 +95,8 @@ bool decodeCore(ByteReader &r, Manifest::CoreInfo &c) {
 }
 
 bool decodeFormats(ByteReader &r, Manifest::FormatVersions &f) {
-  return r.u32(f.IfaceMajor) && r.u32(f.IfaceMinor) && r.u32(f.TmplVersion) &&
-         r.u32(f.PirVersion) && r.u32(f.CodeEncoding) && r.u32(f.DebugVersion);
+  return r.u32(f.IfaceVersion) && r.u32(f.TmplVersion) && r.u32(f.PirVersion) &&
+         r.u32(f.CodeEncoding) && r.u32(f.DebugVersion);
 }
 
 bool decodeTarget(ByteReader &r, Manifest::TargetInfo &t) {
@@ -160,8 +160,7 @@ std::string describe(const Manifest::TargetInfo &t) {
 std::vector<uint8_t> encodeManifest(const Manifest &m) {
   ByteWriter w;
   w.bytes("PKMM", 4);
-  w.u16(kManifestMajor);
-  w.u16(kManifestMinor);
+  w.u32(kManifestVersion);
   record(w, TModule, [&](ByteWriter &v) { v.str(m.Module); });
   record(w, TContents, [&](ByteWriter &v) { v.u32(m.Contents); });
   record(w, TCore, [&](ByteWriter &v) {
@@ -173,8 +172,7 @@ std::vector<uint8_t> encodeManifest(const Manifest &m) {
     v.str(m.Core.Build);
   });
   record(w, TFormats, [&](ByteWriter &v) {
-    v.u32(m.Formats.IfaceMajor);
-    v.u32(m.Formats.IfaceMinor);
+    v.u32(m.Formats.IfaceVersion);
     v.u32(m.Formats.TmplVersion);
     v.u32(m.Formats.PirVersion);
     v.u32(m.Formats.CodeEncoding);
@@ -243,15 +241,15 @@ StatusOr<Manifest> decodeManifest(std::span<const uint8_t> bytes) {
     return Status::error("manifest larger than 1 MiB");
   ByteReader r(bytes);
   std::span<const uint8_t> magic;
-  uint16_t major = 0, minor = 0;
-  if (!r.bytes(4, magic) || !r.u16(major) || !r.u16(minor))
+  uint32_t version = 0;
+  if (!r.bytes(4, magic) || !r.u32(version))
     return Status::error("truncated manifest header");
   if (std::memcmp(magic.data(), "PKMM", 4) != 0)
     return Status::error("bad manifest magic");
-  if (major != kManifestMajor)
-    return Status::error("manifest format " + std::to_string(major) + "." +
-                         std::to_string(minor) + "; this reader knows " +
-                         std::to_string(kManifestMajor) + ".x");
+  if (version != kManifestVersion)
+    return Status::error("manifest format " + versionString(version) +
+                         "; this reader knows " +
+                         versionString(kManifestVersion));
   Manifest m;
   std::vector<uint64_t> seen;
   uint64_t last = 0;
@@ -382,28 +380,21 @@ Verdict checkCompatibility(const Manifest &m, const HostIdentity &host,
     return Verdict{k, r, std::move(msg)};
   };
   const Manifest::FormatVersions &f = m.Formats;
-  if (f.IfaceMajor != host.IfaceMajor)
+  if (f.IfaceVersion != host.IfaceVersion)
     return verdict(K::Rejected, R::Format,
-                   "interface format " + std::to_string(f.IfaceMajor) + "." +
-                       std::to_string(f.IfaceMinor) + "; this paykan reads " +
-                       std::to_string(host.IfaceMajor) + ".x");
-  if (f.IfaceMinor > host.IfaceMinor)
-    return verdict(
-        policy == Policy::Cache ? K::Stale : K::Rejected, R::Interface,
-        "interface format " + std::to_string(f.IfaceMajor) + "." +
-            std::to_string(f.IfaceMinor) + " is newer than this paykan's " +
-            std::to_string(host.IfaceMajor) + "." +
-            std::to_string(host.IfaceMinor));
+                   "interface format " + versionString(f.IfaceVersion) +
+                       "; this paykan reads " +
+                       versionString(host.IfaceVersion));
   if (f.PirVersion != host.PirVersion)
     return verdict(K::Rejected, R::PIR,
-                   "PIR " + std::to_string(f.PirVersion) +
+                   "PIR " + versionString(f.PirVersion) +
                        "; this paykan needs PIR " +
-                       std::to_string(host.PirVersion));
+                       versionString(host.PirVersion));
   if (m.RuntimeAbi != host.RuntimeAbi)
     return verdict(K::Rejected, R::ABI,
-                   "runtime ABI " + std::to_string(m.RuntimeAbi) +
+                   "runtime ABI " + versionString(m.RuntimeAbi) +
                        "; this paykan needs runtime ABI " +
-                       std::to_string(host.RuntimeAbi));
+                       versionString(host.RuntimeAbi));
   if (m.Target != host.Target)
     return verdict(K::Rejected, R::Target,
                    "target " + describe(m.Target) + "; this paykan targets " +

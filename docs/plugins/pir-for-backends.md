@@ -52,7 +52,7 @@ host: `host->runtime_library(session)` and
 `host->runtime_include_dir(session)`. The object files named with
 `--object`, which define a program's own `native fn`s (the `$c.` externs,
 [`pir.md` §3](../pir.md#3-functions-and-locals)), are not passed to a
-loaded backend: `PaykanBackendInput` has no field for them in plugin API 1,
+loaded backend: `PaykanBackendInput` has no field for them,
 so only the built-in backends link them.
 
 The example [`src/Backends/PrintPIR`](../../src/Backends/PrintPIR) (C) reads it and writes
