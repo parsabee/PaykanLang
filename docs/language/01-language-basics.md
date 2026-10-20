@@ -17,7 +17,9 @@ Tuples (`09-tuples.md`), optional types (`10-optionals.md`, optional primitives 
 optional-mode `match` included) and generics (`11-generics.md`) are **stable in v0.1**: the
 syntax and semantics this reference documents for them are covered by the compatibility
 promise for the 0.1 series. The limitations each chapter lists stay limitations; in
-particular generics cannot be imported across modules until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)). An optional
+particular a generic class or function cannot be imported from a prebuilt `.pkm` module
+until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)); importing one from
+source works. An optional
 primitive is a value, not a box, and no optional converts to `Obj`
 ([#96](https://github.com/parsabee/PaykanLang/issues/96); see `10-optionals.md`).
 
@@ -33,8 +35,9 @@ primitive is a value, not a box, and no optional converts to `Obj`
 
 ## Program Structure
 
-- A Paykan program is a list of **top-level declarations**: imports, classes, and functions.
-  There are no top-level statements.
+- A Paykan program is a list of **top-level declarations**: imports, classes, structs,
+  enums, traits, `impl` blocks and functions (`native fn`s included). There are no top-level
+  statements.
 - Execution begins at `main`, which must return `int`. Its return value becomes the process
   exit code. `main` may optionally take the command-line arguments as
   `fn main(args: view Str[]) -> int`; `args[0]` is the source-file path under `paykan run` (the executable's path for a program made
@@ -203,9 +206,9 @@ io::println(p);                         // Point(x: 5, y: 2)
 ### Function types
 
 `(T1, T2) -> R` is the type of a function value: a lambda, `fn(x: int) -> int { return
-x + 1; }`, or a named function used without calling it. A function value is a closure, a
-reference holding the variables the lambda captured (by copy), called like a function.
-See `15-function-types.md`.
+x + 1; }`, or a named function used without calling it. A function value is a value, held
+in place like a tuple: its code and its closure, the variables the lambda captured (by
+copy). It is called like a function. See `15-function-types.md`.
 
 ```pkn
 square = fn(x: int) -> int { return x * x; };
@@ -227,9 +230,10 @@ n = apply(square, 3);               // 9
 
 ### Optional Types
 
-Any reference type `T` (a class or `Str`) and the primitives `int`, `float`, `bool`,
-`char` and the sized numeric types have an optional form `T?` that holds either a `T` or `None`. A `T` converts to `T?` implicitly; a `T?` is unwrapped with `match`. See
-`10-optionals.md`.
+Any reference type `T` (a class or `Str`), the primitives `int`, `float`, `bool`, `char`
+and the sized numeric types, and an enum, a tuple, a struct or a function value of at most
+64 bytes have an optional form `T?` that holds either a `T` or `None`. A `T` converts to
+`T?` implicitly; a `T?` is unwrapped with `match`. See `10-optionals.md`.
 
 ```pkn
 n: Node? = None;
@@ -372,7 +376,7 @@ initializer may be any expression. A `view` local of a value type holds a copy o
 of an object, string or array holds the same object, string or array, which cannot be
 changed through it: no field or element write, and only a `view fn`
 ([Methods that don't change `self`](04-classes.md#methods-that-dont-change-self)), such as
-`toString`, `equals`, `len` or `length`, can be called on it (`'v' is a 'view' local;
+`toString`, `equals` or `len`, can be called on it (`'v' is a 'view' local;
 'tick' is not a 'view fn'`). A `view` local stays one: it can only be passed on to a `view` parameter,
 and is never stored or returned
 ([A `view` stays a `view`](02-functions-and-calling.md#a-view-of-a-reference-stays-a-view)).
@@ -425,8 +429,8 @@ that uses it keeps it live for the whole loop:
 - while an `inout` local is live, the variable it names cannot be used except through it:
   `'k' is borrowed by 'inout' local 'x' until 'x' is last used`;
 - while a `view` local of a variable is live, the variable cannot change, as if it were a
-  `view` itself: `'c' is viewed by 'view' local 'v' until 'v' is last used; 'tick' may
-  change it`. A variable of a value type can still be read and passed on as a copy.
+  `view` itself: `'c' is viewed by 'view' local 'v' until 'v' is last used; 'tick' is
+  not a 'view fn'`. A variable of a value type can still be read and passed on as a copy.
 
 ```pkn
 import ::io;
@@ -517,7 +521,7 @@ under [Conversions](#conversions)).
 
 | Op  | Meaning     | Type          |
 |-----|-------------|---------------|
-| `-` | Negation    | `int`/`float` |
+| `-` | Negation    | `int`, `float` and the signed sized types (not `unsigned`, `u8`, `u16`, `u32`) |
 | `!` | Logical NOT | `bool`        |
 
 ### Relational & Equality
@@ -554,8 +558,11 @@ if <condition> then <expr> else <expr>
 ```
 
 - Condition must be `bool`.
-- Both branches must have a compatible type (`int`/`float` promote; class types unify to their
-  nearest common ancestor).
+- Both branches must have the same type, with two exceptions: class types unify to their
+  nearest common ancestor, and a `None` branch makes the result the other branch's optional
+  (`if c then 1 else None` is an `int?`). `int` and `float` do not promote here:
+  `if c then 1 else 2.5` is an error (`ternary branches have incompatible types 'int' and
+  'float'`).
 - Right-associative; can be nested.
 
 ```pkn
@@ -563,10 +570,11 @@ result: int = if x > 0 then x else 0 - x;
 label: Str = if score >= 90 then "A" else if score >= 80 then "B" else "C";
 ```
 
-### `mov` (removed)
+### `mov`
 
-`mov` was removed in v0.2.0 and is a reserved word: write `t = s`, not `t = mov s`. Ownership
-transfers are inferred by the compiler; see `08-memory-model.md`.
+`mov` is a reserved word, not an operator: write `t = s`, not `t = mov s` (an error,
+`'mov' was removed in v0.2.0; ownership transfers are inferred`). Ownership transfers are
+inferred by the compiler; see `08-memory-model.md`.
 
 ### Operator Precedence (highest -> lowest)
 
@@ -627,7 +635,8 @@ if x > 100 {
 }
 ```
 
-Condition must be `bool`. It is written without parentheses; the body's `{` ends it. A chain
+Condition must be `bool`. It is written without parentheses; the body's `{` ends it
+(parentheses around it are allowed, as around any expression). A chain
 continues with `elif`, not `else if`; `else if` belongs to the conditional expression
 (`if x > 0 then 1 else if x == 0 then 0 else -1`), and each form rejects the other's spelling.
 
@@ -883,9 +892,6 @@ program itself, so it dies by `SIGABRT` (a shell shows `$?` as `134` either way)
 **`char` is a byte.** A `char` is one byte of a `Str`, so a non-ASCII character in a UTF-8
 string spans several `char`s (`"é"[0]` has code `195`). `int<char>` reads the byte as an
 unsigned code `0`..`255`, and `char<int>` is its exact inverse over that range.
-
-> The conversion builtins `StrInt`, `StrFloat`, `StrBool`, `StrChar`, `IntStr` and `FloatStr`
-> were replaced by these constructors.
 
 ### File I/O
 

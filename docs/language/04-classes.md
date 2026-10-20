@@ -62,7 +62,8 @@ io::println(p.toString());     // (1,2)
 
 - Each field has a type annotation. Fields **do not have default values** — every field must be
   assigned inside `__init__`, or passed to the default one.
-- Field types may be builtins, `Str`, fixed-size arrays (`T[n]`), or other class types.
+- Field types may be builtins, `Str`, fixed-size arrays (`T[n]`), other class types, enums,
+  tuples, structs, optionals and function types; not a slice (`T[]`).
 - A field declared `weak` (`weak parent: Node?;`) refers to its object without keeping it
   alive and reads as `None` once the object is gone; its type is `T?` for a class `T`. It is
   the back link that breaks a reference cycle (see `08-memory-model.md`, "Weak References").
@@ -140,7 +141,8 @@ types' methods, and its templates wherever they are instantiated. An importer ge
 `'m::Counter' cannot be constructed here: its initializer '___init__' is private to module
 'm'` (`cannot be extended here` from a subclass), and makes one through a function the module
 provides, as `io::open` and `io::stdin` make an `io::File`.
-`toString`, `==` and `hash` see every field as before. The rules are in
+Privacy does not hide a field from what the compiler generates: a struct's `toString` and
+`==` include its private fields (`14-structs.md`). The rules are in
 `docs/design/visibility.md`.
 
 ### The default `__init__`
@@ -259,7 +261,7 @@ is not a `view fn` may return part of `self` for its caller to change.
 Only a `view fn` can be called on a `view`, a parameter or a local
 ([Functions](02-functions-and-calling.md#view-read-only)): `'c' is a 'view' parameter;
 'increment' is not a 'view fn'`. The builtin methods that only read are `view fn`s:
-`toString`, `equals`, `len`, `length`; `concat` is not. (The standard library's
+`toString`, `equals`, `len`; `concat` is not. (The standard library's
 `io::File` methods are `view fn`s.) A `let`
 local only cannot be reassigned: any method can be called on what it holds.
 
@@ -310,7 +312,8 @@ fn main() -> int {
 - `fn` and `view fn` methods follow the same rules as those of the class body, and the
   two can call each other.
 - A `static fn` has no `self`. It is called as `Type::name(...)`, or `mod::Type::name(...)`
-  from a module that imports it.
+  from a module that imports it; one of a generic class is called on an instantiation,
+  `Box<int>::of(1)` (see `11-generics.md`).
 - No method may reuse a name that the class or one of its superclasses already has, and
   a subclass cannot override an `impl` method.
 - `__init__` goes in an `impl` block, not the class body: it is the class's constructor,

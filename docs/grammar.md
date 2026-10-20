@@ -152,7 +152,7 @@ traitMember ::= "view"? "fn" IDENT "(" paramList? ")"
 
 implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
                 ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
-implMember  ::= funcDecl | "static" "fn" IDENT "(" paramList? ")"
+implMember  ::= funcDecl | "static" "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? block
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
@@ -187,8 +187,9 @@ A parameter's type may start with its mode, `view` or `inout`
 ([language/02-functions-and-calling.md](language/02-functions-and-calling.md)):
 `fn bump(n: inout int)`, `fn __init__(start: view int)`.  The keywords are
 reserved: besides a parameter's type, they only start a result's type
-(`-> view T`), a local borrow's type or a `match` binding's type
-(`borrowDecl` and `matchArm`, below), and `view` a `view fn`.  In any other
+(`-> view T`), a function type's parameter (`paramType`, below), a local
+borrow's type or a `match` binding's type (`borrowDecl` and `matchArm`,
+below), and `view` a `view fn`.  In any other
 position (a
 statement, a field's type, before the parameter's name) they are a syntax
 error; before the name, the error shows the parameter rewritten.
@@ -235,14 +236,14 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 - `T?` is rejected at parse time when `T` is `void` (`optional type 'void?'
   is not supported`) or already optional (`nested optional type 'Str??' is
   not supported`). The other builtin value types have optional forms
-  (`int?`, `float?`, `bool?`, `char?`). An enum spelled `Color?` is only
+  (`int?`, `float?`, `bool?`, `char?`, `u8?`, `f32?`, ...). An enum spelled `Color?` is only
   known to Sema, which resolves it there (an enum, a tuple and a struct have
   optionals; a fixed-size array does not).
 - A tuple type has at least two elements; `(int)` is a syntax error (there
   are no parenthesised types).
 - `Box<int>` is a generic type application (a `GenericType` node that Sema
-  instantiates). The qualified form `lib::Box<int>` parses so that Sema can
-  reject it with a dedicated diagnostic.
+  instantiates). The qualified form `lib::Box<int>` names a generic class of
+  an imported module.
 - An unqualified name resolves at parse time to the builtin type or
   bootstrap class of that name (`int`, `Str`, `Obj`, ...) if there is one;
   any other name becomes a `ClassType` stub carrying the name and its
@@ -304,6 +305,11 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   The `VarDecl` and its `DeclStmt` start at `let`.  `let` starts nothing
   else: a parameter, a field, a type, a destructuring (`let a, b = t;`) or a
   `let` without an initializer is a syntax error.
+- `weakDecl` declares one local holding a weak reference
+  (`VarDecl::isWeak`); its type, when not written, is its initializer's, and
+  without an initializer it starts as `None`.  It needs a type or an
+  initializer (`a 'weak' declaration needs a type or an initial value`), and
+  is neither a borrow (`weak x: view = e;`) nor a destructuring.
 - `borrowDecl` declares a local borrow (`VarDecl::getMode`); its type, when
   not written, is its initializer's.  It needs an initializer, is never
   `let` (`let x: view = e;`) and is not a destructuring target.  With the
@@ -359,7 +365,9 @@ primary ::= literal
           | IDENT "<" typeArgList ">" "::" IDENT "(" argumentList? ")"
                                                              -- static fn of an
                                                              -- instantiation
-          | modulePath "::" IDENT                            -- enum variant
+          | modulePath "::" IDENT                            -- enum variant, or a
+                                                             -- qualified function
+                                                             -- as a value
           | modulePath "::" IDENT "(" argumentList? ")"      -- qualified call
           | modulePath "::" IDENT "<" typeArgList ">" "(" argumentList? ")"
           | modulePath "::" IDENT "<" typeArgList ">" "::" IDENT "(" argumentList? ")"
@@ -431,8 +439,9 @@ way, with the same AST.
 A conversion `Target<Source>(value)` (`Str<int>(n)`, `int<float>(f)`,
 `int<Str>(s)`, ..., see [`language/01-language-basics.md`](language/01-language-basics.md)) is not
 a separate production: it is the generic-call form above. The builtin type
-names `int`, `float`, `bool`, `char` and `void` are ordinary `IDENT`s (they
-are resolved as type names, not reserved by the scanner), so `int<Str>(s)`
+names `int`, `float`, `bool`, `char`, `void` and the sized numeric types
+(`u8`, `i32`, `unsigned`, `f32`, ...) are ordinary `IDENT`s (they are
+resolved as type names, not reserved by the scanner), so `int<Str>(s)`
 parses exactly like `Box<int>(1)`. Every frontend builds a `CallExpr` whose
 callee is the target name, with one type argument and one argument. Sema
 tells a conversion apart from a generic constructor by its callee.
@@ -472,9 +481,10 @@ not message text.
 
 The recursive-descent frontend recovers from a syntax error at the next
 statement boundary (`;`, or the `}` of the enclosing block, matching braces
-on the way), at the next class or struct member (`fn`, `;`, `}`) and at the
-next top-level declaration (`import`, `class`, `struct`, `enum`, `fn`), so
-one file can
+on the way), at the next class, struct, `impl` or trait member (`fn`,
+`view fn`, `static`, `;`, `}`) and at the next top-level declaration
+(`import`, `class`, `struct`, `enum`, `trait`, `impl`, `fn`, `view fn`,
+`native`), so one file can
 report several independent errors. Another frontend may recover less (for
 example only at `;` inside a block). Any error makes the parse fail; a file
 with errors is never handed to Sema.
