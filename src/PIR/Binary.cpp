@@ -170,8 +170,7 @@ public:
     // The string table precedes the body, so the body is written first.
     ByteWriter out;
     out.bytes(kMagic, 4);
-    out.u16(kCodecMajor);
-    out.u16(kCodecMinor);
+    out.u32(kCodecVersion);
     out.u32(kPIRVersion);
     out.u32((Strip ? kFlagNamesStripped : 0) |
             (definesMain(m) ? kFlagDefinesMain : 0));
@@ -794,16 +793,15 @@ private:
 Status walk(std::span<const uint8_t> blob, const DecodeOptions &opts,
             BlobInfo &info, Module *out) {
   ByteReader r(blob);
-  if (!magicIs(r, kMagic, "magic") || !r.u16(info.CodecMajor) ||
-      !r.u16(info.CodecMinor) || !r.u32(info.PIRVersion) || !r.u32(info.Flags))
+  if (!magicIs(r, kMagic, "magic") || !r.u32(info.CodecVersion) ||
+      !r.u32(info.PIRVersion) || !r.u32(info.Flags))
     return readerError(r);
-  if (info.CodecMajor != kCodecMajor)
+  if (info.CodecVersion != kCodecVersion)
     return Status::error("binary PIR: unsupported codec version " +
-                         std::to_string(info.CodecMajor) + "." +
-                         std::to_string(info.CodecMinor));
+                         versionString(info.CodecVersion));
   if (info.PIRVersion != kPIRVersion)
     return Status::error("binary PIR: unsupported PIR version " +
-                         std::to_string(info.PIRVersion));
+                         versionString(info.PIRVersion));
   if (info.Flags & ~kKnownModuleFlags)
     return Status::error("binary PIR: reserved flag bits set");
   if (!support::StringTable::read(r, info.Strings))
@@ -1002,8 +1000,7 @@ std::vector<uint8_t> encodeSymbolIndex(std::span<const SymbolEntry> entries) {
   body.bytes(kIndexTrailer, 4);
   ByteWriter out;
   out.bytes(kIndexMagic, 4);
-  out.u16(kCodecMajor);
-  out.u16(kCodecMinor);
+  out.u32(kCodecVersion);
   strings.write(out);
   out.bytes(body.data());
   return out.take();
@@ -1012,14 +1009,14 @@ std::vector<uint8_t> encodeSymbolIndex(std::span<const SymbolEntry> entries) {
 StatusOr<std::vector<SymbolEntry>>
 decodeSymbolIndex(std::span<const uint8_t> section) {
   ByteReader r(section);
-  uint16_t major, minor;
+  uint32_t version;
   std::vector<std::string> strings;
   uint64_t n;
-  if (!magicIs(r, kIndexMagic, "magic") || !r.u16(major) || !r.u16(minor))
+  if (!magicIs(r, kIndexMagic, "magic") || !r.u32(version))
     return readerError(r);
-  if (major != kCodecMajor)
+  if (version != kCodecVersion)
     return Status::error("symbol index: unsupported version " +
-                         std::to_string(major) + "." + std::to_string(minor));
+                         versionString(version));
   if (!support::StringTable::read(r, strings) ||
       !r.count(n, kMinIndexEntryBytes))
     return readerError(r);

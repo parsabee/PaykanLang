@@ -12,6 +12,7 @@
 #include <gtest/gtest.h>
 
 #include "BuildId.h"
+#include "Version.h"
 #include "paykan/pkm/File.h"
 #include "paykan/pkm/Manifest.h"
 
@@ -553,9 +554,12 @@ TEST(Pkm, EmitPkmAndDump) {
   auto dump = run(std::string(kPaykan) + " pkm dump " +
                   (p.Dir / "out" / "shapes.pkm").string());
   ASSERT_EQ(dump.exitCode, 0) << dump.out;
+  const std::string header =
+      "pkm " + paykan::versionString(paykan::kVersionNumber) + ", 4 sections";
+  EXPECT_TRUE(contains(dump.out, header)) << dump.out;
   for (const char *expected :
-       {"pkm 1.0, 4 sections", "#0 MANIFEST", "#1 IFACE", "#2 CODE",
-        "#3 SYMIDX", "module geometry::shapes", "contents 0x1 (HAS_CODE)",
+       {"#0 MANIFEST", "#1 IFACE", "#2 CODE", "#3 SYMIDX",
+        "module geometry::shapes", "contents 0x1 (HAS_CODE)",
         "display_file \"geometry/shapes.pkn\"", "class Rect super \"\"",
         "method area() -> int", "func describe(Rect) -> Str",
         "func Rect(int, int) -> Rect", "payloads 0", "pir:\n",
@@ -735,7 +739,9 @@ TEST(Pkm, ParamModesAcrossModules) {
         "method __init__(view int) -> void flags 0x0"})
     EXPECT_TRUE(contains(dump.out, sig)) << sig << "\n" << dump.out;
   auto manifest = p.paykan("pkm dump --section=manifest base.pkm");
-  EXPECT_TRUE(contains(manifest.out, "format_versions iface 1.0"))
+  EXPECT_TRUE(
+      contains(manifest.out, "format_versions iface " +
+                                 paykan::versionString(paykan::kVersionNumber)))
       << manifest.out;
 }
 

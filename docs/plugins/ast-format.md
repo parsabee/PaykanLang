@@ -6,31 +6,36 @@ and hands the AST to Sema exactly as if the built-in recursive-descent
 frontend had built it. The format is a small S-expression language: easy to
 produce from any language, easy to read in a diff.
 
-**Version 1** (`PAYKAN_AST_FORMAT_VERSION` in `plugin_api.h`). The core's
+The format's version is the PaykanLang release's, like every format's
+(`PAYKAN_AST_FORMAT_VERSION` in `plugin_api.h`, the release version packed as
+major * 10000 + minor * 100 + patch); the text spells it dotted, `0.2.0`. The core's
 writer and reader are [`include/paykan/ast/Interchange.h`](../../include/paykan/ast/Interchange.h);
 `paykan --emit-ast program.pkn` prints any program in this format, which is
 the quickest way to see what a frontend must produce.
 
 ```text
 $ cat hello.pkn
+import ::io;
 fn main() -> int {
-  println("hi");
+  io::println("hi");
   return 0;
 }
 $ paykan --emit-ast hello.pkn
-(paykan-ast 1
-  (unit @1:1-4:2
-    (fn @1:1-4:2 "main"
+(paykan-ast 0.2.0
+  (unit @1:1-5:2
+    (import @1:1-1:13 true ""
+      (module "io" ""))
+    (fn @2:1-5:2 "main"
       (type-params)
       (params)
       (named-type "int")
-      (block @1:19-1:19
-        (expr @2:3-2:17
-          (call @2:3-2:16 "println"
+      (block @2:19-2:19
+        (expr @3:3-3:21
+          (call @3:3-3:20 "io::println"
             (type-args)
-            (string @2:11-2:15 "hi")))
-        (return @3:3-3:12
-          (int @3:10-3:11 0))))))
+            (string @3:15-3:19 "hi")))
+        (return @4:3-4:12
+          (int @4:10-4:11 0))))))
 ```
 
 ## 1. Syntax
@@ -59,11 +64,11 @@ $ paykan --emit-ast hello.pkn
 The whole text is one list:
 
 ```text
-(paykan-ast 1 UNIT)
+(paykan-ast VERSION UNIT)
 ```
 
-The version must be one the reader supports (today: 1). Nothing but
-whitespace and comments may follow.
+`VERSION` is the dotted release version, and the reader accepts exactly its
+own (`0.2.0` for paykan 0.2.0). Nothing but whitespace and comments may follow.
 
 ## 2. Nodes
 
@@ -197,17 +202,10 @@ it.
 
 ## 5. Stability
 
-`PAYKAN_AST_FORMAT_VERSION` is bumped on any incompatible change: a node or
-field removed, renamed or changed in meaning, or a node a reader must handle
-added (a new language construct). Within one version the format does not
-change, except for optional trailing items that only new constructs use: a
-parameter's or a local borrow's `(qual ...)`, a local's `(let)` and a
-`weak` declaration's `(weak)`. They keep the version, because every document that
-was valid stays valid and means the same, and a reader that predates an item
-rejects a document that uses it (an unexpected field) instead of misreading
-it. The `struct` declaration is the same kind of addition: a document that
-uses it is rejected by a reader that predates it, and every other document
-reads as before, so the version stays 1 until 0.2.0 bumps it with the other
-formats. The core's tests write and read back the AST of every program in the
+The format is versioned by the release: every PaykanLang release has its own
+version (`PAYKAN_AST_FORMAT_VERSION`), and a reader accepts only its own, so
+a frontend plugin's AST is read by the release whose headers it was built
+with (a plugin is accepted only by a release that lists its build version,
+[`overview.md`](overview.md)). The core's tests write and read back the AST of every program in the
 samples corpus and check that the result is identical
 (`tests/AST/InterchangeTests.cpp`).

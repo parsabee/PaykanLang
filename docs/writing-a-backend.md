@@ -30,7 +30,7 @@ The example in [`src/Backends/PrintPIR`](../src/Backends/PrintPIR) is the smalle
 complete loadable backend, in plain C (it prints the PIR it receives); copy it
 to start your own.
 
-**Stability.** Unlike the language (stable in v0.1, see
+**Stability.** Unlike the language (stable in the 0.2 series, see
 [`language/01-language-basics.md`](language/01-language-basics.md)), the
 plugin interfaces are not yet stable: `plugin_api.h` (versioned by
 `PAYKAN_PLUGIN_API_VERSION`), the PIR text (`PAYKAN_PIR_TEXT_VERSION`), and
@@ -429,9 +429,9 @@ PaykanLang version it was **built with**, and each release carries an explicit
   ```text
   $ paykan --list-backends
   c (default)
-  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.1 accepts 0.1.1, 0.1.0) [/home/me/.paykan/plugins/0.1.1/libmine.so]
+  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]
   $ paykan --backend=mine program.pkn
-  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.1.1 accepts 0.1.1, 0.1.0) [/home/me/.paykan/plugins/0.1.1/libmine.so]
+  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]
   $ echo $?
   2
   ```
@@ -447,8 +447,8 @@ PaykanLang version it was **built with**, and each release carries an explicit
 
   ```text
   Paykan backend plugin 'paykan_backend_mine' is incompatible: built with
-  PaykanLang 0.0.9; the installed PaykanLang 0.1.1 (<prefix>/lib/cmake/Paykan)
-  accepts 0.1.1, 0.1.0
+  PaykanLang 0.0.9; the installed PaykanLang 0.2.0 (<prefix>/lib/cmake/Paykan)
+  accepts 0.2.0
   ```
 
   That version is the installation's own (`PAYKAN_TOOLCHAIN_VERSION`) unless

@@ -99,7 +99,8 @@ std::vector<uint8_t> withPart(const std::vector<uint8_t> &b, uint32_t tag,
 TEST(Interface, RoundTrip) {
   Interface i = sampleInterface();
   std::vector<uint8_t> b = writeInterface(i);
-  EXPECT_EQ(std::memcmp(b.data(), "PKMI\x01\x00\x00\x00", 8), 0);
+  EXPECT_EQ(std::memcmp(b.data(), "PKMI", 4), 0);
+  EXPECT_EQ(getU32(b, 4), kIfaceVersion);
   std::vector<Part> ps = parts(b);
   ASSERT_EQ(ps.size(), 6u);
   std::vector<uint32_t> tags, flags;
@@ -223,12 +224,13 @@ TEST(Interface, Framing) {
     std::vector<uint8_t> b = good;
     b[0] = 'x';
     EXPECT_NE(readError(b).find("magic"), std::string::npos);
-    b = good;
-    b[4] = 2;
-    EXPECT_NE(readError(b).find("interface format 2.0"), std::string::npos);
-    b = good;
-    b[6] = 3; // newer minor accepted
-    EXPECT_TRUE(readInterface(b, "geometry::shapes"));
+    // Any other version, older or newer, is rejected.
+    for (uint32_t other : {kIfaceVersion - 1, kIfaceVersion + 1}) {
+      b = good;
+      putU32(b, 4, other);
+      EXPECT_NE(readError(b).find("interface format " + versionString(other)),
+                std::string::npos);
+    }
   }
   EXPECT_NE(readError(good, "geometry::other").find("not 'geometry::other'"),
             std::string::npos);

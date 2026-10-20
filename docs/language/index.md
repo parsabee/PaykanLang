@@ -35,6 +35,6 @@ frontend implements.
 
 ## Stability
 
-Tuples, optional types and generics are stable in the 0.1 series: a program that follows
-the reference keeps its meaning in every 0.1.x release. See
+Tuples, optional types and generics are stable in the 0.2 series: a program that follows
+the reference keeps its meaning in every 0.2.x release. See
 [Stability](01-language-basics.md#stability) for the limitations that stay.

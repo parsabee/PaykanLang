@@ -92,7 +92,7 @@ std::string result(const ModeRecs &m) {
 }
 
 void dumpHeader(const File &f, std::ostream &os) {
-  os << "pkm " << f.formatMajor() << "." << f.formatMinor() << ", "
+  os << "pkm " << versionString(f.formatVersion()) << ", "
      << f.sections().size() << " sections, table sha256 "
      << prefix(f.tableHash()) << "\n";
   os << "iface_hash " << hex(f.ifaceHash()) << "\n";
@@ -120,11 +120,11 @@ void dumpManifest(const Manifest &m, std::ostream &os) {
   os << "  core " << quoted(m.Core.Version) << " " << m.Core.Major << "."
      << m.Core.Minor << "." << m.Core.Patch << " prerelease "
      << quoted(m.Core.Prerelease) << " build " << quoted(m.Core.Build) << "\n";
-  os << "  format_versions iface " << m.Formats.IfaceMajor << "."
-     << m.Formats.IfaceMinor << " tmpl " << m.Formats.TmplVersion << " pir "
-     << m.Formats.PirVersion << " code_encoding " << m.Formats.CodeEncoding
-     << " debug " << m.Formats.DebugVersion << "\n";
-  os << "  runtime_abi " << m.RuntimeAbi << "\n";
+  os << "  format_versions iface " << versionString(m.Formats.IfaceVersion)
+     << " tmpl " << m.Formats.TmplVersion << " pir "
+     << versionString(m.Formats.PirVersion) << " code_encoding "
+     << m.Formats.CodeEncoding << " debug " << m.Formats.DebugVersion << "\n";
+  os << "  runtime_abi " << versionString(m.RuntimeAbi) << "\n";
   os << "  target pointer " << unsigned(m.Target.PointerSize) << " slot "
      << unsigned(m.Target.SlotSize) << " endianness "
      << unsigned(m.Target.Endianness) << " int " << unsigned(m.Target.IntWidth)
@@ -142,14 +142,14 @@ void dumpManifest(const Manifest &m, std::ostream &os) {
   os << "  libraries " << m.Libraries.size() << "\n";
   for (const Manifest::Lib &l : m.Libraries)
     os << "    " << libKindName(l.Kind) << " " << quoted(l.Name) << " version "
-       << quoted(l.Version) << " abi " << l.Abi << " flags "
+       << quoted(l.Version) << " abi " << versionString(l.Abi) << " flags "
        << detail::hex(l.Flags) << "\n";
   os << "  frontend " << quoted(m.Frontend.Name) << " "
      << quoted(m.Frontend.Version) << " plugin " << quoted(m.Frontend.Plugin)
      << "\n";
   os << "  producer " << quoted(m.Producer.Tool) << " "
      << quoted(m.Producer.Version) << "\n";
-  os << "  plugin_api " << m.PluginApi << "\n";
+  os << "  plugin_api " << versionString(m.PluginApi) << "\n";
   os << "  opt_pipeline " << quoted(m.OptPipeline) << "\n";
   os << "  attributes " << m.Attributes.size();
   for (const std::string &a : m.Attributes)

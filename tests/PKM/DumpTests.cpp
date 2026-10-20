@@ -22,15 +22,17 @@ std::string dumpOf(const std::vector<uint8_t> &b, DumpOptions opts = {}) {
   return os.str();
 }
 
+// The section hashes depend on the release version, which the manifest and
+// the interface carry: a version bump regenerates them.
 const char *const kGolden =
-    R"(pkm 1.0, 6 sections, table sha256 329b175a6c7945db
-iface_hash 6060b3f9a453db292934eb7024e6cd14d29e96b21665ae9cc2d231bba6f4fde9
+    R"(pkm 0.2.0, 6 sections, table sha256 1b248c267ba874bf
+iface_hash 34f4e1e0bf3ca072894bcd0e6f4c62e945ee095e05db37d1095a3771eb2f5f7a
 tmpl_hash 0000000000000000000000000000000000000000000000000000000000000000
 code_hash 31635559fa224a2c41eac6c6a0ecf6e9b08ee0747deaf38cbf2f08365f54f4c6
-module_hash f6816235aaede545812081ea267b087809bee262d458997e0035bf48773997fa
+module_hash a89bbebaaf585e188f3bceb718b43983c5c2014e93fcaedd8ec9020bc1c3daf6
 sections:
-  #0 MANIFEST flags REQUIRED offset 0x1c0 size 430 sha256 cd1968da24a98197
-  #1 IFACE flags REQUIRED offset 0x370 size 640 sha256 6060b3f9a453db29
+  #0 MANIFEST flags REQUIRED offset 0x1c0 size 426 sha256 6f1fd01446583ae1
+  #1 IFACE flags REQUIRED offset 0x370 size 640 sha256 34f4e1e0bf3ca072
   #2 CODE flags REQUIRED offset 0x5f0 size 21 sha256 31635559fa224a2c
   #3 SYMIDX flags - offset 0x608 size 6 sha256 12643e6ba7fdc1f1
   #4 PAYLOAD flags INSTANCED offset 0x610 size 11 sha256 18e9d2416680ac3c
@@ -39,18 +41,18 @@ manifest:
   module geometry::shapes
   contents 0x1 (HAS_CODE)
   core "0.2.0-rc1" 0.2.0 prerelease "rc1" build "abc123"
-  format_versions iface 1.0 tmpl 1 pir 2 code_encoding 2 debug 1
-  runtime_abi 7
+  format_versions iface 0.2.0 tmpl 1 pir 0.2.0 code_encoding 2 debug 1
+  runtime_abi 0.2.0
   target pointer 8 slot 8 endianness 1 int 64 float 64
   deps 2
     ::io flags 0x1 iface d15e8a8021cbf6f9 tmpl 0000000000000000 core "0.2.0-rc1"
     geometry::vec flags 0x2 iface 204c017c008cfc0e tmpl 9656a97f47735794 core "0.2.0-rc1"
   source sha256 41cf6794ba4200b839c53531555f0f3998df4cbb01a4d5cb0b94e3ca5e23947d size 1234
   libraries 1
-    RUNTIME "paykan_runtime" version "0.2.0" abi 7 flags 0x1
+    RUNTIME "paykan_runtime" version "0.2.0" abi 0.2.0 flags 0x1
   frontend "recursive-descent" "0.2.0" plugin ""
   producer "paykan" "0.2.0-rc1"
-  plugin_api 3
+  plugin_api 0.2.0
   opt_pipeline ""
   attributes 2 "@inline" "@cold"
 iface:

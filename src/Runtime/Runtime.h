@@ -36,17 +36,14 @@ extern "C" {
 
 // -- Runtime ABI version
 //
-// Bumped whenever the generated code's ABI (object layout, vtable slots,
-// calling conventions, symbol naming) changes, so code compiled against an
-// older runtime is never linked or loaded: both backends' caches and every
-// .pkm module file record it (docs/design/pkm.md §2.2, tag 0x09).
-//   v3: PIR-based translation.
-//   v4: the main module's symbols are prefixed (`pk.`).
-//   v5: methods are `<Class>.<method>` (was `<Class>_<method>`), vtables
-//       `<Class>..vtable`.
-//   v6: imported modules' symbols are prefixed with the canonical module
-//       name (`geometry::shapes::describe`), not the absolute file path.
-#define PAYKAN_RUNTIME_ABI_VERSION 6
+// The ABI of the generated code (object layout, vtable slots, calling
+// conventions, symbol naming), versioned like every format by the release:
+// major * 10000 + minor * 100 + patch.  Code compiled against another
+// runtime is never linked or loaded: both backends' caches and every .pkm
+// module file record it (docs/design/pkm.md §2.2, tag 0x09).  It is spelled
+// out here, for C, and the compiler checks it is its own release's
+// (kVersionNumber, a static_assert in src/Modules/ModuleResolver.cpp).
+#define PAYKAN_RUNTIME_ABI_VERSION 200 /* 0.2.0 */
 
 // -- Target assumptions
 //

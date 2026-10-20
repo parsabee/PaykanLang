@@ -1,10 +1,10 @@
 # PaykanLang — Generics
 
-> **Stable in v0.1** (issue #2): the syntax and semantics below are covered by the
-> compatibility promise for the 0.1 series (see `01-language-basics.md`, "Stability").
+> **Stable** (issue #2): the syntax and semantics below are covered by the
+> compatibility promise for the 0.2 series (see `01-language-basics.md`, "Stability").
 
 Generic classes and functions are parameterised by types. A type parameter's
-bounds (`<T: Show>`) are in `12-traits.md`; variance is not supported in v0.1.
+bounds (`<T: Show>`) are in `12-traits.md`; variance is not supported.
 
 ---
 
@@ -60,7 +60,7 @@ impl Pair<K, V> {
 - A parameter may not be repeated (`class P<T, T>`) and may not reuse the name
   of a type in scope (`class Bar<Foo>` when `Foo` is a class, `fn f<Str>`).
 - A generic class may extend a **concrete** class: `class Wrap<T> : Base { … }`.
-  The superclass itself cannot be generic in v0.1.
+  The superclass itself cannot be generic.
 - A generic class may mention its own instantiation in signatures
   (`fn link(n: Node<T>)`).
 
@@ -360,7 +360,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Instantiation depth exceeded | self-instantiation with a growing argument |
 | Instantiation name clash | this module's `Box<Str>` and an imported template's, or an imported class `Box<int>` |
 
-## Not Supported in v0.1
+## Not Supported Yet
 
 Variance, default type arguments, explicit specialisation, generic methods on non-generic classes,
 generic superclasses, and templates in a prebuilt `.pkm` (v0.2.0, [#160](https://github.com/parsabee/PaykanLang/issues/160)).

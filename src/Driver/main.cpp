@@ -83,7 +83,8 @@ void printVersion(const paykan::plugin::LoadReport &plugins) {
           std::cout << ": " << d;
     std::cout << origin(e) << "\n";
   }
-  std::cout << "plugin API " << PAYKAN_PLUGIN_API_VERSION << "\n";
+  std::cout << "plugin API " << paykan::versionString(PAYKAN_PLUGIN_API_VERSION)
+            << "\n";
   std::cout << "plugin directories:";
   if (plugins.DiscoveryDisabled)
     std::cout << " none searched (--no-plugins or PAYKAN_NO_PLUGINS)";

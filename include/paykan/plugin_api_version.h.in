@@ -17,4 +17,9 @@
  * included (e.g. "1.2.3", or "1.2.3-rc1" for a pre-release). */
 #define PAYKAN_PLUGIN_HEADER_VERSION "@PAYKAN_VERSION@"
 
+/* The same version packed as major * 10000 + minor * 100 + patch (0.2.0 is
+ * 200): the version of the plugin API, the PIR text a backend receives and
+ * the AST a frontend returns (paykan/plugin_api.h). */
+#define PAYKAN_VERSION_NUMBER @PAYKAN_VERSION_NUMBER@
+
 #endif /* PAYKAN_PLUGIN_API_VERSION_H */

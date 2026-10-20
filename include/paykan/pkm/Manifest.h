@@ -59,7 +59,7 @@ struct Manifest {
     bool operator==(const CoreInfo &) const = default;
   };
   struct FormatVersions {
-    uint32_t IfaceMajor = 0, IfaceMinor = 0, TmplVersion = 0, PirVersion = 0,
+    uint32_t IfaceVersion = 0, TmplVersion = 0, PirVersion = 0,
              CodeEncoding = 0, DebugVersion = 0;
     bool operator==(const FormatVersions &) const = default;
   };
@@ -132,8 +132,7 @@ StatusOr<Manifest> decodeManifest(std::span<const uint8_t> bytes);
 /// What the running toolchain is, for checkCompatibility.  The integrator
 /// fills it from Version.h, PluginCompat.h, pir::kPIRVersion and Runtime.h.
 struct HostIdentity {
-  uint32_t IfaceMajor = kIfaceMajor;
-  uint32_t IfaceMinor = kIfaceMinor;
+  uint32_t IfaceVersion = kIfaceVersion;
   uint32_t PirVersion = 0;
   uint32_t RuntimeAbi = 0;
   Manifest::TargetInfo Target;

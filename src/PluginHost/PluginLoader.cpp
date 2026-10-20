@@ -8,6 +8,7 @@
 
 #include "Platform.h"
 #include "PluginHost.h"
+#include "Version.h"
 
 #include "paykan/Backend.h"
 #include "paykan/Frontend.h"
@@ -48,7 +49,7 @@ std::string supportedApiVersions() {
   for (uint32_t v : kSupportedApiVersions) {
     if (!out.empty())
       out += ", ";
-    out += std::to_string(v);
+    out += paykan::versionString(v);
   }
   return out;
 }
@@ -121,7 +122,7 @@ std::string checkArray(const char *kind, size_t n, const T *array,
   if (uint32_t size = array[0].struct_size; size < minSize)
     return std::string(kind) + " #1: its descriptor is " +
            std::to_string(size) + " bytes, plugin API " +
-           std::to_string(PAYKAN_PLUGIN_API_VERSION) + " needs " +
+           paykan::versionString(PAYKAN_PLUGIN_API_VERSION) + " needs " +
            std::to_string(minSize);
   std::set<std::string_view> seen;
   for (size_t i = 0; i < n; ++i) {
@@ -254,13 +255,13 @@ void loadFile(PluginFile &f) {
     return;
   }
   if (!supportsApiVersion(p->api_version)) {
-    f.Error = "built for plugin API " + std::to_string(p->api_version) +
+    f.Error = "built for plugin API " + paykan::versionString(p->api_version) +
               "; this paykan supports plugin API " + supportedApiVersions();
     return;
   }
   if (p->struct_size < host::kMinPluginSize) {
     f.Error = "its descriptor is " + std::to_string(p->struct_size) +
-              " bytes, plugin API " + std::to_string(p->api_version) +
+              " bytes, plugin API " + paykan::versionString(p->api_version) +
               " needs " + std::to_string(host::kMinPluginSize);
     return;
   }

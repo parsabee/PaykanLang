@@ -15,8 +15,7 @@ TEST(Container, WriterLayoutAndRoundTrip) {
   std::vector<uint8_t> b = sampleFileBytes();
   ASSERT_GE(b.size(), 64u);
   EXPECT_EQ(std::memcmp(b.data(), "\x89PKM\r\n\x1a\n", 8), 0);
-  EXPECT_EQ(b[8], 1); // format 1.0
-  EXPECT_EQ(b[10], 0);
+  EXPECT_EQ(getU32(b, 8), kFormatVersion); // the release's
   EXPECT_EQ(getU32(b, 12), 64u);
   EXPECT_EQ(getU32(b, 16), 6u);
   EXPECT_EQ(getU32(b, 20), 64u);
@@ -46,8 +45,7 @@ TEST(Container, WriterLayoutAndRoundTrip) {
   EXPECT_TRUE((*f).section(Kind::Payload, 2).empty());
   EXPECT_TRUE((*f).section(Kind::Debug).empty());
   EXPECT_EQ((*f).manifest(), sampleManifest());
-  EXPECT_EQ((*f).formatMajor(), 1);
-  EXPECT_EQ((*f).formatMinor(), 0);
+  EXPECT_EQ((*f).formatVersion(), kFormatVersion);
 }
 
 TEST(Container, DerivedHashes) {
@@ -121,17 +119,16 @@ TEST(Container, HeaderErrors) {
     EXPECT_EQ(readError(t).Code, ErrorCode::NotAPkm);
   }
   {
-    std::vector<uint8_t> t = b;
-    t[8] = 2;
-    Error e = readError(t);
-    EXPECT_EQ(e.Code, ErrorCode::UnsupportedFormat);
-    EXPECT_EQ(e.str(), "format 2.0; this reader knows format 1.x");
-  }
-  {
-    // A higher minor is accepted.
-    std::vector<uint8_t> t = b;
-    t[10] = 5;
-    EXPECT_TRUE(File::read(t));
+    // Any other version, older or newer, is rejected.
+    for (uint32_t other : {kFormatVersion - 1, kFormatVersion + 1}) {
+      std::vector<uint8_t> t = b;
+      putU32(t, 8, other);
+      Error e = readError(t);
+      EXPECT_EQ(e.Code, ErrorCode::UnsupportedFormat);
+      EXPECT_EQ(e.str(), "format " + versionString(other) +
+                             "; this paykan reads " +
+                             versionString(kFormatVersion));
+    }
   }
   {
     std::vector<uint8_t> t = b;

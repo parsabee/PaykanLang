@@ -77,7 +77,11 @@ static char *copy(const char *text, size_t size) {
 __attribute__((unused)) static int test_parse(void *data, PaykanSession *s,
                                               const PaykanFrontendInput *in,
                                               PaykanFrontendOutput *out) {
-  static const char bad[] = "(paykan-ast 1 (unit (frob)))";
+  char bad[64]; /* not a valid AST: (frob) is no declaration */
+  snprintf(bad, sizeof bad, "(paykan-ast %d.%d.%d (unit (frob)))",
+           PAYKAN_AST_FORMAT_VERSION / 10000,
+           PAYKAN_AST_FORMAT_VERSION / 100 % 100,
+           PAYKAN_AST_FORMAT_VERSION % 100);
   mark(".called");
   if (data != (void *)&host || out->struct_size < sizeof(*out) ||
       in->max_nesting != 512 ||

@@ -42,19 +42,59 @@ std::string dump(ast::TranslationUnit *tu) {
   return os.str();
 }
 
-std::string write(const ast::TranslationUnit &tu) {
+// The format version is the release's, so the texts below spell it `1`: it
+// is the real version (kVersion) where read() and write() see the text, and
+// `1` again in what they return.  WritesTheDocumentedForm checks the real
+// header.
+const std::string kVersion = versionString(ic::kFormatVersion);
+const std::string kSpelled = "(paykan-ast 1";
+const std::string kReal = "(paykan-ast " + kVersion;
+
+std::string replaceAll(std::string s, const std::string &from,
+                       const std::string &to) {
+  for (size_t at = s.find(from); at != std::string::npos;
+       at = s.find(from, at + to.size()))
+    s.replace(at, from.size(), to);
+  return s;
+}
+
+std::string writeReal(const ast::TranslationUnit &tu) {
   std::ostringstream os;
   std::string error;
   EXPECT_TRUE(ic::write(tu, os, error)) << error;
   return os.str();
 }
 
+std::string write(const ast::TranslationUnit &tu) {
+  return replaceAll(writeReal(tu), kReal, kSpelled);
+}
+
+/// A position "1:<column>:" past the version on the first line, in the
+/// spelled text's columns.
+std::string spelledColumns(const std::string &error) {
+  const size_t shift = kVersion.size() - 1;
+  const size_t afterVersion = kSpelled.size() + 1; // column after `1`
+  if (!error.starts_with("1:"))
+    return error;
+  size_t end = error.find(':', 2);
+  if (end == std::string::npos)
+    return error;
+  size_t column = std::stoul(error.substr(2, end - 2));
+  if (column > afterVersion)
+    column -= shift;
+  return "1:" + std::to_string(column) + error.substr(end);
+}
+
 /// read() of @p text: the unit, or null with @p error.
 ast::TranslationUnit *read(const std::string &text, ast::ASTContext &ctx,
                            std::string &error) {
   ic::ReadError err;
-  ast::TranslationUnit *tu = ic::read(text, ctx, err);
-  error = err.str();
+  std::string real = text;
+  if (real.starts_with(kSpelled + " ") || real.starts_with(kSpelled + "\n"))
+    real.replace(0, kSpelled.size(), kReal);
+  ast::TranslationUnit *tu = ic::read(real, ctx, err);
+  error = real == text ? err.str() : spelledColumns(err.str());
+  error = replaceAll(error, "version " + kVersion, "version 1");
   return tu;
 }
 
@@ -96,15 +136,16 @@ TEST(ASTInterchange, WritesTheDocumentedForm) {
   { std::ofstream(path) << "fn main() -> int {\n  return 0;\n}\n"; }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);
-  EXPECT_EQ(write(*driver.getRoot()), "(paykan-ast 1\n"
-                                      "  (unit @1:1-3:2\n"
-                                      "    (fn @1:1-3:2 \"main\"\n"
-                                      "      (type-params)\n"
-                                      "      (params)\n"
-                                      "      (named-type \"int\")\n"
-                                      "      (block @1:19-1:19\n"
-                                      "        (return @2:3-2:12\n"
-                                      "          (int @2:10-2:11 0))))))\n");
+  EXPECT_EQ(writeReal(*driver.getRoot()),
+            kReal + "\n"
+                    "  (unit @1:1-3:2\n"
+                    "    (fn @1:1-3:2 \"main\"\n"
+                    "      (type-params)\n"
+                    "      (params)\n"
+                    "      (named-type \"int\")\n"
+                    "      (block @1:19-1:19\n"
+                    "        (return @2:3-2:12\n"
+                    "          (int @2:10-2:11 0))))))\n");
 }
 
 // Everything the reader builds: names resolve like the recursive-descent
@@ -236,7 +277,8 @@ TEST(ASTInterchange, RejectsMalformedInput) {
       {"(paykan-ast 2 (unit))", "1:13: unsupported AST format version 2 "
                                 "(this paykan reads version 1)"},
       {"(paykan-ast 99999999999999999999 (unit))",
-       "1:13: not a 64-bit integer: 99999999999999999999"},
+       "1:13: unsupported AST format version 99999999999999999999 (this "
+       "paykan reads version 1)"},
       {"(paykan-ast 1 (block))", "1:15: expected (unit ...)"},
       {"(paykan-ast 1 (unit \"x\"))",
        "1:21: expected a declaration: (import ...), (enum ...), (class ...), "

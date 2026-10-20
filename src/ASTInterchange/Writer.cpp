@@ -22,7 +22,7 @@ public:
   explicit Writer(std::ostream &os) : OS(os) {}
 
   bool unit(const TranslationUnit &tu) {
-    OS << "(paykan-ast " << kFormatVersion;
+    OS << "(paykan-ast " << versionString(kFormatVersion);
     Depth = 1;
     open("unit", &tu);
     // The declaration lists in the order --dump-ast prints them; read()

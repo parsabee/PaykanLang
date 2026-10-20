@@ -256,14 +256,11 @@ public:
              nullptr;
     if (form.Items.size() != 2 || form.Items[0].K != SExpr::Number)
       return fail(form, "expected (paykan-ast <version> (unit ...))"), nullptr;
-    int64_t version = 0;
-    if (!integer(form.Items[0], version))
-      return nullptr;
-    if (version != kFormatVersion)
+    if (form.Items[0].Text != versionString(kFormatVersion))
       return fail(form.Items[0], "unsupported AST format version " +
                                      form.Items[0].Text +
                                      " (this paykan reads version " +
-                                     std::to_string(kFormatVersion) + ")"),
+                                     versionString(kFormatVersion) + ")"),
              nullptr;
     return unit(form.Items[1]);
   }

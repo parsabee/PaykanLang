@@ -413,7 +413,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opens the tap's formula bump pull request and sends the apt repository its publish
   dispatch, with the `RELEASE_CHANNELS_TOKEN` secret; `packaging/` holds the two
   repositories' initial contents and the one-time setup.  A tap of the compiler repository
-  moves with `brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
+  moves with
+  `brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
+- Every format is versioned by the release: PIR (binary, and the text a backend plugin
+  receives), the runtime ABI, the `.pkm` container, manifest and interface, the plugin API
+  and the AST interchange format all carry the release version, packed as
+  `major * 10000 + minor * 100 + patch` (200 for 0.2.0) where the formats had their own
+  numbers, and dotted in text (`(paykan-ast 0.2.0 ...)`, `pkm dump`, diagnostics).  A
+  reader accepts exactly its own release's: a prebuilt `.pkm` or a plugin of another
+  release is rejected, and a cache entry of another release is rebuilt.  0.2.0 accepts
+  plugins built with 0.2.0 only.
 - Printing and files moved to the standard library: the builtins `print`, `println`,
   `printerr`, `printerrln`, `open`, the classes `File` and `Error` and the identifier
   `Stdin` are gone.  A program writes `import ::io;` and `io::println(...)`,
@@ -483,8 +492,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never boxed).  Deferred destruction keeps its pending objects on a runtime stack (256
   inline slots, then the C heap); the destroy order is unchanged.  Every object struct,
   the runtime's and the generated ones, starts with the header; the runtime's immortal
-  `None` and stdin `File` start with a strong count of 1.  The runtime ABI version is
-  unchanged (6): delete every `.paykan_cache` directory written by an older build.
+  `None` and stdin `File` start with a strong count of 1.  The runtime ABI version is the
+  release's (below): delete every `.paykan_cache` directory written by an older build.
 - The program's entry point is `fn main() -> int` or `fn main(args: view Str[]) -> int`
   (docs/language/02-functions-and-calling.md): the arguments are a slice, which `main`
   reads (`args[0]` is the script path, or the executable's) but does not keep.  Any other
