@@ -16,7 +16,7 @@ argument must implement.
   method that `A` already has meets a requirement too.
 - A class implements every trait its superclasses implement. Every class implements the
   built-in trait `Show` (`view fn toString() -> Str`) through `Obj`, and so do `int`,
-  `float`, `bool` and `char` (`n.toString()` is `Str(n)`), tuples (`(1, "a").toString()`
+  `float`, `bool`, `char` and every sized numeric type (`n.toString()` is `Str(n)`), tuples (`(1, "a").toString()`
   is `(1, a)`), structs (`Point(x: 1, y: 2)`) and the optional of a `Show` type
   (`"None"` or the value's text). The standard library's print functions
   (`io::println<T: Show>`) take any `Show` value.
@@ -185,7 +185,7 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 
 | Error | Trigger |
 |-------|---------|
-| Trait name taken | A trait is named like a class, enum, function or another trait, or `Show` |
+| Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Show`, `Hashable`, `ValueType`) |
 | Bad requirement | A requirement names an unknown type, repeats a name, or is `__init__` / `destroy` |
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |

@@ -25,7 +25,8 @@ bounds (`<T: Show>`) are in `12-traits.md`; variance is not supported in v0.1.
 - Type parameters name types only; `T` cannot be read as a value or constructed.
 - Bodies are checked per instantiation: `Adder<int>` may be fine while
   `Adder<bool>` reports an error that names the instantiation.
-- A module's generic declarations are not exported; `mod::Box<int>` is an error.
+- A module's generic declarations are exported with it: an importer writes
+  `mod::Box<int>` or `mod::first(xs)` (see *Modules*).
 
 ---
 
@@ -74,7 +75,7 @@ impl Box<T> {
   view fn isSame(other: view Box<T>) -> bool { return self.v == other.v; }
 }
 
-trait Keyed<K> { view fn key() -> K; }
+trait Keyed<K> { fn key() -> K; }
 impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
 ```
 
@@ -84,8 +85,8 @@ impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
   method name already in the class is reported for `Box<int>`, the instantiation.
 - `impl Keyed<K> for Pair<K, V>` makes every instantiation implement the trait:
   `Pair<Str, int>` implements `Keyed<Str>`, and meets a `T: Keyed<Str>` bound.
-- Its `__init__` can go in one too: `Box(3)` infers `T` from it, as from one in the
-  class body.
+- The class's `__init__` goes in one (it cannot be in the class body, see
+  `04-classes.md`): `Box(3)` infers `T` from it.
 - A generic class's `impl` block can have `static fn`s; one is called on an
   instantiation, `Box<int>::of(3)` (or `m::Box<int>::of(3)` through an import), and is that
   instantiation's function.
@@ -153,8 +154,9 @@ first<Str>(words);        // explicit — always allowed
 
 Inference looks through slices (`view T[]`, against an array's elements),
 tuples (`(A, B)`, element by element), optionals (`T?` against a `U?` or a
-plain `U`) and instantiations (`Box<T>`, also when the argument is a subclass
-of one). A bare `None` argument is typed `Obj` and carries no information
+plain `U`), function types (`(T) -> U`, parameter by parameter and the
+result, see `15-function-types.md`) and instantiations (`Box<T>`, or a
+generic struct's `Pair<A, B>`). A bare `None` argument is typed `Obj` and carries no information
 about `T`: `unwrapOr(None, Node(3))` infers `T = Node` from the second
 argument, but `wrap(None)` alone cannot be inferred and needs
 `wrap<Node>(None)`. It is exact: a parameter that appears twice must be
@@ -167,7 +169,7 @@ mk();                     // error: cannot infer type parameter 'T' of 'mk'
 mk<int>();                // ok
 
 fn same<T>(a: T, b: T) -> T { return a; }
-same(1, 2.0);             // error: 'T' deduced as both 'int' and 'float'
+same(1, 2.0);             // error: cannot infer type parameter 'T' of 'same': deduced as both 'int' and 'float'
 same<float>(1, 2.0);      // ok (1 promotes to float)
 ```
 
@@ -261,8 +263,10 @@ template's source and says which instantiation was being checked:
 ```
 class Adder<T> {
   v: T;
-  fn __init__(v: T) { self.v = v; }
   fn twice() -> T { return self.v + self.v; }
+}
+impl Adder<T> {
+  fn __init__(v: T) { self.v = v; }
 }
 a = Adder<int>(1);        // fine
 b = Adder<bool>(True);    // error: operator '+' is not defined for types 'bool' and 'bool'
@@ -359,4 +363,4 @@ d = gen::Box<int>(1);     // the same class as c's
 ## Not Supported in v0.1
 
 Variance, default type arguments, explicit specialisation, generic methods on non-generic classes,
-generic superclasses, and templates in a prebuilt `.pkm` (v0.2.0, [#57](https://github.com/parsabee/PaykanLang/issues/57)).
+generic superclasses, and templates in a prebuilt `.pkm` (v0.2.0, [#160](https://github.com/parsabee/PaykanLang/issues/160)).
