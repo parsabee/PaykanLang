@@ -3,8 +3,8 @@
 // `b` still uses it: the binding keeps the B alive until the end of the arm,
 // then the B is released; the new A is released with `x` at the end of main.
 //
-// Runtime allocation sites: the B and A structs + their PaykanShared boxes,
-// their Str fields, and the concatenated names.
+// Runtime allocation sites: the B and A objects, their Str fields, and the
+// concatenated names.
 //
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: Bbee

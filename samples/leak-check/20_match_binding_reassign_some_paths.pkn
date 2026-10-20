@@ -4,7 +4,7 @@
 // binding must release exactly what it owns: nothing when it still aliases
 // the subject, the new A when it was reassigned.
 //
-// Runtime allocation sites: the matched A struct + its PaykanShared box.
+// Runtime allocation site: the matched A object.
 //
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: 7

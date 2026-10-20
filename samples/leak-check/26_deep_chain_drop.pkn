@@ -14,7 +14,7 @@
 //     slot, which carries the message of a failed io::open() in every
 //     10,000th link.  Releasing a link releases the references its tuple holds.
 //
-// Runtime allocation sites: object structs + PaykanShared (Shared.c),
+// Runtime allocation sites: the objects,
 // PaykanString_new (String.c), Paykan_error_text (Error.c).
 //
 // Expected under --track-heap: live blocks : 0.

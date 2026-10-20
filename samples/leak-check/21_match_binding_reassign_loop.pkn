@@ -3,8 +3,8 @@
 // release); every later one releases the A the previous iteration created.
 // At the end of the arm the binding owns the last A.
 //
-// Runtime allocation sites: four A structs + their PaykanShared boxes (the
-// subject and one per iteration).
+// Runtime allocation sites: four A objects (the subject and one per
+// iteration).
 //
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: 2

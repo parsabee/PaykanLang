@@ -1,6 +1,6 @@
 // Isolates: a single fieldless class instance.
-// Runtime allocation site: object struct (emitted Paykan_malloc in the
-// constructor) wrapped by a PaykanShared ARC box (Shared.c).
+// Runtime allocation site: the object (Paykan_malloc in the constructor),
+// one block holding its header (vtable, strong and weak counts) and fields.
 //
 // Expected under --track-heap: live blocks : 0 (destroy runs at end of scope).
 

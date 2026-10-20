@@ -1,6 +1,6 @@
 // Isolates: a subclass instance constructed through __super__.
-// Runtime allocation sites: object struct + PaykanShared box, exercising the
-// super-initializer chain (no double allocation should occur).
+// Runtime allocation site: the object, exercising the super-initializer
+// chain (no double allocation should occur).
 //
 // Expected under --track-heap: live blocks : 0.
 

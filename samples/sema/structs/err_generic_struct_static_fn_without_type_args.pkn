@@ -1,0 +1,13 @@
+// ERROR: a static fn of a generic struct is the instantiation's, so a call names the type
+// arguments: 'Pair::mk' is a function of the generic struct 'Pair': write 'Pair<...>::mk(...)'
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
+impl Pair<A, B> {
+  static fn mk(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
+}
+fn main() -> int {
+  p = Pair::mk(1, "a");
+  return 0;
+}

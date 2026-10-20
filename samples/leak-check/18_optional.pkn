@@ -1,13 +1,13 @@
-// Isolates: ownership of optional (`T?`) values, which are possibly-NULL
-// PaykanShared boxes.  Every path that touches one must be NULL-safe and
+// Isolates: ownership of optional (`T?`) values of a class, which are
+// possibly-NULL references.  Every path that touches one must be NULL-safe and
 // balanced: an optional local released at scope exit (present or None), a
 // None-initialised optional field, rebinding an optional between None and a
 // value, an optional copied between locals, a `T?` printed (the None
 // singleton stands for a NULL one), a `match` on an optional call
-// result (the subject box is released at match.end), and `T?[n]` slots being
+// result (the subject is released at match.end), and `T?[n]` slots being
 // overwritten with None (releasing the old element) and destroyed with NULLs.
 //
-// Runtime allocation sites: the Node structs + boxes, the strings (the array
+// Runtime allocation sites: the Node objects, the strings (the array
 // of optionals holds its slots inline).
 //
 // Expected under --track-heap: live blocks : 0.

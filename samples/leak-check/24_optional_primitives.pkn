@@ -48,7 +48,7 @@ fn main() -> int {
   a = None;
   io::println(twice(a));
   a = 3;
-  b = a;                       // shared box
+  b = a;                       // a copy of the value
   a = None;
   io::println(b);
 

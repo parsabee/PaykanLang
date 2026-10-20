@@ -1,12 +1,9 @@
 // calc/hashmap — a string-keyed hash map (Str -> float).
 //
 // A separate-chaining hash table that backs the calculator's variable store.
-// Two language facts shape the design:
-//
-//   1. `Str ==` is reference identity, not content — so keys are compared with
-//      `Str.equals()`, which compares character-by-character.
-//   2. There is no char -> int conversion — so `charOrd` derives an ordinal by
-//      finding the character's index in a reference alphabet.
+// Keys are compared with `Str.equals()`, character by character, and
+// `charOrd` derives a character's ordinal from its index in a reference
+// alphabet.
 //
 // The table has a fixed number of buckets (`Entry?[8]`), each the first entry
 // of a linked chain (`Entry.next`), or None when the bucket is empty. A new

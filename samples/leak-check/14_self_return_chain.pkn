@@ -1,12 +1,9 @@
-// Isolates: `self` used as a value — returned (and chained) out of a method.
-// Every ownership-taking use of the raw `self` parameter must recover the
-// object's unique PaykanShared box via its header backpointer (Shared.c,
-// unique-box invariant) instead of wrapping `self` in a second box; a second
-// box would drop to zero on its own and destroy the object while the caller's
-// box still owns it (double free).
+// Isolates: `self` used as a value: returned (and chained) out of a method.
+// Each ownership-taking use of `self` retains the object (Paykan_retain), so
+// every chained `return self` hop and the extra owner `c` share the one
+// object, which is destroyed once, when the last of them lets go.
 //
-// Runtime allocation sites: one object struct + its unique PaykanShared box,
-// retained once per chained `return self` hop and by the extra owner `c`.
+// Runtime allocation site: one object.
 //
 // Expected under --track-heap: live blocks : 0.
 
