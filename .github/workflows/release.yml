@@ -18,11 +18,12 @@ name: Release
 # plan" job prints that decision on every run, dry runs included.
 #
 # A normal release then feeds the package channels, which live in their own
-# repositories (packaging/README.md): it opens a pull request on the Homebrew
-# tap that bumps the formula, and sends the apt repository the dispatch that
-# re-indexes and signs it.  Both need the RELEASE_CHANNELS_TOKEN secret;
-# without it the release is published and the channels are skipped with a
-# warning.
+# repositories, parsabee/homebrew-paykanlang and parsabee/paykanlang-apt: it
+# opens a pull request on the Homebrew tap that bumps the formula, and sends
+# the apt repository the dispatch that re-indexes and signs it.  Both need the
+# RELEASE_CHANNELS_TOKEN secret, a fine-grained token with Contents and Pull
+# requests write access on both repositories; without it the release is
+# published and the channels are skipped with a warning.
 on:
   push:
     tags:
@@ -254,7 +255,7 @@ jobs:
         id: token
         run: |
           if [ -z "${GH_TOKEN}" ]; then
-            echo "::warning::RELEASE_CHANNELS_TOKEN is not set: ${TAP_REPO} and ${APT_REPO} are not updated (packaging/README.md)"
+            echo "::warning::RELEASE_CHANNELS_TOKEN is not set: ${TAP_REPO} and ${APT_REPO} are not updated"
             echo "set=false" >> "${GITHUB_OUTPUT}"
           else
             echo "set=true" >> "${GITHUB_OUTPUT}"

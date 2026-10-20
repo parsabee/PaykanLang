@@ -411,8 +411,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tap URL), and the signed apt repository is `https://parsabee.github.io/paykanlang-apt`,
   published by that repository instead of the documentation site.  The Release workflow
   opens the tap's formula bump pull request and sends the apt repository its publish
-  dispatch, with the `RELEASE_CHANNELS_TOKEN` secret; `packaging/` holds the two
-  repositories' initial contents and the one-time setup.  A tap of the compiler repository
+  dispatch, with the `RELEASE_CHANNELS_TOKEN` secret.  A tap of the compiler repository
   moves with
   `brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
 - Every format is versioned by the release: PIR (binary, and the text a backend plugin
