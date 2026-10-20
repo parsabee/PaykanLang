@@ -9,7 +9,7 @@ deterministic and iterative, `view` / `inout` borrows checked at compile
 time).  The PIR format, the runtime ABI and the `.pkm` format change shape but
 not version: their versions stay fixed until 0.2.0 (`docs/design/pkm.md`),
 and a compiler with this change does not trust the caches of an older one
-(`CLAUDE.md`).  The open questions at the end have the default this
+([clear them](../internals.md#the-compilation-caches)).  The open questions at the end have the default this
 implementation takes.
 
 ## Summary of the decisions
@@ -201,7 +201,7 @@ type name (bit 0: weak); a struct's field records carry none.  `pkm dump`
 prints `weak field parent: Node?`.  The `.pkm` format version is unchanged
 (pre-release): a `.pkm` written before this change is read as if its fields
 had no flags byte and is rejected or misread, which the cache check and
-`CLAUDE.md`'s cache-clearing rule cover.
+[clearing the caches](../internals.md#the-compilation-caches) cover.
 
 ## Diagnostics
 

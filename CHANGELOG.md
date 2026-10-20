@@ -583,8 +583,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `int<Str>` & co. return one without allocating (the runtime's `PaykanString_parse_int` &
   co.).  The semantics are unchanged.  An `int?[3]` holds its elements inline, 16 bytes
   each, and a tuple holds an `int?` element inline at its offset.  In #96's benchmark
-  (`benchmarks/optional_stack.pkn`: 10M pushes onto a `Stack<int>` and 10M pops through
-  `pop() -> T?`) popping through the `int?` allocates nothing and takes as long as popping
+  (10M pushes onto a `Stack<int>` and 10M pops through `pop() -> T?`) popping through the `int?` allocates nothing and takes as long as popping
   a plain `int`.
 
 - Tuples are values held in place (docs/language/09-tuples.md, "Tuples as Values"), like

@@ -22,6 +22,23 @@ Frontends and backends can also be added to an installed `paykan` as plugins.
 - [PIR for backend plugins](plugins/pir-for-backends.md): the PIR text a backend plugin
   receives.
 
+## The compilation caches
+
+`paykan` caches compiled modules and objects in a `.paykan_cache` directory next to the
+sources (see [the C backend](c-backend.md)). An entry is keyed on its source, its imports
+and the format versions, so a compiler whose generated code, runtime ABI, PIR, `.pkm`
+format or value layout changed without a version bump still trusts what an older build
+wrote, and running those cached modules can crash. After such a change, delete every cache
+before running a program or a test:
+
+```sh
+find . -name .paykan_cache -type d -prune -exec rm -rf {} +
+```
+
+A test failure that disappears after this was a stale cache, not a bug.
+
+## Stability
+
 The plugin interfaces are versioned but not yet covered by a stability promise. A plugin is
 built with one PaykanLang version, and `paykan` lists a plugin built with a version it does
 not accept as incompatible and will not select it.

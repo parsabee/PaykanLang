@@ -46,6 +46,12 @@ compile_commands.json
 # Log files
 *.log
 
+# CTest's scratch directory (a ctest run from the source root)
+Testing/
+
+# Local assistant instructions
+CLAUDE.md
+
 # TODO
 TODO/
 
