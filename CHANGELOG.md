@@ -419,6 +419,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The package channels have repositories of their own (#178, #181).  Homebrew installs from
+  the tap `parsabee/homebrew-paykanlang` (`brew install parsabee/paykanlang/paykanlang`, no
+  tap URL), and the signed apt repository is `https://parsabee.github.io/paykanlang-apt`,
+  published by that repository instead of the documentation site.  The Release workflow
+  opens the tap's formula bump pull request and sends the apt repository its publish
+  dispatch, with the `RELEASE_CHANNELS_TOKEN` secret; `packaging/` holds the two
+  repositories' initial contents and the one-time setup.  A tap of the compiler repository
+  moves with `brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
 - Printing and files moved to the standard library: the builtins `print`, `println`,
   `printerr`, `printerrln`, `open`, the classes `File` and `Error` and the identifier
   `Stdin` are gone.  A program writes `import ::io;` and `io::println(...)`,

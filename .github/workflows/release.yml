@@ -16,6 +16,13 @@ name: Release
 # published as a GitHub pre-release and never marked "Latest" (#133); a plain
 # version tag (v1.2.3) is a normal release and becomes "Latest".  The "Release
 # plan" job prints that decision on every run, dry runs included.
+#
+# A normal release then feeds the package channels, which live in their own
+# repositories (packaging/README.md): it opens a pull request on the Homebrew
+# tap that bumps the formula, and sends the apt repository the dispatch that
+# re-indexes and signs it.  Both need the RELEASE_CHANNELS_TOKEN secret;
+# without it the release is published and the channels are skipped with a
+# warning.
 on:
   push:
     tags:
@@ -29,7 +36,6 @@ on:
 
 permissions:
   contents: write   # required to create the GitHub Release
-  actions: write    # re-runs the Pages workflow, which publishes the apt repository
 
 jobs:
   build:
@@ -230,11 +236,61 @@ jobs:
             dist/paykanlang_*.deb
             dist/paykanlang_*.deb.sha256
 
-      # Rebuild the documentation site, which carries the apt repository, so
-      # the new .deb reaches `apt install paykanlang` (a release published
-      # with this token does not trigger other workflows by itself).
-      - name: Refresh the apt repository
-        if: ${{ !contains(github.ref_name, '-') }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run pages.yml --repo "${GITHUB_REPOSITORY}" --ref develop
+  channels:
+    name: Update the package channels
+    needs: release
+    # Pre-releases stay on the release pages.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
+      TAP_REPO: parsabee/homebrew-paykanlang
+      APT_REPO: parsabee/paykanlang-apt
+      # A fine-grained token with contents and pull-requests write access on
+      # both repositories; GITHUB_TOKEN cannot write to another repository.
+      GH_TOKEN: ${{ secrets.RELEASE_CHANNELS_TOKEN }}
+    steps:
+      - name: Check for the channels token
+        id: token
+        run: |
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::RELEASE_CHANNELS_TOKEN is not set: ${TAP_REPO} and ${APT_REPO} are not updated (packaging/README.md)"
+            echo "set=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "set=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      # The formula builds from the tag's source archive: its url and sha256
+      # change, and the previous release's bottle block goes (the tap's CI
+      # builds new bottles on the pull request; `pr-pull` publishes them).
+      - name: Open the Homebrew tap's bump pull request
+        if: steps.token.outputs.set == 'true'
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
+          sha="$(curl -fsSL "${url}" | sha256sum | cut -d' ' -f1)"
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" tap
+          cd tap
+          branch="paykanlang-${version}"
+          git checkout -b "${branch}"
+          sed -i -E "s#^  url \".*\"\$#  url \"${url}\"#; s#^  sha256 \".*\"\$#  sha256 \"${sha}\"#" Formula/paykanlang.rb
+          perl -0pi -e 's/\n  bottle do\n.*?\n  end\n//s' Formula/paykanlang.rb
+          if git diff --quiet; then
+            echo "::notice::the formula already builds ${TAG}"
+            exit 0
+          fi
+          git diff
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -qam "paykanlang ${version}"
+          git push origin "${branch}"
+          gh pr create --repo "${TAP_REPO}" --base main --head "${branch}" \
+            --title "paykanlang ${version}" \
+            --body "Bumps the formula to [${TAG}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}). Label \`pr-pull\` once the bottles are built to publish them."
+
+      - name: Ask the apt repository to publish
+        if: steps.token.outputs.set == 'true'
+        run: |
+          gh api "repos/${APT_REPO}/dispatches" \
+            -f event_type=paykanlang-release -f "client_payload[tag]=${TAG}"

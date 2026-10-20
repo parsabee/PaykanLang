@@ -39,21 +39,36 @@ On Debian, Ubuntu and their derivatives (x86_64), download the `.deb` from the
 `apt`:
 
 ```sh
-$ curl -fLO https://github.com/parsabee/PaykanLang/releases/download/v0.1.1/paykanlang_0.1.1_amd64.deb
-$ sudo apt install ./paykanlang_0.1.1_amd64.deb
+$ curl -fLO https://github.com/parsabee/PaykanLang/releases/download/v<version>/paykanlang_<version>_amd64.deb
+$ sudo apt install ./paykanlang_<version>_amd64.deb
 ```
 
-Replace `0.1.1` with the release you want; to upgrade, install a newer release's `.deb` the same way.
+Or add PaykanLang's apt repository once, signed with its own key, and install and upgrade
+`paykanlang` like any other package:
+
+```sh
+$ sudo curl -fsSLo /usr/share/keyrings/paykanlang.gpg https://parsabee.github.io/paykanlang-apt/paykanlang.gpg
+$ echo "deb [signed-by=/usr/share/keyrings/paykanlang.gpg] https://parsabee.github.io/paykanlang-apt stable main" |
+  sudo tee /etc/apt/sources.list.d/paykanlang.list
+$ sudo apt update
+$ sudo apt install paykanlang
+```
+
+The repository keeps the latest few releases; older `.deb` files stay on their release pages.
 
 ### With Homebrew (macOS)
 
-The repository doubles as a Homebrew tap:
+The formula is in the tap
+[`parsabee/homebrew-paykanlang`](https://github.com/parsabee/homebrew-paykanlang), which
+`brew install` taps by itself:
 
 ```sh
-$ brew tap parsabee/paykanlang https://github.com/parsabee/PaykanLang
 $ brew install parsabee/paykanlang/paykanlang
 $ paykan --version
 ```
+
+If you tapped the compiler's repository for an earlier release, point the tap at the new
+repository once: `brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
 
 The release tarballs and the Debian package contain both backends: the C backend (the
 default) and the LLVM backend, selected with `--backend=llvm`. The Homebrew formula

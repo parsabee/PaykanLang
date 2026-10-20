@@ -12,8 +12,8 @@
 #
 # The Release file is signed with the secret key that the GPG home directory
 # holds (GNUPGHOME, or ~/.gnupg); APT_SIGNING_KEY_ID picks one key when it
-# holds several.  The Pages workflow (.github/workflows/pages.yml) runs this
-# on every release's .deb and publishes the result under /apt on the site.
+# holds several.  .github/workflows/publish.yml runs this on the releases'
+# .deb files and deploys the result to this repository's Pages site.
 #
 # Needs dpkg-scanpackages (dpkg-dev), gzip, sha256sum, md5sum and gpg: CI-only
 # tools, none of which a PaykanLang build or install needs.

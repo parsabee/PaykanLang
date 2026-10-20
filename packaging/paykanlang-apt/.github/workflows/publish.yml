@@ -1,0 +1,88 @@
+name: Publish
+
+# Builds the apt repository from the .deb assets of the latest PaykanLang
+# releases and deploys it to this repository's Pages site,
+# https://parsabee.github.io/paykanlang-apt.  The Release workflow of
+# parsabee/PaykanLang sends the `paykanlang-release` dispatch after it
+# publishes a release; a manual run (Actions -> Publish -> "Run workflow")
+# rebuilds from the current releases.
+on:
+  repository_dispatch:
+    types: [paykanlang-release]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; a newer one waits rather than cancelling one in
+# progress.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPO: parsabee/PaykanLang
+  # How many releases the pool keeps; older ones stay on their release pages.
+  KEEP_RELEASES: 5
+
+jobs:
+  build:
+    name: Build the repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dpkg-dev
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev
+
+      - name: Download the releases' packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p debs
+          gh release list --repo "${SOURCE_REPO}" --exclude-drafts --exclude-pre-releases \
+            --limit "${KEEP_RELEASES}" --json tagName --jq '.[].tagName' |
+            while read -r tag; do
+              gh release download "${tag}" --repo "${SOURCE_REPO}" --pattern 'paykanlang_*.deb' --dir debs ||
+                echo "::notice::${tag} has no .deb"
+            done
+          ls -l debs
+
+      - name: Index and sign
+        env:
+          APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APT_SIGNING_KEY}" ]; then
+            echo "::error::the APT_SIGNING_KEY secret is not set"
+            exit 1
+          fi
+          export GNUPGHOME="${RUNNER_TEMP}/gnupg"
+          mkdir -m 700 "${GNUPGHOME}"
+          printf '%s\n' "${APT_SIGNING_KEY}" | gpg --batch --import
+          scripts/build_apt_repo.sh debs _site
+          cp index.html _site/
+
+      # With the published keyring, as apt checks it (gpgv only reads it).
+      - name: Check the signature
+        run: gpgv --keyring ./_site/paykanlang.gpg _site/dists/stable/InRelease
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./_site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -60,11 +60,10 @@ n=42 is small
 
 Each [GitHub release](https://github.com/parsabee/PaykanLang/releases) carries a tarball
 for Linux (x86_64) and macOS (Apple Silicon), and a `.deb` package for Debian and Ubuntu,
-which also install from the [apt repository](manual/01-getting-started.md). On macOS you can
-also use Homebrew:
+which also install from the [apt repository](manual/01-getting-started.md#with-apt-debian-and-ubuntu).
+On macOS you can also use Homebrew:
 
 ```sh
-brew tap parsabee/paykanlang https://github.com/parsabee/PaykanLang
 brew install parsabee/paykanlang/paykanlang
 ```
 
