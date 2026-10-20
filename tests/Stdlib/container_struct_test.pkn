@@ -1,0 +1,87 @@
+// ::collections' containers are structs over the one object that holds their
+// state: a copy, a parameter or a field names the same container, a copy of a
+// HashMap stays one map across a rehash, and a container in a mem::Box is an
+// Obj.
+import ::io;
+import ::collections as c;
+import ::memory as mem;
+
+class Holder {
+  xs: c::List<int>;
+}
+
+fn fill(xs: c::List<int>, n: int) {
+  i = 0;
+  while i < n {
+    xs.push(i);
+    i = i + 1;
+  }
+}
+
+fn grow(m: c::HashMap<Str, int>) {
+  i = 0;
+  while i < 40 {
+    // past several rehashes
+    m.put("k" + Str(i), i);
+    i = i + 1;
+  }
+}
+
+fn describe(o: Obj) -> Str {
+  match o {
+    b: mem::Box<c::List<int>> {
+      return "a boxed list of " + Str(b.get().len());
+    }
+    _ { return "something else"; }
+  }
+}
+
+fn main() -> int {
+  // A copy and a parameter are the same list.
+  xs = c::List<int>();
+  ys = xs;
+  fill(ys, 3);
+  xs.push(9);
+  io::println(c::listToString(xs) + " " + c::listToString(ys) + " "
+      + Str(xs == ys));
+  io::println(Str(xs == xs.copy()));
+
+  // A field holds the same list.
+  h = Holder(xs);
+  h.xs.pop();
+  io::println(Str(xs.len()));
+
+  // A copy of a map is the same map, through rehashes.
+  m = c::HashMap<Str, int>();
+  grow(m);
+  m2 = m;
+  m2.remove("k3");
+  io::println(Str(m.len()) + " " + Str(m2.len()) + " "
+      + Str(m.containsKey("k3")) + " " + Str(m.get("k39")));
+
+  // The other containers.
+  s = c::HashSet<int>();
+  t = s;
+  t.add(1);
+  st = c::Stack<Str>();
+  st2 = st;
+  st2.push("a");
+  q = c::Queue<Str>();
+  q2 = q;
+  q2.enqueue("b");
+  lo = c::MinPriorityQueue<Str>();
+  lo2 = lo;
+  lo2.push("x", 2);
+  hi = c::MaxPriorityQueue<Str>();
+  hi2 = hi;
+  hi2.push("y", 2);
+  io::println(Str(s.contains(1)) + " " + st.pop() + " " + q.dequeue() + " "
+      + lo.pop() + " " + hi.pop());
+
+  // A container in a Box is an object.
+  b = mem::Box(xs);
+  b.get().push(7);
+  o: Obj = b;
+  io::println(describe(o) + ", " + describe(h) + ", " + Str(xs.len()));
+  return 0;
+}

@@ -1909,8 +1909,9 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
                       "import ::io;\n"
                       "fn main() -> int {\n"
                       "  m = collections::HashMap<int, int>();\n"
-                      "  n = m.__size;\n"
-                      "  e = m.__find(1, 1);\n"
+                      "  n = m.__table;\n"
+                      "  l = collections::List<int>();\n"
+                      "  l.__check(1, 1);\n"
                       "  b = collections::_bucket(1, 2);\n"
                       "  x = collections::_Entry<int, int>(1, 2, 3, None);\n"
                       "  buf = memory::Buffer<int>(1);\n"
@@ -1921,10 +1922,10 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   for (const char *line :
-       {"'__size' is private to 'HashMap<int, int>': it is reachable only "
+       {"'__table' is private to 'HashMap<int, int>': it is reachable only "
         "from its own methods",
-        "'__find' is private to 'HashMap<int, int>': it is reachable only "
-        "from its own methods",
+        "'__check' is private to 'List<int>': it is reachable only from its "
+        "own methods",
         "'collections::_bucket' is private to module '::collections'",
         "'collections::_Entry' is private to module '::collections'",
         "'__data' is private to 'Buffer<int>': it is reachable only from its "

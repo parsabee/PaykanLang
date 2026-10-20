@@ -2,8 +2,10 @@
 
 The standard containers: `List<T>`, a growable array; `LinkedList<T>`, a doubly linked
 list; `Stack<T>` and `Queue<T>`; the hash tables `HashMap<K, V>` and `HashSet<K>`; and the
-priority queues `MinPriorityQueue<T>` and `MaxPriorityQueue<T>`. They are generic classes
-written in Paykan on [`::memory`](memory.md)'s buffers. A program imports the module with
+priority queues `MinPriorityQueue<T>` and `MaxPriorityQueue<T>`. They are written in Paykan
+on [`::memory`](memory.md)'s buffers: `LinkedList` is a generic class, and the others are
+generic [structs](../language/11-structs.md), each holding the one object that keeps its
+state. A program imports the module with
 `import ::collections;` (or an alias, `import ::collections as c;`) and names a container
 with its qualifier: `collections::List<int>()`.
 
@@ -23,7 +25,7 @@ fn main() -> int {
   }
   io::println(xs.indexOf("c"));
   io::println(xs.indexOf("z"));
-  same = xs;                       // a container is an object: this shares it
+  same = xs;                       // the same list: copies share its state
   same.pop();
   io::println(collections::listToString(xs) + " " + Str(xs.len()));
   return 0;
@@ -42,9 +44,21 @@ None
 
 ## Rules for every container
 
-- **A container is an object**, so assigning one, or passing it, shares it; `copy()` (on a
-  `List`) or `toList()` makes a new one. A container's own `toString()` is `Obj`'s;
-  `listToString` prints a list's elements.
+- **Copies of a container are the same container.** `List`, `Stack`, `Queue`, `HashMap`,
+  `HashSet` and the priority queues are structs whose one field is the object that holds
+  every element and count (a `Buffer`, a `LinkedList`, the hash table of a `HashMap` or a `HashSet`, or the heap), and a
+  `LinkedList` is that object itself. So assigning a container, passing it or storing it
+  in a field names the same container: a change through any of the names is seen through
+  all of them, and `==` is True only for the same container. `copy()` (on a `List`) or
+  `toList()` makes a new one.
+- **A container is a struct**, so the rules of [structs](../language/11-structs.md) apply:
+  a container in a `let` variable cannot be changed (`'xs' is declared with 'let'; its value
+  cannot change, and 'push' is not a 'view fn'`), a `view` of one calls only its `view fn`s,
+  it is not an `Obj`: where one is needed, put the container in a
+  [`Box`](memory.md) (with `import ::memory as mem;`, `b = mem::Box(xs);`), an object
+  whose `get()` is the container itself (`b.get().push(1);`), and its own
+  `toString()` is a struct's, which shows its private field. `listToString` prints a list's
+  elements. A `LinkedList` is a class, with a class's rules.
 - **A container holds its own reference to each element**, whether the method that stores
   it takes the element by value (`pushFront(v: T)`, `put(k: K, v: V)`) or lent
   (`push(v: view T)`): an object element is shared with the container, and a value element

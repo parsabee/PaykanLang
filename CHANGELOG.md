@@ -406,6 +406,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `::collections`' `List`, `Stack`, `Queue`, `HashMap`, `HashSet`, `MinPriorityQueue` and
+  `MaxPriorityQueue` are structs, each holding the one object that keeps its state (the hash
+  table of a `HashMap` or a `HashSet` is a private class of its own), so a copy, a parameter
+  or a field still names the same container. As structs they are `ValueType`s and not
+  `Obj`s: put one in a `memory::Box` where an `Obj` is needed. A container in a `let`
+  variable can no longer be changed, and printing one shows the struct's fields.
+  `LinkedList` stays a class.
 - The documentation has one language reference: the manual's chapters and the reference's
   are merged, a chapter per feature that teaches it and then gives its precise rules
   (`docs/language/`, in reading order from getting started to the `paykan` command). The

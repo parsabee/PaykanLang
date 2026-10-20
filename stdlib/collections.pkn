@@ -9,7 +9,10 @@
 //   MinPriorityQueue<T>, MaxPriorityQueue<T>
 //                            binary heaps ordered by an int priority
 //
-// Every container is an object: assigning one shares it.  Every index and
+// List, Stack, Queue, HashMap, HashSet and the priority queues are structs,
+// each holding one object that keeps all of its state (LinkedList is that
+// object itself), so assigning or passing a container names the same
+// container: a change through either name is seen through both.  Every index and
 // size is an `unsigned`: `len()` returns one, `get(i)` takes one, and
 // `indexOf` returns an `unsigned?`.  A container holds
 // its own reference to each element it stores.  Elements are compared with
@@ -19,7 +22,7 @@
 // of range, panics.
 //
 // Names starting with `_` are private (docs/language/15-modules.md,
-// "Private to the module"): `_Entry`, `_Heap`, `_panic`, `_fail`,
+// "Private to the module"): `_Entry`, `_Table`, `_Heap`, `_panic`, `_fail`,
 // `_bucket` and the buffer helpers are the module's own, and a `__` field or method is reachable
 // only from its type's methods.
 
@@ -55,7 +58,7 @@ fn _buffer<T>(n: unsigned) -> mem::Buffer<T> {
 
 // A growable array.  `push` and `pop` at the end are amortised O(1); `insert`
 // and `removeAt` move the elements after the index.
-class List<T> {
+struct List<T> {
   __items: mem::Buffer<T>;
 }
 
@@ -403,7 +406,7 @@ impl LinkedList<T> {
 // -- Stack and Queue ------------------------------------------------------------
 
 // Last in, first out: push and pop at the top, O(1).
-class Stack<T> {
+struct Stack<T> {
   __list: LinkedList<T>;
 }
 
@@ -441,7 +444,7 @@ impl Stack<T> {
 }
 
 // First in, first out: enqueue at the back and dequeue at the front, O(1).
-class Queue<T> {
+struct Queue<T> {
   __list: LinkedList<T>;
 }
 
@@ -488,19 +491,14 @@ class _Entry<K, V> {
   next: _Entry<K, V>?;
 }
 
-// A hash table: each key is Hashable and maps to one value.  Two keys are
-// the same key when they are ==, and keys that are == must have equal
-// hash(): a class key implements both (`impl Hashable for` and `equals`).
-// `put`, `get`, `containsKey` and `remove` are O(1) on average.  The table
-// keeps at most 3 entries for every 4 buckets, doubling when it would hold
-// more.  The order of keys() is the table's, not the insertion order.
-class HashMap<K: Hashable, V> {
+// The table of a HashMap or a HashSet: its buckets and its number of keys,
+// which every copy of the map or set shares.
+class _Table<K: Hashable, V> {
   __buckets: mem::Buffer<_Entry<K, V>?>;
   __size: unsigned;
 }
 
-impl HashMap<K, V> {
-  // An empty map.
+impl _Table<K, V> {
   fn __init__() {
     self.__buckets = _buffer<_Entry<K, V>?>(8);
     self.__size = 0;
@@ -682,35 +680,84 @@ fn _bucket(h: int, n: unsigned) -> unsigned {
   return unsigned(h) % n;
 }
 
-// A set of Hashable keys, compared with == (see HashMap).
-class HashSet<K: Hashable> {
-  __map: HashMap<K, bool>;
+// A hash table: each key is Hashable and maps to one value.  Two keys are
+// the same key when they are ==, and keys that are == must have equal
+// hash(): a class key implements both (`impl Hashable for` and `equals`).
+// `put`, `get`, `containsKey` and `remove` are O(1) on average.  The table
+// keeps at most 3 entries for every 4 buckets, doubling when it would hold
+// more.  The order of keys() is the table's, not the insertion order.
+struct HashMap<K: Hashable, V> {
+  __table: _Table<K, V>;
+}
+
+impl HashMap<K, V> {
+  // An empty map.
+  fn __init__()                          { self.__table = _Table<K, V>(); }
+
+  // The number of keys.
+  view fn len() -> unsigned              { return self.__table.len(); }
+
+  // True when the map has no keys.
+  view fn isEmpty() -> bool              { return self.__table.isEmpty(); }
+
+  // Map `k` to `v`, replacing its value if `k` is already a key.  True if
+  // `k` is a new key.
+  fn put(k: K, v: V) -> bool             { return self.__table.put(k, v); }
+
+  // The value of `k`, which must be a key.
+  view fn get(k: view K) -> V            { return self.__table.get(k); }
+
+  // The value of `k`, or `otherwise` if it is not a key.
+  view fn getOr(k: view K, otherwise: V) -> V {
+    return self.__table.getOr(k, otherwise);
+  }
+
+  // True when `k` is a key.
+  view fn containsKey(k: view K) -> bool { return self.__table.containsKey(k); }
+
+  // Remove `k` and its value; True if it was a key.
+  fn remove(k: view K) -> bool           { return self.__table.remove(k); }
+
+  // Remove every key.
+  fn clear()                             { self.__table.clear(); }
+
+  // The keys, in a new list.
+  view fn keys() -> List<K>              { return self.__table.keys(); }
+
+  // The values, in a new list, in the order of keys().
+  view fn values() -> List<V>            { return self.__table.values(); }
+}
+
+// A set of Hashable keys, compared with == (see HashMap): the keys of a
+// _Table, which every copy of the set shares.
+struct HashSet<K: Hashable> {
+  __table: _Table<K, bool>;
 }
 
 impl HashSet<K> {
   // An empty set.
-  fn __init__()                       { self.__map = HashMap<K, bool>(); }
+  fn __init__()                       { self.__table = _Table<K, bool>(); }
 
   // The number of keys.
-  view fn len() -> unsigned           { return self.__map.len(); }
+  view fn len() -> unsigned           { return self.__table.len(); }
 
   // True when the set has no keys.
-  view fn isEmpty() -> bool           { return self.__map.isEmpty(); }
+  view fn isEmpty() -> bool           { return self.__table.isEmpty(); }
 
   // Add `k`; True if it was not in the set.
-  fn add(k: K) -> bool                { return self.__map.put(k, True); }
+  fn add(k: K) -> bool                { return self.__table.put(k, True); }
 
   // True when `k` is in the set.
-  view fn contains(k: view K) -> bool { return self.__map.containsKey(k); }
+  view fn contains(k: view K) -> bool { return self.__table.containsKey(k); }
 
   // Remove `k`; True if it was in the set.
-  fn remove(k: view K) -> bool        { return self.__map.remove(k); }
+  fn remove(k: view K) -> bool        { return self.__table.remove(k); }
 
   // Remove every key.
-  fn clear()                          { self.__map.clear(); }
+  fn clear()                          { self.__table.clear(); }
 
   // The keys, in a new list.
-  view fn toList() -> List<K>         { return self.__map.keys(); }
+  view fn toList() -> List<K>         { return self.__table.keys(); }
 }
 
 // -- Priority queues ------------------------------------------------------------
@@ -833,7 +880,7 @@ impl _Heap<T> {
 
 // A priority queue that pops the element of lowest priority first, and of
 // equal priorities the one pushed first.  push and pop are O(log n).
-class MinPriorityQueue<T> {
+struct MinPriorityQueue<T> {
   __heap: _Heap<T>;
 }
 
@@ -864,7 +911,7 @@ impl MinPriorityQueue<T> {
 
 // A priority queue that pops the element of highest priority first, and of
 // equal priorities the one pushed first.  push and pop are O(log n).
-class MaxPriorityQueue<T> {
+struct MaxPriorityQueue<T> {
   __heap: _Heap<T>;
 }
 
