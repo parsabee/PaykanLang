@@ -18,7 +18,7 @@ type-checking (no codegen or JIT execution).
 | `tuples/`  | Tuple types, literals, `.N` access, destructuring, immutability |
 | `structs/` | `struct` declarations, fields assigned in place, `impl` blocks, nominal typing, the `let` / `view` / `inout` rules, generic structs, what is not supported yet |
 | `lambdas/` | Function types `(T) -> R`, lambdas and their captures, named functions as values, calls through function values |
-| `visibility/` | Private members: `__` fields and methods reachable only from their type's methods, `__` types kept out of public signatures |
+| `visibility/` | Private members: `__` fields and methods reachable only from their type's methods, `_` functions and types private to their module and kept out of public signatures |
 | `conversions/` | Conversion constructors `Target<Source>(value)`: the supported pairs, result types |
 | `sized/` | Sized numeric types `i8` … `unsigned`, `f16`, `f32`: literals taking the expected type, the one-type rule for operators, conversions between every numeric pair |
 

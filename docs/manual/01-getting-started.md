@@ -90,7 +90,7 @@ $ build/bin/paykan --version
 The default build needs nothing else and downloads nothing. It does not build the tests;
 configure with `-DPAYKAN_BUILD_ALL_TESTS=ON` to build them all, or name the suites you want
 with `-DPAYKAN_BUILD_TESTS=<suites>` (the README's Testing section lists them). To install
-the compiler and its runtime under a prefix:
+the compiler, its runtime and the standard library under a prefix:
 
 ```sh
 $ cmake --install build --prefix /usr/local
@@ -224,8 +224,8 @@ Output printed before a panic is never lost: standard output is flushed first.
 ## Source files
 
 PaykanLang source files use the `.pkn` extension (`.pk` is accepted too). A file contains
-only declarations (imports, functions, classes and enums), in any order: a function may call
-another one declared further down the file. There are no statements at the top level, so all
-code lives in functions.
+only declarations (imports, functions, classes, structs, enums, traits and `impl` blocks),
+in any order: a function may call another one declared further down the file. There are no
+statements at the top level, so all code lives in functions.
 
 Next, [Basics](02-basics.md) covers the core of the language.

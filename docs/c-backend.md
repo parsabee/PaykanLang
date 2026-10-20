@@ -79,15 +79,16 @@ backends.
   ordered, as `docs/pir.md` defines `cmp`), and `cast` reinterprets bits
   through `memcpy`, so the generated code has the same semantics as the
   LLVM backend.
-* ARC, allocation and freeing are direct runtime calls (`Paykan_retain`,
-  `Paykan_release`, `PaykanShared_new`, `PaykanShared_get`, `Paykan_malloc`,
-  `Paykan_free`); every other runtime call is cast to the prototype in
-  `Runtime.h`.
+* ARC, weak references, allocation and freeing are direct runtime calls
+  (`Paykan_retain`, `Paykan_release`, `PaykanShared_new`, `Paykan_weak_new`,
+  `Paykan_weak_load`, `Paykan_weak_release`, `Paykan_malloc`, `Paykan_free`);
+  `unbox` is a cast, since a box is its object's own pointer; every other
+  runtime call is cast to the prototype in `Runtime.h`.
 * `main(int argc, char **argv)` makes the program's arguments with
-  `Paykan_args_new`, passes them to the Paykan `main` as a slice (their
-  address and number) and drops them with `Paykan_args_free` after it
-  returns, honours `PAYKAN_TRACK_HEAP` (set by `--track-heap`) and returns
-  the Paykan `main`'s result.
+  `Paykan_args_new` (when the Paykan `main` takes them), passes them to
+  the Paykan `main` as a slice (their address and number) and drops them
+  with `Paykan_args_free` after it returns, honours `PAYKAN_TRACK_HEAP`
+  (set by `--track-heap`) and returns the Paykan `main`'s result.
 * Nothing unused is emitted: the bit-cast helpers, allocators (`pknew_*`)
   and string / data globals only when referenced, no local that nothing
   reads, and no binding for a call result nothing reads; an unread
@@ -98,12 +99,13 @@ backends.
 emit one translation unit per PIR module (a module declares what it imports
 as `extern` items, so each unit is self-contained), compile each into
 `<project root>/.paykan_cache/<module>.<hash>.o` (`geometry::shapes` is
-`geometry/shapes.<hash>.o`), reuse the object while the
-module's generated C and its cache key (the C compiler and flags, a hash of
-`Runtime.h` and the paykan version) are unchanged, and link the
-objects with `libpaykan_runtime.a`.  `<hash>` is a 64-bit FNV-1a hash of the
-whole key (which includes a hash of the module's C), and the entry's `.c`,
-`.o` and `.key` all carry it, so builds with different flags (`-O0` and
+`geometry/shapes.<hash>.o`, the system module `::io` is
+`@system/io.<hash>.o`), reuse the object while the module's generated C
+and its cache key (the C compiler and flags, a hash of `Runtime.h` and the
+paykan version) are unchanged, and link the objects with
+`libpaykan_runtime.a`.  `<hash>` is a 64-bit FNV-1a hash of the whole key
+(which includes a hash of the module's C), and the entry's `.c`, `.o` and
+`.key` all carry it, so builds with different flags (`-O0` and
 `-O2`, a sanitizer) never share a file (#134): a build links only objects
 compiled under its own key, with no window in which a concurrent build can
 swap in one compiled under another, and alternating configurations do not
