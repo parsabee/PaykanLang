@@ -200,7 +200,9 @@ TEST(Driver, VersionListsEveryPluginAsCompatible) {
   EXPECT_GE(frontends, 1u);
   EXPECT_GE(backends, 1u);
   EXPECT_EQ(frontends + backends + pluginLines, ls.size() - 2) << out;
-  EXPECT_TRUE(hasLine(out, "plugin API 1")) << out;
+  EXPECT_TRUE(hasLine(out, "plugin API " +
+                               paykan::versionString(paykan::kVersionNumber)))
+      << out;
   EXPECT_TRUE(hasLine(out, "plugin directories: none searched (--no-plugins "
                            "or PAYKAN_NO_PLUGINS)"))
       << out;
