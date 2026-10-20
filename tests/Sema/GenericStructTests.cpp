@@ -354,12 +354,11 @@ impl Pair<X, Y> { fn h() {} }
 fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(r.Ok);
+  // (A `static fn` in `impl Pair<A, B>` is fine: the instantiation's.)
   expectAll(r, {"'Pair' is a generic struct: write 'impl Pair<A, B>'",
                 "'impl Pair' names 1 type parameter(s); generic struct 'Pair' "
-                "has 2",
-                "a 'static fn' in the 'impl' block of a generic struct is not "
-                "supported yet"});
-  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+                "has 2"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
 TEST(GenericStruct, ImplMethodsAreCheckedPerInstantiation) {

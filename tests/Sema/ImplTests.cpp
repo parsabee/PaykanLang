@@ -174,7 +174,7 @@ class A { n: int; }
 impl A { fn __init__() { self.n = 0; } }
 impl Box { fn f() {} }
 impl Box<T, U> { fn f() {} }
-impl Box<T> { static fn make() {} }
+impl Box<T> { static fn make() {} } // fine: the instantiation's function
 impl Box<A> { fn f() {} }
 impl A<T> { fn f() {} }
 trait Named { view fn name() -> Str; }
@@ -194,8 +194,6 @@ fn main() -> int { b = Box(1); c = Cell(2); return 0; }
   expectAll(r, {"'Box' is a generic class: write 'impl Box<T>'",
                 "'impl Box' names 2 type parameter(s); generic class 'Box' "
                 "has 1",
-                "a 'static fn' in the 'impl' block of a generic class is not "
-                "supported yet",
                 "type parameter 'A' of 'impl' block for 'Box' shadows a type",
                 "'A' is not a generic class: write 'impl A'",
                 "class 'Cell<int>' already has a method 'get'",
