@@ -491,8 +491,8 @@ class _Entry<K, V> {
   next: _Entry<K, V>?;
 }
 
-// A HashMap's table: its buckets and its number of keys, which every copy of
-// the map shares.
+// The table of a HashMap or a HashSet: its buckets and its number of keys,
+// which every copy of the map or set shares.
 class _Table<K: Hashable, V> {
   __buckets: mem::Buffer<_Entry<K, V>?>;
   __size: unsigned;
@@ -728,35 +728,36 @@ impl HashMap<K, V> {
   view fn values() -> List<V>            { return self.__table.values(); }
 }
 
-// A set of Hashable keys, compared with == (see HashMap).
+// A set of Hashable keys, compared with == (see HashMap): the keys of a
+// _Table, which every copy of the set shares.
 struct HashSet<K: Hashable> {
-  __map: HashMap<K, bool>;
+  __table: _Table<K, bool>;
 }
 
 impl HashSet<K> {
   // An empty set.
-  fn __init__()                       { self.__map = HashMap<K, bool>(); }
+  fn __init__()                       { self.__table = _Table<K, bool>(); }
 
   // The number of keys.
-  view fn len() -> unsigned           { return self.__map.len(); }
+  view fn len() -> unsigned           { return self.__table.len(); }
 
   // True when the set has no keys.
-  view fn isEmpty() -> bool           { return self.__map.isEmpty(); }
+  view fn isEmpty() -> bool           { return self.__table.isEmpty(); }
 
   // Add `k`; True if it was not in the set.
-  fn add(k: K) -> bool                { return self.__map.put(k, True); }
+  fn add(k: K) -> bool                { return self.__table.put(k, True); }
 
   // True when `k` is in the set.
-  view fn contains(k: view K) -> bool { return self.__map.containsKey(k); }
+  view fn contains(k: view K) -> bool { return self.__table.containsKey(k); }
 
   // Remove `k`; True if it was in the set.
-  fn remove(k: view K) -> bool        { return self.__map.remove(k); }
+  fn remove(k: view K) -> bool        { return self.__table.remove(k); }
 
   // Remove every key.
-  fn clear()                          { self.__map.clear(); }
+  fn clear()                          { self.__table.clear(); }
 
   // The keys, in a new list.
-  view fn toList() -> List<K>         { return self.__map.keys(); }
+  view fn toList() -> List<K>         { return self.__table.keys(); }
 }
 
 // -- Priority queues ------------------------------------------------------------

@@ -46,7 +46,7 @@ None
 
 - **Copies of a container are the same container.** `List`, `Stack`, `Queue`, `HashMap`,
   `HashSet` and the priority queues are structs whose one field is the object that holds
-  every element and count (a `Buffer`, a `LinkedList`, the map's table or the heap), and a
+  every element and count (a `Buffer`, a `LinkedList`, the hash table of a `HashMap` or a `HashSet`, or the heap), and a
   `LinkedList` is that object itself. So assigning a container, passing it or storing it
   in a field names the same container: a change through any of the names is seen through
   all of them, and `==` is True only for the same container. `copy()` (on a `List`) or
