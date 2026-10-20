@@ -172,6 +172,7 @@ inline constexpr const char *kPaykanErrorText = "Paykan_error_text";
 // Reached only through a `native fn` of the standard library
 inline constexpr const char *kPaykanPanicMessage = "Paykan_panic_message";
 inline constexpr const char *kPaykanPanicValue = "Paykan_panic_value";
+inline constexpr const char *kPaykanUnreachableView = "Paykan_unreachable_view";
 
 // Hash: `hash()` of the builtin Hashable types
 inline constexpr const char *kPaykanIntHash = "PaykanInt_hash";

@@ -89,6 +89,9 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
     case VarKind::ViewBinding:
       why = "'" + name + "' is bound to a 'view'";
       break;
+    case VarKind::WeakView:
+      why = "'" + name + "' is a 'weak' local of a 'view'";
+      break;
     case VarKind::Plain:
     case VarKind::Let:
     case VarKind::Captured:

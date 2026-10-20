@@ -83,8 +83,8 @@ has checked the index already, as reading a fixed-size array out of bounds does.
 | `Buffer<T>()` | An empty buffer: no slots, nothing allocated | |
 | `view fn len() -> unsigned` | The number of slots | |
 | `view fn get(i: unsigned) -> view T` | Slot `i` itself, read in place, nothing copied | panics `buffer index <i> out of bounds (len=<n>)`, or `buffer value <i> was never set` for an unset slot |
-| `view fn copyUnchecked(i: unsigned) -> T` | A copy of slot `i`, to keep | panics as `get` does |
-| `view fn copy(i: unsigned) -> res::Result<T>` | A copy of slot `i`, to keep | `OutOfRange`, `NotFound` |
+| `fn copyUnchecked(i: unsigned) -> T` | A copy of slot `i`, to keep | panics as `get` does |
+| `fn copy(i: unsigned) -> res::Result<T>` | A copy of slot `i`, to keep | `OutOfRange`, `NotFound` |
 | `fn set(i: unsigned, v: view T) -> res::Error` | Stores `v` in slot `i`, dropping what it held | `OutOfRange` |
 | `fn push(v: view T) -> res::Error` | Adds a slot at the end holding `v` | `OutOfMemory` |
 | `fn grow(by: unsigned) -> res::Error` | Adds `by` new slots at the end | `OutOfMemory` |
@@ -96,9 +96,11 @@ has checked the index already, as reading a fixed-size array out of bounds does.
 capacity behind the slots. Growing one slot at a time is amortised O(1): the allocation at
 least doubles when it grows, and is halved once at most a quarter of it is in use.
 
-The methods that change the buffer are not `view fn`s, so a `view` parameter of type
-`memory::Buffer<T>` can be read (`len`, `get`, `copy`, `copyUnchecked`) but not changed
-(`'b' is a 'view' parameter; 'push' is not a 'view fn'`).
+The methods that change the buffer are not `view fn`s, and neither are `copy` and
+`copyUnchecked`: a copy of an object shares it with the buffer, so it could be changed
+through the copy. A `view` parameter of type `memory::Buffer<T>` is read with `len` and
+`get`, which lends the slot as a `view`, and nothing changes through it (`'b' is a 'view'
+parameter; 'push' is not a 'view fn'`, and the same for `copyUnchecked`).
 
 ---
 

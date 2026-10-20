@@ -89,8 +89,7 @@ TEST(Weak, IsNotAnInoutPlace) {
 
 // A `weak` local may name what a `view` names (a `view` parameter, part of
 // `self` in a `view fn`): it takes no reference, so the view is not copied,
-// and what it reads is a fresh reference, so a `view fn` can walk a chain of
-// nodes through one and return what it finds.
+// and a `view fn` can walk a chain of nodes through one, reading each node.
 TEST(Weak, LocalMayNameWhatAViewNames) {
   auto r = semaCheck(R"(
     class Node { v: int; next: Node?; }
@@ -107,11 +106,11 @@ TEST(Weak, LocalMayNameWhatAViewNames) {
         }
         return total;
       }
-      view fn first() -> Node? {
+      view fn first() -> int {
         weak h = self.head;
         match h {
-          n: Node { return n; }
-          None { return None; }
+          n: Node { return n.v; }
+          None { return -1; }
         }
       }
     }
@@ -122,10 +121,88 @@ TEST(Weak, LocalMayNameWhatAViewNames) {
     }
     fn main() -> int {
       c = Chain(None);
-      return c.sum() + peek(c, Node(1, None));
+      return c.sum() + c.first() + peek(c, Node(1, None));
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// What a `weak` local of a `view` reads is a `view` too: the object is the
+// view's, so nothing changes through it, and it is never stored, returned
+// or captured except as a `view`.  It may be assigned another `view` (the
+// cursor moves on).
+TEST(Weak, LocalOfAViewReadsAsAView) {
+  auto r = semaCheck(R"(
+    class Node {
+      v: int;
+      next: Node?;
+      fn bump() { self.v = self.v + 1; }
+    }
+    class Keep { n: Node?; }
+    fn take(n: Node) { }
+    class Chain {
+      head: Node?;
+      view fn leak() -> Node? {
+        weak cur = self.head;
+        match cur { n: Node { return n; } None { return None; } }
+      }
+      view fn poke() {
+        weak cur = self.head;
+        match cur { n: Node { n.v = 9; n.bump(); take(n); } None { } }
+      }
+      view fn keep(k: Keep) {
+        weak cur = self.head;
+        match cur { n: Node { k.n = n; } None { } }
+      }
+      view fn later() -> () -> int {
+        weak cur = self.head;
+        return fn() -> int { match cur { n: Node { return n.v; } None { return 0; } } };
+      }
+    }
+    fn first(n: view Node) -> Node {
+      weak w = n;
+      match w { x: Node { return x; } None { return Node(0, None); } }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"'n' is bound to a 'view'; it cannot be returned",
+                "'n' is bound to a 'view'; cannot assign to its field 'v'",
+                "'n' is bound to a 'view'; 'bump' is not a 'view fn'",
+                "'n' is bound to a 'view'; it can only be passed to a 'view' "
+                "parameter",
+                "'n' is bound to a 'view'; it cannot be stored",
+                "'cur' is a 'weak' local of a 'view'; a function cannot "
+                "capture a borrow",
+                "'x' is bound to a 'view'; it cannot be returned"});
+}
+
+// A `view fn` returns a `view` of an element it reached by `match`ing part
+// of `self`: the arm's name is a `view` of the subject.
+TEST(Weak, MatchedPartOfSelfReturnsAsAView) {
+  auto r = semaCheck(R"(
+    class Node { v: Str; next: Node?; }
+    class Chain {
+      head: Node?;
+      view fn front() -> view Str {
+        match self.head {
+          n: Node { return n.v; }
+          None { return "none"; }
+        }
+      }
+      view fn second() -> view Str {
+        weak cur = self.head;
+        match cur { n: Node { return n.v; } None { return "none"; } }
+      }
+    }
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  // The match of `self.head` lends its node; a new value and a cursor do not.
+  EXPECT_EQ(r.Diagnostics.find(":7:"), std::string::npos) << r.Diagnostics;
+  expectAll(r, {"a 'view' result must be part of 'self' or of a 'view' or "
+                "'inout' parameter, not a new value",
+                "'cur' is a local: a 'view' result must be part of 'self'"});
 }
 
 // Otherwise a weak reference is an ordinary `T?`: assigned, compared,

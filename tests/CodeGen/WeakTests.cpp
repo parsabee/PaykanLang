@@ -239,8 +239,9 @@ TEST(Weak, LoopsAndEarlyExits) {
 }
 
 // A `view fn` walks a chain of nodes through a `weak` cursor: the cursor
-// takes no reference to `self`'s nodes, and each read of it is a fresh
-// reference the method may bind, read and return.
+// takes no reference to `self`'s nodes, and each read of it is a `view` the
+// method may bind and read.  A method that may change `self` walks one as
+// well and returns what it finds.
 TEST(Weak, CursorInAViewMethod) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
@@ -260,7 +261,7 @@ TEST(Weak, CursorInAViewMethod) {
         }
         return total;
       }
-      view fn find(v: int) -> Node? {
+      fn find(v: int) -> Node? {
         weak cur = self.head;
         while cur != None {
           match cur {
@@ -274,7 +275,7 @@ TEST(Weak, CursorInAViewMethod) {
         return None;
       }
     }
-    fn show(c: view Chain) -> Str {
+    fn show(c: Chain) -> Str {
       match c.find(2) {
         n: Node { return Str(c.sum()) + " found " + Str(n.v); }
         None { return Str(c.sum()) + " none"; }

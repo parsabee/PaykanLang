@@ -61,6 +61,8 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows) {
     return "'" + name + "' is a 'view' local";
   case VarKind::ViewBinding:
     return "'" + name + "' is bound to a 'view'";
+  case VarKind::WeakView:
+    return "'" + name + "' is a 'weak' local of a 'view'";
   case VarKind::Captured: {
     // The lambda's own copy, which its body must not change (the program
     // could not see it); what a captured reference names is an object,

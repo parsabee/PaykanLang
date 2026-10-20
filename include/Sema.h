@@ -103,7 +103,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     Captured,
     /// A `weak` local (docs/language/16-memory.md): it holds a weak
     /// reference, so no `inout` may name it.
-    Weak
+    Weak,
+    /// A `weak` local first read from a `view` (a cursor over `self`'s nodes
+    /// in a `view fn`): as Weak, and each read of it is a `view` as well, so
+    /// nothing changes through it and nothing read from it is stored or
+    /// returned except as a `view`.  It may be assigned other `view`s.
+    WeakView
   };
 
   /// A single lexical scope. Each scope has its own local bindings and a
@@ -113,6 +118,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     StringMap<ast::Type *> Locals;
     /// The kind of each variable bound here that is not Plain.
     StringMap<VarKind> Kinds;
+    /// The subject a ViewBinding names a `view` of: a `view` result may be
+    /// part of it.
+    StringMap<const ast::Expr *> ViewSubjects;
 
     explicit Scope(Scope *parent = nullptr);
 

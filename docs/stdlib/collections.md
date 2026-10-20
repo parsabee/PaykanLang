@@ -62,8 +62,17 @@ None
 - **A container holds its own reference to each element**, whether the method that stores
   it takes the element by value (`pushFront(v: T)`, `put(k: K, v: V)`) or lent
   (`push(v: view T)`): an object element is shared with the container, and a value element
-  is copied into it. A method that hands an element out returns a copy, which shares an
-  object element with the container.
+  is copied into it.
+- **What a container lends is a `view`.** A method that reads an element and leaves it in
+  the container lends it as a `view` (`-> view T`): `List`'s `get` and `last`,
+  `LinkedList`'s `front` and `back`, the `peek` of `Stack`, `Queue` and the priority queues,
+  and `HashMap`'s `get` and `getOr`. The element is read, passed to a `view` parameter or
+  bound to a `view` local (`f: view = fs.get(i);`), and a value element is copied out
+  (`n = xs.get(0);`), but an object element is neither stored nor changed through it
+  (`the result of 'get' is a 'view'; cannot assign to its field 'n'`), so a `view` of a
+  container changes nothing in it. A method that takes an element out (`pop`, `removeAt`,
+  `dequeue`, `popFront`, ...) returns it, and a new list (`copy()`, `toList()`, `keys()`)
+  holds its own references.
 - **Elements are compared with `==`**, so a class compares by its `equals` (the
   identity, unless it overrides `equals`).
 - **Every index and size is an `unsigned`**: `len()` returns one, `get(i)`, `set(i, v)`,
@@ -99,11 +108,11 @@ the end are amortised O(1); `insert` and `removeAt` move the elements after the 
 | `List<T>()` | An empty list | |
 | `view fn len() -> unsigned` | The number of elements | |
 | `view fn isEmpty() -> bool` | Whether there are none | |
-| `view fn get(i: unsigned) -> T` | Element `i` (a copy) | panics `List index <i> out of range (len=<n>)` unless `i < len()` |
+| `view fn get(i: unsigned) -> view T` | Element `i`, as a `view` | panics `List index <i> out of range (len=<n>)` unless `i < len()` |
 | `fn set(i: unsigned, v: view T)` | Replaces element `i` | panics as `get` |
 | `fn push(v: view T)` | Appends `v` | |
 | `fn pop() -> T` | Removes and returns the last element | panics `pop from an empty List` |
-| `view fn last() -> T` | The last element | panics `last of an empty List` |
+| `view fn last() -> view T` | The last element, as a `view` | panics `last of an empty List` |
 | `fn insert(i: unsigned, v: view T)` | Inserts `v` before element `i`; `i == len()` appends | panics as `get` unless `i <= len()` |
 | `fn removeAt(i: unsigned) -> T` | Removes and returns element `i` | panics as `get` |
 | `view fn indexOf(v: view T) -> unsigned?` | The index of the first element `== v` | `None` when there is none |
@@ -145,8 +154,8 @@ and `remove` walk the list.
 | `fn pushBack(v: T)` | Adds `v` after the last element | |
 | `fn popFront() -> T` | Removes and returns the first element | panics `popFront on an empty LinkedList` |
 | `fn popBack() -> T` | Removes and returns the last element | panics `popBack on an empty LinkedList` |
-| `view fn front() -> T` | The first element | panics `front on an empty LinkedList` |
-| `view fn back() -> T` | The last element | panics `back on an empty LinkedList` |
+| `view fn front() -> view T` | The first element, as a `view` | panics `front on an empty LinkedList` |
+| `view fn back() -> view T` | The last element, as a `view` | panics `back on an empty LinkedList` |
 | `view fn contains(v: view T) -> bool` | Whether some element is `== v` | |
 | `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | |
 | `fn clear()` | Removes every element | |
@@ -167,7 +176,7 @@ A `Stack` is last in, first out; a `Queue` first in, first out. Both are kept in
 | `Stack<T>()` | `Queue<T>()` | An empty stack, an empty queue | |
 | `fn push(v: T)` | `fn enqueue(v: T)` | Adds `v`: on top of the stack, at the back of the queue | |
 | `fn pop() -> T` | `fn dequeue() -> T` | Removes and returns the top, the front | panics `pop from an empty Stack`, `dequeue from an empty Queue` |
-| `view fn peek() -> T` | `view fn peek() -> T` | The element `pop` or `dequeue` would return | panics `peek at an empty Stack`, `peek at an empty Queue` |
+| `view fn peek() -> view T` | `view fn peek() -> view T` | The element `pop` or `dequeue` would return, as a `view` | panics `peek at an empty Stack`, `peek at an empty Queue` |
 | `view fn len() -> unsigned` | the same | The number of elements | |
 | `view fn isEmpty() -> bool` | the same | Whether there are none | |
 | `fn clear()` | the same | Removes every element | |
@@ -191,8 +200,8 @@ found.
 | `view fn len() -> unsigned` | The number of keys | |
 | `view fn isEmpty() -> bool` | Whether there are none | |
 | `fn put(k: K, v: V) -> bool` | Maps `k` to `v`, replacing the value of a key it has; `True` if `k` is a new key | |
-| `view fn get(k: view K) -> V` | The value of `k` | panics `HashMap.get of a key it does not have` |
-| `view fn getOr(k: view K, otherwise: V) -> V` | The value of `k`, or `otherwise` if it is not a key | |
+| `view fn get(k: view K) -> view V` | The value of `k`, as a `view` | panics `HashMap.get of a key it does not have` |
+| `view fn getOr(k: view K, otherwise: view V) -> view V` | The value of `k`, or `otherwise` if it is not a key, as a `view` | |
 | `view fn containsKey(k: view K) -> bool` | Whether `k` is a key | |
 | `fn remove(k: view K) -> bool` | Removes `k` and its value; `True` if it was a key | |
 | `fn clear()` | Removes every key | |
@@ -224,7 +233,7 @@ same methods:
 | `view fn isEmpty() -> bool` | Whether there are none | |
 | `fn push(v: view T, priority: int)` | Adds `v` with `priority` | |
 | `fn pop() -> T` | Removes and returns the next element | panics `pop on an empty priority queue` |
-| `view fn peek() -> T` | The next element | panics `peek on an empty priority queue` |
+| `view fn peek() -> view T` | The next element, as a `view` | panics `peek on an empty priority queue` |
 | `view fn peekPriority() -> int` | The next element's priority | panics `peekPriority on an empty priority queue` |
 | `fn clear()` | Removes every element | |
 

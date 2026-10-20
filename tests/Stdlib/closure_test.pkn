@@ -29,7 +29,7 @@ fn main() -> int {
   i: unsigned = 0;
   total = 0;
   while i < fs.len() {
-    f = fs.get(i);
+    f: view = fs.get(i);
     total = total + f(3);
     i = i + 1;
   }
@@ -41,7 +41,7 @@ fn main() -> int {
   greetings = collections::HashMap<Str, (Str) -> Str>();
   greetings.put("en", fn(n: Str) -> Str { return "hello " + n; });
   greetings.put("fr", fn(n: Str) -> Str { return "bonjour " + n; });
-  g = greetings.get("fr");
+  g: view = greetings.get("fr");
   io::println(g("pat") + " " + Str(greetings.containsKey("de")) + " "
       + Str(greetings.len()));
 
