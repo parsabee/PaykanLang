@@ -110,7 +110,9 @@ needs nothing else; the LLVM backend is opt-in.
 Dependencies are deliberately limited to:
 - standard C and C++ (the compiler and its standard libraries) to build and use PaykanLang;
 - GoogleTest, for the test suite only (found on the system, or fetched);
-- LLVM, for the opt-in `llvm` backend only;
+- LLVM 22 (with MLIR), for the opt-in `llvm` backend only: a configure that lists it
+  downloads the prebuilt release, which links with zlib and zstd from the system
+  (`zlib1g-dev libzstd-dev` on Debian and Ubuntu, `brew install zstd` on macOS);
 - Python 3 with its standard library only, for the test and lint scripts in `scripts/`: the
   system's `python3`, or the one given with `-DPython3_EXECUTABLE=<path>`. Without Python,
   the script-driven tests are skipped.
@@ -230,7 +232,7 @@ only those on a pull request, and every suite on a push.
 ## Development Tooling
 
 Quality gates are enforced in CI and available locally via the Python helpers in `scripts/`
-(those that run LLVM tools prefer the LLVM 17 tools under `build/third-party/llvm`, which a
+(those that run LLVM tools prefer the LLVM 22 tools under `build/third-party/llvm`, which a
 configure with the `llvm` backend downloads, so results match CI; otherwise they use the
 tools on the `PATH`):
 

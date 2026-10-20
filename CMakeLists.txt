@@ -42,7 +42,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # -- Third-party dependency versions ------------------------------------------
 # Pinned versions; hashes are verified in each Setup module.
-set(LLVM_VERSION  "17.0.6")
+set(LLVM_VERSION  "22.1.8")
 set(GTEST_VERSION "1.15.2")
 
 # All third-party artifacts live under <build>/third-party/.

@@ -558,6 +558,7 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
         // Every field is set on every path out of `__init__`.
         if (method->getName() == names::kMethodInit) {
           std::vector<std::pair<std::string, ast::Type *>> fields;
+          fields.reserve(st->getNumFields());
           for (size_t i = 0; i < st->getNumFields(); ++i)
             fields.emplace_back(st->getFieldName(i), st->getElementType(i));
           if (!checkInitFieldsAssigned(fields, method->getBody(),

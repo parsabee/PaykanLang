@@ -81,7 +81,7 @@ public:
   virtual Capabilities capabilities() const = 0;
 
   /// A one-line description for --version / --list-backends, typically the
-  /// toolchain the backend is built on ("LLVM 17.0.6"); "" for none.
+  /// toolchain the backend is built on ("LLVM 22.1.8"); "" for none.
   virtual std::string describe() const { return {}; }
 
   /// Translate the program into the requested artifact.  Source output is

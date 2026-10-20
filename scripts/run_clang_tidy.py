@@ -2,7 +2,7 @@
 """Run clang-tidy over PaykanLang's first-party translation units.
 
 This is the authoritative lint entry point shared by CI and the pre-commit
-hook. It uses the vendored LLVM 17 clang-tidy (build/third-party/llvm) when
+hook. It uses the vendored LLVM 22 clang-tidy (build/third-party/llvm) when
 present, falling back to a clang-tidy on PATH otherwise.
 
 Third-party code is excluded: it is not ours to fix.
@@ -79,7 +79,12 @@ def first_party_tus(compile_db: str) -> list[str]:
 # is a hard error, and an unknown -W option is one under -Werror.  Either
 # failed every C++ translation unit and, being a compiler error, also kept the
 # static analyzer from running on it.
-_GCC_ONLY_FLAGS = ("-fno-lifetime-dse", "-Wno-class-memaccess")
+_GCC_ONLY_FLAGS = (
+    "-fno-lifetime-dse",
+    "-Wno-class-memaccess",
+    "-Wno-dangling-reference",
+    "-Wno-stringop-overread",
+)
 _GCC_ONLY_RE = re.compile(
     r"(?<=\s)(?:" + "|".join(map(re.escape, _GCC_ONLY_FLAGS)) + r")(?=\s|$)"
 )

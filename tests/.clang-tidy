@@ -1,0 +1,10 @@
+# The tests' clang-tidy configuration: the project's (../.clang-tidy), less
+# two checks that only flag how tests are written.
+# - bugprone-unchecked-optional-access: an optional is checked with
+#   ASSERT_TRUE before it is used, which the check does not model.
+# - bugprone-command-processor: the tests run paykan and the compilers
+#   through the shell on purpose (popen).
+InheritParentConfig: true
+Checks: >
+  -bugprone-unchecked-optional-access,
+  -bugprone-command-processor

@@ -1684,6 +1684,7 @@ public:
 
 bool emitC(const pir::Program &program, std::ostream &out, std::ostream &errs) {
   std::vector<size_t> all;
+  all.reserve(program.Modules.size());
   for (size_t i = 0; i < program.Modules.size(); ++i)
     all.push_back(i);
   Emitter em(program, out, errs);

@@ -132,7 +132,7 @@ is built.
 ```sh
 $ paykan --list-backends
 c (default)
-llvm: LLVM 17.0.6
+llvm: LLVM 22.1.8
 $ paykan --backend=llvm prog.pkn
 ```
 
