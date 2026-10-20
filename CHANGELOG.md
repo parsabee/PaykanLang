@@ -579,6 +579,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `"a" + n` and `n + "a"` with a number `n` passed type checking and then failed in PIR
+  verification ("arithmetic on obj"); they are a type error now, `operator '+' is not
+  defined for types 'Str' and 'int' (convert the 'int' with 'Str(...)')`.
 - A process that compiles two programs importing the same source module (the test
   binaries, an embedding host) no longer fails to lower the second: the module's analysis
   is cached with its exports (`Sema::ModuleContextCache`), so every compilation that

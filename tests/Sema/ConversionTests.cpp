@@ -347,3 +347,17 @@ TEST(CharLiteral, EmptyCharLiteralIsOneError) {
   }
   std::filesystem::remove(path);
 }
+
+// `+` joins two strings or adds two numbers; a string and a number need the
+// number converted first.
+TEST(Conversion, StrPlusANumberNeedsStr) {
+  expectError(inMain("n: int = 3; s = \"a\" + n;"),
+              "operator '+' is not defined for types 'Str' and 'int' (convert "
+              "the 'int' with 'Str(...)')");
+  expectError(inMain("s = 2.5 + \"b\";"),
+              "operator '+' is not defined for types 'float' and 'Str' "
+              "(convert the 'float' with 'Str(...)')");
+  expectError(inMain("b: u8 = 1; s = \"c\" + b;"),
+              "operator '+' is not defined for types 'Str' and 'u8'");
+  expectOk(inMain("n: int = 3; s: Str = \"a\" + Str(n) + \"b\";"));
+}
