@@ -65,12 +65,20 @@ Download the Debian package for Linux x86_64 from the
 apt, which also pulls in a C compiler (`gcc`, or `clang`) for the C backend:
 
 ```sh
-curl -fLO https://github.com/parsabee/PaykanLang/releases/download/v0.1.1/paykanlang_0.1.1_amd64.deb
-sudo apt install ./paykanlang_0.1.1_amd64.deb
+curl -fLO https://github.com/parsabee/PaykanLang/releases/download/v<version>/paykanlang_<version>_amd64.deb
+sudo apt install ./paykanlang_<version>_amd64.deb
 ```
 
-Each release's `.deb` sits beside its SHA-256 sum (`paykanlang_<version>_amd64.deb.sha256`);
-replace `0.1.1` with the release you want.
+Each release's `.deb` sits beside its SHA-256 sum (`paykanlang_<version>_amd64.deb.sha256`).
+Or add the signed apt repository, and `apt upgrade` picks up every new release:
+
+```sh
+sudo curl -fsSLo /usr/share/keyrings/paykanlang.gpg https://parsabee.github.io/paykanlang-apt/paykanlang.gpg
+echo "deb [signed-by=/usr/share/keyrings/paykanlang.gpg] https://parsabee.github.io/paykanlang-apt stable main" |
+  sudo tee /etc/apt/sources.list.d/paykanlang.list
+sudo apt update
+sudo apt install paykanlang
+```
 
 It installs `paykan` in `/usr/bin`, the runtime in `/usr/lib`, its header and the plugin
 headers in `/usr/include/paykan`, the `find_package(Paykan)` package, and the system plugin
@@ -79,10 +87,13 @@ directory `/usr/lib/paykan/plugins/<version>/`. `sudo apt purge paykanlang` remo
 ### Homebrew (macOS)
 
 ```sh
-brew tap parsabee/paykanlang https://github.com/parsabee/PaykanLang
 brew install parsabee/paykanlang/paykanlang
 paykan --version
 ```
+
+The formula is in the tap [`parsabee/homebrew-paykanlang`](https://github.com/parsabee/homebrew-paykanlang).
+A tap of this repository from an earlier release moves there with
+`brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
 
 ### Plugins
 

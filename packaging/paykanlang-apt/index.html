@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>PaykanLang apt repository</title></head>
+<body>
+<h1>PaykanLang apt repository</h1>
+<p>Packages of the <a href="https://github.com/parsabee/PaykanLang">PaykanLang</a> compiler
+for Debian and Ubuntu (x86_64). To install:</p>
+<pre>
+sudo curl -fsSLo /usr/share/keyrings/paykanlang.gpg https://parsabee.github.io/paykanlang-apt/paykanlang.gpg
+echo "deb [signed-by=/usr/share/keyrings/paykanlang.gpg] https://parsabee.github.io/paykanlang-apt stable main" |
+  sudo tee /etc/apt/sources.list.d/paykanlang.list
+sudo apt update
+sudo apt install paykanlang
+</pre>
+</body>
+</html>
