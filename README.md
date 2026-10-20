@@ -21,7 +21,7 @@ provide a safe, ergonomic, performant, and productive interface that compiles to
 
 ## Installing
 
-Release builds are published for macOS (Apple Silicon) and Linux (x86_64). Each
+Release builds are published for macOS (Apple Silicon) and Linux (x86_64 and ARM64). Each
 [GitHub Release](https://github.com/parsabee/PaykanLang/releases) carries a tarball per
 platform and a Debian package for Linux (each with its SHA-256 sum). A tarball holds
 `bin/paykan`, the runtime and its header; unpack it
@@ -33,9 +33,9 @@ compiler, so a C11 compiler (`cc`) must be installed. Or build from source (belo
 
 ### Debian / Ubuntu
 
-Download the Debian package for Linux x86_64 from the
-[latest release](https://github.com/parsabee/PaykanLang/releases/latest) and install it with
-apt, which also pulls in a C compiler (`gcc`, or `clang`) for the C backend:
+Download the Debian package for your architecture (`amd64` for x86_64, `arm64` for ARM64) from
+the [latest release](https://github.com/parsabee/PaykanLang/releases/latest) and install it
+with apt, which also pulls in a C compiler (`gcc`, or `clang`) for the C backend:
 
 ```sh
 curl -fLO https://github.com/parsabee/PaykanLang/releases/download/v<version>/paykanlang_<version>_amd64.deb

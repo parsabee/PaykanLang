@@ -52,6 +52,9 @@ jobs:
           - label: linux-x86_64
             runner: ubuntu-latest
             generator: "Ninja"
+          - label: linux-arm64
+            runner: ubuntu-24.04-arm
+            generator: "Ninja"
     steps:
       - uses: actions/checkout@v4
 
@@ -72,8 +75,10 @@ jobs:
           -DPAYKAN_BUILD_TESTS=OFF -DPAYKAN_RELEASE=ON
           -DPAYKAN_FRONTENDS=recursive-descent "-DPAYKAN_BACKENDS=llvm;c"
 
+      # paykan_stdlib compiles stdlib/ with the built paykan and stages it
+      # where paykan finds it (and where `cmake --install` takes it from).
       - name: Build
-        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan paykan_runtime
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan paykan_runtime paykan_stdlib
 
       # Sanity-check the release binary actually runs before we publish it.
       - name: Smoke test (--version + run and build on both backends)

@@ -61,7 +61,7 @@ n=42 is small
 ## Install
 
 Each [GitHub release](https://github.com/parsabee/PaykanLang/releases) carries a tarball
-for Linux (x86_64) and macOS (Apple Silicon), and a `.deb` package for Debian and Ubuntu,
+for Linux (x86_64 and ARM64) and macOS (Apple Silicon), and a `.deb` package for Debian and Ubuntu,
 which also install from the [apt repository](language/01-getting-started.md#with-apt-debian-and-ubuntu).
 On macOS you can also use Homebrew:
 
