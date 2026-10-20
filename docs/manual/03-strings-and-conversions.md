@@ -22,7 +22,8 @@ Any other backslash sequence is kept as written, so `"a\qb"` is the four charact
 
 The operations on strings:
 
-- `a + b` concatenates two strings into a new one;
+- `a + b` concatenates two strings into a new one (both must be strings: `"n = " + n` with a
+  number `n` is an error, and `"n = " + Str(n)` is how to write it);
 - `s.len()` is the length, in bytes;
 - `s[i]` is the `char` at index `i` (zero-based, checked: an index out of range panics);
 - `a == b` and `a != b` compare **contents**: `"ab" == "a" + "b"` is `True`.

@@ -152,7 +152,9 @@ Output:
 ### String Type
 
 `Str` is a built-in heap-allocated class type. String literals produce a `Str`. The `+`
-operator concatenates two `Str` values and returns a new `Str`. `s.len()` returns the
+operator concatenates two `Str` values and returns a new `Str`; a `Str` and a number are
+not added (`operator '+' is not defined for types 'Str' and 'int' (convert the 'int' with
+'Str(...)')`), so a number is converted first: `"n = " + Str(n)`. `s.len()` returns the
 length as an `int`, and subscripting `s[i]` reads the `char` at index `i`.
 
 ```pkn

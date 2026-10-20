@@ -1376,6 +1376,15 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     // String concatenation: String + String -> String.
     if (lhsTy == S.Ctx.getStrTy() && rhsTy == S.Ctx.getStrTy())
       return S.Ctx.getStrTy();
+    // `+` is both Str's and the numbers', but never between them.
+    if (lhsTy == S.Ctx.getStrTy() || rhsTy == S.Ctx.getStrTy()) {
+      ast::Type *other = lhsTy == S.Ctx.getStrTy() ? rhsTy : lhsTy;
+      S.error(node->getLocation(), "operator '+' is not defined for types '" +
+                                       typeName(lhsTy) + "' and '" +
+                                       typeName(rhsTy) + "' (convert the '" +
+                                       typeName(other) + "' with 'Str(...)')");
+      return nullptr;
+    }
     [[fallthrough]];
   case ast::BinaryOpcode::Sub:
   case ast::BinaryOpcode::Mul:
