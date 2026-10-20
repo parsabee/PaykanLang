@@ -1,42 +1,71 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — Error type implementation: what open() returns when
-// fopen fails; toString is the message.
+// Paykan runtime — errors (Runtime.h, "Errors"): what a C library failure
+// means to the standard library's ::result (stdlib/result.pkn), whose Error is
+// a value the Paykan code makes from these.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
-#include <stdlib.h>
+#include <errno.h>
+#include <string.h>
 
-PaykanMethod PaykanError_vtable[PAYKAN_OBJECT_SLOTS] = {
-    [PAYKAN_SLOT_DESTROY] = (PaykanMethod)PaykanError_destroy,
-    [PAYKAN_SLOT_TO_STRING] = (PaykanMethod)PaykanError_toString,
-    [PAYKAN_SLOT_EQUALS] = (PaykanMethod)PaykanError_equals,
-};
-
-PaykanError *PaykanError_new(const char *msg, int64_t len) {
-  PaykanError *e = (PaykanError *)Paykan_malloc(sizeof(PaykanError));
-  e->vtable = PaykanError_vtable;
-  e->strong = 0; // unowned until boxed
-  e->weak = 0;
-  e->message = PaykanString_new(msg, len);
-  return e;
+int64_t Paykan_error_code(int64_t err) {
+  switch (err) {
+  case 0:
+    return PAYKAN_ERROR_OK;
+  case ENOENT:
+    return PAYKAN_ERROR_NOT_FOUND;
+  case EACCES:
+  case EPERM:
+    return PAYKAN_ERROR_PERMISSION_DENIED;
+  case EEXIST:
+    return PAYKAN_ERROR_ALREADY_EXISTS;
+  case EINVAL:
+  case EBADF: // a file not open for the operation, or closed
+    return PAYKAN_ERROR_INVALID_ARGUMENT;
+  case EISDIR:
+    return PAYKAN_ERROR_IS_A_DIRECTORY;
+  case ENOTDIR:
+    return PAYKAN_ERROR_NOT_A_DIRECTORY;
+  case EMFILE:
+  case ENFILE:
+    return PAYKAN_ERROR_TOO_MANY_OPEN_FILES;
+  case ENOSPC:
+    return PAYKAN_ERROR_NO_SPACE;
+  case EROFS:
+    return PAYKAN_ERROR_READ_ONLY;
+  case EBUSY:
+    return PAYKAN_ERROR_BUSY;
+  case EINTR:
+    return PAYKAN_ERROR_INTERRUPTED;
+  case EAGAIN:
+#if EWOULDBLOCK != EAGAIN
+  case EWOULDBLOCK:
+#endif
+    return PAYKAN_ERROR_WOULD_BLOCK;
+  case EPIPE:
+    return PAYKAN_ERROR_BROKEN_PIPE;
+  case ETIMEDOUT:
+    return PAYKAN_ERROR_TIMED_OUT;
+  case ENOMEM:
+    return PAYKAN_ERROR_OUT_OF_MEMORY;
+  case ENOSYS:
+  case ENOTSUP:
+#if EOPNOTSUPP != ENOTSUP
+  case EOPNOTSUPP:
+#endif
+    return PAYKAN_ERROR_UNSUPPORTED;
+  case EIO:
+    return PAYKAN_ERROR_IO;
+  default:
+    return PAYKAN_ERROR_OTHER;
+  }
 }
 
-void PaykanError_destroy(PaykanObject *self) {
-  PaykanError *e = (PaykanError *)self;
-  Paykan_dispose((PaykanObject *)e->message); // the message was never boxed
-}
-
-PaykanShared *PaykanError_toString(PaykanObject *self) {
-  PaykanError *e = (PaykanError *)self;
+PaykanShared *Paykan_error_text(int64_t err) {
+  const char *text = strerror((int)err);
   return PaykanShared_new(
-      (PaykanObject *)PaykanString_new(e->message->data, e->message->len));
-}
-
-int64_t PaykanError_equals(PaykanObject *self, PaykanShared *other) {
-  PaykanObject *o = Paykan_equals_unbox_other(other);
-  int64_t result = o && self == o;
-  return Paykan_equals_consume_other(other, result);
+      (PaykanObject *)PaykanString_new(text, (int64_t)strlen(text)));
 }

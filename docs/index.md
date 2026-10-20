@@ -24,6 +24,8 @@ through modules) is described in the
 ## A taste
 
 ```pkn
+import ::io;
+
 enum Size { Small, Large }
 
 fn describe(n: int) -> (Size, Str) {
@@ -37,8 +39,8 @@ fn main() -> int {
   while i < nums.len() {
     size, label = describe(nums[i]);
     match size {
-      Small { println(label + " is small"); }
-      Large { println(label + " is large"); }
+      Small { io::println(label + " is small"); }
+      Large { io::println(label + " is large"); }
     }
     i = i + 1;
   }

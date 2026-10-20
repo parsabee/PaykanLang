@@ -399,6 +399,18 @@ private:
   /// True when Sema marked @p expr (a primitive) to become the present
   /// value of the optional primitive slot it flows into (`int` -> `int?`).
   static bool isOptionalWrap(const ast::Expr *expr);
+  /// A tuple or a struct made the present value of its optional (Sema's
+  /// coercion): held in memory as the optional's `(bool, T)`.
+  static bool isMemOptionalWrap(const ast::Expr *expr);
+  /// The type of the value @p e makes in memory: the optional a wrapped
+  /// tuple or struct, or a None, becomes (Sema's coercion), else its own.
+  ast::Type *memTypeOf(ast::Expr *e);
+  /// Write the optional @p e (a tuple or a struct, isMemOptionalWrap) is
+  /// wrapped into at @p dst: present, then @p e's value.
+  void emitMemOptionalWrap(ast::Expr *e, const Val &dst);
+  /// The expression whose value emitMemOptionalWrap is writing, which is
+  /// not wrapped again.
+  const ast::Expr *UnwrappedExpr = nullptr;
   /// The optional type of @p expr's value when that is an optional of a
   /// value type (`int?` & co.): its own type, or the one it is wrapped into.
   /// nullptr otherwise.
@@ -543,8 +555,16 @@ private:
   /// layout, retains, releases, equality and type descriptors of function
   /// values are this tuple's.
   ast::TupleType *functionValueShape();
-  /// @p ty, or functionValueShape() for a function value.
+  /// What a value of @p ty held in memory is laid out as: @p ty itself, or
+  /// a tuple for a function value (functionValueShape()) and for the
+  /// optional of a tuple or a struct (`(bool, T)`: present, then the value,
+  /// None all zeros).
   ast::Type *memShapeOf(ast::Type *ty);
+  /// Where the value of the optional tuple or struct @p optTy starts.
+  int64_t memOptionalPayloadOffset(ast::Type *optTy);
+  /// Whether the optional tuple, struct or function value at @p addr (of
+  /// type @p optTy) is None.
+  Val emitMemOptionalIsNone(const Val &addr, ast::Type *optTy);
 
   /// The code of each lambda (its `call` function, made once), and of each
   /// named function used as a value (a function forwarding to it).
@@ -592,8 +612,9 @@ private:
                             ast::Type *resultTy);
   /// Whether the optional function value at @p addr is None.
   Val emitFunctionValueIsNone(const Val &addr);
-  /// `match` on an optional function value.
-  Val emitFunctionValueMatch(ast::MatchStmt *node);
+  /// `match` on an optional held in memory: a function value's, a tuple's
+  /// or a struct's.
+  Val emitMemOptionalMatch(ast::MatchStmt *node);
 
   // -- Structs (LoweringStruct.cpp, docs/language/14-structs.md)
   //
@@ -789,7 +810,7 @@ private:
   /// An `inout` name @p name, of type @p astTy, for the variable or field
   /// @p place: an `inout` local's, or a `match` arm's `n: inout T`.
   void emitInoutBinding(const std::string &name, ast::Expr *place,
-                        ast::Type *astTy);
+                        ast::Type *astTy, int64_t offset = 0);
   /// Release the boxes emitInoutArg kept for a call that has returned.
   void releaseAfterCall(const std::vector<Val> &keep);
   /// For a call of a method of @p ct, a class defined in another module:

@@ -8,7 +8,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 static std::string withEnums(const std::string &enums,
                              const std::string &body) {
@@ -18,7 +18,7 @@ static std::string withEnums(const std::string &enums,
 TEST(EnumCodeGen, EqualityTrueBranch) {
   auto r = compileAndRun(withEnums("enum Color { Red, Green, Blue }", R"(
     c: Color = Color::Green;
-    if c == Color::Green { println("yes"); }
+    if c == Color::Green { io::println("yes"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "yes\n");
@@ -27,7 +27,7 @@ TEST(EnumCodeGen, EqualityTrueBranch) {
 TEST(EnumCodeGen, EqualityFalseBranch) {
   auto r = compileAndRun(withEnums("enum Color { Red, Green, Blue }", R"(
     c: Color = Color::Green;
-    if c == Color::Red { println("a"); } else { println("b"); }
+    if c == Color::Red { io::println("a"); } else { io::println("b"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "b\n");
@@ -36,7 +36,7 @@ TEST(EnumCodeGen, EqualityFalseBranch) {
 TEST(EnumCodeGen, Inequality) {
   auto r = compileAndRun(withEnums("enum Color { Red, Green, Blue }", R"(
     c: Color = Color::Blue;
-    if c != Color::Red { println("ne"); }
+    if c != Color::Red { io::println("ne"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "ne\n");
@@ -46,10 +46,10 @@ TEST(EnumCodeGen, MatchVariant) {
   auto r = compileAndRun(withEnums("enum Color { Red, Green, Blue }", R"(
     c: Color = Color::Green;
     match c {
-      Red   { println("r"); }
-      Green { println("g"); }
-      Blue  { println("b"); }
-      _     { println("?"); }
+      Red   { io::println("r"); }
+      Green { io::println("g"); }
+      Blue  { io::println("b"); }
+      _     { io::println("?"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -60,9 +60,9 @@ TEST(EnumCodeGen, MatchWildcardFallthrough) {
   auto r = compileAndRun(withEnums("enum Color { Red, Green, Blue }", R"(
     c: Color = Color::Blue;
     match c {
-      Red   { println("r"); }
-      Green { println("g"); }
-      _     { println("other"); }
+      Red   { io::println("r"); }
+      Green { io::println("g"); }
+      _     { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -71,12 +71,12 @@ TEST(EnumCodeGen, MatchWildcardFallthrough) {
 
 TEST(EnumCodeGen, EnumThroughFunctionParam) {
   auto src =
-      "enum Dir { North, East, South, West }\n"
+      "import ::io; enum Dir { North, East, South, West }\n"
       "fn step(d: Dir) -> int {\n"
       "  match d {\n"
-      "    North { println(\"N\"); }\n"
-      "    East  { println(\"E\"); }\n"
-      "    _     { println(\"?\"); }\n"
+      "    North { io::println(\"N\"); }\n"
+      "    East  { io::println(\"E\"); }\n"
+      "    _     { io::println(\"?\"); }\n"
       "  }\n"
       "  return 0;\n"
       "}\n" +
@@ -91,9 +91,9 @@ TEST(EnumCodeGen, VariantOrderingValues) {
   // proving variants get implicit increasing values 0,1,2.
   auto r = compileAndRun(withEnums("enum E { A, B, C }", R"(
     e: E = E::C;
-    if e == E::A { println("0"); }
-    if e == E::B { println("1"); }
-    if e == E::C { println("2"); }
+    if e == E::A { io::println("0"); }
+    if e == E::B { io::println("1"); }
+    if e == E::C { io::println("2"); }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "2\n");
@@ -112,7 +112,7 @@ TEST(EnumCodeGen, ExhaustiveMatchSatisfiesReturn) {
              "    West  { return \"W\"; }\n"
              "  }\n"
              "}\n" +
-             wrapMain("println(name(Dir::South));");
+             wrapMain("io::println(name(Dir::South));");
   auto r = compileAndRun(src);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "S\n");
@@ -132,7 +132,7 @@ TEST(EnumCodeGen, ReturnEnumFromFunction) {
              "  }\n"
              "}\n" +
              wrapMain("x: Dir = opp(Dir::North);\n"
-                      "  if x == Dir::South { println(\"south\"); }");
+                      "  if x == Dir::South { io::println(\"south\"); }");
   auto r = compileAndRun(src);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "south\n");
@@ -156,7 +156,7 @@ TEST(EnumCodeGen, ArrayOfEnums) {
                "  xs[2] = Dir::South;\n" // subscript set
                "  xs[0] = Dir::West;\n"
                "  i: int = 0;\n"
-               "  while i < xs.len() { println(nm(xs[i])); i = i + 1; }");
+               "  while i < xs.len() { io::println(nm(xs[i])); i = i + 1; }");
   auto r = compileAndRun(src);
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "W\nE\nS\n");

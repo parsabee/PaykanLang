@@ -12,7 +12,7 @@ using namespace paykan::test;
 // an optional, inside a loop and shadowed in a block.
 TEST(Let, LocalsHoldValuesAndReferences) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Point { x: int; }
     impl Point { fn __init__(x: int) { self.x = x; } }
     fn main() -> int {
@@ -24,10 +24,10 @@ TEST(Let, LocalsHoldValuesAndReferences) {
       let xs: int[3] = [n, 4, p.x];
       let o: int? = None;
       p.x = p.x + n;
-      { let n = 10; println(Str(n)); }
+      { let n = 10; io::println(Str(n)); }
       i = 0;
-      while i < 2 { let k = i * 2; print(Str(k) + " "); i = i + 1; }
-      println(s + " " + Str(f) + " " + Str(p.x) + " " + Str(xs.len()) + " " +
+      while i < 2 { let k = i * 2; io::print(Str(k) + " "); i = i + 1; }
+      io::println(s + " " + Str(f) + " " + Str(p.x) + " " + Str(xs.len()) + " " +
               Str(o == None) + " " + Str(base != None));
       return 0;
     }

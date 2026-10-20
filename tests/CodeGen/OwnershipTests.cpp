@@ -31,7 +31,7 @@ using namespace paykan::test;
 // box, not wrap the raw receiver in a second box (double free on scope exit).
 TEST(Ownership, ReturnSelf) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class B {
       x: int;
       fn me() -> B { return self; }
@@ -43,7 +43,7 @@ TEST(Ownership, ReturnSelf) {
     fn main() -> int {
       b: B = B();
       c: B = b.me();
-      println(Str<int>(c.x));
+      io::println(Str<int>(c.x));
       return 0;
     }
   )");
@@ -56,7 +56,7 @@ TEST(Ownership, ReturnSelf) {
 // Chained self-returns: each hop retains the same unique box.
 TEST(Ownership, ReturnSelfChained) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class B {
       x: int;
       fn bump() -> B { self.x = self.x + 1; return self; }
@@ -68,7 +68,7 @@ TEST(Ownership, ReturnSelfChained) {
     fn main() -> int {
       b: B = B();
       c: B = b.bump().bump().bump();
-      println(Str<int>(c.x));
+      io::println(Str<int>(c.x));
       return 0;
     }
   )");
@@ -81,7 +81,7 @@ TEST(Ownership, ReturnSelfChained) {
 // Passing `self` to a function whose class-typed parameter consumes a +1 box.
 TEST(Ownership, PassSelfAsArgument) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class B {
       x: int;
       fn send() { probe(self); }
@@ -90,7 +90,7 @@ TEST(Ownership, PassSelfAsArgument) {
     impl B {
       fn __init__() { self.x = 1; }
     }
-    fn probe(b: B) { println(Str<int>(b.x)); }
+    fn probe(b: B) { io::println(Str<int>(b.x)); }
     fn main() -> int {
       b: B = B();
       b.send();
@@ -106,7 +106,7 @@ TEST(Ownership, PassSelfAsArgument) {
 // `y = self` inside a method: the local owner shares the caller's box.
 TEST(Ownership, AssignSelfToLocal) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
       fn grab() -> int {
@@ -121,8 +121,8 @@ TEST(Ownership, AssignSelfToLocal) {
     fn main() -> int {
       a: A = A();
       n: int = a.grab();
-      println(Str<int>(n));
-      println(Str<int>(a.x));
+      io::println(Str<int>(n));
+      io::println(Str<int>(a.x));
       return 0;
     }
   )");
@@ -138,7 +138,7 @@ TEST(Ownership, AssignSelfToLocal) {
 // passing it to a consuming callee must recover the subject's box.
 TEST(Ownership, MatchBindingPassedOwnedSubject) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
     }
@@ -146,12 +146,12 @@ TEST(Ownership, MatchBindingPassedOwnedSubject) {
     impl A {
       fn __init__() { self.x = 5; }
     }
-    fn probe(a: A) { println(Str<int>(a.x)); }
+    fn probe(a: A) { io::println(Str<int>(a.x)); }
     fn main() -> int {
       o: Obj = A();
       match o {
         b: A { probe(b); }
-        _ { println("no"); }
+        _ { io::println("no"); }
       }
       return 0;
     }
@@ -165,7 +165,7 @@ TEST(Ownership, MatchBindingPassedOwnedSubject) {
 // Binding consumed by explicit and implicit variable declarations.
 TEST(Ownership, MatchBindingVarDecls) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
     }
@@ -179,9 +179,9 @@ TEST(Ownership, MatchBindingVarDecls) {
         b: A {
           c: A = b;
           d = b;
-          println(Str<int>(c.x + d.x));
+          io::println(Str<int>(c.x + d.x));
         }
-        _ { println("no"); }
+        _ { io::println("no"); }
       }
       return 0;
     }
@@ -196,7 +196,7 @@ TEST(Ownership, MatchBindingVarDecls) {
 // emitImplicitVarDecl's fallback must recover the subject's box.
 TEST(Ownership, MatchBindingCallSubjectImplicitDecl) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
     }
@@ -209,9 +209,9 @@ TEST(Ownership, MatchBindingCallSubjectImplicitDecl) {
       match make() {
         b: A {
           c = b;
-          println(Str<int>(c.x));
+          io::println(Str<int>(c.x));
         }
-        _ { println("no"); }
+        _ { io::println("no"); }
       }
       return 0;
     }
@@ -226,7 +226,7 @@ TEST(Ownership, MatchBindingCallSubjectImplicitDecl) {
 // subject's box (retained), and the nested read h.a.x must unwrap it.
 TEST(Ownership, MatchBindingMemberAssign) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
     }
@@ -246,9 +246,9 @@ TEST(Ownership, MatchBindingMemberAssign) {
       h: Holder = Holder(A());
       match o {
         b: A { h.a = b; }
-        _ { println("no"); }
+        _ { io::println("no"); }
       }
-      println(Str<int>(h.a.x));
+      io::println(Str<int>(h.a.x));
       return 0;
     }
   )");
@@ -262,7 +262,7 @@ TEST(Ownership, MatchBindingMemberAssign) {
 // around the raw alias.
 TEST(Ownership, MatchBindingCopied) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
     }
@@ -275,9 +275,9 @@ TEST(Ownership, MatchBindingCopied) {
       match o {
         b: A {
           c = b;
-          println(Str<int>(c.x));
+          io::println(Str<int>(c.x));
         }
-        _ { println("no"); }
+        _ { io::println("no"); }
       }
       return 0;
     }
@@ -292,7 +292,7 @@ TEST(Ownership, MatchBindingCopied) {
 // declaration) must keep working alongside the backpointer recovery.
 TEST(Ownership, MatchBindingBackedControl) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
     }
@@ -305,9 +305,9 @@ TEST(Ownership, MatchBindingBackedControl) {
       match make() {
         b: A {
           c: A = b;
-          println(Str<int>(c.x));
+          io::println(Str<int>(c.x));
         }
-        _ { println("no"); }
+        _ { io::println("no"); }
       }
       return 0;
     }
@@ -325,7 +325,7 @@ TEST(Ownership, MatchBindingBackedControl) {
 // be a use-after-free / double free.
 TEST(Ownership, ArrayFieldStoreAndRead) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class H {
       arr: Str[3];
     }
@@ -335,8 +335,8 @@ TEST(Ownership, ArrayFieldStoreAndRead) {
     }
     fn main() -> int {
       h: H = H([Str(1), Str(2), Str(3)]);
-      println(h.arr[0]);
-      println(Str<int>(h.arr.len()));
+      io::println(h.arr[0]);
+      io::println(Str<int>(h.arr.len()));
       return 0;
     }
   )");
@@ -350,7 +350,7 @@ TEST(Ownership, ArrayFieldStoreAndRead) {
 // the new ones, also one the new value takes from the old.
 TEST(Ownership, ArrayFieldReassign) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class H {
       arr: Str[2];
     }
@@ -361,7 +361,7 @@ TEST(Ownership, ArrayFieldReassign) {
     fn main() -> int {
       h: H = H([Str(1), Str(2)]);
       h.arr = [Str(7), h.arr[0]];
-      println(h.arr[0] + h.arr[1] + Str<int>(h.arr.len()));
+      io::println(h.arr[0] + h.arr[1] + Str<int>(h.arr.len()));
       return 0;
     }
   )");
@@ -377,10 +377,10 @@ TEST(Ownership, ArrayFieldReassign) {
 // elements' (it previously resolved through a coincidental Str slot).
 TEST(Ownership, LenOnCallResult) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn makeArr() -> Str[3] { return [Str(1), Str(2), Str(3)]; }
     fn main() -> int {
-      println(Str<int>(makeArr().len()));
+      io::println(Str<int>(makeArr().len()));
       return 0;
     }
   )");
@@ -395,7 +395,7 @@ TEST(Ownership, LenOnCallResult) {
 // element's box instead of double-boxing the raw element pointer.
 TEST(Ownership, ImplicitDeclFromObjectArrayElement) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
     }
@@ -406,7 +406,7 @@ TEST(Ownership, ImplicitDeclFromObjectArrayElement) {
     fn main() -> int {
       arr: A[2] = [A(1), A(2)];
       y = arr[1];
-      println(Str<int>(y.x));
+      io::println(Str<int>(y.x));
       return 0;
     }
   )");
@@ -422,7 +422,7 @@ TEST(Ownership, ImplicitDeclFromObjectArrayElement) {
 // "field" out of the PaykanShared box returns its refCount/object words.
 TEST(Ownership, NestedMemberAccessUnwrapsBox) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class A {
       x: int;
     }
@@ -439,9 +439,9 @@ TEST(Ownership, NestedMemberAccessUnwrapsBox) {
     }
     fn main() -> int {
       h: H = H(A());
-      println(Str<int>(h.a.x));
+      io::println(Str<int>(h.a.x));
       h.a.x = 9;
-      println(Str<int>(h.a.x));
+      io::println(Str<int>(h.a.x));
       return 0;
     }
   )");
@@ -458,7 +458,7 @@ TEST(Ownership, NestedMemberAccessUnwrapsBox) {
 // vtable convention (same as the implicit-declaration path).
 TEST(Ownership, AssignNarrowsBaseVar) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Animal {
       fn speak() -> Str { return "..."; }
     }
@@ -477,7 +477,7 @@ TEST(Ownership, AssignNarrowsBaseVar) {
       d: Dog = Dog();
       a: Animal = Animal();
       a = d;
-      println(a.speak());
+      io::println(a.speak());
       return 0;
     }
   )");

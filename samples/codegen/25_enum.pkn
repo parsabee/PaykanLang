@@ -16,6 +16,8 @@
 //   9. arrays of enums: literal, subscript get/set, iteration
 //  10. a single-variant enum
 
+import ::io;
+
 // --- Multiple enum declarations -------------------------------------------
 
 enum Direction {
@@ -25,7 +27,12 @@ enum Direction {
   West,        // trailing comma allowed
 }
 
-enum Suit { Hearts, Diamonds, Clubs, Spades }
+enum Suit {
+  Hearts,
+  Diamonds,
+  Clubs,
+  Spades
+}
 
 enum Light { Red, Yellow, Green }
 
@@ -38,8 +45,8 @@ fn opposite(d: Direction) -> Direction {
   match d {
     North { return Direction::South; }
     South { return Direction::North; }
-    East  { return Direction::West; }
-    West  { return Direction::East; }
+    East { return Direction::West; }
+    West { return Direction::East; }
   }
 }
 
@@ -47,43 +54,41 @@ fn opposite(d: Direction) -> Direction {
 fn dirName(d: view Direction) -> Str {
   match d {
     North { return "North"; }
-    East  { return "East"; }
+    East { return "East"; }
     South { return "South"; }
-    West  { return "West"; }
+    West { return "West"; }
   }
 }
 
 // Match WITH a wildcard: only two suits are red, the rest fall through.
 fn isRed(s: Suit) -> bool {
   match s {
-    Hearts   { return True; }
+    Hearts { return True; }
     Diamonds { return True; }
-    _        { return False; }
+    _ { return False; }
   }
 }
 
 // A state transition: enum in, enum out.
 fn nextLight(l: Light) -> Light {
   match l {
-    Red    { return Light::Green; }
-    Green  { return Light::Yellow; }
+    Red { return Light::Green; }
+    Green { return Light::Yellow; }
     Yellow { return Light::Red; }
   }
 }
 
 fn lightName(l: Light) -> Str {
   match l {
-    Red    { return "Red"; }
+    Red { return "Red"; }
     Yellow { return "Yellow"; }
-    Green  { return "Green"; }
+    Green { return "Green"; }
   }
 }
 
 // Single-variant enum, matched exhaustively.
 fn signalName(s: Signal) -> Str {
-  match s {
-    Only { return "Only"; }
-  }
+  match s { Only { return "Only"; } }
 }
 
 // --- An enum stored in a class field --------------------------------------
@@ -92,7 +97,7 @@ class Player {
   facing: Direction;
   // Methods may call module-level free functions (defined anywhere in the file)
   // and pass/return enum values through them.
-  fn turnAround() { self.facing = opposite(self.facing); }
+  fn turnAround()         { self.facing = opposite(self.facing); }
   view fn report() -> Str { return dirName(self.facing); }
 }
 
@@ -102,64 +107,81 @@ impl Player {
 
 fn main() -> int {
   // 1. Declaration & variant access.
-  println("== basics ==");
+  io::println("== basics ==");
   d: Direction = Direction::East;
-  println(dirName(d));                       // East
+  io::println(dirName(d));                       // East
 
   // 2. Implicit ordering: variants are 0,1,2,3 in declaration order, so the
   //    later a variant is declared the later this chain reaches it.
-  println("== ordering ==");
+  io::println("== ordering ==");
   probe: Direction = Direction::South;       // index 2
-  if probe == Direction::North { println("0"); }
-  if probe == Direction::East  { println("1"); }
-  if probe == Direction::South { println("2"); } // prints
-  if probe == Direction::West  { println("3"); }
+  if probe == Direction::North {
+    io::println("0");
+  }
+  if probe == Direction::East {
+    io::println("1");
+  }
+  if probe == Direction::South {
+    io::println("2");
+  }  // prints
+  if probe == Direction::West {
+    io::println("3");
+  }
 
   // 3. Equality / inequality (same enum only).
-  println("== equality ==");
-  if d == Direction::East  { println("facing east"); }
-  if d != Direction::North { println("not north"); }
+  io::println("== equality ==");
+  if d == Direction::East {
+    io::println("facing east");
+  }
+  if d != Direction::North {
+    io::println("not north");
+  }
 
   // 4. Returning an enum from a function.
-  println("== return enum ==");
-  println(dirName(opposite(d)));             // West
+  io::println("== return enum ==");
+  io::println(dirName(opposite(d)));             // West
 
   // 5. Match with a wildcard.
-  println("== wildcard match ==");
-  if isRed(Suit::Hearts) { println("Hearts is red"); }
-  if isRed(Suit::Spades) { println("Spades is red"); }
-  else { println("Spades is black"); }
+  io::println("== wildcard match ==");
+  if isRed(Suit::Hearts) {
+    io::println("Hearts is red");
+  }
+  if isRed(Suit::Spades) {
+    io::println("Spades is red");
+  } else {
+    io::println("Spades is black");
+  }
 
   // 6. Exhaustive match used directly.
-  println("== exhaustive ==");
-  println(dirName(Direction::West));         // West
-  println(signalName(Signal::Only));         // Only
+  io::println("== exhaustive ==");
+  io::println(dirName(Direction::West));         // West
+  io::println(signalName(Signal::Only));         // Only
 
   // 7. Enum field in a class, mutated via a method.
-  println("== class field ==");
+  io::println("== class field ==");
   p: Player = Player(Direction::North);
-  println(p.report());                       // North
+  io::println(p.report());                       // North
   p.turnAround();
-  println(p.report());                       // South
+  io::println(p.report());                       // South
 
   // 8. State machine: reassign an enum in a loop using a transition function.
-  println("== state machine ==");
+  io::println("== state machine ==");
   l: Light = Light::Red;
   i: int = 0;
   while i < 4 {
-    println(lightName(l));                   // Red, Green, Yellow, Red
+    io::println(lightName(l));                   // Red, Green, Yellow, Red
     l = nextLight(l);
     i = i + 1;
   }
 
   // 9. Arrays of enums: literal, subscript get/set, iteration.
-  println("== arrays ==");
-  route: Direction[4] = [Direction::North, Direction::East, Direction::South,
-                         Direction::West];
+  io::println("== arrays ==");
+  route: Direction[4] =
+      [Direction::North, Direction::East, Direction::South, Direction::West];
   route[0] = opposite(route[0]);             // North -> South
   j: int = 0;
   while j < route.len() {
-    println(dirName(route[j]));              // South, East, South, West
+    io::println(dirName(route[j]));              // South, East, South, West
     j = j + 1;
   }
 

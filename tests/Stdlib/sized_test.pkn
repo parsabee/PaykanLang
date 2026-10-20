@@ -2,6 +2,7 @@
 // numeric types") in the containers: a List<u8>, a HashMap with u32 and
 // unsigned keys, a HashSet<i8>, a Buffer<u16>, a Box<f32> and priority
 // queues of f16 and unsigned values; literals take the element type.
+import ::io;
 import ::collections;
 import ::memory;
 
@@ -10,12 +11,15 @@ fn main() -> int {
   bytes = collections::List<u8>();
   bytes.push(250);
   bytes.push(3);
-  bytes.push(bytes.get(0) + bytes.get(1));   // 253
+  bytes.push(bytes.get(0) + bytes.get(1));  // 253
   bytes.push(bytes.get(2) + 10);             // 7
-  println(collections::listToString<u8>(bytes));
+  io::println(collections::listToString<u8>(bytes));
   match bytes.indexOf(253) {
-    at: unsigned { println(Str(bytes.contains(7)) + " " + Str(at) + " " + Str(bytes.contains(1))); }
-    None { println("not found"); }
+    at: unsigned {
+      io::println(Str(bytes.contains(7)) + " " + Str(at) + " "
+          + Str(bytes.contains(1)));
+    }
+    None { io::println("not found"); }
   }
 
   // HashMap<u32, Str>: a literal key takes the key type; keys above the
@@ -25,7 +29,8 @@ fn main() -> int {
   byCode.put(7, "seven");
   byCode.put(7, "SEVEN");
   k: u32 = 4000000000;
-  println(byCode.get(k) + " " + byCode.getOr(7, "none") + " " + byCode.getOr(8, "none") + " " + Str(byCode.len()));
+  io::println(byCode.get(k) + " " + byCode.getOr(7, "none") + " "
+      + byCode.getOr(8, "none") + " " + Str(byCode.len()));
 
   // HashMap<unsigned, int>: the top of the unsigned range hashes and
   // compares as its own value.
@@ -34,47 +39,53 @@ fn main() -> int {
   top.put(u, 1);
   top.put(u / 2, 2);
   top.put(0, 3);
-  println(Str(top.get(u)) + " " + Str(top.get(9223372036854775807)) + " " + Str(top.get(0)) + " " + Str(top.containsKey(1)));
+  io::println(Str(top.get(u)) + " " + Str(top.get(9223372036854775807)) + " "
+      + Str(top.get(0)) + " " + Str(top.containsKey(1)));
 
   // HashSet<i8>: negative keys.
   small = collections::HashSet<i8>();
   small.add(-128);
   small.add(127);
   small.add(-128);
-  println(Str(small.len()) + " " + Str(small.contains(-128)) + " " + Str(small.contains(0)) + " " + Str(small.remove(127)) + " " + Str(small.len()));
+  io::println(Str(small.len()) + " " + Str(small.contains(-128)) + " "
+      + Str(small.contains(0)) + " " + Str(small.remove(127)) + " "
+      + Str(small.len()));
 
   // Buffer<u16>: slots of sized values, zero when new.
-  buf = memory::Buffer<u16>(2);
-  buf.set(0, 65535);
-  buf.set(1, buf.copy(0) + 2);               // 1
-  buf.push(9);
-  println(Str(buf.copy(0)) + " " + Str(buf.copy(1)) + " " + Str(buf.copy(2)) + " " + Str(buf.len()));
+  buf = memory::Buffer<u16>();
+  e = buf.grow(2);
+  e = buf.set(0, 65535);
+  e = buf.set(1, buf.get(0) + 2);            // 1
+  e = buf.push(9);
+  io::println(Str(buf.get(0)) + " " + Str(buf.get(1)) + " " + Str(buf.get(2))
+      + " " + Str(buf.len()));
 
   // Box<f32>: one rounded value shared through two names.
   ratio = memory::Box<f32>(0.1);
   alias = ratio;
   r: inout f32 = alias.get();
   r = r * 3;
-  println(Str(ratio.get()) + " " + Str(ratio.get() == 0.3));
+  io::println(Str(ratio.get()) + " " + Str(ratio.get() == 0.3));
 
   // Priority queues of f16 and unsigned values.
   halves = collections::MinPriorityQueue<f16>();
   halves.push(0.1, 2);
   halves.push(1024.5, 1);                    // rounds to 1024 (the f16 ulp is 1)
-  println(Str(halves.pop()) + " " + Str(halves.pop()));
+  io::println(Str(halves.pop()) + " " + Str(halves.pop()));
   bigs = collections::MaxPriorityQueue<unsigned>();
   bigs.push(u, 1);
   bigs.push(5, 2);
-  println(Str(bigs.pop()) + " " + Str(bigs.pop()));
+  io::println(Str(bigs.pop()) + " " + Str(bigs.pop()));
 
   // A LinkedList<i32> and a Stack<u8>.
   ints = collections::LinkedList<i32>();
   ints.pushBack(-2147483648);
   ints.pushFront(2147483647);
-  println(Str(ints.front()) + " " + Str(ints.back()) + " " + Str(ints.front() + ints.back()));
+  io::println(Str(ints.front()) + " " + Str(ints.back()) + " "
+      + Str(ints.front() + ints.back()));
   st = collections::Stack<u8>();
   st.push(200);
   st.push(st.peek() + 100);                  // 44
-  println(Str(st.pop()) + " " + Str(st.pop()));
+  io::println(Str(st.pop()) + " " + Str(st.pop()));
   return 0;
 }

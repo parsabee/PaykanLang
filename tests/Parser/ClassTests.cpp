@@ -128,7 +128,7 @@ TEST(Class, InterleavedDecls) {
 }
 
 TEST(Class, MissingCloseBrace) {
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io; 
     class A {
       x: int;
     fn main() -> int { return 0; }
@@ -235,7 +235,7 @@ TEST(Class, MatchWithStmtsInArm) {
 }
 
 TEST(Class, MatchMissingCloseBrace) {
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io; 
     fn main() -> int {
       x: Obj = 0;
       match x {

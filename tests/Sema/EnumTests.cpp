@@ -9,7 +9,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 static std::string withEnums(const std::string &enums,
                              const std::string &body) {
@@ -49,21 +49,20 @@ TEST(Enum, NameClashesWithClassRejected) {
 
 // Enums share the top-level namespace with the builtins.
 TEST(Enum, NameShadowsBuiltinClassRejected) {
-  auto r = semaCheck(withEnums("enum Error { NotFound }", "return 0;"));
+  auto r = semaCheck(withEnums("enum Str { Short }", "return 0;"));
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(
-      r.Diagnostics.find("'Error' is a builtin class and cannot be redeclared"),
+      r.Diagnostics.find("'Str' is a builtin class and cannot be redeclared"),
       std::string::npos)
       << r.Diagnostics;
 }
 
-TEST(Enum, NameShadowsBuiltinFunctionRejected) {
-  auto r = semaCheck(withEnums("enum open { Read, Write }", "return 0;"));
-  EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find(
-                "'open' is a builtin function and cannot be redeclared"),
-            std::string::npos)
-      << r.Diagnostics;
+// The standard library's names are not reserved: a program's own `Error`
+// and `open` live beside res::Error and io::open.
+TEST(Enum, TheStandardLibrarysNamesAreNotReserved) {
+  auto r = semaCheck("enum Error { NotFound }\nenum open { Read }\n"
+                     "fn main() -> int { return 0; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
 // --- Variant access ---------------------------------------------------------

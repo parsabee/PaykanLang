@@ -218,7 +218,7 @@ fn main() -> int {
 }
 
 TEST(GenericStruct, BoundsAndTraits) {
-  auto r = semaCheck(R"(
+  auto r = semaCheck(R"(import ::io;
 struct H<T: Hashable> { v: T; }
 impl Hashable for H<T> { view fn hash() -> int { return self.v.hash(); } }
 trait Named { view fn name() -> Str; }
@@ -234,7 +234,7 @@ fn main() -> int {
   h = H(2.5);
   g = H("s");
   pair = twice(Tag(1));
-  println(greet(Tag(1)) + show(g) + Str(hashOf(g)) + Str(hashOf(H(1))));
+  io::println(greet(Tag(1)) + show(g) + Str(hashOf(g)) + Str(hashOf(H(1))));
   n = NoName(1);
   return pair.1.v;
 }
@@ -354,12 +354,11 @@ impl Pair<X, Y> { fn h() {} }
 fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(r.Ok);
+  // (A `static fn` in `impl Pair<A, B>` is fine: the instantiation's.)
   expectAll(r, {"'Pair' is a generic struct: write 'impl Pair<A, B>'",
                 "'impl Pair' names 1 type parameter(s); generic struct 'Pair' "
-                "has 2",
-                "a 'static fn' in the 'impl' block of a generic struct is not "
-                "supported yet"});
-  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+                "has 2"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
 TEST(GenericStruct, ImplMethodsAreCheckedPerInstantiation) {
@@ -388,9 +387,9 @@ fn main() -> int {
 }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"variable 'o' has type 'Pair<int, int>?': optional struct "
-                "types are not supported yet",
-                "match on a struct ('Pair<int, int>') is not supported yet",
+  // (An optional struct, `o`, is fine.)
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  expectAll(r, {"match on a struct ('Pair<int, int>') is not supported yet",
                 "'q' is declared with 'let'; its fields are part of its value "
                 "and cannot be assigned",
                 "tuple index '.0' applied to struct type 'Pair<int, int>': a "
@@ -457,4 +456,36 @@ TEST(GenericStruct, ImportedTemplates) {
   expectAll(bad, {"an 'impl' block for a struct of another module is not "
                   "supported yet"});
   std::filesystem::remove_all(dir);
+}
+
+// -- static fn of a generic struct's impl block (`Pair<int, Str>::make`)
+
+TEST(GenericStruct, StaticFnOfAnInstantiation) {
+  auto r = semaCheck(R"(
+struct Pair<A, B> { a: A; b: B; }
+impl Pair<A, B> {
+  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
+  static fn swapped(p: Pair<B, A>) -> Pair<A, B> { return Pair<A, B>(p.b, p.a); }
+}
+fn main() -> int {
+  p = Pair<int, Str>::make(1, "a");
+  q: Pair<Str, int> = Pair<Str, int>::swapped(p);
+  return p.a + q.b;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(GenericStruct, StaticFnWithoutTypeArgs) {
+  auto r = semaCheck(R"(
+struct Pair<A, B> { a: A; b: B; }
+impl Pair<A, B> {
+  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
+}
+fn main() -> int { p = Pair::make(1, "a"); return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectAll(r, {"'Pair::make' is a function of the generic struct 'Pair': "
+                "write 'Pair<...>::make(...)' with its type arguments"});
 }

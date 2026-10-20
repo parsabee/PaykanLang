@@ -7,6 +7,8 @@
 // value, concatenation operand, field, tuple / array / optional element).  Run with --track-heap:
 // zero live blocks.
 
+import ::io;
+
 // expect-stdout: "ab"[1]:     b
 // expect-stdout: "xyz"[i]:    xyz
 // expect-stdout: match:       newline
@@ -33,61 +35,79 @@ impl Tagged {
   fn __init__() { self.name = "k"; self.tag = "t"; }
 }
 
-fn consume(s: Str) -> int { return s.len(); }
-fn give() -> Str { return "ret"; }
+fn consume(s: Str) -> int {
+  return s.len();
+}
+fn give() -> Str {
+  return "ret";
+}
 
 fn main() -> int {
   c = "ab"[1];
-  println("\"ab\"[1]:     " + Str(c));
+  io::println("\"ab\"[1]:     " + Str(c));
   letters: Str = "";
   i = 0;
   while i < 3 {
     letters = letters + Str<char>("xyz"[i]);
     i = i + 1;
   }
-  println("\"xyz\"[i]:    " + letters);
+  io::println("\"xyz\"[i]:    " + letters);
   match "a\nb"[1] {
-    '\n' { println("match:       newline"); }
-    _ { println("match:       other"); }
+    '\n' {
+      io::println("match:       newline");
+    }
+    _ {
+      io::println("match:       other");
+    }
   }
-  println("Str<char>:   " + Str<char>("xy"[1]));
-  println("len:         " + Str<int>("abc".len()));
+  io::println("Str<char>:   " + Str<char>("xy"[1]));
+  io::println("len:         " + Str<int>("abc".len()));
 
   v = "lit";
-  println("binding:     " + v);
-  print("println:     ");
-  println("lit");
-  println("argument:    " + Str<int>(consume("lit")));
+  io::println("binding:     " + v);
+  io::print("println:     ");
+  io::println("lit");
+  io::println("argument:    " + Str<int>(consume("lit")));
   s: Str = "typed";
-  println("typed:       " + s);
-  println("concat:      " + ("lit" + "x"));
-  println("return:      " + give());
+  io::println("typed:       " + s);
+  io::println("concat:      " + ("lit" + "x"));
+  io::println("return:      " + give());
   k = Tagged();
   k.name = "k2";
   match k.tag {
-    t: Str { println("field:       " + k.name + " " + t); }
-    None { println("field:       " + k.name + " none"); }
+    t: Str {
+      io::println("field:       " + k.name + " " + t);
+    }
+    None {
+      io::println("field:       " + k.name + " none");
+    }
   }
 
   t = ("tup", 1);
   m: (Str, Str) = ("m1", "m2");
-  println("tuple:       " + t.0 + " " + m.0 + m.1);
+  io::println("tuple:       " + t.0 + " " + m.0 + m.1);
   a: Str[3] = ["x", "y", ""];
   a[0] = "z";
   a[2] = "w";
-  println("array:       " + a[0] + a[1] + a[2] + " " + ["p", "q"][1]);
+  io::println("array:       " + a[0] + a[1] + a[2] + " " + ["p", "q"][1]);
   o: Str? = "opt";
   o2: Str? = "opt2";
   match o {
     p: Str {
       match o2 {
-        q: Str { println("optional:    " + p + " " + q); }
-        None { println("optional:    " + p); }
+        q: Str {
+          io::println("optional:    " + p + " " + q);
+        }
+        None {
+          io::println("optional:    " + p);
+        }
       }
     }
-    None { println("optional:    none"); }
+    None {
+      io::println("optional:    none");
+    }
   }
-  print("int<Str>:    ");
-  println(int<Str>("42"));
+  io::print("int<Str>:    ");
+  io::println(int<Str>("42"));
   return 0;
 }

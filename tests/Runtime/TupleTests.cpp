@@ -255,7 +255,7 @@ TEST(TupleToString, NestedTuplesRenderInPlace) {
 TEST(TupleToString, ClassElementRendersThroughItsToString) {
   TrackingHeap heap;
   Refs t = {point(3),
-            PaykanShared_new((PaykanObject *)PaykanError_new("oops", 4))};
+            PaykanShared_new((PaykanObject *)PaykanString_new("oops", 4))};
   EXPECT_EQ(render(&t, kRefsLayout), "(P(3), oops)");
   // Rendering borrows the elements.
   EXPECT_EQ(t.a->strong, 1);
@@ -400,7 +400,7 @@ TEST(TupleEquals, NullReferences) {
 TEST(TupleEquals, ReferencesCompareThroughEquals) {
   TrackingHeap heap;
   gPointEqualsCalls = 0;
-  PaykanShared *err = PaykanShared_new((PaykanObject *)PaykanError_new("e", 1));
+  PaykanShared *err = PaykanShared_new((PaykanObject *)PaykanFile_new());
   Refs a = {point(3), err};
   Refs b = {point(3), err};
   EXPECT_EQ(eq(&a, &b, kRefsLayout), 1); // distinct Points, the same x
@@ -412,11 +412,10 @@ TEST(TupleEquals, ReferencesCompareThroughEquals) {
   b.a = point(4);
   EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
   EXPECT_EQ(b.a->strong, 1);
-  // Error's equals is identity: another Error with the same message is not
-  // equal.
+  // File's equals is identity: another File is not equal.
   Paykan_release(b.a);
   b.a = point(3);
-  b.b = PaykanShared_new((PaykanObject *)PaykanError_new("e", 1));
+  b.b = PaykanShared_new((PaykanObject *)PaykanFile_new());
   EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
   release(a);
   release(b);

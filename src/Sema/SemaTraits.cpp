@@ -267,6 +267,13 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   auto isBuiltinTrait = [&](const char *name) {
     return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
   };
+  // An optional shows itself when its value does: "None", or the value's
+  // text (the builtin `Show`).
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return isBuiltinTrait(names::kTraitShow) &&
+                   traitImplOwner(ot->getInnerType(), tr)
+               ? ty
+               : nullptr;
   // A struct is a ValueType and shows its fields (the builtin `Show`);
   // anything else, an `impl ... for` block gives it.  Before the tuple
   // cases, which a struct is too.

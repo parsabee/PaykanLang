@@ -15,6 +15,8 @@
 // expect-stdout: x
 // expect-stdout: 2
 
+import ::io;
+
 class Holder {
   n: int?;
   f: float?;
@@ -36,19 +38,19 @@ impl Slot<T> {
 fn twice(o: int?) -> int? {
   match o {
     n: int { return n * 2; }
-    None   { return None; }
+    None { return None; }
   }
 }
 
 fn main() -> int {
   a: int? = 3;
-  println(twice(a));
+  io::println(twice(a));
   a = None;
-  println(twice(a));
+  io::println(twice(a));
   a = 3;
   b = a;                       // shared box
   a = None;
-  println(b);
+  io::println(b);
 
   h = Holder();
   h.n = 1;
@@ -62,12 +64,12 @@ fn main() -> int {
 
   t: (int?, bool?) = (4, True);
   c: char? = 'x';
-  println(c);
+  io::println(c);
 
   s = Slot<int>();
   s.set(1);
   s.set(2);
-  println(s.v);
+  io::println(s.v);
 
   m = b;
   i = 0;

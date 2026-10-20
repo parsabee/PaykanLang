@@ -17,7 +17,7 @@ implementation takes.
 | Topic | Decision |
 |-------|----------|
 | Syntax | `weak y: Point? = x;` declares a local, `weak parent: Node?;` a class field; `weak u = x;` infers `Point?` from `x: Point` or `x: Point?`; `weak e: Point?;` starts as None |
-| Type | `T?` of a class `T` (a user class, `Str`, `File`, `Error`, `Obj`), always optional: a weak reference reads as None once its object is destroyed.  Not a plain class, a value, a struct, an enum or a function type |
+| Type | `T?` of a class `T` (a user class, `Str`, `Obj`), always optional: a weak reference reads as None once its object is destroyed.  Not a plain class, a value, a struct, an enum or a function type |
 | Reading | a `weak` variable or field reads as a `T?`: a strong reference to the object while it is alive (one the expression owns for its own duration), None otherwise; it goes everywhere a `T?` goes (`match`, `== None`, an argument, a result, a strong variable or field) |
 | Writing | assigning a `T` or a `T?` to a `weak` variable or field stores a weak reference to its object (none for None) and drops the one it held; the object's strong count is untouched |
 | Lifetime | a weak reference never keeps its object alive; the object is destroyed with its last strong reference, and from then on every weak reference to it reads as None |

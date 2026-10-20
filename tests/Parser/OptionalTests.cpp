@@ -91,13 +91,13 @@ TEST(Optional, QualifiedOptionalType) {
 
 TEST(Optional, MatchArmsOverOptional) {
   // Type arm with binding, a `None` literal arm, and the wildcard all parse.
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io;
     class Node { v: int; }
     fn main() -> int {
       n: Node? = None;
       match n {
-        x: Node { println("some"); }
-        None     { println("none"); }
+        x: Node { io::println("some"); }
+        None     { io::println("none"); }
       }
       match n {
         Node { }
@@ -126,7 +126,7 @@ TEST(Optional, ComparisonAgainstNone) {
 TEST(Optional, OptionalPrimitivesParse) {
   // Optional primitives (#66) parse in every type position, including a
   // primitive match arm over an `int?` subject.
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io;
     class H { n: int?; }
     impl H { fn __init__() {} }
     fn f(x: float?, b: bool?) -> char? { return None; }
@@ -135,8 +135,8 @@ TEST(Optional, OptionalPrimitivesParse) {
       xs: int?[2] = [1, 2];
       t: (int?, Str) = (1, "a");
       match x {
-        n: int { println("some"); }
-        None   { println("none"); }
+        n: int { io::println("some"); }
+        None   { io::println("none"); }
       }
       return 0;
     }

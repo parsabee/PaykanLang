@@ -14,6 +14,7 @@
 // a ReadError with a position, never an assertion; nesting is bounded
 // (kMaxDepth), and so is every recursion here.
 
+#include "Names.h"
 #include "paykan/Frontend.h"
 #include "paykan/ast/Interchange.h"
 
@@ -753,6 +754,10 @@ private:
     TypeParamBounds bounds;
     if (!name || !typeParams(f, tparams, bounds))
       return nullptr;
+    // `___init__` is the initializer `__init__`, private to its module.
+    const bool modulePrivateInit = *name == names::kMethodInitModulePrivate;
+    if (modulePrivateInit)
+      name = &Ctx.intern(names::kMethodInit);
     const SExpr *pl = f.list("params");
     if (!pl)
       return nullptr;
@@ -790,6 +795,7 @@ private:
                                     std::move(tparams));
       fn->setNativeSymbol(*symbol);
       fn->setResultMode(resultMode);
+      fn->setModulePrivateInit(modulePrivateInit);
       return fn;
     }
     CompoundStmt *body = nullptr;
@@ -821,6 +827,7 @@ private:
     fn->setView(view);
     fn->setStatic(isStatic);
     fn->setResultMode(resultMode);
+    fn->setModulePrivateInit(modulePrivateInit);
     fn->setTypeParamBounds(std::move(bounds));
     return fn;
   }

@@ -3,6 +3,8 @@
 //            nested ternaries, class-type ternary (Str branches via emitAsShared),
 //            ternary used in assignment and function return
 
+import ::io;
+
 fn classify(n: int) -> Str {
   return if n > 0 then "positive" else if n < 0 then "negative" else "zero";
 }
@@ -12,60 +14,58 @@ fn pickStr(flag: bool, a: Str, b: Str) -> Str {
 }
 
 fn main() -> int {
-  println("=== int ternary ===");
-  x: int = if True  then 10 else 20;
+  io::println("=== int ternary ===");
+  x: int = if True then 10 else 20;
   y: int = if False then 10 else 20;
-  println("True  ->" + Str<int>(x));    // 10
-  println("False ->" + Str(y));    // 20
+  io::println("True  ->" + Str<int>(x));    // 10
+  io::println("False ->" + Str(y));    // 20
 
-  println("=== float ternary ===");
+  io::println("=== float ternary ===");
   f: float = if 1 < 2 then 1.5 else 2.5;
-  println("1<2 ->" + Str<float>(f));    // 1.5
+  io::println("1<2 ->" + Str<float>(f));    // 1.5
 
-  println("=== bool ternary ===");
+  io::println("=== bool ternary ===");
   b: bool = if True then False else True;
-  println("bool ->" + Str(b));    // False
+  io::println("bool ->" + Str(b));    // False
 
-  println("=== nested ternary ===");
+  io::println("=== nested ternary ===");
   grade: int = 85;
-  label: int = if grade >= 90 then 1
-               else if grade >= 80 then 2
-               else if grade >= 70 then 3
-               else 4;
-  println("grade 85 -> band" + Str<int>(label));  // 2
+  label: int = if grade >= 90 then 1 else if grade >= 80 then 2 else if grade
+      >= 70 then 3 else 4;
+  io::println("grade 85 -> band" + Str<int>(label));  // 2
 
-  println("=== ternary with relational condition ===");
+  io::println("=== ternary with relational condition ===");
   a: int = 7;
-  println("max(7,3)=" + Str(if a > 3 then a else 3));  // 7
-  println("min(7,3)=" + Str<int>(if a < 3 then a else 3));  // 3
+  io::println("max(7,3)=" + Str(if a > 3 then a else 3));  // 7
+  io::println("min(7,3)=" + Str<int>(if a < 3 then a else 3));  // 3
 
-  println("=== Str ternary (class branches) ===");
+  io::println("=== Str ternary (class branches) ===");
   // Both branches produce Str — exercises the isClassResult path which
   // calls emitAsShared on each branch.
   cond: bool = True;
   s: Str = if cond then "yes" else "no";
-  println(s);           // yes
+  io::println(s);           // yes
   s = if !cond then "yes" else "no";
-  println(s);           // no
+  io::println(s);           // no
 
-  println("=== Str ternary rebind (double-box regression) ===");
+  io::println("=== Str ternary rebind (double-box regression) ===");
   // Assigning a ternary-Str to an existing variable must not double-box.
   t: Str = "initial";
   t = if True then "replaced" else "original";
-  println(t);           // replaced
+  io::println(t);           // replaced
 
-  println("=== ternary in function return ===");
-  println(classify(5));    // positive
-  println(classify(0 - 3));// negative
-  println(classify(0));    // zero
+  io::println("=== ternary in function return ===");
+  io::println(classify(5));    // positive
+  io::println(classify(0 - 3)); // negative
+  io::println(classify(0));    // zero
 
-  println("=== ternary with owned Str variables as branches ===");
+  io::println("=== ternary with owned Str variables as branches ===");
   p: Str = "alpha";
   q: Str = "beta";
-  r: Str = pickStr(True,  p, q);
-  println(r);           // alpha
+  r: Str = pickStr(True, p, q);
+  io::println(r);           // alpha
   r = pickStr(False, p, q);
-  println(r);           // beta
+  io::println(r);           // beta
 
   return 0;
 }

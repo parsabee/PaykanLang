@@ -1,3 +1,5 @@
+import ::io;
+
 // OK: wildcard arm as the last arm is valid
 class Dog {}
 class Cat {}
@@ -7,7 +9,7 @@ fn main() -> int {
   match x {
     Dog { }
     _ {
-      println("not a Dog");
+      io::println("not a Dog");
     }
   }
   return 0;

@@ -60,6 +60,8 @@ TEST(Native, OnlyScalarsCrossByValue) {
     native fn f(n: int, x: float, b: bool, c: char, k: view int,
                 m: inout int, s: view Str, o: inout Obj) -> int = "pk_f";
     native fn g<T>(n: int, x: view T, y: inout T) = "pk_g";
+    enum Dir { Up, Down }
+    native fn h(d: Dir) -> Dir = "pk_h"; // an enum, as its ordinal
     fn main() -> int {
       m = 1;
       o: Obj = "o";
@@ -84,8 +86,8 @@ TEST(Native, OnlyScalarsCrossByValue) {
   }
   r = semaCheck("native fn f(s: Str) = \"pk_f\";\n"
                 "fn main() -> int { return 0; }");
-  EXPECT_NE(r.Diagnostics.find("('s: view Str'); only int, float, bool and "
-                               "char cross into C by value"),
+  EXPECT_NE(r.Diagnostics.find("('s: view Str'); only int, float, bool, "
+                               "char and an enum cross into C by value"),
             std::string::npos)
       << r.Diagnostics;
 }

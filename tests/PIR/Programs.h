@@ -12,7 +12,7 @@ cstr @.str0 = "Hello\n" len 6
 data @.d0 = [1, -2, 3]
 bytes @.b0 = [0, 4]
 extern obj @$rt.PaykanObject_None
-extern vtable @$rt.PaykanError_vtable
+extern vtable @$rt.PaykanString_vtable
 
 class Point {
   field x: i64
@@ -88,7 +88,7 @@ fn @main() -> i64 {
   field.store %p.2, Point.x, 7
   field.store %p.2, Point.name, null box
   %vt.3 = vtable.addr Point
-  %vt2.4 = vtable.addr @$rt.PaykanError_vtable
+  %vt2.4 = vtable.addr @$rt.PaykanString_vtable
   %vt3.5 = vtable.load %p.2
   %same.6 = cmp eq %vt.3, %vt3.5
   %b.7 = box %p.2

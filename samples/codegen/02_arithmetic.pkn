@@ -2,55 +2,57 @@
 // Exercises: visitBinaryExpr for Add/Sub/Mul/Div/Mod,
 //            implicit int->float promotion in binary ops and assignments
 
+import ::io;
+
 fn main() -> int {
   // ---- Integer arithmetic ---------------------------------------------------
-  println("=== int arithmetic ===");
-  println("2+3=" + Str<int>(2 + 3));       // 5
-  println("10-4=" + Str(10 - 4));      // 6
-  println("3*7=" + Str<int>(3 * 7));       // 21
-  println("20/4=" + Str(20 / 4));      // 5
-  println("17%5=" + Str<int>(17 % 5));      // 2
-  println("7%7=" + Str(7 % 7));       // 0
+  io::println("=== int arithmetic ===");
+  io::println("2+3=" + Str<int>(2 + 3));       // 5
+  io::println("10-4=" + Str(10 - 4));      // 6
+  io::println("3*7=" + Str<int>(3 * 7));       // 21
+  io::println("20/4=" + Str(20 / 4));      // 5
+  io::println("17%5=" + Str<int>(17 % 5));  // 2
+  io::println("7%7=" + Str(7 % 7));       // 0
 
   // Operator precedence
-  println("2+3*4=" + Str<int>(2 + 3 * 4));          // 14
-  println("(2+3)*4=" + Str((2 + 3) * 4));        // 20
-  println("10-2*3=" + Str<int>(10 - 2 * 3));         // 4
-  println("8/2+1=" + Str(8 / 2 + 1));          // 5
-  println("10%3+1=" + Str<int>(10 % 3 + 1));         // 2
+  io::println("2+3*4=" + Str<int>(2 + 3 * 4));  // 14
+  io::println("(2+3)*4=" + Str((2 + 3) * 4));  // 20
+  io::println("10-2*3=" + Str<int>(10 - 2 * 3));  // 4
+  io::println("8/2+1=" + Str(8 / 2 + 1));  // 5
+  io::println("10%3+1=" + Str<int>(10 % 3 + 1));  // 2
 
   // Negative numbers (via subtraction)
-  println("0-5=" + Str(0 - 5));              // -5
-  println("0-5*2=" + Str<int>(0 - 5 * 2));         // -10
+  io::println("0-5=" + Str(0 - 5));              // -5
+  io::println("0-5*2=" + Str<int>(0 - 5 * 2));  // -10
 
   // ---- Float arithmetic -----------------------------------------------------
-  println("=== float arithmetic ===");
-  println("1.5+2.5=" + Str(1.5 + 2.5));      // 4
-  println("5.0-1.5=" + Str<float>(5.0 - 1.5));      // 3.5
-  println("2.0*3.5=" + Str(2.0 * 3.5));      // 7
-  println("7.0/2.0=" + Str<float>(7.0 / 2.0));      // 3.5
-  println("5.5%2.0=" + Str(5.5 % 2.0));      // 1.5
+  io::println("=== float arithmetic ===");
+  io::println("1.5+2.5=" + Str(1.5 + 2.5));  // 4
+  io::println("5.0-1.5=" + Str<float>(5.0 - 1.5));  // 3.5
+  io::println("2.0*3.5=" + Str(2.0 * 3.5));  // 7
+  io::println("7.0/2.0=" + Str<float>(7.0 / 2.0));  // 3.5
+  io::println("5.5%2.0=" + Str(5.5 % 2.0));  // 1.5
 
   // ---- Int->float promotion --------------------------------------------------
-  println("=== int->float promotion ===");
+  io::println("=== int->float promotion ===");
   // In binary expr: one side is float, other is int
-  println("1+0.5=" + Str<float>(1 + 0.5));        // 1.5
-  println("0.5+1=" + Str(0.5 + 1));        // 1.5
-  println("3*1.0=" + Str<float>(3 * 1.0));        // 3
+  io::println("1+0.5=" + Str<float>(1 + 0.5));  // 1.5
+  io::println("0.5+1=" + Str(0.5 + 1));        // 1.5
+  io::println("3*1.0=" + Str<float>(3 * 1.0));  // 3
   // In variable declaration: explicit float var gets int expr
   promoted: float = 7;
-  println("float=7: " + Str(promoted));        // 7
+  io::println("float=7: " + Str(promoted));  // 7
   // Rebind
   promoted = 3;
-  println("float=3: " + Str<float>(promoted));        // 3
+  io::println("float=3: " + Str<float>(promoted));  // 3
 
   // ---- Chained assignments and compound exprs ------------------------------
-  println("=== chained ===");
+  io::println("=== chained ===");
   x: int = 1;
   x = x + 10;
   x = x * 2;
   x = x - 3;
-  println("x=(1+10)*2-3=" + Str(x));            // 19
+  io::println("x=(1+10)*2-3=" + Str(x));            // 19
 
   return 0;
 }

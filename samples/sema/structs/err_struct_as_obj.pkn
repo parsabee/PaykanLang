@@ -1,6 +1,8 @@
 // ERROR: initializer of type 'A' does not match declared type 'Obj'
 // A struct is a value, not an object: it has no vtable and no identity.
-struct A { x: int; }
+struct A {
+  x: int;
+}
 fn main() -> int {
   o: Obj = A(1);
   return 0;

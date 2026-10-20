@@ -7,6 +7,8 @@
 //            through a function, `float?` self-comparison, and the non-NaN
 //            cases that stay equal to themselves.
 
+import ::io;
+
 // expect-stdout: nan == nan:      False
 // expect-stdout: t == t:          False
 // expect-stdout: t != t:          True
@@ -21,31 +23,33 @@
 // expect-stdout: (-0.0) == (0.0): True
 // expect-stdout: y == y (float?): True
 
-fn same(p: (int, float), q: (int, float)) -> bool { return p == q; }
+fn same(p: (int, float), q: (int, float)) -> bool {
+  return p == q;
+}
 
 fn main() -> int {
   nan: float = 0.0 / 0.0;
   t = (1, nan);
   u = (1, nan);
   alias = t;                                   // a copy of t
-  println("nan == nan:      " + Str(nan == nan));
-  println("t == t:          " + Str(t == t));
-  println("t != t:          " + Str<bool>(t != t));
-  println("t == u:          " + Str(t == u));
-  println("alias == t:      " + Str(same(alias, t)));
+  io::println("nan == nan:      " + Str(nan == nan));
+  io::println("t == t:          " + Str(t == t));
+  io::println("t != t:          " + Str<bool>(t != t));
+  io::println("t == u:          " + Str(t == u));
+  io::println("alias == t:      " + Str(same(alias, t)));
   n = ((1, nan), "x");
-  println("nested n == n:   " + Str(n == n));
+  io::println("nested n == n:   " + Str(n == n));
   o: (int, float?) = (1, nan);
-  println("(int, float?):   " + Str(o == o));
+  io::println("(int, float?):   " + Str(o == o));
   x: float? = nan;
-  println("x == x (float?): " + Str(x == x));
-  println("x != x (float?): " + Str<bool>(x != x));
+  io::println("x == x (float?): " + Str(x == x));
+  io::println("x != x (float?): " + Str<bool>(x != x));
   ok = (1, 2.5, "s");
-  println("ok == ok:        " + Str(ok == ok));
-  println("ok != ok:        " + Str<bool>(ok != ok));
+  io::println("ok == ok:        " + Str(ok == ok));
+  io::println("ok != ok:        " + Str<bool>(ok != ok));
   z = (-0.0, 1);
-  println("(-0.0) == (0.0): " + Str(z == (0.0, 1)));
+  io::println("(-0.0) == (0.0): " + Str(z == (0.0, 1)));
   y: float? = 2.5;
-  println("y == y (float?): " + Str(y == y));
+  io::println("y == y (float?): " + Str(y == y));
   return 0;
 }

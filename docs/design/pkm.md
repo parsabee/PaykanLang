@@ -317,7 +317,7 @@ through `T_CLASS` by name, not by index).
 | tag | entry | payload | meaning |
 |---|---|---|---|
 | 1–5 | `T_INT`, `T_FLOAT`, `T_BOOL`, `T_CHAR`, `T_VOID` | — | primitives (`void` for returns only) |
-| 6 | `T_BUILTIN_CLASS` | `u8 kind` | 0 `Obj`, 1 `Str`, 2 `File`, 3 `Error`: bootstrapped by every `ASTContext`, never described |
+| 6 | `T_BUILTIN_CLASS` | `u8 kind` | 0 `Obj`, 1 `Str`: bootstrapped by every `ASTContext`, never described. 2 and 3 were the builtin classes `File` and `Error`, which are gone (`io::File` and `res::Error` are ordinary types of the standard library's modules); the codes stay reserved and unused while the format is frozen |
 | 7 | `T_CLASS` | `Mod, Str name` | a user class; `mod` 0 → described by a `CLASS` record here, else by that module's blob |
 | 8 | `T_ENUM` | `Mod, Str name` | likewise |
 | 9 | `T_OPAQUE` | `Mod, uleb id` | a module-private class seen only as the type of a private field of a public class (#19): an object reference with no name or members; `id` = position among the module's private classes sorted by name |
@@ -431,7 +431,7 @@ verified PIR"; this design reads that as "ships what importers specialise
 | Name in a template body | Resolved at export to |
 |---|---|
 | a type annotation (`T`, `T[3]`, `point::Point`, `Box<T>`, `Node<T>?`) | `Ty` |
-| a callee | `Callee`: this module's function/ctor, another module's function `(Mod, name)`, a template, a builtin (`println`, `len`, `open`, conversions), `__super__`, a type parameter used as a value (kept so the importer reports it), or `UNRESOLVED(name)` |
+| a callee | `Callee`: this module's function/ctor, another module's function `(Mod, name)`, a template, a builtin (`len`, conversions; `println` and `open` once were, and are now `::io` functions), `__super__`, a type parameter used as a value (kept so the importer reports it), or `UNRESOLVED(name)` |
 | `Enum::Variant` (qualified or not) | `(Ty, variant index)` |
 | a module constant, a class static, a static call (#170/#167) | `(Mod, name)` / a `TYPE` identifier |
 | a local, a parameter, `self`; a field or method name | a **string** (resolved per instantiation against the receiver's type, as today) |

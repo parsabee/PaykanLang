@@ -11,6 +11,8 @@
 //
 // Both print 49999995000000.
 
+import ::io;
+
 class Stack<T> {
   items: T[8];
   count: int;
@@ -27,15 +29,12 @@ class Stack<T> {
     self.count = self.count - 1;
     return self.items[self.count];
   }
-  view fn len() -> int { return self.count; }
+  view fn len() -> int      { return self.count; }
   view fn capacity() -> int { return self.items.len(); }
 }
 
 impl Stack<T> {
-  fn __init__(blank: T) {
-    self.items = [blank; 8];
-    self.count = 0;
-  }
+  fn __init__(blank: T) { self.items = [blank; 8]; self.count = 0; }
 }
 
 fn main(args: view Str[]) -> int {
@@ -50,17 +49,19 @@ fn main(args: view Str[]) -> int {
       i = i + 1;
     }
     if raw {
-      while s.len() > 0 { total = total + s.popRaw(); }
+      while s.len() > 0 {
+        total = total + s.popRaw();
+      }
     } else {
       done = False;
       while !done {
         match s.pop() {
           v: int { total = total + v; }
-          None   { done = True; }
+          None { done = True; }
         }
       }
     }
   }
-  println(Str(total));
+  io::println(Str(total));
   return 0;
 }

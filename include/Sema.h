@@ -424,6 +424,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// `m::__name` written in an importer: reported as private to its
   /// module, true; false when @p name is not of that form.
   bool reportPrivateImport(const std::string &name, ast::SourceLocation loc);
+  /// Whether code here may construct (@p verb "constructed"), or extend
+  /// through `__super__` ("extended"), the type @p typeName whose
+  /// initializer is @p init: always, unless the initializer is `___init__`
+  /// and the type is another module's, outside that module's own templates.
+  /// Reports it otherwise, naming the type as @p written.
+  bool checkConstructible(const std::string &typeName,
+                          const std::string &written,
+                          const ast::MethodDecl *init, const char *verb,
+                          ast::SourceLocation loc);
   /// Whether a declaration's name is its module's own (`_f`, `_T`,
   /// `_T::f`): the first segment is private to the module.
   static bool isModuleOwnName(const std::string &name);
@@ -764,6 +773,11 @@ public:
   /// Global cache of already-analyzed modules, keyed by the resolved path
   /// of the file they came from (a source, or a .pkm).
   static StringMap<ModuleInfo> ModuleCache;
+  /// The analysis of each module of ModuleCache built from its source, by
+  /// the same key: a later compilation in the process that imports the
+  /// module gets it too (its importer's ImportedContexts), which an
+  /// in-process lowering of the program needs for the module's code.
+  static StringMap<std::shared_ptr<SemaContext>> ModuleContextCache;
 
   /// The exports of the module this Sema analysed (after run()): what an
   /// importer sees, in the module's own terms.  @p moduleName is its
@@ -1157,6 +1171,26 @@ private:
     return ClassTemplates.count(name) || StructTemplates.count(name) ||
            FuncTemplates.count(name);
   }
+  /// Whether @p name is `Tmpl::member`, a function of the `impl` block of a
+  /// class or struct template (`Box<int>::of(1)`, resolveGenericCall).
+  bool isTemplateStatic(const std::string &name) const {
+    const size_t sep = name.rfind("::");
+    if (sep == std::string::npos)
+      return false;
+    const std::string owner = name.substr(0, sep);
+    return ClassTemplates.count(owner) || StructTemplates.count(owner);
+  }
+  /// An optional of a tuple or a struct holds the value in place: one of
+  /// more than this many bytes is rejected (checkOptionalValueSize), to be
+  /// boxed.
+  static constexpr int64_t kOptionalValueLimit = 64;
+  /// The size in bytes of a value of @p ty held in place, as the lowering
+  /// lays it out (ModuleLowering::memLayout); 8 for a reference.
+  static int64_t valueSize(const ast::Type *ty);
+  /// Report `inner?` (the @p context at @p loc) when @p inner, a tuple or a
+  /// struct, is more than kOptionalValueLimit bytes.
+  bool checkOptionalValueSize(ast::Type *inner, ast::SourceLocation loc,
+                              const std::string &context);
   /// Split the canonical instantiation name @p name (`Tmpl<arg1, arg2>`)
   /// into the template's name and its arguments, resolved in this context;
   /// false when it is not one or an argument does not resolve.
@@ -1308,6 +1342,11 @@ private:
     const std::vector<std::string> *RequestLines = nullptr;
   };
   std::vector<PendingInstantiation> PendingInstantiations;
+  /// Declare the `static fn`s of the `impl` blocks of the instantiation
+  /// @p instName of @p type (ImplsByClass) as the functions `Inst::name`,
+  /// their bodies pending like @p base, the instantiation's own entry.
+  void declareInstantiationStatics(const std::string &instName, ast::Type *type,
+                                   const PendingInstantiation &base);
 
   /// Instantiations in creation order; injected into the TranslationUnit at
   /// the end of run() so they are lowered.
@@ -1325,6 +1364,21 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// Whether every struct's fields are known (populateStructs): until then
+  /// a struct's size is not, and the checks of the optionals resolved so far
+  /// (a class's fields and signatures) wait in DeferredOptionalChecks.
+  bool StructsPopulated = false;
+  struct DeferredOptionalCheck {
+    ast::Type *Inner;
+    ast::SourceLocation Loc;
+    std::string Context;
+    /// Where it was resolved: the diagnostic's file and instantiation notes.
+    const ModuleTemplates *Origin;
+    std::vector<InstantiationFrame> Frames;
+  };
+  std::vector<DeferredOptionalCheck> DeferredOptionalChecks;
+  /// The types reported (by name): a second use of one is a follow-on.
+  StringSet ReportedOptionalLimits;
   /// The depth of the instantiation whose body is being checked
   /// (checkPendingInstantiations); 0 in hand-written code.
   size_t CurrentInstantiationDepth = 0;

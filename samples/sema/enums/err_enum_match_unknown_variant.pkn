@@ -5,10 +5,10 @@ enum Color { Red, Green }
 fn main() -> int {
   c: Color = Color::Red;
   match c {
-    Red   { }
+    Red { }
     Green { }
-    Blue  { }   // sema error: 'Blue' is not a variant of enum 'Color'
-    _     { }
+    Blue { }   // sema error: 'Blue' is not a variant of enum 'Color'
+    _ { }
   }
   return 0;
 }

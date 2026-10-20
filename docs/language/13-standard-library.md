@@ -9,10 +9,17 @@ qualifier: `collections::List<int>()`.
 
 ## Quick Summary
 
+- `::io`: printing (`print`, `println`, `printerr`, `printerrln`, of any `Show` value),
+  files (`open`, the class `File` and its `write`, `readln`, `readbytes` and `read`) and
+  the standard input (`stdin()`).
+- `::result`: errors as values. `ErrorCode`, the standard set of errors; `Error`, a code
+  and a message; `Result<T>`, an error and the value made when there was none. Every
+  library function that can fail returns a `Result` (or an `Error` when it makes no value).
 - `::collections`: `List<T>`, `LinkedList<T>`, `Stack<T>`, `Queue<T>`, `HashMap<K, V>`,
   `HashSet<K>`, `MinPriorityQueue<T>` and `MaxPriorityQueue<T>`, and the functions
   `listOf` and `listToString`.
-- `::memory`: `Buffer<T>`, the growable storage the containers are built on, and
+- `::memory`: `Buffer<T>`, the growable storage the containers are built on (a struct
+  whose copies share its slots, reporting errors as `::result` values), and
   `Box<T: ValueType>`, one value in a shared object.
 - `::math`: the C library's math functions on `float` (`sqrt`, `pow`, `exp`, `log`,
   `sin`, `atan2`, `floor`, `round`, `gamma`, …), bound directly to `<math.h>`, with
@@ -47,6 +54,8 @@ qualifier: `collections::List<int>()`.
 ## An Example
 
 ```pkn
+import ::io;
+
 import ::collections;
 
 fn main() -> int {
@@ -57,7 +66,7 @@ fn main() -> int {
     counts.put(words[i], counts.getOr(words[i], 0) + 1);
     i = i + 1;
   }
-  println("to: " + Str(counts.get("to")) + ", keys: " + Str(counts.len()));
+  io::println("to: " + Str(counts.get("to")) + ", keys: " + Str(counts.len()));
 
   todo = collections::MinPriorityQueue<Str>();
   todo.push("write", 2);
@@ -65,7 +74,7 @@ fn main() -> int {
   todo.push("ship", 3);
   out = collections::List<Str>();
   while !todo.isEmpty() { out.push(todo.pop()); }
-  println(collections::listToString(out));
+  io::println(collections::listToString(out));
   return 0;
 }
 ```
@@ -75,6 +84,161 @@ Output:
 ```
 to: 2, keys: 4
 [plan, write, ship]
+```
+
+---
+
+## `::io`
+
+Printing, files and the standard input. Printing is not built into the language: a
+program that prints imports `::io` (`import ::io;`, by convention without an alias) and
+calls `io::println(...)`.
+
+| Function | Description |
+|----------|-------------|
+| `print(v)`, `println(v)` | Write `v.toString()` to stdout; `println` adds a newline |
+| `printerr(v)`, `printerrln(v)` | The same, to stderr |
+| `open(path, mode)` | The file at `path`, opened with C's `fopen` mode (`"r"`, `"w"`, `"a"`, ...): a `res::Result<File>` |
+| `stdin()` | The process's standard input, a `File` |
+
+Each print function is `fn println<T: Show>(value: view T)`, so it takes one value of any
+type that implements [`Show`](12-traits.md): an object (every class, `Str`), a number, a
+`bool`, a `char`, a tuple, a struct, or an optional of one, which prints `None` when it is
+absent. A function value is not `Show` (`'() -> int' does not implement trait 'Show',
+which 'io::println' requires of 'T'`). Several pieces are joined into one `Str` with `+`
+first (`io::println("n = " + Str(n))`): there is no variadic form.
+
+A `File` is an open file, closed when the last reference to it goes; its `toString()` is
+`File@0x...`. A program does not construct one: `open` and `stdin` make it, its initializer
+being `___init__`, private to `::io` (`io::File(...)` is `'io::File' cannot be constructed
+here: its initializer '___init__' is private to module '::io'`). Its methods are `view fn`s,
+and each reports failure through `::result`:
+
+| Method | Description |
+|--------|-------------|
+| `write(s)` | Writes `s`; returns a `res::Error`, `Ok` when it wrote |
+| `readln()` | The next line, with its newline when it has one: a `res::Result<Str>` |
+| `readbytes(n)` | Up to `n` bytes (`InvalidArgument` when `n` is not positive) |
+| `read()` | The rest of the file |
+
+A read's error is `EndOfFile` when nothing is left. When `open` fails, the result's error
+has the code of C's `errno` (`NotFound`, `PermissionDenied`, ...) and C's `strerror` text
+as its message (`No such file or directory`). A file is matched through the result's
+`value`, an optional:
+
+```pkn
+r = io::open("notes.txt", "r");
+match r.value {
+  f: io::File {
+    while True {
+      match f.readln().value {
+        line: Str { io::print(line); }
+        None      { break; }           // EndOfFile
+      }
+    }
+  }
+  None { io::printerrln("cannot open notes.txt: " + r.error.message()); }
+}
+```
+
+Type names are global across an import graph ([Modules](06-modules.md)), so a program that
+imports `::io` cannot declare its own `File`, `Error`, `Result` or `ErrorCode` (`class
+'File' conflicts with an imported type of the same name`).
+
+```pkn
+import ::io;
+import ::result as res;
+
+struct Point { x: int; y: int; }
+
+fn main() -> int {
+  io::println(42);
+  io::println((1, "one"));
+  io::println(Point(3, 4));
+  n: int? = None;
+  io::println(n);
+  io::print("no newline, ");
+  io::println(True);
+  r = io::open("/no/such/dir/file.txt", "r");
+  io::println(r.isOk());
+  io::println(res::name(r.error.code) + ": " + r.error.message());
+  return 0;
+}
+```
+
+Output:
+
+```
+42
+(1, one)
+Point(x: 3, y: 4)
+None
+no newline, True
+False
+NotFound: No such file or directory
+```
+
+## `::result`
+
+Errors as values, imported by convention as `import ::result as res;`. An `Error` says
+what went wrong: a code from the standard set and, when there is more to say, a message. A
+function of the standard library that can fail returns a `Result<T>` (or an `Error`, when
+it makes no value), and a program can use the same types for its own errors.
+
+| Declaration | Description |
+|-------------|-------------|
+| `enum ErrorCode` | `Ok`, `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidArgument`, `IsADirectory`, `NotADirectory`, `TooManyOpenFiles`, `NoSpace`, `ReadOnly`, `Busy`, `Interrupted`, `WouldBlock`, `BrokenPipe`, `TimedOut`, `OutOfMemory`, `Unsupported`, `Io`, `EndOfFile`, `OutOfRange`, `Other` |
+| `struct Error { code: ErrorCode; msg: Str?; }` | An error; `isOk()` is whether the code is `Ok`, `message()` is `msg`, or the code's name when it is `None` |
+| `struct Result<T> { error: Error; value: T?; }` | The result of an operation that can fail: `value` is present exactly when `error.code` is `Ok`; `isOk()` tests it |
+| `none()` | No error: `Error(ErrorCode::Ok, None)` |
+| `ok(v)` | The `Result<T>` of an operation that made `v` |
+| `name(code)` | The code's name: `"NotFound"` for `ErrorCode::NotFound` |
+| `fromErrno(errno)` | The `Error` of a C library failure: its code and C's `strerror` text |
+
+`Error` and `Result` are [structs](14-structs.md), values copied on assignment. A struct is
+not a `match` subject, so a result is taken apart by matching its `value`, in optional mode
+([Match](07-match-statements.md)), and reading its `error` in the `None` arm. `Result<T>`
+works for every `T`: for an optional `T` the `value` is a `T` itself, not a nested
+optional (`Result<Str?>`'s `value` is a `Str?`, see [Generics](11-generics.md)).
+
+```pkn
+import ::io;
+import ::result as res;
+
+fn parsePort(s: Str) -> res::Result<int> {
+  match int(s) {
+    n: int {
+      if n > 0 && n < 65536 { return res::ok(n); }
+      return res::Result<int>(
+          res::Error(res::ErrorCode::InvalidArgument, "out of range: " + s), None);
+    }
+    None {
+      return res::Result<int>(res::Error(res::ErrorCode::InvalidArgument, None), None);
+    }
+  }
+}
+
+fn main() -> int {
+  inputs: Str[3] = ["8080", "99999", "http"];
+  i = 0;
+  while i < inputs.len() {
+    r = parsePort(inputs[i]);
+    match r.value {
+      port: int { io::println("port " + Str(port)); }
+      None      { io::println("error: " + r.error.message()); }
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+port 8080
+error: out of range: 99999
+error: InvalidArgument
 ```
 
 ---
@@ -181,6 +345,8 @@ A literal flowing into a container's method takes the element type, so `bytes.pu
 pushes a `u8`, and the elements keep their arithmetic: adding two `u8` elements wraps at 256.
 
 ```pkn
+import ::io;
+
 import ::collections;
 
 fn main() -> int {
@@ -189,7 +355,7 @@ fn main() -> int {
   bytes.push(bytes.get(0) + 10);          // 4: u8 arithmetic wraps
   codes = collections::HashMap<u32, Str>();
   codes.put(4000000000, "big");           // a key above the i32 range
-  println(collections::listToString<u8>(bytes) + " " + codes.get(4000000000));
+  io::println(collections::listToString<u8>(bytes) + " " + codes.get(4000000000));
   return 0;
 }
 ```
@@ -202,18 +368,68 @@ Output:
 
 ## `::memory`
 
-`Buffer<T>(n)` is `n` slots of `T` whose storage is the runtime's, reached through generic
-native functions (see [Native functions](02-functions-and-calling.md#native-functions)). A
-new slot holds zero bytes: `0`, `0.0`, `False`, char 0 or `None`. A slot of a reference type
-that cannot be `None` (a class, `Str`, a tuple) is unset until it is stored, and reading
-it panics.
+`Buffer<T>()` is an empty run of slots of `T` whose storage is the runtime's, reached
+through generic native functions (see [Native
+functions](02-functions-and-calling.md#native-functions)). `Buffer` is a
+[struct](14-structs.md) holding a reference to that storage, a runtime object: copying a
+buffer copies the reference, so every copy shares the same slots, as copies of a slice
+header do, and the storage goes with the last copy. A new slot holds zero bytes: `0`,
+`0.0`, `False`, char 0 or `None`. A slot of a reference type that cannot be `None` (a
+class, `Str`, a tuple) is unset until it is stored.
+
+What can go wrong is reported as a [`::result`](#result) value, not a panic: the methods
+that can fail return a `res::Error` (or a `res::Result<T>`) and leave the buffer unchanged
+when they do. Only `get(i)` and `copyUnchecked(i)` panic on a bad index or an unset slot,
+for code that has checked the index already.
 
 | Method | Description |
 |--------|-------------|
 | `len()` | The number of slots, an `unsigned` |
-| `get(i)`, `copy(i)`, `set(i, v)` | Slot `i` (an `unsigned`): a `view` of it, a copy to keep, or a new value |
-| `push(v)`, `grow(by)`, `reserve(n)`, `shrink(by)` | Change the number of slots; growing one at a time is amortised O(1) |
-| `swap(i, j)` | Exchange two slots |
+| `get(i)` | Slot `i` itself, a `view` read in place; panics past the end or on an unset slot |
+| `copyUnchecked(i)` | A copy of slot `i`, to keep; panics as `get` does |
+| `copy(i)` | A copy of slot `i` as a `res::Result<T>`: `OutOfRange` past the end, `NotFound` for an unset slot |
+| `set(i, v)` | Stores `v` in slot `i`: `OutOfRange` past the end |
+| `push(v)`, `grow(by)`, `reserve(n)` | Add a slot holding `v`, add `by` new slots, make room for `n`: `OutOfMemory` when the memory is not there. Growing one at a time is amortised O(1) |
+| `shrink(by)` | Drops the last `by` slots: `InvalidArgument` for more than `len()` |
+| `swap(i, j)` | Exchanges two slots: `OutOfRange` past the end, `NotFound` for an unset slot |
+
+Every index and count is an `unsigned`.
+
+```pkn
+import ::io;
+import ::memory;
+import ::result as res;
+
+fn main() -> int {
+  b = memory::Buffer<Str>();
+  b.push("a");
+  b.push("b");
+  b.grow(1);                          // slot 2: unset
+  alias = b;                          // a copy shares the slots
+  alias.set(0, "A");
+  io::println(Str(b.len()) + " " + b.get(0) + b.get(1));
+  io::println(res::name(b.set(5, "x").code));
+  io::println(res::name(b.copy(2).error.code));
+  io::println(res::name(b.swap(0, 2).code));
+  io::println(res::name(b.shrink(9).code));
+  match b.copy(1).value {
+    s: Str { io::println("copy " + s); }
+    None   { io::println("none"); }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+3 Ab
+OutOfRange
+NotFound
+NotFound
+InvalidArgument
+copy b
+```
 
 `Box<T: ValueType>(v)` holds one value of a [`ValueType`](12-traits.md#valuetype) (`int`,
 `float`, `bool`, `char`, an enum or a tuple) in an object, so the value can be shared:
@@ -222,6 +438,8 @@ assigning a box shares it, and a change through one name shows through every oth
 parameter, or assign through an `inout` local:
 
 ```pkn
+import ::io;
+
 import ::memory;
 
 fn bump(n: inout int) { n = n + 1; }
@@ -235,7 +453,7 @@ fn main() -> int {
   pair = memory::Box((1, "one"));
   p: inout (int, Str) = pair.get();
   p = (2, "two");
-  println(Str(hits.get()) + " " + pair.get().1);
+  io::println(Str(hits.get()) + " " + pair.get().1);
   return 0;
 }
 ```
@@ -271,16 +489,18 @@ The functions take and return `float`; a sized float (`f32`, `f16`) converts wit
 `float(x)` first.
 
 ```pkn
+import ::io;
+
 import ::math;
 
 fn main() -> int {
   r = 2.0;
-  println("area " + Str(math::pi() * math::pow(r, 2.0)));
-  println("hypot " + Str(math::hypot(3.0, 4.0)) + ", 45 degrees is "
+  io::println("area " + Str(math::pi() * math::pow(r, 2.0)));
+  io::println("hypot " + Str(math::hypot(3.0, 4.0)) + ", 45 degrees is "
           + Str(math::atan2(1.0, 1.0)) + " radians");
-  println(Str(math::floor(-2.5)) + " " + Str(math::round(-2.5)) + " "
+  io::println(Str(math::floor(-2.5)) + " " + Str(math::round(-2.5)) + " "
           + Str(math::gamma(5.0)));
-  println(Str(math::isNaN(math::sqrt(-1.0))) + " " + Str(math::log(0.0)));
+  io::println(Str(math::isNaN(math::sqrt(-1.0))) + " " + Str(math::log(0.0)));
   return 0;
 }
 ```

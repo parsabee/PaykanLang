@@ -13,7 +13,7 @@ using namespace paykan::test;
 
 TEST(Impl, MethodsStaticFnsAndSubclasses) {
   LeakGuard guard;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     class Point {
       x: int; y: int;
       view fn describe() -> Str {
@@ -41,11 +41,11 @@ TEST(Impl, MethodsStaticFnsAndSubclasses) {
     fn main() -> int {
       p = Point::origin();
       p.shift(2);
-      println(p.label("p=") + " " + Str(p.sum()));
+      io::println(p.label("p=") + " " + Str(p.sum()));
       q = Point3::unit();
       q.shift(1);
       base: Point = q;
-      println(base.label("q=") + " " + Str(q.volume()) + " " +
+      io::println(base.label("q=") + " " + Str(q.volume()) + " " +
               Str(base.sum()));
       return 0;
     }
@@ -59,7 +59,7 @@ TEST(Impl, MethodsStaticFnsAndSubclasses) {
 // traits, also one made for a field type.
 TEST(Impl, GenericBlocks) {
   LeakGuard guard;
-  auto r = compileAndRun(R"pkn(
+  auto r = compileAndRun(R"pkn(import ::io;
     class Box<T> {
       v: T;
       view fn describe() -> Str { return "Box"; }
@@ -83,7 +83,7 @@ TEST(Impl, GenericBlocks) {
       b.set(b.get() + 1);
       h = Holder();
       h.b.set("t");
-      println(label(b) + " " + label(h.b));
+      io::println(label(b) + " " + label(h.b));
       return 0;
     }
   )pkn");
@@ -124,7 +124,7 @@ impl Bag {
   view fn first() -> view Str { return self.items[0]; }
 }
 )";
-  std::ofstream(dir / "main.pkn") << R"(
+  std::ofstream(dir / "main.pkn") << R"(import ::io;
 import shapes;
 class Tagged : shapes::Bag {}
 impl Tagged { fn __init__() { __super__(); } }
@@ -133,7 +133,7 @@ fn main() -> int {
   b.add("c");
   t = Tagged();
   t.add("x");
-  println(b.first() + " " + Str(b.size()) + " " + t.first());
+  io::println(b.first() + " " + Str(b.size()) + " " + t.first());
   return 0;
 }
 )";
@@ -161,14 +161,14 @@ impl Box<T> {
 fn _pick<T>(a: T, b: T) -> T { return a; }
 fn mk() -> Box<int> { return Box<int>(41); }
 )";
-  std::ofstream(dir / "main.pkn") << R"(
+  std::ofstream(dir / "main.pkn") << R"(import ::io;
 import gen;
 fn main() -> int {
   s = gen::Box("s");
   s.set("t");
   n = gen::mk();
   n.set(n.get() + 1);
-  println(s.get() + " " + Str(n.get()));
+  io::println(s.get() + " " + Str(n.get()));
   return 0;
 }
 )";

@@ -33,11 +33,13 @@ Storage that grows is the standard library's: see `List<T>` and `Buffer<T>` in
 ### Literals
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   nums: int[3] = [10, 20, 30];
   words = ["hello", "world"];      // a Str[2]
   mixed = [1, 2.5];                // a float[2]: the int promotes
-  println(Str(nums[2]) + " " + words[1] + " " + Str(mixed[0]));
+  io::println(Str(nums[2]) + " " + words[1] + " " + Str(mixed[0]));
   return 0;
 }
 ```
@@ -68,12 +70,14 @@ initializer's. An array literal gives its element count, and its first element t
 of a nested `_`. Anything else gives the lengths of the array it is.
 
 ```pkn
+import ::io;
+
 fn fill<T>(v: T) -> T[3] { return [v; 3]; }
 
 fn main() -> int {
   x: int[_][_] = [[1, 2, 3], [4, 5, 6]];   // an int[2][3]
   z: float[_] = fill<float>(1.5);          // a float[3]
-  println(Str(x.len()) + " " + Str(x[0].len()) + " " + Str(z.len()));
+  io::println(Str(x.len()) + " " + Str(x[0].len()) + " " + Str(z.len()));
   return 0;
 }
 ```
@@ -97,12 +101,14 @@ is an `int[3]`; flowing into a `T[n]`, `v` takes the element type `T` (`[0; 4]` 
 length its count.
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   zeros: float[4] = [0; 4];          // the int 0 becomes 0.0
   slots: int?[8] = [None; 8];
   grid: int[_][_] = [[0; 3]; 2];     // an int[2][3]
   grid[1][2] = 7;
-  println(Str(zeros.len()) + " " + Str(slots[5] == None) + " " + Str(grid[0][2]) + " "
+  io::println(Str(zeros.len()) + " " + Str(slots[5] == None) + " " + Str(grid[0][2]) + " "
           + Str(grid[1][2]));
   return 0;
 }
@@ -122,13 +128,15 @@ and the copies share the objects it holds: `[(0, Counter(0)); 3]` is three tuple
 counter.
 
 ```pkn
+import ::io;
+
 class Counter { n: int; }
 
 fn main() -> int {
   cs = [Counter(0); 3];    // one Counter, three times
   cs[0].n = 5;
   cs[1] = Counter(1);      // cs[1] now holds a second Counter
-  println(Str(cs[2].n) + " " + Str(cs[1].n));
+  io::println(Str(cs[2].n) + " " + Str(cs[1].n));
   return 0;
 }
 ```
@@ -153,6 +161,8 @@ Output:
 An array starts with the elements of its initializer, and a loop can set them afterwards:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   squares: int[5] = [0; 5];
   i = 0;
@@ -160,7 +170,7 @@ fn main() -> int {
     squares[i] = i * i;
     i = i + 1;
   }
-  println(Str(squares[3]) + " " + Str(squares[4]));
+  io::println(Str(squares[3]) + " " + Str(squares[4]));
   return 0;
 }
 ```
@@ -176,6 +186,8 @@ will hold, and keeps beside it a count of the slots in use. `[v; n]` fills the c
 a placeholder that the count has not reached yet:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   divisors: int[16] = [0; 16];   // room for 16
   count = 0;                     // divisors[0] to divisors[count - 1] are in use
@@ -187,7 +199,7 @@ fn main() -> int {
     }
     d = d + 1;
   }
-  println(Str(count) + " divisors, the largest " + Str(divisors[count - 1]));
+  io::println(Str(count) + " divisors, the largest " + Str(divisors[count - 1]));
   return 0;
 }
 ```
@@ -210,10 +222,12 @@ as `[None; 8]` instead.
 `xs.len()` is the array's length, an `int`. Indices are zero-based `int`s:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   a = [10, 20, 30];
   a[1] = 99;
-  println(Str(a[1]) + " " + Str(a.len()));
+  io::println(Str(a[1]) + " " + Str(a.len()));
   return 0;
 }
 ```
@@ -236,12 +250,14 @@ An array is a value: assigning one copies its elements, so the copy and the orig
 independently.
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   xs: int[3] = [1, 2, 3];
   ys = xs;                 // a copy
   ys[0] = 10;
   xs = [xs[2], xs[0], xs[1]];
-  println(Str(xs[0]) + " " + Str(ys[0]) + " " + Str(xs.len()));
+  io::println(Str(xs[0]) + " " + Str(ys[0]) + " " + Str(xs.len()));
   return 0;
 }
 ```
@@ -282,6 +298,8 @@ copy and the original share their elements' objects, and an element of a `view` 
 `view` too.
 
 ```pkn
+import ::io;
+
 class Counter { n: int; }
 
 fn main() -> int {
@@ -290,7 +308,7 @@ fn main() -> int {
   copy[0].n = 10;
   names: Str[2] = ["ann", "bob"];
   names[1] = names[0] + "!";
-  println(Str(cs[0].n) + " " + names[1]);
+  io::println(Str(cs[0].n) + " " + names[1]);
   return 0;
 }
 ```
@@ -310,6 +328,8 @@ An array's element type is exact: a `Dog[2]` is not an `Animal[2]`.
 Use `while` with an index:
 
 ```pkn
+import ::io;
+
 class Point {
   x: int;
   y: int;
@@ -320,7 +340,7 @@ fn main() -> int {
   pts = [Point(0, 0), Point(1, 2), Point(-3, 4)];
   i = 0;
   while i < pts.len() {
-    println(pts[i].toString());
+    io::println(pts[i].toString());
     i = i + 1;
   }
   return 0;
@@ -344,12 +364,14 @@ An array of arrays puts its first length on its first index, as in C: `int[2][3]
 a row is a value too: `row = grid[1];` copies it.
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
   row = grid[1];
   row[0] = 40;
   grid[0][2] = 30;
-  println(Str(grid[1][0]) + " " + Str(row[0]) + " " + Str(grid[0][2]));
+  io::println(Str(grid[1][0]) + " " + Str(row[0]) + " " + Str(grid[0][2]));
   return 0;
 }
 ```
@@ -373,12 +395,14 @@ other field. Its elements change only where the object can (`self.cells[0][1] = 
 allowed in a `view fn`).
 
 ```pkn
+import ::io;
+
 class Board { cells: char[3][3]; }
 
 fn main() -> int {
   b = Board([['.'; 3]; 3]);
   b.cells[1][1] = 'x';
-  println(Str(b.cells[1][1]) + " " + Str(b.cells.len()));
+  io::println(Str(b.cells[1][1]) + " " + Str(b.cells.len()));
   return 0;
 }
 ```
@@ -398,6 +422,8 @@ one reads the caller's array, and an `inout` one changes it. A result is returne
 (`-> int[3]`; a `view` or `inout` result of an array is not supported yet).
 
 ```pkn
+import ::io;
+
 fn bumped(xs: int[3]) -> int[3] {
   xs[0] = xs[0] + 100;     // the function's own copy
   return xs;
@@ -411,7 +437,7 @@ fn main() -> int {
   a: int[3] = [1, 2, 3];
   b = bumped(a);
   clear(a);
-  println(Str(a[0]) + " " + Str(b[0]));
+  io::println(Str(a[0]) + " " + Str(b[0]));
   return 0;
 }
 ```
@@ -430,6 +456,8 @@ length. A `view` slice only reads. An `inout` one assigns elements (`xs[i] = v;`
 the whole slice (`'xs' is a slice; assign its elements ('xs[i] = ...')`).
 
 ```pkn
+import ::io;
+
 fn sum(xs: view int[]) -> int {
   t = 0;
   i = 0;
@@ -452,7 +480,7 @@ fn main() -> int {
   a: int[3] = [1, 2, 3];
   scale(a, 10);
   grid: int[2][2] = [[1, 2], [3, 4]];
-  println(Str(sum(a)) + " " + Str(sum([5, 6])) + " " + Str(sum(grid[1])));
+  io::println(Str(sum(a)) + " " + Str(sum([5, 6])) + " " + Str(sum(grid[1])));
   return 0;
 }
 ```

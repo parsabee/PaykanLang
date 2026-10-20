@@ -9,7 +9,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 static std::string withFns(const std::string &fns, const std::string &body) {
   return fns + "\n" + wrapMain(body);
@@ -26,7 +26,7 @@ TEST(Class, EmptyClassInstantiate) {
   )",
                                  R"(
     e: Empty = Empty();
-    println("ok");
+    io::println("ok");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "ok\n");
@@ -47,7 +47,7 @@ TEST(Class, InitStoresIntField) {
   )",
                                  R"(
     c: Counter = Counter(42);
-    println(Str<int>(c.count));
+    io::println(Str<int>(c.count));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "42\n");
@@ -63,7 +63,7 @@ TEST(Class, DefaultInitTakesTheFields) {
   )",
                                  R"(
     b: Box = Box(5, "five");
-    println(Str<int>(b.val) + " " + b.name);
+    io::println(Str<int>(b.val) + " " + b.name);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "5 five\n");
@@ -74,7 +74,7 @@ TEST(Class, DefaultInitTakesTheFields) {
 // array, a tuple and a generic one; nothing leaks.
 TEST(Class, DefaultInitChainsAndStoresEveryField) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Vehicle { speed: int; }
     impl Vehicle { fn __init__(s: int) { self.speed = s * 10; } }
     class Car : Vehicle { name: Str; }
@@ -86,11 +86,11 @@ TEST(Class, DefaultInitChainsAndStoresEveryField) {
       l = Node("a", Node("b", None));
       b = Bag(1, "bag", [2, 3], (4, "four"), None);
       x = Box(Node("c", None));
-      println(Str(c.speed) + " " + c.name + " " + Str(b.speed) + " " +
+      io::println(Str(c.speed) + " " + c.name + " " + Str(b.speed) + " " +
               Str(b.xs.len()) + " " + b.pair.1 + " " + x.v.label);
       match l.next {
-        m: Node { println(l.label + m.label); }
-        None { println("none"); }
+        m: Node { io::println(l.label + m.label); }
+        None { io::println("none"); }
       }
       return 0;
     }
@@ -114,8 +114,8 @@ TEST(Class, FieldReadWrite) {
     p: Point = Point(0, 0);
     p.x = 3;
     p.y = 7;
-    println(Str<int>(p.x));
-    println(Str<int>(p.y));
+    io::println(Str<int>(p.x));
+    io::println(Str<int>(p.y));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n7\n");
@@ -140,9 +140,9 @@ TEST(Class, MultipleIntFields) {
   )",
                                  R"(
     t: Triple = Triple(1, 2, 3);
-    println(Str<int>(t.a));
-    println(Str<int>(t.b));
-    println(Str<int>(t.c));
+    io::println(Str<int>(t.a));
+    io::println(Str<int>(t.b));
+    io::println(Str<int>(t.c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "1\n2\n3\n");
@@ -163,7 +163,7 @@ TEST(Class, StrField) {
   )",
                                  R"(
     g: Greeter = Greeter("hello");
-    println(g.msg);
+    io::println(g.msg);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "hello\n");
@@ -184,7 +184,7 @@ TEST(Class, FieldReassign) {
                                  R"(
     m: Mutable = Mutable(10);
     m.set(99);
-    println(Str<int>(m.val));
+    io::println(Str<int>(m.val));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "99\n");
@@ -206,7 +206,7 @@ TEST(Class, MethodReturnsField) {
   )",
                                  R"(
     f: Foo = Foo(7);
-    println(Str<int>(f.get()));
+    io::println(Str<int>(f.get()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "7\n");
@@ -224,7 +224,7 @@ TEST(Class, MethodWithParam) {
     a: Acc = Acc(0);
     a.add(5);
     a.add(3);
-    println(Str<int>(a.total));
+    io::println(Str<int>(a.total));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "8\n");
@@ -245,7 +245,7 @@ TEST(Class, MethodComputed) {
   )",
                                  R"(
     r: Rect = Rect(4, 5);
-    println(Str<int>(r.area()));
+    io::println(Str<int>(r.area()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "20\n");
@@ -265,8 +265,8 @@ TEST(Class, TwoInstancesIndependent) {
                                  R"(
     a: Val = Val(1);
     b: Val = Val(2);
-    println(Str<int>(a.n));
-    println(Str<int>(b.n));
+    io::println(Str<int>(a.n));
+    io::println(Str<int>(b.n));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "1\n2\n");
@@ -292,7 +292,7 @@ TEST(Class, InheritedField) {
   )",
                                  R"(
     d: Dog = Dog("Rex");
-    println(d.name);
+    io::println(d.name);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "Rex\n");
@@ -321,8 +321,8 @@ TEST(Class, SubclassOwnField) {
   )",
                                  R"(
     c: Child = Child(3, 4);
-    println(Str<int>(c.x));
-    println(Str<int>(c.y));
+    io::println(Str<int>(c.x));
+    io::println(Str<int>(c.y));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n4\n");
@@ -340,7 +340,7 @@ TEST(Class, MethodOverride) {
   )",
                                  R"(
     c: Circle = Circle();
-    println(c.describe());
+    io::println(c.describe());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "circle\n");
@@ -369,8 +369,8 @@ TEST(Class, SuperInit) {
   )",
                                  R"(
     car: Car = Car(120, "Toyota");
-    println(Str<int>(car.speed));
-    println(car.brand);
+    io::println(Str<int>(car.speed));
+    io::println(car.brand);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "120\nToyota\n");
@@ -399,7 +399,7 @@ TEST(Class, ThreeLevelInheritance) {
   )",
                                  R"(
     c: C = C(99);
-    println(Str<int>(c.val));
+    io::println(Str<int>(c.val));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "99\n");
@@ -424,7 +424,7 @@ TEST(Class, InheritedMethod) {
   )",
                                  R"(
     s: Sub = Sub(6);
-    println(Str<int>(s.doubled()));
+    io::println(Str<int>(s.doubled()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "12\n");
@@ -434,7 +434,7 @@ TEST(Class, InheritedMethod) {
 
 // Class instance passed to a function; function reads a field.
 TEST(Class, PassToFunction) {
-  auto r = compileAndRun(withFns(R"(
+  auto r = compileAndRun(withFns(R"(import ::io;
     class Num {
       v: int;
     }
@@ -443,7 +443,7 @@ TEST(Class, PassToFunction) {
       fn __init__(x: int) { self.v = x; }
     }
     fn show(n: Num) {
-      println(Str<int>(n.v));
+      io::println(Str<int>(n.v));
     }
   )",
                                  R"(
@@ -471,8 +471,8 @@ TEST(Class, ReturnClassFromFunction) {
   )",
                                  R"(
     p: Pair = makePair(3, 7);
-    println(Str<int>(p.a));
-    println(Str<int>(p.b));
+    io::println(Str<int>(p.a));
+    io::println(Str<int>(p.b));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3\n7\n");
@@ -495,8 +495,8 @@ TEST(Class, MethodWithIfElse) {
   )",
                                  R"(
     s: Sign = Sign();
-    println(s.of(5));
-    println(s.of(-3));
+    io::println(s.of(5));
+    io::println(s.of(-3));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "pos\nneg\n");
@@ -519,7 +519,7 @@ TEST(Class, MethodWithLoop) {
                                  R"(
     s: Summer = Summer(0);
     s.sumTo(5);
-    println(Str<int>(s.total));
+    io::println(Str<int>(s.total));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "15\n");
@@ -571,24 +571,24 @@ TEST(MatchCodeGen, BasicDispatch) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Dog();
     match a {
-      Dog  { println("dog"); }
-      Cat  { println("cat"); }
-      Bird { println("bird"); }
-      _    { println("other"); }
+      Dog  { io::println("dog"); }
+      Cat  { io::println("cat"); }
+      Bird { io::println("bird"); }
+      _    { io::println("other"); }
     }
     b: Animal = Cat();
     match b {
-      Dog  { println("dog"); }
-      Cat  { println("cat"); }
-      Bird { println("bird"); }
-      _    { println("other"); }
+      Dog  { io::println("dog"); }
+      Cat  { io::println("cat"); }
+      Bird { io::println("bird"); }
+      _    { io::println("other"); }
     }
     c: Animal = Bird();
     match c {
-      Dog  { println("dog"); }
-      Cat  { println("cat"); }
-      Bird { println("bird"); }
-      _    { println("other"); }
+      Dog  { io::println("dog"); }
+      Cat  { io::println("cat"); }
+      Bird { io::println("bird"); }
+      _    { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -600,9 +600,9 @@ TEST(MatchCodeGen, WildcardFallthrough) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Bird();
     match a {
-      Dog { println("dog"); }
-      Cat { println("cat"); }
-      _   { println("other"); }
+      Dog { io::println("dog"); }
+      Cat { io::println("cat"); }
+      _   { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -614,7 +614,7 @@ TEST(MatchCodeGen, WildcardOnly) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Cat();
     match a {
-      _ { println("wildcard"); }
+      _ { io::println("wildcard"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -638,8 +638,8 @@ TEST(MatchCodeGen, BindingIntField) {
                                  R"(
     s: Shape = Rect(4, 5);
     match s {
-      r: Rect { println(Str<int>(r.w)); println(Str<int>(r.h)); }
-      _       { println("other"); }
+      r: Rect { io::println(Str<int>(r.w)); io::println(Str<int>(r.h)); }
+      _       { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -651,8 +651,8 @@ TEST(MatchCodeGen, BindingStrField) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Labrador();
     match a {
-      lab: Labrador { println(lab.name); }
-      _             { println("other"); }
+      lab: Labrador { io::println(lab.name); }
+      _             { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -664,8 +664,8 @@ TEST(MatchCodeGen, BindingMethodCall) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Dog();
     match a {
-      dog: Dog { println(dog.speak()); }
-      _        { println("other"); }
+      dog: Dog { io::println(dog.speak()); }
+      _        { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -677,9 +677,9 @@ TEST(MatchCodeGen, ExactTypeLabradorNotDog) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Labrador();
     match a {
-      Dog      { println("dog"); }
-      Labrador { println("labrador"); }
-      _        { println("other"); }
+      Dog      { io::println("dog"); }
+      Labrador { io::println("labrador"); }
+      _        { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -691,9 +691,9 @@ TEST(MatchCodeGen, LabradorFallsToWildcard) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Labrador();
     match a {
-      Dog { println("dog"); }
-      Cat { println("cat"); }
-      _   { println("other"); }
+      Dog { io::println("dog"); }
+      Cat { io::println("cat"); }
+      _   { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -714,10 +714,10 @@ TEST(MatchCodeGen, MatchInFunction) {
     }
   )",
                                  R"(
-    println(describe(Dog()));
-    println(describe(Cat()));
-    println(describe(Bird()));
-    println(describe(Labrador()));
+    io::println(describe(Dog()));
+    io::println(describe(Cat()));
+    io::println(describe(Bird()));
+    io::println(describe(Labrador()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "dog\ncat\nbird\nunknown\n");
@@ -728,14 +728,14 @@ TEST(MatchCodeGen, MultipleMatchStmts) {
   auto r = compileAndRun(withFns(kMatchHierarchy, R"(
     a: Animal = Cat();
     match a {
-      Dog { println("1:dog"); }
-      Cat { println("1:cat"); }
-      _   { println("1:other"); }
+      Dog { io::println("1:dog"); }
+      Cat { io::println("1:cat"); }
+      _   { io::println("1:other"); }
     }
     match a {
-      Bird { println("2:bird"); }
-      Cat  { println("2:cat"); }
-      _    { println("2:other"); }
+      Bird { io::println("2:bird"); }
+      Cat  { io::println("2:cat"); }
+      _    { io::println("2:other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -760,12 +760,12 @@ TEST(MatchCodeGen, ControlFlowInArm) {
     match n {
       leaf: Leaf {
         if leaf.val > 5 {
-          println("big");
+          io::println("big");
         } else {
-          println("small");
+          io::println("small");
         }
       }
-      _ { println("other"); }
+      _ { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -782,14 +782,14 @@ TEST(MatchCodeGen, SubjectIsCallExpr) {
   )",
                                  R"(
     match makeAnimal(1) {
-      Dog { println("dog"); }
-      Cat { println("cat"); }
-      _   { println("other"); }
+      Dog { io::println("dog"); }
+      Cat { io::println("cat"); }
+      _   { io::println("other"); }
     }
     match makeAnimal(2) {
-      Dog { println("dog"); }
-      Cat { println("cat"); }
-      _   { println("other"); }
+      Dog { io::println("dog"); }
+      Cat { io::println("cat"); }
+      _   { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -809,24 +809,24 @@ TEST(MatchCodeGen, DeepInheritanceExactType) {
                                  R"(
     x: A = A();
     match x {
-      C { println("C"); }
-      B { println("B"); }
-      A { println("A"); }
-      _ { println("?"); }
+      C { io::println("C"); }
+      B { io::println("B"); }
+      A { io::println("A"); }
+      _ { io::println("?"); }
     }
     y: A = B();
     match y {
-      C { println("C"); }
-      B { println("B"); }
-      A { println("A"); }
-      _ { println("?"); }
+      C { io::println("C"); }
+      B { io::println("B"); }
+      A { io::println("A"); }
+      _ { io::println("?"); }
     }
     z: A = C();
     match z {
-      C { println("C"); }
-      B { println("B"); }
-      A { println("A"); }
-      _ { println("?"); }
+      C { io::println("C"); }
+      B { io::println("B"); }
+      A { io::println("A"); }
+      _ { io::println("?"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -840,11 +840,11 @@ TEST(MatchCodeGen, ArmScopeCleanup) {
     match a {
       Dog {
         tmp: Str = "cleanup-me";
-        println(tmp);
+        io::println(tmp);
       }
-      _ { println("other"); }
+      _ { io::println("other"); }
     }
-    println("after");
+    io::println("after");
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "cleanup-me\nafter\n");
@@ -857,9 +857,9 @@ TEST(MatchCodeGen, StringValueMatch) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "World";
     match s {
-      "Hello" { println("got hello"); }
-      "World" { println("got world"); }
-      _ { println("got other"); }
+      "Hello" { io::println("got hello"); }
+      "World" { io::println("got world"); }
+      _ { io::println("got other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -871,9 +871,9 @@ TEST(MatchCodeGen, StringValueMatchWildcard) {
   auto r = compileAndRun(wrapMain(R"(
     s: Str = "Nope";
     match s {
-      "Hello" { println("got hello"); }
-      "World" { println("got world"); }
-      _ { println("got other"); }
+      "Hello" { io::println("got hello"); }
+      "World" { io::println("got world"); }
+      _ { io::println("got other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -885,10 +885,10 @@ TEST(MatchCodeGen, IntValueMatch) {
   auto r = compileAndRun(wrapMain(R"(
     n: int = 2;
     match n {
-      1 { println("one"); }
-      2 { println("two"); }
-      3 { println("three"); }
-      _ { println("many"); }
+      1 { io::println("one"); }
+      2 { io::println("two"); }
+      3 { io::println("three"); }
+      _ { io::println("many"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -900,9 +900,9 @@ TEST(MatchCodeGen, CharValueMatch) {
   auto r = compileAndRun(wrapMain(R"(
     c: char = 'b';
     match c {
-      'a' { println("a"); }
-      'b' { println("b"); }
-      _ { println("other"); }
+      'a' { io::println("a"); }
+      'b' { io::println("b"); }
+      _ { io::println("other"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -914,8 +914,8 @@ TEST(MatchCodeGen, BoolValueMatch) {
   auto r = compileAndRun(wrapMain(R"(
     b: bool = False;
     match b {
-      True { println("yes"); }
-      False { println("no"); }
+      True { io::println("yes"); }
+      False { io::println("no"); }
     }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -934,7 +934,7 @@ TEST(Class, MethodCallsFreeFunctionDefinedBefore) {
                     "impl C {\n"
                     "  fn __init__() {}\n"
                     "}\n" +
-                    wrapMain("c: C = C();\n  println(Str<int>(c.get()));"));
+                    wrapMain("c: C = C();\n  io::println(Str<int>(c.get()));"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "7\n");
 }
@@ -948,7 +948,7 @@ TEST(Class, MethodCallsFreeFunctionDefinedAfter) {
                     "  fn __init__() {}\n"
                     "}\n"
                     "fn helper() -> int { return 42; }\n" +
-                    wrapMain("c: C = C();\n  println(Str<int>(c.get()));"));
+                    wrapMain("c: C = C();\n  io::println(Str<int>(c.get()));"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "42\n");
 }
@@ -966,10 +966,10 @@ TEST(Class, DefaultEqualsIsIdentity) {
                                  R"(
     b: Box = Box(5);
     c: Box = Box(5);
-    println(Str<bool>(b.equals(b)));
-    println(Str<bool>(b.equals(c)));
-    println(Str<bool>(b == b));
-    println(Str<bool>(b == c));
+    io::println(Str<bool>(b.equals(b)));
+    io::println(Str<bool>(b.equals(c)));
+    io::println(Str<bool>(b == b));
+    io::println(Str<bool>(b == c));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nFalse\nTrue\nFalse\n");
@@ -980,10 +980,10 @@ TEST(Class, DefaultEqualsIsIdentity) {
 // `process() == None` returns None.equals(None) == True.  Regression: this used
 // to compare a box pointer against the None singleton and was always false.
 TEST(Class, CallTemporaryEqualsNone) {
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn process() -> Obj { return None; }
     fn main() -> int {
-      if process() == None { println("none"); } else { println("something"); }
+      if process() == None { io::println("none"); } else { io::println("something"); }
       return 0;
     }
   )");
@@ -992,12 +992,12 @@ TEST(Class, CallTemporaryEqualsNone) {
 }
 
 TEST(Class, CallTemporaryNotEqualsNone) {
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Thing { n: int; }
     impl Thing { fn __init__(x: int) { self.n = x; } }
     fn process() -> Obj { return Thing(5); }
     fn main() -> int {
-      if process() != None { println("something"); } else { println("none"); }
+      if process() != None { io::println("something"); } else { io::println("none"); }
       return 0;
     }
   )");
@@ -1007,11 +1007,11 @@ TEST(Class, CallTemporaryNotEqualsNone) {
 
 // Two distinct call temporaries are distinct objects under identity `==`.
 TEST(Class, TwoCallTemporariesDistinct) {
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Thing {}
     fn make() -> Obj { return Thing(); }
     fn main() -> int {
-      if make() == make() { println("same"); } else { println("diff"); }
+      if make() == make() { io::println("same"); } else { io::println("diff"); }
       return 0;
     }
   )");
@@ -1022,13 +1022,13 @@ TEST(Class, TwoCallTemporariesDistinct) {
 // `==` on Str is value (content) equality, since it lowers to Str.equals.
 // Two distinct string objects with equal content are `==`-equal.
 TEST(Class, StringEqualityIsContent) {
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       a: Str = "abc";
       b: Str = "ab" + "c";
-      println(Str<bool>(a == b));
-      println(Str<bool>(a != b));
-      println(Str<bool>(a == "xyz"));
+      io::println(Str<bool>(a == b));
+      io::println(Str<bool>(a != b));
+      io::println(Str<bool>(a == "xyz"));
       return 0;
     }
   )");
@@ -1040,7 +1040,7 @@ TEST(Class, StringEqualityIsContent) {
 // own class type (regression: the class's vtable global was created after its
 // method bodies, so a self-type match referenced an unresolved placeholder).
 TEST(Class, EqualsOperatorUsesOverrideWithSelfMatch) {
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Money {
       cents: int;
       view fn equals(o: Obj) -> bool {
@@ -1058,9 +1058,9 @@ TEST(Class, EqualsOperatorUsesOverrideWithSelfMatch) {
       a: Money = Money(5);
       b: Money = Money(5);
       c: Money = Money(9);
-      println(Str<bool>(a == b));
-      println(Str<bool>(a == c));
-      println(Str<bool>(a != c));
+      io::println(Str<bool>(a == b));
+      io::println(Str<bool>(a == c));
+      io::println(Str<bool>(a != c));
       return 0;
     }
   )");
@@ -1071,7 +1071,7 @@ TEST(Class, EqualsOperatorUsesOverrideWithSelfMatch) {
 // A method that matches on its own class type links correctly (vtable global
 // must exist before the method body is emitted).
 TEST(Class, MethodMatchesOwnType) {
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node {
       v: int;
       fn isNode(o: Obj) -> bool {
@@ -1084,7 +1084,7 @@ TEST(Class, MethodMatchesOwnType) {
     }
     fn main() -> int {
       a: Node = Node(1);
-      println(Str<bool>(a.isNode(a)));
+      io::println(Str<bool>(a.isNode(a)));
       return 0;
     }
   )");
@@ -1108,7 +1108,7 @@ TEST(Class, EqualsOverrideDispatched) {
                                  R"(
     a: Always = Always(1);
     b: Always = Always(2);
-    println(Str<bool>(a.equals(b)));
+    io::println(Str<bool>(a.equals(b)));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\n");
@@ -1123,7 +1123,7 @@ TEST(Class, EqualsWithMatchBoundArgument) {
     match x {
       a: Str {
         match y {
-          b: Str { println(Str<bool>(a.equals(b))); }
+          b: Str { io::println(Str<bool>(a.equals(b))); }
           _ {}
         }
       }

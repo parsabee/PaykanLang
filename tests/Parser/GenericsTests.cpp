@@ -354,3 +354,44 @@ TEST(Generics, ParenthesisedComparisonStaysRelational) {
   ASSERT_NE(cmp, nullptr);
   EXPECT_EQ(cmp->getOpcode(), BinaryOpcode::Lt);
 }
+
+// `Box<int>::of(1)`: the type arguments are the owner's and the callee is
+// its function; Sema instantiates `Box<int>` and binds `Box<int>::of`.
+TEST(Generics, StaticFnOfAnInstantiation) {
+  auto [ok, driver] = parse(R"(
+    fn main() -> int { b = Box<int>::of(1); return 0; }
+  )");
+  ASSERT_TRUE(ok);
+  auto *call = firstCall(driver->getRoot());
+  ASSERT_NE(call, nullptr);
+  EXPECT_EQ(call->getCalleeName(), "Box::of");
+  ASSERT_EQ(call->getTypeArgs().size(), 1u);
+  EXPECT_TRUE(isa<BuiltinType>(call->getTypeArgs()[0]));
+  EXPECT_EQ(call->getNumArguments(), 1u);
+}
+
+TEST(Generics, StaticFnOfAnImportedInstantiation) {
+  auto [ok, driver] = parse(R"(
+    fn main() -> int { p = m::Pair<int, Str>::make(1, "a"); return 0; }
+  )");
+  ASSERT_TRUE(ok);
+  auto *call = firstCall(driver->getRoot());
+  ASSERT_NE(call, nullptr);
+  EXPECT_EQ(call->getCalleeName(), "m::Pair::make");
+  ASSERT_EQ(call->getTypeArgs().size(), 2u);
+  EXPECT_EQ(call->getNumArguments(), 2u);
+}
+
+// Without the call's `(` the speculation is rewound: `a < b > ::c` is the
+// comparison `a < b` followed by a chained `>`, which is rejected as such.
+TEST(Generics, StaticFnNeedsTheCall) {
+  auto [ok, driver] = parse(R"(
+    fn main() -> int { x = a < b > ::c; return 0; }
+  )");
+  EXPECT_FALSE(ok);
+  auto [ok2, driver2] = parse(R"(
+    fn main() -> int { x = a < b; return 0; }
+  )");
+  EXPECT_TRUE(ok2);
+  EXPECT_EQ(firstCall(driver2->getRoot()), nullptr);
+}

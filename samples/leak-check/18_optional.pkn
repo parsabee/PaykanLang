@@ -12,6 +12,8 @@
 //
 // Expected under --track-heap: live blocks : 0.
 
+import ::io;
+
 class Node {
   v: int;
   next: Node?;
@@ -27,8 +29,10 @@ fn make(c: bool) -> Node? {
 
 fn show(n: Node?) {
   match n {
-    x: Node { println(Str<int>(x.v)); }
-    None    { println("none"); }
+    x: Node {
+      io::println(Str<int>(x.v));
+    }
+    None { io::println("none"); }
   }
 }
 
@@ -42,7 +46,7 @@ fn main() -> int {
   show(c);                     // 3
   show(make(False));           // none — call temporary, no box to release
   show(make(True));            // 1 — call temporary released at match.end
-  println(make(False));        // None — printed as the None singleton
+  io::println(make(False));        // None — printed as the None singleton
   head: Node = Node(10);
   head.next = Node(11);        // field owns the temporary
   head.next = None;            // releases Node(11)

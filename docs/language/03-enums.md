@@ -103,8 +103,8 @@ enum:
 ```pkn
 d: Direction = Direction::East;
 
-if d == Direction::East  { println("facing east"); }
-if d != Direction::North { println("not north"); }
+if d == Direction::East  { io::println("facing east"); }
+if d != Direction::North { io::println("not north"); }
 ```
 
 There is no ordering (`<`, `>`) on enums — even though variants have ordinals, the language does
@@ -151,7 +151,7 @@ route[0] = opposite(route[0]);        // North -> South
 
 j: int = 0;
 while j < route.len() {
-  println(dirName(route[j]));
+  io::println(dirName(route[j]));
   j = j + 1;
 }
 ```
@@ -227,7 +227,7 @@ fn nextLight(l: Light) -> Light {
 l: Light = Light::Red;
 i: int = 0;
 while i < 4 {
-  println(lightName(l));   // Red, Green, Yellow, Red
+  io::println(lightName(l));   // Red, Green, Yellow, Red
   l = nextLight(l);
   i = i + 1;
 }
@@ -242,7 +242,7 @@ and the complete set of rules — see `07-match-statements.md`.
 
 | Error | Trigger |
 |-------|---------|
-| Enum name taken | The enum is named like a builtin (`enum Error {…}`, `enum print {…}`), a class, a function, or another enum — top-level names are shared (see `01-language-basics.md`) |
+| Enum name taken | The enum is named like a builtin (`enum Str {…}`, `enum int {…}`), a class, a function, or another enum — top-level names are shared (see `01-language-basics.md`) |
 | Unknown variant | `Enum::Name` where `Name` is not a declared variant |
 | Enum / `int` mismatch | Using an enum value where an `int` is required (or vice versa) |
 | Cross-enum comparison | `==` / `!=` between two different enum types |

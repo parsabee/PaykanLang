@@ -15,7 +15,7 @@ guarantee, not something you write by hand.
 - **Arrays** (`T[n]`) and **tuples** (`(T1, T2)`) are values too: held inline in their
   variable, field or array element and copied whole on assignment. A reference element
   is a reference: copying the array or tuple retains it.
-- **Reference types** (class instances, `Str`, `File`, `Error`, and their optionals) live
+- **Reference types** (class instances, `Str`, and their optionals) live
   on the heap and are reference-counted.
 - Each heap object carries its **reference counts** in its own header, a strong count and a weak
   count. Copying a reference **retains** (strong count `+1`); dropping one **releases** (`-1`).
@@ -41,7 +41,7 @@ The category of a type decides how it is stored and whether ARC applies.
 | **Tuple** | `(T1, T2, ...)` of any element types | Inline in the variable, the field or the enclosing array or tuple | Elements copied; reference elements retained |
 | **Struct** | `struct Name { ... }` of any field types | Inline, like a tuple of its fields | Fields copied; reference fields retained |
 | **Function value** | `(T1, T2) -> R`: a lambda or a named function | Heap: a closure object holding the captured variables (copied when the lambda is made) | Reference shared; count adjusted; the captures are released with the closure |
-| **Reference** | class instances, `Str`, `File`, `Error`, optionals `T?` of these | Heap | Reference shared; count adjusted |
+| **Reference** | class instances (an `io::File` among them), `Str`, optionals `T?` of these | Heap | Reference shared; count adjusted |
 
 A value type has no identity beyond its bits: assigning one `int` to another produces two
 independent values. A reference type has identity: assigning one variable to another makes both
@@ -108,7 +108,7 @@ When a release drops the count to zero:
    on.
 
 This is **deterministic**: an object is destroyed at the exact point its last reference is
-released, in a well-defined order, with no background collector and no pause. A `File`, for
+released, in a well-defined order, with no background collector and no pause. An `io::File`, for
 example, is closed as soon as the last reference to it goes away.
 
 Destruction is **iterative**: deep chains are freed without stack growth. A linked list of a
@@ -206,7 +206,7 @@ is the receiver's storage, so a method allocates nothing to be called. See `14-s
 
 `None` is a singleton `Obj` representing the absence of a value. Because it is a shared global
 rather than an allocation, retaining and releasing it is harmless and it is never destroyed.
-`None` is what operations like `readln` yield at end of input, distinguished with `match`
+`None` is what a read like `readln` holds as its result's `value` at end of input, distinguished with `match`
 (see `07-match-statements.md`).
 
 ### Optional types
@@ -217,8 +217,8 @@ absent value is represented by *having no box at all* rather than by the `None` 
 means an optional costs nothing extra: retaining, releasing, moving or destroying an absent
 `T?` is a no-op, a `None` stored into an optional field or array slot releases the previous
 value and allocates nothing, and `x == None` is a plain null test. A `T?` never becomes an `Obj`
-(an optional is not an object); when one is printed (`println(maybe)`), the compiler prints the
-`None` singleton for an absent value.
+(an optional is not an object); its `toString()` (`io::println(maybe)`) is `"None"` for an
+absent value.
 
 An optional primitive (`int?`, `float?`, `bool?`, `char?`) is a value instead (#96): the
 primitive and a presence flag, copied like an `int` and never counted, inline in a variable, a
@@ -231,10 +231,12 @@ value out and owns nothing.
 ## Weak References
 
 A variable or a class field declared with `weak` refers to an object **without keeping it
-alive**. Its type is `T?` for a class `T` (a user class, `Str`, `File`, `Error` or `Obj`),
+alive**. Its type is `T?` for a class `T` (a user class, `Str` or `Obj`),
 and it may be left off a local declaration that has an initializer:
 
 ```pkn
+import ::io;
+
 class Node {
   name: Str;
   weak parent: Node?;   // a back link that does not own the parent
@@ -268,12 +270,12 @@ fn main() -> int {
   root.add(a);
   weak w: Node? = root;   // reads as root while something holds it
   weak u = a;             // inferred Node?
-  println(a.path() + " " + Str(w == None));
+  io::println(a.path() + " " + Str(w == None));
   root = Node("other");   // the first root dies: it was held by nothing else
-  println(a.path() + " " + Str(w == None));
+  io::println(a.path() + " " + Str(w == None));
   match u {
-    n: Node { println(n.name); }
-    None { println("gone"); }
+    n: Node { io::println(n.name); }
+    None { io::println("gone"); }
   }
   return 0;
 }

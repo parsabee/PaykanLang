@@ -242,7 +242,7 @@ backend does no inheritance walk.
 * A class marked `extern` belongs to another module: its fields are known (for
   `field.load`/`field.store` on imported instances) and its vtable address may
   be taken, but its vtable contents and functions are defined in that module.
-* Runtime classes (`Obj`, `Str`, `File`, `Error`) are never
+* Runtime classes (`Obj`, `Str`) are never
   declared as classes; their vtables are
   `extern vtable` globals and their methods are called through `vcall` with an
   explicit slot index, exactly like user classes.
@@ -534,16 +534,16 @@ CodeGen enforced, now in one place.
   `PaykanString_equals` with a boxed literal); enum arms compare `i64`
   constants.  Arm bindings are raw `obj` aliases (unowned).
 * **Optionals**: `None` into a reference `T?` is `null`.  An optional is
-  never an `Obj` (Sema rejects that); a reference `T?` passed to a print
-  builtin is `select`ed to `@$rt.PaykanObject_None` when null.  An optional
+  never an `Obj` (Sema rejects that).  An optional
   primitive (`int?`, `float?`, `bool?`, `char?`) is a value
   (`opt_i64` & co.) with no ARC: a primitive that Sema marked for an
   optional primitive slot is `some` of it (after `int`→`float` promotion for
   a `float?`), `None` there is `none`, `x == None` is `not (is_some x)`, two
   of them are equal when their `is_some` agree and, both present, their
   `unwrap`s are `==`, and a `match` arm binding the primitive is its
-  `unwrap`.  The print builtins print one as its text, formatted with
-  `PaykanString_from_int` & co. when present and `"None"` otherwise.  An
+  `unwrap`.  An optional's `toString()` (optionals are `Show`) is a branch
+  on `is_some`: the value's text (`PaykanString_from_int` & co. for a
+  primitive) when present, `"None"` otherwise.  An
   element of an `int?[n]` & co. is the optional itself, the optional's size
   in the array's `mem` (16 bytes for `int?` and `float?`, 2 for `bool?` and
   `char?`), read and written in place, and so is an `int?` element of a
@@ -611,22 +611,13 @@ PaykanInt_hash(i64) -> i64              PaykanString_hash(obj) -> i64
 PaykanTuple_toString(ptr, ptr) -> obj   PaykanTuple_equals(ptr, ptr, ptr) -> i64
 ; structs: likewise, with a struct layout
 PaykanStruct_toString(ptr, ptr) -> obj  PaykanStruct_equals(ptr, ptr, ptr) -> i64
-; files
-PaykanFile_open(obj, obj) -> box
-; I/O
-Paykan_print(obj) -> void   Paykan_println(obj) -> void
-Paykan_printerr(obj) -> void   Paykan_printerrln(obj) -> void
 ; vtable slot implementations (inherited into user vtables)
 PaykanObject_destroy(obj) -> void   PaykanObject_toString(obj) -> box
 PaykanObject_equals(obj, box) -> i64
-PaykanFile_destroy(obj) -> void     PaykanFile_toString(obj) -> box
-PaykanFile_equals(obj, box) -> i64  PaykanFile_write(obj, obj) -> void
-PaykanFile_readln(obj) -> box
 ; globals
-extern obj PaykanObject_None     extern obj PaykanFile_Stdin
+extern obj PaykanObject_None
 ; runtime classes' vtables, their type identities for `match`
 extern vtable PaykanObject_vtable   extern vtable PaykanString_vtable
-extern vtable PaykanFile_vtable     extern vtable PaykanError_vtable
 ```
 
 An executable's entry code, not PIR, calls the two functions that make and
@@ -643,9 +634,12 @@ list; the LLVM backend's JIT symbol table must cover it and the C backend links
 
 Vtable slot layouts of runtime classes (slot index = position):
 
-* `Obj`, `Error`: `destroy, toString, equals`
+* `Obj`: `destroy, toString, equals`
 * `Str`: `destroy, toString, equals, len, concat`
-* `File`: `destroy, toString, equals, write, readln, readbytes, read`
+
+Printing and files are not runtime classes or builtins: they are the
+standard library's `::io` module, whose `native fn`s call the runtime's
+`Paykan_print` & co. and `Paykan_io_*` functions like any native function.
 
 An array is not an object and has no vtable: `len()` is its type's length,
 or a slice's `i64` length.  Nor is a tuple: its `toString()` and `==` are the

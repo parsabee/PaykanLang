@@ -1,6 +1,14 @@
 // A public function, field or method cannot name a `_` type: an importer
 // could receive a value it cannot name.
-class _Hidden { v: int; }
-fn make() -> _Hidden { return _Hidden(1); }   // error: 'make' is public but its result names the private type '_Hidden'
-class Pub { h: _Hidden; }                       // error: field 'h' of 'Pub' is public but it names the private type '_Hidden'
-fn main() -> int { return make().v; }
+class _Hidden {
+  v: int;
+}
+fn make() -> _Hidden {
+  return _Hidden(1);
+}  // error: 'make' is public but its result names the private type '_Hidden'
+class Pub {
+  h: _Hidden;
+}                       // error: field 'h' of 'Pub' is public but it names the private type '_Hidden'
+fn main() -> int {
+  return make().v;
+}

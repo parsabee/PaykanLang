@@ -8,6 +8,8 @@
 // method with inout parameters, view arguments of every kind.  Run with
 // --track-heap: zero live blocks.
 
+import ::io;
+
 // expect-stdout: k = 3
 // expect-stdout: a = 2, b = 1
 // expect-stdout: light = Green, x = 4.5
@@ -27,10 +29,7 @@ class Stats {
 }
 
 impl Stats {
-  fn __init__() {
-    self.hits = 0;
-    self.last = 0;
-  }
+  fn __init__() { self.hits = 0; self.last = 0; }
 }
 
 class Meter {
@@ -53,7 +52,9 @@ impl Meter {
   }
 }
 
-fn bump(n: inout int) { n = n + 1; }
+fn bump(n: inout int) {
+  n = n + 1;
+}
 
 fn bumpTwice(n: inout int) {
   bump(n);             // an inout parameter passes its address on
@@ -74,25 +75,27 @@ fn advance(light: inout Light) {
   }
 }
 
-fn scale(x: inout float, by: view float) { x = x * by; }
+fn scale(x: inout float, by: view float) {
+  x = x * by;
+}
 
 fn main() -> int {
   k = 1;
   bumpTwice(k);
-  println("k = " + Str(k));
+  io::println("k = " + Str(k));
 
   a = 1;
   b = 2;
   swap(a, b);
-  println("a = " + Str(a) + ", b = " + Str(b));
+  io::println("a = " + Str(a) + ", b = " + Str(b));
 
   light = Light::Red;
   advance(light);
   x = 1.5;
   let factor = 3;      // a `let` local: a view argument, never an inout one
   scale(x, factor);
-  println("light = " + (if light == Light::Green then "Green" else "?") +
-          ", x = " + Str(x));
+  io::println("light = " + (if light == Light::Green then "Green" else "?")
+      + ", x = " + Str(x));
 
   stats = Stats();
   stats.record(10);
@@ -101,14 +104,14 @@ fn main() -> int {
   start = 3;
   m = Meter(start);
   m.add(total, 4);
-  println("hits = " + Str(stats.hits) + ", total = " + Str(total));
+  io::println("hits = " + Str(stats.hits) + ", total = " + Str(total));
 
   bump(m.stats.hits);  // a field of a chain
   m.stats.record(30);
   bump(stats.hits);
   bump(stats.hits);
-  println("stats: " + Str(stats.hits) + " hits, last " + Str(stats.last) +
-          "; meter: " + Str(m.stats.hits) + " hits");
-  println("start = " + Str(start) + ", step = " + Str(m.step));
+  io::println("stats: " + Str(stats.hits) + " hits, last " + Str(stats.last)
+      + "; meter: " + Str(m.stats.hits) + " hits");
+  io::println("start = " + Str(start) + ", step = " + Str(m.step));
   return 0;
 }

@@ -5,27 +5,29 @@
 // Str<char>(c: char) -> Str converts a char to a one-character string.
 // Comparison operators ==, !=, <, >, <=, >= are supported.
 
+import ::io;
+
 fn main() -> int {
   // Basic literal and Str<char> conversion
   c: char = 'A';
-  println(Str<char>(c));                 // A
+  io::println(Str<char>(c));                 // A
 
   // Escape sequences
-  println("tab:" + Str('\t') + "end");
-  println("newline before:");
-  println(Str<char>('\n') + "newline after");
+  io::println("tab:" + Str('\t') + "end");
+  io::println("newline before:");
+  io::println(Str<char>('\n') + "newline after");
 
   // Comparison
   lo: char = 'a';
   hi: char = 'z';
-  if lo < hi { println("a < z"); }
-  if lo != hi { println("a != z"); }
-  if lo == lo { println("a == a"); }
-  if hi > lo  { println("z > a"); }
+  if lo < hi { io::println("a < z"); }
+  if lo != hi { io::println("a != z"); }
+  if lo == lo { io::println("a == a"); }
+  if hi > lo { io::println("z > a"); }
 
   // char in a variable used multiple times
   sep: char = '-';
-  println(Str(sep) + Str<char>(sep) + Str(sep));  // ---
+  io::println(Str(sep) + Str<char>(sep) + Str(sep));  // ---
 
   return 0;
 }

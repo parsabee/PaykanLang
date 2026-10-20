@@ -210,11 +210,11 @@ TEST(Leak, EarlyReturn) {
 
 TEST(Leak, StringTransfer) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       s: Str = "Hello world";
       t = s;
-      println(t);
+      io::println(t);
       return 0;
     }
   )");
@@ -224,7 +224,7 @@ TEST(Leak, StringTransfer) {
 
 TEST(Leak, ClassObjectTransfer) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Box { v: Str;
     }
 
@@ -234,7 +234,7 @@ TEST(Leak, ClassObjectTransfer) {
     fn main() -> int {
       b: Box = Box("payload");
       c = b;
-      println(c.v);
+      io::println(c.v);
       return 0;
     }
   )");
@@ -244,13 +244,13 @@ TEST(Leak, ClassObjectTransfer) {
 
 TEST(Leak, TransferThenReassign) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       s: Str = "first";
       t = s;
       s = "second";
-      println(t);
-      println(s);
+      io::println(t);
+      io::println(s);
       return 0;
     }
   )");
@@ -260,12 +260,12 @@ TEST(Leak, TransferThenReassign) {
 
 TEST(Leak, ConditionalTransfer) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       s: Str = "cond";
       if True {
         t = s;
-        println(t);
+        io::println(t);
       }
       return 0;
     }
@@ -276,11 +276,11 @@ TEST(Leak, ConditionalTransfer) {
 
 TEST(Leak, ParameterIntoReturn) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn passthrough(s: Str) -> Str { return s; }
     fn main() -> int {
       out: Str = passthrough("relayed");
-      println(out);
+      io::println(out);
       return 0;
     }
   )");
@@ -293,11 +293,11 @@ TEST(Leak, ParameterIntoReturn) {
 
 TEST(Leak, MethodCallOnCallResultReceiver) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn make() -> Str { return "xyz"; }
     fn main() -> int {
       n: int = make().len();
-      println(Str<int>(n));
+      io::println(Str<int>(n));
       return 0;
     }
   )");
@@ -307,10 +307,10 @@ TEST(Leak, MethodCallOnCallResultReceiver) {
 
 TEST(Leak, MethodCallOnConcatReceiver) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       n: int = ("a" + "b").len();
-      println(Str<int>(n));
+      io::println(Str<int>(n));
       return 0;
     }
   )");
@@ -320,11 +320,11 @@ TEST(Leak, MethodCallOnConcatReceiver) {
 
 TEST(Leak, MethodCallOnParenthesizedReceiver) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       s: Str = "receiver";
       n: int = (s).len();
-      println(Str<int>(n));
+      io::println(Str<int>(n));
       return 0;
     }
   )");
@@ -334,10 +334,10 @@ TEST(Leak, MethodCallOnParenthesizedReceiver) {
 
 TEST(Leak, MethodCallOnStringLiteralReceiver) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       n: int = "abc".len();
-      println(Str<int>(n));
+      io::println(Str<int>(n));
       return 0;
     }
   )");
@@ -350,7 +350,7 @@ TEST(Leak, MethodCallOnStringLiteralReceiver) {
 
 TEST(Leak, CallTemporaryInEquality) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Thing { n: int;
     }
 
@@ -359,8 +359,8 @@ TEST(Leak, CallTemporaryInEquality) {
     }
     fn process() -> Obj { return Thing(5); }
     fn main() -> int {
-      if process() == None { println("none"); }
-      else { println("something"); }
+      if process() == None { io::println("none"); }
+      else { io::println("something"); }
       return 0;
     }
   )");
@@ -370,11 +370,11 @@ TEST(Leak, CallTemporaryInEquality) {
 
 TEST(Leak, TwoCallTemporariesInEquality) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Thing {}
     fn make() -> Obj { return Thing(); }
     fn main() -> int {
-      if make() == make() { println("same"); } else { println("diff"); }
+      if make() == make() { io::println("same"); } else { io::println("diff"); }
       return 0;
     }
   )");
@@ -389,7 +389,7 @@ TEST(Leak, TwoCallTemporariesInEquality) {
 
 TEST(Leak, CallRootedMemberChainAsValue) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class H { a: Str;
     }
 
@@ -399,7 +399,7 @@ TEST(Leak, CallRootedMemberChainAsValue) {
     fn makeH() -> H { return H(); }
     fn main() -> int {
       x = makeH().a;
-      println(x);
+      io::println(x);
       return 0;
     }
   )");
@@ -409,7 +409,7 @@ TEST(Leak, CallRootedMemberChainAsValue) {
 
 TEST(Leak, CallRootedMemberChainAsReceiver) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class H { a: Str;
     }
 
@@ -419,7 +419,7 @@ TEST(Leak, CallRootedMemberChainAsReceiver) {
     fn makeH() -> H { return H(); }
     fn main() -> int {
       n: int = makeH().a.len();
-      println(Str<int>(n));
+      io::println(Str<int>(n));
       return 0;
     }
   )");
@@ -429,7 +429,7 @@ TEST(Leak, CallRootedMemberChainAsReceiver) {
 
 TEST(Leak, CallRootedNestedMemberChain) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class H { a: Str;
     }
 
@@ -445,7 +445,7 @@ TEST(Leak, CallRootedNestedMemberChain) {
     fn makeO() -> O { return O(); }
     fn main() -> int {
       x = makeO().h.a;
-      println(x);
+      io::println(x);
       return 0;
     }
   )");
@@ -459,7 +459,7 @@ TEST(Leak, CallRootedNestedMemberChain) {
 
 TEST(Leak, MemberReadIntoImplicitVarRetains) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class H { a: Str;
     }
 
@@ -469,8 +469,8 @@ TEST(Leak, MemberReadIntoImplicitVarRetains) {
     fn main() -> int {
       h: H = H();
       x = h.a;
-      println(x);
-      println(h.a);
+      io::println(x);
+      io::println(h.a);
       return 0;
     }
   )");
@@ -480,7 +480,7 @@ TEST(Leak, MemberReadIntoImplicitVarRetains) {
 
 TEST(Leak, MemberReadRebindAndFieldToField) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class H { a: Str;
     }
 
@@ -493,8 +493,8 @@ TEST(Leak, MemberReadRebindAndFieldToField) {
       x: Str = "seed";
       x = h.a;      // rebind an owned var to a borrowed field box
       h2.a = h.a;   // field-to-field assignment (borrowed RHS)
-      println(x);
-      println(h2.a);
+      io::println(x);
+      io::println(h2.a);
       return 0;
     }
   )");
@@ -509,7 +509,7 @@ TEST(Leak, MemberReadRebindAndFieldToField) {
 
 TEST(Leak, MatchOnBorrowedFieldBox) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class H { a: Obj;
     }
 
@@ -519,10 +519,10 @@ TEST(Leak, MatchOnBorrowedFieldBox) {
     fn main() -> int {
       h: H = H();
       match h.a {
-        Str { println("is str"); }
-        _ { println("other"); }
+        Str { io::println("is str"); }
+        _ { io::println("other"); }
       }
-      println("done");
+      io::println("done");
       return 0;
     }
   )");
@@ -532,14 +532,14 @@ TEST(Leak, MatchOnBorrowedFieldBox) {
 
 TEST(Leak, CallRootedSubscriptReceiver) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn makeArr() -> Str[3] { return [Str(1), Str(2), Str(3)]; }
     fn makeStr() -> Str { return "a" + "b"; }
     fn main() -> int {
       x: Str = makeArr()[0];
       c: char = makeStr()[1];
-      println(x);
-      println(Str<char>(c));
+      io::println(x);
+      io::println(Str<char>(c));
       return 0;
     }
   )");
@@ -555,7 +555,7 @@ TEST(Leak, CallRootedSubscriptReceiver) {
 
 TEST(Leak, RefTypedArgsToUserMethods) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Bag {
       xs: int[2];
       view fn sum(ys: view int[]) -> int { return ys[0] + ys[1]; }
@@ -571,16 +571,16 @@ TEST(Leak, RefTypedArgsToUserMethods) {
     fn main() -> int {
       b: Bag = Bag();
       v: int[2] = [3, 4];
-      println(Str<int>(b.sum(v)));                         // local argument
-      println(Str<int>(v.len()));                          // local still alive
-      println(Str<int>(b.sum([5, 6])));                    // literal argument
-      println(Str<int>(b.sum(mk())));                      // call-result argument
-      println(Str<int>(b.own()));
-      println(Str<int>(b.names(["a", "b"])));
-      println(b.first((1, "t")));                        // tuple literal
+      io::println(Str<int>(b.sum(v)));                         // local argument
+      io::println(Str<int>(v.len()));                          // local still alive
+      io::println(Str<int>(b.sum([5, 6])));                    // literal argument
+      io::println(Str<int>(b.sum(mk())));                      // call-result argument
+      io::println(Str<int>(b.own()));
+      io::println(Str<int>(b.names(["a", "b"])));
+      io::println(b.first((1, "t")));                        // tuple literal
       t: (int, Str) = (2, "u");
-      println(b.first(t));                               // tuple local
-      println(b.first(t));                               // still alive
+      io::println(b.first(t));                               // tuple local
+      io::println(b.first(t));                               // still alive
       return 0;
     }
   )");

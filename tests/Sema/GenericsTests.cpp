@@ -24,7 +24,8 @@ const char *kBox = R"(
 )";
 
 std::string withMain(const std::string &decls, const std::string &body) {
-  return decls + "\nfn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return decls + "import ::io; \nfn main() -> int {\n" + body +
+         "\n  return 0;\n}\n";
 }
 
 bool has(const std::string &haystack, const std::string &needle) {
@@ -398,9 +399,9 @@ TEST(Generics, TemplateNameCollisions) {
       has(r2.Diagnostics, "'f' is already declared as a generic function"))
       << r2.Diagnostics;
 
-  auto r3 = semaCheck(withMain("class print<T> {}", ""));
+  auto r3 = semaCheck(withMain("class Str<T> {}", ""));
   EXPECT_FALSE(r3.Ok);
-  EXPECT_TRUE(has(r3.Diagnostics, "builtin function")) << r3.Diagnostics;
+  EXPECT_TRUE(has(r3.Diagnostics, "builtin class")) << r3.Diagnostics;
 }
 
 TEST(Generics, InstantiationDepthGuard) {
@@ -725,7 +726,7 @@ fn main() -> int { b = Box<int>(1); return 0; }
                            "b = gen::Box<Str>(\"y\"); a = Box<Str>(\"x\");"}) {
     auto r3 = semaCheckFile(writeProjectFile(
         dir, "clash2.pkn",
-        std::string("import lib::gen;\n"
+        std::string("import ::io; import lib::gen;\n"
                     "class Box<T> { v: T; }\n"
                     "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
                     "fn main() -> int { ") +
@@ -847,40 +848,28 @@ TEST(GenericsTypes, OptionalOfPrimitiveArgumentIsAccepted) {
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
+  // An enum's optional is a value optional; a `T?` of an optional argument
+  // is the argument itself (no nested optional).
   auto re = semaCheck(R"(
     enum Color { Red, Green }
     class Slot<T> { v: T?; }
     impl Slot<T> { fn __init__() { } }
-    fn main() -> int { b = Slot<Color>(); return 0; }
+    fn main() -> int { b = Slot<Color>(); n = Slot<int?>(); return 0; }
   )");
-  EXPECT_FALSE(re.Ok);
-  EXPECT_TRUE(has(re.Diagnostics, "has type 'Color?': optional enum types "
-                                  "are not supported yet"))
-      << re.Diagnostics;
-  EXPECT_TRUE(has(re.Diagnostics, "in instantiation of 'Slot<Color>'"))
-      << re.Diagnostics;
+  EXPECT_TRUE(re.Ok) << re.Diagnostics;
 
-  auto rn = semaCheck(R"(
-    class Slot<T> { v: T?; }
-    impl Slot<T> { fn __init__() { } }
-    fn main() -> int { b = Slot<int?>(); return 0; }
-  )");
-  EXPECT_FALSE(rn.Ok);
-  EXPECT_TRUE(has(rn.Diagnostics, "nested optional type 'int?"
-                                  "?'"))
-      << rn.Diagnostics;
-
-  // Likewise an optional tuple (not supported yet, see #15).
+  // An optional tuple, an optional enum and an optional type argument (whose
+  // `T?` is the argument itself) are all fine.
   auto r2 = semaCheck(R"(
+    enum Color { Red }
     class Slot<T> { v: T?; }
     impl Slot<T> { fn __init__() { } }
-    fn main() -> int { b = Slot<(int, Str)>(); return 0; }
+    fn main() -> int {
+      b = Slot<(int, Str)>(); c = Slot<Color>(); d = Slot<int?>();
+      return 0;
+    }
   )");
-  EXPECT_FALSE(r2.Ok);
-  EXPECT_TRUE(has(r2.Diagnostics, "optional tuple types are not supported yet"))
-      << r2.Diagnostics;
-  EXPECT_TRUE(has(r2.Diagnostics, "in instantiation of 'Slot<(int, Str)>'"))
-      << r2.Diagnostics;
+  EXPECT_TRUE(r2.Ok) << r2.Diagnostics;
 }
 
 TEST(GenericsTypes, TupleAndOptionalTypeArgs) {
@@ -924,4 +913,102 @@ fn main() -> int {
   auto r = semaCheckFile(p);
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   std::filesystem::remove_all(dir);
+}
+
+// -- static fn of a generic class's impl block (`Box<int>::of(1)`)
+
+static const char *const kBoxWithStatics = R"(
+  class Box<T> {
+    __v: T;
+    fn get() -> T { return self.__v; }
+  }
+  impl Box<T> {
+    fn __init__(v: T) { self.__v = v; }
+    static fn of(v: T) -> Box<T> { return Box<T>(v); }
+    static fn pair(v: T) -> (Box<T>, Box<T>) {
+      b = Box<T>(v);
+      return (b, Box<T>(b.__v)); // a static reaches the private members
+    }
+  }
+)";
+
+TEST(Generics, StaticFnOfAnInstantiation) {
+  auto r = check(withMain(kBoxWithStatics, R"(
+    b = Box<int>::of(1);
+    s: Box<Str> = Box<Str>::of("s");
+    t = Box<int>::pair(2);
+    n = t.0.get() + t.1.get() + b.get();
+    io::println(s.get() + Str(n));
+  )"));
+  ASSERT_TRUE(r.Ok) << r.Diagnostics;
+  // The statics of an instantiation are its functions, declared with it.
+  std::vector<std::string> funcs;
+  for (auto *fn : r.Driver->getRoot()->getFuncDecls())
+    funcs.push_back(fn->getName());
+  EXPECT_EQ(funcs,
+            (std::vector<std::string>{"main", "Box<int>::of", "Box<int>::pair",
+                                      "Box<Str>::of", "Box<Str>::pair"}));
+}
+
+TEST(Generics, StaticFnWithoutTypeArgs) {
+  auto r = semaCheck(withMain(kBoxWithStatics, "b = Box::of(1);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics,
+                  "'Box::of' is a function of the generic class 'Box': write "
+                  "'Box<...>::of(...)' with its type arguments"))
+      << r.Diagnostics;
+}
+
+TEST(Generics, StaticFnUnknown) {
+  auto r = semaCheck(withMain(kBoxWithStatics, "b = Box<int>::make(1);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "'Box<int>' has no static function 'make'"))
+      << r.Diagnostics;
+}
+
+TEST(Generics, StaticFnArgumentIsChecked) {
+  auto r = semaCheck(withMain(kBoxWithStatics, "b = Box<int>::of(\"s\");"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "'Box<int>::of'")) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "expected 'int'")) << r.Diagnostics;
+}
+
+// The name must be free in the instantiation, as in a plain class; the call
+// is a follow-on.
+TEST(Generics, StaticFnNameTakenByAMethod) {
+  auto r = semaCheck(withMain(R"(
+    class Box<T> {
+      v: T;
+      fn of() -> int { return 1; }
+    }
+    impl Box<T> {
+      static fn of(v: T) -> Box<T> { return Box<T>(v); }
+    }
+  )",
+                              "b = Box<int>::of(1);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "class 'Box<int>' already has a method 'of'"))
+      << r.Diagnostics;
+}
+
+// The body is checked per instantiation, with the instantiation note.
+TEST(Generics, StaticFnBodyIsCheckedPerInstantiation) {
+  auto r = semaCheck(withMain(R"(
+    class Box<T> { v: T; }
+    impl Box<T> {
+      static fn of(v: T) -> Box<T> { return Box<T>(v, v); }
+    }
+  )",
+                              "b = Box<int>::of(1);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_TRUE(has(r.Diagnostics, "function 'Box<int>' expects 1 argument(s), "
+                                 "got 2"))
+      << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "in instantiation of 'Box<int>' requested "
+                                 "here"))
+      << r.Diagnostics;
 }

@@ -4,16 +4,32 @@
 //            bool/int/float/Str parameters and return values,
 //            emitAllScopesCleanup on every return path
 
+import ::io;
+
 // ---- Arithmetic helpers ---------------------------------------------------
 
-fn add(a: int, b: int) -> int { return a + b; }
-fn sub(a: int, b: int) -> int { return a - b; }
-fn mul(a: int, b: int) -> int { return a * b; }
-fn div(a: int, b: int) -> int { return a / b; }
-fn mod(a: int, b: int) -> int { return a % b; }
+fn add(a: int, b: int) -> int {
+  return a + b;
+}
+fn sub(a: int, b: int) -> int {
+  return a - b;
+}
+fn mul(a: int, b: int) -> int {
+  return a * b;
+}
+fn div(a: int, b: int) -> int {
+  return a / b;
+}
+fn mod(a: int, b: int) -> int {
+  return a % b;
+}
 
-fn square(n: int) -> int { return n * n; }
-fn cube(n: int)   -> int { return n * n * n; }
+fn square(n: int) -> int {
+  return n * n;
+}
+fn cube(n: int) -> int {
+  return n * n * n;
+}
 
 fn maxOf(a: int, b: int) -> int {
   return if a > b then a else b;
@@ -27,21 +43,29 @@ fn clamp(v: int, lo: int, hi: int) -> int {
 
 // ---- Bool-returning functions ---------------------------------------------
 
-fn isEven(n: int) -> bool { return n % 2 == 0; }
-fn isPositive(n: int) -> bool { return n > 0; }
-fn inRange(v: int, lo: int, hi: int) -> bool { return v >= lo && v <= hi; }
+fn isEven(n: int) -> bool {
+  return n % 2 == 0;
+}
+fn isPositive(n: int) -> bool {
+  return n > 0;
+}
+fn inRange(v: int, lo: int, hi: int) -> bool {
+  return v >= lo && v <= hi;
+}
 
 // ---- Float functions -------------------------------------------------------
 
-fn average(a: float, b: float) -> float { return (a + b) / 2.0; }
+fn average(a: float, b: float) -> float {
+  return (a + b) / 2.0;
+}
 
 // ---- Void functions --------------------------------------------------------
 
 fn printInt(label: Str, n: int) {
-  println(label + Str<int>(n));
+  io::println(label + Str<int>(n));
 }
 fn printBool(label: Str, b: bool) {
-  println(label + Str(b));
+  io::println(label + Str(b));
 }
 
 // ---- Str-returning functions (exercises shared-box return path) -----------
@@ -102,52 +126,52 @@ fn classify(n: int) -> Str {
 // ---- main -----------------------------------------------------------------
 
 fn main() -> int {
-  println("=== basic int ops ===");
-  printInt("add 3+4=",  add(3, 4));        // 7
+  io::println("=== basic int ops ===");
+  printInt("add 3+4=", add(3, 4));        // 7
   printInt("sub 10-6=", sub(10, 6));       // 4
-  printInt("mul 6*7=",  mul(6, 7));        // 42
+  printInt("mul 6*7=", mul(6, 7));        // 42
   printInt("div 15/4=", div(15, 4));       // 3
   printInt("mod 17%5=", mod(17, 5));       // 2
 
-  println("=== helpers ===");
-  printInt("square 9=",  square(9));       // 81
-  printInt("cube 3=",    cube(3));         // 27
-  printInt("max(4,7)=",  maxOf(4, 7));     // 7
-  printInt("min(4,7)=",  minOf(4, 7));     // 4
+  io::println("=== helpers ===");
+  printInt("square 9=", square(9));       // 81
+  printInt("cube 3=", cube(3));         // 27
+  printInt("max(4,7)=", maxOf(4, 7));     // 7
+  printInt("min(4,7)=", minOf(4, 7));     // 4
   printInt("clamp(-1,0,10)=", clamp(0 - 1, 0, 10));  // 0
-  printInt("clamp(5,0,10)=",  clamp(5, 0, 10));       // 5
-  printInt("clamp(15,0,10)=", clamp(15, 0, 10));      // 10
+  printInt("clamp(5,0,10)=", clamp(5, 0, 10));  // 5
+  printInt("clamp(15,0,10)=", clamp(15, 0, 10));  // 10
 
-  println("=== bool-returning ===");
-  printBool("even(4)=",      isEven(4));            // True
-  printBool("even(7)=",      isEven(7));            // False
-  printBool("positive(-1)=", isPositive(0 - 1));   // False
+  io::println("=== bool-returning ===");
+  printBool("even(4)=", isEven(4));            // True
+  printBool("even(7)=", isEven(7));            // False
+  printBool("positive(-1)=", isPositive(0 - 1));  // False
   printBool("inRange(5,1,10)=", inRange(5, 1, 10));  // True
   printBool("inRange(0,1,10)=", inRange(0, 1, 10));  // False
 
-  println("=== float ===");
-  println("avg(3.0,7.0)=" + Str<float>(average(3.0, 7.0)));  // 5
+  io::println("=== float ===");
+  io::println("avg(3.0,7.0)=" + Str<float>(average(3.0, 7.0)));  // 5
 
-  println("=== Str-returning ===");
-  println(greeting("Paykan"));          // Hello, Paykan!
-  println(repeat("ab", 3));             // ababab
-  println(repeat("x", 0));              // (empty)
+  io::println("=== Str-returning ===");
+  io::println(greeting("Paykan"));          // Hello, Paykan!
+  io::println(repeat("ab", 3));             // ababab
+  io::println(repeat("x", 0));              // (empty)
 
-  println("=== recursive ===");
+  io::println("=== recursive ===");
   printInt("0!=", factorial(0));    // 1
   printInt("5!=", factorial(5));    // 120
   printInt("10!=",factorial(10));   // 3628800
-  printInt("fib(0)=",  fib(0));     // 0
+  printInt("fib(0)=", fib(0));     // 0
   printInt("fib(10)=", fib(10));    // 55
   printInt("gcd(48,18)=", gcd(48, 18));  // 6
   printInt("2^10=", power(2, 10));       // 1024
 
-  println("=== multiple return paths ===");
+  io::println("=== multiple return paths ===");
   printInt("abs(-7)=", abs(0 - 7));    // 7
-  printInt("abs(7)=",  abs(7));         // 7
-  println(classify(5));     // pos
-  println(classify(0 - 2)); // neg
-  println(classify(0));     // zero
+  printInt("abs(7)=", abs(7));         // 7
+  io::println(classify(5));     // pos
+  io::println(classify(0 - 2)); // neg
+  io::println(classify(0));     // zero
 
   return 0;
 }

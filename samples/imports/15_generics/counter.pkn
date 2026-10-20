@@ -2,6 +2,10 @@
 // the class main's Box<int> is: one class per instantiation per program.
 import containers::box;
 
-fn start() -> box::Box<int> { return box::Box<int>(10); }
+fn start() -> box::Box<int> {
+  return box::Box<int>(10);
+}
 
-fn named() -> box::Pair<Str, int> { return box::pairOf("n", 3); }
+fn named() -> box::Pair<Str, int> {
+  return box::pairOf("n", 3);
+}

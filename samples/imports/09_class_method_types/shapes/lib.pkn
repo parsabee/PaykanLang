@@ -9,7 +9,7 @@ class Pair {
   a: Cell;
   b: Cell;
   view fn first() -> view Cell { return self.a; }
-  view fn sum() -> int { return self.a.v + self.b.v; }
+  view fn sum() -> int         { return self.a.v + self.b.v; }
 }
 
 impl Pair {
@@ -19,20 +19,28 @@ impl Pair {
 class Cell {
   v: int;
   kind: Kind;
-  view fn kindOf() -> Kind { return self.kind; }
+  view fn kindOf() -> Kind     { return self.kind; }
   fn pairWith(o: Cell) -> Pair { return Pair(self, o); }
 }
 
 impl Cell {
-  fn __init__(v: int) { self.v = v; self.kind = Kind::Even; if v % 2 != 0 { self.kind = Kind::Odd; } }
+  fn __init__(v: int) {
+    self.v = v;
+    self.kind = Kind::Even;
+    if v % 2 != 0 {
+      self.kind = Kind::Odd;
+    }
+  }
 }
 
 class Splitter {
-  view fn split(c: Cell) -> Cell[2] { return [Cell(c.v / 2), Cell(c.v - c.v / 2)]; }
+  view fn split(c: Cell) -> Cell[2] {
+    return [Cell(c.v / 2), Cell(c.v - c.v / 2)];
+  }
 }
 
 impl Splitter {
-  fn __init__() {}
+  fn __init__() { }
 }
 
 enum Kind { Even, Odd }
@@ -40,6 +48,9 @@ enum Kind { Even, Odd }
 fn total(cs: view Cell[]) -> int {
   s: int = 0;
   i: int = 0;
-  while i < cs.len() { s = s + cs[i].v; i = i + 1; }
+  while i < cs.len() {
+    s = s + cs[i].v;
+    i = i + 1;
+  }
   return s;
 }

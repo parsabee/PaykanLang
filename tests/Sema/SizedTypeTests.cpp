@@ -13,7 +13,7 @@
 using namespace paykan::test;
 
 static std::string inMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 static void expectOk(const std::string &src) {

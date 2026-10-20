@@ -1,7 +1,12 @@
 // The sized numeric types: literals take the type their context expects,
 // every operation has one operand type, and the conversions cover every
 // numeric pair.
-struct Pixel { r: u8; g: u8; b: u8; a: f32; }
+struct Pixel {
+  r: u8;
+  g: u8;
+  b: u8;
+  a: f32;
+}
 fn clamp(v: i32, lo: i32, hi: i32) -> i32 {
   if v < lo { return lo; }
   if v > hi { return hi; }
@@ -29,4 +34,6 @@ fn main() -> int {
   match a { 255 { } _ { } }
   return 0;
 }
-fn g16(v: f16) -> f16 { return v * 2; }
+fn g16(v: f16) -> f16 {
+  return v * 2;
+}

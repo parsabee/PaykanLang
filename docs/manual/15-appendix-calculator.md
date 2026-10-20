@@ -78,26 +78,23 @@ class Entry {
   fn append(e: Entry) {
     match self.next {
       n: Entry { n.append(e); }
-      None     { self.next = e; }
+      None { self.next = e; }
     }
   }
 // ...
+
 impl Entry {
-  fn __init__(k: Str, v: float) {
-    self.key = k;
-    self.value = v;
-  }
+  fn __init__(k: Str, v: float) { self.key = k; self.value = v; }
 }
 // ...
+
 class HashMap {
   buckets: Entry?[8];
   size: int;
 // ...
+
 impl HashMap {
-  fn __init__() {
-    self.buckets = [None; 8];
-    self.size = 0;
-  }
+  fn __init__() { self.buckets = [None; 8]; self.size = 0; }
 }
 ```
 
@@ -118,7 +115,9 @@ in the table, and `insert` changes it.
     while cur != None {
       match cur {
         e: Entry {
-          if e.key.equals(key) { return e; }
+          if e.key.equals(key) {
+            return e;
+          }
           cur = e.next;
         }
         None { }
@@ -145,8 +144,12 @@ added:
       None {
         b: int = self.indexFor(key);
         match self.buckets[b] {
-          first: Entry { first.append(Entry(key, value)); }
-          None         { self.buckets[b] = Entry(key, value); }
+          first: Entry {
+            first.append(Entry(key, value));
+          }
+          None {
+            self.buckets[b] = Entry(key, value);
+          }
         }
         return True;
       }
@@ -189,7 +192,7 @@ not a `view fn` either, since the entries it reaches can be changed:
 // from: samples/imports/12_calc/main.pkn
 fn listVars(env: hashmap::HashMap) {
   if env.count() == 0 {
-    println("(no variables)");
+    io::println("(no variables)");
     return;
   }
   b: int = 0;
@@ -198,7 +201,7 @@ fn listVars(env: hashmap::HashMap) {
     while cur != None {
       match cur {
         e: hashmap::Entry {
-          println("  " + e.key + " = " + show(e.value));
+          io::println("  " + e.key + " = " + show(e.value));
           cur = e.next;
         }
         None { }
@@ -235,6 +238,7 @@ first error:
 
 ```pkn
 // from: samples/imports/12_calc/calc/parser.pkn
+
 class Parser {
   input: Str;
   pos: int;
@@ -242,10 +246,9 @@ class Parser {
   error: Str?;   // the first error, or None
 
   // Record the first error only; later errors are usually cascades.
-  fn fail(msg: Str) {
-    if self.error == None { self.error = msg; }
-  }
+  fn fail(msg: Str)      { if self.error == None { self.error = msg; } }
 // ...
+
 impl Parser {
   fn __init__(s: Str, env: hashmap::HashMap) {
     self.input = s;
@@ -261,12 +264,13 @@ chained conditional expression:
 
 ```pkn
 // from: samples/imports/12_calc/calc/parser.pkn
+
   fn parseTerm() -> float {
     result: float = self.parseFactor();
     self.skipWs();
     while !self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%')) {
-      op: Op = if self.atIs('*') then Op::Mul
-               else if self.atIs('/') then Op::Div else Op::Mod;
+      op: Op = if self.atIs('*') then Op::Mul else if self.atIs('/')
+          then Op::Div else Op::Mod;
       self.advance();
       rhs: float = self.parseFactor();
       result = applyOp(op, result, rhs);
@@ -284,7 +288,9 @@ A factor that is a name is looked up in the variable store. The `match` names th
     if self.atIsIdentStart() {
       name: Str = self.parseIdent();
       match self.env.lookup(name) {
-        e: hashmap::Entry { return e.value; }
+        e: hashmap::Entry {
+          return e.value;
+        }
         None {
           self.fail("undefined variable '" + name + "'");
           return 0.0;
@@ -351,6 +357,7 @@ class Ring<T> {
     }
   }
 // ...
+
 impl Ring<T> {
   // Every slot starts as `blank`, until an item is added there.
   fn __init__(blank: T) {
@@ -380,20 +387,20 @@ between printing an assignment and printing an expression's value:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-fn evalStatement(src: Str, env: hashmap::HashMap,
-                 history: Ring<(Str, float)>, quiet: bool) {
+fn evalStatement(src: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
+                 quiet: bool) {
   p: parser::Parser = parser::Parser(src, env);
   target, value = p.parseStatement();
 
   match p.error {
     msg: Str {
-      printerrln("error: " + msg);
+      io::printerrln("error: " + msg);
       return;
     }
     None { }
   }
   if !p.done() {
-    printerrln("error: unexpected '" + p.rest() + "'");
+    io::printerrln("error: unexpected '" + p.rest() + "'");
     return;
   }
 
@@ -402,12 +409,18 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
   match target {
     name: Str {
       env.put(name, value);
-      if quiet { println(show(value)); }
-      else { println(name + " = " + show(value)); }
+      if quiet {
+        io::println(show(value));
+      } else {
+        io::println(name + " = " + show(value));
+      }
     }
     None {
-      if quiet { println(show(value)); }
-      else { println(src + " = " + show(value)); }
+      if quiet {
+        io::println(show(value));
+      } else {
+        io::println(src + " = " + show(value));
+      }
     }
   }
 }
@@ -416,14 +429,18 @@ fn evalStatement(src: Str, env: hashmap::HashMap,
 ### The REPL
 
 The interactive loop is the standard-input idiom from [Files and I/O](11-files-and-io.md).
-`readln` returns an `Obj`, so the end of input is caught by the `_` arm; `handle` returns
-`False` for `:quit`:
+`readln` returns a result whose `value` is a `Str?`, so the end of input is caught by the
+`_` arm (the `None`); `handle` returns `False` for `:quit`:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
   while True {
-    match Stdin.readln() {
-      line: Str { if !handle(line, env, history, quiet) { return 0; } }
+    match io::stdin().readln().value {
+      line: Str {
+        if !handle(line, env, history, quiet) {
+          return 0;
+        }
+      }
       _ { break; } // None — end of input
     }
   }
@@ -437,6 +454,7 @@ convention:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
+
 fn main(args: view Str[]) -> int {
   quiet: bool = False;
   runDemo: bool = True;
@@ -458,7 +476,7 @@ fn main(args: view Str[]) -> int {
         i = i + 1;
         nexprs = nexprs + 1;
       } else {
-        printerrln("error: " + a + " requires an argument");
+        io::printerrln("error: " + a + " requires an argument");
         return 2;
       }
 ```
@@ -495,8 +513,8 @@ language:
   in `applyOp`. The compiler points out the `match` that no longer covers every variant.
 - Add functions such as `abs(x)` and `sqrt(x)`: parse a name followed by `(`, and dispatch on
   the name with a value-mode `match` on the `Str`.
-- Add `:save <file>` and `:load <file>` commands that write the variables with `open` and read
-  them back with `readln` and `float(...)`.
+- Add `:save <file>` and `:load <file>` commands that write the variables with `io::open` and
+  read them back with `readln` and `float(...)`.
 - Run the result with `paykan --track-heap` to check that it still frees everything.
 
 Back to the [manual's contents](index.md).

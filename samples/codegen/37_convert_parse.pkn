@@ -16,10 +16,16 @@
 // expect-stdout: '1e999' is not a float
 // expect-stdout: None
 
+import ::io;
+
 fn describe(s: Str) -> Str {
   match int<Str>(s) {
-    n: int { return "'" + s + "' is " + Str<int>(n); }
-    None   { return "'" + s + "' is not an int"; }
+    n: int {
+      return "'" + s + "' is " + Str<int>(n);
+    }
+    None {
+      return "'" + s + "' is not an int";
+    }
   }
 }
 
@@ -31,23 +37,25 @@ fn main() -> int {
   while i < inputs.len() {
     match int(inputs[i]) {
       n: int { sum = sum + n; }
-      None   { invalid = invalid + 1; }
+      None { invalid = invalid + 1; }
     }
     i = i + 1;
   }
-  println("sum of the valid numbers: " + Str(sum) + " (" + Str<int>(invalid) +
-          " invalid)");
+  io::println("sum of the valid numbers: " + Str(sum) + " (" + Str<int>(invalid)
+      + " invalid)");
 
   match int<Str>("-9223372036854775808") {
-    n: int { println(Str(n) + " is the smallest int"); }
-    None   { }
+    n: int {
+      io::println(Str(n) + " is the smallest int");
+    }
+    None { }
   }
   if int("9223372036854775808") == None {
-    println("9223372036854775808 is not an int");
+    io::println("9223372036854775808 is not an int");
   }
-  println(describe(" 7"));
-  println(describe("7 "));
-  println(describe("+7"));
+  io::println(describe(" 7"));
+  io::println(describe("7 "));
+  io::println(describe("+7"));
 
   readings: Str[4] = ["1.5", "2", "bad", "3.25"];
   total = 0.0;
@@ -55,12 +63,15 @@ fn main() -> int {
   i = 0;
   while i < readings.len() {
     match float<Str>(readings[i]) {
-      f: float { total = total + f; count = count + 1; }
-      None     { }
+      f: float {
+        total = total + f;
+        count = count + 1;
+      }
+      None { }
     }
     i = i + 1;
   }
-  println("mean: " + Str<float>(total / float<int>(count)));
+  io::println("mean: " + Str<float>(total / float<int>(count)));
 
   out = "";
   specials: Str[3] = ["nan", "inf", "-0"];
@@ -68,13 +79,15 @@ fn main() -> int {
   while i < specials.len() {
     match float(specials[i]) {
       f: float { out = out + Str(f); }
-      None     { out = out + "?"; }
+      None { out = out + "?"; }
     }
     if i < 2 { out = out + " "; }
     i = i + 1;
   }
-  println(out);
-  if float<Str>("1e999") == None { println("'1e999' is not a float"); }
-  println(int("12abc"));      // an int? prints as its value or None
+  io::println(out);
+  if float<Str>("1e999") == None {
+    io::println("'1e999' is not a float");
+  }
+  io::println(int("12abc"));      // an int? prints as its value or None
   return 0;
 }

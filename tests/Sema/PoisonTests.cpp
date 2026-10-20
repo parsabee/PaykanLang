@@ -17,7 +17,7 @@ using namespace paykan::test;
 namespace {
 
 std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 // A failing initializer: the conversion's source is written as `int`, but the
@@ -43,23 +43,25 @@ void expectOnly(const std::string &src, const std::string &expected) {
 
 // The issue's reproducer.
 TEST(Poison, FailedFirstAssignmentReportsOnlyTheRealError) {
-  expectOnly("fn main() -> int { n = 2.5; a = Str<int>(n); println(a); "
+  expectOnly("import ::io; fn main() -> int { n = 2.5; a = Str<int>(n); "
+             "io::println(a); "
              "return 0; }",
              kBadMsg);
 }
 
 TEST(Poison, SeveralLaterUsesAreSilent) {
   expectOnly(
-      wrapMain("a = " + kBad +
-               ";\n println(a);\n b = a;\n x: int = a;\n print(Str(x));"),
+      wrapMain(
+          "a = " + kBad +
+          ";\n io::println(a);\n b = a;\n x: int = a;\n io::print(Str(x));"),
       kBadMsg);
 }
 
 // Poison is absorbing: a value computed from a poisoned one is poisoned too.
 TEST(Poison, PoisonPropagatesThroughDerivedVariables) {
   expectOnly(wrapMain("a = " + kBad +
-                      ";\n b = a + 1;\n println(b);\n c = b.len();\n"
-                      " println(Str(c));"),
+                      ";\n b = a + 1;\n io::println(b);\n c = b.len();\n"
+                      " io::println(Str(c));"),
              kBadMsg);
 }
 
@@ -70,34 +72,34 @@ TEST(Poison, EveryUseOfAPoisonedVariableIsSilent) {
       "impl P {\n  fn __init__(x: int) { self.x = x; }\n}\n"
       "fn f(v: int) -> int { return v; }\n";
   const std::vector<std::string> uses = {
-      "a.foo();",                                 // method call
-      "y = a.x; println(y);",                     // field access
-      "z = a[0]; println(z);",                    // subscript
-      "xs = [1, 2]; println(Str(xs[a]));",        // as an array index
-      "s = \"abc\"; println(Str(s[a]));",         // as a string index
-      "f(a);",                                    // call argument
-      "p = P(a); println(Str(p.x));",             // constructor argument
-      "println(Str(f(a) + 1));",                  // nested in a call
-      "if a { println(\"t\"); }",                 // if condition
-      "while a < 3 { println(\"w\"); }",          // while condition
-      "k = if a then 1 else 2; println(Str(k));", // ternary condition
-      "q = -a; r = !a; println(Str(q)); println(Str(r));", // unary ops
-      "t = a * 2 + 1 == 3 && a; println(Str(t));",         // binary ops
-      "e = a == None; println(Str(e));",                   // comparison
-      "a.x = 3;",                                          // member assignment
-      "a[1] = 2;",                         // subscript assignment
-      "xs = [1]; xs[0] = a;",              // assigned into an array
-      "pp = P(1); pp.x = a;",              // assigned into a field
-      "t = (a, 1); println(t.0);",         // tuple element
-      "u = [a, a]; println(Str(u[1]));",   // array element
-      "s = Str(a); println(s);",           // inferred conversion
-      "s = Str<int>(a); println(s);",      // explicit conversion
-      "m = a; println(m);",                // copy
-      "match a { _ { println(\"m\"); } }", // match subject
-      "o: Obj = a; println(o);",           // typed declaration
-      "e: Error = a; println(e);",         // not the user-visible `Error` class
-      "u, v = a; println(u); println(v);", // destructuring source
-      "println(a.toString().len());",      // chained calls
+      "a.foo();",                                     // method call
+      "y = a.x; io::println(y);",                     // field access
+      "z = a[0]; io::println(z);",                    // subscript
+      "xs = [1, 2]; io::println(Str(xs[a]));",        // as an array index
+      "s = \"abc\"; io::println(Str(s[a]));",         // as a string index
+      "f(a);",                                        // call argument
+      "p = P(a); io::println(Str(p.x));",             // constructor argument
+      "io::println(Str(f(a) + 1));",                  // nested in a call
+      "if a { io::println(\"t\"); }",                 // if condition
+      "while a < 3 { io::println(\"w\"); }",          // while condition
+      "k = if a then 1 else 2; io::println(Str(k));", // ternary condition
+      "q = -a; r = !a; io::println(Str(q)); io::println(Str(r));", // unary ops
+      "t = a * 2 + 1 == 3 && a; io::println(Str(t));",             // binary ops
+      "e = a == None; io::println(Str(e));",                       // comparison
+      "a.x = 3;",                              // member assignment
+      "a[1] = 2;",                             // subscript assignment
+      "xs = [1]; xs[0] = a;",                  // assigned into an array
+      "pp = P(1); pp.x = a;",                  // assigned into a field
+      "t = (a, 1); io::println(t.0);",         // tuple element
+      "u = [a, a]; io::println(Str(u[1]));",   // array element
+      "s = Str(a); io::println(s);",           // inferred conversion
+      "s = Str<int>(a); io::println(s);",      // explicit conversion
+      "m = a; io::println(m);",                // copy
+      "match a { _ { io::println(\"m\"); } }", // match subject
+      "o: Obj = a; io::println(o);",           // typed declaration
+      "e: Error = a; io::println(e);", // not the user-visible `Error` class
+      "u, v = a; io::println(u); io::println(v);", // destructuring source
+      "io::println(a.toString().len());",          // chained calls
   };
   for (const auto &use : uses) {
     SCOPED_TRACE(use);
@@ -111,7 +113,7 @@ TEST(Poison, EveryUseOfAPoisonedVariableIsSilent) {
 
 TEST(Poison, ReturnOfAPoisonedVariableIsSilent) {
   expectOnly("fn g() -> int {\n  a = " + kBad + ";\n  return a;\n}\n" +
-                 wrapMain("println(Str(g()));"),
+                 wrapMain("io::println(Str(g()));"),
              kBadMsg);
 }
 
@@ -126,7 +128,7 @@ TEST(Poison, EmptyArrayLiteralPoisonsTheVariable) {
 
 // A later valid assignment re-declares the variable with the value's type.
 TEST(Poison, ValidReassignmentRedeclaresTheVariable) {
-  expectOnly(wrapMain("a = " + kBad + ";\n a = 5;\n println(Str(a + 1));"),
+  expectOnly(wrapMain("a = " + kBad + ";\n a = 5;\n io::println(Str(a + 1));"),
              kBadMsg);
 }
 
@@ -144,14 +146,15 @@ TEST(Poison, RedeclaredVariableIsCheckedAgain) {
 
 // A re-assignment in an inner scope re-declares the variable where it lives.
 TEST(Poison, ReassignmentInANestedScopeRedeclaresTheOuterVariable) {
-  expectOnly(
-      wrapMain("a = " + kBad + ";\n if True { a = 5; }\n println(Str(a + 1));"),
-      kBadMsg);
+  expectOnly(wrapMain("a = " + kBad +
+                      ";\n if True { a = 5; }\n io::println(Str(a + 1));"),
+             kBadMsg);
 }
 
 // A failing re-assignment keeps the variable poisoned (and silent).
 TEST(Poison, FailedReassignmentKeepsThePoison) {
-  expectOnly(wrapMain("a = " + kBad + ";\n a = a + 1;\n println(a);"), kBadMsg);
+  expectOnly(wrapMain("a = " + kBad + ";\n a = a + 1;\n io::println(a);"),
+             kBadMsg);
 }
 
 // A failed re-assignment of a healthy variable keeps its type.
@@ -166,7 +169,7 @@ TEST(Poison, FailedReassignmentOfAHealthyVariableKeepsItsType) {
 // -- Genuinely undeclared names
 
 TEST(Poison, UndeclaredVariableIsStillReported) {
-  auto r = semaCheck(wrapMain("println(nope);"));
+  auto r = semaCheck(wrapMain("io::println(nope);"));
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("use of undeclared variable 'nope'"),
@@ -176,7 +179,7 @@ TEST(Poison, UndeclaredVariableIsStillReported) {
 
 TEST(Poison, UndeclaredVariableNextToAPoisonedOneIsStillReported) {
   auto r = semaCheck(
-      wrapMain("a = " + kBad + ";\n println(a);\n println(nope + a);"));
+      wrapMain("a = " + kBad + ";\n io::println(a);\n io::println(nope + a);"));
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find(kBadMsg), std::string::npos) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("use of undeclared variable 'nope'"),
@@ -186,8 +189,8 @@ TEST(Poison, UndeclaredVariableNextToAPoisonedOneIsStillReported) {
 
 // The poison is a binding like any other: it ends with its scope.
 TEST(Poison, PoisonDoesNotOutliveItsScope) {
-  auto r = semaCheck(
-      wrapMain("if True { a = " + kBad + "; println(a); }\n println(a);"));
+  auto r = semaCheck(wrapMain("if True { a = " + kBad +
+                              "; io::println(a); }\n io::println(a);"));
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("use of undeclared variable 'a'"),
             std::string::npos)
@@ -197,24 +200,23 @@ TEST(Poison, PoisonDoesNotOutliveItsScope) {
 // -- Typed declarations: `x: T = <bad>`
 
 TEST(Poison, UnknownDeclaredTypePoisonsTheVariable) {
-  expectOnly(wrapMain("x: Foo = 1;\n println(x);\n y = x + 1;\n"
-                      " println(y.len());"),
+  expectOnly(wrapMain("x: Foo = 1;\n io::println(x);\n y = x + 1;\n"
+                      " io::println(y.len());"),
              "variable 'x' has unknown class type 'Foo'");
 }
 
 // An annotation that resolves to an unsupported type poisons the variable
 // (it used to be declared as `void`, which reported follow-ons at its uses).
 TEST(Poison, UnsupportedDeclaredTypePoisonsTheVariable) {
-  expectOnly("enum Color { Red }\n" +
-                 wrapMain("t: Color? = None;\n"
-                          " match t { x: Color { println(\"c\"); } _ { } }\n"
-                          " println(t);"),
-             "optional enum types are not supported yet");
+  expectOnly(wrapMain("t: Missing? = None;\n"
+                      " match t { x: Missing { io::println(\"c\"); } _ { } }\n"
+                      " io::println(t);"),
+             "unknown class type 'Missing'");
 }
 
 // A resolved annotation still types the variable, so it keeps being checked.
 TEST(Poison, ResolvedDeclaredTypeIsKeptAfterABadInitializer) {
-  expectOnly(wrapMain("x: int = " + kBad + ";\n println(Str(x + 1));"),
+  expectOnly(wrapMain("x: int = " + kBad + ";\n io::println(Str(x + 1));"),
              kBadMsg);
   auto r = semaCheck(wrapMain("x: int = " + kBad + ";\n s: Str = x;"));
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
@@ -224,36 +226,38 @@ TEST(Poison, ResolvedDeclaredTypeIsKeptAfterABadInitializer) {
 
 TEST(Poison, FailedDestructuringBindsBothTargets) {
   // The value is in error.
-  expectOnly(wrapMain("a, b = " + kBad +
-                      ";\n println(a);\n println(b + a);\n c = a.len();"),
-             kBadMsg);
+  expectOnly(
+      wrapMain("a, b = " + kBad +
+               ";\n io::println(a);\n io::println(b + a);\n c = a.len();"),
+      kBadMsg);
   // The value is not a tuple.
-  expectOnly(wrapMain("a, b = 5;\n println(a);\n println(b + a);"),
+  expectOnly(wrapMain("a, b = 5;\n io::println(a);\n io::println(b + a);"),
              "only tuples can be destructured");
   // The arity does not match.
-  expectOnly(wrapMain("a, b = (1, 2, 3);\n println(a);\n println(b);"),
+  expectOnly(wrapMain("a, b = (1, 2, 3);\n io::println(a);\n io::println(b);"),
              "into 2 targets (it has 3 elements)");
 }
 
 // An annotated target whose annotation resolves keeps its type.
 TEST(Poison, FailedDestructuringKeepsResolvedAnnotations) {
-  expectOnly(wrapMain("a, b: int = 5;\n println(a);\n println(Str(b + 1));"),
-             "only tuples can be destructured");
+  expectOnly(
+      wrapMain("a, b: int = 5;\n io::println(a);\n io::println(Str(b + 1));"),
+      "only tuples can be destructured");
   auto r = semaCheck(wrapMain("a, b: int = 5;\n s: Str = b;"));
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
 // A target whose annotation does not match its element is still declared.
 TEST(Poison, MismatchedDestructuringTargetIsStillDeclared) {
-  expectOnly(wrapMain("p: Str, q = (1, 2);\n println(Str(p.len()));\n"
-                      " println(Str(q));"),
+  expectOnly(wrapMain("p: Str, q = (1, 2);\n io::println(Str(p.len()));\n"
+                      " io::println(Str(q));"),
              "does not match declared type 'Str' for target 'p'");
 }
 
 // A target with an unknown annotation is poisoned.
 TEST(Poison, UnknownDestructuringAnnotationPoisonsTheTarget) {
-  expectOnly(wrapMain("p: Nope, q = (1, 2);\n println(p);\n"
-                      " println(Str(q));"),
+  expectOnly(wrapMain("p: Nope, q = (1, 2);\n io::println(p);\n"
+                      " io::println(Str(q));"),
              "unknown class type 'Nope'");
 }
 
@@ -261,7 +265,7 @@ TEST(Poison, UnknownDestructuringAnnotationPoisonsTheTarget) {
 // re-declared with its element's type.
 TEST(Poison, DestructuringRedeclaresAPoisonedVariable) {
   expectOnly(
-      wrapMain("a = " + kBad + ";\n a, b = (1, 2);\n println(Str(a + b));"),
+      wrapMain("a = " + kBad + ";\n a, b = (1, 2);\n io::println(Str(a + b));"),
       kBadMsg);
 }
 
@@ -270,21 +274,22 @@ TEST(Poison, DestructuringRedeclaresAPoisonedVariable) {
 TEST(Poison, MatchArmWithUnknownTypeBindsItsName) {
   expectOnly("class A { }\n" +
                  wrapMain("o: Obj = A();\n"
-                          " match o { q: Nope { println(q); } _ { } }"),
+                          " match o { q: Nope { io::println(q); } _ { } }"),
              "match arm has unknown class type 'Nope'");
 }
 
 TEST(Poison, OptionalMatchArmInErrorBindsItsName) {
-  expectOnly("class A { }\n" +
-                 wrapMain("m: A? = None;\n"
-                          " match m { r: Str { println(r.len()); } _ { } }"),
-             "is not a subclass of 'A'");
+  expectOnly(
+      "class A { }\n" +
+          wrapMain("m: A? = None;\n"
+                   " match m { r: Str { io::println(r.len()); } _ { } }"),
+      "is not a subclass of 'A'");
 }
 
 TEST(Poison, EnumMatchArmBindingIsSilentInItsBody) {
   expectOnly("enum Color { Red, Green }\n" +
                  wrapMain("c = Color::Red;\n"
-                          " match c { x: Red { println(x); } _ { } }"),
+                          " match c { x: Red { io::println(x); } _ { } }"),
              "enum-match arm cannot bind a variable");
 }
 
@@ -292,10 +297,10 @@ TEST(Poison, EnumMatchArmBindingIsSilentInItsBody) {
 // follow-ons of that error, and so are the values they produce.
 TEST(Poison, CallsToAFunctionWithABadSignatureAreSilent) {
   expectOnly("fn f(x: Foo) -> int { return 1; }\n" +
-                 wrapMain("v = f(1);\n println(Str(v + 1));"),
+                 wrapMain("v = f(1);\n io::println(Str(v + 1));"),
              "parameter 'x' has unknown class type 'Foo'");
   expectOnly("fn g() -> Foo { return 1; }\n" +
-                 wrapMain("v = g();\n println(v.len());"),
+                 wrapMain("v = g();\n io::println(v.len());"),
              "unknown class type 'Foo'");
 }
 
@@ -310,8 +315,8 @@ TEST(Poison, ColliderDoesNotSilenceTheOriginal) {
       << r.Diagnostics;
 }
 
-// Reserved binder names (#126): every binder rejects `Stdin` and type names
-// with one error, through the same guard.
+// Reserved binder names (#126): every binder rejects a type name (a builtin
+// one, `Str`, or the program's) with one error, through the same guard.
 
 namespace {
 
@@ -324,8 +329,8 @@ void expectOneBinderError(const std::string &src, const std::string &expected) {
                                                              << r.Diagnostics;
 }
 
-const std::string kStdinMsg =
-    "'Stdin' is a reserved name and cannot be used as a variable";
+const std::string kStrMsg =
+    "'Str' is a type name and cannot be used as a variable";
 const std::string kPointMsg =
     "'Point' is a type name and cannot be used as a variable";
 const std::string kPoint = "class Point { x: int; }\n"
@@ -334,51 +339,46 @@ const std::string kPoint = "class Point { x: int; }\n"
 } // namespace
 
 TEST(BinderName, InferredAssignmentRejectsReservedNames) {
-  expectOneBinderError(wrapMain("Stdin = 1;"), kStdinMsg);
+  expectOneBinderError(wrapMain("Str = 1;"), kStrMsg);
   expectOneBinderError(kPoint + wrapMain("Point = 1;"), kPointMsg);
 }
 
 TEST(BinderName, TypedDeclarationRejectsReservedNames) {
-  // The issue's reproducer.
-  expectOneBinderError(wrapMain("Stdin: File = Stdin;"), kStdinMsg);
   expectOneBinderError(kPoint + wrapMain("Point: int = 1;"), kPointMsg);
-  expectOneBinderError(wrapMain("Str: int = 1;"),
-                       "'Str' is a type name and cannot be used");
+  expectOneBinderError(wrapMain("Str: int = 1;"), kStrMsg);
 }
 
 TEST(BinderName, DestructuringTargetsRejectReservedNames) {
-  expectOneBinderError(wrapMain("Stdin, b = (1, 2);"), kStdinMsg);
-  expectOneBinderError(wrapMain("a, Stdin: int = (1, 2);"), kStdinMsg);
+  expectOneBinderError(wrapMain("Str, b = (1, 2);"), kStrMsg);
+  expectOneBinderError(wrapMain("a, Str: int = (1, 2);"), kStrMsg);
   expectOneBinderError(kPoint + wrapMain("Point: int, b = (1, 2);"), kPointMsg);
 }
 
 TEST(BinderName, FunctionParametersRejectReservedNames) {
-  expectOneBinderError("fn f(Stdin: File) -> int { return 0; }\n" +
-                           wrapMain("n = f(Stdin);"),
-                       kStdinMsg);
+  expectOneBinderError(
+      "fn f(Str: int) -> int { return 0; }\n" + wrapMain("n = f(1);"), kStrMsg);
   expectOneBinderError(kPoint + "fn f(Point: int) -> int { return Point; }\n" +
                            wrapMain("n = f(1);"),
                        kPointMsg);
 }
 
 TEST(BinderName, MethodParametersRejectReservedNames) {
-  expectOneBinderError("class C { fn m(Stdin: int) -> int { return 0; } }\n" +
+  expectOneBinderError("class C { fn m(Str: int) -> int { return 0; } }\n" +
                            wrapMain("c = C(); n = c.m(1);"),
-                       kStdinMsg);
+                       kStrMsg);
 }
 
 TEST(BinderName, MatchBindingsRejectReservedNames) {
   expectOneBinderError(
-      wrapMain("o: Obj = \"s\";\n match o { Stdin: Str { println(Stdin); } "
+      wrapMain("o: Obj = \"s\";\n match o { Str: Str { io::println(Str); } "
                "_ { } }"),
-      kStdinMsg);
+      kStrMsg);
   expectOneBinderError(
       kPoint + wrapMain("o: Obj = Point();\n match o { Point: Point { "
-                        "println(Str(Point.x)); } _ { } }"),
+                        "io::println(Str(Point.x)); } _ { } }"),
       kPointMsg);
   expectOneBinderError(
-      wrapMain("s: Str? = None;\n match s { Stdin: Str { } None { } }"),
-      kStdinMsg);
+      wrapMain("s: Str? = None;\n match s { Str: Str { } None { } }"), kStrMsg);
 }
 
 TEST(BinderName, OrdinaryNamesAreStillAccepted) {

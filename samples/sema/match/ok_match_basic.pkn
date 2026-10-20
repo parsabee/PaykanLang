@@ -4,10 +4,6 @@ class Cat {}
 
 fn main() -> int {
   x: Obj = Dog();
-  match x {
-    Dog { }
-    Cat { }
-    _ { }
-  }
+  match x { Dog { } Cat { } _ { } }
   return 0;
 }

@@ -151,7 +151,6 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanStructEquals,
      kInt64,
      {kConstVoidPtr, kConstVoidPtr, kConstInt64Ptr}},
-    {names::kPaykanFileOpen, kRtBoxPtr, {kRtObjPtr, kRtObjPtr}},
     {names::kPaykanPrint, kVoid, {kRtObjPtr}},
     {names::kPaykanPrintln, kVoid, {kRtObjPtr}},
     {names::kPaykanErrPrint, kVoid, {kRtObjPtr}},
@@ -159,11 +158,6 @@ const RuntimeProto kRuntimeProtos[] = {
     {names::kPaykanObjectDestroy, kVoid, {kRtObjPtr}},
     {names::kPaykanObjectToString, kRtBoxPtr, {kRtObjPtr}},
     {names::kPaykanObjectEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
-    {names::kPaykanFileDestroy, kVoid, {kRtObjPtr}},
-    {names::kPaykanFileToString, kRtBoxPtr, {kRtObjPtr}},
-    {names::kPaykanFileEquals, kInt64, {kRtObjPtr, kRtBoxPtr}},
-    {names::kPaykanFileWrite, kVoid, {kRtObjPtr, kRtObjPtr}},
-    {names::kPaykanFileReadln, kRtBoxPtr, {kRtObjPtr}},
 };
 
 const RuntimeProto *findProto(const std::string &name) {
@@ -1428,14 +1422,18 @@ class Emitter {
       return;
     }
     case Opcode::FnAddr:
-      // A function pointer held as a `void *` (POSIX guarantees the round
-      // trip); ICall converts it back to the function's own type.
+      // A function pointer held as a `void *`.  ISO C has no conversion
+      // between a function pointer and an object pointer (GCC's -pedantic
+      // rejects the cast), but any pointer converts to an integer and back,
+      // so the code pointer goes through uintptr_t here and in ICall, which
+      // converts it back to the function's own type.
       pre = resultPrefix(i);
-      line(stmt(pre + cast(kVoidPtr) + funcSymbol(*CurMod, i.Callee)));
+      line(stmt(pre + cast(kVoidPtr) + cast(kUintptr) +
+                funcSymbol(*CurMod, i.Callee)));
       return;
     case Opcode::ICall: {
       pre = resultPrefix(i);
-      // ((<ret> (*)(<params>))<fn>)(<args>)
+      // ((<ret> (*)(<params>))(uintptr_t)<fn>)(<args>)
       std::vector<std::string> params;
       params.reserve(i.Sig.Params.size());
       for (Type p : i.Sig.Params)
@@ -1444,7 +1442,7 @@ class Emitter {
         params.emplace_back(kVoid);
       std::string fnTy = cType(i.Sig.Ret) + std::string(kSpace) +
                          paren(kOpDeref) + paren(list(params));
-      std::string fn = paren(cast(fnTy) + operand(i.Args[0]));
+      std::string fn = paren(cast(fnTy) + cast(kUintptr) + operand(i.Args[0]));
       std::vector<std::string> args;
       args.reserve(i.Args.size() - 1);
       for (size_t a = 1; a < i.Args.size(); ++a)

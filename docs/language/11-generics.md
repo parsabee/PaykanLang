@@ -86,7 +86,9 @@ impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
   `Pair<Str, int>` implements `Keyed<Str>`, and meets a `T: Keyed<Str>` bound.
 - Its `__init__` can go in one too: `Box(3)` infers `T` from it, as from one in the
   class body.
-- A generic class's `impl` block cannot have a `static fn` yet.
+- A generic class's `impl` block can have `static fn`s; one is called on an
+  instantiation, `Box<int>::of(3)` (or `m::Box<int>::of(3)` through an import), and is that
+  instantiation's function.
 
 A struct can be generic in the same way (`struct Pair<A, B> { a: A; b: B; }`, with
 `impl Pair<A, B>` blocks): see [Generic structs](14-structs.md#generic-structs).
@@ -206,12 +208,50 @@ holds the tuple's elements in place, a `T` parameter is a copy of one, and a
 tuple meets a `T: Show` bound.
 
 Because each instantiation is checked separately, a `T?` in a template is
-an optional of whatever `T` is. `Slot<int>` holds an `int?` (an optional
-primitive, see `10-optionals.md`), and `orElse(x, 0)` with `x: int?` works
-as written above. The instantiations where `T?` is not allowed are
-rejected: `Slot<Color>` (optional enums), `Slot<int?>` (a nested `int??`)
-and `Slot<(int, Str)>` (optional tuples). The diagnostic names the
-instantiation.
+an optional of whatever `T` is: `Slot<int>` below holds an `int?` (an
+optional primitive, see `10-optionals.md`), `Slot<Color>` a `Color?` and
+`Slot<(int, Str)>` an `(int, Str)?`, and `orElse(x, 0)` with `x: int?`
+works as written above. When `T` is itself optional, `T?` is `T`: a
+template never makes a nested optional, so `Slot<int?>` holds an `int?`
+(a written `int??` is still an error).
+
+```pkn
+import ::io;
+
+enum Color { Red, Green }
+
+class Slot<T> {
+  v: T?;
+}
+
+impl Slot<T> {
+  fn __init__() { self.v = None; }
+  fn put(x: T) { self.v = x; }
+}
+
+fn main() -> int {
+  a = Slot<int>();
+  a.put(3);
+  b = Slot<(int, Str)>();
+  b.put((1, "one"));
+  c = Slot<Color>();
+  c.put(Color::Green);
+  d = Slot<int?>();                // its v is an int?, not an int??
+  io::println(a.v.toString() + " " + b.v.toString() + " " + d.v.toString());
+  match c.v {
+    k: Color { io::println(k == Color::Green); }
+    None     { io::println("empty"); }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+3 (1, one) None
+True
+```
 
 ## How Errors Are Reported
 

@@ -10,6 +10,8 @@ Type parameters go in angle brackets after the class name, and stand for a type
 everywhere in the class:
 
 ```pkn
+import ::io;
+
 class Pair<A, B> {
   first: A;
   second: B;
@@ -23,10 +25,10 @@ impl Pair<A, B> {
 fn main() -> int {
   p = Pair<Str, int>("answer", 42);
   q = p.swap();                     // Pair<int, Str>
-  println(q.second + " = " + Str(q.first));
+  io::println(q.second + " = " + Str(q.first));
 
   r = Pair(2.5, True);              // Pair<float, bool>, inferred
-  println(Str(r.first) + " " + Str(r.second));
+  io::println(Str(r.first) + " " + Str(r.second));
   return 0;
 }
 ```
@@ -53,6 +55,8 @@ when they cannot be (for example when the parameter appears only in the return t
 them explicitly:
 
 ```pkn
+import ::io;
+
 fn lastOf<T>(xs: view T[]) -> view T {
   return xs[xs.len() - 1];
 }
@@ -71,13 +75,13 @@ fn three<T>(x: T) -> T[3] {
 }
 
 fn main() -> int {
-  println(Str(lastOf([3, 1, 4])));
-  println(lastOf(["x", "y"]));
-  println(indexOf(["a", "b", "c"], "c"));
-  println(indexOf([1, 2], 5));
+  io::println(Str(lastOf([3, 1, 4])));
+  io::println(lastOf(["x", "y"]));
+  io::println(indexOf(["a", "b", "c"], "c"));
+  io::println(indexOf([1, 2], 5));
   words = three<Str>("ab");          // a Str[3]
-  println(Str(words.len()) + " " + lastOf(words));
-  println(Str(three(7)[1] + 1 == 8));
+  io::println(Str(words.len()) + " " + lastOf(words));
+  io::println(Str(three(7)[1] + 1 == 8));
   return 0;
 }
 ```
@@ -153,6 +157,8 @@ generic. It keeps its items in a `T?[8]` with a count, so its empty slots are `N
 is empty:
 
 ```pkn
+import ::io;
+
 class Stack<T> {
   items: T?[8];
   count: int;
@@ -217,10 +223,10 @@ class TaskList {
   fn undo() {
     match self.removed.pop() {
       t: Task {
-        if self.add(t) { println("restored '" + t.title + "'"); }
-        else { println("no room for '" + t.title + "'"); }
+        if self.add(t) { io::println("restored '" + t.title + "'"); }
+        else { io::println("no room for '" + t.title + "'"); }
       }
-      None    { println("nothing to undo"); }
+      None    { io::println("nothing to undo"); }
     }
   }
 
@@ -250,9 +256,9 @@ fn main() -> int {
   list.add(Task("call mum"));
   list.remove(1);
   list.remove(1);
-  println(list.titles());
+  io::println(list.titles());
   list.undo();
-  println(list.titles());
+  io::println(list.titles());
   list.undo();
   list.undo();
 
@@ -261,7 +267,7 @@ fn main() -> int {
   numbers.push(2);
   size = numbers.size();
   match numbers.pop() {
-    top: int { println(Str(size) + " numbers, top " + Str(top)); }
+    top: int { io::println(Str(size) + " numbers, top " + Str(top)); }
     None     { }
   }
   return 0;

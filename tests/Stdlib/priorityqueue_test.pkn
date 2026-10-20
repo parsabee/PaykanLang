@@ -1,5 +1,6 @@
 // ::collections MinPriorityQueue<T> and MaxPriorityQueue<T>: order by
 // priority, ties in push order, and a heap sort of many elements.
+import ::io;
 import ::collections;
 
 class Task {
@@ -8,28 +9,32 @@ class Task {
 
 fn main() -> int {
   mins = collections::MinPriorityQueue<Str>();
-  println(Str(mins.len()) + " " + Str(mins.isEmpty()));
+  io::println(Str(mins.len()) + " " + Str(mins.isEmpty()));
   mins.push("write", 3);
   mins.push("plan", 1);
   mins.push("test", 4);
   mins.push("review", 3);
   mins.push("design", 2);
   mins.push("ship", 5);
-  println("peek " + mins.peek() + " " + Str(mins.peekPriority()) + " len " +
-          Str(mins.len()));
+  io::println("peek " + mins.peek() + " " + Str(mins.peekPriority()) + " len "
+      + Str(mins.len()));
   out: Str = "";
-  while !mins.isEmpty() { out = out + mins.pop() + " "; }
-  println("min order: " + out);
+  while !mins.isEmpty() {
+    out = out + mins.pop() + " ";
+  }
+  io::println("min order: " + out);
 
   maxs = collections::MaxPriorityQueue<Task>();
   maxs.push(Task("low"), -10);
   maxs.push(Task("high"), 10);
   maxs.push(Task("mid-a"), 0);
   maxs.push(Task("mid-b"), 0);
-  println("peek " + maxs.peek().name + " " + Str(maxs.peekPriority()));
+  io::println("peek " + maxs.peek().name + " " + Str(maxs.peekPriority()));
   out = "";
-  while !maxs.isEmpty() { out = out + maxs.pop().name + " "; }
-  println("max order: " + out);
+  while !maxs.isEmpty() {
+    out = out + maxs.pop().name + " ";
+  }
+  io::println("max order: " + out);
 
   // Heap sort: 200 values pushed in a scrambled order come out sorted.
   sorter = collections::MinPriorityQueue<int>();
@@ -48,25 +53,25 @@ fn main() -> int {
     if v != prev + 1 { ok = False; }
     prev = v;
   }
-  println("sorted " + Str(ok) + " last " + Str(prev));
+  io::println("sorted " + Str(ok) + " last " + Str(prev));
   prev = 200;
   while !rev.isEmpty() {
     v: int = rev.pop();
     if v != prev - 1 { ok = False; }
     prev = v;
   }
-  println("reverse sorted " + Str(ok) + " last " + Str(prev));
+  io::println("reverse sorted " + Str(ok) + " last " + Str(prev));
 
   // Interleaved pushes and pops; clear.
   q = collections::MinPriorityQueue<Str>();
   q.push("c", 30);
   q.push("a", 10);
-  println(q.pop());
+  io::println(q.pop());
   q.push("b", 20);
   q.push("d", 5);
-  println(q.pop() + q.pop() + q.pop() + " " + Str(q.len()));
+  io::println(q.pop() + q.pop() + q.pop() + " " + Str(q.len()));
   q.push("x", 1);
   q.clear();
-  println(Str(q.isEmpty()));
+  io::println(Str(q.isEmpty()));
   return 0;
 }

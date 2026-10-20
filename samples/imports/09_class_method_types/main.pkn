@@ -6,6 +6,7 @@
 // the order the module declared them — so that e.g. `c.pairWith(d)` is typed
 // `lib::Pair` at the call site and not silently `void`.
 
+import ::io;
 import shapes::lib;
 
 fn main() -> int {
@@ -21,8 +22,8 @@ fn main() -> int {
   odd: int = 0;
   if k == lib::Kind::Odd { odd = 1; }
 
-  println(Str<int>(p.sum()));             // 11
-  println(Str(lib::total(halves)));  // 7
-  println(Str<int>(odd));                 // 1
+  io::println(Str<int>(p.sum()));             // 11
+  io::println(Str(lib::total(halves)));  // 7
+  io::println(Str<int>(odd));                 // 1
   return 0;
 }

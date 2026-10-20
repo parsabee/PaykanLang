@@ -105,7 +105,7 @@ std::string repeat(const std::string &s, int n) {
 }
 
 std::string inMain(const std::string &stmts) {
-  return "fn main() -> int { " + stmts + " return 0; }\n";
+  return "import ::io; fn main() -> int { " + stmts + " return 0; }\n";
 }
 
 // Parse @p src with every frontend: true if every one accepts it; false if
@@ -228,7 +228,7 @@ TEST(GrammarEdge, PathologicalNestingIsRejectedNotCrashed) {
   // 100,000 levels used to overflow the stack in the passes after a parse
   // that kept its own stack on the heap (Sema, the AST printer).
   for (const char *open : {"{ ", "(", "-", "if a then "}) {
-    std::string src = "fn main() -> int { ";
+    std::string src = "import ::io; fn main() -> int { ";
     std::string o(open);
     if (o == "{ ")
       src += repeat(o, 100000) + repeat("} ", 100000);

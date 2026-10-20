@@ -28,13 +28,15 @@ The operations on strings:
 - `a == b` and `a != b` compare **contents**: `"ab" == "a" + "b"` is `True`.
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   first = "Paykan";
   full = first + "Lang";
-  println(full + " has " + Str(full.len()) + " characters");
-  println("it starts with " + Str(full[0]) + " and ends with " + Str(full[full.len() - 1]));
-  println(Str(full == "Paykan" + "Lang"));
-  println("tab:\t|  quote: \"  backslash: \\");
+  io::println(full + " has " + Str(full.len()) + " characters");
+  io::println("it starts with " + Str(full[0]) + " and ends with " + Str(full[full.len() - 1]));
+  io::println(Str(full == "Paykan" + "Lang"));
+  io::println("tab:\t|  quote: \"  backslash: \\");
   return 0;
 }
 ```
@@ -62,6 +64,8 @@ compare with `==`, `!=`, `<`, `<=`, `>` and `>=` by their byte value, which make
 range checks such as "is this a digit?" easy:
 
 ```pkn
+import ::io;
+
 fn isDigit(c: char) -> bool {
   return c >= '0' && c <= '9';
 }
@@ -77,7 +81,7 @@ fn countDigits(s: Str) -> int {
 }
 
 fn main() -> int {
-  println(Str(countDigits("call 555-0199 before 9pm")));
+  io::println(Str(countDigits("call 555-0199 before 9pm")));
   return 0;
 }
 ```
@@ -101,10 +105,12 @@ To convert a value to another type, call the target type like a function with th
 `Str(x)` works for `int`, `float`, `bool`, `char` and the sized numeric types:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
-  println(Str(42) + " " + Str(-7));
-  println(Str(3.14) + " " + Str(2.0) + " " + Str(1.0 / 3.0) + " " + Str(1e20));
-  println(Str(True) + " " + Str('z'));
+  io::println(Str(42) + " " + Str(-7));
+  io::println(Str(3.14) + " " + Str(2.0) + " " + Str(1.0 / 3.0) + " " + Str(1e20));
+  io::println(Str(True) + " " + Str('z'));
   return 0;
 }
 ```
@@ -135,11 +141,13 @@ method instead ([Classes](04-classes.md)).
 | `char(n)`    | the `char` with byte value `n`; panics outside `0` to `255` |
 
 ```pkn
+import ::io;
+
 fn main() -> int {
-  println(Str(int(2.9)) + " " + Str(int(-2.9)));
-  println(Str(float(7) / 2.0));
-  println(Str(int('A')) + " " + Str(char(int('A') + 2)));
-  println(Str(bool(0)) + " " + Str(int(True)));
+  io::println(Str(int(2.9)) + " " + Str(int(-2.9)));
+  io::println(Str(float(7) / 2.0));
+  io::println(Str(int('A')) + " " + Str(char(int('A') + 2)));
+  io::println(Str(bool(0)) + " " + Str(int(True)));
   return 0;
 }
 ```
@@ -160,10 +168,12 @@ range, and `f32(f)` rounds a `float` to single precision.  Two values of differe
 types never meet in an operation without one of these conversions.
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   b: u8 = 200;
-  println(Str(u8(300)) + " " + Str(int(b) + 100) + " " + Str(b + 100));
-  println(Str(unsigned(-1)) + " " + Str(f32(0.1)));
+  io::println(Str(u8(300)) + " " + Str(int(b) + 100) + " " + Str(b + 100));
+  io::println(Str(unsigned(-1)) + " " + Str(f32(0.1)));
   return 0;
 }
 ```
@@ -182,13 +192,15 @@ number), so they do not return an `int` but an `int?`, an *optional* `int` that 
 number or `None`. You get the number out with `match`:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   inputs = ["42", "-8", "12abc", " 7", "9223372036854775808"];
   i = 0;
   while i < inputs.len() {
     match int(inputs[i]) {
-      n: int { println("'" + inputs[i] + "' is the number " + Str(n)); }
-      None   { println("'" + inputs[i] + "' is not a number"); }
+      n: int { io::println("'" + inputs[i] + "' is the number " + Str(n)); }
+      None   { io::println("'" + inputs[i] + "' is not a number"); }
     }
     i = i + 1;
   }
@@ -219,9 +231,11 @@ Each conversion has an explicit spelling that names the source type too: `Str<in
 is being converted and makes the compiler check it:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   n = 5;
-  println(Str<int>(n) + " " + Str<float>(2.5) + " " + Str<bool>(n > 3));
+  io::println(Str<int>(n) + " " + Str<float>(2.5) + " " + Str<bool>(n > 3));
   return 0;
 }
 ```
@@ -246,6 +260,8 @@ spaces and line breaks from both ends (lines read from a file end in `\n`), and
 are 32 above the uppercase ones:
 
 ```pkn
+import ::io;
+
 fn padRight(s: Str, width: int) -> Str {
   out = s;
   while out.len() < width {
@@ -287,9 +303,9 @@ fn capitalize(s: Str) -> Str {
 }
 
 fn main() -> int {
-  println("|" + padRight("buy milk", 12) + "|");
-  println("|" + trim("  water the plants \n") + "|");
-  println(capitalize("call the plumber"));
+  io::println("|" + padRight("buy milk", 12) + "|");
+  io::println("|" + trim("  water the plants \n") + "|");
+  io::println(capitalize("call the plumber"));
   return 0;
 }
 ```

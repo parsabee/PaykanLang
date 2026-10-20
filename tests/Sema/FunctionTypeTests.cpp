@@ -51,7 +51,7 @@ SemaResult semaCheckFile(const std::string &path) {
 // -- Types and values
 
 TEST(FunctionType, ValuesInEveryPosition) {
-  auto r = semaCheck(R"(
+  auto r = semaCheck(R"(import ::io;
 fn square(x: int) -> int { return x * x; }
 fn apply(f: (int) -> int, x: int) -> int { return f(x); }
 fn twice(f: (int) -> int) -> (int) -> int { return fn(x: int) -> int { return f(f(x)); }; }
@@ -69,7 +69,7 @@ fn main() -> int {
   h = twice(add);
   k: (int) -> int = fn(x: int) -> int { return x; };
   fs: ((int) -> int)[2] = [square, add];
-  b = Button("ok", fn(l: Str) { println(l + s); });
+  b = Button("ok", fn(l: Str) { io::println(l + s); });
   b.onClick("clicked ");
   o = Op("add", fn(a: int, b: int) -> int { return a + b; });
   p = Op("plus", Op::plus());
@@ -120,7 +120,6 @@ fn first<T>(xs: view T[]) -> view T { return xs[0]; }
 fn peek(s: view Str) -> view Str { return s; }
 class C { x: int; fn m() -> int { return self.x; } }
 fn main() -> int {
-  p = println;
   c = C;
   f = first;
   q = peek;
@@ -130,9 +129,7 @@ fn main() -> int {
 }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"'println' is a builtin and cannot be a function value (wrap "
-                "it in a lambda)",
-                "'C' is a constructor, not a function value (wrap it: "
+  expectAll(r, {"'C' is a constructor, not a function value (wrap it: "
                 "'fn(...) -> C { return C(...); }')",
                 "'first' is a generic function; a generic function cannot be "
                 "a function value yet (wrap a call to it in a lambda)",
@@ -333,13 +330,13 @@ fn main() -> int {
 }
 
 TEST(FunctionType, NotAnObjectNorShowNorHashable) {
-  auto r = semaCheck(R"(
+  auto r = semaCheck(R"(import ::io;
 fn show<T: Show>(x: view T) -> Str { return x.toString(); }
 fn hashOf<T: Hashable>(x: view T) -> int { return x.hash(); }
 fn main() -> int {
   f = fn() -> int { return 1; };
   g = f;
-  println(f);
+  io::println(f);
   o: Obj = f;
   s = f.toString();
   a = show(f);
@@ -348,7 +345,8 @@ fn main() -> int {
 }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"argument 1 of 'println' has type '() -> int', expected 'Obj'",
+  expectAll(r, {"'() -> int' does not implement trait 'Show'",
+                "which 'io::println' requires of 'T'",
                 "initializer of type '() -> int' does not match declared type",
                 "method call on non-class type '() -> int'",
                 "does not implement trait 'Show'",
@@ -356,11 +354,11 @@ fn main() -> int {
 }
 
 TEST(FunctionType, OptionalFunctionsUnwrapWithMatch) {
-  auto r = semaCheck(R"(
+  auto r = semaCheck(R"(import ::io;
 class Button { onClick: ((Str) -> void)?; }
 fn main() -> int {
   b = Button(None);
-  b.onClick = fn(s: Str) { println(s); };
+  b.onClick = fn(s: Str) { io::println(s); };
   match b.onClick {
     f: (Str) -> void { f("hi"); }
     None { }

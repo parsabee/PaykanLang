@@ -99,7 +99,7 @@ fn @main() -> i64 {
 // parameter, with any argument of its type.
 TEST(ParamMode, ViewParametersArePassedByValue) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     enum Color { Red, Green }
     class Counter {
       n: int;
@@ -128,7 +128,7 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
       let k = 3;
       c: Counter = Twice(k);
       ns: int[2] = [4, 5];
-      println(Str(c.add(k)) + " " + Str(scale(1.5, 2)) + " " +
+      io::println(Str(c.add(k)) + " " + Str(scale(1.5, 2)) + " " +
               name(Color::Green, True, '!') + " " + Str(at(ns, 1)) + " " +
               Str(k));
       return 0;
@@ -146,7 +146,7 @@ TEST(ParamMode, ViewParametersArePassedByValue) {
 // template's ordinary parameter.
 TEST(ParamMode, InoutParametersChangeTheCallersVariables) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     enum Color { Red, Green, Blue }
     fn bump(n: inout int) { n = n + 1; }
     fn twice(n: inout int) { bump(n); bump(n); }
@@ -176,7 +176,7 @@ TEST(ParamMode, InoutParametersChangeTheCallersVariables) {
       i = 0; total = 0;
       pair: int[2] = [1, 2];
       while i < 3 { count(pair, total); i = i + 1; }
-      println(Str(k) + " " + Str(a) + Str(b) + " " + Str(x) + " " + Str(f) +
+      io::println(Str(k) + " " + Str(a) + Str(b) + " " + Str(x) + " " + Str(f) +
               " " + Str(ch) + " " + Str(c == Color::Red) + " " + Str(lo) +
               Str(hi) + " " + Str(r) + " " + Str(s) + " " + Str(total));
       return 0;
@@ -191,7 +191,7 @@ TEST(ParamMode, InoutParametersChangeTheCallersVariables) {
 // too; a virtual call reaches the override's address-taking slot.
 TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Counter {
       n: int;
       fn take(to: inout int) { to = to + self.n; }
@@ -214,7 +214,7 @@ TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
       c.take(acc);
       plain = Counter(acc);
       plain.take(st);
-      println(Str(st) + " " + Str(acc) + " " + Str(c.n) + " " + Str(plain.n));
+      io::println(Str(st) + " " + Str(acc) + " " + Str(c.n) + " " + Str(plain.n));
       return 0;
     }
   )");
@@ -229,7 +229,7 @@ TEST(ParamMode, InoutParametersOfMethodsAndConstructors) {
 // (a chain, a call's result, an array element) is kept alive for the call.
 TEST(ParamMode, InoutFieldsArePassedByAddress) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Inner {
       n: int;
       fn addTo(t: inout int) { t = t + 1; }
@@ -249,7 +249,7 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
     fn bump(n: inout int) { n = n + 1; }
     fn watch(t: inout int, h: Holder) {
       t = t + 1;
-      println("seen " + Str(h.total));
+      io::println("seen " + Str(h.total));
       t = t + 1;
     }
     fn replace(n: inout int, h: Holder) { h.inner = Inner(); n = 99; }
@@ -268,7 +268,7 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
       twice(h.f);
       let p = Holder();
       bump(p.total);
-      println(Str(h.total) + " " + Str(h.inner.n) + " " + Str(hs[1].total) +
+      io::println(Str(h.total) + " " + Str(h.inner.n) + " " + Str(hs[1].total) +
               " " + Str(h.f) + " " + Str(p.total));
       return 0;
     }
@@ -283,7 +283,7 @@ TEST(ParamMode, InoutFieldsArePassedByAddress) {
 // it on to other `view` parameters.
 TEST(ParamMode, ViewParametersOfReferenceTypes) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Counter {
       n: int;
       fn tick() { self.n = self.n + 1; }
@@ -306,7 +306,7 @@ TEST(ParamMode, ViewParametersOfReferenceTypes) {
       c.tick();
       names: Str[2] = ["a", "b"];
       cs: Counter[3] = [c, c, c];
-      println(Str(sum(c, [1, 2], "abc")) + " " + Str(sum(Fast(4), [5], "")) +
+      io::println(Str(sum(c, [1, 2], "abc")) + " " + Str(sum(Fast(4), [5], "")) +
               " " + Str(passOn(c, [7])) + " " + Str(size(names)) +
               Str(size(cs)));
       return 0;
@@ -325,7 +325,7 @@ TEST(ParamMode, ViewParametersOfReferenceTypes) {
 // keeps that object alive.
 TEST(ParamMode, InoutParametersOfReferenceTypes) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Counter {
       n: int;
       fn tick() { self.n = self.n + 1; }
@@ -385,7 +385,7 @@ TEST(ParamMode, InoutParametersOfReferenceTypes) {
       h = Holder();
       reset(h.c);
       swap(h.c, p);
-      println(Str(k.n) + " " + Str(x.n) + " " + a + b + " " + Str(i) +
+      io::println(Str(k.n) + " " + Str(x.n) + " " + a + b + " " + Str(i) +
               Str(j) + " " + Str(p.n) + Str(q.n) + " " + Str(o != None) +
               " " + Str(t.0) + t.1 + " " + Str(xs[0]) + Str(xs[1]) + " " +
               Str(w) + Str(y.n) + " " + Str(h.c.n));
@@ -403,7 +403,7 @@ TEST(ParamMode, InoutParametersOfReferenceTypes) {
 // its type inferred or written.
 TEST(LocalBorrow, ViewLocalsOfValueTypes) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     enum Color { Red, Green }
     fn main() -> int {
       k = 3;
@@ -412,7 +412,7 @@ TEST(LocalBorrow, ViewLocalsOfValueTypes) {
       c: view Color = Color::Green;
       b: view = v > 2;
       ch: view char = 'z';
-      println(Str(v) + " " + Str(w) + " " + Str(c == Color::Green) + " " +
+      io::println(Str(v) + " " + Str(w) + " " + Str(c == Color::Green) + " " +
               Str(b) + " " + Str(ch));
       return 0;
     }
@@ -427,7 +427,7 @@ TEST(LocalBorrow, ViewLocalsOfValueTypes) {
 // a `match` arm's name for it, and printing it.
 TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Counter {
       n: int;
       view fn toString() -> Str { return "counter " + Str(self.n); }
@@ -446,8 +446,8 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
       o: view Counter? = c;
       kind = "plain";
       match v { f: Fast { kind = "fast " + Str(f.n); } _ { } }
-      println(v);
-      println(v.toString() + " " + s + Str(s.len()) + " " +
+      io::println(v);
+      io::println(v.toString() + " " + s + Str(s.len()) + " " +
               Str(xs.len() + xs[1]) + " " + Str(o != None) + " " + kind);
       return 0;
     }
@@ -461,7 +461,7 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
 // makes outlives the view and is released once.
 TEST(LocalBorrow, LiteralsHoldTheirViewElements) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node { n: int; }
     class Named { name: Str; n: int; }
     impl Named {
@@ -481,7 +481,7 @@ TEST(LocalBorrow, LiteralsHoldTheirViewElements) {
       names = h.names();
       v: view = Node(1);
       xs = [v, Node(2)];
-      println(t.0 + " " + Str(t.1) + " " + a[2] + " " + Str(w.1.0.n) + " " +
+      io::println(t.0 + " " + Str(t.1) + " " + a[2] + " " + Str(w.1.0.n) + " " +
               p.0 + Str(p.1) + " " + names[0] + names[1] + " " +
               Str(xs[0].n + xs[1].n));
       return 0;
@@ -499,7 +499,7 @@ TEST(LocalBorrow, LiteralsHoldTheirViewElements) {
 // stays alive while the local can be used.
 TEST(LocalBorrow, InoutLocalsWriteThrough) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Counter {
       n: int;
       fn get() -> int { return self.n; }
@@ -547,7 +547,7 @@ TEST(LocalBorrow, InoutLocalsWriteThrough) {
       oo = Counter(4);
       m: inout = make().total;
       m = m + 1;
-      println(Str(k) + " " + Str(f) + " " + s + " " + Str(c.get()) + " " +
+      io::println(Str(k) + " " + Str(f) + " " + s + " " + Str(c.get()) + " " +
               Str(h.c.get()) + " " + Str(h.total) + " " + Str(xs[0]) +
               Str(xs[1]) + " " + Str(o != None) + " " + Str(m));
       return 0;
@@ -563,7 +563,7 @@ TEST(LocalBorrow, InoutLocalsWriteThrough) {
 // unwrapped from optionals.
 TEST(LocalBorrow, ViewArms) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Animal {
       n: int;
       view fn get() -> int { return self.n; }
@@ -578,17 +578,17 @@ TEST(LocalBorrow, ViewArms) {
     fn main() -> int {
       a: Animal = Dog();
       match a {
-        d: view Dog { println(Str(d.get() + show(d))); }
+        d: view Dog { io::println(Str(d.get() + show(d))); }
         _ { }
       }
       o: Str? = "hi";
       match o {
-        s: view Str { println(s + Str(s.len())); }
+        s: view Str { io::println(s + Str(s.len())); }
         None { }
       }
       n: int? = 7;
       match n {
-        k: view int { println(Str(k * 2)); }
+        k: view int { io::println(Str(k * 2)); }
         None { }
       }
       return 0;
@@ -605,7 +605,7 @@ TEST(LocalBorrow, ViewArms) {
 // until it ends.
 TEST(LocalBorrow, InoutArmsWriteThrough) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Animal {
       n: int;
       fn tick() { self.n = self.n + 1; }
@@ -633,11 +633,11 @@ TEST(LocalBorrow, InoutArmsWriteThrough) {
           d.tick();
           d = Dog(10);
           d.tick();
-          print(Str(d.get()) + " ");
+          io::print(Str(d.get()) + " ");
         }
         _ { }
       }
-      print(Str(a.get()) + " " + Str(keep.get()) + " ");
+      io::print(Str(a.get()) + " " + Str(keep.get()) + " ");
       h = Home();
       match h.pet {
         d: inout Dog { d = Dog(42); }
@@ -649,11 +649,11 @@ TEST(LocalBorrow, InoutArmsWriteThrough) {
         None { }
       }
       match o {
-        y: Dog { print("dog" + Str(y.get()) + " "); }
+        y: Dog { io::print("dog" + Str(y.get()) + " "); }
         _ { }
       }
       adopt(a);
-      println(Str(h.pet.get()) + " " + Str(a.get()));
+      io::println(Str(h.pet.get()) + " " + Str(a.get()));
       return 0;
     }
   )");
@@ -667,7 +667,7 @@ TEST(LocalBorrow, InoutArmsWriteThrough) {
 // local and passed on to a `view` parameter.
 TEST(BorrowedResult, ViewResultsAreRead) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Counter {
       n: int;
       view fn get() -> int { return self.n; }
@@ -694,7 +694,7 @@ TEST(BorrowedResult, ViewResultsAreRead) {
       v: view = b.peek();
       k = b.first();
       s = "hello";
-      println(longer(s, "hi") + " " + Str(v.get() + show(b.peek()) + k));
+      io::println(longer(s, "hi") + " " + Str(v.get() + show(b.peek()) + k));
       return 0;
     }
   )");
@@ -709,7 +709,7 @@ TEST(BorrowedResult, ViewResultsAreRead) {
 // two `inout` parameters.
 TEST(BorrowedResult, InoutResultsWriteThrough) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Counter {
       n: int;
       fn tick() { self.n = self.n + 1; }
@@ -747,7 +747,7 @@ TEST(BorrowedResult, InoutResultsWriteThrough) {
       p = 20;
       bump(pick(i, j, True));
       y = b.num() + b.counter().get();
-      println(Str(b.k) + " " + Str(b.c.get()) + " " + Str(i) + " " + Str(j) +
+      io::println(Str(b.k) + " " + Str(b.c.get()) + " " + Str(i) + " " + Str(j) +
               " " + Str(y));
       return 0;
     }
@@ -764,7 +764,7 @@ TEST(BorrowedResult, InoutResultsWriteThrough) {
 // references it holds.
 TEST(BorrowedResult, InoutTupleResultsWriteThrough) {
   LeakGuard guard;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class H {
       t: (int, Str);
       n: ((int, Str), Str);
@@ -780,20 +780,20 @@ TEST(BorrowedResult, InoutTupleResultsWriteThrough) {
     fn main() -> int {
       h = H((1, "one"), ((2, "two"), "x"));
       copy = h.get();
-      println(h.get().1 + " " + h.nested().0.1 + h.nested().1);
+      io::println(h.get().1 + " " + h.nested().0.1 + h.nested().1);
       set(h.get());
-      println(show(copy) + " " + show(h.t));
+      io::println(show(copy) + " " + show(h.t));
       w: inout (int, Str) = h.get();
       w = (3, "three");
       inner: inout ((int, Str), Str) = h.nested();
       inner = ((4, "four"), "y");
-      println(show(h.get()) + " " + show(h.n.0) + h.n.1);
+      io::println(show(h.get()) + " " + show(h.n.0) + h.n.1);
       a = (5, "a");
       b = (6, "b");
       p: inout (int, Str) = pick(a, b, False);
       p = (7, "seven");
       set(pick(a, b, True));
-      println(show(a) + " " + show(b));
+      io::println(show(a) + " " + show(b));
       return 0;
     }
   )");

@@ -17,42 +17,52 @@
 // expect-stdout: idx called
 // expect-stdout: show 1
 
-class C { v: int; }
-impl C { fn __init__(v: int) { self.v = v; } }
+import ::io;
 
-class Holder { c: C; }
-impl Holder { fn __init__(v: int) { self.c = C(v); } }
+class C {
+  v: int;
+}
+impl C {
+  fn __init__(v: int) { self.v = v; }
+}
+
+class Holder {
+  c: C;
+}
+impl Holder {
+  fn __init__(v: int) { self.c = C(v); }
+}
 
 fn idx() -> int {
-  println("idx called");
+  io::println("idx called");
   return 0;
 }
 
 fn arrs() -> C[2] {
-  println("arrs called");
+  io::println("arrs called");
   return [C(3), C(4)];
 }
 
 fn make() -> Holder {
-  println("make called");
+  io::println("make called");
   return Holder(5);
 }
 
 fn show(c: C) {
-  println("show " + Str<int>(c.v));
+  io::println("show " + Str<int>(c.v));
 }
 
 fn main() -> int {
   arr: C[2] = [C(1), C(2)];
   x: C = C(9);
   x = arr[idx()];
-  println(Str(x.v));
+  io::println(Str(x.v));
   x = arrs()[1];
-  println(Str<int>(x.v));
+  io::println(Str<int>(x.v));
   y: C = arr[idx()];
-  println(Str(y.v));
+  io::println(Str(y.v));
   x = make().c;
-  println(Str<int>(x.v));
+  io::println(Str<int>(x.v));
   show(arr[idx()]);
   return 0;
 }

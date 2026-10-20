@@ -9,6 +9,8 @@
 // expect-stdout: None
 // expect-stdout: (1, two)
 
+import ::io;
+
 class Step {
   n: int;
   view fn toString() -> Str { return "step " + Str(self.n); }
@@ -19,21 +21,21 @@ impl Step {
 }
 
 fn main() -> int {
-  print("progress:");
+  io::print("progress:");
   i: int = 1;
   while i <= 3 {
-    print(" " + Str(i));
-    printerr("[log] ");
-    printerrln(Step(i));       // any Obj prints through its toString
+    io::print(" " + Str(i));
+    io::printerr("[log] ");
+    io::printerrln(Step(i));       // any Obj prints through its toString
     i = i + 1;
   }
-  println("");
-  println("done (" + Str(i - 1) + " steps)");
+  io::println("");
+  io::println("done (" + Str(i - 1) + " steps)");
 
   maybe: Str? = None;
-  println(maybe);              // an absent optional prints None
-  println((1, "two"));         // a tuple prints its elements
-  printerr("printerr adds no newline; ");
-  printerrln("printerrln does");
+  io::println(maybe);              // an absent optional prints None
+  io::println((1, "two"));         // a tuple prints its elements
+  io::printerr("printerr adds no newline; ");
+  io::printerrln("printerrln does");
   return 0;
 }

@@ -69,6 +69,9 @@ file(RELATIVE_PATH PAYKAN_TEST_SUPPORT_RELDIR
     "/${PAYKAN_INSTALL_CMAKEDIR}" "/${PAYKAN_INSTALL_TEST_SUPPORT_DIR}")
 file(RELATIVE_PATH PAYKAN_SAMPLES_RELDIR
     "/${PAYKAN_INSTALL_CMAKEDIR}" "/${PAYKAN_INSTALL_SAMPLES_DIR}")
+# The installed standard library, which the tests' programs import.
+file(RELATIVE_PATH PAYKAN_STDLIB_RELDIR
+    "/${PAYKAN_INSTALL_CMAKEDIR}" "/${PAYKAN_INSTALL_STDLIBDIR}")
 configure_file(${PROJECT_SOURCE_DIR}/cmake/PaykanFrontendTests.cmake.in
     ${CMAKE_BINARY_DIR}/cmake/PaykanFrontendTests.cmake @ONLY)
 install(FILES ${CMAKE_BINARY_DIR}/cmake/PaykanFrontendTests.cmake

@@ -12,6 +12,8 @@ is created and must give every field a value. Inside methods, `self` is the obje
 method was called on. You never write `self` in a parameter list:
 
 ```pkn
+import ::io;
+
 class Counter {
   name: Str;
   count: int;
@@ -36,9 +38,9 @@ fn main() -> int {
   c = Counter("visitors");
   c.increment();
   c.increment();
-  println(c.report());
+  io::println(c.report());
   c.count = 10;            // fields are accessible from outside
-  println(c.report());
+  io::println(c.report());
   return 0;
 }
 ```
@@ -70,6 +72,8 @@ compiler holds it to that: inside it, `self` is read-only. A `view` parameter (s
 was given, so only `view fn` methods can be called on one:
 
 ```pkn
+import ::io;
+
 class Account {
   balance: int;
   fn deposit(amount: int) { self.balance = self.balance + amount; }
@@ -81,7 +85,7 @@ impl Account {
 }
 
 fn show(a: view Account) {
-  println(a.report());
+  io::println(a.report());
 }
 
 fn main() -> int {
@@ -146,6 +150,8 @@ to another variable, or passing it to a function, shares the same object; it doe
 it:
 
 ```pkn
+import ::io;
+
 class Box {
   value: int;
 }
@@ -163,7 +169,7 @@ fn main() -> int {
   b = a;           // b and a are the same object
   b.value = 5;
   bump(a);
-  println(Str(a.value) + " " + Str(b.value));
+  io::println(Str(a.value) + " " + Str(b.value));
   return 0;
 }
 ```
@@ -188,6 +194,8 @@ The derived constructor must call the base constructor with `__super__(...)` as 
 statement:
 
 ```pkn
+import ::io;
+
 class Animal {
   name: Str;
   view fn sound() -> Str { return "..."; }
@@ -222,7 +230,7 @@ fn main() -> int {
   pets: Animal[3] = [Dog("Rex"), Cat("Tom"), Animal("Generic")];
   i = 0;
   while i < pets.len() {
-    println(pets[i].speak());
+    io::println(pets[i].speak());
     i = i + 1;
   }
   return 0;
@@ -259,7 +267,7 @@ Things to know about inheritance:
 Every class extends `Obj`, the root of the class hierarchy, directly or indirectly. `Obj`
 provides two methods that your classes can override:
 
-- `view fn toString() -> Str`, used by `print` and `println` to print an object. The default
+- `view fn toString() -> Str`, used by `io::print` and `io::println` to print an object. The default
   prints `Object@` and an address.
 - `view fn equals(other: Obj) -> bool`, used by `==` and `!=`. The default compares identity: two
   separately created objects are unequal even if their fields are the same.
@@ -269,6 +277,8 @@ equality. `equals` receives an `Obj`, so it uses `match` to check that the other
 of the right class:
 
 ```pkn
+import ::io;
+
 class Point {
   x: int;
   y: int;
@@ -292,9 +302,9 @@ impl Point {
 fn main() -> int {
   a = Point(1, 2);
   b = Point(1, 2);
-  println(a);
-  println("a == b: " + Str(a == b));
-  println("a != Point(2, 1): " + Str(a != Point(2, 1)));
+  io::println(a);
+  io::println("a == b: " + Str(a == b));
+  io::println("a != Point(2, 1): " + Str(a != Point(2, 1)));
   return 0;
 }
 ```
@@ -307,7 +317,8 @@ a == b: True
 a != Point(2, 1): True
 ```
 
-`println(a)` works because `println` accepts any object and prints it with `toString()`.
+`io::println(a)` works because `io::println` accepts any object (any `Show` value) and
+prints it with `toString()`.
 `Str(a)` does not: the `Str` conversions are only for the built-in types. Call
 `a.toString()` when you need the string.
 
@@ -320,6 +331,8 @@ A `match` on an object compares its **exact** runtime class against each arm, an
 the form `name: Class` binds the object with that type:
 
 ```pkn
+import ::io;
+
 class Shape {}
 impl Shape { fn __init__() {} }
 class Circle : Shape {
@@ -347,9 +360,9 @@ fn describe(s: Shape) -> Str {
 }
 
 fn main() -> int {
-  println(describe(Circle(1.5)));
-  println(describe(Rect(2.0, 3.0)));
-  println(describe(Shape()));
+  io::println(describe(Circle(1.5)));
+  io::println(describe(Rect(2.0, 3.0)));
+  io::println(describe(Shape()));
   return 0;
 }
 ```
@@ -372,6 +385,8 @@ A task has a title and a done flag. A task with a deadline is a task too, so it 
 subclass that adds a `due` field and overrides `toString` to show it:
 
 ```pkn
+import ::io;
+
 class Task {
   title: Str;
   done: bool;
@@ -413,8 +428,8 @@ fn main() -> int {
   milk = Task("buy milk");
   taxes: Task = DeadlineTask("file taxes", "April 15");
   milk.complete();
-  println(milk);
-  println(taxes);
+  io::println(milk);
+  io::println(taxes);
   return 0;
 }
 ```

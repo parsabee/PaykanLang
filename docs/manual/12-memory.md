@@ -13,7 +13,7 @@ Types come in two kinds:
   (`(int, Str)`). They are copied on assignment and live in their variable or field, so there
   is nothing to manage. An array or a tuple of objects or strings holds references to them,
   as a variable would.
-- **Reference types**: class instances, `Str`, `File`, `Error` and optional values of
+- **Reference types**: class instances (an `io::File` too), `Str` and optional values of
   them. They live on the heap, and variables, fields, array elements and tuple elements hold
   references to them.
 
@@ -29,7 +29,7 @@ The consequences you can rely on:
 - An object lives exactly as long as something refers to it, and is freed **immediately**
   after: there are no collection pauses, and destruction happens at a predictable point.
 - You cannot free something too early or twice, or use an object after it was freed.
-- Resources are released deterministically: a `File` is closed as soon as its last reference
+- Resources are released deterministically: an `io::File` is closed as soon as its last reference
   goes away.
 - Destruction does not recurse on the call stack, so dropping a linked list of a million
   nodes is safe.
@@ -63,6 +63,8 @@ other's count above zero, so neither is ever freed, even after the program has d
 reference to both. Such a **cycle** leaks:
 
 ```text
+import ::io;
+
 class Person {
   name: Str;
   friend: Person?;
@@ -74,7 +76,7 @@ fn main() -> int {
   b = Person("Grace");
   a.friend = b;
   b.friend = a;          // a -> b -> a: a cycle
-  println(a.name + " and " + b.name + " are friends");
+  io::println(a.name + " and " + b.name + " are friends");
   return 0;
 }
 ```
@@ -96,6 +98,8 @@ keeps the object alive. Its type is an optional, because it reads as `None` once
 is gone. Make the back link weak and the cycle is no cycle at all:
 
 ```pkn
+import ::io;
+
 class Person {
   name: Str;
   weak friend: Person?;
@@ -116,9 +120,9 @@ fn main() -> int {
   b = Person("Grace");
   a.friend = b;
   b.friend = a;
-  println(a.name + " and " + a.friendName() + " are friends");
+  io::println(a.name + " and " + a.friendName() + " are friends");
   b = Person("Alan");    // Grace was held only by b: she is freed
-  println(a.name + " and " + a.friendName() + " are friends");
+  io::println(a.name + " and " + a.friendName() + " are friends");
   return 0;
 }
 ```

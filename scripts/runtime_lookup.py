@@ -30,8 +30,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-PROGRAM = 'fn main() -> int {\n  println("runtime ok");\n  return 0;\n}\n'
+PROGRAM = 'import ::io;\nfn main() -> int {\n  io::println("runtime ok");\n  return 0;\n}\n'
 EXPECTED = "runtime ok\n"
+STDLIB = Path(__file__).resolve().parent.parent / "stdlib"
 BROKEN_MARKER = "paykan-runtime-lookup-broken-prefix"
 NOT_FOUND = "cannot find the Paykan runtime"
 
@@ -70,6 +71,10 @@ class Checker:
     def paykan(self, exe, cmd, env_dir=None):
         env = dict(os.environ)
         env.pop("PAYKAN_RUNTIME_DIR", None)
+        # The prefixes hold the runtime only: the program's `import ::io`
+        # finds the repository's standard library (these checks are about
+        # the runtime's lookup, not the standard library's).
+        env["PAYKAN_STDLIB"] = str(STDLIB)
         if env_dir is not None:
             env["PAYKAN_RUNTIME_DIR"] = str(env_dir)
         return subprocess.run([str(exe), *cmd], stdin=subprocess.DEVNULL,

@@ -327,7 +327,8 @@ TEST(Driver, ListBackendsMarksTheConfiguredDefault) {
 // backend is built: --emit-source prints C, not LLVM IR.  --backend=llvm
 // selects the llvm backend (and its JIT for `run`).
 TEST(Driver, DefaultBackendIsCEvenWithLLVM) {
-  auto src = writeTmp("fn main() -> int { println(\"hi\"); return 0; }");
+  auto src = writeTmp(
+      "import ::io; fn main() -> int { io::println(\"hi\"); return 0; }");
   auto [rc, code] =
       run(std::string(kPaykan) + " --emit-source " + src + " 2>&1");
   EXPECT_EQ(rc, 0) << code;
@@ -354,7 +355,8 @@ TEST(Driver, DefaultBackendRunsPrograms) {
              ("drv_defaultbe_" + std::to_string(getpid()));
   std::filesystem::create_directories(dir);
   auto src = (dir / "hi.pkn").string();
-  std::ofstream(src) << "fn main() -> int { println(\"hi\"); return 3; }";
+  std::ofstream(src)
+      << "import ::io; fn main() -> int { io::println(\"hi\"); return 3; }";
   auto [rc, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
   auto [rc2, out2] = run(std::string(kPaykan) + " --backend=" +
                          PAYKAN_EXPECTED_DEFAULT_BACKEND + " " + src + " 2>&1");
@@ -648,15 +650,15 @@ TEST(Driver, FixedArrayIndexOutOfBoundsPanics) {
 // on every frontend, with `paykan run` and a built executable.
 TEST(Driver, UserPanicNamedFunctionLeavesTheRuntimePanicAlone) {
   REQUIRE_BACKEND();
-  auto src =
-      writeTmp("fn Paykan_panic_div_by_zero() { println(\"user fn\"); }\n"
-               "fn z() -> int { return 0; }\n"
-               "fn main() -> int {\n"
-               "  Paykan_panic_div_by_zero();\n"
-               "  println(Str<int>(5 / z()));\n"
-               "  println(\"after\");\n"
-               "  return 0;\n"
-               "}\n");
+  auto src = writeTmp("import ::io; fn Paykan_panic_div_by_zero() { "
+                      "io::println(\"user fn\"); }\n"
+                      "fn z() -> int { return 0; }\n"
+                      "fn main() -> int {\n"
+                      "  Paykan_panic_div_by_zero();\n"
+                      "  io::println(Str<int>(5 / z()));\n"
+                      "  io::println(\"after\");\n"
+                      "  return 0;\n"
+                      "}\n");
   auto exe = src + ".exe";
   auto listed = run(std::string(kPaykan) + " --list-frontends 2>&1");
   ASSERT_EQ(listed.exitCode, 0);
@@ -716,8 +718,8 @@ static void expectConversionPanic(const std::string &decl,
                                   const std::string &message) {
   // (Nothing printed after the conversion may appear; the output printed
   // before a panic is covered by PanicFlushesStdoutOnEveryBackend.)
-  auto src = writeTmp("fn main() -> int { " + decl + " " + conv +
-                      " println(\"after\"); return 0; }");
+  auto src = writeTmp("import ::io; fn main() -> int { " + decl + " " + conv +
+                      " io::println(\"after\"); return 0; }");
   auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0) << conv << "\n" << out;
@@ -747,9 +749,10 @@ TEST(Driver, IntOfFloatPanicsOnNaNInfinityAndOutOfRange) {
 TEST(Driver, IntOfFloatAcceptsTheInt64Boundaries) {
   REQUIRE_BACKEND();
   auto src = writeTmp(
-      "fn main() -> int { lo: float = -9223372036854775808.0; "
+      "import ::io; fn main() -> int { lo: float = -9223372036854775808.0; "
       "hi: float = 9223372036854774784.0; "
-      "println(Str<int>(int<float>(lo))); println(Str<int>(int<float>(hi))); "
+      "io::println(Str<int>(int<float>(lo))); "
+      "io::println(Str<int>(int<float>(hi))); "
       "return 0; }");
   auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
@@ -772,9 +775,10 @@ TEST(Driver, CharOfIntPanicsOutsideTheByteRange) {
 // INT64_MIN % -1 is mathematically 0 and must not trap.
 TEST(Driver, IntModMinByNegOneIsZero) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("fn main() -> int { m: int = -9223372036854775807 - 1; "
-                      "d: int = -1; r: int = m % d; println(Str<int>(r)); "
-                      "return 7 % d + 3; }");
+  auto src = writeTmp(
+      "import ::io; fn main() -> int { m: int = -9223372036854775807 - 1; "
+      "d: int = -1; r: int = m % d; io::println(Str<int>(r)); "
+      "return 7 % d + 3; }");
   auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 3) << out;
@@ -863,20 +867,20 @@ TEST(Driver, PanicFlushesStdoutOnEveryBackend) {
     const char *message;
   };
   const Case cases[] = {
-      {"index", "xs = [1, 2, 3]; i: int = 10; println(Str<int>(xs[i]));",
+      {"index", "xs = [1, 2, 3]; i: int = 10; io::println(Str<int>(xs[i]));",
        "paykan: array index 10 out of bounds (len=3)"},
       {"store", "xs = [1, 2, 3]; i: int = 5; xs[i] = 4;",
        "paykan: array index 5 out of bounds (len=3)"},
-      {"strindex", "s: Str = \"ab\"; c = s[7]; println(Str<char>(c));",
+      {"strindex", "s: Str = \"ab\"; c = s[7]; io::println(Str<char>(c));",
        "paykan: string index 7 out of bounds (len=2)"},
-      {"divzero", "z: int = 0; println(Str<int>(7 / z));",
+      {"divzero", "z: int = 0; io::println(Str<int>(7 / z));",
        "paykan: integer division or modulo by zero"},
       {"intfloat",
        "z: float = 0.0; n = int<float>(1.0 / z); "
-       "println(Str<int>(n));",
+       "io::println(Str<int>(n));",
        "paykan: int<float>(inf): the value is NaN, infinite or outside the "
        "int range"},
-      {"charint", "n: int = 300; c = char<int>(n); println(Str<char>(c));",
+      {"charint", "n: int = 300; c = char<int>(n); io::println(Str<char>(c));",
        "paykan: char<int>(300): the value is outside the char range 0..255"},
   };
   const std::string before = "first line\nabout to panic...\n";
@@ -891,9 +895,9 @@ TEST(Driver, PanicFlushesStdoutOnEveryBackend) {
       auto src = (dir / (std::string(c.name) + ".pkn")).string();
       {
         std::ofstream ofs(src);
-        ofs << "fn main() -> int { println(\"first line\"); "
-               "print(\"about to panic...\\n\"); "
-            << c.body << " println(\"after\"); return 0; }";
+        ofs << "import ::io; fn main() -> int { io::println(\"first line\"); "
+               "io::print(\"about to panic...\\n\"); "
+            << c.body << " io::println(\"after\"); return 0; }";
       }
       auto exe = (dir / (std::string(c.name) + "-" + be)).string();
       std::string runCmd = kPaykan;
@@ -934,10 +938,11 @@ TEST(Driver, PanicFlushesOpenFiles) {
   auto out = std::filesystem::temp_directory_path() /
              ("drv_panic_file_" + std::to_string(getpid()) + ".txt");
   std::filesystem::remove(out);
-  auto src = writeTmp("fn main() -> int { match open(\"" + out.string() +
-                      "\", \"w\") { err: Error { return 1; } "
-                      "f: File { f.write(\"kept\\n\"); xs = [1]; i: int = 3; "
-                      "println(Str<int>(xs[i])); } } return 0; }");
+  auto src = writeTmp(
+      "import ::io; fn main() -> int { match io::open(\"" + out.string() +
+      "\", \"w\").value { None { return 1; } "
+      "f: io::File { f.write(\"kept\\n\"); xs = [1]; i: int = 3; "
+      "io::println(Str<int>(xs[i])); } } return 0; }");
   auto [rc, msg] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 128 + SIGABRT) << msg;
@@ -1003,14 +1008,16 @@ TEST(Driver, OptionalVoidIsRejectedAtParse) {
 
 TEST(Driver, EmitPirPrintsTheProgram) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("fn main() -> int { s: Str = \"hi\"; println(s); "
-                      "return 0; }");
+  auto src = writeTmp(
+      "import ::io; fn main() -> int { s: Str = \"hi\"; io::println(s); "
+      "return 0; }");
   auto [rc, out] = run(std::string(kPaykan) + " --emit-pir " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 0) << out;
   EXPECT_NE(out.find("fn @main() -> i64 {"), std::string::npos) << out;
   EXPECT_NE(out.find("release"), std::string::npos) << out;
-  EXPECT_NE(out.find("call @$rt.Paykan_println("), std::string::npos) << out;
+  EXPECT_NE(out.find("call @\"$::io::println<Str>\"("), std::string::npos)
+      << out;
 }
 
 TEST(Driver, EmitCPrintsCSource) {
@@ -1061,7 +1068,7 @@ TEST(Driver, EmitCOmitsUnusedEntities) {
   REQUIRE_BACKEND();
   auto src = writeTmp(
       "class K { fn seven() -> int { return 7; } }"
-      "fn side() -> int { println(\"side\"); return 1; }"
+      "fn side() -> int { s = \"side\"; return s.len(); }"
       "fn main() -> int { side(); k = K(); x: int = if True then 1 else 2;"
       "  return k.seven() + x; }");
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
@@ -1083,9 +1090,9 @@ TEST(Driver, EmitCOmitsUnusedEntities) {
 // stored as a double.
 TEST(Driver, EmitCStoresFloatsInPlaceWithoutBitCasts) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("fn main() -> int { t = (1.5, 2);"
+  auto src = writeTmp("import ::io; fn main() -> int { t = (1.5, 2);"
                       "  xs: float[2] = [0.5, t.0]; o: float? = t.0;"
-                      "  println(Str<float>(t.0 + xs[1])); println(t);"
+                      "  io::println(Str<float>(t.0 + xs[1])); io::println(t);"
                       "  return 0; }");
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
@@ -1130,9 +1137,10 @@ TEST(Driver, ObjectListLinksEveryNativeObject) {
     ASSERT_EQ(cc.exitCode, 0) << cc.out;
   }
   std::ofstream(dir / "main.pkn")
-      << "native fn twice(x: int) -> int = \"drv_twice\";\n"
+      << "import ::io; native fn twice(x: int) -> int = \"drv_twice\";\n"
          "native fn plus1(x: int) -> int = \"drv_plus1\";\n"
-         "fn main() -> int { println(Str<int>(plus1(twice(20)))); return 0; "
+         "fn main() -> int { io::println(Str<int>(plus1(twice(20)))); return "
+         "0; "
          "}\n";
   std::string objects = " --object=" + (dir / "a.o").string() + "," +
                         (dir / "b.o").string() + " ";
@@ -1164,8 +1172,9 @@ TEST(Driver, EmitCRejectsAnotherBackend) {
 TEST(Driver, FloatNotEqualIsUnorderedOnEveryBackend) {
   REQUIRE_BACKEND();
   auto src = writeTmp(
-      "fn main() -> int { inf: float = 1.0e308 * 10.0; n: float = inf - inf;"
-      " println(Str<bool>(n != n) + Str<bool>(n == n) + Str<bool>(n < 1.0)"
+      "import ::io; fn main() -> int { inf: float = 1.0e308 * 10.0; n: float = "
+      "inf - inf;"
+      " io::println(Str<bool>(n != n) + Str<bool>(n == n) + Str<bool>(n < 1.0)"
       " + Str<bool>(1.0 != n) + Str<bool>(1.0 != 1.0)); return 0; }");
   auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
   int ran = 0;
@@ -1237,7 +1246,8 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
   auto src = (dir / "prog.pkn").string();
   {
     std::ofstream ofs(src);
-    ofs << "fn main(args: view Str[]) -> int { println(\"built\"); return "
+    ofs << "import ::io; fn main(args: view Str[]) -> int { "
+           "io::println(\"built\"); return "
            "args.len(); }";
   }
   auto exe = (dir / "prog").string();
@@ -1263,7 +1273,8 @@ TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
   // Changing the source regenerates it.
   {
     std::ofstream ofs(src);
-    ofs << "fn main() -> int { println(\"rebuilt\"); return 5; }";
+    ofs << "import ::io; fn main() -> int { io::println(\"rebuilt\"); return "
+           "5; }";
   }
   auto [rc4, out4] = run(std::string(kPaykan) + " --backend=c -o " + exe +
                          " build " + src + " 2>&1");
@@ -1328,10 +1339,11 @@ TEST(Driver, CBackendRebuildsACorruptCachedObject) {
          "fn v() -> int { return 1; }\n";
   std::ofstream(dir / "mid.pkn")
       << "import dep;\nfn mk() -> dep::P { return dep::P(); }\n";
-  std::ofstream(dir / "main.pkn") << "import mid;\nimport dep;\n"
-                                     "fn main() -> int { p = mid::mk(); "
-                                     "println(Str<int>(p.get() + dep::v()));"
-                                     " return 0; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io; import mid;\nimport dep;\n"
+         "fn main() -> int { p = mid::mk(); "
+         "io::println(Str<int>(p.get() + dep::v()));"
+         " return 0; }\n";
   std::string src = (dir / "main.pkn").string();
   std::string runCmd = std::string(kPaykan) + " --backend=c " + src + " 2>&1";
   std::string exe = (dir / "main").string();
@@ -1390,7 +1402,7 @@ TEST(Driver, CBackendCollectsStaleCacheEntries) {
   fs::create_directories(dir);
   auto src = (dir / "m.pkn").string();
   auto writeProgram = [&](int n) {
-    std::ofstream(src) << "fn main() -> int { println(\"" << n
+    std::ofstream(src) << "import ::io; fn main() -> int { io::println(\"" << n
                        << "\"); return 0; }\n";
   };
   const auto cacheDir = dir / ".paykan_cache";
@@ -1471,10 +1483,10 @@ TEST(Driver, BuildProducesAStandaloneExecutable) {
   auto src = (dir / "prog.pkn").string();
   {
     std::ofstream ofs(src);
-    ofs << "class Box { v: int; }\n"
+    ofs << "import ::io; class Box { v: int; }\n"
            "impl Box { fn __init__(v: int) { self.v = v; } }\n"
            "fn main(args: view Str[]) -> int { b = Box(40); "
-           "println(args[1]); return b.v + args.len(); }";
+           "io::println(args[1]); return b.v + args.len(); }";
   }
   auto buildAndRun = [&](const std::string &opt) {
     auto exe = (dir / ("prog" + opt)).string();
@@ -1499,7 +1511,8 @@ TEST(Driver, BuildProducesAStandaloneExecutable) {
   // stem, in the current directory).
   {
     std::ofstream ofs(src);
-    ofs << "fn main() -> int { println(\"no args\"); return 7; }";
+    ofs << "import ::io; fn main() -> int { io::println(\"no args\"); return "
+           "7; }";
   }
   auto [rc4, out4] = run("cd " + dir.string() + " && " + paykanRun() +
                          " build " + src + " 2>&1");
@@ -1518,7 +1531,8 @@ TEST(Driver, BuildAcceptsOptionsAfterTheSourceFile) {
              ("drv_build_order_" + std::to_string(getpid()));
   std::filesystem::create_directories(dir);
   auto src = (dir / "order.pkn").string();
-  std::ofstream(src) << "fn main() -> int { println(\"ok\"); return 7; }";
+  std::ofstream(src)
+      << "import ::io; fn main() -> int { io::println(\"ok\"); return 7; }";
   // Before and after the source file.
   for (const std::string &args :
        {std::string(" --backend=c -o ") + (dir / "before").string() +
@@ -1551,7 +1565,8 @@ TEST(Driver, ProgramsAreInstrumentedInACoverageBuild) {
              ("drv_cov_" + std::to_string(getpid()));
   std::filesystem::create_directories(dir);
   auto src = (dir / "cov.pkn").string();
-  std::ofstream(src) << "fn main() -> int { println(\"cov\"); return 3; }";
+  std::ofstream(src)
+      << "import ::io; fn main() -> int { io::println(\"cov\"); return 3; }";
   auto exe = (dir / "cov").string();
   auto [rc, out] = run(paykanRun() + " -o " + exe + " build " + src + " 2>&1");
   ASSERT_EQ(rc, 0) << out;
@@ -1576,8 +1591,9 @@ TEST(Driver, BuildRejectsAStrayArgument) {
 
 TEST(Driver, CBackendRunForwardsArgumentsAndTracksTheHeap) {
   REQUIRE_BACKEND();
-  auto src = writeTmp("fn main(args: view Str[]) -> int { println(args[1]); "
-                      "return args.len(); }");
+  auto src = writeTmp(
+      "import ::io; fn main(args: view Str[]) -> int { io::println(args[1]); "
+      "return args.len(); }");
   auto [rc, out] = run(std::string(kPaykan) + " --backend=c --track-heap " +
                        src + " hello 2>&1");
   std::filesystem::remove(src);
@@ -1637,10 +1653,12 @@ void writeZooProject(const std::filesystem::path &dir) {
   std::ofstream(dir / "a" / "util.pkn") << "fn tag() -> int { return 1; }\n";
   std::ofstream(dir / "b" / "util.pkn") << "fn tag() -> int { return 2; }\n";
   std::ofstream(dir / "zoo.pkn")
-      << "import geometry::shapes;\nimport a::util;\nimport b::util as bu;\n"
+      << "import ::io; import geometry::shapes;\nimport a::util;\nimport "
+         "b::util as bu;\n"
          "fn main() -> int { r: shapes::Rect = shapes::Rect(3, 4);\n"
-         "  println(shapes::describe(r)); println(Str<int>(r.area()));\n"
-         "  println(Str<int>(util::tag() * 10 + bu::tag())); return 0; }\n";
+         "  io::println(shapes::describe(r)); "
+         "io::println(Str<int>(r.area()));\n"
+         "  io::println(Str<int>(util::tag() * 10 + bu::tag())); return 0; }\n";
 }
 
 } // namespace
@@ -1756,9 +1774,9 @@ TEST(Driver, RunOptimisesUnderTheHostLayout) {
   fs::remove_all(dir);
   fs::create_directories(dir);
   std::ofstream(dir / "lay.pkn")
-      << "class P {\n  c: char;\n  n: int;\n}\n"
+      << "import ::io; class P {\n  c: char;\n  n: int;\n}\n"
          "impl P { fn __init__() { self.c = 'x'; self.n = 7; } }\n"
-         "fn main() -> int { p = P(); println(Str(p.c) + Str(p.n)); "
+         "fn main() -> int { p = P(); io::println(Str(p.c) + Str(p.n)); "
          "return 0; }\n";
   std::string src = (dir / "lay.pkn").string();
   auto [rc, ir] = run(paykanRun() + " --emit-source " + src + " 2>&1");
@@ -1785,10 +1803,10 @@ TEST(Driver, BuildAndRunDefaultToO2) {
   std::ofstream(dir / "lib.pkn")
       << "fn sq(x: int) -> int { y = x * x; return y; }\n";
   std::ofstream(dir / "opt.pkn")
-      << "import lib;\n"
+      << "import ::io; import lib;\n"
          "fn main() -> int { s = 0; i = 0;\n"
          "  while i < 10 { s = s + lib::sq(i); i = i + 1; }\n"
-         "  println(Str<int>(s)); return 0; }\n";
+         "  io::println(Str<int>(s)); return 0; }\n";
   std::string src = (dir / "opt.pkn").string();
 
   // build: the default produces the -O2 executable, not the -O0 one.  (Each
@@ -1859,7 +1877,12 @@ TEST(Driver, BuildAndRunDefaultToO2) {
     std::string ir = emit("");
     EXPECT_EQ(ir, emit("-O2"));
     EXPECT_NE(ir, emit("-O0"));
-    EXPECT_EQ(ir.find("alloca"), std::string::npos) << ir;
+    // The program's own code is optimised: no stack slot is left in main.
+    // (::io's, whose `errno` slots C writes through, keep theirs.)
+    size_t mainAt = ir.find("define i64 @main(");
+    ASSERT_NE(mainAt, std::string::npos) << ir;
+    std::string mainIR = ir.substr(mainAt, ir.find("\n}\n", mainAt) - mainAt);
+    EXPECT_EQ(mainIR.find("alloca"), std::string::npos) << mainIR;
     // Cached bitcode is the unoptimised translation (the opt level is
     // applied to the linked program), so one entry serves every level: a
     // run at another level reuses it unchanged.
@@ -1881,6 +1904,7 @@ TEST(Driver, BuildAndRunDefaultToO2) {
 TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
   auto src = writeTmp("import ::collections;\n"
                       "import ::memory;\n"
+                      "import ::io;\n"
                       "fn main() -> int {\n"
                       "  m = collections::HashMap<int, int>();\n"
                       "  n = m.__size;\n"
@@ -1889,6 +1913,7 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
                       "  x = collections::_Entry<int, int>(1, 2, 3, None);\n"
                       "  buf = memory::Buffer<int>(1);\n"
                       "  d = buf.__data;\n"
+                      "  f = io::File(m);\n"
                       "  return 0;\n}\n");
   auto [rc, out] = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
   std::filesystem::remove(src);
@@ -1901,6 +1926,8 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
         "'collections::_bucket' is private to module '::collections'",
         "'collections::_Entry' is private to module '::collections'",
         "'__data' is private to 'Buffer<int>': it is reachable only from its "
-        "own methods"})
+        "own methods",
+        "'io::File' cannot be constructed here: its initializer '___init__' "
+        "is private to module '::io'"})
     EXPECT_NE(out.find(line), std::string::npos) << line << "\n" << out;
 }

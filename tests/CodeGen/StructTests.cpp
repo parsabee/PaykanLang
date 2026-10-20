@@ -41,7 +41,7 @@ std::string writeTempFile(const std::filesystem::path &dir,
 
 TEST(Struct, FieldsAreReadAndAssignedInPlace) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     struct Point { x: int; y: int; }
     fn main() -> int {
       p = Point(1, 2);
@@ -49,9 +49,9 @@ TEST(Struct, FieldsAreReadAndAssignedInPlace) {
       p.y = p.x * 2;
       q = p;            // a copy
       q.x = 0;
-      println(p);
-      println(q);
-      println(Str(p == Point(5, 10)) + " " + Str(p == q) + " " + Str(p != q));
+      io::println(p);
+      io::println(q);
+      io::println(Str(p == Point(5, 10)) + " " + Str(p == q) + " " + Str(p != q));
       return p.x + p.y + q.x + q.y;
     }
   )");
@@ -64,7 +64,7 @@ TEST(Struct, FieldsAreReadAndAssignedInPlace) {
 
 TEST(Struct, EveryFieldTypeAndCopiesShareReferences) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node { n: int; view fn toString() -> Str { return "N" + Str(self.n); } }
     struct Rec { name: Str; node: Node; maybe: Node?; t: (int, Str); oi: int?; }
     struct Outer { r: Rec; k: int; }
@@ -80,28 +80,28 @@ TEST(Struct, EveryFieldTypeAndCopiesShareReferences) {
       s.node = Node(2);
       s.maybe = Node(3);
       s.oi = 7;
-      println(r);
-      println(s);
+      io::println(r);
+      io::println(s);
       o = Outer(r, 5);
       o.r.name = "o";
-      println(o.r.name + " " + r.name + " " + Str(o.r.node == r.node));
+      io::println(o.r.name + " " + r.name + " " + Str(o.r.node == r.node));
       h = Holder(mk(4), [mk(5), mk(6)]);
       h.r.name = "h";
       h.rs[1].name = "h6";
-      println(h.r.name + " " + h.rs[0].name + " " + h.rs[1].name);
-      println(mk(7).name + " " + Str(mk(8).node.n) + " " + mk(9).t.1);
+      io::println(h.r.name + " " + h.rs[0].name + " " + h.rs[1].name);
+      io::println(mk(7).name + " " + Str(mk(8).node.n) + " " + mk(9).t.1);
       xs: Rec[2] = [r, s];
-      println(first(xs).name + " " + label(xs[1]));
+      io::println(first(xs).name + " " + label(xs[1]));
       bump(r);
       bump(s);
-      println(r.name + " " + Str(r.t.0) + " " + xs[0].name);
+      io::println(r.name + " " + Str(r.t.0) + " " + xs[0].name);
       t = (r, 1);
-      println(t);
+      io::println(t);
       u = t;
-      println(Str(u == t) + " " + Str(r == s) + " " + Str(r == r));
+      io::println(Str(u == t) + " " + Str(r == s) + " " + Str(r == r));
       r2 = r;
       r2.node = Node(1);          // another object: unequal by identity
-      println(Str(r2 == r));
+      io::println(Str(r2 == r));
       return 0;
     }
   )");
@@ -123,7 +123,7 @@ TEST(Struct, EveryFieldTypeAndCopiesShareReferences) {
 
 TEST(Struct, NestedStructsAndTuplesPrintAndCompareInPlace) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     struct Point { x: int; y: int; }
     struct Line { a: Point; b: Point; label: Str; }
     struct Tagged { t: (Point, Str); f: float; c: char; b: bool; }
@@ -132,12 +132,12 @@ TEST(Struct, NestedStructsAndTuplesPrintAndCompareInPlace) {
       l.a.x = 9;
       m = l;
       m.b.y = 0;
-      println(l);
-      println(m);
-      println(Str(l == m) + " " + Str(l.a == m.a) + " " + Str(l == Line(Point(9, 2), Point(3, 4), "l")));
+      io::println(l);
+      io::println(m);
+      io::println(Str(l == m) + " " + Str(l.a == m.a) + " " + Str(l == Line(Point(9, 2), Point(3, 4), "l")));
       g = Tagged((Point(1, 1), "p"), 2.5, 'c', True);
-      println(g);
-      println(Str(g == Tagged((Point(1, 1), "p"), 2.5, 'c', True)) + " " + Str(g.t.0.x));
+      io::println(g);
+      io::println(Str(g == Tagged((Point(1, 1), "p"), 2.5, 'c', True)) + " " + Str(g.t.0.x));
       return l.b.y + m.b.y;
     }
   )");
@@ -156,7 +156,7 @@ TEST(Struct, NestedStructsAndTuplesPrintAndCompareInPlace) {
 
 TEST(Struct, MethodsChangeTheReceiverInPlace) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     struct Counter { n: int; name: Str; }
     impl Counter {
       fn __init__(name: Str) { self.n = 0; self.name = name; }
@@ -186,13 +186,13 @@ TEST(Struct, MethodsChangeTheReceiverInPlace) {
       k: inout int = b.c.slot();
       k = k + 10;
       mk().tick();                // a temporary: changed, then dropped
-      println(Str(c.get()) + " " + Str(b.c.get()) + " " + Str(cs[0].get()) + " " +
+      io::println(Str(c.get()) + " " + Str(b.c.get()) + " " + Str(cs[0].get()) + " " +
               Str(cs[1].get()) + " " + cs[1].label() + " " + c.label() + " " +
               Str(mk().get()));
       d = c.copyWith(9);
-      println(Str(d.get()) + Str(c.get()) + Str(c.same(d)) + Str(c.same(c)));
+      io::println(Str(d.get()) + Str(c.get()) + Str(c.same(d)) + Str(c.same(c)));
       v: view = c;
-      println(Str(v.get()) + v.label());
+      io::println(Str(v.get()) + v.label());
       return c.get();
     }
   )");
@@ -204,7 +204,7 @@ TEST(Struct, MethodsChangeTheReceiverInPlace) {
 
 TEST(Struct, ImplBlocksTraitsAndGenerics) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     struct Point { x: int; y: int; }
     class Holder { p: Point; }
     impl Point {
@@ -229,13 +229,13 @@ TEST(Struct, ImplBlocksTraitsAndGenerics) {
       p.shift(1);
       h = Holder(p);
       h.p.y = 3;
-      println(show(p) + " " + greet(p) + " " + Str(hashOf(p)) + " " + Str(p.hash() == Point(2, 3).hash()));
+      io::println(show(p) + " " + greet(p) + " " + Str(hashOf(p)) + " " + Str(p.hash() == Point(2, 3).hash()));
       pair = twice(p);
       m = Point::origin().moved(2);
       b = Box(Point(1, 2));
       b.set(Point(3, 4));
       q: Point = b.get();
-      println(show(q) + " " + show(b.get()) + " " + Str(pick(True, Point(1, 1), Point(2, 2)).sum()));
+      io::println(show(q) + " " + show(b.get()) + " " + Str(pick(True, Point(1, 1), Point(2, 2)).sum()));
       return p.sum() + pair.1.x + m.x + h.p.y;
     }
   )");
@@ -250,7 +250,7 @@ TEST(Struct, ImplBlocksTraitsAndGenerics) {
 
 TEST(Struct, ParameterModesAndLet) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     struct P { x: int; s: Str; }
     fn byValue(p: P) -> int { p.x = 100; return p.x; }
     fn byView(p: view P) -> int { return p.x + p.s.len(); }
@@ -262,10 +262,10 @@ TEST(Struct, ParameterModesAndLet) {
       a = byValue(p);
       b = byView(p);
       byInout(p);
-      println(Str(a) + " " + Str(b) + " " + p.s + Str(p.x) + " " + k.s);
+      io::println(Str(a) + " " + Str(b) + " " + p.s + Str(p.x) + " " + k.s);
       replace(p);
       v: view = p;
-      println(v.s + " " + Str(byView(k)));
+      io::println(v.s + " " + Str(byView(k)));
       return p.x + k.x;
     }
   )");
@@ -303,7 +303,7 @@ TEST(Struct, FieldsOfTemporariesAndElementsAreReleased) {
 
 TEST(Struct, GenericStructsInstantiateLikeClasses) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     struct Pair<A, B> { a: A; b: B; }
     impl Pair<A, B> {
       view fn first() -> view A { return self.a; }
@@ -331,19 +331,19 @@ TEST(Struct, GenericStructsInstantiateLikeClasses) {
       q: Pair<int, Str> = Pair<int, Str>(2, "two");
       p.swapWith(q);
       f = p.flipped();
-      println(p);
-      println(f);
-      println(show(q) + " " + greet(p) + " " + Str(p.first()) + Str(firstOf(f).len()));
+      io::println(p);
+      io::println(f);
+      io::println(show(q) + " " + greet(p) + " " + Str(p.first()) + Str(firstOf(f).len()));
       b = Box(Pair(3, 4));
       b.set(Pair(5, 6));
-      println(Str(sumInts(b.get())) + " " + Str(b.hash()) + " " + show(mkBox("s")));
+      io::println(Str(sumInts(b.get())) + " " + Str(b.hash()) + " " + show(mkBox("s")));
       h = Holder(9);
       h.p.a = 10;
       bs: Box<int>[2] = [Box(1), Box(2)];
       bs[1].v = 7;
       t = (Pair(1.5, 'c'), Box(True));
-      println(Str(h.p.a) + h.p.b + " " + Str(bs[0].v + bs[1].v) + " " + Str(t.0.b) + Str(t.1.v));
-      println(Str(p == Pair(2, "two")) + Str(b == Box(Pair(5, 6))) + Str(Box(1) == Box(2)));
+      io::println(Str(h.p.a) + h.p.b + " " + Str(bs[0].v + bs[1].v) + " " + Str(t.0.b) + Str(t.1.v));
+      io::println(Str(p == Pair(2, "two")) + Str(b == Box(Pair(5, 6))) + Str(Box(1) == Box(2)));
       return p.a + q.a;
     }
   )");
@@ -360,7 +360,7 @@ TEST(Struct, GenericStructsInstantiateLikeClasses) {
 
 TEST(Struct, GenericStructsHoldingReferencesAreReleased) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node { n: int; view fn toString() -> Str { return "N" + Str(self.n); } }
     struct Slot<T> { v: T; label: Str; }
     impl Slot<T> { fn put(v: T) { self.v = v; } }
@@ -375,10 +375,10 @@ TEST(Struct, GenericStructsHoldingReferencesAreReleased) {
       two.b.put("z");
       xs: Slot<Node>[2] = [mk(3), mk(4)];
       xs[0] = xs[1];
-      println(s);
-      println(t);
-      println(two);
-      println(Str(xs[0].v.n + xs[1].v.n) + " " + Str(mk(5).v.n) + " " + mk(6).label);
+      io::println(s);
+      io::println(t);
+      io::println(two);
+      io::println(Str(xs[0].v.n + xs[1].v.n) + " " + Str(mk(5).v.n) + " " + mk(6).label);
       return 0;
     }
   )");
@@ -408,7 +408,7 @@ impl Box<T> { fn __init__(v: T) { self.v = v; } view fn get() -> view T { return
 fn mk() -> Pair<int, Str> { return Pair<int, Str>(41, "x"); }
 fn boxed<T>(v: T) -> Box<T> { return Box<T>(v); }
 )");
-  auto mainPath = writeTempFile(tmpDir, "main.pkn", R"(
+  auto mainPath = writeTempFile(tmpDir, "main.pkn", R"(import ::io;
 import lib::gen;
 fn main() -> int {
   p = gen::mk();                      // the module's own Pair<int, Str>
@@ -417,7 +417,7 @@ fn main() -> int {
   p.a = p.a + q.a;
   b: gen::Box<Str> = gen::boxed("b"); // an instantiation of a function
   c = gen::Box(r);
-  println(p.toString() + " " + r.first() + " " + b.get() + " " + c.get().b.toString() + " " + Str(p == q));
+  io::println(p.toString() + " " + r.first() + " " + b.get() + " " + c.get().b.toString() + " " + Str(p == q));
   return p.a;
 }
 )");
@@ -448,7 +448,7 @@ struct Named { p: Point; name: Str; }
 class Shape { at: Point; view fn where() -> Point { return self.at; } }
 fn make(n: int) -> Named { return Named(Point(n, n), "n" + Str(n)); }
 )");
-  auto mainPath = writeTempFile(tmpDir, "main.pkn", R"(
+  auto mainPath = writeTempFile(tmpDir, "main.pkn", R"(import ::io;
 import geo::shapes;
 fn main() -> int {
   p = shapes::Point(1, 2);
@@ -458,7 +458,7 @@ fn main() -> int {
   n.p.shift(1);
   s = shapes::Shape(p);
   q: shapes::Point = s.where();
-  println(p.toString() + " " + Str(p.sum()) + " " + Str(o == p) + " " + n.name + Str(n.p.x) + " " + Str(q.sum()));
+  io::println(p.toString() + " " + Str(p.sum()) + " " + Str(o == p) + " " + n.name + Str(n.p.x) + " " + Str(q.sum()));
   return 0;
 }
 )");

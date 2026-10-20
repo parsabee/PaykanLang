@@ -43,12 +43,13 @@ class Rect {
 impl Rect { fn __init__(w: int, h: int) { self.w = w; self.h = h; } }
 fn describe(r: Rect) -> Str { return "rect " + Str(r.area()); }
 """
-MAIN = """import lib::util;
+MAIN = """import ::io;
+import lib::util;
 import geometry::shapes;
 fn main() -> int {
   r = shapes::Rect(3, 4);
-  println(shapes::describe(r));
-  println(Str(util::tag()));
+  io::println(shapes::describe(r));
+  io::println(Str(util::tag()));
   return 0;
 }
 """

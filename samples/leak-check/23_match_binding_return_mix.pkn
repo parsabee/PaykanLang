@@ -11,14 +11,23 @@
 // expect-stdout: none
 // expect-stdout: q
 
-class A { s: Str; }
-impl A { fn __init__(s: Str) { self.s = s; } }
+import ::io;
+
+class A {
+  s: Str;
+}
+impl A {
+  fn __init__(s: Str) { self.s = s; }
+}
 
 fn pick(o: A?) -> A {
   match o {
     a: A {
       i: int = 0;
-      while i < 3 { a = A("n" + Str<int>(i)); i = i + 1; }
+      while i < 3 {
+        a = A("n" + Str<int>(i));
+        i = i + 1;
+      }
       return a;
     }
     None { return A("none"); }
@@ -28,10 +37,14 @@ fn pick(o: A?) -> A {
 
 fn main() -> int {
   o: A? = A("z");
-  println(pick(o).s);
-  println(pick(None).s);
+  io::println(pick(o).s);
+  io::println(pick(None).s);
   match o {
-    a: A { a = A("q"); a = a; println(a.s); }
+    a: A {
+      a = A("q");
+      a = a;
+      io::println(a.s);
+    }
     None { }
   }
   return 0;

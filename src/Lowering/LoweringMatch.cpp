@@ -50,9 +50,11 @@ void ModuleLowering::emitMatchChain(size_t n,
 }
 
 Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
-  // An optional function value is held in memory: matched in place.
-  if (ast::isFunctionValue(node->getSubject()->getResolvedType()))
-    return emitFunctionValueMatch(node);
+  // An optional held in memory (a function value's, a tuple's, a struct's):
+  // matched on its copy.
+  if (ast::Type *t = node->getSubject()->getResolvedType();
+      ast::isFunctionValue(t) || ast::isMemOptional(t))
+    return emitMemOptionalMatch(node);
   // 1. Evaluate the subject once.  A boxed subject (call result, field read)
   //    is owned for the duration of the match and released on every exit.
   Val subjRaw = emitExpr(node->getSubject());
@@ -108,10 +110,11 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
         noneArm = arm;
       }
 
-  // An optional primitive (`int?`, a value): its single type arm names the
-  // primitive and always matches a present value.
-  ast::BuiltinType *primInner =
-      optTy ? ast::dyn_cast<ast::BuiltinType>(optTy->getInnerType()) : nullptr;
+  // An optional primitive or enum (`int?`, `Suit?`, a value): its single
+  // type arm names the primitive or the enum and always matches a present
+  // value.
+  ast::Type *primInner =
+      optTy && ast::isValueOptional(optTy) ? optTy->getInnerType() : nullptr;
 
   struct TypeArm {
     ast::ClassType *CT;

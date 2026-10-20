@@ -1,21 +1,25 @@
-// Isolates: an Error object produced by a failing open().
-// Runtime allocation site: PaykanError_new (Error.c) — allocates the error
-// object (and its message Str). The match binding must release it.
+// Isolates: the Result of a failing io::open(): its Error's message, a Str
+// the runtime makes (Paykan_error_text, Error.c), is released with the
+// Result, whether the Result is a variable, a temporary, or matched.
 //
 // Expected under --track-heap: live blocks : 0.
 
+import ::io;
+
 fn func1() {
-  match open("/nonexistent/paykan/leak-check/path.txt", "r") {
-    e: Error { }
-    f: File  { }
-  } 
+  r = io::open("/nonexistent/paykan/leak-check/path.txt", "r");
+  match r.value {
+    f: io::File { }
+    None { }
+  }
 }
 
 fn func2() {
-  obj: Obj = open("/nonexistent/paykan/leak-check/path.txt", "r");
-  match obj {
-    e: Error { }
-    f: File  { }
+  msg: Obj =
+      io::open("/nonexistent/paykan/leak-check/path.txt", "r").error.message();
+  match msg {
+    s: Str { }
+    _ { }
   }
 }
 

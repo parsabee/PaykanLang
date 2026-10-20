@@ -47,9 +47,18 @@ static const int64_t *skip_struct_layout(const int64_t *l) {
   return e;
 }
 
+/// Whether the entry at @p e is an optional tuple's or struct's: a presence
+/// flag at its offset, then (at e + 3) a whole entry for the value.
+static int optional_aggregate(const int64_t *e) {
+  return e[0] == PAYKAN_KIND_OPTIONAL &&
+         (e[2] == PAYKAN_KIND_TUPLE || e[2] == PAYKAN_KIND_STRUCT);
+}
+
 /// The words of the layout entry at @p e: its own and a nested tuple's or
 /// struct's.
 static const int64_t *next_entry(const int64_t *e) {
+  if (optional_aggregate(e))
+    return next_entry(e + 3);
   if (e[0] == PAYKAN_KIND_OPTIONAL)
     return e + 3;
   if (e[0] == PAYKAN_KIND_STRUCT)
@@ -149,7 +158,12 @@ static void render_scalar(StrBuf *sb, int64_t kind, const char *at) {
 /// @p value.
 static void render_entry(StrBuf *sb, const char *value, const int64_t *e) {
   const char *at = value + e[1];
-  if (e[0] == PAYKAN_KIND_TUPLE) {
+  if (optional_aggregate(e)) {
+    if (load_byte(at))
+      render_entry(sb, value, e + 3);
+    else
+      sb_append(sb, "None", 4);
+  } else if (e[0] == PAYKAN_KIND_TUPLE) {
     render_tuple(sb, at, e + 2);
   } else if (e[0] == PAYKAN_KIND_STRUCT) {
     render_struct(sb, at, e + 2);
@@ -240,6 +254,9 @@ static int struct_equals(const char *a, const char *b, const int64_t *layout);
 static int entry_equals(const char *a, const char *b, const int64_t *e) {
   const char *ea = a + e[1];
   const char *eb = b + e[1];
+  if (optional_aggregate(e))
+    return load_byte(ea) == load_byte(eb) &&
+           (!load_byte(ea) || entry_equals(a, b, e + 3));
   if (e[0] == PAYKAN_KIND_TUPLE)
     return tuple_equals(ea, eb, e + 2);
   if (e[0] == PAYKAN_KIND_STRUCT)

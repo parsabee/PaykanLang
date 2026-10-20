@@ -12,6 +12,8 @@
 // expect-stdout: [a] [Z] [ ]
 // expect-stdout: point(3, -4) visible=True tag=p
 
+import ::io;
+
 class Point {
   x: int;
   y: int;
@@ -25,21 +27,23 @@ impl Point {
 }
 
 fn main() -> int {
-  println(Str<int>(42) + " " + Str(-7) + " " + Str<int>(0));
+  io::println(Str<int>(42) + " " + Str(-7) + " " + Str<int>(0));
   big: int = 9223372036854775807;
-  println(Str(-big - 1) + " " + Str<int>(big));
+  io::println(Str(-big - 1) + " " + Str<int>(big));
 
   z: float = 0.0;
-  println(Str(3.14) + " " + Str<float>(2.0) + " " + Str(0.5) + " " +
-          Str<float>(1e20) + " " + Str(-z));
-  println(Str<float>(z / z) + " " + Str(1.0 / z) + " " + Str<float>(-1.0 / z));
+  io::println(Str(3.14) + " " + Str<float>(2.0) + " " + Str(0.5) + " "
+      + Str<float>(1e20) + " " + Str(-z));
+  io::println(Str<float>(z / z) + " " + Str(1.0 / z) + " "
+      + Str<float>(-1.0 / z));
 
-  println(Str(True) + " " + Str<bool>(1 > 2));
+  io::println(Str(True) + " " + Str<bool>(1 > 2));
   word = "aZ ";
-  println("[" + Str(word[0]) + "] [" + Str<char>(word[1]) + "] [" +
-          Str(word[2]) + "]");
+  io::println("[" + Str(word[0]) + "] [" + Str<char>(word[1]) + "] ["
+      + Str(word[2]) + "]");
 
   p = Point(3, -4);
-  println(p.toString() + " visible=" + Str<bool>(p.x > 0) + " tag=" + Str('p'));
+  io::println(p.toString() + " visible=" + Str<bool>(p.x > 0) + " tag="
+      + Str('p'));
   return 0;
 }

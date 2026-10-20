@@ -10,6 +10,8 @@
 // the whole list is released through the ordinary destructors (run this with
 // --track-heap to see zero live blocks).
 
+import ::io;
+
 class Node {
   v: int;
   next: Node?;                 // implicitly None — no assignment in __init__
@@ -61,50 +63,52 @@ fn render(head: Node?) -> Str {
 
 fn describe(found: Node?) -> Str {
   match found {
-    n: Node { return "found " + Str(n.v); }
-    None    { return "not found"; }
+    n: Node {
+      return "found " + Str(n.v);
+    }
+    None { return "not found"; }
   }
 }
 
 // ---- main ------------------------------------------------------------------
 
 fn main() -> int {
-  println("=== build a list ===");
+  io::println("=== build a list ===");
   head: Node? = None;
   head = push_front(head, 3);
   head = push_front(head, 2);
   head = push_front(head, 1);
-  println(render(head));                     // [1, 2, 3]
+  io::println(render(head));                     // [1, 2, 3]
 
-  println("=== search ===");
-  println(describe(find(head, 2)));          // found 2
-  println(describe(find(head, 9)));          // not found
-  println(describe(find(None, 1)));          // not found
+  io::println("=== search ===");
+  io::println(describe(find(head, 2)));          // found 2
+  io::println(describe(find(head, 9)));          // not found
+  io::println(describe(find(None, 1)));          // not found
 
-  println("=== None checks ===");
-  println(Str<bool>(head == None));            // False
-  println(Str(find(head, 9) == None));   // True
-  println(Str<bool>(find(head, 3) != None));   // True
+  io::println("=== None checks ===");
+  io::println(Str<bool>(head == None));            // False
+  io::println(Str(find(head, 9) == None));  // True
+  io::println(Str<bool>(find(head, 3) != None));  // True
 
-  println("=== printing an optional ===");
+  io::println("=== printing an optional ===");
   maybe: Node? = None;
-  println(maybe);                            // None
+  io::println(maybe);                            // None
   s: Str? = "text";
-  println(s);                                // text
+  io::println(s);                                // text
 
-  println("=== array of optionals ===");
+  io::println("=== array of optionals ===");
   slots: Node?[2] = [None, Node(42)];
   slots[0] = Node(7);
   slots[1] = None;
-  println(describe(slots[0]));               // found 7
-  println(describe(slots[1]));               // not found
+  io::println(describe(slots[0]));               // found 7
+  io::println(describe(slots[1]));               // not found
 
-  println("=== two optionals ===");
+  io::println("=== two optionals ===");
   a: Str? = "same";
   b: Str? = "same";
   c: Str? = None;
-  println(Str(a == b));                  // True  (content equality)
-  println(Str<bool>(a == c));                  // False (one is None)
-  println(Str(c == None));               // True
+  io::println(Str(a == b));                  // True  (content equality)
+  io::println(Str<bool>(a == c));                  // False (one is None)
+  io::println(Str(c == None));               // True
   return 0;
 }

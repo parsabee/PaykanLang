@@ -1,6 +1,10 @@
 // Every conversion constructor `Target<Source>(value)` with its result type.
 fn main() -> int {
-  i: int = 1;  f: float = 1.5;  b: bool = True;  c: char = 'c';  s: Str = "12";
+  i: int = 1;
+  f: float = 1.5;
+  b: bool = True;
+  c: char = 'c';
+  s: Str = "12";
   s1: Str = Str<int>(i);
   s2: Str = Str<float>(f);
   s3: Str = Str<bool>(b);
@@ -15,8 +19,14 @@ fn main() -> int {
   n6: char = char<int>(i);
   q1: bool? = bool<Str>(s);     // exactly "True" / "False"
   // A parsed optional is unwrapped before it is formatted.
-  match p1 { x: int { t: Str = Str<int>(x); } None { } }
+  match p1 {
+    x: int { t: Str = Str<int>(x); }
+    None { }
+  }
   cq: char? = c;
-  match cq { x: char { t: Str = Str<char>(x); } None { } }
+  match cq {
+    x: char { t: Str = Str<char>(x); }
+    None { }
+  }
   return 0;
 }

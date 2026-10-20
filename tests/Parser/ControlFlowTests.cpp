@@ -10,10 +10,10 @@ using namespace paykan::test;
 // ─── if / else / else-if ────────────────────────────────────────────────────
 
 TEST(ControlFlow, IfStmt) {
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io;
     fn main() -> int {
       if True {
-        println("yes");
+        io::println("yes");
       }
       return 0;
     }
@@ -22,13 +22,13 @@ TEST(ControlFlow, IfStmt) {
 }
 
 TEST(ControlFlow, IfElseStmt) {
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io;
     fn main() -> int {
       x: int = 10;
       if x > 5 {
-        println("big");
+        io::println("big");
       } else {
-        println("small");
+        io::println("small");
       }
       return 0;
     }
@@ -37,15 +37,15 @@ TEST(ControlFlow, IfElseStmt) {
 }
 
 TEST(ControlFlow, IfElifElse) {
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io;
     fn main() -> int {
       x: int = 42;
       if x > 100 {
-        println("large");
+        io::println("large");
       } elif x > 10 {
-        println("medium");
+        io::println("medium");
       } else {
-        println("small");
+        io::println("small");
       }
       return 0;
     }
@@ -54,12 +54,12 @@ TEST(ControlFlow, IfElifElse) {
 }
 
 TEST(ControlFlow, NestedIf) {
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io;
     fn main() -> int {
       x: int = 5;
       if x > 0 {
         if x < 10 {
-          println("single digit positive");
+          io::println("single digit positive");
         }
       }
       return 0;

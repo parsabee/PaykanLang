@@ -14,6 +14,8 @@
 // expect-stdout: 2.5
 // expect-stdout: True a 7
 
+import ::io;
+
 class Cell {
   label: Str;
   value: int?;
@@ -26,7 +28,7 @@ impl Cell {
 fn parseOr(s: Str, d: int) -> int {
   match int<Str>(s) {
     n: int { return n; }
-    None   { return d; }
+    None { return d; }
   }
 }
 
@@ -38,25 +40,28 @@ fn main() -> int {
     if i < 4 { line = line + " "; }
     i = i + 1;
   }
-  println(line);
+  io::println(line);
 
   words: Str[7] = ["1", "2", "x", "3", "", "4", "5"];
   total = 0;
   i = 0;
-  while i < words.len() { total = total + parseOr(words[i], 0); i = i + 1; }
-  println(Str<int>(total));
+  while i < words.len() {
+    total = total + parseOr(words[i], 0);
+    i = i + 1;
+  }
+  io::println(Str<int>(total));
 
   c = Cell();
   c.label = Str(2.5);
   c.value = int("7");
   c.value = int<Str>("nope");
   c.value = int("7");
-  println(c.label);
+  io::println(c.label);
 
   f = float<Str>("1.25");
   f = float("bad");
   n = int<float>(7.9) + int(False) + int<char>(char(0));
-  println(Str<bool>(bool<int>(n)) + " " + Str(char(97)) + " " +
-          Str<int>(n));
+  io::println(Str<bool>(bool<int>(n)) + " " + Str(char(97)) + " "
+      + Str<int>(n));
   return 0;
 }

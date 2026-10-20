@@ -237,13 +237,13 @@ fn name(c: Color) -> Str {
 fn favorite() -> Color { return Color::Blue; }
 )");
 
-  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(import ::io;
 import pal::color;
 fn main() -> int {
   c: color::Color = color::Color::Green;
-  println(color::name(c));            // green
+  io::println(color::name(c));            // green
   f: color::Color = color::favorite();
-  println(color::name(f));            // blue
+  io::println(color::name(f));            // blue
   if f == color::Color::Blue { return 0; }
   return 1;
 }
@@ -597,13 +597,13 @@ fn tag() -> Str { return "y"; }
 fn num(n: int) -> int { return n * 10; }
 fn both() -> Str { return tag() + x::tag(); }
 )");
-  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(import ::io;
 import x;
 import lib::y as r;
 fn tag() -> Str { return "m"; }
 fn num(n: int) -> int { return n - 1; }
 fn main() -> int {
-  println(x::tag() + r::tag() + lib::y::tag() + tag() + r::both());
+  io::println(x::tag() + r::tag() + lib::y::tag() + tag() + r::both());
   return x::num(1) + r::num(2) + num(30);
 }
 )");
@@ -614,6 +614,131 @@ fn main() -> int {
   EXPECT_EQ(r.StdOut, "xyymyx\n");
   EXPECT_EQ(r.ExitCode, 51); // 2 + 20 + 29
   g.expectNoLeaks("same-named functions of several modules");
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+// A module's generic that uses one of the module's own functions as a value
+// names that module's function, as a call does, not one the importer
+// declares; and however the function is spelled, its values compare equal
+// within a module.
+TEST(Module, GenericUsesItsModulesFunctionAsAValue) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_fn_value";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "lib.pkn", R"(
+fn square(x: int) -> int { return x * x; }
+fn pick<T>(x: T) -> (int) -> int { return square; }
+class Keeper<T> {
+  v: T;
+  fn code() -> (int) -> int { return square; }
+  fn same(f: (int) -> int) -> bool { return f == square; }
+}
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import ::io;
+import lib;
+fn square(x: int) -> int { return x + 1000; }
+fn main() -> int {
+  f = lib::pick<int>(1);
+  io::println(f(3));
+  k = lib::Keeper<Str>("a");
+  io::println(k.code()(3));
+  io::println(k.same(lib::square));
+  io::println(k.same(square));
+  return 0;
+}
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "9\n9\nTrue\nFalse\n");
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+// A type whose initializer is `___init__` is made through its module's
+// factories, which run like any constructor call.
+TEST(Module, FactoryOfAModulePrivateInitializer) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_private_init";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "lib.pkn", R"(
+class Conn { __h: int; }
+impl Conn {
+  fn ___init__(h: int) { self.__h = h; }
+  static fn open(h: int) -> Conn { return Conn(h); }
+  view fn h() -> int { return self.__h; }
+}
+struct P { x: int; }
+impl P { fn ___init__(x: int) { self.x = x; } }
+fn origin() -> P { return P(0); }
+class Box<T> { v: T; }
+impl Box<T> {
+  fn ___init__(v: T) { self.v = v; }
+  static fn of(v: T) -> Box<T> { return Box<T>(v); }
+}
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import ::io;
+import lib;
+fn main() -> int {
+  c = lib::Conn::open(7);
+  io::println(c.h());
+  io::println(lib::origin().x);
+  io::println(lib::Box<Str>::of("b").v);
+  return 0;
+}
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "7\n0\nb\n");
+
+  std::filesystem::remove_all(tmpDir);
+}
+
+// A `static fn` of an imported template's `impl` block: of an instantiation
+// the module made itself (imported with it) and of one made here.
+TEST(Module, StaticFnOfAnImportedInstantiation) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_generic_static";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "lib.pkn", R"(
+class Box<T> { __v: T; }
+impl Box<T> {
+  fn ___init__(v: T) { self.__v = v; }
+  view fn get() -> view T { return self.__v; }
+  static fn of(v: T) -> Box<T> { return Box<T>(v); }
+}
+struct Pair<A, B> { a: A; b: B; }
+impl Pair<A, B> {
+  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
+}
+fn own() -> Box<Str> { return Box<Str>::of("own"); }
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import ::io;
+import lib;
+fn main() -> int {
+  a = lib::own();              // Box<Str>, instantiated by lib
+  b = lib::Box<Str>::of("b");  // its static, imported with it
+  c = lib::Box<int>::of(3);    // a new instantiation here, and its static
+  p = lib::Pair<int, Str>::make(1, "p");
+  io::println(a.get() + " " + b.get() + " " + Str(c.get()) + " " + p.toString());
+  return 0;
+}
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "own b 3 Pair<int, Str>(a: 1, b: p)\n");
 
   std::filesystem::remove_all(tmpDir);
 }

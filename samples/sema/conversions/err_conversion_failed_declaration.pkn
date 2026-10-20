@@ -1,3 +1,5 @@
+import ::io;
+
 // ERROR: argument of 'Str<int>' has type 'float', expected 'int'
 // The failed declaration of `a` is the only error reported: `a` is still
 // declared (with an internal error type), so its later uses are not reported
@@ -5,8 +7,8 @@
 fn main() -> int {
   n = 2.5;
   a = Str<int>(n);
-  println(a);
+  io::println(a);
   b = a + "!";
-  println(b.len());
+  io::println(b.len());
   return 0;
 }

@@ -35,19 +35,19 @@ void expectRunsOnEveryFrontend(const char *label, const std::string &source,
 // Signatures unlike the runtime's: these used to be an ICE (an assertion in
 // the lowering, or a PIR verification failure).
 TEST(RuntimeName, UserFunctionsWithOtherSignatures) {
-  expectRunsOnEveryFrontend("OtherSignatures", R"(
+  expectRunsOnEveryFrontend("OtherSignatures", R"(import ::io;
     fn PaykanString_new(x: int) -> int { return x + 1; }
     fn Paykan_println(a: int, b: int) -> int { return a * b; }
     fn Paykan_panic_div_by_zero(x: int) -> Str { return "user " + Str(x); }
     fn PaykanString_concat() -> int { return 9; }
     fn main() -> int {
-      println("hi");
+      io::println("hi");
       s = "a" + "b";
-      println(s);
-      println(Str<int>(PaykanString_new(2)));
-      println(Str<int>(Paykan_println(6, 7)));
-      println(Paykan_panic_div_by_zero(10 / 2));
-      println(Str<int>(PaykanString_concat()));
+      io::println(s);
+      io::println(Str<int>(PaykanString_new(2)));
+      io::println(Str<int>(Paykan_println(6, 7)));
+      io::println(Paykan_panic_div_by_zero(10 / 2));
+      io::println(Str<int>(PaykanString_concat()));
       return 0;
     }
   )",
@@ -59,23 +59,23 @@ TEST(RuntimeName, UserFunctionsWithOtherSignatures) {
 // the runtime's) or a crash.
 TEST(RuntimeName, UserFunctionsWithTheRuntimeSignatures) {
   expectRunsOnEveryFrontend(
-      "SameSignatures", R"(
-    fn Paykan_panic_div_by_zero() { println("user div"); }
-    fn Paykan_panic_int_to_char(n: int) { println("user char " + Str(n)); }
-    fn Paykan_println(s: Str) { print("[" + s + "]\n"); }
+      "SameSignatures", R"(import ::io;
+    fn Paykan_panic_div_by_zero() { io::println("user div"); }
+    fn Paykan_panic_int_to_char(n: int) { io::println("user char " + Str(n)); }
+    fn Paykan_println(s: Str) { io::print("[" + s + "]\n"); }
     fn PaykanString_new(s: Str, n: int) -> Str { return s + Str(n); }
     fn PaykanObject_None() -> int { return 4; }
     fn two() -> int { return 2; }
     fn main() -> int {
       Paykan_panic_div_by_zero();
       Paykan_panic_int_to_char(300);
-      println(Str<int>(10 / two()));
-      println(Str<char>(char<int>(65)));
+      io::println(Str<int>(10 / two()));
+      io::println(Str<char>(char<int>(65)));
       Paykan_println("x");
-      println(PaykanString_new("s", 1));
+      io::println(PaykanString_new("s", 1));
       a: Str? = None;
-      println(a);
-      println(Str<int>(PaykanObject_None()));
+      io::println(a);
+      io::println(Str<int>(PaykanObject_None()));
       return 0;
     }
   )",

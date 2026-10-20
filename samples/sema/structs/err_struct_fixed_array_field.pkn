@@ -1,3 +1,7 @@
 // ERROR: field 'xs' in struct 'A' has type 'int[3]': a struct field cannot be a fixed-size array yet
-struct A { xs: int[3]; }
-fn main() -> int { return 0; }
+struct A {
+  xs: int[3];
+}
+fn main() -> int {
+  return 0;
+}

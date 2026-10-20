@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `::result` (stdlib/result.pkn, imported `as res`): errors as values.  `enum ErrorCode`,
+  the language's standard set of errors (`Ok`, `NotFound`, `PermissionDenied`,
+  `AlreadyExists`, `InvalidArgument`, `OutOfMemory`, `Io`, `EndOfFile`, `OutOfRange`, ...),
+  `struct Error { code: ErrorCode; msg: Str?; }` and
+  `struct Result<T> { error: Error; value: T?; }`, the value present exactly when the code
+  is `Ok`, with `ok(v)`, `none()`, `name(code)`, `fromErrno(errno)` and `isOk()` /
+  `message()`.  Every standard library function that can fail returns one: `io::open`,
+  `io::File`'s methods, `memory::Buffer`'s.  The runtime maps a C `errno` to its code
+  (`Paykan_error_code`) and text (`Paykan_error_text`).
+- `::io` (stdlib/io.pkn): `print`, `println`, `printerr` and `printerrln` take any
+  `T: Show` (so `io::println(5)` needs no `Str(...)`); `class File`, whose `impl` methods
+  `write` returns an `Error` and `readln`, `readbytes` and `read` a `Result<Str>`
+  (`EndOfFile` at the end); `open(path, mode) -> Result<File>`; and `stdin() -> File`.
+- Optionals of enums, tuples and structs (docs/language/10-optionals.md): `Suit?` is held
+  like `int?`, a `(int, Str)?` or a `Point?` in place as a presence flag and the value,
+  `None` all zeros.  They are made, compared (`== None`, `==`), unwrapped by `match`
+  (`p: Point { ... } None { ... }`), printed, and stored in fields, arrays, tuples,
+  parameters and results like any value.  A template's `T?` of an optional `T` is `T`
+  itself, so `Result<Str?>` works (a written `int??` is still an error).  The value of an
+  optional tuple or struct is at most 64 bytes: `Big?` for a 72-byte `Big` is rejected (`use
+  'Box<Big>?' (memory::Box) instead`).  A nested tuple literal widens into an optional slot
+  (`a: (int, (Str, Str)?) = (1, ("x", "y"));`).
+- An optional of a `Show` type is `Show`: `x.toString()` on an optional is "None" or its
+  value's text.
+- A native function takes and returns an enum, as its ordinal (`int64_t`).
+- The runtime's `PaykanBuffer_isSet`, `PaykanBuffer_tryGrow` and
+  `PaykanBuffer_tryReserve`, which report a failed allocation as `ENOMEM` instead of
+  aborting (`memory::Buffer`'s `OutOfMemory`).
 - `::math`, a standard library module of the C library's math functions on `float`
   (docs/language/13-standard-library.md, "`::math`"): `sqrt`, `cbrt`, `pow`, `hypot`,
   the exponentials and logarithms, the trigonometric and hyperbolic functions,
@@ -391,13 +419,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Printing and files moved to the standard library: the builtins `print`, `println`,
+  `printerr`, `printerrln`, `open`, the classes `File` and `Error` and the identifier
+  `Stdin` are gone.  A program writes `import ::io;` and `io::println(...)`,
+  `io::open(...)`, `io::stdin()`; the samples, tests and docs are rewritten so.  Only `Obj`
+  and `Str` remain builtin classes, and `print`, `open`, `File` and `Error` are free names
+  (a program that imports `::io` still cannot declare a `File`, `Error`, `Result` or
+  `ErrorCode` of its own: type names are global across an import graph).
+- `memory::Buffer<T>` is a struct: a handle to the runtime's storage, so its copies share
+  the slots.  It starts empty, `Buffer<T>()`, and its operations report what goes wrong
+  instead of panicking: `grow`, `reserve`, `push`, `set`, `swap` and `shrink` return a
+  `res::Error` (`OutOfMemory`, `OutOfRange`, `InvalidArgument`, `NotFound`) and `copy(i)` a
+  `res::Result<T>`; `get(i)` and `copyUnchecked(i)` still panic on a bad index, for code
+  that has checked it.  `::collections` uses them so; its own API is unchanged.
 - A function value is a value held in place, not a reference to a closure object
   (docs/design/function-types.md, "Run-time representation"): 16 bytes, the address of its
   code and the box of its closure, the object holding its captures, which is null when it
   captures nothing.  A named function or a lambda that captures nothing used as a value
   no longer allocates.  Copying one shares the closure; `==` is true for the same code
   and the same closure, so `square == square` is now `True` and `List.contains(square)`
-  finds it, while each evaluation of a capturing lambda still makes a new closure.  A
+  finds it (within a module: a value of the function made in another module is a
+  different value for now), while each evaluation of a capturing lambda still makes a new
+  closure.  A
   function type is a `ValueType`, and `((int) -> int)?` takes the same 16 bytes, `None`
   having no code.  A call loads the code and the closure, keeps the closure for the call
   and calls the code through its address, through the new PIR instructions `fn.addr` and
@@ -415,6 +458,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps parsing.  A statement starting with `if` is a ternary expression statement when
   `then` follows its condition, as before.  The samples, the standard library, the
   tests and the docs are rewritten without the parentheses.
+- `scripts/pkfmt.py` checks (`python3 scripts/pkfmt.py`) or applies (`--apply`) the layout
+  of Paykan source (`.pkn`); every tracked file is formatted with it, and the Lint job
+  checks it.
+- A generic class's or struct's `impl` block may declare `static fn`s; one is the
+  instantiation's, called as `Box<int>::of(3)` (`m::Box<int>::of(3)` through an import).
+- A module-private initializer: `fn ___init__(...)` (three underscores) in a class's or a
+  struct's `impl` block is its `__init__`, and the type is constructed (`T(...)`) and extended
+  (`__super__(...)`) by the module's own code only, its templates included wherever they are
+  instantiated; an importer makes one through the module's functions (`'m::T' cannot be
+  constructed here: its initializer '___init__' is private to module 'm'`).  `io::File`'s is
+  one: `open` and `stdin` make a `File`, a program cannot.
 - The object header is 16 bytes instead of 24 (src/Runtime/Runtime.h, `PaykanObject`;
   docs/language/08-memory-model.md): the vtable pointer, then a 32-bit strong count and a
   32-bit weak count, so every object is 8 bytes smaller.  A count that would pass
@@ -570,6 +624,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A process that compiles two programs importing the same source module (the test
+  binaries, an embedding host) no longer fails to lower the second: the module's analysis
+  is cached with its exports (`Sema::ModuleContextCache`), so every compilation that
+  imports it can lower it.
+- A conditional expression whose branches are calls of functions returning nothing, as a
+  statement (`if c then f() else g();`) in a function that returns a value, failed PIR
+  verification (`control can fall off the end of a non-void function`): the rest of the
+  function was emitted inside the branch.  One branch now runs for its effect.
 - A generic class or function of a module whose body calls a `static fn` of one of that
   module's types (`Pub::make()`) no longer fails to lower with "call to undeclared
   function '$m::Pub::make'" when an importer instantiates it.

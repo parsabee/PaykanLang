@@ -1,5 +1,8 @@
 // ERROR: generic struct 'Pair' expects 2 type argument(s), got 1
-struct Pair<A, B> { a: A; b: B; }
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
 fn main() -> int {
   p: Pair<int> = Pair<int>(1);
   return 0;

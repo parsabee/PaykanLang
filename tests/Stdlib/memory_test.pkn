@@ -1,37 +1,65 @@
-// ::memory Buffer<T>: new slots are zero (or unset), set/get/copy, growth,
-// shrinking and swap, for values and references.
-import ::memory;
+// ::memory Buffer<T>: a struct whose copies share the slots; new slots are
+// zero (or unset); set/get/copy, growth, shrinking and swap, for values and
+// references; and the errors the operations report instead of panicking.
+import ::io;
+import ::memory as mem;
+import ::result as res;
+
+/// The name of @p e's code.
+fn code(e: res::Error) -> Str {
+  return res::name(e.code);
+}
 
 fn main() -> int {
-  n = memory::Buffer<int>(3);
-  println(Str(n.len()) + " " + Str(n.get(0) + n.get(2)));
-  n.set(1, 7);
-  n.grow(2);
-  n.push(9);
-  println(Str(n.len()) + " " + Str(n.get(1)) + " " + Str(n.get(4)) + " " +
-          Str(n.copy(5)));
-  n.swap(1, 5);
-  println(Str(n.get(1)) + Str(n.get(5)));
-  n.shrink(4);
-  n.reserve(3);
-  println(Str(n.len()) + " " + Str(n.get(1)) + " " + Str(n.get(2)));
+  n = mem::Buffer<int>();
+  io::println(Str(n.len()) + " " + code(n.grow(3)) + " " + Str(n.len()));
+  io::println(n.get(0) + n.get(2));
+  e = n.set(1, 7);
+  e = n.grow(2);
+  e = n.push(9);
+  io::println(Str(n.len()) + " " + Str(n.get(1)) + " " + Str(n.get(4)) + " "
+      + Str(n.copyUnchecked(5)));
+  io::println(n.copy(5).value);
+  e = n.swap(1, 5);
+  io::println(Str(n.get(1)) + Str(n.get(5)));
+  e = n.shrink(4);
+  e = n.reserve(3);
+  io::println(Str(n.len()) + " " + Str(n.get(1)) + " " + Str(n.get(2)));
 
-  s = memory::Buffer<Str>(0);
+  // A copy shares the slots.
+  alias = n;
+  e = alias.set(0, 42);
+  io::println(n.get(0));
+
+  // What goes wrong is an error, and the buffer is unchanged.
+  io::println(code(n.set(10, 1)) + " " + code(n.swap(0, 10)) + " "
+      + code(n.shrink(10)) + " " + code(n.copy(10).error) + " " + Str(n.len()));
+  io::println(code(n.grow(9223372036854775807)) + " " + Str(n.len()));
+
+  s = mem::Buffer<Str>();
   i: int = 0;
   while i < 100 {
-    s.push("s" + Str(i));
+    e = s.push("s" + Str(i));
     i = i + 1;
   }
-  kept: Str = s.copy(42);
-  s.shrink(99);
-  println(Str(s.len()) + " " + s.get(0) + " " + kept);
+  kept = s.copy(42);
+  e = s.shrink(99);
+  io::println(Str(s.len()) + " " + s.get(0) + " " + kept.value.toString());
+  e = s.grow(1);
+  io::println(code(s.copy(1).error) + " " + code(s.swap(0, 1)));
 
-  opt = memory::Buffer<Str?>(2);
-  opt.set(1, "here");
-  println(Str(opt.get(0) == None) + " " + Str(opt.get(1) == None));
-  f = memory::Buffer<float>(1);
-  b = memory::Buffer<bool>(1);
-  c = memory::Buffer<char>(1);
-  println(Str(f.get(0)) + " " + Str(b.get(0)) + " " + Str(int<char>(c.get(0))));
+  opt = mem::Buffer<Str?>();
+  e = opt.grow(2);
+  e = opt.set(1, "here");
+  io::println(Str(opt.get(0) == None) + " " + Str(opt.get(1) == None) + " "
+      + opt.copy(1).value.toString());
+  f = mem::Buffer<float>();
+  b = mem::Buffer<bool>();
+  c = mem::Buffer<char>();
+  e = f.grow(1);
+  e = b.grow(1);
+  e = c.grow(1);
+  io::println(Str(f.get(0)) + " " + Str(b.get(0)) + " "
+      + Str(int<char>(c.get(0))));
   return 0;
 }

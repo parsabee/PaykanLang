@@ -13,7 +13,7 @@ using namespace paykan::test;
 namespace {
 
 std::string wrapMain(const std::string &body) {
-  return "enum Color { Red, Green }\nfn main() -> int {\n" + body +
+  return "import ::io; enum Color { Red, Green }\nfn main() -> int {\n" + body +
          "\n  return 0;\n}\n";
 }
 

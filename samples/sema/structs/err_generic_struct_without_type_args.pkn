@@ -1,5 +1,8 @@
 // ERROR: variable 'q' names generic struct 'Pair' without type arguments (write 'Pair<...>')
-struct Pair<A, B> { a: A; b: B; }
+struct Pair<A, B> {
+  a: A;
+  b: B;
+}
 fn main() -> int {
   q: Pair = Pair(1, 2);
   return 0;

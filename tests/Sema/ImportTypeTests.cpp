@@ -379,3 +379,64 @@ fn main() -> int { k = K(); f = Fine(); return 0; }
       << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
+
+// ─── A module-private initializer is constructed by its module only ─────────
+//
+// `___init__` (docs/language/06-modules.md): an importer cannot construct the
+// type, nor extend it (`__super__` into the initializer, written or the
+// default one), from the module's source or its templates; the module's own
+// functions and templates can.
+
+TEST(Module, ModulePrivateInitializerIsNotTheImportersErr) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_private_init").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib.pkn", R"(
+class Conn { __h: int; }
+impl Conn {
+  fn ___init__(h: int) { self.__h = h; }
+  static fn open(h: int) -> Conn { return Conn(h); }
+  view fn h() -> int { return self.__h; }
+}
+fn mk() -> Conn { return Conn(1); }
+struct P { x: int; }
+impl P { fn ___init__(x: int) { self.x = x; } }
+fn mkP() -> P { return P(2); }
+class Box<T> { v: T; }
+impl Box<T> { fn ___init__(v: T) { self.v = v; } }
+fn boxOf(v: int) -> Box<int> { return Box<int>(v); }
+)");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import lib;
+class Sub : lib::Conn {}
+impl Sub { fn __init__() { __super__(2); } }
+class Sub2 : lib::Conn {}
+fn main() -> int {
+  a = lib::Conn(1);
+  b = lib::Conn::open(2);
+  c = lib::mk();
+  p = lib::P(3);
+  q = lib::mkP();
+  e = lib::Box<int>(4);
+  f = lib::boxOf(5);
+  return a.h() + b.h() + c.h() + p.x + q.x + e.v + f.v;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"'Conn' cannot be extended here: its initializer '___init__' is "
+        "private to module 'lib'",
+        "'lib::Conn' cannot be constructed here: its initializer '___init__' "
+        "is private to module 'lib'",
+        "'lib::P' cannot be constructed here: its initializer '___init__' is "
+        "private to module 'lib'",
+        "cannot be constructed here: its initializer '___init__' is private "
+        "to module 'lib'"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  // The factories, the module's function and its template's are fine.
+  for (const char *ok :
+       {"lib::Conn::open", "lib::mk()", "lib::mkP()", "lib::boxOf(5)"})
+    EXPECT_EQ(r.Diagnostics.find(std::string("error") + ok), std::string::npos);
+  std::filesystem::remove_all(tmp);
+}

@@ -250,8 +250,9 @@ TEST(Arith, IntLiteralOverflowRejected) {
 // and zero written with a huge exponent are fine.
 TEST(Arith, FloatLiteralOutOfRangeRejected) {
   for (const char *lit : {"1e999", "1.8e308", "1e-400", "2e-324"}) {
-    auto r = parseWithDiags(std::string("fn main() -> int {\n  x: float = ") +
-                            lit + ";\n  return 0;\n}\n");
+    auto r = parseWithDiags(
+        std::string("import ::io; fn main() -> int {\n  x: float = ") + lit +
+        ";\n  return 0;\n}\n");
     ASSERT_FALSE(r.Ok) << lit;
     ASSERT_FALSE(r.Diags.empty()) << lit;
     EXPECT_NE(
@@ -378,7 +379,7 @@ TEST(Arith, MissingSemicolon) {
 }
 
 TEST(Arith, MissingCloseBrace) {
-  auto [ok, _] = parse(R"(
+  auto [ok, _] = parse(R"(import ::io; 
     fn main() -> int {
       return 0;
   )");

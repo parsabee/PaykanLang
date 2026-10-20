@@ -5,6 +5,7 @@
 // docs/plugins/ast-format.md).  One list per node, each child list on a line
 // of its own, indented two spaces per level; atoms stay on their node's line.
 
+#include "Names.h"
 #include "paykan/ast/Interchange.h"
 
 #include <cmath>
@@ -230,7 +231,9 @@ private:
   /// A function; a trait's @p requirement has `_` for its body.
   void funcDecl(const FuncDecl &d, bool requirement = false) {
     open("fn", &d);
-    str(d.getName());
+    // A module-private initializer is written as spelled, `___init__`.
+    str(d.isModulePrivateInit() ? std::string(names::kMethodInitModulePrivate)
+                                : d.getName());
     typeParams(d.getTypeParams(), d.getTypeParamBounds());
     open("params");
     for (const Param &p : d.getParams()) {

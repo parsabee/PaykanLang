@@ -105,8 +105,6 @@ Val ModuleLowering::ExprEmitter::visitCallValueExpr(ast::CallValueExpr *node) {
 }
 
 Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
-  if (node->getName() == kStdin)
-    return L.externObject(kPaykanFileStdin);
   // A function used as a value: a function value held in memory.
   if (node->isFunctionRef())
     return L.emitMemAddress(node);
@@ -187,6 +185,18 @@ Val ModuleLowering::ExprEmitter::visitTernaryExpr(ast::TernaryExpr *node) {
   Val cond = visit(node->getCondition());
   if (!cond)
     return Val();
+  // Both branches void (a statement, `if c then f() else g();`): one runs
+  // for its effect, and there is no value.
+  if (node->getTrueExpr()->getResolvedType() == L.ASTCtx.getVoidTy()) {
+    pir::If *s = L.B.openIf(cond, true);
+    L.B.enter(*s->Then);
+    visit(node->getTrueExpr());
+    L.B.leave();
+    L.B.enter(*s->Else);
+    visit(node->getFalseExpr());
+    L.B.leave();
+    return Val();
+  }
   bool isClassResult =
       node->getResolvedType() && ast::isRefType(node->getResolvedType());
   Type resultTy =
@@ -903,6 +913,62 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   if (auto *st = L.getExprStructType(node->getReceiver());
       st && node->getMethodName() != kMethodToString)
     return emitStructMethodCall(node, st, wantAddress);
+  // `o.toString()` on an optional (the builtin `Show`): "None", or the
+  // value's text, as a fresh box like any method's `Str` result.
+  if (ast::isa<ast::OptionalType>(recvResolved) &&
+      node->getMethodName() == kMethodToString) {
+    if (ast::isMemOptional(recvResolved)) {
+      // A tuple's or a struct's, in place: its presence flag, then its
+      // layout's text.
+      size_t mark = L.MemTemps.size();
+      Val addr = L.emitMemAddress(node->getReceiver());
+      if (!addr)
+        return Val();
+      auto *value = ast::cast<ast::TupleType>(ast::stripOptional(recvResolved));
+      pir::LocalId text = L.B.addLocal("opt.str", Type::Box);
+      pir::If *s = L.B.openIf(L.emitMemOptionalIsNone(addr, recvResolved),
+                              /*withElse=*/true);
+      L.B.enter(*s->Then);
+      L.B.store(text,
+                L.emitSharedNew(L.callRuntime(kPaykanStringNew,
+                                              {L.internString(kNoneText),
+                                               Val::i64(static_cast<int64_t>(
+                                                   std::strlen(kNoneText)))},
+                                              "opt.str"),
+                                "str.shared"));
+      L.B.leave();
+      L.B.enter(*s->Else);
+      Val payload =
+          L.B.ptrAdd(addr, Val::i64(L.memOptionalPayloadOffset(recvResolved)),
+                     "opt.value.addr");
+      L.B.store(text, L.emitSharedNew(
+                          L.callRuntime(ast::isa<ast::StructType>(value)
+                                            ? kPaykanStructToString
+                                            : kPaykanTupleToString,
+                                        {payload, L.emitTupleLayout(value)},
+                                        "tup.str"),
+                          "str.shared"));
+      L.B.leave();
+      Val str = L.B.load(text, "opt.str");
+      L.releaseMemTemps(mark);
+      return str;
+    }
+    if (ast::isValueOptional(recvResolved)) {
+      Val v = visit(node->getReceiver());
+      if (!v)
+        return Val();
+      return L.emitSharedNew(L.emitOptionalToString(v, recvResolved),
+                             "str.shared");
+    }
+    Receiver receiver = L.emitReceiver(node->getReceiver());
+    if (!receiver)
+      return Val();
+    const pir::Function &toString = L.declareRuntime(kPaykanObjectToString);
+    Val str = L.B.vcall(L.emitNoneObject(receiver.Raw), "", 1, toString.Sig, {},
+                        "str");
+    L.releaseIfOwned(receiver.Owned);
+    return str;
+  }
   // `t.toString()` on a tuple or a struct (the builtin `Show`): its text,
   // as a fresh box like any method's `Str` result.
   if (ast::isa<ast::TupleType>(recvResolved)) {
@@ -938,8 +1004,6 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   auto resolveReceiverASTType = [&]() -> ast::Type * {
     auto *recvExpr = node->getReceiver();
     if (auto *id = ast::dyn_cast<ast::Identifier>(recvExpr)) {
-      if (id->getName() == kStdin)
-        return L.ASTCtx.getFileTy();
       if (L.CurrentScope)
         if (auto *t = L.CurrentScope->lookupASTType(id->getName()))
           return t;
@@ -971,8 +1035,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   if (!ct)
     ct = L.getExprClassType(node->getReceiver());
   if (!ct) {
-    for (auto *candidate :
-         {L.ASTCtx.getStrTy(), L.ASTCtx.getFileTy(), L.ASTCtx.getObjTy()}) {
+    for (auto *candidate : {L.ASTCtx.getStrTy(), L.ASTCtx.getObjTy()}) {
       if (candidate && candidate->findMethod(node->getMethodName())) {
         ct = candidate;
         break;

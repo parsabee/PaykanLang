@@ -157,8 +157,9 @@ TEST(LocalBorrow, Errors) {
                               "type: write 'x: inout float = ...'"},
   };
   for (const auto &c : cases) {
-    std::string src = std::string("fn main() -> int {\n  y = 1.0;\n  ") + c[0] +
-                      "\n  return 0;\n}";
+    std::string src =
+        std::string("import ::io; fn main() -> int {\n  y = 1.0;\n  ") + c[0] +
+        "\n  return 0;\n}";
     auto [ok, _] = parse(src);
     EXPECT_FALSE(ok) << src;
     if (testFrontend() != "recursive-descent")
@@ -240,8 +241,9 @@ TEST(MatchArm, Modes) {
                                 "type: write 'd: inout Box<Dog>'"},
   };
   for (const auto &c : cases) {
-    std::string src = std::string("fn main() -> int {\n  match a {\n    ") +
-                      c[0] + "\n  }\n  return 0;\n}";
+    std::string src =
+        std::string("import ::io; fn main() -> int {\n  match a {\n    ") +
+        c[0] + "\n  }\n  return 0;\n}";
     std::string errs = parseErrors(src);
     EXPECT_NE(errs.find(c[1]), std::string::npos) << src << "\n" << errs;
   }

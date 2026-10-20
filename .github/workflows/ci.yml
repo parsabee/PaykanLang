@@ -110,6 +110,9 @@ jobs:
       - name: clang-format (check)
         run: python3 scripts/clang_format.py
 
+      - name: pkfmt (check)
+        run: python3 scripts/pkfmt.py
+
       - name: clang-tidy (bug-focused gate)
         run: python3 scripts/run_clang_tidy.py --build-dir build
 
@@ -179,7 +182,12 @@ jobs:
           # same templates check them -- ASan then reports container-overflow
           # inside LLVM's own static initialisers (DebugCounter::addCounter) at
           # process start.  See AddressSanitizerContainerOverflow on the wiki.
-          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1:detect_container_overflow=0
+          # allocator_may_return_null: the runtime reports an allocation that
+          # fails (ENOMEM, memory::Buffer's OutOfMemory, a read's) instead of
+          # aborting, and the tests exercise that with sizes no allocator can
+          # serve; ASan's allocator is to return null for them, as libc's does,
+          # not to report them as errors.
+          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1:detect_container_overflow=0:allocator_may_return_null=1
         run: ctest --test-dir build-asan --output-on-failure --parallel 4
 
   # ---------------------------------------------------------------------------
@@ -507,8 +515,9 @@ jobs:
           cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c
 
+      # The samples import the standard library (::io at least), so stage it.
       - name: Build
-        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan
+        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan paykan_stdlib
 
       - name: Strict C11 on GCC and Clang
         run: |

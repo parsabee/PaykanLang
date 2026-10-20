@@ -3,6 +3,11 @@
 # (-DPAYKAN_BUILD_TESTS=<suites> or -DPAYKAN_BUILD_ALL_TESTS=ON).
 
 
+# The standard library the tests' programs import (`import ::io;`): the
+# build's staged copy, with its .pkm files (TestUtils.h, unless
+# $PAYKAN_STDLIB names another).
+add_compile_definitions(PAYKAN_TEST_STDLIB_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${PAYKAN_STDLIB_DIR_FROM_BINDIR}")
+
 # The plugin build versions this build accepts, for the plugin, driver and
 # out-of-tree suites.
 list(JOIN PAYKAN_PLUGIN_COMPATIBLE_VERSIONS ", " PAYKAN_TEST_ACCEPTED_VERSIONS)

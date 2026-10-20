@@ -311,7 +311,10 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     localStructs.insert(sd->getName());
   auto methodInfo = [](const ast::MethodDecl *m) {
     ModuleInfo::ClassInfo::MethodInfo mi;
-    mi.Name = m->getName();
+    // A module-private initializer is recorded as spelled, `___init__`.
+    mi.Name = m->isModulePrivateInit()
+                  ? std::string(names::kMethodInitModulePrivate)
+                  : m->getName();
     mi.ReturnTypeName = ast::typeName(m->getReturnType());
     for (auto *pty : m->getParamTypes())
       mi.ParamTypeNames.push_back(ast::typeName(pty));
@@ -580,8 +583,12 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   // the name alone: another compilation's module of the same name is
   // another module.
   const std::string &path = located.Path;
-  if (auto it = ModuleCache.find(path); it != ModuleCache.end())
+  if (auto it = ModuleCache.find(path); it != ModuleCache.end()) {
+    if (auto ctx = ModuleContextCache.find(path);
+        ctx != ModuleContextCache.end())
+      AccumulatedImportContexts.try_emplace(canonical, ctx->second);
     return &it->second;
+  }
   if (located.Iface)
     return &(ModuleCache[path] = fromInterface(*located.Iface));
 
@@ -598,7 +605,12 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   // a bare one-line fallback.  Mirrors the wiring in src/Driver/main.cpp:
   // SourceLines lives in the driver and is filled by parseFile before the
   // parser runs, so handing its address over now is safe.
-  auto importDriverPtr = std::make_shared<parser::ParserDriver>(FrontendName);
+  // The standard library is written in Paykan: a system module is parsed
+  // by the default frontend, whichever one the program's files use
+  // (`--frontend=ast-text` reads the program's AST, not the library's).
+  const bool system = canonical.starts_with(names::kQualSep);
+  const std::string moduleFrontend = system ? std::string() : FrontendName;
+  auto importDriverPtr = std::make_shared<parser::ParserDriver>(moduleFrontend);
   // Diagnostics name the module's file by its path from the source root.
   DiagEngine importDiag(Diags.getOS());
   importDiag.setSourceInfo(displayPath(path),
@@ -643,7 +655,7 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
 
   // Run Sema on the imported module, reusing the same engine.
   Sema importSema(importDriverPtr->getASTContext(), importDiag, ProjectRoot,
-                  FrontendName);
+                  moduleFrontend);
   if (ImportStack)
     ImportStack->insert(canonical);
   importSema.ImportStack = ImportStack;
@@ -684,8 +696,9 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
 
   childCtx.OwnedDriver = importDriverPtr;
   childCtx.Root = importRoot;
-  AccumulatedImportContexts[canonical] =
-      std::make_shared<SemaContext>(std::move(childCtx));
+  auto ctx = std::make_shared<SemaContext>(std::move(childCtx));
+  ModuleContextCache[path] = ctx;
+  AccumulatedImportContexts[canonical] = std::move(ctx);
   return &info;
 }
 
@@ -778,10 +791,15 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     }
     if (!sigOk)
       return nullptr;
-    auto *md =
-        Ctx.make<ast::MethodDecl>(ast::SourceLocation(), Ctx.intern(m.Name),
-                                  retTy, std::move(params), m.Flags);
+    // `___init__` is the initializer `__init__`, private to its module.
+    const bool modulePrivateInit = m.Name == names::kMethodInitModulePrivate;
+    auto *md = Ctx.make<ast::MethodDecl>(
+        ast::SourceLocation(),
+        Ctx.intern(modulePrivateInit ? std::string(names::kMethodInit)
+                                     : m.Name),
+        retTy, std::move(params), m.Flags);
     md->setParamModes(m.Modes);
+    md->setModulePrivateInit(modulePrivateInit);
     return md;
   };
 
@@ -923,7 +941,14 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
           ok = false;
           continue;
         }
-        builder.method(m.Name, retTy, std::move(params), m.Flags, m.Modes);
+        // `___init__` is the initializer `__init__`, private to its module.
+        const bool modulePrivateInit =
+            m.Name == names::kMethodInitModulePrivate;
+        builder.method(modulePrivateInit ? std::string(names::kMethodInit)
+                                         : m.Name,
+                       retTy, std::move(params), m.Flags, m.Modes);
+        if (modulePrivateInit)
+          ct->findMethod(names::kMethodInit)->setModulePrivateInit(true);
       }
       builder.build();
       if (ci->IsLocal)

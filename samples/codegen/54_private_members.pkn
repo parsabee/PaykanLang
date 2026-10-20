@@ -10,22 +10,33 @@
 //            seeing every field.
 // Nothing changes at run time: privacy is a compile-time check.
 
+import ::io;
+
 class Counter {
   __count: int;
   step: int;
-  fn tick() { self.__bump(self.step); }
+  fn tick()              { self.__bump(self.step); }
   view fn value() -> int { return self.__count; }
-  fn __bump(by: int) { self.__count = self.__count + by; }
-  fn adder() -> (int) -> int { return fn(d: int) -> int { return self.__count + d; }; }
+  fn __bump(by: int)     { self.__count = self.__count + by; }
+  fn adder() -> (int) -> int {
+    return fn(d: int) -> int {
+      return self.__count + d;
+    };
+  }
 }
 
 impl Counter {
-  static fn make(n: int) -> Counter { c = Counter(0, n); c.__count = 10; return c; }
+  static fn make(n: int) -> Counter
+                               { c = Counter(0, n); c.__count = 10; return c; }
   fn copyFrom(o: view Counter) { self.__count = o.__count; }
 }
 
-trait Named { view fn name() -> Str; }
-impl Named for Counter { view fn name() -> Str { return "Counter(" + Str(self.__count) + ")"; } }
+trait Named {
+  view fn name() -> Str;
+}
+impl Named for Counter {
+  view fn name() -> Str { return "Counter(" + Str(self.__count) + ")"; }
+}
 
 struct P {
   __x: int;
@@ -33,14 +44,24 @@ struct P {
 }
 
 impl P {
-  fn __set(v: int) { self.__x = v; }
-  fn bump() { self.__set(self.__x + 1); }
-  view fn x() -> int { return self.__x; }
+  fn __set(v: int)        { self.__x = v; }
+  fn bump()               { self.__set(self.__x + 1); }
+  view fn x() -> int      { return self.__x; }
   static fn origin() -> P { p = P(0, 0); p.__x = 1; return p; }
 }
 
-class _Node { v: int; next: _Node?; }
-impl _Node { view fn _len() -> int { match self.next { m: _Node { return 1 + m._len(); } None { return 1; } } } }
+class _Node {
+  v: int;
+  next: _Node?;
+}
+impl _Node {
+  view fn _len() -> int {
+    match self.next {
+      m: _Node { return 1 + m._len(); }
+      None { return 1; }
+    }
+  }
+}
 fn _sum(n: view _Node) -> int {
   match n.next {
     m: _Node { return n.v + _sum(m); }
@@ -51,11 +72,11 @@ fn _sum(n: view _Node) -> int {
 class Box<T> {
   __v: T;
   fn get() -> T { return self.__v; }
-  fn set(v: T) { self.__v = v; }
+  fn set(v: T)  { self.__v = v; }
 }
 impl Box<T> {
-  fn __init__(v: T) { self.__v = v; }
-  fn take(o: Box<T>) { self.__v = o.__v; }       // another instance's private field
+  fn __init__(v: T)  { self.__v = v; }
+  fn take(o: Box<T>) { self.__v = o.__v; }  // another instance's private field
 }
 
 fn main() -> int {
@@ -64,18 +85,20 @@ fn main() -> int {
   d = Counter(0, 1);
   d.copyFrom(c);
   add = c.adder();
-  println(Str(c.value()) + " " + Str(d.value()) + " " + c.name() + " " + Str(add(5)));
+  io::println(Str(c.value()) + " " + Str(d.value()) + " " + c.name() + " "
+      + Str(add(5)));
 
   p = P::origin();
   p.bump();
   q = P(2, 3);                              // the private field, as a constructor argument
-  println(Str(p.x()) + " " + Str(q.x()) + " " + q.toString() + " " + Str(p == P(2, 0)));
+  io::println(Str(p.x()) + " " + Str(q.x()) + " " + q.toString() + " "
+      + Str(p == P(2, 0)));
 
   chain = _Node(1, _Node(2, _Node(3, None)));
   b = Box("s");
   b.set("t");
   o = Box("u");
   b.take(o);
-  println(Str(_sum(chain)) + " " + b.get() + " " + Str(chain._len()));
+  io::println(Str(_sum(chain)) + " " + b.get() + " " + Str(chain._len()));
   return 0;
 }

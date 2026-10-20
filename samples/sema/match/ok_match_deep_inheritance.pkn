@@ -1,3 +1,5 @@
+import ::io;
+
 // OK: deep inheritance — Labrador is a valid arm when matching an Animal
 class Animal {}
 class Dog : Animal {}
@@ -6,8 +8,10 @@ class Labrador : Dog {}
 fn main() -> int {
   a: Animal = Labrador();
   match a {
-    Labrador { println("labrador"); }
-    Dog      { println("dog"); }
+    Labrador {
+      io::println("labrador");
+    }
+    Dog { io::println("dog"); }
     _ { }
   }
   return 0;

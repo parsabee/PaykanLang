@@ -120,12 +120,12 @@ TEST(Lowering, OwnedVariablesAreReleasedInReverseOrderAtScopeExit) {
 
 TEST(Lowering, StringTemporaryPassedToBuiltinIsDestroyedAfterTheCall) {
   auto l = lower(R"(
-    fn main() -> int { println("hi"); return 0; }
+    fn main() -> int { n = "hi".len(); return n; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
   size_t newStr = m.find("call @$rt.PaykanString_new(");
-  size_t println = m.find("call @$rt.Paykan_println(");
+  size_t println = m.find(" = vcall %str.");
   size_t destroy = m.find("call @$rt.Paykan_dispose(");
   ASSERT_NE(newStr, std::string::npos) << m;
   ASSERT_NE(println, std::string::npos) << m;
@@ -219,7 +219,7 @@ TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
 // value's, a `-> T` result through a local C writes, a `-> view T` result as
 // an address the caller copies.
 TEST(Lowering, GenericNativeFunctionPassesTypesAndAddresses) {
-  auto l = lower(R"(
+  auto l = lower(R"(import ::io;
     native fn pick<T>(first: bool, a: view T, b: view T) -> T = "pk_test_pick";
     native fn get<T>(b: view Obj, i: int) -> view T = "pk_test_get";
     fn main() -> int {
@@ -227,7 +227,7 @@ TEST(Lowering, GenericNativeFunctionPassesTypesAndAddresses) {
       s = pick<Str>(True, a, "b");
       f = pick<float>(False, 1.5, 2.5);
       b: Obj = "x";
-      println(get<Str>(b, 0));
+      io::println(get<Str>(b, 0));
       return pick<int>(True, 1, 2);
     }
   )");
@@ -566,12 +566,12 @@ TEST(Lowering, CallRootedFieldReadRetainsTheFieldAndReleasesTheReceiver) {
 // #72: a string-literal subject is built as a Str (not passed as its raw C
 // string) and released on every exit of the match.
 TEST(Lowering, StringLiteralMatchSubjectIsAStrReleasedOnEveryExit) {
-  auto l = lower(R"(
+  auto l = lower(R"(import ::io;
     fn f() -> int {
       match "s" { "t" { return 1; } _ { return 2; } }
     }
     fn main() -> int {
-      match "s" { "t" { println("t"); } _ { println("other"); } }
+      match "s" { "t" { io::println("t"); } _ { io::println("other"); } }
       return f();
     }
   )");
@@ -592,7 +592,7 @@ TEST(Lowering, StringLiteralMatchSubjectIsAStrReleasedOnEveryExit) {
 }
 
 TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
-  auto l = lower(R"(
+  auto l = lower(R"(import ::io;
     class A {}
     impl A { fn __init__() {} }
     class B : A {}
@@ -600,9 +600,9 @@ TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
     fn mk() -> A { return B(); }
     fn main() -> int {
       match mk() {
-        b: B { println("b"); }
-        A { println("a"); }
-        _ { println("other"); }
+        b: B { io::println("b"); }
+        A { io::println("a"); }
+        _ { io::println("other"); }
       }
       return 0;
     }
@@ -625,13 +625,13 @@ TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
 }
 
 TEST(Lowering, MatchBindingOnAVariableSubjectAcquiresItsBox) {
-  auto l = lower(R"(
+  auto l = lower(R"(import ::io;
     class A { v: int; }
     impl A { fn __init__(v: int) { self.v = v; } }
     fn main() -> int {
       x: A = A(1);
       match x {
-        a: A { println(Str<int>(a.v)); }
+        a: A { io::println(Str<int>(a.v)); }
       }
       return 0;
     }
@@ -650,7 +650,7 @@ TEST(Lowering, MatchBindingOnAVariableSubjectAcquiresItsBox) {
 // an ordinary owned variable: re-assignment releases the old box and stores
 // the new one into the same slot, with no twin slot.
 TEST(Lowering, ReassigningAMatchBindingIsAnOrdinaryRebind) {
-  auto l = lower(R"(
+  auto l = lower(R"(import ::io;
     class A { v: int; }
     impl A { fn __init__(v: int) { self.v = v; } }
     fn main() -> int {
@@ -661,7 +661,7 @@ TEST(Lowering, ReassigningAMatchBindingIsAnOrdinaryRebind) {
           if k == 1 { a = A(1); }
           i: int = 0;
           while i < 3 { a = A(i); i = i + 1; }
-          println(Str<int>(a.v));
+          io::println(Str<int>(a.v));
         }
         None { }
       }
@@ -677,7 +677,7 @@ TEST(Lowering, ReassigningAMatchBindingIsAnOrdinaryRebind) {
 // Re-assigning the subject inside an arm must not free the object the binding
 // still refers to: the binding holds its own reference.
 TEST(Lowering, ReassigningTheSubjectInsideAnArmKeepsTheBindingAlive) {
-  auto l = lower(R"(
+  auto l = lower(R"(import ::io;
     class A { fn name() -> Str { return "A"; } }
     impl A { fn __init__() {} }
     class B : A { fn name() -> Str { return "B"; } }
@@ -685,7 +685,7 @@ TEST(Lowering, ReassigningTheSubjectInsideAnArmKeepsTheBindingAlive) {
     fn main() -> int {
       x: A = B();
       match x {
-        b: B { x = A(); println(b.name()); }
+        b: B { x = A(); io::println(b.name()); }
         _ { }
       }
       return 0;
@@ -703,14 +703,14 @@ TEST(Lowering, ReassigningTheSubjectInsideAnArmKeepsTheBindingAlive) {
 }
 
 TEST(Lowering, OptionalMatchTestsNullBeforeTheVTable) {
-  auto l = lower(R"(
+  auto l = lower(R"(import ::io;
     class N { v: int; }
     impl N { fn __init__(v: int) { self.v = v; } }
     fn find(f: bool) -> N? { if f { return N(1); } return None; }
     fn main() -> int {
       match find(True) {
-        n: N { println(Str<int>(n.v)); }
-        None { println("none"); }
+        n: N { io::println(Str<int>(n.v)); }
+        None { io::println("none"); }
       }
       return 0;
     }
@@ -763,10 +763,10 @@ TEST(Lowering, EnumMatchComparesConstants) {
 TEST(Lowering, AssigningAnObjectElementEvaluatesTheIndexOnce) {
   // Issue #52: `x = arr[idx()]` used to evaluate the subscript once for the
   // value and again for the ownership handling.
-  auto l = lower(R"(
+  auto l = lower(R"(import ::io;
     class C { v: int; }
     impl C { fn __init__(v: int) { self.v = v; } }
-    fn idx() -> int { println("idx called"); return 0; }
+    fn idx() -> int { io::println("idx called"); return 0; }
     fn mk() -> C[1] { return [C(3)]; }
     fn main() -> int {
       arr: C[2] = [C(1), C(2)];
@@ -793,12 +793,12 @@ TEST(Lowering, SideEffectingReceiversAreEvaluatedOnce) {
   // The other ownership paths that take a value's box: a call-rooted field
   // read, a call result assigned to a variable, an element passed to a ref
   // parameter and an element stored into an array slot or a field.
-  auto l = lower(R"(
+  auto l = lower(R"(import ::io;
     class C { v: int; }
     impl C { fn __init__(v: int) { self.v = v; } }
     class H { c: C; }
     impl H { fn __init__(c: C) { self.c = c; } }
-    fn idx() -> int { println("idx"); return 0; }
+    fn idx() -> int { io::println("idx"); return 0; }
     fn mkh() -> H { return H(C(5)); }
     fn take(c: C) -> int { return c.v; }
     fn main() -> int {
@@ -848,11 +848,11 @@ TEST(Lowering, PrintedOrComparedTupleUsesALayout) {
     fn main() -> int {
       t = (1, "s");
       u = (1, "s");
-      println(t);
+      p = t.toString();
       b = t == u;
       n: ((int?, bool), Str?, char?, float) = ((None, True), None, 'c', 2.5);
       s: Str = n.toString();
-      println(n);
+      q = n.toString();
       return t.0;
     }
   )");
@@ -868,7 +868,7 @@ TEST(Lowering, PrintedOrComparedTupleUsesALayout) {
       << l.Text;
   EXPECT_EQ(count(l.Text, "data @"), 2u) << l.Text;
   std::string m = function(l.Text, "main");
-  EXPECT_NE(m.find("local %n.3: mem(48, 8)\n"), std::string::npos) << m;
+  EXPECT_NE(m.find("local %n.4: mem(48, 8)\n"), std::string::npos) << m;
   EXPECT_NE(m.find("call @$rt.PaykanTuple_toString(%t.addr."),
             std::string::npos)
       << m;
@@ -884,7 +884,7 @@ TEST(Lowering, PrintedOptionalSubstitutesTheNoneSingleton) {
     class N {}
     impl N { fn __init__() {} }
     fn find() -> N? { return None; }
-    fn main() -> int { println(find()); return 0; }
+    fn main() -> int { s = find().toString(); return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
@@ -1214,7 +1214,7 @@ TEST(Lowering, PrintingAnOptionalValueFormatsIt) {
   auto l = lower(R"(
     fn main() -> int {
       a: int? = 5;  b: bool? = None;
-      println(a);  print(b);
+      s = a.toString();  t = b.toString();
       return 0;
     }
   )");
@@ -1223,8 +1223,7 @@ TEST(Lowering, PrintingAnOptionalValueFormatsIt) {
   EXPECT_NE(m.find("call @$rt.PaykanString_from_int("), std::string::npos) << m;
   EXPECT_NE(m.find("call @$rt.PaykanString_from_bool("), std::string::npos)
       << m;
-  EXPECT_EQ(count(m, "call @$rt.Paykan_dispose("), 2u) << m;
-  EXPECT_EQ(m.find("box"), std::string::npos) << m;
+  // An optional value is formatted in place: not through the None object.
   EXPECT_EQ(m.find("PaykanObject_None"), std::string::npos) << m;
 }
 
@@ -1387,8 +1386,8 @@ TEST(Lowering, SameNamedFunctionsOfTwoModulesStayDistinct) {
   }
   auto l = lower("import x; import y as r;\n"
                  "fn tag() -> Str { return \"m\"; }\n"
-                 "fn main() -> int { println(x::tag() + r::tag() + y::tag() "
-                 "+ tag()); return 0; }\n",
+                 "fn main() -> int { s = x::tag() + r::tag() + y::tag() "
+                 "+ tag(); return s.len(); }\n",
                  dir.string());
   std::filesystem::remove_all(dir);
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -1503,15 +1502,15 @@ TEST(Lowering, StringLiteralUsedAsAnObjectIsAStr) {
 TEST(Lowering, RuntimeExternsCannotClashWithUserFunctions) {
   auto l = lower(R"(
     fn PaykanString_new(x: int) -> int { return x + 1; }
-    fn Paykan_println(s: Str) { print(s); }
-    fn Paykan_panic_div_by_zero() { println("mine"); }
+    fn Paykan_println(s: Str) { n = s.len(); }
+    fn Paykan_panic_div_by_zero() { n = "mine".len(); }
     fn PaykanObject_None() -> int { return 4; }
     fn z() -> int { return 0; }
     fn main() -> int {
       Paykan_println("x");
       Paykan_panic_div_by_zero();
       a: Str? = None;
-      println(a);
+      s = a.toString();
       return PaykanString_new(1) + PaykanObject_None() + 5 / z();
     }
   )");
@@ -1524,8 +1523,8 @@ TEST(Lowering, RuntimeExternsCannotClashWithUserFunctions) {
     EXPECT_FALSE(fn->IsExtern) << name;
   }
   EXPECT_EQ(m.findFunction("PaykanString_new")->Sig.Params.size(), 1u);
-  for (const char *name : {"$rt.PaykanString_new", "$rt.Paykan_println",
-                           "$rt.Paykan_panic_div_by_zero"}) {
+  for (const char *name :
+       {"$rt.PaykanString_new", "$rt.Paykan_panic_div_by_zero"}) {
     const pir::Function *fn = m.findFunction(name);
     ASSERT_NE(fn, nullptr) << name << "\n" << l.Text;
     EXPECT_TRUE(fn->IsExtern) << name;

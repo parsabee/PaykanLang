@@ -1,3 +1,5 @@
+import ::io;
+
 // Optional primitives: `int?`, `float?`, `bool?`, `char?` widen from their
 // primitive, take None, and unwrap with a primitive match arm.
 fn half(n: int) -> int? {
@@ -12,9 +14,13 @@ fn main() -> int {
   c: char? = 'c';
   xs: int?[3] = [1, 2, None];
   match a {
-    n: int { println(Str<int>(n + 1)); }
-    None   { println("odd"); }
+    n: int {
+      io::println(Str<int>(n + 1));
+    }
+    None { io::println("odd"); }
   }
-  if b == None && a != None { println("ok"); }
+  if b == None && a != None {
+    io::println("ok");
+  }
   return 0;
 }

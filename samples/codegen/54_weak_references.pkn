@@ -11,6 +11,8 @@
 // Every object is freed with its last strong reference: the tree, the
 // buttons and the closures all go, so the program leaks nothing.
 
+import ::io;
+
 class Node {
   name: Str;
   weak parent: Node?;
@@ -32,7 +34,9 @@ impl Node {
   }
   fn path() -> Str {
     match self.parent {
-      p: Node { return p.path() + "/" + self.name; }
+      p: Node {
+        return p.path() + "/" + self.name;
+      }
       None { return self.name; }
     }
   }
@@ -46,13 +50,17 @@ class Button {
 impl Button {
   fn __init__(label: Str) {
     self.label = label;
-    self.onClick = fn() -> Str { return "unwired"; };
+    self.onClick = fn() -> Str {
+      return "unwired";
+    };
   }
   fn wire() {
     weak me: Button? = self;
     self.onClick = fn() -> Str {
       match me {
-        b: Button { return "clicked " + b.label; }
+        b: Button {
+          return "clicked " + b.label;
+        }
         None { return "no button"; }
       }
     };
@@ -74,34 +82,34 @@ fn main() -> int {
   b = Node("b");
   root.add(a);
   a.add(b);
-  println(b.path());
+  io::println(b.path());
 
   // A weak local reads as the object while something holds it.
   weak w: Node? = root;
   weak u = a;
   weak e: Node?;
-  println(show(w) + " " + show(u) + " " + show(e) + " " + Str(e == None));
+  io::println(show(w) + " " + show(u) + " " + show(e) + " " + Str(e == None));
 
   // Dropping the root frees it: the children lose their parent, and the
   // weak local reads as None.
   root = Node("other");
-  println(b.path() + " " + show(w) + " " + Str(w == None));
+  io::println(b.path() + " " + show(w) + " " + Str(w == None));
 
   // A strong copy taken from a weak reference keeps the object.
   keep: Node? = u;
   a = Node("c");
-  println(show(u) + " " + show(keep));
+  io::println(show(u) + " " + show(keep));
   keep = None;
-  println(show(u));
+  io::println(show(u));
 
   // A closure stored in the object it refers to, through a weak capture.
   btn = Button("ok");
-  println(btn.click());
+  io::println(btn.click());
   btn.wire();
-  println(btn.click());
+  io::println(btn.click());
   f = btn.onClick;
   btn = Button("another");
-  println(f());
+  io::println(f());
   return 0;
 }
 // expect-stdout: root/a/b

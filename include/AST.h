@@ -414,6 +414,8 @@ private:
   const std::string *NativeSymbol = nullptr;
   bool View = false;   // `view fn`: a method that does not change `self`
   bool Static = false; // `static fn`: an `impl` block's function, no `self`
+  // Written `___init__` (Names.h): the initializer, private to its module.
+  bool ModulePrivateInit = false;
   ParamMode ResultMode = ParamMode::Value; // `-> view T`
 
 public:
@@ -470,6 +472,9 @@ public:
   /// Declared `static fn` in an `impl` block: called as `Type::name()`.
   bool isStatic() const { return Static; }
   void setStatic(bool isStatic) { Static = isStatic; }
+  /// Written `___init__`: the initializer, private to its module (Names.h).
+  bool isModulePrivateInit() const { return ModulePrivateInit; }
+  void setModulePrivateInit(bool v) { ModulePrivateInit = v; }
 
   /// `-> view T` (or `-> inout T`): the result is a borrow of what the
   /// function was given as one; Value for a copy.
@@ -875,16 +880,21 @@ class Identifier : public Expr {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   // Set by Sema when the name is a function used as a value (`f = square;`,
-  // docs/language/15-function-types.md): the lowering makes a closure of it.
-  bool FunctionRef = false;
+  // docs/language/15-function-types.md): the function's name as the lowering
+  // knows it (the spelling, or, inside another module's template, that
+  // module's qualified name), of which the lowering makes a function value.
+  const std::string *FunctionRef = nullptr;
 
 public:
   Identifier(SourceLocation loc, const std::string &internedName)
       : Expr(NK_Identifier, loc), Name(&internedName) {}
 
   const std::string &getName() const { return *Name; }
-  void setFunctionRef(bool ref) { FunctionRef = ref; }
-  bool isFunctionRef() const { return FunctionRef; }
+  void setFunctionRef(const std::string &internedName) {
+    FunctionRef = &internedName;
+  }
+  bool isFunctionRef() const { return FunctionRef != nullptr; }
+  const std::string &getFunctionRef() const { return *FunctionRef; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_Identifier;
@@ -1159,7 +1169,8 @@ private:
   Type *ReturnType;
   std::vector<Type *> ParamTypes;
   uint8_t MethodFlags;
-  ParamModes Modes; // `n: inout int`
+  ParamModes Modes;               // `n: inout int`
+  bool ModulePrivateInit = false; // the type's `___init__` (Names.h)
 
 public:
   MethodDecl(SourceLocation loc, const std::string &internedName, Type *retTy,
@@ -1180,6 +1191,10 @@ public:
   bool isView() const { return MethodFlags & View; }
   /// Declared in an `impl` block: it has no vtable slot.
   bool isImpl() const { return MethodFlags & Impl; }
+  /// The type's `___init__`: constructed, and extended, by its module only
+  /// (Sema::checkConstructible).
+  bool isModulePrivateInit() const { return ModulePrivateInit; }
+  void setModulePrivateInit(bool v) { ModulePrivateInit = v; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MethodDecl;
@@ -1979,8 +1994,8 @@ public:
 // type (counting a suppressed follow-on) and every enclosing check already
 // stays quiet for an operand in error.  Only the original error is reported.
 //
-// It is NOT the user-visible class `Error` (ASTContext::getErrorTy, returned
-// by open()): a poisoned variable never type-checks as a valid value.  It has
+// It is not a type a program can name (the standard library's error::Error
+// is a struct): a poisoned variable never type-checks as a valid value.  It has
 // no spelling, so it can never be named in source; it lives only in Sema's
 // symbol table and is never written into the AST, so it cannot reach the
 // lowering (a program with a poisoned binder always has an error).  One
@@ -2121,12 +2136,22 @@ public:
   }
 };
 
-/// Returns true for an optional of a value type, `int?`, `float?`, `bool?`
-/// or `char?` (#96): a value, the payload and a presence flag held inline
-/// (PIR `opt_i64` & co.), with no box and no reference count.
+/// Returns true for an optional of a scalar, `int?`, `float?`, `bool?`,
+/// `char?` (#96) or an enum's (`Suit?`, its ordinal): a value, the payload and
+/// a presence flag held inline (PIR `opt_i64` & co.), with no box and no
+/// reference count.
 inline bool isValueOptional(const Type *ty) {
   auto *ot = dyn_cast<OptionalType>(ty);
-  return ot && isa<BuiltinType>(ot->getInnerType());
+  return ot && (isa<BuiltinType>(ot->getInnerType()) ||
+                isa<EnumType>(ot->getInnerType()));
+}
+
+/// Returns true for an optional of a value held in memory, a tuple's or a
+/// struct's (`(int, Str)?`, `Point?`): held in place as a presence flag and
+/// the value (laid out as the tuple `(bool, T)`), None all zeros.
+inline bool isMemOptional(const Type *ty) {
+  auto *ot = dyn_cast<OptionalType>(ty);
+  return ot && isa<TupleType>(ot->getInnerType());
 }
 
 /// Returns true for a function value (docs/design/function-types.md): a
@@ -2145,17 +2170,18 @@ inline bool isFunctionValue(const Type *ty) {
 /// of a value type is a value (isValueOptional), as is a function value.
 /// Use this instead of spelling out the `||` condition everywhere.
 inline bool isRefType(const Type *ty) {
-  return ty && !isFunctionValue(ty) &&
+  return ty && !isFunctionValue(ty) && !isMemOptional(ty) &&
          (isa<ClassType>(ty) ||
           (isa<OptionalType>(ty) && !isValueOptional(ty)));
 }
 
 /// Returns true for a type whose values are held in memory, in place: a
-/// fixed-size array (`T[n]`), a tuple (a struct is one) or a function value.
-/// A copy copies its bytes and retains the references among them.
+/// fixed-size array (`T[n]`), a tuple (a struct is one), a function value,
+/// or the optional of a tuple.  A copy copies its bytes and retains the
+/// references among them.
 inline bool isMemType(const Type *ty) {
-  return ty &&
-         (isa<FixedArrayType>(ty) || isa<TupleType>(ty) || isFunctionValue(ty));
+  return ty && (isa<FixedArrayType>(ty) || isa<TupleType>(ty) ||
+                isFunctionValue(ty) || isMemOptional(ty));
 }
 
 /// If @p ty is an optional type, return its inner type; otherwise @p ty.
@@ -2167,10 +2193,15 @@ inline Type *stripOptional(Type *ty) {
 
 /// Returns true when a value of type @p src stored into a slot of type
 /// @p dst becomes the present value of an optional first: a plain primitive
-/// (`int`) flowing into an optional primitive (`int?`, or `float?` after
-/// int -> float promotion).
+/// (`int`) or an enum flowing into an optional of one (`int?`, `float?`
+/// after int -> float promotion, `Suit?`), or a tuple or a struct into the
+/// optional of it.
 inline bool wrapsInOptional(const Type *dst, const Type *src) {
-  return isValueOptional(dst) && src && isa<BuiltinType>(src);
+  if (!src)
+    return false;
+  if (isValueOptional(dst))
+    return isa<BuiltinType>(src) || isa<EnumType>(src);
+  return isMemOptional(dst) && isa<TupleType>(src);
 }
 
 } // namespace ast

@@ -43,10 +43,8 @@ class ASTContext {
   ClassType *ObjTy;
   ClassType *StrTy;
   // Canonical file type (ClassType inheriting Obj).
-  ClassType *FileTy;
   // Canonical error type (ClassType inheriting Obj, returned by open() on
   // failure).
-  ClassType *ErrorTy;
 
   // Registry of all class types, keyed by name.
   std::unordered_map<std::string, ClassType *> ClassTypes;
@@ -90,8 +88,6 @@ class ASTContext {
   // -- Bootstrap helpers (called from the constructor)
   void buildObjectType();
   void buildStringType();
-  void buildFileType();
-  void buildErrorType();
 
 public:
   ASTContext();
@@ -175,8 +171,6 @@ public:
   // Canonical class type accessors.
   ClassType *getObjTy() const { return ObjTy; }
   ClassType *getStrTy() const { return StrTy; }
-  ClassType *getFileTy() const { return FileTy; }
-  ClassType *getErrorTy() const { return ErrorTy; }
 
   /// Return the canonical FixedArrayType of @p length elements of type
   /// @p elemTy (`int[3]`), creating it on first use.  @p elemTy must itself

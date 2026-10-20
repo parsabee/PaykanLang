@@ -42,13 +42,14 @@ fn area(c: Circle) -> float {
 
 ```pkn
 // file: main.pkn
+import ::io;
 import geometry::shapes;
 
 fn main() -> int {
   c: shapes::Circle = shapes::Circle(2.0);
   k = shapes::Kind::Round;
-  println("area " + Str(shapes::area(c)));
-  println(Str(k == shapes::Kind::Round));
+  io::println("area " + Str(shapes::area(c)));
+  io::println(Str(k == shapes::Kind::Round));
   return 0;
 }
 ```
@@ -111,10 +112,12 @@ class however many modules use it, so the values pass freely between them (see
 
 **System imports.** A leading `::`, as in `import ::collections;`, looks for the module in
 the standard library instead of the source root. The standard library ships with
-PaykanLang: `::collections` has lists, linked lists, stacks, queues, hash maps, hash sets
-and priority queues (see [the standard library](../language/13-standard-library.md)). Set
-`$PAYKAN_STDLIB` to use another directory of system modules. The built-in functions and
-types (`println`, `Str`, `open`, `File`, `Stdin` and the rest) need no import.
+PaykanLang: `::io` prints and reads and writes files, `::result` holds the errors that
+library functions report, and `::collections` has lists, linked lists, stacks, queues, hash
+maps, hash sets and priority queues (see [the standard
+library](../language/13-standard-library.md)). Set `$PAYKAN_STDLIB` to use another directory
+of system modules. Only the built-in types (`int`, `Str`, `Obj` and the rest) and the
+conversions (`Str(n)`, `int(s)`) need no import.
 
 ## Project: `tasks` as a multi-file program
 
@@ -211,6 +214,7 @@ fn splitOnce(s: Str, sep: char) -> (Str, Str) {
 
 ```pkn
 // file: tasks/list.pkn
+import ::io;
 import tasks::task;
 
 class TaskList {
@@ -244,10 +248,10 @@ class TaskList {
   view fn show() {
     i = 0;
     while i < self.count {
-      println(Str(i + 1) + ". " + self.tasks[i].toString());
+      io::println(Str(i + 1) + ". " + self.tasks[i].toString());
       i = i + 1;
     }
-    println(Str(self.pending()) + " of " + Str(self.count) + " to do");
+    io::println(Str(self.pending()) + " of " + Str(self.count) + " to do");
   }
 }
 
@@ -265,6 +269,7 @@ will come from the command line and standard input instead:
 
 ```pkn
 // file: main.pkn
+import ::io;
 import tasks::{task, text, list as tl};
 
 fn run(tasks: tl::TaskList, line: Str) {
@@ -272,16 +277,16 @@ fn run(tasks: tl::TaskList, line: Str) {
   match command {
     "add" {
       title, priority = text::splitOnce(rest, '|');
-      if !tasks.add(title, task::parsePriority(priority)) { println("the list is full"); }
+      if !tasks.add(title, task::parsePriority(priority)) { io::println("the list is full"); }
     }
     "done" {
       match int(rest) {
-        n: int { if !tasks.complete(n) { println("no task " + rest); } }
-        None   { println("not a task number: " + rest); }
+        n: int { if !tasks.complete(n) { io::println("no task " + rest); } }
+        None   { io::println("not a task number: " + rest); }
       }
     }
     "list" { tasks.show(); }
-    _      { println("unknown command: " + command); }
+    _      { io::println("unknown command: " + command); }
   }
 }
 

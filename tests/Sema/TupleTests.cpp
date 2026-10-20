@@ -11,7 +11,7 @@
 using namespace paykan::test;
 
 static std::string wrapMain(const std::string &body) {
-  return "fn main() -> int {\n" + body + "\n  return 0;\n}\n";
+  return "import ::io; fn main() -> int {\n" + body + "\n  return 0;\n}\n";
 }
 
 // -- Literals and element types
@@ -246,10 +246,10 @@ TEST(Tuple, NoBuiltinTupleClass) {
 TEST(Tuple, PrintedAndShown) {
   auto r = semaCheck(wrapMain(R"(
     t = (1, "a");
-    println(t);
-    print(t);
-    printerrln((1, 2.5));
-    println(((1, 'c'), None));
+    io::println(t);
+    io::print(t);
+    io::printerrln((1, 2.5));
+    io::println(((1, 'c'), None));
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
@@ -473,7 +473,7 @@ TEST(Tuple, MatchArmOnTupleRejected) {
   auto r = semaCheck(wrapMain(R"(
     o: Obj = "s";
     match o {
-      (int, int) { println("pair"); }
+      (int, int) { io::println("pair"); }
       _ { }
     }
   )"));
@@ -542,7 +542,7 @@ TEST(Tuple, ViewHoldingReferencesCannotBeStored) {
   }
   // Reading it in place is fine.
   auto ok = semaCheck(decls + wrapMain(refs + R"(
-    println(first(refs));
+    io::println(first(refs));
     n: int = first(refs).0.len();
   )"));
   EXPECT_TRUE(ok.Ok) << ok.Diagnostics;

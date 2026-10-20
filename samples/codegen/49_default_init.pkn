@@ -8,6 +8,8 @@
 // class whose type argument is inferred from the fields.  Run with
 // --track-heap: zero live blocks.
 
+import ::io;
+
 // expect-stdout: (1, 2) (3, 4) origin
 // expect-stdout: car at 50
 // expect-stdout: a -> b -> end
@@ -18,9 +20,7 @@
 class Point {
   x: int;
   y: int;
-  view fn show() -> Str {
-    return "(" + Str(self.x) + ", " + Str(self.y) + ")";
-  }
+  view fn show() -> Str { return "(" + Str(self.x) + ", " + Str(self.y) + ")"; }
 }
 
 class Labeled : Point {
@@ -60,7 +60,7 @@ class Square : Shape {
 }
 
 impl Square {
-  fn __init__(side: int) { self.side = side; }   // Shape's does nothing
+  fn __init__(side: int) { self.side = side; }  // Shape's does nothing
 }
 
 class Box<T> {
@@ -69,7 +69,9 @@ class Box<T> {
 
 fn chain(n: Node) -> Str {
   match n.next {
-    m: Node { return n.name + " -> " + chain(m); }
+    m: Node {
+      return n.name + " -> " + chain(m);
+    }
     None { return n.name + " -> end"; }
   }
 }
@@ -84,21 +86,21 @@ fn scoreText(s: int?) -> Str {
 fn main() -> int {
   p = Point(1, 2);
   l = Labeled(3, 4, "origin");
-  println(p.show() + " " + l.show() + " " + l.label);
+  io::println(p.show() + " " + l.show() + " " + l.label);
 
   c = Car(5, "car");
-  println(c.kind + " at " + Str(c.speed));
+  io::println(c.kind + " at " + Str(c.speed));
 
-  println(chain(Node("a", Node("b", None))));
+  io::println(chain(Node("a", Node("b", None))));
 
   inv = Inventory(["x", "y", "z"], (1, "one"), None);
-  println(Str(inv.items.len()) + " items, first " + inv.first.toString() +
-          ", score " + scoreText(inv.score));
+  io::println(Str(inv.items.len()) + " items, first " + inv.first.toString()
+      + ", score " + scoreText(inv.score));
 
   s: Shape = Square(3);
-  println("square " + Str(s.area()));
+  io::println("square " + Str(s.area()));
 
   b = Box(7);
-  println("box of " + Str(b.v));
+  io::println("box of " + Str(b.v));
   return 0;
 }

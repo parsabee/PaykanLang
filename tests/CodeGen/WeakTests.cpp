@@ -15,7 +15,7 @@ using namespace paykan::test;
 // the object.
 TEST(Weak, LocalsReadNoneOnceTheObjectIsGone) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node { value: int; }
     impl Node { fn __init__(v: int) { self.value = v; } }
     fn show(w: Node?) -> Str {
@@ -26,18 +26,18 @@ TEST(Weak, LocalsReadNoneOnceTheObjectIsGone) {
       weak w: Node? = a;
       weak u = a;
       weak e: Node?;
-      println(show(w) + " " + show(u) + " " + show(e) + " " + Str(w == None) +
+      io::println(show(w) + " " + show(u) + " " + show(e) + " " + Str(w == None) +
               " " + Str(e == None));
       a = Node(2);
-      println(show(w) + " " + show(u) + " " + Str(w == None) + " " + Str(w == u));
+      io::println(show(w) + " " + show(u) + " " + Str(w == None) + " " + Str(w == u));
       w = a;
       u = None;
-      println(show(w) + " " + show(u));
+      io::println(show(w) + " " + show(u));
       s: Node? = w;
       a = Node(3);
-      println(show(w) + " " + show(s));
+      io::println(show(w) + " " + show(s));
       s = None;
-      println(show(w));
+      io::println(show(w));
       return 0;
     }
   )");
@@ -55,7 +55,7 @@ TEST(Weak, LocalsReadNoneOnceTheObjectIsGone) {
 // parent is gone sees None.
 TEST(Weak, FieldsBreakCycles) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node {
       name: Str;
       weak parent: Node?;
@@ -84,11 +84,11 @@ TEST(Weak, FieldsBreakCycles) {
       b = Node("b");
       root.add(a);
       a.add(b);
-      println(b.path());
+      io::println(b.path());
       weak w = root;
       root = Node("other");
-      println(b.path());
-      match w { n: Node { println(n.name); } None { println("root gone"); } }
+      io::println(b.path());
+      match w { n: Node { io::println(n.name); } None { io::println("root gone"); } }
       return 0;
     }
   )");
@@ -102,7 +102,7 @@ TEST(Weak, FieldsBreakCycles) {
 // None.
 TEST(Weak, LambdasCaptureWeakly) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Button {
       label: Str;
       onClick: () -> Str;
@@ -125,12 +125,12 @@ TEST(Weak, LambdasCaptureWeakly) {
     }
     fn main() -> int {
       b = Button("ok");
-      println(b.click());
+      io::println(b.click());
       b.wire();
-      println(b.click());
+      io::println(b.click());
       f = b.onClick;
       b = Button("other");
-      println(f());
+      io::println(f());
       return 0;
     }
   )");
@@ -144,7 +144,7 @@ TEST(Weak, LambdasCaptureWeakly) {
 // field, and assigned by destructuring.
 TEST(Weak, PassedReturnedAndStored) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class P { v: int; }
     impl P { fn __init__(v: int) { self.v = v; } }
     fn take(p: P?) -> Str { match p { q: P { return Str(q.v); } None { return "none"; } } }
@@ -160,14 +160,14 @@ TEST(Weak, PassedReturnedAndStored) {
       h.peek = x;
       h2 = Holder();
       h2.peek = h.peek;
-      println(take(w) + " " + look(w) + " " + take(pass(w)) + " " + take(h.item) +
+      io::println(take(w) + " " + look(w) + " " + take(pass(w)) + " " + take(h.item) +
               " " + take(h.peek) + " " + take(h2.peek));
       x = P(6);
-      println(take(w) + " " + take(h2.peek));
+      io::println(take(w) + " " + take(h2.peek));
       h.item = None;
-      println(take(w) + " " + take(h.peek) + " " + take(h2.peek));
+      io::println(take(w) + " " + take(h.peek) + " " + take(h2.peek));
       w, n = (x, 1);
-      println(take(w) + " " + Str(n));
+      io::println(take(w) + " " + Str(n));
       return 0;
     }
   )");
@@ -179,7 +179,7 @@ TEST(Weak, PassedReturnedAndStored) {
 // A `weak` field is inherited, and a generic class may have one.
 TEST(Weak, InheritedAndGenericFields) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Base { weak owner: Base?; }
     impl Base { fn __init__() { self.owner = None; } }
     class Derived : Base { tag: Str; }
@@ -190,15 +190,15 @@ TEST(Weak, InheritedAndGenericFields) {
       d = Derived("d");
       e = Derived("e");
       d.owner = e;
-      match d.owner { o: Derived { println(o.tag); } _ { println("other"); } }
+      match d.owner { o: Derived { io::println(o.tag); } _ { io::println("other"); } }
       e = Derived("f");
-      match d.owner { o: Base { println("alive"); } None { println("gone"); } }
+      match d.owner { o: Base { io::println("alive"); } None { io::println("gone"); } }
       c1 = Cell<int>(1);
       c2 = Cell<int>(2);
       c1.next = c2;
-      match c1.next { n: Cell<int> { println(Str(n.value)); } None { println("none"); } }
+      match c1.next { n: Cell<int> { io::println(Str(n.value)); } None { io::println("none"); } }
       c2 = Cell<int>(3);
-      match c1.next { n: Cell<int> { println(Str(n.value)); } None { println("none"); } }
+      match c1.next { n: Cell<int> { io::println(Str(n.value)); } None { io::println("none"); } }
       return 0;
     }
   )");
@@ -212,7 +212,7 @@ TEST(Weak, InheritedAndGenericFields) {
 // locals that keep its object go.
 TEST(Weak, LoopsAndEarlyExits) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class P { v: int; }
     impl P { fn __init__(v: int) { self.v = v; } }
     fn find(limit: int) -> P? {
@@ -228,8 +228,8 @@ TEST(Weak, LoopsAndEarlyExits) {
       return None;
     }
     fn main() -> int {
-      match find(3) { p: P { println(Str(p.v)); } None { println("none"); } }
-      match find(20) { p: P { println(Str(p.v)); } None { println("none"); } }
+      match find(3) { p: P { io::println(Str(p.v)); } None { io::println("none"); } }
+      match find(20) { p: P { io::println(Str(p.v)); } None { io::println("none"); } }
       return 0;
     }
   )");
@@ -243,7 +243,7 @@ TEST(Weak, LoopsAndEarlyExits) {
 // reference the method may bind, read and return.
 TEST(Weak, CursorInAViewMethod) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node { v: int; next: Node?; }
     class Chain { head: Node?; }
     impl Chain {
@@ -282,14 +282,14 @@ TEST(Weak, CursorInAViewMethod) {
     }
     fn main() -> int {
       c = Chain();
-      println(show(c));
+      io::println(show(c));
       c.push(1);
       c.push(2);
       c.push(3);
-      println(show(c));
+      io::println(show(c));
       kept: Node? = c.find(2);
       c = Chain();
-      match kept { n: Node { println(Str(n.v)); } None { println("gone"); } }
+      match kept { n: Node { io::println(Str(n.v)); } None { io::println("gone"); } }
       return 0;
     }
   )");
@@ -302,16 +302,16 @@ TEST(Weak, CursorInAViewMethod) {
 // weakly, and the immortal `None` object stays.
 TEST(Weak, StringsAndObjects) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn main() -> int {
       s = "abc";
       weak ws: Str? = s;
       o: Obj = None;
       weak wo: Obj? = o;
-      match ws { t: Str { println(t); } None { println("gone"); } }
+      match ws { t: Str { io::println(t); } None { io::println("gone"); } }
       s = "x";
-      match ws { t: Str { println(t); } None { println("gone"); } }
-      println(Str(wo == None));
+      match ws { t: Str { io::println(t); } None { io::println("gone"); } }
+      io::println(Str(wo == None));
       return 0;
     }
   )");

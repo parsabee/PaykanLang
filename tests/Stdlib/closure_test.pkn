@@ -3,9 +3,12 @@
 // code and closure, so it is an element of a List<T>, found by `contains`
 // and `indexOf` (a named function, or a copy of a lambda's value), and a
 // value of a HashMap.
+import ::io;
 import ::collections;
 
-fn square(x: int) -> int { return x * x; }
+fn square(x: int) -> int {
+  return x * x;
+}
 
 // The text of an index `indexOf` returns: the number, or "None".
 fn idx(i: unsigned?) -> Str {
@@ -19,7 +22,9 @@ fn main() -> int {
   fs = collections::List<(int) -> int>();
   fs.push(square);
   fs.push(fn(x: int) -> int { return x + 1; });
-  double = fn(x: int) -> int { return x * 2; };
+  double = fn(x: int) -> int {
+    return x * 2;
+  };
   fs.push(double);
   i: unsigned = 0;
   total = 0;
@@ -28,15 +33,17 @@ fn main() -> int {
     total = total + f(3);
     i = i + 1;
   }
-  println(Str(total) + " " + Str(fs.contains(double)) + " " + idx(fs.indexOf(double)) +
-          " " + Str(fs.contains(fn(x: int) -> int { return x * 2; })) + " " +
-          Str(fs.contains(square)) + " " + idx(fs.indexOf(square)));
+  io::println(Str(total) + " " + Str(fs.contains(double)) + " "
+      + idx(fs.indexOf(double)) + " " + Str(fs.contains(fn(x: int) -> int {
+    return x * 2;
+  })) + " " + Str(fs.contains(square)) + " " + idx(fs.indexOf(square)));
 
   greetings = collections::HashMap<Str, (Str) -> Str>();
   greetings.put("en", fn(n: Str) -> Str { return "hello " + n; });
   greetings.put("fr", fn(n: Str) -> Str { return "bonjour " + n; });
   g = greetings.get("fr");
-  println(g("pat") + " " + Str(greetings.containsKey("de")) + " " + Str(greetings.len()));
+  io::println(g("pat") + " " + Str(greetings.containsKey("de")) + " "
+      + Str(greetings.len()));
 
   stack = collections::Stack<() -> int>();
   n = 1;
@@ -44,6 +51,6 @@ fn main() -> int {
   n = 2;
   stack.push(fn() -> int { return n; });
   top = stack.pop();
-  println(Str(top()) + " " + Str(stack.len()));
+  io::println(Str(top()) + " " + Str(stack.len()));
   return 0;
 }

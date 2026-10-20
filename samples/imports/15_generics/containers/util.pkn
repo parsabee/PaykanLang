@@ -1,2 +1,4 @@
 // Module: containers/util
-fn bracket(s: Str) -> Str { return "[" + s + "]"; }
+fn bracket(s: Str) -> Str {
+  return "[" + s + "]";
+}

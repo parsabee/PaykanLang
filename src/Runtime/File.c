@@ -36,15 +36,14 @@ PaykanFile *PaykanFile_new(void) {
 
 // -- Methods
 
-PaykanShared *PaykanFile_open(PaykanObject *pathObj, PaykanObject *modeObj) {
+PaykanShared *PaykanFile_open(PaykanObject *pathObj, PaykanObject *modeObj,
+                              int64_t *err) {
   PaykanString *path = (PaykanString *)pathObj;
   PaykanString *mode = (PaykanString *)modeObj;
   FILE *handle = fopen(path->data, mode->data);
   if (!handle) {
-    char buf[512];
-    int n = snprintf(buf, sizeof(buf), "open(\"%s\", \"%s\"): %s", path->data,
-                     mode->data, strerror(errno));
-    return PaykanShared_new((PaykanObject *)PaykanError_new(buf, (int64_t)n));
+    *err = errno;
+    return (PaykanShared *)0;
   }
   PaykanFile *f = PaykanFile_new();
   f->handle = handle;
@@ -77,6 +76,14 @@ static int file_closed(const PaykanFile *f, const char *op) {
   return 1;
 }
 
+/// None for a read whose buffer could not be allocated, with errno ENOMEM
+/// (a read sets errno to 0 first, so its caller can tell).  Frees @p buf.
+static PaykanShared *file_read_no_memory(char *buf) {
+  Paykan_free(buf);
+  errno = ENOMEM;
+  return PaykanShared_new(&PaykanObject_None);
+}
+
 /// The `Str?` result of a read: the first @p used bytes of @p buf as a fresh
 /// Str, or None when nothing was read.  Frees @p buf.
 static PaykanShared *file_read_result(char *buf, size_t used) {
@@ -104,11 +111,16 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
   size_t cap = 128;
   size_t used = 0;
   char *buf = (char *)Paykan_malloc(cap);
+  if (!buf)
+    return file_read_no_memory(buf);
   int c;
   while ((c = fgetc(f->handle)) != EOF) {
     if (used + 1 >= cap) {
       cap *= 2;
-      buf = (char *)Paykan_realloc(buf, cap);
+      char *grown = (char *)Paykan_realloc(buf, cap);
+      if (!grown)
+        return file_read_no_memory(buf);
+      buf = grown;
     }
     buf[used++] = (char)c;
     if (c == '\n')
@@ -123,6 +135,8 @@ PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n) {
   if (file_closed(f, "readbytes") || n <= 0)
     return PaykanShared_new(&PaykanObject_None);
   char *buf = (char *)Paykan_malloc((size_t)n);
+  if (!buf)
+    return file_read_no_memory(buf);
   return file_read_result(buf, fread(buf, 1, (size_t)n, f->handle));
 }
 
@@ -133,12 +147,17 @@ PaykanShared *PaykanFile_read(PaykanObject *self) {
   size_t cap = 4096;
   size_t used = 0;
   char *buf = (char *)Paykan_malloc(cap);
+  if (!buf)
+    return file_read_no_memory(buf);
   size_t got;
   while ((got = fread(buf + used, 1, cap - used, f->handle)) > 0) {
     used += got;
     if (used == cap) {
       cap *= 2;
-      buf = (char *)Paykan_realloc(buf, cap);
+      char *grown = (char *)Paykan_realloc(buf, cap);
+      if (!grown)
+        return file_read_no_memory(buf);
+      buf = grown;
     }
   }
   return file_read_result(buf, used);
@@ -167,4 +186,94 @@ PaykanFile PaykanFile_Stdin = {
 
 __attribute__((constructor)) static void PaykanFile_Stdin_init(void) {
   PaykanFile_Stdin.handle = stdin;
+}
+
+// -- The standard library's ::io (stdlib/io.pkn)
+//
+// An io::File holds one of these objects as its handle, which the natives
+// bound to these functions take borrowed (`view Obj`).  Each reports a
+// failure as C's errno, which ::result turns into an Error: a write returns
+// it (0 when it succeeded), a read returns NULL with it in `*err` (an
+// int64_t, the native's `inout int`), 0 there meaning the end of the file.
+
+/// @p h as a file, or a panic naming @p op: an io::File made from an object
+/// that is not one.
+static PaykanFile *io_file(PaykanObject *h, const char *op) {
+  if (!h || (Paykan_vtable_of(h) != PaykanFile_vtable &&
+             Paykan_vtable_of(h) != PaykanStdin_vtable))
+    Paykan_runtime_panic("io::File.%s on an object that is not a file", op);
+  return (PaykanFile *)h;
+}
+
+/// A read's result as a `Str?`: the text, or NULL with the errno of the
+/// failure in @p err (0 at the end of the file).  The caller zeroed errno:
+/// ENOMEM there with no stream error is the read's own buffer failing.
+static PaykanShared *io_read_result(PaykanFile *f, PaykanShared *r,
+                                    int64_t *err) {
+  if (r != &PaykanObject_None)
+    return r;
+  Paykan_release(r);
+  if (ferror(f->handle))
+    *err = errno ? errno : EIO;
+  else
+    *err = errno == ENOMEM ? ENOMEM : 0;
+  clearerr(f->handle);
+  return (PaykanShared *)0;
+}
+
+PaykanShared *Paykan_io_open(PaykanObject *path, PaykanObject *mode,
+                             void *err) {
+  return PaykanFile_open(path, mode, (int64_t *)err);
+}
+
+int64_t Paykan_io_write(PaykanObject *file, PaykanObject *str) {
+  PaykanFile *f = io_file(file, "write");
+  PaykanString *s = (PaykanString *)str;
+  if (!f->handle)
+    return EBADF;
+  errno = 0;
+  if (fwrite(s->data, 1, (size_t)s->len, f->handle) != (size_t)s->len) {
+    int err = errno ? errno : EIO;
+    // The failure is this call's, reported now: the next read of the stream
+    // is not to mistake the error flag for its own.
+    clearerr(f->handle);
+    return err;
+  }
+  return 0;
+}
+
+PaykanShared *Paykan_io_readln(PaykanObject *file, void *err) {
+  PaykanFile *f = io_file(file, "readln");
+  if (!f->handle) {
+    *(int64_t *)err = EBADF;
+    return (PaykanShared *)0;
+  }
+  errno = 0;
+  return io_read_result(f, PaykanFile_readln((PaykanObject *)f),
+                        (int64_t *)err);
+}
+
+PaykanShared *Paykan_io_readbytes(PaykanObject *file, int64_t n, void *err) {
+  PaykanFile *f = io_file(file, "readbytes");
+  if (!f->handle || n <= 0) {
+    *(int64_t *)err = f->handle ? EINVAL : EBADF;
+    return (PaykanShared *)0;
+  }
+  errno = 0;
+  return io_read_result(f, PaykanFile_readbytes((PaykanObject *)f, n),
+                        (int64_t *)err);
+}
+
+PaykanShared *Paykan_io_read(PaykanObject *file, void *err) {
+  PaykanFile *f = io_file(file, "read");
+  if (!f->handle) {
+    *(int64_t *)err = EBADF;
+    return (PaykanShared *)0;
+  }
+  errno = 0;
+  return io_read_result(f, PaykanFile_read((PaykanObject *)f), (int64_t *)err);
+}
+
+PaykanShared *Paykan_io_stdin(void) {
+  return PaykanShared_new((PaykanObject *)&PaykanFile_Stdin);
 }

@@ -9,6 +9,12 @@ impl Circle {
   fn __init__(r: int) { self.r = r; }
 }
 
-fn name() -> Str { return "circle"; }
-fn make(r: int) -> Circle { return Circle(r); }
-fn describe(c: Circle) -> Str { return name() + "(" + Str<int>(c.r) + ")"; }
+fn name() -> Str {
+  return "circle";
+}
+fn make(r: int) -> Circle {
+  return Circle(r);
+}
+fn describe(c: Circle) -> Str {
+  return name() + "(" + Str<int>(c.r) + ")";
+}

@@ -11,13 +11,15 @@ Add `?` to a type to make it optional: `Str?`, `int?`, `Task?`. Any class, `Str`
 `float`, `bool` and `char` can be optional. `None` is the absent value:
 
 ```pkn
+import ::io;
+
 fn main() -> int {
   nickname: Str? = None;
   age: int? = 36;          // an int converts to int? automatically
-  println(nickname);
-  println(age);
+  io::println(nickname);
+  io::println(age);
   nickname = "Gracie";
-  println(nickname);
+  io::println(nickname);
   return 0;
 }
 ```
@@ -54,6 +56,8 @@ error: cannot use optional 'int?' as 'int' without unwrapping (use match)
 binds the value, and an arm for `None`. Together the two are exhaustive:
 
 ```pkn
+import ::io;
+
 fn half(n: int) -> int? {
   if n % 2 != 0 { return None; }
   return n / 2;
@@ -67,8 +71,8 @@ fn describe(n: int) -> Str {
 }
 
 fn main() -> int {
-  println(describe(10));
-  println(describe(7));
+  io::println(describe(10));
+  io::println(describe(7));
   return 0;
 }
 ```
@@ -95,6 +99,8 @@ A field whose type is optional starts out as `None`, so `__init__` does not have
 it. This is the natural way to model something that is set later, or not at all:
 
 ```pkn
+import ::io;
+
 class Person {
   name: Str;
   email: Str?;
@@ -113,9 +119,9 @@ impl Person {
 
 fn main() -> int {
   p = Person("Ada");
-  println(p.contact());
+  io::println(p.contact());
   p.email = "ada@example.org";
-  println(p.contact());
+  io::println(p.contact());
   return 0;
 }
 ```
@@ -133,6 +139,8 @@ Optionals make linked structures easy to express, because "no next node" is just
 Here is a minimal linked list with a search that returns `Node?`:
 
 ```pkn
+import ::io;
+
 class Node {
   value: int;
   next: Node?;
@@ -159,10 +167,10 @@ fn find(head: Node?, wanted: int) -> Node? {
 fn main() -> int {
   list = Node(1, Node(2, Node(3, None)));
   match find(list, 2) {
-    n: Node { println("found " + Str(n.value)); }
-    None    { println("not found"); }
+    n: Node { io::println("found " + Str(n.value)); }
+    None    { io::println("not found"); }
   }
-  println(Str(find(list, 9) == None));
+  io::println(Str(find(list, 9) == None));
   return 0;
 }
 ```
@@ -182,12 +190,12 @@ True
 - `T?[n]` is an array whose elements may be `None`. An array cannot itself be optional
   (`int[3]?` is rejected).
 - `if c then value else None` has the type `T?` when `value` is a `T`.
-- An enum cannot be optional yet (`Direction?` is rejected), and neither can a tuple.
-  Return a class, or a tuple with a `bool` that says whether the value is valid.
+- Enums, tuples and structs have optionals too (`Direction?`, `(int, Str)?`, `Point?`),
+  unwrapped with an arm naming the type: `d: Direction { ... }`.
 - There is no `?.`, `??` or `if let` shorthand in this release; `match` is the way to unwrap.
-- Some older built-in functions use `Obj` rather than optionals to say "nothing": the file
-  reading methods return a `Str` or `None` as an `Obj`. [Files and I/O](11-files-and-io.md)
-  shows how to `match` on those.
+- The standard library says "nothing" with optionals too: a file read returns a result
+  whose `value` is a `Str?`, `None` at the end of the file. [Files and
+  I/O](11-files-and-io.md) shows how to `match` on those.
 
 ## Project: finding tasks and optional deadlines
 
@@ -197,6 +205,8 @@ when there is none, which lets the caller decide what to do. It isn't a `view fn
 the caller may change the task it returns:
 
 ```pkn
+import ::io;
+
 class Task {
   title: Str;
   done: bool;
@@ -248,8 +258,8 @@ impl TaskList {
 
 fn setDue(list: TaskList, title: Str, due: Str) {
   match list.find(title) {
-    t: Task { t.due = due; println(t); }
-    None    { println("no task called '" + title + "'"); }
+    t: Task { t.due = due; io::println(t); }
+    None    { io::println("no task called '" + title + "'"); }
   }
 }
 
@@ -259,7 +269,7 @@ fn main() -> int {
   list.add("buy milk");
   setDue(list, "file taxes", "April 15");
   setDue(list, "walk the dog", "today");
-  println(list.tasks[1]);
+  io::println(list.tasks[1]);
   return 0;
 }
 ```

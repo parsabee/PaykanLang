@@ -116,8 +116,8 @@ static void push_pending(PaykanObject *obj) {
     size_t cap = g_pending_cap * 2;
     PaykanObject **grown =
         g_pending == g_inline_pending
-            ? (PaykanObject **)malloc(cap * sizeof *grown)
-            : (PaykanObject **)realloc(g_pending, cap * sizeof *grown);
+            ? (PaykanObject **)malloc(cap * sizeof(PaykanObject *))
+            : (PaykanObject **)realloc(g_pending, cap * sizeof(PaykanObject *));
     if (!grown)
       Paykan_runtime_panic("out of memory destroying %zu objects",
                            g_pending_len + 1);

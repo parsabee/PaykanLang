@@ -18,6 +18,7 @@ namespace sema {
 
 // Static module cache.
 StringMap<Sema::ModuleInfo> Sema::ModuleCache;
+StringMap<std::shared_ptr<SemaContext>> Sema::ModuleContextCache;
 
 // -- Scope / ScopeGuard
 
@@ -339,8 +340,17 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
       return d;
     }
     if (ast::isa<ast::ArrayLiteralExpr>(e) ||
-        ast::isa<ast::TupleLiteralExpr>(e))
-      return adoptLiteralElements(d, t, e);
+        ast::isa<ast::TupleLiteralExpr>(e)) {
+      ast::Type *adopted = adoptLiteralElements(d, t, e);
+      // The adopted literal is the present value of an optional slot
+      // (`(1, ("x", "y"))` into `(int, (Str, Str)?)`): wrapped as a call's
+      // result would be.
+      if (adopted && boxes(d, adopted)) {
+        e->setCoercedType(d);
+        return d;
+      }
+      return adopted;
+    }
     if (!boxes(d, t))
       return t;
     e->setCoercedType(d);
@@ -415,7 +425,7 @@ static int64_t elementAlign(const ast::Type *ty) {
   }
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
     return elementAlign(ft->getElementType());
-  if (ast::isValueOptional(ty))
+  if (ast::isValueOptional(ty) || ast::isMemOptional(ty))
     return elementAlign(ast::cast<ast::OptionalType>(ty)->getInnerType());
   if (const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return bt->getTypeKind() == ast::BuiltinType::Bool ||
@@ -455,12 +465,21 @@ int64_t Sema::fixedElementBytes(const ast::Type *ty) {
     return 8;
   if (ast::isFunctionValue(ty))
     return 16;
+  // An optional tuple or struct: a presence flag, padded to the value's
+  // alignment, then the value (Lowering's `(bool, T)`).
+  if (ast::isMemOptional(ty)) {
+    const ast::Type *inner = ast::cast<ast::OptionalType>(ty)->getInnerType();
+    int64_t bytes = fixedElementBytes(inner);
+    if (bytes < 0)
+      return -1;
+    int64_t align = elementAlign(inner);
+    return ((align + bytes) + align - 1) / align * align;
+  }
   // An optional value is a presence flag padded to its value's alignment,
   // then the value (`int?` takes 16 bytes, `bool?` 2).
   if (ast::isValueOptional(ty))
-    if (const auto *inner = ast::dyn_cast<ast::BuiltinType>(
-            ast::cast<ast::OptionalType>(ty)->getInnerType()))
-      return 2 * fixedElementBytes(inner);
+    return 2 *
+           fixedElementBytes(ast::cast<ast::OptionalType>(ty)->getInnerType());
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
     // Its elements, counted across its rows.
     int64_t count = 1;
@@ -762,20 +781,16 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     if (!inner)
       return nullptr;
     // A `T?` of a reference type is T's own PaykanShared* box with NULL
-    // meaning None; a primitive's (`int?`, `float?`, `bool?`, `char?`) is a
-    // value, the primitive and a presence flag (#96).  `void` has no value
-    // (the parser rejects the spelled `void?`; a type argument can still
-    // produce it).  `Enum?` is not supported yet.  Nested optionals are
-    // rejected because a `T??` would need a second None to distinguish `None`
-    // from `Some(None)`.
+    // meaning None; a primitive's (`int?`, `float?`, `bool?`, `char?`) or an
+    // enum's is a value, the payload and a presence flag (#96); a tuple's or
+    // a struct's is held in place, a presence flag and the value.  `void` has
+    // no value (the parser rejects the spelled `void?`; a type argument can
+    // still produce it).  Nested optionals are rejected because a `T??` would
+    // need a second None to distinguish `None` from `Some(None)` (a
+    // template's `T?` of an optional T is that optional: ASTCloner).
     if (inner == Ctx.getVoidTy()) {
       error(loc, context + " has type 'void?': optional type 'void?' is not "
                            "supported");
-      return nullptr;
-    }
-    if (ast::isa<ast::EnumType>(inner)) {
-      error(loc, context + " has type '" + typeName(inner) +
-                     "?': optional enum types are not supported yet");
       return nullptr;
     }
     if (ast::isa<ast::OptionalType>(inner)) {
@@ -783,22 +798,17 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
                      "?', which is not supported");
       return nullptr;
     }
-    // An optional struct could not be unwrapped either (`match` takes no
-    // struct subject or arm); before the tuple check, which a struct is.
-    if (ast::isa<ast::StructType>(inner)) {
-      error(loc, context + " has type '" + typeName(inner) +
-                     "?': optional struct types are not supported yet (an "
-                     "optional struct cannot be unwrapped with match)");
-      return nullptr;
-    }
-    // An optional tuple could never be unwrapped: `match` rejects tuple type
-    // arms, so the `T` arm that unwraps an optional does not exist for it.
-    // Reject it until tuple patterns land.
-    if (ast::isa<ast::TupleType>(inner)) {
-      error(loc, context + " has type '" + typeName(inner) +
-                     "?': optional tuple types are not supported yet (an "
-                     "optional tuple cannot be unwrapped with match)");
-      return nullptr;
+    // An optional of a tuple or a struct is held in place, the presence flag
+    // and the value: a value of more than kOptionalValueLimit bytes goes in
+    // a `memory::Box`, and that is made optional.  A struct's size is known
+    // once populateStructs ran: a class's fields and signatures, resolved
+    // before, are checked then.
+    if (ast::isMemType(inner) && !ast::isFunctionValue(inner)) {
+      if (!StructsPopulated)
+        DeferredOptionalChecks.push_back(
+            {inner, loc, context, CurrentOrigin, InstantiationStack});
+      else if (!checkOptionalValueSize(inner, loc, context))
+        return nullptr;
     }
     // Resolve to the context's canonical (interned) instance, as for arrays.
     return Ctx.getOptionalType(inner);
@@ -883,11 +893,6 @@ void Sema::declarePoisoned(Scope *scope, std::string_view name) {
 }
 
 bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc) {
-  if (name == names::kStdin) {
-    error(loc,
-          "'" + name + "' is a reserved name and cannot be used as a variable");
-    return false;
-  }
   if (isTypeNameForVariable(name)) {
     error(loc,
           "'" + name + "' is a type name and cannot be used as a variable");
@@ -910,7 +915,8 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
         !ast::isa<ast::MemberAccessExpr>(subject) &&
         !ast::isa<ast::SubscriptExpr>(subject))
       msg = what + " needs a variable or a field to match on";
-    else if (ast::isa<ast::BuiltinType>(bindTy))
+    else if (ast::isa<ast::BuiltinType>(bindTy) ||
+             ast::isa<ast::EnumType>(bindTy))
       msg = what + " cannot change the '" + typeName(bindTy) +
             "' inside an optional yet";
     else
@@ -940,10 +946,7 @@ bool Sema::isTypeNameForVariable(const std::string &name) const {
          StructTemplates.count(name) ||
          (CurrentTypeParams && CurrentTypeParams->count(name)) ||
          name == names::kObj || name == names::kString ||
-         name == names::kFile ||
-         (ast::builtinKindOfName(name, kind) &&
-          kind != ast::BuiltinType::Void) ||
-         name == names::kStdin;
+         (ast::builtinKindOfName(name, kind) && kind != ast::BuiltinType::Void);
 }
 
 // Visit an expression and return its resolved type (nullptr on error).
@@ -1087,8 +1090,6 @@ ast::Type *Sema::ExprChecker::visitStringLiteral(ast::StringLiteral *) {
 }
 
 ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
-  if (node->getName() == names::kStdin)
-    return S.Ctx.getFileTy();
   // Inside an instantiation body, a bare type parameter name is a type, not a
   // value (a local variable of the same name shadows it, as usual).
   if (S.CurrentTypeParams && S.CurrentTypeParams->count(node->getName()) &&
@@ -1097,12 +1098,21 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
                                      "' cannot be used as a value");
     return nullptr;
   }
-  // A function used as a value (`f = square;`): its function type.
+  // A function used as a value (`f = square;`): its function type.  Inside
+  // another module's template, a bare name is that module's function first,
+  // as a call's is (ModuleTemplates' Names), not one the importer declares.
   if (!S.CurrentScope->lookup(node->getName())) {
-    if (const FunctionSig *sig = S.lookupFunction(node->getName())) {
-      if (!S.checkFunctionValue(node->getName(), *sig, node->getLocation()))
+    std::string fnName = node->getName();
+    if (S.CurrentOrigin) {
+      std::string home = Sema::hiddenQualifier(S.CurrentOrigin->Module) +
+                         names::kQualSep + fnName;
+      if (S.lookupFunction(home))
+        fnName = std::move(home);
+    }
+    if (const FunctionSig *sig = S.lookupFunction(fnName)) {
+      if (!S.checkFunctionValue(fnName, *sig, node->getLocation()))
         return nullptr;
-      node->setFunctionRef(true);
+      node->setFunctionRef(S.Ctx.intern(fnName));
       auto *fnt = S.functionTypeOf(*sig);
       node->setResolvedType(fnt);
       return fnt;
@@ -1456,7 +1466,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   // instance is known first, and so are its parameters.
   const bool explicitInstance = node->hasTypeArgs() &&
                                 !S.isConversionTarget(node->getCalleeName()) &&
-                                S.isTemplate(node->getCalleeName());
+                                (S.isTemplate(node->getCalleeName()) ||
+                                 S.isTemplateStatic(node->getCalleeName()));
   if (explicitInstance && !S.resolveGenericCall(node, {}))
     return nullptr;
   if (explicitInstance ||
@@ -1519,6 +1530,11 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       return nullptr;
     }
     auto *superInit = superClass->findMethod(names::kMethodInit);
+    // A superclass whose initializer is `___init__` is extended by its
+    // module only.
+    if (!S.checkConstructible(superClass->getName(), superClass->getName(),
+                              superInit, "extended", node->getLocation()))
+      return nullptr;
     std::vector<ast::Type *> expectedParams;
     if (superInit)
       expectedParams = superInit->getParamTypes();
@@ -1565,7 +1581,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
   // -- Generic call: instantiate the template and rebind the callee
   if (!explicitInstance &&
-      (node->hasTypeArgs() || S.isTemplate(node->getCalleeName()))) {
+      (node->hasTypeArgs() || S.isTemplate(node->getCalleeName()) ||
+       S.isTemplateStatic(node->getCalleeName()))) {
     for (auto *ty : argTypes)
       if (!ty)
         return nullptr; // argument errors already reported; cannot infer
@@ -1614,6 +1631,19 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     S.ConstructsEdges[S.CurrentClassCtx->ClassType->getName()].insert(
         node->getCalleeName());
 
+  // A type whose initializer is `___init__` is constructed by its module.
+  if (auto *ct = S.Ctx.lookupClassType(node->getCalleeName())) {
+    if (!S.checkConstructible(ct->getName(), node->getCalleeName(),
+                              ct->findMethod(names::kMethodInit), "constructed",
+                              node->getLocation()))
+      return nullptr;
+  } else if (auto *st = S.Ctx.lookupStructType(node->getCalleeName())) {
+    if (!S.checkConstructible(st->getName(), node->getCalleeName(),
+                              st->findMethod(names::kMethodInit), "constructed",
+                              node->getLocation()))
+      return nullptr;
+  }
+
   if (argTypes.size() != sig->ParamTypes.size()) {
     std::string msg = "function '" + displayName(node->getCalleeName()) +
                       "' expects " + std::to_string(sig->ParamTypes.size()) +
@@ -1631,22 +1661,11 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     return sig->ReturnType;
   }
 
-  // The print builtins print an optional too, `None` or its value, and a
-  // tuple: they take one as it is, not as an `Obj` (neither is one).
-  const bool printsOptionals =
-      sig->IsBuiltin && (node->getCalleeName() == names::kPrint ||
-                         node->getCalleeName() == names::kPrintln ||
-                         node->getCalleeName() == names::kErrPrint ||
-                         node->getCalleeName() == names::kErrPrintln);
-
   // Check argument types.
   for (size_t i = 0; i < argTypes.size(); ++i) {
     if (!argTypes[i])
       continue; // already reported
     auto *argExpr = node->getArguments()[i];
-    if (printsOptionals && (ast::isa<ast::OptionalType>(argTypes[i]) ||
-                            ast::isa<ast::TupleType>(argTypes[i])))
-      continue;
     if (!S.checkAssignable(sig->ParamTypes[i], argTypes[i], argExpr) &&
         !S.diagnoseOptionalNarrowing(argExpr->getLocation(), sig->ParamTypes[i],
                                      argTypes[i])) {
@@ -1673,8 +1692,18 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   if (!recvTy)
     return nullptr;
 
-  // A method cannot be called on an optional receiver (it may be None).
+  // A method cannot be called on an optional receiver (it may be None),
+  // but for the builtin `Show`'s `toString()` of an optional object or
+  // scalar: "None", or its value's text.
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
+    ast::Type *inner = ot->getInnerType();
+    if (node->getMethodName() == names::kMethodToString &&
+        node->getNumArguments() == 0 &&
+        (ast::isa<ast::ClassType>(inner) || ast::isa<ast::TupleType>(inner) ||
+         (ast::isa<ast::BuiltinType>(inner) && inner != S.Ctx.getVoidTy()))) {
+      node->setResolvedType(S.Ctx.getStrTy());
+      return S.Ctx.getStrTy();
+    }
     S.errorOptionalUnwrap(node->getLocation(), ot);
     return nullptr;
   }
@@ -2151,6 +2180,8 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
       if (ast::isa<ast::OptionalType>(valueTy))
         result = valueTy;
       else if (ast::isRefType(valueTy) || ast::isFunctionValue(valueTy) ||
+               ast::isa<ast::EnumType>(valueTy) ||
+               ast::isa<ast::TupleType>(valueTy) ||
                (ast::isa<ast::BuiltinType>(valueTy) &&
                 valueTy != S.Ctx.getVoidTy()))
         result = S.Ctx.getOptionalType(valueTy);
@@ -2433,18 +2464,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
   AccumulatedImportContexts.clear();
 
-  // Bootstrap builtin functions — the print family takes a single Obj
-  // (printed via toString), or an optional (`None` or its value, see
-  // visitCallExpr); compose multiple pieces with `+`.  Paykan has no
-  // variadic functions or overloading, so these are ordinary one-arg builtins.
-  declareFunction(names::kPrint, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*isBuiltin=*/true);
-  declareFunction(names::kPrintln, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*isBuiltin=*/true);
-  declareFunction(names::kErrPrint, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*isBuiltin=*/true);
-  declareFunction(names::kErrPrintln, Ctx.getVoidTy(), {Ctx.getObjTy()},
-                  /*isBuiltin=*/true);
+  // Printing and files are the standard library's (stdlib/io.pkn).
 
   // Register type-conversion builtins (take unique builtin types — no ownership
   // check needed).
@@ -2452,15 +2472,6 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   // The conversions (`Str<int>(n)`, `int<Str>(s)`, ...) are not functions:
   // checkConversion handles them (#64).
   declareFunction(names::kString, StrTy, {StrTy}, true);
-  declareFunction(names::kOpen, Ctx.getObjTy(), {StrTy, StrTy}, true);
-  // They only read their arguments, which are `view` parameters, so a `view`
-  // can be printed (checkViewArgs).  Not `Str(s)`, which returns `s` itself.
-  for (const char *fn : {names::kPrint, names::kPrintln, names::kErrPrint,
-                         names::kErrPrintln, names::kOpen}) {
-    FunctionSig &sig = FunctionTable[fn];
-    sig.Modes.Modes.assign(sig.ParamTypes.size(), ast::ParamMode::View);
-    sig.Modes.Names.assign(sig.ParamTypes.size(), "value");
-  }
 
   registerBuiltinTraits();
 
@@ -2765,6 +2776,20 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
       ok = false;
   if (!populateStructs())
     ok = false;
+  // The optionals of tuples and structs resolved so far, now that every
+  // struct's size is known; the rest are checked where they are resolved.
+  StructsPopulated = true;
+  for (const auto &c : DeferredOptionalChecks) {
+    std::vector<InstantiationFrame> savedStack = std::move(InstantiationStack);
+    InstantiationStack = c.Frames;
+    {
+      OriginSource inOrigin(*this, c.Origin);
+      if (!checkOptionalValueSize(c.Inner, c.Loc, c.Context))
+        ok = false;
+    }
+    InstantiationStack = std::move(savedStack);
+  }
+  DeferredOptionalChecks.clear();
   // Then the traits' signatures, which may name the classes, and the
   // `impl` blocks, which record what implements a trait; only then can a
   // template's bounds be checked (SemaTraits.cpp).
@@ -3312,8 +3337,10 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 // Paykan storage.
 bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                                 const std::vector<ast::Type *> &paramTypes) {
+  // An enum crosses as its variant's ordinal, an int64_t.
   auto scalarOrRef = [&](ast::Type *t) {
-    if (t == Ctx.getStrTy() || t == Ctx.getObjTy())
+    if (t == Ctx.getStrTy() || t == Ctx.getObjTy() ||
+        ast::isa<ast::EnumType>(t))
       return true;
     auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
     return bt && t != Ctx.getVoidTy();
@@ -3324,9 +3351,9 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     error(node->getLocation(),
           "native function '" + node->getName() + "': " + what + " '" +
               typeName(t) +
-              "' cannot cross into C (int, float, bool, char, Str and Obj "
-              "can, Str? and Obj? as a result, and any type where a generic "
-              "native function says 'T')");
+              "' cannot cross into C (int, float, bool, char, an enum, Str "
+              "and Obj can, Str? and Obj? as a result, and any type where a "
+              "generic native function says 'T')");
     ok = false;
   };
   for (size_t i = 0; i < paramTypes.size(); ++i)
@@ -3373,14 +3400,16 @@ bool Sema::checkNativeParamModes(const ast::FuncDecl *node,
   for (size_t i = 0; i < types.size(); ++i) {
     const ast::Param &p = node->getParams()[i];
     if (p.Mode != ast::ParamMode::Value ||
-        (ast::isa<ast::BuiltinType>(types[i]) && types[i] != Ctx.getVoidTy()))
+        (ast::isa<ast::BuiltinType>(types[i]) && types[i] != Ctx.getVoidTy()) ||
+        ast::isa<ast::EnumType>(types[i]))
       continue;
     const std::string ty = typeName(types[i]);
     error(node->getLocation(),
           "native function '" + node->getName() + "': parameter '" +
               p.getName() + "' must be 'view' or 'inout' ('" + p.getName() +
               ": view " + ty +
-              "'); only int, float, bool and char cross into C by value");
+              "'); only int, float, bool, char and an enum cross into C by "
+              "value");
     ok = false;
   }
   return ok;
@@ -4086,9 +4115,12 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
           bindTy = armCt;
         }
       } else if (ast::isa<ast::BuiltinType>(inner) ||
-                 ast::isa<ast::FunctionType>(inner)) {
+                 ast::isa<ast::FunctionType>(inner) ||
+                 ast::isa<ast::EnumType>(inner) ||
+                 ast::isa<ast::TupleType>(inner)) {
         // `int?`: the `int` arm unwraps the present value, a plain `int`;
-        // likewise the function type of a `((int) -> int)?`.
+        // likewise the function type of a `((int) -> int)?`, the enum of a
+        // `Suit?`, and the tuple or the struct of a `(int, Str)?` / `P?`.
         if (resolvedArmTy != inner) {
           error(arm->getLocation(),
                 "match arm type '" + typeName(resolvedArmTy) +

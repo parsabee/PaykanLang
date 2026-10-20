@@ -2,12 +2,26 @@
 // (Runtime.h, "Buffer"), reached through generic native functions, and
 // Box<T>, one value held in a shared object.
 //
+// A Buffer is a struct: a handle to its storage, which the runtime holds.
+// Copying a Buffer copies the handle, so every copy sees the same slots (as a
+// slice header does); the storage goes with the last copy.
+//
 // A buffer has len() slots.  Every index and count is an `unsigned`.  It
 // grows and shrinks only when asked to, and growing a slot at a time is
 // amortised O(1).  A new slot holds zero bytes, which is the value 0, 0.0,
 // False, char 0 or None.  A reference slot that may not be None (a class,
-// Str, a tuple) is unset until stored, and reading one panics, as do an
-// index out of bounds and shrinking by more than len().
+// Str, a tuple) is unset until stored.
+//
+// What can go wrong is reported as ::result's errors, not a panic: memory
+// that is not there for new slots is `OutOfMemory` (the buffer unchanged),
+// an index past the end is `OutOfRange`, reading an unset slot is
+// `NotFound`, and shrinking by more than len() is `InvalidArgument`.  So a
+// buffer starts empty, `Buffer<T>()`, which allocates no slots, and grows by
+// grow(), reserve() or push(), each saying whether it could.  The one exception is
+// get() and copyUnchecked(), the reads for code that has checked its index
+// already (get() returns the slot itself, a `view`, nothing copied): they
+// panic on a bad index, as reading a fixed-size array out of bounds does.
+// copy() is the checked read.
 //
 // The buffer holds its own reference to each value it stores and drops it
 // when the slot is overwritten or shrunk away, or the buffer dies.
@@ -16,56 +30,115 @@
 // "Private to the module"): the `_` native functions are the module's own,
 // and `Buffer`'s `__data` is reachable only from its methods.
 
+import ::result as res;
+
 native fn _new<T>(n: unsigned) -> Obj = "PaykanBuffer_new";
 native fn _len<T>(b: view Obj) -> unsigned = "PaykanBuffer_len";
+native fn _isSet<T>(b: view Obj, i: unsigned) -> int = "PaykanBuffer_isSet";
 native fn _get<T>(b: view Obj, i: unsigned) -> view T = "PaykanBuffer_get";
 native fn _copy<T>(b: view Obj, i: unsigned) -> T = "PaykanBuffer_copy";
 native fn _set<T>(b: inout Obj, i: unsigned, v: view T) = "PaykanBuffer_set";
-native fn _reserve<T>(b: inout Obj, n: unsigned) = "PaykanBuffer_reserve";
-native fn _grow<T>(b: inout Obj, by: unsigned) = "PaykanBuffer_grow";
+native fn _reserve<T>(b: inout Obj, n: unsigned)
+                      -> int = "PaykanBuffer_tryReserve";
+native fn _grow<T>(b: inout Obj, by: unsigned) -> int = "PaykanBuffer_tryGrow";
 native fn _shrink<T>(b: inout Obj, by: unsigned) = "PaykanBuffer_shrink";
 
-class Buffer<T> {
+/// The error of a buffer operation that failed with @p code.
+fn _fail(code: res::ErrorCode) -> res::Error {
+  return res::Error(code, None);
+}
+
+/// The Error of C's @p errno: none for 0.
+fn _error(errno: int) -> res::Error {
+  return if errno == 0 then res::none() else res::fromErrno(errno);
+}
+
+struct Buffer<T> {
   __data: Obj;
 }
 
 impl Buffer<T> {
-  // A buffer of `n` new slots.
-  fn __init__(n: unsigned) { self.__data = _new<T>(n); }
+  // An empty buffer: no slots, nothing allocated for them.
+  fn __init__()                           { self.__data = _new<T>(0); }
 
   // The number of slots.
-  view fn len() -> unsigned { return _len<T>(self.__data); }
+  view fn len() -> unsigned               { return _len<T>(self.__data); }
 
-  // Slot `i`, for i < len().
-  view fn get(i: unsigned) -> view T { return _get<T>(self.__data, i); }
+  // Slot `i`, for i < len(), itself: read in place, panicking on a bad
+  // index or an unset slot (copy() reports them instead).
+  view fn get(i: unsigned) -> view T      { return _get<T>(self.__data, i); }
 
-  // A copy of slot `i`, to keep.
-  view fn copy(i: unsigned) -> T { return _copy<T>(self.__data, i); }
+  // A copy of slot `i`, to keep, for i < len(): panicking on a bad index or
+  // an unset slot, as get() does (copy() reports them instead).
+  view fn copyUnchecked(i: unsigned) -> T { return _copy<T>(self.__data, i); }
 
-  // Store `v` in slot `i`.
-  fn set(i: unsigned, v: view T) { _set<T>(self.__data, i, v); }
-
-  // Make the buffer at least `n` slots long.
-  fn reserve(n: unsigned) { _reserve<T>(self.__data, n); }
-
-  // Add `by` new slots at the end.
-  fn grow(by: unsigned) { _grow<T>(self.__data, by); }
-
-  // Drop the last `by` slots.
-  fn shrink(by: unsigned) { _shrink<T>(self.__data, by); }
-
-  // Append `v` in a new slot.
-  fn push(v: view T) {
-    _grow<T>(self.__data, 1);
-    _set<T>(self.__data, _len<T>(self.__data) - 1, v);
+  // A copy of slot `i`, to keep: `OutOfRange` past the end, `NotFound` for
+  // a slot never set.
+  view fn copy(i: unsigned) -> res::Result<T> {
+    if i >= _len<T>(self.__data) {
+      return res::Result<T>(_fail(res::ErrorCode::OutOfRange), None);
+    }
+    if _isSet<T>(self.__data, i) == 0 {
+      return res::Result<T>(_fail(res::ErrorCode::NotFound), None);
+    }
+    return res::ok(_copy<T>(self.__data, i));
   }
 
-  // Exchange slots `i` and `j`.
-  fn swap(i: unsigned, j: unsigned) {
+  // Store `v` in slot `i`: `OutOfRange` past the end.
+  fn set(i: unsigned, v: view T) -> res::Error {
+    if i >= _len<T>(self.__data) {
+      return _fail(res::ErrorCode::OutOfRange);
+    }
+    _set<T>(self.__data, i, v);
+    return res::none();
+  }
+
+  // Make the buffer at least `n` slots long: `OutOfMemory` when the slots
+  // cannot be allocated.
+  fn reserve(n: unsigned) -> res::Error {
+    return _error(_reserve<T>(self.__data, n));
+  }
+
+  // Add `by` new slots at the end: `OutOfMemory` when they cannot be
+  // allocated.
+  fn grow(by: unsigned) -> res::Error {
+    return _error(_grow<T>(self.__data, by));
+  }
+
+  // Drop the last `by` slots: `InvalidArgument` for more than len().
+  fn shrink(by: unsigned) -> res::Error {
+    if by > _len<T>(self.__data) {
+      return _fail(res::ErrorCode::InvalidArgument);
+    }
+    _shrink<T>(self.__data, by);
+    return res::none();
+  }
+
+  // Append `v` in a new slot: `OutOfMemory` when it cannot be allocated.
+  fn push(v: view T) -> res::Error {
+    errno = _grow<T>(self.__data, 1);
+    if errno != 0 {
+      return res::fromErrno(errno);
+    }
+    _set<T>(self.__data, _len<T>(self.__data) - 1, v);
+    return res::none();
+  }
+
+  // Exchange slots `i` and `j`: `OutOfRange` when either is past the end,
+  // `NotFound` when either was never set.
+  fn swap(i: unsigned, j: unsigned) -> res::Error {
+    n = _len<T>(self.__data);
+    if i >= n || j >= n {
+      return _fail(res::ErrorCode::OutOfRange);
+    }
+    if _isSet<T>(self.__data, i) == 0 || _isSet<T>(self.__data, j) == 0 {
+      return _fail(res::ErrorCode::NotFound);
+    }
     a: T = _copy<T>(self.__data, i);
     b: T = _copy<T>(self.__data, j);
     _set<T>(self.__data, i, b);
     _set<T>(self.__data, j, a);
+    return res::none();
   }
 }
 
@@ -79,6 +152,6 @@ class Box<T: ValueType> {
 }
 
 impl Box<T> {
-  fn __init__(v: T) { self.__data = v; }
+  fn __init__(v: T)   { self.__data = v; }
   fn get() -> inout T { return self.__data; }
 }

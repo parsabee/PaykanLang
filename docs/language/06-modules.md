@@ -104,9 +104,10 @@ library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable
 ordinary module, and it is cached under `.paykan_cache/@system/` (see
 [Module Files](#module-files)).
 
-The standard library ships with the compiler: `::collections` and `::memory` (see
-[the standard library](13-standard-library.md)). The builtins (`println`, `Str`, `File`,
-`open`, `Stdin`, ...) need no import.
+The standard library ships with the compiler: `::io`, `::result`, `::collections` and
+`::memory` (see [the standard library](13-standard-library.md)). Printing and files are
+`::io`, so a program that prints imports it (`import ::io;`, then `io::println(...)`). Only
+the builtins (`Obj`, `Str` and the conversions, the primitive types) need no import.
 
 ---
 
@@ -123,6 +124,7 @@ variant:
 
 ```pkn
 // file: pal/color.pkn
+import ::io;
 enum Color { Red, Green, Blue }
 fn name(c: Color) -> Str { /* … */ }
 
@@ -131,7 +133,7 @@ import pal::color;
 
 fn main() -> int {
   c: color::Color = color::Color::Green;   // qualified type + variant
-  println(color::name(c));                 // pass an enum to an imported function
+  io::println(color::name(c));                 // pass an enum to an imported function
   return 0;
 }
 ```
@@ -144,7 +146,11 @@ declaration, used anywhere; an importer cannot name it. `m::_bucket(1, 2)`, a `m
 annotation, `m::_Entry<int, Str>(...)`, `class C : m::_Base` and `impl m::_Trait for C` are
 all rejected with `'m::_bucket' is private to module 'm'`. A field or method of a class or
 struct whose name starts with one underscore is the module's own the same way: any code of
-the module reaches it, an importer does not (`'_w' of 'Pub' is private to module 'm'`). Two
+the module reaches it, an importer does not (`'_w' of 'Pub' is private to module 'm'`). An
+initializer written `___init__` is the module's too: only the module's code constructs the
+type, or extends it (`'m::T' cannot be constructed here: its initializer '___init__' is
+private to module 'm'`); an importer makes one through the module's functions
+([Classes](04-classes.md#private-fields-and-methods)). Two
 underscores (`__count`) are for a member private to its own class or struct
 ([Classes](04-classes.md#private-fields-and-methods)), and a top-level declaration cannot
 have them. A generic class or function the module exports may use its private names in its
@@ -293,4 +299,5 @@ interface 1.0, PIR 1, runtime ABI 6); ... Rebuild it from source.`), never a sil
 | Unknown exported type | An import's export record names a type nothing provides (a compiler bug or corrupt cache — reported against the `import`, never silently degraded to `Obj`/`void`) |
 | Private name imported | `Mod::_name` for a function, class, struct, enum or trait whose name starts with `_`: `'Mod::_name' is private to module 'Mod'` |
 | Module-private member imported | `x._f`, `x._m()` or `Mod::T::_s()` on a type of another module: `'_f' of 'T' is private to module 'Mod'` |
+| Module-private initializer | `Mod::T(...)`, or `__super__(...)` from a subclass, where `T`'s initializer is `___init__`: `'Mod::T' cannot be constructed here: its initializer '___init__' is private to module 'Mod'` |
 | Private type exposed | A free function, a public field or a public method naming a `_`-prefixed type |

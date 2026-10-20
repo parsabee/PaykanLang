@@ -1,7 +1,13 @@
-3 0
+0 Ok 3
+0
 6 7 0 9
+9
 97
 3 9 0
+42
+OutOfRange OutOfRange InvalidArgument OutOfRange 3
+OutOfMemory 3
 1 s0 s42
-True False
+NotFound NotFound
+True False here
 0 False 0

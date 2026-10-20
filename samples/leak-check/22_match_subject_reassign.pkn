@@ -10,6 +10,8 @@
 // expect-stdout: Bbee
 // expect-stdout: Aa
 
+import ::io;
+
 class A {
   s: Str;
   view fn name() -> Str { return "A" + self.s; }
@@ -30,9 +32,12 @@ impl B {
 fn main() -> int {
   x: A = B();
   match x {
-    b: B { x = A(); println(b.name()); }
-    _ { println("other"); }
+    b: B {
+      x = A();
+      io::println(b.name());
+    }
+    _ { io::println("other"); }
   }
-  println(x.name());
+  io::println(x.name());
   return 0;
 }

@@ -51,14 +51,14 @@ void expectRuns(const std::string &main, const std::string &expected) {
 } // namespace
 
 TEST(Buffer, StartsWithThreeZeroedSlots) {
-  expectRuns(R"(
+  expectRuns(R"(import ::io;
     fn main() -> int {
       b = Buffer<int>();
-      println(Str<int>(b.len()));
+      io::println(Str<int>(b.len()));
       b.set(0, 10);
       b.set(2, 30);
       n: int = b.get(0) + b.get(1) + b.get(2);
-      println(Str<int>(n));
+      io::println(Str<int>(n));
       return 0;
     }
   )",
@@ -66,17 +66,17 @@ TEST(Buffer, StartsWithThreeZeroedSlots) {
 }
 
 TEST(Buffer, ReserveGrowAndShrinkChangeTheLength) {
-  expectRuns(R"(
+  expectRuns(R"(import ::io;
     fn main() -> int {
       b = Buffer<float>();
       b.grow(2);
       b.set(4, 2.5);
-      println(Str<int>(b.len()) + " " + Str<float>(b.get(4)));
+      io::println(Str<int>(b.len()) + " " + Str<float>(b.get(4)));
       b.shrink(4);
-      println(Str<int>(b.len()));
+      io::println(Str<int>(b.len()));
       b.reserve(8);
       b.reserve(2);
-      println(Str<int>(b.len()) + " " + Str<float>(b.get(4)));
+      io::println(Str<int>(b.len()) + " " + Str<float>(b.get(4)));
       return 0;
     }
   )",
@@ -84,7 +84,7 @@ TEST(Buffer, ReserveGrowAndShrinkChangeTheLength) {
 }
 
 TEST(Buffer, HoldsReferences) {
-  expectRuns(R"(
+  expectRuns(R"(import ::io;
     class P {
       x: int;
     }
@@ -98,13 +98,13 @@ TEST(Buffer, HoldsReferences) {
       s.set(1, "b");
       s.set(2, "c");
       s.set(1, "B");
-      println(s.get(0) + s.get(1) + s.get(2));
+      io::println(s.get(0) + s.get(1) + s.get(2));
       s.shrink(2);
       ps = Buffer<P>();
       p = P(42);
       ps.set(1, p);
       ps.set(2, p);
-      println(Str<int>(ps.get(1).x + ps.get(2).x));
+      io::println(Str<int>(ps.get(1).x + ps.get(2).x));
       return 0;
     }
   )",
@@ -112,11 +112,11 @@ TEST(Buffer, HoldsReferences) {
 }
 
 TEST(Buffer, OptionalSlotsStartAsNone) {
-  expectRuns(R"(
+  expectRuns(R"(import ::io;
     fn show(o: view Str?) {
       match o {
-        v: Str { println(v); }
-        None { println("None"); }
+        v: Str { io::println(v); }
+        None { io::println("None"); }
       }
     }
     fn main() -> int {
@@ -135,7 +135,7 @@ TEST(Buffer, OptionalSlotsStartAsNone) {
 // An optional value is its presence flag and payload: a `char?` takes two
 // bytes and an `int?` sixteen, a new one is None, and both survive growing.
 TEST(Buffer, HoldsOptionalValuesOfEverySize) {
-  expectRuns(R"(
+  expectRuns(R"(import ::io;
     fn c(o: view char?) -> Str {
       match o { v: char { return Str<char>(v); } None { return "-"; } }
     }
@@ -156,8 +156,8 @@ TEST(Buffer, HoldsOptionalValuesOfEverySize) {
       s = "";
       i = 0;
       while i < 7 { s = s + c(cs.get(i)) + n(ns.get(i)) + " "; i = i + 1; }
-      println(s);
-      println(c(cs.copy(21)) + n(ns.copy(21)) + " " + c(cs.get(22)));
+      io::println(s);
+      io::println(c(cs.copy(21)) + n(ns.copy(21)) + " " + c(cs.get(22)));
       return 0;
     }
   )",
@@ -166,19 +166,19 @@ TEST(Buffer, HoldsOptionalValuesOfEverySize) {
 
 // A bool takes one byte; a copy outlives the value it was taken from.
 TEST(Buffer, HoldsBoolsAndCopiesOut) {
-  expectRuns(R"(
+  expectRuns(R"(import ::io;
     fn main() -> int {
       b = Buffer<bool>();
       b.grow(13);
       b.set(1, True);
       b.set(15, True);
-      println(Str<bool>(b.get(0)) + " " + Str<bool>(b.get(1)) + " " +
+      io::println(Str<bool>(b.get(0)) + " " + Str<bool>(b.get(1)) + " " +
               Str<bool>(b.copy(15)));
       s = Buffer<Str>();
       s.set(0, "x");
       t: Str = s.copy(0);
       s.set(0, "y");
-      println(t + s.get(0));
+      io::println(t + s.get(0));
       return 0;
     }
   )",
@@ -189,7 +189,7 @@ TEST(Buffer, HoldsBoolsAndCopiesOut) {
 // retained by the buffer, its `int?` is inline, and a copy outlives the value
 // it was taken from.  A tuple of plain values is copied out of a `get`.
 TEST(Buffer, HoldsTuples) {
-  expectRuns(R"(
+  expectRuns(R"(import ::io;
     class Node {
       v: int;
       view fn toString() -> Str { return "N" + Str<int>(self.v); }
@@ -204,24 +204,24 @@ TEST(Buffer, HoldsTuples) {
       b.set(0, ("a", n, 1));
       b.set(1, ("b" + "b", Node(2), None));
       b.set(2, ("c", n, 3));
-      println(b.get(0));
-      println(b.get(1));
-      println(b.get(1).0 + " " + opt(b.get(1).2) + " " + opt(b.get(2).2));
+      io::println(b.get(0));
+      io::println(b.get(1));
+      io::println(b.get(1).0 + " " + opt(b.get(1).2) + " " + opt(b.get(2).2));
       t = b.copy(2);
       b.set(2, ("d", Node(4), 4));
-      println(t);
-      println(b.get(2));
+      io::println(t);
+      io::println(b.get(2));
       b.grow(2);
       b.set(4, t);
-      println(Str<int>(b.len()) + " " + b.get(4).0);
+      io::println(Str<int>(b.len()) + " " + b.get(4).0);
       b.shrink(3);
       n.v = 9;
-      println(b.get(0));
+      io::println(b.get(0));
       ps = Buffer<(int, float)>();
       ps.set(1, (2, 0.5));
       p = ps.get(1);
-      println(p);
-      println(ps.get(0));
+      io::println(p);
+      io::println(ps.get(0));
       return 0;
     }
   )",

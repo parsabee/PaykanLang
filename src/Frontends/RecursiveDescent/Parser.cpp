@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Parser.h"
+#include "Names.h"
 #include "paykan/Frontend.h"
 
 #include <algorithm>
@@ -1021,7 +1022,12 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
     errorAtCurrent("expected a function name after 'fn'");
     return nullptr;
   }
-  const std::string &name = intern(consume().Text);
+  // `___init__` is the initializer `__init__`, private to its module
+  // (Names.h): recorded as the initializer, with the mark.
+  const std::string_view spelled = consume().Text; // into the source
+  const bool modulePrivateInit = spelled == names::kMethodInitModulePrivate;
+  const std::string &name = intern(
+      modulePrivateInit ? std::string_view(names::kMethodInit) : spelled);
 
   std::vector<const std::string *> typeParams;
   TypeParamBounds bounds;
@@ -1067,6 +1073,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
                                   nullptr, std::move(typeParams));
     fn->setNativeSymbol(symbol);
     fn->setResultMode(resultMode);
+    fn->setModulePrivateInit(modulePrivateInit);
     return fn;
   }
 
@@ -1086,6 +1093,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
                                   nullptr);
     fn->setView(view);
     fn->setResultMode(resultMode);
+    fn->setModulePrivateInit(modulePrivateInit);
     return fn;
   }
 
@@ -1096,6 +1104,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
                                 body, std::move(typeParams));
   fn->setView(view);
   fn->setResultMode(resultMode);
+  fn->setModulePrivateInit(modulePrivateInit);
   fn->setTypeParamBounds(std::move(bounds));
   return fn;
 }
@@ -2055,15 +2064,22 @@ Expr *Parser::parseLiteral() {
 }
 
 // `name <` in expression position is a generic call only when a type
-// argument list followed by `> (` fits; `a < b` is otherwise a comparison.
-bool Parser::tryGenericCallArgs(std::vector<Type *> &out) {
+// argument list followed by `> (` fits, or by `> :: IDENT (` (a function of
+// the instantiation, `Box<int>::of(1)`); `a < b` is otherwise a comparison.
+bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member) {
   size_t saved = Pos;
   SourceLocation savedEnd = PrevEnd;
   ++Speculating;
   consume(); // '<'
   bool ok = enterNesting();
   if (ok) {
-    ok = parseTypeArgList(out) && accept(Tok::Greater) && at(Tok::LParen);
+    ok = parseTypeArgList(out) && accept(Tok::Greater);
+    if (ok && at(Tok::ColonColon) && kind(1) == Tok::Ident &&
+        kind(2) == Tok::LParen) {
+      consume(); // '::'
+      member = std::string(consume().Text);
+    }
+    ok = ok && at(Tok::LParen);
     leaveNesting();
   }
   --Speculating;
@@ -2071,14 +2087,17 @@ bool Parser::tryGenericCallArgs(std::vector<Type *> &out) {
     Pos = saved;
     PrevEnd = savedEnd;
     out.clear();
+    member.clear();
   }
   return ok;
 }
 
 // primary ::= literal | IDENT | IDENT "(" args ")" | IDENT "<" types ">" "("
 // args ")"
+//           | IDENT "<" types ">" "::" IDENT "(" args ")"
 //           | modulePath "::" IDENT ( "(" args ")" | "<" types ">" "(" args ")"
-//           )? | "(" expression ")" | "(" expression ( "," expression )+ ")" |
+//           | "<" types ">" "::" IDENT "(" args ")" )?
+//           | "(" expression ")" | "(" expression ( "," expression )+ ")" |
 //           "[" args "]"
 Expr *Parser::parsePrimary() {
   SourceLocation start = cur().Loc;
@@ -2099,7 +2118,10 @@ Expr *Parser::parsePrimary() {
     std::string full = path.empty() ? name : path + "::" + name;
 
     std::vector<Type *> typeArgs;
-    bool generic = at(Tok::Less) && tryGenericCallArgs(typeArgs);
+    std::string member; // `Box<int>::of(...)`: the instantiation's function
+    bool generic = at(Tok::Less) && tryGenericCallArgs(typeArgs, member);
+    if (!member.empty())
+      full += "::" + member;
     if (generic || at(Tok::LParen)) {
       consume(); // '('
       std::vector<Expr *> args;

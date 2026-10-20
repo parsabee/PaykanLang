@@ -1,5 +1,6 @@
 // ::collections HashMap<K, V> and HashSet<K>: keys of the builtin Hashable
 // types and of a class implementing Hashable, growth and removal.
+import ::io;
 import ::collections;
 
 // A class key: hash() and equals agree, so equal points are the same key.
@@ -8,7 +9,9 @@ class Point {
   y: int;
   view fn equals(other: Obj) -> bool {
     match other {
-      p: Point { return p.x == self.x && p.y == self.y; }
+      p: Point {
+        return p.x == self.x && p.y == self.y;
+      }
       _ { return False; }
     }
   }
@@ -35,21 +38,21 @@ fn sortedKeys(m: view collections::HashMap<Str, int>) -> Str {
 
 fn main() -> int {
   counts = collections::HashMap<Str, int>();
-  println(Str(counts.len()) + " " + Str(counts.isEmpty()));
+  io::println(Str(counts.len()) + " " + Str(counts.isEmpty()));
   words: Str[7] = ["a", "bb", "a", "ccc", "bb", "a", "dddd"];
   i: int = 0;
   while i < words.len() {
     counts.put(words[i], counts.getOr(words[i], 0) + 1);
     i = i + 1;
   }
-  println(Str(counts.len()) + " a=" + Str(counts.get("a")) + " bb=" +
-          Str(counts.get("bb")) + " zz=" + Str(counts.getOr("zz", -1)));
-  println(sortedKeys(counts));
-  println(Str(counts.put("a", 10)) + " " + Str(counts.put("e", 5)) + " " +
-          Str(counts.get("a")) + " " + Str(counts.len()));
-  println(Str(counts.containsKey("ccc")) + " " + Str(counts.remove("ccc")) +
-          " " + Str(counts.remove("ccc")) + " " + Str(counts.containsKey("ccc")) +
-          " " + Str(counts.len()));
+  io::println(Str(counts.len()) + " a=" + Str(counts.get("a")) + " bb="
+      + Str(counts.get("bb")) + " zz=" + Str(counts.getOr("zz", -1)));
+  io::println(sortedKeys(counts));
+  io::println(Str(counts.put("a", 10)) + " " + Str(counts.put("e", 5)) + " "
+      + Str(counts.get("a")) + " " + Str(counts.len()));
+  io::println(Str(counts.containsKey("ccc")) + " " + Str(counts.remove("ccc"))
+      + " " + Str(counts.remove("ccc")) + " " + Str(counts.containsKey("ccc"))
+      + " " + Str(counts.len()));
   total: int = 0;
   vs = counts.values();
   v: unsigned = 0;
@@ -57,7 +60,7 @@ fn main() -> int {
     total = total + vs.get(v);
     v = v + 1;
   }
-  println("total " + Str(total));
+  io::println("total " + Str(total));
 
   // Growth: many int keys, then remove the odd ones.
   squares = collections::HashMap<int, int>();
@@ -71,52 +74,52 @@ fn main() -> int {
     squares.remove(i);
     i = i + 2;
   }
-  println(Str(squares.len()) + " " + Str(squares.get(998)) + " " +
-          Str(squares.containsKey(999)) + " " + Str(squares.getOr(-5, 7)));
+  io::println(Str(squares.len()) + " " + Str(squares.get(998)) + " "
+      + Str(squares.containsKey(999)) + " " + Str(squares.getOr(-5, 7)));
   squares.clear();
   squares.put(-5, 25);
-  println(Str(squares.len()) + " " + Str(squares.get(-5)));
+  io::println(Str(squares.len()) + " " + Str(squares.get(-5)));
 
   // char and bool keys; values of any type.
   letters = collections::HashMap<char, Str?>();
   letters.put('a', "alpha");
   letters.put('b', None);
-  println(Str(letters.len()) + " " + Str(letters.get('b') == None) + " " +
-          Str(letters.containsKey('c')));
+  io::println(Str(letters.len()) + " " + Str(letters.get('b') == None) + " "
+      + Str(letters.containsKey('c')));
   flags = collections::HashMap<bool, (int, int)>();
   flags.put(True, (1, 2));
   flags.put(False, (3, 4));
   flags.put(True, (5, 6));
   t = flags.get(True);
-  println(Str(flags.len()) + " " + Str(t.0 + t.1));
+  io::println(Str(flags.len()) + " " + Str(t.0 + t.1));
 
   // A class key: a new Point(1, 2) finds the entry another one made.
   grid = collections::HashMap<Point, Str>();
   grid.put(Point(1, 2), "one-two");
   grid.put(Point(2, 1), "two-one");
   grid.put(Point(1, 2), "again");
-  println(Str(grid.len()) + " " + grid.get(Point(1, 2)) + " " +
-          grid.getOr(Point(3, 3), "none"));
+  io::println(Str(grid.len()) + " " + grid.get(Point(1, 2)) + " "
+      + grid.getOr(Point(3, 3), "none"));
 
   seen = collections::HashSet<Str>();
-  println(Str(seen.add("x")) + " " + Str(seen.add("y")) + " " +
-          Str(seen.add("x")) + " " + Str(seen.len()));
-  println(Str(seen.contains("y")) + " " + Str(seen.remove("y")) + " " +
-          Str(seen.contains("y")) + " " + Str(seen.len()) + " " +
-          collections::listToString(seen.toList()));
+  io::println(Str(seen.add("x")) + " " + Str(seen.add("y")) + " "
+      + Str(seen.add("x")) + " " + Str(seen.len()));
+  io::println(Str(seen.contains("y")) + " " + Str(seen.remove("y")) + " "
+      + Str(seen.contains("y")) + " " + Str(seen.len()) + " "
+      + collections::listToString(seen.toList()));
   nums = collections::HashSet<int>();
   i = 0;
   while i < 100 {
     nums.add(i % 10);
     i = i + 1;
   }
-  println(Str(nums.len()) + " " + Str(nums.contains(9)) + " " +
-          Str(nums.contains(10)));
+  io::println(Str(nums.len()) + " " + Str(nums.contains(9)) + " "
+      + Str(nums.contains(10)));
   nums.clear();
-  println(Str(nums.isEmpty()));
+  io::println(Str(nums.isEmpty()));
   pts = collections::HashSet<Point>();
   pts.add(Point(0, 0));
   pts.add(Point(0, 0));
-  println(Str(pts.len()) + " " + Str(pts.contains(Point(0, 0))));
+  io::println(Str(pts.len()) + " " + Str(pts.contains(Point(0, 0))));
   return 0;
 }

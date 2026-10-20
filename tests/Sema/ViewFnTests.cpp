@@ -152,7 +152,7 @@ fn main() -> int { return 0; }
 // `let` only fixes the variable: any method can be called on what it holds,
 // its own and the builtins', `view fn` or not.
 TEST(ViewFn, LetCanCallAnyMethod) {
-  auto r = semaCheck(R"(class Counter {
+  auto r = semaCheck(R"(import ::io; class Counter {
   n: int;
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
@@ -167,7 +167,7 @@ fn main() -> int {
   let xs = [1, 2];
   c.tick();
   s.concat("d");
-  println(c.toString() + s.toString());
+  io::println(c.toString() + s.toString());
   return c.get() + s.len() + xs.len();
 }
 )");
@@ -177,7 +177,7 @@ fn main() -> int {
 // A `view fn` of the class, an inherited one and an override of one can be
 // called on a `view`; a plain `fn` cannot.
 TEST(ViewFn, CallableOnAView) {
-  auto r = semaCheck(R"(class Counter {
+  auto r = semaCheck(R"(import ::io; class Counter {
   n: int;
   fn tick() { self.n = self.n + 1; }
   view fn get() -> int { return self.n; }
@@ -195,7 +195,7 @@ impl Fast {
   fn __init__() { __super__(); }
 }
 fn show(c: view Counter, f: view Fast) -> int {
-  println(c.toString() + f.toString());
+  io::println(c.toString() + f.toString());
   f.tick();
   return c.get() + f.get();
 }

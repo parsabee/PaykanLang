@@ -17,7 +17,9 @@ argument must implement.
 - A class implements every trait its superclasses implement. Every class implements the
   built-in trait `Show` (`view fn toString() -> Str`) through `Obj`, and so do `int`,
   `float`, `bool` and `char` (`n.toString()` is `Str(n)`), tuples (`(1, "a").toString()`
-  is `(1, a)`) and structs (`Point(x: 1, y: 2)`).
+  is `(1, a)`), structs (`Point(x: 1, y: 2)`) and the optional of a `Show` type
+  (`"None"` or the value's text). The standard library's print functions
+  (`io::println<T: Show>`) take any `Show` value.
 - The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
   `char` and `Str`, every sized integer type, and by a class or a struct with an
   `impl Hashable for` block. The standard library's hash tables take `Hashable` keys (see
@@ -108,6 +110,8 @@ for` block. Values that are `==` must have the same hash, so a class that overri
 by field) hashes its fields:
 
 ```pkn
+import ::io;
+
 class Point {
   x: int;
   y: int;
@@ -126,7 +130,7 @@ impl Hashable for Point {
 fn sameHash<T: Hashable>(a: view T, b: view T) -> bool { return a.hash() == b.hash(); }
 
 fn main() -> int {
-  println(Str(sameHash(Point(1, 2), Point(1, 2))) + " " + Str(sameHash("ab", "ab")) +
+  io::println(Str(sameHash(Point(1, 2), Point(1, 2))) + " " + Str(sameHash("ab", "ab")) +
           " " + Str(sameHash(7, 8)));
   return 0;
 }
@@ -154,6 +158,8 @@ reference. A struct implements it already, so `impl ValueType for` a struct is a
 too (`struct 'P' already implements 'ValueType'`).
 
 ```pkn
+import ::io;
+
 enum Suit { Hearts, Spades }
 
 fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
@@ -161,7 +167,7 @@ fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
 fn main() -> int {
   p = twice((1, "one"));
   s = twice(Suit::Spades);
-  println(Str(twice(2).1) + " " + p.1.1 + " " + Str(s.0 == Suit::Spades));
+  io::println(Str(twice(2).1) + " " + p.1.1 + " " + Str(s.0 == Suit::Spades));
   return 0;
 }
 ```

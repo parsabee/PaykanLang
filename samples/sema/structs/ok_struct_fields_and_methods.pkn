@@ -1,3 +1,5 @@
+import ::io;
+
 // OK: a struct is a value with named fields, constructed from its fields in
 // order (or through an `__init__` from an `impl` block), read with `p.x`,
 // assigned in place with `p.x = v`, copied by assignment, and given methods,
@@ -8,11 +10,11 @@ struct Point {
 }
 
 impl Point {
-  static fn origin() -> Point { return Point(0, 0); }
-  view fn sum() -> int { return self.x + self.y; }
-  fn shift(d: int) { self.x = self.x + d; self.y = self.y + d; }
+  static fn origin() -> Point    { return Point(0, 0); }
+  view fn sum() -> int           { return self.x + self.y; }
+  fn shift(d: int)               { self.x = self.x + d; self.y = self.y + d; }
   view fn moved(d: int) -> Point { q = self; q.shift(d); return q; }
-  fn xSlot() -> inout int { return self.x; }
+  fn xSlot() -> inout int        { return self.x; }
 }
 
 impl Hashable for Point {
@@ -26,14 +28,26 @@ struct Line {
 }
 
 impl Line {
-  fn __init__(a: Point, b: Point) { self.a = a; self.b = b; self.label = "line"; }
+  fn __init__(a: Point, b: Point) {
+    self.a = a;
+    self.b = b;
+    self.label = "line";
+  }
 }
 
-class Shape { at: Point; }
+class Shape {
+  at: Point;
+}
 
-fn bump(n: inout int) { n = n + 1; }
-fn show<T: Show>(x: view T) -> Str { return x.toString(); }
-fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
+fn bump(n: inout int) {
+  n = n + 1;
+}
+fn show<T: Show>(x: view T) -> Str {
+  return x.toString();
+}
+fn twice<T: ValueType>(x: T) -> (T, T) {
+  return (x, x);
+}
 
 fn main() -> int {
   p = Point(1, 2);
@@ -49,6 +63,6 @@ fn main() -> int {
   ps: Point[2] = [p, q];
   ps[1].x = 9;
   pair = twice(p);
-  println(show(l) + " " + Str(p == q) + " " + Str(p.hash()));
+  io::println(show(l) + " " + Str(p == q) + " " + Str(p.hash()));
   return p.sum() + l.a.x + s.at.moved(1).y + pair.1.x + ps[1].x;
 }

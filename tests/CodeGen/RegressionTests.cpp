@@ -21,16 +21,16 @@ using namespace paykan::test;
 
 TEST(Regression, MethodArrayParam) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Bag {
       fn take(ys: view int[]) -> int { return ys.len(); }
     }
     fn main() -> int {
       b = Bag();
       ys: int[3] = [1, 2, 3];
-      println(Str<int>(b.take(ys)));
-      println(Str<int>(b.take([4, 5])));
-      println(Str<int>(ys.len()));
+      io::println(Str<int>(b.take(ys)));
+      io::println(Str<int>(b.take([4, 5])));
+      io::println(Str<int>(ys.len()));
       return 0;
     }
   )");
@@ -42,7 +42,7 @@ TEST(Regression, MethodArrayParam) {
 
 TEST(Regression, MethodObjectArrayParam) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class P {
       x: int;
     }
@@ -62,10 +62,10 @@ TEST(Regression, MethodObjectArrayParam) {
     fn main() -> int {
       b = Bag();
       ps: P[2] = [P(1), P(2)];
-      println(Str<int>(b.total(ps)));
-      println(Str<int>(b.total([P(3), P(4)])));
-      println(Str<int>(b.count(["a", "b", "c"])));
-      println(Str<int>(ps[1].x));
+      io::println(Str<int>(b.total(ps)));
+      io::println(Str<int>(b.total([P(3), P(4)])));
+      io::println(Str<int>(b.count(["a", "b", "c"])));
+      io::println(Str<int>(ps[1].x));
       return 0;
     }
   )");
@@ -77,7 +77,7 @@ TEST(Regression, MethodObjectArrayParam) {
 
 TEST(Regression, MethodTupleParam) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Bag {
       fn second(t: (int, Str)) -> Str { return t.1; }
       fn first(t: (int, Str)) -> int { return t.0; }
@@ -85,10 +85,10 @@ TEST(Regression, MethodTupleParam) {
     fn main() -> int {
       b = Bag();
       t: (int, Str) = (1, "one");
-      println(b.second(t));
-      println(b.second((2, "two")));
-      println(Str<int>(b.first(t)));
-      println(t.1);
+      io::println(b.second(t));
+      io::println(b.second((2, "two")));
+      io::println(Str<int>(b.first(t)));
+      io::println(t.1);
       return 0;
     }
   )");
@@ -100,7 +100,7 @@ TEST(Regression, MethodTupleParam) {
 
 TEST(Regression, MethodEqualsOverride) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Bag {
       n: int;
       view fn equals(o: Obj) -> bool { return True; }
@@ -112,8 +112,8 @@ TEST(Regression, MethodEqualsOverride) {
     fn main() -> int {
       b = Bag(1);
       c = Bag(2);
-      println(Str<bool>(b == c));
-      println(Str<bool>(b.equals(c)));
+      io::println(Str<bool>(b == c));
+      io::println(Str<bool>(b.equals(c)));
       return 0;
     }
   )");
@@ -127,7 +127,7 @@ TEST(Regression, MethodEqualsOverride) {
 
 TEST(Regression, InferredClassTernaryReceiver) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Point {
       x: int;
       y: int;
@@ -147,13 +147,13 @@ TEST(Regression, InferredClassTernaryReceiver) {
       return r.sum() + r.x;
     }
     fn main() -> int {
-      println(Str<int>(pick(True)));
-      println(Str<int>(pick(False)));
+      io::println(Str<int>(pick(True)));
+      io::println(Str<int>(pick(False)));
       c = False;
       r = if c then Point(3, 3) else Point(4, 4);
-      println(Str<int>(r.sum()));
+      io::println(Str<int>(r.sum()));
       a = if c then Dog() else Cat();
-      println(a.sound());
+      io::println(a.sound());
       return 0;
     }
   )");
@@ -165,7 +165,7 @@ TEST(Regression, InferredClassTernaryReceiver) {
 
 TEST(Regression, InferredTupleOptionalTernary) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Point {
       x: int;
       fn get() -> int { return self.x; }
@@ -185,8 +185,8 @@ TEST(Regression, InferredTupleOptionalTernary) {
       return tup.1.get() * 10 + tup.0 + n;
     }
     fn main() -> int {
-      println(Str<int>(run(True)));
-      println(Str<int>(run(False)));
+      io::println(Str<int>(run(True)));
+      io::println(Str<int>(run(False)));
       return 0;
     }
   )");
@@ -199,7 +199,7 @@ TEST(Regression, InferredTupleOptionalTernary) {
 
 TEST(Regression, CharArrayElements) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Word {
       cs: char[2];
       fn first() -> char { return self.cs[0]; }
@@ -212,25 +212,25 @@ TEST(Regression, CharArrayElements) {
     fn second(cs: view char[]) -> char { return cs[1]; }
     fn main() -> int {
       cs: char[2] = ['a', 'b'];
-      println(Str<char>(cs[1]));
-      if cs[0] == 'a' { println("eq"); }
-      println(Str<bool>(isA(cs[0])));
+      io::println(Str<char>(cs[1]));
+      if cs[0] == 'a' { io::println("eq"); }
+      io::println(Str<bool>(isA(cs[0])));
       c: char = cs[1];
       d = cs[0];
-      println(Str<char>(c) + Str<char>(d));
+      io::println(Str<char>(c) + Str<char>(d));
       x = 'k';
       ds: char[3] = [x, 'm', x];
       ds[2] = 'z';
       ds[0] = 'q';
-      println(Str<char>(ds[0]) + Str<char>(second(ds)) + Str<char>(ds[2]));
-      println(Str<int>(ds.len()));
+      io::println(Str<char>(ds[0]) + Str<char>(second(ds)) + Str<char>(ds[2]));
+      io::println(Str<int>(ds.len()));
       w = Word();
-      println(Str<char>(w.first()) + Str<char>(w.cs[1]));
+      io::println(Str<char>(w.first()) + Str<char>(w.cs[1]));
       s: Str = "yo";
-      println(Str<char>(s[1]));
+      io::println(Str<char>(s[1]));
       bs: bool[3] = [True, False, False];
       bs[2] = True;
-      println(Str<bool>(bs[2]) + Str<bool>(bs[1]));
+      io::println(Str<bool>(bs[2]) + Str<bool>(bs[1]));
       return 0;
     }
   )");
@@ -242,7 +242,7 @@ TEST(Regression, CharArrayElements) {
 
 TEST(Regression, CallRootedObjectSubscript) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Point {
       x: int;
       fn get() -> int { return self.x; }
@@ -265,24 +265,24 @@ TEST(Regression, CallRootedObjectSubscript) {
     fn take(p: Point) -> int { return p.x; }
     fn ret() -> Point { return mk()[1]; }
     fn main() -> int {
-      println(Str<int>(mk()[0].x));
-      println(Str<int>(mk()[1].get()));
+      io::println(Str<int>(mk()[0].x));
+      io::println(Str<int>(mk()[1].get()));
       p = mk()[0];
       q: Point = mk()[1];
-      println(Str<int>(p.x + q.x));
+      io::println(Str<int>(p.x + q.x));
       q = mk()[0];
-      println(Str<int>(q.x));
-      println(Str<int>(take(mk()[0])));
+      io::println(Str<int>(q.x));
+      io::println(Str<int>(take(mk()[0])));
       s = mks()[0];
-      println(s + mks()[1]);
-      println(Str<int>(mkn()[0][1]));
-      println(Str<int>(mkn()[1].len()));
-      println(Str<int>(mkh().items[0].x));
-      println(Str<int>(ret().x));
+      io::println(s + mks()[1]);
+      io::println(Str<int>(mkn()[0][1]));
+      io::println(Str<int>(mkn()[1].len()));
+      io::println(Str<int>(mkh().items[0].x));
+      io::println(Str<int>(ret().x));
       ps: Point[1] = [mk()[1]];
-      println(Str<int>(ps[0].x));
+      io::println(Str<int>(ps[0].x));
       match mk()[0] {
-        pp: Point { println(Str<int>(pp.x)); }
+        pp: Point { io::println(Str<int>(pp.x)); }
       }
       return 0;
     }
@@ -347,7 +347,7 @@ std::filesystem::path freshProjectDir(const std::string &name) {
 
 TEST(Regression, MethodConstructsOwnAndLaterClass) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Cell {
       v: int;
       fn clone() -> Cell { return Cell(self.v + 1); }
@@ -369,7 +369,7 @@ TEST(Regression, MethodConstructsOwnAndLaterClass) {
       c = Cell(3);
       d = c.clone();
       b = c.wrap();
-      println(Str<int>(d.v) + " " + Str<int>(b.n) + " " + Str<int>(b.cell().v));
+      io::println(Str<int>(d.v) + " " + Str<int>(b.n) + " " + Str<int>(b.cell().v));
       return 0;
     }
   )");
@@ -409,7 +409,7 @@ fn main() -> int {
 
 TEST(Regression, SubclassDeclaredBeforeBase) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Square : Rect {}
 
     impl Square {
@@ -431,7 +431,7 @@ TEST(Regression, SubclassDeclaredBeforeBase) {
     }
     fn main() -> int {
       s = Square(4);
-      println(Str<int>(s.area()) + " " + s.tag);
+      io::println(Str<int>(s.area()) + " " + s.tag);
       return 0;
     }
   )");
@@ -498,7 +498,7 @@ fn main() -> int {
 // `(None, 3)` into a `(Node?, int)`.
 TEST(Regression, SuperLiteralArgumentsTakeTheParameterTypes) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Node { v: int; }
     class Base {
       xs: float[2];
@@ -520,9 +520,9 @@ TEST(Regression, SuperLiteralArgumentsTakeTheParameterTypes) {
     }
     fn main() -> int {
       d = Derived();
-      println(Str(d.xs[0] + d.xs[1]) + " " + Str(d.pair.1) + " " +
+      io::println(Str(d.xs[0] + d.xs[1]) + " " + Str(d.pair.1) + " " +
               Str(d.link == None));
-      match d.q { n: int { println(Str(n)); } None { println("none"); } }
+      match d.q { n: int { io::println(Str(n)); } None { io::println("none"); } }
       return 0;
     }
   )");
@@ -533,7 +533,7 @@ TEST(Regression, SuperLiteralArgumentsTakeTheParameterTypes) {
 
 TEST(Regression, SuperArgumentsAreBoxed) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class Point {
       x: int;
     }
@@ -572,14 +572,14 @@ TEST(Regression, SuperArgumentsAreBoxed) {
     }
     fn main() -> int {
       a = Lit();
-      println(a.name + Str<int>(a.p.x) + Str<int>(a.xs.len()));
+      io::println(a.name + Str<int>(a.p.x) + Str<int>(a.xs.len()));
       b = Cat("c");
-      println(b.name + Str<int>(b.p.x));
+      io::println(b.name + Str<int>(b.p.x));
       q = Point(3);
       s: Str = "fwd";
       ys: int[2] = [7, 8];
       c = Fwd(q, s, ys);
-      println(c.name + Str<int>(c.p.x) + Str<int>(q.x) + s + Str<int>(ys.len()));
+      io::println(c.name + Str<int>(c.p.x) + Str<int>(q.x) + s + Str<int>(ys.len()));
       return 0;
     }
   )");
@@ -593,7 +593,7 @@ TEST(Regression, SuperArgumentsAreBoxed) {
 // The same program as ArrayTests' RefField.SubscriptObjectArrayField.
 TEST(Regression, SubscriptObjectArrayFieldIsLeakFree) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
 class Foo { v: int; }
 impl Foo { fn __init__(x: int){ self.v = x; } }
 class Box {
@@ -606,8 +606,8 @@ impl Box {
 }
 fn main() -> int {
   b: Box = Box();
-  println(Str<int>(b.items[0].v));   // subscript via local receiver
-  println(Str<int>(b.second()));     // subscript via self.field inside a method
+  io::println(Str<int>(b.items[0].v));   // subscript via local receiver
+  io::println(Str<int>(b.second()));     // subscript via self.field inside a method
   return 0;
 }
 )");
@@ -619,7 +619,7 @@ fn main() -> int {
 // The same program as ArrayTests' RefField.NestedArrayOfArraysField.
 TEST(Regression, NestedArrayOfArraysFieldIsLeakFree) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
 class Grid {
   rows: int[3][3];
   fn at(r: int, c: int) -> int {
@@ -643,9 +643,9 @@ impl Grid {
 }
 fn main() -> int {
   g: Grid = Grid();
-  println(Str<int>(g.at(0, 0)));   // 0
-  println(Str<int>(g.at(1, 2)));   // 5
-  println(Str<int>(g.at(2, 1)));   // 7
+  io::println(Str<int>(g.at(0, 0)));   // 0
+  io::println(Str<int>(g.at(1, 2)));   // 5
+  io::println(Str<int>(g.at(2, 1)));   // 7
   return 0;
 }
 )");
@@ -658,23 +658,23 @@ fn main() -> int {
 // plain value match; the string subject is released on every exit.
 TEST(Regression, MatchOnALiteralSubject) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     fn pick() -> int {
       match "r" { "r" { return 7; } _ { return 0; } }
     }
     fn main() -> int {
-      match "s" { "t" { println("t"); } _ { println("other"); } }
-      match "s" { "s" { println("s"); } _ { println("other"); } }
-      match "" { "" { println("empty"); } _ { println("other"); } }
-      match "q" { _ { println("wild"); } }
-      match 3 { 1 { println("1"); } 3 { println("3"); } _ { println("?"); } }
-      match 2.5 { 2.5 { println("2.5"); } _ { println("?"); } }
-      match 'c' { 'c' { println("c"); } _ { println("?"); } }
-      match True { True { println("T"); } False { println("F"); } }
+      match "s" { "t" { io::println("t"); } _ { io::println("other"); } }
+      match "s" { "s" { io::println("s"); } _ { io::println("other"); } }
+      match "" { "" { io::println("empty"); } _ { io::println("other"); } }
+      match "q" { _ { io::println("wild"); } }
+      match 3 { 1 { io::println("1"); } 3 { io::println("3"); } _ { io::println("?"); } }
+      match 2.5 { 2.5 { io::println("2.5"); } _ { io::println("?"); } }
+      match 'c' { 'c' { io::println("c"); } _ { io::println("?"); } }
+      match True { True { io::println("T"); } False { io::println("F"); } }
       i = 0;
       while i < 3 {
         i = i + 1;
-        match "x" { "x" { if i == 2 { break; } println("x"); } _ { } }
+        match "x" { "x" { if i == 2 { break; } io::println("x"); } _ { } }
       }
       return pick();
     }
@@ -690,10 +690,10 @@ TEST(Regression, MatchOnALiteralSubject) {
 // destructor.  They are now `<Class>.<method>`, which no identifier can spell.
 TEST(Regression, MethodAndUserFunctionWithTheOldMangledName) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class K { fn w() -> int { return 1; } }
     fn K_w() -> int { return 2; }
-    fn main() -> int { k: K = K(); println(Str<int>(k.w() + K_w())); return 0; }
+    fn main() -> int { k: K = K(); io::println(Str<int>(k.w() + K_w())); return 0; }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.ExitCode, 0);
@@ -706,7 +706,7 @@ TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
   // The destructor of K (which releases `name`) and the user `K_destroy`
   // are distinct; so are a method `vtable` and the class's vtable (LLVM)
   // and `K_vtable`.
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class K {
       name: Str;
       fn vtable() -> int { return 10; }
@@ -728,8 +728,8 @@ TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
     fn main() -> int {
       k: K = K("k");
       b: K = D();
-      println(K_destroy(k) + " " + K_destroy(b));
-      println(Str<int>(k.vtable() + b.vtable() + K_vtable() + D_vtable()));
+      io::println(K_destroy(k) + " " + K_destroy(b));
+      io::println(Str<int>(k.vtable() + b.vtable() + K_vtable() + D_vtable()));
       return 0;
     }
   )");
@@ -743,14 +743,14 @@ TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
 // `K_2Ew` sanitizes to the same text and must still get its own C symbol.
 TEST(Regression, MethodAndUserFunctionWithItsCSpelling) {
   LeakGuard g;
-  auto r = compileAndRun(R"(
+  auto r = compileAndRun(R"(import ::io;
     class K { fn w() -> int { return 1; } fn destroy2() -> int { return 4; } }
     fn K_2Ew() -> int { return 2; }
     fn K_2Edestroy() -> int { return 8; }
     fn K_2Edestroy2() -> int { return 16; }
     fn main() -> int {
       k: K = K();
-      println(Str<int>(k.w() + K_2Ew() + k.destroy2() + K_2Edestroy() +
+      io::println(Str<int>(k.w() + K_2Ew() + k.destroy2() + K_2Edestroy() +
                        K_2Edestroy2()));
       return 0;
     }
@@ -775,14 +775,14 @@ impl Cell {
   fn __init__(v: int) { self.v = v; }
 }
 )");
-  auto mainPath = writeProjectFile(dir, "main.pkn", R"(
+  auto mainPath = writeProjectFile(dir, "main.pkn", R"(import ::io;
 import lib::cell;
 fn Cell_clone() -> int { return 100; }
 fn Cell_destroy() -> int { return 1000; }
 fn main() -> int {
   c = cell::Cell(3);
   d = c.clone();
-  println(Str<int>(d.v + Cell_clone() + Cell_destroy()));
+  io::println(Str<int>(d.v + Cell_clone() + Cell_destroy()));
   return 0;
 }
 )");

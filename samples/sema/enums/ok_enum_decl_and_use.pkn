@@ -1,22 +1,18 @@
 // OK: declare an enum, use a variant to initialise a same-typed variable,
 // compare with == / !=, and match on the enum with bare-variant arms.
-enum Color {
-  Red,
-  Green,
-  Blue,
-}
+enum Color { Red, Green, Blue, }
 
 fn main() -> int {
   c: Color = Color::Green;
 
   if c == Color::Green { }
-  if c != Color::Red   { }
+  if c != Color::Red { }
 
   match c {
-    Red   { }
+    Red { }
     Green { }
-    Blue  { }
-    _     { }
+    Blue { }
+    _ { }
   }
   return 0;
 }

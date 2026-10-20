@@ -24,9 +24,11 @@ fn name(params) {
   optionally take the command-line arguments:
 
 ```pkn
+import ::io;
+
 fn main(args: view Str[]) -> int {
   // args[0] is the source-file path; args[1..] are the arguments after it
-  println(args[0]);
+  io::println(args[0]);
   return 0;
 }
 ```
@@ -64,6 +66,8 @@ A parameter of any type may have a mode, `view` or `inout`, written where the ty
 `n: inout int`, `c: view Counter`. A parameter without one is passed as above.
 
 ```pkn
+import ::io;
+
 fn bump(n: inout int) {
   n = n + 1;
 }
@@ -77,7 +81,7 @@ fn main() -> int {
   bump(k);              // no marking at the call: just the variable
   x = 1.5;
   scale(x, 2);
-  println(Str(k) + " " + Str(x));
+  io::println(Str(k) + " " + Str(x));
   return 0;
 }
 ```
@@ -109,6 +113,8 @@ element passed to an `inout` parameter, and only a `view fn` can be called on it
 'view' parameter; 'tick' is not a 'view fn'`).
 
 ```pkn
+import ::io;
+
 class Counter {
   n: int;
   fn tick() { self.n = self.n + 1; }
@@ -119,7 +125,7 @@ impl Counter {
 }
 
 fn show(c: view Counter, label: view Str) {
-  println(label + " " + Str(c.n));
+  io::println(label + " " + Str(c.n));
 }
 
 fn main() -> int {
@@ -143,8 +149,9 @@ struct holding one -- can only be passed on to another `view` parameter, a param
 [local](01-language-basics.md#local-borrows) alike, so no function it reaches can change or
 keep what it shares. With `fn keep(c: Counter)` and `v: view = Counter()`, `keep(v)` is an
 error: `'v' is a 'view' local; it can only be passed to a 'view' parameter, and parameter 1
-of 'keep' is not one`. The fix is to make that parameter `view` too. The builtin functions
-only read (`println(v)`), and so do the builtin methods. `Str(s)` with a `Str` returns `s`
+of 'keep' is not one`. The fix is to make that parameter `view` too. The builtin methods
+only read, and so do the standard library's print functions (`io::println(v)` takes a
+`view T`). `Str(s)` with a `Str` returns `s`
 itself, so it takes no `view`.
 
 A value type read through a `view` -- an `int` parameter `n: view int`, a local `k: view =
@@ -177,6 +184,8 @@ reference to what it holds: passing it shares nothing, and assigning to it repla
 the caller's variable holds.
 
 ```pkn
+import ::io;
+
 fn swap(a: inout Str, b: inout Str) {
   t = a;
   a = b;
@@ -187,7 +196,7 @@ fn main() -> int {
   x = "left";
   y = "right";
   swap(x, y);
-  println(x + " " + y);
+  io::println(x + " " + y);
   return 0;
 }
 ```
@@ -226,6 +235,8 @@ object alive for the duration of the call (objects never move), so the address s
 valid even if the callee drops the object from where it was reached:
 
 ```pkn
+import ::io;
+
 class Counter {
   hits: int;
 }
@@ -236,13 +247,13 @@ impl Counter {
 
 fn hit(n: inout int, c: Counter) {
   n = n + 1;
-  println("seen " + Str(c.hits));  // the write is already visible
+  io::println("seen " + Str(c.hits));  // the write is already visible
 }
 
 fn main() -> int {
   c = Counter();
   hit(c.hits, c);
-  println(Str(c.hits));
+  io::println(Str(c.hits));
   return 0;
 }
 ```
@@ -342,6 +353,8 @@ type goes: `-> view T` or `-> inout T`. The result is part of what the function 
 a borrow, so it needs no annotation saying where it comes from:
 
 ```pkn
+import ::io;
+
 class Counter {
   n: int;
   view fn get() -> int { return self.n; }
@@ -367,7 +380,7 @@ fn longer(a: view Str, b: view Str) -> view Str {
 fn main() -> int {
   b = Box();
   v: view = b.peek();
-  println(longer("hello", "hi") + " " + Str(v.get()));
+  io::println(longer("hello", "hi") + " " + Str(v.get()));
   return 0;
 }
 ```
@@ -409,6 +422,8 @@ hello 4
 local names it: the caller writes through it.
 
 ```pkn
+import ::io;
+
 class Box {
   k: int;
   fn num() -> inout int { return self.k; }
@@ -433,7 +448,7 @@ fn main() -> int {
   j = 2;
   p: inout = pick(i, j, False);
   p = 20;          // writes j
-  println(Str(b.k) + " " + Str(i) + " " + Str(j));
+  io::println(Str(b.k) + " " + Str(i) + " " + Str(j));
   return 0;
 }
 ```
@@ -461,8 +476,10 @@ Output:
 ## Examples
 
 ```pkn
+import ::io;
+
 fn writeLine(s: Str) {
-  println(s);
+  io::println(s);
 }
 
 fn greet(name: Str) -> Str {
@@ -475,7 +492,7 @@ fn clamp(v: int, lo: int, hi: int) -> int {
 
 fn main() -> int {
   writeLine(greet("world"));
-  println(Str<int>(clamp(150, 0, 100)));  // 100
+  io::println(Str<int>(clamp(150, 0, 100)));  // 100
   return 0;
 }
 ```
@@ -502,25 +519,27 @@ fn fib(n: int) -> int {
 
 A `native fn` declares a function whose body is a C function, written against
 the Paykan runtime (`Runtime.h`).  It is how a library implements what Paykan
-cannot express itself, such as the standard library's file I/O (#198):
+cannot express itself, such as the standard library's file I/O (#198,
+`stdlib/io.pkn`):
 
 ```pkn
-native fn _io_write(fd: int, s: view Str) -> int = "paykan_io_write";
+native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
 ```
 
 The string is the C symbol.  The rest of the program calls the function like
 any other.
 
-Only `int`, `float`, `bool` and `char` cross into C by value.  Any other
+Only `int`, `float`, `bool`, `char` and an enum cross into C by value.  Any other
 parameter is a `view`, which C borrows for the call, or an `inout`, which
 C changes in place: a call never shares a reference with C, so it costs no
 reference counting (`parameter 's' must be 'view' or 'inout' ('s: view
-Str'); only int, float, bool and char cross into C by value`).  Only these
+Str'); only int, float, bool, char and an enum cross into C by value`).  Only these
 types cross, with the runtime's own convention:
 
 | Paykan | C | Notes |
 |--------|---|-------|
 | `int`, `float`, `bool`, `char` | `int64_t`, `double`, `bool`, `int8_t` | by value, or a `view` |
+| an enum | `int64_t` | its variant's ordinal (`0` for the first), by value: `native fn f(d: Dir) -> Dir` |
 | a sized numeric type (`u8`, `i32`, `unsigned`, `f32`, …) | `int64_t` (an integer, in its canonical sign- or zero-extended form; an `unsigned` as its bits), `double` (a float) | as `int` and `float`: the 8-byte slot of [sized numeric types](01-language-basics.md#sized-numeric-types) |
 | `inout int`, ... | `int64_t *`, `double *`, `bool *`, `int8_t *` | the caller's variable |
 | `view Str`, `view Obj` | `PaykanObject *` | borrowed for the call; the C code must not keep it without a retain |
@@ -611,7 +630,7 @@ the C library and the runtime functions compiled code uses
 |-------|---------|
 | Undeclared function | Calling a function that is not declared anywhere in the program |
 | Function redefinition | Two functions with the same name |
-| Builtin name reused | A function named like a builtin function or class (`fn print(...)`, `fn Str()`) — see *Builtin Names Are Reserved* in `01-language-basics.md` |
+| Builtin name reused | A function named like a builtin class or type (`fn Str()`, `fn float(...)`) — see *Builtin Names Are Reserved* in `01-language-basics.md` |
 | Class / enum name reused | A function named like a class (its constructor) or an enum declared in the same program |
 | Argument count mismatch | Wrong number of arguments |
 | Argument type mismatch | Argument type incompatible with parameter type |

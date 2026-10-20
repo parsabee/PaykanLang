@@ -3,6 +3,8 @@
 //            Str vars at different nesting depths all released exactly once,
 //            loop scopes, if-else branch scopes, function scopes
 
+import ::io;
+
 fn innerWork(flag: bool) -> Str {
   // Str declared before the conditional return — must be released on BOTH paths.
   prefix: Str = "result";
@@ -15,7 +17,7 @@ fn innerWork(flag: bool) -> Str {
 
 fn multiReturn(n: int) -> int {
   a: Str = "a";
-  if n < 0  { return 0 - 1; }
+  if n < 0 { return 0 - 1; }
   b: Str = "b";
   if n == 0 { return 0; }
   c: Str = "c";
@@ -23,19 +25,19 @@ fn multiReturn(n: int) -> int {
 }
 
 fn main() -> int {
-  println("=== simple nested scopes ===");
+  io::println("=== simple nested scopes ===");
   s0: Str = "outer";
   if True {
     s1: Str = "inner1";
     if True {
       s2: Str = "inner2";
-      println(s2);        // inner2  — s2 released when this block ends
+      io::println(s2);        // inner2  — s2 released when this block ends
     }
-    println(s1);          // inner1  — s1 released when if block ends
+    io::println(s1);          // inner1  — s1 released when if block ends
   }
-  println(s0);            // outer   — s0 released at function end
+  io::println(s0);            // outer   — s0 released at function end
 
-  println("=== loop iteration scopes ===");
+  io::println("=== loop iteration scopes ===");
   // Each iteration creates a fresh Str; scope cleanup runs per iteration.
   i: int = 0;
   total: int = 0;
@@ -45,18 +47,18 @@ fn main() -> int {
     i = i + 1;
   }
   // "0".."4" each have length 1  ->  total = 5
-  println(Str(total));   // 5
+  io::println(Str(total));   // 5
 
-  println("=== early return cleanup ===");
-  println(innerWork(True));    // result-yes
-  println(innerWork(False));   // result-no
+  io::println("=== early return cleanup ===");
+  io::println(innerWork(True));    // result-yes
+  io::println(innerWork(False));   // result-no
 
-  println("=== multi-level early return ===");
-  println(Str<int>(multiReturn(0 - 5)));  // -1
-  println(Str(multiReturn(0)));      //  0
-  println(Str<int>(multiReturn(3)));      //  6
+  io::println("=== multi-level early return ===");
+  io::println(Str<int>(multiReturn(0 - 5)));  // -1
+  io::println(Str(multiReturn(0)));      //  0
+  io::println(Str<int>(multiReturn(3)));      //  6
 
-  println("=== deeply nested scopes ===");
+  io::println("=== deeply nested scopes ===");
   // 4 levels of if-nesting each with a Str var; all must be cleaned up.
   level0: Str = "L0";
   if True {
@@ -65,27 +67,27 @@ fn main() -> int {
       level2: Str = "L2";
       if True {
         level3: Str = "L3";
-        println(level3);    // L3
+        io::println(level3);    // L3
       }
-      println(level2);      // L2
+      io::println(level2);      // L2
     }
-    println(level1);        // L1
+    io::println(level1);        // L1
   }
-  println(level0);          // L0
+  io::println(level0);          // L0
 
-  println("=== Str scope across reassign ===");
+  io::println("=== Str scope across reassign ===");
   // Rebinding releases the old box and installs a new one; original string
   // must already be destroyed by the time we rebind.
   r: Str = "first";
   r = "second";
   r = "third";
-  println(r);               // third
+  io::println(r);               // third
 
-  println("=== scope stress: many short-lived Strs ===");
+  io::println("=== scope stress: many short-lived Strs ===");
   j: int = 0;
   while j < 10 {
     tmp: Str = "t" + Str(j);
-    println(tmp);
+    io::println(tmp);
     j = j + 1;
   }
 

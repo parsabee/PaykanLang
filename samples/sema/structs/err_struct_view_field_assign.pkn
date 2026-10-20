@@ -1,4 +1,10 @@
 // ERROR: 'a' is a 'view' parameter; cannot assign to its field 'x'
-struct A { x: int; }
-fn set(a: view A) { a.x = 1; }
-fn main() -> int { return 0; }
+struct A {
+  x: int;
+}
+fn set(a: view A) {
+  a.x = 1;
+}
+fn main() -> int {
+  return 0;
+}

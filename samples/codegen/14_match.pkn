@@ -14,6 +14,8 @@
 //
 // In both modes `_` is the catch-all and must be the last arm.
 
+import ::io;
+
 // ===========================================================================
 // Type-mode fixtures
 // ===========================================================================
@@ -23,7 +25,7 @@ class Animal {
 }
 
 impl Animal {
-  fn __init__() {}
+  fn __init__() { }
 }
 
 class Dog : Animal {
@@ -61,10 +63,10 @@ impl Labrador {
 // match inside a helper function (type mode), used as the function's value.
 fn describeAnimal(x: Animal) -> Str {
   match x {
-    Dog  { return "it is a dog"; }
-    Cat  { return "it is a cat"; }
+    Dog { return "it is a dog"; }
+    Cat { return "it is a cat"; }
     Bird { return "it is a bird"; }
-    _    { return "unknown"; }
+    _ { return "unknown"; }
   }
   return "unreachable";
 }
@@ -81,7 +83,6 @@ fn classify(n: int) -> Str {
 }
 
 fn main() -> int {
-
   // =========================================================================
   // PART A — TYPE MODE
   // =========================================================================
@@ -89,54 +90,70 @@ fn main() -> int {
   // --- A1: basic no-binding dispatch ---
   a: Animal = Dog();
   match a {
-    Dog  { println("A1: Dog"); }
-    Cat  { println("A1: Cat"); }
-    Bird { println("A1: Bird"); }
-    _    { println("A1: other"); }
+    Dog { io::println("A1: Dog"); }
+    Cat { io::println("A1: Cat"); }
+    Bird { io::println("A1: Bird"); }
+    _ { io::println("A1: other"); }
   }
 
   // --- A2: wildcard-only arm ---
   b: Animal = Cat();
   match b {
-    _ { println("A2: wildcard"); }
+    _ { io::println("A2: wildcard"); }
   }
 
   // --- A3: binding + field access ---
   d: Animal = Labrador();
   match d {
-    lab: Labrador { println("A3: " + lab.name); }
-    Dog           { println("A3: plain dog"); }
-    _             { println("A3: other"); }
+    lab: Labrador {
+      io::println("A3: " + lab.name);
+    }
+    Dog {
+      io::println("A3: plain dog");
+    }
+    _ {
+      io::println("A3: other");
+    }
   }
 
   // --- A4: binding + method call (dispatch through the binding) ---
   plainDog: Animal = Dog();
   match plainDog {
-    dog: Dog { println("A4: " + dog.speak()); }
-    _        { println("A4: other"); }
+    dog: Dog {
+      io::println("A4: " + dog.speak());
+    }
+    _ {
+      io::println("A4: other");
+    }
   }
 
   // --- A5: exact-type comparison — a Labrador does NOT match the Dog arm ---
   e: Animal = Labrador();
   match e {
-    Cat      { println("A5: cat"); }
-    Dog      { println("A5: Dog"); }
-    Labrador { println("A5: Labrador"); }
-    _        { println("A5: other"); }
+    Cat { io::println("A5: cat"); }
+    Dog { io::println("A5: Dog"); }
+    Labrador {
+      io::println("A5: Labrador");
+    }
+    _ {
+      io::println("A5: other");
+    }
   }
 
   // --- A6: no arm matches -> wildcard ---
   f: Animal = Bird();
   match f {
-    Dog { println("A6: dog"); }
-    Cat { println("A6: cat"); }
-    _   { println("A6: wildcard Bird"); }
+    Dog { io::println("A6: dog"); }
+    Cat { io::println("A6: cat"); }
+    _ {
+      io::println("A6: wildcard Bird");
+    }
   }
 
   // --- A7: match inside a helper function ---
-  println(describeAnimal(Dog()));
-  println(describeAnimal(Bird()));
-  println(describeAnimal(Cat()));
+  io::println(describeAnimal(Dog()));
+  io::println(describeAnimal(Bird()));
+  io::println(describeAnimal(Cat()));
 
   // =========================================================================
   // PART B — VALUE MODE
@@ -145,67 +162,87 @@ fn main() -> int {
   // --- B1: Str literal match (content comparison) ---
   greeting: Str = "World";
   match greeting {
-    "Hello" { println("B1: got Hello"); }
-    "World" { println("B1: got World"); }
-    _       { println("B1: other"); }
+    "Hello" {
+      io::println("B1: got Hello");
+    }
+    "World" {
+      io::println("B1: got World");
+    }
+    _ {
+      io::println("B1: other");
+    }
   }
 
   // --- B2: Str match falls through to wildcard ---
   nope: Str = "Nope";
   match nope {
-    "Hello" { println("B2: got Hello"); }
-    "World" { println("B2: got World"); }
-    _       { println("B2: wildcard"); }
+    "Hello" {
+      io::println("B2: got Hello");
+    }
+    "World" {
+      io::println("B2: got World");
+    }
+    _ {
+      io::println("B2: wildcard");
+    }
   }
 
   // --- B3: int literal match ---
   n: int = 2;
   match n {
-    1 { println("B3: one"); }
-    2 { println("B3: two"); }
-    3 { println("B3: three"); }
-    _ { println("B3: many"); }
+    1 { io::println("B3: one"); }
+    2 { io::println("B3: two"); }
+    3 { io::println("B3: three"); }
+    _ { io::println("B3: many"); }
   }
 
   // --- B4: float literal match ---
   pi: float = 2.5;
   match pi {
-    1.0 { println("B4: one"); }
-    2.5 { println("B4: two-point-five"); }
-    _   { println("B4: other"); }
+    1.0 { io::println("B4: one"); }
+    2.5 {
+      io::println("B4: two-point-five");
+    }
+    _ { io::println("B4: other"); }
   }
 
   // --- B5: char literal match ---
   ch: char = 'b';
   match ch {
-    'a' { println("B5: a"); }
-    'b' { println("B5: b"); }
-    _   { println("B5: other"); }
+    'a' { io::println("B5: a"); }
+    'b' { io::println("B5: b"); }
+    _ { io::println("B5: other"); }
   }
 
   // --- B6: bool literal match — exhaustive, no wildcard needed ---
   flag: bool = False;
   match flag {
-    True  { println("B6: yes"); }
-    False { println("B6: no"); }
+    True { io::println("B6: yes"); }
+    False { io::println("B6: no"); }
   }
 
   // --- B6b: a literal subject (a constant, but still a value match) ---
   match "World" {
-    "Hello" { println("B6b: got Hello"); }
-    "World" { println("B6b: got World"); }
-    _       { println("B6b: other"); }
+    "Hello" {
+      io::println("B6b: got Hello");
+    }
+    "World" {
+      io::println("B6b: got World");
+    }
+    _ {
+      io::println("B6b: other");
+    }
   }
   match 3 {
-    3 { println("B6b: three"); }
-    _ { println("B6b: other"); }
+    3 { io::println("B6b: three"); }
+    _ { io::println("B6b: other"); }
   }
 
   // --- B7: value match inside a helper function ---
-  println(classify(0));
-  println(classify(1));
-  println(classify(2));
-  println(classify(9));
+  io::println(classify(0));
+  io::println(classify(1));
+  io::println(classify(2));
+  io::println(classify(9));
 
   return 0;
 }

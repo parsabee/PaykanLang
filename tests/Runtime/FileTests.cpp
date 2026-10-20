@@ -3,6 +3,7 @@
 //
 // Unit tests for PaykanFile runtime functions.
 
+#include <cerrno>
 #include <gtest/gtest.h>
 
 #include <cstdio>
@@ -114,6 +115,10 @@ TEST(FileEquals, DifferentObjectsAreNotEqual) {
 
 // -- PaykanFile_open
 
+/// Where a failing PaykanFile_open puts errno (the tests that open expect
+/// success).
+static int64_t openErr;
+
 TEST(FileOpen, SuccessReturnsFile) {
   std::string path = makeTempFile("");
   ASSERT_FALSE(path.empty());
@@ -121,7 +126,7 @@ TEST(FileOpen, SuccessReturnsFile) {
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
 
-  PaykanShared *shared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *shared = PaykanFile_open(pathStr, modeStr, &openErr);
   ASSERT_NE(shared, nullptr);
   PaykanObject *obj = PaykanShared_get(shared);
   // Should NOT be None — it must be a PaykanFile with a valid handle.
@@ -134,19 +139,16 @@ TEST(FileOpen, SuccessReturnsFile) {
   std::remove(path.c_str());
 }
 
-TEST(FileOpen, FailureReturnsError) {
+TEST(FileOpen, FailureReturnsNullAndErrno) {
   PaykanObject *pathStr = strObj("/no/such/path/that/exists");
   PaykanObject *modeStr = strObj("r");
 
-  PaykanShared *shared = PaykanFile_open(pathStr, modeStr);
-  ASSERT_NE(shared, nullptr);
-  PaykanObject *obj = PaykanShared_get(shared);
-  // open failure: returns an Error object describing the failure.
-  EXPECT_NE(obj, nullptr);
-  EXPECT_NE(obj, &PaykanObject_None);
-  EXPECT_EQ(obj->vtable, PaykanError_vtable);
+  // open failure: NULL, with C's errno for the standard library's Error.
+  int64_t err = 0;
+  EXPECT_EQ(PaykanFile_open(pathStr, modeStr, &err), nullptr);
+  EXPECT_EQ(err, ENOENT);
+  EXPECT_EQ(Paykan_error_code(err), PAYKAN_ERROR_NOT_FOUND);
 
-  Paykan_release(shared);
   Paykan_dispose((PaykanObject *)pathStr);
   Paykan_dispose((PaykanObject *)modeStr);
 }
@@ -159,7 +161,7 @@ TEST(FileOpen, OpenForWrite) {
 
   PaykanObject *pathStr = strObj(path);
   PaykanObject *modeStr = strObj("w");
-  PaykanShared *shared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *shared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *obj = PaykanShared_get(shared);
   EXPECT_NE(obj, &PaykanObject_None);
 
@@ -180,7 +182,7 @@ TEST(FileWrite, WritesContentToFile) {
   // Open for writing.
   PaykanObject *pathStr = strObj(path);
   PaykanObject *modeStr = strObj("w");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -210,7 +212,7 @@ TEST(FileWrite, EmptyStringIsHarmless) {
 
   PaykanObject *pathStr = strObj(path);
   PaykanObject *modeStr = strObj("w");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -232,7 +234,7 @@ TEST(FileReadln, ReadsSingleLine) {
 
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -253,7 +255,7 @@ TEST(FileReadln, ReadsMultipleLines) {
 
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -277,7 +279,7 @@ TEST(FileReadln, ReturnsNoneAtEOF) {
 
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -298,7 +300,7 @@ TEST(FileReadln, LineWithoutTrailingNewline) {
 
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -322,7 +324,7 @@ TEST(FileReadln, LongLineTriggersBufferGrowth) {
 
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -350,7 +352,7 @@ TEST(FileRoundTrip, WriteAndReadBack) {
   {
     PaykanObject *pathStr = strObj(path);
     PaykanObject *modeStr = strObj("w");
-    PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+    PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
     PaykanObject *fObj = PaykanShared_get(fShared);
     ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -370,7 +372,7 @@ TEST(FileRoundTrip, WriteAndReadBack) {
   {
     PaykanObject *pathStr = strObj(path);
     PaykanObject *modeStr = strObj("r");
-    PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+    PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
     PaykanObject *fObj = PaykanShared_get(fShared);
     ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -398,7 +400,7 @@ TEST(FileReadbytes, ReadsUpToN) {
   std::string path = makeTempFile("hello world");
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -417,7 +419,7 @@ TEST(FileReadbytes, ReadsLessThanNAtEOF) {
   std::string path = makeTempFile("hi");
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -436,7 +438,7 @@ TEST(FileReadbytes, ReturnsNoneAtEOF) {
   std::string path = makeTempFile("");
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -456,7 +458,7 @@ TEST(FileRead, ReadsEntireFile) {
   std::string path = makeTempFile("line1\nline2\n");
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 
@@ -475,7 +477,7 @@ TEST(FileRead, ReturnsNoneOnEmptyFile) {
   std::string path = makeTempFile("");
   PaykanObject *pathStr = strObj(path.c_str());
   PaykanObject *modeStr = strObj("r");
-  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr);
+  PaykanShared *fShared = PaykanFile_open(pathStr, modeStr, &openErr);
   PaykanObject *fObj = PaykanShared_get(fShared);
   ASSERT_NE(fObj, &PaykanObject_None);
 

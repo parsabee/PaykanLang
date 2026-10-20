@@ -212,6 +212,25 @@ bool Sema::reportPrivateImport(const std::string &name,
   return true;
 }
 
+bool Sema::checkConstructible(const std::string &typeName,
+                              const std::string &written,
+                              const ast::MethodDecl *init, const char *verb,
+                              ast::SourceLocation loc) {
+  if (!init || !init->isModulePrivateInit())
+    return true;
+  // This module's own type is constructed anywhere in the module.
+  auto origin = ImportedTypeOrigins.find(typeName);
+  if (origin == ImportedTypeOrigins.end())
+    return true;
+  // Another module's template instantiated here runs that module's code.
+  if (CurrentOrigin && CurrentOrigin->Module == origin->second)
+    return true;
+  error(loc, "'" + displayName(written) + "' cannot be " + verb +
+                 " here: its initializer '" + names::kMethodInitModulePrivate +
+                 "' is private to module '" + origin->second + "'");
+  return false;
+}
+
 bool Sema::isModuleOwnName(const std::string &name) {
   const std::string base = baseName(name);
   const size_t sep = base.find(names::kQualSep);
@@ -231,10 +250,22 @@ bool Sema::rejectTopLevelTypePrivate(ast::TranslationUnit *tu) {
                    kind + " is spelled '" + name.substr(1) + "'");
     ok = false;
   };
+  auto checkFunction = [&](const ast::FuncDecl *fn) {
+    // `___init__` is a class's or a struct's initializer, not a function.
+    if (fn->isModulePrivateInit()) {
+      error(fn->getLocation(),
+            std::string("'") + names::kMethodInitModulePrivate +
+                "' is the initializer of a class or a struct, private to its "
+                "module; it goes in an 'impl' block");
+      ok = false;
+      return;
+    }
+    check(fn->getName(), "function", fn->getLocation());
+  };
   for (auto *fn : tu->getFuncDecls())
-    check(fn->getName(), "function", fn->getLocation());
+    checkFunction(fn);
   for (auto *fn : tu->getGenericFuncDecls())
-    check(fn->getName(), "function", fn->getLocation());
+    checkFunction(fn);
   for (auto *cd : tu->getClassDecls())
     check(cd->getName(), "class", cd->getLocation());
   for (auto *cd : tu->getGenericClassDecls())

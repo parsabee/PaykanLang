@@ -72,19 +72,9 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanTupleEquals, {{kPtr, kPtr, kPtr}, kI64}},
     {kPaykanStructToString, {{kPtr, kPtr}, kObj}},
     {kPaykanStructEquals, {{kPtr, kPtr, kPtr}, kI64}},
-    {kPaykanFileOpen, {{kObj, kObj}, kBox}},
-    {kPaykanPrint, {{kObj}, kVoid}},
-    {kPaykanPrintln, {{kObj}, kVoid}},
-    {kPaykanErrPrint, {{kObj}, kVoid}},
-    {kPaykanErrPrintln, {{kObj}, kVoid}},
     {kPaykanObjectDestroy, {{kObj}, kVoid}},
     {kPaykanObjectToString, {{kObj}, kBox}},
     {kPaykanObjectEquals, {{kObj, kBox}, kI64}},
-    {kPaykanFileDestroy, {{kObj}, kVoid}},
-    {kPaykanFileToString, {{kObj}, kBox}},
-    {kPaykanFileEquals, {{kObj, kBox}, kI64}},
-    {kPaykanFileWrite, {{kObj, kObj}, kVoid}},
-    {kPaykanFileReadln, {{kObj}, kBox}},
 };
 
 const RuntimeSig *findRuntimeSig(const std::string &name) {
@@ -314,7 +304,7 @@ bool ModuleLowering::isFunctionValueExpr(const ast::Expr *expr) {
 }
 
 bool ModuleLowering::isObjectElementType(ast::Type *elemTy) const {
-  if (!elemTy || ast::isFunctionValue(elemTy))
+  if (!elemTy || ast::isFunctionValue(elemTy) || ast::isMemOptional(elemTy))
     return false;
   if (ast::isa<ast::EnumType>(elemTy) || ast::isa<ast::StructType>(elemTy))
     return false;
@@ -607,10 +597,6 @@ void ModuleLowering::bootstrapBuiltins() {
     assert(rs);
     FunctionTable[paykanName] = {runtimeName, rs->Sig};
   };
-  reg(kPrint, kPaykanPrint);
-  reg(kPrintln, kPaykanPrintln);
-  reg(kErrPrint, kPaykanErrPrint);
-  reg(kErrPrintln, kPaykanErrPrintln);
   // Conversions with a runtime implementation, by the spelled callee Sema
   // rebinds them to (the numeric ones are inline, see emitConversion):
   // `Str<T>` for every numeric T, bool and char.
@@ -625,7 +611,6 @@ void ModuleLowering::bootstrapBuiltins() {
   reg(kConvStrBool, kPaykanStringFromBool);
   reg(kConvStrChar, kPaykanStringFromChar);
   // (`int<Str>` & co. are emitParse.)
-  reg(kOpen, kPaykanFileOpen);
   IdentityCtors.insert(kString);
 }
 
@@ -715,7 +700,7 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
     if (IdentityCtors.count(ce->getCalleeName()) && ce->getNumArguments() == 1)
       return exprAlreadyShared(ce->getArguments()[0]);
     if (FunctionTable.count(ce->getCalleeName()))
-      return ce->getCalleeName() == kOpen;
+      return false;
     return true;
   }
   return false;
@@ -1503,7 +1488,10 @@ ModuleLowering::localNative(const std::string &name) const {
 // and payload (docs/pir.md §1).  A tuple is its elements in place, each
 // reference among them at its offset.
 Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
-  // A function value is described as its shape, a tuple.
+  // A function value, or an optional tuple or struct, is described as its
+  // shape, a tuple; under an optional's shape (the presence flag, then the
+  // value) a reference is null for None: nullable, not unset.
+  const bool optional = ast::isa<ast::OptionalType>(ty);
   ty = memShapeOf(ty);
   const Type slot = toPIRType(ty);
   std::vector<int64_t> words = {pir::storeSize(slot), pir::storeAlign(slot),
@@ -1511,20 +1499,21 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     MemLayout l = memLayout(tt);
     words = {l.Size, l.Align, kNativeKindTuple, 0};
-    std::function<void(ast::TupleType *, int64_t)> refs = [&](ast::TupleType *t,
-                                                              int64_t base) {
-      for (size_t i = 0; i < t->getArity(); ++i) {
-        ast::Type *e = t->getElementType(i);
-        int64_t off = base + tupleElementOffset(t, i);
-        if (auto *nested = ast::dyn_cast<ast::TupleType>(memShapeOf(e))) {
-          refs(nested, off);
-        } else if (ast::isRefType(e)) {
-          ++words[3];
-          words.push_back(off << 1 | (ast::isa<ast::OptionalType>(e) ? 1 : 0));
-        }
-      }
-    };
-    refs(tt, 0);
+    std::function<void(ast::TupleType *, int64_t, bool)> refs =
+        [&](ast::TupleType *t, int64_t base, bool nullable) {
+          for (size_t i = 0; i < t->getArity(); ++i) {
+            ast::Type *e = t->getElementType(i);
+            int64_t off = base + tupleElementOffset(t, i);
+            const bool maybeNull = nullable || ast::isa<ast::OptionalType>(e);
+            if (auto *nested = ast::dyn_cast<ast::TupleType>(memShapeOf(e))) {
+              refs(nested, off, maybeNull);
+            } else if (ast::isRefType(e)) {
+              ++words[3];
+              words.push_back(off << 1 | (maybeNull ? 1 : 0));
+            }
+          }
+        };
+    refs(tt, 0, optional);
   } else if (slot == Type::Box) {
     words[3] = 1;
     words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
@@ -1581,7 +1570,13 @@ bool ModuleLowering::isNoneForOptional(ast::Expr *expr) {
 }
 
 bool ModuleLowering::isOptionalWrap(const ast::Expr *expr) {
-  return ast::wrapsInOptional(expr->getCoercedType(), expr->getResolvedType());
+  return ast::isValueOptional(expr->getCoercedType()) &&
+         ast::wrapsInOptional(expr->getCoercedType(), expr->getResolvedType());
+}
+
+bool ModuleLowering::isMemOptionalWrap(const ast::Expr *expr) {
+  return ast::isMemOptional(expr->getCoercedType()) &&
+         ast::wrapsInOptional(expr->getCoercedType(), expr->getResolvedType());
 }
 
 ast::Type *ModuleLowering::valueOptionalType(ast::Expr *expr) {
@@ -1662,13 +1657,14 @@ Val ModuleLowering::emitOptionalEquality(ast::BinaryExpr *node) {
   bool rhsNone = ast::isa<ast::NoneLiteral>(rhs);
   if (lhsNone || rhsNone) {
     ast::Expr *opt = lhsNone ? rhs : lhs;
-    // An optional function value: no code.
-    if (ast::isFunctionValue(opt->getResolvedType())) {
+    // An optional held in memory: no code, or no presence flag.
+    if (ast::Type *t = opt->getResolvedType();
+        ast::isFunctionValue(t) || ast::isMemOptional(t)) {
       size_t mark = MemTemps.size();
       Val addr = emitMemAddress(opt);
       if (!addr)
         return addr;
-      Val isNone = emitFunctionValueIsNone(addr);
+      Val isNone = emitMemOptionalIsNone(addr, t);
       releaseMemTemps(mark);
       return isNone;
     }
@@ -1684,7 +1680,8 @@ Val ModuleLowering::emitOptionalEquality(ast::BinaryExpr *node) {
   }
 
   // Two function values, either optional: the same code and closure.
-  if (ast::isFunctionValue(lhs->getResolvedType()))
+  if (ast::isFunctionValue(lhs->getResolvedType()) ||
+      ast::isMemOptional(lhs->getResolvedType()))
     return emitTupleEquals(lhs, rhs);
 
   // Two optional values: their flags and payloads.

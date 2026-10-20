@@ -7,7 +7,7 @@
 class Box {}
 
 impl Box {
-  fn __init__() {}
+  fn __init__() { }
 }
 
 fn main() -> int {

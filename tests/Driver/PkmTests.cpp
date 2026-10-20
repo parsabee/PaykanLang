@@ -22,6 +22,7 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -122,11 +123,11 @@ struct Project {
               "fn mid() -> int { return base::base() + 1; }\n"
               "fn pick(c: base::Cell) -> int { return c.v; }\n");
     writeFile(Dir / "main.pkn",
-              "import mid;\nimport base;\n"
+              "import ::io; import mid;\nimport base;\n"
               "fn main() -> int {\n"
               "  c: base::Cell = base::Cell(40);\n"
-              "  println(Str<int>(mid::mid()));\n"
-              "  println(Str<int>(mid::pick(c) + c.twice()));\n"
+              "  io::println(Str<int>(mid::mid()));\n"
+              "  io::println(Str<int>(mid::pick(c) + c.twice()));\n"
               "  return 0;\n}\n");
   }
   ~Project() { fs::remove_all(Dir); }
@@ -197,6 +198,17 @@ bool contains(const std::string &text, const std::string &what) {
   return text.find(what) != std::string::npos;
 }
 
+/// Whether `--verbose` output @p out reports module @p module built from
+/// source.
+bool builtFromSource(const std::string &out, const std::string &module) {
+  std::istringstream lines(out);
+  for (std::string line; std::getline(lines, line);)
+    if (line.rfind("module " + module + ":", 0) == 0 &&
+        line.find("building from source") != std::string::npos)
+      return true;
+  return false;
+}
+
 } // namespace
 
 // -- The cache
@@ -229,7 +241,10 @@ TEST(Pkm, CacheIsWrittenOnTheFirstBuildAndReusedOnTheSecond) {
       contains(second.out, "module mid: cache .paykan_cache/mid.pkm usable"))
       << second.out;
   EXPECT_FALSE(contains(second.out, "wrote")) << second.out;
-  EXPECT_FALSE(contains(second.out, "building from source")) << second.out;
+  // (The standard library's ::io and ::result hold templates, which a .pkm
+  // does not carry yet (#160): they are built from source every time.)
+  EXPECT_FALSE(builtFromSource(second.out, "base")) << second.out;
+  EXPECT_FALSE(builtFromSource(second.out, "mid")) << second.out;
 }
 
 TEST(Pkm, CacheEntriesAreByteIdenticalAcrossColdBuilds) {
@@ -325,7 +340,8 @@ TEST(Pkm, SignatureEditRebuildsTheImporter) {
       << r.out;
   // Now both entries are fresh again.
   auto again = p.runMain("--verbose");
-  EXPECT_FALSE(contains(again.out, "building from source")) << again.out;
+  EXPECT_FALSE(builtFromSource(again.out, "base")) << again.out;
+  EXPECT_FALSE(builtFromSource(again.out, "mid")) << again.out;
 }
 
 TEST(Pkm, CorruptCacheEntryIsRebuilt) {
@@ -570,7 +586,7 @@ TEST(Pkm, EmitPkmAndDump) {
                       (p.Dir / "main.pkm").string());
   EXPECT_TRUE(contains(mainDump.out, "module main")) << mainDump.out;
   EXPECT_TRUE(contains(mainDump.out, "HAS_MAIN")) << mainDump.out;
-  EXPECT_TRUE(contains(mainDump.out, "deps 2")) << mainDump.out;
+  EXPECT_TRUE(contains(mainDump.out, "deps 3")) << mainDump.out; // and ::io
   EXPECT_TRUE(contains(mainDump.out, "    base flags 0x0 iface "))
       << mainDump.out;
   EXPECT_TRUE(contains(mainDump.out, "    mid flags 0x0 iface "))
@@ -638,7 +654,7 @@ struct ModesProject {
               "fn bump(n: inout int) { n = n + 1; }\n");
     writeFile(
         Dir / "main.pkn",
-        "import base;\n"
+        "import ::io; import base;\n"
         "class Fast : base::Counter {\n"
         "  fn add(k: view int) -> int { self.n = self.n + 10 * k;\n"
         "    return self.n; }\n"
@@ -654,7 +670,7 @@ struct ModesProject {
         "  j = 3;\n"
         "  c.take(j);\n"
         "  cell = base::Cell(k);\n"
-        "  println(Str(c.add(2)) + \" \" + Str(base::twice(3)) + \" \" +\n"
+        "  io::println(Str(c.add(2)) + \" \" + Str(base::twice(3)) + \" \" +\n"
         "          Str(k) + \" \" + Str(j) + \" \" + Str(cell.v));\n"
         "  return 0;\n}\n");
     writeFile(Dir / "bad.pkn", "import base;\n"
@@ -734,10 +750,10 @@ TEST(Pkm, ViewFnAcrossModules) {
                               "  view fn get() -> int { return self.n; }\n"
                               "  fn set(v: int) { self.n = v; } }\n"
                               "impl P { fn __init__() { self.n = 4; } }\n");
-  writeFile(dir / "main.pkn", "import base;\n"
+  writeFile(dir / "main.pkn", "import ::io; import base;\n"
                               "fn main() -> int {\n"
                               "  let p = base::P();\n"
-                              "  println(Str(p.get()));\n"
+                              "  io::println(Str(p.get()));\n"
                               "  return 0;\n}\n");
   writeFile(dir / "bad.pkn", "import base;\n"
                              "class Q : base::P {\n"
@@ -773,16 +789,17 @@ TEST(Pkm, DefaultInitAcrossModules) {
   fs::remove_all(dir);
   writeFile(dir / "geo.pkn", "class Point { x: int; y: int; }\n"
                              "class Named : Point { name: Str; }\n");
-  writeFile(dir / "main.pkn",
-            "import geo;\n"
-            "class P3 : geo::Point { z: int; }\n"
-            "fn main() -> int {\n"
-            "  p = geo::Point(1, 2);\n"
-            "  n = geo::Named(3, 4, \"n\");\n"
-            "  q = P3(5, 6, 7);\n"
-            "  println(Str(p.x + p.y) + \" \" + n.name + Str(n.y) + \" \" +\n"
-            "          Str(q.x + q.y + q.z));\n"
-            "  return 0;\n}\n");
+  writeFile(
+      dir / "main.pkn",
+      "import ::io; import geo;\n"
+      "class P3 : geo::Point { z: int; }\n"
+      "fn main() -> int {\n"
+      "  p = geo::Point(1, 2);\n"
+      "  n = geo::Named(3, 4, \"n\");\n"
+      "  q = P3(5, 6, 7);\n"
+      "  io::println(Str(p.x + p.y) + \" \" + n.name + Str(n.y) + \" \" +\n"
+      "          Str(q.x + q.y + q.z));\n"
+      "  return 0;\n}\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
   };
@@ -825,7 +842,7 @@ TEST(Pkm, StructsAcrossModules) {
             "fn make(n: int) -> Named { return Named(Point(n, n), \"n\" + "
             "Str(n)); }\n");
   writeFile(dir / "main.pkn",
-            "import geo;\n"
+            "import ::io; import geo;\n"
             "fn main() -> int {\n"
             "  p = geo::Point(1, 2);\n"
             "  p.shift(3);\n"
@@ -835,7 +852,7 @@ TEST(Pkm, StructsAcrossModules) {
             "  n.name = n.name + \"!\";\n"
             "  s = geo::Shape(p);\n"
             "  q: geo::Point = s.where();\n"
-            "  println(p.toString() + \" \" + Str(p.sum()) + \" \" + "
+            "  io::println(p.toString() + \" \" + Str(p.sum()) + \" \" + "
             "Str(o == p) + \" \" + n.name + Str(n.p.x) + \" \" + "
             "Str(q.sum()) + \" \" + Str(p == q));\n"
             "  return 0;\n}\n");
@@ -885,13 +902,13 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
             "impl Box { fn __init__() { self.c = Counter(); } }\n"
             "fn longer(a: view Str, b: view Str) -> view Str {\n"
             "  return if a.len() > b.len() then a else b; }\n");
-  writeFile(dir / "main.pkn", "import base;\n"
+  writeFile(dir / "main.pkn", "import ::io; import base;\n"
                               "fn main() -> int {\n"
                               "  b = base::Box();\n"
                               "  n: inout = b.count();\n"
                               "  n = n + 2;\n"
                               "  v: view = b.peek();\n"
-                              "  println(base::longer(\"ab\", \"c\") + "
+                              "  io::println(base::longer(\"ab\", \"c\") + "
                               "Str(v.get()));\n"
                               "  return 0;\n}\n");
   writeFile(dir / "bad.pkn", "import base;\n"
@@ -994,14 +1011,14 @@ TEST(Pkm, FunctionTypesAcrossModules) {
             "class Button { label: Str; onClick: (Str) -> Str;\n"
             "  fn click() -> Str { return self.onClick(self.label); } }\n");
   writeFile(dir / "main.pkn",
-            "import ops;\n"
+            "import ::io; import ops;\n"
             "fn main() -> int {\n"
             "  t = ops::twice(ops::square);\n"
             "  b = ops::Button(\"b\", fn(l: Str) -> Str { return l + \"!\"; "
             "});\n"
             "  n = ops::each([1, 2, 3], fn(x: view int, acc: inout int) { acc "
             "= acc + x; });\n"
-            "  println(Str(t(3)) + \" \" + b.click() + \" \" + Str(n));\n"
+            "  io::println(Str(t(3)) + \" \" + b.click() + \" \" + Str(n));\n"
             "  return 0;\n}\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
@@ -1054,19 +1071,23 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
             "class _GenHidden<T> { v: T; }\n"
             "fn useHidden() -> int {\n"
             "  h = _GenHidden<int>(3); p = Pub::_make();\n"
-            "  return h.v + p._twice() - p._w * 2; }\n");
+            "  return h.v + p._twice() - p._w * 2; }\n"
+            "class Conn { v: int; }\n"
+            "impl Conn { fn ___init__(v: int) { self.v = v; }\n"
+            "  static fn open(v: int) -> Conn { return Conn(v); } }\n");
   writeFile(dir / "main.pkn",
-            "import lib::shapes;\n"
+            "import ::io; import lib::shapes;\n"
             "fn main() -> int {\n"
             "  p = shapes::Pub::mk();\n"
-            "  println(Str(p.get()) + \" \" + Str(shapes::useHidden()));\n"
+            "  io::println(Str(p.get()) + \" \" + Str(shapes::useHidden()));\n"
+            "  io::println(shapes::Conn::open(7).v);\n"
             "  return 0;\n}\n");
   // A template's body uses the module's private names in the importer
   // (templates come from the source: a `.pkm` carries none, #160).
-  writeFile(dir / "gen.pkn", "import lib::shapes;\n"
+  writeFile(dir / "gen.pkn", "import ::io; import lib::shapes;\n"
                              "fn main() -> int {\n"
                              "  g = shapes::Gen(4);\n"
-                             "  println(Str(g.get()));\n"
+                             "  io::println(Str(g.get()));\n"
                              "  return 0;\n}\n");
   writeFile(dir / "bad.pkn", "import lib::shapes;\n"
                              "fn main() -> int {\n"
@@ -1081,6 +1102,7 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
                              "  u = shapes::Pub::_make();\n"
                              "  h = shapes::_GenHidden<int>(1);\n"
                              "  b: _Node = n;\n"
+                             "  c = shapes::Conn(1);\n"
                              "  return 0;\n}\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
@@ -1088,7 +1110,7 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
   auto check = [&](const char *when) {
     auto ok = paykan("--track-heap main.pkn");
     EXPECT_EQ(ok.exitCode, 0) << when << "\n" << ok.out;
-    EXPECT_TRUE(contains(ok.out, "2 3\n")) << when << "\n" << ok.out;
+    EXPECT_TRUE(contains(ok.out, "2 3\n7\n")) << when << "\n" << ok.out;
     EXPECT_TRUE(contains(ok.out, "live blocks       : 0")) << when << "\n"
                                                            << ok.out;
     auto bad = paykan("--check-only bad.pkn");
@@ -1105,7 +1127,9 @@ TEST(Pkm, PrivateNamesAreTheModulesOwn) {
           "'_twice' of 'Pub' is private to module 'lib::shapes'",
           "'_make' of 'Pub' is private to module 'lib::shapes'",
           "'shapes::_GenHidden' is private to module 'lib::shapes'",
-          "'_Node' is private to module 'lib::shapes'"})
+          "'_Node' is private to module 'lib::shapes'",
+          "'shapes::Conn' cannot be constructed here: its initializer "
+          "'___init__' is private to module 'lib::shapes'"})
       EXPECT_TRUE(contains(bad.out, line)) << when << ": " << line << "\n"
                                            << bad.out;
   };
@@ -1144,13 +1168,13 @@ TEST(Pkm, FunctionTypeArgumentsInInstantiationNames) {
             "fn apply(p: view Pair<(int, int) -> int, Str>, x: int) -> int "
             "{ return p.a(x, x); }\n");
   writeFile(dir / "main.pkn",
-            "import lib::shapes;\n"
+            "import ::io; import lib::shapes;\n"
             "fn main() -> int {\n"
             "  p = shapes::makePair();\n"
             "  q = shapes::Pair(fn(x: int) -> int { return x + 1; }, 2);\n"
             "  m = shapes::makeMap();\n"
             "  r: shapes::Pair<(int, int) -> int, Str> = p;\n"
-            "  println(Str(shapes::apply(p, 3)) + \" \" + p.b + \" \" + "
+            "  io::println(Str(shapes::apply(p, 3)) + \" \" + p.b + \" \" + "
             "Str(q.a(q.b)) + \" \" + Str(m.key()(3)) + \" \" + m.v + \" "
             "\" + Str(r.first()(2, 2)));\n"
             "  return 0;\n}\n");
@@ -1223,18 +1247,18 @@ TEST(Pkm, WeakFieldsAcrossModules) {
             "impl Node { fn __init__(name: Str) { self.name = name; "
             "self.parent = None; self.first = None; self.next = None; } }\n");
   writeFile(dir / "main.pkn",
-            "import tree;\n"
+            "import ::io; import tree;\n"
             "fn main() -> int {\n"
             "  root = tree::Node(\"root\");\n"
             "  a = tree::Node(\"a\");\n"
             "  root.add(a);\n"
             "  a.parent = root;\n"
             "  weak w = root;\n"
-            "  print(a.path() + \" \");\n"
+            "  io::print(a.path() + \" \");\n"
             "  root = tree::Node(\"other\");\n"
-            "  print(a.path() + \" \");\n"
-            "  match w { n: tree::Node { println(n.name); } None { "
-            "println(\"gone\"); } }\n"
+            "  io::print(a.path() + \" \");\n"
+            "  match w { n: tree::Node { io::println(n.name); } None { "
+            "io::println(\"gone\"); } }\n"
             "  return 0;\n}\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
@@ -1279,14 +1303,15 @@ TEST(Pkm, GenericStructsAcrossSourceModulesAreNotCached) {
   writeFile(dir / "plain.pkn", "fn two() -> int { return 2; }\n");
   // m2's Pair<Str, int> is one struct with main's; gen's own Pair<int, Str>
   // (mk's result) is one with main's explicit instantiation of it.
-  writeFile(dir / "main.pkn",
-            "import m1;\nimport m2;\nimport plain;\nimport lib::gen;\n"
-            "fn main() -> int { p = m2::make(); p.b = p.b + 1;\n"
-            "  q = gen::Pair<Str, int>(\"m\", 3);\n"
-            "  r = gen::mk(); r.a = 0;\n"
-            "  println(p.toString() + \" \" + Str(p == q) + \" \" +\n"
-            "          Str(r == gen::Pair<int, Str>(0, \"m\")));\n"
-            "  return m1::one() + plain::two() + p.b; }\n");
+  writeFile(
+      dir / "main.pkn",
+      "import ::io; import m1;\nimport m2;\nimport plain;\nimport lib::gen;\n"
+      "fn main() -> int { p = m2::make(); p.b = p.b + 1;\n"
+      "  q = gen::Pair<Str, int>(\"m\", 3);\n"
+      "  r = gen::mk(); r.a = 0;\n"
+      "  io::println(p.toString() + \" \" + Str(p == q) + \" \" +\n"
+      "          Str(r == gen::Pair<int, Str>(0, \"m\")));\n"
+      "  return m1::one() + plain::two() + p.b; }\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
   };
@@ -1331,14 +1356,15 @@ TEST(Pkm, SizedTypesCrossModulesAndPkm) {
             "fn tiny(x: f16) -> f16 { return x; }\n");
   writeFile(
       dir / "main.pkn",
-      "import lib::pix;\n"
+      "import ::io; import lib::pix;\n"
       "fn main() -> int {\n"
       "  c = pix::Rgb(200, 200, 255);\n"
-      "  println(Str(pix::brightness(c)) + \" \" + Str(pix::big()) + \" \"\n"
+      "  io::println(Str(pix::brightness(c)) + \" \" + Str(pix::big()) + \" "
+      "\"\n"
       "          + Str(pix::half(0.5)) + \" \" + Str(pix::wrap(127)) + \" \"\n"
       "          + Str(pix::tiny(0.1)) + \" \" + c.toString());\n"
       "  u: unsigned = pix::big() / 2;\n"
-      "  println(Str(u));\n"
+      "  io::println(Str(u));\n"
       "  return 0;\n}\n");
   writeFile(dir / "bad.pkn", "import lib::pix;\n"
                              "fn main() -> int {\n"

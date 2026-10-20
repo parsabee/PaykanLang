@@ -4,87 +4,89 @@
 //            visitAssignStmt (rebind), emitImplicitVarDecl, emitClassVarRebind,
 //            Scope::declare/declareUnowned, Scope::findOwner
 
-fn main() -> int {
-  println("=== explicit typed declarations ===");
-  a: int   = 42;
-  b: float = 3.14;
-  c: bool  = True;
-  d: Str   = "hello";
-  println(Str<int>(a));    // 42
-  println(Str(b));  // 3.14
-  println(Str<bool>(c));   // True
-  println(d);               // hello
+import ::io;
 
-  println("=== implicit (inferred) declarations ===");
+fn main() -> int {
+  io::println("=== explicit typed declarations ===");
+  a: int = 42;
+  b: float = 3.14;
+  c: bool = True;
+  d: Str = "hello";
+  io::println(Str<int>(a));    // 42
+  io::println(Str(b));  // 3.14
+  io::println(Str<bool>(c));   // True
+  io::println(d);               // hello
+
+  io::println("=== implicit (inferred) declarations ===");
   // No type annotation — CodeGen infers from RHS value
   x = 100;
   y = 2.718;
   z = False;
   w = "world";
-  println(Str(x));    // 100
-  println(Str<float>(y));  // 2.718
-  println(Str(z));   // False
-  println(w);               // world
+  io::println(Str(x));    // 100
+  io::println(Str<float>(y));  // 2.718
+  io::println(Str(z));   // False
+  io::println(w);               // world
 
-  println("=== rebind int ===");
+  io::println("=== rebind int ===");
   v: int = 1;
   v = 2;
   v = v + 10;
   v = v * 3;
-  println(Str<int>(v));    // 36
+  io::println(Str<int>(v));    // 36
 
-  println("=== rebind float ===");
+  io::println("=== rebind float ===");
   f: float = 0.0;
   f = 1.5;
   f = f + 0.5;
-  println(Str(f));  // 2
+  io::println(Str(f));  // 2
 
-  println("=== rebind bool ===");
+  io::println("=== rebind bool ===");
   flag: bool = False;
   flag = True;
   flag = !flag;
-  println(Str<bool>(flag)); // False
+  io::println(Str<bool>(flag)); // False
 
-  println("=== int->float promotion on rebind ===");
+  io::println("=== int->float promotion on rebind ===");
   pf: float = 0.0;
   pf = 7;              // int literal assigned to float var -> SIToFP
-  println(Str(pf));  // 7
+  io::println(Str(pf));  // 7
   pf = pf + 1;         // int 1 promoted
-  println(Str<float>(pf));  // 8
+  io::println(Str<float>(pf));  // 8
 
-  println("=== Str rebind (emitClassVarRebind) ===");
+  io::println("=== Str rebind (emitClassVarRebind) ===");
   s: Str = "first";
-  println(s);               // first
+  io::println(s);               // first
   s = "second";
-  println(s);               // second
+  io::println(s);               // second
   s = s + "!";          // concat then rebind
-  println(s);               // second!
+  io::println(s);               // second!
 
-  println("=== Str implicit decl then rebind ===");
+  io::println("=== Str implicit decl then rebind ===");
   msg = "initial";
-  println(msg);             // initial
+  io::println(msg);             // initial
   msg = "updated";
-  println(msg);             // updated
+  io::println(msg);             // updated
 
-  println("=== multiple vars same scope ===");
+  io::println("=== multiple vars same scope ===");
   p: int = 1;
   q: int = 2;
   r: int = 3;
   p = p + q + r;
-  println(Str(p));    // 6
+  io::println(Str(p));    // 6
 
-  println("=== nested scope variable access ===");
+  io::println("=== nested scope variable access ===");
   outer: int = 10;
   if True {
     inner: int = 20;
     outer = outer + inner;   // outer accessible from inner scope
-    println(Str<int>(outer));   // 30
+    io::println(Str<int>(outer));   // 30
   }
-  println(Str(outer));     // 30 (modified by inner scope)
+  io::println(Str(outer));     // 30 (modified by inner scope)
 
-  println("=== None initialised var ===");
+  io::println("=== None initialised var ===");
   n: Obj = None;   // None has type Obj, not Str
-  println("none ok");  // just checking it doesn't crash
+  io::println("none ok");  // just checking it doesn't crash
 
   return 0;
 }

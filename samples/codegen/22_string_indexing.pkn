@@ -3,6 +3,8 @@
 // Indexing a Str with an integer subscript now yields a char (primitive i8).
 // Out-of-bounds access aborts with a runtime error message.
 
+import ::io;
+
 fn countChar(s: Str, target: char) -> int {
   count: int = 0;
   i: int = 0;
@@ -41,36 +43,36 @@ fn isPalindrome(s: Str) -> bool {
 fn main() -> int {
   // Basic indexing
   word: Str = "hello";
-  println(Str(word[0]));   // h
-  println(Str<char>(word[4]));   // o
+  io::println(Str(word[0]));   // h
+  io::println(Str<char>(word[4]));   // o
 
   // Round-trip: index then Str<char>
   i: int = 0;
   while i < word.len() {
-    print(Str(word[i]));
+    io::print(Str(word[i]));
     i = i + 1;
   }
-  println("");   // newline
+  io::println("");   // newline
 
   // Count occurrences of a char
   sentence: Str = "the quick brown fox jumps over the lazy dog";
-  println("'e' count: " + Str<int>(countChar(sentence, 'e')));   // 3
-  println("'o' count: " + Str(countChar(sentence, 'o')));   // 4
+  io::println("'e' count: " + Str<int>(countChar(sentence, 'e')));  // 3
+  io::println("'o' count: " + Str(countChar(sentence, 'o')));  // 4
 
   // Reverse a string
-  println(reverseStr("abcde"));   // edcba
-  println(reverseStr("racecar")); // racecar
+  io::println(reverseStr("abcde"));   // edcba
+  io::println(reverseStr("racecar")); // racecar
 
   // Palindrome check
-  println(Str<bool>(isPalindrome("racecar")));  // True
-  println(Str(isPalindrome("hello")));    // False
-  println(Str<bool>(isPalindrome("a")));        // True
-  println(Str(isPalindrome("")));         // True
+  io::println(Str<bool>(isPalindrome("racecar")));  // True
+  io::println(Str(isPalindrome("hello")));  // False
+  io::println(Str<bool>(isPalindrome("a")));  // True
+  io::println(Str(isPalindrome("")));         // True
 
   // Comparison between indexed chars
   s: Str = "az";
   if s[0] < s[1] {
-    println("a < z: true");
+    io::println("a < z: true");
   }
 
   return 0;

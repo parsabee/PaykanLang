@@ -16,16 +16,34 @@
 // expect-stdout: None
 // expect-stdout: None
 
+import ::io;
+
 fn describe(s: Str) -> Str {
-  match int(s) { n: int { return "int " + Str<int>(n); } None { } }
-  match float(s) { f: float { return "float " + Str(f); } None { } }
-  match bool(s) { b: bool { return "bool " + Str<bool>(b); } None { } }
+  match int(s) {
+    n: int {
+      return "int " + Str<int>(n);
+    }
+    None { }
+  }
+  match float(s) {
+    f: float {
+      return "float " + Str(f);
+    }
+    None { }
+  }
+  match bool(s) {
+    b: bool {
+      return "bool " + Str<bool>(b);
+    }
+    None { }
+  }
   return "?";
 }
 
 fn main() -> int {
   // Each string parses as the first type that accepts it.
-  println(describe("42") + " | " + describe("2.5") + " | " + describe("True"));
+  io::println(describe("42") + " | " + describe("2.5") + " | "
+      + describe("True"));
 
   // Parsing settings by key.
   keys: Str[5] = ["retries", "ratio", "verbose", "color", "depth"];
@@ -36,47 +54,67 @@ fn main() -> int {
   while k < keys.len() {
     text = "";
     if keys[k] == "ratio" {
-      match float<Str>(vals[k]) { x: float { text = Str<float>(x); } None { } }
-    } elif keys[k] == "verbose" || keys[k] == "color" {
-      match bool(vals[k]) {                       // bool<Str>
-        x: bool { text = Str<bool>(x); }
-        None    { }
+      match float<Str>(vals[k]) {
+        x: float {
+          text = Str<float>(x);
+        }
+        None { }
       }
-      if text == "" { println("'" + vals[k] + "' is not a bool"); }
+    } elif keys[k] == "verbose" || keys[k] == "color" {
+      match bool(vals[k]) {
+        // bool<Str>
+        x: bool { text = Str<bool>(x); }
+        None { }
+      }
+      if text == "" {
+        io::println("'" + vals[k] + "' is not a bool");
+      }
     } else {
-      match int(vals[k]) { x: int { text = Str(x); } None { } }
+      match int(vals[k]) {
+        x: int { text = Str(x); }
+        None { }
+      }
     }
     if text != "" {
       valid = valid + 1;
-      if line != "" { line = line + " "; }
+      if line != "" {
+        line = line + " ";
+      }
       line = line + keys[k] + "=" + text;
     }
     k = k + 1;
   }
-  println("settings: " + Str<int>(valid) + " of " + Str<int>(keys.len()) +
-          " valid");
-  println(line);
+  io::println("settings: " + Str<int>(valid) + " of " + Str<int>(keys.len())
+      + " valid");
+  io::println(line);
 
   // bool<Str> takes exactly the spellings Str<bool> prints.
   match bool<Str>("true") {
-    v: bool { println("parsed " + Str<bool>(v)); }
-    None    { println("'true' is not a bool"); }
+    v: bool {
+      io::println("parsed " + Str<bool>(v));
+    }
+    None {
+      io::println("'true' is not a bool");
+    }
   }
   out = "round trip:";
   flags: bool[2] = [True, False];
   j = 0;
   while j < flags.len() {
-    match bool(Str(flags[j])) {                   // bool<Str>(Str<bool>(...))
-      v: bool { out = out + " " + Str<bool>(v); }
-      None    { out = out + " ?"; }
+    match bool(Str(flags[j])) {
+      // bool<Str>(Str<bool>(...))
+      v: bool {
+        out = out + " " + Str<bool>(v);
+      }
+      None { out = out + " ?"; }
     }
     j = j + 1;
   }
-  println(out);
+  io::println(out);
 
   // A failed parse is None.
   missing: int? = int<Str>("4 2");
-  println(missing);
-  println(bool(""));
+  io::println(missing);
+  io::println(bool(""));
   return 0;
 }

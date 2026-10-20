@@ -51,6 +51,7 @@ inline constexpr const char *kSize = "size_t";     ///< <stdlib.h>
 
 // Pointer types, spelled as the emitter writes them (`T *`).
 inline constexpr const char *kVoidPtr = "void *";
+inline constexpr const char *kUintptr = "uintptr_t";
 inline constexpr const char *kUint8Ptr = "uint8_t *";
 inline constexpr const char *kConstCharPtr = "const char *";
 inline constexpr const char *kCharPtrPtr = "char **";
