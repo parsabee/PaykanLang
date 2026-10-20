@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: MIT
 // PIR -> the `pir` MLIR dialect: every item and instruction of docs/pir.md,
 // and every sample program, imports into MLIR that verifies, and the printed
-// MLIR parses back to the same text.
+// MLIR parses back to the same text.  The shared lowering
+// (docs/design/mlir-backend.md) leaves only func, scf, arith and the pir ops
+// both targets lower, and its output round-trips too.
 
+#include "Dialect/PIRDialect.h"
 #include "Import/PIRImport.h"
+#include "Lowering/PIRToStandard.h"
 #include "PIR/Programs.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Verifier.h"
@@ -14,6 +18,7 @@
 #include <mlir/IR/MLIRContext.h>
 #include <mlir/IR/Verifier.h>
 #include <mlir/Parser/Parser.h>
+#include <mlir/Pass/PassManager.h>
 
 #include <gtest/gtest.h>
 
@@ -56,6 +61,49 @@ std::string importText(const std::string &text, mlir::MLIRContext &ctx,
   return print((*mod).get());
 }
 
+/// Import the PIR @p text and run the shared lowering on it: the module, or
+/// null with the reason in @p err.
+mlir::OwningOpRef<mlir::ModuleOp>
+lowerText(const std::string &text, mlir::MLIRContext &ctx, std::string &err) {
+  pir::ParseError perr;
+  auto program = pir::parseProgram(text, perr);
+  if (!program) {
+    err = "parse error: " + perr.str();
+    return {};
+  }
+  auto mod = mlir_backend::importProgram(*program, ctx);
+  if (!mod) {
+    err = mod.status().message();
+    return {};
+  }
+  mlir::PassManager pm(&ctx);
+  pm.addPass(mlir_backend::createPIRToStandardPass());
+  if (mlir::failed(pm.run((*mod).get()))) {
+    err = "the shared lowering failed";
+    return {};
+  }
+  return std::move(*mod);
+}
+
+/// Every op of @p mod is one both targets lower: func, scf and arith, and
+/// the pir globals, memory ops and optionals.
+void expectOnlyStandardOps(mlir::ModuleOp mod) {
+  namespace P = ::paykan::pir_dialect;
+  mod.walk([&](mlir::Operation *op) {
+    llvm::StringRef dialect = op->getName().getDialectNamespace();
+    if (dialect == "builtin" || dialect == "func" || dialect == "scf" ||
+        dialect == "arith")
+      return;
+    EXPECT_TRUE((
+        mlir::isa<P::CStrOp, P::DataOp, P::BytesOp, P::ExternObjectOp,
+                  P::ExternVTableOp, P::VTableOp, P::AllocaOp, P::PtrLoadOp,
+                  P::PtrStoreOp, P::PtrAddOp, P::MemCopyOp, P::MemZeroOp,
+                  P::AddressOfOp, P::NullOp, P::FnAddrOp, P::ICallOp, P::CastOp,
+                  P::SomeOp, P::NoneOp, P::IsSomeOp, P::UnwrapOp>(op)))
+        << op->getName().getStringRef().str();
+  });
+}
+
 /// @p mlir parses back, verifies and prints as @p mlir.
 void expectRoundTrip(const std::string &mlir, mlir::MLIRContext &ctx) {
   auto parsed = mlir::parseSourceString<mlir::ModuleOp>(mlir, &ctx);
@@ -77,6 +125,33 @@ TEST(PIRMLIR, EveryItemAndInstruction) {
         "module = \"lib\"", "ptr_load", "ptr_store", "field_load"})
     EXPECT_NE(mlir.find(op), std::string::npos) << op << "\n" << mlir;
   expectRoundTrip(mlir, ctx);
+}
+
+TEST(PIRMLIR, SharedLoweringOfEveryItemAndInstruction) {
+  mlir::MLIRContext ctx;
+  std::string err;
+  auto mod = lowerText(pir::test::kProgram, ctx, err);
+  ASSERT_TRUE(mod) << err;
+  expectOnlyStandardOps(*mod);
+  std::string mlir = print(*mod);
+  // Link names; the layout of Point3 (the header, x, name, z at 32); its
+  // vtable; and the class Adder of module "lib".
+  for (const char *text :
+       {"func.func private @PaykanString_new", "pir.vtable @pkvt_main_SPoint",
+        "pir.extern_vtable @pkvt_lib_SAdder", "pk_main_SPoint__destroy",
+        "func.func private @pk_lib_Shelper"})
+    EXPECT_NE(mlir.find(text), std::string::npos) << text << "\n" << mlir;
+  expectRoundTrip(mlir, ctx);
+}
+
+TEST(PIRMLIR, LinkNamesAreCIdentifiers) {
+  EXPECT_EQ(mlir_backend::linkName("main", "f"), "pk_main_Sf");
+  EXPECT_EQ(mlir_backend::linkName("geometry::shapes", "Point.move"),
+            "pk_geometry_3A_3Ashapes_SPoint_2Emove");
+  // `_` is doubled, so module "a_S" name "b" and module "a" name "S_b" differ.
+  EXPECT_NE(mlir_backend::linkName("a_S", "b"),
+            mlir_backend::linkName("a", "S_b"));
+  EXPECT_EQ(mlir_backend::vtableName("m", "Box<int>"), "pkvt_m_SBox_3Cint_3E");
 }
 
 /// The PIR of a source file, as `paykan --emit-pir` prints it.
@@ -116,6 +191,10 @@ TEST(PIRMLIR, EverySample) {
     std::string mlir = importText(pirText, ctx, err);
     ASSERT_FALSE(mlir.empty()) << err;
     expectRoundTrip(mlir, ctx);
+    auto lowered = lowerText(pirText, ctx, err);
+    ASSERT_TRUE(lowered) << err;
+    expectOnlyStandardOps(*lowered);
+    expectRoundTrip(print(*lowered), ctx);
   }
 }
 

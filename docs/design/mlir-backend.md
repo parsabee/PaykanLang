@@ -78,12 +78,19 @@ vtables, optionals, the sized integer types, structured control flow with
   offset, read or written through a `pir` pointer op; `new` allocates the
   computed size and zeroes it.  Vtables become `pir` globals of function
   addresses, and `vcall` a load from the vtable and an indirect call.
-* **Optionals** never cross into C (docs/pir.md §1: no runtime or native
-  function takes or returns one), so each becomes its two parts, the
-  presence flag and the payload, as two values; in memory it keeps its C
-  layout.
-* **Locals** are `pir` slots: memory that LLVM's `mem2reg` turns back into
-  values, and that C declares as variables.
+* **Optionals** stay `!pir.opt` values, with `pir.some`, `pir.none`,
+  `pir.is_some` and `pir.unwrap`: each target makes them the struct C lays
+  out (`{ bool present; <payload> value; }`), passed and returned by value as
+  both of today's backends do.  (Their two parts as two values would need
+  two results from a function returning one, which EmitC, like C, cannot
+  express.)
+* **Locals** are `pir.alloca` slots: memory that LLVM's `mem2reg` turns
+  back into values, and that C declares as variables.
+* **Names.**  Every symbol gets its link name here, the same for both
+  targets and in every module that references it: `pk_<module>_S<name>`
+  (a vtable `pkvt_...`), both parts escaped so the result is a C identifier
+  and no two symbols share one; runtime and native functions keep their C
+  names.
 
 ## Steps
 

@@ -4,10 +4,15 @@
 // The `pir` dialect: PIR (docs/pir.md) as MLIR.  One op per PIR item,
 // statement and instruction, with PIR's types, so a PIR module imports one
 // to one (PIRImport.cpp) and `--emit-mlir=pir` shows the program as the
-// lowering made it.  The shared lowering (docs/design/mlir-backend.md)
-// rewrites it into the upstream dialects both targets reach: func, scf and
-// arith, plus the few pir memory ops no upstream dialect lowers to both LLVM
-// and EmitC.
+// lowering made it.  The shared lowering (docs/design/mlir-backend.md,
+// Lowering/PIRToStandard.cpp) rewrites it into the upstream dialects both
+// targets reach -- func, scf and arith -- and keeps the few pir ops no
+// upstream dialect lowers to both LLVM and EmitC: the globals (pir.cstr,
+// pir.data, pir.bytes, pir.vtable and the externs), the memory ops
+// (pir.alloca, pir.ptr_load, pir.ptr_store, pir.ptr_add, pir.memcopy,
+// pir.memzero, pir.addressof, pir.null, pir.fn_addr, pir.icall, pir.cast)
+// and the optionals (!pir.opt, pir.some, pir.none, pir.is_some,
+// pir.unwrap).
 //
 // Every region of a pir op is a structured block, like PIR's: a `pir.func`
 // body, the branches of `pir.if`, the condition and body of `pir.while`.
@@ -185,6 +190,18 @@ def PIR_FuncOp : PIR_Op<"func", [FunctionOpInterface, IsolatedFromAbove,
     bool isDeclaration() { return isExternal(); }
   }];
   let hasCustomAssemblyFormat = 1;
+}
+
+def PIR_VTableOp : PIR_Op<"vtable", [Symbol]> {
+  let summary = "a class's vtable: its slots' function addresses";
+  let description = [{
+    Made by the shared lowering from a `pir.class`: one entry per slot in
+    slot order, a function symbol or `unit` for an abstract (null) slot.
+    The address of the vtable (`pir.addressof`) is the class's runtime type
+    identity.  Another module's class's vtable is a `pir.extern_vtable`.
+  }];
+  let arguments = (ins SymbolNameAttr:$sym_name, ArrayAttr:$entries);
+  let assemblyFormat = "$sym_name `=` $entries attr-dict";
 }
 
 //===----------------------------------------------------------------------===//
@@ -498,6 +515,17 @@ def PIR_LocalOp : PIR_Op<"local", [
   let arguments = (ins StrAttr:$name);
   let results = (outs PIR_LocalType:$slot);
   let assemblyFormat = "$name attr-dict `:` qualified(type($slot))";
+}
+
+def PIR_AllocaOp : PIR_Op<"alloca"> {
+  let summary = "a function's stack slot of `size` bytes aligned to `align`";
+  let description = [{
+    Made by the shared lowering from a `pir.local`: the slot's address,
+    read and written with `pir.ptr_load` and `pir.ptr_store`.
+  }];
+  let arguments = (ins I64Attr:$size, I64Attr:$align, StrAttr:$name);
+  let results = (outs PIR_PtrType:$result);
+  let assemblyFormat = "$name `,` $size `,` $align attr-dict";
 }
 
 def PIR_LoadOp : PIR_Op<"load", [
