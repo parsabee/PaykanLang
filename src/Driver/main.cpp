@@ -552,8 +552,10 @@ int main(int argc, char *argv[]) {
   if (opts.EmitSource) {
     if (!caps.EmitSource)
       return fail("backend '" + backendName + "' has no source output");
+    paykan::backend::EmitOptions eo;
+    eo.SourceStage = opts.EmitStage;
     paykan::Status s =
-        backend->emit(in, paykan::backend::EmitKind::Source, {}, std::cout);
+        backend->emit(in, paykan::backend::EmitKind::Source, eo, std::cout);
     std::cout.flush();
     return s ? EXIT_SUCCESS : failBackend(s);
   }

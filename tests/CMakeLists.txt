@@ -218,6 +218,39 @@ if(PAYKAN_TEST_SUITE_pir_llvm AND "llvm" IN_LIST PAYKAN_BACKENDS)
     add_test(NAME PIRLLVMTests COMMAND pir_llvm_tests)
 endif()
 
+# --- PIR -> MLIR import tests: the pir dialect round trip (pir-mlir) -----------
+paykan_test_suite(pir-mlir PAYKAN_TEST_SUITE_pir_mlir)
+if(PAYKAN_TEST_SUITE_pir_mlir AND "mlir" IN_LIST PAYKAN_BACKENDS)
+    add_executable(pir_mlir_tests
+        Backends/PIRMLIRTests.cpp
+    )
+    target_include_directories(pir_mlir_tests
+        PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_include_directories(pir_mlir_tests SYSTEM
+        PRIVATE ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS}
+    )
+    paykan_llvm_no_werror(pir_mlir_tests)
+    target_compile_definitions(pir_mlir_tests
+        PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
+                PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
+    )
+    target_link_libraries(pir_mlir_tests
+        PRIVATE gtest_main
+                paykan_backend_mlir
+                paykan_pir
+                paykan_compile_options
+                MLIRParser
+    )
+    # The samples are compiled to PIR by the built paykan, which needs the
+    # standard library staged.
+    add_dependencies(pir_mlir_tests paykan)
+    if(TARGET paykan_stdlib)
+        add_dependencies(pir_mlir_tests paykan_stdlib)
+    endif()
+    add_test(NAME PIRMLIRTests COMMAND pir_mlir_tests)
+endif()
+
 # --- PIR tests: printer, parser, verifier, binary codec (pir) ------------------------------
 paykan_test_suite(pir PAYKAN_TEST_SUITE_pir)
 if(PAYKAN_TEST_SUITE_pir)

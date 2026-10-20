@@ -58,6 +58,9 @@ struct Options {
 
   /// -o <file>: the output of `build` or `--emit-pkm`.
   std::string OutputPath;
+  /// --emit-mlir=<stage>: --backend=mlir --emit-source, writing the stage of
+  /// the MLIR pipeline named (the backend's EmitOptions::SourceStage).
+  std::string EmitStage;
 
   /// `paykan pkm <verb> <file>`: the verb and the `--section=<name>` of
   /// `dump` ("" = all).

@@ -1038,6 +1038,32 @@ TEST(Driver, EmitCPrintsCSource) {
   EXPECT_NE(out.find("int32_t weak;"), std::string::npos) << out;
 }
 
+// --emit-mlir=<stage> selects the mlir backend and prints the program at
+// that stage of its pipeline (docs/design/mlir-backend.md); with another
+// backend, or a stage the backend has not, it is an error.
+TEST(Driver, EmitMLIRPrintsThePIRDialect) {
+  auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
+  if (backends.find("mlir:") == std::string::npos)
+    GTEST_SKIP() << "this build has no mlir backend";
+  auto src = writeTmp("fn main() -> int { x = 40; return x + 2; }");
+  auto [rc, out] =
+      run(std::string(kPaykan) + " --emit-mlir=pir " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_NE(out.find("pir.func @main() -> i64"), std::string::npos) << out;
+  EXPECT_NE(out.find(" = add "), std::string::npos) << out;
+  auto [rcC, outC] = run(std::string(kPaykan) +
+                         " --backend=c --emit-mlir=pir " + src + " 2>&1");
+  EXPECT_NE(rcC, 0) << outC;
+  EXPECT_NE(outC.find("--emit-mlir needs the mlir backend"), std::string::npos)
+      << outC;
+  auto [rcStage, outStage] =
+      run(std::string(kPaykan) + " --emit-mlir=bogus " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rcStage, 0) << outStage;
+  EXPECT_NE(outStage.find("unknown MLIR stage 'bogus'"), std::string::npos)
+      << outStage;
+}
+
 // Every vtable is an array of PaykanMethod (Runtime.h), read with
 // Paykan_vtable_of and converted to the method's own type at the call: no
 // vtable is accessed through a pointer to another type (#62).

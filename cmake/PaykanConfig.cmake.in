@@ -72,6 +72,7 @@ set(PAYKAN_FRONTENDS "@PAYKAN_FRONTENDS@")
 set(PAYKAN_BACKENDS "@PAYKAN_BACKENDS@")
 set(PAYKAN_PLUGINS "@PAYKAN_CONFIG_PLUGINS@")
 set(PAYKAN_NEEDS_LLVM @PAYKAN_NEEDS_LLVM@)
+set(PAYKAN_NEEDS_MLIR @PAYKAN_NEEDS_MLIR@)
 set_and_check(PAYKAN_RUNTIME_LIBRARY "@PACKAGE_PAYKAN_CONFIG_RUNTIME_LIBRARY@")
 set_and_check(PAYKAN_RUNTIME_INCLUDE_DIR "@PACKAGE_PAYKAN_CONFIG_RUNTIME_INCLUDE_DIR@")
 set(PAYKAN_TOOLCHAIN_VERSION "@PAYKAN_VERSION@")
@@ -88,6 +89,10 @@ if(PAYKAN_NEEDS_LLVM)
     # LLVM installed.  Pass -DLLVM_DIR=<llvm>/lib/cmake/llvm to link the
     # llvm backend into a driver.
     find_package(LLVM CONFIG QUIET)
+endif()
+if(PAYKAN_NEEDS_MLIR)
+    # The same for the mlir backend and MLIR (-DMLIR_DIR=<llvm>/lib/cmake/mlir).
+    find_package(MLIR CONFIG QUIET)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PaykanTargets.cmake")

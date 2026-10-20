@@ -61,6 +61,10 @@ struct EmitOptions {
   /// Output file for Object / Executable; "" means a default next to the
   /// input.  Source output goes to the stream emit() is given.
   std::string OutputPath;
+  /// For Source: which of the backend's source forms to write ("" for its
+  /// default), for a backend with several (the mlir backend's stages,
+  /// --emit-mlir=<stage>).
+  std::string SourceStage;
 };
 
 struct RunOptions {

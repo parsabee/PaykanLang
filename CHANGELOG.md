@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The `mlir` backend, the first step of replacing the C and llvm backends' two translations of
+  PIR with one lowering through MLIR (docs/design/mlir-backend.md).  Opt-in like `llvm`
+  (`-DPAYKAN_BACKENDS="llvm;mlir;c"`).  So far it imports the program into `pir`, an MLIR
+  dialect with an op for each PIR item, statement and instruction, and prints it:
+  `paykan --emit-mlir=pir prog.pkn`.  The `pir-mlir` test suite imports every item and
+  instruction of PIR and every sample program, and checks that the MLIR verifies and parses
+  back to the same text.
+
 ### Changed
 
 - The `llvm` backend is built on LLVM 22.1.8 (was 17.0.6), the first step towards an MLIR

@@ -114,6 +114,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   bool sawVerb = false;
   bool emitLLVM = false;
   bool emitC = false;
+  bool emitMLIR = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
@@ -180,6 +181,14 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
 
+    if (std::string stage;
+        valueOption(name, "emit-mlir", i, argc, argv, stage, r.Error)) {
+      if (!r.Error.empty())
+        return r;
+      emitMLIR = true;
+      o.EmitStage = std::move(stage);
+      continue;
+    }
     if (std::string plugin;
         valueOption(name, "plugin", i, argc, argv, plugin, r.Error)) {
       if (!r.Error.empty())
@@ -270,6 +279,16 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     o.Backend = "c";
     o.EmitSource = true;
   }
+  if (emitMLIR) {
+    if (!o.Backend.empty() && o.Backend != "mlir") {
+      r.Error =
+          "--emit-mlir needs the mlir backend, but --backend=" + o.Backend +
+          " was given";
+      return r;
+    }
+    o.Backend = "mlir";
+    o.EmitSource = true;
+  }
   bool infoOnly =
       o.ShowHelp || o.ShowVersion || o.ListFrontends || o.ListBackends;
   if (!infoOnly && o.InputFilename.empty())
@@ -297,6 +316,9 @@ void printUsage(std::ostream &os, const char *argv0) {
   os << "  --emit-llvm       - Emit LLVM IR to stdout (--backend=llvm "
         "--emit-source)\n"
      << "  --emit-c          - Emit C to stdout (--backend=c --emit-source)\n"
+     << "  --emit-mlir=<stage> - Emit MLIR at a stage of the mlir backend to "
+        "stdout\n"
+     << "                      (pir: the imported PIR dialect)\n"
      << "  --frontend=<name> - Parse with the named frontend "
         "(--list-frontends)\n"
      << "  --backend=<name>  - Generate code with the named backend "
