@@ -46,7 +46,7 @@ extern "C" {
 //       `<Class>..vtable`.
 //   v6: imported modules' symbols are prefixed with the canonical module
 //       name (`geometry::shapes::describe`), not the absolute file path.
-#define PAYKAN_RUNTIME_ABI_VERSION 6
+#define PAYKAN_RUNTIME_ABI_VERSION 7
 
 // -- Target assumptions
 //

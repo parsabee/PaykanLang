@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml/badge.svg)](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.1-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](CHANGELOG.md)
 
 PaykanLang (`.pkn`) is a high-performance language for building applications on modern,
 heterogeneous machines. The goal is application development across many cores and, 
@@ -17,7 +17,10 @@ a real module system, C interoperability exposed through modules, and automatic 
 counting in place of a garbage collector or manual memory management. PaykanLang aims to 
 provide a safe, ergonomic, performant, and productive interface that compiles to native speed.
 
-This is **v0.1.1**, a patch release of v0.1.0, the first release, which lays the foundation.
+This is **v0.2.0**. It moves printing and files into a standard library (`::io`, `::result`,
+`::collections`, `::memory`, `::math`) and adds structs, sized numeric types, weak references,
+private members, function values held in place and optionals of value types; see the
+[CHANGELOG](CHANGELOG.md) for the full list and what changed from 0.1.
 Implemented and tested today: static typing with inference, single-inheritance classes with virtual dispatch,
 ARC, value-aware `==` (reference types dispatch to a virtual
 `equals`), fixed-size arrays and slices, a file-based module system, `match` type dispatch, enums, tuples,
@@ -34,13 +37,12 @@ concurrency, and C interop through modules — are the road ahead, not yet shipp
 [CHANGELOG.md](CHANGELOG.md) for what's in this release.
 
 **Stability.** Tuples, optional types (optional primitives and `match` on an optional
-included) and generics are **stable in v0.1**: their syntax and semantics as documented in
-[`docs/language/`](docs/language/) are covered by the compatibility promise for the 0.1
-series, so a program that follows the reference keeps its meaning in every 0.1.x release.
+included) and generics are **stable**: their syntax and semantics as documented in
+[`docs/language/`](docs/language/) are covered by the compatibility promise for the 0.2
+series, so a program that follows the reference keeps its meaning in every 0.2.x release.
 The limitations the reference documents stay: a prebuilt `.pkm` module file cannot hold
-generic templates until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)), so
-a module that declares generics, or uses another module's, is compiled from source every
-time. An optional primitive is a value, not a box, and an optional does not convert to
+generic templates, so a module that declares generics, or uses another module's, is
+compiled from source every time. An optional primitive is a value, not a box, and an optional does not convert to
 `Obj`. Not covered by the promise: the plugin interfaces
 (the C plugin API `include/paykan/plugin_api.h`, the PIR text a backend plugin receives, and
 the C++ interfaces `Frontend.h`, `Backend.h` and the registry) are versioned but not yet
@@ -109,8 +111,8 @@ any language that exposes C functions. `paykan` loads the files named with
 
 ```sh
 paykan --plugin=./libpaykan_backend_print_pir.so --backend=print-pir --emit-source hello.pkn
-mkdir -p ~/.paykan/plugins/0.1.1
-cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.1.1/   # or `cmake --install` it
+mkdir -p ~/.paykan/plugins/0.2.0
+cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.2.0/   # or `cmake --install` it
 paykan --backend=print-pir --emit-source hello.pkn
 paykan --list-backends    # every backend, with the file a plugin came from
 paykan --no-plugins ...   # only the built-in plugins (and --plugin files)

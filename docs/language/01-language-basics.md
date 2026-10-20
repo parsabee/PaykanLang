@@ -14,12 +14,11 @@ collector.
 ### Stability
 
 Tuples (`09-tuples.md`), optional types (`10-optionals.md`, optional primitives and
-optional-mode `match` included) and generics (`11-generics.md`) are **stable in v0.1**: the
+optional-mode `match` included) and generics (`11-generics.md`) are **stable**: the
 syntax and semantics this reference documents for them are covered by the compatibility
-promise for the 0.1 series. The limitations each chapter lists stay limitations; in
-particular a generic class or function cannot be imported from a prebuilt `.pkm` module
-until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)); importing one from
-source works. An optional
+promise for the 0.2 series. The limitations each chapter lists stay limitations; in
+particular a generic class or function cannot be imported from a prebuilt `.pkm` module;
+importing one from source works. An optional
 primitive is a value, not a box, and no optional converts to `Obj`
 ([#96](https://github.com/parsabee/PaykanLang/issues/96); see `10-optionals.md`).
 

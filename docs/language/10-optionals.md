@@ -1,7 +1,7 @@
 # PaykanLang — Optional Types
 
-> **Stable in v0.1** (issue #5), optional primitives and optional-mode `match` included: the
-> syntax and semantics below are covered by the compatibility promise for the 0.1 series (see
+> **Stable** (issue #5), optional primitives and optional-mode `match` included: the
+> syntax and semantics below are covered by the compatibility promise for the 0.2 series (see
 > `01-language-basics.md`, "Stability").
 
 An **optional type** `T?` holds either a value of type `T` or `None`. It is how a program says
@@ -398,7 +398,7 @@ Retaining, releasing and destroying an absent optional are no-ops. See `08-memor
 
 ---
 
-## Not supported in v0.1
+## Not supported yet
 
 Flow typing (`if x != None { x.foo(); }` does not narrow `x`), `if let`, the `??` default
 and `?.` chaining operators, optional fixed-size arrays, and typing `None` in a literal that has no
