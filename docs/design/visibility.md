@@ -56,10 +56,12 @@ or `view` argument, a method call and a `static fn` call:
 ```
 
 A subclass cannot reach a superclass's private field or method: `self.__x` in
-`Sub`'s method, with `__x` declared in `Base`, is the same error.  A
-subclass may declare its own `__x`; it is a different field (the superclass's
-stays in the layout, unreachable from the subclass), reported as the usual
-shadowing error if the name is public in the superclass.
+`Sub`'s method, with `__x` declared in `Base`, is the same error.  Nor can it
+declare a field `__x` of its own: the shadowing check does not look at
+privacy, so it is `field '__x' in class 'Sub' shadows a field in superclass
+'Base'`, as for a public name.  (Letting a subclass declare its own `__x`, a
+different field with the superclass's still in the layout, is not
+implemented.)
 
 The check is made where a member is resolved, on the owner of the member (the
 class or struct that declares it, found by walking the superclass chain) and

@@ -122,8 +122,9 @@ Output:
 
 `c.__count` or `c.__bump(1)` in `main`, or in a method of another class, is an error:
 `'__count' is private to 'Counter': it is reachable only from its own methods`. The same holds
-in a subclass: `self.__count` inside `class Sub : Counter` is rejected, and a subclass may declare
-its own `__count`, a different field.
+in a subclass: `self.__count` inside `class Sub : Counter` is rejected. A subclass cannot
+declare a field of the same name either, private or not: `field '__count' in class 'Sub'
+shadows a field in superclass 'Counter'`.
 
 A field or method whose name starts with **one** underscore (`_cache`, `_rebuild()`, `static fn
 _make()`) is **private to its module** instead: every function and class of the module that
