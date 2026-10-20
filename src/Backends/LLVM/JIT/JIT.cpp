@@ -122,6 +122,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanBufferTryReserve, reinterpret_cast<void *>(&PaykanBuffer_tryReserve)},
     {kPaykanPanicMessage,    reinterpret_cast<void *>(&Paykan_panic_message)},
     {kPaykanPanicValue,      reinterpret_cast<void *>(&Paykan_panic_value)},
+    {kPaykanUnreachableView, reinterpret_cast<void *>(&Paykan_unreachable_view)},
     // Reached through `native fn`s (the standard library's ::io), with the
     // print functions above.
     {kPaykanIoOpen,          reinterpret_cast<void *>(&Paykan_io_open)},

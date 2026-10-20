@@ -518,8 +518,9 @@ hello 4
 ```
 
 - What a `-> view T` function returns must be part of `self` or of a `view` or `inout`
-  parameter: the parameter itself, a field or an element reached from it, or the borrowed
-  result of another call that borrows only those. A new value, a copy parameter or a local
+  parameter: the parameter itself, a field or an element reached from it, a `match` arm's
+  name for a `view` of one (`match self.head { n: Node { return n.v; } ... }`), or the
+  borrowed result of another call that borrows only those. A new value, a copy parameter or a local
   is an error: `'d' is a copy: a 'view' result must be part of 'self' or of a 'view' or
   'inout' parameter`.
 - The caller sees the result as a `view` ([A `view` stays a `view`](#a-view-of-a-reference-stays-a-view)):

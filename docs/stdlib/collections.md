@@ -62,7 +62,10 @@ None
 - **A container holds its own reference to each element**, whether the method that stores
   it takes the element by value (`pushFront(v: T)`, `put(k: K, v: V)`) or lent
   (`push(v: view T)`): an object element is shared with the container, and a value element
-  is copied into it. A method that hands an element out returns a copy, which shares an
+  is copied into it. `LinkedList`'s `front()` and `back()`, and `Stack` and `Queue`'s
+  `peek()`, lend the element as a `view` (`-> view T`): it is read, or bound to a `view`
+  local, while the container is not changed, and a value element is copied out (`n =
+  s.peek();`). The other methods that hand an element out return a copy, which shares an
   object element with the container.
 - **Elements are compared with `==`**, so a class compares by its `equals` (the
   identity, unless it overrides `equals`).
@@ -145,8 +148,8 @@ and `remove` walk the list.
 | `fn pushBack(v: T)` | Adds `v` after the last element | |
 | `fn popFront() -> T` | Removes and returns the first element | panics `popFront on an empty LinkedList` |
 | `fn popBack() -> T` | Removes and returns the last element | panics `popBack on an empty LinkedList` |
-| `view fn front() -> T` | The first element | panics `front on an empty LinkedList` |
-| `view fn back() -> T` | The last element | panics `back on an empty LinkedList` |
+| `view fn front() -> view T` | The first element, as a `view` | panics `front on an empty LinkedList` |
+| `view fn back() -> view T` | The last element, as a `view` | panics `back on an empty LinkedList` |
 | `view fn contains(v: view T) -> bool` | Whether some element is `== v` | |
 | `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | |
 | `fn clear()` | Removes every element | |
@@ -167,7 +170,7 @@ A `Stack` is last in, first out; a `Queue` first in, first out. Both are kept in
 | `Stack<T>()` | `Queue<T>()` | An empty stack, an empty queue | |
 | `fn push(v: T)` | `fn enqueue(v: T)` | Adds `v`: on top of the stack, at the back of the queue | |
 | `fn pop() -> T` | `fn dequeue() -> T` | Removes and returns the top, the front | panics `pop from an empty Stack`, `dequeue from an empty Queue` |
-| `view fn peek() -> T` | `view fn peek() -> T` | The element `pop` or `dequeue` would return | panics `peek at an empty Stack`, `peek at an empty Queue` |
+| `view fn peek() -> view T` | `view fn peek() -> view T` | The element `pop` or `dequeue` would return, as a `view` | panics `peek at an empty Stack`, `peek at an empty Queue` |
 | `view fn len() -> unsigned` | the same | The number of elements | |
 | `view fn isEmpty() -> bool` | the same | Whether there are none | |
 | `fn clear()` | the same | Removes every element | |

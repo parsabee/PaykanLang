@@ -600,6 +600,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A `weak` local read from a `view` (`weak h = self.head;` in a `view fn`) was an ordinary
+  reference once matched, so a `view fn` could return part of `self` as a copy and the caller
+  could change it through a `view`.  Its reads are `view`s now: a `match` arm's name for one
+  is bound to a `view`, which cannot be changed, stored, returned or captured
+  (`'n' is bound to a 'view'; it cannot be returned`).  A `-> view T` function may return
+  a `match` arm's name for a `view` of `self` or of a parameter.  `LinkedList`'s `front()`
+  and `back()` and `Stack` and `Queue`'s `peek()` return a `view T`.
 - `"a" + n` and `n + "a"` with a number `n` passed type checking and then failed in PIR
   verification ("arithmetic on obj"); they are a type error now, `operator '+' is not
   defined for types 'Str' and 'int' (convert the 'int' with 'Str(...)')`.

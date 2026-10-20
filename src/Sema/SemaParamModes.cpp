@@ -134,7 +134,8 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
            "it cannot be " +
            use;
   // A weak reference is not a place a strong reference could be written to.
-  if (id && varKind(id->getName()) == VarKind::Weak)
+  if (id && (varKind(id->getName()) == VarKind::Weak ||
+             varKind(id->getName()) == VarKind::WeakView))
     return "'" + id->getName() + "' is a 'weak' reference and cannot be " + use;
   if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(place))
     if (const auto *ct =

@@ -100,6 +100,12 @@ std::string Sema::borrowedResultError(const ast::Expr *e) {
     return what + ", not a new value";
   const std::string &name = id->getName();
   const Scope *owner = CurrentScope ? CurrentScope->findOwner(name) : nullptr;
+  // A `match` arm's name for a `view` is part of the subject, which cannot
+  // change while the arm runs.
+  if (owner && varKind(name) == VarKind::ViewBinding)
+    if (auto it = owner->ViewSubjects.find(name);
+        it != owner->ViewSubjects.end())
+      return borrowedResultError(it->second);
   bool param = name == names::kSelf;
   for (const ast::Param &p : CurrentResult.Fn->getParams())
     param |= p.getName() == name;

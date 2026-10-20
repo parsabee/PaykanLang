@@ -584,6 +584,10 @@ PAYKAN_NORETURN void Paykan_panic_message(PaykanObject *message);
 /// (`-> T`), for where the program needs a value: it never stores one.
 PAYKAN_NORETURN void Paykan_panic_value(void *t, void *out,
                                         PaykanObject *message);
+/// A generic `native fn` with a borrowed result (`-> view T`) of @p owner,
+/// for the path of a `view fn` that has just panicked and still needs a
+/// `view` of part of `self` to return: reaching it is a bug, so it aborts.
+PAYKAN_NORETURN void *Paykan_unreachable_view(void *t, PaykanObject *owner);
 
 // -- I/O builtins
 

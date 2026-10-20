@@ -329,11 +329,15 @@ to an `inout` parameter, named by an `inout` local, or bound by an `inout` match
 struct fields, tuple or array elements, parameters or results.
 
 A `weak` local may name what a `view` names: a `view` parameter, or part of `self` in a
-`view fn`. It takes no reference of its own, so the view is not copied, and what it reads is
-a fresh reference to the object, which the method may bind, read and return. That is how a
-`view fn` walks a chain of objects reached from `self` without copying a reference out of
-the view (a plain local could not hold one): `weak cur = self.head;` then `match cur { n: Node
-{ ...; cur = n.next; } None { } }`.
+`view fn`. It takes no reference of its own, so the view is not copied. What it reads is the
+view's object, so its reads are `view`s too: a `match` arm's name for it is bound to a `view`,
+which is read, or passed on to a `view` parameter, but never changed, stored, returned (`'n'
+is bound to a 'view'; it cannot be returned`) or captured by a function (`'cur' is a 'weak'
+local of a 'view'; a function cannot capture a borrow`). It may be assigned another `view`.
+That is how a `view fn` walks a chain of objects reached from `self` without copying a
+reference out of the view (a plain local could not hold one): `weak cur = self.head;` then
+`match cur { n: Node { ...; cur = n.next; } None { } }`. A method that may change `self`
+walks one the same way and returns what it finds, since there `self` is not a `view`.
 
 The object's memory is kept, empty, while `weak` references to it remain (its own references
 are released when it is destroyed), and freed with the last of them — so a program that drops

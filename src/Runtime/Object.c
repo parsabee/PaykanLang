@@ -93,6 +93,12 @@ void Paykan_panic_value(void *t, void *out, PaykanObject *message) {
   Paykan_panic_message(message);
 }
 
+void *Paykan_unreachable_view(void *t, PaykanObject *owner) {
+  (void)t;
+  (void)owner;
+  Paykan_runtime_panic("internal error: an unreachable 'view' was reached");
+}
+
 void Paykan_panic_div_by_zero(void) {
   Paykan_runtime_panic("integer division or modulo by zero");
 }

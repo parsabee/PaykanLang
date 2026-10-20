@@ -930,8 +930,10 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
     // `n: view T` is a `view` local of the subject, whatever the subject is.
     if (arm->getMode() == ast::ParamMode::View)
       CurrentScope->Kinds[name] = VarKind::ViewLocal;
-    else if (MatchSubjectIsView)
+    else if (MatchSubjectIsView) {
       CurrentScope->Kinds[name] = VarKind::ViewBinding;
+      CurrentScope->ViewSubjects[name] = subject;
+    }
     return true;
   }
   // Its uses in the arm's body are follow-ons of the reported error.
@@ -3003,6 +3005,7 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
     error(loc, "cannot assign to '" + name + "': it is bound to a 'view'");
     return false;
   case VarKind::Weak:
+  case VarKind::WeakView:
   case VarKind::Plain:
   case VarKind::Inout:
     break;
@@ -3048,8 +3051,10 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
               (CurrentClassCtx->Struct ? ": assign its fields instead" : ""));
     return false;
   }
-  // The variable is still declared after this error.
-  const bool viewOk = checkViewNotStored(node->getValue(), valTy);
+  // The variable is still declared after this error.  A `weak` local of a
+  // `view` may take another `view`: its reads stay `view`s.
+  const bool viewOk = varKind(varName) == VarKind::WeakView ||
+                      checkViewNotStored(node->getValue(), valTy);
 
   // Look up the variable in all enclosing scopes.
   auto *owner = CurrentScope->findOwner(varName);
@@ -3523,6 +3528,7 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
 
   // Check the initializer type.
   bool viewOk = true;
+  bool weakOfView = false;
   if (node->getInitExpr()) {
     unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
     auto *initTy = resolveExprType(node->getInitExpr(), declTy);
@@ -3564,9 +3570,13 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     // The variable is still declared after this error.  A local borrow may
     // name a `view` (checkLocalBorrow), and so may a `weak` local: it takes
     // no reference of its own (a weak reference is not a copy of the
-    // view), and what it reads later is a fresh reference to the object.
+    // view).  What it reads is the view's object, so its reads are `view`s
+    // too (VarKind::WeakView).
     if (node->getMode() == ast::ParamMode::Value && !node->isWeak())
       viewOk = checkViewNotStored(node->getInitExpr(), initTy);
+    else if (node->isWeak())
+      weakOfView =
+          sharesStorage(initTy) && !viewOf(node->getInitExpr()).empty();
     if (declTy) {
       if (!checkAssignable(declTy, initTy, node->getInitExpr())) {
         if (!diagnoseOptionalNarrowing(node->getLocation(), declTy, initTy))
@@ -3611,7 +3621,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
     }
-    CurrentScope->Kinds[node->getName()] = VarKind::Weak;
+    CurrentScope->Kinds[node->getName()] =
+        weakOfView ? VarKind::WeakView : VarKind::Weak;
   }
 
   // Register the variable in the current scope.  An inferred type (`let x =
