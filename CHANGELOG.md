@@ -607,6 +607,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`'n' is bound to a 'view'; it cannot be returned`).  A `-> view T` function may return
   a `match` arm's name for a `view` of `self` or of a parameter.  `LinkedList`'s `front()`
   and `back()` and `Stack` and `Queue`'s `peek()` return a `view T`.
+- A `view fn` of the standard library handed out an object element as a copy, so a `view`
+  of a container could change its elements: `List`'s `get` and `last`, `HashMap`'s `get`
+  and `getOr` and the priority queues' `peek` return a `view` now (`view fn get(i:
+  unsigned) -> view T`; `getOr` takes `otherwise: view V`), and `memory::Buffer`'s `copy`
+  and `copyUnchecked` are no longer `view fn`s (a `view` of a buffer reads with `get`).
+  A value element is still copied out (`n = xs.get(0);`); an object element is read or
+  bound to a `view` local (`f: view = fs.get(i);`).
 - `"a" + n` and `n + "a"` with a number `n` passed type checking and then failed in PIR
   verification ("arithmetic on obj"); they are a type error now, `operator '+' is not
   defined for types 'Str' and 'int' (convert the 'int' with 'Str(...)')`.

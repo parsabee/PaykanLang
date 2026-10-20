@@ -1903,6 +1903,38 @@ TEST(Driver, BuildAndRunDefaultToO2) {
 // The `__` names of `::collections` and `::memory` are private
 // (docs/language/15-modules.md): a program cannot reach a container's `__`
 // fields and methods, or the modules' `__` functions and classes.
+// What a container hands out through a `view` is a `view`: an object
+// element is read, not stored or changed, whatever the container.
+TEST(Driver, StandardLibraryViewsDoNotChangeElements) {
+  auto src = writeTmp(
+      "import ::collections as c;\n"
+      "import ::memory as mem;\n"
+      "class Cell { n: int; }\n"
+      "fn poke(xs: view c::List<Cell>, m: view c::HashMap<int, Cell>,\n"
+      "        q: view c::MinPriorityQueue<Cell>,\n"
+      "        s: view c::Stack<Cell>, l: view c::LinkedList<Cell>,\n"
+      "        b: view mem::Buffer<Cell>) {\n"
+      "  xs.get(0).n = 1;\n"
+      "  kept = xs.last();\n"
+      "  m.get(1).n = 2;\n"
+      "  q.peek().n = 3;\n"
+      "  s.peek().n = 4;\n"
+      "  l.front().n = 5;\n"
+      "  e = b.copyUnchecked(0);\n"
+      "}\n"
+      "fn main() -> int { return 0; }\n");
+  auto [rc, out] = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(rc, 0);
+  for (const char *line :
+       {"the result of 'get' is a 'view'; cannot assign to its field 'n'",
+        "the result of 'last' is a 'view'; it cannot be stored",
+        "the result of 'peek' is a 'view'; cannot assign to its field 'n'",
+        "the result of 'front' is a 'view'; cannot assign to its field 'n'",
+        "'b' is a 'view' parameter; 'copyUnchecked' is not a 'view fn'"})
+    EXPECT_NE(out.find(line), std::string::npos) << line << "\n" << out;
+}
+
 TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
   auto src = writeTmp("import ::collections;\n"
                       "import ::memory;\n"
