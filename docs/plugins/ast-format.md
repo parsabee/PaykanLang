@@ -88,7 +88,7 @@ or more.
 | `(trait LOC NAME (type-params NAME...) (methods FN...))` | a trait. Its methods are signatures: each `fn` has `_` in place of its body, and none is generic |
 | `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? (native STRING))` | a `native fn` (#198): the C symbol in place of the body; a generic one has type parameters |
 | `(param NAME TYPE QUAL?)` | one parameter; `QUAL` is its mode, `(qual view)` or `(qual inout)`, absent for an ordinary (by-value) parameter: `n: inout int` is `(param "n" (named-type "int") (qual inout))` |
-| `(var LOC NAME TYPE? EXPR? MODE? LET?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `MODE` is `(qual view)` or `(qual inout)` for a local borrow, which has an initialiser and is never a field or `let`: `v: view = k;` is `(var "v" _ (ident "k") (qual view))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))` |
+| `(var LOC NAME TYPE? EXPR? MODE? LET? WEAK?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `MODE` is `(qual view)` or `(qual inout)` for a local borrow, which has an initialiser and is never a field or `let`: `v: view = k;` is `(var "v" _ (ident "k") (qual view))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))`. `WEAK` is `(weak)` for a `weak` local or class field ([`../language/08-memory-model.md`](../language/08-memory-model.md)), which has a type or an initialiser and is never a borrow or `let`: `weak w: Node? = n;` is `(var "w" (optional-type (named-type "Node")) (ident "n") (weak))` |
 
 ### Types
 
@@ -201,7 +201,8 @@ it.
 field removed, renamed or changed in meaning, or a node a reader must handle
 added (a new language construct). Within one version the format does not
 change, except for optional trailing items that only new constructs use: a
-parameter's or a local borrow's `(qual ...)` and a local's `(let)`. They keep the version, because every document that
+parameter's or a local borrow's `(qual ...)`, a local's `(let)` and a
+`weak` declaration's `(weak)`. They keep the version, because every document that
 was valid stays valid and means the same, and a reader that predates an item
 rejects a document that uses it (an unexpected field) instead of misreading
 it. The `struct` declaration is the same kind of addition: a document that

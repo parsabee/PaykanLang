@@ -77,8 +77,8 @@ an integer type and the literal fits it, the literal has that type; when it
 does not fit, the literal is an error; when the context is not an integer
 type, the literal is `int` and the usual checks apply.  A float literal is
 `f32` or `f16` in such a context, else `float`.  Nothing else converts
-implicitly: `x + y` with `x: i32` and `y: int` is `cannot apply '+' to 'i32'
-and 'int'`, written `x + i32(y)` or `int(x) + y`.
+implicitly: `x + y` with `x: i32` and `y: int` is `operator '+' is not
+defined for types 'i32' and 'int'`, written `x + i32(y)` or `int(x) + y`.
 
 ## Conversions
 

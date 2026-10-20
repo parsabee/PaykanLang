@@ -230,6 +230,7 @@ public:
 | `Program` | `const pir::Program *`: every module of the program, main module first, already run through the verifier |
 | `InputFilename`, `ProjectRoot` | the main source file and the directory imports were resolved against (for default output names, caches, diagnostics) |
 | `OptLevel` | `-O<n>`, 0..3; what it means is the backend's choice |
+| `Objects` | the object files and archives of `--object`, which define the program's `native fn`s (the `$c.` externs, [`pir.md`](pir.md) §3); a native backend links them |
 
 A PIR program is a plain data structure
 ([`include/paykan/pir/PIR.h`](../include/paykan/pir/PIR.h)): modules hold
@@ -301,10 +302,11 @@ paykan_add_driver(paykan-mine PLUGINS paykan_backend_mine)
 ```
 
 If the installation includes the llvm backend (`PAYKAN_BACKENDS` lists `llvm`),
-`find_package(Paykan)` also looks up LLVM, because that backend's installed
-library links LLVM's imported targets. Pass the same LLVM the installation was
-built with, or configure fails with "Could not find a package configuration
-file provided by "LLVM"":
+`find_package(Paykan)` also looks for LLVM, because that backend's installed
+library links LLVM's libraries. It looks quietly and does not require it (a
+loadable plugin needs no LLVM), but a driver that links the llvm backend
+(`paykan_add_driver`) does: pass the same LLVM the installation was built
+with, or the driver cannot link:
 
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH=/opt/paykan -DLLVM_DIR=<llvm>/lib/cmake/llvm
@@ -350,11 +352,11 @@ auto program = paykan::pir::parseProgram(R"(module "t"
 extern fn @$rt.Paykan_println(obj) -> void
 cstr @.s = "hi" len 2
 extern fn @$rt.PaykanString_new(ptr, i64) -> obj
-extern fn @$rt.PaykanString_destroy(obj) -> void
+extern fn @$rt.Paykan_dispose(obj) -> void
 fn @main() -> i64 {
   %s = call @$rt.PaykanString_new(@.s, 2)
   call @$rt.Paykan_println(%s)
-  call @$rt.PaykanString_destroy(%s)
+  call @$rt.Paykan_dispose(%s)
   ret 0
 }
 )", err);

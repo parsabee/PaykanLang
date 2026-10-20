@@ -7,8 +7,8 @@ objects behind reference-counted boxes, `view` / `inout` borrows checked at
 compile time).  They add two PIR instructions, `fn.addr` and `icall`, and no
 change to the runtime ABI or the `.pkm` format; the versions stay fixed until
 0.2.0.  The open questions at
-the end are the ones a reviewer should answer; each has the default this
-implementation takes.
+the end record the alternatives; each has the default this implementation
+takes.
 
 ## Summary of the decisions
 
@@ -18,7 +18,7 @@ implementation takes.
 | Values | a lambda `fn(x: int) -> int { return x + 1; }`, or a named function used without calling it (`square`, `m::square`): a free function of the module or an import, a `static fn` (`Point::origin`), not a method, a constructor, a builtin or an uninstantiated generic |
 | Representation | a value held in place, 16 bytes: the address of its code, and the box of its *closure*, a reference-counted object holding the captures (null when there are none); copying one copies the code and shares the closure; `==` is true for the same code and the same closure; it is a `ValueType`, not an `Obj`, and has no `toString` or `hash`; an optional one is the same 16 bytes, `None` having no code |
 | Captures | a lambda copies, when it is made, each variable of the enclosing function it uses (an `int` is copied, an object or a `Str` is retained, a struct or a tuple is copied like an assignment); only a plain variable (a local or a by-value parameter) or a class method's `self` can be captured, never a `view` or `inout` name, a `view fn`'s `self` or a struct's `self`; inside the lambda a captured name is read-only |
-| Calls | `f(args)` where `f` is a variable or parameter of function type, `obj.f(args)` where `f` is a field of function type (and `self.f(args)`), with the arguments checked and passed exactly as for the function's own parameters, modes included |
+| Calls | `f(args)` where `f` is a variable or parameter of function type, `obj.f(args)` where `f` is a field of function type (and `self.f(args)`), and any other expression of function type called in place (`fs[0](1)`, `pair.0(x)`, `twice(g)(2)`), with the arguments checked and passed exactly as for the function's own parameters, modes included |
 | Nominal? | structural: two function types are the same when their parameter types, modes and result type are |
 | Generics | a function type may name type parameters (`fn map<T, U>(xs: view T[], f: (view T) -> U)`), and a function value is a type argument (`List<(int) -> int>`) |
 | Optionals | `((int) -> int)?` is the same 16 bytes, `None` having no code; unwrapped with `match` like an optional object |

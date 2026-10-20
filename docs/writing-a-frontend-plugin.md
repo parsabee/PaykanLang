@@ -43,6 +43,8 @@ A frontend is a `PaykanFrontend` in the plugin's descriptor
 ```c
 #include "paykan/plugin_api.h"
 
+#include <stdlib.h>
+
 static const PaykanHost *host;
 
 static int my_parse(void *data, PaykanSession *s, const PaykanFrontendInput *in,
@@ -52,6 +54,7 @@ static int my_parse(void *data, PaykanSession *s, const PaykanFrontendInput *in,
    *   ++out->error_count;
    * On success, print the AST (docs/plugins/ast-format.md) into memory that
    * my_free releases, and set out->ast / out->ast_size. */
+  return PAYKAN_OK;
 }
 
 static void my_free(void *p) { free(p); }

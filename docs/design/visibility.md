@@ -163,10 +163,9 @@ Each with the default taken here.
    private field is part of the layout and a private function or type may be
    reached by an exported template.  Leaving them out would need a layout
    record of its own in the format, which stays fixed until 0.2.0.
-5. **Should a single underscore mean anything?**  Yes, since this revision:
-   private to the module, the level a top-level `__` name used to have.  A
-   top-level `__` name is an error rather than a synonym, so each prefix has
-   one meaning.
+5. **Should a single underscore mean anything?**  Yes: private to the
+   module.  A top-level `__` name is an error rather than a synonym, so each
+   prefix has one meaning.
 6. **Should a private type's name be the module's own too?**  Not yet: type
    names are global across an import graph (one canonical name per type, as
    `docs/language/06-modules.md` says), so two modules still cannot both
