@@ -40,7 +40,7 @@ The category of a type decides how it is stored and whether ARC applies.
 | **Array** | `T[n]` of any element type | Inline in the variable, the field or the enclosing array | Elements copied; reference elements retained |
 | **Tuple** | `(T1, T2, ...)` of any element types | Inline in the variable, the field or the enclosing array or tuple | Elements copied; reference elements retained |
 | **Struct** | `struct Name { ... }` of any field types | Inline, like a tuple of its fields | Fields copied; reference fields retained |
-| **Function value** | `(T1, T2) -> R`: a lambda or a named function | Heap: a closure object holding the captured variables (copied when the lambda is made) | Reference shared; count adjusted; the captures are released with the closure |
+| **Function value** | `(T1, T2) -> R`: a lambda or a named function | Inline, 16 bytes: the code's address and a reference to its closure, a heap object holding the captured variables (copied when the lambda is made; none when nothing is captured) | Code copied, closure shared (retained); the captures are released with the closure |
 | **Reference** | class instances (an `io::File` among them), `Str`, optionals `T?` of these | Heap | Reference shared; count adjusted |
 
 A value type has no identity beyond its bits: assigning one `int` to another produces two
@@ -74,7 +74,7 @@ object: { vtable pointer, strong count, weak count, fields… }
 
 The header is 16 bytes: the 8-byte vtable pointer and two 32-bit counts. An object can have up to
 2,147,483,647 references of each kind; one more stops the program with `paykan: too many strong
-references to one object` rather than corrupting the count.
+references to one object (the limit is 2147483647)` rather than corrupting the count.
 
 Two operations maintain the strong count:
 
@@ -101,7 +101,7 @@ When a release drops the count to zero:
 
 1. The object's `destroy` method runs. The compiler generates `destroy` to **release every
    reference the object holds** — its reference-typed fields (the `weak` ones dropped), and
-   the reference-typed elements of its array and tuple fields — so destruction cascades
+   the references inside its array, tuple, struct and function-value fields — so destruction cascades
    transitively.
 2. The object's memory is freed. If `weak` references to the object remain, its memory is
    kept, empty, until the last of them goes away; every one of them reads as `None` from now
@@ -152,10 +152,12 @@ reference, and is destroyed promptly once it is not.
 
 Assigning or passing a reference shares the object: `t = s` retains it, and `s` and `t` are
 both live until their scopes end. There is no way to *consume* a variable by hand. Where a
-variable is not read again after it is handed on, the hand-off can become a transfer — the
+variable is not read again after it is handed on, the hand-off could become a transfer — the
 reference moves to the destination without a retain, and the source is not released at scope
-exit. That is an optimization the compiler makes, never something a program has to spell out
-(the last-use pass, [#186](https://github.com/parsabee/PaykanLang/issues/186)).
+exit. That is an optimization for the compiler to make, never something a program has to
+spell out, and it is not made yet: until the last-use pass
+([#186](https://github.com/parsabee/PaykanLang/issues/186)) lands, each such hand-off is a
+retain, and the source is released at scope exit.
 
 Earlier releases had a `mov` keyword for this. It was removed in v0.2.0: `mov` is still a
 reserved word, and using it is an error:
@@ -190,7 +192,7 @@ arrays then share. See `05-arrays.md`.
 A tuple is a value in the same way: it has no box and no count, and its elements are laid out
 in place, one after another like a C struct's fields, in its variable, its field or the array
 element that holds it. A tuple of value types (`(int, float)`) allocates nothing; a reference
-element (`Str`, a class, `Node?`) is its box, which the tuple **retains**. Each copy of a tuple
+element (`Str`, a class, `Node?`) is a reference to the object, which the tuple **retains**. Each copy of a tuple
 (an assignment, a plain parameter, a result, an array element) retains the references in it
 once more; a variable's are released when it goes out of scope, a field's when its object is
 destroyed, an array element's with its array. See `09-tuples.md`.
@@ -212,19 +214,24 @@ rather than an allocation, retaining and releasing it is harmless and it is neve
 ### Optional types
 
 A value of optional type `T?` of a reference type `T` (see `10-optionals.md`) is the **same
-shared box** as a `T`; the
-absent value is represented by *having no box at all* rather than by the `None` singleton. This
+reference** as a `T`, the object's address; the
+absent value is represented by a *null reference* rather than by the `None` singleton. This
 means an optional costs nothing extra: retaining, releasing, moving or destroying an absent
 `T?` is a no-op, a `None` stored into an optional field or array slot releases the previous
 value and allocates nothing, and `x == None` is a plain null test. A `T?` never becomes an `Obj`
 (an optional is not an object); its `toString()` (`io::println(maybe)`) is `"None"` for an
 absent value.
 
-An optional primitive (`int?`, `float?`, `bool?`, `char?`) is a value instead (#96): the
+An optional primitive (`int?`, `float?`, `bool?`, `char?`, `u8?`, …) is a value instead (#96): the
 primitive and a presence flag, copied like an `int` and never counted, inline in a variable, a
 field, an array element or a tuple element. It is not an object, so it never becomes an
 `Obj`. A `match` arm binding the `int` copies the
 value out and owns nothing.
+
+An optional enum, tuple or struct is a value held in place too: an enum's is its ordinal and
+a presence flag, a tuple's or a struct's a presence flag followed by the value (at most 64
+bytes; a bigger one goes in a `memory::Box`), copied with the references it holds retained. An optional function value is the function value's own 16 bytes, `None`
+being the one with no code. See `10-optionals.md`.
 
 ---
 
@@ -351,7 +358,6 @@ sharing a reference-counted object across threads is safe today.
   language constructs — ownership is tracked by the compiler.
 - A reference keeps its object alive for exactly as long as it is reachable.
 - `destroy` runs automatically and releases everything an object owns, transitively.
-
 - A `weak` reference never keeps an object alive and never dangles: it reads as `None` once
   the object is gone.
 

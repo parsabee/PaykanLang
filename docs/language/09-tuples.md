@@ -266,7 +266,7 @@ optional tuple (`(int, Str)?`) is unwrapped by an arm naming the tuple type
 - `toString` prints the elements without quotes, as `io::println` does, so
   `("a, b", 1)` prints as `(a, b, 1)`.
 - At run time a tuple is laid out in place like a C struct: its elements one
-  after another at their natural alignment, a reference element as its box, an
+  after another at their natural alignment, a reference element as the object's address, an
   `int?` element inline (a presence flag, then the `int`), a nested tuple
   inline.  A tuple of `int`s allocates nothing.  Each copy of a tuple retains
   the references it holds; a variable's are released when its scope ends, a

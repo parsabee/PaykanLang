@@ -120,7 +120,7 @@ error:
 ```pkn
 match x {
   d: Dog {
-    d: int = 1;   // error: redeclaration of 'd'
+    d: int = 1;   // error: redeclaration of variable 'd'
   }
 }
 ```
@@ -194,7 +194,8 @@ Output:
 - A tuple or a struct inside an optional (`p: inout Point` on a `Point?`) is bound as the
   value after the presence flag, so a write through the binding changes the subject. A
   primitive or an enum inside one (`n: inout int` on an `int?`, `k: inout Suit` on a
-  `Suit?`) cannot be changed this way yet.
+  `Suit?`) cannot be changed this way yet (`'inout' arm 'n' cannot change the 'int' inside
+  an optional yet`).
 
 The mode goes after the colon: `view d: Dog { }` is a syntax error that shows the fix,
 `d: view Dog`. A binding of a `view` subject is a `view` even without the mode
@@ -267,12 +268,12 @@ arm in a value-mode `match`, is an error:
 ```pkn
 match n {            // n: int
   1     { }
-  "two" { }          // error: Str literal does not match int subject
+  "two" { }          // error: match arm literal of type 'Str' does not match subject type 'int'
   _     { }
 }
 
 match x {            // x: int
-  Animal { }         // error: value-match requires literal patterns, not type names
+  Animal { }         // error: match on a value of type 'int' requires literal patterns, not type names
   _ { }
 }
 ```
@@ -287,7 +288,7 @@ can never run:
 ```pkn
 match x {
   _   { }
-  Dog { }   // error: unreachable arm after wildcard
+  Dog { }   // error: unreachable arm: wildcard '_' must be the last arm
 }
 ```
 
@@ -312,7 +313,7 @@ match x {
     io::println(sound);
   }
   Dog {
-    y: int = 3.14;           // error: cannot assign float to int
+    y: int = 3.14;           // error: initializer of type 'float' does not match declared type 'int' for variable 'y'
   }
   _ { }
 }
@@ -334,8 +335,8 @@ fn main() -> int {
   match x {
     Dog { return 0; }
     Cat { return 1; }
-    // error: no '_' arm and no return after the match —
-    //        the function does not always return a value
+    // no '_' arm and no return after the match —
+    // error: non-void function 'main' does not always return a value
   }
 }
 ```
@@ -434,7 +435,7 @@ A `None` arm is only valid on an optional subject; matching on an `Obj` is uncha
 | Type name in value mode | A value-mode `match` has a type-name arm instead of a literal |
 | Binding redeclaration | An arm body redeclares the arm's binding name |
 | `view` binding changed or passed on | A `name: view T` binding is assigned, written through, passed to a parameter that is not `view`, or stored; or the subject's variable changes while it is live |
-| `inout` binding of something else | A `name: inout T` arm's subject is not a variable or a field, is `self`, a `let` local or a `view`, or is an optional primitive; or the subject's variable is used while the binding is live |
+| `inout` binding of something else | A `name: inout T` arm's subject is not a variable or a field, is `self`, a `let` local, a `view` or a `weak` reference, or is an optional primitive or enum; or the subject's variable is used while the binding is live |
 | Arm body type error | Any type error inside an arm body |
 | Wildcard not last | A `_` arm is followed by another arm |
 | Non-exhaustive match | A `match` leaves cases uncovered where every path must produce a value |
