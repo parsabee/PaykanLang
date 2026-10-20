@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/images/paykan-logo.png" alt="PaykanLang logo" width="480">
+</p>
+
 # PaykanLang
 
 [![CI](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml/badge.svg)](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml)

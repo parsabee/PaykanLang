@@ -20,6 +20,9 @@ repository: parsabee/PaykanLang
 
 remote_theme: just-the-docs/just-the-docs@v0.12.0
 
+# Shown at the top of the sidebar, in place of the title.
+logo: /assets/images/paykan-logo.png
+
 plugins:
   - jekyll-remote-theme
   - jekyll-include-cache
