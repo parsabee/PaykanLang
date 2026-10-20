@@ -5,7 +5,7 @@
 //       base-type variable holding subclass instance (Obj polymorphism)
 // Exercises: class lowering (object layout, vtables with inherited and
 //            overridden slots), `vcall` dispatch, field loads and stores,
-//            class-typed parameters and returns boxed in PaykanShared (ARC),
+//            class-typed parameters and returns (reference counted),
 //            and rebinding a base-type variable to another subclass
 //            instance, which releases the object it owned before.
 

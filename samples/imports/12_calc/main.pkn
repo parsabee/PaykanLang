@@ -83,8 +83,7 @@ import calc::utils;
 
 // A fixed-capacity ring buffer that keeps the most recent 16 items, oldest
 // first. It is generic: `Ring<(Str, float)>` below holds the statement history,
-// and any other element type works the same way. (Generic types are not
-// exported across modules yet, so it lives in this module.)
+// and any other element type works the same way.
 class Ring<T> {
   items: T[16];
   count: int; // how many slots are in use: all of them once the buffer is full

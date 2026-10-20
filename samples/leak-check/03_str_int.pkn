@@ -1,6 +1,6 @@
 // Isolates: Str<int> int->Str conversion.
-// Runtime allocation site: PaykanString_new (String.c), reached via the
-// Str<int> builtin in IO.c — allocates the freshly-formatted Str.
+// Runtime allocation site: PaykanString_from_int (String.c), the freshly
+// formatted Str.
 //
 // Expected under --track-heap: live blocks : 0.
 

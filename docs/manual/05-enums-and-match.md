@@ -108,8 +108,8 @@ True False
 
 ### Matching values
 
-On an `int`, `float`, `char`, `bool` or `Str`, the arms are literals, compared by value
-(strings by content):
+On an `int`, `float`, `char`, `bool`, `Str` or a sized numeric type (`u8`, …), the arms are
+literals, compared by value (strings by content):
 
 ```pkn
 import ::io;

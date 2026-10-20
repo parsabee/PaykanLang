@@ -46,7 +46,8 @@ option prints a message suggesting `--help`, and also exits with 1.
 | `--module-path=<dir>` | a directory of prebuilt `.pkm` modules, searched for an import whose source is not found (repeatable; then the `:`-separated `$PAYKAN_MODULE_PATH`) |
 | `--rebuild-modules` | ignore the `.pkm` cache entries of the imported modules (they are rewritten) |
 | `--no-module-cache` | neither read nor write `.pkm` cache entries |
-| `--verbose` | print one line per imported module on standard error: where it came from (its source, a cache entry, a prebuilt file) and why a cache entry was not used |
+| `--verbose` | print one line per imported module on standard error: where it came from (its source, a cache entry, a prebuilt file) and why a cache entry was not used; and one line per cache entry written |
+| `--object=<files>` | link these object files or archives (comma-separated; repeatable): they define the program's `native fn`s ([Native functions](../language/02-functions-and-calling.md#native-functions)) |
 | `--` | ends `paykan`'s options: a file name starting with `-` can follow |
 
 ### Looking inside the compiler
@@ -74,9 +75,21 @@ cstr @.str0 = "Hello, world!" len 13
 
 fn @main() -> i64 {
   %str.1 = call @$rt.PaykanString_new(@.str0, 13)
-  call @$rt.Paykan_println(%str.1)
-  call @$rt.PaykanString_destroy(%str.1)
+  %shared.2 = box %str.1
+  call @"$::io::println<Str>"(%shared.2)
   ret 0
+}
+
+fn @"$::io::println<Str>"(%value.1: box) -> void {
+  local %value.0: box
+  store %value.0, %value.1
+  %value.2 = load %value.0
+  %value.obj.3 = unbox %value.2
+  %mcall.4 = vcall %value.obj.3 : (obj) -> box [1] ()
+  call @"$::io::_println"(%mcall.4)
+  %5 = load %value.0
+  release %5
+  ret
 }
 ...
 ```
@@ -136,8 +149,11 @@ with a manifest recording the compiler that wrote it, the source it was built fr
 interface of every module it imports. On the next run an entry is used when all of those
 are unchanged and the rest is recompiled, so editing `main.pkn` in a large project does not
 recompile every library module, editing a function body recompiles one module, and changing
-a class or a signature also recompiles the modules that use it. Each backend keeps its own
-generated-code cache beside the `.pkm` entries.
+a class or a signature also recompiles the modules that use it. A module that declares
+generic classes, structs or functions, or uses another module's, is not cached: a `.pkm`
+does not hold generic templates yet, so it is compiled from source every time. `::io` and
+`::result` are such modules, and so is every module that calls `io::println`, a generic
+function. Each backend keeps its own generated-code cache beside the `.pkm` entries.
 
 The cache is safe to share and to delete:
 
@@ -158,5 +174,7 @@ files, the cache and prebuilt modules in detail.
 | `PAYKAN_STDLIB` | the directory of system imports, `import ::name;`, instead of the installed standard library ([Modules](10-modules.md)) |
 | `PAYKAN_MODULE_PATH` | `:`-separated directories of prebuilt `.pkm` modules, searched after the `--module-path` directories |
 | `PAYKAN_PLUGIN_PATH` | more directories to load plugins from, separated by `:` |
+| `PAYKAN_NO_PLUGINS` | set to anything but `0`: do not search the plugin directories, like `--no-plugins` |
+| `PAYKAN_TRACK_HEAP` | when set (to any value), a program prints the heap statistics at exit as under `--track-heap`, an executable made by `build` included |
 
 Next: [Extending PaykanLang](14-extending.md).

@@ -1,0 +1,36 @@
+// An enum, a tuple and a struct have optionals too, held in place: a presence flag and the
+// value. They widen from a present value, compare with None, and unwrap with match.
+import ::io;
+
+enum Color { Red, Green }
+struct Point {
+  x: int;
+  y: int;
+}
+
+fn find(k: int) -> (int, Str)? {
+  if k == 1 {
+    return (1, "one");
+  }
+  return None;
+}
+
+fn main() -> int {
+  c: Color? = Color::Green;
+  p: Point? = Point(1, 2);
+  t = find(1);
+  match c {
+    k: Color { io::println(k == Color::Green); }
+    None { io::println("no color"); }
+  }
+  match p {
+    q: Point { io::println(q.x + q.y); }
+    None { io::println("no point"); }
+  }
+  match t {
+    v: (int, Str) { io::println(v.1); }
+    None { io::println("not found"); }
+  }
+  io::println(find(2) == None);
+  return 0;
+}

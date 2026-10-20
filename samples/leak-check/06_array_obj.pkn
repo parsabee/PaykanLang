@@ -1,6 +1,6 @@
-// Isolates: an Obj[1] holding a single boxed (reference-counted) element.
-// Runtime allocation site: PaykanShared (Shared.c) — the ARC box wrapping the
-// stored string; the array holds that box inline, in its one slot.
+// Isolates: an Obj[1] holding a single reference-counted element.
+// Runtime allocation site: the stored string (PaykanString_new, String.c);
+// the array holds its reference inline, in its one slot.
 //
 // Expected under --track-heap: live blocks : 0 (the array's element is
 // released at end of scope).

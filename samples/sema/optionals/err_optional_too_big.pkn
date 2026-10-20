@@ -1,0 +1,18 @@
+// ERROR: an optional holds its value in place, up to 64 bytes: 'Nine' is 72 bytes, so
+// 'Nine?' is rejected with the advice to make the optional of a 'memory::Box<Nine>'.
+struct Nine {
+  a: int;
+  b: int;
+  c: int;
+  d: int;
+  e: int;
+  f: int;
+  g: int;
+  h: int;
+  i: int;
+}
+
+fn main() -> int {
+  n: Nine? = None;
+  return 0;
+}

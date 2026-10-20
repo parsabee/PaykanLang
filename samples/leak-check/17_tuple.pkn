@@ -7,8 +7,7 @@
 // nothing.  Each copy of a tuple retains the references in it; a variable's
 // are released at scope exit, a field's or array slot's when its holder dies.
 //
-// Runtime allocation sites: PaykanString_new (String.c), object structs +
-// PaykanShared (Shared.c).
+// Runtime allocation sites: PaykanString_new (String.c), the objects.
 //
 // Expected under --track-heap: live blocks : 0.
 

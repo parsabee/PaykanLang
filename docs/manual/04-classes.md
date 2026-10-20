@@ -60,8 +60,14 @@ Create an object by calling the class name with the constructor's arguments, as 
   '__init__'`). The one exception, optional fields, comes in
   [Optionals](08-optionals.md).
 - A class has exactly one `__init__`, and method names are unique within a class: there is
-  no overloading. A class without fields may leave out `__init__`.
-- There are no access modifiers: every field and method is public.
+  no overloading. A class that leaves out `__init__` gets one that takes a value for each
+  field, in the order they are declared: without its `impl` block, `Counter` would be
+  built as `Counter("visitors", 0)`.
+- A field or method is public unless its name says otherwise. A name starting with two
+  underscores (`__count`) is private to its class: only the class's own methods reach it. A
+  name starting with one underscore (`_cache`) is private to its module (see
+  [Modules](10-modules.md)). The details are in
+  [the language reference](../language/04-classes.md#private-fields-and-methods).
 - By convention class names are `UpperCamelCase`.
 
 ## Methods that only read: `view fn`
@@ -251,9 +257,11 @@ runtime check with `match`, shown below.
 
 Things to know about inheritance:
 
-- A class has at most one base class, and there are no interfaces or abstract classes. A
-  base class whose methods are meant to be overridden simply provides a default body, as
-  `Animal.sound` does.
+- A class has at most one base class, and there are no abstract classes. A base class whose
+  methods are meant to be overridden simply provides a default body, as `Animal.sound` does.
+  A *trait* (`trait Named { view fn name() -> Str; }`) lists methods that a class can
+  declare it has with `impl Named for Animal {}`, but it is not a type: generic code
+  requires it of a type parameter ([Generics](09-generics.md#how-generic-code-is-checked)).
 - An override must have exactly the same parameter and return types as the method it
   overrides, and the same parameter modes (`view`, `inout`, [Basics](02-basics.md#functions)).
 - `__super__(...)` can only be called in `__init__`. An overriding method cannot call the

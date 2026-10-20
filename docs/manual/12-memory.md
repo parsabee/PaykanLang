@@ -9,13 +9,13 @@ your programs, how to check them for leaks, and the one kind of leak ARC cannot 
 
 Types come in two kinds:
 
-- **Value types**: `int`, `float`, `bool`, `char`, enums, arrays (`int[3]`) and tuples
-  (`(int, Str)`). They are copied on assignment and live in their variable or field, so there
-  is nothing to manage. An array or a tuple of objects or strings holds references to them,
-  as a variable would.
-- **Reference types**: class instances (an `io::File` too), `Str` and optional values of
-  them. They live on the heap, and variables, fields, array elements and tuple elements hold
-  references to them.
+- **Value types**: `int`, `float`, `bool`, `char`, the sized numeric types (`u8`, `f32`, …),
+  enums, arrays (`int[3]`), tuples (`(int, Str)`) and structs. They are copied on assignment
+  and live in their variable or field, so there is nothing to manage. An array, a tuple or a
+  struct of objects or strings holds references to them, as a variable would.
+- **Reference types**: class instances (an `io::File` too), `Str`, function values and
+  optional values of them. They live on the heap, and variables, fields, array elements and
+  tuple elements hold references to them.
 
 Each heap object carries a **reference count**. Storing a reference (in a variable, a field,
 an array or a tuple, or by passing it to a function) increments the count; when a reference
@@ -43,12 +43,12 @@ statistics to standard error:
 $ paykan --track-heap hello.pkn
 Hello, world!
 paykan heap stats:
-  total allocations : 5
-  total frees       : 5
+  total allocations : 6
+  total frees       : 6
   total reallocs    : 0
   live blocks       : 0
   live bytes        : 0
-  peak bytes        : 108
+  peak bytes        : 138
 ```
 
 `live blocks` is the line to read: it counts the allocations that were never freed, and is
@@ -68,6 +68,9 @@ import ::io;
 class Person {
   name: Str;
   friend: Person?;
+}
+
+impl Person {
   fn __init__(name: Str) { self.name = name; }
 }
 
@@ -86,10 +89,10 @@ $ paykan --track-heap friends.pkn
 Ada and Grace are friends
 paykan heap stats:
   ...
-  live blocks       : 10
-  live bytes        : 202
+  live blocks       : 6
+  live bytes        : 138
   ...
-  ** LEAK: 10 block(s) / 202 byte(s) not freed **
+  ** LEAK: 6 block(s) / 138 byte(s) not freed **
 ```
 
 PaykanLang has no cycle collector. The fix is a **weak reference**: a field (or a local)
@@ -146,14 +149,15 @@ children but not back, never form cycles and need no care.
 
 ## No `mov`
 
-Earlier releases had a `mov` keyword that handed a reference on without touching its count.
-It was removed in v0.2.0, and using it is an error:
+You never hand a reference on by hand. `t = s` shares the object, and `s` stays readable
+afterwards; where `s` is not read again, the compiler moves the reference to `t` without
+touching its count. `mov` is a reserved word, and writing `t = mov s` is an error:
 
 ```
 error: 'mov' was removed in v0.2.0; ownership transfers are inferred
 ```
 
-Write `t = s` instead of `t = mov s`. The output and the freed objects are the same.
+Write `t = s` instead.
 
 ## Threads
 

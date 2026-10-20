@@ -3,10 +3,10 @@
 This appendix walks through a complete program from the repository,
 [`samples/imports/12_calc`](../../samples/imports/12_calc/main.pkn): an arithmetic calculator
 with variables, a command history and an interactive mode. At about 870 lines in four
-modules it uses most of what this manual covers: classes, an enum, `match` in all its modes,
-arrays, tuples, optionals, a generic class, modules, standard input and command-line
-arguments. The test suite runs it on every backend, and the excerpts below are checked
-against the sample's source, so they are always current.
+modules it uses most of what this manual covers: classes, an enum, `match` in three of its
+four modes (all but matching classes), arrays, tuples, optionals, a generic class, modules,
+standard input and command-line arguments. The test suite runs it on every backend, and the
+excerpts below are checked against the sample's source, so they are always current.
 
 ## Using it
 
@@ -159,8 +159,8 @@ added:
 
 The `match` covers both cases and returns from each arm, so the function needs no `return`
 after it. Keys are compared with `e.key.equals(key)`, which compares contents just like
-`e.key == key` would. (A comment at the top of the module predates `==` comparing strings by
-content.)
+`e.key == key` would. (The comment at the top of the module, which says that `==` compares
+strings by identity and that there is no `char` to `int` conversion, is out of date.)
 
 Removing a key unlinks its entry: the first one of a bucket by storing its `next` in the
 bucket, any other by `Entry.unlink`, which links the entry before it to the one after it.
@@ -334,9 +334,10 @@ its type, since a bare `None` in a tuple literal with no declared destination wo
 ### A generic ring buffer
 
 The `:history` command shows the last 16 statements. They are kept in a generic ring buffer,
-`Ring<T>`, declared in `main.pkn` itself because generic classes cannot be imported from
-another module yet. It holds an array of 16 slots, a count of the slots in use, and the
-index of the oldest item once all of them are. Until the buffer is full, `add` fills the
+`Ring<T>`, declared in `main.pkn` itself (a generic class could equally live in a module of
+its own and be imported, as [Modules](10-modules.md#rules-worth-knowing) shows). It holds an
+array of 16 slots, a count of the slots in use, and the index of the oldest item once all of
+them are. Until the buffer is full, `add` fills the
 next free slot; after that it overwrites the oldest item and moves `start` on:
 
 ```pkn
@@ -509,10 +510,11 @@ history can keep:
 The calculator is a good playground. Some changes to try, each exercising a part of the
 language:
 
-- Add a `^` operator: a new `Op` variant, a new precedence level in the parser, and a loop
-  in `applyOp`. The compiler points out the `match` that no longer covers every variant.
-- Add functions such as `abs(x)` and `sqrt(x)`: parse a name followed by `(`, and dispatch on
-  the name with a value-mode `match` on the `Str`.
+- Add a `^` operator: a new `Op` variant, a new precedence level in the parser, and a call
+  to `math::pow` (from `import ::math;`) in `applyOp`. The compiler points out the `match`
+  that no longer covers every variant.
+- Add functions such as `abs(x)` and `sqrt(x)`: parse a name followed by `(`, dispatch on
+  the name with a value-mode `match` on the `Str`, and call `math::abs` or `math::sqrt`.
 - Add `:save <file>` and `:load <file>` commands that write the variables with `io::open` and
   read them back with `readln` and `float(...)`.
 - Run the result with `paykan --track-heap` to check that it still frees everything.

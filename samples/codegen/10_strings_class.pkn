@@ -5,7 +5,7 @@
 //            emitClassVarRebind with exprAlreadyShared guard,
 //            visitMethodCallExpr (primitive + class-typed returns),
 //            emitAsShared in call args, emitRetain/emitRelease,
-//            scope cleanup releasing shared boxes
+//            scope cleanup releasing the strings
 
 import ::io;
 

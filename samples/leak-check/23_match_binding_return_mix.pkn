@@ -3,8 +3,7 @@
 // assigned to itself.  The returned binding hands its (owned) reference to
 // the caller; `a = a` must neither release nor double-retain it.
 //
-// Runtime allocation sites: the A structs + their PaykanShared boxes and
-// their Str fields (literals and "n" + Str<int>(i) concatenations).
+// Runtime allocation sites: the A objects and their Str fields (literals and "n" + Str<int>(i) concatenations).
 //
 // Expected under --track-heap: live blocks : 0.
 // expect-stdout: n2

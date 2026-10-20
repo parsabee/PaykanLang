@@ -22,8 +22,10 @@ Implemented and tested today: static typing with inference, single-inheritance c
 ARC, value-aware `==` (reference types dispatch to a virtual
 `equals`), fixed-size arrays and slices, a file-based module system, `match` type dispatch, enums, tuples,
 structs (value types with named fields and `impl` blocks), function types and lambdas
-(`(int) -> bool`, closures capturing by copy), optionals, generics, traits, and
-conversion constructors (`Str(n)`, `int<Str>(s)`). Programs are lowered to a
+(`(int) -> bool`, closures capturing by copy), optionals, generics, traits, sized numeric
+types (`u8`, `i32`, `f32`, ...), weak references, private members, conversion constructors
+(`Str(n)`, `int<Str>(s)`), and a standard library (`::io`, `::result`, `::collections`,
+`::memory`, `::math`). Programs are lowered to a
 backend-neutral IR (PIR) and compiled by one of two backends: the C backend (emits C11 and
 builds it with the system C compiler) or the optional LLVM backend (LLVM IR, run in-process by
 a JIT). Either backend can `run` a program directly or `build` a native executable.
@@ -35,10 +37,11 @@ concurrency, and C interop through modules — are the road ahead, not yet shipp
 included) and generics are **stable in v0.1**: their syntax and semantics as documented in
 [`docs/language/`](docs/language/) are covered by the compatibility promise for the 0.1
 series, so a program that follows the reference keeps its meaning in every 0.1.x release.
-The limitations the reference documents stay: generics cannot be imported across modules
-until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)). Since
-[#96](https://github.com/parsabee/PaykanLang/issues/96) an optional primitive is a value, not a
-box, and an optional no longer converts to `Obj`. Not covered by the promise: the plugin interfaces
+The limitations the reference documents stay: a prebuilt `.pkm` module file cannot hold
+generic templates until v0.2.0 ([#57](https://github.com/parsabee/PaykanLang/issues/57)), so
+a module that declares generics, or uses another module's, is compiled from source every
+time. An optional primitive is a value, not a box, and an optional does not convert to
+`Obj`. Not covered by the promise: the plugin interfaces
 (the C plugin API `include/paykan/plugin_api.h`, the PIR text a backend plugin receives, and
 the C++ interfaces `Frontend.h`, `Backend.h` and the registry) are versioned but not yet
 stable; see [`docs/plugins/overview.md`](docs/plugins/overview.md) and
@@ -189,8 +192,9 @@ The tests are off by default, so a plain build downloads nothing at all. See
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (with the
 runtime, `lib/libpaykan_runtime.a` and `include/paykan/Runtime.h`, that `build` and the c
 backend link programs against, the plugin interface `include/paykan/plugin_api.h` (with the
-generated `include/paykan/plugin_api_version.h` it includes), and the
-empty system plugin directory `lib/paykan/plugins/<version>/`):
+generated `include/paykan/plugin_api_version.h` it includes), the standard library
+`lib/paykan/stdlib/<version>/`, and the empty system plugin directory
+`lib/paykan/plugins/<version>/`):
 
 ```sh
 cmake --install build --prefix /usr/local
@@ -256,11 +260,13 @@ only those on a pull request, and every suite on a push.
 ## Development Tooling
 
 Quality gates are enforced in CI and available locally via the Python helpers in `scripts/`
-(they prefer the LLVM 17 tools under `build/third-party/llvm`, which a configure with the
-`llvm` backend downloads, so results match CI; otherwise they use the tools on the `PATH`):
+(those that run LLVM tools prefer the LLVM 17 tools under `build/third-party/llvm`, which a
+configure with the `llvm` backend downloads, so results match CI; otherwise they use the
+tools on the `PATH`):
 
 ```sh
-python3 scripts/clang_format.py --apply          # format the tree
+python3 scripts/clang_format.py --apply          # format the C and C++ sources
+python3 scripts/pkfmt.py --apply                 # format the .pkn sources
 python3 scripts/run_clang_tidy.py --build-dir build   # bug-focused clang-tidy gate
 python3 scripts/coverage.py --build-dir build-cov     # coverage report + floor gate
 python3 scripts/comment_metrics.py               # comment lines per source file

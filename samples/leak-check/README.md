@@ -20,19 +20,20 @@ line each; the samples parity check (`scripts/samples_parity.py`, ctest
 |----------------------------|-------------------------------------------------------|--------------------------------------|
 | `01_string_literal.pkn`    | A single string literal                               | `PaykanString_new` (`String.c`)      |
 | `02_string_concat.pkn`     | `Str + Str` concatenation                             | `PaykanString_concat` (`String.c`)   |
-| `03_str_int.pkn`           | `Str<int>` int→`Str` conversion                       | `PaykanString_new` via `IO.c`        |
+| `03_str_int.pkn`           | `Str<int>` int→`Str` conversion                       | `PaykanString_from_int` (`String.c`) |
 | `04_array_literal.pkn`     | An `int[3]` array literal (held inline)               | none: nothing is allocated           |
-| `06_array_obj.pkn`         | An `Obj[1]` holding a boxed element                   | `PaykanShared` (`Shared.c`)          |
-| `07_class_empty.pkn`       | A fieldless class instance                            | object struct + `PaykanShared`       |
+| `06_array_obj.pkn`         | An `Obj[1]` holding a reference element               | `PaykanString_new` (`String.c`)      |
+| `07_class_empty.pkn`       | A fieldless class instance                            | object struct (`Paykan_malloc`)      |
 | `08_class_str_field.pkn`   | A class instance holding a `Str` field                | object struct + `PaykanString_new`   |
-| `09_class_inherit.pkn`     | A subclass instance via `__super__`                   | object struct + `PaykanShared`       |
-| `10_error_open.pkn`        | `Error` from a failed `open`                          | `PaykanError_new` (`Error.c`)        |
-| `11_file_write.pkn`        | `File` from a successful `open` + `write`             | `PaykanFile_new` (`File.c`)          |
+| `09_class_inherit.pkn`     | A subclass instance via `__super__`                   | object struct (`Paykan_malloc`)      |
+| `10_error_open.pkn`        | The `res::Error` of a failed `io::open`               | `Paykan_error_text` (`Error.c`)      |
+| `11_file_write.pkn`        | `io::File` from a successful `io::open` + `write`     | `PaykanFile_new` (`File.c`) + the `io::File` object |
 | `12_file_readln.pkn`       | `readln` line buffer                                  | `PaykanFile_readln` (`File.c`)       |
-| `14_self_return_chain.pkn` | `self` returned (chained) out of a method             | unique-box acquire (`Shared.c`)      |
-| `15_match_binding_ownership.pkn` | match-arm binding consumed as arg/var/field     | unique-box acquire (`Shared.c`)      |
-| `16_call_rooted_member_chain.pkn` | `makeH().a` chains + borrowed field acquisition | receiver-box teardown + field retain |
+| `14_self_return_chain.pkn` | `self` returned (chained) out of a method             | `Paykan_retain` of the object (`Shared.c`) |
+| `15_match_binding_ownership.pkn` | match-arm binding consumed as arg/var/field     | `Paykan_retain` of the subject (`Shared.c`) |
+| `16_call_rooted_member_chain.pkn` | `makeH().a` chains + borrowed field acquisition | receiver teardown + field retain     |
 | `17_tuple.pkn`             | Tuple literals, destructuring, nesting, `mk().0`, `==`, copies (held in place: only their `Str` elements allocate) | `PaykanString_new` (`String.c`) + the `Holder` instance |
+| `18_optional.pkn`          | Optional references (`T?`): locals, fields, rebinding, copies, printing, `match`, `T?[n]` slots | the `Node` instances and strings |
 | `20_match_binding_reassign_some_paths.pkn` | match-arm binding reassigned on some paths only | binding release at the join (`Shared.c`) |
 | `21_match_binding_reassign_loop.pkn` | match-arm binding reassigned in a loop          | per-iteration release (`Shared.c`)   |
 | `22_match_subject_reassign.pkn` | match subject reassigned inside the arm          | binding keeps the subject alive (`Shared.c`) |

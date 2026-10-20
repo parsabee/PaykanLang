@@ -1,12 +1,11 @@
-// Isolates: member chains rooted in a call result — the fresh receiver box
-// (`makeH()` below) is owned by the member access and must be torn down after
-// the field is read, with a ref-typed field value retained first so it
-// survives the receiver teardown.  Also exercises acquiring a BORROWED field
-// box for a new owner (x = h.a), which must retain the box rather than steal
-// the field slot's reference.
+// Isolates: member chains rooted in a call result: the fresh receiver
+// (`makeH()` below) is owned by the member access and must be released after
+// the field is read, with a reference-typed field value retained first so it
+// survives the receiver's release.  Also exercises a new owner of a field's
+// value (x = h.a), which must retain it rather than take the field's
+// reference.
 //
-// Runtime allocation sites: object structs + PaykanShared boxes (Shared.c),
-// PaykanString_new (String.c).
+// Runtime allocation sites: the objects, PaykanString_new (String.c).
 //
 // Expected under --track-heap: live blocks : 0.
 

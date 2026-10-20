@@ -1,12 +1,10 @@
 // Isolates: ownership-taking uses of a match-arm binding.
-// The binding is a raw unowned alias of the subject; consuming it — as a
-// function argument, a new owned variable, or a class field — must retain the
-// subject's existing PaykanShared box (recovered through the object-header
-// backpointer, Shared.c) rather than boxing the raw alias afresh, which would
-// double-free against the subject's owner.
+// The binding names the subject without owning it; consuming it (as a
+// function argument, a new owned variable, or a class field) retains the
+// subject's object (Paykan_retain), so the binding's consumers and the
+// subject's owner share it and it is destroyed once.
 //
-// Runtime allocation sites: two object structs + their PaykanShared boxes
-// (the matched A and the Holder), shared across the binding's consumers.
+// Runtime allocation sites: two objects (the matched A and the Holder).
 //
 // Expected under --track-heap: live blocks : 0.
 
