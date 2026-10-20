@@ -1,34 +1,286 @@
-# PaykanLang — Generics
+# Generics
 
 > **Stable** (issue #2): the syntax and semantics below are covered by the
-> compatibility promise for the 0.2 series (see `01-language-basics.md`, "Stability").
+> compatibility promise for the 0.2 series (see [Stability](index.md#stability)).
 
-Generic classes and functions are parameterised by types. A type parameter's
-bounds (`<T: Show>`) are in `12-traits.md`; variance is not supported.
+Generic classes and functions are written once for any type. A `Stack<T>` works as a
+`Stack<int>`, a `Stack<Str>` or a `Stack<Task>`, each fully type-checked. This chapter
+shows how to declare and use them, gives `tasks` an undo history built on a generic stack,
+and then states the rules: type arguments, inference, how generic bodies are checked, and
+generics across modules. A type parameter's bounds (`<T: Show>`) are covered in
+[Traits](06-traits.md); variance is not supported.
 
----
+## Generic classes
 
-## Quick Summary
+Type parameters go in angle brackets after the class name, and stand for a type
+everywhere in the class:
 
-- Declare type parameters after the name: `class Box<T> { … }`,
-  `class Pair<K, V> { … }`, `fn first<T>(xs: view T[]) -> view T { … }`.
-- Use a generic class by giving it type arguments: `Box<int>`, `Pair<Str, int>`,
-  `Box<int>[2]`, `Box<Box<int>>`. Each distinct argument list is its own
-  ordinary class named after it (`Box<int>` and `Box<Str>` are unrelated, and
-  so are `Box<Dog>` and `Box<Animal>`: there is no variance).
-- Construct with the type arguments — `Box<int>(3)` — or let the compiler
-  infer them from the `__init__` arguments: `Box(3)`. Without an `__init__`, the
-  default one takes the fields (see `04-classes.md`), so `class Box<T> { v: T; }`
-  infers them too.
-- Call a generic function with explicit arguments, `first<int>(xs)`, or let
-  them be inferred from the argument types, `first(xs)`.
-- Type parameters name types only; `T` cannot be read as a value or constructed.
-- Bodies are checked per instantiation: `Adder<int>` may be fine while
-  `Adder<bool>` reports an error that names the instantiation.
-- A module's generic declarations are exported with it: an importer writes
-  `mod::Box<int>` or `mod::first(xs)` (see *Modules*).
+```pkn
+import ::io;
 
----
+class Pair<A, B> {
+  first: A;
+  second: B;
+  fn swap() -> Pair<B, A> { return Pair<B, A>(self.second, self.first); }
+}
+
+impl Pair<A, B> {
+  fn __init__(a: A, b: B) { self.first = a; self.second = b; }
+}
+
+fn main() -> int {
+  p = Pair<Str, int>("answer", 42);
+  q = p.swap();                     // Pair<int, Str>
+  io::println(q.second + " = " + Str(q.first));
+
+  r = Pair(2.5, True);              // Pair<float, bool>, inferred
+  io::println(Str(r.first) + " " + Str(r.second));
+  return 0;
+}
+```
+
+Output:
+
+```
+answer = 42
+2.5 True
+```
+
+Each distinct list of type arguments makes a separate, ordinary class: `Pair<Str, int>` and
+`Pair<int, Str>` are different types, and so are `Box<Dog>` and `Box<Animal>` even when
+`Dog` extends `Animal` (there is no variance). When the type arguments can be worked out
+from the constructor's arguments, as in `Pair(2.5, True)`, you can leave them out.
+
+## Generic functions
+
+A free function can have type parameters too. They are usually inferred from the arguments;
+when they cannot be (for example when the parameter appears only in the return type), write
+them explicitly:
+
+```pkn
+import ::io;
+
+fn lastOf<T>(xs: view T[]) -> view T {
+  return xs[xs.len() - 1];
+}
+
+fn indexOf<T>(xs: view T[], x: view T) -> int? {
+  i = 0;
+  while i < xs.len() {
+    if xs[i] == x { return i; }
+    i = i + 1;
+  }
+  return None;
+}
+
+fn three<T>(x: T) -> T[3] {
+  return [x; 3];
+}
+
+fn main() -> int {
+  io::println(Str(lastOf([3, 1, 4])));
+  io::println(lastOf(["x", "y"]));
+  io::println(indexOf(["a", "b", "c"], "c"));
+  io::println(indexOf([1, 2], 5));
+  words = three<Str>("ab");          // a Str[3]
+  io::println(Str(words.len()) + " " + lastOf(words));
+  io::println(Str(three(7)[1] + 1 == 8));
+  return 0;
+}
+```
+
+Output:
+
+```
+4
+y
+2
+None
+3 ab
+True
+```
+
+A slice parameter (`view T[]`, see [Slices](09-arrays.md#slices)) takes `T` from the
+array's elements, so `lastOf` works on an array of any type and length. `lastOf` returns a
+`view` of the caller's element, and `indexOf` an `int?` that is `None` when the value is
+not there. [Inference](#inference) below gives the exact rules.
+
+## How generic code is checked
+
+A type parameter can name the traits its type argument must implement, as a **bound**:
+`fn show<T: Show>(x: T)` accepts only types with a `toString()`, and `io::println` is
+declared just so. A trait such as `Show` or `Hashable` is built in, and a program declares
+its own with `trait` (see [Traits](06-traits.md)). A call with a type that lacks the trait
+is an error at the call (`'Task' does not implement trait 'Named', which 'f' requires of
+'T'`).
+
+Bounds or not, the body of a generic class or function is type-checked again for each set
+of type arguments it is used with. If an operation does not work for one of them, the error
+points at the generic code and says which instantiation needed it:
+
+```pkn
+class Doubler<T> {
+  v: T;
+  fn twice() -> T { return self.v + self.v; }
+}
+
+impl Doubler<T> {
+  fn __init__(v: T) { self.v = v; }
+}
+
+fn main() -> int {
+  a = Doubler<int>(21);     // fine: int has +
+  s = Doubler<Str>("ab");   // fine: Str has + too
+  b = Doubler<bool>(True);  // bool does not
+  return 0;
+}
+```
+
+Error:
+
+```
+error: operator '+' is not defined for types 'bool' and 'bool'
+note: in instantiation of 'Doubler<bool>' requested here
+```
+
+## Project: undo with a generic stack
+
+`tasks` remembers the tasks it removes, so the last removal can be undone. The history is a
+`Stack<Task>`, and since nothing about a stack depends on what it holds, `Stack<T>` is
+generic. It keeps its items in a `T?[8]` with a count, so its empty slots are `None`.
+`push` returns `False` when the stack is full, and `pop` returns `T?`, `None` when the stack
+is empty:
+
+```pkn
+import ::io;
+
+class Stack<T> {
+  items: T?[8];
+  count: int;
+
+  fn push(x: T) -> bool {
+    if self.count == self.items.len() { return False; }
+    self.items[self.count] = x;
+    self.count = self.count + 1;
+    return True;
+  }
+
+  fn pop() -> T? {
+    if self.count == 0 { return None; }
+    self.count = self.count - 1;
+    top = self.items[self.count];
+    self.items[self.count] = None;
+    return top;
+  }
+
+  view fn size() -> int { return self.count; }
+}
+
+impl Stack<T> {
+  fn __init__() {
+    self.items = [None; 8];
+    self.count = 0;
+  }
+}
+
+class Task {
+  title: Str;
+}
+
+impl Task {
+  fn __init__(title: Str) { self.title = title; }
+}
+
+class TaskList {
+  tasks: Task[8];
+  count: int;
+  removed: Stack<Task>;
+
+  fn add(t: Task) -> bool {
+    if self.count == self.tasks.len() { return False; }
+    self.tasks[self.count] = t;
+    self.count = self.count + 1;
+    return True;
+  }
+
+  // Removes task number `n`, moving the ones after it down.
+  fn remove(n: int) {
+    if n < 1 || n > self.count { return; }
+    self.removed.push(self.tasks[n - 1]);
+    i = n;
+    while i < self.count {
+      self.tasks[i - 1] = self.tasks[i];
+      i = i + 1;
+    }
+    self.count = self.count - 1;
+  }
+
+  fn undo() {
+    match self.removed.pop() {
+      t: Task {
+        if self.add(t) { io::println("restored '" + t.title + "'"); }
+        else { io::println("no room for '" + t.title + "'"); }
+      }
+      None    { io::println("nothing to undo"); }
+    }
+  }
+
+  view fn titles() -> Str {
+    out = "";
+    i = 0;
+    while i < self.count {
+      out = out + (if i > 0 then ", " else "") + self.tasks[i].title;
+      i = i + 1;
+    }
+    return out;
+  }
+}
+
+impl TaskList {
+  fn __init__() {
+    self.tasks = [Task(""); 8];
+    self.count = 0;
+    self.removed = Stack<Task>();
+  }
+}
+
+fn main() -> int {
+  list = TaskList();
+  list.add(Task("buy milk"));
+  list.add(Task("fix the leak"));
+  list.add(Task("call mum"));
+  list.remove(1);
+  list.remove(1);
+  io::println(list.titles());
+  list.undo();
+  io::println(list.titles());
+  list.undo();
+  list.undo();
+
+  numbers = Stack<int>();       // the same Stack, for ints
+  numbers.push(1);
+  numbers.push(2);
+  size = numbers.size();
+  match numbers.pop() {
+    top: int { io::println(Str(size) + " numbers, top " + Str(top)); }
+    None     { }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+call mum
+restored 'fix the leak'
+call mum, fix the leak
+restored 'buy milk'
+nothing to undo
+2 numbers, top 2
+```
+
+In [Modules and imports](15-modules.md), `tasks` is split into several files.
 
 ## Declaring a Generic Class
 
@@ -86,13 +338,13 @@ impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
 - `impl Keyed<K> for Pair<K, V>` makes every instantiation implement the trait:
   `Pair<Str, int>` implements `Keyed<Str>`, and meets a `T: Keyed<Str>` bound.
 - The class's `__init__` goes in one (it cannot be in the class body, see
-  `04-classes.md`): `Box(3)` infers `T` from it.
+  [Classes](05-classes.md)): `Box(3)` infers `T` from it.
 - A generic class's `impl` block can have `static fn`s; one is called on an
   instantiation, `Box<int>::of(3)` (or `m::Box<int>::of(3)` through an import), and is that
   instantiation's function.
 
 A struct can be generic in the same way (`struct Pair<A, B> { a: A; b: B; }`, with
-`impl Pair<A, B>` blocks): see [Generic structs](14-structs.md#generic-structs).
+`impl Pair<A, B>` blocks): see [Generic structs](11-structs.md#generic-structs).
 
 ## Declaring a Generic Function
 
@@ -155,17 +407,17 @@ first<Str>(words);        // explicit — always allowed
 Inference looks through slices (`view T[]`, against an array's elements),
 tuples (`(A, B)`, element by element), optionals (`T?` against a `U?` or a
 plain `U`), function types (`(T) -> U`, parameter by parameter and the
-result, see `15-function-types.md`) and instantiations (`Box<T>`, or a
-generic struct's `Pair<A, B>`). A bare `None` argument is typed `Obj` and carries no information
-about `T`: `unwrapOr(None, Node(3))` infers `T = Node` from the second
-argument, but `wrap(None)` alone cannot be inferred and needs
+result, see [Function types and lambdas](14-function-types.md)) and instantiations
+(`Box<T>`, or a generic struct's `Pair<A, B>`). A bare `None` argument is typed `Obj` and
+carries no information about `T`: `unwrapOr(None, Node(3))` infers `T = Node` from the
+second argument, but `wrap(None)` alone cannot be inferred and needs
 `wrap<Node>(None)`. It is exact: a parameter that appears twice must be
-deduced as the same type, and no promotion or subtyping is applied. When inference is impossible or ambiguous
-the call is an error with a hint to write the arguments explicitly:
+deduced as the same type, and no promotion or subtyping is applied. When inference is
+impossible or ambiguous the call is an error with a hint to write the arguments explicitly:
 
 ```pkn
 fn mk<T>() -> int { return 1; }
-mk();                     // error: cannot infer type parameter 'T' of 'mk'
+mk();                     // error: cannot infer type parameter 'T' of 'mk' from the call arguments
 mk<int>();                // ok
 
 fn same<T>(a: T, b: T) -> T { return a; }
@@ -175,7 +427,8 @@ same<float>(1, 2.0);      // ok (1 promotes to float)
 
 A generic **class** may be constructed without type arguments when they can be
 inferred from its `__init__` parameters, or its fields' types when it has the
-default `__init__`: `Box(3)` is `Box<int>(3)`.
+default `__init__` ([The default `__init__`](05-classes.md#the-default-__init__)):
+`Box(3)` is `Box<int>(3)`, also for a `class Box<T> { v: T; }` with no `impl` block.
 
 ## Type Parameters Are Types
 
@@ -211,9 +464,9 @@ tuple meets a `T: Show` bound.
 
 Because each instantiation is checked separately, a `T?` in a template is
 an optional of whatever `T` is: `Slot<int>` below holds an `int?` (an
-optional primitive, see `10-optionals.md`), `Slot<Color>` a `Color?` and
-`Slot<(int, Str)>` an `(int, Str)?`, and `orElse(x, 0)` with `x: int?`
-works as written above. When `T` is itself optional, `T?` is `T`: a
+optional primitive, see [Optional Primitives](12-optionals.md#optional-primitives)),
+`Slot<Color>` a `Color?` and `Slot<(int, Str)>` an `(int, Str)?`, and `orElse(x, 0)` with
+`x: int?` works as written above. When `T` is itself optional, `T?` is `T`: a
 template never makes a nested optional, so `Slot<int?>` holds an `int?`
 (a written `int??` is still an error).
 
@@ -258,20 +511,9 @@ True
 ## How Errors Are Reported
 
 A generic body is checked once per instantiation. An error is reported at the
-template's source and says which instantiation was being checked:
-
-```
-class Adder<T> {
-  v: T;
-  fn twice() -> T { return self.v + self.v; }
-}
-impl Adder<T> {
-  fn __init__(v: T) { self.v = v; }
-}
-a = Adder<int>(1);        // fine
-b = Adder<bool>(True);    // error: operator '+' is not defined for types 'bool' and 'bool'
-                          // note: in instantiation of 'Adder<bool>' requested here
-```
+template's source and says which instantiation was being checked, as the `Doubler<bool>`
+example in [How generic code is checked](#how-generic-code-is-checked) shows: the error
+points at `self.v + self.v`, and a note points at `Doubler<bool>(True)`.
 
 A generic declaration that is never instantiated is only parsed, not checked.
 Nested instantiation is bounded: a class that instantiates itself with an
@@ -315,7 +557,9 @@ d = gen::Box<int>(1);     // the same class as c's
 - **Names in a body are the module's.** A template's body is resolved where
   it is declared: `_serial`, `Box` and `util::bracket` above are what
   `lib::gen` declares and imports, whatever the importer calls those names
-  (its own `_serial`, its own `util`).
+  (its own `_serial`, its own `util`). A template may use the module's
+  [private](15-modules.md#private-to-the-module) names: the importer runs that code,
+  it just cannot write the names.
 - **Checked per instantiation, as the module would check it.** An error in
   the body is reported in the template's file, with the instantiation note
   at the request.
@@ -330,10 +574,12 @@ d = gen::Box<int>(1);     // the same class as c's
   `Box<Str>` and `gen::Box<Str>`, is an error: type names are global across
   the import graph.
 - A generic class's `impl` blocks go with it, except `impl Trait for` blocks:
-  an importer cannot name another module's traits yet (`12-traits.md`).
+  an importer cannot name another module's traits yet
+  ([Traits](06-traits.md#not-supported-yet)).
 - A `.pkm` does not hold templates yet (#160): a module that declares them,
   instantiates another module's, or uses such an instantiation, is built
-  from its source every time (`docs/design/pkm.md` §4.8).
+  from its source every time ([`docs/design/pkm.md`](../design/pkm.md) §4.8, and
+  [The compilation cache](15-modules.md#the-compilation-cache)).
 
 ## Syntax Notes
 
@@ -349,14 +595,14 @@ d = gen::Box<int>(1);     // the same class as c's
 |-------|---------|
 | Wrong number of type arguments | `Box<int, Str>` for a one-parameter class, `f<int, int>(…)` |
 | Unknown generic | `Nope<int>` with no such class |
-| Type arguments on a non-generic | `f<int>(1)` where `f` is ordinary; `Str<int>` in a type position (`t: Str<int>`) — as an expression, `Str<int>(n)` is a conversion constructor (`01-language-basics.md`) |
+| Type arguments on a non-generic | `f<int>(1)` where `f` is ordinary; `Str<int>` in a type position (`t: Str<int>`) — as an expression, `Str<int>(n)` is a conversion constructor ([Conversions](04-strings-and-conversions.md#conversions)) |
 | Missing type arguments | `b: Box = …` for a generic `Box` |
 | Type parameter used as a value | `y = T;`, `T()` inside a generic body |
 | Duplicate / shadowing type parameter | `class P<T, T>`, `class Bar<Foo>` when `Foo` is a type, `impl Box<Foo>` |
 | `impl` type parameters | `impl Box` or `impl Box<T, U>` for a one-parameter `Box`, `impl A<T>` for a non-generic `A` |
 | Name reuse | a class or function named like a generic declaration |
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
-| Inference failure / ambiguity | see *Inference* |
+| Inference failure / ambiguity | see [Inference](#inference) |
 | Instantiation depth exceeded | self-instantiation with a growing argument |
 | Instantiation name clash | this module's `Box<Str>` and an imported template's, or an imported class `Box<int>` |
 

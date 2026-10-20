@@ -1,5 +1,5 @@
 // OK: generic classes and functions of another module, instantiated here
-// (docs/language/11-generics.md).  A type argument may be explicit or
+// (docs/language/13-generics.md).  A type argument may be explicit or
 // inferred, a template may be used inside this module's own templates, and
 // an instantiation made by several modules (`Box<int>`) is one class.
 // expect-stdout: 16 five [7]

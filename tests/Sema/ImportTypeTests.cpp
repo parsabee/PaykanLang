@@ -382,7 +382,7 @@ fn main() -> int { k = K(); f = Fine(); return 0; }
 
 // ─── A module-private initializer is constructed by its module only ─────────
 //
-// `___init__` (docs/language/06-modules.md): an importer cannot construct the
+// `___init__` (docs/language/15-modules.md): an importer cannot construct the
 // type, nor extend it (`__super__` into the initializer, written or the
 // default one), from the module's source or its templates; the module's own
 // functions and templates can.

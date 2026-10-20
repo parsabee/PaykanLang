@@ -24,7 +24,7 @@ inline constexpr const char *kString = "Str";
 inline constexpr const char *kMethodInit = "__init__";
 inline constexpr const char *kMethodSuper = "__super__";
 /// `___init__`: the initializer, private to its module (docs/language/
-/// 04-classes.md, "Private fields and methods").  The parser records it as
+/// 05-classes.md, "Private fields and methods").  The parser records it as
 /// `__init__` with FuncDecl::isModulePrivateInit; the AST interchange form
 /// and a `.pkm` interface write the method under this name again.
 inline constexpr const char *kMethodInitModulePrivate = "___init__";
@@ -344,7 +344,7 @@ inline constexpr const char *kInt2FPName = "int2fp";
 inline constexpr const char *kTupleLayoutGlobalName = ".tuple";
 inline constexpr const char *kStructLayoutGlobalName = ".struct";
 
-// -- Function values (docs/language/15-function-types.md)
+// -- Function values (docs/language/14-function-types.md)
 //
 // A function value is its code and its closure, held in place.  The code of
 // a lambda is the function `fn.<module>.N.call`, and its closure, when it

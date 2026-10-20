@@ -295,7 +295,7 @@ bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
 
 bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   // `None` into an optional slot: statically the literal is `Obj` (a design
-  // decision — see docs/language/10-optionals.md), but in this position it
+  // decision — see docs/language/12-optionals.md), but in this position it
   // denotes the absent `T?` value.  Record that contextual type on the
   // literal so the lowering emits a null box rather than boxing the `None`
   // singleton, which is how a present `Obj` value spells None.

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// AST -> PIR lowering: structs (docs/language/14-structs.md).
+// AST -> PIR lowering: structs (docs/language/11-structs.md).
 //
 // A struct is a tuple of its fields to the lowering (ast::StructType is a
 // TupleType): a value held in memory (LoweringMem.cpp), copied, retained and

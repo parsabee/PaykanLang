@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Codegen tests: weak references (docs/language/08-memory-model.md, "Weak
+// Codegen tests: weak references (docs/language/16-memory.md, "Weak
 // references"): `weak` locals and fields read as None once their object is
 // gone, break reference cycles, and are released like any reference.
 

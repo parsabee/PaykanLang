@@ -1,29 +1,170 @@
-# PaykanLang — Optional Types
+# Optionals
 
 > **Stable** (issue #5), optional primitives and optional-mode `match` included: the
 > syntax and semantics below are covered by the compatibility promise for the 0.2 series (see
-> `01-language-basics.md`, "Stability").
+> [Stability](index.md#stability)).
 
-An **optional type** `T?` holds either a value of type `T` or `None`. It is how a program says
-"this may be absent" without giving up the static type: a `next: Node?` field is a `Node` or
-nothing — never a `Str` — and a `count: int?` is an `int` or nothing.
+Sometimes a value may be missing: a search finds nothing, a string is not a number, a task
+has no deadline. PaykanLang expresses this with **optional types**. A `T?` holds either a
+value of type `T` or `None`, without giving up the static type: a `next: Node?` field is a
+`Node` or nothing, never a `Str`, and a `count: int?` is an `int` or nothing. The compiler
+makes sure you check which before using the value. This chapter shows how to declare,
+unwrap and compare optionals, and `tasks` learns to look tasks up and to give them an
+optional deadline; then it gives the precise rules.
+
+## Optional types
+
+Add `?` to a type to make it optional: `Str?`, `int?`, `Task?`. Any class, `Str`, `int`,
+`float`, `bool`, `char` and the sized numeric types can be optional, and so can enums,
+tuples, structs and function values. `None` is the absent value:
 
 ```pkn
+import ::io;
+
+fn main() -> int {
+  nickname: Str? = None;
+  age: int? = 36;          // an int converts to int? automatically
+  io::println(nickname);
+  io::println(age);
+  nickname = "Gracie";
+  io::println(nickname);
+  return 0;
+}
+```
+
+Output:
+
+```
+None
+36
+Gracie
+```
+
+A `T` converts to `T?` automatically, so functions returning `T?` simply `return` a `T` or
+`None`. The other direction never happens implicitly: a `T?` cannot be used as a `T`, not in
+arithmetic, not to call a method, not to pass to a parameter of type `T`:
+
+```pkn
+fn main() -> int {
+  age: int? = 36;
+  nextYear = age + 1;
+  return 0;
+}
+```
+
+Error:
+
+```
+error: cannot use optional 'int?' as 'int' without unwrapping (use match)
+```
+
+## Getting the value out with match
+
+`match` on an optional has an arm for the present case, which names the wrapped type and
+binds the value, and an arm for `None`. Together the two are exhaustive:
+
+```pkn
+import ::io;
+
+fn half(n: int) -> int? {
+  if n % 2 != 0 { return None; }
+  return n / 2;
+}
+
+fn describe(n: int) -> Str {
+  match half(n) {
+    h: int { return Str(n) + " halves to " + Str(h); }
+    None   { return Str(n) + " is odd"; }
+  }
+}
+
+fn main() -> int {
+  io::println(describe(10));
+  io::println(describe(7));
+  return 0;
+}
+```
+
+Output:
+
+```
+10 halves to 5
+7 is odd
+```
+
+Inside the first arm, `h` is a plain `int`. With a class type the present arm matches every
+object of that class *or any subclass*, unlike a class `match` on a non-optional value,
+which compares exact classes.
+
+To just test for presence, compare with `None`: `x == None` and `x != None` work on any
+optional. But a test does not unwrap: after `if x != None` the type of `x` is still `T?`,
+so you still need a `match` to use the value. Two optionals can be compared with `==` as
+well; they are equal when both are `None` or both hold equal values (see
+[Comparing with `None`](#comparing-with-none)).
+
+## Fields that start as None
+
+A field whose type is optional starts out as `None`, so `__init__` does not have to assign
+it. This is the natural way to model something that is set later, or not at all:
+
+```pkn
+import ::io;
+
+class Person {
+  name: Str;
+  email: Str?;
+
+  view fn contact() -> Str {
+    match self.email {
+      e: Str { return self.name + " <" + e + ">"; }
+      None   { return self.name + " (no email)"; }
+    }
+  }
+}
+
+impl Person {
+  fn __init__(name: Str) { self.name = name; }
+}
+
+fn main() -> int {
+  p = Person("Ada");
+  io::println(p.contact());
+  p.email = "ada@example.org";
+  io::println(p.contact());
+  return 0;
+}
+```
+
+Output:
+
+```
+Ada (no email)
+Ada <ada@example.org>
+```
+
+## Linked structures
+
+Optionals make linked structures easy to express, because "no next node" is just `None`.
+Here is a minimal linked list with a search that returns `Node?`:
+
+```pkn
+import ::io;
+
 class Node {
-  v: int;
-  next: Node?;                       // implicitly None
+  value: int;
+  next: Node?;
 }
 
 impl Node {
-  fn __init__(x: int) { self.v = x; }
+  fn __init__(v: int, next: Node?) { self.value = v; self.next = next; }
 }
 
-fn find(head: Node?, key: int) -> Node? {
-  cur: Node? = head;
+fn find(head: Node?, wanted: int) -> Node? {
+  cur = head;
   while cur != None {
     match cur {
-      n: Node {                      // n is the unwrapped Node
-        if n.v == key { return n; }
+      n: Node {
+        if n.value == wanted { return n; }
         cur = n.next;
       }
       None { }
@@ -31,6 +172,124 @@ fn find(head: Node?, key: int) -> Node? {
   }
   return None;
 }
+
+fn main() -> int {
+  list = Node(1, Node(2, Node(3, None)));
+  match find(list, 2) {
+    n: Node { io::println("found " + Str(n.value)); }
+    None    { io::println("not found"); }
+  }
+  io::println(Str(find(list, 9) == None));
+  return 0;
+}
+```
+
+Output:
+
+```
+found 2
+True
+```
+
+## Things to know
+
+- `None` on its own has the type `Obj`, the root class. So `x = None;` declares an `Obj`
+  variable, not an optional: write the type, as in `x: Task? = None;`. The same goes for
+  an array literal holding `None`: `ts: Task?[8] = [None; 8]` needs its annotation.
+- `T?[n]` is an array whose elements may be `None` ([Arrays](#arrays)); an array cannot
+  itself be optional.
+- Enums, tuples and structs have optionals too (`Direction?`, `(int, Str)?`, `Point?`),
+  unwrapped with an arm naming the type: `d: Direction { ... }`. Such an optional holds its
+  value in place, at most 64 bytes of it ([Optional Enums, Tuples and
+  Structs](#optional-enums-tuples-and-structs)).
+- There is no `?.`, `??` or `if let` shorthand in this release; `match` is the way to unwrap.
+- The standard library says "nothing" with optionals too: a file read returns a result
+  whose `value` is a `Str?`, `None` at the end of the file. [Input and
+  output](../stdlib/io.md) shows how to `match` on those.
+
+## Project: finding tasks and optional deadlines
+
+Two changes to `tasks`. A deadline becomes an optional field instead of a subclass, so any
+task can get one later. And `TaskList.find` looks a task up by its title, returning `None`
+when there is none, which lets the caller decide what to do. It isn't a `view fn`, because
+the caller may change the task it returns:
+
+```pkn
+import ::io;
+
+class Task {
+  title: Str;
+  done: bool;
+  due: Str?;
+
+  view fn toString() -> Str {
+    text = (if self.done then "[x] " else "[ ] ") + self.title;
+    match self.due {
+      d: Str { return text + " (due " + d + ")"; }
+      None   { return text; }
+    }
+  }
+}
+
+impl Task {
+  fn __init__(title: Str) {
+    self.title = title;
+    self.done = False;
+  }
+}
+
+class TaskList {
+  tasks: Task[8];
+  count: int;
+
+  fn add(title: Str) -> bool {
+    if self.count == self.tasks.len() { return False; }
+    self.tasks[self.count] = Task(title);
+    self.count = self.count + 1;
+    return True;
+  }
+
+  fn find(title: Str) -> Task? {
+    i = 0;
+    while i < self.count {
+      if self.tasks[i].title == title { return self.tasks[i]; }
+      i = i + 1;
+    }
+    return None;
+  }
+}
+
+impl TaskList {
+  fn __init__() {
+    self.tasks = [Task(""); 8];
+    self.count = 0;
+  }
+}
+
+fn setDue(list: TaskList, title: Str, due: Str) {
+  match list.find(title) {
+    t: Task { t.due = due; io::println(t); }
+    None    { io::println("no task called '" + title + "'"); }
+  }
+}
+
+fn main() -> int {
+  list = TaskList();
+  list.add("file taxes");
+  list.add("buy milk");
+  setDue(list, "file taxes", "April 15");
+  setDue(list, "walk the dog", "today");
+  io::println(list.tasks[1]);
+  return 0;
+}
+```
+
+Output:
+
+```
+[ ] file taxes (due April 15)
+no task called 'walk the dog'
+[ ] buy milk
 ```
 
 ---
@@ -42,7 +301,7 @@ fn find(head: Node?, key: int) -> Node? {
   (`Node?[3]`). A match arm names the type without the `?`.
 - Reference types (classes, `Str`), the primitives `int`, `float`, `bool`, `char` and
   the sized numeric types (`u8?`, `f32?`, …), enums, tuples, structs and function values
-  (`((int) -> int)?`, see [Function Types](15-function-types.md#function-values-are-values))
+  (`((int) -> int)?`, see [Function Values Are Values](14-function-types.md#function-values-are-values))
   can be optional (see [Optional Primitives](#optional-primitives) and [Optional Enums,
   Tuples and Structs](#optional-enums-tuples-and-structs)). `void?`, a written `T??` and optional
   fixed-size arrays (`int[3]?`) are rejected.
@@ -127,7 +386,7 @@ match maybe {
 
 Matching on an `Obj` subject is unchanged, and a `None` arm is only valid on an optional
 subject. A read's result holds a `Str?`, so the `match io::stdin().readln().value { line: Str
-{ … } _ { … } }` idiom is an optional-mode match.
+{ … } _ { … } }` idiom is an optional-mode match (see [Input and output](../stdlib/io.md)).
 
 ---
 
@@ -178,7 +437,7 @@ fn show(o: int?) -> Str {
 
 - The parsing conversions return optional primitives: `int<Str>(s)` is an `int?`,
   `float<Str>(s)` a `float?` and `bool<Str>(s)` a `bool?`, `None` for an invalid string
-  (see `01-language-basics.md`).
+  (see [Conversions](04-strings-and-conversions.md#conversions)).
 - A primitive widens to its optional implicitly (`x: int? = 5`). An `int` also widens to
   `float?`, after the usual `int` -> `float` promotion (`f: float? = 3`).
 - An `int?` does **not** convert to a `float?` (or any other optional). `int[2]` is not an
@@ -199,7 +458,7 @@ fn show(o: int?) -> Str {
   (`if c then 3 else None` is an `int?`) and generic arguments (`Box<int?>`). A `T?` inside a
   generic class or function instantiated with `T = int` is an `int?`, and so is one
   instantiated with `T = int?`: a template's `T?` of a `T` that is already optional is `T`
-  itself, never a nested optional (`11-generics.md`).
+  itself, never a nested optional ([Generics](13-generics.md)).
 - An optional primitive is not an object (see [Optionals are not
   objects](#optionals-are-not-objects)): `o: Obj = x` is an error. `io::println(x)` prints `5` or
   `None`.
@@ -270,19 +529,8 @@ no suit
 
 ## Optional Fields
 
-A field of type `T?` need not be assigned in `__init__`; it starts as `None`:
-
-```pkn
-class Node {
-  v: int;
-  next: Node?;                       // None until assigned
-}
-
-impl Node {
-  fn __init__(x: int) { self.v = x; }
-}
-```
-
+A field of type `T?` need not be assigned in `__init__`; it starts as `None` (as `email`
+does in [Fields that start as None](#fields-that-start-as-none)).
 Non-optional fields keep the usual rule (assigned on every path through `__init__`).
 Assigning `None` to an optional field releases whatever it held.
 
@@ -372,7 +620,7 @@ reference-counted object as a `T`, with a null reference meaning `None`. An opti
 primitive is a value, the primitive and a presence flag: it allocates nothing and is never
 counted. An optional enum, tuple or struct is a value held in place in the same way, and an
 optional function value is the function value's 16 bytes. An `int?[3]` holds its elements inline.
-Retaining, releasing and destroying an absent optional are no-ops. See `08-memory-model.md`.
+Retaining, releasing and destroying an absent optional are no-ops. See [Memory](16-memory.md).
 
 ---
 

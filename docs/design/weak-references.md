@@ -1,6 +1,6 @@
 # Weak references and one allocation per object
 
-The design behind the `weak` declarations of `docs/language/08-memory-model.md`
+The design behind the `weak` declarations of `docs/language/16-memory.md`
 ("Weak references") and the object layout that carries them: what a weak
 reference is, where one may be declared, how it is read and written, and how
 the runtime keeps an object's counts in the object itself.  The decisions fit

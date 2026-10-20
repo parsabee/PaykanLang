@@ -1,10 +1,64 @@
-# PaykanLang — Structs
+# Structs
 
 A struct is a value with named fields: `struct Point { x: int; y: int; }` declares a
 type whose values hold an `x` and a `y` side by side, like a tuple `(int, int)` whose
 elements have names and can be assigned.  A struct is held in place and copied by
 assignment, as a tuple is; it has no superclass, no vtable and no identity, and its
-methods come from `impl` blocks.
+methods come from `impl` blocks.  This chapter introduces structs with the statistics of
+the `tasks` project, then gives the precise rules.
+
+## Structs: named fields
+
+When a group of values has a shape worth naming, declare a **struct**. `tasks` keeps its
+statistics in one:
+
+```pkn
+import ::io;
+
+struct Stats {
+  done: int;
+  pending: int;
+}
+
+impl Stats {
+  view fn total() -> int { return self.done + self.pending; }
+  fn count(isDone: bool) {
+    if isDone { self.done = self.done + 1; } else { self.pending = self.pending + 1; }
+  }
+}
+
+fn main() -> int {
+  s = Stats(0, 0);                  // the fields, in order
+  s.count(True);
+  s.count(False);
+  s.count(True);
+  s.pending = s.pending + 10;       // a field is assigned in place
+  t = s;                            // a copy
+  t.done = 0;
+  io::println(s);
+  io::println(Str(s.total()) + " " + Str(t.total()) + " " + Str(s == t));
+  return 0;
+}
+```
+
+Output:
+
+```
+Stats(done: 2, pending: 11)
+13 11 False
+```
+
+`Stats(0, 0)` builds a struct from its fields in order, and the `impl` block holds its
+methods, as a class's does. `t = s` copies the struct, so `t.done = 0` leaves `s` alone;
+unlike a tuple's elements, its fields have names and can be assigned, and in a method `self`
+is the variable the method was called on, so `s.count(True)` changes `s`. `==` compares two
+structs field by field, and `io::println` prints the struct's name with each field.
+
+Use a class when values must share one object that several names refer to, or when
+subclasses and `match` are needed; use a struct for a small group of fields that is
+copied around like a number. A struct can be generic, like a class
+([Generic structs](#generic-structs)): `struct Pair<A, B> { a: A; b: B; }`, used as
+`Pair<int, Str>` or inferred from `Pair(1, "one")`.
 
 ---
 
@@ -33,9 +87,9 @@ methods come from `impl` blocks.
   is an `inout` place (`bump(p.x)`).
 - Generic: `struct Pair<A, B> { a: A; b: B; }` is a template, instantiated by its type
   arguments (`Pair<int, Str>`) or inferred from a constructor call (`Pair(1, "a")`),
-  with `impl Pair<A, B>` blocks, as a generic class is (`11-generics.md`).
+  with `impl Pair<A, B>` blocks, as a generic class is ([Generics](13-generics.md)).
 - A struct of at most 64 bytes has an optional (`Point?`), held in place like the tuple
-  `(bool, Point)` and unwrapped with `match p { q: Point { … } None { … } }` (`10-optionals.md`).
+  `(bool, Point)` and unwrapped with `match p { q: Point { … } None { … } }` ([Optionals](12-optionals.md#optional-enums-tuples-and-structs)).
 - Not yet: `match` on a struct itself, a fixed-size array field, a struct that contains
   itself.
 
@@ -180,12 +234,10 @@ type 'A': a struct's fields are named (x, y)`), a struct cannot be destructured 
 destructure a value of type 'A'; only tuples can be destructured`), and `p.z` names no
 field (`no field 'z' in struct 'A'`).
 
----
-
 ### Private fields and methods
 
 A field or a method whose name starts with two underscores is private to the struct, exactly
-as for a class ([Classes](04-classes.md#private-fields-and-methods)): `self.__n` is read and
+as for a class ([Classes](05-classes.md#private-fields-and-methods)): `self.__n` is read and
 assigned only in the struct's own methods, in its body or its `impl` blocks and trait impls;
 `p.__n` elsewhere is `'__n' is private to 'P': it is reachable only from its own methods`.
 The default constructor still takes every field, private ones included. A field or method
@@ -194,6 +246,8 @@ module reaches it, an importer does not. A struct's initializer may be written `
 as well, private to the module as a class's: the module constructs the struct, an importer
 does not (`'m::P' cannot be constructed here: its initializer '___init__' is private to
 module 'm'`).
+
+---
 
 ## Structs as Values
 
@@ -246,7 +300,8 @@ a result, an array element (`Point[3]`), a tuple element (`(Point, Str)`), a typ
 
 ### Parameter modes and places
 
-Parameter modes work on a struct as on a tuple (`02-functions-and-calling.md`): a plain
+[Parameter modes](03-functions.md#parameter-modes-view-and-inout) work on a struct as on a
+tuple ([Tuples as Values](10-tuples.md#tuples-as-values)): a plain
 parameter is the callee's own copy, a `view` parameter reads the caller's struct, and an
 `inout` parameter is the caller's variable or field, which the callee changes in place or
 replaces whole.  A `view` of a struct of value types is copied when it is assigned, like a
@@ -295,7 +350,7 @@ of a struct in a tuple.
 ## Methods
 
 An `impl` block gives a struct methods, an `__init__` and `static fn`s, with the rules of a
-class's `impl` block (`04-classes.md`, "`impl` Blocks"): a struct may have several, in
+class's `impl` block ([`impl` Blocks](05-classes.md#impl-blocks)): a struct may have several, in
 its own module only (`an 'impl' block for a struct of another module is not supported
 yet`), and a method name is declared once (`struct 'A' already has a method 'm'`).  A
 struct has no vtable: every call is resolved at compile time.
@@ -379,7 +434,7 @@ struct's name and each field's name and value as its own `toString()` shows it:
 `println`, `printerr` and `printerrln` take a struct as they take a tuple (it is `Show`).
 
 Every struct implements the built-in traits `Show` (its `toString`) and `ValueType` (it
-is held in place), so it meets `T: Show` and `T: ValueType` bounds (`12-traits.md`), and
+is held in place), so it meets `T: Show` and `T: ValueType` bounds ([Traits](06-traits.md)), and
 `impl Show for A {}` or `impl ValueType for A {}` is an error (`struct 'A' already
 implements 'Show'`).  `Hashable` and user traits are implemented with `impl Trait for
 Name` blocks, as for a class:
@@ -419,7 +474,7 @@ Point(x: 1, y: 2) Point 2 True True False
 
 Values that are `==` must hash the same, so `hash` reads the fields `==` compares.  A
 `Hashable` struct is a key of the standard library's `HashMap<K, V>` and `HashSet<K>`
-(`13-standard-library.md`), and any struct is an element of `List<T>` and the other
+([Collections](../stdlib/collections.md)), and any struct is an element of `List<T>` and the other
 collections:
 
 ```pkn
@@ -455,7 +510,7 @@ east False True 1
 
 ## Generic structs
 
-A struct can have type parameters, like a class (`11-generics.md`): `struct Pair<A, B> {
+A struct can have type parameters, like a class ([Generics](13-generics.md)): `struct Pair<A, B> {
 a: A; b: B; }` is a template, and each use with distinct type arguments instantiates it
 into a struct of its own, `Pair<int, Str>`, which has everything a written struct has.
 An instantiation is written with its arguments (`p: Pair<int, Str>`,
@@ -546,7 +601,7 @@ in a generic struct's `impl` block is the instantiation's, called as
 
 A struct declared in a module is used from an importer as `mod::Name`: its constructor
 `mod::Point(1, 2)`, its static functions `mod::Point::origin()`, and its fields and methods
-on a value as usual.  A prebuilt module (`.pkm`, see `06-modules.md`) keeps a struct's
+on a value as usual.  A prebuilt module (`.pkm`, see [Prebuilt modules](15-modules.md#prebuilt-modules)) keeps a struct's
 fields, methods and constructor.  An `impl` block for a struct of another module is not
 supported yet.
 
@@ -622,8 +677,8 @@ Point(x: 4, y: 2) 6 True
 `match` on a struct (other than unwrapping a `Point?`), a fixed-size array field, an `impl`
 block for a struct of another module, a
 field of an array element as an `inout` place, and a struct crossing into C other than as
-a type argument of a generic native function (`02-functions-and-calling.md`, "Generic
-native functions").  Like a tuple, a struct has no `equals` method and cannot be ordered
+a type argument of a generic native function ([Generic native
+functions](03-functions.md#generic-native-functions)).  Like a tuple, a struct has no `equals` method and cannot be ordered
 with `<`.
 
 ---
@@ -631,11 +686,11 @@ with `<`.
 ## Notes
 
 - At run time a struct is laid out in place like a C struct of its fields, exactly as the
-  tuple of its field types is (`09-tuples.md`, "Notes"): a struct of `int`s allocates
+  tuple of its field types is ([Tuples](10-tuples.md#notes)): a struct of `int`s allocates
   nothing, a reference field is its box, retained once per copy and released when the
   variable goes out of scope, the holding object is destroyed or the array goes.  A
   method takes the receiver's address as its first argument, and a `view fn` the same;
   a constructor writes its result into the caller's storage.
 - `toString` and `==` go through the struct's layout, constant data the compiler emits
-  for each struct type that is printed or compared (`docs/pir.md`): the field count,
+  for each struct type that is printed or compared ([PIR](../pir.md)): the field count,
   the struct's name, then each field's name and the words a tuple element has.

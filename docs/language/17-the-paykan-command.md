@@ -19,13 +19,13 @@ paykan pkm check <file.pkm>
 - **`build`** compiles the program into a native executable named by `-o`, or after the
   source file without its extension. `build` takes no program arguments, so its options may
   also come after the file.
-- **`pkm`** inspects a module file (see [Module Files](../language/06-modules.md#module-files)): `dump`
+- **`pkm`** inspects a module file (see [Module Files](15-modules.md#module-files)): `dump`
   prints it (`--section=manifest|sections|iface|code|symidx|payloads` prints one part;
   `code` is exactly the module's PIR text), `check` prints whether this `paykan` can use it
   and exits with 0 when it can.
 
 The source file is the program's **main file**. Its directory is the source root from which
-imports are resolved (see [Modules](10-modules.md)).
+imports are resolved (see [Modules](15-modules.md)).
 
 When compilation fails, `paykan` prints the errors and exits with status 1. A wrong
 option prints a message suggesting `--help`, and also exits with 1.
@@ -40,14 +40,14 @@ option prints a message suggesting `--help`, and also exits with 1.
 | `-O<n>` | optimization level, `0` to `3` (also `-O <n>` and `-O=<n>`); the default is `2`, and `-O0` compiles fastest and is easiest to debug |
 | `--backend=<name>` | the backend to compile with (see below) |
 | `--frontend=<name>` | the parser to read the source with; the built-in one, `recursive-descent`, is the default |
-| `--track-heap` | run with heap tracking and print the allocation statistics to standard error at exit ([Memory](12-memory.md)) |
+| `--track-heap` | run with heap tracking and print the allocation statistics to standard error at exit ([Memory](16-memory.md)) |
 | `--check-only` | parse and type-check, then stop: no code is generated and nothing runs. It also accepts a module that has no `main`, which makes it handy for checking a library module on its own |
 | `--emit-pkm` | compile one module and write its `.pkm` module file to `-o <file>`, or next to the source, then stop. The module may have no `main`. Like `build`, it takes no program arguments, so `-o` may follow the file |
 | `--module-path=<dir>` | a directory of prebuilt `.pkm` modules, searched for an import whose source is not found (repeatable; then the `:`-separated `$PAYKAN_MODULE_PATH`) |
 | `--rebuild-modules` | ignore the `.pkm` cache entries of the imported modules (they are rewritten) |
 | `--no-module-cache` | neither read nor write `.pkm` cache entries |
 | `--verbose` | print one line per imported module on standard error: where it came from (its source, a cache entry, a prebuilt file) and why a cache entry was not used; and one line per cache entry written |
-| `--object=<files>` | link these object files or archives (comma-separated; repeatable): they define the program's `native fn`s ([Native functions](../language/02-functions-and-calling.md#native-functions)) |
+| `--object=<files>` | link these object files or archives (comma-separated; repeatable): they define the program's `native fn`s ([Native functions](03-functions.md#native-functions)) |
 | `--` | ends `paykan`'s options: a file name starting with `-` can follow |
 
 ### Looking inside the compiler
@@ -110,7 +110,7 @@ fn @"$::io::println<Str>"(%value.1: box) -> void {
 | `--plugin=<file>` | load a frontend or backend plugin from a shared library (repeatable) |
 | `--no-plugins` | do not search the plugin directories (files named with `--plugin` still load) |
 
-[Extending PaykanLang](14-extending.md) explains plugins.
+[Extending PaykanLang](../internals.md#extending-paykanlang) explains plugins.
 
 ## Backends
 
@@ -126,7 +126,7 @@ A backend turns the compiled program into something that runs. Two come with Pay
   compiler.
 
 Both backends implement the same language and produce the same output. The repository's
-test suite runs every sample program, and every program in this manual, on each backend that
+test suite runs every sample program, and every program in this documentation, on each backend that
 is built.
 
 ```sh
@@ -162,7 +162,7 @@ The cache is safe to share and to delete:
 - An entry that is missing, damaged or out of date is simply rebuilt (`--verbose` says why).
 - Deleting `.paykan_cache/` costs only a recompile, so add it to your `.gitignore`.
 
-[Modules](../language/06-modules.md#module-files) in the reference describes the module
+[Modules](15-modules.md#module-files) describes the module
 files, the cache and prebuilt modules in detail.
 
 ## Environment variables
@@ -171,10 +171,8 @@ files, the cache and prebuilt modules in detail.
 |----------|--------|
 | `CC` | the C compiler the c backend uses (default `cc`) |
 | `PAYKAN_RUNTIME_DIR` | where to find the runtime (`lib/` and `include/paykan/` under it) |
-| `PAYKAN_STDLIB` | the directory of system imports, `import ::name;`, instead of the installed standard library ([Modules](10-modules.md)) |
+| `PAYKAN_STDLIB` | the directory of system imports, `import ::name;`, instead of the installed standard library ([Modules](15-modules.md)) |
 | `PAYKAN_MODULE_PATH` | `:`-separated directories of prebuilt `.pkm` modules, searched after the `--module-path` directories |
 | `PAYKAN_PLUGIN_PATH` | more directories to load plugins from, separated by `:` |
 | `PAYKAN_NO_PLUGINS` | set to anything but `0`: do not search the plugin directories, like `--no-plugins` |
 | `PAYKAN_TRACK_HEAP` | when set (to any value), a program prints the heap statistics at exit as under `--track-heap`, an executable made by `build` included |
-
-Next: [Extending PaykanLang](14-extending.md).

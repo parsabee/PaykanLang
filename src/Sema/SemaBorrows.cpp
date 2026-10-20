@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Exclusivity of local borrows (docs/language/01-language-basics.md,
+// Exclusivity of local borrows (docs/language/02-basics.md,
 // "Local borrows"): while an `inout` local is live, the variable it names
 // cannot be used except through it, and while a `view` local of a variable
 // is live, the variable cannot change.  A borrow is live from its

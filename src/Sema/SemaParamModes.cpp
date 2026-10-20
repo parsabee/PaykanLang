@@ -1,10 +1,10 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // The rules of `view` and `inout` parameters, of any type
-// (docs/language/02-functions-and-calling.md, "Parameter modes"): overrides,
+// (docs/language/03-functions.md, "Parameter modes"): overrides,
 // and the arguments an `inout` parameter takes, none of them overlapping
 // anything else the call borrows; and of local borrows
-// (docs/language/01-language-basics.md, "Local borrows").  Assignments to a
+// (docs/language/02-basics.md, "Local borrows").  Assignments to a
 // `view` parameter or local are checked with `let` locals'
 // (Sema::checkReassignable).
 

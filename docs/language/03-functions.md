@@ -1,8 +1,47 @@
-# PaykanLang — Functions & Argument Passing
+# Functions
+
+This chapter covers declaring and calling functions: parameters and how each kind of
+argument is passed, the `view` and `inout` parameter modes, return values and borrowed
+results, recursion, and native functions written in C. Using a function as a value (function
+types and lambdas) has its own chapter, [Function types](14-function-types.md).
 
 ---
 
 ## Function Declaration
+
+A function declares its parameters with their types, and its return type after `->`. A
+function without `->` returns nothing (`void`), and may use a bare `return;` to leave early:
+
+```pkn
+import ::io;
+
+fn add(a: int, b: int) -> int {
+  return a + b;
+}
+
+fn greet(name: Str) {
+  if name == "" {
+    return;
+  }
+  io::println("Hello, " + name + "!");
+}
+
+fn main() -> int {
+  greet("Grace");
+  greet("");
+  io::println(Str(add(2, 3)));
+  return 0;
+}
+```
+
+Output:
+
+```
+Hello, Grace!
+5
+```
+
+The general form is:
 
 ```pkn
 fn name(params) -> ReturnType {
@@ -14,14 +53,25 @@ fn name(params) {
 }
 ```
 
-- No function overloading — each name must be unique in the program.
-- Functions may be declared in any order — calling a function that is declared later in the
-  file is fine (forward references are allowed).
+- Functions may be declared in any order: calling a function that is declared later in the
+  file is fine (forward references are allowed), and a function may call itself
+  ([Recursive Functions](#recursive-functions)).
+- No function overloading: each name is declared once in the program (`redefinition of
+  function 'f'`). A function cannot take the name of a builtin type or class (`int`,
+  `float`, `bool`, `char`, `void`, `Str`, `Obj`, the sized numeric types), nor that of a
+  class or enum of the program; see [Builtin Names Are
+  Reserved](02-basics.md#builtin-names-are-reserved). The standard library's names, such as
+  `print` or `open`, are not reserved: they live in their module (`io::print`), and a
+  program may declare its own `fn print`.
 - A function is a value too: `f = square;` holds it, and `fn(x: int) -> int { ... }` is a
-  function without a name (a lambda).  Its type is `(int) -> int`; see
-  `15-function-types.md`.
-- `main` must return `int`; its return value becomes the process exit code. `main` may
-  optionally take the command-line arguments:
+  function without a name (a lambda). Its type is `(int) -> int`; see
+  [Function types](14-function-types.md).
+- `main` must return `int`, and its return value becomes the process exit code. A non-zero
+  status tells the shell that something went wrong, which matters for scripts:
+  `paykan check.pkn && echo ok` prints `ok` only when `main` returned 0. Any other
+  signature is an error (`the program's entry point must be 'fn main() -> int' or 'fn
+  main(args: view Str[]) -> int'`). `main` may optionally take the command-line arguments
+  (see [`::io`](../stdlib/io.md)):
 
 ```pkn
 import ::io;
@@ -43,27 +93,99 @@ Each parameter has the form:
 paramName: TypeName
 ```
 
+How an argument is passed depends on its type, and a [mode](#parameter-modes-view-and-inout)
+can change it. Without a mode, the call passes a copy of a value type and a reference to an
+object or a string:
+
+```pkn
+import ::io;
+
+class P {
+  x: int;
+}
+
+impl P {
+  fn __init__() { self.x = 0; }
+}
+
+fn f(n: int, s: Str, p: P) {
+  n = 5;        // the function's own copy
+  p.x = 7;      // the caller's object
+  p = P();      // the function's own reference, now to another object
+  p.x = 9;
+  s = "other";
+}
+
+fn main() -> int {
+  n = 1;
+  s = "mine";
+  p = P();
+  f(n, s, p);
+  io::println(Str(n) + " " + s + " " + Str(p.x));
+  return 0;
+}
+```
+
+Output:
+
+```
+1 mine 7
+```
+
 ### Builtin type parameters (`i: int`, `f: float`, `b: bool`)
 
-Passed by value — a copy is made at the call site.
+Passed by value — a copy is made at the call site. The same holds for `char` and the
+[sized numeric types](02-basics.md#sized-numeric-types): assigning to the parameter changes
+the function's copy only.
 
 ### Class / Str parameters (`s: Str`, `p: Point`)
 
+Strings and objects are passed by reference: the function receives the same object as its
+caller, so a field it assigns or a method that changes the object is seen by the caller.
 The reference count of the object is incremented on entry and decremented on return.
-The caller's variable is unaffected.
+Assigning to the parameter makes it refer to another object; the caller's variable is
+unaffected. More in [Classes](05-classes.md) and [Memory](16-memory.md).
 
 ### Array parameters (`a: int[3]`, `xs: view int[]`)
 
 A fixed-size array is a value: a plain `a: int[3]` parameter is the function's own copy.
 A `view int[]` or `inout int[]` parameter is a slice, which reaches the caller's array of
-any length in place (see `05-arrays.md`).
+any length in place (see [Slices](09-arrays.md#slices)).
 
 ---
 
 ## Parameter modes: view and inout
 
 A parameter of any type may have a mode, `view` or `inout`, written where the type goes:
-`n: inout int`, `c: view Counter`. A parameter without one is passed as above.
+`n: inout int`, `c: view Counter`. An `inout` parameter is the caller's variable (or a field
+of an object): the function changes it in place, and assigning an object to it gives the
+caller that object. A `view` parameter is read-only: the function cannot assign to it, nor
+change the object, string or array it holds. A parameter without a mode is passed as
+[above](#parameters). The call looks the same either way:
+
+```pkn
+import ::io;
+
+fn addTax(price: inout float, rate: view float) {
+  price = price + price * rate;
+}
+
+fn main() -> int {
+  price = 20.0;
+  addTax(price, 0.5);
+  io::println("price = " + Str(price));
+  return 0;
+}
+```
+
+Output:
+
+```
+price = 30
+```
+
+An `inout` argument is written as just the variable, and a `view` parameter takes any
+argument of its type, a literal included:
 
 ```pkn
 import ::io;
@@ -109,7 +231,7 @@ passed, but the function cannot change it through the parameter: no assignment t
 or an element (`'c' is a 'view' parameter; cannot assign to its field 'n'`), no field or
 element passed to an `inout` parameter, and only a `view fn` can be called on it
 (`toString`, `equals`, `len`, or a method of its class declared `view fn`, see
-[Methods that don't change `self`](04-classes.md#methods-that-dont-change-self); `'c' is a
+[Methods that don't change `self`](05-classes.md#methods-that-dont-change-self); `'c' is a
 'view' parameter; 'tick' is not a 'view fn'`).
 
 ```pkn
@@ -146,7 +268,7 @@ ticks 1
 
 A `view` of a reference -- an object, a string, an optional of one, or an array, tuple or
 struct holding one -- can only be passed on to another `view` parameter, a parameter or a
-[local](01-language-basics.md#local-borrows) alike, so no function it reaches can change or
+[local](02-basics.md#local-borrows) alike, so no function it reaches can change or
 keep what it shares. With `fn keep(c: Counter)` and `v: view = Counter()`, `keep(v)` is an
 error: `'v' is a 'view' local; it can only be passed to a 'view' parameter, and parameter 1
 of 'keep' is not one`. The fix is to make that parameter `view` too. The builtin methods
@@ -321,10 +443,10 @@ accepted, and the callee then sees one storage through both parameters.
   it are checked the same way.
 - A function value's type carries its parameters' modes (`(inout int) -> void`), so a
   mode is always known where a function is called, by name or through a value
-  (`15-function-types.md`).
+  ([Function types](14-function-types.md)).
 
 `view` and `inout` are reserved words. They go where a type goes: a parameter's, a
-[local borrow's](01-language-basics.md#local-borrows), a `match` arm's or a result's
+[local borrow's](02-basics.md#local-borrows), a `match` arm's or a result's
 ([Borrowed results](#borrowed-results)). Written before the name, as in `inout n: int`,
 they are a syntax error that shows the fix: `'inout' goes after the colon, before the
 type: write 'n: inout int'`.
@@ -343,9 +465,12 @@ fn nothing() {
 }
 ```
 
-- Non-void functions must return a value matching the declared return type.
-- `return;` in a non-void function is a compile-time error.
-- Every control-flow path in a non-void function must end with a `return`.
+- Non-void functions must return a value matching the declared return type (`return
+  value of type 'Str' does not match function return type 'int'`).
+- `return;` in a non-void function is a compile-time error (`non-void function must
+  return a value`).
+- The compiler checks that every control-flow path in a non-void function ends with a
+  `return` (`non-void function 'g' does not always return a value`).
 
 ### Borrowed results
 
@@ -406,11 +531,11 @@ hello 4
   as one: `view fn name() -> view Str { return self.name; }`. As a copy it is an error,
   `'self' is read-only in 'view fn name', so part of it can only be returned as a 'view':
   write '-> view Str'` ([Methods that don't change
-  self](04-classes.md#methods-that-dont-change-self)).
+  self](05-classes.md#methods-that-dont-change-self)).
 - A borrowed result borrows what its call borrowed: the receiver and every argument passed
   to a `view` or `inout` parameter. While a `view` local of it (or a `match` arm's
   `n: view T`) is live, those variables cannot change, as for any
-  [local borrow](01-language-basics.md#local-borrows): with `w: view = longer(s, t);`,
+  [local borrow](02-basics.md#local-borrows): with `w: view = longer(s, t);`,
   `t = "bye";` is `'t' is viewed by 'view' local 'w' until 'w' is last used; it cannot be
   assigned`. Both arguments are borrowed, though only one comes back; a value type can be
   copied out instead.
@@ -470,7 +595,8 @@ Output:
   local of it is live, they cannot be used (`'b' is borrowed by 'inout' local 'x' until 'x'
   is last used`).
 - The receiver of a method returning `inout` is a variable or a field, which outlives the
-  call: `Box().num()` is an error.
+  call: `Box().num()` is an error (`the receiver of 'num' must be a variable or a field:
+  its 'inout' result is part of it`).
 
 ---
 
@@ -498,20 +624,38 @@ fn main() -> int {
 }
 ```
 
+Output:
+
+```
+Hello, world!
+100
+```
+
 ---
 
 ## Recursive Functions
 
+A function may call itself, directly or through another function (declaration order does
+not matter, so two functions can call each other):
+
 ```pkn
-fn factorial(n: int) -> int {
-  if n <= 1 { return 1; }
-  return n * factorial(n - 1);
-}
+import ::io;
 
 fn fib(n: int) -> int {
-  if n <= 1 { return n; }
+  if n < 2 { return n; }
   return fib(n - 1) + fib(n - 2);
 }
+
+fn main() -> int {
+  io::println("fib(20) = " + Str(fib(20)));
+  return 0;
+}
+```
+
+Output:
+
+```
+fib(20) = 6765
 ```
 
 ---
@@ -524,6 +668,7 @@ cannot express itself, such as the standard library's file I/O (#198,
 `stdlib/io.pkn`):
 
 ```pkn
+// from: stdlib/io.pkn
 native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
 ```
 
@@ -542,7 +687,7 @@ types cross, with the runtime's own convention:
 |--------|---|-------|
 | `int`, `float`, `bool`, `char` | `int64_t`, `double`, `bool`, `int8_t` | by value, or a `view` |
 | an enum | `int64_t` | its variant's ordinal (`0` for the first), by value: `native fn f(d: Dir) -> Dir` |
-| a sized numeric type (`u8`, `i32`, `unsigned`, `f32`, …) | `int64_t` (an integer, in its canonical sign- or zero-extended form; an `unsigned` as its bits), `double` (a float) | as `int` and `float`: the 8-byte slot of [sized numeric types](01-language-basics.md#sized-numeric-types) |
+| a sized numeric type (`u8`, `i32`, `unsigned`, `f32`, …) | `int64_t` (an integer, in its canonical sign- or zero-extended form; an `unsigned` as its bits), `double` (a float) | as `int` and `float`: the 8-byte slot of [sized numeric types](02-basics.md#sized-numeric-types) |
 | `inout int`, ... | `int64_t *`, `double *`, `bool *`, `int8_t *` | the caller's variable |
 | `view Str`, `view Obj` | `PaykanObject *` | borrowed for the call; the C code must not keep it without a retain |
 | `inout Str`, `inout Obj` | `PaykanShared **` | the caller's box: to replace it, release it and store an owned box (never `NULL`) |
@@ -632,16 +777,18 @@ the C library and the runtime functions compiled code uses
 |-------|---------|
 | Undeclared function | Calling a function that is not declared anywhere in the program |
 | Function redefinition | Two functions with the same name |
-| Builtin name reused | A function named like a builtin class or type (`fn Str()`, `fn float(...)`) — see *Builtin Names Are Reserved* in `01-language-basics.md` |
+| Builtin name reused | A function named like a builtin class or type (`fn Str()`, `fn float(...)`) — see [Builtin Names Are Reserved](02-basics.md#builtin-names-are-reserved) |
 | Class / enum name reused | A function named like a class (its constructor) or an enum declared in the same program |
 | Argument count mismatch | Wrong number of arguments |
 | Argument type mismatch | Argument type incompatible with parameter type |
 | Non-void return without value | `return;` in non-void function |
 | Return type mismatch | Returned expression type ≠ declared return type |
+| Missing return | A path through a non-void function that does not end in a `return` |
+| Bad entry point | `main` that does not return `int`, or takes anything but `args: view Str[]` |
 | Write to a `view` parameter | Assigning or destructuring into it |
 | A `view` changed, passed on or kept | Writing a field or element of what it holds, calling a method on it that is not a `view fn`, passing it to a parameter that is not `view`, or storing or returning one that shares what it holds |
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |
 | Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout`, or returns a borrow where the method it overrides returns a copy (or the other way) |
 | A `view` result of something else | A `-> view T` function returns a new value, a copy parameter or a local, not part of `self` or of a `view` / `inout` parameter |
 | An `inout` result of something else | A `-> inout T` function returns what an `inout` argument could not be, or what is not part of `self` or of an `inout` parameter, or another type; a `view fn` returns `inout`; the receiver of a method returning `inout` is not a variable or a field |
-| A function value misused | A builtin, a constructor, a generic function or a function returning a borrow used as a value; a call through a variable that is not a function; wrong arguments to a function value; a lambda capturing a borrow or assigning a captured name (see `15-function-types.md`) |
+| A function value misused | A builtin, a constructor, a generic function or a function returning a borrow used as a value; a call through a variable that is not a function; wrong arguments to a function value; a lambda capturing a borrow or assigning a captured name (see [Function types](14-function-types.md)) |

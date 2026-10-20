@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Semantic analysis: function values (docs/language/15-function-types.md).
+// Semantic analysis: function values (docs/language/14-function-types.md).
 // A lambda `fn(x: int) -> int { ... }` is checked as a function body is,
 // in a scope of its own whose parent is the scope it is written in: a name
 // used inside that is bound outside is captured, by copy, and declared in

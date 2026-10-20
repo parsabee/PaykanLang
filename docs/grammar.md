@@ -168,7 +168,7 @@ varDecl     ::= IDENT ":" typeAnnotation
 An enum needs at least one variant; a single trailing comma is permitted.
 A struct body holds fields only, at least one: a method goes in an `impl`
 block, and a struct has no superclass
-([language/14-structs.md](language/14-structs.md)); both are syntax errors
+([language/11-structs.md](language/11-structs.md)); both are syntax errors
 (`a struct body holds fields only ('name: Type;'); a method goes in an 'impl'
 block`, `a struct has no superclass`), and so is an empty body (`struct 'S'
 has no fields: a struct has at least one`).
@@ -180,11 +180,11 @@ argument must implement.  `impl Show for A` implements trait `Show` for `A`;
 The `impl` block of a generic type names its type parameters: `impl Box<T>`.
 A trait's methods are signatures that end with `;`.
 Methods are `funcDecl`s inside a class body.  `view fn` marks a method that
-does not change `self` ([language/04-classes.md](language/04-classes.md));
+does not change `self` ([language/05-classes.md](language/05-classes.md));
 on a free function it is a semantic error, not a syntax error.
 
 A parameter's type may start with its mode, `view` or `inout`
-([language/02-functions-and-calling.md](language/02-functions-and-calling.md)):
+([language/03-functions.md](language/03-functions.md)):
 `fn bump(n: inout int)`, `fn __init__(start: view int)`.  The keywords are
 reserved: besides a parameter's type, they only start a result's type
 (`-> view T`), a function type's parameter (`paramType`, below), a local
@@ -212,7 +212,7 @@ paramType      ::= ( "view" | "inout" )? typeAnnotation
 typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
 ```
 
-- `(int, view Str) -> bool` is a function type (docs/language/15-function-types.md):
+- `(int, view Str) -> bool` is a function type (docs/language/14-function-types.md):
   the `->` after the `)` tells it from a tuple type, so a tuple type's elements have
   no mode (`a tuple element has no mode`).  `() -> int` takes no parameter; the result
   may be `void`, never `view` or `inout`.  `->` is right-associative, and a function
@@ -230,7 +230,7 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   only in a variable declaration with one.
 - `T[]` parses wherever a type does, but it is only the spelling of a
   `view` or `inout` parameter's slice
-  ([language/05-arrays.md](language/05-arrays.md#slices)): Sema rejects it
+  ([language/09-arrays.md](language/09-arrays.md#slices)): Sema rejects it
   anywhere else (`variable 'x' has type 'int[]': a slice can only be a 'view'
   or 'inout' parameter, and an array has a length ('int[3]')`).
 - `T?` is rejected at parse time when `T` is `void` (`optional type 'void?'
@@ -383,7 +383,7 @@ argumentList ::= expression ( "," expression )*
 ```
 
 A lambda is a function without a name, in expression position
-(docs/language/15-function-types.md): `fn(x: int) -> int { return x + 1; }`.
+(docs/language/14-function-types.md): `fn(x: int) -> int { return x + 1; }`.
 Its parameters are written like a function's, modes included, its result type
 is written or `void`, never `view` or `inout`, and its body is a block.
 
@@ -437,7 +437,7 @@ way, with the same AST.
 ### Conversion constructors
 
 A conversion `Target<Source>(value)` (`Str<int>(n)`, `int<float>(f)`,
-`int<Str>(s)`, ..., see [`language/01-language-basics.md`](language/01-language-basics.md)) is not
+`int<Str>(s)`, ..., see [`language/02-basics.md`](language/02-basics.md)) is not
 a separate production: it is the generic-call form above. The builtin type
 names `int`, `float`, `bool`, `char`, `void` and the sized numeric types
 (`u8`, `i32`, `unsigned`, `f32`, ...) are ordinary `IDENT`s (they are

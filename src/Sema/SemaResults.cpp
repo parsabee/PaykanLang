@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Borrowed results (docs/language/02-functions-and-calling.md, "Borrowed
+// Borrowed results (docs/language/03-functions.md, "Borrowed
 // results"): `-> view T` returns a borrow of what the function was given as
 // one, `self` or a `view` / `inout` parameter, never a new value, and
 // `-> inout T` the storage of part of `self` or of an `inout` parameter.  A

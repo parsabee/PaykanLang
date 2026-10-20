@@ -1,34 +1,86 @@
-# PaykanLang — Modules
+# Modules and imports
 
-Every `.pkn` source file is a **module**. The file path (relative to the source root, with `/`
-replaced by `::` and the `.pkn` extension dropped) is the module's canonical name.
+Programs are split into **modules**, and in PaykanLang every `.pkn` source file is a
+module. This chapter explains how imports work and what a module exposes, splits `tasks`
+into a small multi-file project, and then describes the compiled module files (`.pkm`) and
+the compilation cache.
 
----
+## Files are modules
 
-## Quick Summary
+A module's name is its path relative to the **source root**, the directory that holds the
+main file (the one you pass to `paykan`), with `/` written as `::` and the `.pkn` dropped.
+That name is the module's canonical name. In this project:
 
-- `import modulePath;` — bring all public declarations into scope.
-- `import modulePath as Alias;` — bring declarations in under `Alias::name`.
-- `import base::{a, b as c};` — import several modules of one directory at once.
-- `import ::modulePath;` — a system import, looked up in the standard-library directory
-  instead of the source root (see [the standard library](13-standard-library.md)).
-- Module paths use `::` as a separator, mirroring directory structure.
-- There is no `export` keyword. Everything declared at the top level of a module is
-  importable, except a name that starts with `_`, which is
-  [private to the module](#private-to-the-module).
-- Imports are non-transitive: importing `A` does not automatically import what `A` imports.
-  Values of a type that `A` only reached through its own imports can still flow through `A`'s
-  signatures; naming that type requires importing its defining module (see
-  [Non-Transitivity](#non-transitivity)).
-- Type names are global across a program's import graph: two modules in the same graph cannot
-  declare different classes, structs or enums under one name.
-- Function names are not: every module (the main file included) may define its own `tag`,
-  `new` or `helper`, and `x::tag()`, `y::tag()` and a local `tag()` each call their own
-  module's function. One qualifier names one module: two imports cannot both bind `util`.
+```text
+project/
+├── main.pkn            the main file; project/ is the source root
+└── geometry/
+    ├── shapes.pkn      module geometry::shapes
+    └── units.pkn       module geometry::units
+```
 
----
+`main.pkn` imports a module with `import geometry::shapes;` and then refers to what the
+module declares through its last name segment: `shapes::Circle`, `shapes::area(...)`.
+Here are the two files. The comment on the first line of each is not part of the language;
+it only tells you (and the test suite) where the file lives:
+
+```pkn
+// file: geometry/shapes.pkn
+class Circle {
+  r: float;
+}
+
+impl Circle {
+  fn __init__(r: float) { self.r = r; }
+}
+
+enum Kind { Round, Square }
+
+fn area(c: Circle) -> float {
+  return 3.14159 * c.r * c.r;
+}
+```
+
+```pkn
+// file: main.pkn
+import ::io;
+import geometry::shapes;
+
+fn main() -> int {
+  c: shapes::Circle = shapes::Circle(2.0);
+  k = shapes::Kind::Round;
+  io::println("area " + Str(shapes::area(c)));
+  io::println(Str(k == shapes::Kind::Round));
+  return 0;
+}
+```
+
+Output:
+
+```
+area 12.5664
+True
+```
+
+- Everything declared at the top level of a module (functions, classes, structs and enums)
+  can be imported, except the names starting with `_`, which are the module's own. There is
+  no `export` keyword (see [What Can Be Imported](#what-can-be-imported)).
+- Imported names are always qualified: a type is `shapes::Circle`, a variant is
+  `shapes::Kind::Round`. Your own module's names stay unqualified.
+- Import paths always start from the source root, also inside the modules in
+  subdirectories: `geometry/units.pkn` imports its sibling as `import geometry::shapes;`.
+- A leading `::` (`import ::io;`) imports a module of the standard library instead
+  ([System Imports](#system-imports)).
 
 ## Import Forms
+
+```text
+import geometry::shapes;              // qualifier: shapes
+import geometry::shapes as geo;       // qualifier: geo
+import geometry::{shapes, units};     // two modules of one directory
+import geometry::{shapes as s, units};
+import ::collections;                 // a system import, from the standard library
+```
 
 ### Plain Import
 
@@ -38,7 +90,8 @@ import utils::math;
 result: int = math::add(3, 4);
 ```
 
-All names from `utils/math.pkn` are accessible as `math::name`.
+All names from `utils/math.pkn` are accessible as `math::name`, the module path's last
+segment.
 
 ### Aliased Import
 
@@ -48,10 +101,11 @@ import utils::math as M;
 result: int = M::add(3, 4);
 ```
 
-Useful for shortening long module paths or avoiding name collisions. A qualifier (an alias, a
-plain import's last path segment, or a full module path) names exactly one module, so
-`import a::util; import b::util;` is an error; write `import b::util as bu;` instead. Importing
-the same module under a second qualifier is fine.
+An **alias** replaces the qualifier. It is useful for shortening long module paths, and
+required when two modules would otherwise share one: a qualifier (an alias, a plain
+import's last path segment, or a full module path) names exactly one module, so
+`import a::util; import b::util;` is an error; write `import b::util as bu;` instead.
+Importing the same module under a second qualifier is fine.
 
 ### Selective Import
 
@@ -80,8 +134,6 @@ import graphics::shapes::polygon;
 p: polygon::Polygon = polygon::Polygon(5, 10.0);
 ```
 
----
-
 ## Module Path Resolution
 
 Given `import a::b::c`, the compiler looks for:
@@ -91,9 +143,9 @@ Given `import a::b::c`, the compiler looks for:
    `a/b/c.pkm` under each `--module-path=<dir>` directory and each directory of
    `$PAYKAN_MODULE_PATH` (see [Module Files](#module-files)).
 
-The source root is the directory containing the main file passed to the compiler driver. There
-is no package registry, and an ordinary import never searches beyond the source root and the
-module path.
+The source root is the directory containing the main file passed to the compiler driver. Imports
+are resolved when the program is compiled; there is no package registry, and an ordinary import
+never searches beyond the source root and the module path.
 
 ### System Imports
 
@@ -105,12 +157,13 @@ library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable
 ordinary module, and it is cached under `.paykan_cache/@system/` (see
 [Module Files](#module-files)).
 
-The standard library ships with the compiler: `::io`, `::result`, `::collections`,
-`::memory` and `::math` (see [the standard library](13-standard-library.md)). Printing and files are
-`::io`, so a program that prints imports it (`import ::io;`, then `io::println(...)`). Only
-the builtins (`Obj`, `Str` and the conversions, the primitive types) need no import.
-
----
+The standard library ships with the compiler (see [the standard library](../stdlib/index.md)):
+`::io` prints, reads and writes files; `::result` holds the errors that library functions
+report; `::collections` has lists, linked lists, stacks, queues, hash maps, hash sets and
+priority queues; `::math` has the mathematical functions (`math::sqrt`, `math::pi()`, …);
+and `::memory` has `Buffer<T>` and `Box<T>`. Printing is `::io`, so a program that prints
+imports it (`import ::io;`, then `io::println(...)`). Only the builtins (`Obj`, `Str` and
+the conversions such as `Str(n)` and `int(s)`, the primitive types) need no import.
 
 ## What Can Be Imported
 
@@ -119,7 +172,7 @@ declarations. There is no explicit `export` keyword: everything declared at the 
 level is importable under the chosen qualifier or alias, except the names that start with an
 underscore, which are [private to the module](#private-to-the-module). A module's **traits**
 are not exported yet: an importer cannot name `m::Trait` in a bound or an `impl ... for`
-(`unknown trait 'm::Trait'`; see [Traits](12-traits.md#not-supported-yet)).
+(`unknown trait 'm::Trait'`; see [Traits](06-traits.md#not-supported-yet)).
 
 An imported enum is named like any other qualified type. Use `mod::Enum` (or `Alias::Enum`, or
 the full `path::to::mod::Enum`) wherever a type is expected, and `mod::Enum::Variant` to name a
@@ -141,6 +194,17 @@ fn main() -> int {
 }
 ```
 
+**Function names are per module.** Every module (the main file included) may define its own
+`tag`, `new` or `helper`, and `x::tag()`, `y::tag()` and a local `tag()` each call their own
+module's function. Type names, on the other hand, are global across the program
+([Non-Transitivity](#non-transitivity)).
+
+**Generics.** A module's generic classes and functions are imported with the rest of it:
+`shapes::Box<int>(7)`, `b: shapes::Box<Str>`, `shapes::first(xs)`. Their bodies use what
+`shapes` declares and imports, whatever your module calls those names, and a `Box<int>` is
+one class however many modules use it, so the values pass freely between them (see
+[Generics](13-generics.md#modules)).
+
 ### Private to the module
 
 A top-level function, class, struct, enum or trait whose name starts with one underscore
@@ -154,9 +218,9 @@ initializer written `___init__` is the module's too: only the module's code cons
 type, or extends it (`'m::T' cannot be constructed here: its initializer '___init__' is
 private to module 'm'`, and `'T' cannot be extended here: ...` for a subclass's
 `__super__(...)`); an importer makes one through the module's functions
-([Classes](04-classes.md#private-fields-and-methods)). Two
+([Classes](05-classes.md#private-fields-and-methods)). Two
 underscores (`__count`) are for a member private to its own class or struct
-([Classes](04-classes.md#private-fields-and-methods)), and a top-level declaration cannot
+([Classes](05-classes.md#private-fields-and-methods)), and a top-level declaration cannot
 have them. A generic class or function the module exports may use its private names in its
 bodies; an importer that instantiates it still runs that code, it just cannot write the
 names.
@@ -167,15 +231,13 @@ public class or struct that names a private type is an error in the declaring mo
 (`'make' is public but its result names the private type '_Node'; make the function private
 or the type public`). A private function, a private field or method, and the members of a
 private type may name private types freely. The design, with the alternatives considered, is
-in `docs/design/visibility.md`.
-
----
+in [`docs/design/visibility.md`](../design/visibility.md).
 
 ## Non-Transitivity
 
-If module `B` imports module `A`, and module `C` imports module `B`, then `C` does **not**
-automatically have access to what `A` exported. `C` must import `A` directly if it needs
-`A`'s declarations.
+**Imports are not transitive.** If module `B` imports module `A`, and module `C` imports
+module `B`, then `C` does **not** automatically have access to what `A` exported. `C` must
+import `A` directly if it needs `A`'s declarations.
 
 Precisely, importing `B` brings in **names** only for what `B` itself declares
 (`B::fn`, `B::Class`, `B::Enum`). Nothing `B` imported is re-exported under `B`'s qualifier:
@@ -189,11 +251,12 @@ What `C` cannot do without importing `A` is *spell* the type: `t = w.get()` is f
 `t: B::Thing = w.get()` is not. Once `C` imports `A` (in any order relative to `B`),
 `A::Thing` names the very same type that `B`'s signatures use.
 
-Because each type is rebuilt once per importing file, keyed by its declared name, type names
-are global across the import graph: if two modules reachable from one file both declare a
-class (or struct, or enum) called `Node`, importing them is an error naming both modules. A
-file also cannot declare a class, struct or enum with the same name as a type reached
-through any of its imports.
+**Type names are global.** Because each type is rebuilt once per importing file, keyed by its
+declared name, type names are global across the import graph (the main file and everything
+it imports, directly or not): if two modules reachable from one file both declare a class
+(or struct, or enum) called `Node`, importing them is an error naming both modules. A file
+also cannot declare a class, struct or enum with the same name as a type reached through any
+of its imports.
 
 ```pkn
 // file: geometry/point.pkn
@@ -228,14 +291,210 @@ fn main() -> int {
 }
 ```
 
----
-
 ## Circular Imports
 
-Circular imports (`A` imports `B` and `B` imports `A`) are **not supported** and will result
-in a compilation error.
+Circular imports are **not supported**: if `a` imports `b`, `b` cannot import `a`, directly
+or through other modules, and such a cycle is a compile-time error. Move what both need into
+a third module.
 
----
+## Project: `tasks` as a multi-file program
+
+`tasks` has outgrown a single file. It now has this layout:
+
+```text
+tasks/
+├── main.pkn          command handling
+└── tasks/
+    ├── task.pkn      the Priority enum and the Task class
+    ├── text.pkn      string helpers
+    └── list.pkn      TaskList
+```
+
+`tasks/task.pkn` holds the data model:
+
+```pkn
+// file: tasks/task.pkn
+enum Priority { Low, Normal, High }
+
+fn priorityName(p: Priority) -> Str {
+  match p {
+    Low    { return "low"; }
+    Normal { return "normal"; }
+    High   { return "high"; }
+  }
+}
+
+fn parsePriority(word: Str) -> Priority {
+  match word {
+    "low"  { return Priority::Low; }
+    "high" { return Priority::High; }
+    _      { return Priority::Normal; }
+  }
+}
+
+class Task {
+  title: Str;
+  done: bool;
+  priority: Priority;
+
+  view fn toString() -> Str {
+    box = if self.done then "[x] " else "[ ] ";
+    marker = if self.priority == Priority::High then " !" else "";
+    return box + self.title + marker;
+  }
+}
+
+impl Task {
+  fn __init__(title: Str, priority: Priority) {
+    self.title = title;
+    self.done = False;
+    self.priority = priority;
+  }
+}
+```
+
+`tasks/text.pkn` collects the string helpers from earlier chapters:
+
+```pkn
+// file: tasks/text.pkn
+fn isSpace(c: char) -> bool {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+fn slice(s: Str, from: int, to: int) -> Str {
+  out = "";
+  i = from;
+  while i < to {
+    out = out + Str(s[i]);
+    i = i + 1;
+  }
+  return out;
+}
+
+fn trim(s: Str) -> Str {
+  start = 0;
+  end = s.len();
+  while start < end && isSpace(s[start]) { start = start + 1; }
+  while end > start && isSpace(s[end - 1]) { end = end - 1; }
+  return slice(s, start, end);
+}
+
+// Splits at the first `sep`: (s, "") when there is none.
+fn splitOnce(s: Str, sep: char) -> (Str, Str) {
+  i = 0;
+  while i < s.len() && s[i] != sep { i = i + 1; }
+  if i == s.len() { return (s, ""); }
+  return (slice(s, 0, i), slice(s, i + 1, s.len()));
+}
+```
+
+`tasks/list.pkn` imports `tasks::task`, so it names the class `task::Task`:
+
+```pkn
+// file: tasks/list.pkn
+import ::io;
+import tasks::task;
+
+class TaskList {
+  tasks: task::Task[8];   // room for eight tasks
+  count: int;             // tasks[0] to tasks[count - 1] are in use
+
+  // Adds a task; False if the list is full.
+  fn add(title: Str, priority: task::Priority) -> bool {
+    if self.count == self.tasks.len() { return False; }
+    self.tasks[self.count] = task::Task(title, priority);
+    self.count = self.count + 1;
+    return True;
+  }
+
+  fn complete(n: int) -> bool {
+    if n < 1 || n > self.count { return False; }
+    self.tasks[n - 1].done = True;
+    return True;
+  }
+
+  view fn pending() -> int {
+    count = 0;
+    i = 0;
+    while i < self.count {
+      if !self.tasks[i].done { count = count + 1; }
+      i = i + 1;
+    }
+    return count;
+  }
+
+  view fn show() {
+    i = 0;
+    while i < self.count {
+      io::println(Str(i + 1) + ". " + self.tasks[i].toString());
+      i = i + 1;
+    }
+    io::println(Str(self.pending()) + " of " + Str(self.count) + " to do");
+  }
+}
+
+impl TaskList {
+  fn __init__() {
+    self.tasks = [task::Task("", task::Priority::Normal); 8];
+    self.count = 0;
+  }
+}
+```
+
+Finally `main.pkn` imports all three, the list module under the alias `tl`. It runs a few
+commands of the form `add <title>|<priority>` and `done <number>`; in [`::io`](../stdlib/io.md) they
+come from the command line and standard input instead:
+
+```pkn
+// file: main.pkn
+import ::io;
+import tasks::{task, text, list as tl};
+
+fn run(tasks: tl::TaskList, line: Str) {
+  command, rest = text::splitOnce(text::trim(line), ' ');
+  match command {
+    "add" {
+      title, priority = text::splitOnce(rest, '|');
+      if !tasks.add(title, task::parsePriority(priority)) { io::println("the list is full"); }
+    }
+    "done" {
+      match int(rest) {
+        n: int { if !tasks.complete(n) { io::println("no task " + rest); } }
+        None   { io::println("not a task number: " + rest); }
+      }
+    }
+    "list" { tasks.show(); }
+    _      { io::println("unknown command: " + command); }
+  }
+}
+
+fn main() -> int {
+  tasks = tl::TaskList();
+  script = ["add buy milk", "add fix the leak|high", "add call mum|low",
+            "done 1", "done 9", "list"];
+  i = 0;
+  while i < script.len() {
+    run(tasks, script[i]);
+    i = i + 1;
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+no task 9
+1. [x] buy milk
+2. [ ] fix the leak !
+3. [ ] call mum
+2 of 3 to do
+```
+
+Run it from anywhere by naming the main file: `paykan tasks/main.pkn`. The source root is
+always the main file's directory, and the compiled modules are cached in
+`tasks/.paykan_cache/`, so after a change only the modules affected by it are recompiled
+([The compilation cache](#the-compilation-cache)).
 
 ## Module Files
 
@@ -247,7 +506,7 @@ hash of every module it imports. The file carries no backend-specific code, no p
 timestamps: the same source always produces the same bytes, and one file serves the c
 backend and the llvm backend alike. `paykan pkm dump <file>` prints a file,
 `paykan pkm check <file>` says whether this `paykan` can use it, and `paykan --emit-pkm`
-writes one ([The `paykan` command](../manual/13-the-paykan-command.md)).
+writes one ([The `paykan` command](17-the-paykan-command.md)).
 
 Module files reach a program in two ways.
 
@@ -260,7 +519,7 @@ not depend on the directory the compiler is launched from, so `paykan proj/main.
 `cd proj && paykan main.pkn` share one cache. The main file is never cached. Nor is a module
 that declares generic classes or functions, instantiates another module's, or uses such an
 instantiation: a `.pkm` does not hold templates yet, so that module is built from its source
-every time ([Generics](11-generics.md#modules)). Every module of the standard library is one
+every time ([Generics](13-generics.md#modules)). Every module of the standard library is one
 of these.
 
 - **Validity.** An entry is used only when it was written by this very `paykan` (its version,
@@ -281,7 +540,8 @@ of these.
   module files (the llvm backend's `a/b/c.bc`; the c backend's `c.<hash>.c`, `.o` and `.key`,
   one set per key, and the main file's too), validated by their own keys and shared between
   concurrent builds. They are the native translation of the PIR a module file
-  holds; a later release folds them into the module file.
+  holds; a later release folds them into the module file. The cache options are summed up in
+  [The `paykan` command](17-the-paykan-command.md#the-compilation-cache).
 
 ### Prebuilt modules
 
@@ -297,8 +557,6 @@ A prebuilt file is used only when this `paykan` can: a file written by another r
 against another interface of a module it imports, is an error naming what differs
 (`module 'a::b' (lib/a/b.pkm) was written by another paykan release: format 0.3.0; this
 paykan reads 0.2.0. Rebuild it from source.`), never a silent mismatch.
-
----
 
 ## Semantic Checks
 

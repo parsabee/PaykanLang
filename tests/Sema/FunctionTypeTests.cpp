@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: function types and lambdas (docs/language/15-function-types.md)
+// Sema tests: function types and lambdas (docs/language/14-function-types.md)
 // -- function types in every type position, named functions and lambdas as
 // values, calls through variables, fields and other expressions, captures
 // and their rules, the modes of a function type's parameters, and what is

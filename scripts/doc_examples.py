@@ -42,10 +42,10 @@ Two more kinds of block make multi-file and error examples testable:
   other lines must appear in that file verbatim and in order; a line reading
   `// ...` (indented or not) separates pieces that need not be adjacent.
 
-In the files under docs/manual/ and in docs/index.md every ```pkn block must
-be one of these (an example with `Output:` or `Error:`, a module an example
-uses, or an excerpt), so the manual has no untested code.  Elsewhere a ```pkn block that is
-none of them (a fragment) is skipped.
+In docs/index.md every ```pkn block must be one of these (an example with
+`Output:` or `Error:`, a module an example uses, or an excerpt), so the home
+page has no untested code.  Elsewhere a ```pkn block that is none of them (a
+fragment, such as a grammar form or part of a program) is skipped.
 
 Usage:
     doc_examples.py --paykan build/bin/paykan [--backend c ...] [file.md ...]
@@ -74,7 +74,7 @@ FROM_RE = re.compile(r"^//\s*from:\s*(\S+)\s*$")
 ELLIPSIS = "// ..."
 
 # Markdown files in which every ```pkn block must be tested.
-STRICT = ("docs/manual/", "docs/index.md")
+STRICT = ("docs/index.md",)
 
 
 class Example:
@@ -293,7 +293,7 @@ def main():
         if rel.startswith(STRICT):
             for lineno in untested:
                 failures += 1
-                print(f"FAIL {rel}:{lineno}: a pkn block in the manual that "
+                print(f"FAIL {rel}:{lineno}: a pkn block that "
                       "is not tested: make it an example (Output: or "
                       "Error:), a module an example imports (// file:) "
                       "or an excerpt (// from:)")

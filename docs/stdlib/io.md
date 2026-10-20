@@ -1,17 +1,55 @@
-# Files and I/O
+# `::io`
 
-Programs talk to the world through files, command-line arguments, standard input and
-standard error. This chapter covers each, and finishes `tasks`: it now keeps its tasks in a
-file and takes commands from the command line.
+Printing, files, the standard input and standard error. Printing is not built into the
+language: a program that prints imports the module (`import ::io;`, by convention without
+an alias) and calls `io::println(...)`. Opening and reading a file can fail, and `::io`
+reports that as a [`::result`](result.md) value, so a program that looks at the errors
+imports `::result` too (`import ::result as res;`). This page teaches files, the standard
+streams and the command-line arguments, finishes the `tasks` project, and then documents
+[every function and method](#api) of the module.
+
+```pkn
+import ::io;
+import ::result as res;
+
+struct Point { x: int; y: int; }
+
+fn main() -> int {
+  io::println(42);
+  io::println((1, "one"));
+  io::println(Point(3, 4));
+  n: int? = None;
+  io::println(n);
+  io::print("no newline, ");
+  io::println(True);
+  r = io::open("/no/such/dir/file.txt", "r");
+  io::println(r.isOk());
+  io::println(res::name(r.error.code) + ": " + r.error.message());
+  return 0;
+}
+```
+
+Output:
+
+```
+42
+(1, one)
+Point(x: 3, y: 4)
+None
+no newline, True
+False
+NotFound: No such file or directory
+```
+
+---
 
 ## Opening files
 
-Files, like printing, come from the standard library's `::io` module. `io::open(path, mode)`
-opens a file. The mode is `"r"` to read, `"w"` to write (creating the file, or emptying an
-existing one) or `"a"` to append. Opening can fail, so `open` returns a **result**: a
-`Result<io::File>` from the `::result` module, holding an `error` and a `value`. The value is
-an `io::File?`, the file when the open succeeded and `None` when it did not, and you tell the
-two apart with `match`:
+`io::open(path, mode)` opens a file. The mode is `"r"` to read, `"w"` to write (creating the
+file, or emptying an existing one) or `"a"` to append. Opening can fail, so `open` returns a
+**result**: a `Result<io::File>` from the `::result` module, holding an `error` and a
+`value`. The value is an `io::File?`, the file when the open succeeded and `None` when it did
+not, and you tell the two apart with `match`:
 
 ```pkn
 import ::io;
@@ -180,7 +218,7 @@ output when it is redirected to a file or a pipe.
 ## Command-line arguments
 
 To receive its command-line arguments, `main` takes a `view Str[]`, a slice of the
-arguments (see [Arrays](06-arrays.md#arrays-are-values)):
+arguments (see [Arrays](../language/09-arrays.md#arrays-are-values)):
 
 ```pkn
 import ::io;
@@ -229,9 +267,9 @@ and loads it back. Each task is one line, `<done>|<priority>|<title>`:
 
 `main.pkn` now reads its command from the command line: `add <title> [high|low]`,
 `done <number>` or `list`. It loads `tasks.txt`, runs the command, and saves the list when
-the command changed it. The modules `task`, `text` and `list` are the ones from the
-[last chapter](10-modules.md#project-tasks-as-a-multi-file-program), with one addition to
-`TaskList`: `addTask`, for adding an existing `Task` while loading.
+the command changed it. The modules `task`, `text` and `list` are the ones from
+[Modules](../language/15-modules.md#project-tasks-as-a-multi-file-program), with one
+addition to `TaskList`: `addTask`, for adding an existing `Task` while loading.
 
 <details markdown="block">
 <summary>The modules <code>task</code>, <code>text</code> and <code>list</code></summary>
@@ -527,7 +565,161 @@ $ cat tasks.txt
 
 Build it once with `paykan build main.pkn -o tasks` and you have a `tasks` command to put on
 your `PATH`. (It saves `tasks.txt` in the directory you run it from.)
+[Memory](../language/16-memory.md) looks at what happens to all these objects.
 
-The reference covers `::io` and `::result` in [the standard
-library](../language/13-standard-library.md). Next: [Memory](12-memory.md),
-which looks at what happens to all these objects.
+---
+
+## API
+
+The module declares four print functions, two functions that make a `File`, and the class
+`File`. Every other name in `stdlib/io.pkn` starts with `_` and is the module's own.
+
+### Printing
+
+#### `print`
+
+```pkn
+fn print<T: Show>(value: view T)
+```
+
+Writes `value.toString()` to standard output, with no newline after it.
+
+#### `println`
+
+```pkn
+fn println<T: Show>(value: view T)
+```
+
+Writes `value.toString()` and a newline to standard output.
+
+#### `printerr`
+
+```pkn
+fn printerr<T: Show>(value: view T)
+```
+
+Writes `value.toString()` to standard error, with no newline after it.
+
+#### `printerrln`
+
+```pkn
+fn printerrln<T: Show>(value: view T)
+```
+
+Writes `value.toString()` and a newline to standard error.
+
+Each print function takes exactly one value of any type that implements
+[`Show`](../language/06-traits.md): an object (every class, `Str`), a number of any size, a
+`bool`, a `char`, a tuple, a struct, or an optional of one, which prints `None` when it is
+absent. A function value is not `Show` (`'() -> int' does not implement trait 'Show',
+which 'io::println' requires of 'T'`). Paykan has no variadic functions or overloading, so
+several pieces are joined into one `Str` with `+` first (`io::println("n = " + Str(n))`).
+The value is a `view`: a temporary, or a borrowed `view` parameter, prints without being
+copied.
+
+The print functions report no errors. Standard output is flushed before a
+[panic](index.md#quick-summary), so output printed before one is never lost, and comes
+ahead of the panic's message when both go to the same file or pipe.
+
+### Files
+
+#### `open`
+
+```pkn
+fn open(path: view Str, mode: view Str) -> res::Result<File>
+```
+
+Opens the file at `path` with C's `fopen` and the mode `mode`: `"r"` to read, `"w"` to
+write (creating the file, or emptying it), `"a"` to append, and C's other modes (`"r+"`,
+`"w+"`, `"a+"`, ...). A relative `path` is relative to the current
+directory of the process. The result's `value` is the `File`, or `None` when the file could
+not be opened; then its `error` has the code of C's `errno` and C's `strerror` text as its
+message: `NotFound` (`No such file or directory`), `PermissionDenied`, `IsADirectory` (a
+directory opened to write), `InvalidArgument` (a mode `fopen` does not take), and the rest
+of [the mapping](result.md#errorcode). Opening a directory to read succeeds on Linux; its
+reads then fail with `IsADirectory`.
+
+#### `stdin`
+
+```pkn
+fn stdin() -> File
+```
+
+The process's standard input. It cannot fail, and it is never closed: every call returns a
+`File` for the same stream, and it stays open when the `File`s go. Writing to it fails with
+`InvalidArgument` (`Bad file descriptor`).
+
+#### `File`
+
+```pkn
+class File { ... }
+```
+
+An open file, made by `open` or `stdin`. A program does not construct one: its initializer
+is `___init__`, private to `::io` (`io::File(...)` is `'io::File' cannot be constructed
+here: its initializer '___init__' is private to module '::io'`). A `File` is an object, so
+assigning one shares it, and the file is closed when the last reference to it goes; there
+is no `close`. Its `toString()` is `File@0x...`, and two `File`s are `==` when they are the
+same object (`io::stdin() == io::stdin()` is `False`: each call makes a new `File`). Every
+method is a `view fn`, so it can be called through a `view` parameter, and each reports
+failure through `::result`.
+
+#### `File.write`
+
+```pkn
+view fn write(s: view Str) -> res::Error
+```
+
+Writes `s` to the file. The error is `Ok` when it wrote, `InvalidArgument` (`Bad file
+descriptor`) when the file is not open for writing (`stdin()`, a file opened with `"r"`).
+
+#### `File.readln`
+
+```pkn
+view fn readln() -> res::Result<Str>
+```
+
+The next line, with its `\n` when it has one (the last line of a file may not).
+
+#### `File.readbytes`
+
+```pkn
+view fn readbytes(n: int) -> res::Result<Str>
+```
+
+The next `n` bytes, or fewer at the end of the file. `InvalidArgument` when `n` is not
+positive.
+
+#### `File.read`
+
+```pkn
+view fn read() -> res::Result<Str>
+```
+
+Everything that is left of the file.
+
+#### End of file, failed reads and buffering
+
+A read that finds nothing left fails with `EndOfFile` (its `value` is `None`), so a read
+never returns an empty `Str`: `read()` of an empty file, or of one already read to the end,
+is `EndOfFile` too. A read that the operating system fails has the code of its `errno`
+(`IsADirectory` for a directory, `Io`, ...). Reading a file opened only to write fails with
+`InvalidArgument` (`Bad file descriptor`), as writing to one opened only to read does.
+
+Writes are buffered by the C library: what `write` reports is whether the data was taken,
+and the data is on disk once the file is closed. An error the operating system reports only
+then, when the buffer is written out (a full disk, say), is not reported to the program.
+
+#### Errors at a glance
+
+| Situation | Code |
+|-----------|------|
+| `open` of a path that does not exist | `NotFound` |
+| `open` without the permission | `PermissionDenied` |
+| `open` of a directory to write | `IsADirectory` |
+| `open` with a mode `fopen` rejects | `InvalidArgument` |
+| a read with nothing left | `EndOfFile` |
+| `readbytes(n)` with `n <= 0` | `InvalidArgument` |
+| `write` to a file not open for writing (`stdin()`, a `"r"` file) | `InvalidArgument` |
+| a read of a directory opened with `"r"` | `IsADirectory` |
+| any other failure | the code of its `errno` ([`ErrorCode`](result.md#errorcode)) |

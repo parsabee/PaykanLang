@@ -466,7 +466,7 @@ TEST(StringParse, Float) {
   EXPECT_FALSE(parseWith(PaykanString_parse_float, " 1", 2, d));
 }
 
-// The range rule (docs/language/01-language-basics.md): a value that
+// The range rule (docs/language/02-basics.md): a value that
 // rounds to a finite float, subnormals included, is accepted; one too large
 // (rounds to +-inf) or too small (nonzero, rounds to 0) is None.  strtod
 // flags subnormal results with ERANGE too, which must not make them None.

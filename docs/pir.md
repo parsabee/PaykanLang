@@ -44,7 +44,7 @@ Design rules:
 | `ptr` | any other pointer: vtable addresses, literal data, type descriptors and tuple layouts, the address of a slot | `void *`  |
 | `opt_i64` `opt_f64` `opt_bool` `opt_char` | an inline optional: a presence flag, then the payload (`i64`, `f64`, `bool`, `char`) at its natural alignment, held and passed by value (#96): 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char` | `struct { bool present; <payload> value; }` |
 | `mem(N, A)` | N bytes aligned to A (1, 2, 4 or 8; N a positive multiple of A): the storage of an aggregate, a fixed-size array or a tuple. Only a `local` or a field has this type, never a value, a parameter or a result; it is reached through its address (§6) | `_Alignas(A) uint8_t name[N]` |
-| `weak` | `PaykanWeak*`: a weak reference to an object (docs/language/08-memory-model.md, "Weak references"), the type of a `weak` local or field; may be `null`. Made from a `box` by `weak.new`, read as a `box` by `weak.load`, dropped by `weak.release` (§6); never addressed, cast or compared | `PaykanWeak *` |
+| `weak` | `PaykanWeak*`: a weak reference to an object (docs/language/16-memory.md, "Weak references"), the type of a `weak` local or field; may be `null`. Made from a `box` by `weak.new`, read as a `box` by `weak.load`, dropped by `weak.release` (§6); never addressed, cast or compared | `PaykanWeak *` |
 
 Paykan types lower as: `int`→`i64`, `float`→`f64`, `bool`→`bool`,
 `char`→`char`, every enum→`i64`, `int?`→`opt_i64`, `float?`→`opt_f64`,
@@ -478,7 +478,7 @@ CodeGen enforced, now in one place.
   concatenation's: destroyed after a print, boxed when kept) and
   `PaykanTuple_equals` (`i64`, nonzero when equal: `==` is its `cmp ne
   ..., 0`, `!=` the `not` of that).
-* **Structs** (docs/language/14-structs.md) are tuples with names: the same
+* **Structs** (docs/language/11-structs.md) are tuples with names: the same
   `mem` storage, copies, retains and releases, with a field read as
   `ptr.add` of the field's offset from the struct's address and a field
   assignment a `ptr.store` there (a `mem` field a `mem.copy`), after the
@@ -492,7 +492,7 @@ CodeGen enforced, now in one place.
   and `==`/`!=` pass the address and the `.structN` layout to
   `PaykanStruct_toString` and `PaykanStruct_equals`, with the conventions
   of the tuple calls.
-* **Function values** (docs/language/15-function-types.md,
+* **Function values** (docs/language/14-function-types.md,
   docs/design/function-types.md) are held in memory, 16 bytes laid out as
   the tuple `(i64, box)`: the code's address cast to `i64`, then the box of
   the closure, or null.  The code of a lambda is `fn.<module>.N.call` and of
@@ -506,7 +506,7 @@ CodeGen enforced, now in one place.
   optional function value is the same 16 bytes, None all zeros.
 * **Fields** own their box; `field.store` is preceded by a retain-or-steal
   of the new value and the old value is released (null-checked).
-* **Weak references** (docs/language/08-memory-model.md): a `weak` local is
+* **Weak references** (docs/language/16-memory.md): a `weak` local is
   a `local` of type `weak`, a `weak` field a field of type `weak`.  A
   declaration or an assignment takes the value as a +1 box (as a variable's
   initializer is taken), stores `weak.new` of it and releases the box; an

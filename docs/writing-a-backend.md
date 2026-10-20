@@ -31,7 +31,7 @@ complete loadable backend, in plain C (it prints the PIR it receives); copy it
 to start your own.
 
 **Stability.** Unlike the language (stable in the 0.2 series, see
-[`language/01-language-basics.md`](language/01-language-basics.md)), the
+[`language/02-basics.md`](language/02-basics.md)), the
 plugin interfaces are not yet stable: `plugin_api.h` (versioned by
 `PAYKAN_PLUGIN_API_VERSION`), the PIR text (`PAYKAN_PIR_TEXT_VERSION`), and
 the C++ interfaces of the built-in plugins may change between 0.x releases.

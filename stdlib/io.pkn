@@ -13,7 +13,7 @@
 // it wrote), a read a Result holding the text read, whose error is
 // `EndOfFile` when nothing was left to read.
 //
-// Names starting with `_` are the module's own (docs/language/06-modules.md,
+// Names starting with `_` are the module's own (docs/language/15-modules.md,
 // "Private to the module"): the native functions, bound to the runtime's
 // (Runtime.h, "The standard library's ::io").
 

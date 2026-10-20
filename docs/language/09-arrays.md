@@ -1,12 +1,361 @@
-# PaykanLang — Arrays
+# Arrays
 
-An array `T[n]` holds exactly `n` elements of one type `T`. Its length is part of its type,
+An array `T[n]` holds exactly `n` values of one type `T`. Its length is part of its type,
 and it is a **value**: it is stored inline, in its variable, its field or the array that
 holds it, and assigning it copies its elements. A function takes an array of any length
-through a slice parameter, `view T[]` or `inout T[]`.
+through a slice parameter, `view T[]` or `inout T[]`. This chapter shows how to create,
+read and change arrays, how to collect a varying number of values in one, and gives the
+`tasks` project a `TaskList` that holds all its tasks; then it gives the precise rules.
 
-Storage that grows is the standard library's: see `List<T>` and `Buffer<T>` in
-[the standard library](13-standard-library.md).
+Storage that grows is the standard library's: see `List<T>` in
+[Collections](../stdlib/collections.md) and `Buffer<T>` in [Memory](../stdlib/memory.md).
+
+## Creating arrays
+
+The type of an array of `n` values of type `T` is written `T[n]`. An array literal lists its
+elements in square brackets; its element type is inferred from them, and its length is the
+number of elements:
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  primes = [2, 3, 5, 7];               // int[4]
+  names: Str[2] = ["Ada", "Grace"];
+  sizes: float[_] = [1.5, 2, 4];       // float[3]: _ takes the literal's length
+  zeros = [0; 6];                      // int[6]: six copies of 0
+  io::println(Str(primes.len()) + " primes, " + Str(names.len()) + " names, "
+          + Str(sizes.len()) + " sizes, " + Str(zeros.len()) + " zeros");
+  io::println("the first prime is " + Str(primes[0]));
+  return 0;
+}
+```
+
+Output:
+
+```
+4 primes, 2 names, 3 sizes, 6 zeros
+the first prime is 2
+```
+
+The length is part of the type: an `int[4]` is not an `int[3]`, and a literal for a `T[n]`
+has exactly `n` elements (`names: Str[2] = ["Ada"]` is an error). Write `_` for a length to
+take it from the initializer, as `sizes` does. An array has at least one element, so `[]` is
+an error. The elements of a literal must have a common type: `int`s and `float`s mix into
+`float`s, and objects of different classes give their nearest common ancestor.
+
+`[v; n]` is an array of `n` copies of `v`, where `n` is a number written out, at least 1
+(`[0; n]` with a variable `n` is an error). It is how you make an array that the program
+fills in afterwards, as the next section does: `[0; 6]` is six zeros, `[""; 3]` three empty
+strings, and `flags: bool[4] = [False; 4]` four `False`s. With a declared type, `v` takes
+its element type, so `ratios: float[3] = [0; 3]` holds `0.0`s.
+
+## Reading and writing
+
+| Operation      | Meaning                                                    |
+|----------------|------------------------------------------------------------|
+| `a.len()`      | the number of elements                                     |
+| `a[i]`         | the element at index `i`, counting from 0                  |
+| `a[i] = v`     | replaces the element at index `i`                          |
+
+An array's length never changes. Every index is checked: a constant one when compiling
+(`primes[4]` is an error), any other when the program runs, where an index outside `0` to
+`len() - 1` is a panic: the program stops with a message such as `paykan: array index 5 out
+of bounds (len=3)`.
+
+There is no `for` loop, so you walk an array with `while` and an index:
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  squares = [0; 5];
+  i = 0;
+  while i < squares.len() {
+    squares[i] = (i + 1) * (i + 1);
+    i = i + 1;
+  }
+  squares[0] = 100;
+
+  sum = 0;
+  i = 0;
+  while i < squares.len() {
+    sum = sum + squares[i];
+    i = i + 1;
+  }
+  io::println(Str(squares.len()) + " squares, sum " + Str(sum));
+  return 0;
+}
+```
+
+Output:
+
+```
+5 squares, sum 154
+```
+
+There are no other built-in array operations (no `insert`, `remove` or sorting), but they
+are a few lines each, as the project below shows.
+
+## Arrays are values
+
+An array is stored in its variable, like an `int`, and assigning it copies every element.
+A plain parameter, such as `xs: int[3]`, gets a copy too.
+
+To let a function work on an array of any length, give it a **slice** parameter, written
+`view T[]` or `inout T[]`. A slice takes an array of any length with elements of type `T`,
+and `len()` tells how long it is. A `view` slice reads the caller's array; an `inout` one
+changes its elements in place:
+
+```pkn
+import ::io;
+
+fn doubleAll(xs: inout int[]) {
+  i = 0;
+  while i < xs.len() {
+    xs[i] = xs[i] * 2;
+    i = i + 1;
+  }
+}
+
+fn join(xs: view int[], sep: Str) -> Str {
+  out = "";
+  i = 0;
+  while i < xs.len() {
+    if i > 0 { out = out + sep; }
+    out = out + Str(xs[i]);
+    i = i + 1;
+  }
+  return out;
+}
+
+fn main() -> int {
+  a = [1, 2, 3];
+  b = a;                 // a copy
+  doubleAll(a);
+  io::println(join(a, ", ") + " / " + join(b, ", "));
+  io::println(join([7, 8, 9, 10], "-"));
+  return 0;
+}
+```
+
+Output:
+
+```
+2, 4, 6 / 1, 2, 3
+7-8-9-10
+```
+
+Two things to note:
+
+- `==` is not defined on arrays. Write a loop to compare elements.
+- `io::println` does not take an array, so a helper such as `join` is the way to show its
+  elements.
+
+## Keeping a count
+
+Since an array's length is fixed when it is created, a program that collects a number of
+values it does not know in advance gives the array a **capacity**, the most it will hold,
+and keeps a **count** of the slots in use beside it. Adding a value writes the slot at the
+count and increments the count; removing the last value decrements it:
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  stack = [0; 4];            // room for 4
+  count = 0;
+  n = 1;
+  while n <= 3 {
+    stack[count] = n * 10;
+    count = count + 1;
+    n = n + 1;
+  }
+  count = count - 1;         // drop the top value
+  io::println(Str(count) + " left, top " + Str(stack[count - 1]) + ", room for "
+          + Str(stack.len() - count) + " more");
+  return 0;
+}
+```
+
+Output:
+
+```
+2 left, top 20, room for 2 more
+```
+
+Before adding, check that `count` is below `len()`: the program decides what to do when the
+array is full, rather than letting the index panic.
+
+When there is no sensible capacity, use a list from the standard library instead of an
+array: `collections::List<T>` keeps its own count and grows as values are pushed (see
+[Collections](../stdlib/collections.md)).
+
+## Arrays of arrays and of objects
+
+The element type can be any type, including another array type or a class. `int[2][3]` is
+two rows of three `int`s, indexed `grid[row][column]`:
+
+```pkn
+import ::io;
+
+class City {
+  name: Str;
+  people: int;
+}
+
+impl City {
+  fn __init__(name: Str, people: int) { self.name = name; self.people = people; }
+}
+
+fn main() -> int {
+  grid: int[2][3] = [[1, 2, 3], [4, 5, 6]];
+  grid[1][2] = 60;
+  io::println("row 1 has " + Str(grid[1].len()) + " cells, the last is " + Str(grid[1][2]));
+
+  cities = [City("Tehran", 9000000), City("Lyon", 520000), City("Oslo", 700000)];
+  biggest = cities[0];
+  i = 1;
+  while i < cities.len() {
+    if cities[i].people > biggest.people { biggest = cities[i]; }
+    i = i + 1;
+  }
+  io::println("largest: " + biggest.name);
+  return 0;
+}
+```
+
+Output:
+
+```
+row 1 has 3 cells, the last is 60
+largest: Tehran
+```
+
+Every row of an array of arrays has the same length. An array of objects holds references
+to them, so copying the array copies the references: both arrays share the same objects.
+
+Arrays are **invariant**: if `Dog` extends `Animal`, a `Dog[2]` is still not an
+`Animal[2]`. To keep different subclasses in one array, give it the base type, as in
+`pets: Animal[2] = [Dog("Rex"), Cat("Tom")]`.
+
+## Project: the task list
+
+`TaskList` keeps the tasks in an array with room for eight, and counts the ones in use.
+Its constructor fills the array with a blank task, which the slots past the count keep until
+a task is added there. Tasks are numbered from 1 for the user, so the methods convert
+between those numbers and array indices, and they check the number before using it rather
+than letting a bad one panic:
+
+```pkn
+import ::io;
+
+class Task {
+  title: Str;
+  done: bool;
+  view fn toString() -> Str {
+    return (if self.done then "[x] " else "[ ] ") + self.title;
+  }
+}
+
+impl Task {
+  fn __init__(title: Str) { self.title = title; self.done = False; }
+}
+
+class TaskList {
+  tasks: Task[8];   // room for eight tasks
+  count: int;       // tasks[0] to tasks[count - 1] are in use
+
+  // Adds a task; False if the list is full.
+  fn add(title: Str) -> bool {
+    if self.count == self.tasks.len() { return False; }
+    self.tasks[self.count] = Task(title);
+    self.count = self.count + 1;
+    return True;
+  }
+
+  // Marks task number `n` (counting from 1) done; False if there is none.
+  fn complete(n: int) -> bool {
+    if n < 1 || n > self.count { return False; }
+    self.tasks[n - 1].done = True;
+    return True;
+  }
+
+  view fn pending() -> int {
+    count = 0;
+    i = 0;
+    while i < self.count {
+      if !self.tasks[i].done { count = count + 1; }
+      i = i + 1;
+    }
+    return count;
+  }
+
+  // Drops the finished tasks, moving the others down, and returns how many there were.
+  fn clearDone() -> int {
+    kept = 0;
+    i = 0;
+    while i < self.count {
+      if !self.tasks[i].done {
+        self.tasks[kept] = self.tasks[i];
+        kept = kept + 1;
+      }
+      i = i + 1;
+    }
+    removed = self.count - kept;
+    self.count = kept;
+    return removed;
+  }
+
+  view fn show() {
+    i = 0;
+    while i < self.count {
+      io::println(Str(i + 1) + ". " + self.tasks[i].toString());
+      i = i + 1;
+    }
+    io::println(Str(self.pending()) + " of " + Str(self.count) + " to do");
+  }
+}
+
+impl TaskList {
+  fn __init__() {
+    self.tasks = [Task(""); 8];
+    self.count = 0;
+  }
+}
+
+fn main() -> int {
+  list = TaskList();
+  list.add("buy milk");
+  list.add("fix the leak");
+  list.add("call mum");
+  list.complete(2);
+  if !list.complete(7) { io::println("there is no task 7"); }
+  list.show();
+  io::println("cleared " + Str(list.clearDone()));
+  list.show();
+  return 0;
+}
+```
+
+Output:
+
+```
+there is no task 7
+1. [ ] buy milk
+2. [x] fix the leak
+3. [ ] call mum
+2 of 3 to do
+cleared 1
+1. [ ] buy milk
+2. [ ] call mum
+2 of 2 to do
+```
+
+`[Task(""); 8]` calls `Task("")` once, and a class value is a reference to its object, so
+the eight slots hold the same blank task. That is fine here: `add` puts a new task in a slot
+before anything changes it, and `complete` only reaches the slots in use. An array whose
+elements each need their own object from the start is filled in a loop.
 
 ---
 
@@ -94,11 +443,10 @@ initializer, which gives it`), and so is an initializer that gives no length: `x
 
 ### Repeated values
 
-`[v; n]` is an array of `n` copies of `v`. The count `n` is an integer literal of at least
-1, and `[v; n]` types as the literal `[v, ..., v]` of `n` elements would: on its own `[0; 3]`
-is an `int[3]`; flowing into a `T[n]`, `v` takes the element type `T` (`[0; 4]` into a
-`float[4]` is four `0.0`s, `[None; 8]` into an `int?[8]` eight `None`s); and it gives a `_`
-length its count.
+The count `n` of `[v; n]` is an integer literal of at least 1, and `[v; n]` types as the
+literal `[v, ..., v]` of `n` elements would: on its own `[0; 3]` is an `int[3]`; flowing
+into a `T[n]`, `v` takes the element type `T` (`[0; 4]` into a `float[4]` is four `0.0`s,
+`[None; 8]` into an `int?[8]` eight `None`s); and it gives a `_` length its count.
 
 ```pkn
 import ::io;
@@ -158,7 +506,10 @@ Output:
 
 ### Filling an array
 
-An array starts with the elements of its initializer, and a loop can set them afterwards:
+An array starts with the elements of its initializer, and a loop can set them afterwards.
+A program that collects a varying number of elements uses a capacity and a count, as in
+[Keeping a count](#keeping-a-count): `[v; n]` fills the capacity with a placeholder that the
+count has not reached yet.
 
 ```pkn
 import ::io;
@@ -180,10 +531,6 @@ Output:
 ```
 9 16
 ```
-
-A program that collects a varying number of elements gives an array a capacity, the most it
-will hold, and keeps beside it a count of the slots in use. `[v; n]` fills the capacity with
-a placeholder that the count has not reached yet:
 
 ```pkn
 import ::io;
@@ -211,9 +558,9 @@ Output:
 ```
 
 For an array of objects the placeholder is one blank object (`tasks: Task[8] =
-[Task(""); 8]`), which the unused slots share: a slot gets its own object when it is
-assigned one, before the program changes it. An optional element type (`Task?[8]`) can start
-as `[None; 8]` instead.
+[Task(""); 8]`, as in [the task list](#project-the-task-list)), which the unused slots
+share: a slot gets its own object when it is assigned one, before the program changes it.
+An optional element type (`Task?[8]`) can start as `[None; 8]` instead.
 
 ---
 
@@ -292,8 +639,8 @@ An `inout` local names the array itself (`r: inout = xs;`).
 An element can be a scalar (`int`, `float`, `bool`, `char`, a sized numeric type such as
 `u8`, which takes an 8-byte slot like `int`), an optional of one (`int?`,
 held inline, `None` when zeroed), an enum, a reference (a class, `Str`, an optional of one), a
-tuple or a struct (held inline, see `09-tuples.md` and `14-structs.md`), a function value or
-another array. An element of a reference type is
+tuple or a struct (held inline, see [Tuples](10-tuples.md) and [Structs](11-structs.md)), a
+function value or another array. An element of a reference type is
 a reference, as a variable of that type is: copying the array copies the references, so the
 copy and the original share their elements' objects, and an element of a `view` array is a
 `view` too.
@@ -392,8 +739,8 @@ elements`).
 ## Fields
 
 A class's field can be an array: it is held inside its object, and `__init__` assigns it like
-any other field (a struct's field cannot be one yet). Its elements change only where the object can (`self.cells[0][1] = 5;` is not
-allowed in a `view fn`).
+any other field (a struct's field cannot be one yet). Its elements change only where the
+object can (`self.cells[0][1] = 5;` is not allowed in a `view fn`).
 
 ```pkn
 import ::io;
@@ -418,9 +765,10 @@ x 3
 
 ## Parameters and Results
 
-A parameter can be an array in every mode. A plain one is the function's own copy, a `view`
-one reads the caller's array, and an `inout` one changes it. A result is returned as a copy
-(`-> int[3]`; a `view` or `inout` result of an array is not supported yet).
+A parameter can be an array in every mode (see [Parameter modes](03-functions.md#parameter-modes-view-and-inout)).
+A plain one is the function's own copy, a `view` one reads the caller's array, and an
+`inout` one changes it. A result is returned as a copy (`-> int[3]`; a `view` or `inout`
+result of an array is not supported yet).
 
 ```pkn
 import ::io;
@@ -505,7 +853,8 @@ Output:
 - A generic `xs: view T[]` takes `T` from the array's elements.
 
 The program's entry point takes its command-line arguments as a slice,
-`fn main(args: view Str[]) -> int` (see `02-functions-and-calling.md`).
+`fn main(args: view Str[]) -> int` (see [Functions](03-functions.md) and
+[Input and output](../stdlib/io.md)).
 
 ---
 

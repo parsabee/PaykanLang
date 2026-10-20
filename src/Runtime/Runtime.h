@@ -104,7 +104,7 @@ typedef struct PaykanObject PaykanWeak;
 //
 // Root of the class hierarchy.  Every Paykan heap object starts with this
 // 16-byte header, so that a PaykanObject* reaches the vtable and the
-// object's own reference counts (docs/language/08-memory-model.md):
+// object's own reference counts (docs/language/16-memory.md):
 //
 //   [0] vtable  — method dispatch + type identity (64 bits)
 //   [1] strong  — the strong reference count (32 bits): the number of owned
@@ -337,7 +337,7 @@ PaykanShared *Paykan_error_text(int64_t err);
 //   PaykanShared*  a strong reference, counted in `strong` (a variable, a
 //                  field, an argument, a result; NULL for an absent `T?`);
 //   PaykanWeak*    a weak reference, counted in `weak` (a `weak` variable or
-//                  field, docs/language/08-memory-model.md).
+//                  field, docs/language/16-memory.md).
 //
 // "Boxing" a raw pointer (PaykanShared_new) is a strong retain: generated
 // code that holds an object only as a raw PaykanObject* can always box it
@@ -388,7 +388,7 @@ void Paykan_weak_release(PaykanWeak *weak);
 // -- Generic native functions
 //
 // An instance of a generic `native fn` (`native fn get<T>(b: view Obj, i: int)
-// -> view T = "..."`, docs/language/02-functions-and-calling.md) receives a
+// -> view T = "..."`, docs/language/03-functions.md) receives a
 // PaykanType for each type argument, in order, ahead of its arguments.  A
 // parameter typed by a type parameter crosses by address: a `view T` as a
 // `const void *` C borrows for the call, an `inout T` as a `void *` C may
@@ -470,7 +470,7 @@ int64_t PaykanTuple_equals(const void *a, const void *b, const int64_t *layout);
 
 // -- Structs
 //
-// A struct (docs/language/14-structs.md) is a value held in place like a
+// A struct (docs/language/11-structs.md) is a value held in place like a
 // tuple, with a name and named fields.  Its layout is a tuple's with the
 // names in it: the field count, the struct's name, then for each field its
 // name and the words a tuple element has (the kind and the byte offset, then

@@ -165,7 +165,7 @@ private:
     std::unordered_map<std::string, ast::Type *> ASTTypeMap;
     /// Variables whose slot stores an owned PaykanShared* box.
     std::unordered_set<std::string> SharedVars;
-    /// `weak` variables (docs/language/08-memory-model.md): their slot
+    /// `weak` variables (docs/language/16-memory.md): their slot
     /// stores a weak reference, loaded as a fresh +1 box on every read.
     std::unordered_set<std::string> WeakVars;
     struct VarMeta {
@@ -546,7 +546,7 @@ private:
   const char *builtinMethodSymbol(ast::ClassType *ct, const std::string &name);
 
   // -- Function values (LoweringClosure.cpp,
-  // docs/language/15-function-types.md)
+  // docs/language/14-function-types.md)
 
   /// A function value is held in place as the tuple `(int, Obj?)` this
   /// returns: its code's address (as an i64), then the box of its closure,
@@ -616,7 +616,7 @@ private:
   /// or a struct's.
   Val emitMemOptionalMatch(ast::MatchStmt *node);
 
-  // -- Structs (LoweringStruct.cpp, docs/language/14-structs.md)
+  // -- Structs (LoweringStruct.cpp, docs/language/11-structs.md)
   //
   // A struct is a tuple of its fields to the lowering (ast::StructType is a
   // TupleType): held in memory, copied, retained and released like one.

@@ -1,7 +1,7 @@
-// 50 — fixed-size arrays (docs/language/05-arrays.md, "Fixed-size
-// arrays").  `T[n]` holds n elements inline: it is a value, so copying it
-// copies its elements.  An array of arrays puts its first length on its
-// first index: `int[2][3]` is two `int[3]`s.
+// 50 — fixed-size arrays (docs/language/09-arrays.md).  `T[n]` holds n
+// elements inline: it is a value, so copying it copies its elements.  An
+// array of arrays puts its first length on its first index: `int[2][3]` is
+// two `int[3]`s.
 // Exercises: arrays of int, float, char, an enum and Str, a copy changed
 // apart from its source, an assigned literal reading the old value, a 2D
 // grid walked with len(), an `inout` local.  Run with --track-heap: zero

@@ -1,5 +1,5 @@
 // 48 — `view fn` methods.  A method may change `self` unless it is a
-// `view fn`, where `self` is read-only (docs/language/04-classes.md,
+// `view fn`, where `self` is read-only (docs/language/05-classes.md,
 // "Methods that don't change self").  Only `view fn` methods can be called
 // on a `view` parameter, and an override keeps its parent's marker.
 // Exercises: a class with changing and reading methods, a subclass

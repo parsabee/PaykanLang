@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: weak references (docs/language/08-memory-model.md, "Weak
+// Sema tests: weak references (docs/language/16-memory.md, "Weak
 // references"): the type of a `weak` declaration, and the places a weak
 // reference cannot be.
 

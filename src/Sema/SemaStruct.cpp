@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Semantic analysis: struct declarations and their method bodies
-// (docs/language/14-structs.md).  A struct is a value type with named,
+// (docs/language/11-structs.md).  A struct is a value type with named,
 // mutable fields and the methods of its `impl` blocks, which are called
 // directly: it has no vtable, no superclass and no subclasses.  Its type is
 // an ast::StructType, which is a TupleType of its field types by its name,

@@ -1,6 +1,6 @@
 # Private names: the `_` and `__` prefixes
 
-The design behind the visibility rules in `docs/language/04-classes.md`,
+The design behind the visibility rules in `docs/language/05-classes.md`,
 `14-structs.md` and `06-modules.md`: which names an underscore prefix makes
 private, from where they can be reached, and how a private name crosses a
 module boundary.  There are two levels, each spelled by its prefix and neither
@@ -170,6 +170,6 @@ Each with the default taken here.
    prefix has one meaning.
 6. **Should a private type's name be the module's own too?**  Not yet: type
    names are global across an import graph (one canonical name per type, as
-   `docs/language/06-modules.md` says), so two modules still cannot both
+   `docs/language/15-modules.md` says), so two modules still cannot both
    declare a `_Node`.  Privacy here is about reach, not naming; module-local
    canonical names are a 0.2.0 change (`docs/design/pkm.md` §3.6).

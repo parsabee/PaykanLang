@@ -62,7 +62,7 @@ n=42 is small
 
 Each [GitHub release](https://github.com/parsabee/PaykanLang/releases) carries a tarball
 for Linux (x86_64) and macOS (Apple Silicon), and a `.deb` package for Debian and Ubuntu,
-which also install from the [apt repository](manual/01-getting-started.md#with-apt-debian-and-ubuntu).
+which also install from the [apt repository](language/01-getting-started.md#with-apt-debian-and-ubuntu).
 On macOS you can also use Homebrew:
 
 ```sh
@@ -70,17 +70,18 @@ brew install parsabee/paykanlang/paykanlang
 ```
 
 PaykanLang compiles programs with the system C compiler, so a C compiler (`cc`) must be
-installed. [Getting started](manual/01-getting-started.md) covers every way to install,
+installed. [Getting started](language/01-getting-started.md) covers every way to install,
 including building from source, and runs your first program.
 
 ## Documentation
 
-- **[The manual](manual/index.md)** teaches the language from the ground up, chapter by
-  chapter, for programmers who are new to PaykanLang. Start here.
-- **[The language reference](language/index.md)** specifies each feature precisely: every
-  rule, limitation and compile-time error.
+- **[The language reference](language/index.md)** teaches the language from the ground
+  up, a chapter per feature, and specifies each one precisely: every rule, limitation and
+  compile-time error. Start with [Getting started](language/01-getting-started.md).
+- **[The standard library](stdlib/index.md)** documents every module a program can import:
+  `::io`, `::result`, `::collections`, `::memory` and `::math`.
 - **[Implementation and plugins](internals.md)** describes the compiler's IR, the C
   backend, and how to write your own frontend or backend as a plugin.
 
-Every program in the manual and on this page is run by the project's test suite, so the
+Every program with its output shown in this documentation is run by the project's test suite, so the
 output shown is what the current compiler prints.

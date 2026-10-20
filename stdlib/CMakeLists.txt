@@ -5,7 +5,7 @@
 # <bindir> (PAYKAN_STDLIB_DIR_FROM_BINDIR, CMakeLists.txt), with its .pkm
 # compiled by the `paykan` just built.  The source goes next to the .pkm: a
 # module with generic declarations is built from its source until a .pkm
-# holds templates (docs/language/11-generics.md, "Modules").  `cmake
+# holds templates (docs/language/13-generics.md, "Modules").  `cmake
 # --install` installs both.
 
 if(NOT PAYKAN_BACKENDS)

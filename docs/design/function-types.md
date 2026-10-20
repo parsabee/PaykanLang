@@ -1,6 +1,6 @@
 # Function types and lambdas
 
-The design behind `docs/language/15-function-types.md`: what a function value
+The design behind `docs/language/14-function-types.md`: what a function value
 is, what it may capture, how it is called, and how it is laid out at run time.
 The decisions were made to fit the language as it is (values held in place,
 objects behind reference-counted boxes, `view` / `inout` borrows checked at

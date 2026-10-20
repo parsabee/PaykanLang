@@ -66,75 +66,61 @@ defaults:
   - scope: { path: index.md }
     values: { title: Home, nav_order: 1 }
 
-  # The manual
-  - scope: { path: manual/index.md }
-    values: { title: Manual, nav_order: 2 }
-  - scope: { path: manual/01-getting-started.md }
-    values: { title: 1. Getting started, parent: Manual, nav_order: 1 }
-  - scope: { path: manual/02-basics.md }
-    values: { title: 2. Basics, parent: Manual, nav_order: 2 }
-  - scope: { path: manual/03-strings-and-conversions.md }
-    values: { title: 3. Strings and conversions, parent: Manual, nav_order: 3 }
-  - scope: { path: manual/04-classes.md }
-    values: { title: 4. Classes and inheritance, parent: Manual, nav_order: 4 }
-  - scope: { path: manual/05-enums-and-match.md }
-    values: { title: 5. Enums and match, parent: Manual, nav_order: 5 }
-  - scope: { path: manual/06-arrays.md }
-    values: { title: 6. Arrays, parent: Manual, nav_order: 6 }
-  - scope: { path: manual/07-tuples.md }
-    values: { title: 7. Tuples, parent: Manual, nav_order: 7 }
-  - scope: { path: manual/08-optionals.md }
-    values: { title: 8. Optionals and None, parent: Manual, nav_order: 8 }
-  - scope: { path: manual/09-generics.md }
-    values: { title: 9. Generics, parent: Manual, nav_order: 9 }
-  - scope: { path: manual/10-modules.md }
-    values: { title: 10. Modules and imports, parent: Manual, nav_order: 10 }
-  - scope: { path: manual/11-files-and-io.md }
-    values: { title: 11. Files and I/O, parent: Manual, nav_order: 11 }
-  - scope: { path: manual/12-memory.md }
-    values: { title: 12. Memory, parent: Manual, nav_order: 12 }
-  - scope: { path: manual/13-the-paykan-command.md }
-    values: { title: 13. The paykan command, parent: Manual, nav_order: 13 }
-  - scope: { path: manual/14-extending.md }
-    values: { title: 14. Extending PaykanLang, parent: Manual, nav_order: 14 }
-  - scope: { path: manual/15-appendix-calculator.md }
-    values: { title: "Appendix: a calculator", parent: Manual, nav_order: 15 }
-
   # The language reference
   - scope: { path: language/index.md }
-    values: { title: Language reference, nav_order: 3 }
-  - scope: { path: language/01-language-basics.md }
-    values: { title: Language basics, parent: Language reference, nav_order: 1 }
-  - scope: { path: language/02-functions-and-calling.md }
-    values: { title: Functions, parent: Language reference, nav_order: 2 }
-  - scope: { path: language/03-enums.md }
-    values: { title: Enums, parent: Language reference, nav_order: 3 }
-  - scope: { path: language/04-classes.md }
-    values: { title: Classes, parent: Language reference, nav_order: 4 }
-  - scope: { path: language/05-arrays.md }
-    values: { title: Arrays, parent: Language reference, nav_order: 5 }
-  - scope: { path: language/06-modules.md }
-    values: { title: Modules, parent: Language reference, nav_order: 6 }
-  - scope: { path: language/07-match-statements.md }
-    values: { title: Match statements, parent: Language reference, nav_order: 7 }
-  - scope: { path: language/08-memory-model.md }
-    values: { title: Memory model, parent: Language reference, nav_order: 8 }
-  - scope: { path: language/09-tuples.md }
-    values: { title: Tuples, parent: Language reference, nav_order: 9 }
-  - scope: { path: language/10-optionals.md }
-    values: { title: Optional types, parent: Language reference, nav_order: 10 }
-  - scope: { path: language/11-generics.md }
-    values: { title: Generics, parent: Language reference, nav_order: 11 }
-  - scope: { path: language/12-traits.md }
-    values: { title: Traits, parent: Language reference, nav_order: 12 }
-  - scope: { path: language/13-standard-library.md }
-    values: { title: The standard library, parent: Language reference, nav_order: 13 }
-  - scope: { path: language/14-structs.md }
-    values: { title: Structs, parent: Language reference, nav_order: 14 }
-  - scope: { path: language/15-function-types.md }
-    values: { title: Function types and lambdas, parent: Language reference, nav_order: 15 }
+    values: { title: Language reference, nav_order: 2 }
+  - scope: { path: language/01-getting-started.md }
+    values: { title: 1. Getting started, parent: Language reference, nav_order: 1 }
+  - scope: { path: language/02-basics.md }
+    values: { title: 2. Basics, parent: Language reference, nav_order: 2 }
+  - scope: { path: language/03-functions.md }
+    values: { title: 3. Functions, parent: Language reference, nav_order: 3 }
+  - scope: { path: language/04-strings-and-conversions.md }
+    values: { title: 4. Strings and conversions, parent: Language reference, nav_order: 4 }
+  - scope: { path: language/05-classes.md }
+    values: { title: 5. Classes and inheritance, parent: Language reference, nav_order: 5 }
+  - scope: { path: language/06-traits.md }
+    values: { title: 6. Traits, parent: Language reference, nav_order: 6 }
+  - scope: { path: language/07-enums.md }
+    values: { title: 7. Enums, parent: Language reference, nav_order: 7 }
+  - scope: { path: language/08-match.md }
+    values: { title: 8. Match statements, parent: Language reference, nav_order: 8 }
+  - scope: { path: language/09-arrays.md }
+    values: { title: 9. Arrays, parent: Language reference, nav_order: 9 }
+  - scope: { path: language/10-tuples.md }
+    values: { title: 10. Tuples, parent: Language reference, nav_order: 10 }
+  - scope: { path: language/11-structs.md }
+    values: { title: 11. Structs, parent: Language reference, nav_order: 11 }
+  - scope: { path: language/12-optionals.md }
+    values: { title: 12. Optionals and None, parent: Language reference, nav_order: 12 }
+  - scope: { path: language/13-generics.md }
+    values: { title: 13. Generics, parent: Language reference, nav_order: 13 }
+  - scope: { path: language/14-function-types.md }
+    values: { title: 14. Function types and lambdas, parent: Language reference, nav_order: 14 }
+  - scope: { path: language/15-modules.md }
+    values: { title: 15. Modules and imports, parent: Language reference, nav_order: 15 }
+  - scope: { path: language/16-memory.md }
+    values: { title: 16. Memory, parent: Language reference, nav_order: 16 }
+  - scope: { path: language/17-the-paykan-command.md }
+    values: { title: 17. The paykan command, parent: Language reference, nav_order: 17 }
+  - scope: { path: language/18-appendix-calculator.md }
+    values: { title: "Appendix: a calculator", parent: Language reference, nav_order: 18 }
   - scope: { path: grammar.md }
-    values: { title: Grammar, parent: Language reference, nav_order: 16 }
+    values: { title: Grammar, parent: Language reference, nav_order: 19 }
+
+  # The standard library
+  - scope: { path: stdlib/index.md }
+    values: { title: Standard library, nav_order: 3 }
+  - scope: { path: stdlib/io.md }
+    values: { title: "`::io`: printing, files and input", parent: Standard library, nav_order: 1 }
+  - scope: { path: stdlib/result.md }
+    values: { title: "`::result`: errors as values", parent: Standard library, nav_order: 2 }
+  - scope: { path: stdlib/collections.md }
+    values: { title: "`::collections`: containers", parent: Standard library, nav_order: 3 }
+  - scope: { path: stdlib/memory.md }
+    values: { title: "`::memory`: buffers and boxes", parent: Standard library, nav_order: 4 }
+  - scope: { path: stdlib/math.md }
+    values: { title: "`::math`", parent: Standard library, nav_order: 5 }
 
   # The implementation: IR, backends, plugins
   - scope: { path: internals.md }
