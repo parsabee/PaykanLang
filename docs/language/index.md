@@ -22,8 +22,9 @@ instead; its chapters link here for the details.
 10. [Optional types](10-optionals.md): `T?`, `None` and unwrapping.
 11. [Generics](11-generics.md): generic classes and functions, and inference.
 12. [Traits](12-traits.md): traits, `impl Trait for Type` and bounds on type parameters.
-13. [The standard library](13-standard-library.md): `::collections` (lists, linked lists,
-    stacks, queues, hash maps and sets, priority queues), `::memory` and `::math`.
+13. [The standard library](13-standard-library.md): `::io` (printing and files),
+    `::result` (errors as values), `::collections` (lists, linked lists, stacks, queues, hash
+    maps and sets, priority queues), `::memory` and `::math`.
 14. [Structs](14-structs.md): values with named fields, held in place like tuples, with
     `impl` blocks for their methods.
 15. [Function types and lambdas](15-function-types.md): `(int, float) -> bool`, lambdas,

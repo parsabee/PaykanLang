@@ -292,7 +292,8 @@ An `inout` local names the array itself (`r: inout = xs;`).
 An element can be a scalar (`int`, `float`, `bool`, `char`, a sized numeric type such as
 `u8`, which takes an 8-byte slot like `int`), an optional of one (`int?`,
 held inline, `None` when zeroed), an enum, a reference (a class, `Str`, an optional of one), a
-tuple (held inline, see `09-tuples.md`) or another array. An element of a reference type is
+tuple or a struct (held inline, see `09-tuples.md` and `14-structs.md`), a function value or
+another array. An element of a reference type is
 a reference, as a variable of that type is: copying the array copies the references, so the
 copy and the original share their elements' objects, and an element of a `view` array is a
 `view` too.
@@ -390,8 +391,8 @@ elements`).
 
 ## Fields
 
-A field can be an array: it is held inside its object, and `__init__` assigns it like any
-other field. Its elements change only where the object can (`self.cells[0][1] = 5;` is not
+A class's field can be an array: it is held inside its object, and `__init__` assigns it like
+any other field (a struct's field cannot be one yet). Its elements change only where the object can (`self.cells[0][1] = 5;` is not
 allowed in a `view fn`).
 
 ```pkn
@@ -510,8 +511,9 @@ The program's entry point takes its command-line arguments as a slice,
 
 ## Limits for now
 
-An array is only ever a local variable, a parameter, a result or a field. It cannot be a
-tuple element, an optional (`int[3]?`), a type argument (`Box<int[3]>`) or a `match` arm, and
+An array is only ever a local variable, a parameter, a result or a class's field. It cannot
+be a struct's field (`a struct field cannot be a fixed-size array yet`), a tuple element, an
+optional (`int[3]?`), a type argument (`Box<int[3]>`) or a `match` arm, and
 it does not convert to `Obj`; each is an error such as `tuple element 0: a fixed-size array
 ('int[2]') can only be a local variable, a parameter, a result or a field for now`.
 
@@ -541,4 +543,4 @@ it does not convert to `Obj`; each is an error such as `tuple element 0: a fixed
 | Element assigned through a `let` or a `view` | `xs[0] = 5` with `let xs` or `xs: view int[]` |
 | Slice anywhere but a parameter | `x: int[]`, a field or a result of type `int[]` |
 | Slice element type mismatch | an `int[3]` passed to a `view float[]` |
-| Array where it cannot be | a tuple element, an optional, a type argument, a `match` arm, an `Obj` |
+| Array where it cannot be | a struct field, a tuple element, an optional, a type argument, a `match` arm, an `Obj` |

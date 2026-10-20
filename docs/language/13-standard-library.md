@@ -34,7 +34,7 @@ qualifier: `collections::List<int>()`.
   type (`xs.get(0)`); a counter is declared `i: unsigned = 0`.
 - The keys of a `HashMap` or `HashSet` implement the builtin trait
   [`Hashable`](12-traits.md#hashable): `int`, `bool`, `char`, `Str`, a sized integer type
-  (`u32`, `unsigned`, …), or a class with an `impl Hashable for` block.
+  (`u32`, `unsigned`, …), or a class or a struct with an `impl Hashable for` block.
 - A broken precondition panics: `pop` on an empty container, an index out of range,
   `get` of a key a map does not have.
 - The library's `_` and `__` names are [private](06-modules.md#private-to-the-module): a
@@ -193,7 +193,7 @@ it makes no value), and a program can use the same types for its own errors.
 | `none()` | No error: `Error(ErrorCode::Ok, None)` |
 | `ok(v)` | The `Result<T>` of an operation that made `v` |
 | `name(code)` | The code's name: `"NotFound"` for `ErrorCode::NotFound` |
-| `fromErrno(errno)` | The `Error` of a C library failure: its code and C's `strerror` text |
+| `fromErrno(errno)` | The `Error` of a C library failure: its code and C's `strerror` text (`none()` for `0`) |
 
 `Error` and `Result` are [structs](14-structs.md), values copied on assignment. A struct is
 not a `match` subject, so a result is taken apart by matching its `value`, in optional mode
@@ -331,7 +331,7 @@ priority pop in the order they were pushed. `push` and `pop` are O(log n).
 | `peek()`, `peekPriority()` | The next element and its priority |
 | `len()`, `isEmpty()`, `clear()` | |
 
-The priority is a separate `int` because `<` is defined only for `int`, `float` and `char`.
+The priority is a separate `int` because `<` is defined only for the numeric types and `char`.
 To order numbers by their own value, push each one with itself as its priority:
 `q.push(n, n)`.
 
@@ -432,7 +432,7 @@ copy b
 ```
 
 `Box<T: ValueType>(v)` holds one value of a [`ValueType`](12-traits.md#valuetype) (`int`,
-`float`, `bool`, `char`, an enum or a tuple) in an object, so the value can be shared:
+`float`, `bool`, `char`, a sized number, an enum, a tuple, a struct or a function value) in an object, so the value can be shared:
 assigning a box shares it, and a change through one name shows through every other.
 `get()` returns `inout T`, the value's storage. Read it, pass it to an `inout`
 parameter, or assign through an `inout` local:
@@ -532,6 +532,7 @@ packages include them. Configure with `-DPAYKAN_BUILD_STDLIB=OFF` to leave the l
 It is off by default when cross-compiling, because the built `paykan` cannot run on the
 build machine.
 
-Every module of the library has generic declarations, and a `.pkm` does not hold templates
-yet ([Generics](11-generics.md#modules)). So a program builds the library's modules from
-the sources installed next to the `.pkm` files.
+Every module of the library but `::math` has generic declarations, and a `.pkm` does not
+hold templates yet ([Generics](11-generics.md#modules)). So a program builds those modules
+from the sources installed next to the `.pkm` files every time, and `::math` once, into its
+[compilation cache](06-modules.md#the-compilation-cache).

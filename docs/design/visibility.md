@@ -56,10 +56,12 @@ or `view` argument, a method call and a `static fn` call:
 ```
 
 A subclass cannot reach a superclass's private field or method: `self.__x` in
-`Sub`'s method, with `__x` declared in `Base`, is the same error.  A
-subclass may declare its own `__x`; it is a different field (the superclass's
-stays in the layout, unreachable from the subclass), reported as the usual
-shadowing error if the name is public in the superclass.
+`Sub`'s method, with `__x` declared in `Base`, is the same error.  Nor can it
+declare a field `__x` of its own: the shadowing check does not look at
+privacy, so it is `field '__x' in class 'Sub' shadows a field in superclass
+'Base'`, as for a public name.  (Letting a subclass declare its own `__x`, a
+different field with the superclass's still in the layout, is not
+implemented.)
 
 The check is made where a member is resolved, on the owner of the member (the
 class or struct that declares it, found by walking the superclass chain) and
@@ -163,10 +165,9 @@ Each with the default taken here.
    private field is part of the layout and a private function or type may be
    reached by an exported template.  Leaving them out would need a layout
    record of its own in the format, which stays fixed until 0.2.0.
-5. **Should a single underscore mean anything?**  Yes, since this revision:
-   private to the module, the level a top-level `__` name used to have.  A
-   top-level `__` name is an error rather than a synonym, so each prefix has
-   one meaning.
+5. **Should a single underscore mean anything?**  Yes: private to the
+   module.  A top-level `__` name is an error rather than a synonym, so each
+   prefix has one meaning.
 6. **Should a private type's name be the module's own too?**  Not yet: type
    names are global across an import graph (one canonical name per type, as
    `docs/language/06-modules.md` says), so two modules still cannot both

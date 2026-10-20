@@ -219,9 +219,10 @@ had no flags byte and is rejected or misread, which the cache check and
 
 ## Costs
 
-* An object is one allocation of 24 header bytes plus its fields, instead
-  of 16 header bytes plus a separate 16-byte box: fewer allocations and
-  pointer chases, the same total.
+* An object is one allocation of a 16-byte header plus its fields, instead
+  of a 16-byte header (the vtable and a pointer to the box) plus a separate
+  16-byte box: fewer allocations and pointer chases, and 16 bytes less per
+  object.
 * A destroyed object with weak references outstanding keeps its whole
   allocation until the last weak reference goes (its fields are released,
   so what it held is freed).  This is the trade-off Swift's `weak` makes with

@@ -86,7 +86,7 @@ A suffix binds to the result: `(int) -> int[]` returns an `int[]`, which no resu
 write the function type in parentheses to give it a suffix, `((int) -> int)[3]` for an
 array of three functions, `((int) -> int)?` for an optional one.
 
-Function types are structural: `typeName` spells them as written and two spellings of
+Function types are structural: a diagnostic spells them as written and two spellings of
 the same shape are one type, wherever they are written.  A function type goes anywhere
 a type does: a field, a parameter, a result, an element of an array or a tuple, a type
 argument (`List<(int) -> int>`), a `view` or `inout` parameter or local, and an optional.
@@ -408,11 +408,12 @@ crossing into C, except as a type argument of a generic native function; `toStri
 
 ## Notes
 
-- At run time a closure is an object of a class the compiler makes for the lambda (or
-  for the named function), with one field per capture and the vtable `[destroy,
-  toString, equals, call]`: the first three an object's, `call` the function's code with
-  the closure first.  A call through a function value is a virtual call of `call`
-  (`docs/pir.md`); `Paykan_release` destroys a closure through `destroy` as it does any
-  object, releasing its captures.  A closure of a named function holds no captures and
-  forwards to the function.
+- At run time a function value is laid out as the tuple `(int, Obj?)`: the address of
+  its code, then its closure, or null when it captures nothing.  A closure is an object
+  of a class the compiler makes for the lambda, with one field per capture and an
+  object's vtable `[destroy, toString, equals]`.  A call through a function value loads
+  the code and the closure and calls the code through its address (`icall`,
+  `docs/pir.md`), the closure first; `Paykan_release` destroys a closure through
+  `destroy` as it does any object, releasing its captures.  A named function used as a
+  value has no closure: its code forwards to the function.
 - The design and its open questions are in `docs/design/function-types.md`.

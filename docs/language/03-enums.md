@@ -16,8 +16,9 @@ possibility is known at compile time.
   **not** an `int` and does **not** convert to or from one.
 - The only operators are `==` and `!=`, and both sides must be the **same** enum type.
 - Enums are **value types**: stack-allocated, copied on assignment, no reference counting.
-- An enum can be a variable, a function parameter or return type, a class field, or an array
-  element type.
+- An enum can be a variable, a function parameter or return type, a class or struct field, a
+  tuple element or an array element type, and has an optional (`Direction?`, see
+  `10-optionals.md`).
 - `match` is the idiomatic way to branch on an enum and can be **exhaustive** over the variants
   without a wildcard.
 

@@ -34,8 +34,8 @@ methods come from `impl` blocks.
 - Generic: `struct Pair<A, B> { a: A; b: B; }` is a template, instantiated by its type
   arguments (`Pair<int, Str>`) or inferred from a constructor call (`Pair(1, "a")`),
   with `impl Pair<A, B>` blocks, as a generic class is (`11-generics.md`).
-- A struct has an optional (`Point?`), held in place like the tuple `(bool, Point)` and
-  unwrapped with `match p { q: Point { … } None { … } }` (`10-optionals.md`).
+- A struct of at most 64 bytes has an optional (`Point?`), held in place like the tuple
+  `(bool, Point)` and unwrapped with `match p { q: Point { … } None { … } }` (`10-optionals.md`).
 - Not yet: `match` on a struct itself, a fixed-size array field, a struct that contains
   itself.
 
@@ -620,7 +620,7 @@ Point(x: 4, y: 2) 6 True
 ## Not Yet Supported
 
 `match` on a struct (other than unwrapping a `Point?`), a fixed-size array field, an `impl`
-block for a struct of another module, a `static fn` in a generic struct's `impl` block, a
+block for a struct of another module, a
 field of an array element as an `inout` place, and a struct crossing into C other than as
 a type argument of a generic native function (`02-functions-and-calling.md`, "Generic
 native functions").  Like a tuple, a struct has no `equals` method and cannot be ordered

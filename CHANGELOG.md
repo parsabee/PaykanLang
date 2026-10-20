@@ -33,10 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`a: (int, (Str, Str)?) = (1, ("x", "y"));`).
 - An optional of a `Show` type is `Show`: `x.toString()` on an optional is "None" or its
   value's text.
-- A native function takes and returns an enum, as its ordinal (`int64_t`).
-- The runtime's `PaykanBuffer_isSet`, `PaykanBuffer_tryGrow` and
-  `PaykanBuffer_tryReserve`, which report a failed allocation as `ENOMEM` instead of
-  aborting (`memory::Buffer`'s `OutOfMemory`).
 - `::math`, a standard library module of the C library's math functions on `float`
   (docs/language/13-standard-library.md, "`::math`"): `sqrt`, `cbrt`, `pow`, `hypot`,
   the exponentials and logarithms, the trigonometric and hyperbolic functions,
@@ -44,56 +40,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `copysign`, `erf`, `erfc`, `gamma` and `lgamma`, each a native function bound
   directly to its `<math.h>` symbol, plus `pi()`, `e()`, `inf()`, `nan()`, `isNaN`,
   `isInf` and `isFinite` in Paykan, with a stdlib test and a docs example.
-- The standard library uses the private members and the sized numeric types
-  (docs/language/13-standard-library.md): the `__` names of `::collections` and
-  `::memory` are now enforced as private rather than a convention (a program naming
-  `m.__size` or `collections::__bucket` is rejected), every index and size of the
-  library is an `unsigned` (`len()` returns one, `get(i)` & co. take one, `indexOf`
-  returns an `unsigned?` that is `None` for a missing element instead of `-1`, and the
-  `Buffer` natives take and return `unsigned`), `HashMap`'s bucket index is the hash's
-  bits read as an `unsigned` modulo the bucket count, and the containers hold sized
-  elements and keys (`List<u8>`, `HashMap<u32, Str>`, `Box<f32>`, a
-  `MinPriorityQueue<f16>`), with a stdlib test and a docs example.  `LinkedList<T>` is
-  made of node objects again: each node owns the next and holds the previous one as a
-  `weak` reference, instead of the index-linked buffers that worked around reference
-  cycles; `pushFront`, `pushBack`, `Stack.push` and `Queue.enqueue` take the element by
-  value, like `HashMap.put`.
 - Sized numeric types (docs/language/01-language-basics.md, "Sized numeric types";
   docs/design/sized-types.md): `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `f16`
   and `f32`, with `i64`, `u64` and `f64` as other spellings of `int`, `unsigned` and
-  `float`.  Every value takes an 8-byte slot, so layouts, the runtime structures and the
-  `.pkm` format are unchanged.  The operands of an operation have one type (`int` with
-  `float` stays the one promotion), integer results wrap to the type's width, `f16` and
-  `f32` results are rounded after each operation, and an `unsigned` divides, takes the
-  remainder and orders unsigned.  A numeric literal takes the sized type its context
-  expects when it fits it (`x: u8 = 255`, `x + 1`, a `match` arm) and is an error when
-  it does not.  The conversion constructors convert between every pair of numeric types
-  (integer to integer keeps the low bits, float to integer truncates and panics outside
-  the target's range, integer to float rounds), `Str(x)` prints every numeric type
-  (`unsigned` without a sign) and `u8(s)` & co. parse a `Str` into a `u8?` & co.  Every
-  numeric type is `Show` and `ValueType` and the integer ones `Hashable`.  PIR gains
-  `wrap`, `mask`, `udiv`, `urem`, `ucmp`, `utof`, `ftou` and `fround32` (docs/pir.md §6)
-  and the runtime `PaykanString_from_uint`, `PaykanString_parse_uint`,
+  `float`.  Every numeric value takes an 8-byte slot, like an `int`, so a sized type
+  changes no layout, runtime structure or `.pkm` record.  The operands of an operation have
+  one type (`int` with `float` stays the one promotion), integer results wrap to the type's
+  width, `f16` and `f32` results are rounded after each operation, and an `unsigned`
+  divides, takes the remainder and orders unsigned.  A numeric literal takes the sized type
+  its context expects when it fits it (`x: u8 = 255`, `x + 1`, a `match` arm) and is an
+  error when it does not.  The conversion constructors convert between every pair of
+  numeric types (integer to integer keeps the low bits, float to integer truncates and
+  panics outside the target's range, integer to float rounds), `Str(x)` prints every
+  numeric type (`unsigned` without a sign) and `u8(s)` & co. parse a `Str` into a `u8?` &
+  co.  Every numeric type is `Show` and `ValueType` and the integer ones `Hashable`.  PIR
+  gains `wrap`, `mask`, `udiv`, `urem`, `ucmp`, `utof`, `ftou` and `fround32` (docs/pir.md
+  §6) and the runtime `PaykanString_from_uint`, `PaykanString_parse_uint`,
   `Paykan_round_f16`, `Paykan_panic_float_to_type` and the layout kind
-  `PAYKAN_KIND_UINT`; the ABI and format versions stay (CLAUDE.md).  Not yet: bitwise
-  operators, literal suffixes, hexadecimal literals, `char` to the sized types, implicit
-  widening.
+  `PAYKAN_KIND_UINT`.  Not yet: bitwise operators, literal suffixes, hexadecimal literals,
+  `char` to the sized types, implicit widening.
 - Weak references (docs/language/08-memory-model.md, "Weak references"; design in
   docs/design/weak-references.md): `weak y: Point? = x;` declares a local, and `weak
   parent: Node?;` a class field, that refers to an object without keeping it alive.  The
-  type is `T?` of a class `T` (a user class, `Str`, `File`, `Error` or `Obj`), inferred
-  from the initializer when left off (`weak u = x;`), and a local without an initializer
-  starts as `None`.  A weak reference reads as a `T?`: the object while something holds
-  it, `None` once it has been destroyed; it is assigned a `T` or a `T?`, matched, compared
-  with `== None`, passed, returned and copied into a strong variable or field (which then
-  keeps the object), and a lambda captures a `weak` variable weakly.  It is the back link
-  that breaks a reference cycle (a child's `parent`, a closure stored in the object it
-  refers to).  A weak reference cannot be passed to an `inout` parameter, named by an
-  `inout` local or bound by an `inout` match arm; `weak` is a keyword.  Not yet: a `weak`
-  struct field, tuple or array element, parameter or result.  In PIR a weak reference has
-  the type `weak` and the ops `weak.new`, `weak.load` and `weak.release`; the runtime has
-  `Paykan_weak_new`, `Paykan_weak_load` and `Paykan_weak_release`; a `.pkm` interface
-  marks a weak field with a flags byte (`pkm dump` prints `weak field parent: Node?`).
+  type is `T?` of a class `T` (a user class, `Str`, `io::File` or `Obj`), inferred from the
+  initializer when left off (`weak u = x;`), and a local without an initializer starts as
+  `None`.  A weak reference reads as a `T?`: the object while something holds it, `None`
+  once it has been destroyed; it is assigned a `T` or a `T?`, matched, compared with `==
+  None`, passed, returned and copied into a strong variable or field (which then keeps the
+  object), and a lambda captures a `weak` variable weakly.  It is the back link that breaks
+  a reference cycle (a child's `parent`, a closure stored in the object it refers to).  A
+  weak reference cannot be passed to an `inout` parameter, named by an `inout` local or
+  bound by an `inout` match arm; `weak` is a keyword.  A struct field cannot be `weak` (a
+  struct is a value); not yet: a `weak` tuple or array element, parameter or result.  In
+  PIR a weak reference has the type `weak` and the ops `weak.new`, `weak.load` and
+  `weak.release`; the runtime has `Paykan_weak_new`, `Paykan_weak_load` and
+  `Paykan_weak_release`; a `.pkm` interface marks a weak field with a flags byte (`pkm
+  dump` prints `weak field parent: Node?`).
 - Structs (docs/language/14-structs.md): `struct Point { x: int; y: int; }` declares a
   value type with named fields, held in place and copied by assignment like a tuple, with
   no superclass, no vtable and no identity.  `Point(1, 2)` constructs one from its fields
@@ -105,60 +87,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as for classes, so a struct is a key of `HashMap` and `HashSet`.  A struct crosses
   modules and prebuilt `.pkm` files (a `STRUCT` interface record), and the runtime renders
   and compares one through its layout (`PaykanStruct_toString`, `PaykanStruct_equals`,
-  the layout kind `PAYKAN_KIND_STRUCT`).  Not yet: optional structs, `match` on a
-  struct, a fixed-size array field and an `impl` for another module's struct.
+  the layout kind `PAYKAN_KIND_STRUCT`).  Not yet: `match` on a struct, a fixed-size array
+  field and an `impl` for another module's struct.
 - Generic structs (docs/language/14-structs.md, "Generic structs"): `struct Pair<A, B>
   { a: A; b: B; }` is a template like a generic class, instantiated by its type
   arguments (`Pair<int, Str>`) or inferred from a constructor call (`Pair(1, "a")`, from
   the fields or from an `__init__` of an `impl Pair<A, B>` block), with `impl` and `impl
   Trait for` blocks and bounds, in every position a struct goes, across modules too.
-  A `static fn` in a generic struct's `impl` block is not supported yet.
-- A generic class or struct whose method instantiates its template with an ever-growing
-  type argument (`Deep<Deep<T>>`) is now reported (`exceeds the maximum instantiation
-  depth`) instead of instantiating without end.
-- Private members (docs/language/04-classes.md "Private fields and methods",
-  docs/language/06-modules.md "Private to the module", design in docs/design/visibility.md):
-  a name that starts with two underscores is private.  A field or a method `__x` of a class
-  or struct is reachable only from that type's own methods, `impl` blocks, trait impls and
-  `static fn`s (`'__count' is private to 'Counter': it is reachable only from its own
-  methods`), not from a subclass, the rest of the module or an importer; the default
-  `__init__` still takes every field.  A free function, class, struct, enum or trait `__f`
-  is the module's own: an importer cannot write `m::__f` (`'m::__f' is private to module
-  'm'`), while the module's exported generic templates keep using it.  A public function,
-  field or method cannot name a private type (`'make' is public but its result names the
-  private type '__Node'; make the function private or the type public`).  `__init__` and
-  `__super__` keep their meaning.  The `.pkm` format is unchanged: private names stay in
-  the interface and are refused by name.
-- A value type read through a `view` is passed to a by-value parameter as a copy
-  (docs/language/02-functions-and-calling.md, "A `view` of a reference stays a `view`"): `twice(n)` with `n: view int`, `twice(k)` with `k:
-  view = 3`, `f(xs[i])` with `xs: view int[]`, `twice(b.num())` with `num() -> view int`,
-  and `g(self.x)` with `x: int` in a `view fn` were errors (`it can only be passed to a
-  'view' parameter`) although assigning the same value copies it; they are now allowed.
-  A `view` of an object, a `Str`, or a struct, tuple or array holding one still goes only
-  to a `view` parameter.  The 'never changes self' warning is unchanged: a method that
-  passes part of `self` to a by-value parameter is still not reported.
-- Fixes from an inspection of structs, generic structs and function values: a method
-  that changes `self` can no longer be called on a `let` struct, on a struct in a tuple
-  or on an element of a `let` array (`'p' is declared with 'let'; its value cannot
-  change, and 'shift' is not a 'view fn'`), and a field of a `let` struct or of a
-  captured struct is no longer an `inout` place; `p.__init__(...)` is rejected for
-  structs and classes (`'__init__' cannot be called directly`; on a class it crashed
-  the compiler); a bounded generic struct instantiated by a field type (`struct Outer {
-  k: Keyed<int>; }`) no longer crashes the compiler, and neither does a class
-  instantiation named like an existing struct instantiation (`struct List<T>` next to
-  `collections::List<int>`), which is now the documented conflict error; a type
-  parameter shadowing a template declared later is reported; a call through a function
-  value that is not a name (`fs[0]()`, `t.0(8)`, `mk()()`) now works for results that
-  are references or values held in memory (it failed PIR verification, dropped the
-  statement or stopped the compiler); a named function assigned to a variable without
-  an annotation (`g = square; g(3)`) can be called; a closure stays alive while an
-  argument of its call rebinds the variable or field that held it (`f(swap(f))`,
-  `o.cb(reset(o))` read freed memory); a captured struct's object-typed field is
-  changed through the object (`w.node.n = 7` in a lambda); and the slice hint spells a
-  function element type in parentheses.
-- Assigning `self` in a class method (`self = C(1)`) is now an error (`cannot assign to
-  'self'`): `self` names the object the method was called on, and the assignment changed
-  nothing the caller could see.
+  A `static fn` of its `impl` block is the instantiation's: `Pair<int, Str>::of(1, "a")`.
+- Private names, at two levels (docs/language/04-classes.md "Private fields and methods",
+  docs/language/06-modules.md "Private to the module", design in docs/design/visibility.md).
+  A field or a method whose name starts with two underscores, `__x`, is private to its
+  class or struct: it is reachable only from that type's own methods, `impl` blocks, trait
+  impls and `static fn`s (`'__count' is private to 'Counter': it is reachable only from its
+  own methods`), not from a subclass, the rest of the module or an importer; the default
+  `__init__` still takes every field.  A name that starts with one underscore is private to
+  its module: an importer cannot name a `_` free function, class, struct, enum or trait
+  (`'m::_f' is private to module 'm'`), while the module's exported generic templates keep
+  using it, and a `_` field or method is reachable from any code of the module that
+  declares its type, a subclass and a free function included, and from no importer (`'_w'
+  of 'Pub' is private to module 'lib::shapes'`).  A top-level declaration named with `__`
+  is rejected (`a module's own function is spelled '_f'`).  A public function, field or
+  method cannot name a private type (`'make' is public but its result names the private
+  type '_Node'; make the function private or the type public`).  `fn ___init__(...)`
+  (three underscores) in a class's or a struct's `impl` block is a module-private
+  `__init__`: the type is constructed (`T(...)`) and extended (`__super__(...)`) by the
+  module's own code only, its templates included wherever they are instantiated, and an
+  importer makes one through the module's functions (`'m::T' cannot be constructed here:
+  its initializer '___init__' is private to module 'm'`).  `io::File`'s is one: `open` and
+  `stdin` make a `File`, a program cannot.  `__init__` and `__super__` keep their meaning.
+  Private names stay in a `.pkm` interface and are refused by name.
 - Function types and lambdas (docs/language/15-function-types.md, design in
   docs/design/function-types.md): `(int, float) -> bool` is the type of a function
   value, with the parameters' modes part of it (`(view Str, inout int) -> bool`) and the
@@ -170,13 +128,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   place copied), read-only inside it; a `view`, an `inout`, a `view fn`'s `self` or a
   struct method's `self` cannot be captured.  A function value is called like a function
   (`f(1)`, `obj.cb(1)`, `fs[0](1)`), with the arguments checked and passed as for the
-  function's own parameters.  A closure is a reference with identity (`==`), released like
-  an object; it is not an `Obj`.  Function types go in every type position, cross modules
-  and prebuilt `.pkm` files, and are type arguments (`List<(int) -> int>`).  At run time a
-  closure is an object of a class the compiler makes per lambda, called through a fourth
-  vtable slot; the PIR format, the runtime ABI and the `.pkm` format are unchanged.  Not
-  yet: borrowed results in a function type, methods and generic functions as values,
-  inferred lambda parameter types, capture by reference.
+  function's own parameters.  Function types go in every type position, cross modules
+  and prebuilt `.pkm` files, and are type arguments (`List<(int) -> int>`).  A function
+  value is a value held in place (docs/design/function-types.md, "Run-time
+  representation"): 16 bytes, the address of its code and the box of its closure, the
+  object holding its captures, which is null when it captures nothing, so a named function
+  or a lambda that captures nothing used as a value allocates nothing.  Copying one shares
+  the closure; `==` is true for the same code and the same closure, so `square == square`
+  is `True` and `List.contains(square)` finds it (within a module: a value of the function
+  made in another module is a different value for now), while each evaluation of a
+  capturing lambda makes a new closure.  A function type is a `ValueType`, not an `Obj`,
+  and `((int) -> int)?` takes the same 16 bytes, `None` having no code.  A call loads the
+  code and the closure, keeps the closure for the call and calls the code through its
+  address, through the PIR instructions `fn.addr` and `icall` (docs/pir.md); at `-O2` LLVM
+  makes the call direct where the code is known.  Not yet: borrowed results in a function
+  type, methods and generic functions as values, inferred lambda parameter types, capture
+  by reference.
 
 - The standard library ships with the compiler (docs/language/13-standard-library.md), in
   `stdlib/`: `::collections` has `List<T>`, `LinkedList<T>` (doubly linked, each node
@@ -184,55 +151,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Stack<T>` and `Queue<T>` (on a `LinkedList<T>`), `HashMap<K: Hashable, V>` and
   `HashSet<K: Hashable>` (separate chaining), and `MinPriorityQueue<T>` and
   `MaxPriorityQueue<T>` (binary heaps of elements pushed with an `int` priority, equal
-  priorities popping in push order); `::memory` has `Buffer<T>`.  A broken precondition
-  panics (`pop from an empty Stack`).  The build compiles each module to a `.pkm` with the
-  `paykan` it built and stages it with its source in `lib/paykan/stdlib/<version>/` next
-  to `bin/paykan`; `cmake --install` installs them in `<prefix>/lib/paykan/stdlib/<version>/`
-  and the release packages include them.  `-DPAYKAN_BUILD_STDLIB=OFF` leaves the library
-  out, and it is off by default when cross-compiling.  The `stdlib` test suite
+  priorities popping in push order); `::memory` has `Buffer<T>`, a struct that is a handle
+  to the runtime's storage, so its copies share the slots.  Every index and size of the
+  library is an `unsigned` (`len()` returns one, `get(i)` & co. take one, and `indexOf`
+  returns an `unsigned?`, `None` for a missing element), and the containers hold elements
+  and keys of the sized numeric types too (`List<u8>`, `HashMap<u32, Str>`, `Box<f32>`).
+  A broken precondition of a container panics (`pop from an empty Stack`).  A `Buffer`
+  starts empty, `Buffer<T>()`, and its operations report what goes wrong instead of
+  panicking: `grow`, `reserve`, `push`, `set`, `swap` and `shrink` return a `res::Error`
+  (`OutOfMemory`, `OutOfRange`, `InvalidArgument`, `NotFound`) and `copy(i)` a
+  `res::Result<T>`; `get(i)` and `copyUnchecked(i)` panic on a bad index, for code that
+  has checked it.  The build compiles each module to a `.pkm` with the `paykan` it built
+  and stages it with its source in `lib/paykan/stdlib/<version>/` next to `bin/paykan`;
+  `cmake --install` installs them in `<prefix>/lib/paykan/stdlib/<version>/` and the
+  release packages include them.  `-DPAYKAN_BUILD_STDLIB=OFF` leaves the library out, and
+  it is off by default when cross-compiling.  The `stdlib` test suite
   (`scripts/stdlib_tests.py`) runs `tests/Stdlib` on every backend.
 - A system import (`import ::collections;`) finds the installed standard library: it
   looks in `$PAYKAN_STDLIB` when it is set, then in `<prefix>/lib/paykan/stdlib/<version>/`
   next to the `paykan` executable when that exists, then in `<source-root>/stdlib`.
 - The built-in trait `Hashable` (docs/language/12-traits.md, "Hashable"):
-  `view fn hash() -> int`, implemented by `int`, `bool`, `char` and `Str` and by a class
-  with an `impl Hashable for` block.  The hash of equal values is equal on every run and
-  backend: the runtime's `PaykanInt_hash` (a `bool` or `char` hashes as its `int` value)
-  and `PaykanString_hash` (FNV-1a over the bytes), both ending in the SplitMix64
-  finalizer.  Declaring a trait named `Hashable` is an error.
+  `view fn hash() -> int`, implemented by `int`, `bool`, `char`, `Str` and the sized
+  integer types, and by a class or a struct with an `impl Hashable for` block.  The hash
+  of equal values is equal on every run and backend: the runtime's `PaykanInt_hash` (a
+  `bool` or `char` hashes as its `int` value) and `PaykanString_hash` (FNV-1a over the
+  bytes), both ending in the SplitMix64 finalizer.  Declaring a trait named `Hashable` is
+  an error.
 - The built-in trait `ValueType` (docs/language/12-traits.md, "ValueType"), with no
-  methods: implemented by `int`, `float`, `bool`, `char`, every enum and every tuple, the
-  types held in place.  A class, `Str` and an optional are not, and `impl ValueType for`
-  a class is an error (`class 'P' cannot implement 'ValueType': a class is shared by
-  reference, not held in place`).
+  methods: implemented by the types held in place, `int`, `float`, `bool`, `char`, the
+  sized numeric types, every enum, tuple, struct and function type, and a fixed-size array
+  (which cannot be a type argument yet).  A class, `Str` and an optional are not, and `impl
+  ValueType for` a class is an error (`class 'P' cannot implement 'ValueType': a class is
+  shared by reference, not held in place`).
 - `memory::Box<T: ValueType>`: one value in a shared object, whose `get()` is the
   value's storage (`-> inout T`).
 - Runtime functions for the standard library's panics, reached through `native fn`s:
   `Paykan_panic_message(Str)` prints `paykan: <message>` and aborts, and
   `Paykan_panic_value`, the same as a generic `native fn` with a result, for where a value
   is due.
-- Arrays are `T[n]` (docs/language/05-arrays.md): `xs: int[3] = [1, 2, 3];` holds three
-  ints inline. An array is a value, so `ys = xs` copies it, and its one method is `len()`.
-  A literal for a `T[n]` has exactly `n` elements. An index out of bounds is an error when
-  it is a constant, and a panic (`paykan: array index 3 out of bounds (len=3)`) otherwise.
-  A `let` array's elements cannot be assigned. `int[2][3]` is two `int[3]`s, and an array
-  holds at most 16384 elements, counted across its rows. A parameter can be one in every
-  mode (a plain one is the function's own copy), and so can a result, also across
-  modules. An element can be a scalar or an optional of one (`int?[3]`), an enum, a
-  reference (`Str[2]`, `Point[4]`: a copy of the array shares the elements' objects) or
-  another array. For now an array is only ever a local variable, a parameter, a result or
-  a field (held inside its object): not a tuple element, an optional, a type argument, a
-  `match` arm or an `Obj` (`tuple element 0: a fixed-size array ('int[2]') can only be a
-  local variable, a parameter, a result or a field for now`), and it has no `==` and is
-  not printed. In a variable declaration with an initializer a length can be `_`, the
-  initializer's: `x: int[_][_] = [[1, 2, 3], [4, 5, 6]];` is an `int[2][3]`, and
-  `z: float[_] = f();` takes the length of the array `f` returns.
-- An array literal is a `T[n]` of its own length (docs/language/05-arrays.md,
-  "Literals"): `[1, 2, 3]` is an `int[3]`, `[1, 2.5]` a `float[2]` and `[[1, 2], [3, 4]]`
-  an `int[2][2]`, and objects of different classes give their nearest common ancestor.
-  Where the literal flows into a typed slot, its elements take the slot's element type
-  (`xs: float[2] = [1, 2]`). An array has at least one element: `[]` is an error (`an
-  empty array literal has no type: an array has at least one element`).
 - `[v; n]` is an array of `n` copies of `v` (docs/language/05-arrays.md, "Repeated
   values"): `slots: Entry?[8] = [None; 8];`, and `[[0; 3]; 2]` is an `int[2][3]` of zeros.
   The count is an integer literal of at least 1 (`[0; 0]` is an error, `an array has at
@@ -241,14 +197,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[Node(); 3]` holds one object three times. In PIR, `[0; n]` (or `0.0`, `False`,
   `'\0'`) of a scalar element type is one `mem.zero` of the array. In the AST interchange
   format it is `(array-repeat LOC EXPR INT)`.
-- Slices (docs/language/05-arrays.md, "Slices"): `T[]` is the type of a `view` or `inout`
-  parameter, a slice. It takes an array of any length whose elements are exactly `T`
-  (a literal becomes one) or another slice, and reads or writes the elements in place: a
-  slice is indexed, measured with `len()` and passed on. A generic `xs: view T[]` takes
-  `T` from the elements. Anywhere else `T[]` is an error (`variable 'x' has type 'int[]':
-  a slice can only be a 'view' or 'inout' parameter, and an array has a length
-  ('int[3]')`). In PIR a slice parameter is two, the `ptr` address of the elements and
-  their `i64` number.
 - Traits (docs/language/12-traits.md): `trait Named { view fn name() -> Str; }` lists the
   methods a type must have, and `impl Named for A { ... }` declares that class `A` has
   them. The block's methods join `A` like an `impl` block's, and a method `A` already has
@@ -260,14 +208,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instantiated (`'Str' does not implement trait 'Named', which 'greet' requires of 'T'`).
   A trait is not a type.
 - `impl` blocks (docs/language/04-classes.md, "`impl` Blocks"): `impl Point { ... }` adds
-  `fn`, `view fn` and `static fn` methods to a class of the same module, and can hold its
-  `__init__`. They are called directly, not through the vtable, and subclasses inherit them. A `static fn` is called
-  as `Point::origin()`, or `mod::Point::origin()` from an importer. No `impl` method may
-  reuse a name the class or a superclass has, and none can be overridden.
+  `fn`, `view fn` and `static fn` methods to a class of the same module, and holds its
+  `__init__`. They are called directly, not through the vtable, and subclasses inherit
+  them. A `static fn` is called as `Point::origin()`, or `mod::Point::origin()` from an
+  importer. No `impl` method may reuse a name the class or a superclass has, and none can
+  be overridden.
 - Generic `impl` blocks (docs/language/11-generics.md, "`impl` Blocks"): `impl Box<T> { ... }`
   and `impl Named for Box<T> { ... }` give each instantiation of `Box` the block's methods
   and trait, checked when it is instantiated, also in a module that imports `Box`. A
-  `static fn` in one is not supported yet.
+  `static fn` in one is the instantiation's, called as `Box<int>::of(3)`
+  (`m::Box<int>::of(3)` through an import).
 - Generic classes and functions of an imported module (docs/language/11-generics.md,
   "Modules"): `gen::Box<int>(1)`, `gen::Box("s")`, `b: gen::Box<Str>` and `gen::first(xs)`
   instantiate `gen`'s templates in the importer, in every position a local template may be
@@ -278,21 +228,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   template's module included, and is compiled once per program; inference through
   `Box<T>` parameters sees an imported `Box<int>` too.  A module with templates, with
   instantiations of another module's, or using such an instantiation, is built from source
-  every time (a `.pkm` does not hold templates yet).  Instantiating both this module's `Box<Str>` and an imported
-  template's is an error (`conflicts with another template's instantiation of the same
-  name`).
+  every time (a `.pkm` does not hold templates yet).  Instantiating both this module's
+  `Box<Str>` and an imported template's is an error (`conflicts with another template's
+  instantiation of the same name`).
 - Runtime functions for the standard library's `memory::Buffer<T>`: `PaykanBuffer_new`,
-  `_len`, `_get`, `_copy`, `_set`, `_reserve`, `_grow` and `_shrink` (`Runtime.h`,
-  "Buffer"), generic native functions over a `PaykanBuffer` of values of any size, laid
-  out by their `PaykanType`.  New values are all zero bytes (0, False or None); the
-  buffer retains the references it holds and releases them when they are overwritten,
+  `_len`, `_get`, `_copy`, `_isSet`, `_set`, `_reserve`, `_grow` and `_shrink`
+  (`Runtime.h`, "Buffer"), generic native functions over a `PaykanBuffer` of values of any
+  size, laid out by their `PaykanType`.  New values are all zero bytes (0, False or None);
+  the buffer retains the references it holds and releases them when they are overwritten,
   shrunk away or destroyed; growing at least doubles the allocation and shrinking to a
   quarter of it halves it.  An index out of bounds, a negative count, shrinking by more
   than the length and reading a never-set reference that may not be None panic (`buffer
-  index 3 out of bounds (len=3)`).
+  index 3 out of bounds (len=3)`); `PaykanBuffer_tryGrow` and `PaykanBuffer_tryReserve`
+  report a failed allocation as `ENOMEM` instead of aborting (`memory::Buffer`'s
+  `OutOfMemory`).
 - Generic native functions (docs/language/02-functions-and-calling.md, "Generic native
-  functions"): `native fn pick<T>(first: bool, a: T, b: T) -> T = "c_pick";`.  Each
-  instance calls the same C function with a `PaykanType` for each type argument first
+  functions"): `native fn pick<T>(first: bool, a: view T, b: view T) -> T = "c_pick";`.
+  Each instance calls the same C function with a `PaykanType` for each type argument first
   (`Runtime.h`: the type's size, alignment, kind and reference offsets), and passes what
   the function types `T` by address (a `-> T` result through a `void *out`), so a value
   of any type and size crosses into C; `PaykanType_copy` and `PaykanType_drop` copy and
@@ -310,20 +262,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parameter, of exactly its type: the caller binds it to an `inout` local, passes it on to
   an `inout` parameter or reads it, and it borrows the receiver and the `inout` arguments
   as an `inout` local would; it is lowered as the address the function returns.  An
-  override keeps how the method it overrides returns; `main` returns a copy.  The result's mode is part of a module's interface
-  (a result-mode byte after a `.pkm` record's parameter modes), and in the AST interchange
-  format it is a `(qual view)` after the return type.
+  override keeps how the method it overrides returns; `main` returns a copy.  The result's
+  mode is part of a module's interface (a result-mode byte after a `.pkm` record's
+  parameter modes), and in the AST interchange format it is a `(qual view)` after the
+  return type.
 - `match` arms that borrow the subject (docs/language/07-match-statements.md, "Borrowing
   the subject"): `d: view Dog { … }` binds `d` as a `view` local of the subject, whatever
   the subject is, so nothing changes through it and it passes on only to `view`
   parameters; the variable the subject starts from cannot change until `d`'s last use in
   the arm.  `d: inout Dog { … }` binds `d` as the subject's storage, like an `inout` local:
   assigning to it writes the matched variable or field (a variable, a field, an optional,
-  an `inout` parameter; not an expression, `self`, a `let` local, a `view` or a primitive
-  inside an optional yet), and the subject's variable cannot be used until `d`'s last
-  use.  With the mode before the name (`view d: Dog`) the syntax error shows the fix.  In
-  the AST interchange format the arm carries `(qual view)` or `(qual inout)` after its
-  type.
+  an `inout` parameter; not an expression, `self`, a `let` local, a `view`, or a primitive
+  or an enum inside an optional yet), and the subject's variable cannot be used until
+  `d`'s last use.  With the mode before the name (`view d: Dog`) the syntax error shows the
+  fix.  In the AST interchange format the arm carries `(qual view)` or `(qual inout)` after
+  its type.
 - `view fn` (docs/language/04-classes.md, "Methods that don't change self"): a method
   declared `view fn len() -> int` does not change `self`, and is the only kind of method
   that can be called on a `view` (`'c' is a 'view' parameter; 'tick' is not a 'view fn'`).
@@ -332,12 +285,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The marker is part of a module's interface (method flag `0x2` in a `.pkm`), and a
   function in the AST interchange format carries it as a trailing `(qual view)`.  In a
   `view fn`, `self` and everything reached through it is read-only, as through a `view`
-  parameter (`'self' is read-only in 'view fn get'; cannot assign to its field 'n'`),
-  though part of `self` may still be returned.  A method that never changes `self` but
-  is not a `view fn` gets a warning (`'area' never changes 'self': make it a 'view fn' so
-  'view' parameters can call it`), worked out across a method's overrides and its calls
-  on `self`; the samples and the manual mark theirs.  `samples/codegen/48_view_fn.pkn`
-  shows them.
+  parameter (`'self' is read-only in 'view fn get'; cannot assign to its field 'n'`), and
+  part of `self` that is an object, string or optional (or an array or tuple holding one)
+  is returned as a `view`, `-> view T`: `view fn name() -> Str { return self.name; }` is an
+  error, `'self' is read-only in 'view fn name', so part of it can only be returned as a
+  'view': write '-> view Str'`, while a field of a value type (or an array or tuple of
+  them) is returned as a copy.  A method that never changes `self` but is not a `view fn`
+  gets a warning (`'area' never changes 'self': make it a 'view fn' so 'view' parameters
+  can call it`), worked out across a method's overrides and its calls on `self`; a method
+  that returns part of `self` does not.  The samples and the manual mark theirs.
+  `samples/codegen/48_view_fn.pkn` shows them.
 - Local borrows (docs/language/01-language-basics.md, "Local borrows"): a local declared
   with a mode where the type goes, `v: view = k + 1;` or `w: view float = k;`, the type
   inferred when left off.  A `view` local reads its initializer, which may be any
@@ -349,29 +306,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type: assigning to it writes there, and it passes its address on to an `inout`
   parameter.  It names a place as an `inout` argument does (not an expression, an array
   element yet, a string's character, `self`, a `let` local or a `view`), of exactly its
-  type, and keeps a field's object alive while it can be used.  In PIR, box slots now have
-  addresses (`local.addr`, `field.addr`, `ptr.load`, `ptr.store`).  A local borrow of a
+  type, and keeps a field's object alive while it can be used.  A local borrow of a
   variable is exclusive while it is live, from its declaration to its last use in its
   block (a loop that uses it keeps it live): the variable an `inout` local names cannot be
   used (`'k' is borrowed by 'inout' local 'x' until 'x' is last used`), and one a `view`
   local reads cannot change (`'c' is viewed by 'view' local 'v' until 'v' is last used;
   'tick' is not a 'view fn'`).  A borrow of a borrow keeps the first variable borrowed.
-  A local borrow needs an initializer, is never `let` and is not a destructuring target; written before the name (`view x = e;`) the error shows
-  the fix.  In the AST interchange format a local borrow carries `(qual view)` or
+  A local borrow needs an initializer, is never `let` and is not a destructuring target;
+  written before the name (`view x = e;`) the error shows the fix.  In the AST
+  interchange format a local borrow carries `(qual view)` or
   `(qual inout)`.
-- A `view` stays a `view` (docs/language/02-functions-and-calling.md): a `view` parameter
-  or local can only be passed on to a `view` parameter, whatever its type (`print`,
-  `println` and `open` take `view` parameters; the builtin methods read their arguments;
-  `Str(s)` returns `s` itself and takes none).  One that shares what it holds is never
-  stored (assigned, put in an array or tuple, destructured) or returned, and a `match` arm's name for one is a `view` too.  Passing a `view` to an
-  `inout` parameter now reads `'v' is a 'view' parameter; it cannot be passed to 'inout'
-  parameter 'n'`.
+- A `view` of a reference stays a `view` (docs/language/02-functions-and-calling.md, "A
+  `view` of a reference stays a `view`"): a `view` of an object, a `Str`, an optional of
+  one, or a struct, tuple or array holding one can only be passed on to a `view` parameter
+  (`io::println` and the other print functions take a `view T`; the builtin methods read
+  their arguments; `Str(s)` returns `s` itself and takes none).  A value type read through
+  a `view` (`n: view int`, `k: view = 3`, `xs[i]` with `xs: view int[]`, a `-> view int`
+  result, `self.x` with `x: int` in a `view fn`) is passed to a by-value parameter as a
+  copy, as assigning it copies it.  A `view` that shares what it holds is never stored
+  (assigned, destructured) or returned, and a `match` arm's name for one is a `view` too;
+  an array or tuple literal is a new value, so any `view` can be one of its elements
+  (`[v]`, `(s, 1)`, `return (s, 1);`).  Passing a `view` to an `inout` parameter reads
+  `'v' is a 'view' parameter; it cannot be passed to 'inout' parameter 'n'`.
 - `view` and `inout` parameters (docs/language/02-functions-and-calling.md, "Parameter
-  modes"), on functions, methods and constructors, for parameters of any type (type
-  parameters included).  The mode is written where the type goes: `fn bump(n: inout int)`,
-  `fn scale(x: inout float, by: view float)`, `fn show(c: view Counter)`, called as
-  `bump(k)`.  A `view` parameter is read-only, and so is what it holds: no field or
-  element write and only `view fn` calls through it.  An `inout` parameter is
+  modes: view and inout"), on functions, methods and constructors, for parameters of any
+  type (type parameters included).  The mode is written where the type goes: `fn bump(n:
+  inout int)`, `fn scale(x: inout float, by: view float)`, `fn show(c: view Counter)`,
+  called as `bump(k)`.  A `view` parameter is read-only, and so is what it holds: no field
+  or element write and only `view fn` calls through it.  An `inout` parameter is
   its caller's storage, passed by address so
   every write reaches the caller at once: a local variable, a parameter (an `inout` one
   passes its address on) or a field of an object (`obj.f`, `self.f`, `a.b.f`; by real
@@ -381,12 +343,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference: passing it neither retains nor releases, and assigning to it replaces what
   the caller's variable holds.  A literal or other expression, `self`, a `view` parameter
   or anything reached through one, a `let` local, an array element (not yet) or a
-  string's character is an error, and so is the same variable or field path passed to two
-  `inout` parameters of one call.  An override keeps every parameter's mode; modes are part
-  of a module's interface.  `view` and `inout` are reserved words, a syntax error anywhere
-  but before a parameter's type; written before the name (`inout n: int`), the error shows
-  the fix.  In the AST interchange format a parameter carries `(qual view)` or
-  `(qual inout)`.  `samples/codegen/47_inout_view.pkn` shows them.
+  string's character is an error.  An override keeps every parameter's mode; modes are
+  part of a module's interface (a `.pkm` record's parameter modes), so calls and overrides
+  in another module are checked against them.  `view` and `inout` are reserved words, a
+  syntax error anywhere but before a parameter's type; written before the name (`inout n:
+  int`), the error shows the fix.  In the AST interchange format a parameter carries
+  `(qual view)` or `(qual inout)`.  `samples/codegen/47_inout_view.pkn` shows them.
+- What a call passes to an `inout` parameter shares no storage with anything else the
+  call borrows (docs/language/02-functions-and-calling.md, "Exclusivity"): another
+  `inout` argument, a `view` argument, or the receiver of a method that may change it or
+  of a `view fn`, and a variable overlaps a field chain on it.  `both(k, k)` with
+  `fn both(a: view int, b: inout int)` is `'k' is passed to 'view' parameter 'a'; it
+  cannot also be passed to 'inout' parameter 'b'`, and `p.take(p.x)` is `'p.x' is part of
+  'p', the receiver of 'take' (not a 'view fn'); it cannot also be passed to 'inout'
+  parameter 'm'`.
 
 - `let` local declarations: `let n = 3;` and `let s: Str = "a";` declare a variable
   that cannot be reassigned (`'n' is declared with 'let' and cannot be reassigned`),
@@ -407,15 +377,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `samples/imports/13_pkm` walks through it.  Libraries `paykan_pkm` (the file format) and
   `paykan_modules` (the resolver); the runtime ABI version moved to
   `PAYKAN_RUNTIME_ABI_VERSION` in `Runtime.h`.
-- `native fn name(params) -> T = "c_symbol";` declares a function whose body is
-  a C function written against the runtime ABI (#198): `int`, `float`, `bool`,
-  `char`, `Str` and `Obj` cross by the runtime builtins' convention (`Str?` and
-  `Obj?` as a result).  `native` is a reserved word.  In PIR the C function is
-  a module-less `extern fn @$c.<symbol>`; both backends declare it from its
-  signature.  `paykan` does not build native code: `--object=a.o,b.o` (a
-  comma-separated list, repeatable) names the objects or archives that define
-  it, and every backend links them (the llvm JIT loads them).  Sample:
-  `samples/imports/14_native`.
+- Each build of the compiler has a build ID, a hash of its sources (`cmake/BuildId.cmake`,
+  #188), which a `.paykan_cache` module entry records (`core.build`) and which must match
+  for the entry to be used, so a development build never reuses an entry another build of
+  the same version wrote; `--verbose` reports `is stale (compiled by paykan <version>
+  (<id>); this is paykan <version> (<id>))`.  A release build (`-DPAYKAN_RELEASE=ON`, set
+  by the release workflow and the Homebrew formula) has no build ID, and a prebuilt `.pkm`
+  is still judged by its version alone.
+- `native fn name(params) -> T = "c_symbol";` declares a function whose body is a C
+  function written against the runtime ABI (#198; docs/language/02-functions-and-calling.md,
+  "Native Functions"): `int`, `float`, `bool`, `char`, an enum (as its ordinal, an
+  `int64_t`), `Str` and `Obj` cross by the runtime builtins' convention (`Str?` and `Obj?`
+  as a result).  Only `int`, `float`, `bool`, `char` and an enum cross by value: any other
+  parameter is a `view`, which C borrows, or an `inout`, which C changes in place
+  (`parameter 's' must be 'view' or 'inout' ('s: view Str'); only int, float, bool, char
+  and an enum cross into C by value`).  An `inout` argument is the caller's variable:
+  `int64_t *`, ..., `PaykanShared **` for a `Str` or `Obj`, and for a generic instance's
+  `inout T` the value's own address.  The result can be a `view` of a `view` or `inout`
+  parameter.  A call in the declaring module calls the C function directly with the
+  caller's own references, so it does no reference counting.  `native` is a reserved word.
+  In PIR the C function is a module-less `extern fn @$c.<symbol>`; both backends declare it
+  from its signature.  `paykan` does not build native code: `--object=a.o,b.o` (a
+  comma-separated list, repeatable) names the objects or archives that define it, and
+  every backend links them (the llvm JIT loads them).  Sample: `samples/imports/14_native`.
+- `scripts/pkfmt.py` checks (`python3 scripts/pkfmt.py`) or applies (`--apply`) the layout
+  of Paykan source (`.pkn`); every tracked file is formatted with it, and the Lint job
+  checks it.
 
 ### Changed
 
@@ -434,26 +421,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `Str` remain builtin classes, and `print`, `open`, `File` and `Error` are free names
   (a program that imports `::io` still cannot declare a `File`, `Error`, `Result` or
   `ErrorCode` of its own: type names are global across an import graph).
-- `memory::Buffer<T>` is a struct: a handle to the runtime's storage, so its copies share
-  the slots.  It starts empty, `Buffer<T>()`, and its operations report what goes wrong
-  instead of panicking: `grow`, `reserve`, `push`, `set`, `swap` and `shrink` return a
-  `res::Error` (`OutOfMemory`, `OutOfRange`, `InvalidArgument`, `NotFound`) and `copy(i)` a
-  `res::Result<T>`; `get(i)` and `copyUnchecked(i)` still panic on a bad index, for code
-  that has checked it.  `::collections` uses them so; its own API is unchanged.
-- A function value is a value held in place, not a reference to a closure object
-  (docs/design/function-types.md, "Run-time representation"): 16 bytes, the address of its
-  code and the box of its closure, the object holding its captures, which is null when it
-  captures nothing.  A named function or a lambda that captures nothing used as a value
-  no longer allocates.  Copying one shares the closure; `==` is true for the same code
-  and the same closure, so `square == square` is now `True` and `List.contains(square)`
-  finds it (within a module: a value of the function made in another module is a
-  different value for now), while each evaluation of a capturing lambda still makes a new
-  closure.  A
-  function type is a `ValueType`, and `((int) -> int)?` takes the same 16 bytes, `None`
-  having no code.  A call loads the code and the closure, keeps the closure for the call
-  and calls the code through its address, through the new PIR instructions `fn.addr` and
-  `icall` (docs/pir.md); at `-O2` LLVM makes the call direct where the code is known.
-  The generated code and the PIR change: clear every `.paykan_cache` after upgrading.
 - An if-statement chains with the new keyword `elif` instead of `else if`
   (docs/grammar.md): `if x > 0 { … } elif x == 0 { … } else { … }`.  `else if` after an
   if-statement's block is a syntax error that names `elif`; the conditional expression
@@ -466,52 +433,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keeps parsing.  A statement starting with `if` is a ternary expression statement when
   `then` follows its condition, as before.  The samples, the standard library, the
   tests and the docs are rewritten without the parentheses.
-- `scripts/pkfmt.py` checks (`python3 scripts/pkfmt.py`) or applies (`--apply`) the layout
-  of Paykan source (`.pkn`); every tracked file is formatted with it, and the Lint job
-  checks it.
-- A generic class's or struct's `impl` block may declare `static fn`s; one is the
-  instantiation's, called as `Box<int>::of(3)` (`m::Box<int>::of(3)` through an import).
-- A module-private initializer: `fn ___init__(...)` (three underscores) in a class's or a
-  struct's `impl` block is its `__init__`, and the type is constructed (`T(...)`) and extended
-  (`__super__(...)`) by the module's own code only, its templates included wherever they are
-  instantiated; an importer makes one through the module's functions (`'m::T' cannot be
-  constructed here: its initializer '___init__' is private to module 'm'`).  `io::File`'s is
-  one: `open` and `stdin` make a `File`, a program cannot.
-- The object header is 16 bytes instead of 24 (src/Runtime/Runtime.h, `PaykanObject`;
-  docs/language/08-memory-model.md): the vtable pointer, then a 32-bit strong count and a
-  32-bit weak count, so every object is 8 bytes smaller.  A count that would pass
-  `INT32_MAX` panics (`too many strong references to one object`) instead of wrapping.
-  Deferred destruction keeps its pending objects on a runtime stack (256 inline slots,
-  then the C heap) rather than in their `strong` words, which can no longer hold a
-  pointer; the destroy order is unchanged.  The object layout is ABI: clear every
-  `.paykan_cache` after upgrading.
-- Two levels of privacy (docs/design/visibility.md): `__` now only marks a field or
-  method private to its class or struct, and a single `_` marks a name private to its
-  module.  A `_` free function, class, struct, enum or trait is what a top-level `__`
-  one was (`collections::_Entry`, `memory::_new`); a `_` field or method is reachable
-  from any code of the module that declares its type, a subclass and a free function
-  included, and from no importer (`'_w' of 'Pub' is private to module 'lib::shapes'`).
-  A top-level declaration named with `__` is rejected.  The standard library's private
-  functions and classes are renamed to match.
+- Arrays are `T[n]` (docs/language/05-arrays.md), values of a fixed length, instead of the
+  dynamically sized `T[]` objects: `push`, `pop`, `toString` and `equals` on an array are
+  gone, and storage that grows is `collections::List<T>` or `memory::Buffer<T>`.
+  `xs: int[3] = [1, 2, 3];` holds three
+  ints inline. An array is a value, so `ys = xs` copies it, and its one method is `len()`.
+  A literal for a `T[n]` has exactly `n` elements. An index out of bounds is an error when
+  it is a constant, and a panic (`paykan: array index 3 out of bounds (len=3)`) otherwise.
+  A `let` array's elements cannot be assigned. `int[2][3]` is two `int[3]`s, and an array
+  holds at most 16384 elements, counted across its rows. A parameter can be one in every
+  mode (a plain one is the function's own copy), and so can a result, also across
+  modules. An element can be a scalar or an optional of one (`int?[3]`), an enum, a
+  reference (`Str[2]`, `Point[4]`: a copy of the array shares the elements' objects) or
+  another array. For now an array is only ever a local variable, a parameter, a result or
+  a field of a class (held inside its object): not a tuple element, a struct field, an
+  optional, a type argument, a `match` arm or an `Obj` (`a fixed-size array ('int[2]') can
+  only be a local variable, a parameter, a result or a field for now`), and it has no `==`
+  and is not printed. In a variable declaration with an initializer a length can be `_`,
+  the initializer's: `x: int[_][_] = [[1, 2, 3], [4, 5, 6]];` is an `int[2][3]`, and
+  `z: float[_] = f();` takes the length of the array `f` returns.
+- An array literal is a `T[n]` of its own length (docs/language/05-arrays.md,
+  "Literals"): `[1, 2, 3]` is an `int[3]`, `[1, 2.5]` a `float[2]` and `[[1, 2], [3, 4]]`
+  an `int[2][2]`, and objects of different classes give their nearest common ancestor.
+  Where the literal flows into a typed slot, its elements take the slot's element type
+  (`xs: float[2] = [1, 2]`). An array has at least one element: `[]` is an error (`an
+  empty array literal has no type: an array has at least one element`).
+- Slices (docs/language/05-arrays.md, "Slices"): `T[]` is the type of a `view` or `inout`
+  parameter, a slice. It takes an array of any length whose elements are exactly `T`
+  (a literal becomes one) or another slice, and reads or writes the elements in place: a
+  slice is indexed, measured with `len()` and passed on. A generic `xs: view T[]` takes
+  `T` from the elements. Anywhere else `T[]` is an error (`variable 'x' has type 'int[]':
+  a slice can only be a 'view' or 'inout' parameter, and an array has a length
+  ('int[3]')`). In PIR a slice parameter is two, the `ptr` address of the elements and
+  their `i64` number.
 - An object is one allocation (docs/language/08-memory-model.md, "The reference counts"):
-  the reference counts live in the object's header, `{ vtable, strong count, weak count,
+  its 16-byte header (src/Runtime/Runtime.h, `PaykanObject`) is the vtable pointer, then a
+  32-bit strong count and a 32-bit weak count, `{ vtable, strong count, weak count,
   fields… }`, and the separate `PaykanShared` box is gone.  A strong reference
   (`PaykanShared *`) and a weak reference (`PaykanWeak *`) are the object's own pointer:
   `PaykanShared_new` is a retain and returns the object, `PaykanShared_get` is the
-  identity, and both backends lower `unbox` to the identity.  A `destroy` (vtable slot 0)
-  releases what the object holds and tears down its resources but no longer frees the
-  object: the runtime frees it after the destroy, or keeps it, empty, until the last weak
-  reference to it is released (`Paykan_weak_release`).  Generated destructors no longer end
-  in `free`, `PaykanObject_destroy` is a no-op, `PaykanString_destroy` frees the bytes
-  only, and a string temporary the generated code drops goes through the new
-  `Paykan_dispose(obj)` (destroy and free an object that was never boxed).  Every object
-  struct, the runtime's and the generated ones, starts with the three-word header; the
-  immortal `None` and `Stdin` start with a strong count of 1.  The runtime ABI, PIR and
-  `.pkm` versions are unchanged (pre-release): delete every `.paykan_cache` directory
-  written by an older build.
-- An array or tuple literal can have a `view` as an element (`[v]`, `(s, 1)`, `return (s, 1);`
-  with `s: view Str`): it is a new value, holding its own reference to the element.  Other
-  stores of a `view` (a variable, a field, an element, `return`) stay errors.
+  identity, and both backends lower `unbox` to the identity.  A count that would pass
+  `INT32_MAX` panics (`too many strong references to one object`) instead of wrapping.
+  A `destroy` (vtable slot 0) releases what the object holds and tears down its resources
+  but does not free the object: the runtime frees it after the destroy, or keeps it,
+  empty, until the last weak reference to it is released (`Paykan_weak_release`).
+  Generated destructors do not end in `free`, `PaykanObject_destroy` is a no-op,
+  `PaykanString_destroy` frees the bytes only, and a string temporary the generated code
+  drops goes through the new `Paykan_dispose(obj)` (destroy and free an object that was
+  never boxed).  Deferred destruction keeps its pending objects on a runtime stack (256
+  inline slots, then the C heap); the destroy order is unchanged.  Every object struct,
+  the runtime's and the generated ones, starts with the header; the runtime's immortal
+  `None` and stdin `File` start with a strong count of 1.  The runtime ABI version is
+  unchanged (6): delete every `.paykan_cache` directory written by an older build.
 - The program's entry point is `fn main() -> int` or `fn main(args: view Str[]) -> int`
   (docs/language/02-functions-and-calling.md): the arguments are a slice, which `main`
   reads (`args[0]` is the script path, or the executable's) but does not keep.  Any other
@@ -534,45 +507,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Blocks"): `class A { fn __init__() { ... } }` is an error that says to write
   `impl A { fn __init__() { ... } }`. The class body holds the fields and the virtual
   methods.
-- A native function's parameters are borrowed (docs/language/02-functions-and-calling.md,
-  "Native Functions"): only `int`, `float`, `bool` and `char` cross into C by value; any
-  other parameter is a `view`, which C borrows, or an `inout`, which C changes in place
-  (`parameter 's' must be 'view' or 'inout' ('s: view Str'); only int, float, bool and char
-  cross into C by value`).  An `inout` argument is the caller's variable: `int64_t *`, ...,
-  `PaykanShared **` for a `Str` or `Obj`, and for a generic instance's `inout T` the
-  value's own address.  The result can be a `view` of a `view` or `inout` parameter.  A
-  call in the declaring module calls the C function directly with the caller's own
-  references, so it does no reference counting.
-- What a call passes to an `inout` parameter shares no storage with anything else the
-  call borrows (docs/language/02-functions-and-calling.md, "Exclusivity"): not only another
-  `inout` argument, but a `view` argument and the receiver of a method that may change
-  it or of a `view fn`, and a variable overlaps a field chain on it.  `both(k, k)` with
-  `fn both(a: view int, b: inout int)` is now `'k' is passed to 'view' parameter 'a'; it
-  cannot also be passed to 'inout' parameter 'b'`, and `p.take(p.x)` is `'p.x' is part of
-  'p', the receiver of 'take' (not a 'view fn'); it cannot also be passed to 'inout'
-  parameter 'm'`.
-- A `view fn` returns part of `self` that is an object, string or optional (or an
-  array or tuple holding one) as a `view`, `-> view T` (docs/language/04-classes.md, "Methods that don't change self"):
-  returned as a copy, its caller could change it.  `view fn name() -> Str { return
-  self.name; }` is now an error, `'self' is read-only in 'view fn name', so part of it can
-  only be returned as a 'view': write '-> view Str'`; a field of a value type (or an array
-  or tuple of them) is still returned as a copy.  A method that is not a `view fn` and returns part of `self` no longer
-  gets the warning that it never changes `self`.
+- Assigning `self` in a class method (`self = C(1)`) is now an error (`cannot assign to
+  'self'`): `self` names the object the method was called on, and the assignment changed
+  nothing the caller could see.
 - An override of `toString` or `equals` is declared `view fn` (`view fn toString() -> Str`),
   like the `Obj` methods it overrides: a plain `fn` override is an error.
-- `.pkm` interfaces carry a function's, a method's and a constructor's
-  parameter modes (`view`, `inout`), so calls and overrides in another module
-  are checked against them, whether the module is imported from source, from
-  the cache or from a prebuilt file.
 - PIR: `mem(N, A)` slots (docs/pir.md §1 and §6), a local's or a field's N bytes
   aligned to A, for aggregates: fixed-size arrays and tuples.  A `mem` slot is never a
   value: it is reached through its address, with `ptr.add` to its parts, and copied and
   cleared with `mem.copy` and `mem.zero`.  A backend plugin must handle the three
   instructions.
 - PIR: four address instructions, `local.addr`, `field.addr`, `ptr.load` and
-  `ptr.store` (docs/pir.md §6), which `inout` parameters lower to.  Only
-  scalar (`i64`, `f64`, `bool`, `char`) slots have addresses.  A backend plugin
-  must handle them.
+  `ptr.store` (docs/pir.md §6), which `inout` parameters and locals lower to.  Scalar
+  (`i64`, `f64`, `bool`, `char`), optional and `box` slots have addresses, and so has a
+  `mem` local.  A backend plugin must handle them.
 - PIR: inline optionals (#96, docs/pir.md §1 and §6).  Four value types, `opt_i64`,
   `opt_f64`, `opt_bool` and `opt_char` (a bool presence flag, then the payload at its
   alignment: 16 bytes for `opt_i64` and `opt_f64`, 2 for `opt_bool` and `opt_char`), and four
@@ -591,8 +539,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `int<Str>` & co. return one without allocating (the runtime's `PaykanString_parse_int` &
   co.).  The semantics are unchanged.  An `int?[3]` holds its elements inline, 16 bytes
   each, and a tuple holds an `int?` element inline at its offset.  In #96's benchmark
-  (10M pushes onto a `Stack<int>` and 10M pops through `pop() -> T?`) popping through the `int?` allocates nothing and takes as long as popping
-  a plain `int`.
+  (10M pushes onto a `Stack<int>` and 10M pops through `pop() -> T?`) popping through the
+  `int?` allocates nothing and takes as long as popping a plain `int`.
 
 - Tuples are values held in place (docs/language/09-tuples.md, "Tuples as Values"), like
   `T[n]`: a tuple's elements are laid out like a C struct's fields in the variable, field
@@ -639,9 +587,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   statement (`if c then f() else g();`) in a function that returns a value, failed PIR
   verification (`control can fall off the end of a non-void function`): the rest of the
   function was emitted inside the branch.  One branch now runs for its effect.
-- A generic class or function of a module whose body calls a `static fn` of one of that
-  module's types (`Pub::make()`) no longer fails to lower with "call to undeclared
-  function '$m::Pub::make'" when an importer instantiates it.
 - A top-level declaration named after a builtin type (`class int { ... }`, `struct u8`,
   `enum unsigned`, `fn float(...)`, under any of the types' spellings) was accepted and
   silently shadowed by the builtin; it is now rejected (`'u8' is a builtin type and cannot
@@ -651,24 +596,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not holding a box while it passed its argument's box through); the `Str` constructor now
   takes its argument's ownership classification, so the string is passed on and released
   once.
-
-- A `.paykan_cache` module entry written by another build of the same version was reused
-  (#188), so a compiler fix never reached a cached import: every development build calls
-  itself 0.1.1.  Each build now has a build ID, a hash of the compiler's sources
-  (`cmake/BuildId.cmake`), which a cache entry records (`core.build`) and which must match
-  for the entry to be used; `--verbose` reports `is stale (compiled by paykan 0.1.1
-  (<id>); this is paykan 0.1.1 (<id>))`.  A release build (`-DPAYKAN_RELEASE=ON`, set by
-  the release workflow and the Homebrew formula) has no build ID, and a prebuilt `.pkm` is
-  still judged by its version alone.
+- Calling `__init__` on an object (`c.__init__(2)`) stopped the compiler in the lowering;
+  it is now an error (`'__init__' cannot be called directly; it runs when a value is
+  constructed ('C(...)')`).
+- A generic class whose method instantiates its template with an ever-growing type
+  argument (`Deep<Deep<T>>`) is now reported (`exceeds the maximum instantiation depth`)
+  instead of instantiating without end, as a field's type already was.
 - A literal argument of `__super__(...)` was typed on its own instead of by the superclass
   `__init__`'s parameter: `__super__([1, 2])` for a `float[2]` parameter was an error
   (`argument 1 of '__super__' has type 'int[2]', expected 'float[2]'`), as was `None` or
   `(None, 3)` for an optional or a tuple of optionals.  It now takes the parameter's type,
   as a call's argument does.
-- A `-> inout` result of a tuple was copied out into a temporary instead of naming its
-  storage: a write through it (an `inout` local, an `inout` argument) changed only the
-  copy, and reading an element of one released the references the storage held.  It is
-  now the address of the storage, like an `inout` result of any other type.
 - The llvm backend's `run` (and `--emit-llvm`) optimised the program under LLVM's default data
   layout instead of the host's, which the JIT then ran it with: an object with a `char` or
   `bool` field before an `int` was allocated a few bytes short, and stores could land at the

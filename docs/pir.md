@@ -291,7 +291,8 @@ unless stated):
                                                ; the lowering guards 0 and INT64_MIN/-1
 %r = neg %a                                    ; i64 or f64
 %r = not %a                                    ; bool
-%r = cmp eq %a, %b | ne | lt | le | gt | ge    ; -> bool; eq/ne also on box/obj/ptr
+%r = cmp eq %a, %b | ne | lt | le | gt | ge    ; -> bool; also on bool and char (signed);
+                                               ; eq/ne also on box/obj/ptr
 %r = select %c, %a, %b                         ; bool ? a : b (no side effects)
 %r = itof %a                                   ; i64 -> f64 (numeric)
 %r = ftoi %a                                   ; f64 -> i64 (numeric, toward zero);
@@ -326,8 +327,8 @@ are LLVM's `fcmp une` / `oeq olt ole ogt oge` and C's `!= == < <= > >=`.
 
 `cast` pairs: `f64->i64` and `i64->f64` reinterpret the bits; `bool->i64`,
 `char->i64` zero-extend; `i64->bool`, `i64->char` truncate; `box<->i64`,
-`obj<->i64`, `ptr<->i64` are pointer/int casts; `obj<->ptr`, `box<->ptr` are
-free.  Nothing else.
+`obj<->i64`, `ptr<->i64` are pointer/int casts; `obj<->ptr`, `box<->ptr`,
+`box<->obj` are free.  Nothing else.
 
 **Calls**
 
@@ -596,6 +597,9 @@ Paykan_dispose(obj) -> void      ; destroy and free an object never boxed (a str
 Paykan_panic_div_by_zero() -> void      Paykan_panic_div_overflow() -> void
 Paykan_panic_float_to_int(f64) -> void  Paykan_panic_int_to_char(i64) -> void
 Paykan_panic_index(i64, i64) -> void    ; the index, the length
+Paykan_panic_float_to_type(f64, ptr, i64) -> void   ; the value, the target type's name and its length
+; sized numeric types
+Paykan_round_f16(f64) -> f64            ; rounded to the nearest f16
 ; strings
 PaykanString_new(ptr, i64) -> obj       PaykanString_destroy(obj) -> void
 PaykanString_concat(obj, obj) -> obj    PaykanString_char_at(obj, i64) -> char
@@ -605,6 +609,7 @@ PaykanString_equals(obj, box) -> i64    PaykanString_toString(obj) -> box
 PaykanString_length(obj) -> i64
 PaykanString_parse_int(obj, ptr) -> i64     PaykanString_parse_float(obj, ptr) -> i64
 PaykanString_parse_bool(obj, ptr) -> i64    ; 1 and the value at ptr, or 0 (and 0 there)
+PaykanString_from_uint(i64) -> obj      PaykanString_parse_uint(obj, ptr) -> i64   ; `unsigned`
 ; hash (the builtin Hashable's `hash()`)
 PaykanInt_hash(i64) -> i64              PaykanString_hash(obj) -> i64
 ; tuples: the address of the value (of both, for equals), then its layout
@@ -660,12 +665,18 @@ The verifier rejects a program when:
   16 or 32);
 * a `call` names an undeclared function or passes the wrong arity/types; a
   `vcall` slot is out of range of the named class's vtable or the argument list
-  does not match the slot's signature;
+  does not match the slot's signature; an `icall`'s callee is not a `ptr` or
+  its arguments do not match the signature it writes; `fn.addr` names a
+  function the module does not declare;
 * `field.load`/`field.store`/`field.addr`/`new`/`vtable.addr` name an
   unknown class or field; a field store has the wrong type;
+* a class extends an unknown class or declares a field twice, a field has
+  a type that is not a field type (§5), a defined class's vtable slot 0 is
+  not `destroy`, or an `extern class` names no module;
 * `weak.new` takes anything but a `box`, `weak.load` or `weak.release`
-  anything but a `weak`; a `weak` is cast or compared, or its address
-  taken;
+  anything but a `weak`; a `weak` is cast or its address taken (that a
+  `weak` is never compared, §1, is the lowering's guarantee: `cmp` does not
+  check it);
 * `local.addr` or `field.addr` takes the address of a slot that is not `i64`,
   `f64`, `bool`, `char`, an optional, `box` or `mem`; `ptr.load`/`ptr.store`
   take an address that is not a `ptr`, or read or write a value of another
@@ -676,7 +687,8 @@ The verifier rejects a program when:
   slot's size is not a positive multiple of its alignment, or its alignment
   is not 1, 2, 4 or 8;
 * a runtime or native extern takes or returns an optional;
-* `break`/`continue` appear outside a `while`; a statement follows a
+* `break`/`continue` appear outside a `while` or in its condition region,
+  or a condition region ends the function; a statement follows a
   terminator in the same block (a terminator is `break`, `continue`, `ret`,
   `unreachable`, or an `if` whose two branches both end in one); `ret`
   carries the wrong type; a non-void function's body can fall off the end
@@ -688,6 +700,13 @@ The verifier rejects a program when:
   be a native `$c.<symbol>`), or anything else (a function, a module extern's
   `symbol`, a `cstr`/`data`/`bytes` global) has either name;
 * `@main` has a signature other than `() -> i64` or `(ptr, i64) -> i64`.
+
+Verifying a whole program (`verify(const Program &)`) adds the checks
+across modules: a module appears twice; a module extern (`extern fn ...
+module`, `extern class`) names a module that is not in the program, or a
+function or class that module does not define, or one whose signature or
+field layout differs from the definition; the main module defines no
+`@main`.
 
 ## 10. Text format summary
 
@@ -701,12 +720,12 @@ module "01"
 cstr @.str0 = "Hello" len 5
 extern fn @$rt.PaykanString_new(ptr, i64) -> obj
 extern fn @$rt.Paykan_println(obj) -> void
-extern fn @$rt.PaykanString_destroy(obj) -> void
+extern fn @$rt.Paykan_dispose(obj) -> void
 
 fn @main() -> i64 {
   %s = call @$rt.PaykanString_new(@.str0, 5)
   call @$rt.Paykan_println(%s)
-  call @$rt.PaykanString_destroy(%s)
+  call @$rt.Paykan_dispose(%s)
   ret 0
 }
 ```

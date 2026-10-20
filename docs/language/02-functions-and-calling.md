@@ -108,7 +108,7 @@ returned. One of an object, string, array, tuple or optional shares what the cal
 passed, but the function cannot change it through the parameter: no assignment to a field
 or an element (`'c' is a 'view' parameter; cannot assign to its field 'n'`), no field or
 element passed to an `inout` parameter, and only a `view fn` can be called on it
-(`toString`, `equals`, `len`, `length`, or a method of its class declared `view fn`, see
+(`toString`, `equals`, `len`, or a method of its class declared `view fn`, see
 [Methods that don't change `self`](04-classes.md#methods-that-dont-change-self); `'c' is a
 'view' parameter; 'tick' is not a 'view fn'`).
 
@@ -319,8 +319,9 @@ accepted, and the callee then sees one storage through both parameters.
 - Across modules: a module's exported functions, constructors and methods keep their
   modes, whether the module is imported from source or from a `.pkm` file, and calls into
   it are checked the same way.
-- Functions are not values in Paykan (only calls name them), so a mode is always known
-  where the function is called.
+- A function value's type carries its parameters' modes (`(inout int) -> void`), so a
+  mode is always known where a function is called, by name or through a value
+  (`15-function-types.md`).
 
 `view` and `inout` are reserved words. They go where a type goes: a parameter's, a
 [local borrow's](01-language-basics.md#local-borrows), a `match` arm's or a result's
@@ -529,7 +530,8 @@ native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
 The string is the C symbol.  The rest of the program calls the function like
 any other.
 
-Only `int`, `float`, `bool`, `char` and an enum cross into C by value.  Any other
+Only `int`, `float`, `bool`, `char`, a sized numeric type and an enum cross into C by
+value.  Any other
 parameter is a `view`, which C borrows for the call, or an `inout`, which
 C changes in place: a call never shares a reference with C, so it costs no
 reference counting (`parameter 's' must be 'view' or 'inout' ('s: view

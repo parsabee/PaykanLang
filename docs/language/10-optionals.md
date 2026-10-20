@@ -2,10 +2,7 @@
 
 > **Stable in v0.1** (issue #5), optional primitives and optional-mode `match` included: the
 > syntax and semantics below are covered by the compatibility promise for the 0.1 series (see
-> `01-language-basics.md`, "Stability"). Since [#96](https://github.com/parsabee/PaykanLang/issues/96)
-> an optional primitive is a value (the primitive and a presence flag), not a box, and no
-> optional converts to `Obj` (see "Optionals are not objects"); comparing, printing, `match`
-> and narrowing behave as before.
+> `01-language-basics.md`, "Stability").
 
 An **optional type** `T?` holds either a value of type `T` or `None`. It is how a program says
 "this may be absent" without giving up the static type: a `next: Node?` field is a `Node` or
@@ -41,11 +38,13 @@ fn find(head: Node?, key: int) -> Node? {
 ## Quick Summary
 
 - `T?` is written as a suffix and is allowed in every type position: variables, fields,
-  parameters, return types, match arms and array element types (`Node?[3]`).
+  parameters, return types, tuple elements, type arguments and array element types
+  (`Node?[3]`). A match arm names the type without the `?`.
 - Reference types (classes, `Str`), the primitives `int`, `float`, `bool`, `char` and
-  the sized numeric types (`u8?`, `f32?`, …), enums, tuples and structs can be optional
-  (see [Optional Primitives](#optional-primitives) and [Optional Enums, Tuples and
-  Structs](#optional-enums-tuples-and-structs)). `void?`, a written `T??` and optional
+  the sized numeric types (`u8?`, `f32?`, …), enums, tuples, structs and function values
+  (`((int) -> int)?`, see [Function Types](15-function-types.md#function-values-are-values))
+  can be optional (see [Optional Primitives](#optional-primitives) and [Optional Enums,
+  Tuples and Structs](#optional-enums-tuples-and-structs)). `void?`, a written `T??` and optional
   fixed-size arrays (`int[3]?`) are rejected.
 - `None` is the absent value. A `T` converts to `T?` implicitly; a `T?` **never** converts back
   to `T` — unwrap it with `match`.
@@ -183,8 +182,8 @@ fn show(o: int?) -> Str {
 - A primitive widens to its optional implicitly (`x: int? = 5`). An `int` also widens to
   `float?`, after the usual `int` -> `float` promotion (`f: float? = 3`).
 - An `int?` does **not** convert to a `float?` (or any other optional). `int[2]` is not an
-  `int?[2]` either. An array or tuple literal still works where its elements need boxing
-  (`xs: int?[2] = [1, 2]`, `p: (int?, Str) = (1, "a")`), but destructuring does not box:
+  `int?[2]` either. An array or tuple literal still works where its elements need widening
+  (`xs: int?[2] = [1, 2]`, `p: (int?, Str) = (1, "a")`), but destructuring does not widen:
   `a: int?, s: Str = (1, "a")` is an error. See [Literals take their destination's
   types](#literals-take-their-destinations-types) for `None` and mixed elements.
 - In a `match` on an `int?` subject, the only type arm is `n: int`. It matches every present
@@ -204,6 +203,7 @@ fn show(o: int?) -> Str {
 - An optional primitive is not an object (see [Optionals are not
   objects](#optionals-are-not-objects)): `o: Obj = x` is an error. `io::println(x)` prints `5` or
   `None`.
+
 At runtime an `int?` is a value: the `int` and a presence flag, held inline in a variable, a
 field, a parameter, an array element or a tuple element and copied like an `int`, with no heap
 allocation and no reference count. `None` is the flag being clear.
@@ -367,9 +367,11 @@ fn pick(c: bool) -> Str? { return if c then "yes" else None; }
 
 ## Memory
 
-A `T?` of a reference type costs nothing extra: it is the same reference-counted box as a `T`,
-with "no box" meaning `None`. An optional primitive is a value, the primitive and a presence
-flag: it allocates nothing and is never counted. An `int?[3]` holds its elements inline.
+A `T?` of a reference type costs nothing extra: it is the same reference to a
+reference-counted object as a `T`, with a null reference meaning `None`. An optional
+primitive is a value, the primitive and a presence flag: it allocates nothing and is never
+counted. An optional enum, tuple or struct is a value held in place in the same way, and an
+optional function value is the function value's 16 bytes. An `int?[3]` holds its elements inline.
 Retaining, releasing and destroying an absent optional are no-ops. See `08-memory-model.md`.
 
 ---

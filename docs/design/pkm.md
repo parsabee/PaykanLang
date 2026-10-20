@@ -4,9 +4,35 @@ Design for v0.2.0. Tracks #57 (module file), #106 (backend payloads) and
 #160 (generics across modules); touches #19, #21, #23, #25, #93, #96, #98,
 #99, #113, #144, #147, #153, #162, #167, #170, #171.
 
-Status: **design, not implemented.** Every "Decision" below is proposed;
-the "Open questions" at the end need the owner. Line references are to
-`develop` after the #28 cleanup.
+Status: **partly implemented.** What `paykan` ships today:
+
+- the container (§1), the manifest (§2), `CODE` (§5) and `SYMIDX` (§6.1)
+  as specified here, with the reserved fields and item tables written as
+  zero or empty;
+- `IFACE` (§3) in a prototype form: the part table and the record framing
+  of §3.2, but `DECLS` holds only `ENUM`, `CLASS`, `FUNC` and `STRUCT`
+  records whose types are type-name strings
+  (`include/paykan/pkm/Interface.h`), `TYPES` and `INST` are empty, and no
+  record carries `Vis`, `MFlags` or `Attrs`;
+- the module system of §8 in a prototype form: `paykan_modules`
+  (`include/paykan/modules/ModuleResolver.h`) resolves an import to its
+  source, its `.paykan_cache` entry or a prebuilt file (next to the source
+  or on the module path), with the verdicts of §8.2 (the producer's own
+  version is the only compatible one); Sema still parses and checks an
+  imported source itself, and the lowering still lowers the whole program
+  (`lowering::lowerProgram`), taking a loaded module's decoded `CODE`
+  instead of lowering it;
+- `--emit-pkm`, `--module-path` / `$PAYKAN_MODULE_PATH`,
+  `--rebuild-modules`, `--no-module-cache`, `--verbose`, and `paykan pkm
+  dump` / `check` (§8.5).
+
+Generics cross modules from source only (§4.8): a module with templates is
+never cached, and the `.pkm` that `--emit-pkm` writes for one carries none
+of its templates. Not implemented: `TMPL` and `INST` (§4.1–§4.7), `DEBUG`
+(§6.2), payloads (§7: the section kind is recognised, none is written), the
+linkage classes and the mangling of §9, the flags and `pkm` verbs §8.5 marks
+as planned, and the coordinated version bump of §11. Every "Decision" not
+yet implemented is a proposal; §15 lists the questions still open.
 
 ---
 
@@ -191,7 +217,7 @@ G = gating (a mismatch yields a verdict), I = informational.
 | `0x03` | `contents` | `u32` bitset | G | bit 0 `HAS_CODE`, 1 `HAS_TEMPLATES`, 2 `HAS_MAIN`, 3 `SYSTEM` (name starts with `::`), 4 `HAS_STATIC_INIT` (#170 lazily initialised storage), 5 `EXPORTS_C` (#21). Must agree with the section table |
 | `0x05` | `core` | `{str version; u32 major, minor, patch; str prerelease; str build}` | G | the PaykanLang that produced the file (`include/Version.h.in`). `build` is `""` for a release (configured with `-DPAYKAN_RELEASE=ON`, which the release workflow and the Homebrew formula pass); for every other build, a development build of the last release's version included, it is the build ID: a hash of the contents of `src/` and `include/`, recomputed on every build (`kBuildId` in the generated `BuildId.h`, `cmake/BuildId.cmake`; never an executable size/mtime). A cache entry of another build is Stale (#188) |
 | `0x07` | `format_versions` | `{u32 iface_major, iface_minor, tmpl_version, pir_version, code_encoding, debug_version}` | G | `pir_version` = `pir::kPIRVersion` (new core constant; `PAYKAN_PIR_TEXT_VERSION` is defined from it so text, binary and manifest agree by construction). `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
-| `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, moved from `src/Backends/LLVM/PIRToLLVM.cpp:843` (`kPaykanABIVersion = 6`) into `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this). Becomes 7 with §9's mangling |
+| `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, defined in `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this). Becomes 7 with §9's mangling |
 | `0x0B` | `target` | `{u8 pointer_size, slot_size, endianness, int_width, float_width}` | G | the abstract target PIR assumes: `8, 8, 1, 64, 64` (`Runtime.h` LP64 LE asserts). Not a triple: PIR and interface are the same for every LP64 LE triple; the triple belongs to a payload |
 | `0x0D` | `deps` | `list<Dep>` | G | direct imports only, sorted by canonical name; §2.3 |
 | `0x0F` | `source` | `{hash sha256; u64 size}` | G (cache) / I (prebuilt) | the module's source file exactly as read. Absent for generated modules |
@@ -290,8 +316,10 @@ parameters).  A borrowed result (`-> view T`) adds a `u8` result mode
 after a `FUNC` record's modes, and one per method after a `CLASS` record's
 lists, written only when a result is a borrow (the modes lists are then
 written too, with `n` 0 where a signature has none).  A record without them
-reads as having no modes and returning copies.  The interface minor version
-is bumped for them at the next release.
+reads as having no modes and returning copies.  Each field of a `CLASS`
+record carries a flags byte after its type name (bit 0: a `weak` field,
+docs/design/weak-references.md); a `STRUCT` record's fields have none.  The
+interface minor version is bumped for them at the next release.
 
 Every part but `STRS` is `uleb count` then records `uleb tag, uleb len,
 payload[len]`. A reader parses the fields it knows and ignores trailing
@@ -371,6 +399,14 @@ rebuilt; importers that value-specialised it are (their `Dep` has
 (§13).
 
 ### 3.6 Visibility (#19)
+
+The language's rules are not the ones this section was written for:
+`docs/design/visibility.md` describes them (`__` makes a member private to
+its class or struct, `_` makes any name private to its module, and a
+top-level `__` name is an error). The prototype `IFACE` carries every
+declaration, private ones included, without a `Vis` byte; the importer
+reads privacy from the underscores. The table below is the proposed
+encoding and still has to be brought in line with those rules.
 
 | Declaration | In the blob? |
 |---|---|
@@ -459,12 +495,8 @@ TmplSection
 Node := u8 kind ; Loc ; fields…           Loc := uleb line, col, line_end, col_end (0s = unknown)
 ```
 
-Node kinds are the interchange format's (`docs/plugins/ast-format.md`):
-statements `block, return, assign, decl, expr, if, while, break, continue,
-member-assign, subscript-assign, match, destructure, var`; expressions
-`int, float, bool, char, none, string, unary, binary, ternary, ident, call,
-method-call, member, subscript, array, tuple, tuple-index, enum-value,
-mov`; plus the resolved forms:
+Node kinds are the statement and expression nodes of the interchange format
+(`docs/plugins/ast-format.md` §2), plus the resolved forms:
 
 ```
 Ident  := u8 kind: 1 LOCAL Str | 2 CONST Mod, Str | 3 TYPE Ty | 4 UNRESOLVED Str
@@ -700,7 +732,9 @@ InstrRec := u8 opcode ; uleb result id (0 = none) ; [type result type ; str resu
 | 46, 47 | `utof ftou` | — | 1 |
 | 48 | `fround32` | — | 1 |
 | 49 | `weak.release` (#99) | — | 1 |
-| 50–255 | reserved | | |
+| 50 | `fn.addr` (docs/design/function-types.md) | `str` callee | 0 |
+| 51 | `icall` | `sig` | n (the callee first) |
+| 52–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults
 of `PIR.h`, as the text parser produces, so round-trip equality holds. An
@@ -751,8 +785,9 @@ ClassObjRec (#160) str name ; str class ; uleb nTypeArgs ; nTypeArgs × str
 
 The reader checks that a function body ends exactly at `recordLength`
 (no slack), so the writer's encoding is the unique one. The object header
-kind (`{vtable, backpointer}` today; one allocation after #93) is a
-property of the runtime ABI version, not per class.
+kind (`{vtable, strong, weak}` in one allocation since #93,
+docs/design/weak-references.md) is a property of the runtime ABI version,
+not per class.
 
 ### 5.8 Determinism
 
@@ -1070,7 +1105,7 @@ paykan [run|build|--emit-pir|--emit-source|--check-only|--emit-pkm] main.pkn
                 no source     → first prebuilt candidate with verdict Usable → LOAD ; else "module not found (tried …)"
         BUILD   parse → Sema(dep, &graph) (its imports first) → lowerModule → verify → exportInterface → encode → AtomicFile
         LOAD    readFile → verdict → readInterface → ensure deps' hashes match → LoadedModule{Name, Iface, hashes, Code (lazy), Payloads}
-      Sema reconstructs the interface into the importer's ASTContext (the typed-table twin of SemaImport.cpp:278-435).
+      Sema reconstructs the interface into the importer's ASTContext (the typed-table twin of what SemaImport.cpp does with a ModuleInfo).
  4. lowerModule(main) → pir::Module; externs declared from interfaces (§9.1).
  5. graph.assembleProgram → pir::Program = [main] + post-order of the import DAG (children in import order, each once) + synthetic units; verify(Program).
  6. --emit-pir prints; --emit-pkm writes main's file and stops; --check-only stops after Sema.
@@ -1172,18 +1207,19 @@ backend (`verifyModule` after `parseBitcodeFile`; the linker for objects).
 | Flag | Effect |
 |---|---|
 | `--emit-pkm [-o f.pkm]` | compile the input module and write its `.pkm`; portable by default |
-| `--with-payload[=<backend>]` | with `--emit-pkm`: also append the named (or default) backend's payload |
+| `--with-payload[=<backend>]` (planned) | with `--emit-pkm`: also append the named (or default) backend's payload |
 | `--module-path=<dir>` | repeatable |
-| `--write-payloads={on,off}` | default on: after a build/run, add the active backend's payload to cached imports |
-| `--prefer-pkm` | §8.3 |
+| `--write-payloads={on,off}` (planned) | default on: after a build/run, add the active backend's payload to cached imports |
+| `--prefer-pkm` (planned) | §8.3 |
 | `--rebuild-modules`, `--no-module-cache` | force rebuild / never read or write the cache |
-| `--strip-names`, `--debug-lines` | §5.8, §6.2 |
-| `--verbose` | one line per import: file, verdict, why a payload was dropped |
+| `--strip-names`, `--debug-lines` (planned) | §5.8, §6.2 |
+| `--verbose` | one line per import: file, verdict, and (once there are payloads) why a payload was dropped |
 
-`paykan pkm <verb>`: `dump f.pkm [--section=manifest|iface|tmpl|code|symidx|debug|payloads|all] [--symbol=<name>]`
-(stable text; golden-tested; `--section=code` prints exactly `pir::print`
-of the decoded module, so it equals `--emit-pir` of the module when it was
-built), `check f.pkm` (verdict against this toolchain, exit status),
+`paykan pkm <verb>`: `dump f.pkm [--section=manifest|sections|iface|code|symidx|payloads|all]`
+(planned: `--section=tmpl|debug` and `--symbol=<name>`; stable text;
+golden-tested; `--section=code` prints exactly `pir::print` of the decoded
+module, so it equals `--emit-pir` of the module when it was built),
+`check f.pkm` (verdict against this toolchain, exit status), and, planned,
 `strip`, `extract`, `add-payload` (§7.7).
 
 ### 8.6 Diagnostics
@@ -1440,6 +1476,12 @@ frontends, and leaves `develop` releasable. "Universal first": the
 payload-free `.pkm` that both backends and `print-pir` consume lands before
 any payload code.
 
+Landed so far: A1 (header-only, `include/paykan/support/`, and without
+`AtomicFile`), A2 (without the linkage and
+attribute flags), A3 and A4, and A6 and B1 in the prototype form the status
+at the top describes (no `PAYKAN_PKM_COMPATIBLE_VERSIONS` list yet). A5, B2
+and phases C and D have not landed.
+
 | PR | Lands | Depends on |
 |---|---|---|
 | **A0** | this document | — |
@@ -1533,9 +1575,9 @@ everywhere.
    (`--emit-pir` and `pkm dump`), never Paykan language syntax.
 5. **Defaults:** `--write-payloads=on` for cached modules; `--emit-pkm`
    portable unless `--with-payload`. Confirm.
-6. **Pre-release build id:** git revision at configure time, falling back
-   to a hash of the source listing; gating only in the cache tier
-   (proposed).
+6. ~~Pre-release build id.~~ **Decided (#188):** a hash of the contents of
+   `src/` and `include/`, recomputed on every build (`cmake/BuildId.cmake`,
+   §2.2), empty for a release; gating only in the cache tier.
 7. **`--prefer-pkm`** for vendored user modules shipped with sources:
    flag, default off (proposed), or a project setting?
 8. **Backend caches:** delete `.bc` and `.c/.o/.key` once C3/C4 land
@@ -1546,8 +1588,8 @@ everywhere.
     one code path; proposed) or only their interfaces in memory?
 11. **Hidden symbols in strict C11** stay plain external (proposed) or get
     `__attribute__((visibility("hidden")))` under a non-strict flag?
-12. **Module-level `_name`** is public (#19's proposal) — confirm, since the
-    interface writes `Vis` 0 for it.
+12. ~~Module-level `_name`.~~ **Decided:** private to its module
+    (`docs/design/visibility.md`), not public; §3.6 has to follow.
 13. **Scope:** #57 closes with phases A + B; C under #106; D1 under #160
     (proposed).
 14. **Doc location:** this file at `docs/design/pkm.md`, with a user-facing

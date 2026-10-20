@@ -30,10 +30,12 @@ The text form is line-oriented and made for this:
   `extern obj`, `extern vtable` declarations of runtime symbols, `class`
   layouts, and `fn` definitions whose bodies are indented blocks closed by
   `}`.
-- Items come in no particular order, and a symbol may be used above the item
-  that declares it: the printer puts a module's runtime externs (`extern fn
-  @$rt....`) after its functions. Read a whole module before translating it,
-  or emit forward declarations (as the C backend does).
+- A symbol may be used above the item that declares it. The printer writes
+  a module's globals, then its `extern obj` / `extern vtable` declarations,
+  its classes and its functions, and the `extern fn` declarations come among
+  the functions, in the order the lowering declared them (usually after the
+  first function that calls them). Read a whole module before translating
+  it, or emit forward declarations (as the C backend does).
 - Values are `%name.N` (unique per function), symbols `@name`, constants are
   literal (`42`, `1.5`, `true`, `'a'`, `null box`).
 - Control flow is structured (`if`, `while`, `break`, `continue`, `ret`), so
@@ -47,7 +49,11 @@ calls (§8); [§10](../pir.md#10-text-format-summary) summarises the text
 format.
 The runtime library and header a native program links against come from the
 host: `host->runtime_library(session)` and
-`host->runtime_include_dir(session)`.
+`host->runtime_include_dir(session)`. The object files named with
+`--object`, which define a program's own `native fn`s (the `$c.` externs,
+[`pir.md` §3](../pir.md#3-functions-and-locals)), are not passed to a
+loaded backend: `PaykanBackendInput` has no field for them in plugin API 1,
+so only the built-in backends link them.
 
 The example [`src/Backends/PrintPIR`](../../src/Backends/PrintPIR) (C) reads it and writes
 it back out unchanged.
@@ -65,5 +71,7 @@ plugins would misread it.
 The printer and parser in the core (`src/PIR/Printer.cpp`,
 `src/PIR/Parser.cpp`) define the form; the core's tests round-trip the whole
 samples corpus through them (`tests/Lowering/RoundTripTests.cpp`), so what a
-backend receives is always parseable PIR. A binary form may be added later
-as an option, next to the text.
+backend receives is always parseable PIR. PIR's binary form
+([`pir.md` §11](../pir.md#11-binary-form), the `CODE` section of a `.pkm`
+module file) is not offered to plugins; it may be added later as an option,
+next to the text.

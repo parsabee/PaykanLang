@@ -13,14 +13,15 @@ replaced by `::` and the `.pkn` extension dropped) is the module's canonical nam
 - `import ::modulePath;` — a system import, looked up in the standard-library directory
   instead of the source root (see [the standard library](13-standard-library.md)).
 - Module paths use `::` as a separator, mirroring directory structure.
-- There are no visibility modifiers. Everything declared at the top level of a module is
-  importable.
+- There is no `export` keyword. Everything declared at the top level of a module is
+  importable, except a name that starts with `_`, which is
+  [private to the module](#private-to-the-module).
 - Imports are non-transitive: importing `A` does not automatically import what `A` imports.
   Values of a type that `A` only reached through its own imports can still flow through `A`'s
   signatures; naming that type requires importing its defining module (see
   [Non-Transitivity](#non-transitivity)).
 - Type names are global across a program's import graph: two modules in the same graph cannot
-  declare different classes or enums under one name.
+  declare different classes, structs or enums under one name.
 - Function names are not: every module (the main file included) may define its own `tag`,
   `new` or `helper`, and `x::tag()`, `y::tag()` and a local `tag()` each call their own
   module's function. One qualifier names one module: two imports cannot both bind `util`.
@@ -96,7 +97,7 @@ module path.
 
 ### System Imports
 
-A leading `::` marks a **system** import: `import ::io;` (or `import ::{io, fs};`) looks for
+A leading `::` marks a **system** import: `import ::io;` (or `import ::{io, result};`) looks for
 `io.pkn` in the standard-library directory instead of the source root. That directory is
 the first of `$PAYKAN_STDLIB` when the environment variable is set, the installed standard
 library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable's
@@ -104,8 +105,8 @@ library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable
 ordinary module, and it is cached under `.paykan_cache/@system/` (see
 [Module Files](#module-files)).
 
-The standard library ships with the compiler: `::io`, `::result`, `::collections` and
-`::memory` (see [the standard library](13-standard-library.md)). Printing and files are
+The standard library ships with the compiler: `::io`, `::result`, `::collections`,
+`::memory` and `::math` (see [the standard library](13-standard-library.md)). Printing and files are
 `::io`, so a program that prints imports it (`import ::io;`, then `io::println(...)`). Only
 the builtins (`Obj`, `Str` and the conversions, the primitive types) need no import.
 
@@ -113,10 +114,12 @@ the builtins (`Obj`, `Str` and the conversions, the primitive types) need no imp
 
 ## What Can Be Imported
 
-A module exposes its top-level **function** (`fn`), **class**, **struct**, **enum** and
-**trait** declarations. There is no explicit `export` keyword: everything declared at the top
+A module exposes its top-level **function** (`fn`), **class**, **struct** and **enum**
+declarations. There is no explicit `export` keyword: everything declared at the top
 level is importable under the chosen qualifier or alias, except the names that start with an
-underscore, which are [private to the module](#private-to-the-module).
+underscore, which are [private to the module](#private-to-the-module). A module's **traits**
+are not exported yet: an importer cannot name `m::Trait` in a bound or an `impl ... for`
+(`unknown trait 'm::Trait'`; see [Traits](12-traits.md#not-supported-yet)).
 
 An imported enum is named like any other qualified type. Use `mod::Enum` (or `Alias::Enum`, or
 the full `path::to::mod::Enum`) wherever a type is expected, and `mod::Enum::Variant` to name a
@@ -124,11 +127,11 @@ variant:
 
 ```pkn
 // file: pal/color.pkn
-import ::io;
 enum Color { Red, Green, Blue }
 fn name(c: Color) -> Str { /* … */ }
 
 // file: main.pkn
+import ::io;
 import pal::color;
 
 fn main() -> int {
@@ -149,7 +152,8 @@ struct whose name starts with one underscore is the module's own the same way: a
 the module reaches it, an importer does not (`'_w' of 'Pub' is private to module 'm'`). An
 initializer written `___init__` is the module's too: only the module's code constructs the
 type, or extends it (`'m::T' cannot be constructed here: its initializer '___init__' is
-private to module 'm'`); an importer makes one through the module's functions
+private to module 'm'`, and `'T' cannot be extended here: ...` for a subclass's
+`__super__(...)`); an importer makes one through the module's functions
 ([Classes](04-classes.md#private-fields-and-methods)). Two
 underscores (`__count`) are for a member private to its own class or struct
 ([Classes](04-classes.md#private-fields-and-methods)), and a top-level declaration cannot
@@ -187,8 +191,9 @@ What `C` cannot do without importing `A` is *spell* the type: `t = w.get()` is f
 
 Because each type is rebuilt once per importing file, keyed by its declared name, type names
 are global across the import graph: if two modules reachable from one file both declare a
-class (or enum) called `Node`, importing them is an error naming both modules. A file also
-cannot declare a class with the same name as one reached through any of its imports.
+class (or struct, or enum) called `Node`, importing them is an error naming both modules. A
+file also cannot declare a class, struct or enum with the same name as a type reached
+through any of its imports.
 
 ```pkn
 // file: geometry/point.pkn
@@ -214,10 +219,13 @@ impl Segment {
 import geometry::segment;
 import geometry::point;   // must import point explicitly to NAME Point
 
-p1: point::Point   = point::Point(0, 0);
-p2: point::Point   = point::Point(3, 4);
-s:  segment::Segment = segment::Segment(p1, p2);
-a = s.a;                  // a Point even without `import geometry::point`
+fn main() -> int {
+  p1: point::Point   = point::Point(0, 0);
+  p2: point::Point   = point::Point(3, 4);
+  s:  segment::Segment = segment::Segment(p1, p2);
+  a = s.a;                // a Point even without `import geometry::point`
+  return a.x;
+}
 ```
 
 ---
@@ -249,7 +257,11 @@ Compiling a program writes the `.pkm` of every module it imports to `.paykan_cac
 the source root, named by the module's canonical name: `a::b::c` is cached as
 `.paykan_cache/a/b/c.pkm`, a system module under `.paykan_cache/@system/`. The location does
 not depend on the directory the compiler is launched from, so `paykan proj/main.pkn` and
-`cd proj && paykan main.pkn` share one cache. The main file is never cached.
+`cd proj && paykan main.pkn` share one cache. The main file is never cached. Nor is a module
+that declares generic classes or functions, instantiates another module's, or uses such an
+instantiation: a `.pkm` does not hold templates yet, so that module is built from its source
+every time ([Generics](11-generics.md#modules)). Every module of the standard library is one
+of these.
 
 - **Validity.** An entry is used only when it was written by this very `paykan` (its version,
   its build ID and the format numbers), from exactly the current source (size and hash, never
@@ -268,7 +280,7 @@ not depend on the directory the compiler is launched from, so `paykan proj/main.
 - **The backends' caches.** Each backend still keeps its own generated-code entries beside the
   module files (the llvm backend's `a/b/c.bc`; the c backend's `c.<hash>.c`, `.o` and `.key`,
   one set per key, and the main file's too), validated by their own keys and shared between
-  concurrent builds as before. They are the native translation of the PIR a module file
+  concurrent builds. They are the native translation of the PIR a module file
   holds; a later release folds them into the module file.
 
 ### Prebuilt modules
@@ -291,13 +303,13 @@ interface 1.0, PIR 1, runtime ABI 6); ... Rebuild it from source.`), never a sil
 
 | Error | Trigger |
 |-------|---------|
-| Module not found | The `.pkn` file corresponding to the module path does not exist |
+| Module not found | Neither the `.pkn` file nor a prebuilt `.pkm` of the module path exists: `module 'a::b' not found (tried a/b.pkn, a/b.pkm)` |
 | Unresolved name | Qualified name `Mod::name` where `name` is not in `Mod` (including names `Mod` merely imported) |
 | Circular import | Import graph contains a cycle |
 | Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules |
-| Conflicting type name | Two modules in the import graph declare different classes/enums under one name, or a file declares a class named like an imported one |
+| Conflicting type name | Two modules in the import graph declare different classes/structs/enums under one name, or a file declares a type named like an imported one |
 | Unknown exported type | An import's export record names a type nothing provides (a compiler bug or corrupt cache — reported against the `import`, never silently degraded to `Obj`/`void`) |
 | Private name imported | `Mod::_name` for a function, class, struct, enum or trait whose name starts with `_`: `'Mod::_name' is private to module 'Mod'` |
 | Module-private member imported | `x._f`, `x._m()` or `Mod::T::_s()` on a type of another module: `'_f' of 'T' is private to module 'Mod'` |
-| Module-private initializer | `Mod::T(...)`, or `__super__(...)` from a subclass, where `T`'s initializer is `___init__`: `'Mod::T' cannot be constructed here: its initializer '___init__' is private to module 'Mod'` |
+| Module-private initializer | `Mod::T(...)`, or `__super__(...)` from a subclass, where `T`'s initializer is `___init__`: `'Mod::T' cannot be constructed here: its initializer '___init__' is private to module 'Mod'` (`'T' cannot be extended here: ...` for `__super__`) |
 | Private type exposed | A free function, a public field or a public method naming a `_`-prefixed type |
