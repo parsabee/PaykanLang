@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-20
+
 ### Added
 
+- Linux ARM64 (aarch64) release builds: a `paykanlang-<version>-linux-arm64.tar.gz` tarball
+  and an `arm64` Debian package, built and smoke-tested like the x86_64 ones, with the LLVM
+  backend (the pinned LLVM 17.0.6 aarch64 build is downloaded at configure time).
 - `::result` (stdlib/result.pkn, imported `as res`): errors as values.  `enum ErrorCode`,
   the language's standard set of errors (`Ok`, `NotFound`, `PermissionDenied`,
   `AlreadyExists`, `InvalidArgument`, `OutOfMemory`, `Io`, `EndOfFile`, `OutOfRange`, ...),
@@ -1324,6 +1329,7 @@ statically-typed, object-oriented language that compiled to LLVM IR and was
 - The `destroy()` destructor is compiler-generated and final: user classes cannot
   override it, and direct calls are rejected at compile time.
 
-[Unreleased]: https://github.com/parsabee/PaykanLang/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/parsabee/PaykanLang/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/parsabee/PaykanLang/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/parsabee/PaykanLang/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/parsabee/PaykanLang/releases/tag/v0.1.0

@@ -17,8 +17,9 @@ is installed:
 ### From a release tarball
 
 Every [GitHub release](https://github.com/parsabee/PaykanLang/releases) carries a tarball
-per platform, `paykanlang-<version>-linux-x86_64.tar.gz` and
-`paykanlang-<version>-macos-arm64.tar.gz`, each with a `.sha256` file next to it. A tarball
+per platform, `paykanlang-<version>-linux-x86_64.tar.gz`,
+`paykanlang-<version>-linux-arm64.tar.gz` and `paykanlang-<version>-macos-arm64.tar.gz`, each
+with a `.sha256` file next to it. A tarball
 unpacks into a `paykanlang/` directory holding the `paykan` compiler in `bin/` and the
 runtime that compiled programs link against in `lib/` and `include/`. Unpack it anywhere
 and put its `bin/` on your `PATH`:
@@ -34,7 +35,8 @@ $ paykan --version
 
 ### With apt (Debian and Ubuntu)
 
-On Debian, Ubuntu and their derivatives (x86_64), download the `.deb` from the
+On Debian, Ubuntu and their derivatives (x86_64 or ARM64), download the `.deb` for your
+architecture (`amd64` or `arm64`) from the
 [latest release](https://github.com/parsabee/PaykanLang/releases/latest) and install it with
 `apt`:
 
