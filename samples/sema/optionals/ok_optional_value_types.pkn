@@ -3,7 +3,10 @@
 import ::io;
 
 enum Color { Red, Green }
-struct Point { x: int; y: int; }
+struct Point {
+  x: int;
+  y: int;
+}
 
 fn find(k: int) -> (int, Str)? {
   if k == 1 {
@@ -18,15 +21,15 @@ fn main() -> int {
   t = find(1);
   match c {
     k: Color { io::println(k == Color::Green); }
-    None     { io::println("no color"); }
+    None { io::println("no color"); }
   }
   match p {
     q: Point { io::println(q.x + q.y); }
-    None     { io::println("no point"); }
+    None { io::println("no point"); }
   }
   match t {
     v: (int, Str) { io::println(v.1); }
-    None          { io::println("not found"); }
+    None { io::println("not found"); }
   }
   io::println(find(2) == None);
   return 0;
