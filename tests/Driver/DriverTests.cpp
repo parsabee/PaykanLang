@@ -1901,7 +1901,7 @@ TEST(Driver, BuildAndRunDefaultToO2) {
 // -- The standard library's private members
 
 // The `__` names of `::collections` and `::memory` are private
-// (docs/language/06-modules.md): a program cannot reach a container's `__`
+// (docs/language/15-modules.md): a program cannot reach a container's `__`
 // fields and methods, or the modules' `__` functions and classes.
 TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
   auto src = writeTmp("import ::collections;\n"

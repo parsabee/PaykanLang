@@ -26,7 +26,7 @@
 // The buffer holds its own reference to each value it stores and drops it
 // when the slot is overwritten or shrunk away, or the buffer dies.
 //
-// Names starting with `_` are private (docs/language/06-modules.md,
+// Names starting with `_` are private (docs/language/15-modules.md,
 // "Private to the module"): the `_` native functions are the module's own,
 // and `Buffer`'s `__data` is reachable only from its methods.
 

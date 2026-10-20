@@ -517,7 +517,7 @@ fn first<T>(xs: view T[]) -> view T { return xs[0]; }
 } // namespace
 
 // Another module's generic classes and functions are instantiated in the
-// importer (docs/language/11-generics.md), in every position a local
+// importer (docs/language/13-generics.md), in every position a local
 // template may be used.
 TEST(Generics, ImportedTemplates) {
   auto dir = paykan::test::tempDir() / "pkn_sema_generics_imp";

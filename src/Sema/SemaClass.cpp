@@ -210,7 +210,7 @@ bool Sema::checkInitFieldsAssigned(
   // assigns it: the constructor zero-initialises every slot and a NULL box IS
   // None, so such fields start out definitely assigned.  This is what makes
   // linked structures ergonomic (see
-  // docs/language/10-optionals.md).
+  // docs/language/12-optionals.md).
   BitSet entry(n, false);
   for (unsigned i = 0; i < n; ++i)
     if (ast::isa<ast::OptionalType>(fields[i].second))
@@ -963,7 +963,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
 // -- Generics: templates, instantiation, type-argument inference
 //
 // See the comment block in Sema.h ("Generics") and
-// docs/language/11-generics.md for the design.  In short: a generic declaration
+// docs/language/13-generics.md for the design.  In short: a generic declaration
 // is a template that is registered by name and never checked itself; each use
 // with a distinct tuple of canonical type arguments clones the declaration with
 // the type parameters substituted (ast::ASTCloner), registers the clone under

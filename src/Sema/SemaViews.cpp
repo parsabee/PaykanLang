@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // What cannot change through a `view`
-// (docs/language/02-functions-and-calling.md, "A `view` stays a `view`"): a
+// (docs/language/03-functions.md, "A `view` of a reference stays a `view`"): a
 // `view` parameter, a `view` local and a `match` arm's name for either,
-// `self` in a `view fn` (docs/language/04-classes.md, "Methods that don't
+// `self` in a `view fn` (docs/language/05-classes.md, "Methods that don't
 // change self"), and everything reached through them.  None of those may be
 // assigned, have a field or element assigned, be passed to an `inout` parameter
 // or have a method called on it that is not a `view fn`.

@@ -1,4 +1,4 @@
-// Function values (docs/language/15-function-types.md) in the collections:
+// Function values (docs/language/14-function-types.md) in the collections:
 // a function value is held in place and equal to another holding the same
 // code and closure, so it is an element of a List<T>, found by `contains`
 // and `indexOf` (a named function, or a copy of a lambda's value), and a

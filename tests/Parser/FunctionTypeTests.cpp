@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 // Parser tests: function types and lambdas
-// (docs/language/15-function-types.md): the `(T1, T2) -> R` type with its
+// (docs/language/14-function-types.md): the `(T1, T2) -> R` type with its
 // modes and suffixes, how it is told from a tuple type, the lambda
 // expression `fn(x: int) -> int { ... }`, calls of function values, and the
 // forms the grammar rejects.

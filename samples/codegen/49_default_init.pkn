@@ -1,6 +1,6 @@
 // 49 — The default `__init__`.  A class that declares no `__init__` gets
 // one that takes its superclass constructor's arguments and then one per
-// field it declares, in order (docs/language/04-classes.md, "The default
+// field it declares, in order (docs/language/05-classes.md, "The default
 // `__init__`").
 // Exercises: a plain class, a subclass of it, a subclass of a class with a
 // written `__init__`, a field-less base whose subclass `__init__` need not

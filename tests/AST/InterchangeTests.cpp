@@ -946,7 +946,7 @@ TEST(ASTInterchange, WriteRefusesACheckedAST) {
 // ends with (qual static), as a `view fn` ends with (qual view).
 // Function types (`fn-type`, with each parameter's mode), lambdas
 // (`lambda`) and calls of function values that are not named
-// (`call-value`) round-trip (docs/language/15-function-types.md).
+// (`call-value`) round-trip (docs/language/14-function-types.md).
 TEST(Interchange, FunctionTypesRoundTrip) {
   parser::ParserDriver driver("recursive-descent");
   auto path = std::filesystem::temp_directory_path() /

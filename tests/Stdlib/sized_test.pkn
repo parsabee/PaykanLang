@@ -1,4 +1,4 @@
-// The sized numeric types (docs/language/01-language-basics.md, "Sized
+// The sized numeric types (docs/language/02-basics.md, "Sized
 // numeric types") in the containers: a List<u8>, a HashMap with u32 and
 // unsigned keys, a HashSet<i8>, a Buffer<u16>, a Box<f32> and priority
 // queues of f16 and unsigned values; literals take the element type.

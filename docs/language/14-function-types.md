@@ -1,41 +1,51 @@
-# PaykanLang — Function Types and Lambdas
+# Function types and lambdas
 
-A function type names what a function value takes and returns: `(int, float) -> bool`
-is the type of a function of an `int` and a `float` returning a `bool`.  A value of a
-function type is a *closure*: a lambda written in place, `fn(x: int) -> int { return x +
-1; }`, or a named function used without calling it.  It is stored, passed and returned
-like any other value and called like any function.
+A function can be stored in a variable, passed to another function or returned from one.
+This chapter introduces function values, then gives the rules for function types, lambdas,
+what a lambda captures, calling a function value, and how function values are copied and
+compared.
 
----
+## Functions as values
 
-## Quick Summary
+A function type names what a function value takes and returns. It lists the parameter
+types in parentheses and the result after `->`: `(int) -> int` is a function taking an
+`int` and returning an `int`, and `(Str, int) -> void` takes two arguments and returns
+nothing. A value of a function type is a *closure*: a named function used without calling
+it (a function is a value just by its name), or a *lambda*, `fn(...) -> ... { ... }`
+without a name, written in place. It is stored, passed and returned like any other value
+and called like any function:
 
-- Type: `(T1, T2) -> R`; `() -> R` for no parameters; `-> void` for no result; a
-  parameter may have a mode, `(view Str, inout int) -> bool`.  `->` is right-associative,
-  and a function type takes a suffix in parentheses: `((int) -> int)[3]`, `((int) ->
-  int)?`.
-- Values: a lambda `fn(x: int, y: int) -> int { return x + y; }` (its parameters are
-  annotated, its result type written or `void`, its body a block); a named function,
-  `square`, `m::square`, `Point::origin`; the field of a class or a struct, an element of
-  an array or a tuple, a parameter, a result, a type argument.
-- Captures: a lambda uses the variables of the function it is written in, which it
-  **copies when it is made**: a value is copied, an object or a `Str` is shared (the
-  reference retained).  A captured name is read-only inside the lambda, and a `view` or
-  `inout` cannot be captured.
-- Calls: `f(1)` with `f` a variable, `obj.cb(1)` with `cb` a field, `fs[0](1)` for any
-  other expression of function type; the arguments are checked and passed as for a
-  function with the same parameters, modes included.
-- A function value is a value: its code and its closure (the captures), held in place
-  like a tuple.  A copy shares the closure; `==` is true when the code and the closure are
-  the same (`square == square`).  It is a `ValueType`, not an `Obj`: it cannot be printed,
-  stored in an `Obj` or given to a `Show` or `Hashable` bound.
-- Structural: two function types are the same when their parameter types, modes and
-  result are.
-- Not yet: borrowed results in a function type, a method as a value (`p.shift`), a generic
-  function as a value, a lambda with inferred parameter types, a capture of a `view`, an
-  `inout` or a struct method's `self`.
+```pkn
+import ::io;
 
----
+fn double(x: int) -> int { return x * 2; }
+
+fn apply(f: (int) -> int, x: int) -> int {
+  return f(x);
+}
+
+fn main() -> int {
+  step = 3;
+  addStep = fn(x: int) -> int { return x + step; };   // uses `step` from main
+  io::println(Str(apply(double, 5)) + " " + Str(apply(addStep, 5)));
+  step = 100;
+  io::println(Str(addStep(5)));                           // still 8: the lambda copied `step`
+  return 0;
+}
+```
+
+Output:
+
+```
+10 8
+8
+```
+
+A lambda copies the variables it uses from the surrounding function at the moment it is
+written, and cannot assign to them: `addStep` keeps its own `step`, which the later
+assignment in `main` does not change. The copies, like every argument and result of a
+function value, are plain copies for value types and references for objects (see
+[Captures](#captures)).
 
 ## Function Types
 
@@ -91,8 +101,6 @@ the same shape are one type, wherever they are written.  A function type goes an
 a type does: a field, a parameter, a result, an element of an array or a tuple, a type
 argument (`List<(int) -> int>`), a `view` or `inout` parameter or local, and an optional.
 
----
-
 ## Function Values
 
 A **named function** used without an argument list is a value of its function type: a
@@ -134,8 +142,6 @@ type, a non-void body returns on every path (`the lambda does not always return 
 and `break` and `continue` do not reach a loop outside it.  `view fn` is for methods;
 a lambda is never one.
 
----
-
 ## Captures
 
 A lambda may use the variables of the function (or method, or lambda) it is written in.
@@ -146,8 +152,8 @@ and the variable share the object; a value held in place (a struct, a tuple, a f
 array) is copied, with its references retained.  Later assignments to the variable do not
 reach the closure, and the closure does not change the variable.  A closure is an object:
 one that captures an object and is stored in a field of it is a reference cycle, which
-[is not collected](08-memory-model.md#reference-cycles) — unless the captured variable is a
-[`weak`](08-memory-model.md#weak-references) one, which the closure captures weakly: it reads
+[is not collected](16-memory.md#reference-cycles) — unless the captured variable is a
+[`weak`](16-memory.md#weak-references) one, which the closure captures weakly: it reads
 as the object while the object is alive and as `None` afterwards (`weak me = self;
 self.onClick = fn() -> Str { match me { ... } };`).
 
@@ -220,8 +226,6 @@ Output:
 A lambda inside a lambda captures the outer lambda's copy, so a closure returned from a
 closure holds what the outer one held.
 
----
-
 ## Calling a Function Value
 
 A function value is called with the syntax of a function call: `f(1)` when `f` is a
@@ -267,9 +271,7 @@ plus! times!
 ```
 
 An optional function value (`((Str) -> Str)?`) is unwrapped with `match`, the arm naming
-the function type (`10-optionals.md`).
-
----
+the function type ([Unwrapping with `match`](12-optionals.md#unwrapping-with-match)).
 
 ## Function Values Are Values
 
@@ -292,7 +294,7 @@ Two function values are `==` when they run the same code with the same closure:
 Each evaluation of a lambda that captures something makes a new closure, so `adder(1) ==
 adder(1)` is `False`, and two different lambdas are never equal, even with the same body.
 
-A function type is a [`ValueType`](12-traits.md#valuetype) (`fn keep<T: ValueType>(x: T)`
+A function type is a [`ValueType`](06-traits.md#valuetype) (`fn keep<T: ValueType>(x: T)`
 takes `square`).  It is not an `Obj`: it cannot be printed, converted to a `Str`, stored
 in an `Obj` slot, matched by class, or given to a `T: Show` or `T: Hashable` bound.  An
 optional function value, `((int) -> int)?`, takes the same 16 bytes: `None` is the value
@@ -301,8 +303,6 @@ with no code.
 Parameter modes work on a function value as on any value held in place: a plain
 parameter is the callee's own copy, a `view` one reads it (it can be called, not stored),
 an `inout` one is the caller's variable, which the callee may set to another function.
-
----
 
 ## Generics and Modules
 
@@ -373,8 +373,6 @@ Output:
 81 b!
 ```
 
----
-
 ## Semantic Checks
 
 | Error | Trigger |
@@ -392,8 +390,6 @@ Output:
 | A lambda body's rule | `break` outside its own loop, a missing `return`, a duplicate parameter |
 | A closure as an object | `io::println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Show` |
 
----
-
 ## Not Yet Supported
 
 A borrowed result (`-> view T`, `-> inout T`) in a function type; a method as a value
@@ -404,8 +400,6 @@ an object); capturing a `view`, an `inout` or a struct method's `self`; a functi
 crossing into C, except as a type argument of a generic native function; `toString`,
 `print` and `hash` on a function value.
 
----
-
 ## Notes
 
 - At run time a function value is laid out as the tuple `(int, Obj?)`: the address of
@@ -413,7 +407,7 @@ crossing into C, except as a type argument of a generic native function; `toStri
   of a class the compiler makes for the lambda, with one field per capture and an
   object's vtable `[destroy, toString, equals]`.  A call through a function value loads
   the code and the closure and calls the code through its address (`icall`,
-  `docs/pir.md`), the closure first; `Paykan_release` destroys a closure through
+  [PIR](../pir.md)), the closure first; `Paykan_release` destroys a closure through
   `destroy` as it does any object, releasing its captures.  A named function used as a
   value has no closure: its code forwards to the function.
-- The design and its open questions are in `docs/design/function-types.md`.
+- The design and its open questions are in [`docs/design/function-types.md`](../design/function-types.md).

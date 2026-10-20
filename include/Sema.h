@@ -99,9 +99,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     ViewBinding,
     Inout,
     /// A variable of an enclosing function, captured by copy by a lambda
-    /// (docs/language/15-function-types.md): read-only inside it.
+    /// (docs/language/14-function-types.md): read-only inside it.
     Captured,
-    /// A `weak` local (docs/language/08-memory-model.md): it holds a weak
+    /// A `weak` local (docs/language/16-memory.md): it holds a weak
     /// reference, so no `inout` may name it.
     Weak
   };
@@ -135,7 +135,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   Scope *CurrentScope = nullptr;
 
-  // -- Lambdas (SemaLambda.cpp, docs/language/15-function-types.md)
+  // -- Lambdas (SemaLambda.cpp, docs/language/14-function-types.md)
 
   struct ClassContext;
   struct FunctionSig;
@@ -345,7 +345,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
 
-  // -- Fixed-size arrays (docs/language/05-arrays.md)
+  // -- Fixed-size arrays (docs/language/09-arrays.md)
   //
   // For now only a local variable, a parameter, a result and a field have a
   // `T[n]` type (set around the resolveType of its annotation, which takes
@@ -848,7 +848,7 @@ private:
   /// k;`), just declared in the current scope: records its kind.
   bool checkLocalBorrow(const ast::VarDecl *node);
   /// Whether @p ty may be the type of a `weak` declaration: `T?` of a
-  /// class `T` (docs/language/08-memory-model.md); an error names @p what
+  /// class `T` (docs/language/16-memory.md); an error names @p what
   /// otherwise.
   bool checkWeakType(ast::Type *ty, ast::SourceLocation loc,
                      const std::string &what);
@@ -1097,7 +1097,7 @@ private:
   /// module, and make its `static fn`s the module's functions `Type::name`.
   bool checkImplDecls(ast::TranslationUnit *tu);
 
-  // -- Structs (SemaStruct.cpp, docs/language/14-structs.md)
+  // -- Structs (SemaStruct.cpp, docs/language/11-structs.md)
   //
   // A struct is a value type with named fields and the methods of its `impl`
   // blocks; its type is an ast::StructType, a TupleType by its name.  Its

@@ -539,7 +539,7 @@ TEST(Optional, TernaryOptionalResultCannotNarrow) {
 
 // ─── rejected optional inner types ──────────────────────────────────────────
 
-// Optionals of enums, tuples and structs (docs/language/10-optionals.md).
+// Optionals of enums, tuples and structs (docs/language/12-optionals.md).
 TEST(Optional, OptionalEnumTupleAndStructAreAccepted) {
   auto r = semaCheck(R"(
     enum Color { Red, Green }

@@ -42,7 +42,7 @@ enum class PartTag : uint32_t {
 
 /// DECLS record tags (§3.5); TRAIT, IMPL, CONST and TEMPLATE_* are not
 /// written by the prototype.  STRUCT (9) is the prototype's record for a
-/// struct type (docs/language/14-structs.md): a name, fields and methods,
+/// struct type (docs/language/11-structs.md): a name, fields and methods,
 /// like a CLASS without a superclass or a vtable.
 enum class DeclTag : uint8_t { Enum = 1, Class = 2, Func = 5, Struct = 9 };
 

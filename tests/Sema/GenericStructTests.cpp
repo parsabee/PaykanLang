@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: generic structs (docs/language/14-structs.md, "Generic
+// Sema tests: generic structs (docs/language/11-structs.md, "Generic
 // structs") — templates and their `impl` blocks, instantiation by type and
 // by constructor call (explicit and inferred), bounds, nominal instances,
 // errors inside an instantiation, self-containment through an instantiation,

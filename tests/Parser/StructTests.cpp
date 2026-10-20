@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Parser tests: struct declarations (docs/language/14-structs.md): fields,
+// Parser tests: struct declarations (docs/language/11-structs.md): fields,
 // generic structs, the `impl` blocks that give them methods, and the forms
 // the grammar rejects (methods in the body, a superclass, no fields).
 

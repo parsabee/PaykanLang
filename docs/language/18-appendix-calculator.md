@@ -3,7 +3,7 @@
 This appendix walks through a complete program from the repository,
 [`samples/imports/12_calc`](../../samples/imports/12_calc/main.pkn): an arithmetic calculator
 with variables, a command history and an interactive mode. At about 870 lines in four
-modules it uses most of what this manual covers: classes, an enum, `match` in three of its
+modules it uses most of what this reference covers: classes, an enum, `match` in three of its
 four modes (all but matching classes), arrays, tuples, optionals, a generic class, modules,
 standard input and command-line arguments. The test suite runs it on every backend, and the
 excerpts below are checked against the sample's source, so they are always current.
@@ -104,7 +104,7 @@ hash is folded into `self.buckets.len()`, so the lookups follow the field's type
 repeating the number of buckets.
 
 Looking a key up returns an **optional**, `Entry?`, so a missing variable is `None` rather
-than a special value. The loop is the linked-list walk from [Optionals](08-optionals.md).
+than a special value. The loop is the linked-list walk from [Optionals](12-optionals.md).
 `lookup` changes nothing, but it is not a `view fn`: the entry it returns is the one stored
 in the table, and `insert` changes it.
 
@@ -335,7 +335,7 @@ its type, since a bare `None` in a tuple literal with no declared destination wo
 
 The `:history` command shows the last 16 statements. They are kept in a generic ring buffer,
 `Ring<T>`, declared in `main.pkn` itself (a generic class could equally live in a module of
-its own and be imported, as [Modules](10-modules.md#rules-worth-knowing) shows). It holds an
+its own and be imported, as [Modules](15-modules.md#what-can-be-imported) shows). It holds an
 array of 16 slots, a count of the slots in use, and the index of the oldest item once all of
 them are. Until the buffer is full, `add` fills the
 next free slot; after that it overwrites the oldest item and moves `start` on:
@@ -371,7 +371,7 @@ impl Ring<T> {
 
 An array always holds all of its elements, so `__init__` takes a `blank` item and fills the
 slots with `[blank; 16]` until they are used, as the task list in
-[Arrays](06-arrays.md#project-the-task-list) does. The history holds `(Str, float)` tuples,
+[Arrays](09-arrays.md#project-the-task-list) does. The history holds `(Str, float)` tuples,
 the statement and its value, so its type is `Ring<(Str, float)>`, and its blank is an empty
 statement:
 
@@ -429,7 +429,7 @@ fn evalStatement(src: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
 
 ### The REPL
 
-The interactive loop is the standard-input idiom from [Files and I/O](11-files-and-io.md).
+The interactive loop is the standard-input idiom from [Files and I/O](../stdlib/io.md).
 `readln` returns a result whose `value` is a `Str?`, so the end of input is caught by the
 `_` arm (the `None`); `handle` returns `False` for `:quit`:
 
@@ -519,4 +519,4 @@ language:
   read them back with `readln` and `float(...)`.
 - Run the result with `paykan --track-heap` to check that it still frees everything.
 
-Back to the [manual's contents](index.md).
+Back to the [contents](index.md).

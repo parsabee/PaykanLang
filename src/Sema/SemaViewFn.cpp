@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Where a `view fn` may be declared (docs/language/04-classes.md, "Methods
+// Where a `view fn` may be declared (docs/language/05-classes.md, "Methods
 // that don't change self"): only a method, never `__init__`, and a method and
 // its overrides are all `view fn` or none is, so that a call through a base
 // class knows what the method does to its object.  A method that could be one

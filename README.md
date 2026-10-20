@@ -38,7 +38,7 @@ concurrency, and C interop through modules — are the road ahead, not yet shipp
 
 **Stability.** Tuples, optional types (optional primitives and `match` on an optional
 included) and generics are **stable**: their syntax and semantics as documented in
-[`docs/language/`](docs/language/) are covered by the compatibility promise for the 0.2
+[`docs/language/`](docs/language/index.md) are covered by the compatibility promise for the 0.2
 series, so a program that follows the reference keeps its meaning in every 0.2.x release.
 The limitations the reference documents stay: a prebuilt `.pkm` module file cannot hold
 generic templates, so a module that declares generics, or uses another module's, is
@@ -288,13 +288,16 @@ pre-commit install --hook-type pre-push
 
 To learn PaykanLang:
 
-- **Documentation: [parsabee.github.io/PaykanLang](https://parsabee.github.io/PaykanLang/)** — the manual, a tutorial that builds a real program chapter by chapter ([`docs/manual/`](docs/manual/index.md)), with the reference below.
-- **[`docs/language/`](docs/language/)** — the full reference: language basics,
-  functions, enums, classes, arrays, modules, `match` statements, the memory model,
-  tuples, optional types, generics, traits, the standard library, structs and function
-  types; the conversion
-  constructors (`Str(n)`, `int<Str>(s)`, ...) are under "Conversions" in
-  [`01-language-basics.md`](docs/language/01-language-basics.md).
+- **Documentation: [parsabee.github.io/PaykanLang](https://parsabee.github.io/PaykanLang/)** — the
+  same pages as [`docs/`](docs/index.md), rendered.
+- **[`docs/language/`](docs/language/index.md)** — the language reference: a chapter per
+  feature that teaches it and then gives its precise rules, in reading order from
+  [getting started](docs/language/01-getting-started.md) through basics, functions, strings
+  and conversions, classes, traits, enums, `match`, arrays, tuples, structs, optionals,
+  generics, function types, modules and memory to the `paykan` command. Chapter by chapter
+  it builds a real program.
+- **[`docs/stdlib/`](docs/stdlib/index.md)** — the standard library: `::io`, `::result`,
+  `::collections`, `::memory` and `::math`, every function and type with its signature.
 - **[`samples/`](samples/)** — runnable `.pkn` programs exercising every feature
   (`samples/codegen/` has the feature demos; see also `imports/`, `sema/`, `leak-check/`).
   [`samples/imports/12_calc/`](samples/imports/12_calc/) is a larger multi-module program:

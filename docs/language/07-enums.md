@@ -1,24 +1,82 @@
-# PaykanLang — Enums
+# Enums
 
-An `enum` declares a new type whose values are a fixed, named set of **variants**. Enums model
-closed choices — a direction, a card suit, a traffic light, a parser state — where every
-possibility is known at compile time.
+An **enum** is a type with a fixed set of named values, called **variants**: the days of the
+week, a card suit, a traffic light, a parser state, the priority of a task. Enums model
+closed choices, where every possibility is known at compile time. This chapter shows how to
+declare and use one, then gives the rules; [Match](08-match.md) covers the statement that
+branches on enums, and on much more.
+
+## Declaring an enum
+
+```pkn
+import ::io;
+
+enum Direction { North, East, South, West }
+
+fn turnRight(d: Direction) -> Direction {
+  match d {
+    North { return Direction::East; }
+    East  { return Direction::South; }
+    South { return Direction::West; }
+    West  { return Direction::North; }
+  }
+}
+
+fn name(d: Direction) -> Str {
+  match d {
+    North { return "north"; }
+    East  { return "east"; }
+    South { return "south"; }
+    West  { return "west"; }
+  }
+}
+
+fn main() -> int {
+  d = Direction::North;
+  i = 0;
+  route = name(d);
+  while i < 4 {
+    d = turnRight(d);
+    route = route + " -> " + name(d);
+    i = i + 1;
+  }
+  io::println(route);
+  io::println(Str(d == Direction::North));
+  return 0;
+}
+```
+
+Output:
+
+```
+north -> east -> south -> west -> north
+True
+```
+
+The variants are written `Enum::Variant` in expressions, and bare (`North`) in the arms of a
+`match` on the enum. An enum is a type of its own: it is not a number, it has no ordering,
+and it cannot be printed directly (`io::println(d)` is an error: an enum is not `Show`), so
+a function such as `name` above turns it into a string. It is a plain value like an `int`:
+copied on assignment, never allocated.
 
 ---
 
 ## Quick Summary
 
 - Declared with `enum Name { Variant1, Variant2, … }`. A trailing comma after the last variant
-  is allowed.
+  is allowed, which suits enums written one variant per line.
 - Variants are referenced as `Name::Variant`.
 - Each variant has an implicit ordinal value `0, 1, 2, …` assigned in declaration order.
-- An enum is a **distinct nominal type**, backed by a 64-bit unsigned integer at runtime. It is
-  **not** an `int` and does **not** convert to or from one.
+- An enum is a **distinct nominal type**, represented as a 64-bit integer at runtime. It is
+  **not** an `int` and does **not** convert to or from one, in either direction; there is no
+  arithmetic on enums.
 - The only operators are `==` and `!=`, and both sides must be the **same** enum type.
+- An enum has no methods (`d.toString()` is an error) and implements neither `Show` nor
+  `Hashable`; it does implement `ValueType` ([Traits](06-traits.md)).
 - Enums are **value types**: stack-allocated, copied on assignment, no reference counting.
 - An enum can be a variable, a function parameter or return type, a class or struct field, a
   tuple element or an array element type, and has an optional (`Direction?`, see
-  `10-optionals.md`).
+  [Optionals](12-optionals.md)).
 - `match` is the idiomatic way to branch on an enum and can be **exhaustive** over the variants
   without a wildcard.
 
@@ -43,7 +101,8 @@ enum Signal { Only }   // a single-variant enum is valid
   variant names.
 - Multiple enums may be declared in the same file.
 - Enums are top-level declarations, like functions and classes, and may be imported from other
-  modules (see `06-modules.md`).
+  modules (see [Modules](15-modules.md)).
+- An enum cannot have an `impl` block (`an 'impl' block for an enum is not supported yet`).
 
 ---
 
@@ -57,7 +116,7 @@ enum Direction { North, East, South, West }
 // North = 0, East = 1, South = 2, West = 3
 ```
 
-These ordinals are an implementation detail of the runtime representation — they define the
+These ordinals are an implementation detail of the runtime representation: they define the
 storage but are **not** exposed as integers. You cannot read a variant as an `int`, do
 arithmetic on it, or build one from a number. The ordinal only matters in that it is fixed and
 stable for a given declaration order.
@@ -108,7 +167,7 @@ if d == Direction::East  { io::println("facing east"); }
 if d != Direction::North { io::println("not north"); }
 ```
 
-There is no ordering (`<`, `>`) on enums — even though variants have ordinals, the language does
+There is no ordering (`<`, `>`) on enums: even though variants have ordinals, the language does
 not expose them for relational comparison.
 
 ---
@@ -162,7 +221,7 @@ while j < route.len() {
 ## Using `enum` with `match`
 
 `match` is the primary way to act on an enum. When the subject of a `match` is an enum, each arm
-names a **bare variant** — not the fully-qualified `Enum::Variant`, just the variant name:
+names a **bare variant**: not the fully-qualified `Enum::Variant`, just the variant name:
 
 ```pkn
 fn dirName(d: Direction) -> Str {
@@ -178,9 +237,10 @@ fn dirName(d: Direction) -> Str {
 ### Exhaustiveness
 
 When every variant of the enum is covered, the `match` is **exhaustive** and no wildcard `_` arm
-is needed — as in `dirName` above. This is the recommended style: if you later add a variant to
-the enum, an exhaustive `match` that no longer covers every case is the natural place to be
-reminded to handle it.
+is needed, as in `dirName` above; that is also why `dirName` needs no `return` after its
+`match`. This is the recommended style: if you later add a variant to the enum, the compiler
+reports that each such function no longer always returns a value, pointing you at every place
+that needs updating.
 
 When you only care about some variants, add a wildcard `_` as the final arm to catch the rest:
 
@@ -234,8 +294,8 @@ while i < 4 {
 }
 ```
 
-For the full mechanics of `match` — including value-mode matching on builtin types, bindings,
-and the complete set of rules — see `07-match-statements.md`.
+For the full mechanics of `match`, including value-mode matching on builtin types, bindings,
+and the complete set of rules, see [Match](08-match.md).
 
 ---
 
@@ -243,9 +303,10 @@ and the complete set of rules — see `07-match-statements.md`.
 
 | Error | Trigger |
 |-------|---------|
-| Enum name taken | The enum is named like a builtin (`enum Str {…}`, `enum int {…}`), a class, a function, or another enum — top-level names are shared (see `01-language-basics.md`) |
+| Enum name taken | The enum is named like a builtin (`enum Str {…}`, `enum int {…}`), a class, a function, or another enum — top-level names are shared (see [Builtin Names Are Reserved](02-basics.md#builtin-names-are-reserved)) |
 | Unknown variant | `Enum::Name` where `Name` is not a declared variant |
 | Enum / `int` mismatch | Using an enum value where an `int` is required (or vice versa) |
 | Cross-enum comparison | `==` / `!=` between two different enum types |
 | Unknown variant in `match` arm | A bare-identifier arm that is not a variant of the subject enum |
 | Non-exhaustive `match` | Enum `match` that covers neither all variants nor a wildcard, on a path that must yield a value |
+| Method on an enum | `d.toString()` or any method call on an enum value (`method call on non-class type 'Direction'`); `impl` blocks for enums are not supported yet |

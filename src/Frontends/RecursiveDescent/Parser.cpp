@@ -1374,7 +1374,7 @@ bool Parser::parseLetDecl(Stmt *&out) {
 
 // weakDecl ::= "weak" IDENT ( ":" typeAnnotation )? ( "=" expression )? ";"
 //
-// A weak reference (docs/language/08-memory-model.md): the type is `T?` of a
+// A weak reference (docs/language/16-memory.md): the type is `T?` of a
 // class `T` (Sema checks), given or inferred from the initializer; without
 // an initializer the local starts as None.
 bool Parser::parseWeakDecl(Stmt *&out) {

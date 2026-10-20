@@ -1,7 +1,7 @@
 # Sized primitive types
 
 The design behind the sized integer and floating-point types in
-`docs/language/01-language-basics.md`: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`,
+`docs/language/02-basics.md`: `i8`, `i16`, `i32`, `i64`, `u8`, `u16`,
 `u32`, `u64`, `unsigned`, `f16`, `f32` and `f64`, next to the `int` and
 `float` the language had.  The decisions keep every value in the 8-byte slot
 `int` and `float` already use, so no layout, runtime structure or `.pkm`

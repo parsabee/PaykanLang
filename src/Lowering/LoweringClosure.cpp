@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// AST -> PIR lowering: function values (docs/language/15-function-types.md,
+// AST -> PIR lowering: function values (docs/language/14-function-types.md,
 // docs/design/function-types.md).
 //
 // A function value is a value held in place, laid out as the tuple

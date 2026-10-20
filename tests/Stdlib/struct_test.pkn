@@ -1,4 +1,4 @@
-// Structs (docs/language/14-structs.md) in the collections: a struct is an
+// Structs (docs/language/11-structs.md) in the collections: a struct is an
 // element of a List<T>, and one with `impl Hashable for` is a key of a
 // HashMap<K, V> and a HashSet<K>.  Equality of elements and keys is a
 // struct's field-wise `==`.

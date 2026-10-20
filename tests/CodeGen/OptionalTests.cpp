@@ -663,7 +663,7 @@ fn main() -> int {
   g.expectNoLeaks("ImportedTupleOfOptionals");
 }
 
-// Optionals of enums, tuples and structs (docs/language/10-optionals.md): an
+// Optionals of enums, tuples and structs (docs/language/12-optionals.md): an
 // enum's like `int?`, a tuple's or a struct's held in place as a presence
 // flag and the value.  Made, compared, matched, printed, and stored in
 // fields, arrays, tuples, parameters and results.

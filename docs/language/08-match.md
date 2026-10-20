@@ -1,7 +1,13 @@
-# PaykanLang — Match Statements
+# Match
 
-`match` is PaykanLang's structured branching construct. It inspects a single subject and runs the
-first arm that applies. Depending on the subject's type, `match` operates in one of four modes:
+`match` takes a value and runs the first **arm** whose pattern fits it. It is PaykanLang's
+structured branching construct: it tells enum variants apart, compares a number or a string
+against literals, checks the runtime class of an object, and unwraps an optional. This
+chapter introduces each of these modes, gives tasks in `tasks` a priority, and then gives the
+precise rules.
+
+What a pattern can be depends on the type of the value, the **subject**. The mode is chosen
+by the static type of the subject; you do not select it explicitly:
 
 | Subject type | Mode | Arms compare against |
 |--------------|------|----------------------|
@@ -10,28 +16,191 @@ first arm that applies. Depending on the subject's type, `match` operates in one
 | A builtin (`int`, `float`, `bool`, `char`, `Str`, a sized numeric type) | **value mode** | **literal** values |
 | An optional `T?` | **optional mode** | **present** (`T` arm) vs **absent** (`None` arm) |
 
-The mode is chosen by the static type of the subject — you do not select it explicitly.
+## Matching enum variants
+
+On an enum, each arm names a variant, **without** the `Enum::` prefix. A `match` that names
+every variant is **exhaustive**, which the compiler knows, so a function that returns from
+each arm needs no `return` after the `match` (see [Enums](07-enums.md#exhaustiveness)). To
+handle only some variants, end with the wildcard arm `_`, which matches anything:
+
+```pkn
+import ::io;
+
+enum Day { Mon, Tue, Wed, Thu, Fri, Sat, Sun }
+
+fn isWeekend(d: Day) -> bool {
+  match d {
+    Sat { return True; }
+    Sun { return True; }
+    _   { return False; }
+  }
+}
+
+fn main() -> int {
+  io::println(Str(isWeekend(Day::Sun)) + " " + Str(isWeekend(Day::Wed)));
+  return 0;
+}
+```
+
+Output:
+
+```
+True False
+```
+
+## Matching values
+
+On an `int`, `float`, `char`, `bool`, `Str` or a sized numeric type (`u8`, …), the arms are
+literals, compared by value (strings by content):
+
+```pkn
+import ::io;
+
+fn command(word: Str) -> Str {
+  match word {
+    "add"  { return "adding"; }
+    "done" { return "completing"; }
+    "list" { return "listing"; }
+    _      { return "unknown command '" + word + "'"; }
+  }
+}
+
+fn main() -> int {
+  io::println(command("add"));
+  io::println(command("list"));
+  io::println(command("frobnicate"));
+  n = 2;
+  match n * 3 {
+    0 { io::println("zero"); }
+    6 { io::println("six"); }
+    _ { io::println("something else"); }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+adding
+listing
+unknown command 'frobnicate'
+six
+```
+
+A `bool` match with both `True` and `False` arms is exhaustive. On numbers and strings
+there are always values you did not list, so a `match` that must produce a result needs a
+`_` arm.
+
+## Matching classes
+
+On an object, the arms name classes and match the object's exact runtime class, as shown
+in [Classes](05-classes.md#checking-the-class-at-run-time). An arm can bind the object to a
+name with the narrower type: `c: Circle { ... }`.
+
+## Matching optionals
+
+On an optional value (`int?`, `Str?`, `Task?`) the arms tell a present value from `None`.
+This is how a parsed number is unwrapped
+([Strings and conversions](04-strings-and-conversions.md)); [Optionals](12-optionals.md)
+covers it, and [Optional Mode](#optional-mode--unwrapping-a-t) below gives the rules.
+
+## Project: task priorities
+
+Each task gets a priority. The enum has three variants; `priorityName` turns one into text,
+and `parsePriority` reads the words a user would type. Since an unknown word must still
+give a priority, it falls back to `Normal`:
+
+```pkn
+import ::io;
+
+enum Priority { Low, Normal, High }
+
+fn priorityName(p: Priority) -> Str {
+  match p {
+    Low    { return "low"; }
+    Normal { return "normal"; }
+    High   { return "high"; }
+  }
+}
+
+fn parsePriority(word: Str) -> Priority {
+  match word {
+    "low"  { return Priority::Low; }
+    "high" { return Priority::High; }
+    "!"    { return Priority::High; }
+    _      { return Priority::Normal; }
+  }
+}
+
+class Task {
+  title: Str;
+  done: bool;
+  priority: Priority;
+
+  fn complete() { self.done = True; }
+
+  view fn toString() -> Str {
+    box = if self.done then "[x]" else "[ ]";
+    marker = if self.priority == Priority::High then " !" else "";
+    return box + " " + self.title + marker;
+  }
+}
+
+impl Task {
+  fn __init__(title: Str, priority: Priority) {
+    self.title = title;
+    self.done = False;
+    self.priority = priority;
+  }
+}
+
+fn main() -> int {
+  a = Task("water the plants", parsePriority("low"));
+  b = Task("fix the leak", parsePriority("!"));
+  c = Task("read a book", parsePriority("whenever"));
+  b.complete();
+  io::println(a);
+  io::println(b);
+  io::println(c.title + " has priority " + priorityName(c.priority));
+  return 0;
+}
+```
+
+Output:
+
+```
+[ ] water the plants
+[x] fix the leak !
+read a book has priority normal
+```
+
+The rest of this chapter gives the precise rules.
 
 ---
 
 ## Quick Summary
 
 - Syntax: `match <expr> { arm … }`. Each arm is `pattern { statements }`.
-- **`match` is a statement, not an expression** — it does not produce a value. Arms act by
+- **`match` is a statement, not an expression**: it does not produce a value. Arms act by
   running statements (assigning, calling, `return`ing).
 - Arm patterns:
-  - `TypeName { … }` — type/variant pattern, no binding.
-  - `name: TypeName { … }` — type pattern that **binds** the narrowed object to `name`.
-  - `name: view TypeName { … }` / `name: inout TypeName { … }` — the binding borrows the
+  - `TypeName { … }`: type/variant pattern, no binding.
+  - `name: TypeName { … }`: type pattern that **binds** the narrowed object to `name`.
+  - `name: view TypeName { … }` / `name: inout TypeName { … }`: the binding borrows the
     subject, read-only or as its storage ([Borrowing the subject](#borrowing-the-subject)).
-  - `literal { … }` — value pattern (`int`, `float`, `bool`, `char`, or `Str` literal; a
+  - `literal { … }`: value pattern (`int`, `float`, `bool`, `char`, or `Str` literal; a
     numeric literal takes a sized subject's type, `match b { 255 { … } }` with `b: u8`).
-  - `_ { … }` — wildcard catch-all.
-- The first matching arm wins; remaining arms are not considered.
+  - `_ { … }`: wildcard catch-all.
+- The first matching arm wins, and only that one runs; there is no fallthrough.
 - `_` must be the **last** arm. Any arm after it is unreachable and rejected.
 - Each arm body is its own scope and is fully type-checked.
-- A `match` may be **exhaustive** (covers every case) and then needs no `_`; otherwise a `_` arm
-  is required wherever every path must produce a result.
+- If no arm matches, nothing happens and execution continues after the `match`. A `match`
+  may be **exhaustive** (covers every case) and then needs no `_`; otherwise a `_` arm is
+  required wherever every path must produce a result.
+- A tuple, an array, a struct or a function value cannot be a subject (`match subject must
+  be a class type, got '(int, int)'`; `match on a struct ('S') is not supported yet: a
+  struct is a value, not an object`).
 
 ---
 
@@ -53,8 +222,8 @@ match a {
 
 ### Exact-type comparison
 
-A type arm matches **only** when the object's runtime class is *exactly* that class — a subclass
-does **not** match a base-class arm:
+A type arm matches **only** when the object's runtime class is *exactly* that class; a
+subclass does **not** match a base-class arm:
 
 ```pkn
 class Animal {}
@@ -111,8 +280,8 @@ match x {
 ```
 
 A binding is an ordinary reference to the matched object: it can be passed to functions,
-stored into fields or array slots, and assigned to variables that outlive the `match` — the
-object's lifetime is managed by ARC like any other reference (see `08-memory-model.md`).
+stored into fields or array slots, and assigned to variables that outlive the `match`; the
+object's lifetime is managed by ARC like any other reference (see [Memory](16-memory.md)).
 
 The binding is scoped to its arm body. Redeclaring the binding name inside the same body is an
 error:
@@ -125,13 +294,13 @@ match x {
 }
 ```
 
-Bindings are available only on type arms — value-pattern arms, enum-variant arms and `_` do
-not bind.
+Bindings are available only on type arms (including the `T` arm of an optional): value-pattern
+arms, enum-variant arms and `_` do not bind.
 
 ### Borrowing the subject
 
 A binding may borrow the subject instead, written with a mode where the type goes, as for a
-[local borrow](01-language-basics.md#local-borrows): `name: view TypeName { … }` or
+[local borrow](02-basics.md#local-borrows): `name: view TypeName { … }` or
 `name: inout TypeName { … }`.
 
 With `view`, the binding is a `view` local of the subject, whatever the subject is:
@@ -199,7 +368,7 @@ Output:
 
 The mode goes after the colon: `view d: Dog { }` is a syntax error that shows the fix,
 `d: view Dog`. A binding of a `view` subject is a `view` even without the mode
-([A `view` stays a `view`](02-functions-and-calling.md#a-view-of-a-reference-stays-a-view)).
+([A `view` stays a `view`](03-functions.md#a-view-of-a-reference-stays-a-view)).
 
 ---
 
@@ -219,17 +388,18 @@ fn dirName(d: Direction) -> Str {
 ```
 
 An enum `match` that names every variant is **exhaustive** and needs no `_`. Naming an identifier
-that is not a variant of the subject enum is an error. See `03-enums.md` for the full enum
-treatment.
+that is not a variant of the subject enum is an error, and so is a qualified arm
+(`base::Color::Green`). See [Using `enum` with `match`](07-enums.md#using-enum-with-match)
+for the full enum treatment.
 
 ---
 
 ## Value Mode — matching on a builtin value
 
 When the subject is a builtin (`int`, `float`, `bool`, `char`, `Str`, or a sized numeric
-type), arms are **literal patterns** and the subject is compared by value. The first equal literal wins. The subject
-can be any expression of a builtin type: a variable, a call, a temporary such as `a + b`, or even
-a literal (`match "s" { … }`).
+type), arms are **literal patterns** and the subject is compared by value. The first equal
+literal wins. The subject can be any expression of a builtin type: a variable, a call, a
+temporary such as `a + b`, or even a literal (`match "s" { … }`).
 
 ```pkn
 n: int = 2;
@@ -280,10 +450,37 @@ match x {            // x: int
 
 ---
 
+## Optional Mode — unwrapping a `T?`
+
+When the subject is an optional type `T?` (see [Optionals](12-optionals.md)), `match` is the
+way to get at the wrapped value. The arm naming `T` itself matches **every present value**,
+whatever its runtime subclass, and binds it as `T`; a `None` arm (or `_`) covers the absent
+case:
+
+```pkn
+match find(head, key) {          // find returns Node?
+  n: Node { io::println(Str(n.v)); }
+  None    { io::println("not found"); }
+}
+```
+
+Two differences from type mode:
+
+- The `T` arm is **not** an exact-type test: a `Leaf` stored in a `Node?` is matched by
+  `n: Node`. An arm naming a strict subclass keeps exact-type semantics and must come before
+  the `T` arm (anything after the `T` arm is unreachable and rejected: `unreachable arm: the
+  'Node' arm above already matches every non-None value`).
+- A `T` arm alone is **not exhaustive**; `T` together with `None` (or `_`) is, and then the
+  `match` satisfies the "always returns" and field-initialisation analyses.
+
+A `None` arm is only valid on an optional subject; matching on an `Obj` is unchanged.
+
+---
+
 ## The Wildcard `_`
 
-`_` matches anything and is the catch-all. It must appear as the **last** arm — anything after it
-can never run:
+`_` matches anything and is the catch-all. It must appear as the **last** arm; anything after
+it can never run:
 
 ```pkn
 match x {
@@ -325,9 +522,9 @@ match x {
 
 `match` participates in the same flow analysis as the rest of the language. When a `match` is the
 last thing in a function whose every path must `return` a value, the analysis treats the `match`
-as guaranteeing a result only if it is exhaustive — every arm returns *and* the arms cover every
-case (via `_`, all enum variants, or both `bool` values). A `match` with uncovered cases and no
-fallthrough is rejected:
+as guaranteeing a result only if it is exhaustive: every arm returns *and* the arms cover every
+case (via `_`, all enum variants, both `bool` values, or `T` and `None` on an optional). A
+`match` with uncovered cases and no fallthrough is rejected:
 
 ```pkn
 fn main() -> int {
@@ -342,8 +539,8 @@ fn main() -> int {
 ```
 
 The same exhaustiveness rule lets `match` satisfy field-initialisation analysis inside `__init__`
-(see `04-classes.md`): a field assigned in every arm of an exhaustive `match` counts as
-definitely assigned.
+(see [Fields](05-classes.md#fields)): a field assigned in every arm of an exhaustive `match`
+counts as definitely assigned.
 
 ---
 
@@ -351,10 +548,10 @@ definitely assigned.
 
 ### Matching a `Result`
 
-`io::open()` returns a `res::Result<io::File>` (module `::result`): a struct holding an
-`error` and a `value: io::File?`, present exactly when the open succeeded. A struct is not a
-`match` subject, so match its `value` in optional mode (below), and read the `error` in the
-`None` arm:
+`io::open()` returns a `res::Result<io::File>` (module `::result`, see
+[Result](../stdlib/result.md)): a struct holding an `error` and a `value: io::File?`, present
+exactly when the open succeeded. A struct is not a `match` subject, so match its `value` in
+optional mode, and read the `error` in the `None` arm:
 
 ```pkn
 r = io::open("/tmp/data.txt", "r");
@@ -374,7 +571,7 @@ match r.value {
 ### Unwrapping parsed primitives
 
 `int<Str>(s)` / `float<Str>(s)` return an `int?` / `float?`: `None` when `s` is not a valid
-number. They are unwrapped in optional mode (below), and the arm binds a plain `int`:
+number. They are unwrapped in optional mode, and the arm binds a plain `int`:
 
 ```pkn
 match int<Str>(s) {
@@ -397,36 +594,11 @@ match f.readln().value {
 
 ---
 
-## Optional Mode — unwrapping a `T?`
-
-When the subject is an optional type `T?` (see `10-optionals.md`), `match` is the way to get at
-the wrapped value. The arm naming `T` itself matches **every present value** — whatever its
-runtime subclass — and binds it as `T`; a `None` arm (or `_`) covers the absent case:
-
-```pkn
-match find(head, key) {          // find returns Node?
-  n: Node { io::println(Str(n.v)); }
-  None    { io::println("not found"); }
-}
-```
-
-Two differences from type mode:
-
-- The `T` arm is **not** an exact-type test: a `Leaf` stored in a `Node?` is matched by
-  `n: Node`. An arm naming a strict subclass keeps exact-type semantics and must come before
-  the `T` arm (anything after the `T` arm is unreachable and rejected).
-- A `T` arm alone is **not exhaustive**; `T` together with `None` (or `_`) is, and then the
-  `match` satisfies the "always returns" and field-initialisation analyses.
-
-A `None` arm is only valid on an optional subject; matching on an `Obj` is unchanged.
-
----
-
 ## Semantic Checks
 
 | Error | Trigger |
 |-------|---------|
-| Subject is not matchable | The subject type supports neither type-, variant-, nor value-mode matching |
+| Subject is not matchable | The subject type supports neither type-, variant-, value- nor optional-mode matching: a tuple, an array, a struct or a function type |
 | Arm type not a subtype | A type arm names a class that is not the subject type or a subtype of it |
 | Unknown arm type | A type arm names a class that is not declared anywhere |
 | Unknown enum variant | A variant arm names an identifier that is not a variant of the subject enum |

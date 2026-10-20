@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // AST -> PIR lowering: values held in memory, fixed-size arrays (`T[n]`,
-// docs/language/05-arrays.md) and tuples (docs/language/09-tuples.md).
+// docs/language/09-arrays.md) and tuples (docs/language/10-tuples.md).
 //
 // Such a value is never in an SSA value: a variable is a `mem` local of its
 // bytes (an `inout` one a `ptr` local holding the address of the value it

@@ -383,7 +383,7 @@ Records, sorted by `(tag, name)`:
 | 6 | `CONST` | `Str name; Vis; Attrs; Ty; Const value` (#170 module-level `let`; `value` tag 0 for object initialisers, reached through the module's accessor in `CODE`) |
 | 7 | `TEMPLATE_CLASS` | `Str name; Vis (0/3); Attrs; TypeParams; u8 tflags (bit0 ERASABLE, §4.5); Ty super (concrete); fields[] { Str name; Vis; Ty }; methods[] { Str name; Vis; MFlags; Sig }; u8 has_init; Sig init; Tmpl body` |
 | 8 | `TEMPLATE_FUNC` | `Str name; Vis; Attrs; TypeParams; u8 tflags; Sig; Tmpl body` |
-| 9 | `STRUCT` | `Str name; Vis; Attrs; Ty self;` fields in declaration order `fields[] { Str name; Vis; Ty; Attrs }`; `methods[] { Str name; Vis; MFlags; Sig }` (`__init__` and the `impl` block's methods, statically dispatched: a struct has no vtable); the constructor is a `FUNC` record of the struct's name (docs/language/14-structs.md) |
+| 9 | `STRUCT` | `Str name; Vis; Attrs; Ty self;` fields in declaration order `fields[] { Str name; Vis; Ty; Attrs }`; `methods[] { Str name; Vis; MFlags; Sig }` (`__init__` and the `impl` block's methods, statically dispatched: a struct has no vtable); the constructor is a `FUNC` record of the struct's name (docs/language/11-structs.md) |
 
 `Str`, `Obj`, arrays, tuples and optionals are never written: every context bootstraps them. Static fields in generic classes
 are rejected at definition (#170), so templates carry none.

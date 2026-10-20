@@ -295,9 +295,9 @@ public:
 // Variable declaration with explicit type (x: int = 10), a `let` local
 // (let x = 10;), which cannot be reassigned, or a `weak` local or field
 // (weak y: Point? = x;), which holds a weak reference
-// (docs/language/08-memory-model.md, "Weak references").
+// (docs/language/16-memory.md, "Weak references").
 // How a parameter or a local is held
-// (docs/language/02-functions-and-calling.md, "Parameter modes"): by value (the
+// (docs/language/03-functions.md, "Parameter modes"): by value (the
 // default), `view` (read-only) or `inout` (another name for the caller's
 // storage, or for a place).
 enum class ParamMode : uint8_t { Value, View, Inout };
@@ -338,7 +338,7 @@ public:
   bool isWeak() const { return Weak; }
   void setWeak(bool weak) { Weak = weak; }
 
-  /// A local borrow (docs/language/01-language-basics.md, "Local borrows"):
+  /// A local borrow (docs/language/02-basics.md, "Local borrows"):
   /// `view` or `inout`; Value for any other declaration.
   ParamMode getMode() const { return Mode; }
   void setMode(ParamMode mode) { Mode = mode; }
@@ -362,7 +362,7 @@ struct ParamModes {
   std::vector<ParamMode> Modes;
   std::vector<std::string> Names;
   /// How the result is returned: a copy, or a borrow (`-> view T`) of what
-  /// the function was given as one (docs/language/02-functions-and-calling.md,
+  /// the function was given as one (docs/language/03-functions.md,
   /// "Borrowed results").
   ParamMode Result = ParamMode::Value;
 
@@ -465,7 +465,7 @@ public:
   }
 
   /// Declared `view fn`: a method whose body does not change `self`
-  /// (docs/language/04-classes.md, "Methods that don't change self").
+  /// (docs/language/05-classes.md, "Methods that don't change self").
   bool isView() const { return View; }
   void setView(bool view) { View = view; }
 
@@ -713,7 +713,7 @@ public:
   Expr *getLiteralPattern() const { return LiteralPattern; }
   CompoundStmt *getBody() const { return Body; }
   /// `n: view T` or `n: inout T`: how the binding holds the subject
-  /// (docs/language/07-match-statements.md, "Borrowing the subject").
+  /// (docs/language/08-match.md, "Borrowing the subject").
   ParamMode getMode() const { return Mode; }
   void setMode(ParamMode mode) { Mode = mode; }
 
@@ -880,7 +880,7 @@ class Identifier : public Expr {
 private:
   const std::string *Name; // points into ASTContext::StringPool (stable)
   // Set by Sema when the name is a function used as a value (`f = square;`,
-  // docs/language/15-function-types.md): the function's name as the lowering
+  // docs/language/14-function-types.md): the function's name as the lowering
   // knows it (the spelling, or, inside another module's template, that
   // module's qualified name), of which the lowering makes a function value.
   const std::string *FunctionRef = nullptr;
@@ -944,7 +944,7 @@ public:
 };
 
 // A call of a function value that is not named: `xs[0](1)`, `t.0(x)`,
-// `make()(2)` (docs/language/15-function-types.md).  A call by name is a
+// `make()(2)` (docs/language/14-function-types.md).  A call by name is a
 // CallExpr (`f(1)`, a variable of function type) or a MethodCallExpr
 // (`obj.cb(1)`, a field of function type); the callee here is any other
 // expression, of function type.
@@ -967,7 +967,7 @@ public:
 };
 
 // Lambda expression: `fn(x: int) -> int { return x + 1; }`
-// (docs/language/15-function-types.md).
+// (docs/language/14-function-types.md).
 //
 // A function without a name, in expression position, whose value is a
 // closure: its body may use the variables of the function it is written in,
@@ -1219,7 +1219,7 @@ class ClassType : public Type {
 
   // Instance fields: (name, type) pairs.
   std::vector<std::pair<std::string, Type *>> Fields;
-  // The fields declared `weak` (docs/language/08-memory-model.md): they hold
+  // The fields declared `weak` (docs/language/16-memory.md): they hold
   // a weak reference, and their type is `T?` of a class `T`.
   std::unordered_set<std::string> WeakFields;
 
@@ -1465,7 +1465,7 @@ public:
   static bool classof(const ASTNode *N) { return N->getKind() == NK_ClassDecl; }
 };
 
-// User-defined struct declaration (docs/language/14-structs.md):
+// User-defined struct declaration (docs/language/11-structs.md):
 //   struct Point { x: int; y: int; }
 //
 // Fields are VarDecl nodes (no initializer), at least one.  A struct body
@@ -1738,7 +1738,7 @@ public:
   const std::string &getEnumName() const { return *EnumName; }
   const std::string &getVariantName() const { return *VariantName; }
   /// Set by Sema when `m::f` names an imported function used as a value
-  /// (docs/language/15-function-types.md): the function's qualified name.
+  /// (docs/language/14-function-types.md): the function's qualified name.
   void setFunctionRef(const std::string &internedName) {
     FunctionRef = &internedName;
   }
@@ -1922,7 +1922,7 @@ public:
 };
 
 // Struct type: `struct Point { x: int; y: int; }`
-// (docs/language/14-structs.md).
+// (docs/language/11-structs.md).
 //
 // A value type with named fields: a tuple of its field types (see TupleType)
 // that is nominal -- two structs with the same fields are different types,
@@ -2010,13 +2010,13 @@ public:
 };
 
 // The type of a `view T[]` or `inout T[]` parameter: a slice, the address of
-// a fixed-size array's elements and their number (docs/language/05-arrays.md,
+// a fixed-size array's elements and their number (docs/language/09-arrays.md,
 // "Slices").  It is spelled `T[]` with the parameter's mode; Sema gives it to
 // the parameter, so a slice is indexed, measured with `len()` and passed to
 // another slice parameter, and nothing else.  One canonical instance per
 // element type (ASTContext::getSliceType).
 // Function type: `(int, view Str) -> bool`
-// (docs/language/15-function-types.md).
+// (docs/language/14-function-types.md).
 //
 // The type of a function value: a lambda or a named function used without
 // calling it.  Its parameters have types and modes, as a function's do, and

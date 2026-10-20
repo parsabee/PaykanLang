@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Codegen / E2E tests for structs (docs/language/14-structs.md): values held
+// Codegen / E2E tests for structs (docs/language/11-structs.md): values held
 // in place with named fields, assigned in place, with methods from an `impl`
 // block whose `self` is the receiver's storage.  Every runtime test runs
 // under the tracking allocator and asserts zero live heap blocks afterwards,

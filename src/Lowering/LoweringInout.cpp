@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // AST -> PIR lowering: `inout` parameters and locals
-// (docs/language/02-functions-and-calling.md, "Parameter modes";
-// docs/language/01-language-basics.md, "Local borrows").
+// (docs/language/03-functions.md, "Parameter modes";
+// docs/language/02-basics.md, "Local borrows").
 //
 // An `inout` parameter is a PIR `ptr`: the address of its caller's storage.
 // The callee keeps the address in the parameter's local and reads and writes
@@ -19,7 +19,7 @@
 // An `inout` local (`x: inout = k;`) is a `ptr` local holding the address of
 // what it names, the same way; a hidden owned local keeps a field's object
 // alive for as long as the local can be used.  A `match` arm's `n: inout T`
-// is one for the subject (docs/language/07-match-statements.md, "Borrowing
+// is one for the subject (docs/language/08-match.md, "Borrowing
 // the subject").
 //
 // For a reference type the storage holds a box, and the `inout` is a mutable

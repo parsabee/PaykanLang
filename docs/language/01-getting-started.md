@@ -89,8 +89,8 @@ $ build/bin/paykan --version
 
 The default build needs nothing else and downloads nothing. It does not build the tests;
 configure with `-DPAYKAN_BUILD_ALL_TESTS=ON` to build them all, or name the suites you want
-with `-DPAYKAN_BUILD_TESTS=<suites>` (the README's Testing section lists them). To install
-the compiler, its runtime and the standard library under a prefix:
+with `-DPAYKAN_BUILD_TESTS=<suites>` (the README's [Testing](../../README.md#testing) section
+lists them). To install the compiler, its runtime and the standard library under a prefix:
 
 ```sh
 $ cmake --install build --prefix /usr/local
@@ -104,7 +104,7 @@ downloads:
 $ cmake -B build "-DPAYKAN_BACKENDS=llvm;c"
 ```
 
-[The `paykan` command](13-the-paykan-command.md) explains how to choose a backend.
+[The `paykan` command](17-the-paykan-command.md#backends) explains how to choose a backend.
 
 ### Checking the installation
 
@@ -120,6 +120,9 @@ backend c (built with PaykanLang <version>, compatible)
 plugin API <version>
 plugin directories: ...
 ```
+
+A compiler built with the LLVM backend lists it too, as
+`backend llvm (built with PaykanLang <version>, compatible): LLVM <llvm-version>`.
 
 ## Hello, world
 
@@ -162,7 +165,8 @@ A few things to notice:
 
 `paykan hello.pkn` is short for `paykan run hello.pkn`: it compiles the program and runs it
 right away. Anything after the file name is passed to the program as its command-line
-arguments (chapter 11 shows how to read them):
+arguments ([Command-line arguments](../stdlib/io.md#command-line-arguments) shows how to
+read them):
 
 ```sh
 $ paykan run hello.pkn
@@ -185,7 +189,8 @@ The executable has the PaykanLang runtime linked in, so it runs without `paykan`
 
 After the first run you will find a `.paykan_cache/` directory next to `hello.pkn`. It holds
 the generated C and compiled objects, so that the next run only recompiles what changed.
-It is safe to delete at any time; chapter 13 says more.
+It is safe to delete at any time; [The compilation
+cache](17-the-paykan-command.md#the-compilation-cache) says more.
 
 ## When something is wrong
 
@@ -227,5 +232,6 @@ PaykanLang source files use the `.pkn` extension (`.pk` is accepted too). A file
 only declarations (imports, functions, classes, structs, enums, traits and `impl` blocks),
 in any order: a function may call another one declared further down the file. There are no
 statements at the top level, so all code lives in functions.
+[Program Structure](02-basics.md#program-structure) gives the rules.
 
 Next, [Basics](02-basics.md) covers the core of the language.

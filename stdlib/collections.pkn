@@ -18,7 +18,7 @@
 // broken precondition, such as `pop` on an empty container or an index out
 // of range, panics.
 //
-// Names starting with `_` are private (docs/language/06-modules.md,
+// Names starting with `_` are private (docs/language/15-modules.md,
 // "Private to the module"): `_Entry`, `_Heap`, `_panic`, `_fail`,
 // `_bucket` and the buffer helpers are the module's own, and a `__` field or method is reachable
 // only from its type's methods.

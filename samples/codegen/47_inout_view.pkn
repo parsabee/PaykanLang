@@ -1,8 +1,8 @@
 // 47 — parameter modes and `let`.  A `view` parameter is a read-only copy;
 // an `inout` parameter is its caller's variable or field, passed by address,
 // so the callee's writes reach the caller at once.  Both apply to int,
-// float, bool, char and enum parameters (docs/language/02-functions-and-
-// calling.md, "Parameter modes").  A `let` local cannot be reassigned.
+// float, bool, char and enum parameters (docs/language/03-functions.md,
+// "Parameter modes").  A `let` local cannot be reassigned.
 // Exercises: inout locals and parameters (passed on), fields of a variable,
 // of `self` and of a chain, a swap, an enum, a float, a constructor and a
 // method with inout parameters, view arguments of every kind.  Run with
