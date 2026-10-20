@@ -61,15 +61,16 @@ area 12.5664
 True
 ```
 
-- Everything declared at the top level of a module (functions, classes and enums) can be
-  imported, except the names starting with `_`, which are the module's own. There is no
-  `export` keyword.
+- Everything declared at the top level of a module (functions, classes, structs and enums)
+  can be imported, except the names starting with `_`, which are the module's own. There is
+  no `export` keyword.
 - Imported names are always qualified: a type is `shapes::Circle`, a variant is
   `shapes::Kind::Round`. Your own module's names stay unqualified.
 - Import paths always start from the source root, also inside the modules in
   subdirectories: `geometry/units.pkn` imports its sibling as `import geometry::shapes;`.
 - Imports are resolved when the program is compiled; there is no package registry, and
-  nothing outside the source root is searched (except system imports, below).
+  no source outside the source root is searched (except system imports, below). Prebuilt
+  modules can be added with `--module-path` ([The paykan command](13-the-paykan-command.md)).
 
 ## Import forms
 
@@ -97,9 +98,9 @@ back. It just cannot *name* the type, in an annotation for instance, until it im
 module that declares it.
 
 **Type names are global, function names are not.** Within one program (the main file and
-everything it imports, directly or not), two modules cannot declare different classes or
-enums with the same name. Functions are per module: `a::helper()`, `b::helper()` and your own
-`helper()` are three different functions.
+everything it imports, directly or not), two modules cannot declare different classes,
+structs or enums with the same name. Functions are per module: `a::helper()`, `b::helper()`
+and your own `helper()` are three different functions.
 
 **No cycles.** If `a` imports `b`, `b` cannot import `a`, directly or through other
 modules. Move what both need into a third module.
@@ -113,8 +114,9 @@ class however many modules use it, so the values pass freely between them (see
 **System imports.** A leading `::`, as in `import ::collections;`, looks for the module in
 the standard library instead of the source root. The standard library ships with
 PaykanLang: `::io` prints and reads and writes files, `::result` holds the errors that
-library functions report, and `::collections` has lists, linked lists, stacks, queues, hash
-maps, hash sets and priority queues (see [the standard
+library functions report, `::collections` has lists, linked lists, stacks, queues, hash
+maps, hash sets and priority queues, `::math` has the mathematical functions (`math::sqrt`,
+`math::pi()`, …) and `::memory` has `Buffer<T>` and `Box<T>` (see [the standard
 library](../language/13-standard-library.md)). Set `$PAYKAN_STDLIB` to use another directory
 of system modules. Only the built-in types (`int`, `Str`, `Obj` and the rest) and the
 conversions (`Str(n)`, `int(s)`) need no import.

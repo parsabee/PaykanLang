@@ -249,7 +249,7 @@ Stats(done: 2, pending: 11)
   Unlike a tuple, its fields have names and can be assigned, and in a method `self` is the
   variable the method was called on, so `s.count(True)` changes `s`.
 - A struct has no superclass and no `vtable`: it is not an object, and `==` compares two
-  structs field by field. `println` prints the struct's name with each field.
+  structs field by field. `io::println` prints the struct's name with each field.
 
 Use a class when values must share one object that several names refer to, or when
 subclasses and `match` are needed; use a struct for a small group of fields that is

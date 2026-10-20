@@ -180,6 +180,10 @@ Output:
 Before adding, check that `count` is below `len()`: the program decides what to do when the
 array is full, rather than letting the index panic.
 
+When there is no sensible capacity, use a list from the standard library instead of an
+array: `collections::List<T>` keeps its own count and grows as values are pushed (see
+[the standard library](../language/13-standard-library.md#collections)).
+
 ## Arrays of arrays and of objects
 
 The element type can be any type, including another array type or a class. `int[2][3]` is

@@ -108,10 +108,16 @@ have their own type parameters; a method uses the type parameters of its generic
 
 ## How generic code is checked
 
-There are no constraints on type parameters (no `T: Comparable`). Instead, the body of a
-generic class or function is type-checked again for each set of type arguments it is used
-with. If an operation does not work for one of them, the error points at the generic code
-and says which instantiation needed it:
+A type parameter can name the traits its type argument must implement, as a **bound**:
+`fn show<T: Show>(x: T)` accepts only types with a `toString()`, and `io::println` is
+declared just so. A trait such as `Show` or `Hashable` is built in, and a program declares
+its own with `trait` (see [Traits](../language/12-traits.md)). A call with a type that lacks
+the trait is an error at the call (`'Task' does not implement trait 'Named', which 'f'
+requires of 'T'`).
+
+Bounds or not, the body of a generic class or function is type-checked again for each set
+of type arguments it is used with. If an operation does not work for one of them, the error
+points at the generic code and says which instantiation needed it:
 
 ```pkn
 class Doubler<T> {

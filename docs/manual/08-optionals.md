@@ -8,7 +8,8 @@ chapter `tasks` learns to look tasks up and to give them an optional deadline.
 ## Optional types
 
 Add `?` to a type to make it optional: `Str?`, `int?`, `Task?`. Any class, `Str`, `int`,
-`float`, `bool` and `char` can be optional. `None` is the absent value:
+`float`, `bool`, `char` and the sized numeric types can be optional, and so can enums, tuples
+and structs (below). `None` is the absent value:
 
 ```pkn
 import ::io;
@@ -191,7 +192,9 @@ True
   (`int[3]?` is rejected).
 - `if c then value else None` has the type `T?` when `value` is a `T`.
 - Enums, tuples and structs have optionals too (`Direction?`, `(int, Str)?`, `Point?`),
-  unwrapped with an arm naming the type: `d: Direction { ... }`.
+  unwrapped with an arm naming the type: `d: Direction { ... }`. Such an optional holds its
+  value in place, which may be at most 64 bytes; for a bigger tuple or struct the compiler
+  asks for a `memory::Box<T>?` instead.
 - There is no `?.`, `??` or `if let` shorthand in this release; `match` is the way to unwrap.
 - The standard library says "nothing" with optionals too: a file read returns a result
   whose `value` is a `Str?`, `None` at the end of the file. [Files and

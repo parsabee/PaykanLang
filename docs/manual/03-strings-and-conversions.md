@@ -54,8 +54,9 @@ Strings are immutable from the program's point of view: `s[0] = 'x'` is an error
 (`subscript assignment on non-array type 'Str'`). To change a string, build a new one. The
 ordering operators (`<`, `>`) are not defined on strings; compare characters instead.
 
-There are no built-in methods for searching, slicing or splitting yet (a standard library is
-planned), but they are short loops over `len()` and `[]`, as we will see below.
+There are no built-in methods for searching, slicing or splitting yet, and the standard
+library has none either, but they are short loops over `len()` and `[]`, as we will see
+below.
 
 ### Characters and bytes
 
