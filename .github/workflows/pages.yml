@@ -4,7 +4,7 @@ name: Pages
 # by GitHub Pages' own Jekyll (docs/_config.yml) and deployed with the official
 # Pages actions.  Nothing is installed from the repository: the theme is a
 # remote theme that the build fetches, and the plugins are those GitHub Pages
-# ships.  (The apt repository has its own site: packaging/README.md.)
+# ships.  (The apt repository has its own site, from parsabee/paykanlang-apt.)
 #
 # One-time setup by a repository admin: Settings -> Pages -> Build and
 # deployment -> Source: "GitHub Actions".  (The workflow's token cannot turn

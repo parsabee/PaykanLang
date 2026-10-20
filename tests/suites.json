@@ -101,7 +101,6 @@
     ["scripts/run_clang_tidy.py", []],
     ["scripts/coverage.py", []],
     [".github/*", []],
-    ["packaging/*", []],
     [".clang-format", []],
     [".clang-tidy", "all"],
     [".pre-commit-config.yaml", []],
