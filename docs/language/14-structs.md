@@ -537,7 +537,8 @@ holds no templates yet.
 What a struct cannot hold, an instantiation cannot either: `struct Node<T> { v: T; next:
 Node<T>; }` is reported when it is instantiated (`struct 'Node<int>' contains itself:
 field 'next' holds a 'Node<int>'`), as is a fixed-size array type argument.  A `static fn`
-in a generic struct's `impl` block is not supported yet, like a generic class's.
+in a generic struct's `impl` block is the instantiation's, called as
+`Pair<int, Str>::make(1, "a")`, like a generic class's.
 
 ---
 
@@ -594,7 +595,7 @@ Point(x: 4, y: 2) 6 True
 | Taken name | `struct A` next to a class, enum, function or trait `A`; `struct Str` |
 | Contains itself | `struct A { b: B; } struct B { a: A; }`; `struct C { c: (int, C); }` |
 | Array field | `struct A { xs: int[3]; }` |
-| Generic struct misuse | `Pair<int>` for two parameters; `p: Pair` without arguments; `A<int>` for a plain struct; `impl Pair { }`; a `static fn` in `impl Pair<A, B>`; `Same(1, "a")` for `Same<T> { a: T; b: T; }` |
+| Generic struct misuse | `Pair<int>` for two parameters; `p: Pair` without arguments; `A<int>` for a plain struct; `impl Pair { }`; `Pair::make(1, "a")` without the type arguments; `Same(1, "a")` for `Same<T> { a: T; b: T; }` |
 | Nominal mismatch | `b: B = a`; `t: (int, int) = a`; `a == b` across types |
 | Not an `Obj` | `o: Obj = a` |
 | Tuple index | `a.0` |

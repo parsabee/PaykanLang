@@ -20,6 +20,7 @@
 #include "Sema.h"
 #include "SemaInternal.h"
 
+#include <algorithm>
 #include <functional>
 
 namespace paykan {
@@ -474,9 +475,10 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
-  PendingInstantiations.push_back(std::move(pending));
+  PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedStructDecls : InstantiatedStructDecls)
       .push_back(clone);
+  declareInstantiationStatics(instName, st, pending);
   return st;
 }
 
@@ -571,6 +573,83 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
 
   CurrentClassCtx = savedCtx;
   return ok;
+}
+
+// -- The size of a value held in place
+//
+// The lowering's layout (ModuleLowering::memLayout, toPIRType and
+// pir::storeSize), so that what an optional of a tuple or a struct holds in
+// place can be bounded (kOptionalValueLimit) where the type is resolved.
+
+namespace {
+
+struct ValueLayout {
+  int64_t Size = 0, Align = 1;
+};
+
+int64_t alignUp(int64_t n, int64_t align) {
+  return (n + align - 1) / align * align;
+}
+
+ValueLayout valueLayout(const ast::Type *ty) {
+  if (const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
+    switch (bt->getTypeKind()) {
+    case ast::BuiltinType::Bool:
+    case ast::BuiltinType::Char:
+      return {1, 1};
+    case ast::BuiltinType::Void:
+      return {0, 1};
+    default:
+      return {8, 8}; // every number is held in an 8-byte slot
+    }
+  if (ast::isFunctionValue(ty))
+    return {16, 8}; // the code and the closure (None has no code)
+  if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
+    if (ast::isRefType(ty))
+      return {8, 8}; // the reference, NULL for None
+    // The presence flag, then the value at its own alignment.
+    const ValueLayout inner = valueLayout(ot->getInnerType());
+    return {alignUp(alignUp(1, inner.Align) + inner.Size, inner.Align),
+            inner.Align};
+  }
+  if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
+    const ValueLayout elem = valueLayout(ft->getElementType());
+    return {elem.Size * std::max<int64_t>(ft->getLength(), 0), elem.Align};
+  }
+  if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    ValueLayout l;
+    for (const ast::Type *e : tt->getElementTypes()) {
+      const ValueLayout el = valueLayout(e);
+      l.Size = alignUp(l.Size, el.Align) + el.Size;
+      l.Align = std::max(l.Align, el.Align);
+    }
+    return {alignUp(l.Size, l.Align), l.Align};
+  }
+  return {8, 8}; // a reference or an enum
+}
+
+} // namespace
+
+// static
+int64_t Sema::valueSize(const ast::Type *ty) { return valueLayout(ty).Size; }
+
+bool Sema::checkOptionalValueSize(ast::Type *inner, ast::SourceLocation loc,
+                                  const std::string &context) {
+  const int64_t size = valueSize(inner);
+  if (size <= kOptionalValueLimit)
+    return true;
+  const std::string name = ast::typeName(inner);
+  if (!ReportedOptionalLimits.insert(name).second) {
+    ++SuppressedFollowOns; // reported at its first use
+    return false;
+  }
+  error(loc, context + " has type '" + name +
+                 "?': an optional holds a value of up to " +
+                 std::to_string(kOptionalValueLimit) +
+                 " bytes in place, and '" + name + "' is " +
+                 std::to_string(size) + " bytes; use 'Box<" + name +
+                 ">?' (memory::Box) instead");
+  return false;
 }
 
 } // namespace sema

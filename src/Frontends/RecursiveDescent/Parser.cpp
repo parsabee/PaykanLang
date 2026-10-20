@@ -2064,15 +2064,22 @@ Expr *Parser::parseLiteral() {
 }
 
 // `name <` in expression position is a generic call only when a type
-// argument list followed by `> (` fits; `a < b` is otherwise a comparison.
-bool Parser::tryGenericCallArgs(std::vector<Type *> &out) {
+// argument list followed by `> (` fits, or by `> :: IDENT (` (a function of
+// the instantiation, `Box<int>::of(1)`); `a < b` is otherwise a comparison.
+bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member) {
   size_t saved = Pos;
   SourceLocation savedEnd = PrevEnd;
   ++Speculating;
   consume(); // '<'
   bool ok = enterNesting();
   if (ok) {
-    ok = parseTypeArgList(out) && accept(Tok::Greater) && at(Tok::LParen);
+    ok = parseTypeArgList(out) && accept(Tok::Greater);
+    if (ok && at(Tok::ColonColon) && kind(1) == Tok::Ident &&
+        kind(2) == Tok::LParen) {
+      consume(); // '::'
+      member = std::string(consume().Text);
+    }
+    ok = ok && at(Tok::LParen);
     leaveNesting();
   }
   --Speculating;
@@ -2080,14 +2087,17 @@ bool Parser::tryGenericCallArgs(std::vector<Type *> &out) {
     Pos = saved;
     PrevEnd = savedEnd;
     out.clear();
+    member.clear();
   }
   return ok;
 }
 
 // primary ::= literal | IDENT | IDENT "(" args ")" | IDENT "<" types ">" "("
 // args ")"
+//           | IDENT "<" types ">" "::" IDENT "(" args ")"
 //           | modulePath "::" IDENT ( "(" args ")" | "<" types ">" "(" args ")"
-//           )? | "(" expression ")" | "(" expression ( "," expression )+ ")" |
+//           | "<" types ">" "::" IDENT "(" args ")" )?
+//           | "(" expression ")" | "(" expression ( "," expression )+ ")" |
 //           "[" args "]"
 Expr *Parser::parsePrimary() {
   SourceLocation start = cur().Loc;
@@ -2108,7 +2118,10 @@ Expr *Parser::parsePrimary() {
     std::string full = path.empty() ? name : path + "::" + name;
 
     std::vector<Type *> typeArgs;
-    bool generic = at(Tok::Less) && tryGenericCallArgs(typeArgs);
+    std::string member; // `Box<int>::of(...)`: the instantiation's function
+    bool generic = at(Tok::Less) && tryGenericCallArgs(typeArgs, member);
+    if (!member.empty())
+      full += "::" + member;
     if (generic || at(Tok::LParen)) {
       consume(); // '('
       std::vector<Expr *> args;

@@ -86,7 +86,9 @@ impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
   `Pair<Str, int>` implements `Keyed<Str>`, and meets a `T: Keyed<Str>` bound.
 - Its `__init__` can go in one too: `Box(3)` infers `T` from it, as from one in the
   class body.
-- A generic class's `impl` block cannot have a `static fn` yet.
+- A generic class's `impl` block can have `static fn`s; one is called on an
+  instantiation, `Box<int>::of(3)` (or `m::Box<int>::of(3)` through an import), and is that
+  instantiation's function.
 
 A struct can be generic in the same way (`struct Pair<A, B> { a: A; b: B; }`, with
 `impl Pair<A, B>` blocks): see [Generic structs](14-structs.md#generic-structs).

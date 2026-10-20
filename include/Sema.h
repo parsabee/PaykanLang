@@ -1171,6 +1171,26 @@ private:
     return ClassTemplates.count(name) || StructTemplates.count(name) ||
            FuncTemplates.count(name);
   }
+  /// Whether @p name is `Tmpl::member`, a function of the `impl` block of a
+  /// class or struct template (`Box<int>::of(1)`, resolveGenericCall).
+  bool isTemplateStatic(const std::string &name) const {
+    const size_t sep = name.rfind("::");
+    if (sep == std::string::npos)
+      return false;
+    const std::string owner = name.substr(0, sep);
+    return ClassTemplates.count(owner) || StructTemplates.count(owner);
+  }
+  /// An optional of a tuple or a struct holds the value in place: one of
+  /// more than this many bytes is rejected (checkOptionalValueSize), to be
+  /// boxed.
+  static constexpr int64_t kOptionalValueLimit = 64;
+  /// The size in bytes of a value of @p ty held in place, as the lowering
+  /// lays it out (ModuleLowering::memLayout); 8 for a reference.
+  static int64_t valueSize(const ast::Type *ty);
+  /// Report `inner?` (the @p context at @p loc) when @p inner, a tuple or a
+  /// struct, is more than kOptionalValueLimit bytes.
+  bool checkOptionalValueSize(ast::Type *inner, ast::SourceLocation loc,
+                              const std::string &context);
   /// Split the canonical instantiation name @p name (`Tmpl<arg1, arg2>`)
   /// into the template's name and its arguments, resolved in this context;
   /// false when it is not one or an argument does not resolve.
@@ -1322,6 +1342,11 @@ private:
     const std::vector<std::string> *RequestLines = nullptr;
   };
   std::vector<PendingInstantiation> PendingInstantiations;
+  /// Declare the `static fn`s of the `impl` blocks of the instantiation
+  /// @p instName of @p type (ImplsByClass) as the functions `Inst::name`,
+  /// their bodies pending like @p base, the instantiation's own entry.
+  void declareInstantiationStatics(const std::string &instName, ast::Type *type,
+                                   const PendingInstantiation &base);
 
   /// Instantiations in creation order; injected into the TranslationUnit at
   /// the end of run() so they are lowered.
@@ -1339,6 +1364,21 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// Whether every struct's fields are known (populateStructs): until then
+  /// a struct's size is not, and the checks of the optionals resolved so far
+  /// (a class's fields and signatures) wait in DeferredOptionalChecks.
+  bool StructsPopulated = false;
+  struct DeferredOptionalCheck {
+    ast::Type *Inner;
+    ast::SourceLocation Loc;
+    std::string Context;
+    /// Where it was resolved: the diagnostic's file and instantiation notes.
+    const ModuleTemplates *Origin;
+    std::vector<InstantiationFrame> Frames;
+  };
+  std::vector<DeferredOptionalCheck> DeferredOptionalChecks;
+  /// The types reported (by name): a second use of one is a follow-on.
+  StringSet ReportedOptionalLimits;
   /// The depth of the instantiation whose body is being checked
   /// (checkPendingInstantiations); 0 in hand-written code.
   size_t CurrentInstantiationDepth = 0;

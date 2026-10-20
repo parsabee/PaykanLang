@@ -356,9 +356,13 @@ primary ::= literal
           | IDENT "(" argumentList? ")"                      -- call / constructor
           | IDENT "<" typeArgList ">" "(" argumentList? ")"  -- generic call /
                                                              -- conversion
+          | IDENT "<" typeArgList ">" "::" IDENT "(" argumentList? ")"
+                                                             -- static fn of an
+                                                             -- instantiation
           | modulePath "::" IDENT                            -- enum variant
           | modulePath "::" IDENT "(" argumentList? ")"      -- qualified call
           | modulePath "::" IDENT "<" typeArgList ">" "(" argumentList? ")"
+          | modulePath "::" IDENT "<" typeArgList ">" "::" IDENT "(" argumentList? ")"
           | "(" expression ")"
           | "(" expression ( "," expression )+ ")"           -- tuple literal
           | "[" argumentList? "]"                            -- array literal

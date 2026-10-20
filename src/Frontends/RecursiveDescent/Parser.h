@@ -163,9 +163,11 @@ private:
   ast::Expr *parsePrimary();
   ast::Expr *parseLiteral();
   bool parseArgumentList(Tok closer, std::vector<ast::Expr *> &out);
-  /// `< typeArgList > (`: on success the type arguments are in @p out and
-  /// the current token is the `(`; otherwise the position is rewound.
-  bool tryGenericCallArgs(std::vector<ast::Type *> &out);
+  /// `< typeArgList > (`, or `< typeArgList > :: IDENT (` (a function of
+  /// the instantiation, `Box<int>::of(1)`, its name in @p member): on
+  /// success the type arguments are in @p out and the current token is the
+  /// `(`; otherwise the position is rewound.
+  bool tryGenericCallArgs(std::vector<ast::Type *> &out, std::string &member);
 };
 
 } // namespace paykan::frontend::recursive_descent

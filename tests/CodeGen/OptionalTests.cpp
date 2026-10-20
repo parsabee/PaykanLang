@@ -831,3 +831,64 @@ TEST(Optional, InoutArmOnAnOptionalStruct) {
   EXPECT_EQ(r.StdOut, "P(x: 9, s: w)\n(3, c)\nP(x: 7, s: q)\n");
   g.expectNoLeaks("InoutArmOnAnOptionalStruct");
 }
+
+// A nested tuple literal widens into an optional slot of the enclosing
+// literal, at any depth, as a call's result does.
+TEST(OptionalTuple, NestedLiteralIntoAnOptionalSlot) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+struct P { x: int; y: int; }
+fn main() -> int {
+  a: (int, (Str, Str)?) = (1, ("x", "y"));
+  b: (int, (Str, Str)?) = (2, None);
+  c: ((int, int)?, Str) = ((3, 4), "c");
+  d: (int, P?) = (5, P(6, 7));
+  e: (int, (int, (Str, int)?)?) = (8, (9, ("z", 10)));
+  f: ((Str, Str)?, (Str, Str)?)[2] = [(("a", "b"), None), (None, ("c", "d"))];
+  match a.1 { v: (Str, Str) { io::println(v.0 + v.1); } None { io::println("none a"); } }
+  match b.1 { v: (Str, Str) { io::println(v.0 + v.1); } None { io::println("none b"); } }
+  match c.0 { v: (int, int) { io::println(Str(v.0 + v.1)); } None { io::println("none c"); } }
+  match d.1 { pt: P { io::println(Str(pt.x * pt.y)); } None { io::println("none d"); } }
+  match e.1 {
+    v: (int, (Str, int)?) {
+      match v.1 { w: (Str, int) { io::println(w.0 + Str(v.0 + w.1)); } None { io::println("none e2"); } }
+    }
+    None { io::println("none e"); }
+  }
+  match f[1].1 { v: (Str, Str) { io::println(v.0 + v.1); } None { io::println("none f"); } }
+  io::println(a.toString() + " " + b.toString() + " " + e.toString() + " " + d.toString());
+  a = (11, ("p", "q"));
+  io::println(a.toString());
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut,
+            "xy\nnone b\n7\n42\nz19\ncd\n"
+            "(1, (x, y)) (2, None) (8, (9, (z, 10))) (5, P(x: 6, y: 7))\n"
+            "(11, (p, q))\n");
+  g.expectNoLeaks("NestedLiteralIntoAnOptionalSlot");
+}
+
+// The value of an optional tuple or struct is at most 64 bytes in place; a
+// bigger one goes in a `memory::Box`, whose optional is a reference.
+TEST(Optional, ValueOf64BytesInPlaceAndBiggerBoxed) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+import ::memory;
+struct Eight { a: int; b: int; c: int; d: int; e: int; f: int; g: int; h: int; }
+struct Nine { a: int; b: int; c: int; d: int; e: int; f: int; g: int; h: int; i: int; }
+fn pick(x: Eight?) -> int { match x { e: Eight { return e.a + e.h; } None { return -1; } } }
+fn boxed(n: memory::Box<Nine>?) -> int { match n { b: memory::Box<Nine> { return b.get().i; } None { return -2; } } }
+fn main() -> int {
+  t: (Str, int, int, int, int, int, int, int)? = ("t", 2, 3, 4, 5, 6, 7, 8);
+  io::println(Str(pick(Eight(1, 2, 3, 4, 5, 6, 7, 8))) + " " + Str(pick(None)));
+  match t { v: (Str, int, int, int, int, int, int, int) { io::println(v.0 + Str(v.7)); } None { io::println("none"); } }
+  io::println(Str(boxed(memory::Box<Nine>(Nine(1, 2, 3, 4, 5, 6, 7, 8, 9)))) + " " + Str(boxed(None)));
+  return 0;
+}
+)pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "9 -1\nt8\n9 -2\n");
+  g.expectNoLeaks("ValueOf64BytesInPlaceAndBiggerBoxed");
+}

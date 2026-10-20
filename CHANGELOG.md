@@ -27,7 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `None` all zeros.  They are made, compared (`== None`, `==`), unwrapped by `match`
   (`p: Point { ... } None { ... }`), printed, and stored in fields, arrays, tuples,
   parameters and results like any value.  A template's `T?` of an optional `T` is `T`
-  itself, so `Result<Str?>` works (a written `int??` is still an error).
+  itself, so `Result<Str?>` works (a written `int??` is still an error).  The value of an
+  optional tuple or struct is at most 64 bytes: `Big?` for a 72-byte `Big` is rejected (`use
+  'Box<Big>?' (memory::Box) instead`).  A nested tuple literal widens into an optional slot
+  (`a: (int, (Str, Str)?) = (1, ("x", "y"));`).
 - An optional of a `Show` type is `Show`: `x.toString()` on an optional is "None" or its
   value's text.
 - A native function takes and returns an enum, as its ordinal (`int64_t`).
@@ -458,6 +461,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/pkfmt.py` checks (`python3 scripts/pkfmt.py`) or applies (`--apply`) the layout
   of Paykan source (`.pkn`); every tracked file is formatted with it, and the Lint job
   checks it.
+- A generic class's or struct's `impl` block may declare `static fn`s; one is the
+  instantiation's, called as `Box<int>::of(3)` (`m::Box<int>::of(3)` through an import).
 - A module-private initializer: `fn ___init__(...)` (three underscores) in a class's or a
   struct's `impl` block is its `__init__`, and the type is constructed (`T(...)`) and extended
   (`__super__(...)`) by the module's own code only, its templates included wherever they are

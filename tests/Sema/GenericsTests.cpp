@@ -914,3 +914,101 @@ fn main() -> int {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   std::filesystem::remove_all(dir);
 }
+
+// -- static fn of a generic class's impl block (`Box<int>::of(1)`)
+
+static const char *const kBoxWithStatics = R"(
+  class Box<T> {
+    __v: T;
+    fn get() -> T { return self.__v; }
+  }
+  impl Box<T> {
+    fn __init__(v: T) { self.__v = v; }
+    static fn of(v: T) -> Box<T> { return Box<T>(v); }
+    static fn pair(v: T) -> (Box<T>, Box<T>) {
+      b = Box<T>(v);
+      return (b, Box<T>(b.__v)); // a static reaches the private members
+    }
+  }
+)";
+
+TEST(Generics, StaticFnOfAnInstantiation) {
+  auto r = check(withMain(kBoxWithStatics, R"(
+    b = Box<int>::of(1);
+    s: Box<Str> = Box<Str>::of("s");
+    t = Box<int>::pair(2);
+    n = t.0.get() + t.1.get() + b.get();
+    io::println(s.get() + Str(n));
+  )"));
+  ASSERT_TRUE(r.Ok) << r.Diagnostics;
+  // The statics of an instantiation are its functions, declared with it.
+  std::vector<std::string> funcs;
+  for (auto *fn : r.Driver->getRoot()->getFuncDecls())
+    funcs.push_back(fn->getName());
+  EXPECT_EQ(funcs,
+            (std::vector<std::string>{"main", "Box<int>::of", "Box<int>::pair",
+                                      "Box<Str>::of", "Box<Str>::pair"}));
+}
+
+TEST(Generics, StaticFnWithoutTypeArgs) {
+  auto r = semaCheck(withMain(kBoxWithStatics, "b = Box::of(1);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics,
+                  "'Box::of' is a function of the generic class 'Box': write "
+                  "'Box<...>::of(...)' with its type arguments"))
+      << r.Diagnostics;
+}
+
+TEST(Generics, StaticFnUnknown) {
+  auto r = semaCheck(withMain(kBoxWithStatics, "b = Box<int>::make(1);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "'Box<int>' has no static function 'make'"))
+      << r.Diagnostics;
+}
+
+TEST(Generics, StaticFnArgumentIsChecked) {
+  auto r = semaCheck(withMain(kBoxWithStatics, "b = Box<int>::of(\"s\");"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "'Box<int>::of'")) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "expected 'int'")) << r.Diagnostics;
+}
+
+// The name must be free in the instantiation, as in a plain class; the call
+// is a follow-on.
+TEST(Generics, StaticFnNameTakenByAMethod) {
+  auto r = semaCheck(withMain(R"(
+    class Box<T> {
+      v: T;
+      fn of() -> int { return 1; }
+    }
+    impl Box<T> {
+      static fn of(v: T) -> Box<T> { return Box<T>(v); }
+    }
+  )",
+                              "b = Box<int>::of(1);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "class 'Box<int>' already has a method 'of'"))
+      << r.Diagnostics;
+}
+
+// The body is checked per instantiation, with the instantiation note.
+TEST(Generics, StaticFnBodyIsCheckedPerInstantiation) {
+  auto r = semaCheck(withMain(R"(
+    class Box<T> { v: T; }
+    impl Box<T> {
+      static fn of(v: T) -> Box<T> { return Box<T>(v, v); }
+    }
+  )",
+                              "b = Box<int>::of(1);"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_TRUE(has(r.Diagnostics, "function 'Box<int>' expects 1 argument(s), "
+                                 "got 2"))
+      << r.Diagnostics;
+  EXPECT_TRUE(has(r.Diagnostics, "in instantiation of 'Box<int>' requested "
+                                 "here"))
+      << r.Diagnostics;
+}

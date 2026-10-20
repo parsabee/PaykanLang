@@ -458,3 +458,35 @@ TEST(GenericStruct, ImportedTemplates) {
                   "supported yet"});
   std::filesystem::remove_all(dir);
 }
+
+// -- static fn of a generic struct's impl block (`Pair<int, Str>::make`)
+
+TEST(GenericStruct, StaticFnOfAnInstantiation) {
+  auto r = semaCheck(R"(
+struct Pair<A, B> { a: A; b: B; }
+impl Pair<A, B> {
+  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
+  static fn swapped(p: Pair<B, A>) -> Pair<A, B> { return Pair<A, B>(p.b, p.a); }
+}
+fn main() -> int {
+  p = Pair<int, Str>::make(1, "a");
+  q: Pair<Str, int> = Pair<Str, int>::swapped(p);
+  return p.a + q.b;
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(GenericStruct, StaticFnWithoutTypeArgs) {
+  auto r = semaCheck(R"(
+struct Pair<A, B> { a: A; b: B; }
+impl Pair<A, B> {
+  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
+}
+fn main() -> int { p = Pair::make(1, "a"); return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  expectAll(r, {"'Pair::make' is a function of the generic struct 'Pair': "
+                "write 'Pair<...>::make(...)' with its type arguments"});
+}

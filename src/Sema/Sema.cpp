@@ -340,8 +340,17 @@ ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,
       return d;
     }
     if (ast::isa<ast::ArrayLiteralExpr>(e) ||
-        ast::isa<ast::TupleLiteralExpr>(e))
-      return adoptLiteralElements(d, t, e);
+        ast::isa<ast::TupleLiteralExpr>(e)) {
+      ast::Type *adopted = adoptLiteralElements(d, t, e);
+      // The adopted literal is the present value of an optional slot
+      // (`(1, ("x", "y"))` into `(int, (Str, Str)?)`): wrapped as a call's
+      // result would be.
+      if (adopted && boxes(d, adopted)) {
+        e->setCoercedType(d);
+        return d;
+      }
+      return adopted;
+    }
     if (!boxes(d, t))
       return t;
     e->setCoercedType(d);
@@ -788,6 +797,18 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       error(loc, context + " has nested optional type '" + typeName(inner) +
                      "?', which is not supported");
       return nullptr;
+    }
+    // An optional of a tuple or a struct is held in place, the presence flag
+    // and the value: a value of more than kOptionalValueLimit bytes goes in
+    // a `memory::Box`, and that is made optional.  A struct's size is known
+    // once populateStructs ran: a class's fields and signatures, resolved
+    // before, are checked then.
+    if (ast::isMemType(inner) && !ast::isFunctionValue(inner)) {
+      if (!StructsPopulated)
+        DeferredOptionalChecks.push_back(
+            {inner, loc, context, CurrentOrigin, InstantiationStack});
+      else if (!checkOptionalValueSize(inner, loc, context))
+        return nullptr;
     }
     // Resolve to the context's canonical (interned) instance, as for arrays.
     return Ctx.getOptionalType(inner);
@@ -1445,7 +1466,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   // instance is known first, and so are its parameters.
   const bool explicitInstance = node->hasTypeArgs() &&
                                 !S.isConversionTarget(node->getCalleeName()) &&
-                                S.isTemplate(node->getCalleeName());
+                                (S.isTemplate(node->getCalleeName()) ||
+                                 S.isTemplateStatic(node->getCalleeName()));
   if (explicitInstance && !S.resolveGenericCall(node, {}))
     return nullptr;
   if (explicitInstance ||
@@ -1559,7 +1581,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
 
   // -- Generic call: instantiate the template and rebind the callee
   if (!explicitInstance &&
-      (node->hasTypeArgs() || S.isTemplate(node->getCalleeName()))) {
+      (node->hasTypeArgs() || S.isTemplate(node->getCalleeName()) ||
+       S.isTemplateStatic(node->getCalleeName()))) {
     for (auto *ty : argTypes)
       if (!ty)
         return nullptr; // argument errors already reported; cannot infer
@@ -2753,6 +2776,20 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
       ok = false;
   if (!populateStructs())
     ok = false;
+  // The optionals of tuples and structs resolved so far, now that every
+  // struct's size is known; the rest are checked where they are resolved.
+  StructsPopulated = true;
+  for (const auto &c : DeferredOptionalChecks) {
+    std::vector<InstantiationFrame> savedStack = std::move(InstantiationStack);
+    InstantiationStack = c.Frames;
+    {
+      OriginSource inOrigin(*this, c.Origin);
+      if (!checkOptionalValueSize(c.Inner, c.Loc, c.Context))
+        ok = false;
+    }
+    InstantiationStack = std::move(savedStack);
+  }
+  DeferredOptionalChecks.clear();
   // Then the traits' signatures, which may name the classes, and the
   // `impl` blocks, which record what implements a trait; only then can a
   // template's bounds be checked (SemaTraits.cpp).

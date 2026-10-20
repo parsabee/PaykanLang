@@ -475,3 +475,37 @@ fn main() -> int {
   std::filesystem::remove_all(dir);
   g.expectNoLeaks("ExportedInstantiationNamesWithCommasAndTuples");
 }
+
+// A `static fn` of a generic class's or struct's `impl` block is the
+// instantiation's function: `Box<int>::of(1)`.
+TEST(Generics, StaticFnOfAnInstantiation) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+class Box<T> { __v: T; }
+impl Box<T> {
+  fn __init__(v: T) { self.__v = v; }
+  view fn get() -> view T { return self.__v; }
+  static fn of(v: T) -> Box<T> { return Box<T>(v); }
+  static fn twice(v: T) -> (Box<T>, Box<T>) { b = Box<T>(v); return (b, Box<T>(b.__v)); }
+}
+struct Pair<A, B> { a: A; b: B; }
+impl Pair<A, B> {
+  static fn make(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
+  static fn swapped(p: Pair<B, A>) -> Pair<A, B> { return Pair<A, B>(p.b, p.a); }
+}
+fn main() -> int {
+  b = Box<int>::of(1);
+  s = Box<Str>::of("s");
+  t = Box<Str>::twice("t");
+  p = Pair<int, Str>::make(2, "p");
+  q = Pair<Str, int>::swapped(p);
+  n: Box<Pair<int, Str>> = Box<Pair<int, Str>>::of(p);
+  io::println(Str(b.get()) + " " + s.get() + " " + t.0.get() + t.1.get() + " " + p.toString() + " " + q.toString() + " " + Str(n.get().a));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut,
+            "1 s tt Pair<int, Str>(a: 2, b: p) Pair<Str, int>(a: p, b: 2) 2\n");
+  g.expectNoLeaks("StaticFnOfAnInstantiation");
+}

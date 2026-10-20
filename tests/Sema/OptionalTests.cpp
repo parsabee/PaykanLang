@@ -853,3 +853,93 @@ fn main() -> int {
       << r2.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
+
+// ─── the value of an optional tuple or struct is at most 64 bytes ───────────
+
+static const char *const kEightNine =
+    "struct Eight { a: int; b: int; c: int; d: int; e: int; f: int; g: int; "
+    "h: int; }\n"
+    "struct Nine { a: int; b: int; c: int; d: int; e: int; f: int; g: int; "
+    "h: int; i: int; }\n";
+
+static const char *const kNineLimit =
+    "an optional holds a value of up to 64 bytes in place, and 'Nine' is 72 "
+    "bytes; use 'Box<Nine>?' (memory::Box) instead";
+
+TEST(OptionalLimit, UpTo64BytesInPlace) {
+  expectOk(std::string(kEightNine) + R"(
+fn pick(x: Eight?) -> int { match x { e: Eight { return e.a; } None { return -1; } } }
+fn eight() -> (int, int, int, int, int, int, int, int)? { return None; }
+fn main() -> int {
+  t: (int, int, int, int, int, int, int, int)? = (1, 2, 3, 4, 5, 6, 7, 8);
+  s: (Str, Str, Str, Str, Str, Str, Str, Str)? = None;
+  f: ((int) -> int, int, int, int, int, int, int)? = None;
+  b: (bool, bool, bool, bool, bool, bool, bool, bool, int, int, int, int, int, int, int)? = None;
+  n: Nine = Nine(1, 2, 3, 4, 5, 6, 7, 8, 9);
+  big: (int, int, int, int, int, int, int, int, int) = (1, 2, 3, 4, 5, 6, 7, 8, 9);
+  return pick(Eight(1, 2, 3, 4, 5, 6, 7, 8)) + n.i + big.8;
+}
+)");
+}
+
+TEST(OptionalLimit, VariableParameterAndResult) {
+  expectError(std::string(kEightNine) +
+                  "fn main() -> int { t: Nine? = None; return 0; }",
+              std::string("variable 't' has type 'Nine?': ") + kNineLimit);
+  expectError(std::string(kEightNine) + "fn f(x: Nine?) -> int { return 0; }\n"
+                                        "fn main() -> int { return 0; }",
+              std::string("parameter 'x' has type 'Nine?': ") + kNineLimit);
+  expectError(std::string(kEightNine) + "fn g() -> Nine? { return None; }\n"
+                                        "fn main() -> int { return 0; }",
+              std::string("function 'g' return type has type 'Nine?': ") +
+                  kNineLimit);
+  expectError("fn main() -> int { t: (int, int, int, int, int, int, int, int, "
+              "int)? = None; return 0; }",
+              "variable 't' has type '(int, int, int, int, int, int, int, int, "
+              "int)?': an optional holds a value of up to 64 bytes in place, "
+              "and '(int, int, int, int, int, int, int, int, int)' is 72 "
+              "bytes; use 'Box<(int, int, int, int, int, int, int, int, "
+              "int)>?' (memory::Box) instead");
+  expectError("fn main() -> int { t: (int, bool, int, int, int, int, int, int, "
+              "int)? = None; return 0; }",
+              "'(int, bool, int, int, int, int, int, int, int)' is 72 bytes");
+  expectError(std::string(kEightNine) +
+                  "fn main() -> int { t: (int, Nine?) = (1, None); return 0; }",
+              "'Nine' is 72 bytes");
+}
+
+TEST(OptionalLimit, FieldsAndSignaturesOfClassesAndStructs) {
+  // A class's fields and method signatures are resolved before the structs'
+  // sizes are known: they are checked once they are.
+  expectError(
+      std::string(kEightNine) + "class C { n: Nine?; }\n"
+                                "impl C { fn __init__() { self.n = None; } }\n"
+                                "fn main() -> int { return 0; }",
+      std::string("field 'n' in class 'C' has type 'Nine?': ") + kNineLimit);
+  expectError(std::string(kEightNine) + "class C { fn f(x: Nine?) {} }\n"
+                                        "fn main() -> int { return 0; }",
+              std::string("parameter 'x' of method 'f' in 'C' has type "
+                          "'Nine?': ") +
+                  kNineLimit);
+  expectError(std::string(kEightNine) +
+                  "class C { fn g() -> Nine? { return None; } }\n"
+                  "fn main() -> int { return 0; }",
+              "'Nine' is 72 bytes");
+  expectError(std::string(kEightNine) + "struct S { n: Nine?; }\n"
+                                        "fn main() -> int { return 0; }",
+              std::string("field 'n' in struct 'S' has type 'Nine?': ") +
+                  kNineLimit);
+  expectError(std::string(kEightNine) +
+                  "class Holder<T> { v: T?; }\n"
+                  "fn main() -> int { h = Holder<Nine>(None); return 0; }",
+              std::string("field 'v' in class 'Holder<Nine>' has type "
+                          "'Nine?': ") +
+                  kNineLimit);
+  // One report per type: a class with the default initializer names the
+  // field once.
+  auto r =
+      semaCheck(std::string(kEightNine) + "class C { n: Nine?; }\n"
+                                          "fn main() -> int { return 0; }");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}

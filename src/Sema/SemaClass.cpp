@@ -1136,13 +1136,6 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       why += name;
       why += "' has " + std::to_string(want->size());
     }
-    for (auto *fn : im->getMethods())
-      if (why.empty() && fn->isStatic()) {
-        why = "a 'static fn' in the 'impl' block of a generic ";
-        why += kind;
-        why += " is not supported yet";
-        loc = fn->getLocation();
-      }
     if (!why.empty())
       error(loc, why);
     if (!why.empty() ||
@@ -1392,10 +1385,54 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
-  PendingInstantiations.push_back(std::move(pending));
+  PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedClassDecls : InstantiatedClassDecls)
       .push_back(clone);
+  declareInstantiationStatics(instName, ct, pending);
   return ct;
+}
+
+void Sema::declareInstantiationStatics(const std::string &instName,
+                                       ast::Type *type,
+                                       const PendingInstantiation &base) {
+  auto it = ImplsByClass.find(instName);
+  if (it == ImplsByClass.end())
+    return;
+  // Declared in the template's module, as the bodies are checked.
+  InstantiationStack.push_back(
+      {base.Name, base.RequestLoc, base.RequestFile, base.RequestLines});
+  OriginSource inOrigin(*this, base.Origin);
+  for (auto *im : it->second) {
+    if (im->getTrait())
+      continue;
+    for (auto *fn : im->getMethods()) {
+      if (!fn->isStatic())
+        continue;
+      const std::string name = instName + names::kQualSep + fn->getName();
+      if (methodOf(type, fn->getName())) {
+        error(fn->getLocation(), std::string(typeKindWord(type)) + " '" +
+                                     instName + "' already has a method '" +
+                                     fn->getName() + "'");
+        ErroneousNames.insert(name); // its calls are follow-ons
+        continue;
+      }
+      fn->setName(Ctx.intern(name));
+      if (!declareFunctionSignature(fn))
+        continue; // ErroneousNames has it
+      // Another module's template's: the instantiation's, not this
+      // module's to export (the first module to need it emits it).
+      if (base.Origin)
+        ImportedTypeOrigins[fn->getName()] = base.Origin->Module;
+      PendingInstantiation p = base;
+      p.Class = nullptr;
+      p.Struct = nullptr;
+      p.Func = fn;
+      PendingInstantiations.push_back(std::move(p));
+      (base.Origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
+          .push_back(fn);
+    }
+  }
+  InstantiationStack.pop_back();
 }
 
 std::string Sema::instantiateFunction(const std::string &name,
@@ -1785,6 +1822,55 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     if (inst.empty())
       return false;
     node->setCalleeName(Ctx.intern(inst));
+    return true;
+  }
+
+  // `Box<int>::of(1)`: a `static fn` of the `impl` block of a class or
+  // struct template is the function `Box<int>::of` of the instantiation
+  // (declareInstantiationStatics).
+  if (const size_t sep = callee.rfind(names::kQualSep);
+      sep != std::string::npos && isTemplateStatic(callee)) {
+    const std::string owner = callee.substr(0, sep);
+    const std::string member = callee.substr(sep + 2);
+    const bool isClass = ClassTemplates.count(owner) != 0;
+    if (typeArgs.empty()) {
+      error(loc, "'" + callee + "' is a function of the generic " +
+                     (isClass ? "class" : "struct") + " '" + owner +
+                     "': write '" + owner + "<...>::" + member +
+                     "(...)' with its type arguments");
+      return false;
+    }
+    std::string instName;
+    if (isClass) {
+      auto *ct = instantiateClass(owner, typeArgs, loc);
+      if (!ct)
+        return false;
+      instName = ct->getName();
+    } else {
+      auto *st = instantiateStruct(owner, typeArgs, loc);
+      if (!st)
+        return false;
+      instName = st->getName();
+    }
+    // Declared with the instantiation here, or imported with the one an
+    // imported module made (`m::Box<int>::of`, qualified as its functions
+    // are).
+    std::string fn = instName + names::kQualSep + member;
+    if (!lookupFunction(fn)) {
+      const size_t q = owner.rfind(names::kQualSep);
+      const std::string imported =
+          q == std::string::npos ? "" : owner.substr(0, q + 2) + fn;
+      if (imported.empty() || !lookupFunction(imported)) {
+        if (ErroneousNames.count(fn))
+          ++SuppressedFollowOns; // rejected with its declaration
+        else
+          error(loc,
+                "'" + instName + "' has no static function '" + member + "'");
+        return false;
+      }
+      fn = imported;
+    }
+    node->setCalleeName(Ctx.intern(fn));
     return true;
   }
 
