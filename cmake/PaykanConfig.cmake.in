@@ -91,8 +91,14 @@ if(PAYKAN_NEEDS_LLVM)
     find_package(LLVM CONFIG QUIET)
 endif()
 if(PAYKAN_NEEDS_MLIR)
-    # The same for the mlir backend and MLIR (-DMLIR_DIR=<llvm>/lib/cmake/mlir).
-    find_package(MLIR CONFIG QUIET)
+    # The same for the mlir backend and MLIR (-DMLIR_DIR=<llvm>/lib/cmake/mlir;
+    # by default the MLIR of the LLVM found above, which LLVM's release
+    # archives install beside it).
+    if(LLVM_DIR)
+        find_package(MLIR CONFIG QUIET HINTS "${LLVM_DIR}/../mlir")
+    else()
+        find_package(MLIR CONFIG QUIET)
+    endif()
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PaykanTargets.cmake")

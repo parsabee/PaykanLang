@@ -112,8 +112,18 @@ if(NOT LLVM_FOUND)
             list(APPEND LLVM_MEMBERS "${LLVM_TOP}/bin/${tool}")
         endforeach()
         set(LLVM_EXCLUDES)
-        foreach(lib libFortran* libflang* liblldb* libclang.* libclang-cpp.*
-                    libLTO.* LLVMPolly.*)
+        set(LLVM_EXCLUDED_LIBS libFortran* libflang* liblldb* libclang.*
+                               libclang-cpp.* LLVMPolly.*)
+        if(APPLE)
+            # The archive's libc++ runtime, which Paykan never uses (it builds
+            # with the system's), would shadow the system libc++ in the
+            # linker's process (see libLTO below).
+            list(APPEND LLVM_EXCLUDED_LIBS libc++.* libc++abi.* libunwind.*)
+        else()
+            # macOS links the libraries through it (see below).
+            list(APPEND LLVM_EXCLUDED_LIBS libLTO.*)
+        endif()
+        foreach(lib IN LISTS LLVM_EXCLUDED_LIBS)
             list(APPEND LLVM_EXCLUDES "--exclude=${LLVM_TOP}/lib/${lib}")
         endforeach()
         # (The system tar: CMake's cannot leave members out.)
@@ -174,6 +184,28 @@ endif()
 # libxml2 the target LLVM's package names just has to exist.
 if(LLVM_ENABLE_LIBXML2 AND NOT TARGET LibXml2::LibXml2)
     add_library(LibXml2::LibXml2 INTERFACE IMPORTED)
+endif()
+
+# -- macOS: the libraries are LLVM bitcode --------------------------------------
+# The macOS release is built with ThinLTO, so its static libraries hold LLVM
+# 22 bitcode, which Xcode's linker reads only through a libLTO of the same
+# LLVM: the archive's own, which compiles the members an executable uses
+# when it is linked (cached under <build>/lto.cache, so a relink compiles
+# only what changed).  (The Linux releases hold native objects.)  The linker
+# loads it with the directory it is in first on its library search path, so
+# it is given from a directory of its own: from lib/, a dylib there named
+# like one of the linker's own (the archive's libc++.1.dylib) would replace
+# it, and the linker would abort.
+if(APPLE AND EXISTS "${LLVM_INSTALL_DIR}/lib/libLTO.dylib")
+    set(PAYKAN_LIBLTO "${LLVM_INSTALL_DIR}/lto/libLTO.dylib")
+    if(NOT EXISTS "${PAYKAN_LIBLTO}")
+        file(MAKE_DIRECTORY "${LLVM_INSTALL_DIR}/lto")
+        file(CREATE_LINK "${LLVM_INSTALL_DIR}/lib/libLTO.dylib"
+             "${PAYKAN_LIBLTO}" COPY_ON_ERROR)
+    endif()
+    add_link_options(
+        "LINKER:-lto_library,${PAYKAN_LIBLTO}"
+        "LINKER:-cache_path_lto,${CMAKE_BINARY_DIR}/lto.cache")
 endif()
 
 # -- Import LLVM's own CMake helpers ------------------------------------------
