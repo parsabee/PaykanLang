@@ -14,15 +14,7 @@
 namespace paykan::pkm {
 
 struct DumpOptions {
-  enum class Section {
-    All,
-    Manifest,
-    Sections,
-    Iface,
-    Tmpl,
-    SymIdx,
-    Payloads
-  };
+  enum class Section { All, Manifest, Sections, Iface, Tmpl, SymIdx, Payloads };
   Section Which = Section::All;
 };
 

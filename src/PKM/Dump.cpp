@@ -124,8 +124,7 @@ void dumpManifest(const Manifest &m, std::ostream &os) {
   os << "  format_versions iface " << versionString(m.Formats.IfaceVersion)
      << " tmpl "
      << (m.Formats.TmplVersion ? versionString(m.Formats.TmplVersion) : "0")
-     << " pir "
-     << versionString(m.Formats.PirVersion) << " code_encoding "
+     << " pir " << versionString(m.Formats.PirVersion) << " code_encoding "
      << m.Formats.CodeEncoding << " debug " << m.Formats.DebugVersion << "\n";
   os << "  runtime_abi " << versionString(m.RuntimeAbi) << "\n";
   os << "  target pointer " << unsigned(m.Target.PointerSize) << " slot "
