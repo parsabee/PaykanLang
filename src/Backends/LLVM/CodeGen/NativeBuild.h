@@ -58,6 +58,11 @@ StatusOr<int> runInProcess(std::unique_ptr<llvm::Module> module,
 Status emitHostObject(llvm::Module &module, unsigned optLevel,
                       const std::string &path);
 
+/// One module's code (no entry point) as a native object for the host at
+/// @p path, optimised at -O@p optLevel.
+Status emitHostModuleObject(llvm::Module &module, unsigned optLevel,
+                            const std::string &path);
+
 /// `build`: the object @p emitObject writes to the path it is given, linked
 /// with @p objects against the runtime into the executable @p output.
 Status buildHostExecutable(

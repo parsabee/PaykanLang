@@ -5,9 +5,12 @@ For every runnable program of the samples corpus (samples_parity.py's list)
 and every compiler named with --cc, the whole-program `paykan --emit-c`
 output (the mlir backend's C, through EmitC) is compiled with STRICT_FLAGS at
 each --opt level, linked with a copy of the runtime (src/Runtime/*.c) built
-by the same compiler with the same flags, and run.  Every executable must
-exit like `paykan run --track-heap` does, print the same stdout and stderr
-(apart from the heap statistics) and end with 0 live heap blocks.
+by the same compiler with the same flags and with the compiled code of the
+modules it imports (`paykan pkm extract --object` of each module file: the
+standard library's and the program's cache entries, as archives), and run.
+Every executable must exit like `paykan run --track-heap` does, print the
+same stdout and stderr (apart from the heap statistics) and end with 0 live
+heap blocks.
 
 Usage:
     c_strict.py --paykan build/bin/paykan --cc gcc --cc clang \\
@@ -88,6 +91,38 @@ def build_runtime(cc, opt, outdir):
     return objs
 
 
+def module_archive(paykan, pkms, outdir, name):
+    """An archive of the compiled code of the module files @p pkms (those
+    without any are left out: their CODE is all of it), or None."""
+    objs = []
+    for i, pkm in enumerate(pkms):
+        obj = Path(outdir) / f"{name}-{i}.o"
+        p = tool([paykan, "pkm", "extract", "--object", str(pkm), "-o",
+                  str(obj)])
+        if p.returncode == 0:
+            objs.append(str(obj))
+        elif "has no compiled code" not in p.stderr:
+            raise SystemExit(f"FAIL pkm extract {pkm}:\n{p.stderr}")
+    if not objs:
+        return None
+    archive = Path(outdir) / f"lib{name}.a"
+    p = tool(["ar", "rcs", str(archive), *objs])
+    if p.returncode != 0:
+        raise SystemExit(f"FAIL ar {archive}:\n{p.stderr}")
+    return str(archive)
+
+
+def stdlib_archive(paykan, outdir):
+    """The standard library's compiled code, as one archive."""
+    version = tool([paykan, "--version"])
+    for line in version.stdout.splitlines():
+        if line.startswith("standard library: "):
+            stdlib = Path(line[len("standard library: "):])
+            return module_archive(paykan, sorted(stdlib.glob("**/*.pkm")),
+                                  outdir, "stdlib")
+    raise SystemExit("FAIL: `paykan --version` names no standard library")
+
+
 def check_sample(args, sample, idx, runtimes, outdir):
     """[(label, problems)] for one sample."""
     results = []
@@ -102,6 +137,13 @@ def check_sample(args, sample, idx, runtimes, outdir):
         return [("emit-c", [emitted.stderr.strip()])]
     c_file = Path(outdir) / f"s{idx}.c"
     c_file.write_text(emitted.stdout)
+    # The compiled code of the program's own modules: their cache entries,
+    # which --emit-c has just written (the archive lets the linker take only
+    # the program's modules of the directory's).
+    cache = sample.parent / ".paykan_cache"
+    local = module_archive(args.paykan, sorted(cache.glob("**/*.pkm")),
+                           outdir, f"s{idx}")
+    modules = [a for a in (local, args.stdlib) if a]
     # A sample's native C (#198) is held to the same flags, compiled with the
     # generated C.
     natives = [str(c) for c in sorted(sample.parent.glob("*.c"))
@@ -110,7 +152,8 @@ def check_sample(args, sample, idx, runtimes, outdir):
         label = f"emit-c {cc} {opt}"
         exe = Path(outdir) / f"s{idx}-rt{ri}"
         p = tool([cc, *STRICT_FLAGS, *EXTRA, opt, "-I", str(RUNTIME),
-                  str(c_file), *natives, *objs, "-lm", "-o", str(exe)])
+                  str(c_file), *natives, *objs, *modules, "-lm", "-o",
+                  str(exe)])
         if p.returncode != 0:
             results.append((label, ["compile failed:\n" + p.stderr]))
             continue
@@ -136,6 +179,7 @@ def main():
     EXTRA.extend(args.cflag)
 
     with tempfile.TemporaryDirectory(prefix="paykan-c-strict-") as outdir:
+        args.stdlib = stdlib_archive(args.paykan, outdir)
         runtimes = {}
         for ci, cc in enumerate(args.cc):
             for opt in opts:

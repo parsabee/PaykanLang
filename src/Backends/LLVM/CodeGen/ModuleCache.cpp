@@ -216,9 +216,10 @@ compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
     auto code =
         llvm::parseBitcodeFile(llvm::MemoryBufferRef(buffer, name), ctx);
     if (!code) {
-      std::string why = llvm::toString(code.takeError());
-      return Status::error("the compiled code of module '" + name +
-                           "' does not read: " + why);
+      std::string msg = "the compiled code of module '" + name;
+      msg += "' does not read: ";
+      msg += llvm::toString(code.takeError());
+      return Status::error(msg);
     }
     if (llvm::Linker::linkModules(**linked, std::move(*code),
                                   llvm::Linker::Flags::LinkOnlyNeeded))

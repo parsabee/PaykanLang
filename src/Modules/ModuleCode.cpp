@@ -71,7 +71,7 @@ pir::Function declaration(const pir::Function &f, const std::string &module) {
   return d;
 }
 
-void prune(pir::Module &module, pir::Roots roots) {
+void prune(pir::Module &module, const pir::Roots &roots) {
   pir::Program p;
   p.Modules.push_back(std::move(module));
   pir::dropDeadCode(p, roots);

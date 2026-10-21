@@ -136,6 +136,13 @@ public:
   /// a program that has the module to link.  Only called when
   /// capabilities().CompileModules is set; the default fails.
   virtual StatusOr<ModuleObject> compileModule(const pir::Module &module);
+
+  /// Write @p code, one module's compiled code, as a native object at
+  /// @p path, optimised at -O@p optLevel: what a program's C (--emit-c) is
+  /// linked with (`paykan pkm extract --object`).  Only called when
+  /// capabilities().CompileModules is set; the default fails.
+  virtual Status emitModuleObject(const ModuleObject &code, unsigned optLevel,
+                                  const std::string &path);
 };
 
 using Registry = plugin::Registry<Backend>;

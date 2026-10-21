@@ -18,7 +18,8 @@ this repository, always built and the default; other backends are plugins
 | LLVM | 22.1.8, whose prebuilt releases ship MLIR with the EmitC conversions (scf, arith, func and memref to EmitC); LLVM 17's have none |
 | Input | the verified PIR program, as every backend gets it (docs/pir.md); PIR stays the interface for every backend, in tree and out |
 | The `pir` dialect | PIR one to one: an op per item, statement and instruction, PIR's types (`!pir.box`, `!pir.obj`, `!pir.ptr`, `!pir.weak`, `!pir.opt<T>`, `!pir.mem<N, A>`, `!pir.local<T>`); structured regions with no terminators, as PIR's blocks are (`--emit-mlir=pir`) |
-| Unreachable code | dropped from the imported program before anything is lowered: MLIR's symbol DCE, run until nothing changes, from the main module's `main` (see below); a `.pkm` keeps all its module's code |
+| Unreachable code | dropped by the driver before the backend sees the program: PIR's dead-code pass from the main module's `main` (docs/pir.md §12); in a module's compiled code, by linking only what the program references (see below) |
+| Modules | a module's `.pkm` keeps its copies of instantiations as PIR and the rest of its code as LLVM bitcode (`compileModule`), which a program links on demand; shared copies link under names without their module |
 | The shared lowering | `pir` → `func` + `scf` + `arith`, and the few `pir` memory ops neither upstream path covers; one pass, used by both targets (`--emit-mlir=scf`) |
 | Where the targets part | after the shared lowering, at the MLIR level: upstream conversions take `func`, `scf` and `arith` to the `llvm` dialect and to EmitC; the remaining `pir` ops get one small pattern set per target |
 | LLVM | the `llvm` dialect (`--emit-mlir=llvm`), translated to LLVM IR, then the existing JIT, native object build, bitcode cache and `--emit-llvm` |
@@ -67,34 +68,46 @@ vtables, optionals, the sized integer types, structured control flow with
 
 ## Unreachable code
 
-A program's binary holds only what its `main` reaches: the rest of each
-module it imports (most of the standard library, for most programs) is
-dropped right after the import (`dropUnreachable`,
-`src/Backends/MLIR/Lowering/DropUnreachable.cpp`), so no stage lowers it.
-Every output of a program starts there: `run`, `build`, `--emit-llvm`,
-`--emit-c` and `--emit-mlir`.  `--emit-pir` and `.pkm` files hold all of
-each module's code, since an importer may use any of it.
+A program's binary holds only what its `main` reaches.  The driver runs
+PIR's dead-code pass (docs/pir.md §12) on the verified program before any
+backend sees it, so no stage lowers the rest of each module it imports
+(most of the standard library, for most programs): every output of a
+program starts there, `run`, `build`, `--emit-llvm`, `--emit-c`,
+`--emit-mlir` and `--emit-pir` alike.
 
-MLIR's symbol DCE does the work: it erases each private symbol (function,
-declaration, global) that no live one refers to.  Two kinds of reference
-are not symbol references in the dialect, and the driver gives them to it
-between runs, until a run erases nothing:
+What a program uses of a module's compiled code (below) is not PIR, so the
+pass cannot see into it; a compiled declaration carries the names its code
+uses instead, and the pass keeps those.  The code itself is linked into the
+program's LLVM module with `LinkOnlyNeeded`: only the functions (and what
+they reference) the program, or code linked before, refers to.  A module
+is linked after every module that imports it, so what it is asked for is
+known when it is linked.
 
-* A declaration names another module's function by its `module` and
-  `link_symbol` attributes.  A definition is public, and so live, while a
-  declaration of it elsewhere lives; the main module's `main` is the other
-  public symbol.  A declaration that dies takes its definition with it at
-  the next run.
-* A class is named by a string (a class and its constructor share a
-  name), and a class op is never erased by symbol DCE.  A class no op names
-  any more (`new`, `vcall`, a field access, `vtable_addr`, or a live
-  class's superclass) is erased, and its vtable's functions die with it at
-  the next run.  Class names are unique across a program, so a class is
-  live wherever a name of it is used.
+## Modules compiled ahead of time
 
-Each module is then lowered and its LLVM IR cached as before, under the
+A module's `.pkm` (a cache entry, or what `--emit-pkm` writes) keeps its
+code in two parts (docs/design/pkm.md §5.13): its copies of instantiations
+of templates stay PIR in CODE, which every program shares and prunes, and
+the rest is compiled by the backend when the file is written
+(`Backend::compileModule`) into its OBJ section, which CODE declares.  This
+backend compiles a module into LLVM bitcode, before optimisation (-O<n>
+applies to the program it is linked into), and links only bitcode it made
+itself (the same backend, format, target and LLVM; `objectKind()`).
+
+Code compiled in one module calls copies of instantiations that a program
+keeps in whichever module comes first, so a shared function or class (PIR
+`shared`) links under a name without its module: `pk__S<name>` and
+`pkvt__S<name>` rather than `pk_<module>_S<name>` (an escaped module name
+never starts `_S`, so the two never meet).
+
+Each module's PIR (the main module whole, an imported one its copies and
+declarations) is then lowered and its LLVM IR cached as before, under the
 text of what is left of it: another program's use of a module leaves
 another part of it, which is cached afresh.
+
+`--emit-c` prints the C of the program's PIR; a compiled module's code is
+not C, and is linked as an object (`paykan pkm extract --object`), so for
+`--emit-c` the dead-code pass also keeps everything that code uses.
 
 ## The shared lowering
 

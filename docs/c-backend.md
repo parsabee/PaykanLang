@@ -1,6 +1,6 @@
 # The C output
 
-`paykan --emit-c prog.pkn` prints the whole program as one C translation unit:
+`paykan --emit-c prog.pkn` prints the program's PIR as one C translation unit:
 the C target of the `mlir` backend ([the MLIR backend](design/mlir-backend.md)),
 the only backend in this repository.  The C is strictly conforming ISO C11
 under the target assumptions below (see [Standard C](#standard-c)), written
@@ -23,12 +23,29 @@ compiler of your choice.
 `--backend` is an error), and excludes `--emit-llvm` and `--emit-mlir`.  `-O<n>`
 does not change the C; the flags of the C compiler that builds it do.
 
-To build the C:
+The code of the modules the program imports from module files is not in the
+C: a module file keeps its code other than its copies of instantiations
+compiled (LLVM bitcode, [Module Files](language/15-modules.md#module-files)),
+so the C declares those functions and the program links them as objects.
+`paykan pkm extract --object` writes one module file's compiled code as an
+object, and the C keeps everything that code uses.  To build the C:
 
 ```sh
 paykan --emit-c prog.pkn > prog.c
-cc -std=c11 -O2 -I<prefix>/include/paykan prog.c <prefix>/lib/libpaykan_runtime.a -lm -o prog
+i=0
+for m in <prefix>/lib/paykan/stdlib/<version>/*.pkm $(find .paykan_cache -name '*.pkm'); do
+  i=$((i + 1))
+  paykan pkm extract --object "$m" -o "module$i.o"
+done
+ar rcs libmodules.a module*.o
+cc -std=c11 -O2 -I<prefix>/include/paykan prog.c libmodules.a \
+   <prefix>/lib/libpaykan_runtime.a -lm -o prog
 ```
+
+(The archive lets the linker take only the modules the program has;
+`paykan --version` names the standard library's directory, and
+`.paykan_cache` under the program's directory holds its own imported
+modules once a compile has written them.)
 
 `<prefix>` is the installation: `/usr` for the Debian package, the unpacked
 `paykanlang/` directory of a release tarball.  The executable behaves as one
@@ -82,7 +99,9 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   returned by value.
 * **Names.**  Every symbol a module defines has the link name the shared
   lowering gives it, the same in the C and in the LLVM IR: `pk_<module>_S<name>`,
-  and `pkvt_<module>_S<class>` for a class's vtable.  In both parts letters
+  and `pkvt_<module>_S<class>` for a class's vtable; a copy of an
+  instantiation (`Box<int>.get`, shared by every module, [PIR](pir.md) §3)
+  has none of its module: `pk__SBox_3Cint_3E_2Eget`.  In both parts letters
   and digits stay, `_` is doubled and every other byte becomes `_XX`, its
   hexadecimal code, so the result is a C identifier, no two symbols share
   one, and none spells a C keyword, a C library name or a runtime symbol: a

@@ -22,4 +22,10 @@ StatusOr<ModuleObject> Backend::compileModule(const pir::Module &) {
                        "' cannot compile modules");
 }
 
+Status Backend::emitModuleObject(const ModuleObject &, unsigned,
+                                 const std::string &) {
+  return Status::error("backend '" + std::string(name()) +
+                       "' cannot compile modules");
+}
+
 } // namespace paykan::backend

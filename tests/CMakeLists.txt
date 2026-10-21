@@ -274,6 +274,7 @@ add_executable(pkm_tests
     PKM/ManifestTests.cpp
     PKM/InterfaceTests.cpp
     PKM/TemplatesTests.cpp
+    PKM/ObjectTests.cpp
     PKM/DumpTests.cpp
 )
 target_link_libraries(pkm_tests
@@ -290,6 +291,7 @@ paykan_test_suite(lowering PAYKAN_TEST_SUITE_lowering)
 if(PAYKAN_TEST_SUITE_lowering)
 add_executable(lowering_tests
     Lowering/LoweringTests.cpp
+    Lowering/ModuleCodeTests.cpp
     Lowering/RoundTripTests.cpp
 )
 target_include_directories(lowering_tests
@@ -301,6 +303,7 @@ target_compile_definitions(lowering_tests
 target_link_libraries(lowering_tests
     PRIVATE gtest_main
             paykan_lowering
+            paykan_modules
             paykan_pir
             paykan_sema
             paykan_frontend

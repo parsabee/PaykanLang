@@ -471,10 +471,10 @@ ModuleResolver::loadCode(const std::string &canonical) const {
 
 const pkm::Object *ModuleResolver::object(const std::string &canonical) const {
   auto it = Entries.find(canonical);
-  if (it == Entries.end() || it->second->State != Entry::State::Loaded ||
-      !it->second->Object)
+  if (it == Entries.end() || it->second->State != Entry::State::Loaded)
     return nullptr;
-  return &*it->second->Object;
+  const std::optional<pkm::Object> &object = it->second->Object;
+  return object ? &*object : nullptr;
 }
 
 std::span<const uint8_t>

@@ -205,13 +205,13 @@ TEST(Driver, VersionListsEveryPluginAsCompatible) {
                        PAYKAN_TEST_ACCEPTED_VERSIONS);
   const std::string compatible = std::string(" (built with PaykanLang ") +
                                  paykan::kVersion + ", compatible)";
-  unsigned frontends = 0, backends = 0, pluginLines = 0;
+  unsigned frontends = 0, backends = 0, otherLines = 0;
   for (size_t i = 2; i < ls.size(); ++i) {
     const std::string &l = ls[i];
-    // Then the plugin API and the plugin directories (none searched: the
-    // ctest runs with PAYKAN_NO_PLUGINS=1).
-    if (l.rfind("plugin ", 0) == 0) {
-      ++pluginLines;
+    // Then the plugin API, the standard library and the plugin directories
+    // (none searched: the ctest runs with PAYKAN_NO_PLUGINS=1).
+    if (l.rfind("plugin ", 0) == 0 || l.rfind("standard library: ", 0) == 0) {
+      ++otherLines;
       continue;
     }
     EXPECT_NE(l.find(compatible), std::string::npos) << l;
@@ -222,7 +222,9 @@ TEST(Driver, VersionListsEveryPluginAsCompatible) {
   EXPECT_TRUE(hasLine(out, "frontend recursive-descent" + compatible)) << out;
   EXPECT_GE(frontends, 1u);
   EXPECT_GE(backends, 1u);
-  EXPECT_EQ(frontends + backends + pluginLines, ls.size() - 2) << out;
+  EXPECT_EQ(frontends + backends + otherLines, ls.size() - 2) << out;
+  // Where the system imports come from (the build tree's, here).
+  EXPECT_NE(out.find("\nstandard library: "), std::string::npos) << out;
   EXPECT_TRUE(hasLine(out, "plugin API " +
                                paykan::versionString(paykan::kVersionNumber)))
       << out;

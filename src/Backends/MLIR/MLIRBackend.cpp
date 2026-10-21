@@ -19,9 +19,12 @@
 #include "Pipeline.h"
 #include "paykan/Backend.h"
 
+#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/Support/Error.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_os_ostream.h>
 #include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/Triple.h>
@@ -87,6 +90,25 @@ public:
     writer.writeStrtab();
     o.Bytes.assign(buffer.begin(), buffer.end());
     return o;
+  }
+
+  Status emitModuleObject(const ModuleObject &code, unsigned optLevel,
+                          const std::string &path) override {
+    const ModuleObject kind = objectKind();
+    if (!code.sameKind(kind))
+      return Status::error("the code was compiled by backend '" + code.Backend +
+                           "' (" + code.Producer + ", " + code.Format +
+                           " for " + code.Target + "), not by this one (" +
+                           kind.Producer + " for " + kind.Target + ")");
+    llvm::LLVMContext ctx;
+    llvm::StringRef buffer(reinterpret_cast<const char *>(code.Bytes.data()),
+                           code.Bytes.size());
+    auto module =
+        llvm::parseBitcodeFile(llvm::MemoryBufferRef(buffer, path), ctx);
+    if (!module)
+      return Status::error("the compiled code does not read: " +
+                           llvm::toString(module.takeError()));
+    return llvm_codegen::emitHostModuleObject(**module, optLevel, path);
   }
 
   Status emit(const Input &in, EmitKind kind, const EmitOptions &opts,

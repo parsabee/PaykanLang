@@ -113,6 +113,8 @@ fn @name(%p0: T0, %p1: T1) -> R {
 extern fn @$rt.Paykan_retain(box) -> void          ; runtime ABI symbol `Paykan_retain`
 extern fn @add(i64, i64) -> i64 module "lib::math" ; defined in another PIR module
 extern fn @"x::tag"() -> box module "x" symbol @tag ; named `tag` in module "x"
+shared fn @Box<int>.get(%self: obj) -> i64 { ... }  ; an instantiation's copy
+extern fn @count() -> i64 module "lib" uses @Box<int>.get ; in module lib's compiled code
 ```
 
 Locals are declared at the top of the function body (the lowering hoists them,
@@ -142,6 +144,25 @@ names of module-defined symbols (C needs to: `Box<int>`, `first<int>` and
 symbol, the name without `$rt.` (`pir::runtimeSymbol`, `PIR.h`); a
 `(module, name)` pair must mangle the same way in every module of the
 program.
+
+**Shared copies.**  A function or class marked `shared` (`shared fn`,
+`shared class`, and `extern shared fn` / `extern shared class` for one
+declared from another module) belongs to an instantiation of a template:
+`Box<int>`'s class and functions, or another module's generic function's
+`$lib::first<int>`.  Every module that uses one may hold a copy, a program
+keeps one copy of each (the lowering's `shareInstantiations`), and a
+backend links a shared symbol under a name that does not depend on the
+module holding it, so code of any module calls the copy the program kept.
+An extern of a shared function is shared too (§9).
+
+**Compiled declarations.**  A module loaded from a `.pkm` whose code was
+compiled ahead of time (docs/design/pkm.md §5.13) declares that code: an
+`extern fn` or `extern class` naming its own module is defined in the
+module's compiled code, not in its PIR.  Other modules link to it as to a
+definition.  A compiled function lists, after `uses` on its line, the names
+of the module (functions and classes) its compiled body refers to, so a
+program that keeps the function keeps them (§12); a compiled class keeps
+its layout and its vtable's description, which the compiled code defines.
 
 **Runtime names.**  Runtime externs (`extern fn` without a `module`, `extern
 obj`, `extern vtable`), and only they, are named `$rt.<C symbol>`:
@@ -717,14 +738,19 @@ The verifier rejects a program when:
   vtable`) is not named `$rt.<symbol>` (a module-less `extern fn` may instead
   be a native `$c.<symbol>`), or anything else (a function, a module extern's
   `symbol`, a `cstr`/`data`/`bytes` global) has either name;
-* `@main` has a signature other than `() -> i64` or `(ptr, i64) -> i64`.
+* `@main` has a signature other than `() -> i64` or `(ptr, i64) -> i64`;
+* a function that is not a compiled declaration has `uses`, or a `uses`
+  names nothing the module declares; a runtime extern is `shared`.
 
 Verifying a whole program (`verify(const Program &)`) adds the checks
 across modules: a module appears twice; a module extern (`extern fn ...
 module`, `extern class`) names a module that is not in the program, or a
-function or class that module does not define, or one whose signature or
-field layout differs from the definition; the main module defines no
-`@main`.
+function or class that module does not define (in its PIR, or as a
+compiled declaration), or one whose signature or field layout differs from
+the definition, or is shared when the definition is not (or the other way
+round); the main module defines no `@main`.  A compiled declaration is the
+definition of its module's compiled code, which PIR does not hold, so it is
+not checked against one.
 
 ## 10. Text format summary
 
@@ -795,3 +821,36 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
   versions, reserved codes and bits, slack bytes, nesting depth) and
   nothing else; run `paykan::pir::verify` on the result as on a parsed
   module.
+
+## 12. Passes
+
+A pass rewrites a program in place (`paykan::pir::Pass`,
+`include/paykan/pir/Pass.h`); a `PassManager` runs its passes in order and,
+built with `verifyEach`, verifies the program after each one, so a pass
+that breaks it is the one named in the error.
+
+**The dead-code pass** (`include/paykan/pir/DeadCode.h`,
+`dropDeadCode` / `createDeadCodePass`) erases every function, class and
+global no root reaches; the modules themselves stay.  A root reaches:
+
+- from a function definition, the names its body refers to
+  (`references()`: the callees of `call` and `fn.addr`, the `@sym`
+  operands, and the classes `new`, `vcall`, `vtable.addr` and the field
+  instructions name); from a compiled declaration, its `uses`;
+- from an extern naming another module, that module's definition;
+- from a class, its superclass and its vtable's functions; from an extern
+  class, the class in the module it names.
+
+A name is looked up among a module's functions and globals and among its
+classes (a class and its constructor share theirs).  A class no instruction
+names is not reached through code that only uses its objects (a `vcall` of
+an imported class carries just the slot's signature): whatever made the
+object reached it.
+
+The driver runs it on every program with the main module's `@main` as the
+root (`Roots::entryPoint`), before any backend sees the program, so a
+binary holds only what its entry point reaches and `--emit-pir` prints
+that program.  With `--emit-c` every compiled declaration is a root too:
+the C is linked with each compiled module's code as a whole object.  A
+module's `.pkm` is trimmed with other roots before it is written
+(docs/design/pkm.md §5.13).

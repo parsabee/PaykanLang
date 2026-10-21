@@ -1019,6 +1019,101 @@ TEST(Pkm, GenericsAcrossModulesAreCached) {
 // source gone, an importer instantiates its classes, structs and functions
 // from the file, an error inside an instantiated body names the module's
 // file, and `paykan pkm dump` lists the section.
+// A module's file keeps its own code, its copies of the instantiations its
+// interface exposes, and of the others what its own code uses; the copies
+// stay PIR in CODE and the rest is compiled (OBJ), CODE declaring it
+// (docs/design/pkm.md §5.13).  A program runs the same from the cache.
+TEST(Pkm, ModuleCodeKeepsWhatTheModuleAndItsImportersUse) {
+  REQUIRE_BACKEND();
+  fs::path dir = fs::temp_directory_path() /
+                 ("pkm_module_code_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(
+      dir / "lib" / "gen.pkn",
+      "struct Pair<A, B> { a: A; b: B; }\n"
+      "impl Pair<A, B> { view fn first() -> view A { return self.a; }\n"
+      "  view fn second() -> view B { return self.b; } }\n"
+      "class Box<T> { v: T; view fn get() -> view T { return self.v; } }\n"
+      "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n");
+  writeFile(
+      dir / "m2.pkn",
+      "import lib::gen;\n"
+      "fn make() -> gen::Pair<Str, int> { return gen::Pair<Str, int>(\"m\", "
+      "2); }\n"
+      "fn boxes(b: view gen::Box<gen::Pair<int, int>>) -> int { "
+      "return b.get().first(); }\n"
+      "fn hidden() -> int { p = gen::Pair<int, bool>(1, True); "
+      "return p.first(); }\n");
+  writeFile(dir / "main.pkn", "import m2;\n"
+                              "fn main() -> int { return m2::make().second() "
+                              "+ m2::hidden(); }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto first = paykan("--verbose main.pkn");
+  EXPECT_EQ(first.exitCode, 3) << first.out;
+  EXPECT_TRUE(contains(first.out, "module m2: wrote")) << first.out;
+  auto code = paykan("pkm dump --section=code .paykan_cache/m2.pkm");
+  ASSERT_EQ(code.exitCode, 0) << code.out;
+  // The exposed instantiations whole (an importer may call any of their
+  // functions), the hidden one as far as `hidden` uses it.
+  for (const char *kept :
+       {"shared fn @\"Pair<Str, int>.second\"(",
+        "shared fn @\"Pair<Str, int>.first\"(",
+        "shared fn @\"Pair<int, int>.second\"(",
+        "shared class \"Box<Pair<int, int>>\"",
+        "shared fn @\"Pair<int, bool>.first\"(",
+        "extern fn @make(ptr) -> void module \"m2\" uses @\"Pair<Str, int>\"",
+        "extern fn @hidden() -> i64 module \"m2\" uses"})
+    EXPECT_TRUE(contains(code.out, kept)) << kept << "\n" << code.out;
+  EXPECT_FALSE(contains(code.out, "Pair<int, bool>.second")) << code.out;
+  // The functions' bodies are compiled, not in CODE.
+  EXPECT_FALSE(contains(code.out, "fn @hidden() -> i64 {")) << code.out;
+  auto obj = paykan("pkm dump --section=obj .paykan_cache/m2.pkm");
+  EXPECT_TRUE(contains(obj.out, "  backend \"mlir\"\n  format \"llvm-bc\""))
+      << obj.out;
+  auto again = paykan("--verbose main.pkn");
+  EXPECT_EQ(again.exitCode, 3) << again.out;
+  EXPECT_TRUE(
+      contains(again.out, "module m2: cache .paykan_cache/m2.pkm usable"))
+      << again.out;
+  // A binary keeps only what main reaches: `boxes` and its copies go.
+  auto pir = paykan("--emit-pir main.pkn");
+  ASSERT_EQ(pir.exitCode, 0) << pir.out;
+  EXPECT_FALSE(contains(pir.out, "boxes")) << pir.out;
+  EXPECT_FALSE(contains(pir.out, "Box<Pair<int, int>>")) << pir.out;
+  EXPECT_TRUE(contains(pir.out, "Pair<Str, int>.second")) << pir.out;
+  fs::remove_all(dir);
+}
+
+// `pkm extract --object` writes a module's compiled code as an object the
+// system linker takes (what a program's --emit-c C links with).
+TEST(Pkm, ExtractWritesTheCompiledCodeAsAnObject) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_extract_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib.pkn", "fn twice(n: int) -> int { return n * 2; }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  ASSERT_EQ(paykan("--emit-pkm lib.pkn").exitCode, 0);
+  auto extract = paykan("pkm extract --object lib.pkm -o lib.o");
+  ASSERT_EQ(extract.exitCode, 0) << extract.out;
+  std::string object = slurp(dir / "lib.o");
+  ASSERT_GE(object.size(), 4u);
+  const bool elf = object.compare(0, 4,
+                                  "\x7f"
+                                  "ELF") == 0;
+  const bool macho = object.compare(0, 4, "\xcf\xfa\xed\xfe") == 0;
+  EXPECT_TRUE(elf || macho);
+  auto none = paykan("pkm extract lib.pkm");
+  EXPECT_NE(none.exitCode, 0);
+  EXPECT_TRUE(contains(none.out, "needs what to extract: --object"))
+      << none.out;
+  fs::remove_all(dir);
+}
+
 TEST(Pkm, PrebuiltModuleCarriesItsTemplates) {
   REQUIRE_BACKEND();
   fs::path dir = fs::temp_directory_path() /

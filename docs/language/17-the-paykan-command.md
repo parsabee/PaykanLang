@@ -10,6 +10,7 @@ paykan [options] [run] <source-file> [program arguments]
 paykan [options] build <source-file> [-o <output>]
 paykan pkm dump <file.pkm> [--section=<name>]
 paykan pkm check <file.pkm>
+paykan pkm extract --object <file.pkm> [-o <file.o>]
 ```
 
 - **`run`** (the default, so `paykan prog.pkn` is the same as `paykan run prog.pkn`)
@@ -20,9 +21,12 @@ paykan pkm check <file.pkm>
   source file without its extension. `build` takes no program arguments, so its options may
   also come after the file.
 - **`pkm`** inspects a module file (see [Module Files](15-modules.md#module-files)): `dump`
-  prints it (`--section=manifest|sections|iface|tmpl|code|symidx|payloads` prints one part;
-  `tmpl` adds the text of the generic templates, and `code` is exactly the module's PIR
-  text), `check` prints whether this `paykan` can use it and exits with 0 when it can.
+  prints it (`--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads` prints one
+  part; `tmpl` adds the text of the generic templates, `code` is exactly the module's PIR
+  text, and `obj` says who compiled its code, for which target), `check` prints whether this
+  `paykan` can use it and exits with 0 when it can, and `extract --object` writes the
+  module's compiled code as a native object file (`-o <file>`, or the module file's name
+  with `.o`, at the `-O<n>` level): what a program's `--emit-c` C is linked with.
 
 The source file is the program's **main file**. Its directory is the source root from which
 imports are resolved (see [Modules](15-modules.md)).
@@ -63,7 +67,7 @@ These print an intermediate form of the program to standard output and stop.
 | `--emit-llvm` | the program's LLVM IR, as `run` executes it at the `-O<n>` level (the mlir backend's `--emit-source`) |
 | `--emit-mlir=<stage>` | the program as MLIR at a stage of the mlir backend: `pir`, the program imported into the `pir` dialect, `scf`, after the lowering both targets share, `llvm`, the LLVM dialect, or `emitc`, EmitC, the C `--emit-c` prints ([the MLIR backend](../design/mlir-backend.md)) |
 | `--emit-source` | the selected backend's output, whatever its language (the mlir backend's is LLVM IR) |
-| `--emit-pir` | PIR, the backend-neutral intermediate representation ([PIR](../pir.md)) |
+| `--emit-pir` | PIR, the backend-neutral intermediate representation ([PIR](../pir.md)), as the backend gets it: what `main` reaches |
 | `--emit-ast` | the parsed program in the AST interchange format ([AST format](../plugins/ast-format.md)) |
 | `--dump-ast` | the parsed program as a readable tree |
 | `--dump-tokens` | the token stream, for frontends that support it |
@@ -102,7 +106,7 @@ fn @"$::io::println<Str>"(%value.1: box) -> void {
 
 | Option | Effect |
 |--------|--------|
-| `--version`, `-v` | the version, the frontends and backends with their versions, and the plugin directories |
+| `--version`, `-v` | the version, the frontends and backends with their versions, the plugin directories and the standard library's |
 | `--help`, `-h` | a summary of every option |
 | `--list-backends` | the available backends; the default is marked `(default)` |
 | `--list-frontends` | the available frontends |
@@ -120,17 +124,22 @@ fn @"$::io::println<Str>"(%value.1: box) -> void {
 
 A backend turns the compiled program into something that runs. PaykanLang has one,
 **`mlir`**, the default, which every build has. It takes the program through MLIR, where one
-lowering serves two targets ([the MLIR backend](../design/mlir-backend.md)). It first drops
-what the program's `main` cannot reach, so neither target compiles, and no executable holds,
-the parts of a module (the standard library's, say) the program does not use; `--emit-pir`
-and module files keep all of them.
+lowering serves two targets ([the MLIR backend](../design/mlir-backend.md)). Before it sees
+the program, `paykan` drops what the program's `main` cannot reach, so neither target
+compiles, and no executable holds, the parts of a module (the standard library's, say) the
+program does not use. A module file keeps what the module and its importers can reach, its
+code other than its copies of instantiations compiled to LLVM bitcode, of which a program
+links only what it uses ([Module Files](15-modules.md#module-files)).
 
 - **LLVM IR.** `run` executes the program in-process with LLVM's JIT compiler, with no C
   compiler involved; `build` writes a native object and links it against the runtime with
   the system C compiler: `$CC` when the variable is set, `cc` otherwise. `-O<n>` selects
   LLVM's optimization pipeline. `--emit-llvm` (or `--emit-source`) prints the IR.
 - **C.** `--emit-c` prints the program as one strictly conforming C11 translation unit,
-  which any C11 compiler builds against the runtime ([The C output](../c-backend.md)).
+  which any C11 compiler builds against the runtime ([The C output](../c-backend.md)). The
+  code of a module compiled into its module file (the standard library's, a cached import's)
+  is not C: it is linked as an object, which `paykan pkm extract --object` writes, and the C
+  keeps everything that code uses.
 
 `--emit-mlir=<stage>` prints the program at a stage of the pipeline. Other backends are
 plugins ([Plugins](#plugins)), selected with `--backend=<name>`. The repository's test suite

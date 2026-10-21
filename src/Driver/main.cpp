@@ -144,6 +144,8 @@ void printVersion(const paykan::plugin::LoadReport &plugins) {
   }
   std::cout << "plugin API " << paykan::versionString(PAYKAN_PLUGIN_API_VERSION)
             << "\n";
+  std::cout << "standard library: "
+            << paykan::module_utils::stdlibDir("").string() << "\n";
   std::cout << "plugin directories:";
   if (plugins.DiscoveryDisabled)
     std::cout << " none searched (--no-plugins or PAYKAN_NO_PLUGINS)";
@@ -294,6 +296,36 @@ int pkmTool(const Options &opts) {
     paykan::pir::print(*mod, os);
     return true;
   };
+  if (opts.Verb == PkmVerb::Extract) {
+    // The module's compiled code as a native object, for a program's C
+    // (--emit-c) to link with.
+    if (!opts.PkmObject)
+      return fail("`pkm extract` needs what to extract: --object");
+    std::span<const uint8_t> section = (*file).section(pkm::Kind::Object);
+    if (section.empty())
+      return fail(path + " has no compiled code (its CODE is all of it)");
+    auto object = pkm::readObject(section);
+    if (!object)
+      return fail(path + ": " + object.status().message());
+    std::string backendName =
+        opts.Backend.empty() ? std::string(paykan::backend::defaultBackend())
+                             : opts.Backend;
+    auto backend = paykan::backend::Registry::get().create(backendName);
+    if (!backend)
+      return fail("unknown backend '" + backendName + "'");
+    if (!backend->capabilities().CompileModules)
+      return fail("backend '" + backendName + "' does not compile modules");
+    std::string out = opts.OutputPath.empty() ? std::filesystem::path(path)
+                                                    .filename()
+                                                    .replace_extension(".o")
+                                                    .string()
+                                              : opts.OutputPath;
+    if (paykan::Status s =
+            backend->emitModuleObject(toBackend(*object), opts.optLevel(), out);
+        !s)
+      return fail(path + ": " + s.message());
+    return EXIT_SUCCESS;
+  }
   if (opts.Verb == PkmVerb::Check) {
     pkm::Verdict v = pkm::checkCompatibility(
         (*file).manifest(), paykan::modules::ModuleResolver::hostIdentity(),
@@ -680,10 +712,21 @@ int main(int argc, char *argv[]) {
     return fail("PIR verification failed:\n" +
                 paykan::pir::formatErrors(errors));
   // What the program's entry point cannot reach is dropped before the
-  // backend lowers anything (docs/pir.md §12).
+  // backend lowers anything (docs/pir.md §12).  The C of --emit-c is linked
+  // with each compiled module's code as a whole object (`pkm extract
+  // --object`), so everything that code uses stays too.
+  paykan::pir::Roots roots = paykan::pir::Roots::entryPoint(program);
+  if (opts.EmitSource && opts.EmitStage == "c") {
+    roots.Functions = [entry =
+                           roots.Functions](const paykan::pir::Module &m,
+                                            const paykan::pir::Function &f) {
+      return entry(m, f) || m.isCompiled(f);
+    };
+    roots.Classes = [](const paykan::pir::Module &m,
+                       const paykan::pir::Class &c) { return m.isCompiled(c); };
+  }
   paykan::pir::PassManager passes;
-  passes.add(
-      paykan::pir::createDeadCodePass(paykan::pir::Roots::entryPoint(program)));
+  passes.add(paykan::pir::createDeadCodePass(std::move(roots)));
   if (paykan::Status s = passes.run(program); !s)
     return fail(s.message());
   if (opts.EmitPIR) {

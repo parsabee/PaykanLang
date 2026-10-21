@@ -201,6 +201,11 @@ Status emitHostObject(llvm::Module &module, unsigned optLevel,
                       const std::string &path) {
   if (Status s = addEntryPoint(module); !s)
     return s;
+  return emitHostModuleObject(module, optLevel, path);
+}
+
+Status emitHostModuleObject(llvm::Module &module, unsigned optLevel,
+                            const std::string &path) {
   auto tm = createHostTargetMachine(optLevel);
   if (!tm)
     return tm.status();

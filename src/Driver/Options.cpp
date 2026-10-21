@@ -148,9 +148,11 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
           o.Verb = PkmVerb::Dump;
         } else if (arg == "check") {
           o.Verb = PkmVerb::Check;
+        } else if (arg == "extract") {
+          o.Verb = PkmVerb::Extract;
         } else {
           r.Error = "unknown pkm command '" + std::string(arg) +
-                    "' (expected `dump` or `check`)";
+                    "' (expected `dump`, `check` or `extract`)";
           return r;
         }
         continue;
@@ -195,6 +197,12 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       if (!r.Error.empty())
         return r;
       o.Plugins.push_back(std::move(plugin));
+      continue;
+    }
+    // `pkm extract --object`: what to extract (a `pkm` command links no
+    // native objects).
+    if (o.Cmd == Command::Pkm && name == "object") {
+      o.PkmObject = true;
       continue;
     }
     if (std::string list;
@@ -317,7 +325,8 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   if (!infoOnly && o.InputFilename.empty())
     r.Error = o.Cmd == Command::Pkm
                   ? (sawVerb ? "no module file specified"
-                             : "no pkm command specified (`dump` or `check`)")
+                             : "no pkm command specified (`dump`, `check` or "
+                               "`extract`)")
                   : "no source file specified";
   return r;
 }
@@ -330,7 +339,9 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "       " << argv0
      << " pkm dump <file.pkm> [--section=manifest|sections|iface|symidx|"
         "code|obj|payloads]\n"
-     << "       " << argv0 << " pkm check <file.pkm>\n\n"
+     << "       " << argv0 << " pkm check <file.pkm>\n"
+     << "       " << argv0
+     << " pkm extract --object <file.pkm> [-o <file.o>]\n\n"
      << "OPTIONS:\n";
   for (const Flag &f : kFlags)
     os << "  --" << f.Name

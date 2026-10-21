@@ -22,9 +22,13 @@ Status: **partly implemented.** What `paykan` ships today:
   imported source itself, and the lowering still lowers the whole program
   (`lowering::lowerProgram`), taking a loaded module's decoded `CODE`
   instead of lowering it;
+- a module's compiled code (`OBJ`, §5.13): before a module's file is
+  written, its code is trimmed to what it and its importers reach, its
+  copies of instantiations stay PIR in `CODE`, and the rest is compiled by
+  the backend, `CODE` declaring it;
 - `--emit-pkm`, `--module-path` / `$PAYKAN_MODULE_PATH`,
   `--rebuild-modules`, `--no-module-cache`, `--verbose`, and `paykan pkm
-  dump` / `check` (§8.5).
+  dump` / `check` / `extract --object` (§8.5).
 
 Generics cross modules from a source and from a `.pkm` alike (§4.8): a
 module's `TMPL` section holds its templates as renamed interchange text
@@ -58,7 +62,7 @@ map onto three *classes* of section rather than three literal sections:
 |---|---|---|---|
 | 1. "a header that tells the system, backend, frontend, core, libraries that it depends on and their versions" | **header** | `MANIFEST` | the driver, before anything else is decoded |
 | 2. "loadable by Sema for semantic analysis" | **sema** | `IFACE`, `TMPL` | Sema (and the lowering, to declare externs) |
-| 3. "everything not needed for semantic analysis; binary" | **binary** | `CODE`, `SYMIDX`, `DEBUG`, `PAYLOAD`* | the driver (PIR) and the active backend (payload) |
+| 3. "everything not needed for semantic analysis; binary" | **binary** | `CODE`, `OBJ`, `SYMIDX`, `DEBUG`, `PAYLOAD`* | the driver (PIR) and the active backend (compiled code, payload) |
 
 A file with **no `PAYLOAD`** is the **portable** form: it is complete, and
 any backend whose PIR version and runtime ABI match regenerates native
@@ -145,6 +149,7 @@ plus a table rewrite.
 | `0x0200` | `CODE` | binary | 0..1 | yes when present | §5 |
 | `0x0201` | `SYMIDX` | binary | 0..1 | no | §6.1 |
 | `0x0202` | `DEBUG` | binary | 0..1 | no | §6.2 |
+| `0x0203` | `OBJ` | binary | 0..1 | yes when present | §5.13 |
 | `0x0210` | `PAYLOAD` | binary | 0..n | no, `INSTANCED` | §7 |
 | `0x7F00`–`0x7FFF` | private | — | any | never | out-of-tree tools |
 
@@ -224,7 +229,7 @@ G = gating (a mismatch yields a verdict), I = informational.
 | Tag | Name | Type | G/I | Content |
 |---|---|---|---|---|
 | `0x01` | `module` | `str` | G | canonical module name; must equal the name the importer resolved |
-| `0x03` | `contents` | `u32` bitset | G | bit 0 `HAS_CODE`, 1 `HAS_TEMPLATES`, 2 `HAS_MAIN`, 3 `SYSTEM` (name starts with `::`), 4 `HAS_STATIC_INIT` (#170 lazily initialised storage), 5 `EXPORTS_C` (#21). Must agree with the section table |
+| `0x03` | `contents` | `u32` bitset | G | bit 0 `HAS_CODE`, 1 `HAS_TEMPLATES`, 2 `HAS_MAIN`, 3 `SYSTEM` (name starts with `::`), 4 `HAS_STATIC_INIT` (#170 lazily initialised storage), 5 `EXPORTS_C` (#21), 6 `HAS_OBJECT` (the module's code is compiled, §5.13). Must agree with the section table |
 | `0x05` | `core` | `{str version; u32 major, minor, patch; str prerelease; str build}` | G | the PaykanLang that produced the file (`include/Version.h.in`). `build` is `""` for a release (configured with `-DPAYKAN_RELEASE=ON`, which the release workflow and the Homebrew formula pass); for every other build, a development build of the last release's version included, it is the build ID: a hash of the contents of `src/` and `include/`, recomputed on every build (`kBuildId` in the generated `BuildId.h`, `cmake/BuildId.cmake`; never an executable size/mtime). A cache entry of another build is Stale (#188) |
 | `0x07` | `format_versions` | `{u32 iface_version, tmpl_version, pir_version, code_encoding, debug_version}` | G | `iface_version` and `pir_version` are the release's (§11), like `PAYKAN_PIR_TEXT_VERSION`, so text, binary and manifest agree by construction. `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
 | `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, defined in `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this): the release version, like every format (§11) |
@@ -651,7 +656,12 @@ without erasure or `INST` (§4.5 stays the plan for erased copies):
   become externs of that one (a `vcall` naming the class takes the slot's
   signature, as one on an imported class does). The driver writes the cache
   entries and `--emit-pkm`'s file from the per-module PIR, then shares.
-  Copies are not merged by the linker: strict C11 has no COMDAT (#62).
+  The lowering marks every copy `shared` (docs/pir.md §3), each function and
+  class of an instantiation has its own keeper (a module keeps only the part
+  of a copy it uses, §5.13), and a backend links a shared symbol under a
+  name without its module, so a module's compiled code calls whichever copy
+  the program kept. Copies are not merged by the linker: strict C11 has no
+  COMDAT (#62).
 - **Caching.** A module with templates, or with copies of another module's
   instantiations, is cached like any other. Its importers record its
   `tmpl_hash` as well as its `iface_hash` (§2.3), so an edit of a template's
@@ -894,6 +904,69 @@ instantiation class; a constant `SlotRec` has an init of its type;
 `internal` symbol is never named by another module's extern; a vtable slot
 target of an `external` class is `external` or `hidden`. The verifier stays
 the single rulebook for text and binary.
+
+### 5.13 What a file keeps of its module's code: `CODE` and `OBJ` (implemented)
+
+A module is lowered with a copy of every instantiation it uses (§4.8). When
+its file is written (a cache entry once the program verified, or
+`--emit-pkm`), the driver first trims it, then splits it
+(`include/paykan/modules/ModuleCode.h`):
+
+- **Trim.** PIR's dead-code pass (docs/pir.md §12) runs on the module with
+  these roots: every function and class of its own (not a copy, a closure,
+  or an instantiation of one of its own generic functions), and its copies
+  of the instantiations its interface **exposes**. A type is exposed when
+  `IFACE` spells it in a function's signature, or in a field, method or
+  superclass of one of the module's own types (private members aside), or
+  inside an exposed type's own members, or as a type argument of one: an
+  importer may then get a value of it without naming it, and calls the
+  module's copy (`typeOrigin`), so an exposed copy is kept whole. Of the
+  other copies, only what the module's own code reaches stays: in
+  `m2`, a `Pair<int, bool>` only `hidden()` uses keeps `first`, its
+  constructor and `__init__`, and loses `second`.
+- **Split.** The module's shared copies of instantiations stay PIR in
+  `CODE`: a program keeps one of each and drops what its `main` does not
+  reach, and an importer instantiating the same type links to them. Every
+  other definition is compiled by the backend (`Backend::compileModule`,
+  the `CompileModules` capability) into `OBJ`; `CODE` declares it, as a
+  compiled declaration (an extern naming its own module, docs/pir.md §3)
+  listing the module's names its compiled body uses, which a program's
+  dead-code pass keeps while it keeps the function. Compiled classes keep
+  their layout and vtable description in `CODE`. Synthesized items
+  (closures, local instantiations) are declared only while a copy or a
+  declaration uses them. With a backend that compiles nothing, `CODE` is
+  the trimmed module, whole (the portable form).
+
+```
+OBJ blob
+  "PKMO" u32 version(= the release's) u32 flags(0)
+  str backend    the backend that compiled it ("mlir")
+  str format     what the bytes are ("llvm-bc")
+  str target     the target triple
+  str producer   the backend's version (its describe(): "MLIR 22.1.8")
+  uleb n ; n bytes   the code, opaque to the core
+```
+
+**Who links it.** `OBJ` is not a cache of `CODE` (§7): the module's code is
+only there, so a file with `OBJ` is usable only by a backend that links
+what that backend made, for that target (`Backend::objectKind()`; the mlir
+backend checks all four fields). The resolver judges a cache entry against
+the active backend (`ResolverOptions::CompiledBy`): code another backend,
+target or LLVM compiled makes it stale, and it is rebuilt from source. A
+prebuilt file (the standard library) is used whoever compiled it, and the
+backend reports code it cannot link. A program gets the compiled code of
+its modules in `backend::Input::Compiled`; the mlir backend links into the
+program's LLVM module only what the program references
+(docs/design/mlir-backend.md). `--emit-c` prints the C of the program's
+PIR, keeping everything compiled code uses, and the code is linked as an
+object: `paykan pkm extract --object f.pkm -o f.o` (§8.5).
+
+**Modules built this run.** A module built from source gets its cache
+entry, then the program uses it in its split form (its `CODE`, its `OBJ`),
+as an importer will next time, unless another module of the program
+declares from it something its `CODE` no longer has (`providesFor`: a copy
+it dropped that this program's lowering pointed another module at); then
+the program keeps the module as lowered.
 
 ---
 
@@ -1254,13 +1327,15 @@ backend (`verifyModule` after `parseBitcodeFile`; the linker for objects).
 | `--strip-names`, `--debug-lines` (planned) | §5.8, §6.2 |
 | `--verbose` | one line per import: file, verdict, and (once there are payloads) why a payload was dropped |
 
-`paykan pkm <verb>`: `dump f.pkm [--section=manifest|sections|iface|tmpl|code|symidx|payloads|all]`
+`paykan pkm <verb>`: `dump f.pkm [--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads|all]`
 (`tmpl` adds the bodies' interchange text to the framing `all` shows;
 planned: `--section=debug` and `--symbol=<name>`; stable text;
 golden-tested; `--section=code` prints exactly `pir::print` of the decoded
 module, so it equals `--emit-pir` of the module when it was built),
-`check f.pkm` (verdict against this toolchain, exit status), and, planned,
-`strip`, `extract`, `add-payload` (§7.7).
+`check f.pkm` (verdict against this toolchain, exit status), `extract
+--object f.pkm [-o f.o]` (the module's compiled code, `OBJ`, as a native
+object for the host, at `-O<n>`; what a program's `--emit-c` C links with),
+and, planned, `strip`, `extract --payload`, `add-payload` (§7.7).
 
 ### 8.6 Diagnostics
 

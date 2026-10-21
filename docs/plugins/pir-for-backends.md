@@ -21,6 +21,15 @@ types match, every value is defined before use in its block structure, every
 callee is declared, every class layout and vtable is complete. A backend may
 rely on it and needn't re-check.
 
+The program holds only what its `main` reaches.  A module loaded from a
+`.pkm` whose code the mlir backend compiled (the installed standard
+library's, for one) arrives with that code declared, not defined: an `extern
+fn` or `extern class` naming its own module, a compiled declaration
+([`pir.md` §3](../pir.md#3-functions-and-locals)).  A loaded backend gets no
+compiled code (`PaykanBackendInput` has no field for it), so it can print
+or analyse such a program but not link it; the modules it builds from
+source, and their cache entries, have all of their code in PIR.
+
 ## Reading it
 
 The text form is line-oriented and made for this:

@@ -33,14 +33,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry records the templates' hash of every module it imports, so editing a generic body
   recompiles the modules that may hold a copy of it.  `--emit-pkm --module-name=<name>`
   names the module the file records.
-- The mlir backend drops what a program's `main` cannot reach before it lowers anything
-  (docs/design/mlir-backend.md, "Unreachable code"): MLIR's symbol DCE on the imported `pir`
-  dialect, run until nothing changes, with the declarations of other modules' functions and
-  the classes ops name given to it between runs.  An executable, and what `run` compiles,
-  hold only the code the program uses; `--emit-llvm`, `--emit-c` and `--emit-mlir` print that.
-  A module's cached LLVM IR is keyed on the part of it the program uses.
+- PIR passes (docs/pir.md §12): a pass manager, and a dead-code pass that erases what no root
+  of a program reaches, following calls, symbol operands, the classes instructions name,
+  vtables and the declarations between modules.  `paykan` runs it on every program with
+  `main` as the root before the backend sees it: an executable, and what `run` compiles,
+  hold only the code the program uses, and `--emit-pir`, `--emit-llvm`, `--emit-c` and
+  `--emit-mlir` print that.  A module's cached LLVM IR is keyed on the part of it the
+  program uses.
+- A `.pkm` keeps only the code its module and its importers can reach, and compiles most of
+  it (docs/design/pkm.md §5.13): the module's own code stays, with its copies of the
+  instantiations its interface exposes, and its other copies only as far as its own code
+  uses them.  The copies stay PIR (marked `shared`, docs/pir.md §3), which every program
+  shares and prunes; the rest is compiled by the backend (LLVM bitcode, for the mlir
+  backend) into a new `OBJ` section, which the module's PIR declares, each function with the
+  names its code uses.  A program links only the part of that code it uses.  A cache entry
+  whose code another backend or another LLVM compiled is rebuilt.  The standard library
+  ships compiled.
+- `paykan pkm extract --object <file.pkm>` writes a module's compiled code as a native
+  object, which a program's `--emit-c` C is linked with; `paykan pkm dump --section=obj`
+  shows who compiled it.  `paykan --version` names the standard library's directory.
+- Backends may compile modules (the `CompileModules` capability: `compileModule`,
+  `objectKind`, `emitModuleObject`, and `Input::Compiled`, docs/writing-a-backend.md).
 
 ### Changed
+
+- `--emit-c` prints the C of the program's PIR.  A module loaded from a module file with
+  compiled code (the standard library's, an import's cache entry) is linked as an object
+  (`paykan pkm extract --object`), and the C keeps everything that code uses
+  (docs/c-backend.md).  A loaded backend plugin gets such a module's code declared, not
+  defined (docs/plugins/pir-for-backends.md).
 
 - The standard library is installed as `.pkm` files only: each module is compiled, as
   `::<name>`, against the `.pkm` files of the modules it imports, and a program loads all of

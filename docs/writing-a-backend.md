@@ -217,6 +217,18 @@ public:
   allocates and dumps it afterwards (`Paykan_heap_dump()`); a backend that runs
   a separate process passes the request on to it. The base class's `run()`
   fails, so a backend without `Run` need not override it.
+- **Compiled modules** (optional, `CompileModules`): when a module's `.pkm`
+  is written, `paykan` trims its PIR and asks the backend to compile all of
+  it but its copies of instantiations (`compileModule(const pir::Module &)`,
+  a module whose other items are declared); the bytes go into the file's
+  OBJ section, tagged with what `objectKind()` returns (the backend's name,
+  the bytes' format, the target and the backend's version), and its PIR
+  declares that code ([`design/pkm.md`](design/pkm.md) §5.13). A program
+  then hands the backend each such module's code in `Input::Compiled` to
+  link, and `emitModuleObject()` writes one as a native object (`paykan pkm
+  extract --object`). A backend without the capability gets only programs
+  whose PIR is all of their code from the modules it built, and the module
+  files it writes keep all of it in PIR.
 - **Errors** are reported with `paykan::Status` / `paykan::StatusOr<T>`
   ([`include/paykan/Status.h`](../include/paykan/Status.h)). The core is built
   with `-fno-exceptions`; nothing may throw across the interface.
@@ -231,6 +243,7 @@ public:
 | `InputFilename`, `ProjectRoot` | the main source file and the directory imports were resolved against (for default output names, caches, diagnostics) |
 | `OptLevel` | `-O<n>`, 0..3; what it means is the backend's choice |
 | `Objects` | the object files and archives of `--object`, which define the program's `native fn`s (the `$c.` externs, [`pir.md`](pir.md) §3); a native backend links them |
+| `Compiled` | for a backend with `CompileModules`: by module name, the code `compileModule` made of each module the program's PIR declares (compiled declarations, [`pir.md`](pir.md) §3); the backend links what the program uses of it |
 
 A PIR program is a plain data structure
 ([`include/paykan/pir/PIR.h`](../include/paykan/pir/PIR.h)): modules hold
