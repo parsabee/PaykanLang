@@ -2,7 +2,7 @@
 """Produce an LLVM source-based coverage report for PaykanLang.
 
 Prerequisites: a Clang with llvm-profdata / llvm-cov, and a coverage tree.
-The vendored LLVM 17 under build/third-party/llvm is downloaded only by a
+The vendored LLVM 22 under build/third-party/llvm is downloaded only by a
 configure that lists the llvm backend; a plain configure (recursive-descent +
 c) does not download it, so pass the full list, e.g.
 

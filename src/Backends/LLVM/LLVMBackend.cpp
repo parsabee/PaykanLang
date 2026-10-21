@@ -143,7 +143,7 @@ private:
     auto tm = createHostTargetMachine(in.OptLevel);
     if (!tm)
       return tm.status();
-    (*module)->setTargetTriple((*tm)->getTargetTriple().str());
+    (*module)->setTargetTriple((*tm)->getTargetTriple());
     (*module)->setDataLayout((*tm)->createDataLayout());
     optimizeModule(**module, in.OptLevel);
     return writeObjectFile(**module, **tm, path);

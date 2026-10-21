@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The `llvm` backend is built on LLVM 22.1.8 (was 17.0.6), the first step towards an MLIR
+  backend: the prebuilt release a configure with `-DPAYKAN_BACKENDS=llvm;c` downloads includes
+  MLIR.  Only what PaykanLang uses is extracted (headers, the LLVM and MLIR libraries and the
+  tools the build and the scripts run), about 2 GB of the archive's 12.  The prebuilt LLVM links
+  with zlib and zstd from the system (`zlib1g-dev libzstd-dev` on Debian and Ubuntu, `brew
+  install zstd` on macOS); a configure without them says so.  The vendored clang-format and
+  clang-tidy are LLVM 22's too.
 ## [0.2.0] - 2026-10-20
 
 ### Added

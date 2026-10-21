@@ -66,7 +66,7 @@ Status addEntryPoint(llvm::Module &module) {
   // PAYKAN_TRACK_HEAP: select the tracking allocator before the program
   // allocates anything (the C backend's main does the same).
   llvm::Value *trackEnv = b.CreateCall(
-      fn("getenv", ptr, {ptr}), {b.CreateGlobalStringPtr("PAYKAN_TRACK_HEAP")});
+      fn("getenv", ptr, {ptr}), {b.CreateGlobalString("PAYKAN_TRACK_HEAP")});
   llvm::Value *track = b.CreateIsNotNull(trackEnv, "track");
   auto *trackOn = llvm::BasicBlock::Create(ctx, "track.on", entry);
   auto *start = llvm::BasicBlock::Create(ctx, "start", entry);
@@ -119,31 +119,29 @@ StatusOr<std::unique_ptr<llvm::TargetMachine>>
 createHostTargetMachine(unsigned optLevel) {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
-  std::string triple = llvm::sys::getDefaultTargetTriple();
+  llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
   std::string err;
   const llvm::Target *target = llvm::TargetRegistry::lookupTarget(triple, err);
   if (!target)
-    return Status::error("no LLVM target for '" + triple + "': " + err);
+    return Status::error("no LLVM target for '" + triple.str() + "': " + err);
 
   llvm::SubtargetFeatures features;
-  llvm::StringMap<bool> hostFeatures;
-  if (llvm::sys::getHostCPUFeatures(hostFeatures))
-    for (const auto &f : hostFeatures)
-      features.AddFeature(f.first(), f.second);
+  for (const auto &f : llvm::sys::getHostCPUFeatures())
+    features.AddFeature(f.first(), f.second);
 
-  static const llvm::CodeGenOpt::Level levels[] = {
-      llvm::CodeGenOpt::None,
-      llvm::CodeGenOpt::Less,
-      llvm::CodeGenOpt::Default,
-      llvm::CodeGenOpt::Aggressive,
+  static const llvm::CodeGenOptLevel levels[] = {
+      llvm::CodeGenOptLevel::None,
+      llvm::CodeGenOptLevel::Less,
+      llvm::CodeGenOptLevel::Default,
+      llvm::CodeGenOptLevel::Aggressive,
   };
   llvm::TargetOptions options;
   std::unique_ptr<llvm::TargetMachine> tm(target->createTargetMachine(
       triple, llvm::sys::getHostCPUName(), features.getString(), options,
       llvm::Reloc::PIC_, std::nullopt, levels[optLevel < 4 ? optLevel : 3]));
   if (!tm)
-    return Status::error("cannot create an LLVM target machine for '" + triple +
-                         "'");
+    return Status::error("cannot create an LLVM target machine for '" +
+                         triple.str() + "'");
   return tm;
 }
 
@@ -154,7 +152,8 @@ Status writeObjectFile(llvm::Module &module, llvm::TargetMachine &tm,
   if (ec)
     return Status::error("cannot write '" + path + "': " + ec.message());
   llvm::legacy::PassManager pm;
-  if (tm.addPassesToEmitFile(pm, out, nullptr, llvm::CGFT_ObjectFile))
+  if (tm.addPassesToEmitFile(pm, out, nullptr,
+                             llvm::CodeGenFileType::ObjectFile))
     return Status::error("the LLVM target cannot emit object files");
   pm.run(module);
   out.close();

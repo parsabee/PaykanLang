@@ -2,8 +2,8 @@
 
 llvm_map_components_to_libnames(JIT_LLVM_LIBS
     orcjit
-    jitlink            # ObjectLinkingLayer / EHFrameRegistrar (JIT.cpp)
-    orctargetprocess   # llvm_orc_registerEHFrameSectionWrapper (JIT.cpp)
+    jitlink            # LLJIT's default object linking layer
+    orctargetprocess   # the in-process EH-frame registration it uses
     native
 )
 

@@ -239,6 +239,9 @@ void loadFile(PluginFile &f) {
   }
   PaykanPluginInitFn init = nullptr;
   static_assert(sizeof(init) == sizeof(sym));
+  // dlsym's object pointer as a function pointer: POSIX guarantees the
+  // conversion, and memcpy makes it without the cast ISO C++ forbids.
+  // NOLINTNEXTLINE(bugprone-bitwise-pointer-cast)
   std::memcpy(&init, &sym, sizeof(init));
   // 3. The descriptor, checked before anything else in the library is
   //    called: the plugin API version, its layout, then the build version.

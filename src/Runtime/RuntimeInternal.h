@@ -30,7 +30,7 @@ static inline PaykanShared *Paykan_vcall_toString(PaykanObject *self) {
 
 static inline int64_t Paykan_vcall_equals(PaykanObject *self,
                                           PaykanShared *other) {
-  return ((int64_t(*)(PaykanObject *, PaykanShared *))Paykan_vtable_of(
+  return ((int64_t (*)(PaykanObject *, PaykanShared *))Paykan_vtable_of(
       self)[PAYKAN_SLOT_EQUALS])(self, other);
 }
 

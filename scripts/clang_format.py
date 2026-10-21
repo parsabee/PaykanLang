@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check or apply clang-format on PaykanLang's first-party C/C++ sources.
 
-Uses the vendored LLVM 17 clang-format (build/third-party/llvm) when present,
+Uses the vendored LLVM 22 clang-format (build/third-party/llvm) when present,
 falling back to a clang-format on PATH. Third-party code is excluded.
 
 Usage:

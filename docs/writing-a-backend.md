@@ -315,7 +315,7 @@ cmake -B build -DCMAKE_PREFIX_PATH=/opt/paykan -DLLVM_DIR=<llvm>/lib/cmake/llvm
 A plain configure of Paykan builds only the core (recursive-descent + c) and
 downloads no LLVM. An installation with the llvm backend comes from a configure
 that passes the full list,
-`"-DPAYKAN_BACKENDS=llvm;c"`; that configure downloads LLVM 17
+`"-DPAYKAN_BACKENDS=llvm;c"`; that configure downloads LLVM 22
 into `<paykan-build>/third-party/llvm` unless `LLVM_DIR` names one, so
 `<llvm>` above is that directory or the LLVM you passed.
 

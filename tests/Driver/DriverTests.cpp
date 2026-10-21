@@ -1881,8 +1881,11 @@ TEST(Driver, BuildAndRunDefaultToO2) {
     EXPECT_NE(ir, emit("-O0"));
     // The program's own code is optimised: no stack slot is left in main.
     // (::io's, whose `errno` slots C writes through, keep theirs.)
-    size_t mainAt = ir.find("define i64 @main(");
+    // (`define [attributes] i64 @main(`: the optimiser adds `noundef`.)
+    size_t mainAt = ir.find(" @main(");
     ASSERT_NE(mainAt, std::string::npos) << ir;
+    mainAt = ir.rfind('\n', mainAt) + 1;
+    ASSERT_EQ(ir.compare(mainAt, 7, "define "), 0) << ir;
     std::string mainIR = ir.substr(mainAt, ir.find("\n}\n", mainAt) - mainAt);
     EXPECT_EQ(mainIR.find("alloca"), std::string::npos) << mainIR;
     // Cached bitcode is the unoptimised translation (the opt level is

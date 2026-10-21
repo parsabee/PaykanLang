@@ -11,6 +11,22 @@
 # which neither glibc nor macOS provides.  It only fired on Linux, where those
 # calls reach the checker by name; macOS's fortified headers turn them into
 # __builtin___*_chk calls it does not match, so CI never saw it.
+#
+# Off since LLVM 22, which added them, because what they flag is how this code
+# is meant to be written, not a defect:
+# - bugprone-derived-method-shadowing-base-method: a CRTP visitor's derived
+#   class defines the visit methods the base class dispatches to
+#   (ASTVisitor.h); that is the pattern, not shadowing by mistake.
+# - bugprone-crtp-constructor-accessibility: the same visitors' public
+#   default constructors.
+# - bugprone-multi-level-implicit-pointer-conversion: `T **` to `void *`,
+#   C's idiom for memcpy and the runtime's generic slots (Runtime.h).
+# - performance-enum-size: an enum's underlying type is chosen for clarity,
+#   not to save bytes in the few places one is stored.
+# - clang-analyzer-security.ArrayBound (alpha.security.ArrayBoundV2 before,
+#   never enabled here): it reports LLVM's own operand storage, which sits
+#   before a User object, as out of bounds on any IRBuilder call; the report
+#   is in LLVM's headers, so no NOLINT in our code reaches it.
 Checks: >
   -*,
   bugprone-*,
@@ -18,8 +34,17 @@ Checks: >
   clang-analyzer-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-narrowing-conversions,
-  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -bugprone-derived-method-shadowing-base-method,
+  -bugprone-crtp-constructor-accessibility,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -performance-enum-size,
+  -clang-analyzer-security.ArrayBound
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/(src|include)/.*\.h$'
 FormatStyle: file
+# A result discarded with `(void)` is discarded on purpose (a best-effort
+# cleanup), as clang-tidy before LLVM 22 took it.
+CheckOptions:
+  bugprone-unused-return-value.AllowCastToVoid: true

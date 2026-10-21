@@ -133,7 +133,9 @@ TEST(ASTInterchange, WritesTheDocumentedForm) {
   parser::ParserDriver driver("recursive-descent");
   auto path = std::filesystem::temp_directory_path() /
               ("paykan_interchange_" + std::to_string(::getpid()) + ".pkn");
-  { std::ofstream(path) << "fn main() -> int {\n  return 0;\n}\n"; }
+  {
+    std::ofstream(path) << "fn main() -> int {\n  return 0;\n}\n";
+  }
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);
   EXPECT_EQ(writeReal(*driver.getRoot()),

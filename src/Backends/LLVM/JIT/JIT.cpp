@@ -13,11 +13,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <llvm/ExecutionEngine/Orc/EPCEHFrameRegistrar.h>
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
-#include <llvm/ExecutionEngine/Orc/ObjectLinkingLayer.h>
-#include <llvm/ExecutionEngine/Orc/TargetProcess/RegisterEHFrames.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
 #include <llvm/Support/Error.h>
 #include <llvm/Support/MemoryBuffer.h>
@@ -150,31 +147,6 @@ const VTableAlias kVTableAliases[] = {
 };
 // clang-format on
 
-// Object linking layer for the LLJIT.
-//
-// LLJIT's default creates a JITLink layer whose EH-frame registration plugin
-// finds llvm_orc_registerEHFrameSectionWrapper by NAME in the running process
-// (dlsym).  That works on macOS, where every global symbol of an executable is
-// visible to dlsym, and fails on Linux, where it is not unless the binary is
-// linked with --export-dynamic: every program died with
-//   JIT error: Symbols not found: [ llvm_orc_registerEHFrameSectionWrapper ]
-// Hand the plugin the two functions' addresses directly -- they are linked
-// into this binary -- so nothing depends on linker flags or symbol
-// visibility, in the same spirit as the explicit runtime symbol table above.
-llvm::Expected<std::unique_ptr<llvm::orc::ObjectLayer>>
-createObjectLinkingLayer(llvm::orc::ExecutionSession &es,
-                         const llvm::Triple & /*triple*/) {
-  auto layer = std::make_unique<llvm::orc::ObjectLinkingLayer>(es);
-  layer->addPlugin(std::make_unique<llvm::orc::EHFrameRegistrationPlugin>(
-      es, std::make_unique<llvm::orc::EPCEHFrameRegistrar>(
-              es,
-              llvm::orc::ExecutorAddr::fromPtr(
-                  &llvm_orc_registerEHFrameSectionWrapper),
-              llvm::orc::ExecutorAddr::fromPtr(
-                  &llvm_orc_deregisterEHFrameSectionWrapper))));
-  return layer;
-}
-
 } // anonymous namespace
 
 // -- Runtime panics
@@ -219,7 +191,7 @@ llvm::Error setHostLayout(llvm::Module &module) {
   auto layout = jtmb->getDefaultDataLayoutForTarget();
   if (!layout)
     return layout.takeError();
-  module.setTargetTriple(jtmb->getTargetTriple().str());
+  module.setTargetTriple(jtmb->getTargetTriple());
   module.setDataLayout(*layout);
   return llvm::Error::success();
 }
@@ -265,10 +237,12 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 
-  // Build the JIT.
-  auto jitOrErr = llvm::orc::LLJITBuilder()
-                      .setObjectLinkingLayerCreator(createObjectLinkingLayer)
-                      .create();
+  // Build the JIT.  Its default object linking layer registers the code's
+  // EH frames itself: the in-process executor hands JITLink the addresses
+  // of the registration functions, which are linked into this binary, so
+  // nothing is looked up by name in the running process (LLVM 17 needed
+  // them passed explicitly here on Linux).
+  auto jitOrErr = llvm::orc::LLJITBuilder().create();
   if (!jitOrErr)
     return jitOrErr.takeError();
   auto &jit = *jitOrErr;
