@@ -115,10 +115,14 @@ if(NOT LLVM_FOUND)
         set(LLVM_EXCLUDED_LIBS libFortran* libflang* liblldb* libclang.*
                                libclang-cpp.* LLVMPolly.*)
         if(APPLE)
-            # The archive's libc++ runtime, which Paykan never uses (it builds
-            # with the system's), would shadow the system libc++ in the
-            # linker's process (see libLTO below).
+            # The archive's libc++, which Paykan never uses: it builds with
+            # the system's, the one the archive's libraries were built
+            # against.  Its dylibs would shadow the system libc++ in the
+            # linker's process (see libLTO below), and without its headers
+            # the vendored clang (the coverage build's) compiles with the
+            # SDK's, which match the libc++ a program links with.
             list(APPEND LLVM_EXCLUDED_LIBS libc++.* libc++abi.* libunwind.*)
+            list(APPEND LLVM_EXCLUDES "--exclude=${LLVM_TOP}/include/c++")
         else()
             # macOS links the libraries through it (see below).
             list(APPEND LLVM_EXCLUDED_LIBS libLTO.*)

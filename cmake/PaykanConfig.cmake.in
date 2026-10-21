@@ -100,6 +100,14 @@ if(PAYKAN_NEEDS_MLIR)
         find_package(MLIR CONFIG QUIET)
     endif()
 endif()
+# macOS: LLVM's release archives hold their libraries as LLVM bitcode, which
+# Xcode's linker reads only through that LLVM's libLTO (cmake/LLVMSetup.cmake
+# links PaykanLang itself through it, from <llvm>/lto/): a driver linking
+# them is linked through it too.
+set(PAYKAN_LLVM_LTO_LIBRARY "")
+if(APPLE AND LLVM_FOUND AND EXISTS "${LLVM_INSTALL_PREFIX}/lto/libLTO.dylib")
+    set(PAYKAN_LLVM_LTO_LIBRARY "${LLVM_INSTALL_PREFIX}/lto/libLTO.dylib")
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PaykanTargets.cmake")
 
@@ -133,6 +141,11 @@ const struct PackageRuntime {
     foreach(plugin IN LISTS PAYKAN_PLUGINS ARG_PLUGINS)
         target_link_libraries(${target} PRIVATE "$<LINK_LIBRARY:WHOLE_ARCHIVE,${plugin}>")
     endforeach()
+    if(PAYKAN_LLVM_LTO_LIBRARY)
+        target_link_options(${target} PRIVATE
+            "LINKER:-lto_library,${PAYKAN_LLVM_LTO_LIBRARY}"
+            "LINKER:-cache_path_lto,${CMAKE_CURRENT_BINARY_DIR}/lto.cache")
+    endif()
 endfunction()
 
 # The plugin compatibility check at configure time (#103): the same list a
