@@ -1,0 +1,9 @@
+// expect-panic: getBack on an empty LinkedList
+import ::io;
+import ::collections;
+
+fn main() -> int {
+  l = collections::LinkedList<Str>();
+  io::println(l.getBack());
+  return 0;
+}

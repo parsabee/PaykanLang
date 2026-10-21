@@ -1,5 +1,5 @@
 // ::memory Buffer<T>: a struct whose copies share the slots; new slots are
-// zero (or unset); set/get/copy, growth, shrinking and swap, for values and
+// zero (or unset); set/at/get/copy, growth, shrinking and swap, for values and
 // references; and the errors the operations report instead of panicking.
 import ::io;
 import ::memory as mem;
@@ -13,12 +13,12 @@ fn code(e: res::Error) -> Str {
 fn main() -> int {
   n = mem::Buffer<int>();
   io::println(Str(n.len()) + " " + code(n.grow(3)) + " " + Str(n.len()));
-  io::println(n.get(0) + n.get(2));
+  io::println(n.at(0) + n.get(2));
   e = n.set(1, 7);
   e = n.grow(2);
   e = n.push(9);
-  io::println(Str(n.len()) + " " + Str(n.get(1)) + " " + Str(n.get(4)) + " "
-      + Str(n.copyUnchecked(5)));
+  io::println(Str(n.len()) + " " + Str(n.at(1)) + " " + Str(n.at(4)) + " "
+      + Str(n.get(5)));
   io::println(n.copy(5).value);
   e = n.swap(1, 5);
   io::println(Str(n.get(1)) + Str(n.get(5)));
@@ -44,14 +44,14 @@ fn main() -> int {
   }
   kept = s.copy(42);
   e = s.shrink(99);
-  io::println(Str(s.len()) + " " + s.get(0) + " " + kept.value.toString());
+  io::println(Str(s.len()) + " " + s.at(0) + " " + kept.value.toString());
   e = s.grow(1);
   io::println(code(s.copy(1).error) + " " + code(s.swap(0, 1)));
 
   opt = mem::Buffer<Str?>();
   e = opt.grow(2);
   e = opt.set(1, "here");
-  io::println(Str(opt.get(0) == None) + " " + Str(opt.get(1) == None) + " "
+  io::println(Str(opt.at(0) == None) + " " + Str(opt.get(1) == None) + " "
       + opt.copy(1).value.toString());
   f = mem::Buffer<float>();
   b = mem::Buffer<bool>();

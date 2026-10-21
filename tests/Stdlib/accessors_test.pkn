@@ -1,0 +1,104 @@
+// ::collections' two ways to hand out an element: a `view fn` lends it as a
+// `view` (at, atOr, last, front, back, peek), which is read in place and
+// works through a `view` of the container; get, getOr, getFront and getBack
+// hand over a copy the caller keeps.  A copy of an object shares it with the
+// container; a copy of a value (an int, a struct) is the caller's alone.
+import ::io;
+import ::collections as c;
+
+class Dog {
+  name: Str;
+  fn rename(n: Str) { self.name = n; }
+}
+impl Dog {
+  fn __init__(n: Str) { self.name = n; }
+}
+
+struct P {
+  x: int;
+  y: int;
+}
+
+// Reads through a `view`: only the lending accessors are `view fn`s.
+fn names(xs: view c::List<Dog>, m: view c::HashMap<Str, Dog>,
+         l: view c::LinkedList<Dog>, s: view c::Stack<Dog>,
+         q: view c::Queue<Dog>, pq: view c::MaxPriorityQueue<Dog>,
+         stray: view Dog) -> Str {
+  return xs.at(0).name + " " + xs.last().name + " " + m.at("a").name + " "
+      + m.atOr("z", stray).name + " " + l.front().name + " " + l.back().name
+      + " " + s.peek().name + " " + q.peek().name + " " + pq.peek().name;
+}
+
+fn main() -> int {
+  dogs = c::List<Dog>();
+  dogs.push(Dog("rex"));
+  dogs.push(Dog("fido"));
+  // A copy of an object is the caller's own reference: it shares the dog and
+  // outlives the list's.
+  d = dogs.get(0);
+  d.rename("max");
+  io::println(dogs.at(0).name + " " + d.name);
+  dogs.clear();
+  io::println(Str(dogs.len()) + " " + d.name);
+
+  // A copy of a value is the caller's alone.
+  ps = c::listOf([P(1, 2)]);
+  p = ps.get(0);
+  p.x = 9;
+  io::println(Str(p.x) + " " + Str(ps.at(0).x));
+  n = c::listOf([5, 6]).get(1);
+  n = n + 1;
+  io::println(n);
+
+  m = c::HashMap<Str, Dog>();
+  m.put("a", Dog("ann"));
+  a = m.get("a");
+  a.rename("amy");
+  zed = m.getOr("z", Dog("zed"));
+  io::println(m.at("a").name + " " + zed.name + " " + m.getOr("a", zed).name
+      + " " + Str(m.len()));
+  m.remove("a");
+  io::println(a.name + " " + Str(m.containsKey("a")));
+
+  l = c::LinkedList<Dog>();
+  l.pushBack(Dog("head"));
+  l.pushBack(Dog("tail"));
+  h = l.getFront();
+  t = l.getBack();
+  l.clear();
+  io::println(h.name + " " + t.name + " " + Str(l.len()));
+
+  s = c::Stack<Dog>();
+  s.push(Dog("bottom"));
+  s.push(Dog("top"));
+  q = c::Queue<Dog>();
+  q.enqueue(Dog("first"));
+  q.enqueue(Dog("second"));
+  top = s.get();
+  first = q.get();
+  io::println(top.name + " " + first.name + " " + Str(s.len()) + " "
+      + Str(q.len()));
+  s.pop();
+  q.dequeue();
+  io::println(top.name + " " + first.name + " " + s.peek().name + " "
+      + q.peek().name);
+
+  lo = c::MinPriorityQueue<Str>();
+  hi = c::MaxPriorityQueue<Dog>();
+  lo.push("low", 1);
+  lo.push("high", 9);
+  hi.push(Dog("low"), 1);
+  hi.push(Dog("high"), 9);
+  best = hi.get();
+  hi.pop();
+  io::println(lo.get() + " " + lo.peek() + " " + best.name + " "
+      + hi.peek().name + " " + Str(hi.len()));
+
+  dogs.push(Dog("rex"));
+  dogs.push(Dog("fido"));
+  m.put("a", Dog("ann"));
+  l.pushBack(Dog("head"));
+  l.pushBack(Dog("tail"));
+  io::println(names(dogs, m, l, s, q, hi, Dog("stray")));
+  return 0;
+}

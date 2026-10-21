@@ -13,13 +13,16 @@
 // each holding one object that keeps all of its state (LinkedList is that
 // object itself), so assigning or passing a container names the same
 // container: a change through either name is seen through both.  Every index and
-// size is an `unsigned`: `len()` returns one, `get(i)` takes one, and
-// `indexOf` returns an `unsigned?`.  A container holds
+// size is an `unsigned`: `len()` returns one, `at(i)` and `get(i)` take one,
+// and `indexOf` returns an `unsigned?`.  A container holds
 // its own reference to each element it stores.  Elements are compared with
-// `==`, so a class compares by its `equals`.  A method that hands an element
-// out returns a copy (an object is then shared with the container).  A
-// broken precondition, such as `pop` on an empty container or an index out
-// of range, panics.
+// `==`, so a class compares by its `equals`.  An element is handed out two
+// ways: lent, as a `view` that stays the container's (`at`, `last`,
+// `front`, `back`, `peek`, `atOr`: `view fn`s, so a `view` of the container
+// reads with them), or as a copy the caller keeps (`get`, `getFront`,
+// `getBack`, `getOr`: not `view fn`s, since an object element is then
+// shared with the container).  A broken precondition, such as `pop` on an
+// empty container or an index out of range, panics.
 //
 // Names starting with `_` are private (docs/language/15-modules.md,
 // "Private to the module"): `_Entry`, `_Table`, `_Heap`, `_panic`, `_fail`,
@@ -77,7 +80,14 @@ impl List<T> {
   view fn isEmpty() -> bool           { return self.__items.len() == 0; }
 
   // Element `i`, for i < len(), as a `view`.
-  view fn get(i: unsigned) -> view T {
+  view fn at(i: unsigned) -> view T {
+    self.__check(i, self.__items.len());
+    return self.__items.at(i);
+  }
+
+  // A copy of element `i`, for i < len(), to keep (an object is shared with
+  // the list).
+  fn get(i: unsigned) -> T {
     self.__check(i, self.__items.len());
     return self.__items.get(i);
   }
@@ -97,7 +107,7 @@ impl List<T> {
     if n == 0 {
       _panic("pop from an empty List");
     }
-    v: T = self.__items.copyUnchecked(n - 1);
+    v: T = self.__items.get(n - 1);
     _check(self.__items.shrink(1));
     return v;
   }
@@ -108,7 +118,7 @@ impl List<T> {
     if n == 0 {
       _panic("last of an empty List");
     }
-    return self.__items.get(n - 1);
+    return self.__items.at(n - 1);
   }
 
   // Exchange elements `i` and `j`.
@@ -134,7 +144,7 @@ impl List<T> {
   fn removeAt(i: unsigned) -> T {
     n: unsigned = self.__items.len();
     self.__check(i, n);
-    v: T = self.__items.copyUnchecked(i);
+    v: T = self.__items.get(i);
     j: unsigned = i;
     while j < n - 1 {
       _check(self.__items.swap(j, j + 1));
@@ -149,7 +159,7 @@ impl List<T> {
     i: unsigned = 0;
     n: unsigned = self.__items.len();
     while i < n {
-      if self.__items.get(i) == v {
+      if self.__items.at(i) == v {
         return i;
       }
       i = i + 1;
@@ -195,7 +205,7 @@ impl List<T> {
     i: unsigned = 0;
     n: unsigned = self.__items.len();
     while i < n {
-      out.push(self.__items.get(i));
+      out.push(self.__items.at(i));
       i = i + 1;
     }
     return out;
@@ -226,7 +236,7 @@ fn listToString<T: Show>(xs: view List<T>) -> Str {
   i: unsigned = 0;
   while i < xs.len() {
     if i > 0 { out = out + ", "; }
-    out = out + xs.get(i).toString();
+    out = out + xs.at(i).toString();
     i = i + 1;
   }
   return out + "]";
@@ -339,6 +349,22 @@ impl LinkedList<T> {
     }
   }
 
+  // A copy of the first element, to keep.
+  fn getFront() -> T {
+    match self.__head {
+      n: _Node<T> { return n.value; }
+      None { return _fail<T>("getFront on an empty LinkedList"); }
+    }
+  }
+
+  // A copy of the last element, to keep.
+  fn getBack() -> T {
+    match self.__tail {
+      n: _Node<T> { return n.value; }
+      None { return _fail<T>("getBack on an empty LinkedList"); }
+    }
+  }
+
   // True when some element == v.
   view fn contains(v: view T) -> bool {
     weak cur = self.__head; // the cursor: no reference copied out of self
@@ -444,6 +470,14 @@ impl Stack<T> {
     return self.__list.front();
   }
 
+  // A copy of the top element, to keep.
+  fn get() -> T {
+    if self.__list.isEmpty() {
+      _panic("get from an empty Stack");
+    }
+    return self.__list.getFront();
+  }
+
   // Remove every element.
   fn clear()                  { self.__list.clear(); }
 
@@ -480,6 +514,14 @@ impl Queue<T> {
       _panic("peek at an empty Queue");
     }
     return self.__list.front();
+  }
+
+  // A copy of the front element, to keep.
+  fn get() -> T {
+    if self.__list.isEmpty() {
+      _panic("get from an empty Queue");
+    }
+    return self.__list.getFront();
   }
 
   // Remove every element.
@@ -533,29 +575,44 @@ impl _Table<K, V> {
       self.__rehash(self.__buckets.len() * 2);
     }
     b: unsigned = _bucket(h, self.__buckets.len());
-    _check(self.__buckets.set(b, _Entry<K,
-        V>(k, v, h, self.__buckets.copyUnchecked(b))));
+    _check(self.__buckets.set(b, _Entry<K, V>(k, v, h, self.__buckets.get(b))));
     self.__size = self.__size + 1;
     return True;
   }
 
   // The value of `k`, which must be a key, as a `view`.
-  view fn get(k: view K) -> view V {
+  view fn at(k: view K) -> view V {
     h: int = k.hash();
-    match self.__buckets.get(_bucket(h, self.__buckets.len())) {
+    match self.__buckets.at(_bucket(h, self.__buckets.len())) {
       e: _Entry<K, V> { return self.__valueIn(e, k, h); }
       None {
-        _panic("HashMap.get of a key it does not have");
+        _panic("HashMap.at of a key it does not have");
         return _unreachableView<V>(self);
       }
     }
   }
 
   // The value of `k`, or `otherwise` if it is not a key, as a `view`.
-  view fn getOr(k: view K, otherwise: view V) -> view V {
+  view fn atOr(k: view K, otherwise: view V) -> view V {
     h: int = k.hash();
-    match self.__buckets.get(_bucket(h, self.__buckets.len())) {
+    match self.__buckets.at(_bucket(h, self.__buckets.len())) {
       e: _Entry<K, V> { return self.__valueOr(e, k, h, otherwise); }
+      None { return otherwise; }
+    }
+  }
+
+  // A copy of the value of `k`, which must be a key, to keep.
+  fn get(k: view K) -> V {
+    match self.__find(k, k.hash()) {
+      e: _Entry<K, V> { return e.value; }
+      None { return _fail<V>("HashMap.get of a key it does not have"); }
+    }
+  }
+
+  // A copy of the value of `k`, or `otherwise` if it is not a key.
+  fn getOr(k: view K, otherwise: V) -> V {
+    match self.__find(k, k.hash()) {
+      e: _Entry<K, V> { return e.value; }
       None { return otherwise; }
     }
   }
@@ -563,7 +620,7 @@ impl _Table<K, V> {
   // True when `k` is a key.
   view fn containsKey(k: view K) -> bool {
     h: int = k.hash();
-    weak cur = self.__buckets.get(_bucket(h, self.__buckets.len()));
+    weak cur = self.__buckets.at(_bucket(h, self.__buckets.len()));
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -581,7 +638,7 @@ impl _Table<K, V> {
     h: int = k.hash();
     b: unsigned = _bucket(h, self.__buckets.len());
     prev: _Entry<K, V>? = None;
-    cur: _Entry<K, V>? = self.__buckets.copyUnchecked(b);
+    cur: _Entry<K, V>? = self.__buckets.get(b);
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -617,7 +674,7 @@ impl _Table<K, V> {
     out: List<K> = List<K>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
-      weak cur = self.__buckets.get(i); // no reference copied out of self
+      weak cur = self.__buckets.at(i); // no reference copied out of self
       while cur != None {
         match cur {
           e: _Entry<K, V> {
@@ -637,7 +694,7 @@ impl _Table<K, V> {
     out: List<V> = List<V>();
     i: unsigned = 0;
     while i < self.__buckets.len() {
-      weak cur = self.__buckets.get(i); // no reference copied out of self
+      weak cur = self.__buckets.at(i); // no reference copied out of self
       while cur != None {
         match cur {
           e: _Entry<K, V> {
@@ -661,7 +718,7 @@ impl _Table<K, V> {
     match e.next {
       n: _Entry<K, V> { return self.__valueIn(n, k, h); }
       None {
-        _panic("HashMap.get of a key it does not have");
+        _panic("HashMap.at of a key it does not have");
         return _unreachableView<V>(self);
       }
     }
@@ -681,10 +738,9 @@ impl _Table<K, V> {
   }
 
   // The entry of key `k`, whose hash is `h`, or None: for put(), which
-  // changes it.
+  // changes it, and for get().
   fn __find(k: view K, h: int) -> _Entry<K, V>? {
-    cur: _Entry<K, V>? =
-        self.__buckets.copyUnchecked(_bucket(h, self.__buckets.len()));
+    cur: _Entry<K, V>? = self.__buckets.get(_bucket(h, self.__buckets.len()));
     while True {
       match cur {
         e: _Entry<K, V> {
@@ -705,13 +761,13 @@ impl _Table<K, V> {
     self.__buckets = _buffer<_Entry<K, V>?>(n);
     i: unsigned = 0;
     while i < old.len() {
-      cur: _Entry<K, V>? = old.copyUnchecked(i);
+      cur: _Entry<K, V>? = old.get(i);
       while cur != None {
         match cur {
           e: _Entry<K, V> {
             cur = e.next;
             b: unsigned = _bucket(e.hash, n);
-            e.next = self.__buckets.copyUnchecked(b);
+            e.next = self.__buckets.get(b);
             _check(self.__buckets.set(b, e));
           }
           None { }
@@ -731,7 +787,7 @@ fn _bucket(h: int, n: unsigned) -> unsigned {
 // A hash table: each key is Hashable and maps to one value.  Two keys are
 // the same key when they are ==, and keys that are == must have equal
 // hash(): a class key implements both (`impl Hashable for` and `equals`).
-// `put`, `get`, `containsKey` and `remove` are O(1) on average.  The table
+// `put`, `at`, `get`, `containsKey` and `remove` are O(1) on average.  The table
 // keeps at most 3 entries for every 4 buckets, doubling when it would hold
 // more.  The order of keys() is the table's, not the insertion order.
 struct HashMap<K: Hashable, V> {
@@ -753,10 +809,18 @@ impl HashMap<K, V> {
   fn put(k: K, v: V) -> bool             { return self.__table.put(k, v); }
 
   // The value of `k`, which must be a key, as a `view`.
-  view fn get(k: view K) -> view V       { return self.__table.get(k); }
+  view fn at(k: view K) -> view V        { return self.__table.at(k); }
 
   // The value of `k`, or `otherwise` if it is not a key, as a `view`.
-  view fn getOr(k: view K, otherwise: view V) -> view V {
+  view fn atOr(k: view K, otherwise: view V) -> view V {
+    return self.__table.atOr(k, otherwise);
+  }
+
+  // A copy of the value of `k`, which must be a key, to keep.
+  fn get(k: view K) -> V                 { return self.__table.get(k); }
+
+  // A copy of the value of `k`, or `otherwise` if it is not a key.
+  fn getOr(k: view K, otherwise: V) -> V {
     return self.__table.getOr(k, otherwise);
   }
 
@@ -843,7 +907,7 @@ impl _Heap<T> {
 
   fn pop(what: view Str) -> T {
     self.__nonEmpty(what);
-    v: T = self.__values.copyUnchecked(0);
+    v: T = self.__values.get(0);
     last: unsigned = self.__values.len() - 1;
     self.__swap(0, last);
     _check(self.__values.shrink(1));
@@ -855,12 +919,17 @@ impl _Heap<T> {
 
   view fn peek() -> view T {
     self.__nonEmpty("peek");
+    return self.__values.at(0);
+  }
+
+  fn get() -> T {
+    self.__nonEmpty("get");
     return self.__values.get(0);
   }
 
   view fn peekPriority(what: view Str) -> int {
     self.__nonEmpty(what);
-    return self.__priorities.get(0);
+    return self.__priorities.at(0);
   }
 
   fn clear() {
@@ -872,13 +941,13 @@ impl _Heap<T> {
 
   // True when node `i` pops before node `j`.
   view fn __before(i: unsigned, j: unsigned) -> bool {
-    pi: int = self.__priorities.get(i);
-    pj: int = self.__priorities.get(j);
+    pi: int = self.__priorities.at(i);
+    pj: int = self.__priorities.at(j);
     if pi != pj {
       if self.__max { return pi > pj; }
       return pi < pj;
     }
-    return self.__order.get(i) < self.__order.get(j);
+    return self.__order.at(i) < self.__order.at(j);
   }
 
   fn __swap(i: unsigned, j: unsigned) {
@@ -948,6 +1017,9 @@ impl MinPriorityQueue<T> {
   // The element of lowest priority, as a `view`.
   view fn peek() -> view T          { return self.__heap.peek(); }
 
+  // A copy of it, to keep.
+  fn get() -> T                     { return self.__heap.get(); }
+
   // Its priority.
   view fn peekPriority() -> int {
     return self.__heap.peekPriority("peekPriority");
@@ -978,6 +1050,9 @@ impl MaxPriorityQueue<T> {
 
   // The element of highest priority, as a `view`.
   view fn peek() -> view T          { return self.__heap.peek(); }
+
+  // A copy of it, to keep.
+  fn get() -> T                     { return self.__heap.get(); }
 
   // Its priority.
   view fn peekPriority() -> int {

@@ -4,6 +4,6 @@ import ::collections;
 
 fn main() -> int {
   xs = collections::listOf([1, 2, 3]);
-  io::println(Str(xs.get(3)));
+  io::println(Str(xs.at(3)));
   return 0;
 }

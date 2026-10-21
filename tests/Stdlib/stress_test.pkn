@@ -22,7 +22,7 @@ fn same(l: view collections::LinkedList<int>,
   }
   i: unsigned = 0;
   while i < xs.len() {
-    if xs.get(i) != model.get(i) {
+    if xs.at(i) != model.at(i) {
       return False;
     }
     i = i + 1;
