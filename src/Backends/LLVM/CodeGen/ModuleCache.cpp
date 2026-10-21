@@ -29,8 +29,8 @@ namespace paykan::llvm_codegen {
 /// Link @p parts (main module first) into one module named @p name.
 StatusOr<std::unique_ptr<llvm::Module>>
 linkModules(const pir::Program &program,
-          std::vector<std::unique_ptr<llvm::Module>> parts,
-          const std::string &name) {
+            std::vector<std::unique_ptr<llvm::Module>> parts,
+            const std::string &name) {
   std::unique_ptr<llvm::Module> main = std::move(parts.front());
   main->setModuleIdentifier(name);
   for (size_t i = 1; i < parts.size(); ++i)
@@ -40,15 +40,14 @@ linkModules(const pir::Program &program,
   return std::move(main);
 }
 
-
 // -- Bitcode cache
 //
 // An imported module's LLVM IR depends only on its PIR text (which spells out
 // every layout and signature it uses from other modules) and on the compiler
 // that translates it, so that text is the cache key.  Entries live under
 // <projectRoot>/.paykan_cache/<module name as a path><extension>, stamped
-// with the key, which names the backend too; anything that does not parse or carries another key is
-// recompiled and rewritten.
+// with the key, which names the backend too; anything that does not parse or
+// carries another key is recompiled and rewritten.
 
 namespace {
 

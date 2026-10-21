@@ -57,8 +57,7 @@ public:
   }
 };
 
-template <typename Op>
-struct PIRPattern : public OpConversionPattern<Op> {
+template <typename Op> struct PIRPattern : public OpConversionPattern<Op> {
   using OpConversionPattern<Op>::OpConversionPattern;
   Type ptr() const { return llvmPtr(this->getContext()); }
   Value i64(ConversionPatternRewriter &r, Location loc, int64_t v) const {
@@ -71,22 +70,20 @@ struct PIRPattern : public OpConversionPattern<Op> {
 
 struct AllocaLowering : PIRPattern<P::AllocaOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::AllocaOp op, OpAdaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::AllocaOp op, OpAdaptor,
+                                ConversionPatternRewriter &r) const override {
     Type bytes = LLVM::LLVMArrayType::get(r.getI8Type(), op.getSize());
-    r.replaceOpWithNewOp<LLVM::AllocaOp>(
-        op, ptr(), bytes, i64(r, op.getLoc(), 1),
-        static_cast<unsigned>(op.getAlign()));
+    r.replaceOpWithNewOp<LLVM::AllocaOp>(op, ptr(), bytes,
+                                         i64(r, op.getLoc(), 1),
+                                         static_cast<unsigned>(op.getAlign()));
     return success();
   }
 };
 
 struct PtrLoadLowering : PIRPattern<P::PtrLoadOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::PtrLoadOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::PtrLoadOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     Type t = getTypeConverter()->convertType(op.getType());
     r.replaceOpWithNewOp<LLVM::LoadOp>(op, t, a.getPtr());
     return success();
@@ -95,9 +92,8 @@ struct PtrLoadLowering : PIRPattern<P::PtrLoadOp> {
 
 struct PtrStoreLowering : PIRPattern<P::PtrStoreOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::PtrStoreOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::PtrStoreOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     r.replaceOpWithNewOp<LLVM::StoreOp>(op, a.getValue(), a.getPtr());
     return success();
   }
@@ -105,9 +101,8 @@ struct PtrStoreLowering : PIRPattern<P::PtrStoreOp> {
 
 struct PtrAddLowering : PIRPattern<P::PtrAddOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::PtrAddOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::PtrAddOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     r.replaceOpWithNewOp<LLVM::GEPOp>(op, ptr(), r.getI8Type(), a.getPtr(),
                                       ValueRange(a.getOffset()));
     return success();
@@ -116,9 +111,8 @@ struct PtrAddLowering : PIRPattern<P::PtrAddOp> {
 
 struct MemCopyLowering : PIRPattern<P::MemCopyOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::MemCopyOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::MemCopyOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     // The bytes' alignment is not known: copied as unaligned.
     r.replaceOpWithNewOp<LLVM::MemmoveOp>(op, a.getDst(), a.getSrc(),
                                           a.getCount(), false);
@@ -128,9 +122,8 @@ struct MemCopyLowering : PIRPattern<P::MemCopyOp> {
 
 struct MemZeroLowering : PIRPattern<P::MemZeroOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::MemZeroOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::MemZeroOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     Value zero = LLVM::ConstantOp::create(r, op.getLoc(), r.getI8Type(),
                                           r.getI8IntegerAttr(0));
     r.replaceOpWithNewOp<LLVM::MemsetOp>(op, a.getDst(), zero, a.getCount(),
@@ -141,9 +134,8 @@ struct MemZeroLowering : PIRPattern<P::MemZeroOp> {
 
 struct AddressOfLowering : PIRPattern<P::AddressOfOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::AddressOfOp op, OpAdaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::AddressOfOp op, OpAdaptor,
+                                ConversionPatternRewriter &r) const override {
     r.replaceOpWithNewOp<LLVM::AddressOfOp>(op, ptr(), op.getSymbol());
     return success();
   }
@@ -151,9 +143,8 @@ struct AddressOfLowering : PIRPattern<P::AddressOfOp> {
 
 struct FnAddrLowering : PIRPattern<P::FnAddrOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::FnAddrOp op, OpAdaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::FnAddrOp op, OpAdaptor,
+                                ConversionPatternRewriter &r) const override {
     r.replaceOpWithNewOp<LLVM::AddressOfOp>(op, ptr(), op.getCallee());
     return success();
   }
@@ -161,9 +152,8 @@ struct FnAddrLowering : PIRPattern<P::FnAddrOp> {
 
 struct NullLowering : PIRPattern<P::NullOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::NullOp op, OpAdaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::NullOp op, OpAdaptor,
+                                ConversionPatternRewriter &r) const override {
     r.replaceOpWithNewOp<LLVM::ZeroOp>(op, ptr());
     return success();
   }
@@ -172,9 +162,8 @@ struct NullLowering : PIRPattern<P::NullOp> {
 /// A pointer cast: free between pointers, ptrtoint / inttoptr otherwise.
 struct CastLowering : PIRPattern<P::CastOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::CastOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::CastOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     Type to = getTypeConverter()->convertType(op.getType());
     Value v = a.getValue();
     bool fromPtr = isa<LLVM::LLVMPointerType>(v.getType());
@@ -193,9 +182,8 @@ struct CastLowering : PIRPattern<P::CastOp> {
 
 struct ICallLowering : PIRPattern<P::ICallOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::ICallOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::ICallOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     SmallVector<Type> params;
     for (Value v : a.getArgs())
       params.push_back(v.getType());
@@ -215,26 +203,24 @@ struct ICallLowering : PIRPattern<P::ICallOp> {
 
 struct SomeLowering : PIRPattern<P::SomeOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::SomeOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::SomeOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     Location loc = op.getLoc();
     Type t = getTypeConverter()->convertType(op.getType());
     Value s = LLVM::PoisonOp::create(r, loc, t);
-    Value present = LLVM::ConstantOp::create(r, loc, r.getI1Type(),
-                                             r.getBoolAttr(true));
+    Value present =
+        LLVM::ConstantOp::create(r, loc, r.getI1Type(), r.getBoolAttr(true));
     s = LLVM::InsertValueOp::create(r, loc, s, present, ArrayRef<int64_t>{0});
     r.replaceOpWithNewOp<LLVM::InsertValueOp>(op, s, a.getValue(),
-                                               ArrayRef<int64_t>{1});
+                                              ArrayRef<int64_t>{1});
     return success();
   }
 };
 
 struct NoneLowering : PIRPattern<P::NoneOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::NoneOp op, OpAdaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::NoneOp op, OpAdaptor,
+                                ConversionPatternRewriter &r) const override {
     r.replaceOpWithNewOp<LLVM::ZeroOp>(
         op, getTypeConverter()->convertType(op.getType()));
     return success();
@@ -243,22 +229,20 @@ struct NoneLowering : PIRPattern<P::NoneOp> {
 
 struct IsSomeLowering : PIRPattern<P::IsSomeOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::IsSomeOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::IsSomeOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     r.replaceOpWithNewOp<LLVM::ExtractValueOp>(op, a.getValue(),
-                                                ArrayRef<int64_t>{0});
+                                               ArrayRef<int64_t>{0});
     return success();
   }
 };
 
 struct UnwrapLowering : PIRPattern<P::UnwrapOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::UnwrapOp op, OpAdaptor a,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::UnwrapOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
     r.replaceOpWithNewOp<LLVM::ExtractValueOp>(op, a.getValue(),
-                                                ArrayRef<int64_t>{1});
+                                               ArrayRef<int64_t>{1});
     return success();
   }
 };
@@ -277,9 +261,8 @@ void constantGlobal(ConversionPatternRewriter &r, Operation *op, Type type,
 
 struct CStrLowering : PIRPattern<P::CStrOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::CStrOp op, OpAdaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::CStrOp op, OpAdaptor,
+                                ConversionPatternRewriter &r) const override {
     std::string data = op.getValue().str();
     data.push_back('\0');
     Type t = LLVM::LLVMArrayType::get(r.getI8Type(), data.size());
@@ -290,9 +273,8 @@ struct CStrLowering : PIRPattern<P::CStrOp> {
 
 struct DataLowering : PIRPattern<P::DataOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::DataOp op, OpAdaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::DataOp op, OpAdaptor,
+                                ConversionPatternRewriter &r) const override {
     ArrayRef<int64_t> words = op.getWords();
     auto shape = RankedTensorType::get({static_cast<int64_t>(words.size())},
                                        r.getI64Type());
@@ -305,9 +287,8 @@ struct DataLowering : PIRPattern<P::DataOp> {
 
 struct BytesLowering : PIRPattern<P::BytesOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::BytesOp op, OpAdaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::BytesOp op, OpAdaptor,
+                                ConversionPatternRewriter &r) const override {
     ArrayRef<int8_t> bytes = op.getBytes();
     auto shape = RankedTensorType::get({static_cast<int64_t>(bytes.size())},
                                        r.getI8Type());
@@ -321,9 +302,8 @@ struct BytesLowering : PIRPattern<P::BytesOp> {
 /// address is taken.
 template <typename Op> struct ExternGlobalLowering : PIRPattern<Op> {
   using PIRPattern<Op>::PIRPattern;
-  LogicalResult
-  matchAndRewrite(Op op, typename Op::Adaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(Op op, typename Op::Adaptor,
+                                ConversionPatternRewriter &r) const override {
     LLVM::GlobalOp::create(r, op.getLoc(), r.getI8Type(), /*isConstant=*/false,
                            LLVM::Linkage::External, op.getSymName(),
                            Attribute());
@@ -335,9 +315,8 @@ template <typename Op> struct ExternGlobalLowering : PIRPattern<Op> {
 /// A vtable: an array of function pointers, a null one for an abstract slot.
 struct VTableLowering : PIRPattern<P::VTableOp> {
   using PIRPattern::PIRPattern;
-  LogicalResult
-  matchAndRewrite(P::VTableOp op, OpAdaptor,
-                  ConversionPatternRewriter &r) const override {
+  LogicalResult matchAndRewrite(P::VTableOp op, OpAdaptor,
+                                ConversionPatternRewriter &r) const override {
     Location loc = op.getLoc();
     ArrayAttr entries = op.getEntries();
     Type t = LLVM::LLVMArrayType::get(ptr(), entries.size());
@@ -389,8 +368,8 @@ struct ConvertToLLVMPass
                  ICallLowering, SomeLowering, NoneLowering, IsSomeLowering,
                  UnwrapLowering, CStrLowering, DataLowering, BytesLowering,
                  ExternGlobalLowering<P::ExternObjectOp>,
-                 ExternGlobalLowering<P::ExternVTableOp>, VTableLowering>(
-        types, ctx);
+                 ExternGlobalLowering<P::ExternVTableOp>, VTableLowering>(types,
+                                                                          ctx);
     // Each nested module (one per PIR module) on its own.
     FrozenRewritePatternSet frozen(std::move(patterns));
     for (ModuleOp m : modules())
