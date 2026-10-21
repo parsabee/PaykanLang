@@ -453,10 +453,12 @@ ModuleResolver::loadCode(const std::string &canonical) const {
 std::span<const uint8_t>
 ModuleResolver::templates(const std::string &canonical) const {
   auto it = Entries.find(canonical);
-  if (it == Entries.end() || it->second->State != Entry::State::Loaded ||
-      !it->second->File)
+  if (it == Entries.end())
     return {};
-  return it->second->File->section(pkm::Kind::Tmpl);
+  const Entry &e = *it->second;
+  if (e.State != Entry::State::Loaded || !e.File)
+    return {};
+  return e.File->section(pkm::Kind::Tmpl);
 }
 
 std::string ModuleResolver::displayPath(const std::string &canonical) const {
