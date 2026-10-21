@@ -33,15 +33,11 @@ translateProgram(const pir::Program &program, llvm::LLVMContext &ctx,
                  const std::string &moduleName);
 
 /// Translate a whole program into one linked LLVM module, serving imported
-/// modules from the bitcode cache under <projectRoot>/.paykan_cache when
-/// their PIR is unchanged (and refreshing the cache otherwise).  The main
-/// module is never cached.
+/// modules from the bitcode cache under <projectRoot>/.paykan_cache
+/// (<module>.bc) when their PIR is unchanged (and refreshing the cache
+/// otherwise).  The main module is never cached.
 StatusOr<std::unique_ptr<llvm::Module>>
 compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
                const std::string &moduleName, const std::string &projectRoot);
-
-/// Run LLVM's default optimisation pipeline at -O<level> (0 = none; levels
-/// above 3 are clamped to 3).
-void optimizeModule(llvm::Module &module, unsigned level);
 
 } // namespace paykan::backend::llvm_backend

@@ -19,7 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scf.if` / `scf.while` with an exit flag, objects get their C layouts, and every symbol a
   link name that is a C identifier.  The `pir-mlir` test suite imports every item and
   instruction of PIR and every sample program, checks that the MLIR verifies and parses back
-  to the same text, and that the shared lowering leaves only those ops.
+  to the same text, and that the shared lowering leaves only those ops.  Then the LLVM path
+  (`--emit-mlir=llvm`): upstream conversions take func, scf, cf and arith to the LLVM
+  dialect and a pattern each the remaining pir ops, MLIR translates it to LLVM IR, and
+  `--backend=mlir` runs programs with the JIT and builds them as the llvm backend does, its
+  imported modules cached as `<module>.mlir.bc`.  Every test suite that runs programs runs
+  on it too (CodeGenTests.mlir, DriverTests.mlir, the samples, the standard library's tests,
+  the documentation's examples).  The JIT, the bitcode cache and native builds are a library
+  both LLVM backends share (src/Backends/LLVM/CodeGen).
 
 ### Changed
 

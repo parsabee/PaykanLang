@@ -320,7 +320,7 @@ void printUsage(std::ostream &os, const char *argv0) {
         "stdout\n"
      << "                      (pir: the imported PIR dialect; scf: after "
         "the shared\n"
-     << "                      lowering)\n"
+     << "                      lowering; llvm: the LLVM dialect)\n"
      << "  --frontend=<name> - Parse with the named frontend "
         "(--list-frontends)\n"
      << "  --backend=<name>  - Generate code with the named backend "

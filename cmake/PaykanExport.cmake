@@ -49,10 +49,10 @@ set(PAYKAN_EXPORT_TARGETS
 )
 get_property(PAYKAN_PLUGIN_TARGETS_LIST GLOBAL PROPERTY PAYKAN_PLUGIN_TARGETS)
 list(APPEND PAYKAN_EXPORT_TARGETS ${PAYKAN_PLUGIN_TARGETS_LIST})
-# The LLVM backend's private dependency is exported with it, and the MLIR
+# The LLVM backends' shared libraries are exported with them, and the MLIR
 # backend's dialect with that backend.
 if(TARGET paykan_jit)
-    list(APPEND PAYKAN_EXPORT_TARGETS paykan_jit)
+    list(APPEND PAYKAN_EXPORT_TARGETS paykan_jit paykan_llvm_codegen)
 endif()
 if(TARGET paykan_mlir_pir_dialect)
     list(APPEND PAYKAN_EXPORT_TARGETS paykan_mlir_pir_dialect)
