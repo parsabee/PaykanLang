@@ -37,12 +37,18 @@ std::unique_ptr<mlir::MLIRContext> createContext();
 /// ones) from the imported pir dialect up to @p stage.
 Status lowerTo(mlir::ModuleOp module, Stage stage);
 
+/// The whole program imported into the pir dialect (importProgram), without
+/// what its `main` cannot reach (dropUnreachable): where every output of a
+/// program starts.
+StatusOr<mlir::OwningOpRef<mlir::ModuleOp>>
+importReachable(const pir::Program &program, mlir::MLIRContext &ctx);
+
 /// The whole program as one C translation unit, on @p os.
 Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os);
 
 /// The whole program in LLVM IR, one linked module named @p moduleName;
 /// imported modules are served from the bitcode cache under @p projectRoot
-/// (<module>.bc) when their PIR is unchanged.
+/// (<module>.bc) when what is left of them is unchanged.
 StatusOr<std::unique_ptr<llvm::Module>>
 compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
                const std::string &moduleName, const std::string &projectRoot);

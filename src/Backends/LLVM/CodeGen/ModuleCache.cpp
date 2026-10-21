@@ -9,7 +9,6 @@
 #include "Names.h"
 #include "Runtime.h"
 #include "Version.h"
-#include "paykan/pir/Printer.h"
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -42,12 +41,13 @@ linkModules(const pir::Program &program,
 
 // -- Bitcode cache
 //
-// An imported module's LLVM IR depends only on its PIR text (which spells out
-// every layout and signature it uses from other modules) and on the compiler
-// that translates it, so that text is the cache key.  Entries live under
-// <projectRoot>/.paykan_cache/<module name as a path><extension>, stamped
-// with the key, which names the backend too; anything that does not parse or
-// carries another key is recompiled and rewritten.
+// An imported module's LLVM IR depends only on what the backend translates
+// it from (the text of the part of its PIR the program uses, which spells
+// out every layout and signature it uses from other modules) and on the
+// compiler that translates it, so that text is the cache key.  Entries live
+// under <projectRoot>/.paykan_cache/<module name as a path><extension>,
+// stamped with the key, which names the backend too; anything that does not
+// parse or carries another key is recompiled and rewritten.
 
 namespace {
 
@@ -74,9 +74,9 @@ llvm::StringRef compilerBuildId() {
   return id;
 }
 
-std::string cacheKey(const pir::Module &module, llvm::StringRef backend) {
+std::string cacheKey(llvm::StringRef text, llvm::StringRef backend) {
   llvm::SHA256 hasher;
-  hasher.update(pir::toString(module));
+  hasher.update(text);
   hasher.update("|backend ");
   hasher.update(backend);
   hasher.update("|paykan ");
@@ -173,14 +173,15 @@ std::unique_ptr<llvm::Module> loadCached(const std::string &path,
 StatusOr<std::unique_ptr<llvm::Module>>
 compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
                const std::string &moduleName, const std::string &projectRoot,
-               const ModuleCache &cache, const TranslateModule &translate) {
+               const ModuleCache &cache, const ModuleText &text,
+               const TranslateModule &translate) {
   if (program.Modules.empty())
     return Status::error("empty PIR program");
   std::vector<std::unique_ptr<llvm::Module>> parts;
   for (size_t i = 0; i < program.Modules.size(); ++i) {
     if (i > 0) {
       const pir::Module &module = program.Modules[i];
-      std::string key = cacheKey(module, cache.Backend);
+      std::string key = cacheKey(text(i), cache.Backend);
       std::string path = cachePath(module.Name, projectRoot, cache.Extension);
       if (auto cached = loadCached(path, key, ctx)) {
         parts.push_back(std::move(cached));

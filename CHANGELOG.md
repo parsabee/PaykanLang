@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry records the templates' hash of every module it imports, so editing a generic body
   recompiles the modules that may hold a copy of it.  `--emit-pkm --module-name=<name>`
   names the module the file records.
+- The mlir backend drops what a program's `main` cannot reach before it lowers anything
+  (docs/design/mlir-backend.md, "Unreachable code"): MLIR's symbol DCE on the imported `pir`
+  dialect, run until nothing changes, with the declarations of other modules' functions and
+  the classes ops name given to it between runs.  An executable, and what `run` compiles,
+  hold only the code the program uses; `--emit-llvm`, `--emit-c` and `--emit-mlir` print that.
+  A module's cached LLVM IR is keyed on the part of it the program uses.
 
 ### Changed
 

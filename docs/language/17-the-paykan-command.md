@@ -120,7 +120,10 @@ fn @"$::io::println<Str>"(%value.1: box) -> void {
 
 A backend turns the compiled program into something that runs. PaykanLang has one,
 **`mlir`**, the default, which every build has. It takes the program through MLIR, where one
-lowering serves two targets ([the MLIR backend](../design/mlir-backend.md)):
+lowering serves two targets ([the MLIR backend](../design/mlir-backend.md)). It first drops
+what the program's `main` cannot reach, so neither target compiles, and no executable holds,
+the parts of a module (the standard library's, say) the program does not use; `--emit-pir`
+and module files keep all of them.
 
 - **LLVM IR.** `run` executes the program in-process with LLVM's JIT compiler, with no C
   compiler involved; `build` writes a native object and links it against the runtime with
@@ -156,8 +159,8 @@ a class or a signature also recompiles the modules that use it. A module's entry
 generic templates too, and its own copies of the instantiations of other modules' templates
 it uses (`collections::List<int>`), so editing a generic body recompiles every module that
 imports its module, directly or not. The mlir backend also caches each imported module's LLVM IR there, as bitcode
-(`.paykan_cache/a/b.bc`), and translates the module again only when its PIR or the
-compiler changed.
+(`.paykan_cache/a/b.bc`), and translates the module again only when the part of it the
+program uses or the compiler changed.
 
 The cache is safe to share and to delete:
 
