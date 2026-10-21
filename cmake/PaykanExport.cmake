@@ -42,6 +42,7 @@ set(PAYKAN_EXPORT_TARGETS
     paykan_pir
     paykan_backend
     paykan_backend_toolchain
+    paykan_c_build
     paykan_lowering
     paykan_runtime
     paykan_plugin_host

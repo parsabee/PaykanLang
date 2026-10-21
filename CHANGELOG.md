@@ -26,7 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   imported modules cached as `<module>.mlir.bc`.  Every test suite that runs programs runs
   on it too (CodeGenTests.mlir, DriverTests.mlir, the samples, the standard library's tests,
   the documentation's examples).  The JIT, the bitcode cache and native builds are a library
-  both LLVM backends share (src/Backends/LLVM/CodeGen).
+  both LLVM backends share (src/Backends/LLVM/CodeGen).  And the C path
+  (`--emit-mlir=emitc`): upstream conversions take func, scf and arith to EmitC and a pattern
+  each the remaining pir ops, MLIR's C emitter prints it, and `--backend=mlir-c` builds and
+  runs that C with the system compiler as the c backend does its own (`paykan
+  --backend=mlir-c --emit-c prog.pkn` prints it).  Its C is strict C11 like the c backend's
+  (CStrictC11.mlir-c), and the suites that run programs run on it too.  Building C one
+  cached object per module is a library both C backends share (paykan/backends/c/CBuild.h).
 
 ### Changed
 

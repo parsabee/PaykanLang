@@ -524,7 +524,8 @@ def PIR_AllocaOp : PIR_Op<"alloca"> {
     read and written with `pir.ptr_load` and `pir.ptr_store`.
   }];
   let arguments = (ins I64Attr:$size, I64Attr:$align, StrAttr:$name);
-  let results = (outs PIR_PtrType:$result);
+  // Allocates its result: an unused slot is dead.
+  let results = (outs Res<PIR_PtrType, "", [MemAlloc]>:$result);
   let assemblyFormat = "$name `,` $size `,` $align attr-dict";
 }
 
@@ -549,14 +550,14 @@ def PIR_LocalAddrOp : PIR_Op<"local_addr", [Pure]> {
   let assemblyFormat = "$slot attr-dict `:` qualified(type($slot))";
 }
 
-def PIR_PtrLoadOp : PIR_Op<"ptr_load"> {
+def PIR_PtrLoadOp : PIR_Op<"ptr_load", [MemoryEffects<[MemRead]>]> {
   let summary = "read a value through an address";
   let arguments = (ins PIR_PtrType:$ptr);
   let results = (outs PIR_Value:$result);
   let assemblyFormat = "$ptr attr-dict `:` type($result)";
 }
 
-def PIR_PtrStoreOp : PIR_Op<"ptr_store"> {
+def PIR_PtrStoreOp : PIR_Op<"ptr_store", [MemoryEffects<[MemWrite]>]> {
   let summary = "write a value through an address";
   let arguments = (ins PIR_PtrType:$ptr, PIR_Value:$value);
   let assemblyFormat = "$value `,` $ptr attr-dict `:` type($value)";
@@ -569,13 +570,14 @@ def PIR_PtrAddOp : PIR_Op<"ptr_add", [Pure]> {
   let assemblyFormat = "$ptr `,` $offset attr-dict";
 }
 
-def PIR_MemCopyOp : PIR_Op<"memcopy"> {
+def PIR_MemCopyOp : PIR_Op<"memcopy",
+    [MemoryEffects<[MemRead, MemWrite]>]> {
   let summary = "copy bytes; the two ranges may overlap";
   let arguments = (ins PIR_PtrType:$dst, PIR_PtrType:$src, I64:$count);
   let assemblyFormat = "$dst `,` $src `,` $count attr-dict";
 }
 
-def PIR_MemZeroOp : PIR_Op<"memzero"> {
+def PIR_MemZeroOp : PIR_Op<"memzero", [MemoryEffects<[MemWrite]>]> {
   let arguments = (ins PIR_PtrType:$dst, I64:$count);
   let assemblyFormat = "$dst `,` $count attr-dict";
 }

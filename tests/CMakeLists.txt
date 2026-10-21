@@ -114,6 +114,18 @@ foreach(fe IN LISTS PAYKAN_FRONTENDS)
 endforeach()
 endif()
 
+# The backends that run programs, each of which the codegen, driver and
+# samples tests run on: the built ones, and with `mlir` its C path, `mlir-c`.
+set(PAYKAN_RUN_BACKENDS "")
+foreach(be IN LISTS PAYKAN_BACKENDS)
+    if(be STREQUAL "llvm" OR be STREQUAL "mlir" OR be STREQUAL "c")
+        list(APPEND PAYKAN_RUN_BACKENDS ${be})
+    endif()
+    if(be STREQUAL "mlir")
+        list(APPEND PAYKAN_RUN_BACKENDS mlir-c)
+    endif()
+endforeach()
+
 # --- CodeGen / E2E tests, every backend (codegen) ----------------------------
 paykan_test_suite(codegen PAYKAN_TEST_SUITE_codegen)
 if(PAYKAN_TEST_SUITE_codegen)
@@ -196,12 +208,10 @@ if("mlir" IN_LIST PAYKAN_BACKENDS)
     )
 endif()
 paykan_link_plugins(codegen_tests)
-foreach(be IN LISTS PAYKAN_BACKENDS)
-    if(be STREQUAL "llvm" OR be STREQUAL "mlir" OR be STREQUAL "c")
-        add_test(NAME CodeGenTests.${be} COMMAND codegen_tests)
-        set_tests_properties(CodeGenTests.${be} PROPERTIES
-            ENVIRONMENT "PAYKAN_TEST_BACKEND=${be}")
-    endif()
+foreach(be IN LISTS PAYKAN_RUN_BACKENDS)
+    add_test(NAME CodeGenTests.${be} COMMAND codegen_tests)
+    set_tests_properties(CodeGenTests.${be} PROPERTIES
+        ENVIRONMENT "PAYKAN_TEST_BACKEND=${be}")
 endforeach()
 endif()
 
@@ -522,15 +532,13 @@ if(PAYKAN_COVERAGE)
     target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_COVERAGE=1)
 endif()
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).
-foreach(be IN LISTS PAYKAN_BACKENDS)
-    if(be STREQUAL "llvm" OR be STREQUAL "mlir" OR be STREQUAL "c")
-        add_test(NAME DriverTests.${be} COMMAND driver_tests)
-        # No plugins from the plugin directories: the listings these tests
-        # check exactly are the build's own (tests/Plugin/LoaderTests.cpp
-        # covers discovery).
-        set_tests_properties(DriverTests.${be} PROPERTIES
-            ENVIRONMENT "PAYKAN_TEST_BACKEND=${be};PAYKAN_NO_PLUGINS=1")
-    endif()
+foreach(be IN LISTS PAYKAN_RUN_BACKENDS)
+    add_test(NAME DriverTests.${be} COMMAND driver_tests)
+    # No plugins from the plugin directories: the listings these tests
+    # check exactly are the build's own (tests/Plugin/LoaderTests.cpp
+    # covers discovery).
+    set_tests_properties(DriverTests.${be} PROPERTIES
+        ENVIRONMENT "PAYKAN_TEST_BACKEND=${be};PAYKAN_NO_PLUGINS=1")
 endforeach()
 endif()
 
@@ -554,10 +562,8 @@ endfunction()
 # The samples corpus on every backend that runs programs: identical stdout,
 # exit codes and zero live heap blocks (scripts/samples_parity.py) (samples).
 set(PAYKAN_SAMPLES_BACKENDS "")
-foreach(be IN LISTS PAYKAN_BACKENDS)
-    if(be STREQUAL "llvm" OR be STREQUAL "mlir" OR be STREQUAL "c")
-        list(APPEND PAYKAN_SAMPLES_BACKENDS --backend ${be})
-    endif()
+foreach(be IN LISTS PAYKAN_RUN_BACKENDS)
+    list(APPEND PAYKAN_SAMPLES_BACKENDS --backend ${be})
 endforeach()
 paykan_test_suite(samples PAYKAN_TEST_SUITE_samples)
 if(PAYKAN_TEST_SUITE_samples AND PAYKAN_SAMPLES_BACKENDS)
@@ -616,7 +622,7 @@ if(PAYKAN_TEST_SUITE_stdlib AND PAYKAN_SAMPLES_BACKENDS)
     endif()
 endif()
 
-# The C backend's output is strict ISO C11 (docs/c-backend.md): every
+# The C backends' output is strict ISO C11 (docs/c-backend.md): every
 # sample's C compiles with -std=c11 -pedantic-errors -Wall -Wextra -Werror on
 # every C compiler found (GCC and Clang), at -O0 and -O2, and runs exactly
 # like `paykan --backend=c run` (scripts/c_strict.py).  `paykan build` is
@@ -643,6 +649,16 @@ if(PAYKAN_TEST_SUITE_c_strict AND "c" IN_LIST PAYKAN_BACKENDS)
         if(TEST CStrictC11)
             set_tests_properties(CStrictC11 PROPERTIES
                 RESOURCE_LOCK paykan_samples_cache)
+        endif()
+        # The mlir backend's C path is held to the same standard.
+        if("mlir-c" IN_LIST PAYKAN_RUN_BACKENDS)
+            paykan_add_python_test(CStrictC11.mlir-c c_strict.py
+                        --backend mlir-c
+                        --paykan $<TARGET_FILE:paykan> ${PAYKAN_STRICT_CCS})
+            if(TEST CStrictC11.mlir-c)
+                set_tests_properties(CStrictC11.mlir-c PROPERTIES
+                    RESOURCE_LOCK paykan_samples_cache)
+            endif()
         endif()
     endif()
 endif()

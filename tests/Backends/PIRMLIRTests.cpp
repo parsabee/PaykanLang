@@ -10,6 +10,8 @@
 #include "Import/PIRImport.h"
 #include "Lowering/PIRToStandard.h"
 #include "PIR/Programs.h"
+#include "Pipeline.h"
+#include "ToEmitC/ToEmitC.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Verifier.h"
 
@@ -25,6 +27,7 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -104,6 +107,49 @@ void expectOnlyStandardOps(mlir::ModuleOp mod) {
   });
 }
 
+/// The PIR @p text through the C path: lowered to EmitC (left in @p emitc,
+/// with its own context in @p ctx) and printed as C ("" on failure, with
+/// the reason in @p err).
+std::string emitCText(const std::string &text,
+                      std::unique_ptr<mlir::MLIRContext> &ctx,
+                      mlir::OwningOpRef<mlir::ModuleOp> &emitc,
+                      std::string &err) {
+  pir::ParseError perr;
+  auto program = pir::parseProgram(text, perr);
+  if (!program) {
+    err = "parse error: " + perr.str();
+    return "";
+  }
+  ctx = mlir_backend::createContext();
+  auto mod = mlir_backend::importProgram(*program, *ctx);
+  if (!mod) {
+    err = mod.status().message();
+    return "";
+  }
+  emitc = std::move(*mod);
+  if (Status s = mlir_backend::lowerTo(*emitc, mlir_backend::Stage::EmitC);
+      !s) {
+    err = s.message();
+    return "";
+  }
+  std::string c;
+  llvm::raw_string_ostream os(c);
+  if (Status s = mlir_backend::translateToC(*emitc, os); !s) {
+    err = s.message();
+    return "";
+  }
+  return c;
+}
+
+/// Every op of @p mod is EmitC's: the C path left nothing else.
+void expectOnlyEmitCOps(mlir::ModuleOp mod) {
+  mod.walk([&](mlir::Operation *op) {
+    llvm::StringRef dialect = op->getName().getDialectNamespace();
+    EXPECT_TRUE(dialect == "emitc" || mlir::isa<mlir::ModuleOp>(op))
+        << op->getName().getStringRef().str();
+  });
+}
+
 /// @p mlir parses back, verifies and prints as @p mlir.
 void expectRoundTrip(const std::string &mlir, mlir::MLIRContext &ctx) {
   auto parsed = mlir::parseSourceString<mlir::ModuleOp>(mlir, &ctx);
@@ -142,6 +188,37 @@ TEST(PIRMLIR, SharedLoweringOfEveryItemAndInstruction) {
         "func.func private @pk_lib_Shelper"})
     EXPECT_NE(mlir.find(text), std::string::npos) << text << "\n" << mlir;
   expectRoundTrip(mlir, ctx);
+}
+
+// The C path: every pir op the shared lowering keeps has its EmitC, and the
+// unit around it is C's (Runtime.h, the optionals' structs, the vtables as
+// PaykanMethod arrays, C's main() calling the program's).
+TEST(PIRMLIR, EmitCOfEveryItemAndInstruction) {
+  std::unique_ptr<mlir::MLIRContext> ctx;
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string err;
+  std::string c = emitCText(pir::test::kProgram, ctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod);
+  for (const char *text :
+       {"#include \"Runtime.h\"",
+        "typedef struct { bool present; int64_t value; } pkrt_opt_i64;",
+        "PaykanMethod pkvt_main_SPoint[", "(PaykanMethod)pk_main_SPoint__",
+        "extern PaykanMethod pkvt_lib_SAdder[];",
+        "static const char pk_main_S_2Estr0[7] = \"Hello\\n\";",
+        "static int64_t paykan_main(void);", "int main(int argc, char **argv)",
+        "int64_t rc = paykan_main();"})
+    EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
+  // The runtime's functions are Runtime.h's: never declared here.
+  EXPECT_EQ(c.find("PaykanString_new("), c.find("PaykanString_new(v")) << c;
+  // C11 spells an empty parameter list (void): no declaration or
+  // definition (a top-level line) has `()`.
+  std::istringstream lines(c);
+  for (std::string line; std::getline(lines, line);) {
+    if (line.empty() || line[0] == ' ')
+      continue;
+    EXPECT_EQ(line.find("()"), std::string::npos) << line;
+  }
 }
 
 TEST(PIRMLIR, LinkNamesAreCIdentifiers) {
@@ -195,6 +272,12 @@ TEST(PIRMLIR, EverySample) {
     ASSERT_TRUE(lowered) << err;
     expectOnlyStandardOps(*lowered);
     expectRoundTrip(print(*lowered), ctx);
+    // And through the C path (CStrictC11 compiles and runs the C).
+    std::unique_ptr<mlir::MLIRContext> cctx;
+    mlir::OwningOpRef<mlir::ModuleOp> emitc;
+    std::string c = emitCText(pirText, cctx, emitc, err);
+    ASSERT_FALSE(c.empty()) << err;
+    expectOnlyEmitCOps(*emitc);
   }
 }
 

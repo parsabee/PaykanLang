@@ -93,6 +93,35 @@ static std::string backendFlag() {
 // The paykan command running programs on the test backend.
 static std::string paykanRun() { return std::string(kPaykan) + backendFlag(); }
 
+// Whether the test backend builds C with the system compiler (c, or the
+// mlir backend's C path, mlir-c), whose objects the C object cache holds.
+static bool testBackendIsC() {
+  return testBackend() == "c" || testBackend() == "mlir-c";
+}
+
+// The backends that run programs, of those this build has: what
+// `paykan --list-backends` lists (`<name>: <description>`, or
+// `<name> (default)`).
+static std::vector<std::string> runBackends() {
+  std::string listing =
+      run(std::string(kPaykan) + " --no-plugins --list-backends 2>&1").out;
+  std::vector<std::string> out;
+  for (const std::string be : {"llvm", "mlir", "mlir-c", "c"}) {
+    size_t at = 0;
+    while ((at = listing.find(be, at)) != std::string::npos) {
+      bool lineStart = at == 0 || listing[at - 1] == '\n';
+      char after =
+          at + be.size() < listing.size() ? listing[at + be.size()] : '\n';
+      if (lineStart && (after == ':' || after == ' ' || after == '\n')) {
+        out.push_back(be);
+        break;
+      }
+      at += be.size();
+    }
+  }
+  return out;
+}
+
 // -- The --check-only flag
 
 TEST(Driver, CheckOnlySucceedsOnValidInput) {
@@ -823,12 +852,9 @@ TEST(Driver, PanicExitStatusIsTheSameOnEveryBackend) {
     std::ofstream ofs(src);
     ofs << "fn main() -> int { z: int = 0; return 7 / z; }";
   }
-  auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
+  auto backends = runBackends();
   int ran = 0;
-  for (const std::string be : {"llvm", "mlir", "c"}) {
-    if (backends.find(be + "\n") == std::string::npos &&
-        backends.find(be + " ") == std::string::npos)
-      continue;
+  for (const std::string &be : backends) {
     ++ran;
     int st = rawWaitStatus({kPaykan, "--backend=" + be, src});
     EXPECT_TRUE(WIFEXITED(st)) << be << ": killed by signal " << WTERMSIG(st);
@@ -848,7 +874,7 @@ TEST(Driver, PanicExitStatusIsTheSameOnEveryBackend) {
         << be << ": wait status " << st;
   }
   std::filesystem::remove_all(dir);
-  EXPECT_GT(ran, 0) << backends;
+  EXPECT_GT(ran, 0);
 }
 
 // A panic flushes the program's stdout before printing its message and
@@ -886,12 +912,9 @@ TEST(Driver, PanicFlushesStdoutOnEveryBackend) {
        "paykan: char<int>(300): the value is outside the char range 0..255"},
   };
   const std::string before = "first line\nabout to panic...\n";
-  auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
+  auto backends = runBackends();
   int ran = 0;
-  for (const std::string be : {"llvm", "mlir", "c"}) {
-    if (backends.find(be + "\n") == std::string::npos &&
-        backends.find(be + " ") == std::string::npos)
-      continue;
+  for (const std::string &be : backends) {
     ++ran;
     for (const auto &c : cases) {
       auto src = (dir / (std::string(c.name) + ".pkn")).string();
@@ -931,7 +954,7 @@ TEST(Driver, PanicFlushesStdoutOnEveryBackend) {
     }
   }
   std::filesystem::remove_all(dir);
-  EXPECT_GT(ran, 0) << backends;
+  EXPECT_GT(ran, 0);
 }
 
 // A panic also flushes what the program has written to a File (#92).
@@ -1062,10 +1085,20 @@ TEST(Driver, EmitMLIRPrintsEachStage) {
   EXPECT_EQ(rcLLVM, 0) << outLLVM;
   EXPECT_NE(outLLVM.find("llvm.func @main() -> i64"), std::string::npos)
       << outLLVM;
+  // EmitC: the program's main as paykan_main, and C's main() calling it.
+  auto [rcEmitC, outEmitC] =
+      run(std::string(kPaykan) + " --emit-mlir=emitc " + src + " 2>&1");
+  EXPECT_EQ(rcEmitC, 0) << outEmitC;
+  EXPECT_NE(outEmitC.find("emitc.func private @paykan_main() -> i64"),
+            std::string::npos)
+      << outEmitC;
+  EXPECT_NE(outEmitC.find("int main(int argc, char **argv)"), std::string::npos)
+      << outEmitC;
   auto [rcC, outC] = run(std::string(kPaykan) +
                          " --backend=c --emit-mlir=pir " + src + " 2>&1");
   EXPECT_NE(rcC, 0) << outC;
-  EXPECT_NE(outC.find("--emit-mlir needs the mlir backend"), std::string::npos)
+  EXPECT_NE(outC.find("--emit-mlir needs the mlir or mlir-c backend"),
+            std::string::npos)
       << outC;
   auto [rcStage, outStage] =
       run(std::string(kPaykan) + " --emit-mlir=bogus " + src + " 2>&1");
@@ -1202,7 +1235,9 @@ TEST(Driver, EmitCRejectsAnotherBackend) {
       run(std::string(kPaykan) + " --backend=llvm --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
-  EXPECT_NE(out.find("--emit-c needs the c backend"), std::string::npos) << out;
+  EXPECT_NE(out.find("--emit-c needs the c or mlir-c backend"),
+            std::string::npos)
+      << out;
 }
 
 // Float `!=` is IEEE's unordered not-equal (true for a NaN operand) and the
@@ -1215,31 +1250,34 @@ TEST(Driver, FloatNotEqualIsUnorderedOnEveryBackend) {
       "inf - inf;"
       " io::println(Str<bool>(n != n) + Str<bool>(n == n) + Str<bool>(n < 1.0)"
       " + Str<bool>(1.0 != n) + Str<bool>(1.0 != 1.0)); return 0; }");
-  auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
+  // `paykan --backend=<be> <flags> <src>`
+  auto paykanOn = [&](const std::string &be, const std::string &flags) {
+    return run(std::string(kPaykan) + " --backend=" + be + flags + " " + src +
+               " 2>&1");
+  };
+  auto backends = runBackends();
   int ran = 0;
-  for (const char *be : {"llvm", "mlir", "c"}) {
-    if (backends.find(std::string(be) + "\n") == std::string::npos &&
-        backends.find(std::string(be) + " ") == std::string::npos)
-      continue;
+  for (const std::string &be : backends) {
     ++ran;
-    auto [rc, out] =
-        run(std::string(kPaykan) + " --backend=" + be + " " + src + " 2>&1");
+    auto [rc, out] = paykanOn(be, "");
     EXPECT_EQ(rc, 0) << be << ": " << out;
     EXPECT_EQ(out, "TrueFalseFalseTrueFalse\n") << be;
     // At -O0: the default -O2 folds the comparisons of constants away.
-    auto [srcRc, code] = run(std::string(kPaykan) + " --backend=" + be +
-                             " -O0 --emit-source " + src + " 2>&1");
+    auto [srcRc, code] = paykanOn(be, " -O0 --emit-source");
     EXPECT_EQ(srcRc, 0) << be << ": " << code;
-    if (std::string(be) != "c") { // LLVM IR
-      EXPECT_NE(code.find("fcmp une double"), std::string::npos) << code;
-      EXPECT_EQ(code.find("fcmp one"), std::string::npos) << code;
-    } else {
+    if (be == "c") {
       EXPECT_NE(code.find("_n != v"), std::string::npos) << code;
       EXPECT_EQ(code.find(" || "), std::string::npos) << code;
+    } else if (be == "mlir-c") { // C's own `!=`, no NaN test of its own
+      EXPECT_NE(code.find(" != "), std::string::npos) << code;
+      EXPECT_EQ(code.find(" || "), std::string::npos) << code;
+    } else { // LLVM IR
+      EXPECT_NE(code.find("fcmp une double"), std::string::npos) << code;
+      EXPECT_EQ(code.find("fcmp one"), std::string::npos) << code;
     }
   }
   std::filesystem::remove(src);
-  EXPECT_GT(ran, 0) << backends;
+  EXPECT_GT(ran, 0);
 }
 
 // The C backend's cache entries of module file stem @p stem in @p dir:
@@ -1789,7 +1827,7 @@ TEST(Driver, OutputDoesNotDependOnTheSourceDirectory) {
   instrumented = true;
 #endif
 #endif
-  if (!(instrumented && testBackend() == "c")) {
+  if (!(instrumented && testBackendIsC())) {
     for (const std::string &bytes : exes) {
       EXPECT_EQ(bytes.find(base.string()), std::string::npos);
       EXPECT_EQ(bytes.find(".pkn"), std::string::npos);
@@ -1874,7 +1912,7 @@ TEST(Driver, BuildAndRunDefaultToO2) {
     EXPECT_EQ(rc, 0) << opt << ": " << out;
     EXPECT_EQ(out, "285\n") << opt;
   };
-  if (testBackend() == "c") {
+  if (testBackendIsC()) {
     const auto cacheDir = dir / ".paykan_cache";
     fs::remove_all(cacheDir);
     runWith("");

@@ -20,6 +20,13 @@ namespace paykan::mlir_backend {
 /// keeps the name `main`, the program's entry point.
 inline constexpr const char *kMainModuleAttr = "pir.main";
 
+/// The attribute the lowering puts on what the runtime defines and Runtime.h
+/// declares (a runtime or C library function, a runtime global): the C
+/// path declares none of it itself and calls such a function through
+/// Runtime.h's prototype.  A native function or another module's symbol
+/// has none: it is declared from its signature.
+inline constexpr const char *kRuntimeAttr = "pir.runtime";
+
 /// The link name of the symbol @p name of PIR module @p module, the same in
 /// every module of the program: `pk_<module>_S<name>`, both parts escaped
 /// so the result is a C identifier and no two (module, name) pairs share

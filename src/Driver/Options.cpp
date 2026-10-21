@@ -271,22 +271,27 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     o.EmitSource = true;
   }
   if (emitC) {
-    if (!o.Backend.empty() && o.Backend != "c") {
-      r.Error = "--emit-c needs the c backend, but --backend=" + o.Backend +
-                " was given";
-      return r;
-    }
-    o.Backend = "c";
-    o.EmitSource = true;
-  }
-  if (emitMLIR) {
-    if (!o.Backend.empty() && o.Backend != "mlir") {
+    // The C of the c backend, or of the mlir backend's C path.
+    if (!o.Backend.empty() && o.Backend != "c" && o.Backend != "mlir-c") {
       r.Error =
-          "--emit-mlir needs the mlir backend, but --backend=" + o.Backend +
+          "--emit-c needs the c or mlir-c backend, but --backend=" + o.Backend +
           " was given";
       return r;
     }
-    o.Backend = "mlir";
+    if (o.Backend.empty())
+      o.Backend = "c";
+    o.EmitSource = true;
+  }
+  if (emitMLIR) {
+    // Either of the mlir plugin's backends prints the stage.
+    if (!o.Backend.empty() && o.Backend != "mlir" && o.Backend != "mlir-c") {
+      r.Error = "--emit-mlir needs the mlir or mlir-c backend, but "
+                "--backend=" +
+                o.Backend + " was given";
+      return r;
+    }
+    if (o.Backend.empty())
+      o.Backend = "mlir";
     o.EmitSource = true;
   }
   bool infoOnly =
@@ -315,12 +320,15 @@ void printUsage(std::ostream &os, const char *argv0) {
        << f.Help << "\n";
   os << "  --emit-llvm       - Emit LLVM IR to stdout (--backend=llvm "
         "--emit-source)\n"
-     << "  --emit-c          - Emit C to stdout (--backend=c --emit-source)\n"
+     << "  --emit-c          - Emit C to stdout (--backend=c --emit-source; "
+        "with\n"
+     << "                      --backend=mlir-c, the mlir backend's C)\n"
      << "  --emit-mlir=<stage> - Emit MLIR at a stage of the mlir backend to "
         "stdout\n"
      << "                      (pir: the imported PIR dialect; scf: after "
         "the shared\n"
-     << "                      lowering; llvm: the LLVM dialect)\n"
+     << "                      lowering; llvm: the LLVM dialect; emitc: "
+        "EmitC, the C)\n"
      << "  --frontend=<name> - Parse with the named frontend "
         "(--list-frontends)\n"
      << "  --backend=<name>  - Generate code with the named backend "
