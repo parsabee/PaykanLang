@@ -10,6 +10,7 @@ add_library(paykan_backend_mlir STATIC
     MLIRBackend.cpp
     Pipeline.cpp
     Import/PIRImport.cpp
+    Lowering/DropUnreachable.cpp
     Lowering/PIRToStandard.cpp
     ToEmitC/ToEmitC.cpp
     ToLLVM/ToLLVM.cpp

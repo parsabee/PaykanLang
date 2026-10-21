@@ -119,7 +119,7 @@ private:
       return Status::error("unknown MLIR stage '" + stageName +
                            "' (expected: pir, scf, llvm, emitc)");
     auto ctx = MB::createContext();
-    auto mod = MB::importProgram(*in.Program, *ctx);
+    auto mod = MB::importReachable(*in.Program, *ctx);
     if (!mod)
       return mod.status();
     if (Status s = MB::lowerTo((*mod).get(), stage); !s)

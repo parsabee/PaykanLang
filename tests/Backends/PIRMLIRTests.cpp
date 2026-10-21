@@ -333,6 +333,124 @@ TEST(PIRMLIR, SwitchesAreIndexSwitches) {
   EXPECT_NE(c.find("switch ("), std::string::npos) << c;
 }
 
+// What `main` cannot reach: a class no op names (and the functions only its
+// vtable reaches), a function nobody calls, and in the other modules what
+// only a dropped declaration named, a module further at each round.
+const char *const kUnreachable = R"(module "main"
+extern fn @"lib::used"() -> i64 module "lib" symbol @used
+extern fn @"lib::other"() -> i64 module "lib" symbol @other
+
+class Kept {
+  field n: i64
+  vtable {
+    destroy = @Kept.destroy : (obj) -> void
+    get = @Kept.get : (obj) -> i64
+  }
+}
+
+class Dropped {
+  field n: i64
+  vtable {
+    destroy = @Dropped.destroy : (obj) -> void
+    get = @Dropped.get : (obj) -> i64
+  }
+}
+
+fn @Kept.destroy(%self.1: obj) -> void {
+  free %self.1
+  ret
+}
+
+fn @Kept.get(%self.1: obj) -> i64 {
+  %n.2 = field.load %self.1, Kept.n
+  ret %n.2
+}
+
+fn @Dropped.destroy(%self.1: obj) -> void {
+  free %self.1
+  ret
+}
+
+fn @Dropped.get(%self.1: obj) -> i64 {
+  %n.2 = call @onlyDropped()
+  ret %n.2
+}
+
+fn @onlyDropped() -> i64 {
+  ret 2
+}
+
+fn @unused() -> i64 {
+  %n.1 = call @"lib::other"()
+  ret %n.1
+}
+
+fn @main() -> i64 {
+  %o.1 = new Kept
+  field.store %o.1, Kept.n, 1
+  %v.2 = vcall %o.1 : Kept [1] ()
+  %u.3 = call @"lib::used"()
+  %s.4 = add %v.2, %u.3
+  ret %s.4
+}
+
+module "lib"
+extern fn @"deep::f"() -> i64 module "deep" symbol @f
+
+fn @used() -> i64 {
+  %n.1 = call @helper()
+  ret %n.1
+}
+
+fn @helper() -> i64 {
+  ret 3
+}
+
+fn @other() -> i64 {
+  %n.1 = call @"deep::f"()
+  ret %n.1
+}
+
+fn @alsoUnused() -> i64 {
+  ret 4
+}
+
+module "deep"
+
+fn @f() -> i64 {
+  ret 5
+}
+)";
+
+TEST(PIRMLIR, UnreachableCodeIsDropped) {
+  auto ctx = mlir_backend::createContext();
+  pir::ParseError perr;
+  auto program = pir::parseProgram(kUnreachable, perr);
+  ASSERT_TRUE(program) << perr.str();
+  ASSERT_TRUE(pir::verify(*program).empty())
+      << pir::formatErrors(pir::verify(*program));
+  auto mod = mlir_backend::importReachable(*program, *ctx);
+  ASSERT_TRUE(mod) << mod.status().message();
+  ASSERT_TRUE(mlir::succeeded(mlir::verify((*mod).get())));
+  std::string text = print((*mod).get());
+  for (const char *kept :
+       {"pir.func @main()", "pir.class \"Kept\"", "pir.func @Kept.get(",
+        "pir.func @Kept.destroy(", "@\"lib::used\"", "pir.func @used()",
+        "pir.func @helper()", "module @deep"})
+    EXPECT_NE(text.find(kept), std::string::npos) << kept << "\n" << text;
+  for (const char *dropped :
+       {"Dropped", "onlyDropped", "@unused", "@other", "lib::other",
+        "alsoUnused", "deep::f", "pir.func @f("})
+    EXPECT_EQ(text.find(dropped), std::string::npos) << dropped << "\n" << text;
+  // What stays keeps the import's visibility: definitions public.
+  EXPECT_EQ(text.find("pir.func private @used"), std::string::npos) << text;
+
+  // And it still lowers.
+  Status lowered =
+      mlir_backend::lowerTo((*mod).get(), mlir_backend::Stage::LLVM);
+  EXPECT_TRUE(lowered) << lowered.message();
+}
+
 TEST(PIRMLIR, LinkNamesAreCIdentifiers) {
   EXPECT_EQ(mlir_backend::linkName("main", "f"), "pk_main_Sf");
   EXPECT_EQ(mlir_backend::linkName("geometry::shapes", "Point.move"),

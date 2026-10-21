@@ -18,6 +18,7 @@ this repository, always built and the default; other backends are plugins
 | LLVM | 22.1.8, whose prebuilt releases ship MLIR with the EmitC conversions (scf, arith, func and memref to EmitC); LLVM 17's have none |
 | Input | the verified PIR program, as every backend gets it (docs/pir.md); PIR stays the interface for every backend, in tree and out |
 | The `pir` dialect | PIR one to one: an op per item, statement and instruction, PIR's types (`!pir.box`, `!pir.obj`, `!pir.ptr`, `!pir.weak`, `!pir.opt<T>`, `!pir.mem<N, A>`, `!pir.local<T>`); structured regions with no terminators, as PIR's blocks are (`--emit-mlir=pir`) |
+| Unreachable code | dropped from the imported program before anything is lowered: MLIR's symbol DCE, run until nothing changes, from the main module's `main` (see below); a `.pkm` keeps all its module's code |
 | The shared lowering | `pir` → `func` + `scf` + `arith`, and the few `pir` memory ops neither upstream path covers; one pass, used by both targets (`--emit-mlir=scf`) |
 | Where the targets part | after the shared lowering, at the MLIR level: upstream conversions take `func`, `scf` and `arith` to the `llvm` dialect and to EmitC; the remaining `pir` ops get one small pattern set per target |
 | LLVM | the `llvm` dialect (`--emit-mlir=llvm`), translated to LLVM IR, then the existing JIT, native object build, bitcode cache and `--emit-llvm` |
@@ -63,6 +64,37 @@ through a function pointer).  Those few ops are all that is written per
 target; everything PaykanLang-specific (ARC, objects and their layouts,
 vtables, optionals, the sized integer types, structured control flow with
 `break`, `continue` and early `return`) is lowered once.
+
+## Unreachable code
+
+A program's binary holds only what its `main` reaches: the rest of each
+module it imports (most of the standard library, for most programs) is
+dropped right after the import (`dropUnreachable`,
+`src/Backends/MLIR/Lowering/DropUnreachable.cpp`), so no stage lowers it.
+Every output of a program starts there: `run`, `build`, `--emit-llvm`,
+`--emit-c` and `--emit-mlir`.  `--emit-pir` and `.pkm` files hold all of
+each module's code, since an importer may use any of it.
+
+MLIR's symbol DCE does the work: it erases each private symbol (function,
+declaration, global) that no live one refers to.  Two kinds of reference
+are not symbol references in the dialect, and the driver gives them to it
+between runs, until a run erases nothing:
+
+* A declaration names another module's function by its `module` and
+  `link_symbol` attributes.  A definition is public, and so live, while a
+  declaration of it elsewhere lives; the main module's `main` is the other
+  public symbol.  A declaration that dies takes its definition with it at
+  the next run.
+* A class is named by a string (a class and its constructor share a
+  name), and a class op is never erased by symbol DCE.  A class no op names
+  any more (`new`, `vcall`, a field access, `vtable_addr`, or a live
+  class's superclass) is erased, and its vtable's functions die with it at
+  the next run.  Class names are unique across a program, so a class is
+  live wherever a name of it is used.
+
+Each module is then lowered and its LLVM IR cached as before, under the
+text of what is left of it: another program's use of a module leaves
+another part of it, which is cached afresh.
 
 ## The shared lowering
 

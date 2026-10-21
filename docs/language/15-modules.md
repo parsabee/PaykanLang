@@ -539,8 +539,9 @@ uses another module's holds its own copies of the instantiations it uses
   deleting it at any time is safe and only costs a recompile.
 - **The backend's cache.** The mlir backend keeps each imported module's LLVM IR in the cache
   too, as bitcode (`a/b/c.bc`; the main file's is never cached), validated by its own
-  key (the module's PIR, the compiler and the runtime ABI) and shared between concurrent
-  builds. It is the native translation of the PIR a module file holds; a later release folds
+  key (the part of the module's PIR the program uses, the compiler and the runtime ABI) and
+  shared between concurrent builds. A program compiles only the code its `main` reaches, so
+  two programs that use different parts of a module keep recompiling its entry. It is the native translation of the PIR a module file holds; a later release folds
   it into the module file. The cache options are summed up in
   [The `paykan` command](17-the-paykan-command.md#the-compilation-cache).
 
