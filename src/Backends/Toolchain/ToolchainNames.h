@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 //
 // Centralized string constants of the native toolchain: the C compiler /
-// linker command line (Toolchain.cpp, and the C backend's CBuild.cpp) and
+// linker command line (Toolchain.cpp) and
 // the runtime files it looks for.
 
 #pragma once

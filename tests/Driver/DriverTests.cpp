@@ -93,12 +93,6 @@ static std::string backendFlag() {
 // The paykan command running programs on the test backend.
 static std::string paykanRun() { return std::string(kPaykan) + backendFlag(); }
 
-// Whether the test backend builds C with the system compiler (c, or the
-// mlir backend's C path, mlir-c), whose objects the C object cache holds.
-static bool testBackendIsC() {
-  return testBackend() == "c" || testBackend() == "mlir-c";
-}
-
 // The backends that run programs, of those this build has: what
 // `paykan --list-backends` lists (`<name>: <description>`, or
 // `<name> (default)`).
@@ -106,7 +100,7 @@ static std::vector<std::string> runBackends() {
   std::string listing =
       run(std::string(kPaykan) + " --no-plugins --list-backends 2>&1").out;
   std::vector<std::string> out;
-  for (const std::string be : {"llvm", "mlir", "mlir-c", "c"}) {
+  for (const std::string be : {"mlir"}) {
     size_t at = 0;
     while ((at = listing.find(be, at)) != std::string::npos) {
       bool lineStart = at == 0 || listing[at - 1] == '\n';
@@ -313,9 +307,8 @@ TEST(Driver, SelectingAnIncompatiblePluginFails) {
   std::filesystem::remove(src);
 }
 
-// --list-backends: the default is the one the build configured, and that is
-// `c` whenever the c backend is built (#27), wherever PAYKAN_BACKENDS lists
-// it: `llvm;c` defaults to c too, and llvm needs --backend=llvm.
+// --list-backends: the default is the one the build configured, mlir, the
+// in-tree backend.
 
 #ifndef PAYKAN_EXPECTED_DEFAULT_BACKEND
 #error "PAYKAN_EXPECTED_DEFAULT_BACKEND must be defined via CMake"
@@ -330,7 +323,6 @@ TEST(Driver, ListBackendsMarksTheConfiguredDefault) {
   ASSERT_NE(mark, std::string::npos) << out;
   EXPECT_EQ(out.find(" (default)", mark + 1), std::string::npos) << out;
   // Each line is "<name>[ (default)][: <description>]".
-  std::vector<std::string> names;
   std::string defaultName;
   size_t pos = 0;
   while (pos < out.size()) {
@@ -338,45 +330,29 @@ TEST(Driver, ListBackendsMarksTheConfiguredDefault) {
     std::string line = out.substr(pos, eol - pos);
     pos = eol == std::string::npos ? out.size() : eol + 1;
     std::string name = line.substr(0, line.find_first_of(" :"));
-    names.push_back(name);
     if (line.compare(name.size(), 10, " (default)") == 0)
       defaultName = name;
   }
   EXPECT_EQ(defaultName, expected) << out;
-  // The c backend is part of every build, so it is the default.
-  EXPECT_NE(std::find(names.begin(), names.end(), "c"), names.end()) << out;
-  EXPECT_EQ(expected, "c");
-  EXPECT_EQ(defaultName, "c") << out;
-  // With the llvm backend built (listed first in the full configuration),
-  // it is listed but not the default.
-  if (std::find(names.begin(), names.end(), "llvm") != names.end()) {
-    EXPECT_EQ(out.find("llvm (default)"), std::string::npos) << out;
-  }
+  EXPECT_EQ(expected, "mlir");
 }
 
-// Without --backend the program goes to the c backend even when the llvm
-// backend is built: --emit-source prints C, not LLVM IR.  --backend=llvm
-// selects the llvm backend (and its JIT for `run`).
-TEST(Driver, DefaultBackendIsCEvenWithLLVM) {
+// Without --backend the program goes to the mlir backend: --emit-source and
+// --emit-llvm print its LLVM IR, --emit-c its C, and `run` runs it.
+TEST(Driver, DefaultBackendIsMLIR) {
   auto src = writeTmp(
       "import ::io; fn main() -> int { io::println(\"hi\"); return 0; }");
-  auto [rc, code] =
-      run(std::string(kPaykan) + " --emit-source " + src + " 2>&1");
-  EXPECT_EQ(rc, 0) << code;
-  EXPECT_NE(code.find("#include \"Runtime.h\""), std::string::npos) << code;
-  EXPECT_EQ(code.find("ModuleID"), std::string::npos) << code;
-  auto listed = run(std::string(kPaykan) + " --list-backends 2>&1").out;
-  if (listed.rfind("llvm", 0) == 0 ||
-      listed.find("\nllvm") != std::string::npos) {
-    auto [rc2, ir] = run(std::string(kPaykan) +
-                         " --backend=llvm --emit-source " + src + " 2>&1");
-    EXPECT_EQ(rc2, 0) << ir;
-    EXPECT_NE(ir.find("ModuleID"), std::string::npos) << ir;
-    auto [rc3, out3] =
-        run(std::string(kPaykan) + " --backend=llvm " + src + " 2>&1");
-    EXPECT_EQ(rc3, 0) << out3;
-    EXPECT_EQ(out3, "hi\n");
+  for (const char *flag : {" --emit-source ", " --emit-llvm "}) {
+    auto [rc, ir] = run(std::string(kPaykan) + flag + src + " 2>&1");
+    EXPECT_EQ(rc, 0) << flag << ir;
+    EXPECT_NE(ir.find("ModuleID"), std::string::npos) << flag << ir;
   }
+  auto [rcC, code] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
+  EXPECT_EQ(rcC, 0) << code;
+  EXPECT_NE(code.find("#include \"Runtime.h\""), std::string::npos) << code;
+  auto [rcRun, out] = run(std::string(kPaykan) + " " + src + " 2>&1");
+  EXPECT_EQ(rcRun, 0) << out;
+  EXPECT_EQ(out, "hi\n");
   std::filesystem::remove(src);
 }
 
@@ -838,10 +814,9 @@ static int rawWaitStatus(const std::vector<std::string> &argv) {
   return status;
 }
 
-// A runtime panic aborts the program.  `paykan run` reports it the same way
-// on every backend, as the exit status 128 + SIGABRT (the C backend's child
-// process dies by the signal, the JIT turns it into that status), and an
-// executable from `build` dies by SIGABRT on every backend (#79).
+// A runtime panic aborts the program.  `paykan run` reports it as the exit
+// status 128 + SIGABRT (the JIT turns the signal into that status), and an
+// executable from `build` dies by SIGABRT (#79), on every backend.
 TEST(Driver, PanicExitStatusIsTheSameOnEveryBackend) {
   REQUIRE_BACKEND();
   auto dir = std::filesystem::temp_directory_path() /
@@ -1029,7 +1004,7 @@ TEST(Driver, OptionalVoidIsRejectedAtParse) {
       << out;
 }
 
-// -- PIR, the C backend, build, and the object cache
+// -- PIR, C, build
 
 TEST(Driver, EmitPirPrintsTheProgram) {
   REQUIRE_BACKEND();
@@ -1056,18 +1031,17 @@ TEST(Driver, EmitCPrintsCSource) {
   EXPECT_NE(out.find("#include \"Runtime.h\""), std::string::npos) << out;
   EXPECT_NE(out.find("int main(int argc, char **argv)"), std::string::npos)
       << out;
-  // The object header: the vtable, then the strong and the weak count.
-  EXPECT_NE(out.find("int32_t strong;"), std::string::npos) << out;
-  EXPECT_NE(out.find("int32_t weak;"), std::string::npos) << out;
+  // The program's main behind C's, and P's vtable.
+  EXPECT_NE(out.find("static int64_t paykan_main(void) {"), std::string::npos)
+      << out;
+  EXPECT_NE(out.find("PaykanMethod pkvt_"), std::string::npos) << out;
 }
 
 // --emit-mlir=<stage> selects the mlir backend and prints the program at
 // that stage of its pipeline (docs/design/mlir-backend.md); with another
 // backend, or a stage the backend has not, it is an error.
 TEST(Driver, EmitMLIRPrintsEachStage) {
-  auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
-  if (backends.find("mlir:") == std::string::npos)
-    GTEST_SKIP() << "this build has no mlir backend";
+  REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { x = 40; return x + 2; }");
   auto [rc, out] =
       run(std::string(kPaykan) + " --emit-mlir=pir " + src + " 2>&1");
@@ -1095,10 +1069,9 @@ TEST(Driver, EmitMLIRPrintsEachStage) {
   EXPECT_NE(outEmitC.find("int main(int argc, char **argv)"), std::string::npos)
       << outEmitC;
   auto [rcC, outC] = run(std::string(kPaykan) +
-                         " --backend=c --emit-mlir=pir " + src + " 2>&1");
+                         " --backend=other --emit-mlir=pir " + src + " 2>&1");
   EXPECT_NE(rcC, 0) << outC;
-  EXPECT_NE(outC.find("--emit-mlir needs the mlir or mlir-c backend"),
-            std::string::npos)
+  EXPECT_NE(outC.find("--emit-mlir needs the mlir backend"), std::string::npos)
       << outC;
   auto [rcStage, outStage] =
       run(std::string(kPaykan) + " --emit-mlir=bogus " + src + " 2>&1");
@@ -1108,9 +1081,9 @@ TEST(Driver, EmitMLIRPrintsEachStage) {
       << outStage;
 }
 
-// Every vtable is an array of PaykanMethod (Runtime.h), read with
-// Paykan_vtable_of and converted to the method's own type at the call: no
-// vtable is accessed through a pointer to another type (#62).
+// Every vtable is an array of PaykanMethod (Runtime.h), its slots read as
+// the PaykanMethod they are and converted to the method's own type at the
+// call: no vtable is accessed through a pointer to another type (#62).
 TEST(Driver, EmitCVTablesArePaykanMethodArrays) {
   REQUIRE_BACKEND();
   auto src = writeTmp("class A { fn f() -> int { return 1; } }"
@@ -1120,22 +1093,25 @@ TEST(Driver, EmitCVTablesArePaykanMethodArrays) {
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 0) << out;
-  EXPECT_NE(out.find("PaykanMethod *vtable;"), std::string::npos) << out;
   EXPECT_TRUE(
       std::regex_search(out, std::regex(R"(\nPaykanMethod pkvt_\w+\[)")))
       << out;
   EXPECT_NE(out.find("(PaykanMethod)PaykanObject_toString"), std::string::npos)
       << out;
-  EXPECT_NE(out.find("(int64_t (*)(PaykanObject *))Paykan_vtable_of("),
+  // The object's vtable pointer is written and read as a PaykanMethod *, its
+  // slot read as a PaykanMethod, never as a void *.
+  EXPECT_NE(out.find("PaykanMethod** "), std::string::npos) << out;
+  EXPECT_NE(out.find("PaykanMethod* "), std::string::npos) << out;
+  EXPECT_EQ(out.find("void** "), std::string::npos) << out;
+  EXPECT_NE(out.find("((int64_t (*)(PaykanObject *))(uintptr_t)fn)("),
             std::string::npos)
       << out;
-  EXPECT_EQ(out.find("pkrt_fn"), std::string::npos) << out;
 }
 
-// Nothing unused reaches the C (a -Wall -Wextra warning otherwise): no
-// bit-cast helper without a cast, no unread local (`self` here), no binding
-// for a discarded call result, no unreferenced string global, and only the
-// branch taken of an `if` on a literal (#62).
+// Nothing unused reaches the C (a -Wall -Wextra warning otherwise): an
+// unread parameter (`self` here) is marked read, a discarded call result has
+// no variable, and only the branch taken of an `if` on a literal is left
+// (#62).
 TEST(Driver, EmitCOmitsUnusedEntities) {
   REQUIRE_BACKEND();
   auto src = writeTmp(
@@ -1146,20 +1122,16 @@ TEST(Driver, EmitCOmitsUnusedEntities) {
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 0) << out;
-  EXPECT_EQ(out.find("pkrt_f64_bits"), std::string::npos) << out;
-  EXPECT_EQ(out.find("pkrt_bits_f64"), std::string::npos) << out;
-  EXPECT_EQ(out.find("l_self"), std::string::npos) << out;
   EXPECT_NE(out.find("(void)v"), std::string::npos) << out; // unread `self`
-  EXPECT_TRUE(std::regex_search(out, std::regex(R"(\n  \w+_side\(\);)")))
+  EXPECT_TRUE(std::regex_search(out, std::regex(R"(\n  \w+_Sside\(\);)")))
       << out;
   EXPECT_EQ(out.find("if (true)"), std::string::npos) << out;
-  EXPECT_EQ(out.find("INT64_C(2)"), std::string::npos) << out;
 }
 
-// The bit-cast helpers are emitted only for a PIR `cast` between i64 and f64
-// (MemSlot.FloatBitsRoundTripThroughAnInteger runs them), which the lowering
-// never emits: a float held in place, in a tuple, an array or a `float?`, is
-// stored as a double.
+// A bit cast (a memcpy in C) is emitted only for a PIR `cast` between i64
+// and f64 (MemSlot.FloatBitsRoundTripThroughAnInteger runs one), which the
+// lowering never emits: a float held in place, in a tuple, an array or a
+// `float?`, is stored as a double.
 TEST(Driver, EmitCStoresFloatsInPlaceWithoutBitCasts) {
   REQUIRE_BACKEND();
   auto src = writeTmp("import ::io; fn main() -> int { t = (1.5, 2);"
@@ -1169,9 +1141,8 @@ TEST(Driver, EmitCStoresFloatsInPlaceWithoutBitCasts) {
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 0) << out;
-  EXPECT_NE(out.find("*((double *)"), std::string::npos) << out;
-  EXPECT_EQ(out.find("pkrt_bits_f64"), std::string::npos) << out;
-  EXPECT_EQ(out.find("pkrt_f64_bits"), std::string::npos) << out;
+  EXPECT_NE(out.find("(double*) "), std::string::npos) << out;
+  EXPECT_EQ(out.find("memcpy("), std::string::npos) << out;
 }
 
 // A `native fn`'s C symbol is prototyped from its PIR signature (#198).
@@ -1184,10 +1155,11 @@ TEST(Driver, EmitCPrototypesNativeFunctions) {
   auto [rc, out] = run(std::string(kPaykan) + " --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 0) << out;
-  EXPECT_NE(out.find("int64_t pk_put(int64_t, PaykanObject *);"),
+  EXPECT_NE(out.find("extern int64_t pk_put(int64_t, PaykanObject*);"),
             std::string::npos)
       << out;
-  EXPECT_NE(out.find("PaykanShared *pk_get(void);"), std::string::npos) << out;
+  EXPECT_NE(out.find("extern PaykanShared* pk_get(void);"), std::string::npos)
+      << out;
 }
 
 // --object=a.o,b.o links every listed object (#198): each defines one
@@ -1232,326 +1204,41 @@ TEST(Driver, EmitCRejectsAnotherBackend) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { return 0; }");
   auto [rc, out] =
-      run(std::string(kPaykan) + " --backend=llvm --emit-c " + src + " 2>&1");
+      run(std::string(kPaykan) + " --backend=other --emit-c " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
-  EXPECT_NE(out.find("--emit-c needs the c or mlir-c backend"),
-            std::string::npos)
+  EXPECT_NE(out.find("--emit-c needs the mlir backend"), std::string::npos)
       << out;
 }
 
 // Float `!=` is IEEE's unordered not-equal (true for a NaN operand) and the
-// other comparisons are ordered, identically on every backend built: the LLVM
-// backend emits `fcmp une`, the C backend C's own `!=`.
-TEST(Driver, FloatNotEqualIsUnorderedOnEveryBackend) {
+// other comparisons are ordered: the LLVM IR has `fcmp une`, the C C's own
+// `!=`, with no NaN test of its own.
+TEST(Driver, FloatNotEqualIsUnordered) {
   REQUIRE_BACKEND();
   auto src = writeTmp(
       "import ::io; fn main() -> int { inf: float = 1.0e308 * 10.0; n: float = "
       "inf - inf;"
       " io::println(Str<bool>(n != n) + Str<bool>(n == n) + Str<bool>(n < 1.0)"
       " + Str<bool>(1.0 != n) + Str<bool>(1.0 != 1.0)); return 0; }");
-  // `paykan --backend=<be> <flags> <src>`
-  auto paykanOn = [&](const std::string &be, const std::string &flags) {
-    return run(std::string(kPaykan) + " --backend=" + be + flags + " " + src +
-               " 2>&1");
-  };
-  auto backends = runBackends();
-  int ran = 0;
-  for (const std::string &be : backends) {
-    ++ran;
-    auto [rc, out] = paykanOn(be, "");
-    EXPECT_EQ(rc, 0) << be << ": " << out;
-    EXPECT_EQ(out, "TrueFalseFalseTrueFalse\n") << be;
-    // At -O0: the default -O2 folds the comparisons of constants away.
-    auto [srcRc, code] = paykanOn(be, " -O0 --emit-source");
-    EXPECT_EQ(srcRc, 0) << be << ": " << code;
-    if (be == "c") {
-      EXPECT_NE(code.find("_n != v"), std::string::npos) << code;
-      EXPECT_EQ(code.find(" || "), std::string::npos) << code;
-    } else if (be == "mlir-c") { // C's own `!=`, no NaN test of its own
-      EXPECT_NE(code.find(" != "), std::string::npos) << code;
-      EXPECT_EQ(code.find(" || "), std::string::npos) << code;
-    } else { // LLVM IR
-      EXPECT_NE(code.find("fcmp une double"), std::string::npos) << code;
-      EXPECT_EQ(code.find("fcmp one"), std::string::npos) << code;
-    }
-  }
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, "TrueFalseFalseTrueFalse\n");
+  // At -O0: the default -O2 folds the comparisons of constants away.
+  auto [irRc, ir] = run(paykanRun() + " -O0 --emit-llvm " + src + " 2>&1");
+  EXPECT_EQ(irRc, 0) << ir;
+  EXPECT_NE(ir.find("fcmp une double"), std::string::npos) << ir;
+  EXPECT_EQ(ir.find("fcmp one"), std::string::npos) << ir;
+  auto [cRc, code] = run(paykanRun() + " --emit-c " + src + " 2>&1");
+  EXPECT_EQ(cRc, 0) << code;
+  EXPECT_NE(code.find(" != "), std::string::npos) << code;
+  EXPECT_EQ(code.find(" || "), std::string::npos) << code;
   std::filesystem::remove(src);
-  EXPECT_GT(ran, 0);
 }
 
-// The C backend's cache entries of module file stem @p stem in @p dir:
-// `<stem>.<16 hex digits><ext>` (key-addressed, #134), the most recently
-// written first.
-static std::vector<std::filesystem::path>
-cacheEntries(const std::filesystem::path &dir, const std::string &stem,
-             const std::string &ext) {
-  static const std::regex hashed("[0-9a-f]{16}");
-  std::vector<std::filesystem::path> found;
-  std::error_code ec;
-  for (const auto &e : std::filesystem::directory_iterator(dir, ec)) {
-    std::string name = e.path().filename().string();
-    if (name.size() != stem.size() + 17 + ext.size() ||
-        name.compare(0, stem.size() + 1, stem + ".") != 0 ||
-        name.compare(name.size() - ext.size(), ext.size(), ext) != 0 ||
-        !std::regex_match(name.substr(stem.size() + 1, 16), hashed))
-      continue;
-    found.push_back(e.path());
-  }
-  std::sort(found.begin(), found.end(), [](const auto &a, const auto &b) {
-    return std::filesystem::last_write_time(a) >
-           std::filesystem::last_write_time(b);
-  });
-  return found;
-}
-
-// The most recently written of them (empty when there is none).
-static std::filesystem::path cacheEntry(const std::filesystem::path &dir,
-                                        const std::string &stem,
-                                        const std::string &ext) {
-  auto all = cacheEntries(dir, stem, ext);
-  return all.empty() ? std::filesystem::path() : all.front();
-}
-
-// `build` writes an executable that runs on its own, and the C backend reuses
-// the cached object for a module whose generated C is unchanged.
-TEST(Driver, CBackendBuildsAnExecutableAndCachesObjects) {
-  REQUIRE_BACKEND();
-  auto dir = std::filesystem::temp_directory_path() /
-             ("drv_build_" + std::to_string(getpid()));
-  std::filesystem::create_directories(dir);
-  auto src = (dir / "prog.pkn").string();
-  {
-    std::ofstream ofs(src);
-    ofs << "import ::io; fn main(args: view Str[]) -> int { "
-           "io::println(\"built\"); return "
-           "args.len(); }";
-  }
-  auto exe = (dir / "prog").string();
-  // Options (including -o) come before the source file.
-  auto [rc, out] = run(std::string(kPaykan) + " --backend=c -o " + exe +
-                       " build " + src + " 2>&1");
-  ASSERT_EQ(rc, 0) << out;
-  ASSERT_TRUE(std::filesystem::exists(exe));
-  auto cache = cacheEntry(dir / ".paykan_cache", "prog", ".o");
-  ASSERT_TRUE(std::filesystem::exists(cache)) << cache;
-  auto stamp = std::filesystem::last_write_time(cache);
-
-  auto [rc2, out2] = run(exe + " a b 2>&1");
-  EXPECT_EQ(rc2, 3) << out2; // the executable itself plus two arguments
-  EXPECT_EQ(out2, "built\n");
-
-  // A second build leaves the cached object alone.
-  auto [rc3, out3] = run(std::string(kPaykan) + " --backend=c -o " + exe +
-                         " build " + src + " 2>&1");
-  EXPECT_EQ(rc3, 0) << out3;
-  EXPECT_EQ(std::filesystem::last_write_time(cache), stamp);
-
-  // Changing the source regenerates it.
-  {
-    std::ofstream ofs(src);
-    ofs << "import ::io; fn main() -> int { io::println(\"rebuilt\"); return "
-           "5; }";
-  }
-  auto [rc4, out4] = run(std::string(kPaykan) + " --backend=c -o " + exe +
-                         " build " + src + " 2>&1");
-  EXPECT_EQ(rc4, 0) << out4;
-  auto [rc5, out5] = run(exe + " 2>&1");
-  EXPECT_EQ(rc5, 5) << out5;
-  EXPECT_EQ(out5, "rebuilt\n");
-
-  // The cache key covers the runtime header and the compiler's version: an
-  // object compiled by another paykan, or against another Runtime.h, is
-  // rebuilt even though the module's C is unchanged.  Simulate one by
-  // rewriting the stored key and corrupting the object (reusing it would
-  // fail the link).
-  // (The edit gave the module a new entry; the newest is the current one.)
-  cache = cacheEntry(dir / ".paykan_cache", "prog", ".o");
-  auto keyPath = cacheEntry(dir / ".paykan_cache", "prog", ".key");
-  ASSERT_FALSE(keyPath.empty());
-  std::string key;
-  {
-    std::ifstream in(keyPath);
-    key.assign(std::istreambuf_iterator<char>(in),
-               std::istreambuf_iterator<char>());
-  }
-  EXPECT_NE(key.find(std::string("\npaykan:") + paykan::kVersion + "\n"),
-            std::string::npos)
-      << key;
-  EXPECT_NE(key.find("\nruntime.h:"), std::string::npos) << key;
-  EXPECT_NE(key.find("\nc:"), std::string::npos) << key;
-  // Entries are written through temporaries renamed into place; none are
-  // left behind.
-  for (const auto &e :
-       std::filesystem::directory_iterator(dir / ".paykan_cache"))
-    EXPECT_EQ(e.path().string().find(".tmp"), std::string::npos) << e.path();
-  for (const char *field : {"\npaykan:", "\nruntime.h:"}) {
-    std::string stale = key;
-    stale.insert(stale.find(field) + std::strlen(field), "old-");
-    std::ofstream(keyPath) << stale;
-    std::ofstream(cache) << "not an object file";
-    std::string rebuild = kPaykan;
-    rebuild += " --backend=c -o " + exe;
-    rebuild += " build " + src + " 2>&1";
-    auto [rc6, out6] = run(rebuild);
-    EXPECT_EQ(rc6, 0) << field << out6;
-    auto [rc7, out7] = run(exe + " 2>&1");
-    EXPECT_EQ(rc7, 5) << field << out7;
-  }
-  std::filesystem::remove_all(dir);
-}
-
-// A cached object that was truncated or corrupted after it was written (disk
-// full, a crash, an outside edit) is detected through the size and hash in
-// its `.key` and rebuilt, instead of failing every later link (#74).
-TEST(Driver, CBackendRebuildsACorruptCachedObject) {
-  REQUIRE_BACKEND();
-  auto dir = std::filesystem::temp_directory_path() /
-             ("drv_corrupt_" + std::to_string(getpid()));
-  std::filesystem::remove_all(dir);
-  std::filesystem::create_directories(dir);
-  std::ofstream(dir / "dep.pkn")
-      << "class P { a: int; view fn get() -> int { return self.a; } }\n"
-         "impl P { fn __init__() { self.a = 1; } }\n"
-         "fn v() -> int { return 1; }\n";
-  std::ofstream(dir / "mid.pkn")
-      << "import dep;\nfn mk() -> dep::P { return dep::P(); }\n";
-  std::ofstream(dir / "main.pkn")
-      << "import ::io; import mid;\nimport dep;\n"
-         "fn main() -> int { p = mid::mk(); "
-         "io::println(Str<int>(p.get() + dep::v()));"
-         " return 0; }\n";
-  std::string src = (dir / "main.pkn").string();
-  std::string runCmd = std::string(kPaykan) + " --backend=c " + src + " 2>&1";
-  std::string exe = (dir / "main").string();
-  std::string buildCmd = std::string(kPaykan) + " --backend=c -o " + exe +
-                         " build " + src + " 2>&1";
-  auto [rc, out] = run(runCmd);
-  ASSERT_EQ(rc, 0) << out;
-  ASSERT_EQ(out, "2\n");
-  auto obj = cacheEntry(dir / ".paykan_cache", "dep", ".o");
-  ASSERT_TRUE(std::filesystem::exists(obj)) << obj;
-  auto size = std::filesystem::file_size(obj);
-  ASSERT_GT(size, 16u);
-
-  // An intact entry is reused: the object is not rewritten.
-  auto stamp = std::filesystem::last_write_time(obj);
-  auto [rcSame, outSame] = run(runCmd);
-  EXPECT_EQ(rcSame, 0) << outSame;
-  EXPECT_EQ(std::filesystem::last_write_time(obj), stamp);
-
-  // Truncated (the audit's repro), then same-size corruption (only the hash
-  // can tell), for both `run` and `build`.
-  for (const std::string &cmd : {runCmd, buildCmd}) {
-    std::filesystem::resize_file(obj, 10);
-    auto [rc1, out1] = run(cmd);
-    EXPECT_EQ(rc1, 0) << cmd << "\n" << out1;
-    EXPECT_EQ(std::filesystem::file_size(obj), size);
-
-    {
-      std::fstream f(obj, std::ios::in | std::ios::out | std::ios::binary);
-      f.seekp(0);
-      f.write("\0\0\0\0\0\0\0\0", 8); // clobber the ELF / Mach-O magic
-    }
-    EXPECT_EQ(std::filesystem::file_size(obj), size);
-    auto [rc2, out2] = run(cmd);
-    EXPECT_EQ(rc2, 0) << cmd << "\n" << out2;
-  }
-  auto [rcExe, outExe] = run(exe + " 2>&1");
-  EXPECT_EQ(rcExe, 0) << outExe;
-  EXPECT_EQ(outExe, "2\n");
-  auto [rcRun, outRun] = run(runCmd);
-  EXPECT_EQ(rcRun, 0) << outRun;
-  EXPECT_EQ(outRun, "2\n");
-  std::filesystem::remove_all(dir);
-}
-
-// Key-addressed entries are garbage-collected when a module gets a new one
-// (#134): the four most recently used are kept, and so is any entry used in
-// the last hour, which a concurrent build may be about to link.  Unhashed
-// entries from before #134 go the same way.  Another module's entries, even
-// one whose name starts with this one's, are left alone.
-TEST(Driver, CBackendCollectsStaleCacheEntries) {
-  REQUIRE_BACKEND();
-  namespace fs = std::filesystem;
-  auto dir = fs::temp_directory_path() / ("drv_gc_" + std::to_string(getpid()));
-  fs::remove_all(dir);
-  fs::create_directories(dir);
-  auto src = (dir / "m.pkn").string();
-  auto writeProgram = [&](int n) {
-    std::ofstream(src) << "import ::io; fn main() -> int { io::println(\"" << n
-                       << "\"); return 0; }\n";
-  };
-  const auto cacheDir = dir / ".paykan_cache";
-  std::string cmd = std::string(kPaykan) + " --backend=c " + src + " 2>&1";
-  auto build = [&](int n) {
-    writeProgram(n);
-    auto [rc, out] = run(cmd);
-    EXPECT_EQ(rc, 0) << out;
-    EXPECT_EQ(out, std::to_string(n) + "\n");
-  };
-  // The entry (its hash) of each of six versions of the module.
-  auto hashes = [&] {
-    std::set<std::string> out;
-    for (const auto &k : cacheEntries(cacheDir, "m", ".key"))
-      out.insert(k.stem().extension().string());
-    return out;
-  };
-  std::vector<std::string> version;
-  for (int n = 0; n < 6; ++n) {
-    auto before = hashes();
-    build(n);
-    auto after = hashes();
-    ASSERT_EQ(after.size(), before.size() + 1);
-    for (const auto &h : after)
-      if (!before.count(h))
-        version.push_back(h);
-  }
-  // Versions 0-3 were last used 2 hours ago (0 the longest), 4 and 5 now.
-  // Add an unhashed entry from before #134 and other modules' entries.
-  auto age = [](const fs::path &f, int minutes) {
-    fs::last_write_time(f, fs::file_time_type::clock::now() -
-                               std::chrono::hours(2) -
-                               std::chrono::minutes(minutes));
-  };
-  for (int n = 0; n < 4; ++n)
-    for (const char *ext : {".c", ".o", ".key"})
-      age(cacheDir / ("m" + version[n] + ext), 10 - n);
-  for (const char *f : {"m.c", "m.o", "m.key", "m.x.0123456789abcdef.o",
-                        "mm.0123456789abcdef.o"}) {
-    std::ofstream(cacheDir / f) << "x";
-    age(cacheDir / f, 60);
-  }
-  // Reusing an entry is a use: version 0 is built again from the cache ...
-  build(0);
-  EXPECT_EQ(hashes().size(), 6u);
-  // ... so when version 6 gets an entry, the four kept are 6, 0, 5 and 4:
-  // 3, 2 and 1 and the unhashed entry are removed, the rest left alone.
-  build(6);
-  auto kept = hashes();
-  EXPECT_EQ(kept.size(), 4u);
-  for (int n : {0, 4, 5})
-    EXPECT_TRUE(kept.count(version[n])) << n;
-  for (int n : {1, 2, 3})
-    for (const char *ext : {".c", ".o", ".key"})
-      EXPECT_FALSE(fs::exists(cacheDir / ("m" + version[n] + ext))) << n << ext;
-  EXPECT_EQ(cacheEntries(cacheDir, "m", ".o").size(), 4u);
-  EXPECT_EQ(cacheEntries(cacheDir, "m", ".c").size(), 4u);
-  for (const char *f : {"m.c", "m.o", "m.key"})
-    EXPECT_FALSE(fs::exists(cacheDir / f)) << f;
-  for (const char *f : {"m.x.0123456789abcdef.o", "mm.0123456789abcdef.o"})
-    EXPECT_TRUE(fs::exists(cacheDir / f)) << f;
-  // Entries used within the last hour are kept beyond the four.
-  for (int n = 7; n < 10; ++n)
-    build(n);
-  EXPECT_EQ(hashes().size(), 7u);
-  fs::remove_all(dir);
-}
-
-// `build` on the test backend (each backend that runs programs: the C
-// backend through the system C compiler, the llvm backend through a native
-// object linked against the runtime) gives an executable that behaves like
-// `run`: arguments, exit code, PAYKAN_TRACK_HEAP, at -O0 and -O2.
+// `build` gives a native executable, linked against the runtime, that
+// behaves like `run`: arguments, exit code, PAYKAN_TRACK_HEAP, at -O0 and
+// -O2.
 TEST(Driver, BuildProducesAStandaloneExecutable) {
   REQUIRE_BACKEND();
   auto dir = std::filesystem::temp_directory_path() /
@@ -1612,10 +1299,10 @@ TEST(Driver, BuildAcceptsOptionsAfterTheSourceFile) {
       << "import ::io; fn main() -> int { io::println(\"ok\"); return 7; }";
   // Before and after the source file.
   for (const std::string &args :
-       {std::string(" --backend=c -o ") + (dir / "before").string() +
+       {std::string(" --backend=mlir -o ") + (dir / "before").string() +
             " build " + src,
         std::string(" build ") + src + " -o " + (dir / "after").string() +
-            " --backend=c"}) {
+            " --backend=mlir"}) {
     auto [rc, out] = run(std::string(kPaykan) + args + " 2>&1");
     EXPECT_EQ(rc, 0) << args << "\n" << out;
   }
@@ -1629,10 +1316,9 @@ TEST(Driver, BuildAcceptsOptionsAfterTheSourceFile) {
   std::filesystem::remove_all(dir);
 }
 
-// A coverage build's runtime archive is instrumented, so every backend that
-// builds programs must link them with the same coverage flags (and a
-// compiler whose profile runtime matches; the C backend also compiles the
-// program with them): the program builds, runs and writes its own profile.
+// A coverage build's runtime archive is instrumented, so a built program
+// must be linked with the same coverage flags (and a compiler whose profile
+// runtime matches): the program builds, runs and writes its own profile.
 TEST(Driver, ProgramsAreInstrumentedInACoverageBuild) {
 #ifndef PAYKAN_TEST_COVERAGE
   GTEST_SKIP() << "not a PAYKAN_COVERAGE build";
@@ -1659,20 +1345,18 @@ TEST(Driver, ProgramsAreInstrumentedInACoverageBuild) {
 
 TEST(Driver, BuildRejectsAStrayArgument) {
   auto src = writeTmp("fn main() -> int { return 0; }");
-  auto [rc, out] =
-      run(std::string(kPaykan) + " --backend=c build " + src + " extra 2>&1");
+  auto [rc, out] = run(std::string(kPaykan) + " build " + src + " extra 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   EXPECT_NE(out.find("unexpected argument 'extra'"), std::string::npos) << out;
 }
 
-TEST(Driver, CBackendRunForwardsArgumentsAndTracksTheHeap) {
+TEST(Driver, RunForwardsArgumentsAndTracksTheHeap) {
   REQUIRE_BACKEND();
   auto src = writeTmp(
       "import ::io; fn main(args: view Str[]) -> int { io::println(args[1]); "
       "return args.len(); }");
-  auto [rc, out] = run(std::string(kPaykan) + " --backend=c --track-heap " +
-                       src + " hello 2>&1");
+  auto [rc, out] = run(paykanRun() + " --track-heap " + src + " hello 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 2) << out;
   EXPECT_NE(out.find("hello\n"), std::string::npos) << out;
@@ -1689,30 +1373,6 @@ std::string slurp(const std::filesystem::path &path) {
   std::ifstream in(path, std::ios::binary);
   return std::string((std::istreambuf_iterator<char>(in)),
                      std::istreambuf_iterator<char>());
-}
-
-/// The C compiler flags recorded in a C backend cache key (its `cc:` line,
-/// "cc:<compiler> <flag> <flag>..."), one token each.  The opt level is
-/// matched as a token, not as the line's suffix: sanitizer and coverage
-/// builds append their own flags after it (#122).
-std::vector<std::string> cacheKeyCompileFlags(const std::string &key) {
-  std::vector<std::string> flags;
-  if (key.rfind("cc:", 0) != 0)
-    return flags;
-  std::string line = key.substr(3, key.find('\n') - 3);
-  size_t pos = line.find(' '); // skip the compiler itself
-  while (pos != std::string::npos) {
-    size_t start = pos + 1;
-    pos = line.find(' ', start);
-    std::string tok = line.substr(start, pos - start);
-    if (!tok.empty())
-      flags.push_back(tok);
-  }
-  return flags;
-}
-
-bool hasFlag(const std::vector<std::string> &flags, const std::string &f) {
-  return std::find(flags.begin(), flags.end(), f) != flags.end();
 }
 
 /// A multi-module project under @p dir: nested modules and two modules with
@@ -1799,9 +1459,8 @@ TEST(Driver, OutputDoesNotDependOnTheSourceDirectory) {
   }
 
   // The executables built in the two trees are identical and carry no source
-  // path.  (In an instrumented build the C backend's objects record the
-  // path of their cached C file, under the project; skip it there.)  Each is
-  // built under the same file name, in a directory of its own: on macOS the
+  // path.  Each is built under the same file name, in a directory of its
+  // own: on macOS the
   // linker hashes the output's file name into LC_UUID and ad-hoc signs it
   // with the file name as its identifier, so differently named outputs of
   // the same program differ.
@@ -1818,33 +1477,20 @@ TEST(Driver, OutputDoesNotDependOnTheSourceDirectory) {
     EXPECT_EQ(out2, "rect\n12\n12\n");
     exes.push_back(slurp(exe));
   }
-  bool instrumented = false;
-#if defined(PAYKAN_TEST_COVERAGE) || defined(__SANITIZE_ADDRESS__)
-  instrumented = true;
-#elif defined(__has_feature)
-#if __has_feature(address_sanitizer) ||                                        \
-    __has_feature(undefined_behavior_sanitizer)
-  instrumented = true;
-#endif
-#endif
-  if (!(instrumented && testBackendIsC())) {
-    for (const std::string &bytes : exes) {
-      EXPECT_EQ(bytes.find(base.string()), std::string::npos);
-      EXPECT_EQ(bytes.find(".pkn"), std::string::npos);
-      EXPECT_EQ(bytes, exes[0]);
-    }
+  for (const std::string &bytes : exes) {
+    EXPECT_EQ(bytes.find(base.string()), std::string::npos);
+    EXPECT_EQ(bytes.find(".pkn"), std::string::npos);
+    EXPECT_EQ(bytes, exes[0]);
   }
   fs::remove_all(base);
 }
 
-// The llvm backend's `run` optimises the program under the layout the JIT
-// runs it with.  Under LLVM's default layout an `int` after a `char` sits 4
-// bytes past it, so the object size the optimiser folds was 4 bytes short
-// and a split store wrote the wrong offset.  --emit-llvm prints run's IR.
+// `run` optimises the program under the layout the JIT runs it with.  Under
+// LLVM's default layout an `int` after a `char` sits 4 bytes past it, so the
+// object size the optimiser folds was 4 bytes short and a split store wrote the
+// wrong offset.  --emit-llvm prints run's IR.
 TEST(Driver, RunOptimisesUnderTheHostLayout) {
   REQUIRE_BACKEND();
-  if (testBackend() != "llvm")
-    GTEST_SKIP() << "the llvm backend's JIT";
   namespace fs = std::filesystem;
   auto dir =
       fs::temp_directory_path() / ("drv_layout_" + std::to_string(getpid()));
@@ -1904,76 +1550,39 @@ TEST(Driver, BuildAndRunDefaultToO2) {
   EXPECT_EQ(plain, build("-O2"));
   EXPECT_NE(plain, build("-O0"));
 
-  // run: the level reaches the backend -- the C backend's object cache key
-  // records it, the llvm backend's IR (--emit-llvm goes through `run`'s
-  // compile) is the optimised one.
+  // run: the level reaches the backend -- its IR (--emit-source goes
+  // through `run`'s compile) is the optimised one.
   auto runWith = [&](const std::string &opt) {
     auto [rc, out] = run(paykanRun() + " " + opt + " " + src + " 2>&1");
     EXPECT_EQ(rc, 0) << opt << ": " << out;
     EXPECT_EQ(out, "285\n") << opt;
   };
-  if (testBackendIsC()) {
-    const auto cacheDir = dir / ".paykan_cache";
-    fs::remove_all(cacheDir);
-    runWith("");
-    auto o2Key = cacheEntry(cacheDir, "opt", ".key");
-    ASSERT_FALSE(o2Key.empty());
-    auto flags = cacheKeyCompileFlags(slurp(o2Key));
-    EXPECT_TRUE(hasFlag(flags, "-O2")) << slurp(o2Key);
-    EXPECT_FALSE(hasFlag(flags, "-O0")) << slurp(o2Key);
-    runWith("-O0");
-    // Each level has its own entry (#134): -O0 does not replace -O2's.
-    ASSERT_EQ(cacheEntries(cacheDir, "opt", ".key").size(), 2u);
-    auto o0Key = cacheEntry(cacheDir, "opt", ".key");
-    EXPECT_NE(o0Key, o2Key);
-    flags = cacheKeyCompileFlags(slurp(o0Key));
-    EXPECT_TRUE(hasFlag(flags, "-O0")) << slurp(o0Key);
-    EXPECT_FALSE(hasFlag(flags, "-O2")) << slurp(o0Key);
-    // The runtime's include directory (an absolute path) is not part of it.
-    for (const auto &f : flags)
-      EXPECT_NE(f.rfind("-I", 0), 0U) << slurp(o0Key);
-    // Alternating levels reuses both entries: no object is rebuilt.
-    std::vector<std::pair<fs::path, fs::file_time_type>> objects;
-    for (const auto &o : cacheEntries(cacheDir, "opt", ".o"))
-      objects.emplace_back(o, fs::last_write_time(o));
-    for (const auto &o : cacheEntries(cacheDir, "lib", ".o"))
-      objects.emplace_back(o, fs::last_write_time(o));
-    EXPECT_EQ(objects.size(), 4u);
-    runWith("-O2");
-    runWith("-O0");
-    runWith("");
-    for (const auto &[o, t] : objects)
-      EXPECT_EQ(fs::last_write_time(o), t) << o;
-  } else {
-    runWith("");
-    runWith("-O0");
-    auto emit = [&](const std::string &opt) {
-      return run(paykanRun() + " " + opt + " --emit-source " + src + " 2>&1")
-          .out;
-    };
-    std::string ir = emit("");
-    EXPECT_EQ(ir, emit("-O2"));
-    EXPECT_NE(ir, emit("-O0"));
-    // The program's own code is optimised: no stack slot is left in main.
-    // (::io's, whose `errno` slots C writes through, keep theirs.)
-    // (`define [attributes] i64 @main(`: the optimiser adds `noundef`.)
-    size_t mainAt = ir.find(" @main(");
-    ASSERT_NE(mainAt, std::string::npos) << ir;
-    mainAt = ir.rfind('\n', mainAt) + 1;
-    ASSERT_EQ(ir.compare(mainAt, 7, "define "), 0) << ir;
-    std::string mainIR = ir.substr(mainAt, ir.find("\n}\n", mainAt) - mainAt);
-    EXPECT_EQ(mainIR.find("alloca"), std::string::npos) << mainIR;
-    // Cached bitcode is the unoptimised translation (the opt level is
-    // applied to the linked program), so one entry serves every level: a
-    // run at another level reuses it unchanged.
-    auto bc = dir / ".paykan_cache" /
-              (testBackend() == "mlir" ? "lib.mlir.bc" : "lib.bc");
-    ASSERT_TRUE(fs::exists(bc)) << bc;
-    auto stamp = fs::last_write_time(bc);
-    runWith("-O1");
-    runWith("-O3");
-    EXPECT_EQ(fs::last_write_time(bc), stamp);
-  }
+  runWith("");
+  runWith("-O0");
+  auto emit = [&](const std::string &opt) {
+    return run(paykanRun() + " " + opt + " --emit-source " + src + " 2>&1").out;
+  };
+  std::string ir = emit("");
+  EXPECT_EQ(ir, emit("-O2"));
+  EXPECT_NE(ir, emit("-O0"));
+  // The program's own code is optimised: no stack slot is left in main.
+  // (::io's, whose `errno` slots C writes through, keep theirs.)
+  // (`define [attributes] i64 @main(`: the optimiser adds `noundef`.)
+  size_t mainAt = ir.find(" @main(");
+  ASSERT_NE(mainAt, std::string::npos) << ir;
+  mainAt = ir.rfind('\n', mainAt) + 1;
+  ASSERT_EQ(ir.compare(mainAt, 7, "define "), 0) << ir;
+  std::string mainIR = ir.substr(mainAt, ir.find("\n}\n", mainAt) - mainAt);
+  EXPECT_EQ(mainIR.find("alloca"), std::string::npos) << mainIR;
+  // Cached bitcode is the unoptimised translation (the opt level is
+  // applied to the linked program), so one entry serves every level: a
+  // run at another level reuses it unchanged.
+  auto bc = dir / ".paykan_cache" / "lib.bc";
+  ASSERT_TRUE(fs::exists(bc)) << bc;
+  auto stamp = fs::last_write_time(bc);
+  runWith("-O1");
+  runWith("-O3");
+  EXPECT_EQ(fs::last_write_time(bc), stamp);
   fs::remove_all(dir);
 }
 

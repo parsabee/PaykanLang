@@ -739,7 +739,7 @@ TEST(Regression, DestructorAndUserFunctionWithTheOldMangledName) {
   g.expectNoLeaks("DestructorAndUserFunctionWithTheOldMangledName");
 }
 
-// The C backend escapes the '.' of `K.w` as `_2E`; a user function named
+// A link name escapes the '.' of `K.w` as `_2E`; a user function named
 // `K_2Ew` sanitizes to the same text and must still get its own C symbol.
 TEST(Regression, MethodAndUserFunctionWithItsCSpelling) {
   LeakGuard g;

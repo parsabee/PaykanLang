@@ -152,11 +152,11 @@ const VTableAlias kVTableAliases[] = {
 // -- Runtime panics
 //
 // A runtime panic (division by zero, an index out of bounds, ...) prints its
-// message and calls abort().  The C backend runs the program as a child
-// process and `paykan run` exits with 128 + SIGABRT (134); the JIT runs it
-// in this process, where the abort would kill the compiler itself.  While
-// main runs, SIGABRT is turned into that same exit status, so both backends
-// end `paykan run` alike (docs/c-backend.md).  Like abort(), _Exit flushes
+// message and calls abort(), which a program run as its own process ends
+// with: its exit status is 128 + SIGABRT (134).  The JIT runs it in this
+// process, where the abort would kill the compiler itself.  While main
+// runs, SIGABRT is turned into that same exit status, so `paykan run` ends
+// as the built executable does.  Like abort(), _Exit flushes
 // no stdio buffer; the runtime's panic routine (Paykan_runtime_panic) flushes
 // every output stream itself before printing the message.  A built
 // executable still aborts with SIGABRT.

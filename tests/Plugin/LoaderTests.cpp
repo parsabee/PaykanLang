@@ -174,7 +174,8 @@ TEST_F(PluginLoader, ExplicitPluginIsListedWithItsFile) {
   EXPECT_TRUE(
       hasLine(r.Out, "test-good: the loader tests' backend [" + good + "]"))
       << r.Out;
-  EXPECT_TRUE(hasLine(r.Out, "c (default)")) << r.Out;
+  EXPECT_NE(("\n" + r.Out).find("\nmlir (default): "), std::string::npos)
+      << r.Out;
   // Listing reads the descriptor only.
   EXPECT_TRUE(ran("test-good", ".ctor"));
   EXPECT_FALSE(ran("test-good", ".called"));
@@ -597,14 +598,14 @@ TEST_F(PluginLoader, ClashWithABuiltInIsAmbiguous) {
   std::string conflict = "provided by both the built-in plugin and " + clash;
   auto l = paykan("--no-plugins " + flag("plugin", clash) + " --list-backends");
   ASSERT_EQ(l.Code, 0) << l.Err;
-  EXPECT_TRUE(hasLine(l.Out, "c (ambiguous: " + conflict + ")")) << l.Out;
-  // The default backend is c: running anything is now an error.
+  EXPECT_TRUE(hasLine(l.Out, "mlir (ambiguous: " + conflict + ")")) << l.Out;
+  // The default backend is mlir: running anything is now an error.
   auto r = paykan("--no-plugins " + flag("plugin", clash) + " --emit-source " +
                   quote(kSample));
   EXPECT_EQ(r.Code, 2);
-  EXPECT_EQ(r.Err,
-            "paykan: cannot use backend 'c' (ambiguous: " + conflict + ")\n");
-  EXPECT_FALSE(ran("c", ".called"));
+  EXPECT_EQ(r.Err, "paykan: cannot use backend 'mlir' (ambiguous: " + conflict +
+                       ")\n");
+  EXPECT_FALSE(ran("mlir", ".called"));
 }
 
 } // namespace

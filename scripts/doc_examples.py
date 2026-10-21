@@ -277,7 +277,7 @@ def main():
                     help="a backend to run (repeatable; default: c)")
     ap.add_argument("files", nargs="*", help="Markdown files to scan")
     args = ap.parse_args()
-    backends = args.backend or ["c"]
+    backends = args.backend or ["mlir"]
     paykan = str(Path(args.paykan).resolve())
     files = [Path(f).resolve() for f in args.files] or \
         [ROOT / "README.md"] + sorted((ROOT / "docs").rglob("*.md"))

@@ -80,8 +80,10 @@ inline std::pair<int, std::string> redirectFdToTempFile(int fd) {
       (tempDir() / ("paykan_cap_" + std::to_string(cnt++) + ".txt")).string();
   int saved = dup(fd);
   int tmp = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
-  dup2(tmp, fd);
-  close(tmp);
+  if (tmp >= 0) { // else the output is not captured
+    dup2(tmp, fd);
+    close(tmp);
+  }
   return {saved, path};
 }
 

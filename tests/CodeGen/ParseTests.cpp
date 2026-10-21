@@ -129,7 +129,7 @@ TEST(ParseFloat, InvalidStringsAreNone) {
 
 // Subnormal strings parse (strtod also flags them with ERANGE); a value too
 // large (rounds to +-inf) or too small (nonzero, rounds to 0) is None (#73).
-// Subnormal literals compile on both backends and agree with the parse.
+// Subnormal literals compile and agree with the parse.
 TEST(ParseFloat, SubnormalsParseAndOutOfRangeIsNone) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kShowFloat) + wrapMain(R"(

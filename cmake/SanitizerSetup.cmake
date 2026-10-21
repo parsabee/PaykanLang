@@ -14,8 +14,9 @@ option(PAYKAN_UBSAN "Build with UndefinedBehaviorSanitizer"       OFF)
 option(PAYKAN_TSAN  "Build with ThreadSanitizer"                  OFF)
 
 # The sanitizer flags in effect, for code that compiles and links programs
-# against this build's (instrumented) runtime archive at run time -- the C
-# backend passes them to the system C compiler (src/Backends/C).
+# against this build's (instrumented) runtime archive at run time -- the
+# toolchain passes them to the system C compiler, which links `paykan build`'s
+# executables (src/Backends/Toolchain).
 set(PAYKAN_SANITIZER_FLAGS "")
 
 if(PAYKAN_ASAN AND PAYKAN_TSAN)

@@ -63,17 +63,15 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(SanitizerSetup)     # -> PAYKAN_ASAN / PAYKAN_UBSAN / PAYKAN_TSAN options
 include(CoverageSetup)      # -> PAYKAN_COVERAGE option (LLVM source coverage)
 include(PaykanPlugins)      # -> PAYKAN_FRONTENDS / PAYKAN_BACKENDS, plugin helpers
-if(PAYKAN_NEEDS_LLVM)
-    include(LLVMSetup)      # -> paykan_llvm       INTERFACE target
-endif()
-if(PAYKAN_NEEDS_MLIR)
-    include(MLIRSetup)      # -> MLIR's package, mlir_tablegen()
-endif()
+# The mlir backend's LLVM 22 and MLIR: found (-DLLVM_DIR), or downloaded once.
+include(LLVMSetup)          # -> paykan_llvm       INTERFACE target
+include(MLIRSetup)          # -> MLIR's package, mlir_tablegen()
 
 # The tests are off by default, so a plain configure builds only the compiler
-# and downloads nothing.  -DPAYKAN_BUILD_TESTS=<suites> builds the named test
-# suites and -DPAYKAN_BUILD_ALL_TESTS=ON all of them; GoogleTest is fetched
-# only when a suite needs it and no installed one is found.
+# and downloads nothing besides LLVM.  -DPAYKAN_BUILD_TESTS=<suites> builds
+# the named test suites and -DPAYKAN_BUILD_ALL_TESTS=ON all of them;
+# GoogleTest is fetched only when a suite needs it and no installed one is
+# found.
 include(PaykanTests)        # -> PAYKAN_ENABLED_TEST_SUITES, paykan_test_suite_enabled()
 # The frontend test suites and the samples corpus, installed as sources for
 # out-of-tree frontends (cmake/PaykanTestSupport.cmake).

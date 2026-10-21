@@ -1,28 +1,19 @@
 #!/usr/bin/env python3
-"""Concurrent builds that share a module cache never link each other's
-objects (issue #134).
+"""Concurrent builds that share a module cache never use each other's
+entries (issue #134).
 
-Two `paykan` processes that differ in their C compile flags build the same
-multi-module project at the same time, many times over, and every run must
-link and print the right output.  Before #134 the C backend checked a
-module's `.key` and linked its `.o` later; a concurrent build with other
-flags could replace the object in between, so a plain build linked an
-ASan-instrumented object (`undefined reference to __asan_init`).
-
-Configurations raced against each other, for `run` and `build`:
-
-* -O0 against -O2;
-* the plain C compiler against the same compiler with -fsanitize=address
-  (through a `CC` wrapper script, so the same `paykan` binary serves both;
-  skipped when the C compiler cannot build ASan programs).
-
-Every other iteration edits a module, so both processes rebuild it at the
-same moment (the cache-miss path); the rest find their entries cached.  The
-llvm backend is raced at -O0 against -O2 too when it is named.
+Two `paykan` processes that differ in their flags (-O0 and -O2) build the
+same multi-module project at the same time, many times over, for `run` and
+`build`, and every run must link and print the right output.  Every other
+iteration edits a module, so both processes rebuild its cached bitcode at
+the same moment (the cache-miss path); the rest find their entries cached.
+(#134 was found in the former C backend's object cache, whose `.key` was
+checked and its `.o` linked later: a concurrent build with other flags could
+replace the object in between.)
 
 Usage:
     cache_race.py --paykan build/bin/paykan [--iterations 30] \\
-        --backend c [--backend llvm]
+        [--backend mlir]
 """
 
 import argparse
@@ -67,28 +58,6 @@ def write_project(root, salt):
     (root / "main.pkn").write_text(MAIN)
 
 
-def asan_wrapper(tmp):
-    """A `CC` that adds -fsanitize=address, or None when the C compiler
-    cannot build and run an ASan program here."""
-    cc = os.environ.get("CC") or "cc"
-    probe = tmp / "probe.c"
-    probe.write_text("int main(void) { return 0; }\n")
-    exe = tmp / "probe"
-    env = dict(os.environ, ASAN_OPTIONS="detect_leaks=0")
-    try:
-        if subprocess.run([cc, "-fsanitize=address", str(probe), "-o", str(exe)],
-                          capture_output=True).returncode != 0:
-            return None
-        if subprocess.run([str(exe)], capture_output=True, env=env).returncode != 0:
-            return None
-    except OSError:
-        return None
-    wrapper = tmp / "cc-asan"
-    wrapper.write_text('#!/bin/sh\nexec %s -fsanitize=address "$@"\n' % cc)
-    wrapper.chmod(0o755)
-    return str(wrapper)
-
-
 def race(args, backend, root, configs, mode, tmp):
     """Run the configurations concurrently args.iterations times; return the
     number of failed runs."""
@@ -129,30 +98,15 @@ def main():
     ap.add_argument("--backend", action="append", default=[])
     ap.add_argument("--iterations", type=int, default=30)
     args = ap.parse_args()
-    backends = args.backend or ["c"]
+    backends = args.backend or ["mlir"]
 
     with tempfile.TemporaryDirectory(prefix="paykan_cache_race_") as d:
         tmp = Path(d)
         base = dict(os.environ)
-        # The ASan-wrapped programs run without LeakSanitizer, which does not
-        # work everywhere (e.g. under ptrace); the runtime frees everything
-        # anyway (--track-heap checks that elsewhere).
-        asan_env = dict(base)
-        asan_env["ASAN_OPTIONS"] = ":".join(
-            filter(None, [base.get("ASAN_OPTIONS"), "detect_leaks=0"]))
         total = runs = 0
         for backend in backends:
             pairs = [("-O0 vs -O2", [("-O0", ["-O0"], base),
                                      ("-O2", ["-O2"], base)])]
-            if backend == "c":
-                wrapper = asan_wrapper(tmp)
-                if wrapper:
-                    pairs.append(("plain vs asan",
-                                  [("plain", [], base),
-                                   ("asan", [], dict(asan_env, CC=wrapper))]))
-                else:
-                    print("note: the C compiler cannot build ASan programs; "
-                          "racing -O0 against -O2 only")
             for label, configs in pairs:
                 for mode in ("run", "build"):
                     root = tmp / ("proj-%s-%s-%s" % (backend, mode,

@@ -10,7 +10,6 @@
 #include "ToEmitC/ToEmitC.h"
 #include "ToLLVM/ToLLVM.h"
 
-#include <llvm/Support/raw_os_ostream.h>
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/IR/Diagnostics.h>
 #include <mlir/Pass/PassManager.h>
@@ -19,9 +18,9 @@ namespace paykan::mlir_backend {
 
 namespace {
 
-/// The mlir backend's entries in the bitcode cache: <module>.mlir.bc, apart
-/// from the llvm backend's <module>.bc.
-const llvm_codegen::ModuleCache kCache{"mlir", ".mlir.bc"};
+/// The backend's entries in the bitcode cache: <module>.bc (a cached entry
+/// of another translation, which its key names, is rebuilt).
+const llvm_codegen::ModuleCache kCache{"mlir", ".bc"};
 
 /// @p mod, lowered to EmitC, printed as C.
 Status emitC(mlir::ModuleOp mod, llvm::raw_ostream &os) {
@@ -82,35 +81,6 @@ Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os) {
   if (!mod)
     return mod.status();
   return emitC((*mod).get(), os);
-}
-
-Status emitModuleC(const pir::Program &program, size_t index,
-                   llvm::raw_ostream &os) {
-  auto ctx = createContext();
-  auto mod = importModule(program, index, *ctx);
-  if (!mod)
-    return mod.status();
-  return emitC((*mod).get(), os);
-}
-
-backend_c::CSource cSource() {
-  auto report = [](const Status &s, std::ostream &errs) {
-    if (!s)
-      errs << s.message() << "\n";
-    return static_cast<bool>(s);
-  };
-  backend_c::CSource src;
-  src.Program = [report](const pir::Program &p, std::ostream &out,
-                         std::ostream &errs) {
-    llvm::raw_os_ostream os(out);
-    return report(emitProgramC(p, os), errs);
-  };
-  src.Module = [report](const pir::Program &p, size_t module, std::ostream &out,
-                        std::ostream &errs) {
-    llvm::raw_os_ostream os(out);
-    return report(emitModuleC(p, module, os), errs);
-  };
-  return src;
 }
 
 StatusOr<std::unique_ptr<llvm::Module>>

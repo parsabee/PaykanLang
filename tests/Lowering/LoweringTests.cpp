@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 // AST -> PIR lowering tests: every program is lowered, verified, printed, and
 // the printed PIR is checked for the ownership shapes the lowering must
-// produce (docs/pir.md §7).  Behavioural parity with the LLVM backend is
-// covered by the CodeGen suite run on every backend.
+// produce (docs/pir.md §7).  The programs' behaviour is covered by the
+// CodeGen suite, run on the mlir backend.
 
 #include "ModuleName.h"
 #include "TestUtils.h"

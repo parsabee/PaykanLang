@@ -19,7 +19,7 @@ Usage:
         --runtime-lib build/lib/libpaykan_runtime.a \\
         --runtime-header src/Runtime/Runtime.h --build-dir build \\
         --installed-lib /usr/local/lib/libpaykan_runtime.a \\
-        --backend c [--backend llvm]
+        --backend mlir
 """
 
 import argparse
@@ -168,12 +168,9 @@ def main():
         for be in args.backend:
             c.expect_works("installed binary", installed, be)
             # The build tree still exists, but the prefix's own (here
-            # broken) runtime wins: a C backend's compile stops at its
-            # header, the llvm backends' link at its archive.
+            # broken) runtime wins: the link stops at its archive.
             c.expect_build_fails("installed binary, stale build tree", stale,
-                                 be,
-                                 BROKEN_MARKER if be in ("c", "mlir-c")
-                                 else broken_lib)
+                                 be, broken_lib)
             c.expect_works("PAYKAN_RUNTIME_DIR over the prefix", stale, be,
                            env_dir=outdir / "installed")
             c.expect_works("binary inside the build tree", in_build, be)

@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// A program's LLVM modules, whichever backend translates them (the llvm
-// backend's PIRToLLVM.cpp, the mlir backend's LLVM path): the per-project
+// A program's LLVM modules, as the mlir backend's LLVM path translates them
+// (or any translation of one PIR module to LLVM IR): the per-project
 // bitcode cache of imported modules, linking, and -O<n>.
 
 #pragma once

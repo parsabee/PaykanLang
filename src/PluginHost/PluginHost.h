@@ -4,7 +4,7 @@
 // The host side of the C plugin interface (paykan/plugin_api.h), private
 // to src/PluginHost: the host table paykan hands every plugin, the session
 // each callback runs in, and the adapters that turn a C frontend into a
-// frontend::Frontend and a C backend into a backend::Backend.
+// frontend::Frontend and a backend's C interface into a backend::Backend.
 
 #pragma once
 
@@ -71,7 +71,7 @@ inline bool pluginHasFrontends(const PaykanPlugin &p) {
 std::unique_ptr<frontend::Frontend>
 makeFrontendAdapter(const PaykanPlugin *plugin, const PaykanFrontend *f);
 
-/// A backend::Backend that forwards to the C backend @p b of a loaded
+/// A backend::Backend that forwards to the C interface @p b of a loaded
 /// plugin (which must stay loaded: plugins are never unloaded).
 std::unique_ptr<backend::Backend> makeBackendAdapter(const PaykanBackend *b);
 

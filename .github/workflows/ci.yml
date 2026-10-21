@@ -16,13 +16,9 @@ concurrency:
   group: ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The default configure is the core build (recursive-descent + c, nothing
-# downloaded, #123).  Jobs that test the opt-in LLVM and MLIR backends pass
-# the full list explicitly:
-#   "-DPAYKAN_BACKENDS=llvm;mlir;c"
-# The default backend is c there too (it always is when c is built); every
-# test that means llvm passes --backend=llvm, and the per-backend suites
-# (CodeGenTests.*, DriverTests.*, SamplesParity*) run on both.
+# Every job builds the default configuration: the recursive-descent frontend
+# and the mlir backend, the only in-tree one (#123), whose LLVM 22 with MLIR
+# the configure downloads once into build/third-party (cached per job kind).
 #
 # A pull request builds and runs only the test suites its changes can affect
 # (scripts/affected_tests.py, the "changes" job); a push builds them all.
@@ -108,7 +104,7 @@ jobs:
       # every translation unit of the compiler is checked, and the affected
       # test suites' sources with it.
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;mlir;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -147,7 +143,7 @@ jobs:
           key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;mlir;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -184,7 +180,7 @@ jobs:
           key: third-party-macos-arm64-asan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (ASan)
-        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_ASAN=ON "-DPAYKAN_BACKENDS=llvm;mlir;c"
+        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_ASAN=ON
 
       - name: Build
         run: cmake --build build-asan --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -236,7 +232,7 @@ jobs:
           key: third-party-macos-arm64-ubsan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (UBSan)
-        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_UBSAN=ON "-DPAYKAN_BACKENDS=llvm;mlir;c"
+        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_UBSAN=ON
 
       - name: Build
         run: cmake --build build-ubsan --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -270,7 +266,7 @@ jobs:
           key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;mlir;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja "${PAYKAN_TESTS_FLAG}"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -283,9 +279,8 @@ jobs:
   # Release build + full test suite (Linux x86-64, the default GCC).  GCC's
   # -O2/-O3 warnings (-Wmaybe-uninitialized, -Wdangling-pointer, ...) only
   # fire with optimisation on, so the Debug jobs cannot catch what would break
-  # release.yml under -Werror.  The full build is tested in Release, and the
-  # default (core) configuration that release.yml ships is built in Release
-  # too: its different inlining has surfaced warnings of its own.
+  # release.yml under -Werror.  release.yml ships this configuration, without
+  # the tests.
   # ---------------------------------------------------------------------------
   release-linux:
     name: Release | Linux x86-64 (GCC)
@@ -307,7 +302,7 @@ jobs:
           key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Release, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;mlir;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja "${PAYKAN_TESTS_FLAG}"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -315,11 +310,6 @@ jobs:
       - name: Test
         if: needs.changes.outputs.tests != ''
         run: ctest --test-dir build --output-on-failure --parallel 4
-
-      - name: Build the default (core) configuration (Release, as release.yml)
-        run: |
-          cmake -B build-bare -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build-bare --parallel "$(getconf _NPROCESSORS_ONLN)"
 
   # ---------------------------------------------------------------------------
   # Code coverage (LLVM source-based) + floor gate.
@@ -348,16 +338,16 @@ jobs:
           key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       # A full configure populates build/third-party (vendored LLVM + GTest),
-      # which the coverage tree below reuses for its clang and gtest source.
-      # LLVM is opt-in, so the lists are needed for it to be provisioned.
+      # which the coverage tree below reuses for its LLVM, its clang and its
+      # gtest source.
       - name: Configure base tree (provisions vendored toolchain)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_ALL_TESTS=ON "-DPAYKAN_BACKENDS=llvm;mlir;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_ALL_TESTS=ON
 
       - name: Configure coverage tree
         run: |
           LLVM="$PWD/build/third-party/llvm"
           cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_ALL_TESTS=ON -DPAYKAN_COVERAGE=ON \
-            "-DPAYKAN_BACKENDS=llvm;mlir;c" \
+            -DLLVM_DIR="$LLVM/lib/cmake/llvm" \
             -DCMAKE_C_COMPILER="$LLVM/bin/clang" \
             -DCMAKE_CXX_COMPILER="$LLVM/bin/clang++" \
             -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/build/third-party/gtest"
@@ -377,97 +367,64 @@ jobs:
           if-no-files-found: warn
 
   # ---------------------------------------------------------------------------
-  # Barebones build: standard C++ only.  No LLVM, and nothing downloaded at
-  # configure time.  This is the DEFAULT configure (no
-  # PAYKAN_FRONTENDS / PAYKAN_BACKENDS: recursive-descent + c, #123).  Proves
-  # the acceptance criteria of #16, #77 and #123: a plain configure (tests are
-  # off by default) downloads nothing at all (GoogleTest is fetched only for
-  # the test suite), `paykan` links no third-party library, the full suite passes
-  # on the C backend, and an out-of-tree backend builds against the installed
-  # package.
+  # The packager's build and the installed paykan (#77, #123, #141): a plain
+  # configure (tests are off by default) downloads nothing but LLVM, not even
+  # GoogleTest, and builds the core: the recursive-descent frontend and the
+  # mlir backend.  Installed, its paykan runs and builds programs, and the
+  # example backend and frontend plugins build against the installed package
+  # alone and load into it.
   # ---------------------------------------------------------------------------
-  barebones-linux:
-    name: Barebones | Linux x86-64
+  install-linux:
+    name: Install | Linux x86-64
     runs-on: ubuntu-latest
     needs: changes
-    env:
-      PAYKAN_TESTS_FLAG: ${{ needs.changes.outputs.cmake-flag }}
     steps:
       - uses: actions/checkout@v4
 
+      # libzstd-dev: the prebuilt LLVM links with zstd (cmake/LLVMSetup.cmake).
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libzstd-dev
 
-      # The packager's build (#77): a plain configure, so tests are off and not
-      # even GoogleTest is fetched.  The defaults are the core (#123).
-      - name: Configure and build with the defaults (tests off, nothing downloaded)
+      # Restored, never saved: the cache is the test jobs', GoogleTest in it.
+      - name: Restore the third-party dependencies
+        uses: actions/cache/restore@v4
+        with:
+          path: build/third-party
+          key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
+
+      # The build directory the cache restores LLVM into, so the configure
+      # downloads it only on a cache miss; GoogleTest, which the cache may
+      # hold too, is moved out of the way, so a configure that fetched or
+      # used it would show.
+      - name: Configure and build with the defaults (tests off)
         run: |
           set -o pipefail
-          cmake -B build-notests -G Ninja -DCMAKE_BUILD_TYPE=Debug 2>&1 | tee configure-notests.log
-          grep -F "Frontends: recursive-descent (default: recursive-descent)" configure-notests.log
-          grep -F "Backends: c (default: c)" configure-notests.log
+          rm -rf build/third-party/gtest
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug 2>&1 | tee configure.log
+          grep -F "Frontends: recursive-descent (default: recursive-descent)" configure.log
+          grep -F "Backends: mlir (default: mlir)" configure.log
           # (`! grep` mid-script would not fail the step: bash -e ignores a
           # negated command, actionlint/shellcheck SC2251.)
-          if grep -i "Downloading\|Fetching\|GTest\|prebuilt LLVM\|LLVM not found" configure-notests.log; then
-            echo "error: the configure with tests off downloaded or built something (above)"
+          if grep -i "Fetching\|GTest\|googletest" configure.log; then
+            echo "error: the configure with tests off fetched GoogleTest (above)"
             exit 1
           fi
-          test ! -e build-notests/third-party
-          test ! -e build-notests/_deps
-          test ! -e build-notests/CTestTestfile.cmake
-          cmake --build build-notests --parallel "$(getconf _NPROCESSORS_ONLN)"
-          build-notests/bin/paykan --version
-          build-notests/bin/paykan --list-backends | tee backends.log
-          test "$(cat backends.log)" = "$(grep '^c (default)' backends.log)"
-
-      - name: Cache GoogleTest
-        uses: actions/cache@v4
-        with:
-          path: build/third-party/gtest
-          key: gtest-${{ hashFiles('cmake/GTestSetup.cmake') }}
-
-      - name: "Configure (default: recursive-descent frontend, C backend only, with tests)"
-        run: |
-          set -o pipefail
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" 2>&1 | tee configure.log
-          # Nothing but GoogleTest may be fetched.
-          if grep -i "Downloading" configure.log; then
-            echo "error: the default configure downloaded or built more than GoogleTest (above)"
+          if [ "$(ls build/third-party)" != "llvm" ]; then
+            echo "error: build/third-party holds more than LLVM"
             exit 1
           fi
-          if [ -d build/third-party ] && [ "$(ls build/third-party)" != "gtest" ]; then
-            echo "error: build/third-party holds more than GoogleTest"
-            exit 1
-          fi
+          test ! -e build/_deps
+          test ! -e build/CTestTestfile.cmake
+          cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
+          build/bin/paykan --version
+          build/bin/paykan --list-backends | tee backends.log
+          test "$(cat backends.log)" = "$(grep '^mlir (default)' backends.log)"
 
-      - name: Build
-        run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
-
-      - name: Check that paykan links no third-party library
-        run: |
-          ldd build/bin/paykan | tee ldd.log
-          # (libdl: the dynamic loader, for plugins; part of libc on current
-          # glibc.)
-          if grep -iv "linux-vdso\|libstdc++\|libgcc_s\|libc\.so\|libm\.so\|libdl\.so\|ld-linux" ldd.log; then
-            echo "error: paykan links a third-party library (above)"
-            exit 1
-          fi
-          nm -C build/bin/paykan > nm.log
-          if grep "llvm::" nm.log; then
-            echo "error: paykan contains LLVM symbols (above)"
-            exit 1
-          fi
-
-      - name: Test
-        if: needs.changes.outputs.tests != ''
-        run: ctest --test-dir build --output-on-failure --parallel 4
-
-      # Plugins load into the INSTALLED paykan with no rebuild (#141): the C
-      # and the C example backend and frontend are built
-      # against the installation alone,
-      # then loaded with --plugin, from $PAYKAN_PLUGIN_PATH and from the
-      # installation's plugin directory, with PaykanLang's build tree deleted
-      # and its source tree moved away.
+      # Plugins load into the INSTALLED paykan with no rebuild (#141): the
+      # example backend and frontend are built against the installation
+      # alone, then loaded with --plugin, from $PAYKAN_PLUGIN_PATH and from
+      # the installation's plugin directory, with PaykanLang's build tree
+      # deleted and its source tree moved away.
       - name: Load the example plugins into the installed paykan
         run: |
           set -euo pipefail
@@ -482,7 +439,7 @@ jobs:
             cmake -S "$ex/$p" -B "$ex/build-$p" -G Ninja -DCMAKE_PREFIX_PATH="$prefix"
             cmake --build "$ex/build-$p"
           done
-          rm -rf build build-notests
+          rm -rf build
           src="$GITHUB_WORKSPACE"
           cd "$RUNNER_TEMP"
           mv "$src" "$src.away"
@@ -515,12 +472,12 @@ jobs:
             exit 1
           fi
           # The installed paykan still finds its runtime (#124).
-          "$paykan" --backend=c run "$ex/hello.pkn" > run.out
-          "$paykan" build --backend=c -o prog "$ex/hello.pkn"
+          "$paykan" run "$ex/hello.pkn" > run.out
+          "$paykan" build -o prog "$ex/hello.pkn"
           ./prog | diff run.out -
 
   # ---------------------------------------------------------------------------
-  # Strict C11: the C backend's output for the whole samples corpus compiles
+  # Strict C11: --emit-c's output for the whole samples corpus compiles
   # with -std=c11 -pedantic-errors -Wall -Wextra -Werror on GCC and on Clang
   # (both required here) and runs like `paykan run` (scripts/c_strict.py; the
   # CStrictC11 ctest runs it with whichever compilers a job has).
@@ -533,19 +490,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # libzstd-dev: the prebuilt LLVM links with zstd (cmake/LLVMSetup.cmake).
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y ninja-build gcc clang
+        run: sudo apt-get update && sudo apt-get install -y ninja-build gcc clang libzstd-dev
 
-      - name: Cache GoogleTest
-        uses: actions/cache@v4
+      # Restored, never saved: the cache is the test jobs', GoogleTest in it.
+      - name: Restore the third-party dependencies
+        uses: actions/cache/restore@v4
         with:
-          path: build/third-party/gtest
-          key: gtest-${{ hashFiles('cmake/GTestSetup.cmake') }}
+          path: build/third-party
+          key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
-      - name: "Configure (core: recursive-descent frontend, C backend)"
-        run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-            -DPAYKAN_FRONTENDS=recursive-descent -DPAYKAN_BACKENDS=c
+      - name: Configure (the defaults)
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
 
       # The samples import the standard library (::io at least), so stage it.
       - name: Build
@@ -555,4 +512,4 @@ jobs:
         run: |
           gcc --version && clang --version
           python3 scripts/c_strict.py --paykan build/bin/paykan \
-            --cc gcc --cc clang --build-cc gcc --build-cc clang -v
+            --cc gcc --cc clang -v

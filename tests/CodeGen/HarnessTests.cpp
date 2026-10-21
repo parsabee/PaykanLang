@@ -5,20 +5,17 @@
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
 
-#if PAYKAN_TEST_HAVE_LLVM
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#endif
 
 #include <memory>
 #include <string>
 
 using namespace paykan::test;
 
-#if PAYKAN_TEST_HAVE_LLVM
 // A JIT failure must reach the test as a message, not an anonymous -1: here
 // main calls a function no module or runtime table defines, so the JIT cannot
 // resolve it.  The returned error ("JIT: Failed to materialize symbols: ...
@@ -42,8 +39,3 @@ TEST(Harness, JITErrorMessageReachesStdErr) {
   EXPECT_NE(r.StdErr.find("JIT: "), std::string::npos) << r.StdErr;
   EXPECT_NE(r.StdErr.find(missing), std::string::npos) << r.StdErr;
 }
-#else
-TEST(Harness, JITErrorMessageReachesStdErr) {
-  GTEST_SKIP() << "the JIT belongs to the LLVM backend";
-}
-#endif

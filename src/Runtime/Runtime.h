@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // Paykan language runtime — the C ABI of the builtin class types, shared by
-// the runtime, the generated code of both backends (the C backend includes
-// this header) and the JIT's symbol table.
+// the runtime, the generated code (the C of --emit-c includes this header,
+// the LLVM IR follows it) and the JIT's symbol table.
 //
 // Every Paykan object begins with a pointer to its class's vtable: an array
 // of PaykanMethod slots (see "Object" below) whose layout mirrors the
@@ -47,8 +47,8 @@ extern "C" {
 
 // -- Target assumptions
 //
-// The runtime, the C backend's generated code (which includes this header)
-// and the LLVM backend all rely on these implementation-defined properties.
+// The runtime and the generated code, C (which includes this header) and
+// LLVM IR, all rely on these implementation-defined properties.
 // docs/c-backend.md ("Target assumptions") explains where each one is used.
 // They hold on every supported target (LP64 Linux and macOS); a target that
 // breaks one fails to compile here instead of miscompiling.

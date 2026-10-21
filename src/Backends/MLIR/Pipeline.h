@@ -6,7 +6,6 @@
 #pragma once
 
 #include "paykan/Status.h"
-#include "paykan/backends/c/CBuild.h"
 #include "paykan/pir/PIR.h"
 
 #include <llvm/IR/LLVMContext.h>
@@ -41,18 +40,9 @@ Status lowerTo(mlir::ModuleOp module, Stage stage);
 /// The whole program as one C translation unit, on @p os.
 Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os);
 
-/// Module @p index of @p program as a C translation unit of its own: what
-/// it defines and declarations of what it imports (`build` compiles one per
-/// module and caches the objects).
-Status emitModuleC(const pir::Program &program, size_t index,
-                   llvm::raw_ostream &os);
-
-/// The two above, as what paykan/backends/c/CBuild.h builds.
-backend_c::CSource cSource();
-
 /// The whole program in LLVM IR, one linked module named @p moduleName;
 /// imported modules are served from the bitcode cache under @p projectRoot
-/// (<module>.mlir.bc) when their PIR is unchanged.
+/// (<module>.bc) when their PIR is unchanged.
 StatusOr<std::unique_ptr<llvm::Module>>
 compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
                const std::string &moduleName, const std::string &projectRoot);

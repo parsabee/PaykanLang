@@ -79,7 +79,7 @@ class Backend {
 public:
   virtual ~Backend() = default;
 
-  /// The name the backend is registered under ("c", "llvm", ...).
+  /// The name the backend is registered under ("mlir", ...).
   virtual std::string_view name() const = 0;
 
   virtual Capabilities capabilities() const = 0;

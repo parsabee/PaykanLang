@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// A loaded plugin's C backend (PaykanBackend, paykan/plugin_api.h) as a
+// A loaded plugin's backend (PaykanBackend, paykan/plugin_api.h) as a
 // backend::Backend: the driver selects and drives it exactly like a
 // built-in one.  The program crosses the boundary as PIR text
 // (docs/pir.md), printed from the verified pir::Program.

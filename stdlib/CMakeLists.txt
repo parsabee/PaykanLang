@@ -8,12 +8,6 @@
 # holds templates (docs/language/13-generics.md, "Modules").  `cmake
 # --install` installs both.
 
-if(NOT PAYKAN_BACKENDS)
-    message(STATUS "Standard library not compiled: PAYKAN_BACKENDS is empty, "
-                   "and --emit-pkm needs a backend")
-    return()
-endif()
-
 file(GLOB PAYKAN_STDLIB_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/*.pkn")
 cmake_path(SET PAYKAN_STDLIB_STAGE_DIR NORMALIZE
@@ -33,7 +27,7 @@ endforeach()
 
 # The environment `paykan` runs in here: the staged library, no plugins, and
 # for an instrumented build the settings the test jobs give it (an ASan
-# `paykan` with the LLVM backend reports container-overflow in LLVM's
+# `paykan`, which links LLVM, reports container-overflow in LLVM's
 # uninstrumented static initialisers; a coverage one writes its profile in
 # this build directory, not in the current one).
 set(paykan_env PAYKAN_STDLIB=${PAYKAN_STDLIB_STAGE_DIR} PAYKAN_NO_PLUGINS=1)

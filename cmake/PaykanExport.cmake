@@ -18,7 +18,7 @@
 # Exported targets are namespaced Paykan:: and lose their paykan_ prefix:
 # Paykan::plugin, Paykan::backend, Paykan::pir, Paykan::frontend,
 # Paykan::driver, ... plus every built plugin (Paykan::frontend_recursive_descent,
-# Paykan::backend_llvm, ...).
+# Paykan::backend_mlir, ...).
 
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
@@ -42,22 +42,18 @@ set(PAYKAN_EXPORT_TARGETS
     paykan_pir
     paykan_backend
     paykan_backend_toolchain
-    paykan_c_build
     paykan_lowering
     paykan_runtime
     paykan_plugin_host
     paykan_driver
+    # The mlir backend's libraries: its JIT, its native code generation and
+    # its dialect.
+    paykan_jit
+    paykan_llvm_codegen
+    paykan_mlir_pir_dialect
 )
 get_property(PAYKAN_PLUGIN_TARGETS_LIST GLOBAL PROPERTY PAYKAN_PLUGIN_TARGETS)
 list(APPEND PAYKAN_EXPORT_TARGETS ${PAYKAN_PLUGIN_TARGETS_LIST})
-# The LLVM backends' shared libraries are exported with them, and the MLIR
-# backend's dialect with that backend.
-if(TARGET paykan_jit)
-    list(APPEND PAYKAN_EXPORT_TARGETS paykan_jit paykan_llvm_codegen)
-endif()
-if(TARGET paykan_mlir_pir_dialect)
-    list(APPEND PAYKAN_EXPORT_TARGETS paykan_mlir_pir_dialect)
-endif()
 
 # Public include directories point into the source/build tree; an installed
 # consumer must see the install location instead.

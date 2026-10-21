@@ -862,11 +862,14 @@ void FunctionLowering::lowerInstr(Operation *op) {
                        o->getResultTypes(), mapped(o.getArgs()))));
       })
       .Case([&](P::VCallOp o) {
-        // The vtable is the object's first word; slot k its k-th pointer.
+        // The vtable is the object's first word (set by `new`, never
+        // changed); slot k its k-th pointer.
         auto args = mapped(o.getArgs());
-        Value vt = P::PtrLoadOp::create(B, Loc, ptr, asPtr(args.front()));
+        Value vt = P::PtrLoadOp::create(B, Loc, ptr, asPtr(args.front()),
+                                        /*vtable=*/true, /*method=*/false);
         Value slot = P::PtrAddOp::create(B, Loc, vt, i64(8 * o.getSlot()));
-        Value fn = P::PtrLoadOp::create(B, Loc, ptr, slot);
+        Value fn = P::PtrLoadOp::create(B, Loc, ptr, slot, /*vtable=*/false,
+                                        /*method=*/true);
         define(op, resultOf(P::ICallOp::create(B, Loc, o->getResultTypes(), fn,
                                                args)));
       })
@@ -904,7 +907,8 @@ void FunctionLowering::lowerInstr(Operation *op) {
         // The header (vtable, zero counts) and every field, zeroed.
         P::MemZeroOp::create(B, Loc, p, size);
         P::PtrStoreOp::create(B, Loc, p,
-                              P::AddressOfOp::create(B, Loc, ptr, l->VTable));
+                              P::AddressOfOp::create(B, Loc, ptr, l->VTable),
+                              /*vtable=*/true);
         define(op, P::CastOp::create(B, Loc, obj, p));
       })
       .Case([&](P::FreeOp) {
@@ -925,7 +929,8 @@ void FunctionLowering::lowerInstr(Operation *op) {
         define(op, fieldAddr(o.getObj(), o.getClassName(), o.getField(), ty));
       })
       .Case([&](P::VTableLoadOp) {
-        define(op, P::PtrLoadOp::create(B, Loc, ptr, asPtr(operand(0))));
+        define(op, P::PtrLoadOp::create(B, Loc, ptr, asPtr(operand(0)),
+                                        /*vtable=*/true, /*method=*/false));
       })
       .Case([&](P::VTableAddrOp o) {
         const ClassLayout *l = M.layout(o.getClassName());

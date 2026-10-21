@@ -199,12 +199,13 @@ endif()
 # loads it with the directory it is in first on its library search path, so
 # it is given from a directory of its own: from lib/, a dylib there named
 # like one of the linker's own (the archive's libc++.1.dylib) would replace
-# it, and the linker would abort.
-if(APPLE AND EXISTS "${LLVM_INSTALL_DIR}/lib/libLTO.dylib")
-    set(PAYKAN_LIBLTO "${LLVM_INSTALL_DIR}/lto/libLTO.dylib")
+# it, and the linker would abort.  (The LLVM found, downloaded or given with
+# -DLLVM_DIR, e.g. another build tree's.)
+if(APPLE AND EXISTS "${LLVM_INSTALL_PREFIX}/lib/libLTO.dylib")
+    set(PAYKAN_LIBLTO "${LLVM_INSTALL_PREFIX}/lto/libLTO.dylib")
     if(NOT EXISTS "${PAYKAN_LIBLTO}")
-        file(MAKE_DIRECTORY "${LLVM_INSTALL_DIR}/lto")
-        file(CREATE_LINK "${LLVM_INSTALL_DIR}/lib/libLTO.dylib"
+        file(MAKE_DIRECTORY "${LLVM_INSTALL_PREFIX}/lto")
+        file(CREATE_LINK "${LLVM_INSTALL_PREFIX}/lib/libLTO.dylib"
              "${PAYKAN_LIBLTO}" COPY_ON_ERROR)
     endif()
     add_link_options(

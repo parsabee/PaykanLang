@@ -12,11 +12,9 @@ add_compile_definitions(PAYKAN_TEST_STDLIB_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY
 # out-of-tree suites.
 list(JOIN PAYKAN_PLUGIN_COMPATIBLE_VERSIONS ", " PAYKAN_TEST_ACCEPTED_VERSIONS)
 
-if(PAYKAN_NEEDS_LLVM)
-    llvm_map_components_to_libnames(TEST_LLVM_LIBS
-        core support passes orcjit native
-    )
-endif()
+llvm_map_components_to_libnames(TEST_LLVM_LIBS
+    core support passes orcjit native
+)
 
 # --- Parser tests (parser) ---------------------------------------------------
 paykan_test_suite(parser PAYKAN_TEST_SUITE_parser)
@@ -115,23 +113,14 @@ endforeach()
 endif()
 
 # The backends that run programs, each of which the codegen, driver and
-# samples tests run on: the built ones, and with `mlir` its C path, `mlir-c`.
-set(PAYKAN_RUN_BACKENDS "")
-foreach(be IN LISTS PAYKAN_BACKENDS)
-    if(be STREQUAL "llvm" OR be STREQUAL "mlir" OR be STREQUAL "c")
-        list(APPEND PAYKAN_RUN_BACKENDS ${be})
-    endif()
-    if(be STREQUAL "mlir")
-        list(APPEND PAYKAN_RUN_BACKENDS mlir-c)
-    endif()
-endforeach()
+# samples tests run on: the in-tree one, mlir.
+set(PAYKAN_RUN_BACKENDS ${PAYKAN_BACKENDS})
 
-# --- CodeGen / E2E tests, every backend (codegen) ----------------------------
+# --- CodeGen / E2E tests (codegen) --------------------------------------------
 paykan_test_suite(codegen PAYKAN_TEST_SUITE_codegen)
 if(PAYKAN_TEST_SUITE_codegen)
-# One executable; ctest runs it once per backend that can run programs
-# (PAYKAN_TEST_BACKEND selects the one the compile-and-run helpers use, see
-# CodeGenTestUtils.h), so the backends check each other's output.
+# The programs run with the mlir backend's JIT (CodeGenTestUtils.h); the C it
+# emits for the samples is checked by CStrictC11 below.
 add_executable(codegen_tests
     CodeGen/ArithTests.cpp
     CodeGen/FuncTests.cpp
@@ -180,33 +169,18 @@ target_link_libraries(codegen_tests
             paykan_runtime
             paykan_compile_options
 )
-if(PAYKAN_NEEDS_LLVM)
-    target_include_directories(codegen_tests SYSTEM
-        PRIVATE ${LLVM_INCLUDE_DIRS}
-    )
-    paykan_llvm_no_werror(codegen_tests)
-    target_link_libraries(codegen_tests
-        PRIVATE paykan_jit
-                ${TEST_LLVM_LIBS}
-    )
-endif()
-if("llvm" IN_LIST PAYKAN_BACKENDS)
-    target_compile_definitions(codegen_tests
-        PRIVATE PAYKAN_TEST_HAVE_LLVM=1
-    )
-endif()
-if("mlir" IN_LIST PAYKAN_BACKENDS)
-    # (The plugin itself is linked whole, with the others, below.)
-    target_include_directories(codegen_tests
-        PRIVATE ${CMAKE_SOURCE_DIR}/src/Backends/MLIR
-    )
-    target_include_directories(codegen_tests SYSTEM
-        PRIVATE ${MLIR_INCLUDE_DIRS}
-    )
-    target_compile_definitions(codegen_tests
-        PRIVATE PAYKAN_TEST_HAVE_MLIR=1
-    )
-endif()
+# (The mlir plugin itself is linked whole, with the others, below.)
+target_include_directories(codegen_tests
+    PRIVATE ${CMAKE_SOURCE_DIR}/src/Backends/MLIR
+)
+target_include_directories(codegen_tests SYSTEM
+    PRIVATE ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS}
+)
+paykan_llvm_no_werror(codegen_tests)
+target_link_libraries(codegen_tests
+    PRIVATE paykan_jit
+            ${TEST_LLVM_LIBS}
+)
 paykan_link_plugins(codegen_tests)
 foreach(be IN LISTS PAYKAN_RUN_BACKENDS)
     add_test(NAME CodeGenTests.${be} COMMAND codegen_tests)
@@ -215,18 +189,19 @@ foreach(be IN LISTS PAYKAN_RUN_BACKENDS)
 endforeach()
 endif()
 
-# --- PIR -> LLVM translation tests: hand-written PIR, run through the JIT ----
-# --- (pir-llvm) ---------------------------------------------------------------
+# --- PIR -> LLVM translation tests: hand-written PIR, through the mlir ------
+# --- backend's LLVM path and the JIT (pir-llvm) -------------------------------
 paykan_test_suite(pir-llvm PAYKAN_TEST_SUITE_pir_llvm)
-if(PAYKAN_TEST_SUITE_pir_llvm AND "llvm" IN_LIST PAYKAN_BACKENDS)
+if(PAYKAN_TEST_SUITE_pir_llvm)
     add_executable(pir_llvm_tests
         Backends/PIRLLVMTests.cpp
     )
     target_include_directories(pir_llvm_tests
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+                ${CMAKE_SOURCE_DIR}/src/Backends/MLIR
     )
     target_include_directories(pir_llvm_tests SYSTEM
-        PRIVATE ${LLVM_INCLUDE_DIRS}
+        PRIVATE ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS}
     )
     paykan_llvm_no_werror(pir_llvm_tests)
     target_link_libraries(pir_llvm_tests
@@ -244,7 +219,7 @@ endif()
 
 # --- PIR -> MLIR import tests: the pir dialect round trip (pir-mlir) -----------
 paykan_test_suite(pir-mlir PAYKAN_TEST_SUITE_pir_mlir)
-if(PAYKAN_TEST_SUITE_pir_mlir AND "mlir" IN_LIST PAYKAN_BACKENDS)
+if(PAYKAN_TEST_SUITE_pir_mlir)
     add_executable(pir_mlir_tests
         Backends/PIRMLIRTests.cpp
     )
@@ -434,7 +409,7 @@ paykan_test_frontend(fe_clash fe_clash [=[TP_NAME="recursive-descent"]=])
 paykan_test_plugin(dup_a dup [=[TP_NAME="dup"]=])
 paykan_test_plugin(dup_b dup [=[TP_NAME="dup"]=])
 paykan_test_plugin(dup_old dupold [=[TP_NAME="dup"]=] [=[TP_BUILD_VERSION="0.0.9"]=])
-paykan_test_plugin(clash clash [=[TP_NAME="c"]=])
+paykan_test_plugin(clash clash [=[TP_NAME="mlir"]=])
 # Not a library at all.
 file(WRITE ${PAYKAN_TEST_PLUGIN_DIR}/corrupt/libcorrupt${PAYKAN_TEST_PLUGIN_SUFFIX}
     "this is not a shared library\n")
@@ -622,44 +597,23 @@ if(PAYKAN_TEST_SUITE_stdlib AND PAYKAN_SAMPLES_BACKENDS)
     endif()
 endif()
 
-# The C backends' output is strict ISO C11 (docs/c-backend.md): every
+# The C `paykan --emit-c` prints is strict ISO C11 (docs/c-backend.md): every
 # sample's C compiles with -std=c11 -pedantic-errors -Wall -Wextra -Werror on
 # every C compiler found (GCC and Clang), at -O0 and -O2, and runs exactly
-# like `paykan --backend=c run` (scripts/c_strict.py).  `paykan build` is
-# checked too, unless the runtime archive is sanitizer- or
-# coverage-instrumented (it then links only with the compiler that built it).
-# (c-strict)
+# like `paykan run` (scripts/c_strict.py).  (c-strict)
 paykan_test_suite(c-strict PAYKAN_TEST_SUITE_c_strict)
-if(PAYKAN_TEST_SUITE_c_strict AND "c" IN_LIST PAYKAN_BACKENDS)
+if(PAYKAN_TEST_SUITE_c_strict)
     set(PAYKAN_STRICT_CCS "")
     find_program(PAYKAN_STRICT_GCC NAMES gcc)
     find_program(PAYKAN_STRICT_CLANG NAMES clang)
     foreach(cc IN ITEMS ${PAYKAN_STRICT_GCC} ${PAYKAN_STRICT_CLANG})
         if(cc)
             list(APPEND PAYKAN_STRICT_CCS --cc ${cc})
-            if(NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
-                list(APPEND PAYKAN_STRICT_CCS --build-cc ${cc})
-            endif()
         endif()
     endforeach()
     if(PAYKAN_STRICT_CCS)
         paykan_add_python_test(CStrictC11 c_strict.py
                     --paykan $<TARGET_FILE:paykan> ${PAYKAN_STRICT_CCS})
-        # `paykan build` writes the import samples' object caches.
-        if(TEST CStrictC11)
-            set_tests_properties(CStrictC11 PROPERTIES
-                RESOURCE_LOCK paykan_samples_cache)
-        endif()
-        # The mlir backend's C path is held to the same standard.
-        if("mlir-c" IN_LIST PAYKAN_RUN_BACKENDS)
-            paykan_add_python_test(CStrictC11.mlir-c c_strict.py
-                        --backend mlir-c
-                        --paykan $<TARGET_FILE:paykan> ${PAYKAN_STRICT_CCS})
-            if(TEST CStrictC11.mlir-c)
-                set_tests_properties(CStrictC11.mlir-c PROPERTIES
-                    RESOURCE_LOCK paykan_samples_cache)
-            endif()
-        endif()
     endif()
 endif()
 
@@ -692,8 +646,8 @@ paykan_link_plugins(frontend_tests)
 add_test(NAME FrontendTests COMMAND frontend_tests)
 endif()
 
-# A plain configure (no options) is the core build:
-# recursive-descent + c, nothing downloaded, no third-party/ or _deps/
+# A plain configure (no options but this build's LLVM) is the core build:
+# recursive-descent + mlir, nothing downloaded, no third-party/ or _deps/
 # (#123).  Configure only, in a scratch directory of its own.  Not in a
 # coverage build: it runs no instrumented code, and scripts/coverage.py
 # requires every test to write a profile.  (configure)
@@ -704,6 +658,7 @@ if(PAYKAN_TEST_SUITE_configure AND NOT PAYKAN_COVERAGE)
                 -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
                 -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}/default-configure
                 -DGENERATOR=${CMAKE_GENERATOR}
+                -DLLVM_DIR=${LLVM_DIR}
                 -DC_COMPILER=${CMAKE_C_COMPILER}
                 -DCXX_COMPILER=${CMAKE_CXX_COMPILER}
                 -P ${CMAKE_CURRENT_SOURCE_DIR}/DefaultConfigure.cmake)
@@ -734,10 +689,8 @@ endif()
 paykan_test_suite(out-of-tree PAYKAN_TEST_SUITE_out_of_tree)
 if(PAYKAN_TEST_SUITE_out_of_tree AND NOT PAYKAN_SANITIZER_FLAGS
    AND NOT PAYKAN_COVERAGE_FLAGS)
-    set(PAYKAN_OOT_ARGS "")
-    if(TARGET paykan_backend_llvm)
-        list(APPEND PAYKAN_OOT_ARGS -DLLVM_DIR=${LLVM_DIR})
-    endif()
+    # The installation's mlir backend links LLVM and MLIR: this build's.
+    set(PAYKAN_OOT_ARGS -DLLVM_DIR=${LLVM_DIR})
     add_test(NAME PrintPIROutOfTree
         COMMAND ${CMAKE_COMMAND}
                 -DPAYKAN_BUILD_DIR=${CMAKE_BINARY_DIR}
@@ -774,10 +727,8 @@ endif()
 paykan_test_suite(out-of-tree PAYKAN_TEST_SUITE_out_of_tree)
 if(PAYKAN_TEST_SUITE_out_of_tree AND PAYKAN_INSTALL_TEST_SUPPORT
    AND NOT PAYKAN_SANITIZER_FLAGS AND NOT PAYKAN_COVERAGE_FLAGS)
-    set(PAYKAN_OOT_FE_ARGS "")
-    if(TARGET paykan_backend_llvm)
-        list(APPEND PAYKAN_OOT_FE_ARGS -DLLVM_DIR=${LLVM_DIR})
-    endif()
+    # The installation's mlir backend links LLVM and MLIR: this build's.
+    set(PAYKAN_OOT_FE_ARGS -DLLVM_DIR=${LLVM_DIR})
     if(googletest_SOURCE_DIR)
         list(APPEND PAYKAN_OOT_FE_ARGS -DGTEST_SOURCE_DIR=${googletest_SOURCE_DIR})
     elseif(GTest_DIR)
