@@ -19,7 +19,7 @@ Backends are plugins, of two kinds:
   PIR text and talks to `paykan` through a table of host functions.
 - **Built-in plugins** (section 4): C++ classes implementing
   [`include/paykan/Backend.h`](../include/paykan/Backend.h), linked into
-  `paykan` (`c`, `llvm`). They are part of PaykanLang's source tree; an
+  `paykan` (`mlir`). They are part of PaykanLang's source tree; an
   advanced option links such a static C++ plugin into a `paykan` of its own.
 
 Either way the driver lists the backends (`paykan --list-backends`) and
@@ -103,7 +103,7 @@ PAYKAN_PLUGIN_EXPORT const PaykanPlugin *paykan_plugin_init(const PaykanHost *h)
 - **The toolchain.** A native backend links its objects (or C sources)
   against the Paykan runtime with `host->link_executable`; it finds the
   runtime with `host->runtime_library` / `host->runtime_include_dir`, exactly
-  as the built-in backends do.
+  as the built-in backend does.
 
 ## 2. The input
 
@@ -171,14 +171,14 @@ with its own toolchain (`cargo`); `paykan_check_plugin_built_with()` gives a
 CMake wrapper the version check.
 
 A loadable plugin is independent of the installation's configuration: it
-works the same with a core install (recursive-descent + c) and with one
-that has the llvm backend, and needs no LLVM.
+builds against the plugin header alone and needs no LLVM, although the
+`paykan` it loads into links LLVM and MLIR for its own backend.
 
 ## 4. Built-in backends (C++)
 
 ### The C++ interface
 
-The built-in backends implement `Backend.h` in process; a loadable plugin
+A built-in backend implements `Backend.h` in process; a loadable plugin
 never sees these types.
 
 ```cpp
@@ -269,9 +269,11 @@ the CMake helpers below do that. Frontends register the same way with
 Add `src/Backends/<Name>/` with a `CMakeLists.txt` that builds the library,
 links `paykan_backend`, and records it with `paykan_add_plugin(<target>)`;
 list the backend in `PAYKAN_KNOWN_BACKENDS` (`cmake/PaykanPlugins.cmake`) and
-add its `add_subdirectory` to the backend loop in `src/CMakeLists.txt`. Every
-executable that calls `paykan_link_plugins()` (the driver and the test
-binaries) then links it whole-archive, and `-DPAYKAN_BACKENDS=...` selects it.
+add its `add_subdirectory` to `src/CMakeLists.txt`, as `Backends/MLIR` is, for
+when `PAYKAN_BACKENDS` lists it. Every executable that calls
+`paykan_link_plugins()` (the driver and the test binaries) then links it
+whole-archive, and `-DPAYKAN_BACKENDS=...` selects it (`mlir` is always
+built).
 
 ### A static C++ plugin in a driver of its own (advanced)
 
@@ -281,7 +283,7 @@ ties the plugin to the C++ interfaces and to the compiler and standard
 library the installation was built with; prefer a loadable plugin.
 
 ```sh
-cmake -B build -DPAYKAN_BACKENDS=c      # or any configuration
+cmake -B build                          # or any configuration
 cmake --build build
 cmake --install build --prefix /opt/paykan
 ```
@@ -301,32 +303,26 @@ target_link_libraries(paykan_backend_mine PUBLIC Paykan::backend)
 paykan_add_driver(paykan-mine PLUGINS paykan_backend_mine)
 ```
 
-If the installation includes the llvm backend (`PAYKAN_BACKENDS` lists `llvm`),
-`find_package(Paykan)` also looks for LLVM, because that backend's installed
-library links LLVM's libraries. It looks quietly and does not require it (a
-loadable plugin needs no LLVM), but a driver that links the llvm backend
-(`paykan_add_driver`) does: pass the same LLVM the installation was built
-with, or the driver cannot link:
+`find_package(Paykan)` also looks for LLVM and MLIR, because the mlir
+backend's installed libraries link theirs. It looks quietly and does not
+require them (a loadable plugin needs no LLVM), but a driver
+(`paykan_add_driver`), which links the mlir backend, does: pass the same LLVM
+the installation was built with, or the driver cannot link (its MLIR is the
+one LLVM's release archives install beside it, or `-DMLIR_DIR=...`):
 
 ```sh
 cmake -B build -DCMAKE_PREFIX_PATH=/opt/paykan -DLLVM_DIR=<llvm>/lib/cmake/llvm
 ```
 
-A plain configure of Paykan builds only the core (recursive-descent + c) and
-downloads no LLVM. An installation with the llvm backend comes from a configure
-that passes the full list,
-`"-DPAYKAN_BACKENDS=llvm;c"`; that configure downloads LLVM 22
-into `<paykan-build>/third-party/llvm` unless `LLVM_DIR` names one, so
-`<llvm>` above is that directory or the LLVM you passed.
-
-An installation built without the llvm backend needs only `CMAKE_PREFIX_PATH`.
-This lasts while the LLVM backend is in tree; it moves to its own repository at
-v1.0 ([#61](https://github.com/parsabee/PaykanLang/issues/61)).
+A plain configure of Paykan builds the recursive-descent frontend and the
+mlir backend, and downloads LLVM 22 (MLIR included) into
+`<paykan-build>/third-party/llvm` unless `LLVM_DIR` names one, so `<llvm>`
+above is that directory or the LLVM you passed.
 
 `find_package(Paykan)` provides the imported targets `Paykan::backend`,
 `Paykan::pir`, `Paykan::frontend`, `Paykan::sema`, `Paykan::ast`,
 `Paykan::runtime`, `Paykan::driver` and one target per installed plugin
-(`Paykan::backend_c`, `Paykan::frontend_recursive_descent`, ...), the variables
+(`Paykan::backend_mlir`, `Paykan::frontend_recursive_descent`, ...), the variables
 `PAYKAN_BACKENDS` / `PAYKAN_FRONTENDS` / `PAYKAN_PLUGINS`, the installed
 runtime's location `PAYKAN_RUNTIME_LIBRARY` / `PAYKAN_RUNTIME_INCLUDE_DIR`,
 the installation's version `PAYKAN_TOOLCHAIN_VERSION` and the plugin build
@@ -428,7 +424,7 @@ PaykanLang version it was **built with**, and each release carries an explicit
 
   ```text
   $ paykan --list-backends
-  c (default)
+  mlir (default): MLIR 22.1.8
   mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]
   $ paykan --backend=mine program.pkn
   paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]

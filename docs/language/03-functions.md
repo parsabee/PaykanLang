@@ -759,15 +759,15 @@ or archives with `--object`, a comma-separated list:
 
 ```sh
 cc -std=c11 -fPIC -I<paykan include dir> -c text.c -o text.o
-paykan --object=text.o,more.o main.pkn          # run (JIT or C backend)
+paykan --object=text.o,more.o main.pkn          # run (the JIT loads the objects)
 paykan build --object=text.o main.pkn -o main   # an executable
 ```
 
-Every backend links the objects; the llvm backend's `run` loads them into the
-JIT, so build them position-independent (`-fPIC`).  There, the C code may call
-the C library and the runtime functions compiled code uses
-(`PaykanString_new`, `PaykanShared_new`, `Paykan_retain`, `Paykan_release`,
-...); a built executable can call any runtime function.  A `PaykanString`'s
+`run` loads the objects into the JIT, so build them position-independent
+(`-fPIC`).  There, the C code may call the C library and the runtime functions
+compiled code uses (`PaykanString_new`, `PaykanShared_new`, `Paykan_retain`,
+`Paykan_release`, ...); `build` links the objects into the executable, which
+can call any runtime function.  A `PaykanString`'s
 `data` and `len` may be read directly.  See `samples/imports/14_native`.
 
 ---

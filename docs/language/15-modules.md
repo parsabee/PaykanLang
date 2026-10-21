@@ -500,11 +500,11 @@ always the main file's directory, and the compiled modules are cached in
 
 A compiled module is a **`.pkm` module file**: the module's interface (what the type checker
 needs to check a module that imports it), its PIR (the backend-neutral intermediate
-representation both backends generate code from), a symbol index, and a manifest recording
+representation every backend generates code from), a symbol index, and a manifest recording
 which `paykan` produced it, the source it was built from (size and SHA-256) and the interface
 hash of every module it imports. The file carries no backend-specific code, no paths and no
-timestamps: the same source always produces the same bytes, and one file serves the c
-backend and the llvm backend alike. `paykan pkm dump <file>` prints a file,
+timestamps: the same source always produces the same bytes, and one file serves the mlir
+backend and a backend plugin alike. `paykan pkm dump <file>` prints a file,
 `paykan pkm check <file>` says whether this `paykan` can use it, and `paykan --emit-pkm`
 writes one ([The `paykan` command](17-the-paykan-command.md)).
 
@@ -536,11 +536,11 @@ of these.
   truncated, corrupt or out of date is rebuilt. `--rebuild-modules` rebuilds every entry;
   `--no-module-cache` neither reads nor writes them. The directory is purely a cache:
   deleting it at any time is safe and only costs a recompile.
-- **The backends' caches.** Each backend still keeps its own generated-code entries beside the
-  module files (the llvm backend's `a/b/c.bc`; the c backend's `c.<hash>.c`, `.o` and `.key`,
-  one set per key, and the main file's too), validated by their own keys and shared between
-  concurrent builds. They are the native translation of the PIR a module file
-  holds; a later release folds them into the module file. The cache options are summed up in
+- **The backend's cache.** The mlir backend keeps each imported module's LLVM IR in the cache
+  too, as bitcode (`a/b/c.bc`; the main file's is never cached), validated by its own
+  key (the module's PIR, the compiler and the runtime ABI) and shared between concurrent
+  builds. It is the native translation of the PIR a module file holds; a later release folds
+  it into the module file. The cache options are summed up in
   [The `paykan` command](17-the-paykan-command.md#the-compilation-cache).
 
 ### Prebuilt modules
@@ -549,7 +549,7 @@ Where an import's source is not found, a `.pkm` of the module is used instead: f
 the source would be (`a/b/c.pkm` for `a/b/c.pkn`), then under each `--module-path=<dir>`
 directory and each `:`-separated directory of `$PAYKAN_MODULE_PATH`. A source file is always
 authoritative when it exists. A prebuilt module is type-checked against from its interface
-and compiled from its PIR, so the program builds and runs identically on either backend
+and compiled from its PIR, so the program builds and runs identically on any backend
 without the source (see [`samples/imports/13_pkm`](../../samples/imports/13_pkm/README.md)).
 
 A prebuilt file is used only when this `paykan` can: a file written by another release

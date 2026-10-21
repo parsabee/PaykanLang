@@ -39,8 +39,8 @@ extern "C" {
 // The ABI of the generated code (object layout, vtable slots, calling
 // conventions, symbol naming), versioned like every format by the release:
 // major * 10000 + minor * 100 + patch.  Code compiled against another
-// runtime is never linked or loaded: both backends' caches and every .pkm
-// module file record it (docs/design/pkm.md §2.2, tag 0x09).  It is spelled
+// runtime is never linked or loaded: the backend's bitcode cache and every
+// .pkm module file record it (docs/design/pkm.md §2.2, tag 0x09).  It is spelled
 // out here, for C, and the compiler checks it is its own release's
 // (kVersionNumber, a static_assert in src/Modules/ModuleResolver.cpp).
 #define PAYKAN_RUNTIME_ABI_VERSION 200 /* 0.2.0 */
@@ -125,8 +125,8 @@ typedef struct PaykanObject PaykanWeak;
 // every slot holds a method converted to `void (*)(void)` and is converted
 // back to the method's own type before the call (C11 6.3.2.3p8 guarantees
 // the round trip).  The runtime's vtables and the generated code's
-// (`pkvt_<class>`, both backends) are all declared this way, so every slot is
-// read through its declared type.  The slot numbers below are shared by
+// (`pkvt_<class>`, in C and in LLVM IR) are all declared this way, so every
+// slot is read through its declared type.  The slot numbers below are shared by
 // every class: a subclass's vtable starts with its superclass's slots.
 typedef void (*PaykanMethod)(void);
 

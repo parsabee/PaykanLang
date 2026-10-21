@@ -1,7 +1,7 @@
 # The `paykan` command
 
 `paykan` is the compiler, the runner and the build tool in one. This chapter describes its
-commands and every option, the two backends, and the compilation cache.
+commands and every option, the backend, and the compilation cache.
 
 ## Commands
 
@@ -52,14 +52,16 @@ option prints a message suggesting `--help`, and also exits with 1.
 
 ### Looking inside the compiler
 
-These print an intermediate form of the program to standard output and stop:
+These print an intermediate form of the program to standard output and stop.
+`--emit-c`, `--emit-llvm` and `--emit-mlir` are the mlir backend's (with another
+`--backend` they are an error), and only one of them may be given:
 
 | Option | Prints |
 |--------|--------|
-| `--emit-c` | the generated C (selects the c backend; with `--backend=mlir-c`, the mlir backend's C) |
-| `--emit-llvm` | the generated LLVM IR (selects the llvm backend, which must be built in) |
-| `--emit-mlir=<stage>` | the program as MLIR at a stage of the mlir backend, which must be built in: `pir`, the program imported into the `pir` dialect, `scf`, after the lowering both targets share, `llvm`, the LLVM dialect, or `emitc`, EmitC, the C the `mlir-c` backend prints ([the MLIR backend](../design/mlir-backend.md)) |
-| `--emit-source` | the selected backend's output, whatever its language |
+| `--emit-c` | the program's C, one strictly conforming C11 translation unit ([The C output](../c-backend.md)) |
+| `--emit-llvm` | the program's LLVM IR, as `run` executes it at the `-O<n>` level (the mlir backend's `--emit-source`) |
+| `--emit-mlir=<stage>` | the program as MLIR at a stage of the mlir backend: `pir`, the program imported into the `pir` dialect, `scf`, after the lowering both targets share, `llvm`, the LLVM dialect, or `emitc`, EmitC, the C `--emit-c` prints ([the MLIR backend](../design/mlir-backend.md)) |
+| `--emit-source` | the selected backend's output, whatever its language (the mlir backend's is LLVM IR) |
 | `--emit-pir` | PIR, the backend-neutral intermediate representation ([PIR](../pir.md)) |
 | `--emit-ast` | the parsed program in the AST interchange format ([AST format](../plugins/ast-format.md)) |
 | `--dump-ast` | the parsed program as a readable tree |
@@ -115,42 +117,30 @@ fn @"$::io::println<Str>"(%value.1: box) -> void {
 
 ## Backends
 
-A backend turns the compiled program into something that runs. Two come with PaykanLang:
+A backend turns the compiled program into something that runs. PaykanLang has one,
+**`mlir`**, the default, which every build has. It takes the program through MLIR, where one
+lowering serves two targets ([the MLIR backend](../design/mlir-backend.md)):
 
-- **`c`**, the default, which every build has. It translates the program to C11 and
-  compiles it with the system C compiler: `$CC` when the variable is set, `cc` otherwise.
-  `run` builds the program into a temporary directory and runs it; `build` writes the
-  executable. `-O<n>` is passed on to the C compiler.
-- **`llvm`**, opt-in when building PaykanLang from source (`-DPAYKAN_BACKENDS="llvm;c"`). It
-  generates LLVM IR. `run` executes the program in-process with LLVM's JIT compiler, with no
-  C compiler involved; `build` writes a native object and links it with the system C
-  compiler.
+- **LLVM IR.** `run` executes the program in-process with LLVM's JIT compiler, with no C
+  compiler involved; `build` writes a native object and links it against the runtime with
+  the system C compiler: `$CC` when the variable is set, `cc` otherwise. `-O<n>` selects
+  LLVM's optimization pipeline. `--emit-llvm` (or `--emit-source`) prints the IR.
+- **C.** `--emit-c` prints the program as one strictly conforming C11 translation unit,
+  which any C11 compiler builds against the runtime ([The C output](../c-backend.md)).
 
-A third, **`mlir`** (`-DPAYKAN_BACKENDS="llvm;mlir;c"`), is being built to replace both: the
-program goes through MLIR, and one lowering serves both C and LLVM
-([the MLIR backend](../design/mlir-backend.md)). It brings two backends:
-
-- **`mlir`** runs programs like `llvm` does (MLIR, then LLVM IR, then the JIT for `run` and a
-  native object for `build`); `--emit-source` prints its LLVM IR.
-- **`mlir-c`** builds and runs them like `c` does, from the C MLIR's EmitC dialect prints;
-  `--emit-c` (or `--emit-source`) prints that C.
-
-With either, `--emit-mlir=<stage>` prints the program at a stage of the pipeline.
-
-Both backends implement the same language and produce the same output. The repository's
-test suite runs every sample program, and every program in this documentation, on each backend that
-is built.
+`--emit-mlir=<stage>` prints the program at a stage of the pipeline. Other backends are
+plugins ([Plugins](#plugins)), selected with `--backend=<name>`. The repository's test suite
+runs every sample program, and every program in this documentation, on the mlir backend.
 
 ```sh
 $ paykan --list-backends
-c (default)
-llvm: LLVM 22.1.8
-$ paykan --backend=llvm prog.pkn
+mlir (default): MLIR 22.1.8
+$ paykan --backend=mlir prog.pkn
 ```
 
-The C backend needs the PaykanLang runtime (a static library and its header) to link
-programs against. An installed `paykan` finds it next to itself (`../lib` and
-`../include/paykan`); `PAYKAN_RUNTIME_DIR` points it elsewhere.
+`build` needs the PaykanLang runtime (a static library and its header) to link programs
+against. An installed `paykan` finds it next to itself (`../lib` and `../include/paykan`);
+`PAYKAN_RUNTIME_DIR` points it elsewhere.
 
 ## The compilation cache
 
@@ -165,7 +155,9 @@ a class or a signature also recompiles the modules that use it. A module that de
 generic classes, structs or functions, or uses another module's, is not cached: a `.pkm`
 does not hold generic templates yet, so it is compiled from source every time. `::io` and
 `::result` are such modules, and so is every module that calls `io::println`, a generic
-function. Each backend keeps its own generated-code cache beside the `.pkm` entries.
+function. The mlir backend also caches each imported module's LLVM IR there, as bitcode
+(`.paykan_cache/a/b.bc`), and translates the module again only when its PIR or the
+compiler changed.
 
 The cache is safe to share and to delete:
 
@@ -181,7 +173,7 @@ files, the cache and prebuilt modules in detail.
 
 | Variable | Effect |
 |----------|--------|
-| `CC` | the C compiler the c backend uses (default `cc`) |
+| `CC` | the C compiler `build` links executables with (default `cc`) |
 | `PAYKAN_RUNTIME_DIR` | where to find the runtime (`lib/` and `include/paykan/` under it) |
 | `PAYKAN_STDLIB` | the directory of system imports, `import ::name;`, instead of the installed standard library ([Modules](15-modules.md)) |
 | `PAYKAN_MODULE_PATH` | `:`-separated directories of prebuilt `.pkm` modules, searched after the `--module-path` directories |

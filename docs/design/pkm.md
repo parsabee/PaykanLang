@@ -34,6 +34,15 @@ linkage classes and the mangling of §9, the flags and `pkm` verbs §8.5 marks
 as planned, and the coordinated version bump of §11. Every "Decision" not
 yet implemented is a proposal; §15 lists the questions still open.
 
+Since this design was written, the `mlir` backend has replaced the `c` and
+`llvm` backends ([the MLIR backend](mlir-backend.md)). Where this document
+speaks of the C and LLVM backends (§7, §9, §13, §14), it records the design
+against them: the mlir backend's bitcode cache (`.paykan_cache/<module>.bc`)
+is now the only backend cache, the C backend's object cache (`.c/.o/.key`)
+is gone, and the mlir backend's link names (`pk_<module>_S<name>`, the same
+in its C and in its LLVM IR) depend only on the module and the symbol, with
+no program-wide counter (§9.2).
+
 ---
 
 ## 0. Goals, the three parts, terminology
@@ -1031,6 +1040,9 @@ a library build (#23) uses.
 
 ### 7.5 What each backend stores
 
+(Written for the `c` and `llvm` backends, which the `mlir` backend has since
+replaced; its payload would be the LLVM one.)
+
 **C** (`payloadFormat 1`): the relocatable object of the module's
 translation unit (`cc -c`, exactly as `CBuild.cpp`); not the generated C,
 which is derivable. `backendVersion` = the toolchain id (compiler
@@ -1309,6 +1321,10 @@ parameters: `Pair<$class,$class>.first`, `Pair<int,$class>.first`,
 `Box<int>`, class object `Box<geometry::point::Point>`.
 
 ### 9.5 What changes in the backends
+
+(Written for the `c` and `llvm` backends, which the `mlir` backend has since
+replaced: its shared lowering gives every symbol one link name for both of
+its targets.)
 
 **C** (`CEmitter.cpp`): `collectSymbols` runs over the unit's module only
 and calls `pir::mangle`; `UsedSymbols` and the counter are deleted; foreign

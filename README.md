@@ -25,17 +25,17 @@ Release builds are published for macOS (Apple Silicon) and Linux (x86_64 and ARM
 [GitHub Release](https://github.com/parsabee/PaykanLang/releases) carries a tarball per
 platform and a Debian package for Linux (each with its SHA-256 sum). A tarball holds
 `bin/paykan`, the runtime and its header; unpack it
-anywhere and put its `bin/` on the `PATH`. The release builds (tarballs and the Debian package)
-have both backends: the C backend, the default, and the LLVM backend (`--backend=llvm`), linked
-in statically so nothing else needs installing. The Homebrew formula builds the core (the
-recursive-descent frontend and the C backend). Programs are compiled with the system C
-compiler, so a C11 compiler (`cc`) must be installed. Or build from source (below).
+anywhere and put its `bin/` on the `PATH`. The release builds (the tarballs, which the Homebrew
+formula installs, and the Debian package) have the recursive-descent frontend and the `mlir`
+backend, with LLVM linked in statically, so nothing else needs installing. `paykan run` runs a
+program in process; `paykan build` links executables with the system C compiler, so a C
+compiler (`cc`) must be installed to build them. Or build from source (below).
 
 ### Debian / Ubuntu
 
 Download the Debian package for your architecture (`amd64` for x86_64, `arm64` for ARM64) from
 the [latest release](https://github.com/parsabee/PaykanLang/releases/latest) and install it
-with apt, which also pulls in a C compiler (`gcc`, or `clang`) for the C backend:
+with apt, which also pulls in a C compiler (`gcc`, or `clang`) for `paykan build`:
 
 ```sh
 curl -fLO https://github.com/parsabee/PaykanLang/releases/download/v<version>/paykanlang_<version>_amd64.deb
@@ -57,7 +57,7 @@ It installs `paykan` in `/usr/bin`, the runtime in `/usr/lib`, its header and th
 headers in `/usr/include/paykan`, the `find_package(Paykan)` package, and the system plugin
 directory `/usr/lib/paykan/plugins/<version>/`. `sudo apt purge paykanlang` removes it.
 
-### Homebrew (macOS)
+### Homebrew (macOS and Linux)
 
 ```sh
 brew install parsabee/paykanlang/paykanlang
@@ -65,6 +65,8 @@ paykan --version
 ```
 
 The formula is in the tap [`parsabee/homebrew-paykanlang`](https://github.com/parsabee/homebrew-paykanlang).
+It installs the release's prebuilt tarball for the platform (macOS on Apple Silicon, Linux on
+x86_64 and ARM64) rather than building from source.
 A tap of this repository from an earlier release moves there with
 `brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
 
@@ -103,16 +105,17 @@ in the [AST interchange format](docs/plugins/ast-format.md); a backend receives 
 
 ## Building from Source
 
-Prerequisites: CMake 3.24 or newer and a C++20 compiler to build PaykanLang, plus a C11
-compiler (`cc`) at run time, which the C backend uses to compile programs. The default build
-needs nothing else; the LLVM backend is opt-in.
+Prerequisites: CMake 3.24 or newer, a C++20 compiler and LLVM 22.1.8 with MLIR (downloaded by
+the configure step unless you name one) to build PaykanLang, plus a C compiler (`cc`) at run
+time, which `paykan build` links executables with.
 
 Dependencies are deliberately limited to:
 - standard C and C++ (the compiler and its standard libraries) to build and use PaykanLang;
-- GoogleTest, for the test suite only (found on the system, or fetched);
-- LLVM 22 (with MLIR), for the opt-in `llvm` backend only: a configure that lists it
-  downloads the prebuilt release, which links with zlib and zstd from the system
+- LLVM 22.1.8 with MLIR, for the `mlir` backend: `-DLLVM_DIR=<llvm>/lib/cmake/llvm` uses one
+  you have; otherwise the configure downloads the prebuilt release once into
+  `build/third-party/llvm`. The prebuilt LLVM links with zlib and zstd from the system
   (`zlib1g-dev libzstd-dev` on Debian and Ubuntu, `brew install zstd` on macOS);
+- GoogleTest, for the test suite only (found on the system, or fetched);
 - Python 3 with its standard library only, for the test and lint scripts in `scripts/`: the
   system's `python3`, or the one given with `-DPython3_EXECUTABLE=<path>`. Without Python,
   the script-driven tests are skipped.
@@ -122,8 +125,8 @@ git clone https://github.com/parsabee/PaykanLang.git
 cd PaykanLang
 cmake -B build
 cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
-# the full build, with the opt-in LLVM backend:
-# cmake -B build "-DPAYKAN_BACKENDS=llvm;c"
+# with an LLVM 22.1.8 (and its MLIR) of your own instead of the download:
+# cmake -B build -DLLVM_DIR=<llvm>/lib/cmake/llvm
 ```
 
 The frontend (lexer + parser) is pluggable. `-DPAYKAN_FRONTENDS=<list>` lists the in-tree
@@ -137,19 +140,16 @@ one and how to run PaykanLang's parser and Sema suites against it. The reference
 the Bison frontend, [PaykanLang_Bison_Frontend](https://github.com/parsabee/PaykanLang_Bison_Frontend).
 `--dump-tokens` prints a frontend's token stream.
 
-The backend is pluggable too. `-DPAYKAN_BACKENDS=<list>` selects the backends to build:
-`c` (the C backend: emits C11, builds with the system C compiler, standard C++ only) is always
-built; `llvm` (LLVM IR, the ORC JIT for `run`, native objects linked by the system C compiler
-for `build`) is an in-tree, opt-in backend (`-DPAYKAN_BACKENDS="llvm;c"`). The default backend
-is always `c`, whatever the list's order: with `"llvm;c"`, `--list-backends` shows
-`c (default)` and the llvm backend (and its JIT) is selected with `--backend=llvm`.
+The backend is pluggable too. The in-tree backend is `mlir`, always built and the default: it
+imports PIR into an MLIR dialect, lowers it once, and takes it to LLVM IR (the ORC JIT for
+`run`, native objects linked by the system C compiler for `build`, `--emit-llvm`) and, through
+MLIR's EmitC, to strict ISO C11 (`--emit-c`); [`docs/design/mlir-backend.md`](docs/design/mlir-backend.md)
+describes it. `-DPAYKAN_BACKENDS=<list>` lists the in-tree backends to build, and `mlir` is the
+only one (the configure prints `Backends: mlir (default: mlir)`); the names of the `c` and
+`llvm` backends it replaced are still accepted, with a warning, and build `mlir`.
 `--backend=<name>` selects a backend at run time; `--list-backends` prints them and marks the
-default. (A configuration without the c backend, which this tree never produces, falls back to
-the first backend listed.) LLVM is
-downloaded only when `llvm` is listed, so the default configure (`recursive-descent` + `c`) is
-a **barebones build** that needs nothing but a C++20 compiler and a C compiler (CI checks that
-it downloads nothing and links no third-party library). The full build is
-`-DPAYKAN_BACKENDS="llvm;c"`.
+default (`mlir (default)`). Other backends are plugins that the installed `paykan` loads at run
+time (see [Plugins](#plugins)).
 Every backend consumes the Paykan IR described in [`docs/pir.md`](docs/pir.md);
 [`docs/writing-a-backend.md`](docs/writing-a-backend.md) explains how to write one, as a
 loadable plugin for an installed `paykan` (see [Plugins](#plugins)) or in tree, and
@@ -158,13 +158,14 @@ frontends. Each release lists the plugin build versions it accepts; a plugin bui
 version is listed as incompatible and can't be selected
 ([plugin compatibility](docs/writing-a-backend.md#7-plugin-compatibility)).
 
-The tests are off by default, so a plain build downloads nothing at all. See
+The tests are off by default, so a plain build downloads nothing but LLVM. See
 [Testing](#testing) to build them.
 
 The `paykan` binary is placed at `build/bin/paykan`. To install it to a prefix (with the
-runtime, `lib/libpaykan_runtime.a` and `include/paykan/Runtime.h`, that `build` and the c
-backend link programs against, the plugin interface `include/paykan/plugin_api.h` (with the
-generated `include/paykan/plugin_api_version.h` it includes), the standard library
+runtime, `lib/libpaykan_runtime.a` and `include/paykan/Runtime.h`, that `build` links programs
+against and the C that `--emit-c` prints is compiled against, the plugin interface
+`include/paykan/plugin_api.h` (with the generated `include/paykan/plugin_api_version.h` it
+includes), the standard library
 `lib/paykan/stdlib/<version>/`, and the empty system plugin directory
 `lib/paykan/plugins/<version>/`):
 
@@ -179,15 +180,16 @@ cmake --install build --prefix /usr/local
 ```sh
 paykan program.pkn              # run a source file (same as `paykan run program.pkn`)
 paykan build program.pkn -o prog # compile a native executable
-paykan --backend=c program.pkn  # pick a backend (--list-backends prints them)
+paykan --backend=NAME program.pkn # pick a backend (--list-backends prints them)
 paykan --frontend=NAME program.pkn # pick a frontend (--list-frontends prints them)
 paykan --check-only program.pkn # stop after type-checking (no codegen)
 paykan --dump-ast program.pkn   # print the parsed AST
 paykan --emit-ast program.pkn   # print it in the AST interchange format (docs/plugins/ast-format.md)
 paykan --emit-pir program.pkn   # print the backend-neutral IR (docs/pir.md)
-paykan --emit-source program.pkn # print the backend's output (C or LLVM IR)
-paykan --emit-c program.pkn     # print the generated C (--backend=c --emit-source)
-paykan --emit-llvm program.pkn  # print the LLVM IR (--backend=llvm --emit-source)
+paykan --emit-source program.pkn # print the backend's output (the mlir backend's: LLVM IR)
+paykan --emit-c program.pkn     # print the program's C (strict ISO C11, through MLIR's EmitC)
+paykan --emit-llvm program.pkn  # print the LLVM IR (the same as --emit-source)
+paykan --emit-mlir=scf program.pkn # print the program at a stage of the MLIR pipeline (pir, scf, llvm, emitc)
 paykan --track-heap program.pkn # run, then print heap/leak statistics
 paykan -O0 program.pkn          # set the optimization level (0-3, default -O2)
 paykan --plugin=FILE ...        # load a plugin library (repeatable; see Plugins above)
@@ -195,11 +197,10 @@ paykan --version                # print the version, every plugin and the plugin
 paykan --help                   # list every option
 ```
 
-`run` uses the c backend unless `--backend=llvm` is given: the c backend compiles the program
-with the system C compiler into a temporary directory and runs that; `--backend=llvm` executes
-it in-process through LLVM's ORC JIT.
-`--emit-llvm` and `--emit-c` need their backend to be built in. `main`'s return value becomes
-the process exit code, and extra command-line arguments after the source file are passed to
+`run` executes the program in process through LLVM's ORC JIT; `build` emits a native object
+and links it against the runtime with the system C compiler (`$CC`, or `cc`). `--emit-llvm`,
+`--emit-c` and `--emit-mlir` are the mlir backend's and exclude each other. `main`'s return
+value becomes the process exit code, and extra command-line arguments after the source file are passed to
 `main(args: view Str[])` (with `args[0]` the source-file path under `run`, and the executable's path for a
 program made by `build`). Source files use the
 `.pkn` extension (`.pk` is also accepted).
@@ -233,8 +234,7 @@ only those on a pull request, and every suite on a push.
 
 Quality gates are enforced in CI and available locally via the Python helpers in `scripts/`
 (those that run LLVM tools prefer the LLVM 22 tools under `build/third-party/llvm`, which a
-configure with the `llvm` backend downloads, so results match CI; otherwise they use the
-tools on the `PATH`):
+configure downloads, so results match CI; otherwise they use the tools on the `PATH`):
 
 ```sh
 python3 scripts/clang_format.py --apply          # format the C and C++ sources

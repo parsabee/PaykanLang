@@ -7,11 +7,14 @@ need them to write PaykanLang programs; [the language reference](language/index.
 A program goes through three stages. A **frontend** parses the source into an AST (the
 built-in one is a recursive-descent parser). The compiler type-checks the AST and lowers it
 to **PIR**, a small backend-neutral IR. A **backend** turns the PIR into a running program or
-an executable: the built-in `c` backend emits C, and the opt-in `llvm` backend emits LLVM IR.
-Frontends and backends can also be added to an installed `paykan` as plugins.
+an executable: the built-in `mlir` backend takes it through MLIR to LLVM IR, which it runs
+with a JIT or builds into a native executable, and to C (`--emit-c`). Frontends and
+backends can also be added to an installed `paykan` as plugins.
 
 - [PIR](pir.md): the Paykan intermediate representation that every backend consumes.
-- [The C backend](c-backend.md): the generated C, the runtime and the build cache.
+- [The C output](c-backend.md): the C that `--emit-c` prints, its strict C11 guarantee and
+  the target assumptions the generated code and the runtime share.
+- [The MLIR backend](design/mlir-backend.md): the design of the built-in backend.
 - [Plugins overview](plugins/overview.md): how `paykan` discovers, checks and loads
   plugins.
 - [Writing a backend](writing-a-backend.md) and
@@ -76,11 +79,12 @@ documents the C interface field by field.
 
 ## The compilation caches
 
-`paykan` caches compiled modules and objects in a `.paykan_cache` directory next to the
-sources (see [the C backend](c-backend.md)). An entry is keyed on its source, its imports
-and the format versions, so a compiler whose generated code, runtime ABI, PIR, `.pkm`
-format or value layout changed without a version bump still trusts what an older build
-wrote, and running those cached modules can crash. After such a change, delete every cache
+`paykan` caches compiled modules in a `.paykan_cache` directory next to the sources: each
+imported module's `.pkm` file and the mlir backend's LLVM bitcode of it (see
+[the compilation cache](language/17-the-paykan-command.md#the-compilation-cache)). An entry
+is keyed on its source, its imports and the format versions, so a compiler whose generated
+code, runtime ABI, PIR, `.pkm` format or value layout changed without a version bump still
+trusts what an older build wrote, and running those cached modules can crash. After such a change, delete every cache
 before running a program or a test:
 
 ```sh

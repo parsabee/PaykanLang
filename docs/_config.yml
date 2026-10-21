@@ -128,7 +128,7 @@ defaults:
   - scope: { path: pir.md }
     values: { title: PIR, parent: Implementation and plugins, nav_order: 1 }
   - scope: { path: c-backend.md }
-    values: { title: The C backend, parent: Implementation and plugins, nav_order: 2 }
+    values: { title: The C output, parent: Implementation and plugins, nav_order: 2 }
   - scope: { path: plugins/overview.md }
     values: { title: Plugins overview, parent: Implementation and plugins, nav_order: 3 }
   - scope: { path: writing-a-backend.md }

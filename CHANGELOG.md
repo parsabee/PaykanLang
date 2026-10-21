@@ -9,40 +9,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- The `mlir` backend, the first step of replacing the C and llvm backends' two translations of
-  PIR with one lowering through MLIR (docs/design/mlir-backend.md).  Opt-in like `llvm`
-  (`-DPAYKAN_BACKENDS="llvm;mlir;c"`).  So far it imports the program into `pir`, an MLIR
-  dialect with an op for each PIR item, statement and instruction, and prints it:
-  `paykan --emit-mlir=pir prog.pkn`.  The lowering both targets will share follows
-  (`--emit-mlir=scf`): func, scf and arith, plus the pir ops for memory, globals and
+- The `mlir` backend (docs/design/mlir-backend.md), which replaces the C and llvm backends' two
+  translations of PIR with one lowering through MLIR.  It imports the program into `pir`, an
+  MLIR dialect with an op for each PIR item, statement and instruction, and lowers that once
+  for both of its targets: to func, scf and arith, plus the pir ops for memory, globals and
   optionals; structured control flow with `break`, `continue` and early `return` becomes
   `scf.if` / `scf.while` with an exit flag, objects get their C layouts, and every symbol a
-  link name that is a C identifier.  The `pir-mlir` test suite imports every item and
+  link name that is a C identifier.  From there the LLVM path: upstream conversions take
+  func, scf, cf and arith to the LLVM dialect and a pattern each the remaining pir ops, and
+  MLIR translates it to LLVM IR, which `paykan run` runs with the JIT and `paykan build`
+  builds into a native object, its imported modules cached as `<module>.bc`.  And the C
+  path: upstream conversions take func, scf and arith to EmitC and a pattern each the
+  remaining pir ops, and MLIR's C emitter prints the program's C (`--emit-c`).
+  `--emit-mlir=<stage>` prints the program at a stage of the pipeline: `pir`, `scf` (after
+  the shared lowering), `llvm` or `emitc`.  The `pir-mlir` test suite imports every item and
   instruction of PIR and every sample program, checks that the MLIR verifies and parses back
-  to the same text, and that the shared lowering leaves only those ops.  Then the LLVM path
-  (`--emit-mlir=llvm`): upstream conversions take func, scf, cf and arith to the LLVM
-  dialect and a pattern each the remaining pir ops, MLIR translates it to LLVM IR, and
-  `--backend=mlir` runs programs with the JIT and builds them as the llvm backend does, its
-  imported modules cached as `<module>.mlir.bc`.  Every test suite that runs programs runs
-  on it too (CodeGenTests.mlir, DriverTests.mlir, the samples, the standard library's tests,
-  the documentation's examples).  The JIT, the bitcode cache and native builds are a library
-  both LLVM backends share (src/Backends/LLVM/CodeGen).  And the C path
-  (`--emit-mlir=emitc`): upstream conversions take func, scf and arith to EmitC and a pattern
-  each the remaining pir ops, MLIR's C emitter prints it, and `--backend=mlir-c` builds and
-  runs that C with the system compiler as the c backend does its own (`paykan
-  --backend=mlir-c --emit-c prog.pkn` prints it).  Its C is strict C11 like the c backend's
-  (CStrictC11.mlir-c), and the suites that run programs run on it too.  Building C one
-  cached object per module is a library both C backends share (paykan/backends/c/CBuild.h).
+  to the same text, and that the shared lowering leaves only those ops.
 
 ### Changed
 
-- The `llvm` backend is built on LLVM 22.1.8 (was 17.0.6), the first step towards an MLIR
-  backend: the prebuilt release a configure with `-DPAYKAN_BACKENDS=llvm;c` downloads includes
-  MLIR.  Only what PaykanLang uses is extracted (headers, the LLVM and MLIR libraries and the
-  tools the build and the scripts run), about 2 GB of the archive's 12.  The prebuilt LLVM links
+- LLVM is 22.1.8 (was 17.0.6, for the llvm backend), whose prebuilt release includes MLIR.
+  Only what PaykanLang uses is extracted (headers, the LLVM and MLIR libraries and the tools
+  the build and the scripts run), about 2 GB of the archive's 12.  The prebuilt LLVM links
   with zlib and zstd from the system (`zlib1g-dev libzstd-dev` on Debian and Ubuntu, `brew
   install zstd` on macOS); a configure without them says so.  The vendored clang-format and
   clang-tidy are LLVM 22's too.
+- `mlir` is the only backend built in this repository, always built and the default:
+  `paykan --list-backends` prints `mlir (default)` and the configure `Backends: mlir
+  (default: mlir)`.  `paykan run` runs a program in process with LLVM's ORC JIT, with no C
+  compiler involved; `paykan build` emits a native object and links it against
+  `libpaykan_runtime.a` with the system C compiler.  Other backends are plugins
+  (docs/writing-a-backend.md).
+- `--emit-c` prints the mlir backend's C, made with MLIR's EmitC: the whole program as one
+  strictly conforming ISO C11 translation unit (docs/c-backend.md, now "The C output").  The
+  CStrictC11 test (scripts/c_strict.py) compiles it for every runnable sample with
+  `-std=c11 -pedantic-errors -Wall -Wextra -Werror` on GCC and Clang, at `-O0` and `-O2`,
+  and runs it like `paykan run`.  Vtables are arrays of Runtime.h's `PaykanMethod`: an
+  object's vtable pointer is read as a `PaykanMethod *` and a slot as a `PaykanMethod`,
+  converted to the method's type at the call through `uintptr_t` (#62).  `--emit-llvm` is
+  the mlir backend's LLVM IR (its `--emit-source`); `--emit-llvm`, `--emit-c` and
+  `--emit-mlir=<stage>` need the mlir backend and exclude each other.
+- A default configure needs LLVM 22.1.8 with MLIR: it uses `-DLLVM_DIR=<llvm>/lib/cmake/llvm`
+  when given, and otherwise downloads the prebuilt release once into
+  `build/third-party/llvm`.  So the core build is no longer standard C++ only, and a plain
+  configure is no longer one that downloads nothing (#16, #77, #123): it downloads LLVM and
+  nothing else.  The tests stay off by default, and GoogleTest is fetched only when they are
+  enabled.  The DefaultConfigure test configures with no option but the enclosing build's
+  `LLVM_DIR` and checks that the defaults are recursive-descent + mlir, with nothing
+  downloaded.
+- The bitcode module cache (`.paykan_cache/<module>.bc`) is the only backend cache.
+- The release tarballs and the Debian package ship the defaults, the recursive-descent
+  frontend and the mlir backend, with LLVM linked in statically.  Homebrew installs the
+  release's prebuilt tarballs (macOS ARM64, Linux x86-64 and ARM64) instead of building from
+  source ([parsabee/homebrew-paykanlang#2](https://github.com/parsabee/homebrew-paykanlang/pull/2)).
+- CI: the "Barebones | Linux x86-64" job, which built without LLVM, is replaced by "Install |
+  Linux x86-64": a plain configure, installed, with plugins loaded into the installed
+  `paykan`.  Every job builds the defaults.
+
+### Removed
+
+- The `c` backend: the C emitter and its build (src/Backends/C: CEmitter, CBackend, CBuild,
+  CNames; include/paykan/backends/c), the `paykan_c_build` library and the C object cache
+  (`.paykan_cache/<module>.<hash>.{c,o,key}`).  `--emit-c` is the mlir backend's.
+- The `llvm` backend: src/Backends/LLVM/LLVMBackend.cpp and PIRToLLVM.cpp.
+  src/Backends/LLVM/JIT and src/Backends/LLVM/CodeGen stay, as the mlir backend's JIT and
+  native code generation.
+- `--backend=c` and `--backend=llvm` (unknown backends now).  In `PAYKAN_BACKENDS` the names
+  `c` and `llvm` are still accepted, with a warning, and build `mlir`.
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

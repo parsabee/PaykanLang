@@ -1,183 +1,200 @@
-# The C backend
+# The C output
 
-The C backend (`--backend=c`) translates a verified PIR program
-(`docs/pir.md`) into one strictly conforming ISO C11 translation unit
-(see [Standard C](#standard-c)) against the runtime's `Runtime.h`, and builds
-or runs it with the system C compiler.  It is part of the core: it depends on
-nothing but the standard library and a C compiler at run time, and it is the
-default backend of every build that has it (it always is built in tree), so
-`--backend=c` may be omitted.  The LLVM backend is in tree too, but opt-in at
-configure time (`-DPAYKAN_BACKENDS="llvm;c"`) and selected with `--backend=llvm`.
+`paykan --emit-c prog.pkn` prints the whole program as one C translation unit:
+the C target of the `mlir` backend ([the MLIR backend](design/mlir-backend.md)),
+the only backend in this repository.  The C is strictly conforming ISO C11
+under the target assumptions below (see [Standard C](#standard-c)), written
+against the runtime's `Runtime.h`, and builds with any C11 compiler and
+`libpaykan_runtime.a`.  `paykan run` and `paykan build` do not go through it:
+they take the backend's other path, through LLVM (the JIT for `run`, a native
+object linked by the system C compiler for `build`).  The C is there to read
+what the compiler made of a program, and to build the program with a C
+compiler of your choice.
 
 ## Commands
 
 | Command | Effect |
 |---|---|
-| `paykan --backend=c --emit-c prog.pkn` | write the C to stdout and stop |
-| `paykan --backend=c build prog.pkn [-o prog]` | emit, compile and link an executable (default name: the source's stem) |
-| `paykan --backend=c run prog.pkn [args…]` / `paykan --backend=c prog.pkn [args…]` | build into a temporary directory, run, forward the exit code |
-| `--track-heap` | the program runs with the runtime's tracking allocator and prints the heap statistics to stderr at exit (`live blocks : 0` for a leak-free program) |
-| `-O<n>` | passed to the C compiler as `-O<n>` |
+| `paykan --emit-c prog.pkn` | write the program's C to stdout and stop |
+| `paykan --emit-mlir=emitc prog.pkn` | write the same unit in MLIR's EmitC dialect, as MLIR's C emitter receives it |
+| `paykan --emit-mlir=scf prog.pkn` | write the program after the lowering the C and the LLVM paths share |
 
-The C compiler is `$CC`, then `cc` (in a `PAYKAN_COVERAGE` build, the C
-compiler that built the runtime, with `-isysroot` of the build's SDK on
-macOS).  The runtime (`libpaykan_runtime.a` and
-`Runtime.h`) is found in this order: `$PAYKAN_RUNTIME_DIR/{lib,include/paykan}`,
-the installed runtime recorded by the package a driver made with
-`paykan_add_driver` was built against, the install layout around the
-executable (`../lib`, `../include/paykan`), the build tree the compiler was
-built in (only for a binary inside that build tree, which a
-`.paykan-build-tree` marker at its top identifies), and the install location
-configured at build time.  So an installed `paykan` uses its own prefix even
-while its build tree still exists.  Programs are compiled and linked with the
-build's sanitizer and coverage flags, since the runtime archive is
-instrumented with them.
+`--emit-c` needs the mlir backend, the default (`--emit-c` with another
+`--backend` is an error), and excludes `--emit-llvm` and `--emit-mlir`.  `-O<n>`
+does not change the C; the flags of the C compiler that builds it do.
 
-A program started with `paykan run` sees the script path as `args[0]`
-(`fn main(args: view Str[])`), like the llvm backend.  A runtime panic flushes
-stdout (and every open `io::File`), prints its message to stderr and aborts the
-program (`SIGABRT`); `paykan run` then exits with 128 + the signal number,
-134, which is also what the llvm backend's `paykan run` exits with (its JIT
-runs the program in the compiler's own process and turns the abort into that
-exit status).  An executable from `build` dies by `SIGABRT` itself, on both
-backends.
+To build the C:
+
+```sh
+paykan --emit-c prog.pkn > prog.c
+cc -std=c11 -O2 -I<prefix>/include/paykan prog.c <prefix>/lib/libpaykan_runtime.a -lm -o prog
+```
+
+`<prefix>` is the installation: `/usr` for the Debian package, the unpacked
+`paykanlang/` directory of a release tarball.  The executable behaves as one
+made by `paykan build`: the Paykan `main`'s result is the exit status, the
+command-line arguments reach `main(args: view Str[])` (with `args[0]` the
+executable's path), a runtime panic flushes stdout, prints its message to
+stderr and aborts the program (`SIGABRT`), and `PAYKAN_TRACK_HEAP` set in the
+environment prints the heap statistics at exit, as `--track-heap` does.  A
+program with `native fn`s links the objects that define them, as `--object`
+does for `paykan build`.
+
+## How it is made
+
+The C comes out of the same pipeline as the LLVM IR, up to where the two
+targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
+
+1. PIR is imported into the `pir` MLIR dialect, and the shared lowering
+   (`src/Backends/MLIR/Lowering/PIRToStandard.cpp`) takes it to `func`, `scf`
+   and `arith`, plus the few `pir` memory ops neither upstream path covers.
+   Everything specific to PaykanLang is decided there, once for both
+   targets: ARC as runtime calls, every class's layout and field offsets, the
+   vtables, the optionals, the exit flags that give `scf` its `break`,
+   `continue` and early `return`, and every symbol's link name.
+2. Canonicalisation drops the values and call results nothing reads (C would
+   warn about the unused variable).
+3. One conversion (`src/Backends/MLIR/ToEmitC/ToEmitC.cpp`) takes `func`,
+   `scf` and `arith` to EmitC with MLIR's upstream patterns, and the remaining
+   `pir` ops with patterns of its own, the only part of the backend written
+   for C alone.  It also adds what surrounds them in the translation unit:
+   the includes, the optionals' structs, the indirect-call helpers and C's
+   `main`.
+4. MLIR's C emitter prints the unit, with an empty parameter list spelled
+   `(void)`, C11's prototype, in place of the emitter's `()` (an old-style
+   declaration in C).
 
 ## The generated C
 
-* One `struct` per class with the runtime's 16-byte object header (vtable
-  pointer, `int32_t` strong count, `int32_t` weak count) followed by every
-  field, ancestors first.
-  Class, function and global names are mangled as `pk_<module>_<name>` (any
-  character outside `[A-Za-z0-9_]` becomes `_XX`, and a clash gets a `_<n>`
-  suffix), so modules never collide and generics instantiations
-  (`Box<int>`) and methods (`K.w` is `pk_<module>_K_2Ew`, distinct from a
-  user function `K_2Ew`) are valid identifiers.  A runtime extern is
-  `@$rt.<symbol>` in PIR (`docs/pir.md` §3) and is emitted as its C name
-  `<symbol>`, declared by `Runtime.h`; a program function spelled like a
-  runtime symbol (`fn PaykanString_new`) is an ordinary program function
-  (`pk_<module>_PaykanString_new`), so it neither replaces nor clashes with
-  the runtime's.
-* One vtable per class (`pkvt_pk_<module>_<Class>`), whose address is the
-  class's runtime type identity (`match`).  Every vtable, the runtime's
-  included, is an array of `PaykanMethod` (`void (*)(void)`, `Runtime.h`):
-  each slot holds a method converted to that type, and a virtual call reads
-  the slot (`Paykan_vtable_of(obj)[slot]`, with the slot number from PIR)
-  and converts it back to the method's own type before calling it, a round
-  trip C11 6.3.2.3p8 defines.
-* Names from the program never reach C unprefixed, so they cannot clash with
-  C keywords, the C library (`errno`, `stdout`, `fmod`, `int64_t`, ...) or
-  generated names: fields are `f_<name>`, PIR locals `l_<name>` (`l<k>_<name>`
-  for the k-th shadowing local of the same name), and PIR values
-  `v<id>_<name>`.
-* Every PIR value is a `const`-free C local declared where it is defined;
-  PIR locals are C variables declared at the top of the function.
-  Structured PIR maps one-to-one: `if`/`else`, `for (;;)` with the condition
-  region at the top of the loop (`continue` re-enters it), `break`,
-  `return`.
-* Integer arithmetic wraps (it is done in `uint64_t`), float comparisons
-  are C's own operators (`!=` unordered, true for a NaN operand; the rest
-  ordered, as `docs/pir.md` defines `cmp`), and `cast` reinterprets bits
-  through `memcpy`, so the generated code has the same semantics as the
-  LLVM backend.
-* ARC, weak references, allocation and freeing are direct runtime calls
-  (`Paykan_retain`, `Paykan_release`, `PaykanShared_new`, `Paykan_weak_new`,
-  `Paykan_weak_load`, `Paykan_weak_release`, `Paykan_malloc`, `Paykan_free`);
-  `unbox` is a cast, since a box is its object's own pointer; every other
-  runtime call is cast to the prototype in `Runtime.h`.
-* `main(int argc, char **argv)` makes the program's arguments with
-  `Paykan_args_new` (when the Paykan `main` takes them), passes them to
-  the Paykan `main` as a slice (their address and number) and drops them
-  with `Paykan_args_free` after it returns, honours `PAYKAN_TRACK_HEAP`
-  (set by `--track-heap`) and returns the Paykan `main`'s result.
-* Nothing unused is emitted: the bit-cast helpers, allocators (`pknew_*`)
-  and string / data globals only when referenced, no local that nothing
-  reads, and no binding for a call result nothing reads; an unread
-  parameter is consumed with `(void)`.  An `if` on a literal condition is
-  emitted as just the branch taken.
+* **The unit.**  A comment naming the generator; `<math.h>`, `<stdbool.h>`,
+  `<stdint.h>`, `<stdlib.h>`, `<string.h>` and `"Runtime.h"`; the optionals'
+  structs and the `pkicall_<n>` helpers; then each PIR module of the program
+  in turn, main module first: a declaration of every function it defines (a
+  body or a vtable may use one defined below it), `extern` declarations of
+  what it uses from other modules and of its native functions, its constants
+  and vtables, and its functions.  C's `main` ends the main module's part.
+* **Types** are spelled as `Runtime.h` spells them: an `i64` is `int64_t`, an
+  `f64` `double`, a `bool` `bool` and a `char` `int8_t`; a box is
+  `PaykanShared *`, an obj `PaykanObject *`, a weak reference `PaykanWeak *`
+  and a ptr `void *`.  An optional is the struct of its presence flag and its
+  payload, `typedef struct { bool present; <payload> value; }
+  pkrt_opt_<payload>;` (`pkrt_opt_i64`, `_f64`, `_bool`, `_char`), passed and
+  returned by value.
+* **Names.**  Every symbol a module defines has the link name the shared
+  lowering gives it, the same in the C and in the LLVM IR: `pk_<module>_S<name>`,
+  and `pkvt_<module>_S<class>` for a class's vtable.  In both parts letters
+  and digits stay, `_` is doubled and every other byte becomes `_XX`, its
+  hexadecimal code, so the result is a C identifier, no two symbols share
+  one, and none spells a C keyword, a C library name or a runtime symbol: a
+  program's `fn PaykanString_new` in module `m` is `pk_m_SPaykanString__new`,
+  and the method `Dog.sound` of module `zoo` is `pk_zoo_SDog_2Esound`.
+  Runtime and native functions keep their C names.  The program's `main` is
+  the `static` function `paykan_main`, and values are `v<n>`, numbered per
+  function.
+* **Objects** have no C struct of their own.  The shared lowering computes
+  each class's layout as C lays out such a struct (the 16-byte header, then
+  every field at its alignment, ancestors first; [PIR](pir.md) §5), and a
+  field is read or written through the object's address plus the field's
+  byte offset, `*(T *)((uint8_t *)obj + offset)`.
+* **Vtables** are arrays of `Runtime.h`'s `PaykanMethod`, as the runtime's
+  own are: `PaykanMethod pkvt_zoo_SDog[4] = {(PaykanMethod)pk_zoo_SDog_2Edestroy,
+  (PaykanMethod)PaykanObject_toString, ...};`, with `NULL` in an abstract
+  slot; another module's vtable is declared `extern PaykanMethod
+  pkvt_...[];`.  A virtual call reads the object's vtable pointer as a
+  `PaykanMethod *` and the slot as a `PaykanMethod`, so every vtable is read
+  through the type it is declared with (#62), and converts the slot through
+  `uintptr_t` to the `void *` an indirect call takes.
+* **Function values and indirect calls.**  A function's address is held as a
+  `void *` through `uintptr_t`, `(void *)(uintptr_t)f`, since ISO C converts
+  a function pointer to an object pointer in neither direction.  A call
+  through one goes through a helper per signature, defined once at the top
+  of the unit, which converts it back to the function's type:
 
-`--emit-c` prints the whole program as one file.  `build` and `run` instead
-emit one translation unit per PIR module (a module declares what it imports
-as `extern` items, so each unit is self-contained), compile each into
-`<project root>/.paykan_cache/<module>.<hash>.o` (`geometry::shapes` is
-`geometry/shapes.<hash>.o`, the system module `::io` is
-`@system/io.<hash>.o`), reuse the object while the module's generated C
-and its cache key (the C compiler and flags, a hash of `Runtime.h` and the
-paykan version) are unchanged, and link the objects with
-`libpaykan_runtime.a`.  `<hash>` is a 64-bit FNV-1a hash of the whole key
-(which includes a hash of the module's C), and the entry's `.c`, `.o` and
-`.key` all carry it, so builds with different flags (`-O0` and
-`-O2`, a sanitizer) never share a file (#134): a build links only objects
-compiled under its own key, with no window in which a concurrent build can
-swap in one compiled under another, and alternating configurations do not
-rebuild each other's objects.  The `.key` still records the whole key, so a
-hash collision only costs a rebuild.  Cache files are written to a temporary
-name and renamed into place, the object before its `.key`, so concurrent
-builds that share an import never see a partial entry.  The `.key` also
-records the object's size and hash, checked on every reuse: an object
-truncated or corrupted after it was cached is rebuilt, not linked.  Each
-reuse touches the `.key`; when a module gets a new entry, its entries
-beyond the four most recently used are deleted, except any used within the
-last hour (a concurrent build may be about to link it), and so are unhashed
-entries left by older versions (`<module>.{c,o,key}`).
-`scripts/cache_race.py` (the `CacheRace` test) races builds with different
-flags on one project.  The output is
-deterministic for a given program.  The C compiler runs with `-std=c11` and
-the include path only: no `-w`, since the generated code compiles without
-warnings (any warning is a backend bug).
+  ```c
+  static int64_t pkicall_0(void *fn, PaykanObject * a0, int64_t a1) { return ((int64_t (*)(PaykanObject *, int64_t))(uintptr_t)fn)(a0, a1); }
+  ```
+
+* **Locals.**  Each local slot of the shared lowering (a PIR `local`, an exit
+  flag, a function's result) is a zeroed array of the unsigned integer of the
+  slot's alignment, `uint64_t v3[1] = {0};` for an 8-byte slot, which gives
+  C the slot's alignment; it is read and written through a pointer of the
+  value's type.
+* **Calls.**  A runtime function is called through `Runtime.h`'s prototype,
+  which the unit never repeats: its pointer arguments are passed as `void *`
+  and its pointer result is cast, so `Runtime.h`'s more precise pointer types
+  need no table in the compiler.  Native functions and other modules'
+  functions are declared `extern` from their PIR signatures.
+* **Arithmetic.**  Integer arithmetic is done in `uint64_t` and converted
+  back, so it never overflows a signed type; division by zero and
+  `INT64_MIN / -1` are guarded by the lowering before they reach C, and
+  `INT64_MIN` is written as the macro.  A float comparison is C's operator,
+  `!=` unordered and the others ordered, as `docs/pir.md` defines `cmp`; a
+  `cast` between `f64` and `i64` reinterprets the bits with `memcpy`.
+* **Constants.**  Strings and data are `static const` arrays
+  (`static const char pk_hello_S_2Estr0[3] = "hi";`), an empty one `{0}` of
+  one element; a `?` in a string is escaped, so no trigraph forms.
+* **Control flow** is structured, as PIR is.  An `if` is C's `if`; a `while`
+  is a `do { ... } while (cond);` whose body evaluates the condition and runs
+  the loop's body under an `if` on it.  `break`, `continue` and an early
+  `return` set the function's exit flag; the statements after one that may
+  have set it run under an `if` on the flag being clear, a loop stops once it
+  is set, and the function returns its result from a local at its end.
+* **C's `main`** sets the runtime up as `paykan run` does: with
+  `PAYKAN_TRACK_HEAP` set, the tracking allocator before the program and the
+  heap statistics after it; the command-line arguments as the Paykan `main`'s
+  `args` slice (`Paykan_args_new`, which also honours `PAYKAN_NO_ARGS`, and
+  `Paykan_args_free` after it returns), or `(void)argc; (void)argv;` when it
+  takes none; and the Paykan `main`'s result as the exit status.
+* **Nothing unused.**  Values nothing reads are dropped before the
+  conversion, a constant nothing reads is not emitted, a call result nothing
+  reads is not bound, and a parameter a function does not read is consumed
+  with `(void)p;`, so a `-Wall -Wextra` build finds no unused variable,
+  parameter or static.
+
+The C does not read like hand-written C: EmitC names every intermediate value
+and spells every conversion as a cast of its own.  The output is
+deterministic for a given program.
 
 ## Standard C
 
-Everything `--emit-c`, `build` and `run` generate is strictly conforming ISO
-C11 under the target assumptions below: no compiler extensions (statement
-expressions, `__attribute__`, `__builtin_*`, `typeof`, case ranges, labels as
-values, inline assembly), no VLAs, no zero-length arrays or empty
-initializers, no conversion between function and object pointers, no type
-punning except through `memcpy`, and no reserved identifiers (every emitted
-name starts with a lowercase prefix: `pk_`, `pkvt_`, `pknew_`, `pkrt_`,
-`f_`, `l_`, `v<id>`).  Integer arithmetic is done in `uint64_t`, so it never
-overflows a signed type (negation is `0 - (uint64_t)x`; PIR has no shifts),
-and division by zero and `INT64_MIN / -1` are guarded by the lowering before
-they reach C.
+Everything `--emit-c` prints is strictly conforming ISO C11 under the target
+assumptions below: no compiler extensions (statement expressions,
+`__attribute__`, `__builtin_*`, `typeof`, case ranges, labels as values,
+inline assembly), no VLAs, no zero-length arrays or empty initializers, no
+conversion between function and object pointers except through `uintptr_t`,
+no type punning except through `memcpy`, and no reserved identifiers (every
+generated name starts with a lowercase prefix: `pk_`, `pkvt_`, `pkicall_`,
+`pkrt_`, `paykan_main`, `v<n>`).
 
-The `CStrictC11` ctest (`scripts/c_strict.py`) enforces this over the whole
-samples corpus (`samples/codegen`, `samples/leak-check` and
-`samples/imports/*/main.pkn`): with every C compiler
-it finds (GCC and Clang), each program's `--emit-c` output and the runtime
-are compiled with `-std=c11 -pedantic-errors -Wall -Wextra -Werror` at `-O0`
-and `-O2`, linked and run, and `paykan build` is run with those flags added
-to `$CC` (which also covers the per-module units); every executable must
-print the same stdout and stderr, exit with the same status and leave the
-same live heap blocks (none) as `paykan --backend=c run`.  The *Strict C11*
-CI job runs it with both GCC and Clang required.  MSVC (`clang-cl`) and
-TinyCC are a goal, not yet checked: no CI runner provides them.
+The `CStrictC11` ctest (`scripts/c_strict.py`) enforces this over the runnable
+programs of the samples corpus (`samples/codegen`, `samples/leak-check` and
+`samples/imports/*/main.pkn`): with every C compiler it finds (GCC and Clang),
+each program's `--emit-c` output and the runtime (`src/Runtime/*.c`) are
+compiled with `-std=c11 -pedantic-errors -Wall -Wextra -Werror` at `-O0` and
+`-O2`, linked and run, and every executable must print the same stdout and
+stderr, exit with the same status and leave the same live heap blocks (none)
+as `paykan run --track-heap`.  The *Strict C11* CI job runs it with both GCC
+and Clang required.  MSVC (`clang-cl`) and TinyCC are a goal, not yet checked:
+no CI runner provides them.
 
 ### Target assumptions
 
 The generated code and the runtime rely on these implementation-defined
-properties.  `Runtime.h`, which every generated unit includes, checks each
-with `_Static_assert` (or `#error`), so a target that breaks one fails to
-compile instead of miscompiling.
+properties.  `Runtime.h`, which the C includes, checks each it can with
+`_Static_assert` (or `#error`), so a target that breaks one fails to compile
+instead of miscompiling.  The LLVM IR the backend runs and builds relies on
+the same properties.
 
 | Assumption | Why | Check |
 |---|---|---|
-| `CHAR_BIT == 8` | byte offsets into `mem` storage (arrays, tuples) and tuple layouts, string data, `int8_t` chars | `_Static_assert` |
-| LP64: 8-byte pointers, `intptr_t` and `unsigned long` | a reference in an array, a tuple or a `PaykanType` value is an 8-byte box pointer at the offset the lowering computed for both backends | `_Static_assert` on the sizes; `#error` without `intptr_t` |
-| A pointer converted to `intptr_t` / `int64_t` and back is the same pointer (C11 6.3.2.3p5-6 leave it implementation-defined) | PIR's `cast`s between `i64` and `box`, `obj` or `ptr` (`(PaykanShared *)(intptr_t)v`) | documented; true of every LP64 ABI |
-| Function pointers are pointer-sized | vtable slots are 8 bytes, matching the LLVM backend's vtables | `_Static_assert` |
+| `CHAR_BIT == 8` | byte offsets into objects and `mem` storage (arrays, tuples), tuple layouts, string data, `int8_t` chars | `_Static_assert` |
+| LP64: 8-byte pointers, `intptr_t` and `unsigned long` | a reference in an object, an array, a tuple or a `PaykanType` value is an 8-byte box pointer at the offset the shared lowering computed | `_Static_assert` on the sizes; `#error` without `intptr_t` |
+| A pointer converted to `intptr_t` / `int64_t` and back is the same pointer (C11 6.3.2.3p5-6 leave it implementation-defined) | PIR's `cast`s between `i64` and `box`, `obj` or `ptr` | documented; true of every LP64 ABI |
+| Function pointers are pointer-sized, and one converted to `uintptr_t` and back (6.3.2.3p5-6 again) is the same function | vtable slots are 8 bytes; a function value and a vtable slot are held as a `void *` through `uintptr_t` until a `pkicall_<n>` helper calls them | `_Static_assert` on the size; the conversion is documented, true of every LP64 ABI |
 | Two's complement, and converting an out-of-range value to a signed type wraps modulo 2^64 (6.3.1.3p3 leaves it implementation-defined) | `(int64_t)((uint64_t)a + (uint64_t)b)` and the other wrapping operations | `_Static_assert((int64_t)UINT64_MAX == -1 && ...)` |
-| IEEE 754 binary64 `double`, with NaN and infinities | float semantics, `cast` bit patterns, `NAN` / `INFINITY` literals | `_Static_assert` on `<float.h>` (`FLT_RADIX`, `DBL_MANT_DIG`, `DBL_MAX_EXP`, `DBL_MIN_EXP`) |
-| An object struct can be used through a `PaykanObject *` (and a pointer to it converted to and from `PaykanObject *`): every Paykan object struct, generated or in the runtime, starts with the same 16-byte header | the runtime's ARC and method calls see every object as a `PaykanObject`; generated code casts between `struct pk_…`, `PaykanString`, `PaykanFile`, … and `PaykanObject *` | `_Static_assert` on the runtime structs' header offsets; the generated code reads vtables only through `memcpy` (`Paykan_vtable_of`), never through another struct type |
+| IEEE 754 binary64 `double`, with NaN and infinities | float semantics, `cast` bit patterns, `NAN` / `INFINITY` | `_Static_assert` on `<float.h>` (`FLT_RADIX`, `DBL_MANT_DIG`, `DBL_MAX_EXP`, `DBL_MIN_EXP`) |
+| Every Paykan object, generated or the runtime's, starts with the same 16-byte header, so a pointer to it can be converted to and used as a `PaykanObject *` | the runtime's ARC and method calls see every object as a `PaykanObject`; the generated code reads an object's vtable pointer as the `PaykanMethod *` the header starts with | `_Static_assert` on the runtime structs' header offsets |
 
 `__STDC_IEC_559__` (full Annex F conformance) is deliberately not required:
 GCC and Clang on glibc define it, Apple's clang does not, and the generated
 code relies only on the binary64 format, which `<float.h>` pins down.
-
-## Parity with the LLVM backend
-
-Both backends consume the same PIR semantics (the ownership rules live in the
-lowering, `src/Lowering`), so every CodeGen test and every sample must produce
-identical stdout, exit codes and zero live heap blocks under `--track-heap`
-on both.  `tests/CodeGenTestUtils.h` selects the backend with
-`PAYKAN_TEST_BACKEND` and ctest runs the CodeGen and Driver suites once per
-backend (`CodeGenTests.llvm`, `CodeGenTests.c`, ...); `SamplesParity` runs
-`scripts/samples_parity.py` over the samples corpus on every backend.
