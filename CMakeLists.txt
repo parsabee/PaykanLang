@@ -66,6 +66,9 @@ include(PaykanPlugins)      # -> PAYKAN_FRONTENDS / PAYKAN_BACKENDS, plugin help
 if(PAYKAN_NEEDS_LLVM)
     include(LLVMSetup)      # -> paykan_llvm       INTERFACE target
 endif()
+if(PAYKAN_NEEDS_MLIR)
+    include(MLIRSetup)      # -> MLIR's package, mlir_tablegen()
+endif()
 
 # The tests are off by default, so a plain configure builds only the compiler
 # and downloads nothing.  -DPAYKAN_BUILD_TESTS=<suites> builds the named test

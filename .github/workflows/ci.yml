@@ -17,9 +17,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The default configure is the core build (recursive-descent + c, nothing
-# downloaded, #123).  Jobs that test the opt-in LLVM backend pass the full
-# list explicitly:
-#   "-DPAYKAN_BACKENDS=llvm;c"
+# downloaded, #123).  Jobs that test the opt-in LLVM and MLIR backends pass
+# the full list explicitly:
+#   "-DPAYKAN_BACKENDS=llvm;mlir;c"
 # The default backend is c there too (it always is when c is built); every
 # test that means llvm passes --backend=llvm, and the per-backend suites
 # (CodeGenTests.*, DriverTests.*, SamplesParity*) run on both.
@@ -108,7 +108,7 @@ jobs:
       # every translation unit of the compiler is checked, and the affected
       # test suites' sources with it.
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;mlir;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -147,7 +147,7 @@ jobs:
           key: third-party-macos-arm64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;mlir;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -184,7 +184,7 @@ jobs:
           key: third-party-macos-arm64-asan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (ASan)
-        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_ASAN=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build-asan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_ASAN=ON "-DPAYKAN_BACKENDS=llvm;mlir;c"
 
       - name: Build
         run: cmake --build build-asan --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -205,7 +205,14 @@ jobs:
           # aborting, and the tests exercise that with sizes no allocator can
           # serve; ASan's allocator is to return null for them, as libc's does,
           # not to report them as errors.
-          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1:detect_container_overflow=0:allocator_may_return_null=1
+          # allow_user_poisoning=0: LLVM's BumpPtrAllocator poisons a new slab
+          # and unpoisons each allocation from it, but only where it is
+          # compiled with ASan: a slab our instrumented code starts (its
+          # StartNewSlab) and the uninstrumented MLIR library allocates from
+          # stays poisoned, and ASan reports use-after-poison in
+          # MLIRContext's constructor (BuiltinDialect's types).  Only LLVM
+          # poisons memory by hand; every other check stays on.
+          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1:detect_container_overflow=0:allocator_may_return_null=1:allow_user_poisoning=0
         run: ctest --test-dir build-asan --output-on-failure --parallel 4
 
   # ---------------------------------------------------------------------------
@@ -236,7 +243,7 @@ jobs:
           key: third-party-macos-arm64-ubsan-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (UBSan)
-        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_UBSAN=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build-ubsan -DCMAKE_BUILD_TYPE=Debug "${PAYKAN_TESTS_FLAG}" -DPAYKAN_UBSAN=ON "-DPAYKAN_BACKENDS=llvm;mlir;c"
 
       - name: Build
         run: cmake --build build-ubsan --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -270,7 +277,7 @@ jobs:
           key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Debug, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -G Ninja "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;mlir;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -307,7 +314,7 @@ jobs:
           key: third-party-linux-x86_64-${{ hashFiles('cmake/LLVMSetup.cmake', 'cmake/GTestSetup.cmake') }}
 
       - name: Configure (Release, full)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja "${PAYKAN_TESTS_FLAG}" "-DPAYKAN_BACKENDS=llvm;mlir;c"
 
       - name: Build
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -351,13 +358,13 @@ jobs:
       # which the coverage tree below reuses for its clang and gtest source.
       # LLVM is opt-in, so the lists are needed for it to be provisioned.
       - name: Configure base tree (provisions vendored toolchain)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_ALL_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_ALL_TESTS=ON "-DPAYKAN_BACKENDS=llvm;mlir;c"
 
       - name: Configure coverage tree
         run: |
           LLVM="$PWD/build/third-party/llvm"
           cmake -B build-cov -DCMAKE_BUILD_TYPE=Debug -DPAYKAN_BUILD_ALL_TESTS=ON -DPAYKAN_COVERAGE=ON \
-            "-DPAYKAN_BACKENDS=llvm;c" \
+            "-DPAYKAN_BACKENDS=llvm;mlir;c" \
             -DCMAKE_C_COMPILER="$LLVM/bin/clang" \
             -DCMAKE_CXX_COMPILER="$LLVM/bin/clang++" \
             -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="$PWD/build/third-party/gtest"

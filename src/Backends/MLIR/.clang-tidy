@@ -1,0 +1,8 @@
+# The mlir backend's clang-tidy configuration: the project's
+# (../../../.clang-tidy), less clang-analyzer-core.StackAddressEscape, which
+# reports MLIR's own type registration (Dialect::addTypes and the
+# StorageUniquer lambdas it passes down) as a dangling stack reference; the
+# report is in MLIR's headers, so no NOLINT in our code reaches it.
+InheritParentConfig: true
+Checks: >
+  -clang-analyzer-core.StackAddressEscape

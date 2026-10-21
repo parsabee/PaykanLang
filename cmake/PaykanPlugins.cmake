@@ -13,6 +13,7 @@
 #   PAYKAN_BACKENDS           -- cache list of backends to build
 #   PAYKAN_DEFAULT_BACKEND    -- the backend used when --backend is absent
 #   PAYKAN_NEEDS_LLVM         -- TRUE when a listed backend depends on LLVM
+#   PAYKAN_NEEDS_MLIR         -- TRUE when a listed backend depends on MLIR
 #   paykan_add_plugin(<target>)
 #   paykan_link_plugins(<target>)
 
@@ -49,8 +50,10 @@ message(STATUS "Frontends: ${PAYKAN_FRONTENDS} (default: ${PAYKAN_DEFAULT_FRONTE
 # `c` is the C backend (part of the core: it needs only a C compiler at run
 # time), always built and the default; `llvm` is the LLVM IR / ORC JIT
 # backend, which is opt-in and depends on LLVM: LLVM is fetched only when
-# `llvm` is listed (#123).  So a plain configure downloads nothing.
-set(PAYKAN_KNOWN_BACKENDS c llvm)
+# `llvm` is listed (#123).  So a plain configure downloads nothing.  `mlir`
+# is the MLIR backend (docs/design/mlir-backend.md), opt-in like `llvm`, on
+# the same LLVM, which ships MLIR.
+set(PAYKAN_KNOWN_BACKENDS c llvm mlir)
 set(PAYKAN_BACKENDS "c" CACHE STRING
     "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS}; c is always built and is the default)")
 
@@ -74,8 +77,13 @@ else()
     list(GET PAYKAN_BACKENDS 0 PAYKAN_DEFAULT_BACKEND)
 endif()
 set(PAYKAN_NEEDS_LLVM FALSE)
+set(PAYKAN_NEEDS_MLIR FALSE)
 if("llvm" IN_LIST PAYKAN_BACKENDS)
     set(PAYKAN_NEEDS_LLVM TRUE)
+endif()
+if("mlir" IN_LIST PAYKAN_BACKENDS)
+    set(PAYKAN_NEEDS_LLVM TRUE)
+    set(PAYKAN_NEEDS_MLIR TRUE)
 endif()
 message(STATUS "Backends: ${PAYKAN_BACKENDS} (default: ${PAYKAN_DEFAULT_BACKEND})")
 
