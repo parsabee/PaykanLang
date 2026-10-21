@@ -112,8 +112,13 @@ if(NOT LLVM_FOUND)
             list(APPEND LLVM_MEMBERS "${LLVM_TOP}/bin/${tool}")
         endforeach()
         set(LLVM_EXCLUDES)
-        foreach(lib libFortran* libflang* liblldb* libclang.* libclang-cpp.*
-                    libLTO.* LLVMPolly.*)
+        set(LLVM_EXCLUDED_LIBS libFortran* libflang* liblldb* libclang.*
+                               libclang-cpp.* LLVMPolly.*)
+        if(NOT APPLE)
+            # macOS links the libraries through it (see below).
+            list(APPEND LLVM_EXCLUDED_LIBS libLTO.*)
+        endif()
+        foreach(lib IN LISTS LLVM_EXCLUDED_LIBS)
             list(APPEND LLVM_EXCLUDES "--exclude=${LLVM_TOP}/lib/${lib}")
         endforeach()
         # (The system tar: CMake's cannot leave members out.)
@@ -174,6 +179,18 @@ endif()
 # libxml2 the target LLVM's package names just has to exist.
 if(LLVM_ENABLE_LIBXML2 AND NOT TARGET LibXml2::LibXml2)
     add_library(LibXml2::LibXml2 INTERFACE IMPORTED)
+endif()
+
+# -- macOS: the libraries are LLVM bitcode --------------------------------------
+# The macOS release is built with ThinLTO, so its static libraries hold LLVM
+# 22 bitcode, which Xcode's linker reads only through a libLTO of the same
+# LLVM: the archive's own, which compiles the members an executable uses
+# when it is linked (cached under <build>/lto.cache, so a relink compiles
+# only what changed).  (The Linux releases hold native objects.)
+if(APPLE AND EXISTS "${LLVM_INSTALL_DIR}/lib/libLTO.dylib")
+    add_link_options(
+        "LINKER:-lto_library,${LLVM_INSTALL_DIR}/lib/libLTO.dylib"
+        "LINKER:-cache_path_lto,${CMAKE_BINARY_DIR}/lto.cache")
 endif()
 
 # -- Import LLVM's own CMake helpers ------------------------------------------
