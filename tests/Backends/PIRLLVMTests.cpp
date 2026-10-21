@@ -213,6 +213,7 @@ fn @f(%a: f64, %b: f64) -> bool {
   ret %z
 }
 fn @main() -> i64 {
+  %r = call @f(1.0, 2.0)
   ret 0
 }
 )",
@@ -335,6 +336,8 @@ fn @C_get(%self: obj) -> i64 {
 }
 
 fn @main() -> i64 {
+  %s = ptr.load char, @.s
+  %t = ptr.load char, @.t
   %o = new C
   %vt = vtable.load %o
   %r = vcall %o : C [3] ()
