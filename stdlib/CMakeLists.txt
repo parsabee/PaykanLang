@@ -34,11 +34,13 @@ endforeach()
 # The environment `paykan` runs in here: the staged library, no plugins, and
 # for an instrumented build the settings the test jobs give it (an ASan
 # `paykan` with the LLVM backend reports container-overflow in LLVM's
-# uninstrumented static initialisers; a coverage one writes its profile in
-# this build directory, not in the current one).
+# uninstrumented static initialisers, and use-after-poison in the slabs of
+# MLIR's allocators; a coverage one writes its profile in this build
+# directory, not in the current one).
 set(paykan_env PAYKAN_STDLIB=${PAYKAN_STDLIB_STAGE_DIR} PAYKAN_NO_PLUGINS=1)
 if(PAYKAN_ASAN)
-    list(APPEND paykan_env ASAN_OPTIONS=detect_container_overflow=0:detect_leaks=0)
+    list(APPEND paykan_env
+         ASAN_OPTIONS=detect_container_overflow=0:detect_leaks=0:allow_user_poisoning=0)
 endif()
 if(PAYKAN_COVERAGE)
     list(APPEND paykan_env LLVM_PROFILE_FILE=${CMAKE_CURRENT_BINARY_DIR}/%p.profraw)
