@@ -94,6 +94,8 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
   deps.reserve(iface.Mods.size());
   for (const ModuleRef &m : iface.Mods)
     deps.push_back(&m);
+  // By name, never by address, so the order is deterministic.
+  // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
   std::stable_sort(deps.begin(), deps.end(),
                    [](const ModuleRef *a, const ModuleRef *b) {
                      return a->Canonical < b->Canonical;

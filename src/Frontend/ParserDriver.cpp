@@ -148,10 +148,14 @@ bool ParserDriver::prepare(const std::string &filename, sema::DiagEngine &diag,
       std::fopen(filename.c_str(), "rb"), &std::fclose);
   if (!in)
     return fail("cannot open '" + filename + "': " + std::strerror(errno));
+  // A short read is the end of the file or an error (checked below): the
+  // stream is not read again after either.
   char buf[1 << 16];
   size_t n;
-  while ((n = std::fread(buf, 1, sizeof buf, in.get())) > 0)
+  do {
+    n = std::fread(buf, 1, sizeof buf, in.get());
     out.Source.append(buf, n);
+  } while (n == sizeof buf);
   if (std::ferror(in.get()))
     return fail("cannot read '" + filename + "': " + std::strerror(errno));
 

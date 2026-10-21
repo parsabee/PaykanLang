@@ -296,7 +296,9 @@ StatusOr<std::vector<uint8_t>> Writer::finish() const {
   order.reserve(Pendings.size());
   for (const Pending &p : Pendings)
     order.push_back(&p);
-  // Stable: instances of one kind keep their insertion order.
+  // Stable: instances of one kind keep their insertion order.  (By kind,
+  // never by address, so the order is deterministic.)
+  // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
   std::stable_sort(
       order.begin(), order.end(),
       [](const Pending *a, const Pending *b) { return a->Kind < b->Kind; });
