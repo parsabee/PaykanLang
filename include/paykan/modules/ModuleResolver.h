@@ -96,15 +96,18 @@ public:
 
   /// Sema built @p canonical from its source: @p iface holds its exports
   /// (Mods, System and DisplayFile are filled here), @p deps its direct
-  /// imports (canonical names, any order).  Its interface hash is known from
-  /// here on, so importers' cache entries can be checked against it.
+  /// imports (canonical names, any order), @p templates its TMPL section
+  /// (empty when it has no templates).  Its interface and templates hashes
+  /// are known from here on, so importers' cache entries can be checked
+  /// against them.
   void built(const std::string &canonical, pkm::Interface iface,
-             std::vector<std::string> deps);
+             std::vector<std::string> deps,
+             std::vector<uint8_t> templates = {});
   /// Sema could not build @p canonical (not found, not a file, errors).
   void failed(const std::string &canonical);
   /// A module built() whose cache entry could not hold all an importer
-  /// needs (generic templates, #160): writeCache leaves it out, so it is
-  /// built from source again.
+  /// needs (its code uses an instantiation another module of this program
+  /// lowered): writeCache leaves it out, so it is built from source again.
   void keepUncached(const std::string &canonical);
 
   /// True when @p canonical was Loaded from a `.pkm`.
@@ -114,6 +117,8 @@ public:
   dependencies(const std::string &canonical) const;
   /// The PIR of a Loaded module: CODE decoded and verified (§8.4 step 5).
   StatusOr<pir::Module> loadCode(const std::string &canonical) const;
+  /// The TMPL section of a Loaded module (empty when it has none).
+  std::span<const uint8_t> templates(const std::string &canonical) const;
   /// The file a diagnostic names for a Loaded module (project-relative).
   std::string displayPath(const std::string &canonical) const;
 
@@ -124,13 +129,15 @@ public:
   void writeCache(const pir::Program &program);
 
   /// --emit-pkm: the file of module @p canonical (the main module) at
-  /// @p out, from its exports, its direct imports, its source and its
-  /// lowered module.  Portable: MANIFEST, IFACE, CODE and SYMIDX.
+  /// @p out, from its exports, its direct imports, its source, its lowered
+  /// module and its TMPL section (empty when it has no templates).
+  /// Portable: MANIFEST, IFACE, TMPL, CODE and SYMIDX.
   Status writeModuleFile(const std::filesystem::path &out,
                          const std::string &canonical, pkm::Interface iface,
                          std::vector<std::string> deps,
                          const std::filesystem::path &source,
-                         const pir::Module &module);
+                         const pir::Module &module,
+                         std::span<const uint8_t> templates = {});
 
   /// @p path relative to the project root when it lies under it, as given
   /// otherwise (the same rule as Sema's diagnostics).
@@ -154,8 +161,8 @@ private:
   StatusOr<std::vector<uint8_t>>
   encodeFile(const std::string &canonical, const pkm::Interface &iface,
              const std::vector<std::string> &deps,
-             std::span<const uint8_t> sourceBytes,
-             const pir::Module &module) const;
+             std::span<const uint8_t> sourceBytes, const pir::Module &module,
+             std::span<const uint8_t> templates) const;
   std::filesystem::path cachePath(const std::string &canonical) const;
   void log(const std::string &line) const;
 

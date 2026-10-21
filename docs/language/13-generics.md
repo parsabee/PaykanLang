@@ -576,10 +576,14 @@ d = gen::Box<int>(1);     // the same class as c's
 - A generic class's `impl` blocks go with it, except `impl Trait for` blocks:
   an importer cannot name another module's traits yet
   ([Traits](06-traits.md#not-supported-yet)).
-- A `.pkm` does not hold templates yet (#160): a module that declares them,
-  instantiates another module's, or uses such an instantiation, is built
-  from its source every time ([`docs/design/pkm.md`](../design/pkm.md) §4.8, and
-  [The compilation cache](15-modules.md#the-compilation-cache)).
+- A module's `.pkm` holds its templates: an importer instantiates them from
+  a prebuilt or cached module as from its source (the standard library's
+  `::collections` is one). Each module compiles its own copy of the
+  instantiations of other modules' templates it uses, so its `.pkm` is the
+  same in every program; a program keeps one copy of each
+  ([`docs/design/pkm.md`](../design/pkm.md) §4.8). Editing a template's body
+  recompiles the modules that import its module, directly or not
+  ([The compilation cache](15-modules.md#the-compilation-cache)).
 
 ## Syntax Notes
 
@@ -609,4 +613,5 @@ d = gen::Box<int>(1);     // the same class as c's
 ## Not Supported Yet
 
 Variance, default type arguments, explicit specialisation, generic methods on non-generic classes,
-generic superclasses, and templates in a prebuilt `.pkm` (v0.2.0, [#160](https://github.com/parsabee/PaykanLang/issues/160)).
+generic superclasses, and one shared copy of an instantiation over class-type arguments
+(erasure, [#160](https://github.com/parsabee/PaykanLang/issues/160)).

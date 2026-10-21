@@ -585,9 +585,9 @@ Str>` is one struct wherever it is used), each instantiation is a distinct nomin
 names (`'Pair' is already declared as a generic struct`), and the instantiation depth is
 bounded.  `toString` renders the instantiation's name.  An instantiation of another
 module's generic struct (`gen::Pair<int, Str>`, `gen::Pair(1, "a")`) is made in the
-importer as for a generic class, and is one struct whoever makes it; a module that
-declares or instantiates generic structs is built from its source each time, as a `.pkm`
-holds no templates yet.
+importer as for a generic class, and is one struct whoever makes it; a module's `.pkm`
+holds its generic structs for its importers to instantiate, as it does its generic classes
+([Generics](13-generics.md#modules)).
 
 What a struct cannot hold, an instantiation cannot either: `struct Node<T> { v: T; next:
 Node<T>; }` is reported when it is instantiated (`struct 'Node<int>' contains itself:

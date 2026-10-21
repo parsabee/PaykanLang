@@ -9,6 +9,7 @@
 #include "DiagEngine.h"
 
 #include "StringMap.h"
+#include "paykan/Status.h"
 #include "paykan/pkm/Interface.h"
 
 #include <deque>
@@ -16,6 +17,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -65,6 +67,10 @@ struct SemaContext {
   std::vector<ast::ClassDecl *> ForeignClasses;
   std::vector<ast::FuncDecl *> ForeignFunctions;
   std::vector<ast::StructDecl *> ForeignStructs;
+  /// The resolver Sema made when its caller set none (one without a
+  /// cache), which the lowering then reads the modules loaded from `.pkm`
+  /// files through; null when the caller's was used.
+  std::shared_ptr<modules::ModuleResolver> Resolver;
 
   explicit operator bool() const { return Ok; }
 };
@@ -659,10 +665,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// it lies under it, as given otherwise.
   std::string displayPath(const std::filesystem::path &path) const;
 
-  /// Where imports come from when the driver set one (setResolver): source
-  /// files, cache entries or prebuilt `.pkm` files.  Without it every import
-  /// is parsed from its source file.
+  /// Where imports come from: source files, cache entries or prebuilt
+  /// `.pkm` files.  The driver's (setResolver), or one run() makes, which
+  /// neither reads nor writes the cache (OwnedResolver).
   modules::ModuleResolver *Resolver = nullptr;
+  std::shared_ptr<modules::ModuleResolver> OwnedResolver;
 
 public:
   struct ModuleTemplates;
@@ -801,6 +808,21 @@ public:
   /// process.
   static pkm::Interface toInterface(const ModuleInfo &info);
   static ModuleInfo fromInterface(const pkm::Interface &iface);
+
+  /// The templates of the module this Sema analysed, resolved for its
+  /// importers; null when it has none.  @p canonical is its name.
+  std::shared_ptr<ModuleTemplates>
+  exportTemplates(ast::TranslationUnit *tu, const std::string &canonical);
+  /// @p mt as the TMPL section of a .pkm (docs/design/pkm.md §4.3), and
+  /// back.  encodeTemplates returns no bytes, with the reason in @p error,
+  /// for a body the interchange format cannot write.  decodeTemplates
+  /// builds the bodies in an ASTContext of their own (Owner); Uses names
+  /// the modules, and the importer fills in the files they are cached
+  /// under; the bodies have no source lines.
+  static std::vector<uint8_t> encodeTemplates(const ModuleTemplates &mt,
+                                              std::string &error);
+  static StatusOr<std::shared_ptr<ModuleTemplates>>
+  decodeTemplates(std::span<const uint8_t> bytes, const std::string &canonical);
 
   /// Set the resolver imports go through (the driver's).  Child Semas
   /// inherit it.
@@ -1430,10 +1452,6 @@ private:
   std::vector<ast::ClassDecl *> ForeignInstantiatedClassDecls;
   std::vector<ast::FuncDecl *> ForeignInstantiatedFuncDecls;
 
-  /// The templates of the module this Sema analysed, resolved for its
-  /// importers; null when it has none.  @p canonical is its name.
-  std::shared_ptr<ModuleTemplates>
-  exportTemplates(ast::TranslationUnit *tu, const std::string &canonical);
   /// Register the templates of the module @p info describes under
   /// @p qualifier and @p fullModulePath, and every module their bodies
   /// name under its hidden qualifier.

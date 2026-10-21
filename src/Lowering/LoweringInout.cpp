@@ -313,9 +313,8 @@ void ModuleLowering::releaseAfterCall(const std::vector<Val> &keep) {
 
 bool ModuleLowering::checkImportedSlot(ast::ClassType *ct, uint32_t slot,
                                        const pir::Signature &sig) {
-  auto origin = PL.ClassOrigins.find(ct->getName());
-  auto mod = origin == PL.ClassOrigins.end() ? PL.ByName.end()
-                                             : PL.ByName.find(origin->second);
+  const std::string *origin = typeOrigin(ct->getName());
+  auto mod = origin ? PL.ByName.find(*origin) : PL.ByName.end();
   const pir::Class *def =
       mod == PL.ByName.end() ? nullptr : mod->second->findClass(ct->getName());
   if (def && !def->IsExtern && slot < def->VTable.size() &&

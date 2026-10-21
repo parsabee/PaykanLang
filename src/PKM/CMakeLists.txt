@@ -7,6 +7,7 @@ add_library(paykan_pkm STATIC
     File.cpp
     Manifest.cpp
     Interface.cpp
+    Templates.cpp
     Dump.cpp
 )
 

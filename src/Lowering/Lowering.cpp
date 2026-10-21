@@ -504,9 +504,8 @@ pir::Function *ModuleLowering::lookupFunction(const std::string &name) {
     symbol = imp->second.Plain;
   } else if (auto fo = PL.FuncOrigins.find(name); fo != PL.FuncOrigins.end()) {
     def = byName(fo->second); // another module emits this instantiation
-  } else if (auto co = PL.ClassOrigins.find(name);
-             co != PL.ClassOrigins.end()) {
-    def = byName(co->second); // the constructor of an instantiation there
+  } else if (const std::string *co = typeOrigin(name)) {
+    def = byName(*co); // the constructor of an instantiation there
   } else if (name.starts_with(kHiddenQualPrefix)) {
     // `$<module>::f`, named in the body of that module's template, or
     // `$<module>::T::f` for a `static fn` of one of its types: the longest
@@ -533,42 +532,72 @@ pir::Function *ModuleLowering::lookupFunction(const std::string &name) {
 }
 
 void ModuleLowering::noteExternUse(const std::string &name) {
-  if (!Canonical.empty() && PL.Resolver && PL.ForeignInstantiations.count(name))
+  if (!Canonical.empty() && PL.Resolver &&
+      PL.ForeignInstantiations.count(name) && !DependencyOrigins.count(name))
     PL.Resolver->keepUncached(Canonical);
+}
+
+const std::string *ModuleLowering::typeOrigin(const std::string &type) {
+  if (auto it = TypeOrigins.find(type); it != TypeOrigins.end())
+    return it->second;
+  if (type.find('<') != std::string::npos) {
+    // Breadth first from the direct imports: each module once.
+    std::vector<std::string> queue = DirectImports;
+    std::unordered_set<std::string> seen(queue.begin(), queue.end());
+    for (size_t i = 0; i < queue.size(); ++i) {
+      auto mod = PL.ByCanonical.find(queue[i]);
+      if (mod != PL.ByCanonical.end() && mod->second) {
+        const pir::Module &m = *mod->second;
+        const pir::Class *c = m.findClass(type);
+        const pir::Function *ctor = m.findFunction(type);
+        if ((c && !c->IsExtern) || (!c && ctor && !ctor->IsExtern)) {
+          DependencyOrigins.insert(type);
+          return TypeOrigins[type] = &m.Name;
+        }
+      }
+      if (auto deps = PL.ImportsOf.find(queue[i]); deps != PL.ImportsOf.end())
+        for (const std::string &d : deps->second)
+          if (seen.insert(d).second)
+            queue.push_back(d);
+    }
+  }
+  // Not memoised: the type may yet be defined by a module lowered later.
+  auto origin = PL.ClassOrigins.find(type);
+  return origin == PL.ClassOrigins.end() ? nullptr : &origin->second;
 }
 
 pir::Function *ModuleLowering::lookupClassFunction(ast::ClassType *ct,
                                                    const std::string &symbol) {
   if (auto it = FuncByName.find(symbol); it != FuncByName.end())
     return it->second;
-  auto origin = PL.ClassOrigins.find(ct->getName());
-  if (origin == PL.ClassOrigins.end() || origin->second == Mod.Name)
+  const std::string *origin = typeOrigin(ct->getName());
+  if (!origin || *origin == Mod.Name || OwnTypes.count(ct->getName()))
     return nullptr;
-  auto modIt = PL.ByName.find(origin->second);
+  auto modIt = PL.ByName.find(*origin);
   if (modIt == PL.ByName.end())
     return nullptr;
   const pir::Function *def = modIt->second->findFunction(symbol);
   if (!def || def->IsExtern)
     return nullptr;
   noteExternUse(ct->getName());
-  return declareExternFrom(*def, origin->second, symbol);
+  return declareExternFrom(*def, *origin, symbol);
 }
 
 pir::Function *ModuleLowering::lookupTypeFunction(const std::string &typeName,
                                                   const std::string &symbol) {
   if (auto it = FuncByName.find(symbol); it != FuncByName.end())
     return it->second;
-  auto origin = PL.ClassOrigins.find(typeName);
-  if (origin == PL.ClassOrigins.end() || origin->second == Mod.Name)
+  const std::string *origin = typeOrigin(typeName);
+  if (!origin || *origin == Mod.Name || OwnTypes.count(typeName))
     return nullptr;
-  auto modIt = PL.ByName.find(origin->second);
+  auto modIt = PL.ByName.find(*origin);
   if (modIt == PL.ByName.end())
     return nullptr;
   const pir::Function *def = modIt->second->findFunction(symbol);
   if (!def || def->IsExtern)
     return nullptr;
   noteExternUse(typeName);
-  return declareExternFrom(*def, origin->second, symbol);
+  return declareExternFrom(*def, *origin, symbol);
 }
 
 Val ModuleLowering::internString(const std::string &content) {

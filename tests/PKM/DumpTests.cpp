@@ -41,7 +41,7 @@ manifest:
   module geometry::shapes
   contents 0x1 (HAS_CODE)
   core "0.2.0-rc1" 0.2.0 prerelease "rc1" build "abc123"
-  format_versions iface 0.2.0 tmpl 1 pir 0.2.0 code_encoding 2 debug 1
+  format_versions iface 0.2.0 tmpl 0.0.1 pir 0.2.0 code_encoding 2 debug 1
   runtime_abi 0.2.0
   target pointer 8 slot 8 endianness 1 int 64 float 64
   deps 2

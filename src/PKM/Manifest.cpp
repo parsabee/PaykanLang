@@ -7,6 +7,7 @@
 // and an extended value is caught rather than silently misread.
 
 #include "paykan/pkm/Manifest.h"
+#include "paykan/pkm/Templates.h"
 
 #include "Internal.h"
 #include "ModuleName.h"
@@ -385,6 +386,10 @@ Verdict checkCompatibility(const Manifest &m, const HostIdentity &host,
                    "interface format " + versionString(f.IfaceVersion) +
                        "; this paykan reads " +
                        versionString(host.IfaceVersion));
+  if ((m.Contents & kContentsHasTemplates) && f.TmplVersion != kTmplVersion)
+    return verdict(K::Rejected, R::Format,
+                   "template format " + versionString(f.TmplVersion) +
+                       "; this paykan reads " + versionString(kTmplVersion));
   if (f.PirVersion != host.PirVersion)
     return verdict(K::Rejected, R::PIR,
                    "PIR " + versionString(f.PirVersion) +

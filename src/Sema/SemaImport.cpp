@@ -12,12 +12,15 @@
 #include "Names.h"
 #include "ParserDriver.h"
 #include "Sema.h"
+#include "paykan/ast/Interchange.h"
 #include "paykan/modules/ModuleResolver.h"
+#include "paykan/pkm/Templates.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
+#include <sstream>
 #include <utility>
 
 namespace paykan {
@@ -589,8 +592,36 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
       AccumulatedImportContexts.try_emplace(canonical, ctx->second);
     return &it->second;
   }
-  if (located.Iface)
-    return &(ModuleCache[path] = fromInterface(*located.Iface));
+  if (located.Iface) {
+    ModuleInfo info = fromInterface(*located.Iface);
+    std::span<const uint8_t> tmpl =
+        Resolver ? Resolver->templates(canonical) : std::span<const uint8_t>();
+    if (!tmpl.empty()) {
+      auto templates = decodeTemplates(tmpl, canonical);
+      if (!templates) {
+        error(loc,
+              "module '" + canonical + "' (" + displayPath(path) +
+                  ") has a bad TMPL section: " + templates.status().message());
+        if (FailedModules)
+          FailedModules->insert(canonical);
+        return nullptr;
+      }
+      // The other modules the bodies name are dependencies of this one,
+      // resolved before it: the files they are cached under.
+      for (size_t i = 1; i < (*templates)->Uses.size(); ++i) {
+        auto &[used, file] = (*templates)->Uses[i];
+        const bool usedSystem = used.starts_with(names::kQualSep);
+        LocatedModule usedLocated;
+        if (!locateModule(used, usedSystem, usedSystem ? used.substr(2) : used,
+                          loc, usedLocated) ||
+            !loadModule(used, usedLocated, loc))
+          return nullptr;
+        file = usedLocated.Path;
+      }
+      info.Templates = std::move(*templates);
+    }
+    return &(ModuleCache[path] = std::move(info));
+  }
 
   // Cycle detection.
   if (ImportStack && ImportStack->count(canonical)) {
@@ -685,13 +716,23 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
       for (auto &m : imp->getModules())
         deps.push_back(module_name::canonicalImportName(imp->modulePath(m),
                                                         imp->isSystem()));
-    Resolver->built(canonical, toInterface(info), std::move(deps));
-    // A .pkm holds neither templates nor instantiations of another
-    // module's ones yet (#160): such a module is built from source each
-    // time, so its importers instantiate from its bodies.
-    if (info.Templates || !childCtx.ForeignClasses.empty() ||
-        !childCtx.ForeignFunctions.empty() || !childCtx.ForeignStructs.empty())
-      Resolver->keepUncached(canonical);
+    // Its templates go in its TMPL section; their hash is what importers
+    // holding copies of their instantiations are checked against.
+    std::vector<uint8_t> tmpl;
+    if (info.Templates) {
+      std::string why;
+      tmpl = encodeTemplates(*info.Templates, why);
+      if (tmpl.empty()) {
+        error(loc, "internal compiler error: the templates of module '" +
+                       canonical + "' cannot be written: " + why);
+        if (FailedModules)
+          FailedModules->insert(canonical);
+        Resolver->failed(canonical);
+        return nullptr;
+      }
+    }
+    Resolver->built(canonical, toInterface(info), std::move(deps),
+                    std::move(tmpl));
   }
 
   childCtx.OwnedDriver = importDriverPtr;
@@ -1208,6 +1249,82 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
         if (!im->getTrait())
           mt->Impls[mt->Structs.back()].push_back(cloner.cloneTemplate(im));
   }
+  return mt;
+}
+
+std::vector<uint8_t> Sema::encodeTemplates(const ModuleTemplates &mt,
+                                           std::string &error) {
+  pkm::Templates t;
+  t.File = mt.File;
+  for (size_t i = 1; i < mt.Uses.size(); ++i)
+    t.Uses.push_back(mt.Uses[i].first);
+  // The `impl` blocks after the templates, each with the index of its own.
+  std::vector<ast::ImplDecl *> impls;
+  auto implsOf = [&](const ast::Decl *d, pkm::Templates::OwnerKind kind,
+                     uint32_t index) {
+    if (auto it = mt.Impls.find(d); it != mt.Impls.end())
+      for (auto *im : it->second) {
+        impls.push_back(im);
+        t.Impls.push_back({kind, index});
+      }
+  };
+  for (uint32_t i = 0; i < mt.Classes.size(); ++i)
+    implsOf(mt.Classes[i], pkm::Templates::OwnerKind::Class, i);
+  for (uint32_t i = 0; i < mt.Structs.size(); ++i)
+    implsOf(mt.Structs[i], pkm::Templates::OwnerKind::Struct, i);
+  ast::TranslationUnit unit(ast::SourceLocation(), {}, {}, {}, {}, mt.Classes,
+                            mt.Functions, std::move(impls), {}, {}, mt.Structs);
+  std::ostringstream os;
+  if (!ast::interchange::write(unit, os, error))
+    return {};
+  t.Ast = os.str();
+  return pkm::writeTemplates(t);
+}
+
+StatusOr<std::shared_ptr<Sema::ModuleTemplates>>
+Sema::decodeTemplates(std::span<const uint8_t> bytes,
+                      const std::string &canonical) {
+  StatusOr<pkm::Templates> read = pkm::readTemplates(bytes);
+  if (!read)
+    return read.status();
+  pkm::Templates *t = &*read;
+  auto ctx = std::make_shared<ast::ASTContext>();
+  ast::interchange::ReadError err;
+  ast::TranslationUnit *tu = ast::interchange::read(t->Ast, *ctx, err);
+  if (!tu)
+    return Status::error("TMPL: the bodies do not read: " + err.str());
+  if (!tu->getImports().empty() || !tu->getClassDecls().empty() ||
+      !tu->getFuncDecls().empty() || !tu->getEnumDecls().empty() ||
+      !tu->getTraitDecls().empty() || !tu->getStructDecls().empty())
+    return Status::error("TMPL: the bodies hold more than templates");
+  auto mt = std::make_shared<ModuleTemplates>();
+  mt->Module = canonical;
+  mt->Uses.emplace_back(canonical, "");
+  for (std::string &u : t->Uses)
+    mt->Uses.emplace_back(std::move(u), "");
+  mt->Classes = tu->getGenericClassDecls();
+  mt->Functions = tu->getGenericFuncDecls();
+  mt->Structs = tu->getGenericStructDecls();
+  const auto &impls = tu->getImplDecls();
+  if (impls.size() != t->Impls.size())
+    return Status::error("TMPL: " + std::to_string(impls.size()) +
+                         " impl blocks for " + std::to_string(t->Impls.size()) +
+                         " owners");
+  for (size_t i = 0; i < impls.size(); ++i) {
+    const pkm::Templates::Impl &owner = t->Impls[i];
+    const bool isClass = owner.Kind == pkm::Templates::OwnerKind::Class;
+    const size_t n = isClass ? mt->Classes.size() : mt->Structs.size();
+    if (owner.Owner >= n)
+      return Status::error("TMPL: impl block " + std::to_string(i) +
+                           " names template " + std::to_string(owner.Owner) +
+                           " of " + std::to_string(n));
+    const ast::Decl *d =
+        isClass ? static_cast<const ast::Decl *>(mt->Classes[owner.Owner])
+                : mt->Structs[owner.Owner];
+    mt->Impls[d].push_back(impls[i]);
+  }
+  mt->File = std::move(t->File);
+  mt->Owner = std::move(ctx);
   return mt;
 }
 

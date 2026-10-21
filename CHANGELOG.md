@@ -25,8 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the shared lowering), `llvm` or `emitc`.  The `pir-mlir` test suite imports every item and
   instruction of PIR and every sample program, checks that the MLIR verifies and parses back
   to the same text, and that the shared lowering leaves only those ops.
+- A `.pkm` holds its module's generic classes, structs and functions in a `TMPL` section
+  (docs/design/pkm.md §4.3), so an importer instantiates them from a prebuilt or cached module
+  as from its source (#160).  Every module compiles its own copy of the instantiations of
+  other modules' templates it uses, so its `.pkm` is the same in every program, and a program
+  keeps one copy of each.  Modules with templates, or with such copies, are now cached; an
+  entry records the templates' hash of every module it imports, so editing a generic body
+  recompiles the modules that may hold a copy of it.  `--emit-pkm --module-name=<name>`
+  names the module the file records.
 
 ### Changed
+
+- The standard library is installed as `.pkm` files only: each module is compiled, as
+  `::<name>`, against the `.pkm` files of the modules it imports, and a program loads all of
+  them from those files instead of compiling the generic ones from their sources every time.
 
 - A `match` on an enum, or on integer, `char` or `bool` literals, is a `switch` statement in
   PIR (docs/pir.md §6), a case per value and the wildcard its default, instead of an if-else

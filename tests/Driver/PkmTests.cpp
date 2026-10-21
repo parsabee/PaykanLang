@@ -944,13 +944,13 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
   fs::remove_all(dir);
 }
 
-// Generic templates across source modules (docs/design/pkm.md §4.8): a
-// module with templates, one that instantiates another module's, and one
-// that only uses such an instantiation (whose emitting module depends on
-// the program) are built from source every time, while the others are
-// cached as usual.  `m3` uses m2's Box<int>; in `p2`, m1 needs Box<int>
-// first and emits it.
-TEST(Pkm, GenericsAcrossSourceModulesAreNotCached) {
+// Generic templates across modules (docs/design/pkm.md §4.8): a module
+// with templates is cached with them, and so are one that instantiates
+// another module's (it holds its own copy) and one that only uses such an
+// instantiation; two programs sharing the cache each keep one Box<int>.
+// `m3` uses m2's Box<int>; in `p2`, m1 makes Box<int> too.  Editing a
+// template's body makes every entry that may hold a copy of it stale.
+TEST(Pkm, GenericsAcrossModulesAreCached) {
   REQUIRE_BACKEND();
   fs::path dir =
       fs::temp_directory_path() / ("pkm_generics_" + std::to_string(getpid()));
@@ -980,19 +980,150 @@ TEST(Pkm, GenericsAcrossSourceModulesAreNotCached) {
   for (int round = 0; round < 2; ++round) {
     auto p1 = paykan("--verbose p1.pkn");
     EXPECT_EQ(p1.exitCode, 3) << p1.out;
-    for (const char *m : {"lib::gen", "m2", "m3"})
+    for (const char *m : {"lib::gen", "m2", "m3", "plain"})
       EXPECT_TRUE(contains(p1.out, std::string("module ") + m +
-                                       ": no cache entry; building from "
-                                       "source"))
+                                       (round == 0 ? ": wrote" : ": cache")))
           << m << "\n"
           << p1.out;
-    EXPECT_TRUE(contains(p1.out, round == 0 ? "module plain: wrote"
-                                            : "module plain: cache"))
-        << p1.out;
-    auto p2 = paykan("p2.pkn");
+    auto p2 = paykan("--verbose p2.pkn");
     EXPECT_EQ(p2.exitCode, 2) << p2.out;
+    EXPECT_TRUE(
+        contains(p2.out, round == 0 ? "module m1: wrote" : "module m1: cache"))
+        << p2.out;
   }
-  EXPECT_FALSE(fs::exists(dir / ".paykan_cache" / "m3.pkm"));
+  writeFile(dir / "lib" / "gen.pkn",
+            "class Box<T> { v: T;\n"
+            "  view fn one() -> int { return 10; } }\n"
+            "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n");
+  auto p1 = paykan("--verbose p1.pkn");
+  EXPECT_EQ(p1.exitCode, 12) << p1.out;
+  EXPECT_TRUE(contains(p1.out, "module m2: cache .paykan_cache/m2.pkm is stale "
+                               "(the templates of module 'lib::gen' "
+                               "changed)"))
+      << p1.out;
+  // m3 holds no copy of its own, but m2's interface records gen's templates.
+  EXPECT_TRUE(contains(p1.out, "module m3: cache .paykan_cache/m3.pkm is stale "
+                               "(the interface of module 'm2' changed)"))
+      << p1.out;
+  EXPECT_TRUE(contains(p1.out, "module plain: cache .paykan_cache/plain.pkm "
+                               "usable"))
+      << p1.out;
+  auto p2 = paykan("p2.pkn");
+  EXPECT_EQ(p2.exitCode, 20) << p2.out;
+  fs::remove_all(dir);
+}
+
+// A module's .pkm holds its templates (docs/design/pkm.md §4.3): with its
+// source gone, an importer instantiates its classes, structs and functions
+// from the file, an error inside an instantiated body names the module's
+// file, and `paykan pkm dump` lists the section.
+TEST(Pkm, PrebuiltModuleCarriesItsTemplates) {
+  REQUIRE_BACKEND();
+  fs::path dir = fs::temp_directory_path() /
+                 ("pkm_prebuilt_tmpl_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib" / "gen.pkn",
+            "class Box<T> { v: T;\n"
+            "  view fn get() -> view T { return self.v; }\n"
+            "  view fn twice() -> T { return self.v + self.v; } }\n"
+            "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
+            "struct Pair<A, B> { a: A; b: B; }\n"
+            "fn first<T>(x: T, y: T) -> T { return _keep(x); }\n"
+            "fn _keep<T>(x: T) -> T { return x; }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto emit = paykan("--emit-pkm lib/gen.pkn");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  fs::remove(dir / "lib" / "gen.pkn");
+  auto dump = paykan("pkm dump lib/gen.pkm");
+  EXPECT_EQ(dump.exitCode, 0) << dump.out;
+  EXPECT_TRUE(contains(dump.out, "contents 0x3 (HAS_CODE,HAS_TEMPLATES)"))
+      << dump.out;
+  EXPECT_TRUE(contains(dump.out, "  file \"lib/gen.pkn\"\n  uses 0\n"
+                                 "  impls 1\n    class 0\n"))
+      << dump.out;
+  auto tmpl = paykan("pkm dump --section=tmpl lib/gen.pkm");
+  EXPECT_EQ(tmpl.exitCode, 0) << tmpl.out;
+  EXPECT_TRUE(contains(tmpl.out, "(paykan-ast ")) << tmpl.out;
+  EXPECT_TRUE(contains(tmpl.out, "\"$lib::gen::_keep\"")) << tmpl.out;
+  writeFile(dir / "main.pkn", "import ::io;\nimport lib::gen;\n"
+                              "fn main() -> int { b = gen::Box<int>(20); "
+                              "p = gen::Pair<Str, int>(\"x\", 1);\n"
+                              "  io::println(gen::first(\"a\", \"b\") + p.a);\n"
+                              "  return b.twice() + gen::first(2, 3); }\n");
+  auto r = paykan("--verbose main.pkn");
+  EXPECT_EQ(r.exitCode, 42) << r.out;
+  EXPECT_TRUE(contains(r.out, "ax\n")) << r.out;
+  EXPECT_TRUE(contains(r.out, "module lib::gen: prebuilt lib/gen.pkm usable"))
+      << r.out;
+  writeFile(dir / "bad.pkn",
+            "import lib::gen;\n"
+            "fn main() -> int { b = gen::Box<bool>(true); b.twice(); "
+            "return 0; }\n");
+  auto bad = paykan("bad.pkn");
+  EXPECT_NE(bad.exitCode, 0) << bad.out;
+  EXPECT_TRUE(contains(bad.out, "lib/gen.pkn:3:")) << bad.out;
+  EXPECT_TRUE(contains(bad.out, "in instantiation of")) << bad.out;
+  fs::remove_all(dir);
+}
+
+// The standard library is staged as .pkm files only, each named `::name`
+// (--module-name): a program loads every module of it, generic ones
+// included, from those files.
+TEST(Pkm, StandardLibraryIsPkmFilesOnly) {
+  REQUIRE_BACKEND();
+  size_t modules = 0;
+  for (const auto &e : fs::directory_iterator(PAYKAN_TEST_STDLIB_DIR)) {
+    EXPECT_EQ(e.path().extension(), ".pkm") << e.path();
+    ++modules;
+  }
+  EXPECT_GE(modules, 5u);
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_stdlib_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "main.pkn",
+            "import ::io;\nimport ::collections;\n"
+            "fn main() -> int { xs = collections::List<Str>();\n"
+            "  xs.push(\"a\"); xs.push(\"b\");\n"
+            "  io::println(xs.get(1)); return int(xs.len()); }\n");
+  auto r = run("cd " + dir.string() + " && " + paykanCmd() +
+               " --verbose --no-module-cache main.pkn");
+  EXPECT_EQ(r.exitCode, 2) << r.out;
+  EXPECT_TRUE(contains(r.out, "b\n")) << r.out;
+  for (const char *m : {"::io", "::result", "::memory", "::collections"})
+    EXPECT_TRUE(contains(r.out, std::string("module ") + m + ": prebuilt "))
+        << m << "\n"
+        << r.out;
+  fs::remove_all(dir);
+}
+
+// --module-name names the module --emit-pkm writes, and nothing else takes
+// it.
+TEST(Pkm, ModuleNameNamesTheEmittedModule) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_modname_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "src" / "shapes.pkn", "fn area() -> int { return 6; }\n");
+  writeFile(dir / "main.pkn", "import geometry::shapes;\n"
+                              "fn main() -> int { return shapes::area(); }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto emit = paykan("--emit-pkm --module-name=geometry::shapes "
+                     "-o geometry/shapes.pkm src/shapes.pkn");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  auto r = paykan("main.pkn");
+  EXPECT_EQ(r.exitCode, 6) << r.out;
+  auto noEmit = paykan("--module-name=geometry::shapes main.pkn");
+  EXPECT_NE(noEmit.exitCode, 0);
+  EXPECT_TRUE(contains(noEmit.out, "--module-name names the module "
+                                   "--emit-pkm writes"))
+      << noEmit.out;
+  auto badName = paykan("--emit-pkm --module-name=a::1b src/shapes.pkn");
+  EXPECT_NE(badName.exitCode, 0);
+  EXPECT_TRUE(contains(badName.out, "is not a module name")) << badName.out;
   fs::remove_all(dir);
 }
 
@@ -1288,9 +1419,9 @@ TEST(Pkm, WeakFieldsAcrossModules) {
 }
 
 // A generic struct is a template like a generic class: its module, and a
-// module that instantiates it, are built from source each time, and the
-// instantiation is one struct whoever makes it.
-TEST(Pkm, GenericStructsAcrossSourceModulesAreNotCached) {
+// module that instantiates it, are cached, and the instantiation is one
+// struct whoever makes it, from the sources and from the cache alike.
+TEST(Pkm, GenericStructsAcrossModulesAreCached) {
   REQUIRE_BACKEND();
   fs::path dir = fs::temp_directory_path() /
                  ("pkm_generic_structs_" + std::to_string(getpid()));
@@ -1326,17 +1457,13 @@ TEST(Pkm, GenericStructsAcrossSourceModulesAreNotCached) {
     EXPECT_TRUE(contains(r.out, "Pair<Str, int>(a: m, b: 3) True True\n"))
         << r.out;
     EXPECT_TRUE(contains(r.out, "live blocks       : 0")) << r.out;
-    for (const char *m : {"lib::gen", "m1", "m2"})
+    for (const char *m : {"lib::gen", "m1", "m2", "plain"})
       EXPECT_TRUE(contains(r.out, std::string("module ") + m +
-                                      ": no cache entry; building from "
-                                      "source"))
+                                      (round == 0 ? ": wrote" : ": cache")))
           << m << "\n"
           << r.out;
-    EXPECT_TRUE(contains(r.out, round == 0 ? "module plain: wrote"
-                                           : "module plain: cache"))
-        << r.out;
   }
-  EXPECT_FALSE(fs::exists(dir / ".paykan_cache" / "m2.pkm"));
+  EXPECT_TRUE(fs::exists(dir / ".paykan_cache" / "m2.pkm"));
   fs::remove_all(dir);
 }
 

@@ -20,9 +20,9 @@ paykan pkm check <file.pkm>
   source file without its extension. `build` takes no program arguments, so its options may
   also come after the file.
 - **`pkm`** inspects a module file (see [Module Files](15-modules.md#module-files)): `dump`
-  prints it (`--section=manifest|sections|iface|code|symidx|payloads` prints one part;
-  `code` is exactly the module's PIR text), `check` prints whether this `paykan` can use it
-  and exits with 0 when it can.
+  prints it (`--section=manifest|sections|iface|tmpl|code|symidx|payloads` prints one part;
+  `tmpl` adds the text of the generic templates, and `code` is exactly the module's PIR
+  text), `check` prints whether this `paykan` can use it and exits with 0 when it can.
 
 The source file is the program's **main file**. Its directory is the source root from which
 imports are resolved (see [Modules](15-modules.md)).
@@ -43,6 +43,7 @@ option prints a message suggesting `--help`, and also exits with 1.
 | `--track-heap` | run with heap tracking and print the allocation statistics to standard error at exit ([Memory](16-memory.md)) |
 | `--check-only` | parse and type-check, then stop: no code is generated and nothing runs. It also accepts a module that has no `main`, which makes it handy for checking a library module on its own |
 | `--emit-pkm` | compile one module and write its `.pkm` module file to `-o <file>`, or next to the source, then stop. The module may have no `main`. Like `build`, it takes no program arguments, so `-o` may follow the file |
+| `--module-name=<name>` | with `--emit-pkm`: the canonical name the module file records, instead of the one its path gives it (`a::b`, or `::name` for a module of the standard library, as the library's build compiles them) |
 | `--module-path=<dir>` | a directory of prebuilt `.pkm` modules, searched for an import whose source is not found (repeatable; then the `:`-separated `$PAYKAN_MODULE_PATH`) |
 | `--rebuild-modules` | ignore the `.pkm` cache entries of the imported modules (they are rewritten) |
 | `--no-module-cache` | neither read nor write `.pkm` cache entries |
@@ -151,11 +152,10 @@ with a manifest recording the compiler that wrote it, the source it was built fr
 interface of every module it imports. On the next run an entry is used when all of those
 are unchanged and the rest is recompiled, so editing `main.pkn` in a large project does not
 recompile every library module, editing a function body recompiles one module, and changing
-a class or a signature also recompiles the modules that use it. A module that declares
-generic classes, structs or functions, or uses another module's, is not cached: a `.pkm`
-does not hold generic templates yet, so it is compiled from source every time. `::io` and
-`::result` are such modules, and so is every module that calls `io::println`, a generic
-function. The mlir backend also caches each imported module's LLVM IR there, as bitcode
+a class or a signature also recompiles the modules that use it. A module's entry holds its
+generic templates too, and its own copies of the instantiations of other modules' templates
+it uses (`collections::List<int>`), so editing a generic body recompiles every module that
+imports its module, directly or not. The mlir backend also caches each imported module's LLVM IR there, as bitcode
 (`.paykan_cache/a/b.bc`), and translates the module again only when its PIR or the
 compiler changed.
 

@@ -21,6 +21,7 @@
 #include "paykan/pir/Binary.h"
 #include "paykan/pir/Verifier.h"
 #include "paykan/pir/Version.h"
+#include "paykan/pkm/Templates.h"
 
 // The runtime ABI version is spelled out in Runtime.h, for C; it is the
 // release's, like every format's.
@@ -48,8 +49,14 @@ struct ModuleResolver::Entry {
   pkm::Interface Iface;             ///< Built, Loaded
   std::vector<std::string> Deps;    ///< Built, Loaded: direct imports
   support::Hash256 IfaceHash{};     ///< Built, Loaded
-  std::optional<pkm::File> File;    ///< Loaded
-  bool KeepUncached = false;        ///< Built: writeCache skips it
+  /// Built, Loaded: the TMPL section's hash (zero without one).  The
+  /// interface hash covers the dependencies' (IFACE's MODS), so an edit of
+  /// a template body reaches every module that may hold a copy of an
+  /// instantiation of it.
+  support::Hash256 TmplHash{};
+  std::vector<uint8_t> Tmpl;     ///< Built: the TMPL section
+  std::optional<pkm::File> File; ///< Loaded
+  bool KeepUncached = false;     ///< Built: writeCache skips it
 };
 
 /// A .pkm read for a module whose dependencies are still being resolved,
@@ -326,6 +333,13 @@ Resolution ModuleResolver::load(const std::string &canonical,
                                 "' changed)"
                           : "was built against another interface of module '" +
                                 d.Name + "'");
+    // Its code holds copies of the instantiations it uses, made from the
+    // templates' bodies.
+    if (dep.TmplHash != d.TmplHash)
+      return unusable(
+          policy == pkm::Policy::Cache
+              ? "is stale (the templates of module '" + d.Name + "' changed)"
+              : "was built against other templates of module '" + d.Name + "'");
   }
   StatusOr<pkm::Interface> iface =
       pkm::readInterface(file.section(pkm::Kind::Iface), canonical);
@@ -338,6 +352,7 @@ Resolution ModuleResolver::load(const std::string &canonical,
   for (const pkm::Manifest::Dep &d : m.Deps)
     e->Deps.push_back(d.Name);
   e->IfaceHash = file.ifaceHash();
+  e->TmplHash = file.tmplHash();
   e->File = std::move(p->File);
   Pendings.erase(canonical);
   Awaiting.erase(canonical);
@@ -352,7 +367,8 @@ Resolution ModuleResolver::load(const std::string &canonical,
 // -- Sema's reports
 
 void ModuleResolver::built(const std::string &canonical, pkm::Interface iface,
-                           std::vector<std::string> deps) {
+                           std::vector<std::string> deps,
+                           std::vector<uint8_t> templates) {
   auto it = Entries.find(canonical);
   if (it == Entries.end() || it->second->State != Entry::State::Source)
     return; // not a module this resolver handed out
@@ -367,13 +383,18 @@ void ModuleResolver::built(const std::string &canonical, pkm::Interface iface,
     pkm::ModuleRef ref;
     ref.Canonical = d;
     ref.System = isSystemName(d);
-    if (auto dit = Entries.find(d); dit != Entries.end())
+    if (auto dit = Entries.find(d); dit != Entries.end()) {
       ref.IfaceHash = dit->second->IfaceHash;
+      ref.TmplHash = dit->second->TmplHash;
+    }
     iface.Mods.push_back(std::move(ref));
   }
   if (StatusOr<std::vector<uint8_t>> bytes = pkm::readFileBytes(e.Path))
     e.SourceBytes = std::move(*bytes);
   e.IfaceHash = support::sha256(pkm::writeInterface(iface));
+  e.TmplHash =
+      templates.empty() ? support::Hash256{} : support::sha256(templates);
+  e.Tmpl = std::move(templates);
   e.Iface = std::move(iface);
   e.Deps = std::move(deps);
   e.State = Entry::State::Built;
@@ -429,6 +450,15 @@ ModuleResolver::loadCode(const std::string &canonical) const {
   return mod;
 }
 
+std::span<const uint8_t>
+ModuleResolver::templates(const std::string &canonical) const {
+  auto it = Entries.find(canonical);
+  if (it == Entries.end() || it->second->State != Entry::State::Loaded ||
+      !it->second->File)
+    return {};
+  return it->second->File->section(pkm::Kind::Tmpl);
+}
+
 std::string ModuleResolver::displayPath(const std::string &canonical) const {
   auto it = Entries.find(canonical);
   return it == Entries.end() ? std::string() : relativeToRoot(it->second->Path);
@@ -439,10 +469,12 @@ std::string ModuleResolver::displayPath(const std::string &canonical) const {
 StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
     const std::string &canonical, const pkm::Interface &iface,
     const std::vector<std::string> &deps, std::span<const uint8_t> sourceBytes,
-    const pir::Module &module) const {
+    const pir::Module &module, std::span<const uint8_t> templates) const {
   pkm::Manifest m;
   m.Module = canonical;
   m.Contents = pkm::kContentsHasCode;
+  if (!templates.empty())
+    m.Contents |= pkm::kContentsHasTemplates;
   if (definesMain(module))
     m.Contents |= pkm::kContentsHasMain;
   if (isSystemName(canonical))
@@ -453,16 +485,18 @@ StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
             static_cast<uint32_t>(kVersionPatch),
             kVersionPrerelease,
             Host.CoreBuild};
-  m.Formats = {pkm::kIfaceVersion, 0, pir::kPIRVersion, pkm::kCodeBinaryPir1,
-               0};
+  m.Formats = {pkm::kIfaceVersion, templates.empty() ? 0 : pkm::kTmplVersion,
+               pir::kPIRVersion, pkm::kCodeBinaryPir1, 0};
   m.RuntimeAbi = Host.RuntimeAbi;
   m.Target = Host.Target;
   for (const std::string &d : deps) {
     pkm::Manifest::Dep dep;
     dep.Name = d;
     dep.Flags = isSystemName(d) ? pkm::kDepSystem : 0;
-    if (auto it = Entries.find(d); it != Entries.end())
+    if (auto it = Entries.find(d); it != Entries.end()) {
       dep.IfaceHash = it->second->IfaceHash;
+      dep.TmplHash = it->second->TmplHash;
+    }
     dep.CoreVersion = kVersion;
     m.Deps.push_back(std::move(dep));
   }
@@ -481,6 +515,9 @@ StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
   pkm::Writer w;
   w.add(pkm::Kind::Manifest, pkm::kFlagRequired, pkm::encodeManifest(m));
   w.add(pkm::Kind::Iface, pkm::kFlagRequired, pkm::writeInterface(iface));
+  if (!templates.empty())
+    w.add(pkm::Kind::Tmpl, pkm::kFlagRequired,
+          std::vector<uint8_t>(templates.begin(), templates.end()));
   w.add(pkm::Kind::Code, pkm::kFlagRequired, std::move(code));
   w.add(pkm::Kind::SymIdx, 0, std::move(symidx));
   return w.finish();
@@ -503,8 +540,8 @@ void ModuleResolver::writeCache(const pir::Program &program) {
     if (mod == program.Modules.end())
       continue;
     std::filesystem::path path = cachePath(name);
-    StatusOr<std::vector<uint8_t>> bytes =
-        encodeFile(name, entry->Iface, entry->Deps, entry->SourceBytes, *mod);
+    StatusOr<std::vector<uint8_t>> bytes = encodeFile(
+        name, entry->Iface, entry->Deps, entry->SourceBytes, *mod, entry->Tmpl);
     Status s = bytes ? pkm::writeFileAtomically(path, *bytes) : bytes.status();
     log("module " + name + ": " +
         (s ? "wrote " + relativeToRoot(path)
@@ -517,7 +554,8 @@ Status ModuleResolver::writeModuleFile(const std::filesystem::path &out,
                                        pkm::Interface iface,
                                        std::vector<std::string> deps,
                                        const std::filesystem::path &source,
-                                       const pir::Module &module) {
+                                       const pir::Module &module,
+                                       std::span<const uint8_t> templates) {
   std::sort(deps.begin(), deps.end());
   deps.erase(std::unique(deps.begin(), deps.end()), deps.end());
   iface.Module = canonical;
@@ -528,15 +566,17 @@ Status ModuleResolver::writeModuleFile(const std::filesystem::path &out,
     pkm::ModuleRef ref;
     ref.Canonical = d;
     ref.System = isSystemName(d);
-    if (auto it = Entries.find(d); it != Entries.end())
+    if (auto it = Entries.find(d); it != Entries.end()) {
       ref.IfaceHash = it->second->IfaceHash;
+      ref.TmplHash = it->second->TmplHash;
+    }
     iface.Mods.push_back(std::move(ref));
   }
   StatusOr<std::vector<uint8_t>> sourceBytes = pkm::readFileBytes(source);
   if (!sourceBytes)
     return sourceBytes.status();
   StatusOr<std::vector<uint8_t>> bytes =
-      encodeFile(canonical, iface, deps, *sourceBytes, module);
+      encodeFile(canonical, iface, deps, *sourceBytes, module, templates);
   if (!bytes)
     return bytes.status();
   return pkm::writeFileAtomically(out, *bytes);

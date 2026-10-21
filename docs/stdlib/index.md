@@ -113,14 +113,18 @@ directories:
    executable's `<prefix>/bin/`, when that directory exists;
 3. `stdlib/` under the source root (the directory of the main file).
 
-The sources are in [`stdlib/`](../../stdlib) in the repository. The build stages them, with
-a `.pkm` that the built `paykan` compiles from each, in `lib/paykan/stdlib/<version>/` of
-the build tree, next to its `bin/paykan`. `cmake --install` installs both, and the release
-packages include them. Configure with `-DPAYKAN_BUILD_STDLIB=OFF` to leave the library out.
+The sources are in [`stdlib/`](../../stdlib) in the repository. The build compiles each into
+a `.pkm` named `::<name>`, with the built `paykan` and against the `.pkm` files of the modules
+it imports, in `lib/paykan/stdlib/<version>/` of the build tree, next to its `bin/paykan`.
+Only the `.pkm` files are staged: they hold all an importer needs, the modules' generic
+templates included ([Generics](../language/13-generics.md#modules)), so the sources are not
+installed. `cmake --install` installs the `.pkm` files, and the release packages include
+them. Configure with `-DPAYKAN_BUILD_STDLIB=OFF` to leave the library out.
 It is off by default when cross-compiling, because the built `paykan` cannot run on the
 build machine.
 
-Every module of the library but `::math` has generic declarations, and a `.pkm` does not
-hold templates yet ([Generics](../language/13-generics.md#modules)). So a program builds
-those modules from the sources installed next to the `.pkm` files every time, and `::math`
-once, into its [compilation cache](../language/15-modules.md#the-compilation-cache).
+A program loads the library's modules from those files and compiles none of them. Each of
+its own modules compiles a copy of the library's instantiations it uses
+(`collections::List<int>`), kept in its
+[compilation cache](../language/15-modules.md#the-compilation-cache) entry, and the program
+keeps one copy of each.

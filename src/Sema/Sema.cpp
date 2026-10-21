@@ -4,6 +4,7 @@
 #include "Sema.h"
 #include "Names.h"
 #include "SemaInternal.h"
+#include "paykan/modules/ModuleResolver.h"
 
 #include <algorithm>
 #include <cmath>
@@ -2486,6 +2487,19 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
 
   registerBuiltinTraits();
 
+  // Imports go through a resolver, so a prebuilt module (the standard
+  // library's) is found too: without the caller's, one with no cache.
+  if (!Resolver) {
+    modules::ResolverOptions opts;
+    opts.ProjectRoot = ProjectRoot;
+    opts.FrontendName = FrontendName;
+    opts.ReadCache = false;
+    opts.WriteCache = false;
+    OwnedResolver = std::make_shared<modules::ModuleResolver>(
+        std::move(opts), modules::ModuleResolver::hostIdentity());
+    Resolver = OwnedResolver.get();
+  }
+
   // Process imports before local declarations.
   StringSet localImportStack, localFailedModules;
   if (!ImportStack)
@@ -2514,7 +2528,8 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      std::move(AccumulatedImportContexts),
                      std::move(ForeignInstantiatedClassDecls),
                      std::move(ForeignInstantiatedFuncDecls),
-                     std::move(ForeignInstantiatedStructDecls)};
+                     std::move(ForeignInstantiatedStructDecls),
+                     OwnedResolver};
   // The sets live in this frame: a Sema is run once.
   if (ImportStack == &localImportStack)
     ImportStack = nullptr;

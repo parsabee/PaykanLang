@@ -26,10 +26,12 @@ Status: **partly implemented.** What `paykan` ships today:
   `--rebuild-modules`, `--no-module-cache`, `--verbose`, and `paykan pkm
   dump` / `check` (§8.5).
 
-Generics cross modules from source only (§4.8): a module with templates is
-never cached, and the `.pkm` that `--emit-pkm` writes for one carries none
-of its templates. Not implemented: `TMPL` and `INST` (§4.1–§4.7), `DEBUG`
-(§6.2), payloads (§7: the section kind is recognised, none is written), the
+Generics cross modules from a source and from a `.pkm` alike (§4.8): a
+module's `TMPL` section holds its templates as renamed interchange text
+(§4.3), every module compiles its own copies of the instantiations of other
+modules' templates it uses, and a program keeps one of each. Not
+implemented: the erased copies and `INST` of §4.5, `TEMPLATE_*` records in
+`DECLS`, `DEBUG` (§6.2), payloads (§7: the section kind is recognised, none is written), the
 linkage classes and the mangling of §9, the flags and `pkm` verbs §8.5 marks
 as planned, and the coordinated version bump of §11. Every "Decision" not
 yet implemented is a proposal; §15 lists the questions still open.
@@ -253,6 +255,16 @@ Dep := { str  name;          canonical name of the imported module
 Only direct imports. The closure is reached through each dependency's own
 `deps`; the driver loads each module once per program, keyed by canonical
 name.
+
+As implemented, `INSTANTIATED` is not written and `tmpl_hash` is recorded
+for every dependency (zero for one without templates) and checked whatever
+the flags: a module's `CODE` holds its own copy of every instantiation of
+another module's template it uses (§4.8), which may come from a dependency's
+template or, through a template body, from one of that dependency's
+dependencies.  The second case is covered because `IFACE`'s `MODS` records
+both hashes of each dependency (§3.3): a template edit in `::memory` changes
+the `IFACE` of `::collections` once it is rebuilt, and so the `iface_hash`
+an importer of `::collections` checks.
 
 ### 2.4 `Lib` (#153, #21, #23)
 
@@ -489,45 +501,46 @@ instantiates the body gets today's diagnostic with a cross-file note.
 ### 4.3 Encoding
 
 A separate section so it can be read lazily (only when something is
-instantiated) and hashed on its own (`tmpl_hash`). It **shares `IFACE`'s
-`STRS` and `TYPES` tables by index** (duplicating a type table per body
-would cost more than it saves) and is bound to `IFACE` by the manifest's
-`HAS_TEMPLATES` bit and the `Tmpl` indices in `DECLS`.
+instantiated) and hashed on its own (`tmpl_hash`), bound to `IFACE` by the
+manifest's `HAS_TEMPLATES` bit.
+
+**As implemented** (`include/paykan/pkm/Templates.h`): the bodies are those
+of the source imports of §4.8, already resolved by renaming, so they need no
+node codec of their own. The section frames the [AST interchange
+format](../plugins/ast-format.md) text of a unit holding the module's
+generic classes, structs and functions and their `impl` blocks, as
+`Sema::exportTemplates` produced them:
 
 ```
 TmplSection
   "PKMT"  u32 version(= the release's)  u32 flags(0)
-  uleb n_records ; records[n] { uleb tag (1 class, 2 function); uleb len; payload }
-    class:    uleb n_methods ; methods[n] { Str name; Node body }      (plus init body under name "__init__")
-    function: Node body
+  Str file                                the module's source, as diagnostics name it
+  uleb n ; Str uses[n]                    the other modules the bodies name (§4.8 Uses)
+  uleb n ; { u8 kind (1 class, 2 struct); uleb index }[n]
+                                          the template each impl block of the unit belongs to
+  Str ast                                 the interchange text of the unit
+```
+
+`Sema::encodeTemplates` writes it and `Sema::decodeTemplates` reads the
+unit back (`interchange::read`) into an `ASTContext` of its own, which the
+importer's `ModuleTemplates` keeps alive; an importer then registers and
+instantiates the templates exactly as a source import's. The interchange
+text is the release's (its version is the release's, like every format), so
+reusing it ties `TMPL` to nothing a `.pkm` is not already tied to. A
+diagnostic inside an instantiated body names `file`, without the source
+line excerpt (§4.7).
+
+The design this replaced resolved every free name to a typed reference
+(below) and shared `IFACE`'s `STRS` and `TYPES` tables; the renaming of
+§4.8 resolves the same names to `$<module>::name` strings, which the
+importer's hidden qualifiers bind.
+
+```
 Node := u8 kind ; Loc ; fields…           Loc := uleb line, col, line_end, col_end (0s = unknown)
-```
-
-Node kinds are the statement and expression nodes of the interchange format
-(`docs/plugins/ast-format.md` §2), plus the resolved forms:
-
-```
 Ident  := u8 kind: 1 LOCAL Str | 2 CONST Mod, Str | 3 TYPE Ty | 4 UNRESOLVED Str
 Callee := u8 kind: 1 FUNC Mod, Str | 2 CTOR Ty | 3 TEMPLATE_FUNC Mod, Str | 4 TEMPLATE_CTOR Mod, Str
           | 5 BUILTIN Str | 6 CONVERSION Str | 7 SUPER_INIT | 8 TYPE_PARAM uleb | 9 UNRESOLVED Str
 ```
-
-The codec is written next to `src/ASTInterchange/{Writer,Reader}.cpp` as one
-`switch` over `ASTNode::NodeKind` with the same cases; the test harness
-materialises a decoded body and prints it with `interchange::write` to
-compare with `--emit-ast` of the template. Nesting depth ≤ 2048
-(`interchange::kMaxDepth`). The text interchange format is **not** reused
-(it refuses post-Sema types and is a plugin-API contract, versioned
-separately).
-
-Materialisation builds the body in the **importer's `ASTContext`**:
-`LOCAL` → `Identifier`; `CONST`/`FUNC`/`TEMPLATE_*` → canonical qualified
-names (`geometry::physics::GRAVITY`, `geometry::shapes::Box`) that the
-loader registers for every loaded module whether or not the importer
-imported it (entries are `IsBuiltin`, never re-exported); `T_PARAM i` → a
-`ClassType` stub named by the parameter, exactly what the parser produces
-for `T`, so `ASTCloner::cloneType` substitutes it; `T_APPLY` → a
-`GenericType` with the canonical template name.
 
 ### 4.4 Instantiation identity
 
@@ -608,10 +621,10 @@ file name and declaration positions, so no source is needed for the message
 (the source line excerpt is shown when the file exists). JSON diagnostics
 (#144) carry `module`, `file`, `line`, `column` for both frames.
 
-### 4.8 Source imports (implemented before `TMPL`)
+### 4.8 What is implemented: renamed bodies and per-module copies
 
-Templates of a module imported **from source** already work, without `TMPL`
-or `INST`:
+Templates work across modules, from a source and from a `.pkm` alike,
+without erasure or `INST` (§4.5 stays the plan for erased copies):
 
 - **Resolution at export (§4.2) as a renamed AST.** `Sema::exportTemplates`
   clones each template and spells every name its module declares, and every
@@ -619,24 +632,38 @@ or `INST`:
   qualifier, `Sema::hiddenQualifier`: no source can spell `$`). An importer
   registers each module the bodies name under its hidden qualifier, then
   instantiates the clone as it would a local template, in the template
-  module's file for diagnostics (§4.7).
+  module's file for diagnostics (§4.7). A module's `.pkm` holds the clones
+  in its `TMPL` section (§4.3); an importer that loads the module from it
+  reads them back and instantiates them the same way.
 - **Identity.** A class instantiation is named `Box<int>`, as a local one
   (open question 3 stands); an instantiation the importer meets as an
   imported class of the template's module is that class. A function
-  instantiation is `$<module>::f<int>`.
-- **Emission.** Each instantiation is lowered once per program, by the first
-  module lowered that needs it (imports first); the others declare it
-  extern. It is not a unit of its own because it may call methods of the
-  requester's classes (`Box<Foo>`), which the requester only declares while
-  it is lowered; the driver-owned units of §4.5 take those from the
-  requester's `IFACE`.
-- **Caching.** A module with templates, or with instantiations of another
-  module's, is never written to the `.pkm` cache, so no `.pkm` holds
-  another module's instantiation, and importers always see its templates.
-  Nor is a module whose code declares such an instantiation extern (it
-  uses a `Box<int>` another module made): the extern names the module that
-  emits it in this program, which in another program may be a different
-  one.
+  instantiation is `$<module>::f<int>`. Type names are unique across a
+  program (Sema rejects two types of one name anywhere in its imports), so
+  one name is one instantiation program-wide.
+- **Emission: one copy per module, one per program.** Every module lowers
+  its own copy of each instantiation of another module's template its code
+  uses (`ForeignClasses`, `ForeignFunctions`, `ForeignStructs`), as
+  definitions in its own PIR, so what its PIR says does not depend on the
+  program. `lowering::shareInstantiations` then keeps one copy per program:
+  the first module that defines `Box<int>` (imports first, the main module
+  last) keeps the class and its functions, and in every other module they
+  become externs of that one (a `vcall` naming the class takes the slot's
+  signature, as one on an imported class does). The driver writes the cache
+  entries and `--emit-pkm`'s file from the per-module PIR, then shares.
+  Copies are not merged by the linker: strict C11 has no COMDAT (#62).
+- **Caching.** A module with templates, or with copies of another module's
+  instantiations, is cached like any other. Its importers record its
+  `tmpl_hash` as well as its `iface_hash` (§2.3), so an edit of a template's
+  body rebuilds the modules that may hold a copy of an instantiation of it.
+  A module whose code declares an instantiation extern without a copy of its
+  own (a use Sema did not record as an instantiation of the module) is
+  still kept out of the cache: the extern names the module that emits it in
+  this program, which in another program may be a different one.
+- **The standard library** is built this way: each module is compiled into
+  a `.pkm` named `::<name>` (`--emit-pkm --module-name=::<name>`) against
+  the `.pkm` files of the modules it imports, and only the `.pkm` files are
+  installed.
 
 ---
 ## 5. `CODE`: binary PIR
@@ -1144,7 +1171,7 @@ source required), in this order:
 | `core.version` (+ `build`) | **cache:** ≠ `kVersion`/build id ⇒ `Stale` (a rebuild is free and protects against codegen fixes between versions with unchanged PIR/ABI numbers). **prebuilt:** not on `PAYKAN_PKM_COMPATIBLE_VERSIONS` (new, in `cmake/PluginCompat.cmake`, generated into `PluginCompat.h`, the #103 mechanism #113 and #153 ask to reuse) ⇒ `Rejected(Toolchain)` |
 | no `CODE` and no usable payload | `Usable` for `--check-only`; `NoCode` when code is needed |
 | `source` hash (when a source is found) | `Stale` |
-| each `Dep`: current `iface_hash` (and `tmpl_hash` when `INSTANTIATED`) differs | `Stale`; dependency not found ⇒ `Rejected(MissingDependency)` |
+| each `Dep`: current `iface_hash` or `tmpl_hash` differs (§2.3) | `Stale`; dependency not found ⇒ `Rejected(MissingDependency)` |
 
 `Stale` with source rebuilds silently (`--verbose` says why). `Stale` or
 `Rejected` without source is an error naming what differs:
@@ -1218,6 +1245,7 @@ backend (`verifyModule` after `parseBitcodeFile`; the linker for objects).
 | Flag | Effect |
 |---|---|
 | `--emit-pkm [-o f.pkm]` | compile the input module and write its `.pkm`; portable by default |
+| `--module-name=<name>` | with `--emit-pkm`: the canonical name the file records (`::<name>` for the standard library's modules) |
 | `--with-payload[=<backend>]` (planned) | with `--emit-pkm`: also append the named (or default) backend's payload |
 | `--module-path=<dir>` | repeatable |
 | `--write-payloads={on,off}` (planned) | default on: after a build/run, add the active backend's payload to cached imports |
@@ -1226,8 +1254,9 @@ backend (`verifyModule` after `parseBitcodeFile`; the linker for objects).
 | `--strip-names`, `--debug-lines` (planned) | §5.8, §6.2 |
 | `--verbose` | one line per import: file, verdict, and (once there are payloads) why a payload was dropped |
 
-`paykan pkm <verb>`: `dump f.pkm [--section=manifest|sections|iface|code|symidx|payloads|all]`
-(planned: `--section=tmpl|debug` and `--symbol=<name>`; stable text;
+`paykan pkm <verb>`: `dump f.pkm [--section=manifest|sections|iface|tmpl|code|symidx|payloads|all]`
+(`tmpl` adds the bodies' interchange text to the framing `all` shows;
+planned: `--section=debug` and `--symbol=<name>`; stable text;
 golden-tested; `--section=code` prints exactly `pir::print` of the decoded
 module, so it equals `--emit-pir` of the module when it was built),
 `check f.pkm` (verdict against this toolchain, exit status), and, planned,
