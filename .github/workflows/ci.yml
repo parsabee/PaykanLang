@@ -205,7 +205,14 @@ jobs:
           # aborting, and the tests exercise that with sizes no allocator can
           # serve; ASan's allocator is to return null for them, as libc's does,
           # not to report them as errors.
-          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1:detect_container_overflow=0:allocator_may_return_null=1
+          # allow_user_poisoning=0: LLVM's BumpPtrAllocator poisons a new slab
+          # and unpoisons each allocation from it, but only where it is
+          # compiled with ASan: a slab our instrumented code starts (its
+          # StartNewSlab) and the uninstrumented MLIR library allocates from
+          # stays poisoned, and ASan reports use-after-poison in
+          # MLIRContext's constructor (BuiltinDialect's types).  Only LLVM
+          # poisons memory by hand; every other check stays on.
+          ASAN_OPTIONS: abort_on_error=1:detect_stack_use_after_return=1:detect_container_overflow=0:allocator_may_return_null=1:allow_user_poisoning=0
         run: ctest --test-dir build-asan --output-on-failure --parallel 4
 
   # ---------------------------------------------------------------------------

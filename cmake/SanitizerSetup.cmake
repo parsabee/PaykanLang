@@ -34,9 +34,11 @@ if(PAYKAN_ASAN)
         set(_paykan_asan_flags -fsanitize=address,leak)
         message(STATUS "Sanitizer: AddressSanitizer + LeakSanitizer enabled")
     endif()
-    # Run tests with ASAN_OPTIONS=detect_container_overflow=0: the prebuilt
-    # LLVM is not instrumented, and mixing it with instrumented libc++
-    # containers yields false container-overflow reports (see ci.yml).
+    # Run tests with ASAN_OPTIONS=detect_container_overflow=0 and
+    # allow_user_poisoning=0: the prebuilt LLVM is not instrumented, and
+    # mixing it with instrumented libc++ containers and LLVM allocators
+    # yields false container-overflow and use-after-poison reports (see
+    # ci.yml).
     add_compile_options(${_paykan_asan_flags} -fno-omit-frame-pointer)
     add_link_options(${_paykan_asan_flags})
     list(APPEND PAYKAN_SANITIZER_FLAGS ${_paykan_asan_flags})
