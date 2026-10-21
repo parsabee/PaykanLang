@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// The PIR -> LLVM translation, tested on hand-written PIR text: parse,
-// verify, translate, JIT, and check the exit code and output.
+// The PIR -> LLVM translation (the mlir backend's LLVM path), tested on
+// hand-written PIR text: parse, verify, translate, JIT, and check the exit
+// code and output, or the LLVM IR.
 
 #include "JIT.h"
-#include "PIRToLLVM.h"
+#include "Pipeline.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Verifier.h"
 
@@ -46,7 +47,7 @@ Run runPIR(const std::string &text, const std::vector<std::string> &args = {}) {
     return r;
   }
   auto ctx = std::make_unique<llvm::LLVMContext>();
-  auto module = backend::llvm_backend::translateProgram(*program, *ctx, "t");
+  auto module = mlir_backend::compileProgram(*program, *ctx, "t", "");
   if (!module) {
     r.Err = module.status().message();
     return r;
@@ -79,7 +80,7 @@ std::string translatePIR(const std::string &text, std::string &err) {
     return "";
   }
   llvm::LLVMContext ctx;
-  auto module = backend::llvm_backend::translateProgram(*program, ctx, "t");
+  auto module = mlir_backend::compileProgram(*program, ctx, "t", "");
   if (!module) {
     err = module.status().message();
     return "";
@@ -218,9 +219,8 @@ fn @main() -> i64 {
                                 err);
   ASSERT_FALSE(ir.empty()) << err;
   for (const char *expected :
-       {"= fcmp une double %a, %b", "= fcmp oeq double %a, %b",
-        "= fcmp olt double %a, %b", "= fcmp ole double %a, %b",
-        "= fcmp ogt double %a, %b", "= fcmp oge double %a, %b"})
+       {"= fcmp une double ", "= fcmp oeq double ", "= fcmp olt double ",
+        "= fcmp ole double ", "= fcmp ogt double ", "= fcmp oge double "})
     EXPECT_EQ(linesWith(ir, expected).size(), 1u) << expected << "\n" << ir;
   EXPECT_TRUE(linesWith(ir, "fcmp one").empty()) << ir;
 }
@@ -306,9 +306,9 @@ fn @main() -> i64 {
   EXPECT_EQ(r.ExitCode, 11);
 }
 
-// The optimisation hints the legacy AST code generator emitted: string
-// literals are mergeable (unnamed_addr, align 1) and vtable-pointer loads are
-// invariant, so LLVM can hoist and merge them.
+// The optimisation hints: string literals are mergeable (unnamed_addr,
+// align 1) and vtable-pointer loads are invariant, so LLVM can hoist and
+// merge them.
 TEST(PIRLLVM, ConstantsAreMergeableAndVTableLoadsInvariant) {
   std::string err;
   std::string ir = translatePIR(R"(module "t"
@@ -345,7 +345,7 @@ fn @main() -> i64 {
                                 err);
   ASSERT_FALSE(ir.empty()) << err;
 
-  for (const char *name : {"@.s = ", "@.t = "}) {
+  for (const char *name : {"@pk_t_S_2Es = ", "@pk_t_S_2Et = "}) {
     auto defs = linesWith(ir, name);
     ASSERT_EQ(defs.size(), 1u) << name << "\n" << ir;
     EXPECT_NE(
@@ -358,10 +358,10 @@ fn @main() -> i64 {
   // Both vtable-pointer loads (vtable.load and the one vcall does) carry
   // !invariant.load; the slot load does not (it is a load from the vtable,
   // not of the object's header).
-  auto vtLoads = linesWith(ir, "= load ptr, ptr %o");
+  auto vtLoads = linesWith(ir, "!invariant.load !");
   ASSERT_EQ(vtLoads.size(), 2u) << ir;
   for (const auto &l : vtLoads)
-    EXPECT_NE(l.find("!invariant.load !"), std::string::npos) << l;
+    EXPECT_NE(l.find("= load ptr, ptr "), std::string::npos) << l;
   EXPECT_FALSE(linesWith(ir, "!{}").empty()) << ir;
 }
 
@@ -392,14 +392,15 @@ fn @main() -> i64 {
 )",
                                 err);
   ASSERT_FALSE(ir.empty()) << err;
-  EXPECT_FALSE(linesWith(ir, "define { i1, double } @pk.half(i64").empty())
+  EXPECT_FALSE(linesWith(ir, "define { i1, double } @pk_t_Shalf(i64").empty())
       << ir;
   EXPECT_FALSE(linesWith(ir, "insertvalue { i1, double }").empty()) << ir;
   EXPECT_FALSE(linesWith(ir, "zeroinitializer").empty()) << ir;
   EXPECT_FALSE(linesWith(ir, "extractvalue { i1, double }").empty()) << ir;
 
-  // An object's size is the target's sizeof, folded once the module has its
-  // data layout: { i1, i64 } is 16 bytes there, 12 under LLVM's default one.
+  // An object's size is its C layout's (the shared lowering's): the 16-byte
+  // header, then the opt_bool field's 2 bytes, rounded up to the header's
+  // alignment.
   ir = translatePIR(R"(module "t"
 class C {
   field b: opt_bool
@@ -422,7 +423,7 @@ fn @main() -> i64 {
   ASSERT_FALSE(ir.empty()) << err;
   auto mallocs = linesWith(ir, "call ptr @Paykan_malloc(");
   ASSERT_EQ(mallocs.size(), 1u) << ir;
-  EXPECT_NE(mallocs[0].find("ptrtoint (ptr getelementptr"), std::string::npos)
+  EXPECT_NE(mallocs[0].find("@Paykan_malloc(i64 24)"), std::string::npos)
       << mallocs[0];
 
   auto r = runPIR(R"(module "t"

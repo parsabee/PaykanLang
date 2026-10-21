@@ -2,12 +2,14 @@
 
 The design behind the `mlir` backend: PIR is imported into an MLIR dialect,
 lowered once into upstream MLIR dialects, and from there to LLVM (the JIT,
-`build`, `--emit-llvm`) and to C (`--emit-c`).  It replaces the two
-hand-written translations of PIR, the C emitter (`src/Backends/C`) and
-`PIRToLLVM.cpp`, which each re-implement every PIR feature, with one
-lowering shared by both targets.  It is built in steps, each a pull request
-that keeps every test passing; the C and llvm backends stay until the `mlir`
-backend matches them.
+`build`, `--emit-llvm`) and to C (`--emit-c`).  It replaced the two
+hand-written translations of PIR, the C emitter (`src/Backends/C`, the `c`
+backend) and `PIRToLLVM.cpp` (the `llvm` backend), which each re-implemented
+every PIR feature, with one lowering shared by both targets.  It was built in
+steps, each a pull request that kept every test passing; the last one (step 6
+below) removed the `c` and `llvm` backends.  `mlir` is now the only backend in
+this repository, always built and the default; other backends are plugins
+([writing a backend](../writing-a-backend.md)).
 
 ## Summary of the decisions
 
@@ -21,10 +23,11 @@ backend matches them.
 | LLVM | the `llvm` dialect (`--emit-mlir=llvm`), translated to LLVM IR, then the existing JIT, native object build, bitcode cache and `--emit-llvm` |
 | C | EmitC, printed by MLIR's C emitter (`--emit-c`) |
 | Options | `--emit-mlir=<stage>`, `pir`, `scf`, `llvm` or `emitc`: the program after that stage, on stdout |
+| Backends | `mlir` alone, always built and the default; it replaced `c` and `llvm`, whose `PAYKAN_BACKENDS` names now build it, with a warning (step 6) |
 
 ## Why one lowering
 
-Each PIR feature has had to be written twice: once in C syntax, once in
+Each PIR feature had to be written twice: once in C syntax, once in
 LLVM IR.  An object field is a struct member in C and a GEP in LLVM; a
 `while` with `break` is a C loop and a set of basic blocks.  MLIR's upstream
 dialects already have both translations for everything that is not specific
@@ -44,8 +47,8 @@ PIR ──import──▶ pir dialect                         --emit-mlir=pir
         llvm dialect                 emitc
    (--emit-mlir=llvm)         (--emit-mlir=emitc)
              ▼                          ▼
-   LLVM IR: JIT, build,      C source (--emit-c): build,
-   --emit-llvm                    run with $CC
+   LLVM IR: JIT, build,      C source (--emit-c)
+   --emit-llvm
 ```
 
 The rule for each piece of the lowering: if an upstream path from `scf` (or
@@ -71,7 +74,7 @@ vtables, optionals, the sized integer types, structured control flow with
   set.  A `return`'s value goes into a local the function returns at its
   end.  LLVM's optimiser removes the flag again; C keeps it.
 * **ARC, allocation, weak references** become calls to the runtime
-  (`func.call`), as both translations already do.
+  (`func.call`), as both of the replaced translations did.
 * **Objects.**  Every class's layout is computed once, as C lays out the
   object (docs/pir.md §5: the 16-byte header, then the fields at their
   alignment): a field access is the object's address plus the field's
@@ -81,7 +84,7 @@ vtables, optionals, the sized integer types, structured control flow with
 * **Optionals** stay `!pir.opt` values, with `pir.some`, `pir.none`,
   `pir.is_some` and `pir.unwrap`: each target makes them the struct C lays
   out (`{ bool present; <payload> value; }`), passed and returned by value as
-  both of today's backends do.  (Their two parts as two values would need
+  the `c` and `llvm` backends did.  (Their two parts as two values would need
   two results from a function returning one, which EmitC, like C, cannot
   express.)
 * **Locals** are `pir.alloca` slots: memory that LLVM's `mem2reg` turns
@@ -96,10 +99,12 @@ vtables, optionals, the sized integer types, structured control flow with
 
 Upstream conversions take `func`, `scf` and `arith` to EmitC
 (src/Backends/MLIR/ToEmitC); a pattern each takes the `pir` ops the shared
-lowering keeps; MLIR's C emitter prints the result.  The `mlir-c` backend
-builds that C with the system compiler as the c backend builds its own, one
-cached object per module (paykan/backends/c/CBuild.h, which both share).
-What is C's alone is decided there, at the MLIR level:
+lowering keeps; MLIR's C emitter prints the result, the whole program as one
+translation unit (`--emit-c`; [the C output](../c-backend.md) describes it).
+`paykan run` and `paykan build` take the LLVM path.  (Until step 6 an `mlir-c`
+backend also built and ran that C with the system compiler, one cached object
+per module, as the `c` backend built its own.)  What is C's alone is decided
+there, at the MLIR level:
 
 * **Types** are spelled as Runtime.h spells them: a box `PaykanShared *`, an
   obj `PaykanObject *`, a weak `PaykanWeak *`, a ptr `void *` (what a native
@@ -116,7 +121,7 @@ What is C's alone is decided there, at the MLIR level:
 * **Locals** are zeroed arrays of the slot alignment's integer, which gives
   C their alignment.
 * **Strictly conforming C11**, which a `-std=c11 -pedantic-errors -Wall
-  -Wextra -Werror` build accepts (CStrictC11.mlir-c): the program's `main`
+  -Wextra -Werror` build accepts (the CStrictC11 test): the program's `main`
   becomes `paykan_main` behind C's `main()`, which sets the runtime up as
   `run` does; unread values are dropped (canonicalisation) and unread
   parameters marked `(void)`, so C warns about no unused variable; and an
@@ -139,12 +144,25 @@ What is C's alone is decided there, at the MLIR level:
    Building C with the system compiler moves to a library both C backends
    share (paykan/backends/c/CBuild.h).
 6. The C emitter and `PIRToLLVM.cpp` are removed; MLIR is the only backend.
+   Done: the `c` and `llvm` backends (src/Backends/C,
+   include/paykan/backends/c, `LLVMBackend.cpp`, `PIRToLLVM.cpp`) and the
+   `paykan_c_build` library are gone, and `mlir-c` became the `mlir`
+   backend's `--emit-c`.  `mlir` is always built and the default
+   (`paykan --list-backends` prints `mlir (default)`); `--emit-llvm`,
+   `--emit-c` and `--emit-mlir=<stage>` are its source outputs, one at a
+   time.  src/Backends/LLVM keeps its JIT and its native code generation
+   (src/Backends/LLVM/JIT and src/Backends/LLVM/CodeGen), and the bitcode
+   cache (`<module>.bc`) is the only backend cache.
 
 ## Open questions
 
-* **The C path without LLVM.**  Today the default build needs only a C
-  compiler; with MLIR every build links LLVM and MLIR.  Step 6 decides how
-  the default configure and the package channels follow.
-* **Readable C.**  EmitC's output names every intermediate value; the C
-  emitter's is closer to hand-written C.  `--emit-c` stays correct and
-  strictly conforming either way.
+* **The C path without LLVM.**  Before step 6 the default build needed
+  only a C++ compiler and, at run time, a C compiler; with MLIR every build
+  links LLVM and MLIR.  Decided in step 6: a default configure uses the LLVM
+  22.1.8 that `-DLLVM_DIR` names, or downloads the prebuilt release (MLIR
+  included) once into `build/third-party/llvm`; the release tarballs and the
+  Debian package link it statically, and Homebrew installs those prebuilt
+  tarballs instead of building from source.
+* **Readable C.**  EmitC's output names every intermediate value; the
+  removed C emitter's was closer to hand-written C.  `--emit-c` stays
+  correct and strictly conforming either way.

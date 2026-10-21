@@ -6,8 +6,8 @@
 // implemented side by side for each supported platform in Platform.cpp:
 //   - for the backends that produce native programs: locating the running
 //     executable, spawning the C compiler / linker and the built program,
-//     creating a temporary directory, the process id (Toolchain.cpp and the
-//     C backend's CBuild.cpp are the users);
+//     creating a temporary directory, the process id (Toolchain.cpp is the
+//     user);
 //   - for the plugin loader (src/PluginHost): loading a shared library and
 //     looking up a symbol in it (the platform's dynamic loader).
 //

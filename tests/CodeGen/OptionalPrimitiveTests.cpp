@@ -598,7 +598,7 @@ TEST(OptionalPrimitive, GenericStackPopsAnOptional) {
 
 // -- PIR inline optionals (#96)
 
-// `some`, `none`, `is_some` and `unwrap` on both backends, with optionals in
+// `some`, `none`, `is_some` and `unwrap`, with optionals in
 // locals, parameters, results, fields (a new object's are absent; an
 // opt_char and an opt_bool field are 16 bytes like the others), a vtable
 // slot's signature, `select` and through addresses; `unwrap` of an absent

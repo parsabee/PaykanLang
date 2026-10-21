@@ -87,7 +87,7 @@ fn @main() -> i64 {
 )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   // k 2 + n 41 + g 3 + f 1 + 'c' - 'a' 2 + t false 0.  The sum stays below
-  // 128: the C backend's runner reads a higher exit status as a signal.
+  // 128: a shell reads a higher exit status as a signal.
   EXPECT_EQ(r.ExitCode, 49) << r.StdErr;
   guard.expectNoLeaks("address ops");
 }

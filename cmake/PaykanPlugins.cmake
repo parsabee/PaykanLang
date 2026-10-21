@@ -12,8 +12,8 @@
 #   PAYKAN_DEFAULT_FRONTEND   -- the frontend used when --frontend is absent
 #   PAYKAN_BACKENDS           -- cache list of backends to build
 #   PAYKAN_DEFAULT_BACKEND    -- the backend used when --backend is absent
-#   PAYKAN_NEEDS_LLVM         -- TRUE when a listed backend depends on LLVM
-#   PAYKAN_NEEDS_MLIR         -- TRUE when a listed backend depends on MLIR
+#   PAYKAN_NEEDS_LLVM         -- TRUE: the mlir backend depends on LLVM ...
+#   PAYKAN_NEEDS_MLIR         -- ... and on MLIR
 #   paykan_add_plugin(<target>)
 #   paykan_link_plugins(<target>)
 
@@ -47,44 +47,36 @@ list(LENGTH PAYKAN_FRONTENDS PAYKAN_NUM_FRONTENDS)
 message(STATUS "Frontends: ${PAYKAN_FRONTENDS} (default: ${PAYKAN_DEFAULT_FRONTEND})")
 
 # -- Backends -----------------------------------------------------------------
-# `c` is the C backend (part of the core: it needs only a C compiler at run
-# time), always built and the default; `llvm` is the LLVM IR / ORC JIT
-# backend, which is opt-in and depends on LLVM: LLVM is fetched only when
-# `llvm` is listed (#123).  So a plain configure downloads nothing.  `mlir`
-# is the MLIR backend (docs/design/mlir-backend.md), opt-in like `llvm`, on
-# the same LLVM, which ships MLIR.
-set(PAYKAN_KNOWN_BACKENDS c llvm mlir)
-set(PAYKAN_BACKENDS "c" CACHE STRING
-    "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS}; c is always built and is the default)")
+# The in-tree backend is `mlir` (docs/design/mlir-backend.md): PIR through
+# MLIR to LLVM (the JIT, native objects and executables, --emit-llvm) and to
+# C (--emit-c).  It depends on LLVM 22 with MLIR, which a configure finds
+# (-DLLVM_DIR) or downloads (cmake/LLVMSetup.cmake).  Always built and the
+# default; other backends are plugins, built against an installed Paykan
+# (docs/writing-a-backend.md).  The c and llvm backends it replaced are
+# accepted in the list for old build directories and scripts, and stand for
+# it.
+set(PAYKAN_KNOWN_BACKENDS mlir)
+set(PAYKAN_BACKENDS "mlir" CACHE STRING
+    "Semicolon-separated list of backends to build (available: ${PAYKAN_KNOWN_BACKENDS}; mlir is always built and is the default)")
 
+set(_paykan_backends "")
 foreach(be IN LISTS PAYKAN_BACKENDS)
-    if(NOT be IN_LIST PAYKAN_KNOWN_BACKENDS)
+    if(be STREQUAL "c" OR be STREQUAL "llvm")
+        message(WARNING "PAYKAN_BACKENDS: the ${be} backend was replaced by "
+                        "mlir, which emits both C and LLVM IR: building mlir")
+        set(be mlir)
+    elseif(NOT be IN_LIST PAYKAN_KNOWN_BACKENDS)
         message(FATAL_ERROR "Unknown backend '${be}' in PAYKAN_BACKENDS (available: ${PAYKAN_KNOWN_BACKENDS})")
     endif()
+    list(APPEND _paykan_backends ${be})
 endforeach()
-if(NOT "c" IN_LIST PAYKAN_BACKENDS)
-    list(APPEND PAYKAN_BACKENDS c)
-endif()
+list(APPEND _paykan_backends mlir)
+list(REMOVE_DUPLICATES _paykan_backends)
+set(PAYKAN_BACKENDS "${_paykan_backends}")
 
-# The default backend is `c` whenever it is built, wherever the list puts it
-# (`llvm;c` and `c;llvm` both default to `c`; `llvm` is selected with
-# --backend=llvm).  `c` is appended above, so in this tree it always is.  A
-# configuration without `c` (which this file never produces, but a fork or a
-# downstream copy of it might) falls back to the first backend listed.
-if("c" IN_LIST PAYKAN_BACKENDS)
-    set(PAYKAN_DEFAULT_BACKEND c)
-else()
-    list(GET PAYKAN_BACKENDS 0 PAYKAN_DEFAULT_BACKEND)
-endif()
-set(PAYKAN_NEEDS_LLVM FALSE)
-set(PAYKAN_NEEDS_MLIR FALSE)
-if("llvm" IN_LIST PAYKAN_BACKENDS)
-    set(PAYKAN_NEEDS_LLVM TRUE)
-endif()
-if("mlir" IN_LIST PAYKAN_BACKENDS)
-    set(PAYKAN_NEEDS_LLVM TRUE)
-    set(PAYKAN_NEEDS_MLIR TRUE)
-endif()
+set(PAYKAN_DEFAULT_BACKEND mlir)
+set(PAYKAN_NEEDS_LLVM TRUE)
+set(PAYKAN_NEEDS_MLIR TRUE)
 message(STATUS "Backends: ${PAYKAN_BACKENDS} (default: ${PAYKAN_DEFAULT_BACKEND})")
 
 # -- Helpers ------------------------------------------------------------------

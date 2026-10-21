@@ -19,7 +19,7 @@ extern "C" {
 using namespace paykan::test;
 
 // An inline optional in memory (an `int?[n]` element, a field, a native
-// function's PaykanType) is the C backend's `{ bool present; T value; }`: the
+// function's PaykanType) is C's `{ bool present; T value; }`: the
 // size and alignment the lowering gives the runtime are that struct's.
 namespace {
 template <typename T> struct OptLayout {

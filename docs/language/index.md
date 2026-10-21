@@ -18,11 +18,10 @@ and takes commands from the command line.
 
 PaykanLang (source files end in `.pkn`) is a statically typed language. A program is
 checked, lowered to a backend-neutral IR ([PIR](../pir.md)) and compiled by a backend: the
-**C backend** (emits C11 for the system C compiler) or the optional **LLVM backend** (LLVM
-IR). `paykan run` (or just `paykan prog.pkn`) runs a program; the C backend is the default,
-and `--backend=llvm` runs it through a JIT instead. `paykan build prog.pkn -o prog` writes a
-native executable with either backend. Memory lifetimes for objects are managed by
-automatic reference counting: there is no garbage collector.
+**`mlir` backend**, which takes it through MLIR to LLVM IR (and, with `--emit-c`, to C11).
+`paykan run` (or just `paykan prog.pkn`) runs a program in process through LLVM's JIT;
+`paykan build prog.pkn -o prog` writes a native executable. Memory lifetimes for objects are
+managed by automatic reference counting: there is no garbage collector.
 
 | Pillar | Description |
 |--------|-------------|

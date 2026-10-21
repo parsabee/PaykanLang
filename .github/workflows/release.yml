@@ -19,7 +19,8 @@ name: Release
 #
 # A normal release then feeds the package channels, which live in their own
 # repositories, parsabee/homebrew-paykanlang and parsabee/paykanlang-apt: it
-# opens a pull request on the Homebrew tap that bumps the formula, and sends
+# opens a pull request on the Homebrew tap that points the formula at the
+# release's tarballs, and sends
 # the apt repository the dispatch that re-indexes and signs it.  Both need the
 # RELEASE_CHANNELS_TOKEN secret, a fine-grained token with Contents and Pull
 # requests write access on both repositories; without it the release is
@@ -71,16 +72,16 @@ jobs:
         run: brew list zstd > /dev/null 2>&1 || brew install zstd
 
       # Only paykan and the runtime are shipped: no test suite, so no GoogleTest.
-      # The release ships the recursive-descent frontend and both backends:
-      # c (the default, which needs only a C compiler at run time) and llvm
-      # (--backend=llvm: the ORC JIT for `run`, native objects for `build`).
-      # LLVM is downloaded at configure time (cmake/LLVMSetup.cmake) and
-      # linked statically into paykan, so the installed paykan needs no LLVM.
-      - name: Configure (Release, recursive-descent + c + llvm)
+      # The release ships the defaults: the recursive-descent frontend and the
+      # mlir backend (the ORC JIT for `run`, native objects for `build`, and
+      # --emit-c).  LLVM is downloaded at configure time
+      # (cmake/LLVMSetup.cmake) and linked statically into paykan, so the
+      # installed paykan needs no LLVM, only a C compiler to link `build`'s
+      # executables.
+      - name: Configure (Release, the defaults)
         run: >-
           cmake -B build -DCMAKE_BUILD_TYPE=Release -G "${{ matrix.generator }}"
           -DPAYKAN_BUILD_TESTS=OFF -DPAYKAN_RELEASE=ON
-          -DPAYKAN_FRONTENDS=recursive-descent "-DPAYKAN_BACKENDS=llvm;c"
 
       # paykan_stdlib compiles stdlib/ with the built paykan and stages it
       # where paykan finds it (and where `cmake --install` takes it from).
@@ -88,18 +89,16 @@ jobs:
         run: cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)" --target paykan paykan_runtime paykan_stdlib
 
       # Sanity-check the release binary actually runs before we publish it.
-      - name: Smoke test (--version + run and build on both backends)
+      - name: Smoke test (--version, run, build and --emit-c)
         run: |
           set -euo pipefail
           ./build/bin/paykan --version
-          ./build/bin/paykan --list-backends | grep '^c (default)'
-          ./build/bin/paykan --list-backends | grep '^llvm'
+          ./build/bin/paykan --list-backends | grep '^mlir (default)'
           printf 'import ::io;\nfn main() -> int {\n  io::println("Hello from release CI!");\n  return 0;\n}\n' > /tmp/hello.pkn
-          for be in c llvm; do
-            ./build/bin/paykan --backend="${be}" /tmp/hello.pkn | grep -Fx "Hello from release CI!"
-            ./build/bin/paykan --backend="${be}" -o "/tmp/hello-${be}" build /tmp/hello.pkn
-            "/tmp/hello-${be}" | grep -Fx "Hello from release CI!"
-          done
+          ./build/bin/paykan /tmp/hello.pkn | grep -Fx "Hello from release CI!"
+          ./build/bin/paykan -o /tmp/hello build /tmp/hello.pkn
+          /tmp/hello | grep -Fx "Hello from release CI!"
+          ./build/bin/paykan --emit-c /tmp/hello.pkn | grep -F 'int main('
 
       # The tag must name the version the tree builds: CMakeLists.txt
       # (project() VERSION plus PAYKAN_VERSION_PRERELEASE) is the only place
@@ -166,11 +165,9 @@ jobs:
           test "$(command -v paykan)" = /usr/bin/paykan
           paykan --version
           printf 'import ::io;\nfn main() -> int {\n  io::println("Hello from the .deb!");\n  return 0;\n}\n' > hello.pkn
-          for be in c llvm; do
-            paykan --backend="${be}" run hello.pkn | grep -Fx "Hello from the .deb!"
-            paykan --backend="${be}" build -o "hello-${be}" hello.pkn
-            "./hello-${be}" | grep -Fx "Hello from the .deb!"
-          done
+          paykan run hello.pkn | grep -Fx "Hello from the .deb!"
+          paykan build -o hello hello.pkn
+          ./hello | grep -Fx "Hello from the .deb!"
           cmake -S "${GITHUB_WORKSPACE}/src/Backends/PrintPIR" -B print-pir -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build print-pir
           paykan --plugin=print-pir/libpaykan_backend_print_pir.so --list-backends | grep '^print-pir'
@@ -273,24 +270,36 @@ jobs:
             echo "set=true" >> "${GITHUB_OUTPUT}"
           fi
 
-      # The formula builds from the tag's source archive: its url and sha256
-      # change, and the previous release's bottle block goes (the tap's CI
-      # builds new bottles on the pull request; `pr-pull` publishes them).
+      # The formula installs the release's prebuilt tarballs (paykan links
+      # LLVM statically, so a source build would download and link LLVM on
+      # the user's machine): each platform's url and sha256 change, read
+      # from the tarball and the .sha256 the release just published.  The
+      # tap's CI installs and tests the formula on the pull request.
       - name: Open the Homebrew tap's bump pull request
         if: steps.token.outputs.set == 'true'
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          url="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${TAG}.tar.gz"
-          sha="$(curl -fsSL "${url}" | sha256sum | cut -d' ' -f1)"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" tap
           cd tap
           branch="paykanlang-${version}"
           git checkout -b "${branch}"
-          sed -i -E "s#^  url \".*\"\$#  url \"${url}\"#; s#^  sha256 \".*\"\$#  sha256 \"${sha}\"#" Formula/paykanlang.rb
-          perl -0pi -e 's/\n  bottle do\n.*?\n  end\n//s' Formula/paykanlang.rb
+          # Each platform's url lines name its tarball (paykanlang-<version>-
+          # <label>.tar.gz), each followed by its sha256 line; the macOS one
+          # is there twice, for Apple Silicon and for Intel (which the
+          # formula refuses, but brew wants a URL on every macOS).
+          for label in macos-arm64 linux-x86_64 linux-arm64; do
+            archive="paykanlang-${version}-${label}.tar.gz"
+            sha="$(curl -fsSL "${base}/${archive}.sha256" | cut -d' ' -f1)"
+            test "${#sha}" -eq 64
+            URL="${base}/${archive}" SHA="${sha}" LABEL="${label}" perl -0pi -e '
+              s{^(\s*)url "[^"]*-\Q$ENV{LABEL}\E\.tar\.gz"\n(\s*)sha256 "[0-9a-f]*"$}
+               {$1url "$ENV{URL}"\n$2sha256 "$ENV{SHA}"}mg
+                or die "no url line for $ENV{LABEL} in the formula\n"' Formula/paykanlang.rb
+          done
           if git diff --quiet; then
-            echo "::notice::the formula already builds ${TAG}"
+            echo "::notice::the formula already installs ${TAG}"
             exit 0
           fi
           git diff
@@ -300,7 +309,7 @@ jobs:
           git push origin "${branch}"
           gh pr create --repo "${TAP_REPO}" --base main --head "${branch}" \
             --title "paykanlang ${version}" \
-            --body "Bumps the formula to [${TAG}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}). Label \`pr-pull\` once the bottles are built to publish them."
+            --body "Points the formula at the [${TAG}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}) tarballs. Merge once \`brew test-bot\` passes."
 
       - name: Ask the apt repository to publish
         if: steps.token.outputs.set == 'true'

@@ -260,39 +260,27 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     }
   }
 
-  if (emitLLVM) {
-    if (!o.Backend.empty() && o.Backend != "llvm") {
-      r.Error =
-          "--emit-llvm needs the llvm backend, but --backend=" + o.Backend +
-          " was given";
-      return r;
-    }
-    o.Backend = "llvm";
-    o.EmitSource = true;
+  // --emit-llvm, --emit-c and --emit-mlir=<stage> are the mlir backend's
+  // source outputs (its EmitOptions::SourceStage: "", "c", <stage>).
+  int emits = static_cast<int>(emitLLVM) + static_cast<int>(emitC) +
+              static_cast<int>(emitMLIR);
+  if (emits > 1) {
+    r.Error = "--emit-llvm, --emit-c and --emit-mlir exclude each other";
+    return r;
   }
-  if (emitC) {
-    // The C of the c backend, or of the mlir backend's C path.
-    if (!o.Backend.empty() && o.Backend != "c" && o.Backend != "mlir-c") {
-      r.Error =
-          "--emit-c needs the c or mlir-c backend, but --backend=" + o.Backend +
-          " was given";
+  if (emits == 1) {
+    const char *flag =
+        emitLLVM ? "--emit-llvm" : (emitC ? "--emit-c" : "--emit-mlir");
+    if (!o.Backend.empty() && o.Backend != "mlir") {
+      r.Error = std::string(flag) +
+                " needs the mlir backend, but --backend=" + o.Backend +
+                " was given";
       return r;
     }
-    if (o.Backend.empty())
-      o.Backend = "c";
+    o.Backend = "mlir";
     o.EmitSource = true;
-  }
-  if (emitMLIR) {
-    // Either of the mlir plugin's backends prints the stage.
-    if (!o.Backend.empty() && o.Backend != "mlir" && o.Backend != "mlir-c") {
-      r.Error = "--emit-mlir needs the mlir or mlir-c backend, but "
-                "--backend=" +
-                o.Backend + " was given";
-      return r;
-    }
-    if (o.Backend.empty())
-      o.Backend = "mlir";
-    o.EmitSource = true;
+    if (emitC)
+      o.EmitStage = "c";
   }
   bool infoOnly =
       o.ShowHelp || o.ShowVersion || o.ListFrontends || o.ListBackends;
@@ -318,11 +306,9 @@ void printUsage(std::ostream &os, const char *argv0) {
     os << "  --" << f.Name
        << std::string(16 - std::string_view(f.Name).size(), ' ') << "- "
        << f.Help << "\n";
-  os << "  --emit-llvm       - Emit LLVM IR to stdout (--backend=llvm "
-        "--emit-source)\n"
-     << "  --emit-c          - Emit C to stdout (--backend=c --emit-source; "
-        "with\n"
-     << "                      --backend=mlir-c, the mlir backend's C)\n"
+  os << "  --emit-llvm       - Emit the program's LLVM IR to stdout "
+        "(--emit-source)\n"
+     << "  --emit-c          - Emit the program's C to stdout\n"
      << "  --emit-mlir=<stage> - Emit MLIR at a stage of the mlir backend to "
         "stdout\n"
      << "                      (pir: the imported PIR dialect; scf: after "

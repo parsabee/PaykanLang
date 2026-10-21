@@ -69,7 +69,7 @@ Status addEntryPoint(llvm::Module &module) {
   auto *bb = llvm::BasicBlock::Create(ctx, "entry", entry);
   b.SetInsertPoint(bb);
   // PAYKAN_TRACK_HEAP: select the tracking allocator before the program
-  // allocates anything (the C backend's main does the same).
+  // allocates anything (the C path's main() does the same).
   llvm::Value *trackEnv = b.CreateCall(
       fn("getenv", ptr, {ptr}), {b.CreateGlobalString("PAYKAN_TRACK_HEAP")});
   llvm::Value *track = b.CreateIsNotNull(trackEnv, "track");

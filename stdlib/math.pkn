@@ -1,9 +1,9 @@
 // ::math: the C library's math functions, on `float`.
 //
 // Each native function is the C99 <math.h> function of the same name (or,
-// where the name says more, the one in its comment), called directly: the C
-// backend links the program with -lm, and the llvm backend's JIT resolves the
-// symbols in its own process.  So they behave exactly as C's do: a result
+// where the name says more, the one in its comment), called directly: a
+// built program is linked with -lm, and the JIT resolves the symbols in its
+// own process.  So they behave exactly as C's do: a result
 // out of range is an infinity, a domain error (`sqrt(-1.0)`, `log(-1.0)`) is
 // NaN, and nothing panics.
 //

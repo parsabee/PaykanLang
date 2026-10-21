@@ -13,9 +13,8 @@ Memory is managed by automatic reference counting: there is no garbage collector
 manual `free`, and objects are destroyed the moment their last reference goes away.
 
 A program is type-checked, lowered to a small backend-neutral IR and compiled by a backend.
-The default backend emits C and builds it with your system's C compiler; an optional LLVM
-backend runs programs through a JIT. Either one can run a program straight from source or
-build a standalone executable.
+The built-in backend takes it through MLIR to LLVM: it runs a program straight from source
+through a JIT, builds a standalone executable, and can also print the program as C11.
 
 PaykanLang is young: the current release is an early one that lays the foundation. The road
 ahead (thread-safe concurrency, offloading work to GPUs and other accelerators, C interop
@@ -69,8 +68,8 @@ On macOS you can also use Homebrew:
 brew install parsabee/paykanlang/paykanlang
 ```
 
-PaykanLang compiles programs with the system C compiler, so a C compiler (`cc`) must be
-installed. [Getting started](language/01-getting-started.md) covers every way to install,
+`paykan build` links executables with the system C compiler, so a C compiler (`cc`) must
+be installed to build them. [Getting started](language/01-getting-started.md) covers every way to install,
 including building from source, and runs your first program.
 
 ## Documentation
@@ -80,8 +79,8 @@ including building from source, and runs your first program.
   compile-time error. Start with [Getting started](language/01-getting-started.md).
 - **[The standard library](stdlib/index.md)** documents every module a program can import:
   `::io`, `::result`, `::collections`, `::memory` and `::math`.
-- **[Implementation and plugins](internals.md)** describes the compiler's IR, the C
-  backend, and how to write your own frontend or backend as a plugin.
+- **[Implementation and plugins](internals.md)** describes the compiler's IR, its backend
+  and C output, and how to write your own frontend or backend as a plugin.
 
 Every program with its output shown in this documentation is run by the project's test suite, so the
 output shown is what the current compiler prints.

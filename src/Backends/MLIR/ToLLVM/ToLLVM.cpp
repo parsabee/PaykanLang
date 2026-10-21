@@ -85,7 +85,9 @@ struct PtrLoadLowering : PIRPattern<P::PtrLoadOp> {
   LogicalResult matchAndRewrite(P::PtrLoadOp op, OpAdaptor a,
                                 ConversionPatternRewriter &r) const override {
     Type t = getTypeConverter()->convertType(op.getType());
-    r.replaceOpWithNewOp<LLVM::LoadOp>(op, t, a.getPtr());
+    auto load = r.replaceOpWithNewOp<LLVM::LoadOp>(op, t, a.getPtr());
+    if (op.getVtable())
+      load.setInvariant(true); // !invariant.load
     return success();
   }
 };

@@ -2,13 +2,12 @@
 """Produce an LLVM source-based coverage report for PaykanLang.
 
 Prerequisites: a Clang with llvm-profdata / llvm-cov, and a coverage tree.
-The vendored LLVM 22 under build/third-party/llvm is downloaded only by a
-configure that lists the llvm backend; a plain configure (recursive-descent +
-c) does not download it, so pass the full list, e.g.
+The vendored LLVM 22 under build/third-party/llvm, which every configure
+finds or downloads (the mlir backend's), has both, e.g.
 
-    cmake -B build -DPAYKAN_BUILD_ALL_TESTS=ON "-DPAYKAN_BACKENDS=llvm;c"
+    cmake -B build -DPAYKAN_BUILD_ALL_TESTS=ON
     cmake -B build-cov -DPAYKAN_BUILD_ALL_TESTS=ON -DPAYKAN_COVERAGE=ON \\
-          "-DPAYKAN_BACKENDS=llvm;c" \\
+          -DLLVM_DIR=build/third-party/llvm/lib/cmake/llvm \\
           -DCMAKE_C_COMPILER=build/third-party/llvm/bin/clang \\
           -DCMAKE_CXX_COMPILER=build/third-party/llvm/bin/clang++
     cmake --build build-cov --parallel "$(getconf _NPROCESSORS_ONLN)"
@@ -137,7 +136,7 @@ def run_test(
     The profiles are named by process id (%p) rather than merged online by
     module signature (%m): the profile runtime overwrites, with only a
     warning on the process's stderr, a pool file whose signature matches
-    but whose layout does not.  Programs the C backend builds link the
+    but whose layout does not.  Programs `paykan build` links link the
     instrumented runtime and write profiles too: their runtime counts are
     real coverage, and their generated code is in no reported object.
 

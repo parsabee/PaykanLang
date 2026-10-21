@@ -1,7 +1,7 @@
 # paykan_backend_toolchain -- the system toolchain shared by the native
 # backends (include/paykan/backends/Toolchain.h): runtime lookup, process
-# spawning and linking against libpaykan_runtime.a.  The C backend compiles
-# and links with it; the llvm backend links the objects it emits with it.
+# spawning and linking against libpaykan_runtime.a.  The mlir backend links
+# the objects it emits with it.
 # Standard C++ plus POSIX, every OS call behind the portability layer in
 # Platform.h (Linux and macOS side by side).
 

@@ -56,8 +56,8 @@ fn @main() -> i64 {
   EXPECT_EQ(r.ExitCode, 7 + 5 + 'x' + 1 + 0 - 'x');
 }
 
-// A `cast` between i64 and f64 reinterprets the bits (the C backend's
-// pkrt_f64_bits / pkrt_bits_f64): a float's bits stored in an integer slot
+// A `cast` between i64 and f64 reinterprets the bits (arith.bitcast, a
+// memcpy in C): a float's bits stored in an integer slot
 // come back as the same float, the sign of zero included.
 TEST(MemSlot, FloatBitsRoundTripThroughAnInteger) {
   auto r = compileAndRunPIR(R"(module "t"

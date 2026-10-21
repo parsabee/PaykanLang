@@ -27,9 +27,8 @@ returns the program it parsed in the [AST interchange format](ast-format.md),
 which `paykan` reads, checks and hands to Sema; a backend receives the
 verified program as [PIR text](pir-for-backends.md).
 
-The built-in plugins (the `recursive-descent` frontend, the `c` backend and
-the opt-in in-tree `llvm` backend) are linked into `paykan` and keep their
-in-process C++ interface.
+The built-in plugins (the `recursive-descent` frontend and the `mlir`
+backend) are linked into `paykan` and keep their in-process C++ interface.
 
 ## Using a plugin
 
@@ -54,7 +53,7 @@ file with what it provides. Include `paykan --version` in bug reports.
 
 ```text
 $ paykan --list-backends
-c (default)
+mlir (default): MLIR 22.1.8
 print-pir: prints the Paykan IR [/usr/local/lib/paykan/plugins/0.2.0/libpaykan_backend_print_pir.so]
 ```
 
@@ -127,7 +126,7 @@ rejected plugin, the first exists and the second never does.
 
   ```text
   $ paykan --list-backends
-  c (default)
+  mlir (default): MLIR 22.1.8
   mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]
   $ paykan --backend=mine program.pkn
   paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]
@@ -159,7 +158,7 @@ rejected plugin, the first exists and the second never does.
   paykan: cannot use backend 'mine' (ambiguous: provided by both /a/libmine.so and /b/libmine.so)
   ```
 
-  A plugin that takes a built-in name (`c`, `recursive-descent`) makes that
+  A plugin that takes a built-in name (`mlir`, `recursive-descent`) makes that
   name ambiguous too, including as the default.
 
 ## Compatibility and stability

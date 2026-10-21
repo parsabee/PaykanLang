@@ -143,9 +143,11 @@ At `-O2` LLVM turns an `icall` whose code is known into a direct call, often
 inlined: a lambda passed straight to the function that calls it costs no
 indirect call.  The code and closure classes are module items like any
 other: names no Paykan identifier can spell, mangled by the C backend like
-`Box<int>`.  A function value crosses modules as its two words: the module
-that calls it needs only its signature.  Nothing is added to the runtime:
-`Paykan_release` destroys a closure through slot 0 as it does any object.
+`Box<int>` (now by the link names of the `mlir` backend, which replaced the
+C and LLVM backends; [the MLIR backend](mlir-backend.md)).  A function
+value crosses modules as its two words: the module that calls it needs only
+its signature.  Nothing is added to the runtime: `Paykan_release` destroys a
+closure through slot 0 as it does any object.
 
 ## Diagnostics
 

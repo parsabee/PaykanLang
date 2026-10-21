@@ -92,8 +92,7 @@ std::vector<std::string> runnableBackends() {
     std::string line = r.out.substr(pos, end - pos);
     pos = end == std::string::npos ? r.out.size() : end + 1;
     std::string name = line.substr(0, line.find_first_of(" :"));
-    if ((name == "c" || name == "llvm" || name == "mlir" || name == "mlir-c") &&
-        line.find("incompatible") == std::string::npos)
+    if (name == "mlir" && line.find("incompatible") == std::string::npos)
       out.push_back(name);
   }
   return out;

@@ -1,10 +1,10 @@
 // 32 — identifiers that are special in C: every backend must accept any
-// valid Paykan name.  The C backend once emitted user names unchanged, so these
-// collided with its own generated names (`x_1`, `a_<n>`), with C type names
-// (`int64_t`) and with C library macros and functions (`errno`, `stdout`,
-// `EOF`, `fmod`, `malloc`).
+// valid Paykan name.  The C backend (replaced by the mlir backend's --emit-c)
+// once emitted user names unchanged, so these collided with its own generated
+// names (`x_1`, `a_<n>`), with C type names (`int64_t`) and with C library
+// macros and functions (`errno`, `stdout`, `EOF`, `fmod`, `malloc`).
 // Exercises: locals, parameters, fields, methods, functions and classes named
-//            like C / libc identifiers or like the C backend's mangled names.
+//            like C / libc identifiers or like generated, mangled C names.
 
 import ::io;
 

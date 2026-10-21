@@ -22,7 +22,7 @@ solid
 
 The first run compiles `geometry/shapes.pkn` and writes its compiled form to
 `.paykan_cache/geometry/shapes.pkm`: the module's interface (what the type
-checker needs to check an importer), its PIR (what either backend generates
+checker needs to check an importer), its PIR (what the backend generates
 code from) and a manifest naming the toolchain that produced it and the
 source it was built from.  The standard library modules `::io`, which
 `main.pkn` imports, and `::result`, which `::io` imports, declare generics,
@@ -91,19 +91,13 @@ by a relative path inside the project is named by that path
 ```text
 $ mv geometry/shapes.pkn /tmp/
 $ rm -rf .paykan_cache
-$ paykan --verbose --backend=c main.pkn
+$ paykan --verbose main.pkn
 module ::io: no cache entry; building from source
 module ::result: no cache entry; building from source
 module geometry::shapes: prebuilt geometry/shapes.pkm usable
 rect of area 12
 ...
-$ paykan --verbose --backend=llvm main.pkn
-module ::io: no cache entry; building from source
-module ::result: no cache entry; building from source
-module geometry::shapes: prebuilt geometry/shapes.pkm usable
-rect of area 12
-...
-$ paykan build --backend=llvm -o shapes main.pkn && ./shapes
+$ paykan build -o shapes main.pkn && ./shapes
 rect of area 12
 ...
 $ mv /tmp/shapes.pkn geometry/
@@ -111,8 +105,9 @@ $ mv /tmp/shapes.pkn geometry/
 
 Where no source is found, `paykan` looks for `<module>.pkm` where the source
 would be, then under each `--module-path=<dir>` and `$PAYKAN_MODULE_PATH`
-directory.  The file carries no backend-specific code: the c backend and the
-llvm backend both generate their output from the PIR inside it, which is
-why one file serves both.  A prebuilt file written by a `paykan` with a
-different PIR or runtime ABI version is rejected with a message naming the
-versions, never used silently.
+directory.  The file carries no backend-specific code: the mlir backend
+generates its output from the PIR inside it, for `run` and `build` alike,
+and so does a backend plugin, which is why one file serves every backend.
+A prebuilt file written by a `paykan` with a different PIR or runtime ABI
+version is rejected with a message naming the versions, never used
+silently.

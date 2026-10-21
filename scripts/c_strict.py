@@ -1,34 +1,21 @@
 #!/usr/bin/env python3
-"""Check that a C backend's output is strict ISO C11 on every C compiler.
+"""Check that the C `paykan --emit-c` prints is strict ISO C11 on every C compiler.
 
-The backend is --backend: `c` (the default), or `mlir-c`, the mlir backend's
-C path.  For every runnable program of the samples corpus (samples_parity.py's
-list) and every compiler named with --cc:
-
-* emit-c: the whole-program `paykan --backend=<backend> --emit-c` output is
-  compiled with STRICT_FLAGS at each --opt level, linked with a copy of the
-  runtime (src/Runtime/*.c) built by the same compiler with the same flags,
-  and run;
-* build: `paykan --backend=<backend> build` is run with $CC set to a wrapper
-  that adds STRICT_FLAGS, so every per-module translation unit `build` and
-  `run` compile is checked too (compilers named with --build-cc only: these
-  link against the build tree's runtime, which a sanitizer build instruments
-  for its own compiler).
-
-Every executable must exit like `paykan --backend=c run --track-heap` does,
-print the same stdout and stderr (apart from the heap statistics) and end
-with 0 live heap blocks.
+For every runnable program of the samples corpus (samples_parity.py's list)
+and every compiler named with --cc, the whole-program `paykan --emit-c`
+output (the mlir backend's C, through EmitC) is compiled with STRICT_FLAGS at
+each --opt level, linked with a copy of the runtime (src/Runtime/*.c) built
+by the same compiler with the same flags, and run.  Every executable must
+exit like `paykan run --track-heap` does, print the same stdout and stderr
+(apart from the heap statistics) and end with 0 live heap blocks.
 
 Usage:
     c_strict.py --paykan build/bin/paykan --cc gcc --cc clang \\
-        [--build-cc gcc --build-cc clang] [--opt -O0 --opt -O2] \\
-        [--backend mlir-c] [-v]
+        [--opt -O0 --opt -O2] [-v]
 """
 
 import argparse
 import os
-import shlex
-import stat
 import subprocess
 import sys
 import tempfile
@@ -101,28 +88,16 @@ def build_runtime(cc, opt, outdir):
     return objs
 
 
-def wrapper(cc, outdir, index):
-    """An executable `$CC` that runs @p cc with the strict flags."""
-    path = Path(outdir) / f"strict-cc{index}"
-    path.write_text("#!/bin/sh\nexec " +
-                    " ".join(shlex.quote(a) for a in [cc, *STRICT_FLAGS]) +
-                    ' "$@"\n')
-    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP |
-               stat.S_IXOTH)
-    return str(path)
-
-
-def check_sample(args, sample, idx, runtimes, wrappers, outdir):
+def check_sample(args, sample, idx, runtimes, outdir):
     """[(label, problems)] for one sample."""
     results = []
     objects = sp.object_flags(sample, outdir)
-    ref_p = tool([args.paykan, "--backend=c", "--track-heap", *objects,
-                  str(sample), *sp.sample_args(sample, outdir)])
+    ref_p = tool([args.paykan, "--track-heap", *objects, str(sample),
+                  *sp.sample_args(sample, outdir)])
     ref = sp.normalise(ref_p)
     if ref[3] not in (0, None):  # None: a panic aborts before the report
         return [("reference run", [f"live blocks {ref[3]} (exit {ref[0]})"])]
-    emitted = tool([args.paykan, f"--backend={args.backend}", "--emit-c",
-                    str(sample)])
+    emitted = tool([args.paykan, "--emit-c", str(sample)])
     if emitted.returncode != 0:
         return [("emit-c", [emitted.stderr.strip()])]
     c_file = Path(outdir) / f"s{idx}.c"
@@ -140,16 +115,6 @@ def check_sample(args, sample, idx, runtimes, wrappers, outdir):
             results.append((label, ["compile failed:\n" + p.stderr]))
             continue
         results.append((label, compare(ref, run_exe(exe, sample, outdir))))
-    for wi, (cc, wrap) in enumerate(wrappers.items()):
-        label = f"build {cc}"
-        exe = Path(outdir) / f"s{idx}-build{wi}"
-        p = tool([args.paykan, "build", f"--backend={args.backend}",
-                  *objects, "-o", str(exe), str(sample)],
-                 env=dict(os.environ, CC=wrap))
-        if p.returncode != 0:
-            results.append((label, ["build failed:\n" + p.stderr]))
-            continue
-        results.append((label, compare(ref, run_exe(exe, sample, outdir))))
     return results
 
 
@@ -158,16 +123,12 @@ def main():
     ap.add_argument("--paykan", required=True, help="the paykan binary")
     ap.add_argument("--cc", action="append", required=True,
                     help="a C compiler for the emit-c check (repeatable)")
-    ap.add_argument("--build-cc", action="append", default=[],
-                    help="a C compiler for the build check (repeatable)")
     ap.add_argument("--opt", action="append",
                     help="an optimization level for the emit-c check "
                          "(repeatable; default -O0 and -O2)")
     ap.add_argument("--cflag", action="append", default=[],
                     help="an extra flag for the emit-c check's compiles and "
                          "links, e.g. -fsanitize=function (repeatable)")
-    ap.add_argument("--backend", default="c",
-                    help="the backend whose C is checked (c or mlir-c)")
     ap.add_argument("-j", "--jobs", type=int, default=4)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
@@ -181,13 +142,10 @@ def main():
                 d = Path(outdir) / f"rt{ci}{opt}"
                 d.mkdir()
                 runtimes[(cc, opt)] = build_runtime(cc, opt, d)
-        wrappers = {cc: wrapper(cc, outdir, wi)
-                    for wi, cc in enumerate(args.build_cc)}
         files = corpus()
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
             all_results = list(pool.map(
-                lambda t: check_sample(args, t[1], t[0], runtimes, wrappers,
-                                       outdir),
+                lambda t: check_sample(args, t[1], t[0], runtimes, outdir),
                 enumerate(files)))
 
     failures = 0

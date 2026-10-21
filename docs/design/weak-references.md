@@ -99,12 +99,15 @@ zero until it is boxed; an immortal static (`PaykanObject_None`,
 
 The separate control block is gone.  `PaykanShared_new(obj)` is `++strong`
 and returns `obj`; `PaykanShared_get` is the identity; `Paykan_retain` and
-`Paykan_release` work on the object.  Both backends lower `unbox` to the
-identity and `box` to `PaykanShared_new`, keep `PaykanShared_get` in the
-runtime for native code, and lay out a class as the 16-byte header followed
-by its fields (the LLVM backend's struct type is `{ptr, i32, i32,
-fields...}` and a field is at index 3 + i; the C backend's struct starts
-`PaykanMethod *vtable; int32_t strong; int32_t weak;`).
+`Paykan_release` work on the object.  Both backends of the time lower
+`unbox` to the identity and `box` to `PaykanShared_new`, keep
+`PaykanShared_get` in the runtime for native code, and lay out a class as the
+16-byte header followed by its fields (the LLVM backend's struct type is
+`{ptr, i32, i32, fields...}` and a field is at index 3 + i; the C backend's
+struct starts `PaykanMethod *vtable; int32_t strong; int32_t weak;`).  The
+`mlir` backend, which has since replaced both
+([the MLIR backend](mlir-backend.md)), does the same, its shared lowering
+computing the layout as byte offsets.
 
 ### Destroy and free
 

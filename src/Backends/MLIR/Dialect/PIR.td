@@ -552,14 +552,28 @@ def PIR_LocalAddrOp : PIR_Op<"local_addr", [Pure]> {
 
 def PIR_PtrLoadOp : PIR_Op<"ptr_load", [MemoryEffects<[MemRead]>]> {
   let summary = "read a value through an address";
-  let arguments = (ins PIR_PtrType:$ptr);
+  let description = [{
+    What the memory holds, when it is part of a vtable call (at most one is
+    set):
+
+    * `vtable`: an object's vtable pointer, which never changes while the
+      program can read it, so LLVM may assume it (`!invariant.load`); C reads
+      it as Runtime.h's `PaykanMethod *`.
+    * `method`: a vtable slot, which C reads as the `PaykanMethod` it is
+      (#62), not through a pointer to another type.
+  }];
+  let arguments = (ins PIR_PtrType:$ptr, UnitAttr:$vtable, UnitAttr:$method);
   let results = (outs PIR_Value:$result);
   let assemblyFormat = "$ptr attr-dict `:` type($result)";
 }
 
 def PIR_PtrStoreOp : PIR_Op<"ptr_store", [MemoryEffects<[MemWrite]>]> {
   let summary = "write a value through an address";
-  let arguments = (ins PIR_PtrType:$ptr, PIR_Value:$value);
+  let description = [{
+    `vtable`: the value is a new object's vtable pointer, which C writes as
+    Runtime.h's `PaykanMethod *` (the `vtable` of `pir.ptr_load`).
+  }];
+  let arguments = (ins PIR_PtrType:$ptr, PIR_Value:$value, UnitAttr:$vtable);
   let assemblyFormat = "$value `,` $ptr attr-dict `:` type($value)";
 }
 

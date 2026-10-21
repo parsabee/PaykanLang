@@ -1,8 +1,7 @@
-# paykan_llvm_codegen -- what the backends that produce LLVM IR (llvm, mlir)
-# share: the per-project bitcode cache, linking and -O<n> (ModuleCache.cpp),
-# and running the program with the JIT or building it as a native object
-# linked with the system toolchain (NativeBuild.cpp).  Built when a listed
-# backend needs LLVM.
+# paykan_llvm_codegen -- the mlir backend's LLVM half: the per-project
+# bitcode cache, linking and -O<n> (ModuleCache.cpp), and running the
+# program with the JIT or building it as a native object linked with the
+# system toolchain (NativeBuild.cpp).
 
 llvm_map_components_to_libnames(CODEGEN_LLVM_LIBS
     core support passes native bitreader bitwriter linker target

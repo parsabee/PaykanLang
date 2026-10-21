@@ -582,8 +582,8 @@ bool ModuleLowering::isStrConversion(const std::string &callee) {
 }
 
 // Inline numeric conversions `Target<Source>(value)` (#64).  This is the one
-// place their semantics are defined; both backends inherit it, and nothing
-// here is undefined behaviour in either (the C backend is strict C11):
+// place their semantics are defined; every backend inherits it, and nothing
+// here is undefined behaviour in C or LLVM IR (--emit-c is strict C11):
 //   int<float>  truncates toward zero; NaN, +-inf and values outside int64
 //               panic (Paykan_panic_float_to_int) before the `ftoi`;
 //   float<int>  nearest double (`itof`);
@@ -661,8 +661,8 @@ Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
   if (tk != BuiltinType::Char || sk != BuiltinType::Int)
     return Val();
   // char<int>: range-check, then map the code 128..255 to the signed byte
-  // with the same bits before the truncating cast, so the C backend's
-  // `(int8_t)` conversion only ever sees an in-range value.
+  // with the same bits before the truncating cast, so C's `(int8_t)`
+  // conversion only ever sees an in-range value.
   Val lo = L.B.cmp(CmpPred::Ge, v, Val::i64(0), "conv.lo");
   Val hi = L.B.cmp(CmpPred::Le, v, Val::i64(255), "conv.hi");
   panicUnless(L.B.select(lo, hi, Val::boolean(false), "conv.ok"),

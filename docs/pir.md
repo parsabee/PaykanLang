@@ -1,10 +1,11 @@
 # PIR: the Paykan intermediate representation
 
 PIR is the small, backend-neutral IR that sits between Sema's typed AST and
-every backend (C, LLVM, out-of-tree).  It is produced by **one** lowering
-pass (`src/Lowering`), which is the single home of the ownership rules: by the
-time a backend sees PIR, every `retain`/`release`/`box`/`unbox`, every scope
-cleanup, every `match` dispatch and every vtable is explicit.  A
+every backend (the in-tree `mlir` backend, plugins).  It is produced by
+**one** lowering pass (`src/Lowering`), which is the single home of the
+ownership rules: by the time a backend sees PIR, every
+`retain`/`release`/`box`/`unbox`, every scope cleanup, every `match` dispatch
+and every vtable is explicit.  A
 backend never re-derives any of that; it translates PIR ops one-to-one.
 
 PIR has a textual form (printer + parser, so backend tests need no frontend),
@@ -72,8 +73,9 @@ It is a value like an `i64`: stored in locals and fields, passed and returned,
 `select`ed and read and written through addresses, with no ARC.  It has no
 constants, is never compared (`is_some`, then the payloads) and never `cast`,
 and a runtime or native function never takes or returns one (its C ABI is
-not the same on both backends' targets: it crosses into C as its parts).  A
-new object's optional fields are absent, as its other fields are zero.
+not the same in the C and in the LLVM IR the backend makes: it crosses into
+C as its parts).  A new object's optional fields are absent, as its other
+fields are zero.
 
 ## 2. Values and constants
 
@@ -146,8 +148,8 @@ obj`, `extern vtable`), and only they, are named `$rt.<C symbol>`:
 `@$rt.PaykanString_new` is the runtime's `PaykanString_new`.  No Paykan
 identifier can spell `$` or `.`, so the runtime and the program never share a
 PIR name: a program function `fn PaykanString_new(x: int) -> int` is the
-ordinary `@PaykanString_new` (C `pk_<module>_PaykanString_new`, LLVM
-`pk.PaykanString_new`), whatever its signature, and the program's own string
+ordinary `@PaykanString_new` (the mlir backend's link name
+`pk_<module>_SPaykanString__new`), whatever its signature, and the program's own string
 literals still call `@$rt.PaykanString_new`.  The verifier enforces both
 directions (§9).
 
@@ -218,10 +220,10 @@ parameters or the program's arguments as a slice, `(ptr, i64)`: the address of
 their strings' `box` slots and their number.  It returns `i64`.  The backend's
 entry code makes the slice before it calls `@main` and drops it after:
 `@main` borrows the strings, as any slice parameter borrows its elements.  An
-executable's `main(argc, argv)` (the C backend's, and the llvm backend's for
-`paykan build`) makes it with `Paykan_args_new(argc, argv, &count)` and drops
-it with `Paykan_args_free(args, count)`; the llvm backend's JIT boxes the
-same strings itself.
+executable's `main(argc, argv)` (the one the mlir backend adds for `paykan
+build`, and the C of `--emit-c`) makes it with `Paykan_args_new(argc, argv,
+&count)` and drops it with `Paykan_args_free(args, count)`; the backend's JIT
+(`paykan run`) boxes the same strings itself.
 
 ## 5. Classes, layouts and vtables
 
@@ -260,9 +262,8 @@ override it.  Every
 method `m` of a class `C` is the function `@C.m(obj self, params...)`.  The
 '.' cannot occur in a Paykan identifier, so these names never clash with a
 program function (`fn Point_move`, `fn Point_destroy`); backends must keep
-them apart too (the C backend escapes the '.' and uniquifies clashing C
-names; the LLVM backend names a vtable `<class>..vtable`, which no method
-symbol spells).
+them apart too (the mlir backend escapes the '.' as `_2E` in its link
+names, and a vtable's starts `pkvt_` where a function's starts `pk_`).
 
 ## 6. Statements and instructions
 
@@ -634,7 +635,7 @@ Paykan_args_free(PaykanShared **args, int64_t count) -> void
 ```
 
 `names::kCodeGenRequiredSymbols` in `include/Names.h` is the authoritative
-list; the LLVM backend's JIT symbol table must cover it and the C backend links
+list; the mlir backend's JIT symbol table must cover it, and an executable links
 `libpaykan_runtime.a`.
 
 Vtable slot layouts of runtime classes (slot index = position):

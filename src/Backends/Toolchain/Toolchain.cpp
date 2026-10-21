@@ -137,8 +137,8 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
   }
   // The build tree's runtime archive is sanitizer- or coverage-instrumented
   // when the compiler was built that way, and on macOS built for the build's
-  // deployment target: programs linked against it need the same flags (the C
-  // backend's compile and every backend's link).
+  // deployment target: programs linked against it need the same flags (every
+  // backend's link).
   if (tc.RuntimeLib.empty()) {
     appendFlags(PAYKAN_SANITIZER_FLAGS, tc.ExtraFlags);
     appendFlags(PAYKAN_COVERAGE_FLAGS, tc.ExtraFlags);

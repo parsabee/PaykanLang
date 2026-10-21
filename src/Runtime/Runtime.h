@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // Paykan language runtime — the C ABI of the builtin class types, shared by
-// the runtime, the generated code of both backends (the C backend includes
-// this header) and the JIT's symbol table.
+// the runtime, the generated code (the C of --emit-c includes this header,
+// the LLVM IR follows it) and the JIT's symbol table.
 //
 // Every Paykan object begins with a pointer to its class's vtable: an array
 // of PaykanMethod slots (see "Object" below) whose layout mirrors the
@@ -39,16 +39,16 @@ extern "C" {
 // The ABI of the generated code (object layout, vtable slots, calling
 // conventions, symbol naming), versioned like every format by the release:
 // major * 10000 + minor * 100 + patch.  Code compiled against another
-// runtime is never linked or loaded: both backends' caches and every .pkm
-// module file record it (docs/design/pkm.md §2.2, tag 0x09).  It is spelled
-// out here, for C, and the compiler checks it is its own release's
+// runtime is never linked or loaded: the backend's bitcode cache and every
+// .pkm module file record it (docs/design/pkm.md §2.2, tag 0x09).  It is
+// spelled out here, for C, and the compiler checks it is its own release's
 // (kVersionNumber, a static_assert in src/Modules/ModuleResolver.cpp).
 #define PAYKAN_RUNTIME_ABI_VERSION 200 /* 0.2.0 */
 
 // -- Target assumptions
 //
-// The runtime, the C backend's generated code (which includes this header)
-// and the LLVM backend all rely on these implementation-defined properties.
+// The runtime and the generated code, C (which includes this header) and
+// LLVM IR, all rely on these implementation-defined properties.
 // docs/c-backend.md ("Target assumptions") explains where each one is used.
 // They hold on every supported target (LP64 Linux and macOS); a target that
 // breaks one fails to compile here instead of miscompiling.
@@ -125,8 +125,8 @@ typedef struct PaykanObject PaykanWeak;
 // every slot holds a method converted to `void (*)(void)` and is converted
 // back to the method's own type before the call (C11 6.3.2.3p8 guarantees
 // the round trip).  The runtime's vtables and the generated code's
-// (`pkvt_<class>`, both backends) are all declared this way, so every slot is
-// read through its declared type.  The slot numbers below are shared by
+// (`pkvt_<class>`, in C and in LLVM IR) are all declared this way, so every
+// slot is read through its declared type.  The slot numbers below are shared by
 // every class: a subclass's vtable starts with its superclass's slots.
 typedef void (*PaykanMethod)(void);
 

@@ -363,7 +363,21 @@ struct PtrLoadLowering : CPattern<P::PtrLoadOp> {
     Type t = convert(op.getType());
     if (!t)
       return failure();
-    Value lv = deref(r, op.getLoc(), a.getPtr(), t);
+    Location loc = op.getLoc();
+    // A vtable's memory is read as the PaykanMethods it holds (#62): an
+    // object's vtable pointer as a `PaykanMethod *`, a slot as a
+    // `PaykanMethod`, which becomes a `void *` through uintptr_t.
+    Type method = opaque(getContext(), "PaykanMethod");
+    if (op.getVtable() || op.getMethod()) {
+      Type held = op.getVtable() ? pointerTo(method) : method;
+      Value v =
+          emitc::LoadOp::create(r, loc, held, deref(r, loc, a.getPtr(), held));
+      if (op.getMethod())
+        v = emitc::CastOp::create(r, loc, opaque(getContext(), "uintptr_t"), v);
+      r.replaceOp(op, castTo(r, loc, t, v));
+      return success();
+    }
+    Value lv = deref(r, loc, a.getPtr(), t);
     r.replaceOpWithNewOp<emitc::LoadOp>(op, t, lv);
     return success();
   }
@@ -374,6 +388,11 @@ struct PtrStoreLowering : CPattern<P::PtrStoreOp> {
   LogicalResult matchAndRewrite(P::PtrStoreOp op, OpAdaptor a,
                                 ConversionPatternRewriter &r) const override {
     Value v = a.getValue();
+    // A new object's vtable pointer is written as the `PaykanMethod *` it
+    // is read as (PtrLoadLowering).
+    if (op.getVtable())
+      v = castTo(r, op.getLoc(),
+                 pointerTo(opaque(getContext(), "PaykanMethod")), v);
     Value lv = deref(r, op.getLoc(), a.getPtr(), v.getType());
     emitc::AssignOp::create(r, op.getLoc(), lv, v);
     r.eraseOp(op);

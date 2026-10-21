@@ -1,44 +1,23 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Test utilities that compile and run Paykan programs through a backend.
-//
-// The backend is selected per test process by the PAYKAN_TEST_BACKEND
-// environment variable ("llvm", "mlir", "mlir-c" or "c"; the build's default
-// backend, c, when unset), so the same CodeGen suite runs once per enabled
-// backend (see
-// tests/CMakeLists.txt) and the backends act as differential oracles for
-// each other: every test asserts the same stdout, exit code and zero live
-// heap blocks whichever backend ran it.
-//
-//   * llvm: lowering -> PIR -> LLVM IR -> ORC JIT, in-process.
-//   * mlir: lowering -> PIR -> MLIR -> LLVM IR -> ORC JIT, in-process.
-//   * c:    lowering -> PIR -> C -> $CC, run as a child process.  The child
-//           runs with the tracking allocator when the test process has it
-//           enabled, and reports its live-block count back through its heap
-//           dump, which LeakGuard then checks.
-//   * mlir-c: lowering -> PIR -> MLIR -> EmitC -> C -> $CC, run as c's.
+// Test utilities that compile and run Paykan programs through the mlir
+// backend: lowering -> PIR -> MLIR -> LLVM IR (through the bitcode cache,
+// like the driver) -> ORC JIT, in process.  Every test asserts stdout, the
+// exit code and zero live heap blocks (LeakGuard).  The C the backend emits
+// for the same programs is checked by CStrictC11 (scripts/c_strict.py).
 
 #pragma once
 
 #include "TestUtils.h"
 
-#include "paykan/backends/c/CBackend.h"
+#include "JIT.h"
+#include "Pipeline.h"
 #include "paykan/lowering/Lowering.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Verifier.h"
 
-#if PAYKAN_TEST_HAVE_LLVM || PAYKAN_TEST_HAVE_MLIR
-#include "JIT.h"
-
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
-#endif
-#if PAYKAN_TEST_HAVE_LLVM
-#include "PIRToLLVM.h"
-#endif
-#if PAYKAN_TEST_HAVE_MLIR
-#include "Pipeline.h"
-#endif
 
 #include <gtest/gtest.h>
 
@@ -67,18 +46,6 @@ struct RunResult {
   std::string StdErr;
   bool CompileOk;
 };
-
-/// The backend the compile-and-run helpers use.
-inline const std::string &testBackend() {
-  static const std::string backend = [] {
-    const char *env = std::getenv("PAYKAN_TEST_BACKEND");
-    if (env && env[0])
-      return std::string(env);
-    // The default backend is c in every build (it is always built).
-    return std::string("c");
-  }();
-  return backend;
-}
 
 namespace detail {
 
@@ -146,7 +113,6 @@ inline Analysed analyseFile(const std::string &filePath,
   return a;
 }
 
-#if PAYKAN_TEST_HAVE_LLVM || PAYKAN_TEST_HAVE_MLIR
 /// JIT-run an LLVM module in process, capturing its stdout and stderr.  A JIT
 /// failure (an unresolved symbol, a module the JIT rejects) returns
 /// CompileOk == false with the error's message appended to StdErr, so a
@@ -172,11 +138,9 @@ inline RunResult runJITModule(std::unique_ptr<llvm::Module> module,
   }
   return {*resultOrErr, outStr, errStr, true};
 }
-#endif
 
-#if PAYKAN_TEST_HAVE_MLIR
-/// The MLIR backend: lowering -> PIR -> MLIR -> LLVM IR (through the bitcode
-/// cache, like the driver) -> JIT, in process.
+/// The mlir backend: PIR -> MLIR -> LLVM IR (through the bitcode cache,
+/// like the driver) -> JIT, in process.
 inline RunResult runProgramMLIR(const pir::Program &program,
                                 const std::vector<std::string> *args,
                                 const std::string &projectRoot) {
@@ -199,134 +163,17 @@ inline RunResult runMLIR(Analysed &a, const std::vector<std::string> *args,
     return {-1, "", "lowering failed: " + errs.str(), false};
   return runProgramMLIR(program, args, projectRoot);
 }
-#endif
-
-#if PAYKAN_TEST_HAVE_LLVM
-/// The LLVM backend: lowering -> PIR -> LLVM IR (through the bitcode cache,
-/// like the driver) -> JIT, in process.
-inline RunResult runProgramLLVM(const pir::Program &program,
-                                const std::vector<std::string> *args,
-                                const std::string &projectRoot) {
-  if (auto verrs = pir::verify(program); !verrs.empty())
-    return {-1, "", "verifier: " + pir::formatErrors(verrs), false};
-  auto llvmCtx = std::make_unique<llvm::LLVMContext>();
-  auto module = backend::llvm_backend::compileProgram(program, *llvmCtx, "test",
-                                                      projectRoot);
-  if (!module)
-    return {-1, "", module.status().message(), false};
-  return runJITModule(std::move(*module), std::move(llvmCtx), args);
-}
-
-inline RunResult runLLVM(Analysed &a, const std::vector<std::string> *args,
-                         const std::string &projectRoot) {
-  pir::Program program;
-  std::ostringstream errs;
-  if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
-                              program, errs))
-    return {-1, "", "lowering failed: " + errs.str(), false};
-  return runProgramLLVM(program, args, projectRoot);
-}
-#endif
-
-/// Remove the runtime's heap-statistics block from a child's stderr and
-/// return the live-block count it reported (-1 when there is none).
-inline int64_t extractHeapReport(std::string &err) {
-  const std::string header = "paykan heap stats:\n";
-  size_t pos = err.find(header);
-  if (pos == std::string::npos)
-    return -1;
-  size_t end = pos + header.size();
-  int64_t live = -1;
-  // Indented lines belong to the block ("  key : value", "  ** LEAK ... **").
-  while (end < err.size() && err.compare(end, 2, "  ") == 0) {
-    size_t eol = err.find('\n', end);
-    std::string line = err.substr(
-        end, eol == std::string::npos ? std::string::npos : eol - end);
-    const std::string key = "  live blocks       : ";
-    if (line.rfind(key, 0) == 0)
-      live = std::strtoll(line.c_str() + key.size(), nullptr, 10);
-    end = eol == std::string::npos ? err.size() : eol + 1;
-  }
-  err.erase(pos, end - pos);
-  return live;
-}
-
-/// The C translation the test backend builds: the mlir backend's C path for
-/// mlir-c, the C backend's emitter otherwise.
-inline backend_c::CSource testCSource() {
-#if PAYKAN_TEST_HAVE_MLIR
-  if (testBackend() == "mlir-c")
-    return mlir_backend::cSource();
-#endif
-  return backend_c::emitterSource();
-}
-
-/// Build @p program as C (testCSource()) and run it with @p argv.
-inline RunResult runProgramC(const pir::Program &program,
-                             const std::vector<std::string> &argv) {
-  std::ostringstream errs;
-  bool track = Paykan_heap_tracking_enabled() != 0;
-
-  auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
-  auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
-  backend_c::Toolchain tc;
-  int rc =
-      backend_c::buildAndRun(program, testCSource(), argv, track, tc, errs);
-  fflush(stdout);
-  fflush(stderr);
-  restoreFd(STDOUT_FILENO, savedOut);
-  restoreFd(STDERR_FILENO, savedErr);
-  std::string outStr = drainAndRemoveTempFile(outPath);
-  std::string errStr = drainAndRemoveTempFile(errPath);
-
-  if (rc < 0)
-    return {-1, outStr, errStr + errs.str(), false};
-  if (rc > 128) {
-    // The program died from a signal (a runtime panic aborts).  The JIT
-    // path dies with the test process; do the same so death tests see it.
-    fputs(outStr.c_str(), stdout);
-    fputs(errStr.c_str(), stderr);
-    fflush(stdout);
-    fflush(stderr);
-    raise(rc - 128);
-  }
-  int64_t live = extractHeapReport(errStr);
-  lastRunLiveBlocks() = track ? (live < 0 ? -1 : live) : 0;
-  return {rc, outStr, errStr, true};
-}
-
-inline RunResult runC(Analysed &a, const std::vector<std::string> *args,
-                      const std::string &projectRoot) {
-  pir::Program program;
-  std::ostringstream errs;
-  if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
-                              program, errs))
-    return {-1, "", "lowering failed: " + errs.str(), false};
-  return runProgramC(program, args ? *args : std::vector<std::string>{a.Path});
-}
 
 inline RunResult runAnalysed(Analysed &a, const std::vector<std::string> *args,
                              const std::string &projectRoot) {
   if (!a.Ok)
     return a.Failure;
-#if PAYKAN_TEST_HAVE_LLVM
-  if (testBackend() == "llvm")
-    return runLLVM(a, args, projectRoot);
-#endif
-#if PAYKAN_TEST_HAVE_MLIR
-  if (testBackend() == "mlir")
-    return runMLIR(a, args, projectRoot);
-#endif
-  if (testBackend() == "c" || testBackend() == "mlir-c")
-    return runC(a, args, projectRoot);
-  return {-1, "", "unknown test backend '" + testBackend() + "'", false};
+  return runMLIR(a, args, projectRoot);
 }
 
 } // namespace detail
 
-/// The number of live heap blocks after the last compileAndRun* call: the
-/// in-process count for the JIT, the child's reported count for the C
-/// backend (-1 if it reported none).
+/// The number of live heap blocks after the last compileAndRun* call.
 inline int64_t liveBlocksAfterRun() { return detail::lastRunLiveBlocks(); }
 
 /// RAII guard: enable the tracking allocator before a run and check that the
@@ -370,24 +217,14 @@ inline RunResult compileAndRunWithFrontend(const std::string &source,
   return detail::runAnalysed(a, nullptr, "");
 }
 
-/// Parse the hand-written PIR program @p text and run it through the test
-/// backend, verified as the driver verifies a lowered program.
+/// Parse the hand-written PIR program @p text and run it, verified as the
+/// driver verifies a lowered program.
 inline RunResult compileAndRunPIR(const std::string &text) {
   pir::ParseError err;
   auto program = pir::parseProgram(text, err);
   if (!program)
     return {-1, "", "PIR parse error: " + err.str(), false};
-#if PAYKAN_TEST_HAVE_LLVM
-  if (testBackend() == "llvm")
-    return detail::runProgramLLVM(*program, nullptr, "");
-#endif
-#if PAYKAN_TEST_HAVE_MLIR
-  if (testBackend() == "mlir")
-    return detail::runProgramMLIR(*program, nullptr, "");
-#endif
-  if (auto verrs = pir::verify(*program); !verrs.empty())
-    return {-1, "", "verifier: " + pir::formatErrors(verrs), false};
-  return detail::runProgramC(*program, {"program.pir"});
+  return detail::runProgramMLIR(*program, nullptr, "");
 }
 
 /// Compile and run from a .pkn file on disk.

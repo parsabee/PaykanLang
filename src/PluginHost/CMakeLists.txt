@@ -4,7 +4,7 @@
 # host side of the C plugin interface (include/paykan/plugin_api.h): the host
 # table and the adapters that make a plugin's C frontend a
 # frontend::Frontend (reading the AST interchange format it returns) and its
-# C backend a backend::Backend.
+# backend (a C interface) a backend::Backend.
 #
 # Standard C++; the dynamic loader is behind the portability layer
 # (src/Backends/Toolchain/Platform.h).  The plugins themselves link nothing

@@ -15,7 +15,7 @@ that run alone (a sample that writes files puts them there, so parallel
 runs of the corpus never share a file).
 
 Usage:
-    samples_parity.py --paykan build/bin/paykan --backend llvm --backend c
+    samples_parity.py --paykan build/bin/paykan --backend mlir [--backend <plugin>]
 
 With --build, every sample is instead compiled ahead of time with
 `paykan build --backend=<name>` and the resulting executable is run (with

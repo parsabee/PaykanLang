@@ -13,8 +13,8 @@ passes when it exits non-zero and its stderr has the line
 `paykan: <message>`.
 
 Usage:
-    stdlib_tests.py --paykan build/bin/paykan --backend c [--backend llvm]
-    stdlib_tests.py --paykan build/bin/paykan --backend c --update
+    stdlib_tests.py --paykan build/bin/paykan --backend mlir [--backend <plugin>]
+    stdlib_tests.py --paykan build/bin/paykan --backend mlir --update
 
 --update rewrites the .expected files from the first backend's output.
 """

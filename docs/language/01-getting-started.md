@@ -4,10 +4,10 @@ This chapter installs PaykanLang, runs a first program and builds it into an exe
 
 ## What you need
 
-PaykanLang compiles your programs with the **C compiler of your system**: the default
-backend translates a program to C and hands it to `cc` (or to the compiler named by the
-`CC` environment variable). So whichever way you install PaykanLang, make sure a C compiler
-is installed:
+`paykan run` compiles a program and runs it in process, with no C compiler involved, but
+`paykan build` links the executable it writes with the **C compiler of your system**: `cc`,
+or the compiler named by the `CC` environment variable. So whichever way you install
+PaykanLang, make sure a C compiler is installed:
 
 - on Debian or Ubuntu, `sudo apt install build-essential` (or just `gcc`);
 - on macOS, `xcode-select --install` (the Command Line Tools provide `cc`).
@@ -58,7 +58,7 @@ $ sudo apt install paykanlang
 
 The repository keeps the latest few releases; older `.deb` files stay on their release pages.
 
-### With Homebrew (macOS)
+### With Homebrew (macOS and Linux)
 
 The formula is in the tap
 [`parsabee/homebrew-paykanlang`](https://github.com/parsabee/homebrew-paykanlang), which
@@ -72,14 +72,14 @@ $ paykan --version
 If you tapped the compiler's repository for an earlier release, point the tap at the new
 repository once: `brew tap --custom-remote parsabee/paykanlang https://github.com/parsabee/homebrew-paykanlang`.
 
-The release tarballs and the Debian package contain both backends: the C backend (the
-default) and the LLVM backend, selected with `--backend=llvm`. The Homebrew formula
-builds the core compiler: the default frontend and the C backend.
+The release tarballs, the Debian package and the Homebrew formula (which installs the
+release tarballs) hold the same compiler: the default frontend and the `mlir` backend,
+with LLVM linked in statically, so nothing else needs installing.
 
 ### From source
 
-Building PaykanLang needs CMake 3.24 or newer and a C++20 compiler (and, as always, a C
-compiler to compile programs with):
+Building PaykanLang needs CMake 3.24 or newer, a C++20 compiler and LLVM 22.1.8 with MLIR,
+which the configure step downloads (and, as always, a C compiler to link executables with):
 
 ```sh
 $ git clone https://github.com/parsabee/PaykanLang.git
@@ -89,24 +89,20 @@ $ cmake --build build --parallel
 $ build/bin/paykan --version
 ```
 
-The default build needs nothing else and downloads nothing. It does not build the tests;
-configure with `-DPAYKAN_BUILD_ALL_TESTS=ON` to build them all, or name the suites you want
-with `-DPAYKAN_BUILD_TESTS=<suites>` (the README's [Testing](../../README.md#testing) section
+The first configure downloads LLVM's prebuilt release, MLIR included, once into
+`build/third-party/llvm`; `-DLLVM_DIR=<llvm>/lib/cmake/llvm` uses an LLVM 22.1.8 you
+already have instead. The prebuilt LLVM links with zlib and zstd from the system (`sudo apt
+install zlib1g-dev libzstd-dev` on Debian and Ubuntu, `brew install zstd` on macOS). The
+default build downloads nothing else. It does not build the tests; configure with
+`-DPAYKAN_BUILD_ALL_TESTS=ON` to build them all, or name the suites you want with
+`-DPAYKAN_BUILD_TESTS=<suites>` (the README's [Testing](../../README.md#testing) section
 lists them). To install the compiler, its runtime and the standard library under a prefix:
 
 ```sh
 $ cmake --install build --prefix /usr/local
 ```
 
-A source build can also include the optional **LLVM backend**, which can run programs
-in-process through a JIT. It is opt-in because it needs LLVM, which the configure step
-downloads:
-
-```sh
-$ cmake -B build "-DPAYKAN_BACKENDS=llvm;c"
-```
-
-[The `paykan` command](17-the-paykan-command.md#backends) explains how to choose a backend.
+[The `paykan` command](17-the-paykan-command.md#backends) describes the backend.
 
 ### Checking the installation
 
@@ -118,13 +114,10 @@ $ paykan --version
 PaykanLang <version>
 accepts plugins built with PaykanLang <version>
 frontend recursive-descent (built with PaykanLang <version>, compatible)
-backend c (built with PaykanLang <version>, compatible)
+backend mlir (built with PaykanLang <version>, compatible): MLIR <llvm-version>
 plugin API <version>
 plugin directories: ...
 ```
-
-A compiler built with the LLVM backend lists it too, as
-`backend llvm (built with PaykanLang <version>, compatible): LLVM <llvm-version>`.
 
 ## Hello, world
 
@@ -190,7 +183,7 @@ The executable has the PaykanLang runtime linked in, so it runs without `paykan`
 `.pkn` source.
 
 After the first run you will find a `.paykan_cache/` directory next to `hello.pkn`. It holds
-the generated C and compiled objects, so that the next run only recompiles what changed.
+the imported modules in compiled form, so that the next run only recompiles what changed.
 It is safe to delete at any time; [The compilation
 cache](17-the-paykan-command.md#the-compilation-cache) says more.
 

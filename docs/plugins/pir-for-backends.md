@@ -35,7 +35,7 @@ The text form is line-oriented and made for this:
   its classes and its functions, and the `extern fn` declarations come among
   the functions, in the order the lowering declared them (usually after the
   first function that calls them). Read a whole module before translating
-  it, or emit forward declarations (as the C backend does).
+  it, or emit forward declarations (as the mlir backend's C output does).
 - Values are `%name.N` (unique per function), symbols `@name`, constants are
   literal (`42`, `1.5`, `true`, `'a'`, `null box`).
 - Control flow is structured (`if`, `while`, `break`, `continue`, `ret`), so

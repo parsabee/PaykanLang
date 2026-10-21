@@ -287,8 +287,7 @@ fn main() -> int { return mid::bumped() + leaf::base(); }
 
 // Another module's templates, instantiated by several modules of one
 // program: each instantiation is one class (values flow between the
-// modules) and is emitted once, or the C backend would see a class defined
-// twice.
+// modules) and is emitted once, or the program would define it twice.
 TEST(Module, ImportedGenerics) {
   auto tmpDir = paykan::test::tempDir() / "pkn_import_generics";
   std::filesystem::remove_all(tmpDir);
@@ -340,8 +339,6 @@ fn main() -> int {
 // stale mid.bc would read the wrong slots (and, without dependency tracking,
 // nothing in mid's own source or mtime changes).
 TEST(Module, CacheInvalidatesOnTransitiveLayoutChange) {
-  if (testBackend() != "llvm")
-    GTEST_SKIP() << "the bitcode import cache belongs to the LLVM backend";
   auto tmpDir = paykan::test::tempDir() / "pkn_cache_trans";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);
@@ -407,8 +404,6 @@ fn make(a: int, b: int) -> Point { return Point(a, b); }
 // The cache lives under the project root (the main file's directory), not
 // under whatever directory the compiler happens to be launched from.
 TEST(Module, CacheLivesUnderProjectRoot) {
-  if (testBackend() != "llvm")
-    GTEST_SKIP() << "the bitcode import cache belongs to the LLVM backend";
   auto tmpDir = paykan::test::tempDir() / "pkn_cache_root";
   auto cwdA = paykan::test::tempDir() / "pkn_cache_cwd_a";
   auto cwdB = paykan::test::tempDir() / "pkn_cache_cwd_b";
@@ -447,8 +442,6 @@ fn main() -> int { return helper::add(10, 22); }
 // garbage case damages only the LEAF module while its importer's entry stays
 // valid, so the leaf has to be regenerated from underneath a cache hit.
 TEST(Module, CorruptCacheEntryIsRegenerated) {
-  if (testBackend() != "llvm")
-    GTEST_SKIP() << "the bitcode import cache belongs to the LLVM backend";
   auto tmpDir = paykan::test::tempDir() / "pkn_cache_corrupt";
   std::filesystem::remove_all(tmpDir);
   std::filesystem::create_directories(tmpDir);

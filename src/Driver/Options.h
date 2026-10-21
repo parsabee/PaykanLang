@@ -58,8 +58,9 @@ struct Options {
 
   /// -o <file>: the output of `build` or `--emit-pkm`.
   std::string OutputPath;
-  /// --emit-mlir=<stage>: --backend=mlir --emit-source, writing the stage of
-  /// the MLIR pipeline named (the backend's EmitOptions::SourceStage).
+  /// The mlir backend's source output (its EmitOptions::SourceStage): the
+  /// stage of the MLIR pipeline --emit-mlir=<stage> names, "c" for --emit-c,
+  /// empty for its LLVM IR (--emit-llvm, --emit-source).
   std::string EmitStage;
 
   /// `paykan pkm <verb> <file>`: the verb and the `--section=<name>` of
@@ -92,8 +93,9 @@ struct Options {
   /// kDefaultOptLevel.
   unsigned optLevel() const { return OptLevel.value_or(kDefaultOptLevel); }
 
-  /// --emit-source: write the backend's source output (C, LLVM IR, ...) to
-  /// stdout and stop.  --emit-llvm is --backend=llvm --emit-source.
+  /// --emit-source: write the backend's source output (the mlir backend's
+  /// LLVM IR, ...) to stdout and stop.  --emit-llvm, --emit-c and
+  /// --emit-mlir=<stage> set it with EmitStage.
   bool EmitSource = false;
   /// --emit-pir: print the verified PIR of the whole program and stop.
   bool EmitPIR = false;
