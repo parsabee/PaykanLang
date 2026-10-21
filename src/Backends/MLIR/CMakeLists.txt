@@ -7,6 +7,7 @@ add_subdirectory(Dialect)
 add_library(paykan_backend_mlir STATIC
     MLIRBackend.cpp
     Import/PIRImport.cpp
+    Lowering/PIRToStandard.cpp
 )
 target_include_directories(paykan_backend_mlir
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
@@ -20,7 +21,10 @@ target_link_libraries(paykan_backend_mlir
             paykan_mlir_pir_dialect
     PRIVATE paykan_compile_options
             MLIRArithDialect
+            MLIRFuncDialect
             MLIRIR
+            MLIRPass
+            MLIRSCFDialect
 )
 
 paykan_add_plugin(paykan_backend_mlir)

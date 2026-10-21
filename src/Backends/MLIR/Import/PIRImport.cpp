@@ -8,6 +8,7 @@
 #include "PIRImport.h"
 
 #include "Dialect/PIRDialect.h"
+#include "Lowering/PIRToStandard.h"
 
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/Dialect/Arith/IR/Arith.h>
@@ -29,11 +30,14 @@ using namespace ::paykan::pir_dialect;
 
 class Importer {
 public:
-  Importer(const P::Module &module, MLIRContext &ctx)
-      : M(module), Ctx(ctx), B(&ctx), Loc(UnknownLoc::get(&ctx)) {}
+  Importer(const P::Module &module, bool isMain, MLIRContext &ctx)
+      : M(module), IsMain(isMain), Ctx(ctx), B(&ctx),
+        Loc(UnknownLoc::get(&ctx)) {}
 
   StatusOr<OwningOpRef<ModuleOp>> run() {
     OwningOpRef<ModuleOp> mod = ModuleOp::create(Loc, M.Name);
+    if (IsMain)
+      (*mod)->setAttr(kMainModuleAttr, UnitAttr::get(&Ctx));
     B.setInsertionPointToEnd(mod->getBody());
     importGlobals();
     for (const P::Class &c : M.Classes)
@@ -48,6 +52,7 @@ public:
 
 private:
   const P::Module &M;
+  bool IsMain;
   MLIRContext &Ctx;
   OpBuilder B;
   Location Loc;
@@ -461,7 +466,7 @@ StatusOr<OwningOpRef<ModuleOp>> importModule(const P::Program &program,
   if (index >= program.Modules.size())
     return Status::error("PIR module index out of range");
   loadImportDialects(ctx);
-  auto mod = Importer(program.Modules[index], ctx).run();
+  auto mod = Importer(program.Modules[index], index == 0, ctx).run();
   if (!mod)
     return mod.status();
   if (Status s = verifyImport((*mod)->getOperation()); !s)
@@ -474,7 +479,7 @@ StatusOr<OwningOpRef<ModuleOp>> importProgram(const P::Program &program,
   loadImportDialects(ctx);
   OwningOpRef<ModuleOp> top = ModuleOp::create(UnknownLoc::get(&ctx));
   for (size_t i = 0; i < program.Modules.size(); ++i) {
-    auto mod = Importer(program.Modules[i], ctx).run();
+    auto mod = Importer(program.Modules[i], i == 0, ctx).run();
     if (!mod)
       return mod.status();
     top->getBody()->push_back((*mod).release());

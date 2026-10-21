@@ -58,7 +58,7 @@ These print an intermediate form of the program to standard output and stop:
 |--------|--------|
 | `--emit-c` | the generated C (selects the c backend) |
 | `--emit-llvm` | the generated LLVM IR (selects the llvm backend, which must be built in) |
-| `--emit-mlir=<stage>` | the program as MLIR at a stage of the mlir backend, which must be built in: `pir`, the program imported into the `pir` dialect ([the MLIR backend](../design/mlir-backend.md)) |
+| `--emit-mlir=<stage>` | the program as MLIR at a stage of the mlir backend, which must be built in: `pir`, the program imported into the `pir` dialect, or `scf`, after the lowering both targets share ([the MLIR backend](../design/mlir-backend.md)) |
 | `--emit-source` | the selected backend's output, whatever its language |
 | `--emit-pir` | PIR, the backend-neutral intermediate representation ([PIR](../pir.md)) |
 | `--emit-ast` | the parsed program in the AST interchange format ([AST format](../plugins/ast-format.md)) |
@@ -129,7 +129,7 @@ A backend turns the compiled program into something that runs. Two come with Pay
 A third, **`mlir`** (`-DPAYKAN_BACKENDS="llvm;mlir;c"`), is being built to replace both: the
 program goes through MLIR, and one lowering serves both C and LLVM
 ([the MLIR backend](../design/mlir-backend.md)). So far it only prints the program as MLIR
-(`--emit-mlir=pir`).
+(`--emit-mlir=pir`, `--emit-mlir=scf`).
 
 Both backends implement the same language and produce the same output. The repository's
 test suite runs every sample program, and every program in this documentation, on each backend that

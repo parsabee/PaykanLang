@@ -13,9 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PIR with one lowering through MLIR (docs/design/mlir-backend.md).  Opt-in like `llvm`
   (`-DPAYKAN_BACKENDS="llvm;mlir;c"`).  So far it imports the program into `pir`, an MLIR
   dialect with an op for each PIR item, statement and instruction, and prints it:
-  `paykan --emit-mlir=pir prog.pkn`.  The `pir-mlir` test suite imports every item and
-  instruction of PIR and every sample program, and checks that the MLIR verifies and parses
-  back to the same text.
+  `paykan --emit-mlir=pir prog.pkn`.  The lowering both targets will share follows
+  (`--emit-mlir=scf`): func, scf and arith, plus the pir ops for memory, globals and
+  optionals; structured control flow with `break`, `continue` and early `return` becomes
+  `scf.if` / `scf.while` with an exit flag, objects get their C layouts, and every symbol a
+  link name that is a C identifier.  The `pir-mlir` test suite imports every item and
+  instruction of PIR and every sample program, checks that the MLIR verifies and parses back
+  to the same text, and that the shared lowering leaves only those ops.
 
 ### Changed
 

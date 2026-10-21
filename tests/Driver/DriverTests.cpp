@@ -1041,7 +1041,7 @@ TEST(Driver, EmitCPrintsCSource) {
 // --emit-mlir=<stage> selects the mlir backend and prints the program at
 // that stage of its pipeline (docs/design/mlir-backend.md); with another
 // backend, or a stage the backend has not, it is an error.
-TEST(Driver, EmitMLIRPrintsThePIRDialect) {
+TEST(Driver, EmitMLIRPrintsEachStage) {
   auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
   if (backends.find("mlir:") == std::string::npos)
     GTEST_SKIP() << "this build has no mlir backend";
@@ -1051,6 +1051,12 @@ TEST(Driver, EmitMLIRPrintsThePIRDialect) {
   EXPECT_EQ(rc, 0) << out;
   EXPECT_NE(out.find("pir.func @main() -> i64"), std::string::npos) << out;
   EXPECT_NE(out.find(" = add "), std::string::npos) << out;
+  auto [rcSCF, outSCF] =
+      run(std::string(kPaykan) + " --emit-mlir=scf " + src + " 2>&1");
+  EXPECT_EQ(rcSCF, 0) << outSCF;
+  EXPECT_NE(outSCF.find("func.func @main() -> i64"), std::string::npos)
+      << outSCF;
+  EXPECT_NE(outSCF.find("arith.addi"), std::string::npos) << outSCF;
   auto [rcC, outC] = run(std::string(kPaykan) +
                          " --backend=c --emit-mlir=pir " + src + " 2>&1");
   EXPECT_NE(rcC, 0) << outC;
