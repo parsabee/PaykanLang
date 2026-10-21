@@ -114,7 +114,12 @@ if(NOT LLVM_FOUND)
         set(LLVM_EXCLUDES)
         set(LLVM_EXCLUDED_LIBS libFortran* libflang* liblldb* libclang.*
                                libclang-cpp.* LLVMPolly.*)
-        if(NOT APPLE)
+        if(APPLE)
+            # The archive's libc++ runtime, which Paykan never uses (it builds
+            # with the system's), would shadow the system libc++ in the
+            # linker's process (see libLTO below).
+            list(APPEND LLVM_EXCLUDED_LIBS libc++.* libc++abi.* libunwind.*)
+        else()
             # macOS links the libraries through it (see below).
             list(APPEND LLVM_EXCLUDED_LIBS libLTO.*)
         endif()
@@ -186,10 +191,20 @@ endif()
 # 22 bitcode, which Xcode's linker reads only through a libLTO of the same
 # LLVM: the archive's own, which compiles the members an executable uses
 # when it is linked (cached under <build>/lto.cache, so a relink compiles
-# only what changed).  (The Linux releases hold native objects.)
+# only what changed).  (The Linux releases hold native objects.)  The linker
+# loads it with the directory it is in first on its library search path, so
+# it is given from a directory of its own: from lib/, a dylib there named
+# like one of the linker's own (the archive's libc++.1.dylib) would replace
+# it, and the linker would abort.
 if(APPLE AND EXISTS "${LLVM_INSTALL_DIR}/lib/libLTO.dylib")
+    set(PAYKAN_LIBLTO "${LLVM_INSTALL_DIR}/lto/libLTO.dylib")
+    if(NOT EXISTS "${PAYKAN_LIBLTO}")
+        file(MAKE_DIRECTORY "${LLVM_INSTALL_DIR}/lto")
+        file(CREATE_LINK "${LLVM_INSTALL_DIR}/lib/libLTO.dylib"
+             "${PAYKAN_LIBLTO}" COPY_ON_ERROR)
+    endif()
     add_link_options(
-        "LINKER:-lto_library,${LLVM_INSTALL_DIR}/lib/libLTO.dylib"
+        "LINKER:-lto_library,${PAYKAN_LIBLTO}"
         "LINKER:-cache_path_lto,${CMAKE_BINARY_DIR}/lto.cache")
 endif()
 
