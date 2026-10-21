@@ -37,12 +37,6 @@ std::unique_ptr<mlir::MLIRContext> createContext();
 /// ones) from the imported pir dialect up to @p stage.
 Status lowerTo(mlir::ModuleOp module, Stage stage);
 
-/// The whole program imported into the pir dialect (importProgram), without
-/// what its `main` cannot reach (dropUnreachable): where every output of a
-/// program starts.
-StatusOr<mlir::OwningOpRef<mlir::ModuleOp>>
-importReachable(const pir::Program &program, mlir::MLIRContext &ctx);
-
 /// The whole program as one C translation unit, on @p os.
 Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os);
 

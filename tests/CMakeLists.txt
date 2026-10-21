@@ -250,11 +250,12 @@ if(PAYKAN_TEST_SUITE_pir_mlir)
     add_test(NAME PIRMLIRTests COMMAND pir_mlir_tests)
 endif()
 
-# --- PIR tests: printer, parser, verifier, binary codec (pir) ------------------------------
+# --- PIR tests: printer, parser, verifier, binary codec, passes (pir) ---------------------
 paykan_test_suite(pir PAYKAN_TEST_SUITE_pir)
 if(PAYKAN_TEST_SUITE_pir)
 add_executable(pir_tests
     PIR/BinaryTests.cpp
+    PIR/DeadCodeTests.cpp
     PIR/PIRTests.cpp
 )
 target_link_libraries(pir_tests

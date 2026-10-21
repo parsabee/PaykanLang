@@ -317,7 +317,7 @@ bool ModuleLowering::checkImportedSlot(ast::ClassType *ct, uint32_t slot,
   auto mod = origin ? PL.ByName.find(*origin) : PL.ByName.end();
   const pir::Class *def =
       mod == PL.ByName.end() ? nullptr : mod->second->findClass(ct->getName());
-  if (def && !def->IsExtern && slot < def->VTable.size() &&
+  if (def && mod->second->defines(*def) && slot < def->VTable.size() &&
       def->VTable[slot].Sig == sig)
     return true;
   reportInternalError("a call of slot " + std::to_string(slot) + " of '" +

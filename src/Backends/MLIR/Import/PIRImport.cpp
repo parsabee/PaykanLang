@@ -134,6 +134,8 @@ private:
         B, Loc, c.Name,
         c.Super.empty() ? StringAttr() : B.getStringAttr(c.Super), c.IsExtern,
         c.Module.empty() ? StringAttr() : B.getStringAttr(c.Module));
+    if (c.Shared)
+      cls->setAttr(kSharedAttr, B.getUnitAttr());
     OpBuilder::InsertionGuard guard(B);
     B.setInsertionPointToEnd(&cls.getBody().emplaceBlock());
     for (const P::Field &f : c.Fields)
@@ -160,6 +162,8 @@ private:
         /*res_attrs=*/ArrayAttr(),
         f.Module.empty() ? StringAttr() : B.getStringAttr(f.Module),
         f.Symbol.empty() ? StringAttr() : B.getStringAttr(f.Symbol));
+    if (f.Shared)
+      fn->setAttr(kSharedAttr, B.getUnitAttr());
     if (f.IsExtern) {
       // A declaration: private, as a symbol without a definition must be.
       fn.setPrivate();

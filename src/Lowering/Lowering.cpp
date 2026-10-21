@@ -482,6 +482,7 @@ pir::Function *ModuleLowering::declareExternFrom(const pir::Function &fn,
   pir::Function *ext = getOrCreateFunction(name, fn.Sig);
   ext->IsExtern = true;
   ext->Module = modulePath;
+  ext->Shared = fn.Shared;
   if (name != fn.Name)
     ext->Symbol = fn.Name;
   ext->Params.clear();
@@ -525,7 +526,7 @@ pir::Function *ModuleLowering::lookupFunction(const std::string &name) {
   if (!def || def->Name == Mod.Name)
     return nullptr;
   const pir::Function *fn = def->findFunction(symbol);
-  if (!fn || fn->IsExtern)
+  if (!fn || !def->defines(*fn))
     return nullptr;
   noteExternUse(name);
   return declareExternFrom(*fn, def->Name, name);
@@ -550,7 +551,7 @@ const std::string *ModuleLowering::typeOrigin(const std::string &type) {
         const pir::Module &m = *mod->second;
         const pir::Class *c = m.findClass(type);
         const pir::Function *ctor = m.findFunction(type);
-        if ((c && !c->IsExtern) || (!c && ctor && !ctor->IsExtern)) {
+        if ((c && m.defines(*c)) || (!c && ctor && m.defines(*ctor))) {
           DependencyOrigins.insert(type);
           return TypeOrigins[type] = &m.Name;
         }
@@ -577,7 +578,7 @@ pir::Function *ModuleLowering::lookupClassFunction(ast::ClassType *ct,
   if (modIt == PL.ByName.end())
     return nullptr;
   const pir::Function *def = modIt->second->findFunction(symbol);
-  if (!def || def->IsExtern)
+  if (!def || !modIt->second->defines(*def))
     return nullptr;
   noteExternUse(ct->getName());
   return declareExternFrom(*def, *origin, symbol);
@@ -594,7 +595,7 @@ pir::Function *ModuleLowering::lookupTypeFunction(const std::string &typeName,
   if (modIt == PL.ByName.end())
     return nullptr;
   const pir::Function *def = modIt->second->findFunction(symbol);
-  if (!def || def->IsExtern)
+  if (!def || !modIt->second->defines(*def))
     return nullptr;
   noteExternUse(typeName);
   return declareExternFrom(*def, *origin, symbol);
@@ -650,6 +651,7 @@ bool ModuleLowering::run(ast::TranslationUnit *tu) {
   bootstrapBuiltins();
   processImports(tu);
   visit(tu);
+  markShared();
   return !HadInternalError;
 }
 

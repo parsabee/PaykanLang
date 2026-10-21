@@ -5,7 +5,6 @@
 #include "Pipeline.h"
 
 #include "Import/PIRImport.h"
-#include "Lowering/DropUnreachable.h"
 #include "Lowering/PIRToStandard.h"
 #include "ModuleCache.h"
 #include "ToEmitC/ToEmitC.h"
@@ -76,19 +75,9 @@ Status lowerTo(mlir::ModuleOp module, Stage stage) {
   return Status::ok();
 }
 
-StatusOr<mlir::OwningOpRef<mlir::ModuleOp>>
-importReachable(const pir::Program &program, mlir::MLIRContext &ctx) {
-  auto mod = importProgram(program, ctx);
-  if (!mod)
-    return mod.status();
-  if (Status s = dropUnreachable((*mod).get()); !s)
-    return s;
-  return mod;
-}
-
 Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os) {
   auto ctx = createContext();
-  auto mod = importReachable(program, *ctx);
+  auto mod = importProgram(program, *ctx);
   if (!mod)
     return mod.status();
   return emitC((*mod).get(), os);
@@ -98,7 +87,7 @@ StatusOr<std::unique_ptr<llvm::Module>>
 compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
                const std::string &moduleName, const std::string &projectRoot) {
   auto mlirCtx = createContext();
-  auto top = importReachable(program, *mlirCtx);
+  auto top = importProgram(program, *mlirCtx);
   if (!top)
     return top.status();
   // Each module is lowered on its own, as what is left of it, and cached

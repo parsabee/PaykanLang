@@ -295,7 +295,9 @@ void ModuleLowering::layoutClass(P::ClassOp c) {
   }
   l.Size = alignTo(at, maxAlign);
   std::optional<StringRef> module = c.getModule();
-  l.VTable = vtableName(module ? *module : StringRef(Name), c.getName());
+  l.VTable = c->hasAttr(kSharedAttr)
+                 ? vtableName("", c.getName())
+                 : vtableName(module ? *module : StringRef(Name), c.getName());
 }
 
 LogicalResult ModuleLowering::run() {
@@ -311,7 +313,9 @@ LogicalResult ModuleLowering::run() {
     std::string link;
     std::optional<StringRef> module = f.getModule();
     std::optional<StringRef> symbol = f.getLinkSymbol();
-    if (!f.isExternal())
+    if (f->hasAttr(kSharedAttr))
+      link = linkName("", symbol ? *symbol : f.getSymName());
+    else if (!f.isExternal())
       link = definedName(f.getSymName());
     else if (!module)
       link = ::paykan::pir::externCSymbol(f.getSymName());

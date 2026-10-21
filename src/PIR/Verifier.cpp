@@ -275,6 +275,16 @@ private:
       if (hasMem(f.Sig))
         error(where, "function '@" + f.Name +
                          "' takes or returns a mem (pass its address)");
+      if (!f.Uses.empty() && !m.isCompiled(f))
+        error(where, "function '@" + f.Name +
+                         "' has uses but is not a compiled declaration (an "
+                         "extern naming its own module)");
+      for (const std::string &u : f.Uses)
+        if (!Index.Functions.count(u) && !Index.Classes.count(u))
+          error(where, "compiled function '@" + f.Name + "' uses '@" + u +
+                           "', which the module does not declare");
+      if (f.IsExtern && f.Shared && f.Module.empty())
+        error(where, "runtime extern function '@" + f.Name + "' is shared");
       if (f.IsExtern) {
         if (!f.Params.empty() || !f.Locals.empty() || !f.Body.Stmts.empty())
           error(where, "extern function '@" + f.Name + "' has a body");
@@ -991,8 +1001,10 @@ private:
   };
 };
 
-/// Cross-module checks: every extern that names a module must match a
-/// definition in that module.
+/// Cross-module checks: every extern that names another module must match
+/// a definition in that module (in its PIR or its compiled code), shared
+/// when it is.  A compiled declaration, which names its own module, is
+/// checked against the module's compiled code, which PIR does not see.
 void verifyProgramLinks(const Program &p, std::vector<VerifyError> &errors) {
   std::unordered_map<std::string, const Module *> modules;
   for (const Module &m : p.Modules) {
@@ -1001,7 +1013,7 @@ void verifyProgramLinks(const Program &p, std::vector<VerifyError> &errors) {
   }
   for (const Module &m : p.Modules) {
     for (const Function &f : m.Functions) {
-      if (!f.IsExtern || f.Module.empty())
+      if (!f.IsExtern || f.Module.empty() || m.isCompiled(f))
         continue;
       auto it = modules.find(f.Module);
       if (it == modules.end()) {
@@ -1011,10 +1023,16 @@ void verifyProgramLinks(const Program &p, std::vector<VerifyError> &errors) {
         continue;
       }
       const Function *def = it->second->findFunction(f.linkName());
-      if (!def || def->IsExtern)
+      if (!def || !it->second->defines(*def))
         errors.push_back({m.Name, "extern fn '@" + f.linkName() +
                                       "' is not defined in module '" +
                                       f.Module + "'"});
+      else if (def->Shared != f.Shared)
+        errors.push_back({m.Name, "extern fn '@" + f.Name + "' is " +
+                                      (f.Shared ? "" : "not ") +
+                                      "shared but its definition in module '" +
+                                      f.Module + "' is" +
+                                      (def->Shared ? "" : " not")});
       else if (!(def->Sig == f.Sig))
         errors.push_back({m.Name, "extern fn '@" + f.Name + "' is declared " +
                                       sigStr(f.Sig) + " but module '" +
@@ -1022,7 +1040,7 @@ void verifyProgramLinks(const Program &p, std::vector<VerifyError> &errors) {
                                       sigStr(def->Sig)});
     }
     for (const Class &c : m.Classes) {
-      if (!c.IsExtern)
+      if (!c.IsExtern || m.isCompiled(c))
         continue;
       auto it = modules.find(c.Module);
       if (it == modules.end()) {
@@ -1032,7 +1050,7 @@ void verifyProgramLinks(const Program &p, std::vector<VerifyError> &errors) {
         continue;
       }
       const Class *def = it->second->findClass(c.Name);
-      if (!def || def->IsExtern) {
+      if (!def || !it->second->defines(*def)) {
         errors.push_back({m.Name, "extern class '" + c.Name +
                                       "' is not defined in module '" +
                                       c.Module + "'"});

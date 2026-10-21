@@ -18,6 +18,8 @@
 #include "paykan/lowering/Lowering.h"
 #include "paykan/modules/ModuleResolver.h"
 #include "paykan/pir/Binary.h"
+#include "paykan/pir/DeadCode.h"
+#include "paykan/pir/Pass.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
 #include "paykan/pkm/Dump.h"
@@ -573,6 +575,13 @@ int main(int argc, char *argv[]) {
   if (!errors.empty())
     return fail("PIR verification failed:\n" +
                 paykan::pir::formatErrors(errors));
+  // What the program's entry point cannot reach is dropped before the
+  // backend lowers anything (docs/pir.md §12).
+  paykan::pir::PassManager passes;
+  passes.add(
+      paykan::pir::createDeadCodePass(paykan::pir::Roots::entryPoint(program)));
+  if (paykan::Status s = passes.run(program); !s)
+    return fail(s.message());
   if (opts.EmitPIR) {
     paykan::pir::print(program, std::cout);
     std::cout.flush();

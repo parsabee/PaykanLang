@@ -1378,11 +1378,11 @@ TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
   std::filesystem::remove_all(dir);
   ASSERT_TRUE(l.Ok) << l.Error;
   const std::string &t = l.Text;
-  EXPECT_EQ(count(t, "\nclass Box<Str> {"), 1u) << t;
-  EXPECT_EQ(count(t, "\nextern class Box<Str> module \"a\""), 2u) << t;
-  EXPECT_EQ(count(t, "\nfn @\"$lib::gen::first<int>\"("), 1u) << t;
-  EXPECT_EQ(count(t, "\nextern fn @\"$lib::gen::first<int>\"(ptr, i64) -> i64 "
-                     "module \"a\"\n"),
+  EXPECT_EQ(count(t, "\nshared class Box<Str> {"), 1u) << t;
+  EXPECT_EQ(count(t, "\nextern shared class Box<Str> module \"a\""), 2u) << t;
+  EXPECT_EQ(count(t, "\nshared fn @\"$lib::gen::first<int>\"("), 1u) << t;
+  EXPECT_EQ(count(t, "\nextern shared fn @\"$lib::gen::first<int>\"(ptr, i64) "
+                     "-> i64 module \"a\"\n"),
             2u)
       << t;
   for (const pir::Module &m : l.Program.Modules) {
@@ -1447,7 +1447,7 @@ TEST(Lowering, EveryModuleLowersItsOwnCopiesUntilShared) {
   pir::print(copies.Program, os);
   EXPECT_EQ(os.str(), shared.Text);
   EXPECT_TRUE(pir::verify(copies.Program).empty());
-  EXPECT_EQ(count(shared.Text, "\nclass Box<Str> {"), 1u) << shared.Text;
+  EXPECT_EQ(count(shared.Text, "\nshared class Box<Str> {"), 1u) << shared.Text;
   EXPECT_NE(shared.Text.find(": (obj) -> i64 ["), std::string::npos)
       << shared.Text;
 }
