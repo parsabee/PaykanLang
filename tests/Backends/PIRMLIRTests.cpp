@@ -88,8 +88,8 @@ lowerText(const std::string &text, mlir::MLIRContext &ctx, std::string &err) {
   return std::move(*mod);
 }
 
-/// The PIR @p text through the shared lowering, switch formation included
-/// (Stage::SCF), printed ("" on failure, with the reason in @p err).
+/// The PIR @p text through the shared lowering (Stage::SCF), printed (""
+/// on failure, with the reason in @p err).
 std::string scfText(const std::string &text, mlir::MLIRContext &ctx,
                     std::string &err) {
   pir::ParseError perr;
@@ -191,7 +191,8 @@ TEST(PIRMLIR, EveryItemAndInstruction) {
         "pir.extern_object", "pir.extern_vtable", "pir.class \"Point\"",
         "pir.class \"Point3\" : \"Point\"", "extern module \"lib\"", "field",
         "slot \"area\" :", "pir.func private @\"$rt.PaykanString_new\"",
-        "module = \"lib\"", "ptr_load", "ptr_store", "field_load"})
+        "module = \"lib\"", "ptr_load", "ptr_store", "field_load",
+        "switch %9 : i64 [1, 7] {"})
     EXPECT_NE(mlir.find(op), std::string::npos) << op << "\n" << mlir;
   expectRoundTrip(mlir, ctx);
 }
@@ -204,11 +205,11 @@ TEST(PIRMLIR, SharedLoweringOfEveryItemAndInstruction) {
   expectOnlyStandardOps(*mod);
   std::string mlir = print(*mod);
   // Link names; the layout of Point3 (the header, x, name, z at 32); its
-  // vtable; and the class Adder of module "lib".
+  // vtable; the class Adder of module "lib"; the switch.
   for (const char *text :
        {"func.func private @PaykanString_new", "pir.vtable @pkvt_main_SPoint",
         "pir.extern_vtable @pkvt_lib_SAdder", "pk_main_SPoint__destroy",
-        "func.func private @pk_lib_Shelper"})
+        "func.func private @pk_lib_Shelper", "scf.index_switch", "case 7 {"})
     EXPECT_NE(mlir.find(text), std::string::npos) << text << "\n" << mlir;
   expectRoundTrip(mlir, ctx);
 }
@@ -230,7 +231,7 @@ TEST(PIRMLIR, EmitCOfEveryItemAndInstruction) {
         "extern PaykanMethod pkvt_lib_SAdder[];",
         "static const char pk_main_S_2Estr0[7] = \"Hello\\n\";",
         "static int64_t paykan_main(void);", "int main(int argc, char **argv)",
-        "int64_t rc = paykan_main();"})
+        "int64_t rc = paykan_main();", "switch (", "case 7: {"})
     EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
   // The runtime's functions are Runtime.h's: never declared here.
   EXPECT_EQ(c.find("PaykanString_new("), c.find("PaykanString_new(v")) << c;
@@ -244,143 +245,92 @@ TEST(PIRMLIR, EmitCOfEveryItemAndInstruction) {
   }
 }
 
-// A chain of ifs testing one integer against constants, `match` on an
-// enum or on integer literals, as PIR (src/Lowering/LoweringMatch.cpp).
-// The second test of 2 is never taken.
-const char *const kEqualityChain = R"(module "main"
+// Switches on an i64, a bool and a char: one in tail position whose every
+// case returns, and one in a loop whose cases break.
+const char *const kSwitches = R"(module "main"
 fn @pick(%x.1: i64) -> i64 {
+  switch %x.1 {
+    case -1 {
+      ret 10
+    }
+    case 4294967296 {
+      ret 20
+    }
+    default {
+      ret 30
+    }
+  }
+}
+
+fn @flag(%b.1: bool) -> i64 {
   local %r.0: i64
   store %r.0, 0
-  %t.2 = cmp eq %x.1, 0
-  if %t.2 {
-    store %r.0, 10
-  } else {
-    %t.3 = cmp eq %x.1, 2
-    if %t.3 {
-      store %r.0, 20
-    } else {
-      %t.4 = cmp eq %x.1, 2
-      if %t.4 {
-        store %r.0, 99
-      } else {
-        %t.5 = cmp eq %x.1, 5
-        if %t.5 {
-          store %r.0, 30
-        } else {
-          store %r.0, 40
-        }
+  switch %b.1 {
+    case true {
+      store %r.0, 1
+    }
+    case false {
+      store %r.0, 2
+    }
+  }
+  %v.2 = load %r.0
+  ret %v.2
+}
+
+fn @letter(%c.1: char) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  while {
+    cond true
+  } {
+    switch %c.1 {
+      case 'a' {
+        break
+      }
+      default {
+        store %r.0, 1
+        break
       }
     }
   }
-  %v.6 = load %r.0
-  ret %v.6
+  %v.2 = load %r.0
+  ret %v.2
 }
 
 fn @main() -> i64 {
-  %a.1 = call @pick(5)
+  %a.1 = call @pick(4294967296)
   ret %a.1
 }
 )";
 
-// The chain is one scf.index_switch, a case for each value tested first,
-// and both targets switch: C on the index's size_t, LLVM on its i64.
-TEST(PIRMLIR, AnEqualityChainIsASwitch) {
+// A switch is an scf.index_switch on its value as an index, a bool or a
+// char zero-extended (as its cases are).  In tail position its cases yield
+// the returned value, with no exit flag; one in a loop sets the loop's.
+// Both targets switch.
+TEST(PIRMLIR, SwitchesAreIndexSwitches) {
   auto ctx = mlir_backend::createContext();
   std::string err;
-  std::string mlir = scfText(kEqualityChain, *ctx, err);
+  std::string mlir = importText(kSwitches, *ctx, err);
   ASSERT_FALSE(mlir.empty()) << err;
-  for (const char *text :
-       {"scf.index_switch", "case 0 {", "case 2 {", "case 5 {", "default {"})
-    EXPECT_NE(mlir.find(text), std::string::npos) << text << "\n" << mlir;
-  EXPECT_EQ(mlir.find("scf.if"), std::string::npos) << mlir;
-  EXPECT_EQ(mlir.find("arith.cmpi"), std::string::npos) << mlir;
-  EXPECT_EQ(mlir.find("99"), std::string::npos) << mlir;
   expectRoundTrip(mlir, *ctx);
 
+  std::string scf = scfText(kSwitches, *ctx, err);
+  ASSERT_FALSE(scf.empty()) << err;
+  for (const char *text :
+       {"scf.index_switch %", "-> i64", "case -1 {", "case 4294967296 {",
+        "arith.index_castui", "case 0 {", "case 1 {", "case 97 {"})
+    EXPECT_NE(scf.find(text), std::string::npos) << text << "\n" << scf;
+  EXPECT_EQ(scf.find("pir.switch"), std::string::npos) << scf;
+  // Only @letter, whose cases break, has an exit flag.
+  size_t flag = scf.find("pir.alloca \"exit\"");
+  EXPECT_NE(flag, std::string::npos) << scf;
+  EXPECT_EQ(scf.find("pir.alloca \"exit\"", flag + 1), std::string::npos)
+      << scf;
+
   mlir::OwningOpRef<mlir::ModuleOp> mod;
-  std::string c = emitCText(kEqualityChain, ctx, mod, err);
+  std::string c = emitCText(kSwitches, ctx, mod, err);
   ASSERT_FALSE(c.empty()) << err;
   EXPECT_NE(c.find("switch ("), std::string::npos) << c;
-  EXPECT_NE(c.find("case 5: {"), std::string::npos) << c;
-}
-
-// What is not a chain of equality tests on one integer stays scf.if: a
-// single test, tests of two values, an ordering test, a negative constant.
-TEST(PIRMLIR, OtherTestsStayIfs) {
-  const char *programs[] = {
-      R"(module "main"
-fn @f(%x.1: i64) -> i64 {
-  local %r.0: i64
-  store %r.0, 0
-  %t.2 = cmp eq %x.1, 1
-  if %t.2 {
-    store %r.0, 1
-  } else {
-    store %r.0, 2
-  }
-  %v.3 = load %r.0
-  ret %v.3
-}
-)",
-      R"(module "main"
-fn @f(%x.1: i64, %y.2: i64) -> i64 {
-  local %r.0: i64
-  store %r.0, 0
-  %t.3 = cmp eq %x.1, 1
-  if %t.3 {
-    store %r.0, 1
-  } else {
-    %t.4 = cmp eq %y.2, 2
-    if %t.4 {
-      store %r.0, 2
-    }
-  }
-  %v.5 = load %r.0
-  ret %v.5
-}
-)",
-      R"(module "main"
-fn @f(%x.1: i64) -> i64 {
-  local %r.0: i64
-  store %r.0, 0
-  %t.2 = cmp lt %x.1, 1
-  if %t.2 {
-    store %r.0, 1
-  } else {
-    %t.3 = cmp lt %x.1, 2
-    if %t.3 {
-      store %r.0, 2
-    }
-  }
-  %v.4 = load %r.0
-  ret %v.4
-}
-)",
-      R"(module "main"
-fn @f(%x.1: i64) -> i64 {
-  local %r.0: i64
-  store %r.0, 0
-  %t.2 = cmp eq %x.1, -1
-  if %t.2 {
-    store %r.0, 1
-  } else {
-    %t.3 = cmp eq %x.1, -2
-    if %t.3 {
-      store %r.0, 2
-    }
-  }
-  %v.4 = load %r.0
-  ret %v.4
-}
-)"};
-  for (const char *text : programs) {
-    auto ctx = mlir_backend::createContext();
-    std::string err;
-    std::string mlir = scfText(text, *ctx, err);
-    ASSERT_FALSE(mlir.empty()) << err << "\n" << text;
-    EXPECT_EQ(mlir.find("scf.index_switch"), std::string::npos) << mlir;
-    EXPECT_NE(mlir.find("scf.if"), std::string::npos) << mlir;
-  }
 }
 
 TEST(PIRMLIR, LinkNamesAreCIdentifiers) {

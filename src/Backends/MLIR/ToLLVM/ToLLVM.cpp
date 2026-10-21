@@ -346,9 +346,9 @@ struct VTableLowering : PIRPattern<P::VTableOp> {
 
 // -- SCF to cf
 
-/// scf.index_switch (SwitchFormation.h) as a cf.switch on the whole 64-bit
-/// index.  Upstream's lowering switches on an i32, which drops the upper
-/// half: a subject of 1 << 32 would take case 0.
+/// scf.index_switch (a pir.switch, Lowering/PIRToStandard.cpp) as a
+/// cf.switch on the whole 64-bit index.  Upstream's lowering switches on an
+/// i32, which drops the upper half: a subject of 1 << 32 would take case 0.
 struct IndexSwitchLowering : OpRewritePattern<scf::IndexSwitchOp> {
   using OpRewritePattern::OpRewritePattern;
   LogicalResult matchAndRewrite(scf::IndexSwitchOp op,

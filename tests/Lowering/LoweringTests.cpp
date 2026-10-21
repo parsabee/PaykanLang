@@ -565,6 +565,42 @@ TEST(Lowering, CallRootedFieldReadRetainsTheFieldAndReleasesTheReceiver) {
 
 // #72: a string-literal subject is built as a Str (not passed as its raw C
 // string) and released on every exit of the match.
+// A match on an enum, or on integer, char or bool literals, is a `switch`:
+// a case per value, the wildcard its default, of two arms naming one value
+// the first.  One on floats or strings is an if-else chain of tests.
+TEST(Lowering, PrimitiveMatchesAreSwitches) {
+  auto l = lower(R"(
+    enum Dir { N, E, S, W }
+    fn d(x: Dir) -> int { match x { N { return 1; } S { return 2; } _ { return 3; } } }
+    fn i(x: int) -> int { match x { 5 { return 1; } 9 { return 2; } 5 { return 3; } _ { return 4; } } }
+    fn c(x: char) -> int { match x { 'a' { return 1; } _ { return 2; } } }
+    fn b(x: bool) -> int { match x { True { return 1; } False { return 2; } } }
+    fn f(x: float) -> int { match x { 1.5 { return 1; } _ { return 2; } } }
+    fn s(x: Str) -> int { match x { "a" { return 1; } _ { return 2; } } }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error; // the verifier ran
+  std::string d = function(l.Text, "d");
+  EXPECT_NE(d.find("switch %x."), std::string::npos) << d;
+  EXPECT_NE(d.find("case 0 {"), std::string::npos) << d;
+  EXPECT_NE(d.find("case 2 {"), std::string::npos) << d;
+  EXPECT_NE(d.find("default {"), std::string::npos) << d;
+  EXPECT_EQ(d.find("cmp eq"), std::string::npos) << d;
+  std::string i = function(l.Text, "i");
+  EXPECT_EQ(count(i, "case 5 {"), 1u) << i;
+  EXPECT_EQ(i.find("ret 3"), std::string::npos) << i; // the second 5
+  EXPECT_NE(function(l.Text, "c").find("case 'a' {"), std::string::npos)
+      << l.Text;
+  std::string b = function(l.Text, "b");
+  EXPECT_NE(b.find("case true {"), std::string::npos) << b;
+  EXPECT_NE(b.find("case false {"), std::string::npos) << b;
+  for (const char *chain : {"f", "s"}) {
+    std::string fn = function(l.Text, chain);
+    EXPECT_EQ(fn.find("switch"), std::string::npos) << fn;
+    EXPECT_NE(fn.find("if %"), std::string::npos) << fn;
+  }
+}
+
 TEST(Lowering, StringLiteralMatchSubjectIsAStrReleasedOnEveryExit) {
   auto l = lower(R"(import ::io;
     fn f() -> int {
@@ -743,7 +779,7 @@ TEST(Lowering, ValueMatchOnStrBoxesTheLiteralForEquals) {
   EXPECT_EQ(count(m, " = box "), 3u) << m; // s itself and the two literals
 }
 
-TEST(Lowering, EnumMatchComparesConstants) {
+TEST(Lowering, EnumMatchIsASwitchOnTheVariants) {
   auto l = lower(R"(
     enum Color { Red, Green }
     fn main() -> int {
@@ -754,8 +790,10 @@ TEST(Lowering, EnumMatchComparesConstants) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "cmp eq %"), 2u) << m; // one test per variant arm
-  EXPECT_EQ(count(m, "release"), 0u) << m;  // no boxes anywhere
+  EXPECT_EQ(count(m, "switch %"), 1u) << m;
+  EXPECT_EQ(count(m, "case "), 2u) << m; // one per variant arm
+  EXPECT_EQ(count(m, "cmp eq %"), 0u) << m;
+  EXPECT_EQ(count(m, "release"), 0u) << m; // no boxes anywhere
 }
 
 // -- Arrays, tuples, optionals

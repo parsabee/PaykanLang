@@ -205,6 +205,18 @@ private:
         // An empty else is no else (and `else {}` would parse back as none).
         if (i->Else && !i->Else->Stmts.empty())
           importRegion(op.getElseRegion(), i->Else.get());
+      } else if (const auto *sw = std::get_if<P::Switch>(&s)) {
+        Value v = operand(sw->Value);
+        SmallVector<Attribute> cases;
+        for (const P::Switch::Case &c : sw->Cases)
+          cases.push_back(constant(c.Value));
+        auto op =
+            SwitchOp::create(B, Loc, v, B.getArrayAttr(cases), cases.size());
+        for (auto [region, c] : llvm::zip(op.getCaseRegions(), sw->Cases))
+          importRegion(region, c.Body.get());
+        // An empty default is no default, as an empty else is no else.
+        if (sw->Default && !sw->Default->Stmts.empty())
+          importRegion(op.getDefaultRegion(), sw->Default.get());
       } else if (const auto *w = std::get_if<P::While>(&s)) {
         auto op = WhileOp::create(B, Loc);
         {
@@ -225,6 +237,19 @@ private:
         UnreachableOp::create(B, Loc);
       }
     }
+  }
+
+  /// A constant operand (a switch case) as an attribute of the type the
+  /// operand has as a value.
+  Attribute constant(const P::Operand &op) {
+    if (const auto *v = std::get_if<bool>(&op.V))
+      return B.getIntegerAttr(B.getI1Type(), *v ? 1 : 0);
+    if (const auto *v = std::get_if<char>(&op.V))
+      return B.getIntegerAttr(B.getI8Type(), static_cast<int8_t>(*v));
+    if (const auto *v = std::get_if<int64_t>(&op.V))
+      return B.getI64IntegerAttr(*v);
+    fail("a switch case that is not an integer, char or bool constant");
+    return B.getI64IntegerAttr(0);
   }
 
   /// An operand as a value: a constant is materialised where it is used.

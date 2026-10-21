@@ -235,6 +235,12 @@ private:
           collect(*w->CondBlock);
         if (w->Body)
           collect(*w->Body);
+      } else if (const auto *sw = std::get_if<Switch>(&s)) {
+        for (const Switch::Case &c : sw->Cases)
+          if (c.Body)
+            collect(*c.Body);
+        if (sw->Default)
+          collect(*sw->Default);
       }
     }
   }
@@ -412,6 +418,30 @@ private:
         OS << "} {\n";
         if (w->Body)
           printBlock(*w->Body, depth + 1);
+        indent(depth);
+        OS << "}\n";
+      } else if (const auto *sw = std::get_if<Switch>(&s)) {
+        OS << "switch ";
+        printOperand(sw->Value);
+        OS << " {\n";
+        auto printCase = [&](const Block *body) {
+          OS << " {\n";
+          if (body)
+            printBlock(*body, depth + 2);
+          indent(depth + 1);
+          OS << "}\n";
+        };
+        for (const Switch::Case &c : sw->Cases) {
+          indent(depth + 1);
+          OS << "case ";
+          printOperand(c.Value);
+          printCase(c.Body.get());
+        }
+        if (sw->Default) {
+          indent(depth + 1);
+          OS << "default";
+          printCase(sw->Default.get());
+        }
         indent(depth);
         OS << "}\n";
       } else if (std::holds_alternative<Break>(s)) {

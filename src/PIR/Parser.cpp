@@ -1000,6 +1000,28 @@ private:
       out = std::move(w);
       return true;
     }
+    if (isWord("switch")) {
+      advance();
+      Switch sw;
+      if (!parseOperand(sw.Value) || !expect(Tok::LBrace, "'{'"))
+        return false;
+      while (isWord("case")) {
+        advance();
+        Switch::Case c;
+        if (!parseOperand(c.Value) || !parseBracedBlock(c.Body))
+          return false;
+        sw.Cases.push_back(std::move(c));
+      }
+      if (isWord("default")) {
+        advance();
+        if (!parseBracedBlock(sw.Default))
+          return false;
+      }
+      if (!expect(Tok::RBrace, "'}'"))
+        return false;
+      out = std::move(sw);
+      return true;
+    }
     if (isWord("break")) {
       advance();
       out = Break{};
@@ -1047,9 +1069,9 @@ private:
     if (Cur.Kind != Tok::Word)
       return false;
     static const char *const kStmtWords[] = {
-        "if",   "while",       "break", "continue", "ret",    "unreachable",
-        "cond", "call",        "vcall", "icall",    "retain", "release",
-        "free", "field.store", "store", "ptr.store"};
+        "if",          "while", "switch",      "break", "continue", "ret",
+        "unreachable", "cond",  "call",        "vcall", "icall",    "retain",
+        "release",     "free",  "field.store", "store", "ptr.store"};
     for (const char *w : kStmtWords)
       if (Cur.Text == w)
         return true;
@@ -1371,6 +1393,14 @@ private:
               t = findIn(*w->Body, id);
             if (t != Type::Void)
               return t;
+          } else if (const auto *sw = std::get_if<Switch>(&s)) {
+            for (const Switch::Case &c : sw->Cases)
+              if (Type t = c.Body ? findIn(*c.Body, id) : Type::Void;
+                  t != Type::Void)
+                return t;
+            if (Type t = sw->Default ? findIn(*sw->Default, id) : Type::Void;
+                t != Type::Void)
+              return t;
           }
         }
         return Type::Void;
@@ -1417,6 +1447,12 @@ private:
           resolveBlock(m, f, *w->CondBlock);
         if (w->Body)
           resolveBlock(m, f, *w->Body);
+      } else if (auto *sw = std::get_if<Switch>(&s)) {
+        for (Switch::Case &c : sw->Cases)
+          if (c.Body)
+            resolveBlock(m, f, *c.Body);
+        if (sw->Default)
+          resolveBlock(m, f, *sw->Default);
       }
     }
   }

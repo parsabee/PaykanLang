@@ -755,6 +755,7 @@ self-describing for the dump tool and the fuzzer.
 Block := uleb count ; Stmt[count]
 Stmt  := u8 tag: 0 instr InstrRec | 1 if Operand, Block then, u8 hasElse, [Block] | 2 while Block cond, Operand, Block body
          | 3 break | 4 continue | 5 ret u8 hasValue, [Operand] | 6 unreachable
+         | 7 switch Operand, uleb n, (Operand, Block)[n], u8 hasDefault, [Block]
 ```
 
 Nesting depth is capped at 512 (the frontends' source-nesting bound; a

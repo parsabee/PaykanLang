@@ -54,11 +54,20 @@ class Builder {
   unsigned LoopDepth = 0;
 
   /// A statement after which nothing runs: break / continue / ret /
-  /// unreachable, or an if whose two branches both end that way.
+  /// unreachable, or an if or a switch whose every branch ends that way (a
+  /// switch with a default).
   static bool isTerminator(const Stmt &s) {
     if (auto *i = std::get_if<If>(&s))
       return i->Else && endsInTerminator(*i->Then) &&
              endsInTerminator(*i->Else);
+    if (auto *sw = std::get_if<Switch>(&s)) {
+      if (!sw->Default || !endsInTerminator(*sw->Default))
+        return false;
+      for (const Switch::Case &c : sw->Cases)
+        if (!endsInTerminator(*c.Body))
+          return false;
+      return true;
+    }
     return std::holds_alternative<Break>(s) ||
            std::holds_alternative<Continue>(s) ||
            std::holds_alternative<Return>(s) ||
@@ -192,6 +201,25 @@ public:
     return &s;
   }
   void setWhileCond(While *w, const Val &cond) { w->Cond = cond.Op; }
+
+  /// Open a switch on @p value; the caller enters each block addCase and
+  /// addDefault return, emits it, and leaves:
+  //   Switch *s = openSwitch(v);
+  //   enter(addCase(s, Val::i64(0))); ... leave();
+  //   enter(addDefault(s)); ... leave();
+  Switch *openSwitch(const Val &value) {
+    Switch &s = append<Switch>();
+    s.Value = value.Op;
+    return &s;
+  }
+  Block &addCase(Switch *s, const Val &constant) {
+    s->Cases.push_back({constant.Op, std::make_unique<Block>()});
+    return *s->Cases.back().Body;
+  }
+  Block &addDefault(Switch *s) {
+    s->Default = std::make_unique<Block>();
+    return *s->Default;
+  }
 
   void enter(Block &b) { Stack.push_back(&b); }
   void leave() {

@@ -11,7 +11,6 @@ add_library(paykan_backend_mlir STATIC
     Pipeline.cpp
     Import/PIRImport.cpp
     Lowering/PIRToStandard.cpp
-    Lowering/SwitchFormation.cpp
     ToEmitC/ToEmitC.cpp
     ToLLVM/ToLLVM.cpp
 )

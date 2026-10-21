@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // AST -> PIR lowering: `match` in its three modes (class / optional, value,
-// enum) as a structured if-else chain.
+// enum).  A match on an enum or on integer, char or bool literals is a
+// `switch`; one on classes, optionals, strings or floats an if-else chain.
 
 #include "LoweringInternal.h"
 #include "Names.h"
@@ -47,6 +48,32 @@ void ModuleLowering::emitMatchChain(size_t n,
   emitDefault();
   for (size_t i = 0; i < opened.size(); ++i)
     B.leave();
+}
+
+// switch (subj) { case c(0) { body(0) } ... default { the wildcard's } }.
+// Of two arms naming one value the first is taken, as in a chain, so a
+// later one is dropped.
+void ModuleLowering::emitMatchSwitch(
+    const Val &subj, const std::vector<std::pair<Val, ast::MatchArm *>> &arms,
+    ast::MatchArm *wildcard) {
+  pir::Switch *s = B.openSwitch(subj);
+  std::vector<const pir::Operand *> seen;
+  for (const auto &[value, arm] : arms) {
+    bool again = false;
+    for (const pir::Operand *o : seen)
+      again |= pir::sameConstant(*o, value.Op);
+    if (again)
+      continue;
+    seen.push_back(&value.Op);
+    B.enter(B.addCase(s, value));
+    emitMatchArmBody(arm);
+    B.leave();
+  }
+  if (wildcard) {
+    B.enter(B.addDefault(s));
+    emitMatchArmBody(wildcard);
+    B.leave();
+  }
 }
 
 Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
@@ -211,14 +238,27 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   return Val();
 }
 
-// Value-mode match: an equality chain over literal arms.  `subjRaw` is a
-// raw scalar for primitives or a raw PaykanString* for Str subjects.
+// Value-mode match: a switch over the literal arms of an integer, char or
+// bool subject, an equality chain over those of a float or Str one.
+// `subjRaw` is a raw scalar for primitives or a raw PaykanString* for Str
+// subjects.
 Val ModuleLowering::emitValueMatch(ast::MatchStmt *node, const Val &subjRaw) {
   std::vector<ast::MatchArm *> litArms;
   for (ast::MatchArm *arm : node->getArms())
     if (arm->isLiteral())
       litArms.push_back(arm);
   ast::MatchArm *wildcard = findWildcardArm(node);
+
+  if (subjRaw.Ty == Type::I64 || subjRaw.Ty == Type::Char ||
+      subjRaw.Ty == Type::Bool) {
+    // Their literals are constants of the subject's type.
+    std::vector<std::pair<Val, ast::MatchArm *>> arms;
+    arms.reserve(litArms.size());
+    for (ast::MatchArm *arm : litArms)
+      arms.emplace_back(emitExpr(arm->getLiteralPattern()), arm);
+    emitMatchSwitch(subjRaw, arms, wildcard);
+    return Val();
+  }
 
   emitMatchChain(
       litArms.size(),
@@ -246,15 +286,11 @@ Val ModuleLowering::emitValueMatch(ast::MatchStmt *node, const Val &subjRaw) {
   return Val();
 }
 
-// Enum-mode match: compare the subject's i64 against each variant's index.
+// Enum-mode match: a switch on the subject's i64, a case per variant's index.
 Val ModuleLowering::emitEnumMatch(ast::MatchStmt *node, const Val &subjRaw) {
   auto *enumTy =
       ast::cast<ast::EnumType>(node->getSubject()->getResolvedType());
-  struct VariantArm {
-    ast::MatchArm *Arm;
-    int64_t Value;
-  };
-  std::vector<VariantArm> variantArms;
+  std::vector<std::pair<Val, ast::MatchArm *>> arms;
   for (ast::MatchArm *arm : node->getArms()) {
     if (arm->isWildcard())
       continue;
@@ -265,21 +301,9 @@ Val ModuleLowering::emitEnumMatch(ast::MatchStmt *node, const Val &subjRaw) {
       variant = et->getName();
     int64_t val = enumTy->findVariant(variant);
     assert(val >= 0 && "Sema should have verified the variant exists");
-    variantArms.push_back({arm, val});
+    arms.emplace_back(Val::i64(val), arm);
   }
-  ast::MatchArm *wildcard = findWildcardArm(node);
-
-  emitMatchChain(
-      variantArms.size(),
-      [&](size_t i) -> Val {
-        return B.cmp(CmpPred::Eq, subjRaw, Val::i64(variantArms[i].Value),
-                     "match.eq");
-      },
-      [&](size_t i) { emitMatchArmBody(variantArms[i].Arm); },
-      [&]() {
-        if (wildcard)
-          emitMatchArmBody(wildcard);
-      });
+  emitMatchSwitch(subjRaw, arms, findWildcardArm(node));
   return Val();
 }
 

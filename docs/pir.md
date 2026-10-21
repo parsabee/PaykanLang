@@ -271,6 +271,11 @@ Statement forms (each on its own line; blocks are `{ ... }`):
 
 ```
 if %c { ... } else { ... }          ; else optional
+switch %v {                         ; the case equal to %v, else the default
+  case 0 { ... }
+  case 2 { ... }
+  default { ... }                   ; default optional
+}
 while { ...; cond %c } { ... }      ; condition region ends with `cond`; body may break/continue
 break                               ; leave the innermost while
 continue                            ; re-enter the innermost while's condition region
@@ -279,10 +284,19 @@ unreachable                         ; after a noreturn call (panic)
 <instruction>
 ```
 
+A `switch` runs the block of the case whose constant equals its value, or
+else its `default` block (nothing, without one); a block does not fall into
+the next.  Its value is an `i64`, `char` or `bool`, every case a constant of
+that type, no two of them equal.  The lowering dispatches a `match` on an
+enum, or on integer, `char` or `bool` literals, with one; a `match` on
+floats, classes (a vtable test per arm), optionals or strings is an if-else
+chain.
+
 Nothing may follow `break`, `continue`, `ret` or `unreachable` in the same
 block.  An `if` whose `then` and `else` blocks both end that way is itself a
 terminator (nothing may follow it either, and a non-void function may end
-with one); a `while` never is.  Instructions (`%r = op ...` when they produce a value):
+with one), and so is a `switch` with a `default` whose every block does; a
+`while` never is.  Instructions (`%r = op ...` when they produce a value):
 
 **Arithmetic and comparison** (both operands the same type; `i64` or `f64`
 unless stated):
@@ -691,9 +705,12 @@ The verifier rejects a program when:
 * `break`/`continue` appear outside a `while` or in its condition region,
   or a condition region ends the function; a statement follows a
   terminator in the same block (a terminator is `break`, `continue`, `ret`,
-  `unreachable`, or an `if` whose two branches both end in one); `ret`
-  carries the wrong type; a non-void function's body can fall off the end
-  (its last statement is not a `ret`, `unreachable` or terminating `if`);
+  `unreachable`, or an `if` whose two branches, or a `switch` with a
+  `default` whose every block, end in one); `ret` carries the wrong type; a
+  non-void function's body can fall off the end (its last statement is not
+  a `ret`, `unreachable`, terminating `if` or terminating `switch`);
+* a `switch`'s value is not an `i64`, `char` or `bool`, or a case is not a
+  constant of its type or equals an earlier case;
 * a module-level symbol is defined twice, or a vtable entry's signature does not
   match the named function's declaration;
 * a runtime extern (`extern fn` without a `module`, `extern obj`, `extern

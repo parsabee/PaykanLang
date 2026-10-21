@@ -59,7 +59,8 @@ enum StmtTag : uint8_t {
   kStBreak,
   kStContinue,
   kStRet,
-  kStUnreachable
+  kStUnreachable,
+  kStSwitch
 };
 // Item tables in §5.2 order, and the least bytes one record of each takes.
 enum Table : size_t {
@@ -333,6 +334,18 @@ private:
           E.operand(*r.Value);
       }
       void operator()(const Unreachable &) const { E.W.u8(kStUnreachable); }
+      void operator()(const Switch &sw) const {
+        E.W.u8(kStSwitch);
+        E.operand(sw.Value);
+        E.W.uleb(sw.Cases.size());
+        for (const Switch::Case &c : sw.Cases) {
+          E.operand(c.Value);
+          E.block(c.Body.get());
+        }
+        E.W.u8(sw.Default ? 1 : 0);
+        if (sw.Default)
+          E.block(sw.Default.get());
+      }
     };
     std::visit(Visitor{*this}, s);
   }
@@ -781,6 +794,24 @@ private:
     case kStUnreachable:
       s = Unreachable{};
       return true;
+    case kStSwitch: {
+      Switch sw;
+      uint64_t n;
+      if (!operand(sw.Value) || !R.count(n))
+        return false;
+      // Every case takes at least two bytes: its constant and its block.
+      if (n > R.remaining() / 2)
+        return R.fail("too many switch cases");
+      sw.Cases.resize(static_cast<size_t>(n));
+      for (Switch::Case &c : sw.Cases)
+        if (!operand(c.Value) || !subBlock(c.Body))
+          return false;
+      uint8_t hasDefault;
+      if (!flag(hasDefault) || (hasDefault && !subBlock(sw.Default)))
+        return false;
+      s = std::move(sw);
+      return true;
+    }
     default:
       return R.fail("reserved statement tag", R.offset() - 1);
     }

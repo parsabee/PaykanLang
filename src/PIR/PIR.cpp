@@ -23,4 +23,16 @@ const Class *Module::findClass(const std::string &name) const {
   return nullptr;
 }
 
+bool sameConstant(const Operand &a, const Operand &b) {
+  if (a.V.index() != b.V.index())
+    return false;
+  if (const auto *x = std::get_if<int64_t>(&a.V))
+    return *x == std::get<int64_t>(b.V);
+  if (const auto *x = std::get_if<bool>(&a.V))
+    return *x == std::get<bool>(b.V);
+  if (const auto *x = std::get_if<char>(&a.V))
+    return *x == std::get<char>(b.V);
+  return false;
+}
+
 } // namespace paykan::pir

@@ -114,6 +114,17 @@ fn @main() -> i64 {
     }
   }
   %x.16 = field.load %p.2, Point.x
+  switch %x.16 {
+    case 1 {
+      store %i.0, 1
+    }
+    case 7 {
+      store %i.0, 2
+    }
+    default {
+      store %i.0, 3
+    }
+  }
   %f.17 = itof %x.16
   %g.18 = cast %f.17 to i64
   %fl.19 = sub 1.5, 2000.0
