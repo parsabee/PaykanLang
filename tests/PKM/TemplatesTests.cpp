@@ -7,7 +7,9 @@
 
 #include <gtest/gtest.h>
 
-#include <cstring>
+#include <algorithm>
+#include <cstdint>
+#include <vector>
 
 using namespace paykan::pkm;
 
@@ -54,8 +56,10 @@ TEST(Templates, RejectsWhatIsNotABlobOfThisRelease) {
   auto flags = bytes;
   flags[8] = 1;
   EXPECT_NE(error(flags).find("unknown flags"), std::string::npos);
-  auto trailing = bytes;
-  trailing.push_back(0);
+  // One byte more, allocated at that size (GCC 13's -O3 misreads a
+  // push_back on a copy as an overflow).
+  std::vector<uint8_t> trailing(bytes.size() + 1, 0);
+  std::copy(bytes.begin(), bytes.end(), trailing.begin());
   EXPECT_NE(error(trailing).find("1 trailing bytes"), std::string::npos);
   EXPECT_FALSE(error({bytes.begin(), bytes.end() - 3}).empty());
 }
