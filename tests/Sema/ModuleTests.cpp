@@ -782,7 +782,8 @@ fn main() -> int {
 }
 )");
   expectOneError(semaCheckFile(main, tmp),
-                 "module 'lib::nothere' not found (tried lib/nothere.pkn)",
+                 "module 'lib::nothere' not found (tried lib/nothere.pkn, "
+                 "lib/nothere.pkm)",
                  tmp);
   std::filesystem::remove_all(tmp);
 }

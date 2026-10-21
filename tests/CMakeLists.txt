@@ -272,6 +272,7 @@ add_executable(pkm_tests
     PKM/ContainerTests.cpp
     PKM/ManifestTests.cpp
     PKM/InterfaceTests.cpp
+    PKM/TemplatesTests.cpp
     PKM/DumpTests.cpp
 )
 target_link_libraries(pkm_tests

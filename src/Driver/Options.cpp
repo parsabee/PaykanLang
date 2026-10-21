@@ -4,6 +4,7 @@
 #include "Options.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <ostream>
 #include <string_view>
@@ -218,6 +219,8 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     if (valueOption(name, "frontend", i, argc, argv, o.Frontend, r.Error) ||
         valueOption(name, "backend", i, argc, argv, o.Backend, r.Error) ||
         valueOption(name, "section", i, argc, argv, o.PkmSection, r.Error) ||
+        valueOption(name, "module-name", i, argc, argv, o.ModuleName,
+                    r.Error) ||
         valueOption(name, "o", i, argc, argv, o.OutputPath, r.Error)) {
       if (!r.Error.empty())
         return r;
@@ -282,6 +285,33 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     if (emitC)
       o.EmitStage = "c";
   }
+  if (!o.ModuleName.empty()) {
+    if (!o.EmitPkm) {
+      r.Error = "--module-name names the module --emit-pkm writes";
+      return r;
+    }
+    // `a::b`, or `::a` for a module of the standard library: identifiers
+    // separated by `::`.
+    std::string_view rest(o.ModuleName);
+    if (rest.starts_with("::"))
+      rest.remove_prefix(2);
+    bool valid = !rest.empty();
+    for (size_t start = 0; valid && start <= rest.size();) {
+      size_t sep = std::min(rest.find("::", start), rest.size());
+      std::string_view part = rest.substr(start, sep - start);
+      valid =
+          !part.empty() && !std::isdigit(static_cast<unsigned char>(part[0]));
+      for (char c : part)
+        valid =
+            valid && (std::isalnum(static_cast<unsigned char>(c)) || c == '_');
+      start = sep + 2;
+    }
+    if (!valid) {
+      r.Error = "--module-name: '" + o.ModuleName +
+                "' is not a module name (identifiers separated by '::')";
+      return r;
+    }
+  }
   bool infoOnly =
       o.ShowHelp || o.ShowVersion || o.ListFrontends || o.ListBackends;
   if (!infoOnly && o.InputFilename.empty())
@@ -330,6 +360,9 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "                      repeatable): they define the native "
         "functions\n"
      << "  -o <file>         - Output file of `build` or `--emit-pkm`\n"
+     << "  --module-name=<name> - The module `--emit-pkm` writes "
+        "(`a::b`, or `::name`\n"
+     << "                      for a module of the standard library)\n"
      << "  -O<n>             - Optimization level (0-3, default "
      << kDefaultOptLevel << "; -O0 for debugging)\n"
      << "  --version, -v     - Print the version and exit\n"

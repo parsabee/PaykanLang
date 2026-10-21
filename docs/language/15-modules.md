@@ -516,18 +516,19 @@ Compiling a program writes the `.pkm` of every module it imports to `.paykan_cac
 the source root, named by the module's canonical name: `a::b::c` is cached as
 `.paykan_cache/a/b/c.pkm`, a system module under `.paykan_cache/@system/`. The location does
 not depend on the directory the compiler is launched from, so `paykan proj/main.pkn` and
-`cd proj && paykan main.pkn` share one cache. The main file is never cached. Nor is a module
-that declares generic classes or functions, instantiates another module's, or uses such an
-instantiation: a `.pkm` does not hold templates yet, so that module is built from its source
-every time ([Generics](13-generics.md#modules)). Every module of the standard library is one
-of these.
+`cd proj && paykan main.pkn` share one cache. The main file is never cached. A module that
+declares generic classes, structs or functions is cached with its templates, and a module that
+uses another module's holds its own copies of the instantiations it uses
+([Generics](13-generics.md#modules)).
 
 - **Validity.** An entry is used only when it was written by this very `paykan` (its version,
   its build ID and the format numbers), from exactly the current source (size and hash, never
   timestamps), and
-  against the current interface of every module it imports. Editing a function body
-  therefore rebuilds that module only; changing a class or a function signature also
+  against the current interface and templates of every module it imports. Editing a function
+  body therefore rebuilds that module only; changing a class or a function signature also
   rebuilds the modules that import it, and theirs only if their own interface changed.
+  Editing the body of a generic class, struct or function rebuilds every module that imports
+  its module, directly or not, since any of them may hold a copy of an instantiation of it.
   `--verbose` prints, for every import, which file was used or why an entry was not. The
   build ID is a hash of the compiler's sources, so two builds of one version from
   different sources do not share entries. A release has none: its version identifies it.

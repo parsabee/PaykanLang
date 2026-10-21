@@ -13,6 +13,9 @@
 #include "Names.h"
 #include "paykan/lowering/Lowering.h"
 
+#include <string_view>
+#include <variant>
+
 namespace paykan::lowering {
 
 using namespace names;
@@ -87,6 +90,7 @@ pir::Module *ProgramLowering::lowerImport(const std::string &name) {
     }
     ByCanonical[name] = &m;
     ByName[m.Name] = &m;
+    ImportsOf[name] = Resolver->dependencies(name);
     return &m;
   }
   const sema::SemaContext *modCtx = lookupImportContext(name);
@@ -109,10 +113,14 @@ pir::Module *ProgramLowering::lowerImport(const std::string &name) {
 void ModuleLowering::processImports(ast::TranslationUnit *tu) {
   // Record where this module's own classes and structs live before anything
   // references them (instantiations count as local declarations).
-  for (auto *cls : tu->getClassDecls())
+  for (auto *cls : tu->getClassDecls()) {
     PL.ClassOrigins.try_emplace(cls->getName(), Mod.Name);
-  for (auto *sd : tu->getStructDecls())
+    OwnTypes.insert(cls->getName());
+  }
+  for (auto *sd : tu->getStructDecls()) {
     PL.ClassOrigins.try_emplace(sd->getName(), Mod.Name);
+    OwnTypes.insert(sd->getName());
+  }
 
   for (auto *imp : tu->getImports()) {
     for (auto &m : imp->getModules()) {
@@ -120,6 +128,7 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
       const std::string &qualifier = m.qualifier();
       std::string canonical =
           module_name::canonicalImportName(modulePath, imp->isSystem());
+      DirectImports.push_back(canonical);
       pir::Module *defMod = PL.lowerImport(canonical);
       if (!defMod) {
         reportInternalError("lowering failed for imported module '" +
@@ -140,30 +149,194 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
     }
   }
 
-  // Instantiations of other modules' templates, once the imports (which may
-  // need the same ones) are lowered: the first module to need one emits it,
-  // and the later ones declare it extern.
-  for (auto *cls : SemaCtx.ForeignClasses)
-    if (PL.ClassOrigins.try_emplace(cls->getName(), Mod.Name).second) {
-      PL.ForeignInstantiations.insert(cls->getName());
-      ForeignClasses.push_back(cls);
+  if (!Canonical.empty())
+    PL.ImportsOf[Canonical] = DirectImports;
+
+  // Instantiations of other modules' templates: every module that uses one
+  // lowers its own copy, so its PIR is the same in every program (and its
+  // CODE can be cached); shareInstantiations keeps one per program.  The
+  // origins record the first copy for a use that is not one of this
+  // module's (noteExternUse).
+  for (auto *cls : SemaCtx.ForeignClasses) {
+    PL.ClassOrigins.try_emplace(cls->getName(), Mod.Name);
+    OwnTypes.insert(cls->getName());
+    PL.ForeignInstantiations.insert(cls->getName());
+    ForeignClasses.push_back(cls);
+  }
+  for (auto *fn : SemaCtx.ForeignFunctions) {
+    PL.FuncOrigins.try_emplace(fn->getName(), Mod.Name);
+    PL.ForeignInstantiations.insert(fn->getName());
+    ForeignFuncs.push_back(fn);
+  }
+  for (auto *sd : SemaCtx.ForeignStructs) {
+    PL.ClassOrigins.try_emplace(sd->getName(), Mod.Name);
+    OwnTypes.insert(sd->getName());
+    PL.ForeignInstantiations.insert(sd->getName());
+    ForeignStructs.push_back(sd);
+  }
+}
+
+// -- One copy of each instantiation per program
+
+namespace {
+
+/// @p name up to its first '.' outside `<...>` and `(...)` (`Box<int>.get`
+/// -> `Box<int>`), or all of it.  A function type's `->` closes nothing.
+std::string_view typePart(std::string_view name) {
+  int depth = 0;
+  for (size_t i = 0; i < name.size(); ++i) {
+    const char c = name[i];
+    if (c == '<' || c == '(')
+      ++depth;
+    else if (c == '-' && i + 1 < name.size() && name[i + 1] == '>')
+      ++i;
+    else if (c == '>' || c == ')')
+      --depth;
+    else if (c == '.' && depth == 0)
+      return name.substr(0, i);
+  }
+  return name;
+}
+
+/// The instantiation a function of a module belongs to (its name for a
+/// function instantiation `$lib::gen::f<int>`, the type's for a class or
+/// struct one's function), or "" for any other function.  A local generic
+/// function's instantiation (`first<int>`) is not one: function names are
+/// per module, and another module's `first<int>` is another function.
+std::string instantiationOf(const std::string &fn,
+                            const std::unordered_set<std::string> &types) {
+  if (fn.starts_with(kHiddenQualPrefix) && fn.find('<') != std::string::npos)
+    return fn;
+  std::string type(typePart(fn));
+  return types.count(type) ? type : std::string();
+}
+
+} // namespace
+
+void shareInstantiations(pir::Program &program) {
+  // The instantiated types: classes `Tmpl<args>`, and the types of the
+  // functions `Tmpl<args>.m` (a struct has no PIR item of its own).
+  std::unordered_set<std::string> types;
+  for (const pir::Module &m : program.Modules) {
+    for (const pir::Class &c : m.Classes)
+      if (c.Name.find('<') != std::string::npos)
+        types.insert(c.Name);
+    for (const pir::Function &f : m.Functions) {
+      std::string_view type = typePart(f.linkName());
+      if (type.size() < f.linkName().size() &&
+          type.find('<') != std::string_view::npos)
+        types.emplace(type);
     }
-  for (auto *fn : SemaCtx.ForeignFunctions)
-    if (PL.FuncOrigins.try_emplace(fn->getName(), Mod.Name).second) {
-      PL.ForeignInstantiations.insert(fn->getName());
-      ForeignFuncs.push_back(fn);
+  }
+  if (types.empty())
+    return;
+
+  // Who keeps each: the first module that defines it, imports first (the
+  // order they were lowered in), the main module last.
+  std::vector<pir::Module *> order;
+  for (size_t i = 1; i < program.Modules.size(); ++i)
+    order.push_back(&program.Modules[i]);
+  if (!program.Modules.empty())
+    order.push_back(&program.Modules.front());
+  std::unordered_map<std::string, const pir::Module *> keeper;
+  for (const pir::Module *m : order) {
+    for (const pir::Class &c : m->Classes)
+      if (!c.IsExtern && types.count(c.Name))
+        keeper.try_emplace(c.Name, m);
+    for (const pir::Function &f : m->Functions)
+      if (!f.IsExtern)
+        if (std::string inst = instantiationOf(f.Name, types); !inst.empty())
+          keeper.try_emplace(inst, m);
+  }
+  // The keeper of @p inst when it defines @p symbol (a class or function).
+  auto keptBy = [&](const std::string &inst, const std::string &symbol,
+                    bool isClass) -> const pir::Module * {
+    auto it = keeper.find(inst);
+    if (it == keeper.end())
+      return nullptr;
+    if (isClass) {
+      const pir::Class *c = it->second->findClass(symbol);
+      return c && !c->IsExtern ? it->second : nullptr;
     }
-  for (auto *sd : SemaCtx.ForeignStructs)
-    if (PL.ClassOrigins.try_emplace(sd->getName(), Mod.Name).second) {
-      PL.ForeignInstantiations.insert(sd->getName());
-      ForeignStructs.push_back(sd);
+    const pir::Function *f = it->second->findFunction(symbol);
+    return f && !f->IsExtern ? it->second : nullptr;
+  };
+
+  for (pir::Module *m : order) {
+    // A vcall names the class whose vtable it reads; once that class is an
+    // extern (whose vtable is not described) it carries the slot's
+    // signature instead, as a vcall on an imported class does.
+    std::unordered_map<std::string, std::vector<pir::VTableEntry>> vtables;
+    for (pir::Class &c : m->Classes) {
+      if (!types.count(c.Name))
+        continue;
+      const pir::Module *k = keptBy(c.Name, c.Name, /*isClass=*/true);
+      if (!k || k == m)
+        continue;
+      if (!c.IsExtern)
+        vtables[c.Name] = std::move(c.VTable);
+      c.IsExtern = true;
+      c.Module = k->Name;
+      c.VTable.clear();
     }
+    for (pir::Function &f : m->Functions) {
+      std::string inst = instantiationOf(f.linkName(), types);
+      if (inst.empty())
+        continue;
+      const pir::Module *k = keptBy(inst, f.linkName(), /*isClass=*/false);
+      if (!k || k == m)
+        continue;
+      if (f.IsExtern) {
+        f.Module = k->Name;
+        continue;
+      }
+      f.IsExtern = true;
+      f.Module = k->Name;
+      f.Symbol.clear();
+      f.Params.clear();
+      f.Locals.clear();
+      f.Body = pir::Block();
+      f.NextValueId = 1;
+    }
+    if (vtables.empty())
+      continue;
+    std::function<void(pir::Block &)> visit = [&](pir::Block &b) {
+      for (pir::Stmt &s : b.Stmts) {
+        if (auto *in = std::get_if<pir::Instr>(&s)) {
+          if (in->Op != pir::Opcode::VCall || in->ClassName.empty())
+            continue;
+          auto it = vtables.find(in->ClassName);
+          if (it == vtables.end() || in->Slot >= it->second.size())
+            continue;
+          in->Sig = it->second[in->Slot].Sig;
+          in->ClassName.clear();
+        } else if (auto *i = std::get_if<pir::If>(&s)) {
+          visit(*i->Then);
+          if (i->Else)
+            visit(*i->Else);
+        } else if (auto *w = std::get_if<pir::While>(&s)) {
+          visit(*w->CondBlock);
+          visit(*w->Body);
+        } else if (auto *sw = std::get_if<pir::Switch>(&s)) {
+          for (auto &c : sw->Cases)
+            visit(*c.Body);
+          if (sw->Default)
+            visit(*sw->Default);
+        }
+      }
+    };
+    for (pir::Function &f : m->Functions)
+      if (!f.IsExtern)
+        visit(f.Body);
+  }
 }
 
 bool lowerProgram(const sema::SemaContext &ctx, ast::TranslationUnit *tu,
                   const std::string &mainName, const std::string &projectRoot,
                   pir::Program &out, std::ostream &errs,
-                  modules::ModuleResolver *resolver) {
+                  modules::ModuleResolver *resolver, Copies copies) {
+  if (!resolver)
+    resolver = ctx.Resolver.get(); // the one Sema made
   ProgramLowering pl(ctx, projectRoot, errs, resolver);
   // The main module is lowered last (its imports first) but listed first.
   ModuleLowering ml(pl, ctx, pl.claimName(mainName));
@@ -173,6 +346,8 @@ bool lowerProgram(const sema::SemaContext &ctx, ast::TranslationUnit *tu,
   out.Modules.push_back(std::move(mainMod));
   for (auto &m : pl.Modules)
     out.Modules.push_back(std::move(m));
+  if (copies == Copies::Shared)
+    shareInstantiations(out);
   return ok;
 }
 

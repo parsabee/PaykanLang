@@ -203,10 +203,11 @@ pir::Class *ModuleLowering::getOrCreateClass(ast::ClassType *ct) {
       cls.Fields.back().Align = l.Align;
     }
   }
-  auto origin = PL.ClassOrigins.find(ct->getName());
-  if (origin != PL.ClassOrigins.end() && origin->second != Mod.Name) {
+  const std::string *origin =
+      OwnTypes.count(cls.Name) ? nullptr : typeOrigin(cls.Name);
+  if (origin && *origin != Mod.Name) {
     cls.IsExtern = true;
-    cls.Module = origin->second;
+    cls.Module = *origin;
     noteExternUse(cls.Name);
   }
   ClassByName[cls.Name] = &cls;

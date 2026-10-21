@@ -9,6 +9,7 @@
 
 #include "Internal.h"
 #include "paykan/pkm/Interface.h"
+#include "paykan/pkm/Templates.h"
 
 #include <cstdio>
 #include <ostream>
@@ -121,8 +122,9 @@ void dumpManifest(const Manifest &m, std::ostream &os) {
      << m.Core.Minor << "." << m.Core.Patch << " prerelease "
      << quoted(m.Core.Prerelease) << " build " << quoted(m.Core.Build) << "\n";
   os << "  format_versions iface " << versionString(m.Formats.IfaceVersion)
-     << " tmpl " << m.Formats.TmplVersion << " pir "
-     << versionString(m.Formats.PirVersion) << " code_encoding "
+     << " tmpl "
+     << (m.Formats.TmplVersion ? versionString(m.Formats.TmplVersion) : "0")
+     << " pir " << versionString(m.Formats.PirVersion) << " code_encoding "
      << m.Formats.CodeEncoding << " debug " << m.Formats.DebugVersion << "\n";
   os << "  runtime_abi " << versionString(m.RuntimeAbi) << "\n";
   os << "  target pointer " << unsigned(m.Target.PointerSize) << " slot "
@@ -218,6 +220,33 @@ void dumpBinary(const File &f, std::ostream &os, Kind k, const char *name) {
        << hex(support::sha256(bytes)) << "\n";
 }
 
+/// The TMPL blob's framing, and with @p text the bodies' interchange text.
+void dumpTmpl(const File &f, std::ostream &os, bool text) {
+  std::span<const uint8_t> bytes = f.section(Kind::Tmpl);
+  if (bytes.empty()) {
+    os << "tmpl: absent\n";
+    return;
+  }
+  os << "tmpl: " << bytes.size() << " B, sha256 " << hex(support::sha256(bytes))
+     << "\n";
+  StatusOr<Templates> read = readTemplates(bytes);
+  if (!read) {
+    os << "  (does not decode: " << read.status().message() << ")\n";
+    return;
+  }
+  const Templates *t = &*read;
+  os << "  file " << quoted(t->File) << "\n  uses " << t->Uses.size() << "\n";
+  for (const std::string &u : t->Uses)
+    os << "    " << u << "\n";
+  os << "  impls " << t->Impls.size() << "\n";
+  for (const Templates::Impl &im : t->Impls)
+    os << "    "
+       << (im.Kind == Templates::OwnerKind::Class ? "class " : "struct ")
+       << im.Owner << "\n";
+  if (text)
+    os << "  ast " << t->Ast.size() << " B\n" << t->Ast;
+}
+
 void dumpPayloads(const File &f, std::ostream &os) {
   os << "payloads " << f.count(Kind::Payload) << "\n";
   for (const SectionEntry &e : f.sections())
@@ -239,10 +268,10 @@ void dump(const File &f, std::ostream &os, const DumpOptions &opts) {
     dumpManifest(f.manifest(), os);
   if (all || w == Section::Iface)
     dumpIface(f, os);
-  if (all) {
-    dumpBinary(f, os, Kind::Tmpl, "tmpl");
+  if (all || w == Section::Tmpl)
+    dumpTmpl(f, os, w == Section::Tmpl);
+  if (all)
     dumpBinary(f, os, Kind::Code, "code");
-  }
   if (all || w == Section::SymIdx)
     dumpBinary(f, os, Kind::SymIdx, "symidx");
   if (all)

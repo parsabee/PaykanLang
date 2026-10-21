@@ -271,14 +271,16 @@ int pkmTool(const Options &opts) {
     dopts.Which = S::Sections;
   else if (sec == "iface")
     dopts.Which = S::Iface;
+  else if (sec == "tmpl")
+    dopts.Which = S::Tmpl;
   else if (sec == "symidx")
     dopts.Which = S::SymIdx;
   else if (sec == "payloads")
     dopts.Which = S::Payloads;
   else if (!codeOnly)
     return fail("unknown section '" + sec +
-                "' (expected manifest, sections, iface, code, symidx, "
-                "payloads or all)");
+                "' (expected manifest, sections, iface, tmpl, code, "
+                "symidx, payloads or all)");
   if (!codeOnly)
     pkm::dump(*file, std::cout, dopts);
   bool ok = true;
@@ -297,11 +299,19 @@ int pkmTool(const Options &opts) {
 /// (`geometry/shapes.pkn`, run from the project root), the module is named
 /// by that path (`geometry::shapes`) and the root is the current directory,
 /// so the file is what an importer of `geometry::shapes` expects.
+/// --module-name names it outright (the standard library's build names its
+/// modules `::name`).
 void mainModuleIdentity(const Options &opts, std::string &name,
                         std::string &projectRoot) {
   std::filesystem::path input(opts.InputFilename);
   name = paykan::module_name::mainModuleName(opts.InputFilename);
   projectRoot = input.parent_path().string();
+  if (!opts.ModuleName.empty()) {
+    // --module-name: as given (its imports still resolve against the
+    // file's directory).
+    name = opts.ModuleName;
+    return;
+  }
   if (!opts.EmitPkm || input.is_absolute() || !input.has_parent_path())
     return;
   std::string nested;
@@ -506,9 +516,13 @@ int main(int argc, char *argv[]) {
   // Every backend reads PIR: lower the program (the single home of the
   // ownership semantics), verify it, and hand it over.  --emit-pir prints it
   // instead.
+  // Each module keeps its own copies of the instantiations it uses until the
+  // cache entries (and --emit-pkm's file) are written: those must not
+  // depend on this program.
   paykan::pir::Program program;
   if (!paykan::lowering::lowerProgram(semaCtx, root, mainName, projectRoot,
-                                      program, std::cerr, &resolver))
+                                      program, std::cerr, &resolver,
+                                      paykan::lowering::Copies::PerModule))
     return fail("lowering to PIR failed");
   auto errors = paykan::pir::verify(program);
   if (opts.EmitPkm) {
@@ -534,14 +548,31 @@ int main(int argc, char *argv[]) {
       for (auto &m : imp->getModules())
         deps.push_back(paykan::module_name::canonicalImportName(
             imp->modulePath(m), imp->isSystem()));
+    // Its templates, for importers to instantiate without its source.
+    std::vector<uint8_t> templates;
+    if (auto mt = sema.exportTemplates(root, mainName)) {
+      mt->File = resolver.relativeToRoot(opts.InputFilename);
+      std::string why;
+      templates = paykan::sema::Sema::encodeTemplates(*mt, why);
+      if (templates.empty())
+        return fail("cannot write the templates of " + opts.InputFilename +
+                    ": " + why);
+    }
     paykan::Status s = resolver.writeModuleFile(
         out, mainName,
         paykan::sema::Sema::toInterface(sema.exportModuleInfo(root, mainName)),
-        std::move(deps), opts.InputFilename, program.Modules.front());
+        std::move(deps), opts.InputFilename, program.Modules.front(),
+        templates);
     if (!s)
       return fail("cannot write " + out.string() + ": " + s.message());
     return EXIT_SUCCESS;
   }
+  // The program runs with one copy of each instantiation.
+  paykan::lowering::shareInstantiations(program);
+  errors = paykan::pir::verify(program);
+  if (!errors.empty())
+    return fail("PIR verification failed:\n" +
+                paykan::pir::formatErrors(errors));
   if (opts.EmitPIR) {
     paykan::pir::print(program, std::cout);
     std::cout.flush();

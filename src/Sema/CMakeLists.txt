@@ -18,5 +18,6 @@ target_link_libraries(paykan_sema
     PUBLIC  paykan_diag
             paykan_frontend
             paykan_modules
-    PRIVATE paykan_compile_options
+    PRIVATE paykan_ast_interchange
+            paykan_compile_options
 )

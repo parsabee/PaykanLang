@@ -74,6 +74,8 @@ struct ProgramLowering {
   /// The instantiations of other modules' templates (classes and
   /// functions), each emitted by the first module lowered that needs it.
   std::unordered_set<std::string> ForeignInstantiations;
+  /// Each lowered or loaded module's direct imports, by canonical name.
+  std::unordered_map<std::string, std::vector<std::string>> ImportsOf;
   /// Every SemaContext reachable from Top, keyed by canonical module name.
   std::unordered_map<std::string, const sema::SemaContext *> Contexts;
   bool Indexed = false;
@@ -136,6 +138,10 @@ private:
   std::vector<ast::ClassDecl *> ForeignClasses;
   std::vector<ast::FuncDecl *> ForeignFuncs;
   std::vector<ast::StructDecl *> ForeignStructs;
+  /// The classes and structs this module defines: its own, and its copies
+  /// of other modules' instantiations (which another module may have
+  /// defined first: ProgramLowering::ClassOrigins).
+  std::unordered_set<std::string> OwnTypes;
 
   pir::Module Mod;
   /// Functions in declaration order with stable addresses (the module vector
@@ -283,10 +289,24 @@ private:
                                    const std::string &modulePath,
                                    const std::string &localName);
   /// This module uses @p name, declared extern: when it is an instantiation
-  /// of another module's template, the module that emits it is this
-  /// program's choice, so this module is not cached (docs/design/pkm.md
-  /// §4.8).
+  /// of another module's template that no dependency of this module has a
+  /// copy of (typeOrigin), the module that emits it is this program's
+  /// choice, so this module is not cached (docs/design/pkm.md §4.8).
   void noteExternUse(const std::string &name);
+  /// The module whose class or struct @p type this module's externs name,
+  /// or null.  For an instantiation (`Box<int>`) that is the first of this
+  /// module's dependencies, nearest first, whose PIR has a copy of it:
+  /// every program this module is in has that module, so this module's PIR
+  /// does not depend on the program.  Otherwise, and for an instantiation
+  /// no dependency has, it is the module that defines it in this program.
+  const std::string *typeOrigin(const std::string &type);
+  /// The instantiations typeOrigin found in a dependency.
+  std::unordered_set<std::string> DependencyOrigins;
+  /// typeOrigin's answers (pointers into module names and ClassOrigins,
+  /// which do not move).
+  std::unordered_map<std::string, const std::string *> TypeOrigins;
+  /// The canonical names of the modules this one imports, in import order.
+  std::vector<std::string> DirectImports;
 
   /// Call a runtime function by its C symbol.
   Val callRuntime(const std::string &symbol, const std::vector<Val> &args,

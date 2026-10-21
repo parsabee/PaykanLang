@@ -32,8 +32,10 @@ struct Lowered {
 };
 
 /// Parse, check, lower, verify and print @p source (@p projectRoot for
-/// imports).
-Lowered lower(const std::string &source, const std::string &projectRoot = "") {
+/// imports), the instantiations of other modules' templates as @p copies
+/// says.
+Lowered lower(const std::string &source, const std::string &projectRoot = "",
+              lowering::Copies copies = lowering::Copies::Shared) {
   Lowered l;
   auto [parseOk, driver] = parse(source);
   if (!parseOk) {
@@ -51,7 +53,7 @@ Lowered lower(const std::string &source, const std::string &projectRoot = "") {
   }
   std::ostringstream errs;
   if (!lowering::lowerProgram(ctx, driver->getRoot(), "main", projectRoot,
-                              l.Program, errs)) {
+                              l.Program, errs, nullptr, copies)) {
     l.Error = "lowering failed: " + errs.str();
     return l;
   }
@@ -1391,6 +1393,63 @@ TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
                    "\"lib::gen\" symbol @_h\n"),
             std::string::npos)
       << t;
+}
+
+// Before they are shared, every module that uses an instantiation of another
+// module's template has a copy of its own, so its PIR is the same in every
+// program (docs/design/pkm.md §4.8); shareInstantiations keeps the first
+// (imports first, the main module last) and makes the others externs of it,
+// a vcall on the class naming the slot's signature instead.
+TEST(Lowering, EveryModuleLowersItsOwnCopiesUntilShared) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("lowering_generic_copies_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir / "lib");
+  std::ofstream(dir / "lib" / "gen.pkn")
+      << "class Box<T> { v: T; "
+         "view fn n() -> int { return 1; } }\n"
+         "impl Box<T> { fn __init__(v: T) { self.v = v; } }\n"
+         "fn first<T>(xs: view T[]) -> T { return xs[0]; }\n";
+  for (const char *m : {"a", "b"})
+    std::ofstream(dir / (std::string(m) + ".pkn"))
+        << "import lib::gen;\n"
+           "fn "
+        << m
+        << "() -> int { b = gen::Box<Str>(\"s\"); "
+           "return b.n() + gen::first<int>([1]); }\n";
+  const std::string main =
+      "import lib::gen; import a; import b;\n"
+      "fn main() -> int { b = gen::Box<Str>(\"m\");\n"
+      "  return b.n() + gen::first<int>([2]) + a::a() + b::b(); }\n";
+  auto copies = lower(main, dir.string(), lowering::Copies::PerModule);
+  auto shared = lower(main, dir.string());
+  std::filesystem::remove_all(dir);
+  ASSERT_TRUE(copies.Ok) << copies.Error;
+  ASSERT_TRUE(shared.Ok) << shared.Error;
+  // `a` and `b` make their own; the main module may use one its imports
+  // have, which every program it is in has too.
+  for (const pir::Module &m : copies.Program.Modules) {
+    if (m.Name == "lib::gen")
+      continue;
+    const pir::Class *box = m.findClass("Box<Str>");
+    const pir::Function *first = m.findFunction("$lib::gen::first<int>");
+    ASSERT_TRUE(box && first) << m.Name;
+    if (m.Name == "main") {
+      EXPECT_TRUE(!box->IsExtern || box->Module == "a" || box->Module == "b");
+      EXPECT_TRUE(!first->IsExtern || first->Module == "a" ||
+                  first->Module == "b");
+    } else {
+      EXPECT_FALSE(box->IsExtern) << m.Name;
+      EXPECT_FALSE(first->IsExtern) << m.Name;
+    }
+  }
+  lowering::shareInstantiations(copies.Program);
+  std::ostringstream os;
+  pir::print(copies.Program, os);
+  EXPECT_EQ(os.str(), shared.Text);
+  EXPECT_TRUE(pir::verify(copies.Program).empty());
+  EXPECT_EQ(count(shared.Text, "\nclass Box<Str> {"), 1u) << shared.Text;
+  EXPECT_NE(shared.Text.find(": (obj) -> i64 ["), std::string::npos)
+      << shared.Text;
 }
 
 TEST(Lowering, CanonicalModuleNameHelpers) {

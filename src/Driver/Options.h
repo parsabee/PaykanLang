@@ -58,6 +58,10 @@ struct Options {
 
   /// -o <file>: the output of `build` or `--emit-pkm`.
   std::string OutputPath;
+  /// --module-name=<name>: the canonical name of the module `--emit-pkm`
+  /// writes (`geometry::shapes`, or `::collections` for a module of the
+  /// standard library), instead of the one its path gives it.
+  std::string ModuleName;
   /// The mlir backend's source output (its EmitOptions::SourceStage): the
   /// stage of the MLIR pipeline --emit-mlir=<stage> names, "c" for --emit-c,
   /// empty for its LLVM IR (--emit-llvm, --emit-source).
