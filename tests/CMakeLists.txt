@@ -250,11 +250,12 @@ if(PAYKAN_TEST_SUITE_pir_mlir)
     add_test(NAME PIRMLIRTests COMMAND pir_mlir_tests)
 endif()
 
-# --- PIR tests: printer, parser, verifier, binary codec (pir) ------------------------------
+# --- PIR tests: printer, parser, verifier, binary codec, passes (pir) ---------------------
 paykan_test_suite(pir PAYKAN_TEST_SUITE_pir)
 if(PAYKAN_TEST_SUITE_pir)
 add_executable(pir_tests
     PIR/BinaryTests.cpp
+    PIR/DeadCodeTests.cpp
     PIR/PIRTests.cpp
 )
 target_link_libraries(pir_tests
@@ -273,6 +274,7 @@ add_executable(pkm_tests
     PKM/ManifestTests.cpp
     PKM/InterfaceTests.cpp
     PKM/TemplatesTests.cpp
+    PKM/ObjectTests.cpp
     PKM/DumpTests.cpp
 )
 target_link_libraries(pkm_tests
@@ -289,6 +291,7 @@ paykan_test_suite(lowering PAYKAN_TEST_SUITE_lowering)
 if(PAYKAN_TEST_SUITE_lowering)
 add_executable(lowering_tests
     Lowering/LoweringTests.cpp
+    Lowering/ModuleCodeTests.cpp
     Lowering/RoundTripTests.cpp
 )
 target_include_directories(lowering_tests
@@ -300,6 +303,7 @@ target_compile_definitions(lowering_tests
 target_link_libraries(lowering_tests
     PRIVATE gtest_main
             paykan_lowering
+            paykan_modules
             paykan_pir
             paykan_sema
             paykan_frontend

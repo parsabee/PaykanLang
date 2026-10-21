@@ -18,6 +18,7 @@
 #include "paykan/pkm/File.h"
 #include "paykan/pkm/Interface.h"
 #include "paykan/pkm/Manifest.h"
+#include "paykan/pkm/Object.h"
 
 #include <filesystem>
 #include <iosfwd>
@@ -47,6 +48,14 @@ struct ResolverOptions {
   /// --verbose: one line per import (file, verdict, reason), and one per
   /// file written.
   std::ostream *Verbose = nullptr;
+  /// The compiled code the active backend makes and links (an OBJ
+  /// section's backend, format, target and producer; docs/design/pkm.md
+  /// §5.13): a cache entry whose code another backend compiled is stale.
+  /// An empty Backend: the backend compiles no module, so any cache entry
+  /// with compiled code is.  Unset: no code is generated (--check-only),
+  /// and any will do.  A prebuilt file is used whoever compiled it (the
+  /// backend reports one it cannot link).
+  std::optional<pkm::Object> CompiledBy;
 };
 
 /// The answer to resolve() (§8.1 DECIDE).
@@ -117,27 +126,39 @@ public:
   dependencies(const std::string &canonical) const;
   /// The PIR of a Loaded module: CODE decoded and verified (§8.4 step 5).
   StatusOr<pir::Module> loadCode(const std::string &canonical) const;
+  /// The compiled code of a Loaded module (its OBJ section), or null when
+  /// its CODE is all of it.
+  const pkm::Object *object(const std::string &canonical) const;
   /// The TMPL section of a Loaded module (empty when it has none).
   std::span<const uint8_t> templates(const std::string &canonical) const;
   /// The file a diagnostic names for a Loaded module (project-relative).
   std::string displayPath(const std::string &canonical) const;
 
-  /// After the program verified: write the cache entry of every module
-  /// built from source whose pir::Module is in @p program.  A failure to
-  /// write is reported on Verbose and otherwise ignored (the cache is only a
-  /// cache).
-  void writeCache(const pir::Program &program);
+  /// The modules built from source whose cache entries are to be written
+  /// once the program verified (none when the cache is not written), and
+  /// the interface of each.
+  std::vector<std::string> cacheable() const;
+  const pkm::Interface *builtInterface(const std::string &canonical) const;
+
+  /// Write the cache entry of @p canonical, one of cacheable(): @p code is
+  /// its CODE, @p object its compiled code (null when CODE is all of it).
+  /// A failure to write is reported on Verbose and otherwise ignored (the
+  /// cache is only a cache).
+  void writeCacheEntry(const std::string &canonical, const pir::Module &code,
+                       const pkm::Object *object);
 
   /// --emit-pkm: the file of module @p canonical (the main module) at
-  /// @p out, from its exports, its direct imports, its source, its lowered
-  /// module and its TMPL section (empty when it has no templates).
-  /// Portable: MANIFEST, IFACE, TMPL, CODE and SYMIDX.
+  /// @p out, from its exports, its direct imports, its source, its CODE,
+  /// its TMPL section (empty when it has no templates) and its compiled
+  /// code (null when CODE is all of it): MANIFEST, IFACE, TMPL, CODE, OBJ
+  /// and SYMIDX.
   Status writeModuleFile(const std::filesystem::path &out,
                          const std::string &canonical, pkm::Interface iface,
                          std::vector<std::string> deps,
                          const std::filesystem::path &source,
-                         const pir::Module &module,
-                         std::span<const uint8_t> templates = {});
+                         const pir::Module &code,
+                         std::span<const uint8_t> templates = {},
+                         const pkm::Object *object = nullptr);
 
   /// @p path relative to the project root when it lies under it, as given
   /// otherwise (the same rule as Sema's diagnostics).
@@ -162,7 +183,8 @@ private:
   encodeFile(const std::string &canonical, const pkm::Interface &iface,
              const std::vector<std::string> &deps,
              std::span<const uint8_t> sourceBytes, const pir::Module &module,
-             std::span<const uint8_t> templates) const;
+             std::span<const uint8_t> templates,
+             const pkm::Object *object) const;
   std::filesystem::path cachePath(const std::string &canonical) const;
   void log(const std::string &line) const;
 

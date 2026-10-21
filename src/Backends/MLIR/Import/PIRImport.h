@@ -24,6 +24,10 @@ void loadImportDialects(mlir::MLIRContext &ctx);
 StatusOr<mlir::OwningOpRef<mlir::ModuleOp>>
 importModule(const pir::Program &program, size_t index, mlir::MLIRContext &ctx);
 
+/// @p module alone (the program's main module when @p isMain).
+StatusOr<mlir::OwningOpRef<mlir::ModuleOp>>
+importModule(const pir::Module &module, bool isMain, mlir::MLIRContext &ctx);
+
 /// Every module of @p program (main module first), each a nested module of
 /// the result.
 StatusOr<mlir::OwningOpRef<mlir::ModuleOp>>

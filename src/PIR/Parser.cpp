@@ -595,7 +595,10 @@ private:
         m.Bytes.push_back(std::move(g));
       } else if (isWord("extern")) {
         advance();
-        if (isWord("obj") || isWord("vtable")) {
+        const bool shared = isWord("shared");
+        if (shared)
+          advance();
+        if (!shared && (isWord("obj") || isWord("vtable"))) {
           ExternGlobal g;
           g.K = isWord("obj") ? ExternGlobal::Object : ExternGlobal::VTable;
           advance();
@@ -606,6 +609,7 @@ private:
           advance();
           Function f;
           f.IsExtern = true;
+          f.Shared = shared;
           if (!parseSymbol(f.Name) || !parseSignature(f.Sig))
             return false;
           // The optional `module "<name>"` clause is on the declaration's
@@ -622,33 +626,47 @@ private:
             if (!parseSymbol(f.Symbol))
               return false;
           }
+          // `uses @a, @b`: a compiled declaration's references.
+          if (isWord("uses") && Cur.Line == PrevLine && !parseUses(f.Uses))
+            return false;
           m.Functions.push_back(std::move(f));
         } else if (isWord("class")) {
           advance();
           Class c;
           c.IsExtern = true;
+          c.Shared = shared;
           if (!parseClass(c))
             return false;
           m.Classes.push_back(std::move(c));
         } else {
-          return error("expected 'obj', 'vtable', 'fn' or 'class' after "
-                       "'extern'");
+          return error(shared ? "expected 'fn' or 'class' after 'shared'"
+                              : "expected 'obj', 'vtable', 'fn' or 'class' "
+                                "after 'extern'");
         }
-      } else if (isWord("class")) {
-        advance();
-        Class c;
-        if (!parseClass(c))
-          return false;
-        m.Classes.push_back(std::move(c));
-      } else if (isWord("fn")) {
-        advance();
-        Function f;
-        if (!parseFunction(f))
-          return false;
-        m.Functions.push_back(std::move(f));
+      } else if (isWord("class") || isWord("fn") || isWord("shared")) {
+        const bool shared = isWord("shared");
+        if (shared)
+          advance();
+        if (isWord("class")) {
+          advance();
+          Class c;
+          c.Shared = shared;
+          if (!parseClass(c))
+            return false;
+          m.Classes.push_back(std::move(c));
+        } else if (isWord("fn")) {
+          advance();
+          Function f;
+          f.Shared = shared;
+          if (!parseFunction(f))
+            return false;
+          m.Functions.push_back(std::move(f));
+        } else {
+          return error("expected 'fn' or 'class' after 'shared'");
+        }
       } else {
         return error("expected a module item ('cstr', 'data', 'bytes', "
-                     "'extern', 'class' or 'fn')");
+                     "'extern', 'shared', 'class' or 'fn')");
       }
     }
     return resolveFixups(m);
@@ -700,6 +718,20 @@ private:
       }
     }
     advance();
+    return true;
+  }
+
+  /// `uses @a, @b, ...` (at `uses`).
+  bool parseUses(std::vector<std::string> &uses) {
+    advance();
+    do {
+      if (!uses.empty())
+        advance(); // ','
+      std::string name;
+      if (!parseSymbol(name))
+        return false;
+      uses.push_back(std::move(name));
+    } while (Cur.Kind == Tok::Comma);
     return true;
   }
 

@@ -31,6 +31,7 @@ enum class Kind : uint32_t {
   Code = 0x0200,
   SymIdx = 0x0201,
   Debug = 0x0202,
+  Object = 0x0203,
   Payload = 0x0210,
 };
 

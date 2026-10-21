@@ -37,10 +37,12 @@ constexpr uint8_t kIndexTrailer[4] = {'Y', 'S', 'K', 'P'};
 // bit is reserved for a later ticket and must be zero.
 constexpr uint32_t kKnownModuleFlags = kFlagNamesStripped | kFlagDefinesMain;
 constexpr uint32_t kFnExtern = 1u << 0, kFnHasModule = 1u << 1,
-                   kFnHasSymbol = 1u << 2;
-constexpr uint32_t kKnownFnFlags = kFnExtern | kFnHasModule | kFnHasSymbol;
-constexpr uint32_t kClassExtern = 1u << 0;
-constexpr uint32_t kKnownClassFlags = kClassExtern;
+                   kFnHasSymbol = 1u << 2, kFnShared = 1u << 3,
+                   kFnHasUses = 1u << 4;
+constexpr uint32_t kKnownFnFlags =
+    kFnExtern | kFnHasModule | kFnHasSymbol | kFnShared | kFnHasUses;
+constexpr uint32_t kClassExtern = 1u << 0, kClassShared = 1u << 1;
+constexpr uint32_t kKnownClassFlags = kClassExtern | kClassShared;
 
 enum OperandKind : uint8_t {
   kOpValue,
@@ -107,7 +109,7 @@ constexpr bool predFromCode(uint8_t c, CmpPred &out) {
 
 bool definesMain(const Module &m) {
   for (const Function &f : m.Functions)
-    if (!f.IsExtern && f.Name == "main")
+    if (m.defines(f) && f.Name == "main")
       return true;
   return false;
 }
@@ -357,12 +359,15 @@ private:
     W = ByteWriter();
     str(f.Name);
     W.u32((f.IsExtern ? kFnExtern : 0) | (f.Module.empty() ? 0 : kFnHasModule) |
-          (f.Symbol.empty() ? 0 : kFnHasSymbol));
+          (f.Symbol.empty() ? 0 : kFnHasSymbol) | (f.Shared ? kFnShared : 0) |
+          (f.Uses.empty() ? 0 : kFnHasUses));
     sig(f.Sig);
     if (!f.Module.empty())
       str(f.Module);
     if (!f.Symbol.empty())
       str(f.Symbol);
+    if (!f.Uses.empty())
+      uses(f.Uses);
     if (!f.IsExtern) {
       W.uleb(0); // nConventions (#98)
       W.uleb(f.Params.size());
@@ -385,9 +390,16 @@ private:
     W.bytes(rec);
   }
 
+  /// `uleb n, n × str`.
+  void uses(const std::vector<std::string> &names) {
+    W.uleb(names.size());
+    for (const std::string &n : names)
+      str(n);
+  }
+
   void klass(const Class &c) {
     str(c.Name);
-    W.u32(c.IsExtern ? kClassExtern : 0);
+    W.u32((c.IsExtern ? kClassExtern : 0) | (c.Shared ? kClassShared : 0));
     str(c.Super);
     if (c.IsExtern)
       str(c.Module);
@@ -454,6 +466,20 @@ public:
     return true;
   }
 
+  /// `uleb n, n × str`, at least one.
+  bool uses(std::vector<std::string> &names) {
+    uint64_t n;
+    if (!R.count(n))
+      return false;
+    if (n == 0)
+      return R.fail("an empty uses list is written as none");
+    names.resize(static_cast<size_t>(n));
+    for (std::string &name : names)
+      if (!nonEmpty(name, "use"))
+        return false;
+    return true;
+  }
+
   bool klass(Class &c) {
     uint32_t flags;
     uint64_t n;
@@ -462,6 +488,7 @@ public:
     if (flags & ~kKnownClassFlags)
       return R.fail("reserved class flag", R.offset() - 4);
     c.IsExtern = (flags & kClassExtern) != 0;
+    c.Shared = (flags & kClassShared) != 0;
     if (!str(c.Super) || (c.IsExtern && !str(c.Module)))
       return false;
     if (!R.count(n, 2))
@@ -488,6 +515,7 @@ public:
     if (flags & ~kKnownFnFlags)
       return R.fail("reserved function flag", R.offset() - 4);
     f.IsExtern = (flags & kFnExtern) != 0;
+    f.Shared = (flags & kFnShared) != 0;
     if (!bodies)
       return true;
     if (!sig(f.Sig))
@@ -495,6 +523,8 @@ public:
     if ((flags & kFnHasModule) && !nonEmpty(f.Module, "module"))
       return false;
     if ((flags & kFnHasSymbol) && !nonEmpty(f.Symbol, "symbol"))
+      return false;
+    if ((flags & kFnHasUses) && !uses(f.Uses))
       return false;
     if (f.IsExtern)
       return true;

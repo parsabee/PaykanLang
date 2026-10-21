@@ -28,6 +28,8 @@ inline constexpr uint32_t kContentsHasMain = 1 << 2;
 inline constexpr uint32_t kContentsSystem = 1 << 3;
 inline constexpr uint32_t kContentsHasStaticInit = 1 << 4;
 inline constexpr uint32_t kContentsExportsC = 1 << 5;
+/// The module's code is compiled (the OBJ section); CODE declares it.
+inline constexpr uint32_t kContentsHasObject = 1 << 6;
 
 /// `Dep.flags` bits (§2.3).
 inline constexpr uint32_t kDepSystem = 1 << 0;

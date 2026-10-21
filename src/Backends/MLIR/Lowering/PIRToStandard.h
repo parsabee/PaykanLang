@@ -27,15 +27,22 @@ inline constexpr const char *kMainModuleAttr = "pir.main";
 /// has none: it is declared from its signature.
 inline constexpr const char *kRuntimeAttr = "pir.runtime";
 
+/// The attribute the import puts on a shared function or class (an
+/// instantiation of a template, pir::Function::Shared): it links under a
+/// name of its own, whichever module holds the copy a program keeps.
+inline constexpr const char *kSharedAttr = "pir.shared";
+
 /// The link name of the symbol @p name of PIR module @p module, the same in
 /// every module of the program: `pk_<module>_S<name>`, both parts escaped
 /// so the result is a C identifier and no two (module, name) pairs share
 /// one (letters and digits stay, `_` becomes `__`, any other byte `_` and
-/// its two hex digits).
+/// its two hex digits).  A shared symbol's has no module: `pk__S<name>`
+/// (an escaped module never starts `_S`).
 std::string linkName(llvm::StringRef module, llvm::StringRef name);
 
 /// The vtable symbol of class @p name of PIR module @p module:
-/// `pkvt_<module>_S<class>`, escaped as linkName().
+/// `pkvt_<module>_S<class>`, escaped as linkName() (a shared class's has no
+/// module).
 std::string vtableName(llvm::StringRef module, llvm::StringRef name);
 
 /// Lower @p module, one imported PIR module (Import/PIRImport.h), in place.

@@ -174,7 +174,7 @@ StatusOr<std::unique_ptr<llvm::Module>>
 compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
                const std::string &moduleName, const std::string &projectRoot,
                const ModuleCache &cache, const ModuleText &text,
-               const TranslateModule &translate) {
+               const TranslateModule &translate, const CompiledCode &compiled) {
   if (program.Modules.empty())
     return Status::error("empty PIR program");
   std::vector<std::unique_ptr<llvm::Module>> parts;
@@ -200,7 +200,33 @@ compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
       return part.status();
     parts.push_back(std::move(*part));
   }
-  return linkModules(program, std::move(parts), moduleName);
+  auto linked = linkModules(program, std::move(parts), moduleName);
+  if (!linked)
+    return linked;
+  // A module is linked after every module that may call it (the program
+  // lists a module after the modules it imports), so what it is asked for
+  // is known when it is linked.
+  for (size_t i = program.Modules.size(); compiled && i-- > 1;) {
+    std::span<const uint8_t> bytes = compiled(i);
+    if (bytes.empty())
+      continue;
+    const std::string &name = program.Modules[i].Name;
+    llvm::StringRef buffer(reinterpret_cast<const char *>(bytes.data()),
+                           bytes.size());
+    auto code =
+        llvm::parseBitcodeFile(llvm::MemoryBufferRef(buffer, name), ctx);
+    if (!code) {
+      std::string msg = "the compiled code of module '" + name;
+      msg += "' does not read: ";
+      msg += llvm::toString(code.takeError());
+      return Status::error(msg);
+    }
+    if (llvm::Linker::linkModules(**linked, std::move(*code),
+                                  llvm::Linker::Flags::LinkOnlyNeeded))
+      return Status::error("failed to link the compiled code of module '" +
+                           name + "'");
+  }
+  return linked;
 }
 
 void optimizeModule(llvm::Module &module, unsigned level) {

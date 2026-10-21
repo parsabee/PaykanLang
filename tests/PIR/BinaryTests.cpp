@@ -564,7 +564,7 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
   // A reserved function flag bit.
   {
     std::vector<uint8_t> b = good;
-    b[rec + 2] |= 0x08; // flags bit 3: linkage hidden
+    b[rec + 2] |= 0x20; // flags bit 5
     EXPECT_FALSE(binary::decode(b).isOk());
   }
   // Slack: one extra byte inside the record, length adjusted.

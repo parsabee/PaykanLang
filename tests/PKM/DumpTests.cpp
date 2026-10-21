@@ -79,6 +79,7 @@ iface:
     method sum() -> int flags 0x6
 tmpl: absent
 code: 21 B, sha256 31635559fa224a2c41eac6c6a0ecf6e9b08ee0747deaf38cbf2f08365f54f4c6
+obj: absent
 symidx: 6 B, sha256 12643e6ba7fdc1f1e76eb68141e5d02904f35ea9e64b4094bcd2ada3e44e990f
 debug: absent
 payloads 2

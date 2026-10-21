@@ -16,17 +16,24 @@
 #include "paykan/PluginLoader.h"
 #include "paykan/ast/Interchange.h"
 #include "paykan/lowering/Lowering.h"
+#include "paykan/modules/ModuleCode.h"
 #include "paykan/modules/ModuleResolver.h"
 #include "paykan/pir/Binary.h"
+#include "paykan/pir/DeadCode.h"
+#include "paykan/pir/Pass.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
 #include "paykan/pkm/Dump.h"
 #include "paykan/pkm/File.h"
+#include "paykan/pkm/Object.h"
 #include "paykan/plugin_api.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -35,6 +42,58 @@ using paykan::driver::Options;
 using paykan::driver::PkmVerb;
 
 namespace {
+
+namespace pkm = paykan::pkm;
+
+/// A module's compiled code as the backend interface has it, and as a
+/// `.pkm`'s OBJ section does.
+paykan::backend::ModuleObject toBackend(const pkm::Object &o) {
+  return {o.Backend, o.Format, o.Target, o.Producer, o.Bytes};
+}
+pkm::Object toPkm(const paykan::backend::ModuleObject &o) {
+  return {o.Backend, o.Format, o.Target, o.Producer, o.Bytes};
+}
+
+/// A copy of @p m (a module holds its blocks by unique_ptr): the binary
+/// form round-trips every module the verifier accepts.
+paykan::pir::Module copyOf(const paykan::pir::Module &m) {
+  auto copy = paykan::pir::binary::decode(paykan::pir::binary::encode(m));
+  return copy ? std::move(*copy) : paykan::pir::Module();
+}
+
+/// What a module's `.pkm` holds of its code (docs/design/pkm.md §5.13).
+struct WrittenCode {
+  paykan::pir::Module Code;
+  std::optional<paykan::backend::ModuleObject> Object;
+};
+
+/// @p module (as lowered) trimmed to what it and its importers (whose view
+/// of it is @p iface) reach, and with a backend that compiles modules,
+/// split into its CODE and the code @p backend compiles.
+paykan::StatusOr<WrittenCode>
+moduleCode(paykan::pir::Module module, const pkm::Interface &iface,
+           paykan::backend::Backend *backend,
+           const paykan::backend::Capabilities &caps) {
+  paykan::modules::trimModuleCode(module, iface);
+  WrittenCode out;
+  if (!backend || !caps.CompileModules) {
+    out.Code = std::move(module);
+    return out;
+  }
+  paykan::modules::ModuleCode parts =
+      paykan::modules::splitModuleCode(std::move(module));
+  for (const paykan::pir::Module *m : {&parts.Code, &parts.Compiled})
+    if (auto errors = paykan::pir::verify(*m); !errors.empty())
+      return paykan::Status::error(
+          "internal compiler error: the split module does not verify:\n" +
+          paykan::pir::formatErrors(errors));
+  auto object = backend->compileModule(parts.Compiled);
+  if (!object)
+    return object.status();
+  out.Code = std::move(parts.Code);
+  out.Object = std::move(*object);
+  return out;
+}
 
 /// " [<file>]" for a loaded plugin, "" for a built-in one.
 template <typename Entry> std::string origin(const Entry &e) {
@@ -85,6 +144,8 @@ void printVersion(const paykan::plugin::LoadReport &plugins) {
   }
   std::cout << "plugin API " << paykan::versionString(PAYKAN_PLUGIN_API_VERSION)
             << "\n";
+  std::cout << "standard library: "
+            << paykan::module_utils::stdlibDir("").string() << "\n";
   std::cout << "plugin directories:";
   if (plugins.DiscoveryDisabled)
     std::cout << " none searched (--no-plugins or PAYKAN_NO_PLUGINS)";
@@ -235,6 +296,36 @@ int pkmTool(const Options &opts) {
     paykan::pir::print(*mod, os);
     return true;
   };
+  if (opts.Verb == PkmVerb::Extract) {
+    // The module's compiled code as a native object, for a program's C
+    // (--emit-c) to link with.
+    if (!opts.PkmObject)
+      return fail("`pkm extract` needs what to extract: --object");
+    std::span<const uint8_t> section = (*file).section(pkm::Kind::Object);
+    if (section.empty())
+      return fail(path + " has no compiled code (its CODE is all of it)");
+    auto object = pkm::readObject(section);
+    if (!object)
+      return fail(path + ": " + object.status().message());
+    std::string backendName =
+        opts.Backend.empty() ? std::string(paykan::backend::defaultBackend())
+                             : opts.Backend;
+    auto backend = paykan::backend::Registry::get().create(backendName);
+    if (!backend)
+      return fail("unknown backend '" + backendName + "'");
+    if (!backend->capabilities().CompileModules)
+      return fail("backend '" + backendName + "' does not compile modules");
+    std::string out = opts.OutputPath.empty() ? std::filesystem::path(path)
+                                                    .filename()
+                                                    .replace_extension(".o")
+                                                    .string()
+                                              : opts.OutputPath;
+    if (paykan::Status s =
+            backend->emitModuleObject(toBackend(*object), opts.optLevel(), out);
+        !s)
+      return fail(path + ": " + s.message());
+    return EXIT_SUCCESS;
+  }
   if (opts.Verb == PkmVerb::Check) {
     pkm::Verdict v = pkm::checkCompatibility(
         (*file).manifest(), paykan::modules::ModuleResolver::hostIdentity(),
@@ -275,12 +366,14 @@ int pkmTool(const Options &opts) {
     dopts.Which = S::Tmpl;
   else if (sec == "symidx")
     dopts.Which = S::SymIdx;
+  else if (sec == "obj")
+    dopts.Which = S::Object;
   else if (sec == "payloads")
     dopts.Which = S::Payloads;
   else if (!codeOnly)
     return fail("unknown section '" + sec +
                 "' (expected manifest, sections, iface, tmpl, code, "
-                "symidx, payloads or all)");
+                "symidx, obj, payloads or all)");
   if (!codeOnly)
     pkm::dump(*file, std::cout, dopts);
   bool ok = true;
@@ -462,6 +555,26 @@ int main(int argc, char *argv[]) {
     return EXIT_SUCCESS;
   }
 
+  // -- Backend
+  // Chosen before the imports are resolved: a cache entry holds the code
+  // the backend that wrote it compiled, which only that backend links.
+  std::unique_ptr<paykan::backend::Backend> backend;
+  paykan::backend::Capabilities caps;
+  std::string backendName;
+  if (!opts.CheckOnly) {
+    backendName = opts.Backend.empty()
+                      ? std::string(paykan::backend::defaultBackend())
+                      : opts.Backend;
+    if (backendName.empty())
+      return fail("this build has no backend (PAYKAN_BACKENDS was empty); "
+                  "only --check-only and --dump-ast are available");
+    backend = paykan::backend::Registry::get().create(backendName);
+    if (!backend)
+      return fail("unknown backend '" + backendName +
+                  "' (see --list-backends)");
+    caps = backend->capabilities();
+  }
+
   // -- Semantic analysis
   std::string mainName, projectRoot;
   mainModuleIdentity(opts, mainName, projectRoot);
@@ -475,6 +588,9 @@ int main(int argc, char *argv[]) {
   resolverOpts.ReadCache = !opts.RebuildModules && !opts.NoModuleCache;
   resolverOpts.WriteCache = !opts.NoModuleCache;
   resolverOpts.Verbose = opts.Verbose ? &std::cerr : nullptr;
+  if (backend)
+    resolverOpts.CompiledBy =
+        caps.CompileModules ? toPkm(backend->objectKind()) : pkm::Object{};
   paykan::modules::ModuleResolver resolver(
       resolverOpts, paykan::modules::ModuleResolver::hostIdentity());
   // Sema reuses the DiagEngine constructed above (already carrying the
@@ -494,18 +610,6 @@ int main(int argc, char *argv[]) {
     return EXIT_FAILURE;
   if (opts.CheckOnly)
     return EXIT_SUCCESS;
-
-  // -- Backend
-  std::string backendName = opts.Backend.empty()
-                                ? std::string(paykan::backend::defaultBackend())
-                                : opts.Backend;
-  if (backendName.empty())
-    return fail("this build has no backend (PAYKAN_BACKENDS was empty); only "
-                "--check-only and --dump-ast are available");
-  auto backend = paykan::backend::Registry::get().create(backendName);
-  if (!backend)
-    return fail("unknown backend '" + backendName + "' (see --list-backends)");
-  const auto caps = backend->capabilities();
 
   paykan::backend::Input in;
   in.InputFilename = opts.InputFilename;
@@ -536,8 +640,33 @@ int main(int argc, char *argv[]) {
     return fail("PIR verification failed:\n" +
                 paykan::pir::formatErrors(errors));
   // The whole program verified: the modules built from source this run get
-  // their cache entries now, never before.
-  resolver.writeCache(program);
+  // their cache entries now, never before.  Each keeps what it and its
+  // importers reach; with a backend that compiles modules, its code other
+  // than its copies of instantiations is compiled, and the program uses the
+  // module as an importer will (when nothing else of the program needs a
+  // copy it dropped).
+  std::map<std::string, paykan::backend::ModuleObject> compiled;
+  for (const std::string &name : resolver.cacheable()) {
+    auto mod = std::find_if(
+        program.Modules.begin(), program.Modules.end(),
+        [&](const paykan::pir::Module &m) { return m.Name == name; });
+    const pkm::Interface *iface = resolver.builtInterface(name);
+    if (mod == program.Modules.end() || !iface)
+      continue;
+    auto written = moduleCode(copyOf(*mod), *iface, backend.get(), caps);
+    if (!written)
+      return fail("cannot write the cache entry of module '" + name +
+                  "': " + written.status().message());
+    WrittenCode &code = *written;
+    std::optional<pkm::Object> object;
+    if (code.Object)
+      object = toPkm(*code.Object);
+    resolver.writeCacheEntry(name, code.Code, object ? &*object : nullptr);
+    if (code.Object && paykan::modules::providesFor(code.Code, program)) {
+      *mod = std::move(code.Code);
+      compiled[name] = std::move(*code.Object);
+    }
+  }
   if (opts.EmitPkm) {
     std::filesystem::path out = opts.OutputPath.empty()
                                     ? std::filesystem::path(opts.InputFilename)
@@ -558,11 +687,20 @@ int main(int argc, char *argv[]) {
         return fail("cannot write the templates of " + opts.InputFilename +
                     ": " + why);
     }
+    pkm::Interface iface =
+        paykan::sema::Sema::toInterface(sema.exportModuleInfo(root, mainName));
+    auto written = moduleCode(std::move(program.Modules.front()), iface,
+                              backend.get(), caps);
+    if (!written)
+      return fail("cannot write " + out.string() + ": " +
+                  written.status().message());
+    const WrittenCode &code = *written;
+    std::optional<pkm::Object> object;
+    if (code.Object)
+      object = toPkm(*code.Object);
     paykan::Status s = resolver.writeModuleFile(
-        out, mainName,
-        paykan::sema::Sema::toInterface(sema.exportModuleInfo(root, mainName)),
-        std::move(deps), opts.InputFilename, program.Modules.front(),
-        templates);
+        out, mainName, std::move(iface), std::move(deps), opts.InputFilename,
+        code.Code, templates, object ? &*object : nullptr);
     if (!s)
       return fail("cannot write " + out.string() + ": " + s.message());
     return EXIT_SUCCESS;
@@ -573,12 +711,37 @@ int main(int argc, char *argv[]) {
   if (!errors.empty())
     return fail("PIR verification failed:\n" +
                 paykan::pir::formatErrors(errors));
+  // What the program's entry point cannot reach is dropped before the
+  // backend lowers anything (docs/pir.md §12).  The C of --emit-c is linked
+  // with each compiled module's code as a whole object (`pkm extract
+  // --object`), so everything that code uses stays too.
+  paykan::pir::Roots roots = paykan::pir::Roots::entryPoint(program);
+  if (opts.EmitSource && opts.EmitStage == "c") {
+    roots.Functions = [entry =
+                           roots.Functions](const paykan::pir::Module &m,
+                                            const paykan::pir::Function &f) {
+      return entry(m, f) || m.isCompiled(f);
+    };
+    roots.Classes = [](const paykan::pir::Module &m,
+                       const paykan::pir::Class &c) { return m.isCompiled(c); };
+  }
+  paykan::pir::PassManager passes;
+  passes.add(paykan::pir::createDeadCodePass(std::move(roots)));
+  if (paykan::Status s = passes.run(program); !s)
+    return fail(s.message());
   if (opts.EmitPIR) {
     paykan::pir::print(program, std::cout);
     std::cout.flush();
     return EXIT_SUCCESS;
   }
   in.Program = &program;
+  // The compiled code of the modules loaded from a `.pkm` that has some.
+  if (caps.CompileModules)
+    for (const paykan::pir::Module &m : program.Modules)
+      if (const pkm::Object *o = resolver.object(m.Name))
+        compiled.try_emplace(m.Name, toBackend(*o));
+  for (const auto &[name, o] : compiled)
+    in.Compiled[name] = &o;
 
   if (opts.EmitSource) {
     if (!caps.EmitSource)

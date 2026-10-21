@@ -499,14 +499,25 @@ always the main file's directory, and the compiled modules are cached in
 ## Module Files
 
 A compiled module is a **`.pkm` module file**: the module's interface (what the type checker
-needs to check a module that imports it), its PIR (the backend-neutral intermediate
-representation every backend generates code from), a symbol index, and a manifest recording
+needs to check a module that imports it), its templates (the generic classes, structs and
+functions an importer instantiates), its code, a symbol index, and a manifest recording
 which `paykan` produced it, the source it was built from (size and SHA-256) and the interface
-hash of every module it imports. The file carries no backend-specific code, no paths and no
-timestamps: the same source always produces the same bytes, and one file serves the mlir
-backend and a backend plugin alike. `paykan pkm dump <file>` prints a file,
-`paykan pkm check <file>` says whether this `paykan` can use it, and `paykan --emit-pkm`
-writes one ([The `paykan` command](17-the-paykan-command.md)).
+hash of every module it imports. The file carries no paths and no timestamps: the same
+source always produces the same bytes.
+
+A module file keeps only the code the module and its importers can reach: the module's own
+functions and classes, its copies of the instantiations its interface hands out (a
+`Pair<Str, int>` a function returns, whole, since an importer may call any of its methods),
+and of its other copies only what its own code uses. Its copies of instantiations stay in
+PIR (the backend-neutral intermediate representation), where a program keeps one copy of
+each and drops what its `main` does not use; the rest of its code is compiled by the
+backend when the file is written (LLVM bitcode, for the mlir backend) and only declared in
+its PIR. A program links just the part of that code it uses. Code compiled by one backend
+(and one LLVM, for one target) is linked only by that backend: a backend plugin that
+compiles nothing writes files whose PIR is all of their code. `paykan pkm dump <file>`
+prints a file, `paykan pkm check <file>` says whether this `paykan` can use it,
+`paykan pkm extract --object <file>` writes its compiled code as an object file, and
+`paykan --emit-pkm` writes one ([The `paykan` command](17-the-paykan-command.md)).
 
 Module files reach a program in two ways.
 
@@ -524,7 +535,8 @@ uses another module's holds its own copies of the instantiations it uses
 - **Validity.** An entry is used only when it was written by this very `paykan` (its version,
   its build ID and the format numbers), from exactly the current source (size and hash, never
   timestamps), and
-  against the current interface and templates of every module it imports. Editing a function
+  against the current interface and templates of every module it imports, its code compiled
+  by the backend in use (another backend's entry is rebuilt). Editing a function
   body therefore rebuilds that module only; changing a class or a function signature also
   rebuilds the modules that import it, and theirs only if their own interface changed.
   Editing the body of a generic class, struct or function rebuilds every module that imports
@@ -537,12 +549,13 @@ uses another module's holds its own copies of the instantiations it uses
   truncated, corrupt or out of date is rebuilt. `--rebuild-modules` rebuilds every entry;
   `--no-module-cache` neither reads nor writes them. The directory is purely a cache:
   deleting it at any time is safe and only costs a recompile.
-- **The backend's cache.** The mlir backend keeps each imported module's LLVM IR in the cache
-  too, as bitcode (`a/b/c.bc`; the main file's is never cached), validated by its own
-  key (the part of the module's PIR the program uses, the compiler and the runtime ABI) and
-  shared between concurrent builds. A program compiles only the code its `main` reaches, so
-  two programs that use different parts of a module keep recompiling its entry. It is the native translation of the PIR a module file holds; a later release folds
-  it into the module file. The cache options are summed up in
+- **The backend's cache.** The mlir backend keeps the LLVM IR of each imported module's PIR
+  (its copies of instantiations) in the cache too, as bitcode (`a/b/c.bc`; the main file's is
+  never cached), validated by its own key (the part of that PIR the program uses, the
+  compiler and the runtime ABI) and shared between concurrent builds. A program compiles only
+  the copies its `main` reaches, so two programs that use different ones of a module keep
+  recompiling its entry; the module's other code is compiled once, in its module file. The
+  cache options are summed up in
   [The `paykan` command](17-the-paykan-command.md#the-compilation-cache).
 
 ### Prebuilt modules
@@ -551,8 +564,9 @@ Where an import's source is not found, a `.pkm` of the module is used instead: f
 the source would be (`a/b/c.pkm` for `a/b/c.pkn`), then under each `--module-path=<dir>`
 directory and each `:`-separated directory of `$PAYKAN_MODULE_PATH`. A source file is always
 authoritative when it exists. A prebuilt module is type-checked against from its interface
-and compiled from its PIR, so the program builds and runs identically on any backend
-without the source (see [`samples/imports/13_pkm`](../../samples/imports/13_pkm/README.md)).
+and linked from its code, so the program builds and runs identically without the source
+(see [`samples/imports/13_pkm`](../../samples/imports/13_pkm/README.md)); its compiled code
+needs the backend that compiled it.
 
 A prebuilt file is used only when this `paykan` can: a file written by another release
 (every format, PIR and the runtime ABI included, is versioned by the release), or built

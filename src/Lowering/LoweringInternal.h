@@ -132,6 +132,10 @@ private:
   };
   std::unordered_map<std::string, ImportedFn> ImportedFunctions;
   void processImports(ast::TranslationUnit *tu);
+  /// Mark this module's instantiations of templates shared (pir::Function::
+  /// Shared): the classes and structs whose names carry type arguments,
+  /// their functions, and the copies of other modules' generic functions.
+  void markShared();
   /// The instantiations of other modules' templates this module emits:
   /// those of SemaContext::ForeignClasses / ForeignFunctions that no module
   /// lowered before it emits (each is emitted once per program).

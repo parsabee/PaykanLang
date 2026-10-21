@@ -462,9 +462,17 @@ private:
   }
 };
 
+/// ` uses @a, @b` (nothing for none).
+void printUses(const std::vector<std::string> &uses, std::ostream &os) {
+  for (size_t i = 0; i < uses.size(); ++i) {
+    os << (i ? ", " : " uses ");
+    printSymbol(uses[i], os);
+  }
+}
+
 void printFunction(const Function &f, std::ostream &os) {
   if (f.IsExtern) {
-    os << "extern fn ";
+    os << (f.Shared ? "extern shared fn " : "extern fn ");
     printSymbol(f.Name, os);
     print(f.Sig, os);
     if (!f.Module.empty()) {
@@ -475,10 +483,11 @@ void printFunction(const Function &f, std::ostream &os) {
       os << " symbol ";
       printSymbol(f.Symbol, os);
     }
+    printUses(f.Uses, os);
     os << "\n";
     return;
   }
-  os << "fn ";
+  os << (f.Shared ? "shared fn " : "fn ");
   printSymbol(f.Name, os);
   os << '(';
   for (size_t i = 0; i < f.Params.size(); ++i) {
@@ -495,6 +504,8 @@ void printFunction(const Function &f, std::ostream &os) {
 void printClass(const Class &c, std::ostream &os) {
   if (c.IsExtern)
     os << "extern ";
+  if (c.Shared)
+    os << "shared ";
   os << "class ";
   printName(c.Name, os);
   if (!c.Super.empty()) {

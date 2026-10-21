@@ -196,6 +196,8 @@ std::optional<Error> readImpl(std::span<const uint8_t> bytes,
   if (bool(manifest.Contents & kContentsHasTemplates) != has(Kind::Tmpl))
     return badManifest(
         "contents HAS_TEMPLATES disagrees with the section table");
+  if (bool(manifest.Contents & kContentsHasObject) != has(Kind::Object))
+    return badManifest("contents HAS_OBJECT disagrees with the section table");
   if (bool(manifest.Contents & kContentsSystem) !=
       manifest.Module.starts_with("::"))
     return badManifest("contents SYSTEM disagrees with the module name");
@@ -218,6 +220,8 @@ const char *kindName(uint32_t kind) {
     return "SYMIDX";
   case Kind::Debug:
     return "DEBUG";
+  case Kind::Object:
+    return "OBJ";
   case Kind::Payload:
     return "PAYLOAD";
   }

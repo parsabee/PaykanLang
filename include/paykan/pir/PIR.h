@@ -400,6 +400,16 @@ struct Function {
   std::string Symbol;
   /// The defining module's name for this function (Symbol, or Name).
   const std::string &linkName() const { return Symbol.empty() ? Name : Symbol; }
+  /// An instantiation of a template (`Box<int>.get`, `$lib::f<int>`): every
+  /// module that uses it may hold a copy, a program keeps one, and it links
+  /// under a name that does not depend on its module.  An extern of one is
+  /// shared too.
+  bool Shared = false;
+  /// For a compiled declaration (an extern naming its own module: the
+  /// function is in the module's compiled code, docs/pir.md §4): the symbols
+  /// of this module its compiled body references, which a program must keep
+  /// while it keeps the function.
+  std::vector<std::string> Uses;
   /// Next free ValueId for the builder / parser (ids are dense from 1).
   ValueId NextValueId = 1;
 };
@@ -427,8 +437,13 @@ struct Class {
   std::vector<Field> Fields;
   std::vector<VTableEntry> VTable;
   /// Declared in another PIR module (layout known, vtable defined there).
+  /// Naming its own module, a compiled class: defined in this module's
+  /// compiled code, its vtable still described (what the compiled vtable
+  /// holds).
   bool IsExtern = false;
   std::string Module;
+  /// An instantiation of a generic class (see Function::Shared).
+  bool Shared = false;
 };
 
 // -- Module-level globals
@@ -464,6 +479,19 @@ struct Module {
 
   const Function *findFunction(const std::string &name) const;
   const Class *findClass(const std::string &name) const;
+
+  /// Whether @p f / @p c is a compiled declaration: an extern naming this
+  /// module, whose definition is in the module's compiled code rather than
+  /// in its PIR (a module loaded from a `.pkm` with an OBJ section).
+  bool isCompiled(const Function &f) const {
+    return f.IsExtern && f.Module == Name;
+  }
+  bool isCompiled(const Class &c) const {
+    return c.IsExtern && c.Module == Name;
+  }
+  /// Whether this module defines @p f / @p c: in its PIR or compiled.
+  bool defines(const Function &f) const { return !f.IsExtern || isCompiled(f); }
+  bool defines(const Class &c) const { return !c.IsExtern || isCompiled(c); }
 };
 
 struct Program {

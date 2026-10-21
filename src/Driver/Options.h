@@ -20,8 +20,9 @@ enum class Command {
 
 /// The verb of `paykan pkm`.
 enum class PkmVerb {
-  Dump,  // print the file (pkm::dump) and the PIR text of its CODE
-  Check, // print the verdict against this toolchain; exit 0 when usable
+  Dump,    // print the file (pkm::dump) and the PIR text of its CODE
+  Check,   // print the verdict against this toolchain; exit 0 when usable
+  Extract, // write a part of the file on its own (--object: its code)
 };
 
 /// The optimisation level of `paykan build` and `paykan run` (and --emit-*)
@@ -70,6 +71,8 @@ struct Options {
   /// `paykan pkm <verb> <file>`: the verb and the `--section=<name>` of
   /// `dump` ("" = all).
   PkmVerb Verb = PkmVerb::Dump;
+  /// `pkm extract --object`: the module's compiled code as a native object.
+  bool PkmObject = false;
   std::string PkmSection;
 
   /// --module-path=<dir> (repeatable): where prebuilt `.pkm` modules are

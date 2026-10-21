@@ -77,14 +77,14 @@ pir::Module *ProgramLowering::lowerImport(const std::string &name) {
     Modules.push_back(std::move(*mod));
     pir::Module &m = Modules.back();
     for (const pir::Class &cls : m.Classes)
-      if (!cls.IsExtern)
+      if (m.defines(cls))
         ClassOrigins.try_emplace(cls.Name, m.Name);
     // A struct has no PIR item: its methods and constructor are the module's
     // functions `S.m` and `S`, so the struct `S` is defined where a
     // function `S.<name>` is (names::kNameSep cannot occur in a Paykan
     // identifier).
     for (const pir::Function &fn : m.Functions) {
-      size_t sep = fn.IsExtern ? std::string::npos : fn.Name.find(kNameSep);
+      size_t sep = m.defines(fn) ? fn.Name.find(kNameSep) : std::string::npos;
       if (sep != std::string::npos && sep > 0)
         ClassOrigins.try_emplace(fn.Name.substr(0, sep), m.Name);
     }
@@ -138,7 +138,7 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
       // Every function the module defines is reachable under this import
       // site's qualifier and under the full module path.
       for (const auto &fn : defMod->Functions) {
-        if (fn.IsExtern)
+        if (!defMod->defines(fn))
           continue;
         ImportedFunctions[qualifier + kQualSep + fn.Name] = {defMod->Name,
                                                              fn.Name};
@@ -178,88 +178,45 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
 
 // -- One copy of each instantiation per program
 
-namespace {
-
-/// @p name up to its first '.' outside `<...>` and `(...)` (`Box<int>.get`
-/// -> `Box<int>`), or all of it.  A function type's `->` closes nothing.
-std::string_view typePart(std::string_view name) {
-  int depth = 0;
-  for (size_t i = 0; i < name.size(); ++i) {
-    const char c = name[i];
-    if (c == '<' || c == '(')
-      ++depth;
-    else if (c == '-' && i + 1 < name.size() && name[i + 1] == '>')
-      ++i;
-    else if (c == '>' || c == ')')
-      --depth;
-    else if (c == '.' && depth == 0)
-      return name.substr(0, i);
+void ModuleLowering::markShared() {
+  for (pir::Class &c : Classes_)
+    c.Shared = c.Name.find('<') != std::string::npos;
+  for (pir::Function &f : Funcs) {
+    if (f.IsExtern)
+      continue; // an extern is as shared as its definition (declareExternFrom)
+    const std::string owner(ownerTypeName(f.Name));
+    f.Shared = (f.Name.starts_with(kHiddenQualPrefix) &&
+                f.Name.find('<') != std::string::npos) ||
+               (owner.find('<') != std::string::npos && OwnTypes.count(owner));
   }
-  return name;
 }
-
-/// The instantiation a function of a module belongs to (its name for a
-/// function instantiation `$lib::gen::f<int>`, the type's for a class or
-/// struct one's function), or "" for any other function.  A local generic
-/// function's instantiation (`first<int>`) is not one: function names are
-/// per module, and another module's `first<int>` is another function.
-std::string instantiationOf(const std::string &fn,
-                            const std::unordered_set<std::string> &types) {
-  if (fn.starts_with(kHiddenQualPrefix) && fn.find('<') != std::string::npos)
-    return fn;
-  std::string type(typePart(fn));
-  return types.count(type) ? type : std::string();
-}
-
-} // namespace
 
 void shareInstantiations(pir::Program &program) {
-  // The instantiated types: classes `Tmpl<args>`, and the types of the
-  // functions `Tmpl<args>.m` (a struct has no PIR item of its own).
-  std::unordered_set<std::string> types;
-  for (const pir::Module &m : program.Modules) {
-    for (const pir::Class &c : m.Classes)
-      if (c.Name.find('<') != std::string::npos)
-        types.insert(c.Name);
-    for (const pir::Function &f : m.Functions) {
-      std::string_view type = typePart(f.linkName());
-      if (type.size() < f.linkName().size() &&
-          type.find('<') != std::string_view::npos)
-        types.emplace(type);
-    }
-  }
-  if (types.empty())
-    return;
-
-  // Who keeps each: the first module that defines it, imports first (the
-  // order they were lowered in), the main module last.
+  // Who keeps each shared class and function: the first module that
+  // defines it, imports first (the order they were lowered in), the main
+  // module last.  Each symbol has its own keeper: a module keeps only the
+  // part of an instantiation it uses (a constructor without the class), and
+  // shared items link by a name of their own, so the parts need not be kept
+  // together.
   std::vector<pir::Module *> order;
   for (size_t i = 1; i < program.Modules.size(); ++i)
     order.push_back(&program.Modules[i]);
   if (!program.Modules.empty())
     order.push_back(&program.Modules.front());
-  std::unordered_map<std::string, const pir::Module *> keeper;
+  std::unordered_map<std::string, const pir::Module *> classKeeper, fnKeeper;
   for (const pir::Module *m : order) {
     for (const pir::Class &c : m->Classes)
-      if (!c.IsExtern && types.count(c.Name))
-        keeper.try_emplace(c.Name, m);
+      if (c.Shared && !c.IsExtern)
+        classKeeper.try_emplace(c.Name, m);
     for (const pir::Function &f : m->Functions)
-      if (!f.IsExtern)
-        if (std::string inst = instantiationOf(f.Name, types); !inst.empty())
-          keeper.try_emplace(inst, m);
+      if (f.Shared && !f.IsExtern)
+        fnKeeper.try_emplace(f.Name, m);
   }
-  // The keeper of @p inst when it defines @p symbol (a class or function).
-  auto keptBy = [&](const std::string &inst, const std::string &symbol,
-                    bool isClass) -> const pir::Module * {
-    auto it = keeper.find(inst);
-    if (it == keeper.end())
-      return nullptr;
-    if (isClass) {
-      const pir::Class *c = it->second->findClass(symbol);
-      return c && !c->IsExtern ? it->second : nullptr;
-    }
-    const pir::Function *f = it->second->findFunction(symbol);
-    return f && !f->IsExtern ? it->second : nullptr;
+  if (classKeeper.empty() && fnKeeper.empty())
+    return;
+  auto keeper = [](const auto &map, const std::string &name) {
+    auto it = map.find(name);
+    return it == map.end() ? nullptr : it->second;
   };
 
   for (pir::Module *m : order) {
@@ -268,9 +225,7 @@ void shareInstantiations(pir::Program &program) {
     // signature instead, as a vcall on an imported class does.
     std::unordered_map<std::string, std::vector<pir::VTableEntry>> vtables;
     for (pir::Class &c : m->Classes) {
-      if (!types.count(c.Name))
-        continue;
-      const pir::Module *k = keptBy(c.Name, c.Name, /*isClass=*/true);
+      const pir::Module *k = c.Shared ? keeper(classKeeper, c.Name) : nullptr;
       if (!k || k == m)
         continue;
       if (!c.IsExtern)
@@ -280,10 +235,8 @@ void shareInstantiations(pir::Program &program) {
       c.VTable.clear();
     }
     for (pir::Function &f : m->Functions) {
-      std::string inst = instantiationOf(f.linkName(), types);
-      if (inst.empty())
-        continue;
-      const pir::Module *k = keptBy(inst, f.linkName(), /*isClass=*/false);
+      const pir::Module *k =
+          f.Shared ? keeper(fnKeeper, f.linkName()) : nullptr;
       if (!k || k == m)
         continue;
       if (f.IsExtern) {
