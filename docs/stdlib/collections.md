@@ -20,7 +20,7 @@ fn main() -> int {
   xs.insert(0, "a");
   i: unsigned = 0;
   while i < xs.len() {
-    io::print(xs.get(i) + " ");
+    io::print(xs.at(i) + " ");
     i = i + 1;
   }
   io::println(xs.indexOf("c"));
@@ -63,32 +63,43 @@ None
   it takes the element by value (`pushFront(v: T)`, `put(k: K, v: V)`) or lent
   (`push(v: view T)`): an object element is shared with the container, and a value element
   is copied into it.
-- **What a container lends is a `view`.** A method that reads an element and leaves it in
-  the container lends it as a `view` (`-> view T`): `List`'s `get` and `last`,
-  `LinkedList`'s `front` and `back`, the `peek` of `Stack`, `Queue` and the priority queues,
-  and `HashMap`'s `get` and `getOr`. The element is read, passed to a `view` parameter or
-  bound to a `view` local (`f: view = fs.get(i);`), and a value element is copied out
-  (`n = xs.get(0);`), but an object element is neither stored nor changed through it
-  (`the result of 'get' is a 'view'; cannot assign to its field 'n'`), so a `view` of a
-  container changes nothing in it. A method that takes an element out (`pop`, `removeAt`,
-  `dequeue`, `popFront`, ...) returns it, and a new list (`copy()`, `toList()`, `keys()`)
-  holds its own references.
+- **An element is lent as a `view` or handed over as a copy.** A method that reads an
+  element and leaves it in the container does one of two things:
+  - It lends the element as a `view` (`-> view T`), which stays the container's: `List`'s
+    `at` and `last`, `LinkedList`'s `front` and `back`, the `peek` of `Stack`, `Queue` and
+    the priority queues, and `HashMap`'s `at` and `atOr`. These are `view fn`s. The
+    element is read in place, passed to a `view` parameter or bound to a `view` local
+    (`f: view = fs.at(i);`), and a value element is copied out (`n = xs.at(0);`), but an
+    object element is neither stored nor changed through it (`the result of 'at' is a
+    'view'; cannot assign to its field 'n'`).
+  - It hands over a copy the caller keeps (`-> T`): the `get` of `List`, `HashMap`,
+    `Stack`, `Queue` and the priority queues, `HashMap`'s `getOr`, and `LinkedList`'s
+    `getFront` and `getBack`. The copy is stored, returned and changed like any value of
+    `T`: a value element (an `int`, a tuple, a struct) is the caller's alone, and an object
+    element is shared with the container, so a change through the copy shows in the
+    container, and the object stays the caller's after the container lets it go. Since a
+    copy of an object could change an element, these are not `view fn`s, and a `view` of a
+    container cannot call them (`'xs' is a 'view' parameter; 'get' is not a 'view fn'`):
+    a `view` of a container changes nothing in it.
+
+  A method that takes an element out (`pop`, `removeAt`, `dequeue`, `popFront`, ...)
+  returns it, and a new list (`copy()`, `toList()`, `keys()`) holds its own references.
 - **Elements are compared with `==`**, so a class compares by its `equals` (the
   identity, unless it overrides `equals`).
-- **Every index and size is an `unsigned`**: `len()` returns one, `get(i)`, `set(i, v)`,
+- **Every index and size is an `unsigned`**: `len()` returns one, `at(i)`, `get(i)`, `set(i, v)`,
   `insert(i, v)`, `removeAt(i)` and `swap(i, j)` take one, and `indexOf(v)` returns an
   `unsigned?` that is `None` when there is no such element. A literal index takes the
-  type (`xs.get(0)`), and a counter is declared `i: unsigned = 0`: an `int` is not an index
-  (`argument 1 of 'get' has type 'int', expected 'unsigned'`), and a negative literal does
+  type (`xs.at(0)`), and a counter is declared `i: unsigned = 0`: an `int` is not an index
+  (`argument 1 of 'at' has type 'int', expected 'unsigned'`), and a negative literal does
   not fit (`the literal -1 does not fit in 'unsigned' ...`).
 - **A broken precondition panics** with a message that names it: an index out of range
   (`List index 3 out of range (len=1)`), taking from an empty container (`pop from an
-  empty List`), `get` of a key a map does not have. The tables below give each message.
+  empty List`), `at` or `get` of a key a map does not have. The tables below give each message.
   There is no other error: a container that cannot get memory for a new element panics
   with `out of memory: ...`.
-- **The methods that only read are `view fn`s**, so they can be called through a `view`
-  parameter (`fn total(xs: view collections::List<int>)` may call `len()` and `get(i)`, not
-  `push`).
+- **The methods that only read are `view fn`s**, the copying ones aside, so they can be
+  called through a `view` parameter (`fn total(xs: view collections::List<int>)` may call
+  `len()` and `at(i)`, not `push` or `get(i)`).
 - The keys of a `HashMap` or `HashSet` implement the builtin trait
   [`Hashable`](../language/06-traits.md#hashable): `int`, `bool`, `char`, `Str`, a sized
   integer type (`u32`, `unsigned`, ...), or a class or a struct with an `impl Hashable for`
@@ -108,17 +119,18 @@ the end are amortised O(1); `insert` and `removeAt` move the elements after the 
 | `List<T>()` | An empty list | |
 | `view fn len() -> unsigned` | The number of elements | |
 | `view fn isEmpty() -> bool` | Whether there are none | |
-| `view fn get(i: unsigned) -> view T` | Element `i`, as a `view` | panics `List index <i> out of range (len=<n>)` unless `i < len()` |
-| `fn set(i: unsigned, v: view T)` | Replaces element `i` | panics as `get` |
+| `view fn at(i: unsigned) -> view T` | Element `i`, as a `view` | panics `List index <i> out of range (len=<n>)` unless `i < len()` |
+| `fn get(i: unsigned) -> T` | A copy of element `i`, to keep | panics as `at` |
+| `fn set(i: unsigned, v: view T)` | Replaces element `i` | panics as `at` |
 | `fn push(v: view T)` | Appends `v` | |
 | `fn pop() -> T` | Removes and returns the last element | panics `pop from an empty List` |
 | `view fn last() -> view T` | The last element, as a `view` | panics `last of an empty List` |
-| `fn insert(i: unsigned, v: view T)` | Inserts `v` before element `i`; `i == len()` appends | panics as `get` unless `i <= len()` |
-| `fn removeAt(i: unsigned) -> T` | Removes and returns element `i` | panics as `get` |
+| `fn insert(i: unsigned, v: view T)` | Inserts `v` before element `i`; `i == len()` appends | panics as `at` unless `i <= len()` |
+| `fn removeAt(i: unsigned) -> T` | Removes and returns element `i` | panics as `at` |
 | `view fn indexOf(v: view T) -> unsigned?` | The index of the first element `== v` | `None` when there is none |
 | `view fn contains(v: view T) -> bool` | Whether some element is `== v` | |
 | `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | |
-| `fn swap(i: unsigned, j: unsigned)` | Exchanges elements `i` and `j` | panics as `get` |
+| `fn swap(i: unsigned, j: unsigned)` | Exchanges elements `i` and `j` | panics as `at` |
 | `fn reverse()` | Reverses the order of the elements | |
 | `fn clear()` | Removes every element | |
 | `view fn copy() -> List<T>` | A new list of the same elements (shared, if they are objects) | |
@@ -156,6 +168,8 @@ and `remove` walk the list.
 | `fn popBack() -> T` | Removes and returns the last element | panics `popBack on an empty LinkedList` |
 | `view fn front() -> view T` | The first element, as a `view` | panics `front on an empty LinkedList` |
 | `view fn back() -> view T` | The last element, as a `view` | panics `back on an empty LinkedList` |
+| `fn getFront() -> T` | A copy of the first element, to keep | panics `getFront on an empty LinkedList` |
+| `fn getBack() -> T` | A copy of the last element, to keep | panics `getBack on an empty LinkedList` |
 | `view fn contains(v: view T) -> bool` | Whether some element is `== v` | |
 | `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | |
 | `fn clear()` | Removes every element | |
@@ -177,6 +191,7 @@ A `Stack` is last in, first out; a `Queue` first in, first out. Both are kept in
 | `fn push(v: T)` | `fn enqueue(v: T)` | Adds `v`: on top of the stack, at the back of the queue | |
 | `fn pop() -> T` | `fn dequeue() -> T` | Removes and returns the top, the front | panics `pop from an empty Stack`, `dequeue from an empty Queue` |
 | `view fn peek() -> view T` | `view fn peek() -> view T` | The element `pop` or `dequeue` would return, as a `view` | panics `peek at an empty Stack`, `peek at an empty Queue` |
+| `fn get() -> T` | `fn get() -> T` | A copy of that element, to keep | panics `get from an empty Stack`, `get from an empty Queue` |
 | `view fn len() -> unsigned` | the same | The number of elements | |
 | `view fn isEmpty() -> bool` | the same | Whether there are none | |
 | `fn clear()` | the same | Removes every element | |
@@ -186,7 +201,7 @@ A `Stack` is last in, first out; a `Queue` first in, first out. Both are kept in
 
 Hash tables with separate chaining. Two keys are the same key when they are `==`, and keys
 that are `==` must have the same `hash()`. A class key overrides `equals` and implements
-`Hashable` to match. `put`, `get`, `containsKey` and `remove` are O(1) on average. The
+`Hashable` to match. `put`, `at`, `get`, `containsKey` and `remove` are O(1) on average. The
 table keeps at most three entries for every four buckets, and doubles when it would hold
 more. The order of `keys()` is the table's, not the insertion order.
 
@@ -200,8 +215,10 @@ found.
 | `view fn len() -> unsigned` | The number of keys | |
 | `view fn isEmpty() -> bool` | Whether there are none | |
 | `fn put(k: K, v: V) -> bool` | Maps `k` to `v`, replacing the value of a key it has; `True` if `k` is a new key | |
-| `view fn get(k: view K) -> view V` | The value of `k`, as a `view` | panics `HashMap.get of a key it does not have` |
-| `view fn getOr(k: view K, otherwise: view V) -> view V` | The value of `k`, or `otherwise` if it is not a key, as a `view` | |
+| `view fn at(k: view K) -> view V` | The value of `k`, as a `view` | panics `HashMap.at of a key it does not have` |
+| `view fn atOr(k: view K, otherwise: view V) -> view V` | The value of `k`, or `otherwise` if it is not a key, as a `view` | |
+| `fn get(k: view K) -> V` | A copy of the value of `k`, to keep | panics `HashMap.get of a key it does not have` |
+| `fn getOr(k: view K, otherwise: V) -> V` | A copy of the value of `k`, or `otherwise` if it is not a key | |
 | `view fn containsKey(k: view K) -> bool` | Whether `k` is a key | |
 | `fn remove(k: view K) -> bool` | Removes `k` and its value; `True` if it was a key | |
 | `fn clear()` | Removes every key | |
@@ -234,6 +251,7 @@ same methods:
 | `fn push(v: view T, priority: int)` | Adds `v` with `priority` | |
 | `fn pop() -> T` | Removes and returns the next element | panics `pop on an empty priority queue` |
 | `view fn peek() -> view T` | The next element, as a `view` | panics `peek on an empty priority queue` |
+| `fn get() -> T` | A copy of the next element, to keep | panics `get on an empty priority queue` |
 | `view fn peekPriority() -> int` | The next element's priority | panics `peekPriority on an empty priority queue` |
 | `fn clear()` | Removes every element | |
 

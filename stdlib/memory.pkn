@@ -18,10 +18,10 @@
 // `NotFound`, and shrinking by more than len() is `InvalidArgument`.  So a
 // buffer starts empty, `Buffer<T>()`, which allocates no slots, and grows by
 // grow(), reserve() or push(), each saying whether it could.  The one exception is
-// get() and copyUnchecked(), the reads for code that has checked its index
-// already (get() returns the slot itself, a `view`, nothing copied): they
-// panic on a bad index, as reading a fixed-size array out of bounds does.
-// copy() is the checked read.
+// at() and get(), the reads for code that has checked its index already
+// (at() returns the slot itself, a `view`, nothing copied; get() a copy to
+// keep): they panic on a bad index, as reading a fixed-size array out of
+// bounds does.  copy() is the checked read.
 //
 // The buffer holds its own reference to each value it stores and drops it
 // when the slot is overwritten or shrunk away, or the buffer dies.
@@ -59,23 +59,23 @@ struct Buffer<T> {
 
 impl Buffer<T> {
   // An empty buffer: no slots, nothing allocated for them.
-  fn __init__()                      { self.__data = _new<T>(0); }
+  fn __init__()                     { self.__data = _new<T>(0); }
 
   // The number of slots.
-  view fn len() -> unsigned          { return _len<T>(self.__data); }
+  view fn len() -> unsigned         { return _len<T>(self.__data); }
 
   // Slot `i`, for i < len(), itself: read in place, panicking on a bad
   // index or an unset slot (copy() reports them instead).
-  view fn get(i: unsigned) -> view T { return _get<T>(self.__data, i); }
+  view fn at(i: unsigned) -> view T { return _get<T>(self.__data, i); }
 
   // A copy of slot `i`, to keep, for i < len(): panicking on a bad index or
-  // an unset slot, as get() does (copy() reports them instead).  A copy of
+  // an unset slot, as at() does (copy() reports them instead).  A copy of
   // an object shares it with the buffer, so it is not taken through a
-  // `view` of the buffer: a `view` reads with get().
-  fn copyUnchecked(i: unsigned) -> T { return _copy<T>(self.__data, i); }
+  // `view` of the buffer: a `view` reads with at().
+  fn get(i: unsigned) -> T          { return _copy<T>(self.__data, i); }
 
   // A copy of slot `i`, to keep: `OutOfRange` past the end, `NotFound` for
-  // a slot never set.  As copyUnchecked(), not through a `view`.
+  // a slot never set.  As get(), not through a `view`.
   fn copy(i: unsigned) -> res::Result<T> {
     if i >= _len<T>(self.__data) {
       return res::Result<T>(_fail(res::ErrorCode::OutOfRange), None);

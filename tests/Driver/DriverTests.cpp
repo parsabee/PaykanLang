@@ -1594,7 +1594,9 @@ TEST(Driver, BuildAndRunDefaultToO2) {
 // (docs/language/15-modules.md): a program cannot reach a container's `__`
 // fields and methods, or the modules' `__` functions and classes.
 // What a container hands out through a `view` is a `view`: an object
-// element is read, not stored or changed, whatever the container.
+// element is read, not stored or changed, whatever the container.  Its
+// copies (get(), getFront()) share an object, so they are not taken through
+// a `view`.
 TEST(Driver, StandardLibraryViewsDoNotChangeElements) {
   auto src = writeTmp(
       "import ::collections as c;\n"
@@ -1604,24 +1606,32 @@ TEST(Driver, StandardLibraryViewsDoNotChangeElements) {
       "        q: view c::MinPriorityQueue<Cell>,\n"
       "        s: view c::Stack<Cell>, l: view c::LinkedList<Cell>,\n"
       "        b: view mem::Buffer<Cell>) {\n"
-      "  xs.get(0).n = 1;\n"
+      "  xs.at(0).n = 1;\n"
       "  kept = xs.last();\n"
-      "  m.get(1).n = 2;\n"
+      "  m.at(1).n = 2;\n"
       "  q.peek().n = 3;\n"
       "  s.peek().n = 4;\n"
       "  l.front().n = 5;\n"
-      "  e = b.copyUnchecked(0);\n"
+      "  e = b.get(0);\n"
+      "  f = xs.get(0);\n"
+      "  g = m.getOr(1, Cell());\n"
+      "  h = q.get();\n"
+      "  i = l.getBack();\n"
       "}\n"
       "fn main() -> int { return 0; }\n");
   auto [rc, out] = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_NE(rc, 0);
   for (const char *line :
-       {"the result of 'get' is a 'view'; cannot assign to its field 'n'",
+       {"the result of 'at' is a 'view'; cannot assign to its field 'n'",
         "the result of 'last' is a 'view'; it cannot be stored",
         "the result of 'peek' is a 'view'; cannot assign to its field 'n'",
         "the result of 'front' is a 'view'; cannot assign to its field 'n'",
-        "'b' is a 'view' parameter; 'copyUnchecked' is not a 'view fn'"})
+        "'b' is a 'view' parameter; 'get' is not a 'view fn'",
+        "'xs' is a 'view' parameter; 'get' is not a 'view fn'",
+        "'m' is a 'view' parameter; 'getOr' is not a 'view fn'",
+        "'q' is a 'view' parameter; 'get' is not a 'view fn'",
+        "'l' is a 'view' parameter; 'getBack' is not a 'view fn'"})
     EXPECT_NE(out.find(line), std::string::npos) << line << "\n" << out;
 }
 

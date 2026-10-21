@@ -1,0 +1,10 @@
+// expect-panic: HashMap.at of a key it does not have
+import ::io;
+import ::collections;
+
+fn main() -> int {
+  m = collections::HashMap<Str, int>();
+  m.put("a", 1);
+  io::println(Str(m.at("b")));
+  return 0;
+}

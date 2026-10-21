@@ -1,0 +1,9 @@
+// expect-panic: get on an empty priority queue
+import ::io;
+import ::collections;
+
+fn main() -> int {
+  q = collections::MinPriorityQueue<Str>();
+  io::println(q.get());
+  return 0;
+}

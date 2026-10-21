@@ -1,0 +1,9 @@
+// expect-panic: get from an empty Queue
+import ::io;
+import ::collections;
+
+fn main() -> int {
+  q = collections::Queue<int>();
+  io::println(Str(q.get()));
+  return 0;
+}

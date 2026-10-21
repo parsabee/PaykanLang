@@ -1,0 +1,9 @@
+// expect-panic: get from an empty Stack
+import ::io;
+import ::collections;
+
+fn main() -> int {
+  s = collections::Stack<Str>();
+  io::println(s.get());
+  return 0;
+}

@@ -327,7 +327,7 @@ fn main() -> int {
   fs = collections::List<(int) -> int>();
   fs.push(fn(x: int) -> int { return x * 2; });
   fs.push(fn(x: int) -> int { return x + 2; });
-  k: view = fs.get(1);
+  k: view = fs.at(1);
   io::println(Str(n) + " " + h.run("a") + " " + Str(k(1)) + " " + Str(fs.contains(k)));
   return 0;
 }

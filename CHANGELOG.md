@@ -57,6 +57,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The standard library's containers hand out an element two ways (docs/stdlib/collections.md).
+  `view fn`s lend it as a `view`, which stays the container's: `List`'s `at` and `last`,
+  `LinkedList`'s `front` and `back`, the `peek`s, and `HashMap`'s `at` and `atOr`.  The new
+  `get`s hand over a copy the caller keeps (`-> T`): `List.get(i)`, `HashMap.get(k)` and
+  `getOr(k, otherwise)`, `LinkedList.getFront()` and `getBack()`, and `get()` on `Stack`,
+  `Queue` and the priority queues.  A copy of an object shares it with the container, so the
+  `get`s are not `view fn`s, and a `view` of a container reads with `at` (`'xs' is a 'view'
+  parameter; 'get' is not a 'view fn'`).  `List.get` and `HashMap.get` / `getOr` were the
+  lending reads; code that reads through a `view` of the container, or binds the result to a
+  `view` local, now calls `at` / `atOr`.  `memory::Buffer<T>` follows suit: `at(i)` lends a
+  slot, and `get(i)` is the copy that was `copyUnchecked(i)`.
 - `--emit-c` prints the C of the program's PIR.  A module loaded from a module file with
   compiled code (the standard library's, an import's cache entry) is linked as an object
   (`paykan pkm extract --object`), and the C keeps everything that code uses
