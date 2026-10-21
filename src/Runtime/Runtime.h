@@ -40,8 +40,8 @@ extern "C" {
 // conventions, symbol naming), versioned like every format by the release:
 // major * 10000 + minor * 100 + patch.  Code compiled against another
 // runtime is never linked or loaded: the backend's bitcode cache and every
-// .pkm module file record it (docs/design/pkm.md §2.2, tag 0x09).  It is spelled
-// out here, for C, and the compiler checks it is its own release's
+// .pkm module file record it (docs/design/pkm.md §2.2, tag 0x09).  It is
+// spelled out here, for C, and the compiler checks it is its own release's
 // (kVersionNumber, a static_assert in src/Modules/ModuleResolver.cpp).
 #define PAYKAN_RUNTIME_ABI_VERSION 200 /* 0.2.0 */
 
