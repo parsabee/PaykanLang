@@ -3,13 +3,14 @@
 // Test utilities that compile and run Paykan programs through a backend.
 //
 // The backend is selected per test process by the PAYKAN_TEST_BACKEND
-// environment variable ("llvm" or "c"; the build's default backend, c, when
-// unset), so the same CodeGen suite runs once per enabled backend (see
+// environment variable ("llvm", "mlir" or "c"; the build's default backend,
+// c, when unset), so the same CodeGen suite runs once per enabled backend (see
 // tests/CMakeLists.txt) and the backends act as differential oracles for
 // each other: every test asserts the same stdout, exit code and zero live
 // heap blocks whichever backend ran it.
 //
 //   * llvm: lowering -> PIR -> LLVM IR -> ORC JIT, in-process.
+//   * mlir: lowering -> PIR -> MLIR -> LLVM IR -> ORC JIT, in-process.
 //   * c:    lowering -> PIR -> C -> $CC, run as a child process.  The child
 //           runs with the tracking allocator when the test process has it
 //           enabled, and reports its live-block count back through its heap
@@ -24,12 +25,17 @@
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Verifier.h"
 
-#if PAYKAN_TEST_HAVE_LLVM
+#if PAYKAN_TEST_HAVE_LLVM || PAYKAN_TEST_HAVE_MLIR
 #include "JIT.h"
-#include "PIRToLLVM.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
+#endif
+#if PAYKAN_TEST_HAVE_LLVM
+#include "PIRToLLVM.h"
+#endif
+#if PAYKAN_TEST_HAVE_MLIR
+#include "Pipeline.h"
 #endif
 
 #include <gtest/gtest.h>
@@ -138,7 +144,7 @@ inline Analysed analyseFile(const std::string &filePath,
   return a;
 }
 
-#if PAYKAN_TEST_HAVE_LLVM
+#if PAYKAN_TEST_HAVE_LLVM || PAYKAN_TEST_HAVE_MLIR
 /// JIT-run an LLVM module in process, capturing its stdout and stderr.  A JIT
 /// failure (an unresolved symbol, a module the JIT rejects) returns
 /// CompileOk == false with the error's message appended to StdErr, so a
@@ -164,7 +170,36 @@ inline RunResult runJITModule(std::unique_ptr<llvm::Module> module,
   }
   return {*resultOrErr, outStr, errStr, true};
 }
+#endif
 
+#if PAYKAN_TEST_HAVE_MLIR
+/// The MLIR backend: lowering -> PIR -> MLIR -> LLVM IR (through the bitcode
+/// cache, like the driver) -> JIT, in process.
+inline RunResult runProgramMLIR(const pir::Program &program,
+                                const std::vector<std::string> *args,
+                                const std::string &projectRoot) {
+  if (auto verrs = pir::verify(program); !verrs.empty())
+    return {-1, "", "verifier: " + pir::formatErrors(verrs), false};
+  auto llvmCtx = std::make_unique<llvm::LLVMContext>();
+  auto module =
+      mlir_backend::compileProgram(program, *llvmCtx, "test", projectRoot);
+  if (!module)
+    return {-1, "", module.status().message(), false};
+  return runJITModule(std::move(*module), std::move(llvmCtx), args);
+}
+
+inline RunResult runMLIR(Analysed &a, const std::vector<std::string> *args,
+                         const std::string &projectRoot) {
+  pir::Program program;
+  std::ostringstream errs;
+  if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
+                              program, errs))
+    return {-1, "", "lowering failed: " + errs.str(), false};
+  return runProgramMLIR(program, args, projectRoot);
+}
+#endif
+
+#if PAYKAN_TEST_HAVE_LLVM
 /// The LLVM backend: lowering -> PIR -> LLVM IR (through the bitcode cache,
 /// like the driver) -> JIT, in process.
 inline RunResult runProgramLLVM(const pir::Program &program,
@@ -265,6 +300,10 @@ inline RunResult runAnalysed(Analysed &a, const std::vector<std::string> *args,
   if (testBackend() == "llvm")
     return runLLVM(a, args, projectRoot);
 #endif
+#if PAYKAN_TEST_HAVE_MLIR
+  if (testBackend() == "mlir")
+    return runMLIR(a, args, projectRoot);
+#endif
   if (testBackend() == "c")
     return runC(a, args, projectRoot);
   return {-1, "", "unknown test backend '" + testBackend() + "'", false};
@@ -328,6 +367,10 @@ inline RunResult compileAndRunPIR(const std::string &text) {
 #if PAYKAN_TEST_HAVE_LLVM
   if (testBackend() == "llvm")
     return detail::runProgramLLVM(*program, nullptr, "");
+#endif
+#if PAYKAN_TEST_HAVE_MLIR
+  if (testBackend() == "mlir")
+    return detail::runProgramMLIR(*program, nullptr, "");
 #endif
   if (auto verrs = pir::verify(*program); !verrs.empty())
     return {-1, "", "verifier: " + pir::formatErrors(verrs), false};

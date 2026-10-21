@@ -1,10 +1,14 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Ahead-of-time compilation in the `llvm` backend (see NativeBuild.h).
+// Running and building a program's LLVM module (see NativeBuild.h).
 
 #include "NativeBuild.h"
 
+#include "JIT.h"
+#include "ModuleCache.h"
 #include "Names.h"
+#include "Runtime.h"
+#include "paykan/backends/Toolchain.h"
 
 #include <llvm/ADT/StringMap.h>
 #include <llvm/IR/IRBuilder.h>
@@ -20,8 +24,9 @@
 #include <llvm/TargetParser/SubtargetFeature.h>
 
 #include <optional>
+#include <sstream>
 
-namespace paykan::backend::llvm_backend {
+namespace paykan::llvm_codegen {
 
 namespace {
 
@@ -164,4 +169,66 @@ Status writeObjectFile(llvm::Module &module, llvm::TargetMachine &tm,
   return Status::ok();
 }
 
-} // namespace paykan::backend::llvm_backend
+Status prepareForJIT(llvm::Module &module, unsigned optLevel) {
+  if (llvm::Error err = jit::setHostLayout(module))
+    return Status::error("JIT error: " + llvm::toString(std::move(err)));
+  optimizeModule(module, optLevel);
+  return Status::ok();
+}
+
+StatusOr<int> runInProcess(std::unique_ptr<llvm::Module> module,
+                           std::unique_ptr<llvm::LLVMContext> ctx,
+                           std::span<const std::string> args,
+                           const std::vector<std::string> &objects,
+                           bool trackHeap) {
+  // Select the tracking allocator before any program allocation happens,
+  // so that every block is allocated and freed by the same back-end.
+  if (trackHeap) {
+    Paykan_heap_set_tracking(1);
+    Paykan_heap_reset();
+  }
+  std::vector<std::string> progArgs(args.begin(), args.end());
+  auto result =
+      jit::runModule(std::move(module), std::move(ctx), progArgs, objects);
+  if (trackHeap)
+    Paykan_heap_dump();
+  if (!result)
+    return Status::error("JIT error: " + llvm::toString(result.takeError()));
+  return *result;
+}
+
+Status emitHostObject(llvm::Module &module, unsigned optLevel,
+                      const std::string &path) {
+  if (Status s = addEntryPoint(module); !s)
+    return s;
+  auto tm = createHostTargetMachine(optLevel);
+  if (!tm)
+    return tm.status();
+  module.setTargetTriple((*tm)->getTargetTriple());
+  module.setDataLayout((*tm)->createDataLayout());
+  optimizeModule(module, optLevel);
+  return writeObjectFile(module, **tm, path);
+}
+
+Status buildHostExecutable(
+    const std::function<Status(const std::string &)> &emitObject,
+    const std::vector<std::string> &objects, const std::string &output) {
+  // The system toolchain, with the sanitizer / coverage flags of a sanitizer
+  // / coverage build, whose runtime archive is instrumented.
+  std::ostringstream errs;
+  toolchain::Toolchain tc;
+  tc.ExtraObjects = objects;
+  if (!toolchain::resolveToolchain(tc, errs))
+    return Status::error(errs.str());
+  toolchain::TempDir tmp;
+  if (tmp.Path.empty())
+    return Status::error("cannot create a temporary directory");
+  std::string object = tmp.Path + "/program.o";
+  if (Status s = emitObject(object); !s)
+    return s;
+  if (!toolchain::linkExecutable({object}, output, tc, errs))
+    return Status::error(errs.str());
+  return Status::ok();
+}
+
+} // namespace paykan::llvm_codegen

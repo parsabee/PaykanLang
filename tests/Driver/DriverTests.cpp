@@ -825,7 +825,7 @@ TEST(Driver, PanicExitStatusIsTheSameOnEveryBackend) {
   }
   auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
   int ran = 0;
-  for (const std::string be : {"llvm", "c"}) {
+  for (const std::string be : {"llvm", "mlir", "c"}) {
     if (backends.find(be + "\n") == std::string::npos &&
         backends.find(be + " ") == std::string::npos)
       continue;
@@ -888,7 +888,7 @@ TEST(Driver, PanicFlushesStdoutOnEveryBackend) {
   const std::string before = "first line\nabout to panic...\n";
   auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
   int ran = 0;
-  for (const std::string be : {"llvm", "c"}) {
+  for (const std::string be : {"llvm", "mlir", "c"}) {
     if (backends.find(be + "\n") == std::string::npos &&
         backends.find(be + " ") == std::string::npos)
       continue;
@@ -1057,6 +1057,11 @@ TEST(Driver, EmitMLIRPrintsEachStage) {
   EXPECT_NE(outSCF.find("func.func @main() -> i64"), std::string::npos)
       << outSCF;
   EXPECT_NE(outSCF.find("arith.addi"), std::string::npos) << outSCF;
+  auto [rcLLVM, outLLVM] =
+      run(std::string(kPaykan) + " --emit-mlir=llvm " + src + " 2>&1");
+  EXPECT_EQ(rcLLVM, 0) << outLLVM;
+  EXPECT_NE(outLLVM.find("llvm.func @main() -> i64"), std::string::npos)
+      << outLLVM;
   auto [rcC, outC] = run(std::string(kPaykan) +
                          " --backend=c --emit-mlir=pir " + src + " 2>&1");
   EXPECT_NE(rcC, 0) << outC;
@@ -1212,7 +1217,7 @@ TEST(Driver, FloatNotEqualIsUnorderedOnEveryBackend) {
       " + Str<bool>(1.0 != n) + Str<bool>(1.0 != 1.0)); return 0; }");
   auto backends = run(std::string(kPaykan) + " --list-backends 2>&1").out;
   int ran = 0;
-  for (const char *be : {"llvm", "c"}) {
+  for (const char *be : {"llvm", "mlir", "c"}) {
     if (backends.find(std::string(be) + "\n") == std::string::npos &&
         backends.find(std::string(be) + " ") == std::string::npos)
       continue;
@@ -1225,7 +1230,7 @@ TEST(Driver, FloatNotEqualIsUnorderedOnEveryBackend) {
     auto [srcRc, code] = run(std::string(kPaykan) + " --backend=" + be +
                              " -O0 --emit-source " + src + " 2>&1");
     EXPECT_EQ(srcRc, 0) << be << ": " << code;
-    if (std::string(be) == "llvm") {
+    if (std::string(be) != "c") { // LLVM IR
       EXPECT_NE(code.find("fcmp une double"), std::string::npos) << code;
       EXPECT_EQ(code.find("fcmp one"), std::string::npos) << code;
     } else {
@@ -1923,7 +1928,8 @@ TEST(Driver, BuildAndRunDefaultToO2) {
     // Cached bitcode is the unoptimised translation (the opt level is
     // applied to the linked program), so one entry serves every level: a
     // run at another level reuses it unchanged.
-    auto bc = dir / ".paykan_cache" / "lib.bc";
+    auto bc = dir / ".paykan_cache" /
+              (testBackend() == "mlir" ? "lib.mlir.bc" : "lib.bc");
     ASSERT_TRUE(fs::exists(bc)) << bc;
     auto stamp = fs::last_write_time(bc);
     runWith("-O1");

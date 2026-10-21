@@ -12,7 +12,7 @@ add_compile_definitions(PAYKAN_TEST_STDLIB_DIR="${CMAKE_RUNTIME_OUTPUT_DIRECTORY
 # out-of-tree suites.
 list(JOIN PAYKAN_PLUGIN_COMPATIBLE_VERSIONS ", " PAYKAN_TEST_ACCEPTED_VERSIONS)
 
-if("llvm" IN_LIST PAYKAN_BACKENDS)
+if(PAYKAN_NEEDS_LLVM)
     llvm_map_components_to_libnames(TEST_LLVM_LIBS
         core support passes orcjit native
     )
@@ -168,22 +168,36 @@ target_link_libraries(codegen_tests
             paykan_runtime
             paykan_compile_options
 )
-if("llvm" IN_LIST PAYKAN_BACKENDS)
+if(PAYKAN_NEEDS_LLVM)
     target_include_directories(codegen_tests SYSTEM
         PRIVATE ${LLVM_INCLUDE_DIRS}
     )
     paykan_llvm_no_werror(codegen_tests)
-    target_compile_definitions(codegen_tests
-        PRIVATE PAYKAN_TEST_HAVE_LLVM=1
-    )
     target_link_libraries(codegen_tests
         PRIVATE paykan_jit
                 ${TEST_LLVM_LIBS}
     )
 endif()
+if("llvm" IN_LIST PAYKAN_BACKENDS)
+    target_compile_definitions(codegen_tests
+        PRIVATE PAYKAN_TEST_HAVE_LLVM=1
+    )
+endif()
+if("mlir" IN_LIST PAYKAN_BACKENDS)
+    # (The plugin itself is linked whole, with the others, below.)
+    target_include_directories(codegen_tests
+        PRIVATE ${CMAKE_SOURCE_DIR}/src/Backends/MLIR
+    )
+    target_include_directories(codegen_tests SYSTEM
+        PRIVATE ${MLIR_INCLUDE_DIRS}
+    )
+    target_compile_definitions(codegen_tests
+        PRIVATE PAYKAN_TEST_HAVE_MLIR=1
+    )
+endif()
 paykan_link_plugins(codegen_tests)
 foreach(be IN LISTS PAYKAN_BACKENDS)
-    if(be STREQUAL "llvm" OR be STREQUAL "c")
+    if(be STREQUAL "llvm" OR be STREQUAL "mlir" OR be STREQUAL "c")
         add_test(NAME CodeGenTests.${be} COMMAND codegen_tests)
         set_tests_properties(CodeGenTests.${be} PROPERTIES
             ENVIRONMENT "PAYKAN_TEST_BACKEND=${be}")
@@ -509,7 +523,7 @@ if(PAYKAN_COVERAGE)
 endif()
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).
 foreach(be IN LISTS PAYKAN_BACKENDS)
-    if(be STREQUAL "llvm" OR be STREQUAL "c")
+    if(be STREQUAL "llvm" OR be STREQUAL "mlir" OR be STREQUAL "c")
         add_test(NAME DriverTests.${be} COMMAND driver_tests)
         # No plugins from the plugin directories: the listings these tests
         # check exactly are the build's own (tests/Plugin/LoaderTests.cpp
@@ -541,7 +555,7 @@ endfunction()
 # exit codes and zero live heap blocks (scripts/samples_parity.py) (samples).
 set(PAYKAN_SAMPLES_BACKENDS "")
 foreach(be IN LISTS PAYKAN_BACKENDS)
-    if(be STREQUAL "llvm" OR be STREQUAL "c")
+    if(be STREQUAL "llvm" OR be STREQUAL "mlir" OR be STREQUAL "c")
         list(APPEND PAYKAN_SAMPLES_BACKENDS --backend ${be})
     endif()
 endforeach()

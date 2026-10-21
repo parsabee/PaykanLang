@@ -8,12 +8,9 @@
 // modules are served from the bitcode cache under <project root>/.paykan_cache
 // when their PIR is unchanged.
 
-#include "JIT.h"
 #include "NativeBuild.h"
 #include "PIRToLLVM.h"
-#include "Runtime.h"
 #include "paykan/Backend.h"
-#include "paykan/backends/Toolchain.h"
 
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/LLVMContext.h>
@@ -22,7 +19,6 @@
 #include <filesystem>
 #include <memory>
 #include <ostream>
-#include <sstream>
 #include <string>
 
 namespace paykan::backend::llvm_backend {
@@ -79,20 +75,8 @@ public:
     auto module = compile(in, *ctx);
     if (!module)
       return module.status();
-    // Select the tracking allocator before any program allocation happens,
-    // so that every block is allocated and freed by the same back-end.
-    if (opts.TrackHeap) {
-      Paykan_heap_set_tracking(1);
-      Paykan_heap_reset();
-    }
-    std::vector<std::string> progArgs(args.begin(), args.end());
-    auto result = jit::runModule(std::move(*module), std::move(ctx), progArgs,
-                                 in.Objects);
-    if (opts.TrackHeap)
-      Paykan_heap_dump();
-    if (!result)
-      return Status::error("JIT error: " + llvm::toString(result.takeError()));
-    return *result;
+    return llvm_codegen::runInProcess(std::move(*module), std::move(ctx), args,
+                                      in.Objects, opts.TrackHeap);
   }
 
 private:
@@ -117,9 +101,8 @@ private:
     auto module = translate(in, ctx);
     if (!module)
       return module.status();
-    if (llvm::Error err = jit::setHostLayout(**module))
-      return Status::error("JIT error: " + llvm::toString(std::move(err)));
-    optimizeModule(**module, in.OptLevel);
+    if (Status s = llvm_codegen::prepareForJIT(**module, in.OptLevel); !s)
+      return s;
     return module;
   }
 
@@ -138,36 +121,15 @@ private:
     auto module = translate(in, ctx);
     if (!module)
       return module.status();
-    if (Status s = addEntryPoint(**module); !s)
-      return s;
-    auto tm = createHostTargetMachine(in.OptLevel);
-    if (!tm)
-      return tm.status();
-    (*module)->setTargetTriple((*tm)->getTargetTriple());
-    (*module)->setDataLayout((*tm)->createDataLayout());
-    optimizeModule(**module, in.OptLevel);
-    return writeObjectFile(**module, **tm, path);
+    return llvm_codegen::emitHostObject(**module, in.OptLevel, path);
   }
 
-  /// `build`: the object of emitObject() linked against the runtime with
-  /// the system toolchain (including the sanitizer / coverage flags of a
-  /// sanitizer / coverage build, whose runtime archive is instrumented).
+  /// `build`: the object of emitObject() linked against the runtime.
   static Status buildExecutable(const Input &in, llvm::LLVMContext &ctx,
                                 const std::string &output) {
-    std::ostringstream errs;
-    toolchain::Toolchain tc;
-    tc.ExtraObjects = in.Objects;
-    if (!toolchain::resolveToolchain(tc, errs))
-      return Status::error(errs.str());
-    toolchain::TempDir tmp;
-    if (tmp.Path.empty())
-      return Status::error("cannot create a temporary directory");
-    std::string object = tmp.Path + "/program.o";
-    if (Status s = emitObject(in, ctx, object); !s)
-      return s;
-    if (!toolchain::linkExecutable({object}, output, tc, errs))
-      return Status::error(errs.str());
-    return Status::ok();
+    return llvm_codegen::buildHostExecutable(
+        [&](const std::string &object) { return emitObject(in, ctx, object); },
+        in.Objects, output);
   }
 };
 

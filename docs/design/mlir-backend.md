@@ -101,7 +101,8 @@ vtables, optionals, the sized integer types, structured control flow with
 3. The shared lowering and `--emit-mlir=scf`.
 4. The LLVM path: the `llvm` dialect, LLVM IR, the JIT and `build`
    (`--backend=mlir` runs programs), and `--emit-mlir=llvm`; the whole test
-   suite passes on it.
+   suite passes on it.  The JIT, the bitcode cache and native builds move
+   to a library both LLVM backends share (src/Backends/LLVM/CodeGen).
 5. The C path: EmitC and `--emit-c` from MLIR, and `paykan build` through
    it; the strict C11 check passes on its output.
 6. The C emitter and `PIRToLLVM.cpp` are removed; MLIR is the only backend.
