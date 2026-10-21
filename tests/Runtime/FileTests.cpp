@@ -194,13 +194,17 @@ TEST(FileWrite, WritesContentToFile) {
   Paykan_dispose((PaykanObject *)pathStr);
   Paykan_dispose((PaykanObject *)modeStr);
 
-  // Read back and verify.
-  FILE *fp = fopen(path, "r");
-  ASSERT_NE(fp, nullptr);
-  char buf[64] = {};
-  size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
-  fclose(fp);
-  EXPECT_EQ(std::string(buf, n), "hello paykan\n");
+  // Read back and verify (the stream closed on every path).
+  std::string text;
+  if (FILE *fp = fopen(path, "r")) {
+    char buf[64] = {};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, fp);
+    fclose(fp);
+    text.assign(buf, n);
+  } else {
+    ADD_FAILURE() << "cannot reopen " << path;
+  }
+  EXPECT_EQ(text, "hello paykan\n");
   std::remove(path);
 }
 
