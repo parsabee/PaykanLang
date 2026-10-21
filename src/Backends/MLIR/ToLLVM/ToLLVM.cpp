@@ -23,6 +23,7 @@
 #include <mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h>
 #include <mlir/Dialect/Arith/IR/Arith.h>
 #include <mlir/Dialect/ControlFlow/IR/ControlFlow.h>
+#include <mlir/Dialect/ControlFlow/IR/ControlFlowOps.h>
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/Dialect/SCF/IR/SCF.h>
@@ -343,6 +344,76 @@ struct VTableLowering : PIRPattern<P::VTableOp> {
   }
 };
 
+// -- SCF to cf
+
+/// scf.index_switch (SwitchFormation.h) as a cf.switch on the whole 64-bit
+/// index.  Upstream's lowering switches on an i32, which drops the upper
+/// half: a subject of 1 << 32 would take case 0.
+struct IndexSwitchLowering : OpRewritePattern<scf::IndexSwitchOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(scf::IndexSwitchOp op,
+                                PatternRewriter &r) const override {
+    Location loc = op.getLoc();
+    Block *head = r.getInsertionBlock();
+    Block *next = r.splitBlock(head, Block::iterator(op));
+    for (Type t : op.getResultTypes())
+      next->addArgument(t, loc);
+    // Each region, its yield a branch to what follows the switch.
+    auto inlineRegion = [&](Region &region) {
+      Block *entry = &region.front();
+      auto yield = cast<scf::YieldOp>(entry->getTerminator());
+      r.setInsertionPoint(yield);
+      r.replaceOpWithNewOp<cf::BranchOp>(yield, next, yield.getOperands());
+      r.inlineRegionBefore(region, next);
+      return entry;
+    };
+    SmallVector<Block *> cases;
+    SmallVector<APInt> values;
+    for (auto [region, value] : llvm::zip(op.getCaseRegions(), op.getCases())) {
+      cases.push_back(inlineRegion(region));
+      values.emplace_back(64, value, /*isSigned=*/true);
+    }
+    Block *defaultCase = inlineRegion(op.getDefaultRegion());
+    r.setInsertionPointToEnd(head);
+    Value subject =
+        arith::IndexCastOp::create(r, loc, r.getI64Type(), op.getArg());
+    cf::SwitchOp::create(r, loc, subject, defaultCase, ValueRange(), values,
+                         cases, SmallVector<ValueRange>(cases.size()));
+    r.replaceOp(op, next->getArguments());
+    return success();
+  }
+};
+
+/// Upstream's SCF to cf conversion, but for scf.index_switch.
+struct SCFToCFPass : public PassWrapper<SCFToCFPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SCFToCFPass)
+
+  StringRef getArgument() const override { return "pir-scf-to-cf"; }
+  StringRef getDescription() const override {
+    return "Lower scf to cf, switches on their whole 64-bit index";
+  }
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<arith::ArithDialect, cf::ControlFlowDialect>();
+  }
+
+  void runOnOperation() override {
+    MLIRContext *ctx = &getContext();
+    RewritePatternSet patterns(ctx);
+    populateSCFToControlFlowConversionPatterns(patterns);
+    patterns.add<IndexSwitchLowering>(ctx, /*benefit=*/2);
+    ConversionTarget target(*ctx);
+    target
+        .addIllegalOp<scf::ForallOp, scf::ForOp, scf::IfOp, scf::IndexSwitchOp,
+                      scf::ParallelOp, scf::WhileOp, scf::ExecuteRegionOp>();
+    target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
+    if (failed(applyPartialConversion(getOperation(), target,
+                                      std::move(patterns))))
+      signalPassFailure();
+  }
+};
+
+// -- The LLVM dialect
+
 struct ConvertToLLVMPass
     : public PassWrapper<ConvertToLLVMPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ConvertToLLVMPass)
@@ -403,7 +474,7 @@ void loadLLVMDialects(MLIRContext &ctx) {
 }
 
 void addLLVMDialectPasses(PassManager &pm) {
-  pm.addPass(createSCFToControlFlowPass());
+  pm.addPass(std::make_unique<SCFToCFPass>());
   pm.addPass(std::make_unique<ConvertToLLVMPass>());
   pm.addPass(createReconcileUnrealizedCastsPass());
 }

@@ -73,6 +73,16 @@ vtables, optionals, the sized integer types, structured control flow with
   flag being clear, and a loop's condition region stops the loop once it is
   set.  A `return`'s value goes into a local the function returns at its
   end.  LLVM's optimiser removes the flag again; C keeps it.
+* **Switches.**  PIR dispatches a `match` with an if-else chain
+  (src/Lowering/LoweringMatch.cpp).  A chain that tests one integer for
+  equality with constants -- a `match` on an enum or on integer or `char`
+  literals -- becomes one `scf.index_switch` (Lowering/SwitchFormation.cpp),
+  the last step of the shared lowering.  Upstream conversions make it a C `switch`
+  (`emitc.switch`); the LLVM path makes it an LLVM `switch` on the whole
+  64-bit value (upstream's switches on an `i32`).  A case value must be
+  non-negative, so that C's `size_t` switch and LLVM's `i64` one agree; a
+  value an earlier test already took is dropped, as the chain never reaches
+  it.  A `match` on classes, optionals, strings or floats stays a chain.
 * **ARC, allocation, weak references** become calls to the runtime
   (`func.call`), as both of the replaced translations did.
 * **Objects.**  Every class's layout is computed once, as C lays out the

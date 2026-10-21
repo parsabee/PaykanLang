@@ -6,6 +6,7 @@
 
 #include "Import/PIRImport.h"
 #include "Lowering/PIRToStandard.h"
+#include "Lowering/SwitchFormation.h"
 #include "ModuleCache.h"
 #include "ToEmitC/ToEmitC.h"
 #include "ToLLVM/ToLLVM.h"
@@ -66,6 +67,7 @@ Status lowerTo(mlir::ModuleOp module, Stage stage) {
       });
   mlir::PassManager pm(module.getContext());
   pm.addPass(createPIRToStandardPass());
+  pm.addPass(createSwitchFormationPass());
   if (stage == Stage::LLVM)
     addLLVMDialectPasses(pm);
   else if (stage == Stage::EmitC)

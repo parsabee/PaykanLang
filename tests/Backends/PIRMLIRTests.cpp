@@ -88,6 +88,29 @@ lowerText(const std::string &text, mlir::MLIRContext &ctx, std::string &err) {
   return std::move(*mod);
 }
 
+/// The PIR @p text through the shared lowering, switch formation included
+/// (Stage::SCF), printed ("" on failure, with the reason in @p err).
+std::string scfText(const std::string &text, mlir::MLIRContext &ctx,
+                    std::string &err) {
+  pir::ParseError perr;
+  auto program = pir::parseProgram(text, perr);
+  if (!program) {
+    err = "parse error: " + perr.str();
+    return "";
+  }
+  auto mod = mlir_backend::importProgram(*program, ctx);
+  if (!mod) {
+    err = mod.status().message();
+    return "";
+  }
+  if (Status s = mlir_backend::lowerTo((*mod).get(), mlir_backend::Stage::SCF);
+      !s) {
+    err = s.message();
+    return "";
+  }
+  return print((*mod).get());
+}
+
 /// Every op of @p mod is one both targets lower: func, scf and arith, and
 /// the pir globals, memory ops and optionals.
 void expectOnlyStandardOps(mlir::ModuleOp mod) {
@@ -218,6 +241,145 @@ TEST(PIRMLIR, EmitCOfEveryItemAndInstruction) {
     if (line.empty() || line[0] == ' ')
       continue;
     EXPECT_EQ(line.find("()"), std::string::npos) << line;
+  }
+}
+
+// A chain of ifs testing one integer against constants, `match` on an
+// enum or on integer literals, as PIR (src/Lowering/LoweringMatch.cpp).
+// The second test of 2 is never taken.
+const char *const kEqualityChain = R"(module "main"
+fn @pick(%x.1: i64) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  %t.2 = cmp eq %x.1, 0
+  if %t.2 {
+    store %r.0, 10
+  } else {
+    %t.3 = cmp eq %x.1, 2
+    if %t.3 {
+      store %r.0, 20
+    } else {
+      %t.4 = cmp eq %x.1, 2
+      if %t.4 {
+        store %r.0, 99
+      } else {
+        %t.5 = cmp eq %x.1, 5
+        if %t.5 {
+          store %r.0, 30
+        } else {
+          store %r.0, 40
+        }
+      }
+    }
+  }
+  %v.6 = load %r.0
+  ret %v.6
+}
+
+fn @main() -> i64 {
+  %a.1 = call @pick(5)
+  ret %a.1
+}
+)";
+
+// The chain is one scf.index_switch, a case for each value tested first,
+// and both targets switch: C on the index's size_t, LLVM on its i64.
+TEST(PIRMLIR, AnEqualityChainIsASwitch) {
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  std::string mlir = scfText(kEqualityChain, *ctx, err);
+  ASSERT_FALSE(mlir.empty()) << err;
+  for (const char *text :
+       {"scf.index_switch", "case 0 {", "case 2 {", "case 5 {", "default {"})
+    EXPECT_NE(mlir.find(text), std::string::npos) << text << "\n" << mlir;
+  EXPECT_EQ(mlir.find("scf.if"), std::string::npos) << mlir;
+  EXPECT_EQ(mlir.find("arith.cmpi"), std::string::npos) << mlir;
+  EXPECT_EQ(mlir.find("99"), std::string::npos) << mlir;
+  expectRoundTrip(mlir, *ctx);
+
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string c = emitCText(kEqualityChain, ctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  EXPECT_NE(c.find("switch ("), std::string::npos) << c;
+  EXPECT_NE(c.find("case 5: {"), std::string::npos) << c;
+}
+
+// What is not a chain of equality tests on one integer stays scf.if: a
+// single test, tests of two values, an ordering test, a negative constant.
+TEST(PIRMLIR, OtherTestsStayIfs) {
+  const char *programs[] = {
+      R"(module "main"
+fn @f(%x.1: i64) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  %t.2 = cmp eq %x.1, 1
+  if %t.2 {
+    store %r.0, 1
+  } else {
+    store %r.0, 2
+  }
+  %v.3 = load %r.0
+  ret %v.3
+}
+)",
+      R"(module "main"
+fn @f(%x.1: i64, %y.2: i64) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  %t.3 = cmp eq %x.1, 1
+  if %t.3 {
+    store %r.0, 1
+  } else {
+    %t.4 = cmp eq %y.2, 2
+    if %t.4 {
+      store %r.0, 2
+    }
+  }
+  %v.5 = load %r.0
+  ret %v.5
+}
+)",
+      R"(module "main"
+fn @f(%x.1: i64) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  %t.2 = cmp lt %x.1, 1
+  if %t.2 {
+    store %r.0, 1
+  } else {
+    %t.3 = cmp lt %x.1, 2
+    if %t.3 {
+      store %r.0, 2
+    }
+  }
+  %v.4 = load %r.0
+  ret %v.4
+}
+)",
+      R"(module "main"
+fn @f(%x.1: i64) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  %t.2 = cmp eq %x.1, -1
+  if %t.2 {
+    store %r.0, 1
+  } else {
+    %t.3 = cmp eq %x.1, -2
+    if %t.3 {
+      store %r.0, 2
+    }
+  }
+  %v.4 = load %r.0
+  ret %v.4
+}
+)"};
+  for (const char *text : programs) {
+    auto ctx = mlir_backend::createContext();
+    std::string err;
+    std::string mlir = scfText(text, *ctx, err);
+    ASSERT_FALSE(mlir.empty()) << err << "\n" << text;
+    EXPECT_EQ(mlir.find("scf.index_switch"), std::string::npos) << mlir;
+    EXPECT_NE(mlir.find("scf.if"), std::string::npos) << mlir;
   }
 }
 
