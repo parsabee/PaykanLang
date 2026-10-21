@@ -217,8 +217,11 @@ public:
     auto it = Layouts.find(className);
     return it == Layouts.end() ? nullptr : &it->second;
   }
-  /// A runtime (or C library) function, declared in the module on first use.
-  func::FuncOp runtime(StringRef name, FunctionType type);
+  /// A runtime (or C library) function, declared in the module on first use
+  /// (with kRuntimeAttr unless @p isRuntime is false: an extern that is not
+  /// the runtime's, a native or another module's function).
+  func::FuncOp runtime(StringRef name, FunctionType type,
+                       bool isRuntime = true);
   void fail(const Twine &message) {
     if (Error.empty())
       Error = message.str();
@@ -247,13 +250,16 @@ private:
 
 // -- ModuleLowering
 
-func::FuncOp ModuleLowering::runtime(StringRef name, FunctionType type) {
+func::FuncOp ModuleLowering::runtime(StringRef name, FunctionType type,
+                                     bool isRuntime) {
   if (auto it = Declared.find(name); it != Declared.end())
     return it->second;
   OpBuilder::InsertionGuard guard(B);
   B.setInsertionPointToStart(Mod.getBody());
   auto fn = func::FuncOp::create(B, Loc, name, type);
   fn.setPrivate();
+  if (isRuntime)
+    fn->setAttr(kRuntimeAttr, UnitAttr::get(Ctx));
   Declared[name] = fn;
   return fn;
 }
@@ -311,6 +317,9 @@ LogicalResult ModuleLowering::run() {
     else
       continue;
     StringRef pirName = SymbolTable::getSymbolName(&op);
+    // A module-less extern global is the runtime's (Runtime.h declares it).
+    if (!link.empty() && !::paykan::pir::isNativeName(pirName))
+      op.setAttr(kRuntimeAttr, UnitAttr::get(Ctx));
     SymbolNames[pirName] = link.empty() ? linkName(Name, sym) : link;
     SymbolTable::setSymbolName(&op, SymbolNames[pirName]);
   }
@@ -340,7 +349,8 @@ LogicalResult ModuleLowering::run() {
     std::string link = FunctionNames[f.getSymName()];
     erase.push_back(f);
     if (f.isExternal()) {
-      runtime(link, f.getFunctionType());
+      runtime(link, f.getFunctionType(),
+              !f.getModule() && !::paykan::pir::isNativeName(f.getSymName()));
       continue;
     }
     auto fn = func::FuncOp::create(B, Loc, link, f.getFunctionType());

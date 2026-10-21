@@ -6,10 +6,12 @@
 #pragma once
 
 #include "paykan/Status.h"
+#include "paykan/backends/c/CBuild.h"
 #include "paykan/pir/PIR.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/raw_ostream.h>
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/MLIRContext.h>
 
@@ -20,12 +22,13 @@ namespace paykan::mlir_backend {
 
 /// The stages of the pipeline, in order: what --emit-mlir=<stage> prints.
 enum class Stage {
-  PIR,  // `pir`: the imported pir dialect
-  SCF,  // `scf`: after the shared lowering (func, scf, arith, pir memory)
-  LLVM, // `llvm`: the LLVM dialect
+  PIR,   // `pir`: the imported pir dialect
+  SCF,   // `scf`: after the shared lowering (func, scf, arith, pir memory)
+  LLVM,  // `llvm`: the LLVM dialect
+  EmitC, // `emitc`: EmitC, the C translation unit (the other target)
 };
 
-/// The stage named @p name ("pir", "scf", "llvm"), or false.
+/// The stage named @p name ("pir", "scf", "llvm", "emitc"), or false.
 bool parseStage(const std::string &name, Stage &stage);
 
 /// A context with every dialect the pipeline makes.
@@ -34,6 +37,18 @@ std::unique_ptr<mlir::MLIRContext> createContext();
 /// Run the pipeline on @p module (one PIR module, or a program of nested
 /// ones) from the imported pir dialect up to @p stage.
 Status lowerTo(mlir::ModuleOp module, Stage stage);
+
+/// The whole program as one C translation unit, on @p os.
+Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os);
+
+/// Module @p index of @p program as a C translation unit of its own: what
+/// it defines and declarations of what it imports (`build` compiles one per
+/// module and caches the objects).
+Status emitModuleC(const pir::Program &program, size_t index,
+                   llvm::raw_ostream &os);
+
+/// The two above, as what paykan/backends/c/CBuild.h builds.
+backend_c::CSource cSource();
 
 /// The whole program in LLVM IR, one linked module named @p moduleName;
 /// imported modules are served from the bitcode cache under @p projectRoot

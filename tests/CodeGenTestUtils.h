@@ -3,8 +3,9 @@
 // Test utilities that compile and run Paykan programs through a backend.
 //
 // The backend is selected per test process by the PAYKAN_TEST_BACKEND
-// environment variable ("llvm", "mlir" or "c"; the build's default backend,
-// c, when unset), so the same CodeGen suite runs once per enabled backend (see
+// environment variable ("llvm", "mlir", "mlir-c" or "c"; the build's default
+// backend, c, when unset), so the same CodeGen suite runs once per enabled
+// backend (see
 // tests/CMakeLists.txt) and the backends act as differential oracles for
 // each other: every test asserts the same stdout, exit code and zero live
 // heap blocks whichever backend ran it.
@@ -15,6 +16,7 @@
 //           runs with the tracking allocator when the test process has it
 //           enabled, and reports its live-block count back through its heap
 //           dump, which LeakGuard then checks.
+//   * mlir-c: lowering -> PIR -> MLIR -> EmitC -> C -> $CC, run as c's.
 
 #pragma once
 
@@ -249,7 +251,17 @@ inline int64_t extractHeapReport(std::string &err) {
   return live;
 }
 
-/// Build @p program with the C backend and run it with @p argv.
+/// The C translation the test backend builds: the mlir backend's C path for
+/// mlir-c, the C backend's emitter otherwise.
+inline backend_c::CSource testCSource() {
+#if PAYKAN_TEST_HAVE_MLIR
+  if (testBackend() == "mlir-c")
+    return mlir_backend::cSource();
+#endif
+  return backend_c::emitterSource();
+}
+
+/// Build @p program as C (testCSource()) and run it with @p argv.
 inline RunResult runProgramC(const pir::Program &program,
                              const std::vector<std::string> &argv) {
   std::ostringstream errs;
@@ -258,7 +270,8 @@ inline RunResult runProgramC(const pir::Program &program,
   auto [savedOut, outPath] = redirectFdToTempFile(STDOUT_FILENO);
   auto [savedErr, errPath] = redirectFdToTempFile(STDERR_FILENO);
   backend_c::Toolchain tc;
-  int rc = backend_c::buildAndRun(program, argv, track, tc, errs);
+  int rc =
+      backend_c::buildAndRun(program, testCSource(), argv, track, tc, errs);
   fflush(stdout);
   fflush(stderr);
   restoreFd(STDOUT_FILENO, savedOut);
@@ -304,7 +317,7 @@ inline RunResult runAnalysed(Analysed &a, const std::vector<std::string> *args,
   if (testBackend() == "mlir")
     return runMLIR(a, args, projectRoot);
 #endif
-  if (testBackend() == "c")
+  if (testBackend() == "c" || testBackend() == "mlir-c")
     return runC(a, args, projectRoot);
   return {-1, "", "unknown test backend '" + testBackend() + "'", false};
 }

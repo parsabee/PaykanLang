@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// C backend: compiling and running the emitted C with the system compiler.
+// Compiling and running a C translation of a PIR program with the system
+// compiler (paykan/backends/c/CBuild.h).
 
-#include "paykan/backends/c/CBackend.h"
+#include "paykan/backends/c/CBuild.h"
 
 #include "ModuleName.h"
 #include "Version.h"
@@ -207,16 +208,16 @@ void collectStaleEntries(const std::string &base, const std::string &keepHash) {
 
 } // namespace
 
-bool buildExecutable(const pir::Program &program, const std::string &outputPath,
-                     const Toolchain &tcIn, std::ostream &errs,
-                     const std::string &keepC) {
+bool buildExecutable(const pir::Program &program, const CSource &source,
+                     const std::string &outputPath, const Toolchain &tcIn,
+                     std::ostream &errs, const std::string &keepC) {
   Toolchain tc = tcIn;
   if (!resolveToolchain(tc, errs))
     return false;
 
   if (!keepC.empty()) {
     std::ostringstream src;
-    if (!emitC(program, src, errs))
+    if (!source.Program(program, src, errs))
       return false;
     std::ofstream out(keepC, std::ios::binary);
     out << src.str();
@@ -264,7 +265,7 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
   std::vector<std::string> objects;
   for (size_t mi = 0; mi < program.Modules.size(); ++mi) {
     std::ostringstream src;
-    if (!emitModuleC(program, mi, src, errs))
+    if (!source.Module(program, mi, src, errs))
       return false;
     std::string text = src.str();
 
@@ -358,7 +359,7 @@ bool buildExecutable(const pir::Program &program, const std::string &outputPath,
   return toolchain::linkExecutable(objects, outputPath, tc, errs);
 }
 
-int buildAndRun(const pir::Program &program,
+int buildAndRun(const pir::Program &program, const CSource &source,
                 const std::vector<std::string> &args, bool trackHeap,
                 const Toolchain &tc, std::ostream &errs) {
   TempDir tmp;
@@ -367,7 +368,7 @@ int buildAndRun(const pir::Program &program,
     return -1;
   }
   std::string exe = tmp.Path + "/program";
-  if (!buildExecutable(program, exe, tc, errs))
+  if (!buildExecutable(program, source, exe, tc, errs))
     return -1;
   // args[0] (the script path) becomes the program's argv[0]; an empty list
   // runs the program with argc == 0, exactly what the JIT path does.

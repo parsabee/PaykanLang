@@ -10,7 +10,7 @@
 
 #pragma once
 
-#include "paykan/backends/Toolchain.h"
+#include "paykan/backends/c/CBuild.h"
 #include "paykan/pir/PIR.h"
 
 #include <ostream>
@@ -31,22 +31,17 @@ bool emitC(const pir::Program &program, std::ostream &out, std::ostream &errs);
 bool emitModuleC(const pir::Program &program, size_t module, std::ostream &out,
                  std::ostream &errs);
 
-/// Where the C compiler and the runtime are, and their lookup: shared with
-/// the llvm backend (paykan/backends/Toolchain.h).
-using toolchain::resolveToolchain;
-using toolchain::Toolchain;
+/// The emitter as a CSource (emitC, emitModuleC).
+CSource emitterSource();
 
-/// Emit C, compile and link it into @p outputPath.  @p keepC, when
-/// non-empty, is where the C source is also written.
+/// Emit C, compile and link it into @p outputPath (paykan/backends/c/
+/// CBuild.h, with the emitter).  @p keepC, when non-empty, is where the C
+/// source is also written.
 bool buildExecutable(const pir::Program &program, const std::string &outputPath,
                      const Toolchain &tc, std::ostream &errs,
                      const std::string &keepC = "");
 
-/// Build into a temporary directory and run.  @p args[0] is the script path
-/// (becomes the program's args[0]); @p trackHeap selects the tracking
-/// allocator in the child (its stats are printed to stderr at exit).  Returns
-/// the program's exit status, 128 + signal when it died from a signal, or -1
-/// when it could not be built or started.
+/// Build into a temporary directory and run, with the emitter (CBuild.h).
 int buildAndRun(const pir::Program &program,
                 const std::vector<std::string> &args, bool trackHeap,
                 const Toolchain &tc, std::ostream &errs);

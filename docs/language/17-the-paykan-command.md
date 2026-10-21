@@ -56,9 +56,9 @@ These print an intermediate form of the program to standard output and stop:
 
 | Option | Prints |
 |--------|--------|
-| `--emit-c` | the generated C (selects the c backend) |
+| `--emit-c` | the generated C (selects the c backend; with `--backend=mlir-c`, the mlir backend's C) |
 | `--emit-llvm` | the generated LLVM IR (selects the llvm backend, which must be built in) |
-| `--emit-mlir=<stage>` | the program as MLIR at a stage of the mlir backend, which must be built in: `pir`, the program imported into the `pir` dialect, `scf`, after the lowering both targets share, or `llvm`, the LLVM dialect ([the MLIR backend](../design/mlir-backend.md)) |
+| `--emit-mlir=<stage>` | the program as MLIR at a stage of the mlir backend, which must be built in: `pir`, the program imported into the `pir` dialect, `scf`, after the lowering both targets share, `llvm`, the LLVM dialect, or `emitc`, EmitC, the C the `mlir-c` backend prints ([the MLIR backend](../design/mlir-backend.md)) |
 | `--emit-source` | the selected backend's output, whatever its language |
 | `--emit-pir` | PIR, the backend-neutral intermediate representation ([PIR](../pir.md)) |
 | `--emit-ast` | the parsed program in the AST interchange format ([AST format](../plugins/ast-format.md)) |
@@ -128,9 +128,14 @@ A backend turns the compiled program into something that runs. Two come with Pay
 
 A third, **`mlir`** (`-DPAYKAN_BACKENDS="llvm;mlir;c"`), is being built to replace both: the
 program goes through MLIR, and one lowering serves both C and LLVM
-([the MLIR backend](../design/mlir-backend.md)). It runs programs like `llvm` does (MLIR, then
-LLVM IR, then the JIT for `run` and a native object for `build`); `--emit-mlir=<stage>` prints
-the program at a stage of the pipeline, and `--emit-source` its LLVM IR. Its C output follows.
+([the MLIR backend](../design/mlir-backend.md)). It brings two backends:
+
+- **`mlir`** runs programs like `llvm` does (MLIR, then LLVM IR, then the JIT for `run` and a
+  native object for `build`); `--emit-source` prints its LLVM IR.
+- **`mlir-c`** builds and runs them like `c` does, from the C MLIR's EmitC dialect prints;
+  `--emit-c` (or `--emit-source`) prints that C.
+
+With either, `--emit-mlir=<stage>` prints the program at a stage of the pipeline.
 
 Both backends implement the same language and produce the same output. The repository's
 test suite runs every sample program, and every program in this documentation, on each backend that

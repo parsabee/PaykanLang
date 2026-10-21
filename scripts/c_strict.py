@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Check that the C backend's output is strict ISO C11 on every C compiler.
+"""Check that a C backend's output is strict ISO C11 on every C compiler.
 
-For every runnable program of the samples corpus (samples_parity.py's list)
-and every compiler named with --cc:
+The backend is --backend: `c` (the default), or `mlir-c`, the mlir backend's
+C path.  For every runnable program of the samples corpus (samples_parity.py's
+list) and every compiler named with --cc:
 
-* emit-c: the whole-program `paykan --backend=c --emit-c` output is compiled
-  with STRICT_FLAGS at each --opt level, linked with a copy of the runtime
-  (src/Runtime/*.c) built by the same compiler with the same flags, and run;
-* build: `paykan --backend=c build` is run with $CC set to a wrapper that adds
-  STRICT_FLAGS, so every per-module translation unit `build` and `run`
-  compile is checked too (compilers named with --build-cc only: these link
-  against the build tree's runtime, which a sanitizer build instruments for
-  its own compiler).
+* emit-c: the whole-program `paykan --backend=<backend> --emit-c` output is
+  compiled with STRICT_FLAGS at each --opt level, linked with a copy of the
+  runtime (src/Runtime/*.c) built by the same compiler with the same flags,
+  and run;
+* build: `paykan --backend=<backend> build` is run with $CC set to a wrapper
+  that adds STRICT_FLAGS, so every per-module translation unit `build` and
+  `run` compile is checked too (compilers named with --build-cc only: these
+  link against the build tree's runtime, which a sanitizer build instruments
+  for its own compiler).
 
 Every executable must exit like `paykan --backend=c run --track-heap` does,
 print the same stdout and stderr (apart from the heap statistics) and end
@@ -19,7 +21,8 @@ with 0 live heap blocks.
 
 Usage:
     c_strict.py --paykan build/bin/paykan --cc gcc --cc clang \\
-        [--build-cc gcc --build-cc clang] [--opt -O0 --opt -O2] [-v]
+        [--build-cc gcc --build-cc clang] [--opt -O0 --opt -O2] \\
+        [--backend mlir-c] [-v]
 """
 
 import argparse
@@ -118,7 +121,8 @@ def check_sample(args, sample, idx, runtimes, wrappers, outdir):
     ref = sp.normalise(ref_p)
     if ref[3] not in (0, None):  # None: a panic aborts before the report
         return [("reference run", [f"live blocks {ref[3]} (exit {ref[0]})"])]
-    emitted = tool([args.paykan, "--backend=c", "--emit-c", str(sample)])
+    emitted = tool([args.paykan, f"--backend={args.backend}", "--emit-c",
+                    str(sample)])
     if emitted.returncode != 0:
         return [("emit-c", [emitted.stderr.strip()])]
     c_file = Path(outdir) / f"s{idx}.c"
@@ -139,8 +143,9 @@ def check_sample(args, sample, idx, runtimes, wrappers, outdir):
     for wi, (cc, wrap) in enumerate(wrappers.items()):
         label = f"build {cc}"
         exe = Path(outdir) / f"s{idx}-build{wi}"
-        p = tool([args.paykan, "build", "--backend=c", *objects, "-o",
-                  str(exe), str(sample)], env=dict(os.environ, CC=wrap))
+        p = tool([args.paykan, "build", f"--backend={args.backend}",
+                  *objects, "-o", str(exe), str(sample)],
+                 env=dict(os.environ, CC=wrap))
         if p.returncode != 0:
             results.append((label, ["build failed:\n" + p.stderr]))
             continue
@@ -161,6 +166,8 @@ def main():
     ap.add_argument("--cflag", action="append", default=[],
                     help="an extra flag for the emit-c check's compiles and "
                          "links, e.g. -fsanitize=function (repeatable)")
+    ap.add_argument("--backend", default="c",
+                    help="the backend whose C is checked (c or mlir-c)")
     ap.add_argument("-j", "--jobs", type=int, default=4)
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()

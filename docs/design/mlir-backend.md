@@ -20,7 +20,7 @@ backend matches them.
 | Where the targets part | after the shared lowering, at the MLIR level: upstream conversions take `func`, `scf` and `arith` to the `llvm` dialect and to EmitC; the remaining `pir` ops get one small pattern set per target |
 | LLVM | the `llvm` dialect (`--emit-mlir=llvm`), translated to LLVM IR, then the existing JIT, native object build, bitcode cache and `--emit-llvm` |
 | C | EmitC, printed by MLIR's C emitter (`--emit-c`) |
-| Options | `--emit-mlir=<stage>`, `pir`, `scf` or `llvm`: the program after that stage, on stdout |
+| Options | `--emit-mlir=<stage>`, `pir`, `scf`, `llvm` or `emitc`: the program after that stage, on stdout |
 
 ## Why one lowering
 
@@ -42,10 +42,10 @@ PIR ──import──▶ pir dialect                         --emit-mlir=pir
    + pir→llvm patterns           + pir→emitc patterns
              ▼                          ▼
         llvm dialect                 emitc
-   (--emit-mlir=llvm)                   │
+   (--emit-mlir=llvm)         (--emit-mlir=emitc)
              ▼                          ▼
-   LLVM IR: JIT, build,             C source (--emit-c)
-   --emit-llvm
+   LLVM IR: JIT, build,      C source (--emit-c): build,
+   --emit-llvm                    run with $CC
 ```
 
 The rule for each piece of the lowering: if an upstream path from `scf` (or
@@ -92,6 +92,37 @@ vtables, optionals, the sized integer types, structured control flow with
   and no two symbols share one; runtime and native functions keep their C
   names.
 
+## The C path
+
+Upstream conversions take `func`, `scf` and `arith` to EmitC
+(src/Backends/MLIR/ToEmitC); a pattern each takes the `pir` ops the shared
+lowering keeps; MLIR's C emitter prints the result.  The `mlir-c` backend
+builds that C with the system compiler as the c backend builds its own, one
+cached object per module (paykan/backends/c/CBuild.h, which both share).
+What is C's alone is decided there, at the MLIR level:
+
+* **Types** are spelled as Runtime.h spells them: a box `PaykanShared *`, an
+  obj `PaykanObject *`, a weak `PaykanWeak *`, a ptr `void *` (what a native
+  function's prototype in Runtime.h uses), an optional the struct
+  `pkrt_opt_<payload>`.
+* **The runtime** is Runtime.h's.  The shared lowering marks what the runtime
+  defines (`pir.runtime`); the C path declares none of it, and calls a
+  runtime function with its pointer arguments as `void *` and its pointer
+  result cast, so Runtime.h's more precise pointer types need no table here.
+  Natives and other modules' functions are declared from their signatures.
+* **Function pointers** are held as `void *` through `uintptr_t` (ISO C
+  converts neither to the other directly), called through a helper per
+  signature, and vtables are `PaykanMethod` arrays, as Runtime.h's own.
+* **Locals** are zeroed arrays of the slot alignment's integer, which gives
+  C their alignment.
+* **Strictly conforming C11**, which a `-std=c11 -pedantic-errors -Wall
+  -Wextra -Werror` build accepts (CStrictC11.mlir-c): the program's `main`
+  becomes `paykan_main` behind C's `main()`, which sets the runtime up as
+  `run` does; unread values are dropped (canonicalisation) and unread
+  parameters marked `(void)`, so C warns about no unused variable; and an
+  empty parameter list is printed `(void)`, not the C++ `()` of MLIR's
+  emitter.
+
 ## Steps
 
 1. Build the llvm backend on LLVM 22.1.8 (MLIR included).
@@ -103,8 +134,10 @@ vtables, optionals, the sized integer types, structured control flow with
    (`--backend=mlir` runs programs), and `--emit-mlir=llvm`; the whole test
    suite passes on it.  The JIT, the bitcode cache and native builds move
    to a library both LLVM backends share (src/Backends/LLVM/CodeGen).
-5. The C path: EmitC and `--emit-c` from MLIR, and `paykan build` through
-   it; the strict C11 check passes on its output.
+5. The C path: EmitC and `--emit-c` from MLIR (`--backend=mlir-c`), and
+   `paykan build` through it; the strict C11 check passes on its output.
+   Building C with the system compiler moves to a library both C backends
+   share (paykan/backends/c/CBuild.h).
 6. The C emitter and `PIRToLLVM.cpp` are removed; MLIR is the only backend.
 
 ## Open questions

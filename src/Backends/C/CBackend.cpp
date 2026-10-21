@@ -87,6 +87,20 @@ std::unique_ptr<backend::Backend> create() {
 
 } // namespace
 
+CSource emitterSource() { return {emitC, emitModuleC}; }
+
+bool buildExecutable(const pir::Program &program, const std::string &outputPath,
+                     const Toolchain &tc, std::ostream &errs,
+                     const std::string &keepC) {
+  return buildExecutable(program, emitterSource(), outputPath, tc, errs, keepC);
+}
+
+int buildAndRun(const pir::Program &program,
+                const std::vector<std::string> &args, bool trackHeap,
+                const Toolchain &tc, std::ostream &errs) {
+  return buildAndRun(program, emitterSource(), args, trackHeap, tc, errs);
+}
+
 } // namespace paykan::backend_c
 
 PAYKAN_REGISTER_BACKEND(c, "c", &paykan::backend_c::create);

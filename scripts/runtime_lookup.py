@@ -168,10 +168,12 @@ def main():
         for be in args.backend:
             c.expect_works("installed binary", installed, be)
             # The build tree still exists, but the prefix's own (here
-            # broken) runtime wins.
+            # broken) runtime wins: a C backend's compile stops at its
+            # header, the llvm backends' link at its archive.
             c.expect_build_fails("installed binary, stale build tree", stale,
                                  be,
-                                 BROKEN_MARKER if be == "c" else broken_lib)
+                                 BROKEN_MARKER if be in ("c", "mlir-c")
+                                 else broken_lib)
             c.expect_works("PAYKAN_RUNTIME_DIR over the prefix", stale, be,
                            env_dir=outdir / "installed")
             c.expect_works("binary inside the build tree", in_build, be)
