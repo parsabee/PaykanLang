@@ -109,7 +109,7 @@ constexpr bool predFromCode(uint8_t c, CmpPred &out) {
 
 bool definesMain(const Module &m) {
   for (const Function &f : m.Functions)
-    if (!f.IsExtern && f.Name == "main")
+    if (m.defines(f) && f.Name == "main")
       return true;
   return false;
 }

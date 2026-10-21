@@ -83,9 +83,10 @@ Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os) {
   return emitC((*mod).get(), os);
 }
 
-StatusOr<std::unique_ptr<llvm::Module>>
-compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
-               const std::string &moduleName, const std::string &projectRoot) {
+StatusOr<std::unique_ptr<llvm::Module>> compileProgram(
+    const pir::Program &program, llvm::LLVMContext &ctx,
+    const std::string &moduleName, const std::string &projectRoot,
+    const std::function<std::span<const uint8_t>(size_t)> &compiled) {
   auto mlirCtx = createContext();
   auto top = importProgram(program, *mlirCtx);
   if (!top)
@@ -112,7 +113,19 @@ compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
         if (Status s = lowerTo(mod.get(), Stage::LLVM); !s)
           return s;
         return translateToLLVMIR(mod.get(), ctx, program.Modules[index].Name);
-      });
+      },
+      compiled);
+}
+
+StatusOr<std::unique_ptr<llvm::Module>> compileModule(const pir::Module &module,
+                                                      llvm::LLVMContext &ctx) {
+  auto mlirCtx = createContext();
+  auto mod = importModule(module, /*isMain=*/false, *mlirCtx);
+  if (!mod)
+    return mod.status();
+  if (Status s = lowerTo((*mod).get(), Stage::LLVM); !s)
+    return s;
+  return translateToLLVMIR((*mod).get(), ctx, module.Name);
 }
 
 } // namespace paykan::mlir_backend

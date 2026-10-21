@@ -9,6 +9,7 @@
 
 #include "Internal.h"
 #include "paykan/pkm/Interface.h"
+#include "paykan/pkm/Object.h"
 #include "paykan/pkm/Templates.h"
 
 #include <cstdio>
@@ -35,11 +36,11 @@ std::string flagNames(uint32_t flags) {
 }
 
 std::string contentsNames(uint32_t c) {
-  static const char *const names[] = {"HAS_CODE",        "HAS_TEMPLATES",
-                                      "HAS_MAIN",        "SYSTEM",
-                                      "HAS_STATIC_INIT", "EXPORTS_C"};
+  static const char *const names[] = {
+      "HAS_CODE",        "HAS_TEMPLATES", "HAS_MAIN",  "SYSTEM",
+      "HAS_STATIC_INIT", "EXPORTS_C",     "HAS_OBJECT"};
   std::string out;
-  for (int i = 0; i < 6; ++i)
+  for (int i = 0; i < 7; ++i)
     if (c & (1u << i))
       out += (out.empty() ? "" : ",") + std::string(names[i]);
   return out.empty() ? "-" : out;
@@ -247,6 +248,26 @@ void dumpTmpl(const File &f, std::ostream &os, bool text) {
     os << "  ast " << t->Ast.size() << " B\n" << t->Ast;
 }
 
+/// The OBJ blob's framing: who compiled the bytes, for what.
+void dumpObject(const File &f, std::ostream &os) {
+  std::span<const uint8_t> bytes = f.section(Kind::Object);
+  if (bytes.empty()) {
+    os << "obj: absent\n";
+    return;
+  }
+  os << "obj: " << bytes.size() << " B, sha256 " << hex(support::sha256(bytes))
+     << "\n";
+  StatusOr<Object> read = readObject(bytes);
+  if (!read) {
+    os << "  (does not decode: " << read.status().message() << ")\n";
+    return;
+  }
+  const Object *o = &*read;
+  os << "  backend " << quoted(o->Backend) << "\n  format " << quoted(o->Format)
+     << "\n  target " << quoted(o->Target) << "\n  producer "
+     << quoted(o->Producer) << "\n  bytes " << o->Bytes.size() << "\n";
+}
+
 void dumpPayloads(const File &f, std::ostream &os) {
   os << "payloads " << f.count(Kind::Payload) << "\n";
   for (const SectionEntry &e : f.sections())
@@ -272,6 +293,8 @@ void dump(const File &f, std::ostream &os, const DumpOptions &opts) {
     dumpTmpl(f, os, w == Section::Tmpl);
   if (all)
     dumpBinary(f, os, Kind::Code, "code");
+  if (all || w == Section::Object)
+    dumpObject(f, os);
   if (all || w == Section::SymIdx)
     dumpBinary(f, os, Kind::SymIdx, "symidx");
   if (all)

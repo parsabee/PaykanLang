@@ -178,55 +178,13 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
 
 // -- One copy of each instantiation per program
 
-namespace {
-
-/// @p name up to its first '.' outside `<...>` and `(...)` (`Box<int>.get`
-/// -> `Box<int>`), or all of it.  A function type's `->` closes nothing.
-std::string_view typePart(std::string_view name) {
-  int depth = 0;
-  for (size_t i = 0; i < name.size(); ++i) {
-    const char c = name[i];
-    if (c == '<' || c == '(')
-      ++depth;
-    else if (c == '-' && i + 1 < name.size() && name[i + 1] == '>')
-      ++i;
-    else if (c == '>' || c == ')')
-      --depth;
-    else if (c == '.' && depth == 0)
-      return name.substr(0, i);
-  }
-  return name;
-}
-
-/// The type a function of a type is named after: @p name up to its first
-/// '.' or "::" outside `<...>` and `(...)` (`Box<int>.get`, `Box<int>::make`
-/// -> `Box<int>`), or all of it (a constructor, a free function).
-std::string_view ownerPart(std::string_view name) {
-  std::string_view type = typePart(name);
-  int depth = 0;
-  for (size_t i = 0; i + 1 < type.size(); ++i) {
-    const char c = type[i];
-    if (c == '<' || c == '(')
-      ++depth;
-    else if (c == '-' && type[i + 1] == '>')
-      ++i;
-    else if (c == '>' || c == ')')
-      --depth;
-    else if (c == ':' && type[i + 1] == ':' && depth == 0)
-      return type.substr(0, i);
-  }
-  return type;
-}
-
-} // namespace
-
 void ModuleLowering::markShared() {
   for (pir::Class &c : Classes_)
     c.Shared = c.Name.find('<') != std::string::npos;
   for (pir::Function &f : Funcs) {
     if (f.IsExtern)
       continue; // an extern is as shared as its definition (declareExternFrom)
-    const std::string owner(ownerPart(f.Name));
+    const std::string owner(ownerTypeName(f.Name));
     f.Shared = (f.Name.starts_with(kHiddenQualPrefix) &&
                 f.Name.find('<') != std::string::npos) ||
                (owner.find('<') != std::string::npos && OwnTypes.count(owner));

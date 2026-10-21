@@ -17,4 +17,9 @@ StatusOr<int> Backend::run(const Input &, std::span<const std::string>,
                        "' cannot run programs");
 }
 
+StatusOr<ModuleObject> Backend::compileModule(const pir::Module &) {
+  return Status::error("backend '" + std::string(name()) +
+                       "' cannot compile modules");
+}
+
 } // namespace paykan::backend

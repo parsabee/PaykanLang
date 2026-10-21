@@ -329,7 +329,7 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "       " << argv0 << " [options] build <source-file> -o <output>\n"
      << "       " << argv0
      << " pkm dump <file.pkm> [--section=manifest|sections|iface|symidx|"
-        "code|payloads]\n"
+        "code|obj|payloads]\n"
      << "       " << argv0 << " pkm check <file.pkm>\n\n"
      << "OPTIONS:\n";
   for (const Flag &f : kFlags)

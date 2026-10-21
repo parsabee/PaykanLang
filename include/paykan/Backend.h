@@ -19,10 +19,13 @@
 #include "paykan/Status.h"
 #include "paykan/pir/PIR.h"
 
+#include <cstdint>
 #include <iosfwd>
+#include <map>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace paykan::backend {
 
@@ -33,12 +36,32 @@ struct Capabilities {
   bool EmitObject = false;     // emit(EmitKind::Object)
   bool EmitExecutable = false; // emit(EmitKind::Executable): `paykan build`
   bool Run = false;            // run(): `paykan run`, in-process or not
+  /// compileModule(): a module's code compiled when its `.pkm` is written,
+  /// and linked from Input::Compiled.
+  bool CompileModules = false;
   /// File extension of the backend's source output (".c", ".ll"), used for
   /// default output names and --help.
   std::string_view SourceExtension;
 };
 
 enum class EmitKind { Source, Object, Executable };
+
+/// A module's code compiled by a backend when the module's `.pkm` was
+/// written (its OBJ section, docs/design/pkm.md §5.13).  The module's PIR
+/// then declares it: compiled declarations, each with what its code uses
+/// (docs/pir.md §4).
+struct ModuleObject {
+  /// What made the bytes: the backend's registered name, their format
+  /// ("llvm-bc"), the target they are for and the backend's version (its
+  /// describe()).  A backend links only what it made (objectKind()).
+  std::string Backend, Format, Target, Producer;
+  std::vector<uint8_t> Bytes;
+
+  bool sameKind(const ModuleObject &o) const {
+    return Backend == o.Backend && Format == o.Format && Target == o.Target &&
+           Producer == o.Producer;
+  }
+};
 
 /// The program a backend works on.
 struct Input {
@@ -55,6 +78,11 @@ struct Input {
   /// program's native functions (#198).  Every native backend links them;
   /// the user builds them however they like.
   std::vector<std::string> Objects;
+  /// The compiled code of the program's modules whose PIR declares it, by
+  /// module name.  A backend with CompileModules links what the program
+  /// uses of it; any other gets none (the driver gives it modules lowered
+  /// from source or loaded from a `.pkm` without compiled code).
+  std::map<std::string, const ModuleObject *> Compiled;
 };
 
 struct EmitOptions {
@@ -98,6 +126,16 @@ public:
   /// capabilities().Run is set; the default fails.
   virtual StatusOr<int> run(const Input &in, std::span<const std::string> args,
                             const RunOptions &opts);
+
+  /// What compileModule makes (no bytes): the only compiled code this
+  /// backend links.  Only called when capabilities().CompileModules is set.
+  virtual ModuleObject objectKind() const { return {}; }
+
+  /// The code of @p module, one verified PIR module whose other modules'
+  /// items (and its own shared copies of instantiations) are declared, for
+  /// a program that has the module to link.  Only called when
+  /// capabilities().CompileModules is set; the default fails.
+  virtual StatusOr<ModuleObject> compileModule(const pir::Module &module);
 };
 
 using Registry = plugin::Registry<Backend>;

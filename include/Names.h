@@ -246,6 +246,27 @@ inline constexpr const char *kSelf = "self"; ///< Receiver parameter in methods
 /// destructors (`K.w`, `K.destroy`, `K.__init__`).  '.' cannot occur in a
 /// Paykan identifier, so these never clash with a user function (`fn K_w`).
 inline constexpr const char *kNameSep = ".";
+
+/// The type a PIR function of a type is named after: @p name up to its
+/// first '.' or "::" outside `<...>` and `(...)` (`Box<int>.get`,
+/// `Box<int>::make` -> `Box<int>`), or all of it (a constructor, a free
+/// function).  A function type's `->` closes nothing.
+inline std::string_view ownerTypeName(std::string_view name) {
+  int depth = 0;
+  for (size_t i = 0; i < name.size(); ++i) {
+    const char c = name[i];
+    if (c == '<' || c == '(')
+      ++depth;
+    else if (c == '-' && i + 1 < name.size() && name[i + 1] == '>')
+      ++i;
+    else if (c == '>' || c == ')')
+      --depth;
+    else if (depth == 0 && (c == '.' || (c == ':' && i + 1 < name.size() &&
+                                         name[i + 1] == ':')))
+      return name.substr(0, i);
+  }
+  return name;
+}
 inline constexpr const char *kExternDupSep =
     "."; ///< Suffix separator making a module extern's PIR name unique
 inline constexpr const char *kVTableSuffix =

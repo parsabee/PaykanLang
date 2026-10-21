@@ -13,6 +13,7 @@
 #include "JIT.h"
 #include "Pipeline.h"
 #include "paykan/lowering/Lowering.h"
+#include "paykan/modules/ModuleResolver.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Verifier.h"
 
@@ -140,15 +141,24 @@ inline RunResult runJITModule(std::unique_ptr<llvm::Module> module,
 }
 
 /// The mlir backend: PIR -> MLIR -> LLVM IR (through the bitcode cache,
-/// like the driver) -> JIT, in process.
-inline RunResult runProgramMLIR(const pir::Program &program,
-                                const std::vector<std::string> *args,
-                                const std::string &projectRoot) {
+/// like the driver) -> JIT, in process, with the compiled code of the
+/// modules @p resolver loaded from a `.pkm` that has some.
+inline RunResult
+runProgramMLIR(const pir::Program &program,
+               const std::vector<std::string> *args,
+               const std::string &projectRoot,
+               const modules::ModuleResolver *resolver = nullptr) {
   if (auto verrs = pir::verify(program); !verrs.empty())
     return {-1, "", "verifier: " + pir::formatErrors(verrs), false};
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
-  auto module =
-      mlir_backend::compileProgram(program, *llvmCtx, "test", projectRoot);
+  auto module = mlir_backend::compileProgram(
+      program, *llvmCtx, "test", projectRoot,
+      [&](size_t i) -> std::span<const uint8_t> {
+        const pkm::Object *o =
+            resolver ? resolver->object(program.Modules[i].Name) : nullptr;
+        return o ? std::span<const uint8_t>(o->Bytes)
+                 : std::span<const uint8_t>();
+      });
   if (!module)
     return {-1, "", module.status().message(), false};
   return runJITModule(std::move(*module), std::move(llvmCtx), args);
@@ -161,7 +171,7 @@ inline RunResult runMLIR(Analysed &a, const std::vector<std::string> *args,
   if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
                               program, errs))
     return {-1, "", "lowering failed: " + errs.str(), false};
-  return runProgramMLIR(program, args, projectRoot);
+  return runProgramMLIR(program, args, projectRoot, a.Ctx.Resolver.get());
 }
 
 inline RunResult runAnalysed(Analysed &a, const std::vector<std::string> *args,

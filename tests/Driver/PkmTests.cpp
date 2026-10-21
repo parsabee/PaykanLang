@@ -554,11 +554,13 @@ TEST(Pkm, EmitPkmAndDump) {
                   (p.Dir / "out" / "shapes.pkm").string());
   ASSERT_EQ(dump.exitCode, 0) << dump.out;
   const std::string header =
-      "pkm " + paykan::versionString(paykan::kVersionNumber) + ", 4 sections";
+      "pkm " + paykan::versionString(paykan::kVersionNumber) + ", 5 sections";
   EXPECT_TRUE(contains(dump.out, header)) << dump.out;
+  // Its code compiled (OBJ), CODE declaring it.
   for (const char *expected :
-       {"#0 MANIFEST", "#1 IFACE", "#2 CODE", "#3 SYMIDX",
-        "module geometry::shapes", "contents 0x1 (HAS_CODE)",
+       {"#0 MANIFEST", "#1 IFACE", "#2 CODE", "#3 SYMIDX", "#4 OBJ",
+        "module geometry::shapes", "contents 0x41 (HAS_CODE,HAS_OBJECT)",
+        "obj: ", "  backend \"mlir\"\n  format \"llvm-bc\"",
         "display_file \"geometry/shapes.pkn\"", "class Rect super \"\"",
         "method area() -> int", "func describe(Rect) -> Str",
         "func Rect(int, int) -> Rect", "payloads 0", "pir:\n",
@@ -1038,7 +1040,8 @@ TEST(Pkm, PrebuiltModuleCarriesItsTemplates) {
   fs::remove(dir / "lib" / "gen.pkn");
   auto dump = paykan("pkm dump lib/gen.pkm");
   EXPECT_EQ(dump.exitCode, 0) << dump.out;
-  EXPECT_TRUE(contains(dump.out, "contents 0x3 (HAS_CODE,HAS_TEMPLATES)"))
+  EXPECT_TRUE(
+      contains(dump.out, "contents 0x43 (HAS_CODE,HAS_TEMPLATES,HAS_OBJECT)"))
       << dump.out;
   EXPECT_TRUE(contains(dump.out, "  file \"lib/gen.pkn\"\n  uses 0\n"
                                  "  impls 1\n    class 0\n"))

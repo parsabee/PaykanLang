@@ -14,7 +14,10 @@
 #include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/MLIRContext.h>
 
+#include <cstdint>
+#include <functional>
 #include <memory>
+#include <span>
 #include <string>
 
 namespace paykan::mlir_backend {
@@ -42,9 +45,16 @@ Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os);
 
 /// The whole program in LLVM IR, one linked module named @p moduleName;
 /// imported modules are served from the bitcode cache under @p projectRoot
-/// (<module>.bc) when what is left of them is unchanged.
-StatusOr<std::unique_ptr<llvm::Module>>
-compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
-               const std::string &moduleName, const std::string &projectRoot);
+/// (<module>.bc) when what is left of them is unchanged, and the part of
+/// each module's @p compiled code the program uses is linked in.
+StatusOr<std::unique_ptr<llvm::Module>> compileProgram(
+    const pir::Program &program, llvm::LLVMContext &ctx,
+    const std::string &moduleName, const std::string &projectRoot,
+    const std::function<std::span<const uint8_t>(size_t)> &compiled = {});
+
+/// One module on its own in LLVM IR (not optimised): what a `.pkm`'s OBJ
+/// section holds of it, as bitcode.
+StatusOr<std::unique_ptr<llvm::Module>> compileModule(const pir::Module &module,
+                                                      llvm::LLVMContext &ctx);
 
 } // namespace paykan::mlir_backend

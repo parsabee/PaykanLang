@@ -56,7 +56,9 @@ struct ModuleResolver::Entry {
   support::Hash256 TmplHash{};
   std::vector<uint8_t> Tmpl;     ///< Built: the TMPL section
   std::optional<pkm::File> File; ///< Loaded
-  bool KeepUncached = false;     ///< Built: writeCache skips it
+  /// Loaded: its compiled code, when CODE declares it.
+  std::optional<pkm::Object> Object;
+  bool KeepUncached = false; ///< Built: not cacheable()
 };
 
 /// A .pkm read for a module whose dependencies are still being resolved,
@@ -81,7 +83,7 @@ std::string modulePathOf(const std::string &canonical) {
 bool definesMain(const pir::Module &m) {
   return std::any_of(
       m.Functions.begin(), m.Functions.end(),
-      [](const pir::Function &f) { return !f.IsExtern && f.Name == "main"; });
+      [&](const pir::Function &f) { return m.defines(f) && f.Name == "main"; });
 }
 
 /// "<verb> <what>" with the manifest's toolchain numbers, the shape of the
@@ -345,6 +347,22 @@ Resolution ModuleResolver::load(const std::string &canonical,
       pkm::readInterface(file.section(pkm::Kind::Iface), canonical);
   if (!iface)
     return unusable("has a bad IFACE section: " + iface.status().message());
+  std::optional<pkm::Object> object;
+  if (m.Contents & pkm::kContentsHasObject) {
+    StatusOr<pkm::Object> read =
+        pkm::readObject(file.section(pkm::Kind::Object));
+    if (!read)
+      return unusable("has a bad OBJ section: " + read.status().message());
+    const pkm::Object &o = *read;
+    // A cache entry's code is the active backend's, or it is built again
+    // (a prebuilt file's is checked by the backend that links it).
+    if (policy == pkm::Policy::Cache && Opts.CompiledBy &&
+        !o.sameKind(*Opts.CompiledBy))
+      return unusable("is stale (its code was compiled by backend '" +
+                      o.Backend + "' (" + o.Producer + " for " + o.Target +
+                      "), not by this one)");
+    object = std::move(*read);
+  }
   auto e = std::make_unique<Entry>();
   e->State = Entry::State::Loaded;
   e->Path = path;
@@ -353,6 +371,7 @@ Resolution ModuleResolver::load(const std::string &canonical,
     e->Deps.push_back(d.Name);
   e->IfaceHash = file.ifaceHash();
   e->TmplHash = file.tmplHash();
+  e->Object = std::move(object);
   e->File = std::move(p->File);
   Pendings.erase(canonical);
   Awaiting.erase(canonical);
@@ -450,6 +469,14 @@ ModuleResolver::loadCode(const std::string &canonical) const {
   return mod;
 }
 
+const pkm::Object *ModuleResolver::object(const std::string &canonical) const {
+  auto it = Entries.find(canonical);
+  if (it == Entries.end() || it->second->State != Entry::State::Loaded ||
+      !it->second->Object)
+    return nullptr;
+  return &*it->second->Object;
+}
+
 std::span<const uint8_t>
 ModuleResolver::templates(const std::string &canonical) const {
   auto it = Entries.find(canonical);
@@ -471,12 +498,15 @@ std::string ModuleResolver::displayPath(const std::string &canonical) const {
 StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
     const std::string &canonical, const pkm::Interface &iface,
     const std::vector<std::string> &deps, std::span<const uint8_t> sourceBytes,
-    const pir::Module &module, std::span<const uint8_t> templates) const {
+    const pir::Module &module, std::span<const uint8_t> templates,
+    const pkm::Object *object) const {
   pkm::Manifest m;
   m.Module = canonical;
   m.Contents = pkm::kContentsHasCode;
   if (!templates.empty())
     m.Contents |= pkm::kContentsHasTemplates;
+  if (object)
+    m.Contents |= pkm::kContentsHasObject;
   if (definesMain(module))
     m.Contents |= pkm::kContentsHasMain;
   if (isSystemName(canonical))
@@ -522,6 +552,8 @@ StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
           std::vector<uint8_t>(templates.begin(), templates.end()));
   w.add(pkm::Kind::Code, pkm::kFlagRequired, std::move(code));
   w.add(pkm::Kind::SymIdx, 0, std::move(symidx));
+  if (object)
+    w.add(pkm::Kind::Object, pkm::kFlagRequired, pkm::writeObject(*object));
   return w.finish();
 }
 
@@ -530,34 +562,47 @@ void ModuleResolver::keepUncached(const std::string &canonical) {
     it->second->KeepUncached = true;
 }
 
-void ModuleResolver::writeCache(const pir::Program &program) {
+std::vector<std::string> ModuleResolver::cacheable() const {
+  std::vector<std::string> names;
   if (!Opts.WriteCache)
-    return;
-  for (auto &[name, entry] : Entries) {
-    if (entry->State != Entry::State::Built || entry->KeepUncached)
-      continue;
-    auto mod =
-        std::find_if(program.Modules.begin(), program.Modules.end(),
-                     [&](const pir::Module &m) { return m.Name == name; });
-    if (mod == program.Modules.end())
-      continue;
-    std::filesystem::path path = cachePath(name);
-    StatusOr<std::vector<uint8_t>> bytes = encodeFile(
-        name, entry->Iface, entry->Deps, entry->SourceBytes, *mod, entry->Tmpl);
-    Status s = bytes ? pkm::writeFileAtomically(path, *bytes) : bytes.status();
-    log("module " + name + ": " +
-        (s ? "wrote " + relativeToRoot(path)
-           : "cannot write " + relativeToRoot(path) + ": " + s.message()));
-  }
+    return names;
+  for (const auto &[name, entry] : Entries)
+    if (entry->State == Entry::State::Built && !entry->KeepUncached)
+      names.push_back(name);
+  return names;
 }
 
-Status ModuleResolver::writeModuleFile(const std::filesystem::path &out,
-                                       const std::string &canonical,
-                                       pkm::Interface iface,
-                                       std::vector<std::string> deps,
-                                       const std::filesystem::path &source,
-                                       const pir::Module &module,
-                                       std::span<const uint8_t> templates) {
+const pkm::Interface *
+ModuleResolver::builtInterface(const std::string &canonical) const {
+  auto it = Entries.find(canonical);
+  return it == Entries.end() || it->second->State != Entry::State::Built
+             ? nullptr
+             : &it->second->Iface;
+}
+
+void ModuleResolver::writeCacheEntry(const std::string &canonical,
+                                     const pir::Module &code,
+                                     const pkm::Object *object) {
+  auto it = Entries.find(canonical);
+  if (!Opts.WriteCache || it == Entries.end() ||
+      it->second->State != Entry::State::Built || it->second->KeepUncached)
+    return;
+  const Entry &entry = *it->second;
+  std::filesystem::path path = cachePath(canonical);
+  StatusOr<std::vector<uint8_t>> bytes =
+      encodeFile(canonical, entry.Iface, entry.Deps, entry.SourceBytes, code,
+                 entry.Tmpl, object);
+  Status s = bytes ? pkm::writeFileAtomically(path, *bytes) : bytes.status();
+  log("module " + canonical + ": " +
+      (s ? "wrote " + relativeToRoot(path)
+         : "cannot write " + relativeToRoot(path) + ": " + s.message()));
+}
+
+Status ModuleResolver::writeModuleFile(
+    const std::filesystem::path &out, const std::string &canonical,
+    pkm::Interface iface, std::vector<std::string> deps,
+    const std::filesystem::path &source, const pir::Module &code,
+    std::span<const uint8_t> templates, const pkm::Object *object) {
   std::sort(deps.begin(), deps.end());
   deps.erase(std::unique(deps.begin(), deps.end()), deps.end());
   iface.Module = canonical;
@@ -578,7 +623,7 @@ Status ModuleResolver::writeModuleFile(const std::filesystem::path &out,
   if (!sourceBytes)
     return sourceBytes.status();
   StatusOr<std::vector<uint8_t>> bytes =
-      encodeFile(canonical, iface, deps, *sourceBytes, module, templates);
+      encodeFile(canonical, iface, deps, *sourceBytes, code, templates, object);
   if (!bytes)
     return bytes.status();
   return pkm::writeFileAtomically(out, *bytes);

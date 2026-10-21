@@ -494,8 +494,13 @@ StatusOr<OwningOpRef<ModuleOp>> importModule(const P::Program &program,
                                              size_t index, MLIRContext &ctx) {
   if (index >= program.Modules.size())
     return Status::error("PIR module index out of range");
+  return importModule(program.Modules[index], index == 0, ctx);
+}
+
+StatusOr<OwningOpRef<ModuleOp>> importModule(const P::Module &module,
+                                             bool isMain, MLIRContext &ctx) {
   loadImportDialects(ctx);
-  auto mod = Importer(program.Modules[index], index == 0, ctx).run();
+  auto mod = Importer(module, isMain, ctx).run();
   if (!mod)
     return mod.status();
   if (Status s = verifyImport((*mod)->getOperation()); !s)
