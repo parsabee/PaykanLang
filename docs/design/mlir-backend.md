@@ -73,6 +73,13 @@ vtables, optionals, the sized integer types, structured control flow with
   flag being clear, and a loop's condition region stops the loop once it is
   set.  A `return`'s value goes into a local the function returns at its
   end.  LLVM's optimiser removes the flag again; C keeps it.
+* **Switches.**  A PIR `switch` (a `match` on an enum, or on integer,
+  `char` or `bool` literals) becomes an `scf.index_switch` on its value as
+  an index (a `char` or `bool` zero-extended, as its cases are).  Upstream
+  conversions make it a C `switch` (`emitc.switch`); the LLVM path makes it
+  an LLVM `switch` on the whole 64-bit value itself, as upstream's switches
+  on an `i32`.  A case that returns, breaks or continues is lowered as an
+  `if`'s branch would be.
 * **ARC, allocation, weak references** become calls to the runtime
   (`func.call`), as both of the replaced translations did.
 * **Objects.**  Every class's layout is computed once, as C lays out the

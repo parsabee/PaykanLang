@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A `match` on an enum, or on integer, `char` or `bool` literals, is a `switch` statement in
+  PIR (docs/pir.md §6), a case per value and the wildcard its default, instead of an if-else
+  chain; one on floats, classes, optionals or strings stays a chain.  Both targets switch on
+  it: the LLVM IR at every optimisation level (`switch i64`), and `--emit-c`'s C (`switch`).
 - LLVM is 22.1.8 (was 17.0.6, for the llvm backend), whose prebuilt release includes MLIR.
   Only what PaykanLang uses is extracted (headers, the LLVM and MLIR libraries and the tools
   the build and the scripts run), about 2 GB of the archive's 12.  The prebuilt LLVM links

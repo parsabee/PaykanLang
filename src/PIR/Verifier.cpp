@@ -863,8 +863,41 @@ private:
       }
     }
 
+    /// Verifies a switch; returns true when control cannot fall out of it
+    /// (it has a default, and every branch ends in a terminator).
+    bool verifySwitch(const Switch &sw, bool inLoop) {
+      Type t = typeOf(sw.Value);
+      if (t != Type::Void && t != Type::I64 && t != Type::Char &&
+          t != Type::Bool)
+        error("switch on " + operandStr(sw.Value) + " of type " + typeName(t) +
+              ", expected i64, char or bool");
+      bool terminated = sw.Default != nullptr;
+      for (size_t i = 0; i < sw.Cases.size(); ++i) {
+        const Switch::Case &c = sw.Cases[i];
+        if (c.Value.isValue()) {
+          error("switch case " + operandStr(c.Value) + " is not a constant");
+        } else {
+          if (t != Type::Void)
+            expect(c.Value, t, "switch case");
+          for (size_t j = 0; j < i; ++j)
+            if (sameConstant(sw.Cases[j].Value, c.Value))
+              error("switch case " + operandStr(c.Value) + " listed twice");
+        }
+        if (!c.Body) {
+          error("switch case without a block");
+          terminated = false;
+          continue;
+        }
+        terminated = verifyBlock(*c.Body, inLoop) && terminated;
+      }
+      if (sw.Default)
+        terminated = verifyBlock(*sw.Default, inLoop) && terminated;
+      return terminated;
+    }
+
     /// Verifies a block; returns true when control cannot fall out of its
-    /// end (it ends in ret / unreachable, or an if whose both branches do).
+    /// end (it ends in ret / unreachable, or an if or a switch whose every
+    /// branch does).
     bool verifyBlock(const Block &b, bool inLoop) {
       std::vector<ValueId> defined;
       auto before = Visible;
@@ -883,6 +916,8 @@ private:
           if (!i->Then)
             error("if without a then block");
           terminated = i->Else && t && e;
+        } else if (const auto *sw = std::get_if<Switch>(&s)) {
+          terminated = verifySwitch(*sw, inLoop);
         } else if (const auto *w = std::get_if<While>(&s)) {
           if (!w->CondBlock || !w->Body) {
             error("while without a condition region or body");
@@ -940,6 +975,8 @@ private:
             verifyBlock(*i->Then, inLoop);
           if (i->Else)
             verifyBlock(*i->Else, inLoop);
+        } else if (const auto *sw = std::get_if<Switch>(&s)) {
+          verifySwitch(*sw, inLoop);
         } else if (const auto *w = std::get_if<While>(&s)) {
           if (!w->CondBlock || !w->Body)
             continue;

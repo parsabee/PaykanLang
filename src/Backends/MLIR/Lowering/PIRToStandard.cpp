@@ -22,6 +22,8 @@
 //   the flag being 0, a loop's condition stops the loop once it is set, and
 //   a returned value goes into a slot the function returns at its end.  A
 //   function whose returns are all in tail position needs none of it.
+// * A switch becomes scf.index_switch, which each target makes its own
+//   switch.
 
 #include "PIRToStandard.h"
 
@@ -182,6 +184,22 @@ private:
   void lowerOp(Operation *op);
   Value lowerTail(Block &b);
   void lowerIf(P::IfOp op);
+  void lowerSwitch(P::SwitchOp op) {
+    lowerSwitchWith(op, Type(), [&](Region *r) {
+      if (r && !r->empty())
+        lowerBlock(r->front());
+      return Value();
+    });
+  }
+  /// The dispatch of @p op, each region (null: an absent default) lowered
+  /// by @p fill, which returns the value the region yields when @p result
+  /// is a type: the switch's value of that type, else null.
+  Value lowerSwitchWith(P::SwitchOp op, Type result,
+                        llvm::function_ref<Value(Region *)> fill);
+  /// Fill @p to, a block of an scf op, with @p fill(@p from) and the yield
+  /// of what it returns (a result-less scf.if's blocks have theirs).
+  void fillCase(Block *to, Region *from, Type result,
+                llvm::function_ref<Value(Region *)> fill);
   void lowerWhile(P::WhileOp op);
   void lowerInstr(Operation *op);
   void define(Operation *src, Value v) {
@@ -397,14 +415,18 @@ unsigned FunctionLowering::exits(Operation *op) {
     e = kReturn;
   else if (auto i = dyn_cast<P::IfOp>(op))
     e = exits(i.getThenRegion()) | exits(i.getElseRegion());
-  else if (auto w = dyn_cast<P::WhileOp>(op))
+  else if (auto s = dyn_cast<P::SwitchOp>(op)) {
+    e = exits(s.getDefaultRegion());
+    for (Region &r : s.getCaseRegions())
+      e |= exits(r);
+  } else if (auto w = dyn_cast<P::WhileOp>(op))
     e = exits(w.getBodyRegion()) & kReturn; // the loop's own break/continue
   ExitCache[op] = e;
   return e;
 }
 
 /// Whether every exit of @p b is a return in tail position: the block's
-/// last statement, or the last of a tail `if`'s branch.
+/// last statement, or the last of a tail `if`'s or `switch`'s branch.
 bool FunctionLowering::tailOnly(Block &b) {
   for (Operation &op : b) {
     bool last = &op == &b.back();
@@ -416,6 +438,10 @@ bool FunctionLowering::tailOnly(Block &b) {
     if (auto i = dyn_cast<P::IfOp>(op)) {
       for (Region *r : {&i.getThenRegion(), &i.getElseRegion()})
         if (!r->empty() && !tailOnly(r->front()))
+          return false;
+    } else if (isa<P::SwitchOp>(op)) {
+      for (Region &r : op.getRegions())
+        if (!r.empty() && !tailOnly(r.front()))
           return false;
     } else if (isa<P::BreakOp, P::ContinueOp>(op)) {
       return false;
@@ -498,6 +524,13 @@ Value FunctionLowering::lowerTail(Block &b) {
       return r.getValue() ? lookup(r.getValue()) : Value();
     if (isa<P::UnreachableOp>(op))
       return RetType ? zeroOf(RetType) : Value(); // never reached
+    if (auto s = dyn_cast<P::SwitchOp>(op); s && exits(s) != kNone) {
+      // A branch that falls through is a void function's (as an if's).
+      return lowerSwitchWith(s, RetType, [&](Region *r) {
+        Value v = r && !r->empty() ? lowerTail(r->front()) : Value();
+        return RetType && !v ? zeroOf(RetType) : v;
+      });
+    }
     auto i = dyn_cast<P::IfOp>(op);
     if (!i || exits(i) == kNone) {
       lowerOp(&op);
@@ -557,6 +590,47 @@ void FunctionLowering::lowerIf(P::IfOp op) {
   }
 }
 
+void FunctionLowering::fillCase(Block *to, Region *from, Type result,
+                                llvm::function_ref<Value(Region *)> fill) {
+  OpBuilder::InsertionGuard guard(B);
+  bool yields = !to->empty();
+  if (yields)
+    B.setInsertionPoint(to->getTerminator());
+  else
+    B.setInsertionPointToEnd(to);
+  Value v = fill(from);
+  if (!yields)
+    scf::YieldOp::create(B, Loc, result ? ValueRange(v) : ValueRange());
+}
+
+Value FunctionLowering::lowerSwitchWith(
+    P::SwitchOp op, Type result, llvm::function_ref<Value(Region *)> fill) {
+  Value v = lookup(op.getValue());
+  // An i64 is its own case value; a char or a bool (i8, i1) is zero-extended,
+  // as its cases are.
+  SmallVector<int64_t> cases;
+  for (Attribute c : op.getCases()) {
+    const APInt &value = cast<IntegerAttr>(c).getValue();
+    cases.push_back(value.getBitWidth() < 64
+                        ? static_cast<int64_t>(value.getZExtValue())
+                        : value.getSExtValue());
+  }
+  Value index =
+      v.getType().getIntOrFloatBitWidth() < 64
+          ? arith::IndexCastUIOp::create(B, Loc, B.getIndexType(), v)
+                .getResult()
+          : arith::IndexCastOp::create(B, Loc, B.getIndexType(), v).getResult();
+  auto sw = scf::IndexSwitchOp::create(B, Loc,
+                                       result ? TypeRange(result) : TypeRange(),
+                                       index, cases, cases.size());
+  for (auto [to, from] : llvm::zip(sw.getCaseRegions(), op.getCaseRegions()))
+    fillCase(&to.emplaceBlock(), &from, result, fill);
+  Region &rest = op.getDefaultRegion();
+  fillCase(&sw.getDefaultRegion().emplaceBlock(),
+           rest.empty() ? nullptr : &rest, result, fill);
+  return result ? sw.getResult(0) : Value();
+}
+
 void FunctionLowering::lowerWhile(P::WhileOp op) {
   unsigned bodyExits = exits(op.getBodyRegion());
   auto w = scf::WhileOp::create(B, Loc, TypeRange(), ValueRange());
@@ -612,6 +686,8 @@ void FunctionLowering::lowerOp(Operation *op) {
     return; // made at the top of the function
   if (auto i = dyn_cast<P::IfOp>(op))
     return lowerIf(i);
+  if (auto s = dyn_cast<P::SwitchOp>(op))
+    return lowerSwitch(s);
   if (auto w = dyn_cast<P::WhileOp>(op))
     return lowerWhile(w);
   if (isa<P::BreakOp>(op))

@@ -922,6 +922,53 @@ TEST(MatchCodeGen, BoolValueMatch) {
   EXPECT_EQ(r.StdOut, "no\n");
 }
 
+// A value match on an int is a switch: on the whole 64-bit value (1 << 32
+// plus 1 is not 1), a negative value takes the default, and of two arms
+// naming a value the first is taken.
+TEST(MatchCodeGen, IntValueMatchSwitchesOnTheWholeValue) {
+  auto r = compileAndRun(R"(import ::io;
+fn name(n: int) -> Str {
+  match n {
+    1 { return "one"; }
+    2 { return "two"; }
+    2 { return "again"; }
+    7 { return "seven"; }
+    _ { return "other"; }
+  }
+}
+fn main() -> int {
+  io::println(name(2));
+  io::println(name(4294967297));
+  io::println(name(-1));
+  io::println(name(7));
+  io::println(name(1));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "two\nother\nother\nseven\none\n");
+}
+
+// The arms of a switch on an int break out of and continue the loop around
+// it, as a chain's do.
+TEST(MatchCodeGen, SwitchArmsBreakAndContinueTheLoop) {
+  auto r = compileAndRun(wrapMain(R"(
+    i = 0;
+    total = 0;
+    while i < 10 {
+      match i {
+        2 { i = i + 1; continue; }
+        8 { break; }
+        _ { total = total + i; }
+      }
+      i = i + 1;
+    }
+    io::println(Str<int>(total));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "26\n");
+}
+
 // A class method may call a module-level free function, regardless of whether
 // the function is defined before or after the class (forward-declared).
 

@@ -15,10 +15,14 @@ add_public_tablegen_target(paykan_mlir_pir_dialect_incgen)
 add_library(paykan_mlir_pir_dialect STATIC PIRDialect.cpp)
 add_dependencies(paykan_mlir_pir_dialect paykan_mlir_pir_dialect_incgen)
 target_include_directories(paykan_mlir_pir_dialect
-    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
 )
+# The TableGen output (the .inc files, in the binary directory) is included
+# as system headers, like MLIR's own: the generated code draws warnings
+# (unused parameters, mostly) that the dialect's sources can't fix, in every
+# translation unit that includes the dialect.
 target_include_directories(paykan_mlir_pir_dialect SYSTEM
-    PUBLIC ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS}
+    PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS}
 )
 paykan_llvm_no_werror(paykan_mlir_pir_dialect)
 target_link_libraries(paykan_mlir_pir_dialect

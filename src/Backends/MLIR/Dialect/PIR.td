@@ -222,6 +222,28 @@ def PIR_IfOp : PIR_Op<"if", [NoTerminator, NoRegionArguments,
   }];
 }
 
+def PIR_SwitchOp : PIR_Op<"switch", [NoTerminator, NoRegionArguments,
+                                     RecursiveMemoryEffects, OpAsmOpInterface]> {
+  let summary = "`switch %v { case c { ... } ... default { ... } }`";
+  let description = [{
+    Runs the region of the case whose value (`cases`, constants of the
+    value's type, no two equal) equals `value`, else the default region,
+    which may be empty.
+  }];
+  let arguments = (ins AnyTypeOf<[I64, PIR_Bool, PIR_Char]>:$value,
+                       ArrayAttr:$cases);
+  let regions = (region MaxSizedRegion<1>:$default_region,
+                        VariadicRegion<MaxSizedRegion<1>>:$case_regions);
+  let assemblyFormat = [{
+    $value `:` type($value) $cases $case_regions
+    (`default` $default_region^)? attr-dict
+  }];
+  let hasVerifier = 1;
+  let extraClassDeclaration = [{
+    static ::llvm::StringRef getDefaultDialect() { return "pir"; }
+  }];
+}
+
 def PIR_WhileOp : PIR_Op<"while", [NoTerminator, NoRegionArguments,
                                    RecursiveMemoryEffects, OpAsmOpInterface]> {
   let summary = "`while { ...; cond %c } { ... }`";

@@ -38,7 +38,7 @@ The text form is line-oriented and made for this:
   it, or emit forward declarations (as the mlir backend's C output does).
 - Values are `%name.N` (unique per function), symbols `@name`, constants are
   literal (`42`, `1.5`, `true`, `'a'`, `null box`).
-- Control flow is structured (`if`, `while`, `break`, `continue`, `ret`), so
+- Control flow is structured (`if`, `switch`, `while`, `break`, `continue`, `ret`), so
   a body maps directly onto the target's statements; there is no CFG to
   rebuild.
 

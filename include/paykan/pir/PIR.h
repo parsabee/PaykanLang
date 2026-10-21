@@ -236,6 +236,10 @@ struct Operand {
   ValueId valueId() const { return std::get<ValueId>(V); }
 };
 
+/// Whether @p a and @p b are the same i64, char or bool constant (two cases
+/// of a switch that are one).
+bool sameConstant(const Operand &a, const Operand &b);
+
 // -- Instructions
 
 enum class Opcode : uint8_t {
@@ -340,6 +344,20 @@ struct While {
   std::unique_ptr<Block> Body;
 };
 
+/// `switch %v { case c { ... } ... default { ... } }`: runs the block of the
+/// case whose constant equals the value, else the default's (when there is
+/// one).  The value is an i64, char or bool, every case constant one of
+/// that type, no two of them equal.  (A match on floats is an if chain.)
+struct Switch {
+  struct Case {
+    Operand Value;
+    std::unique_ptr<Block> Body;
+  };
+  Operand Value;
+  std::vector<Case> Cases;
+  std::unique_ptr<Block> Default; // may be null
+};
+
 struct Break {};
 struct Continue {};
 struct Return {
@@ -347,8 +365,8 @@ struct Return {
 };
 struct Unreachable {};
 
-using Stmt =
-    std::variant<Instr, If, While, Break, Continue, Return, Unreachable>;
+using Stmt = std::variant<Instr, If, While, Break, Continue, Return,
+                          Unreachable, Switch>;
 
 struct Block {
   std::vector<Stmt> Stmts;

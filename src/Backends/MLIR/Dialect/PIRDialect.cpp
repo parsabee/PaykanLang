@@ -51,6 +51,21 @@ void FuncOp::print(OpAsmPrinter &p) {
       getArgAttrsAttrName(), getResAttrsAttrName());
 }
 
+// -- pir.switch: a case value of the value's type per case region
+
+LogicalResult SwitchOp::verify() {
+  if (getCases().size() != getCaseRegions().size())
+    return emitOpError("has ") << getCases().size() << " case values for "
+                               << getCaseRegions().size() << " case regions";
+  for (Attribute c : getCases()) {
+    auto typed = dyn_cast<TypedAttr>(c);
+    if (!typed || typed.getType() != getValue().getType())
+      return emitOpError("case ")
+             << c << " is not a constant of type " << getValue().getType();
+  }
+  return success();
+}
+
 // -- pir.local: printed with the local's name
 
 void LocalOp::getAsmResultNames(

@@ -457,6 +457,9 @@ private:
   unsigned char nativeTypeKind(ast::Type *ty) const;
   Val emitValueMatch(ast::MatchStmt *node, const Val &subjRaw);
   Val emitEnumMatch(ast::MatchStmt *node, const Val &subjRaw);
+  void emitMatchSwitch(const Val &subj,
+                       const std::vector<std::pair<Val, ast::MatchArm *>> &arms,
+                       ast::MatchArm *wildcard);
   /// Emit `if (check0) body0 else if (check1) body1 ... else default`.
   void emitMatchChain(size_t n, const std::function<Val(size_t)> &emitCheck,
                       const std::function<void(size_t)> &emitBody,

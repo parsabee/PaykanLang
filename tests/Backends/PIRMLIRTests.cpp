@@ -88,6 +88,29 @@ lowerText(const std::string &text, mlir::MLIRContext &ctx, std::string &err) {
   return std::move(*mod);
 }
 
+/// The PIR @p text through the shared lowering (Stage::SCF), printed (""
+/// on failure, with the reason in @p err).
+std::string scfText(const std::string &text, mlir::MLIRContext &ctx,
+                    std::string &err) {
+  pir::ParseError perr;
+  auto program = pir::parseProgram(text, perr);
+  if (!program) {
+    err = "parse error: " + perr.str();
+    return "";
+  }
+  auto mod = mlir_backend::importProgram(*program, ctx);
+  if (!mod) {
+    err = mod.status().message();
+    return "";
+  }
+  if (Status s = mlir_backend::lowerTo((*mod).get(), mlir_backend::Stage::SCF);
+      !s) {
+    err = s.message();
+    return "";
+  }
+  return print((*mod).get());
+}
+
 /// Every op of @p mod is one both targets lower: func, scf and arith, and
 /// the pir globals, memory ops and optionals.
 void expectOnlyStandardOps(mlir::ModuleOp mod) {
@@ -168,7 +191,8 @@ TEST(PIRMLIR, EveryItemAndInstruction) {
         "pir.extern_object", "pir.extern_vtable", "pir.class \"Point\"",
         "pir.class \"Point3\" : \"Point\"", "extern module \"lib\"", "field",
         "slot \"area\" :", "pir.func private @\"$rt.PaykanString_new\"",
-        "module = \"lib\"", "ptr_load", "ptr_store", "field_load"})
+        "module = \"lib\"", "ptr_load", "ptr_store", "field_load",
+        "switch %9 : i64 [1, 7] {"})
     EXPECT_NE(mlir.find(op), std::string::npos) << op << "\n" << mlir;
   expectRoundTrip(mlir, ctx);
 }
@@ -181,11 +205,11 @@ TEST(PIRMLIR, SharedLoweringOfEveryItemAndInstruction) {
   expectOnlyStandardOps(*mod);
   std::string mlir = print(*mod);
   // Link names; the layout of Point3 (the header, x, name, z at 32); its
-  // vtable; and the class Adder of module "lib".
+  // vtable; the class Adder of module "lib"; the switch.
   for (const char *text :
        {"func.func private @PaykanString_new", "pir.vtable @pkvt_main_SPoint",
         "pir.extern_vtable @pkvt_lib_SAdder", "pk_main_SPoint__destroy",
-        "func.func private @pk_lib_Shelper"})
+        "func.func private @pk_lib_Shelper", "scf.index_switch", "case 7 {"})
     EXPECT_NE(mlir.find(text), std::string::npos) << text << "\n" << mlir;
   expectRoundTrip(mlir, ctx);
 }
@@ -207,7 +231,7 @@ TEST(PIRMLIR, EmitCOfEveryItemAndInstruction) {
         "extern PaykanMethod pkvt_lib_SAdder[];",
         "static const char pk_main_S_2Estr0[7] = \"Hello\\n\";",
         "static int64_t paykan_main(void);", "int main(int argc, char **argv)",
-        "int64_t rc = paykan_main();"})
+        "int64_t rc = paykan_main();", "switch (", "case 7: {"})
     EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
   // The runtime's functions are Runtime.h's: never declared here.
   EXPECT_EQ(c.find("PaykanString_new("), c.find("PaykanString_new(v")) << c;
@@ -219,6 +243,94 @@ TEST(PIRMLIR, EmitCOfEveryItemAndInstruction) {
       continue;
     EXPECT_EQ(line.find("()"), std::string::npos) << line;
   }
+}
+
+// Switches on an i64, a bool and a char: one in tail position whose every
+// case returns, and one in a loop whose cases break.
+const char *const kSwitches = R"(module "main"
+fn @pick(%x.1: i64) -> i64 {
+  switch %x.1 {
+    case -1 {
+      ret 10
+    }
+    case 4294967296 {
+      ret 20
+    }
+    default {
+      ret 30
+    }
+  }
+}
+
+fn @flag(%b.1: bool) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  switch %b.1 {
+    case true {
+      store %r.0, 1
+    }
+    case false {
+      store %r.0, 2
+    }
+  }
+  %v.2 = load %r.0
+  ret %v.2
+}
+
+fn @letter(%c.1: char) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  while {
+    cond true
+  } {
+    switch %c.1 {
+      case 'a' {
+        break
+      }
+      default {
+        store %r.0, 1
+        break
+      }
+    }
+  }
+  %v.2 = load %r.0
+  ret %v.2
+}
+
+fn @main() -> i64 {
+  %a.1 = call @pick(4294967296)
+  ret %a.1
+}
+)";
+
+// A switch is an scf.index_switch on its value as an index, a bool or a
+// char zero-extended (as its cases are).  In tail position its cases yield
+// the returned value, with no exit flag; one in a loop sets the loop's.
+// Both targets switch.
+TEST(PIRMLIR, SwitchesAreIndexSwitches) {
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  std::string mlir = importText(kSwitches, *ctx, err);
+  ASSERT_FALSE(mlir.empty()) << err;
+  expectRoundTrip(mlir, *ctx);
+
+  std::string scf = scfText(kSwitches, *ctx, err);
+  ASSERT_FALSE(scf.empty()) << err;
+  for (const char *text :
+       {"scf.index_switch %", "-> i64", "case -1 {", "case 4294967296 {",
+        "arith.index_castui", "case 0 {", "case 1 {", "case 97 {"})
+    EXPECT_NE(scf.find(text), std::string::npos) << text << "\n" << scf;
+  EXPECT_EQ(scf.find("pir.switch"), std::string::npos) << scf;
+  // Only @letter, whose cases break, has an exit flag.
+  size_t flag = scf.find("pir.alloca \"exit\"");
+  EXPECT_NE(flag, std::string::npos) << scf;
+  EXPECT_EQ(scf.find("pir.alloca \"exit\"", flag + 1), std::string::npos)
+      << scf;
+
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string c = emitCText(kSwitches, ctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  EXPECT_NE(c.find("switch ("), std::string::npos) << c;
 }
 
 TEST(PIRMLIR, LinkNamesAreCIdentifiers) {

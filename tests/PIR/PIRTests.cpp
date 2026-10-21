@@ -371,6 +371,105 @@ fn @main() -> i64 {
   EXPECT_NE(errs.find("operand of not"), std::string::npos) << errs;
 }
 
+// A switch on an i64, a char or a bool, with or without a default, prints
+// as it is written and verifies; one whose default and cases all return
+// ends a non-void function.
+TEST(PIR, SwitchRoundTripsAndVerifies) {
+  const char *src = R"(module "m"
+
+fn @main() -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  switch 'b' {
+    case 'a' {
+      store %r.0, 1
+    }
+    case 'b' {
+    }
+  }
+  switch true {
+    case false {
+      store %r.0, 2
+    }
+    default {
+      store %r.0, 3
+    }
+  }
+  %v.1 = load %r.0
+  switch %v.1 {
+    case 3 {
+      ret 0
+    }
+    case -9 {
+      ret 1
+    }
+    default {
+      ret 2
+    }
+  }
+}
+)";
+  EXPECT_EQ(reprint(src), src);
+  EXPECT_EQ(verifyText(src), "");
+}
+
+TEST(PIRVerifier, ChecksSwitches) {
+  std::string errs = verifyText(R"(module "m"
+fn @main() -> i64 {
+  %f.1 = add 1.5, 2.0
+  switch %f.1 {
+    case 1.5 {
+    }
+  }
+  %n.2 = add 1, 2
+  switch %n.2 {
+    case %n.2 {
+    }
+    case true {
+    }
+    case 4 {
+    }
+    case 4 {
+    }
+  }
+  switch %n.2 {
+    case 1 {
+      ret 1
+    }
+    default {
+      ret 2
+    }
+  }
+  ret 3
+}
+)");
+  EXPECT_NE(errs.find("of type f64, expected i64, char or bool"),
+            std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("is not a constant"), std::string::npos) << errs;
+  EXPECT_NE(errs.find("switch case true has type bool, expected i64"),
+            std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("switch case 4 listed twice"), std::string::npos) << errs;
+  EXPECT_NE(errs.find("statement follows a terminator"), std::string::npos)
+      << errs;
+}
+
+// A non-void function cannot end in a switch without a default, or one
+// with a case that falls through.
+TEST(PIRVerifier, ASwitchEndsAFunctionOnlyWhenEveryBranchDoes) {
+  for (const char *rest : {"    default {\n      ret 2\n    }\n", ""}) {
+    std::string src = std::string(R"(module "m"
+fn @main() -> i64 {
+  switch 1 {
+    case 1 {
+    }
+)") + rest + "  }\n}\n";
+    std::string errs = verifyText(src);
+    EXPECT_NE(errs.find("fall"), std::string::npos) << src << "\n" << errs;
+  }
+}
+
 // Scalar and box slots have addresses (an `inout` parameter is the address
 // of the caller's slot), and an address is read and written as one of those.
 TEST(PIRVerifier, ChecksAddressOps) {
