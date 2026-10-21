@@ -285,15 +285,17 @@ jobs:
           cd tap
           branch="paykanlang-${version}"
           git checkout -b "${branch}"
-          # Each platform's url line names its tarball (paykanlang-<version>-
-          # <label>.tar.gz), and its sha256 line follows it.
+          # Each platform's url lines name its tarball (paykanlang-<version>-
+          # <label>.tar.gz), each followed by its sha256 line; the macOS one
+          # is there twice, for Apple Silicon and for Intel (which the
+          # formula refuses, but brew wants a URL on every macOS).
           for label in macos-arm64 linux-x86_64 linux-arm64; do
             archive="paykanlang-${version}-${label}.tar.gz"
             sha="$(curl -fsSL "${base}/${archive}.sha256" | cut -d' ' -f1)"
             test "${#sha}" -eq 64
             URL="${base}/${archive}" SHA="${sha}" LABEL="${label}" perl -0pi -e '
               s{^(\s*)url "[^"]*-\Q$ENV{LABEL}\E\.tar\.gz"\n(\s*)sha256 "[0-9a-f]*"$}
-               {$1url "$ENV{URL}"\n$2sha256 "$ENV{SHA}"}m
+               {$1url "$ENV{URL}"\n$2sha256 "$ENV{SHA}"}mg
                 or die "no url line for $ENV{LABEL} in the formula\n"' Formula/paykanlang.rb
           done
           if git diff --quiet; then
