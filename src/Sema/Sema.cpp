@@ -3192,8 +3192,11 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
 
 bool Sema::visitForStmt(ast::ForStmt *node) {
   ast::VarDecl *var = node->getVar();
+  // `for _ in ...` binds no name.
   const std::string &name = var->getName();
-  bool ok = checkBinderName(name, var->getLocation());
+  const bool discard = name.empty();
+  const std::string shown = discard ? "_" : name;
+  bool ok = discard || checkBinderName(name, var->getLocation());
   auto isInteger = [](ast::Type *t) {
     const auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
     return bt && bt->isInteger();
@@ -3203,9 +3206,9 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
   ast::Type *varTy = nullptr;
   if (var->getType()) {
     varTy = resolveType(var->getType(), var->getLocation(),
-                        "variable '" + name + "'");
+                        "variable '" + shown + "'");
     if (varTy && !isInteger(varTy)) {
-      error(var->getLocation(), "'" + name + "' has type '" + typeName(varTy) +
+      error(var->getLocation(), "'" + shown + "' has type '" + typeName(varTy) +
                                     "': a 'for' loop's variable is an integer");
       varTy = nullptr;
     }
@@ -3244,12 +3247,12 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
     ok = false;
   } else if (varTy && !typesEqual(startTy, varTy)) {
     error(start->getLocation(), "the start of the range has type '" +
-                                    typeName(startTy) + "', but '" + name +
+                                    typeName(startTy) + "', but '" + shown +
                                     "' is a '" + typeName(varTy) + "'");
     ok = false;
   } else if (varTy && !typesEqual(endTy, varTy)) {
     error(end->getLocation(), "the end of the range has type '" +
-                                  typeName(endTy) + "', but '" + name +
+                                  typeName(endTy) + "', but '" + shown +
                                   "' is a '" + typeName(varTy) + "'");
     ok = false;
   } else if (!typesEqual(startTy, endTy)) {
@@ -3279,13 +3282,17 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
   // The variable is bound in a scope of the loop's own, around the body, and
   // is read-only there.
   ScopeGuard guard(*this);
-  if (loopTy) {
+  if (loopTy)
     var->setType(loopTy);
+  if (discard) {
+    // Nothing to bind.
+  } else if (loopTy) {
     CurrentScope->set(name, loopTy);
   } else {
     declarePoisoned(CurrentScope, name);
   }
-  CurrentScope->Kinds[name] = VarKind::ForVar;
+  if (!discard)
+    CurrentScope->Kinds[name] = VarKind::ForVar;
   ++LoopDepth;
   bool bodyOk = visit(node->getBody());
   --LoopDepth;

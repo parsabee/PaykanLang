@@ -119,6 +119,27 @@ TEST(ControlFlow, ForStmt) {
     EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
 }
 
+// `for _` binds no name: its VarDecl's name is empty, and `_` is still not
+// an expression in the body.
+TEST(ControlFlow, ForDiscardsItsVariable) {
+  auto [ok, driver] = parse(R"(fn main() -> int {
+  for _ in 0..n { }
+  for _: u8 in 0..=255 { }
+  return 0;
+}
+)");
+  ASSERT_TRUE(ok);
+  std::string d = dumpAST(*driver);
+  for (const char *e :
+       {"ForStmt <2:3-2:20> ..\n    | |-VarDecl <2:7-2:8> '_'\n",
+        "    | |-VarDecl <3:7-3:12> '_' type\n"})
+    EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
+
+  EXPECT_FALSE(parse("fn main() -> int { for _ in 0..3 { x = _; } "
+                     "return 0; }")
+                   .Ok);
+}
+
 // `in` and `step` are words only in a `for` header: a variable or field may
 // be named so, the step may be a variable named `step`, and the loop's
 // variable may be named `in`.  The ends are any expressions, `..` taking
@@ -148,7 +169,7 @@ TEST(ControlFlow, ForSyntaxErrors) {
        {Case{"for x in xs { }", "expected '..' or '..=' in the 'for' loop's "
                                 "range ('start..end')"},
         Case{"for (i in 0..3) { }",
-             "expected the loop variable's name after 'for'"},
+             "expected the loop variable's name or '_' after 'for'"},
         Case{"for i 0..3 { }", "expected 'in' after the 'for' loop's variable"},
         Case{"for i in 0..3 2 { }",
              "expected 'step' or '{' after the 'for' loop's range"},

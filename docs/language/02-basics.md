@@ -811,7 +811,8 @@ while True {   // infinite loop
 
 `for` counts through a range of integers. `for i in a..b` gives `i` the values `a`,
 `a + 1`, ..., `b - 1`; `a..=b` includes `b` too. `step` sets the distance between the
-values, and a negative step counts down:
+values, and a negative step counts down. Write `_` for the variable when the body does
+not use it (`for _ in 0..n`):
 
 ```pkn
 import ::io;
@@ -826,7 +827,7 @@ fn main() -> int {
   io::println(up + "| " + evens + "| " + down + "|");
 
   bytes = 0;
-  for _b: u8 in 0..=255 { bytes = bytes + 1; }   // every u8, then the loop ends
+  for _: u8 in 0..=255 { bytes = bytes + 1; }   // every u8, then the loop ends
   io::println(bytes);
   return 0;
 }
@@ -845,7 +846,7 @@ What a loop does is fixed when it starts:
   iteration. The body can change the variables they read, and the loop's values stay the
   same: `for i in 0..n { n = 0; }` still runs `n` times.
 - **The variable is read-only.** A new `i` is declared for the loop (it hides an outer `i`
-  until the loop ends), and the body cannot assign it (`'i' is the variable of a 'for' loop
+  until the loop ends; `_` declares nothing), and the body cannot assign it (`'i' is the variable of a 'for' loop
   and cannot be assigned`) or pass it to an `inout` parameter, so the values are the
   range's. A lambda made in the body captures the value of that iteration.
 - **The loop always ends.** The number of iterations is known before the first one, so a

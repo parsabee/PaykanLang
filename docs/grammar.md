@@ -281,7 +281,7 @@ borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 ifStmt    ::= "if" expression block elseTail?
 elseTail  ::= "elif" expression block elseTail? | "else" block
 whileStmt ::= "while" expression block
-forStmt   ::= "for" IDENT ( ":" typeAnnotation )? "in" expression
+forStmt   ::= "for" ( IDENT | "_" ) ( ":" typeAnnotation )? "in" expression
               ( ".." | "..=" ) expression ( "step" expression )? block
 
 destructureTargets ::= destructureTarget ( "," destructureTarget )+
@@ -332,8 +332,8 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   expression keeps `else if` (`if a then x else if b then y else z`), and
   `elif` there is a syntax error that names `else if`.
 - A `forStmt` (`ForStmt`) declares its variable, a `VarDecl` with no
-  initializer that spans the name and its annotation; the statement spans
-  `for` to the block.  The range's ends are any expressions: `..` and `..=`
+  initializer that spans the name and its annotation (`_` is one with an
+  empty name, which binds nothing); the statement spans `for` to the block.  The range's ends are any expressions: `..` and `..=`
   are not operators, so each end is a whole expression (`0..n - 1` is
   `0..(n - 1)`).  `in` and `step` are not keywords: an identifier spelled
   `in` right after the variable (and its annotation) separates it from the

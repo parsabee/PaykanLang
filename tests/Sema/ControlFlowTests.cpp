@@ -114,6 +114,18 @@ TEST(ControlFlow, ForBoundsSeeTheOuterScope) {
   EXPECT_NE(bad.Diagnostics.find("'i'"), std::string::npos) << bad.Diagnostics;
 }
 
+// `for _` binds nothing: it hides no outer name and nests.
+TEST(ControlFlow, ForDiscardsItsVariable) {
+  auto r = semaCheck(wrapMain(R"(
+    n: unsigned = 3;
+    count: unsigned = 0;
+    for _ in 0..n { count = count + 1; }
+    for _: u8 in 0..=255 step 5 { }
+    for _ in 0..3 { for _ in 0..2 { for i in 0..1 { y: int = i; } } }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
 TEST(ControlFlow, ForVariableIsReadOnly) {
   auto r = semaCheck("fn bump(x: inout int) { x = x + 1; }\n" + wrapMain(R"(
     for i in 0..3 { i = 2; }
@@ -157,7 +169,11 @@ TEST(ControlFlow, ForRangeErrors) {
              "a 'for' loop's step is an 'int', not 'float'"},
         Case{"k: u8 = 1; for i in 0..3 step k { }",
              "a 'for' loop's step is an 'int', not 'u8'"},
-        Case{"for int in 0..3 { }", "'int'"}}) {
+        Case{"for int in 0..3 { }", "'int'"},
+        Case{"m = 4; for _: u8 in 0..m { }",
+             "the end of the range has type 'int', but '_' is a 'u8'"},
+        Case{"for _: Str in 0..3 { }",
+             "'_' has type 'Str': a 'for' loop's variable is an integer"}}) {
     auto r = semaCheck(wrapMain(c.Loop));
     EXPECT_FALSE(r.Ok) << c.Loop;
     EXPECT_NE(r.Diagnostics.find(c.Error), std::string::npos)
