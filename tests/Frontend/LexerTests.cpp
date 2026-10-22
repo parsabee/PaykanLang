@@ -132,6 +132,7 @@ TEST(Lexer, CompoundAssignmentTokens) {
   // space keeps the two apart.
   auto d = dump("+= -= *= /= %= -> - = =-");
   std::vector<std::string> kinds;
+  kinds.reserve(d.Lines.size());
   for (const auto &l : d.Lines)
     kinds.push_back(l.substr(l.find(' ') + 1,
                              l.find(' ', l.find(' ') + 1) - l.find(' ') - 1));
