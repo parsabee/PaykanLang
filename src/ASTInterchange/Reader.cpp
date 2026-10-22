@@ -846,10 +846,13 @@ private:
     return false;
   }
 
-  VarDecl *varDecl(const SExpr &e) {
+  /// @p discardable: the name may be "" (`_`), as a for loop's may.
+  VarDecl *varDecl(const SExpr &e, bool discardable = false) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
-    const std::string *name = f.name("the variable's name");
+    const std::string *name = discardable
+                                  ? f.string("the variable's name (\"\" for _)")
+                                  : f.name("the variable's name");
     if (!name)
       return nullptr;
     Type *ty = nullptr;
@@ -1110,9 +1113,10 @@ private:
         return nullptr;
       out = Ctx.make<WhileStmt>(loc, cond, body);
     } else if (t == "for") {
-      // (for (var NAME TYPE-or-_ _) START END STEP-or-_ BLOCK (inclusive)?)
+      // (for (var NAME TYPE-or-_ _) START END STEP-or-_ BLOCK (inclusive)?),
+      // NAME "" for `for _`.
       const SExpr *v = f.list("var");
-      VarDecl *var = v ? varDecl(*v) : nullptr;
+      VarDecl *var = v ? varDecl(*v, true) : nullptr;
       if (!var)
         return nullptr;
       if (var->getInitExpr() || var->isLet() || var->isWeak() ||

@@ -1330,10 +1330,14 @@ Val ModuleLowering::visitForStmt(ast::ForStmt *node) {
   B.store(more, d.More);
   pir::LocalId cur = B.addLocal("for.cur", Type::I64);
   B.store(cur, first);
+  // `for _` has no variable: only the counter.
   const std::string &name = node->getVar()->getName();
-  pir::LocalId var = B.addLocal(name, Type::I64);
-  B.store(var, first);
-  CurrentScope->declare(name, var, ty);
+  std::optional<pir::LocalId> var;
+  if (!name.empty()) {
+    var = B.addLocal(name, Type::I64);
+    B.store(*var, first);
+    CurrentScope->declare(name, *var, ty);
+  }
 
   pir::While *w = B.openWhile();
   LoopStack.push_back({CurrentScope});
@@ -1341,8 +1345,9 @@ Val ModuleLowering::visitForStmt(ast::ForStmt *node) {
   B.setWhileCond(w, B.load(more, "for.go"));
   B.leave();
   B.enterLoopBody(*w->Body);
-  Val value = B.load(cur, name);
-  B.store(var, value);
+  Val value = B.load(cur, var ? name : "for.value");
+  if (var)
+    B.store(*var, value);
   B.store(more, B.cmp(CmpPred::Ne, value, last, "for.again"));
   B.store(cur, B.binary(Opcode::Add, value, step, "for.next"));
   visit(node->getBody());

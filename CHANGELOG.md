@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     names it. The step is an `int`.
   - What the loop does is fixed when it starts: the start, end and step are
     evaluated once, in that order, and the variable is read-only in the body.
+  - `for _ in 0..n` runs the body `n` times without naming the value.
   - The number of iterations is known before the first, so a loop always ends,
     even at the end of its type: `for b: u8 in 0..=255` runs 256 times.
   - A constant step of `0` is a compile error; a computed one panics when the

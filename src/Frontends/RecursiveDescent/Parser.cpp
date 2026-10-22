@@ -1658,10 +1658,11 @@ Stmt *Parser::parseWhileStmt() {
 // field may still be named `in` or `step`.
 Stmt *Parser::parseForStmt() {
   SourceLocation start = consume().Loc; // "for"
-  if (!at(Tok::Ident)) {
-    errorAtCurrent("expected the loop variable's name after 'for'");
+  if (!at(Tok::Ident) && !at(Tok::Underscore)) {
+    errorAtCurrent("expected the loop variable's name or '_' after 'for'");
     return nullptr;
   }
+  // `_` binds no name: the VarDecl's name is empty.
   Token name = consume();
   Type *ty = nullptr;
   if (accept(Tok::Colon)) {
@@ -1670,7 +1671,9 @@ Stmt *Parser::parseForStmt() {
       return nullptr;
   }
   // The VarDecl spans the name and its annotation.
-  auto *var = Ctx.make<VarDecl>(span(name.Loc), intern(name.Text), ty, nullptr);
+  auto *var = Ctx.make<VarDecl>(
+      span(name.Loc), intern(name.Kind == Tok::Underscore ? "" : name.Text), ty,
+      nullptr);
   if (!at(Tok::Ident) || cur().Text != "in") {
     errorAtCurrent("expected 'in' after the 'for' loop's variable");
     return nullptr;
