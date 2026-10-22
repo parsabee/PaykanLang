@@ -628,6 +628,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// of elements, each of its element type.
     ast::Type *checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
                                       ast::FixedArrayType *fixed);
+    /// `E::V(a, b)`: variant @p variant of @p enumTy made with its fields,
+    /// the arguments, as a struct's constructor takes them; the enum.
+    ast::Type *checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
+                                const std::string &variant);
 #define EXPR_VISIT(Kind, Name, Cast) ast::Type *visit##Name(ast::Cast *node);
     PAYKAN_EXPR_NODES(EXPR_VISIT)
 #undef EXPR_VISIT
@@ -801,11 +805,14 @@ public:
 
     // Serialised enum-type descriptions: the enum name plus its variant names
     // in declaration order (the index is the variant's underlying value).
+    // A tagged union's variants with fields are listed too: each one's
+    // fields are the struct `Name::variant` among ExportedStructs.
     struct EnumInfo {
       std::string Name;
       std::vector<std::string> Variants;
       bool IsLocal = true;      // see ClassInfo::IsLocal
       std::string OriginModule; // see ClassInfo::OriginModule
+      std::vector<std::string> PayloadVariants;
       bool operator==(const EnumInfo &) const = default;
     };
     std::vector<EnumInfo> ExportedEnums;
@@ -1213,6 +1220,12 @@ private:
   bool checkStructBodies();
   /// The module's structs declareStructs registered, in source order.
   std::vector<ast::StructDecl *> DeclaredStructs;
+  /// `struct 'P'`, or for the struct of an enum's variant's fields
+  /// `variant 'V' of enum 'E'`.
+  static std::string describeStruct(const ast::StructType *st);
+  /// The structs of the module's enums' variants' fields (`E::V`), by enum
+  /// name: a struct that holds the enum holds them in place.
+  StringMap<std::vector<std::string>> EnumPayloadStructs;
   /// Their names (a later declaration of one of them is a redefinition,
   /// not a conflict with an import).
   StringSet LocalStructNames;

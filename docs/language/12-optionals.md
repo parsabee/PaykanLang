@@ -487,8 +487,8 @@ same type are equal when both are `None` or both are present and `==`, and a `ma
 unwraps one with an arm naming the inner type (`q: Point`, `t: (int, Str)`, `s: Suit`)
 plus `None`. They can be fields (`None` in a new object), array elements (`Point?[2]`),
 tuple elements, parameters, results and ternary branches (`if c then p else None`). An
-optional tuple or struct prints `None` or the value's text; an enum is not `Show`, and
-neither is its optional.
+optional tuple, struct or enum prints `None` or the value's text (an enum's is its variant's
+name).
 
 ```pkn
 import ::io;

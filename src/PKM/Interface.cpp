@@ -148,6 +148,11 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
       v.uleb(e->Variants.size());
       for (const std::string &name : e->Variants)
         v.uleb(strs.intern(name));
+      if (!e->PayloadVariants.empty()) {
+        v.uleb(e->PayloadVariants.size());
+        for (const std::string &name : e->PayloadVariants)
+          v.uleb(strs.intern(name));
+      }
     });
   for (const ClassRec *c : sortedByName(iface.Classes))
     record(decls, static_cast<uint64_t>(DeclTag::Class), [&](ByteWriter &v) {
@@ -478,7 +483,9 @@ Status Reader::readDecls(Interface &out) {
           EnumRec e;
           uint8_t flags;
           if (!str(v, e.Name) || !v.u8(flags) || !str(v, e.OriginModule) ||
-              !strList(v, e.Variants) || !ordered(tag, e.Name))
+              !strList(v, e.Variants) ||
+              (v.remaining() > 0 && !strList(v, e.PayloadVariants)) ||
+              !ordered(tag, e.Name))
             return true;
           e.IsLocal = flags & kDeclLocal;
           out.Enums.push_back(std::move(e));

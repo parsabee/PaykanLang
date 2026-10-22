@@ -809,6 +809,46 @@ TEST(ASTInterchange, ForLoops) {
   }
 }
 
+// A variant with fields is `(variant "Name" (var "f" TYPE _)...)` among the
+// enum's bare variant names.
+TEST(ASTInterchange, EnumVariantsWithFields) {
+  const std::string text =
+      "(paykan-ast 1 (unit (enum \"E\" \"A\" (variant \"B\" "
+      "(var \"x\" (named-type \"int\") _) (var \"s\" (named-type \"Str\") _)) "
+      "\"C\")))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("EnumDecl 'E' {A, B(x, s), C}"), std::string::npos) << d;
+  std::string written = write(*tu);
+  EXPECT_NE(written.find("(variant \"B\""), std::string::npos) << written;
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *Variant;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(variant \"B\")", "(variant) needs at least one field"},
+        Case{"(variant \"B\" (var \"x\" (named-type \"int\") (int 1)))",
+             "a variant's field is a name and a type only"},
+        Case{"(variant \"B\" (var \"x\" _ _))",
+             "a variant's field is a name and a type only"},
+        Case{"(variant \"\" (var \"x\" (named-type \"int\") _))",
+             "empty name"}}) {
+    std::string doc =
+        "(paykan-ast 1 (unit (enum \"E\" " + std::string(c.Variant) + ")))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.Variant;
+    EXPECT_NE(error.find(c.Error), std::string::npos)
+        << c.Variant << ": " << error;
+  }
+}
+
 // A local borrow is a `var` with a trailing `(qual view)` or
 // `(qual inout)`, and an initialiser.
 TEST(ASTInterchange, LocalBorrows) {

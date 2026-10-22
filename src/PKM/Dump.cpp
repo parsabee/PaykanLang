@@ -183,9 +183,12 @@ void dumpIface(const File &f, std::ostream &os) {
     return std::string(local ? "local" : "imported") + " from " +
            quoted(module);
   };
-  for (const EnumRec &e : i.Enums)
+  for (const EnumRec &e : i.Enums) {
     os << "  enum " << e.Name << " [" << origin(e.IsLocal, e.OriginModule)
        << "] { " << list(e.Variants) << " }\n";
+    if (!e.PayloadVariants.empty())
+      os << "    fields in { " << list(e.PayloadVariants) << " }\n";
+  }
   for (const ClassRec &c : i.Classes) {
     os << "  class " << c.Name << " super " << quoted(c.SuperClassName) << " ["
        << origin(c.IsLocal, c.OriginModule) << "]\n";

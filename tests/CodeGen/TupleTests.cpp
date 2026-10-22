@@ -58,6 +58,8 @@ static_assert(int(paykan::names::kNativeKindTuple) == int(PAYKAN_KIND_TUPLE),
               "native type-kind ABI drift");
 static_assert(int(paykan::names::kNativeKindUInt) == int(PAYKAN_KIND_UINT),
               "native type-kind ABI drift");
+static_assert(int(paykan::names::kNativeKindEnum) == int(PAYKAN_KIND_ENUM),
+              "native type-kind ABI drift");
 
 // -- Literals, element reads, printing
 

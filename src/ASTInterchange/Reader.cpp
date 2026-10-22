@@ -659,13 +659,41 @@ private:
     if (!name)
       return nullptr;
     std::vector<const std::string *> variants;
+    std::vector<std::vector<VarDecl *>> payloads;
     while (!f.atEnd()) {
+      // A plain variant is its name; one with fields is
+      // (variant "Name" (var "f" TYPE _)...).
+      if (const SExpr *vl = f.optionalList("variant")) {
+        Fields vf(*this, *vl);
+        const std::string *v = vf.name("a variant");
+        if (!v)
+          return nullptr;
+        std::vector<VarDecl *> fields;
+        while (!vf.atEnd()) {
+          const SExpr *fe = vf.list("var");
+          VarDecl *field = fe ? varDecl(*fe) : nullptr;
+          if (!field)
+            return nullptr;
+          if (!field->getType() || field->getInitExpr() || field->isLet() ||
+              field->isWeak() || field->getMode() != ParamMode::Value)
+            return fail(*fe, "a variant's field is a name and a type only"),
+                   nullptr;
+          fields.push_back(field);
+        }
+        if (fields.empty())
+          return fail(*vl, "(variant) needs at least one field"), nullptr;
+        variants.push_back(v);
+        payloads.push_back(std::move(fields));
+        continue;
+      }
       const std::string *v = f.name("a variant");
       if (!v)
         return nullptr;
       variants.push_back(v);
+      payloads.emplace_back();
     }
-    return Ctx.make<EnumDecl>(loc, *name, std::move(variants));
+    return Ctx.make<EnumDecl>(loc, *name, std::move(variants),
+                              std::move(payloads));
   }
 
   /// `(type-params "T" (bound "U" TRAIT...))` into @p out and @p bounds

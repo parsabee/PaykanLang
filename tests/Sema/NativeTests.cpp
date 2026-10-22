@@ -87,7 +87,8 @@ TEST(Native, OnlyScalarsCrossByValue) {
   r = semaCheck("native fn f(s: Str) = \"pk_f\";\n"
                 "fn main() -> int { return 0; }");
   EXPECT_NE(r.Diagnostics.find("('s: view Str'); only int, float, bool, "
-                               "char and an enum cross into C by value"),
+                               "char and an enum without fields cross into "
+                               "C by value"),
             std::string::npos)
       << r.Diagnostics;
 }

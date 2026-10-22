@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tagged unions (docs/language/07-enums.md, "Variants With Fields"): an enum's
+  variant may have fields, `enum Shape { Empty, Rect(w: int, h: int) }`. The
+  enum is then a value held in place, like a struct: its tag, then each
+  variant's fields.
+  - `Shape::Rect(2, 3)` makes one, its arguments checked as a constructor's; a
+    variant without fields stays `Shape::Empty`.
+  - A `match` arm `r: Rect { ... }` binds the variant's fields, a copy, or with
+    `view` / `inout` the subject's own. Their struct is the type
+    `Shape::Rect`, so a function can take them.
+  - `toString()` and `io::println` show `Rect(w: 2, h: 3)`; `==` and `!=`
+    compare the variant and its fields.
+  - A variant cannot hold its own enum (hold it in a class instead), a field
+    is not a fixed-size array yet, and a tagged union does not cross into C.
+  - Imported tagged unions work from a source and from a `.pkm`: an `ENUM`
+    record lists its variants with fields, whose fields are `STRUCT` records
+    (docs/design/pkm.md). The AST interchange format writes such a variant as
+    `(variant NAME VAR...)` (docs/plugins/ast-format.md). The runtime adds
+    `PaykanEnum_toString` and `PaykanEnum_equals` and the layout kind `ENUM`
+    (docs/pir.md).
+- Every enum is `Show`: `d.toString()` and `io::println(d)` give the variant's
+  name, also for an enum in a tuple, a struct or an optional (which printed
+  its ordinal before).
+- `scripts/pkfmt.py` keeps a variant's fields on its line.
 - Expression bodies (docs/language/03-functions.md, "Expression Bodies";
   docs/language/14-function-types.md): a function or a lambda whose body only
   returns an expression is written with `=>`, `fn double(x: int) -> int => x

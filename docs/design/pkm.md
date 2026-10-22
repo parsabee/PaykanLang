@@ -343,7 +343,12 @@ lists, written only when a result is a borrow (the modes lists are then
 written too, with `n` 0 where a signature has none).  A record without them
 reads as having no modes and returning copies.  Each field of a `CLASS`
 record carries a flags byte after its type name (bit 0: a `weak` field,
-docs/design/weak-references.md); a `STRUCT` record's fields have none.  The
+docs/design/weak-references.md); a `STRUCT` record's fields have none.  An
+`ENUM` record of a tagged union (docs/language/07-enums.md) adds, after its
+variants, `uleb n, Str name[n]`: the variants that have fields, each one's
+fields the `STRUCT` record named `Enum::variant` (a struct without methods
+or a constructor; it is local when the enum is), written only when there
+are any, so an enum without fields has the record it had before.  The
 interface minor version is bumped for them at the next release.
 
 Every part but `STRS` is `uleb count` then records `uleb tag, uleb len,

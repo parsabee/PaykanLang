@@ -70,26 +70,38 @@ namespace {
 /// The names of the structs a value of the annotation @p ty holds in place:
 /// a struct named outright, as an element of a tuple or a fixed-size array,
 /// or as the value of an optional (`P?` holds its P in place; a slice, a
-/// class and a type argument hold nothing in place).  @p ty is a parser
+/// class and a type argument hold nothing in place).  An enum holds the
+/// structs of its variants' fields (@p enumPayloads).  @p ty is a parser
 /// annotation: a struct is a ClassType stub.
 void heldStructNames(const ast::Type *ty, const StringSet &structs,
+                     const StringMap<std::vector<std::string>> &enumPayloads,
                      std::vector<std::string> &out) {
   if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
     if (structs.count(ct->getName()))
       out.push_back(ct->getName());
+    if (auto it = enumPayloads.find(ct->getName()); it != enumPayloads.end())
+      out.insert(out.end(), it->second.begin(), it->second.end());
   } else if (const auto *st = ast::dyn_cast<ast::StructType>(ty)) {
     out.push_back(st->getName());
   } else if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     for (const ast::Type *e : tt->getElementTypes())
-      heldStructNames(e, structs, out);
+      heldStructNames(e, structs, enumPayloads, out);
   } else if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty)) {
-    heldStructNames(ft->getElementType(), structs, out);
+    heldStructNames(ft->getElementType(), structs, enumPayloads, out);
   } else if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
-    heldStructNames(ot->getInnerType(), structs, out);
+    heldStructNames(ot->getInnerType(), structs, enumPayloads, out);
   }
 }
 
 } // namespace
+
+// static
+std::string Sema::describeStruct(const ast::StructType *st) {
+  if (const ast::EnumType *et = st->getVariantEnum())
+    return "variant '" + *et->getVariants()[st->getVariantIndex()] +
+           "' of enum '" + et->getName() + "'";
+  return "struct '" + st->getName() + "'";
+}
 
 bool Sema::populateStructs() {
   bool ok = true;
@@ -123,13 +135,26 @@ bool Sema::populateStructs() {
         through += path[i];
         through += "'";
       }
-      error(sd->getLocation(),
-            "struct '" + name + "' contains itself" +
-                (through.empty()
-                     ? std::string(": a field holds a '" + name + "'")
-                     : " (through " + through + ")") +
-                "; a struct is held in place, so it cannot hold one of its "
-                "own (hold it in a class instead)");
+      const ast::StructType *st = Ctx.lookupStructType(name);
+      if (const ast::EnumType *et = st->getVariantEnum())
+        // A variant's fields that hold the enum, directly or through
+        // structs: `enum L { Nil, Cons(tail: L) }`.
+        error(sd->getLocation(),
+              "enum '" + et->getName() + "' contains itself: variant '" +
+                  *et->getVariants()[st->getVariantIndex()] + "'" +
+                  (through.empty()
+                       ? std::string(" holds an '" + et->getName() + "'")
+                       : " holds it through " + through) +
+                  "; an enum is held in place, so its variants cannot hold "
+                  "it (hold it in a class instead)");
+      else
+        error(sd->getLocation(),
+              "struct '" + name + "' contains itself" +
+                  (through.empty()
+                       ? std::string(": a field holds a '" + name + "'")
+                       : " (through " + through + ")") +
+                  "; a struct is held in place, so it cannot hold one of "
+                  "its own (hold it in a class instead)");
       ErroneousClasses.insert(name);
       ok = false;
       return;
@@ -138,7 +163,7 @@ bool Sema::populateStructs() {
     path.push_back(name);
     for (auto *field : sd->getFields()) {
       std::vector<std::string> held;
-      heldStructNames(field->getType(), names, held);
+      heldStructNames(field->getType(), names, EnumPayloadStructs, held);
       for (const std::string &h : held)
         if (auto it = byName.find(h); it != byName.end())
           visit(it->second);
@@ -160,7 +185,8 @@ bool Sema::populateStructs() {
       ErroneousClasses.insert(sd->getName());
       continue;
     }
-    declareConstructor(sd, st);
+    if (!st->getVariantEnum()) // a variant's fields: `E::V(1)` is the enum
+      declareConstructor(sd, st);
   }
   return ok;
 }
@@ -168,13 +194,13 @@ bool Sema::populateStructs() {
 bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
   bool ok = true;
   const std::string &name = sd->getName();
+  const std::string what = describeStruct(st);
   StringSet fieldNames;
   for (auto *field : sd->getFields()) {
-    const std::string context =
-        "field '" + field->getName() + "' in struct '" + name + "'";
+    const std::string context = "field '" + field->getName() + "' in " + what;
     if (!fieldNames.insert(field->getName()).second) {
-      error(field->getLocation(), "duplicate field '" + field->getName() +
-                                      "' in struct '" + name + "'");
+      error(field->getLocation(),
+            "duplicate field '" + field->getName() + "' in " + what);
       ok = false;
       continue;
     }
@@ -194,7 +220,9 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     if (holdsFixedArray(fty)) {
       error(field->getLocation(),
             context + " has type '" + typeName(fty) +
-                "': a struct field cannot be a fixed-size array yet");
+                (st->getVariantEnum()
+                     ? "': a variant's field cannot be a fixed-size array yet"
+                     : "': a struct field cannot be a fixed-size array yet"));
       ok = false;
       continue;
     }
@@ -212,9 +240,8 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     // come (its own instantiation resolving to the stub), so the field is
     // checked here, and left out, so that no type holds itself.
     if (holdsStruct(fty, st)) {
-      std::string msg = "struct '";
-      msg += name;
-      msg += "' contains itself: field '";
+      std::string msg = what;
+      msg += " contains itself: field '";
       msg += field->getName();
       msg += "' holds a '";
       msg += name;
@@ -234,6 +261,8 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
                             "field", fty, field->getLocation()))
       ok = false;
   }
+  if (st->getVariantEnum())
+    return ok; // a variant's fields: no methods, no constructor
   if (!populateImplMethods(sd, st))
     ok = false;
   if (!st->findMethod(names::kMethodInit) && !declareDefaultInit(sd, st))
@@ -624,6 +653,19 @@ ValueLayout valueLayout(const ast::Type *ty) {
       l.Size = alignUp(l.Size, el.Align) + el.Size;
       l.Align = std::max(l.Align, el.Align);
     }
+    return {alignUp(l.Size, l.Align), l.Align};
+  }
+  // A tagged union: its tag, then each variant's fields in place, as the
+  // tuple (int, E::A, E::B, ...) of its variants with fields.
+  if (const auto *et = ast::dyn_cast<ast::EnumType>(ty);
+      et && et->hasPayloads()) {
+    ValueLayout l{8, 8};
+    for (size_t i = 0; i < et->getNumVariants(); ++i)
+      if (const ast::StructType *p = et->getPayload(i)) {
+        const ValueLayout el = valueLayout(p);
+        l.Size = alignUp(l.Size, el.Align) + el.Size;
+        l.Align = std::max(l.Align, el.Align);
+      }
     return {alignUp(l.Size, l.Align), l.Align};
   }
   return {8, 8}; // a reference or an enum

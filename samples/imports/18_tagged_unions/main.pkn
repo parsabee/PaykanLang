@@ -1,0 +1,26 @@
+// OK: a tagged union made in another module (docs/language/07-enums.md):
+// its variants built, matched and shown here, one variant's fields passed to
+// that module's function, the module's template instantiated here.
+// expect-stdout: Rect(w: 2, h: 3) 6 Circle(r: 1) 3 Empty 0 | 6 |
+// expect-stdout: Rect(w: 4, h: 3) True
+// expect-stdout: Labelled(text: 0, inner: Box(3)) = 9
+// expect-stdout: Labelled(text: 1, inner: Box(3)) = 9
+import ::io;
+import shapes;
+
+fn main() -> int {
+  all = [shapes::Shape::Rect(2, 3), shapes::Shape::Circle(1.0),
+      shapes::Shape::Empty];
+  for i in 0..3 {
+    io::print(all[i].toString() + " " + Str(shapes::area(all[i])) + " ");
+  }
+  match all[0] {
+    r: Rect { io::println("| " + Str(shapes::rectArea(r)) + " |"); }
+    _ {}
+  }
+  s = all[0];
+  shapes::widen(s);
+  io::println(s.toString() + " " + Str(s == shapes::Shape::Rect(4, 3)));
+  shapes::squares(2, 3);
+  return 0;
+}

@@ -113,6 +113,23 @@ TEST(Dump, Sections) {
                           "  kind 0x0210 19 B (not decoded)\n");
 }
 
+// A tagged union's variants with fields follow its variants.
+TEST(Dump, TaggedUnionVariants) {
+  Writer w;
+  w.add(Kind::Manifest, kFlagRequired, encodeManifest(minimalManifest("m")));
+  Interface i;
+  i.Module = "m";
+  i.Enums.push_back({"Shape", {"Empty", "Rect"}, true, "m", {"Rect"}});
+  w.add(Kind::Iface, kFlagRequired, writeInterface(i));
+  StatusOr<std::vector<uint8_t>> out = w.finish();
+  ASSERT_TRUE(out) << out.status().message();
+  std::string d = dumpOf(*out);
+  EXPECT_NE(d.find("  enum Shape [local from \"m\"] { Empty, Rect }\n"
+                   "    fields in { Rect }\n"),
+            std::string::npos)
+      << d;
+}
+
 TEST(Dump, CorruptInterfaceIsReported) {
   Writer w;
   w.add(Kind::Manifest, kFlagRequired, encodeManifest(minimalManifest()));

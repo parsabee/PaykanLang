@@ -161,3 +161,152 @@ TEST(EnumCodeGen, ArrayOfEnums) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "W\nE\nS\n");
 }
+
+// -- Enums shown by name
+
+TEST(EnumCodeGen, ShownByName) {
+  LeakGuard g;
+  auto r = compileAndRun(withEnums("enum Dir { North, East }", R"(
+    d = Dir::East;
+    o: Dir? = Dir::North;
+    io::println(d.toString() + " " + o.toString());
+    io::println(d);
+    io::println((d, 1));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "East North\nEast\n(East, 1)\n");
+  g.expectNoLeaks("ShownByName");
+}
+
+// -- Variants with fields (a tagged union)
+
+static const char *kShape = "import ::io;\n"
+                            "class Tag {\n"
+                            "  n: int;\n"
+                            "  view fn toString() -> Str {\n"
+                            "    return \"Tag\" + Str(self.n);\n"
+                            "  }\n"
+                            "}\n"
+                            "enum Shape {\n"
+                            "  Empty,\n"
+                            "  Circle(r: float),\n"
+                            "  Rect(w: int, h: int),\n"
+                            "  Named(name: Str, tag: Tag?)\n"
+                            "}\n";
+
+TEST(EnumCodeGen, VariantsMadeMatchedAndShown) {
+  LeakGuard g;
+  auto r = compileAndRun(std::string(kShape) + R"(
+fn area(s: Shape) -> int {
+  match s {
+    Empty { return 0; }
+    c: Circle { return int(c.r * c.r); }
+    r: Rect { return r.w * r.h; }
+    n: Named { return n.name.len(); }
+  }
+}
+fn main() -> int {
+  xs = [Shape::Empty, Shape::Circle(2.0), Shape::Rect(2, 3),
+        Shape::Named("four", Tag(1))];
+  total = 0;
+  for i in 0..4 {
+    io::println(xs[i]);
+    total += area(xs[i]);
+  }
+  return total;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Empty\nCircle(r: 2)\nRect(w: 2, h: 3)\n"
+                      "Named(name: four, tag: Tag1)\n");
+  EXPECT_EQ(r.ExitCode, 14);
+  g.expectNoLeaks("VariantsMadeMatchedAndShown");
+}
+
+// Assigning a variant releases the references of the one it replaces;
+// copies share them; an `inout` binding changes the subject's fields.
+TEST(EnumCodeGen, VariantOwnership) {
+  LeakGuard g;
+  auto r = compileAndRun(std::string(kShape) + R"(
+fn grow(s: inout Shape) {
+  match s {
+    r: inout Rect { r.w *= 10; }
+    n: inout Named { n.name = n.name + "!"; }
+    _ { }
+  }
+}
+fn main() -> int {
+  s = Shape::Named("a", Tag(1));
+  copy = s;
+  s = Shape::Rect(1, 2);
+  grow(s);
+  grow(copy);
+  io::println(s.toString() + " " + copy.toString());
+  s = copy;
+  s = Shape::Empty;
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Rect(w: 10, h: 2) Named(name: a!, tag: Tag1)\n");
+  g.expectNoLeaks("VariantOwnership");
+}
+
+TEST(EnumCodeGen, VariantEquality) {
+  LeakGuard g;
+  auto r = compileAndRun(std::string(kShape) + R"(
+fn main() -> int {
+  a = Shape::Rect(1, 2);
+  io::println(Str(a == Shape::Rect(1, 2)) + " " + Str(a == Shape::Rect(2, 1))
+      + " " + Str(a != Shape::Empty) + " " + Str(Shape::Empty == Shape::Empty)
+      + " " + Str(Shape::Named("x", None) == Shape::Named("x", None)));
+  o: Shape? = None;
+  p: Shape? = a;
+  io::println(Str(o == None) + " " + Str(o == p));
+  o = Shape::Rect(1, 2);
+  io::println(Str(o == p));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "True False True True True\nTrue False\nTrue\n");
+  g.expectNoLeaks("VariantEquality");
+}
+
+// A tagged union in a struct, a tuple, an optional, a List and an object's
+// field; passed, returned, captured; one variant's fields as a parameter.
+TEST(EnumCodeGen, TaggedUnionHeldEverywhere) {
+  LeakGuard g;
+  auto r =
+      compileAndRun(std::string(kShape) + "import ::collections as col;\n" + R"(
+struct Slot { s: Shape; n: int; }
+class Holder { s: Shape; }
+fn rectArea(r: Shape::Rect) -> int { return r.w * r.h; }
+fn make(k: int) -> Shape {
+  return if k > 0 then Shape::Named(Str(k), None) else Shape::Empty;
+}
+fn main() -> int {
+  slot = Slot(Shape::Circle(1.5), 1);
+  t = (make(2), 3);
+  o: Shape? = make(0);
+  l = col::List<Shape>();
+  l.push(make(5));
+  l.push(Shape::Rect(3, 4));
+  h = Holder(Shape::Empty);
+  h.s = l.get(0);
+  f = fn() => slot.s.toString();
+  io::println(slot.toString() + " " + t.toString() + " " + o.toString());
+  io::println(h.s.toString() + " " + f() + " " + Str(l.len()));
+  match l.get(1) {
+    r: Rect { io::println(rectArea(r)); }
+    _ { }
+  }
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut,
+            "Slot(s: Circle(r: 1.5), n: 1) (Named(name: 2, tag: None), 3) "
+            "Empty\nNamed(name: 5, tag: None) Circle(r: 1.5) 2\n12\n");
+  g.expectNoLeaks("TaggedUnionHeldEverywhere");
+}

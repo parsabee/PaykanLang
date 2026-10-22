@@ -724,14 +724,28 @@ void ASTPrinter::visitTraitDecl(TraitDecl *node) {
 void ASTPrinter::visitEnumDecl(EnumDecl *node) {
   header("EnumDecl", node);
   OS << " '" << node->getName() << "' {";
-  bool first = true;
-  for (const auto *v : node->getVariants()) {
-    if (!first)
+  // `B(x, y)` for a variant with fields; the fields follow as children.
+  size_t total = 0;
+  for (size_t i = 0; i < node->getNumVariants(); ++i) {
+    if (i)
       OS << ", ";
-    OS << *v;
-    first = false;
+    OS << *node->getVariants()[i];
+    const auto &payload = node->getPayload(i);
+    if (payload.empty())
+      continue;
+    OS << "(";
+    for (size_t k = 0; k < payload.size(); ++k)
+      OS << (k ? ", " : "") << payload[k]->getName();
+    OS << ")";
+    total += payload.size();
   }
   OS << "}\n";
+  size_t idx = 0;
+  for (size_t i = 0; i < node->getNumVariants(); ++i)
+    for (VarDecl *field : node->getPayload(i)) {
+      ChildScope cs(*this, ++idx == total);
+      visitVarDecl(field);
+    }
 }
 
 void ASTPrinter::visitEnumType(EnumType *node) {

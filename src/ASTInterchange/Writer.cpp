@@ -150,8 +150,18 @@ private:
   void enumDecl(const EnumDecl &d) {
     open("enum", &d);
     str(d.getName());
-    for (const std::string *v : d.getVariants())
-      str(*v);
+    for (size_t i = 0; i < d.getNumVariants(); ++i) {
+      // A variant with fields is (variant "Name" (var ...)...).
+      if (d.getPayload(i).empty()) {
+        str(*d.getVariants()[i]);
+        continue;
+      }
+      open("variant");
+      str(*d.getVariants()[i]);
+      for (const VarDecl *f : d.getPayload(i))
+        varDecl(*f);
+      close();
+    }
     close();
   }
 

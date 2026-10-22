@@ -437,6 +437,8 @@ static int64_t elementAlign(const ast::Type *ty) {
 }
 
 int64_t Sema::fixedElementBytes(const ast::Type *ty) {
+  if (ast::isPayloadEnum(ty))
+    return valueSize(ty); // its tag, then its variants' fields in place
   if (ast::isa<ast::EnumType>(ty))
     return 8;
   if (const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
@@ -1215,8 +1217,86 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
                                      node->getVariantName() + "'");
     return nullptr;
   }
+  // A variant with fields is made with them: `E::V(1, "a")`.
+  if (const ast::StructType *p = enumTy->getPayload(static_cast<size_t>(idx))) {
+    std::string fields;
+    for (size_t i = 0; i < p->getNumFields(); ++i)
+      fields += (i ? ", " : "") + p->getFieldName(i);
+    S.error(node->getLocation(),
+            "variant '" + node->getVariantName() + "' of enum '" +
+                enumTy->getName() + "' has fields: write '" +
+                node->getEnumName() + names::kQualSep + node->getVariantName() +
+                "(" + fields + ")'");
+    return nullptr;
+  }
   node->setResolvedEnum(enumTy);
   node->setValue(idx);
+  node->setResolvedType(enumTy);
+  return enumTy;
+}
+
+ast::Type *Sema::ExprChecker::checkVariantCall(ast::CallExpr *node,
+                                               ast::EnumType *enumTy,
+                                               const std::string &variant) {
+  const std::string &callee = node->getCalleeName();
+  int64_t idx = enumTy->findVariant(variant);
+  if (idx < 0) {
+    S.error(node->getLocation(), "enum '" + enumTy->getName() +
+                                     "' has no variant '" + variant + "'");
+    return nullptr;
+  }
+  ast::StructType *payload = enumTy->getPayload(static_cast<size_t>(idx));
+  if (!payload) {
+    S.error(node->getLocation(),
+            "variant '" + variant + "' of enum '" + enumTy->getName() +
+                "' has no fields: write '" + callee + "' without arguments");
+    return nullptr;
+  }
+  if (S.ErroneousClasses.count(payload->getName())) {
+    ++S.SuppressedFollowOns; // its fields were reported
+    return nullptr;
+  }
+  // The arguments are its fields, in order, as a struct's constructor
+  // takes them.
+  const std::vector<ast::Type *> &fieldTys = payload->getElementTypes();
+  const auto &args = node->getArguments();
+  std::vector<ast::Type *> argTypes;
+  argTypes.reserve(args.size());
+  for (size_t i = 0; i < args.size(); ++i)
+    argTypes.push_back(
+        visitExpecting(args[i], i < fieldTys.size() ? fieldTys[i] : nullptr));
+  if (args.size() != fieldTys.size()) {
+    std::string fields;
+    for (size_t i = 0; i < payload->getNumFields(); ++i)
+      fields += (i ? ", " : "") + payload->getFieldName(i) + ": " +
+                typeName(fieldTys[i]);
+    S.error(node->getLocation(),
+            "variant '" + variant + "' of enum '" + enumTy->getName() +
+                "' has " + std::to_string(fieldTys.size()) + " field(s) (" +
+                fields + "), got " + std::to_string(args.size()) +
+                " argument(s)");
+    return nullptr;
+  }
+  bool ok = true;
+  for (size_t i = 0; i < args.size(); ++i) {
+    if (!argTypes[i]) {
+      ok = false;
+      continue;
+    }
+    if (!S.checkAssignable(fieldTys[i], argTypes[i], args[i]) &&
+        !S.diagnoseOptionalNarrowing(args[i]->getLocation(), fieldTys[i],
+                                     argTypes[i])) {
+      S.error(args[i]->getLocation(), "field '" + payload->getFieldName(i) +
+                                          "' of '" + callee + "' has type '" +
+                                          typeName(fieldTys[i]) + "', got '" +
+                                          typeName(argTypes[i]) + "'");
+      ok = false;
+    }
+  }
+  // A `view` is never stored: the fields are values.
+  if (!ok || !S.checkViewArgs({}, fieldTys, args, callee))
+    return nullptr;
+  node->setVariant(enumTy, static_cast<size_t>(idx));
   node->setResolvedType(enumTy);
   return enumTy;
 }
@@ -1446,6 +1526,14 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
+  // `E::V(a, b)`: an enum's variant, made with its fields.
+  if (const std::string &callee = node->getCalleeName(); !node->hasTypeArgs()) {
+    if (auto sep = callee.rfind(names::kQualSep); sep != std::string::npos)
+      if (auto *et = S.Ctx.lookupEnumType(callee.substr(0, sep)))
+        return checkVariantCall(
+            node, et,
+            callee.substr(sep + std::string_view(names::kQualSep).size()));
+  }
   // `C::__m(...)`: a private static method is its type's own.
   if (!S.checkStaticMemberUse(node->getCalleeName(), node->getLocation()))
     return nullptr;
@@ -1646,10 +1734,14 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   if (!sig) {
     if (S.reportPrivateImport(node->getCalleeName(), node->getLocation()))
       return nullptr;
-    if (!S.isFailedImportUse(node->getCalleeName()))
-      S.error(node->getLocation(), "call to undeclared function '" +
-                                       displayName(node->getCalleeName()) +
-                                       "'");
+    // `m::E::V(x)` names a variant of an enum of the failed module `m`.
+    const std::string &callee = node->getCalleeName();
+    const auto sep = callee.rfind(names::kQualSep);
+    if (!S.isFailedImportUse(callee) &&
+        (sep == std::string::npos ||
+         !S.isFailedImportUse(callee.substr(0, sep))))
+      S.error(node->getLocation(),
+              "call to undeclared function '" + displayName(callee) + "'");
     return nullptr;
   }
 
@@ -1728,6 +1820,7 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     if (node->getMethodName() == names::kMethodToString &&
         node->getNumArguments() == 0 &&
         (ast::isa<ast::ClassType>(inner) || ast::isa<ast::TupleType>(inner) ||
+         ast::isa<ast::EnumType>(inner) ||
          (ast::isa<ast::BuiltinType>(inner) && inner != S.Ctx.getVoidTy()))) {
       node->setResolvedType(S.Ctx.getStrTy());
       return S.Ctx.getStrTy();
@@ -1757,14 +1850,15 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   ast::ClassType *ct = ast::dyn_cast<ast::ClassType>(recvTy);
   ast::StructType *st = ast::dyn_cast<ast::StructType>(recvTy);
 
-  // `n.toString()` on an int, float, bool or char, or on a tuple or a
-  // struct: the builtin `Show`; `n.hash()` on an int, bool or char, and
-  // `s.hash()` on a Str: the builtin `Hashable`.
+  // `n.toString()` on an int, float, bool or char, on a tuple or a struct,
+  // or on an enum (its variant, and its fields): the builtin `Show`;
+  // `n.hash()` on an int, bool or char, and `s.hash()` on a Str: the builtin
+  // `Hashable`.
   const std::string &mname = node->getMethodName();
   ast::Type *builtinResult = nullptr;
   if (!ct &&
       ((ast::isa<ast::BuiltinType>(recvTy) && recvTy != S.Ctx.getVoidTy()) ||
-       ast::isa<ast::TupleType>(recvTy)) &&
+       ast::isa<ast::TupleType>(recvTy) || ast::isa<ast::EnumType>(recvTy)) &&
       mname == names::kMethodToString)
     builtinResult = S.Ctx.getStrTy();
   else if (mname == names::kMethodHash &&
@@ -1944,7 +2038,7 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
       ++S.SuppressedFollowOns; // the struct declaration was already reported
     else
       S.error(node->getLocation(), "no field '" + node->getFieldName() +
-                                       "' in struct '" + st->getName() + "'");
+                                       "' in " + describeStruct(st));
     return nullptr;
   }
 
@@ -2982,14 +3076,31 @@ bool Sema::visitEnumDecl(ast::EnumDecl *node) {
 
   bool ok = true;
   StringSet seen;
-  for (const auto *variant : node->getVariants()) {
-    if (!seen.insert(*variant).second) {
-      error(node->getLocation(), "duplicate variant '" + *variant +
+  for (size_t i = 0; i < node->getNumVariants(); ++i) {
+    const std::string &variant = *node->getVariants()[i];
+    if (!seen.insert(variant).second) {
+      error(node->getLocation(), "duplicate variant '" + variant +
                                      "' in enum '" + node->getName() + "'");
       ok = false;
       continue;
     }
-    enumTy->addVariant(*variant);
+    enumTy->addVariant(variant);
+    const auto &fields = node->getPayload(i);
+    if (fields.empty())
+      continue;
+    // The variant's fields are a struct of their own, `E::V` (a name no
+    // declaration can take), populated with the module's structs
+    // (populateStructs): its fields resolve, and are held in place, as a
+    // struct's are.  It has no constructor: `E::V(1)` makes the enum.
+    const std::string &name =
+        Ctx.intern(node->getName() + names::kQualSep + variant);
+    auto *sd =
+        Ctx.make<ast::StructDecl>(fields.front()->getLocation(), name, fields);
+    auto *st = Ctx.registerStructType(name, sd->getLocation());
+    st->setVariantOf(enumTy, enumTy->getNumVariants() - 1);
+    enumTy->setPayload(enumTy->getNumVariants() - 1, st);
+    DeclaredStructs.push_back(sd);
+    EnumPayloadStructs[node->getName()].push_back(name);
   }
   return ok;
 }
@@ -3523,10 +3634,11 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 // Paykan storage.
 bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                                 const std::vector<ast::Type *> &paramTypes) {
-  // An enum crosses as its variant's ordinal, an int64_t.
+  // An enum crosses as its variant's ordinal, an int64_t (one whose variants
+  // have fields does not cross).
   auto scalarOrRef = [&](ast::Type *t) {
     if (t == Ctx.getStrTy() || t == Ctx.getObjTy() ||
-        ast::isa<ast::EnumType>(t))
+        (ast::isa<ast::EnumType>(t) && !ast::isPayloadEnum(t)))
       return true;
     auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
     return bt && t != Ctx.getVoidTy();
@@ -3537,9 +3649,9 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     error(node->getLocation(),
           "native function '" + node->getName() + "': " + what + " '" +
               typeName(t) +
-              "' cannot cross into C (int, float, bool, char, an enum, Str "
-              "and Obj can, Str? and Obj? as a result, and any type where a "
-              "generic native function says 'T')");
+              "' cannot cross into C (int, float, bool, char, an enum "
+              "without fields, Str and Obj can, Str? and Obj? as a result, "
+              "and any type where a generic native function says 'T')");
     ok = false;
   };
   for (size_t i = 0; i < paramTypes.size(); ++i)
@@ -3585,6 +3697,8 @@ bool Sema::checkNativeParamModes(const ast::FuncDecl *node,
   bool ok = true;
   for (size_t i = 0; i < types.size(); ++i) {
     const ast::Param &p = node->getParams()[i];
+    // An enum whose variants have fields crosses in no mode
+    // (checkNativeSignature says so).
     if (p.Mode != ast::ParamMode::Value ||
         (ast::isa<ast::BuiltinType>(types[i]) && types[i] != Ctx.getVoidTy()) ||
         ast::isa<ast::EnumType>(types[i]))
@@ -3594,8 +3708,8 @@ bool Sema::checkNativeParamModes(const ast::FuncDecl *node,
           "native function '" + node->getName() + "': parameter '" +
               p.getName() + "' must be 'view' or 'inout' ('" + p.getName() +
               ": view " + ty +
-              "'); only int, float, bool, char and an enum cross into C by "
-              "value");
+              "'); only int, float, bool, char and an enum without fields "
+              "cross into C by value");
     ok = false;
   }
   return ok;
@@ -4003,7 +4117,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
         ++SuppressedFollowOns; // the struct declaration was already reported
       else
         error(node->getLocation(), "no field '" + node->getFieldName() +
-                                       "' in struct '" + st->getName() + "'");
+                                       "' in " + describeStruct(st));
       return false;
     }
     if (!checkMemberAccess(st, node->getFieldName(), node->getLocation()))
@@ -4211,11 +4325,6 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       ok = false;
     } else {
       // The arm's type-name stub carries the variant name.
-      if (arm->hasBinding()) {
-        error(arm->getLocation(), "enum-match arm cannot bind a variable");
-        declarePoisoned(CurrentScope, arm->getBinding());
-        ok = false;
-      }
       std::string variant;
       if (auto *stub = ast::dyn_cast<ast::ClassType>(arm->getArmType()))
         variant = stub->getName();
@@ -4243,9 +4352,32 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
               "duplicate variant '" + variant + "' in enum match");
         ok = false;
       }
+      // `x: V { }` binds the variant's fields, a struct: a copy, or with
+      // `view` / `inout` the subject's own (bindArmName).
+      if (arm->hasBinding()) {
+        int64_t idx = variant.empty() ? -1 : subjectTy->findVariant(variant);
+        ast::StructType *payload =
+            idx < 0 ? nullptr : subjectTy->getPayload(static_cast<size_t>(idx));
+        if (idx >= 0 && !payload) {
+          std::string msg = "variant '" + variant + "' of enum '";
+          msg += subjectTy->getName() + "' has no fields to bind: write the ";
+          msg += "arm '" + variant + " { ... }'";
+          error(arm->getLocation(), msg);
+          ok = false;
+        }
+        if (!payload || ErroneousClasses.count(payload->getName())) {
+          declarePoisoned(CurrentScope, arm->getBinding());
+        } else if (!bindArmName(arm, node->getSubject(), payload)) {
+          ok = false;
+        } else if (!CurrentScope->declare(arm->getBinding(), payload)) {
+          error(arm->getLocation(),
+                "redeclaration of '" + arm->getBinding() + "' in match arm");
+          ok = false;
+        }
+      }
     }
 
-    if (!visitStatements(arm->getBody()->getStatements()))
+    if (!visitArmBody(arm, node->getSubject()))
       ok = false;
   }
 

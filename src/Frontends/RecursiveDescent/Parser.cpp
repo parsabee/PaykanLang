@@ -801,7 +801,9 @@ StructDecl *Parser::parseStructDecl() {
   return sd;
 }
 
-// enumDecl ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
+// enumDecl ::= "enum" IDENT "{" variant ( "," variant )* ","? "}"
+// variant  ::= IDENT ( "(" variantField ( "," variantField )* ")" )?
+// variantField ::= IDENT ":" typeAnnotation
 EnumDecl *Parser::parseEnumDecl() {
   SourceLocation start = consume().Loc; // "enum"
   if (!at(Tok::Ident)) {
@@ -813,19 +815,62 @@ EnumDecl *Parser::parseEnumDecl() {
     return nullptr;
 
   std::vector<const std::string *> variants;
+  std::vector<std::vector<VarDecl *>> payloads;
+  // A variant, with its fields (its payload) when it has any.
+  auto variant = [&]() {
+    const std::string &vname = intern(consume().Text);
+    std::vector<VarDecl *> fields;
+    if (accept(Tok::LParen)) {
+      if (at(Tok::RParen)) {
+        errorAtCurrent("a variant without fields is written without "
+                       "parentheses: '" +
+                       vname + "'");
+        return false;
+      }
+      do {
+        SourceLocation fstart = cur().Loc;
+        if (!at(Tok::Ident)) {
+          errorAtCurrent("expected a field name ('name: Type') in variant '" +
+                         vname + "'");
+          return false;
+        }
+        const std::string &fname = intern(consume().Text);
+        if (!expect(Tok::Colon, "after the field name (a variant's field "
+                                "needs a type)"))
+          return false;
+        if (at(Tok::KwView) || at(Tok::KwInout)) {
+          errorAtCurrent("a variant's field is a value: write '" + fname +
+                         ": T'");
+          return false;
+        }
+        Type *ty = parseTypeAnnotation();
+        if (!ty)
+          return false;
+        fields.push_back(Ctx.make<VarDecl>(span(fstart), fname, ty, nullptr));
+      } while (accept(Tok::Comma));
+      if (!expect(Tok::RParen, "to close the variant's fields"))
+        return false;
+    }
+    variants.push_back(&vname);
+    payloads.push_back(std::move(fields));
+    return true;
+  };
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a variant name (an enum needs at least one)");
     return nullptr;
   }
-  variants.push_back(&intern(consume().Text));
+  if (!variant())
+    return nullptr;
   while (accept(Tok::Comma)) {
     if (!at(Tok::Ident))
       break; // trailing comma
-    variants.push_back(&intern(consume().Text));
+    if (!variant())
+      return nullptr;
   }
   if (!expect(Tok::RBrace, "to close the enum body"))
     return nullptr;
-  return Ctx.make<EnumDecl>(span(start), name, std::move(variants));
+  return Ctx.make<EnumDecl>(span(start), name, std::move(variants),
+                            std::move(payloads));
 }
 
 // implDecl ::= "impl" ( typeAnnotation "for" )? modulePath

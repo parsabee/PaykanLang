@@ -288,8 +288,9 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
        ast::isa<ast::FixedArrayType>(ty) || ast::isa<ast::FunctionType>(ty)) &&
       isBuiltinTrait(names::kTraitValueType))
     return ty;
-  // A tuple shows its elements (the builtin `Show`).
-  if (ast::isa<ast::TupleType>(ty))
+  // A tuple shows its elements, an enum its variant and its fields (the
+  // builtin `Show`).
+  if (ast::isa<ast::TupleType>(ty) || ast::isa<ast::EnumType>(ty))
     return isBuiltinTrait(names::kTraitShow) ? ty : nullptr;
   return has(ty) ? ty : nullptr;
 }

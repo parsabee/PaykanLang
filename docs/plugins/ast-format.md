@@ -84,7 +84,7 @@ or more.
 | `(unit LOC DECL...)` | the file. Each `DECL` is an `import`, `enum`, `struct`, `class`, `fn`, `trait` or `impl`, in any order |
 | `(import LOC SYSTEM BASE MODULE...)` | `import`. `SYSTEM` is `true` for `import ::name`, else `false`; `BASE` is the path before the last segment (`"a::b"` for `import a::b::m`, `""` for none); at least one `MODULE` |
 | `(module NAME ALIAS)` | one imported module; `ALIAS` is a string, `""` for none (`import m as x` has `(module "m" "x")`; `import a::{m, n}` has two) |
-| `(enum LOC NAME NAME...)` | `enum E { A, B }`: the name, then the variants |
+| `(enum LOC NAME VARIANT...)` | `enum E { A, B }`: the name, then the variants. A variant without fields is its `NAME`; one with fields is `(variant NAME VAR...)`, each field a `var` with a type and no initialiser (`B(x: int)` is `(variant "B" (var "x" (named-type "int") _))`) |
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser |
 | `(struct LOC NAME (type-params NAME...) (fields VAR...))` | a struct ([`../language/11-structs.md`](../language/11-structs.md)): the name, the type parameters of a generic one, and its fields (at least one), each a `var` with a type and no initialiser. A struct body has no methods: they are in its `impl` blocks |
 | `(bound NAME TYPE...)` | in `type-params`, in place of `NAME`: a type parameter with bounds, the traits as types (`T: Show + Into<int>` is `(bound "T" (named-type "Show") (generic-type "Into" ...))`) |

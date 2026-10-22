@@ -159,6 +159,32 @@ TEST(Interface, WeakFields) {
   EXPECT_NE(writeInterface(i), b);
 }
 
+// A tagged union's ENUM record lists, after its variants, the ones with
+// fields, whose fields are the STRUCT records `Enum::variant`; an enum
+// without fields writes the record it did before.
+TEST(Interface, TaggedUnionVariants) {
+  Interface i;
+  i.Module = "shapes";
+  i.Enums.push_back({"Shape", {"Empty", "Rect"}, true, "shapes", {"Rect"}});
+  StructRec rect;
+  rect.Name = "Shape::Rect";
+  rect.OriginModule = "shapes";
+  rect.Fields = {{"w", "int"}, {"h", "int"}};
+  i.Structs.push_back(rect);
+  std::vector<uint8_t> b = writeInterface(i);
+  StatusOr<Interface> back = readInterface(b, "shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, i);
+  EXPECT_EQ((*back).Enums[0].PayloadVariants, std::vector<std::string>{"Rect"});
+
+  Interface plain = i;
+  plain.Enums[0].PayloadVariants.clear();
+  back = readInterface(writeInterface(plain), "shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_TRUE((*back).Enums[0].PayloadVariants.empty());
+  EXPECT_NE(writeInterface(plain), b);
+}
+
 // The parameter modes follow a FUNC record's signature and a CLASS record's
 // methods, and only when one has any, so a module without them has the
 // records it had before, and an older file reads as having none.

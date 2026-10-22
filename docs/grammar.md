@@ -148,7 +148,8 @@ typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
 
 structDecl  ::= "struct" IDENT typeParams? "{" ( varDecl ";" )+ "}"
 
-enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
+enumDecl    ::= "enum" IDENT "{" variant ( "," variant )* ","? "}"
+variant     ::= IDENT ( "(" varDecl ( "," varDecl )* ")" )?   -- its fields
 
 traitDecl   ::= "trait" IDENT ( "<" IDENT ( "," IDENT )* ">" )?
                 "{" traitMember* "}"
@@ -173,6 +174,12 @@ varDecl     ::= IDENT ":" typeAnnotation
 ```
 
 An enum needs at least one variant; a single trailing comma is permitted.
+A variant's fields, when it has any, are at least one `name: Type` in
+parentheses, without a trailing comma (`a variant without fields is written
+without parentheses: 'B'`; `a variant's field is a value: write 'x: T'` for
+a mode); a variant is made with a call of its qualified name, `E::B(1, s)`,
+and bound by a `match` arm, `b: B { ... }`
+([language/07-enums.md](language/07-enums.md#variants-with-fields)).
 A struct body holds fields only, at least one: a method goes in an `impl`
 block, and a struct has no superclass
 ([language/11-structs.md](language/11-structs.md)); both are syntax errors

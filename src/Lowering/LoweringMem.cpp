@@ -59,6 +59,12 @@ bool holdsRef(const ast::Type *ty) {
     for (const ast::Type *e : tt->getElementTypes())
       if (holdsRef(e))
         return true;
+  // A tagged union holds each variant's fields.
+  if (const auto *et = ast::dyn_cast<ast::EnumType>(ty))
+    for (size_t i = 0; i < et->getNumVariants(); ++i)
+      if (const ast::StructType *payload = et->getPayload(i);
+          payload && holdsRef(payload))
+        return true;
   return false;
 }
 
@@ -174,6 +180,14 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
                              : ast::cast<ast::Identifier>(e)->getFunctionRef(),
                           fnt, addr);
     }
+    return {addr, /*Temp=*/true};
+  }
+  // A tagged union's variant made here: written into a temporary.
+  if (isVariantExpr(e)) {
+    MemLayout l = memLayout(e->getResolvedType());
+    pir::LocalId tmp = B.addMemLocal("variant", l.Size, l.Align);
+    Val addr = B.localAddr(tmp, "variant.addr");
+    emitMemInit(e, addr);
     return {addr, /*Temp=*/true};
   }
   if (auto *id = ast::dyn_cast<ast::Identifier>(e)) {
@@ -374,6 +388,18 @@ void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
     return;
   }
   ast::Type *ty = e == UnwrappedExpr ? e->getResolvedType() : memTypeOf(e);
+  // A tagged union's variant: its tag, then its fields, in place.
+  if (auto *call = ast::dyn_cast<ast::CallExpr>(e);
+      call && call->getVariantEnum()) {
+    emitVariantInit(call, dst);
+    return;
+  }
+  if (auto *ev = ast::dyn_cast<ast::EnumValueExpr>(e);
+      ev && isVariantExpr(ev)) {
+    B.memZero(dst, Val::i64(memLayout(ty).Size));
+    B.ptrStore(dst, Val::i64(ev->getValue()));
+    return;
+  }
   if (auto *tl = ast::dyn_cast<ast::TupleLiteralExpr>(e)) {
     auto *tt = ast::cast<ast::TupleType>(ty);
     for (size_t i = 0; i < tl->getNumElements(); ++i) {
@@ -540,71 +566,131 @@ void ModuleLowering::emitMemAssign(const Val &dst, ast::Expr *value) {
 
 // -- Tuples and structs: their layouts, text and equality
 
-Val ModuleLowering::emitTupleLayout(ast::TupleType *tt) {
-  std::vector<int64_t> words;
-  // A name (Runtime.h, "Structs"): its length, then its bytes packed eight
-  // to a word, the first byte in the lowest eight bits.
-  auto appendName = [&](const std::string &name) {
-    words.push_back(static_cast<int64_t>(name.size()));
-    for (size_t i = 0; i < name.size(); i += 8) {
-      uint64_t word = 0;
-      for (size_t k = 0; k < 8 && i + k < name.size(); ++k)
-        word |= static_cast<uint64_t>(static_cast<unsigned char>(name[i + k]))
-                << (8 * k);
-      words.push_back(static_cast<int64_t>(word));
-    }
-  };
-  std::function<void(ast::TupleType *)> append = [&](ast::TupleType *t) {
-    auto *st = ast::dyn_cast<ast::StructType>(t);
-    words.push_back(static_cast<int64_t>(t->getArity()));
+namespace {
+
+/// Append @p name as a layout writes it (Runtime.h, "Structs"): its length,
+/// then its bytes packed eight to a word, the first byte in the lowest eight
+/// bits.
+void appendName(std::vector<int64_t> &words, const std::string &name) {
+  words.push_back(static_cast<int64_t>(name.size()));
+  for (size_t i = 0; i < name.size(); i += 8) {
+    uint64_t word = 0;
+    for (size_t k = 0; k < 8 && i + k < name.size(); ++k)
+      word |= static_cast<uint64_t>(static_cast<unsigned char>(name[i + k]))
+              << (8 * k);
+    words.push_back(static_cast<int64_t>(word));
+  }
+}
+
+/// The kind of a layout entry for the tuple or struct @p t.
+int64_t aggregateKind(const ast::TupleType *t) {
+  return ast::isa<ast::StructType>(t) ? int64_t{names::kNativeKindStruct}
+                                      : int64_t{names::kNativeKindTuple};
+}
+
+} // namespace
+
+void ModuleLowering::appendTupleLayout(std::vector<int64_t> &words,
+                                       ast::TupleType *t) {
+  auto *st = ast::dyn_cast<ast::StructType>(t);
+  words.push_back(static_cast<int64_t>(t->getArity()));
+  // A variant's fields are shown under the variant's name, `Move(x: 1)`.
+  if (st && st->getVariantEnum())
+    appendName(words,
+               *st->getVariantEnum()->getVariants()[st->getVariantIndex()]);
+  else if (st)
+    appendName(words, st->getName());
+  for (size_t i = 0; i < t->getArity(); ++i) {
+    ast::Type *e = t->getElementType(i);
+    const int64_t off = tupleElementOffset(t, i);
     if (st)
-      appendName(st->getName());
-    for (size_t i = 0; i < t->getArity(); ++i) {
-      ast::Type *e = t->getElementType(i);
-      if (st)
-        appendName(st->getFieldName(i));
-      ast::TupleType *nested = ast::isFunctionValue(e)
-                                   ? functionValueShape()
-                                   : ast::dyn_cast<ast::TupleType>(e);
-      words.push_back(nested ? (ast::isa<ast::StructType>(nested)
-                                    ? int64_t{names::kNativeKindStruct}
-                                    : int64_t{names::kNativeKindTuple})
-                             : int64_t{nativeTypeKind(e)});
-      words.push_back(tupleElementOffset(t, i));
-      if (nested) {
-        append(nested);
-      } else if (ast::isMemOptional(e)) {
-        // An optional tuple or struct: the presence flag at the entry's
-        // offset, then a whole entry for the value (Runtime.h, "Tuples").
-        auto *value = ast::cast<ast::TupleType>(ast::stripOptional(e));
-        const int64_t kind = ast::isa<ast::StructType>(value)
-                                 ? int64_t{names::kNativeKindStruct}
-                                 : int64_t{names::kNativeKindTuple};
-        words.push_back(kind);
-        words.push_back(kind);
-        words.push_back(tupleElementOffset(t, i) + memOptionalPayloadOffset(e));
-        append(value);
-      } else if (ast::isa<ast::OptionalType>(e))
-        words.push_back(ast::isValueOptional(e)
-                            ? int64_t{nativeTypeKind(ast::stripOptional(e))}
-                            : int64_t{names::kNativeKindObject});
+      appendName(words, st->getFieldName(i));
+    if (auto *et = ast::dyn_cast<ast::EnumType>(e)) {
+      words.push_back(names::kNativeKindEnum);
+      words.push_back(off);
+      appendEnumLayout(words, et);
+      continue;
     }
-  };
-  append(tt);
+    // An optional enum: the presence flag at the entry's offset, then a
+    // whole entry for the value (Runtime.h, "Tuples"), as an optional
+    // struct's is; an enum without fields is the payload of an inline
+    // optional (8 bytes in).
+    if (auto *et = ast::isa<ast::OptionalType>(e)
+                       ? ast::dyn_cast<ast::EnumType>(ast::stripOptional(e))
+                       : nullptr) {
+      words.push_back(names::kNativeKindOptional);
+      words.push_back(off);
+      words.push_back(names::kNativeKindEnum);
+      words.push_back(names::kNativeKindEnum);
+      words.push_back(off + (ast::isPayloadEnum(et)
+                                 ? memOptionalPayloadOffset(e)
+                                 : int64_t{8}));
+      appendEnumLayout(words, et);
+      continue;
+    }
+    ast::TupleType *nested = ast::isFunctionValue(e)
+                                 ? functionValueShape()
+                                 : ast::dyn_cast<ast::TupleType>(e);
+    words.push_back(nested ? aggregateKind(nested)
+                           : int64_t{nativeTypeKind(e)});
+    words.push_back(off);
+    if (nested) {
+      appendTupleLayout(words, nested);
+    } else if (ast::isMemOptional(e)) {
+      // An optional tuple or struct: the presence flag at the entry's
+      // offset, then a whole entry for the value (Runtime.h, "Tuples").
+      auto *value = ast::cast<ast::TupleType>(ast::stripOptional(e));
+      words.push_back(aggregateKind(value));
+      words.push_back(aggregateKind(value));
+      words.push_back(off + memOptionalPayloadOffset(e));
+      appendTupleLayout(words, value);
+    } else if (ast::isa<ast::OptionalType>(e))
+      words.push_back(ast::isValueOptional(e)
+                          ? int64_t{nativeTypeKind(ast::stripOptional(e))}
+                          : int64_t{names::kNativeKindObject});
+  }
+}
+
+void ModuleLowering::appendEnumLayout(std::vector<int64_t> &words,
+                                      ast::EnumType *et) {
+  const auto &variants = et->getVariants();
+  words.push_back(static_cast<int64_t>(variants.size()));
+  for (size_t i = 0; i < variants.size(); ++i) {
+    appendName(words, *variants[i]);
+    ast::StructType *payload = et->getPayload(i);
+    words.push_back(payload ? 1 : 0);
+    if (!payload)
+      continue;
+    words.push_back(variantPayloadOffset(et, i));
+    appendTupleLayout(words, payload);
+  }
+}
+
+Val ModuleLowering::internLayout(
+    std::unordered_map<std::string, std::string> &interned, const char *prefix,
+    std::vector<int64_t> words) {
   std::string key;
   for (int64_t w : words) {
     key += std::to_string(w);
     key += '|';
   }
-  auto [it, added] = InternedTupleLayouts.try_emplace(key);
+  auto [it, added] = interned.try_emplace(key);
   if (added) {
-    it->second = std::string(ast::isa<ast::StructType>(tt)
-                                 ? names::kStructLayoutGlobalName
-                                 : names::kTupleLayoutGlobalName) +
-                 std::to_string(InternedTupleLayouts.size() - 1);
+    it->second = prefix + std::to_string(interned.size() - 1);
     Mod.Datas.push_back({it->second, std::move(words)});
   }
   return Val::symbol(it->second, Type::Ptr);
+}
+
+Val ModuleLowering::emitTupleLayout(ast::TupleType *tt) {
+  std::vector<int64_t> words;
+  appendTupleLayout(words, tt);
+  // A struct's and a tuple's are named apart, as they were.
+  return internLayout(InternedTupleLayouts,
+                      ast::isa<ast::StructType>(tt)
+                          ? names::kStructLayoutGlobalName
+                          : names::kTupleLayoutGlobalName,
+                      std::move(words));
 }
 
 Val ModuleLowering::emitTupleToString(ast::Expr *e) {

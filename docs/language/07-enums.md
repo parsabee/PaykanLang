@@ -2,9 +2,12 @@
 
 An **enum** is a type with a fixed set of named values, called **variants**: the days of the
 week, a card suit, a traffic light, a parser state, the priority of a task. Enums model
-closed choices, where every possibility is known at compile time. This chapter shows how to
-declare and use one, then gives the rules; [Match](08-match.md) covers the statement that
-branches on enums, and on much more.
+closed choices, where every possibility is known at compile time. A variant can also carry
+values of its own, its **fields** (`Rect(w: int, h: int)`), which makes the enum a **tagged
+union**: a value is one of the variants and holds that variant's fields
+([Variants With Fields](#variants-with-fields)). This chapter shows how to declare and use an
+enum, then gives the rules; [Match](08-match.md) covers the statement that branches on enums,
+and on much more.
 
 ## Declaring an enum
 
@@ -54,10 +57,10 @@ True
 ```
 
 The variants are written `Enum::Variant` in expressions, and bare (`North`) in the arms of a
-`match` on the enum. An enum is a type of its own: it is not a number, it has no ordering,
-and it cannot be printed directly (`io::println(d)` is an error: an enum is not `Show`), so
-a function such as `name` above turns it into a string. It is a plain value like an `int`:
-copied on assignment, never allocated.
+`match` on the enum. An enum is a type of its own: it is not a number and it has no
+ordering. It prints as its variant's name (`io::println(d)` prints `North`, and
+`d.toString()` is `"North"`); a function such as `name` above gives it other text. It is a
+plain value like an `int`: copied on assignment, never allocated.
 
 ---
 
@@ -71,9 +74,13 @@ copied on assignment, never allocated.
   **not** an `int` and does **not** convert to or from one, in either direction; there is no
   arithmetic on enums.
 - The only operators are `==` and `!=`, and both sides must be the **same** enum type.
-- An enum has no methods (`d.toString()` is an error) and implements neither `Show` nor
-  `Hashable`; it does implement `ValueType` ([Traits](06-traits.md)).
+- An enum's one method is the builtin `toString()`: its variant's name, `"North"`, so it
+  implements `Show` and prints with `io::println`; it implements `ValueType` too, but not
+  `Hashable` ([Traits](06-traits.md)).
 - Enums are **value types**: stack-allocated, copied on assignment, no reference counting.
+- A variant may have fields, `Rect(w: int, h: int)`, made with `Shape::Rect(2, 3)` and bound
+  by a `match` arm, `r: Rect { … r.w … }`: the enum is then a **tagged union**, a value held
+  in place like a struct ([Variants With Fields](#variants-with-fields)).
 - An enum can be a variable, a function parameter or return type, a class or struct field, a
   tuple element or an array element type, and has an optional (`Direction?`, see
   [Optionals](12-optionals.md)).
@@ -103,6 +110,7 @@ enum Signal { Only }   // a single-variant enum is valid
 - Enums are top-level declarations, like functions and classes, and may be imported from other
   modules (see [Modules](15-modules.md)).
 - An enum cannot have an `impl` block (`an 'impl' block for an enum is not supported yet`).
+- A variant may have fields: `Circle(r: float)` ([Variants With Fields](#variants-with-fields)).
 
 ---
 
@@ -299,6 +307,197 @@ and the complete set of rules, see [Match](08-match.md).
 
 ---
 
+## Variants With Fields
+
+A variant can carry values, its **fields**, written after its name as a function's parameters
+are. An enum with such variants is a **tagged union**: each value is one of the variants and
+holds that variant's fields, and a `match` tells the variants apart and reads the fields:
+
+```pkn
+import ::io;
+
+enum Shape {
+  Empty,
+  Circle(r: float),
+  Rect(w: int, h: int),
+  Label(text: Str)
+}
+
+fn area(s: Shape) -> float {
+  match s {
+    Empty { return 0.0; }
+    c: Circle { return 3.0 * c.r * c.r; }
+    r: Rect { return float(r.w * r.h); }
+    _ { return -1.0; }
+  }
+}
+
+fn main() -> int {
+  shapes = [Shape::Circle(1.5), Shape::Rect(2, 3), Shape::Label("hi"), Shape::Empty];
+  for i in 0..4 {
+    io::println(shapes[i].toString() + " has area " + Str(area(shapes[i])));
+  }
+  io::println(Str(shapes[1] == Shape::Rect(2, 3)) + " " + Str(shapes[1] == shapes[3]));
+  return 0;
+}
+```
+
+Output:
+
+```
+Circle(r: 1.5) has area 6.75
+Rect(w: 2, h: 3) has area 6
+Label(text: hi) has area -1
+Empty has area 0
+True False
+```
+
+### Making a value
+
+`Enum::Variant(a, b)` makes a variant with fields: one argument per field, in order, each
+assignable to its field's type as a constructor's arguments are (`Shape::Circle(2)` promotes
+the `int`, a `T` becomes a `T?` field's present value). A variant without fields is still
+`Enum::Variant`, without parentheses, also in a tagged union (`Shape::Empty`). The compiler
+says which form a variant needs:
+
+```pkn
+s = Shape::Rect;          // error: variant 'Rect' of enum 'Shape' has fields: write 'Shape::Rect(w, h)'
+t = Shape::Empty(1);      // error: variant 'Empty' of enum 'Shape' has no fields: write 'Shape::Empty' without arguments
+u = Shape::Rect(1);       // error: variant 'Rect' of enum 'Shape' has 2 field(s) (w: int, h: int), got 1 argument(s)
+```
+
+### Binding the fields
+
+An arm `name: Variant { … }` runs when the value is that variant and binds `name` to its
+fields, read as a struct's are (`r.w`). The binding is a copy, as a by-value parameter is;
+with `view` (`r: view Rect`) it is read-only, and with `inout` (`r: inout Rect`) it is the
+subject's own fields, so writing through it changes the subject:
+
+```pkn
+import ::io;
+
+enum Account {
+  Closed,
+  Open(owner: Str, balance: int)
+}
+
+fn deposit(a: inout Account, amount: int) {
+  match a {
+    o: inout Open { o.balance += amount; }
+    Closed { io::println("closed: nothing deposited"); }
+  }
+}
+
+fn describe(o: Account::Open) -> Str {
+  return o.owner + " has " + Str(o.balance);
+}
+
+fn main() -> int {
+  a = Account::Open("ada", 10);
+  deposit(a, 5);
+  match a {
+    o: Open { io::println(describe(o)); }
+    _ { }
+  }
+  c = Account::Closed;
+  deposit(c, 5);
+  io::println(a);
+  return 0;
+}
+```
+
+Output:
+
+```
+ada has 15
+closed: nothing deposited
+Open(owner: ada, balance: 15)
+```
+
+The fields of a variant are a struct of their own named `Enum::Variant`, so a function can take
+them (`describe(o: Account::Open)` above) and a binding can be passed to it. Only a `match`
+makes one: `Account::Open("ada", 10)` is an `Account`, not an `Account::Open`. A variant
+without fields has nothing to bind (`variant 'Closed' of enum 'Account' has no fields to
+bind: write the arm 'Closed { ... }'`), and the rules of a `view` or an `inout` binding are
+the ones every `match` arm has ([Borrowing the subject](08-match.md#borrowing-the-subject)).
+
+### Text and equality
+
+`toString()`, and so `io::println`, gives the variant's name followed by its fields as a struct
+shows them, `Rect(w: 2, h: 3)`, or the bare name for a variant without fields, `Empty`. `==`
+and `!=` compare two values of the same tagged union: equal when they are the same variant
+with equal fields (compared as a struct's are: a `Str` by its text, an object by its
+`equals`). As for any enum, there is no ordering.
+
+### Held in place
+
+A tagged union is a value held in place, like a struct ([Structs](11-structs.md)): its
+**tag**, the variant's index, followed by each variant's fields one after another, only the
+current variant's set. So a value is as large as the tag and all its variants' fields
+together, assigning one copies those bytes, and the references among the fields (a `Str`,
+an object) are shared, as a struct's are. A tagged union can be a variable, a parameter or a
+result, a field of a class or a struct, a tuple or array element, the value of an optional
+(`Shape?`) and the element of a container (`List<Shape>`), and a lambda can capture one.
+
+Held in place, a variant cannot hold its own enum, directly or through a struct or a tuple
+(`enum 'Expr' contains itself: variant 'Add' holds an 'Expr'; an enum is held in place, so
+its variants cannot hold it (hold it in a class instead)`). A class is a reference, so
+recursive data goes through one:
+
+```pkn
+import ::io;
+
+enum Expr {
+  Num(v: int),
+  Add(args: Pair),
+  Mul(args: Pair)
+}
+
+class Pair {
+  l: Expr;
+  r: Expr;
+}
+
+fn eval(e: Expr) -> int {
+  match e {
+    n: Num { return n.v; }
+    a: Add { return eval(a.args.l) + eval(a.args.r); }
+    m: Mul { return eval(m.args.l) * eval(m.args.r); }
+  }
+}
+
+fn main() -> int {
+  // (2 + 3) * 4
+  sum = Expr::Add(Pair(Expr::Num(2), Expr::Num(3)));
+  e = Expr::Mul(Pair(sum, Expr::Num(4)));
+  io::println(eval(e));
+  return 0;
+}
+```
+
+Output:
+
+```
+20
+```
+
+### Fields and their limits
+
+- A field is a name and a type, `x: int`: no mode, no default value, and the names of one
+  variant's fields are distinct (`duplicate field 'x' in variant 'B' of enum 'E'`). A variant
+  with fields has at least one: `B()` is written `B`.
+- A field's type is any type a struct field can have but a fixed-size array (`a variant's
+  field cannot be a fixed-size array yet`); a generic struct is fine
+  (`Buf(buffer: mem::Buffer<int>)`).
+- A `view` is never stored in a field: `E::B(v)` with a `view` parameter `v` is an error, as
+  storing it in a struct is.
+- A tagged union does not cross into C ([Native functions](03-functions.md#native-functions)),
+  is not `Hashable` (so it is not a `HashMap` key), and an enum has no type parameters.
+- An imported tagged union is used the same way: `geo::Shape::Rect(1, 2)` makes one and the
+  arms are bare (`r: Rect`); its fields' struct is `geo::Shape::Rect`.
+
+---
+
 ## Semantic Checks
 
 | Error | Trigger |
@@ -309,4 +508,9 @@ and the complete set of rules, see [Match](08-match.md).
 | Cross-enum comparison | `==` / `!=` between two different enum types |
 | Unknown variant in `match` arm | A bare-identifier arm that is not a variant of the subject enum |
 | Non-exhaustive `match` | Enum `match` that covers neither all variants nor a wildcard, on a path that must yield a value |
-| Method on an enum | `d.toString()` or any method call on an enum value (`method call on non-class type 'Direction'`); `impl` blocks for enums are not supported yet |
+| Method on an enum | A method call on an enum value other than `toString()` (`method call on non-class type 'Direction'`); `impl` blocks for enums are not supported yet |
+| Variant made the wrong way | A variant with fields written without arguments, a variant without fields called, or the wrong number or types of arguments (`field 'w' of 'Shape::Rect' has type 'int', got 'Str'`) |
+| Binding a variant without fields | `x: Empty { … }` where the variant `Empty` has no fields |
+| Unknown field | `r.z` where the variant's fields have no `z` (`no field 'z' in variant 'Rect' of enum 'Shape'`) |
+| Enum holds itself | A variant's fields hold the enum, directly or through a struct or a tuple |
+| Bad field | Two fields of one variant share a name, a field is a fixed-size array, or a `view` is stored in one |

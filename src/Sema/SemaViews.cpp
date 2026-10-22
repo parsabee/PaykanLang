@@ -142,8 +142,14 @@ bool Sema::checkMethodReceiver(const ast::MethodCallExpr *call,
 }
 
 bool Sema::sharesStorage(const ast::Type *ty) {
-  if (!ty || ast::isa<ast::PoisonType>(ty) || ast::isa<ast::EnumType>(ty) ||
-      ast::isa<ast::BuiltinType>(ty))
+  // A tagged union shares what its variants' fields do.
+  if (const auto *et = ty ? ast::dyn_cast<ast::EnumType>(ty) : nullptr) {
+    for (size_t i = 0; i < et->getNumVariants(); ++i)
+      if (const ast::StructType *p = et->getPayload(i); p && sharesStorage(p))
+        return true;
+    return false;
+  }
+  if (!ty || ast::isa<ast::PoisonType>(ty) || ast::isa<ast::BuiltinType>(ty))
     return false;
   if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return sharesStorage(ot->getInnerType());

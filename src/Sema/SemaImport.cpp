@@ -371,7 +371,10 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
       continue; // alias key — skip
     ModuleInfo::StructInfo si;
     si.Name = name;
-    si.IsLocal = localStructs.count(name) != 0;
+    // A variant's fields are its enum's.
+    const ast::EnumType *variantOf = st->getVariantEnum();
+    si.IsLocal = variantOf ? localEnums.count(variantOf->getName()) != 0
+                           : localStructs.count(name) != 0;
     si.OriginModule = si.IsLocal ? moduleName : lookupOrigin(name);
     for (size_t i = 0; i < st->getNumFields(); ++i)
       si.Fields.push_back(
@@ -383,8 +386,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     info.ExportedStructs.push_back(std::move(si));
   }
 
-  // Enum types: name + variants in declaration order (canonical entries
-  // only, as for classes).
+  // Enum types: name + variants in declaration order, and those with fields
+  // (canonical entries only, as for classes).
   for (auto &[name, et] : Ctx.getEnumTypes()) {
     if (name != et->getName())
       continue; // alias key — skip
@@ -392,8 +395,11 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     ei.Name = name;
     ei.IsLocal = localEnums.count(name) != 0;
     ei.OriginModule = ei.IsLocal ? moduleName : lookupOrigin(name);
-    for (auto *v : et->getVariants())
-      ei.Variants.push_back(*v);
+    for (size_t i = 0; i < et->getNumVariants(); ++i) {
+      ei.Variants.push_back(*et->getVariants()[i]);
+      if (et->getPayload(i))
+        ei.PayloadVariants.push_back(*et->getVariants()[i]);
+    }
     info.ExportedEnums.push_back(std::move(ei));
   }
 
@@ -476,7 +482,8 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
     iface.Structs.push_back(std::move(sr));
   }
   for (auto &ei : info.ExportedEnums)
-    iface.Enums.push_back({ei.Name, ei.Variants, ei.IsLocal, ei.OriginModule});
+    iface.Enums.push_back({ei.Name, ei.Variants, ei.IsLocal, ei.OriginModule,
+                           ei.PayloadVariants});
   return iface;
 }
 
@@ -512,8 +519,8 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
     info.ExportedStructs.push_back(std::move(si));
   }
   for (auto &er : iface.Enums)
-    info.ExportedEnums.push_back(
-        {er.Name, er.Variants, er.IsLocal, er.OriginModule});
+    info.ExportedEnums.push_back({er.Name, er.Variants, er.IsLocal,
+                                  er.OriginModule, er.PayloadVariants});
   sortModuleInfo(info);
   return info;
 }
@@ -895,6 +902,31 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
       } // else: already present — pointer identity preserved
       if (si.IsLocal)
         addStructAliases(st, si.Name);
+    }
+
+    // A tagged union's variants: each one's fields, the struct
+    // `Enum::variant` (an enum already present has them).
+    for (auto &ei : info.ExportedEnums) {
+      auto *et = Ctx.lookupEnumType(ei.Name);
+      if (!et || ei.PayloadVariants.empty() || et->hasPayloads())
+        continue;
+      for (const std::string &v : ei.PayloadVariants) {
+        int64_t idx = et->findVariant(v);
+        auto *st = Ctx.lookupStructType(ei.Name + names::kQualSep + v);
+        if (idx < 0 || !st) {
+          std::string msg = diagPrefix;
+          msg += "the fields of variant '";
+          msg += v;
+          msg += "' of enum '";
+          msg += ei.Name;
+          msg += "' are missing";
+          error(loc, msg);
+          ok = false;
+          continue;
+        }
+        et->setPayload(static_cast<size_t>(idx), st);
+        st->setVariantOf(et, static_cast<size_t>(idx));
+      }
     }
 
     // Classes, phase 1: pre-register a stub for every class not already

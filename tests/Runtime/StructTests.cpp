@@ -8,7 +8,9 @@
 // count, the struct's name, then each field's name and tuple entry.  A name
 // is its byte length in one word, then its bytes packed eight to a word, the
 // first byte in the lowest eight bits.  Each test runs on the tracking
-// allocator and ends with no live blocks.
+// allocator and ends with no live blocks.  An enum's text and equality
+// (PaykanEnum_toString, PaykanEnum_equals) are tested here too: a tagged
+// union's variants' fields are structs (Runtime.h, "Enums").
 
 #include <cmath>
 #include <cstddef>
@@ -42,6 +44,7 @@ constexpr int64_t kObj = PAYKAN_KIND_OBJECT;
 constexpr int64_t kOpt = PAYKAN_KIND_OPTIONAL;
 constexpr int64_t kTuple = PAYKAN_KIND_TUPLE;
 constexpr int64_t kStruct = PAYKAN_KIND_STRUCT;
+constexpr int64_t kEnum = PAYKAN_KIND_ENUM;
 
 #define OFF(T, field) static_cast<int64_t>(offsetof(T, field))
 
@@ -296,4 +299,129 @@ TEST(StructEquals, NestedStructsAndTuplesCompareInPlace) {
   EXPECT_EQ(PaykanTuple_equals(&t, &u, kPointInt.data()), 1);
   u.p.x = 0;
   EXPECT_EQ(PaykanTuple_equals(&t, &u, kPointInt.data()), 0);
+}
+
+// -- Enums
+
+// enum Dir { North, East }: each variant's name and a 0 (no fields).
+const Layout kDir = Layout().word(2).name("North").word(0).name("East").word(0);
+
+// enum Shape { Empty, Rect(w: int, h: int), Named(name: Str) }: its tag, then
+// each variant's fields in place, the current variant's set.
+struct RectFields {
+  int64_t w;
+  int64_t h;
+};
+struct NamedFields {
+  PaykanShared *name;
+};
+struct Shape {
+  int64_t tag;
+  RectFields rect;
+  NamedFields named;
+};
+const Layout kShape = Layout()
+                          .word(3)
+                          .name("Empty")
+                          .word(0)
+                          .name("Rect")
+                          .words({1, OFF(Shape, rect), 2})
+                          .name("Rect")
+                          .name("w")
+                          .words({kInt, OFF(RectFields, w)})
+                          .name("h")
+                          .words({kInt, OFF(RectFields, h)})
+                          .name("Named")
+                          .words({1, OFF(Shape, named), 1})
+                          .name("Named")
+                          .name("name")
+                          .words({kObj, OFF(NamedFields, name)});
+
+// struct Pin { d: Dir; s: Shape; o: Dir?; }: enums as fields, entries of
+// kind ENUM; an optional one an OPTIONAL entry whose value is one.
+struct Pin {
+  int64_t d;
+  Shape s;
+  Inline<int64_t> o;
+};
+const Layout kPin =
+    Layout()
+        .word(3)
+        .name("Pin")
+        .name("d")
+        .words({kEnum, OFF(Pin, d)})
+        .nested(kDir)
+        .name("s")
+        .words({kEnum, OFF(Pin, s)})
+        .nested(kShape)
+        .name("o")
+        .words({kOpt, OFF(Pin, o), kEnum, kEnum,
+                OFF(Pin, o) +
+                    static_cast<int64_t>(offsetof(Inline<int64_t>, value))})
+        .nested(kDir);
+
+std::string renderEnum(const void *value, const Layout &layout) {
+  PaykanString *s = PaykanEnum_toString(value, layout.data());
+  std::string out(s->data, (size_t)s->len);
+  Paykan_dispose((PaykanObject *)s);
+  return out;
+}
+
+TEST(EnumToString, VariantNameOrFields) {
+  TrackingHeap heap;
+  int64_t d = 1;
+  EXPECT_EQ(renderEnum(&d, kDir), "East");
+  Shape s = {};
+  EXPECT_EQ(renderEnum(&s, kShape), "Empty");
+  s.tag = 1;
+  s.rect = {2, 3};
+  EXPECT_EQ(renderEnum(&s, kShape), "Rect(w: 2, h: 3)");
+  Shape n = {};
+  n.tag = 2;
+  n.named.name = str("ab");
+  EXPECT_EQ(renderEnum(&n, kShape), "Named(name: ab)");
+  Paykan_release(n.named.name);
+}
+
+TEST(EnumToString, InAStruct) {
+  TrackingHeap heap;
+  Pin p = {};
+  p.d = 1;
+  p.s.tag = 1;
+  p.s.rect = {4, 5};
+  EXPECT_EQ(render(&p, kPin), "Pin(d: East, s: Rect(w: 4, h: 5), o: None)");
+  p.o = {true, 0};
+  EXPECT_EQ(render(&p, kPin), "Pin(d: East, s: Rect(w: 4, h: 5), o: North)");
+}
+
+TEST(EnumEquals, SameVariantAndEqualFields) {
+  TrackingHeap heap;
+  Shape a = {};
+  Shape b = {};
+  EXPECT_EQ(PaykanEnum_equals(&a, &b, kShape.data()), 1);
+  a.tag = 1;
+  a.rect = {1, 2};
+  EXPECT_EQ(PaykanEnum_equals(&a, &b, kShape.data()), 0); // another variant
+  b.tag = 1;
+  b.rect = {1, 2};
+  EXPECT_EQ(PaykanEnum_equals(&a, &b, kShape.data()), 1);
+  b.rect.h = 3;
+  EXPECT_EQ(PaykanEnum_equals(&a, &b, kShape.data()), 0); // another field
+  Shape x = {};
+  Shape y = {};
+  x.tag = y.tag = 2;
+  x.named.name = str("same");
+  y.named.name = str("same");
+  EXPECT_EQ(PaykanEnum_equals(&x, &y, kShape.data()), 1); // equal Strs
+  Paykan_release(x.named.name);
+  Paykan_release(y.named.name);
+  // Inside a struct, and optional.
+  Pin p = {};
+  Pin q = {};
+  EXPECT_EQ(eq(&p, &q, kPin), 1);
+  q.o = {true, 0};
+  EXPECT_EQ(eq(&p, &q, kPin), 0);
+  p.o = {true, 0};
+  q.s.tag = 1;
+  EXPECT_EQ(eq(&p, &q, kPin), 0);
 }

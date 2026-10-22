@@ -124,6 +124,10 @@ struct EnumRec {
   std::vector<std::string> Variants;
   bool IsLocal = true;
   std::string OriginModule;
+  /// The variants that have fields, for a tagged union: each one's fields
+  /// are the STRUCT record `Name::variant`.  Written after the variants
+  /// only when there are any.
+  std::vector<std::string> PayloadVariants;
   bool operator==(const EnumRec &) const = default;
 };
 
