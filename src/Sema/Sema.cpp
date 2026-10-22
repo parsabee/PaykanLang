@@ -2861,7 +2861,7 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
       ok = false;
   }
 
-  // The functions written `= expression` with no result type: their
+  // The functions written `=> expression` with no result type: their
   // bodies first, so every body below sees their result types.
   if (!inferResults(declaredFns))
     ok = false;
@@ -3437,7 +3437,7 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   // Resolve return type.  Resolved annotations are written back into the
   // declaration so the lowering sees canonical types (never a parser stub or a
   // generic type application).
-  // `fn double(x: int) = x * 2;` has no result type until its body is
+  // `fn double(x: int) => x * 2;` has no result type until its body is
   // checked (inferResults): none is registered, and what is checked of the
   // result here is checked then.
   const bool inferred = node->hasInferredResult() && !node->getReturnType();
@@ -3752,7 +3752,7 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
     error(loc, "the result type of '" + shown +
                    "' is inferred from its expression, which uses '" + shown +
                    "' itself: write the result type, 'fn " + shown +
-                   "(...) -> T = ...'");
+                   "(...) -> T => ...'");
     return false;
   }
   case Inference::Pending:
@@ -3803,7 +3803,7 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
 void Sema::reportInferredMethod(const ast::FuncDecl *fn) {
   error(fn->getLocation(), "the result type of method '" + fn->getName() +
                                "' is not inferred: write it, 'fn " +
-                               fn->getName() + "(...) -> T = ...'");
+                               fn->getName() + "(...) -> T => ...'");
 }
 
 bool Sema::rejectInferredMethods(ast::TranslationUnit *tu) {

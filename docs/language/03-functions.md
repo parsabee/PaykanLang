@@ -605,24 +605,24 @@ Output:
 
 ## Expression Bodies
 
-A function whose body only returns an expression can be written with `=` and the
-expression, ending with `;`: `fn double(x: int) -> int = x * 2;` is
+A function whose body only returns an expression can be written with `=>` and the
+expression, ending with `;`: `fn double(x: int) -> int => x * 2;` is
 `fn double(x: int) -> int { return x * 2; }`. Leave the result type out and it is the
-expression's: `fn double(x: int) = x * 2;` returns an `int`, `fn greet(name: view Str) =
+expression's: `fn double(x: int) => x * 2;` returns an `int`, `fn greet(name: view Str) =>
 "hi " + name;` a `Str`.
 
 ```pkn
 import ::io;
 
-fn area(w: int, h: int) = w * h;
-fn describe(w: int, h: int) = "area " + Str(area(w, h)) + ", half " + Str(half(w * h));
-fn half(n: int) = n / 2;                  // used above, declared after
-fn twice<T>(x: T) = x + x;                // inferred for each type it is used at
+fn area(w: int, h: int) => w * h;
+fn describe(w: int, h: int) => "area " + Str(area(w, h)) + ", half " + Str(half(w * h));
+fn half(n: int) => n / 2;                  // used above, declared after
+fn twice<T>(x: T) => x + x;                // inferred for each type it is used at
 
 struct Size { w: int; h: int; }
 impl Size {
-  static fn square(n: int) = Size(n, n);
-  view fn area() -> int = self.w * self.h;  // a method writes its result type
+  static fn square(n: int) => Size(n, n);
+  view fn area() -> int => self.w * self.h;  // a method writes its result type
 }
 
 fn main() -> int {
@@ -644,15 +644,15 @@ area 12, half 6
 - A generic function's result type is inferred for each instantiation: `twice(21)` is an
   `int`, `twice("ab")` a `Str`.
 - A function whose expression depends on its own result type cannot infer it: `fn fact(n:
-  int) = if n <= 1 then 1 else n * fact(n - 1);` is an error (`the result type of 'fact' is
+  int) => if n <= 1 then 1 else n * fact(n - 1);` is an error (`the result type of 'fact' is
   inferred from its expression, which uses 'fact' itself: write the result type, ...`).
-  Write it, `fn fact(n: int) -> int = ...`, and the recursion is fine. The same goes for
+  Write it, `fn fact(n: int) -> int => ...`, and the recursion is fine. The same goes for
   two functions that use each other.
-- The expression must have a value: `fn say() = io::println("x");` is an error (`the result
+- The expression must have a value: `fn say() => io::println("x");` is an error (`the result
   of 'say' is the value of its expression, which has none`); write a body in braces.
-- A method takes the `=` form with its result type written (`view fn area() -> int =
+- A method takes the `=>` form with its result type written (`view fn area() -> int =>
   self.w * self.h;`): its signature is part of its class before any body is checked, so
-  `fn area() = ...` in a class or an `impl` block is an error (`the result type of method
+  `fn area() => ...` in a class or an `impl` block is an error (`the result type of method
   'area' is not inferred: write it`). A `static fn` is a function, and infers.
 - Everything else is a body's: the expression is the one `return`, checked as one, and a
   public function's inferred result must be a type an importer can name, as a written one.
@@ -661,15 +661,15 @@ area 12, half 6
 ## Untyped Parameters
 
 A free function may leave out a parameter's type. The parameter then has a type parameter of
-its own, so `fn area(w, h) = w * h;` is the generic function `fn area<W, H>(w: W, h: H) = w *
+its own, so `fn area(w, h) => w * h;` is the generic function `fn area<W, H>(w: W, h: H) => w *
 h;`, and each call instantiates it for its arguments' types:
 
 ```pkn
 import ::io;
 
-fn area(w, h) = w * h;
-fn describe(label: Str, value) = label + " " + Str(value);
-fn larger(a, b) = if a > b then a else b;
+fn area(w, h) => w * h;
+fn describe(label: Str, value) => label + " " + Str(value);
+fn larger(a, b) => if a > b then a else b;
 
 fn main() -> int {
   io::println(describe("area", area(3, 4)) + ", " + describe("float", area(1.5, 2.5)));

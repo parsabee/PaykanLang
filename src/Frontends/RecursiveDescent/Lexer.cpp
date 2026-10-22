@@ -184,6 +184,8 @@ const char *describe(Tok k) {
     return "']'";
   case Tok::Arrow:
     return "'->'";
+  case Tok::FatArrow:
+    return "'=>'";
   case Tok::AndAnd:
     return "'&&'";
   case Tok::OrOr:
@@ -330,6 +332,8 @@ const char *tokenKindName(Tok k) {
     return "RBRACKET";
   case Tok::Arrow:
     return "ARROW";
+  case Tok::FatArrow:
+    return "FAT_ARROW";
   case Tok::AndAnd:
     return "AND_AND";
   case Tok::OrOr:
@@ -415,7 +419,12 @@ Token Lexer::next() {
         k = n == '=' ? (len = 2, Tok::GreaterEq) : Tok::Greater;
         break;
       case '=':
-        k = n == '=' ? (len = 2, Tok::EqEq) : Tok::Assign;
+        if (n == '=')
+          k = (len = 2, Tok::EqEq);
+        else if (n == '>')
+          k = (len = 2, Tok::FatArrow);
+        else
+          k = Tok::Assign;
         break;
       case '!':
         k = n == '=' ? (len = 2, Tok::NotEq) : Tok::Not;

@@ -155,7 +155,7 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     modes.push_back(p.Mode);
   }
-  // `fn(x: int) = x * 2` has no result type yet: the body (one `return`)
+  // `fn(x: int) => x * 2` has no result type yet: the body (one `return`)
   // is checked against none, and the result type is then its value's.
   const bool inferred = node->hasInferredResult();
   ast::Type *retTy = inferred ? nullptr : Ctx.getVoidTy();

@@ -817,7 +817,7 @@ private:
       view = v->Text == "view";
       isStatic = !view;
     }
-    // `fn double(x: int) = x * 2;`: a trailing (inferred), as a lambda's.
+    // `fn double(x: int) => x * 2;`: a trailing (inferred), as a lambda's.
     const SExpr *inferred = f.optionalList("inferred");
     if (inferred) {
       const auto *stmts = body ? &body->getStatements() : nullptr;
@@ -1480,7 +1480,7 @@ private:
       CompoundStmt *body = block(f, "the lambda's body");
       if (!body)
         return nullptr;
-      // `fn(x: int) = x * 2`: a trailing (inferred), no result type, and a
+      // `fn(x: int) => x * 2`: a trailing (inferred), no result type, and a
       // body that is one `return` of a value.
       const SExpr *inferred = f.optionalList("inferred");
       if (inferred) {

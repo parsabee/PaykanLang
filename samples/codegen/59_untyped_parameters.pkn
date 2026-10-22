@@ -1,7 +1,7 @@
 // 59 — untyped parameters
 // Exercises: a free function's parameter written without its type, which
-//            gives it a type parameter of its own (`fn double(x) = x * 2;` is
-//            `fn double<T>(x: T) = x * 2;`): one per parameter (the two of
+//            gives it a type parameter of its own (`fn double(x) => x * 2;` is
+//            `fn double<T>(x: T) => x * 2;`): one per parameter (the two of
 //            `add` may differ), with an expression body and with a block,
 //            next to typed parameters and written type parameters (the
 //            added ones come after them, so explicit type arguments name
@@ -13,10 +13,10 @@
 
 import ::io;
 
-fn double(x) = x * 2;
-fn add(a, b) = a + b;
-fn quadruple(x) = double(double(x));
-fn swapped(p) = (p.1, p.0);
+fn double(x) => x * 2;
+fn add(a, b) => a + b;
+fn quadruple(x) => double(double(x));
+fn swapped(p) => (p.1, p.0);
 
 /// @p s repeated @p n times, as text.
 fn repeat(s, n: int) -> Str {
@@ -47,7 +47,7 @@ struct Point {
   y: int;
 }
 
-fn taxicab(p) = p.x + p.y;
+fn taxicab(p) => p.x + p.y;
 
 fn main() -> int {
   io::println(Str(double(21)) + " " + Str(double(1.25)) + " " + Str(add(2, 3))
@@ -67,4 +67,4 @@ fn main() -> int {
   return 0;
 }
 
-fn useEarly(x) = add(x, x) + x; // used above, declared here
+fn useEarly(x) => add(x, x) + x; // used above, declared here

@@ -11,24 +11,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Expression bodies (docs/language/03-functions.md, "Expression Bodies";
   docs/language/14-function-types.md): a function or a lambda whose body only
-  returns an expression is written with `=`, `fn double(x: int) -> int = x *
-  2;` for `fn double(x: int) -> int { return x * 2; }`, and
-  `fn(x: int) -> int = x * 2` for a lambda. The parser makes the body one
+  returns an expression is written with `=>`, `fn double(x: int) -> int => x
+  * 2;` for `fn double(x: int) -> int { return x * 2; }`, and
+  `fn(x: int) -> int => x * 2` for a lambda. The parser makes the body one
   `return`.
-  - Without the result type, `fn double(x: int) = x * 2;` or
-    `fn(x: int) = x * 2`, the result type is the expression's. Sema infers a
+  - `=>` is a new token. `=` stays a native function's (its C symbol), and
+    after any other function's signature it is an error that names `=>`.
+  - Without the result type, `fn double(x: int) => x * 2;` or
+    `fn(x: int) => x * 2`, the result type is the expression's. Sema infers a
     function's before checking any other body, so it may be used before its
     declaration; a generic function's is inferred for each instantiation.
   - An expression with no value, and a function whose expression depends on
-    its own result type (`fn fact(n: int) = ... fact(n - 1)`), are errors that
+    its own result type (`fn fact(n: int) => ... fact(n - 1)`), are errors that
     ask for the result type. A method writes its result type (`fn area() ->
-    int = ...`); a `static fn` infers.
+    int => ...`); a `static fn` infers.
   - The AST interchange format marks such a function or lambda with
     `(inferred)` (docs/plugins/ast-format.md), so a template in a `.pkm` keeps
     it.
 - Untyped parameters (docs/language/03-functions.md, "Untyped Parameters"): a
-  free function's parameter may leave out its type, `fn double(x) = x * 2;`,
-  which the parser makes `fn double<T>(x: T) = x * 2;`. Each untyped parameter
+  free function's parameter may leave out its type, `fn double(x) => x * 2;`,
+  which the parser makes `fn double<T>(x: T) => x * 2;`. Each untyped parameter
   adds a type parameter of its own, after the written ones, so the function is
   generic and each call instantiates it for its argument types.
   - With an expression body, the result type is inferred for each

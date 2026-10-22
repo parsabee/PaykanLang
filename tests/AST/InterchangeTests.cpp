@@ -1001,8 +1001,8 @@ TEST(Interchange, FunctionTypesRoundTrip) {
                            "(int) -> int {\n"
                            "  h = fn(x: int) -> int { return x + 1; };\n"
                            "  log = fn(s: view Str) { io::println(s); };\n"
-                           "  k = fn(x: int) = x * 2;\n"
-                           "  m = fn(x: int) -> int = x;\n"
+                           "  k = fn(x: int) => x * 2;\n"
+                           "  m = fn(x: int) -> int => x;\n"
                            "  fs: ((int) -> int)[1] = [h];\n"
                            "  n = fs[0](1) + h(2) + apply(f, g)(3);\n"
                            "  return h;\n"
@@ -1015,7 +1015,7 @@ TEST(Interchange, FunctionTypesRoundTrip) {
   EXPECT_NE(text.find("view"), std::string::npos) << text;
   EXPECT_NE(text.find("(lambda"), std::string::npos) << text;
   EXPECT_NE(text.find("(call-value"), std::string::npos) << text;
-  // `fn(x: int) = x * 2` alone is marked: the other one has its type.
+  // `fn(x: int) => x * 2` alone is marked: the other one has its type.
   EXPECT_EQ(text.find("(inferred)"), text.rfind("(inferred)")) << text;
   EXPECT_NE(text.find("(inferred)"), std::string::npos) << text;
   ast::ASTContext ctx;
@@ -1027,7 +1027,7 @@ TEST(Interchange, FunctionTypesRoundTrip) {
 }
 
 // (inferred) goes with no result type and a body that is one return of a
-// value, as the parser makes for `fn(x: int) = x * 2`.
+// value, as the parser makes for `fn(x: int) => x * 2`.
 TEST(Interchange, InferredLambdaResults) {
   ast::ASTContext ctx;
   std::string error;
@@ -1049,16 +1049,16 @@ TEST(Interchange, InferredLambdaResults) {
   }
 }
 
-// A function written `= expression` with no result type is marked as a
+// A function written `=> expression` with no result type is marked as a
 // lambda is: `_` for the result type and a trailing (inferred).
 TEST(Interchange, InferredFunctionResults) {
   parser::ParserDriver driver("recursive-descent");
   auto path =
       std::filesystem::temp_directory_path() /
       ("paykan_interchange_inferred_" + std::to_string(::getpid()) + ".pkn");
-  std::ofstream(path) << "fn double(x: int) = x * 2;\n"
-                         "fn half(x: int) -> int = x / 2;\n"
-                         "fn twice<T>(x: T) = x + x;\n";
+  std::ofstream(path) << "fn double(x: int) => x * 2;\n"
+                         "fn half(x: int) -> int => x / 2;\n"
+                         "fn twice<T>(x: T) => x + x;\n";
   ASSERT_EQ(driver.parseFile(path.string()), 0);
   std::filesystem::remove(path);
   std::string text = write(*driver.getRoot());

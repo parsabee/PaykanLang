@@ -338,29 +338,29 @@ TEST(Func, EntryPointCheckModes) {
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
 }
 
-// -- Expression bodies: `fn f(...) = e;` has the type of `e` as its result
+// -- Expression bodies: `fn f(...) => e;` has the type of `e` as its result
 
 TEST(Func, InferredResults) {
   // A use before the declaration, a chain of inferred functions, a
   // function value, a `static fn`, `main`, and generic functions, inferred
   // for each instantiation.
   auto r = semaCheck(R"(
-fn useEarly(x: int) = quad(x) + 1;
-fn quad(x: int) = double(double(x));
-fn double(x: int) -> int = x * 2;
-fn half(x: u8) = x / 2;
-fn later() = quad;
-fn twice<T>(x: T) = x + x;
-fn both<T>(x: T) = twice(twice(x));
+fn useEarly(x: int) => quad(x) + 1;
+fn quad(x: int) => double(double(x));
+fn double(x: int) -> int => x * 2;
+fn half(x: u8) => x / 2;
+fn later() => quad;
+fn twice<T>(x: T) => x + x;
+fn both<T>(x: T) => twice(twice(x));
 struct V { x: int; y: int; }
-impl V { static fn origin() = V(0, 0); }
-fn main() = useEarly(1) + Str(half(9)).len() + later()(1) + V::origin().x
+impl V { static fn origin() => V(0, 0); }
+fn main() => useEarly(1) + Str(half(9)).len() + later()(1) + V::origin().x
     + twice(3) + twice("ab").len() + both(1);
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
   auto typed = semaCheck(R"(
-fn half(x: u8) = x / 2;
-fn words() = "hi";
+fn half(x: u8) => x / 2;
+fn words() => "hi";
 fn main() -> int {
   a: u8 = half(9);
   b: int = half(9);
@@ -377,22 +377,22 @@ fn main() -> int {
 
 TEST(Func, InferredResultErrors) {
   auto r = semaCheck(R"(import ::io;
-fn fact(n: int) = if n <= 1 then 1 else n * fact(n - 1);
-fn ping(n: int) = pong(n) + 1;
-fn pong(n: int) = ping(n) - 1;
-fn say() = io::println("x");
-fn deep<T>(x: T) = deep(x);
-fn twice<T>(x: T) = x + x;
+fn fact(n: int) => if n <= 1 then 1 else n * fact(n - 1);
+fn ping(n: int) => pong(n) + 1;
+fn pong(n: int) => ping(n) - 1;
+fn say() => io::println("x");
+fn deep<T>(x: T) => deep(x);
+fn twice<T>(x: T) => x + x;
 class C {
   n: int;
-  fn get() = self.n;
+  fn get() => self.n;
 }
 class G<T> {
   v: T;
-  fn get() = self.v;
+  fn get() => self.v;
 }
 struct S { a: int; }
-impl S { view fn a2() = self.a * 2; }
+impl S { view fn a2() => self.a * 2; }
 fn main() -> int {
   d = deep(1);
   b = twice(True);
@@ -403,7 +403,7 @@ fn main() -> int {
   EXPECT_FALSE(r.Ok);
   for (const char *e :
        {"the result type of 'fact' is inferred from its expression, which "
-        "uses 'fact' itself: write the result type, 'fn fact(...) -> T = "
+        "uses 'fact' itself: write the result type, 'fn fact(...) -> T => "
         "...'",
         "the result type of 'ping' is inferred from its expression, which "
         "uses 'ping' itself",
@@ -415,7 +415,7 @@ fn main() -> int {
         "operator '+' is not defined for types 'bool' and 'bool'",
         "in instantiation of 'twice<bool>' requested here",
         "the result type of method 'get' is not inferred: write it, 'fn "
-        "get(...) -> T = ...'",
+        "get(...) -> T => ...'",
         "the result type of method 'a2' is not inferred"})
     EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
                                                         << r.Diagnostics;
@@ -431,12 +431,12 @@ fn main() -> int {
 // arguments name both.
 TEST(Func, UntypedParameters) {
   auto r = semaCheck(R"(
-fn double(x) = x * 2;
-fn add(a, b) = a + b;
-fn pair(a, b) = (a, b);
-fn useEarly(x) = later(x) + 1;
-fn later(x) = double(x);
-fn larger<T>(a: T, b: T, tag) -> T = if a > b then a else b;
+fn double(x) => x * 2;
+fn add(a, b) => a + b;
+fn pair(a, b) => (a, b);
+fn useEarly(x) => later(x) + 1;
+fn later(x) => double(x);
+fn larger<T>(a: T, b: T, tag) -> T => if a > b then a else b;
 fn count(n) -> int {
   total = 0;
   for _ in 0..n { total = total + 1; }
@@ -444,7 +444,7 @@ fn count(n) -> int {
 }
 fn ignore(x) { }
 struct P { x: int; y: int; }
-fn sum(p) = p.x + p.y;
+fn sum(p) => p.x + p.y;
 fn main() -> int {
   a: int = double(2);
   f: float = double(1.5);
@@ -464,8 +464,8 @@ fn main() -> int {
 
 TEST(Func, UntypedParameterErrors) {
   auto r = semaCheck(R"(
-fn double(x) = x * 2;
-fn add(a, b) = a + b;
+fn double(x) => x * 2;
+fn add(a, b) => a + b;
 fn larger(a, b) {
   return if a > b then a else b;
 }
@@ -494,7 +494,7 @@ fn main() -> int {
 // template and a method, reported once (calls to the function are not).
 TEST(Func, DuplicateParameters) {
   auto r = semaCheck(R"(
-fn f(x, x) = 1;
+fn f(x, x) => 1;
 fn g(x: int, x: Str) -> int { return 1; }
 fn h<T>(x: T, x: T) -> int { return 1; }
 class A {
