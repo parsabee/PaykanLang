@@ -124,3 +124,39 @@ TEST(Arith, OutAcceptsLiterals) {
   auto r = semaCheck(wrapMain("io::println(\"hello\");"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
+
+// -- Compound assignment: `t op= v` is checked as `t = t op v`
+
+TEST(Arith, CompoundAssignment) {
+  auto r = semaCheck(wrapMain(R"(
+    n = 10;
+    n += 5; n -= 3; n *= 4; n /= 6; n %= 5;
+    s = "a";
+    s += "b";
+    b: u8 = 250;
+    b += 10;
+    xs = [1, 2];
+    xs[0] *= 3;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Arith, CompoundAssignmentErrors) {
+  auto r = semaCheck("fn f(x: view int) { x += 1; }\n" + wrapMain(R"(
+    let c = 1;
+    c += 1;
+    s = "a";
+    s -= "x";
+    zz += 1;
+    for i in 0..3 { i *= 2; }
+  )"));
+  EXPECT_FALSE(r.Ok);
+  for (const char *e :
+       {"cannot assign to 'view' parameter 'x'",
+        "'c' is declared with 'let' and cannot be reassigned",
+        "operator '-' is not defined for types 'Str' and 'Str'",
+        "use of undeclared variable 'zz'",
+        "'i' is the variable of a 'for' loop and cannot be assigned"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+}

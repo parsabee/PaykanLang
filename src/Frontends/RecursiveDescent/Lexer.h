@@ -60,6 +60,11 @@ enum class Tok : uint8_t {
   Underscore, // `_` (destructuring skip / match wildcard); `_x` is an Ident
   // Punctuation and operators
   Assign,     // =
+  PlusAssign, // +=, then -= *= /= %=: compound assignments (`x += y`)
+  MinusAssign,
+  StarAssign,
+  SlashAssign,
+  PercentAssign,
   Minus,      // -
   Plus,       // +
   Star,       // *

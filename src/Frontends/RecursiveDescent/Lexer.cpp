@@ -120,6 +120,16 @@ const char *describe(Tok k) {
     return "'_'";
   case Tok::Assign:
     return "'='";
+  case Tok::PlusAssign:
+    return "'+='";
+  case Tok::MinusAssign:
+    return "'-='";
+  case Tok::StarAssign:
+    return "'*='";
+  case Tok::SlashAssign:
+    return "'/='";
+  case Tok::PercentAssign:
+    return "'%='";
   case Tok::Minus:
     return "'-'";
   case Tok::Plus:
@@ -256,6 +266,16 @@ const char *tokenKindName(Tok k) {
     return "UNDERSCORE";
   case Tok::Assign:
     return "ASSIGN";
+  case Tok::PlusAssign:
+    return "PLUS_ASSIGN";
+  case Tok::MinusAssign:
+    return "MINUS_ASSIGN";
+  case Tok::StarAssign:
+    return "STAR_ASSIGN";
+  case Tok::SlashAssign:
+    return "SLASH_ASSIGN";
+  case Tok::PercentAssign:
+    return "PERCENT_ASSIGN";
   case Tok::Minus:
     return "MINUS";
   case Tok::Plus:
@@ -384,7 +404,9 @@ Token Lexer::next() {
         k = n == ':' ? (len = 2, Tok::ColonColon) : Tok::Colon;
         break;
       case '-':
-        k = n == '>' ? (len = 2, Tok::Arrow) : Tok::Minus;
+        k = n == '>'   ? (len = 2, Tok::Arrow)
+            : n == '=' ? (len = 2, Tok::MinusAssign)
+                       : Tok::Minus;
         break;
       case '<':
         k = n == '=' ? (len = 2, Tok::LessEq) : Tok::Less;
@@ -419,16 +441,16 @@ Token Lexer::next() {
         }
         break;
       case '+':
-        k = Tok::Plus;
+        k = n == '=' ? (len = 2, Tok::PlusAssign) : Tok::Plus;
         break;
       case '*':
-        k = Tok::Star;
+        k = n == '=' ? (len = 2, Tok::StarAssign) : Tok::Star;
         break;
       case '/':
-        k = Tok::Slash;
+        k = n == '=' ? (len = 2, Tok::SlashAssign) : Tok::Slash;
         break;
       case '%':
-        k = Tok::Percent;
+        k = n == '=' ? (len = 2, Tok::PercentAssign) : Tok::Percent;
         break;
       case '?':
         k = Tok::Question;

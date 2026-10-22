@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Compound assignment (docs/language/02-basics.md, "Compound assignment"):
+  `x += e`, `-=`, `*=`, `/=` and `%=`, on a variable, a field or an element.
+  The parser builds `x = x op e`, so the rules of `=` and of the operator
+  apply, and the target is evaluated twice (`xs[f()] += 1` calls `f` twice).
+  `+=`, `-=`, `*=`, `/=` and `%=` are new tokens (docs/grammar.md).
 - `for` loops over ranges of integers (docs/language/02-basics.md, "for"):
   `for i in a..b { }` counts from `a` to `b - 1`, `a..=b` includes `b`, and
   `step s` sets the distance between the values (a negative one counts down).

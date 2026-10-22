@@ -65,7 +65,7 @@ Punctuation and operators:
 
 ```
 =  -  +  *  /  %  <  >  <=  >=  ==  !=  !  ?  :  ::  .  ..  ..=  ;  ,
-(  )  {  }  [  ]  ->  &&  ||
+(  )  {  }  [  ]  ->  &&  ||  +=  -=  *=  /=  %=
 ```
 
 Any other byte is a lexical error (`invalid character 'X'`).
@@ -260,6 +260,7 @@ block     ::= "{" statement* "}"
 statement ::= ";"
             | expression ";"
             | expression "=" expression ";"
+            | expression assignOp expression ";"
             | varDecl "=" expression ";"
             | letDecl
             | weakDecl
@@ -274,6 +275,7 @@ statement ::= ";"
             | "continue" ";"
             | matchStmt
 
+assignOp  ::= "+=" | "-=" | "*=" | "/=" | "%="
 letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
 weakDecl  ::= "weak" IDENT ( ":" typeAnnotation )? ( "=" expression )? ";"
 borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
@@ -302,6 +304,14 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   `MemberAssignStmt` whose field name is the index, which Sema rejects as
   immutable). Anything else: `left-hand side of '=' must be an identifier,
   field access, or subscript`.
+- A compound assignment `target op= value` is the assignment
+  `target = target op value`, built by the parser: its value is a
+  `BinaryExpr` (`+=` is `+`, ..., `%=` is `%`) spanning `target op= value`,
+  whose left operand is a copy of the target's expression and whose right
+  operand is `value` whole (`k *= k + 1` is `k = k * (k + 1)`).  The target
+  is checked as `=`'s is (`left-hand side of '+=' must be ...`), and is
+  evaluated twice, once to read it and once to assign it: `xs[f()] += 1`
+  calls `f` twice.
 - `varDecl "=" expression` is a declaration with an initializer; a bare
   `x: int;` is not a statement.
 - `letDecl` declares one local that cannot be reassigned
