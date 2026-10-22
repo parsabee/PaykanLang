@@ -1049,6 +1049,43 @@ TEST(Interchange, InferredLambdaResults) {
   }
 }
 
+// A function written `= expression` with no result type is marked as a
+// lambda is: `_` for the result type and a trailing (inferred).
+TEST(Interchange, InferredFunctionResults) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_inferred_" + std::to_string(::getpid()) + ".pkn");
+  std::ofstream(path) << "fn double(x: int) = x * 2;\n"
+                         "fn half(x: int) -> int = x / 2;\n"
+                         "fn twice<T>(x: T) = x + x;\n";
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  size_t marks = 0;
+  for (size_t at = text.find("(inferred)"); at != std::string::npos;
+       at = text.find("(inferred)", at + 1))
+    ++marks;
+  EXPECT_EQ(marks, 2u) << text; // `double` and `twice`, not `half`
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+
+  for (const char *bad :
+       {"(fn \"f\" (type-params) (params) (named-type \"int\") "
+        "(block (return (int 1))) (inferred))",
+        "(fn \"f\" (type-params) (params) _ (block (return _)) (inferred))"}) {
+    std::string doc = "(paykan-ast 1 (unit " + std::string(bad) + "))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << bad;
+    EXPECT_NE(error.find("an inferred result needs no result type"),
+              std::string::npos)
+        << bad << ": " << error;
+  }
+}
+
 TEST(Interchange, TraitsRoundTrip) {
   parser::ParserDriver driver("recursive-descent");
   auto path =

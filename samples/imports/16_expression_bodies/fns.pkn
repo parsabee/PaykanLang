@@ -1,0 +1,21 @@
+// Functions written with an expression body (`fn f(x: int) = x + 1;`), with
+// their result types inferred, and function values made by expression-bodied
+// lambdas, in a function and in templates, for main.pkn.
+
+fn triple(x: int) = x * 3;
+
+fn label(n: int) = "#" + Str(n);
+
+fn twice<T>(x: T) = x + x;
+
+fn adder(n: int) -> (int) -> int {
+  return fn(x: int) = x + n;
+}
+
+fn scale<T>(by: T) -> (T) -> T {
+  return fn(x: T) = x * by;
+}
+
+fn labeler<T: Show>(prefix: Str) -> (view T) -> Str {
+  return fn(x: view T) -> Str = prefix + x.toString();
+}

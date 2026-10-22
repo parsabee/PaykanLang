@@ -333,3 +333,89 @@ TEST(Func, EntryPointCheckModes) {
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
 }
+
+// -- Expression bodies: `fn f(...) = e;` has the type of `e` as its result
+
+TEST(Func, InferredResults) {
+  // A use before the declaration, a chain of inferred functions, a
+  // function value, a `static fn`, `main`, and generic functions, inferred
+  // for each instantiation.
+  auto r = semaCheck(R"(
+fn useEarly(x: int) = quad(x) + 1;
+fn quad(x: int) = double(double(x));
+fn double(x: int) -> int = x * 2;
+fn half(x: u8) = x / 2;
+fn later() = quad;
+fn twice<T>(x: T) = x + x;
+fn both<T>(x: T) = twice(twice(x));
+struct V { x: int; y: int; }
+impl V { static fn origin() = V(0, 0); }
+fn main() = useEarly(1) + Str(half(9)).len() + later()(1) + V::origin().x
+    + twice(3) + twice("ab").len() + both(1);
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  auto typed = semaCheck(R"(
+fn half(x: u8) = x / 2;
+fn words() = "hi";
+fn main() -> int {
+  a: u8 = half(9);
+  b: int = half(9);
+  return 0;
+}
+)");
+  EXPECT_FALSE(typed.Ok);
+  EXPECT_NE(typed.Diagnostics.find("initializer of type 'u8' does not match "
+                                   "declared type 'int' for variable 'b'"),
+            std::string::npos)
+      << typed.Diagnostics;
+  EXPECT_EQ(typed.ErrorCount, 1u) << typed.Diagnostics;
+}
+
+TEST(Func, InferredResultErrors) {
+  auto r = semaCheck(R"(import ::io;
+fn fact(n: int) = if n <= 1 then 1 else n * fact(n - 1);
+fn ping(n: int) = pong(n) + 1;
+fn pong(n: int) = ping(n) - 1;
+fn say() = io::println("x");
+fn deep<T>(x: T) = deep(x);
+fn twice<T>(x: T) = x + x;
+class C {
+  n: int;
+  fn get() = self.n;
+}
+class G<T> {
+  v: T;
+  fn get() = self.v;
+}
+struct S { a: int; }
+impl S { view fn a2() = self.a * 2; }
+fn main() -> int {
+  d = deep(1);
+  b = twice(True);
+  c = C(1).get() + G<int>(1).get() + G<Str>("x").get().len() + fact(3);
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *e :
+       {"the result type of 'fact' is inferred from its expression, which "
+        "uses 'fact' itself: write the result type, 'fn fact(...) -> T = "
+        "...'",
+        "the result type of 'ping' is inferred from its expression, which "
+        "uses 'ping' itself",
+        "the result of 'say' is the value of its expression, which has none "
+        "(its type is 'void'): write its body in braces, 'fn say(...) { ...; "
+        "}'",
+        "the result type of 'deep' is inferred from its expression, which "
+        "uses 'deep' itself",
+        "operator '+' is not defined for types 'bool' and 'bool'",
+        "in instantiation of 'twice<bool>' requested here",
+        "the result type of method 'get' is not inferred: write it, 'fn "
+        "get(...) -> T = ...'",
+        "the result type of method 'a2' is not inferred"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  // One error each: `get` is reported for C and once for the template G,
+  // and no use of a function in error is reported again.
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+}

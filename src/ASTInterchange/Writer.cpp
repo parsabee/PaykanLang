@@ -248,7 +248,8 @@ private:
       close();
     }
     close();
-    optionalType(d.getReturnType());
+    // A result Sema inferred is written as it was parsed, without one.
+    optionalType(d.hasInferredResult() ? nullptr : d.getReturnType());
     if (d.getResultMode() != ParamMode::Value) {
       open("qual");
       sym(paramModeName(d.getResultMode()));
@@ -268,6 +269,10 @@ private:
     if (d.isView() || d.isStatic()) {
       open("qual");
       sym(d.isView() ? "view" : "static");
+      close();
+    }
+    if (d.hasInferredResult()) {
+      open("inferred");
       close();
     }
     close();

@@ -183,6 +183,9 @@ Output:
 - Everything else is a block's: the expression is the one `return`, so it is checked as
   one (a `view` parameter cannot be returned, `fn(s: view Str) = s`).
 
+A named function takes the same forms, ending with `;` ([Expression
+Bodies](03-functions.md#expression-bodies)).
+
 ## Captures
 
 A lambda may use the variables of the function (or method, or lambda) it is written in.
@@ -435,8 +438,8 @@ Output:
 
 A borrowed result (`-> view T`, `-> inout T`) in a function type; a method as a value
 (`p.shift` bound to `p`: write `fn(d: int) { p.shift(d); }`); a generic function as a
-value (`first<int>`); a lambda with inferred parameter types (`fn(x) { ... }`); an
-expression body for a named function (`fn double(x: int) = x * 2;`); a capture by reference (a counter shared with a closure lives in
+value (`first<int>`); a lambda with inferred parameter types (`fn(x) { ... }`); a capture by
+reference (a counter shared with a closure lives in
 an object); capturing a `view`, an `inout` or a struct method's `self`; a function value
 crossing into C, except as a type argument of a generic native function; `toString`,
 `print` and `hash` on a function value.

@@ -240,21 +240,10 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
 }
 
 ast::Type *Sema::inferredResult(ast::LambdaExpr *node) {
-  const auto &stmts = node->getBody()->getStatements();
-  const auto *ret =
-      stmts.size() == 1 ? ast::dyn_cast<ast::ReturnStmt>(stmts[0]) : nullptr;
-  ast::Expr *value = ret ? ret->getReturnValue() : nullptr;
-  ast::Type *ty = value ? value->getResolvedType() : nullptr;
-  if (!ty)
-    return nullptr; // the parser makes the body one `return` of a value
-  if (ty == Ctx.getVoidTy()) {
-    error(value->getLocation(),
-          "the lambda's result is the value of its expression, which has "
-          "none (its type is 'void'): write its body in braces, "
-          "'fn(...) { ...; }'");
-    return nullptr;
-  }
-  node->setReturnType(ty);
+  ast::Type *ty =
+      returnedType(node->getBody(), "the lambda's result", "fn(...) { ...; }");
+  if (ty)
+    node->setReturnType(ty);
   return ty;
 }
 

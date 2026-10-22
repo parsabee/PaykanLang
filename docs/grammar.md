@@ -158,7 +158,8 @@ implMember  ::= funcDecl | "static" "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? block
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
-                ( "->" ( "view" | "inout" )? typeAnnotation )? block
+                ( "->" ( "view" | "inout" )? typeAnnotation )?
+                ( block | "=" expression ";" )
 nativeFuncDecl ::= "native" "fn" IDENT typeParams? "(" paramList? ")"
                    ( "->" ( "view" | "inout" )? typeAnnotation )? "=" STRING ";"   -- the C symbol
 paramList   ::= param ( "," param )*
@@ -178,6 +179,14 @@ A class, struct or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
 A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
 argument must implement.  `impl Show for A` implements trait `Show` for `A`.
+A function or method written `= expression ;` has for its body a block of one
+`return` spanning the expression (`fn double(x: int) -> int = x * 2;` is
+`fn double(x: int) -> int { return x * 2; }`); without a result type, `fn
+double(x: int) = x * 2;`, the result type is the expression's, which Sema
+infers (`FuncDecl::hasInferredResult`; a method's is not inferred).  A
+`native fn`'s `=` is followed by its C symbol instead, and a trait method's
+signature has neither (`a trait method has no body: end its signature with
+';'`).
 The `impl` block of a generic type names its type parameters: `impl Box<T>`.
 A trait's methods are signatures that end with `;`.
 Methods are `funcDecl`s inside a class body.  `view fn` marks a method that

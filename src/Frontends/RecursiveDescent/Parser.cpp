@@ -1084,7 +1084,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
       error(start, "a trait method cannot be generic");
       return nullptr;
     }
-    if (at(Tok::LBrace)) {
+    if (at(Tok::LBrace) || at(Tok::Assign)) {
       errorAtCurrent("a trait method has no body: end its signature with ';'");
       return nullptr;
     }
@@ -1098,11 +1098,33 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
     return fn;
   }
 
-  CompoundStmt *body = parseBlock();
-  if (!body)
-    return nullptr;
+  // `fn double(x: int) -> int = x * 2;` is the function whose body is
+  // `{ return x * 2; }`; without the result type, `fn double(x: int) = x *
+  // 2;`, the result type is the expression's (Sema infers it).
+  CompoundStmt *body = nullptr;
+  const bool expressionBody = at(Tok::Assign);
+  if (expressionBody) {
+    consume();
+    SourceLocation from = cur().Loc;
+    Expr *value = parseExpression();
+    if (!value)
+      return nullptr;
+    std::vector<Stmt *> ret{Ctx.make<ReturnStmt>(span(from), value)};
+    body = Ctx.make<CompoundStmt>(span(from), std::move(ret));
+    if (!expect(Tok::Semi, "after the function's expression"))
+      return nullptr;
+  } else {
+    if (!at(Tok::LBrace)) {
+      errorAtCurrent("expected '{' or '=' to start the function's body");
+      return nullptr;
+    }
+    body = parseBlock();
+    if (!body)
+      return nullptr;
+  }
   auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                 body, std::move(typeParams));
+  fn->setInferredResult(expressionBody && !retTy);
   fn->setView(view);
   fn->setResultMode(resultMode);
   fn->setModulePrivateInit(modulePrivateInit);

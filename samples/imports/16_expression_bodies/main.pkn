@@ -1,0 +1,17 @@
+// OK: expression bodies made in another module: its functions with inferred
+// result types (the module's interface records the types), its templates
+// with one (inferred in each instantiation made here), and lambdas made in
+// its functions and templates (docs/language/03-functions.md,
+// docs/language/14-function-types.md).
+// expect-stdout: 21 #4 6 abab
+// expect-stdout: 15 21 7.5 id: 42
+import ::io;
+import fns;
+
+fn main() -> int {
+  io::println(Str(fns::triple(7)) + " " + fns::label(4) + " "
+      + Str(fns::twice(3)) + " " + fns::twice("ab"));
+  io::println(Str(fns::adder(10)(5)) + " " + Str(fns::scale(3)(7)) + " "
+      + Str(fns::scale(2.5)(3.0)) + " " + fns::labeler<int>("id: ")(42));
+  return 0;
+}
