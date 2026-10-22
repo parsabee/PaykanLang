@@ -1369,8 +1369,8 @@ TEST(Lowering, ImportedInstantiationsAreEmittedOnce) {
         << "import lib::gen;\n"
            "fn "
         << m
-        << "() -> int { b = gen::Box<Str>(\"s\"); "
-           "return b.n() + gen::first<int>([1]); }\n";
+        << "() -> int { box = gen::Box<Str>(\"s\"); "
+           "return box.n() + gen::first<int>([1]); }\n";
   auto l = lower("import lib::gen; import a; import b;\n"
                  "fn main() -> int { b = gen::Box<Str>(\"m\");\n"
                  "  return b.n() + gen::first<int>([2]) + a::a() + b::b(); }\n",
@@ -1414,8 +1414,8 @@ TEST(Lowering, EveryModuleLowersItsOwnCopiesUntilShared) {
         << "import lib::gen;\n"
            "fn "
         << m
-        << "() -> int { b = gen::Box<Str>(\"s\"); "
-           "return b.n() + gen::first<int>([1]); }\n";
+        << "() -> int { box = gen::Box<Str>(\"s\"); "
+           "return box.n() + gen::first<int>([1]); }\n";
   const std::string main =
       "import lib::gen; import a; import b;\n"
       "fn main() -> int { b = gen::Box<Str>(\"m\");\n"

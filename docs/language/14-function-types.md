@@ -273,8 +273,9 @@ closure holds what the outer one held.
 ## Calling a Function Value
 
 A function value is called with the syntax of a function call: `f(1)` when `f` is a
-variable or a parameter (a variable of function type shadows a function of the same
-name), `obj.cb(1)` when `cb` is a field of a class or a struct, and `fs[0](1)`,
+variable or a parameter (which cannot take the name of a function of the module, so
+`f(1)` never means both: see [Scoping Rules](02-basics.md#scoping-rules)), `obj.cb(1)`
+when `cb` is a field of a class or a struct, and `fs[0](1)`,
 `t.1(x)`, `make()(2)` for any other expression of function type.  The arguments are
 checked as for a function with the same parameters: their number and types, and their
 modes (`argument 2 of 'v' must be a variable or a field: parameter '2' is 'inout'`; a

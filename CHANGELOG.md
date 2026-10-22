@@ -218,6 +218,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--backend=c` and `--backend=llvm` (unknown backends now).  In `PAYKAN_BACKENDS` the names
   `c` and `llvm` are still accepted, with a warning, and build `mlir`.
 
+### Fixed
+
+- A local could take the name of a function of the module and hide it: `func = fn(x: int,
+  y: float) => x + y;` next to `fn func<T>(x: T) => x + 2;` made `func(1, 2.5)` call the
+  lambda.  A variable, a parameter (a method's or a lambda's too), a `for` loop variable, a
+  `match` binding or a destructuring target named like one of the module's functions (a
+  generic or a native one included, declared before or after it) is now an error, `'func'
+  is a function of this module and cannot be used as a variable`, reported once
+  (docs/language/02-basics.md, "Scoping Rules").  A field, a native function's parameter
+  and another module's function (always qualified) may still share the name.
+
 ## [0.2.0] - 2026-10-20
 
 ### Added

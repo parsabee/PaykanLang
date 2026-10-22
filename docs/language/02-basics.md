@@ -979,6 +979,13 @@ enums.
 - Inner scopes can shadow outer names via a new declaration (with a type), which hides the
   outer variable until the block ends; assigning without a type assigns to the outer
   variable.
+- A local never hides a function of the module: no variable, parameter (a method's or a
+  lambda's included), `for` loop variable or `match` binding can take the name of one of
+  the module's functions, a generic or a `native` one included, wherever the function is
+  declared (`'func' is a function of this module and cannot be used as a variable`). So a
+  call by the name always means the function. A field may share a function's name (it is
+  read as `obj.func`), and so may another module's function, which is always qualified
+  (`io::println`).
 
 ```pkn
 import ::io;
@@ -1032,7 +1039,8 @@ The same rule applies between user declarations: `fn Point()` next to `class Poi
 rejected with `'Point' is already declared as a class`, and a function or class cannot
 reuse an enum's name. A builtin class or type name cannot name a field, parameter or local
 variable either: it is a type name (`'Str' is a type name and cannot be used as a
-variable`).
+variable`). Nor can a function of the module name a parameter or a local variable
+([Scoping Rules](#scoping-rules)).
 
 ---
 
