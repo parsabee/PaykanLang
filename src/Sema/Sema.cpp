@@ -902,6 +902,18 @@ bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc) {
   return true;
 }
 
+bool Sema::checkDistinctParams(const ast::FuncDecl *fn,
+                               const std::string &what) {
+  StringSet seen;
+  for (const ast::Param &p : fn->getParams())
+    if (!seen.insert(p.getName()).second) {
+      error(fn->getLocation(),
+            "duplicate parameter '" + p.getName() + "' in " + what);
+      return false;
+    }
+  return true;
+}
+
 bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
                        ast::Type *bindTy) {
   const std::string &name = arm->getBinding();
@@ -2897,9 +2909,16 @@ bool Sema::checkEntryPoint(ast::TranslationUnit *tu,
       "'fn main() -> int' or 'fn main(args: view Str[]) -> int'";
   for (auto *fn : tu->getGenericFuncDecls())
     if (fn->getName() == names::kMain) {
-      error(fn->getLocation(), "'main' cannot be generic; the program's entry "
-                               "point is " +
-                                   expected);
+      // `fn main(args)` is generic only for leaving the type out.
+      std::string_view untyped;
+      for (const std::string *p : fn->getTypeParams())
+        if (untyped.empty())
+          untyped = names::untypedParamOf(*p);
+      error(fn->getLocation(),
+            (untyped.empty() ? std::string("'main' cannot be generic")
+                             : "parameter '" + std::string(untyped) +
+                                   "' of 'main' needs a type") +
+                "; the program's entry point is " + expected);
       return false;
     }
   for (auto *fn : tu->getFuncDecls()) {
@@ -3436,7 +3455,14 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
     node->setReturnType(retTy);
   }
 
-  // Resolve parameter types.
+  // Resolve parameter types.  (An instantiation's are its template's,
+  // already checked to be distinct.)
+  if (node->getName().find('<') == std::string::npos &&
+      !checkDistinctParams(node,
+                           "function '" + displayName(node->getName()) + "'")) {
+    ErroneousNames.insert(node->getName()); // as for the return type
+    return false;
+  }
   std::vector<ast::Type *> paramTypes;
   for (auto &p : node->getMutableParams()) {
     if (!checkBinderName(p.getName(), node->getLocation())) {

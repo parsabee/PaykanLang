@@ -93,6 +93,8 @@ Each parameter has the form:
 paramName: TypeName
 ```
 
+A free function may also leave the type out (see [Untyped Parameters](#untyped-parameters)).
+
 How an argument is passed depends on its type, and a [mode](#parameter-modes-view-and-inout)
 can change it. Without a mode, the call passes a copy of a value type and a reference to an
 object or a string:
@@ -656,6 +658,55 @@ area 12, half 6
   public function's inferred result must be a type an importer can name, as a written one.
 - Lambdas take the same forms ([Expression-bodied lambdas](14-function-types.md#expression-bodied-lambdas)).
 
+## Untyped Parameters
+
+A free function may leave out a parameter's type. The parameter then has a type parameter of
+its own, so `fn area(w, h) = w * h;` is the generic function `fn area<W, H>(w: W, h: H) = w *
+h;`, and each call instantiates it for its arguments' types:
+
+```pkn
+import ::io;
+
+fn area(w, h) = w * h;
+fn describe(label: Str, value) = label + " " + Str(value);
+fn larger(a, b) = if a > b then a else b;
+
+fn main() -> int {
+  io::println(describe("area", area(3, 4)) + ", " + describe("float", area(1.5, 2.5)));
+  io::println(Str(larger(3, 9)) + " " + Str(larger(2.5, 0.5)));
+  return 0;
+}
+```
+
+Output:
+
+```
+area 12, float 3.75
+9 2.5
+```
+
+- Each untyped parameter has its own type: `area(2, 1.5)` multiplies an `int` and a `float`.
+  The type parameters an untyped parameter adds have names no program can write
+  (`typeof(w)`), so they never clash with a type.
+- The function is a [generic function](13-generics.md#generic-functions), and everything
+  about one applies. Its body is checked for each instantiation, and an error says which one
+  needed it: `area("ab", 2)` reports `operator '*' is not defined for types 'Str' and
+  'int'` with `in instantiation of 'area<Str, int>'`. It cannot be a function value yet,
+  and it can be used from another module, which instantiates it for its own calls.
+- Typed parameters and written type parameters mix with untyped ones. The added type
+  parameters come after the written ones, so explicit type arguments give all of them:
+  `fn larger<T>(a: T, b: T, tag) -> T` is called `larger<float, Str>(1.5, 2.5, "x")`.
+- To return a value of an untyped parameter's type, use an expression body: its result type
+  is [inferred](#expression-bodies) for each instantiation. A block body cannot name that
+  type, so `fn larger(a, b) { return a; }` is a `void` function, and its `return` is an
+  error. Name the type parameter instead: `fn larger<T>(a: T, b: T) -> T { ... }`.
+- An untyped parameter is passed by value. To give a parameter a mode, write its type
+  (`x: view T`, with `T` a written type parameter).
+- Only a free function's parameters may leave out their types. A lambda's, a method's, a
+  `static fn`'s and a trait method's need theirs (`parameter 'x' needs a type ('x: int'):
+  only a free function's parameters can leave it out`), as do a native function's and
+  `main`'s.
+
 ---
 
 ## Examples
@@ -837,6 +888,8 @@ can call any runtime function.  A `PaykanString`'s
 | Function redefinition | Two functions with the same name |
 | Builtin name reused | A function named like a builtin class or type (`fn Str()`, `fn float(...)`) — see [Builtin Names Are Reserved](02-basics.md#builtin-names-are-reserved) |
 | Class / enum name reused | A function named like a class (its constructor) or an enum declared in the same program |
+| Duplicate parameter | Two parameters of one function, method or lambda with the same name |
+| Untyped parameter outside a free function | A lambda's, method's, `static fn`'s, trait method's, native function's or `main`'s parameter without a type (see [Untyped Parameters](#untyped-parameters)) |
 | Argument count mismatch | Wrong number of arguments |
 | Argument type mismatch | Argument type incompatible with parameter type |
 | Non-void return without value | `return;` in non-void function |

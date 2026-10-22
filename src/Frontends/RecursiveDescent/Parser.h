@@ -120,11 +120,15 @@ private:
   ast::TraitDecl *parseTraitDecl();
   /// A function, or with @p requirement a trait method's signature (`;`
   /// instead of a body).
-  ast::FuncDecl *parseFuncDecl(bool native = false, bool requirement = false);
+  /// @p member: a class's or an `impl` block's (a method or `static fn`).
+  ast::FuncDecl *parseFuncDecl(bool native = false, bool requirement = false,
+                               bool member = false);
   /// Type parameters and, given @p bounds, their bounds (`T: Show + Eq`).
   bool parseTypeParamList(std::vector<const std::string *> &out,
                           ast::TypeParamBounds *bounds);
-  bool parseParamList(std::vector<ast::Param> &out);
+  /// @p untyped: null when a parameter may leave out its type (a named
+  /// function's), else why it may not, for the error.
+  bool parseParamList(std::vector<ast::Param> &out, const char *untyped);
   void prefixModeError();
   void prefixBorrowError();
   bool parseBorrowDecl(ast::Stmt *&out);

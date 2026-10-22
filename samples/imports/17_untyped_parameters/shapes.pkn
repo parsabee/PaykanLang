@@ -1,0 +1,11 @@
+// Functions whose parameters leave out their types (each one a type
+// parameter of the function's, so each function is a template), for
+// main.pkn.
+
+fn area(w, h) = w * h;
+
+fn describe(name: Str, value) = name + " " + Str(value);
+
+/// The larger of @p a and @p b (the result type is inferred: a block body
+/// could not name it).
+fn larger(a, b) = if a > b then a else b;

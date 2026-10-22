@@ -19,6 +19,10 @@ using namespace paykan::ast;
 
 namespace {
 
+/// Why a lambda's, a method's or a trait method's parameter needs a type.
+constexpr const char *kOnlyFreeFunctionsUntyped =
+    "only a free function's parameters can leave it out";
+
 // The nesting limit is frontend::kMaxNesting.  Recursive descent uses the
 // native stack, so pathological inputs (a fuzzer's `((((((...`) are rejected
 // with a diagnostic instead of overflowing it.  One level costs under 2 KiB of
@@ -681,7 +685,8 @@ ClassDecl *Parser::parseClassDecl() {
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
     if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
-      if (auto *m = parseFuncDecl()) {
+      if (auto *m = parseFuncDecl(/*native=*/false, /*requirement=*/false,
+                                  /*member=*/true)) {
         body.Methods.push_back(m);
         continue;
       }
@@ -890,7 +895,8 @@ ImplDecl *Parser::parseImplDecl() {
       errorAtCurrent("expected 'fn' after 'static' (a 'static fn' has no "
                      "'self', so it is never a 'view fn')");
     } else if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
-      if (auto *m = parseFuncDecl()) {
+      if (auto *m = parseFuncDecl(/*native=*/false, /*requirement=*/false,
+                                  /*member=*/true)) {
         m->setStatic(isStatic);
         methods.push_back(m);
         continue;
@@ -964,9 +970,10 @@ TraitDecl *Parser::parseTraitDecl() {
 // funcDecl ::= "view"? "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
 //              ( "->" ( "view" | "inout" )? typeAnnotation )? block
 // paramList ::= ( param ( "," param )* )?
-// param ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
+// param ::= IDENT ":" ( "view" | "inout" )? typeAnnotation | IDENT
+//           -- IDENT alone: a named function's, see parseFuncDecl
 
-bool Parser::parseParamList(std::vector<Param> &out) {
+bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
   if (at(Tok::RParen))
     return true;
   do {
@@ -978,7 +985,23 @@ bool Parser::parseParamList(std::vector<Param> &out) {
       errorAtCurrent("expected a parameter name");
       return false;
     }
-    const std::string &name = intern(consume().Text);
+    Token nameTok = consume();
+    const std::string &name = intern(nameTok.Text);
+    if (at(Tok::Comma) || at(Tok::RParen)) {
+      // No type: the parameter's type is a type parameter of its own,
+      // `typeof(x)` (a name no program can write, so it shadows nothing).
+      if (untyped) {
+        error(nameTok.Loc, "parameter '" + name + "' needs a type ('" + name +
+                               ": int'): " + untyped);
+        return false;
+      }
+      out.push_back(Param{
+          &name,
+          Ctx.make<ClassType>(span(nameTok.Loc),
+                              intern(names::untypedParamType(name)), nullptr),
+          ParamMode::Value});
+      continue;
+    }
     if (!expect(Tok::Colon, "after the parameter name"))
       return false;
     ParamMode mode = ParamMode::Value;
@@ -1013,7 +1036,7 @@ void Parser::prefixModeError() {
                          fix + "'");
 }
 
-FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
+FuncDecl *Parser::parseFuncDecl(bool native, bool requirement, bool member) {
   SourceLocation start = cur().Loc;
   bool view = !native && accept(Tok::KwView); // `view fn` (a method; see Sema)
   consume();                                  // "fn", or "native" before it
@@ -1041,9 +1064,29 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
   if (!expect(Tok::LParen, "after the function name"))
     return nullptr;
   std::vector<Param> params;
-  if (!parseParamList(params) ||
+  // Why every parameter needs a type, if one does: only a free function
+  // can be generic.
+  const char *untyped = nullptr;
+  if (native)
+    untyped = "a native function's parameters have types";
+  else if (requirement || member)
+    untyped = kOnlyFreeFunctionsUntyped;
+  if (!parseParamList(params, untyped) ||
       !expect(Tok::RParen, "to close the parameter list"))
     return nullptr;
+  // `fn double(x) = x * 2;` is `fn double<T>(x: T) = x * 2;`: each untyped
+  // parameter adds a type parameter after the written ones.
+  for (const Param &p : params) {
+    const auto *ct = dyn_cast<ClassType>(p.ParamType);
+    // A repeated name adds one type parameter (and is reported by Sema).
+    if (!ct || ct->getName() != names::untypedParamType(p.getName()) ||
+        std::any_of(typeParams.begin(), typeParams.end(),
+                    [&](const std::string *t) { return *t == ct->getName(); }))
+      continue;
+    if (!bounds.empty())
+      bounds.emplace_back();
+    typeParams.push_back(&ct->getName());
+  }
 
   Type *retTy = nullptr;
   ParamMode resultMode = ParamMode::Value;
@@ -2292,7 +2335,7 @@ Expr *Parser::parsePrimary() {
                              "-> int { ... }')"))
       return nullptr;
     std::vector<Param> params;
-    if (!parseParamList(params) ||
+    if (!parseParamList(params, kOnlyFreeFunctionsUntyped) ||
         !expect(Tok::RParen, "to close the parameter list"))
       return nullptr;
     Type *retTy = nullptr;
