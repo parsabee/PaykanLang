@@ -744,7 +744,7 @@ private:
     case ASTNode::NK_LambdaExpr: {
       // (lambda LOC (params PARAM...) TYPE? BLOCK (inferred)?), the
       // parameters and the result as a function's; (inferred) for
-      // `fn(x: int) = x * 2`.
+      // `fn(x: int) => x * 2`.
       const auto *l = cast<LambdaExpr>(e);
       open("lambda", l);
       open("params");

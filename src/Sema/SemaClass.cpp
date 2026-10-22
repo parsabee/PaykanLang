@@ -534,7 +534,7 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
     ~SelfGuard() { Slot = Saved; }
   } selfGuard{SelfType, SelfType};
   SelfType = owner;
-  // A method's result type is written, `fn get() -> int = self.n;`: one
+  // A method's result type is written, `fn get() -> int => self.n;`: one
   // with an expression and none is reported (a template's once, by
   // rejectInferredMethods), as a result type that does not resolve is.
   if (method->hasInferredResult()) {

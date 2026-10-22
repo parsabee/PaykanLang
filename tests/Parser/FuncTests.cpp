@@ -27,29 +27,29 @@ TEST(Func, VoidFunction) {
   EXPECT_TRUE(ok);
 }
 
-// `fn f(...) -> T = e;` is `fn f(...) -> T { return e; }`: the body is one
+// `fn f(...) -> T => e;` is `fn f(...) -> T { return e; }`: the body is one
 // `return` spanning `e`, and the declaration ends at its `;`.  Without the
 // result type the declaration is marked for Sema to infer it.  A method
 // takes the same form; a trait's signature has no body of either kind.
 TEST(Func, ExpressionBodies) {
-  auto [ok, driver] = parse(R"(fn double(x: int) = x * 2;
-fn half(x: int) -> int = x / 2;
+  auto [ok, driver] = parse(R"(fn double(x: int) => x * 2;
+fn half(x: int) -> int => x / 2;
 class C {
   n: int;
-  fn get() -> int = self.n;
+  fn get() -> int => self.n;
 }
 fn main() -> int { return double(1); }
 )");
   ASSERT_TRUE(ok);
   std::string d = dumpAST(*driver);
   for (const char *e :
-       {"FuncDecl <1:1-1:27> 'double' inferred\n| `-CompoundStmt <1:21-1:26>\n"
-        "|   `-ReturnStmt <1:21-1:26>\n"
-        "|     `-BinaryExpr <1:21-1:26> '*'\n",
-        "FuncDecl <2:1-2:32> 'half' ->\n| |-BuiltinType 'int'\n"
-        "| `-CompoundStmt <2:26-2:31>\n"
-        "|   `-ReturnStmt <2:26-2:31>\n",
-        "FuncDecl <5:3-5:28> 'get' ->"})
+       {"FuncDecl <1:1-1:28> 'double' inferred\n| `-CompoundStmt <1:22-1:27>\n"
+        "|   `-ReturnStmt <1:22-1:27>\n"
+        "|     `-BinaryExpr <1:22-1:27> '*'\n",
+        "FuncDecl <2:1-2:33> 'half' ->\n| |-BuiltinType 'int'\n"
+        "| `-CompoundStmt <2:27-2:32>\n"
+        "|   `-ReturnStmt <2:27-2:32>\n",
+        "FuncDecl <5:3-5:29> 'get' ->"})
     EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
 
   struct Case {
@@ -57,12 +57,18 @@ fn main() -> int { return double(1); }
     const char *Error;
   };
   for (const Case &c :
-       {Case{"fn f(x: int) = x\nfn main() -> int { return 0; }\n",
+       {Case{"fn f(x: int) => x\nfn main() -> int { return 0; }\n",
              "expected ';' after the function's expression"},
         Case{"fn f(x: int) x;\nfn main() -> int { return 0; }\n",
-             "expected '{' or '=' to start the function's body"},
+             "expected '{' or '=>' to start the function's body"},
+        Case{"trait T { fn f() -> int => 1; }\n",
+             "a trait method has no body: end its signature with ';'"},
         Case{"trait T { fn f() -> int = 1; }\n",
-             "a trait method has no body: end its signature with ';'"}}) {
+             "a trait method has no body: end its signature with ';'"},
+        // `=` is a native function's: an expression body is `=>`.
+        Case{"fn double(x: int) = x * 2;\nfn main() -> int { return 0; }\n",
+             "an expression body starts with '=>', not '=': 'fn double(...) "
+             "=> ...;'"}}) {
     auto r = parseWithDiags(c.Src);
     EXPECT_FALSE(r.Ok) << c.Src;
     EXPECT_NE(r.Text.find(c.Error), std::string::npos) << c.Src << r.Text;

@@ -1084,7 +1084,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
       error(start, "a trait method cannot be generic");
       return nullptr;
     }
-    if (at(Tok::LBrace) || at(Tok::Assign)) {
+    if (at(Tok::LBrace) || at(Tok::FatArrow) || at(Tok::Assign)) {
       errorAtCurrent("a trait method has no body: end its signature with ';'");
       return nullptr;
     }
@@ -1098,11 +1098,17 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
     return fn;
   }
 
-  // `fn double(x: int) -> int = x * 2;` is the function whose body is
-  // `{ return x * 2; }`; without the result type, `fn double(x: int) = x *
-  // 2;`, the result type is the expression's (Sema infers it).
+  // `fn double(x: int) -> int => x * 2;` is the function whose body is
+  // `{ return x * 2; }`; without the result type, `fn double(x: int) => x *
+  // 2;`, the result type is the expression's (Sema infers it).  `=` is a
+  // native function's (its C symbol), so after another it says so.
+  if (at(Tok::Assign)) {
+    errorAtCurrent("an expression body starts with '=>', not '=': 'fn " + name +
+                   "(...) => ...;'");
+    return nullptr;
+  }
   CompoundStmt *body = nullptr;
-  const bool expressionBody = at(Tok::Assign);
+  const bool expressionBody = at(Tok::FatArrow);
   if (expressionBody) {
     consume();
     SourceLocation from = cur().Loc;
@@ -1115,7 +1121,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
       return nullptr;
   } else {
     if (!at(Tok::LBrace)) {
-      errorAtCurrent("expected '{' or '=' to start the function's body");
+      errorAtCurrent("expected '{' or '=>' to start the function's body");
       return nullptr;
     }
     body = parseBlock();
@@ -2306,10 +2312,15 @@ Expr *Parser::parsePrimary() {
       if (!retTy)
         return nullptr;
     }
-    // `fn(x: int) -> int = x * 2` is `fn(x: int) -> int { return x * 2; }`,
-    // and without the result type, `fn(x: int) = x * 2`, the result type is
-    // the expression's (Sema infers it).
+    // `fn(x: int) -> int => x * 2` is `fn(x: int) -> int { return x * 2; }`,
+    // and without the result type, `fn(x: int) => x * 2`, the result type
+    // is the expression's (Sema infers it).
     if (at(Tok::Assign)) {
+      errorAtCurrent("a lambda's expression body starts with '=>', not '=': "
+                     "'fn(...) => ...'");
+      return nullptr;
+    }
+    if (at(Tok::FatArrow)) {
       consume();
       SourceLocation from = cur().Loc;
       Expr *value = parseExpression();
@@ -2323,7 +2334,7 @@ Expr *Parser::parsePrimary() {
       return lambda;
     }
     if (!at(Tok::LBrace)) {
-      errorAtCurrent("expected '{' or '=' to start the lambda's body");
+      errorAtCurrent("expected '{' or '=>' to start the lambda's body");
       return nullptr;
     }
     CompoundStmt *body = parseBlock();

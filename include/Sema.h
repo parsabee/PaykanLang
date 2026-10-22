@@ -174,7 +174,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// variables it captures.  Its function type, or nullptr after an error.
   ast::Type *checkLambda(ast::LambdaExpr *node);
   /// The result type of the checked lambda @p node written
-  /// `fn(...) = expression`: its expression's type, written back as its
+  /// `fn(...) => expression`: its expression's type, written back as its
   /// result type; nullptr (after an error) when the expression has none.
   ast::Type *inferredResult(ast::LambdaExpr *node);
   /// Record that the enclosing lambdas capture the variable @p name (of type
@@ -277,7 +277,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Look up a function signature, or nullptr if unknown.
   const FunctionSig *lookupFunction(std::string_view name) const;
 
-  // -- Inferred results (`fn double(x: int) = x * 2;`,
+  // -- Inferred results (`fn double(x: int) => x * 2;`,
   // docs/language/03-functions.md, "Expression bodies")
   //
   // A free function written with an expression and no result type is
@@ -308,7 +308,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// first when it has not been yet.
   bool inferResultOf(const std::string &name, ast::SourceLocation loc);
   /// The type of the value the one `return` of @p body returns, for a
-  /// function or a lambda written `= expression`; nullptr after an error
+  /// function or a lambda written `=> expression`; nullptr after an error
   /// (an expression with no value: @p subject is what its result is, and
   /// @p braces the form to write instead).
   ast::Type *returnedType(ast::CompoundStmt *body, const std::string &subject,
@@ -317,7 +317,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// written one is and written back (to the declaration and its
   /// signature); nullptr after an error.
   ast::Type *inferredResultOf(ast::FuncDecl *node);
-  /// A method, or a generic function, written `= expression` needs its
+  /// A method, or a generic function, written `=> expression` needs its
   /// result type: report one with none (and give it the poison type, so its
   /// uses are not reported again).
   bool rejectInferredMethods(ast::TranslationUnit *tu);

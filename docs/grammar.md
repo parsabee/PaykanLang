@@ -65,8 +65,11 @@ Punctuation and operators:
 
 ```
 =  -  +  *  /  %  <  >  <=  >=  ==  !=  !  ?  :  ::  .  ..  ..=  ;  ,
-(  )  {  }  [  ]  ->  &&  ||  +=  -=  *=  /=  %=
+(  )  {  }  [  ]  ->  =>  &&  ||  +=  -=  *=  /=  %=
 ```
+
+`=>` starts an expression body (`fn double(x: int) => x * 2;`); `= >` is two
+tokens.
 
 Any other byte is a lexical error (`invalid character 'X'`).
 
@@ -159,7 +162,7 @@ implMember  ::= funcDecl | "static" "fn" IDENT typeParams? "(" paramList? ")"
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
-                ( block | "=" expression ";" )
+                ( block | "=>" expression ";" )
 nativeFuncDecl ::= "native" "fn" IDENT typeParams? "(" paramList? ")"
                    ( "->" ( "view" | "inout" )? typeAnnotation )? "=" STRING ";"   -- the C symbol
 paramList   ::= param ( "," param )*
@@ -179,14 +182,15 @@ A class, struct or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
 A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
 argument must implement.  `impl Show for A` implements trait `Show` for `A`.
-A function or method written `= expression ;` has for its body a block of one
-`return` spanning the expression (`fn double(x: int) -> int = x * 2;` is
+A function or method written `=> expression ;` has for its body a block of one
+`return` spanning the expression (`fn double(x: int) -> int => x * 2;` is
 `fn double(x: int) -> int { return x * 2; }`); without a result type, `fn
-double(x: int) = x * 2;`, the result type is the expression's, which Sema
+double(x: int) => x * 2;`, the result type is the expression's, which Sema
 infers (`FuncDecl::hasInferredResult`; a method's is not inferred).  A
-`native fn`'s `=` is followed by its C symbol instead, and a trait method's
-signature has neither (`a trait method has no body: end its signature with
-';'`).
+`native fn`'s `=` is followed by its C symbol instead; after any other
+function's signature `=` is a syntax error that names `=>` (`an expression
+body starts with '=>', not '='`).  A trait method's signature has neither
+(`a trait method has no body: end its signature with ';'`).
 The `impl` block of a generic type names its type parameters: `impl Box<T>`.
 A trait's methods are signatures that end with `;`.
 Methods are `funcDecl`s inside a class body.  `view fn` marks a method that
@@ -410,7 +414,7 @@ primary ::= literal
           | lambda
 
 lambda  ::= "fn" "(" paramList? ")" ( "->" typeAnnotation )?
-            ( block | "=" expression )
+            ( block | "=>" expression )
 
 argumentList ::= expression ( "," expression )*
 ```
@@ -419,12 +423,12 @@ A lambda is a function without a name, in expression position
 (docs/language/14-function-types.md): `fn(x: int) -> int { return x + 1; }`.
 Its parameters are written like a function's, modes included, its result type
 is written or `void`, never `view` or `inout`, and its body is a block.  With
-`=` its body is an expression instead, which the parser makes a block of one
-`return` spanning the expression: `fn(x: int) -> int = x + 1` is
-`fn(x: int) -> int { return x + 1; }`.  Without a result type, `fn(x: int) =
+`=>` its body is an expression instead, which the parser makes a block of one
+`return` spanning the expression: `fn(x: int) -> int => x + 1` is
+`fn(x: int) -> int { return x + 1; }`.  Without a result type, `fn(x: int) =>
 x + 1`, the result type is the expression's, which Sema infers
 (`LambdaExpr::hasInferredResult`); it is not `void`.  The expression extends as
-far as an expression can, so `fn(x: int) = fn(y: int) = x + y` nests.
+far as an expression can, so `fn(x: int) => fn(y: int) => x + y` nests.
 
 Precedence, lowest to highest: ternary; `||`; `&&`; relational; `+ -`;
 `* / %`; unary `! -`; postfix. Binary operators are left-associative

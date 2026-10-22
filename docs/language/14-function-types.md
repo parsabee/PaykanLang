@@ -144,10 +144,10 @@ a lambda is never one.
 
 ### Expression-bodied lambdas
 
-A lambda whose body only returns an expression can be written with `=` and the expression
-in place of the block: `fn(x: int) -> int = x * 2` is `fn(x: int) -> int { return x * 2; }`.
-Leave the result type out and it is the expression's: `fn(x: int) = x * 2` is an
-`(int) -> int`, `fn(s: view Str) = s + "!"` a `(view Str) -> Str`, and `fn(x: u8) = x + 1`
+A lambda whose body only returns an expression can be written with `=>` and the expression
+in place of the block: `fn(x: int) -> int => x * 2` is `fn(x: int) -> int { return x * 2; }`.
+Leave the result type out and it is the expression's: `fn(x: int) => x * 2` is an
+`(int) -> int`, `fn(s: view Str) => s + "!"` a `(view Str) -> Str`, and `fn(x: u8) => x + 1`
 a `(u8) -> u8`.
 
 ```pkn
@@ -156,12 +156,12 @@ import ::io;
 fn apply(f: (int) -> int, x: int) -> int { return f(x); }
 
 fn main() -> int {
-  double = fn(x: int) = x * 2;
+  double = fn(x: int) => x * 2;
   n = 10;
-  addN = fn(x: int) -> int = x + n;        // captures n, as a block would
-  add = fn(x: int) = fn(y: int) = x + y;   // a lambda returning a lambda
+  addN = fn(x: int) -> int => x + n;        // captures n, as a block would
+  add = fn(x: int) => fn(y: int) => x + y;   // a lambda returning a lambda
   io::println(Str(double(4)) + " " + Str(addN(1)) + " " + Str(add(1)(2)) + " "
-      + Str(apply(fn(x: int) = x - 1, 10)));
+      + Str(apply(fn(x: int) => x - 1, 10)));
   return 0;
 }
 ```
@@ -172,16 +172,16 @@ Output:
 8 11 3 9
 ```
 
-- The expression reaches as far as an expression can: `fn(x: int) = x * 2 + 1` returns
+- The expression reaches as far as an expression can: `fn(x: int) => x * 2 + 1` returns
   `x * 2 + 1`, and the lambda ends at the `,`, `)` or `;` after it.
 - The result type comes from the expression alone, not from where the lambda goes:
-  `f: (int) -> u8 = fn(x: int) = 5;` is an error (the lambda is an `(int) -> int`); write
-  `fn(x: int) -> u8 = 5` to give the literal the type.
-- The expression must have a value: `fn() = io::println("x")` is an error (`the lambda's
+  `f: (int) -> u8 = fn(x: int) => 5;` is an error (the lambda is an `(int) -> int`); write
+  `fn(x: int) -> u8 => 5` to give the literal the type.
+- The expression must have a value: `fn() => io::println("x")` is an error (`the lambda's
   result is the value of its expression, which has none`), and a block is the way to
   write a lambda that returns nothing, `fn() { io::println("x"); }`.
 - Everything else is a block's: the expression is the one `return`, so it is checked as
-  one (a `view` parameter cannot be returned, `fn(s: view Str) = s`).
+  one (a `view` parameter cannot be returned, `fn(s: view Str) => s`).
 
 A named function takes the same forms, ending with `;` ([Expression
 Bodies](03-functions.md#expression-bodies)).

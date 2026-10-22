@@ -426,21 +426,21 @@ fn main() -> int {
   std::filesystem::remove_all(dir);
 }
 
-// `fn(...) = e` has the type of `e` as its result type; `fn(...) -> T = e`
+// `fn(...) => e` has the type of `e` as its result type; `fn(...) -> T => e`
 // is checked as `fn(...) -> T { return e; }`.
 TEST(FunctionType, ExpressionLambdas) {
   auto r = semaCheck(R"(
 fn apply(f: (int) -> int, x: int) -> int { return f(x); }
 fn main() -> int {
-  a: (int) -> int = fn(x: int) = x * 2;
-  b: (u8) -> u8 = fn(x: u8) = x + 10;
-  c: (view Str) -> Str = fn(s: view Str) = s + "!";
-  d: (int) -> int? = fn(x: int) = if x > 0 then x else None;
-  e: (int) -> (int) -> int = fn(x: int) = fn(y: int) = x + y;
-  f: (int) -> u8 = fn(x: int) -> u8 = 7;
+  a: (int) -> int = fn(x: int) => x * 2;
+  b: (u8) -> u8 = fn(x: u8) => x + 10;
+  c: (view Str) -> Str = fn(s: view Str) => s + "!";
+  d: (int) -> int? = fn(x: int) => if x > 0 then x else None;
+  e: (int) -> (int) -> int = fn(x: int) => fn(y: int) => x + y;
+  f: (int) -> u8 = fn(x: int) -> u8 => 7;
   k = 3;
-  g: (int) -> int = fn(x: int) = x + k;
-  return apply(fn(x: int) = x - 1, a(1));
+  g: (int) -> int = fn(x: int) => x + k;
+  return apply(fn(x: int) => x - 1, a(1));
 }
 )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
@@ -449,10 +449,10 @@ fn main() -> int {
 TEST(FunctionType, ExpressionLambdaErrors) {
   auto r = semaCheck(R"(import ::io;
 fn main() -> int {
-  v = fn() = io::println("x");
-  f: (int) -> u8 = fn(x: int) = 5;
-  g = fn(x: int) -> int = "s";
-  w = fn(s: view Str) = s;
+  v = fn() => io::println("x");
+  f: (int) -> u8 = fn(x: int) => 5;
+  g = fn(x: int) -> int => "s";
+  w = fn(s: view Str) => s;
   return 0;
 }
 )");

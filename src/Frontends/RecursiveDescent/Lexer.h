@@ -92,6 +92,7 @@ enum class Tok : uint8_t {
   LBracket,   // [
   RBracket,   // ]
   Arrow,      // ->
+  FatArrow,   // =>: an expression body (`fn double(x: int) => x * 2;`)
   AndAnd,     // &&
   OrOr,       // ||
 };

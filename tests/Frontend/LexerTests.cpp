@@ -127,6 +127,22 @@ TEST(Lexer, RangeTokens) {
   EXPECT_EQ(d.Errors, 0u);
 }
 
+// `=>` (an expression body) is one token; `= >` is two, and `==` and `>=`
+// are unchanged.
+TEST(Lexer, FatArrowToken) {
+  auto d = dump("=> = > == >= =>=");
+  std::vector<std::string> kinds;
+  kinds.reserve(d.Lines.size());
+  for (const auto &l : d.Lines)
+    kinds.push_back(l.substr(l.find(' ') + 1,
+                             l.find(' ', l.find(' ') + 1) - l.find(' ') - 1));
+  std::vector<std::string> expected = {"FAT_ARROW", "ASSIGN",     "GREATER",
+                                       "EQ_EQ",     "GREATER_EQ", "FAT_ARROW",
+                                       "ASSIGN",    "EOF"};
+  EXPECT_EQ(kinds, expected);
+  EXPECT_EQ(d.Errors, 0u);
+}
+
 TEST(Lexer, CompoundAssignmentTokens) {
   // Each operator glued to `=` is one token; `->` stays the arrow, and a
   // space keeps the two apart.
