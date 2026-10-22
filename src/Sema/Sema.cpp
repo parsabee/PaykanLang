@@ -3004,6 +3004,10 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
     error(loc,
           "'" + name + "' is declared with 'let' and cannot be reassigned");
     return false;
+  case VarKind::ForVar:
+    error(loc, "'" + name +
+                   "' is the variable of a 'for' loop and cannot be assigned");
+    return false;
   case VarKind::Captured:
     error(loc, "cannot assign to '" + name +
                    "': the function captures it by copy, and the copy is "
@@ -3184,6 +3188,108 @@ bool Sema::visitWhileStmt(ast::WhileStmt *node) {
   bool ok = visit(node->getBody());
   --LoopDepth;
   return ok;
+}
+
+bool Sema::visitForStmt(ast::ForStmt *node) {
+  ast::VarDecl *var = node->getVar();
+  const std::string &name = var->getName();
+  bool ok = checkBinderName(name, var->getLocation());
+  auto isInteger = [](ast::Type *t) {
+    const auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
+    return bt && bt->isInteger();
+  };
+
+  // The variable's type: its annotation, or the range's.
+  ast::Type *varTy = nullptr;
+  if (var->getType()) {
+    varTy = resolveType(var->getType(), var->getLocation(),
+                        "variable '" + name + "'");
+    if (varTy && !isInteger(varTy)) {
+      error(var->getLocation(), "'" + name + "' has type '" + typeName(varTy) +
+                                    "': a 'for' loop's variable is an integer");
+      varTy = nullptr;
+    }
+    if (varTy)
+      var->setType(varTy);
+    else
+      ok = false;
+  }
+
+  // The range and the step are evaluated once, before the loop, so they
+  // see the names outside it.  A literal end takes the other end's type, as
+  // an operand of `<` does, or the annotation's.
+  ast::Expr *start = node->getStart();
+  ast::Expr *end = node->getEnd();
+  ast::Type *startTy = nullptr;
+  ast::Type *endTy = nullptr;
+  if (varTy) {
+    startTy = resolveExprType(start, varTy);
+    endTy = resolveExprType(end, varTy);
+  } else if (ExprChecker::isNumericLiteral(start) &&
+             !ExprChecker::isNumericLiteral(end)) {
+    endTy = resolveExprType(end);
+    startTy = resolveExprType(start, endTy);
+  } else {
+    startTy = resolveExprType(start);
+    endTy = resolveExprType(end, startTy);
+  }
+  ast::Type *loopTy = nullptr;
+  if (!startTy || !endTy) {
+    ok = false;
+  } else if (!isInteger(startTy) || !isInteger(endTy)) {
+    ast::Expr *bad = isInteger(startTy) ? end : start;
+    error(bad->getLocation(),
+          "a 'for' loop's range is of integers, not '" +
+              typeName(isInteger(startTy) ? endTy : startTy) + "'");
+    ok = false;
+  } else if (varTy && !typesEqual(startTy, varTy)) {
+    error(start->getLocation(), "the start of the range has type '" +
+                                    typeName(startTy) + "', but '" + name +
+                                    "' is a '" + typeName(varTy) + "'");
+    ok = false;
+  } else if (varTy && !typesEqual(endTy, varTy)) {
+    error(end->getLocation(), "the end of the range has type '" +
+                                  typeName(endTy) + "', but '" + name +
+                                  "' is a '" + typeName(varTy) + "'");
+    ok = false;
+  } else if (!typesEqual(startTy, endTy)) {
+    error(start->getLocation(),
+          "the ends of the range have types '" + typeName(startTy) + "' and '" +
+              typeName(endTy) + "'; a 'for' loop's range has one type");
+    ok = false;
+  } else {
+    loopTy = startTy;
+  }
+
+  // The step is an `int`: positive counts up, negative down.
+  if (ast::Expr *step = node->getStep()) {
+    ast::Type *stepTy = resolveExprType(step, Ctx.getIntTy());
+    if (!stepTy) {
+      ok = false;
+    } else if (!typesEqual(stepTy, Ctx.getIntTy())) {
+      error(step->getLocation(),
+            "a 'for' loop's step is an 'int', not '" + typeName(stepTy) + "'");
+      ok = false;
+    } else if (node->constantStep() == 0) {
+      error(step->getLocation(), "a 'for' loop's step cannot be 0");
+      ok = false;
+    }
+  }
+
+  // The variable is bound in a scope of the loop's own, around the body, and
+  // is read-only there.
+  ScopeGuard guard(*this);
+  if (loopTy) {
+    var->setType(loopTy);
+    CurrentScope->set(name, loopTy);
+  } else {
+    declarePoisoned(CurrentScope, name);
+  }
+  CurrentScope->Kinds[name] = VarKind::ForVar;
+  ++LoopDepth;
+  bool bodyOk = visit(node->getBody());
+  --LoopDepth;
+  return ok && bodyOk;
 }
 
 bool Sema::visitBreakStmt(ast::BreakStmt *node) {

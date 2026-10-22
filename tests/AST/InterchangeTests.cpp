@@ -767,6 +767,48 @@ TEST(ASTInterchange, LetLocals) {
       << error;
 }
 
+// A `for` loop is its variable as a `var` with no initialiser, the range's
+// ends, the step or `_`, the body, and a trailing `(inclusive)` for `..=`.
+TEST(ASTInterchange, ForLoops) {
+  const std::string text =
+      "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+      "(for (var \"i\" _ _) (int 0) (int 3) _ (block)) "
+      "(for (var \"b\" (named-type \"u8\") _) (int 9) (int 0) "
+      "(unary neg (int 3)) (block) (inclusive))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("ForStmt ..\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("ForStmt ..= step\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("VarDecl 'b' type\n"), std::string::npos) << d;
+  std::string written = write(*tu);
+  EXPECT_NE(written.find("(inclusive)"), std::string::npos) << written;
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *For;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(for (var \"i\" _ (int 1)) (int 0) (int 3) _ (block))",
+             "a for loop's variable is a name and a type or _ only"},
+        Case{"(for (var \"i\" _ _) (int 0) (int 3) _ (block) (inclusive x))",
+             "(inclusive) takes no fields"},
+        Case{"(for (var \"i\" _ _) (int 0) _ (block))", "the end of the range"},
+        Case{"(for (var \"i\" _ _) (int 0) (int 3) _)", "the loop's body"}}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
+                      "_ (block " +
+                      std::string(c.For) + "))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.For;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.For << ": " << error;
+  }
+}
+
 // A local borrow is a `var` with a trailing `(qual view)` or
 // `(qual inout)`, and an initialiser.
 TEST(ASTInterchange, LocalBorrows) {

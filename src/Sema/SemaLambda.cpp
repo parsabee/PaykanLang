@@ -94,6 +94,7 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
       break;
     case VarKind::Plain:
     case VarKind::Let:
+    case VarKind::ForVar:
     case VarKind::Captured:
     case VarKind::Weak:
       break;

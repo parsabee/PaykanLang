@@ -53,7 +53,8 @@ Keywords (reserved; never identifiers):
 
 ```
 import  as  class  struct  enum  match  mov  fn  native  return  if  then  else
-elif  while  break  continue  True  False  None  _  view  inout  let  weak  impl  static  trait
+elif  while  for  break  continue  True  False  None  _  view  inout  let  weak  impl
+static  trait
 ```
 
 `_` alone is the `UNDERSCORE` token (destructuring skip, match wildcard);
@@ -63,7 +64,7 @@ elif  while  break  continue  True  False  None  _  view  inout  let  weak  impl
 Punctuation and operators:
 
 ```
-=  -  +  *  /  %  <  >  <=  >=  ==  !=  !  ?  :  ::  .  ;  ,
+=  -  +  *  /  %  <  >  <=  >=  ==  !=  !  ?  :  ::  .  ..  ..=  ;  ,
 (  )  {  }  [  ]  ->  &&  ||
 ```
 
@@ -80,7 +81,8 @@ Any other byte is a lexical error (`invalid character 'X'`).
   underflows to zero (`1e-400`) is an error (`float is out of range: ...`).
   Subnormal values (`5e-324`) and zero with any exponent (`0e-999`) are
   fine. `1.` is a float; `1e` is the integer `1` followed by the
-  identifier `e`.
+  identifier `e`. A `.` followed by another `.` is not part of a number:
+  `0..n` is `0` `..` `n` (a range), never the float `0.` and a `.`.
 - `CHAR` escapes: `\n` `\t` `\r` `\\` `\'` `\0`; any other `\X` is `X`.
   A character literal missing its closing quote before the end of the line
   or file is an error (`unterminated character literal`).  With the
@@ -175,8 +177,7 @@ has no fields: a struct has at least one`).
 A class, struct or function with `typeParams` is generic (a template that Sema
 instantiates); the superclass of a generic class is a plain class name.
 A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
-argument must implement.  `impl Show for A` implements trait `Show` for `A`;
-`for` is not a keyword, only a word the `impl` declaration expects there.
+argument must implement.  `impl Show for A` implements trait `Show` for `A`.
 The `impl` block of a generic type names its type parameters: `impl Box<T>`.
 A trait's methods are signatures that end with `;`.
 Methods are `funcDecl`s inside a class body.  `view fn` marks a method that
@@ -268,6 +269,7 @@ statement ::= ";"
             | block
             | ifStmt
             | whileStmt
+            | forStmt
             | "break" ";"
             | "continue" ";"
             | matchStmt
@@ -279,6 +281,8 @@ borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
 ifStmt    ::= "if" expression block elseTail?
 elseTail  ::= "elif" expression block elseTail? | "else" block
 whileStmt ::= "while" expression block
+forStmt   ::= "for" IDENT ( ":" typeAnnotation )? "in" expression
+              ( ".." | "..=" ) expression ( "step" expression )? block
 
 destructureTargets ::= destructureTarget ( "," destructureTarget )+
 destructureTarget  ::= IDENT | IDENT ":" typeAnnotation | "_"
@@ -327,6 +331,15 @@ literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
   `IfStmt` nested as the else branch of the one before it.  The conditional
   expression keeps `else if` (`if a then x else if b then y else z`), and
   `elif` there is a syntax error that names `else if`.
+- A `forStmt` (`ForStmt`) declares its variable, a `VarDecl` with no
+  initializer that spans the name and its annotation; the statement spans
+  `for` to the block.  The range's ends are any expressions: `..` and `..=`
+  are not operators, so each end is a whole expression (`0..n - 1` is
+  `0..(n - 1)`).  `in` and `step` are not keywords: an identifier spelled
+  `in` right after the variable (and its annotation) separates it from the
+  range, one spelled `step` right after the range's end starts the step,
+  and anywhere else each is an ordinary name (`for in in 0..step step step {`
+  parses).  The step is null in the AST when it is not written.
 - Match arms: a wildcard `_`, a literal pattern (bare literal tokens only,
   so `-1` is not a pattern), a type with an optional binding, in any order.
   A binding may borrow the subject, `n: view T` or `n: inout T`

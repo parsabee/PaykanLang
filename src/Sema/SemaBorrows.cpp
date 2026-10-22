@@ -119,6 +119,12 @@ bool mentions(const ast::Stmt *s, const std::string &name) {
     const auto *w = ast::cast<ast::WhileStmt>(s);
     return mentions(w->getCondition(), name) || mentions(w->getBody(), name);
   }
+  case ast::ASTNode::NK_ForStmt: {
+    const auto *f = ast::cast<ast::ForStmt>(s);
+    return f->getVar()->getName() == name || mentions(f->getStart(), name) ||
+           mentions(f->getEnd(), name) || mentions(f->getStep(), name) ||
+           mentions(f->getBody(), name);
+  }
   case ast::ASTNode::NK_BreakStmt:
   case ast::ASTNode::NK_ContinueStmt:
     return false;

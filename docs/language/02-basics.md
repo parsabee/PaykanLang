@@ -794,7 +794,7 @@ optional.
 
 ### while
 
-`while` is PaykanLang's only loop: there is no `for`. Counting loops use an index variable:
+`while` runs its body for as long as its condition, a `bool`, is true:
 
 ```pkn
 i: int = 0;
@@ -807,10 +807,75 @@ while True {   // infinite loop
 }
 ```
 
+### for
+
+`for` counts through a range of integers. `for i in a..b` gives `i` the values `a`,
+`a + 1`, ..., `b - 1`; `a..=b` includes `b` too. `step` sets the distance between the
+values, and a negative step counts down:
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  up = "";
+  for i in 0..5 { up = up + Str(i) + " "; }
+  evens = "";
+  for i in 0..=10 step 2 { evens = evens + Str(i) + " "; }
+  down = "";
+  for i in 3..0 step -1 { down = down + Str(i) + " "; }
+  io::println(up + "| " + evens + "| " + down + "|");
+
+  bytes = 0;
+  for _b: u8 in 0..=255 { bytes = bytes + 1; }   // every u8, then the loop ends
+  io::println(bytes);
+  return 0;
+}
+```
+
+Output:
+
+```
+0 1 2 3 4 | 0 2 4 6 8 10 | 3 2 1 |
+256
+```
+
+What a loop does is fixed when it starts:
+
+- **The start, the end and the step are evaluated once**, in that order, before the first
+  iteration. The body can change the variables they read, and the loop's values stay the
+  same: `for i in 0..n { n = 0; }` still runs `n` times.
+- **The variable is read-only.** A new `i` is declared for the loop (it hides an outer `i`
+  until the loop ends), and the body cannot assign it (`'i' is the variable of a 'for' loop
+  and cannot be assigned`) or pass it to an `inout` parameter, so the values are the
+  range's. A lambda made in the body captures the value of that iteration.
+- **The loop always ends.** The number of iterations is known before the first one, so a
+  range reaching the end of its type stops there: `for b: u8 in 0..=255` runs 256 times,
+  where `while b <= 255` would run forever (every `u8` is `<= 255`). Only `break` and
+  `return` end it sooner.
+- **A range can be empty**: when the start is past the end in the direction of the step,
+  the body does not run (`for i in 5..0` runs zero times, and so does
+  `for i in 0..5 step -1`). It is not an error.
+
+The range is of integers: `int`, a [sized integer type](#sized-numeric-types) or
+`unsigned`. Both ends have the same type, as the operands of `<` do: a literal takes the
+other end's type (`for i in 0..n` counts in `unsigned` when `n` is one, as it does over a
+list's `len()`), and a type written after the
+variable (`for b: u8 in 0..=255`) is the type of both. A `float` range is an error (`a 'for'
+loop's range is of integers, not 'float'`), as is one whose ends differ (`the ends of the
+range have types 'unsigned' and 'int'; a 'for' loop's range has one type`).
+
+The step is an `int`, whatever the type of the range. It may be any expression
+(`step k / 2`). A step of `0` is an error when it is a constant (`a 'for' loop's step cannot
+be 0`); a computed one that is `0` panics when the loop starts
+(`the step of a 'for' loop is 0`). The last value is the last one the step reaches without
+passing the end: `0..=10 step 3` gives 0, 3, 6 and 9. `in` and `step` mean something only
+in a `for` header, so a variable may still be called `in` or `step`.
+
 ### break / continue
 
-- `break` — exits the innermost `while` loop.
-- `continue` — skips to the next iteration of the innermost `while` loop.
+- `break` — exits the innermost loop, a `while` or a `for`.
+- `continue` — skips to the next iteration of the innermost loop; in a `for` loop, to its
+  next value.
 - Both are a compile-time error outside a loop (`'break' outside of a loop`).
 
 ```pkn

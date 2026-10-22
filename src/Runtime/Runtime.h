@@ -577,6 +577,10 @@ double Paykan_round_f16(double value);
 /// array's element read or written at an index outside 0..len-1.
 PAYKAN_NORETURN void Paykan_panic_index(int64_t index, int64_t len);
 
+/// Print a diagnostic and abort: a `for` loop whose step, computed when the
+/// loop starts, is 0 (a constant 0 is a compile error).
+PAYKAN_NORETURN void Paykan_panic_for_step(void);
+
 /// Print `paykan: <message>` and abort: the standard library's `native fn`
 /// for a broken precondition (`pop` on an empty list, say).
 PAYKAN_NORETURN void Paykan_panic_message(PaykanObject *message);

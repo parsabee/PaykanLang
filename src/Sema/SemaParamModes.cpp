@@ -128,6 +128,11 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
     // It could be reassigned through the other name.
     return "'" + id->getName() + "' is declared with 'let' and cannot be " +
            use;
+  if (id && varKind(id->getName()) == VarKind::ForVar)
+    return "'" + id->getName() +
+           "' is the variable of a 'for' loop and "
+           "cannot be " +
+           use;
   if (id && varKind(id->getName()) == VarKind::Captured)
     return "'" + id->getName() +
            "' is captured by copy by the function, and the copy is read-only; "

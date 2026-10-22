@@ -7,6 +7,7 @@
 #include <cassert>
 #include <concepts>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -74,6 +75,7 @@ public:
     NK_ExprStmt,
     NK_IfStmt,
     NK_WhileStmt,
+    NK_ForStmt,
     NK_BreakStmt,
     NK_ContinueStmt,
     NK_MemberAssignStmt,
@@ -607,6 +609,46 @@ public:
   Stmt *getBody() const { return Body; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_WhileStmt; }
+};
+
+// Range loop (docs/language/02-basics.md, "for"):
+//
+//   for i in start..end { body }            -- start, start+1, ..., end-1
+//   for i: u8 in start..=end step s { body } -- `..=` includes the end
+//
+// The loop variable is a VarDecl with no initializer: its name, and its type
+// annotation or null (Sema writes the resolved type back).  The step is
+// null when not written (1).  The start, end and step are evaluated once,
+// in that order, before the first iteration.
+class ForStmt : public Stmt {
+private:
+  VarDecl *Var;
+  Expr *Start;
+  Expr *End;
+  Expr *Step; // may be null
+  bool Inclusive;
+  Stmt *Body;
+
+public:
+  ForStmt(SourceLocation loc, VarDecl *var, Expr *start, Expr *end, Expr *step,
+          bool inclusive, Stmt *body)
+      : Stmt(NK_ForStmt, loc), Var(var), Start(start), End(end), Step(step),
+        Inclusive(inclusive), Body(body) {}
+
+  VarDecl *getVar() const { return Var; }
+  Expr *getStart() const { return Start; }
+  Expr *getEnd() const { return End; }
+  Expr *getStep() const { return Step; }
+  bool hasStep() const { return Step != nullptr; }
+  /// `..=`: the end is one of the values.
+  bool isInclusive() const { return Inclusive; }
+  Stmt *getBody() const { return Body; }
+
+  /// The step's value when it is a constant: 1 when not written, an integer
+  /// literal, or a negated one.
+  std::optional<int64_t> constantStep() const;
+
+  static bool classof(const ASTNode *N) { return N->getKind() == NK_ForStmt; }
 };
 
 // Break statement

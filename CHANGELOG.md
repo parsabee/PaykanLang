@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `for` loops over ranges of integers (docs/language/02-basics.md, "for"):
+  `for i in a..b { }` counts from `a` to `b - 1`, `a..=b` includes `b`, and
+  `step s` sets the distance between the values (a negative one counts down).
+  - The range is of `int`, a sized integer or `unsigned`, one type for both
+    ends: a literal takes the other end's type, and `for b: u8 in 0..=255`
+    names it. The step is an `int`.
+  - What the loop does is fixed when it starts: the start, end and step are
+    evaluated once, in that order, and the variable is read-only in the body.
+  - The number of iterations is known before the first, so a loop always ends,
+    even at the end of its type: `for b: u8 in 0..=255` runs 256 times.
+  - A constant step of `0` is a compile error; a computed one panics when the
+    loop starts (`the step of a 'for' loop is 0`).
+  - `for` is a keyword (a program can no longer name anything `for`), and `..`
+    and `..=` are tokens; `in` and `step` mean something only in a `for`
+    header, so a variable may still be called `in` or `step`. `0..n` lexes as
+    `0` `..` `n`, never as the float `0.`.
+  - The AST interchange format has a `(for ...)` statement
+    (docs/plugins/ast-format.md). The loop lowers to the PIR `while` loop, so
+    the PIR and the backends are unchanged apart from one new runtime function,
+    `Paykan_panic_for_step`.
+
 - The `mlir` backend (docs/design/mlir-backend.md), which replaces the C and llvm backends' two
   translations of PIR with one lowering through MLIR.  It imports the program into `pir`, an
   MLIR dialect with an op for each PIR item, statement and instruction, and lowers that once

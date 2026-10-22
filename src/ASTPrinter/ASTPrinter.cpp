@@ -216,6 +216,34 @@ void ASTPrinter::visitWhileStmt(WhileStmt *node) {
   }
 }
 
+void ASTPrinter::visitForStmt(ForStmt *node) {
+  header("ForStmt", node);
+  OS << (node->isInclusive() ? " ..=" : " ..");
+  if (node->hasStep())
+    OS << " step";
+  OS << "\n";
+  {
+    ChildScope cs(*this, false);
+    visitVarDecl(node->getVar());
+  }
+  {
+    ChildScope cs(*this, false);
+    visit(node->getStart());
+  }
+  {
+    ChildScope cs(*this, false);
+    visit(node->getEnd());
+  }
+  if (node->hasStep()) {
+    ChildScope cs(*this, false);
+    visit(node->getStep());
+  }
+  {
+    ChildScope cs(*this, true);
+    visit(node->getBody());
+  }
+}
+
 void ASTPrinter::visitBreakStmt(BreakStmt *node) {
   header("BreakStmt", node);
   OS << "\n";

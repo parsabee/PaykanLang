@@ -36,14 +36,12 @@ fn describe(n: int) -> (Size, Str) {
 
 fn main() -> int {
   nums = [7, 250, 42];
-  i = 0;
-  while i < nums.len() {
+  for i in 0..nums.len() {
     size, label = describe(nums[i]);
     match size {
       Small { io::println(label + " is small"); }
       Large { io::println(label + " is large"); }
     }
-    i = i + 1;
   }
   return 0;
 }

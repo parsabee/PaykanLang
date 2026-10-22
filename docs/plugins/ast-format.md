@@ -127,6 +127,7 @@ to resolve, which reports unknown names.
 | `(return LOC EXPR?)` | `return;` / `return e;` |
 | `(if LOC EXPR BLOCK ELSE)` | `ELSE` is a `block`, another `if` (`elif`), or `_` |
 | `(while LOC EXPR BLOCK)` | |
+| `(for LOC VAR EXPR EXPR EXPR BLOCK (inclusive)?)` | `for i in a..b step s { ... }`: the loop's variable as a `var` with no initialiser (`(var "i" TYPE _)`, `TYPE` its annotation or `_`), the range's start and end, the step or `_` (none written), the body, and a trailing `(inclusive)` for `..=` |
 | `(break LOC)`, `(continue LOC)` | |
 | `(match LOC EXPR ARM...)` | `match e { ... }` |
 | `(type-arm LOC STR TYPE QUAL? BLOCK)` | `b: T { ... }`; the binding `STR` is `""` for `T { ... }`. `QUAL` is a binding's mode, `(qual view)` for `b: view T { ... }` or `(qual inout)`, and needs a binding |

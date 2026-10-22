@@ -114,7 +114,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// in a `view fn`): as Weak, and each read of it is a `view` as well, so
     /// nothing changes through it and nothing read from it is stored or
     /// returned except as a `view`.  It may be assigned other `view`s.
-    WeakView
+    WeakView,
+    /// The variable of a `for` loop (docs/language/02-basics.md, "for"):
+    /// read-only, as a `let` is, so the loop's values are the range's.
+    ForVar
   };
 
   /// A single lexical scope. Each scope has its own local bindings and a

@@ -86,6 +86,7 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows) {
   }
   case VarKind::Plain:
   case VarKind::Let:
+  case VarKind::ForVar:
   case VarKind::Inout:
   case VarKind::Weak:
     break;

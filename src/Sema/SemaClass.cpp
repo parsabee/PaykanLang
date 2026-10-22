@@ -181,6 +181,11 @@ bool Sema::checkInitFieldsAssigned(
       analyzeStmt(ws->getBody(), in);
       return {in, false};
     }
+    if (auto *fs = ast::dyn_cast<ast::ForStmt>(s)) {
+      // As a while loop's: the range may be empty.
+      analyzeStmt(fs->getBody(), in);
+      return {in, false};
+    }
     if (auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
       // Analyse every arm (so returns within are validated), then apply
       // exhaustiveness: only an exhaustive match (wildcard arm, every enum

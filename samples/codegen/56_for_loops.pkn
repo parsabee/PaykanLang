@@ -1,0 +1,118 @@
+// 56 — for loops over ranges
+// Exercises: `for i in a..b`, `..=`, `step` (constant, negative, computed),
+//            empty ranges and a step running the other way, the type of
+//            the range (a literal taking the other end's, an annotation),
+//            the ends of u8, i8, int and unsigned (the loop ends where a
+//            `while i <= end` would wrap), break and continue, the start,
+//            end and step evaluated once and in order, a closure per value,
+//            nested loops, a loop in a generic function and in a method.
+// expect-stdout: 0 1 2 3 4 | 0 1 2 3 4 5 | 0 3 6 9 | 0 3 6 9 .
+// expect-stdout: 5 4 3 2 1 | 5 3 1 | [] [] [] | 3 2 1 0 .
+// expect-stdout: 256 256 8 6 18446744073709551615
+// expect-stdout: 1 3 5 7 | start end step 0 2 4 6 8 | 0 10 20
+// expect-stdout: 00 01 02 11 12 22 | ababab | 10 7 4 1 | 6
+
+import ::io;
+
+/// The values `for` gives @p i over the range, as text.
+fn seq(from: int, to: int, by: int) -> Str {
+  out = "";
+  for i in from..to step by {
+    out = out + Str(i) + " ";
+  }
+  return out;
+}
+
+fn trace(what: Str, v: int) -> int {
+  io::print(what + " ");
+  return v;
+}
+
+fn times<T: Show>(x: view T, n: int) -> Str {
+  out = "";
+  for _i in 0..n {
+    out = out + x.toString();
+  }
+  return out;
+}
+
+class Counter {
+  n: int;
+  fn addUpTo(k: int) { for i in 1..=k { self.n = self.n + i; } }
+}
+
+fn main() -> int {
+  a = "";
+  for i in 0..5 { a = a + Str(i) + " "; }
+  b = "";
+  for i in 0..=5 { b = b + Str(i) + " "; }
+  c = "";
+  for i in 0..10 step 3 { c = c + Str(i) + " "; }
+  d = "";
+  for i in 0..=9 step 3 { d = d + Str(i) + " "; }
+  io::println(a + "| " + b + "| " + c + "| " + d + ".");
+
+  e = "";
+  for i in 5..0 step -1 { e = e + Str(i) + " "; }
+  f = "";
+  for i in 5..=0 step -2 { f = f + Str(i) + " "; }
+  // Empty: the end is passed already, or the step runs away from it.
+  empty = "[" + seq(5, 0, 1) + "] [" + seq(0, 5, -1) + "] [" + seq(3, 3, 1)
+      + "]";
+  n: unsigned = 3;
+  g = "";
+  for k in n..=0 step -1 { g = g + Str(k) + " "; }
+  io::println(e + "| " + f + "| " + empty + " | " + g + ".");
+
+  bytes = 0;
+  for _b: u8 in 0..=255 { bytes = bytes + 1; }
+  small = 0;
+  for _s: i8 in -128..=127 { small = small + 1; }
+  top = 0;
+  for _t in 9223372036854775800..=9223372036854775807 { top = top + 1; }
+  hi = unsigned(-1);
+  seen = 0;
+  last: unsigned = 0;
+  for u in hi - 3..=hi {
+    seen = seen + 1;
+    last = u;
+  }
+  // The whole unsigned range, left by a break.
+  for u in 0..=hi {
+    if u == 2 { break; }
+    seen = seen + 1;
+  }
+  io::println(Str(bytes) + " " + Str(small) + " " + Str(top) + " " + Str(seen)
+      + " " + Str(last));
+
+  h = "";
+  for i in 0..100 {
+    if i % 2 == 0 { continue; }
+    if i > 7 { break; }
+    h = h + Str(i) + " ";
+  }
+  // The ends and the step are evaluated once, in order; the loop does not
+  // see `limit` change.
+  limit = 10;
+  io::print(h + "| ");
+  o = "";
+  for i in trace("start", 0)..trace("end", limit) step trace("step", 2) {
+    limit = 0;
+    o = o + Str(i) + " ";
+  }
+  fs = [fn() -> int { return -1; }; 3];
+  for i in 0..3 { fs[i] = fn() -> int { return i * 10; }; }
+  io::println(o + "| " + Str(fs[0]()) + " " + Str(fs[1]()) + " "
+      + Str(fs[2]()));
+
+  p = "";
+  for i in 0..3 {
+    for j in i..3 { p = p + Str(i) + Str(j) + " "; }
+  }
+  by = -3;
+  counter = Counter(0);
+  counter.addUpTo(3);
+  io::println(p + "| " + times("ab", 3) + " | " + seq(10, 0, by) + "| "
+      + Str(counter.n));
+  return 0;
+}

@@ -27,34 +27,21 @@ struct Keyword {
 // Keywords in docs/grammar.md.  `_` on its own is the UNDERSCORE token; any
 // longer identifier starting with `_` is an ordinary identifier.
 constexpr Keyword kKeywords[] = {
-    {"import", Tok::KwImport},
-    {"as", Tok::KwAs},
-    {"class", Tok::KwClass},
-    {"enum", Tok::KwEnum},
-    {"match", Tok::KwMatch},
-    {"mov", Tok::KwMov},
-    {"fn", Tok::KwFn},
-    {"native", Tok::KwNative},
-    {"impl", Tok::KwImpl},
-    {"static", Tok::KwStatic},
-    {"return", Tok::KwReturn},
-    {"if", Tok::KwIf},
-    {"then", Tok::KwThen},
-    {"else", Tok::KwElse},
+    {"import", Tok::KwImport}, {"as", Tok::KwAs},
+    {"class", Tok::KwClass},   {"enum", Tok::KwEnum},
+    {"match", Tok::KwMatch},   {"mov", Tok::KwMov},
+    {"fn", Tok::KwFn},         {"native", Tok::KwNative},
+    {"impl", Tok::KwImpl},     {"static", Tok::KwStatic},
+    {"return", Tok::KwReturn}, {"if", Tok::KwIf},
+    {"then", Tok::KwThen},     {"else", Tok::KwElse},
     {"elif", Tok::KwElif}, // an if-statement's `else if`
-    {"while", Tok::KwWhile},
-    {"break", Tok::KwBreak},
-    {"continue", Tok::KwContinue},
-    {"True", Tok::KwTrue},
-    {"False", Tok::KwFalse},
-    {"None", Tok::KwNone},
-    {"_", Tok::Underscore},
-    {"view", Tok::KwView},
-    {"inout", Tok::KwInout},
-    {"let", Tok::KwLet},
-    {"weak", Tok::KwWeak},
-    {"trait", Tok::KwTrait},
-    {"struct", Tok::KwStruct},
+    {"while", Tok::KwWhile},   {"for", Tok::KwFor},
+    {"break", Tok::KwBreak},   {"continue", Tok::KwContinue},
+    {"True", Tok::KwTrue},     {"False", Tok::KwFalse},
+    {"None", Tok::KwNone},     {"_", Tok::Underscore},
+    {"view", Tok::KwView},     {"inout", Tok::KwInout},
+    {"let", Tok::KwLet},       {"weak", Tok::KwWeak},
+    {"trait", Tok::KwTrait},   {"struct", Tok::KwStruct},
 };
 
 } // namespace
@@ -109,6 +96,8 @@ const char *describe(Tok k) {
     return "'elif'";
   case Tok::KwWhile:
     return "'while'";
+  case Tok::KwFor:
+    return "'for'";
   case Tok::KwBreak:
     return "'break'";
   case Tok::KwContinue:
@@ -163,6 +152,10 @@ const char *describe(Tok k) {
     return "'::'";
   case Tok::Dot:
     return "'.'";
+  case Tok::DotDot:
+    return "'..'";
+  case Tok::DotDotEq:
+    return "'..='";
   case Tok::Semi:
     return "';'";
   case Tok::Comma:
@@ -239,6 +232,8 @@ const char *tokenKindName(Tok k) {
     return "KW_ELIF";
   case Tok::KwWhile:
     return "KW_WHILE";
+  case Tok::KwFor:
+    return "KW_FOR";
   case Tok::KwBreak:
     return "KW_BREAK";
   case Tok::KwContinue:
@@ -293,6 +288,10 @@ const char *tokenKindName(Tok k) {
     return "COLON_COLON";
   case Tok::Dot:
     return "DOT";
+  case Tok::DotDot:
+    return "DOT_DOT";
+  case Tok::DotDotEq:
+    return "DOT_DOT_EQ";
   case Tok::Semi:
     return "SEMI";
   case Tok::Comma:
@@ -435,7 +434,11 @@ Token Lexer::next() {
         k = Tok::Question;
         break;
       case '.':
-        k = Tok::Dot;
+        if (n == '.')
+          k = peekAt(2) == '=' ? (len = 3, Tok::DotDotEq)
+                               : (len = 2, Tok::DotDot);
+        else
+          k = Tok::Dot;
         break;
       case ';':
         k = Tok::Semi;
@@ -480,9 +483,10 @@ Token Lexer::next() {
 // exponent ::= ("e" | "E") ("+" | "-")? digit+
 //
 // Longest match (docs/grammar.md): `1.` is a float, `1e` is the
-// integer 1 followed by the identifier `e`.  After a `.` (afterDot) only the
-// digits are taken; the parser turns them into a tuple index and validates
-// them (no leading zeros, in range) itself.
+// integer 1 followed by the identifier `e`, and `1..` is the integer 1
+// followed by `..` (a range's start, not the float `1.`).  After a `.`
+// (afterDot) only the digits are taken; the parser turns them into a tuple
+// index and validates them (no leading zeros, in range) itself.
 Token Lexer::lexNumber(size_t start, size_t line, size_t col, bool afterDot) {
   while (!atEnd() && isDigit(cur()))
     advance();
@@ -503,7 +507,7 @@ Token Lexer::lexNumber(size_t start, size_t line, size_t col, bool afterDot) {
   };
 
   bool isFloat = false;
-  if (!atEnd() && cur() == '.') {
+  if (!atEnd() && cur() == '.' && peekAt(1) != '.') {
     isFloat = true;
     advance();
     while (!atEnd() && isDigit(cur()))

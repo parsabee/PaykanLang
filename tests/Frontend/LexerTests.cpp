@@ -106,6 +106,27 @@ TEST(Lexer, TupleIndexIsDigitsGluedToDot) {
   EXPECT_EQ(d.Lines, expected);
 }
 
+TEST(Lexer, RangeTokens) {
+  // `0..n` is INT DOT_DOT IDENT, never FLOAT(0.) DOT; `..=` is one token;
+  // `for` is a keyword, and `in` and `step` identifiers.
+  auto d = dump("for i in 0..n 1..=9 step x...y t.0..2 1.5..2");
+  std::vector<std::string> expected = {
+      "1:1-1:4 KW_FOR for",   "1:5-1:6 IDENT i",
+      "1:7-1:9 IDENT in",     "1:10-1:11 INT 0",
+      "1:11-1:13 DOT_DOT ..", "1:13-1:14 IDENT n",
+      "1:15-1:16 INT 1",      "1:16-1:19 DOT_DOT_EQ ..=",
+      "1:19-1:20 INT 9",      "1:21-1:25 IDENT step",
+      "1:26-1:27 IDENT x",    "1:27-1:29 DOT_DOT ..",
+      "1:29-1:30 DOT .",      "1:30-1:31 IDENT y",
+      "1:32-1:33 IDENT t",    "1:33-1:34 DOT .",
+      "1:34-1:35 INT 0",      "1:35-1:37 DOT_DOT ..",
+      "1:37-1:38 INT 2",      "1:39-1:42 FLOAT 1.5",
+      "1:42-1:44 DOT_DOT ..", "1:44-1:45 INT 2",
+      "1:45-1:45 EOF"};
+  EXPECT_EQ(d.Lines, expected);
+  EXPECT_EQ(d.Errors, 0u);
+}
+
 TEST(Lexer, CommentsAndWhitespace) {
   auto d = dump("a // comment\n\t b\r\n");
   std::vector<std::string> expected = {"1:1-1:2 IDENT a", "2:3-2:4 IDENT b",

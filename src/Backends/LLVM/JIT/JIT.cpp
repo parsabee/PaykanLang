@@ -82,6 +82,7 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     {kPaykanPanicFloatToType, reinterpret_cast<void *>(&Paykan_panic_float_to_type)},
     {kPaykanRoundF16,        reinterpret_cast<void *>(&Paykan_round_f16)},
     {kPaykanPanicIndex,      reinterpret_cast<void *>(&Paykan_panic_index)},
+    {kPaykanPanicForStep,    reinterpret_cast<void *>(&Paykan_panic_for_step)},
     {kPaykanRetain,          reinterpret_cast<void *>(&Paykan_retain)},
     {kPaykanRelease,         reinterpret_cast<void *>(&Paykan_release)},
 
