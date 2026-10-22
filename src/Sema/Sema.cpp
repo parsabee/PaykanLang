@@ -3480,7 +3480,7 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   // Register the function in the function table.
   declareFunction(node->getName(), retTy, paramTypes);
   if (inferred)
-    InferredFunctions[node->getName()] = {node};
+    InferredFunctions[node->getName()] = {node, Inference::Pending, nullptr};
   ast::ParamModes &modes = FunctionTable[node->getName()].Modes;
   modes = ast::paramModes(node->getParams());
   modes.Result = node->getResultMode();
@@ -3633,8 +3633,11 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     CurrentResult = savedResult;
     if (!ok)
       return false;
-    if (inferring && !(retTy = inferredResultOf(node)))
-      return false;
+    if (inferring) {
+      retTy = inferredResultOf(node);
+      if (!retTy)
+        return false;
+    }
     // Non-void functions must always return a value on every path.
     if (retTy != Ctx.getVoidTy() &&
         !detail::blockAlwaysReturns(node->getBody()->getStatements())) {
