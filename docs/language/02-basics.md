@@ -744,6 +744,7 @@ let name = expression;               // a variable that cannot be reassigned
 variable = expression;               // assignment
 obj.field = expression;              // field assignment
 arr[i] = expression;                 // subscript assignment
+variable += expression;              // compound assignment: also -= *= /= %=
 return expression;                   // return (or bare return; for void)
 ;                                    // empty statement
 { statements... }                    // block (new scope)
@@ -752,8 +753,41 @@ return expression;                   // return (or bare return; for void)
 `name = expression;` declares `name` when no variable of that name is in scope, and assigns
 to it otherwise ([Scoping Rules](#scoping-rules)).
 
-There are no compound assignments (`+=`) and no increment operators (`++`): write
-`i = i + 1`.
+### Compound assignment
+
+`x += e` is shorthand for `x = x + e`, and `-=`, `*=`, `/=` and `%=` likewise for `-`,
+`*`, `/` and `%`. The target is any target of `=`: a variable, a field (`p.x += 1`) or an
+element (`xs[i] *= 2`). It is exactly the longer assignment, so the same rules apply: the
+operator must be defined for the types (`s += "!"` appends to a `Str`, `s -= "!"` is
+`operator '-' is not defined for types 'Str' and 'Str'`), a `let` variable or a `view`
+parameter cannot be the target, and a sized integer wraps as `+` does.
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  total = 0;
+  for i in 1..=4 { total += i; }
+  k = 2;
+  k *= k + 1;                        // k = k * (k + 1): the right side is one operand
+  label = "total";
+  label += ": " + Str(total);
+  io::println(label + ", k = " + Str(k));
+  return 0;
+}
+```
+
+Output:
+
+```
+total: 10, k = 6
+```
+
+The target is written once but evaluated twice, once to read it and once to assign it:
+`xs[next()] += 1` calls `next` twice. Name the index first (`i = next(); xs[i] += 1;`) when
+that matters.
+
+There are no increment operators (`++`): write `i += 1`.
 
 ---
 

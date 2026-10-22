@@ -127,6 +127,23 @@ TEST(Lexer, RangeTokens) {
   EXPECT_EQ(d.Errors, 0u);
 }
 
+TEST(Lexer, CompoundAssignmentTokens) {
+  // Each operator glued to `=` is one token; `->` stays the arrow, and a
+  // space keeps the two apart.
+  auto d = dump("+= -= *= /= %= -> - = =-");
+  std::vector<std::string> kinds;
+  kinds.reserve(d.Lines.size());
+  for (const auto &l : d.Lines)
+    kinds.push_back(l.substr(l.find(' ') + 1,
+                             l.find(' ', l.find(' ') + 1) - l.find(' ') - 1));
+  std::vector<std::string> expected = {
+      "PLUS_ASSIGN",    "MINUS_ASSIGN", "STAR_ASSIGN", "SLASH_ASSIGN",
+      "PERCENT_ASSIGN", "ARROW",        "MINUS",       "ASSIGN",
+      "ASSIGN",         "MINUS",        "EOF"};
+  EXPECT_EQ(kinds, expected);
+  EXPECT_EQ(d.Errors, 0u);
+}
+
 TEST(Lexer, CommentsAndWhitespace) {
   auto d = dump("a // comment\n\t b\r\n");
   std::vector<std::string> expected = {"1:1-1:2 IDENT a", "2:3-2:4 IDENT b",

@@ -1,0 +1,56 @@
+// 57 — compound assignment
+// Exercises: `+=`, `-=`, `*=`, `/=` and `%=` on a local, a field (of a class
+//            and of a struct), an array element and a List element through
+//            a call, on int, a sized integer (wrapping), float and Str; the
+//            right-hand side taken as one operand (`k *= k + 1`); inside a
+//            for loop and a method.
+// expect-stdout: 3 6 4 3 abc
+// expect-stdout: 42 p! 9 [1, 42, 3] 10 15
+
+import ::io;
+import ::collections as c;
+
+class P {
+  x: int;
+  s: Str;
+  fn bump(by: int) { self.x += by; }
+}
+
+struct Q {
+  a: int;
+}
+
+fn main() -> int {
+  n = 10;
+  n += 5;
+  n -= 3;
+  n *= 4;
+  n /= 6;
+  n %= 5;
+  k = 2;
+  k *= k + 1;
+  b: u8 = 250;
+  b += 10;
+  f = 1.5;
+  f *= 2.0;
+  s = "a";
+  s += "b" + "c";
+  io::println(Str(n) + " " + Str(k) + " " + Str(b) + " " + Str(f) + " " + s);
+
+  p = P(1, "p");
+  p.bump(40);
+  p.x += 1;
+  p.s += "!";
+  q = Q(3);
+  q.a *= 3;
+  xs = [1, 2, 3];
+  xs[1] += 40;
+  total = 0;
+  for i in 0..5 { total += i; }
+  list = c::listOf([1, 2, 3, 4, 5]);
+  sum = 0;
+  for i in 0..list.len() { sum += list.at(i); }
+  io::println(Str(p.x) + " " + p.s + " " + Str(q.a) + " [" + Str(xs[0]) + ", "
+      + Str(xs[1]) + ", " + Str(xs[2]) + "] " + Str(total) + " " + Str(sum));
+  return 0;
+}

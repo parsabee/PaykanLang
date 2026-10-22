@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "Parser.h"
+
+#include "ASTClone.h"
 #include "Names.h"
 #include "paykan/Frontend.h"
 
@@ -1425,30 +1427,60 @@ bool Parser::parseWeakDecl(Stmt *&out) {
   return true;
 }
 
+namespace {
+
+/// The operator of the compound assignment token @p k (`+=` is Add).
+std::optional<BinaryOpcode> compoundOpcode(Tok k) {
+  switch (k) {
+  case Tok::PlusAssign:
+    return BinaryOpcode::Add;
+  case Tok::MinusAssign:
+    return BinaryOpcode::Sub;
+  case Tok::StarAssign:
+    return BinaryOpcode::Mul;
+  case Tok::SlashAssign:
+    return BinaryOpcode::Div;
+  case Tok::PercentAssign:
+    return BinaryOpcode::Mod;
+  default:
+    return std::nullopt;
+  }
+}
+
+} // namespace
+
+// A compound assignment `target op= value` is `target = target op value`
+// (docs/grammar.md): the parser builds the assignment, reading the target
+// with a copy of its expression.
 bool Parser::parseExprOrAssignStatement(Stmt *&out) {
   SourceLocation start = cur().Loc;
   Expr *lhs = parseExpression();
   if (!lhs)
     return false;
 
-  if (!accept(Tok::Assign)) {
+  const std::optional<BinaryOpcode> compound = compoundOpcode(kind());
+  if (!compound && !at(Tok::Assign)) {
     if (!expect(Tok::Semi, "after the expression"))
       return false;
     out = Ctx.make<ExprStmt>(span(start), lhs);
     return true;
   }
+  const Token op = consume();
 
   // Check the target before the value so that recovery resumes at this
   // statement's `;` rather than the next one's.
   if (!isa<Identifier>(lhs) && !isa<MemberAccessExpr>(lhs) &&
       !isa<SubscriptExpr>(lhs) && !isa<TupleIndexExpr>(lhs)) {
-    error(start, "left-hand side of '=' must be an identifier, field access, "
-                 "or subscript");
+    error(start, "left-hand side of '" + std::string(op.Text) +
+                     "' must be an identifier, field access, or subscript");
     return false;
   }
   Expr *value = parseExpression();
   if (!value)
     return false;
+  if (compound)
+    value = Ctx.make<BinaryExpr>(span(start), *compound,
+                                 ast::ASTCloner(Ctx, {}).cloneExpr(lhs), value);
   if (!expect(Tok::Semi, "after the assignment"))
     return false;
   SourceLocation loc = span(start);

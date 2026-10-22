@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Parser tests: if/else, while, for, logical ops, ternary, break/continue
+// Parser tests: if/else, while, for, compound assignment, logical ops,
+// ternary, break/continue
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -182,6 +183,53 @@ TEST(ControlFlow, ForSyntaxErrors) {
     EXPECT_NE(r.Diags[0].Message.find(c.Error), std::string::npos)
         << c.Loop << ": " << r.Diags[0].Message;
   }
+}
+
+// ─── compound assignment ────────────────────────────────────────────────────
+
+// `t op= v` is the assignment `t = t op v`: the value reads the target
+// through a copy of its expression (so `xs[f()] -= 2` calls `f` twice), and
+// the right-hand side is one operand whatever its operators.
+TEST(ControlFlow, CompoundAssignmentIsAnAssignment) {
+  auto [ok, driver] = parse(R"(fn main() -> int {
+  x += 1;
+  p.n *= a + b;
+  xs[f()] -= 2;
+  y /= 2; z %= 3;
+  return 0;
+}
+)");
+  ASSERT_TRUE(ok);
+  std::string d = dumpAST(*driver);
+  for (const char *e :
+       {"AssignStmt <2:3-2:10> 'x'\n    | `-BinaryExpr <2:3-2:9> '+'\n"
+        "    |   |-Identifier <2:3-2:4> 'x'\n"
+        "    |   `-IntegerLiteral <2:8-2:9> 1\n",
+        "MemberAssignStmt 'n' <3:3-3:16>\n    | |-Identifier <3:3-3:4> 'p'\n"
+        "    | `-BinaryExpr <3:3-3:15> '*'\n"
+        "    |   |-MemberAccessExpr 'n' <3:3-3:6>\n"
+        "    |   | `-Identifier <3:3-3:4> 'p'\n"
+        "    |   `-BinaryExpr <3:10-3:15> '+'\n",
+        "SubscriptAssignStmt <4:3-4:16>\n    | |-Identifier <4:3-4:5> 'xs'\n"
+        "    | |-CallExpr <4:6-4:9> 'f'\n"
+        "    | `-BinaryExpr <4:3-4:15> '-'\n"
+        "    |   |-SubscriptExpr <4:3-4:10>\n"
+        "    |   | |-Identifier <4:3-4:5> 'xs'\n"
+        "    |   | `-CallExpr <4:6-4:9> 'f'\n",
+        "BinaryExpr <5:3-5:9> '/'", "BinaryExpr <5:11-5:17> '%'"})
+    EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
+}
+
+TEST(ControlFlow, CompoundAssignmentTargets) {
+  auto r = parseWithDiags("fn main() -> int {\n  f() += 1;\n  return 0;\n}\n");
+  ASSERT_FALSE(r.Ok);
+  ASSERT_FALSE(r.Diags.empty());
+  EXPECT_EQ(r.Diags[0].Message, "left-hand side of '+=' must be an identifier, "
+                                "field access, or subscript");
+  // An operator and `=` apart are not one: `x + = 1` is a syntax error.
+  auto apart =
+      parseWithDiags("fn main() -> int {\n  x + = 1;\n  return 0;\n}\n");
+  EXPECT_FALSE(apart.Ok);
 }
 
 // ─── logical operators ──────────────────────────────────────────────────────
