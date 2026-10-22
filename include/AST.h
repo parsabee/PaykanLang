@@ -1028,10 +1028,11 @@ public:
 
 private:
   std::vector<Param> Params;
-  Type *ReturnType; // nullptr means void
+  Type *ReturnType; // nullptr means void (or, inferred, not known yet)
   CompoundStmt *Body;
   std::vector<Capture> Captures; // set by Sema
   bool CapturesSelf = false;     // `self` of a class method is among them
+  bool InferredResult = false;   // `fn(x: int) = x * 2`
 
 public:
   LambdaExpr(SourceLocation loc, std::vector<Param> params, Type *retTy,
@@ -1052,6 +1053,13 @@ public:
   }
   bool capturesSelf() const { return CapturesSelf; }
   void setCapturesSelf(bool v) { CapturesSelf = v; }
+
+  /// Written `fn(x: int) = x * 2`, with no result type: the result type is
+  /// the type of the expression, which the parser makes the body's one
+  /// `return` (docs/language/14-function-types.md).  Sema sets the result
+  /// type from it.
+  bool hasInferredResult() const { return InferredResult; }
+  void setInferredResult(bool v) { InferredResult = v; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_LambdaExpr;

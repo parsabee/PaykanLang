@@ -400,7 +400,8 @@ primary ::= literal
           | "[" expression ";" INT "]"                       -- repeated value
           | lambda
 
-lambda  ::= "fn" "(" paramList? ")" ( "->" typeAnnotation )? block
+lambda  ::= "fn" "(" paramList? ")" ( "->" typeAnnotation )?
+            ( block | "=" expression )
 
 argumentList ::= expression ( "," expression )*
 ```
@@ -408,7 +409,13 @@ argumentList ::= expression ( "," expression )*
 A lambda is a function without a name, in expression position
 (docs/language/14-function-types.md): `fn(x: int) -> int { return x + 1; }`.
 Its parameters are written like a function's, modes included, its result type
-is written or `void`, never `view` or `inout`, and its body is a block.
+is written or `void`, never `view` or `inout`, and its body is a block.  With
+`=` its body is an expression instead, which the parser makes a block of one
+`return` spanning the expression: `fn(x: int) -> int = x + 1` is
+`fn(x: int) -> int { return x + 1; }`.  Without a result type, `fn(x: int) =
+x + 1`, the result type is the expression's, which Sema infers
+(`LambdaExpr::hasInferredResult`); it is not `void`.  The expression extends as
+far as an expression can, so `fn(x: int) = fn(y: int) = x + y` nests.
 
 Precedence, lowest to highest: ternary; `||`; `&&`; relational; `+ -`;
 `* / %`; unary `! -`; postfix. Binary operators are left-associative

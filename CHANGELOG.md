@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Expression-bodied lambdas (docs/language/14-function-types.md): a lambda
+  whose body only returns an expression is written with `=`,
+  `fn(x: int) -> int = x * 2` for `fn(x: int) -> int { return x * 2; }`, and
+  without the result type, `fn(x: int) = x * 2`, the result type is the
+  expression's. The parser makes the body one `return`; Sema infers the result
+  type, and reports an expression with no value. The AST interchange format
+  marks such a lambda with `(inferred)` (docs/plugins/ast-format.md), so a
+  template in a `.pkm` keeps it.
 - Compound assignment (docs/language/02-basics.md, "Compound assignment"):
   `x += e`, `-=`, `*=`, `/=` and `%=`, on a variable, a field or an element.
   The parser builds `x = x op e`, so the rules of `=` and of the operator

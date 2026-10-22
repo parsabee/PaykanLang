@@ -155,8 +155,11 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     paramTys.push_back(pty ? pty : Ctx.getPoisonTy());
     modes.push_back(p.Mode);
   }
-  ast::Type *retTy = Ctx.getVoidTy();
-  if (node->getReturnType()) {
+  // `fn(x: int) = x * 2` has no result type yet: the body (one `return`)
+  // is checked against none, and the result type is then its value's.
+  const bool inferred = node->hasInferredResult();
+  ast::Type *retTy = inferred ? nullptr : Ctx.getVoidTy();
+  if (!inferred && node->getReturnType()) {
     FixedArrayAllowed = true; // a result may be a fixed-size array
     retTy = resolveType(node->getReturnType(), node->getLocation(),
                         "the lambda's result");
@@ -176,8 +179,6 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
       return nullptr;
     }
   }
-  auto *fnt = Ctx.getFunctionType(paramTys, modes, retTy);
-
   // The body: a function's, in its own scope under the enclosing one (so
   // the names it uses resolve, and the ones bound outside are captured).
   // It is not the enclosing method's body: `self` is a captured variable,
@@ -213,6 +214,10 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     }
     CurrentResult = {ast::ParamMode::Value, nullptr, CurrentScope};
     bodyOk = visitBody(node->getBody()->getStatements());
+    if (bodyOk && inferred)
+      retTy = inferredResult(node);
+    if (!retTy)
+      bodyOk = false;
     if (bodyOk && retTy != Ctx.getVoidTy() &&
         !detail::blockAlwaysReturns(node->getBody()->getStatements())) {
       error(node->getLocation(),
@@ -229,8 +234,28 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   CurrentClassCtx = savedClassCtx;
   if (!bodyOk)
     return nullptr;
+  auto *fnt = Ctx.getFunctionType(paramTys, modes, retTy);
   node->setResolvedType(fnt);
   return fnt;
+}
+
+ast::Type *Sema::inferredResult(ast::LambdaExpr *node) {
+  const auto &stmts = node->getBody()->getStatements();
+  const auto *ret =
+      stmts.size() == 1 ? ast::dyn_cast<ast::ReturnStmt>(stmts[0]) : nullptr;
+  ast::Expr *value = ret ? ret->getReturnValue() : nullptr;
+  ast::Type *ty = value ? value->getResolvedType() : nullptr;
+  if (!ty)
+    return nullptr; // the parser makes the body one `return` of a value
+  if (ty == Ctx.getVoidTy()) {
+    error(value->getLocation(),
+          "the lambda's result is the value of its expression, which has "
+          "none (its type is 'void'): write its body in braces, "
+          "'fn(...) { ...; }'");
+    return nullptr;
+  }
+  node->setReturnType(ty);
+  return ty;
 }
 
 ast::Type *Sema::checkFunctionValueCall(ast::FunctionType *fnt,

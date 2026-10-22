@@ -156,7 +156,7 @@ to resolve, which reports unknown names.
 | `(array-repeat LOC EXPR INT)` | `[v; n]`, `INT` (at least 1) copies of `EXPR`: `[0; 3]` is `(array-repeat (int 0) 3)` |
 | `(tuple LOC EXPR EXPR EXPR...)` | `(a, b)`, at least two |
 | `(tuple-index LOC EXPR INT)` | `t.0` |
-| `(lambda LOC (params PARAM...) TYPE? BLOCK)` | a lambda, `fn(x: int) -> int { ... }`: the parameters and the result type (`_` for none) as a `fn`'s, then the body |
+| `(lambda LOC (params PARAM...) TYPE? BLOCK INFERRED?)` | a lambda, `fn(x: int) -> int { ... }`: the parameters and the result type (`_` for none) as a `fn`'s, then the body. `INFERRED` is `(inferred)` for `fn(x: int) = x * 2`, whose result type Sema infers: it has `_` for its result type and a body of one `return` of a value, `(block (return EXPR))` |
 | `(call-value LOC EXPR EXPR...)` | a call of a function value that is not named, `xs[0](1)`, `t.0(x)`: the callee, then the arguments (`f(1)` with `f` a variable is a `call`, `obj.cb(1)` with `cb` a field a `method-call`) |
 | `(enum-value LOC NAME NAME)` | `Color::Red`: the enum's name (qualified if spelled so) and the variant |
 

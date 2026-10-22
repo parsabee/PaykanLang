@@ -2281,8 +2281,24 @@ Expr *Parser::parsePrimary() {
       if (!retTy)
         return nullptr;
     }
+    // `fn(x: int) -> int = x * 2` is `fn(x: int) -> int { return x * 2; }`,
+    // and without the result type, `fn(x: int) = x * 2`, the result type is
+    // the expression's (Sema infers it).
+    if (at(Tok::Assign)) {
+      consume();
+      SourceLocation from = cur().Loc;
+      Expr *value = parseExpression();
+      if (!value)
+        return nullptr;
+      std::vector<Stmt *> ret{Ctx.make<ReturnStmt>(span(from), value)};
+      auto *body = Ctx.make<CompoundStmt>(span(from), std::move(ret));
+      auto *lambda =
+          Ctx.make<LambdaExpr>(span(start), std::move(params), retTy, body);
+      lambda->setInferredResult(retTy == nullptr);
+      return lambda;
+    }
     if (!at(Tok::LBrace)) {
-      errorAtCurrent("expected '{' to start the lambda's body");
+      errorAtCurrent("expected '{' or '=' to start the lambda's body");
       return nullptr;
     }
     CompoundStmt *body = parseBlock();

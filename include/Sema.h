@@ -173,6 +173,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Check a lambda: its signature, its body as a function's, and the
   /// variables it captures.  Its function type, or nullptr after an error.
   ast::Type *checkLambda(ast::LambdaExpr *node);
+  /// The result type of the checked lambda @p node written
+  /// `fn(...) = expression`: its expression's type, written back as its
+  /// result type; nullptr (after an error) when the expression has none.
+  ast::Type *inferredResult(ast::LambdaExpr *node);
   /// Record that the enclosing lambdas capture the variable @p name (of type
   /// @p ty, bound in @p owner) when it is bound outside them; false (after
   /// reporting it) when it cannot be captured.

@@ -512,6 +512,8 @@ void ASTPrinter::visitLambdaExpr(LambdaExpr *node) {
       OS << ' ' << paramModeName(p.Mode) << " '" << p.getName() << "'";
   if (node->getReturnType())
     OS << " ->";
+  if (node->hasInferredResult())
+    OS << " inferred";
   OS << "\n";
   if (node->getReturnType()) {
     ChildScope cs(*this, false);

@@ -553,9 +553,11 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     std::vector<Param> params;
     for (const Param &p : l->getParams())
       params.push_back(Param{&in(p.getName()), cloneType(p.ParamType), p.Mode});
-    return Ctx.make<LambdaExpr>(loc, std::move(params),
-                                cloneType(l->getReturnType()),
-                                cloneCompound(l->getBody()));
+    auto *copy = Ctx.make<LambdaExpr>(loc, std::move(params),
+                                      cloneType(l->getReturnType()),
+                                      cloneCompound(l->getBody()));
+    copy->setInferredResult(l->hasInferredResult());
+    return copy;
   }
   default:
     break;

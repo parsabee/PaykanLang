@@ -737,8 +737,9 @@ private:
       return;
     }
     case ASTNode::NK_LambdaExpr: {
-      // (lambda LOC (params PARAM...) TYPE? BLOCK), the parameters and the
-      // result as a function's.
+      // (lambda LOC (params PARAM...) TYPE? BLOCK (inferred)?), the
+      // parameters and the result as a function's; (inferred) for
+      // `fn(x: int) = x * 2`.
       const auto *l = cast<LambdaExpr>(e);
       open("lambda", l);
       open("params");
@@ -754,8 +755,13 @@ private:
         close();
       }
       close();
-      optionalType(l->getReturnType());
+      // A result Sema inferred is written as it was parsed, without one.
+      optionalType(l->hasInferredResult() ? nullptr : l->getReturnType());
       stmt(l->getBody());
+      if (l->hasInferredResult()) {
+        open("inferred");
+        close();
+      }
       close();
       return;
     }
