@@ -557,6 +557,9 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
     method->setReturnType(retTy);
   }
   // Resolve parameter types.
+  if (!checkDistinctParams(method, "method '" + method->getName() + "' of '" +
+                                       className + "'"))
+    return nullptr;
   std::vector<ast::Type *> paramTys;
   for (auto &p : method->getMutableParams()) {
     // `self` is the implicit receiver of every method; a parameter of the
@@ -1093,6 +1096,11 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     }
     if (!checkTypeParams(fn->getTypeParams(), "generic function", fn->getName(),
                          fn->getLocation())) {
+      ok = false;
+      continue;
+    }
+    if (!checkDistinctParams(fn, "function '" + fn->getName() + "'")) {
+      ErroneousNames.insert(fn->getName()); // calls are follow-ons
       ok = false;
       continue;
     }

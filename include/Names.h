@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <string>
 #include <string_view>
 
 namespace paykan {
@@ -46,6 +47,22 @@ inline bool isModulePrivateName(std::string_view name) {
 inline bool isPrivateName(std::string_view name) {
   return isTypePrivateName(name) || isModulePrivateName(name);
 }
+/// The type parameter an untyped parameter of a named function adds
+/// (`fn double(x) = x * 2;` is `fn double<typeof(x)>(x: typeof(x))`): a
+/// name no program can write, so it shadows no type.
+inline std::string untypedParamType(std::string_view param) {
+  return "typeof(" + std::string(param) + ")";
+}
+/// The parameter whose type @p typeParam is, when it is one an untyped
+/// parameter added (see untypedParamType), else empty.
+inline std::string_view untypedParamOf(std::string_view typeParam) {
+  constexpr std::string_view open = "typeof(";
+  if (typeParam.size() <= open.size() + 1 ||
+      typeParam.substr(0, open.size()) != open || typeParam.back() != ')')
+    return {};
+  return typeParam.substr(open.size(), typeParam.size() - open.size() - 1);
+}
+
 inline constexpr const char *kMethodDestroy = "destroy";
 inline constexpr const char *kMethodToString = "toString";
 inline constexpr const char *kMethodEquals = "equals";

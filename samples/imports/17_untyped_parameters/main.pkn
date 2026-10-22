@@ -1,0 +1,13 @@
+// OK: functions with untyped parameters made in another module: templates in
+// its interface, instantiated here for the argument types of each call
+// (docs/language/03-functions.md).
+// expect-stdout: 12 3.75 area 6 | 9 2.5
+import ::io;
+import shapes;
+
+fn main() -> int {
+  io::print(Str(shapes::area(3, 4)) + " " + Str(shapes::area(1.5, 2.5)) + " "
+      + shapes::describe("area", shapes::area(2, 3)) + " | ");
+  io::println(Str(shapes::larger(9, 4)) + " " + Str(shapes::larger(1.5, 2.5)));
+  return 0;
+}

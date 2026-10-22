@@ -308,6 +308,10 @@ TEST(Func, IllTypedMainIsOneErrorAtItsDeclaration) {
                         must + "'fn main() -> int?'");
   expectEntryPointError("fn main<T>() -> int { return 0; }\n",
                         "prog.pkn:1:1: error: 'main' cannot be generic");
+  // Generic for leaving out a parameter's type: that is what is reported.
+  expectEntryPointError("fn main(args) -> int { return 0; }\n",
+                        "prog.pkn:1:1: error: parameter 'args' of 'main' needs "
+                        "a type; the program's entry point is");
 }
 
 // A `main` whose declaration is rejected is reported once, for that.
@@ -418,4 +422,93 @@ fn main() -> int {
   // One error each: `get` is reported for C and once for the template G,
   // and no use of a function in error is reported again.
   EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+}
+
+// An untyped parameter makes the function generic: each call instantiates it
+// for the argument types, one type per parameter, with an expression body's
+// result inferred per instantiation and a block's written (or void).  The
+// added type parameters come after the written ones, so explicit type
+// arguments name both.
+TEST(Func, UntypedParameters) {
+  auto r = semaCheck(R"(
+fn double(x) => x * 2;
+fn add(a, b) => a + b;
+fn pair(a, b) => (a, b);
+fn useEarly(x) => later(x) + 1;
+fn later(x) => double(x);
+fn larger<T>(a: T, b: T, tag) -> T => if a > b then a else b;
+fn count(n) -> int {
+  total = 0;
+  for _ in 0..n { total = total + 1; }
+  return total;
+}
+fn ignore(x) { }
+struct P { x: int; y: int; }
+fn sum(p) => p.x + p.y;
+fn main() -> int {
+  a: int = double(2);
+  f: float = double(1.5);
+  s: Str = add("a", "b");
+  t: (int, Str) = pair(1, "x");
+  u: int = useEarly(3);
+  k: u8 = larger(u8(1), u8(2), "tag");
+  e: float = larger<float, Str>(1.5, 2.5, "tag");
+  n: unsigned = 3;
+  c: int = count(n) + count(4);
+  ignore(P(1, 2));
+  return a + sum(P(1, 2)) + add<int, int>(1, 2) + c + u + t.0 + s.len();
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Func, UntypedParameterErrors) {
+  auto r = semaCheck(R"(
+fn double(x) => x * 2;
+fn add(a, b) => a + b;
+fn larger(a, b) {
+  return if a > b then a else b;
+}
+fn main() -> int {
+  s = double("ab");
+  n = add<int>(1, 2);
+  f = double;
+  larger(1, 2);
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *e :
+       {"operator '*' is not defined for types 'Str' and 'int'",
+        "in instantiation of 'double<Str>' requested here",
+        "generic function 'add' expects 2 type argument(s), got 1",
+        "'double' is a generic function; a generic function cannot be a "
+        "function value yet",
+        "return value of type 'int' does not match function return type "
+        "'void'"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+}
+
+// Two parameters of one name are an error, typed or not, in a function, a
+// template and a method, reported once (calls to the function are not).
+TEST(Func, DuplicateParameters) {
+  auto r = semaCheck(R"(
+fn f(x, x) => 1;
+fn g(x: int, x: Str) -> int { return 1; }
+fn h<T>(x: T, x: T) -> int { return 1; }
+class A {
+  v: int;
+  fn m(x: int, x: int) -> int { return 1; }
+}
+fn main() -> int { return f(1, 2) + g(1, "a") + h(1, 2); }
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *e : {"duplicate parameter 'x' in function 'f'",
+                        "duplicate parameter 'x' in function 'g'",
+                        "duplicate parameter 'x' in function 'h'",
+                        "duplicate parameter 'x' in method 'm' of 'A'"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
 }

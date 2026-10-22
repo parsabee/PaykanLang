@@ -360,6 +360,11 @@ Only free functions can be generic; methods of a non-generic class cannot
 declare their own type parameters (a generic class's methods use the class's
 parameters).
 
+A free function's parameter written without its type has a type parameter of
+its own, after the written ones: `fn pick(a, b) => b;` is generic in both
+parameters, as `fn pick<A, B>(a: A, b: B) => b;` is (see [Untyped
+Parameters](03-functions.md#untyped-parameters)).
+
 ## Using Type Arguments
 
 Type arguments are accepted wherever a type is written:

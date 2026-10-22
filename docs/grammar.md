@@ -167,6 +167,7 @@ nativeFuncDecl ::= "native" "fn" IDENT typeParams? "(" paramList? ")"
                    ( "->" ( "view" | "inout" )? typeAnnotation )? "=" STRING ";"   -- the C symbol
 paramList   ::= param ( "," param )*
 param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
+              | IDENT                                   -- a free function's only
 
 varDecl     ::= IDENT ":" typeAnnotation
 ```
@@ -191,6 +192,13 @@ infers (`FuncDecl::hasInferredResult`; a method's is not inferred).  A
 function's signature `=` is a syntax error that names `=>` (`an expression
 body starts with '=>', not '='`).  A trait method's signature has neither
 (`a trait method has no body: end its signature with ';'`).
+A free function's parameter may be its name alone, `fn double(x) => x * 2;`:
+the parser gives it the type parameter `typeof(x)`, after the written type
+parameters (`fn double<typeof(x)>(x: typeof(x)) => x * 2;`, a name no program
+can write), so the function is generic.  A lambda's, method's, `static fn`'s,
+trait method's or native function's parameter without a type is a syntax error
+(`parameter 'x' needs a type ('x: int'): only a free function's parameters can
+leave it out`).
 The `impl` block of a generic type names its type parameters: `impl Box<T>`.
 A trait's methods are signatures that end with `;`.
 Methods are `funcDecl`s inside a class body.  `view fn` marks a method that

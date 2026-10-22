@@ -1,0 +1,70 @@
+// 59 — untyped parameters
+// Exercises: a free function's parameter written without its type, which
+//            gives it a type parameter of its own (`fn double(x) => x * 2;` is
+//            `fn double<T>(x: T) => x * 2;`): one per parameter (the two of
+//            `add` may differ), with an expression body and with a block,
+//            next to typed parameters and written type parameters (the
+//            added ones come after them, so explicit type arguments name
+//            both), instantiated for int, float, unsigned, Str, a tuple and a
+//            struct; one untyped function calling another, and one used
+//            before its declaration; a range bound by an untyped parameter.
+// expect-stdout: 42 2.5 5 abcd 3.5 | 168 7.5
+// expect-stdout: (b, 1) | ababab | max 9 | 3 2 | 7 Point(x: 3, y: 4) | float 1.5 30.
+
+import ::io;
+
+fn double(x) => x * 2;
+fn add(a, b) => a + b;
+fn quadruple(x) => double(double(x));
+fn swapped(p) => (p.1, p.0);
+
+/// @p s repeated @p n times, as text.
+fn repeat(s, n: int) -> Str {
+  out = "";
+  for _ in 0..n {
+    out = out + s;
+  }
+  return out;
+}
+
+/// The larger of @p a and @p b, after printing @p label.
+fn larger<T>(a: T, b: T, label) -> T {
+  io::print(label + " ");
+  return if a > b then a else b;
+}
+
+/// The number of values in `0..n`, of n's type.
+fn count(n) -> int {
+  total = 0;
+  for _ in 0..n {
+    total = total + 1;
+  }
+  return total;
+}
+
+struct Point {
+  x: int;
+  y: int;
+}
+
+fn taxicab(p) => p.x + p.y;
+
+fn main() -> int {
+  io::println(Str(double(21)) + " " + Str(double(1.25)) + " " + Str(add(2, 3))
+      + " " + add("ab", "cd") + " " + Str(add(1.5, 2.0)) + " | "
+      + Str(quadruple(42)) + " " + Str(useEarly(2.5)));
+
+  pair = swapped((1, "b"));
+  io::print("(" + pair.0 + ", " + Str(pair.1) + ") | " + repeat("ab", 3)
+      + " | ");
+  io::print(Str(larger(3, 9, "max")) + " | ");
+  n: unsigned = 2;
+  io::print(Str(count(3)) + " " + Str(count(n)) + " | ");
+  p = Point(3, 4);
+  io::print(Str(taxicab(p)) + " " + p.toString() + " | ");
+  io::println(Str(larger<float, Str>(0.5, 1.5, "float")) + " "
+      + Str(add<int, int>(10, 20)) + ".");
+  return 0;
+}
+
+fn useEarly(x) => add(x, x) + x; // used above, declared here

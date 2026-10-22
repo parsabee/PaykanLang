@@ -28,6 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The AST interchange format marks such a function or lambda with
     `(inferred)` (docs/plugins/ast-format.md), so a template in a `.pkm` keeps
     it.
+- Untyped parameters (docs/language/03-functions.md, "Untyped Parameters"): a
+  free function's parameter may leave out its type, `fn double(x) => x * 2;`,
+  which the parser makes `fn double<T>(x: T) => x * 2;`. Each untyped parameter
+  adds a type parameter of its own, after the written ones, so the function is
+  generic and each call instantiates it for its argument types.
+  - With an expression body, the result type is inferred for each
+    instantiation; a block body cannot name the added types.
+  - A lambda's, a method's, a `static fn`'s, a trait method's, a native
+    function's and `main`'s parameters still need types.
+  - The added type parameters are named `typeof(x)`, which no program can
+    write, in the AST and its interchange format.
+- Two parameters with the same name in a function or a method are an error
+  (`duplicate parameter 'x' in function 'f'`), as they were in a lambda. They
+  used to be accepted, and a program using one failed in code generation.
 - Compound assignment (docs/language/02-basics.md, "Compound assignment"):
   `x += e`, `-=`, `*=`, `/=` and `%=`, on a variable, a field or an element.
   The parser builds `x = x op e`, so the rules of `=` and of the operator

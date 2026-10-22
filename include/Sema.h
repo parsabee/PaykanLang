@@ -546,6 +546,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// parameter, a match binding.  Reports, at @p loc, a name that cannot
   /// be a variable (see isTypeNameForVariable) and returns false.
   bool checkBinderName(const std::string &name, ast::SourceLocation loc);
+  /// Reports a parameter of @p fn named like an earlier one, as a
+  /// duplicate in @p what ("function 'f'"), and returns false.
+  bool checkDistinctParams(const ast::FuncDecl *fn, const std::string &what);
 
   /// checkBinderName for a match arm's binding (of type @p bindTy), and its
   /// kind: `n: view T` is a `view` local, `n: inout T` the storage of
