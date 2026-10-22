@@ -54,7 +54,7 @@ LEX = re.compile(r'''
   | (?P<chr>'(?:[^'\\\n]|\\.)*')
   | (?P<word>[A-Za-z_]\w*)
   | (?P<num>\d\w*)
-  | (?P<op>::|->|==|!=|<=|>=|&&|\|\||.)
+  | (?P<op>::|->|==|!=|<=|>=|&&|\|\||\.\.=|\.\.|.)
 ''', re.X)
 
 
@@ -269,8 +269,8 @@ class Parser:
 BINARY = {"+", "-", "*", "/", "%", "&&", "||", "==", "!=", "<", ">", "<=",
           ">=", "then", "else"}
 AFTER = {"=", "->", ","}
-LAST_RESORT = {"return", "if", "elif", "while", "match", "fn", "let", "view",
-               "inout", ":", "native", "static", "pub"}
+LAST_RESORT = {"return", "if", "elif", "while", "for", "in", "match", "fn",
+               "let", "view", "inout", ":", "native", "static", "pub"}
 
 
 def break_points(code):

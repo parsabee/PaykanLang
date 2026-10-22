@@ -836,8 +836,7 @@ ImplDecl *Parser::parseImplDecl() {
   if (!target)
     return nullptr;
   const char *after = "after 'impl'";
-  if (at(Tok::Ident) && cur().Text == "for") {
-    consume();
+  if (accept(Tok::KwFor)) {
     trait = target;
     after = "after 'for'";
     if (!at(Tok::Ident)) {
@@ -1204,6 +1203,10 @@ bool Parser::parseStatement(Stmt *&out) {
 
   case Tok::KwWhile:
     out = parseWhileStmt();
+    return out != nullptr;
+
+  case Tok::KwFor:
+    out = parseForStmt();
     return out != nullptr;
 
   case Tok::KwElif:
@@ -1613,6 +1616,67 @@ Stmt *Parser::parseWhileStmt() {
   if (!body)
     return nullptr;
   return Ctx.make<WhileStmt>(span(start), cond, body);
+}
+
+// forStmt ::= "for" IDENT ( ":" typeAnnotation )? "in" expression
+//             ( ".." | "..=" ) expression ( "step" expression )? block
+//
+// `in` and `step` are not keywords: an identifier there (after the
+// variable, after the range's end) can only be them, so a variable or a
+// field may still be named `in` or `step`.
+Stmt *Parser::parseForStmt() {
+  SourceLocation start = consume().Loc; // "for"
+  if (!at(Tok::Ident) && !at(Tok::Underscore)) {
+    errorAtCurrent("expected the loop variable's name or '_' after 'for'");
+    return nullptr;
+  }
+  // `_` binds no name: the VarDecl's name is empty.
+  Token name = consume();
+  Type *ty = nullptr;
+  if (accept(Tok::Colon)) {
+    ty = parseTypeAnnotation();
+    if (!ty)
+      return nullptr;
+  }
+  // The VarDecl spans the name and its annotation.
+  auto *var = Ctx.make<VarDecl>(
+      span(name.Loc), intern(name.Kind == Tok::Underscore ? "" : name.Text), ty,
+      nullptr);
+  if (!at(Tok::Ident) || cur().Text != "in") {
+    errorAtCurrent("expected 'in' after the 'for' loop's variable");
+    return nullptr;
+  }
+  consume();
+  Expr *first = parseExpression();
+  if (!first)
+    return nullptr;
+  if (!at(Tok::DotDot) && !at(Tok::DotDotEq)) {
+    errorAtCurrent("expected '..' or '..=' in the 'for' loop's range "
+                   "('start..end')");
+    return nullptr;
+  }
+  const bool inclusive = consume().Kind == Tok::DotDotEq;
+  Expr *last = parseExpression();
+  if (!last)
+    return nullptr;
+  Expr *step = nullptr;
+  if (at(Tok::Ident) && cur().Text == "step") {
+    consume();
+    step = parseExpression();
+    if (!step)
+      return nullptr;
+  }
+  if (!at(Tok::LBrace)) {
+    errorAtCurrent(step ? "expected '{' after the 'for' loop's step"
+                        : "expected 'step' or '{' after the 'for' loop's "
+                          "range");
+    return nullptr;
+  }
+  CompoundStmt *body = parseBlock();
+  if (!body)
+    return nullptr;
+  return Ctx.make<ForStmt>(span(start), var, first, last, step, inclusive,
+                           body);
 }
 
 // matchStmt ::= "match" expression "{" matchArm+ "}"

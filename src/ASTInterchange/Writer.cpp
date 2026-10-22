@@ -440,6 +440,21 @@ private:
       close();
       return;
     }
+    case ASTNode::NK_ForStmt: {
+      const auto *f = cast<ForStmt>(s);
+      open("for", f);
+      varDecl(*f->getVar());
+      expr(f->getStart());
+      expr(f->getEnd());
+      optionalExpr(f->getStep());
+      stmt(f->getBody());
+      if (f->isInclusive()) {
+        open("inclusive");
+        close();
+      }
+      close();
+      return;
+    }
     case ASTNode::NK_BreakStmt:
       open("break", s);
       close();

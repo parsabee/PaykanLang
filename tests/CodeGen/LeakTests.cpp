@@ -588,3 +588,36 @@ TEST(Leak, RefTypedArgsToUserMethods) {
   EXPECT_EQ(r.StdOut, "7\n2\n11\n30\n3\n2\nt\nu\nu\n");
   g.expectNoLeaks("RefTypedArgsToUserMethods");
 }
+
+// -- for loops: the body's objects go at the end of each iteration and at a
+// `continue` or `break`, and the loop's own bookkeeping holds no object.
+
+TEST(Leak, ForLoopBodyLocals) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+    import ::io;
+    class Dog { name: Str; }
+    fn main() -> int {
+      kept: Dog? = None;
+      for i in 0..10 step 2 {
+        d = Dog("dog " + Str(i));
+        if i == 2 { continue; }
+        if i == 6 { kept = d; break; }
+        s = d.name + "!";
+        io::println(s);
+      }
+      for i in 3..=0 step -1 {
+        label = "n" + Str(i);
+        if i == 1 { break; }
+      }
+      match kept {
+        d: Dog { io::println("kept " + d.name); }
+        None { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "dog 0!\ndog 4!\nkept dog 6\n");
+  g.expectNoLeaks("ForLoopBodyLocals");
+}

@@ -887,6 +887,9 @@ TEST(Driver, PanicFlushesStdoutOnEveryBackend) {
        "int range"},
       {"charint", "n: int = 300; c = char<int>(n); io::println(Str<char>(c));",
        "paykan: char<int>(300): the value is outside the char range 0..255"},
+      {"forstep",
+       "z: int = 0; for i in 0..3 step z { io::println(Str<int>(i)); }",
+       "paykan: the step of a 'for' loop is 0"},
   };
   const std::string before = "first line\nabout to panic...\n";
   auto backends = runBackends();

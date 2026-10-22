@@ -47,6 +47,7 @@ enum class Tok : uint8_t {
   KwElse,
   KwElif,
   KwWhile,
+  KwFor,
   KwBreak,
   KwContinue,
   KwTrue,
@@ -75,6 +76,8 @@ enum class Tok : uint8_t {
   Colon,      // :
   ColonColon, // ::
   Dot,        // .
+  DotDot,     // ..
+  DotDotEq,   // ..=
   Semi,       // ;
   Comma,      // ,
   LParen,     // (

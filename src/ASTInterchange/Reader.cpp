@@ -846,10 +846,13 @@ private:
     return false;
   }
 
-  VarDecl *varDecl(const SExpr &e) {
+  /// @p discardable: the name may be "" (`_`), as a for loop's may.
+  VarDecl *varDecl(const SExpr &e, bool discardable = false) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
-    const std::string *name = f.name("the variable's name");
+    const std::string *name = discardable
+                                  ? f.string("the variable's name (\"\" for _)")
+                                  : f.name("the variable's name");
     if (!name)
       return nullptr;
     Type *ty = nullptr;
@@ -1109,6 +1112,36 @@ private:
       if (!body)
         return nullptr;
       out = Ctx.make<WhileStmt>(loc, cond, body);
+    } else if (t == "for") {
+      // (for (var NAME TYPE-or-_ _) START END STEP-or-_ BLOCK (inclusive)?),
+      // NAME "" for `for _`.
+      const SExpr *v = f.list("var");
+      VarDecl *var = v ? varDecl(*v, true) : nullptr;
+      if (!var)
+        return nullptr;
+      if (var->getInitExpr() || var->isLet() || var->isWeak() ||
+          var->getMode() != ParamMode::Value)
+        return fail(*v, "a for loop's variable is a name and a type or _ "
+                        "only"),
+               nullptr;
+      Expr *start = expr(f, "the start of the range");
+      Expr *end = start ? expr(f, "the end of the range") : nullptr;
+      if (!end)
+        return nullptr;
+      Expr *step = nullptr;
+      if (!f.absent()) {
+        step = expr(f, "the step or _");
+        if (!step)
+          return nullptr;
+      }
+      CompoundStmt *body = block(f, "the loop's body");
+      if (!body)
+        return nullptr;
+      const SExpr *inclusive = f.optionalList("inclusive");
+      if (inclusive && !inclusive->Items.empty())
+        return fail(*inclusive, "(inclusive) takes no fields"), nullptr;
+      out = Ctx.make<ForStmt>(loc, var, start, end, step, inclusive != nullptr,
+                              body);
     } else if (t == "break") {
       out = Ctx.make<BreakStmt>(loc);
     } else if (t == "continue") {

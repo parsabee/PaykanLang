@@ -63,25 +63,21 @@ An array's length never changes. Every index is checked: a constant one when com
 `len() - 1` is a panic: the program stops with a message such as `paykan: array index 5 out
 of bounds (len=3)`.
 
-There is no `for` loop, so you walk an array with `while` and an index:
+You walk an array with a [`for` loop](02-basics.md#for) over its indices:
 
 ```pkn
 import ::io;
 
 fn main() -> int {
   squares = [0; 5];
-  i = 0;
-  while i < squares.len() {
+  for i in 0..squares.len() {
     squares[i] = (i + 1) * (i + 1);
-    i = i + 1;
   }
   squares[0] = 100;
 
   sum = 0;
-  i = 0;
-  while i < squares.len() {
+  for i in 0..squares.len() {
     sum = sum + squares[i];
-    i = i + 1;
   }
   io::println(Str(squares.len()) + " squares, sum " + Str(sum));
   return 0;

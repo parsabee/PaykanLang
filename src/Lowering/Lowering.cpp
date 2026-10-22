@@ -49,6 +49,7 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanRoundF16, {{kF64}, kF64}},
     {kPaykanPanicIntToChar, {{kI64}, kVoid}},
     {kPaykanPanicIndex, {{kI64, kI64}, kVoid}},
+    {kPaykanPanicForStep, {{}, kVoid}},
     {kPaykanStringNew, {{kPtr, kI64}, kObj}},
     {kPaykanStringDestroy, {{kObj}, kVoid}},
     {kPaykanDispose, {{kObj}, kVoid}},
@@ -1238,6 +1239,117 @@ Val ModuleLowering::visitWhileStmt(ast::WhileStmt *node) {
   B.setWhileCond(w, cond);
   B.leave();
   B.enterLoopBody(*w->Body);
+  visit(node->getBody());
+  B.leaveLoopBody();
+  LoopStack.pop_back();
+  return Val();
+}
+
+// A range loop (docs/language/02-basics.md, "for") is a while loop over the
+// values the range fixes before it starts:
+//
+//   first = START; end = END; step = STEP         ; once, in order
+//   step == 0: panic                              ; a step not a constant
+//   more = step > 0 ? first < end : first > end   ; <= / >= for `..=`
+//   last = first + (dist - 1) / |step| * step     ; dist - 0 for `..=`
+//   cur = first
+//   while more { i = cur; more = cur != last; cur = cur + step; BODY }
+//
+// dist is the distance from first to end, which fits a u64 whenever the
+// range is not empty, so the count is exact even where a hand-written
+// `i <= end` would wrap forever (`for b: u8 in 0..=255`).  The variable is
+// set before the body, so `continue` (to the condition) moves on, and the
+// loop ends on its last value without stepping past it.
+Val ModuleLowering::visitForStmt(ast::ForStmt *node) {
+  using pir::CmpPred;
+  using pir::Opcode;
+  ScopeGuard guard(*this);
+  ast::Type *ty = node->getVar()->getType();
+  const bool isUnsigned = ast::BuiltinType::isUnsignedKind(builtinKind(ty));
+  auto compare = [&](CmpPred pred, const Val &a, const Val &b) {
+    return isUnsigned ? B.ucmp(pred, a, b, "for.has")
+                      : B.cmp(pred, a, b, "for.has");
+  };
+  Val first = emitExpr(node->getStart());
+  Val end = first ? emitExpr(node->getEnd()) : Val();
+  if (!end)
+    return Val();
+  const std::optional<int64_t> constant = node->constantStep();
+  Val step = constant ? Val::i64(*constant) : emitExpr(node->getStep());
+  if (!step)
+    return Val();
+  if (!constant) {
+    Val zero = B.cmp(CmpPred::Eq, step, Val::i64(0), "for.zero");
+    pir::If *z = B.openIf(zero, false);
+    B.enter(*z->Then);
+    callRuntime(kPaykanPanicForStep, {});
+    B.emitUnreachable();
+    B.leave();
+  }
+
+  // Whether the range has a value, the distance to its end and the step's
+  // magnitude, for the direction the step runs in.
+  const bool inclusive = node->isInclusive();
+  struct Direction {
+    Val More, Dist, Magnitude;
+  };
+  auto upward = [&] {
+    return Direction{compare(inclusive ? CmpPred::Le : CmpPred::Lt, first, end),
+                     B.binary(Opcode::Sub, end, first, "for.dist"), step};
+  };
+  auto downward = [&] {
+    return Direction{compare(inclusive ? CmpPred::Ge : CmpPred::Gt, first, end),
+                     B.binary(Opcode::Sub, first, end, "for.dist"),
+                     B.unary(Opcode::Neg, step, "for.mag")};
+  };
+  Direction d;
+  if (constant) {
+    d = *constant > 0 ? upward() : downward();
+  } else {
+    Direction up = upward();
+    Direction down = downward();
+    Val isUp = B.cmp(CmpPred::Gt, step, Val::i64(0), "for.up");
+    d = {B.select(isUp, up.More, down.More, "for.has"),
+         B.select(isUp, up.Dist, down.Dist, "for.dist"),
+         B.select(isUp, up.Magnitude, down.Magnitude, "for.mag")};
+  }
+  // The index of the last value (the distance over the magnitude, without
+  // the end for `..`), and the value.
+  Val lastIndex =
+      inclusive ? d.Dist : B.binary(Opcode::Sub, d.Dist, Val::i64(1));
+  const bool unit = constant && (*constant == 1 || *constant == -1);
+  if (!unit)
+    lastIndex = B.binary(Opcode::UDiv, lastIndex, d.Magnitude, "for.lastidx");
+  Val last = unit
+                 ? B.binary(*constant == 1 ? Opcode::Add : Opcode::Sub, first,
+                            lastIndex, "for.last")
+                 : B.binary(Opcode::Add, first,
+                            B.binary(Opcode::Mul, lastIndex, step), "for.last");
+
+  pir::LocalId more = B.addLocal("for.more", Type::Bool);
+  B.store(more, d.More);
+  pir::LocalId cur = B.addLocal("for.cur", Type::I64);
+  B.store(cur, first);
+  // `for _` has no variable: only the counter.
+  const std::string &name = node->getVar()->getName();
+  std::optional<pir::LocalId> var;
+  if (!name.empty()) {
+    var = B.addLocal(name, Type::I64);
+    B.store(*var, first);
+    CurrentScope->declare(name, *var, ty);
+  }
+
+  pir::While *w = B.openWhile();
+  LoopStack.push_back({CurrentScope});
+  B.enter(*w->CondBlock);
+  B.setWhileCond(w, B.load(more, "for.go"));
+  B.leave();
+  B.enterLoopBody(*w->Body);
+  Val value = B.load(cur, var ? name : "for.value");
+  if (var)
+    B.store(*var, value);
+  B.store(more, B.cmp(CmpPred::Ne, value, last, "for.again"));
+  B.store(cur, B.binary(Opcode::Add, value, step, "for.next"));
   visit(node->getBody());
   B.leaveLoopBody();
   LoopStack.pop_back();

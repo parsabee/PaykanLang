@@ -107,6 +107,10 @@ void Paykan_panic_div_overflow(void) {
   Paykan_runtime_panic("integer overflow in division");
 }
 
+void Paykan_panic_for_step(void) {
+  Paykan_runtime_panic("the step of a 'for' loop is 0");
+}
+
 void Paykan_panic_float_to_int(double value) {
   char buf[64];
   Paykan_format_float(buf, sizeof(buf), value);

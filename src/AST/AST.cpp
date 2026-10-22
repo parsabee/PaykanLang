@@ -69,6 +69,25 @@ ParamModes paramModes(const std::vector<Param> &params) {
   return out;
 }
 
+// -- ForStmt
+
+std::optional<int64_t> ForStmt::constantStep() const {
+  if (!Step)
+    return 1;
+  const Expr *e = Step;
+  bool negated = false;
+  if (const auto *u = dyn_cast<UnaryExpr>(e);
+      u && u->getOpcode() == UnaryOpcode::Neg) {
+    negated = true;
+    e = u->getOperand();
+  }
+  const auto *lit = dyn_cast<IntegerLiteral>(e);
+  if (!lit)
+    return std::nullopt;
+  // A literal is at most INT64_MAX (docs/grammar.md), so its negation fits.
+  return negated ? -lit->getValue() : lit->getValue();
+}
+
 // -- UnaryExpr
 
 const char *UnaryExpr::getOpcodeStr() const {
@@ -593,6 +612,15 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
     auto *w = cast<WhileStmt>(s);
     return Ctx.make<WhileStmt>(loc, cloneExpr(w->getCondition()),
                                cloneStmt(w->getBody()));
+  }
+  case ASTNode::NK_ForStmt: {
+    auto *f = cast<ForStmt>(s);
+    VarDecl *v = f->getVar();
+    auto *nv = Ctx.make<VarDecl>(v->getLocation(), in(v->getName()),
+                                 cloneType(v->getType()), nullptr);
+    return Ctx.make<ForStmt>(loc, nv, cloneExpr(f->getStart()),
+                             cloneExpr(f->getEnd()), cloneExpr(f->getStep()),
+                             f->isInclusive(), cloneStmt(f->getBody()));
   }
   case ASTNode::NK_BreakStmt:
     return Ctx.make<BreakStmt>(loc);

@@ -145,6 +145,7 @@ private:
   bool parseDestructureTarget(ast::DestructureStmt::Target &out);
   ast::Stmt *parseIfStmt();
   ast::Stmt *parseWhileStmt();
+  ast::Stmt *parseForStmt();
   ast::Stmt *parseMatchStmt();
   ast::MatchArm *parseMatchArm();
   bool ifStartsStatement();

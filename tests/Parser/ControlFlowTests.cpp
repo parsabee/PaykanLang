@@ -1,6 +1,6 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Parser tests: if/else, while, logical ops, ternary, break/continue
+// Parser tests: if/else, while, for, logical ops, ternary, break/continue
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -93,6 +93,95 @@ TEST(ControlFlow, WhileTrue) {
     }
   )");
   EXPECT_TRUE(ok);
+}
+
+// ─── for ─────────────────────────────────────────────────────────────────────
+
+TEST(ControlFlow, ForStmt) {
+  auto [ok, driver] = parse(R"(fn main() -> int {
+  for i in 0..n { }
+  for b: u8 in 9..=0 step -3 { break; }
+  return 0;
+}
+)");
+  ASSERT_TRUE(ok);
+  std::string d = dumpAST(*driver);
+  for (const char *e :
+       {"ForStmt <2:3-2:20> ..\n    | |-VarDecl <2:7-2:8> 'i'\n"
+        "    | |-IntegerLiteral <2:12-2:13> 0\n"
+        "    | |-Identifier <2:15-2:16> 'n'\n"
+        "    | `-CompoundStmt <2:18-2:18>\n",
+        "ForStmt <3:3-3:40> ..= step\n    | |-VarDecl <3:7-3:12> 'b' type\n"
+        "    | | `-BuiltinType 'u8'\n"
+        "    | |-IntegerLiteral <3:16-3:17> 9\n"
+        "    | |-IntegerLiteral <3:20-3:21> 0\n"
+        "    | |-UnaryExpr <3:27-3:29> '-'\n"})
+    EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
+}
+
+// `for _` binds no name: its VarDecl's name is empty, and `_` is still not
+// an expression in the body.
+TEST(ControlFlow, ForDiscardsItsVariable) {
+  auto [ok, driver] = parse(R"(fn main() -> int {
+  for _ in 0..n { }
+  for _: u8 in 0..=255 { }
+  return 0;
+}
+)");
+  ASSERT_TRUE(ok);
+  std::string d = dumpAST(*driver);
+  for (const char *e :
+       {"ForStmt <2:3-2:20> ..\n    | |-VarDecl <2:7-2:8> '_'\n",
+        "    | |-VarDecl <3:7-3:12> '_' type\n"})
+    EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
+
+  EXPECT_FALSE(parse("fn main() -> int { for _ in 0..3 { x = _; } "
+                     "return 0; }")
+                   .Ok);
+}
+
+// `in` and `step` are words only in a `for` header: a variable or field may
+// be named so, the step may be a variable named `step`, and the loop's
+// variable may be named `in`.  The ends are any expressions, `..` taking
+// the lowest precedence.
+TEST(ControlFlow, ForInAndStepAreNotKeywords) {
+  auto [ok, driver] = parse(R"(fn main() -> int {
+  step = 2;
+  for i in step - 1..step * 4 + 1 step step { }
+  for in in 0..3 { x = in; }
+  return 0;
+}
+)");
+  ASSERT_TRUE(ok);
+  std::string d = dumpAST(*driver);
+  EXPECT_NE(d.find("ForStmt <3:3-3:48> .. step\n"), std::string::npos) << d;
+  EXPECT_NE(d.find("| |-BinaryExpr <3:12-3:20> '-'"), std::string::npos) << d;
+  EXPECT_NE(d.find("| |-BinaryExpr <3:22-3:34> '+'"), std::string::npos) << d;
+  EXPECT_NE(d.find("| |-VarDecl <4:7-4:9> 'in'"), std::string::npos) << d;
+}
+
+TEST(ControlFlow, ForSyntaxErrors) {
+  struct Case {
+    const char *Loop;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"for x in xs { }", "expected '..' or '..=' in the 'for' loop's "
+                                "range ('start..end')"},
+        Case{"for (i in 0..3) { }",
+             "expected the loop variable's name or '_' after 'for'"},
+        Case{"for i 0..3 { }", "expected 'in' after the 'for' loop's variable"},
+        Case{"for i in 0..3 2 { }",
+             "expected 'step' or '{' after the 'for' loop's range"},
+        Case{"for i in 0..3 step 2 3 { }",
+             "expected '{' after the 'for' loop's step"}}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  xs = 1;\n  ") +
+                            c.Loop + "\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << c.Loop;
+    ASSERT_FALSE(r.Diags.empty()) << c.Loop;
+    EXPECT_NE(r.Diags[0].Message.find(c.Error), std::string::npos)
+        << c.Loop << ": " << r.Diags[0].Message;
+  }
 }
 
 // ─── logical operators ──────────────────────────────────────────────────────

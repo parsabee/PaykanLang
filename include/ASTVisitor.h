@@ -40,6 +40,7 @@ namespace ast {
   NODE(NK_ExprStmt, ExprStmt, ExprStmt)                                        \
   NODE(NK_IfStmt, IfStmt, IfStmt)                                              \
   NODE(NK_WhileStmt, WhileStmt, WhileStmt)                                     \
+  NODE(NK_ForStmt, ForStmt, ForStmt)                                           \
   NODE(NK_BreakStmt, BreakStmt, BreakStmt)                                     \
   NODE(NK_ContinueStmt, ContinueStmt, ContinueStmt)                            \
   NODE(NK_MemberAssignStmt, MemberAssignStmt, MemberAssignStmt)                \

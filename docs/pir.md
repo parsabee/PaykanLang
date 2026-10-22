@@ -633,6 +633,7 @@ Paykan_dispose(obj) -> void      ; destroy and free an object never boxed (a str
 Paykan_panic_div_by_zero() -> void      Paykan_panic_div_overflow() -> void
 Paykan_panic_float_to_int(f64) -> void  Paykan_panic_int_to_char(i64) -> void
 Paykan_panic_index(i64, i64) -> void    ; the index, the length
+Paykan_panic_for_step() -> void         ; a `for` loop's computed step is 0
 Paykan_panic_float_to_type(f64, ptr, i64) -> void   ; the value, the target type's name and its length
 ; sized numeric types
 Paykan_round_f16(f64) -> f64            ; rounded to the nearest f16

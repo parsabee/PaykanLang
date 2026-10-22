@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
-// Sema tests: if/else, while, logical operators, ternary, break/continue.
+// Sema tests: if/else, while, for, logical operators, ternary,
+// break/continue.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -79,6 +80,113 @@ TEST(ControlFlow, WhileNonBoolConditionRejected) {
 TEST(ControlFlow, WhileTrueLiteral) {
   auto r = semaCheck(wrapMain(R"(
     while True { return 0; }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// -- for
+
+TEST(ControlFlow, ForRangeTypes) {
+  // A literal end takes the other end's type, as an operand of `<` does;
+  // the annotation types both; the step is an `int` whatever they are.
+  auto r = semaCheck(wrapMain(R"(
+    n: unsigned = 3;
+    for i in 0..n { u: unsigned = i; }
+    for b: u8 in 0..=255 step 5 { x: u8 = b; }
+    for k in n..0 step -1 { }
+    by = 2;
+    for j in 10..0 step -by { y: int = j; }
+    for i in 0..3 { for i in i..3 { } }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// The bounds are checked outside the loop: `i` there is the outer one.
+TEST(ControlFlow, ForBoundsSeeTheOuterScope) {
+  auto r = semaCheck(wrapMain(R"(
+    i: Str = "outer";
+    for i in 0..3 { n: int = i; }
+    s: Str = i;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  auto bad = semaCheck(wrapMain("for i in 0..i { }"));
+  EXPECT_FALSE(bad.Ok);
+  EXPECT_NE(bad.Diagnostics.find("'i'"), std::string::npos) << bad.Diagnostics;
+}
+
+// `for _` binds nothing: it hides no outer name and nests.
+TEST(ControlFlow, ForDiscardsItsVariable) {
+  auto r = semaCheck(wrapMain(R"(
+    n: unsigned = 3;
+    count: unsigned = 0;
+    for _ in 0..n { count = count + 1; }
+    for _: u8 in 0..=255 step 5 { }
+    for _ in 0..3 { for _ in 0..2 { for i in 0..1 { y: int = i; } } }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(ControlFlow, ForVariableIsReadOnly) {
+  auto r = semaCheck("fn bump(x: inout int) { x = x + 1; }\n" + wrapMain(R"(
+    for i in 0..3 { i = 2; }
+    for i in 0..3 { bump(i); }
+    for i in 0..3 { f = fn() -> int { return i; }; }
+  )"));
+  EXPECT_FALSE(r.Ok);
+  for (const char *e :
+       {"'i' is the variable of a 'for' loop and cannot be assigned",
+        "'i' is the variable of a 'for' loop and cannot be passed to 'inout' "
+        "parameter 'x'"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+}
+
+TEST(ControlFlow, ForRangeErrors) {
+  struct Case {
+    const char *Loop;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"for f in 0.5..3.0 { }",
+             "a 'for' loop's range is of integers, not 'float'"},
+        Case{"for s in 0..\"x\" { }",
+             "a 'for' loop's range is of integers, not 'Str'"},
+        Case{"n: unsigned = 1; m = 4; for i in n..m { }",
+             "the ends of the range have types 'unsigned' and 'int'; a 'for' "
+             "loop's range has one type"},
+        Case{"m = 4; for b: u8 in 0..m { }",
+             "the end of the range has type 'int', but 'b' is a 'u8'"},
+        Case{"m = 4; for b: u8 in m..9 { }",
+             "the start of the range has type 'int', but 'b' is a 'u8'"},
+        Case{"for b: u8 in 0..=300 { }",
+             "the literal 300 does not fit in 'u8'"},
+        Case{"for f: float in 0..3 { }",
+             "'f' has type 'float': a 'for' loop's variable is an integer"},
+        Case{"for i in 0..3 step 0 { }", "a 'for' loop's step cannot be 0"},
+        Case{"for i in 0..3 step -0 { }", "a 'for' loop's step cannot be 0"},
+        Case{"for i in 0..3 step 1.5 { }",
+             "a 'for' loop's step is an 'int', not 'float'"},
+        Case{"k: u8 = 1; for i in 0..3 step k { }",
+             "a 'for' loop's step is an 'int', not 'u8'"},
+        Case{"for int in 0..3 { }", "'int'"},
+        Case{"m = 4; for _: u8 in 0..m { }",
+             "the end of the range has type 'int', but '_' is a 'u8'"},
+        Case{"for _: Str in 0..3 { }",
+             "'_' has type 'Str': a 'for' loop's variable is an integer"}}) {
+    auto r = semaCheck(wrapMain(c.Loop));
+    EXPECT_FALSE(r.Ok) << c.Loop;
+    EXPECT_NE(r.Diagnostics.find(c.Error), std::string::npos)
+        << c.Loop << ": " << r.Diagnostics;
+  }
+}
+
+TEST(ControlFlow, BreakAndContinueInFor) {
+  auto r = semaCheck(wrapMain(R"(
+    for i in 0..10 {
+      if i == 2 { continue; }
+      if i == 5 { break; }
+    }
   )"));
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
