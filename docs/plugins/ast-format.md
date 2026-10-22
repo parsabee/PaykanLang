@@ -88,7 +88,7 @@ or more.
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser |
 | `(struct LOC NAME (type-params NAME...) (fields VAR...))` | a struct ([`../language/11-structs.md`](../language/11-structs.md)): the name, the type parameters of a generic one, and its fields (at least one), each a `var` with a type and no initialiser. A struct body has no methods: they are in its `impl` blocks |
 | `(bound NAME TYPE...)` | in `type-params`, in place of `NAME`: a type parameter with bounds, the traits as types (`T: Show + Into<int>` is `(bound "T" (named-type "Show") (generic-type "Into" ...))`) |
-| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? BLOCK QUAL?)` | a function or method; the `TYPE` is the return type, `_` for none. A borrowed result has `(qual view)` or `(qual inout)` after its `TYPE` (`-> view Str` is `(named-type "Str") (qual view)`), a `view fn` ends with `(qual view)` and a `static fn` with `(qual static)` |
+| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? BLOCK QUAL? INFERRED?)` | a function or method; the `TYPE` is the return type, `_` for none. A borrowed result has `(qual view)` or `(qual inout)` after its `TYPE` (`-> view Str` is `(named-type "Str") (qual view)`), a `view fn` ends with `(qual view)` and a `static fn` with `(qual static)`. `INFERRED` is `(inferred)` for `fn double(x: int) => x * 2;`, whose result type Sema infers: `_` for its `TYPE` and a body of one `return` of a value, as a lambda's |
 | `(impl LOC TYPE (type-params NAME...)? (for TRAIT)? (methods FN...))` | an `impl` block: `TYPE` is the type's name as written (`"A"`, `"geo::Point"`). The block of a generic type has its type parameters (`impl Box<T>` is `(impl "Box" (type-params "T") ...)`). `impl Show for A` has `(for TRAIT)`, the trait as a type |
 | `(trait LOC NAME (type-params NAME...) (methods FN...))` | a trait. Its methods are signatures: each `fn` has `_` in place of its body, and none is generic |
 | `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? (native STRING))` | a `native fn` (#198): the C symbol in place of the body; a generic one has type parameters |
@@ -156,7 +156,7 @@ to resolve, which reports unknown names.
 | `(array-repeat LOC EXPR INT)` | `[v; n]`, `INT` (at least 1) copies of `EXPR`: `[0; 3]` is `(array-repeat (int 0) 3)` |
 | `(tuple LOC EXPR EXPR EXPR...)` | `(a, b)`, at least two |
 | `(tuple-index LOC EXPR INT)` | `t.0` |
-| `(lambda LOC (params PARAM...) TYPE? BLOCK)` | a lambda, `fn(x: int) -> int { ... }`: the parameters and the result type (`_` for none) as a `fn`'s, then the body |
+| `(lambda LOC (params PARAM...) TYPE? BLOCK INFERRED?)` | a lambda, `fn(x: int) -> int { ... }`: the parameters and the result type (`_` for none) as a `fn`'s, then the body. `INFERRED` is `(inferred)` for `fn(x: int) => x * 2`, whose result type Sema infers: it has `_` for its result type and a body of one `return` of a value, `(block (return EXPR))` |
 | `(call-value LOC EXPR EXPR...)` | a call of a function value that is not named, `xs[0](1)`, `t.0(x)`: the callee, then the arguments (`f(1)` with `f` a variable is a `call`, `obj.cb(1)` with `cb` a field a `method-call`) |
 | `(enum-value LOC NAME NAME)` | `Color::Red`: the enum's name (qualified if spelled so) and the variant |
 

@@ -1,0 +1,81 @@
+// 58 — expression bodies
+// Exercises: functions and lambdas written `=> e`: `fn f(...) -> T => e;` (the
+//            body `{ return e; }`) and `fn f(...) => e;` (the result type
+//            inferred from `e`): a function used before its declaration, a
+//            chain of them, a generic one inferred per instantiation, a
+//            `static fn`, a method with its result type; lambdas of int, a
+//            sized integer, Str, a tuple, an optional and a function type
+//            (one lambda returning another); capturing a local and `self`;
+//            passed as an argument, stored in a List, made in a for loop and
+//            in a generic function.
+// expect-stdout: 13 6 abab 3 4 V(x: 0, y: 5) 7
+// expect-stdout: 8 12 hello pat 4 7 6
+// expect-stdout: none 9 hi!! 101 20 3
+
+import ::io;
+import ::collections as c;
+
+fn useEarly(x: int) => quad(x) + 1; // quad is declared below
+fn quad(x: int) => double(double(x));
+fn double(x: int) -> int => x * 2;
+fn doubled<T>(x: T) => x + x;
+fn half(x: u8) => x / 2;
+
+struct V {
+  x: int;
+  y: int;
+}
+
+impl V {
+  static fn origin() => V(0, 0);
+  fn shifted(dy: int) -> V => V(self.x, self.y + dy);
+  view fn sum() -> int => self.x + self.y;
+}
+
+fn apply(f: (int) -> int, x: int) -> int {
+  return f(x);
+}
+
+fn twice<T>(f: (view T) -> T, x: view T) -> T {
+  return f(f(x));
+}
+
+fn constant<T>(v: T) -> () -> T {
+  return fn() => v;
+}
+
+class Counter {
+  n: int;
+  fn adder() -> (int) -> int { return fn(k: int) => k + self.n; }
+}
+
+fn main() -> int {
+  io::println(Str(useEarly(3)) + " " + Str(doubled(3)) + " " + doubled("ab")
+      + " " + Str(doubled(1.5)) + " " + Str(half(9)) + " "
+      + V::origin().shifted(5).toString() + " " + Str(V(3, 4).sum()));
+
+  double = fn(x: int) -> int => x * 2;
+  triple = fn(x: int) => x * 3;
+  greet = fn(s: view Str) => "hello " + s;
+  bump = fn(x: u8) => x + 10; // a u8 result: 250 + 10 wraps
+  pair = fn(x: int) => (x, Str(x));
+  k = 5;
+  addK = fn(x: int) => x + k;
+  io::println(Str(double(4)) + " " + Str(triple(4)) + " " + greet("pat") + " "
+      + Str(bump(250)) + " " + pair(7).1 + " " + Str(addK(1)));
+
+  positive = fn(x: int) => if x > 0 then x else None;
+  shown = "";
+  match positive(-1) {
+    n: int { shown = Str(n); }
+    None { shown = "none"; }
+  }
+  fs = c::List<(int) -> int>();
+  for i in 0..3 { fs.push(fn(x: int) => x * i); }
+  add = fn(x: int) => fn(y: int) => x + y;
+  io::println(shown + " " + Str(apply(fn(x: int) => x - 1, 10)) + " "
+      + twice(fn(s: view Str) => s + "!", "hi") + " "
+      + Str(Counter(100).adder()(1)) + " " + Str(fs.at(2)(10)) + " "
+      + Str(add(1)(2) + constant(0)()));
+  return 0;
+}

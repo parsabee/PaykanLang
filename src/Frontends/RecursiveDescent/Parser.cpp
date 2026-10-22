@@ -1084,7 +1084,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
       error(start, "a trait method cannot be generic");
       return nullptr;
     }
-    if (at(Tok::LBrace)) {
+    if (at(Tok::LBrace) || at(Tok::FatArrow) || at(Tok::Assign)) {
       errorAtCurrent("a trait method has no body: end its signature with ';'");
       return nullptr;
     }
@@ -1098,11 +1098,39 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement) {
     return fn;
   }
 
-  CompoundStmt *body = parseBlock();
-  if (!body)
+  // `fn double(x: int) -> int => x * 2;` is the function whose body is
+  // `{ return x * 2; }`; without the result type, `fn double(x: int) => x *
+  // 2;`, the result type is the expression's (Sema infers it).  `=` is a
+  // native function's (its C symbol), so after another it says so.
+  if (at(Tok::Assign)) {
+    errorAtCurrent("an expression body starts with '=>', not '=': 'fn " + name +
+                   "(...) => ...;'");
     return nullptr;
+  }
+  CompoundStmt *body = nullptr;
+  const bool expressionBody = at(Tok::FatArrow);
+  if (expressionBody) {
+    consume();
+    SourceLocation from = cur().Loc;
+    Expr *value = parseExpression();
+    if (!value)
+      return nullptr;
+    std::vector<Stmt *> ret{Ctx.make<ReturnStmt>(span(from), value)};
+    body = Ctx.make<CompoundStmt>(span(from), std::move(ret));
+    if (!expect(Tok::Semi, "after the function's expression"))
+      return nullptr;
+  } else {
+    if (!at(Tok::LBrace)) {
+      errorAtCurrent("expected '{' or '=>' to start the function's body");
+      return nullptr;
+    }
+    body = parseBlock();
+    if (!body)
+      return nullptr;
+  }
   auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
                                 body, std::move(typeParams));
+  fn->setInferredResult(expressionBody && !retTy);
   fn->setView(view);
   fn->setResultMode(resultMode);
   fn->setModulePrivateInit(modulePrivateInit);
@@ -2284,8 +2312,29 @@ Expr *Parser::parsePrimary() {
       if (!retTy)
         return nullptr;
     }
+    // `fn(x: int) -> int => x * 2` is `fn(x: int) -> int { return x * 2; }`,
+    // and without the result type, `fn(x: int) => x * 2`, the result type
+    // is the expression's (Sema infers it).
+    if (at(Tok::Assign)) {
+      errorAtCurrent("a lambda's expression body starts with '=>', not '=': "
+                     "'fn(...) => ...'");
+      return nullptr;
+    }
+    if (at(Tok::FatArrow)) {
+      consume();
+      SourceLocation from = cur().Loc;
+      Expr *value = parseExpression();
+      if (!value)
+        return nullptr;
+      std::vector<Stmt *> ret{Ctx.make<ReturnStmt>(span(from), value)};
+      auto *body = Ctx.make<CompoundStmt>(span(from), std::move(ret));
+      auto *lambda =
+          Ctx.make<LambdaExpr>(span(start), std::move(params), retTy, body);
+      lambda->setInferredResult(retTy == nullptr);
+      return lambda;
+    }
     if (!at(Tok::LBrace)) {
-      errorAtCurrent("expected '{' to start the lambda's body");
+      errorAtCurrent("expected '{' or '=>' to start the lambda's body");
       return nullptr;
     }
     CompoundStmt *body = parseBlock();

@@ -1001,6 +1001,8 @@ TEST(Interchange, FunctionTypesRoundTrip) {
                            "(int) -> int {\n"
                            "  h = fn(x: int) -> int { return x + 1; };\n"
                            "  log = fn(s: view Str) { io::println(s); };\n"
+                           "  k = fn(x: int) => x * 2;\n"
+                           "  m = fn(x: int) -> int => x;\n"
                            "  fs: ((int) -> int)[1] = [h];\n"
                            "  n = fs[0](1) + h(2) + apply(f, g)(3);\n"
                            "  return h;\n"
@@ -1013,12 +1015,75 @@ TEST(Interchange, FunctionTypesRoundTrip) {
   EXPECT_NE(text.find("view"), std::string::npos) << text;
   EXPECT_NE(text.find("(lambda"), std::string::npos) << text;
   EXPECT_NE(text.find("(call-value"), std::string::npos) << text;
+  // `fn(x: int) => x * 2` alone is marked: the other one has its type.
+  EXPECT_EQ(text.find("(inferred)"), text.rfind("(inferred)")) << text;
+  EXPECT_NE(text.find("(inferred)"), std::string::npos) << text;
   ast::ASTContext ctx;
   std::string error;
   ast::TranslationUnit *back = read(text, ctx, error);
   ASSERT_NE(back, nullptr) << error;
   EXPECT_EQ(dump(back), dump(driver.getRoot()));
   EXPECT_EQ(write(*back), text);
+}
+
+// (inferred) goes with no result type and a body that is one return of a
+// value, as the parser makes for `fn(x: int) => x * 2`.
+TEST(Interchange, InferredLambdaResults) {
+  ast::ASTContext ctx;
+  std::string error;
+  for (const char *bad :
+       {"(lambda (params) (named-type \"int\") (block (return (int 1))) "
+        "(inferred))",
+        "(lambda (params) _ (block (return _)) (inferred))",
+        "(lambda (params) _ (block (return (int 1)) (return (int 2))) "
+        "(inferred))",
+        "(lambda (params) _ (block (return (int 1))) (inferred x))"}) {
+    std::string doc = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
+                      "_ (block (expr " +
+                      std::string(bad) + ")))))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << bad;
+    EXPECT_TRUE(error.find("an inferred result needs no result type") !=
+                    std::string::npos ||
+                error.find("(inferred) takes no fields") != std::string::npos)
+        << bad << ": " << error;
+  }
+}
+
+// A function written `=> expression` with no result type is marked as a
+// lambda is: `_` for the result type and a trailing (inferred).
+TEST(Interchange, InferredFunctionResults) {
+  parser::ParserDriver driver("recursive-descent");
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_inferred_" + std::to_string(::getpid()) + ".pkn");
+  std::ofstream(path) << "fn double(x: int) => x * 2;\n"
+                         "fn half(x: int) -> int => x / 2;\n"
+                         "fn twice<T>(x: T) => x + x;\n";
+  ASSERT_EQ(driver.parseFile(path.string()), 0);
+  std::filesystem::remove(path);
+  std::string text = write(*driver.getRoot());
+  size_t marks = 0;
+  for (size_t at = text.find("(inferred)"); at != std::string::npos;
+       at = text.find("(inferred)", at + 1))
+    ++marks;
+  EXPECT_EQ(marks, 2u) << text; // `double` and `twice`, not `half`
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), dump(driver.getRoot()));
+  EXPECT_EQ(write(*back), text);
+
+  for (const char *bad :
+       {"(fn \"f\" (type-params) (params) (named-type \"int\") "
+        "(block (return (int 1))) (inferred))",
+        "(fn \"f\" (type-params) (params) _ (block (return _)) (inferred))"}) {
+    std::string doc = "(paykan-ast 1 (unit " + std::string(bad) + "))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << bad;
+    EXPECT_NE(error.find("an inferred result needs no result type"),
+              std::string::npos)
+        << bad << ": " << error;
+  }
 }
 
 TEST(Interchange, TraitsRoundTrip) {

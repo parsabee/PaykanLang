@@ -108,6 +108,39 @@ fn main() -> int {
   EXPECT_NE(dump.find("LambdaExpr <5:39-5:64> ->"), std::string::npos) << dump;
 }
 
+// `fn(...) -> T => e` is `fn(...) -> T { return e; }`: the body is one
+// `return` spanning `e`.  Without the result type (`fn(...) => e`) the lambda
+// is marked for Sema to infer it.  The expression extends as far as an
+// expression can, so `fn(x) => fn(y) => x + y` nests.
+TEST(FunctionType, ExpressionLambdas) {
+  auto dump = dumpAST(R"(fn main() -> int {
+  a = fn(x: int) -> int => x * 2;
+  b = fn(x: int) => x + 1;
+  c = fn(x: int) => fn(y: int) => x + y;
+  return 0;
+}
+)");
+  ASSERT_FALSE(dump.empty());
+  for (const char *e :
+       {"LambdaExpr <2:7-2:33> ->\n    |   |-BuiltinType 'int'\n"
+        "    |   `-CompoundStmt <2:28-2:33>\n"
+        "    |     `-ReturnStmt <2:28-2:33>\n"
+        "    |       `-BinaryExpr <2:28-2:33> '*'\n",
+        "LambdaExpr <3:7-3:26> inferred\n    |   `-CompoundStmt <3:21-3:26>\n"
+        "    |     `-ReturnStmt <3:21-3:26>\n"
+        "    |       `-BinaryExpr <3:21-3:26> '+'\n",
+        "LambdaExpr <4:7-4:40> inferred\n    |   `-CompoundStmt <4:21-4:40>\n"
+        "    |     `-ReturnStmt <4:21-4:40>\n"
+        "    |       `-LambdaExpr <4:21-4:40> inferred\n"})
+    EXPECT_NE(dump.find(e), std::string::npos) << e << "\n" << dump;
+  auto res = parseWithDiags("fn main() -> int {\n  f = fn(x: int) x;\n"
+                            "  return 0;\n}\n");
+  EXPECT_FALSE(res.Ok);
+  EXPECT_NE(res.Text.find("expected '{' or '=>' to start the lambda's body"),
+            std::string::npos)
+      << res.Text;
+}
+
 TEST(FunctionType, CallsOfValues) {
   // A named value is a call; another expression's value is a CallValueExpr.
   auto dump = dumpAST(R"(
@@ -153,7 +186,10 @@ TEST(FunctionType, Rejections) {
        "return 0; }",
        "after 'fn' (a lambda has no name: 'fn(x: int) -> int { ... }')"},
       {"fn main() -> int { f = fn(x: int) -> int return x; return 0; }",
-       "expected '{' to start the lambda's body"},
+       "expected '{' or '=>' to start the lambda's body"},
+      {"fn main() -> int { f = fn(x: int) = x * 2; return 0; }",
+       "a lambda's expression body starts with '=>', not '=': 'fn(...) => "
+       "...'"},
       {"fn main() -> int { f = view fn(x: int) -> int { return x; }; "
        "return 0; }",
        "unexpected 'view'"},

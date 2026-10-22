@@ -817,10 +817,26 @@ private:
       view = v->Text == "view";
       isStatic = !view;
     }
+    // `fn double(x: int) => x * 2;`: a trailing (inferred), as a lambda's.
+    const SExpr *inferred = f.optionalList("inferred");
+    if (inferred) {
+      const auto *stmts = body ? &body->getStatements() : nullptr;
+      const auto *r = stmts && stmts->size() == 1
+                          ? dyn_cast<ReturnStmt>((*stmts)[0])
+                          : nullptr;
+      if (!inferred->Items.empty())
+        return fail(*inferred, "(inferred) takes no fields"), nullptr;
+      if (ret || !r || !r->getReturnValue())
+        return fail(*inferred,
+                    "an inferred result needs no result type and a body "
+                    "that is one return of a value"),
+               nullptr;
+    }
     if (!f.done())
       return nullptr;
     auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, body,
                                   std::move(tparams));
+    fn->setInferredResult(inferred != nullptr);
     fn->setView(view);
     fn->setStatic(isStatic);
     fn->setResultMode(resultMode);
@@ -1462,9 +1478,28 @@ private:
           return nullptr;
       }
       CompoundStmt *body = block(f, "the lambda's body");
-      if (!body || !f.done())
+      if (!body)
         return nullptr;
-      return Ctx.make<LambdaExpr>(loc, std::move(params), ret, body);
+      // `fn(x: int) => x * 2`: a trailing (inferred), no result type, and a
+      // body that is one `return` of a value.
+      const SExpr *inferred = f.optionalList("inferred");
+      if (inferred) {
+        const auto &stmts = body->getStatements();
+        const auto *r =
+            stmts.size() == 1 ? dyn_cast<ReturnStmt>(stmts[0]) : nullptr;
+        if (!inferred->Items.empty())
+          return fail(*inferred, "(inferred) takes no fields"), nullptr;
+        if (ret || !r || !r->getReturnValue())
+          return fail(*inferred,
+                      "an inferred result needs no result type and a body "
+                      "that is one return of a value"),
+                 nullptr;
+      }
+      if (!f.done())
+        return nullptr;
+      auto *lambda = Ctx.make<LambdaExpr>(loc, std::move(params), ret, body);
+      lambda->setInferredResult(inferred != nullptr);
+      return lambda;
     } else if (t == "tuple") {
       std::vector<Expr *> elems;
       if (!exprs(f, elems))

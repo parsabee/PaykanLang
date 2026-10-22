@@ -512,6 +512,8 @@ void ASTPrinter::visitLambdaExpr(LambdaExpr *node) {
       OS << ' ' << paramModeName(p.Mode) << " '" << p.getName() << "'";
   if (node->getReturnType())
     OS << " ->";
+  if (node->hasInferredResult())
+    OS << " inferred";
   OS << "\n";
   if (node->getReturnType()) {
     ChildScope cs(*this, false);
@@ -628,6 +630,8 @@ void ASTPrinter::visitFuncDecl(FuncDecl *node) {
     OS << " ->";
   if (node->getResultMode() != ParamMode::Value)
     OS << ' ' << paramModeName(node->getResultMode());
+  if (node->hasInferredResult())
+    OS << " inferred";
   OS << "\n";
   if (node->getReturnType()) {
     ChildScope cs(*this, !node->getBody());

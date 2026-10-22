@@ -553,9 +553,11 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     std::vector<Param> params;
     for (const Param &p : l->getParams())
       params.push_back(Param{&in(p.getName()), cloneType(p.ParamType), p.Mode});
-    return Ctx.make<LambdaExpr>(loc, std::move(params),
-                                cloneType(l->getReturnType()),
-                                cloneCompound(l->getBody()));
+    auto *copy = Ctx.make<LambdaExpr>(loc, std::move(params),
+                                      cloneType(l->getReturnType()),
+                                      cloneCompound(l->getBody()));
+    copy->setInferredResult(l->hasInferredResult());
+    return copy;
   }
   default:
     break;
@@ -684,6 +686,7 @@ FuncDecl *ASTCloner::cloneFuncDecl(FuncDecl *fn, const std::string &newName) {
   clone->setStatic(fn->isStatic());
   clone->setModulePrivateInit(fn->isModulePrivateInit());
   clone->setResultMode(fn->getResultMode());
+  clone->setInferredResult(fn->hasInferredResult());
   if (fn->isNative())
     clone->setNativeSymbol(in(fn->getNativeSymbol()));
   return clone;
@@ -764,6 +767,7 @@ FuncDecl *ASTCloner::cloneTemplate(FuncDecl *fn) {
   out->setStatic(copy->isStatic());
   out->setModulePrivateInit(copy->isModulePrivateInit());
   out->setResultMode(copy->getResultMode());
+  out->setInferredResult(copy->hasInferredResult());
   out->setTypeParamBounds(cloneBounds(fn->getTypeParamBounds()));
   if (copy->isNative())
     out->setNativeSymbol(copy->getNativeSymbol());

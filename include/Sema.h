@@ -173,6 +173,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// Check a lambda: its signature, its body as a function's, and the
   /// variables it captures.  Its function type, or nullptr after an error.
   ast::Type *checkLambda(ast::LambdaExpr *node);
+  /// The result type of the checked lambda @p node written
+  /// `fn(...) => expression`: its expression's type, written back as its
+  /// result type; nullptr (after an error) when the expression has none.
+  ast::Type *inferredResult(ast::LambdaExpr *node);
   /// Record that the enclosing lambdas capture the variable @p name (of type
   /// @p ty, bound in @p owner) when it is bound outside them; false (after
   /// reporting it) when it cannot be captured.
@@ -272,6 +276,55 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   /// Look up a function signature, or nullptr if unknown.
   const FunctionSig *lookupFunction(std::string_view name) const;
+
+  // -- Inferred results (`fn double(x: int) => x * 2;`,
+  // docs/language/03-functions.md, "Expression bodies")
+  //
+  // A free function written with an expression and no result type is
+  // registered with no result type; its body is checked before any other
+  // body (inferResults), the result type taken from its expression and
+  // written back.  One whose expression uses another such function infers
+  // that one first, with the context of a body of its own; one whose
+  // expression depends on itself is an error.  An instantiation of a
+  // generic one is inferred where it is first used, as its body would be
+  // checked at the end (checkPendingInstantiations).
+  enum class Inference : uint8_t { Pending, InProgress, Done, Failed };
+  struct PendingInstantiation;
+  struct InferredFunction {
+    ast::FuncDecl *Decl = nullptr;
+    Inference State = Inference::Pending;
+    /// An instantiation's: how its body is checked (null otherwise).
+    std::shared_ptr<PendingInstantiation> Instance;
+  };
+  StringMap<InferredFunction> InferredFunctions;
+  /// Set once every free function's signature is registered: inference can
+  /// start.
+  bool InferenceReady = false;
+  /// Check the bodies of the functions in @p fns with an inferred result.
+  bool inferResults(const std::vector<ast::FuncDecl *> &fns);
+  /// Whether the function named @p name has a result type to use at @p loc:
+  /// true unless it is a function with an inferred result whose inference
+  /// failed (reported) or depends on itself (reported here).  Infers it
+  /// first when it has not been yet.
+  bool inferResultOf(const std::string &name, ast::SourceLocation loc);
+  /// The type of the value the one `return` of @p body returns, for a
+  /// function or a lambda written `=> expression`; nullptr after an error
+  /// (an expression with no value: @p subject is what its result is, and
+  /// @p braces the form to write instead).
+  ast::Type *returnedType(ast::CompoundStmt *body, const std::string &subject,
+                          const std::string &braces);
+  /// The checked function @p node's inferred result type, checked as a
+  /// written one is and written back (to the declaration and its
+  /// signature); nullptr after an error.
+  ast::Type *inferredResultOf(ast::FuncDecl *node);
+  /// A method, or a generic function, written `=> expression` needs its
+  /// result type: report one with none (and give it the poison type, so its
+  /// uses are not reported again).
+  bool rejectInferredMethods(ast::TranslationUnit *tu);
+  void reportInferredMethod(const ast::FuncDecl *fn);
+  /// Queue the instantiation @p p for its body to be checked, and record
+  /// how, for one whose result is inferred.
+  void queueInstantiation(PendingInstantiation p);
 
   /// The kind of top-level entity being declared, for checkDeclNameAvailable.
   enum class DeclKind { Function, Class, Enum, Trait, Struct };

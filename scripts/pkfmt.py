@@ -54,7 +54,7 @@ LEX = re.compile(r'''
   | (?P<chr>'(?:[^'\\\n]|\\.)*')
   | (?P<word>[A-Za-z_]\w*)
   | (?P<num>\d\w*)
-  | (?P<op>::|->|==|!=|<=|>=|&&|\|\||\.\.=|\.\.|[-+*/%]=|.)
+  | (?P<op>::|->|=>|==|!=|<=|>=|&&|\|\||\.\.=|\.\.|[-+*/%]=|.)
 ''', re.X)
 
 
@@ -268,14 +268,14 @@ class Parser:
 
 BINARY = {"+", "-", "*", "/", "%", "&&", "||", "==", "!=", "<", ">", "<=",
           ">=", "then", "else"}
-AFTER = {"=", "+=", "-=", "*=", "/=", "%=", "->", ","}
+AFTER = {"=", "+=", "-=", "*=", "/=", "%=", "->", "=>", ","}
 LAST_RESORT = {"return", "if", "elif", "while", "for", "in", "match", "fn",
                "let", "view", "inout", ":", "native", "static", "pub"}
 
 
 def break_points(code):
     """(index, depth, priority) of each space of @p code where it may
-    break: 0 after a comma or `=`/`->`, 1 before a binary operator, 2 any
+    break: 0 after a comma or `=`/`->`/`=>`, 1 before a binary operator, 2 any
     other space, 9 after a keyword or a type annotation's `:`."""
     toks = []   # (start, text, kind, depth)
     pos = depth = 0

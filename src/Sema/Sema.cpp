@@ -1113,7 +1113,8 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
         fnName = std::move(home);
     }
     if (const FunctionSig *sig = S.lookupFunction(fnName)) {
-      if (!S.checkFunctionValue(fnName, *sig, node->getLocation()))
+      if (!S.checkFunctionValue(fnName, *sig, node->getLocation()) ||
+          !S.inferResultOf(fnName, node->getLocation()))
         return nullptr;
       node->setFunctionRef(S.Ctx.intern(fnName));
       auto *fnt = S.functionTypeOf(*sig);
@@ -1179,7 +1180,8 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
     if (!S.checkStaticMemberUse(qualified, node->getLocation()))
       return nullptr;
     if (const FunctionSig *sig = S.lookupFunction(qualified)) {
-      if (!S.checkFunctionValue(qualified, *sig, node->getLocation()))
+      if (!S.checkFunctionValue(qualified, *sig, node->getLocation()) ||
+          !S.inferResultOf(qualified, node->getLocation()))
         return nullptr;
       node->setFunctionRef(S.Ctx.intern(qualified));
       auto *fnt = S.functionTypeOf(*sig);
@@ -1610,6 +1612,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   }
 
   const auto *sig = S.lookupFunction(node->getCalleeName());
+  if (sig && !S.inferResultOf(node->getCalleeName(), node->getLocation()))
+    return nullptr;
   // A call by the name of a rejected declaration, or to the constructor of
   // an erroneous class, was already reported at the declaration.  (A builtin
   // keeps its name, and its calls are checked as usual.)
@@ -2761,6 +2765,8 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   bool ok = rejectFreeViewFns(node);
+  if (!rejectInferredMethods(node))
+    ok = false;
   if (!rejectTopLevelTypePrivate(node))
     ok = false;
   if (!rejectBodyInits(node))
@@ -2843,6 +2849,11 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
       ok = false;
   }
 
+  // The functions written `=> expression` with no result type: their
+  // bodies first, so every body below sees their result types.
+  if (!inferResults(declaredFns))
+    ok = false;
+
   if (!checkEntryPoint(node, declaredFns))
     ok = false;
 
@@ -2854,9 +2865,10 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
   if (!checkStructBodies())
     ok = false;
 
-  // … and finally free-function bodies (signatures all registered above).
+  // … and finally free-function bodies (signatures all registered above;
+  // the ones with an inferred result were checked by inferResults).
   for (auto *fn : declaredFns)
-    if (!visitFuncDecl(fn))
+    if (!fn->hasInferredResult() && !visitFuncDecl(fn))
       ok = false;
 
   // Bodies of the instantiations requested so far (and of any they request
@@ -3406,7 +3418,11 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   // Resolve return type.  Resolved annotations are written back into the
   // declaration so the lowering sees canonical types (never a parser stub or a
   // generic type application).
-  ast::Type *retTy = Ctx.getVoidTy();
+  // `fn double(x: int) => x * 2;` has no result type until its body is
+  // checked (inferResults): none is registered, and what is checked of the
+  // result here is checked then.
+  const bool inferred = node->hasInferredResult() && !node->getReturnType();
+  ast::Type *retTy = inferred ? nullptr : Ctx.getVoidTy();
   if (node->getReturnType()) {
     FixedArrayAllowed = true; // a result may be a fixed-size array
     retTy = resolveType(node->getReturnType(), node->getLocation(),
@@ -3444,8 +3460,8 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
       node->getName().find('<') == std::string::npos) {
     const std::string who =
         "'" + displayName(node->getName()) + "' is public but ";
-    bool pub = checkPublicSurface(who + "its result", "function", retTy,
-                                  node->getLocation());
+    bool pub = inferred || checkPublicSurface(who + "its result", "function",
+                                              retTy, node->getLocation());
     for (auto &p : node->getParams())
       pub = checkPublicSurface(who + "parameter '" + p.getName() + "'",
                                "function", p.ParamType, node->getLocation()) &&
@@ -3463,6 +3479,8 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 
   // Register the function in the function table.
   declareFunction(node->getName(), retTy, paramTypes);
+  if (inferred)
+    InferredFunctions[node->getName()] = {node, Inference::Pending, nullptr};
   ast::ParamModes &modes = FunctionTable[node->getName()].Modes;
   modes = ast::paramModes(node->getParams());
   modes.Result = node->getResultMode();
@@ -3584,8 +3602,10 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
 
   // Re-resolve the annotations to set up the body scope (resolveType is
   // idempotent and, for a registered function, is guaranteed to succeed —
-  // declareFunctionSignature already wrote the canonical types back).
-  ast::Type *retTy = Ctx.getVoidTy();
+  // declareFunctionSignature already wrote the canonical types back).  A
+  // result to infer is none yet: the body is checked against none.
+  const bool inferring = node->hasInferredResult() && !node->getReturnType();
+  ast::Type *retTy = inferring ? nullptr : Ctx.getVoidTy();
   if (node->getReturnType()) {
     FixedArrayAllowed = true;
     retTy = resolveType(node->getReturnType(), node->getLocation(),
@@ -3613,6 +3633,11 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     CurrentResult = savedResult;
     if (!ok)
       return false;
+    if (inferring) {
+      retTy = inferredResultOf(node);
+      if (!retTy)
+        return false;
+    }
     // Non-void functions must always return a value on every path.
     if (retTy != Ctx.getVoidTy() &&
         !detail::blockAlwaysReturns(node->getBody()->getStatements())) {
@@ -3622,6 +3647,157 @@ bool Sema::visitFuncDecl(ast::FuncDecl *node) {
     }
   }
   return true;
+}
+
+// -- Inferred results
+
+ast::Type *Sema::returnedType(ast::CompoundStmt *body,
+                              const std::string &subject,
+                              const std::string &braces) {
+  const auto &stmts = body->getStatements();
+  const auto *ret =
+      stmts.size() == 1 ? ast::dyn_cast<ast::ReturnStmt>(stmts[0]) : nullptr;
+  ast::Expr *value = ret ? ret->getReturnValue() : nullptr;
+  ast::Type *ty = value ? value->getResolvedType() : nullptr;
+  if (!ty)
+    return nullptr; // the parser makes the body one `return` of a value
+  if (ty == Ctx.getVoidTy()) {
+    error(value->getLocation(),
+          subject +
+              " is the value of its expression, which has none (its "
+              "type is 'void'): write its body in braces, '" +
+              braces + "'");
+    return nullptr;
+  }
+  return ty;
+}
+
+/// How a diagnostic names the function shown as @p shown: an
+/// instantiation by its template's name, as it was written.
+static std::string writtenName(const std::string &shown) {
+  return shown.substr(0, shown.find('<'));
+}
+
+ast::Type *Sema::inferredResultOf(ast::FuncDecl *node) {
+  const std::string shown = writtenName(displayName(node->getName()));
+  ast::Type *ty = returnedType(node->getBody(), "the result of '" + shown + "'",
+                               "fn " + shown + "(...) { ...; }");
+  if (!ty || !checkFixedResult(ty, node->getResultMode(), node->getLocation()))
+    return nullptr;
+  // What declareFunctionSignature checks of a written result.
+  if (!isModuleOwnName(node->getName()) &&
+      node->getName().find('<') == std::string::npos &&
+      !checkPublicSurface("'" + shown + "' is public but its result",
+                          "function", ty, node->getLocation()))
+    return nullptr;
+  node->setReturnType(ty);
+  FunctionTable[node->getName()].ReturnType = ty;
+  return ty;
+}
+
+bool Sema::inferResults(const std::vector<ast::FuncDecl *> &fns) {
+  InferenceReady = true;
+  bool ok = true;
+  for (auto *fn : fns) {
+    auto it = InferredFunctions.find(fn->getName());
+    if (it == InferredFunctions.end() || it->second.Decl != fn)
+      continue;
+    if (it->second.State == Inference::Pending)
+      inferResultOf(fn->getName(), fn->getLocation());
+    if (it->second.State != Inference::Done)
+      ok = false;
+  }
+  return ok;
+}
+
+bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
+  auto it = InferredFunctions.find(name);
+  if (it == InferredFunctions.end())
+    return true;
+  InferredFunction &fn = it->second;
+  switch (fn.State) {
+  case Inference::Done:
+    return true;
+  case Inference::Failed:
+    ++SuppressedFollowOns; // its own error was reported
+    return false;
+  case Inference::InProgress: {
+    const std::string shown = writtenName(displayName(name));
+    error(loc, "the result type of '" + shown +
+                   "' is inferred from its expression, which uses '" + shown +
+                   "' itself: write the result type, 'fn " + shown +
+                   "(...) -> T => ...'");
+    return false;
+  }
+  case Inference::Pending:
+    if (!InferenceReady)
+      return true; // the signatures are still being registered
+    break;
+  }
+  // Its body is checked now, as a body of its own: nothing of the body that
+  // uses it (its scopes, lambdas, borrows, loops, class) is in scope there.
+  // An instantiation's is checked as checkPendingInstantiations would.
+  Scope *savedScope = std::exchange(CurrentScope, nullptr);
+  auto savedLambdas = std::exchange(LambdaStack, {});
+  auto savedBorrows = std::exchange(Borrows, {});
+  const unsigned savedLoopDepth = std::exchange(LoopDepth, 0u);
+  ClassContext *savedClassCtx = std::exchange(CurrentClassCtx, nullptr);
+  MethodUse *savedMethodUse = std::exchange(CurrentMethodUse, nullptr);
+  const StringSet *savedTypeParams = std::exchange(CurrentTypeParams, nullptr);
+  const size_t savedDepth = CurrentInstantiationDepth;
+  fn.State = Inference::InProgress;
+  bool ok;
+  if (const PendingInstantiation *p = fn.Instance.get()) {
+    InstantiationStack.push_back(
+        {p->Name, p->RequestLoc, p->RequestFile, p->RequestLines});
+    CurrentTypeParams = &p->TypeParams;
+    CurrentInstantiationDepth = p->Depth;
+    {
+      OriginSource inOrigin(*this, p->Origin);
+      ok = visitFuncDecl(fn.Decl);
+    }
+    InstantiationStack.pop_back();
+  } else {
+    ok = visitFuncDecl(fn.Decl);
+  }
+  CurrentInstantiationDepth = savedDepth;
+  fn.State = ok ? Inference::Done : Inference::Failed;
+  CurrentScope = savedScope;
+  LambdaStack = std::move(savedLambdas);
+  Borrows = std::move(savedBorrows);
+  LoopDepth = savedLoopDepth;
+  CurrentClassCtx = savedClassCtx;
+  CurrentMethodUse = savedMethodUse;
+  CurrentTypeParams = savedTypeParams;
+  if (!ok)
+    ++SuppressedFollowOns; // the use, of a function whose error is reported
+  return ok;
+}
+
+void Sema::reportInferredMethod(const ast::FuncDecl *fn) {
+  error(fn->getLocation(), "the result type of method '" + fn->getName() +
+                               "' is not inferred: write it, 'fn " +
+                               fn->getName() + "(...) -> T => ...'");
+}
+
+bool Sema::rejectInferredMethods(ast::TranslationUnit *tu) {
+  // A method of a template is declared (declareMethod) for each of its
+  // instantiations, if any: reported here, once, and quietly there.
+  bool ok = true;
+  for (auto *cd : tu->getGenericClassDecls())
+    for (auto *m : cd->getMethods())
+      if (m->hasInferredResult()) {
+        reportInferredMethod(m);
+        ok = false;
+      }
+  for (auto *im : tu->getImplDecls())
+    if (!im->getTypeParams().empty())
+      for (auto *m : im->getMethods())
+        if (!m->isStatic() && m->hasInferredResult()) {
+          reportInferredMethod(m);
+          ok = false;
+        }
+  return ok;
 }
 
 bool Sema::visitVarDecl(ast::VarDecl *node) {

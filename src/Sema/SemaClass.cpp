@@ -534,6 +534,16 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
     ~SelfGuard() { Slot = Saved; }
   } selfGuard{SelfType, SelfType};
   SelfType = owner;
+  // A method's result type is written, `fn get() -> int => self.n;`: one
+  // with an expression and none is reported (a template's once, by
+  // rejectInferredMethods), as a result type that does not resolve is.
+  if (method->hasInferredResult()) {
+    if (className.find('<') == std::string::npos)
+      reportInferredMethod(method);
+    else
+      ++SuppressedFollowOns;
+    return nullptr;
+  }
   // Resolve return type.
   ast::Type *retTy = Ctx.getVoidTy();
   if (method->getReturnType()) {
@@ -1432,7 +1442,7 @@ void Sema::declareInstantiationStatics(const std::string &instName,
       p.Class = nullptr;
       p.Struct = nullptr;
       p.Func = fn;
-      PendingInstantiations.push_back(std::move(p));
+      queueInstantiation(std::move(p));
       (base.Origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
           .push_back(fn);
     }
@@ -1540,10 +1550,18 @@ std::string Sema::instantiateFunction(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
-  PendingInstantiations.push_back(std::move(pending));
+  queueInstantiation(std::move(pending));
   (origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
       .push_back(clone);
   return instName;
+}
+
+void Sema::queueInstantiation(PendingInstantiation p) {
+  if (p.Func && p.Func->hasInferredResult())
+    if (auto it = InferredFunctions.find(p.Func->getName());
+        it != InferredFunctions.end())
+      it->second.Instance = std::make_shared<PendingInstantiation>(p);
+  PendingInstantiations.push_back(std::move(p));
 }
 
 bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
@@ -1905,6 +1923,16 @@ bool Sema::checkPendingInstantiations() {
     const size_t savedDepth = CurrentInstantiationDepth;
     CurrentInstantiationDepth = p.Depth;
     bool r;
+    if (p.Func && p.Func->hasInferredResult()) {
+      // Checked where it was first used (inferResultOf), or now.
+      InstantiationStack.pop_back();
+      CurrentInstantiationDepth = savedDepth;
+      CurrentTypeParams = savedParams;
+      if (!inferResultOf(p.Func->getName(), p.RequestLoc) ||
+          InferredFunctions[p.Func->getName()].State != Inference::Done)
+        ok = false;
+      continue;
+    }
     {
       OriginSource inOrigin(*this, p.Origin);
       r = p.Class    ? visitClassDecl(p.Class)
