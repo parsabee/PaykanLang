@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Helpers shared by the .pkm codecs: the `str` and `hash` primitives of
 // docs/design/pkm.md §1.1 on top of support::ByteReader, UTF-8 validation

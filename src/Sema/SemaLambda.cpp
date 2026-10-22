@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Semantic analysis: function values (docs/language/14-function-types.md).
 // A lambda `fn(x: int) -> int { ... }` is checked as a function body is,

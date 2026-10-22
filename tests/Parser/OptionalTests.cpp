@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Parser tests: optional types `T?` in every type position, the
 // `None` match-arm pattern, optional primitives (`int?`, ...), and the
 // parse-time rejections (`void?`, `T??`).

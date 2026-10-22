@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Canonical module names (#102).  A module is identified everywhere past
 // Sema -- PIR `module` clauses, C banners and symbol prefixes, LLVM symbol

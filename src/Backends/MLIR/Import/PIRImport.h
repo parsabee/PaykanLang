@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR -> the `pir` MLIR dialect: one op per PIR item, statement and
 // instruction (Dialect/PIR.td).
 

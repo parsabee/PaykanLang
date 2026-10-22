@@ -140,6 +140,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- PaykanLang is licensed under the Apache License, Version 2.0 (`LICENSE`), no
+  longer the MIT License: every source file's `SPDX-License-Identifier` is
+  `Apache-2.0`, and the copyright notice is in `NOTICE`, which the Debian
+  package installs with the license.
 - The standard library's containers hand out an element two ways (docs/stdlib/collections.md).
   `view fn`s lend it as a `view`, which stays the container's: `List`'s `at` and `last`,
   `LinkedList`'s `front` and `back`, the `peek`s, and `HashMap`'s `at` and `atOr`.  The new

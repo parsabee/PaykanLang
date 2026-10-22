@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Tests of the compile-and-run harness itself (CodeGenTestUtils.h).
 
 #include "CodeGenTestUtils.h"

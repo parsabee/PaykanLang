@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The `pir` dialect: PIR (docs/pir.md) as MLIR.  One op per PIR item,
 // statement and instruction, with PIR's types, so a PIR module imports one

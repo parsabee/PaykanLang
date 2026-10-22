@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The one table of PIR opcodes and types: each enumerator's mnemonic (what
 // the text printer writes and the parser reads) and its wire code (what the

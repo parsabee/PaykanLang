@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The MANIFEST codec (docs/design/pkm.md §2) and the compatibility verdict
 // (§8.2): round trip, canonical ordering, the TLV rules, every post-loop
 // check, and each row of the verdict table.

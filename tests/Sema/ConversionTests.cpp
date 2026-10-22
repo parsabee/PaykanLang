@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: conversion constructors `Target<Source>(value)` (#64, #88) —
 // every specialization of each builtin target and its result type, the
 // closed set (unlisted and custom type arguments), the missing-specialization

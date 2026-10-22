@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Codegen tests: imported signatures that name other types of the imported
 // module (classes, enums, arrays of classes) and transitively-reached classes.
 

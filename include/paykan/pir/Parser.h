@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR text parser (docs/pir.md §10): the inverse of the printer, so backend
 // tests can be written in PIR text without a frontend or the lowering.
 

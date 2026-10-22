@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // AST -> PIR lowering: `inout` parameters and locals
 // (docs/language/03-functions.md, "Parameter modes";

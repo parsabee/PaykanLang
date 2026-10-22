@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Recursive-descent parser (precedence climbing for expressions) for the
 // Paykan language.  Implements docs/grammar.md; any other frontend must
 // build the same AST, node for node and location for location.

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // CodeGen tests: char primitive type end-to-end.
 
 #include "CodeGenTestUtils.h"

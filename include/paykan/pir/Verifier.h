@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR verifier (docs/pir.md §9).  A backend may assume everything the
 // verifier checks; the driver verifies the lowering's output before any
 // backend sees it, and tests verify the programs they build by hand.

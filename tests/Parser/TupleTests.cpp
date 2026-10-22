@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Parser tests: tuple types, literals, element access, destructuring, and the
 // `(x)` vs `(x, y)` / `t.0` vs float-literal disambiguation.
 

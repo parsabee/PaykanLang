@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // What cannot change through a `view`
 // (docs/language/03-functions.md, "A `view` of a reference stays a `view`"): a
 // `view` parameter, a `view` local and a `match` arm's name for either,

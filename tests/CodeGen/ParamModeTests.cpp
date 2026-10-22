@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Codegen tests: `view` and `inout` parameters, and the PIR address ops an
 // `inout` parameter lowers to (local.addr, field.addr, ptr.load, ptr.store).
 

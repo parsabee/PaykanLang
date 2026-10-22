@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // `pkm dump` goldens (docs/design/pkm.md §8.5): the text is stable, so a
 // change here is a deliberate format change.
 

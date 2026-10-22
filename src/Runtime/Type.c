@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Paykan runtime — copying and dropping a value of any type through its
 // PaykanType (Runtime.h, "Generic native functions"), for the C code of

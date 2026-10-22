@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The plugin loader (paykan/PluginLoader.h): discovery, the check before
 // any plugin code but the entry point runs, and registration.

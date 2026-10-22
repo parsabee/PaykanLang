@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for weak references (Runtime.h, "Shared"): Paykan_weak_new,
 // Paykan_weak_load and Paykan_weak_release, the zombie an object leaves for

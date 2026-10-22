@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR text printer.  The format is specified in docs/pir.md §10; the parser
 // (Parser.cpp) reads exactly what this prints.
 

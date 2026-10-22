@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The IFACE section (docs/design/pkm.md §3): what Sema needs to type-check
 // an importer, as a self-delimiting blob with the part table of §3.2.

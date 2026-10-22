@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // `paykan pkm dump` (docs/design/pkm.md §8.5): a stable, golden-tested text
 // rendering of a module file.  Deterministic and path-free so two dumps of

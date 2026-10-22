@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // CodeGen tests: the sized numeric types (docs/design/sized-types.md) —
 // arithmetic wrapping to the width, unsigned division, remainder and
 // ordering, f32 / f16 rounding after each operation, the conversions

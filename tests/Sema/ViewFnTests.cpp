@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: `view fn` methods.  A method may change `self` unless it is a
 // `view fn`, where `self` is read-only; only a `view fn` may be called on a
 // `view`, and a method that never changes `self` but is not one gets a

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for iterative (deferred) destruction in Paykan_release (#118):
 // a release that drops a count to zero while a destroy is running queues the

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The .pkm container reader and writer (docs/design/pkm.md §1).  The reader
 // follows §1.7 in order and stops at the first fault with a structured

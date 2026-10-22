@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Public entry points of the recursive-descent frontend
 // (src/Frontends/RecursiveDescent).
 

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // CodeGen tests: the conversion constructors `Target<Source>(value)` (#64) —
 // `Str<int|float|bool|char>` and the numeric conversions between int, float,
 // bool and char, with their edge cases — and `bool<Str>` (#88).  The parses

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests for the `enum` type: declaration, variant access, equality rules,
 // non-convertibility, and enum-subject match.
 

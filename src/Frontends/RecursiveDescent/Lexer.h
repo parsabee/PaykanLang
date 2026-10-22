@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Reentrant lexer of the recursive-descent frontend for the Paykan language.
 //
 // Pull-based: the parser calls next() for one token at a time.  The lexer

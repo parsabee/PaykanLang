@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The recursive-descent frontend plugin: adapts parseSource/dumpTokens to the
 // frontend interface and registers the plugin as "recursive-descent".
 

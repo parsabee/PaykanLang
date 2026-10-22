@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The system toolchain shared by the backends that produce native programs:
 // finding the C compiler / linker and the Paykan runtime, spawning them, and

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Regression tests for crashers and miscompiles found after the fact.  Every
 // runtime test runs under the tracking allocator and asserts zero live heap
 // blocks, since most of these bugs were ownership imbalances.

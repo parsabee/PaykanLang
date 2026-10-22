@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The MANIFEST section (docs/design/pkm.md §2): what a module file depends
 // on and which toolchain produced it, as a flat TLV so fields can be added

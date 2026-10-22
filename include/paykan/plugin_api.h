@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Parsa Bagheri
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: Apache-2.0
  *
  * The PaykanLang plugin API: the C interface between `paykan` and a plugin
  * loaded at run time (docs/plugins/plugin-api.md is the reference).

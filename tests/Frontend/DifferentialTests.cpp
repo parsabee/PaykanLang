@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Differential check of the enabled frontends: every .pkn file under
 // samples/ must be accepted or rejected by all of them
 // alike and, when accepted, yield the same printed AST (docs/grammar.md).

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR verifier: the rules of docs/pir.md §9.
 
 #include "paykan/pir/Verifier.h"

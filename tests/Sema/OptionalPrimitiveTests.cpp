@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: optional primitives `int?`, `float?`, `bool?`, `char?` (#66) —
 // boxing conversions, what does not convert, `match` with a primitive arm,
 // equality, literals, generics, and the remaining rejections (`Enum?`,

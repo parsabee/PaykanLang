@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // What a module's `.pkm` keeps of its code (see ModuleCode.h).
 
 #include "paykan/modules/ModuleCode.h"

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Parser tests: array types, literals (`[a, b]` and `[v; n]`), subscript
 
 #include "TestUtils.h"

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Binary PIR codec and symbol index (docs/design/pkm.md §5, §6.1): the two
 // round-trip invariants of §5.8 on hand-written PIR, per-function decoding
 // through the index, and hostile input (truncation at every offset, byte

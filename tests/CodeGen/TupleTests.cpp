@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Codegen / E2E tests for tuples, values held in place: copying one retains
 // the references it holds, and a variable's, an element's or a field's are
 // released when it goes.  Every runtime test runs under the tracking

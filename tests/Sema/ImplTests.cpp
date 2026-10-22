@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: `impl` blocks.  Their methods join the class but are called
 // directly: none may take a name the class or a superclass already has, a
 // subclass cannot override one, and an `impl` block adds only to a class of

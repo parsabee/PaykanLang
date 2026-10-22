@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The mlir backend's LLVM path (docs/design/mlir-backend.md): the shared
 // lowering's output into the LLVM dialect -- upstream conversions for func,
 // scf, cf and arith, and a pattern for each remaining pir op -- then LLVM IR.

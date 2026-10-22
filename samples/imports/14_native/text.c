@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The native functions of text.pkn, written against the Paykan runtime ABI
 // (Runtime.h): a `view` Str argument is a borrowed PaykanObject *, an

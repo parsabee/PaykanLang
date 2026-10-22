@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // CodeGen tests: the fallible parses `int<Str>(s)` -> `int?` and
 // `float<Str>(s)` -> `float?` (#64).
 

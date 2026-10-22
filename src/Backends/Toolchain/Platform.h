@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The compiler's portability layer: every operating-system API the
 // compiler uses beyond standard C++ lives behind these few functions,

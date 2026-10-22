@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The fixed numbers of the .pkm module file (docs/design/pkm.md §1, §2, §3):
 // format versions, section kinds and flags, limits.  One header so that the

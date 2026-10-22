@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR text printer (docs/pir.md §10).  The output round-trips through the
 // parser (paykan/pir/Parser.h).
 

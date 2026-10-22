@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Internal declarations of the AST -> PIR lowering, the single home of the
 // ownership rules (docs/pir.md §7): what every expression's value is

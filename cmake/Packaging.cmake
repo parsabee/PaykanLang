@@ -11,7 +11,7 @@
 # CMake package, the empty system plugin directory
 # lib/paykan/plugins/<version> and the standard library
 # lib/paykan/stdlib/<version>, plus the license as
-# share/doc/paykanlang/copyright.  The frontend test support
+# share/doc/paykanlang/copyright and its NOTICE next to it.  The frontend test support
 # (PaykanTestSupport.cmake, its own install component) is left out.
 # `paykan` finds the runtime, the plugin directory and the standard library
 # relative to its own executable, so /usr/bin/paykan uses /usr/lib and
@@ -31,6 +31,11 @@
 install(FILES ${PROJECT_SOURCE_DIR}/LICENSE
     DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/paykanlang
     RENAME copyright
+    COMPONENT DebianDocs
+    EXCLUDE_FROM_ALL
+)
+install(FILES ${PROJECT_SOURCE_DIR}/NOTICE
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/paykanlang
     COMPONENT DebianDocs
     EXCLUDE_FROM_ALL
 )

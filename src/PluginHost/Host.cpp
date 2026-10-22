@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The host table of the C plugin interface: what paykan offers a plugin
 // (paykan/plugin_api.h, docs/plugins/plugin-api.md).  Every function here is

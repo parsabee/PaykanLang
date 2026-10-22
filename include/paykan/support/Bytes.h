@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Bounds-checked little-endian byte I/O for the binary formats (the .pkm
 // container and its sections, docs/design/pkm.md §1.1): fixed-width

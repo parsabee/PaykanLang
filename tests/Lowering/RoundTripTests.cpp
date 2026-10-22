@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR round trips over the whole corpus: every program under samples/ that
 // passes Sema is lowered, verified and printed; the text is parsed back,
 // verified again and re-printed, and the two texts must be identical

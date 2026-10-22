@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // AST -> PIR lowering: the program driver.  Imports are lowered before their
 // importer (each module once; one the resolver loaded from a `.pkm` is

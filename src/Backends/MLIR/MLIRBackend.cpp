@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The mlir backend plugin (docs/design/mlir-backend.md): PIR imported into
 // the `pir` MLIR dialect (Import/), lowered once for both targets
 // (Lowering/PIRToStandard.cpp), then

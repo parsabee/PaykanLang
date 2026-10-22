@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Test helper for vtable dispatch.  A vtable is an array of PaykanMethod
 // (Runtime.h); a slot is converted back to its method's own type before the

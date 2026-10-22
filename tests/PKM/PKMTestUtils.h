@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Shared fixtures for the .pkm tests: a representative manifest, interface
 // and container, and the byte patching helpers the corruption tests use.
 

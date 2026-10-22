@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The PIR -> LLVM translation (the mlir backend's LLVM path), tested on
 // hand-written PIR text: parse, verify, translate, JIT, and check the exit
 // code and output, or the LLVM IR.

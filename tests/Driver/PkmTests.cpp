@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The .pkm module system through the driver (docs/design/pkm.md §8): the
 // per-project cache (written, reused, deterministic, invalidated by body and

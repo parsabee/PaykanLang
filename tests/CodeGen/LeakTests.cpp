@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Heap leak tests: verify every allocation site releases to zero live blocks.
 // Uses the tracking allocator (Paykan_heap_set_tracking /
 // Paykan_heap_live_blocks).

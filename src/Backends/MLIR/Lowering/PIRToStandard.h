@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The shared lowering of the mlir backend (docs/design/mlir-backend.md): the
 // `pir` dialect into func, scf and arith, plus the pir ops no upstream
 // dialect lowers to both LLVM and EmitC.  Both targets start from its

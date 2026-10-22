@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: the types a `native fn` may take and return (#198), and how:
 // only a scalar crosses by value, anything else as a `view` or an `inout`.
 

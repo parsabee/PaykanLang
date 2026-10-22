@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Where a `view fn` may be declared (docs/language/05-classes.md, "Methods
 // that don't change self"): only a method, never `__init__`, and a method and
 // its overrides are all `view fn` or none is, so that a call through a base

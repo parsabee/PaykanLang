@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Semantic analysis: struct declarations and their method bodies
 // (docs/language/11-structs.md).  A struct is a value type with named,

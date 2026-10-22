@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR `mem` slots (docs/pir.md §1, §6): the bytes of an aggregate in a local
 // or a field, written and read through `ptr.add` / `ptr.load` / `ptr.store`,
 // copied with `mem.copy` and cleared with `mem.zero`.  Hand-written PIR, run

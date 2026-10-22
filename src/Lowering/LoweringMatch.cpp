@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // AST -> PIR lowering: `match` in its three modes (class / optional, value,
 // enum).  A match on an enum or on integer, char or bool literals is a

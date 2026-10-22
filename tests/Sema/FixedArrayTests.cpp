@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: arrays, `T[n]`, and slices, `view T[]` / `inout T[]`
 // (docs/language/09-arrays.md).  An array is for now the type of a local
 // variable, a parameter, a result or a field, of scalars, enums, references

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Fixed-size arrays, `T[n]` (docs/language/09-arrays.md): values held in `mem`
 // slots, copied whole, read and written in place.  Every test runs on the
 // backend the suite is built for (llvm and c) and checks zero live heap blocks.

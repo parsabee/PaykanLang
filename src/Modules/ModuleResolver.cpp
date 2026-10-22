@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The module resolver (paykan/modules/ModuleResolver.h).  The freshness rule
 // is docs/design/pkm.md §8.2: a cache entry is used only when the toolchain

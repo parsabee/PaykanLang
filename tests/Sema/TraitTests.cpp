@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: traits (#216).  `impl Trait for A` must give A every method the
 // trait requires, with its signature (a method A already has counts); a
 // class implements what its superclasses do, and every class implements the

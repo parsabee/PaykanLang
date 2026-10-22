@@ -5,7 +5,7 @@
 # PaykanLang
 
 [![CI](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml/badge.svg)](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](CHANGELOG.md)
 
 PaykanLang (`.pkn`) is a high-performance language for building applications on modern,
@@ -294,4 +294,5 @@ Hello, world!
 
 ## License
 
-PaykanLang is released under the [MIT License](LICENSE).
+PaykanLang is released under the [Apache License, Version 2.0](LICENSE). See
+[NOTICE](NOTICE) for its copyright notice.

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Recursive-descent frontend lexer tests, through the --dump-tokens output (one
 // token per line: `line:col-line:col KIND text`).
 

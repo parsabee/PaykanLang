@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Paykan runtime — rendering and comparing a tuple, a struct or an enum,
 // values held in place, through their layouts (Runtime.h, "Tuples",

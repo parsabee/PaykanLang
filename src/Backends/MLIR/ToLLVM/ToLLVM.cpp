@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The LLVM path of the mlir backend.  scf becomes cf (upstream), then one
 // conversion takes func, cf and arith to the LLVM dialect with upstream
 // patterns and the pir ops the shared lowering keeps with the patterns

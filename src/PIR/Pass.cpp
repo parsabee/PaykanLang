@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The PIR pass manager (see Pass.h).
 
 #include "paykan/pir/Pass.h"

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The TMPL section (docs/design/pkm.md §4.3): a module's generic classes,
 // structs and functions, as the module resolved them, for an importer to

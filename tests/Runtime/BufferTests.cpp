@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for the PaykanBuffer_* functions, the storage of the standard
 // library's memory::Buffer<T>: values of any PaykanType, new values all zero

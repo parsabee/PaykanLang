@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Part of the test support for out-of-tree frontends (installed in
 // share/paykan/frontend-tests; paykan_add_frontend_tests links it into each

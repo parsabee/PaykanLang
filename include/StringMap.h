@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // String-keyed containers for the compiler core.
 //
 // The core is standard C++ only, so the LLVM ADT containers (StringMap,

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Codegen tests: traits.  The methods of an `impl ... for` block run like any
 // `impl` block's, `Self` among their types, and a subclass has them too.  A
 // generic body calls what its bounds require, also in a template of another

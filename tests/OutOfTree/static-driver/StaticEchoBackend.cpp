@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // A static C++ backend for a driver of its own (paykan_add_driver): prints
 // the PIR it receives, through the in-process C++ interface.
