@@ -1,0 +1,39 @@
+// 62 — adjacent string literals
+// Exercises: string literals written next to each other, with only
+//            whitespace, newlines or comments between them, are one literal
+//            joined at compile time (docs/grammar.md §1): a long message
+//            split across lines, a table of lines built piece by piece with
+//            comments beside them, escapes decoded in each piece, a postfix
+//            on the joined literal (`.len()`, a subscript), and a joined
+//            literal as a match pattern.
+// expect-stdout: this message is far too long to fit on one line, so it is split across two
+// expect-stdout: usage: tool [options] <file>
+// expect-stdout:   -o <file>   write the output to <file>
+// expect-stdout:   -O<n>       optimise at level <n>
+// expect-stdout: a	tab, a "quote" and a \ backslash | 10 c
+// expect-stdout: a long name
+
+import ::io;
+
+fn kind(name: view Str) -> Str {
+  match name {
+    "a long "
+    "name" { return "a long name"; }
+    _ { return "another name"; }
+  }
+}
+
+fn main() -> int {
+  io::println("this message is far too long to fit on one line, so it is "
+              "split across two");
+
+  usage = "usage: tool [options] <file>\n"
+          "  -o <file>   write the output to <file>\n"  // one piece per line
+          "  -O<n>       optimise at level <n>\n";      // of the output
+  io::print(usage);
+
+  io::println("a\t" "tab, a \"quote\"" " and a \\ backslash | "
+      + Str("0123" "456789".len()) + " " + Str("ab" "c"[2]));
+  io::println(kind("a long name"));
+  return 0;
+}

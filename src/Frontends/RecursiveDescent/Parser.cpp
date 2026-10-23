@@ -1156,7 +1156,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement, bool member) {
   }
 
   // nativeFuncDecl ::= "native" "fn" IDENT ( "<" typeParamList ">" )?
-  //                    "(" params? ")" ( "->" type )? "=" STRING ";"
+  //                    "(" params? ")" ( "->" type )? "=" stringLiteral ";"
   //                    -- the C symbol instead of a body
   if (native) {
     if (!expect(Tok::Assign, "after a native function's signature"))
@@ -1165,7 +1165,10 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement, bool member) {
       errorAtCurrent("expected the C symbol as a string literal");
       return nullptr;
     }
-    const std::string &symbol = intern(consume().StrValue);
+    std::string pieces = consume().StrValue;
+    while (at(Tok::String))
+      pieces += consume().StrValue;
+    const std::string &symbol = intern(pieces);
     if (!expect(Tok::Semi, "after a native function"))
       return nullptr;
     auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
@@ -2278,8 +2281,14 @@ Expr *Parser::parseLiteral() {
     return Ctx.make<BoolLiteral>(t.Loc, false);
   case Tok::Char:
     return Ctx.make<CharLiteral>(t.Loc, t.CharValue);
-  case Tok::String:
-    return Ctx.make<StringLiteral>(t.Loc, t.StrValue);
+  case Tok::String: {
+    // stringLiteral ::= STRING+: adjacent pieces are one literal, joined at
+    // compile time, and spanning every piece (`"ab" "c"` is `"abc"`).
+    std::string value = t.StrValue;
+    while (at(Tok::String))
+      value += consume().StrValue;
+    return Ctx.make<StringLiteral>(span(t.Loc), value);
+  }
   default:
     return Ctx.make<NoneLiteral>(t.Loc);
   }
