@@ -43,7 +43,9 @@ struct MoveCounts {
 /// after an `if` or a `switch` whose arms all moved but one goes into that
 /// arm; null stores nothing reads are removed.  Never moved: `self`, `inout`
 /// and other addressed slots, fields, array elements, parts of a held value,
-/// `weak` locals, and a closure's captures.
+/// `weak` locals, and a closure's captures.  A `view` of a reference holds
+/// one of its own under today's calling convention, and is moved like any
+/// local.
 MoveCounts moveAtLastUse(Function &f);
 
 /// moveAtLastUse on every function the program defines, as a pass

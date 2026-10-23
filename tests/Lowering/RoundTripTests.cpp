@@ -6,8 +6,9 @@
 // (docs/pir.md: the printed form is a faithful serialization).  The binary
 // form (docs/design/pkm.md §5) must hold the same two invariants, and its
 // symbol index must slice every function out of the blob.  And the
-// moves-at-last-use pass (docs/pir.md §12) on every program: what it makes
-// verifies and round-trips, and counts no more references than before.
+// moves-at-last-use pass (docs/pir.md §12) on every program, the standard
+// library's tests' too: what it makes verifies and round-trips, and counts
+// no more references than before.
 
 #include "ModuleName.h"
 #include "TestUtils.h"
@@ -33,20 +34,25 @@
 #ifndef PAYKAN_SAMPLES_DIR
 #error "PAYKAN_SAMPLES_DIR must be defined via CMake compile definition"
 #endif
+#ifndef PAYKAN_STDLIB_TESTS_DIR
+#error "PAYKAN_STDLIB_TESTS_DIR must be defined via CMake compile definition"
+#endif
 
 using namespace paykan;
 
 namespace {
 
-std::vector<std::string> corpus() {
+/// The `.pkn` files under @p dir, sorted.
+std::vector<std::string> programsIn(const std::string &dir) {
   std::vector<std::string> files;
-  for (const auto &e :
-       std::filesystem::recursive_directory_iterator(PAYKAN_SAMPLES_DIR))
+  for (const auto &e : std::filesystem::recursive_directory_iterator(dir))
     if (e.is_regular_file() && e.path().extension() == ".pkn")
       files.push_back(e.path().string());
   std::sort(files.begin(), files.end());
   return files;
 }
+
+std::vector<std::string> corpus() { return programsIn(PAYKAN_SAMPLES_DIR); }
 
 /// Lower @p path the way the driver does (project root = its directory).
 /// Returns false (and leaves @p program empty) when the file is not a
@@ -248,7 +254,12 @@ TEST(PIRMoves, EveryCorpusProgramCountsNoMoreReferencesAndFewerWhereOneMoves) {
   size_t checked = 0, fewer = 0;
   size_t retains = 0, retainsAfter = 0, releases = 0, releasesAfter = 0;
   uint64_t transfers = 0;
-  for (const std::string &path : corpus()) {
+  // The samples, and the standard library's tests, whose programs hold
+  // the copies of the library's generic code they instantiate.
+  std::vector<std::string> programs = corpus();
+  for (const std::string &path : programsIn(PAYKAN_STDLIB_TESTS_DIR))
+    programs.push_back(path);
+  for (const std::string &path : programs) {
     pir::Program program;
     std::string error;
     if (!lowerFile(path, program, error))
@@ -274,6 +285,12 @@ TEST(PIRMoves, EveryCorpusProgramCountsNoMoreReferencesAndFewerWhereOneMoves) {
     if (moves > 0) {
       EXPECT_LT(after.Retains, before.Retains) << path;
       ++fewer;
+    }
+    // The samples written to hand variables on at their last use: fewer
+    // of both, whatever the pass counted.
+    if (path.find("_moves_") != std::string::npos) {
+      EXPECT_LT(after.Retains, before.Retains) << path;
+      EXPECT_LT(after.Releases, before.Releases) << path;
     }
     EXPECT_EQ(roundTrip(program), "") << path;
     // On its own output (a module's code is moved before its `.pkm` is

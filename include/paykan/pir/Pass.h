@@ -30,7 +30,6 @@ public:
   void add(std::string_view pass, std::string_view counter, uint64_t n);
   /// The counter's value; 0 when no pass made it.
   uint64_t get(std::string_view pass, std::string_view counter) const;
-  bool empty() const { return Counters.empty(); }
   /// "paykan pass stats:", then "  <pass> <counter> : <n>" for each
   /// counter, in the order they were made.
   void print(std::ostream &os) const;

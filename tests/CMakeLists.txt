@@ -301,6 +301,7 @@ target_include_directories(lowering_tests
 )
 target_compile_definitions(lowering_tests
     PRIVATE PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
+            PAYKAN_STDLIB_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Stdlib"
 )
 target_link_libraries(lowering_tests
     PRIVATE gtest_main

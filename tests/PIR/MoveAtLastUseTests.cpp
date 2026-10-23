@@ -12,6 +12,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <chrono>
 #include <sstream>
 #include <string>
 
@@ -103,6 +105,26 @@ std::string f(const Moved &m) {
   if (start == std::string::npos)
     return "";
   return text.substr(start, text.find("\n}\n", start) + 3 - start);
+}
+
+/// @f with @p n box locals, each given a new object, handed to @take one
+/// after the other at its last use, and released at the end: n copies in
+/// a function of about 9n statements.
+std::string manyCopies(size_t n) {
+  std::ostringstream os;
+  os << "fn @f() -> void {\n";
+  for (size_t i = 0; i < n; ++i)
+    os << "  local %x" << i << ": box\n";
+  for (size_t i = 0; i < n; ++i)
+    os << "  %o" << i << " = new Node\n  %b" << i << " = box %o" << i
+       << "\n  store %x" << i << ", %b" << i << "\n";
+  for (size_t i = 0; i < n; ++i)
+    os << "  %v" << i << " = load %x" << i << "\n  retain %v" << i
+       << "\n  call @take(%v" << i << ")\n";
+  for (size_t i = n; i-- > 0;)
+    os << "  %w" << i << " = load %x" << i << "\n  release %w" << i << "\n";
+  os << "  ret\n}\n";
+  return os.str();
 }
 
 size_t count(const std::string &text, const std::string &needle) {
@@ -433,6 +455,37 @@ fn @f(%a: box) -> void {
   EXPECT_EQ(count(out, "null box"), 0u) << out;
 }
 
+TEST(MoveAtLastUse, ACopyTakenEarlierIsAReferenceOfItsOwnWhereverItIsUsed) {
+  // %a1 holds its own reference: the copy in the arm may hand the slot's
+  // on although %a1 is used after the if.  The slot is cleared there, so
+  // the release after the if releases it on the other path only.
+  Moved m = move(R"(
+fn @f(%a: box) -> void {
+  local %x: box
+  store %x, %a
+  %a1 = load %x
+  retain %a1
+  %c = call @cond()
+  if %c {
+    %a2 = load %x
+    retain %a2
+    call @take(%a2)
+  }
+  call @take(%a1)
+  %w = load %x
+  release %w
+  ret
+}
+)");
+  const std::string out = f(m);
+  EXPECT_EQ(m.Counts.Transfers, 1u) << out;
+  EXPECT_EQ(count(out, "retain"), 1u) << out;
+  EXPECT_NE(out.find("retain %a1."), std::string::npos) << out;
+  EXPECT_LT(out.find("store %x.0, null box"), out.find("call @take(%a2."))
+      << out;
+  EXPECT_EQ(count(out, "release"), 1u) << out;
+}
+
 TEST(MoveAtLastUse, APathThatStopsNeedsNoRelease) {
   // A panic between the copy and its consumer ends that path.
   Moved m = move(R"(
@@ -714,6 +767,36 @@ fn @f(%a: box, %dst: ptr) -> void {
   EXPECT_NE(out.find("release %old."), std::string::npos) << out;
 }
 
+TEST(MoveAtLastUse, AnIfBetweenAHeldValuesLoadsAndItsCopyKeepsItACopy) {
+  // The retain is taken before the copy, but the if between its load and
+  // the copy may write the slot: the bytes copied need not be the
+  // reference retained, and what the if does is not looked into.
+  Moved m = move(R"(
+fn @f(%a: box, %b: box, %dst: ptr) -> void {
+  local %t: mem(16, 8)
+  %ta = local.addr %t
+  ptr.store %ta, %a
+  %t1 = ptr.add %ta, 8
+  ptr.store %t1, 7
+  %tb = local.addr %t
+  %e = ptr.load box, %tb
+  %c = call @cond()
+  if %c {
+    ptr.store %tb, %b
+  }
+  retain %e
+  %old = ptr.load box, %dst
+  release %old
+  mem.copy %dst, %tb, 16
+  %tr = local.addr %t
+  %te = ptr.load box, %tr
+  release %te
+  ret
+}
+)");
+  EXPECT_EQ(m.Counts.Transfers, 0u) << f(m);
+}
+
 TEST(MoveAtLastUse, APartOfAHeldValueIsNotMoved) {
   // The second element alone, copied out: a member, not the variable.
   Moved m = move(R"(
@@ -835,6 +918,38 @@ fn @f(%a: box) -> void {
       EXPECT_EQ(moveAtLastUse(fn).Transfers, 0u);
     }
   EXPECT_EQ(toString(once.P), first);
+}
+
+TEST(MoveAtLastUse, ItsTimeGrowsWithTheFunctionNotWithCopiesTimesItsSize) {
+  // Each copy's last use, and each release and null store after the
+  // moves, is found by one walk of the function for all of them.  Four
+  // times the copies in a function four times the size take about four
+  // times as long; a walk per copy would take sixteen.
+  auto seconds = [](size_t n) {
+    double best = 0;
+    for (int run = 0; run < 3; ++run) {
+      ParseError err;
+      auto p = parseProgram(kPrelude + manyCopies(n), err);
+      EXPECT_TRUE(p) << err.str();
+      if (!p)
+        return 0.0;
+      Function *fn = nullptr;
+      for (Function &g : p->Modules.front().Functions)
+        if (g.Name == "f")
+          fn = &g;
+      const auto start = std::chrono::steady_clock::now();
+      const MoveCounts c = moveAtLastUse(*fn);
+      const std::chrono::duration<double> took =
+          std::chrono::steady_clock::now() - start;
+      EXPECT_EQ(c.Transfers, n);
+      EXPECT_EQ(c.Releases, n);
+      best = run == 0 ? took.count() : std::min(best, took.count());
+    }
+    return best;
+  };
+  const double small = seconds(1000);
+  const double large = seconds(4000);
+  EXPECT_LT(large, 8 * small) << small << " s, then " << large << " s";
 }
 
 TEST(MoveAtLastUse, ThePassCountsWhatItDid) {

@@ -70,6 +70,16 @@ void addCodePasses(paykan::pir::PassManager &passes) {
   passes.add(paykan::pir::createMovesAtLastUsePass());
 }
 
+/// Whether the program is verified after each PIR pass, so that a pass
+/// that breaks it is the one the error names: in a build with assertions.
+/// A module's code is verified after its passes in every build, since its
+/// `.pkm` keeps it.
+#ifndef NDEBUG
+constexpr bool kVerifyPasses = true;
+#else
+constexpr bool kVerifyPasses = false;
+#endif
+
 /// What a module's `.pkm` holds of its code (docs/design/pkm.md §5.13).
 struct WrittenCode {
   paykan::pir::Module Code;
@@ -78,8 +88,8 @@ struct WrittenCode {
 
 /// @p module (as lowered) trimmed to what it and its importers (whose view
 /// of it is @p iface) reach, through the code passes (what they did added
-/// to @p stats), and with a backend that compiles modules, split into its
-/// CODE and the code @p backend compiles.
+/// to @p stats) and verified, and with a backend that compiles modules,
+/// split into its CODE and the code @p backend compiles.
 paykan::StatusOr<WrittenCode>
 moduleCode(paykan::pir::Module module, const pkm::Interface &iface,
            paykan::backend::Backend *backend,
@@ -95,6 +105,11 @@ moduleCode(paykan::pir::Module module, const pkm::Interface &iface,
       return s;
     module = std::move(code.Modules.front());
   }
+  if (auto errors = paykan::pir::verify(module); !errors.empty())
+    return paykan::Status::error(
+        "internal compiler error: the module's code does not verify after "
+        "the PIR passes:\n" +
+        paykan::pir::formatErrors(errors));
   WrittenCode out;
   if (!backend || !caps.CompileModules) {
     out.Code = std::move(module);
@@ -750,7 +765,7 @@ int main(int argc, char *argv[]) {
     roots.Classes = [](const paykan::pir::Module &m,
                        const paykan::pir::Class &c) { return m.isCompiled(c); };
   }
-  paykan::pir::PassManager passes;
+  paykan::pir::PassManager passes(kVerifyPasses);
   passes.add(paykan::pir::createDeadCodePass(std::move(roots)));
   addCodePasses(passes);
   if (paykan::Status s = passes.run(program, stats); !s)

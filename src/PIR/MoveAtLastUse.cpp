@@ -3,10 +3,10 @@
 // The moves-at-last-use pass (see MoveAtLastUse.h; docs/pir.md §12 has the
 // correctness argument).
 //
-// A function's structured body is first made a control-flow graph (Graph):
-// a node per instruction, per test (an if's or a switch's value, a while's
-// condition), per `ret` and per `unreachable`, linked as the statements run.
-// With it come, for every value, where it is defined and which nodes use it
+// A function's statements are first numbered (Graph): a node per
+// instruction, per test (an if's or a switch's value, a while's condition),
+// per `ret` and per `unreachable`, and one for the end of the body.  With
+// them come, for every value, where it is defined and which nodes use it
 // (Values), and what it may refer to without a reference of its own
 // (Origins): a box loaded from a local, the object unboxed from that box, a
 // field of the object, an address into a `mem` local and what is read
@@ -17,7 +17,10 @@
 // constant offset) before anything else touches the slot or uses an alias
 // of it, or ends in `unreachable`.  Moving removes the copy's retains and
 // stores null into the slot; the cleanup that follows removes what that made
-// useless.
+// useless.  Each of these questions is one dataflow over the structured
+// body (Flow), a bit per slot, so the pass takes time in proportion to the
+// function's size times the depth of its loops, not to the number of copies
+// times its size.
 
 #include "paykan/pir/MoveAtLastUse.h"
 
@@ -25,7 +28,8 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <map>
+#include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <set>
@@ -95,106 +99,74 @@ struct Node {
     Return,      // `ret`: the function ends
     Dead,        // `unreachable`: no path goes on
     Exit,        // the end of the function's body
-    Join,        // where paths meet: a loop's head, an arm's end, a jump
   };
-  Kind K = Join;
+  Kind K = Exit;
   /// The statement (Instruction, Test, Return, Dead).
   Place At;
   /// The operand a Test or a Return uses (none for a `ret` of nothing).
   const Operand *Use = nullptr;
-  std::vector<uint32_t> Succ;
 };
 
-/// A function body's control-flow graph.
+/// A function body's nodes, numbered in the reverse of the order its
+/// statements run in: a block from its end, an if's arms before its test.
+/// The flows (Flow) walk the structured body and step through them.
 class Graph {
 public:
   std::vector<Node> Nodes;
-  uint32_t Entry = 0;
-  /// The node of each instruction, `ret` and `unreachable`, and of each if's
-  /// and switch's test.
-  std::unordered_map<const Stmt *, uint32_t> NodeOf;
-  /// For each if and switch: the node ending each of its arms, from which
-  /// the statement after it runs, in the order of the arms (then, else; the
-  /// cases, then the default).  An absent else or default is an arm too.
-  std::unordered_map<const Stmt *, std::vector<uint32_t>> ArmEnds;
+  /// The end of the function's body.
+  uint32_t End = 0;
 
-  explicit Graph(Function &f) { Entry = block(f.Body, add(Node::Exit)); }
+  explicit Graph(Function &f) : End(add(Node::Exit)) { block(f.Body); }
 
   const Instr *instr(uint32_t n) const {
     return Nodes[n].K == Node::Instruction ? Nodes[n].At.instr() : nullptr;
   }
-  /// The node after instruction node @p n.
-  uint32_t next(uint32_t n) const { return Nodes[n].Succ.front(); }
+  /// The node of an instruction, a `ret` or an `unreachable`, or the test
+  /// of an if, a switch or a while.
+  uint32_t of(const Stmt &s) const { return NodeOf.at(&s); }
 
 private:
-  struct Loop {
-    uint32_t Head;
-    uint32_t Exit;
-  };
-  std::vector<Loop> Loops;
+  std::unordered_map<const Stmt *, uint32_t> NodeOf;
 
-  uint32_t add(Node::Kind k, Place at = {}, const Operand *use = nullptr,
-               std::vector<uint32_t> succ = {}) {
+  uint32_t add(Node::Kind k, Place at = {}, const Operand *use = nullptr) {
     Node n;
     n.K = k;
     n.At = at;
     n.Use = use;
-    n.Succ = std::move(succ);
-    Nodes.push_back(std::move(n));
+    Nodes.push_back(n);
     return static_cast<uint32_t>(Nodes.size() - 1);
   }
 
-  /// The entry of @p b, whose end goes on to @p next.
-  uint32_t block(Block &b, uint32_t next) {
+  void block(Block &b) {
     for (size_t i = b.Stmts.size(); i-- > 0;)
-      next = stmt(b, i, next);
-    return next;
+      stmt(b, i);
   }
 
-  uint32_t stmt(Block &b, size_t i, uint32_t next) {
+  void stmt(Block &b, size_t i) {
     Stmt &s = b.Stmts[i];
     const Place at{&b, i};
-    uint32_t n = 0;
     if (std::holds_alternative<Instr>(s)) {
-      n = add(Node::Instruction, at, nullptr, {next});
+      NodeOf[&s] = add(Node::Instruction, at);
     } else if (auto *x = std::get_if<If>(&s)) {
-      const uint32_t thenEnd = add(Node::Join, {}, nullptr, {next});
-      const uint32_t elseEnd = add(Node::Join, {}, nullptr, {next});
-      const uint32_t thenEntry = block(*x->Then, thenEnd);
-      const uint32_t elseEntry = x->Else ? block(*x->Else, elseEnd) : elseEnd;
-      ArmEnds[&s] = {thenEnd, elseEnd};
-      n = add(Node::Test, at, &x->Cond, {thenEntry, elseEntry});
+      block(*x->Then);
+      if (x->Else)
+        block(*x->Else);
+      NodeOf[&s] = add(Node::Test, at, &x->Cond);
     } else if (auto *x = std::get_if<Switch>(&s)) {
-      std::vector<uint32_t> ends;
-      std::vector<uint32_t> entries;
-      for (Switch::Case &c : x->Cases) {
-        ends.push_back(add(Node::Join, {}, nullptr, {next}));
-        entries.push_back(block(*c.Body, ends.back()));
-      }
-      ends.push_back(add(Node::Join, {}, nullptr, {next}));
-      entries.push_back(x->Default ? block(*x->Default, ends.back())
-                                   : ends.back());
-      ArmEnds[&s] = std::move(ends);
-      n = add(Node::Test, at, &x->Value, std::move(entries));
+      for (Switch::Case &c : x->Cases)
+        block(*c.Body);
+      if (x->Default)
+        block(*x->Default);
+      NodeOf[&s] = add(Node::Test, at, &x->Value);
     } else if (auto *x = std::get_if<While>(&s)) {
-      const uint32_t head = add(Node::Join);
-      Loops.push_back({head, next});
-      const uint32_t body = block(*x->Body, head);
-      Loops.pop_back();
-      const uint32_t test = add(Node::Test, at, &x->Cond, {body, next});
-      Nodes[head].Succ = {block(*x->CondBlock, test)};
-      return head;
-    } else if (std::holds_alternative<Break>(s)) {
-      return add(Node::Join, {}, nullptr, {Loops.back().Exit});
-    } else if (std::holds_alternative<Continue>(s)) {
-      return add(Node::Join, {}, nullptr, {Loops.back().Head});
+      block(*x->Body);
+      NodeOf[&s] = add(Node::Test, at, &x->Cond);
+      block(*x->CondBlock);
     } else if (auto *x = std::get_if<Return>(&s)) {
-      n = add(Node::Return, at, x->Value ? &*x->Value : nullptr);
-    } else {
-      n = add(Node::Dead, at);
+      NodeOf[&s] = add(Node::Return, at, x->Value ? &*x->Value : nullptr);
+    } else if (std::holds_alternative<Unreachable>(s)) {
+      NodeOf[&s] = add(Node::Dead, at);
     }
-    NodeOf[&s] = n;
-    return n;
   }
 };
 
@@ -287,11 +259,14 @@ public:
     }
   }
 
+  /// The locals @p o may refer to, or into the storage of, sorted.
+  const std::vector<LocalId> &locals(const Operand &o) const {
+    static const std::vector<LocalId> none;
+    return o.isValue() && o.valueId() < From.size() ? From[o.valueId()] : none;
+  }
   /// Whether @p o may refer to local @p l, or into its storage.
   bool from(const Operand &o, LocalId l) const {
-    if (!o.isValue() || o.valueId() >= From.size())
-      return false;
-    const std::vector<LocalId> &ls = From[o.valueId()];
+    const std::vector<LocalId> &ls = locals(o);
     return std::binary_search(ls.begin(), ls.end(), l);
   }
   Address address(const Operand &o) const {
@@ -354,11 +329,6 @@ private:
     }
     return changed;
   }
-  const std::vector<LocalId> &fromOf(const Operand &o) const {
-    static const std::vector<LocalId> none;
-    return o.isValue() && o.valueId() < From.size() ? From[o.valueId()] : none;
-  }
-
   void walk(const Block &b, bool &changed) {
     for (const Stmt &s : b.Stmts) {
       if (const auto *in = std::get_if<Instr>(&s)) {
@@ -397,8 +367,8 @@ private:
       }
       break;
     case Opcode::PtrAdd: {
-      merge(from, fromOf(in.Args[0]));
-      merge(from, fromOf(in.Args[1]));
+      merge(from, locals(in.Args[0]));
+      merge(from, locals(in.Args[1]));
       const Address base = address(in.Args[0]);
       addr.L = base.L;
       if (std::optional<int64_t> c = constantI64(in.Args[1]);
@@ -411,13 +381,13 @@ private:
       // copy retained, or a fresh or handed-on one); anything else that
       // refers to something is an alias the local now holds.
       if (F.Locals[in.Local].Ty != Type::Box)
-        changed |= merge(Held[in.Local], fromOf(in.Args[0]));
+        changed |= merge(Held[in.Local], locals(in.Args[0]));
       return;
     case Opcode::PtrStore:
     case Opcode::FieldStore:
       // An alias stored in memory: what it refers to is no longer followed.
       if (!retained(in.Args[1]))
-        for (LocalId l : fromOf(in.Args[1]))
+        for (LocalId l : locals(in.Args[1]))
           if (!Escaped[l]) {
             Escaped[l] = true;
             changed = true;
@@ -438,16 +408,16 @@ private:
       // may be one into an argument.
       if (in.Result.Ty == Type::Obj || in.Result.Ty == Type::Ptr)
         for (const Operand &o : in.Args)
-          merge(from, fromOf(o));
+          merge(from, locals(o));
       break;
     case Opcode::Cast:
       // A reference cast to an integer is still one.
-      merge(from, fromOf(in.Args[0]));
+      merge(from, locals(in.Args[0]));
       break;
     default:
       if (refersTo(in.Result.Ty))
         for (const Operand &o : in.Args)
-          merge(from, fromOf(o));
+          merge(from, locals(o));
       break;
     }
     if (in.Result.Ty == Type::Void)
@@ -472,16 +442,276 @@ struct Slot {
   int64_t Offset = 0;
 };
 
-/// The copy of a box local being examined: the retain that makes it, the
-/// box it retains and the statement that takes the box.
-struct Copy {
-  Place Retain;
-  ValueId Moved = kNoValue;
-  const Stmt *Consumer = nullptr;
+/// A set of slots, a bit each.
+class Bits {
+public:
+  Bits(size_t n, bool all) : N(n), W((n + 63) / 64) { fill(all); }
+
+  bool test(size_t i) const { return (W[i / 64] >> (i % 64) & 1) != 0; }
+  void set(size_t i, bool v) {
+    const uint64_t bit = uint64_t{1} << (i % 64);
+    W[i / 64] = v ? W[i / 64] | bit : W[i / 64] & ~bit;
+  }
+  /// Every bit set to @p v.
+  void fill(bool v) {
+    std::fill(W.begin(), W.end(), v ? ~uint64_t{0} : 0);
+    if (v && N % 64 != 0)
+      W.back() = (uint64_t{1} << (N % 64)) - 1;
+  }
+  /// Each bit "and" (@p all) or "or" the same bit of @p o.
+  void meet(const Bits &o, bool all) {
+    for (size_t i = 0; i < W.size(); ++i)
+      W[i] = all ? W[i] & o.W[i] : W[i] | o.W[i];
+  }
+  bool operator==(const Bits &o) const { return W == o.W; }
+
+private:
+  size_t N;
+  std::vector<uint64_t> W;
 };
 
-/// A copy moved: its retains removed, null stored into the slot's
-/// references before Before.
+/// The slots a flow follows: a bit each, and the bits of each local's.
+class Slots {
+public:
+  explicit Slots(size_t locals) : OfLocal(locals) {}
+
+  /// The bit of @p s, made the first time.
+  size_t add(Slot s) {
+    if (std::optional<size_t> i = find(s))
+      return *i;
+    OfLocal[s.L].push_back(List.size());
+    List.push_back(s);
+    return List.size() - 1;
+  }
+  std::optional<size_t> find(Slot s) const {
+    for (size_t i : OfLocal[s.L])
+      if (List[i].Offset == s.Offset)
+        return i;
+    return std::nullopt;
+  }
+  size_t size() const { return List.size(); }
+  const Slot &operator[](size_t i) const { return List[i]; }
+  /// The bits of local @p l's slots.
+  const std::vector<size_t> &of(LocalId l) const { return OfLocal[l]; }
+
+private:
+  std::vector<Slot> List;
+  std::vector<std::vector<size_t>> OfLocal;
+};
+
+/// A dataflow over a function's structured body, a bit per slot: one walk
+/// over its statements, forward from the entry or backward from the end,
+/// that walks a loop again until the bits at its head stop changing.  A
+/// must-flow's bit holds where it holds on every path (the meet is "and",
+/// and a loop's head starts with every bit set); a may-flow's where it does
+/// on some path ("or", from none set).
+class Flow {
+public:
+  struct State {
+    Bits B;
+    /// Whether some path reaches the point (a forward flow's: not one
+    /// after a `ret`).
+    bool Reached = true;
+
+    bool operator==(const State &o) const {
+      return Reached == o.Reached && B == o.B;
+    }
+  };
+  /// What node @p n does: called with the state before it (forward) or
+  /// after it (backward), which it makes the state after (before) it.  A
+  /// node in a loop is stepped through on every walk of the loop, the last
+  /// time with its final state.
+  using Step = std::function<void(uint32_t n, State &s)>;
+  /// The state at the end of arm @p k of the if or switch @p s (forward):
+  /// the arms in order, then and else, or the cases and the default, an
+  /// absent else or default an arm too.
+  using ArmEnd = std::function<void(const Stmt &s, size_t k, const State &)>;
+
+  Flow(const Graph &g, size_t bits, bool must, Step step,
+       ArmEnd armEnd = nullptr)
+      : G(g), N(bits), Must(must), StepFn(std::move(step)),
+        ArmEndFn(std::move(armEnd)) {}
+
+  /// Forward from the entry of @p body, where no bit is set.
+  void forward(const Block &body) {
+    State s{Bits(N, false), true};
+    fwdBlock(body, s);
+  }
+  /// Backward from the end of @p body, which is stepped through first.
+  void backward(const Block &body) {
+    State s = start();
+    StepFn(G.End, s);
+    bwdBlock(body, s);
+  }
+
+private:
+  const Graph &G;
+  size_t N;
+  bool Must;
+  Step StepFn;
+  ArmEnd ArmEndFn;
+  /// The loops around the statement walked: forward, the states that
+  /// `continue` and `break` leave them with; backward, the states at their
+  /// head and after them.
+  struct Loop {
+    State Head;
+    State Exit;
+  };
+  std::vector<Loop> Loops;
+  /// The state each loop's head settled on the last time it was walked.
+  /// A loop inside another is walked again on each walk of the outer one,
+  /// whose states only ever move one way (down for a must-flow, up for a
+  /// may-flow): starting from where it settled, it settles in a walk or two
+  /// rather than in as many as the first time.
+  std::unordered_map<const Stmt *, State> Heads;
+
+  /// No path: the meet's identity.
+  State none() const { return {Bits(N, Must), false}; }
+  /// What a loop's head starts from, and the state after a `ret` or an
+  /// `unreachable` before it is stepped through (backward).
+  State start() const { return {Bits(N, Must), true}; }
+
+  void meet(State &into, const State &o) const {
+    if (!o.Reached)
+      return;
+    if (!into.Reached) {
+      into = o;
+      return;
+    }
+    into.B.meet(o.B, Must);
+  }
+
+  void fwdBlock(const Block &b, State &s) {
+    for (const Stmt &st : b.Stmts)
+      fwdStmt(st, s);
+  }
+
+  void fwdArm(const Stmt &st, size_t k, const Block *arm, const State &in,
+              State &out) {
+    State a = in;
+    if (arm)
+      fwdBlock(*arm, a);
+    if (ArmEndFn)
+      ArmEndFn(st, k, a);
+    meet(out, a);
+  }
+
+  void fwdStmt(const Stmt &st, State &s) {
+    if (std::holds_alternative<Instr>(st)) {
+      StepFn(G.of(st), s);
+    } else if (const auto *x = std::get_if<If>(&st)) {
+      StepFn(G.of(st), s);
+      State out = none();
+      fwdArm(st, 0, x->Then.get(), s, out);
+      fwdArm(st, 1, x->Else.get(), s, out);
+      s = std::move(out);
+    } else if (const auto *x = std::get_if<Switch>(&st)) {
+      StepFn(G.of(st), s);
+      State out = none();
+      for (size_t k = 0; k < x->Cases.size(); ++k)
+        fwdArm(st, k, x->Cases[k].Body.get(), s, out);
+      fwdArm(st, x->Cases.size(), x->Default.get(), s, out);
+      s = std::move(out);
+    } else if (const auto *x = std::get_if<While>(&st)) {
+      const State entry = s;
+      State head = entry;
+      if (auto it = Heads.find(&st); it != Heads.end()) {
+        head = it->second;
+        meet(head, entry);
+      }
+      for (;;) {
+        State test = head;
+        fwdBlock(*x->CondBlock, test);
+        StepFn(G.of(st), test);
+        Loops.push_back({none(), none()});
+        State body = test;
+        fwdBlock(*x->Body, body);
+        const Loop loop = std::move(Loops.back());
+        Loops.pop_back();
+        State next = entry;
+        meet(next, body);
+        meet(next, loop.Head);
+        if (next == head) {
+          Heads.insert_or_assign(&st, std::move(head));
+          s = std::move(test);
+          meet(s, loop.Exit);
+          return;
+        }
+        head = std::move(next);
+      }
+    } else if (std::holds_alternative<Break>(st)) {
+      meet(Loops.back().Exit, s);
+      s = none();
+    } else if (std::holds_alternative<Continue>(st)) {
+      meet(Loops.back().Head, s);
+      s = none();
+    } else {
+      StepFn(G.of(st), s); // `ret`, `unreachable`
+      s = none();
+    }
+  }
+
+  void bwdBlock(const Block &b, State &s) {
+    for (size_t i = b.Stmts.size(); i-- > 0;)
+      bwdStmt(b.Stmts[i], s);
+  }
+
+  void bwdArm(const Block *arm, const State &after, State &out) {
+    State a = after;
+    if (arm)
+      bwdBlock(*arm, a);
+    meet(out, a);
+  }
+
+  void bwdStmt(const Stmt &st, State &s) {
+    if (std::holds_alternative<Instr>(st)) {
+      StepFn(G.of(st), s);
+    } else if (const auto *x = std::get_if<If>(&st)) {
+      State out = none();
+      bwdArm(x->Then.get(), s, out);
+      bwdArm(x->Else.get(), s, out);
+      s = std::move(out);
+      StepFn(G.of(st), s);
+    } else if (const auto *x = std::get_if<Switch>(&st)) {
+      State out = none();
+      for (const Switch::Case &c : x->Cases)
+        bwdArm(c.Body.get(), s, out);
+      bwdArm(x->Default.get(), s, out);
+      s = std::move(out);
+      StepFn(G.of(st), s);
+    } else if (const auto *x = std::get_if<While>(&st)) {
+      const State exit = s;
+      auto it = Heads.find(&st);
+      State head = it != Heads.end() ? it->second : start();
+      for (;;) {
+        Loops.push_back({head, exit});
+        State before = head;
+        bwdBlock(*x->Body, before);
+        Loops.pop_back();
+        meet(before, exit);
+        StepFn(G.of(st), before);
+        bwdBlock(*x->CondBlock, before);
+        if (before == head)
+          break;
+        head = std::move(before);
+      }
+      Heads.insert_or_assign(&st, head);
+      s = std::move(head);
+    } else if (std::holds_alternative<Break>(st)) {
+      s = Loops.back().Exit;
+    } else if (std::holds_alternative<Continue>(st)) {
+      s = Loops.back().Head;
+    } else {
+      s = start(); // `ret`, `unreachable`: nothing runs after them
+      StepFn(G.of(st), s);
+    }
+  }
+};
+
+/// A copy found: its retains, which a move removes, and null to store into
+/// the slot's references before Before.  It is moved when every path from
+/// the point after node Last reaches the release of each of them before
+/// anything else happens to the slot.
 struct Transfer {
   Slot S;
   /// The references moved (offsets in the slot's local; {0} for a box).
@@ -490,9 +720,11 @@ struct Transfer {
   Place Before;
   /// A mem local's address the null stores go through (its copy's source).
   Operand Base;
+  /// The node the copy is complete at.
+  uint32_t Last = 0;
 };
 
-/// One analysis of a function: its graph and what its values refer to.
+/// One analysis of a function: its nodes and what its values refer to.
 class Analysis {
 public:
   explicit Analysis(Function &f) : F(f), G(f), V(f, G), O(f, G, V) {}
@@ -515,10 +747,13 @@ public:
            V.users(in->Result.Id).size() == 1;
   }
 
-  /// Whether @p o, used by node @p n, is a copy with a reference of its own
-  /// made before @p before: a value whose other use is a retain ahead of
-  /// @p before in its block (`f(a, a)`: the first argument).
-  bool ownCopy(const Operand &o, uint32_t n, Place before) const {
+  /// Whether @p o, used by node @p n, holds a reference of its own there:
+  /// its one other use is a `retain` earlier in @p n's block.  The box a
+  /// copy hands its consumer does, and so does an earlier copy of the same
+  /// slot wherever it is used (`f(a, a)`: the first argument).  A copy made
+  /// after a slot's copy reads the slot first, which ends that copy's last
+  /// use before it.
+  bool ownReference(const Operand &o, uint32_t n) const {
     if (!o.isValue())
       return false;
     const std::vector<uint32_t> &users = V.users(o.valueId());
@@ -527,18 +762,15 @@ public:
     const uint32_t other = users[0] == n ? users[1] : users[0];
     const Instr *in = G.instr(other);
     const Place at = G.Nodes[other].At;
-    return in && in->Op == Opcode::Retain && at.B == before.B &&
-           at.Index < before.Index;
+    const Place here = G.Nodes[n].At;
+    return in && in->Op == Opcode::Retain && at.B == here.B &&
+           at.Index < here.Index;
   }
 
-  /// What node @p n does to slot @p s.  For a box local's copy @p c, its
-  /// consumer may use the moved box, and earlier copies of the slot are
-  /// references of their own.
-  Event event(uint32_t n, Slot s, const Copy &c) const {
+  /// What node @p n does to slot @p s.
+  Event event(uint32_t n, Slot s) const {
     const Node &node = G.Nodes[n];
     switch (node.K) {
-    case Node::Join:
-      return Event::None;
     case Node::Dead:
       // Nothing runs after it: the program has stopped.
       return Event::Release;
@@ -558,9 +790,7 @@ public:
           in.Local == s.L)
         return Event::Bad;
       for (const Operand &o : in.Args)
-        if (O.from(o, s.L) &&
-            !(&node.At.stmt() == c.Consumer && sameValue(o, c.Moved)) &&
-            !ownCopy(o, n, c.Retain))
+        if (O.from(o, s.L) && !ownReference(o, n))
           return Event::Bad;
       return Event::None;
     }
@@ -620,29 +850,61 @@ public:
     return a.L == s.L && a.Offset && !overlaps(*a.Offset, 8, s.Offset);
   }
 
-  /// Whether every path from node @p start ends in a release of slot @p s
-  /// (or in `unreachable`) before any other event on it.
-  bool releasedOnEveryPath(uint32_t start, Slot s, const Copy &c) const {
-    std::vector<bool> seen(G.Nodes.size());
-    std::vector<uint32_t> work{start};
-    while (!work.empty()) {
-      const uint32_t n = work.back();
-      work.pop_back();
-      if (seen[n])
-        continue;
-      seen[n] = true;
-      switch (event(n, s, c)) {
-      case Event::Bad:
-        return false;
-      case Event::Release:
-        break;
+  /// Calls @p fn with the bit of each of @p slots that node @p n may touch:
+  /// a slot of a local it loads, stores or addresses, or of one a value it
+  /// uses may refer to.  Nothing else happens to the others there.
+  template <typename Fn>
+  void touched(uint32_t n, const Slots &slots, Fn fn) const {
+    std::vector<LocalId> ls;
+    auto add = [&](const Operand &o) {
+      const std::vector<LocalId> &from = O.locals(o);
+      ls.insert(ls.end(), from.begin(), from.end());
+    };
+    if (const Instr *in = G.instr(n)) {
+      if (in->Op == Opcode::Load || in->Op == Opcode::Store ||
+          in->Op == Opcode::LocalAddr)
+        ls.push_back(in->Local);
+      for (const Operand &o : in->Args)
+        add(o);
+    } else if (G.Nodes[n].Use) {
+      add(*G.Nodes[n].Use);
+    }
+    std::sort(ls.begin(), ls.end());
+    ls.erase(std::unique(ls.begin(), ls.end()), ls.end());
+    for (LocalId l : ls)
+      for (size_t i : slots.of(l))
+        fn(i);
+  }
+
+  /// The step of the flow that finds the last uses (backward, must): given
+  /// in @p ok, for each of @p slots, whether every path from the point
+  /// after node @p n reaches the slot's release (or `unreachable`) before
+  /// anything else happens to it, make it the same for the point before.
+  void lastUse(uint32_t n, const Slots &slots, Bits &ok) const {
+    switch (G.Nodes[n].K) {
+    case Node::Dead:
+      ok.fill(true);
+      return;
+    case Node::Exit:
+    case Node::Return:
+      ok.fill(false);
+      return;
+    case Node::Test:
+    case Node::Instruction:
+      break;
+    }
+    touched(n, slots, [&](size_t i) {
+      switch (event(n, slots[i])) {
       case Event::None:
-        for (uint32_t succ : G.Nodes[n].Succ)
-          work.push_back(succ);
+        break;
+      case Event::Release:
+        ok.set(i, true);
+        break;
+      case Event::Bad:
+        ok.set(i, false);
         break;
       }
-    }
-    return true;
+    });
   }
 
   /// The offset of address @p p from address @p base, when @p p is @p base
@@ -666,7 +928,8 @@ public:
   }
 
   /// A box local's copy at the retain @p r: `%v = load %x`, `retain %v`,
-  /// and `%v` handed to its consumer, all in one block.
+  /// and `%v` handed to its consumer, all in one block.  Whether it is the
+  /// slot's last use is for the flow to tell (Mover::transfer).
   std::optional<Transfer> boxCopy(uint32_t r) const {
     const Instr &ret = *G.instr(r);
     const Place at = G.Nodes[r].At;
@@ -697,13 +960,12 @@ public:
     }
     if (!consumes(c, v))
       return std::nullopt;
-    if (!releasedOnEveryPath(G.next(r), {x, 0}, Copy{at, v, &use.stmt()}))
-      return std::nullopt;
     Transfer t;
     t.S = {x, 0};
     t.Parts = {0};
     t.Retains = {at};
     t.Before = {at.B, at.Index + 1};
+    t.Last = r;
     return t;
   }
 
@@ -824,7 +1086,8 @@ public:
     return out;
   }
 
-  /// A whole mem local's copy at the `mem.copy` node @p n.
+  /// A whole mem local's copy at the `mem.copy` node @p n (its last use or
+  /// not, as for boxCopy).
   std::optional<Transfer> memCopy(uint32_t n) const {
     const Instr &mc = *G.instr(n);
     const Place at = G.Nodes[n].At;
@@ -865,8 +1128,11 @@ public:
         }
       }
       for (size_t i = first; i < at.Index; ++i) {
+        // What an if or a loop in between does is not looked into.
         const Instr *in = std::get_if<Instr>(&at.B->Stmts[i]);
-        if (!in || (in->Result.Ty != Type::Void && group.count(in->Result.Id)))
+        if (!in)
+          return std::nullopt;
+        if (in->Result.Ty != Type::Void && group.count(in->Result.Id))
           continue;
         if (in->Op == Opcode::Retain && in->Args[0].isValue() &&
             group.count(in->Args[0].valueId()))
@@ -879,14 +1145,12 @@ public:
     Transfer t;
     t.S = {m, 0};
     t.Base = mc.Args[1];
-    const uint32_t lastNode = G.NodeOf.at(&last.stmt());
     for (const auto &[k, p] : retains) {
-      if (!releasedOnEveryPath(G.next(lastNode), {m, k}, Copy{}))
-        return std::nullopt;
       t.Parts.push_back(k);
       t.Retains.push_back(p);
     }
     t.Before = {last.B, last.Index + 1};
+    t.Last = G.of(last.stmt());
     return t;
   }
 };
@@ -1012,8 +1276,7 @@ private:
 
   bool transfer() {
     Analysis a(F);
-    std::vector<Transfer> found;
-    std::unordered_set<const Stmt *> claimed;
+    std::vector<Transfer> copies;
     for (uint32_t n = 0; n < a.G.Nodes.size(); ++n) {
       const Instr *in = a.G.instr(n);
       std::optional<Transfer> t;
@@ -1021,15 +1284,42 @@ private:
         t = a.boxCopy(n);
       else if (in && in->Op == Opcode::MemCopy)
         t = a.memCopy(n);
+      if (t)
+        copies.push_back(std::move(*t));
+    }
+    if (copies.empty())
+      return false;
+    // Which copies are last uses: one flow back from the end of the body,
+    // a bit for each slot a copy is of, read at the point after each copy.
+    Slots slots(F.Locals.size());
+    std::vector<std::vector<size_t>> bits(copies.size());
+    std::unordered_map<uint32_t, std::vector<size_t>> after;
+    for (size_t i = 0; i < copies.size(); ++i) {
+      for (int64_t k : copies[i].Parts)
+        bits[i].push_back(slots.add({copies[i].S.L, k}));
+      after[copies[i].Last].push_back(i);
+    }
+    std::vector<bool> last(copies.size());
+    Flow(a.G, slots.size(), /*must=*/true, [&](uint32_t n, Flow::State &s) {
+      if (auto it = after.find(n); it != after.end())
+        for (size_t i : it->second)
+          last[i] = std::all_of(bits[i].begin(), bits[i].end(),
+                                [&](size_t b) { return s.B.test(b); });
+      a.lastUse(n, slots, s.B);
+    }).backward(F.Body);
+    std::vector<Transfer> found;
+    std::unordered_set<const Stmt *> claimed;
+    for (size_t i = 0; i < copies.size(); ++i) {
+      Transfer &t = copies[i];
       // A retain belongs to one copy.
-      if (!t || std::any_of(t->Retains.begin(), t->Retains.end(),
-                            [&](const Place &p) {
-                              return claimed.count(&p.stmt()) > 0;
-                            }))
+      if (!last[i] ||
+          std::any_of(t.Retains.begin(), t.Retains.end(), [&](const Place &p) {
+            return claimed.count(&p.stmt()) > 0;
+          }))
         continue;
-      for (const Place &p : t->Retains)
+      for (const Place &p : t.Retains)
         claimed.insert(&p.stmt());
-      found.push_back(std::move(*t));
+      found.push_back(std::move(t));
     }
     if (found.empty())
       return false;
@@ -1068,13 +1358,20 @@ private:
     return true;
   }
 
+  /// The moved slots, as a flow's bits.
+  Slots moved() const {
+    Slots slots(F.Locals.size());
+    for (const auto &[l, k] : Moved)
+      slots.add({l, k});
+    return slots;
+  }
+
   /// The moved slot node @p n releases (a release load), if it is one.
-  std::optional<std::pair<LocalId, int64_t>> releasedSlot(const Analysis &a,
-                                                          uint32_t n) const {
+  std::optional<Slot> releasedSlot(const Analysis &a, uint32_t n) const {
     const Instr *in = a.G.instr(n);
     if (!in || !a.releaseLoad(a.G.Nodes[n].At))
       return std::nullopt;
-    std::pair<LocalId, int64_t> s;
+    Slot s;
     if (in->Op == Opcode::Load) {
       s = {in->Local, 0};
     } else {
@@ -1083,51 +1380,9 @@ private:
         return std::nullopt;
       s = {p.L, *p.Offset};
     }
-    if (!Moved.count(s))
+    if (!Moved.count({s.L, s.Offset}))
       return std::nullopt;
     return s;
-  }
-
-  /// The state of every moved slot before each node: whether it is null on
-  /// every path there.  Unreached nodes have no state.
-  struct NullStates {
-    std::vector<std::vector<char>> In;
-    std::vector<bool> Reached;
-  };
-
-  NullStates
-  nullStates(const Analysis &a,
-             const std::vector<std::pair<LocalId, int64_t>> &slots) const {
-    NullStates st;
-    const size_t nodes = a.G.Nodes.size();
-    st.In.assign(nodes, {});
-    st.Reached.assign(nodes, false);
-    st.In[a.G.Entry].assign(slots.size(), 0);
-    st.Reached[a.G.Entry] = true;
-    std::vector<uint32_t> work{a.G.Entry};
-    while (!work.empty()) {
-      const uint32_t n = work.back();
-      work.pop_back();
-      std::vector<char> out = st.In[n];
-      step(a, n, slots, out);
-      for (uint32_t s : a.G.Nodes[n].Succ) {
-        if (!st.Reached[s]) {
-          st.Reached[s] = true;
-          st.In[s] = out;
-          work.push_back(s);
-          continue;
-        }
-        bool changed = false;
-        for (size_t i = 0; i < out.size(); ++i)
-          if (st.In[s][i] && !out[i]) {
-            st.In[s][i] = 0;
-            changed = true;
-          }
-        if (changed)
-          work.push_back(s);
-      }
-    }
-    return st;
   }
 
   /// Whether @p o may be an address (a `ptr`, or an integer one was cast
@@ -1137,151 +1392,191 @@ private:
     return t != Type::Box && t != Type::Obj && t != Type::Weak;
   }
 
-  /// What instruction node @p n does to whether each moved slot is null.
-  void step(const Analysis &a, uint32_t n,
-            const std::vector<std::pair<LocalId, int64_t>> &slots,
-            std::vector<char> &state) const {
-    const Instr *in = a.G.instr(n);
-    if (!in)
-      return;
-    for (size_t i = 0; i < slots.size(); ++i) {
-      const auto &[l, k] = slots[i];
-      if (F.Locals[l].Ty == Type::Box) {
-        if (in->Op == Opcode::Store && in->Local == l)
-          state[i] = isNullBox(in->Args[0]);
+  /// Whether slot @p s is null after @p in, given whether it was before.
+  bool nullAfter(const Analysis &a, const Instr &in, Slot s,
+                 bool isNull) const {
+    if (F.Locals[s.L].Ty == Type::Box)
+      return in.Op == Opcode::Store && in.Local == s.L ? isNullBox(in.Args[0])
+                                                       : isNull;
+    for (size_t j = 0; j < in.Args.size(); ++j) {
+      const Operand &o = in.Args[j];
+      // What a reference loaded from the local refers to is not the local:
+      // only an address writes it.
+      if (!a.O.from(o, s.L) || !mayAddress(a, o))
+        continue;
+      int64_t at = 0;
+      const bool known = a.O.offsetIn(o, s.L, at);
+      if ((in.Op == Opcode::PtrAdd && j == 0) || in.Op == Opcode::PtrLoad)
+        continue; // computes an address, or reads
+      if (in.Op == Opcode::MemCopy && j == 1)
+        continue; // the source, read
+      if (in.Op == Opcode::PtrStore && j == 0 && known) {
+        const int64_t size = storeSize(a.V.type(in.Args[1]));
+        if (at == s.Offset && isNullBox(in.Args[1]))
+          isNull = true;
+        else if (overlaps(at, size, s.Offset))
+          isNull = false;
         continue;
       }
-      for (size_t j = 0; j < in->Args.size(); ++j) {
-        const Operand &o = in->Args[j];
-        // What a reference loaded from the local refers to is not the
-        // local: only an address writes it.
-        if (!a.O.from(o, l) || !mayAddress(a, o))
-          continue;
-        int64_t at = 0;
-        const bool known = a.O.offsetIn(o, l, at);
-        if ((in->Op == Opcode::PtrAdd && j == 0) || in->Op == Opcode::PtrLoad)
-          continue; // computes an address, or reads
-        if (in->Op == Opcode::MemCopy && j == 1)
-          continue; // the source, read
-        if (in->Op == Opcode::PtrStore && j == 0 && known) {
-          const int64_t size = storeSize(a.V.type(in->Args[1]));
-          if (at == k && isNullBox(in->Args[1]))
-            state[i] = 1;
-          else if (overlaps(at, size, k))
-            state[i] = 0;
+      if (in.Op == Opcode::MemZero && j == 0 && known)
+        if (std::optional<int64_t> len = constantI64(in.Args[1])) {
+          if (covers(at, *len, s.Offset))
+            isNull = true;
+          else if (overlaps(at, *len, s.Offset))
+            isNull = false;
           continue;
         }
-        if (in->Op == Opcode::MemZero && j == 0 && known)
-          if (std::optional<int64_t> len = constantI64(in->Args[1])) {
-            if (covers(at, *len, k))
-              state[i] = 1;
-            else if (overlaps(at, *len, k))
-              state[i] = 0;
-            continue;
-          }
-        if (in->Op == Opcode::MemCopy && j == 0 && known)
-          if (std::optional<int64_t> len = constantI64(in->Args[2])) {
-            if (overlaps(at, *len, k))
-              state[i] = 0;
-            continue;
-          }
-        // Anything else may write through the address.
-        state[i] = 0;
-      }
+      if (in.Op == Opcode::MemCopy && j == 0 && known)
+        if (std::optional<int64_t> len = constantI64(in.Args[2])) {
+          if (overlaps(at, *len, s.Offset))
+            isNull = false;
+          continue;
+        }
+      // Anything else may write through the address.
+      isNull = false;
     }
+    return isNull;
   }
+
+  /// What became of a moved box local at the end of an arm.
+  enum class Arm : uint8_t { Unreached, Null, Holding };
+
+  /// An if or a switch, statement S of block B, that the release of a
+  /// moved box local (the load at index J, then the release) follows.
+  struct Sink {
+    Stmt *S;
+    Block *B;
+    size_t J;
+    size_t Bit;
+    std::vector<Arm> Arms;
+  };
 
   /// Remove the releases of moved slots that are null on every path to
   /// them, and move a release that follows an if or a switch into its one
   /// arm in which the slot may hold a reference.
   bool dropNullReleases() {
     Analysis a(F);
-    std::vector<std::pair<LocalId, int64_t>> slots(Moved.begin(), Moved.end());
-    std::map<std::pair<LocalId, int64_t>, size_t> index;
-    for (size_t i = 0; i < slots.size(); ++i)
-      index[slots[i]] = i;
-    const NullStates st = nullStates(a, slots);
+    const Slots slots = moved();
+    const size_t nodes = a.G.Nodes.size();
+    std::vector<std::optional<size_t>> released(nodes);
+    for (uint32_t n = 0; n < nodes; ++n)
+      if (std::optional<Slot> s = releasedSlot(a, n))
+        released[n] = slots.find(*s);
+    std::vector<Sink> sinks;
+    sinkable(a, F.Body, slots, sinks);
+    std::unordered_map<const Stmt *, size_t> sinkOf;
+    for (size_t i = 0; i < sinks.size(); ++i)
+      sinkOf[sinks[i].S] = i;
+    // Whether each moved slot is null on every path to a point.
+    std::vector<bool> null(nodes);
+    Flow(
+        a.G, slots.size(), /*must=*/true,
+        [&](uint32_t n, Flow::State &s) {
+          if (released[n])
+            null[n] = s.Reached && s.B.test(*released[n]);
+          if (const Instr *in = a.G.instr(n))
+            a.touched(n, slots, [&](size_t i) {
+              s.B.set(i, nullAfter(a, *in, slots[i], s.B.test(i)));
+            });
+        },
+        [&](const Stmt &st, size_t k, const Flow::State &s) {
+          auto it = sinkOf.find(&st);
+          if (it == sinkOf.end())
+            return;
+          Sink &sink = sinks[it->second];
+          sink.Arms[k] = !s.Reached           ? Arm::Unreached
+                         : s.B.test(sink.Bit) ? Arm::Null
+                                              : Arm::Holding;
+        })
+        .forward(F.Body);
     Edits e;
     Remover r(a, e);
     bool changed = false;
-    for (uint32_t n = 0; n < a.G.Nodes.size(); ++n) {
-      const auto s = releasedSlot(a, n);
-      if (!s || !st.Reached[n] || !st.In[n][index.at(*s)])
+    for (uint32_t n = 0; n < nodes; ++n) {
+      if (!null[n])
         continue;
       const Place at = a.G.Nodes[n].At;
       r.remove({at.B, at.Index + 1});
       ++Counts.Releases;
       changed = true;
     }
-    changed |= sinkReleases(a, F.Body, st, index, e);
+    for (const Sink &sink : sinks)
+      changed |= sinkRelease(sink, e);
     e.apply(F.Body);
     return changed;
   }
 
-  /// The balancing releases of @p b and the blocks in it (see
-  /// dropNullReleases).
-  bool sinkReleases(const Analysis &a, Block &b, const NullStates &st,
-                    const std::map<std::pair<LocalId, int64_t>, size_t> &index,
-                    Edits &e) {
-    bool changed = false;
+  /// The ifs and switches of @p b and the blocks in it that the release of
+  /// a moved box local follows: only loads of other locals, which no
+  /// release changes, may come between them.
+  void sinkable(const Analysis &a, Block &b, const Slots &slots,
+                std::vector<Sink> &out) const {
     for (size_t i = 0; i < b.Stmts.size(); ++i) {
       Stmt &s = b.Stmts[i];
+      size_t arms = 0;
       if (auto *x = std::get_if<If>(&s)) {
-        changed |= sinkReleases(a, *x->Then, st, index, e);
+        sinkable(a, *x->Then, slots, out);
         if (x->Else)
-          changed |= sinkReleases(a, *x->Else, st, index, e);
+          sinkable(a, *x->Else, slots, out);
+        arms = 2;
       } else if (auto *x = std::get_if<While>(&s)) {
-        changed |= sinkReleases(a, *x->CondBlock, st, index, e);
-        changed |= sinkReleases(a, *x->Body, st, index, e);
+        sinkable(a, *x->CondBlock, slots, out);
+        sinkable(a, *x->Body, slots, out);
         continue;
       } else if (auto *x = std::get_if<Switch>(&s)) {
         for (Switch::Case &c : x->Cases)
-          changed |= sinkReleases(a, *c.Body, st, index, e);
+          sinkable(a, *c.Body, slots, out);
         if (x->Default)
-          changed |= sinkReleases(a, *x->Default, st, index, e);
+          sinkable(a, *x->Default, slots, out);
+        arms = x->Cases.size() + 1;
       } else {
         continue;
       }
-      // The release right after it: only loads of other slots, which no
-      // release changes, may come first.
       size_t j = i + 1;
-      std::optional<std::pair<LocalId, int64_t>> slot;
+      std::optional<Slot> slot;
       std::vector<LocalId> passed;
       for (; j < b.Stmts.size(); ++j) {
         const auto *in = std::get_if<Instr>(&b.Stmts[j]);
         if (!in || in->Op != Opcode::Load)
           break;
         if (a.releaseLoad({&b, j})) {
-          slot = releasedSlot(a, a.G.NodeOf.at(&b.Stmts[j]));
+          slot = releasedSlot(a, a.G.of(b.Stmts[j]));
           break;
         }
         passed.push_back(in->Local);
       }
-      if (!slot || F.Locals[slot->first].Ty != Type::Box ||
-          e.removed(b.Stmts[j + 1]) ||
-          std::find(passed.begin(), passed.end(), slot->first) != passed.end())
+      if (!slot || F.Locals[slot->L].Ty != Type::Box ||
+          std::find(passed.begin(), passed.end(), slot->L) != passed.end())
         continue;
-      const size_t bit = index.at(*slot);
-      const std::vector<uint32_t> &ends = a.G.ArmEnds.at(&s);
-      std::vector<size_t> holding;
-      size_t through = 0;
-      for (size_t k = 0; k < ends.size(); ++k) {
-        if (!st.Reached[ends[k]])
-          continue;
-        ++through;
-        if (!st.In[ends[k]][bit])
-          holding.push_back(k);
-      }
-      if (through < 2 || holding.size() != 1)
-        continue;
-      Block &arm = armBlock(s, holding.front());
-      e.insert(arm, arm.Stmts.size(), std::get<Instr>(b.Stmts[j]));
-      e.insert(arm, arm.Stmts.size(), std::get<Instr>(b.Stmts[j + 1]));
-      e.remove(b.Stmts[j]);
-      e.remove(b.Stmts[j + 1]);
-      changed = true;
+      if (const std::optional<size_t> bit = slots.find(*slot))
+        out.push_back(
+            {&s, &b, j, *bit, std::vector<Arm>(arms, Arm::Unreached)});
     }
-    return changed;
+  }
+
+  /// Move @p sink's release into its one arm reached that ends holding a
+  /// reference, when it has others reached; true if it did.
+  static bool sinkRelease(const Sink &sink, Edits &e) {
+    Block &b = *sink.B;
+    if (e.removed(b.Stmts[sink.J + 1]))
+      return false;
+    size_t through = 0;
+    std::vector<size_t> holding;
+    for (size_t k = 0; k < sink.Arms.size(); ++k) {
+      if (sink.Arms[k] == Arm::Unreached)
+        continue;
+      ++through;
+      if (sink.Arms[k] == Arm::Holding)
+        holding.push_back(k);
+    }
+    if (through < 2 || holding.size() != 1)
+      return false;
+    Block &arm = armBlock(*sink.S, holding.front());
+    e.insert(arm, arm.Stmts.size(), std::get<Instr>(b.Stmts[sink.J]));
+    e.insert(arm, arm.Stmts.size(), std::get<Instr>(b.Stmts[sink.J + 1]));
+    e.remove(b.Stmts[sink.J]);
+    e.remove(b.Stmts[sink.J + 1]);
+    return true;
   }
 
   /// Arm @p k of the if or switch @p s, made when it is an absent else or
@@ -1303,12 +1598,13 @@ private:
   /// slot is written again or the function ends.
   bool dropDeadNullStores() {
     Analysis a(F);
-    Edits e;
-    Remover r(a, e);
-    bool changed = false;
-    for (uint32_t n = 0; n < a.G.Nodes.size(); ++n) {
+    const Slots slots = moved();
+    const size_t nodes = a.G.Nodes.size();
+    std::vector<std::optional<size_t>> stored(nodes);
+    bool any = false;
+    for (uint32_t n = 0; n < nodes; ++n) {
       const Instr *in = a.G.instr(n);
-      std::pair<LocalId, int64_t> s;
+      Slot s;
       if (in && in->Op == Opcode::Store && isNullBox(in->Args[0])) {
         s = {in->Local, 0};
       } else if (in && in->Op == Opcode::PtrStore && isNullBox(in->Args[1])) {
@@ -1319,49 +1615,69 @@ private:
       } else {
         continue;
       }
-      if (!Moved.count(s) || read(a, a.G.next(n), {s.first, s.second}))
+      if (!Moved.count({s.L, s.Offset}))
         continue;
-      r.remove(a.G.Nodes[n].At);
-      changed = true;
+      stored[n] = slots.find(s);
+      any = true;
     }
+    if (!any)
+      return false;
+    // Whether some path from a point reads each moved slot before writing
+    // all of it.
+    std::vector<bool> read(nodes);
+    Flow(a.G, slots.size(), /*must=*/false, [&](uint32_t n, Flow::State &s) {
+      if (stored[n])
+        read[n] = s.B.test(*stored[n]);
+      reads(a, n, slots, s.B);
+    }).backward(F.Body);
+    Edits e;
+    Remover r(a, e);
+    bool changed = false;
+    for (uint32_t n = 0; n < nodes; ++n)
+      if (stored[n] && !read[n]) {
+        r.remove(a.G.Nodes[n].At);
+        changed = true;
+      }
     e.apply(F.Body);
     return changed;
   }
 
-  /// Whether some path from node @p start reads slot @p s before writing
-  /// all of it.
-  bool read(const Analysis &a, uint32_t start, Slot s) const {
-    std::vector<bool> seen(a.G.Nodes.size());
-    std::vector<uint32_t> work{start};
-    while (!work.empty()) {
-      const uint32_t n = work.back();
-      work.pop_back();
-      if (seen[n])
-        continue;
-      seen[n] = true;
-      switch (access(a, n, s)) {
-      case Access::Read:
-        return true;
-      case Access::Written:
-        break;
+  /// The step of the flow that finds the reads of moved slots (backward,
+  /// may): given in @p read, for each of @p slots, whether some path from
+  /// the point after node @p n reads the slot before writing all of it,
+  /// make it the same for the point before.
+  void reads(const Analysis &a, uint32_t n, const Slots &slots,
+             Bits &read) const {
+    switch (a.G.Nodes[n].K) {
+    case Node::Test:
+      return; // a test's value was read before: it reads no slot
+    case Node::Return:
+    case Node::Dead:
+    case Node::Exit:
+      read.fill(false); // nothing reads a slot after them
+      return;
+    case Node::Instruction:
+      break;
+    }
+    const Instr &in = *a.G.instr(n);
+    a.touched(n, slots, [&](size_t i) {
+      switch (access(a, in, slots[i])) {
       case Access::None:
-        for (uint32_t succ : a.G.Nodes[n].Succ)
-          work.push_back(succ);
+        break;
+      case Access::Read:
+        read.set(i, true);
+        break;
+      case Access::Written:
+        read.set(i, false);
         break;
       }
-    }
-    return false;
+    });
   }
 
   enum class Access : uint8_t { None, Read, Written };
 
-  Access access(const Analysis &a, uint32_t n, Slot s) const {
-    // A test's or a `ret`'s value was read before: neither reads the slot.
-    const Node &node = a.G.Nodes[n];
-    if (node.K != Node::Instruction)
-      return node.K == Node::Join || node.K == Node::Test ? Access::None
-                                                          : Access::Written;
-    const Instr &in = *node.At.instr();
+  /// What @p in does to slot @p s: reads it, writes all of it, or neither.
+  Access access(const Analysis &a, const Instr &in, Slot s) const {
     if (F.Locals[s.L].Ty == Type::Box) {
       if (in.Op == Opcode::Load && in.Local == s.L)
         return Access::Read;
