@@ -9,8 +9,9 @@ command below from this directory.
 
 ```text
 $ paykan --verbose main.pkn
-module ::io: no cache entry; building from source
-module ::result: no cache entry; building from source
+module ::result: prebuilt <libdir>/paykan/stdlib/0.2.0/result.pkm usable
+module ::error: prebuilt <libdir>/paykan/stdlib/0.2.0/error.pkm usable
+module ::io: prebuilt <libdir>/paykan/stdlib/0.2.0/io.pkm usable
 module geometry::shapes: no cache entry; building from source
 module geometry::shapes: wrote .paykan_cache/geometry/shapes.pkm
 rect of area 12
@@ -25,14 +26,15 @@ The first run compiles `geometry/shapes.pkn` and writes its compiled form to
 checker needs to check an importer), its PIR (what the backend generates
 code from) and a manifest naming the toolchain that produced it and the
 source it was built from.  The standard library modules `::io`, which
-`main.pkn` imports, and `::result`, which `::io` imports, declare generics,
-which a `.pkm` does not hold yet, so they are compiled from source on every
-run.  The second run reuses the file:
+`main.pkn` imports, and `::error` and `::result`, which `::io` imports, are
+prebuilt `.pkm` files installed with `paykan`, so they are never compiled
+here.  The second run reuses the file:
 
 ```text
 $ paykan --verbose main.pkn
-module ::io: no cache entry; building from source
-module ::result: no cache entry; building from source
+module ::result: prebuilt <libdir>/paykan/stdlib/0.2.0/result.pkm usable
+module ::error: prebuilt <libdir>/paykan/stdlib/0.2.0/error.pkm usable
+module ::io: prebuilt <libdir>/paykan/stdlib/0.2.0/io.pkm usable
 module geometry::shapes: cache .paykan_cache/geometry/shapes.pkm usable
 ...
 ```
@@ -92,8 +94,9 @@ by a relative path inside the project is named by that path
 $ mv geometry/shapes.pkn /tmp/
 $ rm -rf .paykan_cache
 $ paykan --verbose main.pkn
-module ::io: no cache entry; building from source
-module ::result: no cache entry; building from source
+module ::result: prebuilt <libdir>/paykan/stdlib/0.2.0/result.pkm usable
+module ::error: prebuilt <libdir>/paykan/stdlib/0.2.0/error.pkm usable
+module ::io: prebuilt <libdir>/paykan/stdlib/0.2.0/io.pkm usable
 module geometry::shapes: prebuilt geometry/shapes.pkm usable
 rect of area 12
 ...

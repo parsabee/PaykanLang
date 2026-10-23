@@ -134,7 +134,7 @@ TEST(Class, DuplicateMethod) {
 // constructor, so it may not reuse a builtin function, builtin class, or enum.
 
 // Regression: `class print` used to silently replace the builtin `print`.
-// The standard library's names (io::print, io::File, res::Error) are not
+// The standard library's names (io::print, io::File, err::Error) are not
 // reserved: a program may name its own classes so.  (Type names are still
 // global across an import graph, so one that imports ::io cannot also
 // declare a `File`: docs/design/pkm.md, module-local type names.)

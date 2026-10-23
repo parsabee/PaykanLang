@@ -945,8 +945,8 @@ TEST(Driver, PanicFlushesOpenFiles) {
   std::filesystem::remove(out);
   auto src = writeTmp(
       "import ::io; fn main() -> int { match io::open(\"" + out.string() +
-      "\", \"w\").value { None { return 1; } "
-      "f: io::File { f.write(\"kept\\n\"); xs = [1]; i: int = 3; "
+      "\", \"w\") { e: Err { return 1; } "
+      "f: Ok { f.value.write(\"kept\\n\"); xs = [1]; i: int = 3; "
       "io::println(Str<int>(xs[i])); } } return 0; }");
   auto [rc, msg] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);

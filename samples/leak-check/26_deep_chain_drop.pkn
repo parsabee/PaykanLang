@@ -104,14 +104,21 @@ fn arrays(n: int) -> int {
   return i;
 }
 
+/// The message of an open that fails.
+fn openError() -> Obj {
+  match io::open("/nonexistent/paykan/leak-check/deep.txt", "r") {
+    e: Err { return e.error.message(); }
+    _ { return None; }
+  }
+}
+
 fn tuples(n: int) -> int {
   prev: Chain? = None;
   i = 0;
   while i < n {
     e: Obj = None;
     if i % 10000 == 0 {
-      e = io::open("/nonexistent/paykan/leak-check/deep.txt",
-          "r").error.message();
+      e = openError();
     }
     prev = Chain((i, (prev, e)));
     i = i + 1;

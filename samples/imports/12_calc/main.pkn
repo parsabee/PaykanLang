@@ -289,13 +289,13 @@ fn repl(env: hashmap::HashMap, history: Ring<(Str, float)>, quiet: bool) -> int 
     io::println("calc — arithmetic with variables.  :help for commands, :quit to exit.");
   }
   while True {
-    match io::stdin().readln().value {
-      line: Str {
-        if !handle(line, env, history, quiet) {
+    match io::stdin().readln() {
+      line: Ok {
+        if !handle(line.value, env, history, quiet) {
           return 0;
         }
       }
-      _ { break; } // None — end of input
+      _ { break; } // Err — the end of the input
     }
   }
   return 0;

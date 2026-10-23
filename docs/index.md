@@ -76,7 +76,7 @@ including building from source, and runs your first program.
   up, a chapter per feature, and specifies each one precisely: every rule, limitation and
   compile-time error. Start with [Getting started](language/01-getting-started.md).
 - **[The standard library](stdlib/index.md)** documents every module a program can import:
-  `::io`, `::result`, `::collections`, `::memory` and `::math`.
+  `::io`, `::error`, `::result`, `::collections`, `::memory` and `::math`.
 - **[Implementation and plugins](internals.md)** describes the compiler's IR, its backend
   and C output, and how to write your own frontend or backend as a plugin.
 

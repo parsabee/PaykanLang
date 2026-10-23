@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `::error` (docs/stdlib/error.md), a new standard library module: `ErrorCode`, `Error`
+  and its `isOk` and `message`, `none`, `name` and `fromErrno`, which were `::result`'s,
+  and `fail<T>(error)`, the `Result` of an operation that failed.  `::io`, `::memory` and
+  `::collections` report their errors with it.
+- A generic function's type arguments that its arguments leave open are taken from the
+  type the call's value flows into (a declared variable, a parameter, a `return`, a field,
+  an array element), matched against its result type: `s: Str? = none();` with `fn
+  none<T>() -> T?`, and `return res::ok(n);` in a function returning a
+  `res::Result<int, err::Error>` (docs/language/13-generics.md, "Inference").
+
 - Tagged unions (docs/language/07-enums.md, "Variants With Fields"): an enum's
   variant may have fields, `enum Shape { Empty, Rect(w: int, h: int) }`. The
   enum is then a value held in place, like a struct: its tag, then each
@@ -154,6 +164,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `::result`'s `Result` is a generic tagged union, `enum Result<T, E> { Ok(value: T),
+  Err(error: E) }` (docs/stdlib/result.md), no longer the struct `Result<T>` of an `error`
+  and an optional `value`, and its errors are `::error`'s.  The standard library returns a
+  `res::Result<T, err::Error>`: `io::open` (`res::Result<io::File, err::Error>`), the
+  `File` reads (`res::Result<Str, err::Error>`) and `memory::Buffer.copy`; what makes no
+  value returns an `err::Error`.  A program that read a result changes from
+  `match r.value { f: io::File { ... } None { ... r.error ... } }` to
+  `match r { f: Ok { ... f.value ... } e: Err { ... e.error ... } }`, and spells the error
+  types and functions `err::Error`, `err::ErrorCode`, `err::none()`, `err::name(code)`,
+  `err::fromErrno(n)` (`import ::error as err;`).  `Result.isOk()` is gone (match the
+  result); `res::ok` is `ok<T, E>(value)`, with `E` from the type the result flows into.
+  A `Result<Str?, err::Error>` now tells a success that found `None` from a failure.
 - PaykanLang is licensed under the Apache License, Version 2.0 (`LICENSE`), no
   longer the MIT License: every source file's `SPDX-License-Identifier` is
   `Apache-2.0`, and the copyright notice is in `NOTICE`, which the Debian

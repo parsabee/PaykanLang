@@ -1,47 +1,55 @@
 import ::io;
+import ::error as err;
 import ::result as res;
 
 // ::io's File: open and write (the file closes with its last reference),
 // read back, the error of a write on a file opened for reading (which the
 // reads after it do not inherit), the end of the file, a read whose buffer
 // cannot be allocated, a missing file.
+
+/// The name of the code of @p r's error, `Ok` when it made a value.
+fn codeOf<T>(r: res::Result<T, err::Error>) -> Str {
+  match r {
+    v: Ok { return "Ok"; }
+    e: Err { return err::name(e.error.code); }
+  }
+}
+
 fn write(path: Str) {
   w = io::open(path, "w");
-  io::println(w.isOk());
-  match w.value {
-    f: io::File { io::println(res::name(f.write("one\ntwo\n").code)); }
-    None { }
+  io::println(codeOf(w) == "Ok");
+  match w {
+    f: Ok { io::println(err::name(f.value.write("one\ntwo\n").code)); }
+    _ { }
   }
 }
 
 fn read(path: Str) {
-  r = io::open(path, "r");
-  match r.value {
-    f: io::File {
-      io::println(res::name(f.write("x").code));
+  match io::open(path, "r") {
+    r: Ok {
+      f = r.value;
+      io::println(err::name(f.write("x").code));
       a = f.readln();
-      io::println(res::name(a.error.code));
-      match a.value {
-        s: Str { io::print(s); }
-        None { }
+      io::println(codeOf(a));
+      match a {
+        s: Ok { io::print(s.value); }
+        _ { }
       }
-      b = f.read();
-      match b.value {
-        s: Str { io::print(s); }
-        None { }
+      match f.read() {
+        s: Ok { io::print(s.value); }
+        _ { }
       }
-      io::println(res::name(f.readln().error.code));
-      io::println(res::name(f.readbytes(1152921504606846976).error.code));
+      io::println(codeOf(f.readln()));
+      io::println(codeOf(f.readbytes(1152921504606846976)));
     }
-    None { }
+    _ { }
   }
 }
 
 fn main() -> int {
   write("io_test.txt");
   read("io_test.txt");
-  m = io::open("io_test_missing.txt", "r");
-  io::println(res::name(m.error.code));
-  io::println(res::fromErrno(0).message());
+  io::println(codeOf(io::open("io_test_missing.txt", "r")));
+  io::println(err::fromErrno(0).message());
   return 0;
 }

@@ -565,23 +565,22 @@ counts as definitely assigned.
 
 ### Matching a `Result`
 
-`io::open()` returns a `res::Result<io::File>` (module `::result`, see
-[Result](../stdlib/result.md)): a struct holding an `error` and a `value: io::File?`, present
-exactly when the open succeeded. A struct is not a `match` subject, so match its `value` in
-optional mode, and read the `error` in the `None` arm:
+`io::open()` returns a `res::Result<io::File, err::Error>` (module `::result`, see
+[Result](../stdlib/result.md)): a [tagged union](07-enums.md#generic-enums) that is `Ok`,
+holding the file as its `value`, or `Err`, holding the `error` that says why the open
+failed. Match it in variant mode, binding each variant's fields:
 
 ```pkn
-r = io::open("/tmp/data.txt", "r");
-match r.value {
-  f: io::File {
+match io::open("/tmp/data.txt", "r") {
+  r: Ok {
     while True {
-      match f.readln().value {
-        line: Str { io::print(line); }
-        _         { break; }      // None — end of file
+      match r.value.readln() {
+        line: Ok { io::print(line.value); }
+        _        { break; }      // Err — the end of the file
       }
     }
   }
-  None { io::printerrln("open failed: " + r.error.message()); }
+  e: Err { io::printerrln("open failed: " + e.error.message()); }
 }
 ```
 
@@ -599,13 +598,13 @@ match int<Str>(s) {
 
 ### Detecting end of input
 
-`readln()` returns a `res::Result<Str>` whose `value` is `None` at EOF (its error is then
-`EndOfFile`); the `None` is matched by falling through to `_` (or a `None` arm):
+`readln()` returns a `res::Result<Str, err::Error>` that is `Err` at EOF (its error's code
+is then `EndOfFile`); the `Err` is matched by falling through to `_` (or an `Err` arm):
 
 ```pkn
-match f.readln().value {
-  line: Str { process(line); }
-  _         { break; }   // None
+match f.readln() {
+  line: Ok { process(line.value); }
+  _        { break; }   // Err
 }
 ```
 

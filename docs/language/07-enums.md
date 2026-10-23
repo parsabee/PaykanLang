@@ -590,6 +590,8 @@ holds it in field 'tail'`), and a recursive one goes through a class, as `Expr` 
   `opt::Maybe::Just(1)`. Type names are global across imports, so `Maybe<int>` is one enum
   whether the module, its importer or another module made it
   ([Generics: Modules](13-generics.md#modules)).
+- The standard library's `Result<T, E>` is one: the value an operation made or the error
+  saying why it could not ([`::result`](../stdlib/result.md)).
 - A generic enum has no `impl` block yet.
 
 ---

@@ -1,0 +1,133 @@
+// ::error: what went wrong, as a value.
+//
+// An Error is a value, like a struct: an ErrorCode saying what went wrong,
+// from the standard set below, and a message, when there is more to say.  A
+// function of the standard library that can fail returns a
+// `Result<T, Error>` (::result): the value it made, or the Error saying why
+// it could not; one that makes no value returns just its Error, `none()`
+// when it did not fail.
+//
+//   import ::io;
+//   import ::error as err;
+//   ...
+//   match io::open("notes.txt", "r") {
+//     f: Ok { ... f.value ... }
+//     e: Err { io::printerrln("cannot open notes.txt: " + e.error.message()); }
+//   }
+//
+// The codes are the language's standard set: a library or a program uses
+// them for its own errors too.  `none` makes no error, `fromErrno` the Error
+// of a C library failure (Runtime.h, "Errors": the codes' order is the
+// runtime's), and `fail` a Result that failed with an Error.
+
+import ::result as res;
+
+/// What went wrong.  `Ok` is no error.
+enum ErrorCode {
+  Ok,               // no error
+  NotFound,         // there is no such file or entry
+  PermissionDenied, // not allowed
+  AlreadyExists,    // it exists already
+  InvalidArgument,  // an argument is not one the operation takes
+  IsADirectory,     // a directory where a file is needed
+  NotADirectory,    // a file where a directory is needed
+  TooManyOpenFiles, // the process or the system has too many open
+  NoSpace,          // the device is full
+  ReadOnly,         // the file system is read-only
+  Busy,             // the resource is in use
+  Interrupted,      // a signal interrupted the operation
+  WouldBlock,       // the operation would block
+  BrokenPipe,       // the other end of a pipe is closed
+  TimedOut,         // the operation took too long
+  OutOfMemory,      // there is not enough memory
+  Unsupported,      // the operation is not supported
+  Io,               // a low-level input or output error
+  EndOfFile,        // a read found nothing left
+  OutOfRange,       // an index or a count past the end
+  Other,            // any other error
+}
+
+/// An error: what went wrong, and a message saying more, when there is one.
+struct Error {
+  code: ErrorCode;
+  msg: Str?;
+}
+
+impl Error {
+  /// Whether this is no error: its code is `Ok`.
+  view fn isOk() -> bool { return self.code == ErrorCode::Ok; }
+  /// The message, or the code's name when there is none.
+  view fn message() -> Str {
+    match self.msg {
+      m: Str { return m.toString(); }
+      None { return name(self.code); }
+    }
+  }
+}
+
+/// No error.
+fn none() -> Error {
+  return Error(ErrorCode::Ok, None);
+}
+
+/// The Result of an operation that failed with @p error.  `T` is taken from
+/// the type the Result flows into (`return err::fail(e);` in a function
+/// returning a `Result<int, Error>`).
+fn fail<T>(error: Error) -> res::Result<T, Error> {
+  return res::Result::Err(error);
+}
+
+/// The name of @p code: "NotFound" for `ErrorCode::NotFound`.
+fn name(code: ErrorCode) -> Str {
+  match code {
+    Ok { return "Ok"; }
+    NotFound { return "NotFound"; }
+    PermissionDenied {
+      return "PermissionDenied";
+    }
+    AlreadyExists {
+      return "AlreadyExists";
+    }
+    InvalidArgument {
+      return "InvalidArgument";
+    }
+    IsADirectory {
+      return "IsADirectory";
+    }
+    NotADirectory {
+      return "NotADirectory";
+    }
+    TooManyOpenFiles {
+      return "TooManyOpenFiles";
+    }
+    NoSpace { return "NoSpace"; }
+    ReadOnly { return "ReadOnly"; }
+    Busy { return "Busy"; }
+    Interrupted {
+      return "Interrupted";
+    }
+    WouldBlock { return "WouldBlock"; }
+    BrokenPipe { return "BrokenPipe"; }
+    TimedOut { return "TimedOut"; }
+    OutOfMemory {
+      return "OutOfMemory";
+    }
+    Unsupported {
+      return "Unsupported";
+    }
+    Io { return "Io"; }
+    EndOfFile { return "EndOfFile"; }
+    OutOfRange { return "OutOfRange"; }
+    Other { return "Other"; }
+  }
+}
+
+native fn _code(errno: int) -> ErrorCode = "Paykan_error_code";
+native fn _text(errno: int) -> Str = "Paykan_error_text";
+
+/// The Error of a C library failure whose `errno` is @p errno: its code and
+/// C's `strerror` text, or `none()` for 0.
+fn fromErrno(errno: int) -> Error {
+  if errno == 0 { return none(); }
+  return Error(_code(errno), _text(errno));
+}

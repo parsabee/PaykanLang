@@ -19,9 +19,9 @@ fn scratchPath(args: view Str[], name: Str) -> Str {
 }
 
 fn main(args: view Str[]) -> int {
-  match io::open(scratchPath(args, "pkn_leakcheck_write.txt"), "w").value {
-    f: io::File { f.write("hello"); }
-    None { }
+  match io::open(scratchPath(args, "pkn_leakcheck_write.txt"), "w") {
+    f: Ok { f.value.write("hello"); }
+    _ { }
   }
   return 0;
 }

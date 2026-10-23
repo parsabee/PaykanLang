@@ -184,7 +184,7 @@ inline constexpr const char *kPaykanIoReadln = "Paykan_io_readln";
 inline constexpr const char *kPaykanIoReadBytes = "Paykan_io_readbytes";
 inline constexpr const char *kPaykanIoRead = "Paykan_io_read";
 inline constexpr const char *kPaykanIoStdin = "Paykan_io_stdin";
-// ... and ::result's (stdlib/result.pkn)
+// ... and ::error's (stdlib/error.pkn)
 inline constexpr const char *kPaykanErrorCode = "Paykan_error_code";
 inline constexpr const char *kPaykanErrorText = "Paykan_error_text";
 

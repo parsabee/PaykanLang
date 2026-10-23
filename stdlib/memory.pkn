@@ -12,7 +12,7 @@
 // False, char 0 or None.  A reference slot that may not be None (a class,
 // Str, a tuple) is unset until stored.
 //
-// What can go wrong is reported as ::result's errors, not a panic: memory
+// What can go wrong is reported as ::error's errors, not a panic: memory
 // that is not there for new slots is `OutOfMemory` (the buffer unchanged),
 // an index past the end is `OutOfRange`, reading an unset slot is
 // `NotFound`, and shrinking by more than len() is `InvalidArgument`.  So a
@@ -30,6 +30,7 @@
 // "Private to the module"): the `_` native functions are the module's own,
 // and `Buffer`'s `__data` is reachable only from its methods.
 
+import ::error as err;
 import ::result as res;
 
 native fn _new<T>(n: unsigned) -> Obj = "PaykanBuffer_new";
@@ -44,13 +45,8 @@ native fn _grow<T>(b: inout Obj, by: unsigned) -> int = "PaykanBuffer_tryGrow";
 native fn _shrink<T>(b: inout Obj, by: unsigned) = "PaykanBuffer_shrink";
 
 /// The error of a buffer operation that failed with @p code.
-fn _fail(code: res::ErrorCode) -> res::Error {
-  return res::Error(code, None);
-}
-
-/// The Error of C's @p errno: none for 0.
-fn _error(errno: int) -> res::Error {
-  return if errno == 0 then res::none() else res::fromErrno(errno);
+fn _errorOf(code: err::ErrorCode) -> err::Error {
+  return err::Error(code, None);
 }
 
 struct Buffer<T> {
@@ -76,71 +72,71 @@ impl Buffer<T> {
 
   // A copy of slot `i`, to keep: `OutOfRange` past the end, `NotFound` for
   // a slot never set.  As get(), not through a `view`.
-  fn copy(i: unsigned) -> res::Result<T> {
+  fn copy(i: unsigned) -> res::Result<T, err::Error> {
     if i >= _len<T>(self.__data) {
-      return res::Result<T>(_fail(res::ErrorCode::OutOfRange), None);
+      return err::fail(_errorOf(err::ErrorCode::OutOfRange));
     }
     if _isSet<T>(self.__data, i) == 0 {
-      return res::Result<T>(_fail(res::ErrorCode::NotFound), None);
+      return err::fail(_errorOf(err::ErrorCode::NotFound));
     }
     return res::ok(_copy<T>(self.__data, i));
   }
 
   // Store `v` in slot `i`: `OutOfRange` past the end.
-  fn set(i: unsigned, v: view T) -> res::Error {
+  fn set(i: unsigned, v: view T) -> err::Error {
     if i >= _len<T>(self.__data) {
-      return _fail(res::ErrorCode::OutOfRange);
+      return _errorOf(err::ErrorCode::OutOfRange);
     }
     _set<T>(self.__data, i, v);
-    return res::none();
+    return err::none();
   }
 
   // Make the buffer at least `n` slots long: `OutOfMemory` when the slots
   // cannot be allocated.
-  fn reserve(n: unsigned) -> res::Error {
-    return _error(_reserve<T>(self.__data, n));
+  fn reserve(n: unsigned) -> err::Error {
+    return err::fromErrno(_reserve<T>(self.__data, n));
   }
 
   // Add `by` new slots at the end: `OutOfMemory` when they cannot be
   // allocated.
-  fn grow(by: unsigned) -> res::Error {
-    return _error(_grow<T>(self.__data, by));
+  fn grow(by: unsigned) -> err::Error {
+    return err::fromErrno(_grow<T>(self.__data, by));
   }
 
   // Drop the last `by` slots: `InvalidArgument` for more than len().
-  fn shrink(by: unsigned) -> res::Error {
+  fn shrink(by: unsigned) -> err::Error {
     if by > _len<T>(self.__data) {
-      return _fail(res::ErrorCode::InvalidArgument);
+      return _errorOf(err::ErrorCode::InvalidArgument);
     }
     _shrink<T>(self.__data, by);
-    return res::none();
+    return err::none();
   }
 
   // Append `v` in a new slot: `OutOfMemory` when it cannot be allocated.
-  fn push(v: view T) -> res::Error {
+  fn push(v: view T) -> err::Error {
     errno = _grow<T>(self.__data, 1);
     if errno != 0 {
-      return res::fromErrno(errno);
+      return err::fromErrno(errno);
     }
     _set<T>(self.__data, _len<T>(self.__data) - 1, v);
-    return res::none();
+    return err::none();
   }
 
   // Exchange slots `i` and `j`: `OutOfRange` when either is past the end,
   // `NotFound` when either was never set.
-  fn swap(i: unsigned, j: unsigned) -> res::Error {
+  fn swap(i: unsigned, j: unsigned) -> err::Error {
     n = _len<T>(self.__data);
     if i >= n || j >= n {
-      return _fail(res::ErrorCode::OutOfRange);
+      return _errorOf(err::ErrorCode::OutOfRange);
     }
     if _isSet<T>(self.__data, i) == 0 || _isSet<T>(self.__data, j) == 0 {
-      return _fail(res::ErrorCode::NotFound);
+      return _errorOf(err::ErrorCode::NotFound);
     }
     a: T = _copy<T>(self.__data, i);
     b: T = _copy<T>(self.__data, j);
     _set<T>(self.__data, i, b);
     _set<T>(self.__data, j, a);
-    return res::none();
+    return err::none();
   }
 }
 

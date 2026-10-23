@@ -1,39 +1,35 @@
 # `::result`
 
-Errors as values. An `Error` says what went wrong: a code from the standard set,
-`ErrorCode`, and, when there is more to say, a message. A function of the standard library
-that can fail returns a `Result<T>`, an error and the value it made when there was none (or
-just an `Error`, when it makes no value), and a program can use the same types for its own
-errors. The module is imported by convention as `import ::result as res;`, and its names are
-written `res::Error`, `res::ok(...)`.
+The results of what can fail. A `Result<T, E>` is either the value an operation made,
+`Ok(value)`, or the error saying why it could not, `Err(error)`: a [generic tagged
+union](../language/07-enums.md#generic-enums), taken apart with `match`. A function of the
+standard library that can fail returns a `Result<T, Error>`, its error an
+[`::error`](error.md) `Error`, and a program can return results of its own, with the
+standard `Error` or an error type of its own. The module is imported by convention as
+`import ::result as res;`, and its names are written `res::Result`, `res::ok(...)`.
 
 ```pkn
 import ::io;
+import ::error as err;
 import ::result as res;
 
-fn parsePort(s: Str) -> res::Result<int> {
+fn parsePort(s: Str) -> res::Result<int, err::Error> {
   match int(s) {
     n: int {
       if n > 0 && n < 65536 { return res::ok(n); }
-      return res::Result<int>(
-          res::Error(res::ErrorCode::InvalidArgument, "out of range: " + s), None);
+      return err::fail(err::Error(err::ErrorCode::InvalidArgument, "out of range: " + s));
     }
-    None {
-      return res::Result<int>(res::Error(res::ErrorCode::InvalidArgument, None), None);
-    }
+    None { return err::fail(err::Error(err::ErrorCode::InvalidArgument, None)); }
   }
 }
 
 fn main() -> int {
   inputs: Str[3] = ["8080", "99999", "http"];
-  i = 0;
-  while i < inputs.len() {
-    r = parsePort(inputs[i]);
-    match r.value {
-      port: int { io::println("port " + Str(port)); }
-      None      { io::println("error: " + r.error.message()); }
+  for i in 0..3 {
+    match parsePort(inputs[i]) {
+      p: Ok  { io::println("port " + Str(p.value)); }
+      e: Err { io::println("error: " + e.error.message()); }
     }
-    i = i + 1;
   }
   return 0;
 }
@@ -51,149 +47,53 @@ error: InvalidArgument
 
 ## Using a result
 
-`Error` and `Result` are [structs](../language/11-structs.md), values copied on
-assignment. A struct is not a `match` subject, so a result is taken apart by matching its
-`value`, in [optional mode](../language/08-match.md#optional-mode--unwrapping-a-t), and
-reading its `error` in the `None` arm, as `main` does above. To test for one code, compare
-it: `r.error.code == res::ErrorCode::NotFound`, or `match r.error.code { ... }` with an arm
-for each code of interest and a `_` arm.
+A `Result` is an enum whose variants have fields, a value held in place and copied on
+assignment ([Variants With Fields](../language/07-enums.md#variants-with-fields)). A
+`match` takes it apart: the arm `p: Ok` binds the `Ok` variant's field, `p.value`, and the
+arm `e: Err` the `Err` variant's, `e.error`, as `main` does above. An arm for each of the
+two covers every case, so a function may return from both without a `return` after the
+`match`; a `_` arm stands for the one not named (`match f.readln() { l: Ok { ... } _ {
+break; } }`). To test for one code of an `Error`, compare it in the `Err` arm:
+`e.error.code == err::ErrorCode::NotFound`.
 
-`Result<T>` works for every `T`. For an optional `T` the `value` is a `T` itself, not a
-nested optional (`Result<Str?>`'s `value` is a `Str?`, see
-[Generics](../language/13-generics.md)), so a value of `None` does not tell a failure from
-a success that made `None`: test `isOk()` instead.
+A result is made with [`ok`](#ok) or `Result::Ok(value)` when the operation made a value,
+and with `::error`'s [`fail`](error.md#fail) or `Result::Err(error)` when it did not. Each
+takes the type arguments it does not get from its argument from the type the result flows
+into: `return res::ok(n);` in a function returning a `res::Result<int, err::Error>` is that
+`Result` ([Generic Enums](../language/07-enums.md#generic-enums)). Where nothing gives
+them, write them: `res::Result<int, Str>::Err("no")`, or give the value a type, `r:
+res::Result<int, Str> = res::ok(1);`.
 
-The rule that `value` is present exactly when the code is `Ok` is the library's
-convention, kept by its functions and by `ok`. The struct's initializer does not check
-it: `res::Result<int>(res::none(), None)` is a result that says `isOk()` and has no value.
+`Result<T, E>` works for every `T` and `E`. For an optional `T` the value is that optional:
+a `Result<Str?, err::Error>` that is `Ok` with the value `None` is a success that found
+nothing, and an `Err` a failure, so the two are told apart.
 
-Printing an `Error` or a `Result` with `io::println` shows its fields, with the code as
-its ordinal (`Error(code: 1, msg: No such file or directory)`); `message()` and `name(code)`
-are the texts meant for people.
+Printing a `Result` with `io::println` shows its variant and its field:
+`Ok(value: 8080)`, `Err(error: Error(code: NotFound, msg: No such file or directory))`.
+`==` and `!=` compare two results of the same type, their variant and its field.
 
 ---
 
 ## API
 
-### `ErrorCode`
+### `Result`
 
 ```pkn
-enum ErrorCode { Ok, NotFound, PermissionDenied, ... }
-```
-
-What went wrong; `Ok` is no error. The variants, in their order, with the C `errno` values
-that [`fromErrno`](#fromerrno) maps to each:
-
-| Variant | Meaning | From `errno` |
-|---------|---------|--------------|
-| `Ok` | no error | `0` |
-| `NotFound` | there is no such file or entry | `ENOENT` |
-| `PermissionDenied` | not allowed | `EACCES`, `EPERM` |
-| `AlreadyExists` | it exists already | `EEXIST` |
-| `InvalidArgument` | an argument is not one the operation takes | `EINVAL`, `EBADF` (a file not open for the operation) |
-| `IsADirectory` | a directory where a file is needed | `EISDIR` |
-| `NotADirectory` | a file where a directory is needed | `ENOTDIR` |
-| `TooManyOpenFiles` | the process or the system has too many open | `EMFILE`, `ENFILE` |
-| `NoSpace` | the device is full | `ENOSPC` |
-| `ReadOnly` | the file system is read-only | `EROFS` |
-| `Busy` | the resource is in use | `EBUSY` |
-| `Interrupted` | a signal interrupted the operation | `EINTR` |
-| `WouldBlock` | the operation would block | `EAGAIN`, `EWOULDBLOCK` |
-| `BrokenPipe` | the other end of a pipe is closed | `EPIPE` |
-| `TimedOut` | the operation took too long | `ETIMEDOUT` |
-| `OutOfMemory` | there is not enough memory | `ENOMEM` |
-| `Unsupported` | the operation is not supported | `ENOSYS`, `ENOTSUP`, `EOPNOTSUPP` |
-| `Io` | a low-level input or output error | `EIO` |
-| `EndOfFile` | a read found nothing left | (none: made by `::io`'s reads) |
-| `OutOfRange` | an index or a count past the end | (none: made by `::memory`) |
-| `Other` | any other error | every other `errno` |
-
-### `Error`
-
-```pkn
-struct Error {
-  code: ErrorCode;
-  msg: Str?;
+enum Result<T, E> {
+  Ok(value: T),
+  Err(error: E)
 }
 ```
 
-An error: what went wrong, and a message saying more, or `None`. It is made with the
-struct's initializer, `res::Error(res::ErrorCode::InvalidArgument, "out of range")` (a
-`Str` literal for `msg` is fine, or `None`), or by [`none`](#none) and
-[`fromErrno`](#fromerrno). Two errors are `==` when their codes and messages are.
-
-#### `Error.isOk`
-
-```pkn
-view fn isOk() -> bool
-```
-
-Whether this is no error: its code is `Ok`.
-
-#### `Error.message`
-
-```pkn
-view fn message() -> Str
-```
-
-The message, or the code's name ([`name`](#name)) when `msg` is `None`: `"InvalidArgument"`.
-
-### `Result<T>`
-
-```pkn
-struct Result<T> {
-  error: Error;
-  value: T?;
-}
-```
-
-The result of an operation that can fail: its error (code `Ok` when it did not), and the
-value it made, present when it did not fail. A success is made with [`ok`](#ok), a failure
-with the initializer and `None`: `res::Result<int>(res::Error(res::ErrorCode::NotFound,
-None), None)`.
-
-#### `Result.isOk`
-
-```pkn
-view fn isOk() -> bool
-```
-
-Whether the operation did not fail: `error.code` is `Ok`.
-
-### `none`
-
-```pkn
-fn none() -> Error
-```
-
-No error: `Error(ErrorCode::Ok, None)`. A function that returns an `Error` returns this when
-it succeeded.
+The value an operation made, `Ok`, or the error saying why it could not, `Err`. The
+standard library's results are `Result<T, Error>`, with [`::error`](error.md)'s `Error`.
 
 ### `ok`
 
 ```pkn
-fn ok<T>(value: T) -> Result<T>
+fn ok<T, E>(value: T) -> Result<T, E>
 ```
 
-The result of an operation that made `value`: `Result<T>(none(), value)`. `T` is inferred
-from the argument (`res::ok(n)` with `n: int` is a `Result<int>`).
-
-### `name`
-
-```pkn
-fn name(code: ErrorCode) -> Str
-```
-
-The code's name, as it is spelled in `ErrorCode`: `"NotFound"` for `ErrorCode::NotFound`.
-
-### `fromErrno`
-
-```pkn
-fn fromErrno(errno: int) -> Error
-```
-
-The `Error` of a C library failure whose `errno` is `errno`: its code by the table under
-[`ErrorCode`](#errorcode), and C's `strerror` text as its message (`No such file or
-directory` for `ENOENT`; for a number C does not know, the code `Other` and C's text for
-it, `Unknown error 99999` with glibc). `fromErrno(0)` is `none()`. It is for code that calls C through
-[native functions](../language/03-functions.md#native-functions), as `::io` does.
+The result of an operation that made `value`: `Result::Ok(value)`. `T` is inferred from the
+argument and `E` from the type the result flows into (`return res::ok(n);` in a function
+returning a `Result<int, Error>`, `r: Result<int, Error> = res::ok(1)`).

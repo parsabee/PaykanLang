@@ -241,8 +241,8 @@ TEST(Pkm, CacheIsWrittenOnTheFirstBuildAndReusedOnTheSecond) {
       contains(second.out, "module mid: cache .paykan_cache/mid.pkm usable"))
       << second.out;
   EXPECT_FALSE(contains(second.out, "wrote")) << second.out;
-  // (The standard library's ::io and ::result hold templates, which a .pkm
-  // does not carry yet (#160): they are built from source every time.)
+  // (The standard library's modules are prebuilt .pkm files, read and never
+  // written here.)
   EXPECT_FALSE(builtFromSource(second.out, "base")) << second.out;
   EXPECT_FALSE(builtFromSource(second.out, "mid")) << second.out;
 }
@@ -1189,7 +1189,8 @@ TEST(Pkm, StandardLibraryIsPkmFilesOnly) {
                " --verbose --no-module-cache main.pkn");
   EXPECT_EQ(r.exitCode, 2) << r.out;
   EXPECT_TRUE(contains(r.out, "b\n")) << r.out;
-  for (const char *m : {"::io", "::result", "::memory", "::collections"})
+  for (const char *m :
+       {"::io", "::error", "::result", "::memory", "::collections"})
     EXPECT_TRUE(contains(r.out, std::string("module ") + m + ": prebuilt "))
         << m << "\n"
         << r.out;

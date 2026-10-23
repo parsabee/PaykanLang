@@ -266,8 +266,9 @@ To learn PaykanLang:
   and conversions, classes, traits, enums, `match`, arrays, tuples, structs, optionals,
   generics, function types, modules and memory to the `paykan` command. Chapter by chapter
   it builds a real program.
-- **[`docs/stdlib/`](docs/stdlib/index.md)** — the standard library: `::io`, `::result`,
-  `::collections`, `::memory` and `::math`, every function and type with its signature.
+- **[`docs/stdlib/`](docs/stdlib/index.md)** — the standard library: `::io`, `::error`,
+  `::result`, `::collections`, `::memory` and `::math`, every function and type with its
+  signature.
 - **[`samples/`](samples/)** — runnable `.pkn` programs exercising every feature
   (`samples/codegen/` has the feature demos; see also `imports/`, `sema/`, `leak-check/`).
   [`samples/imports/12_calc/`](samples/imports/12_calc/) is a larger multi-module program:

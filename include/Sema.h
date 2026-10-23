@@ -1690,19 +1690,27 @@ private:
   /// @p paramTypes are the template's declared parameter types; on success
   /// @p out holds one canonical type per type parameter, in order.  The
   /// hint on failure spells the call with them as @p spelling
-  /// (`Tmpl<...>(...)` by default).
+  /// (`Tmpl<...>(...)` by default).  The type parameters the arguments
+  /// leave open are taken from @p expected, the type the call's value flows
+  /// into, matched against the template's result type @p resultPattern
+  /// (`r: Result<int, Error> = ok(1)` gives `ok`'s `E`).
   bool inferTypeArgs(const std::string &templateName,
                      const std::vector<const std::string *> &typeParams,
                      const std::vector<ast::Type *> &paramTypes,
                      const std::vector<ast::Type *> &argTypes,
                      ast::SourceLocation loc, std::vector<ast::Type *> &out,
-                     const std::string &spelling = "");
+                     const std::string &spelling = "",
+                     ast::Type *resultPattern = nullptr,
+                     ast::Type *expected = nullptr);
 
   /// Resolve a call whose callee is a template (or carries explicit type
-  /// arguments): instantiate and rewrite the callee name.  Returns false after
+  /// arguments): instantiate and rewrite the callee name.  A generic
+  /// function's type arguments its arguments leave open come from
+  /// @p expected, the type its value flows into.  Returns false after
   /// reporting an error.
   bool resolveGenericCall(ast::CallExpr *node,
-                          const std::vector<ast::Type *> &argTypes);
+                          const std::vector<ast::Type *> &argTypes,
+                          ast::Type *expected = nullptr);
 
   /// True when @p name is a conversion target (`Str`, `int`, `float`,
   /// `bool`, `char`), i.e. `name<Source>(value)` is

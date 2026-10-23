@@ -5,8 +5,8 @@ introduces its feature with small programs, then gives the precise rules: the sy
 typing rules, the run-time behaviour, the limitations of the current release and the
 compile-time errors the feature can report. It is written for a programmer who already
 knows another language (C, Java, Python, Go, Swift or similar) but has never seen this one.
-The modules a program imports, `::io`, `::result`, `::collections`, `::memory` and
-`::math`, are documented in [the standard library](../stdlib/index.md).
+The modules a program imports, `::io`, `::error`, `::result`, `::collections`, `::memory`
+and `::math`, are documented in [the standard library](../stdlib/index.md).
 
 The chapters can be read in order. Along the way they build a real program: **`tasks`**, a
 small to-do list manager. It starts as a few functions in [Basics](02-basics.md), gets a

@@ -1758,7 +1758,8 @@ bool Sema::inferTypeArgs(const std::string &templateName,
                          const std::vector<ast::Type *> &paramTypes,
                          const std::vector<ast::Type *> &argTypes,
                          ast::SourceLocation loc, std::vector<ast::Type *> &out,
-                         const std::string &spelling) {
+                         const std::string &spelling, ast::Type *resultPattern,
+                         ast::Type *expected) {
   const std::string hint =
       "specify the type arguments explicitly: '" +
       (spelling.empty() ? templateName + "<...>(...)" : spelling) + "'";
@@ -1784,6 +1785,15 @@ bool Sema::inferTypeArgs(const std::string &templateName,
       return false;
     }
   }
+  // The ones the arguments leave open, from the type the result flows into
+  // (never against the arguments: a conflict there is the argument check's).
+  if (resultPattern && expected) {
+    StringMap<ast::Type *> fromResult;
+    InferenceConflict ignored;
+    if (unifyTypes(resultPattern, expected, params, fromResult, ignored))
+      for (auto &[name, ty] : fromResult)
+        bindings.try_emplace(name, ty);
+  }
   out.clear();
   for (auto *p : typeParams) {
     auto it = bindings.find(*p);
@@ -1799,7 +1809,8 @@ bool Sema::inferTypeArgs(const std::string &templateName,
 }
 
 bool Sema::resolveGenericCall(ast::CallExpr *node,
-                              const std::vector<ast::Type *> &argTypes) {
+                              const std::vector<ast::Type *> &argTypes,
+                              ast::Type *expected) {
   const std::string &callee = node->getCalleeName();
   const ast::SourceLocation loc = node->getLocation();
 
@@ -1905,8 +1916,10 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
       std::vector<ast::Type *> paramTypes;
       for (auto &p : tmpl->getParams())
         paramTypes.push_back(here(tmpl, p.ParamType));
+      ast::Type *result = tmpl->getReturnType();
       if (!inferTypeArgs(callee, tmpl->getTypeParams(), paramTypes, argTypes,
-                         loc, typeArgs))
+                         loc, typeArgs, "",
+                         result ? here(tmpl, result) : nullptr, expected))
         return false;
     }
     std::string inst = instantiateFunction(callee, typeArgs, loc);

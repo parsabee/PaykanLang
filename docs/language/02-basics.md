@@ -492,10 +492,12 @@ fn find(head: Node?, key: int) -> Node? { ... }
 
 `Obj` and `Str` are the only builtin classes. Files, standard input and errors come from
 the standard library: `io::File` is an open file, `io::stdin()` the program's standard
-input, and `res::Error` / `res::Result<T>` (module `::result`) say what went wrong when an
-operation fails (see [`::io`](../stdlib/io.md) and [`::result`](../stdlib/result.md)). A
-read returns a `res::Result<Str>` whose `value` is a `Str?`, so `match` on the `value` to
-tell a line from the end of the input:
+input, and `err::Error` (module `::error`) says what went wrong when an operation fails,
+inside a `res::Result<T, err::Error>` (module `::result`) when the operation makes a value
+(see [`::io`](../stdlib/io.md), [`::error`](../stdlib/error.md) and
+[`::result`](../stdlib/result.md)). A read returns a `res::Result<Str, err::Error>`, an
+[enum](07-enums.md#generic-enums) that is `Ok` with the line or `Err` at the end of the
+input, so `match` on it to tell the two apart:
 
 ```pkn
 import ::io;
@@ -503,9 +505,9 @@ import ::io;
 fn main() -> int {
   n: int = 0;
   while True {
-    match io::stdin().readln().value {
-      line: Str { n = n + 1; }
-      _         { break; }       // None — end of input
+    match io::stdin().readln() {
+      line: Ok { n = n + 1; }
+      _        { break; }        // Err — the end of the input
     }
   }
   io::println(Str(n) + " lines");
