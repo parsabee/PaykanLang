@@ -518,8 +518,10 @@ manifest's `HAS_TEMPLATES` bit.
 of the source imports of §4.8, already resolved by renaming, so they need no
 node codec of their own. The section frames the [AST interchange
 format](../plugins/ast-format.md) text of a unit holding the module's
-generic classes, structs and functions and their `impl` blocks, as
-`Sema::exportTemplates` produced them:
+generic classes, structs, enums and functions and their `impl` blocks, as
+`Sema::exportTemplates` produced them (an enum has no `impl` block, and its
+instantiations no code: an importer's `Maybe<int>` is an `ENUM` record of
+its own `IFACE` like any enum):
 
 ```
 TmplSection

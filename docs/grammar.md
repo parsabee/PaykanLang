@@ -148,7 +148,7 @@ typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
 
 structDecl  ::= "struct" IDENT typeParams? "{" ( varDecl ";" )+ "}"
 
-enumDecl    ::= "enum" IDENT "{" variant ( "," variant )* ","? "}"
+enumDecl    ::= "enum" IDENT typeParams? "{" variant ( "," variant )* ","? "}"
 variant     ::= IDENT ( "(" varDecl ( "," varDecl )* ")" )?   -- its fields
 
 traitDecl   ::= "trait" IDENT ( "<" IDENT ( "," IDENT )* ">" )?
@@ -186,8 +186,8 @@ block, and a struct has no superclass
 (`a struct body holds fields only ('name: Type;'); a method goes in an 'impl'
 block`, `a struct has no superclass`), and so is an empty body (`struct 'S'
 has no fields: a struct has at least one`).
-A class, struct or function with `typeParams` is generic (a template that Sema
-instantiates); the superclass of a generic class is a plain class name.
+A class, struct, enum or function with `typeParams` is generic (a template that
+Sema instantiates); the superclass of a generic class is a plain class name.
 A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
 argument must implement.  `impl Show for A` implements trait `Show` for `A`.
 A function or method written `=> expression ;` has for its body a block of one
@@ -415,13 +415,18 @@ primary ::= literal
                                                              -- conversion
           | IDENT "<" typeArgList ">" "::" IDENT "(" argumentList? ")"
                                                              -- static fn of an
-                                                             -- instantiation
+                                                             -- instantiation, or
+                                                             -- a generic enum's
+                                                             -- variant with fields
+          | IDENT "<" typeArgList ">" "::" IDENT             -- a generic enum's
+                                                             -- variant
           | modulePath "::" IDENT                            -- enum variant, or a
                                                              -- qualified function
                                                              -- as a value
           | modulePath "::" IDENT "(" argumentList? ")"      -- qualified call
           | modulePath "::" IDENT "<" typeArgList ">" "(" argumentList? ")"
           | modulePath "::" IDENT "<" typeArgList ">" "::" IDENT "(" argumentList? ")"
+          | modulePath "::" IDENT "<" typeArgList ">" "::" IDENT
           | "(" expression ")"
           | "(" expression ( "," expression )+ ")"           -- tuple literal
           | "[" argumentList? "]"                            -- array literal

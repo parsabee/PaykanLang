@@ -310,3 +310,59 @@ fn main() -> int {
             "Empty\nNamed(name: 5, tag: None) Circle(r: 1.5) 2\n12\n");
   g.expectNoLeaks("TaggedUnionHeldEverywhere");
 }
+
+// A generic enum: each instantiation is an enum of its own, made, matched,
+// shown, compared and passed through generic code.
+TEST(EnumCodeGen, GenericEnums) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+import ::io;
+enum Maybe<T> { Just(value: T), Nothing }
+enum Result<T, E> { Ok(value: T), Err(error: E) }
+struct Cell<T> { m: Maybe<T>; n: int; }
+class Holder { m: Maybe<Str>; }
+fn unwrapOr<T>(m: Maybe<T>, d: T) -> T {
+  match m {
+    j: Just { return j.value; }
+    Nothing { return d; }
+  }
+}
+fn parse(s: view Str) -> Result<int, Str> {
+  if (s == "42") {
+    return Result::Ok(42);
+  }
+  return Result::Err("not 42: " + s);
+}
+fn main() -> int {
+  a = Maybe::Just("a");
+  b: Maybe<Str> = Maybe::Nothing;
+  io::println(a.toString() + " " + b.toString());
+  io::println(unwrapOr(a, "x") + unwrapOr(b, "y"));
+  io::println(Str(a == Maybe::Just("a")) + " " + Str(b == Maybe::Nothing));
+  c = Cell(Maybe::Just(2), 3);
+  h = Holder(b);
+  h.m = a;
+  io::println(c.toString() + " " + h.m.toString());
+  xs: Maybe<int>[3] = [Maybe::Just(1), Maybe::Nothing, Maybe::Just(3)];
+  total = 0;
+  for i in 0..3 {
+    total += unwrapOr(xs[i], 10);
+  }
+  match parse("42") {
+    o: Ok { total += o.value; }
+    e: Err { io::println(e.error); }
+  }
+  match parse("7") {
+    o: Ok { total += o.value; }
+    e: Err { io::println(e.error); }
+  }
+  return total;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Just(value: a) Nothing\nay\nTrue True\n"
+                      "Cell<int>(m: Just(value: 2), n: 3) Just(value: a)\n"
+                      "not 42: 7\n");
+  EXPECT_EQ(r.ExitCode, 56);
+  g.expectNoLeaks("GenericEnums");
+}

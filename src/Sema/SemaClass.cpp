@@ -768,7 +768,7 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
       why = std::string("an 'impl' block for a ") +
             (st || StructTemplates.count(name) ? "struct" : "class") +
             " of another module is not supported yet";
-    else if (Ctx.lookupEnumType(name))
+    else if (Ctx.lookupEnumType(name) || EnumTemplates.count(name))
       why = "an 'impl' block for an enum is not supported yet";
     else if (target && !im->getTypeParams().empty()) {
       why = "'" + name + "' is not a generic " + typeKindWord(target) +
@@ -1003,6 +1003,8 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
     templateNames.insert(cd->getName());
   for (auto *sd : tu->getGenericStructDecls())
     templateNames.insert(sd->getName());
+  for (auto *ed : tu->getGenericEnumDecls())
+    templateNames.insert(ed->getName());
 
   // A type parameter list must not repeat a name, and a parameter must not
   // shadow a type: inside the template `T` would silently mean the type
@@ -1028,7 +1030,7 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       }
       if (Ctx.lookupType(*p) || LocalClassNames.count(*p) ||
           ClassTemplates.count(*p) || StructTemplates.count(*p) ||
-          templateNames.count(*p)) {
+          EnumTemplates.count(*p) || templateNames.count(*p)) {
         std::string msg = "type parameter '";
         msg += *p;
         msg += "' of ";
@@ -1081,6 +1083,32 @@ bool Sema::registerGenericTemplates(ast::TranslationUnit *tu) {
       continue;
     }
     StructTemplates[sd->getName()] = sd;
+  }
+
+  for (auto *ed : tu->getGenericEnumDecls()) {
+    if (EnumTemplates.count(ed->getName())) {
+      error(ed->getLocation(),
+            "redefinition of generic enum '" + ed->getName() + "'");
+      ok = false;
+      continue;
+    }
+    if (!checkDeclNameAvailable(ed->getName(), ed->getLocation(),
+                                DeclKind::Enum) ||
+        !checkTypeParams(ed->getTypeParams(), "generic enum", ed->getName(),
+                         ed->getLocation())) {
+      ok = false;
+      continue;
+    }
+    // Its variants are its instantiations': checked once, here (a repeated
+    // one is left out of them, as visitEnumDecl leaves it out of an enum).
+    StringSet seen;
+    for (auto *v : ed->getVariants())
+      if (!seen.insert(*v).second) {
+        error(ed->getLocation(),
+              "duplicate variant '" + *v + "' in enum '" + ed->getName() + "'");
+        ok = false;
+      }
+    EnumTemplates[ed->getName()] = ed;
   }
 
   for (auto *fn : tu->getGenericFuncDecls()) {
@@ -1222,9 +1250,13 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   if (tIt == ClassTemplates.end()) {
     if (ErroneousNames.count(name) || isFailedImportUse(name))
       ++SuppressedFollowOns; // reported with its declaration or its import
-    else if (Ctx.lookupClassType(name) || Ctx.lookupEnumType(name))
+    else if (Ctx.lookupClassType(name))
       error(loc, "'" + name +
                      "' is not a generic class and takes no type "
+                     "arguments");
+    else if (Ctx.lookupEnumType(name))
+      error(loc, "'" + name +
+                     "' is not a generic enum and takes no type "
                      "arguments");
     else if (Ctx.lookupStructType(name))
       error(loc, "'" + name +
@@ -1508,6 +1540,16 @@ std::string Sema::instantiateFunction(const std::string &name,
     FuncInstantiations[instName] = false;
     return "";
   }
+  // The template's module instantiated it with these arguments itself, and
+  // exported the instantiation (an imported function under the module's
+  // hidden qualifier): that one is called, as an imported concrete
+  // instantiation of a struct is used (instantiateStruct).  A native one is
+  // made here, as it crosses into C by its template's rules.
+  if (const FunctionSig *sig = origin ? lookupFunction(instName) : nullptr;
+      sig && sig->IsBuiltin && !tmpl->isNative()) {
+    FuncInstantiations[instName] = true;
+    return instName;
+  }
   if (instantiationDepth() >= kMaxInstantiationDepth) {
     error(loc, "instantiating '" + instName +
                    "' exceeds the maximum instantiation depth (" +
@@ -1671,6 +1713,22 @@ bool Sema::unifyTypes(ast::Type *pattern, ast::Type *actual,
           return false;
       return true;
     }
+    // `Maybe<T>` against an enum: an instantiation of the same template
+    // unifies argument-wise.
+    if (auto etmpl = EnumTemplates.find(gt->getName());
+        etmpl != EnumTemplates.end()) {
+      auto *et = ast::dyn_cast<ast::EnumType>(actual);
+      const EnumInstantiationInfo *info =
+          et ? enumInstantiationInfo(et) : nullptr;
+      if (!info || info->Template != etmpl->second ||
+          info->Args.size() != gt->getNumArgs())
+        return true;
+      for (size_t i = 0; i < gt->getNumArgs(); ++i)
+        if (!unifyTypes(gt->getArgs()[i], info->Args[i], typeParams, bindings,
+                        conflict))
+          return false;
+      return true;
+    }
     // `Box<T>` against a class: find an instantiation of the same template
     // (however either spells it) in the argument's class or one of its
     // ancestors and unify argument-wise.
@@ -1699,10 +1757,11 @@ bool Sema::inferTypeArgs(const std::string &templateName,
                          const std::vector<const std::string *> &typeParams,
                          const std::vector<ast::Type *> &paramTypes,
                          const std::vector<ast::Type *> &argTypes,
-                         ast::SourceLocation loc,
-                         std::vector<ast::Type *> &out) {
+                         ast::SourceLocation loc, std::vector<ast::Type *> &out,
+                         const std::string &spelling) {
   const std::string hint =
-      "specify the type arguments explicitly: '" + templateName + "<...>(...)'";
+      "specify the type arguments explicitly: '" +
+      (spelling.empty() ? templateName + "<...>(...)" : spelling) + "'";
   if (paramTypes.size() != argTypes.size()) {
     error(loc, "cannot infer the type arguments of '" + templateName +
                    "': it expects " + std::to_string(paramTypes.size()) +
@@ -1912,10 +1971,19 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     error(loc, "'" + callee + "' is not generic and takes no type arguments");
   else if (ErroneousNames.count(callee))
     ++SuppressedFollowOns; // a template rejected at its declaration
-  else if (!isFailedImportUse(callee))
-    if (!reportPrivateImport(callee, loc))
+  else {
+    // `q::G<int>::V(...)` names a member of `q::G`, whose import may have
+    // failed or which may be private to its module.
+    const size_t sep = callee.rfind(names::kQualSep);
+    const std::string owner =
+        sep == std::string::npos ? std::string() : callee.substr(0, sep);
+    if (!isFailedImportUse(callee) &&
+        (owner.empty() || !isFailedImportUse(owner)) &&
+        !reportPrivateImport(callee, loc) &&
+        (owner.empty() || !reportPrivateImport(owner, loc)))
       error(loc,
             "call to undeclared generic function or class '" + callee + "'");
+  }
   return false;
 }
 
@@ -1964,6 +2032,11 @@ void Sema::injectInstantiations(ast::TranslationUnit *tu) {
   for (auto *sd : InstantiatedStructDecls)
     tu->addStructDecl(sd);
   InstantiatedStructDecls.clear();
+  // An enum's instantiations are the module's enums (its interface exports
+  // them); they have no code.
+  for (auto *ed : InstantiatedEnumDecls)
+    tu->addEnumDecl(ed);
+  InstantiatedEnumDecls.clear();
   if (InstantiatedClassDecls.empty() && InstantiatedFuncDecls.empty())
     return;
 

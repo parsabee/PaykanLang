@@ -28,6 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `(variant NAME VAR...)` (docs/plugins/ast-format.md). The runtime adds
     `PaykanEnum_toString` and `PaykanEnum_equals` and the layout kind `ENUM`
     (docs/pir.md).
+- Generic enums (docs/language/07-enums.md, "Generic Enums"): an enum takes
+  type parameters, `enum Maybe<T> { Just(value: T), Nothing }`, and each
+  instantiation, `Maybe<int>`, is an enum of its own.
+  - A variant's type arguments are written (`Maybe<int>::Nothing`), taken from
+    the type the value flows into (a declared variable, a parameter, a result,
+    a field, an array element, the other side of `==`, the other arm of a
+    conditional expression), or inferred from its fields (`Maybe::Just(3)`).
+  - Generic functions infer through them (`fn orElse<T>(m: Maybe<T>, d: T)`);
+    a bound is checked per instantiation; an instantiation that holds itself is
+    reported where it is made.
+  - A module's generic enums are exported with its templates, from a source
+    and from a `.pkm` (its `TMPL` section). The AST interchange format writes
+    their type parameters, `(enum NAME (type-params ...) ...)`, and a
+    variant's type arguments, `(enum-value ... (type-args ...))`.
 - Every enum is `Show`: `d.toString()` and `io::println(d)` give the variant's
   name, also for an enum in a tuple, a struct or an optional (which printed
   its ordinal before).
@@ -228,6 +242,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is a function of this module and cannot be used as a variable`, reported once
   (docs/language/02-basics.md, "Scoping Rules").  A field, a native function's parameter
   and another module's function (always qualified) may still share the name.
+- A generic function that its own module instantiated (`fn id<T>` and a call `id(3)` in
+  the module) could not be instantiated with the same type arguments by an importer
+  (`'$m::id<int>' is a builtin function and cannot be redeclared`); the importer now calls
+  the module's instantiation, as it uses an imported instantiation of a generic struct.
+- A static function of an instantiation named in a generic function's body (`Box<int>::of(3)`
+  for a generic `Box` of the module) failed when another module instantiated the function
+  (`call to undeclared generic function or class 'Box::of'`); it is resolved as the
+  template's module declares it, as a variant of a generic enum is (`Maybe::Just(x)`).
 
 ## [0.2.0] - 2026-10-20
 

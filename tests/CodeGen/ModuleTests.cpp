@@ -735,3 +735,54 @@ fn main() -> int {
 
   std::filesystem::remove_all(tmpDir);
 }
+
+// A generic function its own module instantiated (`id<int>`, for `useInt`)
+// is that module's function: an importer instantiating it with the same
+// arguments calls it instead of declaring it again.  A template's body names
+// the module's `Box<int>::of` and its generic enum's variants as the module
+// declares them; the enum's variants are made, inferred and matched by the
+// module's templates and here.
+TEST(Module, InstantiationsTheModuleMadeAndGenericEnums) {
+  auto tmpDir = paykan::test::tempDir() / "pkn_import_own_instantiations";
+  std::filesystem::remove_all(tmpDir);
+  std::filesystem::create_directories(tmpDir);
+
+  writeTempFile(tmpDir.string(), "lib.pkn", R"(
+enum Maybe<T> { Just(value: T), Nothing }
+fn id<T>(x: T) -> T { return x; }
+fn useInt() -> int { return id(3); }
+fn orElse<T>(m: Maybe<T>, d: T) -> T {
+  match m {
+    j: Just { return j.value; }
+    Nothing { return d; }
+  }
+}
+fn half(n: int) -> Maybe<int> {
+  return if n % 2 == 0 then Maybe::Just(n / 2) else Maybe::Nothing;
+}
+fn total() -> int { return orElse(half(4), 0) + orElse(half(3), 10); }
+struct Box<T> { v: T; }
+impl Box<T> { static fn of(v: T) -> Box<T> { return Box<T>(v); } }
+fn boxed<T>(x: T) -> int { return orElse(Maybe::Just(Box<int>::of(7).v), 0); }
+)");
+
+  auto mainPath = writeTempFile(tmpDir.string(), "main.pkn", R"(
+import ::io;
+import lib;
+fn main() -> int {
+  none: lib::Maybe<int> = lib::Maybe::Nothing;
+  io::println(lib::half(6).toString() + " " + none.toString() + " " +
+              lib::Maybe<Str>::Just("s").toString());
+  return lib::id(5) + lib::useInt() + lib::total() +
+         lib::orElse(lib::half(8), 0) + lib::orElse(none, 100) +
+         lib::boxed("s");
+}
+)");
+
+  auto r = compileAndRunFile(mainPath);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Just(value: 3) Nothing Just(value: s)\n");
+  EXPECT_EQ(r.ExitCode, 5 + 3 + 12 + 4 + 100 + 7);
+
+  std::filesystem::remove_all(tmpDir);
+}

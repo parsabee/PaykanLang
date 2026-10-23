@@ -382,16 +382,29 @@ TEST(Generics, StaticFnOfAnImportedInstantiation) {
   EXPECT_EQ(call->getNumArguments(), 2u);
 }
 
-// Without the call's `(` the speculation is rewound: `a < b > ::c` is the
-// comparison `a < b` followed by a chained `>`, which is rejected as such.
-TEST(Generics, StaticFnNeedsTheCall) {
+// Without the call's `(`, `a<b>::c` is a generic enum's variant with its
+// type arguments (`Maybe<int>::Nothing`; Sema checks that `a` is one); a
+// comparison without the `::` member stays a comparison.
+TEST(Generics, MemberWithoutTheCallIsAVariant) {
   auto [ok, driver] = parse(R"(
     fn main() -> int { x = a < b > ::c; return 0; }
   )");
-  EXPECT_FALSE(ok);
+  ASSERT_TRUE(ok);
+  auto *as = dyn_cast<AssignStmt>(
+      driver->getRoot()->getFuncDecls()[0]->getBody()->getStatements()[0]);
+  ASSERT_NE(as, nullptr);
+  auto *ev = dyn_cast<EnumValueExpr>(as->getValue());
+  ASSERT_NE(ev, nullptr);
+  EXPECT_EQ(ev->getEnumName(), "a");
+  EXPECT_EQ(ev->getVariantName(), "c");
+  EXPECT_EQ(ev->getTypeArgs().size(), 1u);
   auto [ok2, driver2] = parse(R"(
     fn main() -> int { x = a < b; return 0; }
   )");
   EXPECT_TRUE(ok2);
   EXPECT_EQ(firstCall(driver2->getRoot()), nullptr);
+  EXPECT_FALSE(parse(R"(
+    fn main() -> int { x = a < b > c; return 0; }
+  )")
+                   .Ok);
 }

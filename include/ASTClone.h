@@ -101,11 +101,16 @@ public:
   /// no type parameters.
   ImplDecl *cloneImplDecl(ImplDecl *im, const std::string &newTypeName);
 
+  /// Copy an enum under a new name (its variants and their fields).  The
+  /// copy has no type parameters.
+  EnumDecl *cloneEnumDecl(EnumDecl *ed, const std::string &newName);
+
   /// Copy a template as a template: same name, same type parameters.
   FuncDecl *cloneTemplate(FuncDecl *fn);
   ClassDecl *cloneTemplate(ClassDecl *cd);
   StructDecl *cloneTemplate(StructDecl *sd);
   ImplDecl *cloneTemplate(ImplDecl *im);
+  EnumDecl *cloneTemplate(EnumDecl *ed);
   /// The type parameters' bounds of a template, cloned.
   TypeParamBounds cloneBounds(const TypeParamBounds &bounds);
 };
