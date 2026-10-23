@@ -127,7 +127,8 @@ reference names it:
 - **Assignment** `x = y` retains the new object and releases whatever `x` referred to before, so
   reassigning a variable cannot leak the previous value.
 - **Passing to a function** keeps the object alive for the duration of the call; the reference the
-  caller holds is unaffected.
+  caller holds is unaffected (at a variable's last use, that reference is the one passed: see
+  [Ownership transfers](#ownership-transfers)).
 - **Returning** transfers ownership of the result to the caller.
 - **Storing into a field or array slot** retains the stored object; overwriting a slot releases
   the value it previously held.
@@ -347,12 +348,72 @@ its weak references frees everything, as `--track-heap` shows.
 
 You never hand a reference on by hand. Assigning or passing a reference shares the object:
 `t = s` retains it, and `s` and `t` are both live, and readable, until their scopes end. There
-is no way to *consume* a variable by hand. Where a variable is not read again after it is
-handed on, the hand-off could become a transfer — the reference moves to the destination
-without a retain, and the source is not released at scope exit. That is an optimization for
-the compiler to make, never something a program has to spell out, and it is not made yet:
-until the last-use pass ([#186](https://github.com/parsabee/PaykanLang/issues/186)) lands,
-each such hand-off is a retain, and the source is released at scope exit.
+is no way to *consume* a variable by hand.
+
+Where a variable is not read again after it is handed on, the compiler makes the hand-off a
+**transfer**: the reference moves to the destination without a retain, and the variable
+releases nothing at the end of its scope. Passing a variable to a function, assigning it to
+another variable, storing it in a field or an array element, and returning it are transfers at
+the variable's last use, and so is copying a tuple, a struct, an enum, a function value or an
+optional of one held in a variable. A hand-off the variable is read after stays a copy: later
+in the function, or on the next iteration of a loop (a variable assigned a new value before it
+is read again is not). Where one branch of an `if` or one arm of a `match` hands the variable on
+and another does not, the other releases it when its scope ends, as before. In `f(a, a)` the
+first `a` is a copy and the second a transfer. `self`, `inout` parameters and locals, fields,
+array elements and the members of a tuple or struct are never transferred, and a lambda's
+captures are always copies. The compiler's `--stats` option counts the transfers it made
+([docs/pir.md §12](../pir.md#12-passes) has the details).
+
+A transfer releases nothing early: the destination holds the reference and releases it at the
+end of *its* scope, as it would a copy: a parameter when its function returns, a variable when
+its scope ends, a field when its object is destroyed or the field is assigned again. A program
+frees the same objects either way. What a transfer can change is *when* an object is destroyed:
+it lives as long as its last holder, which after a transfer is the destination. Only a
+[`weak` reference](#weak-references) elsewhere can see that: it reads `None` as soon as the
+destination lets go, which may be before the variable's scope would have ended.
+
+```pkn
+import ::io;
+
+class Node {
+  name: Str;
+}
+
+class Watcher {
+  weak target: Node?;
+}
+
+fn consume(n: Node) -> Str {
+  return n.name;
+}
+
+fn report(w: view Watcher) {
+  match w.target {
+    t: Node { io::println("alive: " + t.name); }
+    None { io::println("gone"); }
+  }
+}
+
+fn main() -> int {
+  n = Node("first");
+  w = Watcher(n);
+  report(w);
+  io::println(consume(n));   // the last use of n: consume holds the only reference
+  report(w);                 // consume released it when it returned
+  return 0;
+}
+```
+
+Output:
+
+```
+alive: first
+first
+gone
+```
+
+A `weak` local made from the variable itself (`weak u = n;`) and read later keeps the hand-off a
+copy, so it reads the object until the variable's scope ends.
 
 Earlier releases had a `mov` keyword for this. It was removed in v0.2.0: `mov` is still a
 reserved word, and writing `t = mov s` is an error:

@@ -124,8 +124,9 @@ instead (`local.addr`, §6).  Several
 locals may share a name (two match arms binding `a`, a name declared in sibling
 scopes), so the printer writes a local as `%name.I` with `I` its index;
 hand-written text may use any spelling as long as declaration and uses agree.
-Every Paykan variable is a local.  A slot can hold `null` (an absent optional),
-so `release` of a null box is a no-op in the runtime.
+Every Paykan variable is a local.  A slot can hold `null` (an absent optional,
+or a variable handed on at its last use, §12), so `release` of a null box is a
+no-op in the runtime.
 
 A function is `extern` when it is defined elsewhere: in the runtime (no
 `module` clause; the name is `$rt.` followed by the C symbol, see below) or in
@@ -478,7 +479,8 @@ CodeGen enforced, now in one place.
   box (plain field read, tuple element, array element, another variable) is
   `retain`ed first; a raw object
   (string literal, concat result, `self`, a match-arm binding) is `box`ed, which
-  creates the object's unique box or acquires the existing one.
+  creates the object's unique box or acquires the existing one.  A copy at
+  a variable's last use is made a move afterwards (§12).
 * **Scope exit** releases the scope's owned variables in reverse declaration
   order, then any pending temporaries (a match subject), on every path:
   fall-through, `ret` (all scopes), `break`/`continue` (scopes inside the loop).
@@ -843,7 +845,22 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
 A pass rewrites a program in place (`paykan::pir::Pass`,
 `include/paykan/pir/Pass.h`); a `PassManager` runs its passes in order and,
 built with `verifyEach`, verifies the program after each one, so a pass
-that breaks it is the one named in the error.
+that breaks it is the one named in the error.  A pass adds what it did to
+named counters (`pir::Statistics`), which `paykan --stats` prints on
+standard error after the last pass ran:
+
+```text
+$ paykan --stats run greet.pkn
+paykan pass stats:
+  moves-at-last-use transfers : 1
+  moves-at-last-use retains removed : 1
+  moves-at-last-use releases removed : 1
+Hello, world!
+```
+
+(`greet.pkn` passes a variable to `greet(name: Str)` at its last use; the
+counters are those of the passes this run ran, so a module built from its
+source in this run counts, and one loaded from its `.pkm` does not.)
 
 **The dead-code pass** (`include/paykan/pir/DeadCode.h`,
 `dropDeadCode` / `createDeadCodePass`) erases every function, class and
@@ -870,3 +887,98 @@ that program.  With `--emit-c` every compiled declaration is a root too:
 the C is linked with each compiled module's code as a whole object.  A
 module's `.pkm` is trimmed with other roots before it is written
 (docs/design/pkm.md §5.13).
+
+**The moves-at-last-use pass** (`include/paykan/pir/MoveAtLastUse.h`,
+`moveAtLastUse` / `createMovesAtLastUsePass`) turns a copy at a variable's
+last use into a move: the copy's `retain` goes, and the variable's own
+reference is handed to the destination instead.  It works on the slots
+that own a reference: a `box` local whose address is never taken, and each
+reference a `mem` local holds at a constant offset.
+
+A **copy** is either
+
+- a box local's: `%v = load %x`, `retain %v`, and `%v` taken by its
+  consumer, all in one block.  The consumer is an argument of a `call`,
+  `vcall` or `icall` (the callee releases it, §7), a `store` into a local,
+  a `field.store` (not into a closure's capture), a `ptr.store`, or
+  `ret %v`; or
+- a whole `mem` local's (a tuple, a struct, an enum, a function value, an
+  optional of one, a fixed-size array of up to four elements): a
+  `mem.copy` of all its bytes followed by the `retain` of each reference
+  it duplicates, loaded from the destination (a declaration, a result),
+  or preceded by those retains, loaded from the source (an assignment,
+  which takes the new references before releasing the old ones).
+
+It is the slot's **last use** when every path from the copy reaches the
+slot's release before anything else happens to the slot, or ends in
+`unreachable`.  The release is a `load` or `ptr.load` of the slot whose one
+use is the `release` right after it: a scope exit's, or the one an
+assignment makes of the value it replaces.  Anything else on the way is a
+use: another read of the slot; a write to it; a `ret` or the end of the
+function (a slot that is never released does not own its value); or a use
+of an *alias*, a value that refers to the slot's object without a
+reference of its own: a box loaded from the slot before the copy, the
+object unboxed from it, a field read or an address computed from it, a
+`weak.new` of it and the `weak` local holding that.  The consumer may use
+the box it takes, and an earlier copy of the slot is a reference of its
+own: in `f(a, a)` only the second argument can move.  Loops are paths
+like any other: a variable read again on the next iteration is still in
+use; one reassigned first is released by the assignment.
+
+The **rewrite** removes the copy's retains and stores `null` into the slot
+right after them.  On the paths through the copy, the release then
+releases nothing; on the paths that do not pass it (another arm of an `if`
+or a `match`), it releases the reference as before: it is the balancing
+release where the paths join.  Then:
+
+- a release of a slot that is `null` on every path to it is removed, with
+  its load;
+- a release right after an `if` or a `switch` (only loads of other locals
+  between them), where the slot is `null` at the end of every arm that
+  reaches it but one, moves to the end of that arm: on that path it runs
+  at the same moment as before, and on the others it released nothing;
+  with two or more such arms it stays where it is, so a move never adds
+  a release;
+- a `null` store that no path reads before the slot is written again or
+  the function returns is removed.
+
+So `take(a)` at the last use of a parameter `a` is `%a.2 = load %a.0` and
+`call @take(%a.2)`, with neither the retain nor `a`'s release.
+
+**Why it is right.**  The pass removes a retain only together with a
+release that provably runs on the same reference with no read in between:
+on every path from the copy, the slot still holds the reference it copied
+until its release, and nothing reads the slot or uses an alias of it in
+that window.  Between the copy and the release the moved program holds one
+reference fewer than the original, the slot's, which the destination
+holds instead of a new one; before the copy and after the release the
+counts are the same.  Only a value that refers to the object without a
+reference of its own could observe the lower count, by being used after
+the destination let its reference go, and the analysis finds none in that
+window.  No release is ever added, nor moved earlier than it ran: the
+destination owns the reference and releases it at the end of its own
+scope (docs/language/16-memory.md, "Ownership transfers").  What changes
+is only that the object may die when the destination lets go rather than
+when the variable's scope ends, which a `weak` reference made elsewhere
+can see.
+
+**Never moved:** `self` (an `obj` local, or a struct method's `ptr`),
+`inout` parameters and locals (a `ptr`), a slot whose address is taken
+(passed to an `inout` parameter), fields and array elements (no local
+holds them), a part of a value held in memory (a member: only a whole
+local is moved), a `weak` local (of type `weak`), and a closure's
+captures (a `field.store`, or a copy, into a field of a `fn.` class: the
+closure keeps a reference of its own).  A borrow that holds no reference
+of its own has no release to pair a copy with, so it never matches.  A
+`view` parameter of a reference type is passed like one without a mode, a
+box its function owns and releases (§7), so it is a local like any other
+parameter, and at its last use it is handed on (to another `view`
+parameter, the only place Sema lets it go) like one.
+
+The driver runs it on every program after the dead-code pass, before any
+backend sees the program, so `--emit-pir` prints the moved program; and on
+a module's code before its `.pkm` is written, after the trim and before the
+split (docs/design/pkm.md §5.13), so the standard library's compiled code
+is made of moved code too.  A module's `CODE` copies of instantiations go
+through it again in the program that imports them, which leaves them as
+they are: on its own output the pass changes nothing.

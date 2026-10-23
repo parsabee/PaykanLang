@@ -1,0 +1,175 @@
+// 64 — moves at last use: a reference handed on where a variable is last used
+// Exercises: the compiler's transfers (docs/language/16-memory.md,
+//            "Ownership transfers"; docs/pir.md §12): a variable passed,
+//            assigned, stored in a field and returned at its last use; a
+//            last use in one branch of an `if` and in some arms of a
+//            `match` (the others release it); a use inside a loop (a copy)
+//            and after it (a transfer); a variable reassigned after its
+//            last use, in a loop too; `f(a, a)`; a parameter handed on;
+//            `self` passed on and returned (never transferred); a lambda's
+//            capture (always a copy).  The `weak` references show when each
+//            object dies: with its last holder, which after a transfer is
+//            the destination.
+// expect-stdout: kept: a | alive
+// expect-stdout: handed on: a | gone
+// expect-stdout: then: b gone | else: c alive
+// expect-stdout: arm 0: d gone | arm 1: e alive | arm 2: f gone
+// expect-stdout: loop: g g g | after: g gone
+// expect-stdout: reassigned: h i j | j alive
+// expect-stdout: twice: k+k gone
+// expect-stdout: field: alive | let go: gone
+// expect-stdout: returned: m alive | dropped: m gone
+// expect-stdout: self: n n | n alive
+// expect-stdout: captured: o none | alive
+// expect-stdout: weak local: p alive
+
+import ::io;
+
+class Node {
+  name: Str;
+}
+
+class Holder {
+  node: Node?;
+}
+
+impl Node {
+  /// Hands `self` on, and returns it: both take a reference of their own.
+  fn relay() -> Node { io::print(name(self) + " "); return self; }
+}
+
+/// What @p w refers to: "alive" or "gone".
+fn state(w: view Watch) -> Str {
+  match w.target {
+    Node { return "alive"; }
+    None { return "gone"; }
+  }
+}
+
+class Watch {
+  weak target: Node?;
+}
+
+/// Takes @p n and lets it go when it returns.
+fn name(n: Node) -> Str {
+  return n.name;
+}
+
+fn both(a: Node, b: Node) -> Str {
+  return a.name + "+" + b.name;
+}
+
+/// Hands its parameter on to `name`.
+fn pass(n: Node) -> Str {
+  return name(n);
+}
+
+/// A new node, returned from a local.
+fn make(s: Str) -> Node {
+  n = Node(s);
+  return n;
+}
+
+fn main() -> int {
+  // Read afterwards: a copy.  Not read afterwards: handed on.
+  a = Node("a");
+  w = Watch(a);
+  io::println("kept: " + name(a) + " | " + state(w));
+  io::println("handed on: " + name(a) + " | " + state(w));
+
+  // One branch hands the variable on; the other releases it at the end of
+  // the scope, as before.
+  for k in 0..2 {
+    v = Node(if k == 0 then "b" else "c");
+    wv = Watch(v);
+    if k == 0 {
+      io::print("then: " + name(v));
+    } else {
+      io::print(" | else: " + v.name);
+    }
+    io::print(" " + state(wv));
+  }
+  io::println("");
+
+  // Some arms of a match hand it on.
+  for k in 0..3 {
+    m = Node(if k == 0 then "d" else if k == 1 then "e" else "f");
+    wm = Watch(m);
+    out = "";
+    match k {
+      0 { out = name(m); }
+      1 { out = m.name; }
+      _ { out = pass(m); }
+    }
+    io::print((if k == 0 then "" else " | ") + "arm " + Str(k) + ": " + out
+        + " " + state(wm));
+  }
+  io::println("");
+
+  // A use inside a loop is a copy: the next iteration reads it again.
+  g = Node("g");
+  wg = Watch(g);
+  io::print("loop:");
+  for _ in 0..3 {
+    io::print(" " + name(g));
+  }
+  io::println(" | after: " + name(g) + " " + state(wg));
+
+  // Reassigned after its last use, before the next iteration reads it:
+  // each value is handed on in turn.
+  r = Node("h");
+  io::print("reassigned:");
+  for i in 0..2 {
+    io::print(" " + name(r));
+    r = Node(if i == 0 then "i" else "j");
+  }
+  wr = Watch(r);
+  io::println(" " + r.name + " | " + r.name + " " + state(wr));
+
+  // f(a, a): the first is a copy, the second the transfer.
+  t = Node("k");
+  wt = Watch(t);
+  io::println("twice: " + both(t, t) + " " + state(wt));
+
+  // Stored in a field at its last use: the holder holds it now, and it
+  // dies when the holder lets go.
+  f = Node("l");
+  wf = Watch(f);
+  h = Holder(f);
+  io::print("field: " + state(wf));
+  h = Holder(None);
+  io::println(" | let go: " + state(wf));
+
+  // Returned from a local, then dropped at its last use.
+  made = make("m");
+  wmade = Watch(made);
+  io::print("returned: " + made.name + " " + state(wmade));
+  io::println(" | dropped: " + name(made) + " " + state(wmade));
+
+  // `self` is never handed on: the caller's reference keeps it alive.
+  s = Node("n");
+  ws = Watch(s);
+  io::print("self: ");
+  back = s.relay();
+  io::println(back.name + " | " + back.name + " " + state(ws));
+
+  // A capture is a copy, even at the variable's last use: dropping the
+  // closure leaves the variable's own reference.
+  c = Node("o");
+  wc = Watch(c);
+  get = fn() -> Str { return c.name; };
+  io::print("captured: " + get());
+  get = fn() -> Str { return "none"; };
+  io::println(" " + get() + " | " + state(wc));
+
+  // A weak local made from the variable itself and read later keeps the
+  // hand-off a copy: it reads the object until the variable's scope ends.
+  p = Node("p");
+  weak wp = p;
+  io::print("weak local: " + name(p));
+  match wp {
+    Node { io::println(" alive"); }
+    None { io::println(" gone"); }
+  }
+  return 0;
+}

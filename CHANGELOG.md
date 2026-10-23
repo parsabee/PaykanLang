@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Moves at last use (#186): a copy of a variable where it is last used is a transfer, made
+  by a new backend-independent PIR pass, `moves-at-last-use` (docs/pir.md §12), on every
+  program and on the code of every module written to a `.pkm`, the standard library's
+  included.  Passing a variable to a function, assigning it to another, storing it in a
+  field or an array element, and returning it hand its reference on without a retain, and
+  the variable releases nothing at the end of its scope; so does copying a tuple, a struct,
+  an enum, a function value or an optional of one held in a variable.  Each path counts on
+  its own (one branch may hand a variable on while another releases it), a use inside a
+  loop the next iteration reads again stays a copy, and in `f(a, a)` only the second `a`
+  moves.  `self`, `inout` parameters, fields, array elements and the members of a value are
+  never moved, and a lambda's captures are always copies.  Over the samples the pass
+  removes about a third of the retains and a sixth of the releases.
+- `paykan --stats` prints what the PIR passes did, on standard error after the last of them
+  ran (`moves-at-last-use transfers`, `retains removed`, `releases removed`), for the
+  program and for the modules this run builds from source (`pir::Statistics`,
+  `include/paykan/pir/Pass.h`; `Pass::run` takes it).
+
 - Adjacent string literals are one literal, joined at compile time, as in C and C++
   (docs/grammar.md §1, docs/language/04-strings-and-conversions.md, #197): `"this message
   is far too long " "to fit on one line"` may be split across lines, with comments between
@@ -172,6 +189,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An object handed on at a variable's last use lives as long as its destination holds it,
+  no longer until the variable's scope ends (docs/language/16-memory.md, "Ownership
+  transfers"): a `weak` reference made elsewhere reads `None` as soon as, say, the function
+  it was passed to returns.  Nothing is ever released earlier than its last holder lets it
+  go, and programs free the same objects; only what a `weak` reference reads can differ.
 - `::result`'s `Result` is a generic tagged union, `enum Result<T, E> { Ok(value: T),
   Err(error: E) }` (docs/stdlib/result.md), no longer the struct `Result<T>` of an `error`
   and an optional `value`, and its errors are `::error`'s.  The standard library returns a

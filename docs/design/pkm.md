@@ -860,16 +860,19 @@ not per class.
 
 ### 5.9 Which PIR: pass level 0
 
-**Decision: `CODE` stores the verified output of the lowering, before any
-optional pass.** #97's pipeline runs in the driver on the *assembled*
-program at the requested `-O`, before `Backend::emit`/`run`. One file
-serves every `-O` level and pipeline (#113 needs this); `--emit-pir` of a
-cached module prints what source prints; the expensive part is cached by
-payloads anyway. What is **not** a pass artefact and therefore is in
-`CODE`: per-parameter calling conventions (#98 part 2 changes what a
-*caller in another module* emits, so they are signature data; a change is
-an ABI bump). RC elimination (#98 part 1) and last-use transfer (#145)
-rewrite bodies only and run at build time. The `pass level` flag bits are
+**Decision: `CODE` stores the verified output of the lowering, after the
+passes every program runs whatever its `-O` and before any optional
+one.** #97's pipeline runs in the driver on the *assembled* program at the
+requested `-O`, before `Backend::emit`/`run`. One file serves every `-O`
+level and pipeline (#113 needs this); `--emit-pir` of a cached module
+prints what source prints; the expensive part is cached by payloads
+anyway. The moves at last use (#186, docs/pir.md §12) run at every `-O`,
+so they run on the module's code before it is written (§5.13), and again
+on the program, which leaves moved code as it is. What is **not** a pass
+artefact and therefore is in `CODE`: per-parameter calling conventions
+(#98 part 2 changes what a *caller in another module* emits, so they are
+signature data; a change is an ABI bump). RC elimination (#98 part 1)
+rewrites bodies only and runs at build time. The `pass level` flag bits are
 reserved for a later post-pass variant (PR #104 §5.4 option C); storing
 post-pass PIR per `-O` was rejected (N copies per file).
 
@@ -916,7 +919,8 @@ the single rulebook for text and binary.
 
 A module is lowered with a copy of every instantiation it uses (§4.8). When
 its file is written (a cache entry once the program verified, or
-`--emit-pkm`), the driver first trims it, then splits it
+`--emit-pkm`), the driver first trims it, runs the code passes on it, then
+splits it
 (`include/paykan/modules/ModuleCode.h`):
 
 - **Trim.** PIR's dead-code pass (docs/pir.md §12) runs on the module with
@@ -931,6 +935,10 @@ its file is written (a cache entry once the program verified, or
   other copies, only what the module's own code reaches stays: in
   `m2`, a `Pair<int, bool>` only `hidden()` uses keeps `first`, its
   constructor and `__init__`, and loses `second`.
+- **Moves.** The code passes every program goes through (docs/pir.md §12:
+  moves at last use) run on what the trim left, so the compiled code and
+  the copies in `CODE` are both moved code; a program that imports the
+  module runs them on its copies again, which changes nothing more.
 - **Split.** The module's shared copies of instantiations stay PIR in
   `CODE`: a program keeps one of each and drops what its `main` does not
   reach, and an importer instantiating the same type links to them. Every
