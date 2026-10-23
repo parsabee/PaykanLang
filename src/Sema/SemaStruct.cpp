@@ -240,13 +240,25 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     // come (its own instantiation resolving to the stub), so the field is
     // checked here, and left out, so that no type holds itself.
     if (holdsStruct(fty, st)) {
-      std::string msg = what;
-      msg += " contains itself: field '";
-      msg += field->getName();
-      msg += "' holds a '";
-      msg += name;
-      msg += "'; a struct is held in place, so it cannot hold one of its "
-             "own (hold it in a class instead)";
+      std::string msg;
+      if (const ast::EnumType *et = st->getVariantEnum()) {
+        msg = "enum '";
+        msg += et->getName();
+        msg += "' contains itself: variant '";
+        msg += *et->getVariants()[st->getVariantIndex()];
+        msg += "' holds it in field '";
+        msg += field->getName();
+        msg += "'; an enum is held in place, so its variants cannot hold it "
+               "(hold it in a class instead)";
+      } else {
+        msg = what;
+        msg += " contains itself: field '";
+        msg += field->getName();
+        msg += "' holds a '";
+        msg += name;
+        msg += "'; a struct is held in place, so it cannot hold one of its "
+               "own (hold it in a class instead)";
+      }
       error(field->getLocation(), msg);
       ok = false;
       continue;
@@ -359,6 +371,17 @@ bool Sema::holdsStruct(const ast::Type *ty, const ast::StructType *target) {
   // An optional struct or tuple holds its value in place.
   if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return holdsStruct(ot->getInnerType(), target);
+  // An enum holds its variants' fields (those resolved so far: an
+  // instantiation of a generic enum is populated as it is made).
+  if (const auto *et = ast::dyn_cast<ast::EnumType>(ty))
+    for (size_t i = 0; i < et->getNumVariants(); ++i)
+      if (const ast::StructType *p = et->getPayload(i)) {
+        if (p == target)
+          return true;
+        for (const ast::Type *f : p->getElementTypes())
+          if (holdsStruct(f, target))
+            return true;
+      }
   return false;
 }
 
@@ -509,6 +532,140 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
       .push_back(clone);
   declareInstantiationStatics(instName, st, pending);
   return st;
+}
+
+ast::EnumType *Sema::instantiateEnum(const std::string &name,
+                                     const std::vector<ast::Type *> &args,
+                                     ast::SourceLocation loc) {
+  auto tIt = EnumTemplates.find(name);
+  if (tIt == EnumTemplates.end()) {
+    // Only resolveType and a variant of a template come here, with one.
+    if (!reportPrivateImport(name, loc))
+      error(loc, "unknown generic enum '" + name + "'");
+    return nullptr;
+  }
+  ast::EnumDecl *tmpl = tIt->second;
+  for (size_t i = 0; i < args.size(); ++i)
+    if (holdsFixedArray(args[i]))
+      return errorFixedArrayHere(loc, args[i],
+                                 "type argument " + std::to_string(i + 1) +
+                                     " of '" + name + "'"),
+             nullptr;
+  if (args.size() != tmpl->getTypeParams().size()) {
+    error(loc, "generic enum '" + name + "' expects " +
+                   std::to_string(tmpl->getTypeParams().size()) +
+                   " type argument(s), got " + std::to_string(args.size()));
+    return nullptr;
+  }
+  if (!checkBounds(tmpl, name, tmpl->getTypeParams(),
+                   tmpl->getTypeParamBounds(), args, loc))
+    return nullptr;
+
+  // Named by its template's own name, as a struct's instantiation is.
+  const ModuleTemplates *origin = foreignOrigin(tmpl);
+  const std::string instName = instantiationName(tmpl->getName(), args);
+  if (auto cIt = EnumInstantiations.find(instName);
+      cIt != EnumInstantiations.end()) {
+    auto info = cIt->second ? EnumInstantiationInfos.find(cIt->second)
+                            : EnumInstantiationInfos.end();
+    if (info == EnumInstantiationInfos.end() || info->second.Template == tmpl)
+      return cIt->second;
+    error(loc, "instantiation '" + instName + "' of '" + displayName(name) +
+                   "' conflicts with another template's instantiation of the "
+                   "same name (type names are global across imports)");
+    return nullptr;
+  }
+
+  if (auto *existing = Ctx.lookupEnumType(instName)) {
+    // An imported module exported `Maybe<int>` as a concrete enum: the
+    // very instantiation, when the template is that module's.
+    auto o = ImportedTypeOrigins.find(instName);
+    if (origin && o != ImportedTypeOrigins.end() &&
+        o->second == origin->Module) {
+      EnumInstantiationInfos[existing] = EnumInstantiationInfo{tmpl, args};
+      return EnumInstantiations[instName] = existing;
+    }
+    error(loc, "instantiation '" + instName +
+                   "' conflicts with an imported enum of the same name "
+                   "(type names are global across imports)");
+    EnumInstantiations[instName] = nullptr;
+    return nullptr;
+  }
+  if (Ctx.lookupType(instName)) {
+    error(loc, "instantiation '" + instName +
+                   "' conflicts with an imported type of the same name "
+                   "(type names are global across imports)");
+    EnumInstantiations[instName] = nullptr;
+    return nullptr;
+  }
+  if (instantiationDepth() >= kMaxInstantiationDepth) {
+    error(loc, "instantiating '" + instName +
+                   "' exceeds the maximum instantiation depth (" +
+                   std::to_string(kMaxInstantiationDepth) +
+                   "); a generic enum may not instantiate itself with an "
+                   "ever-growing type argument");
+    EnumInstantiations[instName] = nullptr;
+    return nullptr;
+  }
+
+  Subst subst;
+  for (size_t i = 0; i < args.size(); ++i)
+    subst[*tmpl->getTypeParams()[i]] = args[i];
+  ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  ast::EnumDecl *clone = cloner.cloneEnumDecl(tmpl, instName);
+
+  InstantiationStack.push_back(frameAt(instName, loc));
+  OriginSource inOrigin(*this, origin);
+
+  // Cached before the fields are resolved: a field naming this very
+  // instantiation resolves to it, and is then reported (populateStructType).
+  ast::EnumType *et = Ctx.registerEnumType(instName, loc);
+  EnumInstantiations[instName] = et;
+  EnumInstantiationInfos[et] = EnumInstantiationInfo{tmpl, args};
+  if (origin)
+    ImportedTypeOrigins[instName] = origin->Module;
+
+  // The variants (their names were checked with the template), and each
+  // one's fields, the struct `Maybe<int>::Just`, as visitEnumDecl makes it.
+  std::vector<std::pair<ast::StructDecl *, ast::StructType *>> payloads;
+  StringSet seen;
+  for (size_t i = 0; i < clone->getNumVariants(); ++i) {
+    const std::string &variant = *clone->getVariants()[i];
+    if (!seen.insert(variant).second)
+      continue;
+    et->addVariant(variant);
+    const auto &fields = clone->getPayload(i);
+    if (fields.empty())
+      continue;
+    std::string spelled = instName;
+    spelled += names::kQualSep;
+    spelled += variant;
+    const std::string &pname = Ctx.intern(spelled);
+    auto *sd =
+        Ctx.make<ast::StructDecl>(fields.front()->getLocation(), pname, fields);
+    auto *st = Ctx.registerStructType(pname, sd->getLocation());
+    st->setVariantOf(et, et->getNumVariants() - 1);
+    et->setPayload(et->getNumVariants() - 1, st);
+    EnumPayloadStructs[instName].push_back(pname);
+    if (origin)
+      ImportedTypeOrigins[pname] = origin->Module;
+    payloads.emplace_back(sd, st);
+  }
+  bool ok = true;
+  for (auto [sd, st] : payloads)
+    if (!populateStructType(sd, st)) {
+      ErroneousClasses.insert(sd->getName());
+      ok = false;
+    }
+  InstantiationStack.pop_back();
+
+  if (!ok) {
+    EnumInstantiations[instName] = nullptr;
+    return nullptr;
+  }
+  if (!origin)
+    InstantiatedEnumDecls.push_back(clone);
+  return et;
 }
 
 bool Sema::checkStructBodies() {

@@ -84,7 +84,7 @@ or more.
 | `(unit LOC DECL...)` | the file. Each `DECL` is an `import`, `enum`, `struct`, `class`, `fn`, `trait` or `impl`, in any order |
 | `(import LOC SYSTEM BASE MODULE...)` | `import`. `SYSTEM` is `true` for `import ::name`, else `false`; `BASE` is the path before the last segment (`"a::b"` for `import a::b::m`, `""` for none); at least one `MODULE` |
 | `(module NAME ALIAS)` | one imported module; `ALIAS` is a string, `""` for none (`import m as x` has `(module "m" "x")`; `import a::{m, n}` has two) |
-| `(enum LOC NAME VARIANT...)` | `enum E { A, B }`: the name, then the variants. A variant without fields is its `NAME`; one with fields is `(variant NAME VAR...)`, each field a `var` with a type and no initialiser (`B(x: int)` is `(variant "B" (var "x" (named-type "int") _))`) |
+| `(enum LOC NAME (type-params NAME...)? VARIANT...)` | `enum E { A, B }`: the name, then the variants. A generic enum's type parameters follow its name, at least one (`enum M<T>` is `(enum "M" (type-params "T") ...)`); an enum that is not generic has no `type-params`. A variant without fields is its `NAME`; one with fields is `(variant NAME VAR...)`, each field a `var` with a type and no initialiser (`B(x: int)` is `(variant "B" (var "x" (named-type "int") _))`) |
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser |
 | `(struct LOC NAME (type-params NAME...) (fields VAR...))` | a struct ([`../language/11-structs.md`](../language/11-structs.md)): the name, the type parameters of a generic one, and its fields (at least one), each a `var` with a type and no initialiser. A struct body has no methods: they are in its `impl` blocks |
 | `(bound NAME TYPE...)` | in `type-params`, in place of `NAME`: a type parameter with bounds, the traits as types (`T: Show + Into<int>` is `(bound "T" (named-type "Show") (generic-type "Into" ...))`) |
@@ -158,7 +158,7 @@ to resolve, which reports unknown names.
 | `(tuple-index LOC EXPR INT)` | `t.0` |
 | `(lambda LOC (params PARAM...) TYPE? BLOCK INFERRED?)` | a lambda, `fn(x: int) -> int { ... }`: the parameters and the result type (`_` for none) as a `fn`'s, then the body. `INFERRED` is `(inferred)` for `fn(x: int) => x * 2`, whose result type Sema infers: it has `_` for its result type and a body of one `return` of a value, `(block (return EXPR))` |
 | `(call-value LOC EXPR EXPR...)` | a call of a function value that is not named, `xs[0](1)`, `t.0(x)`: the callee, then the arguments (`f(1)` with `f` a variable is a `call`, `obj.cb(1)` with `cb` a field a `method-call`) |
-| `(enum-value LOC NAME NAME)` | `Color::Red`: the enum's name (qualified if spelled so) and the variant |
+| `(enum-value LOC NAME NAME (type-args TYPE...)?)` | `Color::Red`: the enum's name (qualified if spelled so) and the variant; a generic enum's variant written with its type arguments has them after (`M<int>::B` is `(enum-value "M" "B" (type-args (named-type "int")))`) |
 
 Parentheses in the source are not nodes: `(a + b) * c` is
 `(binary mul (binary add (ident "a") (ident "b")) (ident "c"))`.

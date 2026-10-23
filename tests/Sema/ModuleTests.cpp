@@ -775,6 +775,9 @@ fn main() -> int {
   t: nothere::T = nothere::T();
   u = lib::nothere::g(t, n);
   c: nothere::Color = nothere::Color::Red;
+  m1 = nothere::Maybe<int>::Nothing;
+  m2 = nothere::Maybe<int>::Just(n);
+  m3: nothere::Maybe<int> = nothere::Maybe::Just(1);
   match t { nothere::T { } _ { } }
   x: Sub = Sub();
   io::println(Str(n + take(t)));
@@ -785,6 +788,36 @@ fn main() -> int {
                  "module 'lib::nothere' not found (tried lib/nothere.pkn, "
                  "lib/nothere.pkm)",
                  tmp);
+  std::filesystem::remove_all(tmp);
+}
+
+// A module's private generic enum is reported once per use, whatever form
+// the use has.
+TEST(Module, PrivateGenericEnumReportedAsPrivate) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_private_enum").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "opt.pkn",
+            "enum _Maybe<T> { Just(value: T), Nothing }\n"
+            "fn make() -> int { m = _Maybe::Just(1); "
+            "return 0; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(
+import opt;
+fn main() -> int {
+  a = opt::_Maybe<int>::Nothing;
+  b = opt::_Maybe<int>::Just(1);
+  c: opt::_Maybe<int> = opt::_Maybe::Nothing;
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  size_t n = 0;
+  for (size_t at = 0;
+       (at = r.Diagnostics.find("'opt::_Maybe' is private to module 'opt'",
+                                at)) != std::string::npos;
+       ++at)
+    ++n;
+  EXPECT_EQ(n, 3u) << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
 

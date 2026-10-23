@@ -1178,10 +1178,30 @@ Sema::structInstantiationInfo(ast::StructType *st) {
                StructInstantiationInfo{tmpl->second, std::move(args)});
 }
 
+const Sema::EnumInstantiationInfo *
+Sema::enumInstantiationInfo(ast::EnumType *et) {
+  if (auto it = EnumInstantiationInfos.find(et);
+      it != EnumInstantiationInfos.end())
+    return &it->second;
+  const std::string &name = et->getName();
+  auto origin = ImportedTypeOrigins.find(name);
+  std::string base;
+  std::vector<ast::Type *> args;
+  if (origin == ImportedTypeOrigins.end() ||
+      !parseInstantiationName(name, base, args))
+    return nullptr;
+  auto tmpl = EnumTemplates.find(hiddenQualifier(origin->second) +
+                                 names::kQualSep + base);
+  if (tmpl == EnumTemplates.end())
+    return nullptr;
+  return &(EnumInstantiationInfos[et] =
+               EnumInstantiationInfo{tmpl->second, std::move(args)});
+}
+
 std::shared_ptr<Sema::ModuleTemplates>
 Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   if (tu->getGenericClassDecls().empty() && tu->getGenericFuncDecls().empty() &&
-      tu->getGenericStructDecls().empty())
+      tu->getGenericStructDecls().empty() && tu->getGenericEnumDecls().empty())
     return nullptr;
   // What the module declares, by the names its bodies use for them.
   StringSet types, generics, callees;
@@ -1202,6 +1222,12 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   for (auto *sd : tu->getGenericStructDecls()) {
     generics.insert(sd->getName());
     callees.insert(sd->getName());
+  }
+  // A generic enum is named as a type (`Maybe::Nothing`) or a template
+  // (`Maybe<int>`).
+  for (auto *ed : tu->getGenericEnumDecls()) {
+    generics.insert(ed->getName());
+    types.insert(ed->getName());
   }
   for (auto *fn : tu->getFuncDecls())
     callees.insert(fn->getName());
@@ -1255,7 +1281,18 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
       return spell(name, Generics);
     }
     std::string callee(const std::string &name) const override {
-      return spell(name, Callees);
+      if (std::string q = spell(name, Callees); q != name)
+        return q;
+      // `X::member`: a variant of the enum X, or a static function of the
+      // class or struct X, named as X is.
+      const size_t sep = name.rfind(names::kQualSep);
+      if (sep == std::string::npos)
+        return name;
+      const std::string owner = name.substr(0, sep);
+      std::string spelled = spell(owner, Types);
+      if (spelled == owner)
+        spelled = spell(owner, Generics);
+      return spelled + name.substr(sep);
     }
   };
   Names names(*this, *mt, types, generics, callees);
@@ -1281,6 +1318,9 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
         if (!im->getTrait())
           mt->Impls[mt->Structs.back()].push_back(cloner.cloneTemplate(im));
   }
+  for (auto *ed : tu->getGenericEnumDecls())
+    if (EnumTemplates.count(ed->getName()))
+      mt->Enums.push_back(cloner.cloneTemplate(ed));
   return mt;
 }
 
@@ -1305,7 +1345,8 @@ std::vector<uint8_t> Sema::encodeTemplates(const ModuleTemplates &mt,
   for (uint32_t i = 0; i < mt.Structs.size(); ++i)
     implsOf(mt.Structs[i], pkm::Templates::OwnerKind::Struct, i);
   ast::TranslationUnit unit(ast::SourceLocation(), {}, {}, {}, {}, mt.Classes,
-                            mt.Functions, std::move(impls), {}, {}, mt.Structs);
+                            mt.Functions, std::move(impls), {}, {}, mt.Structs,
+                            mt.Enums);
   std::ostringstream os;
   if (!ast::interchange::write(unit, os, error))
     return {};
@@ -1337,6 +1378,7 @@ Sema::decodeTemplates(std::span<const uint8_t> bytes,
   mt->Classes = tu->getGenericClassDecls();
   mt->Functions = tu->getGenericFuncDecls();
   mt->Structs = tu->getGenericStructDecls();
+  mt->Enums = tu->getGenericEnumDecls();
   const auto &impls = tu->getImplDecls();
   if (impls.size() != t->Impls.size())
     return Status::error("TMPL: " + std::to_string(impls.size()) +
@@ -1404,11 +1446,16 @@ bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
     for (auto *sd : mt.Structs)
       if (hidden || !names::isModulePrivateName(sd->getName()))
         StructTemplates[q + names::kQualSep + sd->getName()] = sd;
+    for (auto *ed : mt.Enums)
+      if (hidden || !names::isModulePrivateName(ed->getName()))
+        EnumTemplates[q + names::kQualSep + ed->getName()] = ed;
   }
   for (auto *cd : mt.Classes)
     ForeignTemplates[cd] = &mt;
   for (auto *sd : mt.Structs)
     ForeignTemplates[sd] = &mt;
+  for (auto *ed : mt.Enums)
+    ForeignTemplates[ed] = &mt;
   for (const auto &[cd, impls] : mt.Impls)
     TemplateImpls[cd] = impls;
   for (auto *fn : mt.Functions)

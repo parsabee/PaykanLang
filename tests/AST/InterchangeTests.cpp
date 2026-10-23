@@ -849,6 +849,46 @@ TEST(ASTInterchange, EnumVariantsWithFields) {
   }
 }
 
+// A generic enum's type parameters follow its name, `(type-params "T")`; an
+// enum value's type arguments its names, `(type-args TYPE...)`.
+TEST(ASTInterchange, GenericEnums) {
+  const std::string text =
+      "(paykan-ast 1 (unit (enum \"M\" (type-params \"T\") (variant \"A\" "
+      "(var \"x\" (named-type \"T\") _)) \"B\") (fn \"f\" (type-params) "
+      "(params) _ (block (expr (enum-value \"M\" \"B\" (type-args "
+      "(named-type \"int\"))))))))";
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(text, ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  ASSERT_EQ(tu->getGenericEnumDecls().size(), 1u);
+  EXPECT_TRUE(tu->getEnumDecls().empty());
+  std::string d = dump(tu);
+  EXPECT_NE(d.find("EnumDecl 'M' <T> {A(x), B}"), std::string::npos) << d;
+  EXPECT_NE(d.find("EnumValueExpr 'M::B' 1 type args"), std::string::npos) << d;
+  std::string written = write(*tu);
+  EXPECT_NE(written.find("(type-params \"T\")"), std::string::npos) << written;
+  ast::ASTContext ctx2;
+  ast::TranslationUnit *back = read(written, ctx2, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), d);
+
+  struct Case {
+    const char *Doc;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(enum \"M\" (type-params) \"A\")",
+             "(type-params) of an enum needs a name"},
+        Case{"(fn \"f\" (type-params) (params) _ (block (expr (enum-value "
+             "\"M\" \"B\" (type-args)))))",
+             "(type-args) of an enum value needs a type"}}) {
+    std::string doc = "(paykan-ast 1 (unit " + std::string(c.Doc) + "))";
+    EXPECT_EQ(read(doc, ctx, error), nullptr) << c.Doc;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Doc << ": " << error;
+  }
+}
+
 // A local borrow is a `var` with a trailing `(qual view)` or
 // `(qual inout)`, and an initialiser.
 TEST(ASTInterchange, LocalBorrows) {

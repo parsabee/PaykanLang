@@ -1,0 +1,46 @@
+// A generic enum and the functions over it, for main.pkn: templates that
+// make and match its values in the importer (`wrap`, `orElse`, `firstOf`),
+// a function of one instantiation (`total`), and one returning an
+// instantiation made here (`parsePort`).
+
+enum Maybe<T> {
+  Just(value: T),
+  Nothing
+}
+
+fn wrap<T>(x: T) -> Maybe<T> => Maybe::Just(x);
+
+fn orElse<T>(m: Maybe<T>, d: T) -> T {
+  match m {
+    j: Just { return j.value; }
+    Nothing { return d; }
+  }
+}
+
+/// The first of @p a and @p b that has a value.
+fn firstOf<T>(a: Maybe<T>, b: Maybe<T>) -> Maybe<T> {
+  match a {
+    Just { return a; }
+    Nothing { return b; }
+  }
+}
+
+/// The sum of the values in @p ms.
+fn total(ms: view Maybe<int>[]) -> int {
+  sum = 0;
+  for i in 0..ms.len() {
+    sum += orElse(ms[i], 0);
+  }
+  return sum;
+}
+
+/// @p s as a port number, when it is one of the two this program knows.
+fn parsePort(s: view Str) -> Maybe<int> {
+  if (s == "http") {
+    return Maybe::Just(80);
+  }
+  if (s == "https") {
+    return Maybe::Just(443);
+  }
+  return Maybe::Nothing;
+}

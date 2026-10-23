@@ -86,3 +86,47 @@ TEST(EnumParse, MalformedVariantsRejected) {
   EXPECT_FALSE(parse(withMain("enum E { A(x: int }")).Ok);
   EXPECT_TRUE(parse(withMain("enum E { A(x: int), B, }")).Ok);
 }
+
+// A generic enum: type parameters (with bounds) after its name; a variant
+// with type arguments, `M<int>::B` or `M<int>::A(1)`.
+TEST(EnumParse, GenericEnum) {
+  auto [ok, driver] = parse(withMain("enum M<T, U: Show> {\n"
+                                     "  A(x: T, y: U),\n"
+                                     "  B\n"
+                                     "}\n"
+                                     "enum Plain { C }"));
+  ASSERT_TRUE(ok);
+  auto *tu = driver->getRoot();
+  ASSERT_EQ(tu->getGenericEnumDecls().size(), 1u);
+  ASSERT_EQ(tu->getEnumDecls().size(), 1u);
+  auto *ed = tu->getGenericEnumDecls()[0];
+  EXPECT_TRUE(ed->isGeneric());
+  ASSERT_EQ(ed->getTypeParams().size(), 2u);
+  EXPECT_EQ(*ed->getTypeParams()[1], "U");
+  ASSERT_EQ(ed->getTypeParamBounds().size(), 2u);
+  EXPECT_TRUE(ed->getTypeParamBounds()[0].empty());
+  EXPECT_EQ(ed->getTypeParamBounds()[1].size(), 1u);
+  EXPECT_FALSE(tu->getEnumDecls()[0]->isGeneric());
+
+  auto dump = dumpAST("enum M<T> { A(x: T), B }\n"
+                      "fn main() -> int {\n"
+                      "  a = M<int>::B;\n"
+                      "  b = M<int>::A(1);\n"
+                      "  c = M::B;\n"
+                      "  return 0;\n"
+                      "}\n");
+  ASSERT_FALSE(dump.empty());
+  EXPECT_NE(dump.find("EnumDecl <1:1-1:25> 'M' <T> {A(x), B}"),
+            std::string::npos)
+      << dump;
+  EXPECT_NE(dump.find("EnumValueExpr <3:7-3:16> 'M::B' 1 type args"),
+            std::string::npos)
+      << dump;
+  EXPECT_NE(dump.find("CallExpr <4:7-4:19> 'M::A' 1 type args"),
+            std::string::npos)
+      << dump;
+  EXPECT_NE(dump.find("EnumValueExpr <5:7-5:11> 'M::B'\n"), std::string::npos)
+      << dump;
+  // A type parameter list is not empty.
+  EXPECT_FALSE(parse(withMain("enum M<> { A }")).Ok);
+}

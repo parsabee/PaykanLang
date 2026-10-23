@@ -5,8 +5,9 @@ week, a card suit, a traffic light, a parser state, the priority of a task. Enum
 closed choices, where every possibility is known at compile time. A variant can also carry
 values of its own, its **fields** (`Rect(w: int, h: int)`), which makes the enum a **tagged
 union**: a value is one of the variants and holds that variant's fields
-([Variants With Fields](#variants-with-fields)). This chapter shows how to declare and use an
-enum, then gives the rules; [Match](08-match.md) covers the statement that branches on enums,
+([Variants With Fields](#variants-with-fields)), and an enum can take type parameters, so one
+declaration serves every type of field ([Generic Enums](#generic-enums)). This chapter shows
+how to declare and use an enum, then gives the rules; [Match](08-match.md) covers the statement that branches on enums,
 and on much more.
 
 ## Declaring an enum
@@ -81,6 +82,9 @@ plain value like an `int`: copied on assignment, never allocated.
 - A variant may have fields, `Rect(w: int, h: int)`, made with `Shape::Rect(2, 3)` and bound
   by a `match` arm, `r: Rect { … r.w … }`: the enum is then a **tagged union**, a value held
   in place like a struct ([Variants With Fields](#variants-with-fields)).
+- An enum can be generic, `enum Maybe<T> { Just(value: T), Nothing }`: each instantiation,
+  `Maybe<int>`, is an enum of its own, and a variant's type arguments are written, expected
+  or inferred, `Maybe::Just(3)` ([Generic Enums](#generic-enums)).
 - An enum can be a variable, a function parameter or return type, a class or struct field, a
   tuple element or an array element type, and has an optional (`Direction?`, see
   [Optionals](12-optionals.md)).
@@ -492,9 +496,101 @@ Output:
 - A `view` is never stored in a field: `E::B(v)` with a `view` parameter `v` is an error, as
   storing it in a struct is.
 - A tagged union does not cross into C ([Native functions](03-functions.md#native-functions)),
-  is not `Hashable` (so it is not a `HashMap` key), and an enum has no type parameters.
+  and is not `Hashable` (so it is not a `HashMap` key).
 - An imported tagged union is used the same way: `geo::Shape::Rect(1, 2)` makes one and the
   arms are bare (`r: Rect`); its fields' struct is `geo::Shape::Rect`.
+
+## Generic Enums
+
+An enum can take **type parameters**, written after its name as a generic class's are
+([Generics](13-generics.md)), and its variants' fields name them. One declaration then serves
+every type of value: an optional result, the outcome of something that can fail.
+
+```pkn
+import ::io;
+
+enum Maybe<T> {
+  Just(value: T),
+  Nothing
+}
+
+enum Result<T, E> {
+  Ok(value: T),
+  Err(error: E)
+}
+
+fn divide(a: int, b: int) -> Result<int, Str> {
+  if (b == 0) {
+    return Result::Err("divide by zero");
+  }
+  return Result::Ok(a / b);
+}
+
+fn orElse<T>(m: Maybe<T>, d: T) -> T {
+  match m {
+    j: Just { return j.value; }
+    Nothing { return d; }
+  }
+}
+
+fn main() -> int {
+  a = Maybe::Just(3);             // a Maybe<int>, from the field
+  b: Maybe<int> = Maybe::Nothing; // from the variable's type
+  c = Maybe<Str>::Nothing;        // written
+  io::println(a.toString() + " " + b.toString() + " " + c.toString());
+  io::println(orElse(a, 0) + orElse(b, 10));
+  match divide(7, 0) {
+    q: Ok { io::println(q.value); }
+    e: Err { io::println(e.error); }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+Just(value: 3) Nothing Nothing
+13
+divide by zero
+```
+
+Each use with type arguments, `Maybe<int>`, is an **instantiation**: an enum of its own, with
+its own variants' fields (the struct `Maybe<int>::Just`), made where the program first names
+it, as a generic class's is. `Maybe<int>` and `Maybe<Str>` are different types.
+
+A variant written without its type arguments gets them, in this order:
+
+1. **Written**: `Maybe<int>::Nothing`, `Result<int, Str>::Ok(1)`.
+2. **From the type the value flows into**, when that is an instantiation of the same enum: a
+   variable's declared type, a parameter's, a result's, a field's, an array element's, the
+   other side of `==` or `!=`, or the other arm of a conditional expression (`if n > 0 then
+   Maybe::Just(n) else Maybe::Nothing`). It comes before inference, so `m: Maybe<u8> =
+   Maybe::Just(200)` holds a `u8`.
+3. **Inferred from the variant's fields**, as a generic class's constructor infers them:
+   `Maybe::Just(3)` is a `Maybe<int>`, and `Maybe::Just(x)` in a generic function a `Maybe<T>`.
+
+A variant without fields has nothing to infer from, so it needs one of the first two: `x =
+Maybe::Nothing;` alone is an error (`cannot infer the type arguments of generic enum 'Maybe'
+for 'Maybe::Nothing': write them ('Maybe<...>::Nothing'), or give the value a type ('x:
+Maybe<...> = Maybe::Nothing')`). So is a variant whose fields leave a type parameter open:
+`Result::Ok(1)` says nothing about `E`.
+
+Everything else is as for any enum. The arms of a `match` are bare variant names and bind an
+instantiation's fields with their types (`j.value` is an `int` in a `Maybe<int>`); a generic
+function's parameter `Maybe<T>` infers `T` from the instantiation passed to it. Each
+instantiation is shown, compared and held in place as [Variants With
+Fields](#variants-with-fields) describes. So `enum List<T> { Nil, Cons(head: T, tail: List<T>)
+}` is an error at its first instantiation (`enum 'List<int>' contains itself: variant 'Cons'
+holds it in field 'tail'`), and a recursive one goes through a class, as `Expr` does above.
+
+- A type parameter may have bounds (`enum Sorted<T: Ord>`), checked at each instantiation
+  ([Traits](06-traits.md)).
+- An imported generic enum is spelled with its module's qualifier: `opt::Maybe<int>`,
+  `opt::Maybe::Just(1)`. Type names are global across imports, so `Maybe<int>` is one enum
+  whether the module, its importer or another module made it
+  ([Generics: Modules](13-generics.md#modules)).
+- A generic enum has no `impl` block yet.
 
 ---
 
@@ -514,3 +610,6 @@ Output:
 | Unknown field | `r.z` where the variant's fields have no `z` (`no field 'z' in variant 'Rect' of enum 'Shape'`) |
 | Enum holds itself | A variant's fields hold the enum, directly or through a struct or a tuple |
 | Bad field | Two fields of one variant share a name, a field is a fixed-size array, or a `view` is stored in one |
+| Generic enum without type arguments | `m: Maybe = …` for a generic `Maybe` (`write 'Maybe<...>'`) |
+| Type arguments cannot be inferred | A variant of a generic enum without written type arguments, an expected type of the same enum, or fields that determine them (`x = Maybe::Nothing;`, `Result::Ok(1)`) |
+| Wrong type arguments | `Maybe<int, int>` for a one-parameter enum, an argument that does not satisfy a bound, or `Color<int>` for an enum that is not generic |

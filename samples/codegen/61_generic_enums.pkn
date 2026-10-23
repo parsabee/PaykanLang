@@ -1,0 +1,127 @@
+// 61 — generic enums
+// Exercises: a generic enum (docs/language/07-enums.md): a variant's type
+//            arguments written (`List<int>::Empty`), taken from the type
+//            its value flows into (a result, a declared variable, an array
+//            element, an arm of a conditional expression, the other side
+//            of `==`) and inferred from its fields (`Maybe::Just(3)`);
+//            generic functions taking and returning one, with a lambda
+//            mapping its value; two type parameters (`Result<T, E>`); an
+//            instantiation in a generic struct, an object's field and a
+//            fixed-size array; a recursive list through a class; match arms
+//            binding an instantiation's fields; the text of a value and
+//            `==`.
+// expect-stdout: Just(value: 23) Nothing | 23 -1
+// expect-stdout: Just(value: 3) fig!
+// expect-stdout: divide 1 by zero
+// expect-stdout: Slot<int>(name: answer, value: Just(value: 42)) Just(value: 42) True
+// expect-stdout: 6 8 | Nothing Just(value: 2)
+
+import ::io;
+
+enum Maybe<T> {
+  Just(value: T),
+  Nothing
+}
+
+enum Result<T, E> {
+  Ok(value: T),
+  Err(error: E)
+}
+
+/// A list's cells are objects: an enum is held in place, so it holds its
+/// own kind only through one.
+class Cell<T> {
+  head: T;
+  tail: List<T>;
+}
+
+enum List<T> {
+  Cons(cell: Cell<T>),
+  Empty
+}
+
+struct Slot<T> {
+  name: Str;
+  value: Maybe<T>;
+}
+
+class Registry {
+  last: Maybe<Str>;
+}
+
+/// The first element of @p xs that @p pred accepts.
+fn find<T>(xs: view T[], pred: (view T) -> bool) -> Maybe<T> {
+  for i in 0..xs.len() {
+    if (pred(xs[i])) {
+      return Maybe::Just(xs[i]);
+    }
+  }
+  return Maybe::Nothing;
+}
+
+/// @p m's value through @p f.
+fn map<T, U>(m: view Maybe<T>, f: (view T) -> U) -> Maybe<U> {
+  match m {
+    j: view Just { return Maybe::Just(f(j.value)); }
+    Nothing { return Maybe::Nothing; }
+  }
+}
+
+fn orElse<T>(m: Maybe<T>, d: T) -> T {
+  match m {
+    j: Just { return j.value; }
+    Nothing { return d; }
+  }
+}
+
+fn divide(a: int, b: int) -> Result<int, Str> {
+  if (b == 0) {
+    return Result::Err("divide " + Str(a) + " by zero");
+  }
+  return Result::Ok(a / b);
+}
+
+fn sum(l: view List<int>) -> int {
+  match l {
+    c: view Cons { return c.cell.head + sum(c.cell.tail); }
+    Empty { return 0; }
+  }
+}
+
+/// @p n halved when it is even.
+fn half(n: int) -> Maybe<int> {
+  return if n % 2 == 0 then Maybe::Just(n / 2) else Maybe::Nothing;
+}
+
+fn main() -> int {
+  xs = [4, 8, 15, 16, 23, 42];
+  big = find(xs, fn(x: view int) => x > 20);
+  none = find(xs, fn(x: view int) => x > 50);
+  io::println(big.toString() + " " + none.toString() + " | "
+      + Str(orElse(big, 0)) + " " + Str(orElse(none, -1)));
+
+  fruit = Maybe::Just("fig");
+  io::println(map(fruit, fn(w: view Str) => w.len()).toString() + " "
+      + orElse(map(fruit, fn(w: view Str) => w + "!"), "?"));
+
+  quotients: Result<int, Str>[3] = [divide(7, 2), divide(1, 0), Result::Ok(5)];
+  total = 0;
+  for i in 0..3 {
+    match quotients[i] {
+      q: Ok { total += q.value; }
+      e: Err { io::println(e.error); }
+    }
+  }
+
+  slot = Slot("answer", Maybe::Just(42));
+  reg = Registry(Maybe::Nothing);
+  reg.last = map(slot.value, fn(v: view int) => Str(v));
+  io::println(slot.toString() + " " + reg.last.toString() + " "
+      + Str(reg.last == Maybe::Just("42")));
+
+  l = List::Cons(Cell(1,
+      List::Cons(Cell(2, List::Cons(Cell(3, List<int>::Empty))))));
+  io::println(Str(sum(l)) + " " + Str(total) + " | " + half(3).toString() + " "
+      + half(4).toString());
+  return 0;
+}

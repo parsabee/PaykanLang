@@ -344,7 +344,9 @@ impl Keyed<K> for Pair<K, V> {}   // met by Pair's own key()
   instantiation's function.
 
 A struct can be generic in the same way (`struct Pair<A, B> { a: A; b: B; }`, with
-`impl Pair<A, B>` blocks): see [Generic structs](11-structs.md#generic-structs).
+`impl Pair<A, B>` blocks): see [Generic structs](11-structs.md#generic-structs). So can an
+enum, whose variants' fields name its type parameters (`enum Maybe<T> { Just(value: T),
+Nothing }`): see [Generic Enums](07-enums.md#generic-enums).
 
 ## Declaring a Generic Function
 
@@ -593,7 +595,8 @@ d = gen::Box<int>(1);     // the same class as c's
 ## Syntax Notes
 
 - `a < b` stays a comparison everywhere; `f<int>(x)` is a generic call because
-  the `>` is followed by `(`. The one ambiguous shape is `g(a < b, c > (d))`,
+  the `>` is followed by `(`, and `Maybe<int>::Nothing` a generic enum's variant
+  because it is followed by `::` and a name. The one ambiguous shape is `g(a < b, c > (d))`,
   which reads as a generic call — parenthesise a comparison to get the other
   meaning.
 - `>=` is a single token: write `x: Box<int> = …`, not `x: Box<int>=…`.
