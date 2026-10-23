@@ -82,6 +82,9 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   if (ast::Type *t = node->getSubject()->getResolvedType();
       ast::isFunctionValue(t) || ast::isMemOptional(t))
     return emitMemOptionalMatch(node);
+  // A tagged union: a switch on its tag (LoweringEnum.cpp).
+  if (ast::isPayloadEnum(node->getSubject()->getResolvedType()))
+    return emitPayloadEnumMatch(node);
   // 1. Evaluate the subject once.  A boxed subject (call result, field read)
   //    is owned for the duration of the match and released on every exit.
   Val subjRaw = emitExpr(node->getSubject());

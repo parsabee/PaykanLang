@@ -371,7 +371,10 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
       continue; // alias key — skip
     ModuleInfo::StructInfo si;
     si.Name = name;
-    si.IsLocal = localStructs.count(name) != 0;
+    // A variant's fields are its enum's.
+    const ast::EnumType *variantOf = st->getVariantEnum();
+    si.IsLocal = variantOf ? localEnums.count(variantOf->getName()) != 0
+                           : localStructs.count(name) != 0;
     si.OriginModule = si.IsLocal ? moduleName : lookupOrigin(name);
     for (size_t i = 0; i < st->getNumFields(); ++i)
       si.Fields.push_back(
@@ -383,8 +386,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     info.ExportedStructs.push_back(std::move(si));
   }
 
-  // Enum types: name + variants in declaration order (canonical entries
-  // only, as for classes).
+  // Enum types: name + variants in declaration order, and those with fields
+  // (canonical entries only, as for classes).
   for (auto &[name, et] : Ctx.getEnumTypes()) {
     if (name != et->getName())
       continue; // alias key — skip
@@ -392,8 +395,11 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     ei.Name = name;
     ei.IsLocal = localEnums.count(name) != 0;
     ei.OriginModule = ei.IsLocal ? moduleName : lookupOrigin(name);
-    for (auto *v : et->getVariants())
-      ei.Variants.push_back(*v);
+    for (size_t i = 0; i < et->getNumVariants(); ++i) {
+      ei.Variants.push_back(*et->getVariants()[i]);
+      if (et->getPayload(i))
+        ei.PayloadVariants.push_back(*et->getVariants()[i]);
+    }
     info.ExportedEnums.push_back(std::move(ei));
   }
 
@@ -476,7 +482,8 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
     iface.Structs.push_back(std::move(sr));
   }
   for (auto &ei : info.ExportedEnums)
-    iface.Enums.push_back({ei.Name, ei.Variants, ei.IsLocal, ei.OriginModule});
+    iface.Enums.push_back({ei.Name, ei.Variants, ei.IsLocal, ei.OriginModule,
+                           ei.PayloadVariants});
   return iface;
 }
 
@@ -512,8 +519,8 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
     info.ExportedStructs.push_back(std::move(si));
   }
   for (auto &er : iface.Enums)
-    info.ExportedEnums.push_back(
-        {er.Name, er.Variants, er.IsLocal, er.OriginModule});
+    info.ExportedEnums.push_back({er.Name, er.Variants, er.IsLocal,
+                                  er.OriginModule, er.PayloadVariants});
   sortModuleInfo(info);
   return info;
 }
@@ -897,6 +904,31 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
         addStructAliases(st, si.Name);
     }
 
+    // A tagged union's variants: each one's fields, the struct
+    // `Enum::variant` (an enum already present has them).
+    for (auto &ei : info.ExportedEnums) {
+      auto *et = Ctx.lookupEnumType(ei.Name);
+      if (!et || ei.PayloadVariants.empty() || et->hasPayloads())
+        continue;
+      for (const std::string &v : ei.PayloadVariants) {
+        int64_t idx = et->findVariant(v);
+        auto *st = Ctx.lookupStructType(ei.Name + names::kQualSep + v);
+        if (idx < 0 || !st) {
+          std::string msg = diagPrefix;
+          msg += "the fields of variant '";
+          msg += v;
+          msg += "' of enum '";
+          msg += ei.Name;
+          msg += "' are missing";
+          error(loc, msg);
+          ok = false;
+          continue;
+        }
+        et->setPayload(static_cast<size_t>(idx), st);
+        st->setVariantOf(et, static_cast<size_t>(idx));
+      }
+    }
+
     // Classes, phase 1: pre-register a stub for every class not already
     // present, superclass before subclass.  All stubs exist before any
     // signature is resolved, so a method or field may name any class of the
@@ -1146,10 +1178,30 @@ Sema::structInstantiationInfo(ast::StructType *st) {
                StructInstantiationInfo{tmpl->second, std::move(args)});
 }
 
+const Sema::EnumInstantiationInfo *
+Sema::enumInstantiationInfo(ast::EnumType *et) {
+  if (auto it = EnumInstantiationInfos.find(et);
+      it != EnumInstantiationInfos.end())
+    return &it->second;
+  const std::string &name = et->getName();
+  auto origin = ImportedTypeOrigins.find(name);
+  std::string base;
+  std::vector<ast::Type *> args;
+  if (origin == ImportedTypeOrigins.end() ||
+      !parseInstantiationName(name, base, args))
+    return nullptr;
+  auto tmpl = EnumTemplates.find(hiddenQualifier(origin->second) +
+                                 names::kQualSep + base);
+  if (tmpl == EnumTemplates.end())
+    return nullptr;
+  return &(EnumInstantiationInfos[et] =
+               EnumInstantiationInfo{tmpl->second, std::move(args)});
+}
+
 std::shared_ptr<Sema::ModuleTemplates>
 Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   if (tu->getGenericClassDecls().empty() && tu->getGenericFuncDecls().empty() &&
-      tu->getGenericStructDecls().empty())
+      tu->getGenericStructDecls().empty() && tu->getGenericEnumDecls().empty())
     return nullptr;
   // What the module declares, by the names its bodies use for them.
   StringSet types, generics, callees;
@@ -1170,6 +1222,12 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
   for (auto *sd : tu->getGenericStructDecls()) {
     generics.insert(sd->getName());
     callees.insert(sd->getName());
+  }
+  // A generic enum is named as a type (`Maybe::Nothing`) or a template
+  // (`Maybe<int>`).
+  for (auto *ed : tu->getGenericEnumDecls()) {
+    generics.insert(ed->getName());
+    types.insert(ed->getName());
   }
   for (auto *fn : tu->getFuncDecls())
     callees.insert(fn->getName());
@@ -1223,7 +1281,18 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
       return spell(name, Generics);
     }
     std::string callee(const std::string &name) const override {
-      return spell(name, Callees);
+      if (std::string q = spell(name, Callees); q != name)
+        return q;
+      // `X::member`: a variant of the enum X, or a static function of the
+      // class or struct X, named as X is.
+      const size_t sep = name.rfind(names::kQualSep);
+      if (sep == std::string::npos)
+        return name;
+      const std::string owner = name.substr(0, sep);
+      std::string spelled = spell(owner, Types);
+      if (spelled == owner)
+        spelled = spell(owner, Generics);
+      return spelled + name.substr(sep);
     }
   };
   Names names(*this, *mt, types, generics, callees);
@@ -1249,6 +1318,9 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
         if (!im->getTrait())
           mt->Impls[mt->Structs.back()].push_back(cloner.cloneTemplate(im));
   }
+  for (auto *ed : tu->getGenericEnumDecls())
+    if (EnumTemplates.count(ed->getName()))
+      mt->Enums.push_back(cloner.cloneTemplate(ed));
   return mt;
 }
 
@@ -1273,7 +1345,8 @@ std::vector<uint8_t> Sema::encodeTemplates(const ModuleTemplates &mt,
   for (uint32_t i = 0; i < mt.Structs.size(); ++i)
     implsOf(mt.Structs[i], pkm::Templates::OwnerKind::Struct, i);
   ast::TranslationUnit unit(ast::SourceLocation(), {}, {}, {}, {}, mt.Classes,
-                            mt.Functions, std::move(impls), {}, {}, mt.Structs);
+                            mt.Functions, std::move(impls), {}, {}, mt.Structs,
+                            mt.Enums);
   std::ostringstream os;
   if (!ast::interchange::write(unit, os, error))
     return {};
@@ -1305,6 +1378,7 @@ Sema::decodeTemplates(std::span<const uint8_t> bytes,
   mt->Classes = tu->getGenericClassDecls();
   mt->Functions = tu->getGenericFuncDecls();
   mt->Structs = tu->getGenericStructDecls();
+  mt->Enums = tu->getGenericEnumDecls();
   const auto &impls = tu->getImplDecls();
   if (impls.size() != t->Impls.size())
     return Status::error("TMPL: " + std::to_string(impls.size()) +
@@ -1372,11 +1446,16 @@ bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
     for (auto *sd : mt.Structs)
       if (hidden || !names::isModulePrivateName(sd->getName()))
         StructTemplates[q + names::kQualSep + sd->getName()] = sd;
+    for (auto *ed : mt.Enums)
+      if (hidden || !names::isModulePrivateName(ed->getName()))
+        EnumTemplates[q + names::kQualSep + ed->getName()] = ed;
   }
   for (auto *cd : mt.Classes)
     ForeignTemplates[cd] = &mt;
   for (auto *sd : mt.Structs)
     ForeignTemplates[sd] = &mt;
+  for (auto *ed : mt.Enums)
+    ForeignTemplates[ed] = &mt;
   for (const auto &[cd, impls] : mt.Impls)
     TemplateImpls[cd] = impls;
   for (auto *fn : mt.Functions)

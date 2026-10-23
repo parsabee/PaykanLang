@@ -1,0 +1,35 @@
+// OK: a generic enum declared in another module (docs/language/07-enums.md):
+// instantiated here with this module's types and that module's, its
+// variants made here (type arguments written, expected and inferred) and by
+// that module's templates, matched and shown here, and passed to that
+// module's functions.
+// expect-stdout: Just(value: 80) Nothing 443 | 523
+// expect-stdout: Just(value: hi) Just(value: two) one
+// expect-stdout: Just(value: Point(x: 1, y: 2)) 3
+import ::io;
+import options;
+
+struct Point {
+  x: int;
+  y: int;
+}
+
+fn main() -> int {
+  http = options::parsePort("http");
+  gopher = options::parsePort("gopher");
+  ports: options::Maybe<int>[3] = [http, gopher, options::Maybe::Just(443)];
+  io::println(http.toString() + " " + gopher.toString() + " "
+      + Str(options::orElse(ports[2], 0)) + " | " + Str(options::total(ports)));
+
+  none: options::Maybe<Str> = options::Maybe::Nothing;
+  io::println(options::wrap("hi").toString() + " "
+      + options::firstOf(none, options::Maybe::Just("two")).toString() + " "
+      + options::orElse(options::Maybe<Str>::Nothing, "one"));
+
+  p = options::wrap(Point(1, 2));
+  match p {
+    j: Just { io::println(p.toString() + " " + Str(j.value.x + j.value.y)); }
+    Nothing {}
+  }
+  return 0;
+}

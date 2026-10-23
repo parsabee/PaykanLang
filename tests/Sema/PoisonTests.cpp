@@ -290,7 +290,7 @@ TEST(Poison, EnumMatchArmBindingIsSilentInItsBody) {
   expectOnly("enum Color { Red, Green }\n" +
                  wrapMain("c = Color::Red;\n"
                           " match c { x: Red { io::println(x); } _ { } }"),
-             "enum-match arm cannot bind a variable");
+             "variant 'Red' of enum 'Color' has no fields to bind");
 }
 
 // A function whose signature failed is not declared; calls by its name are

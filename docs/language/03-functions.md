@@ -784,18 +784,19 @@ native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
 The string is the C symbol.  The rest of the program calls the function like
 any other.
 
-Only `int`, `float`, `bool`, `char`, a sized numeric type and an enum cross into C by
-value.  Any other
-parameter is a `view`, which C borrows for the call, or an `inout`, which
-C changes in place: a call never shares a reference with C, so it costs no
-reference counting (`parameter 's' must be 'view' or 'inout' ('s: view
-Str'); only int, float, bool, char and an enum cross into C by value`).  Only these
-types cross, with the runtime's own convention:
+Only `int`, `float`, `bool`, `char`, a sized numeric type and an enum
+without fields cross into C by value.  Any other parameter is a `view`,
+which C borrows for the call, or an `inout`, which C changes in place: a
+call never shares a reference with C, so it costs no reference counting
+(`parameter 's' must be 'view' or 'inout' ('s: view Str'); only int, float,
+bool, char and an enum without fields cross into C by value`).  Only these
+types cross, with the runtime's own convention (an enum whose variants have
+fields, [a tagged union](07-enums.md#variants-with-fields), does not):
 
 | Paykan | C | Notes |
 |--------|---|-------|
 | `int`, `float`, `bool`, `char` | `int64_t`, `double`, `bool`, `int8_t` | by value, or a `view` |
-| an enum | `int64_t` | its variant's ordinal (`0` for the first), by value: `native fn f(d: Dir) -> Dir` |
+| an enum without fields | `int64_t` | its variant's ordinal (`0` for the first), by value: `native fn f(d: Dir) -> Dir` |
 | a sized numeric type (`u8`, `i32`, `unsigned`, `f32`, …) | `int64_t` (an integer, in its canonical sign- or zero-extended form; an `unsigned` as its bits), `double` (a float) | as `int` and `float`: the 8-byte slot of [sized numeric types](02-basics.md#sized-numeric-types) |
 | `inout int`, ... | `int64_t *`, `double *`, `bool *`, `int8_t *` | the caller's variable |
 | `view Str`, `view Obj` | `PaykanObject *` | borrowed for the call; the C code must not keep it without a retain |

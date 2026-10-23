@@ -528,6 +528,19 @@ CodeGen enforced, now in one place.
   and `==`/`!=` pass the address and the `.structN` layout to
   `PaykanStruct_toString` and `PaykanStruct_equals`, with the conventions
   of the tuple calls.
+* **Enums** (docs/language/07-enums.md) whose variants have no fields are
+  `i64`, the variant's index.  A tagged union, an enum with fields, is
+  held in `mem` as the tuple of its tag (`i64`) and each variant's fields,
+  a struct, one after another, all zeros but the current variant's: its
+  copies, retains and releases are that tuple's (a null reference is
+  skipped), and a container's type descriptor marks each of its references
+  nullable.  `E::B(x, y)` zeroes the value, stores the tag and initialises
+  the fields in place; a `match` copies the subject, `switch`es on its tag
+  and binds an arm's fields as a copy of the struct (or, `inout`, as the
+  `ptr.add` of their offset in the subject).  Printing, `toString()` and
+  `==`/`!=` pass the address and the `.enumN` layout to
+  `PaykanEnum_toString` and `PaykanEnum_equals`, with the conventions of
+  the tuple calls; an enum without fields is first stored to a local.
 * **Function values** (docs/language/14-function-types.md,
   docs/design/function-types.md) are held in memory, 16 bytes laid out as
   the tuple `(i64, box)`: the code's address cast to `i64`, then the box of
@@ -653,6 +666,8 @@ PaykanInt_hash(i64) -> i64              PaykanString_hash(obj) -> i64
 PaykanTuple_toString(ptr, ptr) -> obj   PaykanTuple_equals(ptr, ptr, ptr) -> i64
 ; structs: likewise, with a struct layout
 PaykanStruct_toString(ptr, ptr) -> obj  PaykanStruct_equals(ptr, ptr, ptr) -> i64
+; enums: likewise, with an enum layout
+PaykanEnum_toString(ptr, ptr) -> obj    PaykanEnum_equals(ptr, ptr, ptr) -> i64
 ; vtable slot implementations (inherited into user vtables)
 PaykanObject_destroy(obj) -> void   PaykanObject_toString(obj) -> box
 PaykanObject_equals(obj, box) -> i64

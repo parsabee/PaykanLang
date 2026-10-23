@@ -29,6 +29,8 @@ public:
     // sorts the declarations into the lists by kind again.
     for (auto *d : tu.getImports())
       importDecl(*d);
+    for (auto *d : tu.getGenericEnumDecls())
+      enumDecl(*d);
     for (auto *d : tu.getEnumDecls())
       enumDecl(*d);
     for (auto *d : tu.getGenericStructDecls())
@@ -150,8 +152,21 @@ private:
   void enumDecl(const EnumDecl &d) {
     open("enum", &d);
     str(d.getName());
-    for (const std::string *v : d.getVariants())
-      str(*v);
+    // A generic enum's type parameters, `enum Option<T> { ... }`.
+    if (d.isGeneric())
+      typeParams(d.getTypeParams(), d.getTypeParamBounds());
+    for (size_t i = 0; i < d.getNumVariants(); ++i) {
+      // A variant with fields is (variant "Name" (var ...)...).
+      if (d.getPayload(i).empty()) {
+        str(*d.getVariants()[i]);
+        continue;
+      }
+      open("variant");
+      str(*d.getVariants()[i]);
+      for (const VarDecl *f : d.getPayload(i))
+        varDecl(*f);
+      close();
+    }
     close();
   }
 
@@ -725,6 +740,13 @@ private:
       open("enum-value", v);
       str(v->getEnumName());
       str(v->getVariantName());
+      // A generic enum's type arguments, `Option<int>::Nothing`.
+      if (v->hasTypeArgs()) {
+        open("type-args");
+        for (const Type *t : v->getTypeArgs())
+          type(t);
+        close();
+      }
       close();
       return;
     }

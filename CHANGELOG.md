@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Tagged unions (docs/language/07-enums.md, "Variants With Fields"): an enum's
+  variant may have fields, `enum Shape { Empty, Rect(w: int, h: int) }`. The
+  enum is then a value held in place, like a struct: its tag, then each
+  variant's fields.
+  - `Shape::Rect(2, 3)` makes one, its arguments checked as a constructor's; a
+    variant without fields stays `Shape::Empty`.
+  - A `match` arm `r: Rect { ... }` binds the variant's fields, a copy, or with
+    `view` / `inout` the subject's own. Their struct is the type
+    `Shape::Rect`, so a function can take them.
+  - `toString()` and `io::println` show `Rect(w: 2, h: 3)`; `==` and `!=`
+    compare the variant and its fields.
+  - A variant cannot hold its own enum (hold it in a class instead), a field
+    is not a fixed-size array yet, and a tagged union does not cross into C.
+  - Imported tagged unions work from a source and from a `.pkm`: an `ENUM`
+    record lists its variants with fields, whose fields are `STRUCT` records
+    (docs/design/pkm.md). The AST interchange format writes such a variant as
+    `(variant NAME VAR...)` (docs/plugins/ast-format.md). The runtime adds
+    `PaykanEnum_toString` and `PaykanEnum_equals` and the layout kind `ENUM`
+    (docs/pir.md).
+- Generic enums (docs/language/07-enums.md, "Generic Enums"): an enum takes
+  type parameters, `enum Maybe<T> { Just(value: T), Nothing }`, and each
+  instantiation, `Maybe<int>`, is an enum of its own.
+  - A variant's type arguments are written (`Maybe<int>::Nothing`), taken from
+    the type the value flows into (a declared variable, a parameter, a result,
+    a field, an array element, the other side of `==`, the other arm of a
+    conditional expression), or inferred from its fields (`Maybe::Just(3)`).
+  - Generic functions infer through them (`fn orElse<T>(m: Maybe<T>, d: T)`);
+    a bound is checked per instantiation; an instantiation that holds itself is
+    reported where it is made.
+  - A module's generic enums are exported with its templates, from a source
+    and from a `.pkm` (its `TMPL` section). The AST interchange format writes
+    their type parameters, `(enum NAME (type-params ...) ...)`, and a
+    variant's type arguments, `(enum-value ... (type-args ...))`.
+- Every enum is `Show`: `d.toString()` and `io::println(d)` give the variant's
+  name, also for an enum in a tuple, a struct or an optional (which printed
+  its ordinal before).
+- `scripts/pkfmt.py` keeps a variant's fields on its line.
 - Expression bodies (docs/language/03-functions.md, "Expression Bodies";
   docs/language/14-function-types.md): a function or a lambda whose body only
   returns an expression is written with `=>`, `fn double(x: int) -> int => x
@@ -190,6 +227,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   native code generation.
 - `--backend=c` and `--backend=llvm` (unknown backends now).  In `PAYKAN_BACKENDS` the names
   `c` and `llvm` are still accepted, with a warning, and build `mlir`.
+
+### Fixed
+
+- A generic function that its own module instantiated (`fn id<T>` and a call `id(3)` in
+  the module) could not be instantiated with the same type arguments by an importer
+  (`'$m::id<int>' is a builtin function and cannot be redeclared`); the importer now calls
+  the module's instantiation, as it uses an imported instantiation of a generic struct.
+- A static function of an instantiation named in a generic function's body (`Box<int>::of(3)`
+  for a generic `Box` of the module) failed when another module instantiated the function
+  (`call to undeclared generic function or class 'Box::of'`); it is resolved as the
+  template's module declares it, as a variant of a generic enum is (`Maybe::Just(x)`).
 
 ## [0.2.0] - 2026-10-20
 

@@ -40,6 +40,7 @@ add_executable(parser_tests
     Parser/TraitTests.cpp
     Parser/StructTests.cpp
     Parser/FunctionTypeTests.cpp
+    Parser/EnumTests.cpp
 )
 target_include_directories(parser_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

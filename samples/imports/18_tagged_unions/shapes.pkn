@@ -1,0 +1,48 @@
+// A tagged union and the functions over it, for main.pkn: its variants with
+// fields, a function taking one variant's fields (`Shape::Rect`), and a
+// template that makes and matches its values in the importer.
+
+import ::io;
+
+enum Shape {
+  Empty,
+  Circle(r: float),
+  Rect(w: int, h: int),
+  Labelled(text: Str, inner: Box)
+}
+
+class Box {
+  side: int;
+
+  view fn toString() -> Str { return "Box(" + Str(self.side) + ")"; }
+}
+
+/// The area of the rectangle @p r.
+fn rectArea(r: Shape::Rect) => r.w * r.h;
+
+/// The area of @p s, rounded down.
+fn area(s: Shape) -> int {
+  match s {
+    Empty { return 0; }
+    c: Circle { return int(3.0 * c.r * c.r); }
+    r: Rect { return rectArea(r); }
+    l: Labelled { return l.inner.side * l.inner.side; }
+  }
+}
+
+/// Prints @p n squares of side @p side, each labelled with its index: a
+/// template (`n` has no type), instantiated in the importer.
+fn squares(n, side: int) {
+  for i in 0..n {
+    s = Shape::Labelled(Str(i), Box(side));
+    io::println(s.toString() + " = " + Str(area(s)));
+  }
+}
+
+/// Doubles a rectangle's width in place.
+fn widen(s: inout Shape) {
+  match s {
+    r: inout Rect { r.w *= 2; }
+    _ { io::println("not a rectangle"); }
+  }
+}

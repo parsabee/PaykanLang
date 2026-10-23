@@ -257,6 +257,9 @@ private:
   std::unordered_map<std::string, std::string>
       InternedStrings; // content -> @sym
   std::unordered_map<std::string, std::string> InternedTupleLayouts;
+  std::unordered_map<std::string, std::string> InternedEnumLayouts;
+  /// Each tagged union's carrier (enumCarrier).
+  std::unordered_map<const ast::EnumType *, ast::TupleType *> EnumCarriers;
   std::unordered_map<std::string, std::string> InternedTypeDescriptors;
 
   /// Address (ptr) of the interned C-string global holding @p content.
@@ -355,6 +358,9 @@ private:
   bool exprProducesFreshBox(ast::Expr *expr) const;
   /// A lambda, or a function used as a value: a fresh closure box.
   static bool isFunctionValueExpr(const ast::Expr *expr);
+  /// A tagged union's variant made here: `E::B(x)`, or `E::A` of an enum
+  /// with fields.
+  static bool isVariantExpr(const ast::Expr *expr);
   ExprValue classifyExpr(ast::Expr *expr, const Val &val) const;
   void releaseIfOwned(const ExprValue &ev);
   Val takeSharedOwnership(ast::Expr *expr, const Val &val);
@@ -583,9 +589,9 @@ private:
   /// values are this tuple's.
   ast::TupleType *functionValueShape();
   /// What a value of @p ty held in memory is laid out as: @p ty itself, or
-  /// a tuple for a function value (functionValueShape()) and for the
-  /// optional of a tuple or a struct (`(bool, T)`: present, then the value,
-  /// None all zeros).
+  /// a tuple for a function value (functionValueShape()), for the optional
+  /// of a tuple, a struct or a tagged union (`(bool, T)`: present, then the
+  /// value, None all zeros) and for a tagged union (enumCarrier()).
   ast::Type *memShapeOf(ast::Type *ty);
   /// Where the value of the optional tuple or struct @p optTy starts.
   int64_t memOptionalPayloadOffset(ast::Type *optTy);
@@ -765,6 +771,38 @@ private:
   /// Whether the tuples or structs @p a and @p b are equal
   /// (PaykanTuple_equals / PaykanStruct_equals).
   Val emitTupleEquals(ast::Expr *a, ast::Expr *b);
+  /// Append to @p words the layout of the tuple or struct @p tt
+  /// (emitTupleLayout).
+  void appendTupleLayout(std::vector<int64_t> &words, ast::TupleType *tt);
+  /// Append to @p words the layout of the enum @p et (Runtime.h, "Enums").
+  void appendEnumLayout(std::vector<int64_t> &words, ast::EnumType *et);
+  /// The data global holding @p words, one per distinct layout, named
+  /// @p prefix and a number.
+  Val internLayout(std::unordered_map<std::string, std::string> &interned,
+                   const char *prefix, std::vector<int64_t> words);
+
+  // -- Enums (LoweringEnum.cpp, docs/language/07-enums.md)
+  /// What the tagged union @p et is laid out as: its tag, an int, then each
+  /// variant's fields, a struct, in place (a variant without fields has
+  /// none).  Only the current variant's are set; the others are all zeros,
+  /// so a copy's retains and a release's releases reach every variant's
+  /// references alike (null ones are skipped).
+  ast::TupleType *enumCarrier(ast::EnumType *et);
+  /// Where the fields of variant @p i of the tagged union @p et are.
+  int64_t variantPayloadOffset(ast::EnumType *et, size_t i);
+  /// Write the variant the call @p call makes (`E::V(x, y)`) to @p dst.
+  void emitVariantInit(ast::CallExpr *call, const Val &dst);
+  /// The layout of the enum @p et the runtime reads, as constant data.
+  Val emitEnumLayout(ast::EnumType *et);
+  /// The text of the enum value @p e (PaykanEnum_toString), a new string.
+  Val emitEnumToString(ast::Expr *e);
+  /// The text of the enum held at @p addr, as emitEnumToString.
+  Val emitEnumToStringAt(const Val &addr, ast::EnumType *et);
+  /// Whether the tagged unions @p a and @p b are equal (PaykanEnum_equals).
+  Val emitEnumEquals(ast::Expr *a, ast::Expr *b);
+  /// `match` on a tagged union: a switch on its tag, each arm's binding the
+  /// variant's fields.
+  Val emitPayloadEnumMatch(ast::MatchStmt *node);
   /// True when @p arg is passed for a slice parameter: a fixed-size array
   /// Sema took for one, or a slice passed on.
   static bool isSliceArg(const ast::Expr *arg);

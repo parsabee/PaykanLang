@@ -50,6 +50,8 @@ class EnumDecl;
 class ImplDecl;
 class TraitDecl;
 class StructDecl;
+class StructType;
+class EnumType;
 
 // Base AST node with LLVM-style RTTI
 class ASTNode {
@@ -971,6 +973,8 @@ private:
   // Set by Sema when the callee is a variable or parameter of function type
   // (`f(1)` with `f: (int) -> int`): a call through a function value.
   bool CalleeIsValue = false;
+  EnumType *VariantEnum = nullptr; // `E::V(a, b)` (Sema)
+  size_t VariantIndex = 0;
 
 public:
   CallExpr(SourceLocation loc, const std::string &internedCallee,
@@ -989,6 +993,13 @@ public:
   bool hasTypeArgs() const { return !TypeArgs.empty(); }
   void setCalleeIsValue(bool v) { CalleeIsValue = v; }
   bool calleeIsValue() const { return CalleeIsValue; }
+  /// Set by Sema for `E::V(a, b)`: an enum's variant made with its fields.
+  void setVariant(EnumType *e, size_t index) {
+    VariantEnum = e;
+    VariantIndex = index;
+  }
+  EnumType *getVariantEnum() const { return VariantEnum; }
+  size_t getVariantIndex() const { return VariantIndex; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_CallExpr; }
 };
@@ -1585,6 +1596,7 @@ private:
   std::vector<TraitDecl *> TraitDecls;
   std::vector<StructDecl *> StructDecls;
   std::vector<StructDecl *> GenericStructDecls;
+  std::vector<EnumDecl *> GenericEnumDecls;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
@@ -1596,14 +1608,16 @@ public:
                   std::vector<ImplDecl *> impls = {},
                   std::vector<TraitDecl *> traits = {},
                   std::vector<StructDecl *> structs = {},
-                  std::vector<StructDecl *> genericStructs = {})
+                  std::vector<StructDecl *> genericStructs = {},
+                  std::vector<EnumDecl *> genericEnums = {})
       : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
         ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)),
         EnumDecls(std::move(enums)),
         GenericClassDecls(std::move(genericClasses)),
         GenericFuncDecls(std::move(genericFuncs)), ImplDecls(std::move(impls)),
         TraitDecls(std::move(traits)), StructDecls(std::move(structs)),
-        GenericStructDecls(std::move(genericStructs)) {}
+        GenericStructDecls(std::move(genericStructs)),
+        GenericEnumDecls(std::move(genericEnums)) {}
 
   const std::vector<ImportDecl *> &getImports() const { return Imports; }
   const std::vector<ClassDecl *> &getClassDecls() const { return ClassDecls; }
@@ -1623,8 +1637,14 @@ public:
   const std::vector<StructDecl *> &getGenericStructDecls() const {
     return GenericStructDecls;
   }
+  /// The generic enums (`enum Option<T> { ... }`): templates, each
+  /// instantiation of which Sema makes an enum of its own.
+  const std::vector<EnumDecl *> &getGenericEnumDecls() const {
+    return GenericEnumDecls;
+  }
   /// Append an instantiated struct (Sema).
   void addStructDecl(StructDecl *sd) { StructDecls.push_back(sd); }
+  void addEnumDecl(EnumDecl *ed) { EnumDecls.push_back(ed); }
 
   /// Append an instantiated function (Sema).
   void addFuncDecl(FuncDecl *fn) { FuncDecls.push_back(fn); }
@@ -1745,6 +1765,11 @@ class EnumType : public Type {
   // Variant names in declaration order; index == underlying value.
   // Each entry points into ASTContext::StringPool (stable).
   std::vector<const std::string *> Variants;
+  // Parallel to Variants: the struct of a variant's fields (its payload,
+  // `V(x: int)`), or nullptr for a variant without fields.  An enum with a
+  // payload is a tagged union, a value held in memory (isMemType): its tag,
+  // then each payload in place (docs/language/07-enums.md).
+  std::vector<StructType *> Payloads;
 
 public:
   EnumType(SourceLocation loc, const std::string &internedName)
@@ -1758,6 +1783,17 @@ public:
 
   void addVariant(const std::string &internedVariant) {
     Variants.push_back(&internedVariant);
+    Payloads.push_back(nullptr);
+  }
+  /// The struct of variant @p i's fields, or nullptr when it has none.
+  StructType *getPayload(size_t i) const { return Payloads[i]; }
+  void setPayload(size_t i, StructType *payload) { Payloads[i] = payload; }
+  /// Whether a variant has fields: the enum is a tagged union.
+  bool hasPayloads() const {
+    for (const StructType *p : Payloads)
+      if (p)
+        return true;
+    return false;
   }
   const std::vector<const std::string *> &getVariants() const {
     return Variants;
@@ -1786,15 +1822,21 @@ class EnumValueExpr : public Expr {
   EnumType *ResolvedEnum = nullptr;         // set by Sema
   int64_t Value = -1;                       // set by Sema (variant index)
   const std::string *FunctionRef = nullptr; // set by Sema (see below)
+  std::vector<Type *> TypeArgs;             // `Option<int>::Nothing`
 
 public:
   EnumValueExpr(SourceLocation loc, const std::string &internedEnum,
-                const std::string &internedVariant)
+                const std::string &internedVariant,
+                std::vector<Type *> typeArgs = {})
       : Expr(NK_EnumValueExpr, loc), EnumName(&internedEnum),
-        VariantName(&internedVariant) {}
+        VariantName(&internedVariant), TypeArgs(std::move(typeArgs)) {}
 
   const std::string &getEnumName() const { return *EnumName; }
   const std::string &getVariantName() const { return *VariantName; }
+  /// A generic enum's type arguments, `Option<int>::Nothing`; empty when
+  /// none are written.
+  const std::vector<Type *> &getTypeArgs() const { return TypeArgs; }
+  bool hasTypeArgs() const { return !TypeArgs.empty(); }
   /// Set by Sema when `m::f` names an imported function used as a value
   /// (docs/language/14-function-types.md): the function's qualified name.
   void setFunctionRef(const std::string &internedName) {
@@ -1812,25 +1854,56 @@ public:
 };
 
 // Enum declaration:
-//   enum MyEnum { One, Two, Three }
+//   enum MyEnum { One, Two(n: int, s: Str), Three }
 //
 // Variants are recorded in declaration order; their underlying values are
-// their indices.  Sema registers a corresponding EnumType in the ASTContext.
+// their indices.  A variant may carry fields, its payload (a tagged union,
+// docs/language/07-enums.md): Sema gives each such variant a struct type of
+// its fields.  Sema registers a corresponding EnumType in the ASTContext.
 class EnumDecl : public Decl {
   const std::string *Name; // points into ASTContext::StringPool (stable)
   std::vector<const std::string *> Variants; // each interned (stable)
+  // Parallel to Variants: each variant's fields, none for a plain variant.
+  std::vector<std::vector<VarDecl *>> Payloads;
+  std::vector<const std::string *> TypeParams; // a generic enum's, interned
+  TypeParamBounds Bounds;
 
 public:
   EnumDecl(SourceLocation loc, const std::string &internedName,
-           std::vector<const std::string *> variants)
+           std::vector<const std::string *> variants,
+           std::vector<std::vector<VarDecl *>> payloads = {},
+           std::vector<const std::string *> typeParams = {})
       : Decl(NK_EnumDecl, loc), Name(&internedName),
-        Variants(std::move(variants)) {}
+        Variants(std::move(variants)), Payloads(std::move(payloads)),
+        TypeParams(std::move(typeParams)) {
+    Payloads.resize(Variants.size());
+  }
+
+  /// A generic enum's type parameters (`enum Option<T> { ... }`), which its
+  /// variants' fields name; empty for any other enum.
+  const std::vector<const std::string *> &getTypeParams() const {
+    return TypeParams;
+  }
+  bool isGeneric() const { return !TypeParams.empty(); }
+  const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
+  void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
 
   const std::string &getName() const { return *Name; }
   const std::vector<const std::string *> &getVariants() const {
     return Variants;
   }
   size_t getNumVariants() const { return Variants.size(); }
+  /// The fields of variant @p i: empty for a variant without a payload.
+  const std::vector<VarDecl *> &getPayload(size_t i) const {
+    return Payloads[i];
+  }
+  /// Whether any variant has fields (the enum is a tagged union).
+  bool hasPayloads() const {
+    for (const auto &p : Payloads)
+      if (!p.empty())
+        return true;
+    return false;
+  }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_EnumDecl; }
 };
@@ -1998,12 +2071,24 @@ class StructType : public TupleType {
   // is called directly), and its `__init__`, kept apart like a class's.
   std::vector<MethodDecl *> ImplMethods;
   MethodDecl *InitMethod = nullptr;
+  // The payload of an enum's variant (`E::V` for `V(x: int)`): its enum and
+  // the variant's index.  It has no constructor: `E::V(1)` makes the enum.
+  EnumType *VariantEnum = nullptr;
+  size_t VariantIndex = 0;
 
 public:
   StructType(SourceLocation loc, const std::string &internedName)
       : TupleType(NK_StructType, loc, {}), Name(&internedName) {}
 
   const std::string &getName() const { return *Name; }
+
+  void setVariantOf(EnumType *e, size_t index) {
+    VariantEnum = e;
+    VariantIndex = index;
+  }
+  /// The enum this struct is the payload of a variant of, or nullptr.
+  EnumType *getVariantEnum() const { return VariantEnum; }
+  size_t getVariantIndex() const { return VariantIndex; }
 
   // -- Fields (Sema adds them as it resolves their types)
 
@@ -2194,6 +2279,14 @@ public:
   }
 };
 
+/// Returns true for an enum whose variants carry fields, a tagged union
+/// (`enum E { A, B(x: int) }`): a value held in memory, its tag and then
+/// each payload in place.  An enum without fields is a 64-bit integer.
+inline bool isPayloadEnum(const Type *ty) {
+  const auto *et = dyn_cast<EnumType>(ty);
+  return et && et->hasPayloads();
+}
+
 /// Returns true for an optional of a scalar, `int?`, `float?`, `bool?`,
 /// `char?` (#96) or an enum's (`Suit?`, its ordinal): a value, the payload and
 /// a presence flag held inline (PIR `opt_i64` & co.), with no box and no
@@ -2201,15 +2294,18 @@ public:
 inline bool isValueOptional(const Type *ty) {
   auto *ot = dyn_cast<OptionalType>(ty);
   return ot && (isa<BuiltinType>(ot->getInnerType()) ||
-                isa<EnumType>(ot->getInnerType()));
+                (isa<EnumType>(ot->getInnerType()) &&
+                 !isPayloadEnum(ot->getInnerType())));
 }
 
-/// Returns true for an optional of a value held in memory, a tuple's or a
-/// struct's (`(int, Str)?`, `Point?`): held in place as a presence flag and
-/// the value (laid out as the tuple `(bool, T)`), None all zeros.
+/// Returns true for an optional of a value held in memory, a tuple's, a
+/// struct's or a tagged union's (`(int, Str)?`, `Point?`): held in place as
+/// a presence flag and the value (laid out as the tuple `(bool, T)`), None
+/// all zeros.
 inline bool isMemOptional(const Type *ty) {
   auto *ot = dyn_cast<OptionalType>(ty);
-  return ot && isa<TupleType>(ot->getInnerType());
+  return ot && (isa<TupleType>(ot->getInnerType()) ||
+                isPayloadEnum(ot->getInnerType()));
 }
 
 /// Returns true for a function value (docs/design/function-types.md): a
@@ -2239,7 +2335,7 @@ inline bool isRefType(const Type *ty) {
 /// references among them.
 inline bool isMemType(const Type *ty) {
   return ty && (isa<FixedArrayType>(ty) || isa<TupleType>(ty) ||
-                isFunctionValue(ty) || isMemOptional(ty));
+                isFunctionValue(ty) || isMemOptional(ty) || isPayloadEnum(ty));
 }
 
 /// If @p ty is an optional type, return its inner type; otherwise @p ty.
@@ -2259,7 +2355,7 @@ inline bool wrapsInOptional(const Type *dst, const Type *src) {
     return false;
   if (isValueOptional(dst))
     return isa<BuiltinType>(src) || isa<EnumType>(src);
-  return isMemOptional(dst) && isa<TupleType>(src);
+  return isMemOptional(dst) && (isa<TupleType>(src) || isPayloadEnum(src));
 }
 
 } // namespace ast

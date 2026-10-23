@@ -154,6 +154,8 @@ inline constexpr const char *kPaykanTupleToString = "PaykanTuple_toString";
 inline constexpr const char *kPaykanTupleEquals = "PaykanTuple_equals";
 inline constexpr const char *kPaykanStructToString = "PaykanStruct_toString";
 inline constexpr const char *kPaykanStructEquals = "PaykanStruct_equals";
+inline constexpr const char *kPaykanEnumToString = "PaykanEnum_toString";
+inline constexpr const char *kPaykanEnumEquals = "PaykanEnum_equals";
 
 // Type descriptors: for the C code of generic native functions
 inline constexpr const char *kPaykanTypeCopy = "PaykanType_copy";
@@ -346,6 +348,8 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanTupleEquals,
     kPaykanStructToString,
     kPaykanStructEquals,
+    kPaykanEnumToString,
+    kPaykanEnumEquals,
     // Globals (objects and singletons)
     kPaykanObjectNone,
     // Builtin methods inherited into user-class vtable slots
@@ -376,6 +380,8 @@ enum NativeTypeKind : unsigned char {
                            // (only in a layout, never a PaykanType's kind)
   kNativeKindUInt = 8,     // uint64_t (`unsigned`); the narrower sized
                            // integers and floats are kInt and kFloat
+  kNativeKindEnum = 9,     // an enum's tag, and a tagged union's fields
+                           // (only in a layout, never a PaykanType's kind)
 };
 
 // -- Names of lowering-generated globals and values
@@ -384,6 +390,7 @@ inline constexpr const char *kStrGlobalName = ".str";
 inline constexpr const char *kInt2FPName = "int2fp";
 inline constexpr const char *kTupleLayoutGlobalName = ".tuple";
 inline constexpr const char *kStructLayoutGlobalName = ".struct";
+inline constexpr const char *kEnumLayoutGlobalName = ".enum";
 
 // -- Function values (docs/language/14-function-types.md)
 //

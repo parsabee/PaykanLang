@@ -59,6 +59,9 @@ ast::Type *ModuleLowering::memShapeOf(ast::Type *ty) {
   if (ast::isMemOptional(ty))
     return ASTCtx.getTupleType(
         {ASTCtx.getBoolTy(), ast::cast<ast::OptionalType>(ty)->getInnerType()});
+  // A tagged union: its tag, then each variant's fields.
+  if (ast::isPayloadEnum(ty))
+    return enumCarrier(ast::cast<ast::EnumType>(ty));
   return ty;
 }
 

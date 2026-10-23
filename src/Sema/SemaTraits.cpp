@@ -209,7 +209,7 @@ std::optional<Sema::TraitRef> Sema::resolveTraitRef(ast::Type *ref,
     if (isFailedImportUse(name))
       return std::nullopt;
     if (Ctx.lookupType(name) || ClassTemplates.count(name) ||
-        StructTemplates.count(name))
+        StructTemplates.count(name) || EnumTemplates.count(name))
       error(loc, "'" + name + "' is not a trait");
     else if (!reportPrivateImport(name, loc))
       error(loc, "unknown trait '" + name + "'");
@@ -288,8 +288,9 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
        ast::isa<ast::FixedArrayType>(ty) || ast::isa<ast::FunctionType>(ty)) &&
       isBuiltinTrait(names::kTraitValueType))
     return ty;
-  // A tuple shows its elements (the builtin `Show`).
-  if (ast::isa<ast::TupleType>(ty))
+  // A tuple shows its elements, an enum its variant and its fields (the
+  // builtin `Show`).
+  if (ast::isa<ast::TupleType>(ty) || ast::isa<ast::EnumType>(ty))
     return isBuiltinTrait(names::kTraitShow) ? ty : nullptr;
   return has(ty) ? ty : nullptr;
 }
@@ -407,6 +408,8 @@ bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {
     check(cd, cd->getTypeParams(), cd->getTypeParamBounds());
   for (auto *sd : tu->getGenericStructDecls())
     check(sd, sd->getTypeParams(), sd->getTypeParamBounds());
+  for (auto *ed : tu->getGenericEnumDecls())
+    check(ed, ed->getTypeParams(), ed->getTypeParamBounds());
   for (auto *fn : tu->getGenericFuncDecls())
     check(fn, fn->getTypeParams(), fn->getTypeParamBounds());
   return ok;

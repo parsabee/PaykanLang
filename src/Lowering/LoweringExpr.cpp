@@ -69,8 +69,9 @@ Val ModuleLowering::ExprEmitter::visitStringLiteral(ast::StringLiteral *node) {
 }
 
 Val ModuleLowering::ExprEmitter::visitEnumValueExpr(ast::EnumValueExpr *node) {
-  // `m::f` used as a value: a function value held in memory, its address.
-  if (node->getFunctionRef())
+  // `m::f` used as a value: a function value held in memory, its address;
+  // a variant of a tagged union is held in memory too.
+  if (node->getFunctionRef() || isVariantExpr(node))
     return L.emitMemAddress(node);
   return Val::i64(node->getValue());
 }
@@ -331,9 +332,11 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     // against None, or as the same code and closure.
     if (ast::isa<ast::OptionalType>(lt) || ast::isa<ast::OptionalType>(rt) ||
         ast::isa<ast::TupleType>(lt) || ast::isFunctionValue(lt) ||
-        ast::isFunctionValue(rt)) {
+        ast::isFunctionValue(rt) || ast::isPayloadEnum(lt)) {
       Val eq = ast::isa<ast::TupleType>(lt)
                    ? L.emitTupleEquals(node->getLHS(), node->getRHS())
+               : ast::isPayloadEnum(lt)
+                   ? L.emitEnumEquals(node->getLHS(), node->getRHS())
                    : L.emitOptionalEquality(node);
       if (!eq)
         return Val();
@@ -471,9 +474,12 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
   std::vector<ExprValue> ownedArgs;
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
-    // A tuple printed: its text.
-    if (ast::isa<ast::TupleType>(argExpr->getResolvedType())) {
-      Val v = L.emitTupleToString(argExpr);
+    // A tuple or an enum printed: its text.
+    if (ast::isa<ast::TupleType>(argExpr->getResolvedType()) ||
+        ast::isa<ast::EnumType>(argExpr->getResolvedType())) {
+      Val v = ast::isa<ast::EnumType>(argExpr->getResolvedType())
+                  ? L.emitEnumToString(argExpr)
+                  : L.emitTupleToString(argExpr);
       if (!v)
         return Val();
       ownedArgs.push_back(ExprValue::owned(v));
@@ -676,6 +682,9 @@ Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
 Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   // Wanted as an address only by this call, not by the arguments' calls.
   const bool wantAddress = std::exchange(WantAddress, false);
+  // `E::B(x, y)`: a tagged union's variant, held in memory (LoweringEnum.cpp).
+  if (node->getVariantEnum())
+    return L.emitMemAddress(node);
   // A call through a function value held by a variable.
   if (node->calleeIsValue()) {
     auto *id = L.ASTCtx.make<ast::Identifier>(
@@ -918,13 +927,13 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   if (ast::isa<ast::OptionalType>(recvResolved) &&
       node->getMethodName() == kMethodToString) {
     if (ast::isMemOptional(recvResolved)) {
-      // A tuple's or a struct's, in place: its presence flag, then its
-      // layout's text.
+      // A tuple's, a struct's or a tagged union's, in place: its presence
+      // flag, then its layout's text.
       size_t mark = L.MemTemps.size();
       Val addr = L.emitMemAddress(node->getReceiver());
       if (!addr)
         return Val();
-      auto *value = ast::cast<ast::TupleType>(ast::stripOptional(recvResolved));
+      ast::Type *value = ast::stripOptional(recvResolved);
       pir::LocalId text = L.B.addLocal("opt.str", Type::Box);
       pir::If *s = L.B.openIf(L.emitMemOptionalIsNone(addr, recvResolved),
                               /*withElse=*/true);
@@ -941,13 +950,16 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       Val payload =
           L.B.ptrAdd(addr, Val::i64(L.memOptionalPayloadOffset(recvResolved)),
                      "opt.value.addr");
-      L.B.store(text, L.emitSharedNew(
-                          L.callRuntime(ast::isa<ast::StructType>(value)
-                                            ? kPaykanStructToString
-                                            : kPaykanTupleToString,
-                                        {payload, L.emitTupleLayout(value)},
-                                        "tup.str"),
-                          "str.shared"));
+      Val raw;
+      if (auto *et = ast::dyn_cast<ast::EnumType>(value))
+        raw = L.emitEnumToStringAt(payload, et);
+      else
+        raw = L.callRuntime(
+            ast::isa<ast::StructType>(value) ? kPaykanStructToString
+                                             : kPaykanTupleToString,
+            {payload, L.emitTupleLayout(ast::cast<ast::TupleType>(value))},
+            "tup.str");
+      L.B.store(text, L.emitSharedNew(raw, "str.shared"));
       L.B.leave();
       Val str = L.B.load(text, "opt.str");
       L.releaseMemTemps(mark);
@@ -969,10 +981,13 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     L.releaseIfOwned(receiver.Owned);
     return str;
   }
-  // `t.toString()` on a tuple or a struct (the builtin `Show`): its text,
-  // as a fresh box like any method's `Str` result.
-  if (ast::isa<ast::TupleType>(recvResolved)) {
-    Val str = L.emitTupleToString(node->getReceiver());
+  // `t.toString()` on a tuple, a struct or an enum (the builtin `Show`): its
+  // text, as a fresh box like any method's `Str` result.
+  if (ast::isa<ast::TupleType>(recvResolved) ||
+      ast::isa<ast::EnumType>(recvResolved)) {
+    Val str = ast::isa<ast::EnumType>(recvResolved)
+                  ? L.emitEnumToString(node->getReceiver())
+                  : L.emitTupleToString(node->getReceiver());
     if (!str)
       return Val();
     return L.emitSharedNew(str, "str.shared");

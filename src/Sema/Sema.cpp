@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Sema.h"
+#include "ASTClone.h"
 #include "Names.h"
 #include "SemaInternal.h"
 #include "paykan/modules/ModuleResolver.h"
@@ -153,6 +154,10 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
   }
   if (StructTemplates.count(name)) {
     error(loc, "'" + name + "' is already declared as a generic struct");
+    return false;
+  }
+  if (EnumTemplates.count(name)) {
+    error(loc, "'" + name + "' is already declared as a generic enum");
     return false;
   }
   if (FuncTemplates.count(name)) {
@@ -437,6 +442,8 @@ static int64_t elementAlign(const ast::Type *ty) {
 }
 
 int64_t Sema::fixedElementBytes(const ast::Type *ty) {
+  if (ast::isPayloadEnum(ty))
+    return valueSize(ty); // its tag, then its variants' fields in place
   if (ast::isa<ast::EnumType>(ty))
     return 8;
   if (const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty)) {
@@ -668,12 +675,14 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     if (auto *canonical = Ctx.lookupClassType(ct->getName()))
       return canonical;
     if (ClassTemplates.count(ct->getName()) ||
-        StructTemplates.count(ct->getName())) {
-      error(loc,
-            context + " names generic " +
-                (ClassTemplates.count(ct->getName()) ? "class '" : "struct '") +
-                ct->getName() + "' without type arguments (write '" +
-                ct->getName() + "<...>')");
+        StructTemplates.count(ct->getName()) ||
+        EnumTemplates.count(ct->getName())) {
+      error(loc, context + " names generic " +
+                     (ClassTemplates.count(ct->getName())    ? "class '"
+                      : StructTemplates.count(ct->getName()) ? "struct '"
+                                                             : "enum '") +
+                     ct->getName() + "' without type arguments (write '" +
+                     ct->getName() + "<...>')");
       return nullptr;
     }
     if (Traits.count(ct->getName())) {
@@ -774,6 +783,8 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     }
     if (StructTemplates.count(gt->getName()))
       return instantiateStruct(gt->getName(), args, loc);
+    if (EnumTemplates.count(gt->getName()))
+      return instantiateEnum(gt->getName(), args, loc);
     return instantiateClass(gt->getName(), args, loc);
   }
 
@@ -958,7 +969,7 @@ bool Sema::isTypeNameForVariable(const std::string &name) const {
   ast::BuiltinType::Kind kind;
   return Ctx.lookupClassType(name) || Ctx.lookupEnumType(name) ||
          Ctx.lookupStructType(name) || ClassTemplates.count(name) ||
-         StructTemplates.count(name) ||
+         StructTemplates.count(name) || EnumTemplates.count(name) ||
          (CurrentTypeParams && CurrentTypeParams->count(name)) ||
          name == names::kObj || name == names::kString ||
          (ast::builtinKindOfName(name, kind) && kind != ast::BuiltinType::Void);
@@ -1183,7 +1194,41 @@ ast::Type *Sema::ExprChecker::visitCallValueExpr(ast::CallValueExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
-  auto *enumTy = S.Ctx.lookupEnumType(node->getEnumName());
+  ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
+  ast::EnumType *enumTy = nullptr;
+  if (S.EnumTemplates.count(node->getEnumName())) {
+    // `Maybe<int>::Nothing`, or `Maybe::Nothing` flowing into a
+    // `Maybe<int>`.
+    enumTy =
+        genericVariantEnum(node, node->getEnumName(), node->getVariantName(),
+                           node->getTypeArgs(), expected, nullptr);
+    if (!enumTy)
+      return nullptr;
+  } else if (node->hasTypeArgs()) {
+    // `Box<int>::of` without a call: only a variant is a value with type
+    // arguments.
+    const std::string &name = node->getEnumName();
+    if (S.reportPrivateImport(name, node->getLocation()) ||
+        S.isFailedImportUse(name))
+      return nullptr;
+    std::string msg = "'";
+    msg += name;
+    if (S.Ctx.lookupEnumType(name)) {
+      msg += "' is not a generic enum and takes no type arguments";
+    } else {
+      msg += "' is not a generic enum: only a generic enum's variant takes "
+             "type arguments without a call ('";
+      msg += name;
+      msg += "<...>";
+      msg += names::kQualSep;
+      msg += node->getVariantName();
+      msg += "(...)' calls a function)";
+    }
+    S.error(node->getLocation(), msg);
+    return nullptr;
+  } else {
+    enumTy = S.Ctx.lookupEnumType(node->getEnumName());
+  }
   if (!enumTy) {
     // `m::f` or `S::f`, an imported function or a `static fn` used as a
     // value: its function type.
@@ -1215,8 +1260,181 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
                                      node->getVariantName() + "'");
     return nullptr;
   }
+  // A variant with fields is made with them: `E::V(1, "a")`.
+  if (const ast::StructType *p = enumTy->getPayload(static_cast<size_t>(idx))) {
+    std::string fields;
+    for (size_t i = 0; i < p->getNumFields(); ++i)
+      fields += (i ? ", " : "") + p->getFieldName(i);
+    S.error(node->getLocation(),
+            "variant '" + node->getVariantName() + "' of enum '" +
+                enumTy->getName() + "' has fields: write '" +
+                node->getEnumName() + names::kQualSep + node->getVariantName() +
+                "(" + fields + ")'");
+    return nullptr;
+  }
   node->setResolvedEnum(enumTy);
   node->setValue(idx);
+  node->setResolvedType(enumTy);
+  return enumTy;
+}
+
+ast::EnumType *Sema::ExprChecker::genericVariantEnum(
+    ast::Expr *node, const std::string &tmplName, const std::string &variant,
+    const std::vector<ast::Type *> &typeArgAnns, ast::Type *expected,
+    std::optional<std::vector<ast::Type *>> *argTypes) {
+  const ast::SourceLocation loc = node->getLocation();
+  const ast::EnumDecl *tmpl = S.EnumTemplates.find(tmplName)->second;
+  const std::string spelled = tmplName + names::kQualSep + variant;
+  // Written: `Maybe<int>::Just(1)`.
+  if (!typeArgAnns.empty()) {
+    std::vector<ast::Type *> typeArgs;
+    for (size_t i = 0; i < typeArgAnns.size(); ++i) {
+      auto *t = S.resolveType(typeArgAnns[i], loc,
+                              "type argument " + std::to_string(i + 1) +
+                                  " of '" + spelled + "'");
+      if (!t)
+        return nullptr;
+      typeArgs.push_back(t);
+    }
+    return S.instantiateEnum(tmplName, typeArgs, loc);
+  }
+  // The slot's: `m: Maybe<int> = Maybe::Nothing` (or a `Maybe<int>?`).
+  if (auto *ot =
+          expected ? ast::dyn_cast<ast::OptionalType>(expected) : nullptr)
+    expected = ot->getInnerType();
+  if (auto *et = expected ? ast::dyn_cast<ast::EnumType>(expected) : nullptr)
+    if (const EnumInstantiationInfo *info = S.enumInstantiationInfo(et);
+        info && info->Template == tmpl)
+      return et;
+  // Inferred from the fields: `Maybe::Just(1)` unifies the variant's field
+  // types with the arguments' types, as a generic struct's constructor
+  // does.
+  const auto &variants = tmpl->getVariants();
+  size_t idx = 0;
+  while (idx < variants.size() && *variants[idx] != variant)
+    ++idx;
+  if (idx == variants.size()) {
+    S.error(loc, "enum '" + tmplName + "' has no variant '" + variant + "'");
+    return nullptr;
+  }
+  const auto &fields = tmpl->getPayload(idx);
+  if (fields.empty()) {
+    if (argTypes)
+      S.error(loc, "variant '" + variant + "' of enum '" + tmplName +
+                       "' has no fields: write '" + spelled +
+                       "' without arguments");
+    else
+      S.error(loc, "cannot infer the type arguments of generic enum '" +
+                       tmplName + "' for '" + spelled + "': write them ('" +
+                       tmplName + "<...>" + names::kQualSep + variant +
+                       "'), or give the value a type ('x: " + tmplName +
+                       "<...> = " + spelled + "')");
+    return nullptr;
+  }
+  auto *call = ast::cast<ast::CallExpr>(node);
+  const auto &args = call->getArguments();
+  std::vector<ast::Type *> &tys = argTypes->emplace();
+  bool ok = true;
+  for (auto *a : args) {
+    tys.push_back(visit(a));
+    if (!tys.back())
+      ok = false;
+  }
+  if (!ok)
+    return nullptr;
+  if (args.size() != fields.size()) {
+    std::string list;
+    for (size_t i = 0; i < fields.size(); ++i)
+      list += (i ? ", " : "") + fields[i]->getName() + ": " +
+              typeName(fields[i]->getType());
+    S.error(loc, "variant '" + variant + "' of enum '" + tmplName + "' has " +
+                     std::to_string(fields.size()) + " field(s) (" + list +
+                     "), got " + std::to_string(args.size()) + " argument(s)");
+    return nullptr;
+  }
+  // A field type of another module's template, as this context spells it.
+  std::vector<ast::Type *> paramTypes;
+  paramTypes.reserve(fields.size());
+  for (auto *f : fields)
+    paramTypes.push_back(
+        S.foreignOrigin(tmpl)
+            ? ast::ASTCloner(S.Ctx, {}, nullptr, /*foreign=*/true)
+                  .cloneType(f->getType())
+            : f->getType());
+  std::vector<ast::Type *> typeArgs;
+  if (!S.inferTypeArgs(
+          tmplName, tmpl->getTypeParams(), paramTypes, tys, loc, typeArgs,
+          tmplName + "<...>" + names::kQualSep + variant + "(...)"))
+    return nullptr;
+  return S.instantiateEnum(tmplName, typeArgs, loc);
+}
+
+ast::Type *
+Sema::ExprChecker::checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
+                                    const std::string &variant,
+                                    const std::vector<ast::Type *> *argTypes) {
+  const std::string &callee = node->getCalleeName();
+  int64_t idx = enumTy->findVariant(variant);
+  if (idx < 0) {
+    S.error(node->getLocation(), "enum '" + enumTy->getName() +
+                                     "' has no variant '" + variant + "'");
+    return nullptr;
+  }
+  ast::StructType *payload = enumTy->getPayload(static_cast<size_t>(idx));
+  if (!payload) {
+    S.error(node->getLocation(),
+            "variant '" + variant + "' of enum '" + enumTy->getName() +
+                "' has no fields: write '" + callee + "' without arguments");
+    return nullptr;
+  }
+  if (S.ErroneousClasses.count(payload->getName())) {
+    ++S.SuppressedFollowOns; // its fields were reported
+    return nullptr;
+  }
+  // The arguments are its fields, in order, as a struct's constructor
+  // takes them (visited already when they gave its type arguments).
+  const std::vector<ast::Type *> &fieldTys = payload->getElementTypes();
+  const auto &args = node->getArguments();
+  std::vector<ast::Type *> visited;
+  if (!argTypes) {
+    visited.reserve(args.size());
+    for (size_t i = 0; i < args.size(); ++i)
+      visited.push_back(
+          visitExpecting(args[i], i < fieldTys.size() ? fieldTys[i] : nullptr));
+    argTypes = &visited;
+  }
+  if (args.size() != fieldTys.size()) {
+    std::string fields;
+    for (size_t i = 0; i < payload->getNumFields(); ++i)
+      fields += (i ? ", " : "") + payload->getFieldName(i) + ": " +
+                typeName(fieldTys[i]);
+    S.error(node->getLocation(),
+            "variant '" + variant + "' of enum '" + enumTy->getName() +
+                "' has " + std::to_string(fieldTys.size()) + " field(s) (" +
+                fields + "), got " + std::to_string(args.size()) +
+                " argument(s)");
+    return nullptr;
+  }
+  bool ok = true;
+  for (size_t i = 0; i < args.size(); ++i) {
+    if (!(*argTypes)[i]) {
+      ok = false;
+      continue;
+    }
+    if (!S.checkAssignable(fieldTys[i], (*argTypes)[i], args[i]) &&
+        !S.diagnoseOptionalNarrowing(args[i]->getLocation(), fieldTys[i],
+                                     (*argTypes)[i])) {
+      S.error(args[i]->getLocation(), "field '" + payload->getFieldName(i) +
+                                          "' of '" + callee + "' has type '" +
+                                          typeName(fieldTys[i]) + "', got '" +
+                                          typeName((*argTypes)[i]) + "'");
+      ok = false;
+    }
+  }
+  // A `view` is never stored: the fields are values.
+  if (!ok || !S.checkViewArgs({}, fieldTys, args, callee))
+    return nullptr;
+  node->setVariant(enumTy, static_cast<size_t>(idx));
   node->setResolvedType(enumTy);
   return enumTy;
 }
@@ -1446,6 +1664,33 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
+  ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
+  // `E::V(a, b)`: an enum's variant, made with its fields; `G<int>::V(a)`
+  // or `G::V(a)` a generic enum's.
+  if (const std::string &callee = node->getCalleeName();
+      callee.find(names::kQualSep) != std::string::npos) {
+    const size_t sep = callee.rfind(names::kQualSep);
+    const std::string owner = callee.substr(0, sep);
+    const std::string variant =
+        callee.substr(sep + std::string_view(names::kQualSep).size());
+    if (auto *et = S.Ctx.lookupEnumType(owner)) {
+      if (!node->hasTypeArgs())
+        return checkVariantCall(node, et, variant);
+      S.error(node->getLocation(), "'" + owner +
+                                       "' is not a generic enum and takes no "
+                                       "type arguments");
+      return nullptr;
+    }
+    if (S.EnumTemplates.count(owner)) {
+      std::optional<std::vector<ast::Type *>> argTypes;
+      ast::EnumType *et = genericVariantEnum(
+          node, owner, variant, node->getTypeArgs(), expected, &argTypes);
+      if (!et)
+        return nullptr;
+      return checkVariantCall(node, et, variant,
+                              argTypes ? &*argTypes : nullptr);
+    }
+  }
   // `C::__m(...)`: a private static method is its type's own.
   if (!S.checkStaticMemberUse(node->getCalleeName(), node->getLocation()))
     return nullptr;
@@ -1646,10 +1891,14 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   if (!sig) {
     if (S.reportPrivateImport(node->getCalleeName(), node->getLocation()))
       return nullptr;
-    if (!S.isFailedImportUse(node->getCalleeName()))
-      S.error(node->getLocation(), "call to undeclared function '" +
-                                       displayName(node->getCalleeName()) +
-                                       "'");
+    // `m::E::V(x)` names a variant of an enum of the failed module `m`.
+    const std::string &callee = node->getCalleeName();
+    const auto sep = callee.rfind(names::kQualSep);
+    if (!S.isFailedImportUse(callee) &&
+        (sep == std::string::npos ||
+         !S.isFailedImportUse(callee.substr(0, sep))))
+      S.error(node->getLocation(),
+              "call to undeclared function '" + displayName(callee) + "'");
     return nullptr;
   }
 
@@ -1728,6 +1977,7 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     if (node->getMethodName() == names::kMethodToString &&
         node->getNumArguments() == 0 &&
         (ast::isa<ast::ClassType>(inner) || ast::isa<ast::TupleType>(inner) ||
+         ast::isa<ast::EnumType>(inner) ||
          (ast::isa<ast::BuiltinType>(inner) && inner != S.Ctx.getVoidTy()))) {
       node->setResolvedType(S.Ctx.getStrTy());
       return S.Ctx.getStrTy();
@@ -1757,14 +2007,15 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   ast::ClassType *ct = ast::dyn_cast<ast::ClassType>(recvTy);
   ast::StructType *st = ast::dyn_cast<ast::StructType>(recvTy);
 
-  // `n.toString()` on an int, float, bool or char, or on a tuple or a
-  // struct: the builtin `Show`; `n.hash()` on an int, bool or char, and
-  // `s.hash()` on a Str: the builtin `Hashable`.
+  // `n.toString()` on an int, float, bool or char, on a tuple or a struct,
+  // or on an enum (its variant, and its fields): the builtin `Show`;
+  // `n.hash()` on an int, bool or char, and `s.hash()` on a Str: the builtin
+  // `Hashable`.
   const std::string &mname = node->getMethodName();
   ast::Type *builtinResult = nullptr;
   if (!ct &&
       ((ast::isa<ast::BuiltinType>(recvTy) && recvTy != S.Ctx.getVoidTy()) ||
-       ast::isa<ast::TupleType>(recvTy)) &&
+       ast::isa<ast::TupleType>(recvTy) || ast::isa<ast::EnumType>(recvTy)) &&
       mname == names::kMethodToString)
     builtinResult = S.Ctx.getStrTy();
   else if (mname == names::kMethodHash &&
@@ -1944,7 +2195,7 @@ Sema::ExprChecker::visitMemberAccessExpr(ast::MemberAccessExpr *node) {
       ++S.SuppressedFollowOns; // the struct declaration was already reported
     else
       S.error(node->getLocation(), "no field '" + node->getFieldName() +
-                                       "' in struct '" + st->getName() + "'");
+                                       "' in " + describeStruct(st));
     return nullptr;
   }
 
@@ -2167,9 +2418,20 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
+  // A generic enum's variant in an arm takes its type arguments from the
+  // slot the value flows into, else (the false arm) from the true arm's
+  // type: `if c then Maybe::Just(1) else Maybe::Nothing`.
+  ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
+  auto visitArm = [&](ast::Expr *arm, ast::Type *want) {
+    if (want &&
+        (ast::isa<ast::EnumValueExpr>(arm) || ast::isa<ast::CallExpr>(arm) ||
+         ast::isa<ast::TernaryExpr>(arm)))
+      S.VariantExpectation = want;
+    return visit(arm);
+  };
   auto *condTy = visit(node->getCondition());
-  auto *trueTy = visit(node->getTrueExpr());
-  auto *falseTy = visit(node->getFalseExpr());
+  auto *trueTy = visitArm(node->getTrueExpr(), expected);
+  auto *falseTy = visitArm(node->getFalseExpr(), expected ? expected : trueTy);
   if (!condTy || !trueTy || !falseTy)
     return nullptr;
 
@@ -2982,14 +3244,31 @@ bool Sema::visitEnumDecl(ast::EnumDecl *node) {
 
   bool ok = true;
   StringSet seen;
-  for (const auto *variant : node->getVariants()) {
-    if (!seen.insert(*variant).second) {
-      error(node->getLocation(), "duplicate variant '" + *variant +
+  for (size_t i = 0; i < node->getNumVariants(); ++i) {
+    const std::string &variant = *node->getVariants()[i];
+    if (!seen.insert(variant).second) {
+      error(node->getLocation(), "duplicate variant '" + variant +
                                      "' in enum '" + node->getName() + "'");
       ok = false;
       continue;
     }
-    enumTy->addVariant(*variant);
+    enumTy->addVariant(variant);
+    const auto &fields = node->getPayload(i);
+    if (fields.empty())
+      continue;
+    // The variant's fields are a struct of their own, `E::V` (a name no
+    // declaration can take), populated with the module's structs
+    // (populateStructs): its fields resolve, and are held in place, as a
+    // struct's are.  It has no constructor: `E::V(1)` makes the enum.
+    const std::string &name =
+        Ctx.intern(node->getName() + names::kQualSep + variant);
+    auto *sd =
+        Ctx.make<ast::StructDecl>(fields.front()->getLocation(), name, fields);
+    auto *st = Ctx.registerStructType(name, sd->getLocation());
+    st->setVariantOf(enumTy, enumTy->getNumVariants() - 1);
+    enumTy->setPayload(enumTy->getNumVariants() - 1, st);
+    DeclaredStructs.push_back(sd);
+    EnumPayloadStructs[node->getName()].push_back(name);
   }
   return ok;
 }
@@ -3523,10 +3802,11 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
 // Paykan storage.
 bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
                                 const std::vector<ast::Type *> &paramTypes) {
-  // An enum crosses as its variant's ordinal, an int64_t.
+  // An enum crosses as its variant's ordinal, an int64_t (one whose variants
+  // have fields does not cross).
   auto scalarOrRef = [&](ast::Type *t) {
     if (t == Ctx.getStrTy() || t == Ctx.getObjTy() ||
-        ast::isa<ast::EnumType>(t))
+        (ast::isa<ast::EnumType>(t) && !ast::isPayloadEnum(t)))
       return true;
     auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
     return bt && t != Ctx.getVoidTy();
@@ -3537,9 +3817,9 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     error(node->getLocation(),
           "native function '" + node->getName() + "': " + what + " '" +
               typeName(t) +
-              "' cannot cross into C (int, float, bool, char, an enum, Str "
-              "and Obj can, Str? and Obj? as a result, and any type where a "
-              "generic native function says 'T')");
+              "' cannot cross into C (int, float, bool, char, an enum "
+              "without fields, Str and Obj can, Str? and Obj? as a result, "
+              "and any type where a generic native function says 'T')");
     ok = false;
   };
   for (size_t i = 0; i < paramTypes.size(); ++i)
@@ -3585,6 +3865,8 @@ bool Sema::checkNativeParamModes(const ast::FuncDecl *node,
   bool ok = true;
   for (size_t i = 0; i < types.size(); ++i) {
     const ast::Param &p = node->getParams()[i];
+    // An enum whose variants have fields crosses in no mode
+    // (checkNativeSignature says so).
     if (p.Mode != ast::ParamMode::Value ||
         (ast::isa<ast::BuiltinType>(types[i]) && types[i] != Ctx.getVoidTy()) ||
         ast::isa<ast::EnumType>(types[i]))
@@ -3594,8 +3876,8 @@ bool Sema::checkNativeParamModes(const ast::FuncDecl *node,
           "native function '" + node->getName() + "': parameter '" +
               p.getName() + "' must be 'view' or 'inout' ('" + p.getName() +
               ": view " + ty +
-              "'); only int, float, bool, char and an enum cross into C by "
-              "value");
+              "'); only int, float, bool, char and an enum without fields "
+              "cross into C by value");
     ok = false;
   }
   return ok;
@@ -4003,7 +4285,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
         ++SuppressedFollowOns; // the struct declaration was already reported
       else
         error(node->getLocation(), "no field '" + node->getFieldName() +
-                                       "' in struct '" + st->getName() + "'");
+                                       "' in " + describeStruct(st));
       return false;
     }
     if (!checkMemberAccess(st, node->getFieldName(), node->getLocation()))
@@ -4211,11 +4493,6 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
       ok = false;
     } else {
       // The arm's type-name stub carries the variant name.
-      if (arm->hasBinding()) {
-        error(arm->getLocation(), "enum-match arm cannot bind a variable");
-        declarePoisoned(CurrentScope, arm->getBinding());
-        ok = false;
-      }
       std::string variant;
       if (auto *stub = ast::dyn_cast<ast::ClassType>(arm->getArmType()))
         variant = stub->getName();
@@ -4243,9 +4520,32 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
               "duplicate variant '" + variant + "' in enum match");
         ok = false;
       }
+      // `x: V { }` binds the variant's fields, a struct: a copy, or with
+      // `view` / `inout` the subject's own (bindArmName).
+      if (arm->hasBinding()) {
+        int64_t idx = variant.empty() ? -1 : subjectTy->findVariant(variant);
+        ast::StructType *payload =
+            idx < 0 ? nullptr : subjectTy->getPayload(static_cast<size_t>(idx));
+        if (idx >= 0 && !payload) {
+          std::string msg = "variant '" + variant + "' of enum '";
+          msg += subjectTy->getName() + "' has no fields to bind: write the ";
+          msg += "arm '" + variant + " { ... }'";
+          error(arm->getLocation(), msg);
+          ok = false;
+        }
+        if (!payload || ErroneousClasses.count(payload->getName())) {
+          declarePoisoned(CurrentScope, arm->getBinding());
+        } else if (!bindArmName(arm, node->getSubject(), payload)) {
+          ok = false;
+        } else if (!CurrentScope->declare(arm->getBinding(), payload)) {
+          error(arm->getLocation(),
+                "redeclaration of '" + arm->getBinding() + "' in match arm");
+          ok = false;
+        }
+      }
     }
 
-    if (!visitStatements(arm->getBody()->getStatements()))
+    if (!visitArmBody(arm, node->getSubject()))
       ok = false;
   }
 

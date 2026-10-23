@@ -159,7 +159,8 @@ fn main() -> int {
       << r.Diagnostics;
 }
 
-// int, float, bool and char implement `Show`: `n.toString()` is a `Str`.
+// int, float, bool and char implement `Show`: `n.toString()` is a `Str`.  So
+// does an enum: its variant's name.
 TEST(Traits, ScalarsImplementShow) {
   auto r = semaCheck(R"(enum Color { Red }
 fn show<T: Show>(x: view T) -> Str { return x.toString(); }
@@ -173,10 +174,8 @@ fn main() -> int {
 }
 )");
   EXPECT_FALSE(r.Ok);
-  expectAll(r, {"method 'toString' expects 0 argument(s), got 1",
-                "'Color' does not implement trait 'Show', which 'show' "
-                "requires of 'T'"});
-  EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;
+  expectAll(r, {"method 'toString' expects 0 argument(s), got 1"});
+  EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
 }
 
 // int, bool, char and Str implement `Hashable`: `n.hash()` is an `int`.  A

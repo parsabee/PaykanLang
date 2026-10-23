@@ -14,7 +14,7 @@ The layout:
   that column.  Any other method is written out on the lines that follow.
 - A class's or struct's fields are on lines of their own.
 - An enum is on one line when it fits in COL (40) characters, else one
-  variant per line.
+  variant per line (a variant's fields, `B(x: int, s: Str)`, on its line).
 
 Only whitespace changes: a file whose tokens a rewrite would change is left
 as it is and reported.
@@ -596,6 +596,7 @@ class Formatter:
                 return [one]
         lines = [" " * ind + head + " {"]
         cur = None
+        depth = 0  # inside a variant's fields, `B(x: int, s: Str)`
         for t in inner:
             if t.kind == "com":
                 if cur is not None and t.nl == 0:
@@ -609,10 +610,12 @@ class Formatter:
                         lines.append("")
                     lines.append(" " * (ind + STEP) + t.text)
                 continue
-            if t.text == ",":
+            if t.text == "," and depth == 0:
                 cur = (cur or " " * (ind + STEP)) + ","
                 continue
-            if cur is not None and not cur.rstrip().endswith(","):
+            depth += {"(": 1, ")": -1}.get(t.text, 0)
+            if cur is not None and (depth > 0 or t.text == ")" or
+                                    not cur.rstrip().endswith(",")):
                 cur += " " + t.text if t.ws or t.nl else t.text
                 continue
             if cur is not None:

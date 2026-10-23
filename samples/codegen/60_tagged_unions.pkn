@@ -1,0 +1,147 @@
+// 60 — tagged unions
+// Exercises: an enum whose variants have fields (docs/language/07-enums.md):
+//            a variant made with its fields, `E::B(x, y)`, and one without,
+//            `E::A`; fields of a primitive, an object, a Str, an optional
+//            and a generic struct (`mem::Buffer<int>`); a match whose arms
+//            bind a variant's fields (a copy, and with `inout` the subject's
+//            own), with a wildcard and with a `return` in an arm; the text
+//            of a value (`toString`, `io::println`) and of an enum without
+//            fields; `==` and `!=`; a tagged union in a struct, a tuple, an
+//            optional, a fixed-size array and a List, held by an object,
+//            captured by a lambda, passed and returned; a variant's fields
+//            as a parameter's type (`MyType::WithPrimitive`).
+// expect-stdout: NoElement | 7 2.5 | three Node#3 | 0 1 4 | 3 squares
+// expect-stdout: WithPrimitive(i: 7, f: 2.5) WithObject(obj: Node#3, str: three)
+// expect-stdout: 9.5 -1 | WithPrimitive(i: 14, f: 2.5) | True False True
+// expect-stdout: Pin(where: North, at: WithPrimitive(i: 1, f: 0.5), last: None)
+// expect-stdout: (South, NoElement) Some(i: 2) None | 3 NoElement | caught
+// expect-stdout: West East | WithObject(obj: Node#9, str: held)
+
+import ::io;
+import ::memory as mem;
+import ::collections as col;
+
+class Node {
+  id: int;
+
+  view fn toString() -> Str { return "Node#" + Str(self.id); }
+}
+
+enum MyType {
+  NoElement,
+  WithPrimitive(i: int, f: float),
+  WithObject(obj: Obj, str: Str),
+  WithStruct(buffer: mem::Buffer<int>)
+}
+
+enum Dir { North, East, South, West }
+
+enum Maybe { Nothing, Some(i: int) }
+
+struct Pin {
+  where: Dir;
+  at: MyType;
+  last: MyType?;
+}
+
+class Holder {
+  held: MyType;
+}
+
+/// The value @p k picks: each variant in turn, the last one holding k - 1
+/// squares.
+fn getMyType(k: int) -> MyType {
+  if k == 0 {
+    return MyType::NoElement;
+  }
+  if k == 1 {
+    return MyType::WithPrimitive(7, 2.5);
+  }
+  if k == 2 {
+    return MyType::WithObject(Node(3), "three");
+  }
+  b = mem::Buffer<int>();
+  for i in 0..k - 1 {
+    e = b.push(i * i);
+  }
+  return MyType::WithStruct(b);
+}
+
+/// What @p e holds, as text: the user's example, every arm of it.
+fn show(e: MyType) -> Str {
+  match e {
+    NoElement { return "NoElement"; }
+    x: WithPrimitive { return Str(x.i) + " " + Str(x.f); }
+    b: WithStruct {
+      out = "";
+      for i in 0..b.buffer.len() {
+        out += Str(b.buffer.at(i)) + " ";
+      }
+      return out + "| " + Str(b.buffer.len()) + " squares";
+    }
+    _ { return e.toString(); }
+  }
+}
+
+/// The sum of a WithPrimitive's fields.
+fn total(p: MyType::WithPrimitive) => float(p.i) + p.f;
+
+/// Doubles the int a WithPrimitive holds, in place.
+fn double(e: inout MyType) {
+  match e {
+    p: inout WithPrimitive { p.i *= 2; }
+    _ {}
+  }
+}
+
+fn main() -> int {
+  // The user's example: every variant made and matched.
+  io::print(show(getMyType(0)) + " | " + show(getMyType(1)) + " | ");
+  match getMyType(2) {
+    o: WithObject { io::print(o.str + " " + o.obj.toString() + " | "); }
+    _ {}
+  }
+  io::println(show(getMyType(4)));
+  io::println(getMyType(1).toString() + " " + getMyType(2).toString());
+
+  // A variant's fields passed on, and changed in place.
+  e = getMyType(1);
+  match e {
+    p: WithPrimitive { io::print(Str(total(p)) + " "); }
+    _ { io::print("? "); }
+  }
+  match getMyType(0) {
+    p: WithPrimitive { io::print(Str(total(p)) + " | "); }
+    _ { io::print("-1 | "); }
+  }
+  double(e);
+  io::print(e.toString() + " | ");
+  io::println(Str(e == MyType::WithPrimitive(14, 2.5)) + " "
+      + Str(e == MyType::NoElement) + " " + Str(e != getMyType(1)));
+
+  // In a struct, a tuple, an optional, a fixed-size array and a List.
+  pin = Pin(Dir::North, MyType::WithPrimitive(1, 0.5), None);
+  io::println(pin);
+  t = (Dir::South, MyType::NoElement);
+  m: Maybe? = Maybe::Some(2);
+  io::print(t.toString() + " " + m.toString() + " ");
+  m = None;
+  io::print(m.toString() + " | ");
+  xs = [MyType::NoElement; 3];
+  xs[1] = getMyType(2);
+  list = col::List<MyType>();
+  for i in 0..3 {
+    list.push(xs[i]);
+  }
+  io::print(Str(list.len()) + " " + list.get(2).toString() + " | ");
+  check = fn() => xs[1] != MyType::NoElement;
+  io::println(if check() then "caught" else "missed");
+
+  // Held by an object, and an enum without fields shown by name.
+  h = Holder(MyType::NoElement);
+  h.held = MyType::WithObject(Node(9), "held");
+  d = Dir::West;
+  io::println(d.toString() + " " + Dir::East.toString() + " | "
+      + h.held.toString());
+  return 0;
+}

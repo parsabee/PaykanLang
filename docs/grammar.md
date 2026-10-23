@@ -148,7 +148,8 @@ typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
 
 structDecl  ::= "struct" IDENT typeParams? "{" ( varDecl ";" )+ "}"
 
-enumDecl    ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
+enumDecl    ::= "enum" IDENT typeParams? "{" variant ( "," variant )* ","? "}"
+variant     ::= IDENT ( "(" varDecl ( "," varDecl )* ")" )?   -- its fields
 
 traitDecl   ::= "trait" IDENT ( "<" IDENT ( "," IDENT )* ">" )?
                 "{" traitMember* "}"
@@ -173,14 +174,20 @@ varDecl     ::= IDENT ":" typeAnnotation
 ```
 
 An enum needs at least one variant; a single trailing comma is permitted.
+A variant's fields, when it has any, are at least one `name: Type` in
+parentheses, without a trailing comma (`a variant without fields is written
+without parentheses: 'B'`; `a variant's field is a value: write 'x: T'` for
+a mode); a variant is made with a call of its qualified name, `E::B(1, s)`,
+and bound by a `match` arm, `b: B { ... }`
+([language/07-enums.md](language/07-enums.md#variants-with-fields)).
 A struct body holds fields only, at least one: a method goes in an `impl`
 block, and a struct has no superclass
 ([language/11-structs.md](language/11-structs.md)); both are syntax errors
 (`a struct body holds fields only ('name: Type;'); a method goes in an 'impl'
 block`, `a struct has no superclass`), and so is an empty body (`struct 'S'
 has no fields: a struct has at least one`).
-A class, struct or function with `typeParams` is generic (a template that Sema
-instantiates); the superclass of a generic class is a plain class name.
+A class, struct, enum or function with `typeParams` is generic (a template that
+Sema instantiates); the superclass of a generic class is a plain class name.
 A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
 argument must implement.  `impl Show for A` implements trait `Show` for `A`.
 A function or method written `=> expression ;` has for its body a block of one
@@ -408,13 +415,18 @@ primary ::= literal
                                                              -- conversion
           | IDENT "<" typeArgList ">" "::" IDENT "(" argumentList? ")"
                                                              -- static fn of an
-                                                             -- instantiation
+                                                             -- instantiation, or
+                                                             -- a generic enum's
+                                                             -- variant with fields
+          | IDENT "<" typeArgList ">" "::" IDENT             -- a generic enum's
+                                                             -- variant
           | modulePath "::" IDENT                            -- enum variant, or a
                                                              -- qualified function
                                                              -- as a value
           | modulePath "::" IDENT "(" argumentList? ")"      -- qualified call
           | modulePath "::" IDENT "<" typeArgList ">" "(" argumentList? ")"
           | modulePath "::" IDENT "<" typeArgList ">" "::" IDENT "(" argumentList? ")"
+          | modulePath "::" IDENT "<" typeArgList ">" "::" IDENT
           | "(" expression ")"
           | "(" expression ( "," expression )+ ")"           -- tuple literal
           | "[" argumentList? "]"                            -- array literal

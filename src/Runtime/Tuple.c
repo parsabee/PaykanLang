@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: MIT
 //
-// Paykan runtime — rendering and comparing a tuple or a struct, values held
-// in place, through their layouts (Runtime.h, "Tuples" and "Structs").
+// Paykan runtime — rendering and comparing a tuple, a struct or an enum,
+// values held in place, through their layouts (Runtime.h, "Tuples",
+// "Structs" and "Enums").
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -47,11 +48,25 @@ static const int64_t *skip_struct_layout(const int64_t *l) {
   return e;
 }
 
-/// Whether the entry at @p e is an optional tuple's or struct's: a presence
-/// flag at its offset, then (at e + 3) a whole entry for the value.
+/// The words of variant @p tag of the enum layout at @p l, at its name:
+/// after each earlier variant's name, its fields' flag, and for one with
+/// fields their offset and struct layout.
+static const int64_t *enum_variant(const int64_t *l, int64_t tag) {
+  const int64_t *p = l + 1;
+  for (int64_t i = 0; i < tag; ++i) {
+    p = skip_name(p);
+    if (*p++)
+      p = skip_struct_layout(p + 1);
+  }
+  return p;
+}
+
+/// Whether the entry at @p e is an optional tuple's, struct's or enum's: a
+/// presence flag at its offset, then (at e + 3) a whole entry for the value.
 static int optional_aggregate(const int64_t *e) {
   return e[0] == PAYKAN_KIND_OPTIONAL &&
-         (e[2] == PAYKAN_KIND_TUPLE || e[2] == PAYKAN_KIND_STRUCT);
+         (e[2] == PAYKAN_KIND_TUPLE || e[2] == PAYKAN_KIND_STRUCT ||
+          e[2] == PAYKAN_KIND_ENUM);
 }
 
 /// The words of the layout entry at @p e: its own and a nested tuple's or
@@ -63,6 +78,8 @@ static const int64_t *next_entry(const int64_t *e) {
     return e + 3;
   if (e[0] == PAYKAN_KIND_STRUCT)
     return skip_struct_layout(e + 2);
+  if (e[0] == PAYKAN_KIND_ENUM)
+    return enum_variant(e + 2, e[2]); // past its last variant
   if (e[0] != PAYKAN_KIND_TUPLE)
     return e + 2;
   int64_t n = e[2];
@@ -108,6 +125,7 @@ static const int64_t *append_name(StrBuf *sb, const int64_t *p) {
 
 static void render_tuple(StrBuf *sb, const char *value, const int64_t *layout);
 static void render_struct(StrBuf *sb, const char *value, const int64_t *layout);
+static void render_enum(StrBuf *sb, const char *value, const int64_t *layout);
 
 /// Append the scalar of @p kind at @p at, or the object a box holds.
 static void render_scalar(StrBuf *sb, int64_t kind, const char *at) {
@@ -167,6 +185,8 @@ static void render_entry(StrBuf *sb, const char *value, const int64_t *e) {
     render_tuple(sb, at, e + 2);
   } else if (e[0] == PAYKAN_KIND_STRUCT) {
     render_struct(sb, at, e + 2);
+  } else if (e[0] == PAYKAN_KIND_ENUM) {
+    render_enum(sb, at, e + 2);
   } else if (e[0] == PAYKAN_KIND_OPTIONAL && e[2] != PAYKAN_KIND_OBJECT) {
     if (load_byte(at))
       render_scalar(sb, e[2], at + payload_offset(e[2]));
@@ -201,6 +221,17 @@ static void render_struct(StrBuf *sb, const char *value,
     render_entry(sb, value, e);
   }
   sb_append(sb, ")", 1);
+}
+
+/// `North`, or `Move(x: 1, y: 2)` for a variant with fields (their struct's
+/// layout is named for the variant).
+static void render_enum(StrBuf *sb, const char *value, const int64_t *layout) {
+  const int64_t *v = enum_variant(layout, load_int(value));
+  const int64_t *fields = skip_name(v);
+  if (fields[0])
+    render_struct(sb, value + fields[1], fields + 2);
+  else
+    append_name(sb, v);
 }
 
 PaykanString *PaykanTuple_toString(const void *value, const int64_t *layout) {
@@ -248,6 +279,7 @@ static int scalar_equals(int64_t kind, const char *a, const char *b) {
 
 static int tuple_equals(const char *a, const char *b, const int64_t *layout);
 static int struct_equals(const char *a, const char *b, const int64_t *layout);
+static int enum_equals(const char *a, const char *b, const int64_t *layout);
 
 /// Whether the elements described by the entry at @p e of the values at
 /// @p a and @p b are equal.
@@ -261,6 +293,8 @@ static int entry_equals(const char *a, const char *b, const int64_t *e) {
     return tuple_equals(ea, eb, e + 2);
   if (e[0] == PAYKAN_KIND_STRUCT)
     return struct_equals(ea, eb, e + 2);
+  if (e[0] == PAYKAN_KIND_ENUM)
+    return enum_equals(ea, eb, e + 2);
   if (e[0] == PAYKAN_KIND_OPTIONAL && e[2] != PAYKAN_KIND_OBJECT) {
     // Both None, or both present with equal payloads.
     int64_t off = payload_offset(e[2]);
@@ -288,6 +322,15 @@ static int struct_equals(const char *a, const char *b, const int64_t *layout) {
   return 1;
 }
 
+/// The same variant, and for one with fields equal fields.
+static int enum_equals(const char *a, const char *b, const int64_t *layout) {
+  int64_t tag = load_int(a);
+  if (tag != load_int(b))
+    return 0;
+  const int64_t *fields = skip_name(enum_variant(layout, tag));
+  return !fields[0] || struct_equals(a + fields[1], b + fields[1], fields + 2);
+}
+
 int64_t PaykanTuple_equals(const void *a, const void *b,
                            const int64_t *layout) {
   return tuple_equals((const char *)a, (const char *)b, layout);
@@ -296,4 +339,16 @@ int64_t PaykanTuple_equals(const void *a, const void *b,
 int64_t PaykanStruct_equals(const void *a, const void *b,
                             const int64_t *layout) {
   return struct_equals((const char *)a, (const char *)b, layout);
+}
+
+PaykanString *PaykanEnum_toString(const void *value, const int64_t *layout) {
+  StrBuf sb = {NULL, 0, 0};
+  render_enum(&sb, (const char *)value, layout);
+  PaykanString *out = PaykanString_new(sb.data, (int64_t)sb.len);
+  Paykan_free(sb.data);
+  return out;
+}
+
+int64_t PaykanEnum_equals(const void *a, const void *b, const int64_t *layout) {
+  return enum_equals((const char *)a, (const char *)b, layout);
 }

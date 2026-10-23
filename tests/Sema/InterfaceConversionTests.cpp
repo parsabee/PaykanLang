@@ -33,7 +33,15 @@ Sema::ModuleInfo sampleInfo() {
   vec.IsLocal = false;
   vec.OriginModule = "geometry::vec";
   info.ExportedClasses = {shape, vec};
-  info.ExportedEnums = {{"Color", {"Red", "Green"}, true, "geometry::shapes"}};
+  info.ExportedEnums = {
+      {"Color", {"Red", "Green"}, true, "geometry::shapes", {}},
+      // A tagged union: its variant with fields is the struct `Fill::Solid`.
+      {"Fill", {"None_", "Solid"}, true, "geometry::shapes", {"Solid"}}};
+  Sema::ModuleInfo::StructInfo solid;
+  solid.Name = "Fill::Solid";
+  solid.OriginModule = "geometry::shapes";
+  solid.Fields = {{"rgb", "int"}};
+  info.ExportedStructs = {solid};
   info.ExportedFunctions = {{"Shape", "Shape", {"int", "int"}, viewH},
                             {"area", "float", {"Shape"}, {}}};
   return info;
@@ -50,6 +58,8 @@ TEST(InterfaceConversion, RoundTripIsExact) {
             (std::vector<std::string>{"w", "h"}));
   EXPECT_EQ(iface.Enums[0].Variants,
             (std::vector<std::string>{"Red", "Green"}));
+  EXPECT_EQ(iface.Enums[1].PayloadVariants,
+            (std::vector<std::string>{"Solid"}));
   EXPECT_EQ(Sema::fromInterface(iface), info);
 }
 

@@ -88,7 +88,7 @@ inline Interface sampleInterface() {
   vec.IsLocal = false;
   vec.OriginModule = "geometry::vec";
   i.Classes = {vec, shape};
-  i.Enums.push_back({"Color", {"Red", "Green"}, true, "geometry::shapes"});
+  i.Enums.push_back({"Color", {"Red", "Green"}, true, "geometry::shapes", {}});
   // A struct: its fields, its `__init__` and its `impl` methods (`sum` a
   // `view fn` from an `impl` block: flags 0x6), and its constructor function.
   StructRec point;

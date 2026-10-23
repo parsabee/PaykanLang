@@ -12,7 +12,7 @@ by the static type of the subject; you do not select it explicitly:
 | Subject type | Mode | Arms compare against |
 |--------------|------|----------------------|
 | A class type (`Obj`, a user class, `io::File`, …) | **type mode** | the **runtime class** of the object |
-| An `enum` | **variant mode** | the enum's **variants** |
+| An `enum` | **variant mode** | the enum's **variants** (and binds a variant's fields) |
 | A builtin (`int`, `float`, `bool`, `char`, `Str`, a sized numeric type) | **value mode** | **literal** values |
 | An optional `T?` | **optional mode** | **present** (`T` arm) vs **absent** (`None` arm) |
 
@@ -186,7 +186,8 @@ The rest of this chapter gives the precise rules.
   running statements (assigning, calling, `return`ing).
 - Arm patterns:
   - `TypeName { … }`: type/variant pattern, no binding.
-  - `name: TypeName { … }`: type pattern that **binds** the narrowed object to `name`.
+  - `name: TypeName { … }`: type pattern that **binds** the narrowed object to `name`; on
+    an enum, `name: Variant { … }` binds the variant's fields.
   - `name: view TypeName { … }` / `name: inout TypeName { … }`: the binding borrows the
     subject, read-only or as its storage ([Borrowing the subject](#borrowing-the-subject)).
   - `literal { … }`: value pattern (`int`, `float`, `bool`, `char`, or `Str` literal; a
@@ -294,8 +295,10 @@ match x {
 }
 ```
 
-Bindings are available only on type arms (including the `T` arm of an optional): value-pattern
-arms, enum-variant arms and `_` do not bind.
+Bindings are available on type arms (including the `T` arm of an optional) and on the arms
+of an enum's variants with fields, which bind the fields
+([Variant Mode](#variant-mode--matching-on-an-enum)): value-pattern arms, the arms of a
+variant without fields and `_` do not bind.
 
 ### Borrowing the subject
 
@@ -391,6 +394,20 @@ An enum `match` that names every variant is **exhaustive** and needs no `_`. Nam
 that is not a variant of the subject enum is an error, and so is a qualified arm
 (`base::Color::Green`). See [Using `enum` with `match`](07-enums.md#using-enum-with-match)
 for the full enum treatment.
+
+On a tagged union, an arm `name: Variant { … }` binds the fields of a variant that has them
+([Variants With Fields](07-enums.md#variants-with-fields)): a copy, or with `view` or `inout`
+a borrow of the subject's own ([Borrowing the subject](#borrowing-the-subject)):
+
+```pkn
+fn area(s: Shape) -> float {
+  match s {
+    Empty { return 0.0; }
+    c: Circle { return 3.0 * c.r * c.r; }
+    r: Rect { return float(r.w * r.h); }
+  }
+}
+```
 
 ---
 
@@ -602,6 +619,7 @@ match f.readln().value {
 | Arm type not a subtype | A type arm names a class that is not the subject type or a subtype of it |
 | Unknown arm type | A type arm names a class that is not declared anywhere |
 | Unknown enum variant | A variant arm names an identifier that is not a variant of the subject enum |
+| Binding a variant without fields | `x: Variant { … }` where the variant has no fields to bind |
 | Qualified variant arm | A variant arm is written qualified (`base::Color::Green`); arms use the bare variant name (`Green`) |
 | Literal type mismatch | A value arm's literal has a different type than the subject |
 | Type name in value mode | A value-mode `match` has a type-name arm instead of a literal |

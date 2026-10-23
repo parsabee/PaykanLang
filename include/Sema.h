@@ -592,11 +592,16 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// int?`) takes the slot's element type when every element fits it.  A
     /// numeric literal (`5`, `-5`, `1.5`) flowing into a slot of a sized
     /// numeric type takes that type when it fits it
-    /// (docs/design/sized-types.md).
+    /// (docs/design/sized-types.md).  A generic enum's variant written
+    /// without type arguments takes the slot's (`Maybe::Nothing` into a
+    /// `Maybe<int>`), in a conditional expression's arms too.
     ast::Type *visitExpecting(ast::Expr *e, ast::Type *expected) {
       if (expected && (ast::isa<ast::ArrayLiteralExpr>(e) ||
                        ast::isa<ast::TupleLiteralExpr>(e)))
         S.LiteralExpectation = expected;
+      else if (ast::isa<ast::EnumValueExpr>(e) || ast::isa<ast::CallExpr>(e) ||
+               ast::isa<ast::TernaryExpr>(e))
+        S.VariantExpectation = expected;
       else if (ast::Type *sized = sizedLiteralTarget(e, expected))
         S.LiteralExpectation = sized;
       return visit(e);
@@ -617,9 +622,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
                                  bool isInteger, int64_t intValue,
                                  double floatValue);
     /// visit(@p operand) of a binary operator whose other operand has type
-    /// @p otherTy: a numeric literal takes the other operand's sized type.
+    /// @p otherTy: a numeric literal takes the other operand's sized type,
+    /// and a generic enum's variant its type arguments (`m ==
+    /// Maybe::Nothing`).
     ast::Type *visitOperand(ast::Expr *operand, ast::Type *otherTy) {
-      if (otherTy && isNumericLiteral(operand))
+      if (otherTy &&
+          (isNumericLiteral(operand) || ast::isa<ast::EnumValueExpr>(operand) ||
+           ast::isa<ast::CallExpr>(operand)))
         return visitExpecting(operand, otherTy);
       return visit(operand);
     }
@@ -628,6 +637,24 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// of elements, each of its element type.
     ast::Type *checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
                                       ast::FixedArrayType *fixed);
+    /// `E::V(a, b)`: variant @p variant of @p enumTy made with its fields,
+    /// the arguments, as a struct's constructor takes them; the enum.
+    /// @p argTypes: the arguments' types when they were visited already.
+    ast::Type *
+    checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
+                     const std::string &variant,
+                     const std::vector<ast::Type *> *argTypes = nullptr);
+    /// The instantiation of the generic enum @p tmplName that @p node,
+    /// its variant @p variant, makes: by the written type arguments
+    /// (@p typeArgAnns, `Maybe<int>::Nothing`), else by the type the value
+    /// flows into (@p expected, an instantiation of the template), else,
+    /// for a call (@p argTypes non-null), by those inferred from its
+    /// arguments (`Maybe::Just(1)`), which it visits into @p argTypes.
+    /// nullptr after reporting an error.
+    ast::EnumType *genericVariantEnum(
+        ast::Expr *node, const std::string &tmplName,
+        const std::string &variant, const std::vector<ast::Type *> &typeArgAnns,
+        ast::Type *expected, std::optional<std::vector<ast::Type *>> *argTypes);
 #define EXPR_VISIT(Kind, Name, Cast) ast::Type *visit##Name(ast::Cast *node);
     PAYKAN_EXPR_NODES(EXPR_VISIT)
 #undef EXPR_VISIT
@@ -801,11 +828,14 @@ public:
 
     // Serialised enum-type descriptions: the enum name plus its variant names
     // in declaration order (the index is the variant's underlying value).
+    // A tagged union's variants with fields are listed too: each one's
+    // fields are the struct `Name::variant` among ExportedStructs.
     struct EnumInfo {
       std::string Name;
       std::vector<std::string> Variants;
       bool IsLocal = true;      // see ClassInfo::IsLocal
       std::string OriginModule; // see ClassInfo::OriginModule
+      std::vector<std::string> PayloadVariants;
       bool operator==(const EnumInfo &) const = default;
     };
     std::vector<EnumInfo> ExportedEnums;
@@ -824,6 +854,7 @@ public:
     std::vector<ast::ClassDecl *> Classes; ///< in the module's ASTContext
     std::vector<ast::FuncDecl *> Functions;
     std::vector<ast::StructDecl *> Structs;
+    std::vector<ast::EnumDecl *> Enums;
     /// The `impl` blocks of each of Classes and Structs (not `impl Trait
     /// for`, whose trait an importer cannot name).
     std::unordered_map<const ast::Decl *, std::vector<ast::ImplDecl *>> Impls;
@@ -1213,6 +1244,12 @@ private:
   bool checkStructBodies();
   /// The module's structs declareStructs registered, in source order.
   std::vector<ast::StructDecl *> DeclaredStructs;
+  /// `struct 'P'`, or for the struct of an enum's variant's fields
+  /// `variant 'V' of enum 'E'`.
+  static std::string describeStruct(const ast::StructType *st);
+  /// The structs of the module's enums' variants' fields (`E::V`), by enum
+  /// name: a struct that holds the enum holds them in place.
+  StringMap<std::vector<std::string>> EnumPayloadStructs;
   /// Their names (a later declaration of one of them is a redefinition,
   /// not a conflict with an import).
   StringSet LocalStructNames;
@@ -1255,6 +1292,43 @@ private:
   /// Instantiated structs in creation order (injectInstantiations).
   std::vector<ast::StructDecl *> InstantiatedStructDecls;
   std::vector<ast::StructDecl *> ForeignInstantiatedStructDecls;
+
+  // -- Generic enums: templates and instantiations, as for structs
+  // (registerGenericTemplates registers them; resolveType and a variant
+  // with its type arguments, written or inferred, instantiate them).
+
+  /// Enum templates declared by this module (and, qualified, imported), by
+  /// name.
+  StringMap<ast::EnumDecl *> EnumTemplates;
+  /// Instantiation cache by canonical instantiation name; nullptr records a
+  /// failure.
+  StringMap<ast::EnumType *> EnumInstantiations;
+  /// What an instantiated EnumType was made from (for inference through
+  /// `Maybe<T>` parameters).
+  struct EnumInstantiationInfo {
+    const ast::EnumDecl *Template;
+    std::vector<ast::Type *> Args;
+  };
+  std::unordered_map<ast::EnumType *, EnumInstantiationInfo>
+      EnumInstantiationInfos;
+  /// What @p et was instantiated from: an instantiation made here, or one
+  /// an imported module made of a template this module sees.  nullptr for
+  /// any other enum.
+  const EnumInstantiationInfo *enumInstantiationInfo(ast::EnumType *et);
+  /// Instantiate enum template @p name with canonical @p args, or return
+  /// the cached instantiation.  Registers the enum and its variants' fields
+  /// (the structs `Maybe<int>::Just`) immediately.  Returns nullptr after
+  /// reporting an error.
+  ast::EnumType *instantiateEnum(const std::string &name,
+                                 const std::vector<ast::Type *> &args,
+                                 ast::SourceLocation loc);
+  /// The module's own instantiations, in creation order: they join the
+  /// module's enums (injectInstantiations), which its interface exports.
+  std::vector<ast::EnumDecl *> InstantiatedEnumDecls;
+  /// The type a variant of a generic enum written without its type
+  /// arguments (`Maybe::Nothing`, `Maybe::Just(1)`) flows into (set by
+  /// visitExpecting): an instantiation of its template gives them.
+  ast::Type *VariantExpectation = nullptr;
   /// Whether @p name is a class, struct or function template.
   bool isTemplate(const std::string &name) const {
     return ClassTemplates.count(name) || StructTemplates.count(name) ||
@@ -1600,12 +1674,15 @@ private:
 
   /// Infer the type arguments of a generic call from its argument types.
   /// @p paramTypes are the template's declared parameter types; on success
-  /// @p out holds one canonical type per type parameter, in order.
+  /// @p out holds one canonical type per type parameter, in order.  The
+  /// hint on failure spells the call with them as @p spelling
+  /// (`Tmpl<...>(...)` by default).
   bool inferTypeArgs(const std::string &templateName,
                      const std::vector<const std::string *> &typeParams,
                      const std::vector<ast::Type *> &paramTypes,
                      const std::vector<ast::Type *> &argTypes,
-                     ast::SourceLocation loc, std::vector<ast::Type *> &out);
+                     ast::SourceLocation loc, std::vector<ast::Type *> &out,
+                     const std::string &spelling = "");
 
   /// Resolve a call whose callee is a template (or carries explicit type
   /// arguments): instantiate and rewrite the callee name.  Returns false after

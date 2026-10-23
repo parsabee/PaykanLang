@@ -418,7 +418,7 @@ TranslationUnit *Parser::parseTranslationUnit() {
   std::vector<ImportDecl *> imports;
   std::vector<ClassDecl *> classes, genericClasses;
   std::vector<FuncDecl *> funcs, genericFuncs;
-  std::vector<EnumDecl *> enums;
+  std::vector<EnumDecl *> enums, genericEnums;
   std::vector<ImplDecl *> impls;
   std::vector<TraitDecl *> traits;
   std::vector<StructDecl *> structs, genericStructs;
@@ -470,7 +470,7 @@ TranslationUnit *Parser::parseTranslationUnit() {
       break;
     case Tok::KwEnum:
       if (auto *d = parseEnumDecl())
-        enums.push_back(d);
+        (d->isGeneric() ? genericEnums : enums).push_back(d);
       else
         ok = false;
       break;
@@ -510,7 +510,7 @@ TranslationUnit *Parser::parseTranslationUnit() {
       loc, std::move(imports), std::move(classes), std::move(funcs),
       std::move(enums), std::move(genericClasses), std::move(genericFuncs),
       std::move(impls), std::move(traits), std::move(structs),
-      std::move(genericStructs));
+      std::move(genericStructs), std::move(genericEnums));
 }
 
 // -- Imports
@@ -801,7 +801,9 @@ StructDecl *Parser::parseStructDecl() {
   return sd;
 }
 
-// enumDecl ::= "enum" IDENT "{" IDENT ( "," IDENT )* ","? "}"
+// enumDecl ::= "enum" IDENT "{" variant ( "," variant )* ","? "}"
+// variant  ::= IDENT ( "(" variantField ( "," variantField )* ")" )?
+// variantField ::= IDENT ":" typeAnnotation
 EnumDecl *Parser::parseEnumDecl() {
   SourceLocation start = consume().Loc; // "enum"
   if (!at(Tok::Ident)) {
@@ -809,23 +811,76 @@ EnumDecl *Parser::parseEnumDecl() {
     return nullptr;
   }
   const std::string &name = intern(consume().Text);
+  // A generic enum's type parameters, `enum Option<T> { ... }`.
+  std::vector<const std::string *> typeParams;
+  TypeParamBounds bounds;
+  if (accept(Tok::Less)) {
+    if (!parseTypeParamList(typeParams, &bounds) ||
+        !expect(Tok::Greater, "to close the type parameter list"))
+      return nullptr;
+  }
   if (!expect(Tok::LBrace, "to open the enum body"))
     return nullptr;
 
   std::vector<const std::string *> variants;
+  std::vector<std::vector<VarDecl *>> payloads;
+  // A variant, with its fields (its payload) when it has any.
+  auto variant = [&]() {
+    const std::string &vname = intern(consume().Text);
+    std::vector<VarDecl *> fields;
+    if (accept(Tok::LParen)) {
+      if (at(Tok::RParen)) {
+        errorAtCurrent("a variant without fields is written without "
+                       "parentheses: '" +
+                       vname + "'");
+        return false;
+      }
+      do {
+        SourceLocation fstart = cur().Loc;
+        if (!at(Tok::Ident)) {
+          errorAtCurrent("expected a field name ('name: Type') in variant '" +
+                         vname + "'");
+          return false;
+        }
+        const std::string &fname = intern(consume().Text);
+        if (!expect(Tok::Colon, "after the field name (a variant's field "
+                                "needs a type)"))
+          return false;
+        if (at(Tok::KwView) || at(Tok::KwInout)) {
+          errorAtCurrent("a variant's field is a value: write '" + fname +
+                         ": T'");
+          return false;
+        }
+        Type *ty = parseTypeAnnotation();
+        if (!ty)
+          return false;
+        fields.push_back(Ctx.make<VarDecl>(span(fstart), fname, ty, nullptr));
+      } while (accept(Tok::Comma));
+      if (!expect(Tok::RParen, "to close the variant's fields"))
+        return false;
+    }
+    variants.push_back(&vname);
+    payloads.push_back(std::move(fields));
+    return true;
+  };
   if (!at(Tok::Ident)) {
     errorAtCurrent("expected a variant name (an enum needs at least one)");
     return nullptr;
   }
-  variants.push_back(&intern(consume().Text));
+  if (!variant())
+    return nullptr;
   while (accept(Tok::Comma)) {
     if (!at(Tok::Ident))
       break; // trailing comma
-    variants.push_back(&intern(consume().Text));
+    if (!variant())
+      return nullptr;
   }
   if (!expect(Tok::RBrace, "to close the enum body"))
     return nullptr;
-  return Ctx.make<EnumDecl>(span(start), name, std::move(variants));
+  auto *ed = Ctx.make<EnumDecl>(span(start), name, std::move(variants),
+                                std::move(payloads), std::move(typeParams));
+  ed->setTypeParamBounds(std::move(bounds));
+  return ed;
 }
 
 // implDecl ::= "impl" ( typeAnnotation "for" )? modulePath
@@ -2232,7 +2287,10 @@ Expr *Parser::parseLiteral() {
 
 // `name <` in expression position is a generic call only when a type
 // argument list followed by `> (` fits, or by `> :: IDENT (` (a function of
-// the instantiation, `Box<int>::of(1)`); `a < b` is otherwise a comparison.
+// the instantiation, `Box<int>::of(1)`, or a generic enum's variant with
+// fields, `Option<int>::Some(1)`); followed by `> :: IDENT` alone it is a
+// generic enum's variant, `Option<int>::Nothing` (@p member set, no `(`
+// next); `a < b` is otherwise a comparison.
 bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member) {
   size_t saved = Pos;
   SourceLocation savedEnd = PrevEnd;
@@ -2241,12 +2299,11 @@ bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member) {
   bool ok = enterNesting();
   if (ok) {
     ok = parseTypeArgList(out) && accept(Tok::Greater);
-    if (ok && at(Tok::ColonColon) && kind(1) == Tok::Ident &&
-        kind(2) == Tok::LParen) {
+    if (ok && at(Tok::ColonColon) && kind(1) == Tok::Ident) {
       consume(); // '::'
       member = std::string(consume().Text);
     }
-    ok = ok && at(Tok::LParen);
+    ok = ok && (at(Tok::LParen) || !member.empty());
     leaveNesting();
   }
   --Speculating;
@@ -2261,9 +2318,9 @@ bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member) {
 
 // primary ::= literal | IDENT | IDENT "(" args ")" | IDENT "<" types ">" "("
 // args ")"
-//           | IDENT "<" types ">" "::" IDENT "(" args ")"
+//           | IDENT "<" types ">" "::" IDENT ( "(" args ")" )?
 //           | modulePath "::" IDENT ( "(" args ")" | "<" types ">" "(" args ")"
-//           | "<" types ">" "::" IDENT "(" args ")" )?
+//           | "<" types ">" "::" IDENT ( "(" args ")" )? )?
 //           | "(" expression ")" | "(" expression ( "," expression )+ ")" |
 //           "[" args "]"
 Expr *Parser::parsePrimary() {
@@ -2287,6 +2344,10 @@ Expr *Parser::parsePrimary() {
     std::vector<Type *> typeArgs;
     std::string member; // `Box<int>::of(...)`: the instantiation's function
     bool generic = at(Tok::Less) && tryGenericCallArgs(typeArgs, member);
+    // `Option<int>::Nothing`: a generic enum's variant without fields.
+    if (generic && !member.empty() && !at(Tok::LParen))
+      return Ctx.make<EnumValueExpr>(span(start), intern(full), intern(member),
+                                     std::move(typeArgs));
     if (!member.empty())
       full += "::" + member;
     if (generic || at(Tok::LParen)) {

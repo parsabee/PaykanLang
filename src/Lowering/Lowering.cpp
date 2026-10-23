@@ -73,6 +73,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanTupleEquals, {{kPtr, kPtr, kPtr}, kI64}},
     {kPaykanStructToString, {{kPtr, kPtr}, kObj}},
     {kPaykanStructEquals, {{kPtr, kPtr, kPtr}, kI64}},
+    {kPaykanEnumToString, {{kPtr, kPtr}, kObj}},
+    {kPaykanEnumEquals, {{kPtr, kPtr, kPtr}, kI64}},
     {kPaykanObjectDestroy, {{kObj}, kVoid}},
     {kPaykanObjectToString, {{kObj}, kBox}},
     {kPaykanObjectEquals, {{kObj, kBox}, kI64}},
@@ -271,15 +273,16 @@ Type ModuleLowering::toPIRType(ast::Type *ty) {
     }
   }
   // A parser ClassType stub may name an enum or a struct (resolved by
-  // Sema): enums are i64 values, not boxes, and a struct is held in memory.
+  // Sema): an enum is an i64 value, not a box, and a tagged union or a
+  // struct is held in memory.
   if (auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
-    if (ASTCtx.lookupEnumType(ct->getName()))
-      return Type::I64;
+    if (auto *et = ASTCtx.lookupEnumType(ct->getName()))
+      return toPIRType(et);
     if (ASTCtx.lookupStructType(ct->getName()))
       return Type::Mem;
   }
   if (ast::isa<ast::EnumType>(ty))
-    return Type::I64;
+    return ast::isPayloadEnum(ty) ? Type::Mem : Type::I64;
   // An optional of a value type is a value too (#96): `int?` is opt_i64.
   if (ast::isValueOptional(ty))
     return pir::optionalOf(
@@ -1631,10 +1634,12 @@ ModuleLowering::localNative(const std::string &name) const {
 // and payload (docs/pir.md §1).  A tuple is its elements in place, each
 // reference among them at its offset.
 Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
-  // A function value, or an optional tuple or struct, is described as its
-  // shape, a tuple; under an optional's shape (the presence flag, then the
-  // value) a reference is null for None: nullable, not unset.
-  const bool optional = ast::isa<ast::OptionalType>(ty);
+  // A function value, an optional tuple or struct, or a tagged union is
+  // described as its shape, a tuple; under an optional's shape (the presence
+  // flag, then the value) a reference is null for None, and in a tagged
+  // union's for every variant but the current one: nullable, not unset.
+  const bool optional =
+      ast::isa<ast::OptionalType>(ty) || ast::isPayloadEnum(ty);
   ty = memShapeOf(ty);
   const Type slot = toPIRType(ty);
   std::vector<int64_t> words = {pir::storeSize(slot), pir::storeAlign(slot),
@@ -1647,7 +1652,8 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
           for (size_t i = 0; i < t->getArity(); ++i) {
             ast::Type *e = t->getElementType(i);
             int64_t off = base + tupleElementOffset(t, i);
-            const bool maybeNull = nullable || ast::isa<ast::OptionalType>(e);
+            const bool maybeNull = nullable || ast::isa<ast::OptionalType>(e) ||
+                                   ast::isPayloadEnum(e);
             if (auto *nested = ast::dyn_cast<ast::TupleType>(memShapeOf(e))) {
               refs(nested, off, maybeNull);
             } else if (ast::isRefType(e)) {
@@ -1752,25 +1758,32 @@ Val ModuleLowering::emitOptionalToString(const Val &opt, ast::Type *astTy) {
   pir::If *s = B.openIf(B.isSome(opt, "opt.has"), true);
   B.enter(*s->Then);
   Val v = B.unwrap(opt, "opt.value");
-  const char *format = kPaykanStringFromInt;
-  if (auto *ot = astTy ? ast::dyn_cast<ast::OptionalType>(astTy) : nullptr;
-      ot && builtinKind(ot->getInnerType()) == ast::BuiltinType::U64)
-    format = kPaykanStringFromUint;
-  switch (v.Ty) {
-  case Type::F64:
-    format = kPaykanStringFromFloat;
-    break;
-  case Type::Bool:
-    format = kPaykanStringFromBool;
-    v = coerceBoolToI64(v, Type::I64);
-    break;
-  case Type::Char:
-    format = kPaykanStringFromChar;
-    break;
-  default:
-    break;
+  ast::Type *inner = astTy ? ast::stripOptional(astTy) : nullptr;
+  if (auto *et = inner ? ast::dyn_cast<ast::EnumType>(inner) : nullptr) {
+    // An enum's: its variant's name.
+    pir::LocalId tag = B.addLocal("enum", Type::I64);
+    B.store(tag, v);
+    B.store(tmp, emitEnumToStringAt(B.localAddr(tag, "enum.addr"), et));
+  } else {
+    const char *format = kPaykanStringFromInt;
+    if (inner && builtinKind(inner) == ast::BuiltinType::U64)
+      format = kPaykanStringFromUint;
+    switch (v.Ty) {
+    case Type::F64:
+      format = kPaykanStringFromFloat;
+      break;
+    case Type::Bool:
+      format = kPaykanStringFromBool;
+      v = coerceBoolToI64(v, Type::I64);
+      break;
+    case Type::Char:
+      format = kPaykanStringFromChar;
+      break;
+    default:
+      break;
+    }
+    B.store(tmp, callRuntime(format, {v}, "opt.str"));
   }
-  B.store(tmp, callRuntime(format, {v}, "opt.str"));
   B.leave();
   B.enter(*s->Else);
   B.store(tmp,

@@ -89,8 +89,9 @@ You use a built-in trait every time you print: `io::println` is declared
 - A class implements every trait its superclasses implement. Every class implements the
   built-in trait `Show` (`view fn toString() -> Str`) through `Obj`, and so do `int`,
   `float`, `bool`, `char` and every sized numeric type (`n.toString()` is `Str(n)`), tuples (`(1, "a").toString()`
-  is `(1, a)`), structs (`Point(x: 1, y: 2)`) and the optional of a `Show` type
-  (`"None"` or the value's text). An enum does not. The standard library's print functions
+  is `(1, a)`), structs (`Point(x: 1, y: 2)`), enums (the variant's name, `North`, and a
+  variant's fields after it, `Rect(w: 2, h: 3)`) and the optional of a `Show` type
+  (`"None"` or the value's text). The standard library's print functions
   (`io::println<T: Show>`) take any `Show` value.
 - The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
   `char` and `Str`, every sized integer type, and by a class or a struct with an

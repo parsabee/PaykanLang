@@ -524,8 +524,15 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
   case ASTNode::NK_EnumValueExpr: {
     auto *ev = cast<EnumValueExpr>(e);
     const std::string &en = ev->getEnumName();
-    return Ctx.make<EnumValueExpr>(loc, in(Names ? Names->type(en) : en),
-                                   in(ev->getVariantName()));
+    // A generic enum's (`Option<int>::Nothing`) is named as a template is.
+    std::vector<Type *> typeArgs;
+    for (auto *t : ev->getTypeArgs())
+      typeArgs.push_back(cloneType(t));
+    const std::string spelled = !Names              ? en
+                                : ev->hasTypeArgs() ? Names->generic(en)
+                                                    : Names->type(en);
+    return Ctx.make<EnumValueExpr>(loc, in(spelled), in(ev->getVariantName()),
+                                   std::move(typeArgs));
   }
   case ASTNode::NK_TupleLiteralExpr: {
     auto *t = cast<TupleLiteralExpr>(e);
@@ -733,6 +740,37 @@ StructDecl *ASTCloner::cloneTemplate(StructDecl *sd) {
   for (auto *m : copy->getMethods())
     out->addMethod(m);
   out->setTypeParamBounds(cloneBounds(sd->getTypeParamBounds()));
+  return out;
+}
+
+EnumDecl *ASTCloner::cloneEnumDecl(EnumDecl *ed, const std::string &newName) {
+  std::vector<const std::string *> variants;
+  std::vector<std::vector<VarDecl *>> payloads;
+  for (size_t i = 0; i < ed->getNumVariants(); ++i) {
+    variants.push_back(&in(*ed->getVariants()[i]));
+    std::vector<VarDecl *> fields;
+    for (auto *f : ed->getPayload(i))
+      fields.push_back(Ctx.make<VarDecl>(f->getLocation(), in(f->getName()),
+                                         cloneType(f->getType()), nullptr));
+    payloads.push_back(std::move(fields));
+  }
+  return Ctx.make<EnumDecl>(ed->getLocation(), in(newName), std::move(variants),
+                            std::move(payloads));
+}
+
+EnumDecl *ASTCloner::cloneTemplate(EnumDecl *ed) {
+  EnumDecl *copy = cloneEnumDecl(ed, ed->getName());
+  std::vector<const std::string *> params;
+  for (auto *p : ed->getTypeParams())
+    params.push_back(&in(*p));
+  std::vector<std::vector<VarDecl *>> payloads;
+  payloads.reserve(copy->getNumVariants());
+  for (size_t i = 0; i < copy->getNumVariants(); ++i)
+    payloads.push_back(copy->getPayload(i));
+  auto *out = Ctx.make<EnumDecl>(copy->getLocation(), copy->getName(),
+                                 copy->getVariants(), std::move(payloads),
+                                 std::move(params));
+  out->setTypeParamBounds(cloneBounds(ed->getTypeParamBounds()));
   return out;
 }
 

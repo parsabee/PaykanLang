@@ -418,6 +418,10 @@ typedef enum PaykanTypeKind {
                             // the kind of a PaykanType (a struct's is TUPLE)
   PAYKAN_KIND_UINT = 8,     // uint64_t (`unsigned`); the narrower sized
                             // integers and floats are INT and FLOAT
+  PAYKAN_KIND_ENUM = 9,     // an enum's tag, an int64_t, and a tagged
+                            // union's variants' fields after it: only in a
+                            // layout ("Enums", below), never the kind of a
+                            // PaykanType (an enum's is INT, a union's TUPLE)
 } PaykanTypeKind;
 
 /// Followed in memory by `nrefs` int64_t words, one per reference: its byte
@@ -486,6 +490,27 @@ PaykanString *PaykanStruct_toString(const void *value, const int64_t *layout);
 /// PaykanTuple_equals compares elements.
 int64_t PaykanStruct_equals(const void *a, const void *b,
                             const int64_t *layout);
+
+// -- Enums
+//
+// An enum (docs/language/07-enums.md) is its tag, the variant's index, an
+// int64_t; a tagged union's (`enum E { A, B(x: int) }`) is followed in place
+// by each variant's fields, a struct, at its offset, all zeros but the
+// current variant's.  Its layout: the variant count, then for each variant
+// its name, a word that is 1 when it has fields, and then the byte offset
+// of its fields in the value and their struct's layout (named for the
+// variant).  An enum nested in a tuple or a struct is an element of kind
+// ENUM: its kind and offset, then its layout; an optional one is an OPTIONAL
+// whose payload kind is ENUM, followed by a whole ENUM entry for the value,
+// as an optional struct's is.
+
+/// The text of the enum at @p value: its variant's name, `North`, or for a
+/// variant with fields its name and theirs, `Move(x: 1, y: 2)`.  A new
+/// string.
+PaykanString *PaykanEnum_toString(const void *value, const int64_t *layout);
+/// Whether the enums at @p a and @p b are equal: the same variant, with
+/// equal fields (compared as PaykanStruct_equals does).
+int64_t PaykanEnum_equals(const void *a, const void *b, const int64_t *layout);
 
 // -- Buffer
 //
