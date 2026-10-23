@@ -94,7 +94,9 @@ There is no `close`: a file is closed automatically when the last reference to i
 away. Above, the result `match` took apart holds the only one, so `notes.txt` is closed when
 that `match` ends. Everything written is on disk once the file is closed, so a later `open`
 reads it back (the next example writes the file in a function of its own, which closes it
-when it returns).
+when it returns). A file passed to a function where its variable is last used is handed on
+to it ([Ownership transfers](../language/16-memory.md#ownership-transfers)): it is closed when
+that function returns, unless the function keeps it.
 
 ## Reading
 

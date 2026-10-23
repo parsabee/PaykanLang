@@ -12,15 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Moves at last use (#186): a copy of a variable where it is last used is a transfer, made
   by a new backend-independent PIR pass, `moves-at-last-use` (docs/pir.md §12), on every
   program and on the code of every module written to a `.pkm`, the standard library's
-  included.  Passing a variable to a function, assigning it to another, storing it in a
-  field or an array element, and returning it hand its reference on without a retain, and
-  the variable releases nothing at the end of its scope; so does copying a tuple, a struct,
-  an enum, a function value or an optional of one held in a variable.  Each path counts on
-  its own (one branch may hand a variable on while another releases it), a use inside a
-  loop the next iteration reads again stays a copy, and in `f(a, a)` only the second `a`
-  moves.  `self`, `inout` parameters, fields, array elements and the members of a value are
-  never moved, and a lambda's captures are always copies.  Over the samples the pass
-  removes about a third of the retains and a sixth of the releases.
+  included.  Assigning a variable to another, storing it in a field or an array element,
+  and returning it hand its references on without a retain, whatever it holds (a tuple, a
+  struct, an enum, a function value, a fixed-size array of up to four elements or an
+  optional of one included), and so does passing a variable that holds an object, a string
+  or an optional of one to a function; the variable then releases nothing at the end of its
+  scope.  A tuple, a struct, an enum, a function value or a fixed-size array passed to a
+  function stays a copy: the function keeps one of its own.  Each path counts on its own
+  (one branch may hand a variable on while another releases it), a use inside a loop the
+  next iteration reads again stays a copy, and in `f(a, a)` only the second `a` moves.
+  `self`, `inout` parameters, fields, array elements and the members of a value are never
+  moved, and a lambda's captures are always copies; a `view` of an object holds a reference
+  of its own under today's calling convention and is handed on to another `view` like any
+  variable.  Over the samples the pass removes about a third of the retains and a sixth of
+  the releases.
 - `paykan --stats` prints what the PIR passes did, on standard error after the last of them
   ran (`moves-at-last-use transfers`, `retains removed`, `releases removed`), for the
   program and for the modules this run builds from source (`pir::Statistics`,
@@ -191,9 +196,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - An object handed on at a variable's last use lives as long as its destination holds it,
   no longer until the variable's scope ends (docs/language/16-memory.md, "Ownership
-  transfers"): a `weak` reference made elsewhere reads `None` as soon as, say, the function
-  it was passed to returns.  Nothing is ever released earlier than its last holder lets it
-  go, and programs free the same objects; only what a `weak` reference reads can differ.
+  transfers").  Nothing is ever released earlier than its last holder lets it go, and
+  programs free the same objects, but an object may be destroyed sooner than before: a
+  `weak` reference made elsewhere reads `None` as soon as, say, the function it was passed
+  to returns, and an `io::File` passed to a function at its variable's last use is closed,
+  what was written to it on disk, when that function returns.
 - `::result`'s `Result` is a generic tagged union, `enum Result<T, E> { Ok(value: T),
   Err(error: E) }` (docs/stdlib/result.md), no longer the struct `Result<T>` of an `error`
   and an optional `value`, and its errors are `::error`'s.  The standard library returns a

@@ -352,25 +352,40 @@ is no way to *consume* a variable by hand.
 
 Where a variable is not read again after it is handed on, the compiler makes the hand-off a
 **transfer**: the reference moves to the destination without a retain, and the variable
-releases nothing at the end of its scope. Passing a variable to a function, assigning it to
-another variable, storing it in a field or an array element, and returning it are transfers at
-the variable's last use, and so is copying a tuple, a struct, an enum, a function value or an
-optional of one held in a variable. A hand-off the variable is read after stays a copy: later
-in the function, or on the next iteration of a loop (a variable assigned a new value before it
-is read again is not). Where one branch of an `if` or one arm of a `match` hands the variable on
-and another does not, the other releases it when its scope ends, as before. In `f(a, a)` the
-first `a` is a copy and the second a transfer. `self`, `inout` parameters and locals, fields,
-array elements and the members of a tuple or struct are never transferred, and a lambda's
-captures are always copies. The compiler's `--stats` option counts the transfers it made
-([docs/pir.md §12](../pir.md#12-passes) has the details).
+releases nothing at the end of its scope. At a variable's last use:
+
+- **Assigning** it to another variable, **storing** it in a field or an array element, and
+  **returning** it are transfers, whatever it holds: an object, a string, or a tuple, a struct,
+  an enum, a function value, a fixed-size array of up to four elements or an optional of one,
+  all of whose references move together.
+- **Passing** it to a function is a transfer when it holds an object or a string, or an
+  optional of one: the function holds the reference, and releases it when it returns. A tuple,
+  a struct, an enum, a function value or a fixed-size array is passed as its contents, of which
+  the function keeps a copy of its own, so passing one stays a copy, and the variable releases
+  its references when its scope ends.
+- A `view` parameter or `view` local of an object, a string or an optional of one is handed on
+  the same way when it is passed to another `view`.
+
+A hand-off the variable is read after stays a copy: later in the function, or on the next
+iteration of a loop (a variable assigned a new value before it is read again is not). Where one
+branch of an `if` or one arm of a `match` hands the variable on and another does not, the other
+releases it when its scope ends, as before. In `f(a, a)` the first `a` is a copy and the second
+a transfer. `self`, `inout` parameters and locals, fields, array elements and the members of a
+tuple or struct are never transferred, and a lambda's captures are always copies. The
+compiler's `--stats` option counts the transfers it made ([docs/pir.md
+§12](../pir.md#12-passes) has the details).
 
 A transfer releases nothing early: the destination holds the reference and releases it at the
 end of *its* scope, as it would a copy: a parameter when its function returns, a variable when
 its scope ends, a field when its object is destroyed or the field is assigned again. A program
 frees the same objects either way. What a transfer can change is *when* an object is destroyed:
-it lives as long as its last holder, which after a transfer is the destination. Only a
-[`weak` reference](#weak-references) elsewhere can see that: it reads `None` as soon as the
-destination lets go, which may be before the variable's scope would have ended.
+it lives as long as its last holder, which after a transfer is the destination, so it may be
+destroyed before the variable's scope would have ended. Two things can see that. A
+[`weak` reference](#weak-references) elsewhere reads `None` as soon as the destination lets go.
+And what destroying the object does happens then: an [`io::File`](../stdlib/io.md) passed to a
+function at its variable's last use is closed, and what was written to it is on disk, when
+that function returns (unless it keeps the file), so a later `open` of the same path in the
+caller reads it back.
 
 ```pkn
 import ::io;

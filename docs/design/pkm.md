@@ -936,9 +936,10 @@ splits it
   `m2`, a `Pair<int, bool>` only `hidden()` uses keeps `first`, its
   constructor and `__init__`, and loses `second`.
 - **Moves.** The code passes every program goes through (docs/pir.md §12:
-  moves at last use) run on what the trim left, so the compiled code and
-  the copies in `CODE` are both moved code; a program that imports the
-  module runs them on its copies again, which changes nothing more.
+  moves at last use) run on what the trim left, and what they make is
+  verified, so the compiled code and the copies in `CODE` are both moved
+  code; a program that imports the module runs them on its copies again,
+  which changes nothing more.
 - **Split.** The module's shared copies of instantiations stay PIR in
   `CODE`: a program keeps one of each and drops what its `main` does not
   reach, and an importer instantiating the same type links to them. Every

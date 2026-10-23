@@ -845,7 +845,10 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
 A pass rewrites a program in place (`paykan::pir::Pass`,
 `include/paykan/pir/Pass.h`); a `PassManager` runs its passes in order and,
 built with `verifyEach`, verifies the program after each one, so a pass
-that breaks it is the one named in the error.  A pass adds what it did to
+that breaks it is the one named in the error.  The driver's pass manager
+verifies after each pass in a build with assertions, and a module's code
+is verified after its passes in every build, before its `.pkm` is written
+(docs/design/pkm.md §5.13).  A pass adds what it did to
 named counters (`pir::Statistics`), which `paykan --stats` prints on
 standard error after the last pass ran:
 
@@ -919,11 +922,14 @@ function (a slot that is never released does not own its value); or a use
 of an *alias*, a value that refers to the slot's object without a
 reference of its own: a box loaded from the slot before the copy, the
 object unboxed from it, a field read or an address computed from it, a
-`weak.new` of it and the `weak` local holding that.  The consumer may use
-the box it takes, and an earlier copy of the slot is a reference of its
-own: in `f(a, a)` only the second argument can move.  Loops are paths
-like any other: a variable read again on the next iteration is still in
-use; one reassigned first is released by the assignment.
+`weak.new` of it and the `weak` local holding that.  A value whose only
+other use is a `retain` earlier in the same block holds a reference of its
+own, and its use is none of these: the box the copy hands its consumer,
+and an earlier copy of the slot wherever it is used afterwards.  So in
+`f(a, a)` only the second argument can move: a copy made after the slot's
+reads the slot first.  Loops are paths like any other: a variable read
+again on the next iteration is still in use; one reassigned first is
+released by the assignment.
 
 The **rewrite** removes the copy's retains and stores `null` into the slot
 right after them.  On the paths through the copy, the release then
@@ -945,6 +951,17 @@ release where the paths join.  Then:
 So `take(a)` at the last use of a parameter `a` is `%a.2 = load %a.0` and
 `call @take(%a.2)`, with neither the retain nor `a`'s release.
 
+Each of these questions is one **dataflow** over the function's
+structured body, a bit for each slot: which copies are last uses (back
+from the end: on every path, the release first), which releases find
+their slot `null` on every path (forward from the entry), and which `null`
+stores some path reads (back from the end).  A walk visits each statement
+once and a loop until the bits at its head stop changing, a loop inside
+another starting from where it settled the last time, and an instruction
+updates only the bits of the slots it touches.  So the pass takes time in
+proportion to the size of the function (times the depth of its loops),
+not to the number of copies times that size.
+
 **Why it is right.**  The pass removes a retain only together with a
 release that provably runs on the same reference with no read in between:
 on every path from the copy, the slot still holds the reference it copied
@@ -959,8 +976,10 @@ window.  No release is ever added, nor moved earlier than it ran: the
 destination owns the reference and releases it at the end of its own
 scope (docs/language/16-memory.md, "Ownership transfers").  What changes
 is only that the object may die when the destination lets go rather than
-when the variable's scope ends, which a `weak` reference made elsewhere
-can see.
+when the variable's scope ends.  A `weak` reference made elsewhere can see
+that, and so can what the object's destruction does: an `io::File` handed
+on at its last use is closed, and what was written to it flushed, when the
+destination lets it go.
 
 **Never moved:** `self` (an `obj` local, or a struct method's `ptr`),
 `inout` parameters and locals (a `ptr`), a slot whose address is taken
@@ -969,11 +988,19 @@ holds them), a part of a value held in memory (a member: only a whole
 local is moved), a `weak` local (of type `weak`), and a closure's
 captures (a `field.store`, or a copy, into a field of a `fn.` class: the
 closure keeps a reference of its own).  A borrow that holds no reference
-of its own has no release to pair a copy with, so it never matches.  A
-`view` parameter of a reference type is passed like one without a mode, a
-box its function owns and releases (§7), so it is a local like any other
-parameter, and at its last use it is handed on (to another `view`
-parameter, the only place Sema lets it go) like one.
+of its own has no release to pair a copy with, so it never matches.
+
+A `view` of a reference type is not such a borrow yet, and is moved: a
+`view` parameter is passed like one without a mode, a box its function
+owns and releases (§7), and a `view` local (`v: view = x`) retains what it
+names and releases it at the end of its scope.  Each is a box local like
+any other, and at its last use it is handed on to where Sema lets a view
+go: a `view` parameter, or a `view` local, which hands it on in turn.  The
+object it names lives as long as before wherever the variable it views
+still holds it, which is the rest of that variable's scope unless it was
+handed on too.  When parameters are passed borrowed (#98, part 2), a
+`view` parameter holds no reference of its own, has no release, and
+leaves the pass like `self`.
 
 The driver runs it on every program after the dead-code pass, before any
 backend sees the program, so `--emit-pir` prints the moved program; and on
