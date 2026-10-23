@@ -414,9 +414,10 @@ TEST(Optional, MatchBindingIsNarrowedToArmType) {
 TEST(Optional, ObjSubjectMatchStillWorks) {
   expectOk(R"(import ::io;
     fn main() -> int {
-      match io::stdin().readln().value {
+      o: Obj = "text";
+      match o {
         line: Str { io::println(line); }
-        _         { io::println("eof"); }
+        _         { io::println("other"); }
       }
       return 0;
     }

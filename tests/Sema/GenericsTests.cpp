@@ -456,6 +456,37 @@ TEST(Generics, InferenceFailsWithoutArguments) {
   EXPECT_TRUE(r2.Ok) << r2.Diagnostics;
 }
 
+// A type parameter the arguments leave open is taken from the type the
+// call's value flows into, matched against the result type; what the
+// arguments determine stays theirs.
+TEST(Generics, InferenceFromTheExpectedType) {
+  const std::string decls = "class Node { n: int; }\n"
+                            "fn none<T>() -> T? { return None; }\n"
+                            "fn tagged<A, B>(a: A) -> (A, B?) { "
+                            "return (a, None); }\n"
+                            "fn id<T>(x: T) -> T { return x; }\n"
+                            "fn take(n: Node?) -> bool { return n == None; }\n"
+                            "fn find() -> Node? { return none(); }\n";
+  auto r = semaCheck(withMain(decls, R"(
+    s: Str? = none();
+    t: (int, Str?) = tagged(1);
+    b: bool = take(none());
+    s = none();
+    f: float = id(1);
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // Nothing gives it: the call must spell it.
+  r = semaCheck(withMain(decls, "x = none();"));
+  EXPECT_TRUE(has(r.Diagnostics, "cannot infer type parameter 'T' of 'none' "
+                                 "from the call arguments"))
+      << r.Diagnostics;
+  // The arguments win: `id(1)` is an `id<int>`, whose `int` is no `Str`.
+  r = semaCheck(withMain(decls, "x: Str = id(1);"));
+  EXPECT_TRUE(has(r.Diagnostics, "initializer of type 'int' does not match "
+                                 "declared type 'Str' for variable 'x'"))
+      << r.Diagnostics;
+}
+
 TEST(Generics, InferenceAmbiguous) {
   auto r = semaCheck(
       withMain("fn pick<T>(a: T, b: T) -> T { return a; }", "pick(1, 2.0);"));

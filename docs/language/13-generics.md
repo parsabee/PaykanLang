@@ -432,6 +432,19 @@ same(1, 2.0);             // error: cannot infer type parameter 'T' of 'same': d
 same<float>(1, 2.0);      // ok (1 promotes to float)
 ```
 
+A type parameter the arguments leave open is taken from the type the call's value flows
+into, when the function's result type names it: a declared variable, a parameter, a
+`return`, a field or an array element, as for a generic enum's variant ([Generic
+Enums](07-enums.md#generic-enums)). The arguments come first, and what they determine stays
+theirs:
+
+```pkn
+fn none<T>() -> T? { return None; }
+s: Str? = none();                       // T = Str, from the variable
+r: res::Result<int, err::Error> = res::ok(1);   // T = int from 1, E from the variable
+x = none();               // error: cannot infer type parameter 'T' of 'none' from the call arguments
+```
+
 A generic **class** may be constructed without type arguments when they can be
 inferred from its `__init__` parameters, or its fields' types when it has the
 default `__init__` ([The default `__init__`](05-classes.md#the-default-__init__)):

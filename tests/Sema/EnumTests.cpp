@@ -58,7 +58,7 @@ TEST(Enum, NameShadowsBuiltinClassRejected) {
 }
 
 // The standard library's names are not reserved: a program's own `Error`
-// and `open` live beside res::Error and io::open.
+// and `open` live beside err::Error and io::open.
 TEST(Enum, TheStandardLibrarysNamesAreNotReserved) {
   auto r = semaCheck("enum Error { NotFound }\nenum open { Read }\n"
                      "fn main() -> int { return 0; }\n");

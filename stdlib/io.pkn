@@ -7,16 +7,17 @@
 //
 // A File is an open file: `open(path, mode)` opens one with C's `fopen` (the
 // mode "r", "w", "a", ...) and returns a Result (::result) holding it, or the
-// Error saying why it could not; `stdin()` is the process's standard input.
-// A File is closed when the last reference to it goes.  Each of its methods
-// reports what went wrong the same way: a write returns its Error (`Ok` when
-// it wrote), a read a Result holding the text read, whose error is
-// `EndOfFile` when nothing was left to read.
+// Error (::error) saying why it could not; `stdin()` is the process's
+// standard input.  A File is closed when the last reference to it goes.
+// Each of its methods reports what went wrong the same way: a write returns
+// its Error (`Ok` when it wrote), a read a Result holding the text read, or
+// its Error, `EndOfFile` when nothing was left to read.
 //
 // Names starting with `_` are the module's own (docs/language/15-modules.md,
 // "Private to the module"): the native functions, bound to the runtime's
 // (Runtime.h, "The standard library's ::io").
 
+import ::error as err;
 import ::result as res;
 
 // -- Printing -----------------------------------------------------------------
@@ -55,20 +56,16 @@ native fn _readbytes(file: view Obj, n: int, errno: inout int)
 native fn _read(file: view Obj, errno: inout int) -> Str? = "Paykan_io_read";
 native fn _stdin() -> Obj = "Paykan_io_stdin";
 
-/// The Error of C's @p errno: none for 0.
-fn _error(errno: int) -> res::Error {
-  return if errno == 0 then res::none() else res::fromErrno(errno);
-}
-
 /// The Result of a read: the @p text read, or the error its @p errno says
 /// (`EndOfFile` for 0, nothing left to read).
-fn _readResult(text: Str?, errno: int) -> res::Result<Str> {
+fn _readResult(text: Str?, errno: int) -> res::Result<Str, err::Error> {
   match text {
     t: Str { return res::ok(t); }
     None {
-      e = if errno == 0 then res::Error(res::ErrorCode::EndOfFile, None)
-          else res::fromErrno(errno);
-      return res::Result<Str>(e, None);
+      if errno == 0 {
+        return res::fail(err::Error(err::ErrorCode::EndOfFile, None));
+      }
+      return res::fail(err::fromErrno(errno));
     }
   }
 }
@@ -85,20 +82,20 @@ impl File {
   /// Made by `open` and `stdin` only: the initializer is the module's.
   fn ___init__(handle: Obj) { self.__handle = handle; }
   /// Writes @p s to the file: no error, or why it could not.
-  view fn write(s: view Str) -> res::Error
-                            { return _error(_write(self.__handle, s)); }
+  view fn write(s: view Str) -> err::Error
+                            { return err::fromErrno(_write(self.__handle, s)); }
   /// The next line, with its newline when it has one.
-  view fn readln() -> res::Result<Str> {
+  view fn readln() -> res::Result<Str, err::Error> {
     errno = 0;
     return _readResult(_readln(self.__handle, errno), errno);
   }
   /// Up to @p n bytes (`InvalidArgument` when @p n is not positive).
-  view fn readbytes(n: int) -> res::Result<Str> {
+  view fn readbytes(n: int) -> res::Result<Str, err::Error> {
     errno = 0;
     return _readResult(_readbytes(self.__handle, n, errno), errno);
   }
   /// The rest of the file.
-  view fn read() -> res::Result<Str> {
+  view fn read() -> res::Result<Str, err::Error> {
     errno = 0;
     return _readResult(_read(self.__handle, errno), errno);
   }
@@ -107,14 +104,14 @@ impl File {
 /// The file at @p path opened with the `fopen` mode @p mode, or the Error
 /// saying why it could not be (`NotFound`, `PermissionDenied`, ..., with C's
 /// text as its message).
-fn open(path: view Str, mode: view Str) -> res::Result<File> {
+fn open(path: view Str, mode: view Str) -> res::Result<File, err::Error> {
   errno = 0;
   match _open(path, mode, errno) {
     handle: Obj {
       return res::ok(File(handle));
     }
     None {
-      return res::Result<File>(res::fromErrno(errno), None);
+      return res::fail(err::fromErrno(errno));
     }
   }
 }

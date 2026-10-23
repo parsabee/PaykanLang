@@ -113,14 +113,16 @@ defaults:
     values: { title: Standard library, nav_order: 3 }
   - scope: { path: stdlib/io.md }
     values: { title: "::io", parent: Standard library, nav_order: 1 }
+  - scope: { path: stdlib/error.md }
+    values: { title: "::error", parent: Standard library, nav_order: 2 }
   - scope: { path: stdlib/result.md }
-    values: { title: "::result", parent: Standard library, nav_order: 2 }
+    values: { title: "::result", parent: Standard library, nav_order: 3 }
   - scope: { path: stdlib/collections.md }
-    values: { title: "::collections", parent: Standard library, nav_order: 3 }
+    values: { title: "::collections", parent: Standard library, nav_order: 4 }
   - scope: { path: stdlib/memory.md }
-    values: { title: "::memory", parent: Standard library, nav_order: 4 }
+    values: { title: "::memory", parent: Standard library, nav_order: 5 }
   - scope: { path: stdlib/math.md }
-    values: { title: "::math", parent: Standard library, nav_order: 5 }
+    values: { title: "::math", parent: Standard library, nav_order: 6 }
 
   # The implementation: IR, backends, plugins
   - scope: { path: internals.md }

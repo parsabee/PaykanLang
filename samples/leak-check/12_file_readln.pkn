@@ -23,22 +23,22 @@ fn scratchPath(args: view Str[], name: Str) -> Str {
 }
 
 fn writeIt(path: Str) {
-  match io::open(path, "w").value {
-    f: io::File {
-      f.write("line one\n");
+  match io::open(path, "w") {
+    f: Ok {
+      f.value.write("line one\n");
     }
-    None { }
+    _ { }
   }
 }
 
 fn main(args: view Str[]) -> int {
   path: Str = scratchPath(args, "pkn_leakcheck_readln.txt");
   writeIt(path);
-  match io::open(path, "r").value {
-    None { }
-    f: io::File {
-      match f.readln().value {
-        line: Str { }
+  match io::open(path, "r") {
+    e: Err { }
+    f: Ok {
+      match f.value.readln() {
+        line: Ok { }
         _ { }
       }
     }

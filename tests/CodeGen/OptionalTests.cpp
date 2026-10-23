@@ -745,12 +745,12 @@ fn main() -> int {
 TEST(Optional, StructWithReferencesWrappedAsAnArgument) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
-    import ::result as res;
     import ::collections;
     class Node { n: int; }
     impl Node { fn __init__(n: int) { self.n = n; } }
     struct Item { name: Str; node: Node; }
     struct Holder { v: Item?; }
+    struct Maybe<T> { v: T?; }
     fn take(p: Item?) -> bool { return p != None; }
     fn main() -> int {
       io::println(take(Item("x", Node(1))));
@@ -759,9 +759,9 @@ TEST(Optional, StructWithReferencesWrappedAsAnArgument) {
         i: Item { io::println(i.name + Str(i.node.n)); }
         None { io::println("none"); }
       }
-      r = res::ok((1, "a"));
-      io::println(r.isOk());
-      match r.value {
+      m = Maybe((1, "a"));
+      io::println(m.v != None);
+      match m.v {
         t: (int, Str) { io::println(t); }
         None { io::println("none"); }
       }
@@ -782,8 +782,8 @@ TEST(Optional, NoneOfAStructWithReferencesInABuffer) {
   LeakGuard g;
   auto r = compileAndRun(R"pkn(import ::io;
     import ::collections;
+    import ::error as err;
     import ::memory;
-    import ::result as res;
     class Node { n: int; }
     impl Node { fn __init__(n: int) { self.n = n; } }
     struct Item { name: Str; node: Node; }
@@ -794,10 +794,14 @@ TEST(Optional, NoneOfAStructWithReferencesInABuffer) {
       io::println(l.get(0));
       io::println(l.get(1));
       b = memory::Buffer<Item?>();
-      io::println(res::name(b.push(None).code));
-      c = b.copy(0);
-      io::println(res::name(c.error.code));
-      io::println(c.value == None);
+      io::println(err::name(b.push(None).code));
+      match b.copy(0) {
+        c: Ok {
+          io::println("Ok");
+          io::println(c.value == None);
+        }
+        e: Err { io::println(err::name(e.error.code)); }
+      }
       return 0;
     }
   )pkn");

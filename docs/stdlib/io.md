@@ -3,14 +3,15 @@
 Printing, files, the standard input and standard error. Printing is not built into the
 language: a program that prints imports the module (`import ::io;`, by convention without
 an alias) and calls `io::println(...)`. Opening and reading a file can fail, and `::io`
-reports that as a [`::result`](result.md) value, so a program that looks at the errors
-imports `::result` too (`import ::result as res;`). This page teaches files, the standard
+reports that as a [`::result`](result.md) `Result`, which holds an [`::error`](error.md)
+`Error` when it failed, so a program that looks at the errors imports `::error` too (`import
+::error as err;`). This page teaches files, the standard
 streams and the command-line arguments, finishes the `tasks` project, and then documents
 [every function and method](#api) of the module.
 
 ```pkn
 import ::io;
-import ::result as res;
+import ::error as err;
 
 struct Point { x: int; y: int; }
 
@@ -22,9 +23,10 @@ fn main() -> int {
   io::println(n);
   io::print("no newline, ");
   io::println(True);
-  r = io::open("/no/such/dir/file.txt", "r");
-  io::println(r.isOk());
-  io::println(res::name(r.error.code) + ": " + r.error.message());
+  match io::open("/no/such/dir/file.txt", "r") {
+    f: Ok { io::println("opened?"); }
+    e: Err { io::println(err::name(e.error.code) + ": " + e.error.message()); }
+  }
   return 0;
 }
 ```
@@ -37,7 +39,6 @@ Output:
 Point(x: 3, y: 4)
 None
 no newline, True
-False
 NotFound: No such file or directory
 ```
 
@@ -47,28 +48,28 @@ NotFound: No such file or directory
 
 `io::open(path, mode)` opens a file. The mode is `"r"` to read, `"w"` to write (creating the
 file, or emptying an existing one) or `"a"` to append. Opening can fail, so `open` returns a
-**result**: a `Result<io::File>` from the `::result` module, holding an `error` and a
-`value`. The value is an `io::File?`, the file when the open succeeded and `None` when it did
-not, and you tell the two apart with `match`:
+**result**: a `Result<io::File, Error>` from the `::result` module. It is a [tagged
+union](../language/07-enums.md#variants-with-fields), either `Ok`, whose `value` is the file,
+or `Err`, whose `error` says why it could not be opened, and you tell the two apart with
+`match`:
 
 ```pkn
 import ::io;
-import ::result as res;
+import ::error as err;
 
 fn main() -> int {
-  w = io::open("notes.txt", "w");
-  match w.value {
-    f: io::File {
+  match io::open("notes.txt", "w") {
+    w: Ok {
+      f = w.value;
       f.write("first line\n");
       f.write("second line\n");
     }
-    None { io::printerrln(w.error.message()); }
+    e: Err { io::printerrln(e.error.message()); }
   }
 
-  r = io::open("no/such/dir/notes.txt", "r");
-  match r.value {
-    f: io::File { io::println("opened?"); }
-    None { io::println("error: " + res::name(r.error.code) + ": " + r.error.message()); }
+  match io::open("no/such/dir/notes.txt", "r") {
+    r: Ok { io::println("opened?"); }
+    e: Err { io::println("error: " + err::name(e.error.code) + ": " + e.error.message()); }
   }
   return 0;
 }
@@ -80,26 +81,26 @@ Output:
 error: NotFound: No such file or directory
 ```
 
-A result's `error` is a `res::Error`: a `code`, one of the standard `res::ErrorCode`s
-(`Ok`, `NotFound`, `PermissionDenied`, `EndOfFile` and the rest), and a message.
-`error.message()` is the message, here the operating system's, and `res::name(code)` is the
-code's name. The error's code is `Ok` exactly when the value is there; `r.isOk()` tests it.
-Relative paths are relative to the directory the program runs in, not to the source file.
+An `Err`'s `error` is an `err::Error` ([`::error`](error.md)): a `code`, one of the standard
+`err::ErrorCode`s (`NotFound`, `PermissionDenied`, `EndOfFile` and the rest), and a message.
+`error.message()` is the message, here the operating system's, and `err::name(code)` is the
+code's name. Relative paths are relative to the directory the program runs in, not to the
+source file.
 
-`f.write(s)` reports failure the same way: it returns a `res::Error`, whose code is `Ok` when
-it wrote. The example ignores it; `if !f.write(s).isOk() { ... }` checks it.
+`f.write(s)` makes no value, so it reports failure with an `err::Error` alone, whose code is
+`Ok` when it wrote. The example ignores it; `if !f.write(s).isOk() { ... }` checks it.
 
 There is no `close`: a file is closed automatically when the last reference to it goes
-away. The result holds one, so above `notes.txt` stays open until `w` goes away at the end
-of `main`. Everything written is on disk once the file is closed; to read back a file you
-wrote, write it in a function of its own, which closes it when it returns (the next
-example does).
+away. Above, the result `match` took apart holds the only one, so `notes.txt` is closed when
+that `match` ends. Everything written is on disk once the file is closed, so a later `open`
+reads it back (the next example writes the file in a function of its own, which closes it
+when it returns).
 
 ## Reading
 
-An `io::File` has three reading methods. Each returns a `Result<Str>`: its `value` is a
-`Str?`, the data read, or `None` when there is nothing more to read (its error is then
-`EndOfFile`).
+An `io::File` has three reading methods. Each returns a `Result<Str, Error>`: `Ok` with the
+data read as its `value`, or `Err` when there is nothing more to read (the error's code is
+then `EndOfFile`) or the read failed.
 
 | Method          | Reads                                                         |
 |-----------------|---------------------------------------------------------------|
@@ -107,41 +108,40 @@ An `io::File` has three reading methods. Each returns a `Result<Str>`: its `valu
 | `readbytes(n)`  | the next `n` bytes (fewer at the end of the file)             |
 | `read()`        | everything that is left                                       |
 
-A line-by-line loop matches each read's `value`:
+A line-by-line loop matches each read:
 
 ```pkn
 import ::io;
 
 // Writes `text` to the file at `path`; False if it could not.
 fn writeFile(path: Str, text: Str) -> bool {
-  w = io::open(path, "w");
-  match w.value {
-    f: io::File { return f.write(text).isOk(); }
-    None {
-      io::printerrln(w.error.message());
+  match io::open(path, "w") {
+    w: Ok { return w.value.write(text).isOk(); }
+    e: Err {
+      io::printerrln(e.error.message());
       return False;
     }
   }
-}   // the file is closed here, when `w` and `f` go away
+}   // the file is closed here, when the result goes away
 
 fn main() -> int {
   if !writeFile("shopping.txt", "eggs\nflour\nsugar\n") { return 1; }
 
-  r = io::open("shopping.txt", "r");
-  match r.value {
-    f: io::File {
+  match io::open("shopping.txt", "r") {
+    r: Ok {
+      f = r.value;
       n = 0;
       while True {
-        match f.readln().value {
-          line: Str {
+        match f.readln() {
+          line: Ok {
             n = n + 1;
-            io::print(Str(n) + ": " + line);   // line ends in \n already
+            io::print(Str(n) + ": " + line.value);   // the line ends in \n already
           }
-          None { break; }                   // end of file
+          _ { break; }                            // the end of the file
         }
       }
     }
-    None { io::printerrln(r.error.message()); return 1; }
+    e: Err { io::printerrln(e.error.message()); return 1; }
   }
   return 0;
 }
@@ -170,8 +170,9 @@ fn main() -> int {
   total = 0;
   bad = 0;
   while True {
-    match io::stdin().readln().value {
-      line: Str {
+    match io::stdin().readln() {
+      read: Ok {
+        line = read.value;
         // drop the trailing newline before parsing
         digits = "";
         i = 0;
@@ -184,7 +185,7 @@ fn main() -> int {
           None   { bad = bad + 1; }
         }
       }
-      None { break; }
+      _ { break; }
     }
   }
   io::println("total " + Str(total) + ", " + Str(bad) + " bad line(s)");
@@ -418,16 +419,16 @@ import tasks::{task, text, list};
 
 fn load(path: Str) -> list::TaskList {
   tasks = list::TaskList();
-  match io::open(path, "r").value {
-    f: io::File {
+  match io::open(path, "r") {
+    r: Ok {
       while True {
-        match f.readln().value {
-          line: Str { addLine(tasks, text::trim(line)); }
-          None { break; }
+        match r.value.readln() {
+          line: Ok { addLine(tasks, text::trim(line.value)); }
+          _ { break; }
         }
       }
     }
-    None { }   // no file yet: an empty list
+    _ { }   // no file yet: an empty list
   }
   return tasks;
 }
@@ -445,9 +446,9 @@ fn addLine(tasks: list::TaskList, line: Str) {
 }
 
 fn save(tasks: list::TaskList, path: Str) -> bool {
-  r = io::open(path, "w");
-  match r.value {
-    f: io::File {
+  match io::open(path, "w") {
+    w: Ok {
+      f = w.value;
       i = 0;
       while i < tasks.count {
         t = tasks.tasks[i];
@@ -457,16 +458,16 @@ fn save(tasks: list::TaskList, path: Str) -> bool {
       }
       return True;
     }
-    None {
-      io::printerrln("cannot save: " + r.error.message());
+    e: Err {
+      io::printerrln("cannot save: " + e.error.message());
       return False;
     }
   }
 }
 ```
 
-`save` needs no `return` after its `match`. The subject `r.value` is an `io::File?`, and an
-`io::File` arm and a `None` arm together cover every case, so the compiler knows each path
+`save` needs no `return` after its `match`. The subject is a `Result`, and an arm for each
+of its variants, `Ok` and `Err`, covers every case, so the compiler knows each path
 returns. A `match` on an object of a class (an `Obj`, say) is different: an arm for each
 subclass you know of does not cover a class you don't, so a function returning from inside
 such arms needs a `return` after the `match` too (or a `_` arm), or it is rejected with
@@ -626,17 +627,17 @@ ahead of the panic's message when both go to the same file or pipe.
 #### `open`
 
 ```pkn
-fn open(path: view Str, mode: view Str) -> res::Result<File>
+fn open(path: view Str, mode: view Str) -> res::Result<File, err::Error>
 ```
 
 Opens the file at `path` with C's `fopen` and the mode `mode`: `"r"` to read, `"w"` to
 write (creating the file, or emptying it), `"a"` to append, and C's other modes (`"r+"`,
 `"w+"`, `"a+"`, ...). A relative `path` is relative to the current
-directory of the process. The result's `value` is the `File`, or `None` when the file could
-not be opened; then its `error` has the code of C's `errno` and C's `strerror` text as its
-message: `NotFound` (`No such file or directory`), `PermissionDenied`, `IsADirectory` (a
-directory opened to write), `InvalidArgument` (a mode `fopen` does not take), and the rest
-of [the mapping](result.md#errorcode). Opening a directory to read succeeds on Linux; its
+directory of the process. The result is `Ok` with the `File` as its `value`, or `Err` when
+the file could not be opened; then its `error` has the code of C's `errno` and C's
+`strerror` text as its message: `NotFound` (`No such file or directory`),
+`PermissionDenied`, `IsADirectory` (a directory opened to write), `InvalidArgument` (a mode
+`fopen` does not take), and the rest of [the mapping](error.md#errorcode). Opening a directory to read succeeds on Linux; its
 reads then fail with `IsADirectory`.
 
 #### `stdin`
@@ -662,12 +663,12 @@ assigning one shares it, and the file is closed when the last reference to it go
 is no `close`. Its `toString()` is `File@0x...`, and two `File`s are `==` when they are the
 same object (`io::stdin() == io::stdin()` is `False`: each call makes a new `File`). Every
 method is a `view fn`, so it can be called through a `view` parameter, and each reports
-failure through `::result`.
+failure with an [`::error`](error.md) `Error`: a write's alone, a read's in its `Result`.
 
 #### `File.write`
 
 ```pkn
-view fn write(s: view Str) -> res::Error
+view fn write(s: view Str) -> err::Error
 ```
 
 Writes `s` to the file. The error is `Ok` when it wrote, `InvalidArgument` (`Bad file
@@ -676,7 +677,7 @@ descriptor`) when the file is not open for writing (`stdin()`, a file opened wit
 #### `File.readln`
 
 ```pkn
-view fn readln() -> res::Result<Str>
+view fn readln() -> res::Result<Str, err::Error>
 ```
 
 The next line, with its `\n` when it has one (the last line of a file may not).
@@ -684,7 +685,7 @@ The next line, with its `\n` when it has one (the last line of a file may not).
 #### `File.readbytes`
 
 ```pkn
-view fn readbytes(n: int) -> res::Result<Str>
+view fn readbytes(n: int) -> res::Result<Str, err::Error>
 ```
 
 The next `n` bytes, or fewer at the end of the file. `InvalidArgument` when `n` is not
@@ -693,15 +694,15 @@ positive.
 #### `File.read`
 
 ```pkn
-view fn read() -> res::Result<Str>
+view fn read() -> res::Result<Str, err::Error>
 ```
 
 Everything that is left of the file.
 
 #### End of file, failed reads and buffering
 
-A read that finds nothing left fails with `EndOfFile` (its `value` is `None`), so a read
-never returns an empty `Str`: `read()` of an empty file, or of one already read to the end,
+A read that finds nothing left fails with `EndOfFile` (it is an `Err`), so a read never
+returns an empty `Str`: `read()` of an empty file, or of one already read to the end,
 is `EndOfFile` too. A read that the operating system fails has the code of its `errno`
 (`IsADirectory` for a directory, `Io`, ...). Reading a file opened only to write fails with
 `InvalidArgument` (`Bad file descriptor`), as writing to one opened only to read does.
@@ -722,4 +723,4 @@ then, when the buffer is written out (a full disk, say), is not reported to the 
 | `readbytes(n)` with `n <= 0` | `InvalidArgument` |
 | `write` to a file not open for writing (`stdin()`, a `"r"` file) | `InvalidArgument` |
 | a read of a directory opened with `"r"` | `IsADirectory` |
-| any other failure | the code of its `errno` ([`ErrorCode`](result.md#errorcode)) |
+| any other failure | the code of its `errno` ([`ErrorCode`](error.md#errorcode)) |

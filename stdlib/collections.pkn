@@ -29,8 +29,8 @@
 // `_bucket` and the buffer helpers are the module's own, and a `__` field or method is reachable
 // only from its type's methods.
 
+import ::error as err;
 import ::memory as mem;
-import ::result as res;
 
 native fn _panic(message: view Str) = "Paykan_panic_message";
 // _panic for where a value is due: it never returns one.
@@ -43,12 +43,12 @@ native fn _unreachableView<T>(owner: view Obj)
 // -- Buffers ------------------------------------------------------------------
 //
 // The containers keep their elements in mem::Buffers, whose operations
-// say when they fail (::result).  A container checks its own preconditions
+// say when they fail (::error).  A container checks its own preconditions
 // first, so what is left is a buffer that cannot grow: out of memory, a
 // panic here.
 
 /// @p e, which is no error unless memory ran out.
-fn _check(e: res::Error) {
+fn _check(e: err::Error) {
   if !e.isOk() {
     _panic("out of memory: " + e.message());
   }

@@ -2,12 +2,29 @@
 // zero (or unset); set/at/get/copy, growth, shrinking and swap, for values and
 // references; and the errors the operations report instead of panicking.
 import ::io;
+import ::error as err;
 import ::memory as mem;
 import ::result as res;
 
 /// The name of @p e's code.
-fn code(e: res::Error) -> Str {
-  return res::name(e.code);
+fn code(e: err::Error) -> Str {
+  return err::name(e.code);
+}
+
+/// The name of the code of @p r's error, `Ok` when it made a value.
+fn codeOf<T>(r: res::Result<T, err::Error>) -> Str {
+  match r {
+    v: Ok { return "Ok"; }
+    e: Err { return code(e.error); }
+  }
+}
+
+/// The text of @p r's value, or the name of its error's code.
+fn shown<T: Show>(r: res::Result<T, err::Error>) -> Str {
+  match r {
+    v: Ok { return v.value.toString(); }
+    e: Err { return code(e.error); }
+  }
 }
 
 fn main() -> int {
@@ -19,7 +36,7 @@ fn main() -> int {
   e = n.push(9);
   io::println(Str(n.len()) + " " + Str(n.at(1)) + " " + Str(n.at(4)) + " "
       + Str(n.get(5)));
-  io::println(n.copy(5).value);
+  io::println(shown(n.copy(5)));
   e = n.swap(1, 5);
   io::println(Str(n.get(1)) + Str(n.get(5)));
   e = n.shrink(4);
@@ -33,7 +50,7 @@ fn main() -> int {
 
   // What goes wrong is an error, and the buffer is unchanged.
   io::println(code(n.set(10, 1)) + " " + code(n.swap(0, 10)) + " "
-      + code(n.shrink(10)) + " " + code(n.copy(10).error) + " " + Str(n.len()));
+      + code(n.shrink(10)) + " " + codeOf(n.copy(10)) + " " + Str(n.len()));
   io::println(code(n.grow(9223372036854775807)) + " " + Str(n.len()));
 
   s = mem::Buffer<Str>();
@@ -44,15 +61,15 @@ fn main() -> int {
   }
   kept = s.copy(42);
   e = s.shrink(99);
-  io::println(Str(s.len()) + " " + s.at(0) + " " + kept.value.toString());
+  io::println(Str(s.len()) + " " + s.at(0) + " " + shown(kept));
   e = s.grow(1);
-  io::println(code(s.copy(1).error) + " " + code(s.swap(0, 1)));
+  io::println(codeOf(s.copy(1)) + " " + code(s.swap(0, 1)));
 
   opt = mem::Buffer<Str?>();
   e = opt.grow(2);
   e = opt.set(1, "here");
   io::println(Str(opt.at(0) == None) + " " + Str(opt.get(1) == None) + " "
-      + opt.copy(1).value.toString());
+      + shown(opt.copy(1)));
   f = mem::Buffer<float>();
   b = mem::Buffer<bool>();
   c = mem::Buffer<char>();

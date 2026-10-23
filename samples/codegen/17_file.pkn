@@ -1,12 +1,13 @@
 // 17_file.pkn — io::File: open, write, readln, equals, toString
-// Exercises: io::open() returning an error::Result<io::File> (its value on
-//            success, its error on failure), File.write(), File.readln()
-//            returning a Str? (None at the end), File.toString(),
-//            File.equals(), the file closed when the last reference goes.
+// Exercises: io::open() returning a res::Result<io::File, err::Error> (`Ok`
+//            with the file on success, `Err` with the error on failure),
+//            File.write(), File.readln() returning a Result too (`Err` at
+//            the end), File.toString(), File.equals(), the file closed when
+//            the last reference goes.
 //
 // args: {tmpdir}
 
-import ::result as res;
+import ::error as err;
 import ::io;
 
 // The path of the scratch file `name`: in the first argument's directory
@@ -20,15 +21,15 @@ fn scratchPath(args: view Str[], name: Str) -> Str {
 }
 
 fn writelines(path: Str) -> int {
-  r = io::open(path, "w");
-  match r.value {
-    f: io::File {
+  match io::open(path, "w") {
+    w: Ok {
+      f = w.value;
       f.write("line one\n");
       f.write("line two\n");
       f.write("line three\n");
     }
-    None {
-      io::printerrln("writelines: " + r.error.message());
+    e: Err {
+      io::printerrln("writelines: " + e.error.message());
       return 1;
     }
   }
@@ -36,16 +37,15 @@ fn writelines(path: Str) -> int {
 }
 
 fn readlines(path: Str) -> int {
-  r = io::open(path, "r");
-  match r.value {
-    None {
-      io::printerrln("readlines: " + r.error.message());
+  match io::open(path, "r") {
+    e: Err {
+      io::printerrln("readlines: " + e.error.message());
       return 1;
     }
-    f: io::File {
+    r: Ok {
       while True {
-        match f.readln().value {
-          line: Str { io::print(line); }
+        match r.value.readln() {
+          line: Ok { io::print(line.value); }
           _ { break; }
         }
       }
@@ -55,32 +55,29 @@ fn readlines(path: Str) -> int {
 }
 
 fn showToString(path: Str) {
-  r = io::open(path, "r");
-  match r.value {
-    None {
-      io::printerrln("showToString: " + r.error.message());
+  match io::open(path, "r") {
+    e: Err {
+      io::printerrln("showToString: " + e.error.message());
     }
-    f: io::File {
-      s: Str = f.toString();
+    r: Ok {
+      s: Str = r.value.toString();
       io::println(s);   // File@0x...
     }
   }
 }
 
 fn showEquals(path: Str) {
-  r = io::open(path, "r");
-  match r.value {
-    None {
-      io::printerrln("showEquals: " + r.error.message());
+  match io::open(path, "r") {
+    e: Err {
+      io::printerrln("showEquals: " + e.error.message());
     }
-    f: io::File {
-      r2 = io::open(path, "r");
-      match r2.value {
-        None {
-          io::printerrln("showEquals inner: " + r2.error.message());
+    r: Ok {
+      match io::open(path, "r") {
+        e2: Err {
+          io::printerrln("showEquals inner: " + e2.error.message());
         }
-        g: io::File {
-          eq: bool = f.equals(g);
+        r2: Ok {
+          eq: bool = r.value.equals(r2.value);
           io::println(Str<bool>(eq));  // False — different handles
         }
       }
@@ -109,11 +106,10 @@ fn main(args: view Str[]) -> int {
 
   // --- 5. open nonexistent file — the result's error says why --------------
   io::println("=== open failure ===");
-  failed = io::open("/no/such/file_sample_17.txt", "r");
-  match failed.value {
-    None {
-      io::println("error: " + res::name(failed.error.code) + ": "
-          + failed.error.message());
+  match io::open("/no/such/file_sample_17.txt", "r") {
+    e: Err {
+      io::println("error: " + err::name(e.error.code) + ": "
+          + e.error.message());
     }
     _ {
       io::println("unexpected success");

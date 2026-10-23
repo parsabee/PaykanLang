@@ -26,7 +26,7 @@ line each; the samples parity check (`scripts/samples_parity.py`, ctest
 | `07_class_empty.pkn`       | A fieldless class instance                            | object struct (`Paykan_malloc`)      |
 | `08_class_str_field.pkn`   | A class instance holding a `Str` field                | object struct + `PaykanString_new`   |
 | `09_class_inherit.pkn`     | A subclass instance via `__super__`                   | object struct (`Paykan_malloc`)      |
-| `10_error_open.pkn`        | The `res::Error` of a failed `io::open`               | `Paykan_error_text` (`Error.c`)      |
+| `10_error_open.pkn`        | The `err::Error` of a failed `io::open`               | `Paykan_error_text` (`Error.c`)      |
 | `11_file_write.pkn`        | `io::File` from a successful `io::open` + `write`     | `PaykanFile_new` (`File.c`) + the `io::File` object |
 | `12_file_readln.pkn`       | `readln` line buffer                                  | `PaykanFile_readln` (`File.c`)       |
 | `14_self_return_chain.pkn` | `self` returned (chained) out of a method             | `Paykan_retain` of the object (`Shared.c`) |

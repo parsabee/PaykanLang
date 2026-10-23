@@ -1,10 +1,10 @@
 // Sample 23 — Stdin
 //
-// Stdin is a built-in File singleton wrapping C's stdin.
-// Supported methods (same as any File):
-//   Stdin.readln()        -> Obj  (Str on success, None at EOF)
-//   Stdin.readbytes(n)    -> Obj  (Str of up to n bytes on success, None at EOF)
-//   Stdin.read()          -> Obj  (Str with all remaining input, None at EOF)
+// io::stdin() is an io::File wrapping C's stdin.
+// Its reads are those of any File, each a res::Result<Str, err::Error>:
+//   readln()        (`Ok` with the next line, `Err` with EndOfFile at EOF)
+//   readbytes(n)    (`Ok` with up to n bytes, `Err` with EndOfFile at EOF)
+//   read()          (`Ok` with all remaining input, `Err` with EndOfFile at EOF)
 //
 // Run this sample with piped input, e.g.:
 //   printf "hello\nworld\n42\n" | ./build/bin/paykan samples/codegen/23_stdin.pkn
@@ -16,8 +16,9 @@ fn main() -> int {
   io::println("=== readln ===");
   i: int = 0;
   while True {
-    match io::stdin().readln().value {
-      line: Str {
+    match io::stdin().readln() {
+      read: Ok {
+        line = read.value;
         // strip trailing newline for display
         n: int = line.len();
         display: Str = "";

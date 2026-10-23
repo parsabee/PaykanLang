@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Paykan runtime — errors (Runtime.h, "Errors"): what a C library failure
-// means to the standard library's ::result (stdlib/result.pkn), whose Error is
+// means to the standard library's ::error (stdlib/error.pkn), whose Error is
 // a value the Paykan code makes from these.
 
 #include "Runtime.h"

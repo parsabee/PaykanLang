@@ -1,10 +1,10 @@
 // 19_file_copy.pkn — Copy every line from a source file to a destination file.
 // Demonstrates: io::open() and File.readln() returning a res::Result, matched
-//               on its value (present on success, None on failure), and
-//               File.write().
+//               on its variants (`Ok` with the value on success, `Err` with
+//               the error on failure), and File.write().
 //
-// open()   -> Result<File> : the File, or the Error saying why not
-// readln() -> Result<Str>  : a line, or EndOfFile at the end
+// open()   -> Result<File, Error> : the File, or the Error saying why not
+// readln() -> Result<Str, Error>  : a line, or EndOfFile at the end
 //
 // args: {tmpdir}
 
@@ -21,27 +21,27 @@ fn scratchPath(args: view Str[], name: Str) -> Str {
 }
 
 fn writeSource(path: Str) -> int {
-  r = io::open(path, "w");
-  match r.value {
-    None {
-      io::printerrln("writeSource: " + r.error.message());
+  match io::open(path, "w") {
+    e: Err {
+      io::printerrln("writeSource: " + e.error.message());
       return 1;
     }
-    f: io::File {
+    w: Ok {
+      f = w.value;
       f.write("first line\n");
       f.write("second line\n");
       f.write("third line\n");
     }
   }
   return 0;
-  // f destroyed here -> fclose -> data flushed to disk
+  // the File destroyed when the match ends -> fclose -> data flushed
 }
 
 fn copy(inFile: io::File, outFile: io::File) {
   while True {
-    match inFile.readln().value {
-      line: Str {
-        outFile.write(line);
+    match inFile.readln() {
+      line: Ok {
+        outFile.write(line.value);
       }
       _ { break; }
     }
@@ -49,41 +49,37 @@ fn copy(inFile: io::File, outFile: io::File) {
 }
 
 fn copyFile(src: Str, dst: Str) -> int {
-  input = io::open(src, "r");
-  match input.value {
-    None {
-      io::printerrln("copyFile: cannot open src: " + input.error.message());
+  match io::open(src, "r") {
+    e: Err {
+      io::printerrln("copyFile: cannot open src: " + e.error.message());
       return 1;
     }
-    inFile: io::File {
-      output = io::open(dst, "w");
-      match output.value {
-        None {
-          io::printerrln("copyFile: cannot open dst: "
-              + output.error.message());
+    input: Ok {
+      match io::open(dst, "w") {
+        e: Err {
+          io::printerrln("copyFile: cannot open dst: " + e.error.message());
           return 1;
         }
-        outFile: io::File {
-          copy(inFile, outFile);
+        output: Ok {
+          copy(input.value, output.value);
         }
       }
     }
   }
   return 0;
-  // both File handles destroyed here -> fclose
+  // both File handles destroyed when the matches end -> fclose
 }
 
 fn printFile(path: Str) -> int {
-  r = io::open(path, "r");
-  match r.value {
-    None {
-      io::printerrln("printFile: " + r.error.message());
+  match io::open(path, "r") {
+    e: Err {
+      io::printerrln("printFile: " + e.error.message());
       return 1;
     }
-    f: io::File {
+    r: Ok {
       while True {
-        match f.readln().value {
-          line: Str { io::print(line); }
+        match r.value.readln() {
+          line: Ok { io::print(line.value); }
           _ { break; }
         }
       }

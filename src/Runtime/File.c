@@ -192,7 +192,7 @@ __attribute__((constructor)) static void PaykanFile_Stdin_init(void) {
 //
 // An io::File holds one of these objects as its handle, which the natives
 // bound to these functions take borrowed (`view Obj`).  Each reports a
-// failure as C's errno, which ::result turns into an Error: a write returns
+// failure as C's errno, which ::error turns into an Error: a write returns
 // it (0 when it succeeded), a read returns NULL with it in `*err` (an
 // int64_t, the native's `inout int`), 0 there meaning the end of the file.
 

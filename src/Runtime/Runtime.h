@@ -291,10 +291,10 @@ PaykanShared *Paykan_io_stdin(void);
 
 // -- Errors
 //
-// An error is a value of the standard library's ::result, which its Paykan
+// An error is a value of the standard library's ::error, which its Paykan
 // code makes; the runtime only says what a C library failure means.
 
-// The codes of the standard library's ErrorCode (stdlib/result.pkn), by its
+// The codes of the standard library's ErrorCode (stdlib/error.pkn), by its
 // variants' ordinals: the two must list them in the same order.
 enum {
   PAYKAN_ERROR_OK = 0,

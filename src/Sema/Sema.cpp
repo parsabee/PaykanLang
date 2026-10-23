@@ -1874,7 +1874,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     for (auto *ty : argTypes)
       if (!ty)
         return nullptr; // argument errors already reported; cannot infer
-    if (!S.resolveGenericCall(node, argTypes))
+    if (!S.resolveGenericCall(node, argTypes, expected))
       return nullptr;
   } else if (S.CurrentTypeParams &&
              S.CurrentTypeParams->count(node->getCalleeName())) {

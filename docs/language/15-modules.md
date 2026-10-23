@@ -158,8 +158,8 @@ ordinary module, and it is cached under `.paykan_cache/@system/` (see
 [Module Files](#module-files)).
 
 The standard library ships with the compiler (see [the standard library](../stdlib/index.md)):
-`::io` prints, reads and writes files; `::result` holds the errors that library functions
-report; `::collections` has lists, linked lists, stacks, queues, hash maps, hash sets and
+`::io` prints, reads and writes files; `::error` holds the errors that library functions
+report and `::result` the results they return; `::collections` has lists, linked lists, stacks, queues, hash maps, hash sets and
 priority queues; `::math` has the mathematical functions (`math::sqrt`, `math::pi()`, …);
 and `::memory` has `Buffer<T>` and `Box<T>`. Printing is `::io`, so a program that prints
 imports it (`import ::io;`, then `io::println(...)`). Only the builtins (`Obj`, `Str` and

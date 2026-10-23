@@ -8,17 +8,21 @@ import ::io;
 
 fn func1() {
   r = io::open("/nonexistent/paykan/leak-check/path.txt", "r");
-  match r.value {
-    f: io::File { }
-    None { }
+  match r {
+    f: Ok { }
+    e: Err { }
   }
 }
 
 fn func2() {
-  msg: Obj =
-      io::open("/nonexistent/paykan/leak-check/path.txt", "r").error.message();
-  match msg {
-    s: Str { }
+  match io::open("/nonexistent/paykan/leak-check/path.txt", "r") {
+    e: Err {
+      msg: Obj = e.error.message();
+      match msg {
+        s: Str { }
+        _ { }
+      }
+    }
     _ { }
   }
 }

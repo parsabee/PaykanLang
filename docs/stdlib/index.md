@@ -16,7 +16,8 @@ declares is named with the module's qualifier:
 
 ```pkn
 import ::io;                    // io::println(...), io::open(...)
-import ::result as res;         // res::Error, res::Result<T>
+import ::error as err;          // err::Error, err::ErrorCode::NotFound
+import ::result as res;         // res::Result<T, E>, res::ok(...), res::fail(...)
 import ::collections;           // collections::List<int>()
 import ::{memory, math};        // memory::Box(0), math::sqrt(2.0)
 ```
@@ -31,7 +32,8 @@ Printing is not one of them: a program that prints imports `::io`.
 | Module | What it has |
 |--------|-------------|
 | [`::io`](io.md) | Printing any `Show` value (`print`, `println`, `printerr`, `printerrln`), files (`open` and the class `File`) and the standard input (`stdin()`) |
-| [`::result`](result.md) | Errors as values: `ErrorCode`, the standard set of errors; `Error`, a code and a message; `Result<T>`, an error and the value made when there was none |
+| [`::error`](error.md) | Errors as values: `ErrorCode`, the standard set of errors; `Error`, a code and a message; `none` and `fromErrno`, which make them |
+| [`::result`](result.md) | `Result<T, E>`, the value an operation made (`Ok`) or the error saying why it could not (`Err`); `ok` and `fail`, which make them |
 | [`::collections`](collections.md) | The containers `List<T>`, `LinkedList<T>`, `Stack<T>`, `Queue<T>`, `HashMap<K, V>`, `HashSet<K>`, `MinPriorityQueue<T>` and `MaxPriorityQueue<T>`, and `listOf` and `listToString` |
 | [`::memory`](memory.md) | `Buffer<T>`, the growable run of slots the containers keep their elements in, and `Box<T: ValueType>`, one value in a shared object |
 | [`::math`](math.md) | The C library's `<math.h>` functions on `float` (`sqrt`, `pow`, `exp`, `log`, `sin`, `atan2`, `floor`, `round`, `gamma`, ...), the constants `pi()`, `e()`, `inf()`, `nan()`, and `isNaN`, `isInf`, `isFinite` |
@@ -40,8 +42,8 @@ What the modules have in common:
 
 - **Two ways to fail.** What can go wrong in the world (a file that is not there, a read
   at the end of the input, memory that runs out) is reported as a value: a library function
-  that can fail returns a [`res::Result<T>`](result.md), or a
-  [`res::Error`](result.md#error) when it makes no value. A broken precondition, a mistake
+  that can fail returns a [`res::Result<T, err::Error>`](result.md), or an
+  [`err::Error`](error.md#error) when it makes no value. A broken precondition, a mistake
   in the program (an index out of range, `pop` on an empty container, `get` of a key a map
   does not have), **panics**: it prints `paykan: <message>` to stderr and aborts the program
   (`paykan run` then exits with status 134; see
@@ -55,7 +57,8 @@ What the modules have in common:
   its own methods`, `'memory::_new' is private to module '::memory'`). These pages do not
   document them.
 - **Type names are global** across an import graph, so a program that imports `::io` (which
-  imports `::result`) cannot declare its own `File`, `Error`, `Result` or `ErrorCode`
+  imports `::error` and `::result`) cannot declare its own `File`, `Error`, `Result` or
+  `ErrorCode`
   (`class 'File' conflicts with an imported type of the same name`). The library's function
   names are not reserved: a program may declare its own `fn print`.
 - **Sized numeric types** ([`u8`, `i32`, `unsigned`, `f32`, ...](../language/02-basics.md#sized-numeric-types))

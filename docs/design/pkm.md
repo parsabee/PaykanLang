@@ -375,7 +375,7 @@ through `T_CLASS` by name, not by index).
 | tag | entry | payload | meaning |
 |---|---|---|---|
 | 1–5 | `T_INT`, `T_FLOAT`, `T_BOOL`, `T_CHAR`, `T_VOID` | — | primitives (`void` for returns only) |
-| 6 | `T_BUILTIN_CLASS` | `u8 kind` | 0 `Obj`, 1 `Str`: bootstrapped by every `ASTContext`, never described. 2 and 3 were the builtin classes `File` and `Error`, which are gone (`io::File` and `res::Error` are ordinary types of the standard library's modules); the codes stay reserved and unused while the format is frozen |
+| 6 | `T_BUILTIN_CLASS` | `u8 kind` | 0 `Obj`, 1 `Str`: bootstrapped by every `ASTContext`, never described. 2 and 3 were the builtin classes `File` and `Error`, which are gone (`io::File` and `err::Error` are ordinary types of the standard library's modules); the codes stay reserved and unused while the format is frozen |
 | 7 | `T_CLASS` | `Mod, Str name` | a user class; `mod` 0 → described by a `CLASS` record here, else by that module's blob |
 | 8 | `T_ENUM` | `Mod, Str name` | likewise |
 | 9 | `T_OPAQUE` | `Mod, uleb id` | a module-private class seen only as the type of a private field of a public class (#19): an object reference with no name or members; `id` = position among the module's private classes sorted by name |

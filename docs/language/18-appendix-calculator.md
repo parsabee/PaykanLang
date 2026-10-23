@@ -430,19 +430,19 @@ fn evalStatement(src: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
 ### The REPL
 
 The interactive loop is the standard-input idiom from [Files and I/O](../stdlib/io.md).
-`readln` returns a result whose `value` is a `Str?`, so the end of input is caught by the
-`_` arm (the `None`); `handle` returns `False` for `:quit`:
+`readln` returns a `Result` that is `Ok` with the line, or `Err` at the end of the input,
+which the `_` arm catches; `handle` returns `False` for `:quit`:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
   while True {
-    match io::stdin().readln().value {
-      line: Str {
-        if !handle(line, env, history, quiet) {
+    match io::stdin().readln() {
+      line: Ok {
+        if !handle(line.value, env, history, quiet) {
           return 0;
         }
       }
-      _ { break; } // None — end of input
+      _ { break; } // Err — the end of the input
     }
   }
 ```

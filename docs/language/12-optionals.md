@@ -385,8 +385,8 @@ match maybe {
   call result, an array element.
 
 Matching on an `Obj` subject is unchanged, and a `None` arm is only valid on an optional
-subject. A read's result holds a `Str?`, so the `match io::stdin().readln().value { line: Str
-{ … } _ { … } }` idiom is an optional-mode match (see [Input and output](../stdlib/io.md)).
+subject. A read's result is a `Result`, an enum, not an optional: `match io::stdin().readln() {
+line: Ok { … } _ { … } }` is a variant-mode match (see [Input and output](../stdlib/io.md)).
 
 ---
 
