@@ -450,10 +450,14 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
                       method->getName() != names::kMethodInit &&
                       method->getName() != names::kMethodDestroy;
     if (pure && overridden && !overridden->isPure()) {
+      // Named by the class that implements it, not the direct superclass,
+      // which may inherit it.
+      const ast::ClassType *implementer =
+          declaringClass(ct->getSuperClass(), method->getName());
       error(method->getLocation(),
             "method '" + method->getName() + "' of class '" + cd->getName() +
                 "' has no body, but its superclass '" +
-                displayName(ct->getSuperClass()->getName()) +
+                displayName(implementer->getName()) +
                 "' implements it: an implemented method cannot become pure "
                 "virtual again");
       ok = false;

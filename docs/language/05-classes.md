@@ -905,7 +905,8 @@ impl SportsCar {
   only a method in a class body can end its signature with ';' (a pure virtual method)`, or
   `'f' has no body: a 'static fn' needs one`). `__init__` is not a virtual method and goes
   in an `impl` block with its body (`'__init__' has no body: an initializer needs one`),
-  and `destroy` cannot be written at all.
+  and `destroy` cannot be written at all (`'destroy' is the compiler-generated destructor
+  and cannot be overridden`).
 - A class is **abstract** when a slot of its vtable is pure virtual: declared without a body
   in the class or a superclass, and implemented by none of them. Abstractness is never
   declared; the compiler works it out from the vtable. A subclass implements a pure virtual
@@ -945,7 +946,7 @@ impl SportsCar {
 - A generic class's pure virtual methods follow the same rules in each instantiation. A
   superclass cannot be generic ([Generics](13-generics.md#declaring-a-generic-class)), so
   nothing can implement them: a generic class with one is abstract in every instantiation,
-  a type no object has. A generic class can implement a concrete class's pure virtual
+  a type no object has. A generic class can implement a non-generic class's pure virtual
   methods (`class Wrap<T> : Shape { ... }`).
 - A module's pure virtual methods are part of its interface, from its source or its `.pkm`
   file; an importer works out which of its classes are abstract itself. A subclass in

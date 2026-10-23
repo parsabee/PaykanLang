@@ -364,14 +364,21 @@ fn main() -> int { return 0; }
 // -- Overrides
 
 // An implemented method (the superclass's own, inherited, or the runtime's
-// for `Obj`'s) cannot become pure virtual again.
+// for `Obj`'s) cannot become pure virtual again.  The error names the class
+// that implements it, which need not be the direct superclass.
 TEST(PureVirtual, ImplementedMethodCannotBecomePureAgain) {
   auto r = semaCheck(withShapes(R"(
 class Tile : Square {
   view fn area() -> float;
+  view fn perimeter() -> float;
+  view fn label() -> Str;
 }
 class Thing {
   view fn toString() -> Str;
+}
+class Plain { n: int; }
+class Below : Plain {
+  view fn equals(o: Obj) -> bool;
 }
 fn main() -> int { return 0; }
 )"));
@@ -382,11 +389,24 @@ fn main() -> int { return 0; }
                                "again"),
             std::string::npos)
       << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("method 'perimeter' of class 'Tile' has no "
+                               "body, but its superclass 'Polygon' implements "
+                               "it"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("method 'label' of class 'Tile' has no body, "
+                               "but its superclass 'Shape' implements it"),
+            std::string::npos)
+      << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("method 'toString' of class 'Thing' has no "
                                "body, but its superclass 'Obj' implements it"),
             std::string::npos)
       << r.Diagnostics;
-  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("method 'equals' of class 'Below' has no "
+                               "body, but its superclass 'Obj' implements it"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 5u) << r.Diagnostics;
 }
 
 // An implementation is an override: the same signature and markers.

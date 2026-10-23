@@ -318,7 +318,8 @@ TEST(Class, PureVirtualMethodOfAGenericClass) {
 // Only a class body's method may leave out its body: a free function, an
 // `impl` block's method or `static fn` (a struct's methods are in one) is a
 // syntax error at the `;`.  An initializer and a `static fn` are never in
-// a class body, so their errors only ask for the body.
+// a class body, so their errors only ask for the body (naming an
+// initializer as written), and `destroy` is never declared at all.
 TEST(Class, BodilessFunctionsOutsideAClassBodyAreRejected) {
   auto free = parseWithDiags("fn f(x: int) -> int;\n"
                              "fn main() -> int { return 0; }\n");
@@ -345,7 +346,9 @@ TEST(Class, BodilessFunctionsOutsideAClassBodyAreRejected) {
         Case{"fn __init__(x: int);",
              "error: '__init__' has no body: an initializer needs one"},
         Case{"fn ___init__();",
-             "error: '__init__' has no body: an initializer needs one"}}) {
+             "error: '___init__' has no body: an initializer needs one"},
+        Case{"fn destroy();", "error: 'destroy' is the compiler-generated "
+                              "destructor and cannot be overridden"}}) {
     auto impl = parseWithDiags(std::string("class A {}\nimpl A { ") + c.Member +
                                " }\nfn main() -> int { return 0; }\n");
     EXPECT_FALSE(impl.Ok) << c.Member;

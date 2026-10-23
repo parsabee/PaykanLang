@@ -232,7 +232,9 @@ free function, `'f' in an 'impl' block has no body: an 'impl' block's
 methods are called directly, so only a method in a class body can end its
 signature with ';' (a pure virtual method)` for an `impl` block's method,
 and `'f' has no body: a 'static fn' needs one` and `'__init__' has no body:
-an initializer needs one` for a `static fn` and an initializer.
+an initializer needs one` for a `static fn` and an initializer (named as
+written, `___init__` too); `destroy`, which is never declared, gets
+`'destroy' is the compiler-generated destructor and cannot be overridden`.
 
 A parameter's type may start with its mode, `view` or `inout`
 ([language/03-functions.md](language/03-functions.md)):

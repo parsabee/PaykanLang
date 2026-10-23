@@ -22,16 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A call of a pure virtual method goes through the vtable, from an `impl` method too, and
     a superclass's `__init__` that calls one reaches the subclass's implementation (the
     constructor installs the object's vtable before any `__init__` runs).
-  - Only a class body's method may leave out its body: `fn f();` elsewhere is a syntax error
-    (`function 'f' has no body: ...`, or in an `impl` block `'f' in an 'impl' block has no
-    body: ...`, `'f' has no body: a 'static fn' needs one` and `'__init__' has no body: an
-    initializer needs one`). A method its superclass implements cannot be made
-    pure virtual again, and a `match` arm naming an abstract class is rejected
-    (`unreachable arm: no object has the exact type of abstract class 'Shape'`,
-    docs/language/08-match.md); the arm unwrapping a `Shape?` stays fine.
+  - Only a class body's method may leave out its body: `fn f();` elsewhere (but in a
+    trait) is a syntax error (`function 'f' has no body: ...`, or in an `impl` block `'f'
+    in an 'impl' block has no body: ...`, `'f' has no body: a 'static fn' needs one` and
+    `'__init__' has no body: an initializer needs one`). A method its superclass
+    implements cannot be made pure virtual again, and a `match` arm naming an abstract
+    class is rejected (`unreachable arm: no object has the exact type of abstract class
+    'Shape'`, docs/language/08-match.md); the arm unwrapping a `Shape?` stays fine.
   - Generic classes follow the same rules per instantiation (a superclass cannot be
     generic, so a generic class with a pure virtual method has no objects; a generic
-    subclass can implement a concrete class's), and modules export the pure
+    subclass can implement a non-generic class's), and modules export the pure
     bit with each method, from a source and from a `.pkm` (the method flags byte's bit 4,
     the `PURE` bit docs/design/pkm.md reserved; an importer works out abstractness itself).
     The AST interchange format writes a pure virtual method's body as `_`

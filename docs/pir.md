@@ -300,13 +300,14 @@ fn @Shape.area(%self.1: obj) -> f64 {
 }
 ```
 
-It is the slot's target in `C` and in each subclass that does not implement
-`m`, in this module or another (an `extern fn` there, like any inherited
-method).  A class with such a slot is **abstract**: nothing constructs it,
-so it has no constructor `@C` and no `new` names it, while its
-`@C.__init__`, which its subclasses' `__init__` calls, and its destructor
-are emitted as usual.  The format needs no mark for it: an abstract class is
-one without a constructor.
+It is the slot's target in `C` and in each subclass that neither implements
+`m` nor declares it pure again, in this module or another (an `extern fn`
+there, like any inherited method); one that declares it pure again has a
+trap of its own, `@Sub.m`, which names `C` too.  A class with such a slot
+is **abstract**: nothing constructs it, so it has no constructor `@C` and
+no `new` names it, while its `@C.__init__`, which its subclasses'
+`__init__` calls, and its destructor are emitted as usual.  The format
+needs no mark for it: an abstract class is one without a constructor.
 
 ## 6. Statements and instructions
 
