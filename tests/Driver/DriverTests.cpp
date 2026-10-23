@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Smoke tests for the paykan driver CLI (--check-only, --dump-ast, --version).
 // The PAYKAN_BIN CMake variable is injected so tests find the binary.

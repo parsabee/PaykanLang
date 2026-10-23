@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Passes over a PIR program and the manager that runs them (docs/pir.md
 // §12).  A pass rewrites the program in place; the manager runs its passes
 // in order and, when asked, verifies the program after each one, so a pass

@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Parsa Bagheri
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: Apache-2.0
  *
  * The `print-pir` backend: the smallest possible backend, as a template for
  * writing your own (docs/writing-a-backend.md).  Plain C11 against

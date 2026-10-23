@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Codegen / E2E tests for structs (docs/language/11-structs.md): values held
 // in place with named fields, assigned in place, with methods from an `impl`
 // block whose `self` is the receiver's storage.  Every runtime test runs

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // What a module's `.pkm` keeps of its code (docs/design/pkm.md §5.13).  A
 // module is lowered with a copy of every instantiation it uses; before its

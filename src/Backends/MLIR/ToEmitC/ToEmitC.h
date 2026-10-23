@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The C path of the mlir backend (docs/design/mlir-backend.md): the shared
 // lowering's output in EmitC, printed as C11 by MLIR's C emitter.
 

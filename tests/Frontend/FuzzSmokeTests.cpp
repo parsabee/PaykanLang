@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Parser fuzz smoke test: random and mutated inputs must never crash, hang or
 // leak any enabled frontend (the ASan/LSan CI job checks the leaks).
 // Deterministic (fixed seeds) so a failure reproduces.

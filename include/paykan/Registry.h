@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Plugin registry shared by frontends and backends.
 //
 // A plugin implements one of the compiler's interfaces (frontend::Frontend,

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for the runtime functions behind the sized numeric types
 // (docs/design/sized-types.md): `unsigned` printing and parsing, and the

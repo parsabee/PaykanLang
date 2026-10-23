@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The plugin compatibility check of the running toolchain (#103): its own
 // version and the plugin build versions it accepts, compiled into the core
 // from the generated paykan/PluginCompat.h of this build.

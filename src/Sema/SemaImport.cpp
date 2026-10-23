@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Semantic analysis: import resolution, module exports and their
 // reconstruction in the importer.  A module is identified by its canonical

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The frontend interface: source text -> AST + diagnostics.
 //
 // A frontend is a lexer and parser for the Paykan language.  Everything after

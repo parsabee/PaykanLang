@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Shared test utilities for Paykan compiler unit tests (frontend + Sema).
 // Helpers that compile and run programs live in CodeGenTestUtils.h.
 

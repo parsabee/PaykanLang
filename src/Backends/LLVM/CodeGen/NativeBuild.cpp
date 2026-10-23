@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Running and building a program's LLVM module (see NativeBuild.h).
 
 #include "NativeBuild.h"

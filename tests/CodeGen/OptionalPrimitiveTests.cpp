@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // CodeGen / E2E tests for optional primitives `int?`, `float?`, `bool?` and
 // `char?` (#66).  An optional primitive is a value, the primitive and a
 // presence flag (#96), held inline in variables, fields, array elements and

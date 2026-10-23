@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: poisoned binders (#89).  A binder whose declaration fails is
 // still bound -- to the internal poison type -- and every use of it is
 // absorbed silently, so only the original error is reported: never a

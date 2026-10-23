@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR -> the `pir` MLIR dialect.  One pass over a verified module: every
 // item, statement and instruction becomes the op of the same name, every
 // value the op's result, and every constant operand an op of its own

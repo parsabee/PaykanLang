@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for PaykanType, the description of a type a generic native
 // function is passed: copying and dropping a value through it retains and

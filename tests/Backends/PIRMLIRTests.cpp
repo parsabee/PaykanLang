@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR -> the `pir` MLIR dialect: every item and instruction of docs/pir.md,
 // and every sample program, imports into MLIR that verifies, and the printed
 // MLIR parses back to the same text.  The shared lowering

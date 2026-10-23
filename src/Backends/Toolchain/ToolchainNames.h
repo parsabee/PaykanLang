@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Centralized string constants of the native toolchain: the C compiler /
 // linker command line (Toolchain.cpp) and

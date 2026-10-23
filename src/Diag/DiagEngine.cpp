@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The diagnostic engine (DiagEngine.h): formatting with the source snippet,
 // and the debug-build guard against reporting one diagnostic twice.

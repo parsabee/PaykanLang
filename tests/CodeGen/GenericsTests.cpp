@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Codegen tests: generic classes and functions run end to end through the
 // JIT, and every allocation is released (instantiations are ordinary
 // classes, so ARC applies to them unchanged).

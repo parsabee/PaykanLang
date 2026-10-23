@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Codegen / E2E tests for the PaykanBuffer_* runtime functions, called the
 // way the standard library's memory::Buffer<T> calls them: an ordinary
 // generic class whose methods are generic native functions.  Every run is

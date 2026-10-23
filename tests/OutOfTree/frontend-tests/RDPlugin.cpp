@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The `rd-plugin` frontend: the installation's recursive-descent parser as
 // a loadable frontend plugin, for the exported test support's own test

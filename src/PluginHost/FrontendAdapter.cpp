@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // A loaded plugin's C frontend (PaykanFrontend, paykan/plugin_api.h) as a
 // frontend::Frontend.  The plugin returns the program as text in the AST

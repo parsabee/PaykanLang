@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Parser tests: conversion constructors `Target<Source>(value)` (#64).  A
 // conversion is an ordinary call with one explicit type argument whose
 // callee is a type name (`Str`, or a builtin type such as `int`); Sema tells

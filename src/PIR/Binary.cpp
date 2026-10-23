@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Binary PIR codec (docs/design/pkm.md §5) and symbol index (§6.1).  The
 // writer walks the module's vectors in order and interns strings on first

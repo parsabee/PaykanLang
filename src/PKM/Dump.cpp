@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // `paykan pkm dump` text (docs/design/pkm.md §8.5).  Golden-tested: the
 // format changes only with a deliberate test update.  Nothing here depends

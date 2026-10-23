@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for PaykanTuple_toString and PaykanTuple_equals: a tuple is a
 // value held in place, so each test builds one in C++ memory laid out the

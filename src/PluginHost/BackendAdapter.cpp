@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // A loaded plugin's backend (PaykanBackend, paykan/plugin_api.h) as a
 // backend::Backend: the driver selects and drives it exactly like a

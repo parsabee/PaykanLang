@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Running and building a program's linked LLVM module, for the backends
 // that produce one (llvm, mlir): in process with the JIT (`run`), or ahead
 // of time as a native object with the C entry point an executable needs,

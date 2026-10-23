@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // NULL-box tolerance optional types (issue #5) rely on: a
 // `T?` is a possibly-NULL PaykanShared*, so every runtime entry point that

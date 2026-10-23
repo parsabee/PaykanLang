@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The IFACE blob codec (docs/design/pkm.md §3): round trip, determinism,
 // the part table and record framing, and the §3.7 invariants the prototype
 // records support.

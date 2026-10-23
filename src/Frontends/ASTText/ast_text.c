@@ -1,5 +1,5 @@
 /* Copyright (c) 2026 Parsa Bagheri
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: Apache-2.0
  *
  * The `ast-text` frontend: the smallest possible frontend, as a template
  * for writing your own (docs/writing-a-frontend-plugin.md).  Plain C11

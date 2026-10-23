@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Ownership / ARC regression tests for the unique-box invariant (PAY-1).
 //
 // Every heap object has exactly one PaykanShared box, recoverable from the

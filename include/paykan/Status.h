@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Error reporting across the backend interface.
 //
 // The core is built with -fno-exceptions and must not use llvm::Expected, so

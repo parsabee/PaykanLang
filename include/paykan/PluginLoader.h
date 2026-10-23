@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The plugin loader: finds plugin libraries at startup, checks them, and
 // registers what they provide (docs/plugins/overview.md).
 //

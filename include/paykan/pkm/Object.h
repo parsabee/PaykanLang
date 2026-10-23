@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The OBJ section (docs/design/pkm.md §5.13): a module's code, compiled by
 // a backend when the module was written.  CODE then holds only the

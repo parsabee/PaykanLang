@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Semantic analysis: private names (docs/design/visibility.md).  A field or
 // method starting with `__` is private to its class or struct (reachable from

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The dead-code pass (docs/pir.md §12): what no root of a program reaches,
 // erased before anything is lowered.  A binary's root is its entry point; a
 // module written to a `.pkm` has the roots of what its importers may use.

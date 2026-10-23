@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // AST -> PIR lowering tests: every program is lowered, verified, printed, and
 // the printed PIR is checked for the ownership shapes the lowering must
 // produce (docs/pir.md §7).  The programs' behaviour is covered by the

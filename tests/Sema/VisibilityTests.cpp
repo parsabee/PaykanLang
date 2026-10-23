@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: private names (docs/design/visibility.md).  A `__` field or
 // method is its class's or struct's own, reachable from that type's
 // methods, `impl` blocks, trait impls and `static fn`s only; a `_` name is

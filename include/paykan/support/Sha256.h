@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // SHA-256 (FIPS 180-4) for the hashes a .pkm records and checks: section
 // hashes, the source hash, interface and code hashes.  Standard C++ only;

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The .pkm container (docs/design/pkm.md §1): a fixed header, a hashed
 // section table and self-delimiting sections.  File::read performs steps 1-5

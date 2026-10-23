@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The module resolver: where an imported module comes from (docs/design/pkm.md
 // §8, phase A6-lite).  The driver creates one per compilation and hands it to

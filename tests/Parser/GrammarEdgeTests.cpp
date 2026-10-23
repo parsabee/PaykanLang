@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Grammar corners where frontends have disagreed with docs/grammar.md (see
 // its section 10).  These run on every frontend, out-of-tree ones included
 // (paykan_add_frontend_tests, docs/writing-a-frontend-plugin.md).

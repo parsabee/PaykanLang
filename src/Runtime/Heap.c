@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Paykan runtime — the pluggable heap allocator (Runtime.h, "Pluggable heap
 // allocator").  Paykan_malloc / Paykan_realloc / Paykan_free dispatch through

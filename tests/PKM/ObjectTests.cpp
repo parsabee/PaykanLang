@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The OBJ blob (docs/design/pkm.md §5.13): round trip, and every way a
 // reader rejects one.
 

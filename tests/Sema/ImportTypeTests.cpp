@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: types named by an imported module's exported signatures —
 // module-local classes/enums/arrays in method and function signatures,
 // transitive imports, and the diagnostics for unresolvable exported types.

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The plugin loader, end to end: C plugins (tests/Plugin/modules) loaded
 // into the real paykan through every discovery path, the checks that reject

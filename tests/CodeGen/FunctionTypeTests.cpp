@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Codegen / E2E tests for function values (docs/language/14-function-types.md):
 // lambdas and their captures (by copy: values copied, references retained),
 // named functions as values, calls through variables, fields, elements and

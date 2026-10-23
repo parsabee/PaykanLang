@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // AST -> PIR lowering: values held in memory, fixed-size arrays (`T[n]`,
 // docs/language/09-arrays.md) and tuples (docs/language/10-tuples.md).

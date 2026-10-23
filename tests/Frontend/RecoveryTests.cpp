@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Error recovery of the recursive-descent frontend: several independent errors
 // in one file are all reported, at statement, class-member and top-level
 // boundaries, and a file with errors always fails.

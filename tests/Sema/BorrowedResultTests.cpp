@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: borrowed results (`-> view T`).  A function returns a borrow
 // of what it was given as one, and its caller sees the result as a `view`.
 

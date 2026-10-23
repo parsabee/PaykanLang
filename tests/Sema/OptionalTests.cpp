@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: optional types `T?` (issue #5) — assignability,
 // operations that require unwrapping, equality against None, `match` as the
 // unwrap, exhaustiveness, optional fields, `T?[n]`, and module round-trips.

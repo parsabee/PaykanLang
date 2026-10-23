@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The PIR pass manager and the dead-code pass (docs/pir.md §12), and the
 // shared and compiled items they work with (§4).
 

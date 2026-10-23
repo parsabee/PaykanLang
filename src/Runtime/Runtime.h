@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Paykan language runtime — the C ABI of the builtin class types, shared by
 // the runtime, the generated code (the C of --emit-c includes this header,

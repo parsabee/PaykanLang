@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: structs (docs/language/11-structs.md) — declarations and their
 // fields, nominal typing, construction, field access and assignment, `impl`
 // blocks (methods, `__init__`, `static fn`, traits), `self` in a method, the

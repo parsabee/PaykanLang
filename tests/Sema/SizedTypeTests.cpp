@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: the sized numeric types (docs/design/sized-types.md) — the
 // names and their other spellings, literals taking the type their context
 // expects and the fit check, the one-type rule for operators with the `int`

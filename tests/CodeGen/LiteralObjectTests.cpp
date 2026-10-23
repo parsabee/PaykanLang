@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // String literals used as objects (#116): a literal in any value position (a
 // subscript or method receiver, as a match subject, a
 // conversion argument, a tuple / array element, an optional) is a Str object

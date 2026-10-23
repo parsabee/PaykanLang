@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // pir::Builder — appends instructions and structured statements to a PIR
 // function.  Used by the AST->PIR lowering and by tests that construct PIR by

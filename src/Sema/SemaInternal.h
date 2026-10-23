@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Private helpers shared across Sema translation units.
 // Not part of the public API — do not include from outside src/Sema/.

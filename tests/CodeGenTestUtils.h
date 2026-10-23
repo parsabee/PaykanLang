@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Test utilities that compile and run Paykan programs through the mlir
 // backend: lowering -> PIR -> MLIR -> LLVM IR (through the bitcode cache,
 // like the driver) -> ORC JIT, in process.  Every test asserts stdout, the

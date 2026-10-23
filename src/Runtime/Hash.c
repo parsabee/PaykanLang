@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Paykan runtime — `hash()` of the types that implement the builtin
 // `Hashable` trait natively: int, bool, char (PaykanInt_hash) and Str

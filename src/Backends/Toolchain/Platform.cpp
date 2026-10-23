@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The compiler's portability layer (see Platform.h).  This is the only file
 // of the compiler that includes operating-system headers.

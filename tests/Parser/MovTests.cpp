@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Parser tests: `mov` is retired (#145).  The keyword stays reserved and every
 // frontend reports frontend::kMovRemoved at it, once per use.
 

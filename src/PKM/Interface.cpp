@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The IFACE blob codec (docs/design/pkm.md §3.2, §3.3, §3.5, §3.7) in its
 // prototype form: the part table and record framing are the design's, the

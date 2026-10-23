@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Unit tests for PaykanStruct_toString and PaykanStruct_equals: a struct is a
 // value held in place like a tuple, with a name and named fields, so each

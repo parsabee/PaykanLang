@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Exclusivity of local borrows (docs/language/02-basics.md,
 // "Local borrows"): while an `inout` local is live, the variable it names
 // cannot be used except through it, and while a `view` local of a variable

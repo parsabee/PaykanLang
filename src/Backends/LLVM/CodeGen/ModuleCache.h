@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // A program's LLVM modules, as the mlir backend's LLVM path translates them
 // (or any translation of one PIR module to LLVM IR): the per-project
 // bitcode cache of imported modules, linking, and -O<n>.

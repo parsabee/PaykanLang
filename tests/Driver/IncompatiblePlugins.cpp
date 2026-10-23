@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Test-only plugins for the paykan_incompatible_plugins driver
 // (tests/CMakeLists.txt): a frontend and a backend that claim to be built

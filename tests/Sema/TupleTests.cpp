@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema tests: tuple types — element types, indexing, immutability,
 // destructuring, assignability, views, tuples in signatures/fields/arrays,
 // and the module round-trip of tuple-typed signatures.

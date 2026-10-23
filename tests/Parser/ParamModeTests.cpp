@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Parser tests: `view` and `inout` parameters and locals.  The keywords may
 // mark the type of a parameter of a function, a method or a constructor
 // (`n: inout int`) or of a local borrow (`x: view = e;`), and nothing else.

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The plugin registry's compatibility check (#103): fake plugins registered
 // as built with an accepted and with a rejected PaykanLang version.  The

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Sema: traits (#216).  A trait names the methods a type implementing it
 // must have; `impl Trait for A` declares that class A implements it.  The

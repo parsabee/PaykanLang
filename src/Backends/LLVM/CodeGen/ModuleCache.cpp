@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // A program's LLVM modules: translated by a backend (ModuleCache.h), served
 // from and written to the per-project bitcode cache, linked and optimised.
 

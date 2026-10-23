@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // AST -> PIR lowering: scopes, ownership classification, ARC placement,
 // statements.  Expressions are in LoweringExpr.cpp, `match` in

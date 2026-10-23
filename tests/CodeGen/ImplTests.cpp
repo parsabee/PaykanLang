@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Codegen tests: `impl` blocks.  Their methods are called directly (no
 // vtable slot), subclasses inherit them, their `static fn`s are called as
 // `Type::name()`, also from another module, and they can hold `__init__`.

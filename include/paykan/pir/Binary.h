@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Binary PIR: the CODE section of a .pkm module file (docs/design/pkm.md §5)
 // and its symbol index (§6.1).  A one-to-one encoding of PIR.h, so the same

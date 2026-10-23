@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Sema::ModuleInfo <-> pkm::Interface: the exports of a module and their
 // .pkm form carry the same declarations, so a module loaded from a file is
 // injected exactly like one built in process.

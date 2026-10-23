@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // What a module's `.pkm` keeps of its code (paykan/modules/ModuleCode.h,
 // docs/design/pkm.md §5.13): the instantiations its interface exposes, the
 // trim, and the split into CODE and the code a backend compiles.

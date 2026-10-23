@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The C path of the mlir backend.  One conversion takes func, scf and arith
 // to EmitC with upstream patterns and the pir ops the shared lowering keeps
 // with the patterns below; the translation unit around them (includes, the

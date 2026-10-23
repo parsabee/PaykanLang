@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // Paykan runtime — internal helpers shared between the runtime's translation
 // units.  Not part of the public C ABI (Runtime.h); nothing here is visible

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Program functions spelled like runtime symbols (#117).  Runtime externs
 // are `$rt.<symbol>` in PIR (docs/pir.md), so a user function named
 // `PaykanString_new`, `Paykan_println` or `Paykan_panic_div_by_zero` is an

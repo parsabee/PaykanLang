@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 //
 // The AST interchange format's writer (paykan/ast/Interchange.h,
 // docs/plugins/ast-format.md).  One list per node, each child list on a line

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // PIR text parser: reads the format of docs/pir.md §10 (what Printer.cpp
 // prints) into the in-memory form.  Recursive descent over a small token
 // stream; everything the verifier checks (types, declarations, scoping) is

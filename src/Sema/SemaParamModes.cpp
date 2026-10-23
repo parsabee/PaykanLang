@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // The rules of `view` and `inout` parameters, of any type
 // (docs/language/03-functions.md, "Parameter modes"): overrides,
 // and the arguments an `inout` parameter takes, none of them overlapping

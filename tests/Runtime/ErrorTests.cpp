@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Parsa Bagheri
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 // Unit tests for the runtime's errors (Runtime.h, "Errors"): what a C
 // library failure's errno means to the standard library's ::result.
 
