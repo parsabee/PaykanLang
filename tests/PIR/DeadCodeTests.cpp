@@ -318,7 +318,7 @@ namespace {
 class BreakingPass : public Pass {
 public:
   std::string_view name() const override { return "breaking"; }
-  Status run(Program &program) override {
+  Status run(Program &program, Statistics &) override {
     std::erase_if(program.Modules.back().Functions,
                   [](const Function &f) { return f.Name == "f"; });
     return Status::ok();

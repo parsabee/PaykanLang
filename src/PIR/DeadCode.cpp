@@ -209,7 +209,7 @@ class DeadCodePass : public Pass {
 public:
   explicit DeadCodePass(Roots roots) : R(std::move(roots)) {}
   std::string_view name() const override { return "dead-code"; }
-  Status run(Program &program) override {
+  Status run(Program &program, Statistics &) override {
     dropDeadCode(program, R);
     return Status::ok();
   }

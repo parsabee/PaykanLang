@@ -257,6 +257,7 @@ if(PAYKAN_TEST_SUITE_pir)
 add_executable(pir_tests
     PIR/BinaryTests.cpp
     PIR/DeadCodeTests.cpp
+    PIR/MoveAtLastUseTests.cpp
     PIR/PIRTests.cpp
 )
 target_link_libraries(pir_tests

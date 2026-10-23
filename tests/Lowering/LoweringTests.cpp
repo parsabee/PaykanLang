@@ -8,7 +8,9 @@
 #include "ModuleName.h"
 #include "TestUtils.h"
 #include "paykan/lowering/Lowering.h"
+#include "paykan/pir/MoveAtLastUse.h"
 #include "paykan/pir/Parser.h"
+#include "paykan/pir/Pass.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
 
@@ -1726,4 +1728,203 @@ TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalValue) {
     EXPECT_NE(fn.find(e[2]), std::string::npos) << fn;
     EXPECT_EQ(fn.find(" = box "), std::string::npos) << fn;
   }
+}
+
+// -- Moves at last use (docs/pir.md §12): a copy at a variable's last use is
+// -- handed on, the retain and the variable's release gone
+
+namespace {
+
+const char *const kTake = R"(
+    class Node { n: int; }
+    fn take(n: Node) -> int { return n.n; }
+)";
+
+/// @p source (after kTake) lowered, through the moves-at-last-use pass and
+/// verified after it; what the pass did is in @p stats.
+Lowered lowerMoved(const std::string &source, pir::Statistics &stats) {
+  Lowered l = lower(kTake + source);
+  if (!l.Ok)
+    return l;
+  pir::PassManager passes(/*verifyEach=*/true);
+  passes.add(pir::createMovesAtLastUsePass());
+  if (Status s = passes.run(l.Program, stats); !s) {
+    l.Ok = false;
+    l.Error = s.message();
+    return l;
+  }
+  l.Text = pir::toString(l.Program);
+  return l;
+}
+
+Lowered lowerMoved(const std::string &source) {
+  pir::Statistics stats;
+  return lowerMoved(source, stats);
+}
+
+} // namespace
+
+TEST(LoweringMoves, ALastUseInEachBranchOfAnIfMoves) {
+  auto l = lowerMoved(R"(
+    fn f(a: Node, c: bool) -> int {
+      r = 0;
+      if c { r = take(a); } else { r = take(a) + 1; }
+      return r;
+    }
+    fn main() -> int { return f(Node(1), True); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "f");
+  EXPECT_EQ(count(f, "retain"), 0u) << f;
+  EXPECT_EQ(count(f, "release"), 0u) << f;
+  EXPECT_EQ(count(f, "null box"), 0u) << f;
+}
+
+TEST(LoweringMoves, ALastUseInSomeArmsOfAMatchReleasesInTheOthers) {
+  // Two arms hand `a` on; the third releases it where the match ends, as
+  // the scope exit did.
+  auto l = lowerMoved(R"(
+    fn f(a: Node, k: int) -> int {
+      r = 0;
+      match k {
+        0 { r = take(a); }
+        1 { r = 2; }
+        _ { r = take(a) + 1; }
+      }
+      return r;
+    }
+    fn main() -> int { return f(Node(1), 1); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "f");
+  EXPECT_EQ(count(f, "retain"), 0u) << f;
+  EXPECT_EQ(count(f, "release"), 1u) << f;
+  size_t arm = f.find("case 1 {");
+  ASSERT_NE(arm, std::string::npos) << f;
+  EXPECT_GT(f.find("release"), arm) << f;
+  EXPECT_LT(f.find("release"), f.find("default {")) << f;
+}
+
+TEST(LoweringMoves, AUseInALoopBodyIsACopyAndTheUseAfterTheLoopMoves) {
+  auto l = lowerMoved(R"(
+    fn f(a: Node) -> int {
+      s = 0;
+      for i in 0..3 { s = s + take(a); }
+      return s + take(a);
+    }
+    fn main() -> int { return f(Node(1)); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "f");
+  // The retain left is the loop body's.
+  EXPECT_EQ(count(f, "retain"), 1u) << f;
+  size_t loop = f.find("while {");
+  ASSERT_NE(loop, std::string::npos) << f;
+  EXPECT_GT(f.find("retain"), loop) << f;
+  EXPECT_EQ(count(f, "release"), 0u) << f;
+}
+
+TEST(LoweringMoves, AVariableReassignedAfterItsLastUseMovesBothValues) {
+  auto l = lowerMoved(R"(
+    fn f(a: Node) -> int {
+      x = a;
+      n = take(x);
+      x = Node(5);
+      return n + take(x);
+    }
+    fn main() -> int { return f(Node(1)); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "f");
+  EXPECT_EQ(count(f, "retain"), 0u) << f;
+  EXPECT_EQ(count(f, "release"), 0u) << f;
+}
+
+TEST(LoweringMoves, AParameterIsHandedOnAtItsLastUse) {
+  pir::Statistics stats;
+  auto l = lowerMoved(R"(
+    fn f(a: Node) -> int { return take(a); }
+    fn main() -> int { return f(Node(1)); }
+  )",
+                      stats);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "f");
+  EXPECT_EQ(count(f, "retain"), 0u) << f;
+  EXPECT_EQ(count(f, "release"), 0u) << f;
+  EXPECT_GE(stats.get("moves-at-last-use", "transfers"), 1u);
+}
+
+TEST(LoweringMoves, ReturningALocalHandsItsReferenceToTheCaller) {
+  auto l = lowerMoved(R"(
+    fn f() -> Node { x = Node(1); return x; }
+    fn main() -> int { return take(f()); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "f");
+  EXPECT_EQ(count(f, "retain"), 0u) << f;
+  EXPECT_EQ(count(f, "release"), 0u) << f;
+}
+
+TEST(LoweringMoves, OnlyTheSecondOfTwoUsesInOneCallMoves) {
+  auto l = lowerMoved(R"(
+    fn two(a: Node, b: Node) -> int { return a.n + b.n; }
+    fn f(a: Node) -> int { return two(a, a); }
+    fn main() -> int { return f(Node(1)); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "f");
+  EXPECT_EQ(count(f, "retain"), 1u) << f;
+  EXPECT_EQ(count(f, "release"), 0u) << f;
+}
+
+TEST(LoweringMoves, SelfIsNeverHandedOn) {
+  // `self` is a borrow the caller's reference keeps alive: a method that
+  // passes it on or returns it takes a reference of its own.
+  const std::string src = R"(
+    impl Node {
+      fn give() -> int { return take(self); }
+      fn same() -> Node { return self; }
+    }
+    fn main() -> int { n = Node(1); return n.give() + take(n.same()); }
+  )";
+  auto before = lower(kTake + src);
+  auto l = lowerMoved(src);
+  ASSERT_TRUE(before.Ok) << before.Error;
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *m : {"Node.give", "Node.same"}) {
+    std::string after = function(l.Text, m);
+    EXPECT_EQ(after, function(before.Text, m));
+    EXPECT_NE(after.find(" = box %self"), std::string::npos) << after;
+  }
+}
+
+TEST(LoweringMoves, HeldValuesCopiedWholeAtTheirLastUseMove) {
+  // A tuple, a struct, an enum with a reference and a function value: each
+  // copy into a new variable or out of the function is a move.
+  auto l = lowerMoved(R"(
+    struct P { node: Node; k: int; }
+    enum E { A(node: Node), B }
+    fn tuple(a: Node) -> (Node, int) { t = (a, 1); u = t; return u; }
+    fn pair(a: Node) -> P { p = P(a, 1); q = p; return q; }
+    fn variant(a: Node) -> E { e = E::A(a); g = e; return g; }
+    fn function(a: Node) -> () -> int {
+      f = fn() -> int { return a.n; };
+      g = f;
+      return g;
+    }
+    fn main() -> int {
+      return tuple(Node(1)).1 + pair(Node(2)).k + function(Node(3))();
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"tuple", "pair", "variant"}) {
+    std::string f = function(l.Text, fn);
+    EXPECT_EQ(count(f, "retain"), 0u) << f;
+    EXPECT_EQ(count(f, "release"), 0u) << f;
+  }
+  // The capture is a copy (the closure keeps a reference of its own); the
+  // function value is moved.
+  std::string f = function(l.Text, "function");
+  EXPECT_EQ(count(f, "retain"), 1u) << f;
+  EXPECT_EQ(count(f, "release"), 1u) << f;
 }

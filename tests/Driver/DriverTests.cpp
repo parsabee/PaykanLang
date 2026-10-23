@@ -1025,6 +1025,35 @@ TEST(Driver, EmitPirPrintsTheProgram) {
       << out;
 }
 
+// --stats: what the PIR passes did (docs/pir.md §12), on stderr, after the
+// last of them ran: for a program, and for the code of a module written to
+// a `.pkm` (whose compiled code is made by the same passes).
+TEST(Driver, StatsCountTheMovesAtLastUse) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("class N { n: int; }\n"
+                      "fn take(x: N) -> int { return x.n; }\n"
+                      "fn main() -> int { a = N(7); return take(a); }\n");
+  auto [rc, out] = run(paykanRun() + " --stats " + src + " 2>&1");
+  EXPECT_EQ(rc, 7) << out;
+  EXPECT_NE(out.find("paykan pass stats:\n"
+                     "  moves-at-last-use transfers : 1\n"
+                     "  moves-at-last-use retains removed : 1\n"
+                     "  moves-at-last-use releases removed : 1\n"),
+            std::string::npos)
+      << out;
+  auto quiet = run(paykanRun() + " " + src + " 2>&1");
+  EXPECT_EQ(quiet.out.find("pass stats"), std::string::npos) << quiet.out;
+  std::string pkm = src + ".pkm";
+  auto lib = run(std::string(kPaykan) + " --no-module-cache --stats " +
+                 "--emit-pkm -o " + pkm + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  std::filesystem::remove(pkm);
+  EXPECT_EQ(lib.exitCode, 0) << lib.out;
+  EXPECT_NE(lib.out.find("  moves-at-last-use transfers : 1\n"),
+            std::string::npos)
+      << lib.out;
+}
+
 TEST(Driver, EmitCPrintsCSource) {
   REQUIRE_BACKEND();
   auto src = writeTmp("class P { x: int; }\n"

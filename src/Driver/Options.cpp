@@ -47,6 +47,8 @@ constexpr Flag kFlags[] = {
      "Never read or write the .pkm module cache"},
     {"verbose", &Options::Verbose,
      "Report how each imported module was resolved (on stderr)"},
+    {"stats", &Options::Stats,
+     "Report what the PIR passes did (on stderr), after the last one ran"},
     {"track-heap", &Options::TrackHeap,
      "Track runtime heap allocations and dump statistics (incl. leaks) at "
      "exit"},

@@ -1,11 +1,12 @@
 # paykan_pir -- the Paykan IR: data structures (include/paykan/pir/PIR.h),
 # text printer, text parser, verifier, the binary codec of the .pkm CODE
 # section (docs/design/pkm.md §5), and the passes over a program (Pass.h,
-# DeadCode.h).  Standard C++ only; every backend consumes it.
+# DeadCode.h, MoveAtLastUse.h).  Standard C++ only; every backend consumes it.
 
 add_library(paykan_pir STATIC
     Binary.cpp
     DeadCode.cpp
+    MoveAtLastUse.cpp
     Pass.cpp
     PIR.cpp
     Printer.cpp
