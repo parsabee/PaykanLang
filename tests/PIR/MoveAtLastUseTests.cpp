@@ -79,8 +79,9 @@ struct Moved {
 };
 
 /// The prelude and @p text parsed and verified; then moveAtLastUse run on
-/// @f and the result verified.
-Moved move(const std::string &text) {
+/// the function @p name and the result verified.  Called as `::move` with a
+/// std::string, which std::move would otherwise take.
+Moved move(const std::string &text, const std::string &name = "f") {
   Moved m;
   ParseError err;
   auto p = parseProgram(kPrelude + text, err);
@@ -91,17 +92,17 @@ Moved move(const std::string &text) {
   auto errors = verify(m.P);
   EXPECT_TRUE(errors.empty()) << formatErrors(errors);
   for (Function &f : m.P.Modules.front().Functions)
-    if (f.Name == "f")
+    if (f.Name == name)
       m.Counts = moveAtLastUse(f);
   errors = verify(m.P);
   EXPECT_TRUE(errors.empty()) << formatErrors(errors) << toString(m.P);
   return m;
 }
 
-/// The printed @f of @p m.
-std::string f(const Moved &m) {
+/// The printed function @p name of @p m.
+std::string f(const Moved &m, const std::string &name = "f") {
   const std::string text = toString(m.P);
-  const size_t start = text.find("fn @f(");
+  const size_t start = text.find("fn @" + name + "(");
   if (start == std::string::npos)
     return "";
   return text.substr(start, text.find("\n}\n", start) + 3 - start);
@@ -455,6 +456,171 @@ fn @f(%a: box) -> void {
   EXPECT_EQ(count(out, "null box"), 0u) << out;
 }
 
+TEST(MoveAtLastUse, ACopyBeforeABreakMovesAndOneBeforeAContinueDoesNot) {
+  // After `break` the loop is left and the release after it comes next;
+  // after `continue` the next iteration reads the slot again, unless the
+  // path reassigns it first.
+  const std::string loop = R"(
+fn @f(%a: box) -> void {
+  local %x: box
+  store %x, %a
+  while {
+    %c = call @cond()
+    cond %c
+  } {
+    %v = load %x
+    retain %v
+    call @take(%v)
+    LEAVE
+  }
+  %w = load %x
+  release %w
+  ret
+}
+)";
+  auto with = [&](const std::string &leave) {
+    std::string text = loop;
+    text.replace(text.find("LEAVE"), 5, leave);
+    return ::move(text).Counts.Transfers;
+  };
+  EXPECT_EQ(with("break"), 1u);
+  EXPECT_EQ(with("continue"), 0u);
+  EXPECT_EQ(with("%o = new Node\n    %b = box %o\n    %old = load %x\n"
+                 "    release %old\n    store %x, %b\n    continue"),
+            1u);
+}
+
+TEST(MoveAtLastUse, ACopyInANestedLoopFollowsBothLoopsPaths) {
+  // The inner loop's copy is left by `break`, then the outer loop
+  // reassigns the variable before its next iteration reads it: a move.
+  // Without the reassignment the outer loop's next iteration reads it.
+  const std::string text = R"(
+fn @f(%a: box) -> void {
+  local %x: box
+  store %x, %a
+  while {
+    %c = call @cond()
+    cond %c
+  } {
+    while {
+      %d = call @cond()
+      cond %d
+    } {
+      %v = load %x
+      retain %v
+      call @take(%v)
+      break
+    }
+    REASSIGN
+  }
+  %w = load %x
+  release %w
+  ret
+}
+)";
+  std::string reassigned = text;
+  reassigned.replace(reassigned.find("REASSIGN"), 8,
+                     "%o = new Node\n    %b = box %o\n    %old = load %x\n"
+                     "    release %old\n    store %x, %b");
+  Moved m = ::move(reassigned);
+  EXPECT_EQ(m.Counts.Transfers, 1u) << f(m);
+  EXPECT_EQ(count(f(m), "retain"), 0u) << f(m);
+  std::string kept = text;
+  kept.replace(kept.find("REASSIGN"), 8, "%u = load %x\n    call @use(%u)");
+  EXPECT_EQ(::move(kept).Counts.Transfers, 0u);
+}
+
+TEST(MoveAtLastUse, ALastUseInEveryCaseOfASwitchMovesInEach) {
+  // A bool's two cases leave no path to an absent default; the cases of an
+  // i64 do, so the release moves into a default made for it.
+  Moved m = move(R"(
+fn @f(%a: box) -> void {
+  local %x: box
+  store %x, %a
+  %c = call @cond()
+  switch %c {
+    case true {
+      %v = load %x
+      retain %v
+      call @take(%v)
+    }
+    case false {
+      %u = load %x
+      retain %u
+      call @take(%u)
+    }
+  }
+  %w = load %x
+  release %w
+  ret
+}
+)");
+  std::string out = f(m);
+  EXPECT_EQ(m.Counts.Transfers, 2u) << out;
+  EXPECT_EQ(count(out, "retain"), 0u) << out;
+  EXPECT_EQ(count(out, "release"), 0u) << out;
+  EXPECT_EQ(count(out, "null box"), 0u) << out;
+  EXPECT_EQ(out.find("default"), std::string::npos) << out;
+
+  m = move(R"(
+fn @f(%a: box, %k: i64) -> void {
+  local %x: box
+  store %x, %a
+  switch %k {
+    case 0 {
+      %v = load %x
+      retain %v
+      call @take(%v)
+    }
+    case 1 {
+      %u = load %x
+      retain %u
+      call @take(%u)
+    }
+  }
+  %w = load %x
+  release %w
+  ret
+}
+)");
+  out = f(m);
+  EXPECT_EQ(m.Counts.Transfers, 2u) << out;
+  EXPECT_EQ(count(out, "retain"), 0u) << out;
+  EXPECT_EQ(count(out, "release"), 1u) << out;
+  EXPECT_LT(out.find("default {"), out.find("release")) << out;
+  EXPECT_EQ(count(out, "null box"), 0u) << out;
+}
+
+TEST(MoveAtLastUse, ABoolSwitchsOtherCaseGetsTheRelease) {
+  // No path skips both cases: the release goes into the one that keeps the
+  // variable, and the moving one stores no null.
+  Moved m = move(R"(
+fn @f(%a: box) -> void {
+  local %x: box
+  store %x, %a
+  %c = call @cond()
+  switch %c {
+    case true {
+      %v = load %x
+      retain %v
+      call @take(%v)
+    }
+    case false {
+      %u = load %x
+      call @use(%u)
+    }
+  }
+  %w = load %x
+  release %w
+  ret
+}
+)");
+  const std::string out = f(m);
+  EXPECT_EQ(count(out, "release"), 1u) << out;
+  EXPECT_GT(out.find("release"), out.find("case false")) << out;
+  EXPECT_EQ(count(out, "null box"), 0u) << out;
+}
+
 TEST(MoveAtLastUse, ACopyTakenEarlierIsAReferenceOfItsOwnWhereverItIsUsed) {
   // %a1 holds its own reference: the copy in the arm may hand the slot's
   // on although %a1 is used after the if.  The slot is cleared there, so
@@ -660,6 +826,170 @@ fn @f(%a: box) -> void {
 }
 )");
   EXPECT_EQ(m.Counts.Transfers, 0u) << f(m);
+}
+
+TEST(MoveAtLastUse, AViewIsNeverHandedOn) {
+  // A `view` parameter's slot: it names what the caller's variable holds,
+  // which lives as long as the function viewing it.
+  Moved m = move(R"(
+fn @f(%a: box) -> void {
+  local %x: box view
+  store %x, %a
+  %v = load %x
+  retain %v
+  call @take(%v)
+  %w = load %x
+  release %w
+  ret
+}
+)");
+  EXPECT_EQ(m.Counts.Transfers, 0u) << f(m);
+  EXPECT_NE(f(m).find("local %x.0: box view"), std::string::npos) << f(m);
+}
+
+// -- Borrowed references: the object may die sooner after a move
+
+TEST(MoveAtLastUse, AFieldReadUsedAcrossALaterCallKeepsItACopy) {
+  // `x = h.next; take(x); s = h.next.next + other(h)`: the field read, held
+  // across a call that may assign h.next, may have been kept alive by x.
+  // Read and used with no call in between, it is no reason for a copy.
+  const std::string text = R"(
+fn @f(%a: box, %h: box) -> void {
+  local %x: box
+  local %y: box
+  store %x, %a
+  store %y, %h
+  %v = load %x
+  retain %v
+  call @take(%v)
+  %yb = load %y
+  %yo = unbox %yb
+  %n = field.load %yo, Node.next
+  %c = call @cond()
+  %z = cmp eq %n, null box
+  %w = load %x
+  release %w
+  %u = load %y
+  release %u
+  ret
+}
+)";
+  Moved m = move(text);
+  EXPECT_EQ(m.Counts.Transfers, 0u) << f(m);
+  std::string used = text;
+  used.replace(used.find("  %c = call @cond()\n"), 20, "");
+  EXPECT_EQ(::move(used).Counts.Transfers, 1u);
+}
+
+TEST(MoveAtLastUse, AFieldReadBeforeTheCopyAndUsedAfterTheCallKeepsItACopy) {
+  // The call given the reference may let it go before the field read is
+  // used.
+  Moved m = move(R"(
+fn @f(%a: box, %h: box) -> void {
+  local %x: box
+  local %y: box
+  store %x, %a
+  store %y, %h
+  %yb = load %y
+  %yo = unbox %yb
+  %n = field.load %yo, Node.next
+  %v = load %x
+  retain %v
+  call @take(%v)
+  %z = cmp eq %n, null box
+  %w = load %x
+  release %w
+  %u = load %y
+  release %u
+  ret
+}
+)");
+  EXPECT_EQ(m.Counts.Transfers, 0u) << f(m);
+}
+
+TEST(MoveAtLastUse, AReceiverReadFromAFieldKeepsTheCopyItIsGivenWith) {
+  // `h.next.m(x)`: the receiver has no reference of its own, and the
+  // method may let x go while it runs.
+  Moved m = move(R"(
+fn @m2(%self: obj, %p: box) -> void {
+  release %p
+  ret
+}
+
+fn @f(%a: box, %h: box) -> void {
+  local %x: box
+  local %y: box
+  store %x, %a
+  store %y, %h
+  %yb = load %y
+  %yo = unbox %yb
+  %r = field.load %yo, Node.next
+  %ro = unbox %r
+  %v = load %x
+  retain %v
+  call @m2(%ro, %v)
+  %w = load %x
+  release %w
+  %u = load %y
+  release %u
+  ret
+}
+)");
+  EXPECT_EQ(m.Counts.Transfers, 0u) << f(m);
+}
+
+TEST(MoveAtLastUse, SelfUsedAfterACallKeepsAParametersCopy) {
+  // The caller may have no reference of its own to `self` (a receiver read
+  // from a field), and the parameter may be what keeps it alive.  An
+  // `__init__`'s `self` is held by its constructor.
+  const std::string body = R"((%self: obj, %a: box) -> void {
+  local %s: obj
+  local %x: box
+  store %s, %self
+  store %x, %a
+  %v = load %x
+  retain %v
+  call @take(%v)
+  %o = load %s
+  %n = field.load %o, Node.next
+  %c = cmp eq %n, null box
+  %w = load %x
+  release %w
+  ret
+}
+)";
+  Moved m = ::move("fn @f" + body);
+  EXPECT_EQ(m.Counts.Transfers, 0u) << f(m);
+  EXPECT_EQ(
+      ::move("fn @Node.__init__" + body, "Node.__init__").Counts.Transfers, 1u);
+}
+
+TEST(MoveAtLastUse, ABorrowedReferenceRetainedFirstIsAReferenceOfItsOwn) {
+  // A field read retained before anything else uses it (a match subject's)
+  // holds its object, call or no call.
+  Moved m = move(R"(
+fn @f(%a: box, %h: box) -> void {
+  local %x: box
+  local %y: box
+  store %x, %a
+  store %y, %h
+  %yb = load %y
+  %yo = unbox %yb
+  %n = field.load %yo, Node.next
+  retain %n
+  %v = load %x
+  retain %v
+  call @take(%v)
+  call @use(%n)
+  release %n
+  %w = load %x
+  release %w
+  %u = load %y
+  release %u
+  ret
+}
+)");
+  EXPECT_EQ(m.Counts.Transfers, 1u) << f(m);
 }
 
 // -- Values held in memory

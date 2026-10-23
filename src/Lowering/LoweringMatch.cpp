@@ -201,6 +201,8 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
         box = B.box(subjRaw, ta.Arm->getBinding() + ".box");
       }
       pir::LocalId local = B.addLocal(ta.Arm->getBinding(), Type::Box);
+      if (ta.Arm->getMode() == ast::ParamMode::View)
+        B.markView(local);
       B.store(local, box);
       CurrentScope->declare(ta.Arm->getBinding(), local, ta.BindTy);
     }

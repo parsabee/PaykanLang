@@ -1380,8 +1380,10 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
   if (!varTy && node->getInitExpr())
     varTy = node->getInitExpr()->getResolvedType();
   if (ast::isMemType(varTy)) {
-    declareMemVar(node->getName(), canonicalizeDeclType(varTy),
-                  node->getInitExpr());
+    pir::LocalId local = declareMemVar(
+        node->getName(), canonicalizeDeclType(varTy), node->getInitExpr());
+    if (node->getMode() == ast::ParamMode::View)
+      B.markView(local);
     return Val();
   }
   ast::Type *declTy = canonicalizeDeclType(node->getType());
@@ -1423,6 +1425,8 @@ Val ModuleLowering::visitVarDecl(ast::VarDecl *node) {
     pirTy = Type::I64;
 
   pir::LocalId local = B.addLocal(node->getName(), pirTy);
+  if (node->getMode() == ast::ParamMode::View)
+    B.markView(local);
   if (initVal)
     B.store(local, initVal);
   else {

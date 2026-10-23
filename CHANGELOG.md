@@ -21,11 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function stays a copy: the function keeps one of its own.  Each path counts on its own
   (one branch may hand a variable on while another releases it), a use inside a loop the
   next iteration reads again stays a copy, and in `f(a, a)` only the second `a` moves.
-  `self`, `inout` parameters, fields, array elements and the members of a value are never
-  moved, and a lambda's captures are always copies; a `view` of an object holds a reference
-  of its own under today's calling convention and is handed on to another `view` like any
-  variable.  Over the samples the pass removes about a third of the retains and a sixth of
-  the releases.
+  `self`, `inout` parameters, `view` parameters and variables, fields, array elements and
+  the members of a value are never moved, and a lambda's captures are always copies.  A
+  hand-off also stays a copy when the function goes on to use, across a call or a release,
+  an object it holds no reference to (a field's value read in place, anything reached
+  through `self`), since the variable may be what keeps that object alive; in `__init__`,
+  whose object the constructor holds, `self` is no such object.  Over the samples and the
+  standard library's tests the pass removes about a fifth of the retains and a tenth of the
+  releases.  PIR marks the slot of a `view` parameter or variable, `local %v: box view`
+  (docs/pir.md §3), in the text form backend plugins read and in a `.pkm`'s code, where each
+  local has a flags byte (docs/design/pkm.md §5.7).
 - `paykan --stats` prints what the PIR passes did, on standard error after the last of them
   ran (`moves-at-last-use transfers`, `retains removed`, `releases removed`), for the
   program and for the modules this run builds from source (`pir::Statistics`,

@@ -43,6 +43,7 @@ constexpr uint32_t kKnownFnFlags =
     kFnExtern | kFnHasModule | kFnHasSymbol | kFnShared | kFnHasUses;
 constexpr uint32_t kClassExtern = 1u << 0, kClassShared = 1u << 1;
 constexpr uint32_t kKnownClassFlags = kClassExtern | kClassShared;
+constexpr uint8_t kLocalView = 1u << 0;
 
 enum OperandKind : uint8_t {
   kOpValue,
@@ -380,6 +381,7 @@ private:
       for (const Local &l : f.Locals) {
         name(l.Name);
         slotType(l.Ty, l.Size, l.Align);
+        W.u8(l.View ? kLocalView : 0);
       }
       W.uleb(f.NextValueId);
       block(&f.Body);
@@ -545,12 +547,17 @@ public:
       if (p.Ty != f.Sig.Params[i])
         return R.fail("parameter type disagrees with the signature");
     }
-    if (!R.count(n, 2))
+    if (!R.count(n, 3))
       return false;
     f.Locals.resize(static_cast<size_t>(n));
-    for (Local &l : f.Locals)
-      if (!str(l.Name) || !slotType(l.Ty, l.Size, l.Align))
+    for (Local &l : f.Locals) {
+      uint8_t lflags = 0;
+      if (!str(l.Name) || !slotType(l.Ty, l.Size, l.Align) || !R.u8(lflags))
         return false;
+      if ((lflags & ~kLocalView) != 0)
+        return R.fail("reserved local flag bits set");
+      l.View = (lflags & kLocalView) != 0;
+    }
     return R.uleb32(f.NextValueId) && block(f.Body);
   }
 

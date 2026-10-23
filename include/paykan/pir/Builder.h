@@ -138,6 +138,8 @@ public:
     return static_cast<LocalId>(Fn->Locals.size() - 1);
   }
   Type localType(LocalId id) const { return Fn->Locals[id].Ty; }
+  /// Marks local @p id a `view` parameter's or variable's slot.
+  void markView(LocalId id) { Fn->Locals[id].View = true; }
 
   // -- Raw statement emission
 

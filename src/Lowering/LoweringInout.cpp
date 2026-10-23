@@ -102,6 +102,8 @@ size_t ModuleLowering::declareParam(const std::string &name,
     return 1;
   }
   pir::LocalId local = B.addLocal(name, arg.Ty);
+  if (mode == ast::ParamMode::View)
+    B.markView(local);
   B.store(local, Val(pir::Operand::value(arg), arg.Ty));
   // Ref-typed parameters arrive as owned +1 boxes: declared as owned, the
   // scope cleanup releases them.

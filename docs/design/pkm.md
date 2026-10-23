@@ -820,7 +820,7 @@ FunctionRec
   -- definitions only --
   uleb nConventions ; nConventions × u8   per-parameter convention (#98): 0 owned, 1 borrowed; nConventions == nParams or 0
   uleb nParams ; nParams × (uleb id ; type ; str name)
-  uleb nLocals ; nLocals × (str name ; slot type)
+  uleb nLocals ; nLocals × (str name ; slot type ; u8 flags)   flags bit0 view (docs/pir.md §3); the others reserved
   uleb nextValueId
   Block body
 ClassRec

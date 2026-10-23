@@ -7,9 +7,12 @@
 //            and after it (a transfer); a variable reassigned after its
 //            last use, in a loop too; `f(a, a)`; a parameter handed on;
 //            `self` passed on and returned (never transferred); a lambda's
-//            capture (always a copy).  The `weak` references show when each
-//            object dies: with its last holder, which after a transfer is
-//            the destination.
+//            capture (always a copy); a hand-off followed by a field read
+//            held across a call, and one in a method that uses `self`
+//            after it (copies: the variable may be what keeps the read
+//            object alive); a `view` parameter (never handed on).  The
+//            `weak` references show when each object dies: with its last
+//            holder, which after a transfer is the destination.
 // expect-stdout: kept: a | alive
 // expect-stdout: handed on: a | gone
 // expect-stdout: then: b gone | else: c alive
@@ -21,6 +24,9 @@
 // expect-stdout: returned: m alive | dropped: m gone
 // expect-stdout: self: n n | n alive
 // expect-stdout: captured: o none | alive
+// expect-stdout: field read: first1 first1!
+// expect-stdout: method: one1 -> two2 | one1;
+// expect-stdout: view: q alive | back in outer: alive | after: gone
 // expect-stdout: weak local: p alive
 
 import ::io;
@@ -50,6 +56,45 @@ class Watch {
   weak target: Node?;
 }
 
+class Slot {
+  node: Node;
+}
+
+/// Gives @p s a new node, letting the old one go.
+fn replace(s: Slot) -> Str {
+  s.node = Node("other");
+  return "!";
+}
+
+class Walker {
+  at: Node;
+  log: Str;
+}
+
+impl Walker {
+  fn note(n: Node)      { self.log = self.log + n.name + ";"; }
+
+  fn go(n: Node) -> Str { self.at = n; return " -> " + self.at.name; }
+
+  /// Notes the current node, then moves on: `self` is used after `note`.
+  fn step(next: Node) -> Str {
+    cur = self.at;
+    self.note(cur);
+    return self.at.name + self.go(next);
+  }
+}
+
+fn inner(n: view Node, w: view Watch) -> Str {
+  return n.name + " " + state(w);
+}
+
+/// A view: what it names lives as long as this function, also after it
+/// passes the view on.
+fn outer(n: view Node, w: view Watch) -> Str {
+  r = inner(n, w);
+  return r + " | back in outer: " + state(w);
+}
+
 /// Takes @p n and lets it go when it returns.
 fn name(n: Node) -> Str {
   return n.name;
@@ -62,6 +107,23 @@ fn both(a: Node, b: Node) -> Str {
 /// Hands its parameter on to `name`.
 fn pass(n: Node) -> Str {
   return name(n);
+}
+
+/// `replace` lets the old node go while its name, read first, is still to
+/// be used: the hand-off of `x`, which also holds that node, stays a copy.
+fn fieldRead() -> Str {
+  sl = Slot(Node("first" + Str(1)));
+  x = sl.node;
+  took = name(x);
+  got = sl.node.name + replace(sl);
+  return took + " " + got;
+}
+
+/// A view parameter keeps what it names until its function returns.
+fn viewed() -> Str {
+  q = Node("q");
+  wq = Watch(q);
+  return outer(q, wq) + " | after: " + state(wq);
 }
 
 /// A new node, returned from a local.
@@ -162,8 +224,17 @@ fn main() -> int {
   get = fn() -> Str { return "none"; };
   io::println(" " + get() + " | " + state(wc));
 
-  // A weak local made from the variable itself and read later keeps the
-  // hand-off a copy: it reads the object until the variable's scope ends.
+  // In functions of their own: a field read held across a call after a
+  // hand-off keeps every hand-off before it, to the variable's release, a
+  // copy.
+  io::println("field read: " + fieldRead());
+  wk = Walker(Node("one" + Str(1)), "");
+  io::println("method: " + wk.step(Node("two" + Str(2))) + " | " + wk.log);
+  io::println("view: " + viewed());
+
+  // A weak local made from the variable itself keeps a hand-off in its
+  // scope a copy, read or not: it reads the object until the variable's
+  // scope ends.
   p = Node("p");
   weak wp = p;
   io::print("weak local: " + name(p));

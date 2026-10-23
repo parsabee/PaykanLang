@@ -15,12 +15,16 @@
 // A copy is moved when every path from it reaches the release of the
 // slot it copied (a box local, or a reference held in a `mem` local at a
 // constant offset) before anything else touches the slot or uses an alias
-// of it, or ends in `unreachable`.  Moving removes the copy's retains and
-// stores null into the slot; the cleanup that follows removes what that made
-// useless.  Each of these questions is one dataflow over the structured
-// body (Flow), a bit per slot, so the pass takes time in proportion to the
-// function's size times the depth of its loops, not to the number of copies
-// times its size.
+// of it, or ends in `unreachable`; and when, from where the destination
+// holds the reference to that release, no node that may release a
+// reference comes while a borrowed reference (Origins::borrowed: one no
+// local of the function holds the object of) is in use across it
+// (Analysis::exposed).  Moving removes the copy's retains and stores null
+// into the slot; the cleanup that follows removes what that made useless.
+// Each of these questions is one dataflow over the structured body (Flow),
+// a bit per slot, so the pass takes time in proportion to the function's
+// size times the depth of its loops, not to the number of copies times its
+// size.
 
 #include "paykan/pir/MoveAtLastUse.h"
 
@@ -83,6 +87,63 @@ bool isClosureClass(const std::string &name) {
   return name.starts_with(names::kClosureClassPrefix);
 }
 
+/// Whether a call of @p callee may release a reference, or run Paykan code
+/// that may: any callee but the runtime's string, hash, rounding,
+/// allocation and panic helpers (docs/pir.md §8), which do neither.
+bool callMayRelease(std::string_view callee) {
+  if (!callee.starts_with(kRuntimePrefix))
+    return true;
+  callee.remove_prefix(kRuntimePrefix.size());
+  static const std::unordered_set<std::string_view> inert = {
+      names::kPaykanStringNew,        names::kPaykanStringConcat,
+      names::kPaykanStringCharAt,     names::kPaykanStringAt,
+      names::kPaykanStringFromInt,    names::kPaykanStringFromUint,
+      names::kPaykanStringFromFloat,  names::kPaykanStringFromBool,
+      names::kPaykanStringFromChar,   names::kPaykanStringParseInt,
+      names::kPaykanStringParseUint,  names::kPaykanStringParseFloat,
+      names::kPaykanStringParseBool,  names::kPaykanStringEquals,
+      names::kPaykanStringLength,     names::kPaykanStringToString,
+      names::kPaykanStringHash,       names::kPaykanIntHash,
+      names::kPaykanDispose,          names::kPaykanMalloc,
+      names::kPaykanRoundF16,         names::kPaykanPanicDivByZero,
+      names::kPaykanPanicDivOverflow, names::kPaykanPanicFloatToInt,
+      names::kPaykanPanicFloatToType, names::kPaykanPanicIntToChar,
+      names::kPaykanPanicIndex,       names::kPaykanPanicForStep,
+  };
+  return !inert.contains(callee);
+}
+
+/// Whether @p in may release a reference: a `release`, a `free`, or a call
+/// that may (callMayRelease).  An object can only die at one of these.
+bool mayRelease(const Instr &in) {
+  switch (in.Op) {
+  case Opcode::Release:
+  case Opcode::Free:
+  case Opcode::VCall:
+  case Opcode::ICall:
+    return true;
+  case Opcode::Call:
+    return callMayRelease(in.Callee);
+  default:
+    return false;
+  }
+}
+
+bool isCall(Opcode op) {
+  return op == Opcode::Call || op == Opcode::VCall || op == Opcode::ICall;
+}
+
+/// Whether no value reaches a switch's absent default: its cases are a
+/// `bool`'s `true` and `false`.  Otherwise an absent default is the path on
+/// which no case matches.
+bool exhaustive(const Switch &sw) {
+  bool seen[2] = {false, false};
+  for (const Switch::Case &c : sw.Cases)
+    if (const auto *b = std::get_if<bool>(&c.Value.V))
+      seen[*b ? 1 : 0] = true;
+  return seen[0] && seen[1];
+}
+
 /// A statement's place: the block that holds it and its index there.
 struct Place {
   Block *B = nullptr;
@@ -107,6 +168,8 @@ struct Node {
   const Operand *Use = nullptr;
 };
 
+constexpr uint32_t kNoLoop = ~uint32_t{0};
+
 /// A function body's nodes, numbered in the reverse of the order its
 /// statements run in: a block from its end, an if's arms before its test.
 /// The flows (Flow) walk the structured body and step through them.
@@ -115,8 +178,21 @@ public:
   std::vector<Node> Nodes;
   /// The end of the function's body.
   uint32_t End = 0;
+  /// The while loops: the nodes of each, which are numbered together (its
+  /// condition, test and body), and the loop around it.
+  struct Loop {
+    uint32_t First = 0;
+    uint32_t Last = 0;
+    uint32_t Parent = kNoLoop;
+  };
+  std::vector<Loop> Loops;
+  /// By node: the innermost loop it is in, or kNoLoop.
+  std::vector<uint32_t> LoopOf;
 
-  explicit Graph(Function &f) : End(add(Node::Exit)) { block(f.Body); }
+  explicit Graph(Function &f) {
+    End = add(Node::Exit);
+    block(f.Body);
+  }
 
   const Instr *instr(uint32_t n) const {
     return Nodes[n].K == Node::Instruction ? Nodes[n].At.instr() : nullptr;
@@ -124,9 +200,23 @@ public:
   /// The node of an instruction, a `ret` or an `unreachable`, or the test
   /// of an if, a switch or a while.
   uint32_t of(const Stmt &s) const { return NodeOf.at(&s); }
+  /// Node @p n's place in the order the body is written: a block's
+  /// statements from its first, an if's or a switch's test before its
+  /// arms, a while's condition before its body.  Each arm and each loop is
+  /// a run of places.
+  uint32_t pos(uint32_t n) const {
+    return static_cast<uint32_t>(Nodes.size() - 1 - n);
+  }
+  bool inLoop(uint32_t n, uint32_t loop) const {
+    return Loops[loop].First <= n && n <= Loops[loop].Last;
+  }
+  /// The last place in loop @p loop.
+  uint32_t loopEnd(uint32_t loop) const { return pos(Loops[loop].First); }
 
 private:
   std::unordered_map<const Stmt *, uint32_t> NodeOf;
+  /// The loops around the statement numbered, innermost last.
+  std::vector<uint32_t> Open;
 
   uint32_t add(Node::Kind k, Place at = {}, const Operand *use = nullptr) {
     Node n;
@@ -134,6 +224,7 @@ private:
     n.At = at;
     n.Use = use;
     Nodes.push_back(n);
+    LoopOf.push_back(Open.empty() ? kNoLoop : Open.back());
     return static_cast<uint32_t>(Nodes.size() - 1);
   }
 
@@ -159,9 +250,15 @@ private:
         block(*x->Default);
       NodeOf[&s] = add(Node::Test, at, &x->Value);
     } else if (auto *x = std::get_if<While>(&s)) {
+      const auto loop = static_cast<uint32_t>(Loops.size());
+      Loops.push_back({static_cast<uint32_t>(Nodes.size()), 0,
+                       Open.empty() ? kNoLoop : Open.back()});
+      Open.push_back(loop);
       block(*x->Body);
       NodeOf[&s] = add(Node::Test, at, &x->Cond);
       block(*x->CondBlock);
+      Open.pop_back();
+      Loops[loop].Last = static_cast<uint32_t>(Nodes.size() - 1);
     } else if (auto *x = std::get_if<Return>(&s)) {
       NodeOf[&s] = add(Node::Return, at, x->Value ? &*x->Value : nullptr);
     } else if (std::holds_alternative<Unreachable>(s)) {
@@ -245,12 +342,24 @@ struct Address {
 };
 
 /// What the values and locals of a function may refer to without holding a
-/// reference of their own, and which locals cannot be moved from.
+/// reference of their own, which of them are borrowed, and which locals
+/// cannot be moved from.
 class Origins {
 public:
   Origins(const Function &f, const Graph &g, const Values &v)
       : F(f), G(g), V(v), From(v.size()), Addr(v.size()), Held(f.Locals.size()),
-        AddressTaken(f.Locals.size()), Escaped(f.Locals.size()) {
+        AddressTaken(f.Locals.size()), Escaped(f.Locals.size()),
+        Borrowed(v.size()), HoldsBorrowed(f.Locals.size()) {
+    // `self` and an `inout` parameter point at what the caller holds, which
+    // the caller may let go of during the call.  An `__init__`'s `self` is
+    // the object or the storage its constructor made, the only caller it
+    // can have (docs/language/05-classes.md), which holds it until the
+    // call returns.
+    const bool init = f.Name.ends_with(std::string(".") + names::kMethodInit);
+    for (size_t i = 0; i < f.Params.size(); ++i)
+      if (const Value &p = f.Params[i];
+          (p.Ty == Type::Obj || p.Ty == Type::Ptr) && !(init && i == 0))
+        Borrowed[p.Id] = true;
     // What a local holds depends on stores that may come later (a loop):
     // until nothing changes.
     for (bool changed = true; changed;) {
@@ -295,13 +404,28 @@ public:
 
   /// A box local is moved from only when its slot is never addressed and
   /// no alias of it is stored away; a mem local, when no alias of it is
-  /// stored away.
+  /// stored away; neither when it is a `view`'s, which names what another
+  /// variable holds.
   bool movable(LocalId l) const {
-    if (Escaped[l])
+    if (Escaped[l] || F.Locals[l].View)
       return false;
     return F.Locals[l].Ty == Type::Mem ||
            (F.Locals[l].Ty == Type::Box && !AddressTaken[l]);
   }
+
+  /// Whether value @p v is a *borrowed* reference: one that may refer to
+  /// an object, or into one, that no local of the function holds and that
+  /// it holds no reference to of its own.  A field's or an element's value
+  /// read in place, what is reached through `self` or an `inout`
+  /// parameter, and what is computed from one are; what is reached
+  /// through a box or a mem local, a call's box and a retained copy are
+  /// not.
+  bool borrowed(ValueId v) const { return v < Borrowed.size() && Borrowed[v]; }
+  bool borrowed(const Operand &o) const {
+    return o.isValue() && borrowed(o.valueId());
+  }
+  /// Whether local @p l may hold a borrowed reference (`self`, say).
+  bool holdsBorrowed(LocalId l) const { return HoldsBorrowed[l]; }
 
 private:
   const Function &F;
@@ -316,6 +440,78 @@ private:
   std::vector<std::vector<LocalId>> Held;
   std::vector<bool> AddressTaken;
   std::vector<bool> Escaped;
+  std::vector<bool> Borrowed;
+  std::vector<bool> HoldsBorrowed;
+
+  /// Whether box %v is retained before anything else uses it, and nothing
+  /// between its definition and that retain may release a reference: it
+  /// holds a reference of its own wherever it is used.
+  bool retainedFirst(ValueId v) const {
+    const Place def = V.defAt(v);
+    if (!def.B)
+      return false;
+    // The first retain in the block: nodes are numbered backward, so the
+    // largest, and a use after it has a smaller number.
+    const std::vector<uint32_t> &users = V.users(v);
+    std::optional<uint32_t> r;
+    for (uint32_t u : users)
+      if (const Instr *in = G.instr(u);
+          in && in->Op == Opcode::Retain && G.Nodes[u].At.B == def.B)
+        r = std::max(r.value_or(u), u);
+    if (!r || std::any_of(users.begin(), users.end(),
+                          [&](uint32_t u) { return u > *r; }))
+      return false;
+    for (size_t i = def.Index + 1; i < G.Nodes[*r].At.Index; ++i) {
+      const auto *in = std::get_if<Instr>(&def.B->Stmts[i]);
+      if (!in || mayRelease(*in))
+        return false;
+    }
+    return true;
+  }
+  /// Whether what @p in computes from its operands is borrowed: when one
+  /// of them is.
+  bool anyBorrowed(const Instr &in) const {
+    return std::any_of(in.Args.begin(), in.Args.end(),
+                       [&](const Operand &o) { return borrowed(o); });
+  }
+  /// Whether @p in's result is borrowed.
+  bool borrowedResult(const Instr &in) const {
+    const Type t = in.Result.Ty;
+    if (t != Type::Box && t != Type::Obj && t != Type::Ptr && t != Type::I64)
+      return false;
+    const bool ref = t != Type::I64;
+    switch (in.Op) {
+    case Opcode::Load:
+      return HoldsBorrowed[in.Local];
+    case Opcode::LocalAddr:
+      return false;
+    case Opcode::FieldLoad:
+      // A field's value, read in place.
+      return ref && !retainedFirst(in.Result.Id);
+    case Opcode::PtrLoad:
+      // Memory a mem local owns holds references of its own (docs/pir.md
+      // §7); any other is a field's, an element's or the caller's.
+      return ref && !retainedFirst(in.Result.Id) &&
+             (borrowed(in.Args[0]) || address(in.Args[0]).L == kNoLocal);
+    case Opcode::Call:
+    case Opcode::VCall:
+    case Opcode::ICall:
+      // A box returned is the caller's own and a runtime helper's object a
+      // new one; another object or address may be one into an argument,
+      // or into what the callee reached.
+      return t != Type::Box && t != Type::I64 &&
+             !(in.Op == Opcode::Call && in.Callee.starts_with(kRuntimePrefix));
+    case Opcode::Box:
+    case Opcode::New:
+    case Opcode::WeakLoad:
+    case Opcode::FnAddr:
+    case Opcode::VTableAddr:
+    case Opcode::VTableLoad:
+      return false;
+    default:
+      return anyBorrowed(in);
+    }
+  }
 
   static bool merge(std::vector<LocalId> &into,
                     const std::vector<LocalId> &from) {
@@ -380,8 +576,13 @@ private:
       // A box local owns the reference stored in it (docs/pir.md §7: a
       // copy retained, or a fresh or handed-on one); anything else that
       // refers to something is an alias the local now holds.
-      if (F.Locals[in.Local].Ty != Type::Box)
+      if (F.Locals[in.Local].Ty != Type::Box) {
         changed |= merge(Held[in.Local], locals(in.Args[0]));
+        if (borrowed(in.Args[0]) && !HoldsBorrowed[in.Local]) {
+          HoldsBorrowed[in.Local] = true;
+          changed = true;
+        }
+      }
       return;
     case Opcode::PtrStore:
     case Opcode::FieldStore:
@@ -425,6 +626,10 @@ private:
     std::vector<LocalId> &mine = From[in.Result.Id];
     changed |= merge(mine, from);
     Addr[in.Result.Id] = addr;
+    if (!Borrowed[in.Result.Id] && borrowedResult(in)) {
+      Borrowed[in.Result.Id] = true;
+      changed = true;
+    }
   }
 };
 
@@ -524,7 +729,8 @@ public:
   using Step = std::function<void(uint32_t n, State &s)>;
   /// The state at the end of arm @p k of the if or switch @p s (forward):
   /// the arms in order, then and else, or the cases and the default, an
-  /// absent else or default an arm too.
+  /// absent else or default an arm too (not called for an absent default
+  /// no value reaches, exhaustive).
   using ArmEnd = std::function<void(const Stmt &s, size_t k, const State &)>;
 
   Flow(const Graph &g, size_t bits, bool must, Step step,
@@ -610,7 +816,8 @@ private:
       State out = none();
       for (size_t k = 0; k < x->Cases.size(); ++k)
         fwdArm(st, k, x->Cases[k].Body.get(), s, out);
-      fwdArm(st, x->Cases.size(), x->Default.get(), s, out);
+      if (x->Default || !exhaustive(*x))
+        fwdArm(st, x->Cases.size(), x->Default.get(), s, out);
       s = std::move(out);
     } else if (const auto *x = std::get_if<While>(&st)) {
       const State entry = s;
@@ -676,7 +883,8 @@ private:
       State out = none();
       for (const Switch::Case &c : x->Cases)
         bwdArm(c.Body.get(), s, out);
-      bwdArm(x->Default.get(), s, out);
+      if (x->Default || !exhaustive(*x))
+        bwdArm(x->Default.get(), s, out);
       s = std::move(out);
       StepFn(G.of(st), s);
     } else if (const auto *x = std::get_if<While>(&st)) {
@@ -722,6 +930,9 @@ struct Transfer {
   Operand Base;
   /// The node the copy is complete at.
   uint32_t Last = 0;
+  /// The node from which the destination holds the reference (and may let
+  /// it go): a box's consumer, a mem local's Last.
+  uint32_t Holds = 0;
 };
 
 /// One analysis of a function: its nodes and what its values refer to.
@@ -836,6 +1047,67 @@ public:
       }
     }
     return Event::None;
+  }
+
+  /// By node: whether it may release a reference (mayRelease) while a
+  /// borrowed reference (Origins::borrowed) is in use across it: one made
+  /// before it and used after it, one a call it makes is given (a method's
+  /// receiver read from a field), or a local holding one (`self`) read
+  /// after it.  An object such a reference depends on may die there.  A
+  /// use in a loop the reference was made outside of is in use at every
+  /// node of the loop; one in another arm may be counted too.
+  std::vector<bool> exposed() const {
+    const size_t n = G.Nodes.size();
+    // Each borrow's places [from, to], as +1 at from and -1 after to.
+    std::vector<int64_t> starts(n + 1);
+    std::vector<bool> given(n);
+    // The last place before a use at node @p u by which a reference made
+    // at @p def (or at the entry) is in use.
+    auto until = [&](uint32_t u, std::optional<uint32_t> def) {
+      auto to = static_cast<int64_t>(G.pos(u)) - 1;
+      for (uint32_t l = G.LoopOf[u];
+           l != kNoLoop && !(def && G.inLoop(*def, l)); l = G.Loops[l].Parent)
+        to = std::max<int64_t>(to, G.loopEnd(l));
+      return to;
+    };
+    auto span = [&](int64_t from, int64_t to) {
+      if (from > to)
+        return;
+      ++starts[from];
+      --starts[to + 1];
+    };
+    for (ValueId v = 0; v < V.size(); ++v) {
+      if (!O.borrowed(v))
+        continue;
+      std::optional<uint32_t> def;
+      if (const Place d = V.defAt(v); d.B)
+        def = G.of(d.stmt());
+      int64_t to = -1;
+      for (uint32_t u : V.users(v)) {
+        if (const Instr *in = G.instr(u); in && isCall(in->Op))
+          given[u] = true;
+        to = std::max(to, until(u, def));
+      }
+      span(def ? G.pos(*def) + 1 : 0, to);
+    }
+    std::unordered_map<LocalId, int64_t> held;
+    for (uint32_t u = 0; u < n; ++u)
+      if (const Instr *in = G.instr(u);
+          in && in->Op == Opcode::Load && O.holdsBorrowed(in->Local)) {
+        int64_t &to = held.try_emplace(in->Local, -1).first->second;
+        to = std::max(to, until(u, std::nullopt));
+      }
+    for (const auto &[l, to] : held)
+      span(0, to);
+    std::vector<bool> out(n);
+    int64_t open = 0;
+    for (uint32_t p = 0; p < n; ++p) {
+      open += starts[p];
+      const uint32_t u = static_cast<uint32_t>(n - 1 - p);
+      const Instr *in = G.instr(u);
+      out[u] = in && mayRelease(*in) && (open > 0 || given[u]);
+    }
+    return out;
   }
 
   /// Whether @p o is a reference of @p s's local other than @p s, loaded
@@ -966,6 +1238,7 @@ public:
     t.Retains = {at};
     t.Before = {at.B, at.Index + 1};
     t.Last = r;
+    t.Holds = c;
     return t;
   }
 
@@ -1151,6 +1424,7 @@ public:
     }
     t.Before = {last.B, last.Index + 1};
     t.Last = G.of(last.stmt());
+    t.Holds = t.Last;
     return t;
   }
 };
@@ -1256,13 +1530,16 @@ public:
   explicit Mover(Function &f) : F(f) {}
 
   MoveCounts run() {
-    if (!transfer())
-      return Counts;
-    // Each round of the cleanup may make more of it possible (a release
-    // moved into an arm leaves the null stores of the others unread).
-    for (bool changed = true; changed;) {
-      changed = dropNullReleases();
-      changed = dropDeadNullStores() || changed;
+    // A move and its cleanup may take away what kept another copy a copy
+    // (a release a borrowed reference was in use across): until a round
+    // moves nothing, so that the pass changes nothing on its own output.
+    while (transfer()) {
+      // Each round of the cleanup may make more of it possible (a release
+      // moved into an arm leaves the null stores of the others unread).
+      for (bool changed = true; changed;) {
+        changed = dropNullReleases();
+        changed = dropDeadNullStores() || changed;
+      }
     }
     return Counts;
   }
@@ -1307,10 +1584,42 @@ private:
                                 [&](size_t b) { return s.B.test(b); });
       a.lastUse(n, slots, s.B);
     }).backward(F.Body);
+    // Which of them would let an object die under a borrowed reference:
+    // after a move the destination may let the object go before the slot
+    // would have, so a node that may release a reference while a borrowed
+    // one is in use across it (Analysis::exposed), on a path from where the
+    // destination holds the reference to the slot's release, keeps the
+    // slot's copies copies.  One flow forward from the entry: a slot's bits
+    // are set from the destination on and cleared at its release.
+    const std::vector<bool> exposed = a.exposed();
+    std::unordered_map<uint32_t, std::vector<size_t>> holds;
+    for (size_t i = 0; i < copies.size(); ++i)
+      if (last[i])
+        holds[copies[i].Holds].push_back(i);
+    Bits risky(slots.size(), false);
+    Flow(a.G, slots.size(), /*must=*/false, [&](uint32_t n, Flow::State &s) {
+      if (exposed[n])
+        risky.meet(s.B, /*all=*/false);
+      if (auto it = holds.find(n); it != holds.end())
+        for (size_t i : it->second)
+          for (size_t b : bits[i]) {
+            // A call given the reference may let it go before it returns.
+            if (exposed[n])
+              risky.set(b, true);
+            s.B.set(b, true);
+          }
+      a.touched(n, slots, [&](size_t i) {
+        if (a.event(n, slots[i]) == Event::Release)
+          s.B.set(i, false);
+      });
+    }).forward(F.Body);
     std::vector<Transfer> found;
     std::unordered_set<const Stmt *> claimed;
     for (size_t i = 0; i < copies.size(); ++i) {
       Transfer &t = copies[i];
+      if (std::any_of(bits[i].begin(), bits[i].end(),
+                      [&](size_t b) { return risky.test(b); }))
+        continue;
       // A retain belongs to one copy.
       if (!last[i] ||
           std::any_of(t.Retains.begin(), t.Retains.end(), [&](const Place &p) {

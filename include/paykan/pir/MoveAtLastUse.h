@@ -36,16 +36,19 @@ struct MoveCounts {
 /// duplicates.  It is a last use when, on every path from it, the next thing
 /// that touches the local's reference is the `release` of that reference
 /// (scope exit, or the release before an assignment), with no read of the
-/// local and no use of a value derived from it in between.  The retain then
-/// goes and `null` is stored into the slot: the release, still there for
-/// the paths that did not move, releases nothing on the paths that did.
-/// Releases of a slot that is null on every path are removed; a release
-/// after an `if` or a `switch` whose arms all moved but one goes into that
-/// arm; null stores nothing reads are removed.  Never moved: `self`, `inout`
-/// and other addressed slots, fields, array elements, parts of a held value,
-/// `weak` locals, and a closure's captures.  A `view` of a reference holds
-/// one of its own under today's calling convention, and is moved like any
-/// local.
+/// local and no use of a value derived from it in between; and when, from
+/// where the destination holds the reference to that release, nothing that
+/// may release a reference comes while a borrowed reference (a field read in
+/// place, `self`, what an `inout` parameter points at) is in use across it,
+/// since the local may be what keeps that reference's object alive.  The
+/// retain then goes and `null` is stored into the slot: the release, still
+/// there for the paths that did not move, releases nothing on the paths
+/// that did.  Releases of a slot that is null on every path are removed; a
+/// release after an `if` or a `switch` whose arms all moved but one goes
+/// into that arm; null stores nothing reads are removed; and the whole runs
+/// again until it moves nothing more.  Never moved: `self`, `inout` and
+/// other addressed slots, a `view`'s slot, fields, array elements, parts of
+/// a held value, `weak` locals, and a closure's captures.
 MoveCounts moveAtLastUse(Function &f);
 
 /// moveAtLastUse on every function the program defines, as a pass

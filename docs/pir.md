@@ -108,6 +108,7 @@ carry a value out of a branch, store it into a `local`.
 ```
 fn @name(%p0: T0, %p1: T1) -> R {
   local %x: T          ; mutable slot, function-scoped, uninitialised
+  local %v: box view   ; a `view` parameter's or variable's slot
   ...statements...
 }
 extern fn @$rt.Paykan_retain(box) -> void          ; runtime ABI symbol `Paykan_retain`
@@ -124,9 +125,14 @@ instead (`local.addr`, §6).  Several
 locals may share a name (two match arms binding `a`, a name declared in sibling
 scopes), so the printer writes a local as `%name.I` with `I` its index;
 hand-written text may use any spelling as long as declaration and uses agree.
-Every Paykan variable is a local.  A slot can hold `null` (an absent optional,
-or a variable handed on at its last use, §12), so `release` of a null box is a
-no-op in the runtime.
+Every Paykan variable is a local.  A slot can hold `null` (an absent
+optional), so `release` of a null box is a no-op in the runtime.  A variable
+handed on at its last use (§12) may keep the reference it handed on, which
+it no longer owns: nothing reads or releases that slot again.  `view` after
+a local's type marks the slot of a `view` parameter or variable (`fn f(n:
+view Node)`, `v: view = x`, a `view` binding of a `match` arm): it names a
+value another variable holds, so no pass hands what it holds on (§12).
+Backends treat it as the same slot without the mark.
 
 A function is `extern` when it is defined elsewhere: in the runtime (no
 `module` clause; the name is `$rt.` followed by the C symbol, see below) or in
@@ -479,11 +485,17 @@ CodeGen enforced, now in one place.
   box (plain field read, tuple element, array element, another variable) is
   `retain`ed first; a raw object
   (string literal, concat result, `self`, a match-arm binding) is `box`ed, which
-  creates the object's unique box or acquires the existing one.  A copy at
-  a variable's last use is made a move afterwards (§12).
+  creates the object's unique box or acquires the existing one.
 * **Scope exit** releases the scope's owned variables in reverse declaration
   order, then any pending temporaries (a match subject), on every path:
   fall-through, `ret` (all scopes), `break`/`continue` (scopes inside the loop).
+* **Moves at last use** (§12) then change both rules for a variable handed
+  on at its last use: the copy takes no reference of its own, and the
+  variable owns nothing from there on.  Its release is gone from the paths
+  through the copy (or, where an `if` or a `switch` joins them with paths
+  that kept the variable, moved to the end of the one arm that did), and its
+  slot may keep the pointer it handed on, which nothing reads again.  This
+  is what a backend receives.
 * **Arguments** to user functions/methods, `__super__` and the virtual `equals`
   are owned (+1) boxes that the callee releases on exit (callee-consumes).
   Arguments to runtime builtins are borrowed; temporaries are released after the
@@ -929,7 +941,39 @@ and an earlier copy of the slot wherever it is used afterwards.  So in
 `f(a, a)` only the second argument can move: a copy made after the slot's
 reads the slot first.  Loops are paths like any other: a variable read
 again on the next iteration is still in use; one reassigned first is
-released by the assignment.
+released by the assignment.  An absent `else` or `default` is a path too,
+the one on which no case matches, unless the cases of a `switch` are both
+values of a `bool`.
+
+A last use is moved only when no **borrowed reference** may depend on the
+slot's object.  After a move the destination may let the object go before
+the slot would have (a callee when it returns, a variable at the end of its
+scope, a field when it is assigned again), and with it what only the object
+holds.  A borrowed reference is one the function uses without a reference
+of its own and without a local of its own holding its object: a field's or
+an element's value read in place (`h.node.name`, held while `+` evaluates
+its other operand), what `self` or an `inout` parameter points at, and what
+is computed from them (a method's receiver read from a field).  The slot
+may be what kept that object alive.  So from the point the destination
+holds the reference to the slot's release, no node that may release a
+reference (a `release`, a `free`, a call of anything but the runtime's
+string, hash, allocation and panic helpers) may come while a borrowed
+reference is in use across it: one made before it and used after it, one a
+call it makes is given, or a local holding one (`self`) read after it.  One
+used in a loop it was made outside of is in use at every node of the loop.
+A value that holds a reference of its own is not borrowed: a box loaded
+from a box local, what a `mem` local holds (it owns its references, §7), a
+call's box, and a value retained before anything else uses it.  Nor is an
+`__init__`'s `self`: its constructor, the only caller one can have, holds
+the object (or, for a struct, the storage) until the call returns.  So
+`x = h.node; take(x); s = h.node.name + replace(h)` keeps the copy into
+`take`: if `replace` assigns `h.node`, the name read before it would die
+with the node.  Whether a borrowed reference really depends on the object
+is not asked, so a move can be refused where it was safe: one in use
+across a call anywhere between the hand-off and the slot's release, which
+for a variable of a function's outermost scope is the function's end,
+keeps the hand-off a copy; in a method, so does any use of `self` by or
+after a call that follows it (the call it is passed to included).
 
 The **rewrite** removes the copy's retains and stores `null` into the slot
 right after them.  On the paths through the copy, the release then
@@ -941,45 +985,56 @@ release where the paths join.  Then:
   its load;
 - a release right after an `if` or a `switch` (only loads of other locals
   between them), where the slot is `null` at the end of every arm that
-  reaches it but one, moves to the end of that arm: on that path it runs
-  at the same moment as before, and on the others it released nothing;
-  with two or more such arms it stays where it is, so a move never adds
-  a release;
+  reaches it but one, moves to the end of that arm, made for it when it is
+  an absent `else` or `default`: on that path it runs at the same moment as
+  before, and on the others it released nothing; with two or more such
+  arms it stays where it is, so a move never adds a release.  A `default`
+  made for the `switch` of a `match` whose cases are every variant of an
+  enum holds a release that never runs, since PIR does not know that no
+  other value reaches it;
 - a `null` store that no path reads before the slot is written again or
   the function returns is removed.
 
 So `take(a)` at the last use of a parameter `a` is `%a.2 = load %a.0` and
 `call @take(%a.2)`, with neither the retain nor `a`'s release.
 
-Each of these questions is one **dataflow** over the function's
-structured body, a bit for each slot: which copies are last uses (back
-from the end: on every path, the release first), which releases find
+Each of these questions is one **dataflow** over the function's structured
+body, a bit for each slot: which copies are last uses (back from the end:
+on every path, the release first), which of them a borrowed reference may
+depend on (forward from the entry: from the destination to the release,
+past a node a borrowed reference is in use across), which releases find
 their slot `null` on every path (forward from the entry), and which `null`
-stores some path reads (back from the end).  A walk visits each statement
-once and a loop until the bits at its head stop changing, a loop inside
-another starting from where it settled the last time, and an instruction
-updates only the bits of the slots it touches.  So the pass takes time in
-proportion to the size of the function (times the depth of its loops),
-not to the number of copies times that size.
+stores some path reads (back from the end).  Where a borrowed reference is
+in use is found once, from each one's first and last places in the body.  A
+walk visits each statement once and a loop until the bits at its head stop
+changing, a loop inside another starting from where it settled the last
+time, and an instruction updates only the bits of the slots it touches.  So
+the pass takes time in proportion to the size of the function (times the
+depth of its loops), not to the number of copies times that size.
 
 **Why it is right.**  The pass removes a retain only together with a
 release that provably runs on the same reference with no read in between:
 on every path from the copy, the slot still holds the reference it copied
 until its release, and nothing reads the slot or uses an alias of it in
-that window.  Between the copy and the release the moved program holds one
-reference fewer than the original, the slot's, which the destination
+that window.  Between the copy and the release the moved program holds
+one reference fewer than the original, the slot's, which the destination
 holds instead of a new one; before the copy and after the release the
-counts are the same.  Only a value that refers to the object without a
-reference of its own could observe the lower count, by being used after
-the destination let its reference go, and the analysis finds none in that
-window.  No release is ever added, nor moved earlier than it ran: the
-destination owns the reference and releases it at the end of its own
-scope (docs/language/16-memory.md, "Ownership transfers").  What changes
-is only that the object may die when the destination lets go rather than
-when the variable's scope ends.  A `weak` reference made elsewhere can see
-that, and so can what the object's destruction does: an `io::File` handed
-on at its last use is closed, and what was written to it flushed, when the
-destination lets it go.
+counts are the same.
+Until the destination holds it, the reference is the copy's value, which
+nothing releases, so every object lives as long as before.  From then on
+the object, and what only it holds, may die sooner: at a node that may
+release a reference, once the destination has let go.  A reference with a
+count of its own keeps what it refers to alive as before, so only one
+without could be left pointing at freed memory: an alias of the slot, of
+which the window has none, or a borrowed reference, none of which is in use
+across such a node in the window.  No release is ever added, nor moved
+earlier than it ran: the destination owns the reference and releases it at
+the end of its own scope (docs/language/16-memory.md, "Ownership
+transfers").  What changes is only that the object may die when the
+destination lets go rather than when the variable's scope ends.  A `weak`
+reference made elsewhere can see that, and so can what the object's
+destruction does: an `io::File` handed on at its last use is closed, and
+what was written to it flushed, when the destination lets it go.
 
 **Never moved:** `self` (an `obj` local, or a struct method's `ptr`),
 `inout` parameters and locals (a `ptr`), a slot whose address is taken
@@ -988,19 +1043,13 @@ holds them), a part of a value held in memory (a member: only a whole
 local is moved), a `weak` local (of type `weak`), and a closure's
 captures (a `field.store`, or a copy, into a field of a `fn.` class: the
 closure keeps a reference of its own).  A borrow that holds no reference
-of its own has no release to pair a copy with, so it never matches.
-
-A `view` of a reference type is not such a borrow yet, and is moved: a
-`view` parameter is passed like one without a mode, a box its function
-owns and releases (§7), and a `view` local (`v: view = x`) retains what it
-names and releases it at the end of its scope.  Each is a box local like
-any other, and at its last use it is handed on to where Sema lets a view
-go: a `view` parameter, or a `view` local, which hands it on in turn.  The
-object it names lives as long as before wherever the variable it views
-still holds it, which is the rest of that variable's scope unless it was
-handed on too.  When parameters are passed borrowed (#98, part 2), a
-`view` parameter holds no reference of its own, has no release, and
-leaves the pass like `self`.
+of its own has no release to pair a copy with, so it never matches.  Nor
+is a `view` parameter's or variable's slot (`local %v: box view`, §3)
+moved, although today a `view` parameter is a box its function owns and
+releases (§7) and a `view` variable retains what it names: a view names
+what another variable holds, and the object lives as long as the function
+that views it.  Passing a variable to a `view` parameter at its last use
+is a move like any other.
 
 The driver runs it on every program after the dead-code pass, before any
 backend sees the program, so `--emit-pir` prints the moved program; and on

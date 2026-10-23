@@ -40,7 +40,7 @@ namespace {
 
 // Every opcode (ftoi is not in kProgram), NaN, -0.0 and inf constants,
 // quoted names, empty blocks, an abstract slot, an extern class, both vcall
-// and vtable.addr forms, extreme integers and chars, mem slots.
+// and vtable.addr forms, extreme integers and chars, mem slots, a view slot.
 const char *const kEdgeProgram = R"(module "bin"
 cstr @"quoted name" = "a\0b" len 3
 data @.d = [-9223372036854775807, 9223372036854775807, 0, -1, 64, -65]
@@ -75,6 +75,7 @@ fn @main() -> i64 {
   local %"quoted local".0: f64
   local %1: box
   local %m.2: mem(3, 1)
+  local %v.3: box view
   %s.1 = new "ns::Shape"
   %f.2 = ftoi 2.5
   %g.3 = ftoi nan
@@ -620,6 +621,35 @@ TEST(PIRBinary, MemIsOnlyASlotType) {
   auto bad = binary::decode(binary::encode(oneFunction(std::move(g))));
   ASSERT_FALSE(bad.isOk());
   EXPECT_NE(bad.status().message().find("mem is only the type of a local"),
+            std::string::npos)
+      << bad.status().message();
+}
+
+// A view slot's mark survives the round trip; the other bits of a local's
+// flags are reserved.
+TEST(PIRBinary, AViewSlotKeepsItsMark) {
+  Function f;
+  f.Name = "f";
+  f.Sig.Ret = Type::Void;
+  f.Locals.push_back({"v", Type::Box, 0, 0, /*View=*/true});
+  f.Body.Stmts.push_back(Return{});
+  Module m = oneFunction(std::move(f));
+  std::vector<uint8_t> good = binary::encode(m);
+  auto d = binary::decode(good);
+  ASSERT_TRUE(d.isOk()) << d.status().message();
+  ASSERT_EQ((*d).Functions[0].Locals.size(), 1u);
+  EXPECT_TRUE((*d).Functions[0].Locals[0].View);
+  // Length, name, flags (4), sig (count 0, ret), conventions, params,
+  // locals, then the local's name, type and flags.
+  std::vector<binary::SymbolEntry> idx = binary::index(good);
+  ASSERT_EQ(idx.size(), 1u);
+  const size_t flags = idx[0].Offset + 1 + 1 + 4 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+  ASSERT_EQ(good[flags], 1u);
+  std::vector<uint8_t> b = good;
+  b[flags] = 3;
+  auto bad = binary::decode(b);
+  ASSERT_FALSE(bad.isOk());
+  EXPECT_NE(bad.status().message().find("reserved local flag"),
             std::string::npos)
       << bad.status().message();
 }

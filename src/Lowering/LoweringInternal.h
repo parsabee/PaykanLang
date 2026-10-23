@@ -744,8 +744,9 @@ private:
   void emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
                        const Val &dst);
   /// A variable @p name of a type held in memory, initialised with @p init
-  /// (zero without one), declared in the current scope.
-  void declareMemVar(const std::string &name, ast::Type *ty, ast::Expr *init);
+  /// (zero without one), declared in the current scope: its local.
+  pir::LocalId declareMemVar(const std::string &name, ast::Type *ty,
+                             ast::Expr *init);
   /// Copy the value of @p value into the place at @p dst (an assignment:
   /// @p value may read @p dst).
   void emitMemAssign(const Val &dst, ast::Expr *value);

@@ -487,8 +487,8 @@ void ModuleLowering::emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
   });
 }
 
-void ModuleLowering::declareMemVar(const std::string &name, ast::Type *ty,
-                                   ast::Expr *init) {
+pir::LocalId ModuleLowering::declareMemVar(const std::string &name,
+                                           ast::Type *ty, ast::Expr *init) {
   MemLayout l = memLayout(ty);
   pir::LocalId local = B.addMemLocal(name, l.Size, l.Align);
   Val addr = B.localAddr(local, name + ".addr");
@@ -497,6 +497,7 @@ void ModuleLowering::declareMemVar(const std::string &name, ast::Type *ty,
   else
     B.memZero(addr, Val::i64(l.Size));
   CurrentScope->declare(name, local, ty);
+  return local;
 }
 
 void ModuleLowering::declareMemParam(const std::string &name,
@@ -514,6 +515,8 @@ void ModuleLowering::declareMemParam(const std::string &name,
     return;
   }
   pir::LocalId local = B.addLocal(name, Type::Ptr);
+  if (mode == ast::ParamMode::View)
+    B.markView(local);
   B.store(local, addr);
   CurrentScope->declareInout(name, local, Type::Mem, ty);
 }
