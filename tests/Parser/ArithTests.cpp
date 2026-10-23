@@ -2,11 +2,23 @@
 // SPDX-License-Identifier: Apache-2.0
 // Parser tests: arithmetic, literals, variables, basic errors
 
+#include "ASTPrinter.h"
 #include "TestUtils.h"
 #include <gtest/gtest.h>
 #include <sstream>
 
 using namespace paykan::test;
+
+// The printed AST of @p src (empty when it does not parse).
+static std::string dumpAST(const std::string &src) {
+  auto [ok, driver] = parse(src);
+  if (!ok)
+    return "";
+  std::ostringstream os;
+  paykan::ast::ASTPrinter printer(os);
+  printer.visit(driver->getRoot());
+  return os.str();
+}
 
 TEST(Arith, EmptyMain) {
   auto [ok, _] = parse("fn main() -> int { return 0; }");
@@ -221,6 +233,75 @@ TEST(Arith, LineNumbersCorrectAfterStringLiterals) {
 }
 
 // -- Integer literal range (B7)
+
+// -- Adjacent string literals (#197, docs/grammar.md §1)
+// Two or more STRING tokens with only whitespace, newlines or comments
+// between them are one literal, its pieces joined at compile time.
+
+TEST(Arith, AdjacentStringLiteralsJoin) {
+  auto dump = dumpAST("fn main() -> int {\n"
+                      "  a = \"ab\" \"c\";\n"
+                      "  b = \"one \"\n"
+                      "      \"two \"   // a comment between the pieces\n"
+                      "      \"three\";\n"
+                      "  return 0;\n"
+                      "}\n");
+  ASSERT_FALSE(dump.empty());
+  // One literal, spanning every piece.
+  EXPECT_NE(dump.find("StringLiteral <2:7-2:15> \"abc\""), std::string::npos)
+      << dump;
+  EXPECT_NE(dump.find("StringLiteral <3:7-5:14> \"one two three\""),
+            std::string::npos)
+      << dump;
+  EXPECT_EQ(dump.find("\"ab\""), std::string::npos) << dump;
+}
+
+TEST(Arith, AdjacentStringLiteralsDecodeEachPiece) {
+  // Each piece's escapes are decoded on their own, then joined: `"\\" "n"`
+  // is a backslash and an `n`, not a newline.
+  auto [ok, driver] = parse("fn main() -> int {\n"
+                            "  s = \"tab\\t\" \"\\\\\" \"n\" \"q\\\"\";\n"
+                            "  return 0;\n"
+                            "}\n");
+  ASSERT_TRUE(ok);
+  auto *fn = driver->getRoot()->getFuncDecls()[0];
+  auto *as = paykan::ast::dyn_cast<paykan::ast::AssignStmt>(
+      fn->getBody()->getStatements()[0]);
+  ASSERT_NE(as, nullptr);
+  auto *lit = paykan::ast::dyn_cast<paykan::ast::StringLiteral>(as->getValue());
+  ASSERT_NE(lit, nullptr);
+  EXPECT_EQ(lit->getValue(), "tab\t\\nq\"");
+}
+
+TEST(Arith, AdjacentStringLiteralsAreOnePrimary) {
+  // A postfix applies to the joined literal; a match arm's pattern and a
+  // native function's symbol join too.
+  auto dump = dumpAST("native fn f() = \"pk_\" \"f\";\n"
+                      "fn main() -> int {\n"
+                      "  c = \"ab\" \"c\"[2];\n"
+                      "  n = \"ab\" \"c\".len();\n"
+                      "  match \"x\" { \"x\" \"y\" { } _ { } }\n"
+                      "  return 0;\n"
+                      "}\n");
+  ASSERT_FALSE(dump.empty());
+  EXPECT_NE(dump.find("native 'pk_f'"), std::string::npos) << dump;
+  EXPECT_NE(dump.find("SubscriptExpr"), std::string::npos) << dump;
+  EXPECT_NE(dump.find("\"abc\""), std::string::npos) << dump;
+  EXPECT_NE(dump.find("\"xy\""), std::string::npos) << dump;
+}
+
+TEST(Arith, StringThenCharDoesNotJoin) {
+  // A character literal is no piece of a string.
+  auto r = parseWithDiags("fn main() -> int { s = \"a\" 'b'; return 0; }\n");
+  EXPECT_FALSE(r.Ok);
+  ASSERT_FALSE(r.Diags.empty());
+  EXPECT_NE(r.Diags[0].Message.find("unexpected character literal"),
+            std::string::npos)
+      << r.Diags[0].Message;
+  // Each piece is still single-line.
+  EXPECT_FALSE(
+      parse("fn main() -> int { s = \"a\" \"b\nc\"; return 0; }\n").Ok);
+}
 
 TEST(Arith, IntLiteralMaxAccepted) {
   auto [ok, _] = parse(R"(

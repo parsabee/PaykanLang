@@ -26,6 +26,41 @@ cannot span multiple lines; use \n)`). Special characters are written with escap
 
 Any other backslash sequence is kept as written, so `"a\qb"` is the four characters `a\qb`.
 
+String literals written next to each other, with only spaces, newlines or comments between
+them, are **one** literal, joined when the program is compiled, as in C and C++. A long
+string is split across lines this way, at no cost when the program runs: unlike `+`, the
+join makes no new string.
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  io::println("this message is far too long "
+              "to fit on one line");
+  usage = "usage: tool <file>\n"
+          "  -o <file>   output\n"   // a comment between the pieces is fine
+          "  -q          quiet\n";
+  io::print(usage);
+  io::println(Str("ab" "c".len()));
+  return 0;
+}
+```
+
+Output:
+
+```
+this message is far too long to fit on one line
+usage: tool <file>
+  -o <file>   output
+  -q          quiet
+3
+```
+
+Each piece's escapes are decoded on their own, and each piece still closes on its own line.
+The joined literal is one value, so `"ab" "c".len()` is `3` and `"ab" "c"[2]` is `'c'`, and
+it works as a `match` pattern too. A character literal is not a piece: `"a" 'b'` is an
+error.
+
 The operations on strings:
 
 - `a + b` concatenates two `Str` values into a new `Str`. Both must be strings: a `Str` and a

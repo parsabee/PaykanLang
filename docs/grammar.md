@@ -97,6 +97,15 @@ Any other byte is a lexical error (`invalid character 'X'`).
   verbatim as the two characters `\X`. String literals are single-line: a
   raw newline before the closing quote is an error (`unterminated string
   literal ...`); embed a newline as `\n`.
+- Adjacent `STRING` tokens, with only whitespace, newlines or comments
+  between them, are **one** string literal, as in C and C++
+  (`stringLiteral ::= STRING+`): its value is the pieces' values, each with
+  its escapes decoded, joined in order, and its source range covers every
+  piece. `"this is " "one literal"` is `"this is one literal"`, and a long
+  string is split across lines this way, at no cost at run time: the AST
+  holds the one joined literal. The joined literal is one primary
+  expression, so a postfix applies to all of it (`"ab" "c"[2]` is `'c'`). A
+  `CHAR` does not join: `"a" 'b'` is a syntax error.
 
 ### Tuple indices
 
@@ -165,7 +174,7 @@ funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
                 ( block | "=>" expression ";" )
 nativeFuncDecl ::= "native" "fn" IDENT typeParams? "(" paramList? ")"
-                   ( "->" ( "view" | "inout" )? typeAnnotation )? "=" STRING ";"   -- the C symbol
+                   ( "->" ( "view" | "inout" )? typeAnnotation )? "=" stringLiteral ";"   -- the C symbol
 paramList   ::= param ( "," param )*
 param       ::= IDENT ":" ( "view" | "inout" )? typeAnnotation
               | IDENT                                   -- a free function's only
@@ -322,7 +331,8 @@ matchArm  ::= typeAnnotation block
             | IDENT ":" ( "view" | "inout" )? typeAnnotation block
             | literal block
             | "_" block
-literal   ::= INT | FLOAT | BOOL | CHAR | STRING | NONE
+literal   ::= INT | FLOAT | BOOL | CHAR | stringLiteral | NONE
+stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
 ```
 
 - `;` on its own is an empty statement and produces no AST node.

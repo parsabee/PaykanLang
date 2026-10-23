@@ -145,3 +145,29 @@ TEST(LiteralObject, ExpressionStatementAndFields) {
   )",
                             "k2\nt\n");
 }
+
+// Adjacent string literals (#197) are one literal, joined at compile time:
+// it prints, compares, matches and is used as an object exactly as the
+// single literal it spells.
+TEST(LiteralObject, AdjacentPiecesAreOneLiteral) {
+  expectRunsOnEveryFrontend("AdjacentPiecesAreOneLiteral", R"(import ::io;
+    fn main() -> int {
+      io::println("this message is far too long "
+                  "to fit on one line");
+      s = "ab" "c";
+      io::println(Str(s == "abc") + " " + Str("ab" "c".len()) + " "
+          + Str("ab" "c"[2]));
+      match s {
+        "a" "bc" { io::println("matched"); }
+        _ { io::println("no"); }
+      }
+      usage = "usage: tool <file>\n"
+              "  -o <file>   output\n";   // a comment between is fine
+      io::print(usage);
+      return 0;
+    }
+  )",
+                            "this message is far too long to fit on one "
+                            "line\nTrue 3 c\nmatched\nusage: tool <file>\n"
+                            "  -o <file>   output\n");
+}

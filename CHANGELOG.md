@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Adjacent string literals are one literal, joined at compile time, as in C and C++
+  (docs/grammar.md §1, docs/language/04-strings-and-conversions.md, #197): `"this message
+  is far too long " "to fit on one line"` may be split across lines, with comments between
+  the pieces, and makes no string at run time.  Each piece's escapes are decoded on their
+  own; the joined literal is one primary expression (`"ab" "c".len()` is 3), spans every
+  piece in diagnostics, and joins in a `match` pattern and a native function's symbol too.
+  A character literal does not join (`"a" 'b'` stays an error).  `scripts/pkfmt.py` keeps a
+  statement whose literal is split across lines as it was written.
+
 - `::error` (docs/stdlib/error.md), a new standard library module: `ErrorCode`, `Error`
   and its `isOk` and `message`, `none`, `name` and `fromErrno`, which were `::result`'s,
   and `fail<T>(error)`, the `Result` of an operation that failed.  `::io`, `::memory` and

@@ -15,6 +15,9 @@ The layout:
 - A class's or struct's fields are on lines of their own.
 - An enum is on one line when it fits in COL (40) characters, else one
   variant per line (a variant's fields, `B(x: int, s: Str)`, on its line).
+- A declaration or statement with a comment inside, or with a string
+  literal split across lines (adjacent pieces, `"one "` then `"literal"` on
+  the next line: docs/grammar.md), is kept as it was written.
 
 Only whitespace changes: a file whose tokens a rewrite would change is left
 as it is and reported.
@@ -400,6 +403,12 @@ class Formatter:
     def has_comment(self, first, last):
         return any(t.kind == "com" for t in self.toks[first:last + 1])
 
+    def splits_string(self, i):
+        """Whether token @p i is a piece of a string literal that the next
+        piece continues on a later line."""
+        return self.tok(i).kind == "str" and i + 1 < len(self.toks) and \
+            self.tok(i + 1).kind == "str" and self.tok(i + 1).nl > 0
+
     def kind(self, item):
         """fn, type (struct/class), enum, impl (impl/trait) or stmt."""
         for p in item.parts:
@@ -488,9 +497,11 @@ class Formatter:
         kind = self.kind(item)
         blocks = [p for p in item.parts if isinstance(p, Block)]
         runs = [p for p in item.parts if not isinstance(p, Block)]
-        # A comment inside a declaration or statement (not in a block of
-        # it): as it was written.
-        if any(self.tok(i).kind == "com" for r in runs for i in r):
+        # A comment, or a string literal split across lines, inside a
+        # declaration or statement (not in a block of it): as it was
+        # written.
+        if any(self.tok(i).kind == "com" or self.splits_string(i)
+               for r in runs for i in r):
             return self.with_trail(verbatim(self.span(item), ind), item)
         if kind == "enum" and blocks:
             return self.with_trail(self.enum(item, ind), item)
