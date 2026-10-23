@@ -300,6 +300,16 @@ void ClassType::addMethod(MethodDecl *m) {
   VTable.push_back(m);
 }
 
+void ClassType::updateAbstract() { Abstract = !pureSlots().empty(); }
+
+std::vector<const MethodDecl *> ClassType::pureSlots() const {
+  std::vector<const MethodDecl *> out;
+  for (const MethodDecl *m : VTable)
+    if (m->isPure())
+      out.push_back(m);
+  return out;
+}
+
 int ClassType::getVTableIndex(const std::string &name) const {
   auto it = VTableIndex.find(name);
   return it != VTableIndex.end() ? it->second : -1;

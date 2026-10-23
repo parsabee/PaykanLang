@@ -1,0 +1,17 @@
+// ERROR (syntax): only a method in a class body can be declared without a
+// body (a pure virtual method); an `impl` block's methods are called
+// directly, so each needs one:
+//   'area' in an 'impl' block has no body: an 'impl' block's methods and
+//   'static fn's are called directly, so only a method in a class body can
+//   end its signature with ';' (a pure virtual method)
+class Shape {
+  side: float;
+}
+
+impl Shape {
+  view fn area() -> float;
+}
+
+fn main() -> int {
+  return 0;
+}

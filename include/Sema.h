@@ -699,6 +699,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // mode; a `None` literal arm or `_` covers the absent case.
   bool checkOptionalMatch(ast::MatchStmt *node, ast::OptionalType *subjectTy);
 
+  /// A type arm that tests for the exact class @p armCt, which is abstract:
+  /// no object has that class, so the arm can never run.
+  void reportAbstractArm(const ast::MatchArm *arm, const ast::ClassType *armCt);
+
   // -- Import resolution
 
   /// The directory of the file currently being analyzed.
@@ -1198,6 +1202,12 @@ private:
 
   /// Phase 4b for one class: register the constructor function `Name(...)`.
   void declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct);
+
+  /// `cannot instantiate abstract class 'C': 'B.f' has no implementation`,
+  /// naming every pure virtual slot of the abstract class @p ct, each by the
+  /// class that declares it pure.
+  void reportAbstractConstruction(const ast::ClassType *ct,
+                                  ast::SourceLocation loc);
 
   /// The signature of @p method of @p owner (a class or a struct) as a
   /// MethodDecl with @p flags, its annotations resolved and written back;

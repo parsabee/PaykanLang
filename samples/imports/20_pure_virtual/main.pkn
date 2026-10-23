@@ -1,0 +1,47 @@
+// OK: pure virtual methods across modules (docs/language/05-classes.md).
+// geometry::shapes exports the abstract Shape and Polygon; this module
+// implements what they leave out, in Triangle (a Polygon) and Circle (a
+// Shape), and mixes them with the module's own Square. The importer works
+// out abstractness from the methods' pure bits, whether the module comes
+// from its source or from its `.pkm` (the second run of the sample).
+//
+// expect-stdout: polygon a: 4
+// expect-stdout: polygon b: 6
+// expect-stdout: circle c: 3
+// expect-stdout: total 13
+
+import ::io;
+import geometry::shapes;
+
+class Triangle : shapes::Polygon {
+  b: float;
+  h: float;
+  view fn area() -> float { return self.b * self.h / 2.0; }
+}
+
+impl Triangle {
+  fn __init__(name: Str, b: float, h: float) {
+    __super__(name, 3);
+    self.b = b;
+    self.h = h;
+  }
+}
+
+// Only roughly a circle: pi is 3 here.
+class Circle : shapes::Shape {
+  r: float;
+  view fn area() -> float { return 3.0 * self.r * self.r; }
+  view fn kind() -> Str   { return "circle"; }
+}
+
+fn main() -> int {
+  all: shapes::Shape[3] =
+      [shapes::Square("a", 2.0), Triangle("b", 3.0, 4.0), Circle("c", 1.0)];
+  i = 0;
+  while i < all.len() {
+    io::println(all[i].report());
+    i += 1;
+  }
+  io::println("total " + Str(shapes::total(all)));
+  return 0;
+}

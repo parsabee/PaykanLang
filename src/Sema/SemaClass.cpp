@@ -441,8 +441,26 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
-    if (auto *mdecl =
-            declareMethod(method, ct, overridden, ast::MethodDecl::None, ok))
+    // A method without a body is pure virtual: a vtable slot that a
+    // subclass implements.  `__init__` and `destroy` have no slot of their
+    // own; they are reported where they are checked (rejectBodyInits,
+    // visitClassDecl).
+    const bool pure = !method->getBody() && !method->isNative() &&
+                      method->getName() != names::kMethodInit &&
+                      method->getName() != names::kMethodDestroy;
+    if (pure && overridden && !overridden->isPure()) {
+      error(method->getLocation(),
+            "method '" + method->getName() + "' of class '" + cd->getName() +
+                "' has no body, but its superclass '" +
+                displayName(ct->getSuperClass()->getName()) +
+                "' implements it: an implemented method cannot become pure "
+                "virtual again");
+      ok = false;
+      continue;
+    }
+    if (auto *mdecl = declareMethod(
+            method, ct, overridden,
+            pure ? ast::MethodDecl::Pure : ast::MethodDecl::None, ok))
       ct->addMethod(mdecl);
     else
       ok = false;
@@ -451,6 +469,8 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
     ok = false;
   if (!ct->findMethod(names::kMethodInit) && !declareDefaultInit(cd, ct))
     ok = false;
+  // The vtable is complete: whether a slot is still pure.
+  ct->updateAbstract();
   PopulatedClasses.insert(cd->getName());
   return ok;
 }
@@ -659,6 +679,37 @@ void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct) {
     FunctionTable[cd->getName()].Modes = initDecl->getParamModes();
 }
 
+void Sema::reportAbstractConstruction(const ast::ClassType *ct,
+                                      ast::SourceLocation loc) {
+  // Each slot by the class that declares it pure: the topmost one, from
+  // @p ct up, whose slot of that name is still pure.  (By name, not by
+  // MethodDecl: an imported class's vtable has a MethodDecl of its own per
+  // slot.)
+  std::vector<std::string> missing;
+  for (const ast::MethodDecl *m : ct->pureSlots()) {
+    const ast::ClassType *owner = ct;
+    for (const ast::ClassType *super = owner->getSuperClass(); super;
+         super = super->getSuperClass()) {
+      const int slot = super->getVTableIndex(m->getName());
+      if (slot < 0 || !super->getVTable()[slot]->isPure())
+        break;
+      owner = super;
+    }
+    missing.push_back("'" + displayName(owner->getName()) + "." + m->getName() +
+                      "'");
+  }
+  std::string msg = "cannot instantiate abstract class '" +
+                    displayName(ct->getName()) + "': ";
+  for (size_t i = 0; i < missing.size(); ++i) {
+    if (i)
+      msg += i + 1 == missing.size() ? " and " : ", ";
+    msg += missing[i];
+  }
+  msg += missing.size() == 1 ? " has no implementation"
+                             : " have no implementation";
+  error(loc, msg);
+}
+
 // -- impl blocks
 //
 // An `impl` block's methods join its class: checked like the class body's,
@@ -863,6 +914,10 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
       ok = false;
       continue;
     }
+    // A pure virtual method has no body to check (a bodiless `__init__`
+    // was reported by rejectBodyInits).
+    if (!method->getBody())
+      continue;
 
     // Determine whether this __init__ must call __super__.  A derived
     // __init__ must call __super__(...) as its first statement whenever its

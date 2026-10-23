@@ -463,7 +463,7 @@ TranslationUnit *Parser::parseTranslationUnit() {
         ok = false;
       break;
     case Tok::KwNative:
-      if (auto *d = parseFuncDecl(/*native=*/true))
+      if (auto *d = parseFuncDecl(FuncKind::Native))
         (d->isGeneric() ? genericFuncs : funcs).push_back(d);
       else
         ok = false;
@@ -685,8 +685,7 @@ ClassDecl *Parser::parseClassDecl() {
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
     if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
-      if (auto *m = parseFuncDecl(/*native=*/false, /*requirement=*/false,
-                                  /*member=*/true)) {
+      if (auto *m = parseFuncDecl(FuncKind::ClassMethod)) {
         body.Methods.push_back(m);
         continue;
       }
@@ -950,8 +949,7 @@ ImplDecl *Parser::parseImplDecl() {
       errorAtCurrent("expected 'fn' after 'static' (a 'static fn' has no "
                      "'self', so it is never a 'view fn')");
     } else if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
-      if (auto *m = parseFuncDecl(/*native=*/false, /*requirement=*/false,
-                                  /*member=*/true)) {
+      if (auto *m = parseFuncDecl(FuncKind::ImplMethod)) {
         m->setStatic(isStatic);
         methods.push_back(m);
         continue;
@@ -1000,7 +998,7 @@ TraitDecl *Parser::parseTraitDecl() {
   while (!at(Tok::RBrace) && !at(Tok::Eof)) {
     size_t before = Pos;
     if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
-      if (auto *m = parseFuncDecl(/*native=*/false, /*requirement=*/true)) {
+      if (auto *m = parseFuncDecl(FuncKind::Requirement)) {
         methods.push_back(m);
         continue;
       }
@@ -1024,6 +1022,7 @@ TraitDecl *Parser::parseTraitDecl() {
 //
 // funcDecl ::= "view"? "fn" IDENT ( "<" typeParamList ">" )? "(" paramList ")"
 //              ( "->" ( "view" | "inout" )? typeAnnotation )? block
+//              -- or ";" in a class body: a pure virtual method
 // paramList ::= ( param ( "," param )* )?
 // param ::= IDENT ":" ( "view" | "inout" )? typeAnnotation | IDENT
 //           -- IDENT alone: a named function's, see parseFuncDecl
@@ -1091,7 +1090,9 @@ void Parser::prefixModeError() {
                          fix + "'");
 }
 
-FuncDecl *Parser::parseFuncDecl(bool native, bool requirement, bool member) {
+FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
+  const bool native = kind == FuncKind::Native;
+  const bool requirement = kind == FuncKind::Requirement;
   SourceLocation start = cur().Loc;
   bool view = !native && accept(Tok::KwView); // `view fn` (a method; see Sema)
   consume();                                  // "fn", or "native" before it
@@ -1124,7 +1125,7 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement, bool member) {
   const char *untyped = nullptr;
   if (native)
     untyped = "a native function's parameters have types";
-  else if (requirement || member)
+  else if (kind != FuncKind::Free)
     untyped = kOnlyFreeFunctionsUntyped;
   if (!parseParamList(params, untyped) ||
       !expect(Tok::RParen, "to close the parameter list"))
@@ -1207,6 +1208,32 @@ FuncDecl *Parser::parseFuncDecl(bool native, bool requirement, bool member) {
     errorAtCurrent("an expression body starts with '=>', not '=': 'fn " + name +
                    "(...) => ...;'");
     return nullptr;
+  }
+  // A class body's method whose signature ends with `;` is pure virtual: a
+  // vtable slot with no definition (docs/language/05-classes.md); no other
+  // function may leave out its body.
+  if (at(Tok::Semi)) {
+    if (kind != FuncKind::ClassMethod) {
+      error(cur().Loc,
+            kind == FuncKind::ImplMethod
+                ? "'" + name +
+                      "' in an 'impl' block has no body: an 'impl' block's "
+                      "methods and 'static fn's are called directly, so only "
+                      "a method in a class body can end its signature with "
+                      "';' (a pure virtual method)"
+                : "function '" + name +
+                      "' has no body: only a method in a class body can end "
+                      "its signature with ';' (a pure virtual method)");
+      return nullptr;
+    }
+    consume();
+    auto *fn = Ctx.make<FuncDecl>(span(start), name, std::move(params), retTy,
+                                  nullptr, std::move(typeParams));
+    fn->setView(view);
+    fn->setResultMode(resultMode);
+    fn->setModulePrivateInit(modulePrivateInit);
+    fn->setTypeParamBounds(std::move(bounds));
+    return fn;
   }
   CompoundStmt *body = nullptr;
   const bool expressionBody = at(Tok::FatArrow);

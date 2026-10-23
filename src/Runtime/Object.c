@@ -111,6 +111,13 @@ void Paykan_panic_for_step(void) {
   Paykan_runtime_panic("the step of a 'for' loop is 0");
 }
 
+void Paykan_panic_pure_virtual(const char *cls, int64_t cls_len,
+                               const char *method, int64_t method_len) {
+  Paykan_runtime_panic("call of the pure virtual method '%.*s.%.*s', which has "
+                       "no implementation",
+                       (int)cls_len, cls, (int)method_len, method);
+}
+
 void Paykan_panic_float_to_int(double value) {
   char buf[64];
   Paykan_format_float(buf, sizeof(buf), value);

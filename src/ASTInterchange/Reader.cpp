@@ -593,7 +593,7 @@ private:
         return nullptr;
     }
     std::vector<FuncDecl *> methods;
-    if (!methodList(f, methods, /*requirements=*/false) || !f.done())
+    if (!methodList(f, methods, Body::Required) || !f.done())
       return nullptr;
     return Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait,
                               std::move(params));
@@ -610,22 +610,30 @@ private:
     if (!bounds.empty())
       return fail(e, "a trait's type parameters cannot have bounds"), nullptr;
     std::vector<FuncDecl *> methods;
-    if (!methodList(f, methods, /*requirements=*/true) || !f.done())
+    if (!methodList(f, methods, Body::Absent) || !f.done())
       return nullptr;
     return Ctx.make<TraitDecl>(loc, *name, std::move(tparams),
                                std::move(methods));
   }
 
-  /// The `(methods FN...)` field into @p out; a trait's @p requirements
-  /// have `_` for their bodies.
-  bool methodList(Fields &f, std::vector<FuncDecl *> &out, bool requirements) {
+  /// What may stand where a function's body goes (a native's C symbol
+  /// aside).
+  enum class Body {
+    Required, ///< a block: a free function's, an `impl` block's method's
+    Absent,   ///< `_`: a trait method's
+    Optional, ///< a block, or `_` for a pure virtual method: a class's
+  };
+
+  /// The `(methods FN...)` field into @p out, each with a body as @p body
+  /// says.
+  bool methodList(Fields &f, std::vector<FuncDecl *> &out, Body body) {
     const SExpr *ml = f.list("methods");
     if (!ml)
       return false;
     for (const SExpr &m : ml->Items) {
       if (m.K != SExpr::List || m.Text != "fn")
         return fail(m, "expected a method: (fn ...)"), false;
-      auto *fn = funcDecl(m, requirements);
+      auto *fn = funcDecl(m, body);
       if (!fn)
         return false;
       out.push_back(fn);
@@ -780,7 +788,7 @@ private:
         return fail(v, "a field cannot be declared with let"), nullptr;
       fields.push_back(vd);
     }
-    if (!methodList(f, methods, /*requirements=*/false) || !f.done())
+    if (!methodList(f, methods, Body::Optional) || !f.done())
       return nullptr;
     auto *cd = Ctx.make<ClassDecl>(loc, *name, *super, std::move(fields),
                                    std::move(methods), std::move(params));
@@ -788,8 +796,8 @@ private:
     return cd;
   }
 
-  /// A function; a trait's @p requirement has `_` for its body.
-  FuncDecl *funcDecl(const SExpr &e, bool requirement = false) {
+  /// A function, with a body as @p bodyRule says.
+  FuncDecl *funcDecl(const SExpr &e, Body bodyRule = Body::Required) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
     const std::string *name = f.name("the function's name");
@@ -842,11 +850,19 @@ private:
       return fn;
     }
     CompoundStmt *body = nullptr;
-    if (requirement) {
+    if (bodyRule == Body::Absent) {
       if (!tparams.empty())
         return fail(e, "a trait method cannot be generic"), nullptr;
       if (!f.absent())
         return fail(e, "a trait method has `_` for its body"), nullptr;
+    } else if (f.absent()) {
+      // The grammar's own check (docs/grammar.md): only a class's method is
+      // pure virtual.
+      if (bodyRule == Body::Required)
+        return fail(e, "function '" + *name +
+                           "' has `_` for its body: only a class's method "
+                           "can (a pure virtual method)"),
+               nullptr;
     } else {
       body = block(f, "the function's body");
       if (!body)
