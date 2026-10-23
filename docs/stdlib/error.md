@@ -5,7 +5,7 @@ set, `ErrorCode`, and, when there is more to say, a message. A function of the s
 library that can fail returns a [`::result`](result.md) `Result<T, Error>`, the value it
 made or the `Error` saying why it could not, or just an `Error` when it makes no value, and
 a program can use the same types for its own errors. The module is imported by convention
-as `import ::error as err;`, and its names are written `err::Error`, `err::fail(...)`.
+as `import ::error as err;`, and its names are written `err::Error`, `err::none()`.
 
 ```pkn
 import ::io;
@@ -16,7 +16,7 @@ import ::result as res;
 // The square root of a number that has one.
 fn root(x: float) -> res::Result<float, err::Error> {
   if x < 0.0 {
-    return err::fail(err::Error(err::ErrorCode::InvalidArgument, "negative: " + Str(x)));
+    return res::fail(err::Error(err::ErrorCode::InvalidArgument, "negative: " + Str(x)));
   }
   return res::ok(math::sqrt(x));
 }
@@ -57,8 +57,8 @@ No such file or directory)`, and two errors are `==` when their codes and messag
 
 An operation that makes no value returns just its `Error`: [`none`](#none) when it did not
 fail, whose code is `Ok`, so `isOk()` tells the two apart (`if !f.write(s).isOk() { ...
-}`). One that makes a value returns a `Result`, and [`fail`](#fail) makes the result of one
-that failed.
+}`). One that makes a value returns a `Result`, and `::result`'s [`fail`](result.md#fail)
+makes the result of one that failed.
 
 ---
 
@@ -135,16 +135,6 @@ fn none() -> Error
 
 No error: `Error(ErrorCode::Ok, None)`. A function that returns an `Error` returns this when
 it succeeded.
-
-### `fail`
-
-```pkn
-fn fail<T>(error: Error) -> res::Result<T, Error>
-```
-
-The result of an operation that failed with `error`: `Result::Err(error)`. `T` is taken
-from the type the result flows into (`return err::fail(e);` in a function returning a
-`res::Result<int, err::Error>`); where nothing gives it, write it, `err::fail<int>(e)`.
 
 ### `name`
 

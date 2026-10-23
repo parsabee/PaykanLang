@@ -19,9 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   statement whose literal is split across lines as it was written.
 
 - `::error` (docs/stdlib/error.md), a new standard library module: `ErrorCode`, `Error`
-  and its `isOk` and `message`, `none`, `name` and `fromErrno`, which were `::result`'s,
-  and `fail<T>(error)`, the `Result` of an operation that failed.  `::io`, `::memory` and
-  `::collections` report their errors with it.
+  and its `isOk` and `message`, `none`, `name` and `fromErrno`, which were `::result`'s.
+  `::io`, `::memory` and `::collections` report their errors with it.
 - A generic function's type arguments that its arguments leave open are taken from the
   type the call's value flows into (a declared variable, a parameter, a `return`, a field,
   an array element), matched against its result type: `s: Str? = none();` with `fn
@@ -183,7 +182,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `match r { f: Ok { ... f.value ... } e: Err { ... e.error ... } }`, and spells the error
   types and functions `err::Error`, `err::ErrorCode`, `err::none()`, `err::name(code)`,
   `err::fromErrno(n)` (`import ::error as err;`).  `Result.isOk()` is gone (match the
-  result); `res::ok` is `ok<T, E>(value)`, with `E` from the type the result flows into.
+  result); `res::ok` is `ok<T, E>(value)`, with `E` from the type the result flows into,
+  and the new `res::fail<T>(error)` makes the `Result` of an operation that failed with an
+  `err::Error` (`::result` imports `::error`).
   A `Result<Str?, err::Error>` now tells a success that found `None` from a failure.
 - PaykanLang is licensed under the Apache License, Version 2.0 (`LICENSE`), no
   longer the MIT License: every source file's `SPDX-License-Identifier` is

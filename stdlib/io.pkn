@@ -63,9 +63,9 @@ fn _readResult(text: Str?, errno: int) -> res::Result<Str, err::Error> {
     t: Str { return res::ok(t); }
     None {
       if errno == 0 {
-        return err::fail(err::Error(err::ErrorCode::EndOfFile, None));
+        return res::fail(err::Error(err::ErrorCode::EndOfFile, None));
       }
-      return err::fail(err::fromErrno(errno));
+      return res::fail(err::fromErrno(errno));
     }
   }
 }
@@ -111,7 +111,7 @@ fn open(path: view Str, mode: view Str) -> res::Result<File, err::Error> {
       return res::ok(File(handle));
     }
     None {
-      return err::fail(err::fromErrno(errno));
+      return res::fail(err::fromErrno(errno));
     }
   }
 }

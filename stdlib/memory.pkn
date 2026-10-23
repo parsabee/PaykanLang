@@ -74,10 +74,10 @@ impl Buffer<T> {
   // a slot never set.  As get(), not through a `view`.
   fn copy(i: unsigned) -> res::Result<T, err::Error> {
     if i >= _len<T>(self.__data) {
-      return err::fail(_errorOf(err::ErrorCode::OutOfRange));
+      return res::fail(_errorOf(err::ErrorCode::OutOfRange));
     }
     if _isSet<T>(self.__data, i) == 0 {
-      return err::fail(_errorOf(err::ErrorCode::NotFound));
+      return res::fail(_errorOf(err::ErrorCode::NotFound));
     }
     return res::ok(_copy<T>(self.__data, i));
   }
