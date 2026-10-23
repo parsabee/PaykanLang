@@ -68,6 +68,7 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
   OS << "\n";
   size_t total =
       node->getImports().size() + node->getEnumDecls().size() +
+      node->getGenericEnumDecls().size() +
       node->getGenericStructDecls().size() + node->getStructDecls().size() +
       node->getClassDecls().size() + node->getFuncDecls().size() +
       node->getGenericClassDecls().size() + node->getGenericFuncDecls().size() +
@@ -77,6 +78,11 @@ void ASTPrinter::visitTranslationUnit(TranslationUnit *node) {
     ++idx;
     ChildScope cs(*this, idx == total);
     visitImportDecl(imp);
+  }
+  for (auto *en : node->getGenericEnumDecls()) {
+    ++idx;
+    ChildScope cs(*this, idx == total);
+    visitEnumDecl(en);
   }
   for (auto *en : node->getEnumDecls()) {
     ++idx;
@@ -723,7 +729,9 @@ void ASTPrinter::visitTraitDecl(TraitDecl *node) {
 
 void ASTPrinter::visitEnumDecl(EnumDecl *node) {
   header("EnumDecl", node);
-  OS << " '" << node->getName() << "' {";
+  OS << " '" << node->getName() << "'";
+  printTypeParams(OS, node->getTypeParams(), node->getTypeParamBounds());
+  OS << " {";
   // `B(x, y)` for a variant with fields; the fields follow as children.
   size_t total = 0;
   for (size_t i = 0; i < node->getNumVariants(); ++i) {
@@ -755,7 +763,15 @@ void ASTPrinter::visitEnumType(EnumType *node) {
 
 void ASTPrinter::visitEnumValueExpr(EnumValueExpr *node) {
   header("EnumValueExpr", node);
-  OS << " '" << node->getEnumName() << "::" << node->getVariantName() << "'\n";
+  OS << " '" << node->getEnumName() << "::" << node->getVariantName() << "'";
+  if (node->hasTypeArgs())
+    OS << " " << node->getTypeArgs().size() << " type args";
+  OS << "\n";
+  const auto &targs = node->getTypeArgs();
+  for (size_t i = 0; i < targs.size(); ++i) {
+    ChildScope cs(*this, i + 1 == targs.size());
+    visit(targs[i]);
+  }
 }
 
 void ASTPrinter::visitMemberAssignStmt(MemberAssignStmt *node) {

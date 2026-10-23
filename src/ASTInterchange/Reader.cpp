@@ -307,10 +307,16 @@ private:
     /// The next field if it is a list tagged @p tag (consumed), else null:
     /// an optional trailing item.
     const SExpr *optionalList(const char *tag) {
-      if (atEnd() || L.Items[I].K != SExpr::List || L.Items[I].Text != tag)
+      if (!nextIsList(tag))
         return nullptr;
       return &L.Items[I++];
     }
+    /// Whether the next field is the list @p tag (not consumed).
+    bool nextIsList(const char *tag) const {
+      return !atEnd() && L.Items[I].K == SExpr::List && L.Items[I].Text == tag;
+    }
+    /// The next field, not consumed (the caller checked there is one).
+    const SExpr *peekList() const { return &L.Items[I]; }
 
     /// The next field if it is `_` (consumed), else false.
     bool absent() {
@@ -477,7 +483,7 @@ private:
     std::vector<ImportDecl *> imports;
     std::vector<ClassDecl *> classes, genericClasses;
     std::vector<FuncDecl *> funcs, genericFuncs;
-    std::vector<EnumDecl *> enums;
+    std::vector<EnumDecl *> enums, genericEnums;
     std::vector<ImplDecl *> impls;
     std::vector<TraitDecl *> traits;
     std::vector<StructDecl *> structs, genericStructs;
@@ -493,7 +499,7 @@ private:
           imports.push_back(i);
       } else if (d->Text == "enum") {
         if (auto *en = enumDecl(*d))
-          enums.push_back(en);
+          (en->isGeneric() ? genericEnums : enums).push_back(en);
       } else if (d->Text == "class") {
         if (auto *c = classDecl(*d))
           (c->isGeneric() ? genericClasses : classes).push_back(c);
@@ -521,7 +527,7 @@ private:
         loc, std::move(imports), std::move(classes), std::move(funcs),
         std::move(enums), std::move(genericClasses), std::move(genericFuncs),
         std::move(impls), std::move(traits), std::move(structs),
-        std::move(genericStructs));
+        std::move(genericStructs), std::move(genericEnums));
   }
 
   StructDecl *structDecl(const SExpr &e) {
@@ -658,6 +664,16 @@ private:
     const std::string *name = f.name("the enum's name");
     if (!name)
       return nullptr;
+    // A generic enum's (type-params ...) after its name.
+    std::vector<const std::string *> params;
+    TypeParamBounds bounds;
+    if (f.nextIsList("type-params")) {
+      const SExpr &tl = *f.peekList();
+      if (!typeParams(f, params, bounds))
+        return nullptr;
+      if (params.empty())
+        return fail(tl, "(type-params) of an enum needs a name"), nullptr;
+    }
     std::vector<const std::string *> variants;
     std::vector<std::vector<VarDecl *>> payloads;
     while (!f.atEnd()) {
@@ -692,8 +708,10 @@ private:
       variants.push_back(v);
       payloads.emplace_back();
     }
-    return Ctx.make<EnumDecl>(loc, *name, std::move(variants),
-                              std::move(payloads));
+    auto *ed = Ctx.make<EnumDecl>(loc, *name, std::move(variants),
+                                  std::move(payloads), std::move(params));
+    ed->setTypeParamBounds(std::move(bounds));
+    return ed;
   }
 
   /// `(type-params "T" (bound "U" TRAIT...))` into @p out and @p bounds
@@ -1467,7 +1485,22 @@ private:
       const std::string *v = en ? f.name("the variant's name") : nullptr;
       if (!v)
         return nullptr;
-      out = Ctx.make<EnumValueExpr>(loc, *en, *v);
+      // A generic enum's (type-args TYPE...), `Option<int>::Nothing`.
+      std::vector<Type *> targs;
+      if (const SExpr *tl = f.optionalList("type-args")) {
+        for (const SExpr &ta : tl->Items) {
+          if (ta.K != SExpr::List)
+            return fail(ta, "expected a type"), nullptr;
+          Type *ty = type(ta);
+          if (!ty)
+            return nullptr;
+          targs.push_back(ty);
+        }
+        if (targs.empty())
+          return fail(*tl, "(type-args) of an enum value needs a type"),
+                 nullptr;
+      }
+      out = Ctx.make<EnumValueExpr>(loc, *en, *v, std::move(targs));
     } else if (t == "mov") {
       return fail(e, "(mov ...): " + std::string(frontend::kMovRemoved)),
              nullptr;

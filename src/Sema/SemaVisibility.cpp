@@ -76,6 +76,9 @@ std::string Sema::moduleOf(ast::Type *ty) {
   } else if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
     if (const StructInstantiationInfo *info = structInstantiationInfo(st))
       tmpl = info->Template;
+  } else if (auto *et = ast::dyn_cast<ast::EnumType>(ty)) {
+    if (const EnumInstantiationInfo *info = enumInstantiationInfo(et))
+      tmpl = info->Template;
   }
   if (tmpl) {
     const ModuleTemplates *origin = foreignOrigin(tmpl);
@@ -156,8 +159,15 @@ std::string Sema::privateTypeIn(ast::Type *ty) {
           return p;
     return "";
   }
-  if (auto *et = ast::dyn_cast<ast::EnumType>(ty))
-    return named(et->getName());
+  if (auto *et = ast::dyn_cast<ast::EnumType>(ty)) {
+    if (std::string p = named(et->getName()); !p.empty())
+      return p;
+    if (const EnumInstantiationInfo *info = enumInstantiationInfo(et))
+      for (ast::Type *arg : info->Args)
+        if (std::string p = privateTypeIn(arg); !p.empty())
+          return p;
+    return "";
+  }
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
     return privateTypeIn(ot->getInnerType());
   if (auto *at = ast::dyn_cast<ast::ArrayType>(ty))
@@ -275,6 +285,8 @@ bool Sema::rejectTopLevelTypePrivate(ast::TranslationUnit *tu) {
   for (auto *sd : tu->getGenericStructDecls())
     check(sd->getName(), "struct", sd->getLocation());
   for (auto *ed : tu->getEnumDecls())
+    check(ed->getName(), "enum", ed->getLocation());
+  for (auto *ed : tu->getGenericEnumDecls())
     check(ed->getName(), "enum", ed->getLocation());
   for (auto *td : tu->getTraitDecls())
     check(td->getName(), "trait", td->getLocation());

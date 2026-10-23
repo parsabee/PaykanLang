@@ -337,3 +337,160 @@ TEST(Enum, TaggedUnionIsNotNative) {
             std::string::npos)
       << r.Diagnostics;
 }
+
+// --- Generic enums ----------------------------------------------------------
+
+static const char *kGeneric =
+    "enum Maybe<T> { Just(value: T), Nothing }\n"
+    "enum Result<T, E> { Ok(value: T), Err(error: E) }";
+
+/// @p body checked in a program declaring kGeneric: one error, holding
+/// @p message.
+static void expectGenericError(const std::string &body,
+                               const std::string &message) {
+  auto r = semaCheck(withEnums(kGeneric, body));
+  EXPECT_FALSE(r.Ok) << body;
+  EXPECT_EQ(r.ErrorCount, 1u) << body << "\n" << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(message), std::string::npos) << body << "\n"
+                                                            << r.Diagnostics;
+}
+
+// A variant's type arguments are written, taken from the type its value
+// flows into, or inferred from its fields.
+TEST(Enum, GenericVariantsInstantiate) {
+  auto r = semaCheck(withEnums(kGeneric, R"(
+    a = Maybe::Just(3);
+    b: Maybe<int> = Maybe::Nothing;
+    c = Maybe<Str>::Nothing;
+    d: Maybe<u8> = Maybe::Just(200);
+    e: Result<int, Str> = Result::Err("bad");
+    f = Result<int, Str>::Ok(1);
+    a = b;
+    a = Maybe::Nothing;
+    xs: Maybe<Str>[2] = [Maybe::Just("x"), Maybe::Nothing];
+    o: Maybe<int>? = Maybe::Nothing;
+    same = a == Maybe::Nothing;
+    match a { j: Just { n: int = j.value; } Nothing { } }
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// Through a generic function's parameters and result, and a generic
+// struct's fields.
+TEST(Enum, GenericEnumInGenericCode) {
+  auto r = semaCheck(std::string(kGeneric) + R"(
+fn unwrapOr<T>(m: Maybe<T>, d: T) -> T {
+  match m { j: Just { return j.value; } Nothing { return d; } }
+}
+fn wrap<T>(x: T) -> Maybe<T> => Maybe::Just(x);
+fn none<T>() -> Maybe<T> { return Maybe::Nothing; }
+struct Cell<T> { m: Maybe<T>; }
+)" + wrapMain(R"(
+    n: int = unwrapOr(Maybe::Just(1), 0);
+    s: Str = unwrapOr(wrap("a"), "b");
+    f: float = unwrapOr(none<float>(), 1.5);
+    c = Cell(Maybe::Just(2.5));
+    m: Maybe<float> = c.m;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+TEST(Enum, GenericVariantsChecked) {
+  expectGenericError("x = Maybe::Nothing;",
+                     "cannot infer the type arguments of generic enum 'Maybe' "
+                     "for 'Maybe::Nothing': write them ('Maybe<...>::Nothing'"
+                     "), or give the value a type ('x: Maybe<...> = "
+                     "Maybe::Nothing')");
+  expectGenericError("x = Result::Ok(1);",
+                     "cannot infer type parameter 'E' of 'Result' from the "
+                     "call arguments");
+  expectGenericError("x = Result::Ok(1);",
+                     "specify the type arguments explicitly: "
+                     "'Result<...>::Ok(...)'");
+  expectGenericError("x = Maybe<int, int>::Nothing;",
+                     "generic enum 'Maybe' expects 1 type argument(s), got 2");
+  expectGenericError("x = Maybe::Nope;", "enum 'Maybe' has no variant 'Nope'");
+  expectGenericError("x = Maybe::Just();",
+                     "variant 'Just' of enum 'Maybe' has 1 field(s) (value: "
+                     "T), got 0 argument(s)");
+  expectGenericError("x = Maybe::Nothing(1);",
+                     "variant 'Nothing' of enum 'Maybe' has no fields: write "
+                     "'Maybe::Nothing' without arguments");
+  expectGenericError("x: Maybe<int> = Maybe::Just(\"s\");",
+                     "field 'value' of 'Maybe::Just' has type 'int', got "
+                     "'Str'");
+  expectGenericError("x: Maybe<int> = Maybe<Str>::Nothing;",
+                     "initializer of type 'Maybe<Str>' does not match declared "
+                     "type 'Maybe<int>' for variable 'x'");
+  expectGenericError("x: Maybe = Maybe<int>::Nothing;",
+                     "names generic enum 'Maybe' without type arguments "
+                     "(write 'Maybe<...>')");
+  expectGenericError("Maybe = 3;",
+                     "'Maybe' is a type name and cannot be used as a variable");
+}
+
+TEST(Enum, GenericEnumDeclarationsChecked) {
+  struct Case {
+    const char *Decls;
+    const char *Message;
+  };
+  for (const Case &c : {
+           Case{"enum M<T> { A(x: T) }\nenum M<U> { B }",
+                "redefinition of generic enum 'M'"},
+           Case{"enum M<T> { A(x: T) }\nclass M { }",
+                "'M' is already declared as a generic enum"},
+           Case{"enum M<T, T> { A(x: T) }",
+                "duplicate type parameter 'T' in generic enum 'M'"},
+           Case{"enum M<int> { A }", "type parameter 'int' of generic enum "
+                                     "'M' shadows a type of the same name"},
+           Case{"enum M<T> { A(x: T), A }",
+                "duplicate variant 'A' in enum 'M'"},
+           Case{"enum M<T> { A(x: T) }\nimpl M<T> { fn f() -> int { return "
+                "1; } }",
+                "an 'impl' block for an enum is not supported yet"},
+           Case{"enum Color { Red }\nfn f(c: Color<int>) { }",
+                "'Color' is not a generic enum and takes no type arguments"},
+       }) {
+    auto r = semaCheck(std::string(c.Decls) + "\n" + wrapMain(""));
+    EXPECT_FALSE(r.Ok) << c.Decls;
+    EXPECT_NE(r.Diagnostics.find(c.Message), std::string::npos)
+        << c.Decls << "\n"
+        << r.Diagnostics;
+  }
+  // A bound is checked where the enum is instantiated.
+  auto r = semaCheck("trait Named { view fn name() -> Str; }\n"
+                     "enum Tagged<T: Named> { One(v: T) }\n" +
+                     wrapMain("t = Tagged::One(3);"));
+  EXPECT_NE(r.Diagnostics.find("'int' does not implement trait 'Named', which "
+                               "'Tagged' requires of 'T'"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+// An instantiation is held in place as any enum is: its variants cannot hold
+// it, directly or through another instantiation.
+TEST(Enum, GenericEnumCannotHoldItself) {
+  auto r = semaCheck("enum L<T> { Nil, Cons(head: T, tail: L<T>) }\n" +
+                     wrapMain("l = L<int>::Nil;"));
+  EXPECT_NE(r.Diagnostics.find(
+                "enum 'L<int>' contains itself: variant 'Cons' holds it in "
+                "field 'tail'; an enum is held in place, so its variants "
+                "cannot hold it (hold it in a class instead)"),
+            std::string::npos)
+      << r.Diagnostics;
+  r = semaCheck("enum A<T> { X(b: B<T>), E }\nenum B<T> { Y(a: A<T>), F }\n" +
+                wrapMain("a = A<int>::E;"));
+  EXPECT_NE(r.Diagnostics.find("enum 'A<int>' contains itself: variant 'X' "
+                               "holds it in field 'b'"),
+            std::string::npos)
+      << r.Diagnostics;
+  r = semaCheck("enum M<T> { J(v: T), N }\nstruct S { m: M<S>; }\n" +
+                wrapMain(""));
+  EXPECT_NE(r.Diagnostics.find("struct 'S' contains itself"), std::string::npos)
+      << r.Diagnostics;
+  // Through a class it is a reference, which is fine.
+  r = semaCheck("class Node<T> { v: T; next: L<T>; }\n"
+                "enum L<T> { Nil, Cons(n: Node<T>) }\n" +
+                wrapMain("l = L::Cons(Node(1, L<int>::Nil));"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}

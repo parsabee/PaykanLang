@@ -1596,6 +1596,7 @@ private:
   std::vector<TraitDecl *> TraitDecls;
   std::vector<StructDecl *> StructDecls;
   std::vector<StructDecl *> GenericStructDecls;
+  std::vector<EnumDecl *> GenericEnumDecls;
 
 public:
   TranslationUnit(SourceLocation loc, std::vector<ImportDecl *> imports,
@@ -1607,14 +1608,16 @@ public:
                   std::vector<ImplDecl *> impls = {},
                   std::vector<TraitDecl *> traits = {},
                   std::vector<StructDecl *> structs = {},
-                  std::vector<StructDecl *> genericStructs = {})
+                  std::vector<StructDecl *> genericStructs = {},
+                  std::vector<EnumDecl *> genericEnums = {})
       : ASTNode(NK_TranslationUnit, loc), Imports(std::move(imports)),
         ClassDecls(std::move(classes)), FuncDecls(std::move(funcs)),
         EnumDecls(std::move(enums)),
         GenericClassDecls(std::move(genericClasses)),
         GenericFuncDecls(std::move(genericFuncs)), ImplDecls(std::move(impls)),
         TraitDecls(std::move(traits)), StructDecls(std::move(structs)),
-        GenericStructDecls(std::move(genericStructs)) {}
+        GenericStructDecls(std::move(genericStructs)),
+        GenericEnumDecls(std::move(genericEnums)) {}
 
   const std::vector<ImportDecl *> &getImports() const { return Imports; }
   const std::vector<ClassDecl *> &getClassDecls() const { return ClassDecls; }
@@ -1634,8 +1637,14 @@ public:
   const std::vector<StructDecl *> &getGenericStructDecls() const {
     return GenericStructDecls;
   }
+  /// The generic enums (`enum Option<T> { ... }`): templates, each
+  /// instantiation of which Sema makes an enum of its own.
+  const std::vector<EnumDecl *> &getGenericEnumDecls() const {
+    return GenericEnumDecls;
+  }
   /// Append an instantiated struct (Sema).
   void addStructDecl(StructDecl *sd) { StructDecls.push_back(sd); }
+  void addEnumDecl(EnumDecl *ed) { EnumDecls.push_back(ed); }
 
   /// Append an instantiated function (Sema).
   void addFuncDecl(FuncDecl *fn) { FuncDecls.push_back(fn); }
@@ -1813,15 +1822,21 @@ class EnumValueExpr : public Expr {
   EnumType *ResolvedEnum = nullptr;         // set by Sema
   int64_t Value = -1;                       // set by Sema (variant index)
   const std::string *FunctionRef = nullptr; // set by Sema (see below)
+  std::vector<Type *> TypeArgs;             // `Option<int>::Nothing`
 
 public:
   EnumValueExpr(SourceLocation loc, const std::string &internedEnum,
-                const std::string &internedVariant)
+                const std::string &internedVariant,
+                std::vector<Type *> typeArgs = {})
       : Expr(NK_EnumValueExpr, loc), EnumName(&internedEnum),
-        VariantName(&internedVariant) {}
+        VariantName(&internedVariant), TypeArgs(std::move(typeArgs)) {}
 
   const std::string &getEnumName() const { return *EnumName; }
   const std::string &getVariantName() const { return *VariantName; }
+  /// A generic enum's type arguments, `Option<int>::Nothing`; empty when
+  /// none are written.
+  const std::vector<Type *> &getTypeArgs() const { return TypeArgs; }
+  bool hasTypeArgs() const { return !TypeArgs.empty(); }
   /// Set by Sema when `m::f` names an imported function used as a value
   /// (docs/language/14-function-types.md): the function's qualified name.
   void setFunctionRef(const std::string &internedName) {
@@ -1850,15 +1865,28 @@ class EnumDecl : public Decl {
   std::vector<const std::string *> Variants; // each interned (stable)
   // Parallel to Variants: each variant's fields, none for a plain variant.
   std::vector<std::vector<VarDecl *>> Payloads;
+  std::vector<const std::string *> TypeParams; // a generic enum's, interned
+  TypeParamBounds Bounds;
 
 public:
   EnumDecl(SourceLocation loc, const std::string &internedName,
            std::vector<const std::string *> variants,
-           std::vector<std::vector<VarDecl *>> payloads = {})
+           std::vector<std::vector<VarDecl *>> payloads = {},
+           std::vector<const std::string *> typeParams = {})
       : Decl(NK_EnumDecl, loc), Name(&internedName),
-        Variants(std::move(variants)), Payloads(std::move(payloads)) {
+        Variants(std::move(variants)), Payloads(std::move(payloads)),
+        TypeParams(std::move(typeParams)) {
     Payloads.resize(Variants.size());
   }
+
+  /// A generic enum's type parameters (`enum Option<T> { ... }`), which its
+  /// variants' fields name; empty for any other enum.
+  const std::vector<const std::string *> &getTypeParams() const {
+    return TypeParams;
+  }
+  bool isGeneric() const { return !TypeParams.empty(); }
+  const TypeParamBounds &getTypeParamBounds() const { return Bounds; }
+  void setTypeParamBounds(TypeParamBounds b) { Bounds = std::move(b); }
 
   const std::string &getName() const { return *Name; }
   const std::vector<const std::string *> &getVariants() const {
