@@ -1437,6 +1437,11 @@ public:
   /// The vtable's pure virtual slots, in slot order: what a subclass must
   /// implement to be instantiated.
   std::vector<const MethodDecl *> pureSlots() const;
+  /// The class that declares the pure virtual slot @p name: the topmost
+  /// one, from this class up, whose slot of that name is still pure.  (By
+  /// name, not by MethodDecl: an imported class's vtable has a MethodDecl
+  /// of its own per slot.)
+  const ClassType *pureSlotOwner(const std::string &name) const;
 
   /// Find the vtable slot index for a method name, or -1 if not found.
   int getVTableIndex(const std::string &name) const;

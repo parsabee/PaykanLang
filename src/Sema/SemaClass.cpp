@@ -442,10 +442,11 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       continue;
     }
     // A method without a body is pure virtual: a vtable slot that a
-    // subclass implements.  `__init__` and `destroy` have no slot of their
-    // own; they are reported where they are checked (rejectBodyInits,
-    // visitClassDecl).
-    const bool pure = !method->getBody() && !method->isNative() &&
+    // subclass implements (no class body's method is native: every
+    // frontend's grammar keeps `native fn` at the top level).  `__init__`
+    // and `destroy` have no slot of their own; they are reported where they
+    // are checked (rejectBodyInits, visitClassDecl).
+    const bool pure = !method->getBody() &&
                       method->getName() != names::kMethodInit &&
                       method->getName() != names::kMethodDestroy;
     if (pure && overridden && !overridden->isPure()) {
@@ -681,23 +682,12 @@ void Sema::declareConstructor(ast::ClassDecl *cd, ast::ClassType *ct) {
 
 void Sema::reportAbstractConstruction(const ast::ClassType *ct,
                                       ast::SourceLocation loc) {
-  // Each slot by the class that declares it pure: the topmost one, from
-  // @p ct up, whose slot of that name is still pure.  (By name, not by
-  // MethodDecl: an imported class's vtable has a MethodDecl of its own per
-  // slot.)
+  // Each slot by the class that declares it pure.
   std::vector<std::string> missing;
-  for (const ast::MethodDecl *m : ct->pureSlots()) {
-    const ast::ClassType *owner = ct;
-    for (const ast::ClassType *super = owner->getSuperClass(); super;
-         super = super->getSuperClass()) {
-      const int slot = super->getVTableIndex(m->getName());
-      if (slot < 0 || !super->getVTable()[slot]->isPure())
-        break;
-      owner = super;
-    }
-    missing.push_back("'" + displayName(owner->getName()) + "." + m->getName() +
-                      "'");
-  }
+  for (const ast::MethodDecl *m : ct->pureSlots())
+    missing.push_back("'" +
+                      displayName(ct->pureSlotOwner(m->getName())->getName()) +
+                      "." + m->getName() + "'");
   std::string msg = "cannot instantiate abstract class '" +
                     displayName(ct->getName()) + "': ";
   for (size_t i = 0; i < missing.size(); ++i) {

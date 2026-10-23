@@ -66,7 +66,8 @@ inline constexpr uint8_t kMethodPrivate = 1 << 0;
 inline constexpr uint8_t kMethodView = 1 << 1; ///< a `view fn`
 inline constexpr uint8_t kMethodImpl = 1 << 2; ///< an `impl` block's method
 /// A pure virtual method: a class's vtable slot with no definition (§3.5's
-/// PURE bit).  Never an `impl` method's, an initializer's or a struct's.
+/// PURE bit).  Never an `impl` method's, a struct's, an initializer's or
+/// `destroy`'s (readInterface rejects it there).
 inline constexpr uint8_t kMethodPure = 1 << 4;
 inline constexpr uint8_t kMethodKnownFlags =
     kMethodPrivate | kMethodView | kMethodImpl | kMethodPure;
@@ -161,7 +162,8 @@ std::vector<uint8_t> writeInterface(const Interface &iface);
 /// parts in bounds, aligned and non-overlapping, STRS valid, MODS[0] equal
 /// to @p expectedModule, dependencies sorted and unique, records sorted by
 /// (tag, name) with unique names per kind, every string index in range,
-/// method flags known and kMethodPure only on a class's virtual method.
+/// method flags known and kMethodPure only on a class's virtual method
+/// (not `__init__`, `___init__` or `destroy`).
 StatusOr<Interface> readInterface(std::span<const uint8_t> bytes,
                                   std::string_view expectedModule);
 

@@ -88,10 +88,10 @@ or more.
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser. A method may have `_` in place of its body: a pure virtual method, `fn area() -> float;` ([`../language/05-classes.md`](../language/05-classes.md#pure-virtual-methods)) |
 | `(struct LOC NAME (type-params NAME...) (fields VAR...))` | a struct ([`../language/11-structs.md`](../language/11-structs.md)): the name, the type parameters of a generic one, and its fields (at least one), each a `var` with a type and no initialiser. A struct body has no methods: they are in its `impl` blocks |
 | `(bound NAME TYPE...)` | in `type-params`, in place of `NAME`: a type parameter with bounds, the traits as types (`T: Show + Into<int>` is `(bound "T" (named-type "Show") (generic-type "Into" ...))`) |
-| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? BLOCK QUAL? INFERRED?)` | a function or method; the `TYPE` is the return type, `_` for none. A borrowed result has `(qual view)` or `(qual inout)` after its `TYPE` (`-> view Str` is `(named-type "Str") (qual view)`), a `view fn` ends with `(qual view)` and a `static fn` with `(qual static)`. `INFERRED` is `(inferred)` for `fn double(x: int) => x * 2;`, whose result type Sema infers: `_` for its `TYPE` and a body of one `return` of a value, as a lambda's |
+| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? BLOCK QUAL? INFERRED?)` | a function or method; the `TYPE` is the return type, `_` for none. A borrowed result has `(qual view)` or `(qual inout)` after its `TYPE` (`-> view Str` is `(named-type "Str") (qual view)`), a `view fn` ends with `(qual view)` and a `static fn`, an `impl` block's only, with `(qual static)`. `INFERRED` is `(inferred)` for `fn double(x: int) => x * 2;`, whose result type Sema infers: `_` for its `TYPE` and a body of one `return` of a value, as a lambda's |
 | `(impl LOC TYPE (type-params NAME...)? (for TRAIT)? (methods FN...))` | an `impl` block: `TYPE` is the type's name as written (`"A"`, `"geo::Point"`). The block of a generic type has its type parameters (`impl Box<T>` is `(impl "Box" (type-params "T") ...)`). `impl Show for A` has `(for TRAIT)`, the trait as a type |
 | `(trait LOC NAME (type-params NAME...) (methods FN...))` | a trait. Its methods are signatures: each `fn` has `_` in place of its body, and none is generic |
-| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? (native STRING))` | a `native fn` (#198): the C symbol in place of the body; a generic one has type parameters |
+| `(fn LOC NAME (type-params NAME...) (params PARAM...) TYPE? QUAL? (native STRING))` | a `native fn` (#198), a top-level function only: the C symbol in place of the body; a generic one has type parameters |
 | `(param NAME TYPE QUAL?)` | one parameter; `QUAL` is its mode, `(qual view)` or `(qual inout)`, absent for an ordinary (by-value) parameter: `n: inout int` is `(param "n" (named-type "int") (qual inout))` |
 | `(var LOC NAME TYPE? EXPR? MODE? LET? WEAK?)` | a variable or field declaration: `x: int = 1` is `(var "x" (named-type "int") (int 1))`. `MODE` is `(qual view)` or `(qual inout)` for a local borrow, which has an initialiser and is never a field or `let`: `v: view = k;` is `(var "v" _ (ident "k") (qual view))`. `LET` is `(let)` for a `let` local, which has an initialiser and is never a field: `let n = 1;` is `(var "n" _ (int 1) (let))`. `WEAK` is `(weak)` for a `weak` local or class field ([`../language/16-memory.md`](../language/16-memory.md)), which has a type or an initialiser and is never a borrow or `let`: `weak w: Node? = n;` is `(var "w" (optional-type (named-type "Node")) (ident "n") (weak))` |
 
@@ -174,7 +174,8 @@ of range, a malformed location, an unknown escape, a version it does not
 read, and nesting beyond the limit. It
 also makes the grammar's own checks that the recursive-descent frontend
 makes while parsing (`void?`, nested optionals, `_` for the body of a
-function that is neither a class's method nor a trait's). Everything else (unknown
+function that is neither a class's method nor a trait's, `(native ...)` on
+a method, `(qual static)` outside an `impl` block). Everything else (unknown
 names, types that don't match, ...) is Sema's job, with the same
 diagnostics as for any frontend.
 

@@ -347,11 +347,17 @@ record carries a flags byte after its type name (bit 0: a `weak` field,
 docs/design/weak-references.md); a `STRUCT` record's fields have none.  A
 method of a `CLASS` or `STRUCT` record carries one after its signature,
 `ast::MethodDecl`'s flags (`kMethod*` in `include/paykan/pkm/Interface.h`:
-bit 1 a `view fn`, bit 2 an `impl` block's method, bit 4 a pure virtual
-method, docs/language/05-classes.md, the value §3.5 gives `PURE`); a reader
-rejects any other bit, and the pure bit on a struct's method or an `impl`
-block's.  A `CLASS` record lists the complete vtable, so an importer works
-out from the pure bits which classes are abstract; that is never written.  An
+bit 0 `Private`, which nothing sets (a member's privacy is its name's,
+docs/design/visibility.md), bit 1 a `view fn`, bit 2 an `impl` block's
+method, bit 4 a pure virtual method, docs/language/05-classes.md, the value
+§3.5 gives `PURE`); a reader rejects any other bit, and the pure bit on a
+struct's method, an `impl` block's, an initializer (`__init__`,
+`___init__`) or `destroy`.  A `CLASS` record lists the complete vtable, so
+an importer works out from the pure bits which classes are abstract; that
+is never written.  A class's constructor is the `FUNC` record of its name,
+an abstract class's too, though its module defines no such function
+(docs/pir.md §5): an importer's `Shape(...)` is then reported as the
+construction of an abstract class, not as a call of an unknown function.  An
 `ENUM` record of a tagged union (docs/language/07-enums.md) adds, after its
 variants, `uleb n, Str name[n]`: the variants that have fields, each one's
 fields the `STRUCT` record named `Enum::variant` (a struct without methods

@@ -193,6 +193,30 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
+// An abstract class's name is no function value, and the usual hint, a
+// lambda constructing it, is left out: no lambda can.
+TEST(PureVirtual, AbstractClassIsNoFunctionValue) {
+  auto r = semaCheck(withShapes(R"(
+fn main() -> int {
+  f = Shape;
+  g = Square;
+  return 0;
+}
+)"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("'Shape' is a constructor, not a function "
+                               "value, and its class is abstract: it cannot "
+                               "be instantiated"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("'Square' is a constructor, not a function "
+                               "value (wrap it: 'fn(...) -> Square { return "
+                               "Square(...); }')"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(count(r.Diagnostics, "wrap it"), 1u) << r.Diagnostics;
+}
+
 // A class with no `__init__` of its own gets the default one, and its
 // subclasses call it; it is still abstract.
 TEST(PureVirtual, AbstractClassWithTheDefaultInit) {

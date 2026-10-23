@@ -582,6 +582,29 @@ TEST(Lowering, PureVirtualSlotsAreTrapsAndAbstractClassesHaveNoConstructor) {
       << t;
 }
 
+// A subclass that declares an inherited pure virtual method pure again has
+// a trap of its own, which names the method by the class that declares it
+// pure first, as Sema's "cannot instantiate" error does.
+TEST(Lowering, RedeclaredPureVirtualTrapNamesTheDeclaringClass) {
+  auto l = lower(R"(
+    class Shape { view fn area() -> float; }
+    class Mid : Shape { view fn area() -> float; }
+    class Square : Mid {
+      side: float;
+      view fn area() -> float { return self.side * self.side; }
+    }
+    fn main() -> int { s: Shape = Square(2.0); return int<float>(s.area()); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string &t = l.Text;
+  EXPECT_NE(t.find("area = @Mid.area : (obj) -> f64"), std::string::npos) << t;
+  EXPECT_NE(function(t, "Mid.area").find("Paykan_panic_pure_virtual"),
+            std::string::npos)
+      << t;
+  EXPECT_NE(t.find("\"Shape\" len 5"), std::string::npos) << t;
+  EXPECT_EQ(t.find("\"Mid\""), std::string::npos) << t;
+}
+
 TEST(Lowering, FieldStoreRetainsNewAndReleasesOldValue) {
   auto l = lower(R"(
     class H { s: Str; }

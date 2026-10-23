@@ -310,6 +310,18 @@ std::vector<const MethodDecl *> ClassType::pureSlots() const {
   return out;
 }
 
+const ClassType *ClassType::pureSlotOwner(const std::string &name) const {
+  const ClassType *owner = this;
+  for (const ClassType *super = SuperClass; super;
+       super = super->getSuperClass()) {
+    const int slot = super->getVTableIndex(name);
+    if (slot < 0 || !super->getVTable()[slot]->isPure())
+      break;
+    owner = super;
+  }
+  return owner;
+}
+
 int ClassType::getVTableIndex(const std::string &name) const {
   auto it = VTableIndex.find(name);
   return it != VTableIndex.end() ? it->second : -1;

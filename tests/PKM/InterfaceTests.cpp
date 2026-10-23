@@ -239,8 +239,9 @@ TEST(Interface, ResultModes) {
 }
 
 // A method's flags byte carries its pure virtual bit (§3.5's PURE, 0x10):
-// a CLASS record of a pure method round-trips; the bit on a struct's method
-// or an `impl` block's, or a bit the format does not know, is rejected.
+// a CLASS record of a pure method round-trips; the bit on a struct's method,
+// an `impl` block's, an initializer or `destroy`, or a bit the format does
+// not know, is rejected.
 TEST(Interface, PureVirtualMethods) {
   Interface i;
   i.Module = "shapes";
@@ -267,6 +268,15 @@ TEST(Interface, PureVirtualMethods) {
                 .find("method 'report' of an 'impl' block is marked pure "
                       "virtual"),
             std::string::npos);
+  for (const char *slotless : {"__init__", "___init__", "destroy"}) {
+    bad = i;
+    bad.Classes[0].Methods.push_back({slotless, "void", {}, kMethodPure, {}});
+    EXPECT_NE(readError(writeInterface(bad), "shapes")
+                  .find("method '" + std::string(slotless) +
+                        "' of a class is marked pure virtual"),
+              std::string::npos)
+        << slotless;
+  }
   bad = i;
   bad.Classes[0].Methods[1].Flags = 0x28;
   EXPECT_NE(readError(writeInterface(bad), "shapes")

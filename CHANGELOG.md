@@ -23,11 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a superclass's `__init__` that calls one reaches the subclass's implementation (the
     constructor installs the object's vtable before any `__init__` runs).
   - Only a class body's method may leave out its body: `fn f();` elsewhere is a syntax error
-    (`function 'f' has no body: ...`). A method its superclass implements cannot be made
+    (`function 'f' has no body: ...`, or in an `impl` block `'f' in an 'impl' block has no
+    body: ...`, `'f' has no body: a 'static fn' needs one` and `'__init__' has no body: an
+    initializer needs one`). A method its superclass implements cannot be made
     pure virtual again, and a `match` arm naming an abstract class is rejected
     (`unreachable arm: no object has the exact type of abstract class 'Shape'`,
     docs/language/08-match.md); the arm unwrapping a `Shape?` stays fine.
-  - Generic classes follow the same rules per instantiation, and modules export the pure
+  - Generic classes follow the same rules per instantiation (a superclass cannot be
+    generic, so a generic class with a pure virtual method has no objects; a generic
+    subclass can implement a concrete class's), and modules export the pure
     bit with each method, from a source and from a `.pkm` (the method flags byte's bit 4,
     the `PURE` bit docs/design/pkm.md reserved; an importer works out abstractness itself).
     The AST interchange format writes a pure virtual method's body as `_`
@@ -310,6 +314,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for a generic `Box` of the module) failed when another module instantiated the function
   (`call to undeclared generic function or class 'Box::of'`); it is resolved as the
   template's module declares it, as a variant of a generic enum is (`Maybe::Just(x)`).
+- The AST interchange reader (docs/plugins/ast-format.md) took a method with `(native
+  ...)` for its body (a class body's crashed the compiler) and a class's or a trait's
+  method or a free function with `(qual static)` (read as if it had none). As in the
+  recursive-descent grammar, a native body is now a top-level function's only and `(qual
+  static)` an `impl` block's method's only.
 
 ## [0.2.0] - 2026-10-20
 

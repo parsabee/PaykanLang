@@ -273,11 +273,13 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
 
 // A pure virtual method's function: its slot's target until a subclass
 // implements it.  No object of an abstract class exists, so only a broken
-// program (a hand-written PIR one, say) reaches it: it panics.
+// program (a hand-written PIR one, say) reaches it: it panics, naming the
+// method by the class that declares it pure (as Sema's errors do), not by a
+// subclass that declares it pure again.
 void ModuleLowering::emitPureVirtualTrap(pir::Function *fn, ast::ClassType *ct,
                                          const std::string &method) {
   FunctionStateGuard fnState(*this, fn, nullptr, ct);
-  const std::string &cls = ct->getName();
+  const std::string &cls = ct->pureSlotOwner(method)->getName();
   callRuntime(kPaykanPanicPureVirtual,
               {internString(cls), Val::i64(static_cast<int64_t>(cls.size())),
                internString(method),

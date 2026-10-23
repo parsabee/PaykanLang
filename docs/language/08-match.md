@@ -649,6 +649,7 @@ match f.readln() {
 |-------|---------|
 | Subject is not matchable | The subject type supports neither type-, variant-, value- nor optional-mode matching: a tuple, an array, a struct or a function type |
 | Arm type not a subtype | A type arm names a class that is not the subject type or a subtype of it |
+| Arm naming an abstract class | A type arm names an abstract class (or, on a `T?`, a strict subclass of `T` that is abstract): `unreachable arm: no object has the exact type of abstract class 'Shape'` |
 | Unknown arm type | A type arm names a class that is not declared anywhere |
 | Unknown enum variant | A variant arm names an identifier that is not a variant of the subject enum |
 | Binding a variant without fields | `x: Variant { … }` where the variant has no fields to bind |

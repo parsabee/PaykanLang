@@ -1385,3 +1385,58 @@ TEST(Interchange, OnlyAClassMethodHasNoBody) {
     EXPECT_EQ(error, c.Error) << c.Text;
   }
 }
+
+// As in the recursive-descent grammar, only a top-level function is native
+// and only an `impl` block's method is a `static fn`: a class body's
+// method with either is not read as a pure virtual or a virtual method.
+TEST(Interchange, NativeAndStaticOnlyWhereTheGrammarHasThem) {
+  struct Case {
+    const char *Text;
+    const char *Error;
+  };
+  const char *const kNative = "function 'g' has (native ...) for its body: "
+                              "only a top-level function can (a 'native fn')";
+  const char *const kStatic = "has (qual static): only an 'impl' block's "
+                              "method can (a 'static fn')";
+  const Case cases[] = {
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"g\" (type-params) (params) _ (native \"g\"))))))",
+       kNative},
+      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"g\" (type-params) "
+       "(params) _ (native \"g\"))))))",
+       kNative},
+      {"(paykan-ast 1 (unit (trait \"T\" (type-params) (methods (fn \"g\" "
+       "(type-params) (params) _ (native \"g\"))))))",
+       kNative},
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"g\" (type-params) (params) _ _ (qual static))))))",
+       kStatic},
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"g\" (type-params) (params) _ (block) "
+       "(qual static))))))",
+       kStatic},
+      {"(paykan-ast 1 (unit (trait \"T\" (type-params) (methods (fn \"g\" "
+       "(type-params) (params) _ _ (qual static))))))",
+       kStatic},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block) "
+       "(qual static))))",
+       kStatic},
+  };
+  for (const Case &c : cases) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(c.Text, ctx, error), nullptr) << c.Text;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Text << "\n"
+                                                      << error;
+  }
+  // Where the grammar has them, they read.
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_NE(read("(paykan-ast 1 (unit (impl \"A\" (methods (fn \"make\" "
+                 "(type-params) (params) _ (block) (qual static)))) "
+                 "(fn \"twice\" (type-params) (params) _ (native "
+                 "\"twice\"))))",
+                 ctx, error),
+            nullptr)
+      << error;
+}

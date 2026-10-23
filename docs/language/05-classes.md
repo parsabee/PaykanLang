@@ -900,9 +900,12 @@ impl SportsCar {
   vtable slot and no definition. There is no keyword for it. Only a class body's method can
   be one: a free function, an `impl` block's method or `static fn`, and so a struct's
   method, written that way is a syntax error (`function 'f' has no body: only a method in a
-  class body can end its signature with ';' (a pure virtual method)`). `__init__` is not a
-  virtual method and goes in an `impl` block with its body, and `destroy` cannot be written
-  at all.
+  class body can end its signature with ';' (a pure virtual method)`; in an `impl` block
+  `'f' in an 'impl' block has no body: an 'impl' block's methods are called directly, so
+  only a method in a class body can end its signature with ';' (a pure virtual method)`, or
+  `'f' has no body: a 'static fn' needs one`). `__init__` is not a virtual method and goes
+  in an `impl` block with its body (`'__init__' has no body: an initializer needs one`),
+  and `destroy` cannot be written at all.
 - A class is **abstract** when a slot of its vtable is pure virtual: declared without a body
   in the class or a superclass, and implemented by none of them. Abstractness is never
   declared; the compiler works it out from the vtable. A subclass implements a pure virtual
@@ -914,7 +917,9 @@ impl SportsCar {
   argument, a `return`, an array literal, a field's assignment, a lambda's body, a generic
   function's code): `cannot instantiate abstract class 'Square': 'Shape.area' has no
   implementation`, naming every missing implementation by the class that declares the
-  method pure.
+  method pure. Its name is no function value either, as no constructor is (`'Shape' is a
+  constructor, not a function value, and its class is abstract: it cannot be
+  instantiated`).
 - Otherwise an abstract class is an ordinary class: the type of variables, parameters,
   results, fields, arrays (`Shape[3]`, `view Shape[]`), optionals (`Shape?`) and type
   arguments (`Box<Shape>`), and a subtype of `Obj`. It may have fields, an `__init__`, which
@@ -926,7 +931,9 @@ impl SportsCar {
 - An object's class is its own from the start: the constructor installs the class's vtable
   before any `__init__` runs, so a superclass's `__init__` that calls a virtual method,
   pure or not, runs the subclass's implementation (as in Java). That implementation runs
-  before the subclass's own `__init__` has assigned its fields, so it must not read them.
+  before the subclass's own `__init__` has assigned its fields, so it must not read them:
+  the compiler does not check this, and a field that holds an object (a `Str`, a class's)
+  holds none before its assignment, so using it then crashes the program.
 - An override cannot make an implemented method pure virtual again: `method 'area' of class
   'Tile' has no body, but its superclass 'Square' implements it: an implemented method
   cannot become pure virtual again`. A pure virtual method may be declared pure again in a
@@ -935,7 +942,11 @@ impl SportsCar {
   exact class and no object is of an abstract one: `unreachable arm: no object has the exact
   type of abstract class 'Shape'`. The arm that unwraps a `Shape?` is not an exact test and
   is fine ([Match](08-match.md#valid-arm-types)).
-- A generic class's pure virtual methods follow the same rules in each instantiation.
+- A generic class's pure virtual methods follow the same rules in each instantiation. A
+  superclass cannot be generic ([Generics](13-generics.md#declaring-a-generic-class)), so
+  nothing can implement them: a generic class with one is abstract in every instantiation,
+  a type no object has. A generic class can implement a concrete class's pure virtual
+  methods (`class Wrap<T> : Shape { ... }`).
 - A module's pure virtual methods are part of its interface, from its source or its `.pkm`
   file; an importer works out which of its classes are abstract itself. A subclass in
   another module is concrete once it implements them.
@@ -1043,7 +1054,7 @@ created for that argument list. See [Generics](13-generics.md).
 | Override signature mismatch | Override has a different parameter or return type than the base method |
 | Constructing an abstract class | `Shape()` where a pure virtual method of `Shape` has no implementation: `cannot instantiate abstract class 'Shape': 'Shape.area' has no implementation` |
 | Pure virtual over an implementation | A subclass declares without a body a method its superclass implements |
-| Bodiless function outside a class body | `fn f();` at the top level or in an `impl` block: `function 'f' has no body: ...` (a syntax error) |
+| Bodiless function outside a class body | `fn f();` at the top level: `function 'f' has no body: ...`; in an `impl` block: `'f' in an 'impl' block has no body: ...`, `'f' has no body: a 'static fn' needs one` or `'__init__' has no body: an initializer needs one` (syntax errors) |
 | `match` arm naming an abstract class | `s: Shape { ... }`: `unreachable arm: no object has the exact type of abstract class 'Shape'` |
 | Override changes a parameter mode | Override drops, adds or changes a parameter's `view` / `inout` |
 | Override changes `view fn` | Override of a `view fn` is not one, or an override of another method is one |

@@ -317,7 +317,8 @@ TEST(Class, PureVirtualMethodOfAGenericClass) {
 
 // Only a class body's method may leave out its body: a free function, an
 // `impl` block's method or `static fn` (a struct's methods are in one) is a
-// syntax error at the `;`.
+// syntax error at the `;`.  An initializer and a `static fn` are never in
+// a class body, so their errors only ask for the body.
 TEST(Class, BodilessFunctionsOutsideAClassBodyAreRejected) {
   auto free = parseWithDiags("fn f(x: int) -> int;\n"
                              "fn main() -> int { return 0; }\n");
@@ -328,23 +329,28 @@ TEST(Class, BodilessFunctionsOutsideAClassBodyAreRejected) {
             std::string::npos)
       << free.Text;
 
-  for (const char *member : {"fn g() -> int;", "view fn g() -> int;",
-                             "static fn g() -> int;", "fn __init__();"}) {
-    std::string name = std::string(member).find("__init__") != std::string::npos
-                           ? "__init__"
-                           : "g";
-    auto impl = parseWithDiags(std::string("class A {}\nimpl A { ") + member +
+  struct Case {
+    const char *Member;
+    const char *Error;
+  };
+  const char *const kImplMethod =
+      "error: 'g' in an 'impl' block has no body: an 'impl' block's methods "
+      "are called directly, so only a method in a class body can end its "
+      "signature with ';' (a pure virtual method)";
+  for (const Case &c :
+       {Case{"fn g() -> int;", kImplMethod},
+        Case{"view fn g() -> int;", kImplMethod},
+        Case{"static fn g() -> int;",
+             "error: 'g' has no body: a 'static fn' needs one"},
+        Case{"fn __init__(x: int);",
+             "error: '__init__' has no body: an initializer needs one"},
+        Case{"fn ___init__();",
+             "error: '__init__' has no body: an initializer needs one"}}) {
+    auto impl = parseWithDiags(std::string("class A {}\nimpl A { ") + c.Member +
                                " }\nfn main() -> int { return 0; }\n");
-    EXPECT_FALSE(impl.Ok) << member;
-    EXPECT_NE(impl.Text.find("error: '" + name +
-                             "' in an 'impl' block has no body: an 'impl' "
-                             "block's methods and 'static fn's are called "
-                             "directly, so only a method in a class body can "
-                             "end its signature with ';' (a pure virtual "
-                             "method)"),
-              std::string::npos)
-        << member << "\n"
-        << impl.Text;
+    EXPECT_FALSE(impl.Ok) << c.Member;
+    EXPECT_NE(impl.Text.find(c.Error), std::string::npos) << c.Member << "\n"
+                                                          << impl.Text;
   }
 
   auto structImpl = parseWithDiags("struct P { x: int; }\n"
@@ -360,4 +366,19 @@ TEST(Class, BodilessFunctionsOutsideAClassBodyAreRejected) {
                              "native fn twice(x: int) -> int = \"twice\";\n"
                              "fn main() -> int { return 0; }\n");
   EXPECT_TRUE(traitOk);
+}
+
+// A class body's method that has neither a body nor `;` is told about both.
+TEST(Class, MethodWithoutBodyOrSemicolon) {
+  auto r = parseWithDiags("class A {\n"
+                          "  fn f() -> int\n"
+                          "  fn g() -> int { return 1; }\n"
+                          "}\n"
+                          "fn main() -> int { return 0; }\n");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Text.find("3:3: error: unexpected 'fn'; expected '{' or '=>' "
+                        "to start the method's body, or ';' to end a pure "
+                        "virtual method's signature"),
+            std::string::npos)
+      << r.Text;
 }

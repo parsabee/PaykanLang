@@ -259,8 +259,9 @@ backend does no inheritance walk.
   alignment, as C lays out the `uint8_t` array; reached through
   `field.addr`).
 * **Vtable**: one entry per slot in slot order, each a function symbol (a
-  function of this module, an `extern fn`, or `null` for an abstract slot) plus
-  its signature.  Slot 0 is always `destroy`.  The vtable's address is the
+  function of this module, an `extern fn`, or `null` for an empty slot, which
+  the lowering never emits: a pure virtual method's slot holds its trap,
+  below) plus its signature.  Slot 0 is always `destroy`.  The vtable's address is the
   class's runtime type identity (`vtable.addr`).
 * A class marked `extern` belongs to another module: its fields are known (for
   `field.load`/`field.store` on imported instances) and its vtable address may
@@ -305,8 +306,7 @@ method).  A class with such a slot is **abstract**: nothing constructs it,
 so it has no constructor `@C` and no `new` names it, while its
 `@C.__init__`, which its subclasses' `__init__` calls, and its destructor
 are emitted as usual.  The format needs no mark for it: an abstract class is
-one without a constructor.  (The lowering never emits the `null` slot of the
-format above.)
+one without a constructor.
 
 ## 6. Statements and instructions
 

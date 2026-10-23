@@ -124,7 +124,8 @@ private:
     Native,      ///< `native fn`: `=` and its C symbol
     Requirement, ///< a trait's method: `;` instead of a body
     ClassMethod, ///< a class body's: a body, or `;` for a pure virtual one
-    ImplMethod,  ///< an `impl` block's method or `static fn`: a body
+    ImplMethod,  ///< an `impl` block's method: a body
+    StaticFn,    ///< an `impl` block's `static fn`: a body
   };
   ast::FuncDecl *parseFuncDecl(FuncKind kind = FuncKind::Free);
   /// Type parameters and, given @p bounds, their bounds (`T: Show + Eq`).

@@ -949,7 +949,8 @@ ImplDecl *Parser::parseImplDecl() {
       errorAtCurrent("expected 'fn' after 'static' (a 'static fn' has no "
                      "'self', so it is never a 'view fn')");
     } else if (at(Tok::KwFn) || (at(Tok::KwView) && kind(1) == Tok::KwFn)) {
-      if (auto *m = parseFuncDecl(FuncKind::ImplMethod)) {
+      if (auto *m = parseFuncDecl(isStatic ? FuncKind::StaticFn
+                                           : FuncKind::ImplMethod)) {
         m->setStatic(isStatic);
         methods.push_back(m);
         continue;
@@ -1214,16 +1215,21 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   // function may leave out its body.
   if (at(Tok::Semi)) {
     if (kind != FuncKind::ClassMethod) {
-      error(cur().Loc,
-            kind == FuncKind::ImplMethod
-                ? "'" + name +
-                      "' in an 'impl' block has no body: an 'impl' block's "
-                      "methods and 'static fn's are called directly, so only "
-                      "a method in a class body can end its signature with "
-                      "';' (a pure virtual method)"
-                : "function '" + name +
-                      "' has no body: only a method in a class body can end "
-                      "its signature with ';' (a pure virtual method)");
+      std::string why;
+      if (kind == FuncKind::StaticFn)
+        why = "'" + name + "' has no body: a 'static fn' needs one";
+      else if (kind == FuncKind::ImplMethod && name == names::kMethodInit)
+        why = "'" + name + "' has no body: an initializer needs one";
+      else if (kind == FuncKind::ImplMethod)
+        why = "'" + name +
+              "' in an 'impl' block has no body: an 'impl' block's methods "
+              "are called directly, so only a method in a class body can "
+              "end its signature with ';' (a pure virtual method)";
+      else
+        why = "function '" + name +
+              "' has no body: only a method in a class body can end its "
+              "signature with ';' (a pure virtual method)";
+      error(cur().Loc, why);
       return nullptr;
     }
     consume();
@@ -1249,7 +1255,10 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
       return nullptr;
   } else {
     if (!at(Tok::LBrace)) {
-      errorAtCurrent("expected '{' or '=>' to start the function's body");
+      errorAtCurrent(kind == FuncKind::ClassMethod
+                         ? "expected '{' or '=>' to start the method's body, "
+                           "or ';' to end a pure virtual method's signature"
+                         : "expected '{' or '=>' to start the function's body");
       return nullptr;
     }
     body = parseBlock();
