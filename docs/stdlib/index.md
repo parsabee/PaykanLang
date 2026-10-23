@@ -17,7 +17,7 @@ declares is named with the module's qualifier:
 ```pkn
 import ::io;                    // io::println(...), io::open(...)
 import ::error as err;          // err::Error, err::ErrorCode::NotFound
-import ::result as res;         // res::Result<T, E>, res::ok(...)
+import ::result as res;         // res::Result<T, E>, res::ok(...), res::fail(...)
 import ::collections;           // collections::List<int>()
 import ::{memory, math};        // memory::Box(0), math::sqrt(2.0)
 ```
@@ -32,8 +32,8 @@ Printing is not one of them: a program that prints imports `::io`.
 | Module | What it has |
 |--------|-------------|
 | [`::io`](io.md) | Printing any `Show` value (`print`, `println`, `printerr`, `printerrln`), files (`open` and the class `File`) and the standard input (`stdin()`) |
-| [`::error`](error.md) | Errors as values: `ErrorCode`, the standard set of errors; `Error`, a code and a message; `none`, `fail` and `fromErrno`, which make them |
-| [`::result`](result.md) | `Result<T, E>`, the value an operation made (`Ok`) or the error saying why it could not (`Err`); `ok`, which makes the first |
+| [`::error`](error.md) | Errors as values: `ErrorCode`, the standard set of errors; `Error`, a code and a message; `none` and `fromErrno`, which make them |
+| [`::result`](result.md) | `Result<T, E>`, the value an operation made (`Ok`) or the error saying why it could not (`Err`); `ok` and `fail`, which make them |
 | [`::collections`](collections.md) | The containers `List<T>`, `LinkedList<T>`, `Stack<T>`, `Queue<T>`, `HashMap<K, V>`, `HashSet<K>`, `MinPriorityQueue<T>` and `MaxPriorityQueue<T>`, and `listOf` and `listToString` |
 | [`::memory`](memory.md) | `Buffer<T>`, the growable run of slots the containers keep their elements in, and `Box<T: ValueType>`, one value in a shared object |
 | [`::math`](math.md) | The C library's `<math.h>` functions on `float` (`sqrt`, `pow`, `exp`, `log`, `sin`, `atan2`, `floor`, `round`, `gamma`, ...), the constants `pi()`, `e()`, `inf()`, `nan()`, and `isNaN`, `isInf`, `isFinite` |

@@ -16,11 +16,9 @@
 //   }
 //
 // The codes are the language's standard set: a library or a program uses
-// them for its own errors too.  `none` makes no error, `fromErrno` the Error
-// of a C library failure (Runtime.h, "Errors": the codes' order is the
-// runtime's), and `fail` a Result that failed with an Error.
-
-import ::result as res;
+// them for its own errors too.  `none` makes no error, and `fromErrno` the
+// Error of a C library failure (Runtime.h, "Errors": the codes' order is the
+// runtime's); ::result's `fail` makes a Result that failed with an Error.
 
 /// What went wrong.  `Ok` is no error.
 enum ErrorCode {
@@ -68,13 +66,6 @@ impl Error {
 /// No error.
 fn none() -> Error {
   return Error(ErrorCode::Ok, None);
-}
-
-/// The Result of an operation that failed with @p error.  `T` is taken from
-/// the type the Result flows into (`return err::fail(e);` in a function
-/// returning a `Result<int, Error>`).
-fn fail<T>(error: Error) -> res::Result<T, Error> {
-  return res::Result::Err(error);
 }
 
 /// The name of @p code: "NotFound" for `ErrorCode::NotFound`.

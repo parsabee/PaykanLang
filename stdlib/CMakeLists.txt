@@ -40,7 +40,10 @@ endif()
 set(module_files "")
 foreach(src IN LISTS PAYKAN_STDLIB_SOURCES)
     get_filename_component(module ${src} NAME_WE)
-    # The .pkm files of the modules it imports (`import ::name ...;`).
+    # The .pkm files of the modules it imports (`import ::name ...;`), read
+    # when CMake configures: a change to the source configures again, so a
+    # changed import changes the order the modules are built in.
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${src})
     file(STRINGS ${src} imports REGEX "^import ::")
     set(imported "")
     foreach(line IN LISTS imports)

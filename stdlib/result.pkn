@@ -14,7 +14,10 @@
 //   }
 //
 // `ok` makes the Result of an operation that made a value, as `Result::Ok`
-// does; ::error's `fail` makes one that failed with an Error.
+// does, and `fail` one that failed with an ::error Error, as `Result::Err`
+// does.
+
+import ::error as err;
 
 /// The value an operation made, or the error saying why it could not.
 enum Result<T, E> {
@@ -27,4 +30,11 @@ enum Result<T, E> {
 /// `Result<int, Error>`).
 fn ok<T, E>(value: T) -> Result<T, E> {
   return Result::Ok(value);
+}
+
+/// The Result of an operation that failed with @p error.  `T` is taken from
+/// the type the Result flows into (`return res::fail(e);` in a function
+/// returning a `Result<int, err::Error>`).
+fn fail<T>(error: err::Error) -> Result<T, err::Error> {
+  return Result::Err(error);
 }
