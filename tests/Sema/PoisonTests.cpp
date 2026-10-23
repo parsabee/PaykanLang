@@ -381,6 +381,71 @@ TEST(BinderName, MatchBindingsRejectReservedNames) {
       wrapMain("s: Str? = None;\n match s { Str: Str { } None { } }"), kStrMsg);
 }
 
+// A local never takes the name of a function of the module (a generic or a
+// native one too, declared before or after it): the name always means the
+// function.  The one error stands alone; the uses that follow are silent.
+const std::string kFnMsg =
+    "'func' is a function of this module and cannot be used as a variable";
+const std::string kFunc = "fn func(x: int) -> int { return x + 2; }\n";
+
+TEST(BinderName, LocalsRejectFunctionNames) {
+  expectOneBinderError("fn func<T>(x: T) => x + 2;\n" +
+                           wrapMain("func = fn(x: int, y: float) => x + y;\n"
+                                    " io::println(func(1, 2.5));"),
+                       kFnMsg);
+  expectOneBinderError(kFunc + wrapMain("func: int = 3; io::println(func);"),
+                       kFnMsg);
+  expectOneBinderError(kFunc + wrapMain("let func = 3; io::println(func);"),
+                       kFnMsg);
+  expectOneBinderError(
+      kFunc + wrapMain("func, b = (1, 2); io::println(func + b);"), kFnMsg);
+  expectOneBinderError(
+      kFunc + wrapMain("for func in 0..2 { io::println(func + 1); }"), kFnMsg);
+  // Declared after its use, and a native function.
+  expectOneBinderError(wrapMain("func = 1; io::println(func);") +
+                           "fn func(x: int) -> int { return x; }\n",
+                       kFnMsg);
+  expectOneBinderError("native fn func(x: int) -> int = \"pk_func\";\n" +
+                           wrapMain("func = 1;"),
+                       kFnMsg);
+}
+
+TEST(BinderName, ParametersAndBindingsRejectFunctionNames) {
+  expectOneBinderError(kFunc + "fn g(func: int) -> int { return func; }\n" +
+                           wrapMain("n = g(1);"),
+                       kFnMsg);
+  expectOneBinderError(kFunc + wrapMain("f = fn(func: int) => func * 2;"),
+                       kFnMsg);
+  // A method's, declared before the function.
+  expectOneBinderError("class C { fn m(func: int) -> int { return func; } }\n" +
+                           kFunc + wrapMain("n = C().m(1);"),
+                       kFnMsg);
+  expectOneBinderError(
+      "struct S { a: int; }\n"
+      "impl S { view fn m(func: int) -> int { return func; } }\n" +
+          kFunc + wrapMain("n = func(2);"),
+      kFnMsg);
+  expectOneBinderError(
+      kPoint + kFunc +
+          wrapMain("o: Obj = Point();\n match o { func: Point { "
+                   "io::println(Str(func.x)); } _ { } }"),
+      kFnMsg);
+}
+
+// What no code of the program uses may still take a function's name: a
+// field (and the default constructor's parameter for it), a native
+// function's parameter.  So may another module's function's, which is
+// always qualified.
+TEST(BinderName, FieldsAndNativeParametersMayShareFunctionNames) {
+  auto r = semaCheck(kFunc +
+                     "class C { func: int; }\n"
+                     "struct S { func: int; }\n"
+                     "native fn nat(func: int) -> int = \"pk_nat\";\n" +
+                     wrapMain("c = C(1); s = S(2); println = c.func + s.func;"
+                              " io::println(func(println));"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
 TEST(BinderName, OrdinaryNamesAreStillAccepted) {
   auto r = semaCheck(kPoint + "fn f(print: int) -> int { return print; }\n" +
                      wrapMain("point = Point(); stdin = 1; a, b: int = (1, 2);"

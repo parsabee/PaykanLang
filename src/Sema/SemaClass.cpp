@@ -572,7 +572,8 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
                 className + "'; it is the implicit receiver");
       return nullptr;
     }
-    if (!checkBinderName(p.getName(), method->getLocation()))
+    if (!checkBinderName(p.getName(), method->getLocation(),
+                         /*binds=*/!DeclaringDefaultInit))
       return nullptr;
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice

@@ -540,12 +540,26 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// True if @p name is a type name or the reserved `Stdin`, which no
   /// variable may be bound to.
   bool isTypeNameForVariable(const std::string &name) const;
+  /// True if @p name is a function of the module whose code is checked (a
+  /// generic one or a `native fn` included): this module's, or in another
+  /// module's template that module's.  No variable may be bound to it, so a
+  /// call by the name always means the function.
+  bool isFunctionNameForVariable(const std::string &name) const;
+  /// This module's top-level functions, generic and `native` ones included,
+  /// by name: known before any signature is checked, so a method's
+  /// parameter is checked against them too.
+  StringSet ModuleFunctionNames;
 
   /// The guard every binder applies to the name it binds (#126): an inferred
   /// or typed declaration, a destructuring target, a function or method
-  /// parameter, a match binding.  Reports, at @p loc, a name that cannot
-  /// be a variable (see isTypeNameForVariable) and returns false.
-  bool checkBinderName(const std::string &name, ast::SourceLocation loc);
+  /// parameter, a lambda's, a `for` loop's variable, a match binding.
+  /// Reports, at @p loc, a name that cannot be a variable (see
+  /// isTypeNameForVariable and isFunctionNameForVariable) and returns false.
+  /// @p binds is false for a parameter no code of the program uses (a native
+  /// function's, or a default `__init__`'s, which are the fields): it is not
+  /// refused for a function's name.
+  bool checkBinderName(const std::string &name, ast::SourceLocation loc,
+                       bool binds = true);
   /// Reports a parameter of @p fn named like an earlier one, as a
   /// duplicate in @p what ("function 'f'"), and returns false.
   bool checkDistinctParams(const ast::FuncDecl *fn, const std::string &what);

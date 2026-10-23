@@ -139,7 +139,7 @@ TEST(Buffer, HoldsOptionalValuesOfEverySize) {
     fn c(o: view char?) -> Str {
       match o { v: char { return Str<char>(v); } None { return "-"; } }
     }
-    fn n(o: view int?) -> Str {
+    fn num(o: view int?) -> Str {
       match o { v: int { return Str<int>(v); } None { return "-"; } }
     }
     fn main() -> int {
@@ -155,9 +155,9 @@ TEST(Buffer, HoldsOptionalValuesOfEverySize) {
       cs.set(1, None);
       s = "";
       i = 0;
-      while i < 7 { s = s + c(cs.get(i)) + n(ns.get(i)) + " "; i = i + 1; }
+      while i < 7 { s = s + c(cs.get(i)) + num(ns.get(i)) + " "; i = i + 1; }
       io::println(s);
-      io::println(c(cs.copy(21)) + n(ns.copy(21)) + " " + c(cs.get(22)));
+      io::println(c(cs.copy(21)) + num(ns.copy(21)) + " " + c(cs.get(22)));
       return 0;
     }
   )",

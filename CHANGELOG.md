@@ -234,6 +234,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A local could take the name of a function of the module and hide it: `func = fn(x: int,
+  y: float) => x + y;` next to `fn func<T>(x: T) => x + 2;` made `func(1, 2.5)` call the
+  lambda.  A variable, a parameter (a method's or a lambda's too), a `for` loop variable, a
+  `match` binding or a destructuring target named like one of the module's functions (a
+  generic or a native one included, declared before or after it) is now an error, `'func'
+  is a function of this module and cannot be used as a variable`, reported once
+  (docs/language/02-basics.md, "Scoping Rules").  A field, a native function's parameter
+  and another module's function (always qualified) may still share the name.
 - A generic function that its own module instantiated (`fn id<T>` and a call `id(3)` in
   the module) could not be instantiated with the same type arguments by an importer
   (`'$m::id<int>' is a builtin function and cannot be redeclared`); the importer now calls

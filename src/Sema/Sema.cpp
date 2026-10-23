@@ -904,10 +904,17 @@ void Sema::declarePoisoned(Scope *scope, std::string_view name) {
   ++PoisonedBindings;
 }
 
-bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc) {
+bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc,
+                           bool binds) {
   if (isTypeNameForVariable(name)) {
     error(loc,
           "'" + name + "' is a type name and cannot be used as a variable");
+    return false;
+  }
+  if (binds && isFunctionNameForVariable(name)) {
+    error(loc, "'" + name +
+                   "' is a function of this module and cannot be used as a "
+                   "variable");
     return false;
   }
   return true;
@@ -973,6 +980,16 @@ bool Sema::isTypeNameForVariable(const std::string &name) const {
          (CurrentTypeParams && CurrentTypeParams->count(name)) ||
          name == names::kObj || name == names::kString ||
          (ast::builtinKindOfName(name, kind) && kind != ast::BuiltinType::Void);
+}
+
+bool Sema::isFunctionNameForVariable(const std::string &name) const {
+  // Another module's template names its own module's functions under that
+  // module's hidden qualifier; this module's are unqualified.
+  if (!CurrentOrigin)
+    return ModuleFunctionNames.count(name) != 0;
+  const std::string key =
+      hiddenQualifier(CurrentOrigin->Module) + names::kQualSep + name;
+  return FunctionTable.count(key) || FuncTemplates.count(key);
 }
 
 // Visit an expression and return its resolved type (nullptr on error).
@@ -2686,6 +2703,9 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       continue;
     }
     if (!checkBinderName(name, target.Loc)) {
+      // A function's name is poisoned, as in visitAssignStmt.
+      if (isFunctionNameForVariable(name) && !CurrentScope->findOwner(name))
+        declarePoisoned(CurrentScope, name);
       ok = false;
       continue;
     }
@@ -3038,6 +3058,11 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
 // -- Top-level
 
 bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
+  // The module's functions by name, before any binder is checked.
+  for (const auto *decls :
+       {&node->getFuncDecls(), &node->getGenericFuncDecls()})
+    for (const ast::FuncDecl *fd : *decls)
+      ModuleFunctionNames.insert(fd->getName());
   bool ok = rejectFreeViewFns(node);
   if (!rejectInferredMethods(node))
     ok = false;
@@ -3368,9 +3393,14 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
     return false;
   }
 
-  // Guard: the target name must not shadow a type or reserved name.
-  if (!checkBinderName(varName, node->getLocation()))
+  // Guard: the target name must not shadow a type, a function or a reserved
+  // name.  A function's name is then poisoned, so its uses that follow are
+  // not reported again as uses of the function.
+  if (!checkBinderName(varName, node->getLocation())) {
+    if (isFunctionNameForVariable(varName) && !CurrentScope->findOwner(varName))
+      declarePoisoned(CurrentScope, varName);
     return false;
+  }
   // `self` is the method's object, or a struct method's receiver: it names
   // what the method was called on, and cannot name something else.
   if (varName == names::kSelf && CurrentClassCtx &&
@@ -3744,7 +3774,8 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   }
   std::vector<ast::Type *> paramTypes;
   for (auto &p : node->getMutableParams()) {
-    if (!checkBinderName(p.getName(), node->getLocation())) {
+    if (!checkBinderName(p.getName(), node->getLocation(),
+                         /*binds=*/!node->isNative())) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
     }
@@ -4109,9 +4140,14 @@ bool Sema::rejectInferredMethods(ast::TranslationUnit *tu) {
 }
 
 bool Sema::visitVarDecl(ast::VarDecl *node) {
-  // The name must not shadow a type or reserved name (#126).
-  if (!checkBinderName(node->getName(), node->getLocation()))
+  // The name must not shadow a type, a function or a reserved name (#126);
+  // a function's is poisoned, as in visitAssignStmt.
+  if (!checkBinderName(node->getName(), node->getLocation())) {
+    if (isFunctionNameForVariable(node->getName()) &&
+        !CurrentScope->contains(node->getName()))
+      declarePoisoned(CurrentScope, node->getName());
     return false;
+  }
 
   // Check for duplicate declaration in the current scope.
   if (CurrentScope->contains(node->getName())) {
