@@ -256,8 +256,9 @@ runtime check with `match`, shown below.
 
 Things to know about inheritance:
 
-- A class has at most one base class, and there are no abstract classes. A base class whose
-  methods are meant to be overridden simply provides a default body, as `Animal.sound` does.
+- A class has at most one base class. A base class whose method has a sensible default
+  provides a body, as `Animal.sound` does; one whose subclasses must each supply their own
+  declares it without a body, as the next section shows.
   A [trait](06-traits.md) (`trait Named { view fn name() -> Str; }`) lists methods that a
   class can declare it has with `impl Named for Animal {}`, but it is not a type: generic
   code requires it of a type parameter.
@@ -266,6 +267,120 @@ Things to know about inheritance:
   above) or a free function.
 - Arrays are not covariant: a `Dog[2]` is not an `Animal[2]`. Declare the array with the
   type you need, as `pets: Animal[3]` above.
+
+## Pure virtual methods
+
+Sometimes a base class has no sensible body for a method: every shape has an area, but
+there is no area of a shape in general. Such a method is declared without a body, its
+signature ending with `;`, and is **pure virtual**: the class promises the method, and
+each subclass supplies it by overriding it with a body. A class that has a pure virtual
+method, declared in it or inherited, that it does not implement is **abstract**: it
+cannot be constructed, only extended. A subclass that implements all of them can be:
+
+```pkn
+import ::io;
+
+class Shape {
+  name: Str;
+
+  view fn area() -> float;
+
+  view fn describe() -> Str {
+    return self.name + " of area " + Str(self.area());
+  }
+}
+
+impl Shape {
+  fn __init__(name: Str) { self.name = name; }
+}
+
+class Square : Shape {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+impl Square {
+  fn __init__(side: float) {
+    __super__("square");
+    self.side = side;
+  }
+}
+
+class Rect : Shape {
+  w: float;
+  h: float;
+  view fn area() -> float { return self.w * self.h; }
+}
+
+impl Rect {
+  fn __init__(w: float, h: float) {
+    __super__("rectangle");
+    self.w = w;
+    self.h = h;
+  }
+}
+
+fn total(shapes: view Shape[]) -> float {
+  sum = 0.0;
+  i = 0;
+  while i < shapes.len() {
+    sum += shapes[i].area();
+    i += 1;
+  }
+  return sum;
+}
+
+fn main() -> int {
+  shapes: Shape[2] = [Square(2.0), Rect(2.0, 3.0)];
+  io::println(shapes[0].describe());
+  io::println(shapes[1].describe());
+  io::println("total " + Str(total(shapes)));
+  return 0;
+}
+```
+
+Output:
+
+```
+square of area 4
+rectangle of area 6
+total 10
+```
+
+There is no keyword: `Shape` is abstract because `area` has no implementation in it, and
+`Square` is not because it implements `area`. `Shape` is still an ordinary type, of
+variables, parameters, fields, arrays and optionals, and `describe` calls `area` through
+the vtable, reaching each subclass's version. Constructing an abstract class is an error
+that lists what is missing:
+
+```pkn
+class Shape {
+  view fn area() -> float;
+  view fn perimeter() -> float;
+}
+
+class Line : Shape {
+  length: float;
+  view fn perimeter() -> float { return 2.0 * self.length; }
+}
+
+fn main() -> int {
+  s = Shape();
+  l = Line(3.0);
+  return 0;
+}
+```
+
+Error:
+
+```
+error: cannot instantiate abstract class 'Shape': 'Shape.area' and 'Shape.perimeter' have no implementation
+error: cannot instantiate abstract class 'Line': 'Shape.area' has no implementation
+```
+
+`Line` implements `perimeter` but not `area`, so it is abstract too; a subclass of it that
+implements `area` is not. The precise rules are in
+[Pure virtual methods and abstract classes](#pure-virtual-methods-and-abstract-classes).
 
 ## `Obj`, `toString` and `equals`
 
@@ -455,6 +570,10 @@ The rest of this chapter gives the precise rules.
 - Every class transitively extends `Obj`. There is no multiple inheritance.
 - **All methods declared inside a class are virtual**: dispatched through the vtable.
   Methods of an `impl` block are called directly (see [`impl` Blocks](#impl-blocks)).
+- A method of the class body declared **without a body** (`view fn area() -> float;`) is
+  **pure virtual**. A class with a pure virtual method that it does not implement is
+  **abstract** and cannot be constructed; a subclass implements the method by overriding it
+  (see [Pure virtual methods and abstract classes](#pure-virtual-methods-and-abstract-classes)).
 - **`__init__` is the constructor.** It goes in the class's `impl` block, is called
   automatically when the object is created, and must assign every field. A class without
   one gets the default `__init__`, which takes the fields as arguments.
@@ -774,6 +893,97 @@ impl SportsCar {
 }
 ```
 
+### Pure virtual methods and abstract classes
+
+- A method of a class body whose signature ends with `;` instead of a body (`fn area() ->
+  float;`, `view fn name() -> Str;`, with parameters as usual) is **pure virtual**: it has a
+  vtable slot and no definition. There is no keyword for it. Only a class body's method can
+  be one: a free function, an `impl` block's method or `static fn`, and so a struct's
+  method, written that way is a syntax error (`function 'f' has no body: only a method in a
+  class body can end its signature with ';' (a pure virtual method)`). `__init__` is not a
+  virtual method and goes in an `impl` block with its body, and `destroy` cannot be written
+  at all.
+- A class is **abstract** when a slot of its vtable is pure virtual: declared without a body
+  in the class or a superclass, and implemented by none of them. Abstractness is never
+  declared; the compiler works it out from the vtable. A subclass implements a pure virtual
+  method by overriding it with a body, under the usual rules of an override (the same
+  parameter and result types, modes and `view fn` marker). A subclass that implements every
+  one it inherits is concrete; one that leaves some unimplemented is abstract too, which is
+  allowed.
+- An abstract class cannot be constructed, anywhere a value can be written (a local, an
+  argument, a `return`, an array literal, a field's assignment, a lambda's body, a generic
+  function's code): `cannot instantiate abstract class 'Square': 'Shape.area' has no
+  implementation`, naming every missing implementation by the class that declares the
+  method pure.
+- Otherwise an abstract class is an ordinary class: the type of variables, parameters,
+  results, fields, arrays (`Shape[3]`, `view Shape[]`), optionals (`Shape?`) and type
+  arguments (`Box<Shape>`), and a subtype of `Obj`. It may have fields, an `__init__`, which
+  its subclasses run with `__super__(...)` (or the default one), `impl` methods and `static
+  fn`s.
+- A call of a pure virtual method is always dispatched through the vtable, `self.area()`
+  in an `impl` method of the declaring class included, so it runs the object's class's
+  implementation.
+- An object's class is its own from the start: the constructor installs the class's vtable
+  before any `__init__` runs, so a superclass's `__init__` that calls a virtual method,
+  pure or not, runs the subclass's implementation (as in Java). That implementation runs
+  before the subclass's own `__init__` has assigned its fields, so it must not read them.
+- An override cannot make an implemented method pure virtual again: `method 'area' of class
+  'Tile' has no body, but its superclass 'Square' implements it: an implemented method
+  cannot become pure virtual again`. A pure virtual method may be declared pure again in a
+  subclass (with the same signature); it stays unimplemented.
+- A `match` arm that names an abstract class can never run, since an arm tests for the
+  exact class and no object is of an abstract one: `unreachable arm: no object has the exact
+  type of abstract class 'Shape'`. The arm that unwraps a `Shape?` is not an exact test and
+  is fine ([Match](08-match.md#valid-arm-types)).
+- A generic class's pure virtual methods follow the same rules in each instantiation.
+- A module's pure virtual methods are part of its interface, from its source or its `.pkm`
+  file; an importer works out which of its classes are abstract itself. A subclass in
+  another module is concrete once it implements them.
+- A pure virtual method gets no `never changes 'self'` warning: whether it does is up to
+  its implementations. Make it a `view fn` when none of them should.
+
+A superclass's `__init__` that calls a pure virtual method, and an `impl` method that does:
+
+```pkn
+import ::io;
+
+class Shape {
+  label: Str;
+  view fn kind() -> Str;
+  view fn area() -> float;
+}
+
+impl Shape {
+  fn __init__() { self.label = "a " + self.kind(); }    // the subclass's kind
+  view fn report() -> Str { return self.label + " of area " + Str(self.area()); }
+}
+
+class Square : Shape {
+  side: float;
+  view fn kind() -> Str { return "square"; }            // reads no field of Square
+  view fn area() -> float { return self.side * self.side; }
+}
+
+impl Square {
+  fn __init__(side: float) {
+    __super__();
+    self.side = side;
+  }
+}
+
+fn main() -> int {
+  s: Shape = Square(3.0);
+  io::println(s.report());
+  return 0;
+}
+```
+
+Output:
+
+```
+a square of area 9
+```
+
 ---
 
 ## The `Obj` Root
@@ -831,6 +1041,10 @@ created for that argument list. See [Generics](13-generics.md).
 | `weak` field passed `inout` | `f(obj.parent)` where `parent` is `weak` and the parameter is `inout`: a weak reference is not a place a strong reference could be written to |
 | Override of `destroy` | A class declares its own `fn destroy()` |
 | Override signature mismatch | Override has a different parameter or return type than the base method |
+| Constructing an abstract class | `Shape()` where a pure virtual method of `Shape` has no implementation: `cannot instantiate abstract class 'Shape': 'Shape.area' has no implementation` |
+| Pure virtual over an implementation | A subclass declares without a body a method its superclass implements |
+| Bodiless function outside a class body | `fn f();` at the top level or in an `impl` block: `function 'f' has no body: ...` (a syntax error) |
+| `match` arm naming an abstract class | `s: Shape { ... }`: `unreachable arm: no object has the exact type of abstract class 'Shape'` |
 | Override changes a parameter mode | Override drops, adds or changes a parameter's `view` / `inout` |
 | Override changes `view fn` | Override of a `view fn` is not one, or an override of another method is one |
 | `view fn __init__` or a free `view fn` | `__init__` sets up `self`; a free function has no `self` |
