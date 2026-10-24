@@ -38,6 +38,7 @@
 
 #include "LoweringInternal.h"
 
+#include <cassert>
 #include <functional>
 
 namespace paykan::lowering {
@@ -374,6 +375,7 @@ Val ModuleLowering::emitInoutLocal(ast::VarDecl *node) {
 void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
                                       ast::Type *astTy, int64_t offset) {
   std::vector<Val> keep;
+  const size_t mark = MemTemps.size();
   Val addr = emitInoutArg(place, keep, /*keepObject=*/true);
   if (!addr)
     return;
@@ -381,7 +383,14 @@ void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
   if (offset)
     addr = B.ptrAdd(addr, Val::i64(offset), name + ".addr");
   // A field's object stays alive as long as the borrow can be used: a hidden
-  // owned local holds it, released with the scope.
+  // owned local holds it, released with the scope.  So do the objects of a
+  // struct's field and of an `inout` result's storage (noteBorrowedReads),
+  // which come in MemTemps.
+  for (size_t i = mark; i < MemTemps.size(); ++i) {
+    assert(!MemTemps[i].second && "an 'inout' place is no temporary");
+    keep.push_back(MemTemps[i].first);
+  }
+  MemTemps.resize(mark);
   for (const Val &box : keep) {
     pir::LocalId hold = B.addLocal(name + ".obj", Type::Box);
     B.store(hold, box);
@@ -419,8 +428,10 @@ Val ModuleLowering::emitPlaceAddress(ast::Expr *place) {
   // The objects on the way belong to `self` or to an `inout` parameter,
   // which the caller holds: nothing needs keeping past the address.
   std::vector<Val> keep;
+  const size_t mark = MemTemps.size();
   Val addr = emitInoutArg(place, keep);
   releaseAfterCall(keep);
+  releaseMemTemps(mark);
   return addr;
 }
 
@@ -443,6 +454,27 @@ Val ModuleLowering::loadInoutResult(const Val &addr, ast::Type *astTy) {
   Val v = B.ptrLoad(addr, t, "res");
   if (t == Type::Box)
     emitRetain(v);
+  return v;
+}
+
+Val ModuleLowering::takeInoutResult(const Val &addr, ast::Expr *call,
+                                    bool wantAddress,
+                                    const std::vector<Val> &keep, size_t mark,
+                                    const ExprValue &recv) {
+  // The storage is the receiver's, or an `inout` argument's: what holds the
+  // object it is in (a field reached through objects, a held receiver)
+  // stays held while the address is used.
+  if (wantAddress || ast::isMemType(call->getResolvedType())) {
+    for (const Val &box : keep)
+      MemTemps.emplace_back(box, nullptr);
+    if (recv.isOwned())
+      MemTemps.emplace_back(recv.V, nullptr);
+    return addr;
+  }
+  Val v = loadInoutResult(addr, call->getResolvedType());
+  releaseAfterCall(keep);
+  releaseMemTemps(mark);
+  releaseIfOwned(recv);
   return v;
 }
 

@@ -518,11 +518,12 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
   // gone (exprProducesFreshBox).
   if (weak)
     fieldVal = B.weakLoad(fieldVal, node->getFieldName());
-  if (recv.Owned.isOwned()) {
-    if (ast::isRefType(fieldASTTy) && !weak)
-      emitRetain(fieldVal);
-    releaseIfOwned(recv.Owned);
-  }
+  // The field of a temporary, or a held read (noteBorrowedReads), is a +1
+  // box (exprProducesFreshBox).
+  if (ast::isRefType(fieldASTTy) && !weak &&
+      (recv.Owned.isOwned() || isHeldRead(node)))
+    emitRetain(fieldVal);
+  releaseIfOwned(recv.Owned);
   return fieldVal;
 }
 

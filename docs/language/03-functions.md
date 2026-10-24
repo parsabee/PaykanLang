@@ -461,6 +461,41 @@ Output:
 hihi! hi!
 ```
 
+The same holds for what is read through an object, which any call given the object may change:
+a field's value read before the call is the one used, the method of `a.b.m(...)` runs on the
+object that was in `a.b`, and `a.b.f = ...` assigns a field of that object, whatever the call
+assigns to `a.b`.
+
+```pkn
+import ::io;
+
+class Box {
+  label: Str;
+}
+
+class Shelf {
+  box: Box;
+}
+
+fn swap(s: Shelf) -> Str {
+  s.box = Box("new");
+  return "!";
+}
+
+fn main() -> int {
+  shelf = Shelf(Box("old"));
+  t = shelf.box.label + swap(shelf); // the label read before swap replaces the box
+  io::println(t + " " + shelf.box.label);
+  return 0;
+}
+```
+
+Output:
+
+```
+old! new
+```
+
 ### Where modes apply
 
 - To a parameter of any type: value types, strings, arrays, tuples, optionals, objects,

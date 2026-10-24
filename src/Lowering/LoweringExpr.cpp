@@ -169,14 +169,10 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
     Val addr = L.emitFixedElementAddress(node->getArray(), node->getIndex());
     if (!addr)
       return addr;
-    Val elem = L.emitElementLoad(addr, node->getResolvedType());
-    // A temporary's element outlives it as a +1 box (exprProducesFreshBox).
-    if (L.MemTemps.size() > mark) {
-      if (elem.Ty == Type::Box)
-        L.emitRetain(elem);
-      L.releaseMemTemps(mark);
-    }
-    return elem;
+    // A temporary's element, or a held one, is a +1 box
+    // (exprProducesFreshBox).
+    return L.ownElementRead(
+        node, L.emitElementLoad(addr, node->getResolvedType()), mark);
   }
   // A string's character.
   Val idx = visit(node->getIndex());
@@ -867,10 +863,10 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     return slot;
   }
   Val result = L.B.call(callee->Name, callee->Sig, args, "call");
+  if (result && result.Ty == Type::Ptr) // an `inout` result
+    return L.takeInoutResult(result, node, wantAddress, keep, fixedMark);
   L.releaseAfterCall(keep);
   L.releaseMemTemps(fixedMark);
-  if (result && result.Ty == Type::Ptr && !wantAddress) // an `inout` result
-    return L.loadInoutResult(result, node->getResolvedType());
   return result;
 }
 
@@ -1120,10 +1116,13 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     result = L.B.vcall(recv, className, static_cast<uint32_t>(vtableIdx), sig,
                        args, "mcall");
   }
-  L.releaseAfterCall(keep);
-  L.releaseMemTemps(fixedMark);
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
+  if (result && result.Ty == Type::Ptr) // an `inout` result
+    return L.takeInoutResult(result, node, wantAddress, keep, fixedMark,
+                             recvOwned);
+  L.releaseAfterCall(keep);
+  L.releaseMemTemps(fixedMark);
   L.releaseIfOwned(recvOwned);
   if (fixedSlot)
     return fixedSlot;
@@ -1133,8 +1132,6 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       L.toPIRType(L.canonicalizeDeclType(method->getReturnType())) ==
           Type::Bool)
     result = L.B.cmp(CmpPred::Ne, result, Val::i64(0), "eq");
-  if (result && result.Ty == Type::Ptr && !wantAddress) // an `inout` result
-    return L.loadInoutResult(result, node->getResolvedType());
   return result;
 }
 
@@ -1242,14 +1239,10 @@ Val ModuleLowering::ExprEmitter::visitTupleIndexExpr(
   Val addr = L.emitTupleElementAddress(node->getTuple(), node->getIndex());
   if (!addr)
     return addr;
-  Val elem = L.emitElementLoad(addr, node->getResolvedType());
-  // A temporary's element outlives it as a +1 box (exprProducesFreshBox).
-  if (L.MemTemps.size() > mark) {
-    if (elem.Ty == Type::Box)
-      L.emitRetain(elem);
-    L.releaseMemTemps(mark);
-  }
-  return elem;
+  // A temporary's element, or a held one, is a +1 box
+  // (exprProducesFreshBox).
+  return L.ownElementRead(
+      node, L.emitElementLoad(addr, node->getResolvedType()), mark);
 }
 
 Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {

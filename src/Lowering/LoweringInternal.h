@@ -110,7 +110,7 @@ public:
   pir::Module takeModule();
 
   /// Lower @p node; a statement once its held reads are noted
-  /// (noteHeldReads).
+  /// (noteHeldReads, noteBorrowedReads).
   Val visit(ast::ASTNode *node);
 
   // -- Visitor overrides
@@ -368,7 +368,8 @@ private:
   ExprValue classifyExpr(ast::Expr *expr, const Val &val) const;
   void releaseIfOwned(const ExprValue &ev);
 
-  /// The reads noteHeldReads found, which take a reference of their own.
+  /// The reads noteHeldReads and noteBorrowedReads found, which take a
+  /// reference of their own.
   std::unordered_set<const ast::Expr *> HeldReads;
   /// Note the reads among statement @p s's own expressions (not those of
   /// the statements in it) that a later part of the statement may replace
@@ -379,7 +380,21 @@ private:
   /// box, retained (exprProducesFreshBox), or a value held in memory,
   /// copied into a temporary (emitMemValue).
   void noteHeldReads(ast::Stmt *s);
+  /// Note the reads among statement @p s's own expressions of storage the
+  /// function does not own (an object's, or what an `inout` parameter, a
+  /// value passed by address or a struct method's `self` names) that a call
+  /// may replace while their value or storage is in use: one given an
+  /// object, or that storage to change (LoweringHolds.cpp).  A box read is
+  /// retained (exprProducesFreshBox); for a value held in memory, the
+  /// object it is in is (MemTemps).
+  void noteBorrowedReads(ast::Stmt *s);
+  struct BorrowedReads;
   bool isHeldRead(const ast::Expr *e) const { return HeldReads.count(e) > 0; }
+  /// The element @p elem of @p node, read in place from storage whose
+  /// temporaries and holds MemTemps has past @p mark, which are released
+  /// now: a box retained first when @p node is a +1 one
+  /// (exprProducesFreshBox: a temporary's, a held read).
+  Val ownElementRead(ast::Expr *node, const Val &elem, size_t mark);
   /// The variable whose own storage @p place is or is part of (`s`, `s.f`
   /// of a struct, `t.0`, `a[i]` of a fixed-size array), or null (a field of
   /// an object, a call's result).
@@ -898,6 +913,13 @@ private:
   /// A call's `inout` result @p addr read as a value of type @p astTy (a
   /// box is retained, as a call's result is owned).
   Val loadInoutResult(const Val &addr, ast::Type *astTy);
+  /// The `inout` result @p addr of @p call, in storage that the boxes
+  /// @p keep and @p recv and MemTemps past @p mark hold: used where it is
+  /// (@p wantAddress, or a value held in memory), they go to MemTemps for
+  /// its user to release; read, they are released once it is.
+  Val takeInoutResult(const Val &addr, ast::Expr *call, bool wantAddress,
+                      const std::vector<Val> &keep, size_t mark,
+                      const ExprValue &recv = ExprValue());
   /// An `inout` name @p name, of type @p astTy, for the variable or field
   /// @p place: an `inout` local's, or a `match` arm's `n: inout T`.
   void emitInoutBinding(const std::string &name, ast::Expr *place,

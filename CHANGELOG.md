@@ -340,6 +340,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a call may replace"), so it is the value the variable held before the call
   (docs/language/03-functions.md, "Exclusivity").  The moves at last use rely on it: a
   function handed a variable's last reference sees what a temporary would give it.
+- A value read through an object could be freed while still in use when a call made before
+  its use replaced the field it was in, or the field holding the object it was in: a
+  method's receiver (`h.b.m(h)`, `self.child.detach(self)`, or a method replacing its own
+  receiver through what it reaches or a closure it calls), an operand of `+` or `==`
+  (`h.b.s + g(h)`), the object a field assignment writes to (`h.b.k = g(h)`, `h.b.s +=
+  g(h)`), an array in a field while a call computes its index or the element stored in it
+  (`h.b.a[g(h)]`, `h.b.a[1] = g(h)`), a value held in a field and passed by address
+  (`f(h.a.xs, h)`, `h.a.s.take(h)`, an `inout` argument in a struct's field), a call's
+  `inout` result, an `inout` local or a `match` arm's `n: inout T` of such storage, and
+  what an `inout` parameter, a slice or a struct method's `self` names.  Such a read now
+  takes a reference of its own until it is used, and storage used where it is keeps the
+  object it is in alive, wherever a call that may replace it is made in between; a call
+  given nothing that reaches an object replaces nothing, and the reads around it stay in
+  place (docs/pir.md §7, "Reads a call may replace"; docs/language/03-functions.md,
+  "Exclusivity").  The moves at last use made this more likely: after `take(a)` handed
+  `a`'s last reference on, `use(h)`, reading `h.node.name + replace(h)`, joined freed
+  memory (`took !!`); it prints `took first1!`.
+- `Str(s)` of a field handed on (`return Str(self.v);`, `f(Str(self.v))`) passed the field's
+  own reference as if it were a new one, and the release that ended it freed the string the
+  object still held (`heap corruption or invalid free`); it is retained, as `self.v` is.
 - A local could take the name of a function of the module and hide it: `func = fn(x: int,
   y: float) => x + y;` next to `fn func<T>(x: T) => x + 2;` made `func(1, 2.5)` call the
   lambda.  A variable, a parameter (a method's or a lambda's too), a `for` loop variable, a

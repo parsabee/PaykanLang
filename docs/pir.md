@@ -628,6 +628,41 @@ CodeGen enforced, now in one place.
   released after the use.  What the read saw lives until it is used, and
   `s + repl(s)` joins the string `s` held before `repl` ran.  The place the
   call is given, and the one the statement assigns to, are not reads.
+
+  A value read through an object has no reference of its own either: a
+  field's box (`h.b.s`, `self.child`), or a reference read from a value
+  held in a field (`h.a.xs[i]`, `h.a.p.name`) or from what an `inout`
+  parameter or local, a value passed by address (a `view` or slice
+  parameter) or a struct method's `self` names, which may be a field of
+  the caller's.  The object keeps it, and a call given an object may
+  replace it: what the call is given reaches whatever the object reaches,
+  and runs what a closure in it holds, so it may assign the field the
+  value is in, or a field holding the object that has it.  So may a call
+  given such storage as an `inout` argument, or as the `self` of a
+  struct's method that may change `self`.  A call given only values that
+  reach no object (numbers, strings, and arrays, tuples and structs of
+  them) cannot, nor can a native function but through its `inout`
+  arguments.  The lowering follows the order in which a statement
+  evaluates its parts, and a read in use where such a call is made takes
+  a reference of its own: a method's receiver until the method returns
+  (the method is such a call, given its receiver), the left operand of
+  `+` or `==` until the operator, a box a builtin method or a native
+  function reads where it is until the call returns, the object a field
+  assignment writes to until the value is stored.  Its box is `retain`ed
+  after the `field.load` or `ptr.load` and owned like a call's result,
+  released after the use.  The storage of a value held in memory, used
+  where it is while such a call is made (an array while its index or the
+  element stored in it is computed, a value passed by address, a struct
+  method's receiver, an `inout` argument, the place a call's `inout`
+  result names), keeps the object it is in alive: that object, read
+  through another one (`h.a` of `h.a.xs`), is `retain`ed, and released
+  once the address is no longer used; for an `inout` local or a `match`
+  arm's `n: inout T`, a hidden owned local holds it until the local's
+  scope ends.  So `h.b.s + g(h)` joins the string `h.b.s` held before `g`
+  ran, `h.b.m(h)` runs `m` on the object that was in `h.b`, and
+  `h.b.s = g(h)` writes to that object, whatever `g` and `m` assign.  A
+  read in use where no such call is made is read in place, with no
+  `retain`.
 * **Match**: the subject is evaluated once; a boxed subject is owned for the
   match's duration (pending release at match end, also on early exits).  Class
   arms compare `vtable.load` against `vtable.addr`; optional subjects test
@@ -989,39 +1024,41 @@ the slot would have (a callee when it returns, a variable at the end of its
 scope, a field when it is assigned again), and with it what only the object
 holds.  A borrowed reference is one the function uses without a reference
 of its own and without a local of its own holding its object: a field's or
-an element's value read in place (`h.node.name`, held while `+` evaluates
-its other operand), what `self` or an `inout` parameter points at, and what
-is computed from them (a method's receiver read from a field).  The slot
-may be what kept that object alive.  So from the point the destination
-holds the reference to the slot's release, no node that may release a
-reference (a `release`, a `free`, a call of anything but the runtime's
-string, hash, rounding, allocation, disposal and panic helpers) may come
-while a borrowed reference is in use across it: one made before it and used
-after it, one a call it makes is given, or a local holding one (`self`)
-read after it.  One used in a loop it was made outside of is in use at
-every node of the loop.  A release the moves leave with nothing to release
-is no such node: one of a slot that is `null` on every path to it once the
-last uses found are moved, as long as each of those moves is made.  One
-that stays a copy makes its slot's releases releases again, and the copies
-whose windows they lie in copies too.  So a chain `a1 = a0; a2 = a1; ...`
-while `self` is in use moves whole: each hand-off's window holds the
-release of the variable it hands on to, which the next hand-off empties.
-A value that holds a reference of its own is not borrowed: a box loaded
-from a box local, or what a `mem` local holds (it owns its references, §7),
-which the local keeps until a store into it, a statement that is over by
-then, or a call given its address, whose statement's other reads of it
-have a reference of their own (§7, "Reads a call may replace"); a call's
-box; and a value retained before anything else uses it.  Nor is an
-`__init__`'s `self`: its constructor, the only caller one can have, holds
-the object (or, for a struct, the storage) until the call returns.  So
-`x = h.node; take(x); s = h.node.name + replace(h)` keeps the copy into
-`take`: if `replace` assigns `h.node`, the name read before it would die
-with the node.  Whether a borrowed reference really depends on the object
-is not asked, so a move can be refused where it was safe: one in use
-across a call anywhere between the hand-off and the slot's release, which
-for a variable of a function's outermost scope is the function's end,
-keeps the hand-off a copy; in a method, so does any use of `self` by or
-after a call that follows it (the call it is passed to included).
+an element's value read in place (`h.node.name` while `+` evaluates its
+other operand, unless that may replace it: §7, "Reads a call may replace"),
+what `self` or an `inout` parameter points at, and what is computed from
+them.  The slot may be what kept that object alive.  So from the point the
+destination holds the reference to the slot's release, no node that may
+release a reference (a `release`, a `free`, a call of anything but the
+runtime's string, hash, rounding, allocation, disposal and panic helpers)
+may come while a borrowed reference is in use across it: one made before it
+and used after it, one a call it makes is given, or a local holding one
+(`self`) read after it.  One used in a loop it was made outside of is in
+use at every node of the loop.  A release the moves leave with nothing to
+release is no such node: one of a slot that is `null` on every path to it
+once the last uses found are moved, as long as each of those moves is made.
+One that stays a copy makes its slot's releases releases again, and the
+copies whose windows they lie in copies too.  So a chain
+`a1 = a0; a2 = a1; ...` while `self` is in use moves whole: each hand-off's
+window holds the release of the variable it hands on to, which the next
+hand-off empties.  A value that holds a reference of its own is not
+borrowed: a box loaded from a box local, or what a `mem` local holds (it
+owns its references, §7), which the local keeps until a store into it, a
+statement that is over by then, or a call given its address, whose
+statement's other reads of it have a reference of their own (§7, "Reads a
+call may replace"); a call's box; and a value retained before anything else
+uses it.  Nor is an `__init__`'s `self`: its constructor, the only caller
+one can have, holds the object (or, for a struct, the storage) until the
+call returns.  So `x = h.node; take(x); s = h.node.name + label(n)` keeps
+the copy into `take`, though `label`, given a number, can let go of
+nothing; with `replace(h)` in its place, which may assign `h.node`, the
+name read has a reference of its own (§7), and the hand-off moves.  Whether
+a borrowed reference really depends on the object is not asked, so a move
+can be refused where it was safe: one in use across a call anywhere between
+the hand-off and the slot's release, which for a variable of a function's
+outermost scope is the function's end, keeps the hand-off a copy; in a
+method, so does any use of `self` by or after a call that follows it (the
+call it is passed to included).
 
 The **rewrite** removes the copy's retains and stores `null` into the slot
 right after them.  On the paths through the copy, the release then
@@ -1070,34 +1107,34 @@ cleanup moved a release into an arm.
 release that provably runs on the same reference with no read in between:
 on every path from the copy, the slot still holds the reference it copied
 until its release, and nothing reads the slot or uses an alias of it in
-that window.  Between the copy and the release the moved program holds
-one reference fewer than the original, the slot's, which the destination
-holds instead of a new one; before the copy and after the release the
-counts are the same.
-Until the destination holds it, the reference is the copy's value, which
-nothing releases, so every object lives as long as before.  From then on
-the destination holds it as it holds a reference made for it: a callee is
-given a +1 box, as `take(Node(1))` gives it one, that may be the object's
-only reference; a variable, a field or the caller holds it as it holds a
-new object.  So the object, and what only it holds, may die sooner: at a
-node that may release a reference, once the destination has let go.  A
-reference with a count of its own keeps what it refers to alive as before,
-so only code using one without could be left pointing at freed memory.  In
-another function, the destination's code or code that runs later, that
-code would be as wrong for a new object, which §7 does not allow: a
-function keeps alive what it uses, by a reference it holds (a variable's,
-or a read's own where a call of the statement may replace the variable) or
-one its caller holds for the call (the receiver, what an `inout` parameter
-points at).  In the function rewritten it is an alias of the slot, of
-which the window has none, or a borrowed reference, none of which is in
-use across such a node in the window.  No release is ever added, nor moved
-earlier than it ran: the destination owns the reference and releases it at
-the end of its own scope (docs/language/16-memory.md, "Ownership
-transfers").  What changes is only that the object may die when the
-destination lets go rather than when the variable's scope ends.  A `weak`
-reference made elsewhere can see that, and so can what the object's
-destruction does: an `io::File` handed on at its last use is closed, and
-what was written to it flushed, when the destination lets it go.
+that window.  Between the copy and the release the moved program holds one
+reference fewer than the original, the slot's, which the destination holds
+instead of a new one; before the copy and after the release the counts are
+the same.  Until the destination holds it, the reference is the copy's
+value, which nothing releases, so every object lives as long as before.
+From then on the destination holds it as it holds a reference made for it:
+a callee is given a +1 box, as `take(Node(1))` gives it one, that may be
+the object's only reference; a variable, a field or the caller holds it as
+it holds a new object.  So the object, and what only it holds, may die
+sooner: at a node that may release a reference, once the destination has
+let go.  A reference with a count of its own keeps what it refers to alive
+as before, so only code using one without could be left pointing at freed
+memory.  In another function, the destination's code or code that runs
+later, that code would be as wrong for a new object, which §7 does not
+allow: a function keeps alive what it uses, by a reference it holds (a
+variable's, or a read's own where a call of the statement may replace the
+variable, or the field or element it read) or one its caller holds for the
+call (the receiver, what an `inout` parameter points at).  In the function
+rewritten it is an alias of the slot, of which the window has none, or a
+borrowed reference, none of which is in use across such a node in the
+window.  No release is ever added, nor moved earlier than it ran: the
+destination owns the reference and releases it at the end of its own scope
+(docs/language/16-memory.md, "Ownership transfers").  What changes is only
+that the object may die when the destination lets go rather than when the
+variable's scope ends.  A `weak` reference made elsewhere can see that, and
+so can what the object's destruction does: an `io::File` handed on at its
+last use is closed, and what was written to it flushed, when the
+destination lets it go.
 
 **Never moved:** `self` (an `obj` local, or a struct method's `ptr`),
 `inout` parameters and locals (a `ptr`), a slot whose address is taken

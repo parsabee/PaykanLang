@@ -160,20 +160,15 @@ Val ModuleLowering::lowerStructFieldRead(ast::MemberAccessExpr *node,
                                          ast::StructType *st) {
   int idx = st->fieldIndex(node->getFieldName());
   assert(idx >= 0 && "Sema should have verified the field exists");
-  // Read in place; a temporary's field outlives it as a +1 box
+  // Read in place; a temporary's field, or a held one, is a +1 box
   // (exprProducesFreshBox).
   size_t mark = MemTemps.size();
   Val addr =
       emitTupleElementAddress(node->getReceiver(), static_cast<size_t>(idx));
   if (!addr)
     return Val();
-  Val elem = emitElementLoad(addr, node->getResolvedType());
-  if (MemTemps.size() > mark) {
-    if (elem.Ty == Type::Box)
-      emitRetain(elem);
-    releaseMemTemps(mark);
-  }
-  return elem;
+  return ownElementRead(node, emitElementLoad(addr, node->getResolvedType()),
+                        mark);
 }
 
 Val ModuleLowering::lowerStructFieldAssign(ast::MemberAssignStmt *node,
@@ -238,14 +233,14 @@ Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
     args.push_back(slot);
   }
   Val result = L.B.call(fn->Name, fn->Sig, args, "mcall");
-  L.releaseAfterCall(keep);
-  L.releaseMemTemps(mark);
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
+  if (result && result.Ty == Type::Ptr) // an `inout` result
+    return L.takeInoutResult(result, node, wantAddress, keep, mark);
+  L.releaseAfterCall(keep);
+  L.releaseMemTemps(mark);
   if (slot)
     return slot;
-  if (result && result.Ty == Type::Ptr && !wantAddress) // an `inout` result
-    return L.loadInoutResult(result, node->getResolvedType());
   return result;
 }
 
