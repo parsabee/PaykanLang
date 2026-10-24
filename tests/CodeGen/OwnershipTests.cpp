@@ -1635,6 +1635,65 @@ TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
   g.expectNoLeaks("AProgramsStableReadKeepsTheHandOffsTiming");
 }
 
+// A field no code stores into once its object is made keeps the reference
+// its object's `__init__` gave it (docs/pir.md §7): `self.fixed.name` is
+// read in place across a closure that replaces `moving` and, through an
+// `inout` argument, `byArg`.  Their reads keep a reference of their own:
+// each is the string of the Item that was there, which dies once the
+// statement has used it.
+TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Item { name: Str; }
+    class Probe { weak it: Item?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.it {
+          Item { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    fn bump(s: inout Item) { s = Item("arg" + Str(3)); }
+    class Holder {
+      fixed: Item;
+      moving: Item;
+      byArg: Item;
+      view fn viaFixed(f: () -> int) -> Str { return self.fixed.name + Str(f()); }
+      view fn viaMoving(f: () -> int) -> Str { return self.moving.name + Str(f()); }
+      view fn viaArg(f: () -> int) -> Str { return self.byArg.name + Str(f()); }
+    }
+    impl Holder {
+      fn __init__() {
+        self.fixed = Item("fix" + Str(0));
+        self.moving = Item("old" + Str(1));
+        self.byArg = Item("arg" + Str(2));
+      }
+    }
+    fn main() -> int {
+      h = Holder();
+      fixed = Probe(h.fixed);
+      moving = Probe(h.moving);
+      f = fn() -> int {
+        h.moving = Item("new" + Str(4));
+        bump(h.byArg);
+        return 7;
+      };
+      io::println(h.viaFixed(f) + " " + fixed.state() + " " + moving.state());
+      moving = Probe(h.moving);
+      io::println(h.viaMoving(f) + " " + moving.state() + " " + h.moving.name);
+      arg = Probe(h.byArg);
+      io::println(h.viaArg(f) + " " + arg.state() + " " + h.byArg.name);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut,
+            "fix07 alive freed\nnew47 freed new4\narg37 freed arg3\n");
+  g.expectNoLeaks("AFieldStoredOnlyAtConstructionIsReadInPlace");
+}
+
 // A string's character is read from the string as it was before its index
 // was computed, as an array's element is, though the call computing it
 // replaces the string (and makes a new one where it was).

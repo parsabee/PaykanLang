@@ -992,6 +992,161 @@ TEST(Lowering, TheMainModuleOfAProgramKnowsItsClassesOverrides) {
   }
 }
 
+// A field no code stores into once its object is made keeps the reference
+// its object's `__init__` gave it (docs/pir.md §7): `self.fixed.name` needs
+// no hold across a call through a function value, which may do anything,
+// nor does a field a derived class's `__init__` stores.  Every other way to
+// store into a field keeps its read held: an assignment, a compound one, an
+// `inout` argument or local, a `match` arm's `n: inout T` (whose copy is
+// written back), an `-> inout` result (either branch of one), a lambda's
+// body (one an `__init__` makes too), a derived class's method, and a copy
+// of a generic function, which names its type argument's fields.  So is a
+// struct's part in an object (a copy of the struct replaces it), a read in
+// an `__init__`, and one rooted in a parameter the function may hand on.
+// Outside a program's main module, where an importer may name `Holder`,
+// only a private field's stores are all known: one no template of the
+// module stores into either, as `spoil`, which an importer's copy may run,
+// does `_spoiled`.
+TEST(Lowering, AFieldStoredOnlyAtConstructionNeedsNoHold) {
+  const std::string source = R"(
+    class Item { name: Str; }
+    class Special : Item { }
+    impl Special { fn __init__(n: Str) { __super__(n); } }
+    struct P { name: Str; }
+    fn bump(s: inout Str) { s = s + "!"; }
+    fn setTag<T>(x: T) { x.generic = "g"; }
+    class Holder {
+      fixed: Item;
+      assigned: Str;
+      compound: Str;
+      byArg: Str;
+      byLocal: Str;
+      byArm: Item;
+      byResult: Str;
+      byTernary: Str;
+      byLambda: Str;
+      inherited: Str;
+      generic: Str;
+      childInit: Str;
+      pos: P;
+      fn slot(first: bool) -> inout Str {
+        return if first then self.byResult else self.byTernary;
+      }
+      fn grow() { self.compound += "x"; }
+      view fn fixedRead(f: () -> int) -> Str { return self.fixed.name + Str(f()); }
+      view fn assignedRead(f: () -> int) -> Str { return self.assigned + Str(f()); }
+      view fn compoundRead(f: () -> int) -> Str { return self.compound + Str(f()); }
+      view fn byArgRead(f: () -> int) -> Str { return self.byArg + Str(f()); }
+      view fn byLocalRead(f: () -> int) -> Str { return self.byLocal + Str(f()); }
+      view fn byArmRead(f: () -> int) -> Str { return self.byArm.name + Str(f()); }
+      view fn byResultRead(f: () -> int) -> Str { return self.byResult + Str(f()); }
+      view fn byTernaryRead(f: () -> int) -> Str { return self.byTernary + Str(f()); }
+      view fn byLambdaRead(f: () -> int) -> Str { return self.byLambda + Str(f()); }
+      view fn inheritedRead(f: () -> int) -> Str { return self.inherited + Str(f()); }
+      view fn genericRead(f: () -> int) -> Str { return self.generic + Str(f()); }
+      view fn childInitRead(f: () -> int) -> Str { return self.childInit + Str(f()); }
+      view fn posRead(f: () -> int) -> Str { return self.pos.name + Str(f()); }
+    }
+    impl Holder {
+      fn __init__(f: () -> int) {
+        self.fixed = Item("f");
+        self.assigned = "a";
+        self.compound = "c";
+        self.byArg = "b";
+        self.byLocal = "l";
+        self.byArm = Item("m");
+        self.byResult = "r";
+        self.byTernary = "t";
+        self.byLambda = "z";
+        self.inherited = "i";
+        self.generic = "g";
+        self.childInit = "c";
+        self.pos = P("p");
+        early = self.fixed.name + Str(f());
+        k = fn() { self.byLambda = "k"; };
+        k();
+      }
+    }
+    class Child : Holder {
+      fn poke() { self.inherited = "p"; }
+    }
+    impl Child {
+      fn __init__(f: () -> int) { __super__(f); self.childInit = "child"; }
+    }
+    fn outside(h: Holder, f: () -> int) -> Str { return h.fixed.name + Str(f()); }
+    fn stores(h: Holder) {
+      h.assigned = "x";
+      bump(h.byArg);
+      x: inout = h.byLocal;
+      x = "y";
+      match h.byArm {
+        s: inout Special { s = Special("s"); }
+        _ { }
+      }
+      setTag(h);
+    }
+    class Vault {
+      __secret: Str;
+      _shared: Str;
+      open: Str;
+      _spoiled: Str;
+      view fn secretRead(f: () -> int) -> Str { return self.__secret + Str(f()); }
+      view fn sharedRead(f: () -> int) -> Str { return self._shared + Str(f()); }
+      view fn openRead(f: () -> int) -> Str { return self.open + Str(f()); }
+      view fn spoiledRead(f: () -> int) -> Str { return self._spoiled + Str(f()); }
+    }
+    impl Vault {
+      fn __init__() {
+        self.__secret = "s";
+        self._shared = "m";
+        self.open = "o";
+        self._spoiled = "p";
+      }
+    }
+    fn spoil<T>(v: T) { v._spoiled = "t"; }
+    fn main() -> int { return 0; }
+  )";
+  struct Case {
+    const char *Fn, *Read;
+    bool Closed, Open; // fixed in that world
+  };
+  const Case cases[] = {
+      {"Holder.fixedRead", ", Item.name", true, false},
+      {"Holder.childInitRead", ", Holder.childInit", true, false},
+      {"Holder.assignedRead", ", Holder.assigned", false, false},
+      {"Holder.compoundRead", ", Holder.compound", false, false},
+      {"Holder.byArgRead", ", Holder.byArg", false, false},
+      {"Holder.byLocalRead", ", Holder.byLocal", false, false},
+      {"Holder.byArmRead", ", Item.name", false, false},
+      {"Holder.byResultRead", ", Holder.byResult", false, false},
+      {"Holder.byTernaryRead", ", Holder.byTernary", false, false},
+      {"Holder.byLambdaRead", ", Holder.byLambda", false, false},
+      {"Holder.inheritedRead", ", Holder.inherited", false, false},
+      {"Holder.genericRead", ", Holder.generic", false, false},
+      {"Holder.posRead", "ptr.load box, %pos.addr", false, false},
+      {"Holder.__init__", ", Item.name", false, false},
+      {"outside", ", Item.name", false, false},
+      {"Vault.secretRead", ", Vault.__secret", true, true},
+      {"Vault.sharedRead", ", Vault._shared", true, true},
+      {"Vault.openRead", ", Vault.open", true, false},
+      {"Vault.spoiledRead", ", Vault._spoiled", true, false},
+  };
+  for (lowering::World world :
+       {lowering::World::Open, lowering::World::Closed}) {
+    auto l = lower(source, "", lowering::Copies::Shared, world);
+    ASSERT_TRUE(l.Ok) << l.Error;
+    for (const Case &c : cases) {
+      const bool fixed = world == lowering::World::Closed ? c.Closed : c.Open;
+      std::string f = function(l.Text, c.Fn);
+      ASSERT_FALSE(f.empty()) << c.Fn << "\n" << l.Text;
+      EXPECT_EQ(heldAcross(f, defined(f, c.Read), "icall "), !fixed)
+          << c.Fn << "\n"
+          << f;
+      EXPECT_EQ(stableLoad(f, c.Read), fixed) << c.Fn << "\n" << f;
+    }
+  }
+}
+
 // The storage of a value held in an object's field, used where it is while
 // a call that may replace the object runs, keeps the object alive: an
 // array's while its index or the element assigned in it is computed, one
@@ -2234,7 +2389,12 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
 // known, also in the main module of a program, which knows only its own
 // classes' overrides.  So `self.origin` is held across `sum()`, though a
 // Point reaches no object, and so is `self.mine`, a main class's object,
-// across the `sum()` it inherits from the imported class.
+// across the `sum()` it inherits from the imported class: `move` may have
+// replaced either (another module's code may run the program's, as a
+// Point's `equals` override would).  A field the program stores only at
+// construction keeps its Point whatever `sum()` does, and the main module
+// of a program, the only one naming `Fixed`, knows it: `Fixed.origin` is
+// read in place, by a stable load.
 TEST(Lowering, AReadIsHeldAcrossAMethodAnotherModuleCompiles) {
   auto dir = std::filesystem::temp_directory_path() /
              ("lowering_foreign_" + std::to_string(getpid()));
@@ -2250,6 +2410,12 @@ TEST(Lowering, AReadIsHeldAcrossAMethodAnotherModuleCompiles) {
       "  mine: Mine;\n"
       "  view fn total() -> int { return self.origin.sum(); }\n"
       "  view fn own() -> int { return self.mine.sum(); }\n"
+      "  fn move(p: point::Point, m: Mine) { self.origin = p; self.mine = m; "
+      "}\n"
+      "}\n"
+      "class Fixed {\n"
+      "  origin: point::Point;\n"
+      "  view fn total() -> int { return self.origin.sum(); }\n"
       "}\n"
       "fn main() -> int { return 0; }\n";
   for (lowering::World world :
@@ -2262,6 +2428,11 @@ TEST(Lowering, AReadIsHeldAcrossAMethodAnotherModuleCompiles) {
       EXPECT_TRUE(heldAcross(f, defined(f, read), "vcall ")) << f;
       EXPECT_FALSE(stableLoad(f, read)) << f;
     }
+    const bool closed = world == lowering::World::Closed;
+    std::string f = function(l.Text, "Fixed.total");
+    EXPECT_EQ(heldAcross(f, defined(f, ", Fixed.origin"), "vcall "), !closed)
+        << f;
+    EXPECT_EQ(stableLoad(f, ", Fixed.origin"), closed) << f;
   }
   std::filesystem::remove_all(dir);
 }

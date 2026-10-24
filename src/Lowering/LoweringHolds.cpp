@@ -20,8 +20,10 @@
 // object (numbers, strings, and arrays, tuples and structs of them) can
 // replace none of it.  One that runs code the module has may let go only of
 // references of the classes that code stores into or lets go of (effectOf,
-// at the end of this file): a read of storage the function never hands on
-// whose slot is of another class is not replaced.
+// further down): a read of storage the function never hands on whose slot
+// is of another class is not replaced.  Nor is one of a field of `self` no
+// code stores into once its object is made, whatever the call does
+// (isFixedRead, at the end of this file).
 //
 // So the lowering walks each statement's expressions in the order it
 // evaluates them, knowing how long each value stays in use: an operand
@@ -189,7 +191,9 @@ static const ast::Identifier *rootOf(const ast::Expr *e) {
 }
 
 // Whether a call that does @p effect may let go of the reference @p read
-// borrows from its slot.  Not knowing what it does, it may.  A read of
+// borrows from its slot.  A field of `self` that no code stores into once
+// its object is made keeps it, whatever the call does (isFixedRead).  Not
+// knowing what it does, a call may let go of any other.  A read of
 // storage the function never hands on (its `self`, an `inout`, `view` or
 // slice parameter's) lives while that slot keeps its reference, which only
 // letting go of a reference of the slot's class can take away: storing
@@ -203,6 +207,8 @@ static const ast::Identifier *rootOf(const ast::Expr *e) {
 // variable's object would then die later than it does with the hold.
 bool ModuleLowering::BorrowedReads::replaces(const Effect &effect,
                                              const ast::Expr *read) const {
+  if (L.isFixedRead(read))
+    return false;
   if (effect.Unknown)
     return true;
   const ast::Identifier *root = rootOf(read);
@@ -1350,6 +1356,314 @@ void ModuleLowering::BufferUses::expr(ast::Expr *e) {
   } else if (auto *x = ast::dyn_cast<ast::LambdaExpr>(e)) {
     stmt(x->getBody());
   }
+}
+
+// -- Fields stored only at construction
+//
+// A class's field keeps the reference its object's `__init__` gives it
+// (`self.f = v` in the body of the class's `__init__` or of a derived
+// class's) for as long as the object lives when no other code stores into
+// it: an assignment (a compound one too), an `inout` argument or local, a
+// `match` with an arm's `n: inout T` (which writes its subject back), and an
+// `-> inout` function's result, which its caller may write through, are
+// stores; a lambda's body is code of its own, wherever it is written.  An
+// `__init__` runs once, on an object no one else has yet, and is called by
+// nothing but its constructor and a derived class's `__init__` (Sema), so
+// its stores are made in its own frame, under any code that reads the
+// object, and none is made while a call made by such code runs.  A native
+// function stores only through its `inout` arguments (docs/language/
+// 03-functions.md), and an object's destructor runs no code of the program.
+//
+// What code may store into a field depends on what may name it.  The main
+// module of a program (World::Closed) is the only one naming its classes and
+// the instances of its templates, and it lowers every function run on them:
+// its own, the methods of its classes, and its copies of other modules'
+// templates, whose bodies may name a type argument's fields; a template
+// itself runs only as such a copy.  Any other module may be imported, and
+// an importer may name its classes, so only a private field's stores are all
+// known there: one its importers' code cannot name (an importer's copy of
+// another module's template cannot either), stored by none of the module's
+// code and none of its templates, which may run in an importer's copy, and
+// whose fields are known there by name only.
+
+struct ModuleLowering::FieldStoreScan {
+  ModuleLowering &L;
+  /// A template's body, whose types are not resolved: a store is known by
+  /// its field's name only, and any argument may be an `inout` one.
+  bool Template;
+  /// The statements read are an `__init__`'s own (not a lambda's in it).
+  bool Init = false;
+  /// The function read returns `-> inout`: its caller may store into what
+  /// it returns.
+  bool InoutResult = false;
+
+  /// Read @p fn's body: an `__init__`'s stores into `self` are its
+  /// object's construction (a struct's, of its own storage).
+  void function(const ast::FuncDecl *fn) {
+    Init = fn->getName() == names::kMethodInit;
+    InoutResult = fn->getResultMode() == ast::ParamMode::Inout;
+    stmt(fn->getBody());
+  }
+  void stmt(ast::Stmt *s);
+  void expr(ast::Expr *e);
+  void exprs(const std::vector<ast::Expr *> &es) {
+    for (ast::Expr *e : es)
+      expr(e);
+  }
+  /// The arguments @p args of a call, which may change those passed to its
+  /// `inout` parameters.
+  void arguments(const std::vector<ast::Expr *> &args) {
+    for (ast::Expr *a : args)
+      if (Template)
+        place(a);
+      else
+        expr(a);
+  }
+  /// The storage @p e names is stored into: its own field's, and when it
+  /// is a value held in memory (a struct's field, a tuple's element, an
+  /// array's), that of what holds it.
+  void place(ast::Expr *e);
+  /// The field @p name of what @p recv evaluates to is stored into.
+  void field(const ast::Expr *recv, const std::string &name);
+  /// A field of what @p recv evaluates to is stored into: an object's is
+  /// in the object, and a struct's part of where the struct is held.
+  void holder(ast::Expr *recv) {
+    if (!Template && ast::dyn_cast<ast::ClassType>(typeOf(recv)))
+      expr(recv);
+    else
+      place(recv);
+  }
+  ast::Type *typeOf(const ast::Expr *e) const {
+    return L.canonicalizeDeclType(e->getResolvedType());
+  }
+  /// Evaluate @p e's parts.
+  void parts(ast::Expr *e);
+};
+
+void ModuleLowering::FieldStoreScan::field(const ast::Expr *recv,
+                                           const std::string &name) {
+  ast::Type *ty = Template ? nullptr : typeOf(recv);
+  if (ast::dyn_cast<ast::StructType>(ty))
+    return; // a struct's field: no fixed read is part of a struct
+  for (auto *c = ast::dyn_cast<ast::ClassType>(ty); c; c = c->getSuperClass())
+    for (const auto &[f, fieldTy] : c->getFields())
+      if (f == name) {
+        L.StoredFields.Fields.insert(c->getName() + names::kNameSep + name);
+        return;
+      }
+  L.StoredFields.Names.insert(name);
+}
+
+void ModuleLowering::FieldStoreScan::place(ast::Expr *e) {
+  if (auto *x = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    field(x->getReceiver(), x->getFieldName());
+    return holder(x->getReceiver());
+  }
+  if (auto *x = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    expr(x->getIndex());
+    return place(x->getArray());
+  }
+  if (auto *x = ast::dyn_cast<ast::TupleIndexExpr>(e))
+    return place(x->getTuple());
+  if (auto *x = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    expr(x->getCondition());
+    place(x->getTrueExpr());
+    return place(x->getFalseExpr());
+  }
+  // A variable, or a call's `inout` result: what its function returns is a
+  // place stored into there.
+  parts(e);
+}
+
+void ModuleLowering::FieldStoreScan::stmt(ast::Stmt *s) {
+  if (!s || L.StoredFields.Unknown)
+    return;
+  if (auto *x = ast::dyn_cast<ast::CompoundStmt>(s)) {
+    for (ast::Stmt *t : x->getStatements())
+      stmt(t);
+  } else if (auto *x = ast::dyn_cast<ast::ReturnStmt>(s)) {
+    if (InoutResult && x->getReturnValue())
+      place(x->getReturnValue());
+    else
+      expr(x->getReturnValue());
+  } else if (auto *x = ast::dyn_cast<ast::ExprStmt>(s)) {
+    expr(x->getExpr());
+  } else if (auto *x = ast::dyn_cast<ast::DeclStmt>(s)) {
+    auto *vd = ast::dyn_cast<ast::VarDecl>(x->getDecl());
+    if (!vd) {
+      L.StoredFields.Unknown = true;
+    } else if (vd->getMode() == ast::ParamMode::Inout && vd->getInitExpr()) {
+      place(vd->getInitExpr());
+    } else {
+      expr(vd->getInitExpr());
+    }
+  } else if (auto *x = ast::dyn_cast<ast::AssignStmt>(s)) {
+    expr(x->getValue()); // a variable's own storage
+  } else if (auto *x = ast::dyn_cast<ast::MemberAssignStmt>(s)) {
+    ast::Expr *recv = x->getReceiver();
+    // What an `__init__` gives its object (or a struct's `__init__` its
+    // own storage).
+    const auto *id = ast::dyn_cast<ast::Identifier>(recv);
+    if (Init && id && id->getName() == names::kSelf) {
+      expr(recv);
+    } else {
+      field(recv, x->getFieldName());
+      holder(recv);
+    }
+    expr(x->getValue());
+  } else if (auto *x = ast::dyn_cast<ast::SubscriptAssignStmt>(s)) {
+    place(x->getArray());
+    expr(x->getIndex());
+    expr(x->getValue());
+  } else if (auto *x = ast::dyn_cast<ast::DestructureStmt>(s)) {
+    expr(x->getValue()); // into variables
+  } else if (auto *x = ast::dyn_cast<ast::IfStmt>(s)) {
+    expr(x->getCondition());
+    stmt(x->getThenBranch());
+    stmt(x->getElseBranch());
+  } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
+    expr(x->getCondition());
+    stmt(x->getBody());
+  } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
+    expr(x->getStart());
+    expr(x->getEnd());
+    expr(x->getStep());
+    stmt(x->getBody());
+  } else if (auto *x = ast::dyn_cast<ast::MatchStmt>(s)) {
+    // An arm's `n: inout T` writes its copy back to the subject.
+    const std::vector<ast::MatchArm *> &arms = x->getArms();
+    if (std::any_of(arms.begin(), arms.end(), [](const ast::MatchArm *a) {
+          return a->hasBinding() && a->getMode() == ast::ParamMode::Inout;
+        }))
+      place(x->getSubject());
+    else
+      expr(x->getSubject());
+    for (ast::MatchArm *arm : arms) {
+      expr(arm->getLiteralPattern());
+      stmt(arm->getBody());
+    }
+  } else if (!ast::isa<ast::BreakStmt>(s) && !ast::isa<ast::ContinueStmt>(s)) {
+    L.StoredFields.Unknown = true;
+  }
+}
+
+void ModuleLowering::FieldStoreScan::expr(ast::Expr *e) {
+  if (!e || L.StoredFields.Unknown)
+    return;
+  // An `inout` argument, or the receiver of a struct's method that may
+  // change `self`.
+  if (e->isChangedByCall())
+    return place(e);
+  parts(e);
+}
+
+void ModuleLowering::FieldStoreScan::parts(ast::Expr *e) {
+  if (ast::isa<ast::Identifier>(e) || ast::isa<ast::IntegerLiteral>(e) ||
+      ast::isa<ast::FloatLiteral>(e) || ast::isa<ast::BoolLiteral>(e) ||
+      ast::isa<ast::CharLiteral>(e) || ast::isa<ast::NoneLiteral>(e) ||
+      ast::isa<ast::StringLiteral>(e) || ast::isa<ast::EnumValueExpr>(e))
+    return;
+  if (auto *x = ast::dyn_cast<ast::UnaryExpr>(e)) {
+    expr(x->getOperand());
+  } else if (auto *x = ast::dyn_cast<ast::BinaryExpr>(e)) {
+    expr(x->getLHS());
+    expr(x->getRHS());
+  } else if (auto *x = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    expr(x->getCondition());
+    expr(x->getTrueExpr());
+    expr(x->getFalseExpr());
+  } else if (auto *x = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    expr(x->getReceiver());
+  } else if (auto *x = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    expr(x->getArray());
+    expr(x->getIndex());
+  } else if (auto *x = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+    expr(x->getTuple());
+  } else if (auto *x = ast::dyn_cast<ast::ArrayLiteralExpr>(e)) {
+    exprs(x->getElements());
+  } else if (auto *x = ast::dyn_cast<ast::TupleLiteralExpr>(e)) {
+    exprs(x->getElements());
+  } else if (auto *x = ast::dyn_cast<ast::CallExpr>(e)) {
+    arguments(x->getArguments());
+  } else if (auto *x = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    // A call on a box field cannot replace it; one on a value held in
+    // memory may change it, and is marked so (isChangedByCall).
+    expr(x->getReceiver());
+    arguments(x->getArguments());
+  } else if (auto *x = ast::dyn_cast<ast::CallValueExpr>(e)) {
+    expr(x->getCallee());
+    arguments(x->getArguments());
+  } else if (auto *x = ast::dyn_cast<ast::LambdaExpr>(e)) {
+    // Its body runs when it is called, after any `__init__` it is made in.
+    const bool init = Init;
+    const bool inout = InoutResult;
+    Init = InoutResult = false;
+    stmt(x->getBody());
+    Init = init;
+    InoutResult = inout;
+  } else {
+    L.StoredFields.Unknown = true;
+  }
+}
+
+void ModuleLowering::scanFieldStores(ast::TranslationUnit *tu) {
+  for (const ast::ClassDecl *cls : tu->getClassDecls())
+    DeclaredClasses.insert(cls->getName());
+  for (const auto &[name, fn] : Bodies)
+    FieldStoreScan{*this, /*Template=*/false}.function(fn);
+  // A program's main module runs its templates only as its own copies.
+  if (Canonical.empty() && PL.MainWorld == World::Closed)
+    return;
+  auto templates = [&](const std::vector<ast::FuncDecl *> &fns) {
+    for (const ast::FuncDecl *fn : fns)
+      FieldStoreScan{*this, /*Template=*/true}.function(fn);
+  };
+  templates(tu->getGenericFuncDecls());
+  for (const ast::ClassDecl *cd : tu->getGenericClassDecls())
+    templates(cd->getMethods());
+  for (const ast::StructDecl *sd : tu->getGenericStructDecls())
+    templates(sd->getMethods());
+  for (const ast::ImplDecl *im : tu->getImplDecls())
+    if (!im->getTypeParams().empty())
+      templates(im->getMethods());
+}
+
+bool ModuleLowering::isFixedField(ast::ClassType *ct,
+                                  const std::string &field) {
+  if (StoredFields.Unknown)
+    return false;
+  for (ast::ClassType *c = ct; c; c = c->getSuperClass())
+    for (const auto &[f, fieldTy] : c->getFields()) {
+      if (f != field)
+        continue;
+      if (!DeclaredClasses.count(c->getName()) || c->isWeakField(field) ||
+          !ast::isRefType(canonicalizeDeclType(fieldTy)))
+        return false;
+      if (!(Canonical.empty() && PL.MainWorld == World::Closed) &&
+          !names::isPrivateName(field))
+        return false;
+      return !StoredFields.Fields.count(c->getName() + names::kNameSep +
+                                        field) &&
+             !StoredFields.Names.count(field);
+    }
+  return false;
+}
+
+bool ModuleLowering::isFixedRead(const ast::Expr *read) {
+  if (!CurrentMethodClassType || EmittingInit)
+    return false;
+  for (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(read); ma;
+       ma = ast::dyn_cast<ast::MemberAccessExpr>(ma->getReceiver())) {
+    auto *ct = ast::dyn_cast<ast::ClassType>(
+        canonicalizeDeclType(ma->getReceiver()->getResolvedType()));
+    if (!ct || !isFixedField(ct, ma->getFieldName()))
+      return false;
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(ma->getReceiver()))
+      return id->getName() == names::kSelf &&
+             CurrentScope->isStable(names::kSelf) &&
+             CurrentScope->inoutType(names::kSelf) == Type::Void;
+  }
+  return false;
 }
 
 } // namespace paykan::lowering

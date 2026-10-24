@@ -670,7 +670,8 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   // Declare every free function, every struct (methods, constructor) and
   // every class (struct layout, vtable, methods, destructor, constructor)
   // before emitting any body, so calls and `__super__` resolve regardless
-  // of source order.
+  // of source order, and read where the bodies store into class fields
+  // before any is emitted (scanFieldStores).
   std::vector<ast::FuncDecl *> funcs = node->getFuncDecls();
   funcs.insert(funcs.end(), ForeignFuncs.begin(), ForeignFuncs.end());
   std::vector<ast::ClassDecl *> classes = node->getClassDecls();
@@ -689,6 +690,7 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
     declareStruct(sd);
   for (auto *cls : classes)
     declareClass(cls);
+  scanFieldStores(node);
   for (auto *sd : structs)
     visitStructDecl(sd);
   for (auto *cls : classes)

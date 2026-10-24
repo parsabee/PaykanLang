@@ -355,10 +355,13 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
         at +=
             declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
                          md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
-      if (funcDecl->getName() == kMethodInit)
+      if (funcDecl->getName() == kMethodInit) {
+        EmittingInit = true;
         emitInitBody(funcDecl->getBody(), ct, selfLocal);
-      else
+        EmittingInit = false;
+      } else {
         emitBody(funcDecl->getBody());
+      }
     }
     emitImplicitReturn(fn->Sig);
   }

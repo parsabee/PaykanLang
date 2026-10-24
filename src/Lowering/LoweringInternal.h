@@ -273,6 +273,8 @@ private:
 
   /// ClassType of the method being emitted (nullptr otherwise).
   ast::ClassType *CurrentMethodClassType = nullptr;
+  /// The method being emitted is that class's `__init__`.
+  bool EmittingInit = false;
 
   struct LoopContext {
     Scope *EnclosingScope;
@@ -516,6 +518,39 @@ private:
   struct BufferUses;
   /// bufferElementOf's answers, by `<struct>.<field>`.
   std::unordered_map<std::string, ast::Type *> BufferElements;
+  /// The fields of classes that this module's code stores into once their
+  /// objects are made (scanFieldStores, LoweringHolds.cpp).
+  struct FieldStores {
+    /// The code read does something the scan does not recognize: it may
+    /// store into any field.
+    bool Unknown = false;
+    /// The fields stored into, as `<class>.<field>` of the class declaring
+    /// each.
+    std::unordered_set<std::string> Fields;
+    /// The names of the fields a template stores into, whose types are not
+    /// resolved in its body.
+    std::unordered_set<std::string> Names;
+  };
+  FieldStores StoredFields;
+  struct FieldStoreScan;
+  /// The classes this module declares (its own and the instances of its
+  /// templates), the fields of which isFixedField may know of.
+  std::unordered_set<std::string> DeclaredClasses;
+  /// Read the stores into class fields of every body of @p tu's module
+  /// (Bodies) and, outside a program's main module, of its templates.
+  void scanFieldStores(ast::TranslationUnit *tu);
+  /// Whether the field @p field of class @p ct holds, for as long as its
+  /// object lives, the reference its object's `__init__` gave it: a box
+  /// field (not a weak one) of a class this module declares, which no code
+  /// that may name it stores into but as `self.f = v` in an `__init__`'s
+  /// own body.  Outside a program's main module, where an importer may
+  /// name the class, only a private field's stores are all known.
+  bool isFixedField(ast::ClassType *ct, const std::string &field);
+  /// Whether the box read @p read is `self.f`, `self.f.g`, ... of fixed
+  /// fields (isFixedField) in a class's method other than its `__init__`:
+  /// the caller keeps `self` alive for the call, so no call it makes can
+  /// let go of what the read finds.
+  bool isFixedRead(const ast::Expr *read);
   /// The element @p elem of @p node, read in place from storage whose
   /// temporaries and holds MemTemps has past @p mark, which are released
   /// now: a box retained first when @p node is a +1 one
