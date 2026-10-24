@@ -376,9 +376,11 @@ one an assignment replaces, say) while it uses an object it holds no reference t
 reached through another variable, or anything reached through `self`.
 In `x = h.node; take(x); s = h.node.name + label(1);` the hand-off to `take` stays a copy:
 `label` runs while the name read from `h.node` is still to be used, and `x` may be what keeps that
-node alive (the compiler does not ask what a call does). A read that a call could replace keeps what
-it read alive itself until it is used, so with `replace(h)`, which may assign `h.node`, in place of
-`label(1)`, the hand-off is a transfer. In a method, a hand-off therefore stays a copy when `self` is
+node alive (a transfer treats any call as one that may release a reference). A read that a call
+could replace keeps what it read alive itself until it is used, which the compiler decides from
+what the call is given: with `replace(h)`, which is given `h` and so may assign `h.node`, in place
+of `label(1)`, the name has a reference of its own, and the hand-off is a transfer. In a method, a
+hand-off therefore stays a copy when `self` is
 used by or after a call or a release that follows it, the call it is passed to included (not in
 `__init__`, whose object the constructor holds). Where one branch of an `if` or one arm of a `match` hands the
 variable on and another does not, the other releases it when its scope ends, as before. In
@@ -537,4 +539,7 @@ Do not assume that sharing a reference-counted object across threads is safe tod
 
 The two things the model does **not** do for you today are collecting reference cycles (break
 them with `weak`) and making reference counting safe across threads — both are known and on
-the roadmap.
+the roadmap. One construct is not covered yet either: an `-> inout` result in an object the
+function reaches through another object's field (`return self.c.k;`) is not kept alive by its
+caller, so replacing that field through another reference while the result is in use frees the
+storage it names ([Borrowed results](03-functions.md#borrowed-results)).

@@ -357,6 +357,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Exclusivity").  The moves at last use made this more likely: after `take(a)` handed
   `a`'s last reference on, `use(h)`, reading `h.node.name + replace(h)`, joined freed
   memory (`took !!`); it prints `took first1!`.
+- An `inout` result in the object an `inout` argument holds was not kept alive while it was
+  used: with `fn pick(b: inout B) -> inout Str { return b.k; }`, `x: inout = pick(h.b);` or
+  `put(pick(h.b), h)` wrote to freed memory once another reference to `h` replaced `h.b`.
+  The caller now holds what each `inout` argument holds when the call returns, the object
+  of a class-typed one and those in a struct, a tuple or an array passed `inout` (and in a
+  struct method's receiver), for as long as the result is used (docs/pir.md §7, "Reads a
+  call may replace").  An `inout` result in an object the function reaches through
+  another object's field (`return self.c.k;`) is not kept alive yet
+  (docs/language/03-functions.md, "Borrowed results").
+- `s[i]` computed the index before reading the string, against the left-to-right order of
+  operands (docs/language/03-functions.md, "Exclusivity"): a call in the index that
+  replaced the string (`t[bump(t)]` with `fn bump(s: inout Str)`, or `h.b.s[g(h)]` with
+  `g` assigning `h.b`) changed the character read.  The string is now read first, and keeps
+  a reference of its own while the index is computed when that may replace it.
 - `Str(s)` of a field handed on (`return Str(self.v);`, `f(Str(self.v))`) passed the field's
   own reference as if it were a new one, and the release that ended it freed the string the
   object still held (`heap corruption or invalid free`); it is retained, as `self.v` is.

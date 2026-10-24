@@ -850,6 +850,203 @@ TEST(Ownership, AFieldOfWhatALastUseHandedOnStaysAlive) {
   g.expectNoLeaks("AFieldOfWhatALastUseHandedOnStaysAlive");
 }
 
+// An `inout` result in the object an `inout` argument of a class holds
+// (`return b.k;` of `b: inout B`), used after its call while another
+// reference to the holder replaces that object: bound to an `inout` local,
+// passed on to an `inout` parameter, a method's, an `inout` parameter passed
+// on, a field of a field.  The caller holds the object the argument held
+// when the call returned; the write lands in it, and the object made next
+// keeps its own value.
+TEST(Ownership, AnInoutResultInAnInoutArgumentsObjectStaysAlive) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class B { k: Str; }
+    class X { b: B; }
+    class H {
+      b: B;
+      x: X;
+    }
+    class P {
+      n: int;
+      fn pick(b: inout B) -> inout Str { return b.k; }
+    }
+    fn pick(b: inout B) -> inout Str { return b.k; }
+    fn put(x: inout Str, h: H) -> Str {
+      h.b = B("zero" + Str(0));
+      y = B("three" + Str(3));
+      x = "five" + Str(5);
+      return y.k;
+    }
+    fn passOn(b: inout B, c: H) -> Str {
+      x: inout = pick(b);
+      c.b = B("zero" + Str(0));
+      y = B("three" + Str(3));
+      x = "five" + Str(5);
+      return x + " " + y.k;
+    }
+    fn mk() -> H { return H(B("one" + Str(1)), X(B("two" + Str(2)))); }
+    fn main() -> int {
+      h = mk();
+      c = h;
+      x: inout = pick(h.b);
+      c.b = B("zero" + Str(0));
+      y = B("three" + Str(3));
+      x = "five" + Str(5);
+      io::println("bound: " + x + " " + y.k + " " + c.b.k);
+      h = mk();
+      io::println("passed on: " + put(pick(h.b), h) + " " + h.b.k);
+      h = mk();
+      c = h;
+      p = P(1);
+      m: inout = p.pick(h.b);
+      c.b = B("zero" + Str(0));
+      w = B("three" + Str(3));
+      m = "five" + Str(5);
+      io::println("method: " + m + " " + w.k + " " + c.b.k);
+      h = mk();
+      io::println("inout parameter: " + passOn(h.b, h) + " " + h.b.k);
+      h = mk();
+      c = h;
+      d: inout = pick(h.x.b);
+      c.x.b = B("zero" + Str(0));
+      z = B("three" + Str(3));
+      d = "five" + Str(5);
+      io::println("field of a field: " + d + " " + z.k + " " + c.x.b.k);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "bound: five5 three3 zero0\npassed on: three3 zero0\n"
+                      "method: five5 three3 zero0\n"
+                      "inout parameter: five5 three3 zero0\n"
+                      "field of a field: five5 three3 zero0\n");
+  g.expectNoLeaks("AnInoutResultInAnInoutArgumentsObjectStaysAlive");
+}
+
+// The same for an object held in a value held in memory: in a struct
+// argument's field, a struct receiver's field, a tuple argument's element,
+// an array argument's element, and for an `inout` local of the result in a
+// loop.  The caller holds a copy of the value, its references retained.
+TEST(Ownership, AnInoutResultInAnObjectAValueHoldsStaysAlive) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class B { k: Str; }
+    struct S {
+      b: B;
+      n: int;
+    }
+    impl S {
+      fn slot() -> inout Str { return self.b.k; }
+    }
+    class H {
+      s: S;
+      t: (B, int);
+      a: B[6];
+    }
+    fn pick(s: inout S) -> inout Str { return s.b.k; }
+    fn first(t: inout (B, int)) -> inout Str { return t.0.k; }
+    fn last(a: inout B[6]) -> inout Str { return a[5].k; }
+    fn put(x: inout Str, h: H) -> Str {
+      h.s = S(B("zero" + Str(0)), 0);
+      y = B("three" + Str(3));
+      x = "five" + Str(5);
+      return y.k;
+    }
+    fn six(t: Str) -> B[6] { return [B("1"), B("2"), B("3"), B("4"), B("5"), B(t)]; }
+    fn mk() -> H {
+      return H(S(B("one" + Str(1)), 1), (B("one" + Str(1)), 1), six("one" + Str(1)));
+    }
+    fn main() -> int {
+      h = mk();
+      c = h;
+      x: inout = pick(h.s);
+      c.s = S(B("zero" + Str(0)), 0);
+      y = B("three" + Str(3));
+      x = "five" + Str(5);
+      io::println("struct: " + x + " " + y.k + " " + c.s.b.k);
+      h = mk();
+      io::println("passed on: " + put(pick(h.s), h) + " " + h.s.b.k);
+      h = mk();
+      c = h;
+      r: inout = h.s.slot();
+      c.s = S(B("zero" + Str(0)), 0);
+      w = B("three" + Str(3));
+      r = "five" + Str(5);
+      io::println("struct self: " + r + " " + w.k + " " + c.s.b.k);
+      h = mk();
+      c = h;
+      t: inout = first(h.t);
+      c.t = (B("zero" + Str(0)), 0);
+      u = B("three" + Str(3));
+      t = "five" + Str(5);
+      io::println("tuple: " + t + " " + u.k + " " + c.t.0.k);
+      h = mk();
+      c = h;
+      e: inout = last(h.a);
+      c.a = six("zero" + Str(0));
+      v = B("three" + Str(3));
+      e = "five" + Str(5);
+      io::println("array: " + e + " " + v.k + " " + c.a[5].k);
+      h = mk();
+      c = h;
+      for i in 0..2 {
+        l: inout = pick(h.s);
+        c.s = S(B("zero" + Str(i)), i);
+        q = B("three" + Str(3));
+        l = "five" + Str(i);
+        io::println("loop: " + l + " " + q.k + " " + c.s.b.k);
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "struct: five5 three3 zero0\npassed on: three3 zero0\n"
+                      "struct self: five5 three3 zero0\n"
+                      "tuple: five5 three3 zero0\narray: five5 three3 zero0\n"
+                      "loop: five0 three3 zero0\nloop: five1 three3 zero1\n");
+  g.expectNoLeaks("AnInoutResultInAnObjectAValueHoldsStaysAlive");
+}
+
+// A string's character is read from the string as it was before its index
+// was computed, as an array's element is, though the call computing it
+// replaces the string (and makes a new one where it was).
+TEST(Ownership, AStringIsReadBeforeItsIndex) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class B {
+      s: Str;
+      a: Str[2];
+    }
+    class H { b: B; }
+    fn g(h: H) -> int {
+      h.b = B("XY" + Str(9), ["X" + Str(9), "Y"]);
+      y = "QQ" + Str(8);
+      return 0;
+    }
+    fn bump(s: inout Str) -> int {
+      s = "XY" + Str(9);
+      y = "QQ" + Str(8);
+      return 0;
+    }
+    fn main() -> int {
+      h = H(B("ab" + Str(1), ["a" + Str(1), "b"]));
+      c1 = h.b.a[g(h)];
+      h.b = B("ab" + Str(1), ["a" + Str(1), "b"]);
+      c2 = h.b.s[g(h)];
+      t = "ab" + Str(1);
+      c3 = t[bump(t)];
+      io::println(c1 + " " + Str(c2) + " " + Str(c3) + " " + h.b.s + " " + t);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "a1 a a XY9 XY9\n");
+  g.expectNoLeaks("AStringIsReadBeforeItsIndex");
+}
+
 // -- One reference count per object, at the runtime level
 
 // Boxing the same object twice gives the same pointer (the object's own) with

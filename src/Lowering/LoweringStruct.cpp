@@ -223,8 +223,13 @@ Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
   std::vector<Val> args;
   std::vector<ExprValue> ownedArgs;
   std::vector<Val> keep;
+  // An `inout` result may be in an object the receiver's storage holds, as
+  // in one an `inout` argument's does.
+  InoutPlaces places;
+  if (node->isInoutResult())
+    places.emplace_back(self, st);
   if (!emitMethodArgs(node, method, fn->Sig, /*userDefined=*/true, args,
-                      ownedArgs, keep))
+                      ownedArgs, keep, places))
     return Val();
   args.insert(args.begin(), self);
   Val slot;
@@ -236,7 +241,7 @@ Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
   if (result && result.Ty == Type::Ptr) // an `inout` result
-    return L.takeInoutResult(result, node, wantAddress, keep, mark);
+    return L.takeInoutResult(result, node, wantAddress, keep, mark, places);
   L.releaseAfterCall(keep);
   L.releaseMemTemps(mark);
   if (slot)

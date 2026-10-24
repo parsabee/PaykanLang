@@ -646,7 +646,8 @@ CodeGen enforced, now in one place.
   evaluates its parts, and a read in use where such a call is made takes
   a reference of its own: a method's receiver until the method returns
   (the method is such a call, given its receiver), the left operand of
-  `+` or `==` until the operator, a box a builtin method or a native
+  `+` or `==` until the operator, a string while the index of the
+  character read from it is computed, a box a builtin method or a native
   function reads where it is until the call returns, the object a field
   assignment writes to until the value is stored.  Its box is `retain`ed
   after the `field.load` or `ptr.load` and owned like a call's result,
@@ -663,6 +664,22 @@ CodeGen enforced, now in one place.
   `h.b.s = g(h)` writes to that object, whatever `g` and `m` assign.  A
   read in use where no such call is made is read in place, with no
   `retain`.
+
+  A call's `inout` result used where it is (bound to an `inout` local,
+  passed to an `inout` parameter, a value held in memory) may also be in
+  an object that one of the call's `inout` arguments holds, or that a
+  struct receiver's storage holds (`return b.k;` with `b: inout B`).  Once
+  the call returns, the caller `ptr.load`s and `retain`s the box such an
+  argument holds, or copies a value held in memory there into a
+  temporary (`mem.copy` and a `retain` of each reference), and keeps them
+  like the objects above: released once the address is no longer used,
+  or held by an `inout` local's hidden owned locals.  An `inout` result in
+  storage the callee reaches through a field of any other object
+  (`return self.c.k;` in a class's method, `return b.c.k;`) is not kept
+  alive yet: its caller cannot name that object, and replacing `self.c`
+  through another reference to the object while the result is in use
+  frees the storage it names (docs/language/03-functions.md, "Borrowed
+  results").
 * **Match**: the subject is evaluated once; a boxed subject is owned for the
   match's duration (pending release at match end, also on early exits).  Class
   arms compare `vtable.load` against `vtable.addr`; optional subjects test

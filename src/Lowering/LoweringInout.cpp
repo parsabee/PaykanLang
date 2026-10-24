@@ -384,11 +384,19 @@ void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
     addr = B.ptrAdd(addr, Val::i64(offset), name + ".addr");
   // A field's object stays alive as long as the borrow can be used: a hidden
   // owned local holds it, released with the scope.  So do the objects of a
-  // struct's field and of an `inout` result's storage (noteBorrowedReads),
-  // which come in MemTemps.
+  // struct's field and of an `inout` result's storage (noteBorrowedReads,
+  // takeInoutResult), which come in MemTemps; a copy of a value held in
+  // memory there (holdObjectsIn) moves into a hidden local of its own.
   for (size_t i = mark; i < MemTemps.size(); ++i) {
-    assert(!MemTemps[i].second && "an 'inout' place is no temporary");
-    keep.push_back(MemTemps[i].first);
+    const auto &[v, ty] = MemTemps[i];
+    if (!ty) {
+      keep.push_back(v);
+      continue;
+    }
+    MemLayout l = memLayout(ty);
+    pir::LocalId hold = B.addMemLocal(name + ".obj", l.Size, l.Align);
+    B.memCopy(B.localAddr(hold, name + ".obj.addr"), v, Val::i64(l.Size));
+    CurrentScope->declare(name + ".obj", hold, ty);
   }
   MemTemps.resize(mark);
   for (const Val &box : keep) {
@@ -460,15 +468,19 @@ Val ModuleLowering::loadInoutResult(const Val &addr, ast::Type *astTy) {
 Val ModuleLowering::takeInoutResult(const Val &addr, ast::Expr *call,
                                     bool wantAddress,
                                     const std::vector<Val> &keep, size_t mark,
+                                    const InoutPlaces &places,
                                     const ExprValue &recv) {
-  // The storage is the receiver's, or an `inout` argument's: what holds the
-  // object it is in (a field reached through objects, a held receiver)
-  // stays held while the address is used.
+  // The storage is the receiver's, or an `inout` argument's, or in an
+  // object such storage holds (`b.k` of `b: inout B`): what holds the object
+  // it is in (a field reached through objects, a held receiver) and what
+  // those places hold now stay held while the address is used.
   if (wantAddress || ast::isMemType(call->getResolvedType())) {
     for (const Val &box : keep)
       MemTemps.emplace_back(box, nullptr);
     if (recv.isOwned())
       MemTemps.emplace_back(recv.V, nullptr);
+    for (const auto &[at, ty] : places)
+      holdObjectsIn(at, ty);
     return addr;
   }
   Val v = loadInoutResult(addr, call->getResolvedType());
@@ -476,6 +488,23 @@ Val ModuleLowering::takeInoutResult(const Val &addr, ast::Expr *call,
   releaseMemTemps(mark);
   releaseIfOwned(recv);
   return v;
+}
+
+void ModuleLowering::holdObjectsIn(const Val &addr, ast::Type *ty) {
+  if (!reachesObject(ty))
+    return;
+  if (!ast::isMemType(ty)) {
+    Val box = B.ptrLoad(addr, Type::Box, "held.obj");
+    emitRetain(box);
+    MemTemps.emplace_back(box, nullptr);
+    return;
+  }
+  MemLayout l = memLayout(ty);
+  pir::LocalId tmp = B.addMemLocal("held", l.Size, l.Align);
+  Val copy = B.localAddr(tmp, "held.addr");
+  B.memCopy(copy, addr, Val::i64(l.Size));
+  emitMemRetain(copy, ty);
+  MemTemps.emplace_back(copy, ty);
 }
 
 void ModuleLowering::releaseAfterCall(const std::vector<Val> &keep) {

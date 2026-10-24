@@ -390,6 +390,10 @@ private:
   void noteBorrowedReads(ast::Stmt *s);
   struct BorrowedReads;
   bool isHeldRead(const ast::Expr *e) const { return HeldReads.count(e) > 0; }
+  /// Whether a value of type @p ty may reach an object (any class but Str,
+  /// a function value, or what holds one): given it, a call can change
+  /// whatever the object reaches.
+  static bool reachesObject(const ast::Type *ty);
   /// The element @p elem of @p node, read in place from storage whose
   /// temporaries and holds MemTemps has past @p mark, which are released
   /// now: a box retained first when @p node is a +1 one
@@ -432,6 +436,10 @@ private:
   /// Emit @p expr as a receiver; the unwrapped object is named @p name.
   /// Raw is void when the expression failed.
   Receiver emitReceiver(ast::Expr *expr, const std::string &name = "recv.obj");
+  /// The storage of a call's `inout` arguments (and of a struct receiver),
+  /// by address and type: what an `inout` result of the call may be part of
+  /// (takeInoutResult).
+  using InoutPlaces = std::vector<std::pair<Val, ast::Type *>>;
 
   void emitRetain(const Val &shared) { B.retain(shared); }
   void emitRelease(const Val &shared) { B.release(shared); }
@@ -560,7 +568,8 @@ private:
     /// The arguments of the method call @p node for @p method, whose PIR
     /// signature is @p sig (the receiver first, at index 0), appended to
     /// @p args: a slice as two values, a value held in memory by address,
-    /// an `inout` argument as its address (its kept objects in @p keep), a
+    /// an `inout` argument as its address (its kept objects in @p keep, and
+    /// its storage in @p places when the method returns `inout`), a
     /// reference as a +1 box when the method is @p userDefined (a builtin
     /// borrows it), the owned temporaries among the rest in @p ownedArgs.
     /// False when an argument failed.
@@ -569,7 +578,7 @@ private:
                         const pir::Signature &sig, bool userDefined,
                         std::vector<Val> &args,
                         std::vector<ExprValue> &ownedArgs,
-                        std::vector<Val> &keep);
+                        std::vector<Val> &keep, InoutPlaces &places);
     /// A call of a method of the struct @p st (LoweringStruct.cpp): the
     /// receiver's address, then the arguments; @p wantAddress as for a
     /// call's `inout` result.
@@ -914,12 +923,21 @@ private:
   /// box is retained, as a call's result is owned).
   Val loadInoutResult(const Val &addr, ast::Type *astTy);
   /// The `inout` result @p addr of @p call, in storage that the boxes
-  /// @p keep and @p recv and MemTemps past @p mark hold: used where it is
-  /// (@p wantAddress, or a value held in memory), they go to MemTemps for
-  /// its user to release; read, they are released once it is.
+  /// @p keep and @p recv and MemTemps past @p mark hold, or in an object
+  /// held where one of @p places is (the storage of the call's `inout`
+  /// arguments, and of a struct receiver): used where it is (@p wantAddress,
+  /// or a value held in memory), they go to MemTemps for its user to
+  /// release, with what @p places hold (holdObjectsIn); read, they are
+  /// released once it is.
   Val takeInoutResult(const Val &addr, ast::Expr *call, bool wantAddress,
                       const std::vector<Val> &keep, size_t mark,
+                      const InoutPlaces &places,
                       const ExprValue &recv = ExprValue());
+  /// Hold in MemTemps what the storage of type @p ty at @p addr holds that
+  /// reaches an object, as it is now: the object a reference there names
+  /// (a +1 box), or a copy of a value held in memory, its references
+  /// retained.
+  void holdObjectsIn(const Val &addr, ast::Type *ty);
   /// An `inout` name @p name, of type @p astTy, for the variable or field
   /// @p place: an `inout` local's, or a `match` arm's `n: inout T`.
   void emitInoutBinding(const std::string &name, ast::Expr *place,

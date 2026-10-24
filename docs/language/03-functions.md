@@ -662,6 +662,12 @@ Output:
 - The receiver of a method returning `inout` is a variable or a field, which outlives the
   call: `Box().num()` is an error (`the receiver of 'num' must be a variable or a field:
   its 'inout' result is part of it`).
+- While the result is used, its caller keeps alive what it is part of: the receiver, the
+  objects holding the `inout` arguments, and the objects those arguments hold
+  (`return b.k;` with `b: inout B`). Not yet storage the function reaches through a field
+  of another object, such as `return self.c.k;`: if `self.c` is replaced while the result
+  is in use, through another reference to the object, the storage the result names is
+  freed.
 
 ---
 

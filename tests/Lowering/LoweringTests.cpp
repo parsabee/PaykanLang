@@ -615,6 +615,68 @@ TEST(Lowering, StrOfAFieldIsRetainedWhenHandedOn) {
   EXPECT_LT(f.find("retain " + v + "\n"), f.find("ret " + v)) << f;
 }
 
+// An `inout` result used after its call may be in the object an `inout`
+// argument of a class holds (`return b.k;`), or in one held in a value held
+// in memory there: once the call returns, the caller retains what the
+// argument holds (for a value held in memory, a copy of it) for as long as
+// the address is used, in a hidden local for an `inout` local.  A result
+// read at once is read before anything can replace it.
+TEST(Lowering, AnInoutResultHoldsWhatItsInoutArgumentsHold) {
+  auto l = lower(R"(
+    class B { k: Str; }
+    struct S { b: B; }
+    class H { b: B; s: S; }
+    fn pick(b: inout B) -> inout Str { return b.k; }
+    fn pickS(s: inout S) -> inout Str { return s.b.k; }
+    fn put(x: inout Str, h: H) { x = "p"; }
+    fn bound(h: H) { x: inout = pick(h.b); x = "b"; }
+    fn passed(h: H) { put(pick(h.b), h); }
+    fn read(h: H) -> Str { return pick(h.b) + "!"; }
+    fn copied(h: H) { y: inout = pickS(h.s); y = "c"; }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "bound");
+  std::string held = defined(f, "ptr.load box, %b.addr");
+  ASSERT_FALSE(held.empty()) << f;
+  EXPECT_LT(f.find("call @pick("), f.find("retain " + held + "\n")) << f;
+  const size_t store = f.find("store %x.obj.");
+  ASSERT_NE(store, std::string::npos) << f;
+  const std::string line = f.substr(store, f.find('\n', store) - store);
+  EXPECT_EQ(line.substr(line.rfind(' ') + 1), held) << f;
+  f = function(l.Text, "passed");
+  held = defined(f, "ptr.load box, %b.addr");
+  EXPECT_TRUE(heldAcross(f, held, "call @put(")) << f;
+  f = function(l.Text, "read");
+  EXPECT_EQ(f.find("ptr.load box, %b.addr"), std::string::npos) << f;
+  f = function(l.Text, "copied");
+  const size_t call = f.find("call @pickS(");
+  ASSERT_NE(call, std::string::npos) << f;
+  EXPECT_LT(call, f.find("mem.copy %held.addr.")) << f;
+  EXPECT_LT(call, f.find("mem.copy %y.obj.addr.")) << f;
+}
+
+// A string's character: the string is read before its index is computed,
+// with a reference of its own across a call there that may replace it, and
+// in place across one that cannot.
+TEST(Lowering, AStringIsReadBeforeTheIndexOfItsCharacter) {
+  auto l = lower(R"(
+    class B { s: Str; }
+    class H { b: B; }
+    fn g(h: H) -> int { return 0; }
+    fn n(k: int) -> int { return k; }
+    fn held(h: H) -> char { return h.b.s[g(h)]; }
+    fn inPlace(h: H) -> char { return h.b.s[n(1)]; }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "held");
+  EXPECT_TRUE(heldAcross(f, defined(f, ", B.s"), "call @g(")) << f;
+  f = function(l.Text, "inPlace");
+  EXPECT_LT(f.find(", B.s"), f.find("call @n(")) << f;
+  EXPECT_EQ(count(f, "retain "), 0u) << f;
+}
+
 TEST(Lowering, FreshCallResultIsStoredWithoutRetain) {
   auto l = lower(R"(
     fn mk() -> Str { return "x"; }

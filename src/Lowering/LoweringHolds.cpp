@@ -97,7 +97,6 @@ private:
     if (mayReplace)
       L.HeldReads.insert(Live.begin(), Live.end());
   }
-  bool reachesObject(const ast::Type *ty) const;
   bool gives(ast::Expr *arg, Callee callee) const;
   Use variable(ast::Identifier *id) const;
   Use field(ast::MemberAccessExpr *ma);
@@ -112,11 +111,10 @@ private:
                     std::vector<const ast::Expr *> owners);
 };
 
-// Whether a value of type @p ty may reach an object: given it, a call can
-// change whatever the object reaches and run what a closure in it runs.  A
-// Str reaches nothing; neither do the primitives, the enums without fields
-// and what holds only these.
-bool ModuleLowering::BorrowedReads::reachesObject(const ast::Type *ty) const {
+// Given such a value, a call can also run what a closure in it runs.  A Str
+// reaches nothing; neither do the primitives, the enums without fields and
+// what holds only these.
+bool ModuleLowering::reachesObject(const ast::Type *ty) {
   if (!ty || ast::isa<ast::BuiltinType>(ty))
     return !ty;
   if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty))
@@ -221,10 +219,10 @@ ModuleLowering::BorrowedReads::subscript(ast::SubscriptExpr *se) {
   ast::Type *arrTy = se->getArray()->getResolvedType();
   if (!ast::dyn_cast<ast::FixedArrayType>(arrTy) &&
       !ast::dyn_cast<ast::SliceType>(arrTy)) {
-    // A string's character: the index is computed first, then the string is
-    // read for it.
-    eval(se->getIndex());
-    eval(se->getArray());
+    // A string's character: the string read is in use while the index is
+    // computed.
+    Use s = eval(se->getArray());
+    within(holds(s), [&] { eval(se->getIndex()); });
     return {};
   }
   // The array's storage is in use while the index is computed.

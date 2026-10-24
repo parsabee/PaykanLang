@@ -174,14 +174,15 @@ Val ModuleLowering::ExprEmitter::visitSubscriptExpr(ast::SubscriptExpr *node) {
     return L.ownElementRead(
         node, L.emitElementLoad(addr, node->getResolvedType()), mark);
   }
-  // A string's character.
+  // A string's character: the string is read first, then the index is
+  // computed (a read a call there may replace holds a reference of its own).
+  Receiver recv = L.emitReceiver(node->getArray());
+  if (!recv)
+    return Val();
   Val idx = visit(node->getIndex());
   if (!idx)
     return Val();
   idx = L.coerceBoolToI64(idx, Type::I64);
-  Receiver recv = L.emitReceiver(node->getArray());
-  if (!recv)
-    return Val();
   Val ch = L.callRuntime(kPaykanStringCharAt, {recv.Raw, idx}, "str.char_at");
   L.releaseIfOwned(recv.Owned);
   return ch;
@@ -816,6 +817,7 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     return result;
   }
   size_t fixedMark = L.MemTemps.size();
+  InoutPlaces places;
   for (auto *arg : node->getArguments()) {
     if (L.isSliceArg(arg)) {
       if (!L.emitSliceArg(arg, args))
@@ -829,6 +831,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       Val p = L.emitMemAddress(arg); // passed by address
       if (!p)
         return Val();
+      if (arg->isChangedByCall() && node->isInoutResult())
+        places.emplace_back(p, arg->getResolvedType());
       args.push_back(p);
       continue;
     }
@@ -836,6 +840,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       Val p = L.emitInoutArg(arg, keep);
       if (!p)
         return Val();
+      if (node->isInoutResult())
+        places.emplace_back(p, arg->getResolvedType());
       args.push_back(p);
       continue;
     }
@@ -864,7 +870,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   }
   Val result = L.B.call(callee->Name, callee->Sig, args, "call");
   if (result && result.Ty == Type::Ptr) // an `inout` result
-    return L.takeInoutResult(result, node, wantAddress, keep, fixedMark);
+    return L.takeInoutResult(result, node, wantAddress, keep, fixedMark,
+                             places);
   L.releaseAfterCall(keep);
   L.releaseMemTemps(fixedMark);
   return result;
@@ -1083,9 +1090,10 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   std::vector<Val> args;
   std::vector<ExprValue> ownedArgs;
   std::vector<Val> keep;
+  InoutPlaces places;
   size_t fixedMark = L.MemTemps.size();
   if (!emitMethodArgs(node, method, sig, isUserDefinedMethod, args, ownedArgs,
-                      keep))
+                      keep, places))
     return Val();
 
   // A fixed-size array result is written into a temporary, whose address is
@@ -1119,7 +1127,7 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
   if (result && result.Ty == Type::Ptr) // an `inout` result
-    return L.takeInoutResult(result, node, wantAddress, keep, fixedMark,
+    return L.takeInoutResult(result, node, wantAddress, keep, fixedMark, places,
                              recvOwned);
   L.releaseAfterCall(keep);
   L.releaseMemTemps(fixedMark);
@@ -1138,7 +1146,8 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
 bool ModuleLowering::ExprEmitter::emitMethodArgs(
     ast::MethodCallExpr *node, const ast::MethodDecl *method,
     const pir::Signature &sig, bool userDefined, std::vector<Val> &args,
-    std::vector<ExprValue> &ownedArgs, std::vector<Val> &keep) {
+    std::vector<ExprValue> &ownedArgs, std::vector<Val> &keep,
+    InoutPlaces &places) {
   for (size_t i = 0; i < node->getNumArguments(); ++i) {
     auto *argExpr = node->getArguments()[i];
     // The PIR parameter this argument goes to: after the receiver, and two
@@ -1153,6 +1162,8 @@ bool ModuleLowering::ExprEmitter::emitMethodArgs(
       Val p = L.emitMemAddress(argExpr); // passed by address
       if (!p)
         return false;
+      if (argExpr->isChangedByCall() && node->isInoutResult())
+        places.emplace_back(p, argExpr->getResolvedType());
       args.push_back(p);
       continue;
     }
@@ -1161,6 +1172,8 @@ bool ModuleLowering::ExprEmitter::emitMethodArgs(
       Val p = L.emitInoutArg(argExpr, keep);
       if (!p)
         return false;
+      if (node->isInoutResult())
+        places.emplace_back(p, argExpr->getResolvedType());
       args.push_back(p);
       continue;
     }
