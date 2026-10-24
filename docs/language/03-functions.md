@@ -980,10 +980,18 @@ fields, [a tagged union](07-enums.md#variants-with-fields), does not):
 | an enum without fields | `int64_t` | its variant's ordinal (`0` for the first), by value: `native fn f(d: Dir) -> Dir` |
 | a sized numeric type (`u8`, `i32`, `unsigned`, `f32`, …) | `int64_t` (an integer, in its canonical sign- or zero-extended form; an `unsigned` as its bits), `double` (a float) | as `int` and `float`: the 8-byte slot of [sized numeric types](02-basics.md#sized-numeric-types) |
 | `inout int`, ... | `int64_t *`, `double *`, `bool *`, `int8_t *` | the caller's variable |
-| `view Str`, `view Obj` | `PaykanObject *` | borrowed for the call; the C code must not keep it without a retain |
+| `view Str`, `view Obj` | `PaykanObject *` | lent for the call only: C must not retain it or keep it past the call (see below) |
 | `inout Str`, `inout Obj` | `PaykanShared **` | the caller's box: to replace it, release it and store an owned box (never `NULL`) |
 | `Str`, `Obj` result | `PaykanShared *` | owned (+1); never `NULL` |
 | `Str?`, `Obj?` result | `PaykanShared *` | owned (+1); `NULL` is `None` |
+
+Nothing C is given outlives the call.  A `view` argument is lent for the call
+only: C must not retain it, store it, or keep any pointer into it, and once the
+call returns it must assume the value has been deallocated.  An `inout`
+argument is the caller's storage for the call only.  So a native function keeps
+no Paykan value between calls: what it hands back is its owned result.  The
+compiler relies on this: a native call given no `inout` argument cannot free
+anything its caller holds ([PIR §7](../pir.md)).
 
 Any other type, a tuple or a struct for one, crosses only as a type parameter's
 argument of a [generic native function](#generic-native-functions): `native fn
@@ -1022,7 +1030,7 @@ const void *sample_get(const PaykanType *t, PaykanObject *b, int64_t i);
 | Paykan | C |
 |--------|---|
 | a type argument | `const PaykanType *`, ahead of the arguments |
-| `x: view T` | `const void *`: the value's address, borrowed for the call |
+| `x: view T` | `const void *`: the value's address, lent for the call only (C must not keep it or the references in it) |
 | `x: inout T` | `void *`: the caller's storage, which C may change (`PaykanType_drop` the old value, then store an owned one) |
 | `-> T` | `void *out`, after the `PaykanType`s: storage C fills, owning the references it writes |
 | `-> view T` | `const void *` returned: the address of a value in a `view` argument, which the caller copies |
