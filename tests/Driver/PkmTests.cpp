@@ -1001,10 +1001,10 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
             "  fn tick() { self.n = self.n + 1; }\n"
             "  view fn get() -> int { return self.n; } }\n"
             "impl Counter { fn __init__() { self.n = 5; } }\n"
-            "class Box { c: Counter;\n"
+            "class Box { c: Counter; k: int;\n"
             "  view fn peek() -> view Counter { return self.c; }\n"
-            "  fn count() -> inout int { return self.c.n; } }\n"
-            "impl Box { fn __init__() { self.c = Counter(); } }\n"
+            "  fn count() -> inout int { return self.k; } }\n"
+            "impl Box { fn __init__() { self.c = Counter(); self.k = 0; } }\n"
             "fn longer(a: view Str, b: view Str) -> view Str {\n"
             "  return if a.len() > b.len() then a else b; }\n");
   writeFile(dir / "main.pkn", "import ::io; import base;\n"
@@ -1012,9 +1012,10 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
                               "  b = base::Box();\n"
                               "  n: inout = b.count();\n"
                               "  n = n + 2;\n"
+                              "  k = b.count();\n"
                               "  v: view = b.peek();\n"
                               "  io::println(base::longer(\"ab\", \"c\") + "
-                              "Str(v.get()));\n"
+                              "Str(v.get() + k));\n"
                               "  return 0;\n}\n");
   writeFile(dir / "bad.pkn", "import base;\n"
                              "fn main() -> int {\n"
@@ -1034,6 +1035,76 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
   EXPECT_TRUE(contains(bad.out, "bad.pkn:4:3: error: the result of 'peek' is "
                                 "a 'view'; 'tick' is not a 'view fn'"))
       << bad.out;
+  // Where an `inout` result may point is checked as its module is compiled:
+  // one in an object reached through a field makes no module file.
+  writeFile(dir / "far.pkn", "class C { k: Str; }\n"
+                             "class H { c: C;\n"
+                             "  fn e() -> inout Str { return self.c.k; } }\n");
+  auto far = paykan("--emit-pkm far.pkn");
+  EXPECT_NE(far.exitCode, 0);
+  EXPECT_TRUE(contains(far.out, "far.pkn:3:32: error: 'e' returns an 'inout' "
+                                "reference into 'self.c', a separate object"))
+      << far.out;
+  EXPECT_FALSE(fs::exists(dir / "far.pkm"));
+  // A template's is checked where an importer instantiates it from the
+  // module file: `self.v.x` is part of `self` in `Wrap<P>` for a struct
+  // `P`, and in a separate object in `Wrap<D>` for a class `D`.
+  writeFile(dir / "gen.pkn", "class D { x: int; }\n"
+                             "struct P { x: int; }\n"
+                             "class Wrap<T> { v: T;\n"
+                             "  fn x() -> inout int { return self.v.x; } }\n");
+  writeFile(dir / "usegen.pkn", "import ::io; import gen;\n"
+                                "fn main() -> int {\n"
+                                "  w = gen::Wrap<gen::P>(gen::P(1));\n"
+                                "  x: inout = w.x();\n"
+                                "  x = x + 4;\n"
+                                "  io::println(Str(w.v.x));\n"
+                                "  return 0;\n}\n");
+  writeFile(dir / "badgen.pkn", "import gen;\n"
+                                "fn main() -> int {\n"
+                                "  w = gen::Wrap<gen::D>(gen::D(1));\n"
+                                "  return 0;\n}\n");
+  ASSERT_EQ(paykan("--emit-pkm gen.pkn").exitCode, 0);
+  fs::remove(dir / "gen.pkn");
+  auto usegen = paykan("usegen.pkn");
+  ASSERT_EQ(usegen.exitCode, 0) << usegen.out;
+  EXPECT_TRUE(contains(usegen.out, "5\n")) << usegen.out;
+  auto badgen = paykan("--check-only badgen.pkn");
+  EXPECT_NE(badgen.exitCode, 0);
+  EXPECT_TRUE(contains(badgen.out, "gen.pkn:4:32: error: 'x' returns an "
+                                   "'inout' reference into 'self.v', a "
+                                   "separate object"))
+      << badgen.out;
+  EXPECT_TRUE(contains(badgen.out, "badgen.pkn:3:7: note: in instantiation "
+                                   "of 'Wrap<D>' requested here"))
+      << badgen.out;
+  // Whether an object can hold a place of a call's result type is read from
+  // the module file too: a method of `C` returns a `Str`, which a subclass
+  // finds in its own object, so `s.get()` can point past `s`; a `C` holds
+  // no `int`, so `s.num()` is in its storage.
+  writeFile(dir / "slots.pkn",
+            "class C { fn slot() -> inout Str; }\n"
+            "class D : C { k: Str;\n"
+            "  fn slot() -> inout Str { return self.k; } }\n"
+            "struct S { c: C; n: int; }\n"
+            "impl S { fn get() -> inout Str { return self.c.slot(); }\n"
+            "  fn num() -> inout int { return self.n; } }\n");
+  writeFile(dir / "useslots.pkn",
+            "import slots;\n"
+            "class H { s: slots::S;\n"
+            "  fn e() -> inout Str { return self.s.get(); }\n"
+            "  fn f() -> inout int { return self.s.num(); } }\n"
+            "fn main() -> int { return 0; }\n");
+  ASSERT_EQ(paykan("--emit-pkm slots.pkn").exitCode, 0);
+  fs::remove(dir / "slots.pkn");
+  auto useslots = paykan("--check-only useslots.pkn");
+  EXPECT_NE(useslots.exitCode, 0);
+  EXPECT_TRUE(contains(useslots.out,
+                       "useslots.pkn:3:32: error: 'e' returns the 'inout' "
+                       "result of 'get', which can point into an object "
+                       "'self.s' holds"))
+      << useslots.out;
+  EXPECT_FALSE(contains(useslots.out, "useslots.pkn:4:")) << useslots.out;
   auto dump = paykan("pkm dump --section=iface base.pkm");
   EXPECT_TRUE(contains(dump.out, "method peek() -> view Counter flags 0x2"))
       << dump.out;

@@ -255,6 +255,7 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
                               methodSignature(md));
       fn->Params[0].Name = kSelf;
       nameParams(*fn, 1, funcDecl->getParams());
+      Bodies[fn->Name] = funcDecl;
     }
   }
   pir::Function *dtor = getOrCreateFunction(
@@ -518,11 +519,12 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
   // gone (exprProducesFreshBox).
   if (weak)
     fieldVal = B.weakLoad(fieldVal, node->getFieldName());
-  if (recv.Owned.isOwned()) {
-    if (ast::isRefType(fieldASTTy) && !weak)
-      emitRetain(fieldVal);
-    releaseIfOwned(recv.Owned);
-  }
+  // The field of a temporary, or a held read (noteBorrowedReads), is a +1
+  // box (exprProducesFreshBox).
+  if (ast::isRefType(fieldASTTy) && !weak &&
+      (recv.Owned.isOwned() || isHeldRead(node)))
+    emitRetain(fieldVal);
+  releaseIfOwned(recv.Owned);
   return fieldVal;
 }
 

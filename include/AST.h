@@ -206,6 +206,10 @@ class Expr : public ASTNode {
   // `inout` parameter, and the receiver of a struct's method that is not a
   // `view fn` (its `self` is the receiver's storage).
   bool ChangedByCall = false;
+  // Set by Sema on an argument passed to a `view` parameter: the callee
+  // reads it where it is for the whole call (a value held in memory is
+  // passed by its address and not copied).
+  bool ViewedByCall = false;
 
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
@@ -221,6 +225,9 @@ public:
 
   void setChangedByCall(bool changed) { ChangedByCall = changed; }
   bool isChangedByCall() const { return ChangedByCall; }
+
+  void setViewedByCall(bool viewed) { ViewedByCall = viewed; }
+  bool isViewedByCall() const { return ViewedByCall; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_LambdaExpr;

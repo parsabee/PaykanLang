@@ -90,6 +90,27 @@ std::string function(const std::string &text, const std::string &name) {
                                                      : end + 3 - start);
 }
 
+/// The value the first instruction of @p f containing @p what defines
+/// (`%b.4` of `%b.4 = field.load %h.obj.3, H.b`), or "".
+std::string defined(const std::string &f, const std::string &what) {
+  const size_t at = f.find(what);
+  if (at == std::string::npos)
+    return "";
+  const size_t line = f.find_first_not_of(' ', f.rfind('\n', at) + 1);
+  const size_t eq = f.find(" = ", line);
+  return eq < at ? f.substr(line, eq - line) : "";
+}
+
+/// Whether the box @p value is retained before the first @p call of @p f and
+/// released after it: a reference of its own while the call runs.
+bool heldAcross(const std::string &f, const std::string &value,
+                const std::string &call) {
+  const size_t c = f.find(call);
+  return !value.empty() && c != std::string::npos &&
+         f.find("retain " + value + "\n") < c &&
+         f.find("release " + value + "\n", c) != std::string::npos;
+}
+
 } // namespace
 
 // -- Variables, scope cleanup, strings
@@ -442,6 +463,348 @@ TEST(Lowering, AReadACallMayReplaceHasAReferenceOfItsOwn) {
   // `l` is not what repl changes: its receiver is read in place.
   std::string o = function(l.Text, "other");
   EXPECT_EQ(count(o, "retain "), 0u) << o;
+}
+
+// A box read from an object while a call that may replace it runs takes a
+// reference of its own for as long as it is in use: a method's receiver
+// (the method itself is such a call, given the receiver), the left operand
+// of `+` and of `==`, the object a field assignment writes to (twice for
+// `+=`).  A call given nothing that reaches an object replaces nothing, so
+// the reads around it stay in place (docs/pir.md §7, "Reads a call may
+// replace").
+TEST(Lowering, AReadThroughAnObjectACallMayReplaceIsHeld) {
+  auto l = lower(R"(
+    class B { s: Str; a: int[3]; fn m(h: H) -> Str { return self.s; } }
+    class H { b: B; fn drop() -> Str { return self.b.m(self); } }
+    fn g(h: H) -> Str {
+      h.b = B("y", [4, 5, 6]);
+      return "!";
+    }
+    fn gi(h: H) -> int {
+      h.b = B("y", [4, 5, 6]);
+      return 1;
+    }
+    fn shout(s: Str) -> Str { return s + "!"; }
+    fn receiver(h: H) -> Str { return h.b.m(h); }
+    fn operand(h: H) -> Str { return h.b.s + g(h); }
+    fn equal(h: H) -> bool { return h.b.s == g(h); }
+    fn target(h: H) { h.b.s = g(h); }
+    fn compound(h: H) { h.b.s += g(h); }
+    fn inPlace(h: H) -> Str { return h.b.s + shout("x") + Str(h.b.a[0] + gi(h)); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  struct Case {
+    const char *Fn, *Read, *Call;
+  };
+  for (const Case &c : {
+           Case{"receiver", ", H.b", "vcall "},
+           Case{"H.drop", ", H.b", "vcall "},
+           Case{"operand", ", B.s", "call @g("},
+           Case{"equal", ", B.s", "call @g("},
+           Case{"target", ", H.b", "call @g("},
+       }) {
+    std::string f = function(l.Text, c.Fn);
+    EXPECT_TRUE(heldAcross(f, defined(f, c.Read), c.Call)) << c.Fn << "\n" << f;
+  }
+  // `h.b.s = h.b.s + g(h)`: the object written to and the string joined.
+  std::string f = function(l.Text, "compound");
+  EXPECT_TRUE(heldAcross(f, defined(f, ", H.b"), "call @g(")) << f;
+  EXPECT_TRUE(heldAcross(f, defined(f, ", B.s"), "call @g(")) << f;
+  // shout is given a string and gi is called after the element is read:
+  // the only retain is gi's argument.
+  f = function(l.Text, "inPlace");
+  EXPECT_EQ(count(f, "retain "), 1u) << f;
+}
+
+// A call given an object, of a function whose body stores no reference
+// outside its own variables and makes no call that may (a method returning
+// a field, storing a number and calling another such method, or calling
+// itself), cannot replace a read: the read stays in place.  One that stores
+// a reference (into a field, through an `inout` parameter, into a struct's
+// `self`), calls a function that may (also through a recursion), or runs a
+// method a subclass may override (an `Obj`'s too) still holds it
+// (docs/pir.md §7, "Reads a call may replace").
+TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
+  auto l = lower(R"(
+    class B {
+      s: Str;
+      n: int;
+      fn virt() -> int { return self.n; }
+    }
+    impl B {
+      fn count() -> int { return self.n; }
+      fn bump() -> int {
+        self.n = self.n + 1;
+        return self.twice(self.n);
+      }
+      fn twice(k: int) -> int { return 2 * k; }
+      fn down(k: int) -> int {
+        if k == 0 {
+          return self.n;
+        }
+        return self.down(k - 1);
+      }
+      fn reset() -> int {
+        self.s = "r";
+        return 0;
+      }
+      fn viaFree(h: H) -> int { return clear(h); }
+      fn ping(k: int, h: H) -> int {
+        if k == 0 {
+          return clear(h);
+        }
+        return self.pong(k - 1, h);
+      }
+      fn pong(k: int, h: H) -> int { return self.ping(k, h); }
+      fn setIt(x: inout Str) -> int {
+        x = "x";
+        return 0;
+      }
+      fn viaVirt() -> int { return self.virt(); }
+      fn viaObj(o: Obj) -> int { return o.toString().len(); }
+    }
+    struct S { b: B; }
+    impl S {
+      fn reset() -> int {
+        self.b = B("r", 0);
+        return 0;
+      }
+    }
+    class H {
+      b: B;
+      c: B;
+      s: S;
+      o: B?;
+    }
+    fn clear(h: H) -> int {
+      h.b = B("c", 0);
+      return 0;
+    }
+    fn drop(x: inout B?) -> int {
+      x = None;
+      return 0;
+    }
+    fn peek(h: H) -> Str { return "!" + Str(h.b.count()); }
+    fn byCount(h: H) -> int { return h.b.count(); }
+    fn byBump(h: H) -> int { return h.b.bump(); }
+    fn byDown(h: H) -> int { return h.b.down(3); }
+    fn byReset(h: H) -> int { return h.b.reset(); }
+    fn byFree(h: H) -> int { return h.b.viaFree(h); }
+    fn byPing(h: H) -> int { return h.b.ping(2, h); }
+    fn byVirt(h: H) -> int { return h.b.viaVirt(); }
+    fn byObj(h: H) -> int { return h.b.viaObj(h); }
+    fn bySet(h: H) -> Str { return h.b.s + Str(h.c.setIt(h.b.s)); }
+    fn byStruct(h: H) -> Str { return h.s.b.s + Str(h.s.reset()); }
+    fn byDrop(h: H) -> Str { return h.b.s + Str(drop(h.o)); }
+    fn operand(h: H) -> Str { return h.b.s + peek(h); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"byCount", "byBump", "byDown"}) {
+    std::string f = function(l.Text, fn);
+    EXPECT_EQ(count(f, "retain "), 0u) << fn << "\n" << f;
+  }
+  struct Case {
+    const char *Fn, *Read, *Call;
+  };
+  for (const Case &c : {
+           Case{"byReset", ", H.b", "call @B.reset("},
+           Case{"byFree", ", H.b", "call @B.viaFree("},
+           Case{"byPing", ", H.b", "call @B.ping("},
+           Case{"byVirt", ", H.b", "call @B.viaVirt("},
+           Case{"byObj", ", H.b", "call @B.viaObj("},
+           Case{"bySet", ", B.s", "call @B.setIt("},
+           Case{"byStruct", ", B.s", "call @S.reset("},
+           Case{"byDrop", ", B.s", "call @drop("},
+       }) {
+    std::string f = function(l.Text, c.Fn);
+    EXPECT_TRUE(heldAcross(f, defined(f, c.Read), c.Call)) << c.Fn << "\n" << f;
+  }
+  std::string f = function(l.Text, "operand");
+  EXPECT_FALSE(heldAcross(f, defined(f, ", B.s"), "call @peek(")) << f;
+  EXPECT_EQ(count(f, "retain "), 1u) << f; // peek's argument
+}
+
+// The storage of a value held in an object's field, used where it is while
+// a call that may replace the object runs, keeps the object alive: an
+// array's while its index or the element assigned in it is computed, one
+// passed to a `view` or slice parameter, a struct method's receiver, an
+// `inout` argument in a struct field, the storage a call's `inout` result
+// names.  The object is retained first and released after the use; for an
+// `inout` local, by a hidden local as long as the local can be used.
+TEST(Lowering, StorageInAnObjectACallMayReplaceKeepsTheObject) {
+  auto l = lower(R"(
+    struct S { v: Str; }
+    impl S { fn take(h: H) { self.v = "t"; } }
+    class A {
+      s: S; arr: Str[2]; k: Str; n: int[2];
+      fn slot(h: H) -> inout Str { return self.k; }
+    }
+    class H { a: A; }
+    fn gi(h: H) -> int {
+      h.a.k = "g";
+      return 1;
+    }
+    fn word(h: H) -> Str {
+      h.a.k = "w";
+      return "w";
+    }
+    fn look(xs: view Str[], h: H) -> int {
+      h.a.k = "l";
+      return xs[0].len();
+    }
+    fn put(x: inout Str, h: H) { x = "p"; }
+    fn pick(x: inout Str) -> inout Str { return x; }
+    fn element(h: H) -> int { return h.a.n[gi(h)]; }
+    fn store(h: H) { h.a.arr[1] = word(h); }
+    fn storeAt(h: H) { h.a.n[gi(h)] = 2; }
+    fn slice(h: H) -> int { return look(h.a.arr, h); }
+    fn receiver(h: H) { h.a.s.take(h); }
+    fn field(h: H) { put(h.a.s.v, h); }
+    fn result(h: H) { put(h.a.slot(h), h); }
+    fn local(h: H) { x: inout = h.a.s.v; x = "l"; }
+    fn picked(h: H) { y: inout = pick(h.a.k); y = "r"; }
+    fn bound(h: H) { z: inout = h.a.slot(h); z = "b"; }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  struct Case {
+    const char *Fn, *Call;
+  };
+  for (const Case &c :
+       {Case{"element", "call @gi("}, Case{"store", "call @word("},
+        Case{"storeAt", "call @gi("}, Case{"slice", "call @look("},
+        Case{"receiver", "call @S.take("}, Case{"field", "call @put("},
+        Case{"result", "call @put("}}) {
+    std::string f = function(l.Text, c.Fn);
+    EXPECT_TRUE(heldAcross(f, defined(f, ", H.a"), c.Call)) << c.Fn << "\n"
+                                                            << f;
+  }
+  struct Borrow {
+    const char *Fn, *Local;
+  };
+  for (const Borrow &b :
+       {Borrow{"local", "x"}, Borrow{"picked", "y"}, Borrow{"bound", "z"}}) {
+    std::string f = function(l.Text, b.Fn);
+    const std::string a = defined(f, ", H.a");
+    const size_t hold = f.find(std::string("store %") + b.Local + ".obj.");
+    ASSERT_NE(hold, std::string::npos) << f;
+    const std::string store = f.substr(hold, f.find('\n', hold) - hold);
+    EXPECT_LT(f.find("retain " + a + "\n"), hold) << f;
+    EXPECT_EQ(store.substr(store.size() - a.size()), a) << f;
+  }
+}
+
+// What an `inout` parameter, a value passed by address or a struct
+// method's `self` names is its caller's, perhaps an object's field that a
+// call given an object may replace: a box read from there is held across
+// such a call as well.  An `inout` result read as a value is read before
+// what holds its storage is let go.
+TEST(Lowering, AReadOfTheCallersStorageACallMayReplaceIsHeld) {
+  auto l = lower(R"(
+    class H { k: Str; fn slot(h: H) -> inout Str { return self.k; } }
+    class G { h: H; }
+    struct S { v: Str; }
+    impl S { fn both(h: H) -> Str { return self.v + g(h); } }
+    fn g(h: H) -> Str {
+      h.k = "g";
+      return "!";
+    }
+    fn param(x: inout Str, h: H) -> Str { return x + g(h); }
+    fn slice(xs: view Str[], h: H) -> Str { return xs[0] + g(h); }
+    fn read(o: G) -> Str { return o.h.slot(o.h) + "!"; }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"param", "S.both", "slice"}) {
+    std::string f = function(l.Text, fn);
+    EXPECT_TRUE(heldAcross(f, defined(f, "ptr.load box"), "call @g("))
+        << fn << "\n"
+        << f;
+  }
+  std::string f = function(l.Text, "read");
+  const size_t load = f.find(" = ptr.load box, %mcall");
+  ASSERT_NE(load, std::string::npos) << f;
+  EXPECT_GT(f.find("release " + defined(f, ", G.h") + "\n"), load) << f;
+}
+
+// `Str(s)` is `s`: a field's string returned through it is retained, as the
+// field returned is, not handed out as the field's own reference.
+TEST(Lowering, StrOfAFieldIsRetainedWhenHandedOn) {
+  auto l = lower(R"(
+    class Gen { v: Str; fn show() -> Str { return Str(self.v); } }
+    fn main() -> int { return Gen("x").show().len(); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "Gen.show");
+  const std::string v = defined(f, ", Gen.v");
+  EXPECT_LT(f.find("retain " + v + "\n"), f.find("ret " + v)) << f;
+}
+
+// An `inout` result used after its call may be in the object an `inout`
+// argument of a class holds (`return b.k;`), or in one held in a value held
+// in memory there: once the call returns, the caller retains what the
+// argument holds (for a value held in memory, a copy of it) for as long as
+// the address is used, in a hidden local for an `inout` local.  A result
+// read at once is read before anything can replace it.
+TEST(Lowering, AnInoutResultHoldsWhatItsInoutArgumentsHold) {
+  auto l = lower(R"(
+    class B { k: Str; }
+    struct S { b: B; }
+    class H { b: B; s: S; }
+    fn pick(b: inout B) -> inout Str { return b.k; }
+    fn pickS(s: inout S) -> inout Str { return s.b.k; }
+    fn put(x: inout Str, h: H) { x = "p"; }
+    fn bound(h: H) { x: inout = pick(h.b); x = "b"; }
+    fn passed(h: H) { put(pick(h.b), h); }
+    fn read(h: H) -> Str { return pick(h.b) + "!"; }
+    fn copied(h: H) { y: inout = pickS(h.s); y = "c"; }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "bound");
+  std::string held = defined(f, "ptr.load box, %b.addr");
+  ASSERT_FALSE(held.empty()) << f;
+  EXPECT_LT(f.find("call @pick("), f.find("retain " + held + "\n")) << f;
+  const size_t store = f.find("store %x.obj.");
+  ASSERT_NE(store, std::string::npos) << f;
+  const std::string line = f.substr(store, f.find('\n', store) - store);
+  EXPECT_EQ(line.substr(line.rfind(' ') + 1), held) << f;
+  f = function(l.Text, "passed");
+  held = defined(f, "ptr.load box, %b.addr");
+  EXPECT_TRUE(heldAcross(f, held, "call @put(")) << f;
+  f = function(l.Text, "read");
+  EXPECT_EQ(f.find("ptr.load box, %b.addr"), std::string::npos) << f;
+  f = function(l.Text, "copied");
+  const size_t call = f.find("call @pickS(");
+  ASSERT_NE(call, std::string::npos) << f;
+  EXPECT_LT(call, f.find("mem.copy %held.addr.")) << f;
+  EXPECT_LT(call, f.find("mem.copy %y.obj.addr.")) << f;
+}
+
+// A string's character: the string is read before its index is computed,
+// with a reference of its own across a call there that may replace it, and
+// in place across one that cannot.
+TEST(Lowering, AStringIsReadBeforeTheIndexOfItsCharacter) {
+  auto l = lower(R"(
+    class B { s: Str; }
+    class H { b: B; }
+    fn g(h: H) -> int {
+      h.b = B("y");
+      return 0;
+    }
+    fn n(k: int) -> int { return k; }
+    fn held(h: H) -> char { return h.b.s[g(h)]; }
+    fn inPlace(h: H) -> char { return h.b.s[n(1)]; }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string f = function(l.Text, "held");
+  EXPECT_TRUE(heldAcross(f, defined(f, ", B.s"), "call @g(")) << f;
+  f = function(l.Text, "inPlace");
+  EXPECT_LT(f.find(", B.s"), f.find("call @n(")) << f;
+  EXPECT_EQ(count(f, "retain "), 0u) << f;
 }
 
 TEST(Lowering, FreshCallResultIsStoredWithoutRetain) {
@@ -2071,16 +2434,24 @@ TEST(LoweringMoves, SelfIsNeverHandedOn) {
   }
 }
 
-TEST(LoweringMoves, AFieldReadHeldAcrossALaterCallKeepsTheCopy) {
-  // `replace` may assign h.node while the name read before it is still to
-  // be used, and x may be what keeps that node alive: x is handed to
-  // takeName as a copy.  With no such read, it moves.
+TEST(LoweringMoves, AFieldReadInUseAcrossALaterCallKeepsTheCopy) {
+  // The name read from h.node is in use while `label` runs, and x may be
+  // what keeps that node alive (the pass does not ask what a call does): x
+  // is handed to takeName as a copy.  The read `replace` could free, as it
+  // may assign h.node, has a reference of its own (docs/pir.md §7, "Reads a
+  // call may replace"), so there x moves, as it does with no such read.
   auto l = lowerMoved(R"(
     class Named { name: Str; }
     class Holder { node: Named; }
     fn takeName(n: Named) -> Str { return n.name; }
+    fn label(n: int) -> Str { return "#"; }
     fn replace(h: Holder) -> Str { h.node = Named("other"); return "!"; }
     fn kept(h: Holder) -> Str {
+      x = h.node;
+      s = takeName(x);
+      return h.node.name + label(1) + s;
+    }
+    fn held(h: Holder) -> Str {
       x = h.node;
       s = takeName(x);
       return h.node.name + replace(h) + s;
@@ -2095,8 +2466,12 @@ TEST(LoweringMoves, AFieldReadHeldAcrossALaterCallKeepsTheCopy) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "kept");
   EXPECT_EQ(count(f, "retain %x."), 1u) << f;
-  f = function(l.Text, "moved");
-  EXPECT_EQ(count(f, "retain %x."), 0u) << f;
+  for (const char *fn : {"held", "moved"}) {
+    f = function(l.Text, fn);
+    EXPECT_EQ(count(f, "retain %x."), 0u) << fn << "\n" << f;
+  }
+  f = function(l.Text, "held");
+  EXPECT_TRUE(heldAcross(f, defined(f, ", Named.name"), "call @replace(")) << f;
 }
 
 TEST(LoweringMoves, AMethodKeepsACopyWhileItStillUsesSelf) {

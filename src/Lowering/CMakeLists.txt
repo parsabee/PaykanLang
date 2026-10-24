@@ -11,6 +11,7 @@ add_library(paykan_lowering STATIC
     LoweringClosure.cpp
     LoweringMem.cpp
     LoweringInout.cpp
+    LoweringHolds.cpp
     LoweringProgram.cpp
 )
 target_include_directories(paykan_lowering

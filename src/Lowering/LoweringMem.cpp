@@ -393,6 +393,14 @@ Val ModuleLowering::emitElementLoad(const Val &addr, ast::Type *ty) {
                    "elem");
 }
 
+Val ModuleLowering::ownElementRead(ast::Expr *node, const Val &elem,
+                                   size_t mark) {
+  if (elem.Ty == Type::Box && exprProducesFreshBox(node))
+    emitRetain(elem);
+  releaseMemTemps(mark);
+  return elem;
+}
+
 void ModuleLowering::emitMemInit(ast::Expr *e, const Val &dst) {
   if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
     emitMemOptionalWrap(e, dst);

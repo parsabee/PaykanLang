@@ -83,6 +83,7 @@ void ModuleLowering::declareStruct(ast::StructDecl *sd) {
                             structMethodSignature(md));
     fn->Params[0].Name = kSelf;
     nameParams(*fn, 1, funcDecl->getParams());
+    Bodies[fn->Name] = funcDecl;
   }
   pir::Function *ctor =
       getOrCreateFunction(sd->getName(), structConstructorSignature(st));
@@ -160,20 +161,15 @@ Val ModuleLowering::lowerStructFieldRead(ast::MemberAccessExpr *node,
                                          ast::StructType *st) {
   int idx = st->fieldIndex(node->getFieldName());
   assert(idx >= 0 && "Sema should have verified the field exists");
-  // Read in place; a temporary's field outlives it as a +1 box
+  // Read in place; a temporary's field, or a held one, is a +1 box
   // (exprProducesFreshBox).
   size_t mark = MemTemps.size();
   Val addr =
       emitTupleElementAddress(node->getReceiver(), static_cast<size_t>(idx));
   if (!addr)
     return Val();
-  Val elem = emitElementLoad(addr, node->getResolvedType());
-  if (MemTemps.size() > mark) {
-    if (elem.Ty == Type::Box)
-      emitRetain(elem);
-    releaseMemTemps(mark);
-  }
-  return elem;
+  return ownElementRead(node, emitElementLoad(addr, node->getResolvedType()),
+                        mark);
 }
 
 Val ModuleLowering::lowerStructFieldAssign(ast::MemberAssignStmt *node,
@@ -228,8 +224,13 @@ Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
   std::vector<Val> args;
   std::vector<ExprValue> ownedArgs;
   std::vector<Val> keep;
+  // An `inout` result may be in an object the receiver's storage holds, as
+  // in one an `inout` argument's does.
+  InoutPlaces places;
+  if (node->isInoutResult())
+    places.emplace_back(self, st);
   if (!emitMethodArgs(node, method, fn->Sig, /*userDefined=*/true, args,
-                      ownedArgs, keep))
+                      ownedArgs, keep, places))
     return Val();
   args.insert(args.begin(), self);
   Val slot;
@@ -238,14 +239,14 @@ Val ModuleLowering::ExprEmitter::emitStructMethodCall(ast::MethodCallExpr *node,
     args.push_back(slot);
   }
   Val result = L.B.call(fn->Name, fn->Sig, args, "mcall");
-  L.releaseAfterCall(keep);
-  L.releaseMemTemps(mark);
   for (const auto &ev : ownedArgs)
     L.releaseIfOwned(ev);
+  if (result && result.Ty == Type::Ptr) // an `inout` result
+    return L.takeInoutResult(result, node, wantAddress, keep, mark, places);
+  L.releaseAfterCall(keep);
+  L.releaseMemTemps(mark);
   if (slot)
     return slot;
-  if (result && result.Ty == Type::Ptr && !wantAddress) // an `inout` result
-    return L.loadInoutResult(result, node->getResolvedType());
   return result;
 }
 

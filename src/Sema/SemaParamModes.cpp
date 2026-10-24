@@ -279,6 +279,9 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
     if (!argTy || !isAssignable(paramTys[i], argTy))
       continue;
     if (modes.mode(i) == ast::ParamMode::View) {
+      // The lowering keeps what the argument is part of alive for the call
+      // (ast::Expr::isViewedByCall).
+      arg->setViewedByCall(true);
       std::vector<std::string> paths;
       borrowedPaths(arg, paths);
       std::vector<CallUse> mine;

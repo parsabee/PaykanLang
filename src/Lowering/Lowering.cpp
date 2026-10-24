@@ -675,6 +675,8 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
     declareFunctionPrototype(fn);
     if (fn->isNative())
       NativeDecls[fn->getName()] = fn;
+    else
+      Bodies[fn->getName()] = fn;
   }
   for (auto *sd : structs)
     declareStruct(sd);
@@ -747,11 +749,13 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
 bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (valueOptionalType(expr))
     return false;
-  // A `weak` variable or field is loaded as a fresh +1 box (or null), and
-  // a held read of a reference retained (noteHeldReads).
+  // A held read of a reference is retained (noteHeldReads,
+  // noteBorrowedReads), and a `weak` variable or field is loaded as a fresh
+  // +1 box (or null).
+  if (isHeldRead(expr) && ast::isRefType(expr->getResolvedType()))
+    return true;
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
-    return (CurrentScope && CurrentScope->isWeak(id->getName())) ||
-           (isHeldRead(id) && ast::isRefType(expr->getResolvedType()));
+    return CurrentScope && CurrentScope->isWeak(id->getName());
   if (isWeakFieldAccess(expr))
     return true;
   // A struct's field is an element of a value held in memory, like a
@@ -1021,8 +1025,10 @@ void ModuleLowering::emitLoopScopesCleanup() {
 // -- Statements
 
 Val ModuleLowering::visit(ast::ASTNode *node) {
-  if (auto *s = ast::dyn_cast<ast::Stmt>(node))
+  if (auto *s = ast::dyn_cast<ast::Stmt>(node)) {
     noteHeldReads(s);
+    noteBorrowedReads(s);
+  }
   return ASTVisitor::visit(node);
 }
 
@@ -1964,9 +1970,13 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
     }
   }
 
-  // Call/ternary that already returns a box — pass through.
-  if (exprAlreadyShared(expr))
-    return emitExpr(expr);
+  // A call or a ternary returns a +1 box, passed through; `Str(s)` is its
+  // argument's box, retained unless that is a +1 one (`Str(self.v)` is the
+  // field's).
+  if (exprAlreadyShared(expr)) {
+    Val box = emitExpr(expr);
+    return box ? takeSharedOwnership(expr, box) : box;
+  }
 
   // Everything else (a string literal is already a Str temporary): emit
   // raw, then box (acquire semantics cover aliases of already-boxed objects).

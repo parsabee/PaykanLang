@@ -374,9 +374,14 @@ of a loop (a variable assigned a new value before it is read again is not). So d
 function follows, before the variable's scope ends, with a call or the release of a reference (the
 one an assignment replaces, say) while it uses an object it holds no reference to: a field's value
 reached through another variable, or anything reached through `self`.
-In `x = h.node; take(x); s = h.node.name + replace(h);` the hand-off to `take` stays a copy,
-because `replace` may assign `h.node` while the name read before it is still to be used, and `x`
-may be what keeps that node alive. In a method, a hand-off therefore stays a copy when `self` is
+In `x = h.node; take(x); s = h.node.name + label(1);` the hand-off to `take` stays a copy:
+`label` runs while the name read from `h.node` is still to be used, and `x` may be what keeps that
+node alive (a transfer treats any call as one that may release a reference). A read that a call
+could replace keeps what it read alive itself until it is used, which the compiler decides from
+what the call is given and, when it compiles the function called, from what that function does:
+with `replace(h)`, which is given `h` and assigns `h.node`, in place of `label(1)`, the name has a
+reference of its own, and the hand-off is a transfer. In a method, a hand-off therefore stays a
+copy when `self` is
 used by or after a call or a release that follows it, the call it is passed to included (not in
 `__init__`, whose object the constructor holds). Where one branch of an `if` or one arm of a `match` hands the
 variable on and another does not, the other releases it when its scope ends, as before. In
@@ -532,6 +537,12 @@ Do not assume that sharing a reference-counted object across threads is safe tod
 - `destroy` runs automatically and releases everything an object owns, transitively.
 - A `weak` reference never keeps an object alive and never dangles: it reads as `None` once
   the object is gone.
+- A borrowed result never outlives what it names. A `-> view T` result is held by its caller,
+  and an `-> inout T` result can only point into storage its caller keeps alive while the
+  result is used: `self`, or what an `inout` parameter names and the object a reference held
+  there refers to. One in a separate object, reached through a field of another (`return
+  self.c.k;`), is a compile error
+  ([Where an `inout` result can point](03-functions.md#where-an-inout-result-can-point)).
 
 The two things the model does **not** do for you today are collecting reference cycles (break
 them with `weak`) and making reference counting safe across threads — both are known and on
