@@ -390,10 +390,10 @@ Val ModuleLowering::emitInoutLocal(ast::VarDecl *node) {
 
 void ModuleLowering::holdObjects(const std::string &name, std::vector<Val> keep,
                                  size_t mark) {
-  // So are the objects of a struct's field and of an `inout` result's
-  // storage (noteBorrowedReads, takeInoutResult), which come in MemTemps
-  // past @p mark; a copy of a value held in memory there (holdObjectsIn)
-  // moves into a hidden local of its own.
+  // The objects of a struct's field and of an `inout` result's storage
+  // (noteBorrowedReads, takeInoutResult) come in MemTemps past @p mark and
+  // are held the same way; a copy of a value held in memory there
+  // (holdObjectsIn) moves into a hidden local of its own.
   for (size_t i = mark; i < MemTemps.size(); ++i) {
     const auto &[v, ty] = MemTemps[i];
     if (!ty) {
