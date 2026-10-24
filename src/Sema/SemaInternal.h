@@ -24,7 +24,8 @@ namespace paykan {
 namespace sema {
 namespace detail {
 
-/// Returns true if `stmt` always terminates with a return on every path.
+/// Returns true if `stmt` always terminates with a return on every path (a
+/// `while True` with no `break` out of it is left only by a return).
 bool stmtAlwaysReturns(ast::Stmt *s);
 
 /// Returns true if every path through the list of statements ends in a return.

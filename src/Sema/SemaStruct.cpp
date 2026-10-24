@@ -117,11 +117,16 @@ bool Sema::populateStructs() {
   // reported once, where the cycle closes, and left without fields.
   StringMap<uint8_t> color; // 0 = white, 1 = in progress, 2 = done
   std::vector<std::string> path;
+  StringSet reported;
   std::function<void(ast::StructDecl *)> visit = [&](ast::StructDecl *sd) {
     const std::string &name = sd->getName();
     if (color[name] == 2)
       return;
     if (color[name] == 1) {
+      // Another edge back to a struct reported already (`a: S; b: S;`, or
+      // `(S, S)`, or a second variant holding the enum) adds nothing.
+      if (!reported.insert(name).second)
+        return;
       // The edge that closes the cycle: path holds the structs from the
       // first visit of `name` to the holder.
       size_t start = path.size();
@@ -207,13 +212,9 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     // Resolved as a class field is (so a fixed-size array parses), then
     // the array is reported: a struct cannot hold one yet, like a tuple.
     FixedArrayAllowed = true;
-    auto *fty = resolveType(field->getType(), field->getLocation(), context);
+    auto *fty =
+        resolveValueType(field->getType(), field->getLocation(), context);
     if (!fty) {
-      ok = false;
-      continue;
-    }
-    if (fty == Ctx.getVoidTy()) {
-      error(field->getLocation(), context + " cannot have type 'void'");
       ok = false;
       continue;
     }
@@ -396,12 +397,8 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     return nullptr;
   }
   ast::StructDecl *tmpl = tIt->second;
-  for (size_t i = 0; i < args.size(); ++i)
-    if (holdsFixedArray(args[i]))
-      return errorFixedArrayHere(loc, args[i],
-                                 "type argument " + std::to_string(i + 1) +
-                                     " of '" + name + "'"),
-             nullptr;
+  if (!checkTypeArgs(name, args, loc))
+    return nullptr;
   if (args.size() != tmpl->getTypeParams().size()) {
     error(loc, "generic struct '" + name + "' expects " +
                    std::to_string(tmpl->getTypeParams().size()) +
@@ -545,12 +542,8 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
     return nullptr;
   }
   ast::EnumDecl *tmpl = tIt->second;
-  for (size_t i = 0; i < args.size(); ++i)
-    if (holdsFixedArray(args[i]))
-      return errorFixedArrayHere(loc, args[i],
-                                 "type argument " + std::to_string(i + 1) +
-                                     " of '" + name + "'"),
-             nullptr;
+  if (!checkTypeArgs(name, args, loc))
+    return nullptr;
   if (args.size() != tmpl->getTypeParams().size()) {
     error(loc, "generic enum '" + name + "' expects " +
                    std::to_string(tmpl->getTypeParams().size()) +

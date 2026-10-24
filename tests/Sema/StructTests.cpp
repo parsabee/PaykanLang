@@ -243,6 +243,20 @@ fn main() -> int { return 0; }
                 "struct 'D' contains itself: a field holds a 'D'"});
 }
 
+// A struct that holds itself in two places, two fields or one tuple, is
+// reported once.
+TEST(Struct, HoldingItselfTwiceIsReportedOnce) {
+  for (const char *decl :
+       {"struct S { a: S; b: S; }", "struct S { a: (S, S); }",
+        "struct S { a: S?; b: S?; }"}) {
+    auto r =
+        semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }\n");
+    EXPECT_FALSE(r.Ok) << decl;
+    EXPECT_EQ(r.ErrorCount, 1u) << decl << ": " << r.Diagnostics;
+    expectAll(r, {"struct 'S' contains itself: a field holds a 'S'"});
+  }
+}
+
 TEST(Struct, AClassMayHoldAStructThatHoldsTheClass) {
   // Through a reference there is no containment.
   auto r = semaCheck(R"(

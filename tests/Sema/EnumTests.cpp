@@ -294,6 +294,21 @@ TEST(Enum, TaggedUnionCannotHoldItself) {
                                "holds it through 'S'"),
             std::string::npos)
       << r.Diagnostics;
+  // Once for each variant that holds it, however many times it does.
+  r = semaCheck("enum Expr { Num(v: int), Add(l: Expr, r: Expr) }\n" +
+                wrapMain("return 0;"));
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("enum 'Expr' contains itself: variant 'Add' "
+                               "holds an 'Expr'"),
+            std::string::npos)
+      << r.Diagnostics;
+  r = semaCheck("enum E { A(x: int), B(y: E), C(z: (E, E)) }\n" +
+                wrapMain("return 0;"));
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("variant 'B' holds an 'E'"), std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("variant 'C' holds an 'E'"), std::string::npos)
+      << r.Diagnostics;
   // Through a class it is a reference, which is fine.
   r = semaCheck("class Box { l: L; }\nenum L { Nil, Cons(b: Box) }\n" +
                 wrapMain("return 0;"));

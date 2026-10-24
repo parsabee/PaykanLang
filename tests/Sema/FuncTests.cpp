@@ -512,3 +512,51 @@ fn main() -> int { return f(1, 2) + g(1, "a") + h(1, 2); }
                                                         << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
 }
+
+// `void` is a function's result type only: nothing holds a value of it, and
+// a function that returns nothing returns no value.  Each is reported by
+// Sema, none reaches the lowering.
+TEST(Func, VoidHasNoValue) {
+  auto r = semaCheck(R"(
+fn g() {}
+fn k(v: void) {}
+fn h() { return g(); }
+fn id<T>(v: T) -> T { return v; }
+class C { v: void; }
+class D { fn m(v: void) {} }
+class Box<T> { v: T; }
+fn main() -> int {
+  x = g();
+  y: void = g();
+  z: view = g();
+  id(g());
+  b: Box<void>? = None;
+  match g() { _ { } }
+  w = [g(), g()];
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *e :
+       {"3:1: error: parameter 'v' cannot have type 'void'",
+        "4:10: error: return value has type 'void' (the expression produces "
+        "no value): make it a statement, then 'return;'",
+        "6:11: error: field 'v' in class 'C' cannot have type 'void'",
+        "7:11: error: parameter 'v' of method 'm' in 'D' cannot have type "
+        "'void'",
+        "10:3: error: variable 'x' cannot have type 'void' (the expression "
+        "produces no value)",
+        "11:3: error: variable 'y' cannot have type 'void'",
+        "12:3: error: variable 'z' cannot have type 'void' (the expression "
+        "produces no value)",
+        "13:3: error: type argument 1 of 'id' cannot be 'void': it has no "
+        "value (it is a function's result type only)",
+        "14:3: error: type argument 1 of 'Box' cannot be 'void'",
+        "15:9: error: match subject has type 'void' (the expression produces "
+        "no value)",
+        "16:8: error: array element 0 has type 'void' (the expression "
+        "produces no value)"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 11u) << r.Diagnostics;
+}

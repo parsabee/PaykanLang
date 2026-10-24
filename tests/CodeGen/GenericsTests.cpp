@@ -439,6 +439,46 @@ TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
   g.expectNoLeaks("OptionalFieldsAndUnwrapInTemplates");
 }
 
+// When T is optional, a template's `T?` is T, and its arm `v: T` on it is
+// the arm on what T wraps: it matches a present value and binds it
+// unwrapped, so a template that unwraps a `T?` instantiates with any T.
+TEST(GenericsTypes, UnwrapArmOfAnOptionalTypeArgument) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Node { v: Str; }
+    impl Node { fn __init__(x: Str) { self.v = x; } }
+    class Slot<T> {
+      v: T?;
+      view fn describe() -> Str {
+        match self.v { x: T { return "has"; } None { return "empty"; } }
+      }
+    }
+    impl Slot<T> {
+      fn __init__(v: T?) { self.v = v; }
+    }
+    fn orElse<T>(x: T?, d: T) -> T {
+      match x {
+        v: T { return v; }
+        None { return d; }
+      }
+    }
+    fn main() -> int {
+      io::println(Slot<Str?>(None).describe() + " " +
+                  Slot<Str?>("a" + "b").describe());
+      y: int? = 5;
+      io::println(orElse<int?>(y, None).toString() + " " +
+                  orElse<int?>(None, 7).toString());
+      n: Node? = Node("n" + "1");
+      match orElse<Node?>(n, None) { m: Node { io::print(m.v); } None { } }
+      io::println(" " + orElse<Node?>(None, None).toString());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "empty has\n5 7\nn1 None\n");
+  g.expectNoLeaks("UnwrapArmOfAnOptionalTypeArgument");
+}
+
 TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndTuples) {
   LeakGuard g;
   auto dir = paykan::test::tempDir() / "pkn_cg_generics_names";

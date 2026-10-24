@@ -410,6 +410,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Str(s)` of a field handed on (`return Str(self.v);`, `f(Str(self.v))`) passed the field's
   own reference as if it were a new one, and the release that ended it freed the string the
   object still held (`heap corruption or invalid free`); it is retained, as `self.v` is.
+- `void`, the result type of a function that returns nothing, passed type checking as the
+  type of a value and then failed in the lowering (an assertion) or in PIR verification: a
+  variable (`x = g();`, `x: void = g();`, `v: view = g();`), a parameter of a function or a
+  method, a class's field, a type argument (`id(g())`, `Box<void>`) and `return g();` in a
+  function that returns nothing.  Each is an error now: `variable 'x' cannot have type 'void'
+  (the expression produces no value)`, `parameter 'v' cannot have type 'void'`, `field 'v'
+  in class 'C' cannot have type 'void'`, `type argument 1 of 'id' cannot be 'void': it has
+  no value (it is a function's result type only)` and `return value has type 'void' (the
+  expression produces no value): make it a statement, then 'return;'`
+  (docs/language/02-basics.md, "Builtin Types").  So are a `match` on one (`match subject
+  has type 'void' (the expression produces no value)`), which was accepted, and an array
+  of them (`array element 0 has type 'void' (the expression produces no value)`), which
+  was "not supported yet".
+- A struct or a tagged union holding itself in two places (`struct S { a: S; b: S; }`, a
+  field `(S, S)`, `enum Expr { Num(v: int), Add(l: Expr, r: Expr) }`) was reported twice and
+  then stopped the compiler (`the same diagnostic was reported twice`); it is reported once
+  per declaration, and an enum once per variant that holds it.
+- A generic body's `match` arm naming a type parameter on a `T?` (`v: T` in `orElse<T>(x: T?,
+  d: T)`) could not be instantiated with an optional `T` (`match arm type 'int?' cannot be
+  optional`); it names what `T` wraps, the present case (docs/language/13-generics.md).
+- A function whose only way out of a `while True` loop is `return` was rejected as not
+  always returning; such a loop with no `break` out of it never falls through
+  (docs/language/03-functions.md, "Return Values").
 - A local could take the name of a function of the module and hide it: `func = fn(x: int,
   y: float) => x + y;` next to `fn func<T>(x: T) => x + 2;` made `func(1, 2.5)` call the
   lambda.  A variable, a parameter (a method's or a lambda's too), a `for` loop variable, a

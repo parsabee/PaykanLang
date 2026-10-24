@@ -534,7 +534,9 @@ fn nothing() {
 - `return;` in a non-void function is a compile-time error (`non-void function must
   return a value`).
 - The compiler checks that every control-flow path in a non-void function ends with a
-  `return` (`non-void function 'g' does not always return a value`).
+  `return` (`non-void function 'g' does not always return a value`). A `while True` loop
+  with no `break` out of it never falls through, so a function it ends needs no `return`
+  after it; a `break` in a loop nested inside it leaves only that loop.
 
 ### Borrowed results
 

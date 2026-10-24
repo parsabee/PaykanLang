@@ -581,6 +581,23 @@ bool Sema::errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
   return false;
 }
 
+bool Sema::checkTypeArgs(const std::string &name,
+                         const std::vector<ast::Type *> &args,
+                         ast::SourceLocation loc) {
+  for (size_t i = 0; i < args.size(); ++i) {
+    const std::string what =
+        "type argument " + std::to_string(i + 1) + " of '" + name + "'";
+    if (holdsFixedArray(args[i]))
+      return errorFixedArrayHere(loc, args[i], what);
+    if (args[i] == Ctx.getVoidTy()) {
+      error(loc, what + " cannot be 'void': it has no value (it is a "
+                        "function's result type only)");
+      return false;
+    }
+  }
+  return true;
+}
+
 bool Sema::checkFixedResult(ast::Type *retTy, ast::ParamMode mode,
                             ast::SourceLocation loc) {
   if (mode == ast::ParamMode::Value || !ast::isa<ast::FixedArrayType>(retTy))
@@ -878,6 +895,25 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   }
 
   error(loc, context + " has unknown type");
+  return nullptr;
+}
+
+bool Sema::checkNotVoidValue(ast::Type *ty, const std::string &name,
+                             ast::SourceLocation loc) {
+  if (ty != Ctx.getVoidTy())
+    return true;
+  error(loc, "variable '" + name +
+                 "' cannot have type 'void' (the expression produces no "
+                 "value)");
+  return false;
+}
+
+ast::Type *Sema::resolveValueType(ast::Type *ty, ast::SourceLocation loc,
+                                  const std::string &context) {
+  ast::Type *resolved = resolveType(ty, loc, context);
+  if (resolved != Ctx.getVoidTy())
+    return resolved;
+  error(loc, context + " cannot have type 'void'");
   return nullptr;
 }
 
@@ -2272,6 +2308,12 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
     auto *ty = visit(elem);
     if (!ty)
       return nullptr;
+    if (ty == S.Ctx.getVoidTy()) {
+      S.error(elem->getLocation(),
+              "array element " + std::to_string(elemTys.size()) +
+                  " has type 'void' (the expression produces no value)");
+      return nullptr;
+    }
     elemTys.push_back(ty);
   }
   ast::Type *elemTy = elemTys.front();
@@ -3432,6 +3474,10 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
       declarePoisoned(CurrentScope, varName);
       return false;
     }
+    if (!checkNotVoidValue(valTy, varName, node->getLocation())) {
+      declarePoisoned(CurrentScope, varName);
+      return false;
+    }
     CurrentScope->set(varName, valTy);
     return viewOk;
   }
@@ -3464,6 +3510,14 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
     auto *valTy = resolveExprType(node->getReturnValue(), CurrentReturnType);
     if (!valTy)
       return false;
+    // A function that returns nothing returns no value, not one of `void`
+    // (an inferred result reports it with its inference).
+    if (valTy == Ctx.getVoidTy() && CurrentReturnType == Ctx.getVoidTy()) {
+      error(node->getLocation(),
+            "return value has type 'void' (the expression produces no "
+            "value): make it a statement, then 'return;'");
+      return false;
+    }
     if (CurrentReturnType &&
         !checkAssignable(CurrentReturnType, valTy, node->getReturnValue())) {
       if (!diagnoseOptionalNarrowing(node->getLocation(), CurrentReturnType,
@@ -3680,9 +3734,43 @@ bool detail::blockAlwaysReturns(const std::vector<ast::Stmt *> &stmts) {
   return false;
 }
 
+namespace {
+
+/// Whether a `break` in @p s leaves the loop @p s is the body of: one in a
+/// nested loop leaves that loop instead.
+bool breaksOut(const ast::Stmt *s) {
+  if (!s)
+    return false;
+  if (ast::isa<ast::BreakStmt>(s))
+    return true;
+  if (const auto *cs = ast::dyn_cast<ast::CompoundStmt>(s)) {
+    for (const ast::Stmt *x : cs->getStatements())
+      if (breaksOut(x))
+        return true;
+    return false;
+  }
+  if (const auto *is = ast::dyn_cast<ast::IfStmt>(s))
+    return breaksOut(is->getThenBranch()) || breaksOut(is->getElseBranch());
+  if (const auto *ms = ast::dyn_cast<ast::MatchStmt>(s)) {
+    for (const ast::MatchArm *arm : ms->getArms())
+      if (breaksOut(arm->getBody()))
+        return true;
+    return false;
+  }
+  return false; // a nested loop, or a statement that holds none
+}
+
+} // namespace
+
 bool detail::stmtAlwaysReturns(ast::Stmt *s) {
   if (ast::isa<ast::ReturnStmt>(s))
     return true;
+  // `while True` with no `break` out of it never falls through: it is left
+  // only by a `return`.
+  if (auto *ws = ast::dyn_cast<ast::WhileStmt>(s)) {
+    const auto *cond = ast::dyn_cast<ast::BoolLiteral>(ws->getCondition());
+    return cond && cond->getValue() && !breaksOut(ws->getBody());
+  }
   if (auto *ifStmt = ast::dyn_cast<ast::IfStmt>(s)) {
     if (!ifStmt->getElseBranch())
       return false;
@@ -3792,8 +3880,8 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
     }
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
-    auto *ty = resolveType(p.ParamType, node->getLocation(),
-                           "parameter '" + p.getName() + "'");
+    auto *ty = resolveValueType(p.ParamType, node->getLocation(),
+                                "parameter '" + p.getName() + "'");
     if (!ty) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
@@ -4176,8 +4264,8 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
     FixedArrayAllowed = true; // a local may be a fixed-size array
     // and a length may be `_` where an initializer gives it
     InferredLengthAllowed = node->getInitExpr() != nullptr;
-    declTy = resolveType(node->getType(), node->getLocation(),
-                         "variable '" + node->getName() + "'");
+    declTy = resolveValueType(node->getType(), node->getLocation(),
+                              "variable '" + node->getName() + "'");
     if (!declTy) {
       declarePoisoned(CurrentScope, node->getName());
       return false;
@@ -4254,6 +4342,10 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
       if (ast::isa<ast::SliceType>(initTy)) {
         errorFixedArrayHere(node->getLocation(), initTy,
                             "variable '" + node->getName() + "'");
+        declarePoisoned(CurrentScope, node->getName());
+        return false;
+      }
+      if (!checkNotVoidValue(initTy, node->getName(), node->getLocation())) {
         declarePoisoned(CurrentScope, node->getName());
         return false;
       }
@@ -4603,6 +4695,11 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   auto *subjectTy = resolveExprType(node->getSubject());
   if (!subjectTy)
     return false;
+  if (subjectTy == Ctx.getVoidTy()) {
+    error(node->getSubject()->getLocation(),
+          "match subject has type 'void' (the expression produces no value)");
+    return false;
+  }
   // An arm's name for a `view` that shares what it holds is a `view` too,
   // for this match only (a nested one decides its own).
   struct RestoreView {

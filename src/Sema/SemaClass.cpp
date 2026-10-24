@@ -179,7 +179,8 @@ bool Sema::checkInitFieldsAssigned(
       // The body may execute zero times, so no assignment inside it is
       // guaranteed.  Still analyse it so returns within are validated.
       analyzeStmt(ws->getBody(), in);
-      return {in, false};
+      // `while True` with no `break` out of it is left only by a return.
+      return {in, detail::stmtAlwaysReturns(ws)};
     }
     if (auto *fs = ast::dyn_cast<ast::ForStmt>(s)) {
       // As a while loop's: the range may be empty.
@@ -393,9 +394,9 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       }
     }
     FixedArrayAllowed = true; // a field may be a fixed-size array
-    auto *fty = resolveType(field->getType(), field->getLocation(),
-                            "field '" + field->getName() + "' in class '" +
-                                cd->getName() + "'");
+    auto *fty = resolveValueType(field->getType(), field->getLocation(),
+                                 "field '" + field->getName() + "' in class '" +
+                                     cd->getName() + "'");
     if (!fty) {
       ok = false;
       continue;
@@ -602,9 +603,10 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
       return nullptr;
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
-    auto *pty = resolveType(p.ParamType, method->getLocation(),
-                            "parameter '" + p.getName() + "' of method '" +
-                                method->getName() + "' in '" + className + "'");
+    auto *pty =
+        resolveValueType(p.ParamType, method->getLocation(),
+                         "parameter '" + p.getName() + "' of method '" +
+                             method->getName() + "' in '" + className + "'");
     if (!pty)
       return nullptr;
     p.ParamType = pty;
@@ -1320,12 +1322,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     return nullptr;
   }
   ast::ClassDecl *tmpl = tIt->second;
-  for (size_t i = 0; i < args.size(); ++i)
-    if (holdsFixedArray(args[i]))
-      return errorFixedArrayHere(loc, args[i],
-                                 "type argument " + std::to_string(i + 1) +
-                                     " of '" + name + "'"),
-             nullptr;
+  if (!checkTypeArgs(name, args, loc))
+    return nullptr;
   if (args.size() != tmpl->getTypeParams().size()) {
     error(loc, "generic class '" + name + "' expects " +
                    std::to_string(tmpl->getTypeParams().size()) +
@@ -1556,12 +1554,8 @@ std::string Sema::instantiateFunction(const std::string &name,
     return "";
   }
   ast::FuncDecl *tmpl = tIt->second;
-  for (size_t i = 0; i < args.size(); ++i)
-    if (holdsFixedArray(args[i]))
-      return errorFixedArrayHere(loc, args[i],
-                                 "type argument " + std::to_string(i + 1) +
-                                     " of '" + name + "'"),
-             "";
+  if (!checkTypeArgs(name, args, loc))
+    return "";
   if (args.size() != tmpl->getTypeParams().size()) {
     error(loc, "generic function '" + name + "' expects " +
                    std::to_string(tmpl->getTypeParams().size()) +

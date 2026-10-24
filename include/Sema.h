@@ -414,6 +414,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // emits an error on failure.
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
+  // resolveType for what holds a value (a variable, a parameter, a field):
+  // `void` has none, so it is reported (`<context> cannot have type
+  // 'void'`) and nullptr returned.
+  ast::Type *resolveValueType(ast::Type *ty, ast::SourceLocation loc,
+                              const std::string &context);
+  // False (after reporting it) when @p ty, the type of the value a variable
+  // @p name is declared with, is `void`: the expression produces none.
+  bool checkNotVoidValue(ast::Type *ty, const std::string &name,
+                         ast::SourceLocation loc);
 
   // -- Fixed-size arrays (docs/language/09-arrays.md)
   //
@@ -450,6 +459,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// @p where; returns false.
   bool errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
                            const std::string &where);
+  /// False (after reporting it) when a type argument of @p name can hold no
+  /// value of its own: a fixed-size array (not yet) or `void` (none).
+  bool checkTypeArgs(const std::string &name,
+                     const std::vector<ast::Type *> &args,
+                     ast::SourceLocation loc);
   /// False (after reporting it) for a `view` or `inout` result (@p mode) of
   /// a fixed-size array @p retTy, which is not supported yet.
   bool checkFixedResult(ast::Type *retTy, ast::ParamMode mode,

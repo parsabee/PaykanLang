@@ -149,13 +149,8 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   for (ast::Param &p : node->getMutableParams()) {
     FixedArrayAllowed = true;
     SliceAllowed = p.Mode != ast::ParamMode::Value;
-    auto *pty = resolveType(p.ParamType, node->getLocation(),
-                            "parameter '" + p.getName() + "'");
-    if (pty == Ctx.getVoidTy()) {
-      error(node->getLocation(),
-            "parameter '" + p.getName() + "' cannot have type 'void'");
-      pty = nullptr;
-    }
+    auto *pty = resolveValueType(p.ParamType, node->getLocation(),
+                                 "parameter '" + p.getName() + "'");
     if (pty)
       p.ParamType = pty;
     else

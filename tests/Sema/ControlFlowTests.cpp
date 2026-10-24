@@ -416,6 +416,43 @@ TEST(ControlFlow, BoolMatchArmWithoutReturnRejected) {
   EXPECT_NE(r.Diagnostics.find("does not always return"), std::string::npos);
 }
 
+// `while True` with no `break` out of it never falls through, so a function
+// whose loop is left only by `return` always returns; a `break` in a nested
+// loop leaves that loop, one in a `match` arm leaves this one.
+TEST(ControlFlow, WhileTrueWithoutBreakAlwaysReturns) {
+  auto r = semaCheck(R"(
+    fn find(n: int) -> int {
+      while True {
+        j = 0;
+        while True { if j > 2 { break; } j += 1; }
+        if n > 3 { return n; }
+        n += 1;
+      }
+    }
+    class C {}
+    impl C {
+      fn __init__() {}
+      view fn m(n: int) -> int { while True { if n > 0 { return n; } n += 1; } }
+    }
+    fn main() -> int {
+      f = fn(n: int) -> int { while True { if n > 3 { return n; } n += 1; } };
+      return find(1) + C().m(1) + f(1);
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  for (const char *loop : {"while True { break; }",
+                           "while True { match n { 1 { break; } _ { } } }",
+                           "while n > 0 { return 1; }"}) {
+    auto bad = semaCheck("fn g(n: int) -> int { " + std::string(loop) +
+                         " }\nfn main() -> int { return g(1); }\n");
+    EXPECT_FALSE(bad.Ok) << loop;
+    EXPECT_NE(bad.Diagnostics.find(
+                  "non-void function 'g' does not always return a value"),
+              std::string::npos)
+        << loop << ": " << bad.Diagnostics;
+  }
+}
+
 TEST(ControlFlow, IntMatchLiteralArmsNotExhaustive) {
   // Literal coverage is only decidable for bool subjects.
   auto r = semaCheck(R"(

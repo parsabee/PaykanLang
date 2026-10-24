@@ -307,6 +307,12 @@ types (`Box<int>`, [Generics](13-generics.md)).
 | `char`  | 8-bit character (a single byte) — literals `'a'`, `'\n'` |
 | `void`  | Function return type only           |
 
+`void` has no value: a call of a function that returns nothing is a statement, never the
+value of a variable, a parameter, a field, a type argument, an element, a `match` subject
+or a `return` (`variable 'x' cannot have type 'void' (the expression produces no value)`,
+`type argument 1 of 'id' cannot be 'void': it has no value (it is a function's result type
+only)`).
+
 Note the capitals in `True` and `False`. An `int` converts to a `float` implicitly when
 assigned or passed where a `float` is expected (`f: float = 3;` is fine), but nothing else
 converts implicitly: no other numeric type converts, a `float` never silently becomes an
