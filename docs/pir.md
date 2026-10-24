@@ -455,12 +455,13 @@ vtable.store %o, Point                         ; %o's vtable becomes Point's (an
 A `field.load` or a `ptr.load` of a `box` may end in `stable`: the slot
 it reads keeps its reference for as long as the statement it is part of
 uses the value, because the storage is the caller's and no call made
-while the value is in use can let go of a reference of the slot's class
-(§7, "Reads a call may replace").  The load does what it does without the
-mark, and backends ignore it; the moves-at-last-use pass counts the value
-as held by the slot rather than borrowed (§12).  A load with no mark
-promises nothing, so a module written before the mark existed reads as
-before.
+while the value is in use can let go of a reference of the slot's class,
+or because no code stores into the slot, a field of an object the caller
+keeps, once the object is made (§7, "Reads a call may replace").  The
+load does what it does without the mark, and backends ignore it; the
+moves-at-last-use pass counts the value as held by the slot rather than
+borrowed (§12).  A load with no mark promises nothing, so a module
+written before the mark existed reads as before.
 
 **Locals**
 
@@ -750,9 +751,49 @@ CodeGen enforced, now in one place.
   of another variable a copy, and an object would die later.  So
   `h.b.len()` and a map's lookup of a string key need no hold either way.
 
+  A class's field that no code stores into once its object is made keeps
+  the reference its object's `__init__` gave it for as long as the object
+  lives, so no call replaces a read of it from an object the function
+  keeps alive, whatever the call does.  Before it lowers any body, the
+  lowering reads the module's code for every store into a class field: an
+  assignment (a compound one too), an `inout` argument or local, a `match`
+  with an arm's `n: inout T` (whose copy is written back to the subject),
+  and what an `-> inout` function returns (either branch of a
+  conditional), which its caller may write through, in a lambda's body as
+  anywhere else.  Only `self.f = v` in the body of an `__init__`, of the
+  field's class or of a class derived from it, is the object's
+  construction: an `__init__` runs once, on an object nothing else holds
+  yet, and nothing but its constructor and a derived class's `__init__`
+  calls it, so none of its stores is made while a call made by code
+  reading the object runs.  A native function stores into nothing but its
+  `inout` arguments, and keeps nothing it is lent past the call
+  (docs/language/03-functions.md, "Native Functions"), and destroying an
+  object runs no code of the program, so nothing else stores into a field.  Which code
+  may store into one depends on what may name it.  In the main module of
+  a program, no other module names the classes it declares or the
+  instances of its templates, and every function run on them is one it
+  lowers (its copies of other modules' templates too, which may name a
+  type argument's fields), so all their fields are known; its copies of
+  other modules' instantiations are not its own declarations.  An
+  importer may name any other module's classes, so there only a private
+  field (`__f`, `_f`) of a class the module declares is known: no
+  importer's code names it, and the module's templates, which may run in
+  an importer's copy, are read for the stores they make by the field's
+  name.  The function keeps the object alive when it is a class method's
+  `self`, which the caller keeps for the call, or what such a field of it
+  holds, at any depth: `self.origin.sum()` in a program whose code sets
+  `Box.origin` only in `Box`'s `__init__` needs no hold, though `sum` is
+  another module's (`samples/imports/07_qualified_type`), and one whose
+  code stores into `b.origin` anywhere else keeps it, as `sum` may run
+  that code through an `equals` override.  A read in an `__init__`, a
+  read rooted in a variable or a value parameter (kept as above) and a
+  struct's part held in an object, which a copy of the whole struct
+  replaces, are never such reads.
+
   A read of storage the function never hands on that is in use where a
   call that may let go of references is made, though of none of the read
-  slot's class, is read by a `stable` `field.load` or `ptr.load` (§6):
+  slot's class (or one of a field stored only at construction, above), is
+  read by a `stable` `field.load` or `ptr.load` (§6):
   MoveAtLastUse then counts its value as held by the slot, not borrowed,
   and keeps the hand-offs its hold made (`push(v)` of a `Stack<Str>` hands
   `v` on to `pushFront` with no retain at all), so objects die when they
