@@ -28,12 +28,148 @@
 // does; assigning it replaces the box like an assignment to the variable
 // (release the old, store the new).  A `view` parameter is passed by value
 // like any other.
+//
+// So a call can replace what a variable of its caller holds while the
+// caller still uses a value it read from the variable earlier in the same
+// statement: `s + repl(s)`, `l.greet(repl(l))`, `s.n.greet(s.reset())` (a
+// struct's method that may change `self`).  Such a read takes a reference
+// of its own (noteHeldReads), as a call's result has one, so that what it
+// read lives until it is used, whatever the call does to the variable.
 
 #include "LoweringInternal.h"
+
+#include <functional>
 
 namespace paykan::lowering {
 
 using pir::Type;
+
+namespace {
+
+/// Calls @p fn with each operand @p e evaluates; a lambda's body runs when
+/// the lambda is called, and what it captures it copies.
+void forEachOperand(ast::Expr *e, const std::function<void(ast::Expr *)> &fn) {
+  if (auto *x = ast::dyn_cast<ast::BinaryExpr>(e)) {
+    fn(x->getLHS());
+    fn(x->getRHS());
+  } else if (auto *x = ast::dyn_cast<ast::UnaryExpr>(e)) {
+    fn(x->getOperand());
+  } else if (auto *x = ast::dyn_cast<ast::CallExpr>(e)) {
+    for (ast::Expr *a : x->getArguments())
+      fn(a);
+  } else if (auto *x = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    fn(x->getReceiver());
+    for (ast::Expr *a : x->getArguments())
+      fn(a);
+  } else if (auto *x = ast::dyn_cast<ast::CallValueExpr>(e)) {
+    fn(x->getCallee());
+    for (ast::Expr *a : x->getArguments())
+      fn(a);
+  } else if (auto *x = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    fn(x->getCondition());
+    fn(x->getTrueExpr());
+    fn(x->getFalseExpr());
+  } else if (auto *x = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    fn(x->getReceiver());
+  } else if (auto *x = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    fn(x->getArray());
+    fn(x->getIndex());
+  } else if (auto *x = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+    fn(x->getTuple());
+  } else if (auto *x = ast::dyn_cast<ast::ArrayLiteralExpr>(e)) {
+    for (ast::Expr *a : x->getElements())
+      fn(a);
+  } else if (auto *x = ast::dyn_cast<ast::TupleLiteralExpr>(e)) {
+    for (ast::Expr *a : x->getElements())
+      fn(a);
+  }
+}
+
+} // namespace
+
+ast::Identifier *ModuleLowering::storageRoot(ast::Expr *place) {
+  for (ast::Expr *e = place;;) {
+    if (auto *id = ast::dyn_cast<ast::Identifier>(e))
+      return id;
+    auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e);
+    auto *se = ast::dyn_cast<ast::SubscriptExpr>(e);
+    if (ma && getExprStructType(ma->getReceiver()))
+      e = ma->getReceiver();
+    else if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
+      e = ti->getTuple();
+    else if (se && ast::dyn_cast<ast::FixedArrayType>(
+                       se->getArray()->getResolvedType()))
+      e = se->getArray();
+    else
+      return nullptr;
+  }
+}
+
+void ModuleLowering::noteHeldReads(ast::Stmt *s) {
+  // The statement's own expressions, and the places it assigns to.
+  std::vector<ast::Expr *> exprs;
+  std::vector<ast::Expr *> targets;
+  if (auto *x = ast::dyn_cast<ast::ReturnStmt>(s)) {
+    exprs = {x->getReturnValue()};
+  } else if (auto *x = ast::dyn_cast<ast::AssignStmt>(s)) {
+    exprs = {x->getValue()};
+  } else if (auto *x = ast::dyn_cast<ast::DeclStmt>(s)) {
+    if (auto *vd = ast::dyn_cast<ast::VarDecl>(x->getDecl()))
+      exprs = {vd->getInitExpr()};
+  } else if (auto *x = ast::dyn_cast<ast::ExprStmt>(s)) {
+    exprs = {x->getExpr()};
+  } else if (auto *x = ast::dyn_cast<ast::IfStmt>(s)) {
+    exprs = {x->getCondition()};
+  } else if (auto *x = ast::dyn_cast<ast::WhileStmt>(s)) {
+    exprs = {x->getCondition()};
+  } else if (auto *x = ast::dyn_cast<ast::ForStmt>(s)) {
+    exprs = {x->getStart(), x->getEnd(), x->getStep()};
+  } else if (auto *x = ast::dyn_cast<ast::MatchStmt>(s)) {
+    exprs = {x->getSubject()};
+  } else if (auto *x = ast::dyn_cast<ast::DestructureStmt>(s)) {
+    exprs = {x->getValue()};
+  } else if (auto *x = ast::dyn_cast<ast::MemberAssignStmt>(s)) {
+    exprs = {x->getReceiver(), x->getValue()};
+    if (getExprStructType(x->getReceiver()))
+      targets = {x->getReceiver()};
+  } else if (auto *x = ast::dyn_cast<ast::SubscriptAssignStmt>(s)) {
+    exprs = {x->getArray(), x->getIndex(), x->getValue()};
+    targets = {x->getArray()};
+  }
+  std::erase(exprs, nullptr);
+  // The variables a call of the statement may change, and the places
+  // through which it does, which are no reads; nor is the place the
+  // statement assigns to in place (a struct's field, an element).
+  std::unordered_set<std::string> changed;
+  std::unordered_set<const ast::Expr *> places;
+  std::function<void(ast::Expr *)> findChanges = [&](ast::Expr *e) {
+    if (e->isChangedByCall())
+      if (ast::Identifier *root = storageRoot(e)) {
+        changed.insert(root->getName());
+        places.insert(root);
+      }
+    forEachOperand(e, findChanges);
+  };
+  for (ast::Expr *e : exprs)
+    findChanges(e);
+  if (changed.empty())
+    return;
+  for (ast::Expr *t : targets)
+    if (ast::Identifier *root = storageRoot(t))
+      places.insert(root);
+  std::function<void(ast::Expr *)> findReads = [&](ast::Expr *e) {
+    if (auto *id = ast::dyn_cast<ast::Identifier>(e);
+        id && !id->isFunctionRef() && changed.count(id->getName()) &&
+        !places.count(id)) {
+      ast::Type *ty = CurrentScope->lookupASTType(id->getName());
+      if (ast::isRefType(ty) || (ast::isMemType(ty) && memHoldsRefs(ty)))
+        HeldReads.insert(id);
+    }
+    forEachOperand(e, findReads);
+  };
+  for (ast::Expr *e : exprs)
+    findReads(e);
+}
 
 void ModuleLowering::Scope::declareInout(const std::string &name,
                                          pir::LocalId local, pir::Type pointee,
@@ -197,9 +333,11 @@ Val ModuleLowering::emitInoutArg(ast::Expr *arg, std::vector<Val> &keep,
       return Val();
     }
     Val obj;
-    if (ast::isa<ast::Identifier>(recvExpr) && !keepObject) {
+    if (ast::isa<ast::Identifier>(recvExpr) && !keepObject &&
+        !isHeldRead(recvExpr)) {
       // A variable, or `self`: it holds the object for the whole call (the
-      // callee cannot reassign the caller's variables).
+      // callee cannot reassign the caller's variables), unless another part
+      // of the statement may (a held read, noteHeldReads).
       obj = emitExpr(recvExpr);
     } else {
       // Anything else (a chain `a.b.f`, a call, an element) may lose its

@@ -192,9 +192,20 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
   }
   if (auto *id = ast::dyn_cast<ast::Identifier>(e)) {
     pir::LocalId local = CurrentScope->lookup(id->getName());
-    if (CurrentScope->inoutType(id->getName()) != Type::Void)
-      return {B.load(local, id->getName() + ".addr")};
-    return {B.localAddr(local, id->getName() + ".addr")};
+    Val addr = CurrentScope->inoutType(id->getName()) != Type::Void
+                   ? B.load(local, id->getName() + ".addr")
+                   : B.localAddr(local, id->getName() + ".addr");
+    if (!isHeldRead(id))
+      return {addr};
+    // A read its statement may change the variable under (noteHeldReads):
+    // a copy of its own, in a temporary.
+    ast::Type *ty = CurrentScope->lookupASTType(id->getName());
+    MemLayout l = memLayout(ty);
+    pir::LocalId tmp = B.addMemLocal("held", l.Size, l.Align);
+    Val copy = B.localAddr(tmp, "held.addr");
+    B.memCopy(copy, addr, Val::i64(l.Size));
+    emitMemRetain(copy, ty);
+    return {copy, /*Temp=*/true};
   }
   if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
     return {emitFixedElementAddress(se->getArray(), se->getIndex())};

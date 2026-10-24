@@ -95,8 +95,13 @@ inline constexpr TypeEntry kTypeTable[] = {
     {Type::OptI64, 8, "opt_i64"},    {Type::OptF64, 9, "opt_f64"},
     {Type::OptBool, 10, "opt_bool"}, {Type::OptChar, 11, "opt_char"},
     {Type::Weak, 16, "weak"},        {Type::Mem, 17, "mem"},
-    // 12-15 reserved (#96 further inline optionals), 18-255 reserved.
+    // 12-15 reserved (#96 further inline optionals), 18 kViewSlotCode,
+    // 19-255 reserved.
 };
+
+/// The code written before a local's slot type when the local is a
+/// `view`'s (docs/pir.md §3): no type has it.
+inline constexpr uint8_t kViewSlotCode = 18;
 
 namespace detail {
 

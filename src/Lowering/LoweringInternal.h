@@ -109,6 +109,10 @@ public:
 
   pir::Module takeModule();
 
+  /// Lower @p node; a statement once its held reads are noted
+  /// (noteHeldReads).
+  Val visit(ast::ASTNode *node);
+
   // -- Visitor overrides
 #define LW_VISIT(Kind, Name, Cast) Val visit##Name(ast::Cast *node);
   PAYKAN_STMT_NODES(LW_VISIT)
@@ -363,6 +367,23 @@ private:
   static bool isVariantExpr(const ast::Expr *expr);
   ExprValue classifyExpr(ast::Expr *expr, const Val &val) const;
   void releaseIfOwned(const ExprValue &ev);
+
+  /// The reads noteHeldReads found, which take a reference of their own.
+  std::unordered_set<const ast::Expr *> HeldReads;
+  /// Note the reads among statement @p s's own expressions (not those of
+  /// the statements in it) that a later part of the statement may replace
+  /// while their value is in use: of a variable that holds a reference, in
+  /// a statement that also passes it to an `inout` parameter or calls a
+  /// method of its struct that may change it (ast::Expr::isChangedByCall).
+  /// Such a read takes a reference of its own, released once it is used: a
+  /// box, retained (exprProducesFreshBox), or a value held in memory,
+  /// copied into a temporary (emitMemValue).
+  void noteHeldReads(ast::Stmt *s);
+  bool isHeldRead(const ast::Expr *e) const { return HeldReads.count(e) > 0; }
+  /// The variable whose own storage @p place is or is part of (`s`, `s.f`
+  /// of a struct, `t.0`, `a[i]` of a fixed-size array), or null (a field of
+  /// an object, a call's result).
+  ast::Identifier *storageRoot(ast::Expr *place);
   Val takeSharedOwnership(ast::Expr *expr, const Val &val);
   Val promoteIntToFloat(const Val &v, ast::Type *targetTy);
   /// @p v, computed for the numeric type @p ty, in the type's canonical form

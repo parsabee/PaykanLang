@@ -253,6 +253,11 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
   // different chains that might reach the same object at run time (`a.n`
   // and `b.n`) are not checked, and a plain parameter is a copy.
   std::vector<std::vector<CallUse>> uses;
+  // A struct's method that may change `self` changes the receiver's
+  // storage, which the lowering must know of (ast::Expr::isChangedByCall).
+  if (receiver && method && !method->isView() &&
+      ast::dyn_cast<ast::StructType>(receiver->getResolvedType()))
+    const_cast<ast::Expr *>(receiver)->setChangedByCall(true);
   if (receiver && method) {
     std::vector<std::string> paths;
     borrowedPaths(receiver, paths);
@@ -314,6 +319,7 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
                !why.empty()) {
       msg = std::move(why);
     } else {
+      arg->setChangedByCall(true);
       // An `inout` result passes on what its call borrowed.
       std::vector<std::string> paths;
       borrowedPaths(arg, paths);

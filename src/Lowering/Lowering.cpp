@@ -712,9 +712,11 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
   if (valueOptionalType(expr))
     return false;
   // A `weak` variable reads as a fresh +1 box (or null): its slot holds a
-  // weak reference, never a box to borrow.
+  // weak reference, never a box to borrow; so does a held read of a
+  // reference (noteHeldReads).
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
-    return CurrentScope && CurrentScope->isWeak(id->getName());
+    return (CurrentScope && CurrentScope->isWeak(id->getName())) ||
+           (isHeldRead(id) && ast::isRefType(expr->getResolvedType()));
   // An array's (or a slice's or a tuple's) element slot holds the box
   // itself.
   if (ast::isa<ast::SubscriptExpr>(expr) || ast::isa<ast::TupleIndexExpr>(expr))
@@ -744,9 +746,11 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
 bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (valueOptionalType(expr))
     return false;
-  // A `weak` variable or field is loaded as a fresh +1 box (or null).
+  // A `weak` variable or field is loaded as a fresh +1 box (or null), and
+  // a held read of a reference retained (noteHeldReads).
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr))
-    return CurrentScope && CurrentScope->isWeak(id->getName());
+    return (CurrentScope && CurrentScope->isWeak(id->getName())) ||
+           (isHeldRead(id) && ast::isRefType(expr->getResolvedType()));
   if (isWeakFieldAccess(expr))
     return true;
   // A struct's field is an element of a value held in memory, like a
@@ -763,10 +767,10 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   if (ast::isa<ast::SubscriptExpr>(expr) ||
       ast::isa<ast::TupleIndexExpr>(expr) || structField(expr)) {
     // An element of a temporary (`mk()[0]`, `mk().1`, `mk().x` of a
-    // struct), or of a fresh object's field (`mk().xs[0]`), is read as a +1
-    // box: the temporary dies with the read.  A call with an `inout` result
-    // is no temporary: its element is borrowed from the storage the call
-    // names.
+    // struct, or a held read's copy, noteHeldReads), or of a fresh object's
+    // field (`mk().xs[0]`), is read as a +1 box: the temporary dies with the
+    // read.  A call with an `inout` result is no temporary: its element is
+    // borrowed from the storage the call names.
     ast::Expr *root = expr;
     for (;;) {
       if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(root))
@@ -782,12 +786,13 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
       return exprAlreadyShared(expr) && exprProducesFreshBox(ma->getReceiver());
     if (root->isInoutResult())
       return false;
-    return exprAlreadyShared(expr) && (ast::isa<ast::CallExpr>(root) ||
-                                       ast::isa<ast::MethodCallExpr>(root) ||
-                                       ast::isa<ast::CallValueExpr>(root) ||
-                                       ast::isa<ast::ArrayLiteralExpr>(root) ||
-                                       ast::isa<ast::TupleLiteralExpr>(root) ||
-                                       ast::isa<ast::TernaryExpr>(root));
+    return exprAlreadyShared(expr) &&
+           (ast::isa<ast::CallExpr>(root) ||
+            ast::isa<ast::MethodCallExpr>(root) ||
+            ast::isa<ast::CallValueExpr>(root) ||
+            ast::isa<ast::ArrayLiteralExpr>(root) ||
+            ast::isa<ast::TupleLiteralExpr>(root) ||
+            ast::isa<ast::TernaryExpr>(root) || isHeldRead(root));
   }
   if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
     return mce->getResolvedType() && ast::isRefType(mce->getResolvedType());
@@ -1013,6 +1018,12 @@ void ModuleLowering::emitLoopScopesCleanup() {
 }
 
 // -- Statements
+
+Val ModuleLowering::visit(ast::ASTNode *node) {
+  if (auto *s = ast::dyn_cast<ast::Stmt>(node))
+    noteHeldReads(s);
+  return ASTVisitor::visit(node);
+}
 
 Val ModuleLowering::visitCompoundStmt(ast::CompoundStmt *node) {
   ScopeGuard guard(*this);
@@ -1906,11 +1917,13 @@ Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
   if (isNoneForOptional(arg))
     return Val::null(Type::Box);
   // A variable's or a field's own box, when the argument is that reference
-  // as it is: it outlives the call.
+  // as it is: it outlives the call, unless a later argument may replace it
+  // (noteHeldReads).
   ast::Type *ty = arg->getResolvedType();
   if (ty && ast::isRefType(ty)) {
     auto *id = ast::dyn_cast<ast::Identifier>(arg);
-    if (id && CurrentScope->hasLocal(id->getName()) && holdsBox(id->getName()))
+    if (id && CurrentScope->hasLocal(id->getName()) &&
+        holdsBox(id->getName()) && !isHeldRead(id))
       return loadVarBox(id->getName());
     auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(arg);
     if (ma && ast::isa<ast::Identifier>(ma->getReceiver())) {

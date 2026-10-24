@@ -43,7 +43,6 @@ constexpr uint32_t kKnownFnFlags =
     kFnExtern | kFnHasModule | kFnHasSymbol | kFnShared | kFnHasUses;
 constexpr uint32_t kClassExtern = 1u << 0, kClassShared = 1u << 1;
 constexpr uint32_t kKnownClassFlags = kClassExtern | kClassShared;
-constexpr uint8_t kLocalView = 1u << 0;
 
 enum OperandKind : uint8_t {
   kOpValue,
@@ -380,8 +379,9 @@ private:
       W.uleb(f.Locals.size());
       for (const Local &l : f.Locals) {
         name(l.Name);
+        if (l.View)
+          W.u8(kViewSlotCode);
         slotType(l.Ty, l.Size, l.Align);
-        W.u8(l.View ? kLocalView : 0);
       }
       W.uleb(f.NextValueId);
       block(&f.Body);
@@ -547,16 +547,17 @@ public:
       if (p.Ty != f.Sig.Params[i])
         return R.fail("parameter type disagrees with the signature");
     }
-    if (!R.count(n, 3))
+    if (!R.count(n, 2))
       return false;
     f.Locals.resize(static_cast<size_t>(n));
     for (Local &l : f.Locals) {
-      uint8_t lflags = 0;
-      if (!str(l.Name) || !slotType(l.Ty, l.Size, l.Align) || !R.u8(lflags))
+      uint8_t c;
+      if (!str(l.Name) || !R.u8(c))
         return false;
-      if ((lflags & ~kLocalView) != 0)
-        return R.fail("reserved local flag bits set");
-      l.View = (lflags & kLocalView) != 0;
+      // A `view` local's slot type follows its mark (§5.4).
+      l.View = c == kViewSlotCode;
+      if ((l.View && !R.u8(c)) || !slotType(c, l.Ty, l.Size, l.Align))
+        return false;
     }
     return R.uleb32(f.NextValueId) && block(f.Body);
   }
@@ -590,8 +591,10 @@ private:
   /// A local's or field's type: a type, or `mem` and its size and alignment.
   bool slotType(Type &t, int64_t &size, int64_t &align) {
     uint8_t c;
-    if (!R.u8(c))
-      return false;
+    return R.u8(c) && slotType(c, t, size, align);
+  }
+  /// The same, its code @p c read.
+  bool slotType(uint8_t c, Type &t, int64_t &size, int64_t &align) {
     if (!typeFromCode(c, t))
       return R.fail("reserved type code", R.offset() - 1);
     if (t != Type::Mem)

@@ -29,8 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whose object the constructor holds, `self` is no such object.  Over the samples and the
   standard library's tests the pass removes about a fifth of the retains and a tenth of the
   releases.  PIR marks the slot of a `view` parameter or variable, `local %v: box view`
-  (docs/pir.md §3), in the text form backend plugins read and in a `.pkm`'s code, where each
-  local has a flags byte (docs/design/pkm.md §5.7).
+  (docs/pir.md §3), in the text form backend plugins read and in a `.pkm`'s code, where a
+  code before the local's slot type marks it, so that code written before reads the same
+  (docs/design/pkm.md §5.4, §5.7).
 - `paykan --stats` prints what the PIR passes did, on standard error after the last of them
   ran (`moves-at-last-use transfers`, `retains removed`, `releases removed`), for the
   program and for the modules this run builds from source (`pir::Statistics`,
@@ -300,6 +301,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A value read from a variable could be freed while still in use when a call later in the
+  same statement replaced the variable, through an `inout` parameter or a struct's method
+  that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
+  and `l.greet(repl(l))` or `s.n.greet(s.reset())` ran a method on a freed object.  Such a
+  read now takes a reference of its own, released once it is used (docs/pir.md §7, "Reads
+  a call may replace"), so it is the value the variable held before the call
+  (docs/language/03-functions.md, "Exclusivity").  The moves at last use rely on it: a
+  function handed a variable's last reference sees what a temporary would give it.
 - A local could take the name of a function of the module and hide it: `func = fn(x: int,
   y: float) => x + y;` next to `fn func<T>(x: T) => x + 2;` made `func(1, 2.5)` call the
   lambda.  A variable, a parameter (a method's or a lambda's too), a `for` loop variable, a

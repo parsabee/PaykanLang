@@ -202,6 +202,10 @@ class Expr : public ASTNode {
   // Set by Sema on a call of a function or method with an `inout` result
   // (`-> inout T`): its value is the storage it names, not a temporary.
   bool InoutResult = false;
+  // Set by Sema on a place a call may change: an argument passed to an
+  // `inout` parameter, and the receiver of a struct's method that is not a
+  // `view fn` (its `self` is the receiver's storage).
+  bool ChangedByCall = false;
 
 public:
   Expr(NodeKind K, SourceLocation loc) : ASTNode(K, loc) {}
@@ -214,6 +218,9 @@ public:
 
   void setInoutResult(bool inout) { InoutResult = inout; }
   bool isInoutResult() const { return InoutResult; }
+
+  void setChangedByCall(bool changed) { ChangedByCall = changed; }
+  bool isChangedByCall() const { return ChangedByCall; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() >= NK_IntegerLiteral && N->getKind() <= NK_LambdaExpr;

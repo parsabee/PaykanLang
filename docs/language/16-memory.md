@@ -371,13 +371,14 @@ releases nothing at the end of its scope. At a variable's last use:
 
 A hand-off the variable is read after stays a copy: later in the function, or on the next iteration
 of a loop (a variable assigned a new value before it is read again is not). So does one the
-function follows, before the variable's scope ends, with a call while it uses an object it holds no
-reference to: a field's value reached through another variable, or anything reached through `self`.
+function follows, before the variable's scope ends, with a call or the release of a reference (the
+one an assignment replaces, say) while it uses an object it holds no reference to: a field's value
+reached through another variable, or anything reached through `self`.
 In `x = h.node; take(x); s = h.node.name + replace(h);` the hand-off to `take` stays a copy,
 because `replace` may assign `h.node` while the name read before it is still to be used, and `x`
 may be what keeps that node alive. In a method, a hand-off therefore stays a copy when `self` is
-used by or after a call that follows it, the call it is passed to included (not in `__init__`,
-whose object the constructor holds). Where one branch of an `if` or one arm of a `match` hands the
+used by or after a call or a release that follows it, the call it is passed to included (not in
+`__init__`, whose object the constructor holds). Where one branch of an `if` or one arm of a `match` hands the
 variable on and another does not, the other releases it when its scope ends, as before. In
 `f(a, a)` the first `a` is a copy and the second a transfer. `self`, `inout` parameters and locals,
 fields, array elements and the members of a tuple or struct, and `view` parameters and variables,

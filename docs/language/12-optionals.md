@@ -475,7 +475,9 @@ An enum, a tuple or a struct has an optional too, and like an optional primitive
 value, held in place with no heap allocation of its own. A `Suit?` is the enum's ordinal
 and a presence flag. A `(int, Str)?` or a `Point?` is a presence flag followed by the
 value, laid out like the tuple `(bool, T)`; `None` is all zeros. Copying one copies the
-value, retaining the references it holds. The value is at most 64 bytes: an optional of a
+value, retaining the references it holds, except at a variable's last use, where an
+assignment, a store or a `return` moves them ([Memory](16-memory.md#ownership-transfers)).
+The value is at most 64 bytes: an optional of a
 bigger tuple or struct is rejected (`'Big?': an optional holds a value of up to 64 bytes in
 place, and 'Big' is 72 bytes; use 'Box<Big>?' (memory::Box) instead`), and the value goes in
 a `memory::Box`, whose optional is a reference. A nested tuple literal widens into an

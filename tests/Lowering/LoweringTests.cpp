@@ -397,6 +397,53 @@ TEST(Lowering, InoutFieldIsPassedByAddress) {
   EXPECT_NE(m.find("release ", second), std::string::npos) << m;
 }
 
+// A read that a later call of its statement may replace the variable under
+// (an `inout` argument, a struct's method that may change `self`) takes a
+// reference of its own before the call and lets it go after its use: a
+// variable's box retained, a struct copied into a temporary.  The place the
+// call is given is no read, and a statement with no such call reads in
+// place (docs/pir.md §7, "Reads a call may replace").
+TEST(Lowering, AReadACallMayReplaceHasAReferenceOfItsOwn) {
+  auto l = lower(R"(
+    class Node { name: Str; view fn greet(s: Str) -> Str { return self.name + s; } }
+    struct H { n: Node; }
+    impl H { fn reset() -> Str { self.n = Node("r"); return "!"; } }
+    fn repl(x: inout Str) -> Str { x = "b"; return "!"; }
+    fn replNode(x: inout Node) -> Str { x = Node("c"); return "?"; }
+    fn joined(s: Str) -> Str { return s + repl(s); }
+    fn receiver(l: Node) -> Str { return l.greet(replNode(l)); }
+    fn field(h: H) -> Str { return h.n.greet(h.reset()); }
+    fn other(s: Str, l: Node) -> Str { return l.greet(repl(s)); }
+    fn main() -> int {
+      return joined("a").len() + receiver(Node("n")).len() +
+             field(H(Node("m"))).len() + other("o", Node("p")).len();
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"joined", "receiver"}) {
+    std::string f = function(l.Text, fn);
+    const size_t call =
+        f.find(std::string(fn) == "joined" ? "call @repl(" : "call @replNode(");
+    ASSERT_NE(call, std::string::npos) << f;
+    // The read's retain comes before the call, its release after it.
+    EXPECT_EQ(count(f.substr(0, call), "retain "), 1u) << f;
+    const size_t retain = f.find("retain ");
+    const std::string read =
+        f.substr(retain + 7, f.find('\n', retain) - retain - 7);
+    const size_t release = f.find("release " + read + "\n");
+    ASSERT_NE(release, std::string::npos) << f;
+    EXPECT_GT(release, call) << f;
+  }
+  std::string f = function(l.Text, "field");
+  const size_t reset = f.find("call @H.reset(");
+  ASSERT_NE(reset, std::string::npos) << f;
+  EXPECT_NE(f.find("local %held."), std::string::npos) << f;
+  EXPECT_LT(f.find("mem.copy "), reset) << f;
+  // `l` is not what repl changes: its receiver is read in place.
+  std::string o = function(l.Text, "other");
+  EXPECT_EQ(count(o, "retain "), 0u) << o;
+}
+
 TEST(Lowering, FreshCallResultIsStoredWithoutRetain) {
   auto l = lower(R"(
     fn mk() -> Str { return "x"; }

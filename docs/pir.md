@@ -591,6 +591,20 @@ CodeGen enforced, now in one place.
   or concatenation is destroyed and freed (`Paykan_dispose`) by the consumer
   unless it is boxed; a fresh box used as a receiver or borrowed argument is
   released after the use.
+* **Reads a call may replace**: a value read from a variable (a box loaded
+  from it, or a reference read from a struct's, a tuple's or a fixed-size
+  array's own bytes) has no reference of its own while the variable keeps
+  it, and a call can replace what the variable holds before the value is
+  used: one the variable is passed to as an `inout` argument, or a method
+  of its struct that may change `self`.  So in a statement that makes such
+  a call (`s + repl(s)`, `l.greet(repl(l))`, `s.n.greet(s.reset())`), every
+  other read of the variable takes a reference of its own: its box is
+  `retain`ed after the `load` and owned like a call's result, released
+  after the use; a value held in memory is copied into a temporary
+  (`mem.copy` and a `retain` of each reference), whose references are
+  released after the use.  What the read saw lives until it is used, and
+  `s + repl(s)` joins the string `s` held before `repl` ran.  The place the
+  call is given, and the one the statement assigns to, are not reads.
 * **Match**: the subject is evaluated once; a boxed subject is owned for the
   match's duration (pending release at match end, also on early exits).  Class
   arms compare `vtable.load` against `vtable.addr`; optional subjects test
@@ -957,13 +971,23 @@ is computed from them (a method's receiver read from a field).  The slot
 may be what kept that object alive.  So from the point the destination
 holds the reference to the slot's release, no node that may release a
 reference (a `release`, a `free`, a call of anything but the runtime's
-string, hash, allocation and panic helpers) may come while a borrowed
-reference is in use across it: one made before it and used after it, one a
-call it makes is given, or a local holding one (`self`) read after it.  One
-used in a loop it was made outside of is in use at every node of the loop.
+string, hash, rounding, allocation, disposal and panic helpers) may come
+while a borrowed reference is in use across it: one made before it and used
+after it, one a call it makes is given, or a local holding one (`self`)
+read after it.  One used in a loop it was made outside of is in use at
+every node of the loop.  A release the moves leave with nothing to release
+is no such node: one of a slot that is `null` on every path to it once the
+last uses found are moved, as long as each of those moves is made.  One
+that stays a copy makes its slot's releases releases again, and the copies
+whose windows they lie in copies too.  So a chain `a1 = a0; a2 = a1; ...`
+while `self` is in use moves whole: each hand-off's window holds the
+release of the variable it hands on to, which the next hand-off empties.
 A value that holds a reference of its own is not borrowed: a box loaded
-from a box local, what a `mem` local holds (it owns its references, §7), a
-call's box, and a value retained before anything else uses it.  Nor is an
+from a box local, or what a `mem` local holds (it owns its references, §7),
+which the local keeps until a store into it, a statement that is over by
+then, or a call given its address, whose statement's other reads of it
+have a reference of their own (§7, "Reads a call may replace"); a call's
+box; and a value retained before anything else uses it.  Nor is an
 `__init__`'s `self`: its constructor, the only caller one can have, holds
 the object (or, for a struct, the storage) until the call returns.  So
 `x = h.node; take(x); s = h.node.name + replace(h)` keeps the copy into
@@ -1002,15 +1026,21 @@ Each of these questions is one **dataflow** over the function's structured
 body, a bit for each slot: which copies are last uses (back from the end:
 on every path, the release first), which of them a borrowed reference may
 depend on (forward from the entry: from the destination to the release,
-past a node a borrowed reference is in use across), which releases find
-their slot `null` on every path (forward from the entry), and which `null`
-stores some path reads (back from the end).  Where a borrowed reference is
-in use is found once, from each one's first and last places in the body.  A
-walk visits each statement once and a loop until the bits at its head stop
-changing, a loop inside another starting from where it settled the last
-time, and an instruction updates only the bits of the slots it touches.  So
-the pass takes time in proportion to the size of the function (times the
-depth of its loops), not to the number of copies times that size.
+past a node a borrowed reference is in use across), which releases the
+moves leave with nothing to release and which releases find their slot
+`null` on every path (both forward from the entry), and which `null` stores
+some path reads (back from the end).  Where a borrowed reference is in use
+is found once, from each one's first and last places in the body, and which
+copies stay copies because a move they count on is not made, once, from
+the windows open at each release left empty.  A walk visits each statement
+once and a loop until the bits at its head stop changing, a loop inside
+another starting from where it settled the last time, and an instruction
+updates only the bits of the slots it touches.  So a round of the pass
+takes time in proportion to the size of the function (times the depth of
+its loops), not to the number of copies times that size.  The pass repeats
+rounds until one moves nothing, so that it changes nothing on its own
+output; a round finds more than the one before only where that one's
+cleanup moved a release into an arm.
 
 **Why it is right.**  The pass removes a retain only together with a
 release that provably runs on the same reference with no read in between:
@@ -1022,12 +1052,21 @@ holds instead of a new one; before the copy and after the release the
 counts are the same.
 Until the destination holds it, the reference is the copy's value, which
 nothing releases, so every object lives as long as before.  From then on
-the object, and what only it holds, may die sooner: at a node that may
-release a reference, once the destination has let go.  A reference with a
-count of its own keeps what it refers to alive as before, so only one
-without could be left pointing at freed memory: an alias of the slot, of
-which the window has none, or a borrowed reference, none of which is in use
-across such a node in the window.  No release is ever added, nor moved
+the destination holds it as it holds a reference made for it: a callee is
+given a +1 box, as `take(Node(1))` gives it one, that may be the object's
+only reference; a variable, a field or the caller holds it as it holds a
+new object.  So the object, and what only it holds, may die sooner: at a
+node that may release a reference, once the destination has let go.  A
+reference with a count of its own keeps what it refers to alive as before,
+so only code using one without could be left pointing at freed memory.  In
+another function, the destination's code or code that runs later, that
+code would be as wrong for a new object, which §7 does not allow: a
+function keeps alive what it uses, by a reference it holds (a variable's,
+or a read's own where a call of the statement may replace the variable) or
+one its caller holds for the call (the receiver, what an `inout` parameter
+points at).  In the function rewritten it is an alias of the slot, of
+which the window has none, or a borrowed reference, none of which is in
+use across such a node in the window.  No release is ever added, nor moved
 earlier than it ran: the destination owns the reference and releases it at
 the end of its own scope (docs/language/16-memory.md, "Ownership
 transfers").  What changes is only that the object may die when the

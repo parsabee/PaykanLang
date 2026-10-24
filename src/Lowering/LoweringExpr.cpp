@@ -119,16 +119,28 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
     return L.loadWeakVar(node->getName());
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
+  // A read its statement may replace the variable's value under
+  // (noteHeldReads): the box, with a reference of its own, a fresh +1 one
+  // (exprProducesFreshBox).
+  auto held = [&](const Val &box) {
+    L.emitRetain(box);
+    return box;
+  };
   // An `inout` parameter: read the caller's storage (a box: borrowed, and
   // unwrapped like an owned variable's).
   if (Type t = L.CurrentScope->inoutType(node->getName()); t != Type::Void) {
     Val v = L.B.ptrLoad(val, t, node->getName());
+    if (t == Type::Box && L.isHeldRead(node))
+      return held(v);
     return t == Type::Box ? L.emitSharedGet(v, node->getName() + ".obj") : v;
   }
   // Owned ref vars store a box — unwrap to the underlying object.
   auto *astTy = L.CurrentScope->lookupASTType(node->getName());
-  if (ast::isRefType(astTy) && L.CurrentScope->isOwned(node->getName()))
+  if (ast::isRefType(astTy) && L.CurrentScope->isOwned(node->getName())) {
+    if (L.isHeldRead(node))
+      return held(val);
     val = L.emitSharedGet(val, node->getName() + ".obj");
+  }
   return val;
 }
 

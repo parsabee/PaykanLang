@@ -19,18 +19,22 @@
 // holds the reference to that release, no node that may release a
 // reference comes while a borrowed reference (Origins::borrowed: one no
 // local of the function holds the object of) is in use across it
-// (Analysis::exposed).  Moving removes the copy's retains and stores null
-// into the slot; the cleanup that follows removes what that made useless.
-// Each of these questions is one dataflow over the structured body (Flow),
-// a bit per slot, so the pass takes time in proportion to the function's
-// size times the depth of its loops, not to the number of copies times its
-// size.
+// (Analysis::exposed); a release the moves leave releasing nothing is no
+// such node, as long as every move it counts on is made.  Moving removes
+// the copy's retains and stores null into the slot; the cleanup that
+// follows removes what that made useless.  Each of these questions is one
+// dataflow over the structured body (Flow), a bit per slot, so a round of
+// the pass takes time in proportion to the function's size times the depth
+// of its loops, not to the number of copies times its size.  Rounds repeat
+// while one moves something; a later one finds more only where a cleanup
+// moved a release into an arm.
 
 #include "paykan/pir/MoveAtLastUse.h"
 
 #include "Names.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -89,7 +93,8 @@ bool isClosureClass(const std::string &name) {
 
 /// Whether a call of @p callee may release a reference, or run Paykan code
 /// that may: any callee but the runtime's string, hash, rounding,
-/// allocation and panic helpers (docs/pir.md §8), which do neither.
+/// allocation, disposal and panic helpers (docs/pir.md §8), which do
+/// neither.
 bool callMayRelease(std::string_view callee) {
   if (!callee.starts_with(kRuntimePrefix))
     return true;
@@ -419,7 +424,9 @@ public:
   /// read in place, what is reached through `self` or an `inout`
   /// parameter, and what is computed from one are; what is reached
   /// through a box or a mem local, a call's box and a retained copy are
-  /// not.
+  /// not.  A local keeps what it holds until a store into it, or a call
+  /// given its address, whose statement's other reads of it the lowering
+  /// gives references of their own (docs/pir.md §7).
   bool borrowed(ValueId v) const { return v < Borrowed.size() && Borrowed[v]; }
   bool borrowed(const Operand &o) const {
     return o.isValue() && borrowed(o.valueId());
@@ -667,6 +674,13 @@ public:
   void meet(const Bits &o, bool all) {
     for (size_t i = 0; i < W.size(); ++i)
       W[i] = all ? W[i] & o.W[i] : W[i] | o.W[i];
+  }
+  /// Set the bits of @p o, adding to @p added those that were clear.
+  void add(const Bits &o, std::vector<size_t> &added) {
+    for (size_t i = 0; i < W.size(); ++i)
+      for (uint64_t fresh = o.W[i] & ~W[i]; fresh != 0; fresh &= fresh - 1)
+        added.push_back(i * 64 + static_cast<size_t>(std::countr_zero(fresh)));
+    meet(o, /*all=*/false);
   }
   bool operator==(const Bits &o) const { return W == o.W; }
 
@@ -1530,9 +1544,10 @@ public:
   explicit Mover(Function &f) : F(f) {}
 
   MoveCounts run() {
-    // A move and its cleanup may take away what kept another copy a copy
-    // (a release a borrowed reference was in use across): until a round
-    // moves nothing, so that the pass changes nothing on its own output.
+    // A cleanup may take away what kept another copy a copy (a release a
+    // borrowed reference was in use across, moved into an arm): until a
+    // round moves nothing, so that the pass changes nothing on its own
+    // output.
     while (transfer()) {
       // Each round of the cleanup may make more of it possible (a release
       // moved into an arm leaves the null stores of the others unread).
@@ -1590,15 +1605,24 @@ private:
     // one is in use across it (Analysis::exposed), on a path from where the
     // destination holds the reference to the slot's release, keeps the
     // slot's copies copies.  One flow forward from the entry: a slot's bits
-    // are set from the destination on and cleared at its release.
+    // are set from the destination on and cleared at its release.  A
+    // release that the moves leave releasing nothing (idleReleases) is no
+    // such node while every move it counts on is made: the windows open at
+    // it are noted, and become risky if one of those moves is not.
     const std::vector<bool> exposed = a.exposed();
+    const std::vector<std::optional<size_t>> idle =
+        idleReleases(a, copies, bits, slots, last);
     std::unordered_map<uint32_t, std::vector<size_t>> holds;
     for (size_t i = 0; i < copies.size(); ++i)
       if (last[i])
         holds[copies[i].Holds].push_back(i);
     Bits risky(slots.size(), false);
+    std::unordered_map<uint32_t, Bits> openAt;
     Flow(a.G, slots.size(), /*must=*/false, [&](uint32_t n, Flow::State &s) {
-      if (exposed[n])
+      if (exposed[n] && idle[n])
+        openAt.try_emplace(n, slots.size(), false)
+            .first->second.meet(s.B, /*all=*/false);
+      else if (exposed[n])
         risky.meet(s.B, /*all=*/false);
       if (auto it = holds.find(n); it != holds.end())
         for (size_t i : it->second)
@@ -1613,23 +1637,66 @@ private:
           s.B.set(i, false);
       });
     }).forward(F.Body);
+    // The copies kept copies: those not at a last use, those with a risky
+    // bit, and those whose retain an earlier copy has taken.  Keeping one at
+    // a last use makes its slots' idle releases releases again, and the
+    // windows open at them risky.
+    std::vector<std::vector<size_t>> copiesOf(slots.size());
+    for (size_t i = 0; i < copies.size(); ++i)
+      for (size_t b : bits[i])
+        copiesOf[b].push_back(i);
+    std::vector<std::vector<uint32_t>> idleOf(slots.size());
+    for (const auto &[n, open] : openAt)
+      if (const std::optional<size_t> &bit = idle[n])
+        idleOf[*bit].push_back(n);
+    std::vector<bool> kept(copies.size());
+    for (size_t i = 0; i < copies.size(); ++i)
+      kept[i] = !last[i];
+    std::vector<bool> lost(slots.size());
+    std::vector<size_t> work;
+    auto keep = [&](size_t i) {
+      if (kept[i])
+        return;
+      kept[i] = true;
+      for (size_t b : bits[i])
+        if (!lost[b]) {
+          lost[b] = true;
+          for (uint32_t n : idleOf[b])
+            risky.add(openAt.at(n), work);
+        }
+    };
+    auto settle = [&] {
+      while (!work.empty()) {
+        const size_t b = work.back();
+        work.pop_back();
+        for (size_t i : copiesOf[b])
+          keep(i);
+      }
+    };
+    for (size_t b = 0; b < slots.size(); ++b)
+      if (risky.test(b))
+        work.push_back(b);
+    settle();
+    // A retain belongs to one copy.
     std::vector<Transfer> found;
     std::unordered_set<const Stmt *> claimed;
     for (size_t i = 0; i < copies.size(); ++i) {
       Transfer &t = copies[i];
-      if (std::any_of(bits[i].begin(), bits[i].end(),
-                      [&](size_t b) { return risky.test(b); }))
+      if (kept[i])
         continue;
-      // A retain belongs to one copy.
-      if (!last[i] ||
-          std::any_of(t.Retains.begin(), t.Retains.end(), [&](const Place &p) {
+      if (std::any_of(t.Retains.begin(), t.Retains.end(), [&](const Place &p) {
             return claimed.count(&p.stmt()) > 0;
-          }))
+          })) {
+        keep(i);
+        settle();
         continue;
+      }
       for (const Place &p : t.Retains)
         claimed.insert(&p.stmt());
-      found.push_back(std::move(t));
     }
+    for (size_t i = 0; i < copies.size(); ++i)
+      if (!kept[i])
+        found.push_back(std::move(copies[i]));
     if (found.empty())
       return false;
     Edits e;
@@ -1675,23 +1742,62 @@ private:
     return slots;
   }
 
-  /// The moved slot node @p n releases (a release load), if it is one.
-  std::optional<Slot> releasedSlot(const Analysis &a, uint32_t n) const {
+  /// The slot node @p n loads to release (a release load), if it is one.
+  static std::optional<Slot> releaseSlot(const Analysis &a, uint32_t n) {
     const Instr *in = a.G.instr(n);
     if (!in || !a.releaseLoad(a.G.Nodes[n].At))
       return std::nullopt;
-    Slot s;
-    if (in->Op == Opcode::Load) {
-      s = {in->Local, 0};
-    } else {
-      const Address p = a.O.address(in->Args[0]);
-      if (p.L == kNoLocal || !p.Offset)
-        return std::nullopt;
-      s = {p.L, *p.Offset};
-    }
-    if (!Moved.count({s.L, s.Offset}))
+    if (in->Op == Opcode::Load)
+      return Slot{in->Local, 0};
+    const Address p = a.O.address(in->Args[0]);
+    if (p.L == kNoLocal || !p.Offset)
+      return std::nullopt;
+    return Slot{p.L, *p.Offset};
+  }
+
+  /// The moved slot node @p n releases (a release load), if it is one.
+  std::optional<Slot> releasedSlot(const Analysis &a, uint32_t n) const {
+    std::optional<Slot> s = releaseSlot(a, n);
+    if (!s || !Moved.count({s->L, s->Offset}))
       return std::nullopt;
     return s;
+  }
+
+  /// By node: for the `release` of a slot of @p slots that finds it null on
+  /// every path once the copies at a last use (@p last) are moved, the
+  /// slot's bit.  Such a release releases nothing, and the cleanup removes
+  /// it (dropNullReleases).  One flow forward from the entry, null set at
+  /// each move's null stores, as dropNullReleases has it after them.
+  std::vector<std::optional<size_t>>
+  idleReleases(const Analysis &a, const std::vector<Transfer> &copies,
+               const std::vector<std::vector<size_t>> &bits, const Slots &slots,
+               const std::vector<bool> &last) const {
+    std::unordered_map<uint32_t, std::vector<size_t>> nulled;
+    for (size_t i = 0; i < copies.size(); ++i)
+      if (last[i])
+        nulled[copies[i].Last].push_back(i);
+    std::vector<std::optional<size_t>> idle(a.G.Nodes.size());
+    Flow(a.G, slots.size(), /*must=*/true, [&](uint32_t n, Flow::State &s) {
+      const Instr *in = a.G.instr(n);
+      if (!in)
+        return;
+      // A node in a loop is stepped through again, the last time with its
+      // final state.
+      if (std::optional<Slot> r = releaseSlot(a, n))
+        if (std::optional<size_t> bit = slots.find(*r)) {
+          const Place at = a.G.Nodes[n].At;
+          idle[a.G.of(at.B->Stmts[at.Index + 1])] =
+              s.Reached && s.B.test(*bit) ? bit : std::nullopt;
+        }
+      a.touched(n, slots, [&](size_t i) {
+        s.B.set(i, nullAfter(a, *in, slots[i], s.B.test(i)));
+      });
+      if (auto it = nulled.find(n); it != nulled.end())
+        for (size_t i : it->second)
+          for (size_t b : bits[i])
+            s.B.set(b, true);
+    }).forward(F.Body);
+    return idle;
   }
 
   /// Whether @p o may be an address (a `ptr`, or an integer one was cast

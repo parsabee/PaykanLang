@@ -128,6 +128,30 @@ std::string manyCopies(size_t n) {
   return os.str();
 }
 
+/// @f, a method, handing a new object on along @p n box locals (`x1 = x0;
+/// x2 = x1; ...`), then the last on to @p end (`ret` or `call @take`); the
+/// locals are released, the last declared first, before `self` is read.
+std::string chainUnderSelf(size_t n, const std::string &end) {
+  std::ostringstream os;
+  os << "fn @f(%self: obj) -> " << (end == "ret" ? "box" : "void") << " {\n"
+     << "  local %s: obj\n";
+  for (size_t i = 0; i < n; ++i)
+    os << "  local %x" << i << ": box\n";
+  os << "  store %s, %self\n  %o = new Node\n  %b = box %o\n"
+     << "  store %x0, %b\n";
+  for (size_t i = 1; i < n; ++i)
+    os << "  %v" << i << " = load %x" << i - 1 << "\n  retain %v" << i
+       << "\n  store %x" << i << ", %v" << i << "\n";
+  os << "  %r = load %x" << n - 1 << "\n  retain %r\n";
+  if (end != "ret")
+    os << "  call @take(%r)\n";
+  for (size_t i = n; i-- > 0;)
+    os << "  %w" << i << " = load %x" << i << "\n  release %w" << i << "\n";
+  os << "  %t = load %s\n  %k = field.load %t, Node.next\n"
+     << (end == "ret" ? "  ret %r\n" : "  ret\n") << "}\n";
+  return os.str();
+}
+
 size_t count(const std::string &text, const std::string &needle) {
   size_t n = 0;
   for (size_t at = text.find(needle); at != std::string::npos;
@@ -962,6 +986,93 @@ TEST(MoveAtLastUse, SelfUsedAfterACallKeepsAParametersCopy) {
   EXPECT_EQ(m.Counts.Transfers, 0u) << f(m);
   EXPECT_EQ(
       ::move("fn @Node.__init__" + body, "Node.__init__").Counts.Transfers, 1u);
+}
+
+TEST(MoveAtLastUse, AChainOfHandOffsWhileSelfIsInUseMovesWhole) {
+  // Each hand-off's window holds the release of the local it hands on to,
+  // where `self` is in use; that release releases nothing once the next
+  // hand-off moves, so every one moves.  When the last one stays a copy (a
+  // call given the reference while `self` is in use), the release of each
+  // local releases its object again, and every hand-off stays a copy.
+  Moved m = ::move(chainUnderSelf(4, "ret"));
+  EXPECT_EQ(m.Counts.Transfers, 4u) << f(m);
+  EXPECT_EQ(m.Counts.Releases, 4u) << f(m);
+  EXPECT_EQ(count(f(m), "retain"), 0u) << f(m);
+  Moved kept = ::move(chainUnderSelf(4, "take"));
+  EXPECT_EQ(kept.Counts.Transfers, 0u) << f(kept);
+}
+
+TEST(MoveAtLastUse, ARoundAfterAReleaseMovedIntoAnArmMovesMore) {
+  // y's hand-off in the `then` arm moves; x's is kept a copy by y's release
+  // after the `if`, where `self` is in use and the `else` arm still holds
+  // y.  The cleanup moves that release into the `else` arm, out of x's
+  // window: the next round moves x too.
+  Moved m = move(R"(
+fn @f(%self: obj, %a: box, %c: bool) -> void {
+  local %s: obj
+  local %x: box
+  local %y: box
+  local %z: box
+  local %w: box
+  store %s, %self
+  store %x, %a
+  %o = new Node
+  %b = box %o
+  store %y, %b
+  store %z, null box
+  store %w, null box
+  if %c {
+    %vy = load %y
+    retain %vy
+    store %z, %vy
+    %vx = load %x
+    retain %vx
+    store %w, %vx
+  }
+  %ry = load %y
+  release %ry
+  %rx = load %x
+  release %rx
+  %t = load %s
+  %k = field.load %t, Node.next
+  %rz = load %z
+  release %rz
+  %rw = load %w
+  release %rw
+  ret
+}
+)");
+  EXPECT_EQ(m.Counts.Transfers, 2u) << f(m);
+  EXPECT_EQ(count(f(m), "retain"), 0u) << f(m);
+}
+
+TEST(MoveAtLastUse, AChainUnderABorrowedReferenceTakesTimeInProportion) {
+  // One round moves the whole chain: four times the hand-offs take about
+  // four times as long, where a round per hand-off would take sixteen.
+  auto seconds = [](size_t n) {
+    double best = 0;
+    for (int run = 0; run < 3; ++run) {
+      ParseError err;
+      auto p = parseProgram(kPrelude + chainUnderSelf(n, "ret"), err);
+      EXPECT_TRUE(p) << err.str();
+      if (!p)
+        return 0.0;
+      Function *fn = nullptr;
+      for (Function &g : p->Modules.front().Functions)
+        if (g.Name == "f")
+          fn = &g;
+      const auto start = std::chrono::steady_clock::now();
+      const MoveCounts c = moveAtLastUse(*fn);
+      const std::chrono::duration<double> took =
+          std::chrono::steady_clock::now() - start;
+      EXPECT_EQ(c.Transfers, n);
+      best = run == 0 ? took.count() : std::min(best, took.count());
+    }
+    return best;
+  };
+  const double small = seconds(250);
+  const double large = seconds(1000);
+  EXPECT_LT(large, 8 * small) << small << " s, then " << large << " s";
 }
 
 TEST(MoveAtLastUse, ABorrowedReferenceRetainedFirstIsAReferenceOfItsOwn) {

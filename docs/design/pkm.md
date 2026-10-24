@@ -739,7 +739,8 @@ for that reason; the lowering is deterministic already.
 | 2 | `f64` | | 8–11 | #96 inline optionals: `opt_i64`, `opt_f64`, `opt_bool`, `opt_char`; 12–15 reserved for further ones |
 | 3 | `bool` | | 16 | `weak`: a weak reference (#99, docs/design/weak-references.md) |
 | 4 | `char` | | 17 | `mem`: a local's or field's bytes (size and alignment follow, §5.3) |
-| 5 | `box` | | 18–255 | reserved |
+| 5 | `box` | | 18 | `view`: marks the local whose slot type follows as a `view`'s (docs/pir.md §3); only there |
+| | | | 19–255 | reserved |
 
 A reader of codec 1.x rejects reserved codes. A `static_assert`-checked
 table in `include/paykan/pir/Codes.h` holds both the opcode names the
@@ -820,7 +821,7 @@ FunctionRec
   -- definitions only --
   uleb nConventions ; nConventions × u8   per-parameter convention (#98): 0 owned, 1 borrowed; nConventions == nParams or 0
   uleb nParams ; nParams × (uleb id ; type ; str name)
-  uleb nLocals ; nLocals × (str name ; slot type ; u8 flags)   flags bit0 view (docs/pir.md §3); the others reserved
+  uleb nLocals ; nLocals × (str name ; [u8 18] ; slot type)   18 before the slot type: a view local (docs/pir.md §3)
   uleb nextValueId
   Block body
 ClassRec
