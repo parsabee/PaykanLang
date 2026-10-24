@@ -1979,7 +1979,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   const std::string callee = displayName(node->getCalleeName());
   S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
   S.checkViewArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
-  S.noteBorrowResult(node, callee, sig->Modes, node->getArguments(), nullptr);
+  S.noteBorrowResult(node, callee, sig->Modes, sig->ParamTypes,
+                     node->getArguments(), nullptr);
 
   node->setResolvedType(sig->ReturnType);
   return sig->ReturnType;
@@ -2167,7 +2168,7 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     S.checkViewArgs(method->getParamModes(), method->getParamTypes(),
                     node->getArguments(), node->getMethodName());
   S.noteBorrowResult(node, node->getMethodName(), method->getParamModes(),
-                     node->getArguments(), node->getReceiver());
+                     paramTys, node->getArguments(), node->getReceiver());
   // An `inout` result is part of the receiver, which must outlive the call.
   if (method->getParamModes().Result == ast::ParamMode::Inout &&
       !S.placeRoot(node->getReceiver()) &&
@@ -3481,6 +3482,10 @@ bool Sema::visitReturnStmt(ast::ReturnStmt *node) {
           !typesEqual(valTy, CurrentReturnType))
         why = "an 'inout' result has type '" + typeName(CurrentReturnType) +
               "', but what it returns has type '" + typeName(valTy) + "'";
+      // The caller keeps alive the storage it named, not an object reached
+      // through a field of another one.
+      if (why.empty() && CurrentResult.Mode == ast::ParamMode::Inout)
+        why = separateObjectError(node->getReturnValue());
       if (why.empty())
         return true;
       error(node->getReturnValue()->getLocation(), why);

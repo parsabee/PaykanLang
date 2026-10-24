@@ -231,6 +231,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive
+  while the result is used (docs/language/03-functions.md, "Where an `inout` result can
+  point"): into `self` (a field of a class's `self`, or a field of a struct or an element
+  of a tuple held in it; a struct's `self` counts as an `inout` parameter), or into what an
+  `inout` parameter names and the object a reference held there refers to (`return n.k;`
+  with `n: inout Node`, `return s.b.k;` with `s: inout S`, `return a[5].k;` with
+  `a: inout B[6]`).  One in a separate object, reached through a field of `self` or past
+  the object a parameter refers to, wrote to freed memory when another reference replaced
+  that field while the result was in use, and is now an error:
+  `fn e() -> inout Str => self.c.k;` is `'e' returns an 'inout' reference into 'self.c',
+  a separate object: an 'inout' result can only point into 'self' or into an 'inout'
+  parameter's storage; return a copy, or call an accessor on 'self.c' directly`.  So are
+  `self.c.p.x`, `self.arr[0].k` with object elements, `n.c.k`, an object of the array an
+  `inout` slice reaches (`a[i].k` with `a: inout B[]`, which also wrote to freed memory),
+  and another call's `inout` result that can point into one (`return self.c.slot();`,
+  `return pick(self.c);`).  A call's result counts as pointing wherever its call could,
+  whatever its body returns: `return self.s.num();` is an error when the struct `self.s`
+  holds an object, and `return self.s.n;` is not.  Return a copy, or call the object's own
+  accessor where the result is used (`h.c.slot()`), whose receiver the caller then keeps
+  alive.  The rule is checked where a function is defined, an override and an
+  `impl ... for` method too, and in each instantiation of a generic one.  `-> view T`
+  results are unchanged: their caller holds what they name.
 - An object handed on at a variable's last use lives as long as its destination holds it,
   no longer until the variable's scope ends (docs/language/16-memory.md, "Ownership
   transfers").  Nothing is ever released earlier than its last holder lets it go, and
@@ -367,8 +389,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of a class-typed one and those in a struct, a tuple or an array passed `inout` (and in a
   struct method's receiver), for as long as the result is used (docs/pir.md §7, "Reads a
   call may replace").  An `inout` result in an object the function reaches through
-  another object's field (`return self.c.k;`) is not kept alive yet
-  (docs/language/03-functions.md, "Borrowed results").
+  another object's field (`return self.c.k;`), which its caller cannot hold, is now a
+  compile error (see *Changed*).
+- An `inout` result could not be another method's result in `self`: `return self.key();`
+  in a class's method was `'self' cannot be returned 'inout': the method would no longer
+  know its object`, though only part of `self` is returned.  The receiver of a call whose
+  `inout` result is returned is not itself returned, so this is allowed.
 - `s[i]` computed the index before reading the string, against the left-to-right order of
   operands (docs/language/03-functions.md, "Exclusivity"): a call in the index that
   replaced the string (`t[bump(t)]` with `fn bump(s: inout Str)`, or `h.b.s[g(h)]` with

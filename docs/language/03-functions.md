@@ -664,10 +664,102 @@ Output:
   its 'inout' result is part of it`).
 - While the result is used, its caller keeps alive what it is part of: the receiver, the
   objects holding the `inout` arguments, and the objects those arguments hold
-  (`return b.k;` with `b: inout B`). Not yet storage the function reaches through a field
-  of another object, such as `return self.c.k;`: if `self.c` is replaced while the result
-  is in use, through another reference to the object, the storage the result names is
-  freed.
+  (`return b.k;` with `b: inout B`). So the result must be in that storage, as the next
+  section says.
+
+#### Where an `inout` result can point
+
+An `inout` result can only point into storage its caller keeps alive while the result is
+used:
+
+- Into `self`: a field of a class's `self`, or a field of a struct or an element of a tuple
+  held in it, at any depth (`return self.k;`, `return self.pos.x;`). A struct's `self` is
+  the receiver's storage, as an `inout` parameter's is.
+- Into what an `inout` parameter names: its storage (`return n;`, `return s.x;`), and the
+  object a reference held there refers to: the object of a class-typed one (`return n.k;`
+  with `n: inout Node`), or one that a struct, a tuple or a fixed-size array holds
+  (`return s.b.k;` with `s: inout S` and `b` a class-typed field, `return a[5].k;` with
+  `a: inout B[6]`). Not an object in a slice (`a: inout B[]`): its caller keeps none of
+  them alive.
+- Wherever another call's `inout` result can point, when all of it is allowed here: the
+  storage of the call's receiver and of each of its `inout` arguments, and the object a
+  reference held there refers to (the receiver's object, for a class's method): `return
+  self.key();`, `return pick(n);` with `n: inout Node`.
+
+A reference reached past that leads to a separate object. Another reference could replace
+it while the result is in use, freeing the storage the result names, so following one is an
+error:
+
+```pkn
+class C { k: Str; }
+
+class H {
+  c: C;
+  fn e() -> inout Str { return self.c.k; }
+}
+
+fn main() -> int { return 0; }
+```
+
+Error:
+
+```
+error: 'e' returns an 'inout' reference into 'self.c', a separate object: an 'inout' result can only point into 'self' or into an 'inout' parameter's storage; return a copy, or call an accessor on 'self.c' directly
+```
+
+So are `return self.c.p.x;`, `return self.arr[0].k;` when the elements are objects,
+`return n.c.k;` with `n: inout Node`, and a call's result in such an object: `return
+self.c.slot();` is `'e' returns the 'inout' result of 'slot', which can point into
+'self.c', a separate object: ...`. A call's result counts as pointing wherever that call
+could point, whatever its body returns: `return self.s.num();` is an error when the struct
+`self.s` holds an object, even if `num` returns its `n`; `return self.s.n;` is not.
+
+Return a copy instead (`-> Str`), or let the caller call the accessor of the object itself:
+its receiver is then what the caller keeps alive.
+
+```pkn
+import ::io;
+
+class Counter {
+  n: int;
+  fn count() -> inout int { return self.n; }
+}
+
+class Panel {
+  c: Counter;
+  hits: int;
+  fn total() -> inout int { return self.hits; }
+  view fn seen() -> int { return self.c.n; }   // a copy of a separate object's field
+}
+
+fn countOf(c: inout Counter) -> inout int { return c.n; }
+
+fn bump(n: inout int) { n = n + 1; }
+
+fn main() -> int {
+  p = Panel(Counter(1), 10);
+  bump(p.total());        // in p
+  bump(p.c.count());      // in p.c, the receiver
+  bump(countOf(p.c));     // in the object the argument refers to
+  io::println(Str(p.hits) + " " + Str(p.seen()));
+  return 0;
+}
+```
+
+Output:
+
+```
+11 3
+```
+
+The rule is checked where the function is defined, in every module, and for a generic one
+in each instantiation, with its type arguments: `self.v.x` in a `-> inout int` method of
+`Wrap<T>` is part of `self` in `Wrap<P>` for a struct `P`, and in a separate object in
+`Wrap<D>` for a class `D`.
+
+A `-> view T` result needs no such rule: its caller keeps what it names, an object or a
+string with a reference of its own and a value as a copy (with a reference of its own to
+each object in it), so replacing the field it was read from frees nothing the result uses.
 
 ---
 
@@ -971,5 +1063,5 @@ can call any runtime function.  A `PaykanString`'s
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |
 | Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout`, or returns a borrow where the method it overrides returns a copy (or the other way) |
 | A `view` result of something else | A `-> view T` function returns a new value, a copy parameter or a local, not part of `self` or of a `view` / `inout` parameter |
-| An `inout` result of something else | A `-> inout T` function returns what an `inout` argument could not be, or what is not part of `self` or of an `inout` parameter, or another type; a `view fn` returns `inout`; the receiver of a method returning `inout` is not a variable or a field |
+| An `inout` result of something else | A `-> inout T` function returns what an `inout` argument could not be, or what is not part of `self` or of an `inout` parameter, or another type; it returns storage in a separate object, reached through a field of `self` or past the object an `inout` parameter refers to (see [Where an `inout` result can point](#where-an-inout-result-can-point)); a `view fn` returns `inout`; the receiver of a method returning `inout` is not a variable or a field |
 | A function value misused | A builtin, a constructor, a generic function or a function returning a borrow used as a value; a call through a variable that is not a function; wrong arguments to a function value; a lambda capturing a borrow or assigning a captured name (see [Function types](14-function-types.md)) |

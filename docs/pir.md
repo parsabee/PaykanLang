@@ -686,13 +686,17 @@ CodeGen enforced, now in one place.
   argument holds, or copies a value held in memory there into a
   temporary (`mem.copy` and a `retain` of each reference), and keeps them
   like the objects above: released once the address is no longer used,
-  or held by an `inout` local's hidden owned locals.  An `inout` result in
-  storage the callee reaches through a field of any other object
-  (`return self.c.k;` in a class's method, `return b.c.k;`) is not kept
-  alive yet: its caller cannot name that object, and replacing `self.c`
-  through another reference to the object while the result is in use
-  frees the storage it names (docs/language/03-functions.md, "Borrowed
-  results").
+  or held by an `inout` local's hidden owned locals.  No other `inout`
+  result reaches the lowering: Sema rejects one in storage the callee
+  reaches through a field of any other object (`return self.c.k;` in a
+  class's method, `return b.c.k;` with `b: inout B`, a call's result
+  there), whose object its caller could not name, and one in an object
+  of the array an `inout` slice reaches, which a slice argument does not
+  hold (docs/language/03-functions.md, "Where an `inout` result can
+  point").  So whatever an `inout` result names, the receiver's hold and
+  these keep it alive.  A `view` result needs no hold: it is a +1 box,
+  or a value held in memory copied into the caller's slot with a
+  `retain` of each reference.
 * **Match**: the subject is evaluated once; a boxed subject is owned for the
   match's duration (pending release at match end, also on early exits).  Class
   arms compare `vtable.load` against `vtable.addr`; optional subjects test

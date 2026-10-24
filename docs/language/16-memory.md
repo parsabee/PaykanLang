@@ -537,10 +537,13 @@ Do not assume that sharing a reference-counted object across threads is safe tod
 - `destroy` runs automatically and releases everything an object owns, transitively.
 - A `weak` reference never keeps an object alive and never dangles: it reads as `None` once
   the object is gone.
+- A borrowed result never outlives what it names. A `-> view T` result is held by its caller,
+  and an `-> inout T` result can only point into storage its caller keeps alive while the
+  result is used: `self`, or what an `inout` parameter names and the object a reference held
+  there refers to. One in a separate object, reached through a field of another (`return
+  self.c.k;`), is a compile error
+  ([Where an `inout` result can point](03-functions.md#where-an-inout-result-can-point)).
 
 The two things the model does **not** do for you today are collecting reference cycles (break
 them with `weak`) and making reference counting safe across threads — both are known and on
-the roadmap. One construct is not covered yet either: an `-> inout` result in an object the
-function reaches through another object's field (`return self.c.k;`) is not kept alive by its
-caller, so replacing that field through another reference while the result is in use frees the
-storage it names ([Borrowed results](03-functions.md#borrowed-results)).
+the roadmap.

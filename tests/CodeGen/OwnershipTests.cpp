@@ -1009,6 +1009,141 @@ TEST(Ownership, AnInoutResultInAnObjectAValueHoldsStaysAlive) {
   g.expectNoLeaks("AnInoutResultInAnObjectAValueHoldsStaysAlive");
 }
 
+// An `inout` result in an object reached through a field of `self` was the
+// one its caller could not keep alive: with another reference replacing
+// `h.c` while the result was used, `put(h.slot(), h)` and an `inout` local
+// of `h.slot()` wrote to freed memory.  Such a result, the place itself or
+// a call's result there, is now a compile error.
+TEST(Ownership, AnInoutResultInAnObjectReachedThroughAFieldIsAnError) {
+  for (const char *ret : {"return self.c.k;", "return self.c.key();"}) {
+    auto r = compileAndRun(std::string(R"(import ::io;
+      class C {
+        k: Str;
+        fn key() -> inout Str { return self.k; }
+      }
+      class H {
+        c: C;
+        fn slot() -> inout Str { )") +
+                           ret + R"( }
+      }
+      fn put(x: inout Str, h: H) {
+        h.c = C("zero" + Str(0));
+        y = C("three" + Str(3));
+        x = "five" + Str(5);
+      }
+      fn main() -> int {
+        h = H(C("one" + Str(1)));
+        put(h.slot(), h);
+        d = h;
+        x: inout = h.slot();
+        d.c = C("zero" + Str(0));
+        y = C("three" + Str(3));
+        x = "five" + Str(5);
+        io::println(h.c.k);
+        return 0;
+      }
+    )");
+    EXPECT_FALSE(r.CompileOk) << ret;
+    const std::string what =
+        std::string(ret).find("key") == std::string::npos
+            ? "'slot' returns an 'inout' reference into 'self.c', a separate "
+              "object"
+            : "'slot' returns the 'inout' result of 'key', which can point "
+              "into 'self.c', a separate object";
+    EXPECT_NE(r.StdErr.find(what + ": an 'inout' result can only point into "
+                                   "'self' or into an 'inout' parameter's "
+                                   "storage; return a copy, or call an "
+                                   "accessor on 'self.c' directly"),
+              std::string::npos)
+        << r.StdErr;
+  }
+}
+
+// The accessor of the object itself, called where its result is used
+// (`h.c.slot()`), keeps that object alive while the result is: passed to an
+// `inout` parameter, or bound to an `inout` local, while another reference
+// replaces `h.c`, the write lands in the object the result was in, which
+// nothing else keeps.  So do the `inout` results that may still return a
+// call's: another method's in `self`, one in an `inout` parameter's object,
+// one in an object a struct parameter holds.  A `view` result in an object
+// reached through a field is a copy, which the replacement leaves as it was.
+TEST(Ownership, AnAccessorOfTheObjectItselfKeepsItAlive) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class C {
+      k: Str;
+      fn slot() -> inout Str { return self.k; }
+    }
+    struct S {
+      c: C;
+      n: int;
+    }
+    impl S {
+      fn slot() -> inout Str { return self.c.k; }
+    }
+    class H {
+      c: C;
+      k: Str;
+      s: S;
+      fn key() -> inout Str { return self.k; }
+      fn viaKey() -> inout Str { return self.key(); }
+      view fn peek() -> view Str { return self.c.k; }
+    }
+    fn pick(c: inout C) -> inout Str { return c.slot(); }
+    fn viaS(s: inout S) -> inout Str { return s.slot(); }
+    fn swap(h: H) -> Str {
+      h.c = C("zero" + Str(0));
+      h.s = S(C("zero" + Str(0)), 0);
+      y = C("three" + Str(3));
+      return y.k;
+    }
+    fn put(x: inout Str, h: H) -> Str {
+      t = swap(h);
+      x = "five" + Str(5);
+      return t;
+    }
+    fn show(s: view Str, h: H) -> Str {
+      t = swap(h);
+      return s + " " + t;
+    }
+    fn mk() -> H { return H(C("one" + Str(1)), "k" + Str(1), S(C("one" + Str(1)), 1)); }
+    fn main() -> int {
+      h = mk();
+      io::println("accessor: " + put(h.c.slot(), h) + " " + h.c.k);
+      h = mk();
+      c = h;
+      x: inout = h.c.slot();
+      t = swap(c);
+      x = "five" + Str(5);
+      io::println("bound accessor: " + x + " " + t + " " + c.c.k);
+      h = mk();
+      io::println("own accessor: " + put(h.viaKey(), h) + " " + h.k);
+      h = mk();
+      io::println("parameter's object: " + put(pick(h.c), h) + " " + h.c.k);
+      h = mk();
+      io::println("struct's object: " + put(viaS(h.s), h) + " " + h.s.c.k);
+      h = mk();
+      io::println("view: " + show(h.peek(), h) + " " + h.c.k);
+      h = mk();
+      c = h;
+      v: view = h.peek();
+      t = swap(c);
+      io::println("view local: " + v + " " + t + " " + c.c.k);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "accessor: three3 zero0\n"
+                      "bound accessor: five5 three3 zero0\n"
+                      "own accessor: three3 five5\n"
+                      "parameter's object: three3 zero0\n"
+                      "struct's object: three3 zero0\n"
+                      "view: one1 three3 zero0\n"
+                      "view local: one1 three3 zero0\n");
+  g.expectNoLeaks("AnAccessorOfTheObjectItselfKeepsItAlive");
+}
+
 // A call of a function whose own body makes no store that releases a
 // reference still replaces what its callees, a recursion, a method a
 // subclass overrides, its `inout` parameter or a struct method's `self`
