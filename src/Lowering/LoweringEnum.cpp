@@ -15,7 +15,8 @@
 //   * a variant is made in place (`E::B(1, s)`): zeros, the tag, then each
 //     field initialised as a struct's is;
 //   * a match switches on the tag; an arm's binding (`b: B { ... }`) is a
-//     copy of the variant's fields, or with `inout` the subject's own;
+//     copy of the variant's fields, which with `inout` goes back to the
+//     subject as variant B;
 //   * its text and equality are the runtime's, through a layout of every
 //     variant's name and fields (Runtime.h, "Enums").  An enum without
 //     fields is written to a local first, so both kinds share them.
@@ -137,12 +138,15 @@ Val ModuleLowering::emitEnumEquals(ast::Expr *a, ast::Expr *b) {
 Val ModuleLowering::emitPayloadEnumMatch(ast::MatchStmt *node) {
   auto *et = ast::cast<ast::EnumType>(node->getSubject()->getResolvedType());
   // The subject, copied into a slot of the match's scope: its references are
-  // held until the match ends, on every way out of it.
+  // held until the match ends, on every way out of it.  With a `b: inout B`
+  // arm it is read from its storage, where b goes back (emitMatchPlace).
   ScopeGuard matchGuard(*this);
   MemLayout l = memLayout(et);
   pir::LocalId subj = B.addMemLocal("match.subj", l.Size, l.Align);
   Val addr = B.localAddr(subj, "match.subj.addr");
-  emitMemInit(node->getSubject(), addr);
+  std::optional<pir::LocalId> place;
+  if (!emitMemMatchSubject(node, addr, place))
+    return Val();
   CurrentScope->declare("match.subj", subj, et);
 
   pir::Switch *s = B.openSwitch(B.ptrLoad(addr, Type::I64, "enum.tag"));
@@ -173,9 +177,8 @@ Val ModuleLowering::emitPayloadEnumMatch(ast::MatchStmt *node) {
                 Val::i64(pl.Size));
       emitMemRetain(own, payload);
       CurrentScope->declare(name, local, payload);
-      if (arm->getMode() == ast::ParamMode::Inout)
-        bindInoutArm(arm, local, node->getSubject(), payload, off,
-                     Val::i64(idx));
+      if (arm->getMode() == ast::ParamMode::Inout && place)
+        bindInoutArm(arm, local, *place, et, payload, off, Val::i64(idx));
       emitArmBody(arm);
     }
     B.leave();

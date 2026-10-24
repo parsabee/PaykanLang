@@ -30,7 +30,10 @@
 // storage, as `subject = n` would, after n's last use in the arm, or on a
 // way out of the arm before it (bindInoutArm, emitArmBody).  Until then the
 // subject cannot be used but through n (Sema), so a program sees the
-// subject change as n does.
+// subject change as n does.  The storage is found once, when the match
+// starts, and the matched value is read there (emitMatchPlace): a call on
+// the way to it (`b.slot().s`, with an `inout` result) runs once, and n
+// goes back where its value came from.
 //
 // For a reference type the storage holds a box, and the `inout` is a mutable
 // reference to it, not a share of it: it retains nothing and releases
@@ -48,6 +51,7 @@
 
 #include "LoweringInternal.h"
 
+#include <algorithm>
 #include <cassert>
 #include <functional>
 
@@ -544,23 +548,50 @@ bool ModuleLowering::checkImportedSlot(ast::ClassType *ct, uint32_t slot,
   return false;
 }
 
-void ModuleLowering::bindInoutArm(const ast::MatchArm *arm,
-                                  pir::LocalId binding, ast::Expr *subject,
-                                  ast::Type *bindTy, int64_t offset,
-                                  const Val &header) {
-  const std::string &name = arm->getBinding();
+// static
+bool ModuleLowering::hasInoutArm(const ast::MatchStmt *node) {
+  return std::any_of(node->getArms().begin(), node->getArms().end(),
+                     [](const ast::MatchArm *arm) {
+                       return arm->hasBinding() &&
+                              arm->getMode() == ast::ParamMode::Inout;
+                     });
+}
+
+std::optional<pir::LocalId> ModuleLowering::emitMatchPlace(ast::Expr *subject) {
   std::vector<Val> keep;
   const size_t mark = MemTemps.size();
   Val addr = emitInoutArg(subject, keep, /*keepObject=*/true);
   if (!addr)
-    return;
-  // Released after the write-back, which needs the field's object.
-  holdObjects(name, std::move(keep), mark);
-  pir::LocalId place = B.addLocal(name + ".place", Type::Ptr);
+    return std::nullopt;
+  // Released when the match ends, after the write-back, which needs the
+  // field's object.
+  holdObjects("match.subj", std::move(keep), mark);
+  pir::LocalId place = B.addLocal("match.place", Type::Ptr);
   B.store(place, addr);
-  CurrentScope->WriteBacks.push_back({arm, place, binding,
-                                      subject->getResolvedType(), bindTy,
-                                      offset, header});
+  return place;
+}
+
+bool ModuleLowering::emitMemMatchSubject(ast::MatchStmt *node, const Val &dst,
+                                         std::optional<pir::LocalId> &place) {
+  if (!hasInoutArm(node)) {
+    emitMemInit(node->getSubject(), dst);
+    return true;
+  }
+  place = emitMatchPlace(node->getSubject());
+  if (!place)
+    return false;
+  ast::Type *ty = node->getSubject()->getResolvedType();
+  B.memCopy(dst, B.load(*place, "subj.addr"), Val::i64(memLayout(ty).Size));
+  emitMemRetain(dst, ty);
+  return true;
+}
+
+void ModuleLowering::bindInoutArm(const ast::MatchArm *arm,
+                                  pir::LocalId binding, pir::LocalId place,
+                                  ast::Type *placeTy, ast::Type *bindTy,
+                                  int64_t offset, const Val &header) {
+  CurrentScope->WriteBacks.push_back(
+      {arm, place, binding, placeTy, bindTy, offset, header});
 }
 
 void ModuleLowering::emitArmBody(const ast::MatchArm *arm) {

@@ -18,6 +18,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <optional>
 #include <ostream>
 #include <set>
 #include <string>
@@ -984,14 +985,30 @@ private:
   /// @p place.
   void emitInoutBinding(const std::string &name, ast::Expr *place,
                         ast::Type *astTy);
-  /// @p arm's `n: inout T` on @p subject, n already bound to its own copy
-  /// of the matched value (the local @p binding, of type @p bindTy; the
-  /// part at @p offset after @p header of a value held in memory): n goes
-  /// back to the subject's storage after its last use, or on a way out of
-  /// the arm's scope before it (Scope::WriteBack).
+  /// Whether an arm of @p node binds `n: inout T`.
+  static bool hasInoutArm(const ast::MatchStmt *node);
+  /// The storage of @p subject, the subject of a `match` with an
+  /// `n: inout T` arm: a local holding its address, found once, before any
+  /// arm runs, so that a call on the way to it runs once and n goes back
+  /// where the matched value was read.  The objects it is in are held by
+  /// hidden locals of the current scope, the match's, until the match ends.
+  /// None when it could not be found (an internal error, reported).
+  std::optional<pir::LocalId> emitMatchPlace(ast::Expr *subject);
+  /// The subject of @p node, a value held in memory, copied to @p dst, its
+  /// references retained; with an `n: inout T` arm, read from its storage,
+  /// which @p place then holds the address of (emitMatchPlace).  False when
+  /// that could not be found.
+  bool emitMemMatchSubject(ast::MatchStmt *node, const Val &dst,
+                           std::optional<pir::LocalId> &place);
+  /// @p arm's `n: inout T`, n already bound to its own copy of the matched
+  /// value (the local @p binding, of type @p bindTy; the part at @p offset
+  /// after @p header of a value held in memory): n goes back to the
+  /// subject's storage, of type @p placeTy, whose address @p place holds
+  /// (emitMatchPlace), after its last use, or on a way out of the arm's
+  /// scope before it (Scope::WriteBack).
   void bindInoutArm(const ast::MatchArm *arm, pir::LocalId binding,
-                    ast::Expr *subject, ast::Type *bindTy, int64_t offset = 0,
-                    const Val &header = Val());
+                    pir::LocalId place, ast::Type *placeTy, ast::Type *bindTy,
+                    int64_t offset = 0, const Val &header = Val());
   /// The body of @p arm, in the arm's scope: an `inout` binding bound by
   /// bindInoutArm is written back after the statement of its last use
   /// (MatchArm::bindingUses), so what the arm does to the subject after

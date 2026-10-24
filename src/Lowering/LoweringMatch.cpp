@@ -85,25 +85,38 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
   // A tagged union: a switch on its tag (LoweringEnum.cpp).
   if (ast::isPayloadEnum(node->getSubject()->getResolvedType()))
     return emitPayloadEnumMatch(node);
-  // 1. Evaluate the subject once.  A boxed subject (call result, field read)
-  //    is owned for the duration of the match and released on every exit.
-  Val subjRaw = emitExpr(node->getSubject());
-  if (!subjRaw)
-    return Val();
-  Val sharedSubj; // non-null iff we must release at the end
-  if (exprAlreadyShared(node->getSubject())) {
-    sharedSubj = takeSharedOwnership(node->getSubject(), subjRaw);
-    subjRaw = emitSharedGet(sharedSubj, "subj.obj");
-  } else if (isTrackedStringTemp(subjRaw)) {
-    // A raw string temporary (a literal, a concatenation): box it so the
-    // match owns it for its whole duration and arm bindings can share it.
-    sharedSubj = emitSharedNew(subjRaw, "subj.box");
-  }
-
   // A scope spanning the whole match: the subject box is a pending release
   // of this scope, so fall-through, `return`, `break` and `continue` all
   // release it.
   ScopeGuard matchGuard(*this);
+
+  // 1. Evaluate the subject once.  A boxed subject (call result, field read)
+  //    is owned for the duration of the match and released on every exit.
+  //    With an `n: inout T` arm, the box is read from the subject's storage,
+  //    where n goes back (emitMatchPlace).
+  Val subjRaw;
+  Val sharedSubj; // non-null iff we must release at the end
+  std::optional<pir::LocalId> place;
+  if (hasInoutArm(node)) {
+    place = emitMatchPlace(node->getSubject());
+    if (!place)
+      return Val();
+    sharedSubj = B.ptrLoad(B.load(*place, "subj.addr"), Type::Box, "subj.box");
+    emitRetain(sharedSubj);
+    subjRaw = emitSharedGet(sharedSubj, "subj.obj");
+  } else {
+    subjRaw = emitExpr(node->getSubject());
+    if (!subjRaw)
+      return Val();
+    if (exprAlreadyShared(node->getSubject())) {
+      sharedSubj = takeSharedOwnership(node->getSubject(), subjRaw);
+      subjRaw = emitSharedGet(sharedSubj, "subj.obj");
+    } else if (isTrackedStringTemp(subjRaw)) {
+      // A raw string temporary (a literal, a concatenation): box it so the
+      // match owns it for its whole duration and arm bindings can share it.
+      sharedSubj = emitSharedNew(subjRaw, "subj.box");
+    }
+  }
   if (sharedSubj)
     CurrentScope->PendingReleases.push_back(sharedSubj);
 
@@ -201,8 +214,9 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
         B.markView(local);
       B.store(local, box);
       CurrentScope->declare(ta.Arm->getBinding(), local, ta.BindTy);
-      if (ta.Arm->getMode() == ast::ParamMode::Inout)
-        bindInoutArm(ta.Arm, local, node->getSubject(), ta.BindTy);
+      if (ta.Arm->getMode() == ast::ParamMode::Inout && place)
+        bindInoutArm(ta.Arm, local, *place,
+                     node->getSubject()->getResolvedType(), ta.BindTy);
     }
     emitArmBody(ta.Arm);
   };

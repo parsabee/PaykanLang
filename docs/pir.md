@@ -686,9 +686,10 @@ CodeGen enforced, now in one place.
   method's receiver, an `inout` argument, the place a call's `inout`
   result names), keeps the object it is in alive: that object, read
   through another one (`h.a` of `h.a.xs`), is `retain`ed, and released
-  once the address is no longer used; for an `inout` local or a `match`
-  arm's `n: inout T`, a hidden owned local holds it until the local's
-  scope ends.  So `h.b.s + g(h)` joins the string `h.b.s` held before `g`
+  once the address is no longer used; for an `inout` local, a hidden owned
+  local holds it until the local's scope ends, and for a `match` with an
+  arm's `n: inout T`, whose subject's storage is found once, until the
+  `match` ends.  So `h.b.s + g(h)` joins the string `h.b.s` held before `g`
   ran, `h.b.m(h)` runs `m` on the object that was in `h.b`, and
   `h.b.s = g(h)` writes to that object, whatever `g` and `m` assign.  A
   read in use where no such call is made is read in place, with no

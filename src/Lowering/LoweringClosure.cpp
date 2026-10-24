@@ -414,12 +414,15 @@ Val ModuleLowering::emitMemOptionalMatch(ast::MatchStmt *node) {
   auto *optTy = ast::dyn_cast<ast::OptionalType>(subjTy);
   ast::Type *inner = optTy ? optTy->getInnerType() : subjTy;
   // The subject, copied into a slot of the match's scope: its references are
-  // held until the match ends, on every way out of it.
+  // held until the match ends, on every way out of it.  With a `p: inout T`
+  // arm it is read from its storage, where p goes back (emitMatchPlace).
   ScopeGuard matchGuard(*this);
   MemLayout l = memLayout(subjTy);
   pir::LocalId subj = B.addMemLocal("match.subj", l.Size, l.Align);
   Val addr = B.localAddr(subj, "match.subj.addr");
-  emitMemInit(node->getSubject(), addr);
+  std::optional<pir::LocalId> place;
+  if (!emitMemMatchSubject(node, addr, place))
+    return Val();
   CurrentScope->declare("match.subj", subj, subjTy);
 
   ast::MatchArm *noneArm = nullptr;
@@ -459,8 +462,8 @@ Val ModuleLowering::emitMemOptionalMatch(ast::MatchStmt *node) {
               Val::i64(il.Size));
     emitMemRetain(own, inner);
     CurrentScope->declare(name, local, inner);
-    if (valueArm->getMode() == ast::ParamMode::Inout)
-      bindInoutArm(valueArm, local, node->getSubject(), inner, off,
+    if (valueArm->getMode() == ast::ParamMode::Inout && place)
+      bindInoutArm(valueArm, local, *place, subjTy, inner, off,
                    off ? Val::boolean(true) : Val());
     emitArmBody(valueArm);
   } else {

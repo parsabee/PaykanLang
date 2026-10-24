@@ -788,6 +788,53 @@ TEST(LocalBorrow, InoutArmsGoBackAtTheirLastUse) {
   guard.expectNoLeaks("inout arms written back at their last use");
 }
 
+// The subject of a `match` with an `inout` arm is found once, before any arm
+// runs: a call on the way to it (a method with an `inout` result, a function
+// returning an object) runs once, and the binding goes back where its value
+// was read, even when another call would name other storage.
+TEST(LocalBorrow, InoutArmsFindTheirSubjectOnce) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(import ::io;
+    enum Sh { E, L(s: Str) }
+    class Animal { n: int; }
+    impl Animal { fn __init__(n: int) { self.n = n; } }
+    class Dog : Animal {}
+    impl Dog { fn __init__(n: int) { __super__(n); } }
+    struct Q { y: Str; }
+    struct W { s: Sh; a: Animal; q: Q?; }
+    class B {
+      w0: W;
+      w1: W;
+      k: int;
+      fn next() -> inout W {
+        self.k += 1;
+        if self.k % 2 == 1 { return self.w0; }
+        return self.w1;
+      }
+    }
+    class H { s: Sh; }
+    fn mk(t: Str) -> H { io::print("mk "); return H(Sh::L(t + "")); }
+    fn first(b: B) -> Str {
+      match b.next().s { l: inout L { l.s = l.s + "?"; return l.s; } _ { return "-"; } }
+    }
+    fn main() -> int {
+      b = B(W(Sh::L("a" + ""), Animal(1), Q("p" + "")), W(Sh::E, Dog(2), None), 0);
+      match b.next().s { l: inout L { l.s = l.s + "!"; } _ { } }
+      match b.next().a { d: inout Dog { d = Dog(d.n + 5); } _ { io::print("not a dog "); } }
+      match b.next().q { q: inout Q { q.y = q.y + "!"; } None { } }
+      io::print(first(b) + " " + first(b) + " ");
+      io::println(b.w0.s.toString() + " " + b.w0.q.toString() + " " + Str(b.w0.a.n) + " " +
+                  b.w1.s.toString() + " " + Str(b.w1.a.n) + " " + Str(b.k));
+      match mk("m").s { l: inout L { l.s = l.s + "!"; io::println(l.s); } _ { } }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "- a!? L(s: a!?) Q(y: p!) 1 E 7 5\nmk m!\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  guard.expectNoLeaks("inout arms whose subject is reached through a call");
+}
+
 // A borrowed result is returned like any other: part of `self` (a field, an
 // element) or of a `view` parameter, read by its caller, bound to a `view`
 // local and passed on to a `view` parameter.

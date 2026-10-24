@@ -485,6 +485,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   another reference replaced it (`g.h = H(...)` with `g = o`), a write to `x`, or the
   arm's binding going back, wrote freed memory.  The object is kept while the local or the
   binding can be used.
+- A `match` with an `n: inout T` arm evaluated its subject twice, for the matched value and
+  again for the storage the binding goes back to, so a call on the way to it
+  (`b.slot().s`, with `slot` returning `inout`, or `mk().s`) ran twice, and when the
+  second call named other storage, the binding went back there and not where its value
+  came from.  The subject's storage is found once, when the `match` starts, and the value
+  is read there (docs/language/08-match.md, "Borrowing the subject").
 - A local borrow's liveness (docs/language/02-basics.md, "Local borrows"): a lambda or a call
   through a function value (`fs[0](5)`) after a borrow's last use kept every borrow of the
   block live, so a valid use of the borrowed variable was rejected; a call through a
