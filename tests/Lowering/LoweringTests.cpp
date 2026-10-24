@@ -575,9 +575,14 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
       b: B;
       c: B;
       s: S;
+      o: B?;
     }
     fn clear(h: H) -> int {
       h.b = B("c", 0);
+      return 0;
+    }
+    fn drop(x: inout B?) -> int {
+      x = None;
       return 0;
     }
     fn peek(h: H) -> Str { return "!" + Str(h.b.count()); }
@@ -591,6 +596,7 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
     fn byObj(h: H) -> int { return h.b.viaObj(h); }
     fn bySet(h: H) -> Str { return h.b.s + Str(h.c.setIt(h.b.s)); }
     fn byStruct(h: H) -> Str { return h.s.b.s + Str(h.s.reset()); }
+    fn byDrop(h: H) -> Str { return h.b.s + Str(drop(h.o)); }
     fn operand(h: H) -> Str { return h.b.s + peek(h); }
     fn main() -> int { return 0; }
   )");
@@ -610,6 +616,7 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
            Case{"byObj", ", H.b", "call @B.viaObj("},
            Case{"bySet", ", B.s", "call @B.setIt("},
            Case{"byStruct", ", B.s", "call @S.reset("},
+           Case{"byDrop", ", B.s", "call @drop("},
        }) {
     std::string f = function(l.Text, c.Fn);
     EXPECT_TRUE(heldAcross(f, defined(f, c.Read), c.Call)) << c.Fn << "\n" << f;

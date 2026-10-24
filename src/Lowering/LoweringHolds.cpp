@@ -568,9 +568,10 @@ struct ModuleLowering::ReleaseScan {
   /// The function read: a call of it from its own body does what the rest
   /// of the body does.
   const ast::FuncDecl *Fn;
-  /// Its names for storage it does not own: `self` (a struct's), its
-  /// `inout` parameters and locals, its `match` arms' `n: inout T`.
-  std::unordered_set<std::string> NotOwned;
+  /// Its names for storage it does not own, with the type stored there
+  /// (null when not known): `self` (a struct's), its `inout` parameters
+  /// and locals, its `match` arms' `n: inout T`.
+  std::unordered_map<std::string, const ast::Type *> NotOwned;
 
   /// Whether a value of type @p ty holds a reference that storing another
   /// releases.
@@ -628,13 +629,14 @@ bool ModuleLowering::ReleaseScan::stmt(ast::Stmt *s) {
     if (!vd)
       return true;
     if (vd->getMode() == ast::ParamMode::Inout)
-      NotOwned.insert(vd->getName());
+      NotOwned[vd->getName()] = vd->getType();
     return expr(vd->getInitExpr());
   }
-  if (auto *x = ast::dyn_cast<ast::AssignStmt>(s))
-    return (NotOwned.count(x->getVarName()) &&
-            holdsReference(x->getValue()->getResolvedType())) ||
+  if (auto *x = ast::dyn_cast<ast::AssignStmt>(s)) {
+    auto it = NotOwned.find(x->getVarName());
+    return (it != NotOwned.end() && holdsReference(it->second)) ||
            expr(x->getValue());
+  }
   if (auto *x = ast::dyn_cast<ast::MemberAssignStmt>(s))
     return holdsReference(fieldType(x->getReceiver(), x->getFieldName())) ||
            expr(x->getReceiver()) || expr(x->getValue());
@@ -667,7 +669,7 @@ bool ModuleLowering::ReleaseScan::stmt(ast::Stmt *s) {
       return true;
     for (ast::MatchArm *arm : x->getArms()) {
       if (arm->hasBinding() && arm->getMode() == ast::ParamMode::Inout)
-        NotOwned.insert(arm->getBinding());
+        NotOwned[arm->getBinding()] = arm->getArmType();
       if (stmt(arm->getBody()))
         return true;
     }
@@ -774,10 +776,10 @@ bool ModuleLowering::mayRelease(const ast::FuncDecl *fn) {
     return it->second;
   MayRelease[fn] = true; // while it is read: a call of it from another one
   ReleaseScan scan{*this, fn, {}};
-  scan.NotOwned.insert(names::kSelf);
+  scan.NotOwned[names::kSelf] = nullptr;
   for (const ast::Param &p : fn->getParams())
     if (p.Mode == ast::ParamMode::Inout)
-      scan.NotOwned.insert(p.getName());
+      scan.NotOwned[p.getName()] = p.ParamType;
   const bool may = scan.stmt(fn->getBody());
   MayRelease[fn] = may;
   return may;
