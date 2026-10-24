@@ -1344,6 +1344,128 @@ TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
   g.expectNoLeaks("AReleaseInACalleesCalleeStillHoldsTheRead");
 }
 
+// The counterexamples of the analysis that lets a call keep reads it cannot
+// replace in place (docs/pir.md §7): a call that replaces a field through a
+// narrowed `inout` arm (`d: inout Derived<int>` on a `Base` field) frees
+// the object a read of the field holds, though the object's class is exact
+// and holds no `Base`; one given only a Wrap replaces the field an `inout`
+// parameter names (its slot is of the parameter's superclass); a call
+// given a parameter the function may hand on replaces a field of its
+// object.  Each method runs on, and each string is the one of, the object
+// that was there.
+TEST(Ownership, AReadACallReplacesThroughANarrowedPlaceLivesThroughIt) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Base {
+      n: int;
+      view fn m(x: int) -> int { return self.n + x; }
+    }
+    impl Base { fn __init__(n: int) { self.n = n; } }
+    class Derived<X> : Base { v: X; }
+    impl Derived<X> {
+      fn __init__(n: int, v: X) { __super__(n); self.v = v; }
+    }
+    class Plain : Base {
+      tag: Str;
+      view fn m(x: int) -> int { return self.n + x + self.tag.len(); }
+    }
+    impl Plain {
+      fn __init__(n: int, t: Str) { __super__(n); self.tag = t; }
+    }
+    class Holder { b: Base; weak w: Base?; }
+    impl Holder {
+      fn __init__() { self.b = Derived<int>(100, 9); self.w = self.b; }
+      fn run() -> int { return self.b.m(reset(self)); }
+      fn state() -> Str {
+        match self.w {
+          Base { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    fn reset(h: Holder) -> int {
+      match h.b {
+        d: inout Derived<int> { d = Derived<int>(1, 9); }
+        _ { }
+      }
+      return 7;
+    }
+    class Wrap { h: Holder; }
+    fn clobber(w: Wrap) -> int {
+      w.h.b = Base(100);
+      return 5;
+    }
+    fn use(x: inout Plain, w: Wrap) -> int { return x.m(clobber(w)); }
+    class Node { name: Str; }
+    class Pair { node: Node; }
+    fn replace(p: Pair) -> Str {
+      p.node = Node("o" + Str(2));
+      return "!";
+    }
+    fn local(p: Pair) -> Str { return p.node.name + replace(p); }
+    fn main() -> int {
+      h = Holder();
+      r = h.run();
+      io::println("arm: " + Str(r) + " " + h.state());
+      h2 = Holder();
+      h2.b = Plain(1, "abc");
+      w = Wrap(h2);
+      match h2.b {
+        s: inout Plain {
+          s = Plain(2, "fresh");
+          io::println("inout: " + Str(use(s, w)));
+        }
+        _ { }
+      }
+      io::println(local(Pair(Node("n" + Str(1)))));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "arm: 107 freed\ninout: 12\nn1!\n");
+  g.expectNoLeaks("AReadACallReplacesThroughANarrowedPlaceLivesThroughIt");
+}
+
+// The standard library's containers read their state in place across the
+// calls that let go only of their elements and nodes: growing a map past
+// its rehash, replacing and removing keys, clearing it, and stacks, queues
+// and heaps of strings run as before, with every value released.
+TEST(Ownership, AContainersStateNeedsNoHoldAcrossItsOwnMethods) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    import ::collections as c;
+    fn main() -> int {
+      m = c::HashMap<Str, int>();
+      i = 0;
+      while i < 40 {
+        m.put("k" + Str(i), i);
+        i = i + 1;
+      }
+      m.put("k3", 300);
+      m.remove("k4");
+      io::println(Str(m.get("k3")) + " " + Str(m.len()) + " " +
+                  Str(m.keys().len()));
+      m.clear();
+      s = c::Stack<Str>();
+      q = c::Queue<Str>();
+      p = c::MinPriorityQueue<Str>();
+      for j in 0..5 {
+        s.push("s" + Str(j));
+        q.enqueue("q" + Str(j));
+        p.push("p" + Str(j), 5 - j);
+      }
+      io::println(s.pop() + q.dequeue() + p.pop() + " " + Str(m.len()) +
+                  Str(s.len()) + Str(q.len()) + Str(p.len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "300 39 39\ns4q0p4 0444\n");
+  g.expectNoLeaks("AContainersStateNeedsNoHoldAcrossItsOwnMethods");
+}
+
 // A string's character is read from the string as it was before its index
 // was computed, as an array's element is, though the call computing it
 // replaces the string (and makes a new one where it was).

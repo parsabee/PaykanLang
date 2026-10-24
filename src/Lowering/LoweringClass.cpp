@@ -257,6 +257,7 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
       fn->Params[0].Name = kSelf;
       nameParams(*fn, 1, funcDecl->getParams());
       Bodies[fn->Name] = funcDecl;
+      BodyOwners[funcDecl] = ct;
     }
   }
   pir::Function *dtor = getOrCreateFunction(
@@ -348,6 +349,7 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
       pir::LocalId selfLocal = B.addLocal(kSelf, Type::Obj);
       B.store(selfLocal, Val(pir::Operand::value(fn->Params[0]), Type::Obj));
       CurrentScope->declareUnowned(kSelf, selfLocal, ct);
+      CurrentScope->markStable(kSelf);
       size_t at = 1;
       for (size_t i = 0; i < funcDecl->getParams().size(); ++i)
         at +=

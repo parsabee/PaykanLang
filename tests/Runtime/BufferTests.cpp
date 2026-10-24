@@ -7,9 +7,17 @@
 // it, and misuse panics.  Each test runs on the tracking allocator and ends
 // with no live blocks.
 
+#include "Names.h"
+
 #include <cstddef>
 #include <cstring>
+#include <fstream>
+#include <functional>
 #include <gtest/gtest.h>
+#include <iterator>
+#include <map>
+#include <regex>
+#include <set>
 #include <string>
 
 extern "C" {
@@ -246,4 +254,76 @@ TEST(BufferDeath, BadCountsPanic) {
   EXPECT_DEATH(PaykanBuffer_shrink(&kInt, &buf, 4),
                "buffer shrink by 4: it has only 3 values");
   Paykan_release(buf);
+}
+
+// What the lowering knows of the Buffer functions (Names.h,
+// kPaykanBufferFunctions, read in src/Lowering/LoweringHolds.cpp) is what
+// Buffer.c does: the table has every function it defines, none of them
+// replaces the buffer an `inout` handle names, and only those the table
+// says drop values let go of one.  A read the lowering keeps in place
+// across a call of one is only safe while this holds.
+TEST(Buffer, TheFunctionsDoWhatTheLoweringKnowsOfThem) {
+  std::ifstream source(PAYKAN_RUNTIME_BUFFER_SOURCE);
+  ASSERT_TRUE(source) << PAYKAN_RUNTIME_BUFFER_SOURCE;
+  const std::string text((std::istreambuf_iterator<char>(source)),
+                         std::istreambuf_iterator<char>());
+  std::set<std::string> defined;
+  const std::regex definition(R"((^|\n)[A-Za-z][^\n]*\b(PaykanBuffer_\w+)\()");
+  for (auto it = std::sregex_iterator(text.begin(), text.end(), definition);
+       it != std::sregex_iterator(); ++it)
+    if ((*it)[0].str().find("static") == std::string::npos)
+      defined.insert((*it)[2].str());
+  std::set<std::string> known;
+  for (const paykan::names::BufferFunction &f :
+       paykan::names::kPaykanBufferFunctions)
+    known.insert(f.Symbol);
+  EXPECT_EQ(defined, known);
+
+  TrackingHeap heap;
+  PaykanShared *other = str("b");
+  const std::map<std::string, std::function<void(PaykanShared **)>> calls = {
+      {paykan::names::kPaykanBufferNew,
+       [](PaykanShared **) {
+         Paykan_release(PaykanBuffer_new(&kStr.head, 2));
+       }},
+      {paykan::names::kPaykanBufferLen,
+       [](PaykanShared **b) { PaykanBuffer_len(&kStr.head, obj(*b)); }},
+      {paykan::names::kPaykanBufferGet,
+       [](PaykanShared **b) { PaykanBuffer_get(&kStr.head, obj(*b), 0); }},
+      {paykan::names::kPaykanBufferCopy,
+       [](PaykanShared **b) {
+         PaykanShared *got = nullptr;
+         PaykanBuffer_copy(&kStr.head, &got, obj(*b), 0);
+         Paykan_release(got);
+       }},
+      {paykan::names::kPaykanBufferIsSet,
+       [](PaykanShared **b) { PaykanBuffer_isSet(&kStr.head, obj(*b), 0); }},
+      {paykan::names::kPaykanBufferSet,
+       [&](PaykanShared **b) { PaykanBuffer_set(&kStr.head, b, 0, &other); }},
+      {paykan::names::kPaykanBufferReserve,
+       [](PaykanShared **b) { PaykanBuffer_reserve(&kStr.head, b, 100); }},
+      {paykan::names::kPaykanBufferGrow,
+       [](PaykanShared **b) { PaykanBuffer_grow(&kStr.head, b, 100); }},
+      {paykan::names::kPaykanBufferTryReserve,
+       [](PaykanShared **b) { PaykanBuffer_tryReserve(&kStr.head, b, 100); }},
+      {paykan::names::kPaykanBufferTryGrow,
+       [](PaykanShared **b) { PaykanBuffer_tryGrow(&kStr.head, b, 100); }},
+      {paykan::names::kPaykanBufferShrink,
+       [](PaykanShared **b) { PaykanBuffer_shrink(&kStr.head, b, 1); }},
+  };
+  for (const paykan::names::BufferFunction &f :
+       paykan::names::kPaykanBufferFunctions) {
+    auto call = calls.find(f.Symbol);
+    ASSERT_NE(call, calls.end()) << f.Symbol;
+    PaykanShared *buf = PaykanBuffer_new(&kStr.head, 1);
+    PaykanShared *a = str("a");
+    PaykanBuffer_set(&kStr.head, &buf, 0, &a);
+    PaykanShared *const handle = buf;
+    call->second(&buf);
+    EXPECT_EQ(buf, handle) << f.Symbol;
+    EXPECT_EQ(a->strong, f.Drops ? 1 : 2) << f.Symbol;
+    Paykan_release(buf);
+    Paykan_release(a);
+  }
+  Paykan_release(other);
 }

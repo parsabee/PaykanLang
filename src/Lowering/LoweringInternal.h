@@ -197,6 +197,9 @@ private:
     /// `inout` parameters declared in this scope: their local holds the
     /// address of the caller's storage, of this type.
     std::unordered_map<std::string, pir::Type> InoutVars;
+    /// The function's names for storage it never hands on: a method's
+    /// `self`, its `inout`, `view` and slice parameters (markStable).
+    std::unordered_set<std::string> StableVars;
     /// Extra owned boxes released at scope exit (e.g. a match subject).
     std::vector<Val> PendingReleases;
     /// A `match` arm's `n: inout T` (bindInoutArm): after n's last use in
@@ -245,6 +248,12 @@ private:
     /// The type an `inout` parameter @p name points to; Void for any other
     /// variable.
     pir::Type inoutType(const std::string &name) const;
+    /// Mark @p name, declared in this scope, as storage the function never
+    /// hands on: what it names outlives the function's own variables, which
+    /// it may hand on at their last use (docs/pir.md §12).
+    void markStable(const std::string &name) { StableVars.insert(name); }
+    /// Whether the variable @p name is such storage (markStable).
+    bool isStable(const std::string &name) const;
     Scope *findOwner(const std::string &name);
   };
 
@@ -413,19 +422,76 @@ private:
   /// whatever the object reaches.
   static bool reachesObject(const ast::Type *ty);
   /// This module's functions and the methods of the classes and structs it
-  /// defines, by PIR name (`f`, `C.m`, `S.m`): the bodies mayRelease reads.
+  /// defines, by PIR name (`f`, `C.m`, `S.m`): the bodies effectOf reads.
   std::unordered_map<std::string, const ast::FuncDecl *> Bodies;
+  /// The class or struct whose method each body of Bodies is.
+  std::unordered_map<const ast::FuncDecl *, ast::Type *> BodyOwners;
   /// The function or method named @p name in Bodies, or null.
   const ast::FuncDecl *bodyOf(const std::string &name) const;
-  /// Whether running @p fn may release a reference that storage it does not
-  /// own holds, or replace such a reference (LoweringHolds.cpp): true
-  /// unless its body is in Bodies and stores no reference outside its own
-  /// variables and makes no call that may.  A call of a function that
-  /// cannot replaces nothing, whatever it is given.
-  bool mayRelease(const ast::FuncDecl *fn);
-  struct ReleaseScan;
-  /// mayRelease's answers; true for a function being read (a recursion).
-  std::unordered_map<const ast::FuncDecl *, bool> MayRelease;
+
+  /// What running some code may do to references held by storage it does
+  /// not own (LoweringHolds.cpp, docs/pir.md §7): the classes whose
+  /// references it may let go of, or not known.
+  struct Effect {
+    /// What it does is not known: it may let go of any reference.
+    bool Unknown = false;
+    /// It may let go of a reference at all: it stores one where its caller
+    /// may hold one, or makes a call that may (the rule without the types,
+    /// which a read rooted in the function's own variables keeps).
+    bool Releases = false;
+    /// The classes of the slots whose references it may let go of: the
+    /// ones it may store into, and every one an object or a value it lets
+    /// go of may hold (whose dying may let them go).
+    std::unordered_set<const ast::Type *> Types;
+
+    static Effect unknown() { return {true, true, {}}; }
+    void add(const Effect &other);
+  };
+  /// What a call of @p fn does: Unknown for null or a function without a
+  /// body (one another module compiles, a pure virtual method).
+  const Effect &effectOf(const ast::FuncDecl *fn);
+  struct EffectScan;
+  /// effectOf's answers; Unknown for a function being read (a recursion).
+  std::unordered_map<const ast::FuncDecl *, Effect> Effects;
+  /// The classes letting go of a value of type @p ty may let go of: its
+  /// own, and those of what it holds, and what dying objects of exact
+  /// classes hold (isExactClass); Unknown for an object of another class,
+  /// whose subclass may hold anything, and for a function value.
+  const Effect &dropEffect(ast::Type *ty);
+  std::unordered_map<const ast::Type *, Effect> DropEffects;
+  /// A class no class derives from: Str, or an instance of a generic class
+  /// (a superclass is never generic).
+  static bool isExactClass(const ast::ClassType *ct);
+  /// The canonical type of a slot holding @p ty: optionals stripped (a
+  /// `T?` slot holds a T or None).
+  ast::Type *slotType(ast::Type *ty);
+  /// What the method @p name, run on an object of class @p ct, does: the
+  /// one an `impl` block or, for an exact class, its vtable names;
+  /// Unknown when another module compiles it or a subclass may override
+  /// it.
+  Effect methodEffect(ast::ClassType *ct, const std::string &name);
+  /// What the runtime's `toString` or `==` (@p method) of a value of type
+  /// @p ty does: each object's in it.
+  Effect valueMethodEffect(ast::Type *ty, const std::string &method);
+  /// What the native function @p native does, given @p args: a Buffer
+  /// function of the runtime's what kPaykanBufferFunctions says, any other
+  /// nothing but through an `inout` argument, which makes it Unknown.
+  Effect nativeEffect(const ast::FuncDecl &native,
+                      const std::vector<ast::Expr *> &args);
+  /// What constructing the class or struct @p name does (its `__init__`'s),
+  /// or null when @p name is no class or struct.
+  std::optional<Effect> constructorEffect(const std::string &name);
+  /// What a call of the function or constructor @p name does.
+  Effect calleeEffect(const std::string &name);
+  /// The type of the values the private `Obj` field @p field of the struct
+  /// @p st holds when that field is a runtime buffer: every store to it in
+  /// the struct's methods is a new buffer of that type (PaykanBuffer_new)
+  /// and every other use an argument of a Buffer function.  Null
+  /// otherwise.
+  ast::Type *bufferElementOf(ast::StructType *st, const std::string &field);
+  struct BufferUses;
+  /// bufferElementOf's answers, by `<struct>.<field>`.
+  std::unordered_map<std::string, ast::Type *> BufferElements;
   /// The element @p elem of @p node, read in place from storage whose
   /// temporaries and holds MemTemps has past @p mark, which are released
   /// now: a box retained first when @p node is a +1 one

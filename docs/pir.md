@@ -658,21 +658,59 @@ CodeGen enforced, now in one place.
   struct's method that may change `self`.  A call given only values that
   reach no object (numbers, strings, and arrays, tuples and structs of
   them) cannot, nor can a native function but through its `inout`
-  arguments.  Nor can, whatever it is given, a call that runs a function
-  whose body the module lowers (its own, a struct's method, a class's
-  `impl` method, an instantiation it emits) when that body stores no
-  reference outside its own variables (into a field, an element, an
-  `inout` parameter or local, a struct method's `self`) and makes no call
-  that may release one: none of a function that may, or whose body the
-  call does not choose (a method a subclass may override, a function
-  value), of a native function given storage to change, or of `equals`
-  (an `==` of values that reach objects).  What else such a function
-  releases is its own: a variable's or a temporary's reference to an
-  object its caller's storage still holds, or to one it made, and with no
-  variables at module level it reaches nothing else.  So `h.b.len()` and
-  a map's lookup of a string key need no hold; a recursion is read as the
-  rest of its function.  The lowering follows the order in which a statement
-  evaluates its parts, and a read in use where such a call is made takes
+  arguments.
+
+  What a call given more may let go of is read from the code it runs, when
+  the module lowers it (its own functions, a struct's method, a class's
+  `impl` method, a virtual method of an exact class, an instantiation it
+  emits): the classes of the slots whose references it may let go of, or
+  "not known".  A slot loses its reference only when it is stored into, or
+  when what holds it dies, so the classes are those of the slots the code
+  stores into outside its own variables (a field, an element, an `inout`
+  parameter or local, a `match` arm's `n: inout T`, a struct method's
+  `self`), with what letting go of their values may let go of in turn: a
+  value's parts, and the fields of a dying object of an *exact* class,
+  one no class derives from (`Str`, an instance of a generic class, as a
+  superclass is never generic).  An object of any other class may be a
+  subclass's holding anything, and a function value's closure anything,
+  so letting go of one is "not known".  A weak field's store lets go of
+  no object; a store through an `inout` name may replace a slot of any of
+  its type's superclasses, which a `match` arm narrows, so it counts those
+  too (and an arm the class of the subject's slot).  A call the code makes
+  adds what it does: a constructor its `__init__`'s, with the
+  superclass's through `__super__`; the runtime's `==` and `toString` of
+  a tuple, a struct, an enum or an optional its objects' `equals` and
+  `toString`; a Buffer function of the runtime what `kPaykanBufferFunctions`
+  (`Names.h`, checked against `src/Runtime/Buffer.c`) says, which lets go
+  of the values it overwrites or shrinks away, never of the buffer; and a
+  private `Obj` field of a struct whose code stores only new buffers into
+  it and passes it only to Buffer functions (`memory::Buffer<T>.__data`)
+  holds a buffer, whose death lets go of its values.  Anything else is "not known": a function another module
+  compiles (its native functions may keep an object and call back into
+  this module's code), a method a subclass may override, a call through
+  a function value, any other native function given storage to change, a
+  recursion through another function (one calling itself is read as the
+  rest of its body), and any construct the reading does not recognize.
+  What else such code releases is its own: a variable's or a temporary's
+  reference to an object its caller's storage still holds, or to one it
+  made, and with no variables at module level it reaches nothing else.
+
+  A read of storage the function never hands on (its `self`, an `inout`,
+  `view` or slice parameter's) is replaced by such a call only when the
+  call may let go of a reference of the read slot's class, or for an
+  `inout` name's of one of its superclasses: so `self.__list` of a
+  `Stack<int>` needs no hold across `pushFront`, which lets go only of
+  nodes and ints, nor a map's table across `put` of string keys and int
+  values, but does across a `put` of `Dog`s.  A read rooted in a
+  variable or a value parameter, which the function may hand on at its
+  last use (§12), keeps a reference of its own across any call that may
+  let go of one at all, whatever its class: without it the read is
+  borrowed across the call, MoveAtLastUse keeps the hand-off of another
+  variable a copy, and an object would die later.  So `h.b.len()` and a
+  map's lookup of a string key need no hold either way.
+
+  The lowering follows the order in which a statement evaluates its
+  parts, and a read in use where a call that may replace it is made takes
   a reference of its own: a method's receiver until the method returns
   (the method is such a call, given its receiver), the left operand of
   `+` or `==` until the operator, a string while the index of the

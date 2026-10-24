@@ -243,6 +243,7 @@ size_t ModuleLowering::declareParam(const std::string &name,
     pir::LocalId addr = B.addLocal(name, Type::Ptr);
     B.store(addr, Val(pir::Operand::value(arg), Type::Ptr));
     CurrentScope->declareInout(name, addr, Type::Mem, st);
+    CurrentScope->markStable(name);
     pir::LocalId len = B.addLocal(name + ".len", Type::I64);
     B.store(len, Val(pir::Operand::value(params[at + 1]), Type::I64));
     CurrentScope->declare(name + ".len", len, ASTCtx.getIntTy());
@@ -266,6 +267,9 @@ size_t ModuleLowering::declareParam(const std::string &name,
     CurrentScope->declare(name, local, astTy);
   else
     CurrentScope->declare(name, local, nullptr);
+  // The caller's storage, or a `view` the function never hands on.
+  if (mode != ast::ParamMode::Value)
+    CurrentScope->markStable(name);
   return 1;
 }
 

@@ -538,6 +538,7 @@ void ModuleLowering::declareMemParam(const std::string &name,
     B.markView(local);
   B.store(local, addr);
   CurrentScope->declareInout(name, local, Type::Mem, ty);
+  CurrentScope->markStable(name);
 }
 
 bool ModuleLowering::isSliceArg(const ast::Expr *arg) {

@@ -84,6 +84,7 @@ void ModuleLowering::declareStruct(ast::StructDecl *sd) {
     fn->Params[0].Name = kSelf;
     nameParams(*fn, 1, funcDecl->getParams());
     Bodies[fn->Name] = funcDecl;
+    BodyOwners[funcDecl] = st;
   }
   pir::Function *ctor =
       getOrCreateFunction(sd->getName(), structConstructorSignature(st));

@@ -202,6 +202,12 @@ void ModuleLowering::Scope::declareUnowned(const std::string &name,
     ASTTypeMap[name] = astTy;
 }
 
+bool ModuleLowering::Scope::isStable(const std::string &name) const {
+  if (Locals.count(name))
+    return StableVars.count(name) > 0;
+  return Parent ? Parent->isStable(name) : false;
+}
+
 ModuleLowering::Scope *
 ModuleLowering::Scope::findOwner(const std::string &name) {
   if (Locals.count(name))

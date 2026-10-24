@@ -265,6 +265,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alive.  The rule is checked where a function is defined, an override and an
   `impl ... for` method too, and in each instantiation of a generic one.  `-> view T`
   results are unchanged: their caller holds what they name.
+- A read of storage a function never hands on (a method's `self`, an `inout`, `view` or
+  slice parameter's) takes a reference of its own across a call only when the call may let
+  go of a reference of the read's class: one the code it runs stores into, or one that
+  letting go of those may let go of in turn, as an object of an exact class (`Str`, an
+  instance of a generic class) holds its fields' (docs/pir.md §7, "Reads a call may
+  replace").  The standard library's containers no longer retain and release the object
+  holding their state around their own methods over numbers, strings and the like
+  (`Stack<int>.push`, `HashMap<Str, int>.put`, `HashSet<int>.clear`,
+  `MinPriorityQueue<Str>.pop`): 57 of the 86 retain/release pairs the fix for reads through
+  objects added (*Fixed*) are gone, and over the samples and the standard library's tests
+  the static retains go from 1421 to 1374 (releases 4347 to 4300; 10 of those functions
+  copy an argument again that the hold had let them hand on).  A read rooted in a
+  variable, which the function may hand on, keeps its reference across any call that may
+  let go of one, so the moves at last use there stay as they were.
 - An object handed on at a variable's last use lives as long as its destination holds it,
   no longer until the variable's scope ends (docs/language/16-memory.md, "Ownership
   transfers").  Nothing is ever released earlier than its last holder lets it go, and
