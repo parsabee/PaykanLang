@@ -203,6 +203,7 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::FieldStore:
     case Opcode::VTableLoad:
     case Opcode::VTableAddr:
+    case Opcode::VTableStore:
     case Opcode::Load:
     case Opcode::Store:
     case Opcode::LocalAddr:
@@ -260,8 +261,8 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
   for (unsigned c = 26; c < 256; ++c) {
     // some none is_some unwrap weak.load weak.new; local.addr field.addr
     // ptr.load ptr.store ptr.add mem.copy mem.zero; wrap mask udiv urem
-    // ucmp utof ftou fround32 weak.release; fn.addr icall
-    bool used = c <= 31 || (c >= 34 && c <= 51);
+    // ucmp utof ftou fround32 weak.release; fn.addr icall; vtable.store
+    bool used = c <= 31 || (c >= 34 && c <= 52);
     EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
   }
   for (unsigned c = 8; c < 256; ++c) {

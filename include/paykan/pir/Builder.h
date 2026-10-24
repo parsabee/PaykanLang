@@ -485,6 +485,15 @@ public:
     i.Result = newValue(Type::Ptr, std::move(name));
     return emit(std::move(i));
   }
+  /// `vtable.store %obj, Class`: the object's vtable becomes the class's (a
+  /// class's `__init__` makes the object one of its class while it runs).
+  void vtableStore(const Val &obj, const std::string &className) {
+    Instr i;
+    i.Op = Opcode::VTableStore;
+    i.ClassName = className;
+    i.Args = {obj.Op};
+    emit(std::move(i));
+  }
   /// `vtable.addr @sym`: the address of an extern (runtime) vtable global,
   /// given as the symbol operand.
   Val vtableAddrExtern(const Val &symbol, std::string name = "") {

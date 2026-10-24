@@ -58,8 +58,11 @@ Create an object by calling the class name with the constructor's arguments, as 
 
 - Fields have no default values: the compiler checks that `__init__` assigns every field on
   every path (`field 'count' of class 'Counter' is not assigned on every path through
-  '__init__'`). The one exception, optional fields, comes in
-  [Optionals](12-optionals.md#optional-fields).
+  '__init__'`), and that nothing reads a field, or uses `self` otherwise, before then
+  ([Every field before `self`](#every-field-before-self)). The one exception, optional
+  fields, comes in [Optionals](12-optionals.md#optional-fields).
+- `__init__` has no result type (`'__init__' cannot have a result type: it sets up 'self'
+  and returns nothing`): constructing gives the object.
 - A class has exactly one `__init__`, and method names are unique within a class: there is
   no overloading. A class that leaves out `__init__` gets one that takes a value for each
   field, in the order they are declared: without its `impl` block, `Counter` would be
@@ -623,6 +626,82 @@ impl User {
 }
 ```
 
+### Every field before `self`
+
+Until `__init__` has assigned every field of its class's body, on every path so far (an
+optional field starts as `None`), `self` is only the place those fields are assigned in:
+
+- A field assigned on every path so far can be read; one that may not be is an error:
+  `field 'start' is read before it is assigned`.
+- Any other use of `self` is an error until every field is assigned: calling a method on it
+  (a `view fn` too), passing it to a function or a constructor, storing, returning or
+  comparing it, or a lambda capturing it: `'self' is used before every field is assigned:
+  'start' is not assigned yet`. The method, an override of it in a subclass, or whatever
+  `self` is given to could read a field that has no value yet.
+- In a subclass, `__super__(...)` comes first and assigns the superclass's fields, and its
+  arguments cannot use `self` at all (`'self' is used before every field is assigned:
+  '__super__' has not run yet`).
+
+A struct's `__init__` follows the same rules. Once every field is assigned, `self` is an
+ordinary object.
+
+While a class's `__init__` runs, the object is one of that class, as in C++, from the
+point every field of the class's body has a value: a virtual method called by a
+superclass's `__init__` runs the superclass's version, and the subclass's runs once the
+subclass's own `__init__`, after `__super__(...)`, has assigned every field of its own.
+Until then the object is still one of the superclass, also through a reference to it that
+the superclass's `__init__` gave away (registering `self` with a parent, say): a method
+called through it runs the superclass's version, and a `match` on it finds the superclass.
+So nothing reaches an override, or a field of the subclass, before the subclass has given
+its fields a value. (Dispatching to the subclass from the start, as Java does, would let an
+override read such a field: here a field has no value until it is assigned.) A pure
+virtual method called there has no implementation in the class being set up, and stops
+the program: `call of the pure virtual method 'Shape.kind', which has no implementation`.
+
+```pkn
+import ::io;
+
+class Animal {
+  name: Str;
+  greeting: Str;
+  view fn sound() -> Str { return "..."; }
+}
+
+impl Animal {
+  fn __init__(name: Str) {
+    self.name = name;
+    self.greeting = "";
+    self.greeting = self.name + " says " + self.sound();     // Animal's sound
+  }
+}
+
+class Dog : Animal {
+  loud: bool;
+  view fn sound() -> Str { return if self.loud then "WOOF" else "woof"; }
+}
+
+impl Dog {
+  fn __init__(name: Str, loud: bool) {
+    __super__(name);
+    self.loud = loud;
+    io::println(self.greeting + ", then " + self.sound());   // Dog's sound
+  }
+}
+
+fn main() -> int {
+  d = Dog("Rex", True);
+  io::println(d.sound());
+  return 0;
+}
+```
+
+Output:
+
+```
+Rex says ..., then WOOF
+WOOF
+```
+
 ### Private fields and methods
 
 A field or method whose name starts with two underscores is **private to its class**: it can
@@ -929,12 +1008,15 @@ impl SportsCar {
 - A call of a pure virtual method is always dispatched through the vtable, `self.area()`
   in an `impl` method of the declaring class included, so it runs the object's class's
   implementation.
-- An object's class is its own from the start: the constructor installs the class's vtable
-  before any `__init__` runs, so a superclass's `__init__` that calls a virtual method,
-  pure or not, runs the subclass's implementation (as in Java). That implementation runs
-  before the subclass's own `__init__` has assigned its fields, so it must not read them:
-  the compiler does not check this, and a field that holds an object (a `Str`, a class's)
-  holds none before its assignment, so using it then crashes the program.
+- While a class's `__init__` runs, the object is one of that class
+  ([Every field before `self`](#every-field-before-self)): a superclass's `__init__` that
+  calls a virtual method runs the superclass's implementation, and one that calls a pure
+  virtual method its class does not implement stops the program (`call of the pure virtual
+  method 'Shape.kind', which has no implementation`). The subclass's implementation runs
+  once the subclass's own `__init__` has assigned its fields after `__super__(...)`.
+  Java's rule, the subclass's implementation from the start, would run it before the
+  subclass has assigned its fields, which have no default values, so it could read one
+  with no value.
 - An override cannot make an implemented method pure virtual again: `method 'area' of class
   'Tile' has no body, but its superclass 'Square' implements it: an implemented method
   cannot become pure virtual again`. A pure virtual method may be declared pure again in a
@@ -954,25 +1036,31 @@ impl SportsCar {
 - A pure virtual method gets no `never changes 'self'` warning: whether it does is up to
   its implementations. Make it a `view fn` when none of them should.
 
-A superclass's `__init__` that calls a pure virtual method, and an `impl` method that does:
+An `impl` method that calls a pure virtual method, and a superclass's `__init__` that calls
+a virtual one:
 
 ```pkn
 import ::io;
 
 class Shape {
   label: Str;
-  view fn kind() -> Str;
+  view fn kind() -> Str { return "shape"; }
   view fn area() -> float;
 }
 
 impl Shape {
-  fn __init__() { self.label = "a " + self.kind(); }    // the subclass's kind
-  view fn report() -> Str { return self.label + " of area " + Str(self.area()); }
+  fn __init__() {
+    self.label = "";
+    self.label = "made as a " + self.kind();            // Shape's kind: a Shape so far
+  }
+  view fn report() -> Str {
+    return self.label + ", now a " + self.kind() + " of area " + Str(self.area());
+  }
 }
 
 class Square : Shape {
   side: float;
-  view fn kind() -> Str { return "square"; }            // reads no field of Square
+  view fn kind() -> Str { return "square"; }
   view fn area() -> float { return self.side * self.side; }
 }
 
@@ -993,7 +1081,7 @@ fn main() -> int {
 Output:
 
 ```
-a square of area 9
+made as a shape, now a square of area 9
 ```
 
 ---
@@ -1045,6 +1133,9 @@ created for that argument list. See [Generics](13-generics.md).
 |-------|---------|
 | Class name taken | The class is named like a builtin class (`class Str`) or type (`class int`), an enum, or another class — a class name is also its constructor, so top-level names are shared (see [Builtin Names Are Reserved](02-basics.md#builtin-names-are-reserved)) |
 | Missing field init in `__init__` | `__init__` exits with an uninitialised field on some path |
+| Field read before it is assigned | `self.count = self.start;` in `__init__` before `self.start` is assigned on every path: `field 'start' is read before it is assigned` |
+| `self` used before every field is assigned | A method called on `self`, `self` passed, stored, returned or captured in `__init__` before every field is assigned, or in `__super__(...)`'s arguments: `'self' is used before every field is assigned: 'start' is not assigned yet` |
+| `__init__` with a result type | `fn __init__() -> Str`: `'__init__' cannot have a result type: it sets up 'self' and returns nothing` |
 | Default `__init__` arguments | A class without an `__init__` is constructed with other than its superclass constructor's arguments followed by its fields (`Point()` for `class Point { x: int; }`) |
 | `__super__(…)` not first | Derived `__init__` body does not begin with `__super__(…)` |
 | `__super__(…)` outside `__init__` | `__super__(…)` called in any method other than `__init__` |

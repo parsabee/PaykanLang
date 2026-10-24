@@ -697,6 +697,7 @@ private:
   Expr *Receiver;
   const std::string *FieldName; // points into ASTContext::StringPool (stable)
   Expr *Value;
+  bool CompletesInit = false; // set by Sema (see completesInit)
 
 public:
   MemberAssignStmt(SourceLocation loc, Expr *receiver,
@@ -707,6 +708,12 @@ public:
   Expr *getReceiver() const { return Receiver; }
   const std::string &getFieldName() const { return *FieldName; }
   Expr *getValue() const { return Value; }
+  /// Set by Sema in a class's `__init__`: this assignment gives the last
+  /// field of the class's body its value, on every path that reaches it, so
+  /// the object becomes one of the class here (docs/language/05-classes.md,
+  /// "Every field before self").
+  bool completesInit() const { return CompletesInit; }
+  void setCompletesInit(bool completes) { CompletesInit = completes; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MemberAssignStmt;

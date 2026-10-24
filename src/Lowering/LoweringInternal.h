@@ -636,6 +636,12 @@ private:
   /// Paykan_panic_pure_virtual, then unreachable.
   void emitPureVirtualTrap(pir::Function *fn, ast::ClassType *ct,
                            const std::string &method);
+  /// The @p body of @p ct's `__init__`, whose `self` is the local @p self:
+  /// its `__super__(...)` call, then the rest, with `vtable.store` of @p ct
+  /// after the call when no field of @p ct needs assigning (else after the
+  /// assignment Sema marks completesInit, lowerMemberAssignStmt).
+  void emitInitBody(ast::CompoundStmt *body, ast::ClassType *ct,
+                    pir::LocalId self);
   Val lowerMemberAssignStmt(ast::MemberAssignStmt *node);
   Val lowerMemberAccessExpr(ast::MemberAccessExpr *node);
   /// Runtime symbol implementing @p name for the builtin class @p ct, or "".

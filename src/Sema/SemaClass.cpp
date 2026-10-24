@@ -67,9 +67,6 @@ bool Sema::checkInitFieldsAssigned(
     ast::CompoundStmt *body, ast::SourceLocation initLoc,
     const std::string &kind, const std::string &typeName) {
   // Own fields only — base fields are initialised by the required __super__.
-  if (fields.empty())
-    return true;
-
   // Map each own field name to a bit index.
   StringMap<unsigned> fieldIndex;
   for (unsigned i = 0; i < fields.size(); ++i)
@@ -85,6 +82,10 @@ bool Sema::checkInitFieldsAssigned(
       return -1;
     auto it = fieldIndex.find(ma->getFieldName());
     return it == fieldIndex.end() ? -1 : static_cast<int>(it->second);
+  };
+  auto isSelf = [](const ast::Expr *e) {
+    const auto *id = ast::dyn_cast<ast::Identifier>(e);
+    return id && id->getName() == names::kSelf;
   };
 
   // The set of fields left unassigned on a terminating path; bits are reported
@@ -110,6 +111,116 @@ bool Sema::checkInitFieldsAssigned(
       }
     }
   };
+
+  // Until every field is assigned (docs/language/05-classes.md, "Every field
+  // before self"), `self` is only a place to assign fields and to read the
+  // ones assigned on every path so far: a method of it could read one that
+  // is not (an override in a subclass included), and so could whatever it
+  // is passed to, stored in or captured by.  In `__super__(...)`'s
+  // arguments no field is assigned yet, the superclass's neither.
+  auto reportSelfUse = [&](ast::SourceLocation loc, const BitSet &assigned,
+                           bool inSuper) {
+    std::string why;
+    if (inSuper) {
+      why = "'" + std::string(names::kMethodSuper) + "' has not run yet";
+    } else {
+      for (unsigned i = 0; i < n && why.empty(); ++i)
+        if (!assigned[i])
+          why = "'" + fields[i].first + "' is not assigned yet";
+    }
+    error(loc, "'self' is used before every field is assigned: " + why);
+    ok = false;
+  };
+  std::function<void(const ast::Expr *, const BitSet &, bool)> checkUses =
+      [&](const ast::Expr *e, const BitSet &assigned, bool inSuper) {
+        if (!e || (!inSuper && assigned == full))
+          return;
+        auto each = [&](const std::vector<ast::Expr *> &es) {
+          for (const ast::Expr *x : es)
+            checkUses(x, assigned, inSuper);
+        };
+        switch (e->getKind()) {
+        case ast::ASTNode::NK_Identifier:
+          if (isSelf(e))
+            reportSelfUse(e->getLocation(), assigned, inSuper);
+          return;
+        case ast::ASTNode::NK_MemberAccessExpr: {
+          const auto *ma = ast::cast<ast::MemberAccessExpr>(e);
+          if (!isSelf(ma->getReceiver())) {
+            checkUses(ma->getReceiver(), assigned, inSuper);
+            return;
+          }
+          auto it = fieldIndex.find(ma->getFieldName());
+          if (inSuper) {
+            reportSelfUse(e->getLocation(), assigned, inSuper);
+          } else if (it != fieldIndex.end() && !assigned[it->second]) {
+            error(e->getLocation(), "field '" + ma->getFieldName() +
+                                        "' is read before it is assigned");
+            ok = false;
+          }
+          return;
+        }
+        case ast::ASTNode::NK_MethodCallExpr: {
+          const auto *mc = ast::cast<ast::MethodCallExpr>(e);
+          if (isSelf(mc->getReceiver()))
+            reportSelfUse(e->getLocation(), assigned, inSuper);
+          else
+            checkUses(mc->getReceiver(), assigned, inSuper);
+          each(mc->getArguments());
+          return;
+        }
+        case ast::ASTNode::NK_LambdaExpr:
+          // Its body is checked as its own function's; what it captures of
+          // `self` is captured now.
+          if (ast::cast<ast::LambdaExpr>(e)->capturesSelf())
+            reportSelfUse(e->getLocation(), assigned, inSuper);
+          return;
+        case ast::ASTNode::NK_CallExpr:
+          each(ast::cast<ast::CallExpr>(e)->getArguments());
+          return;
+        case ast::ASTNode::NK_CallValueExpr: {
+          const auto *c = ast::cast<ast::CallValueExpr>(e);
+          checkUses(c->getCallee(), assigned, inSuper);
+          each(c->getArguments());
+          return;
+        }
+        case ast::ASTNode::NK_UnaryExpr:
+          checkUses(ast::cast<ast::UnaryExpr>(e)->getOperand(), assigned,
+                    inSuper);
+          return;
+        case ast::ASTNode::NK_BinaryExpr: {
+          const auto *b = ast::cast<ast::BinaryExpr>(e);
+          checkUses(b->getLHS(), assigned, inSuper);
+          checkUses(b->getRHS(), assigned, inSuper);
+          return;
+        }
+        case ast::ASTNode::NK_TernaryExpr: {
+          const auto *t = ast::cast<ast::TernaryExpr>(e);
+          checkUses(t->getCondition(), assigned, inSuper);
+          checkUses(t->getTrueExpr(), assigned, inSuper);
+          checkUses(t->getFalseExpr(), assigned, inSuper);
+          return;
+        }
+        case ast::ASTNode::NK_ArrayLiteralExpr:
+          each(ast::cast<ast::ArrayLiteralExpr>(e)->getElements());
+          return;
+        case ast::ASTNode::NK_SubscriptExpr: {
+          const auto *se = ast::cast<ast::SubscriptExpr>(e);
+          checkUses(se->getArray(), assigned, inSuper);
+          checkUses(se->getIndex(), assigned, inSuper);
+          return;
+        }
+        case ast::ASTNode::NK_TupleLiteralExpr:
+          each(ast::cast<ast::TupleLiteralExpr>(e)->getElements());
+          return;
+        case ast::ASTNode::NK_TupleIndexExpr:
+          checkUses(ast::cast<ast::TupleIndexExpr>(e)->getTuple(), assigned,
+                    inSuper);
+          return;
+        default:
+          return; // a literal or an enum value: no `self` in it
+        }
+      };
 
   // Result of analysing a statement / block: the set of fields definitely
   // assigned along the fall-through path, and whether the path always exits via
@@ -141,13 +252,22 @@ bool Sema::checkInitFieldsAssigned(
 
   analyzeStmt = [&](ast::Stmt *s, const BitSet &in) -> Flow {
     if (auto *ma = ast::dyn_cast<ast::MemberAssignStmt>(s)) {
+      // `self.f = v` assigns f; `self.p.x = v` reads p first.
+      if (!isSelf(ma->getReceiver()))
+        checkUses(ma->getReceiver(), in, false);
+      checkUses(ma->getValue(), in, false);
       BitSet out = in;
       int bit = selfFieldBit(ma);
       if (bit >= 0)
         out[static_cast<unsigned>(bit)] = true;
+      // A class's object becomes one of the class where its last field is
+      // assigned (LoweringClass.cpp, emitInitBody).
+      if (kind == "class" && in != full && out == full)
+        ma->setCompletesInit(true);
       return {out, false};
     }
     if (auto *ret = ast::dyn_cast<ast::ReturnStmt>(s)) {
+      checkUses(ret->getReturnValue(), in, false);
       // Every field must be assigned before any return.
       reportMissing(in, ret->getLocation());
       return {in, true};
@@ -155,6 +275,7 @@ bool Sema::checkInitFieldsAssigned(
     if (auto *cs = ast::dyn_cast<ast::CompoundStmt>(s))
       return analyzeBlock(cs->getStatements(), in);
     if (auto *ifs = ast::dyn_cast<ast::IfStmt>(s)) {
+      checkUses(ifs->getCondition(), in, false);
       Flow thenF = analyzeStmt(ifs->getThenBranch(), in);
       if (!ifs->getElseBranch()) {
         // No else: the condition may be false, so nothing the then-branch
@@ -178,12 +299,16 @@ bool Sema::checkInitFieldsAssigned(
     if (auto *ws = ast::dyn_cast<ast::WhileStmt>(s)) {
       // The body may execute zero times, so no assignment inside it is
       // guaranteed.  Still analyse it so returns within are validated.
+      checkUses(ws->getCondition(), in, false);
       analyzeStmt(ws->getBody(), in);
       // `while True` with no `break` out of it is left only by a return.
       return {in, detail::stmtAlwaysReturns(ws)};
     }
     if (auto *fs = ast::dyn_cast<ast::ForStmt>(s)) {
       // As a while loop's: the range may be empty.
+      checkUses(fs->getStart(), in, false);
+      checkUses(fs->getEnd(), in, false);
+      checkUses(fs->getStep(), in, false);
       analyzeStmt(fs->getBody(), in);
       return {in, false};
     }
@@ -193,6 +318,7 @@ bool Sema::checkInitFieldsAssigned(
       // variant, both bool literals, or None + the wrapped type for an
       // optional subject — see detail::matchIsExhaustive) can guarantee
       // assignments.
+      checkUses(ms->getSubject(), in, false);
       BitSet out = full;
       bool anyFallThrough = false;
       for (ast::MatchArm *arm : ms->getArms()) {
@@ -208,7 +334,22 @@ bool Sema::checkInitFieldsAssigned(
         return {full, true}; // every arm returns
       return {out, false};
     }
-    // Any other statement neither assigns a field nor returns.
+    // Any other statement neither assigns a field nor returns: only what it
+    // reads is checked.
+    if (auto *es = ast::dyn_cast<ast::ExprStmt>(s)) {
+      checkUses(es->getExpr(), in, false);
+    } else if (auto *as = ast::dyn_cast<ast::AssignStmt>(s)) {
+      checkUses(as->getValue(), in, false);
+    } else if (auto *ds = ast::dyn_cast<ast::DeclStmt>(s)) {
+      if (auto *vd = ast::dyn_cast<ast::VarDecl>(ds->getDecl()))
+        checkUses(vd->getInitExpr(), in, false);
+    } else if (auto *sa = ast::dyn_cast<ast::SubscriptAssignStmt>(s)) {
+      checkUses(sa->getArray(), in, false);
+      checkUses(sa->getIndex(), in, false);
+      checkUses(sa->getValue(), in, false);
+    } else if (auto *d = ast::dyn_cast<ast::DestructureStmt>(s)) {
+      checkUses(d->getValue(), in, false);
+    }
     return {in, false};
   };
 
@@ -221,7 +362,16 @@ bool Sema::checkInitFieldsAssigned(
   for (unsigned i = 0; i < n; ++i)
     if (ast::isa<ast::OptionalType>(fields[i].second))
       entry[i] = true;
-  Flow result = analyzeBlock(body->getStatements(), entry);
+  // `__super__(...)` runs first: in its arguments nothing is assigned.
+  std::vector<ast::Stmt *> stmts = body->getStatements();
+  if (!stmts.empty() && isSuperInitCall(stmts.front())) {
+    const auto *call = ast::cast<ast::CallExpr>(
+        ast::cast<ast::ExprStmt>(stmts.front())->getExpr());
+    for (const ast::Expr *arg : call->getArguments())
+      checkUses(arg, entry, true);
+    stmts.erase(stmts.begin());
+  }
+  Flow result = analyzeBlock(stmts, entry);
   if (!result.AlwaysReturns)
     reportMissing(result.Assigned, initLoc);
   return ok;
@@ -568,6 +718,17 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
       reportInferredMethod(method);
     else
       ++SuppressedFollowOns;
+    return nullptr;
+  }
+  // An initializer sets up `self`; constructing gives the object (or the
+  // struct), so there is nothing for it to return.
+  if (method->getName() == names::kMethodInit && method->getReturnType()) {
+    error(method->getLocation(),
+          std::string("'") +
+              (method->isModulePrivateInit() ? names::kMethodInitModulePrivate
+                                             : names::kMethodInit) +
+              "' cannot have a result type: it sets up 'self' and returns "
+              "nothing");
     return nullptr;
   }
   // Resolve return type.

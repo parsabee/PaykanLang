@@ -482,6 +482,37 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
+// An abstract class's `__init__` calls a method, pure or not, only once its
+// fields are assigned (docs/language/05-classes.md, "Every field before
+// self"): before, it is an error, whatever the method; after, it is fine
+// (it runs the abstract class's own, a trap for a pure one).
+TEST(PureVirtual, AbstractInitCallsMethodsOnlyOnceItsFieldsAreSet) {
+  auto r = semaCheck(R"(
+class Shape {
+  tag: Str;
+  view fn kind() -> Str;
+  view fn name() -> Str { return "shape"; }
+}
+impl Shape {
+  fn __init__() { self.tag = "made a " + self.kind(); }
+}
+class Box {
+  tag: Str;
+  view fn kind() -> Str;
+}
+impl Box {
+  fn __init__() { self.tag = ""; self.tag = self.kind(); }
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("8:42: error: 'self' is used before every "
+                               "field is assigned: 'tag' is not assigned yet"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}
+
 // A pure virtual method has no body to judge: its family gets no "never
 // changes 'self'" warning, and neither do its implementations.
 TEST(PureVirtual, NoViewFnWarningForAPureMethod) {

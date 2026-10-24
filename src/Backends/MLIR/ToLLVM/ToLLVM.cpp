@@ -86,9 +86,9 @@ struct PtrLoadLowering : PIRPattern<P::PtrLoadOp> {
   LogicalResult matchAndRewrite(P::PtrLoadOp op, OpAdaptor a,
                                 ConversionPatternRewriter &r) const override {
     Type t = getTypeConverter()->convertType(op.getType());
-    auto load = r.replaceOpWithNewOp<LLVM::LoadOp>(op, t, a.getPtr());
-    if (op.getVtable())
-      load.setInvariant(true); // !invariant.load
+    // An object's vtable pointer changes while it is constructed (a class's
+    // `__init__` makes it one of its class), so no load of it is invariant.
+    r.replaceOpWithNewOp<LLVM::LoadOp>(op, t, a.getPtr());
     return success();
   }
 };

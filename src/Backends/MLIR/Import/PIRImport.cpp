@@ -420,6 +420,9 @@ private:
           in, FieldAddrOp::create(B, Loc, arg(0), in.ClassName, in.Field));
     case P::Opcode::VTableLoad:
       return define(in, VTableLoadOp::create(B, Loc, arg(0)));
+    case P::Opcode::VTableStore:
+      VTableStoreOp::create(B, Loc, arg(0), in.ClassName);
+      return;
     case P::Opcode::VTableAddr:
       // `vtable.addr Class`, or of an extern vtable (`vtable.addr @$rt.X`).
       if (in.ClassName.empty())

@@ -275,6 +275,7 @@ private:
       break;
     case Opcode::New:
     case Opcode::VTableAddr:
+    case Opcode::VTableStore:
       str(in.ClassName);
       break;
     case Opcode::FieldLoad:
@@ -730,6 +731,7 @@ private:
       break;
     case Opcode::New:
     case Opcode::VTableAddr:
+    case Opcode::VTableStore:
       if (!str(in.ClassName))
         return false;
       break;

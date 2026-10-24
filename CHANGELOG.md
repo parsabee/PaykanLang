@@ -19,9 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     implementation`. An abstract class is otherwise an ordinary type (of variables,
     parameters, fields, arrays, optionals, type arguments), with fields, an `__init__` its
     subclasses call with `__super__(...)`, and `impl` methods.
-  - A call of a pure virtual method goes through the vtable, from an `impl` method too, and
-    a superclass's `__init__` that calls one reaches the subclass's implementation (the
-    constructor installs the object's vtable before any `__init__` runs).
+  - A call of a pure virtual method goes through the vtable, from an `impl` method too.
+    Once an abstract class's `__init__` has assigned its fields, the object is one of that
+    class until the subclass's `__init__` has assigned its own (see "Changed": an object is
+    one of the class whose `__init__` runs), so a call of a pure virtual method then reaches
+    the trap below: `call of the pure virtual method 'Shape.kind', which has no
+    implementation`.
   - Only a class body's method may leave out its body: `fn f();` elsewhere (but in a
     trait) is a syntax error (`function 'f' has no body: ...`, or in an `impl` block `'f'
     in an 'impl' block has no body: ...`, `'f' has no body: a 'static fn' needs one` and
@@ -267,6 +270,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `weak` reference made elsewhere reads `None` as soon as, say, the function it was passed
   to returns, and an `io::File` passed to a function at its variable's last use is closed,
   what was written to it on disk, when that function returns.
+- While a class's `__init__` runs, the object is one of that class, as in C++, once every
+  field of the class's body has a value (docs/language/05-classes.md, "Every field before
+  `self`"): a superclass's `__init__` leaves the object one of the superclass, and the
+  subclass's `__init__` makes it one of its own class where it assigns the last of its own
+  fields (right after `__super__(...)` when it has none to assign).  So a virtual method a
+  superclass's `__init__` calls is the superclass's, and a pure virtual one its trap; and so
+  is one called, or a `match` made, through a reference to the object the superclass's
+  `__init__` gave away, until the subclass's fields have values.  Before, the constructor
+  made the object one of its final class before any `__init__` ran, as in Java: a field
+  has no default value, so an override a superclass's `__init__` reached could read a field
+  of the subclass before the subclass's `__init__` assigned it, and crash the program.  PIR has the instruction
+  for it, `vtable.store %self, C` (opcode 52, docs/pir.md §5, docs/design/pkm.md §5.5), and
+  since an object's vtable pointer now changes while it is constructed, the LLVM IR no
+  longer marks a load of it `!invariant.load`.
 - `::result`'s `Result` is a generic tagged union, `enum Result<T, E> { Ok(value: T),
   Err(error: E) }` (docs/stdlib/result.md), no longer the struct `Result<T>` of an `error`
   and an optional `value`, and its errors are `::error`'s.  The standard library returns a
@@ -410,6 +427,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Str(s)` of a field handed on (`return Str(self.v);`, `f(Str(self.v))`) passed the field's
   own reference as if it were a new one, and the release that ended it freed the string the
   object still held (`heap corruption or invalid free`); it is retained, as `self.v` is.
+- An `__init__` could read a field before assigning it, or use `self` before every field was
+  assigned, and the program crashed (a `Str` or an object field read as a null reference) or
+  read `0`: `io::println(self.name); self.name = "x";`, a method called on `self`, `self`
+  passed to a function or captured by a lambda, in a class's or a struct's `__init__`.
+  Until every field of the class's own body is assigned on every path (an optional one starts
+  as `None`), and in a subclass after `__super__(...)`, `self` is now only a place to assign
+  fields and to read the ones already assigned: `field 'name' is read before it is
+  assigned`, `'self' is used before every field is assigned: 'name' is not assigned yet`,
+  and in `__super__(...)`'s arguments `'self' is used before every field is assigned:
+  '__super__' has not run yet` (docs/language/05-classes.md, "Every field before `self`").
+  What a static check cannot see, a superclass's `__init__` calling a method a subclass
+  overrides, or giving `self` away to code the subclass's `__init__` then calls, is safe by
+  the change to the object's class while an `__init__` runs (see "Changed").
 - `void`, the result type of a function that returns nothing, passed type checking as the
   type of a value and then failed in the lowering (an assertion) or in PIR verification: a
   variable (`x = g();`, `x: void = g();`, `v: view = g();`), a parameter of a function or a
@@ -427,6 +457,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field `(S, S)`, `enum Expr { Num(v: int), Add(l: Expr, r: Expr) }`) was reported twice and
   then stopped the compiler (`the same diagnostic was reported twice`); it is reported once
   per declaration, and an enum once per variant that holds it.
+- `__init__` with a result type (`fn __init__() -> Str { ...; return ...; }`) was accepted
+  and every construction leaked what it returned; it is an error, `'__init__' cannot have a
+  result type: it sets up 'self' and returns nothing`.
 - A generic body's `match` arm naming a type parameter on a `T?` (`v: T` in `orElse<T>(x: T?,
   d: T)`) could not be instantiated with an optional `T` (`match arm type 'int?' cannot be
   optional`); it names what `T` wraps, the present case (docs/language/13-generics.md).

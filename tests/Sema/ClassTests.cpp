@@ -1105,6 +1105,133 @@ TEST(Class, InitDerivedOwnFieldAloneAccepted) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
+// -- Every field before `self` (docs/language/05-classes.md)
+
+// Until every field is assigned, `self` is only a place to assign fields and
+// to read the ones assigned on every path so far: reading another field,
+// calling a method on it, passing, storing or capturing it are errors, in a
+// class's and a struct's `__init__`, and so is any use in `__super__(...)`'s
+// arguments.
+TEST(Class, InitUsesSelfOnlyOnceEveryFieldIsAssigned) {
+  auto r = semaCheck(R"(import ::io;
+class C {
+  name: Str;
+  n: int;
+  view fn show() -> int { return self.n; }
+}
+fn look(c: C) -> int { return c.n; }
+impl C {
+  fn __init__(flag: bool) {
+    io::println(self.name);
+    self.n = self.n + 1;
+    if flag { self.name = "a"; }
+    x = self.show();
+    y = look(self);
+    f = fn() -> int { return self.n; };
+    self.name = self.name + "b";
+  }
+}
+class B { a: int; }
+impl B { fn __init__(a: int) { self.a = a; } }
+class D : B { d: int; }
+impl D {
+  fn __init__() {
+    __super__(self.a);
+    self.d = self.a;
+  }
+}
+struct S { x: int; y: int; }
+impl S { fn __init__() { self.x = self.y; self.y = 1; } }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *e :
+       {"10:17: error: field 'name' is read before it is assigned",
+        "11:14: error: field 'n' is read before it is assigned",
+        "13:9: error: 'self' is used before every field is assigned: 'name' "
+        "is not assigned yet",
+        "14:14: error: 'self' is used before every field is assigned: 'name' "
+        "is not assigned yet",
+        "15:9: error: 'self' is used before every field is assigned: 'name' "
+        "is not assigned yet",
+        "16:17: error: field 'name' is read before it is assigned",
+        "24:15: error: 'self' is used before every field is assigned: "
+        "'__super__' has not run yet",
+        "29:35: error: field 'y' is read before it is assigned"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+}
+
+// What is assigned on every path so far can be read, an optional field (None
+// until assigned) and the superclass's fields after `__super__(...)` too;
+// once every field is, `self` is an ordinary object.  A `while True` left
+// only by `return` assigns what each return has.
+TEST(Class, InitReadsWhatIsAssignedAndThenUsesSelf) {
+  auto r = semaCheck(R"(import ::io;
+class B { a: int; }
+impl B { fn __init__(a: int) { self.a = a; } }
+class C : B {
+  name: Str;
+  next: C?;
+  n: int;
+  view fn show() -> Str { return self.name + ""; }
+}
+fn look(c: C) -> int { return c.n; }
+impl C {
+  fn __init__(flag: bool) {
+    __super__(1);
+    if flag { self.name = "a"; } else { self.name = "b"; }
+    match self.next { c: C { self.n = c.n; } None { self.n = self.a; } }
+    self.n = self.n + self.name.len();
+    io::println(self.show() + Str(look(self)));
+    f = fn() -> int { return self.n; };
+    keep = self;
+  }
+}
+struct S { x: int; y: int; }
+impl S { fn __init__() { self.x = 1; self.y = self.x; self.x = self.sum(); } }
+impl S { view fn sum() -> int { return self.x + self.y; } }
+class W { a: int; }
+impl W {
+  fn __init__(k: int) { while True { if k > 0 { self.a = k; return; } k += 1; } }
+}
+fn main() -> int { c = C(True); return S().y + c.n + W(0).a; }
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
+// An initializer has no result: constructing gives the object (or the
+// struct) it set up.
+TEST(Class, InitWithAResultTypeRejected) {
+  for (const char *decl :
+       {"class C { x: int; }\nimpl C { fn __init__() -> Str { self.x = 1; "
+        "return \"a\"; } }\n",
+        "class C { x: int; }\nimpl C { fn __init__() -> C { self.x = 1; "
+        "return self; } }\n",
+        "class C { x: int; }\nimpl C { fn __init__() -> void { self.x = 1; } "
+        "}\n",
+        "struct C { x: int; }\nimpl C { fn __init__() -> int { self.x = 1; "
+        "return 1; } }\n"}) {
+    auto r = semaCheck(std::string(decl) +
+                       "fn main() -> int { c = C(); return c.x; }\n");
+    EXPECT_FALSE(r.Ok) << decl;
+    EXPECT_NE(r.Diagnostics.find("2:10: error: '__init__' cannot have a "
+                                 "result type: it sets up 'self' and returns "
+                                 "nothing"),
+              std::string::npos)
+        << decl << r.Diagnostics;
+  }
+  // Named as written.
+  auto r = semaCheck("class C { x: int; }\nimpl C { fn ___init__() -> int { "
+                     "self.x = 1; return 1; } }\n"
+                     "fn main() -> int { return 0; }\n");
+  EXPECT_NE(r.Diagnostics.find("2:10: error: '___init__' cannot have a result "
+                               "type"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
 // -- `self` as a parameter name is rejected
 
 TEST(Class, SelfParameterNameRejected) {

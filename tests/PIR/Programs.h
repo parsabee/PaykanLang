@@ -90,6 +90,7 @@ fn @main() -> i64 {
   %vt.3 = vtable.addr Point
   %vt2.4 = vtable.addr @$rt.PaykanString_vtable
   %vt3.5 = vtable.load %p.2
+  vtable.store %p.2, Point
   %same.6 = cmp eq %vt.3, %vt3.5
   %b.7 = box %p.2
   retain %b.7
