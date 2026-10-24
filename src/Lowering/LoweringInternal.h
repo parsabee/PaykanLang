@@ -198,6 +198,23 @@ private:
     std::unordered_map<std::string, pir::Type> InoutVars;
     /// Extra owned boxes released at scope exit (e.g. a match subject).
     std::vector<Val> PendingReleases;
+    /// A `match` arm's `n: inout T` (bindInoutArm): after n's last use in
+    /// the arm (emitArmBody), or at the scope's exit by any way out before
+    /// it, ahead of every release, n's own value (`Binding`, of type
+    /// `BindTy`) is assigned back to the subject's storage, whose address
+    /// `Place` holds and whose type is `PlaceTy`.  For a value held in
+    /// memory, n is the part at `Offset`, after the word `Header` (a
+    /// variant's tag, an optional's presence flag; none for the whole).
+    struct WriteBack {
+      const ast::MatchArm *Arm;
+      pir::LocalId Place;
+      pir::LocalId Binding;
+      ast::Type *PlaceTy;
+      ast::Type *BindTy;
+      int64_t Offset;
+      Val Header;
+    };
+    std::vector<WriteBack> WriteBacks;
 
     explicit Scope(Scope *parent = nullptr) : Parent(parent) {}
 
@@ -958,10 +975,30 @@ private:
   /// (a +1 box), or a copy of a value held in memory, its references
   /// retained.
   void holdObjectsIn(const Val &addr, ast::Type *ty);
-  /// An `inout` name @p name, of type @p astTy, for the variable or field
-  /// @p place: an `inout` local's, or a `match` arm's `n: inout T`.
+  /// Hold each box of @p keep, the object of a field a borrow @p name
+  /// names, and what MemTemps past @p mark holds, in hidden owned locals of
+  /// the current scope: a field's object stays alive as long as the borrow
+  /// can be used.
+  void holdObjects(const std::string &name, std::vector<Val> keep, size_t mark);
+  /// An `inout` local @p name, of type @p astTy, for the variable or field
+  /// @p place.
   void emitInoutBinding(const std::string &name, ast::Expr *place,
-                        ast::Type *astTy, int64_t offset = 0);
+                        ast::Type *astTy);
+  /// @p arm's `n: inout T` on @p subject, n already bound to its own copy
+  /// of the matched value (the local @p binding, of type @p bindTy; the
+  /// part at @p offset after @p header of a value held in memory): n goes
+  /// back to the subject's storage after its last use, or on a way out of
+  /// the arm's scope before it (Scope::WriteBack).
+  void bindInoutArm(const ast::MatchArm *arm, pir::LocalId binding,
+                    ast::Expr *subject, ast::Type *bindTy, int64_t offset = 0,
+                    const Val &header = Val());
+  /// The body of @p arm, in the arm's scope: an `inout` binding bound by
+  /// bindInoutArm is written back after the statement of its last use
+  /// (MatchArm::bindingUses), so what the arm does to the subject after
+  /// that stays.
+  void emitArmBody(const ast::MatchArm *arm);
+  /// Assign an `inout` arm's binding back to its subject (Scope::WriteBack).
+  void emitWriteBack(const Scope::WriteBack &wb);
   /// Release the boxes emitInoutArg kept for a call that has returned.
   void releaseAfterCall(const std::vector<Val> &keep);
   /// For a call of a method of @p ct, a class defined in another module:

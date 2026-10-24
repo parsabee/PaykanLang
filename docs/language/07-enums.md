@@ -374,8 +374,9 @@ u = Shape::Rect(1);       // error: variant 'Rect' of enum 'Shape' has 2 field(s
 
 An arm `name: Variant { … }` runs when the value is that variant and binds `name` to its
 fields, read as a struct's are (`r.w`). The binding is a copy, as a by-value parameter is;
-with `view` (`r: view Rect`) it is read-only, and with `inout` (`r: inout Rect`) it is the
-subject's own fields, so writing through it changes the subject:
+with `view` (`r: view Rect`) it is read-only, and with `inout` (`r: inout Rect`) it stands
+for the subject, which the arm sets to the variant it holds after its last use, so writing
+through it changes the subject:
 
 ```pkn
 import ::io;

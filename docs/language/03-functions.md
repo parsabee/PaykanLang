@@ -293,8 +293,11 @@ Assigning it to a variable, a field or an element and `return` are errors: `'v' 
 local; it cannot be stored, only read or passed to a 'view' parameter`, `'v' is a 'view'
 local; it cannot be returned`. A `view` of a value type, or of an array or tuple of them
 (`int[3]`, `(int, float)`), is copied when it is assigned (`m = n`), and the copy is the
-variable's own. An array or tuple literal is a new value, so any `view` can be one of its
-elements: `[v]`, `(v, 1)` and `return (s, 1);` hold `v` and `s` as values of their own.
+variable's own. An array or tuple literal holds its elements, so it stores them too: a
+`view` of a value type can be one of its elements, as a copy, and one that shares what it
+holds cannot, as a copy of it in the literal could change it later (`[v]`, `(v, 1)` and
+`[v; 3]` with `v: view Node` are `'v' is a 'view' parameter; it cannot be stored, only read
+or passed to a 'view' parameter`, and so is `[self]` in a `view fn`).
 
 A `match` arm's name for a `view` is a `view` too: in `match v { k: Fast { k.tick(); } }`,
 `k.tick()` is an error, `'k' is bound to a 'view'; 'tick' is not a 'view fn'`.

@@ -447,25 +447,22 @@ Val ModuleLowering::emitMemOptionalMatch(ast::MatchStmt *node) {
   if (valueArm && valueArm->hasBinding()) {
     ScopeGuard armGuard(*this);
     const std::string &name = valueArm->getBinding();
-    if (valueArm->getMode() == ast::ParamMode::Inout) {
-      // `p: inout T`: p is the subject's storage: the whole of a function
-      // value's (None has no code), the value after the presence flag of a
-      // tuple's or a struct's.
-      emitInoutBinding(name, node->getSubject(), inner,
-                       optTy ? memOptionalPayloadOffset(subjTy) : 0);
-    } else {
-      // The binding's own copy of the present value.
-      MemLayout il = memLayout(inner);
-      pir::LocalId local = B.addMemLocal(name, il.Size, il.Align);
-      Val own = B.localAddr(local, name + ".addr");
-      int64_t off = optTy ? memOptionalPayloadOffset(subjTy) : 0;
-      B.memCopy(own,
-                off ? B.ptrAdd(addr, Val::i64(off), "opt.value.addr") : addr,
-                Val::i64(il.Size));
-      emitMemRetain(own, inner);
-      CurrentScope->declare(name, local, inner);
-    }
-    emitBody(valueArm->getBody());
+    // The binding's own copy of the present value; `p: inout T` writes it
+    // back after its last use (bindInoutArm): the whole of a function
+    // value's (None has no code), the value after a presence flag of a
+    // tuple's or a struct's.
+    MemLayout il = memLayout(inner);
+    pir::LocalId local = B.addMemLocal(name, il.Size, il.Align);
+    Val own = B.localAddr(local, name + ".addr");
+    int64_t off = optTy ? memOptionalPayloadOffset(subjTy) : 0;
+    B.memCopy(own, off ? B.ptrAdd(addr, Val::i64(off), "opt.value.addr") : addr,
+              Val::i64(il.Size));
+    emitMemRetain(own, inner);
+    CurrentScope->declare(name, local, inner);
+    if (valueArm->getMode() == ast::ParamMode::Inout)
+      bindInoutArm(valueArm, local, node->getSubject(), inner, off,
+                   off ? Val::boolean(true) : Val());
+    emitArmBody(valueArm);
   } else {
     emitArmOrDefault(valueArm);
   }

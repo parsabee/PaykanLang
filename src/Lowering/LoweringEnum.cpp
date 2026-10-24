@@ -162,22 +162,21 @@ Val ModuleLowering::emitPayloadEnumMatch(ast::MatchStmt *node) {
       const std::string &name = arm->getBinding();
       ast::StructType *payload = et->getPayload(static_cast<size_t>(idx));
       const int64_t off = variantPayloadOffset(et, static_cast<size_t>(idx));
-      if (arm->getMode() == ast::ParamMode::Inout) {
-        // `b: inout B`: b is the variant's fields in the subject's storage.
-        emitInoutBinding(name, node->getSubject(), payload, off);
-      } else {
-        // The binding's own copy of the variant's fields.
-        MemLayout pl = memLayout(payload);
-        pir::LocalId local = B.addMemLocal(name, pl.Size, pl.Align);
-        if (arm->getMode() == ast::ParamMode::View)
-          B.markView(local);
-        Val own = B.localAddr(local, name + ".addr");
-        B.memCopy(own, B.ptrAdd(addr, Val::i64(off), "variant.addr"),
-                  Val::i64(pl.Size));
-        emitMemRetain(own, payload);
-        CurrentScope->declare(name, local, payload);
-      }
-      emitBody(arm->getBody());
+      // The binding's own copy of the variant's fields; `b: inout B` writes
+      // it back as variant B after its last use (bindInoutArm).
+      MemLayout pl = memLayout(payload);
+      pir::LocalId local = B.addMemLocal(name, pl.Size, pl.Align);
+      if (arm->getMode() == ast::ParamMode::View)
+        B.markView(local);
+      Val own = B.localAddr(local, name + ".addr");
+      B.memCopy(own, B.ptrAdd(addr, Val::i64(off), "variant.addr"),
+                Val::i64(pl.Size));
+      emitMemRetain(own, payload);
+      CurrentScope->declare(name, local, payload);
+      if (arm->getMode() == ast::ParamMode::Inout)
+        bindInoutArm(arm, local, node->getSubject(), payload, off,
+                     Val::i64(idx));
+      emitArmBody(arm);
     }
     B.leave();
   }

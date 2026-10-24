@@ -12,7 +12,9 @@
 // arm's `n: view T` borrows the subject in the same way, from the start of
 // the arm, and a borrow of a call's borrowed result (`v: view = b.peek();`)
 // borrows what the call borrowed: its receiver and the arguments to its
-// `view` / `inout` parameters.
+// `view` / `inout` parameters.  A lambda's body and a call through a
+// function value use the names they hold, no others; a lambda capturing a
+// borrowed variable uses it (captureVariable).
 
 #include "Sema.h"
 
@@ -54,8 +56,18 @@ bool mentions(const ast::Expr *e, const std::string &name) {
     const auto *b = ast::cast<ast::BinaryExpr>(e);
     return mentions(b->getLHS(), name) || mentions(b->getRHS(), name);
   }
-  case ast::ASTNode::NK_CallExpr:
-    return any(ast::cast<ast::CallExpr>(e)->getArguments());
+  case ast::ASTNode::NK_CallExpr: {
+    // `f(3)` uses `f` when it is a function value.
+    const auto *c = ast::cast<ast::CallExpr>(e);
+    return c->getCalleeName() == name || any(c->getArguments());
+  }
+  case ast::ASTNode::NK_CallValueExpr: {
+    const auto *c = ast::cast<ast::CallValueExpr>(e);
+    return mentions(c->getCallee(), name) || any(c->getArguments());
+  }
+  case ast::ASTNode::NK_LambdaExpr:
+    // What its body names (a borrow itself is never captured).
+    return mentions(ast::cast<ast::LambdaExpr>(e)->getBody(), name);
   case ast::ASTNode::NK_MethodCallExpr: {
     const auto *m = ast::cast<ast::MethodCallExpr>(e);
     return mentions(m->getReceiver(), name) || any(m->getArguments());
@@ -218,14 +230,16 @@ void Sema::startBorrow(const ast::Expr *place, const std::string &by,
   Borrows.insert(Borrows.end(), added.begin(), added.end());
 }
 
-bool Sema::visitArmBody(const ast::MatchArm *arm, const ast::Expr *subject) {
+bool Sema::visitArmBody(ast::MatchArm *arm, const ast::Expr *subject) {
   const auto &stmts = arm->getBody()->getStatements();
   if (arm->hasBinding() && arm->getMode() != ast::ParamMode::Value) {
-    // `n: view T` borrows the subject from the arm's start to n's last use.
+    // `n: view T` borrows the subject from the arm's start to n's last use,
+    // where an `inout` one goes back to the subject (the lowering).
     size_t uses = 0;
     for (size_t j = 0; j < stmts.size(); ++j)
       if (mentions(stmts[j], arm->getBinding()))
         uses = j + 1;
+    arm->setBindingUses(uses);
     if (uses > 0)
       startBorrow(subject, arm->getBinding(),
                   arm->getMode() == ast::ParamMode::Inout, &stmts, uses - 1);

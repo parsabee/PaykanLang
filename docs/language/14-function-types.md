@@ -231,11 +231,18 @@ function is made, or keep it in an object)`), passed to an `inout` parameter, or
 it holds a value in place, have a field or an element assigned (`'p' is captured by copy
 by the function; cannot assign to its field 'x'`).  An object reached through a captured
 reference is changed through it as through any other reference (`c.n = c.n + 1` above):
-to share a counter with a closure, keep it in an object.
+to share a counter with a closure, keep it in an object. Read, a captured name is a value
+like any other: the lambda may return it, store it in a local or pass it to any parameter,
+a struct, a tuple or a tagged union as well as a string or an object (`fn constant<T>(x:
+T) -> () -> T { return fn() -> T { return x; }; }` works for every `T`), and the copy holds
+the references the capture does.
 
 What cannot be captured: a `view` or `inout` parameter or local, or a `match` binding of
 one (`'v' is a 'view' parameter; a function cannot capture a borrow (it may outlive the
-call that holds it)`); `self` in a `view fn` (`'self' is read-only in 'view fn m'; a
+call that holds it)`); a variable that a live [local borrow](02-basics.md#local-borrows)
+names (`'k' is borrowed by 'inout' local 'x' until 'x' is last used; a function cannot
+capture it`), or a `view` local views when it holds an object, a string or an array;
+`self` in a `view fn` (`'self' is read-only in 'view fn m'; a
 function cannot capture it (its copy could change the object)`); and `self` in a struct's
 method (`'self' is the receiver's storage in a method of struct 'P'; a function cannot
 capture it (copy it into a variable first)`).  `self` in a class method that is not a
@@ -432,6 +439,7 @@ Output:
 | Wrong arguments | `f(1, 2)` for `f: (int) -> int`; `f("a")`; a `let` or a `view` to an `inout` parameter |
 | Assigning a captured name | `n = 1; g = fn() { n = 2; };`; `bump(n)` inside the lambda; `p.x = 2` for a captured struct |
 | Capturing a borrow or `self` | a `view` or `inout` parameter or local, a `view fn`'s `self`, a struct method's `self` |
+| Capturing a borrowed variable | `x: inout = k;` then `fn() -> int { return k; }` while `x` is live; a reference a live `view` local views |
 | A lambda body's rule | `break` outside its own loop, a missing `return`, a duplicate parameter |
 | A closure as an object | `io::println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Show` |
 

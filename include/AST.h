@@ -761,6 +761,7 @@ class MatchArm : public ASTNode {
                         // otherwise
   CompoundStmt *Body;
   ParamMode Mode = ParamMode::Value; // a binding's borrow of the subject
+  size_t BindingUses = 0;            // set by Sema (see bindingUses)
 
 public:
   // Type arm (or wildcard when armType == nullptr).
@@ -789,6 +790,12 @@ public:
   /// (docs/language/08-match.md, "Borrowing the subject").
   ParamMode getMode() const { return Mode; }
   void setMode(ParamMode mode) { Mode = mode; }
+  /// Set by Sema for a binding that borrows the subject: how many of the
+  /// body's statements, from its first, it is used in (its last use is in
+  /// the last of them; 0 when the body never uses it).  An `inout` one is
+  /// written back to the subject there.
+  size_t bindingUses() const { return BindingUses; }
+  void setBindingUses(size_t uses) { BindingUses = uses; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_MatchArm; }
 };

@@ -543,7 +543,7 @@ fn scale(v: inout int[2], by: int) {
   v[0] = v[0] * by;
   v[1] = v[1] * by;
 }
-fn corners(names: view Str[2][2]) -> Str[2] {
+fn corners(names: Str[2][2]) -> Str[2] {
   return [names[0][0], names[1][1]];
 }
 class Path { stops: Str[3]; }

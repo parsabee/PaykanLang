@@ -357,8 +357,11 @@ fn describe(a: Animal) -> Str {
 }
 ```
 
-With `inout`, the binding is the subject's storage, like an `inout` local of it: assigning
-to it writes the matched variable or field.
+With `inout`, the binding stands for the subject, narrowed to the arm's type, like an
+`inout` local of it: assigning to it, or to its fields, changes the matched variable or
+field. The binding holds the matched value (a copy, as a plain binding does), which goes
+back into the subject after the binding's last use in the arm, or when the arm ends before
+then, whichever way it ends: `return`, `break` or `continue`.
 
 ```pkn
 import ::io;
@@ -393,9 +396,15 @@ Output:
 - While the binding is live, from the start of the arm to its last use there, the variable
   the subject starts from cannot be used except through it (`'a' is borrowed by 'inout'
   local 'd' until 'd' is last used`).
+- Another reference to the subject's object can still reach it: `g` after `g = h` in an arm
+  of `match h.s`, a parameter that is the same object as `self`, or `h` passed next to
+  `h.s` to a function whose `inout` parameter is matched. What it writes there before the
+  binding's last use does not change the binding, which keeps the arm's type (the variant,
+  the present value, the subclass), and the binding's value replaces it at that last use;
+  what it writes after stays, as does an assignment of the subject's variable then.
 - The `match` keeps the object it matched until it ends, so the arm can replace it.
-- A tuple or a struct inside an optional (`p: inout Point` on a `Point?`) is bound as the
-  value after the presence flag, so a write through the binding changes the subject. A
+- A tuple or a struct inside an optional (`p: inout Point` on a `Point?`) is the present
+  value, put back as one, so a write through the binding changes the subject. A
   primitive or an enum inside one (`n: inout int` on an `int?`, `k: inout Suit` on a
   `Suit?`) cannot be changed this way yet (`'inout' arm 'n' cannot change the 'int' inside
   an optional yet`).

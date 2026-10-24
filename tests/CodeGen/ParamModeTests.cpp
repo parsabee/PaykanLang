@@ -457,38 +457,39 @@ TEST(LocalBorrow, ViewLocalsOfReferenceTypes) {
   guard.expectNoLeaks("view reference locals");
 }
 
-// A literal holds its own reference to each `view` element: the value it
-// makes outlives the view and is released once.
-TEST(LocalBorrow, LiteralsHoldTheirViewElements) {
+// A literal holds its own copy of each element read through a `view` (a value
+// type, and what is made from a shared one), and its own reference to each
+// object it is given: the value it makes outlives them and is released once.
+TEST(LocalBorrow, LiteralsHoldTheirElements) {
   LeakGuard guard;
   auto r = compileAndRun(R"(import ::io;
     class Node { n: int; }
     class Named { name: Str; n: int; }
     impl Named {
-      view fn pair() -> (Str, int) { return (self.name, self.n); }
-      view fn names() -> Str[2] { return [self.name, "x"]; }
+      view fn pair() -> (Str, int) { return (self.name + "!", self.n); }
+      view fn sizes() -> int[2] { return [self.name.len(), self.n]; }
     }
-    fn tup(s: view Str) -> (Str, int) { return (s, s.len()); }
-    fn arr(s: view Str) -> Str[3] { return [s; 3]; }
-    fn wrap(n: view Node) -> (Node, (Node, int)) { return (n, (n, 1)); }
+    fn tup(s: view Str) -> (Str, int) { return (s + "", s.len()); }
+    fn arr(k: view int) -> int[3] { return [k; 3]; }
+    fn wrap(n: Node) -> (Node, (Node, int)) { return (n, (n, 1)); }
     fn main() -> int {
       t = tup(Str(12));
-      a = arr("ab" + "c");
+      a = arr(4);
       w = wrap(Node(5));
       w.0.n = 6;
       h = Named("h", 9);
       p = h.pair();
-      names = h.names();
+      sizes = h.sizes();
       v: view = Node(1);
-      xs = [v, Node(2)];
-      io::println(t.0 + " " + Str(t.1) + " " + a[2] + " " + Str(w.1.0.n) + " " +
-              p.0 + Str(p.1) + " " + names[0] + names[1] + " " +
-              Str(xs[0].n + xs[1].n));
+      xs = [v.n, 2];
+      io::println(t.0 + " " + Str(t.1) + " " + Str(a[2]) + " " + Str(w.1.0.n) +
+              " " + p.0 + Str(p.1) + " " + Str(sizes[0] + sizes[1]) + " " +
+              Str(xs[0] + xs[1]));
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "12 2 abc 6 h9 hx 3\n");
+  EXPECT_EQ(r.StdOut, "12 2 4 6 h!9 10 3\n");
   guard.expectNoLeaks("literals of views");
 }
 
@@ -660,6 +661,97 @@ TEST(LocalBorrow, InoutArmsWriteThrough) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "11 11 6 dog7 42 41\n");
   guard.expectNoLeaks("inout arms");
+}
+
+// An `inout` arm narrows the subject (a variant, an optional's value, a
+// subclass), and another reference to its object can change what the subject
+// holds while the arm runs: an alias (`g = h`), a second argument, a
+// parameter that is `self`.  The binding is a value of its own, written back
+// on every way out of the arm (its end, `return`, `break`), so it never reads
+// the changed storage as the narrowed type.
+TEST(LocalBorrow, InoutArmsSurviveAChangeThroughAnotherReference) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(import ::io;
+    enum Sh { E, L(s: Str) }
+    struct P { y: Str; }
+    class A { n: int; }
+    impl A { fn __init__(n: int) { self.n = n; } }
+    class B : A { x: Str; }
+    impl B { fn __init__(n: int, x: Str) { __super__(n); self.x = x; } }
+    class H {
+      s: Sh;
+      p: P?;
+      a: A;
+      fn poke(other: H) {
+        match self.s { l: inout L { other.s = Sh::E; io::print(l.s + " "); } _ { } }
+      }
+    }
+    impl H {
+      fn __init__() { self.s = Sh::L("x" + "y"); self.p = P("a" + "b"); self.a = B(1, "b" + "x"); }
+    }
+    fn f(x: inout Sh, o: H) {
+      match x { l: inout L { o.s = Sh::E; io::print(l.s + " "); } _ { } }
+    }
+    fn firstL(x: inout Sh, o: H) -> Str {
+      while True {
+        match x { l: inout L { o.s = Sh::E; l.s = l.s + "!"; return l.s; } _ { break; } }
+      }
+      return "none";
+    }
+    fn main() -> int {
+      h = H();
+      g = h;
+      match h.s { l: inout L { g.s = Sh::E; io::print(l.s + " "); } _ { } }
+      match h.p { q: inout P { g.p = None; q.y = q.y + "c"; io::print(q.y + " "); } None { } }
+      match h.a { b: inout B { g.a = A(2); io::print(b.x + " "); } _ { } }
+      io::println(h.s.toString() + " " + h.p.toString() + " " + Str(h.a.n));
+      f(h.s, h);
+      h.poke(h);
+      io::print(firstL(h.s, h) + " ");
+      while True {
+        match h.s { l: inout L { l.s = "q"; break; } _ { break; } }
+      }
+      io::println(h.s.toString());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "xy abc bx L(s: xy) P(y: abc) 1\n"
+                      "xy xy xy! L(s: q)\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  guard.expectNoLeaks("inout arms changed through another reference");
+}
+
+// An `inout` arm's binding goes back to the subject after its last use in
+// the arm: what the arm does to the subject after that, through its
+// variable or another reference, stays; a binding the arm never uses puts
+// nothing back.
+TEST(LocalBorrow, InoutArmsGoBackAtTheirLastUse) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(import ::io;
+    enum Sh { E, L(s: Str) }
+    class H { s: Sh; }
+    fn main() -> int {
+      h = H(Sh::L("x" + "y"));
+      g = h;
+      match h.s { l: inout L { l.s = l.s + "1"; h.s = Sh::E; } _ { } }
+      io::print(h.s.toString() + " ");
+      h.s = Sh::L("a" + "b");
+      match h.s { l: inout L { io::print(l.s + " "); g.s = Sh::L("c" + "d"); } _ { } }
+      io::print(h.s.toString() + " ");
+      match h.s { l: inout L { h.s = Sh::E; } _ { } }
+      io::print(h.s.toString() + " ");
+      k: Sh = Sh::L("y");
+      match k { l: inout L { l.s = "b" + "c"; } _ { } }
+      io::print(k.toString() + " ");
+      match k { l: inout L { io::print(l.s + " "); k = Sh::E; } _ { } }
+      io::println(k.toString());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "E ab L(s: cd) E L(s: bc) bc E\n");
+  guard.expectNoLeaks("inout arms written back at their last use");
 }
 
 // A borrowed result is returned like any other: part of `self` (a field, an

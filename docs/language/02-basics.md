@@ -275,6 +275,15 @@ Output:
 A borrow of a borrow (`y: inout = x;` with `x: inout = k;`) keeps `k` borrowed while `y` is
 live. A `view` local of an expression (`v: view = k + 1;`) borrows nothing.
 
+A statement uses the names it holds: a call through a borrow of a function value (`v(3)`
+with `v: view = f;`) uses `v`, and a lambda or a call through a function value
+(`fs[0](5)`) uses only what it names, so neither keeps an unrelated borrow live. A lambda
+that captures the borrowed variable uses it, and copies the reference it holds, so it is
+an error while the borrow is live: `'k' is borrowed by 'inout' local 'x' until 'x' is last
+used; a function cannot capture it`, and for a `view` local of an object, a string or an
+array, `'h' is viewed by 'view' local 'v' until 'v' is last used; a function cannot
+capture it (it could change it through its copy)`.
+
 A local borrow always has an initializer, declares one variable (not a destructuring
 target), and is never `let`: `let x: view = e;` is an error, `a local borrow cannot be
 'let'`. Written before the name, `view x = e;`, the mode is a syntax error that shows the

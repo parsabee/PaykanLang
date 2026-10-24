@@ -2359,9 +2359,12 @@ Sema::ExprChecker::visitArrayLiteralExpr(ast::ArrayLiteralExpr *node) {
                 std::to_string(kMaxFixedArrayElements) + " elements");
     return nullptr;
   }
-  // Each element takes the common type (`[1, 2.5]` is a `float[2]`).
-  for (size_t i = 0; i < elemTys.size(); ++i)
+  // Each element takes the common type (`[1, 2.5]` is a `float[2]`), and
+  // the array holds it: a `view` that shares what it holds is not one.
+  for (size_t i = 0; i < elemTys.size(); ++i) {
     S.checkAssignable(elemTy, elemTys[i], node->getElements()[i]);
+    S.checkViewNotStored(node->getElements()[i], elemTys[i]);
+  }
   node->setResolvedType(fixed);
   return fixed;
 }
@@ -2409,6 +2412,8 @@ Sema::ExprChecker::checkFixedArrayLiteral(ast::ArrayLiteralExpr *node,
               "array literal element of type '" + typeName(ty) +
                   "' does not match the element type '" + typeName(elemTy) +
                   "' of '" + typeName(fixed) + "'");
+      ok = false;
+    } else if (!S.checkViewNotStored(elem, ty)) {
       ok = false;
     }
   }
@@ -2629,6 +2634,9 @@ Sema::ExprChecker::visitTupleLiteralExpr(ast::TupleLiteralExpr *node) {
       ok = false;
       continue;
     }
+    // The tuple holds it: a `view` that shares what it holds is not one.
+    if (!S.checkViewNotStored(elem, ty))
+      ok = false;
     elemTys.push_back(ty);
   }
   if (!ok)

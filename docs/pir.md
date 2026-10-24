@@ -587,9 +587,11 @@ CodeGen enforced, now in one place.
   skipped), and a container's type descriptor marks each of its references
   nullable.  `E::B(x, y)` zeroes the value, stores the tag and initialises
   the fields in place; a `match` copies the subject, `switch`es on its tag
-  and binds an arm's fields as a copy of the struct (or, `inout`, as the
-  `ptr.add` of their offset in the subject).  Printing, `toString()` and
-  `==`/`!=` pass the address and the `.enumN` layout to
+  and binds an arm's fields as a copy of the struct (an `inout` arm's copy
+  is assigned back to the subject, as that variant, after its last use in
+  the arm or on a way out of the arm before it, as an optional's value or a
+  subclass's object is).  Printing, `toString()` and `==`/`!=` pass the
+  address and the `.enumN` layout to
   `PaykanEnum_toString` and `PaykanEnum_equals`, with the conventions of
   the tuple calls; an enum without fields is first stored to a local.
 * **Function values** (docs/language/14-function-types.md,

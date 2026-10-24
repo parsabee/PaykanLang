@@ -284,6 +284,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for it, `vtable.store %self, C` (opcode 52, docs/pir.md §5, docs/design/pkm.md §5.5), and
   since an object's vtable pointer now changes while it is constructed, the LLVM IR no
   longer marks a load of it `!invariant.load`.
+- An array or tuple literal holds its elements, so a `view` that shares what it holds (of an
+  object, a string or an array, a tuple or optional holding one, `self` in a `view fn`) can
+  no longer be one of them: `[v]`, `(v, 1)`, `[v; 3]` and `return [self.name, "x"];` in a
+  `view fn` are `'v' is a 'view' parameter; it cannot be stored, only read or passed to a
+  'view' parameter`, as storing `v` is (docs/language/03-functions.md).  A literal copied
+  the reference, through which the viewed object could be changed, stored or returned.  A
+  `view` of a value type is still copied into a literal.
+- A `match` arm's `n: inout T` binding is the matched value, narrowed to `T`, which goes back
+  to the subject after its last use in the arm (or on a `return`, `break` or `continue`
+  out of the arm before it), no longer a pointer into the subject's storage
+  (docs/language/08-match.md, "Borrowing the subject").  Until then the subject is still
+  used only through `n`, so a program sees the same changes; what another reference to the
+  subject's object writes there meanwhile no longer changes what `n` holds, and `n`'s value
+  replaces it at that last use.
 - `::result`'s `Result` is a generic tagged union, `enum Result<T, E> { Ok(value: T),
   Err(error: E) }` (docs/stdlib/result.md), no longer the struct `Result<T>` of an `error`
   and an optional `value`, and its errors are `::error`'s.  The standard library returns a
@@ -453,6 +467,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has type 'void' (the expression produces no value)`), which was accepted, and an array
   of them (`array element 0 has type 'void' (the expression produces no value)`), which
   was "not supported yet".
+- A `match` arm's `n: inout T` on a tagged union's variant, an optional's value or a
+  subclass could be left pointing at what another reference to the subject's object put
+  there (`g.s = Sh::E;` with `g = h` in an arm of `match h.s`, a parameter that is `self`, or
+  `h` passed with `h.s` to the function that matches it), and reading `n` then crashed or
+  read the object as the wrong class.  The binding is a value of its own now (see
+  "Changed").
+- A local borrow's liveness (docs/language/02-basics.md, "Local borrows"): a lambda or a call
+  through a function value (`fs[0](5)`) after a borrow's last use kept every borrow of the
+  block live, so a valid use of the borrowed variable was rejected; a call through a
+  function-valued borrow (`v(3)` with `v: view = f;`) did not count as a use of it, so `f`
+  could be reassigned while `v` was live; and a lambda could capture the borrowed variable
+  while the borrow was live, reading what an `inout` local borrows or changing what a
+  `view` local views.  A lambda and a call through a function value use what they name
+  only, a call through a borrow uses it, and a capture of a borrowed variable is an error:
+  `'k' is borrowed by 'inout' local 'x' until 'x' is last used; a function cannot capture
+  it`, `'h' is viewed by 'view' local 'v' until 'v' is last used; a function cannot capture
+  it (it could change it through its copy)`.
 - A struct or a tagged union holding itself in two places (`struct S { a: S; b: S; }`, a
   field `(S, S)`, `enum Expr { Num(v: int), Add(l: Expr, r: Expr) }`) was reported twice and
   then stopped the compiler (`the same diagnostic was reported twice`); it is reported once
@@ -460,6 +491,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `__init__` with a result type (`fn __init__() -> Str { ...; return ...; }`) was accepted
   and every construction leaked what it returned; it is an error, `'__init__' cannot have a
   result type: it sets up 'self' and returns nothing`.
+- A lambda's captured struct, tuple or tagged union holding a reference was treated as a
+  `view`: it could not be returned, stored in a local or passed to a by-value parameter (`'p'
+  is captured by copy by the function; it cannot be returned`), while a captured `Str` or
+  object could, so `fn constant<T>(x: T) -> () -> T { return fn() -> T { return x; }; }`
+  failed for such a `T`.  A captured name is read-only, not a `view`: read, it is a value
+  like any other (docs/language/14-function-types.md, "Captures").
 - A generic body's `match` arm naming a type parameter on a `T?` (`v: T` in `orElse<T>(x: T?,
   d: T)`) could not be instantiated with an optional `T` (`match arm type 'int?' cannot be
   optional`); it names what `T` wraps, the present case (docs/language/13-generics.md).

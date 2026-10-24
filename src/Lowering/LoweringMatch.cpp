@@ -180,17 +180,13 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
       pir::LocalId local = B.addLocal(ta.Arm->getBinding(), v.Ty);
       B.store(local, v);
       CurrentScope->declare(ta.Arm->getBinding(), local, primInner);
-    } else if (ta.Arm->hasBinding() &&
-               ta.Arm->getMode() == ast::ParamMode::Inout) {
-      // `n: inout T`: n is the subject's storage, so assigning n writes the
-      // matched variable or field.  The match still holds the object it
-      // matched until it ends.
-      emitInoutBinding(ta.Arm->getBinding(), node->getSubject(), ta.BindTy);
     } else if (ta.Arm->hasBinding()) {
       // The binding is an ordinary owned variable holding its own +1
       // reference to the subject's box, released when the arm's scope exits.
       // It can therefore be re-assigned, moved or stored like any variable,
       // and stays valid even if the arm re-assigns the subject itself.
+      // `n: inout T` writes it back to the subject after its last use
+      // (bindInoutArm).
       // The subject is non-null here: a None subject never reaches a type arm.
       Val box;
       if (sharedSubj) {
@@ -205,8 +201,10 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
         B.markView(local);
       B.store(local, box);
       CurrentScope->declare(ta.Arm->getBinding(), local, ta.BindTy);
+      if (ta.Arm->getMode() == ast::ParamMode::Inout)
+        bindInoutArm(ta.Arm, local, node->getSubject(), ta.BindTy);
     }
-    emitBody(ta.Arm->getBody());
+    emitArmBody(ta.Arm);
   };
 
   auto emitTypeChain = [&]() {
