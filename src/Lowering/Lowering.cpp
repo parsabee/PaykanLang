@@ -675,6 +675,8 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
     declareFunctionPrototype(fn);
     if (fn->isNative())
       NativeDecls[fn->getName()] = fn;
+    else
+      Bodies[fn->getName()] = fn;
   }
   for (auto *sd : structs)
     declareStruct(sd);

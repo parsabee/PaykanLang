@@ -394,6 +394,20 @@ private:
   /// a function value, or what holds one): given it, a call can change
   /// whatever the object reaches.
   static bool reachesObject(const ast::Type *ty);
+  /// This module's functions and the methods of the classes and structs it
+  /// defines, by PIR name (`f`, `C.m`, `S.m`): the bodies mayRelease reads.
+  std::unordered_map<std::string, const ast::FuncDecl *> Bodies;
+  /// The function or method named @p name in Bodies, or null.
+  const ast::FuncDecl *bodyOf(const std::string &name) const;
+  /// Whether running @p fn may release a reference that storage it does not
+  /// own holds, or replace such a reference (LoweringHolds.cpp): true
+  /// unless its body is in Bodies and stores no reference outside its own
+  /// variables and makes no call that may.  A call of a function that
+  /// cannot replaces nothing, whatever it is given.
+  bool mayRelease(const ast::FuncDecl *fn);
+  struct ReleaseScan;
+  /// mayRelease's answers; true for a function being read (a recursion).
+  std::unordered_map<const ast::FuncDecl *, bool> MayRelease;
   /// The element @p elem of @p node, read in place from storage whose
   /// temporaries and holds MemTemps has past @p mark, which are released
   /// now: a box retained first when @p node is a +1 one

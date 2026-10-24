@@ -255,6 +255,7 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
                               methodSignature(md));
       fn->Params[0].Name = kSelf;
       nameParams(*fn, 1, funcDecl->getParams());
+      Bodies[fn->Name] = funcDecl;
     }
   }
   pir::Function *dtor = getOrCreateFunction(

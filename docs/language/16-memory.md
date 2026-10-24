@@ -378,9 +378,10 @@ In `x = h.node; take(x); s = h.node.name + label(1);` the hand-off to `take` sta
 `label` runs while the name read from `h.node` is still to be used, and `x` may be what keeps that
 node alive (a transfer treats any call as one that may release a reference). A read that a call
 could replace keeps what it read alive itself until it is used, which the compiler decides from
-what the call is given: with `replace(h)`, which is given `h` and so may assign `h.node`, in place
-of `label(1)`, the name has a reference of its own, and the hand-off is a transfer. In a method, a
-hand-off therefore stays a copy when `self` is
+what the call is given and, when it compiles the function called, from what that function does:
+with `replace(h)`, which is given `h` and assigns `h.node`, in place of `label(1)`, the name has a
+reference of its own, and the hand-off is a transfer. In a method, a hand-off therefore stays a
+copy when `self` is
 used by or after a call or a release that follows it, the call it is passed to included (not in
 `__init__`, whose object the constructor holds). Where one branch of an `if` or one arm of a `match` hands the
 variable on and another does not, the other releases it when its scope ends, as before. In

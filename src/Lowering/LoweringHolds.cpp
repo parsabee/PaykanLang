@@ -18,7 +18,9 @@
 // storage to change, as an `inout` argument or as the `self` of a struct's
 // method that may change it.  A call given nothing but values that hold no
 // object (numbers, strings, and arrays, tuples and structs of them) can
-// replace none of it.
+// replace none of it, and neither can one that runs a function whose body
+// releases nothing its caller's storage holds (mayRelease, at the end of
+// this file).
 //
 // So the lowering walks each statement's expressions in the order it
 // evaluates them, knowing how long each value stays in use: an operand
@@ -106,7 +108,8 @@ private:
   Use callExpr(ast::CallExpr *ce, bool place);
   Use methodCall(ast::MethodCallExpr *mc, bool place);
   std::vector<const ast::Expr *> arguments(const std::vector<ast::Expr *> &args,
-                                           Callee callee, bool given);
+                                           Callee callee, bool given,
+                                           const ast::FuncDecl *target);
   static Use result(const ast::Expr *call, bool place,
                     std::vector<const ast::Expr *> owners);
 };
@@ -280,14 +283,16 @@ void ModuleLowering::BorrowedReads::binary(ast::BinaryExpr *be) {
 
 // The arguments @p args of a call, evaluated in order, then the call, which
 // @p given says may replace borrowed storage through what else it is given
-// (a receiver, a closure).  Each argument's holds are in use while the later
+// (a receiver, a closure), unless the function it runs, @p target, releases
+// nothing (mayRelease).  Each argument's holds are in use while the later
 // ones are computed; a reference the callee borrows, the place of an `inout`
 // argument and a value read where it is stay in use through the call.  The
 // result is what the `inout` arguments' storage is held by, which an `inout`
 // result may be part of.
 std::vector<const ast::Expr *>
 ModuleLowering::BorrowedReads::arguments(const std::vector<ast::Expr *> &args,
-                                         Callee callee, bool given) {
+                                         Callee callee, bool given,
+                                         const ast::FuncDecl *target) {
   const size_t n = Live.size();
   std::vector<const ast::Expr *> through;
   std::vector<const ast::Expr *> places;
@@ -322,7 +327,7 @@ ModuleLowering::BorrowedReads::arguments(const std::vector<ast::Expr *> &args,
       places.insert(places.end(), h.begin(), h.end());
   }
   Live.resize(n);
-  within(through, [&] { call(mayReplace); });
+  within(through, [&] { call(mayReplace && L.mayRelease(target)); });
   return places;
 }
 
@@ -358,12 +363,12 @@ ModuleLowering::BorrowedReads::callExpr(ast::CallExpr *ce, bool place) {
   // A function value's code and closure are read first, and `__super__`
   // is given `self`.
   if (ce->calleeIsValue() || name == names::kMethodSuper) {
-    arguments(args, Callee::Program, /*given=*/true);
+    arguments(args, Callee::Program, /*given=*/true, nullptr);
     return {};
   }
   std::vector<const ast::Expr *> owners =
       arguments(args, L.localNative(name) ? Callee::Native : Callee::Program,
-                /*given=*/false);
+                /*given=*/false, L.bodyOf(name));
   return result(ce, place, std::move(owners));
 }
 
@@ -375,7 +380,7 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
   // A function value in a field: its code and closure are read first.
   if (mc->isFieldCall()) {
     eval(recv);
-    arguments(mc->getArguments(), Callee::Program, /*given=*/true);
+    arguments(mc->getArguments(), Callee::Program, /*given=*/true, nullptr);
     return {};
   }
   // An array's or a slice's length, a builtin hash: no call of the program.
@@ -395,7 +400,8 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
     within(r.Owners, [&] {
       std::vector<const ast::Expr *> places = arguments(
           mc->getArguments(), Callee::Program,
-          reachesObject(st) || (recv->isChangedByCall() && r.Borrowed));
+          reachesObject(st) || (recv->isChangedByCall() && r.Borrowed),
+          L.bodyOf(st->getName() + names::kNameSep + name));
       owners.insert(owners.end(), places.begin(), places.end());
     });
     return result(mc, place, std::move(owners));
@@ -409,15 +415,19 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
     within(holds(r), [&] { call(reachesObject(rt)); });
     return {};
   }
-  // A class's method: the receiver is in use until it returns.
+  // A class's method: the receiver is in use until it returns.  An `impl`
+  // one is the one the call runs.
   Use r = eval(recv);
-  const auto *ct = ast::dyn_cast<ast::ClassType>(rt);
+  auto *ct = ast::dyn_cast<ast::ClassType>(rt);
+  const ast::MethodDecl *md = ct ? ct->findMethod(name) : nullptr;
+  ast::ClassType *owner = md && md->isImpl() ? ct->implOwner(name) : nullptr;
   std::vector<const ast::Expr *> owners = holds(r);
   within(holds(r), [&] {
-    std::vector<const ast::Expr *> places =
-        arguments(mc->getArguments(),
-                  ct && ct->isBuiltin() ? Callee::Builtin : Callee::Program,
-                  reachesObject(rt));
+    std::vector<const ast::Expr *> places = arguments(
+        mc->getArguments(),
+        ct && ct->isBuiltin() ? Callee::Builtin : Callee::Program,
+        reachesObject(rt),
+        owner ? L.bodyOf(owner->getName() + names::kNameSep + name) : nullptr);
     owners.insert(owners.end(), places.begin(), places.end());
   });
   return result(mc, place, std::move(owners));
@@ -467,7 +477,7 @@ ModuleLowering::BorrowedReads::eval(ast::Expr *e, bool place) {
     return methodCall(mc, place);
   if (auto *cv = ast::dyn_cast<ast::CallValueExpr>(e)) {
     eval(cv->getCallee());
-    arguments(cv->getArguments(), Callee::Program, /*given=*/true);
+    arguments(cv->getArguments(), Callee::Program, /*given=*/true, nullptr);
     return {};
   }
   // A literal's elements are stored in it as they come.
@@ -537,6 +547,240 @@ void ModuleLowering::BorrowedReads::statement(ast::Stmt *s) {
 
 void ModuleLowering::noteBorrowedReads(ast::Stmt *s) {
   BorrowedReads(*this).statement(s);
+}
+
+// -- Functions that release nothing
+//
+// A call given an object replaces nothing when the function it runs cannot
+// free a reference its caller's storage holds: when its body stores no
+// reference outside its own variables (a field's, an element's, an `inout`
+// parameter's, whose old one would go) and makes no call that may (a
+// program's function or method whose body is not at hand or may, a call
+// through a function value, a native function given storage to change, an
+// `==` that calls `equals`).  What else it releases is its own: a
+// variable's or a temporary's reference to an object its caller's storage
+// still holds, or to one it made.  With no variables at module level,
+// nothing else can reach what its caller holds.
+
+/// The read of a function's body for mayRelease.
+struct ModuleLowering::ReleaseScan {
+  ModuleLowering &L;
+  /// The function read: a call of it from its own body does what the rest
+  /// of the body does.
+  const ast::FuncDecl *Fn;
+  /// Its names for storage it does not own: `self` (a struct's), its
+  /// `inout` parameters and locals, its `match` arms' `n: inout T`.
+  std::unordered_set<std::string> NotOwned;
+
+  /// Whether a value of type @p ty holds a reference that storing another
+  /// releases.
+  static bool holdsReference(const ast::Type *ty) {
+    return !ty || ast::isRefType(ty) || memHoldsRefs(ty);
+  }
+  bool runs(const ast::FuncDecl *callee) const {
+    return callee != Fn && L.mayRelease(callee);
+  }
+  /// Whether the arguments @p args give a call something to reach an object
+  /// through, or storage holding a reference to change.
+  static bool gives(const std::vector<ast::Expr *> &args) {
+    return std::any_of(args.begin(), args.end(), [](const ast::Expr *a) {
+      return reachesObject(a->getResolvedType()) ||
+             (a->isChangedByCall() && holdsReference(a->getResolvedType()));
+    });
+  }
+  bool any(const std::vector<ast::Expr *> &es) {
+    return std::any_of(es.begin(), es.end(),
+                       [&](ast::Expr *e) { return expr(e); });
+  }
+  bool stmt(ast::Stmt *s);
+  bool expr(ast::Expr *e);
+  bool call(ast::CallExpr *ce);
+  bool methodCall(ast::MethodCallExpr *mc);
+  /// The static type of @p e, as Sema recorded it (the function read is not
+  /// the one being lowered, whose scope knows other names), or null.
+  ast::Type *typeOf(const ast::Expr *e) const {
+    ast::Type *ty = e->getResolvedType();
+    return ty ? L.canonicalizeDeclType(ty) : nullptr;
+  }
+  /// The type of the field @p field of what @p recv evaluates to, or null.
+  ast::Type *fieldType(const ast::Expr *recv, const std::string &field) const {
+    ast::Type *ty = typeOf(recv);
+    if (auto *st = ast::dyn_cast<ast::StructType>(ty))
+      return st->findField(field);
+    if (auto *ct = ast::dyn_cast<ast::ClassType>(ty))
+      return ct->findField(field);
+    return nullptr;
+  }
+};
+
+bool ModuleLowering::ReleaseScan::stmt(ast::Stmt *s) {
+  if (!s)
+    return false;
+  if (auto *x = ast::dyn_cast<ast::CompoundStmt>(s))
+    return std::any_of(x->getStatements().begin(), x->getStatements().end(),
+                       [&](ast::Stmt *t) { return stmt(t); });
+  if (auto *x = ast::dyn_cast<ast::ReturnStmt>(s))
+    return expr(x->getReturnValue());
+  if (auto *x = ast::dyn_cast<ast::ExprStmt>(s))
+    return expr(x->getExpr());
+  if (auto *x = ast::dyn_cast<ast::DeclStmt>(s)) {
+    auto *vd = ast::dyn_cast<ast::VarDecl>(x->getDecl());
+    if (!vd)
+      return true;
+    if (vd->getMode() == ast::ParamMode::Inout)
+      NotOwned.insert(vd->getName());
+    return expr(vd->getInitExpr());
+  }
+  if (auto *x = ast::dyn_cast<ast::AssignStmt>(s))
+    return (NotOwned.count(x->getVarName()) &&
+            holdsReference(x->getValue()->getResolvedType())) ||
+           expr(x->getValue());
+  if (auto *x = ast::dyn_cast<ast::MemberAssignStmt>(s))
+    return holdsReference(fieldType(x->getReceiver(), x->getFieldName())) ||
+           expr(x->getReceiver()) || expr(x->getValue());
+  if (auto *x = ast::dyn_cast<ast::SubscriptAssignStmt>(s)) {
+    ast::Type *arr = x->getArray()->getResolvedType();
+    ast::Type *elem = nullptr;
+    if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(arr))
+      elem = ft->getElementType();
+    else if (auto *st = ast::dyn_cast<ast::SliceType>(arr))
+      elem = st->getElementType();
+    return holdsReference(elem) || expr(x->getArray()) || expr(x->getIndex()) ||
+           expr(x->getValue());
+  }
+  if (auto *x = ast::dyn_cast<ast::DestructureStmt>(s))
+    return std::any_of(x->getTargets().begin(), x->getTargets().end(),
+                       [&](const ast::DestructureStmt::Target &t) {
+                         return !t.isSkip() && NotOwned.count(t.getName());
+                       }) ||
+           expr(x->getValue());
+  if (auto *x = ast::dyn_cast<ast::IfStmt>(s))
+    return expr(x->getCondition()) || stmt(x->getThenBranch()) ||
+           stmt(x->getElseBranch());
+  if (auto *x = ast::dyn_cast<ast::WhileStmt>(s))
+    return expr(x->getCondition()) || stmt(x->getBody());
+  if (auto *x = ast::dyn_cast<ast::ForStmt>(s))
+    return expr(x->getStart()) || expr(x->getEnd()) || expr(x->getStep()) ||
+           stmt(x->getBody());
+  if (auto *x = ast::dyn_cast<ast::MatchStmt>(s)) {
+    if (expr(x->getSubject()))
+      return true;
+    for (ast::MatchArm *arm : x->getArms()) {
+      if (arm->hasBinding() && arm->getMode() == ast::ParamMode::Inout)
+        NotOwned.insert(arm->getBinding());
+      if (stmt(arm->getBody()))
+        return true;
+    }
+    return false;
+  }
+  return !ast::isa<ast::BreakStmt>(s) && !ast::isa<ast::ContinueStmt>(s);
+}
+
+bool ModuleLowering::ReleaseScan::expr(ast::Expr *e) {
+  if (!e || ast::isa<ast::Identifier>(e) || ast::isa<ast::IntegerLiteral>(e) ||
+      ast::isa<ast::FloatLiteral>(e) || ast::isa<ast::BoolLiteral>(e) ||
+      ast::isa<ast::CharLiteral>(e) || ast::isa<ast::NoneLiteral>(e) ||
+      ast::isa<ast::StringLiteral>(e) || ast::isa<ast::EnumValueExpr>(e) ||
+      ast::isa<ast::LambdaExpr>(e)) // a lambda's body runs when it is called
+    return false;
+  if (auto *x = ast::dyn_cast<ast::UnaryExpr>(e))
+    return expr(x->getOperand());
+  if (auto *x = ast::dyn_cast<ast::BinaryExpr>(e)) {
+    // Values that reach objects are compared by the objects' `equals` (or
+    // another of their methods); `== None` compares a reference with null.
+    const bool none = ast::isa<ast::NoneLiteral>(x->getLHS()) ||
+                      ast::isa<ast::NoneLiteral>(x->getRHS());
+    return expr(x->getLHS()) || expr(x->getRHS()) ||
+           (!none && reachesObject(x->getLHS()->getResolvedType()));
+  }
+  if (auto *x = ast::dyn_cast<ast::TernaryExpr>(e))
+    return expr(x->getCondition()) || expr(x->getTrueExpr()) ||
+           expr(x->getFalseExpr());
+  if (auto *x = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return expr(x->getReceiver());
+  if (auto *x = ast::dyn_cast<ast::SubscriptExpr>(e))
+    return expr(x->getArray()) || expr(x->getIndex());
+  if (auto *x = ast::dyn_cast<ast::TupleIndexExpr>(e))
+    return expr(x->getTuple());
+  if (auto *x = ast::dyn_cast<ast::ArrayLiteralExpr>(e))
+    return any(x->getElements());
+  if (auto *x = ast::dyn_cast<ast::TupleLiteralExpr>(e))
+    return any(x->getElements());
+  if (auto *x = ast::dyn_cast<ast::CallExpr>(e))
+    return call(x);
+  if (auto *x = ast::dyn_cast<ast::MethodCallExpr>(e))
+    return methodCall(x);
+  return true; // a call through a function value
+}
+
+bool ModuleLowering::ReleaseScan::call(ast::CallExpr *ce) {
+  const std::string &name = ce->getCalleeName();
+  const std::vector<ast::Expr *> &args = ce->getArguments();
+  if (any(args))
+    return true;
+  // `Str(s)`, a variant made in place, a conversion or a parse: the
+  // runtime's, given numbers and strings.
+  ast::Type *target = nullptr;
+  ast::Type *source = nullptr;
+  if ((L.IdentityCtors.count(name) && args.size() == 1) || ce->getVariantEnum())
+    return false;
+  if (L.FunctionTable.count(name) || L.conversionTypes(name, target, source))
+    return gives(args);
+  if (ce->calleeIsValue() || name == names::kMethodSuper)
+    return true;
+  // A native function changes only what it is given to (gives in
+  // BorrowedReads).
+  if (L.localNative(name))
+    return std::any_of(args.begin(), args.end(),
+                       [](const ast::Expr *a) { return a->isChangedByCall(); });
+  return gives(args) && runs(L.bodyOf(name));
+}
+
+bool ModuleLowering::ReleaseScan::methodCall(ast::MethodCallExpr *mc) {
+  ast::Expr *recv = mc->getReceiver();
+  ast::Type *rt = typeOf(recv);
+  const std::string &name = mc->getMethodName();
+  if (expr(recv) || any(mc->getArguments()))
+    return true;
+  if (mc->isFieldCall()) // a function value in a field
+    return true;
+  if (ast::dyn_cast<ast::SliceType>(rt) ||
+      ast::dyn_cast<ast::FixedArrayType>(rt))
+    return false; // `len()`
+  if (auto *st = ast::dyn_cast<ast::StructType>(rt);
+      st && name != names::kMethodToString)
+    return runs(L.bodyOf(st->getName() + names::kNameSep + name));
+  // The builtin text, hash or equality of a value (which calls its objects'
+  // methods), or a Str's method (the runtime's).
+  auto *ct = ast::dyn_cast<ast::ClassType>(rt);
+  if (!ct || !reachesObject(ct))
+    return reachesObject(rt);
+  // A class's method: an `impl` one is the one the call runs (an `Obj`'s
+  // runs a subclass's override).
+  const ast::MethodDecl *md = ct->findMethod(name);
+  ast::ClassType *owner = md && md->isImpl() ? ct->implOwner(name) : nullptr;
+  return !owner || runs(L.bodyOf(owner->getName() + names::kNameSep + name));
+}
+
+const ast::FuncDecl *ModuleLowering::bodyOf(const std::string &name) const {
+  auto it = Bodies.find(name);
+  return it == Bodies.end() ? nullptr : it->second;
+}
+
+bool ModuleLowering::mayRelease(const ast::FuncDecl *fn) {
+  if (!fn || !fn->getBody())
+    return true;
+  if (auto it = MayRelease.find(fn); it != MayRelease.end())
+    return it->second;
+  MayRelease[fn] = true; // while it is read: a call of it from another one
+  ReleaseScan scan{*this, fn, {}};
+  scan.NotOwned.insert(names::kSelf);
+  for (const ast::Param &p : fn->getParams())
+    if (p.Mode == ast::ParamMode::Inout)
+      scan.NotOwned.insert(p.getName());
+  const bool may = scan.stmt(fn->getBody());
+  MayRelease[fn] = may;
+  return may;
 }
 
 } // namespace paykan::lowering

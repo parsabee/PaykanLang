@@ -642,7 +642,20 @@ CodeGen enforced, now in one place.
   struct's method that may change `self`.  A call given only values that
   reach no object (numbers, strings, and arrays, tuples and structs of
   them) cannot, nor can a native function but through its `inout`
-  arguments.  The lowering follows the order in which a statement
+  arguments.  Nor can, whatever it is given, a call that runs a function
+  whose body the module lowers (its own, a struct's method, a class's
+  `impl` method, an instantiation it emits) when that body stores no
+  reference outside its own variables (into a field, an element, an
+  `inout` parameter or local, a struct method's `self`) and makes no call
+  that may release one: none of a function that may, or whose body the
+  call does not choose (a method a subclass may override, a function
+  value), of a native function given storage to change, or of `equals`
+  (an `==` of values that reach objects).  What else such a function
+  releases is its own: a variable's or a temporary's reference to an
+  object its caller's storage still holds, or to one it made, and with no
+  variables at module level it reaches nothing else.  So `h.b.len()` and
+  a map's lookup of a string key need no hold; a recursion is read as the
+  rest of its function.  The lowering follows the order in which a statement
   evaluates its parts, and a read in use where such a call is made takes
   a reference of its own: a method's receiver until the method returns
   (the method is such a call, given its receiver), the left operand of

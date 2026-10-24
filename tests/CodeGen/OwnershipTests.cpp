@@ -1009,6 +1009,109 @@ TEST(Ownership, AnInoutResultInAnObjectAValueHoldsStaysAlive) {
   g.expectNoLeaks("AnInoutResultInAnObjectAValueHoldsStaysAlive");
 }
 
+// A call of a function whose own body makes no store that releases a
+// reference still replaces what its callees, a recursion, a method a
+// subclass overrides, its `inout` parameter or a struct method's `self`
+// replace: the receiver read from a field stays alive through the call, and
+// so does a field's value read before it.  A method that stores a number
+// and calls only such methods, and a stdlib map's lookups, replace nothing.
+TEST(Ownership, AReleaseInACalleesCalleeStillHoldsTheRead) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    import ::collections;
+    class B {
+      s: Str;
+      n: int;
+      fn virt(h: H) -> Str { return self.s; }
+    }
+    class D : B {
+      fn virt(h: H) -> Str { return clear(h) + self.s; }
+    }
+    impl B {
+      view fn count() -> int { return self.n; }
+      fn bump() -> int {
+        self.n = self.n + 1;
+        return self.count();
+      }
+      view fn viaFree(h: H) -> Str {
+        t = clear(h);
+        return t + self.s;
+      }
+      view fn ping(k: int, h: H) -> Str {
+        if k == 0 {
+          t = clear(h);
+          return t + self.s;
+        }
+        return self.pong(k - 1, h);
+      }
+      view fn pong(k: int, h: H) -> Str { return self.ping(k, h); }
+      view fn rec(k: int, h: H) -> Str {
+        if k == 0 {
+          h.b = B("other" + Str(9), 9);
+          y = B("reuse" + Str(1), 1);
+          return "!" + self.s;
+        }
+        return self.rec(k - 1, h);
+      }
+      view fn setIt(x: inout Str) -> Str {
+        x = "new" + Str(222);
+        y = B("QQQQQ" + Str(8), 8);
+        return "!";
+      }
+      fn viaVirt(h: H) -> Str { return self.virt(h); }
+    }
+    struct S {
+      b: B;
+    }
+    impl S {
+      fn reset() -> Str {
+        self.b = B("other" + Str(9), 9);
+        y = B("reuse" + Str(1), 1);
+        return "!";
+      }
+    }
+    class H {
+      b: B;
+      c: B;
+    }
+    class W { s: S; }
+    fn clear(h: H) -> Str {
+      h.b = B("other" + Str(9), 9);
+      y = B("reuse" + Str(1), 1);
+      return "!";
+    }
+    fn mk() -> H { return H(B("first" + Str(1), 1), B("c", 3)); }
+    fn main() -> int {
+      h = mk();
+      io::println("free: " + h.b.viaFree(h));
+      h = mk();
+      io::println("mutual: " + h.b.ping(3, h));
+      h = mk();
+      io::println("self: " + h.b.rec(3, h));
+      h = mk();
+      io::println("inout: " + h.b.s + h.c.setIt(h.b.s) + h.b.s);
+      h = mk();
+      h.b = D("first" + Str(1), 1);
+      io::println("virtual: " + h.b.viaVirt(h));
+      w = W(S(B("first" + Str(1), 1)));
+      io::println("struct: " + w.s.b.s + w.s.reset() + w.s.b.s);
+      h = mk();
+      io::println("number: " + h.b.s + Str(h.b.bump()) + Str(h.b.count()));
+      m = collections::HashMap<Str, int>();
+      m.put("a" + Str(1), 1);
+      io::println("map: " + Str(m.get("a1")) + Str(m.containsKey("a1")) + Str(m.len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "free: !first1\nmutual: !first1\nself: !first1\n"
+                      "inout: first1!new222\nvirtual: !first1\n"
+                      "struct: first1!other9\nnumber: first122\n"
+                      "map: 1True1\n");
+  g.expectNoLeaks("AReleaseInACalleesCalleeStillHoldsTheRead");
+}
+
 // A string's character is read from the string as it was before its index
 // was computed, as an array's element is, though the call computing it
 // replaces the string (and makes a new one where it was).

@@ -476,8 +476,14 @@ TEST(Lowering, AReadThroughAnObjectACallMayReplaceIsHeld) {
   auto l = lower(R"(
     class B { s: Str; a: int[3]; fn m(h: H) -> Str { return self.s; } }
     class H { b: B; fn drop() -> Str { return self.b.m(self); } }
-    fn g(h: H) -> Str { return "!"; }
-    fn gi(h: H) -> int { return 1; }
+    fn g(h: H) -> Str {
+      h.b = B("y", [4, 5, 6]);
+      return "!";
+    }
+    fn gi(h: H) -> int {
+      h.b = B("y", [4, 5, 6]);
+      return 1;
+    }
     fn shout(s: Str) -> Str { return s + "!"; }
     fn receiver(h: H) -> Str { return h.b.m(h); }
     fn operand(h: H) -> Str { return h.b.s + g(h); }
@@ -511,6 +517,108 @@ TEST(Lowering, AReadThroughAnObjectACallMayReplaceIsHeld) {
   EXPECT_EQ(count(f, "retain "), 1u) << f;
 }
 
+// A call given an object, of a function whose body stores no reference
+// outside its own variables and makes no call that may (a method returning
+// a field, storing a number and calling another such method, or calling
+// itself), cannot replace a read: the read stays in place.  One that stores
+// a reference (into a field, through an `inout` parameter, into a struct's
+// `self`), calls a function that may (also through a recursion), or runs a
+// method a subclass may override (an `Obj`'s too) still holds it
+// (docs/pir.md §7, "Reads a call may replace").
+TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
+  auto l = lower(R"(
+    class B {
+      s: Str;
+      n: int;
+      fn virt() -> int { return self.n; }
+    }
+    impl B {
+      fn count() -> int { return self.n; }
+      fn bump() -> int {
+        self.n = self.n + 1;
+        return self.twice(self.n);
+      }
+      fn twice(k: int) -> int { return 2 * k; }
+      fn down(k: int) -> int {
+        if k == 0 {
+          return self.n;
+        }
+        return self.down(k - 1);
+      }
+      fn reset() -> int {
+        self.s = "r";
+        return 0;
+      }
+      fn viaFree(h: H) -> int { return clear(h); }
+      fn ping(k: int, h: H) -> int {
+        if k == 0 {
+          return clear(h);
+        }
+        return self.pong(k - 1, h);
+      }
+      fn pong(k: int, h: H) -> int { return self.ping(k, h); }
+      fn setIt(x: inout Str) -> int {
+        x = "x";
+        return 0;
+      }
+      fn viaVirt() -> int { return self.virt(); }
+      fn viaObj(o: Obj) -> int { return o.toString().len(); }
+    }
+    struct S { b: B; }
+    impl S {
+      fn reset() -> int {
+        self.b = B("r", 0);
+        return 0;
+      }
+    }
+    class H {
+      b: B;
+      c: B;
+      s: S;
+    }
+    fn clear(h: H) -> int {
+      h.b = B("c", 0);
+      return 0;
+    }
+    fn peek(h: H) -> Str { return "!" + Str(h.b.count()); }
+    fn byCount(h: H) -> int { return h.b.count(); }
+    fn byBump(h: H) -> int { return h.b.bump(); }
+    fn byDown(h: H) -> int { return h.b.down(3); }
+    fn byReset(h: H) -> int { return h.b.reset(); }
+    fn byFree(h: H) -> int { return h.b.viaFree(h); }
+    fn byPing(h: H) -> int { return h.b.ping(2, h); }
+    fn byVirt(h: H) -> int { return h.b.viaVirt(); }
+    fn byObj(h: H) -> int { return h.b.viaObj(h); }
+    fn bySet(h: H) -> Str { return h.b.s + Str(h.c.setIt(h.b.s)); }
+    fn byStruct(h: H) -> Str { return h.s.b.s + Str(h.s.reset()); }
+    fn operand(h: H) -> Str { return h.b.s + peek(h); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"byCount", "byBump", "byDown"}) {
+    std::string f = function(l.Text, fn);
+    EXPECT_EQ(count(f, "retain "), 0u) << fn << "\n" << f;
+  }
+  struct Case {
+    const char *Fn, *Read, *Call;
+  };
+  for (const Case &c : {
+           Case{"byReset", ", H.b", "call @B.reset("},
+           Case{"byFree", ", H.b", "call @B.viaFree("},
+           Case{"byPing", ", H.b", "call @B.ping("},
+           Case{"byVirt", ", H.b", "call @B.viaVirt("},
+           Case{"byObj", ", H.b", "call @B.viaObj("},
+           Case{"bySet", ", B.s", "call @B.setIt("},
+           Case{"byStruct", ", B.s", "call @S.reset("},
+       }) {
+    std::string f = function(l.Text, c.Fn);
+    EXPECT_TRUE(heldAcross(f, defined(f, c.Read), c.Call)) << c.Fn << "\n" << f;
+  }
+  std::string f = function(l.Text, "operand");
+  EXPECT_FALSE(heldAcross(f, defined(f, ", B.s"), "call @peek(")) << f;
+  EXPECT_EQ(count(f, "retain "), 1u) << f; // peek's argument
+}
+
 // The storage of a value held in an object's field, used where it is while
 // a call that may replace the object runs, keeps the object alive: an
 // array's while its index or the element assigned in it is computed, one
@@ -527,9 +635,18 @@ TEST(Lowering, StorageInAnObjectACallMayReplaceKeepsTheObject) {
       fn slot(h: H) -> inout Str { return self.k; }
     }
     class H { a: A; }
-    fn gi(h: H) -> int { return 1; }
-    fn word(h: H) -> Str { return "w"; }
-    fn look(xs: view Str[], h: H) -> int { return xs[0].len(); }
+    fn gi(h: H) -> int {
+      h.a.k = "g";
+      return 1;
+    }
+    fn word(h: H) -> Str {
+      h.a.k = "w";
+      return "w";
+    }
+    fn look(xs: view Str[], h: H) -> int {
+      h.a.k = "l";
+      return xs[0].len();
+    }
     fn put(x: inout Str, h: H) { x = "p"; }
     fn pick(x: inout Str) -> inout Str { return x; }
     fn element(h: H) -> int { return h.a.n[gi(h)]; }
@@ -583,7 +700,10 @@ TEST(Lowering, AReadOfTheCallersStorageACallMayReplaceIsHeld) {
     class G { h: H; }
     struct S { v: Str; }
     impl S { fn both(h: H) -> Str { return self.v + g(h); } }
-    fn g(h: H) -> Str { return "!"; }
+    fn g(h: H) -> Str {
+      h.k = "g";
+      return "!";
+    }
     fn param(x: inout Str, h: H) -> Str { return x + g(h); }
     fn slice(xs: view Str[], h: H) -> Str { return xs[0] + g(h); }
     fn read(o: G) -> Str { return o.h.slot(o.h) + "!"; }
@@ -663,7 +783,10 @@ TEST(Lowering, AStringIsReadBeforeTheIndexOfItsCharacter) {
   auto l = lower(R"(
     class B { s: Str; }
     class H { b: B; }
-    fn g(h: H) -> int { return 0; }
+    fn g(h: H) -> int {
+      h.b = B("y");
+      return 0;
+    }
     fn n(k: int) -> int { return k; }
     fn held(h: H) -> char { return h.b.s[g(h)]; }
     fn inPlace(h: H) -> char { return h.b.s[n(1)]; }

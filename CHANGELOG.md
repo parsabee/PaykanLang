@@ -351,9 +351,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `inout` result, an `inout` local or a `match` arm's `n: inout T` of such storage, and
   what an `inout` parameter, a slice or a struct method's `self` names.  Such a read now
   takes a reference of its own until it is used, and storage used where it is keeps the
-  object it is in alive, wherever a call that may replace it is made in between; a call
-  given nothing that reaches an object replaces nothing, and the reads around it stay in
-  place (docs/pir.md §7, "Reads a call may replace"; docs/language/03-functions.md,
+  object it is in alive, wherever a call that may replace it is made in between.  A call
+  given nothing that reaches an object replaces nothing, and neither does one of a function
+  the module compiles whose body stores no reference outside its own variables and calls
+  nothing that may (a method returning a field, `len()` or `isEmpty()` of a stdlib
+  container, a map's lookup of a string key): the reads around it stay in place
+  (docs/pir.md §7, "Reads a call may replace"; docs/language/03-functions.md,
   "Exclusivity").  The moves at last use made this more likely: after `take(a)` handed
   `a`'s last reference on, `use(h)`, reading `h.node.name + replace(h)`, joined freed
   memory (`took !!`); it prints `took first1!`.
