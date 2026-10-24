@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <utility>
 
 namespace paykan {
 namespace sema {
@@ -201,6 +202,7 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
   const std::string &name = sd->getName();
   const std::string what = describeStruct(st);
   StringSet fieldNames;
+  bool selfHeld = false; // a field holding the struct was reported
   for (auto *field : sd->getFields()) {
     const std::string context = "field '" + field->getName() + "' in " + what;
     if (!fieldNames.insert(field->getName()).second) {
@@ -239,8 +241,15 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     // are ordered so that a cycle is found before any of them is populated
     // (populateStructs); an instantiation's fields are resolved as they
     // come (its own instantiation resolving to the stub), so the field is
-    // checked here, and left out, so that no type holds itself.
+    // checked here, and left out, so that no type holds itself.  As there,
+    // the struct (a variant) is reported once, whatever the number of its
+    // fields that hold it.
     if (holdsStruct(fty, st)) {
+      ok = false;
+      if (std::exchange(selfHeld, true)) {
+        ++SuppressedFollowOns;
+        continue;
+      }
       std::string msg;
       if (const ast::EnumType *et = st->getVariantEnum()) {
         msg = "enum '";
@@ -261,7 +270,6 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
                "own (hold it in a class instead)";
       }
       error(field->getLocation(), msg);
-      ok = false;
       continue;
     }
     field->setType(fty); // canonical write-back for the lowering

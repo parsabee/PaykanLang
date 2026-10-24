@@ -1236,6 +1236,36 @@ fn main() -> int { return C().n + D().n; }
   EXPECT_EQ(bad.ErrorCount, 2u) << bad.Diagnostics;
 }
 
+// A write in a field's own storage, to an element of a fixed-size array
+// field or to a field of a struct field, reads nothing and assigns nothing:
+// the field is still to be assigned, and only what reads it is reported.
+TEST(Class, InitWritesInAFieldReadNothing) {
+  auto r = semaCheck(R"(
+struct P { x: int; y: int; }
+class D { p: P; grid: int[2][2]; arr: int[3]; n: int; }
+impl D {
+  fn __init__() {
+    self.p.x = 1;
+    self.arr[0] = 5;
+    self.grid[0][1] = self.p.y;
+    self.n = self.grid[0][0] + self.arr[0];
+  }
+}
+fn main() -> int { return D().n; }
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *e :
+       {"8:23: error: field 'p' is read before it is assigned",
+        "9:14: error: field 'grid' is read before it is assigned",
+        "9:32: error: field 'arr' is read before it is assigned",
+        "5:3: error: field 'p' of class 'D' is not assigned on every path",
+        "5:3: error: field 'grid' of class 'D' is not assigned on every path",
+        "5:3: error: field 'arr' of class 'D' is not assigned on every path"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
+}
+
 // An initializer has no result: constructing gives the object (or the
 // struct) it set up.
 TEST(Class, InitWithAResultTypeRejected) {

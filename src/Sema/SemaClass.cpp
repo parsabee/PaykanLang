@@ -231,6 +231,31 @@ bool Sema::checkInitFieldsAssigned(
           return; // a literal or an enum value: no `self` in it
         }
       };
+  // A write in place (`self.p.x = v` with `p` a struct, `self.a[i] = v` with
+  // `a` a fixed-size array) goes into the storage of the field it starts
+  // from, which it neither reads nor assigns: only the indexes on the way are
+  // read.  A write through an object (`self.h.n = v`) reads the field that
+  // holds the object.
+  auto inPlace = [](const ast::Expr *e) {
+    const ast::Type *t = e->getResolvedType(); // null-safe below
+    return ast::dyn_cast<ast::StructType>(t) != nullptr ||
+           ast::dyn_cast<ast::FixedArrayType>(t) != nullptr;
+  };
+  std::function<void(const ast::Expr *, const BitSet &)> checkWrittenIn =
+      [&](const ast::Expr *place, const BitSet &assigned) {
+        const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(place);
+        const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place);
+        if (!inPlace(place) || (!ma && !se)) {
+          checkUses(place, assigned, false);
+        } else if (ma) {
+          // Up to the field's own storage, `self.f`.
+          if (!isSelf(ma->getReceiver()))
+            checkWrittenIn(ma->getReceiver(), assigned);
+        } else {
+          checkWrittenIn(se->getArray(), assigned);
+          checkUses(se->getIndex(), assigned, false);
+        }
+      };
 
   // Result of analysing a statement / block: the set of fields definitely
   // assigned along the fall-through path, and whether the path always exits via
@@ -262,9 +287,10 @@ bool Sema::checkInitFieldsAssigned(
 
   analyzeStmt = [&](ast::Stmt *s, const BitSet &in) -> Flow {
     if (auto *ma = ast::dyn_cast<ast::MemberAssignStmt>(s)) {
-      // `self.f = v` assigns f; `self.p.x = v` reads p first.
+      // `self.f = v` assigns f; `self.p.x = v` writes in p's storage, which
+      // leaves p as it was (checkWrittenIn).
       if (!isSelf(ma->getReceiver()))
-        checkUses(ma->getReceiver(), in, false);
+        checkWrittenIn(ma->getReceiver(), in);
       checkUses(ma->getValue(), in, false);
       BitSet out = in;
       int bit = selfFieldBit(ma);
@@ -354,7 +380,7 @@ bool Sema::checkInitFieldsAssigned(
       if (auto *vd = ast::dyn_cast<ast::VarDecl>(ds->getDecl()))
         checkUses(vd->getInitExpr(), in, false);
     } else if (auto *sa = ast::dyn_cast<ast::SubscriptAssignStmt>(s)) {
-      checkUses(sa->getArray(), in, false);
+      checkWrittenIn(sa->getArray(), in);
       checkUses(sa->getIndex(), in, false);
       checkUses(sa->getValue(), in, false);
     } else if (auto *d = ast::dyn_cast<ast::DestructureStmt>(s)) {

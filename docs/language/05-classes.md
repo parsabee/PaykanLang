@@ -633,12 +633,17 @@ optional field starts as `None`), `self` is only the place those fields are assi
 
 - A field assigned on every path so far can be read; one that may not be is an error:
   `field 'start' is read before it is assigned`. Calling the function a field holds
-  (`self.f(1)` with `f: (int) -> int`) reads the field, and passes `self` nowhere.
+  (`self.f(1)` with `f: (int) -> int`) reads the field, and passes `self` nowhere. A write
+  in a field's own storage, to an element of a fixed-size array (`self.a[0] = 5`) or a
+  field of a struct (`self.p.x = 1`), reads nothing; the field is still to be assigned.
 - Any other use of `self` is an error until every field is assigned: calling a method on it
   (a `view fn` too), passing it to a function or a constructor, storing, returning or
   comparing it, or a lambda capturing it: `'self' is used before every field is assigned:
   'start' is not assigned yet`. The method, an override of it in a subclass, or whatever
-  `self` is given to could read a field that has no value yet.
+  `self` is given to could read a field that has no value yet. So a field that is to hold a
+  lambda capturing `self` (a callback, best captured [weakly](14-function-types.md#captures))
+  gets a placeholder first, or is optional, and the lambda is made once every field has a
+  value.
 - In a subclass, `__super__(...)` comes first and assigns the superclass's fields, and its
   arguments cannot use `self` at all (`'self' is used before every field is assigned:
   '__super__' has not run yet`).

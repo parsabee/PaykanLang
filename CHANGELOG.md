@@ -450,10 +450,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Until every field of the class's own body is assigned on every path (an optional one starts
   as `None`), and in a subclass after `__super__(...)`, `self` is now only a place to assign
   fields and to read the ones already assigned (`self.f(1)` with `f` a field of function
-  type reads `f`): `field 'name' is read before it is assigned`, `'self' is used before
-  every field is assigned: 'name' is not assigned yet`, and in `__super__(...)`'s arguments
-  `'self' is used before every field is assigned: '__super__' has not run yet`
-  (docs/language/05-classes.md, "Every field before `self`").
+  type reads `f`; a write in a field's own storage, `self.a[0] = 5` with `a` a fixed-size
+  array or `self.p.x = 1` with `p` a struct, reads nothing and assigns nothing): `field
+  'name' is read before it is assigned`, `'self' is used before every field is assigned:
+  'name' is not assigned yet`, and in `__super__(...)`'s arguments `'self' is used before
+  every field is assigned: '__super__' has not run yet` (docs/language/05-classes.md,
+  "Every field before `self`").
   What a static check cannot see, a superclass's `__init__` calling a method a subclass
   overrides, or giving `self` away to code the subclass's `__init__` then calls, is safe by
   the change to the object's class while an `__init__` runs (see "Changed").
@@ -505,7 +507,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A struct or a tagged union holding itself in two places (`struct S { a: S; b: S; }`, a
   field `(S, S)`, `enum Expr { Num(v: int), Add(l: Expr, r: Expr) }`) was reported twice and
   then stopped the compiler (`the same diagnostic was reported twice`); it is reported once
-  per declaration, and an enum once per variant that holds it.
+  per declaration, and an enum once per variant that holds it, also through an
+  instantiation of a generic struct (`struct S { a: Box<S>; b: Box<S>; }`).
 - `__init__` with a result type (`fn __init__() -> Str { ...; return ...; }`) was accepted
   and every construction leaked what it returned; it is an error, `'__init__' cannot have a
   result type: it sets up 'self' and returns nothing`.
