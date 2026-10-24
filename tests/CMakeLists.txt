@@ -259,6 +259,7 @@ add_executable(pir_tests
     PIR/DeadCodeTests.cpp
     PIR/MoveAtLastUseTests.cpp
     PIR/PIRTests.cpp
+    PIR/RCEliminationTests.cpp
 )
 target_link_libraries(pir_tests
     PRIVATE gtest_main

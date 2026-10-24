@@ -28,6 +28,9 @@ target_link_libraries(paykan_backend_mlir
             paykan_mlir_pir_dialect
     PRIVATE paykan_llvm_codegen
             paykan_compile_options
+            # Runtime.h: the object header the LLVM path's inline reference
+            # counts read.
+            paykan_runtime
             MLIRArithDialect
             MLIRArithToEmitC
             MLIRArithToLLVM

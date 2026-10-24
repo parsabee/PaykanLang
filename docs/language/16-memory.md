@@ -451,6 +451,61 @@ error: 'mov' was removed in v0.2.0; ownership transfers are inferred
 Drop the keyword: `t = mov s;` becomes `t = s;`. The program prints the same output and frees
 the same objects. The variable `s` simply stays readable afterwards.
 
+## Reference counts the compiler removes
+
+The compiler also removes a retain together with the releases that undo it, wherever
+something else keeps the object alive in between, so that no count changes where nothing
+could see the difference. A `match` on a reference takes one of its own for the whole match
+(the arms may reassign what it read), and its binding another; the binding's goes, since the
+match's keeps the object alive until the match ends. The match's own goes too when nothing in
+it can let go of a reference (no function or method call, no assignment of a reference): then
+the field or variable it read keeps the object. A variable read while nothing reassigns it
+needs no reference of its own for the read either.
+
+The compiler keeps the match's reference when the match calls code, because that code may
+reassign what the match read and drop the object an arm is using. Here `clear` sets `l.head`
+to `None` while the arm still uses `n`, the node `l.head` held:
+
+```pkn
+import ::io;
+
+class Node {
+  name: Str;
+}
+
+class List {
+  head: Node?;
+}
+
+fn clear(l: List) -> int {
+  l.head = None;
+  return 0;
+}
+
+fn main() -> int {
+  l = List(Node("first"));
+  match l.head {
+    n: Node {
+      k = clear(l);
+      io::println(n.name + " " + Str(k));   // n lives until the match ends
+    }
+    None { }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+first 0
+```
+
+Nothing else changes: an object is destroyed at the same point as without these removals, a
+`weak` reference reads what it would, and the program frees the same objects. `--stats`
+counts the retains and releases removed ([docs/pir.md §12](../pir.md#12-passes) has the
+rules).
+
 ## Strings, Arrays and Tuples
 
 `Str` is a heap, reference-counted class. String literals and the results of `+` concatenation

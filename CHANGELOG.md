@@ -36,6 +36,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ran (`moves-at-last-use transfers`, `retains removed`, `releases removed`), for the
   program and for the modules this run builds from source (`pir::Statistics`,
   `include/paykan/pir/Pass.h`; `Pass::run` takes it).
+- Reference-count elimination (#98, part 1): a new backend-independent PIR pass,
+  `rc-elimination` (docs/pir.md §12; docs/language/16-memory.md, "Reference counts the
+  compiler removes"), run after the moves at last use on every program and on the code of
+  every module written to a `.pkm`, removes a `retain` together with the releases that end
+  the reference it made where something else keeps the object alive in between: another
+  reference the function holds on the same value (a match subject's around its binding's,
+  a `weak.load`'s, a box parameter), a local that is not reassigned, released or handed on
+  meanwhile, or nothing in between that can let go of a reference (no call that may run
+  code, no release, no store over a reference).  A reference read from a field or an array
+  element keeps its first retain whenever a call that may run code comes before its
+  release, since the callee may clear the field and free the object (the field-load
+  hazard); the retains nested in it go.  A pair is removed only when it is balanced on
+  every way out of its range (`ret`, `break`, `continue`, a panic), so every object is
+  destroyed where it was before.  Over the samples and the standard library's tests it
+  removes, after the moves, RETAINS_PCT of the retains and RELEASES_PCT of the releases.
+  `--stats` counts `rc-elimination retains removed` and `releases removed`.
 
 - Adjacent string literals are one literal, joined at compile time, as in C and C++
   (docs/grammar.md §1, docs/language/04-strings-and-conversions.md, #197): `"this message
@@ -200,6 +216,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The fast paths of `Paykan_retain` and `Paykan_release` are inline in the generated code
+  (#98, part 4): a null box is skipped, a retain below the limit increments the object's
+  count and a release that leaves it above zero decrements it, with a call of the runtime
+  only for the rest (the limit's panic, a destruction).  The LLVM path emits them at every
+  `-O`; the C of `--emit-c` calls Runtime.h's new `static inline` `Paykan_retain_inline` and
+  `Paykan_release_inline` (strict C11), which the runtime's container copies and drops use
+  too, and `PaykanShared_get_inline` is there for native code.  The out-of-line functions
+  stay the ABI.  BENCHMARK_SUMMARY
 - An object handed on at a variable's last use lives as long as its destination holds it,
   no longer until the variable's scope ends (docs/language/16-memory.md, "Ownership
   transfers").  Nothing is ever released earlier than its last holder lets it go, and

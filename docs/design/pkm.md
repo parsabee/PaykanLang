@@ -867,13 +867,13 @@ one.** #97's pipeline runs in the driver on the *assembled* program at the
 requested `-O`, before `Backend::emit`/`run`. One file serves every `-O`
 level and pipeline (#113 needs this); `--emit-pir` of a cached module
 prints what source prints; the expensive part is cached by payloads
-anyway. The moves at last use (#186, docs/pir.md §12) run at every `-O`,
-so they run on the module's code before it is written (§5.13), and again
-on the program, which leaves moved code as it is. What is **not** a pass
-artefact and therefore is in `CODE`: per-parameter calling conventions
-(#98 part 2 changes what a *caller in another module* emits, so they are
-signature data; a change is an ABI bump). RC elimination (#98 part 1)
-rewrites bodies only and runs at build time. The `pass level` flag bits are
+anyway. The moves at last use (#186) and the reference-count elimination
+(#98 part 1, docs/pir.md §12) run at every `-O`, so they run on the
+module's code before it is written (§5.13), and again on the program,
+which leaves their code as it is. They rewrite bodies only. What is
+**not** a pass artefact and therefore is in `CODE`: per-parameter calling
+conventions (#98 part 2 changes what a *caller in another module* emits,
+so they are signature data; a change is an ABI bump). The `pass level` flag bits are
 reserved for a later post-pass variant (PR #104 §5.4 option C); storing
 post-pass PIR per `-O` was rejected (N copies per file).
 
@@ -937,10 +937,10 @@ splits it
   `m2`, a `Pair<int, bool>` only `hidden()` uses keeps `first`, its
   constructor and `__init__`, and loses `second`.
 - **Moves.** The code passes every program goes through (docs/pir.md §12:
-  moves at last use) run on what the trim left, and what they make is
-  verified, so the compiled code and the copies in `CODE` are both moved
-  code; a program that imports the module runs them on its copies again,
-  which changes nothing more.
+  moves at last use, then reference-count elimination) run on what the
+  trim left, and what they make is verified, so the compiled code and the
+  copies in `CODE` are both made by them; a program that imports the
+  module runs them on its copies again, which changes nothing more.
 - **Split.** The module's shared copies of instantiations stay PIR in
   `CODE`: a program keeps one of each and drops what its `main` does not
   reach, and an importer instantiating the same type links to them. Every

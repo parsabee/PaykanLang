@@ -5,10 +5,11 @@
 // verified again and re-printed, and the two texts must be identical
 // (docs/pir.md: the printed form is a faithful serialization).  The binary
 // form (docs/design/pkm.md §5) must hold the same two invariants, and its
-// symbol index must slice every function out of the blob.  And the
-// moves-at-last-use pass (docs/pir.md §12) on every program, the standard
-// library's tests' too: what it makes verifies and round-trips, and counts
-// no more references than before.
+// symbol index must slice every function out of the blob.  And the code
+// passes (docs/pir.md §12), the moves at last use and the reference-count
+// elimination, on every program, the standard library's tests' too: what
+// each makes verifies and round-trips, and counts no more references than
+// before.
 
 #include "ModuleName.h"
 #include "TestUtils.h"
@@ -18,6 +19,7 @@
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Pass.h"
 #include "paykan/pir/Printer.h"
+#include "paykan/pir/RCElimination.h"
 #include "paykan/pir/Verifier.h"
 
 #include <gtest/gtest.h>
@@ -208,6 +210,15 @@ std::string moved(pir::Program &program, pir::Statistics &stats) {
   return s ? "" : s.message();
 }
 
+/// @p program through the reference-count elimination pass, verified after
+/// it; what it did is added to @p stats.
+std::string eliminated(pir::Program &program, pir::Statistics &stats) {
+  pir::PassManager passes(/*verifyEach=*/true);
+  passes.add(pir::createRCEliminationPass());
+  paykan::Status s = passes.run(program, stats);
+  return s ? "" : s.message();
+}
+
 } // namespace
 
 TEST(PIRRoundTrip, EveryCorpusProgramPrintsParsesAndReprintsIdentically) {
@@ -314,5 +325,64 @@ TEST(PIRMoves, EveryCorpusProgramCountsNoMoreReferencesAndFewerWhereOneMoves) {
   std::cout << "[ moves ] " << checked << " programs, " << fewer
             << " with moves: " << transfers << " transfers; retains " << retains
             << " -> " << retainsAfter << ", releases " << releases << " -> "
+            << releasesAfter << "\n";
+}
+
+TEST(PIRRCElimination, EveryCorpusProgramCountsNoMoreReferencesAfterThePass) {
+  size_t checked = 0, fewer = 0;
+  size_t retains = 0, retainsAfter = 0, releases = 0, releasesAfter = 0;
+  std::vector<std::string> programs = corpus();
+  for (const std::string &path : programsIn(PAYKAN_STDLIB_TESTS_DIR))
+    programs.push_back(path);
+  for (const std::string &path : programs) {
+    pir::Program program;
+    std::string error;
+    if (!lowerFile(path, program, error))
+      continue;
+    ++checked;
+    ASSERT_TRUE(error.empty()) << path << ": " << error;
+    // After the moves, as the driver runs it.
+    pir::Statistics stats;
+    error = moved(program, stats);
+    ASSERT_TRUE(error.empty()) << path << ": " << error;
+    const ReferenceCounting before(program);
+    error = eliminated(program, stats);
+    ASSERT_TRUE(error.empty()) << path << ": " << error;
+    const ReferenceCounting after(program);
+    // A retain goes with a release on each path out of its range, so at
+    // least as many releases go as retains.
+    const uint64_t gone = stats.get("rc-elimination", "retains removed");
+    EXPECT_EQ(before.Retains - after.Retains, gone) << path;
+    EXPECT_EQ(before.Releases - after.Releases,
+              stats.get("rc-elimination", "releases removed"))
+        << path;
+    EXPECT_LE(after.Retains, before.Retains) << path;
+    EXPECT_LE(before.Retains - after.Retains, before.Releases - after.Releases)
+        << path;
+    if (gone > 0)
+      ++fewer;
+    EXPECT_EQ(roundTrip(program), "") << path;
+    // The code passes again (a module's code goes through them before its
+    // `.pkm` is written, and again in the program that imports it) change
+    // nothing more.
+    const std::string once = pir::toString(program);
+    pir::Statistics again;
+    error = moved(program, again);
+    EXPECT_TRUE(error.empty()) << path << ": " << error;
+    error = eliminated(program, again);
+    EXPECT_TRUE(error.empty()) << path << ": " << error;
+    EXPECT_EQ(pir::toString(program), once) << path;
+    retains += before.Retains;
+    retainsAfter += after.Retains;
+    releases += before.Releases;
+    releasesAfter += after.Releases;
+  }
+  EXPECT_GT(checked, 100u);
+  // Most programs read a field into a match or a temporary with nothing
+  // between that can let go, or bind a match subject.
+  EXPECT_GT(fewer, checked / 3) << fewer << " of " << checked;
+  std::cout << "[ rc-elimination ] " << checked << " programs, " << fewer
+            << " with pairs removed: retains " << retains << " -> "
+            << retainsAfter << ", releases " << releases << " -> "
             << releasesAfter << "\n";
 }
