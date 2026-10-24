@@ -434,6 +434,33 @@ The check is conservative: it compares how the arguments are written. Two differ
 paths that reach the same object at run time (`a.n` and `b.n` after `b = a`) are
 accepted, and the callee then sees one storage through both parameters.
 
+Exclusivity is a rule of one call. An expression may read a variable and also pass it to
+an `inout` parameter of a call inside it. Its operands are evaluated left to right, and a
+value read before the call is the one used, even when the call replaces what the variable
+holds:
+
+```pkn
+import ::io;
+
+fn shout(s: inout Str) -> Str {
+  s = s + "!";
+  return s;
+}
+
+fn main() -> int {
+  s = "hi";
+  t = s + shout(s); // the s read before shout changes it
+  io::println(t + " " + s);
+  return 0;
+}
+```
+
+Output:
+
+```
+hihi! hi!
+```
+
 ### Where modes apply
 
 - To a parameter of any type: value types, strings, arrays, tuples, optionals, objects,

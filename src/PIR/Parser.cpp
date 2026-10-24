@@ -828,6 +828,10 @@ private:
         l.Name = written;
       if (!expect(Tok::Colon, "':'") || !parseSlotType(l.Ty, l.Size, l.Align))
         return false;
+      if (isWord("view")) {
+        advance();
+        l.View = true;
+      }
       if (LocalNames.count(written))
         return error("local '%" + written + "' declared twice");
       LocalNames[written] = static_cast<LocalId>(f.Locals.size());

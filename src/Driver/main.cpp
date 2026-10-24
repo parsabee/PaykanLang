@@ -20,6 +20,7 @@
 #include "paykan/modules/ModuleResolver.h"
 #include "paykan/pir/Binary.h"
 #include "paykan/pir/DeadCode.h"
+#include "paykan/pir/MoveAtLastUse.h"
 #include "paykan/pir/Pass.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
@@ -61,6 +62,24 @@ paykan::pir::Module copyOf(const paykan::pir::Module &m) {
   return copy ? std::move(*copy) : paykan::pir::Module();
 }
 
+/// The passes that make code better, run on every program before a backend
+/// sees it and on every module's code before its `.pkm` is written
+/// (docs/pir.md §12): the standard library's compiled code is made by them
+/// too.
+void addCodePasses(paykan::pir::PassManager &passes) {
+  passes.add(paykan::pir::createMovesAtLastUsePass());
+}
+
+/// Whether the program is verified after each PIR pass, so that a pass
+/// that breaks it is the one the error names: in a build with assertions.
+/// A module's code is verified after its passes in every build, since its
+/// `.pkm` keeps it.
+#ifndef NDEBUG
+constexpr bool kVerifyPasses = true;
+#else
+constexpr bool kVerifyPasses = false;
+#endif
+
 /// What a module's `.pkm` holds of its code (docs/design/pkm.md §5.13).
 struct WrittenCode {
   paykan::pir::Module Code;
@@ -68,13 +87,29 @@ struct WrittenCode {
 };
 
 /// @p module (as lowered) trimmed to what it and its importers (whose view
-/// of it is @p iface) reach, and with a backend that compiles modules,
+/// of it is @p iface) reach, through the code passes (what they did added
+/// to @p stats) and verified, and with a backend that compiles modules,
 /// split into its CODE and the code @p backend compiles.
 paykan::StatusOr<WrittenCode>
 moduleCode(paykan::pir::Module module, const pkm::Interface &iface,
            paykan::backend::Backend *backend,
-           const paykan::backend::Capabilities &caps) {
+           const paykan::backend::Capabilities &caps,
+           paykan::pir::Statistics &stats) {
   paykan::modules::trimModuleCode(module, iface);
+  {
+    paykan::pir::Program code;
+    code.Modules.push_back(std::move(module));
+    paykan::pir::PassManager passes;
+    addCodePasses(passes);
+    if (paykan::Status s = passes.run(code, stats); !s)
+      return s;
+    module = std::move(code.Modules.front());
+  }
+  if (auto errors = paykan::pir::verify(module); !errors.empty())
+    return paykan::Status::error(
+        "internal compiler error: the module's code does not verify after "
+        "the PIR passes:\n" +
+        paykan::pir::formatErrors(errors));
   WrittenCode out;
   if (!backend || !caps.CompileModules) {
     out.Code = std::move(module);
@@ -646,6 +681,8 @@ int main(int argc, char *argv[]) {
   // module as an importer will (when nothing else of the program needs a
   // copy it dropped).
   std::map<std::string, paykan::backend::ModuleObject> compiled;
+  // What the PIR passes do, to the modules' code and to the program's.
+  paykan::pir::Statistics stats;
   for (const std::string &name : resolver.cacheable()) {
     auto mod = std::find_if(
         program.Modules.begin(), program.Modules.end(),
@@ -653,7 +690,7 @@ int main(int argc, char *argv[]) {
     const pkm::Interface *iface = resolver.builtInterface(name);
     if (mod == program.Modules.end() || !iface)
       continue;
-    auto written = moduleCode(copyOf(*mod), *iface, backend.get(), caps);
+    auto written = moduleCode(copyOf(*mod), *iface, backend.get(), caps, stats);
     if (!written)
       return fail("cannot write the cache entry of module '" + name +
                   "': " + written.status().message());
@@ -690,7 +727,7 @@ int main(int argc, char *argv[]) {
     pkm::Interface iface =
         paykan::sema::Sema::toInterface(sema.exportModuleInfo(root, mainName));
     auto written = moduleCode(std::move(program.Modules.front()), iface,
-                              backend.get(), caps);
+                              backend.get(), caps, stats);
     if (!written)
       return fail("cannot write " + out.string() + ": " +
                   written.status().message());
@@ -703,6 +740,8 @@ int main(int argc, char *argv[]) {
         code.Code, templates, object ? &*object : nullptr);
     if (!s)
       return fail("cannot write " + out.string() + ": " + s.message());
+    if (opts.Stats)
+      stats.print(std::cerr);
     return EXIT_SUCCESS;
   }
   // The program runs with one copy of each instantiation.
@@ -712,9 +751,10 @@ int main(int argc, char *argv[]) {
     return fail("PIR verification failed:\n" +
                 paykan::pir::formatErrors(errors));
   // What the program's entry point cannot reach is dropped before the
-  // backend lowers anything (docs/pir.md §12).  The C of --emit-c is linked
-  // with each compiled module's code as a whole object (`pkm extract
-  // --object`), so everything that code uses stays too.
+  // backend lowers anything, and the code passes run on what is left
+  // (docs/pir.md §12).  The C of --emit-c is linked with each compiled
+  // module's code as a whole object (`pkm extract --object`), so everything
+  // that code uses stays too.
   paykan::pir::Roots roots = paykan::pir::Roots::entryPoint(program);
   if (opts.EmitSource && opts.EmitStage == "c") {
     roots.Functions = [entry =
@@ -725,10 +765,13 @@ int main(int argc, char *argv[]) {
     roots.Classes = [](const paykan::pir::Module &m,
                        const paykan::pir::Class &c) { return m.isCompiled(c); };
   }
-  paykan::pir::PassManager passes;
+  paykan::pir::PassManager passes(kVerifyPasses);
   passes.add(paykan::pir::createDeadCodePass(std::move(roots)));
-  if (paykan::Status s = passes.run(program); !s)
+  addCodePasses(passes);
+  if (paykan::Status s = passes.run(program, stats); !s)
     return fail(s.message());
+  if (opts.Stats)
+    stats.print(std::cerr);
   if (opts.EmitPIR) {
     paykan::pir::print(program, std::cout);
     std::cout.flush();

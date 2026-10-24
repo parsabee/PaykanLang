@@ -126,8 +126,11 @@ reference names it:
 
 - **Assignment** `x = y` retains the new object and releases whatever `x` referred to before, so
   reassigning a variable cannot leak the previous value.
-- **Passing to a function** keeps the object alive for the duration of the call; the reference the
-  caller holds is unaffected.
+- **Passing to a function** gives it a reference of its own, which keeps the object alive while
+  the function holds it: until it returns, or until it hands the reference on in turn. The
+  reference the caller holds is unaffected, so an object the caller still holds outlives the call
+  (at a variable's last use, that reference is the one passed: see
+  [Ownership transfers](#ownership-transfers)).
 - **Returning** transfers ownership of the result to the caller.
 - **Storing into a field or array slot** retains the stored object; overwriting a slot releases
   the value it previously held.
@@ -347,12 +350,96 @@ its weak references frees everything, as `--track-heap` shows.
 
 You never hand a reference on by hand. Assigning or passing a reference shares the object:
 `t = s` retains it, and `s` and `t` are both live, and readable, until their scopes end. There
-is no way to *consume* a variable by hand. Where a variable is not read again after it is
-handed on, the hand-off could become a transfer — the reference moves to the destination
-without a retain, and the source is not released at scope exit. That is an optimization for
-the compiler to make, never something a program has to spell out, and it is not made yet:
-until the last-use pass ([#186](https://github.com/parsabee/PaykanLang/issues/186)) lands,
-each such hand-off is a retain, and the source is released at scope exit.
+is no way to *consume* a variable by hand.
+
+Where a variable is not read again after it is handed on, the compiler makes the hand-off a
+**transfer**: the reference moves to the destination without a retain, and the variable
+releases nothing at the end of its scope. At a variable's last use:
+
+- **Assigning** it to another variable, **storing** it in a field or an array element, and
+  **returning** it are transfers, whatever it holds: an object, a string, or a tuple, a struct,
+  an enum, a function value, a fixed-size array of up to four elements or an optional of one,
+  all of whose references move together.
+- **Passing** it to a function is a transfer when it holds an object or a string, or an
+  optional of one: the function holds the reference, and releases it when it returns. A tuple,
+  a struct, an enum, a function value or a fixed-size array is passed as its contents, of which
+  the function keeps a copy of its own, so passing one stays a copy, and the variable releases
+  its references when its scope ends.
+- A `view` parameter or variable is never handed on: it names what another variable holds, and
+  the object stays alive until the view's own scope ends. Passing a variable to a `view`
+  parameter at the variable's last use is a transfer like any other.
+
+A hand-off the variable is read after stays a copy: later in the function, or on the next iteration
+of a loop (a variable assigned a new value before it is read again is not). So does one the
+function follows, before the variable's scope ends, with a call or the release of a reference (the
+one an assignment replaces, say) while it uses an object it holds no reference to: a field's value
+reached through another variable, or anything reached through `self`.
+In `x = h.node; take(x); s = h.node.name + replace(h);` the hand-off to `take` stays a copy,
+because `replace` may assign `h.node` while the name read before it is still to be used, and `x`
+may be what keeps that node alive. In a method, a hand-off therefore stays a copy when `self` is
+used by or after a call or a release that follows it, the call it is passed to included (not in
+`__init__`, whose object the constructor holds). Where one branch of an `if` or one arm of a `match` hands the
+variable on and another does not, the other releases it when its scope ends, as before. In
+`f(a, a)` the first `a` is a copy and the second a transfer. `self`, `inout` parameters and locals,
+fields, array elements and the members of a tuple or struct, and `view` parameters and variables,
+are never transferred, and a lambda's captures are always copies. The compiler's `--stats` option
+counts the transfers it made ([docs/pir.md §12](../pir.md#12-passes) has the details).
+
+A transfer releases nothing early: the destination holds the reference and releases it at the
+end of *its* scope, as it would a copy: a parameter when its function returns, a variable when
+its scope ends, a field when its object is destroyed or the field is assigned again. A program
+frees the same objects either way. What a transfer can change is *when* an object is destroyed:
+it lives as long as its last holder, which after a transfer is the destination, so it may be
+destroyed before the variable's scope would have ended. Two things can see that. A
+[`weak` reference](#weak-references) elsewhere reads `None` as soon as the destination lets go.
+And what destroying the object does happens then: an [`io::File`](../stdlib/io.md) passed to a
+function at its variable's last use is closed, and what was written to it is on disk, when
+that function returns (unless it keeps the file), so a later `open` of the same path in the
+caller reads it back.
+
+```pkn
+import ::io;
+
+class Node {
+  name: Str;
+}
+
+class Watcher {
+  weak target: Node?;
+}
+
+fn consume(n: Node) -> Str {
+  return n.name;
+}
+
+fn report(w: view Watcher) {
+  match w.target {
+    t: Node { io::println("alive: " + t.name); }
+    None { io::println("gone"); }
+  }
+}
+
+fn main() -> int {
+  n = Node("first");
+  w = Watcher(n);
+  report(w);
+  io::println(consume(n));   // the last use of n: consume holds the only reference
+  report(w);                 // consume released it when it returned
+  return 0;
+}
+```
+
+Output:
+
+```
+alive: first
+first
+gone
+```
+
+A hand-off of the variable while a `weak` local made from it (`weak u = n;`) is in scope stays a
+copy, whether or not that local is read again, so the local reads the object until the
+variable's scope ends.
 
 Earlier releases had a `mov` keyword for this. It was removed in v0.2.0: `mov` is still a
 reserved word, and writing `t = mov s` is an error:
@@ -380,7 +467,8 @@ where its variable or field does, inline in the stack frame or in the object. Ho
   all its elements when its variable goes out of scope or the object holding it is destroyed.
 
 Assigning an array, or passing it to a plain parameter, copies it: the copy retains each element's object, which the two
-arrays then share. See [Arrays](09-arrays.md).
+arrays then share. (Assigning a variable holding up to four elements at its last use moves them
+instead: see [Ownership transfers](#ownership-transfers).) See [Arrays](09-arrays.md).
 
 A tuple is a value in the same way: it has no box and no count, and its elements are laid out
 in place, one after another like a C struct's fields, in its variable, its field or the array
@@ -388,7 +476,9 @@ element that holds it. A tuple of value types (`(int, float)`) allocates nothing
 element (`Str`, a class, `Node?`) is a reference to the object, which the tuple **retains**. Each copy of a tuple
 (an assignment, a plain parameter, a result, an array element) retains the references in it
 once more; a variable's are released when it goes out of scope, a field's when its object is
-destroyed, an array element's with its array. See [Tuples](10-tuples.md).
+destroyed, an array element's with its array. At a variable's last use, assigning, storing or
+returning it moves its references instead, and the variable releases none (see
+[Ownership transfers](#ownership-transfers)). See [Tuples](10-tuples.md).
 
 A struct is a value in exactly the same way: it is laid out like the tuple of its fields and
 retains and releases the references it holds as a tuple does. Assigning a field in place

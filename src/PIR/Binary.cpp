@@ -379,6 +379,8 @@ private:
       W.uleb(f.Locals.size());
       for (const Local &l : f.Locals) {
         name(l.Name);
+        if (l.View)
+          W.u8(kViewSlotCode);
         slotType(l.Ty, l.Size, l.Align);
       }
       W.uleb(f.NextValueId);
@@ -548,9 +550,15 @@ public:
     if (!R.count(n, 2))
       return false;
     f.Locals.resize(static_cast<size_t>(n));
-    for (Local &l : f.Locals)
-      if (!str(l.Name) || !slotType(l.Ty, l.Size, l.Align))
+    for (Local &l : f.Locals) {
+      uint8_t c;
+      if (!str(l.Name) || !R.u8(c))
         return false;
+      // A `view` local's slot type follows its mark (§5.4).
+      l.View = c == kViewSlotCode;
+      if ((l.View && !R.u8(c)) || !slotType(c, l.Ty, l.Size, l.Align))
+        return false;
+    }
     return R.uleb32(f.NextValueId) && block(f.Body);
   }
 
@@ -583,8 +591,10 @@ private:
   /// A local's or field's type: a type, or `mem` and its size and alignment.
   bool slotType(Type &t, int64_t &size, int64_t &align) {
     uint8_t c;
-    if (!R.u8(c))
-      return false;
+    return R.u8(c) && slotType(c, t, size, align);
+  }
+  /// The same, its code @p c read.
+  bool slotType(uint8_t c, Type &t, int64_t &size, int64_t &align) {
     if (!typeFromCode(c, t))
       return R.fail("reserved type code", R.offset() - 1);
     if (t != Type::Mem)

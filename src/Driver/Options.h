@@ -85,6 +85,7 @@ struct Options {
   bool RebuildModules = false; // --rebuild-modules: ignore cache entries
   bool NoModuleCache = false;  // --no-module-cache: never read or write it
   bool Verbose = false;        // --verbose: one line per import on stderr
+  bool Stats = false;          // --stats: what the PIR passes did, on stderr
 
   bool DumpAST = false;       // --dump-ast
   bool EmitAST = false;       // --emit-ast: the AST interchange format

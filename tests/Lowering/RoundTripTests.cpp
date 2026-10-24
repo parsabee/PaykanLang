@@ -5,13 +5,18 @@
 // verified again and re-printed, and the two texts must be identical
 // (docs/pir.md: the printed form is a faithful serialization).  The binary
 // form (docs/design/pkm.md §5) must hold the same two invariants, and its
-// symbol index must slice every function out of the blob.
+// symbol index must slice every function out of the blob.  And the
+// moves-at-last-use pass (docs/pir.md §12) on every program, the standard
+// library's tests' too: what it makes verifies and round-trips, and counts
+// no more references than before.
 
 #include "ModuleName.h"
 #include "TestUtils.h"
 #include "paykan/lowering/Lowering.h"
 #include "paykan/pir/Binary.h"
+#include "paykan/pir/MoveAtLastUse.h"
 #include "paykan/pir/Parser.h"
+#include "paykan/pir/Pass.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
 
@@ -29,20 +34,25 @@
 #ifndef PAYKAN_SAMPLES_DIR
 #error "PAYKAN_SAMPLES_DIR must be defined via CMake compile definition"
 #endif
+#ifndef PAYKAN_STDLIB_TESTS_DIR
+#error "PAYKAN_STDLIB_TESTS_DIR must be defined via CMake compile definition"
+#endif
 
 using namespace paykan;
 
 namespace {
 
-std::vector<std::string> corpus() {
+/// The `.pkn` files under @p dir, sorted.
+std::vector<std::string> programsIn(const std::string &dir) {
   std::vector<std::string> files;
-  for (const auto &e :
-       std::filesystem::recursive_directory_iterator(PAYKAN_SAMPLES_DIR))
+  for (const auto &e : std::filesystem::recursive_directory_iterator(dir))
     if (e.is_regular_file() && e.path().extension() == ".pkn")
       files.push_back(e.path().string());
   std::sort(files.begin(), files.end());
   return files;
 }
+
+std::vector<std::string> corpus() { return programsIn(PAYKAN_SAMPLES_DIR); }
 
 /// Lower @p path the way the driver does (project root = its directory).
 /// Returns false (and leaves @p program empty) when the file is not a
@@ -157,6 +167,47 @@ std::string binaryRoundTrip(const pir::Program &program, size_t &text,
   return "";
 }
 
+/// The `retain` and `release` instructions of a program's bodies.
+struct ReferenceCounting {
+  size_t Retains = 0;
+  size_t Releases = 0;
+
+  void count(const pir::Block &b) {
+    for (const pir::Stmt &s : b.Stmts) {
+      if (const auto *in = std::get_if<pir::Instr>(&s)) {
+        Retains += in->Op == pir::Opcode::Retain;
+        Releases += in->Op == pir::Opcode::Release;
+      } else if (const auto *x = std::get_if<pir::If>(&s)) {
+        count(*x->Then);
+        if (x->Else)
+          count(*x->Else);
+      } else if (const auto *x = std::get_if<pir::While>(&s)) {
+        count(*x->CondBlock);
+        count(*x->Body);
+      } else if (const auto *x = std::get_if<pir::Switch>(&s)) {
+        for (const pir::Switch::Case &c : x->Cases)
+          count(*c.Body);
+        if (x->Default)
+          count(*x->Default);
+      }
+    }
+  }
+  explicit ReferenceCounting(const pir::Program &p) {
+    for (const pir::Module &m : p.Modules)
+      for (const pir::Function &f : m.Functions)
+        count(f.Body);
+  }
+};
+
+/// @p program through the moves-at-last-use pass, verified after it; what
+/// it did is added to @p stats.
+std::string moved(pir::Program &program, pir::Statistics &stats) {
+  pir::PassManager passes(/*verifyEach=*/true);
+  passes.add(pir::createMovesAtLastUsePass());
+  paykan::Status s = passes.run(program, stats);
+  return s ? "" : s.message();
+}
+
 } // namespace
 
 TEST(PIRRoundTrip, EveryCorpusProgramPrintsParsesAndReprintsIdentically) {
@@ -197,4 +248,71 @@ TEST(PIRBinary, Corpus) {
   // The design's measured ratio is ~3.3x; a drop below 2x means the codec
   // wastes bytes.
   EXPECT_GT(double(text) / double(bin), 2.0);
+}
+
+TEST(PIRMoves, EveryCorpusProgramCountsNoMoreReferencesAndFewerWhereOneMoves) {
+  size_t checked = 0, fewer = 0;
+  size_t retains = 0, retainsAfter = 0, releases = 0, releasesAfter = 0;
+  uint64_t transfers = 0;
+  // The samples, and the standard library's tests, whose programs hold
+  // the copies of the library's generic code they instantiate.
+  std::vector<std::string> programs = corpus();
+  for (const std::string &path : programsIn(PAYKAN_STDLIB_TESTS_DIR))
+    programs.push_back(path);
+  for (const std::string &path : programs) {
+    pir::Program program;
+    std::string error;
+    if (!lowerFile(path, program, error))
+      continue;
+    ++checked;
+    ASSERT_TRUE(error.empty()) << path << ": " << error;
+    const ReferenceCounting before(program);
+    pir::Statistics stats;
+    error = moved(program, stats);
+    ASSERT_TRUE(error.empty()) << path << ": " << error;
+    const ReferenceCounting after(program);
+    const uint64_t moves = stats.get("moves-at-last-use", "transfers");
+    // A move removes the copy's retains; what else goes is the releases of
+    // slots the moves left null.  Nothing is ever added.
+    EXPECT_LE(after.Retains, before.Retains) << path;
+    EXPECT_LE(after.Releases, before.Releases) << path;
+    EXPECT_EQ(before.Retains - after.Retains,
+              stats.get("moves-at-last-use", "retains removed"))
+        << path;
+    EXPECT_EQ(before.Releases - after.Releases,
+              stats.get("moves-at-last-use", "releases removed"))
+        << path;
+    if (moves > 0) {
+      EXPECT_LT(after.Retains, before.Retains) << path;
+      ++fewer;
+    }
+    // The samples written to hand variables on at their last use: fewer
+    // of both, whatever the pass counted.
+    if (path.find("_moves_") != std::string::npos) {
+      EXPECT_LT(after.Retains, before.Retains) << path;
+      EXPECT_LT(after.Releases, before.Releases) << path;
+    }
+    EXPECT_EQ(roundTrip(program), "") << path;
+    // On its own output (a module's code is moved before its `.pkm` is
+    // written, and again in the program that imports it), it changes
+    // nothing more.
+    const std::string once = pir::toString(program);
+    pir::Statistics again;
+    error = moved(program, again);
+    EXPECT_TRUE(error.empty()) << path << ": " << error;
+    EXPECT_EQ(pir::toString(program), once) << path;
+    retains += before.Retains;
+    retainsAfter += after.Retains;
+    releases += before.Releases;
+    releasesAfter += after.Releases;
+    transfers += moves;
+  }
+  EXPECT_GT(checked, 100u);
+  // Many programs hand some variable on at its last use (the others hold
+  // no references, or keep reading them).
+  EXPECT_GT(fewer, checked / 3) << fewer << " of " << checked;
+  std::cout << "[ moves ] " << checked << " programs, " << fewer
+            << " with moves: " << transfers << " transfers; retains " << retains
+            << " -> " << retainsAfter << ", releases " << releases << " -> "
+            << releasesAfter << "\n";
 }

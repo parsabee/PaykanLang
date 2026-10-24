@@ -404,6 +404,34 @@ TEST(Pkm, NoModuleCacheNeverReadsOrWrites) {
   EXPECT_TRUE(contains(r.out, "module base: cache not read")) << r.out;
 }
 
+// A cache entry is written from moved code (docs/pir.md §12; pkm.md §5.13):
+// the run that builds the module counts the moves at last use made in its
+// code, and the run that reuses the entry makes none of them again, with
+// the same result and nothing leaked.
+TEST(Pkm, ACacheEntryIsMovedCode) {
+  REQUIRE_BACKEND();
+  Project p("moves");
+  writeFile(p.Dir / "base.pkn",
+            "class Cell { v: int; }\n"
+            "fn pass<T>(x: T) -> T { y = x; return y; }\n"
+            "fn pick(c: Cell) -> int { return c.v; }\n"
+            "fn give(c: Cell) -> int { return pick(pass(c)); }\n");
+  writeFile(p.Dir / "main.pkn",
+            "import base;\n"
+            "fn main() -> int { return base::give(base::Cell(7)); }\n");
+  auto first = p.runMain("--stats --track-heap");
+  EXPECT_EQ(first.exitCode, 7) << first.out;
+  EXPECT_TRUE(contains(first.out, "  moves-at-last-use transfers : 3\n"))
+      << first.out;
+  EXPECT_TRUE(contains(first.out, "live blocks       : 0\n")) << first.out;
+  ASSERT_TRUE(fs::is_regular_file(p.entry("base")));
+  auto second = p.runMain("--stats --track-heap");
+  EXPECT_EQ(second.exitCode, 7) << second.out;
+  EXPECT_TRUE(contains(second.out, "  moves-at-last-use transfers : 0\n"))
+      << second.out;
+  EXPECT_TRUE(contains(second.out, "live blocks       : 0\n")) << second.out;
+}
+
 // -- Prebuilt modules
 
 /// `--emit-pkm base.pkn` then the source removed: the program builds and

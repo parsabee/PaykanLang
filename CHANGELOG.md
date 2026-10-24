@@ -40,6 +40,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     target of its slot, calls the new runtime function `Paykan_panic_pure_virtual` and is
     `unreachable` (docs/pir.md §5, §8).
   - `samples/codegen/63_pure_virtual.pkn` runs a `Shape` hierarchy.
+- Moves at last use (#186): a copy of a variable where it is last used is a transfer, made
+  by a new backend-independent PIR pass, `moves-at-last-use` (docs/pir.md §12), on every
+  program and on the code of every module written to a `.pkm`, the standard library's
+  included.  Assigning a variable to another, storing it in a field or an array element,
+  and returning it hand its references on without a retain, whatever it holds (a tuple, a
+  struct, an enum, a function value, a fixed-size array of up to four elements or an
+  optional of one included), and so does passing a variable that holds an object, a string
+  or an optional of one to a function; the variable then releases nothing at the end of its
+  scope.  A tuple, a struct, an enum, a function value or a fixed-size array passed to a
+  function stays a copy: the function keeps one of its own.  Each path counts on its own
+  (one branch may hand a variable on while another releases it), a use inside a loop the
+  next iteration reads again stays a copy, and in `f(a, a)` only the second `a` moves.
+  `self`, `inout` parameters, `view` parameters and variables, fields, array elements and
+  the members of a value are never moved, and a lambda's captures are always copies.  A
+  hand-off also stays a copy when the function goes on to use, across a call or a release,
+  an object it holds no reference to (a field's value read in place, anything reached
+  through `self`), since the variable may be what keeps that object alive; in `__init__`,
+  whose object the constructor holds, `self` is no such object.  Over the samples and the
+  standard library's tests the pass removes about a fifth of the retains and a tenth of the
+  releases.  PIR marks the slot of a `view` parameter or variable, `local %v: box view`
+  (docs/pir.md §3), in the text form backend plugins read and in a `.pkm`'s code, where a
+  code before the local's slot type marks it, so that code written before reads the same
+  (docs/design/pkm.md §5.4, §5.7).
+- `paykan --stats` prints what the PIR passes did, on standard error after the last of them
+  ran (`moves-at-last-use transfers`, `retains removed`, `releases removed`), for the
+  program and for the modules this run builds from source (`pir::Statistics`,
+  `include/paykan/pir/Pass.h`; `Pass::run` takes it).
 
 - Adjacent string literals are one literal, joined at compile time, as in C and C++
   (docs/grammar.md §1, docs/language/04-strings-and-conversions.md, #197): `"this message
@@ -204,6 +231,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An object handed on at a variable's last use lives as long as its destination holds it,
+  no longer until the variable's scope ends (docs/language/16-memory.md, "Ownership
+  transfers").  Nothing is ever released earlier than its last holder lets it go, and
+  programs free the same objects, but an object may be destroyed sooner than before: a
+  `weak` reference made elsewhere reads `None` as soon as, say, the function it was passed
+  to returns, and an `io::File` passed to a function at its variable's last use is closed,
+  what was written to it on disk, when that function returns.
 - `::result`'s `Result` is a generic tagged union, `enum Result<T, E> { Ok(value: T),
   Err(error: E) }` (docs/stdlib/result.md), no longer the struct `Result<T>` of an `error`
   and an optional `value`, and its errors are `::error`'s.  The standard library returns a
@@ -298,6 +332,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A value read from a variable could be freed while still in use when a call later in the
+  same statement replaced the variable, through an `inout` parameter or a struct's method
+  that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
+  and `l.greet(repl(l))` or `s.n.greet(s.reset())` ran a method on a freed object.  Such a
+  read now takes a reference of its own, released once it is used (docs/pir.md §7, "Reads
+  a call may replace"), so it is the value the variable held before the call
+  (docs/language/03-functions.md, "Exclusivity").  The moves at last use rely on it: a
+  function handed a variable's last reference sees what a temporary would give it.
 - A local could take the name of a function of the module and hide it: `func = fn(x: int,
   y: float) => x + y;` next to `fn func<T>(x: T) => x + 2;` made `func(1, 2.5)` call the
   lambda.  A variable, a parameter (a method's or a lambda's too), a `for` loop variable, a

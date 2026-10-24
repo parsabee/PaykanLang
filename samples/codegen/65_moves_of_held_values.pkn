@@ -1,0 +1,148 @@
+// 65 — moves at last use of values held in place
+// Exercises: a tuple, a struct, a tagged union, a function value, an
+//            optional tuple and a fixed-size array copied whole at a
+//            variable's last use (docs/language/16-memory.md, "Ownership
+//            transfers"): into another variable, out of a function and
+//            into a field.  The copy then holds the references the variable
+//            held, so the objects die when the copy lets them go, which the
+//            `weak` references show.  A copy the variable is read after,
+//            and an element copied out of it, keep their own.
+// expect-stdout: tuple: alive | replaced: gone
+// expect-stdout: struct: alive | replaced: gone
+// expect-stdout: enum: alive | replaced: gone
+// expect-stdout: function: f | replaced: gone
+// expect-stdout: optional: alive | replaced: gone
+// expect-stdout: array: alive alive | replaced: gone gone
+// expect-stdout: returned: r alive | replaced: gone | field: alive | let go: gone
+// expect-stdout: read after: c | alive | element: e | alive
+
+import ::io;
+
+class Node {
+  name: Str;
+}
+
+class Watch {
+  weak target: Node?;
+}
+
+/// What @p w refers to: "alive" or "gone".
+fn state(w: view Watch) -> Str {
+  match w.target {
+    Node { return "alive"; }
+    None { return "gone"; }
+  }
+}
+
+struct Pair {
+  node: Node;
+  n: int;
+}
+
+enum Slot { Empty, Full(node: Node) }
+
+class Holder {
+  pair: (Node, int);
+}
+
+/// A function value whose closure holds the only reference to @p n.
+fn closureOver(n: Node) -> () -> Str {
+  return fn() -> Str { return n.name; };
+}
+
+/// A struct built in a local and returned from it.
+fn makePair(name: Str) -> Pair {
+  p = Pair(Node(name), 1);
+  return p;
+}
+
+fn main() -> int {
+  // A tuple: `q = t` is t's last use, so q holds the node now.
+  tn = Node("t");
+  wt = Watch(tn);
+  t = (tn, 1);
+  q = t;
+  io::print("tuple: " + state(wt));
+  q = (Node("u"), 2);
+  io::println(" | replaced: " + state(wt));
+
+  // A struct.
+  sn = Node("s");
+  ws = Watch(sn);
+  p = Pair(sn, 1);
+  r = p;
+  io::print("struct: " + state(ws));
+  r = Pair(Node("x"), 2);
+  io::println(" | replaced: " + state(ws));
+
+  // A tagged union holding a node.
+  en = Node("e");
+  we = Watch(en);
+  e = Slot::Full(en);
+  e2 = e;
+  io::print("enum: " + state(we));
+  e2 = Slot::Empty;
+  io::println(" | replaced: " + state(we));
+
+  // A function value: its closure holds the node.
+  fnode = Node("f");
+  wf = Watch(fnode);
+  g = closureOver(fnode);
+  h = g;
+  io::print("function: " + h());
+  h = fn() -> Str { return ""; };
+  io::println(" | replaced: " + state(wf));
+
+  // An optional tuple.
+  on = Node("o");
+  wo = Watch(on);
+  o: (Node, int)? = (on, 1);
+  o2 = o;
+  io::print("optional: " + state(wo));
+  o2 = None;
+  io::println(" | replaced: " + state(wo));
+
+  // A fixed-size array of references.
+  a0 = Node("a");
+  a1 = Node("b");
+  wa0 = Watch(a0);
+  wa1 = Watch(a1);
+  arr: Node[2] = [a0, a1];
+  arr2 = arr;
+  io::print("array: " + state(wa0) + " " + state(wa1));
+  arr2 = [Node("c"), Node("d")];
+  io::println(" | replaced: " + state(wa0) + " " + state(wa1));
+
+  // Returned from a local: the caller's variable holds what it held.
+  made = makePair("r");
+  wm = Watch(made.node);
+  io::print("returned: " + made.node.name + " " + state(wm));
+  made = Pair(Node("q"), 0);
+  io::print(" | replaced: " + state(wm));
+
+  // Assigned to a field at its last use: the field holds the node now.
+  hn = Node("h");
+  wh = Watch(hn);
+  holder = Holder((Node("z"), 0));
+  pair = (hn, 1);
+  holder.pair = pair;
+  io::print(" | field: " + state(wh));
+  holder = Holder((Node("y"), 0));
+  io::println(" | let go: " + state(wh));
+
+  // Read after the copy: the copy is one of its own.  An element copied
+  // out of a value stays a copy too.
+  cn = Node("c");
+  wc = Watch(cn);
+  kept = (cn, 1);
+  copy = kept;
+  copy = (Node("w"), 0);
+  io::print("read after: " + kept.0.name + " | " + state(wc));
+  ek = Node("e");
+  wek = Watch(ek);
+  outer = ((ek, 1), 2);
+  inner = outer.0;
+  inner = (Node("v"), 0);
+  io::println(" | element: " + outer.0.0.name + " | " + state(wek));
+  return 0;
+}

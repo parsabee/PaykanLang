@@ -40,7 +40,7 @@ namespace {
 
 // Every opcode (ftoi is not in kProgram), NaN, -0.0 and inf constants,
 // quoted names, empty blocks, an abstract slot, an extern class, both vcall
-// and vtable.addr forms, extreme integers and chars, mem slots.
+// and vtable.addr forms, extreme integers and chars, mem slots, a view slot.
 const char *const kEdgeProgram = R"(module "bin"
 cstr @"quoted name" = "a\0b" len 3
 data @.d = [-9223372036854775807, 9223372036854775807, 0, -1, 64, -65]
@@ -75,6 +75,7 @@ fn @main() -> i64 {
   local %"quoted local".0: f64
   local %1: box
   local %m.2: mem(3, 1)
+  local %v.3: box view
   %s.1 = new "ns::Shape"
   %f.2 = ftoi 2.5
   %g.3 = ftoi nan
@@ -620,6 +621,49 @@ TEST(PIRBinary, MemIsOnlyASlotType) {
   auto bad = binary::decode(binary::encode(oneFunction(std::move(g))));
   ASSERT_FALSE(bad.isOk());
   EXPECT_NE(bad.status().message().find("mem is only the type of a local"),
+            std::string::npos)
+      << bad.status().message();
+}
+
+// A view slot's mark survives the round trip.  It is a code before the
+// slot type, which a local that is no view's lacks, so a record written
+// before views had it reads the same; the mark is no type of its own.
+TEST(PIRBinary, AViewSlotKeepsItsMark) {
+  auto encodeLocal = [](bool view) {
+    Function f;
+    f.Name = "f";
+    f.Sig.Ret = Type::Void;
+    f.Locals.push_back({"v", Type::Box, 0, 0, view});
+    f.Body.Stmts.push_back(Return{});
+    return binary::encode(oneFunction(std::move(f)));
+  };
+  std::vector<uint8_t> good = encodeLocal(true);
+  auto d = binary::decode(good);
+  ASSERT_TRUE(d.isOk()) << d.status().message();
+  ASSERT_EQ((*d).Functions[0].Locals.size(), 1u);
+  EXPECT_TRUE((*d).Functions[0].Locals[0].View);
+  // Length, name, flags (4), sig (count 0, ret), conventions, params,
+  // locals, the local's name, then its mark and its type.
+  std::vector<binary::SymbolEntry> idx = binary::index(good);
+  ASSERT_EQ(idx.size(), 1u);
+  const size_t length = idx[0].Offset;
+  const size_t mark = length + 1 + 1 + 4 + 1 + 1 + 1 + 1 + 1 + 1;
+  ASSERT_EQ(good[mark], kViewSlotCode);
+  ASSERT_EQ(good[mark + 1], typeEntry(Type::Box).Code);
+  // Without the mark (and with the record one byte shorter): the plain
+  // local's encoding.
+  std::vector<uint8_t> plain = good;
+  plain.erase(plain.begin() + static_cast<std::ptrdiff_t>(mark));
+  --plain[length];
+  EXPECT_EQ(plain, encodeLocal(false));
+  // Twice: the second is read as the slot's type, a reserved code.
+  std::vector<uint8_t> twice = good;
+  twice.insert(twice.begin() + static_cast<std::ptrdiff_t>(mark),
+               kViewSlotCode);
+  ++twice[length];
+  auto bad = binary::decode(twice);
+  ASSERT_FALSE(bad.isOk());
+  EXPECT_NE(bad.status().message().find("reserved type code"),
             std::string::npos)
       << bad.status().message();
 }

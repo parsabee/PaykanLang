@@ -380,6 +380,10 @@ struct Local {
   /// A `mem` local's bytes and alignment (zero for any other type).
   int64_t Size = 0;
   int64_t Align = 0;
+  /// A `view` parameter's or variable's slot (`local %v: box view`): it
+  /// names a value another variable holds, so no pass hands what it holds
+  /// on (docs/pir.md §3, §12).
+  bool View = false;
 };
 
 struct Function {

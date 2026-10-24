@@ -169,6 +169,8 @@ Val ModuleLowering::emitPayloadEnumMatch(ast::MatchStmt *node) {
         // The binding's own copy of the variant's fields.
         MemLayout pl = memLayout(payload);
         pir::LocalId local = B.addMemLocal(name, pl.Size, pl.Align);
+        if (arm->getMode() == ast::ParamMode::View)
+          B.markView(local);
         Val own = B.localAddr(local, name + ".addr");
         B.memCopy(own, B.ptrAdd(addr, Val::i64(off), "variant.addr"),
                   Val::i64(pl.Size));

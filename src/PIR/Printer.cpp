@@ -198,6 +198,8 @@ public:
       OS << ": ";
       const Local &l = F.Locals[i];
       printSlotType(l.Ty, l.Size, l.Align, OS);
+      if (l.View)
+        OS << " view";
       OS << "\n";
     }
     printBlock(F.Body, 1);

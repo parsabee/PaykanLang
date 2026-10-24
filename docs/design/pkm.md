@@ -753,7 +753,8 @@ for that reason; the lowering is deterministic already.
 | 2 | `f64` | | 8–11 | #96 inline optionals: `opt_i64`, `opt_f64`, `opt_bool`, `opt_char`; 12–15 reserved for further ones |
 | 3 | `bool` | | 16 | `weak`: a weak reference (#99, docs/design/weak-references.md) |
 | 4 | `char` | | 17 | `mem`: a local's or field's bytes (size and alignment follow, §5.3) |
-| 5 | `box` | | 18–255 | reserved |
+| 5 | `box` | | 18 | `view`: marks the local whose slot type follows as a `view`'s (docs/pir.md §3); only there |
+| | | | 19–255 | reserved |
 
 A reader of codec 1.x rejects reserved codes. A `static_assert`-checked
 table in `include/paykan/pir/Codes.h` holds both the opcode names the
@@ -834,7 +835,7 @@ FunctionRec
   -- definitions only --
   uleb nConventions ; nConventions × u8   per-parameter convention (#98): 0 owned, 1 borrowed; nConventions == nParams or 0
   uleb nParams ; nParams × (uleb id ; type ; str name)
-  uleb nLocals ; nLocals × (str name ; slot type)
+  uleb nLocals ; nLocals × (str name ; [u8 18] ; slot type)   18 before the slot type: a view local (docs/pir.md §3)
   uleb nextValueId
   Block body
 ClassRec
@@ -874,16 +875,19 @@ not per class.
 
 ### 5.9 Which PIR: pass level 0
 
-**Decision: `CODE` stores the verified output of the lowering, before any
-optional pass.** #97's pipeline runs in the driver on the *assembled*
-program at the requested `-O`, before `Backend::emit`/`run`. One file
-serves every `-O` level and pipeline (#113 needs this); `--emit-pir` of a
-cached module prints what source prints; the expensive part is cached by
-payloads anyway. What is **not** a pass artefact and therefore is in
-`CODE`: per-parameter calling conventions (#98 part 2 changes what a
-*caller in another module* emits, so they are signature data; a change is
-an ABI bump). RC elimination (#98 part 1) and last-use transfer (#145)
-rewrite bodies only and run at build time. The `pass level` flag bits are
+**Decision: `CODE` stores the verified output of the lowering, after the
+passes every program runs whatever its `-O` and before any optional
+one.** #97's pipeline runs in the driver on the *assembled* program at the
+requested `-O`, before `Backend::emit`/`run`. One file serves every `-O`
+level and pipeline (#113 needs this); `--emit-pir` of a cached module
+prints what source prints; the expensive part is cached by payloads
+anyway. The moves at last use (#186, docs/pir.md §12) run at every `-O`,
+so they run on the module's code before it is written (§5.13), and again
+on the program, which leaves moved code as it is. What is **not** a pass
+artefact and therefore is in `CODE`: per-parameter calling conventions
+(#98 part 2 changes what a *caller in another module* emits, so they are
+signature data; a change is an ABI bump). RC elimination (#98 part 1)
+rewrites bodies only and runs at build time. The `pass level` flag bits are
 reserved for a later post-pass variant (PR #104 §5.4 option C); storing
 post-pass PIR per `-O` was rejected (N copies per file).
 
@@ -930,7 +934,8 @@ the single rulebook for text and binary.
 
 A module is lowered with a copy of every instantiation it uses (§4.8). When
 its file is written (a cache entry once the program verified, or
-`--emit-pkm`), the driver first trims it, then splits it
+`--emit-pkm`), the driver first trims it, runs the code passes on it, then
+splits it
 (`include/paykan/modules/ModuleCode.h`):
 
 - **Trim.** PIR's dead-code pass (docs/pir.md §12) runs on the module with
@@ -945,6 +950,11 @@ its file is written (a cache entry once the program verified, or
   other copies, only what the module's own code reaches stays: in
   `m2`, a `Pair<int, bool>` only `hidden()` uses keeps `first`, its
   constructor and `__init__`, and loses `second`.
+- **Moves.** The code passes every program goes through (docs/pir.md §12:
+  moves at last use) run on what the trim left, and what they make is
+  verified, so the compiled code and the copies in `CODE` are both moved
+  code; a program that imports the module runs them on its copies again,
+  which changes nothing more.
 - **Split.** The module's shared copies of instantiations stay PIR in
   `CODE`: a program keeps one of each and drops what its `main` does not
   reach, and an importer instantiating the same type links to them. Every

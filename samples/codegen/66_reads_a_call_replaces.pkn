@@ -1,0 +1,97 @@
+// 66 — reads a call of the same statement replaces
+// Exercises: a value read from a variable while a later part of the same
+//            statement replaces the variable, through an `inout` parameter
+//            or a struct's method that may change `self`
+//            (docs/language/03-functions.md, "Exclusivity"; docs/pir.md §7,
+//            "Reads a call may replace"): the value read before the call is
+//            the one used, and it lives until it is used, also when the
+//            variable held its only reference: a string, an object, a
+//            struct's field, a tuple's and an array's element.  So does
+//            what a function is handed at a variable's last use, and what a
+//            variable handed on was sharing (docs/language/16-memory.md,
+//            "Ownership transfers").
+// expect-stdout: string: first1! other9
+// expect-stdout: assigned: other9!
+// expect-stdout: receiver: node1? new9
+// expect-stdout: struct: sn1! reset0
+// expect-stdout: tuple: tp1# tup2
+// expect-stdout: array: x1% a0
+// expect-stdout: handed on: old1? new9
+// expect-stdout: moved into: x2? new9
+// expect-stdout: shared: first1. first1! other9
+
+import ::io;
+
+class Node {
+  name: Str;
+  view fn greet(s: Str) -> Str { return self.name + s; }
+}
+
+struct Holder {
+  n: Node;
+}
+
+impl Holder {
+  fn reset() -> Str { self.n = Node("reset" + Str(0)); return "!"; }
+}
+
+fn repl(x: inout Str) -> Str {
+  x = "other" + Str(9);
+  return "!";
+}
+
+fn replNode(x: inout Node) -> Str {
+  x = Node("new" + Str(9));
+  return "?";
+}
+
+fn replTuple(t: inout (Str, int)) -> Str {
+  t = ("tup" + Str(2), 2);
+  return "#";
+}
+
+fn replArray(a: inout Node[2]) -> Str {
+  a = [Node("a" + Str(0)), Node("b" + Str(0))];
+  return "%";
+}
+
+fn take(s: Str) -> Str {
+  return s + ".";
+}
+
+/// Its parameter's only reference may be its own (a variable's last use).
+fn use(p: Node) -> Str {
+  return p.name + replNode(p) + " " + p.name;
+}
+
+fn main() -> int {
+  s = "first" + Str(1);
+  io::println("string: " + (s + repl(s)) + " " + s);
+  s += repl(s);
+  io::println("assigned: " + s);
+
+  l = Node("node" + Str(1));
+  io::println("receiver: " + l.greet(replNode(l)) + " " + l.name);
+
+  h = Holder(Node("sn" + Str(1)));
+  io::println("struct: " + h.n.greet(h.reset()) + " " + h.n.name);
+
+  tp = ("tp" + Str(1), 1);
+  io::println("tuple: " + (tp.0 + replTuple(tp)) + " " + tp.0);
+
+  arr = [Node("x" + Str(1)), Node("y" + Str(1))];
+  io::println("array: " + arr[0].greet(replArray(arr)) + " " + arr[0].name);
+
+  x = Node("old" + Str(1));
+  io::println("handed on: " + use(x));
+
+  x2 = Node("x" + Str(2));
+  y = x2;
+  io::println("moved into: " + y.greet(replNode(y)) + " " + y.name);
+
+  a = "first" + Str(1);
+  s2 = a;
+  t = take(a);
+  io::println("shared: " + t + " " + (s2 + repl(s2)) + " " + s2);
+  return 0;
+}

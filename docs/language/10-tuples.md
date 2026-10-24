@@ -461,5 +461,7 @@ an arm naming the tuple type (`t: (int, Str) { … }`) in optional mode (see
   `int?` element inline (a presence flag, then the `int`), a nested tuple
   inline.  A tuple of `int`s allocates nothing.  Each copy of a tuple retains
   the references it holds; a variable's are released when its scope ends, a
-  field's when its object is destroyed, an array element's with the array (see
-  [Memory](16-memory.md)).
+  field's when its object is destroyed, an array element's with the array.  At
+  a variable's last use an assignment, a store or a `return` moves them
+  instead, and the variable releases none (see [Memory](16-memory.md),
+  "Ownership transfers").

@@ -688,7 +688,9 @@ with `<`.
 - At run time a struct is laid out in place like a C struct of its fields, exactly as the
   tuple of its field types is ([Tuples](10-tuples.md#notes)): a struct of `int`s allocates
   nothing, a reference field is its box, retained once per copy and released when the
-  variable goes out of scope, the holding object is destroyed or the array goes.  A
+  variable goes out of scope, the holding object is destroyed or the array goes.  At a
+  variable's last use an assignment, a store or a `return` moves its references instead,
+  and the variable releases none ([Memory](16-memory.md#ownership-transfers)).  A
   method takes the receiver's address as its first argument, and a `view fn` the same;
   a constructor writes its result into the caller's storage.
 - `toString` and `==` go through the struct's layout, constant data the compiler emits
