@@ -559,4 +559,26 @@ fn main() -> int {
     EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
                                                         << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 11u) << r.Diagnostics;
+
+  // Nor is it a trait method's parameter or an array's element.
+  auto more = semaCheck(R"(
+fn g() {}
+trait Tr { fn m(v: void) -> int; }
+class E { a: void[2]; }
+fn s(a: view void[]) {}
+fn main() -> int { y: void[2] = [g(), g()]; return 0; }
+)");
+  EXPECT_FALSE(more.Ok);
+  for (const char *e :
+       {"3:12: error: parameter 'v' of method 'm' of trait 'Tr' cannot have "
+        "type 'void'",
+        "4:11: error: field 'a' in class 'E' has type 'void[2]': an array "
+        "element cannot have type 'void'",
+        "5:1: error: parameter 'a' has type 'void[]': an array element cannot "
+        "have type 'void'",
+        "6:20: error: variable 'y' has type 'void[2]': an array element cannot "
+        "have type 'void'"})
+    EXPECT_NE(more.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                           << more.Diagnostics;
+  EXPECT_EQ(more.ErrorCount, 4u) << more.Diagnostics;
 }

@@ -179,9 +179,8 @@ bool Sema::resolveRequirement(const ast::FuncDecl *fn, const Subst &subst,
                                    what + "; it is the implicit receiver");
       return false;
     }
-    auto *t =
-        resolveValueType(cloner.cloneType(p.ParamType), fn->getLocation(),
-                         "parameter '" + p.getName() + "' of " + what);
+    auto *t = resolveValueType(cloner.cloneType(p.ParamType), fn->getLocation(),
+                               "parameter '" + p.getName() + "' of " + what);
     if (!t)
       return false;
     out.Params.push_back(t);

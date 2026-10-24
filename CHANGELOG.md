@@ -450,9 +450,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Until every field of the class's own body is assigned on every path (an optional one starts
   as `None`), and in a subclass after `__super__(...)`, `self` is now only a place to assign
   fields and to read the ones already assigned (`self.f(1)` with `f` a field of function
-  type reads `f`): `field 'name' is read before it is assigned`, `'self' is used before every field is assigned: 'name' is not assigned yet`,
-  and in `__super__(...)`'s arguments `'self' is used before every field is assigned:
-  '__super__' has not run yet` (docs/language/05-classes.md, "Every field before `self`").
+  type reads `f`): `field 'name' is read before it is assigned`, `'self' is used before
+  every field is assigned: 'name' is not assigned yet`, and in `__super__(...)`'s arguments
+  `'self' is used before every field is assigned: '__super__' has not run yet`
+  (docs/language/05-classes.md, "Every field before `self`").
   What a static check cannot see, a superclass's `__init__` calling a method a subclass
   overrides, or giving `self` away to code the subclass's `__init__` then calls, is safe by
   the change to the object's class while an `__init__` runs (see "Changed").
@@ -467,14 +468,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expression produces no value): make it a statement, then 'return;'`
   (docs/language/02-basics.md, "Builtin Types").  So are a `match` on one (`match subject
   has type 'void' (the expression produces no value)`), which was accepted, and an array
-  of them (`array element 0 has type 'void' (the expression produces no value)`), which
-  was "not supported yet".
+  of them (`array element 0 has type 'void' (the expression produces no value)`, and for
+  a declared `void[2]` or `void[]`, `variable 'y' has type 'void[2]': an array element
+  cannot have type 'void'`), which was "not supported yet", and a trait method's `void`
+  parameter, which no class could implement (`parameter 'v' of method 'm' of trait 'Tr'
+  cannot have type 'void'`).
 - A `match` arm's `n: inout T` on a tagged union's variant, an optional's value or a
   subclass could be left pointing at what another reference to the subject's object put
   there (`g.s = Sh::E;` with `g = h` in an arm of `match h.s`, a parameter that is `self`, or
-  `h` passed with `h.s` to the function that matches it), and reading `n` then crashed or
-  read the object as the wrong class.  The binding is a value of its own now (see
-  "Changed").
+  a variable `h` passed with `h.s` to the function that matches it), and reading `n` then
+  crashed or read the object as the wrong class.  The binding is a value of its own now
+  (see "Changed").
 - An `inout` local or a `match` arm's `n: inout T` naming a field of a struct held in an
   object (`x: inout = o.h.p.s;`, `match o.h.p.s { n: inout L { ... } }`, with `p` a struct)
   did not keep that object (`o.h`) alive, as it does for a field of the object itself: when

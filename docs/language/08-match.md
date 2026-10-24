@@ -398,14 +398,15 @@ Output:
   the subject starts from cannot be used except through it (`'a' is borrowed by 'inout'
   local 'd' until 'd' is last used`).
 - Another reference to the subject's object can still reach it: `g` after `g = h` in an arm
-  of `match h.s`, a parameter that is the same object as `self`, or `h` passed next to
-  `h.s` to a function whose `inout` parameter is matched. What it writes there before the
-  binding's last use does not change the binding, which keeps the arm's type (the variant,
-  the present value, the subclass), and the binding's value replaces it at that last use;
-  what it writes after stays, as does an assignment of the subject's variable then. An
-  object the subject is reached through is kept until then: if another reference replaces
-  it (`g.h = H(...)` in an arm of `match o.h.p.s`, with `g = o` and `p` a struct), the
-  binding's value goes back to that object, which nothing else reaches any more.
+  of `match h.s`, a parameter that is the same object as `self`, or a variable `h` passed
+  next to `h.s` to a function whose `inout` parameter is matched. What it writes there
+  before the binding's last use does not change the binding, which keeps the arm's type
+  (the variant, the present value, the subclass), and the binding's value replaces it at
+  that last use; what it writes after stays, as does an assignment of the subject's
+  variable then. An object the subject of the `match` is reached through (`o.h` in `match
+  o.h.p.s`, with `p` a struct) is kept until then: if another reference replaces it
+  (`g.h = H(...)` with `g = o`), the binding's value goes back to that object, which
+  nothing else reaches any more.
 - The `match` keeps the object it matched until it ends, so the arm can replace it.
 - A tuple or a struct inside an optional (`p: inout Point` on a `Point?`) is the present
   value, put back as one, so a write through the binding changes the subject. A
