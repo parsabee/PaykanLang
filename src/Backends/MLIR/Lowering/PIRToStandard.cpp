@@ -1012,6 +1012,14 @@ void FunctionLowering::lowerInstr(Operation *op) {
         define(op, P::PtrLoadOp::create(B, Loc, ptr, asPtr(operand(0)),
                                         /*vtable=*/true, /*method=*/false));
       })
+      .Case([&](P::VTableStoreOp o) {
+        const ClassLayout *l = M.layout(o.getClassName());
+        if (!l)
+          return M.fail("no class '" + o.getClassName() + "'");
+        P::PtrStoreOp::create(B, Loc, asPtr(operand(0)),
+                              P::AddressOfOp::create(B, Loc, ptr, l->VTable),
+                              /*vtable=*/true);
+      })
       .Case([&](P::VTableAddrOp o) {
         const ClassLayout *l = M.layout(o.getClassName());
         if (!l)

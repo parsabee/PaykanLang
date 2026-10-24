@@ -353,6 +353,13 @@ private:
         printOperand(in.Args[1]);
       }
       break;
+    case Opcode::VTableStore:
+      OS << ' ';
+      if (!in.Args.empty())
+        printOperand(in.Args[0]);
+      OS << ", ";
+      printName(in.ClassName, OS);
+      break;
     case Opcode::VTableAddr:
       OS << ' ';
       if (!in.ClassName.empty())

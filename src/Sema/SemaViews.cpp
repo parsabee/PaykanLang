@@ -12,7 +12,8 @@
 // change the original, so a `view` stays one: it can only be passed on to a
 // `view` parameter, a `view` that shares what it holds is never stored nor
 // returned except as a `view` (`-> view T`, which part of `self` is in a
-// `view fn`), and a `match` arm's name for a `view` is one too.
+// `view fn`), nor made an element of an array or tuple literal, and a
+// `match` arm's name for a `view` is one too.
 
 #include "Names.h"
 #include "Sema.h"
@@ -37,7 +38,7 @@ const ast::Identifier *Sema::placeRoot(const ast::Expr *e) {
   return ast::dyn_cast<ast::Identifier>(placeBase(e));
 }
 
-std::string Sema::frozenPlace(const ast::Expr *e, bool borrows) {
+std::string Sema::frozenPlace(const ast::Expr *e, bool borrows, bool copy) {
   if (const BorrowResult *r = borrowResultOf(e))
     if (r->Mode == ast::ParamMode::View)
       return "the result of '" + r->Callee + "' is a 'view'";
@@ -67,7 +68,11 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows) {
     // The lambda's own copy, which its body must not change (the program
     // could not see it); what a captured reference names is an object,
     // changed through it as through any other reference, whether the copy
-    // is the reference or holds it (a struct's or a tuple's field).
+    // is the reference or holds it (a struct's or a tuple's field).  A copy
+    // of it holds its references as the capture does, so it may be stored,
+    // returned or passed on.
+    if (copy)
+      break;
     for (const ast::Expr *p = e;;) {
       ast::Type *t = p == root ? CurrentScope->lookup(name)
                                : const_cast<ast::Expr *>(p)->getResolvedType();
@@ -171,7 +176,7 @@ std::string Sema::viewOf(const ast::Expr *e, bool borrows) {
     std::string why = viewOf(te->getTrueExpr(), borrows);
     return why.empty() ? viewOf(te->getFalseExpr(), borrows) : why;
   }
-  return frozenPlace(e, borrows);
+  return frozenPlace(e, borrows, /*copy=*/true);
 }
 
 bool Sema::checkViewArgs(const ast::ParamModes &modes,

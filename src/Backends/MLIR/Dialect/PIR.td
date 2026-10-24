@@ -510,11 +510,20 @@ def PIR_FieldAddrOp : PIR_Op<"field_addr", [Pure]> {
   let assemblyFormat = "$obj `,` $class_name `[` $field `]` attr-dict";
 }
 
-def PIR_VTableLoadOp : PIR_Op<"vtable_load", [Pure]> {
+def PIR_VTableLoadOp : PIR_Op<"vtable_load", [MemoryEffects<[MemRead]>]> {
   let summary = "an object's vtable pointer";
+  let description = [{
+    It reads the object: an `__init__` changes it (`pir.vtable_store`).
+  }];
   let arguments = (ins PIR_ObjType:$obj);
   let results = (outs PIR_PtrType:$result);
   let assemblyFormat = "$obj attr-dict";
+}
+
+def PIR_VTableStoreOp : PIR_Op<"vtable_store", [MemoryEffects<[MemWrite]>]> {
+  let summary = "make an object one of a class: its vtable pointer the class's";
+  let arguments = (ins PIR_ObjType:$obj, StrAttr:$class_name);
+  let assemblyFormat = "$obj `,` $class_name attr-dict";
 }
 
 def PIR_VTableAddrOp : PIR_Op<"vtable_addr", [Pure]> {
@@ -578,9 +587,10 @@ def PIR_PtrLoadOp : PIR_Op<"ptr_load", [MemoryEffects<[MemRead]>]> {
     What the memory holds, when it is part of a vtable call (at most one is
     set):
 
-    * `vtable`: an object's vtable pointer, which never changes while the
-      program can read it, so LLVM may assume it (`!invariant.load`); C reads
-      it as Runtime.h's `PaykanMethod *`.
+    * `vtable`: an object's vtable pointer, which C reads as Runtime.h's
+      `PaykanMethod *`.  It changes while the object is constructed (each
+      `__init__` makes it one of its own class, `pir.vtable_store`), so it is
+      an ordinary load.
     * `method`: a vtable slot, which C reads as the `PaykanMethod` it is
       (#62), not through a pointer to another type.
   }];
@@ -592,8 +602,9 @@ def PIR_PtrLoadOp : PIR_Op<"ptr_load", [MemoryEffects<[MemRead]>]> {
 def PIR_PtrStoreOp : PIR_Op<"ptr_store", [MemoryEffects<[MemWrite]>]> {
   let summary = "write a value through an address";
   let description = [{
-    `vtable`: the value is a new object's vtable pointer, which C writes as
-    Runtime.h's `PaykanMethod *` (the `vtable` of `pir.ptr_load`).
+    `vtable`: the value is an object's vtable pointer (a new object's, or
+    the one an `__init__` gives it), which C writes as Runtime.h's
+    `PaykanMethod *` (the `vtable` of `pir.ptr_load`).
   }];
   let arguments = (ins PIR_PtrType:$ptr, PIR_Value:$value, UnitAttr:$vtable);
   let assemblyFormat = "$value `,` $ptr attr-dict `:` type($value)";

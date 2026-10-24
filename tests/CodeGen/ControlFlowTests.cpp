@@ -462,3 +462,30 @@ TEST(ControlFlow, TernaryStatementWithVoidBranches) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "yes\nno\nafter\n");
 }
+
+// A function whose only way out of a `while True` loop is `return` needs no
+// `return` after it: a function, a method and a lambda, one returning a
+// string the loop builds.
+TEST(ControlFlow, WhileTrueLeftOnlyByReturn) {
+  LeakGuard g;
+  auto r = compileAndRun(R"pkn(import ::io;
+    fn label(n: int) -> Str {
+      while True {
+        if n > 3 { return "n" + Str(n); }
+        n += 1;
+      }
+    }
+    class C { k: int; }
+    impl C {
+      view fn above(n: int) -> int { while True { if n > self.k { return n; } n += 1; } }
+    }
+    fn main() -> int {
+      f = fn(n: int) -> int { while True { if n > 5 { return n; } n += 1; } };
+      io::println(label(1) + " " + Str(C(2).above(0)) + " " + Str(f(0)));
+      return 0;
+    }
+  )pkn");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "n4 3 6\n");
+  g.expectNoLeaks("WhileTrueLeftOnlyByReturn");
+}

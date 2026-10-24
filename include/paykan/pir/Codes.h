@@ -78,7 +78,9 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     // Function values (docs/design/function-types.md).
     {Opcode::FnAddr, 50, "fn.addr"},
     {Opcode::ICall, 51, "icall"},
-    // 52-255 reserved.
+    // An object's class while its `__init__` runs (docs/pir.md §5).
+    {Opcode::VTableStore, 52, "vtable.store"},
+    // 53-255 reserved.
 };
 
 struct TypeEntry {

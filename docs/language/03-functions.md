@@ -293,8 +293,15 @@ Assigning it to a variable, a field or an element and `return` are errors: `'v' 
 local; it cannot be stored, only read or passed to a 'view' parameter`, `'v' is a 'view'
 local; it cannot be returned`. A `view` of a value type, or of an array or tuple of them
 (`int[3]`, `(int, float)`), is copied when it is assigned (`m = n`), and the copy is the
-variable's own. An array or tuple literal is a new value, so any `view` can be one of its
-elements: `[v]`, `(v, 1)` and `return (s, 1);` hold `v` and `s` as values of their own.
+variable's own. An array or tuple literal holds its elements, so it stores them too: a
+`view` of a value type can be one of its elements, as a copy, and one that shares what it
+holds cannot, as a copy of it in the literal could change it later (`[v]`, `(v, 1)` and
+`[v; 3]` with `v: view Node` are `'v' is a 'view' parameter; it cannot be stored, only read
+or passed to a 'view' parameter`, and so is `[self]` in a `view fn`). That holds wherever
+the literal goes, a `view` parameter included: with `l` a `List<(Str, Node)>`,
+`l.contains(("ab", l.at(0).1))` is `the result of 'at' is a 'view'; it cannot be stored,
+only read or passed to a 'view' parameter`. A copying accessor gives the literal an element
+of its own: `l.contains(("ab", l.get(0).1))`.
 
 A `match` arm's name for a `view` is a `view` too: in `match v { k: Fast { k.tick(); } }`,
 `k.tick()` is an error, `'k' is bound to a 'view'; 'tick' is not a 'view fn'`.
@@ -534,7 +541,9 @@ fn nothing() {
 - `return;` in a non-void function is a compile-time error (`non-void function must
   return a value`).
 - The compiler checks that every control-flow path in a non-void function ends with a
-  `return` (`non-void function 'g' does not always return a value`).
+  `return` (`non-void function 'g' does not always return a value`). A `while True` loop
+  with no `break` out of it never falls through, so a function it ends needs no `return`
+  after it; a `break` in a loop nested inside it leaves only that loop.
 
 ### Borrowed results
 

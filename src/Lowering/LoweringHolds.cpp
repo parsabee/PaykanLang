@@ -32,9 +32,9 @@
 // load and owned like a call's result; for a value held in memory, its
 // address is in use, and the object it is in is held instead (`h.a` of
 // `h.a.xs`), as the object of a call-rooted field is (MemTemps).  An
-// `inout` local or a `match` arm's `n: inout T` holds the object for as
-// long as it can be used.  A read with no such call while it is in use is
-// read in place, as it was.
+// `inout` local holds the object for as long as it can be used, and a
+// `match` with an arm's `n: inout T` until it ends.  A read with no such
+// call while it is in use is read in place, as it was.
 
 #include "LoweringInternal.h"
 #include "Names.h"
@@ -520,12 +520,12 @@ void ModuleLowering::BorrowedReads::statement(ast::Stmt *s) {
     eval(x->getEnd());
     eval(x->getStep());
   } else if (auto *x = ast::dyn_cast<ast::MatchStmt>(s)) {
-    eval(x->getSubject());
-    for (ast::MatchArm *arm : x->getArms())
-      if (arm->hasBinding() && arm->getMode() == ast::ParamMode::Inout) {
-        borrow(x->getSubject());
-        break;
-      }
+    // With an `n: inout T` arm, the subject is evaluated as its storage,
+    // once, and read there (emitMatchPlace).
+    if (hasInoutArm(x))
+      borrow(x->getSubject());
+    else
+      eval(x->getSubject());
   } else if (auto *x = ast::dyn_cast<ast::DestructureStmt>(s)) {
     eval(x->getValue());
   } else if (auto *x = ast::dyn_cast<ast::MemberAssignStmt>(s)) {
@@ -669,7 +669,7 @@ bool ModuleLowering::ReleaseScan::stmt(ast::Stmt *s) {
       return true;
     for (ast::MatchArm *arm : x->getArms()) {
       if (arm->hasBinding() && arm->getMode() == ast::ParamMode::Inout)
-        NotOwned[arm->getBinding()] = arm->getArmType();
+        NotOwned[arm->getBinding()] = arm->getBindType();
       if (stmt(arm->getBody()))
         return true;
     }

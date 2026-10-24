@@ -260,16 +260,17 @@ enum class Opcode : uint8_t {
   Call,  // Callee = @fn, Args
   VCall, // receiver (obj) = Args[0], ClassName + Slot, Sig; Args[1..] = args
   // ARC and objects
-  Retain,     // box
-  Release,    // box
-  Box,        // obj -> box   (PaykanShared_new)
-  Unbox,      // box -> obj   (PaykanShared_get)
-  New,        // ClassName -> obj
-  Free,       // obj
-  FieldLoad,  // obj, ClassName.Field -> field type
-  FieldStore, // obj, ClassName.Field, value
-  VTableLoad, // obj -> ptr
-  VTableAddr, // ClassName or @extern vtable -> ptr
+  Retain,      // box
+  Release,     // box
+  Box,         // obj -> box   (PaykanShared_new)
+  Unbox,       // box -> obj   (PaykanShared_get)
+  New,         // ClassName -> obj
+  Free,        // obj
+  FieldLoad,   // obj, ClassName.Field -> field type
+  FieldStore,  // obj, ClassName.Field, value
+  VTableLoad,  // obj -> ptr
+  VTableAddr,  // ClassName or @extern vtable -> ptr
+  VTableStore, // obj, ClassName: the object's vtable becomes the class's
   // locals
   Load,  // Local -> type
   Store, // Local, value
@@ -320,7 +321,7 @@ struct Instr {
   CmpPred Pred = CmpPred::Eq; // Cmp / UCmp
   Type CastTo = Type::Void;   // Cast
   std::string Callee;         // Call / FnAddr: function symbol
-  std::string ClassName;      // VCall / New / Field* / VTableAddr
+  std::string ClassName;      // VCall / New / Field* / VTable{Addr,Store}
   std::string Field;          // FieldLoad / FieldStore / FieldAddr
   uint32_t Slot = 0;          // VCall; Wrap / Mask: the bit width
   Signature Sig;              // VCall: the slot's; ICall: the callee's

@@ -279,14 +279,24 @@ backend does no inheritance walk.
   explicit slot index, exactly like user classes.
 
 Constructors and destructors are ordinary functions produced by the lowering:
-`@Point(args...) -> box` allocates with `new`, installs the vtable (the
-class's own, before any `__init__` runs, so a superclass's `__init__` that
-calls a virtual method reaches the subclass's), zeroes
-the counts and the fields, boxes the object (`box`, before `__init__`, so
-`self` inside `__init__` is the caller's box) and calls
-`@Point.__init__(obj, args...)`; `@Point.destroy(obj)` releases every
-ref-typed field (`weak.release` for a `weak` one) and returns: the runtime
-frees the object after the destroy, or keeps it for its weak references
+`@Point(args...) -> box` allocates with `new`, which installs the vtable and
+zeroes the counts and the fields, boxes the object (`box`, before
+`__init__`, so `self` inside `__init__` is the caller's box) and calls
+`@Point.__init__(obj, args...)`.  While a class's `__init__` runs, the
+object is one of that class once every field of the class's body has a
+value (docs/language/05-classes.md, "Every field before `self`"):
+`@C.__init__` calls its superclass's `__init__` first (the `__super__(...)`
+statement), which leaves the object one of the superclass, and `vtable.store
+%self, C` follows the `field.store` of the last of C's own fields on each
+path (or the call, when none needs assigning: an optional one starts as
+None).  So a virtual call made while a superclass's fields are set up, or
+through a reference to the object made then, reaches the superclass's
+implementation (a pure virtual slot's trap for an abstract class), and the
+outermost `__init__` leaves the object one of its own class.  An object's
+vtable pointer therefore changes while it is constructed, and a backend
+cannot treat a load of it as invariant.  `@Point.destroy(obj)` releases
+every ref-typed field (`weak.release` for a `weak` one) and returns: the
+runtime frees the object after the destroy, or keeps it for its weak references
 (Runtime.h, "Shared"), so a destroy never `free`s its object.  `destroy` is
 entirely compiler-generated: it is final, so a class cannot write or
 override it.  Every
@@ -313,8 +323,11 @@ there, like any inherited method); one that declares it pure again has a
 trap of its own, `@Sub.m`, which names `C` too.  A class with such a slot
 is **abstract**: nothing constructs it, so it has no constructor `@C` and
 no `new` names it, while its `@C.__init__`, which its subclasses'
-`__init__` calls, and its destructor are emitted as usual.  The format
-needs no mark for it: an abstract class is one without a constructor.
+`__init__` calls, and its destructor are emitted as usual.  From the
+`vtable.store %self, C` in `@C.__init__` until a subclass's `__init__` has
+assigned its own fields the object is one of `C`, so a call of `m` then
+reaches the trap.  The format needs no mark for it: an abstract class is
+one without a constructor.
 
 ## 6. Statements and instructions
 
@@ -435,6 +448,7 @@ free %o              ; Paykan_free of the object struct (an object never boxed)
 field.store %o, Point.x, %v                    ; plain store: ARC is explicit around it
 %p = vtable.load %o                            ; the object's vtable pointer (ptr)
 %p = vtable.addr Point   |   vtable.addr @$rt.PaykanString_vtable
+vtable.store %o, Point                         ; %o's vtable becomes Point's (an __init__'s, §5)
 ```
 
 **Locals**
@@ -573,9 +587,11 @@ CodeGen enforced, now in one place.
   skipped), and a container's type descriptor marks each of its references
   nullable.  `E::B(x, y)` zeroes the value, stores the tag and initialises
   the fields in place; a `match` copies the subject, `switch`es on its tag
-  and binds an arm's fields as a copy of the struct (or, `inout`, as the
-  `ptr.add` of their offset in the subject).  Printing, `toString()` and
-  `==`/`!=` pass the address and the `.enumN` layout to
+  and binds an arm's fields as a copy of the struct (an `inout` arm's copy
+  is assigned back to the subject, as that variant, after its last use in
+  the arm or on a way out of the arm before it, as an optional's value or a
+  subclass's object is).  Printing, `toString()` and `==`/`!=` pass the
+  address and the `.enumN` layout to
   `PaykanEnum_toString` and `PaykanEnum_equals`, with the conventions of
   the tuple calls; an enum without fields is first stored to a local.
 * **Function values** (docs/language/14-function-types.md,
@@ -670,9 +686,10 @@ CodeGen enforced, now in one place.
   method's receiver, an `inout` argument, the place a call's `inout`
   result names), keeps the object it is in alive: that object, read
   through another one (`h.a` of `h.a.xs`), is `retain`ed, and released
-  once the address is no longer used; for an `inout` local or a `match`
-  arm's `n: inout T`, a hidden owned local holds it until the local's
-  scope ends.  So `h.b.s + g(h)` joins the string `h.b.s` held before `g`
+  once the address is no longer used; for an `inout` local, a hidden owned
+  local holds it until the local's scope ends, and for a `match` with an
+  arm's `n: inout T`, whose subject's storage is found once, until the
+  `match` ends.  So `h.b.s + g(h)` joins the string `h.b.s` held before `g`
   ran, `h.b.m(h)` runs `m` on the object that was in `h.b`, and
   `h.b.s = g(h)` writes to that object, whatever `g` and `m` assign.  A
   read in use where no such call is made is read in place, with no
@@ -841,8 +858,9 @@ The verifier rejects a program when:
   does not match the slot's signature; an `icall`'s callee is not a `ptr` or
   its arguments do not match the signature it writes; `fn.addr` names a
   function the module does not declare;
-* `field.load`/`field.store`/`field.addr`/`new`/`vtable.addr` name an
-  unknown class or field; a field store has the wrong type;
+* `field.load`/`field.store`/`field.addr`/`new`/`vtable.addr`/
+  `vtable.store` name an unknown class or field; a field store has the
+  wrong type; `vtable.store` takes anything but an `obj`;
 * a class extends an unknown class or declares a field twice, a field has
   a type that is not a field type (§5), a defined class's vtable slot 0 is
   not `destroy`, or an `extern class` names no module;
@@ -990,8 +1008,8 @@ global no root reaches; the modules themselves stay.  A root reaches:
 
 - from a function definition, the names its body refers to
   (`references()`: the callees of `call` and `fn.addr`, the `@sym`
-  operands, and the classes `new`, `vcall`, `vtable.addr` and the field
-  instructions name); from a compiled declaration, its `uses`;
+  operands, and the classes `new`, `vcall`, `vtable.addr`, `vtable.store`
+  and the field instructions name); from a compiled declaration, its `uses`;
 - from an extern naming another module, that module's definition;
 - from a class, its superclass and its vtable's functions; from an extern
   class, the class in the module it names.

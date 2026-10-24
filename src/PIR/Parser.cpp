@@ -1311,6 +1311,11 @@ private:
         return false;
       resultTy = Type::Ptr;
       break;
+    case Opcode::VTableStore:
+      if (!parseCommaOperands(in.Args, 1) || !expect(Tok::Comma, "','") ||
+          !parseName(in.ClassName, "a class name"))
+        return false;
+      break;
     case Opcode::VTableAddr:
       if (Cur.Kind == Tok::Symbol) {
         in.Args.push_back(Operand::symbol(Cur.Text));

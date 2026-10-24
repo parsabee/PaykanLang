@@ -8,6 +8,7 @@
 #include "LoweringInternal.h"
 #include "Names.h"
 
+#include <algorithm>
 #include <cassert>
 
 namespace paykan::lowering {
@@ -272,6 +273,39 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
       nameParams(*ctor, 0, m->getParams());
 }
 
+// A class's `__init__` (docs/language/05-classes.md, "Every field before
+// self"): while it runs, the object is one of its class, as in C++, from the
+// point every field of the class's body has a value.  Its superclass's
+// `__init__`, called first, made it one of the superclass; it stays one
+// until the statement Sema marks completesInit, the assignment of the last
+// field on its path, makes it one of this class (lowerMemberAssignStmt), or
+// until `__super__(...)` returns when no field needs assigning (an optional
+// one starts as None).  So a method called while a superclass's fields are
+// set up is the superclass's (a pure virtual one's trap,
+// Paykan_panic_pure_virtual, for an abstract class), and so is one reached
+// through a reference the superclass's `__init__` gave away, never an
+// override that would read a field of this class not assigned yet; the
+// constructor's object leaves the outermost `__init__` one of its own class.
+void ModuleLowering::emitInitBody(ast::CompoundStmt *body, ast::ClassType *ct,
+                                  pir::LocalId self) {
+  const auto &stmts = body->getStatements();
+  size_t first = 0;
+  if (!stmts.empty())
+    if (auto *es = ast::dyn_cast<ast::ExprStmt>(stmts.front()))
+      if (auto *call = ast::dyn_cast<ast::CallExpr>(es->getExpr());
+          call && call->getCalleeName() == kMethodSuper) {
+        visit(stmts.front());
+        first = 1;
+      }
+  const auto &fields = ct->getFields();
+  if (std::none_of(fields.begin(), fields.end(), [](const auto &f) {
+        return !ast::isa<ast::OptionalType>(f.second);
+      }))
+    B.vtableStore(B.load(self, kSelf), ct->getName());
+  for (size_t i = first; i < stmts.size(); ++i)
+    visit(stmts[i]);
+}
+
 // A pure virtual method's function: its slot's target until a subclass
 // implements it.  No object of an abstract class exists, so only a broken
 // program (a hand-written PIR one, say) reaches it: it panics, naming the
@@ -319,7 +353,10 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
         at +=
             declareParam(funcDecl->getParams()[i].getName(), fn->Params, at,
                          md->getParamTypes()[i], funcDecl->getParams()[i].Mode);
-      emitBody(funcDecl->getBody());
+      if (funcDecl->getName() == kMethodInit)
+        emitInitBody(funcDecl->getBody(), ct, selfLocal);
+      else
+        emitBody(funcDecl->getBody());
     }
     emitImplicitReturn(fn->Sig);
   }
@@ -335,9 +372,9 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
 
   // 4. The constructor: allocate, box BEFORE __init__ (so `self` used as a
   //    value inside __init__ recovers the caller's box), run __init__,
-  //    return the box.  The vtable `new` installs is the class's own, so a
-  //    superclass's __init__ that calls a virtual method runs this class's.
-  //    An abstract class has no constructor.
+  //    return the box.  Each __init__ makes the object one of its own class
+  //    while its body runs (emitInitBody), the class's last.  An abstract
+  //    class has no constructor.
   if (ct->isAbstract())
     return Val();
   auto *initMd = ct->findMethod(kMethodInit);
@@ -484,6 +521,10 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
     B.fieldStore(objPtr, ct->getName(), node->getFieldName(),
                  coerceTo(rhs, toPIRType(fieldASTTy)));
   }
+  // The last field of an `__init__`'s class has its value: the object
+  // becomes one of the class (emitInitBody).
+  if (node->completesInit())
+    B.vtableStore(objPtr, ct->getName());
   releaseIfOwned(recv.Owned);
   return Val();
 }

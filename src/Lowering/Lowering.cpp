@@ -993,6 +993,10 @@ ModuleLowering::Receiver ModuleLowering::emitReceiver(ast::Expr *expr,
 // -- Scope cleanup
 
 void ModuleLowering::emitScopeCleanup(Scope &scope) {
+  // An `inout` arm's binding goes back to its subject first: what it holds
+  // and the object of a field it names are released below.
+  for (auto it = scope.WriteBacks.rbegin(); it != scope.WriteBacks.rend(); ++it)
+    emitWriteBack(*it);
   // Reverse declaration order (LIFO).
   for (auto it = scope.DeclOrder.rbegin(); it != scope.DeclOrder.rend(); ++it) {
     assert(it->ASTType && ast::isRefType(it->ASTType) &&

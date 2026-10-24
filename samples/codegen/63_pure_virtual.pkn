@@ -3,13 +3,13 @@
 //            is pure virtual (docs/language/05-classes.md): an abstract
 //            Shape with a field, an __init__ and three pure methods, called
 //            through the vtable from its virtual `describe`, which an `impl`
-//            method calls, and from its __init__ (which reaches the
-//            subclass's implementation: the object's vtable is its class's
-//            from the start); an abstract Polygon that implements one; the
-//            concrete Square, Triangle and Rect; a Shape[] of all three, a
-//            `view Shape[]` parameter, a Shape-typed variable reassigned, a
-//            Shape? unwrapped by `match`, and a `match` on the concrete
-//            classes.
+//            method calls, and from the concrete classes' __init__ once
+//            their own fields are assigned (while Shape's own __init__ runs,
+//            the object is a Shape, which has no `kind`); an abstract Polygon
+//            that implements one; the concrete Square, Triangle and Rect; a
+//            Shape[] of all three, a `view Shape[]` parameter, a Shape-typed
+//            variable reassigned, a Shape? unwrapped by `match`, and a
+//            `match` on the concrete classes.
 // expect-stdout: a square: area 4, perimeter 8
 // expect-stdout: a triangle: area 6, perimeter 12
 // expect-stdout: a rect: area 4.5, perimeter 9
@@ -34,8 +34,7 @@ class Shape {
 }
 
 impl Shape {
-  // `kind` is the subclass's here: it reads none of its fields.
-  fn __init__()           { self.title = "a " + self.kind(); }
+  fn __init__()           { self.title = "a shape"; }
 
   view fn report() -> Str { return self.describe(); }
 }
@@ -62,7 +61,10 @@ class Square : Polygon {
 }
 
 impl Square {
-  fn __init__(side: float) { __super__(4, side); }
+  fn __init__(side: float) {
+    __super__(4, side);
+    self.title = "a " + self.kind();
+  }
 }
 
 // An equilateral triangle would need a square root; this one is 3-4-5, so
@@ -74,7 +76,7 @@ class Triangle : Polygon {
 }
 
 impl Triangle {
-  fn __init__() { __super__(3, 4.0); }
+  fn __init__() { __super__(3, 4.0); self.title = "a " + self.kind(); }
 }
 
 class Rect : Shape {
@@ -87,7 +89,12 @@ class Rect : Shape {
 }
 
 impl Rect {
-  fn __init__(w: float, h: float) { __super__(); self.w = w; self.h = h; }
+  fn __init__(w: float, h: float) {
+    __super__();
+    self.w = w;
+    self.h = h;
+    self.title = "a " + self.kind();
+  }
 }
 
 fn total(shapes: view Shape[]) -> float {

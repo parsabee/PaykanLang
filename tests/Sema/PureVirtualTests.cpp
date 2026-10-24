@@ -313,12 +313,13 @@ fn f(o: Obj, s: Shape) -> int {
 fn main() -> int { return 0; }
 )"));
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("unreachable arm: no object has the exact type "
-                               "of abstract class 'Shape'"),
+  EXPECT_NE(r.Diagnostics.find("a 'match' arm cannot name abstract class "
+                               "'Shape': an object is of it only while it is "
+                               "being constructed"),
             std::string::npos)
       << r.Diagnostics;
-  EXPECT_NE(r.Diagnostics.find("unreachable arm: no object has the exact type "
-                               "of abstract class 'Polygon'"),
+  EXPECT_NE(r.Diagnostics.find("a 'match' arm cannot name abstract class "
+                               "'Polygon'"),
             std::string::npos)
       << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
@@ -354,8 +355,8 @@ fn f(s: Shape?) -> Str {
 fn main() -> int { return 0; }
 )"));
   EXPECT_FALSE(bad.Ok);
-  EXPECT_NE(bad.Diagnostics.find("unreachable arm: no object has the exact "
-                                 "type of abstract class 'Polygon'"),
+  EXPECT_NE(bad.Diagnostics.find("a 'match' arm cannot name abstract class "
+                                 "'Polygon'"),
             std::string::npos)
       << bad.Diagnostics;
   EXPECT_EQ(bad.ErrorCount, 1u) << bad.Diagnostics;
@@ -480,6 +481,37 @@ fn main() -> int {
             std::string::npos)
       << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+}
+
+// An abstract class's `__init__` calls a method, pure or not, only once its
+// fields are assigned (docs/language/05-classes.md, "Every field before
+// self"): before, it is an error, whatever the method; after, it is fine
+// (it runs the abstract class's own, a trap for a pure one).
+TEST(PureVirtual, AbstractInitCallsMethodsOnlyOnceItsFieldsAreSet) {
+  auto r = semaCheck(R"(
+class Shape {
+  tag: Str;
+  view fn kind() -> Str;
+  view fn name() -> Str { return "shape"; }
+}
+impl Shape {
+  fn __init__() { self.tag = "made a " + self.kind(); }
+}
+class Box {
+  tag: Str;
+  view fn kind() -> Str;
+}
+impl Box {
+  fn __init__() { self.tag = ""; self.tag = self.kind(); }
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("8:42: error: 'self' is used before every "
+                               "field is assigned: 'tag' is not assigned yet"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
 }
 
 // A pure virtual method has no body to judge: its family gets no "never
@@ -627,8 +659,8 @@ fn main() -> int {
                                "incompatible signature 'Wrong.area() -> int'"),
             std::string::npos)
       << r.Diagnostics;
-  EXPECT_NE(r.Diagnostics.find("unreachable arm: no object has the exact type "
-                               "of abstract class 'Polygon'"),
+  EXPECT_NE(r.Diagnostics.find("a 'match' arm cannot name abstract class "
+                               "'Polygon'"),
             std::string::npos)
       << r.Diagnostics;
   EXPECT_EQ(count(r.Diagnostics, "cannot instantiate abstract class 'Shape': "

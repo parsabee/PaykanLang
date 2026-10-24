@@ -28,6 +28,8 @@ namespace ast {
 //   * ArrayType, FixedArrayType                      -> element substituted
 //   * GenericType (Box<T>)                           -> arguments substituted
 //   * OptionalType (T?)                              -> inner type substituted
+//     (T's argument itself when it is optional, and a match arm naming T
+//     then names what that optional wraps)
 //   * TupleType ((T, int))                           -> elements substituted
 //   * StructType (a resolved struct)                 -> a stub by its name
 //   * anything else (builtin, enum, other class)     -> shared, not copied

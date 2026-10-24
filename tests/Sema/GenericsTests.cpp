@@ -190,6 +190,46 @@ TEST(Generics, MatchOnInstantiationArms) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
+// An arm naming a type parameter T that is an optional `X?` matches an `X`.
+// On a `T?` its binding is a T, the `X?`: the template compares it with a T
+// and, through `inout`, assigns it one, None too.  On a class subject, which
+// cannot be None, the binding stays the `X`, so an `inout` one is never
+// assigned a T that may be None.
+TEST(Generics, ArmNamingAnOptionalTypeArgument) {
+  auto ok = semaCheck(withMain(R"(
+    class Node { n: int; }
+    fn same<T>(x: T?, d: T) -> bool {
+      match x { v: T { return v == d; } None { return False; } }
+    }
+    fn put<T>(x: inout T?, d: T) {
+      match x { v: inout T { v = d; } None { } }
+    }
+  )",
+                               R"(a: Node? = Node(1);
+    b = same<Node?>(a, None);
+    put<Node?>(a, None);
+    c: int? = 3;
+    put<int?>(c, None);)"));
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  auto bad = semaCheck(withMain(R"(
+    class Animal { n: int; }
+    impl Animal { fn __init__(n: int) { self.n = n; } }
+    class Dog : Animal {}
+    impl Dog { fn __init__(n: int) { __super__(n); } }
+    fn swapIn<T>(a: inout Animal, d: T) {
+      match a { v: inout T { v = d; } _ { } }
+    }
+  )",
+                                "a: Animal = Dog(1); swapIn<Dog?>(a, None);"));
+  EXPECT_FALSE(bad.Ok);
+  EXPECT_TRUE(has(bad.Diagnostics,
+                  "cannot use optional 'Dog?' as 'Dog' without unwrapping"))
+      << bad.Diagnostics;
+  EXPECT_TRUE(
+      has(bad.Diagnostics, "in instantiation of 'swapIn<Dog?>' requested here"))
+      << bad.Diagnostics;
+}
+
 TEST(Generics, RecursiveInstantiationInFieldIsFine) {
   auto r = semaCheck(withMain(R"(
     class Node<T> {

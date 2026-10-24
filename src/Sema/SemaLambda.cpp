@@ -112,6 +112,26 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
                        "outlive the call that holds it)");
       return false;
     }
+    // A capture is a use of the variable, and a copy of the reference it
+    // holds, which the function could change it through: neither while a
+    // local borrow of it is live where the lambda is written.
+    for (const Borrow &b : lc.OuterBorrows) {
+      if (b.Root != name || b.RootScope != owner)
+        continue;
+      if (b.Inout) {
+        error(loc, "'" + name + "' is borrowed by 'inout' local '" + b.By +
+                       "' until '" + b.By +
+                       "' is last used; a function cannot capture it");
+        return false;
+      }
+      if (sharesStorage(ty)) {
+        error(loc, "'" + name + "' is viewed by 'view' local '" + b.By +
+                       "' until '" + b.By +
+                       "' is last used; a function cannot capture it (it "
+                       "could change it through its copy)");
+        return false;
+      }
+    }
     if (name == names::kSelf) {
       const ClassContext *outer = lc.Outer;
       if (outer && outer->Struct) {
@@ -149,13 +169,8 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   for (ast::Param &p : node->getMutableParams()) {
     FixedArrayAllowed = true;
     SliceAllowed = p.Mode != ast::ParamMode::Value;
-    auto *pty = resolveType(p.ParamType, node->getLocation(),
-                            "parameter '" + p.getName() + "'");
-    if (pty == Ctx.getVoidTy()) {
-      error(node->getLocation(),
-            "parameter '" + p.getName() + "' cannot have type 'void'");
-      pty = nullptr;
-    }
+    auto *pty = resolveValueType(p.ParamType, node->getLocation(),
+                                 "parameter '" + p.getName() + "'");
     if (pty)
       p.ParamType = pty;
     else
@@ -212,7 +227,8 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   bool bodyOk;
   {
     ScopeGuard guard(*this);
-    LambdaStack.push_back({node, CurrentScope, savedClassCtx, savedMethodUse});
+    LambdaStack.push_back(
+        {node, CurrentScope, savedClassCtx, savedMethodUse, Borrows});
     for (size_t i = 0; i < node->getParams().size(); ++i) {
       const ast::Param &p = node->getParams()[i];
       CurrentScope->declare(p.getName(), paramTys[i]);

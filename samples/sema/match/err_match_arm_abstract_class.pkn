@@ -1,7 +1,8 @@
-// ERROR: a type arm tests for the object's exact class, and no object has
-// an abstract class (one with a pure virtual method it does not implement),
-// so an arm naming one can never run:
-//   unreachable arm: no object has the exact type of abstract class 'Shape'
+// ERROR: a type arm tests for the object's exact class, and an object is of
+// an abstract class (one with a pure virtual method it does not implement)
+// only while it is being constructed, so an arm cannot name one:
+//   a 'match' arm cannot name abstract class 'Shape': an object is of it only
+//   while it is being constructed
 class Shape {
   view fn area() -> float;
 }

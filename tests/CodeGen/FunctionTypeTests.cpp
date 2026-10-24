@@ -123,6 +123,37 @@ TEST(FunctionType, CapturesAreCopiedAndReleased) {
   g.expectNoLeaks("CapturesAreCopiedAndReleased");
 }
 
+// A captured name is read-only, not a `view`: read, it is a value like any
+// other, which the lambda returns, stores and passes on by value, whatever
+// it holds (a struct, a tuple, a tagged union holding a reference); the copy
+// holds the references the capture does.
+TEST(FunctionType, CapturedValuesAreReadAsValues) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    struct P { name: Str; }
+    enum Shape { Circle(r: int), Named(label: Str) }
+    fn constant<T>(x: T) -> () -> T { return fn() -> T { return x; }; }
+    fn show(p: P) -> Str { return p.name; }
+    fn describe(s: Shape) -> Str {
+      match s { n: Named { return n.label; } _ { return "circle"; } }
+    }
+    fn main() -> int {
+      p = P("ada" + "!");
+      t = (1, "x" + "y");
+      sh = Shape::Named("sq" + "uare");
+      getP = constant(p);
+      getT = constant(t);
+      getS = constant(sh);
+      f = fn() -> Str { local = p; pair = t; return show(local) + pair.1 + describe(sh); };
+      io::println(getP().name + " " + getT().1 + " " + describe(getS()) + " " + f());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "ada! xy square ada!xysquare\n");
+  g.expectNoLeaks("CapturedValuesAreReadAsValues");
+}
+
 TEST(FunctionType, ValuesHeldInPlaceCrossTheCall) {
   // Structs, tuples and fixed-size arrays as parameters (by value, `view`
   // and `inout`) and results of function values, and objects by value and

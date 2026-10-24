@@ -19,16 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     implementation`. An abstract class is otherwise an ordinary type (of variables,
     parameters, fields, arrays, optionals, type arguments), with fields, an `__init__` its
     subclasses call with `__super__(...)`, and `impl` methods.
-  - A call of a pure virtual method goes through the vtable, from an `impl` method too, and
-    a superclass's `__init__` that calls one reaches the subclass's implementation (the
-    constructor installs the object's vtable before any `__init__` runs).
+  - A call of a pure virtual method goes through the vtable, from an `impl` method too.
+    Once an abstract class's `__init__` has assigned its fields, the object is one of that
+    class until the subclass's `__init__` has assigned its own (see "Changed": an object is
+    one of the class whose `__init__` runs), so a call of a pure virtual method then reaches
+    the trap below: `call of the pure virtual method 'Shape.kind', which has no
+    implementation`.
   - Only a class body's method may leave out its body: `fn f();` elsewhere (but in a
     trait) is a syntax error (`function 'f' has no body: ...`, or in an `impl` block `'f'
     in an 'impl' block has no body: ...`, `'f' has no body: a 'static fn' needs one` and
     `'__init__' has no body: an initializer needs one`). A method its superclass
     implements cannot be made pure virtual again, and a `match` arm naming an abstract
-    class is rejected (`unreachable arm: no object has the exact type of abstract class
-    'Shape'`, docs/language/08-match.md); the arm unwrapping a `Shape?` stays fine.
+    class is rejected, as an object is of one only while it is being constructed (`a
+    'match' arm cannot name abstract class 'Shape': an object is of it only while it is
+    being constructed`, docs/language/08-match.md); the arm unwrapping a `Shape?` stays
+    fine.
   - Generic classes follow the same rules per instantiation (a superclass cannot be
     generic, so a generic class with a pure virtual method has no objects; a generic
     subclass can implement a non-generic class's), and modules export the pure
@@ -267,6 +272,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `weak` reference made elsewhere reads `None` as soon as, say, the function it was passed
   to returns, and an `io::File` passed to a function at its variable's last use is closed,
   what was written to it on disk, when that function returns.
+- While a class's `__init__` runs, the object is one of that class, as in C++, once every
+  field of the class's body has a value (docs/language/05-classes.md, "Every field before
+  `self`"): a superclass's `__init__` leaves the object one of the superclass, and the
+  subclass's `__init__` makes it one of its own class where it assigns the last of its own
+  fields (right after `__super__(...)` when it has none to assign).  So a virtual method a
+  superclass's `__init__` calls is the superclass's, and a pure virtual one its trap; and so
+  is one called, or a `match` made, through a reference to the object the superclass's
+  `__init__` gave away, until the subclass's fields have values.  Before, the constructor
+  made the object one of its final class before any `__init__` ran, as in Java: a field
+  has no default value, so an override a superclass's `__init__` reached could read a field
+  of the subclass before the subclass's `__init__` assigned it, and crash the program.
+  PIR has the instruction for it, `vtable.store %self, C` (opcode 52, docs/pir.md §5,
+  docs/design/pkm.md §5.5), and since an object's vtable pointer now changes while it is
+  constructed, the LLVM IR no longer marks a load of it `!invariant.load`.
+- An array or tuple literal holds its elements, so a `view` that shares what it holds (of an
+  object, a string or an array, a tuple or optional holding one, `self` in a `view fn`) can
+  no longer be one of them: `[v]`, `(v, 1)`, `[v; 3]` and `return [self.name, "x"];` in a
+  `view fn` are `'v' is a 'view' parameter; it cannot be stored, only read or passed to a
+  'view' parameter`, as storing `v` is (docs/language/03-functions.md).  A literal copied
+  the reference, through which the viewed object could be changed, stored or returned.  A
+  `view` of a value type is still copied into a literal.
+- A `match` arm's `n: inout T` binding is the matched value, narrowed to `T`, which goes back
+  to the subject after its last use in the arm (or on a `return`, `break` or `continue`
+  out of the arm before it), no longer a pointer into the subject's storage
+  (docs/language/08-match.md, "Borrowing the subject").  Until then the subject is still
+  used only through `n`, so a program sees the same changes; what another reference to the
+  subject's object writes there meanwhile no longer changes what `n` holds, and `n`'s value
+  replaces it at that last use.
 - `::result`'s `Result` is a generic tagged union, `enum Result<T, E> { Ok(value: T),
   Err(error: E) }` (docs/stdlib/result.md), no longer the struct `Result<T>` of an `error`
   and an optional `value`, and its errors are `::error`'s.  The standard library returns a
@@ -410,6 +443,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Str(s)` of a field handed on (`return Str(self.v);`, `f(Str(self.v))`) passed the field's
   own reference as if it were a new one, and the release that ended it freed the string the
   object still held (`heap corruption or invalid free`); it is retained, as `self.v` is.
+- An `__init__` could read a field before assigning it, or use `self` before every field was
+  assigned, and the program crashed (a `Str` or an object field read as a null reference) or
+  read `0`: `io::println(self.name); self.name = "x";`, a method called on `self`, `self`
+  passed to a function or captured by a lambda, in a class's or a struct's `__init__`.
+  Until every field of the class's own body is assigned on every path (an optional one starts
+  as `None`), and in a subclass after `__super__(...)`, `self` is now only a place to assign
+  fields and to read the ones already assigned (`self.f(1)` with `f` a field of function
+  type reads `f`; a write in a field's own storage, `self.a[0] = 5` with `a` a fixed-size
+  array or `self.p.x = 1` with `p` a struct, reads nothing and assigns nothing): `field
+  'name' is read before it is assigned`, `'self' is used before every field is assigned:
+  'name' is not assigned yet`, and in `__super__(...)`'s arguments `'self' is used before
+  every field is assigned: '__super__' has not run yet` (docs/language/05-classes.md,
+  "Every field before `self`").
+  What a static check cannot see, a superclass's `__init__` calling a method a subclass
+  overrides, or giving `self` away to code the subclass's `__init__` then calls, is safe by
+  the change to the object's class while an `__init__` runs (see "Changed").
+- `void`, the result type of a function that returns nothing, passed type checking as the
+  type of a value and then failed in the lowering (an assertion) or in PIR verification: a
+  variable (`x = g();`, `x: void = g();`, `v: view = g();`), a parameter of a function or a
+  method, a class's field, a type argument (`id(g())`, `Box<void>`) and `return g();` in a
+  function that returns nothing.  Each is an error now: `variable 'x' cannot have type 'void'
+  (the expression produces no value)`, `parameter 'v' cannot have type 'void'`, `field 'v'
+  in class 'C' cannot have type 'void'`, `type argument 1 of 'id' cannot be 'void': it has
+  no value (it is a function's result type only)` and `return value has type 'void' (the
+  expression produces no value): make it a statement, then 'return;'`
+  (docs/language/02-basics.md, "Builtin Types").  So are a `match` on one (`match subject
+  has type 'void' (the expression produces no value)`), which was accepted, and an array
+  of them (`array element 0 has type 'void' (the expression produces no value)`, and for
+  a declared `void[2]` or `void[]`, `variable 'y' has type 'void[2]': an array element
+  cannot have type 'void'`), which was "not supported yet", and a trait method's `void`
+  parameter, which no class could implement (`parameter 'v' of method 'm' of trait 'Tr'
+  cannot have type 'void'`).
+- A `match` arm's `n: inout T` on a tagged union's variant, an optional's value or a
+  subclass could be left pointing at what another reference to the subject's object put
+  there (`g.s = Sh::E;` with `g = h` in an arm of `match h.s`, a parameter that is `self`, or
+  a variable `h` passed with `h.s` to the function that matches it), and reading `n` then
+  crashed or read the object as the wrong class.  The binding is a value of its own now
+  (see "Changed").
+- An `inout` local or a `match` arm's `n: inout T` naming a field of a struct held in an
+  object (`x: inout = o.h.p.s;`, `match o.h.p.s { n: inout L { ... } }`, with `p` a struct)
+  did not keep that object (`o.h`) alive, as it does for a field of the object itself: when
+  another reference replaced it (`g.h = H(...)` with `g = o`), a write to `x`, or the
+  arm's binding going back, wrote freed memory.  The object is kept while the local or the
+  binding can be used.
+- A `match` with an `n: inout T` arm evaluated its subject twice, for the matched value and
+  again for the storage the binding goes back to, so a call on the way to it
+  (`b.slot().s`, with `slot` returning `inout`, or `mk().s`) ran twice, and when the
+  second call named other storage, the binding went back there and not where its value
+  came from.  The subject's storage is found once, when the `match` starts, and the value
+  is read there (docs/language/08-match.md, "Borrowing the subject").
+- A local borrow's liveness (docs/language/02-basics.md, "Local borrows"): a lambda or a call
+  through a function value (`fs[0](5)`) after a borrow's last use kept every borrow of the
+  block live, so a valid use of the borrowed variable was rejected; a call through a
+  function-valued borrow (`v(3)` with `v: view = f;`) did not count as a use of it, so `f`
+  could be reassigned while `v` was live; and a lambda could capture the borrowed variable
+  while the borrow was live, reading what an `inout` local borrows or changing what a
+  `view` local views.  A lambda and a call through a function value use what they name
+  only, a call through a borrow uses it, and a capture of a borrowed variable is an error:
+  `'k' is borrowed by 'inout' local 'x' until 'x' is last used; a function cannot capture
+  it`, `'h' is viewed by 'view' local 'v' until 'v' is last used; a function cannot capture
+  it (it could change it through its copy)`.
+- A struct or a tagged union holding itself in two places (`struct S { a: S; b: S; }`, a
+  field `(S, S)`, `enum Expr { Num(v: int), Add(l: Expr, r: Expr) }`) was reported twice and
+  then stopped the compiler (`the same diagnostic was reported twice`); it is reported once
+  per declaration, and an enum once per variant that holds it, also through an
+  instantiation of a generic struct (`struct S { a: Box<S>; b: Box<S>; }`).
+- `__init__` with a result type (`fn __init__() -> Str { ...; return ...; }`) was accepted
+  and every construction leaked what it returned; it is an error, `'__init__' cannot have a
+  result type: it sets up 'self' and returns nothing`.
+- A lambda's captured struct, tuple or tagged union holding a reference was treated as a
+  `view`: it could not be returned, stored in a local or passed to a by-value parameter (`'p'
+  is captured by copy by the function; it cannot be returned`), while a captured `Str` or
+  object could, so `fn constant<T>(x: T) -> () -> T { return fn() -> T { return x; }; }`
+  failed for such a `T`.  A captured name is read-only, not a `view`: read, it is a value
+  like any other (docs/language/14-function-types.md, "Captures").
+- A generic body's `match` arm naming a type parameter on a `T?` (`v: T` in `orElse<T>(x: T?,
+  d: T)`) could not be instantiated with an optional `T` (`match arm type 'int?' cannot be
+  optional`); it matches what `T` wraps, the present case, and binds it as a `T`, so the
+  template can compare it with another `T` or, through `v: inout T`, assign it one
+  (docs/language/13-generics.md).
+- A function whose only way out of a `while True` loop is `return` was rejected as not
+  always returning; such a loop with no `break` out of it never falls through
+  (docs/language/03-functions.md, "Return Values").
 - A local could take the name of a function of the module and hide it: `func = fn(x: int,
   y: float) => x + y;` next to `fn func<T>(x: T) => x + 2;` made `func(1, 2.5)` call the
   lambda.  A variable, a parameter (a method's or a lambda's too), a `for` loop variable, a

@@ -264,8 +264,9 @@ A subject typed as `Obj` accepts any class as an arm, since every class is a sub
 
 An arm naming an **abstract class** (one with a pure virtual method it does not implement,
 [Classes](05-classes.md#pure-virtual-methods)) is an error too: the arm tests for exactly
-that class, and no object is of an abstract class, so it could never run. Name the concrete
-subclasses instead, or call a virtual method:
+that class, and an object is of an abstract class only while it is being constructed
+([Every field before `self`](05-classes.md#every-field-before-self)), so the arm could
+only run in that moment. Name the concrete subclasses instead, or call a virtual method:
 
 ```pkn
 class Shape { view fn area() -> float; }
@@ -276,7 +277,7 @@ class Square : Shape {
 
 fn describe(o: Obj) -> Str {
   match o {
-    Shape  { return "a shape"; }    // error: unreachable arm
+    Shape  { return "a shape"; }    // error: names an abstract class
     Square { return "a square"; }
     _      { return "something else"; }
   }
@@ -290,7 +291,7 @@ fn main() -> int {
 Error:
 
 ```
-error: unreachable arm: no object has the exact type of abstract class 'Shape'
+error: a 'match' arm cannot name abstract class 'Shape': an object is of it only while it is being constructed
 ```
 
 ---
@@ -357,8 +358,11 @@ fn describe(a: Animal) -> Str {
 }
 ```
 
-With `inout`, the binding is the subject's storage, like an `inout` local of it: assigning
-to it writes the matched variable or field.
+With `inout`, the binding stands for the subject, narrowed to the arm's type, like an
+`inout` local of it: assigning to it, or to its fields, changes the matched variable or
+field. The binding holds the matched value (a copy, as a plain binding does), which goes
+back into the subject after the binding's last use in the arm, or when the arm ends before
+then, whichever way it ends: `return`, `break` or `continue`.
 
 ```pkn
 import ::io;
@@ -388,14 +392,28 @@ Output:
 - The subject must be a place an `inout` argument could be: a variable or a field, not an
   expression (`'inout' arm 'd' needs a variable or a field to match on`), `self`, a `let`
   local or a `view` (`'v' is a 'view' parameter; it cannot be bound by 'inout' arm 'd'`).
+- The subject's storage is found once, when the `match` starts, and the binding's value is
+  read there: a call on the way to it (`b.slot().a`, with `slot` returning `inout`, or
+  `mk().a`) runs once, and the binding goes back to that storage, wherever another call
+  would lead.
 - What is assigned to the binding has its type, `Dog`, which the subject's storage can
   hold: `d = Animal(1)` is an error.
 - While the binding is live, from the start of the arm to its last use there, the variable
   the subject starts from cannot be used except through it (`'a' is borrowed by 'inout'
   local 'd' until 'd' is last used`).
+- Another reference to the subject's object can still reach it: `g` after `g = h` in an arm
+  of `match h.s`, a parameter that is the same object as `self`, or a variable `h` passed
+  next to `h.s` to a function whose `inout` parameter is matched. What it writes there
+  before the binding's last use does not change the binding, which keeps the arm's type
+  (the variant, the present value, the subclass), and the binding's value replaces it at
+  that last use; what it writes after stays, as does an assignment of the subject's
+  variable then. An object the subject of the `match` is reached through (`o.h` in `match
+  o.h.p.s`, with `p` a struct) is kept until then: if another reference replaces it
+  (`g.h = H(...)` with `g = o`), the binding's value goes back to that object, which
+  nothing else reaches any more.
 - The `match` keeps the object it matched until it ends, so the arm can replace it.
-- A tuple or a struct inside an optional (`p: inout Point` on a `Point?`) is bound as the
-  value after the presence flag, so a write through the binding changes the subject. A
+- A tuple or a struct inside an optional (`p: inout Point` on a `Point?`) is the present
+  value, put back as one, so a write through the binding changes the subject. A
   primitive or an enum inside one (`n: inout int` on an `int?`, `k: inout Suit` on a
   `Suit?`) cannot be changed this way yet (`'inout' arm 'n' cannot change the 'int' inside
   an optional yet`).
@@ -649,7 +667,7 @@ match f.readln() {
 |-------|---------|
 | Subject is not matchable | The subject type supports neither type-, variant-, value- nor optional-mode matching: a tuple, an array, a struct or a function type |
 | Arm type not a subtype | A type arm names a class that is not the subject type or a subtype of it |
-| Arm naming an abstract class | A type arm names an abstract class (or, on a `T?`, a strict subclass of `T` that is abstract): `unreachable arm: no object has the exact type of abstract class 'Shape'` |
+| Arm naming an abstract class | A type arm names an abstract class (or, on a `T?`, a strict subclass of `T` that is abstract): `a 'match' arm cannot name abstract class 'Shape': an object is of it only while it is being constructed` |
 | Unknown arm type | A type arm names a class that is not declared anywhere |
 | Unknown enum variant | A variant arm names an identifier that is not a variant of the subject enum |
 | Binding a variant without fields | `x: Variant { … }` where the variant has no fields to bind |

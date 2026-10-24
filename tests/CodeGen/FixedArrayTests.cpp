@@ -243,7 +243,7 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
     class Kennel { first: Str; }
     impl Kennel {
       fn __init__(dogs: view Animal[2]) { self.first = dogs[0].speak(); }
-      view fn pair(extra: Str[2]) -> Str[2] { return [self.first, extra[1]]; }
+      fn pair(extra: Str[2]) -> Str[2] { return [self.first, extra[1]]; }
     }
     fn names() -> Str[2] { return ["ann", "bob"]; }
     fn shout(xs: Str[2]) -> Str[2] {
@@ -251,7 +251,7 @@ TEST(FixedArray, TemporariesAndScopesLetGoOfTheirElements) {
       return xs;
     }
     fn rename(xs: inout Str[2]) { xs[0] = "q"; }
-    fn find(xs: view Str[5], s: Str) -> int {
+    fn find(xs: Str[5], s: Str) -> int {
       i = 0;
       while i < xs.len() {
         pair: Str[2] = [xs[i], s];

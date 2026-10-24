@@ -801,7 +801,8 @@ InstrRec := u8 opcode ; uleb result id (0 = none) ; [type result type ; str resu
 | 49 | `weak.release` (#99) | — | 1 |
 | 50 | `fn.addr` (docs/design/function-types.md) | `str` callee | 0 |
 | 51 | `icall` | `sig` | n (the callee first) |
-| 52–255 | reserved | | |
+| 52 | `vtable.store` (docs/pir.md §5) | `str` class | 1 |
+| 53–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults
 of `PIR.h`, as the text parser produces, so round-trip equality holds. An

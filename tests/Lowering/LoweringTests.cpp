@@ -994,6 +994,57 @@ TEST(Lowering, PureVirtualSlotsAreTrapsAndAbstractClassesHaveNoConstructor) {
       << t;
 }
 
+// While a class's `__init__` runs the object is one of that class from the
+// point every field of the class's body has a value: `vtable.store` follows
+// the assignment of the last field on each path (both branches' here, and
+// the one after them), or the `__super__(...)` call when no field needs
+// assigning (an optional one starts as None).
+TEST(Lowering, InitMakesTheObjectOneOfItsClassOnceItsFieldsAreAssigned) {
+  auto l = lower(R"(
+    class A { a: int; }
+    impl A { fn __init__() { self.a = 1; } }
+    class B : A { b: int; c: int; }
+    impl B {
+      fn __init__(f: bool) {
+        __super__();
+        if f { self.b = 1; self.c = 2; } else { self.c = 3; }
+        self.b = 4;
+      }
+    }
+    class C : B { d: C?; }
+    fn main() -> int { c = C(True, None); return c.b; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string &t = l.Text;
+  std::string a = function(t, "A.__init__");
+  EXPECT_NE(a.find("  field.store %self.2, A.a, 1\n"
+                   "  vtable.store %self.2, A\n"),
+            std::string::npos)
+      << a;
+  std::string b = function(t, "B.__init__");
+  EXPECT_EQ(count(b, "vtable.store"), 2u) << b;
+  EXPECT_NE(b.find("    field.store %self.6, B.c, 2\n"
+                   "    vtable.store %self.6, B\n"
+                   "  } else {\n"),
+            std::string::npos)
+      << b;
+  EXPECT_NE(b.find("  field.store %self.8, B.b, 4\n"
+                   "  vtable.store %self.8, B\n"),
+            std::string::npos)
+      << b;
+  EXPECT_LT(b.find("call @A.__init__("), b.find("vtable.store")) << b;
+  std::string c = function(t, "C.__init__");
+  EXPECT_EQ(count(c, "vtable.store"), 1u) << c;
+  EXPECT_NE(c.find("  call @B.__init__(%self.4, %arg1.5)\n"
+                   "  %self.6 = load %self.0\n"
+                   "  vtable.store %self.6, C\n"),
+            std::string::npos)
+      << c;
+  // The constructor installs the class's vtable with `new`, before any
+  // `__init__` runs, and stores none itself.
+  EXPECT_EQ(count(function(t, "C"), "vtable.store"), 0u) << t;
+}
+
 // A subclass that declares an inherited pure virtual method pure again has
 // a trap of its own, which names the method by the class that declares it
 // pure first, as Sema's "cannot instantiate" error does.

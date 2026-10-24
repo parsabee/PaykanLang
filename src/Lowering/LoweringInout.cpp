@@ -18,9 +18,22 @@
 //
 // An `inout` local (`x: inout = k;`) is a `ptr` local holding the address of
 // what it names, the same way; a hidden owned local keeps a field's object
-// alive for as long as the local can be used.  A `match` arm's `n: inout T`
-// is one for the subject (docs/language/08-match.md, "Borrowing
-// the subject").
+// alive for as long as the local can be used.
+//
+// A `match` arm's `n: inout T` (docs/language/08-match.md, "Borrowing the
+// subject") narrows the subject to T: a variant of a tagged union, the
+// value of an optional, a subclass.  Another reference to the subject's
+// object (`g = h`, a parameter that is `self`) can change what it holds
+// while the arm runs, which no check of names sees, so n is never the
+// subject's storage narrowed: it is a variable of its own, a copy of the
+// matched value as a plain binding is, assigned back to the subject's
+// storage, as `subject = n` would, after n's last use in the arm, or on a
+// way out of the arm before it (bindInoutArm, emitArmBody).  Until then the
+// subject cannot be used but through n (Sema), so a program sees the
+// subject change as n does.  The storage is found once, when the match
+// starts, and the matched value is read there (emitMatchPlace): a call on
+// the way to it (`b.slot().s`, with an `inout` result) runs once, and n
+// goes back where its value came from.
 //
 // For a reference type the storage holds a box, and the `inout` is a mutable
 // reference to it, not a share of it: it retains nothing and releases
@@ -38,6 +51,7 @@
 
 #include "LoweringInternal.h"
 
+#include <algorithm>
 #include <cassert>
 #include <functional>
 
@@ -320,13 +334,19 @@ Val ModuleLowering::emitInoutArg(ast::Expr *arg, std::vector<Val> &keep,
     return emitCallAddress(arg);
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(arg)) {
     ast::Expr *recvExpr = ma->getReceiver();
-    // A struct's field: its address in the struct's bytes, which a
-    // variable's, a field's or an element's are (Sema takes no temporary's);
-    // like a value held in memory passed by address, it outlives the call.
+    // A struct's field: its address in the struct's bytes, which are a
+    // place of their own, a variable's or a field's (Sema takes no
+    // temporary's and no element's).  An object holding them is kept as for
+    // a field of its own: an alias that replaces it (`g.h = ...` while
+    // `o.h.p.s` is bound) cannot free them.
     if (auto *st = getExprStructType(recvExpr)) {
       int idx = st->fieldIndex(ma->getFieldName());
       assert(idx >= 0 && "Sema should have verified the field exists");
-      return emitTupleElementAddress(recvExpr, static_cast<size_t>(idx));
+      Val base = emitInoutArg(recvExpr, keep, keepObject);
+      if (!base)
+        return Val();
+      int64_t off = tupleElementOffset(st, static_cast<size_t>(idx));
+      return off == 0 ? base : B.ptrAdd(base, Val::i64(off), "elem.addr");
     }
     ast::ClassType *ct = getExprClassType(recvExpr);
     if (!ct) {
@@ -372,21 +392,12 @@ Val ModuleLowering::emitInoutLocal(ast::VarDecl *node) {
   return Val();
 }
 
-void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
-                                      ast::Type *astTy, int64_t offset) {
-  std::vector<Val> keep;
-  const size_t mark = MemTemps.size();
-  Val addr = emitInoutArg(place, keep, /*keepObject=*/true);
-  if (!addr)
-    return;
-  // Part of the place: the value inside an optional held in memory.
-  if (offset)
-    addr = B.ptrAdd(addr, Val::i64(offset), name + ".addr");
-  // A field's object stays alive as long as the borrow can be used: a hidden
-  // owned local holds it, released with the scope.  So do the objects of a
-  // struct's field and of an `inout` result's storage (noteBorrowedReads,
-  // takeInoutResult), which come in MemTemps; a copy of a value held in
-  // memory there (holdObjectsIn) moves into a hidden local of its own.
+void ModuleLowering::holdObjects(const std::string &name, std::vector<Val> keep,
+                                 size_t mark) {
+  // The objects of a struct's field and of an `inout` result's storage
+  // (noteBorrowedReads, takeInoutResult) come in MemTemps past @p mark and
+  // are held the same way; a copy of a value held in memory there
+  // (holdObjectsIn) moves into a hidden local of its own.
   for (size_t i = mark; i < MemTemps.size(); ++i) {
     const auto &[v, ty] = MemTemps[i];
     if (!ty) {
@@ -404,6 +415,16 @@ void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
     B.store(hold, box);
     CurrentScope->declare(name + ".obj", hold, ASTCtx.getObjTy());
   }
+}
+
+void ModuleLowering::emitInoutBinding(const std::string &name, ast::Expr *place,
+                                      ast::Type *astTy) {
+  std::vector<Val> keep;
+  const size_t mark = MemTemps.size();
+  Val addr = emitInoutArg(place, keep, /*keepObject=*/true);
+  if (!addr)
+    return;
+  holdObjects(name, std::move(keep), mark);
   pir::LocalId local = B.addLocal(name, Type::Ptr);
   B.store(local, addr);
   // A value held in memory is reached through the address
@@ -525,6 +546,105 @@ bool ModuleLowering::checkImportedSlot(ast::ClassType *ct, uint32_t slot,
                       ct->getName() +
                       "' does not match the class's definition in its module");
   return false;
+}
+
+// static
+bool ModuleLowering::hasInoutArm(const ast::MatchStmt *node) {
+  return std::any_of(node->getArms().begin(), node->getArms().end(),
+                     [](const ast::MatchArm *arm) {
+                       return arm->hasBinding() &&
+                              arm->getMode() == ast::ParamMode::Inout;
+                     });
+}
+
+std::optional<pir::LocalId> ModuleLowering::emitMatchPlace(ast::Expr *subject) {
+  std::vector<Val> keep;
+  const size_t mark = MemTemps.size();
+  Val addr = emitInoutArg(subject, keep, /*keepObject=*/true);
+  if (!addr)
+    return std::nullopt;
+  // Released when the match ends, after the write-back, which needs the
+  // field's object.
+  holdObjects("match.subj", std::move(keep), mark);
+  pir::LocalId place = B.addLocal("match.place", Type::Ptr);
+  B.store(place, addr);
+  return place;
+}
+
+bool ModuleLowering::emitMemMatchSubject(ast::MatchStmt *node, const Val &dst,
+                                         std::optional<pir::LocalId> &place) {
+  if (!hasInoutArm(node)) {
+    emitMemInit(node->getSubject(), dst);
+    return true;
+  }
+  place = emitMatchPlace(node->getSubject());
+  if (!place)
+    return false;
+  ast::Type *ty = node->getSubject()->getResolvedType();
+  B.memCopy(dst, B.load(*place, "subj.addr"), Val::i64(memLayout(ty).Size));
+  emitMemRetain(dst, ty);
+  return true;
+}
+
+void ModuleLowering::bindInoutArm(const ast::MatchArm *arm,
+                                  pir::LocalId binding, pir::LocalId place,
+                                  ast::Type *placeTy, ast::Type *bindTy,
+                                  int64_t offset, const Val &header) {
+  CurrentScope->WriteBacks.push_back(
+      {arm, place, binding, placeTy, bindTy, offset, header});
+}
+
+void ModuleLowering::emitArmBody(const ast::MatchArm *arm) {
+  const auto &stmts = arm->getBody()->getStatements();
+  for (size_t i = 0; i <= stmts.size(); ++i) {
+    // n's last use is done: the subject is the arm's to use again (Sema),
+    // so n goes back now, not when the arm ends (a never-used n holds what
+    // the subject does).
+    std::vector<Scope::WriteBack> &wbs = CurrentScope->WriteBacks;
+    if (i == arm->bindingUses() && !wbs.empty() && wbs.back().Arm == arm) {
+      if (i > 0 && !B.isTerminated())
+        emitWriteBack(wbs.back());
+      wbs.pop_back();
+    }
+    if (i < stmts.size())
+      visit(stmts[i]);
+  }
+}
+
+void ModuleLowering::emitWriteBack(const Scope::WriteBack &wb) {
+  Val place = B.load(wb.Place, "subj.addr");
+  // An optional primitive or enum, a value, which a binding of a `T` that is
+  // that optional holds whole (ast::MatchArm::getBindType).
+  if (ast::isValueOptional(wb.PlaceTy)) {
+    B.ptrStore(place, B.load(wb.Binding, "arm.value"));
+    return;
+  }
+  if (!ast::isMemType(wb.PlaceTy)) {
+    // A reference: the binding's object replaces the one there (taken
+    // before the old one goes, which may be the same).
+    Val box = B.load(wb.Binding, "arm.box");
+    emitRetain(box);
+    emitRelease(B.ptrLoad(place, Type::Box, "old.box"));
+    B.ptrStore(place, box);
+    return;
+  }
+  // A value held in memory: the whole value is built around the binding,
+  // as a variant or an optional is made, then assigned like any value.
+  MemLayout l = memLayout(wb.PlaceTy);
+  Val part = B.localAddr(wb.Binding, "arm.addr");
+  Val value = part;
+  if (wb.Header) {
+    pir::LocalId whole = B.addMemLocal("arm.value", l.Size, l.Align);
+    value = B.localAddr(whole, "arm.value.addr");
+    B.memZero(value, Val::i64(l.Size));
+    B.ptrStore(value, wb.Header);
+    Val at = B.ptrAdd(value, Val::i64(wb.Offset), "arm.part.addr");
+    B.memCopy(at, part, Val::i64(memLayout(wb.BindTy).Size));
+    part = at;
+  }
+  emitMemRetain(part, wb.BindTy);
+  emitMemRelease(place, wb.PlaceTy);
+  B.memCopy(place, value, Val::i64(l.Size));
 }
 
 } // namespace paykan::lowering

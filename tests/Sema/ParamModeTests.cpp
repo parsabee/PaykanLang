@@ -644,48 +644,68 @@ fn main() -> int {
                     "returned"),
         ":15:10: error: 'v' is a 'view' local; " + kPass + "report' is not one",
         ":16:7: error: " + kStore, ":17:16: error: " + kStore,
+        ":18:9: error: " + kStore, ":19:8: error: " + kStore,
         ":21:11: error: " + kStore,
         ":22:14: error: 'v' is a 'view' local; " + kPass + "Holder' is not one",
         ":23:9: error: " + kStore, ":25:7: error: " + kStore,
         ":29:11: error: 's' is a 'view' local; " + kPass + "Str' is not one"})
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
-  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
-  // A literal holds a copy of each element: `[v]` and `(v, 1)` are values
-  // of their own; an `int` read through a `view` (`k`, `v.n`) is passed to
-  // a by-value parameter as a copy.
+  EXPECT_EQ(r.ErrorCount, 11u) << r.Diagnostics;
+  // An `int` read through a `view` (`k`, `v.n`) is passed to a by-value
+  // parameter as a copy, and a literal holds one of it.
   for (const char *line :
-       {":18:", ":19:", ":26:", ":27:", ":30:", ":31:", ":32:", ":33:", ":34:"})
+       {":26:", ":27:", ":30:", ":31:", ":32:", ":33:", ":34:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
 }
 
-// An array or tuple literal is a new value: any `view` can be one of its
-// elements, wherever the literal goes.
-TEST(LocalBorrow, LiteralsTakeViewElements) {
+// An array or tuple literal holds its elements: a `view` of a value type is
+// copied into it, one that shares what it holds cannot be an element, at any
+// depth (each literal reports its own), as it cannot be stored.
+TEST(LocalBorrow, LiteralsTakeNoSharingViewElements) {
+  auto ok = semaCheck(R"(class Named { name: Str; n: int; }
+impl Named {
+  view fn pair() -> (int, int) { return (self.n, self.name.len()); }
+}
+fn arr(n: view int) -> int[2] { return [n, 1]; }
+fn tup(s: view Str) -> (int, Str) { return (s.len(), Str(s.len())); }
+fn main() -> int {
+  k: view = 3;
+  return arr(k)[0] + tup("s").0 + [k; 2][1] + (k, (k, 1)).1.0;
+})");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
   auto r = semaCheck(R"(class Node { n: int; }
 class Named { name: Str; n: int; }
 impl Named {
   view fn pair() -> (Str, int) { return (self.name, self.n); }
   view fn names() -> Str[2] { return [self.name, "x"]; }
+  view fn me() -> Named[1] { return [self]; }
 }
 fn arr(s: view Str) -> Str[2] { return [s, "x"]; }
-fn tup(s: view Str) -> (Str, int) { return (s, 1); }
 fn rep(s: view Str) -> Str[3] { return [s; 3]; }
 fn nest(s: view Str) -> ((Str, int), (Str, Str)) { return ((s, 1), (s, "y")); }
 fn main() -> int {
   v: view = Node(0);
-  s: view = "s";
-  xs = [v, Node(1)];
   ys: Node[1] = [v];
-  t = (v, s);
-  u: (Node, (Str, int)) = (v, (s, 2));
-  w = [(s, v)];
-  return arr(s).len() + tup(s).1 + rep(s).len() + nest(s).0.1 + xs.len() +
-         ys.len() + t.1.len() + u.1.1 + w.len();
+  w = [(1, v)];
+  return 0;
 })");
-  EXPECT_TRUE(r.Ok) << r.Diagnostics;
-  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+  const std::string kStore =
+      "; it cannot be stored, only read or passed to a 'view' parameter";
+  for (const std::string &diag :
+       {":4:42: error: 'self' is read-only in 'view fn pair'" + kStore,
+        ":5:39: error: 'self' is read-only in 'view fn names'" + kStore,
+        ":6:38: error: 'self' is read-only in 'view fn me'" + kStore,
+        ":8:41: error: 's' is a 'view' parameter" + kStore,
+        ":9:41: error: 's' is a 'view' parameter" + kStore,
+        ":10:61: error: 's' is a 'view' parameter" + kStore,
+        ":10:69: error: 's' is a 'view' parameter" + kStore,
+        ":13:18: error: 'v' is a 'view' local" + kStore,
+        ":14:12: error: 'v' is a 'view' local" + kStore})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
 }
 
 // A `view` parameter stays one too: it can only be passed on to a `view`
@@ -843,6 +863,89 @@ fn main() -> int {
   for (const char *line : {":17:", ":25:", ":28:", ":31:", ":41:", ":43:"})
     EXPECT_EQ(r.Diagnostics.find(line), std::string::npos) << line << "\n"
                                                            << r.Diagnostics;
+}
+
+// A statement uses the names it holds, no others: a lambda that does not
+// capture a borrow and a call through a function value keep no unrelated
+// borrow live, and a call through a function-valued borrow uses it.
+TEST(LocalBorrow, LambdasAndFunctionValueCallsUseWhatTheyName) {
+  auto ok = semaCheck(R"(import ::io;
+class Counter { n: int; }
+impl Counter {
+  fn __init__() { self.n = 0; }
+  fn tick() { self.n = self.n + 1; }
+}
+fn twice(n: int) -> int { return n * 2; }
+fn main() -> int {
+  k = 1;
+  x: inout = k;
+  x = 5;
+  io::println(Str(k));
+  double = fn(n: int) -> int { return n * 2; };
+  fs = [twice];
+  y: inout = k;
+  y = 6;
+  k = 7;
+  io::println(Str(double(k)) + Str(fs[0](k)));
+  c = Counter();
+  v: view = c;
+  io::println(Str(v.n));
+  c.tick();
+  g = fn() -> int { return 1; };
+  return g();
+})");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  auto r = semaCheck(R"(import ::io;
+fn sq(x: int) -> int => x * x;
+fn neg(x: int) -> int => -x;
+fn main() -> int {
+  f = sq;
+  v: view = f;
+  f = neg;
+  io::println(Str(v(3)));
+  g = sq;
+  s: inout = g;
+  g = neg;
+  s(3);
+  return 0;
+})");
+  expectErrors(r, {":7:3: error: 'f' is viewed by 'view' local 'v' until 'v' "
+                   "is last used; it cannot be assigned",
+                   ":11:3: error: 'g' is borrowed by 'inout' local 's' until "
+                   "'s' is last used"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+}
+
+// A lambda that captures a borrowed variable uses it, and copies the
+// reference it holds: an error while the borrow is live, as `y = k` and
+// `g = h` are.  A value type's copy is only read; after the borrow's last
+// use the capture is fine.
+TEST(LocalBorrow, CapturingABorrowedVariable) {
+  auto r = semaCheck(R"(import ::io;
+class Node { name: Str; }
+class Holder { n: Node; }
+fn main() -> int {
+  k = 1;
+  x: inout = k;
+  f = fn() -> int { return k; };
+  x = 5;
+  h = Holder(Node("a"));
+  v: view = h.n;
+  g = fn() { h.n = Node("z"); };
+  io::println(v.name);
+  m = 2;
+  w: view = m;
+  r = fn() -> int { return m; };
+  io::println(Str(w + r()));
+  late = fn() -> int { return k; };
+  return f() + late();
+})");
+  expectErrors(r, {":7:28: error: 'k' is borrowed by 'inout' local 'x' until "
+                   "'x' is last used; a function cannot capture it",
+                   ":11:14: error: 'h' is viewed by 'view' local 'v' until 'v' "
+                   "is last used; a function cannot capture it (it could "
+                   "change it through its copy)"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
 // A `match` arm's `n: view T` is a `view` local of the subject, whatever the

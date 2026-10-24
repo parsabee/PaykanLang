@@ -157,6 +157,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   struct ClassContext;
   struct FunctionSig;
   struct MethodUse;
+  struct Borrow;
   /// A lambda whose body is being checked: its node, the scope its
   /// parameters live in (the names used inside that resolve outside it are
   /// captured, and declared there as Captured copies), and the method
@@ -168,6 +169,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// The enclosing method's use of `self`: capturing `self` counts as
     /// changing it (the closure may, later).
     MethodUse *OuterUse;
+    /// The local borrows live where the lambda is written: capturing a
+    /// variable uses it, and copies a reference it holds.
+    std::vector<Borrow> OuterBorrows;
   };
   std::vector<LambdaContext> LambdaStack;
   /// Check a lambda: its signature, its body as a function's, and the
@@ -414,6 +418,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // emits an error on failure.
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
                          const std::string &context);
+  // resolveType for what holds a value (a variable, a parameter, a field):
+  // `void` has none, so it is reported (`<context> cannot have type
+  // 'void'`) and nullptr returned.
+  ast::Type *resolveValueType(ast::Type *ty, ast::SourceLocation loc,
+                              const std::string &context);
+  // False (after reporting it) when @p ty, the type of the value a variable
+  // @p name is declared with, is `void`: the expression produces none.
+  bool checkNotVoidValue(ast::Type *ty, const std::string &name,
+                         ast::SourceLocation loc);
 
   // -- Fixed-size arrays (docs/language/09-arrays.md)
   //
@@ -450,6 +463,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// @p where; returns false.
   bool errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
                            const std::string &where);
+  /// False (after reporting it) when a type argument of @p name can hold no
+  /// value of its own: a fixed-size array (not yet) or `void` (none).
+  bool checkTypeArgs(const std::string &name,
+                     const std::vector<ast::Type *> &args,
+                     ast::SourceLocation loc);
   /// False (after reporting it) for a `view` or `inout` result (@p mode) of
   /// a fixed-size array @p retTy, which is not supported yet.
   bool checkFixedResult(ast::Type *retTy, ast::ParamMode mode,
@@ -1002,8 +1020,11 @@ private:
   /// 'view' parameter", "'self' is read-only in 'view fn get'"; "" when it
   /// can.
   /// With @p borrows, a variable viewed by a live `view` local cannot
-  /// change either.
-  std::string frozenPlace(const ast::Expr *e, bool borrows = true);
+  /// change either.  With @p copy, only whether a copy of @p e may share
+  /// what can change through it is asked (viewOf): a lambda's captured
+  /// copy is its own, read-only but not a `view`.
+  std::string frozenPlace(const ast::Expr *e, bool borrows = true,
+                          bool copy = false);
   /// Error at @p loc (and false) when the place @p e cannot be changed;
   /// @p what ends the diagnostic ("cannot assign to its field 'n'").
   bool checkChangeable(const ast::Expr *e, const std::string &what,
@@ -1158,8 +1179,9 @@ private:
   void startBorrow(const ast::Expr *place, const std::string &by, bool inout,
                    const std::vector<ast::Stmt *> *block, size_t end);
   /// Check the body of @p arm, a match over @p subject, its binding
-  /// borrowing the subject when it is `n: view T`.
-  bool visitArmBody(const ast::MatchArm *arm, const ast::Expr *subject);
+  /// borrowing the subject when it is `n: view T` or `n: inout T` until its
+  /// last use (MatchArm::bindingUses).
+  bool visitArmBody(ast::MatchArm *arm, const ast::Expr *subject);
   /// The live borrow (`inout` or `view`) of the variable @p name, or null.
   const Borrow *activeBorrow(const std::string &name, bool inout) const;
   /// Error at @p loc (and false) when variable @p name is named by a live

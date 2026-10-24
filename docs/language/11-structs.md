@@ -176,9 +176,12 @@ Point(x: 1, y: 2)
 Line(a: Point(x: 1, y: 2), b: Point(x: 3, y: 4), label: line)
 ```
 
-`__init__` cannot call `__super__` (`'__super__' called in struct 'A', which has no
-superclass (a struct does not inherit)`), cannot be a `view fn`, and cannot be called by
-name.
+Until every field is assigned, `self` is only the place they are assigned in, as in a
+class's `__init__` ([Every field before `self`](05-classes.md#every-field-before-self)):
+`field 'y' is read before it is assigned`, `'self' is used before every field is
+assigned: 'y' is not assigned yet`. `__init__` cannot call `__super__` (`'__super__'
+called in struct 'A', which has no superclass (a struct does not inherit)`), cannot be a
+`view fn`, has no result type, and cannot be called by name.
 
 ---
 
@@ -659,6 +662,7 @@ Point(x: 4, y: 2) 6 True
 | `match` | `match a { ... }` |
 | Wrong constructor arguments | `A(1)` for two fields; `A("s", 1)` |
 | `__init__` leaves a field unassigned | `fn __init__(x: int) { self.x = x; }` with a field `y` |
+| `__init__` reads a field, or uses `self`, before every field is assigned | `self.x = self.y;` before `self.y = ...`: `field 'y' is read before it is assigned` |
 | `__super__` | in a struct's `__init__` |
 | Assigning `self` | `self = A(1)` in a method |
 | Duplicate method | two `fn m()` across `impl` blocks; `fn toString()` |

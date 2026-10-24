@@ -308,9 +308,11 @@ fn @main() -> i64 {
 }
 
 // The optimisation hints: string literals are mergeable (unnamed_addr,
-// align 1) and vtable-pointer loads are invariant, so LLVM can hoist and
-// merge them.
-TEST(PIRLLVM, ConstantsAreMergeableAndVTableLoadsInvariant) {
+// align 1).  A vtable-pointer load is not invariant: the pointer changes
+// while the object is constructed (each `__init__` makes it one of its own
+// class, `vtable.store`), so LLVM must not merge a load before such a store
+// with one after it.
+TEST(PIRLLVM, ConstantsAreMergeableAndVTableLoadsFollowStores) {
   std::string err;
   std::string ir = translatePIR(R"(module "t"
 cstr @.s = "hi" len 2
@@ -340,6 +342,7 @@ fn @main() -> i64 {
   %t = ptr.load char, @.t
   %o = new C
   %vt = vtable.load %o
+  vtable.store %o, C
   %r = vcall %o : C [3] ()
   free %o
   ret %r
@@ -358,14 +361,11 @@ fn @main() -> i64 {
     EXPECT_NE(defs[0].find(", align 1"), std::string::npos) << defs[0];
   }
 
-  // Both vtable-pointer loads (vtable.load and the one vcall does) carry
-  // !invariant.load; the slot load does not (it is a load from the vtable,
-  // not of the object's header).
-  auto vtLoads = linesWith(ir, "!invariant.load !");
-  ASSERT_EQ(vtLoads.size(), 2u) << ir;
-  for (const auto &l : vtLoads)
-    EXPECT_NE(l.find("= load ptr, ptr "), std::string::npos) << l;
-  EXPECT_FALSE(linesWith(ir, "!{}").empty()) << ir;
+  // No load is invariant, and the vtable.store is a store of the class's
+  // vtable into the object's header, between the two vtable-pointer loads
+  // (vtable.load's and the one vcall does).
+  EXPECT_TRUE(linesWith(ir, "!invariant.load").empty()) << ir;
+  EXPECT_EQ(linesWith(ir, "store ptr @pkvt_").size(), 2u) << ir; // new's too
 }
 
 // An inline optional is an { i1, payload } value: passed and returned as

@@ -439,6 +439,123 @@ TEST(GenericsTypes, OptionalFieldsAndUnwrapInTemplates) {
   g.expectNoLeaks("OptionalFieldsAndUnwrapInTemplates");
 }
 
+// When T is optional, a template's `T?` is T, and its arm `v: T` on it is
+// the arm on what T wraps: it matches a present value and binds it as a T,
+// so a template that unwraps a `T?` instantiates with any T.
+TEST(GenericsTypes, UnwrapArmOfAnOptionalTypeArgument) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Node { v: Str; }
+    impl Node { fn __init__(x: Str) { self.v = x; } }
+    class Slot<T> {
+      v: T?;
+      view fn describe() -> Str {
+        match self.v { x: T { return "has"; } None { return "empty"; } }
+      }
+    }
+    impl Slot<T> {
+      fn __init__(v: T?) { self.v = v; }
+    }
+    fn orElse<T>(x: T?, d: T) -> T {
+      match x {
+        v: T { return v; }
+        None { return d; }
+      }
+    }
+    fn main() -> int {
+      io::println(Slot<Str?>(None).describe() + " " +
+                  Slot<Str?>("a" + "b").describe());
+      y: int? = 5;
+      io::println(orElse<int?>(y, None).toString() + " " +
+                  orElse<int?>(None, 7).toString());
+      n: Node? = Node("n" + "1");
+      match orElse<Node?>(n, None) { m: Node { io::print(m.v); } None { } }
+      io::println(" " + orElse<Node?>(None, None).toString());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "empty has\n5 7\nn1 None\n");
+  g.expectNoLeaks("UnwrapArmOfAnOptionalTypeArgument");
+}
+
+// The binding of an arm naming an optional T on a `T?` is a T, as the
+// template's other values of type T are: it is compared with a T and put in
+// a `(T, T)`, and through `x: inout T` (directly, or passed on to an `inout
+// T` parameter) it is assigned a T, None included, that goes back to the
+// subject.  So for an optional of a class, of a primitive, of a struct and
+// of a tagged union, next to the same templates with a T that is not one.
+TEST(GenericsTypes, ArmOfAnOptionalTypeArgumentBindsAT) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    struct P { s: Str; n: int; }
+    enum Sh { E, L(s: Str) }
+    class Slot<T> {
+      v: T?;
+      fn poke(f: (T) -> T) { match self.v { x: inout T { x = f(x); } None { } } }
+      fn pass(f: (T) -> T) { match self.v { x: inout T { bump(x, f); } None { } } }
+    }
+    fn holds<T>(x: T?, d: T) -> bool {
+      match x { v: T { return v == d; } None { return False; } }
+    }
+    fn pairWith<T>(x: T?, d: T) -> (T, T)? {
+      match x { v: T { return (v, d); } None { return None; } }
+    }
+    fn bump<T>(p: inout T, f: (T) -> T) { p = f(p); }
+    fn twice(s: Str) -> Str { return s + s; }
+    fn twiceO(s: Str?) -> Str? { match s { t: Str { return t + t; } None { return "-"; } } }
+    fn gone(s: Str?) -> Str? { return None; }
+    fn incO(n: int?) -> int? { match n { k: int { return k + 1; } None { return 0; } } }
+    fn noInt(n: int?) -> int? { return None; }
+    fn grow(p: P) -> P { return P(p.s + "+", p.n + 1); }
+    fn growO(p: P?) -> P? { match p { q: P { return P(q.s + "?", q.n * 10); } None { return None; } } }
+    fn shO(s: Sh?) -> Sh? {
+      match s { t: Sh { match t { l: L { return Sh::L(l.s + "!"); } _ { return None; } } } None { return None; } }
+    }
+    fn main() -> int {
+      a = Slot<Str>("a" + "");
+      a.poke(twice);
+      a.pass(twice);
+      b = Slot<Str?>("b" + "");
+      b.poke(twiceO);
+      b.pass(twiceO);
+      io::print(a.v.toString() + " " + b.v.toString() + " ");
+      b.poke(gone);
+      d = Slot<int?>(5);
+      d.poke(incO);
+      d.pass(incO);
+      io::println(b.v.toString() + " " + d.v.toString());
+      d.poke(noInt);
+      e = Slot<P>(P("e" + "", 1));
+      e.poke(grow);
+      f = Slot<P?>(P("f" + "", 2));
+      f.poke(growO);
+      f.pass(growO);
+      h = Slot<Sh?>(Sh::L("h" + ""));
+      h.poke(shO);
+      h.pass(shO);
+      io::println(d.v.toString() + " " + e.v.toString() + " " + f.v.toString() + " " +
+                  h.v.toString());
+      s: Str? = "s" + "";
+      n: int? = 1;
+      q: P? = P("q" + "", 3);
+      io::println(Str(holds<Str?>(s, "s")) + " " + Str(holds<Str?>(s, None)) + " " +
+                  Str(holds<int>(n, 1)) + " " + Str(holds<int?>(n, 1)) + " " +
+                  Str(holds<int?>(n, None)) + " " + Str(holds<P?>(q, P("q", 3))));
+      io::println(pairWith<Str?>(s, None).toString() + " " + pairWith<int?>(n, 8).toString() +
+                  " " + pairWith<P?>(q, None).toString() + " " +
+                  pairWith<int>(n, 2).toString());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "aaaa bbbb None 7\n"
+                      "None P(s: e+, n: 2) P(s: f??, n: 200) L(s: h!!)\n"
+                      "True False True True False True\n"
+                      "(s, None) (1, 8) (P(s: q, n: 3), None) (1, 2)\n");
+  g.expectNoLeaks("ArmOfAnOptionalTypeArgumentBindsAT");
+}
+
 TEST(GenericsTypes, ExportedInstantiationNamesWithCommasAndTuples) {
   LeakGuard g;
   auto dir = paykan::test::tempDir() / "pkn_cg_generics_names";

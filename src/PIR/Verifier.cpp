@@ -729,6 +729,14 @@ private:
         expect(in.Args[0], Type::Obj, "operand of vtable.load");
         result(in, Type::Ptr);
         break;
+      case Opcode::VTableStore:
+        if (!arity(in, 1))
+          break;
+        expect(in.Args[0], Type::Obj, "operand of vtable.store");
+        if (!MV.Index.Classes.count(in.ClassName))
+          error("vtable.store of unknown class '" + in.ClassName + "'");
+        result(in, Type::Void);
+        break;
       case Opcode::VTableAddr:
         if (!in.ClassName.empty()) {
           arity(in, 0);

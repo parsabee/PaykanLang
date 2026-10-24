@@ -697,6 +697,7 @@ private:
   Expr *Receiver;
   const std::string *FieldName; // points into ASTContext::StringPool (stable)
   Expr *Value;
+  bool CompletesInit = false; // set by Sema (see completesInit)
 
 public:
   MemberAssignStmt(SourceLocation loc, Expr *receiver,
@@ -707,6 +708,12 @@ public:
   Expr *getReceiver() const { return Receiver; }
   const std::string &getFieldName() const { return *FieldName; }
   Expr *getValue() const { return Value; }
+  /// Set by Sema in a class's `__init__`: this assignment gives the last
+  /// field of the class's body its value, on every path that reaches it, so
+  /// the object becomes one of the class here (docs/language/05-classes.md,
+  /// "Every field before self").
+  bool completesInit() const { return CompletesInit; }
+  void setCompletesInit(bool completes) { CompletesInit = completes; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_MemberAssignStmt;
@@ -754,6 +761,8 @@ class MatchArm : public ASTNode {
                         // otherwise
   CompoundStmt *Body;
   ParamMode Mode = ParamMode::Value; // a binding's borrow of the subject
+  size_t BindingUses = 0;            // set by Sema (see bindingUses)
+  Type *BindType = nullptr;          // see getBindType
 
 public:
   // Type arm (or wildcard when armType == nullptr).
@@ -776,12 +785,24 @@ public:
   const std::string &getBinding() const { return *Binding; }
   Type *getArmType() const { return ArmType; }
   void setArmType(Type *t) { ArmType = t; }
+  /// The type of the binding: the arm's, but for an arm of a template's
+  /// instantiation naming a type parameter `T` bound to an optional `X?`
+  /// (ASTCloner), which matches an `X` and binds it as a `T` on an optional
+  /// subject (docs/language/13-generics.md).  Sema settles it.
+  Type *getBindType() const { return BindType ? BindType : ArmType; }
+  void setBindType(Type *t) { BindType = t; }
   Expr *getLiteralPattern() const { return LiteralPattern; }
   CompoundStmt *getBody() const { return Body; }
   /// `n: view T` or `n: inout T`: how the binding holds the subject
   /// (docs/language/08-match.md, "Borrowing the subject").
   ParamMode getMode() const { return Mode; }
   void setMode(ParamMode mode) { Mode = mode; }
+  /// Set by Sema for a binding that borrows the subject: how many of the
+  /// body's statements, from its first, it is used in (its last use is in
+  /// the last of them; 0 when the body never uses it).  An `inout` one is
+  /// written back to the subject there.
+  size_t bindingUses() const { return BindingUses; }
+  void setBindingUses(size_t uses) { BindingUses = uses; }
 
   static bool classof(const ASTNode *N) { return N->getKind() == NK_MatchArm; }
 };

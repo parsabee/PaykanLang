@@ -777,6 +777,11 @@ fn @main3() -> i64 {
   store %x.0, true
   ret 0
 }
+fn @init(%self.1: obj) -> void {
+  vtable.store %self.1, E
+  vtable.store 1, C
+  ret
+}
 )");
   EXPECT_NE(errs.find("undeclared function '@nope'"), std::string::npos)
       << errs;
@@ -790,6 +795,9 @@ fn @main3() -> i64 {
             std::string::npos)
       << errs;
   EXPECT_NE(errs.find("stored value"), std::string::npos) << errs;
+  EXPECT_NE(errs.find("vtable.store of unknown class 'E'"), std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("operand of vtable.store"), std::string::npos) << errs;
 }
 
 TEST(PIRVerifier, ChecksMainAndDuplicates) {
