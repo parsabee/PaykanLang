@@ -4843,7 +4843,11 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
           ok = false;
         }
 
-        // 4. Declare the binding variable with the narrowed (arm) type.
+        // 4. Declare the binding variable with the narrowed (arm) type.  An
+        //    arm naming a type parameter that is an optional `X?` binds the
+        //    `X` it matches too (ASTCloner): the subject is never None, so an
+        //    `inout` binding of a `T` could not go back to it.
+        arm->setBindType(nullptr);
         if (arm->hasBinding() && !bindArmName(arm, node->getSubject(), armCt)) {
           ok = false;
         } else if (arm->hasBinding()) {
@@ -4975,6 +4979,16 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
       }
       if (bindTy == inner)
         seenInner = true;
+      // An arm of a template naming a type parameter `T` that is an optional
+      // `X?` matches an `X`, and binds it as a `T` (ASTCloner): the template
+      // uses it as the `T` it names, whatever `T` is.
+      if (bindTy && arm->getBindType() != arm->getArmType()) {
+        bindTy =
+            resolveType(arm->getBindType(), arm->getLocation(), "match arm");
+        arm->setBindType(bindTy);
+        if (!bindTy)
+          ok = false;
+      }
       // An arm in error still binds its name in the body, poisoned.
       if (arm->hasBinding() && !bindTy)
         declarePoisoned(CurrentScope, arm->getBinding());

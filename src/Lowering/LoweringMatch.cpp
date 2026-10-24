@@ -92,8 +92,10 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
 
   // 1. Evaluate the subject once.  A boxed subject (call result, field read)
   //    is owned for the duration of the match and released on every exit.
-  //    With an `n: inout T` arm, the box is read from the subject's storage,
-  //    where n goes back (emitMatchPlace).
+  //    With an `n: inout T` arm, it is read from the subject's storage,
+  //    where n goes back (emitMatchPlace): a box, or the value of an
+  //    optional primitive or enum, which an arm binding a `T` that is that
+  //    optional binds (ast::MatchArm::getBindType).
   Val subjRaw;
   Val sharedSubj; // non-null iff we must release at the end
   std::optional<pir::LocalId> place;
@@ -101,9 +103,15 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
     place = emitMatchPlace(node->getSubject());
     if (!place)
       return Val();
-    sharedSubj = B.ptrLoad(B.load(*place, "subj.addr"), Type::Box, "subj.box");
-    emitRetain(sharedSubj);
-    subjRaw = emitSharedGet(sharedSubj, "subj.obj");
+    Val at = B.load(*place, "subj.addr");
+    if (ast::Type *t = node->getSubject()->getResolvedType();
+        ast::isValueOptional(t)) {
+      subjRaw = B.ptrLoad(at, toPIRType(t), "subj");
+    } else {
+      sharedSubj = B.ptrLoad(at, Type::Box, "subj.box");
+      emitRetain(sharedSubj);
+      subjRaw = emitSharedGet(sharedSubj, "subj.obj");
+    }
   } else {
     subjRaw = emitExpr(node->getSubject());
     if (!subjRaw)
@@ -170,50 +178,57 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
     if (arm->isWildcard() || arm->isLiteral())
       continue;
     if (primInner) {
-      typeArms.push_back({nullptr, primInner, /*MatchesAnySome=*/true, arm});
+      typeArms.push_back(
+          {nullptr, arm->getBindType(), /*MatchesAnySome=*/true, arm});
       continue;
     }
     // A class arm is an exact-type test; the arm naming an optional's
     // wrapped class matches every present value.
     ast::ClassType *armCt = ast::dyn_cast<ast::ClassType>(arm->getArmType());
-    ast::Type *bindTy = arm->getArmType();
     bool matchesAnySome = optTy && arm->getArmType() == optTy->getInnerType();
     assert((armCt || matchesAnySome) &&
            "Sema should have verified arm type exists");
-    typeArms.push_back({armCt, bindTy, matchesAnySome, arm});
+    typeArms.push_back({armCt, arm->getBindType(), matchesAnySome, arm});
   }
 
   auto emitTypeArmBody = [&](size_t i) {
     const TypeArm &ta = typeArms[i];
     ScopeGuard armGuard(*this);
-    if (ta.Arm->hasBinding() && primInner) {
-      // `n: int` on an `int?`: n is a plain value, the present payload (the
-      // binding owns nothing).
-      Val v = B.unwrap(subjRaw, ta.Arm->getBinding());
-      pir::LocalId local = B.addLocal(ta.Arm->getBinding(), v.Ty);
-      B.store(local, v);
-      CurrentScope->declare(ta.Arm->getBinding(), local, primInner);
-    } else if (ta.Arm->hasBinding()) {
-      // The binding is an ordinary owned variable holding its own +1
-      // reference to the subject's box, released when the arm's scope exits.
-      // It can therefore be re-assigned, moved or stored like any variable,
-      // and stays valid even if the arm re-assigns the subject itself.
+    if (ta.Arm->hasBinding()) {
+      const std::string &name = ta.Arm->getBinding();
+      pir::LocalId local;
+      if (primInner) {
+        // `n: int` on an `int?`: n is a plain value, the present payload
+        // (the binding owns nothing); an arm binding a `T` that is the
+        // `int?` (ast::MatchArm::getBindType) holds the optional itself.
+        Val v = ast::isa<ast::OptionalType>(ta.BindTy)
+                    ? subjRaw
+                    : B.unwrap(subjRaw, name);
+        local = B.addLocal(name, v.Ty);
+        B.store(local, v);
+      } else {
+        // The binding is an ordinary owned variable holding its own +1
+        // reference to the subject's box, released when the arm's scope
+        // exits.  It can therefore be re-assigned, moved or stored like any
+        // variable, and stays valid even if the arm re-assigns the subject
+        // itself.  The subject is non-null here: a None subject never
+        // reaches a type arm.
+        Val box;
+        if (sharedSubj) {
+          emitRetain(sharedSubj);
+          box = sharedSubj;
+        } else {
+          // PaykanShared_new acquires the object's existing unique box (+1).
+          box = B.box(subjRaw, name + ".box");
+        }
+        local = B.addLocal(name, Type::Box);
+        if (ta.Arm->getMode() == ast::ParamMode::View)
+          B.markView(local);
+        B.store(local, box);
+      }
+      CurrentScope->declare(name, local, ta.BindTy);
       // `n: inout T` writes it back to the subject after its last use
       // (bindInoutArm).
-      // The subject is non-null here: a None subject never reaches a type arm.
-      Val box;
-      if (sharedSubj) {
-        emitRetain(sharedSubj);
-        box = sharedSubj;
-      } else {
-        // PaykanShared_new acquires the object's existing unique box (+1).
-        box = B.box(subjRaw, ta.Arm->getBinding() + ".box");
-      }
-      pir::LocalId local = B.addLocal(ta.Arm->getBinding(), Type::Box);
-      if (ta.Arm->getMode() == ast::ParamMode::View)
-        B.markView(local);
-      B.store(local, box);
-      CurrentScope->declare(ta.Arm->getBinding(), local, ta.BindTy);
       if (ta.Arm->getMode() == ast::ParamMode::Inout && place)
         bindInoutArm(ta.Arm, local, *place,
                      node->getSubject()->getResolvedType(), ta.BindTy);

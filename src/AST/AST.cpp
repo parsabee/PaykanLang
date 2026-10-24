@@ -674,15 +674,21 @@ Stmt *ASTCloner::cloneStmt(Stmt *s) {
                                cloneExpr(arm->getLiteralPattern()), body));
       else {
         Type *armTy = cloneType(arm->getArmType());
+        Type *bindTy = arm->getBindType() != arm->getArmType()
+                           ? cloneType(arm->getBindType())
+                           : nullptr;
         // An arm naming a type parameter whose argument is an optional `X?`
         // is the arm on `X`, the present case, as a `T?` of it is `X?`
-        // itself: `v: T` unwraps a `T?` whatever T is.
+        // itself: `v: T` unwraps a `T?` whatever T is, and binds a T.
         if (auto *param = dyn_cast<ClassType>(arm->getArmType());
             param && Subst.count(param->getName()))
-          if (auto *ot = dyn_cast<OptionalType>(armTy))
+          if (auto *ot = dyn_cast<OptionalType>(armTy)) {
+            bindTy = armTy;
             armTy = ot->getInnerType();
+          }
         arms.push_back(Ctx.make<MatchArm>(arm->getLocation(),
                                           in(arm->getBinding()), armTy, body));
+        arms.back()->setBindType(bindTy);
       }
       arms.back()->setMode(arm->getMode());
     }

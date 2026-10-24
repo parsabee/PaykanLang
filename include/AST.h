@@ -762,6 +762,7 @@ class MatchArm : public ASTNode {
   CompoundStmt *Body;
   ParamMode Mode = ParamMode::Value; // a binding's borrow of the subject
   size_t BindingUses = 0;            // set by Sema (see bindingUses)
+  Type *BindType = nullptr;          // see getBindType
 
 public:
   // Type arm (or wildcard when armType == nullptr).
@@ -784,6 +785,12 @@ public:
   const std::string &getBinding() const { return *Binding; }
   Type *getArmType() const { return ArmType; }
   void setArmType(Type *t) { ArmType = t; }
+  /// The type of the binding: the arm's, but for an arm of a template's
+  /// instantiation naming a type parameter `T` bound to an optional `X?`
+  /// (ASTCloner), which matches an `X` and binds it as a `T` on an optional
+  /// subject (docs/language/13-generics.md).  Sema settles it.
+  Type *getBindType() const { return BindType ? BindType : ArmType; }
+  void setBindType(Type *t) { BindType = t; }
   Expr *getLiteralPattern() const { return LiteralPattern; }
   CompoundStmt *getBody() const { return Body; }
   /// `n: view T` or `n: inout T`: how the binding holds the subject

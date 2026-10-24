@@ -517,7 +517,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   like any other (docs/language/14-function-types.md, "Captures").
 - A generic body's `match` arm naming a type parameter on a `T?` (`v: T` in `orElse<T>(x: T?,
   d: T)`) could not be instantiated with an optional `T` (`match arm type 'int?' cannot be
-  optional`); it names what `T` wraps, the present case (docs/language/13-generics.md).
+  optional`); it matches what `T` wraps, the present case, and binds it as a `T`, so the
+  template can compare it with another `T` or, through `v: inout T`, assign it one
+  (docs/language/13-generics.md).
 - A function whose only way out of a `while True` loop is `return` was rejected as not
   always returning; such a loop with no `break` out of it never falls through
   (docs/language/03-functions.md, "Return Values").

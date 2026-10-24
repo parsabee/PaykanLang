@@ -488,9 +488,12 @@ optional primitive, see [Optional Primitives](12-optionals.md#optional-primitive
 `Slot<Color>` a `Color?` and `Slot<(int, Str)>` an `(int, Str)?`, and `orElse(x, 0)` with
 `x: int?` works as written above. When `T` is itself optional, `T?` is `T`: a
 template never makes a nested optional, so `Slot<int?>` holds an `int?`
-(a written `int??` is still an error). A `match` arm naming `T` then names what `T`
-wraps, the present case, so `orElse<int?>(y, None)` binds the present `int` to `v` and a
-template that unwraps a `T?` works for any `T`.
+(a written `int??` is still an error). A `match` arm naming `T` on a `T?` then matches
+what `T` wraps, the present case, and binds it as a `T`, like the template's other values of
+type `T`: `orElse<int?>(y, None)` binds `y`'s present value to `v`, an `int?`. So a template
+that unwraps a `T?` works for an optional `T` as for any other, whether it returns the
+binding, compares it with another `T`, or assigns it one through `v: inout T` (`None`
+included, which empties the subject).
 
 ```pkn
 import ::io;

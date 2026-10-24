@@ -453,17 +453,21 @@ Val ModuleLowering::emitMemOptionalMatch(ast::MatchStmt *node) {
     // The binding's own copy of the present value; `p: inout T` writes it
     // back after its last use (bindInoutArm): the whole of a function
     // value's (None has no code), the value after a presence flag of a
-    // tuple's or a struct's.
-    MemLayout il = memLayout(inner);
-    pir::LocalId local = B.addMemLocal(name, il.Size, il.Align);
+    // tuple's or a struct's, and the whole optional for an arm binding a
+    // `T` that is that optional (ast::MatchArm::getBindType).
+    ast::Type *bindTy =
+        ast::isa<ast::OptionalType>(valueArm->getBindType()) ? subjTy : inner;
+    MemLayout bl = memLayout(bindTy);
+    pir::LocalId local = B.addMemLocal(name, bl.Size, bl.Align);
     Val own = B.localAddr(local, name + ".addr");
-    int64_t off = optTy ? memOptionalPayloadOffset(subjTy) : 0;
+    int64_t off =
+        optTy && bindTy == inner ? memOptionalPayloadOffset(subjTy) : 0;
     B.memCopy(own, off ? B.ptrAdd(addr, Val::i64(off), "opt.value.addr") : addr,
-              Val::i64(il.Size));
-    emitMemRetain(own, inner);
-    CurrentScope->declare(name, local, inner);
+              Val::i64(bl.Size));
+    emitMemRetain(own, bindTy);
+    CurrentScope->declare(name, local, bindTy);
     if (valueArm->getMode() == ast::ParamMode::Inout && place)
-      bindInoutArm(valueArm, local, *place, subjTy, inner, off,
+      bindInoutArm(valueArm, local, *place, subjTy, bindTy, off,
                    off ? Val::boolean(true) : Val());
     emitArmBody(valueArm);
   } else {

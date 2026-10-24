@@ -613,6 +613,12 @@ void ModuleLowering::emitArmBody(const ast::MatchArm *arm) {
 
 void ModuleLowering::emitWriteBack(const Scope::WriteBack &wb) {
   Val place = B.load(wb.Place, "subj.addr");
+  // An optional primitive or enum, a value, which a binding of a `T` that is
+  // that optional holds whole (ast::MatchArm::getBindType).
+  if (ast::isValueOptional(wb.PlaceTy)) {
+    B.ptrStore(place, B.load(wb.Binding, "arm.value"));
+    return;
+  }
   if (!ast::isMemType(wb.PlaceTy)) {
     // A reference: the binding's object replaces the one there (taken
     // before the old one goes, which may be the same).

@@ -669,7 +669,7 @@ bool ModuleLowering::ReleaseScan::stmt(ast::Stmt *s) {
       return true;
     for (ast::MatchArm *arm : x->getArms()) {
       if (arm->hasBinding() && arm->getMode() == ast::ParamMode::Inout)
-        NotOwned[arm->getBinding()] = arm->getArmType();
+        NotOwned[arm->getBinding()] = arm->getBindType();
       if (stmt(arm->getBody()))
         return true;
     }
