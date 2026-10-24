@@ -423,10 +423,11 @@ public:
   /// it holds no reference to of its own.  A field's or an element's value
   /// read in place, what is reached through `self` or an `inout`
   /// parameter, and what is computed from one are; what is reached
-  /// through a box or a mem local, a call's box and a retained copy are
-  /// not.  A local keeps what it holds until a store into it, or a call
-  /// given its address, whose statement's other reads of it the lowering
-  /// gives references of their own (docs/pir.md §7).
+  /// through a box or a mem local, a call's box, a retained copy and a
+  /// stable load's box (its slot keeps it while it is used) are not.  A
+  /// local keeps what it holds until a store into it, or a call given its
+  /// address, whose statement's other reads of it the lowering gives
+  /// references of their own (docs/pir.md §7).
   bool borrowed(ValueId v) const { return v < Borrowed.size() && Borrowed[v]; }
   bool borrowed(const Operand &o) const {
     return o.isValue() && borrowed(o.valueId());
@@ -493,12 +494,14 @@ private:
     case Opcode::LocalAddr:
       return false;
     case Opcode::FieldLoad:
-      // A field's value, read in place.
-      return ref && !retainedFirst(in.Result.Id);
+      // A field's value, read in place, unless its slot keeps the reference
+      // while the value is used (a stable load, docs/pir.md §6).
+      return ref && !in.Stable && !retainedFirst(in.Result.Id);
     case Opcode::PtrLoad:
       // Memory a mem local owns holds references of its own (docs/pir.md
-      // §7); any other is a field's, an element's or the caller's.
-      return ref && !retainedFirst(in.Result.Id) &&
+      // §7); any other is a field's, an element's or the caller's, which a
+      // stable load's slot keeps.
+      return ref && !in.Stable && !retainedFirst(in.Result.Id) &&
              (borrowed(in.Args[0]) || address(in.Args[0]).L == kNoLocal);
     case Opcode::Call:
     case Opcode::VCall:

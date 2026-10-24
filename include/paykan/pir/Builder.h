@@ -451,14 +451,17 @@ public:
     i.Args = {obj.Op};
     emit(std::move(i));
   }
+  /// `field.load %o, C.f`, marked `stable` when @p stable (docs/pir.md §6).
   Val fieldLoad(const Val &obj, const std::string &className,
-                const std::string &field, Type fieldTy, std::string name = "") {
+                const std::string &field, Type fieldTy, std::string name = "",
+                bool stable = false) {
     Instr i;
     i.Op = Opcode::FieldLoad;
     i.ClassName = className;
     i.Field = field;
     i.Result = newValue(fieldTy, std::move(name));
     i.Args = {obj.Op};
+    i.Stable = stable;
     return emit(std::move(i));
   }
   void fieldStore(const Val &obj, const std::string &className,
@@ -538,12 +541,15 @@ public:
     i.Args = {obj.Op};
     return emit(std::move(i));
   }
-  /// `ptr.load T, %p`: the @p ty value at the address @p ptr.
-  Val ptrLoad(const Val &ptr, Type ty, std::string name = "") {
+  /// `ptr.load T, %p`: the @p ty value at the address @p ptr, marked
+  /// `stable` when @p stable (docs/pir.md §6).
+  Val ptrLoad(const Val &ptr, Type ty, std::string name = "",
+              bool stable = false) {
     Instr i;
     i.Op = Opcode::PtrLoad;
     i.Result = newValue(ty, std::move(name));
     i.Args = {ptr.Op};
+    i.Stable = stable;
     return emit(std::move(i));
   }
   /// `ptr.store %p, %v`

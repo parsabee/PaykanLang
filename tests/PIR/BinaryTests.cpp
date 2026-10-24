@@ -40,7 +40,8 @@ namespace {
 
 // Every opcode (ftoi is not in kProgram), NaN, -0.0 and inf constants,
 // quoted names, empty blocks, an abstract slot, an extern class, both vcall
-// and vtable.addr forms, extreme integers and chars, mem slots, a view slot.
+// and vtable.addr forms, extreme integers and chars, mem slots, a view slot,
+// a stable load.
 const char *const kEdgeProgram = R"(module "bin"
 cstr @"quoted name" = "a\0b" len 3
 data @.d = [-9223372036854775807, 9223372036854775807, 0, -1, 64, -65]
@@ -121,6 +122,7 @@ fn @main() -> i64 {
   %pm.29 = local.addr %m.2
   %pf.30 = field.addr %s.1, "ns::Shape".bytes
   %pf8.31 = ptr.add %pf.30, 8
+  %sb.32 = ptr.load box, %pf8.31 stable
   mem.zero %pm.29, 3
   mem.copy %pf8.31, %pf.30, 16
   ret %r.14
@@ -558,7 +560,7 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
     b[retType] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "type code " << int(code);
   }
-  for (uint8_t code : {32, 33, 52, 255}) {
+  for (uint8_t code : {32, 33, 53, 255}) {
     std::vector<uint8_t> b = good;
     b[opcode] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "opcode " << int(code);
@@ -667,6 +669,87 @@ TEST(PIRBinary, AViewSlotKeepsItsMark) {
   EXPECT_NE(bad.status().message().find("reserved type code"),
             std::string::npos)
       << bad.status().message();
+}
+
+// A stable load's mark survives the round trip.  It is a code before the
+// opcode, which a load that is not stable lacks, so a record written before
+// loads had it reads the same, as not stable; the mark is no opcode of its
+// own, and comes only before a `field.load` or a `ptr.load`.
+TEST(PIRBinary, AStableLoadKeepsItsMark) {
+  auto encodeLoad = [](Opcode op, bool stable) {
+    Module m;
+    m.Name = "f";
+    Class c;
+    c.Name = "C";
+    c.Fields.push_back({"f", Type::Box, 0, 0});
+    m.Classes.push_back(std::move(c));
+    Function f;
+    f.Name = "f";
+    f.Sig.Params = {op == Opcode::FieldLoad ? Type::Obj : Type::Ptr};
+    f.Sig.Ret = Type::Void;
+    f.Params.push_back({1, f.Sig.Params[0], ""});
+    Instr in;
+    in.Op = op;
+    if (op == Opcode::FieldLoad) {
+      in.ClassName = "C";
+      in.Field = "f";
+    }
+    in.Result = {2, Type::Box, ""};
+    in.Args.push_back(Operand::value(1));
+    in.Stable = stable;
+    f.Body.Stmts.push_back(std::move(in));
+    f.Body.Stmts.push_back(Return{});
+    f.NextValueId = 3;
+    m.Functions.push_back(std::move(f));
+    return binary::encode(m);
+  };
+  for (Opcode op : {Opcode::FieldLoad, Opcode::PtrLoad}) {
+    std::vector<uint8_t> good = encodeLoad(op, true);
+    auto d = binary::decode(good);
+    ASSERT_TRUE(d.isOk()) << d.status().message();
+    const auto &in = std::get<Instr>((*d).Functions[0].Body.Stmts[0]);
+    EXPECT_TRUE(in.Stable);
+    // Length, name, flags (4), sig (count 1, the param's type, ret),
+    // conventions, params (count, id, type, name), locals, next id, the
+    // block's count, the statement's tag, then the mark and the opcode.
+    std::vector<binary::SymbolEntry> idx = binary::index(good);
+    auto fn =
+        std::find_if(idx.begin(), idx.end(), [](const binary::SymbolEntry &e) {
+          return e.Name == "f";
+        });
+    ASSERT_NE(fn, idx.end());
+    const size_t length = fn->Offset;
+    const size_t mark = length + 1 + 1 + 4 + 3 + 1 + 4 + 1 + 1 + 1 + 1;
+    ASSERT_EQ(good[mark], kStableLoadCode);
+    ASSERT_EQ(good[mark + 1], opcodeEntry(op).Code);
+    // Without the mark (and with the record one byte shorter): the load
+    // that is not stable.
+    std::vector<uint8_t> plain = good;
+    plain.erase(plain.begin() + static_cast<std::ptrdiff_t>(mark));
+    --plain[length];
+    EXPECT_EQ(plain, encodeLoad(op, false));
+    auto p = binary::decode(plain);
+    ASSERT_TRUE(p.isOk()) << p.status().message();
+    EXPECT_FALSE(std::get<Instr>((*p).Functions[0].Body.Stmts[0]).Stable);
+    // Twice: the second is read as the opcode, a reserved one.
+    std::vector<uint8_t> twice = good;
+    twice.insert(twice.begin() + static_cast<std::ptrdiff_t>(mark),
+                 kStableLoadCode);
+    ++twice[length];
+    auto bad = binary::decode(twice);
+    ASSERT_FALSE(bad.isOk());
+    EXPECT_NE(bad.status().message().find("reserved opcode"), std::string::npos)
+        << bad.status().message();
+    // Before an instruction that is no load.
+    std::vector<uint8_t> other = good;
+    other[mark + 1] = opcodeEntry(Opcode::Unbox).Code;
+    bad = binary::decode(other);
+    ASSERT_FALSE(bad.isOk());
+    EXPECT_NE(bad.status().message().find(
+                  "a stable mark before an instruction that is no load"),
+              std::string::npos)
+        << bad.status().message();
+  }
 }
 
 TEST(PIRBinary, NestingAndStatementLimits) {

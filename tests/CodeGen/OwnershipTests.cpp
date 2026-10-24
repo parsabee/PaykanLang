@@ -1466,6 +1466,49 @@ TEST(Ownership, AContainersStateNeedsNoHoldAcrossItsOwnMethods) {
   g.expectNoLeaks("AContainersStateNeedsNoHoldAcrossItsOwnMethods");
 }
 
+// A read of `self`'s storage a call cannot let go of is read by a stable
+// load, which keeps the hand-off its hold made: with the moves at last use
+// made, `v` is handed on to `offer`, and the Pet dies when `offer` returns,
+// before `push` asks, as it did while `self.sink` was held across the call
+// (docs/pir.md §7, §12).
+TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
+  LeakGuard g;
+  auto r = compileMoveAndRun(R"(import ::io;
+    class Pet<X> { name: Str; }
+    class Probe { weak p: Pet<int>?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.p {
+          Pet<int> { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    class Sink<T> { last: Str; }
+    impl Sink<T> {
+      fn offer(v: T) { self.last = "seen"; }
+    }
+    struct Pile { sink: Sink<Pet<int>>; }
+    impl Pile {
+      fn push(v: Pet<int>, probe: Probe) -> Str {
+        self.sink.offer(v);
+        return probe.state();
+      }
+    }
+    fn main() -> int {
+      p = Pile(Sink<Pet<int>>("none"));
+      x = Pet<int>("rex");
+      probe = Probe(x);
+      io::println(p.push(x, probe) + " " + probe.state());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "freed freed\n");
+  g.expectNoLeaks("AStableReadKeepsTheHandOffsTiming");
+}
+
 // A string's character is read from the string as it was before its index
 // was computed, as an array's element is, though the call computing it
 // replaces the string (and makes a new one where it was).

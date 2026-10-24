@@ -101,6 +101,16 @@ std::string defined(const std::string &f, const std::string &what) {
   return eq < at ? f.substr(line, eq - line) : "";
 }
 
+/// Whether the first instruction of @p f containing @p what is a `stable`
+/// load (docs/pir.md §6).
+bool stableLoad(const std::string &f, const std::string &what) {
+  const size_t at = f.find(what);
+  if (at == std::string::npos)
+    return false;
+  const std::string line = f.substr(at, f.find('\n', at) - at);
+  return line.ends_with(" stable");
+}
+
 /// Whether the box @p value is retained before the first @p call of @p f and
 /// released after it: a reference of its own while the call runs.
 bool heldAcross(const std::string &f, const std::string &value,
@@ -638,7 +648,10 @@ TEST(Lowering, ACallOfAFunctionThatReleasesNothingHoldsNoRead) {
 // store of a number neither.  A constructor does what its `__init__` does,
 // with the superclass's through `__super__`; the runtime's `==` of a tuple
 // what its objects' `equals` do.  A read rooted in a parameter it may hand
-// on keeps the rule without the types (docs/pir.md §7).
+// on keeps the rule without the types (docs/pir.md §7).  A read a call that
+// may let go of references does not hold is read by a `stable` load; one
+// in use at no such call (`self.s` across `setN`, which lets go of nothing)
+// is read as before.
 TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
   auto l = lower(R"(
     class Box<T> { v: T; view fn at(k: int) -> T { return self.v; } }
@@ -734,31 +747,32 @@ TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
   ASSERT_TRUE(l.Ok) << l.Error;
   struct Case {
     const char *Fn, *Read, *Call;
-    bool Held;
+    bool Held, Stable;
   };
   for (const Case &c : {
-           Case{"H.receiver", ", H.b", "call @B.setS(", false},
-           Case{"H.string", ", H.s", "call @B.setS(", true},
-           Case{"H.number", ", H.s", "call @B.setN(", false},
-           Case{"H.weakStore", ", H.b", "call @B.link(", false},
-           Case{"H.sameClass", ", H.g", "call @B.setG(", true},
-           Case{"H.otherClass", ", B.s", "call @B.setG(", false},
-           Case{"H.destroyed", ", H.s", "call @B.setC(", true},
-           Case{"H.anything", ", H.s", "call @B.setO(", true},
-           Case{"H.built", ", H.b", "call @Kid<Box<int>>(", false},
-           Case{"H.superInit", ", H.s", "call @Kid<Box<int>>(", true},
-           Case{"H.closure", ", H.b", "call @B.apply(", true},
-           Case{"H.compared", ", H.s", "PaykanTuple_equals(", true},
-           Case{"H.comparedB", ", H.b", "PaykanTuple_equals(", false},
-           Case{"S.receiver", "ptr.load box", "call @B.setS(", false},
-           Case{"byInout", "ptr.load box", "call @B.setS(", false},
-           Case{"byView", ", H.b", "call @B.note(", false},
-           Case{"bySlice", "ptr.load box", "call @B.setS(", false},
-           Case{"byLocal", ", H.b", "call @B.setS(", true},
+           Case{"H.receiver", ", H.b", "call @B.setS(", false, true},
+           Case{"H.string", ", H.s", "call @B.setS(", true, false},
+           Case{"H.number", ", H.s", "call @B.setN(", false, false},
+           Case{"H.weakStore", ", H.b", "call @B.link(", false, true},
+           Case{"H.sameClass", ", H.g", "call @B.setG(", true, false},
+           Case{"H.otherClass", ", B.s", "call @B.setG(", false, true},
+           Case{"H.destroyed", ", H.s", "call @B.setC(", true, false},
+           Case{"H.anything", ", H.s", "call @B.setO(", true, false},
+           Case{"H.built", ", H.b", "call @Kid<Box<int>>(", false, true},
+           Case{"H.superInit", ", H.s", "call @Kid<Box<int>>(", true, false},
+           Case{"H.closure", ", H.b", "call @B.apply(", true, false},
+           Case{"H.compared", ", H.s", "PaykanTuple_equals(", true, false},
+           Case{"H.comparedB", ", H.b", "PaykanTuple_equals(", false, true},
+           Case{"S.receiver", "ptr.load box", "call @B.setS(", false, true},
+           Case{"byInout", "ptr.load box", "call @B.setS(", false, true},
+           Case{"byView", ", H.b", "call @B.note(", false, true},
+           Case{"bySlice", "ptr.load box", "call @B.setS(", false, true},
+           Case{"byLocal", ", H.b", "call @B.setS(", true, false},
        }) {
     std::string f = function(l.Text, c.Fn);
     EXPECT_EQ(heldAcross(f, defined(f, c.Read), c.Call), c.Held) << c.Fn << "\n"
                                                                  << f;
+    EXPECT_EQ(stableLoad(f, c.Read), c.Stable) << c.Fn << "\n" << f;
   }
 }
 
@@ -831,6 +845,7 @@ TEST(Lowering, AReadACallMayReplaceThroughANarrowedArmIsHeld) {
        }) {
     std::string f = function(l.Text, c.Fn);
     EXPECT_TRUE(heldAcross(f, defined(f, c.Read), c.Call)) << c.Fn << "\n" << f;
+    EXPECT_FALSE(stableLoad(f, c.Read)) << c.Fn << "\n" << f;
   }
 }
 
@@ -880,6 +895,10 @@ TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
     ASSERT_FALSE(f.empty()) << c.Fn << "\n" << l.Text;
     EXPECT_EQ(heldAcross(f, defined(f, "ptr.load box, %self.addr"), c.Call),
               c.Held)
+        << c.Fn << "\n"
+        << f;
+    // What is not held is read by a stable load (docs/pir.md §6).
+    EXPECT_EQ(stableLoad(f, "ptr.load box, %self.addr"), !c.Held)
         << c.Fn << "\n"
         << f;
   }
@@ -2144,6 +2163,7 @@ TEST(Lowering, AReadIsHeldAcrossAMethodAnotherModuleCompiles) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "Box.total");
   EXPECT_TRUE(heldAcross(f, defined(f, ", Box.origin"), "vcall ")) << f;
+  EXPECT_FALSE(stableLoad(f, ", Box.origin")) << f;
 }
 
 // #102: every module is named by its canonical module name -- the module
@@ -2574,10 +2594,9 @@ const char *const kTake = R"(
     fn take(n: Node) -> int { return n.n; }
 )";
 
-/// @p source (after kTake) lowered, through the moves-at-last-use pass and
-/// verified after it; what the pass did is in @p stats.
-Lowered lowerMoved(const std::string &source, pir::Statistics &stats) {
-  Lowered l = lower(kTake + source);
+/// @p l through the moves-at-last-use pass and verified after it; what the
+/// pass did is in @p stats.
+Lowered moved(Lowered l, pir::Statistics &stats) {
   if (!l.Ok)
     return l;
   pir::PassManager passes(/*verifyEach=*/true);
@@ -2589,6 +2608,11 @@ Lowered lowerMoved(const std::string &source, pir::Statistics &stats) {
   }
   l.Text = pir::toString(l.Program);
   return l;
+}
+
+/// @p source (after kTake) lowered and moved (moved).
+Lowered lowerMoved(const std::string &source, pir::Statistics &stats) {
+  return moved(lower(kTake + source), stats);
 }
 
 Lowered lowerMoved(const std::string &source) {
@@ -2919,8 +2943,40 @@ TEST(LoweringMoves, AReadRootedInAParameterKeepsTheHandOffBeforeIt) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "f");
   EXPECT_TRUE(heldAcross(f, defined(f, ", Lbl.name"), "call @touchGen(")) << f;
+  EXPECT_FALSE(stableLoad(f, ", Lbl.name")) << f;
   // `x` is handed on: no retain before take().
   const size_t take = f.find("call @take(");
   ASSERT_NE(take, std::string::npos) << f;
   EXPECT_EQ(f.substr(0, take).find("retain "), std::string::npos) << f;
+}
+
+// The standard library's containers read their state by a stable load
+// across the calls that store their arguments (a stack's push, a queue's
+// enqueue, a map's put, a set's add of strings), so the argument is handed
+// on to the call, as the hold of the state made it before: the functions
+// retain nothing (docs/pir.md §7, §12).
+TEST(LoweringMoves, AStableReadOfAContainersStateKeepsTheHandOff) {
+  pir::Statistics stats;
+  auto l = moved(lower(R"(import ::collections as c;
+    fn main() -> int {
+      s = c::Stack<Str>();
+      s.push("a");
+      q = c::Queue<Str>();
+      q.enqueue("b");
+      m = c::HashMap<Str, int>();
+      m.put("c", 1);
+      h = c::HashSet<Str>();
+      h.add("d");
+      return int(s.len() + q.len() + m.len() + h.len());
+    }
+  )"),
+                 stats);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"Stack<Str>.push", "Queue<Str>.enqueue",
+                         "\"HashMap<Str, int>.put\"", "HashSet<Str>.add"}) {
+    std::string f = function(l.Text, fn);
+    ASSERT_FALSE(f.empty()) << fn << "\n" << l.Text;
+    EXPECT_TRUE(stableLoad(f, "ptr.load box, %self.addr")) << fn << "\n" << f;
+    EXPECT_EQ(count(f, "retain "), 0u) << fn << "\n" << f;
+  }
 }

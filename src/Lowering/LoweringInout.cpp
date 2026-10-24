@@ -287,10 +287,10 @@ bool ModuleLowering::holdsBox(const std::string &name) const {
          CurrentScope->inoutType(name) == Type::Box;
 }
 
-Val ModuleLowering::loadVarBox(const std::string &name) {
+Val ModuleLowering::loadVarBox(const std::string &name, bool stable) {
   Val slot = B.load(CurrentScope->lookup(name), name);
   if (CurrentScope->inoutType(name) == Type::Box)
-    return B.ptrLoad(slot, Type::Box, name);
+    return B.ptrLoad(slot, Type::Box, name, stable);
   return slot;
 }
 

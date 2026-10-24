@@ -275,10 +275,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Stack<int>.push`, `HashMap<Str, int>.put`, `HashSet<int>.clear`,
   `MinPriorityQueue<Str>.pop`): 57 of the 86 retain/release pairs the fix for reads through
   objects added (*Fixed*) are gone, and over the samples and the standard library's tests
-  the static retains go from 1421 to 1374 (releases 4347 to 4300; 10 of those functions
-  copy an argument again that the hold had let them hand on).  A read rooted in a
-  variable, which the function may hand on, keeps its reference across any call that may
-  let go of one, so the moves at last use there stay as they were.
+  the static retains go from 1421 to 1364 (releases 4347 to 4290), with no other change to
+  the code.  Such a read is a `stable` load in PIR (`%b = field.load %o, C.f stable`,
+  `ptr.load box, %p stable`; docs/pir.md §6), which the moves at last use count as held
+  by its slot: the arguments the hold let them hand on are still handed on
+  (`Stack<Str>.push` gives its string to the list with no retain), so every object dies
+  when it did with the hold.  A `.pkm`'s code marks a stable load with a code before its
+  opcode, so code written before reads as it did (docs/design/pkm.md §5.5).  A read rooted
+  in a variable, which the function may hand on, keeps its reference across any call that
+  may let go of one, so the moves at last use there stay as they were.
 - An object handed on at a variable's last use lives as long as its destination holds it,
   no longer until the variable's scope ends (docs/language/16-memory.md, "Ownership
   transfers").  Nothing is ever released earlier than its last holder lets it go, and

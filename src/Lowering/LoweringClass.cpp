@@ -557,7 +557,8 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
     fieldTy = Type::Box;
 
   Val fieldVal = B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
-                             fieldTy, node->getFieldName());
+                             fieldTy, node->getFieldName(),
+                             fieldTy == Type::Box && isStableRead(node));
   // A `weak` field reads as a fresh +1 box, or null once the object is
   // gone (exprProducesFreshBox).
   if (weak)

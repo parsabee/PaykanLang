@@ -1941,7 +1941,7 @@ Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
     auto *id = ast::dyn_cast<ast::Identifier>(arg);
     if (id && CurrentScope->hasLocal(id->getName()) &&
         holdsBox(id->getName()) && !isHeldRead(id))
-      return loadVarBox(id->getName());
+      return loadVarBox(id->getName(), isStableRead(id));
     auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(arg);
     if (ma && ast::isa<ast::Identifier>(ma->getReceiver())) {
       Val v = emitExpr(arg);

@@ -453,6 +453,12 @@ private:
     }
 
     void verifyInstr(const Instr &in) {
+      // Only a box read from a slot is stable (§6).
+      if (in.Stable &&
+          ((in.Op != Opcode::FieldLoad && in.Op != Opcode::PtrLoad) ||
+           in.Result.Ty != Type::Box))
+        error(std::string("a stable '") + opName(in) +
+              "' (only a field.load or a ptr.load of a box is stable)");
       switch (in.Op) {
       case Opcode::Add:
       case Opcode::Sub:

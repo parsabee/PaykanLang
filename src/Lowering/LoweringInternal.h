@@ -398,6 +398,13 @@ private:
   /// The reads noteHeldReads and noteBorrowedReads found, which take a
   /// reference of their own.
   std::unordered_set<const ast::Expr *> HeldReads;
+  /// The box reads of storage the function never hands on that
+  /// noteBorrowedReads found in use where a call that may let go of
+  /// references is made, though of none of their slot's class: read in
+  /// place, the slot keeps their reference while they are used, and their
+  /// load says so (`stable`, docs/pir.md §6), unless another call holds
+  /// them (isStableRead).
+  std::unordered_set<const ast::Expr *> StableReads;
   /// Note the reads among statement @p s's own expressions (not those of
   /// the statements in it) that a later part of the statement may replace
   /// while their value is in use: of a variable that holds a reference, in
@@ -417,6 +424,9 @@ private:
   void noteBorrowedReads(ast::Stmt *s);
   struct BorrowedReads;
   bool isHeldRead(const ast::Expr *e) const { return HeldReads.count(e) > 0; }
+  bool isStableRead(const ast::Expr *e) const {
+    return StableReads.count(e) > 0 && !isHeldRead(e);
+  }
   /// Whether a value of type @p ty may reach an object (any class but Str,
   /// a function value, or what holds one): given it, a call can change
   /// whatever the object reaches.
@@ -913,8 +923,9 @@ private:
   /// the result.
   Val emitMemResultSlot(ast::Type *ty);
   /// The scalar or box element of type @p ty at @p addr, read in place: a
-  /// box borrowed from its slot.
-  Val emitElementLoad(const Val &addr, ast::Type *ty);
+  /// box borrowed from its slot, by a `stable` load when @p stable
+  /// (isStableRead).
+  Val emitElementLoad(const Val &addr, ast::Type *ty, bool stable = false);
   /// The layout of the tuple type @p tt the runtime reads (Runtime.h,
   /// "Tuples"), as constant data; a struct's holds its name and its fields'
   /// ("Structs").
@@ -993,8 +1004,10 @@ private:
   /// variable's own slot, or the caller's slot an `inout` reference
   /// parameter points to.
   bool holdsBox(const std::string &name) const;
-  /// The box in variable @p name's storage, borrowed (holdsBox).
-  Val loadVarBox(const std::string &name);
+  /// The box in variable @p name's storage, borrowed (holdsBox); an
+  /// `inout` parameter's slot is read by a `stable` load when @p stable
+  /// (isStableRead).
+  Val loadVarBox(const std::string &name, bool stable = false);
   /// Put the +1 box @p newBox in variable @p name's storage (holdsBox),
   /// releasing the box it held.
   void storeVarBox(const std::string &name, const Val &newBox);

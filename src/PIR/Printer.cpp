@@ -352,6 +352,8 @@ private:
         OS << ", ";
         printOperand(in.Args[1]);
       }
+      if (in.Stable)
+        OS << " stable";
       break;
     case Opcode::VTableStore:
       OS << ' ';
@@ -375,6 +377,8 @@ private:
     case Opcode::PtrLoad:
       OS << ' ' << typeName(in.Result.Ty) << ", ";
       printOperandList(in.Args);
+      if (in.Stable)
+        OS << " stable";
       break;
     case Opcode::None:
       OS << ' ' << typeName(in.Result.Ty);

@@ -1000,6 +1000,14 @@ private:
     return true;
   }
 
+  /// The `stable` that may end a `field.load` or a `ptr.load` (§6).
+  void parseStable(Instr &in) {
+    if (isWord("stable")) {
+      advance();
+      in.Stable = true;
+    }
+  }
+
   bool parseStmt(Stmt &out) {
     if (isWord("if")) {
       advance();
@@ -1294,6 +1302,7 @@ private:
       if (!parseCommaOperands(in.Args, 1) || !expect(Tok::Comma, "','") ||
           !parseFieldRef(in))
         return false;
+      parseStable(in);
       needsFixup = true;
       break;
     case Opcode::FieldStore: {
@@ -1356,6 +1365,7 @@ private:
         return false;
       if (resultTy == Type::Void)
         return error("ptr.load of void");
+      parseStable(in);
       break;
     case Opcode::PtrStore:
     case Opcode::MemZero:

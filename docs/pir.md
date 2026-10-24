@@ -445,11 +445,22 @@ weak.release %w      ; weak -> void             Paykan_weak_release (null-safe)
 %o = new Point       ; allocate + header init + zeroed fields (Paykan_malloc)
 free %o              ; Paykan_free of the object struct (an object never boxed)
 %v = field.load %o, Point.x
+%b = field.load %o, Node.next stable           ; a box its slot keeps while it is used
 field.store %o, Point.x, %v                    ; plain store: ARC is explicit around it
 %p = vtable.load %o                            ; the object's vtable pointer (ptr)
 %p = vtable.addr Point   |   vtable.addr @$rt.PaykanString_vtable
 vtable.store %o, Point                         ; %o's vtable becomes Point's (an __init__'s, §5)
 ```
+
+A `field.load` or a `ptr.load` of a `box` may end in `stable`: the slot
+it reads keeps its reference for as long as the statement it is part of
+uses the value, because the storage is the caller's and no call made
+while the value is in use can let go of a reference of the slot's class
+(§7, "Reads a call may replace").  The load does what it does without the
+mark, and backends ignore it; the moves-at-last-use pass counts the value
+as held by the slot rather than borrowed (§12).  A load with no mark
+promises nothing, so a module written before the mark existed reads as
+before.
 
 **Locals**
 
@@ -473,6 +484,7 @@ store %x, %v
 %p = local.addr %x                             ; the address of local %x (ptr)
 %p = field.addr %o, Point.x                    ; the address of a field of %o (ptr)
 %v = ptr.load i64, %p                          ; the i64 at %p
+%b = ptr.load box, %p stable                   ; a box its slot keeps while it is used
 ptr.store %p, %v                               ; store %v at %p
 %q = ptr.add %p, %off                          ; %p plus %off (i64) bytes (ptr)
 mem.copy %dst, %src, %n                        ; copy %n (i64) bytes; the two may overlap
@@ -709,6 +721,18 @@ CodeGen enforced, now in one place.
   variable a copy, and an object would die later.  So `h.b.len()` and a
   map's lookup of a string key need no hold either way.
 
+  A read of storage the function never hands on that is in use where a
+  call that may let go of references is made, though of none of the read
+  slot's class, is read by a `stable` `field.load` or `ptr.load` (§6):
+  MoveAtLastUse then counts its value as held by the slot, not borrowed,
+  and keeps the hand-offs its hold made (`push(v)` of a `Stack<Str>` hands
+  `v` on to `pushFront` with no retain at all), so objects die when they
+  did with the hold.  A read in use at no call that may let go of a
+  reference is read in place and borrowed, as before; a read rooted in a
+  variable or a value parameter is never stable, since the variable may be
+  what keeps its object alive.  The mark is the lowering's promise for the
+  statement only, not a reference of the load's own.
+
   The lowering follows the order in which a statement evaluates its
   parts, and a read in use where a call that may replace it is made takes
   a reference of its own: a method's receiver until the method returns
@@ -898,7 +922,8 @@ The verifier rejects a program when:
   function the module does not declare;
 * `field.load`/`field.store`/`field.addr`/`new`/`vtable.addr`/
   `vtable.store` name an unknown class or field; a field store has the
-  wrong type; `vtable.store` takes anything but an `obj`;
+  wrong type; `vtable.store` takes anything but an `obj`; an instruction
+  other than a `field.load` or a `ptr.load` of a `box` is `stable`;
 * a class extends an unknown class or declares a field twice, a field has
   a type that is not a field type (§5), a defined class's vtable slot 0 is
   not `destroy`, or an `extern class` names no module;
@@ -1001,7 +1026,9 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
 - **Codes.** Types and opcodes are written as the fixed codes of
   `include/paykan/pir/Codes.h`, the one table that also holds the mnemonics
   of §10, never as the C++ enumerator's value; a reader rejects a code it
-  does not know.
+  does not know.  Two codes mark what follows them: 18 a `view` local's
+  slot type (§3), 53 a `stable` load's opcode (§6); a module written
+  before either mark existed reads the same, unmarked.
 - **Functions** are length-prefixed records, so a reader can skip or decode
   one function on its own (`decodeFunction`), and the symbol index
   (`index`, `encodeSymbolIndex`) lists every record with its offset, length
@@ -1136,10 +1163,12 @@ borrowed: a box loaded from a box local, or what a `mem` local holds (it
 owns its references, §7), which the local keeps until a store into it, a
 statement that is over by then, or a call given its address, whose
 statement's other reads of it have a reference of their own (§7, "Reads a
-call may replace"); a call's box; and a value retained before anything else
-uses it.  Nor is an `__init__`'s `self`: its constructor, the only caller
-one can have, holds the object (or, for a struct, the storage) until the
-call returns.  So `x = h.node; take(x); s = h.node.name + label(n)` keeps
+call may replace"); a call's box; a value retained before anything else
+uses it; and a `stable` load's box, which its slot keeps while the
+statement uses it (§6), so `self.__list.pushFront(v)` of a `Stack<Str>`
+hands `v` on.  Nor is an `__init__`'s `self`: its constructor, the only
+caller one can have, holds the object (or, for a struct, the storage)
+until the call returns.  So `x = h.node; take(x); s = h.node.name + label(n)` keeps
 the copy into `take`, though `label`, given a number, can let go of
 nothing; with `replace(h)` in its place, which may assign `h.node`, the
 name read has a reference of its own (§7), and the hand-off moves.  Whether

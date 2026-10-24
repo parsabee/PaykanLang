@@ -14,7 +14,9 @@
 #include "Pipeline.h"
 #include "paykan/lowering/Lowering.h"
 #include "paykan/modules/ModuleResolver.h"
+#include "paykan/pir/MoveAtLastUse.h"
 #include "paykan/pir/Parser.h"
+#include "paykan/pir/Pass.h"
 #include "paykan/pir/Verifier.h"
 
 #include <llvm/IR/LLVMContext.h>
@@ -225,6 +227,25 @@ inline RunResult compileAndRunWithFrontend(const std::string &source,
                                            const std::string &frontendName) {
   auto a = detail::analyse(source, "", frontendName);
   return detail::runAnalysed(a, nullptr, "");
+}
+
+/// Like compileAndRun, with the copies at a variable's last use made moves
+/// as the driver makes them (docs/pir.md §12): when its objects die is what
+/// it is in a program the driver runs.
+inline RunResult compileMoveAndRun(const std::string &source) {
+  auto a = detail::analyse(source, "");
+  if (!a.Ok)
+    return a.Failure;
+  pir::Program program;
+  std::ostringstream errs;
+  if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, "", program,
+                              errs))
+    return {-1, "", "lowering failed: " + errs.str(), false};
+  pir::PassManager passes(/*verifyEach=*/true);
+  passes.add(pir::createMovesAtLastUsePass());
+  if (Status s = passes.run(program); !s)
+    return {-1, "", s.message(), false};
+  return detail::runProgramMLIR(program, nullptr, "", a.Ctx.Resolver.get());
 }
 
 /// Parse the hand-written PIR program @p text and run it, verified as the

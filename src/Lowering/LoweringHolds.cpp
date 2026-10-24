@@ -35,7 +35,11 @@
 // `h.a.xs`), as the object of a call-rooted field is (MemTemps).  An
 // `inout` local holds the object for as long as it can be used, and a
 // `match` with an arm's `n: inout T` until it ends.  A read with no such
-// call while it is in use is read in place, as it was.
+// call while it is in use is read in place, as it was; one of storage the
+// function never hands on that a call is made across which may let go of
+// references, but not of its slot's, by a `stable` load, which the moves at
+// last use count as held by the slot (docs/pir.md §6), as they counted the
+// hold.
 
 #include "LoweringInternal.h"
 #include "Names.h"
@@ -95,11 +99,15 @@ private:
     Live.resize(n);
   }
   /// A call is made that does @p effect: every read in use whose reference
-  /// it may let go of takes one of its own.
+  /// it may let go of takes one of its own.  A read of storage the function
+  /// never hands on whose reference it cannot let go of, though it may let
+  /// go of others (replaces), is read by a `stable` load (isStableRead).
   void call(const Effect &effect) {
     for (const ast::Expr *read : Live)
       if (replaces(effect, read))
         L.HeldReads.insert(read);
+      else if (effect.Releases)
+        L.StableReads.insert(read);
   }
   bool replaces(const Effect &effect, const ast::Expr *read) const;
   bool gives(ast::Expr *arg, Callee callee) const;
