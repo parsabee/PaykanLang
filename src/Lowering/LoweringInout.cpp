@@ -330,13 +330,19 @@ Val ModuleLowering::emitInoutArg(ast::Expr *arg, std::vector<Val> &keep,
     return emitCallAddress(arg);
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(arg)) {
     ast::Expr *recvExpr = ma->getReceiver();
-    // A struct's field: its address in the struct's bytes, which a
-    // variable's, a field's or an element's are (Sema takes no temporary's);
-    // like a value held in memory passed by address, it outlives the call.
+    // A struct's field: its address in the struct's bytes, which are a
+    // place of their own, a variable's or a field's (Sema takes no
+    // temporary's and no element's).  An object holding them is kept as for
+    // a field of its own: an alias that replaces it (`g.h = ...` while
+    // `o.h.p.s` is bound) cannot free them.
     if (auto *st = getExprStructType(recvExpr)) {
       int idx = st->fieldIndex(ma->getFieldName());
       assert(idx >= 0 && "Sema should have verified the field exists");
-      return emitTupleElementAddress(recvExpr, static_cast<size_t>(idx));
+      Val base = emitInoutArg(recvExpr, keep, keepObject);
+      if (!base)
+        return Val();
+      int64_t off = tupleElementOffset(st, static_cast<size_t>(idx));
+      return off == 0 ? base : B.ptrAdd(base, Val::i64(off), "elem.addr");
     }
     ast::ClassType *ct = getExprClassType(recvExpr);
     if (!ct) {

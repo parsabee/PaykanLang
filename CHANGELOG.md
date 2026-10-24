@@ -30,8 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     in an 'impl' block has no body: ...`, `'f' has no body: a 'static fn' needs one` and
     `'__init__' has no body: an initializer needs one`). A method its superclass
     implements cannot be made pure virtual again, and a `match` arm naming an abstract
-    class is rejected (`unreachable arm: no object has the exact type of abstract class
-    'Shape'`, docs/language/08-match.md); the arm unwrapping a `Shape?` stays fine.
+    class is rejected, as an object is of one only while it is being constructed (`a
+    'match' arm cannot name abstract class 'Shape': an object is of it only while it is
+    being constructed`, docs/language/08-match.md); the arm unwrapping a `Shape?` stays
+    fine.
   - Generic classes follow the same rules per instantiation (a superclass cannot be
     generic, so a generic class with a pure virtual method has no objects; a generic
     subclass can implement a non-generic class's), and modules export the pure
@@ -280,10 +282,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `__init__` gave away, until the subclass's fields have values.  Before, the constructor
   made the object one of its final class before any `__init__` ran, as in Java: a field
   has no default value, so an override a superclass's `__init__` reached could read a field
-  of the subclass before the subclass's `__init__` assigned it, and crash the program.  PIR has the instruction
-  for it, `vtable.store %self, C` (opcode 52, docs/pir.md §5, docs/design/pkm.md §5.5), and
-  since an object's vtable pointer now changes while it is constructed, the LLVM IR no
-  longer marks a load of it `!invariant.load`.
+  of the subclass before the subclass's `__init__` assigned it, and crash the program.
+  PIR has the instruction for it, `vtable.store %self, C` (opcode 52, docs/pir.md §5,
+  docs/design/pkm.md §5.5), and since an object's vtable pointer now changes while it is
+  constructed, the LLVM IR no longer marks a load of it `!invariant.load`.
 - An array or tuple literal holds its elements, so a `view` that shares what it holds (of an
   object, a string or an array, a tuple or optional holding one, `self` in a `view fn`) can
   no longer be one of them: `[v]`, `(v, 1)`, `[v; 3]` and `return [self.name, "x"];` in a
@@ -447,8 +449,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passed to a function or captured by a lambda, in a class's or a struct's `__init__`.
   Until every field of the class's own body is assigned on every path (an optional one starts
   as `None`), and in a subclass after `__super__(...)`, `self` is now only a place to assign
-  fields and to read the ones already assigned: `field 'name' is read before it is
-  assigned`, `'self' is used before every field is assigned: 'name' is not assigned yet`,
+  fields and to read the ones already assigned (`self.f(1)` with `f` a field of function
+  type reads `f`): `field 'name' is read before it is assigned`, `'self' is used before every field is assigned: 'name' is not assigned yet`,
   and in `__super__(...)`'s arguments `'self' is used before every field is assigned:
   '__super__' has not run yet` (docs/language/05-classes.md, "Every field before `self`").
   What a static check cannot see, a superclass's `__init__` calling a method a subclass
@@ -473,6 +475,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `h` passed with `h.s` to the function that matches it), and reading `n` then crashed or
   read the object as the wrong class.  The binding is a value of its own now (see
   "Changed").
+- An `inout` local or a `match` arm's `n: inout T` naming a field of a struct held in an
+  object (`x: inout = o.h.p.s;`, `match o.h.p.s { n: inout L { ... } }`, with `p` a struct)
+  did not keep that object (`o.h`) alive, as it does for a field of the object itself: when
+  another reference replaced it (`g.h = H(...)` with `g = o`), a write to `x`, or the
+  arm's binding going back, wrote freed memory.  The object is kept while the local or the
+  binding can be used.
 - A local borrow's liveness (docs/language/02-basics.md, "Local borrows"): a lambda or a call
   through a function value (`fs[0](5)`) after a borrow's last use kept every borrow of the
   block live, so a valid use of the borrowed variable was rejected; a call through a

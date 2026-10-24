@@ -313,12 +313,13 @@ fn f(o: Obj, s: Shape) -> int {
 fn main() -> int { return 0; }
 )"));
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("unreachable arm: no object has the exact type "
-                               "of abstract class 'Shape'"),
+  EXPECT_NE(r.Diagnostics.find("a 'match' arm cannot name abstract class "
+                               "'Shape': an object is of it only while it is "
+                               "being constructed"),
             std::string::npos)
       << r.Diagnostics;
-  EXPECT_NE(r.Diagnostics.find("unreachable arm: no object has the exact type "
-                               "of abstract class 'Polygon'"),
+  EXPECT_NE(r.Diagnostics.find("a 'match' arm cannot name abstract class "
+                               "'Polygon'"),
             std::string::npos)
       << r.Diagnostics;
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
@@ -354,8 +355,8 @@ fn f(s: Shape?) -> Str {
 fn main() -> int { return 0; }
 )"));
   EXPECT_FALSE(bad.Ok);
-  EXPECT_NE(bad.Diagnostics.find("unreachable arm: no object has the exact "
-                                 "type of abstract class 'Polygon'"),
+  EXPECT_NE(bad.Diagnostics.find("a 'match' arm cannot name abstract class "
+                                 "'Polygon'"),
             std::string::npos)
       << bad.Diagnostics;
   EXPECT_EQ(bad.ErrorCount, 1u) << bad.Diagnostics;
@@ -658,8 +659,8 @@ fn main() -> int {
                                "incompatible signature 'Wrong.area() -> int'"),
             std::string::npos)
       << r.Diagnostics;
-  EXPECT_NE(r.Diagnostics.find("unreachable arm: no object has the exact type "
-                               "of abstract class 'Polygon'"),
+  EXPECT_NE(r.Diagnostics.find("a 'match' arm cannot name abstract class "
+                               "'Polygon'"),
             std::string::npos)
       << r.Diagnostics;
   EXPECT_EQ(count(r.Diagnostics, "cannot instantiate abstract class 'Shape': "

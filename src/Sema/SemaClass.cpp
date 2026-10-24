@@ -131,6 +131,18 @@ bool Sema::checkInitFieldsAssigned(
     error(loc, "'self' is used before every field is assigned: " + why);
     ok = false;
   };
+  // `self.<name>` read as a field: a superclass's field has its value once
+  // `__super__(...)` has run, an own one once it is assigned on every path.
+  auto checkFieldRead = [&](const std::string &name, ast::SourceLocation loc,
+                            const BitSet &assigned, bool inSuper) {
+    auto it = fieldIndex.find(name);
+    if (inSuper) {
+      reportSelfUse(loc, assigned, inSuper);
+    } else if (it != fieldIndex.end() && !assigned[it->second]) {
+      error(loc, "field '" + name + "' is read before it is assigned");
+      ok = false;
+    }
+  };
   std::function<void(const ast::Expr *, const BitSet &, bool)> checkUses =
       [&](const ast::Expr *e, const BitSet &assigned, bool inSuper) {
         if (!e || (!inSuper && assigned == full))
@@ -146,26 +158,24 @@ bool Sema::checkInitFieldsAssigned(
           return;
         case ast::ASTNode::NK_MemberAccessExpr: {
           const auto *ma = ast::cast<ast::MemberAccessExpr>(e);
-          if (!isSelf(ma->getReceiver())) {
+          if (isSelf(ma->getReceiver()))
+            checkFieldRead(ma->getFieldName(), e->getLocation(), assigned,
+                           inSuper);
+          else
             checkUses(ma->getReceiver(), assigned, inSuper);
-            return;
-          }
-          auto it = fieldIndex.find(ma->getFieldName());
-          if (inSuper) {
-            reportSelfUse(e->getLocation(), assigned, inSuper);
-          } else if (it != fieldIndex.end() && !assigned[it->second]) {
-            error(e->getLocation(), "field '" + ma->getFieldName() +
-                                        "' is read before it is assigned");
-            ok = false;
-          }
           return;
         }
         case ast::ASTNode::NK_MethodCallExpr: {
+          // `self.f(1)` with `f` a field of function type reads `f` and
+          // calls the value it holds; `self` is not given to anything.
           const auto *mc = ast::cast<ast::MethodCallExpr>(e);
-          if (isSelf(mc->getReceiver()))
-            reportSelfUse(e->getLocation(), assigned, inSuper);
-          else
+          if (!isSelf(mc->getReceiver()))
             checkUses(mc->getReceiver(), assigned, inSuper);
+          else if (mc->isFieldCall())
+            checkFieldRead(mc->getMethodName(), e->getLocation(), assigned,
+                           inSuper);
+          else
+            reportSelfUse(e->getLocation(), assigned, inSuper);
           each(mc->getArguments());
           return;
         }

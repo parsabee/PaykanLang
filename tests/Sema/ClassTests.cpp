@@ -1201,6 +1201,41 @@ fn main() -> int { c = C(True); return S().y + c.n + W(0).a; }
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
+// Calling the function a field holds reads the field and passes `self`
+// nowhere: once the field is assigned (an own one, or a superclass's after
+// `__super__(...)`), `self.f(1)` is fine before every field is; before it, it
+// reads a field with no value.
+TEST(Class, InitCallsAFunctionFieldOnceItIsAssigned) {
+  auto ok = semaCheck(R"(
+class C { f: (int) -> int; n: int; }
+impl C { fn __init__() { self.f = fn(x: int) => x + 1; self.n = self.f(1); } }
+struct S { f: (int) -> int; n: int; }
+impl S { fn __init__() { self.f = fn(x: int) => x * 3; self.n = self.f(2); } }
+class B { f: (int) -> int; }
+class D : B { n: int; }
+impl D { fn __init__() { __super__(fn(x: int) => x + 1); self.n = self.f(1); } }
+fn main() -> int { return C().n + S().n + D().n; }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+
+  auto bad = semaCheck(R"(
+class C { f: (int) -> int; n: int; }
+impl C { fn __init__() { self.n = self.f(1); self.f = fn(x: int) => x; } }
+class B { f: (int) -> int; k: int; }
+class D : B { n: int; }
+impl D { fn __init__() { __super__(fn(x: int) => x, self.f(1)); self.n = 1; } }
+fn main() -> int { return C().n + D().n; }
+)");
+  EXPECT_FALSE(bad.Ok);
+  for (const char *e :
+       {"3:35: error: field 'f' is read before it is assigned",
+        "6:53: error: 'self' is used before every field is assigned: "
+        "'__super__' has not run yet"})
+    EXPECT_NE(bad.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                          << bad.Diagnostics;
+  EXPECT_EQ(bad.ErrorCount, 2u) << bad.Diagnostics;
+}
+
 // An initializer has no result: constructing gives the object (or the
 // struct) it set up.
 TEST(Class, InitWithAResultTypeRejected) {
@@ -1221,6 +1256,8 @@ TEST(Class, InitWithAResultTypeRejected) {
                                  "nothing"),
               std::string::npos)
         << decl << r.Diagnostics;
+    // Its constructions and their uses are follow-ons.
+    EXPECT_EQ(r.ErrorCount, 1u) << decl << r.Diagnostics;
   }
   // Named as written.
   auto r = semaCheck("class C { x: int; }\nimpl C { fn ___init__() -> int { "

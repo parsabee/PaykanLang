@@ -733,6 +733,11 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     auto *elemTy = resolveType(at->getElementType(), loc, context + " element");
     if (!elemTy)
       return nullptr;
+    if (elemTy == Ctx.getVoidTy()) { // it has no value (resolveValueType)
+      error(loc, context + " has type 'void[]': an array element cannot have "
+                           "type 'void'");
+      return nullptr;
+    }
     if (fixedElementBytes(elemTy) < 0) {
       error(loc, context + " has type '" + typeName(elemTy) +
                      "[]': a slice of '" + typeName(elemTy) +
@@ -756,6 +761,11 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     ast::Type *fixed = base;
     for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
       fixed = Ctx.getFixedArrayType(fixed, *it);
+    if (base == Ctx.getVoidTy()) { // it has no value (resolveValueType)
+      error(loc, context + " has type '" + typeName(fixed) +
+                     "': an array element cannot have type 'void'");
+      return nullptr;
+    }
     if (!allowFixed) {
       errorFixedArrayHere(loc, fixed, context);
       return nullptr;
@@ -1942,6 +1952,15 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       return sig->ReturnType;
     }
   if (!sig) {
+    // A struct whose declaration was rejected has no constructor: the
+    // declaration's error is the one to report, and the struct's type
+    // keeps flowing (its field accesses are follow-ons too).
+    if (auto *st = S.Ctx.lookupStructType(node->getCalleeName());
+        st && S.ErroneousClasses.count(st->getName())) {
+      ++S.SuppressedFollowOns;
+      node->setResolvedType(st);
+      return st;
+    }
     if (S.reportPrivateImport(node->getCalleeName(), node->getLocation()))
       return nullptr;
     // `m::E::V(x)` names a variant of an enum of the failed module `m`.
@@ -4816,8 +4835,10 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
                                         subjectCt->getName() + "'");
           ok = false;
         } else if (armCt->isAbstract()) {
-          // An arm is an exact-class test, and no object is of an abstract
-          // class.
+          // An arm is an exact-class test, and an object is of an abstract
+          // class only while it is being constructed (its `__init__` has
+          // assigned its fields, its subclass's has not), which no arm can
+          // rely on.
           reportAbstractArm(arm, armCt);
           ok = false;
         }
@@ -4846,8 +4867,9 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
 void Sema::reportAbstractArm(const ast::MatchArm *arm,
                              const ast::ClassType *armCt) {
   error(arm->getLocation(),
-        "unreachable arm: no object has the exact type of abstract class '" +
-            displayName(armCt->getName()) + "'");
+        "a 'match' arm cannot name abstract class '" +
+            displayName(armCt->getName()) +
+            "': an object is of it only while it is being constructed");
 }
 
 // Optional-mode match: the subject is `T?`.

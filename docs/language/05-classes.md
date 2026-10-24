@@ -632,7 +632,8 @@ Until `__init__` has assigned every field of its class's body, on every path so 
 optional field starts as `None`), `self` is only the place those fields are assigned in:
 
 - A field assigned on every path so far can be read; one that may not be is an error:
-  `field 'start' is read before it is assigned`.
+  `field 'start' is read before it is assigned`. Calling the function a field holds
+  (`self.f(1)` with `f: (int) -> int`) reads the field, and passes `self` nowhere.
 - Any other use of `self` is an error until every field is assigned: calling a method on it
   (a `view fn` too), passing it to a function or a constructor, storing, returning or
   comparing it, or a lambda capturing it: `'self' is used before every field is assigned:
@@ -1021,10 +1022,13 @@ impl SportsCar {
   'Tile' has no body, but its superclass 'Square' implements it: an implemented method
   cannot become pure virtual again`. A pure virtual method may be declared pure again in a
   subclass (with the same signature); it stays unimplemented.
-- A `match` arm that names an abstract class can never run, since an arm tests for the
-  exact class and no object is of an abstract one: `unreachable arm: no object has the exact
-  type of abstract class 'Shape'`. The arm that unwraps a `Shape?` is not an exact test and
-  is fine ([Match](08-match.md#valid-arm-types)).
+- A `match` arm cannot name an abstract class. An arm tests for the exact class, and an
+  object is of an abstract class only while it is being constructed, from where the
+  class's `__init__` has assigned its fields to where the subclass's `__init__` has
+  assigned its own; no constructed object is of it, and no arm should depend on that
+  moment: `a 'match' arm cannot name abstract class 'Shape': an object is of it only while
+  it is being constructed`. The arm that unwraps a `Shape?` is not an exact test and is
+  fine ([Match](08-match.md#valid-arm-types)).
 - A generic class's pure virtual methods follow the same rules in each instantiation. A
   superclass cannot be generic ([Generics](13-generics.md#declaring-a-generic-class)), so
   nothing can implement them: a generic class with one is abstract in every instantiation,
@@ -1147,7 +1151,7 @@ created for that argument list. See [Generics](13-generics.md).
 | Constructing an abstract class | `Shape()` where a pure virtual method of `Shape` has no implementation: `cannot instantiate abstract class 'Shape': 'Shape.area' has no implementation` |
 | Pure virtual over an implementation | A subclass declares without a body a method its superclass implements |
 | Bodiless function outside a class body | `fn f();` at the top level: `function 'f' has no body: ...`; in an `impl` block: `'f' in an 'impl' block has no body: ...`, `'f' has no body: a 'static fn' needs one` or `'__init__' has no body: an initializer needs one` (syntax errors) |
-| `match` arm naming an abstract class | `s: Shape { ... }`: `unreachable arm: no object has the exact type of abstract class 'Shape'` |
+| `match` arm naming an abstract class | `s: Shape { ... }`: `a 'match' arm cannot name abstract class 'Shape': an object is of it only while it is being constructed` |
 | Override changes a parameter mode | Override drops, adds or changes a parameter's `view` / `inout` |
 | Override changes `view fn` | Override of a `view fn` is not one, or an override of another method is one |
 | `view fn __init__` or a free `view fn` | `__init__` sets up `self`; a free function has no `self` |

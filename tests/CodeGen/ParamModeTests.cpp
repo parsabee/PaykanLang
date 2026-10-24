@@ -722,6 +722,40 @@ TEST(LocalBorrow, InoutArmsSurviveAChangeThroughAnotherReference) {
   guard.expectNoLeaks("inout arms changed through another reference");
 }
 
+// A struct held in an object is in the object's storage: an `inout` arm or
+// local naming a field of it keeps the object (`o.h`), so another reference
+// that replaces it (`g.h = ...`) frees nothing the arm's write-back or the
+// local's write still reaches.  What they write goes to the object no longer
+// reached.
+TEST(LocalBorrow, InoutPlacesInAStructKeepItsObject) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(import ::io;
+    enum Sh { E, L(s: Str) }
+    class Box { v: Str; }
+    struct Q { n: Str; }
+    struct P { s: Sh; q: Q?; b: Box; }
+    class H { p: P; }
+    class O { h: H; }
+    fn fresh(t: Str) -> H { return H(P(Sh::L(t + ""), Q(t + "q"), Box(t + "b"))); }
+    fn main() -> int {
+      o = O(fresh("x"));
+      g = o;
+      match o.h.p.s { l: inout L { g.h = fresh("y"); l.s = l.s + "!"; } _ { } }
+      match o.h.p.q { q: inout Q { g.h = fresh("z"); q.n = q.n + "!"; } None { } }
+      match o.h.p.b { b: inout Box { g.h = fresh("w"); y = fresh("v"); b = Box("five"); } _ { } }
+      x: inout = o.h.p.s;
+      g.h = fresh("u");
+      x = Sh::L("q" + "r");
+      io::println(o.h.p.s.toString() + " " + o.h.p.q.toString() + " " + o.h.p.b.v);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "L(s: u) Q(n: uq) ub\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  guard.expectNoLeaks("inout places in a struct held in an object");
+}
+
 // An `inout` arm's binding goes back to the subject after its last use in
 // the arm: what the arm does to the subject after that, through its
 // variable or another reference, stays; a binding the arm never uses puts

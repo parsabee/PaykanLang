@@ -297,7 +297,11 @@ variable's own. An array or tuple literal holds its elements, so it stores them 
 `view` of a value type can be one of its elements, as a copy, and one that shares what it
 holds cannot, as a copy of it in the literal could change it later (`[v]`, `(v, 1)` and
 `[v; 3]` with `v: view Node` are `'v' is a 'view' parameter; it cannot be stored, only read
-or passed to a 'view' parameter`, and so is `[self]` in a `view fn`).
+or passed to a 'view' parameter`, and so is `[self]` in a `view fn`). That holds wherever
+the literal goes, a `view` parameter included: with `l` a `List<(Str, Node)>`,
+`l.contains(("ab", l.at(0).1))` is `the result of 'at' is a 'view'; it cannot be stored,
+only read or passed to a 'view' parameter`. A copying accessor gives the literal an element
+of its own: `l.contains(("ab", l.get(0).1))`.
 
 A `match` arm's name for a `view` is a `view` too: in `match v { k: Fast { k.tick(); } }`,
 `k.tick()` is an error, `'k' is bound to a 'view'; 'tick' is not a 'view fn'`.

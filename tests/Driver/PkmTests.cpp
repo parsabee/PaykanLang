@@ -865,9 +865,8 @@ TEST(Pkm, PureVirtualMethodsAcrossModules) {
   EXPECT_TRUE(contains(ok.out, "live blocks       : 0")) << ok.out;
   auto bad = paykan("--check-only bad.pkn");
   EXPECT_NE(bad.exitCode, 0);
-  EXPECT_TRUE(contains(bad.out, "bad.pkn:3:13: error: unreachable arm: no "
-                                "object has the exact type of abstract class "
-                                "'Half'"))
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:3:13: error: a 'match' arm cannot "
+                                "name abstract class 'Half'"))
       << bad.out;
   EXPECT_TRUE(contains(bad.out, "bad.pkn:7:7: error: cannot instantiate "
                                 "abstract class 'Half': 'Shape.area' has no "

@@ -242,7 +242,8 @@ What it names follows the rules of an
 field, also of the object a `let` local holds, of exactly the local's type (`'inout' local
 'f' has type 'float', but what it names has type 'int'`). An expression, an array element
 (not yet), a string's character, `self`, a `let` local and anything reached through a
-`view` are errors. An object whose field it names stays alive while the local can be used.
+`view` are errors. An object whose field it names stays alive while the local can be used,
+and so does one holding a struct whose field it names (`o.h` for `x: inout = o.h.p.s;`).
 
 A local borrow of a variable (or of a field or element reached from one) is exclusive while
 it is live, from its declaration to the last statement of its block that uses it; a loop
