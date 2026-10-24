@@ -1144,6 +1144,103 @@ TEST(Ownership, AnAccessorOfTheObjectItselfKeepsItAlive) {
   g.expectNoLeaks("AnAccessorOfTheObjectItselfKeepsItAlive");
 }
 
+// A call's `inout` result is one object past what it borrowed only when
+// that object can hold a place of its type.  A `C` holds no `S` and no `C`,
+// so `self.s.me()`, `self.s.ref()` and `self.w.get()` return storage in
+// `self`, and `s.ref().k` a field of the object the struct parameter holds,
+// as `s.c.k` does.  With another reference replacing that storage while the
+// result is used, the write lands where the result points: in `h`, or in
+// the object the argument held, which the caller keeps alive.
+TEST(Ownership, AnInoutResultOfATypeNoObjectHoldsStaysInItsStorage) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class C {
+      k: Str;
+      n: int;
+    }
+    struct S {
+      c: C;
+      n: int;
+    }
+    impl S {
+      fn me() -> inout S { return self; }
+      fn ref() -> inout C { return self.c; }
+    }
+    struct W<T> {
+      v: T;
+    }
+    impl W<T> {
+      fn get() -> inout T { return self.v; }
+    }
+    class H {
+      s: S;
+      w: W<C>;
+      fn num() -> inout int { return self.s.me().n; }
+      fn whole() -> inout S { return self.s.me(); }
+      fn ref() -> inout C { return self.s.ref(); }
+      fn get() -> inout C { return self.w.get(); }
+    }
+    fn key(s: inout S) -> inout Str { return s.ref().k; }
+    fn swap(h: H) -> Str {
+      h.s = S(C("zero" + Str(0), 0), 0);
+      h.w = W<C>(C("zero" + Str(0), 0));
+      y = C("three" + Str(3), 3);
+      return y.k;
+    }
+    fn putN(x: inout int, h: H) -> Str {
+      t = swap(h);
+      x = 5;
+      return t;
+    }
+    fn putS(x: inout S, h: H) -> Str {
+      t = swap(h);
+      x = S(C("five" + Str(5), 5), 5);
+      return t;
+    }
+    fn putC(x: inout C, h: H) -> Str {
+      t = swap(h);
+      x = C("five" + Str(5), 5);
+      return t;
+    }
+    fn putK(x: inout Str, h: H) -> Str {
+      t = swap(h);
+      x = "five" + Str(5);
+      return t;
+    }
+    fn mk() -> H {
+      return H(S(C("one" + Str(1), 1), 1), W<C>(C("one" + Str(1), 1)));
+    }
+    fn main() -> int {
+      h = mk();
+      io::println("struct's field: " + putN(h.num(), h) + " " + Str(h.s.n));
+      h = mk();
+      io::println("struct: " + putS(h.whole(), h) + " " + h.s.c.k);
+      h = mk();
+      io::println("struct's slot: " + putC(h.ref(), h) + " " + h.s.c.k);
+      h = mk();
+      io::println("generic struct's slot: " + putC(h.get(), h) + " " + h.w.v.k);
+      h = mk();
+      io::println("struct parameter's object: " + putK(key(h.s), h) + " " + h.s.c.k);
+      h = mk();
+      c = h;
+      x: inout = h.ref();
+      t = swap(c);
+      x = C("five" + Str(5), 5);
+      io::println("bound: " + x.k + " " + t + " " + c.s.c.k);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "struct's field: three3 5\n"
+                      "struct: three3 five5\n"
+                      "struct's slot: three3 five5\n"
+                      "generic struct's slot: three3 five5\n"
+                      "struct parameter's object: three3 zero0\n"
+                      "bound: five5 three3 five5\n");
+  g.expectNoLeaks("AnInoutResultOfATypeNoObjectHoldsStaysInItsStorage");
+}
+
 // A call of a function whose own body makes no store that releases a
 // reference still replaces what its callees, a recursion, a method a
 // subclass overrides, its `inout` parameter or a struct method's `self`

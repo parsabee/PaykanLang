@@ -19,24 +19,6 @@ namespace sema {
 
 namespace {
 
-/// Whether a place can follow a reference held in storage of type @p ty to
-/// another object: @p ty is a class (not `Str` or `Obj`, whose storage no
-/// place reaches), or a struct, a tuple or a fixed-size array holding one
-/// in its own bytes.  Not a slice: its caller keeps no object in the array
-/// alive.  No place reaches into an optional, an enum or a function value.
-bool followsReference(const ast::Type *ty) {
-  if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty))
-    return !ct->isBuiltin();
-  if (const auto *at = ast::dyn_cast<ast::FixedArrayType>(ty))
-    return followsReference(at->getElementType());
-  // A struct is a tuple with names.
-  if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty))
-    return std::any_of(tt->getElementTypes().begin(),
-                       tt->getElementTypes().end(),
-                       [](const ast::Type *e) { return followsReference(e); });
-  return false;
-}
-
 /// The place @p e as it is written, for a diagnostic: `self.c`, `n.t.0`,
 /// `self.xs[2]`, `a[i]`, `self.slot().c` (an index other than a number or a
 /// name, or a call's arguments, as `...`).
@@ -66,6 +48,49 @@ std::string placeText(const ast::Expr *e) {
 
 } // namespace
 
+bool Sema::holdsPlace(ast::Type *ty, ast::Type *place) {
+  if (typesEqual(ty, place))
+    return true;
+  if (const auto *at = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return holdsPlace(at->getElementType(), place);
+  // A struct is a tuple with names.
+  if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty))
+    return std::any_of(tt->getElementTypes().begin(),
+                       tt->getElementTypes().end(),
+                       [&](ast::Type *e) { return holdsPlace(e, place); });
+  return false;
+}
+
+bool Sema::reachesPlace(ast::Type *ty, ast::Type *place) {
+  if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty)) {
+    if (ct->isBuiltin())
+      return false;
+    auto returnsPlace = [&](const ast::MethodDecl *m) {
+      return m->getParamModes().Result == ast::ParamMode::Inout &&
+             holdsPlace(m->getReturnType(), place);
+    };
+    if (std::any_of(ct->getVTable().begin(), ct->getVTable().end(),
+                    returnsPlace))
+      return true;
+    for (const ast::ClassType *c = ct; c; c = c->getSuperClass()) {
+      for (const auto &field : c->getFields())
+        if (holdsPlace(field.second, place))
+          return true;
+      if (std::any_of(c->getImplMethods().begin(), c->getImplMethods().end(),
+                      returnsPlace))
+        return true;
+    }
+    return false;
+  }
+  if (const auto *at = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return reachesPlace(at->getElementType(), place);
+  if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty))
+    return std::any_of(tt->getElementTypes().begin(),
+                       tt->getElementTypes().end(),
+                       [&](ast::Type *e) { return reachesPlace(e, place); });
+  return false;
+}
+
 bool Sema::checkResultDecl(const ast::FuncDecl *fn, bool method) {
   switch (fn->getResultMode()) {
   case ast::ParamMode::Value:
@@ -91,6 +116,7 @@ bool Sema::checkResultDecl(const ast::FuncDecl *fn, bool method) {
 void Sema::noteBorrowResult(const ast::Expr *call, const std::string &callee,
                             const ast::ParamModes &modes,
                             const std::vector<ast::Type *> &paramTys,
+                            ast::Type *resultTy,
                             const std::vector<ast::Expr *> &args,
                             const ast::Expr *receiver) {
   if (modes.Result == ast::ParamMode::Value)
@@ -106,20 +132,25 @@ void Sema::noteBorrowResult(const ast::Expr *call, const std::string &callee,
   r.PastFrom.clear();
   r.Receiver = receiver;
   // A class's method returns part of its object (or of an argument); a
-  // struct's, part of its storage or of an object held there.
+  // struct's, part of its storage or of an object held there that can hold
+  // a place of the result's type.
   if (receiver) {
+    ast::Type *recvTy = receiver->getResolvedType();
+    const auto *ct = ast::dyn_cast<ast::ClassType>(recvTy);
     r.From.push_back(receiver);
-    r.PastFrom.push_back(followsReference(receiver->getResolvedType()));
+    r.PastFrom.push_back(ct ? !ct->isBuiltin()
+                            : reachesPlace(recvTy, resultTy));
   }
   // An `inout` result can only be part of an `inout` argument: of the
-  // storage passed as the parameter's type (a slice's, an array).
+  // storage passed as the parameter's type (a slice's, an array), or of an
+  // object a reference held there refers to.
   for (size_t i = 0; i < args.size(); ++i)
     if (modes.mode(i) == ast::ParamMode::Inout ||
         (modes.mode(i) == ast::ParamMode::View &&
          modes.Result == ast::ParamMode::View)) {
       r.From.push_back(args[i]);
       r.PastFrom.push_back(i < paramTys.size() &&
-                           followsReference(paramTys[i]));
+                           reachesPlace(paramTys[i], resultTy));
     }
 }
 
@@ -248,28 +279,60 @@ std::string Sema::separateObjectError(const ast::Expr *e) const {
   const BorrowResult *via = nullptr;
   if (inoutReach(e, past, via) >= 0)
     return "";
-  const std::string place = placeText(past);
   std::string msg =
       "'" + displayName(CurrentResult.Fn->getName()) + "' returns ";
   msg +=
       via ? "the 'inout' result of '" + via->Callee + "', which can point into "
           : std::string("an 'inout' reference into ");
   // The object `past` refers to, or one a value holds; a slice's are in
-  // its caller's array.
+  // its caller's array.  A call's `inout` result is no object: the call
+  // names the object its reference refers to, and its receiver or argument
+  // where the result is.
   const ast::Identifier *root = placeRoot(past);
   const bool slice = root && ast::isa<ast::SliceType>(root->getResolvedType());
-  if (slice)
-    msg += "an object of the slice '" + root->getName() + "'";
-  else if (ast::isa<ast::ClassType>(past->getResolvedType()))
-    msg += "'" + place + "', a separate object";
-  else
-    msg += "an object '" + place + "' holds";
+  std::string object = "that object";
+  if (auto call = BorrowResults.find(past); call != BorrowResults.end()) {
+    msg += "a separate object, the one referred to by the 'inout' result of '" +
+           call->second.Callee + "', which can point into " +
+           resultPlaceText(call->second);
+  } else {
+    object = "'" + placeText(past) + "'";
+    if (slice)
+      msg += "an object of the slice '" + root->getName() + "'";
+    else if (ast::isa<ast::ClassType>(past->getResolvedType()))
+      msg += object + ", a separate object";
+    else
+      msg += "an object " + object + " holds";
+  }
   msg += ": an 'inout' result can only point into 'self' or into an "
          "'inout' parameter's storage";
   if (slice)
     msg += ", and its caller keeps no object in a slice alive";
-  return msg + "; return a copy, or call an accessor on '" + place +
-         "' directly";
+  return msg + "; return a copy, or call an accessor on " + object +
+         " directly";
+}
+
+std::string Sema::resultPlaceText(const BorrowResult &r) const {
+  // The farthest of what it borrowed, as inoutReach counts it.
+  size_t farthest = 0;
+  int least = 0;
+  for (size_t i = 0; i < r.From.size(); ++i) {
+    const ast::Expr *past = nullptr;
+    const BorrowResult *via = nullptr;
+    const int left = inoutReach(r.From[i], past, via) - (r.PastFrom[i] ? 1 : 0);
+    if (i == 0 || left < least) {
+      farthest = i;
+      least = left;
+    }
+  }
+  const ast::Expr *from = r.From[farthest];
+  std::string place = "'" + placeText(from) + "'";
+  // A class-typed one's object is where it can point (as for `self.c`); a
+  // value's, its storage or an object it holds.
+  if (r.PastFrom[farthest] &&
+      !ast::isa<ast::ClassType>(from->getResolvedType()))
+    return "an object " + place + " holds";
+  return place;
 }
 
 } // namespace sema

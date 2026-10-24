@@ -1056,9 +1056,10 @@ private:
     ast::ParamMode Mode = ast::ParamMode::View;
     std::vector<const ast::Expr *> From;
     /// For each of From, whether the result can be in an object one
-    /// reference past it (followsReference): the object a class's receiver
-    /// or a class-typed argument refers to, or one that a struct's, a
-    /// tuple's or a fixed-size array's storage refers to.
+    /// reference past it: the object a class's receiver refers to, or one
+    /// that a class-typed argument, or a struct's, a tuple's or a
+    /// fixed-size array's storage, refers to and that can hold a place of
+    /// the result's type (reachesPlace).
     std::vector<bool> PastFrom;
     /// The receiver, the first of From; null for a function's call.
     const ast::Expr *Receiver = nullptr;
@@ -1067,14 +1068,29 @@ private:
   /// The result-mode rules of the declaration of @p fn (a method when
   /// @p method): `main` returns a copy, and a `view fn` no `inout`.
   bool checkResultDecl(const ast::FuncDecl *fn, bool method);
-  /// Record that @p call, of @p callee with @p modes and parameter types
-  /// @p paramTys, returns a borrow of @p receiver (or null) and its
-  /// borrowed @p args.
+  /// Record that @p call, of @p callee with @p modes, parameter types
+  /// @p paramTys and result type @p resultTy, returns a borrow of
+  /// @p receiver (or null) and its borrowed @p args.
   void noteBorrowResult(const ast::Expr *call, const std::string &callee,
                         const ast::ParamModes &modes,
                         const std::vector<ast::Type *> &paramTys,
+                        ast::Type *resultTy,
                         const std::vector<ast::Expr *> &args,
                         const ast::Expr *receiver);
+  /// Whether storage of type @p ty holds a place of type @p place in its
+  /// own bytes: it is one, or a struct, a tuple or a fixed-size array
+  /// holding one.  Not through a reference, which leads to another object.
+  static bool holdsPlace(ast::Type *ty, ast::Type *place);
+  /// Whether an object a reference held in storage of type @p ty refers to
+  /// can hold a place of type @p place, which an `inout` result of that
+  /// type can then point to: @p ty is a class (not `Str` or `Obj`, whose
+  /// storage no place reaches), or a struct, a tuple or a fixed-size array
+  /// holding one in its own bytes, and a field of that class holds such a
+  /// place, or the `inout` result of one of its methods does (an override,
+  /// in a subclass, can return a field of its own).  Not a slice: its
+  /// caller keeps no object in the array alive.  No place reaches into an
+  /// optional, an enum or a function value.
+  static bool reachesPlace(ast::Type *ty, ast::Type *place);
   /// The borrowed result the place @p e is part of, or null.
   const BorrowResult *borrowResultOf(const ast::Expr *e) const;
   /// Whether @p e is a call returning an `inout` result: a place.
@@ -1098,6 +1114,10 @@ private:
   /// cannot be its `inout` result: it is in an object its caller does not
   /// keep alive (inoutReach); "" when it is not.
   std::string separateObjectError(const ast::Expr *e) const;
+  /// Where the `inout` result of call @p r, which a diagnostic follows a
+  /// reference from (so it borrowed something), can point: the receiver or
+  /// argument it can be farthest in (`'n'`, `an object 's' holds`).
+  std::string resultPlaceText(const BorrowResult &r) const;
 
   // -- Where a `view fn` may be declared (SemaViewFn.cpp)
 

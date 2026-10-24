@@ -1979,7 +1979,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
   const std::string callee = displayName(node->getCalleeName());
   S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
   S.checkViewArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
-  S.noteBorrowResult(node, callee, sig->Modes, sig->ParamTypes,
+  S.noteBorrowResult(node, callee, sig->Modes, sig->ParamTypes, sig->ReturnType,
                      node->getArguments(), nullptr);
 
   node->setResolvedType(sig->ReturnType);
@@ -2168,7 +2168,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     S.checkViewArgs(method->getParamModes(), method->getParamTypes(),
                     node->getArguments(), node->getMethodName());
   S.noteBorrowResult(node, node->getMethodName(), method->getParamModes(),
-                     paramTys, node->getArguments(), node->getReceiver());
+                     paramTys, method->getReturnType(), node->getArguments(),
+                     node->getReceiver());
   // An `inout` result is part of the receiver, which must outlive the call.
   if (method->getParamModes().Result == ast::ParamMode::Inout &&
       !S.placeRoot(node->getReceiver()) &&

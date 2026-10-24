@@ -683,8 +683,9 @@ used:
   them alive.
 - Wherever another call's `inout` result can point, when all of it is allowed here: the
   storage of the call's receiver and of each of its `inout` arguments, and the object a
-  reference held there refers to (the receiver's object, for a class's method): `return
-  self.key();`, `return pick(n);` with `n: inout Node`.
+  reference held there refers to when that object can hold the result (the receiver's
+  object, for a class's method): `return self.key();`, `return pick(n);` with
+  `n: inout Node`.
 
 A reference reached past that leads to a separate object. Another reference could replace
 it while the result is in use, freeing the storage the result names, so following one is an
@@ -710,9 +711,20 @@ error: 'e' returns an 'inout' reference into 'self.c', a separate object: an 'in
 So are `return self.c.p.x;`, `return self.arr[0].k;` when the elements are objects,
 `return n.c.k;` with `n: inout Node`, and a call's result in such an object: `return
 self.c.slot();` is `'e' returns the 'inout' result of 'slot', which can point into
-'self.c', a separate object: ...`. A call's result counts as pointing wherever that call
-could point, whatever its body returns: `return self.s.num();` is an error when the struct
-`self.s` holds an object, even if `num` returns its `n`; `return self.s.n;` is not.
+'self.c', a separate object: ...`. A reference followed from a call's result is named by
+the call: `return deep(n).k;`, with `deep(n: inout Node) -> inout C` and `Node` holding a
+`C`, is `'f' returns an 'inout' reference into a separate object, the one referred to by the
+'inout' result of 'deep', which can point into 'n': ...`.
+
+A call's result counts as pointing wherever its signature lets it point, whatever its body
+returns. Past the storage it borrowed, that is an object held there that can hold a place
+of the result's type: one with a field of that type, or of a struct, a tuple or a
+fixed-size array holding one, or with a method whose `inout` result is or holds one (an
+override in a subclass can return a field of its own). With `struct S { c: C; n: int; }`,
+`return self.s.num();` for a method `num() -> inout int` of `S` is an error when `C` has an
+`int` field, even if `num` returns `self.n` (`return self.s.n;` is not). When `C` holds no
+`C`, `return self.s.ref();` for `ref() -> inout C` is in `self.s`, and `return s.ref().k;`
+with `s: inout S` is in the object `s` holds, as `return s.c.k;` is.
 
 Return a copy instead (`-> Str`), or let the caller call the accessor of the object itself:
 its receiver is then what the caller keeps alive.

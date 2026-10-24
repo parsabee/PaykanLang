@@ -390,7 +390,8 @@ fn main() -> int {
 // branch, arm, loop or expression body.  A call's `inout` result can point
 // into what it borrowed and one object past it: into `self.c`'s object for
 // `self.c.slot()`, `pick(self.c)` and `self.c.dslot()`, into an object
-// `self.s` holds for a struct's method.
+// `self.s` holds for a struct's method, and past the object another call's
+// result refers to (`self.slotOfC().slot()`), which is named by that call.
 TEST(BorrowedResult, InoutResultsStayInWhatTheCallerKeepsAlive) {
   auto r = semaCheck(
       R"(class D { x: int; fn xslot() -> inout int { return self.x; } }
@@ -463,7 +464,13 @@ fn main() -> int { return 0; }
                rule + "self.s' directly",
            via(":32:38:", "viaSlot", "dslot", "self.c"),
            via(":33:37:", "viaArg", "pick", "self.c"),
-           via(":35:41:", "viaOwnSlot", "slot", "self.slotOfC()"),
+           std::string(":35:41: error: 'viaOwnSlot' returns the 'inout' "
+                       "result of 'slot', which can point into a separate "
+                       "object, the one referred to by the 'inout' result of "
+                       "'slotOfC', which can point into 'self': an 'inout' "
+                       "result can only point into 'self' or into an 'inout' "
+                       "parameter's storage; return a copy, or call an "
+                       "accessor on that object directly"),
        })
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
@@ -474,7 +481,8 @@ fn main() -> int { return 0; }
 // What an `inout` parameter names stays alive with the object a reference
 // held there refers to, and so does a struct's `self`: one object further,
 // not two (`n.c.k`, `n.arr[1].k`, `s.c.d.x`, `self.c.d.x`, a call's result
-// in `n.c`).  A slice's caller keeps no object in the array alive.
+// in `n.c`, the object a call's result in `self.c` refers to).  A slice's
+// caller keeps no object in the array alive.
 TEST(BorrowedResult, InoutResultsOfParametersReachOneObject) {
   auto r = semaCheck(R"(class D { x: int; }
 class C { k: Str; d: D; fn dslot() -> inout D { return self.d; } }
@@ -513,7 +521,13 @@ fn main() -> int { return 0; }
   };
   for (const std::string &diag : {
            into(":5:34:", "far", "self.c.d"),
-           into(":6:38:", "viaSlot", "self.c.dslot()"),
+           std::string(":6:38: error: 'viaSlot' returns an 'inout' reference "
+                       "into a separate object, the one referred to by the "
+                       "'inout' result of 'dslot', which can point into "
+                       "'self.c'") +
+               rule +
+               "; return a copy, or call an accessor on that object "
+               "directly",
            into(":9:47:", "field", "n.c"),
            into(":10:49:", "element", "n.arr[1]"),
            into(":11:47:", "inStruct", "s.c.d"),
@@ -699,6 +713,99 @@ fn main() -> int {
                                                            << r.Diagnostics;
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+}
+
+// A call's `inout` result can be one object past what it borrowed only in
+// an object that can hold a place of the result's type: a field of its
+// class holds one, or a method's `inout` result does (an override in a
+// subclass can return a field of its own).  So `self.s.me()`,
+// `self.s.ref()`, `self.w.get()`, `first(self.t)`, `s.ref().k` and
+// `s.me().c.k` stay in what they borrowed, as `self.s.c` and `s.c.k` do: a
+// `C` holds no `S` and no `C`.  Not `self.sv.get()` or `self.sv.px()` (a
+// method of `V` returns a `Str`, or a `P` holding an `int`), `self.sl.ref()`
+// or `s.ref().k` (an `L` holds an `L`), or `deep(n).k` (a `Node` holds a
+// `C`).  A reference followed from a call's result is named by the call and
+// where its result can point.
+TEST(BorrowedResult, InoutResultsPastWhatACallBorrowedHoldItsType) {
+  auto r = semaCheck(R"(class C { k: Str; n: int; }
+struct S { c: C; n: int; }
+impl S {
+  fn me() -> inout S { return self; }
+  fn ref() -> inout C { return self.c; }
+}
+struct W<T> { v: T; }
+impl W<T> { fn get() -> inout T { return self.v; } }
+struct P { x: int; }
+class V { fn slot() -> inout Str; fn ps() -> inout P; }
+class D : V {
+  k: Str; p: P;
+  fn slot() -> inout Str { return self.k; }
+  fn ps() -> inout P { return self.p; }
+}
+struct SV { v: V; }
+impl SV {
+  fn get() -> inout Str { return self.v.slot(); }
+  fn px() -> inout int { return self.v.ps().x; }
+}
+class L { k: Str; next: L; }
+struct SL { l: L; }
+impl SL { fn ref() -> inout L { return self.l; } }
+class Node { c: C; }
+fn deep<T>(n: inout T) -> inout C { return n.c; }
+fn outer<T>(n: inout T) -> inout Str { return deep(n).k; }
+fn first(t: inout (C, int)) -> inout C { return t.0; }
+class H {
+  s: S; w: W<C>; t: (C, int); sv: SV; sl: SL; c: C;
+  fn whole() -> inout S { return self.s.me(); }
+  fn num() -> inout int { return self.s.me().n; }
+  fn ref() -> inout C { return self.s.ref(); }
+  fn get() -> inout C { return self.w.get(); }
+  fn viaTuple() -> inout C { return first(self.t); }
+  fn viaV() -> inout Str { return self.sv.get(); }
+  fn viaP() -> inout int { return self.sv.px(); }
+  fn viaL() -> inout L { return self.sl.ref(); }
+  fn slotOfC() -> inout C { return self.c; }
+  fn viaOwnSlot() -> inout Str { return self.slotOfC().k; }
+}
+fn key(s: inout S) -> inout Str { return s.ref().k; }
+fn inner(s: inout S) -> inout Str { return s.me().c.k; }
+fn next(s: inout SL) -> inout Str { return s.ref().k; }
+fn main() -> int {
+  n = Node(C("a", 1));
+  x: inout = outer(n);
+  return 0;
+}
+)");
+  const std::string rule =
+      ": an 'inout' result can only point into 'self' or into an 'inout' "
+      "parameter's storage; return a copy, or call an accessor on ";
+  auto via = [&](const char *at, const char *fn, const char *callee,
+                 const char *place) {
+    return std::string(at) + " error: '" + fn + "' returns the 'inout' " +
+           "result of '" + callee + "', which can point into an object '" +
+           place + "' holds" + rule + "'" + place + "' directly";
+  };
+  auto past = [&](const char *at, const char *fn, const char *callee,
+                  const char *where) {
+    return std::string(at) + " error: '" + fn + "' returns an 'inout' " +
+           "reference into a separate object, the one referred to by the " +
+           "'inout' result of '" + callee + "', which can point into " + where +
+           rule + "that object directly";
+  };
+  for (const std::string &diag : {
+           via(":35:35:", "viaV", "get", "self.sv"),
+           via(":36:35:", "viaP", "px", "self.sv"),
+           via(":37:33:", "viaL", "ref", "self.sl"),
+           past(":39:41:", "viaOwnSlot", "slotOfC", "'self'"),
+           past(":43:44:", "next", "ref", "an object 's' holds"),
+           past(":26:47:", "outer<Node>", "deep<Node>", "'n'"),
+           std::string(":46:14: note: in instantiation of 'outer<Node>' "
+                       "requested here"),
+       })
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
 }
 
 // The rule is checked where the function is defined: an importer of the

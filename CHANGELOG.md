@@ -246,9 +246,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `self.c.p.x`, `self.arr[0].k` with object elements, `n.c.k`, an object of the array an
   `inout` slice reaches (`a[i].k` with `a: inout B[]`, which also wrote to freed memory),
   and another call's `inout` result that can point into one (`return self.c.slot();`,
-  `return pick(self.c);`).  A call's result counts as pointing wherever its call could,
-  whatever its body returns: `return self.s.num();` is an error when the struct `self.s`
-  holds an object, and `return self.s.n;` is not.  Return a copy, or call the object's own
+  `return pick(self.c);`).  A call's result counts as pointing wherever its signature
+  lets it, whatever its body returns: past its receiver and `inout` arguments, into an
+  object held there that can hold a place of the result's type (a field, or a method's
+  `inout` result, of that type or holding it).  So `return self.s.num();` with
+  `num() -> inout int` is an error when the struct `self.s` holds an object with an `int`
+  field, and `return self.s.n;` is not; `return self.s.ref();` with `ref() -> inout C` and
+  `return s.ref().k;` with `s: inout S` compile when a `C` holds no `C`, as before.  A
+  reference followed from a call's result is named by the call (`'f' returns an 'inout'
+  reference into a separate object, the one referred to by the 'inout' result of 'deep',
+  which can point into 'n': ...`).  Return a copy, or call the object's own
   accessor where the result is used (`h.c.slot()`), whose receiver the caller then keeps
   alive.  The rule is checked where a function is defined, an override and an
   `impl ... for` method too, and in each instantiation of a generic one.  `-> view T`

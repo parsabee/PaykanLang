@@ -1078,6 +1078,33 @@ TEST(Pkm, BorrowedResultsAcrossModules) {
   EXPECT_TRUE(contains(badgen.out, "badgen.pkn:3:7: note: in instantiation "
                                    "of 'Wrap<D>' requested here"))
       << badgen.out;
+  // Whether an object can hold a place of a call's result type is read from
+  // the module file too: a method of `C` returns a `Str`, which a subclass
+  // finds in its own object, so `s.get()` can point past `s`; a `C` holds
+  // no `int`, so `s.num()` is in its storage.
+  writeFile(dir / "slots.pkn",
+            "class C { fn slot() -> inout Str; }\n"
+            "class D : C { k: Str;\n"
+            "  fn slot() -> inout Str { return self.k; } }\n"
+            "struct S { c: C; n: int; }\n"
+            "impl S { fn get() -> inout Str { return self.c.slot(); }\n"
+            "  fn num() -> inout int { return self.n; } }\n");
+  writeFile(dir / "useslots.pkn",
+            "import slots;\n"
+            "class H { s: slots::S;\n"
+            "  fn e() -> inout Str { return self.s.get(); }\n"
+            "  fn f() -> inout int { return self.s.num(); } }\n"
+            "fn main() -> int { return 0; }\n");
+  ASSERT_EQ(paykan("--emit-pkm slots.pkn").exitCode, 0);
+  fs::remove(dir / "slots.pkn");
+  auto useslots = paykan("--check-only useslots.pkn");
+  EXPECT_NE(useslots.exitCode, 0);
+  EXPECT_TRUE(contains(useslots.out,
+                       "useslots.pkn:3:32: error: 'e' returns the 'inout' "
+                       "result of 'get', which can point into an object "
+                       "'self.s' holds"))
+      << useslots.out;
+  EXPECT_FALSE(contains(useslots.out, "useslots.pkn:4:")) << useslots.out;
   auto dump = paykan("pkm dump --section=iface base.pkm");
   EXPECT_TRUE(contains(dump.out, "method peek() -> view Counter flags 0x2"))
       << dump.out;
