@@ -999,8 +999,9 @@ TEST(Lowering, TheMainModuleOfAProgramKnowsItsClassesOverrides) {
 // store into a field keeps its read held: an assignment, a compound one, an
 // `inout` argument or local, a `match` arm's `n: inout T` (whose copy is
 // written back), an `-> inout` result (either branch of one), a lambda's
-// body (one an `__init__` makes too), a derived class's method, and a copy
-// of a generic function, which names its type argument's fields.  So is a
+// body (one an `__init__` makes too), a derived class's method, a copy of
+// a generic function, which names its type argument's fields, and an
+// `__init__`'s store into another object of the class.  So is a
 // struct's part in an object (a copy of the struct replaces it), a read in
 // an `__init__`, and one rooted in a parameter the function may hand on.
 // Outside a program's main module, where an importer may name `Holder`,
@@ -1104,6 +1105,19 @@ TEST(Lowering, AFieldStoredOnlyAtConstructionNeedsNoHold) {
       }
     }
     fn spoil<T>(v: T) { v._spoiled = "t"; }
+    class Link {
+      tag: Str;
+      view fn tagRead(f: () -> int) -> Str { return self.tag + Str(f()); }
+    }
+    impl Link {
+      fn __init__(prev: Link?) {
+        self.tag = "t";
+        match prev {
+          o: Link { o.tag = "o"; }
+          None { }
+        }
+      }
+    }
     fn main() -> int { return 0; }
   )";
   struct Case {
@@ -1130,6 +1144,7 @@ TEST(Lowering, AFieldStoredOnlyAtConstructionNeedsNoHold) {
       {"Vault.sharedRead", ", Vault._shared", true, true},
       {"Vault.openRead", ", Vault.open", true, false},
       {"Vault.spoiledRead", ", Vault._spoiled", true, false},
+      {"Link.tagRead", ", Link.tag", false, false},
   };
   for (lowering::World world :
        {lowering::World::Open, lowering::World::Closed}) {

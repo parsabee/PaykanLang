@@ -578,6 +578,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// refused for a function's name.
   bool checkBinderName(const std::string &name, ast::SourceLocation loc,
                        bool binds = true);
+  /// In a method's own body (not a lambda's in it, which is a function of
+  /// its own), `self` names what the method was called on, and the rules on
+  /// `self` (an `__init__`'s field assignments, a `view fn`'s read-only
+  /// `self`) and the lowering take it so: a declaration, a destructuring
+  /// target, a `for` loop's variable or a match binding named `self` there
+  /// is reported at @p loc, and false returned.
+  bool checkNotSelf(const std::string &name, ast::SourceLocation loc);
   /// Reports a parameter of @p fn named like an earlier one, as a
   /// duplicate in @p what ("function 'f'"), and returns false.
   bool checkDistinctParams(const ast::FuncDecl *fn, const std::string &what);

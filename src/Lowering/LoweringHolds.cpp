@@ -1367,7 +1367,8 @@ void ModuleLowering::BufferUses::expr(ast::Expr *e) {
 // `match` with an arm's `n: inout T` (which writes its subject back), and an
 // `-> inout` function's result, which its caller may write through, are
 // stores; a lambda's body is code of its own, wherever it is written.  An
-// `__init__` runs once, on an object no one else has yet, and is called by
+// `__init__` runs once, on an object no one else has yet (`self` names it
+// in all of the body: nothing there may bind the name), and is called by
 // nothing but its constructor and a derived class's `__init__` (Sema), so
 // its stores are made in its own frame, under any code that reads the
 // object, and none is made while a call made by such code runs.  A native
@@ -1502,7 +1503,8 @@ void ModuleLowering::FieldStoreScan::stmt(ast::Stmt *s) {
   } else if (auto *x = ast::dyn_cast<ast::MemberAssignStmt>(s)) {
     ast::Expr *recv = x->getReceiver();
     // What an `__init__` gives its object (or a struct's `__init__` its
-    // own storage).
+    // own storage): `self` names it in all of the body, as nothing there
+    // may bind the name (Sema::checkNotSelf).
     const auto *id = ast::dyn_cast<ast::Identifier>(recv);
     if (Init && id && id->getName() == names::kSelf) {
       expr(recv);

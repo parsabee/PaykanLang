@@ -1334,6 +1334,98 @@ TEST(Class, SelfParameterNameInInitRejected) {
             std::string::npos);
 }
 
+// -- `self` cannot be bound in a method
+
+// In a method's body `self` names the object the method was called on: no
+// declaration (one in a nested block too), `inout` local, `for` loop
+// variable, `match` binding or destructuring target can give the name to
+// another value, so `self.f = v` always assigns the method's own object.
+TEST(Class, SelfCannotBeBoundInAMethod) {
+  const char *const bodies[] = {
+      "match other { self: A { self.n = 1; } None { } }",
+      "match other { self: inout A { self.n = 1; } None { } }",
+      "if self.n > 0 { self: A = A(); }",
+      "if self.n > 0 { x = A(); self: inout = x; }",
+      "for self in 0..3 { }",
+      "self, k = (A(), 2);",
+  };
+  for (const char *body : bodies) {
+    auto r = semaCheck(std::string(R"(
+    class A {
+      n: int;
+      fn m(other: A?) { )") +
+                       body + R"( }
+    }
+    impl A {
+      fn __init__() { self.n = 0; }
+    }
+    fn main() -> int { return 0; }
+  )");
+    EXPECT_FALSE(r.Ok) << body;
+    EXPECT_NE(r.Diagnostics.find("error: 'self' cannot be used as a variable "
+                                 "name in method 'm' of class 'A'; it is the "
+                                 "implicit receiver"),
+              std::string::npos)
+        << body << "\n"
+        << r.Diagnostics;
+    EXPECT_EQ(r.ErrorCount, 1u) << body << "\n" << r.Diagnostics;
+  }
+}
+
+// An `__init__`'s arm binding `self` would make `self.f = 1` assign the
+// matched object's field, though the field-assignment check counted it as
+// the new object's: the object would be used with `f` unset.
+TEST(Class, InitCannotBindSelfInAMatchArm) {
+  auto r = semaCheck(R"(
+    class A { f: int; }
+    impl A {
+      fn __init__(other: A?) {
+        match other {
+          self: A { self.f = 1; }
+          None { self.f = 2; }
+        }
+      }
+    }
+    fn main() -> int { return A(A(None)).f; }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("6:11: error: 'self' cannot be used as a "
+                               "variable name in method '__init__' of class "
+                               "'A'; it is the implicit receiver"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}
+
+// A lambda written in a method is a function of its own, whose parameter
+// may be named `self`, and a free function has no receiver: its variables
+// may take the name.
+TEST(Class, SelfIsAVariableNameOutsideAMethodsBody) {
+  auto r = semaCheck(R"(
+    class A {
+      n: int;
+      view fn m() -> int {
+        g = fn(self: int) -> int { return self + 1; };
+        return g(self.n);
+      }
+    }
+    impl A {
+      fn __init__() { self.n = 0; }
+    }
+    fn f(x: int?) -> int {
+      match x {
+        self: int { return self; }
+        None { return 0; }
+      }
+    }
+    fn main() -> int {
+      for self in 0..2 { }
+      return f(A().m());
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
+
 // -- __init__ definite-assignment: bool-exhaustive match
 
 TEST(Class, InitFieldAssignedInBoolMatchArmsOk) {

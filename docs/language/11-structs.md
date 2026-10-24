@@ -362,9 +362,10 @@ In a method `self` is the **receiver's storage**, not a copy and not an object: 
 reads and writes `p` itself, as if `p` were passed to an `inout` parameter.  So a method
 assigns `self.x` to change the receiver, and may pass `self` or a field of `self` on to an
 `inout` parameter.  `self` cannot be assigned whole (`cannot assign to 'self': assign its
-fields instead`).  A `view fn` reads `self` and cannot change it, call a method on it that
-is not a `view fn`, or pass it to an `inout` parameter; a `view fn` may copy a `self` of
-value types out (`q = self`, `return self`), while one holding a reference is a `view` of
+fields instead`), nor can a variable of the method take its name, as in a class's method.
+A `view fn` reads `self` and cannot change it, call a method on it that is not a `view fn`,
+or pass it to an `inout` parameter; a `view fn` may copy a `self` of value types out
+(`q = self`, `return self`), while one holding a reference is a `view` of
 what it holds, so it is returned, as are its reference fields, only as a `view` (`'self'
 is read-only in 'view fn name', so part of it can only be returned as a 'view': write
 '-> view Str'`).  A method that never changes `self` and is not a

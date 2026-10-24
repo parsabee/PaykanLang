@@ -762,14 +762,17 @@ CodeGen enforced, now in one place.
   conditional), which its caller may write through, in a lambda's body as
   anywhere else.  Only `self.f = v` in the body of an `__init__`, of the
   field's class or of a class derived from it, is the object's
-  construction: an `__init__` runs once, on an object nothing else holds
-  yet, and nothing but its constructor and a derived class's `__init__`
-  calls it, so none of its stores is made while a call made by code
-  reading the object runs.  A native function stores into nothing but its
-  `inout` arguments, and keeps nothing it is lent past the call
-  (docs/language/03-functions.md, "Native Functions"), and destroying an
-  object runs no code of the program, so nothing else stores into a field.  Which code
-  may store into one depends on what may name it.  In the main module of
+  construction (`self` names the object in all of the body, as nothing in
+  a method's body may bind the name: docs/language/05-classes.md,
+  "Declaration"; `o.f = v` of another object is a store): an `__init__`
+  runs once, on an object nothing else holds yet, and nothing but its
+  constructor and a derived class's `__init__` calls it, so none of its
+  stores is made while a call made by code reading the object runs.  A
+  native function stores into nothing but its `inout` arguments, and
+  keeps nothing it is lent past the call (docs/language/03-functions.md,
+  "Native Functions"), and destroying an object runs no code of the
+  program, so nothing else stores into a field.  Which code may store
+  into one depends on what may name it.  In the main module of
   a program, no other module names the classes it declares or the
   instances of its templates, and every function run on them is one it
   lowers (its copies of other modules' templates too, which may name a

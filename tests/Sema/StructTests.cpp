@@ -412,6 +412,27 @@ fn main() -> int { return 0; }
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
 }
 
+// In a struct's method `self` is the receiver's storage: a binder cannot
+// give the name to another value (as `self = B(1)` cannot assign it).
+TEST(Struct, SelfCannotBeBoundInAMethod) {
+  auto r = semaCheck(R"(
+struct P { n: int; }
+impl P {
+  fn m(o: P?) {
+    match o {
+      self: P { self.n = 1; }
+      None { }
+    }
+  }
+}
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"6:7: error: 'self' cannot be used as a variable name in "
+                "method 'm' of struct 'P'; it is the implicit receiver"});
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}
+
 TEST(Struct, ImplRules) {
   auto r = semaCheck(R"(
 struct A { x: int; y: int; }

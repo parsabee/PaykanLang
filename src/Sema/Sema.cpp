@@ -966,6 +966,20 @@ bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc,
   return true;
 }
 
+bool Sema::checkNotSelf(const std::string &name, ast::SourceLocation loc) {
+  if (name != names::kSelf || !CurrentClassCtx ||
+      CurrentClassCtx->MethodName.empty())
+    return true;
+  ast::Type *owner = CurrentClassCtx->ClassType;
+  if (!owner)
+    owner = CurrentClassCtx->Struct;
+  error(loc, "'" + std::string(names::kSelf) +
+                 "' cannot be used as a variable name in method '" +
+                 CurrentClassCtx->MethodName + "' of " + typeKindWord(owner) +
+                 " '" + typeName(owner) + "'; it is the implicit receiver");
+  return false;
+}
+
 bool Sema::checkDistinctParams(const ast::FuncDecl *fn,
                                const std::string &what) {
   StringSet seen;
@@ -982,7 +996,8 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
                        ast::Type *bindTy) {
   const std::string &name = arm->getBinding();
   std::string msg;
-  if (!checkBinderName(name, arm->getLocation())) {
+  if (!checkBinderName(name, arm->getLocation()) ||
+      !checkNotSelf(name, arm->getLocation())) {
     // Reported.
   } else if (arm->getMode() == ast::ParamMode::Inout) {
     // `n: inout T` is another name for the subject's storage, as an `inout`
@@ -2778,7 +2793,7 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       ok = false;
       continue;
     }
-    if (!checkBinderName(name, target.Loc)) {
+    if (!checkBinderName(name, target.Loc) || !checkNotSelf(name, target.Loc)) {
       // A function's name is poisoned, as in visitAssignStmt.
       if (isFunctionNameForVariable(name) && !CurrentScope->findOwner(name))
         declarePoisoned(CurrentScope, name);
@@ -3628,7 +3643,8 @@ bool Sema::visitForStmt(ast::ForStmt *node) {
   const std::string &name = var->getName();
   const bool discard = name.empty();
   const std::string shown = discard ? "_" : name;
-  bool ok = discard || checkBinderName(name, var->getLocation());
+  bool ok = discard || (checkBinderName(name, var->getLocation()) &&
+                        checkNotSelf(name, var->getLocation()));
   auto isInteger = [](ast::Type *t) {
     const auto *bt = ast::dyn_cast<ast::BuiltinType>(t);
     return bt && bt->isInteger();
@@ -4268,7 +4284,8 @@ bool Sema::rejectInferredMethods(ast::TranslationUnit *tu) {
 bool Sema::visitVarDecl(ast::VarDecl *node) {
   // The name must not shadow a type, a function or a reserved name (#126);
   // a function's is poisoned, as in visitAssignStmt.
-  if (!checkBinderName(node->getName(), node->getLocation())) {
+  if (!checkBinderName(node->getName(), node->getLocation()) ||
+      !checkNotSelf(node->getName(), node->getLocation())) {
     if (isFunctionNameForVariable(node->getName()) &&
         !CurrentScope->contains(node->getName()))
       declarePoisoned(CurrentScope, node->getName());

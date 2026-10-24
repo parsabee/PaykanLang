@@ -1004,6 +1004,9 @@ enums.
   call by the name always means the function. A field may share a function's name (it is
   read as `obj.func`), and so may another module's function, which is always qualified
   (`io::println`).
+- A local never hides a method's `self`: in a method's body no declaration, `for` loop
+  variable, `match` binding or destructuring target can be named `self`, which always
+  names what the method was called on (see [Classes](05-classes.md#declaration)).
 
 ```pkn
 import ::io;

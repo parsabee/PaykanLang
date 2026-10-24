@@ -1694,6 +1694,47 @@ TEST(Ownership, AFieldStoredOnlyAtConstructionIsReadInPlace) {
   g.expectNoLeaks("AFieldStoredOnlyAtConstructionIsReadInPlace");
 }
 
+// An `__init__`'s store into another object of its class is no
+// construction: `self.f` keeps a reference of its own across `remake`,
+// whose `__init__` replaces the `f` of the object it is given, and `tag`
+// runs on the Item that was there, which dies once the statement has used
+// it.  (A binding cannot be named `self` there: Sema rejects it.)
+TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class Item { s: Str; }
+    impl Item {
+      fn __init__(s: Str) { self.s = s; }
+      view fn tag(x: int) -> Str { return self.s + Str(x); }
+    }
+    class A { f: Item; }
+    impl A {
+      fn __init__(other: A?) {
+        self.f = Item("original" + Str(100));
+        match other {
+          o: A { o.f = Item("replaced" + Str(2)); }
+          None { }
+        }
+      }
+      fn run() -> Str { return self.f.tag(remake(self)); }
+    }
+    fn remake(a: A) -> int {
+      b = A(a);
+      return 1;
+    }
+    fn main() -> int {
+      a = A(None);
+      io::println(a.run());
+      io::println(a.f.s);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "original1001\nreplaced2\n");
+  g.expectNoLeaks("AnInitsStoreIntoAnotherObjectIsNoConstruction");
+}
+
 // A string's character is read from the string as it was before its index
 // was computed, as an array's element is, though the call computing it
 // replaces the string (and makes a new one where it was).

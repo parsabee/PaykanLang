@@ -271,34 +271,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   letting go of those may let go of in turn, as an object of an exact class (`Str`, an
   instance of a generic class) holds its fields' (docs/pir.md §7, "Reads a call may
   replace").  The main module of a program (one that is run or built, not one `--emit-pkm`
-  writes) knows the classes derived from its own, as no module can import it to derive
-  more: a virtual call on one of its classes does what the implementations it may run do
+  writes) knows the classes derived from its own, as no module can import it to derive more:
+  a virtual call on one of its classes does what the implementations it may run do
   (`shapes[i].area()` of a `view Shape[]`, the `equals` of a map's `Point` keys), and an
   object of one that dies lets go of what their fields hold (a `Dog` holding a string).  A
   class of another module, and a method it compiles, stay unknown.  A field no code stores
-  into once its object is made (only `self.f = v` in an `__init__`, and no assignment,
-  `inout` argument, local or `match` arm, `-> inout` result or lambda anywhere else) keeps
-  what its `__init__` gave it, so a read of one of `self`, at any depth, needs no
-  reference of its own across any call, one of a method another module compiles too
-  (`self.origin.sum()`): in a program's main module for every field of its own classes,
-  elsewhere for a private one.  The standard library's containers no longer retain and
-  release the object holding their state around their own methods over numbers, strings, a
-  program's own classes and the like (`Stack<int>.push`, `HashMap<Str, int>.put`,
-  `HashSet<int>.clear`, `MinPriorityQueue<Str>.pop`, `HashMap<Str, Dog>.put`): 77 of the
-  86 retain/release pairs the fix for reads through objects added (*Fixed*) are gone, and
-  over the samples and the standard library's tests the static retains go from 1421 to
-  1344 (releases 4355 to 4278), with no other change to the code.  Built with `-O2`, loops
-  of millions of operations on them run up to about 13% faster (`Stack<int>`,
-  `Queue<int>`; maps and priority queues within a few percent), and a loop of virtual
-  calls on `self`'s fields and a `view Shape[]` about twice as fast.  Such a read is a
-  `stable` load in PIR (`%b = field.load %o, C.f stable`, `ptr.load box, %p stable`;
-  docs/pir.md §6), which the moves at last use count as held by its slot: the arguments
-  the hold let them hand on are still handed on (`Stack<Str>.push` gives its string to the
-  list with no retain), so every object dies when it did with the hold.  A `.pkm`'s code
-  marks a stable load with a code before its opcode, so code written before reads as it
-  did (docs/design/pkm.md §5.5).  A read rooted in a variable, which the function may hand
-  on, keeps its reference across any call that may let go of one, so the moves at last use
-  there stay as they were.
+  into once its object is made (only `self.f = v` in an `__init__`, where `self` is always
+  the new object (*Fixed*), and no assignment, `inout` argument, local or `match` arm,
+  `-> inout` result or lambda anywhere else) keeps what its `__init__` gave it, so a read of
+  one of `self`, at any depth, needs no reference of its own across any call, one of a
+  method another module compiles too (`self.origin.sum()`): in a program's main module for
+  every field of its own classes, elsewhere for a private one.  The standard library's
+  containers no longer retain and release the object holding their state around their own
+  methods over numbers, strings, a program's own classes and the like (`Stack<int>.push`,
+  `HashMap<Str, int>.put`, `HashSet<int>.clear`, `MinPriorityQueue<Str>.pop`,
+  `HashMap<Str, Dog>.put`): 77 of the 86 retain/release pairs the fix for reads through
+  objects added (*Fixed*) are gone, and over the samples and the standard library's tests
+  the static retains go from 1421 to 1344 (releases 4355 to 4278), with no other change to
+  the code.  Built with `-O2`, loops of millions of operations on them run up to about 13%
+  faster (`Stack<int>`, `Queue<int>`; maps and priority queues within a few percent), and a
+  loop of virtual calls on `self`'s fields and a `view Shape[]` about twice as fast.  Such a
+  read is a `stable` load in PIR (`%b = field.load %o, C.f stable`,
+  `ptr.load box, %p stable`; docs/pir.md §6), which the moves at last use count as held by
+  its slot: the arguments the hold let them hand on are still handed on (`Stack<Str>.push`
+  gives its string to the list with no retain), so every object dies when it did with the
+  hold.  A `.pkm`'s code marks a stable load with a code before its opcode, so code written
+  before reads as it did (docs/design/pkm.md §5.5).  A read rooted in a variable, which the
+  function may hand on, keeps its reference across any call that may let go of one, so the
+  moves at last use there stay as they were.
 - An object handed on at a variable's last use lives as long as its destination holds it,
   no longer until the variable's scope ends (docs/language/16-memory.md, "Ownership
   transfers").  Nothing is ever released earlier than its last holder lets it go, and
@@ -581,6 +581,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   method or a free function with `(qual static)` (read as if it had none). As in the
   recursive-descent grammar, a native body is now a top-level function's only and `(qual
   static)` an `impl` block's method's only.
+- A method's body could give the name `self` to another variable, hiding the object the
+  method was called on: a `match` arm `self: A { … }`, `for self in 0..3`, a declaration
+  in a nested block (`self: A = a;`, `self: inout = a;`) or a destructuring target.  In an
+  `__init__`, `self.f = 1` in such an arm assigned the matched object's field and counted
+  as assigning the new object's, which was then used with `f` unset (a crash), and `self,
+  k = (A(), 2);` stopped the compiler (`internal compiler error: destructuring into unowned
+  variable 'self'`).  Each is now an error, `'self' cannot be used as a variable name in
+  method 'm' of class 'A'; it is the implicit receiver`, as a parameter named `self` is
+  (docs/language/05-classes.md, "Declaration").  A lambda written in a method may still
+  name its parameter `self`, and a free function's variables may take the name.
 
 ## [0.2.0] - 2026-10-20
 
