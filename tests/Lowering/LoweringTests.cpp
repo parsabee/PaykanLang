@@ -515,6 +515,96 @@ TEST(Lowering, ClassItemCarriesFlattenedLayoutAndVTable) {
   EXPECT_NE(m.find(" : Derived ["), std::string::npos) << m;
 }
 
+// A pure virtual method's function is a trap, the slot's target in its
+// class and in a subclass that leaves it unimplemented; an implementation
+// replaces it in the subclass's vtable.  An abstract class has no
+// constructor (nothing allocates it) but keeps its `__init__` and its
+// destructor, which its subclasses' use.
+TEST(Lowering, PureVirtualSlotsAreTrapsAndAbstractClassesHaveNoConstructor) {
+  auto l = lower(R"(
+    class Shape {
+      name: Str;
+      view fn area() -> float;
+      view fn kind() -> Str;
+    }
+    impl Shape {
+      fn __init__(name: Str) { self.name = name; }
+      view fn report() -> float { return self.area(); }
+    }
+    class Polygon : Shape {
+      view fn kind() -> Str { return "polygon"; }
+    }
+    class Square : Polygon {
+      side: float;
+      view fn area() -> float { return self.side * self.side; }
+    }
+    fn main() -> int { s: Shape = Square("s", 2.0); return int<float>(s.report()); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string &t = l.Text;
+  std::string trap = function(t, "Shape.area");
+  EXPECT_EQ(trap,
+            "fn @Shape.area(%self.1: obj) -> f64 {\n"
+            "  call @$rt.Paykan_panic_pure_virtual(@.str0, 5, @.str1, 4)\n"
+            "  unreachable\n}\n")
+      << t;
+  EXPECT_NE(t.find("cstr @.str0 = \"Shape\" len 5\ncstr @.str1 = \"area\" "
+                   "len 4\n"),
+            std::string::npos)
+      << t;
+  EXPECT_NE(function(t, "Shape.kind").find("Paykan_panic_pure_virtual"),
+            std::string::npos)
+      << t;
+  EXPECT_NE(t.find("extern fn @$rt.Paykan_panic_pure_virtual(ptr, i64, ptr, "
+                   "i64) -> void"),
+            std::string::npos)
+      << t;
+  // Shape's slots are its traps; Polygon inherits area's and implements
+  // kind; Square implements area.
+  EXPECT_EQ(count(t, "area = @Shape.area : (obj) -> f64"), 2u) << t;
+  EXPECT_NE(t.find("kind = @Polygon.kind : (obj) -> box"), std::string::npos)
+      << t;
+  EXPECT_NE(t.find("area = @Square.area : (obj) -> f64"), std::string::npos)
+      << t;
+  // Only the concrete class is constructed.
+  EXPECT_EQ(function(t, "Shape"), "") << t;
+  EXPECT_EQ(function(t, "Polygon"), "") << t;
+  EXPECT_NE(function(t, "Square").find(" = new Square"), std::string::npos)
+      << t;
+  EXPECT_EQ(count(t, " = new "), 1u) << t;
+  EXPECT_NE(function(t, "Shape.__init__"), "") << t;
+  EXPECT_NE(function(t, "Polygon.__init__").find("call @Shape.__init__("),
+            std::string::npos)
+      << t;
+  EXPECT_NE(function(t, "Shape.destroy"), "") << t;
+  // The impl method calls the pure one through the vtable.
+  EXPECT_NE(function(t, "Shape.report").find("vcall %"), std::string::npos)
+      << t;
+}
+
+// A subclass that declares an inherited pure virtual method pure again has
+// a trap of its own, which names the method by the class that declares it
+// pure first, as Sema's "cannot instantiate" error does.
+TEST(Lowering, RedeclaredPureVirtualTrapNamesTheDeclaringClass) {
+  auto l = lower(R"(
+    class Shape { view fn area() -> float; }
+    class Mid : Shape { view fn area() -> float; }
+    class Square : Mid {
+      side: float;
+      view fn area() -> float { return self.side * self.side; }
+    }
+    fn main() -> int { s: Shape = Square(2.0); return int<float>(s.area()); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string &t = l.Text;
+  EXPECT_NE(t.find("area = @Mid.area : (obj) -> f64"), std::string::npos) << t;
+  EXPECT_NE(function(t, "Mid.area").find("Paykan_panic_pure_virtual"),
+            std::string::npos)
+      << t;
+  EXPECT_NE(t.find("\"Shape\" len 5"), std::string::npos) << t;
+  EXPECT_EQ(t.find("\"Mid\""), std::string::npos) << t;
+}
+
 TEST(Lowering, FieldStoreRetainsNewAndReleasesOldValue) {
   auto l = lower(R"(
     class H { s: Str; }

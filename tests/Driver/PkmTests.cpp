@@ -787,6 +787,76 @@ TEST(Pkm, ViewFnAcrossModules) {
   fs::remove_all(dir);
 }
 
+// A module's pure virtual methods are in its `.pkm` (each method's flags
+// byte, bit 4): the importer, without the source, works out which classes
+// are abstract, implements them in a subclass and runs it, and is refused
+// what it may not do with an abstract class.
+TEST(Pkm, PureVirtualMethodsAcrossModules) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_pure_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "base.pkn",
+            "class Shape {\n"
+            "  name: Str;\n"
+            "  view fn area() -> float;\n"
+            "  fn grow();\n"
+            "}\n"
+            "impl Shape {\n"
+            "  fn __init__(name: Str) { self.name = name; }\n"
+            "  view fn report() -> Str { return self.name + \" \" + "
+            "Str(self.area()); }\n"
+            "}\n"
+            "class Half : Shape { fn grow() { } }\n");
+  writeFile(dir / "main.pkn", "import ::io; import base;\n"
+                              "class Square : base::Half {\n"
+                              "  side: float;\n"
+                              "  view fn area() -> float {\n"
+                              "    return self.side * self.side; }\n"
+                              "}\n"
+                              "fn main() -> int {\n"
+                              "  s: base::Shape = Square(\"sq\", 3.0);\n"
+                              "  s.grow();\n"
+                              "  io::println(s.report());\n"
+                              "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn", "import base;\n"
+                             "fn f(o: Obj) -> int {\n"
+                             "  match o { base::Half { return 1; } _ { } }\n"
+                             "  return 0;\n}\n"
+                             "fn main() -> int {\n"
+                             "  h = base::Half(\"h\");\n"
+                             "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  ASSERT_EQ(paykan("--emit-pkm base.pkn").exitCode, 0);
+  fs::remove(dir / "base.pkn");
+  auto ok = paykan("--track-heap main.pkn");
+  ASSERT_EQ(ok.exitCode, 0) << ok.out;
+  EXPECT_TRUE(contains(ok.out, "sq 9\n")) << ok.out;
+  EXPECT_TRUE(contains(ok.out, "live blocks       : 0")) << ok.out;
+  auto bad = paykan("--check-only bad.pkn");
+  EXPECT_NE(bad.exitCode, 0);
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:3:13: error: unreachable arm: no "
+                                "object has the exact type of abstract class "
+                                "'Half'"))
+      << bad.out;
+  EXPECT_TRUE(contains(bad.out, "bad.pkn:7:7: error: cannot instantiate "
+                                "abstract class 'Half': 'Shape.area' has no "
+                                "implementation"))
+      << bad.out;
+  // The pure bit is the interface's: a `view fn` one is 0x12, a plain one
+  // 0x10, and the subclass's vtable still has the pure `area`.
+  auto dump = paykan("pkm dump --section=iface base.pkm");
+  EXPECT_TRUE(contains(dump.out, "method area() -> float flags 0x12"))
+      << dump.out;
+  EXPECT_TRUE(contains(dump.out, "method grow() -> void flags 0x10"))
+      << dump.out;
+  EXPECT_TRUE(contains(dump.out, "method report() -> Str flags 0x6"))
+      << dump.out;
+  fs::remove_all(dir);
+}
+
 // A class without an `__init__` keeps its default one in a prebuilt module:
 // an importer constructs it from its fields and subclasses it.
 TEST(Pkm, DefaultInitAcrossModules) {

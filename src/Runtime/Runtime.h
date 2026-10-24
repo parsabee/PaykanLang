@@ -606,6 +606,15 @@ PAYKAN_NORETURN void Paykan_panic_index(int64_t index, int64_t len);
 /// loop starts, is 0 (a constant 0 is a compile error).
 PAYKAN_NORETURN void Paykan_panic_for_step(void);
 
+/// Print a diagnostic naming the pure virtual method @p method (@p
+/// method_len bytes) of the class @p cls (@p cls_len bytes) and abort: the
+/// body of a pure virtual method's function, its vtable slot's target until
+/// a subclass implements it.  No object of an abstract class exists, so only
+/// a broken program reaches it.
+PAYKAN_NORETURN void Paykan_panic_pure_virtual(const char *cls, int64_t cls_len,
+                                               const char *method,
+                                               int64_t method_len);
+
 /// Print `paykan: <message>` and abort: the standard library's `native fn`
 /// for a broken precondition (`pop` on an empty list, say).
 PAYKAN_NORETURN void Paykan_panic_message(PaykanObject *message);

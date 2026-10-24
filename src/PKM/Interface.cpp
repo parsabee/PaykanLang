@@ -10,6 +10,7 @@
 #include "paykan/pkm/Interface.h"
 
 #include "Internal.h"
+#include "Names.h"
 #include "paykan/support/Bytes.h"
 
 #include <algorithm>
@@ -455,17 +456,42 @@ Status Reader::readDecls(Interface &out) {
     lastName = name;
     return true;
   };
-  // A class's or a struct's methods, then the modes and result modes every
-  // method has when any does.
-  auto readMethods = [&](ByteReader &v, std::vector<ClassRec::Method> &out) {
+  // Whose method @p m is, for the error, when it cannot be pure virtual;
+  // nullptr when it can.  Only a class's virtual method can, a vtable slot
+  // a subclass implements: never a struct's (a struct has no vtable), an
+  // `impl` block's, an initializer or `destroy` (compiler-generated).
+  auto neverPure = [](const ClassRec::Method &m,
+                      bool ofStruct) -> const char * {
+    if (ofStruct)
+      return "a struct";
+    if (m.Flags & kMethodImpl)
+      return "an 'impl' block";
+    if (m.Name == names::kMethodInit ||
+        m.Name == names::kMethodInitModulePrivate ||
+        m.Name == names::kMethodDestroy)
+      return "a class";
+    return nullptr;
+  };
+  // A class's or (@p ofStruct) a struct's methods, then the modes and
+  // result modes every method has when any does.
+  auto readMethods = [&](ByteReader &v, std::vector<ClassRec::Method> &out,
+                         bool ofStruct) {
     uint64_t n;
     if (!detail::readCount(v, n, 4))
       return false;
     out.resize(static_cast<size_t>(n));
-    for (ClassRec::Method &m : out)
+    for (ClassRec::Method &m : out) {
       if (!str(v, m.Name) || !str(v, m.ReturnTypeName) ||
           !strList(v, m.ParamTypeNames) || !v.u8(m.Flags))
         return false;
+      if (m.Flags & ~kMethodKnownFlags)
+        return v.fail("method '" + m.Name + "' has unknown flags " +
+                      detail::hex(m.Flags & ~kMethodKnownFlags));
+      if (const char *owner = neverPure(m, ofStruct);
+          owner && (m.Flags & kMethodPure))
+        return v.fail("method '" + m.Name + "' of " + owner +
+                      " is marked pure virtual");
+    }
     if (v.remaining() > 0) // every method's modes
       for (ClassRec::Method &m : out)
         if (!modes(v, m.ParamTypeNames.size(), m.Modes))
@@ -506,7 +532,7 @@ Status Reader::readDecls(Interface &out) {
               return true;
             f.Weak = fflags & kFieldWeak;
           }
-          if (!readMethods(v, c.Methods))
+          if (!readMethods(v, c.Methods, /*ofStruct=*/false))
             return true;
           if (ordered(tag, c.Name))
             out.Classes.push_back(std::move(c));
@@ -524,7 +550,7 @@ Status Reader::readDecls(Interface &out) {
           for (ClassRec::Field &f : s.Fields)
             if (!str(v, f.FieldName) || !str(v, f.TypeName))
               return true;
-          if (!readMethods(v, s.Methods))
+          if (!readMethods(v, s.Methods, /*ofStruct=*/true))
             return true;
           if (ordered(tag, s.Name))
             out.Structs.push_back(std::move(s));

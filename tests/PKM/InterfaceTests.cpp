@@ -238,6 +238,62 @@ TEST(Interface, ResultModes) {
             std::string::npos);
 }
 
+// A method's flags byte carries its pure virtual bit (§3.5's PURE, 0x10):
+// a CLASS record of a pure method round-trips; the bit on a struct's method,
+// an `impl` block's, an initializer or `destroy`, or a bit the format does
+// not know, is rejected.
+TEST(Interface, PureVirtualMethods) {
+  Interface i;
+  i.Module = "shapes";
+  ClassRec shape;
+  shape.Name = "Shape";
+  shape.OriginModule = "shapes";
+  shape.Methods = {{"area", "float", {}, kMethodView | kMethodPure, {}},
+                   {"kind", "Str", {}, kMethodPure, {}},
+                   {"report", "Str", {}, kMethodView | kMethodImpl, {}}};
+  i.Classes.push_back(shape);
+  std::vector<uint8_t> b = writeInterface(i);
+  StatusOr<Interface> back = readInterface(b, "shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, i);
+  EXPECT_EQ((*back).Classes[0].Methods[0].Flags, 0x12);
+  // The bit is part of the interface: it changes the bytes.
+  Interface concrete = i;
+  concrete.Classes[0].Methods[1].Flags = 0;
+  EXPECT_NE(writeInterface(concrete), b);
+
+  Interface bad = i;
+  bad.Classes[0].Methods[2].Flags |= kMethodPure;
+  EXPECT_NE(readError(writeInterface(bad), "shapes")
+                .find("method 'report' of an 'impl' block is marked pure "
+                      "virtual"),
+            std::string::npos);
+  for (const char *slotless : {"__init__", "___init__", "destroy"}) {
+    bad = i;
+    bad.Classes[0].Methods.push_back({slotless, "void", {}, kMethodPure, {}});
+    EXPECT_NE(readError(writeInterface(bad), "shapes")
+                  .find("method '" + std::string(slotless) +
+                        "' of a class is marked pure virtual"),
+              std::string::npos)
+        << slotless;
+  }
+  bad = i;
+  bad.Classes[0].Methods[1].Flags = 0x28;
+  EXPECT_NE(readError(writeInterface(bad), "shapes")
+                .find("method 'kind' has unknown flags 0x28"),
+            std::string::npos);
+  bad = i;
+  StructRec point;
+  point.Name = "Point";
+  point.OriginModule = "shapes";
+  point.Fields = {{"x", "int"}};
+  point.Methods = {{"get", "int", {}, kMethodPure, {}}};
+  bad.Structs.push_back(point);
+  EXPECT_NE(readError(writeInterface(bad), "shapes")
+                .find("method 'get' of a struct is marked pure virtual"),
+            std::string::npos);
+}
+
 TEST(Interface, Deterministic) {
   EXPECT_EQ(writeInterface(sampleInterface()),
             writeInterface(sampleInterface()));

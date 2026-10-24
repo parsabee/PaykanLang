@@ -1,0 +1,20 @@
+// ERROR: a subclass cannot make a method its superclass implements pure
+// virtual again:
+//   method 'area' of class 'Tile' has no body, but its superclass 'Square'
+//   implements it: an implemented method cannot become pure virtual again
+class Shape {
+  view fn area() -> float;
+}
+
+class Square : Shape {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+class Tile : Square {
+  view fn area() -> float;
+}
+
+fn main() -> int {
+  return 0;
+}

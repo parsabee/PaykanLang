@@ -1,0 +1,24 @@
+// ERROR: a type arm tests for the object's exact class, and no object has
+// an abstract class (one with a pure virtual method it does not implement),
+// so an arm naming one can never run:
+//   unreachable arm: no object has the exact type of abstract class 'Shape'
+class Shape {
+  view fn area() -> float;
+}
+
+class Square : Shape {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+fn describe(o: Obj) -> int {
+  match o {
+    Shape { return 1; }
+    Square { return 2; }
+    _ { return 0; }
+  }
+}
+
+fn main() -> int {
+  return describe(Square(2.0));
+}

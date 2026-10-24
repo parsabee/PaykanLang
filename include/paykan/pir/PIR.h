@@ -426,7 +426,7 @@ struct Field {
 
 struct VTableEntry {
   std::string Slot;   // method name (slot 0 is "destroy")
-  std::string Target; // function symbol, or empty for an abstract (null) slot
+  std::string Target; // function symbol, or empty for a null slot
   Signature Sig;
 };
 

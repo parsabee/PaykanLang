@@ -1,0 +1,53 @@
+// OK: pure virtual methods (docs/language/05-classes.md). Shape declares
+// `area` and `kind` without a body, so it is abstract; Polygon implements
+// `kind` only, so it is abstract too; Square implements `area` and can be
+// constructed. The abstract classes are ordinary types: of a variable, a
+// parameter, a field, an array, an optional and a type argument. The impl
+// method `report` and Shape's own `label` call the pure methods through the
+// vtable.
+class Shape {
+  name: Str;
+  view fn area() -> float;
+  view fn kind() -> Str;
+  view fn label() -> Str { return self.kind() + " " + self.name; }
+}
+
+impl Shape {
+  fn __init__(name: Str)    { self.name = name; }
+  view fn report() -> float { return self.area(); }
+}
+
+class Polygon : Shape {
+  view fn kind() -> Str { return "polygon"; }
+}
+
+class Square : Polygon {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+class Box<T> {
+  item: T;
+}
+
+class Scene {
+  main: Shape;
+  extra: Shape?;
+  all: Shape[2];
+}
+
+fn total(shapes: view Shape[]) -> float {
+  return shapes[0].area() + shapes[1].area();
+}
+
+fn main() -> int {
+  a: Shape = Square("a", 1.0);
+  b: Polygon = Square("b", 2.0);
+  scene = Scene(a, None, [a, b]);
+  box = Box<Shape>(b);
+  match scene.extra {
+    s: Shape { return 1; }
+    None { }
+  }
+  return int<float>(total(scene.all) + box.item.report());
+}

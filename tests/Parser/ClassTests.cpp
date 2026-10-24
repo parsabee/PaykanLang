@@ -257,3 +257,131 @@ TEST(Class, MatchArmMissingBodyBrace) {
   )");
   EXPECT_FALSE(ok);
 }
+
+// ─── pure virtual methods ───────────────────────────────────────────────────
+
+// A class body's method whose signature ends with `;` is pure virtual: a
+// FuncDecl without a body, `fn` or `view fn`, with parameters and a result
+// mode as usual.
+TEST(Class, PureVirtualMethodsInTheClassBody) {
+  auto [ok, driver] = parse(R"(
+    class Shape {
+      name: Str;
+      fn area() -> float;
+      view fn label() -> view Str;
+      view fn scaled(by: float, n: inout int) -> float;
+      fn reset();
+      view fn describe() -> Str { return self.name; }
+    }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(ok);
+  const auto &classes = driver->getRoot()->getClassDecls();
+  ASSERT_EQ(classes.size(), 1u);
+  const auto &methods = classes[0]->getMethods();
+  ASSERT_EQ(methods.size(), 5u);
+  for (size_t i = 0; i < 4; ++i) {
+    EXPECT_EQ(methods[i]->getBody(), nullptr) << methods[i]->getName();
+    EXPECT_FALSE(methods[i]->isNative()) << methods[i]->getName();
+  }
+  EXPECT_FALSE(methods[0]->isView());
+  EXPECT_TRUE(methods[1]->isView());
+  EXPECT_EQ(methods[1]->getResultMode(), paykan::ast::ParamMode::View);
+  ASSERT_EQ(methods[2]->getParams().size(), 2u);
+  EXPECT_EQ(methods[2]->getParams()[1].Mode, paykan::ast::ParamMode::Inout);
+  EXPECT_EQ(methods[3]->getReturnType(), nullptr);
+  EXPECT_NE(methods[4]->getBody(), nullptr);
+  // The AST printer shows a pure virtual method without a body: the blocks
+  // are `describe`'s and `main`'s.
+  const std::string ast = dumpAST(*driver);
+  EXPECT_NE(ast.find("'area' ->"), std::string::npos) << ast;
+  size_t blocks = 0;
+  for (size_t at = ast.find("CompoundStmt"); at != std::string::npos;
+       at = ast.find("CompoundStmt", at + 1))
+    ++blocks;
+  EXPECT_EQ(blocks, 2u) << ast;
+}
+
+// A generic class's methods may be pure virtual too.
+TEST(Class, PureVirtualMethodOfAGenericClass) {
+  auto [ok, driver] = parse(R"(
+    class Source<T> { view fn next() -> T; }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(driver->getRoot()->getGenericClassDecls().size(), 1u);
+  EXPECT_EQ(
+      driver->getRoot()->getGenericClassDecls()[0]->getMethods()[0]->getBody(),
+      nullptr);
+}
+
+// Only a class body's method may leave out its body: a free function, an
+// `impl` block's method or `static fn` (a struct's methods are in one) is a
+// syntax error at the `;`.  An initializer and a `static fn` are never in
+// a class body, so their errors only ask for the body (naming an
+// initializer as written), and `destroy` is never declared at all.
+TEST(Class, BodilessFunctionsOutsideAClassBodyAreRejected) {
+  auto free = parseWithDiags("fn f(x: int) -> int;\n"
+                             "fn main() -> int { return 0; }\n");
+  EXPECT_FALSE(free.Ok);
+  EXPECT_NE(free.Text.find("1:20: error: function 'f' has no body: only a "
+                           "method in a class body can end its signature "
+                           "with ';' (a pure virtual method)"),
+            std::string::npos)
+      << free.Text;
+
+  struct Case {
+    const char *Member;
+    const char *Error;
+  };
+  const char *const kImplMethod =
+      "error: 'g' in an 'impl' block has no body: an 'impl' block's methods "
+      "are called directly, so only a method in a class body can end its "
+      "signature with ';' (a pure virtual method)";
+  for (const Case &c :
+       {Case{"fn g() -> int;", kImplMethod},
+        Case{"view fn g() -> int;", kImplMethod},
+        Case{"static fn g() -> int;",
+             "error: 'g' has no body: a 'static fn' needs one"},
+        Case{"fn __init__(x: int);",
+             "error: '__init__' has no body: an initializer needs one"},
+        Case{"fn ___init__();",
+             "error: '___init__' has no body: an initializer needs one"},
+        Case{"fn destroy();", "error: 'destroy' is the compiler-generated "
+                              "destructor and cannot be overridden"}}) {
+    auto impl = parseWithDiags(std::string("class A {}\nimpl A { ") + c.Member +
+                               " }\nfn main() -> int { return 0; }\n");
+    EXPECT_FALSE(impl.Ok) << c.Member;
+    EXPECT_NE(impl.Text.find(c.Error), std::string::npos) << c.Member << "\n"
+                                                          << impl.Text;
+  }
+
+  auto structImpl = parseWithDiags("struct P { x: int; }\n"
+                                   "impl P { fn get() -> int; }\n"
+                                   "fn main() -> int { return 0; }\n");
+  EXPECT_FALSE(structImpl.Ok);
+  EXPECT_NE(structImpl.Text.find("error: 'get' in an 'impl' block has no body"),
+            std::string::npos)
+      << structImpl.Text;
+
+  // A trait's methods and a native function keep their own forms.
+  auto [traitOk, _t] = parse("trait Named { view fn name() -> Str; }\n"
+                             "native fn twice(x: int) -> int = \"twice\";\n"
+                             "fn main() -> int { return 0; }\n");
+  EXPECT_TRUE(traitOk);
+}
+
+// A class body's method that has neither a body nor `;` is told about both.
+TEST(Class, MethodWithoutBodyOrSemicolon) {
+  auto r = parseWithDiags("class A {\n"
+                          "  fn f() -> int\n"
+                          "  fn g() -> int { return 1; }\n"
+                          "}\n"
+                          "fn main() -> int { return 0; }\n");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Text.find("3:3: error: unexpected 'fn'; expected '{' or '=>' "
+                        "to start the method's body, or ';' to end a pure "
+                        "virtual method's signature"),
+            std::string::npos)
+      << r.Text;
+}

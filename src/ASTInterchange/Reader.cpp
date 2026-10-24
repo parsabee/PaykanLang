@@ -593,7 +593,7 @@ private:
         return nullptr;
     }
     std::vector<FuncDecl *> methods;
-    if (!methodList(f, methods, /*requirements=*/false) || !f.done())
+    if (!methodList(f, methods, FuncKind::ImplMethod) || !f.done())
       return nullptr;
     return Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait,
                               std::move(params));
@@ -610,22 +610,31 @@ private:
     if (!bounds.empty())
       return fail(e, "a trait's type parameters cannot have bounds"), nullptr;
     std::vector<FuncDecl *> methods;
-    if (!methodList(f, methods, /*requirements=*/true) || !f.done())
+    if (!methodList(f, methods, FuncKind::Requirement) || !f.done())
       return nullptr;
     return Ctx.make<TraitDecl>(loc, *name, std::move(tparams),
                                std::move(methods));
   }
 
-  /// The `(methods FN...)` field into @p out; a trait's @p requirements
-  /// have `_` for their bodies.
-  bool methodList(Fields &f, std::vector<FuncDecl *> &out, bool requirements) {
+  /// Where a function is declared, which decides what may stand where its
+  /// body goes and whether it may be a `static fn`.
+  enum class FuncKind {
+    Free,        ///< a top-level function: a block, or a native's C symbol
+    ImplMethod,  ///< an `impl` block's method or `static fn`: a block
+    Requirement, ///< a trait's method: `_`
+    ClassMethod, ///< a class body's: a block, or `_` for a pure virtual one
+  };
+
+  /// The `(methods FN...)` field into @p out, each declared as @p kind
+  /// says.
+  bool methodList(Fields &f, std::vector<FuncDecl *> &out, FuncKind kind) {
     const SExpr *ml = f.list("methods");
     if (!ml)
       return false;
     for (const SExpr &m : ml->Items) {
       if (m.K != SExpr::List || m.Text != "fn")
         return fail(m, "expected a method: (fn ...)"), false;
-      auto *fn = funcDecl(m, requirements);
+      auto *fn = funcDecl(m, kind);
       if (!fn)
         return false;
       out.push_back(fn);
@@ -780,7 +789,7 @@ private:
         return fail(v, "a field cannot be declared with let"), nullptr;
       fields.push_back(vd);
     }
-    if (!methodList(f, methods, /*requirements=*/false) || !f.done())
+    if (!methodList(f, methods, FuncKind::ClassMethod) || !f.done())
       return nullptr;
     auto *cd = Ctx.make<ClassDecl>(loc, *name, *super, std::move(fields),
                                    std::move(methods), std::move(params));
@@ -788,8 +797,11 @@ private:
     return cd;
   }
 
-  /// A function; a trait's @p requirement has `_` for its body.
-  FuncDecl *funcDecl(const SExpr &e, bool requirement = false) {
+  /// A function declared as @p kind says.  Its body, and its `(qual
+  /// static)`, are checked as the grammar's are (docs/grammar.md): only a
+  /// top-level function is native, only a class's or a trait's method has
+  /// no body and only an `impl` block's method is a `static fn`.
+  FuncDecl *funcDecl(const SExpr &e, FuncKind kind = FuncKind::Free) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
     const std::string *name = f.name("the function's name");
@@ -830,6 +842,11 @@ private:
       return fail(e, "a borrowed result needs a type"), nullptr;
     // A `native fn` has (native "symbol") where the body goes (#198).
     if (const SExpr *nl = f.optionalList("native")) {
+      if (kind != FuncKind::Free)
+        return fail(e, "function '" + *name +
+                           "' has (native ...) for its body: only a "
+                           "top-level function can (a 'native fn')"),
+               nullptr;
       Fields nf(*this, *nl);
       const std::string *symbol = nf.name("the C symbol");
       if (!symbol || !nf.done() || !f.done())
@@ -842,11 +859,18 @@ private:
       return fn;
     }
     CompoundStmt *body = nullptr;
-    if (requirement) {
+    if (kind == FuncKind::Requirement) {
       if (!tparams.empty())
         return fail(e, "a trait method cannot be generic"), nullptr;
       if (!f.absent())
         return fail(e, "a trait method has `_` for its body"), nullptr;
+    } else if (f.absent()) {
+      // Only a class's method is pure virtual.
+      if (kind != FuncKind::ClassMethod)
+        return fail(e, "function '" + *name +
+                           "' has `_` for its body: only a class's method "
+                           "can (a pure virtual method)"),
+               nullptr;
     } else {
       body = block(f, "the function's body");
       if (!body)
@@ -863,6 +887,11 @@ private:
       view = v->Text == "view";
       isStatic = !view;
     }
+    if (isStatic && kind != FuncKind::ImplMethod)
+      return fail(e, "function '" + *name +
+                         "' has (qual static): only an 'impl' block's "
+                         "method can (a 'static fn')"),
+             nullptr;
     // `fn double(x: int) => x * 2;`: a trailing (inferred), as a lambda's.
     const SExpr *inferred = f.optionalList("inferred");
     if (inferred) {

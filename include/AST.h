@@ -1231,6 +1231,10 @@ public:
     Private = 1 << 0,
     View = 1 << 1, // `view fn`: does not change `self`
     Impl = 1 << 2, // in an `impl` block: called directly, never overridden
+    // Declared without a body in a class body (pure virtual): a vtable
+    // slot with no definition.  The value of the `.pkm` design's PURE bit
+    // (docs/design/pkm.md §3.5).
+    Pure = 1 << 4,
   };
 
 private:
@@ -1260,6 +1264,9 @@ public:
   bool isView() const { return MethodFlags & View; }
   /// Declared in an `impl` block: it has no vtable slot.
   bool isImpl() const { return MethodFlags & Impl; }
+  /// Pure virtual: a vtable slot without a definition, which a subclass
+  /// implements by overriding it (docs/language/05-classes.md).
+  bool isPure() const { return MethodFlags & Pure; }
   /// The type's `___init__`: constructed, and extended, by its module only
   /// (Sema::checkConstructible).
   bool isModulePrivateInit() const { return ModulePrivateInit; }
@@ -1281,6 +1288,8 @@ public:
 //      - If a same-named method exists in the parent vtable, override that
 //      slot.
 //      - Otherwise, append a new slot.
+// A slot that still holds a pure virtual method (MethodDecl::isPure) makes
+// the class abstract.
 //
 class ClassType : public Type {
   const std::string *Name; // points into ASTContext::StringPool (stable)
@@ -1308,6 +1317,9 @@ class ClassType : public Type {
 
   // When true, no user class may inherit from this type.
   bool Final = false;
+
+  // When true, a vtable slot is still pure virtual (updateAbstract).
+  bool Abstract = false;
 
   // When true, this type is a compiler builtin (Obj, Str, Array, File, Error,
   // Tuple) registered by the ASTContext bootstrap: its methods are
@@ -1414,6 +1426,22 @@ public:
   const std::vector<MethodDecl *> &getImplMethods() const {
     return ImplMethods;
   }
+
+  /// Whether the class is abstract: a slot of its vtable is pure virtual,
+  /// declared without a body here or in a superclass and implemented by
+  /// none of them.  It cannot be instantiated.  Never declared: recorded by
+  /// updateAbstract once the vtable is complete.
+  bool isAbstract() const { return Abstract; }
+  /// Record whether the (complete) vtable has a pure virtual slot.
+  void updateAbstract();
+  /// The vtable's pure virtual slots, in slot order: what a subclass must
+  /// implement to be instantiated.
+  std::vector<const MethodDecl *> pureSlots() const;
+  /// The class that declares the pure virtual slot @p name: the topmost
+  /// one, from this class up, whose slot of that name is still pure.  (By
+  /// name, not by MethodDecl: an imported class's vtable has a MethodDecl
+  /// of its own per slot.)
+  const ClassType *pureSlotOwner(const std::string &name) const;
 
   /// Find the vtable slot index for a method name, or -1 if not found.
   int getVTableIndex(const std::string &name) const;

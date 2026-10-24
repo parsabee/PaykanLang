@@ -315,7 +315,7 @@ template <typename Op> struct ExternGlobalLowering : PIRPattern<Op> {
   }
 };
 
-/// A vtable: an array of function pointers, a null one for an abstract slot.
+/// A vtable: an array of function pointers, a null one for an empty slot.
 struct VTableLowering : PIRPattern<P::VTableOp> {
   using PIRPattern::PIRPattern;
   LogicalResult matchAndRewrite(P::VTableOp op, OpAdaptor,

@@ -1926,11 +1926,16 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
         node->getCalleeName());
 
   // A type whose initializer is `___init__` is constructed by its module.
+  // An abstract class is never constructed (every construction is a call by
+  // its name: a constructor is not a function value); the arguments are
+  // still checked.
   if (auto *ct = S.Ctx.lookupClassType(node->getCalleeName())) {
     if (!S.checkConstructible(ct->getName(), node->getCalleeName(),
                               ct->findMethod(names::kMethodInit), "constructed",
                               node->getLocation()))
       return nullptr;
+    if (ct->isAbstract())
+      S.reportAbstractConstruction(ct, node->getLocation());
   } else if (auto *st = S.Ctx.lookupStructType(node->getCalleeName())) {
     if (!S.checkConstructible(st->getName(), node->getCalleeName(),
                               st->findMethod(names::kMethodInit), "constructed",
@@ -4699,6 +4704,11 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
                                         "' is not a subclass of '" +
                                         subjectCt->getName() + "'");
           ok = false;
+        } else if (armCt->isAbstract()) {
+          // An arm is an exact-class test, and no object is of an abstract
+          // class.
+          reportAbstractArm(arm, armCt);
+          ok = false;
         }
 
         // 4. Declare the binding variable with the narrowed (arm) type.
@@ -4720,6 +4730,13 @@ bool Sema::visitMatchStmt(ast::MatchStmt *node) {
   }
 
   return ok;
+}
+
+void Sema::reportAbstractArm(const ast::MatchArm *arm,
+                             const ast::ClassType *armCt) {
+  error(arm->getLocation(),
+        "unreachable arm: no object has the exact type of abstract class '" +
+            displayName(armCt->getName()) + "'");
 }
 
 // Optional-mode match: the subject is `T?`.
@@ -4798,6 +4815,12 @@ bool Sema::checkOptionalMatch(ast::MatchStmt *node,
                     "' (the match subject has type '" + subjName + "')");
           ok = false;
         } else {
+          // The arm naming T unwraps any present value, so T may be
+          // abstract; a strict subclass's arm is an exact-class test.
+          if (armCt != innerCt && armCt->isAbstract()) {
+            reportAbstractArm(arm, armCt);
+            ok = false;
+          }
           bindTy = armCt;
         }
       } else if (ast::isa<ast::BuiltinType>(inner) ||

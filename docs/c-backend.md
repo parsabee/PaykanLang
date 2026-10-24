@@ -117,9 +117,10 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   byte offset, `*(T *)((uint8_t *)obj + offset)`.
 * **Vtables** are arrays of `Runtime.h`'s `PaykanMethod`, as the runtime's
   own are: `PaykanMethod pkvt_zoo_SDog[4] = {(PaykanMethod)pk_zoo_SDog_2Edestroy,
-  (PaykanMethod)PaykanObject_toString, ...};`, with `NULL` in an abstract
-  slot; another module's vtable is declared `extern PaykanMethod
-  pkvt_...[];`.  A virtual call reads the object's vtable pointer as a
+  (PaykanMethod)PaykanObject_toString, ...};`, with `NULL` in an empty
+  (`null`) slot, which the lowering never emits (a pure virtual method's
+  slot holds its trap function, [PIR](pir.md) §5); another module's vtable
+  is declared `extern PaykanMethod pkvt_...[];`.  A virtual call reads the object's vtable pointer as a
   `PaykanMethod *` and the slot as a `PaykanMethod`, so every vtable is read
   through the type it is declared with (#62), and converts the slot through
   `uintptr_t` to the `void *` an indirect call takes.

@@ -259,8 +259,9 @@ backend does no inheritance walk.
   alignment, as C lays out the `uint8_t` array; reached through
   `field.addr`).
 * **Vtable**: one entry per slot in slot order, each a function symbol (a
-  function of this module, an `extern fn`, or `null` for an abstract slot) plus
-  its signature.  Slot 0 is always `destroy`.  The vtable's address is the
+  function of this module, an `extern fn`, or `null` for an empty slot, which
+  the lowering never emits: a pure virtual method's slot holds its trap,
+  below) plus its signature.  Slot 0 is always `destroy`.  The vtable's address is the
   class's runtime type identity (`vtable.addr`).
 * A class marked `extern` belongs to another module: its fields are known (for
   `field.load`/`field.store` on imported instances) and its vtable address may
@@ -271,7 +272,9 @@ backend does no inheritance walk.
   explicit slot index, exactly like user classes.
 
 Constructors and destructors are ordinary functions produced by the lowering:
-`@Point(args...) -> box` allocates with `new`, installs the vtable, zeroes
+`@Point(args...) -> box` allocates with `new`, installs the vtable (the
+class's own, before any `__init__` runs, so a superclass's `__init__` that
+calls a virtual method reaches the subclass's), zeroes
 the counts and the fields, boxes the object (`box`, before `__init__`, so
 `self` inside `__init__` is the caller's box) and calls
 `@Point.__init__(obj, args...)`; `@Point.destroy(obj)` releases every
@@ -285,6 +288,26 @@ method `m` of a class `C` is the function `@C.m(obj self, params...)`.  The
 program function (`fn Point_move`, `fn Point_destroy`); backends must keep
 them apart too (the mlir backend escapes the '.' as `_2E` in its link
 names, and a vtable's starts `pkvt_` where a function's starts `pk_`).
+
+A **pure virtual** method `m` of `C` (declared without a body,
+docs/language/05-classes.md) is the function `@C.m` too, with its slot's
+signature, and its body is a trap:
+
+```
+fn @Shape.area(%self.1: obj) -> f64 {
+  call @$rt.Paykan_panic_pure_virtual(@.str0, 5, @.str1, 4)   ; "Shape", "area"
+  unreachable
+}
+```
+
+It is the slot's target in `C` and in each subclass that neither implements
+`m` nor declares it pure again, in this module or another (an `extern fn`
+there, like any inherited method); one that declares it pure again has a
+trap of its own, `@Sub.m`, which names `C` too.  A class with such a slot
+is **abstract**: nothing constructs it, so it has no constructor `@C` and
+no `new` names it, while its `@C.__init__`, which its subclasses'
+`__init__` calls, and its destructor are emitted as usual.  The format
+needs no mark for it: an abstract class is one without a constructor.
 
 ## 6. Statements and instructions
 
@@ -648,6 +671,7 @@ Paykan_panic_float_to_int(f64) -> void  Paykan_panic_int_to_char(i64) -> void
 Paykan_panic_index(i64, i64) -> void    ; the index, the length
 Paykan_panic_for_step() -> void         ; a `for` loop's computed step is 0
 Paykan_panic_float_to_type(f64, ptr, i64) -> void   ; the value, the target type's name and its length
+Paykan_panic_pure_virtual(ptr, i64, ptr, i64) -> void ; a pure virtual method's trap: the class's name and the method's, each with its length
 ; sized numeric types
 Paykan_round_f16(f64) -> f64            ; rounded to the nearest f16
 ; strings

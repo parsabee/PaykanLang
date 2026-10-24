@@ -696,7 +696,7 @@ struct VTableLowering : CPattern<P::VTableOp> {
       if (auto sym = dyn_cast<FlatSymbolRefAttr>(e))
         entries.push_back("(PaykanMethod)" + sym.getValue().str());
       else
-        entries.emplace_back("NULL"); // an abstract slot
+        entries.emplace_back("NULL"); // an empty slot
     }
     auto type = emitc::ArrayType::get(
         {static_cast<int64_t>(std::max<size_t>(entries.size(), 1))},
