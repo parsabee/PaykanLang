@@ -1254,6 +1254,52 @@ TEST(Pkm, ModuleCodeKeepsWhatTheModuleAndItsImportersUse) {
   fs::remove_all(dir);
 }
 
+// The main module of a program knows every class derived from its classes
+// (docs/pir.md §7), so its copy of `HashMap<Str, Dog>.put` reads the map's
+// table in place across `_Table.put`, which lets go only of Dogs and
+// strings, by a stable load.  Written to a `.pkm` file, which a module that
+// derives a class holding anything from `Dog` may import, the same file
+// holds the table across the call.
+TEST(Pkm, AModuleFileAssumesNothingOfItsClassesSubclasses) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_closed_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "dogs.pkn", "import ::collections as c;\n"
+                              "class Dog { name: Str; }\n"
+                              "fn main() -> int {\n"
+                              "  d = c::HashMap<Str, Dog>();\n"
+                              "  d.put(\"d\", Dog(\"rex\"));\n"
+                              "  return int(d.len());\n"
+                              "}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  // The function's text in @p text.
+  auto put = [](const std::string &text) {
+    const size_t start = text.find("fn @\"HashMap<Str, Dog>.put\"(");
+    if (start == std::string::npos)
+      return std::string();
+    return text.substr(start, text.find("\n}\n", start) - start);
+  };
+  auto pir = paykan("--emit-pir dogs.pkn");
+  ASSERT_EQ(pir.exitCode, 0) << pir.out;
+  ASSERT_EQ(paykan("--emit-pkm dogs.pkn").exitCode, 0);
+  auto code = paykan("pkm dump --section=code dogs.pkm");
+  ASSERT_EQ(code.exitCode, 0) << code.out;
+  const std::string program = put(pir.out);
+  const std::string module = put(code.out);
+  ASSERT_FALSE(program.empty()) << pir.out;
+  ASSERT_FALSE(module.empty()) << code.out;
+  EXPECT_TRUE(contains(program, "= ptr.load box, %self.addr.4 stable\n"))
+      << program;
+  EXPECT_FALSE(contains(program, "retain ")) << program;
+  EXPECT_TRUE(contains(module, "= ptr.load box, %self.addr.4\n")) << module;
+  EXPECT_TRUE(contains(module, "retain %elem.5\n")) << module;
+  EXPECT_TRUE(contains(module, "release %elem.5\n")) << module;
+  fs::remove_all(dir);
+}
+
 // `pkm extract --object` writes a module's compiled code as an object the
 // system linker takes (what a program's --emit-c C links with).
 TEST(Pkm, ExtractWritesTheCompiledCodeAsAnObject) {

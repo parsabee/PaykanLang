@@ -994,6 +994,28 @@ bool ModuleLowering::isExactClass(const ast::ClassType *ct) {
          ct->getName().find('<') != std::string::npos;
 }
 
+// The main module of a program is imported by no module (an import of it
+// would close a cycle, which Sema rejects), and no other module's template
+// can name its classes: every class derived from one of them is a class it
+// defines, a declaration of its own or an instantiation of a template, its
+// own or another module's (whose superclass is never a type parameter).
+bool ModuleLowering::isClosedClass(const ast::ClassType *ct) const {
+  return Canonical.empty() && PL.MainWorld == World::Closed &&
+         OwnTypes.count(ct->getName());
+}
+
+void ModuleLowering::indexSubclasses(
+    const std::vector<ast::ClassDecl *> &classes) {
+  if (!Canonical.empty() || PL.MainWorld != World::Closed)
+    return;
+  for (const ast::ClassDecl *cls : classes) {
+    ast::ClassType *ct = ASTCtx.lookupClassType(cls->getName());
+    for (ast::ClassType *c = ct ? ct->getSuperClass() : nullptr; c;
+         c = c->getSuperClass())
+      Subclasses[c].push_back(ct);
+  }
+}
+
 ast::Type *ModuleLowering::slotType(ast::Type *ty) {
   ty = canonicalizeDeclType(ty);
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
@@ -1035,14 +1057,20 @@ const ModuleLowering::Effect &ModuleLowering::dropEffect(ast::Type *ty) {
     } else if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(t)) {
       work.push_back(ft->getElementType());
     } else if (auto *ct = ast::dyn_cast<ast::ClassType>(t);
-               ct && isExactClass(ct)) {
+               ct && (isExactClass(ct) || isClosedClass(ct))) {
       // An object that dies lets go of what its fields hold (the object a
-      // weak one names stays).
+      // weak one names stays), its destructor runs no other code; one of a
+      // closed class may be of a class derived from it.
       e.Types.insert(ct);
-      for (ast::ClassType *c = ct; c && !c->isBuiltin(); c = c->getSuperClass())
-        for (const auto &[name, fieldTy] : c->getFields())
-          if (!c->isWeakField(name))
-            work.push_back(fieldTy);
+      std::vector<ast::ClassType *> classes = {ct};
+      if (auto sub = Subclasses.find(ct); sub != Subclasses.end())
+        classes.insert(classes.end(), sub->second.begin(), sub->second.end());
+      for (ast::ClassType *k : classes)
+        for (ast::ClassType *c = k; c && !c->isBuiltin();
+             c = c->getSuperClass())
+          for (const auto &[name, fieldTy] : c->getFields())
+            if (!c->isWeakField(name))
+              work.push_back(fieldTy);
     } else {
       // An object of a class a subclass of which may hold anything, a
       // function value's closure, or a type not known here.
@@ -1061,11 +1089,19 @@ ModuleLowering::Effect ModuleLowering::methodEffect(ast::ClassType *ct,
     return effectOf(owner ? bodyOf(owner->getName() + names::kNameSep + name)
                           : nullptr);
   }
-  // A virtual method: of an exact class, the one its vtable names, the
-  // closest class's from it up that defines it.
+  // A virtual method: the one its vtable names, the closest class's from it
+  // up that defines it, for an exact class; for a closed class, that one or
+  // an override of a class derived from it, as an object of one has that
+  // class's vtable (or, while a superclass's `__init__` runs, the
+  // superclass's, through a reference of the superclass's type only).  A
+  // pure one's trap stops the program.
   Effect e = Effect::unknown();
-  if (!isExactClass(ct))
+  if (!isExactClass(ct) && !isClosedClass(ct))
     return e;
+  auto implementation = [&](ast::ClassType *c, const ast::FuncDecl *fn) {
+    const ast::MethodDecl *m = c->findMethod(name);
+    return m && m->isPure() ? Effect() : effectOf(fn);
+  };
   for (ast::ClassType *c = ct; c; c = c->getSuperClass()) {
     if (c->isBuiltin()) {
       e = Effect(); // `Obj`'s or `Str`'s: the runtime's, which runs no code
@@ -1073,12 +1109,17 @@ ModuleLowering::Effect ModuleLowering::methodEffect(ast::ClassType *ct,
     }
     if (const ast::FuncDecl *fn =
             bodyOf(c->getName() + names::kNameSep + name)) {
-      e = effectOf(fn);
+      e = implementation(c, fn);
       break;
     }
     if (!OwnTypes.count(c->getName()))
       break; // another module's class, compiled there
   }
+  if (auto sub = Subclasses.find(ct); sub != Subclasses.end())
+    for (ast::ClassType *c : sub->second)
+      if (const ast::FuncDecl *fn =
+              bodyOf(c->getName() + names::kNameSep + name))
+        e.add(implementation(c, fn));
   e.Releases = true;
   return e;
 }

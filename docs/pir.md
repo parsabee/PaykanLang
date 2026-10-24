@@ -670,13 +670,16 @@ CodeGen enforced, now in one place.
   struct's method that may change `self`.  A call given only values that
   reach no object (numbers, strings, and arrays, tuples and structs of
   them) cannot, nor can a native function but through its `inout`
-  arguments.
+  arguments: a native function keeps nothing it is lent past the call
+  (docs/language/03-functions.md, "Native Functions"), so it holds no
+  Paykan value between calls to let go of or to call back into the
+  program's code with.
 
   What a call given more may let go of is read from the code it runs, when
   the module lowers it (its own functions, a struct's method, a class's
-  `impl` method, a virtual method of an exact class, an instantiation it
-  emits): the classes of the slots whose references it may let go of, or
-  "not known".  A slot loses its reference only when it is stored into, or
+  `impl` method, a virtual method of an exact class or, in the main module
+  of a program, of one of its classes, an instantiation it emits): the
+  classes of the slots whose references it may let go of, or "not known".  A slot loses its reference only when it is stored into, or
   when what holds it dies, so the classes are those of the slots the code
   stores into outside its own variables (a field, an element, an `inout`
   parameter or local, a `match` arm's `n: inout T`, a struct method's
@@ -697,15 +700,40 @@ CodeGen enforced, now in one place.
   of the values it overwrites or shrinks away, never of the buffer; and a
   private `Obj` field of a struct whose code stores only new buffers into
   it and passes it only to Buffer functions (`memory::Buffer<T>.__data`)
-  holds a buffer, whose death lets go of its values.  Anything else is "not known": a function another module
-  compiles (its native functions may keep an object and call back into
-  this module's code), a method a subclass may override, a call through
-  a function value, any other native function given storage to change, a
-  recursion through another function (one calling itself is read as the
-  rest of its body), and any construct the reading does not recognize.
-  What else such code releases is its own: a variable's or a temporary's
-  reference to an object its caller's storage still holds, or to one it
-  made, and with no variables at module level it reaches nothing else.
+  holds a buffer, whose death lets go of its values.  Anything else is
+  "not known": a function another module compiles (its code is not read
+  here), a method a subclass the module does not know may override, a
+  call through a function value, any other native function given storage
+  to change, a recursion through another function (one calling itself is
+  read as the rest of its body), and any construct the reading does not
+  recognize.  What else such code releases is its own: a variable's or a
+  temporary's reference to an object its caller's storage still holds, or
+  to one it made, and with no variables at module level it reaches
+  nothing else.
+
+  The main module of a program to run or build (`run`, `build`,
+  `--emit-pir`, `--emit-c`; not a module `--emit-pkm` writes, which a
+  module may import) knows more about its own classes (lowering's
+  `World::Closed`): no module imports it, as that would close an import
+  cycle, and no other module's template can name its classes, so every
+  class derived from one of them is a class it lowers.  A virtual call on
+  an object of one runs the implementation the class's vtable names or an
+  override of a class derived from it (an object has its own class's
+  vtable, or, while a superclass's `__init__` runs, the superclass's, seen
+  only through a reference of the superclass's type), and does what one
+  of those does; a pure method's trap stops the program.  An object of
+  one that dies may be of a class derived from it, and lets go of what
+  the fields of its class or of that one hold.  So a program's
+  `HashMap<Str, Dog>`, whose `Dog` holds a string, reads its table in
+  place across `put` and `remove`, and `shapes[i].area()` reads the
+  `Shape` in place when no override of `area` lets go of a `Shape`; a
+  `Shape` slot is held across a call to an override that may.  A class of
+  another module stays what it is everywhere, as an importer of that
+  module may derive from it, and so does a method a class of the main
+  module inherits from one (another module compiles it).  Nothing the
+  main module knows so reaches a cache entry: the main module is never
+  cached, and its copies of other modules' instantiations serve only the
+  program, whose imports keep their own.
 
   A read of storage the function never hands on (its `self`, an `inout`,
   `view` or slice parameter's) is replaced by such a call only when the
@@ -713,13 +741,14 @@ CodeGen enforced, now in one place.
   `inout` name's of one of its superclasses: so `self.__list` of a
   `Stack<int>` needs no hold across `pushFront`, which lets go only of
   nodes and ints, nor a map's table across `put` of string keys and int
-  values, but does across a `put` of `Dog`s.  A read rooted in a
-  variable or a value parameter, which the function may hand on at its
-  last use (§12), keeps a reference of its own across any call that may
-  let go of one at all, whatever its class: without it the read is
-  borrowed across the call, MoveAtLastUse keeps the hand-off of another
-  variable a copy, and an object would die later.  So `h.b.len()` and a
-  map's lookup of a string key need no hold either way.
+  values, but does across a `put` of closures, and of `Dog`s outside a
+  program's main module.  A read rooted in a variable or a value
+  parameter, which the function may hand on at its last use (§12), keeps
+  a reference of its own across any call that may let go of one at all,
+  whatever its class, and a virtual call always counts as one: without it
+  the read is borrowed across the call, MoveAtLastUse keeps the hand-off
+  of another variable a copy, and an object would die later.  So
+  `h.b.len()` and a map's lookup of a string key need no hold either way.
 
   A read of storage the function never hands on that is in use where a
   call that may let go of references is made, though of none of the read

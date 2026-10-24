@@ -166,12 +166,15 @@ runProgramMLIR(const pir::Program &program,
   return runJITModule(std::move(*module), std::move(llvmCtx), args);
 }
 
+/// The program, lowered as the driver lowers one to run: its main module
+/// knows every class derived from its classes (lowering::World::Closed).
 inline RunResult runMLIR(Analysed &a, const std::vector<std::string> *args,
                          const std::string &projectRoot) {
   pir::Program program;
   std::ostringstream errs;
   if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, projectRoot,
-                              program, errs))
+                              program, errs, nullptr, lowering::Copies::Shared,
+                              lowering::World::Closed))
     return {-1, "", "lowering failed: " + errs.str(), false};
   return runProgramMLIR(program, args, projectRoot, a.Ctx.Resolver.get());
 }
@@ -239,7 +242,8 @@ inline RunResult compileMoveAndRun(const std::string &source) {
   pir::Program program;
   std::ostringstream errs;
   if (!lowering::lowerProgram(a.Ctx, a.Driver->getRoot(), a.Path, "", program,
-                              errs))
+                              errs, nullptr, lowering::Copies::Shared,
+                              lowering::World::Closed))
     return {-1, "", "lowering failed: " + errs.str(), false};
   pir::PassManager passes(/*verifyEach=*/true);
   passes.add(pir::createMovesAtLastUsePass());

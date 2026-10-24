@@ -35,9 +35,10 @@ struct Lowered {
 
 /// Parse, check, lower, verify and print @p source (@p projectRoot for
 /// imports), the instantiations of other modules' templates as @p copies
-/// says.
+/// says, the main module knowing what @p world says.
 Lowered lower(const std::string &source, const std::string &projectRoot = "",
-              lowering::Copies copies = lowering::Copies::Shared) {
+              lowering::Copies copies = lowering::Copies::Shared,
+              lowering::World world = lowering::World::Open) {
   Lowered l;
   auto [parseOk, driver] = parse(source);
   if (!parseOk) {
@@ -55,7 +56,7 @@ Lowered lower(const std::string &source, const std::string &projectRoot = "",
   }
   std::ostringstream errs;
   if (!lowering::lowerProgram(ctx, driver->getRoot(), "main", projectRoot,
-                              l.Program, errs, nullptr, copies)) {
+                              l.Program, errs, nullptr, copies, world)) {
     l.Error = "lowering failed: " + errs.str();
     return l;
   }
@@ -783,9 +784,11 @@ TEST(Lowering, ACallHoldsOnlyTheReadsOfTheClassesItMayLetGo) {
 // read of an `inout` parameter, whose slot may be a field of a superclass
 // of its type, across a call that replaces that field; and a read of a
 // parameter the function may hand on across any call that may let go of a
-// reference (the counterexamples of the analysis of these holds).
+// reference (the counterexamples of the analysis of these holds).  So they
+// are in the main module of a program, which knows that a `Base` that dies
+// may be a `Plain` or a `Derived<int>`.
 TEST(Lowering, AReadACallMayReplaceThroughANarrowedArmIsHeld) {
-  auto l = lower(R"(
+  const std::string source = R"(
     class Base { n: int; }
     impl Base {
       fn __init__(n: int) { self.n = n; }
@@ -832,20 +835,25 @@ TEST(Lowering, AReadACallMayReplaceThroughANarrowedArmIsHeld) {
     }
     fn local(p: Pair) -> Str { return p.node.name + touchOther(p); }
     fn main() -> int { return 0; }
-  )");
-  ASSERT_TRUE(l.Ok) << l.Error;
+  )";
   struct Case {
     const char *Fn, *Read, *Call;
   };
-  for (const Case &c : {
-           Case{"Holder.run", ", Holder.b", "call @reset("},
-           Case{"Holder.runPlain", ", Holder.b", "call @resetPlain("},
-           Case{"use", "ptr.load box", "call @clobber("},
-           Case{"local", ", Node.name", "call @touchOther("},
-       }) {
-    std::string f = function(l.Text, c.Fn);
-    EXPECT_TRUE(heldAcross(f, defined(f, c.Read), c.Call)) << c.Fn << "\n" << f;
-    EXPECT_FALSE(stableLoad(f, c.Read)) << c.Fn << "\n" << f;
+  for (lowering::World world :
+       {lowering::World::Open, lowering::World::Closed}) {
+    auto l = lower(source, "", lowering::Copies::Shared, world);
+    ASSERT_TRUE(l.Ok) << l.Error;
+    for (const Case &c : {
+             Case{"Holder.run", ", Holder.b", "call @reset("},
+             Case{"Holder.runPlain", ", Holder.b", "call @resetPlain("},
+             Case{"use", "ptr.load box", "call @clobber("},
+             Case{"local", ", Node.name", "call @touchOther("},
+         }) {
+      std::string f = function(l.Text, c.Fn);
+      EXPECT_TRUE(heldAcross(f, defined(f, c.Read), c.Call)) << c.Fn << "\n"
+                                                             << f;
+      EXPECT_FALSE(stableLoad(f, c.Read)) << c.Fn << "\n" << f;
+    }
   }
 }
 
@@ -901,6 +909,86 @@ TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
     EXPECT_EQ(stableLoad(f, "ptr.load box, %self.addr"), !c.Held)
         << c.Fn << "\n"
         << f;
+  }
+}
+
+// The main module of a program (World::Closed) knows every class derived
+// from its classes: a virtual call on one runs the implementation its
+// vtable names or an override of a class derived from it (a pure one's
+// trap stops the program), and an object of one that dies holds the fields
+// of its class or of one of those.  So `Quiet.run`, overridden by `Hush`,
+// and the pure `Shape.area` lets go of nothing a read is of; `Loud.run`
+// may, through `Shout`'s override, which replaces `Holder.item`; and a
+// `Dog` that dies holds a string, but a `Cat` may be a `Lion` holding the
+// map's table.  A main module that may be imported (World::Open, as
+// --emit-pkm lowers it) knows none of it, and holds every such read.
+TEST(Lowering, TheMainModuleOfAProgramKnowsItsClassesOverrides) {
+  const std::string source = R"(import ::collections as c;
+    class Item { name: Str; }
+    class Quiet { fn run(h: Holder) -> int { return 1; } }
+    class Hush : Quiet { fn run(h: Holder) -> int { return 2; } }
+    class Loud { fn run(h: Holder) -> int; }
+    class Shout : Loud {
+      fn run(h: Holder) -> int {
+        h.item = Item("new");
+        return 2;
+      }
+    }
+    class Holder {
+      item: Item;
+      quiet: Quiet;
+      loud: Loud;
+      fn viaQuiet() -> Str { return self.item.name + Str(self.quiet.run(self)); }
+      fn viaLoud() -> Str { return self.item.name + Str(self.loud.run(self)); }
+    }
+    class Shape { view fn area() -> int; }
+    class Square : Shape {
+      s: int;
+      view fn area() -> int { return self.s * self.s; }
+    }
+    fn total(shapes: view Shape[]) -> int {
+      t = 0;
+      for i in 0..shapes.len() { t = t + shapes[i].area(); }
+      return t;
+    }
+    class Dog { name: Str; }
+    class Cat { name: Str; }
+    class Lion : Cat { pride: c::HashMap<Str, Cat>; }
+    fn main() -> int {
+      d = c::HashMap<Str, Dog>();
+      d.put("d", Dog("rex"));
+      k = c::HashMap<Str, Cat>();
+      k.put("k", Cat("tom"));
+      return int(d.len() + k.len());
+    }
+  )";
+  struct Case {
+    const char *Fn, *Read, *Call;
+    bool Held;
+  };
+  const Case cases[] = {
+      {"Holder.viaQuiet", ", Item.name", "vcall ", false},
+      {"Holder.viaLoud", ", Item.name", "vcall ", true},
+      {"total", "ptr.load box", "vcall ", false},
+      {"\"HashMap<Str, Dog>.put\"", "ptr.load box, %self.addr",
+       "call @\"_Table<Str, Dog>.put\"(", false},
+      {"\"HashMap<Str, Cat>.put\"", "ptr.load box, %self.addr",
+       "call @\"_Table<Str, Cat>.put\"(", true},
+  };
+  auto closed =
+      lower(source, "", lowering::Copies::Shared, lowering::World::Closed);
+  ASSERT_TRUE(closed.Ok) << closed.Error;
+  auto open = lower(source);
+  ASSERT_TRUE(open.Ok) << open.Error;
+  for (const Case &c : cases) {
+    std::string f = function(closed.Text, c.Fn);
+    ASSERT_FALSE(f.empty()) << c.Fn << "\n" << closed.Text;
+    EXPECT_EQ(heldAcross(f, defined(f, c.Read), c.Call), c.Held) << c.Fn << "\n"
+                                                                 << f;
+    // What is not held is read by a stable load (docs/pir.md §6).
+    EXPECT_EQ(stableLoad(f, c.Read), !c.Held) << c.Fn << "\n" << f;
+    std::string g = function(open.Text, c.Fn);
+    EXPECT_TRUE(heldAcross(g, defined(g, c.Read), c.Call)) << c.Fn << "\n" << g;
   }
 }
 
@@ -2141,10 +2229,12 @@ TEST(Lowering, ImportedFunctionsAndClassesAreExternItems) {
   EXPECT_NE(t.find("fn @Adder.add("), std::string::npos) << t;
 }
 
-// A method another module compiles may run anything: its native functions
-// may keep an object and call back into this module's code, which replaces
-// the field read (docs/language/03-functions.md).  So `self.origin` is held
-// across `sum()`, though a Point reaches no object.
+// A method another module compiles is not read here, and may be
+// overridden by a class of any module that imports it: what it does is not
+// known, also in the main module of a program, which knows only its own
+// classes' overrides.  So `self.origin` is held across `sum()`, though a
+// Point reaches no object, and so is `self.mine`, a main class's object,
+// across the `sum()` it inherits from the imported class.
 TEST(Lowering, AReadIsHeldAcrossAMethodAnotherModuleCompiles) {
   auto dir = std::filesystem::temp_directory_path() /
              ("lowering_foreign_" + std::to_string(getpid()));
@@ -2152,18 +2242,28 @@ TEST(Lowering, AReadIsHeldAcrossAMethodAnotherModuleCompiles) {
   std::ofstream(dir / "point.pkn")
       << "class Point { x: int; y: int; "
          "view fn sum() -> int { return self.x + self.y; } }\n";
-  auto l = lower("import point;\n"
-                 "class Box {\n"
-                 "  origin: point::Point;\n"
-                 "  view fn total() -> int { return self.origin.sum(); }\n"
-                 "}\n"
-                 "fn main() -> int { return 0; }\n",
-                 dir.string());
+  const std::string source =
+      "import point;\n"
+      "class Mine : point::Point { tag: Str; }\n"
+      "class Box {\n"
+      "  origin: point::Point;\n"
+      "  mine: Mine;\n"
+      "  view fn total() -> int { return self.origin.sum(); }\n"
+      "  view fn own() -> int { return self.mine.sum(); }\n"
+      "}\n"
+      "fn main() -> int { return 0; }\n";
+  for (lowering::World world :
+       {lowering::World::Open, lowering::World::Closed}) {
+    auto l = lower(source, dir.string(), lowering::Copies::Shared, world);
+    ASSERT_TRUE(l.Ok) << l.Error;
+    for (const auto &[fn, read] : {std::pair{"Box.total", ", Box.origin"},
+                                   std::pair{"Box.own", ", Box.mine"}}) {
+      std::string f = function(l.Text, fn);
+      EXPECT_TRUE(heldAcross(f, defined(f, read), "vcall ")) << f;
+      EXPECT_FALSE(stableLoad(f, read)) << f;
+    }
+  }
   std::filesystem::remove_all(dir);
-  ASSERT_TRUE(l.Ok) << l.Error;
-  std::string f = function(l.Text, "Box.total");
-  EXPECT_TRUE(heldAcross(f, defined(f, ", Box.origin"), "vcall ")) << f;
-  EXPECT_FALSE(stableLoad(f, ", Box.origin")) << f;
 }
 
 // #102: every module is named by its canonical module name -- the module

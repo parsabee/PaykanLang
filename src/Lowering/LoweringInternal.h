@@ -11,6 +11,7 @@
 #include "ASTContext.h"
 #include "ASTVisitor.h"
 #include "Sema.h"
+#include "paykan/lowering/Lowering.h"
 #include "paykan/modules/ModuleResolver.h"
 #include "paykan/pir/Builder.h"
 #include "paykan/pir/PIR.h"
@@ -80,6 +81,8 @@ struct ProgramLowering {
   /// Every SemaContext reachable from Top, keyed by canonical module name.
   std::unordered_map<std::string, const sema::SemaContext *> Contexts;
   bool Indexed = false;
+  /// What the main module's code may know of the program (lowerProgram).
+  World MainWorld = World::Open;
 
   ProgramLowering(const sema::SemaContext &top, std::string projectRoot,
                   std::ostream &errs, modules::ModuleResolver *resolver)
@@ -151,6 +154,12 @@ private:
   /// of other modules' instantiations (which another module may have
   /// defined first: ProgramLowering::ClassOrigins).
   std::unordered_set<std::string> OwnTypes;
+  /// In the main module of a closed world (World::Closed), the classes
+  /// derived from each class it defines: all of them are its own
+  /// (indexSubclasses, isClosedClass).
+  std::unordered_map<const ast::ClassType *, std::vector<ast::ClassType *>>
+      Subclasses;
+  void indexSubclasses(const std::vector<ast::ClassDecl *> &classes);
 
   pir::Module Mod;
   /// Functions in declaration order with stable addresses (the module vector
@@ -465,20 +474,25 @@ private:
   std::unordered_map<const ast::FuncDecl *, Effect> Effects;
   /// The classes letting go of a value of type @p ty may let go of: its
   /// own, and those of what it holds, and what dying objects of exact
-  /// classes hold (isExactClass); Unknown for an object of another class,
-  /// whose subclass may hold anything, and for a function value.
+  /// classes hold (isExactClass), or of closed classes and the classes
+  /// derived from them (isClosedClass); Unknown for an object of another
+  /// class, whose subclass may hold anything, and for a function value.
   const Effect &dropEffect(ast::Type *ty);
   std::unordered_map<const ast::Type *, Effect> DropEffects;
   /// A class no class derives from: Str, or an instance of a generic class
   /// (a superclass is never generic).
   static bool isExactClass(const ast::ClassType *ct);
+  /// A class of the main module of a closed world (World::Closed): every
+  /// class derived from it is one this module defines (Subclasses).
+  bool isClosedClass(const ast::ClassType *ct) const;
   /// The canonical type of a slot holding @p ty: optionals stripped (a
   /// `T?` slot holds a T or None).
   ast::Type *slotType(ast::Type *ty);
   /// What the method @p name, run on an object of class @p ct, does: the
-  /// one an `impl` block or, for an exact class, its vtable names;
-  /// Unknown when another module compiles it or a subclass may override
-  /// it.
+  /// one an `impl` block or, for an exact class, its vtable names, or for
+  /// a closed class, that one or an override of a class derived from it;
+  /// Unknown when another module compiles one of those or a subclass this
+  /// module does not know may override it.
   Effect methodEffect(ast::ClassType *ct, const std::string &name);
   /// What the runtime's `toString` or `==` (@p method) of a value of type
   /// @p ty does: each object's in it.

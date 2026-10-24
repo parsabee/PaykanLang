@@ -1509,6 +1509,132 @@ TEST(Ownership, AStableReadKeepsTheHandOffsTiming) {
   g.expectNoLeaks("AStableReadKeepsTheHandOffsTiming");
 }
 
+// The main module of a program knows every override of its classes'
+// methods (docs/pir.md §7): `self.item.name` needs no hold across a call
+// whose overrides let go of nothing (`Hush.run`, the pure `Shape.area`'s
+// `Square` one), and keeps one across `Shout.run`, which replaces the Item
+// it is in: the string read is the one of the Item that was there, which
+// dies when the call replaces it.  A map of Dogs, whose death lets go of a
+// string only, reads its table in place across put and remove, and every
+// replaced Dog dies when it is let go of.
+TEST(Ownership, AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    import ::collections as c;
+    class Item { name: Str; }
+    class Probe { weak it: Item?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.it {
+          Item { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    class Quiet { fn run(h: Holder) -> int { return 1; } }
+    class Hush : Quiet { fn run(h: Holder) -> int { return 2; } }
+    class Loud { fn run(h: Holder) -> int; }
+    class Shout : Loud {
+      fn run(h: Holder) -> int {
+        h.item = Item("new" + Str(1));
+        return 3;
+      }
+    }
+    class Holder {
+      item: Item;
+      quiet: Quiet;
+      loud: Loud;
+      fn viaQuiet() -> Str { return self.item.name + Str(self.quiet.run(self)); }
+      fn viaLoud() -> Str { return self.item.name + Str(self.loud.run(self)); }
+    }
+    class Shape { view fn area() -> int; }
+    class Square : Shape {
+      s: int;
+      view fn area() -> int { return self.s * self.s; }
+    }
+    fn total(shapes: view Shape[]) -> int {
+      t = 0;
+      for i in 0..shapes.len() { t += shapes[i].area(); }
+      return t;
+    }
+    class Dog { name: Str; }
+    class Watch { weak d: Dog?; }
+    impl Watch {
+      view fn state() -> Str {
+        match self.d {
+          Dog { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    fn main() -> int {
+      h = Holder(Item("old" + Str(0)), Hush(), Shout());
+      p = Probe(h.item);
+      io::println(h.viaQuiet() + " " + p.state());
+      io::println(h.viaLoud() + " " + p.state() + " " + h.item.name);
+      shapes: Shape[2] = [Square(2), Square(3)];
+      io::println(Str(total(shapes)));
+      m = c::HashMap<Str, Dog>();
+      rex = Dog("rex" + Str(1));
+      w = Watch(rex);
+      m.put("d", rex);
+      rex = Dog("max");
+      io::println(w.state());
+      m.put("d", rex);
+      io::println(w.state() + " " + m.get("d").name);
+      m.remove("d");
+      io::println(Str(m.len()));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut,
+            "old02 alive\nold03 freed new1\n13\nalive\nfreed max\n0\n");
+  g.expectNoLeaks("AProgramsVirtualCallsHoldOnlyWhatTheirOverridesMayLetGo");
+}
+
+// A read of `self`'s storage across a virtual call of a program's class
+// whose overrides let go of nothing of its class is read by a stable load,
+// which keeps the hand-off its hold made: `v` is handed on to `offer`, and
+// the Pet dies when `offer` returns, before `push` asks (docs/pir.md §7,
+// §12).
+TEST(Ownership, AProgramsStableReadKeepsTheHandOffsTiming) {
+  LeakGuard g;
+  auto r = compileMoveAndRun(R"(import ::io;
+    class Pet { name: Str; }
+    class Probe { weak p: Pet?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.p {
+          Pet { return "alive"; }
+          None { return "freed"; }
+        }
+      }
+    }
+    class Sink { last: Str; fn offer(v: Pet) { self.last = "seen"; } }
+    class Loud : Sink { fn offer(v: Pet) { self.last = v.name; } }
+    struct Pile { sink: Sink; }
+    impl Pile {
+      fn push(v: Pet, probe: Probe) -> Str {
+        self.sink.offer(v);
+        return probe.state();
+      }
+    }
+    fn main() -> int {
+      p = Pile(Loud("none"));
+      x = Pet("rex" + Str(1));
+      probe = Probe(x);
+      io::println(p.push(x, probe) + " " + probe.state() + " " + p.sink.last);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "freed freed rex1\n");
+  g.expectNoLeaks("AProgramsStableReadKeepsTheHandOffsTiming");
+}
+
 // A string's character is read from the string as it was before its index
 // was computed, as an array's element is, though the call computing it
 // replaces the string (and makes a new one where it was).

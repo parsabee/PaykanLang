@@ -270,12 +270,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   go of a reference of the read's class: one the code it runs stores into, or one that
   letting go of those may let go of in turn, as an object of an exact class (`Str`, an
   instance of a generic class) holds its fields' (docs/pir.md §7, "Reads a call may
-  replace").  The standard library's containers no longer retain and release the object
-  holding their state around their own methods over numbers, strings and the like
-  (`Stack<int>.push`, `HashMap<Str, int>.put`, `HashSet<int>.clear`,
-  `MinPriorityQueue<Str>.pop`): 57 of the 86 retain/release pairs the fix for reads through
+  replace").  The main module of a program (one that is run or built, not one `--emit-pkm`
+  writes) knows the classes derived from its own, as no module can import it to derive
+  more: a virtual call on one of its classes does what the implementations it may run do
+  (`shapes[i].area()` of a `view Shape[]`, the `equals` of a map's `Point` keys), and an
+  object of one that dies lets go of what their fields hold (a `Dog` holding a string).  A
+  class of another module, and a method it compiles, stay unknown.  The standard library's
+  containers no longer retain and release the object holding their state around their own
+  methods over numbers, strings, a program's own classes and the like (`Stack<int>.push`,
+  `HashMap<Str, int>.put`, `HashSet<int>.clear`, `MinPriorityQueue<Str>.pop`,
+  `HashMap<Str, Dog>.put`): 75 of the 86 retain/release pairs the fix for reads through
   objects added (*Fixed*) are gone, and over the samples and the standard library's tests
-  the static retains go from 1421 to 1364 (releases 4347 to 4290), with no other change to
+  the static retains go from 1421 to 1346 (releases 4355 to 4280), with no other change to
   the code.  Such a read is a `stable` load in PIR (`%b = field.load %o, C.f stable`,
   `ptr.load box, %p stable`; docs/pir.md §6), which the moves at last use count as held
   by its slot: the arguments the hold let them hand on are still handed on

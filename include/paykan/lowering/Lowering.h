@@ -46,11 +46,25 @@ enum class Copies {
   /// shares them with shareInstantiations before running the program.
   PerModule,
 };
+/// What the main module's code may know of the program it is in (@p world;
+/// every import's code knows only what any module's does).
+enum class World {
+  /// Only what any module's code knows: the main module may be imported
+  /// (--emit-pkm), and an importer may derive classes from its classes.
+  Open,
+  /// The main module is the program's entry (run, build, --emit-pir,
+  /// --emit-c), which no module imports (that would be an import cycle):
+  /// every class derived from one of its classes is its own, so a virtual
+  /// call on one runs one of the overrides it lowers, and an object of one
+  /// that dies holds only the fields of its class or of one of those
+  /// (docs/pir.md §7).
+  Closed,
+};
 bool lowerProgram(const sema::SemaContext &ctx, ast::TranslationUnit *tu,
                   const std::string &mainName, const std::string &projectRoot,
                   pir::Program &out, std::ostream &errs,
                   modules::ModuleResolver *resolver = nullptr,
-                  Copies copies = Copies::Shared);
+                  Copies copies = Copies::Shared, World world = World::Open);
 
 /// Keep one definition of each template instantiation in @p program: the
 /// first module (imports first, the main module last) that defines a class
