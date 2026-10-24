@@ -61,6 +61,17 @@ inline constexpr uint8_t kModeValue = 0;
 inline constexpr uint8_t kModeView = 1;
 inline constexpr uint8_t kModeInout = 2;
 
+/// A method record's flags byte (ast::MethodDecl's flags).
+inline constexpr uint8_t kMethodPrivate = 1 << 0;
+inline constexpr uint8_t kMethodView = 1 << 1; ///< a `view fn`
+inline constexpr uint8_t kMethodImpl = 1 << 2; ///< an `impl` block's method
+/// A pure virtual method: a class's vtable slot with no definition (§3.5's
+/// PURE bit).  Never an `impl` method's, a struct's, an initializer's or
+/// `destroy`'s (readInterface rejects it there).
+inline constexpr uint8_t kMethodPure = 1 << 4;
+inline constexpr uint8_t kMethodKnownFlags =
+    kMethodPrivate | kMethodView | kMethodImpl | kMethodPure;
+
 /// The modes of a signature's parameters (ast::ParamModes): one per
 /// parameter with its name, or none when every parameter is by value, and
 /// how the result is returned (a copy, or a `view` / `inout` borrow).
@@ -94,7 +105,7 @@ struct ClassRec {
     std::string Name;
     std::string ReturnTypeName;
     std::vector<std::string> ParamTypeNames;
-    uint8_t Flags = 0; ///< ast::MethodDecl flags (Private bit)
+    uint8_t Flags = 0; ///< kMethod* bits
     ModeRecs Modes;
     bool operator==(const Method &) const = default;
   };
@@ -150,7 +161,9 @@ std::vector<uint8_t> writeInterface(const Interface &iface);
 /// The checks of §3.7 that apply to the prototype records: magic/major,
 /// parts in bounds, aligned and non-overlapping, STRS valid, MODS[0] equal
 /// to @p expectedModule, dependencies sorted and unique, records sorted by
-/// (tag, name) with unique names per kind, every string index in range.
+/// (tag, name) with unique names per kind, every string index in range,
+/// method flags known and kMethodPure only on a class's virtual method
+/// (not `__init__`, `___init__` or `destroy`).
 StatusOr<Interface> readInterface(std::span<const uint8_t> bytes,
                                   std::string_view expectedModule);
 

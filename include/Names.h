@@ -216,6 +216,8 @@ inline constexpr const char *kPaykanPanicIntToChar = "Paykan_panic_int_to_char";
 inline constexpr const char *kPaykanPanicFloatToType =
     "Paykan_panic_float_to_type";
 inline constexpr const char *kPaykanPanicForStep = "Paykan_panic_for_step";
+inline constexpr const char *kPaykanPanicPureVirtual =
+    "Paykan_panic_pure_virtual";
 /// `f16` rounding (docs/design/sized-types.md)
 inline constexpr const char *kPaykanRoundF16 = "Paykan_round_f16";
 inline constexpr const char *kPaykanPanicIndex = "Paykan_panic_index";
@@ -324,6 +326,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicIntToChar,
     kPaykanPanicIndex,
     kPaykanPanicForStep,
+    kPaykanPanicPureVirtual,
     // String
     kPaykanStringNew,
     kPaykanStringDestroy,

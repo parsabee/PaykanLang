@@ -94,6 +94,7 @@ add_executable(sema_tests
     Sema/FunctionTypeTests.cpp
     Sema/VisibilityTests.cpp
     Sema/SizedTypeTests.cpp
+    Sema/PureVirtualTests.cpp
 )
 target_include_directories(sema_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -156,6 +157,7 @@ add_executable(codegen_tests
     CodeGen/WeakTests.cpp
     CodeGen/ImplTests.cpp
     CodeGen/TraitTests.cpp
+    CodeGen/PureVirtualTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

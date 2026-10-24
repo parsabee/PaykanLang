@@ -594,6 +594,10 @@ private:
   void declareClass(ast::ClassDecl *node);
   Val lowerClassDecl(ast::ClassDecl *node);
   void emitDestructor(ast::ClassDecl *node, ast::ClassType *ct);
+  /// The body of @p fn, the function of @p ct's pure virtual @p method:
+  /// Paykan_panic_pure_virtual, then unreachable.
+  void emitPureVirtualTrap(pir::Function *fn, ast::ClassType *ct,
+                           const std::string &method);
   Val lowerMemberAssignStmt(ast::MemberAssignStmt *node);
   Val lowerMemberAccessExpr(ast::MemberAccessExpr *node);
   /// Runtime symbol implementing @p name for the builtin class @p ct, or "".

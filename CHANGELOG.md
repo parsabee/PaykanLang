@@ -9,6 +9,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Pure virtual methods (docs/language/05-classes.md, "Pure virtual methods", #18): a method
+  of a class body whose signature ends with `;`, `view fn area() -> float;`, is a vtable
+  slot without a definition, which a subclass implements by overriding it. There is no
+  keyword: a class with a pure virtual method, its own or inherited, that it does not
+  implement is abstract, and one that implements them all is not.
+  - Constructing an abstract class is an error wherever it is written, naming every missing
+    implementation: `cannot instantiate abstract class 'Square': 'Shape.area' has no
+    implementation`. An abstract class is otherwise an ordinary type (of variables,
+    parameters, fields, arrays, optionals, type arguments), with fields, an `__init__` its
+    subclasses call with `__super__(...)`, and `impl` methods.
+  - A call of a pure virtual method goes through the vtable, from an `impl` method too, and
+    a superclass's `__init__` that calls one reaches the subclass's implementation (the
+    constructor installs the object's vtable before any `__init__` runs).
+  - Only a class body's method may leave out its body: `fn f();` elsewhere (but in a
+    trait) is a syntax error (`function 'f' has no body: ...`, or in an `impl` block `'f'
+    in an 'impl' block has no body: ...`, `'f' has no body: a 'static fn' needs one` and
+    `'__init__' has no body: an initializer needs one`). A method its superclass
+    implements cannot be made pure virtual again, and a `match` arm naming an abstract
+    class is rejected (`unreachable arm: no object has the exact type of abstract class
+    'Shape'`, docs/language/08-match.md); the arm unwrapping a `Shape?` stays fine.
+  - Generic classes follow the same rules per instantiation (a superclass cannot be
+    generic, so a generic class with a pure virtual method has no objects; a generic
+    subclass can implement a non-generic class's), and modules export the pure
+    bit with each method, from a source and from a `.pkm` (the method flags byte's bit 4,
+    the `PURE` bit docs/design/pkm.md reserved; an importer works out abstractness itself).
+    The AST interchange format writes a pure virtual method's body as `_`
+    (docs/plugins/ast-format.md).
+  - An abstract class has no constructor in the PIR; a pure virtual method's function, the
+    target of its slot, calls the new runtime function `Paykan_panic_pure_virtual` and is
+    `unreachable` (docs/pir.md §5, §8).
+  - `samples/codegen/63_pure_virtual.pkn` runs a `Shape` hierarchy.
 - Moves at last use (#186): a copy of a variable where it is last used is a transfer, made
   by a new backend-independent PIR pass, `moves-at-last-use` (docs/pir.md §12), on every
   program and on the code of every module written to a `.pkm`, the standard library's
@@ -325,6 +356,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for a generic `Box` of the module) failed when another module instantiated the function
   (`call to undeclared generic function or class 'Box::of'`); it is resolved as the
   template's module declares it, as a variant of a generic enum is (`Maybe::Just(x)`).
+- The AST interchange reader (docs/plugins/ast-format.md) took a method with `(native
+  ...)` for its body (a class body's crashed the compiler) and a class's or a trait's
+  method or a free function with `(qual static)` (read as if it had none). As in the
+  recursive-descent grammar, a native body is now a top-level function's only and `(qual
+  static)` an `impl` block's method's only.
 
 ## [0.2.0] - 2026-10-20
 

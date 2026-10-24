@@ -118,11 +118,16 @@ private:
   ast::EnumDecl *parseEnumDecl();
   ast::ImplDecl *parseImplDecl();
   ast::TraitDecl *parseTraitDecl();
-  /// A function, or with @p requirement a trait method's signature (`;`
-  /// instead of a body).
-  /// @p member: a class's or an `impl` block's (a method or `static fn`).
-  ast::FuncDecl *parseFuncDecl(bool native = false, bool requirement = false,
-                               bool member = false);
+  /// Where a function is declared, which decides what follows its signature.
+  enum class FuncKind {
+    Free,        ///< a top-level `fn`: a body
+    Native,      ///< `native fn`: `=` and its C symbol
+    Requirement, ///< a trait's method: `;` instead of a body
+    ClassMethod, ///< a class body's: a body, or `;` for a pure virtual one
+    ImplMethod,  ///< an `impl` block's method: a body
+    StaticFn,    ///< an `impl` block's `static fn`: a body
+  };
+  ast::FuncDecl *parseFuncDecl(FuncKind kind = FuncKind::Free);
   /// Type parameters and, given @p bounds, their bounds (`T: Show + Eq`).
   bool parseTypeParamList(std::vector<const std::string *> &out,
                           ast::TypeParamBounds *bounds);

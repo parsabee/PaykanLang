@@ -40,7 +40,7 @@ managed by automatic reference counting: there is no garbage collector.
 4. [Strings and conversions](04-strings-and-conversions.md): `Str`, `char`, printing, and
    converting between types.
 5. [Classes and inheritance](05-classes.md): fields, methods, constructors, overriding,
-   `toString` and `equals`, and the `Obj` root.
+   pure virtual methods and abstract classes, `toString` and `equals`, and the `Obj` root.
 6. [Traits](06-traits.md): traits, `impl Trait for Type` and bounds on type parameters.
 7. [Enums](07-enums.md): closed sets of values, variants and equality.
 8. [Match statements](08-match.md): type, variant, value and optional mode.

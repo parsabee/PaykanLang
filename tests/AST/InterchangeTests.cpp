@@ -1297,3 +1297,146 @@ TEST(Interchange, ModulePrivateInitializerRoundTrips) {
   EXPECT_EQ(dump(back), dump(driver.getRoot()));
   EXPECT_EQ(write(*back), text);
 }
+
+namespace {
+
+/// The unit of a program written to a scratch file and parsed by the
+/// recursive-descent frontend.
+ast::TranslationUnit *parseProgram(parser::ParserDriver &driver,
+                                   const std::string &source,
+                                   const std::string &tag) {
+  auto path =
+      std::filesystem::temp_directory_path() /
+      ("paykan_interchange_" + tag + "_" + std::to_string(::getpid()) + ".pkn");
+  std::ofstream(path) << source;
+  int rc = driver.parseFile(path.string());
+  std::filesystem::remove(path);
+  return rc == 0 ? driver.getRoot() : nullptr;
+}
+
+} // namespace
+
+// A class's pure virtual method (docs/language/05-classes.md) has `_` for
+// its body, as a trait method has, and reads back as a method without one.
+TEST(Interchange, PureVirtualMethodsRoundTrip) {
+  parser::ParserDriver driver("recursive-descent");
+  ast::TranslationUnit *tu =
+      parseProgram(driver,
+                   "class Shape {\n"
+                   "  view fn area() -> float;\n"
+                   "  fn grow(by: inout float) -> view Shape;\n"
+                   "  view fn name() -> Str { return \"shape\"; }\n"
+                   "}\n"
+                   "class Source<T> { view fn next() -> T; }\n",
+                   "pure");
+  ASSERT_NE(tu, nullptr);
+  std::string text = write(*tu);
+  EXPECT_NE(text.find("(fn @2:3-2:27 \"area\"\n          (type-params)\n"
+                      "          (params)\n          (named-type \"float\") _\n"
+                      "          (qual view))"),
+            std::string::npos)
+      << text;
+  // A borrowed result's `(qual view)` comes before the `_`, a `view fn`'s
+  // after it.
+  EXPECT_NE(text.find("(named-type @3:36-3:41 \"Shape\")\n          (qual "
+                      "view) _)"),
+            std::string::npos)
+      << text;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  const auto &methods = back->getClassDecls()[0]->getMethods();
+  ASSERT_EQ(methods.size(), 3u);
+  EXPECT_EQ(methods[0]->getBody(), nullptr);
+  EXPECT_TRUE(methods[0]->isView());
+  EXPECT_EQ(methods[1]->getBody(), nullptr);
+  EXPECT_EQ(methods[1]->getResultMode(), ast::ParamMode::View);
+  EXPECT_NE(methods[2]->getBody(), nullptr);
+  EXPECT_EQ(back->getGenericClassDecls()[0]->getMethods()[0]->getBody(),
+            nullptr);
+  EXPECT_EQ(dump(back), dump(tu));
+  EXPECT_EQ(write(*back), text);
+}
+
+// Only a class's method (or a trait's) may have `_` for its body: the check
+// the recursive-descent frontend makes at the `;`.
+TEST(Interchange, OnlyAClassMethodHasNoBody) {
+  struct Case {
+    const char *Text;
+    const char *Error;
+  };
+  const Case cases[] = {
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ _)))",
+       "1:21: function 'f' has `_` for its body: only a class's method can "
+       "(a pure virtual method)"},
+      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"g\" (type-params) "
+       "(params) _ _)))))",
+       "1:40: function 'g' has `_` for its body: only a class's method can "
+       "(a pure virtual method)"},
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"g\" (type-params) (params) _ (block) (block))))))",
+       "1:108: unexpected field in (fn ...)"},
+  };
+  for (const Case &c : cases) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(c.Text, ctx, error), nullptr) << c.Text;
+    EXPECT_EQ(error, c.Error) << c.Text;
+  }
+}
+
+// As in the recursive-descent grammar, only a top-level function is native
+// and only an `impl` block's method is a `static fn`: a class body's
+// method with either is not read as a pure virtual or a virtual method.
+TEST(Interchange, NativeAndStaticOnlyWhereTheGrammarHasThem) {
+  struct Case {
+    const char *Text;
+    const char *Error;
+  };
+  const char *const kNative = "function 'g' has (native ...) for its body: "
+                              "only a top-level function can (a 'native fn')";
+  const char *const kStatic = "has (qual static): only an 'impl' block's "
+                              "method can (a 'static fn')";
+  const Case cases[] = {
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"g\" (type-params) (params) _ (native \"g\"))))))",
+       kNative},
+      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"g\" (type-params) "
+       "(params) _ (native \"g\"))))))",
+       kNative},
+      {"(paykan-ast 1 (unit (trait \"T\" (type-params) (methods (fn \"g\" "
+       "(type-params) (params) _ (native \"g\"))))))",
+       kNative},
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"g\" (type-params) (params) _ _ (qual static))))))",
+       kStatic},
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"g\" (type-params) (params) _ (block) "
+       "(qual static))))))",
+       kStatic},
+      {"(paykan-ast 1 (unit (trait \"T\" (type-params) (methods (fn \"g\" "
+       "(type-params) (params) _ _ (qual static))))))",
+       kStatic},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block) "
+       "(qual static))))",
+       kStatic},
+  };
+  for (const Case &c : cases) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(c.Text, ctx, error), nullptr) << c.Text;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Text << "\n"
+                                                      << error;
+  }
+  // Where the grammar has them, they read.
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_NE(read("(paykan-ast 1 (unit (impl \"A\" (methods (fn \"make\" "
+                 "(type-params) (params) _ (block) (qual static)))) "
+                 "(fn \"twice\" (type-params) (params) _ (native "
+                 "\"twice\"))))",
+                 ctx, error),
+            nullptr)
+      << error;
+}

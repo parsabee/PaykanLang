@@ -658,6 +658,8 @@ void ASTPrinter::visitMethodDecl(MethodDecl *node) {
     OS << " view";
   if (node->isImpl())
     OS << " impl";
+  if (node->isPure())
+    OS << " pure";
   OS << "\n";
 }
 

@@ -199,7 +199,7 @@ private:
     close();
     open("methods");
     for (const FuncDecl *m : d.getMethods())
-      funcDecl(*m);
+      funcDecl(*m, /*bodiless=*/true); // a pure virtual method's is `_`
     close();
     close();
   }
@@ -238,13 +238,14 @@ private:
     typeParams(d.getTypeParams());
     open("methods");
     for (const FuncDecl *m : d.getMethods())
-      funcDecl(*m, /*requirement=*/true);
+      funcDecl(*m, /*bodiless=*/true);
     close();
     close();
   }
 
-  /// A function; a trait's @p requirement has `_` for its body.
-  void funcDecl(const FuncDecl &d, bool requirement = false) {
+  /// A function; where it may have none (@p bodiless: a trait's method, a
+  /// class's pure virtual one), `_` for its absent body.
+  void funcDecl(const FuncDecl &d, bool bodiless = false) {
     open("fn", &d);
     // A module-private initializer is written as spelled, `___init__`.
     str(d.isModulePrivateInit() ? std::string(names::kMethodInitModulePrivate)
@@ -276,7 +277,7 @@ private:
       close();
     } else if (d.getBody()) {
       stmt(d.getBody());
-    } else if (requirement) {
+    } else if (bodiless) {
       none();
     } else {
       fail("function '" + d.getName() + "' has no body");

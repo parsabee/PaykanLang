@@ -1,0 +1,150 @@
+// 63 — pure virtual methods and abstract classes
+// Exercises: a method declared without a body, `view fn area() -> float;`,
+//            is pure virtual (docs/language/05-classes.md): an abstract
+//            Shape with a field, an __init__ and three pure methods, called
+//            through the vtable from its virtual `describe`, which an `impl`
+//            method calls, and from its __init__ (which reaches the
+//            subclass's implementation: the object's vtable is its class's
+//            from the start); an abstract Polygon that implements one; the
+//            concrete Square, Triangle and Rect; a Shape[] of all three, a
+//            `view Shape[]` parameter, a Shape-typed variable reassigned, a
+//            Shape? unwrapped by `match`, and a `match` on the concrete
+//            classes.
+// expect-stdout: a square: area 4, perimeter 8
+// expect-stdout: a triangle: area 6, perimeter 12
+// expect-stdout: a rect: area 4.5, perimeter 9
+// expect-stdout: total area 14.5
+// expect-stdout: largest: a triangle
+// expect-stdout: 3 sides
+// expect-stdout: 9 then 2
+
+import ::io;
+
+class Shape {
+  title: Str;
+
+  view fn area() -> float;
+  view fn perimeter() -> float;
+  view fn kind() -> Str;
+
+  view fn describe() -> Str {
+    return self.title + ": area " + Str(self.area()) + ", perimeter "
+        + Str(self.perimeter());
+  }
+}
+
+impl Shape {
+  // `kind` is the subclass's here: it reads none of its fields.
+  fn __init__()           { self.title = "a " + self.kind(); }
+
+  view fn report() -> Str { return self.describe(); }
+}
+
+// Abstract too: it implements `perimeter`, not `area` or `kind`.
+class Polygon : Shape {
+  sides: int;
+  side: float;
+
+  view fn perimeter() -> float { return float<int>(self.sides) * self.side; }
+}
+
+impl Polygon {
+  fn __init__(sides: int, side: float) {
+    __super__();
+    self.sides = sides;
+    self.side = side;
+  }
+}
+
+class Square : Polygon {
+  view fn area() -> float { return self.side * self.side; }
+  view fn kind() -> Str   { return "square"; }
+}
+
+impl Square {
+  fn __init__(side: float) { __super__(4, side); }
+}
+
+// An equilateral triangle would need a square root; this one is 3-4-5, so
+// its `perimeter` is its own.
+class Triangle : Polygon {
+  view fn area() -> float      { return 6.0; }
+  view fn perimeter() -> float { return 12.0; }
+  view fn kind() -> Str        { return "triangle"; }
+}
+
+impl Triangle {
+  fn __init__() { __super__(3, 4.0); }
+}
+
+class Rect : Shape {
+  w: float;
+  h: float;
+
+  view fn area() -> float      { return self.w * self.h; }
+  view fn perimeter() -> float { return 2.0 * (self.w + self.h); }
+  view fn kind() -> Str        { return "rect"; }
+}
+
+impl Rect {
+  fn __init__(w: float, h: float) { __super__(); self.w = w; self.h = h; }
+}
+
+fn total(shapes: view Shape[]) -> float {
+  sum = 0.0;
+  i = 0;
+  while i < shapes.len() {
+    sum += shapes[i].area();
+    i += 1;
+  }
+  return sum;
+}
+
+// The index of the shape of the largest area, or -1 for none.
+fn largest(shapes: view Shape[]) -> int {
+  best = -1;
+  most = 0.0;
+  i = 0;
+  while i < shapes.len() {
+    if shapes[i].area() > most {
+      most = shapes[i].area();
+      best = i;
+    }
+    i += 1;
+  }
+  return best;
+}
+
+fn sidesOf(o: Obj) -> int {
+  match o {
+    s: Square { return s.sides; }
+    t: Triangle { return t.sides; }
+    _ { return 0; }
+  }
+}
+
+fn main() -> int {
+  shapes: Shape[3] = [Square(2.0), Triangle(), Rect(1.5, 3.0)];
+  i = 0;
+  while i < shapes.len() {
+    io::println(shapes[i].report());
+    i += 1;
+  }
+  io::println("total area " + Str(total(shapes)));
+  best: Shape? = None;
+  at = largest(shapes);
+  if at >= 0 {
+    best = shapes[at];
+  }
+  match best {
+    s: Shape { io::println("largest: " + s.title); }
+    None { io::println("no shapes"); }
+  }
+  io::println(Str(sidesOf(shapes[1])) + " sides");
+
+  s: Shape = Square(3.0);
+  before = s.area();
+  s = Rect(1.0, 2.0);
+  io::println(Str(before) + " then " + Str(s.area()));
+  return 0;
+}

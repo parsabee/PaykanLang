@@ -1,0 +1,39 @@
+// Module: geometry/shapes
+// An abstract Shape (pure virtual `area` and `kind`, a field, an __init__
+// and an `impl` method calling them), an abstract Polygon that implements
+// `kind` only, a concrete Square, and a function over any shapes.
+class Shape {
+  name: Str;
+  view fn area() -> float;
+  view fn kind() -> Str;
+  view fn label() -> Str { return self.kind() + " " + self.name; }
+}
+
+impl Shape {
+  fn __init__(name: Str)  { self.name = name; }
+  view fn report() -> Str { return self.label() + ": " + Str(self.area()); }
+}
+
+class Polygon : Shape {
+  sides: int;
+  view fn kind() -> Str { return "polygon"; }
+}
+
+class Square : Polygon {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+impl Square {
+  fn __init__(name: Str, side: float) { __super__(name, 4); self.side = side; }
+}
+
+fn total(shapes: view Shape[]) -> float {
+  sum = 0.0;
+  i = 0;
+  while i < shapes.len() {
+    sum += shapes[i].area();
+    i += 1;
+  }
+  return sum;
+}

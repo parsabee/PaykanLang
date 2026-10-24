@@ -155,6 +155,18 @@ run_step("paykan --frontend=ast-text run"
 if(NOT STEP_OUTPUT STREQUAL expected_run)
     message(FATAL_ERROR "running through ast-text differs:\n${STEP_OUTPUT}")
 endif()
+# A class's pure virtual methods have `_` for their bodies in the AST
+# (docs/plugins/ast-format.md): the program runs through ast-text too.
+set(pure ${PAYKAN_SOURCE_DIR}/samples/codegen/63_pure_virtual.pkn)
+run_step("paykan --emit-ast (pure virtual)" COMMAND ${paykan} --emit-ast ${pure})
+file(WRITE ${WORK_DIR}/63_pure_virtual.pkn "${STEP_OUTPUT}")
+run_step("paykan run (pure virtual)" COMMAND ${paykan} run ${pure})
+set(expected_run "${STEP_OUTPUT}")
+run_step("paykan --frontend=ast-text run (pure virtual)"
+    COMMAND ${paykan} --frontend=ast-text run ${WORK_DIR}/63_pure_virtual.pkn)
+if(NOT STEP_OUTPUT STREQUAL expected_run)
+    message(FATAL_ERROR "pure virtual methods through ast-text differ:\n${STEP_OUTPUT}")
+endif()
 
 # -- The advanced static path: a C++ backend in a driver of its own ----------
 set(build ${WORK_DIR}/static-driver)

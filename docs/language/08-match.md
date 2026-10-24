@@ -262,6 +262,37 @@ match x {          // x: Obj
 
 A subject typed as `Obj` accepts any class as an arm, since every class is a subtype of `Obj`.
 
+An arm naming an **abstract class** (one with a pure virtual method it does not implement,
+[Classes](05-classes.md#pure-virtual-methods)) is an error too: the arm tests for exactly
+that class, and no object is of an abstract class, so it could never run. Name the concrete
+subclasses instead, or call a virtual method:
+
+```pkn
+class Shape { view fn area() -> float; }
+class Square : Shape {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+fn describe(o: Obj) -> Str {
+  match o {
+    Shape  { return "a shape"; }    // error: unreachable arm
+    Square { return "a square"; }
+    _      { return "something else"; }
+  }
+}
+
+fn main() -> int {
+  return 0;
+}
+```
+
+Error:
+
+```
+error: unreachable arm: no object has the exact type of abstract class 'Shape'
+```
+
 ---
 
 ## Bindings
@@ -486,7 +517,9 @@ Two differences from type mode:
 - The `T` arm is **not** an exact-type test: a `Leaf` stored in a `Node?` is matched by
   `n: Node`. An arm naming a strict subclass keeps exact-type semantics and must come before
   the `T` arm (anything after the `T` arm is unreachable and rejected: `unreachable arm: the
-  'Node' arm above already matches every non-None value`).
+  'Node' arm above already matches every non-None value`). So `T` may be an abstract class,
+  `s: Shape` unwrapping a `Shape?`, while a strict subclass's arm may not (it is an exact
+  test, as in type mode).
 - A `T` arm alone is **not exhaustive**; `T` together with `None` (or `_`) is, and then the
   `match` satisfies the "always returns" and field-initialisation analyses.
 
@@ -616,6 +649,7 @@ match f.readln() {
 |-------|---------|
 | Subject is not matchable | The subject type supports neither type-, variant-, value- nor optional-mode matching: a tuple, an array, a struct or a function type |
 | Arm type not a subtype | A type arm names a class that is not the subject type or a subtype of it |
+| Arm naming an abstract class | A type arm names an abstract class (or, on a `T?`, a strict subclass of `T` that is abstract): `unreachable arm: no object has the exact type of abstract class 'Shape'` |
 | Unknown arm type | A type arm names a class that is not declared anywhere |
 | Unknown enum variant | A variant arm names an identifier that is not a variant of the subject enum |
 | Binding a variant without fields | `x: Variant { … }` where the variant has no fields to bind |

@@ -324,7 +324,8 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     mi.Flags =
         static_cast<uint8_t>((m->isPrivate() ? ast::MethodDecl::Private : 0) |
                              (m->isView() ? ast::MethodDecl::View : 0) |
-                             (m->isImpl() ? ast::MethodDecl::Impl : 0));
+                             (m->isImpl() ? ast::MethodDecl::Impl : 0) |
+                             (m->isPure() ? ast::MethodDecl::Pure : 0));
     mi.Modes = m->getParamModes();
     return mi;
   };
@@ -423,6 +424,13 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
   sortModuleInfo(info);
   return info;
 }
+
+// The IFACE records' method flags (pkm::kMethod*) are ast::MethodDecl's.
+static_assert(ast::MethodDecl::Private == pkm::kMethodPrivate &&
+                  ast::MethodDecl::View == pkm::kMethodView &&
+                  ast::MethodDecl::Impl == pkm::kMethodImpl &&
+                  ast::MethodDecl::Pure == pkm::kMethodPure,
+              "the IFACE method flag bits are ast::MethodDecl's");
 
 // The IFACE records' parameter modes (pkm::kMode*, a byte per parameter,
 // with the names) are ast::ParamMode's values.
@@ -1024,6 +1032,8 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
           ct->findMethod(names::kMethodInit)->setModulePrivateInit(true);
       }
       builder.build();
+      // Abstractness is not exported: it follows from the pure slots.
+      ct->updateAbstract();
       if (ci->IsLocal)
         addClassAliases(ct, ci->Name);
     }

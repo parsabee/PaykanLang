@@ -1,0 +1,24 @@
+// OK: on an optional subject, the arm naming the wrapped type unwraps any
+// present value, whatever its class, so it may name an abstract class
+// (docs/language/08-match.md, "Optional Mode"); the concrete subclass's arm
+// before it is an exact test, as in type mode.
+class Shape {
+  view fn area() -> float;
+}
+
+class Square : Shape {
+  side: float;
+  view fn area() -> float { return self.side * self.side; }
+}
+
+fn area(s: Shape?) -> float {
+  match s {
+    sq: Square { return sq.side * sq.side; }
+    x: Shape { return x.area(); }
+    None { return 0.0; }
+  }
+}
+
+fn main() -> int {
+  return int<float>(area(Square(2.0)));
+}

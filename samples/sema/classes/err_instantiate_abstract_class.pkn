@@ -1,0 +1,19 @@
+// ERROR: a class with a pure virtual method it does not implement is
+// abstract and cannot be constructed; the diagnostic names every missing
+// implementation by the class that declares it pure:
+//   cannot instantiate abstract class 'Shape': 'Shape.area' and 'Shape.kind' have no implementation
+//   cannot instantiate abstract class 'Polygon': 'Shape.area' has no implementation
+class Shape {
+  view fn area() -> float;
+  view fn kind() -> Str;
+}
+
+class Polygon : Shape {
+  view fn kind() -> Str { return "polygon"; }
+}
+
+fn main() -> int {
+  s = Shape();
+  p = Polygon();
+  return 0;
+}

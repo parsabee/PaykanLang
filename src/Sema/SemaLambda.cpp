@@ -29,7 +29,15 @@ ast::FunctionType *Sema::functionTypeOf(const FunctionSig &sig) {
 bool Sema::checkFunctionValue(const std::string &name, const FunctionSig &sig,
                               ast::SourceLocation loc) {
   const std::string shown = displayName(name);
-  if (Ctx.lookupClassType(name) || Ctx.lookupStructType(name)) {
+  const ast::ClassType *ct = Ctx.lookupClassType(name);
+  if (ct && ct->isAbstract()) {
+    // No lambda can construct it either.
+    error(loc, "'" + shown +
+                   "' is a constructor, not a function value, and its class "
+                   "is abstract: it cannot be instantiated");
+    return false;
+  }
+  if (ct || Ctx.lookupStructType(name)) {
     error(loc, "'" + shown +
                    "' is a constructor, not a function value (wrap it: "
                    "'fn(...) -> " +

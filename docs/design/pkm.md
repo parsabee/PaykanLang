@@ -13,7 +13,8 @@ Status: **partly implemented.** What `paykan` ships today:
   of §3.2, but `DECLS` holds only `ENUM`, `CLASS`, `FUNC` and `STRUCT`
   records whose types are type-name strings
   (`include/paykan/pkm/Interface.h`), `TYPES` and `INST` are empty, and no
-  record carries `Vis`, `MFlags` or `Attrs`;
+  record carries `Vis`, `MFlags` or `Attrs` (a method's flags byte is the
+  prototype's own, §3.2, its pure virtual bit `PURE`'s);
 - the module system of §8 in a prototype form: `paykan_modules`
   (`include/paykan/modules/ModuleResolver.h`) resolves an import to its
   source, its `.paykan_cache` entry or a prebuilt file (next to the source
@@ -343,7 +344,20 @@ lists, written only when a result is a borrow (the modes lists are then
 written too, with `n` 0 where a signature has none).  A record without them
 reads as having no modes and returning copies.  Each field of a `CLASS`
 record carries a flags byte after its type name (bit 0: a `weak` field,
-docs/design/weak-references.md); a `STRUCT` record's fields have none.  An
+docs/design/weak-references.md); a `STRUCT` record's fields have none.  A
+method of a `CLASS` or `STRUCT` record carries one after its signature,
+`ast::MethodDecl`'s flags (`kMethod*` in `include/paykan/pkm/Interface.h`:
+bit 0 `Private`, which nothing sets (a member's privacy is its name's,
+docs/design/visibility.md), bit 1 a `view fn`, bit 2 an `impl` block's
+method, bit 4 a pure virtual method, docs/language/05-classes.md, the value
+§3.5 gives `PURE`); a reader rejects any other bit, and the pure bit on a
+struct's method, an `impl` block's, an initializer (`__init__`,
+`___init__`) or `destroy`.  A `CLASS` record lists the complete vtable, so
+an importer works out from the pure bits which classes are abstract; that
+is never written.  A class's constructor is the `FUNC` record of its name,
+an abstract class's too, though its module defines no such function
+(docs/pir.md §5): an importer's `Shape(...)` is then reported as the
+construction of an abstract class, not as a call of an unknown function.  An
 `ENUM` record of a tagged union (docs/language/07-enums.md) adds, after its
 variants, `uleb n, Str name[n]`: the variants that have fields, each one's
 fields the `STRUCT` record named `Enum::variant` (a struct without methods
@@ -1559,7 +1573,7 @@ Reserved now so no later major bump is needed:
 | #170 statics/constants | `CONST` record; `statics[]`; `Const` encoding; `SlotRec`; opcodes 32/33; `HAS_STATIC_INIT` |
 | #171 attributes | `Attrs` per declaration; function/class flag bits; `(key, value)` bag; manifest `attributes` |
 | #167 explicit self / static methods | `MFlags.STATIC`, `MUT_SELF`; `direct[]` |
-| #18 override/final/pure | `MFlags.FINAL/OVERRIDE/PURE`; `cflags.FINAL`; class `abstract` bit |
+| #18 override/final/pure | `MFlags.FINAL/OVERRIDE/PURE`; `cflags.FINAL`; class `abstract` bit (pure virtual methods done: the prototype's method flags byte, bit 4, §3.2; abstractness is recomputed, never stored) |
 | #147 traits | `TRAIT`, `IMPL`, `Bounds`, `T_TRAIT_OBJ`, trait default bodies in `TMPL` |
 | #160 generics | `TMPL` section, `INST` part, `ERASABLE`, `erased`/`nHiddenParams`, `ClassObjRec`, `$class` spelling |
 | #96 inline optionals, #99 weak (done: type code 16, opcodes 30, 31 and 49, a class field's flags byte) | type codes 8–16, opcodes 26–31, `T_WEAK` |

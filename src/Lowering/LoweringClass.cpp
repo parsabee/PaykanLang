@@ -260,12 +260,31 @@ void ModuleLowering::declareClass(ast::ClassDecl *node) {
   pir::Function *dtor = getOrCreateFunction(
       node->getName() + kNameSep + kMethodDestroy, {{Type::Obj}, Type::Void});
   dtor->Params[0].Name = kSelf;
-  // Constructor `Class(initParams...) -> box`.
+  // Constructor `Class(initParams...) -> box`; an abstract class, which
+  // nothing constructs, has none (its `__init__` is its subclasses').
+  if (ct->isAbstract())
+    return;
   pir::Function *ctor =
       getOrCreateFunction(node->getName(), constructorSignature(ct));
   for (auto *m : node->getMethods())
     if (m->getName() == kMethodInit)
       nameParams(*ctor, 0, m->getParams());
+}
+
+// A pure virtual method's function: its slot's target until a subclass
+// implements it.  No object of an abstract class exists, so only a broken
+// program (a hand-written PIR one, say) reaches it: it panics, naming the
+// method by the class that declares it pure (as Sema's errors do), not by a
+// subclass that declares it pure again.
+void ModuleLowering::emitPureVirtualTrap(pir::Function *fn, ast::ClassType *ct,
+                                         const std::string &method) {
+  FunctionStateGuard fnState(*this, fn, nullptr, ct);
+  const std::string &cls = ct->pureSlotOwner(method)->getName();
+  callRuntime(kPaykanPanicPureVirtual,
+              {internString(cls), Val::i64(static_cast<int64_t>(cls.size())),
+               internString(method),
+               Val::i64(static_cast<int64_t>(method.size()))});
+  B.emitUnreachable();
 }
 
 Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
@@ -283,6 +302,10 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
       continue;
     pir::Function *fn =
         FuncByName.at(node->getName() + kNameSep + funcDecl->getName());
+    if (md->isPure()) {
+      emitPureVirtualTrap(fn, ct, funcDecl->getName());
+      continue;
+    }
     FunctionStateGuard fnState(*this, fn, md->getReturnType(), ct);
     {
       ScopeGuard guard(*this);
@@ -311,7 +334,11 @@ Val ModuleLowering::lowerClassDecl(ast::ClassDecl *node) {
 
   // 4. The constructor: allocate, box BEFORE __init__ (so `self` used as a
   //    value inside __init__ recovers the caller's box), run __init__,
-  //    return the box.
+  //    return the box.  The vtable `new` installs is the class's own, so a
+  //    superclass's __init__ that calls a virtual method runs this class's.
+  //    An abstract class has no constructor.
+  if (ct->isAbstract())
+    return Val();
   auto *initMd = ct->findMethod(kMethodInit);
   pir::Function *ctorFn = FuncByName.at(node->getName());
   FunctionStateGuard fnState(*this, ctorFn, nullptr, nullptr);

@@ -133,3 +133,14 @@ TEST(ObjectNone, DestroyIsNoOp) {
   // Still accessible after "destroy".
   EXPECT_NE(PaykanObject_None.vtable, nullptr);
 }
+
+// -- The pure virtual trap
+
+// The function of a pure virtual method, its slot's target until a subclass
+// implements it, names the class and the method (each by its bytes and
+// length, so neither need be NUL-terminated) and aborts.
+TEST(ObjectPureVirtual, TrapNamesTheMethodAndAborts) {
+  EXPECT_DEATH(Paykan_panic_pure_virtual("Shapes", 5, "areas", 4),
+               "paykan: call of the pure virtual method 'Shape\\.area', "
+               "which has no implementation");
+}
