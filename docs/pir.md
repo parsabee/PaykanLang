@@ -1111,7 +1111,7 @@ list; the mlir backend's JIT symbol table must cover it, and an executable links
 `libpaykan_runtime.a`.  `pir::runtimeSignature` (`include/paykan/pir/PIR.h`)
 holds the signatures above, and C's `fmod(f64, f64) -> f64`, which a backend
 calls for an `f64` `rem`: a native function bound to one of these symbols
-must have its signature (§4).
+must have its signature (§3).
 
 Vtable slot layouts of runtime classes (slot index = position):
 

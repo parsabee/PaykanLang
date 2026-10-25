@@ -925,7 +925,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   functions its compiled code calls.  Sema computes a native's C signature with the helper
   the lowering declares and calls the C function with (`sema::nativeSignature`), and the
   PIR verifier rejects a native and a runtime extern of one C symbol, in a module or in
-  two, with different signatures (docs/pir.md §4, §9).
+  two, with different signatures (docs/pir.md §3, §9).
 - `--emit-c` gave C that did not compile for a native function bound straight to a C
   library function, which `run` and `build` call fine: `native fn llabs(x: int) -> int =
   "llabs"` failed with `conflicting types for 'llabs'; have 'int64_t(int64_t)'`, since

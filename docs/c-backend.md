@@ -113,7 +113,7 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   function `Runtime.h` declares (the standard library's `Paykan_io_write`,
   the Buffer functions of a `List`'s instance) is declared the same way; one
   of the functions compiled code calls has their signature ([PIR](pir.md)
-  §4).
+  §3).
 * **Types** are spelled as `Runtime.h` spells them: an `i64` is `int64_t`, an
   `f64` `double`, a `bool` `bool` and a `char` `int8_t`; a box is
   `PaykanShared *`, an obj `PaykanObject *`, a weak reference `PaykanWeak *`
