@@ -314,11 +314,11 @@ TEST(Pkm, PrebuiltModuleOfAnotherDevelopmentBuildIsRejected) {
   EXPECT_TRUE(contains(other.out, "module 'base' (base.pkm) was compiled by "
                                   "paykan "))
       << other.out;
-  EXPECT_TRUE(contains(other.out, "; of another build (elsewhere); this "
-                                  "development build (" +
+  EXPECT_TRUE(contains(other.out, "); build ID elsewhere; this paykan is "
+                                  "development build " +
                                       std::string(paykan::kBuildId) +
-                                      ") takes only its own. Rebuild it "
-                                      "from source."))
+                                      " and takes only files of its own "
+                                      "build. Rebuild it from source."))
       << other.out;
 }
 

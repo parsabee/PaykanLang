@@ -822,11 +822,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`PAYKAN_STDLIB`), or a library one of them built, a program misread that code, and one
   using a `memory::Buffer` instantiation compiled before the `PaykanType` change below
   crashed.  Such a file is now an error naming both builds (`module 'lib' (lib.pkm) was
-  compiled by paykan 0.3.0-dev (...); of another build (b7d975d89acc6d2b); this development
-  build (91da536eca5b47fb) takes only its own. Rebuild it from source.`).  A cache entry of
-  another build is rebuilt, as it was, and a release takes a prebuilt file of any build of
-  a version it accepts (docs/language/15-modules.md, "Prebuilt modules"; docs/design/pkm.md
-  §8.2).
+  compiled by paykan 0.3.0-dev (...); build ID b7d975d89acc6d2b; this paykan is development
+  build 91da536eca5b47fb and takes only files of its own build. Rebuild it from source.`).
+  A cache entry of another build is rebuilt, as it was, and a release takes a prebuilt file
+  of any build of a version it accepts (docs/language/15-modules.md, "Prebuilt modules";
+  docs/design/pkm.md §2.2, §8.2).
 - A `memory::Buffer` slot never set was taken for a value when zero bytes are no value of
   its type but a reference among them may be null: a tagged union whose first variant holds
   a `Str`, a class or a function value, and a function value itself.  With `enum F { B(s:
