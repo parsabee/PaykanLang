@@ -790,7 +790,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allocations that return NULL with `ENOMEM` and leave the old block as it was
   (`Paykan_tryMalloc`, `Paykan_tryRealloc`).  An allocation of 0 bytes is a block of its
   own on every platform, so NULL always means out of memory (C lets `malloc(0)` return
-  NULL and `realloc(p, 0)` free `p`).
+  NULL and `realloc(p, 0)` free `p`).  An allocation that succeeds pays only the test of
+  its result: without tracking, `Paykan_malloc` and `Paykan_free` call libc's `malloc` and
+  `free` with no wrapper between, and what a NULL needs is out of line.  Instructions
+  (callgrind, `build -O2` and the C path) of 20 binary trees of 32,767 objects and of
+  300,000 string concatenations, against the runtime before the check: +0.00% and +0.00%
+  with a GCC-built runtime, +0.60% and +0.71% with a Clang-built one and on the C path
+  (Clang).
 - Under `--track-heap` (or `PAYKAN_TRACK_HEAP`), a `memory::Buffer` asked for nearly all of
   memory overflowed the heap: `reserve(2305843009213693951)` of a `Buffer<int>`, 2^64 - 8
   bytes, crashed with a segmentation fault and `grow` with `heap corruption or invalid free`,
