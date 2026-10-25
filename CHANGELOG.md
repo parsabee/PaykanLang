@@ -91,15 +91,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the same heap statistics, at `-O0`, `-O1` and `-O2`.  Over the samples and the
   standard library's tests it removes, after the moves, 22% of the retains and 9% of the
   releases of the lowered programs (3368 to 2615, 9360 to 8535), and 19% and 7% of what
-  `--emit-pir` prints of the runnable ones (1387 to 1129, 4399 to 4110).  It speeds up
-  little on its own: in the `match` of binary trees the subject's retain is a hold across
-  the call and the argument's the one an owned parameter takes (borrowed parameters, #98
-  part 2, would remove it), and what is left costs a few instructions with the inline
-  retains and releases (*Changed*).  `--stats` counts `rc-elimination retains removed` and
-  `rc-elimination releases removed`.  `samples/codegen/67_reference_count_elimination.pkn`
-  runs each shape and each hazard (a callee that clears the field a match read, `x.next =
-  x.next.next`, an array element replaced or emptied by a call), clean under ASan, LSan and
-  UBSan through `--emit-c`.
+  `--emit-pir` prints of the runnable ones, whose imports come from the module cache (1387
+  to 1129, 4399 to 4110).  It speeds up little on its own: in the `match` of binary trees
+  the subject's retain is a hold across the call and the argument's the one an owned
+  parameter takes (borrowed parameters, #98 part 2, would remove it), and what is left
+  costs a few instructions with the inline retains and releases (*Changed*).  `--stats`
+  counts `rc-elimination retains removed` and `rc-elimination releases removed`.
+  `samples/codegen/67_reference_count_elimination.pkn` runs each shape and each hazard (a
+  callee that clears the field a match read, `x.next = x.next.next`, an array element
+  replaced or emptied by a call), clean under ASan, LSan and UBSan through `--emit-c`.
 - Adjacent string literals are one literal, joined at compile time, as in C and C++
   (docs/grammar.md §1, docs/language/04-strings-and-conversions.md, #197): `"this message
   is far too long " "to fit on one line"` may be split across lines, with comments between

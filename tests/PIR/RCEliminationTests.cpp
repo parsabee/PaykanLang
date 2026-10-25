@@ -14,7 +14,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <chrono>
+#include <ctime>
 #include <sstream>
 #include <string>
 
@@ -1162,9 +1162,12 @@ TEST(RCElimination, ThePassCountsWhatItDid) {
 }
 
 TEST(RCElimination, ItsTimeGrowsWithTheFunction) {
-  // Each walk runs from a value's definition to its last use: four times
-  // the subjects in a function four times the size take about four times
-  // as long.
+  // Each walk runs from a value's definition to its last use: eight times
+  // the subjects in a function eight times the size take eight to twelve
+  // times as long (the larger outgrows a cache), where walks to the end of
+  // the function take about seventy.  The time measured is the processor
+  // time the test spends, which a parallel ctest preempting it does not
+  // stretch.
   auto seconds = [](size_t n) {
     double best = 0;
     for (int run = 0; run < 3; ++run) {
@@ -1177,16 +1180,16 @@ TEST(RCElimination, ItsTimeGrowsWithTheFunction) {
       for (Function &g : p->Modules.front().Functions)
         if (g.Name == "f")
           fn = &g;
-      const auto start = std::chrono::steady_clock::now();
+      const std::clock_t start = std::clock();
       const RCCounts c = eliminateRedundantRC(*fn);
-      const std::chrono::duration<double> took =
-          std::chrono::steady_clock::now() - start;
+      const double took =
+          static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
       EXPECT_EQ(c.Retains, 2 * n);
-      best = run == 0 ? took.count() : std::min(best, took.count());
+      best = run == 0 ? took : std::min(best, took);
     }
     return best;
   };
-  const double small = seconds(500);
+  const double small = seconds(250);
   const double large = seconds(2000);
-  EXPECT_LT(large, 8 * small) << small << " s, then " << large << " s";
+  EXPECT_LT(large, 32 * small) << small << " s, then " << large << " s";
 }
