@@ -130,6 +130,24 @@ TEST(Dump, TaggedUnionVariants) {
       << d;
 }
 
+// A native function's record says it is one.
+TEST(Dump, NativeFunctions) {
+  Writer w;
+  w.add(Kind::Manifest, kFlagRequired, encodeManifest(minimalManifest("m")));
+  Interface i;
+  i.Module = "m";
+  i.Functions.push_back({"width", "int", {"Str"}, {{kModeView}, {"s"}}, true});
+  i.Functions.push_back({"twice", "int", {"int"}, {}, false});
+  w.add(Kind::Iface, kFlagRequired, writeInterface(i));
+  StatusOr<std::vector<uint8_t>> out = w.finish();
+  ASSERT_TRUE(out) << out.status().message();
+  std::string d = dumpOf(*out);
+  EXPECT_NE(d.find("  func twice(int) -> int\n"
+                   "  native func width(view Str) -> int\n"),
+            std::string::npos)
+      << d;
+}
+
 TEST(Dump, CorruptInterfaceIsReported) {
   Writer w;
   w.add(Kind::Manifest, kFlagRequired, encodeManifest(minimalManifest()));

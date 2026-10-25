@@ -303,20 +303,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the pass does not follow, keeps its prologue (`--stats`: `lending marks`, `lending
   arguments lent`, `lending copies kept for the window`, `lending parameters lent`,
   `lending parameters handed on`, `lending parameters owned on entry`, `lending retains
-  at keeps`).  In the 122 programs of the corpus that compile (samples, leak checks,
-  standard library tests, imports) it lends 296 of the 297 marks (keeping one for the
-  window, `both(t, t)`) and 727 parameters (165 of them handed on), with 128 retains at
-  keeps, and leaves one parameter owned from its entry (sample 66's `use(p)`, which
-  passes `p` to an `inout` parameter).  So the retains in `--emit-pir` fall from PR
-  #340's 1385 to 1232 (−11%: 1089 copies, 142 keeps, one prologue) and, after the
-  reference-count elimination, which removes as much as before, from 1135 to 981 (−14%);
-  the 4407 and 4131 releases stay, 672 of them asking a parameter's bit.  A program makes
-  fewer retains and as many fewer releases when it runs (in the probes' own code,
-  `show(a); pass(a); keep(h, a)` makes 1 retain and 8 releases instead of 7 and 14, a
-  chain of hand-offs 0 and 40 instead of 10 and 50, the writes of `w1_written` 12 and 110
-  instead of 44 and 143), and every object dies where it did: the corpus prints and
-  frees memory as before on every backend at `-O0`, `-O1` and `-O2`, and the moves at
-  last use make the same moves.  The generated code of a function that takes no box
+  at keeps`).  The reference-count elimination (#98 part 1) then lends a variable at its
+  last use where another reference the function holds keeps the object alive through
+  the call (docs/pir.md §12, "Moves lent"): a `match` binding passed on in its arm, which
+  the matched value holds, or a copy of a variable read again (`u = t; count(u)`).  The
+  copy's retain goes, and with it the release the callee made of what it was handed,
+  which was never the last (`--stats`: `rc-elimination moves lent`).  And a native
+  function's IFACE record says it is one (a flags byte after its result mode,
+  docs/design/pkm.md §3.5; `pkm dump` prints `native func`), so an importer knows that a
+  call of it changes nothing but its `inout` arguments, and lends it a field read as the
+  module's own calls do.  In the 122 programs of the corpus that compile (samples, leak
+  checks, standard library tests, imports) the lending pass lends 296 of the 297 marks
+  (keeping one for the window, `both(t, t)`) and 727 parameters (165 of them handed on),
+  with 128 retains at keeps, and leaves one parameter owned from its entry (sample 66's
+  `use(p)`, which passes `p` to an `inout` parameter); the reference-count elimination
+  removes the 251 retains and 276 releases it removed before and lends 2 moves (samples
+  49 and 54).  No program of the corpus gives a field read to another module's native
+  function (the print family's were lent already, `println<Str>` being given nothing
+  that reaches an object), so the flag changes nothing there.  So the retains in
+  `--emit-pir` fall from PR #340's 1385 to 1232 (−11%: 1089 copies, 142 keeps, one
+  prologue) and, after the reference-count elimination, from 1135 to 979 (−14%); the 4407
+  and 4131 releases stay, 672 of them asking a parameter's bit.  A program makes fewer
+  retains and as many fewer releases when it runs (in the probes' own code, `show(a);
+  pass(a); keep(h, a)` makes 1 retain and 8 releases instead of 7 and 14, a chain of
+  hand-offs 0 and 40 instead of 10 and 50, the writes of `w1_written` 12 and 110 instead
+  of 44 and 143; binary trees' count of a tree costs each child the matched value's
+  retain and release, 2 operations where it cost 4: 4094 retains and 8190 releases
+  instead of 6140 and 10236 at depth 10, 4.19 and 8.39 million instead of 6.29 and 10.49
+  million at depth 20), and every object dies where it did: the corpus prints and frees
+  memory as before on every backend at `-O0`, `-O1` and `-O2`, and the moves at last use
+  make the same moves.  The generated code of a function that takes no box
   (fib, the dispatch benchmark's `area` methods) is unchanged.  At `-O2`, against the
   part 1 and 4 build, callgrind counts the same instructions for fib, 0.2% fewer for
   dispatch, 0.4 to 2.9% fewer for the hash map and set loops and 0.1% fewer for a

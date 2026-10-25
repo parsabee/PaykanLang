@@ -83,12 +83,20 @@ struct ModeRecs {
   bool operator==(const ModeRecs &) const = default;
 };
 
+/// A FUNC record's flags byte, after its result mode (§3.5): bit 0 for a
+/// `native fn`, whose body is C (docs/language/03-functions.md, "Native
+/// Functions"): it keeps nothing it is lent and changes only what its
+/// `inout` arguments name.
+inline constexpr uint8_t kFuncNative = 1 << 0;
+inline constexpr uint8_t kFuncKnownFlags = kFuncNative;
+
 /// ModuleInfo::FunctionInfo.
 struct FuncRec {
   std::string Name;
   std::string ReturnTypeName;
   std::vector<std::string> ParamTypeNames;
   ModeRecs Modes;
+  bool Native = false; ///< kFuncNative
   bool operator==(const FuncRec &) const = default;
 };
 
@@ -162,8 +170,8 @@ std::vector<uint8_t> writeInterface(const Interface &iface);
 /// parts in bounds, aligned and non-overlapping, STRS valid, MODS[0] equal
 /// to @p expectedModule, dependencies sorted and unique, records sorted by
 /// (tag, name) with unique names per kind, every string index in range,
-/// method flags known and kMethodPure only on a class's virtual method
-/// (not `__init__`, `___init__` or `destroy`).
+/// function and method flags known, and kMethodPure only on a class's
+/// virtual method (not `__init__`, `___init__` or `destroy`).
 StatusOr<Interface> readInterface(std::span<const uint8_t> bytes,
                                   std::string_view expectedModule);
 

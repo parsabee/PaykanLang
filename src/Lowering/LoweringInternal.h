@@ -524,8 +524,11 @@ private:
   /// What constructing the class or struct @p name does (its `__init__`'s),
   /// or null when @p name is no class or struct.
   std::optional<Effect> constructorEffect(const std::string &name);
-  /// What a call of the function or constructor @p name does.
-  Effect calleeEffect(const std::string &name);
+  /// What a call of the function or constructor @p name, given @p args,
+  /// does: another module's native function (SemaContext::ImportedNatives)
+  /// nothing but through an `inout` argument, as one of this module's.
+  Effect calleeEffect(const std::string &name,
+                      const std::vector<ast::Expr *> &args);
   /// The type of the values the private `Obj` field @p field of the struct
   /// @p st holds when that field is a runtime buffer: every store to it in
   /// the struct's methods is a new buffer of that type (PaykanBuffer_new)

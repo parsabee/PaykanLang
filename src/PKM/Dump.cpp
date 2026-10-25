@@ -201,8 +201,9 @@ void dumpIface(const File &f, std::ostream &os) {
          << detail::hex(m.Flags) << "\n";
   }
   for (const FuncRec &fn : i.Functions)
-    os << "  func " << fn.Name << "(" << params(fn.ParamTypeNames, fn.Modes)
-       << ") -> " << result(fn.Modes) << fn.ReturnTypeName << "\n";
+    os << "  " << (fn.Native ? "native " : "") << "func " << fn.Name << "("
+       << params(fn.ParamTypeNames, fn.Modes) << ") -> " << result(fn.Modes)
+       << fn.ReturnTypeName << "\n";
   for (const StructRec &s : i.Structs) {
     os << "  struct " << s.Name << " [" << origin(s.IsLocal, s.OriginModule)
        << "]\n";

@@ -1010,6 +1010,9 @@ call).  A call from another module goes through the function's Paykan body,
 which only reads its parameters: it is lent what the caller keeps, and
 releases after the call only what it was handed (a temporary, a variable
 at its last use; see [Borrowed parameters](16-memory.md#borrowed-parameters)).
+The module's interface says the function is native, so the caller knows
+the call changes nothing but its `inout` arguments, and lends it a field
+read that nothing else in the call may replace, as it would a variable.
 
 ### Generic native functions
 

@@ -3702,3 +3702,37 @@ TEST(LoweringLend, NoKindOfCallIsLentAReadItMayLetGo) {
   EXPECT_NE(argCopy(m, "call @Q.set(", 1), "lend") << m;
   EXPECT_NE(argCopy(m, "call @Q.set(", 2), "lend") << m;
 }
+
+// Another module's native function keeps nothing it is lent and changes
+// only what its `inout` arguments name, as its interface says (an IFACE
+// FUNC record's native flag, docs/design/pkm.md §3.5): a field read given
+// to one is lent, where one given to another module's function, which
+// may run anything, is copied, and so is one given to a native with an
+// `inout` argument.
+TEST(LoweringLend, AReadGivenToAnotherModulesNativeIsLent) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("lowering_natives_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "lib.pkn")
+      << "native fn peek(o: view Obj) -> int = \"pk_test_peek\";\n"
+         "native fn poke(o: view Obj, n: inout int) = \"pk_test_poke\";\n"
+         "fn look(o: view Obj) -> int { return 0; }\n";
+  auto l = lower(R"(import lib;
+    class Node { name: Str; }
+    class H { n: Node; }
+    fn main() -> int {
+      h = H(Node("a"));
+      k = lib::peek(h.n);
+      k = k + lib::look(h.n);
+      lib::poke(h.n, k);
+      return k;
+    }
+  )",
+                 dir.string());
+  std::filesystem::remove_all(dir);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string m = function(l.Text, "main");
+  EXPECT_EQ(argCopy(m, "call @\"lib::peek\"("), "lend") << m;
+  EXPECT_EQ(argCopy(m, "call @\"lib::look\"("), "copy") << m;
+  EXPECT_EQ(argCopy(m, "call @\"lib::poke\"("), "copy") << m;
+}

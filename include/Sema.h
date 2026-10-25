@@ -71,6 +71,11 @@ struct SemaContext {
   /// cache), which the lowering then reads the modules loaded from `.pkm`
   /// files through; null when the caller's was used.
   std::shared_ptr<modules::ModuleResolver> Resolver;
+  /// The names the module calls other modules' native functions by
+  /// (`lib::f`, and the hidden qualifier's for what their templates call),
+  /// as their interfaces say (FunctionSig::Native): what such a call does
+  /// is known though another module compiles it.
+  StringSet ImportedNatives;
 
   explicit operator bool() const { return Ok; }
 };
@@ -268,6 +273,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// The parameters' modes: a user function's, or a constructor's
     /// `__init__`'s.
     ast::ParamModes Modes;
+    /// A `native fn`, this module's or (as its interface says) an imported
+    /// one: its body is C, which keeps nothing it is lent and changes only
+    /// what its `inout` arguments name (docs/language/03-functions.md,
+    /// "Native Functions").
+    bool Native = false;
   };
 
   /// Maps function names to their signatures.
@@ -815,6 +825,8 @@ public:
       std::string ReturnTypeName;
       std::vector<std::string> ParamTypeNames;
       ast::ParamModes Modes; // `n: inout int`
+      /// A `native fn` (FunctionSig::Native).
+      bool Native = false;
       bool operator==(const FunctionInfo &) const = default;
     };
     std::vector<FunctionInfo> ExportedFunctions;
@@ -1681,6 +1693,8 @@ private:
   /// SemaContext::ForeignClasses).
   std::vector<ast::ClassDecl *> ForeignInstantiatedClassDecls;
   std::vector<ast::FuncDecl *> ForeignInstantiatedFuncDecls;
+  /// See SemaContext::ImportedNatives.
+  StringSet ImportedNatives;
 
   /// Register the templates of the module @p info describes under
   /// @p qualifier and @p fullModulePath, and every module their bodies

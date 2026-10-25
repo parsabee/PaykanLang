@@ -489,10 +489,10 @@ ModuleLowering::BorrowedReads::callExpr(ast::CallExpr *ce, bool place) {
     return {};
   }
   const ast::FuncDecl *native = L.localNative(name);
-  std::vector<const ast::Expr *> owners =
-      arguments(args, native ? Callee::Native : Callee::Program,
-                /*given=*/false,
-                native ? L.nativeEffect(*native, args) : L.calleeEffect(name));
+  std::vector<const ast::Expr *> owners = arguments(
+      args, native ? Callee::Native : Callee::Program,
+      /*given=*/false,
+      native ? L.nativeEffect(*native, args) : L.calleeEffect(name, args));
   return result(ce, place, std::move(owners));
 }
 
@@ -954,7 +954,7 @@ void ModuleLowering::EffectScan::call(ast::CallExpr *ce) {
     return;
   if (const ast::FuncDecl *fn = L.bodyOf(name))
     return runs(fn);
-  runs(L.calleeEffect(name));
+  runs(L.calleeEffect(name, args));
 }
 
 void ModuleLowering::EffectScan::methodCall(ast::MethodCallExpr *mc) {
@@ -1020,11 +1020,26 @@ ModuleLowering::effectOf(const ast::FuncDecl *fn) {
   return effect;
 }
 
-ModuleLowering::Effect ModuleLowering::calleeEffect(const std::string &name) {
+// Whether a call given @p args may change what one of them names: it is
+// given to an `inout` parameter.
+static bool changesAnArgument(const std::vector<ast::Expr *> &args) {
+  return std::any_of(args.begin(), args.end(),
+                     [](const ast::Expr *a) { return a->isChangedByCall(); });
+}
+
+ModuleLowering::Effect
+ModuleLowering::calleeEffect(const std::string &name,
+                             const std::vector<ast::Expr *> &args) {
   if (const ast::FuncDecl *fn = bodyOf(name))
     return effectOf(fn);
   if (std::optional<Effect> ctor = constructorEffect(name))
     return *ctor;
+  // Another module's native function: its interface says so, and its body
+  // only hands what it is given to C, which keeps nothing and changes only
+  // what it is given to change (docs/language/03-functions.md, "Native
+  // Functions").
+  if (SemaCtx.ImportedNatives.contains(name))
+    return changesAnArgument(args) ? Effect::unknown() : Effect();
   return Effect::unknown();
 }
 
@@ -1214,9 +1229,7 @@ ModuleLowering::valueMethodEffect(ast::Type *ty, const std::string &method) {
 ModuleLowering::Effect
 ModuleLowering::nativeEffect(const ast::FuncDecl &native,
                              const std::vector<ast::Expr *> &args) {
-  const bool inout =
-      std::any_of(args.begin(), args.end(),
-                  [](const ast::Expr *a) { return a->isChangedByCall(); });
+  const bool inout = changesAnArgument(args);
   for (const names::BufferFunction &f : names::kPaykanBufferFunctions) {
     if (native.getNativeSymbol() != f.Symbol)
       continue;

@@ -342,7 +342,14 @@ parameters).  A borrowed result (`-> view T`) adds a `u8` result mode
 after a `FUNC` record's modes, and one per method after a `CLASS` record's
 lists, written only when a result is a borrow (the modes lists are then
 written too, with `n` 0 where a signature has none).  A record without them
-reads as having no modes and returning copies.  Each field of a `CLASS`
+reads as having no modes and returning copies.  A `FUNC` record of a
+`native fn` (docs/language/03-functions.md, "Native Functions") adds a
+`u8` flags byte after its result mode, bit 0 for a native function (its
+modes and its result mode are then written too); a reader rejects any
+other bit, and a record without it is no native's.  It tells an importer
+what a call of the function does though another module compiles it: it
+keeps nothing it is lent and changes only what its `inout` arguments name,
+so a field read given to it may be lent (#98 part 2, docs/pir.md §7).  Each field of a `CLASS`
 record carries a flags byte after its type name (bit 0: a `weak` field,
 docs/design/weak-references.md); a `STRUCT` record's fields have none.  A
 method of a `CLASS` or `STRUCT` record carries one after its signature,
@@ -1605,7 +1612,7 @@ Reserved now so no later major bump is needed:
 | #147 traits | `TRAIT`, `IMPL`, `Bounds`, `T_TRAIT_OBJ`, trait default bodies in `TMPL` |
 | #160 generics | `TMPL` section, `INST` part, `ERASABLE`, `erased`/`nHiddenParams`, `ClassObjRec`, `$class` spelling |
 | #96 inline optionals, #99 weak (done: type code 16, opcodes 30, 31 and 49, a class field's flags byte) | type codes 8–16, opcodes 26–31, `T_WEAK` |
-| #98 borrowed params | per-call ownership in `CODE` (opcode 54, marks 55 and 56, §5.5); the ownership mask in the runtime ABI, asked by every lending body in `CODE` and `OBJ`; `Sig.conv` and `nConventions` retired (0) |
+| #98 borrowed params | per-call ownership in `CODE` (opcode 54, marks 55 and 56, §5.5); the ownership mask in the runtime ABI, asked by every lending body in `CODE` and `OBJ`; `Sig.conv` and `nConventions` retired (0); a `FUNC` record's native flag (§3.5) |
 | #93 one allocation | header kind is a property of `runtime_abi`, nothing per class |
 | #153 runtime as library | manifest `runtime_abi` + `libraries` (`RUNTIME`, `ALLOCATOR`); payload flag bit 5 |
 | #21 C FFI | `cExport`/`cName`; `EXPORTS_C`; `C_LIBRARY` entries |

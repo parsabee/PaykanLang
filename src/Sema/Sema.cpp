@@ -2918,7 +2918,8 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      std::move(ForeignInstantiatedClassDecls),
                      std::move(ForeignInstantiatedFuncDecls),
                      std::move(ForeignInstantiatedStructDecls),
-                     OwnedResolver};
+                     OwnedResolver,
+                     std::move(ImportedNatives)};
   // The sets live in this frame: a Sema is run once.
   if (ImportStack == &localImportStack)
     ImportStack = nullptr;
@@ -3959,9 +3960,10 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   declareFunction(node->getName(), retTy, paramTypes);
   if (inferred)
     InferredFunctions[node->getName()] = {node, Inference::Pending, nullptr};
-  ast::ParamModes &modes = FunctionTable[node->getName()].Modes;
-  modes = ast::paramModes(node->getParams());
-  modes.Result = node->getResultMode();
+  FunctionSig &sig = FunctionTable[node->getName()];
+  sig.Modes = ast::paramModes(node->getParams());
+  sig.Modes.Result = node->getResultMode();
+  sig.Native = node->isNative();
   return checkResultDecl(node, /*method=*/false);
 }
 

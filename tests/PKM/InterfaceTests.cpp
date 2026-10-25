@@ -238,6 +238,53 @@ TEST(Interface, ResultModes) {
             std::string::npos);
 }
 
+// A FUNC record's flags byte, after its result mode, carries the native bit
+// (docs/language/03-functions.md, "Native Functions"): written only for a
+// native function, with the modes and the result mode before it, so the
+// record of any other function is the one it was.  A bit the format does
+// not know is rejected.
+TEST(Interface, NativeFunctions) {
+  auto declsOf = [](const std::vector<uint8_t> &b) {
+    for (auto &[p, v] : partsWithBytes(b))
+      if (p.Tag == static_cast<uint32_t>(PartTag::Decls))
+        return v;
+    return std::vector<uint8_t>();
+  };
+  Interface i = sortedSample();
+  ASSERT_EQ(i.Functions[2].Name, "area");
+  ASSERT_TRUE(i.Functions[2].Modes.Modes.empty());
+  Interface natives = i;
+  natives.Functions[2].Native = true;
+  natives.Functions[1].Native = true;
+  StatusOr<Interface> back =
+      readInterface(writeInterface(natives), "geometry::shapes");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, natives);
+  EXPECT_TRUE((*back).Functions[2].Native);
+  EXPECT_FALSE((*back).Functions[0].Native);
+  // area: an empty modes list, a result byte and the flags; Shape, whose
+  // modes are written already: the result byte and the flags.
+  EXPECT_EQ(declsOf(writeInterface(natives)).size(),
+            declsOf(writeInterface(i)).size() + 5);
+
+  // An unknown bit: the last byte of the DECLS part of an interface whose
+  // one record is a native function's is its flags byte.
+  Interface one;
+  one.Module = "m";
+  one.Functions.push_back({"f", "int", {}, {}, true});
+  std::vector<uint8_t> bytes = writeInterface(one);
+  ASSERT_TRUE(readInterface(bytes, "m"));
+  std::vector<uint8_t> decls = declsOf(bytes);
+  ASSERT_FALSE(decls.empty());
+  ASSERT_EQ(decls.back(), kFuncNative);
+  decls.back() = 0x80 | kFuncNative;
+  EXPECT_NE(
+      readError(withPart(bytes, static_cast<uint32_t>(PartTag::Decls), decls),
+                "m")
+          .find("function 'f' has unknown flags 0x80"),
+      std::string::npos);
+}
+
 // A method's flags byte carries its pure virtual bit (§3.5's PURE, 0x10):
 // a CLASS record of a pure method round-trips; the bit on a struct's method,
 // an `impl` block's, an initializer or `destroy`, or a bit the format does

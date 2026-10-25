@@ -1416,6 +1416,49 @@ TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
   fs::remove_all(dir);
 }
 
+// A native function's FUNC record says it is one (docs/design/pkm.md
+// §3.5): an importer reading lib's interface from its cache entry knows the
+// native keeps nothing it is lent, and lends it a field read, which it
+// copies for another module's function.
+TEST(Pkm, ANativeFunctionAcrossModulesIsLentAFieldRead) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_native_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib.pkn",
+            "native fn tag(o: view Obj) -> int = \"pk_native_tag\";\n"
+            "fn look(o: view Obj) -> int { return 2; }\n");
+  writeFile(dir / "lib.c", "#include <stdint.h>\n"
+                           "int64_t pk_native_tag(void *o) { return o ? 1 : 0; "
+                           "}\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\n"
+            "import lib;\n"
+            "class Node { name: Str; }\n"
+            "class H { n: Node; }\n"
+            "fn main() -> int {\n"
+            "  h = H(Node(\"a\"));\n"
+            "  io::println(Str<int>(lib::tag(h.n) + lib::look(h.n)));\n"
+            "  return 0;\n"
+            "}\n");
+  auto in = [&](const std::string &cmd) {
+    return run("cd " + dir.string() + " && " + cmd);
+  };
+  ASSERT_EQ(in("cc -std=c11 -fPIC -c lib.c -o lib.o").exitCode, 0);
+  auto ran = in(paykanCmd() + " --track-heap --object=lib.o main.pkn");
+  EXPECT_EQ(ran.exitCode, 0) << ran.out;
+  EXPECT_TRUE(contains(ran.out, "3\n")) << ran.out;
+  EXPECT_TRUE(contains(ran.out, "live blocks       : 0\n")) << ran.out;
+  // lib comes from its cache entry now, its interface read from the entry.
+  auto again = in(paykanCmd() + " --track-heap --object=lib.o main.pkn");
+  EXPECT_EQ(again.out, ran.out);
+  auto pir = in(paykanCmd() + " --emit-pir main.pkn");
+  ASSERT_EQ(pir.exitCode, 0) << pir.out;
+  EXPECT_TRUE(contains(pir.out, "call @\"lib::tag\"(lent %n.")) << pir.out;
+  EXPECT_TRUE(contains(pir.out, "call @\"lib::look\"(%n.")) << pir.out;
+  fs::remove_all(dir);
+}
+
 // `pkm extract --object` writes a module's compiled code as an object the
 // system linker takes (what a program's --emit-c C links with).
 TEST(Pkm, ExtractWritesTheCompiledCodeAsAnObject) {
