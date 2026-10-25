@@ -256,6 +256,42 @@ TEST(Native, OneCSymbolHasOneSignature) {
       << r.Diagnostics;
 }
 
+// The error of a clash is the later binding's, and a note points at the
+// first: here the program's own native function, against the instance of
+// the standard library's generic one that a List<int> makes, whose error
+// is in the standard library's source.
+TEST(Native, AClashPointsAtTheFirstBinding) {
+  auto r = semaCheck(R"(native fn f(x: int) -> int = "llabs";
+native fn g(x: float) -> float = "llabs";
+fn main() -> int { return 0; })");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(":2:1: error: native function 'g' binds C "
+                               "symbol 'llabs', which 'f' already binds"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(":1:1: note: 'f' binds it here"),
+            std::string::npos)
+      << r.Diagnostics;
+
+  r = semaCheck(R"(import ::collections;
+native fn bl(b: view Obj) -> int = "PaykanBuffer_len";
+fn main() -> int {
+  xs = collections::List<int>();
+  xs.push(1);
+  return int(xs.len());
+})");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("memory.pkn:"), std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("binds C symbol 'PaykanBuffer_len', which 'bl' "
+                               "already binds with a different signature"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(".pkn:2:1: note: 'bl' binds it here"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
 // A native function may bind a C function of the runtime, which compiled
 // code calls with its own signature, only with that signature (finding
 // new-F3-1): `PaykanString_concat` is what `+` on strings calls, and

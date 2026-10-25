@@ -1295,6 +1295,10 @@ private:
   struct NativeBinding {
     const ast::FuncDecl *Decl = nullptr;
     pir::Signature Sig;
+    /// The source it is declared in (another module's, for an instance of
+    /// its generic native function), for a note that points at it.
+    std::string File;
+    const std::vector<std::string> *Lines = nullptr;
   };
   std::unordered_map<std::string, NativeBinding> NativeSymbols;
 

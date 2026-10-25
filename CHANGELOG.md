@@ -917,11 +917,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function 'Paykan_heap_reset'`, in C's `main()`).  A C symbol now has one signature in a
   program (docs/language/03-functions.md, "Native Functions"): Sema rejects the later of two
   natives of a module that disagree (`native function 'g' binds C symbol 'llabs', which 'f'
-  already binds with a different signature`) and a native bound to a runtime function with a
-  signature other than the runtime's (`native function 'cat' binds C symbol
-  'PaykanString_concat', a function of the runtime, with a different signature`), the entry
-  code's (`Paykan_heap_reset`, `Paykan_args_free`, ...) and the C library's that compiled
-  code calls (`fmod`, `memcpy`, `memmove`, `getenv`) included; no native function has the
+  already binds with a different signature`, and a note where `f` is, which may be another
+  file: the program's own native function, against an instance of a generic native function
+  of the standard library) and a native bound to a runtime function with a signature other
+  than the runtime's (`native function 'cat' binds C symbol 'PaykanString_concat', a
+  function of the runtime, with a different signature`), the entry code's
+  (`Paykan_heap_reset`, `Paykan_args_free`, ...) and the C library's that compiled code
+  calls (`fmod`, `memcpy`, `memmove`, `getenv`) included; no native function has the
   signature of one that takes a C `int` (`memset`, `Paykan_heap_set_tracking`,
   `Paykan_args_new`).  The same signature twice stays fine, and so do the standard library's
   bindings (`Paykan_io_write`, `fmod`, ...).  The driver checks the modules of a program

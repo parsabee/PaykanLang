@@ -4051,15 +4051,25 @@ bool Sema::checkNativeSymbol(const ast::FuncDecl *node) {
               "', a function of the runtime, with a different signature");
     return false;
   }
+  const std::string file = Diags.getSourceName();
+  const std::vector<std::string> *lines = Diags.getSourceLines();
   auto [it, fresh] =
-      NativeSymbols.try_emplace(symbol, NativeBinding{node, sig});
+      NativeSymbols.try_emplace(symbol, NativeBinding{node, sig, file, lines});
   if (fresh || it->second.Sig == sig)
     return true;
+  const NativeBinding &first = it->second;
   error(node->getLocation(), "native function '" +
                                  displayName(node->getName()) +
                                  "' binds C symbol '" + symbol + "', which '" +
-                                 displayName(it->second.Decl->getName()) +
+                                 displayName(first.Decl->getName()) +
                                  "' already binds with a different signature");
+  // Where the first one is, which may be another file: the program's own
+  // native function, when the later one is an instance of a generic native
+  // function of the standard library.
+  Diags.setSourceInfo(first.File, first.Lines);
+  note(first.Decl->getLocation(),
+       "'" + displayName(first.Decl->getName()) + "' binds it here");
+  Diags.setSourceInfo(file, lines);
   return false;
 }
 
