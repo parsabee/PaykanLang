@@ -268,9 +268,27 @@ private:
     }
   }
 
-  void printArgs(const std::vector<Operand> &args, size_t from) {
+  /// A call's `(a, lent b, owned(%o) c)`: each argument from @p from on,
+  /// after its ownership when it is not the default (docs/pir.md §6).
+  void printArgs(const Instr &in, size_t from) {
     OS << '(';
-    printOperandList(args, from);
+    for (size_t i = from; i < in.Args.size(); ++i) {
+      if (i > from)
+        OS << ", ";
+      switch (in.ownership(i)) {
+      case ArgOwnership::Owned:
+        break;
+      case ArgOwnership::Lent:
+        OS << "lent ";
+        break;
+      case ArgOwnership::Passed:
+        OS << "owned(";
+        printOperand(in.Own[i].Bit);
+        OS << ") ";
+        break;
+      }
+      printOperand(in.Args[i]);
+    }
     OS << ')';
   }
 
@@ -307,7 +325,7 @@ private:
     case Opcode::Call:
       OS << ' ';
       printSymbol(in.Callee, OS);
-      printArgs(in.Args, 0);
+      printArgs(in, 0);
       break;
     case Opcode::VCall:
       OS << ' ';
@@ -319,7 +337,7 @@ private:
       else
         print(in.Sig, OS);
       OS << " [" << in.Slot << "] ";
-      printArgs(in.Args, 1);
+      printArgs(in, 1);
       break;
     case Opcode::FnAddr:
       OS << ' ';
@@ -332,7 +350,7 @@ private:
       OS << " : ";
       print(in.Sig, OS);
       OS << ' ';
-      printArgs(in.Args, 1);
+      printArgs(in, 1);
       break;
     case Opcode::New:
       OS << ' ';
@@ -389,6 +407,10 @@ private:
       OS << ", ";
       printOperandList(in.Args);
       break;
+    case Opcode::Retain:
+      if (in.Lend)
+        OS << " lend";
+      [[fallthrough]];
     default:
       if (!in.Args.empty()) {
         OS << ' ';

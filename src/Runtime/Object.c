@@ -41,12 +41,13 @@ PaykanShared *PaykanObject_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
 }
 
-int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other) {
+int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other,
+                            uint64_t owned) {
   // Identity, compared on the unboxed objects (`self` arrives unboxed); a
   // NULL box is equal to nothing.
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && self == o;
-  return Paykan_equals_consume_other(other, result);
+  return Paykan_equals_drop_other(other, owned, result);
 }
 
 // -- None singleton: an immortal Obj whose toString is "None".

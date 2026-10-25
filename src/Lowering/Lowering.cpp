@@ -65,7 +65,9 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanStringParseInt, {{kObj, kPtr}, kI64}},
     {kPaykanStringParseFloat, {{kObj, kPtr}, kI64}},
     {kPaykanStringParseBool, {{kObj, kPtr}, kI64}},
-    {kPaykanStringEquals, {{kObj, kBox}, kI64}},
+    // The vtable `equals`s spell out their slot's ownership mask
+    // (docs/pir.md §3, §8).
+    {kPaykanStringEquals, {{kObj, kBox, kI64}, kI64}},
     {kPaykanStringToString, {{kObj}, kBox}},
     {kPaykanStringLength, {{kObj}, kI64}},
     {kPaykanIntHash, {{kI64}, kI64}},
@@ -78,7 +80,7 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanEnumEquals, {{kPtr, kPtr, kPtr}, kI64}},
     {kPaykanObjectDestroy, {{kObj}, kVoid}},
     {kPaykanObjectToString, {{kObj}, kBox}},
-    {kPaykanObjectEquals, {{kObj, kBox}, kI64}},
+    {kPaykanObjectEquals, {{kObj, kBox, kI64}, kI64}},
 };
 
 const RuntimeSig *findRuntimeSig(const std::string &name) {

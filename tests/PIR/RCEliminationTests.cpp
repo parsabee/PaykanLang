@@ -1110,6 +1110,94 @@ fn @f(%w: weak) -> void {
   EXPECT_EQ(count(f(r), "retain %s"), 1u) << f(r);
 }
 
+// A lending callee (docs/pir.md §3): @look releases its parameter only
+// when it was handed over.
+const std::string kLook = R"(
+fn @look(%p: box) -> void {
+  %o = owned %p
+  if %o {
+    release %p
+  }
+  ret
+}
+)";
+
+TEST(RCElimination, ALentArgumentIsNoHandOn) {
+  // %s lent to @look keeps its reference: the binding's pair goes, as it
+  // would across a call given nothing.
+  Result r = eliminate(kLook + R"(
+fn @f(%w: weak) -> void {
+  local %x: box
+  %s = weak.load %w
+  retain %s
+  store %x, %s
+  call @look(lent %s)
+  %x1 = load %x
+  %xo = unbox %x1
+  vcall %xo : (obj) -> void [1] ()
+  %t = load %x
+  release %t
+  release %s
+  ret
+}
+)");
+  EXPECT_EQ(count(f(r), "retain %s"), 0u) << f(r);
+  EXPECT_EQ(r.Counts.Retains, 1u);
+  EXPECT_EQ(r.Counts.Releases, 1u);
+  // Passed on (`owned(%o)`), it may be handed over, as an owned one is: the
+  // binding's retain is what holds the object then.
+  Result passed = eliminate(kLook + R"(
+fn @f(%w: weak, %q: box) -> void {
+  local %x: box
+  %oq = owned %q
+  %s = weak.load %w
+  retain %s
+  store %x, %s
+  call @look(owned(%oq) %s)
+  %x1 = load %x
+  %xo = unbox %x1
+  vcall %xo : (obj) -> void [1] ()
+  %t = load %x
+  release %t
+  release %q
+  ret
+}
+)");
+  EXPECT_EQ(count(f(passed), "retain %s"), 1u) << f(passed);
+  EXPECT_EQ(passed.Counts.Retains, 0u);
+}
+
+TEST(RCElimination, AConditionalRetainOrReleaseIsNeverPaired) {
+  // A parameter's prologue retains it only when it was lent, and its exit
+  // releases it only when it was handed over: on one path of each `if` the
+  // pair would have no other half, so neither goes.
+  Result r = eliminate(R"(
+fn @f(%p: box, %w: weak) -> void {
+  local %pp: box
+  %own = owned %p
+  %lent = not %own
+  if %lent {
+    retain %p
+  }
+  store %pp, %p
+  %c = call @cond()
+  %e = load %pp
+  release %e
+  %s = weak.load %w
+  retain %s
+  %k = call @cond()
+  if %own {
+    release %s
+  }
+  release %s
+  ret
+}
+)");
+  EXPECT_EQ(count(f(r), "retain"), 2u) << f(r);
+  EXPECT_EQ(count(f(r), "release"), 3u) << f(r);
+  EXPECT_EQ(r.Counts.Retains, 0u);
+}
+
 TEST(RCElimination, ALocalHandedOnIsNoRangeOfItsOwn) {
   // The binding's reference goes to @take (a move): no release of the
   // local ends a range.

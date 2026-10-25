@@ -270,12 +270,13 @@ static int scalar_equals(int64_t kind, const char *a, const char *b) {
     PaykanShared *sb = load_box(b);
     if (!sa || !sb)
       return sa == sb; // two None are equal; None and an object are not
-    // The virtual `equals` consumes its argument box: hand it a +1.  The
-    // values are the caller's storage, which the equals may write: the
-    // receiver is held while it runs, as a call's receiver is.
+    // The virtual `equals` is handed a reference of its own to its
+    // argument, owned (bit 0 of the mask), which it releases.  The values
+    // are the caller's storage, which the equals may write: the receiver is
+    // held while it runs, as a call's receiver is.
     Paykan_retain_inline(sb);
     Paykan_retain_inline(sa);
-    int64_t equal = Paykan_vcall_equals(PaykanShared_get_inline(sa), sb);
+    int64_t equal = Paykan_vcall_equals(PaykanShared_get_inline(sa), sb, 1);
     Paykan_release_inline(sa);
     return equal != 0;
   }

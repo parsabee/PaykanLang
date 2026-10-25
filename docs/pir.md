@@ -195,6 +195,37 @@ C function's owned box.  The objects that define the
 `$c.` symbols are not part of PIR: the driver hands them to the backends
 (`backend::Input::Objects`, `--object`).
 
+**Box parameters and the ownership mask.**  A function *lends* when it has
+a `box` parameter and is not a module-less extern: a definition, another
+module's function (`extern fn ... module`), a compiled declaration, and the
+type of every vtable slot, `vcall` and `icall` with a `box` parameter.  A
+lending function takes one argument more than its signature lists, after
+them: its *ownership mask*, 64 bits read as an unsigned integer (C's
+`uint64_t`, the `i64` of the machine signature, `pir::machineSignature` in
+`PIR.h`).  Bit k is about its k-th `box` parameter, counting box parameters
+only (`self: obj`, a `ptr`, an `i64` take no bit):
+
+* set, the caller hands its reference over: the callee releases it, keeps
+  it or hands it on, as a box argument is passed when there is no mask;
+* clear, the caller lends it, keeping the object alive until the call
+  returns: the callee releases nothing of it, and retains what it keeps.
+
+The 65th box parameter and those after it have no bit: they are always
+handed over.  A call gives each of its box arguments one of three
+ownerships (§6): handed over (the default, written bare), `lent`, or
+`owned(%o)`, handed over exactly when the bool `%o` is true, which is how a
+function hands on what its own caller may have lent it (`%o = owned %p`, the
+bit of its parameter `%p`).  The backend makes the call's mask from them.
+A module-less extern takes no mask: the runtime's functions and a native
+function's C function borrow what they are given and are called with what
+their signatures list.  So the runtime's vtable `equals` (§8) spell out the
+mask of the slot they fill: `extern fn @$rt.PaykanObject_equals(obj, box,
+i64) -> i64` is the target of an `equals` slot of type `(obj, box) -> i64`.
+`destroy`, `toString` and `main` have no box parameter and take no mask.
+The lowering hands every argument over (each bit of every call's mask is
+set), so code without a `lent` or `owned(%o)` runs as it did before the mask
+existed.
+
 ## 4. Module-level items
 
 ```
@@ -422,6 +453,13 @@ are LLVM's `fcmp une` / `oeq olt ole ogt oge` and C's `!= == < <= > >=`.
 %r = icall %p : (obj, i64) -> i64 (%c, %a)    ; indirect: a call through the
                                               ; function address %p (a function
                                               ; value's code), signature written out
+call @f(%a, lent %b, owned(%o) %c)            ; each box argument of a lending
+                                              ; callee handed over (bare), lent, or
+                                              ; handed over when bool %o is (§3);
+                                              ; in a vcall's and an icall's too
+%o = owned %p                                 ; bool: whether the caller handed the
+                                              ; box parameter %p over (its bit of
+                                              ; the ownership mask, §3)
 ```
 
 The callee signature is always statically known: for `call` it is the
@@ -430,12 +468,16 @@ one written (the verifier checks the arguments against it; that the address
 names a function of that signature is the lowering's guarantee).  `fn.addr`
 names a function of the module or one it declares.  Arguments are
 passed as-is; the lowering has already done every conversion (`bool`→`i64` for
-runtime `int64_t` params, boxing, unboxing).
+runtime `int64_t` params, boxing, unboxing).  A call of a lending function
+(§3) also passes the ownership mask its arguments' ownership makes, and
+`owned %p` reads the bit of `%p` in the function's own; nothing else in PIR
+names the mask.
 
 **ARC and objects**
 
 ```
 retain %b            ; box -> void              Paykan_retain
+retain lend %b       ; the same: a copy made only to hand an argument over
 release %b           ; box -> void              Paykan_release (null-safe)
 %b = box %o          ; obj -> box               PaykanShared_new: the object, strong +1
 %o = unbox %b        ; box -> obj               the identity (null -> null)
@@ -451,6 +493,11 @@ field.store %o, Point.x, %v                    ; plain store: ARC is explicit ar
 %p = vtable.addr Point   |   vtable.addr @$rt.PaykanString_vtable
 vtable.store %o, Point                         ; %o's vtable becomes Point's (an __init__'s, §5)
 ```
+
+A `retain lend` is a retain the lowering makes only so that a box argument
+is handed over, which a pass may make a lent argument instead; every other
+pass and every backend reads it as a plain `retain`, and a module may
+contain none (the lowering's marks are cleared before code is kept).
 
 A `field.load` or a `ptr.load` of a `box` may end in `stable`: the slot
 it reads keeps its reference for as long as the statement it is part of
@@ -858,7 +905,7 @@ CodeGen enforced, now in one place.
   match's duration (pending release at match end, also on early exits).  Class
   arms compare `vtable.load` against `vtable.addr`; optional subjects test
   `null` first; value arms compare literals (Str through
-  `PaykanString_equals` with a boxed literal); enum arms compare `i64`
+  `PaykanString_equals` with a boxed literal, handed over: mask 1); enum arms compare `i64`
   constants.  Arm bindings are raw `obj` aliases (unowned).
 * **Optionals**: `None` into a reference `T?` is `null`.  An optional is
   never an `Obj` (Sema rejects that).  An optional
@@ -937,7 +984,7 @@ PaykanString_new(ptr, i64) -> obj       PaykanString_destroy(obj) -> void
 PaykanString_concat(obj, obj) -> obj    PaykanString_char_at(obj, i64) -> char
 PaykanString_from_int(i64) -> obj       PaykanString_from_float(f64) -> obj
 PaykanString_from_bool(i64) -> obj      PaykanString_from_char(char) -> obj
-PaykanString_equals(obj, box) -> i64    PaykanString_toString(obj) -> box
+PaykanString_equals(obj, box, i64) -> i64   PaykanString_toString(obj) -> box
 PaykanString_length(obj) -> i64
 PaykanString_parse_int(obj, ptr) -> i64     PaykanString_parse_float(obj, ptr) -> i64
 PaykanString_parse_bool(obj, ptr) -> i64    ; 1 and the value at ptr, or 0 (and 0 there)
@@ -950,9 +997,11 @@ PaykanTuple_toString(ptr, ptr) -> obj   PaykanTuple_equals(ptr, ptr, ptr) -> i64
 PaykanStruct_toString(ptr, ptr) -> obj  PaykanStruct_equals(ptr, ptr, ptr) -> i64
 ; enums: likewise, with an enum layout
 PaykanEnum_toString(ptr, ptr) -> obj    PaykanEnum_equals(ptr, ptr, ptr) -> i64
-; vtable slot implementations (inherited into user vtables)
+; vtable slot implementations (inherited into user vtables); an `equals`
+; takes the ownership mask of its slot, `(obj, box) -> i64`, spelled out
+; (§3), and releases `other` only when bit 0 says it was handed over
 PaykanObject_destroy(obj) -> void   PaykanObject_toString(obj) -> box
-PaykanObject_equals(obj, box) -> i64
+PaykanObject_equals(obj, box, i64) -> i64
 ; globals
 extern obj PaykanObject_None
 ; runtime classes' vtables, their type identities for `match`
@@ -1033,7 +1082,16 @@ The verifier rejects a program when:
 * a `switch`'s value is not an `i64`, `char` or `bool`, or a case is not a
   constant of its type or equals an earlier case;
 * a module-level symbol is defined twice, or a vtable entry's signature does not
-  match the named function's declaration;
+  match the named function's declaration as a machine function (§3: a slot
+  of a type with a `box` parameter takes the ownership mask, which a runtime
+  target spells out);
+* a call's argument ownership (§6) is not one per argument, or lends or
+  passes on (`lent`, `owned(%o)`) an argument that is not a box parameter of
+  a lending callee with a bit in the ownership mask (§3; never one of a
+  runtime or native extern), or passes a bit that is not a `bool` value; an
+  instruction other than a call has an argument ownership, or one other than
+  a `retain` is `lend`; `owned` names anything but a box parameter of its
+  function with a bit in the mask;
 * a runtime extern (`extern fn` without a `module`, `extern obj`, `extern
   vtable`) is not named `$rt.<symbol>` (a module-less `extern fn` may instead
   be a native `$c.<symbol>`), or anything else (a function, a module extern's
@@ -1058,8 +1116,10 @@ The text form is also what a loadable backend plugin receives
 ([`plugins/pir-for-backends.md`](plugins/pir-for-backends.md)), so it is
 versioned, by the release like every format: `PAYKAN_PIR_TEXT_VERSION` in
 `include/paykan/plugin_api.h` is the release version packed as
-major * 10000 + minor * 100 + patch (200 for 0.2.0), the same number the binary
-form stores.
+major * 10000 + minor * 100 + patch (300 for 0.3.0), the same number the binary
+form stores.  0.3.0's adds a call argument's ownership (`lent`,
+`owned(%o)`), `owned` and `retain lend` (§6), and with them the ownership
+mask a lending function takes (§3).
 
 ```
 module "01"
@@ -1108,9 +1168,12 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
 - **Codes.** Types and opcodes are written as the fixed codes of
   `include/paykan/pir/Codes.h`, the one table that also holds the mnemonics
   of §10, never as the C++ enumerator's value; a reader rejects a code it
-  does not know.  Two codes mark what follows them: 18 a `view` local's
-  slot type (§3), 53 a `stable` load's opcode (§6); a module written
-  before either mark existed reads the same, unmarked.
+  does not know.  Four codes mark what follows them: 18 a `view` local's
+  slot type (§3), 53 a `stable` load's opcode (§6), 55 a call's opcode
+  after the ownership of its arguments that are not handed over (each one's
+  index, `lent` or `owned(%o)` and its bit), 56 a `retain lend`'s opcode; a
+  record without one reads as before the mark existed, unmarked.  `owned`
+  is opcode 54.
 - **Functions** are length-prefixed records, so a reader can skip or decode
   one function on its own (`decodeFunction`), and the symbol index
   (`index`, `encodeSymbolIndex`) lists every record with its offset, length

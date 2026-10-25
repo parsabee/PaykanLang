@@ -112,7 +112,7 @@ std::string scfText(const std::string &text, mlir::MLIRContext &ctx,
 }
 
 /// Every op of @p mod is one both targets lower: func, scf and arith, and
-/// the pir globals, memory ops and optionals.
+/// the pir globals, memory ops, optionals and ownership masks.
 void expectOnlyStandardOps(mlir::ModuleOp mod) {
   namespace P = ::paykan::pir_dialect;
   mod.walk([&](mlir::Operation *op) {
@@ -120,12 +120,13 @@ void expectOnlyStandardOps(mlir::ModuleOp mod) {
     if (dialect == "builtin" || dialect == "func" || dialect == "scf" ||
         dialect == "arith")
       return;
-    EXPECT_TRUE((
-        mlir::isa<P::CStrOp, P::DataOp, P::BytesOp, P::ExternObjectOp,
-                  P::ExternVTableOp, P::VTableOp, P::AllocaOp, P::PtrLoadOp,
-                  P::PtrStoreOp, P::PtrAddOp, P::MemCopyOp, P::MemZeroOp,
-                  P::AddressOfOp, P::NullOp, P::FnAddrOp, P::ICallOp, P::CastOp,
-                  P::SomeOp, P::NoneOp, P::IsSomeOp, P::UnwrapOp>(op)))
+    EXPECT_TRUE(
+        (mlir::isa<P::CStrOp, P::DataOp, P::BytesOp, P::ExternObjectOp,
+                   P::ExternVTableOp, P::VTableOp, P::AllocaOp, P::PtrLoadOp,
+                   P::PtrStoreOp, P::PtrAddOp, P::MemCopyOp, P::MemZeroOp,
+                   P::AddressOfOp, P::NullOp, P::FnAddrOp, P::ICallOp,
+                   P::CastOp, P::SomeOp, P::NoneOp, P::IsSomeOp, P::UnwrapOp,
+                   P::OwnedOp, P::OwnershipOp>(op)))
         << op->getName().getStringRef().str();
   });
 }
@@ -194,6 +195,19 @@ TEST(PIRMLIR, EveryItemAndInstruction) {
         "module = \"lib\"", "ptr_load", "ptr_store", "field_load",
         "switch %9 : i64 [1, 7] {"})
     EXPECT_NE(mlir.find(op), std::string::npos) << op << "\n" << mlir;
+  // A lending function takes the ownership mask last, a ui64, and reads a
+  // box parameter's bit in it; a call to a lending callee passes one, its
+  // owned bits and the bits it passes on (docs/pir.md §3).
+  for (const char *op :
+       {"pir.func @lend(%arg0: !pir.box, %arg1: !pir.box, %arg2: !pir.obj, "
+        "%arg3: !pir.ptr, %arg4: ui64)",
+        "= owned %arg4[0]", "= owned %arg4[1]", "= ownership 0 [1](%1)",
+        "= ownership 0 []()", "= ownership 2 [0](%0)", "= ownership 1 []()",
+        "slot \"equals\" = @\"$rt.PaykanObject_equals\" : (!pir.obj, "
+        "!pir.box, ui64) -> i64",
+        "pir.func private @\"$rt.PaykanObject_equals\"(!pir.obj, !pir.box, "
+        "i64) -> i64"})
+    EXPECT_NE(mlir.find(op), std::string::npos) << op << "\n" << mlir;
   expectRoundTrip(mlir, ctx);
 }
 
@@ -231,8 +245,16 @@ TEST(PIRMLIR, EmitCOfEveryItemAndInstruction) {
         "extern PaykanMethod pkvt_lib_SAdder[];",
         "static const char pk_main_S_2Estr0[7] = \"Hello\\n\";",
         "static int64_t paykan_main(void);", "int main(int argc, char **argv)",
-        "int64_t rc = paykan_main();", "switch (", "case 7: {"})
+        "int64_t rc = paykan_main();", "switch (", "case 7: {",
+        "= v5 & UINT64_C(1);", "= v5 & UINT64_C(2);",
+        "? UINT64_C(2) : UINT64_C(0);",
+        "(PaykanObject *, PaykanShared *, uint64_t)"})
     EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
+  // The ownership mask is a uint64_t, as Runtime.h's `owned` is.
+  EXPECT_NE(c.find("void pk_main_Slend(PaykanShared* v1, PaykanShared* v2, "
+                   "PaykanObject* v3, void* v4, uint64_t v5) {"),
+            std::string::npos)
+      << c;
   // The runtime's functions are Runtime.h's: never declared here.
   EXPECT_EQ(c.find("PaykanString_new("), c.find("PaykanString_new(v")) << c;
   // A retain and a release call Runtime.h's inline fast paths, which call

@@ -99,15 +99,18 @@ ModuleLowering::declareClosureClass(const std::string &name,
   }
   ClassByName[name] = &cls;
   PL.ClassOrigins.try_emplace(name, Mod.Name);
-  // An object's vtable: its own destroy, the runtime's toString and equals.
+  // An object's vtable: its own destroy, the runtime's toString and equals,
+  // each slot with its signature (the runtime's `equals` spells out the
+  // ownership mask the slot's implies, docs/pir.md §3).
   pir::Function *dtor = getOrCreateFunction(name + kNameSep + kMethodDestroy,
                                             {{Type::Obj}, Type::Void});
   dtor->Params[0].Name = kSelf;
   const pir::Function &toString = declareRuntime(kPaykanObjectToString);
   const pir::Function &equals = declareRuntime(kPaykanObjectEquals);
-  cls.VTable = {{kMethodDestroy, dtor->Name, dtor->Sig},
-                {kMethodToString, toString.Name, toString.Sig},
-                {kMethodEquals, equals.Name, equals.Sig}};
+  cls.VTable = {
+      {kMethodDestroy, dtor->Name, dtor->Sig},
+      {kMethodToString, toString.Name, toString.Sig},
+      {kMethodEquals, equals.Name, {{Type::Obj, Type::Box}, Type::I64}}};
   return &cls;
 }
 

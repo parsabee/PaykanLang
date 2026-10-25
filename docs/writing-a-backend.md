@@ -384,6 +384,15 @@ backend; a new in-tree backend is expected to pass them.
 
 - Translate PIR as it is: do not re-derive ownership, dispatch or layout; the
   lowering is the only place those rules live.
+- Give a lending function (one with a `box` parameter that is not a runtime
+  or native extern), a vtable slot's type and a `vcall`'s or an `icall`'s
+  signature with a `box` parameter the ownership mask, a 64-bit unsigned
+  integer after its parameters (`uint64_t`, as `Runtime.h`'s `owned`).
+  Pass every call of one the mask its arguments' ownership makes: bit k set
+  for its k-th box argument when it is handed over (written bare), clear when
+  `lent`, the bool `%o` for `owned(%o)`; none past the 64th.  Read `owned %p`
+  as the bit of `%p` (`docs/pir.md` §3).  The runtime's `equals` take the
+  mask too, spelled out in their externs (`(obj, box, i64) -> i64`).
 - Link a runtime extern (`extern fn @$rt.Paykan_...`, `extern obj`, `extern
   vtable`) by its C symbol, the PIR name without `$rt.`
   (`pir::runtimeSymbol`); mangle only

@@ -241,9 +241,14 @@ private:
   }
 
   void instr(const Instr &in) {
-    // A stable load's opcode follows its mark (§5.5).
+    // A stable load's opcode follows its mark, a `retain lend`'s its own,
+    // and a call's with an argument that is not owned the ownership of its
+    // arguments that are not (§5.5).
     if (in.Stable)
       W.u8(kStableLoadCode);
+    if (in.Lend)
+      W.u8(kLendCode);
+    ownership(in);
     W.u8(opcodeEntry(in.Op).Code);
     W.uleb(in.Result.Id);
     if (in.Result.Id != kNoValue) {
@@ -298,6 +303,29 @@ private:
     W.uleb(in.Args.size());
     for (const Operand &a : in.Args)
       operand(a);
+  }
+
+  /// `u8 55 ; uleb n ; n × (uleb argIndex ; u8 kind ; [kind 2] Operand)`:
+  /// the arguments that are lent (kind 1) or passed (kind 2, its bit
+  /// after it) in order, when there is one.
+  void ownership(const Instr &in) {
+    size_t n = 0;
+    for (const ArgOwnership &o : in.Own)
+      if (o.K != ArgOwnership::Owned)
+        ++n;
+    if (n == 0)
+      return;
+    W.u8(kOwnershipCode);
+    W.uleb(n);
+    for (size_t i = 0; i < in.Own.size(); ++i) {
+      const ArgOwnership &o = in.Own[i];
+      if (o.K == ArgOwnership::Owned)
+        continue;
+      W.uleb(i);
+      W.u8(o.K == ArgOwnership::Lent ? 1 : 2);
+      if (o.K == ArgOwnership::Passed)
+        operand(o.Bit);
+    }
   }
 
   void block(const Block *b) {
@@ -693,14 +721,28 @@ private:
     uint8_t code;
     if (!R.u8(code))
       return false;
-    // A stable load's opcode follows its mark (§5.5).
+    // A stable load's opcode follows its mark, a `retain lend`'s its own,
+    // and a call's the ownership of its arguments that are not owned
+    // (§5.5).
     in.Stable = code == kStableLoadCode;
-    if (in.Stable && !R.u8(code))
+    in.Lend = code == kLendCode;
+    std::vector<std::pair<size_t, ArgOwnership>> own;
+    const bool owns = code == kOwnershipCode;
+    if (owns && !ownership(own))
+      return false;
+    if ((in.Stable || in.Lend || owns) && !R.u8(code))
       return false;
     if (!opcodeFromCode(code, in.Op))
       return R.fail("reserved opcode", R.offset() - 1);
     if (in.Stable && in.Op != Opcode::FieldLoad && in.Op != Opcode::PtrLoad)
       return R.fail("a stable mark before an instruction that is no load",
+                    R.offset() - 1);
+    if (in.Lend && in.Op != Opcode::Retain)
+      return R.fail("a lend mark before an instruction that is no retain",
+                    R.offset() - 1);
+    if (owns && in.Op != Opcode::Call && in.Op != Opcode::VCall &&
+        in.Op != Opcode::ICall)
+      return R.fail("an ownership mark before an instruction that is no call",
                     R.offset() - 1);
     if (!R.uleb32(in.Result.Id))
       return false;
@@ -767,6 +809,45 @@ private:
     for (Operand &a : in.Args)
       if (!operand(a))
         return false;
+    if (own.empty())
+      return true;
+    if (own.back().first >= in.Args.size())
+      return R.fail("an argument's ownership names no argument");
+    in.Own.resize(in.Args.size());
+    for (auto &[i, o] : own)
+      in.Own[i] = std::move(o);
+    return true;
+  }
+
+  /// The arguments' ownership after its mark (§5.5): at least one, in
+  /// increasing order, each lent or passed.
+  bool ownership(std::vector<std::pair<size_t, ArgOwnership>> &out) {
+    uint64_t n;
+    if (!R.count(n, 2))
+      return false;
+    if (n == 0)
+      return R.fail("a call whose arguments are all owned has no ownership "
+                    "mark");
+    out.resize(static_cast<size_t>(n));
+    for (size_t j = 0; j < out.size(); ++j) {
+      auto &[i, o] = out[j];
+      uint64_t at;
+      uint8_t kind;
+      if (!R.uleb(at, UINT32_MAX) || !R.u8(kind))
+        return false;
+      if (j > 0 && at <= out[j - 1].first)
+        return R.fail("arguments' ownership out of order");
+      i = static_cast<size_t>(at);
+      if (kind == 1) {
+        o.K = ArgOwnership::Lent;
+      } else if (kind == 2) {
+        o.K = ArgOwnership::Passed;
+        if (!operand(o.Bit))
+          return false;
+      } else {
+        return R.fail("reserved argument ownership", R.offset() - 1);
+      }
+    }
     return true;
   }
 

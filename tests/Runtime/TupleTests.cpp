@@ -80,7 +80,7 @@ PaykanShared *Point_toString(PaykanObject *self) {
       (PaykanObject *)PaykanString_new(s.data(), (int64_t)s.size()));
 }
 
-int64_t Point_equals(PaykanObject *self, PaykanShared *other);
+int64_t Point_equals(PaykanObject *self, PaykanShared *other, uint64_t owned);
 
 PaykanMethod Point_vtable[PAYKAN_OBJECT_SLOTS] = {
     reinterpret_cast<PaykanMethod>(&Point_destroy),
@@ -90,12 +90,13 @@ PaykanMethod Point_vtable[PAYKAN_OBJECT_SLOTS] = {
 
 int gPointEqualsCalls = 0;
 
-int64_t Point_equals(PaykanObject *self, PaykanShared *other) {
+int64_t Point_equals(PaykanObject *self, PaykanShared *other, uint64_t owned) {
   ++gPointEqualsCalls;
   PaykanObject *o = PaykanShared_get(other);
   int64_t result =
       o && o->vtable == Point_vtable && ((Point *)o)->x == ((Point *)self)->x;
-  Paykan_release(other); // `other` is consumed
+  if (owned & 1)
+    Paykan_release(other); // `other` was handed over
   return result;
 }
 
@@ -140,10 +141,12 @@ PaykanShared *Replacer_toString(PaykanObject *self) {
   return str("R");
 }
 
-int64_t Replacer_equals(PaykanObject *self, PaykanShared *other) {
+int64_t Replacer_equals(PaykanObject *self, PaykanShared *other,
+                        uint64_t owned) {
   (void)self;
   replaceSlot();
-  Paykan_release(other); // `other` is consumed
+  if (owned & 1)
+    Paykan_release(other); // `other` was handed over
   return 0;
 }
 
@@ -469,8 +472,8 @@ TEST(TupleEquals, NullReferences) {
 }
 
 // A reference element is compared by its `equals`, which is handed its own
-// reference to the other element (and consumes it): the tuples' references
-// are untouched.
+// reference to the other element (owned, mask 1: it releases it): the
+// tuples' references are untouched.
 TEST(TupleEquals, ReferencesCompareThroughEquals) {
   TrackingHeap heap;
   gPointEqualsCalls = 0;

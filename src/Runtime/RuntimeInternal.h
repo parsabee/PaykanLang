@@ -29,9 +29,9 @@ static inline PaykanShared *Paykan_vcall_toString(PaykanObject *self) {
 }
 
 static inline int64_t Paykan_vcall_equals(PaykanObject *self,
-                                          PaykanShared *other) {
-  return ((int64_t (*)(PaykanObject *, PaykanShared *))Paykan_vtable_of(
-      self)[PAYKAN_SLOT_EQUALS])(self, other);
+                                          PaykanShared *other, uint64_t owned) {
+  return ((int64_t (*)(PaykanObject *, PaykanShared *, uint64_t))
+              Paykan_vtable_of(self)[PAYKAN_SLOT_EQUALS])(self, other, owned);
 }
 
 // -- panics
@@ -54,28 +54,33 @@ PAYKAN_NORETURN void Paykan_runtime_panic(const char *fmt, ...)
 
 // -- equals helpers
 //
-// Every `*_equals` has the same calling convention: `other` arrives as a
-// PaykanShared box (the convention for class-typed arguments) that the call
-// CONSUMES, and may be NULL (an absent optional is a null box), which is equal
-// to nothing.  So an implementation is
+// Every `*_equals` has the same calling convention, its slot's: `other`
+// arrives as a PaykanShared box (the convention for class-typed arguments)
+// that the call releases when bit 0 of the ownership mask `owned` says it is
+// handed over (Runtime.h, "The ownership mask"), and may be NULL (an absent
+// optional is a null box), which is equal to nothing.  So an implementation
+// is
 //
-//   int64_t PaykanFoo_equals(PaykanObject *self, PaykanShared *other) {
+//   int64_t PaykanFoo_equals(PaykanObject *self, PaykanShared *other,
+//                            uint64_t owned) {
 //     PaykanObject *o = Paykan_equals_unbox_other(other);
 //     int64_t result = o && <compare self against o>;
-//     return Paykan_equals_consume_other(other, result);
+//     return Paykan_equals_drop_other(other, owned, result);
 //   }
 //
-// and compares BEFORE consuming: releasing the box can destroy the object.
+// and compares BEFORE dropping: releasing the box can destroy the object.
 
-/// The object of the consumed `other` box, or NULL for a NULL box.
+/// The object of the `other` box, or NULL for a NULL box.
 static inline PaykanObject *Paykan_equals_unbox_other(PaykanShared *other) {
   return PaykanShared_get_inline(other);
 }
 
-/// Release the consumed `other` box (null-safe); returns @p result.
-static inline int64_t Paykan_equals_consume_other(PaykanShared *other,
-                                                  int64_t result) {
-  Paykan_release_inline(other);
+/// Release the `other` box (null-safe) when bit 0 of @p owned says it was
+/// handed over; returns @p result.
+static inline int64_t Paykan_equals_drop_other(PaykanShared *other,
+                                               uint64_t owned, int64_t result) {
+  if (owned & 1)
+    Paykan_release_inline(other);
   return result;
 }
 

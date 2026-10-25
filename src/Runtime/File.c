@@ -62,10 +62,11 @@ PaykanShared *PaykanFile_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_new(buf, n));
 }
 
-int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other) {
+int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other,
+                          uint64_t owned) {
   PaykanObject *o = Paykan_equals_unbox_other(other);
   int64_t result = o && self == o;
-  return Paykan_equals_consume_other(other, result);
+  return Paykan_equals_drop_other(other, owned, result);
 }
 
 /// Whether @p f is closed, which a read or write reports and skips.

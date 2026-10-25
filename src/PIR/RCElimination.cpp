@@ -102,13 +102,16 @@ struct Place {
 enum class Use : uint8_t {
   Retain,  // a token more
   Release, // a token less
-  HandOn,  // a token less: a call's argument, a field or memory store, `ret`
+  HandOn,  // a token less: a call's argument it does not lend (its own or
+           // passed: `owned(%o)`), a field or memory store, `ret`
   Store,   // into a local: a token less unless the local is borrowing
-  Borrow,  // unbox, cmp, weak.new: none
+  Borrow,  // unbox, cmp, weak.new, a lent argument, `owned` of a
+           // parameter: none
   Other,   // anything else (select, cast): the value is not followed
 };
 
-Use useOf(const Instr &in) {
+/// How @p in uses its operand @p i.
+Use useOf(const Instr &in, size_t i) {
   switch (in.Op) {
   case Opcode::Retain:
     return Use::Retain;
@@ -117,6 +120,7 @@ Use useOf(const Instr &in) {
   case Opcode::Call:
   case Opcode::VCall:
   case Opcode::ICall:
+    return in.ownership(i) == ArgOwnership::Lent ? Use::Borrow : Use::HandOn;
   case Opcode::FieldStore:
   case Opcode::PtrStore:
     return Use::HandOn;
@@ -125,6 +129,7 @@ Use useOf(const Instr &in) {
   case Opcode::Unbox:
   case Opcode::Cmp:
   case Opcode::WeakNew:
+  case Opcode::Owned:
     return Use::Borrow;
   default:
     return Use::Other;
@@ -272,6 +277,9 @@ private:
       }
       for (const Operand &o : in->Args)
         use(o, &s);
+      for (const ArgOwnership &o : in->Own)
+        if (o.K == ArgOwnership::Passed)
+          use(o.Bit, &s);
       if (in->Op == Opcode::Retain)
         Retains.push_back(&s);
       if (in->Op == Opcode::Store)
@@ -314,12 +322,18 @@ private:
         return LoadKind::Release;
     const Place def = Info.at(Def[v]).At;
     std::vector<std::pair<size_t, Use>> events;
-    for (const Stmt *s : uses) {
-      const Place at = Info.at(s).At;
-      const auto *in = std::get_if<Instr>(s);
+    for (size_t j = 0; j < uses.size(); ++j) {
+      // A statement's uses are listed together: each of its operands that
+      // is v is one.
+      if (j > 0 && uses[j] == uses[j - 1])
+        continue;
+      const Place at = Info.at(uses[j]).At;
+      const auto *in = std::get_if<Instr>(uses[j]);
       if (at.B != def.B || !in)
         return LoadKind::Taking;
-      events.emplace_back(at.Index, useOf(*in));
+      for (size_t i = 0; i < in->Args.size(); ++i)
+        if (sameValue(in->Args[i], v))
+          events.emplace_back(at.Index, useOf(*in, i));
     }
     std::sort(events.begin(), events.end(),
               [](const auto &a, const auto &b) { return a.first < b.first; });
@@ -574,10 +588,10 @@ private:
         return s;
       }
     }
-    for (const Operand &o : in.Args) {
-      if (!sameValue(o, C.V))
+    for (size_t i = 0; i < in.Args.size(); ++i) {
+      if (!sameValue(in.Args[i], C.V))
         continue;
-      switch (useOf(in)) {
+      switch (useOf(in, i)) {
       case Use::Retain:
         count(s, 1);
         break;
@@ -595,12 +609,12 @@ private:
     if (s.P[kLive].Reached && letsGo(in))
       K3 = false;
     if (C.M != kNoLocal) {
-      const Use u = useOf(in);
-      const bool touches =
-          (in.Op == Opcode::Store && in.Local == C.M) ||
-          (u != Use::Retain && u != Use::Borrow &&
-           std::any_of(in.Args.begin(), in.Args.end(),
-                       [&](const Operand &o) { return takesFromKeeper(o); }));
+      bool touches = in.Op == Opcode::Store && in.Local == C.M;
+      for (size_t i = 0; i < in.Args.size() && !touches; ++i) {
+        const Use u = useOf(in, i);
+        touches =
+            u != Use::Retain && u != Use::Borrow && takesFromKeeper(in.Args[i]);
+      }
       if (touches)
         keeperTouched(s);
     }
@@ -726,9 +740,13 @@ private:
   /// Whether every use of @p v is one the walk follows.
   bool followed(ValueId v) const {
     return std::all_of(F.Uses[v].begin(), F.Uses[v].end(), [&](const Stmt *s) {
-      if (const auto *in = std::get_if<Instr>(s))
-        return useOf(*in) != Use::Other;
-      return std::holds_alternative<Return>(*s);
+      const auto *in = std::get_if<Instr>(s);
+      if (!in)
+        return std::holds_alternative<Return>(*s);
+      for (size_t i = 0; i < in->Args.size(); ++i)
+        if (sameValue(in->Args[i], v) && useOf(*in, i) == Use::Other)
+          return false;
+      return true;
     });
   }
 

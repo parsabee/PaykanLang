@@ -427,7 +427,7 @@ fn @main() -> i64 {
 }
 extern fn @$rt.Paykan_panic_pure_virtual(ptr, i64, ptr, i64) -> void
 extern fn @$rt.PaykanObject_toString(obj) -> box
-extern fn @$rt.PaykanObject_equals(obj, box) -> i64
+extern fn @$rt.PaykanObject_equals(obj, box, i64) -> i64
 )";
   fflush(stdout);
   fflush(stderr);

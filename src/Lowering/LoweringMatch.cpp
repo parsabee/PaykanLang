@@ -297,12 +297,13 @@ Val ModuleLowering::emitValueMatch(ast::MatchStmt *node, const Val &subjRaw) {
       [&](size_t i) -> Val {
         ast::Expr *lit = litArms[i]->getLiteralPattern();
         if (auto *sl = ast::dyn_cast<ast::StringLiteral>(lit)) {
-          // PaykanString_equals consumes `other` as a box (the vtable-equals
-          // ABI): box the literal and let the call release it.
+          // PaykanString_equals takes `other` as a box (the vtable-equals
+          // ABI): box the literal and hand it over (mask 1), for the call to
+          // release.
           Val litStr = emitExpr(sl);
           Val litBox = emitSharedNew(litStr, "match.eq");
-          Val eq =
-              callRuntime(kPaykanStringEquals, {subjRaw, litBox}, "match.eq");
+          Val eq = callRuntime(kPaykanStringEquals,
+                               {subjRaw, litBox, Val::i64(1)}, "match.eq");
           return B.cmp(CmpPred::Ne, eq, Val::i64(0), "match.eq");
         }
         Val litVal = emitExpr(lit);

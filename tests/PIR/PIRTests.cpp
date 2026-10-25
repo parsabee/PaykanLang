@@ -782,6 +782,178 @@ fn @main() -> i64 {
       << formatErrors(verify(*p));
 }
 
+// A call's arguments may be `lent` or `owned(%o)`, `owned %p` reads the
+// ownership mask, and a retain may be `retain lend` (docs/pir.md §3, §6):
+// each parses into its own field, and kProgram prints them back.
+TEST(PIR, ArgumentOwnershipParses) {
+  ParseError err;
+  auto p = parseProgram(kProgram, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  const Function *f = p->Modules[0].findFunction("lend");
+  ASSERT_NE(f, nullptr);
+  const auto &body = f->Body.Stmts;
+  const auto &oa = std::get<Instr>(body[0]);
+  EXPECT_EQ(oa.Op, Opcode::Owned);
+  EXPECT_EQ(oa.Result.Ty, Type::Bool);
+  const auto &retain = std::get<Instr>(body[2]);
+  EXPECT_EQ(retain.Op, Opcode::Retain);
+  EXPECT_TRUE(retain.Lend);
+  const auto &call = std::get<Instr>(body[3]);
+  ASSERT_EQ(call.Own.size(), call.Args.size());
+  EXPECT_EQ(call.ownership(0), ArgOwnership::Lent);
+  EXPECT_EQ(call.ownership(1), ArgOwnership::Passed);
+  EXPECT_EQ(call.Own[1].Bit.valueId(), 6u);
+  EXPECT_EQ(call.ownership(2), ArgOwnership::Owned);
+  EXPECT_EQ(call.ownership(3), ArgOwnership::Owned);
+  const auto &vcall = std::get<Instr>(body[4]);
+  EXPECT_EQ(vcall.ownership(0), ArgOwnership::Owned); // the receiver
+  EXPECT_EQ(vcall.ownership(1), ArgOwnership::Lent);
+  const auto &icall = std::get<Instr>(body[5]);
+  EXPECT_EQ(icall.ownership(0), ArgOwnership::Owned); // the callee
+  EXPECT_EQ(icall.ownership(1), ArgOwnership::Passed);
+  EXPECT_EQ(icall.ownership(2), ArgOwnership::Owned);
+  // A call with no mark has none.
+  for (const Stmt &st : p->Modules[0].findFunction("main")->Body.Stmts) {
+    if (const auto *in = std::get_if<Instr>(&st)) {
+      EXPECT_TRUE(in->Own.empty() && !in->Lend);
+    }
+  }
+  EXPECT_FALSE(parseProgram(R"(module "m"
+fn @f(%a: box) -> void {
+  call @f(owned(true %a)
+  ret
+}
+)",
+                            err));
+}
+
+TEST(PIRVerifier, ChecksArgumentOwnership) {
+  std::string errs = verifyText(R"(module "m"
+extern fn @$rt.Paykan_retain(box) -> void
+fn @g(%n: i64, %b: box, %fp: ptr) -> void {
+  %n2 = owned %n
+  %k = add %n, 1
+  %k2 = owned %k
+  %ob = owned %b
+  %x = add %n, 2
+  call @g(lent %n, owned(%x) %b, %fp)
+  call @g(%n, owned(true) %b, %fp)
+  call @$rt.Paykan_retain(lent %b)
+  icall %fp : (i64) -> void (lent 3)
+  ret
+}
+fn @main() -> i64 {
+  ret 0
+}
+)");
+  for (const char *e :
+       {"'owned' of %1, which is no box parameter of the function",
+        "'owned' of %5, which is no box parameter of the function",
+        "argument 0 of '@g' is lent or passed, but is no box parameter",
+        "passed bit of argument 1 of '@g' %8 has type i64, expected bool",
+        "the passed bit of argument 1 of '@g' is not a value",
+        "argument 0 of icall is lent or passed, but icall does not lend"})
+    EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+  EXPECT_NE(errs.find("argument 0 of '@$rt.Paykan_retain' is lent or passed, "
+                      "but '@$rt.Paykan_retain' does not lend"),
+            std::string::npos)
+      << errs;
+  EXPECT_EQ(errs.find("of %2,"), std::string::npos) << errs; // %ob is good
+
+  // The ownership mask has 64 bits: the 65th box parameter has none.
+  std::string params, args;
+  for (int i = 0; i < 65; ++i) {
+    params += (i ? ", %b" : "%b") + std::to_string(i) + ": box";
+    args += (i ? ", %b" : "%b") + std::to_string(i);
+  }
+  errs = verifyText("module \"m\"\nfn @wide(" + params +
+                    ") -> void {\n  %o63 = owned %b63\n  %o64 = owned %b64\n"
+                    "  call @wide(lent " +
+                    args.substr(0, args.rfind(", %b64")) + ", lent %b64)\n" +
+                    "  ret\n}\nfn @main() -> i64 {\n  ret 0\n}\n");
+  for (const char *e :
+       {"'owned' of box parameter 64, which the ownership mask has no bit "
+        "for (it is always owned)",
+        "argument 64 of '@wide' is lent or passed, but is box parameter 64, "
+        "which the ownership mask has no bit for"})
+    EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+  EXPECT_EQ(errs.find("argument 0 of"), std::string::npos) << errs;
+  EXPECT_EQ(errs.find("box parameter 63"), std::string::npos) << errs;
+
+  // Only a call's arguments have an ownership, as many as it has
+  // arguments, and only a retain lends: what the text cannot write.
+  ParseError err;
+  auto p = parseProgram(R"(module "m"
+fn @f(%a: box) -> void {
+  %x = add 1, 2
+  release %a
+  call @f(%a)
+  ret
+}
+fn @main() -> i64 {
+  ret 0
+}
+)",
+                        err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  auto &body = p->Modules[0].Functions[0].Body.Stmts;
+  std::get<Instr>(body[0]).Own.resize(2);
+  std::get<Instr>(body[1]).Lend = true;
+  std::get<Instr>(body[2]).Own.resize(2);
+  errs = formatErrors(verify(*p));
+  for (const char *e :
+       {"'add' gives its operands an ownership (only a call's arguments have "
+        "one)",
+        "a lend 'release' (only a retain lends)",
+        "call to '@f' gives the ownership of 2 argument(s), but passes 1"})
+    EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+}
+
+// A vtable slot's target is the same machine function: a lending slot type
+// takes the ownership mask, which a runtime target spells out.
+TEST(PIRVerifier, AVTableTargetHasTheSlotsMachineSignature) {
+  auto program = [](const char *equalsDecl) {
+    return std::string(R"(module "m"
+class C {
+  vtable {
+    destroy = @C.destroy : (obj) -> void
+    equals = @$rt.PaykanObject_equals : (obj, box) -> i64
+    same = @C.same : (obj, box) -> i64
+  }
+}
+)") + equalsDecl +
+           R"(
+fn @C.destroy(%self: obj) -> void {
+  free %self
+  ret
+}
+fn @C.same(%self: obj, %o: box) -> i64 {
+  ret 0
+}
+fn @main() -> i64 {
+  ret 0
+}
+)";
+  };
+  EXPECT_EQ(
+      verifyText(program("extern fn @$rt.PaykanObject_equals(obj, box, i64) "
+                         "-> i64")),
+      "");
+  std::string errs = verifyText(
+      program("extern fn @$rt.PaykanObject_equals(obj, box) -> i64"));
+  EXPECT_NE(errs.find("vtable slot 1 ('equals') has signature (obj, box) -> "
+                      "i64 (a machine function (obj, box, i64) -> i64) but "
+                      "'@$rt.PaykanObject_equals' is declared (obj, box) -> "
+                      "i64 (a machine function (obj, box) -> i64)"),
+            std::string::npos)
+      << errs;
+  EXPECT_EQ(errs.find("'same'"), std::string::npos) << errs;
+}
+
 TEST(PIRVerifier, ChecksOptionals) {
   std::string errs = verifyText(R"(module "m"
 extern fn @$rt.Paykan_take(opt_i64) -> void

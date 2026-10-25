@@ -263,6 +263,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** the runtime ABI and PIR are 0.3.0's (the version is `0.3.0-dev`,
+  `PAYKAN_RUNTIME_ABI_VERSION` 300), for borrowed box parameters (#98): a function that
+  takes a reference, a `box` parameter, now also takes an ownership mask after its
+  parameters, a `uint64_t` whose bit k says whether the caller hands its k-th box argument
+  over (the callee releases it, keeps it or hands it on, as before) or lends it, keeping
+  the object alive until the call returns (docs/pir.md §3; Runtime.h, "The ownership
+  mask").  The 65th box parameter and those after it have no bit and are always handed
+  over.  So does every vtable slot and function value that takes a box; the runtime's
+  own functions and a native function's C function take none.  The runtime's `equals`
+  are `int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other, uint64_t
+  owned)` (and `PaykanString_equals`, `PaykanFile_equals`), which release `other` only
+  when bit 0 is set, and their PIR externs spell the mask out (`(obj, box, i64) -> i64`).
+  PIR writes a call's lent arguments and the ones a function hands on as its caller gave
+  them (`call @f(%a, lent %b, owned(%o) %c)`, in a `vcall` and an `icall` too), reads a
+  parameter's bit (`%o = owned %p`) and marks a copy the lowering makes only to hand an
+  argument over (`retain lend %v`, a plain retain to every pass but the one that will
+  lend it); in binary PIR they are the opcode 54 and the marks 55 and 56 (docs/pir.md §6,
+  §11; docs/design/pkm.md §5.5), and a vtable's target is checked against its slot as a
+  machine function.  An out-of-tree backend must give every lending function, slot and
+  function value its mask, pass each call's from its arguments' ownership and read `owned`
+  from it (docs/writing-a-backend.md); C code calling a runtime `equals` passes a mask;
+  `.pkm` files, cache entries and plugins of 0.2.0 are not accepted.  Nothing is lent yet:
+  every call hands every argument over, so programs run, print and free memory as they did,
+  with the same retains and releases (the corpus's `--emit-pir` differs from before only
+  in the runtime `equals` externs and a string `match`'s mask), and the generated code of
+  a function that takes no box (fib, the dispatch benchmark's `area` calls) is unchanged.
+  Per-parameter conventions in the interface (`Sig.conv`, `nConventions`) are retired,
+  always 0 (docs/design/pkm.md §3.5, §5.9).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive
   while the result is used (docs/language/03-functions.md, "Where an `inout` result can
   point"): into `self` (a field of a class's `self`, or a field of a struct or an element

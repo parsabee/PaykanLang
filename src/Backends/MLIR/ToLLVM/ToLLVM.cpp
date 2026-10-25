@@ -8,7 +8,8 @@
 //
 // Types: every pir pointer (box, obj, ptr, weak) is !llvm.ptr; an optional
 // is the literal struct { i1 present, payload }, passed by value as C passes
-// `struct { bool present; <payload> value; }`.
+// `struct { bool present; <payload> value; }`; the ownership mask (ui64) is
+// an i64, as C passes a uint64_t.
 
 #include "ToLLVM.h"
 
@@ -207,6 +208,40 @@ struct ICallLowering : PIRPattern<P::ICallOp> {
     operands.append(a.getArgs().begin(), a.getArgs().end());
     auto call = LLVM::CallOp::create(r, op.getLoc(), fnType, operands);
     r.replaceOp(op, call->getResults());
+    return success();
+  }
+};
+
+// -- The ownership mask: an i64
+
+/// `pir.owned %m[k]`: (m & 2^k) != 0.
+struct OwnedLowering : PIRPattern<P::OwnedOp> {
+  using PIRPattern::PIRPattern;
+  LogicalResult matchAndRewrite(P::OwnedOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
+    Location loc = op.getLoc();
+    Value bit = i64(r, loc, static_cast<int64_t>(uint64_t{1} << op.getBit()));
+    Value set = LLVM::AndOp::create(r, loc, a.getMask(), bit);
+    r.replaceOpWithNewOp<LLVM::ICmpOp>(op, LLVM::ICmpPredicate::ne, set,
+                                       i64(r, loc, 0));
+    return success();
+  }
+};
+
+/// `pir.ownership`: the owned bits, or each passed bit while its bool is
+/// true.
+struct OwnershipLowering : PIRPattern<P::OwnershipOp> {
+  using PIRPattern::PIRPattern;
+  LogicalResult matchAndRewrite(P::OwnershipOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
+    Location loc = op.getLoc();
+    Value mask = i64(r, loc, static_cast<int64_t>(op.getOwned()));
+    for (auto [k, passed] : llvm::zip(op.getPassedBits(), a.getPassed())) {
+      Value bit = i64(r, loc, static_cast<int64_t>(uint64_t{1} << k));
+      Value set = LLVM::SelectOp::create(r, loc, passed, bit, i64(r, loc, 0));
+      mask = LLVM::OrOp::create(r, loc, mask, set);
+    }
+    r.replaceOp(op, mask);
     return success();
   }
 };
@@ -444,14 +479,15 @@ struct ConvertToLLVMPass
     arith::populateArithToLLVMConversionPatterns(types, patterns);
     cf::populateControlFlowToLLVMConversionPatterns(types, patterns);
     populateFuncToLLVMConversionPatterns(types, patterns);
-    patterns.add<AllocaLowering, PtrLoadLowering, PtrStoreLowering,
-                 PtrAddLowering, MemCopyLowering, MemZeroLowering,
-                 AddressOfLowering, FnAddrLowering, NullLowering, CastLowering,
-                 ICallLowering, SomeLowering, NoneLowering, IsSomeLowering,
-                 UnwrapLowering, CStrLowering, DataLowering, BytesLowering,
-                 ExternGlobalLowering<P::ExternObjectOp>,
-                 ExternGlobalLowering<P::ExternVTableOp>, VTableLowering>(types,
-                                                                          ctx);
+    patterns
+        .add<AllocaLowering, PtrLoadLowering, PtrStoreLowering, PtrAddLowering,
+             MemCopyLowering, MemZeroLowering, AddressOfLowering,
+             FnAddrLowering, NullLowering, CastLowering, ICallLowering,
+             OwnedLowering, OwnershipLowering, SomeLowering, NoneLowering,
+             IsSomeLowering, UnwrapLowering, CStrLowering, DataLowering,
+             BytesLowering, ExternGlobalLowering<P::ExternObjectOp>,
+             ExternGlobalLowering<P::ExternVTableOp>, VTableLowering>(types,
+                                                                      ctx);
     // Each nested module (one per PIR module) on its own.
     FrozenRewritePatternSet frozen(std::move(patterns));
     for (ModuleOp m : modules())

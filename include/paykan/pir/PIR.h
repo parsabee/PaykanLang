@@ -9,6 +9,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -304,12 +305,26 @@ enum class Opcode : uint8_t {
   // function values (docs/pir.md §6)
   FnAddr, // Callee = @fn -> ptr: the function's address
   ICall,  // callee (ptr) = Args[0], Sig; Args[1..] = args
+  // box parameters (docs/pir.md §3)
+  Owned, // box parameter -> bool: whether the caller handed it over
 };
 
 enum class CmpPred : uint8_t { Eq, Ne, Lt, Le, Gt, Ge };
 
 /// Index of a `local` slot inside Function::Locals.
 using LocalId = uint32_t;
+
+/// What a call does with the reference one of its `box` arguments is
+/// (docs/pir.md §3, "Box parameters"): hands it over (`Owned`, the
+/// default, printed bare), lends it (`Lent`: the caller keeps the object
+/// alive until the call returns), or hands it over exactly when its own
+/// caller handed it over (`Passed`: the `bool` Bit, an `owned` result,
+/// says which).  A callee that lends reads which in its ownership mask.
+struct ArgOwnership {
+  enum Kind : uint8_t { Owned, Lent, Passed };
+  Kind K = Owned;
+  Operand Bit; // Passed: a bool value
+};
 
 struct Instr {
   Opcode Op;
@@ -330,6 +345,18 @@ struct Instr {
   /// as long as the statement uses the value (docs/pir.md §6, §7), so the
   /// value is no borrowed reference to MoveAtLastUse.
   bool Stable = false;
+  /// Call / VCall / ICall: the ownership of each argument, parallel to
+  /// Args; empty when every argument is owned (docs/pir.md §6).
+  std::vector<ArgOwnership> Own;
+  /// Retain: a `retain lend`, a copy the lowering made only to hand an
+  /// argument over, which the lending pass may lend instead.  Every other
+  /// pass and every backend reads it as a plain retain.
+  bool Lend = false;
+
+  /// The ownership of argument @p i (Owned when Own says nothing).
+  ArgOwnership::Kind ownership(size_t i) const {
+    return i < Own.size() ? Own[i].K : ArgOwnership::Owned;
+  }
 };
 
 // -- Structured statements
@@ -422,6 +449,42 @@ struct Function {
   /// Next free ValueId for the builder / parser (ids are dense from 1).
   ValueId NextValueId = 1;
 };
+
+// -- Box parameters and the ownership mask (docs/pir.md §3)
+
+/// The bits of an ownership mask: the k-th `box` parameter of a lending
+/// function (counting its box parameters only) is bit k when k is below
+/// this, and is always handed over (owned) when it is not.
+inline constexpr size_t kOwnershipBits = 64;
+
+/// Whether a function of signature @p sig lends, that is takes the
+/// ownership mask: it has a `box` parameter.  Every function type does so
+/// (a vtable slot's, an icall's), but a module-less extern's (lends()).
+bool lendsType(const Signature &sig);
+
+/// Whether @p f lends: it has a `box` parameter and is not a module-less
+/// extern, a runtime (`$rt.`) or a native (`$c.`) C function, whose C
+/// signature is its PIR one.
+bool lends(const Function &f);
+
+/// The number of `box` parameters of @p sig before parameter @p i: a box
+/// parameter's index in the ownership mask.
+size_t boxIndex(const Signature &sig, size_t i);
+
+/// The signature of a function of signature @p sig at the machine level:
+/// @p sig, and the ownership mask, an i64 read as unsigned, after its
+/// parameters when it lends (@p lend).
+Signature machineSignature(const Signature &sig, bool lend);
+inline Signature machineSignature(const Function &f) {
+  return machineSignature(f.Sig, lends(f));
+}
+
+/// The index in a call's Args of its callee's first parameter: 1 for an
+/// icall (Args[0] is the function's address), 0 for a call and a vcall (a
+/// vcall's receiver is its slot's first parameter).
+inline size_t firstParamArg(const Instr &call) {
+  return call.Op == Opcode::ICall ? 1 : 0;
+}
 
 // -- Classes
 

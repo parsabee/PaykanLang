@@ -171,7 +171,8 @@ PaykanShared *PaykanString_toString(PaykanObject *self) {
   return PaykanShared_new((PaykanObject *)PaykanString_new(s->data, s->len));
 }
 
-int64_t PaykanString_equals(PaykanObject *self, PaykanShared *other) {
+int64_t PaykanString_equals(PaykanObject *self, PaykanShared *other,
+                            uint64_t owned) {
   PaykanObject *o = Paykan_equals_unbox_other(other);
   PaykanString *lhs = (PaykanString *)self;
   int64_t result;
@@ -184,7 +185,7 @@ int64_t PaykanString_equals(PaykanObject *self, PaykanShared *other) {
     result = lhs->len == rhs->len &&
              memcmp(lhs->data, rhs->data, (size_t)lhs->len) == 0;
   }
-  return Paykan_equals_consume_other(other, result);
+  return Paykan_equals_drop_other(other, owned, result);
 }
 
 int64_t PaykanString_length(PaykanObject *self) {

@@ -273,7 +273,7 @@ fn @main() -> i64 {
 TEST(PIRLLVM, ClassesVTablesAndFields) {
   auto r = runPIR(R"(module "t"
 extern fn @$rt.PaykanObject_toString(obj) -> box
-extern fn @$rt.PaykanObject_equals(obj, box) -> i64
+extern fn @$rt.PaykanObject_equals(obj, box, i64) -> i64
 extern fn @$rt.Paykan_release(box) -> void
 
 class Counter {
@@ -327,7 +327,7 @@ TEST(PIRLLVM, ConstantsAreMergeableAndVTableLoadsFollowStores) {
 cstr @.s = "hi" len 2
 cstr @.t = "hi" len 2
 extern fn @$rt.PaykanObject_toString(obj) -> box
-extern fn @$rt.PaykanObject_equals(obj, box) -> i64
+extern fn @$rt.PaykanObject_equals(obj, box, i64) -> i64
 
 class C {
   vtable {
@@ -520,7 +520,7 @@ const char *const kCounted = R"(module "t"
 cstr @.d = "destroyed\n" len 10
 cstr @.k = "kept\n" len 5
 extern fn @$rt.PaykanObject_toString(obj) -> box
-extern fn @$rt.PaykanObject_equals(obj, box) -> i64
+extern fn @$rt.PaykanObject_equals(obj, box, i64) -> i64
 extern fn @$rt.PaykanString_new(ptr, i64) -> obj
 extern fn @$rt.Paykan_print(obj) -> void
 extern fn @$rt.Paykan_dispose(obj) -> void
@@ -553,6 +553,107 @@ fn @strong(%b: box) -> i64 {
   ret %n
 }
 )";
+
+// A lending function takes the ownership mask after its parameters, and
+// `owned %p` reads its box parameter's bit (docs/pir.md §3): a call's mask
+// has the bit of each argument it hands over, owned or passed with a true
+// bit, and not of one it lends.
+const char *const kMaskBits = R"(module "t"
+fn @bits(%a: box, %n: i64, %b: box, %c: box) -> i64 {
+  %oa = owned %a
+  %ob = owned %b
+  %oc = owned %c
+  %x = select %oa, 1, 0
+  %y = select %ob, 2, 0
+  %z = select %oc, 4, 0
+  %xy = add %x, %y
+  %r = add %xy, %z
+  ret %r
+}
+fn @fwd(%x: box, %y: box) -> i64 {
+  %ox = owned %x
+  %r = call @bits(owned(%ox) %x, 0, lent %y, %y)
+  ret %r
+}
+fn @main() -> i64 {
+  %t = call @bits(null box, 0, null box, null box)
+  %u = call @bits(lent null box, 0, null box, lent null box)
+  %v = call @fwd(lent null box, null box)
+  %w = call @fwd(null box, null box)
+  %t1 = mul %t, 1000
+  %u1 = mul %u, 100
+  %v1 = mul %v, 10
+  %tu = add %t1, %u1
+  %tuv = add %tu, %v1
+  %r = add %tuv, %w
+  ret %r
+}
+)";
+
+TEST(PIRLLVM, TheOwnershipMaskCarriesEachArgumentsBit) {
+  auto r = runPIR(kMaskBits);
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 7000 + 200 + 40 + 5);
+  std::string err;
+  std::string ir = translatePIR(kMaskBits, err);
+  ASSERT_FALSE(ir.empty()) << err;
+  // The mask is the last parameter, an i64 tested bit by bit ...
+  EXPECT_FALSE(
+      linesWith(ir, "(ptr %0, i64 %1, ptr %2, ptr %3, i64 %4)").empty())
+      << ir;
+  EXPECT_FALSE(linesWith(ir, "and i64 %4, 4").empty()) << ir;
+  // ... a constant where every bit is known, and a passed bit selected.
+  EXPECT_FALSE(linesWith(ir, "ptr null, ptr null, i64 7)").empty()) << ir;
+  EXPECT_FALSE(linesWith(ir, "ptr null, ptr null, i64 2)").empty()) << ir;
+  EXPECT_FALSE(linesWith(ir, "select i1 ").empty()) << ir;
+  EXPECT_FALSE(linesWith(ir, "or i64 ").empty()) << ir;
+}
+
+// Only the first 64 box parameters have a bit: the 65th is always handed
+// over, whatever the mask says, and a call hands it over.
+TEST(PIRLLVM, TheSixtyFifthBoxParameterHasNoBit) {
+  std::string params, owned, lent63, lent0;
+  for (int i = 0; i < 65; ++i) {
+    const std::string sep = i ? ", " : "";
+    params += sep + "%b" + std::to_string(i) + ": box";
+    owned += sep + "null box";
+    lent63 += sep + (i == 63 ? "lent null box" : "null box");
+    lent0 += sep + (i == 0 ? "lent null box" : "null box");
+  }
+  const std::string text = "module \"t\"\nfn @wide(" + params +
+                           ") -> i64 {\n"
+                           "  %o0 = owned %b0\n"
+                           "  %o63 = owned %b63\n"
+                           "  %x = select %o0, 1, 0\n"
+                           "  %y = select %o63, 10, 0\n"
+                           "  %r = add %x, %y\n"
+                           "  ret %r\n}\n"
+                           "fn @main() -> i64 {\n"
+                           "  %a = call @wide(" +
+                           owned +
+                           ")\n"
+                           "  %b = call @wide(" +
+                           lent63 +
+                           ")\n"
+                           "  %c = call @wide(" +
+                           lent0 +
+                           ")\n"
+                           "  %a1 = mul %a, 10000\n"
+                           "  %b1 = mul %b, 100\n"
+                           "  %ab = add %a1, %b1\n"
+                           "  %r = add %ab, %c\n"
+                           "  ret %r\n}\n";
+  auto r = runPIR(text);
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 11 * 10000 + 1 * 100 + 10);
+  std::string err;
+  std::string ir = translatePIR(text, err);
+  ASSERT_FALSE(ir.empty()) << err;
+  // Every bit set (the 65th has none), and every bit but 63's.
+  EXPECT_FALSE(linesWith(ir, "ptr null, i64 -1)").empty()) << ir;
+  EXPECT_FALSE(linesWith(ir, "ptr null, i64 9223372036854775807)").empty())
+      << ir;
+}
 
 TEST(PIRLLVM, RetainAndReleaseHaveTheirFastPathsInline) {
   std::string err;

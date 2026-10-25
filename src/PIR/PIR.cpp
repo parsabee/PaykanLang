@@ -23,6 +23,32 @@ const Class *Module::findClass(const std::string &name) const {
   return nullptr;
 }
 
+bool lendsType(const Signature &sig) {
+  for (Type t : sig.Params)
+    if (t == Type::Box)
+      return true;
+  return false;
+}
+
+bool lends(const Function &f) {
+  return !(f.IsExtern && f.Module.empty()) && lendsType(f.Sig);
+}
+
+size_t boxIndex(const Signature &sig, size_t i) {
+  size_t k = 0;
+  for (size_t p = 0; p < i && p < sig.Params.size(); ++p)
+    if (sig.Params[p] == Type::Box)
+      ++k;
+  return k;
+}
+
+Signature machineSignature(const Signature &sig, bool lend) {
+  Signature m = sig;
+  if (lend)
+    m.Params.push_back(Type::I64);
+  return m;
+}
+
 bool sameConstant(const Operand &a, const Operand &b) {
   if (a.V.index() != b.V.index())
     return false;
