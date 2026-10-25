@@ -1679,6 +1679,60 @@ TEST(Lowering, FieldStoreRetainsNewAndReleasesOldValue) {
   EXPECT_NE(before.find("release"), std::string::npos) << m;
 }
 
+// An `__init__`'s leading assignments that give a field of its class's body
+// its first value find it null, in the object `new` zeroed, and release no
+// old value (docs/pir.md §7): each of a default `__init__`'s, strong or
+// weak.  A field assigned again, a superclass's field (`__super__(...)`
+// assigned it), and one whose value is computed once `self` can be given
+// away (here to `fill`, which may assign the field) release the old value
+// as every other store does.
+TEST(Lowering, AnInitsFirstAssignmentOfAFieldReleasesNoOldValue) {
+  auto l = lower(R"(
+    class Node { name: Str; }
+    class Pair { a: Node; b: Node?; weak c: Node?; }
+    class Twice { n: Node; }
+    impl Twice {
+      fn __init__(first: Node, second: Node) {
+        self.n = first;
+        self.n = second;
+      }
+    }
+    class Late { a: int; o: Node?; }
+    fn fill(l: Late) -> Node { l.o = Node("f"); return Node("r"); }
+    impl Late { fn __init__() { self.a = 1; self.o = fill(self); } }
+    class Base { s: Node; }
+    class Kid : Base { t: Node; }
+    impl Kid {
+      fn __init__(a: Node, b: Node) { __super__(a); self.t = b; self.s = b; }
+    }
+    fn main() -> int {
+      p = Pair(Node("a"), None, None);
+      t = Twice(Node("1"), Node("2"));
+      l = Late();
+      k = Kid(Node("s"), Node("t"));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string &t = l.Text;
+  const std::string pair = function(t, "Pair.__init__");
+  EXPECT_EQ(count(pair, "old.field"), 0u) << pair;
+  EXPECT_EQ(count(pair, "weak.release"), 0u) << pair;
+  EXPECT_EQ(count(pair, "field.store %"), 3u) << pair;
+  EXPECT_EQ(count(function(t, "Node.__init__"), "old.field"), 0u) << t;
+  const std::string twice = function(t, "Twice.__init__");
+  EXPECT_EQ(count(twice, " = field.load %"), 1u) << twice;
+  EXPECT_LT(twice.find("field.store %"), twice.find("old.field")) << twice;
+  EXPECT_NE(twice.find("    release %old.field."), std::string::npos) << twice;
+  const std::string late = function(t, "Late.__init__");
+  EXPECT_EQ(count(late, " = field.load %"), 1u) << late;
+  EXPECT_LT(late.find("call @fill("), late.find("old.field")) << late;
+  EXPECT_NE(late.find(", Late.o\n"), std::string::npos) << late;
+  const std::string kid = function(t, "Kid.__init__");
+  EXPECT_EQ(count(kid, " = field.load %"), 1u) << kid;
+  EXPECT_NE(kid.find("field.load %self.12, Kid.s\n"), std::string::npos) << kid;
+}
+
 TEST(Lowering, CallRootedFieldReadRetainsTheFieldAndReleasesTheReceiver) {
   auto l = lower(R"(
     class H { s: Str; }
@@ -3196,7 +3250,8 @@ TEST(LoweringMoves, AMethodKeepsACopyWhileItStillUsesSelf) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "Pair2.__init__");
   EXPECT_EQ(count(f, "retain"), 0u) << f;
-  EXPECT_EQ(count(f, "release %"), 2u) << f; // the fields' old values
+  // The fields' first values replace nothing (docs/pir.md §7).
+  EXPECT_EQ(count(f, "release %"), 0u) << f;
   f = function(l.Text, "Named.give");
   EXPECT_EQ(count(f, "retain lend %n."), 1u) << f;
 }

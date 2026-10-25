@@ -190,8 +190,9 @@ The lowering's rules (docs/pir.md §7):
   variable or field (stored as-is);
 * a `weak` field is a field of type `weak`: a read is `field.load` then
   `weak.load` (a fresh +1 box, whatever the receiver), a store `weak.new` of
-  the +1 value then `weak.release` of the old field, and `C.destroy`
-  `weak.release`s it;
+  the +1 value then `weak.release` of the old field (but an `__init__`'s
+  first assignment of the field, which finds it null, docs/pir.md §7), and
+  `C.destroy` `weak.release`s it;
 * a closure capturing a `weak` variable has a `weak` field for it, stored
   with `weak.new` from the variable's read and `weak.release`d by the
   closure's destroy; the call's prologue loads it (`weak.load`) into an

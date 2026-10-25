@@ -1735,6 +1735,88 @@ TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
   g.expectNoLeaks("AnInitsStoreIntoAnotherObjectIsNoConstruction");
 }
 
+// An `__init__`'s first assignment of a field releases no old value (the
+// object is new, docs/pir.md §7); every other one does, so what it
+// replaces dies there: a field assigned a second time, a field `fill`
+// assigns once `self` is given to it, and a superclass's field, which
+// `__super__(...)` assigned.  Each replaced node is reported gone right
+// after its replacement, and nothing leaks, through every pass the driver
+// runs.
+TEST(Ownership, WhatAnInitReplacesDiesWhereItIsReplaced) {
+  LeakGuard g;
+  paykan::pir::Statistics stats;
+  auto r = compilePassesAndRun(R"(import ::io;
+    class Node { name: Str; }
+    class Watcher { weak target: Node?; }
+    fn report(w: view Watcher, tag: view Str) {
+      match w.target {
+        t: Node { io::println(tag + ": alive"); }
+        None { io::println(tag + ": gone"); }
+      }
+    }
+    class Pair { a: Node; b: Node?; weak c: Node?; }
+    class Twice { n: Node; }
+    impl Twice {
+      fn __init__(first: Node, second: Node, w: view Watcher) {
+        self.n = first;
+        self.n = second;
+        report(w, "twice");
+      }
+    }
+    class Late { a: int; o: Node?; }
+    fn fill(l: Late, n: Node) -> Node { l.o = n; return Node("result"); }
+    impl Late {
+      fn __init__(n: Node, w: view Watcher) {
+        self.a = 1;
+        self.o = fill(self, n);
+        report(w, "late");
+      }
+    }
+    class Base { s: Node; }
+    class Kid : Base { t: Node; }
+    impl Kid {
+      fn __init__(a: Node, b: Node, w: view Watcher) {
+        __super__(a);
+        self.t = b;
+        self.s = b;
+        report(w, "kid");
+      }
+    }
+    fn main() -> int {
+      x = Node("x");
+      wx = Watcher(x);
+      p = Pair(x, Node("y"), x);
+      match p.c {
+        c: Node { io::println(p.a.name + " " + c.name); }
+        None { io::println("no c"); }
+      }
+      p = Pair(Node("z"), None, None);
+      report(wx, "pair");
+      f = Node("first");
+      wf = Watcher(f);
+      t = Twice(f, Node("second"), wf);
+      m = Node("m");
+      wm = Watcher(m);
+      l = Late(m, wm);
+      a = Node("a");
+      wa = Watcher(a);
+      k = Kid(a, Node("b"), wa);
+      io::println(t.n.name + " " + k.s.name + " " + k.t.name);
+      match l.o {
+        o: Node { io::println(o.name); }
+        None { io::println("no o"); }
+      }
+      return 0;
+    }
+  )",
+                               stats);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "x x\npair: gone\ntwice: gone\nlate: gone\nkid: gone\n"
+                      "second b b\nresult\n");
+  g.expectNoLeaks("WhatAnInitReplacesDiesWhereItIsReplaced");
+}
+
 // A string's character is read from the string as it was before its index
 // was computed, as an array's element is, though the call computing it
 // replaces the string (and makes a new one where it was).

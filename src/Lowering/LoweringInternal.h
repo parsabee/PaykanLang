@@ -275,6 +275,11 @@ private:
   ast::ClassType *CurrentMethodClassType = nullptr;
   /// The method being emitted is that class's `__init__`.
   bool EmittingInit = false;
+  /// The assignments of the `__init__` being emitted that give a field of
+  /// its class's body its first value, in the object `new` zeroed: one of a
+  /// reference field releases no old value (emitInitBody,
+  /// lowerMemberAssignStmt).
+  std::unordered_set<const ast::MemberAssignStmt *> FirstFieldStores;
 
   struct LoopContext {
     Scope *EnclosingScope;

@@ -712,7 +712,14 @@ CodeGen enforced, now in one place.
   the call and `icall`s the code with the function type's signature.  An
   optional function value is the same 16 bytes, None all zeros.
 * **Fields** own their box; `field.store` is preceded by a retain-or-steal
-  of the new value and the old value is released (null-checked).
+  of the new value and the old value is released (null-checked).  An
+  `__init__`'s leading assignments that give a field of its class's body
+  its first value release none, nor `weak.release` one: `new` zeroed the
+  object, `__super__(...)` assigns only the superclass's fields, and
+  nothing else reaches the object's fields while `self` is only the place
+  they are assigned in (docs/language/05-classes.md, "Every field before
+  `self`"), or while the values assigned are variables or `None`.  Every
+  assignment of the default `__init__` is one.
 * **Weak references** (docs/language/16-memory.md): a `weak` local is
   a `local` of type `weak`, a `weak` field a field of type `weak`.  A
   declaration or an assignment takes the value as a +1 box (as a variable's

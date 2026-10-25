@@ -299,12 +299,38 @@ void ModuleLowering::emitInitBody(ast::CompoundStmt *body, ast::ClassType *ct,
         first = 1;
       }
   const auto &fields = ct->getFields();
-  if (std::none_of(fields.begin(), fields.end(), [](const auto &f) {
+  bool selfUsable =
+      std::none_of(fields.begin(), fields.end(), [](const auto &f) {
         return !ast::isa<ast::OptionalType>(f.second);
-      }))
+      });
+  if (selfUsable)
     B.vtableStore(B.load(self, kSelf), ct->getName());
+  // The leading statements that assign a field of the class's body for the
+  // first time find it null: `new` zeroed the object, `__super__(...)`
+  // assigns only the superclass's fields, and nothing else reaches the
+  // object's fields while `self` is only the place they are assigned in
+  // (docs/language/05-classes.md, "Every field before self") or while the
+  // values assigned are variables, which run no code.  So they release no
+  // old value (lowerMemberAssignStmt); the default `__init__` is all such.
+  StringSet assigned;
+  for (size_t i = first; i < stmts.size(); ++i) {
+    auto *ma = ast::dyn_cast<ast::MemberAssignStmt>(stmts[i]);
+    auto *recv =
+        ma ? ast::dyn_cast<ast::Identifier>(ma->getReceiver()) : nullptr;
+    if (!recv || recv->getName() != kSelf ||
+        std::none_of(
+            fields.begin(), fields.end(),
+            [&](const auto &f) { return f.first == ma->getFieldName(); }) ||
+        !assigned.insert(ma->getFieldName()).second ||
+        (selfUsable && !ast::isa<ast::Identifier>(ma->getValue()) &&
+         !isNoneForOptional(ma->getValue())))
+      break;
+    FirstFieldStores.insert(ma);
+    selfUsable = selfUsable || ma->completesInit();
+  }
   for (size_t i = first; i < stmts.size(); ++i)
     visit(stmts[i]);
+  FirstFieldStores.clear();
 }
 
 // A pure virtual method's function: its slot's target until a subclass
@@ -497,27 +523,32 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
                       : emitSharedNew(rhs, "field.shared");
     }
 
+    // A field's first value in `__init__` replaces nothing (emitInitBody).
+    const bool first = FirstFieldStores.count(node) != 0;
     if (ct->isWeakField(node->getFieldName())) {
       // The field takes a weak reference to the object; the +1 handed over
       // is dropped, and so is the old weak reference (null-safe).
       Val weak = B.weakNew(newShared, node->getFieldName() + ".weak");
       if (!newShared.isNull())
         emitRelease(newShared);
-      B.weakRelease(B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
-                                Type::Weak, "old.field"));
+      if (!first)
+        B.weakRelease(B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
+                                  Type::Weak, "old.field"));
       B.fieldStore(objPtr, ct->getName(), node->getFieldName(), weak);
       releaseIfOwned(recv.Owned);
       return Val();
     }
 
     // Release the old value only if it is non-null.
-    Val old = B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
-                          Type::Box, "old.field");
-    Val isNull = B.cmp(CmpPred::Eq, old, Val::null(Type::Box), "is.null");
-    pir::If *s = B.openIf(isNull, true);
-    B.enter(*s->Else);
-    emitRelease(old);
-    B.leave();
+    if (!first) {
+      Val old = B.fieldLoad(objPtr, ct->getName(), node->getFieldName(),
+                            Type::Box, "old.field");
+      Val isNull = B.cmp(CmpPred::Eq, old, Val::null(Type::Box), "is.null");
+      pir::If *s = B.openIf(isNull, true);
+      B.enter(*s->Else);
+      emitRelease(old);
+      B.leave();
+    }
     B.fieldStore(objPtr, ct->getName(), node->getFieldName(), newShared);
   } else {
     Val rhs = emitExpr(node->getValue());

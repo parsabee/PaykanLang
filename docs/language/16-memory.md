@@ -141,7 +141,8 @@ reference names it:
   unaffected, so an object the caller still holds outlives the call.
 - **Returning** transfers ownership of the result to the caller.
 - **Storing into a field or array slot** retains the stored object; overwriting a slot releases
-  the value it previously held.
+  the value it previously held. A field's first assignment in `__init__` overwrites nothing: the
+  object is new.
 
 You do not write any of these retains and releases — they are emitted by the compiler. The
 guarantee you can rely on is that an object is alive for as long as it is reachable through a live
