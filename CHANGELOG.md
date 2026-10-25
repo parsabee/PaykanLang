@@ -564,6 +564,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: the "Barebones | Linux x86-64" job, which built without LLVM, is replaced by "Install |
   Linux x86-64": a plain configure, installed, with plugins loaded into the installed
   `paykan`.  Every job builds the defaults.
+- CI: a pull request that changes the standard library's sources (`stdlib/*.pkn`) builds
+  and runs every suite whose programs import the copy the build stages: `sema`, `lowering`,
+  `pir-mlir` and the end-to-end group (`codegen`, `driver`, `plugin`, `samples`, `stdlib`,
+  `c-strict`, `docs`, `out-of-tree`), where it ran only `stdlib`; one that changes
+  `stdlib/CMakeLists.txt`, which stages it, runs every suite (tests/suites.json,
+  `scripts/affected_tests.py`).
 
 ### Removed
 
