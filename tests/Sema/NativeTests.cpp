@@ -304,3 +304,50 @@ TEST(Native, RuntimeSymbolsKeepTheirSignature) {
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
+
+// So may it one that an executable's entry code or the C of --emit-c calls
+// itself (`Paykan_heap_reset` in C's main(), `memcpy` for a cast between a
+// float and an int, ...), which that C calls through the native function's
+// declaration: it did not compile ("too few arguments to function
+// 'Paykan_heap_reset'").  One that takes a C `int` (`Paykan_heap_set_tracking`,
+// `Paykan_args_new`, `memset`) has a signature no native function has.
+TEST(Native, EntryAndCPathSymbolsKeepTheirSignature) {
+  for (const char *decl : {
+           "native fn hr(x: int) -> int = \"Paykan_heap_reset\";",
+           "native fn hd(x: int) -> int = \"Paykan_heap_dump\";",
+           "native fn ts(x: float) = \"Paykan_heap_set_tracking\";",
+           "native fn ts(x: int) = \"Paykan_heap_set_tracking\";",
+           "native fn an(n: int, c: inout int) = \"Paykan_args_new\";",
+           "native fn af(x: int) -> int = \"Paykan_args_free\";",
+           "native fn ge(s: view Str) -> int = \"getenv\";",
+           "native fn mc(d: inout int, n: int) -> int = \"memcpy\";",
+           "native fn mm(d: inout int, s: inout int, n: int) = \"memmove\";",
+           "native fn ms(d: inout int, c: int, n: int) = \"memset\";",
+           "native fn ri(s: view Str) = \"Paykan_retain_inline\";",
+           "native fn rl(s: view Str) = \"Paykan_release_inline\";",
+       }) {
+    auto r = semaCheck(std::string(decl) + "\nfn main() -> int { return 0; }");
+    EXPECT_EQ(r.ErrorCount, 1u) << decl << "\n" << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find("', a function of the runtime, with a "
+                                 "different signature"),
+              std::string::npos)
+        << decl << "\n"
+        << r.Diagnostics;
+  }
+  auto r = semaCheck("native fn hr(x: int) -> int = \"Paykan_heap_reset\";"
+                     "\nfn main() -> int { return 0; }");
+  EXPECT_NE(r.Diagnostics.find("native function 'hr' binds C symbol "
+                               "'Paykan_heap_reset', a function of the "
+                               "runtime, with a different signature"),
+            std::string::npos)
+      << r.Diagnostics;
+
+  // Their own signatures are fine.
+  r = semaCheck(R"(
+    native fn hr() = "Paykan_heap_reset";
+    native fn hd() = "Paykan_heap_dump";
+    native fn af(args: inout Str, n: int) = "Paykan_args_free";
+    fn main() -> int { return 0; }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}

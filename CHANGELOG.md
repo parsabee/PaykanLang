@@ -904,28 +904,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   said `cannot cross into C (int, float, bool, char, an enum without fields, Str and Obj
   can, ...)`.  Both now name `a sized numeric type` after `char`
   (docs/language/03-functions.md, "Native Functions").
-- Two native functions that bind one C symbol with different C signatures passed the
-  checks: in one module (`native fn f(x: int) -> int = "llabs"; native fn g(x: float) ->
-  float = "llabs";`, or `view Str` against `int`) the program then failed PIR verification
-  (`argument 0 of '@$c.llabs' %2 has type f64, expected i64`), and across two modules it
-  ran with a wrong result, calling `llabs` with a double.  A native function bound to a
-  runtime function that compiled code calls itself, with another signature (`native fn
-  cat(a: int) -> int = "PaykanString_concat"`), failed the MLIR pipeline once both were
-  called (`'func.call' op incorrect number of operands for callee`).  A C symbol now has
-  one signature in a program (docs/language/03-functions.md, "Native Functions"): Sema
-  rejects the later of two natives of a module that disagree (`native function 'g' binds
-  C symbol 'llabs', which 'f' already binds with a different signature`) and a native
-  bound to a runtime function with a signature other than the runtime's (`native function
-  'cat' binds C symbol 'PaykanString_concat', a function of the runtime, with a different
-  signature`); the same signature twice stays fine, and so do the standard library's
+- Two native functions that bind one C symbol with different C signatures passed the checks:
+  in one module (`native fn f(x: int) -> int = "llabs"; native fn g(x: float) -> float =
+  "llabs";`, or `view Str` against `int`) the program then failed PIR verification
+  (`argument 0 of '@$c.llabs' %2 has type f64, expected i64`), and across two modules it ran
+  with a wrong result, calling `llabs` with a double.  A native function bound to a runtime
+  function that compiled code calls itself, with another signature (`native fn cat(a: int)
+  -> int = "PaykanString_concat"`), failed the MLIR pipeline once both were called
+  (`'func.call' op incorrect number of operands for callee`), and one bound to a function an
+  executable's entry code or the C of `--emit-c` calls (`native fn hr(x: int) -> int =
+  "Paykan_heap_reset"`, `memcpy`) gave C that did not compile (`too few arguments to
+  function 'Paykan_heap_reset'`, in C's `main()`).  A C symbol now has one signature in a
+  program (docs/language/03-functions.md, "Native Functions"): Sema rejects the later of two
+  natives of a module that disagree (`native function 'g' binds C symbol 'llabs', which 'f'
+  already binds with a different signature`) and a native bound to a runtime function with a
+  signature other than the runtime's (`native function 'cat' binds C symbol
+  'PaykanString_concat', a function of the runtime, with a different signature`), the entry
+  code's (`Paykan_heap_reset`, `Paykan_args_free`, ...) and the C library's that compiled
+  code calls (`fmod`, `memcpy`, `memmove`, `getenv`) included; no native function has the
+  signature of one that takes a C `int` (`memset`, `Paykan_heap_set_tracking`,
+  `Paykan_args_new`).  The same signature twice stays fine, and so do the standard library's
   bindings (`Paykan_io_write`, `fmod`, ...).  The driver checks the modules of a program
   against one another once they are lowered (`native functions of modules 'main' and 'na'
-  bind C symbol 'llabs' with different signatures`), whether a module is built from
-  source or loaded from the module cache: a module's `.pkm` CODE now keeps the native C
-  functions its compiled code calls.  Sema computes a native's C signature with the helper
-  the lowering declares and calls the C function with (`sema::nativeSignature`), and the
-  PIR verifier rejects a native and a runtime extern of one C symbol, in a module or in
-  two, with different signatures (docs/pir.md §3, §9).
+  bind C symbol 'llabs' with different signatures`), whether a module is built from source
+  or loaded from the module cache: a module's `.pkm` CODE now keeps the native C functions
+  its compiled code calls.  Sema computes a native's C signature with the helper the
+  lowering declares and calls the C function with (`sema::nativeSignature`), and the PIR
+  verifier rejects a native and a runtime extern of one C symbol, in a module or in two,
+  with different signatures (docs/pir.md §3, §9).
 - `--emit-c` gave C that did not compile for a native function bound straight to a C
   library function, which `run` and `build` call fine: `native fn llabs(x: int) -> int =
   "llabs"` failed with `conflicting types for 'llabs'; have 'int64_t(int64_t)'`, since

@@ -967,7 +967,7 @@ void addEntryPoint(Unit &u) {
   c << "int main(int argc, char **argv) {\n"
     << "  int track = getenv(\"PAYKAN_TRACK_HEAP\") != NULL;\n"
     << "  if (track) {\n"
-    << "    Paykan_heap_set_tracking(1);\n"
+    << "    " << names::kPaykanHeapSetTracking << "(1);\n"
     << "    " << names::kPaykanHeapReset << "();\n"
     << "  }\n";
   std::string call = std::string(kPaykanMain) + "()";
@@ -987,7 +987,7 @@ void addEntryPoint(Unit &u) {
     c << "  " << call << ";\n";
   if (u.MainTakesArgs)
     c << "  " << names::kPaykanArgsFree << "(args, args_len);\n";
-  c << "  if (track)\n    Paykan_heap_dump();\n"
+  c << "  if (track)\n    " << names::kPaykanHeapDump << "();\n"
     << "  return " << (u.MainReturns ? "(int)rc" : "0") << ";\n}";
   emitc::VerbatimOp::create(b, m.getLoc(), c.str());
 }

@@ -979,11 +979,16 @@ which 'f' already binds with a different signature`), and so are two in
 different modules of a program, once it is put together, whether the other
 module is built from source or loaded from its `.pkm` (`native functions of
 modules 'main' and 'na' bind C symbol 'llabs' with different signatures`).
-A native function bound to a function of the runtime that compiled code
-calls itself (`PaykanString_concat`, `Paykan_malloc`, ...) must have that
-function's signature (`native function 'cat' binds C symbol
+A native function bound to a C function that compiled code calls itself
+must have that function's signature (`native function 'cat' binds C symbol
 'PaykanString_concat', a function of the runtime, with a different
-signature`).
+signature`): one of the runtime's (`PaykanString_concat`, `Paykan_malloc`,
+...), one an executable's entry code calls (`Paykan_heap_reset`,
+`Paykan_args_free`, ...) or one of the C library's (`fmod` for a float's
+`%`, and `memcpy`, `memmove` and `getenv`, which the C of `--emit-c`
+calls).  No native function has the signature of one that takes a C `int`
+(`Paykan_heap_set_tracking`, `Paykan_args_new`, `memset`), so none can
+bind it.
 
 Only `int`, `float`, `bool`, `char`, a sized numeric type and an enum
 without fields cross into C by value.  Any other parameter is a `view`,

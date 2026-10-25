@@ -261,6 +261,11 @@ inline constexpr const char *kPaykanMalloc = "Paykan_malloc";
 inline constexpr const char *kPaykanRealloc = "Paykan_realloc";
 inline constexpr const char *kPaykanFree = "Paykan_free";
 inline constexpr const char *kPaykanHeapReset = "Paykan_heap_reset";
+// What an executable's entry code calls under PAYKAN_TRACK_HEAP, with
+// kPaykanHeapReset.
+inline constexpr const char *kPaykanHeapSetTracking =
+    "Paykan_heap_set_tracking";
+inline constexpr const char *kPaykanHeapDump = "Paykan_heap_dump";
 inline constexpr const char *kPaykanHeapLiveBlocks = "Paykan_heap_live_blocks";
 inline constexpr const char *kPaykanHeapLiveBytes = "Paykan_heap_live_bytes";
 

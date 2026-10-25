@@ -4041,8 +4041,9 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
 bool Sema::checkNativeSymbol(const ast::FuncDecl *node) {
   const std::string &symbol = node->getNativeSymbol();
   const pir::Signature sig = nativeSignature(Ctx, *node);
-  if (const pir::Signature *rt = pir::runtimeSignature(symbol)) {
-    if (*rt == sig)
+  if (pir::isRuntimeSymbol(symbol)) {
+    if (const pir::Signature *rt = pir::runtimeSignature(symbol);
+        rt && *rt == sig)
       return true;
     error(node->getLocation(),
           "native function '" + displayName(node->getName()) +

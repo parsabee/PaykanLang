@@ -188,11 +188,19 @@ inline std::string externCSymbol(std::string_view name) {
 
 /// The signature of the runtime C function @p symbol: what a `$rt.` extern
 /// of it declares, or for one a backend calls itself (for `new`, `free`,
-/// the weak references and a float's `rem`), what the backend calls it
-/// with.  Null for any other symbol.  A C symbol has one signature in a
-/// program, so a native function bound to one of these must have it too
+/// the weak references and a float's `rem`; an executable's entry code; the
+/// C path's retains, releases and memory copies), what the backend calls it
+/// with.  Null for any other symbol, and for one that takes a C `int`,
+/// which no PIR type is (isRuntimeSymbol).  A C symbol has one signature in
+/// a program, so a native function bound to one of these must have it too
 /// (docs/language/03-functions.md, "Native Functions").
 const Signature *runtimeSignature(std::string_view symbol);
+
+/// Whether compiled code calls the C function @p symbol itself: one
+/// runtimeSignature knows, or one that takes a C `int` (Paykan_args_new,
+/// Paykan_heap_set_tracking, memset), whose signature no native function
+/// has.
+bool isRuntimeSymbol(std::string_view symbol);
 
 // -- Values and operands
 

@@ -1283,8 +1283,9 @@ private:
                              const std::vector<ast::Type *> &types);
   /// Whether the C symbol native function @p node binds has one C
   /// signature (nativeSignature): the one an earlier native function of the
-  /// module binds it with, and a runtime function's
-  /// (pir::runtimeSignature).  Records the binding.
+  /// module binds it with, and that of a function compiled code calls
+  /// itself (pir::isRuntimeSymbol, pir::runtimeSignature).  Records the
+  /// binding.
   bool checkNativeSymbol(const ast::FuncDecl *node);
 
   /// The native function that first binds each C symbol in this module,

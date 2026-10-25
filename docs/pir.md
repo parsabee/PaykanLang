@@ -1099,19 +1099,32 @@ extern vtable PaykanObject_vtable   extern vtable PaykanString_vtable
 ```
 
 An executable's entry code, not PIR, calls the two functions that make and
-drop the program's arguments (§4):
+drop the program's arguments (§4), and under `PAYKAN_TRACK_HEAP` the
+tracking allocator's; the C of `--emit-c` calls C library functions itself
+(C types):
 
 ```
 Paykan_args_new(int argc, char **argv, int64_t *count) -> PaykanShared **
 Paykan_args_free(PaykanShared **args, int64_t count) -> void
+getenv(const char *name) -> char *      ; "PAYKAN_TRACK_HEAP"
+Paykan_heap_set_tracking(int enable) -> void
+Paykan_heap_reset(void) -> void         Paykan_heap_dump(void) -> void
+; the C path: a `mem.copy`, a `mem.zero`, a `cast` between f64 and i64
+memmove(void *, const void *, size_t) -> void *
+memset(void *, int, size_t) -> void *
+memcpy(void *, const void *, size_t) -> void *
 ```
 
 `names::kCodeGenRequiredSymbols` in `include/Names.h` is the authoritative
 list; the mlir backend's JIT symbol table must cover it, and an executable links
 `libpaykan_runtime.a`.  `pir::runtimeSignature` (`include/paykan/pir/PIR.h`)
-holds the signatures above, and C's `fmod(f64, f64) -> f64`, which a backend
-calls for an `f64` `rem`: a native function bound to one of these symbols
-must have its signature (§3).
+holds the signatures above in PIR types (a `size_t` an `i64`), the C path's
+`Paykan_retain_inline(box) -> void` and `Paykan_release_inline(box) ->
+void`, and C's `fmod(f64, f64) -> f64`, which a backend calls for an `f64`
+`rem`; none for the three that take a C `int`, which no PIR type is
+(`Paykan_args_new`, `Paykan_heap_set_tracking`, `memset`).  A native
+function bound to one of these symbols (`pir::isRuntimeSymbol`) must have
+its signature (§3), which for those three no native function has.
 
 Vtable slot layouts of runtime classes (slot index = position):
 

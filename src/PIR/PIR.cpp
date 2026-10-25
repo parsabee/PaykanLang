@@ -82,6 +82,28 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanWeakLoad, {{kWeak}, kBox}},
     {kPaykanWeakRelease, {{kWeak}, kVoid}},
     {"fmod", {{kF64, kF64}, kF64}},
+    // What an executable's entry code calls (C's main() on the C path,
+    // src/Backends/LLVM/CodeGen/NativeBuild.cpp's main), and what the C
+    // path calls itself for a retain, a release, a `mem.copy` and a `cast`
+    // between f64 and i64 (src/Backends/MLIR/ToEmitC/ToEmitC.cpp), in PIR
+    // types (a `size_t` an i64).
+    {kPaykanArgsFree, {{kPtr, kI64}, kVoid}},
+    {kPaykanHeapReset, {{}, kVoid}},
+    {kPaykanHeapDump, {{}, kVoid}},
+    {"getenv", {{kPtr}, kPtr}},
+    {kPaykanRetainInline, {{kBox}, kVoid}},
+    {kPaykanReleaseInline, {{kBox}, kVoid}},
+    {"memmove", {{kPtr, kPtr, kI64}, kPtr}},
+    {"memcpy", {{kPtr, kPtr, kI64}, kPtr}},
+};
+
+/// What that code calls with a C `int`, which no PIR type is, so they have
+/// no signature in PIR types: the entry code's Paykan_args_new and
+/// Paykan_heap_set_tracking, and the memset of the C path's `mem.zero`.
+const char *const kIntTakingSymbols[] = {
+    kPaykanArgsNew, // (int argc, char **argv, int64_t *count)
+    kPaykanHeapSetTracking,
+    "memset",
 };
 
 } // namespace
@@ -91,6 +113,13 @@ const Signature *runtimeSignature(std::string_view symbol) {
     if (symbol == rs.Name)
       return &rs.Sig;
   return nullptr;
+}
+
+bool isRuntimeSymbol(std::string_view symbol) {
+  for (const char *s : kIntTakingSymbols)
+    if (symbol == s)
+      return true;
+  return runtimeSignature(symbol) != nullptr;
 }
 
 const Function *Module::findFunction(const std::string &name) const {
