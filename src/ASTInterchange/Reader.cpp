@@ -1078,6 +1078,12 @@ private:
                          "' has (qual static): only an 'impl' block's "
                          "method can (a 'static fn')"),
              nullptr;
+    // Only a free function is generic, as the grammar has it.
+    if (!tparams.empty() &&
+        (kind == FuncKind::ClassMethod || kind == FuncKind::ImplMethod))
+      return fail(e, std::string(isStatic ? frontend::kGenericStaticFn
+                                          : frontend::kGenericMethod)),
+             nullptr;
     // `fn double(x: int) => x * 2;`: a trailing (inferred), as a lambda's.
     const SExpr *inferred = f.optionalList("inferred");
     if (inferred) {

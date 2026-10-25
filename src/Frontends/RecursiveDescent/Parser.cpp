@@ -1180,10 +1180,19 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
 
   std::vector<const std::string *> typeParams;
   TypeParamBounds bounds;
+  SourceLocation less = cur().Loc;
   if (accept(Tok::Less)) {
     if (!parseTypeParamList(typeParams, &bounds) ||
         !expect(Tok::Greater, "to close the type parameter list"))
       return nullptr;
+    // Only a free function is generic: a method's or a `static fn`'s own
+    // type parameters, which nothing would bind, are an error at the `<`.
+    if (kind == FuncKind::ClassMethod || kind == FuncKind::ImplMethod ||
+        kind == FuncKind::StaticFn) {
+      error(less, std::string(kind == FuncKind::StaticFn ? kGenericStaticFn
+                                                         : kGenericMethod));
+      return nullptr;
+    }
   }
 
   if (!expect(Tok::LParen, "after the function name"))

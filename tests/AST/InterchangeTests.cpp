@@ -1902,3 +1902,53 @@ TEST(Interchange, NativeAndStaticOnlyWhereTheGrammarHasThem) {
             nullptr)
       << error;
 }
+
+// Only a free function is generic, as the grammar has it: a class body's
+// method (pure virtual or not), an `impl` block's method and a `static fn`
+// with type parameters of their own get the recursive-descent frontend's
+// error, where they were read and their type parameters ignored.
+TEST(Interchange, OnlyAFreeFunctionIsGeneric) {
+  const std::string method(paykan::frontend::kGenericMethod);
+  const std::string staticFn(paykan::frontend::kGenericStaticFn);
+  struct Case {
+    const char *Text;
+    const std::string &Error;
+  };
+  const Case cases[] = {
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"f\" (type-params \"T\") (params) _ (block))))))",
+       method},
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"f\" (type-params \"T\") (params) _ _)))))",
+       method},
+      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"f\" (type-params "
+       "(bound \"T\" (named-type \"Show\"))) (params) _ (block))))))",
+       method},
+      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"id\" (type-params "
+       "\"T\") (params (param \"y\" (named-type \"T\"))) (named-type \"T\") "
+       "(block (return (ident \"y\"))) (qual static))))))",
+       staticFn},
+  };
+  for (const Case &c : cases) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(c.Text, ctx, error), nullptr) << c.Text;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Text << "\n"
+                                                      << error;
+  }
+  // A generic type's methods use its type parameters; a free function's are
+  // its own.
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_NE(read("(paykan-ast 1 (unit (class \"Box\" \"\" (type-params \"T\") "
+                 "(fields (var \"v\" (named-type \"T\") _)) (methods)) "
+                 "(impl \"Box\" (type-params \"T\") (methods (fn \"get\" "
+                 "(type-params) (params) (named-type \"T\") (block (return "
+                 "(member (ident \"self\") \"v\"))) (qual view)))) "
+                 "(fn \"id\" (type-params \"T\") (params (param \"x\" "
+                 "(named-type \"T\"))) (named-type \"T\") (block (return "
+                 "(ident \"x\"))))))",
+                 ctx, error),
+            nullptr)
+      << error;
+}

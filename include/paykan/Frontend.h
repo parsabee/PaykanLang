@@ -85,6 +85,18 @@ inline bool isIdentifier(std::string_view s) {
 inline constexpr std::string_view kMovRemoved =
     "'mov' was removed in v0.2.0; ownership transfers are inferred";
 
+/// The diagnostics every frontend reports for a method's or a `static fn`'s
+/// own type parameters (docs/grammar.md section 4): only a free function is
+/// generic, and a generic type's methods use the type's.
+inline constexpr std::string_view kGenericMethod =
+    "a method cannot have type parameters of its own: only a free function "
+    "is generic (the methods of a generic class or struct use its type "
+    "parameters)";
+inline constexpr std::string_view kGenericStaticFn =
+    "a 'static fn' cannot have type parameters of its own: only a free "
+    "function is generic (the static fns of a generic class or struct use "
+    "its type parameters)";
+
 /// Per-parse options.  A frontend ignores the ones it does not support.
 struct Options {
   /// Debug traces of the parser / scanner (--trace-parser,

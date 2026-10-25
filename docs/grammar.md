@@ -153,8 +153,8 @@ name; for the list form the whole path is the base path.
 ```
 classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
                 "{" classMember* "}"
-classMember ::= "weak"? varDecl ";" | funcDecl
-              | "view"? "fn" IDENT typeParams? "(" paramList? ")"
+classMember ::= "weak"? varDecl ";" | funcDecl      -- funcDecl without typeParams
+              | "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"   -- pure virtual
 typeParams  ::= "<" typeParam ( "," typeParam )* ">"
 typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
@@ -171,7 +171,8 @@ traitMember ::= "view"? "fn" IDENT "(" paramList? ")"
 
 implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
                 ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
-implMember  ::= funcDecl | "static" "fn" IDENT typeParams? "(" paramList? ")"
+implMember  ::= funcDecl                          -- funcDecl without typeParams
+              | "static" "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? block
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
@@ -201,6 +202,12 @@ block`, `a struct has no superclass`), and so is an empty body (`struct 'S'
 has no fields: a struct has at least one`).
 A class, struct, enum or function with `typeParams` is generic (a template that
 Sema instantiates); the superclass of a generic class is a plain class name.
+Only a free function is generic: a method in a class body or an `impl` block,
+pure virtual or not, and a `static fn` have no `typeParams` of their own (the
+methods of a generic class or struct use its), and `<` after their name is a
+syntax error there (`a method cannot have type parameters of its own: only a
+free function is generic ...`, `a 'static fn' cannot have type parameters of
+its own: ...`, `frontend::kGenericMethod` and `kGenericStaticFn`).
 A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
 argument must implement.  `impl Show for A` implements trait `Show` for `A`.
 A function or method written `=> expression ;` has for its body a block of one

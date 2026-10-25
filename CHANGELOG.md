@@ -570,6 +570,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `c-strict`, `docs`, `out-of-tree`), where it ran only `stdlib`; one that changes
   `stdlib/CMakeLists.txt`, which stages it, runs every suite (tests/suites.json,
   `scripts/affected_tests.py`).
+- A method or a `static fn` with type parameters of its own is a syntax error, on every
+  frontend: `a method cannot have type parameters of its own: only a free function is
+  generic (the methods of a generic class or struct use its type parameters)`, and `a
+  'static fn' cannot have type parameters of its own: ...` (`frontend::kGenericMethod`,
+  `kGenericStaticFn`), at the `<`.  They were parsed and ignored: `class A { fn f<T>(x:
+  int) -> int { ... } }` compiled as if `T` were not there, `static fn id<T>(y: T) -> T` in
+  an `impl` block was `return type has unknown class type 'T'`, and `fn map<U>(x: U) -> U`
+  in a generic class `unknown class type 'U'`.  The AST interchange reader rejects a
+  class's or an `impl` block's method with `(type-params ...)` alike
+  (docs/grammar.md section 4, docs/language/13-generics.md, "Declaring a Generic Function").
 
 ### Removed
 

@@ -73,3 +73,28 @@ TEST(Impl, StaticCallParsesAsAQualifiedCall) {
   auto [ok, driver] = parse("fn main() -> int { a = A::make(); return 0; }");
   ASSERT_TRUE(ok);
 }
+
+// An `impl` block's method or `static fn` cannot have type parameters of
+// its own: they were parsed and ignored (`static fn id<T>(y: T) -> T` was
+// `unknown class type 'T'`).  Only a free function is generic; the methods
+// of a generic type's `impl` block use the block's.
+TEST(Impl, MethodsAndStaticFnsAreNotGeneric) {
+  auto r = parseWithDiags("impl A {\n"
+                          "  fn f<T>(x: T) {}\n"
+                          "  static fn id<T>(y: T) -> T { return y; }\n"
+                          "  view fn g() -> int => 1;\n"
+                          "}\n"
+                          "fn main() -> int { return 0; }\n");
+  EXPECT_FALSE(r.Ok);
+  ASSERT_EQ(r.Diags.size(), 2u) << r.Text;
+  EXPECT_EQ(r.Diags[0].Message, paykan::frontend::kGenericMethod);
+  EXPECT_EQ(r.Diags[0].Loc.getLineStart(), 2u);
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 7u);
+  EXPECT_EQ(r.Diags[1].Message, paykan::frontend::kGenericStaticFn);
+  EXPECT_EQ(r.Diags[1].Loc.getLineStart(), 3u);
+  EXPECT_EQ(r.Diags[1].Loc.getColumnStart(), 15u);
+  auto [ok, _] = parse("impl Box<T> { static fn of(v: T) -> Box<T> { return "
+                       "Box<T>(v); } view fn get() -> T { return self.v; } }\n"
+                       "fn main() -> int { return 0; }\n");
+  EXPECT_TRUE(ok);
+}
