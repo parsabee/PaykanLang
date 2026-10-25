@@ -921,7 +921,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "exit"` likewise.  The C now renames each native function's symbol while it includes
   the headers (`#define llabs pk__hidden_llabs` before them, `#undef llabs` after, which
   also drops a macro a header defines for the symbol, such as `isnan`), declares the native
-  function from its own signature after them, and turns off the compilers' warning of a
+  function from its own signature after them, once, ahead of the C of every module (one
+  that does not bind the symbol may call it as the runtime's: `fmod` for a float's `%`,
+  `Paykan_panic_index` for an index check), and turns off the compilers' warning of a
   library function declared with other types (docs/c-backend.md, "Native functions").
   `samples/codegen/71_native_libc.pkn` binds `llabs`, `labs`, `fabs` and `exit`; the
   CStrictC11 check compiles it with GCC and Clang.

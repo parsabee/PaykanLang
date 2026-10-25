@@ -905,6 +905,24 @@ void addPrelude(ModuleOp top, Unit &u, const TypeConverter &types) {
                               "typedef struct { bool present; " +
                                   cSpelling(payload).value_or("?") +
                                   " value; } " + name + ";");
+  // Each native function is declared once, here, ahead of every module's
+  // part: another module may call its symbol as a function of the runtime
+  // (a float's `%` calls fmod, an index check Paykan_panic_index, C's main()
+  // Paykan_heap_dump) without a declaration of its own, and the header's
+  // is of another name.  Every module's declaration of a symbol has one
+  // signature (lowering::checkNativeSymbols), the runtime's when it is one.
+  std::vector<emitc::FuncOp> natives;
+  for (ModuleOp m : modulesOf(top))
+    for (auto f : m.getOps<emitc::FuncOp>())
+      if (f.isExternal() && u.NativeFunctions.count(f.getSymName().str()))
+        natives.push_back(f);
+  std::set<std::string> declared;
+  for (emitc::FuncOp f : natives) {
+    if (declared.insert(f.getSymName().str()).second)
+      f->moveBefore(b.getInsertionBlock(), b.getInsertionPoint());
+    else
+      f.erase();
+  }
   for (const auto &[type, name] : u.Trampolines) {
     auto sig = cast<FunctionType>(type);
     std::string ret = "void";

@@ -85,11 +85,12 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
 
 * **The unit.**  A comment naming the generator; `<math.h>`, `<stdbool.h>`,
   `<stdint.h>`, `<stdlib.h>`, `<string.h>` and `"Runtime.h"`; the optionals'
-  structs and the `pkicall_<n>` helpers; then each PIR module of the program
-  in turn, main module first: a declaration of every function it defines (a
-  body or a vtable may use one defined below it), `extern` declarations of
-  what it uses from other modules and of its native functions, its constants
-  and vtables, and its functions.  C's `main` ends the main module's part.
+  structs, the native functions' declarations and the `pkicall_<n>` helpers;
+  then each PIR module of the program in turn, main module first: a
+  declaration of every function it defines (a body or a vtable may use one
+  defined below it), `extern` declarations of what it uses from other
+  modules, its constants and vtables, and its functions.  C's `main` ends the
+  main module's part.
 * **Native functions.**  A native function is declared from its PIR
   signature (`extern int64_t llabs(int64_t);`), which may not be what a
   header says of the symbol: `native fn llabs(x: int) -> int = "llabs"`
@@ -99,7 +100,12 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   `#undef llabs` after, and the header's declaration is of another name.
   The `#undef` also drops a macro a header defines for the symbol (`isnan`
   in `<math.h>`, or `memcpy` in macOS's `<string.h>` when it fortifies), so
-  the C calls the native function.  The compilers know the C library's
+  the C calls the native function.  The native functions are declared once,
+  right after the includes, ahead of every module's part: a module that
+  binds none of them may still call one's symbol as a function of the
+  runtime (`fmod` for a float's `%`, `Paykan_panic_index` for an index
+  check, `Paykan_heap_dump` in C's `main`), and has no declaration of its
+  own for it.  The compilers know the C library's
   functions and warn of a declaration of one with other types (GCC's
   `-Wbuiltin-declaration-mismatch`, Clang's
   `-Wincompatible-library-redeclaration`): a unit with native functions
