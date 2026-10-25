@@ -222,9 +222,14 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
           emitTupleElementAddress(ma->getReceiver(), static_cast<size_t>(idx))};
     }
     Receiver recv = emitReceiver(ma->getReceiver(), "obj");
-    ast::ClassType *ct = getExprClassType(ma->getReceiver());
-    if (!recv || !ct)
+    if (!recv)
       return {};
+    ast::ClassType *ct = getExprClassType(ma->getReceiver());
+    if (!ct) {
+      reportInternalError("the address of field '" + ma->getFieldName() +
+                          "' of a receiver of no class");
+      return {};
+    }
     getOrCreateClass(ct);
     if (recv.Owned.isOwned())
       MemTemps.emplace_back(recv.Owned.V, nullptr);

@@ -602,6 +602,34 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
 }
 
+// A conditional's struct is a temporary too, so its field is no `inout`
+// place; a conditional's object is an object either branch holds, whose
+// field is one, as a call's is.
+TEST(Struct, InoutPlaceOfAConditional) {
+  auto r = semaCheck(R"(
+struct A { x: int; }
+class C { x: int; }
+fn bump(n: inout int) { n = n + 1; }
+fn main() -> int {
+  a = A(1); b = A(2); c = C(1); d = C(2);
+  bump((if a.x == 1 then a else b).x);
+  k: inout = (if a.x == 1 then a else b).x;
+  bump((if c.x == 1 then c else d).x);
+  m: inout = (if c.x == 1 then c else d).x;
+  m = 3;
+  return a.x;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"a field of a struct that is not a variable or a field (a "
+                "temporary, which dies with the statement) cannot be passed "
+                "to 'inout' parameter 'n'",
+                "a field of a struct that is not a variable or a field (a "
+                "temporary, which dies with the statement) cannot be named by "
+                "'inout' local 'k'"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+}
+
 TEST(Struct, NativeFunctions) {
   auto r = semaCheck(R"(
 struct A { x: int; }

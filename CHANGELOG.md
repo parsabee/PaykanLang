@@ -851,6 +851,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C code of a generic native function is compiled against 0.3.0's `Runtime.h`.  A type
   that names no such word (`int`, `Str?`) costs no more on `at`, `get`, `copy` and
   `swap`: the buffer looks at `nunset` before it calls `PaykanType_isUnset`.
+- A field of a conditional `(if c then a else b)` of class type was compiled wrong, though
+  the program checked: `io::println((if k == 1 then a else b).name);` printed nothing, `x =
+  (if k == 1 then a else b).name;` left `x` undeclared (a later use of it failed an assertion
+  in the compiler), `(if k == 1 then a else b).n = 5;` did nothing, an element of a tuple
+  field (`(if k == 1 then a else b).t.1`) printed nothing, `(if k == 1 then a else
+  Node("b")).name + " "` failed the PIR verifier (`operand of box 0 has type i64, expected
+  obj`), and `bump((if k == 1 then a else b).n)` with `fn bump(x: inout int)` was an
+  internal compiler error.  The lowering took the class of a field's receiver only from a
+  variable, a field, a call or an element; it now takes the type Sema gave any receiver, so
+  each of these reads, writes or passes the field of the object the chosen branch gives (a
+  method call on a conditional already worked).  A receiver of no class, which Sema lets
+  through none of, is an internal compiler error instead of a statement left out.  As the
+  field of a call's object is (`bump(pick(k, a, b).n)`), the field of a conditional's object
+  is a place an `inout` parameter takes; a conditional's struct is a temporary, whose field
+  is not (`a field of a struct that is not a variable or a field (a temporary, which dies
+  with the statement) cannot be passed to 'inout' parameter 'n'`).
+  `samples/leak-check/31_conditional_receivers.pkn` reads, assigns, passes and matches such
+  fields on both branches.
 
 ## [0.2.0] - 2026-10-20
 

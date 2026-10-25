@@ -48,19 +48,14 @@ ast::ClassType *ModuleLowering::getExprClassType(ast::Expr *expr) const {
     if (id->getName() == kSelf && CurrentMethodClassType)
       return CurrentMethodClassType;
   }
-  if (auto *mae = ast::dyn_cast<ast::MemberAccessExpr>(expr))
-    return ast::dyn_cast<ast::ClassType>(mae->getResolvedType());
-  if (auto *mce = ast::dyn_cast<ast::MethodCallExpr>(expr))
-    return ast::dyn_cast<ast::ClassType>(mce->getResolvedType());
-  if (auto *ce = ast::dyn_cast<ast::CallExpr>(expr))
-    return ast::dyn_cast<ast::ClassType>(ce->getResolvedType());
-  if (auto *cv = ast::dyn_cast<ast::CallValueExpr>(expr))
-    return ast::dyn_cast<ast::ClassType>(cv->getResolvedType());
-  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(expr))
-    return ast::dyn_cast<ast::ClassType>(se->getResolvedType());
-  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(expr))
-    return ast::dyn_cast<ast::ClassType>(ti->getResolvedType());
-  return nullptr;
+  // Any other expression of a class type (a field, a call, an element, a
+  // conditional `(if c then a else b)`): the type Sema resolved.
+  auto *ct = ast::dyn_cast<ast::ClassType>(expr->getResolvedType());
+  if (!ct)
+    return nullptr;
+  if (auto *canonical = ASTCtx.lookupClassType(ct->getName()))
+    return canonical;
+  return ct;
 }
 
 // -- Signatures
@@ -492,8 +487,11 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
   const Val &objPtr = recv.Raw;
 
   ast::ClassType *ct = getExprClassType(node->getReceiver());
-  if (!ct)
+  if (!ct) {
+    reportInternalError("an assignment to field '" + node->getFieldName() +
+                        "' of a receiver of no class");
     return Val();
+  }
   getOrCreateClass(ct);
   ast::Type *fieldASTTy = fieldASTType(ct, node->getFieldName());
   assert(fieldASTTy && "Sema should have verified field exists");
@@ -580,8 +578,11 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
   const Val &objPtr = recv.Raw;
 
   ast::ClassType *ct = getExprClassType(node->getReceiver());
-  if (!ct)
+  if (!ct) {
+    reportInternalError("a read of field '" + node->getFieldName() +
+                        "' of a receiver of no class");
     return Val();
+  }
   getOrCreateClass(ct);
   ast::Type *fieldASTTy = fieldASTType(ct, node->getFieldName());
   assert(fieldASTTy && "Sema should have verified field exists");
