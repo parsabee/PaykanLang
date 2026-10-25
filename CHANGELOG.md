@@ -780,6 +780,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `io::open("three.txt", "w\0garbage")` opened `three.txt` to write.  A path or a mode
   holding a NUL byte is now not opened: `Err` with `InvalidArgument` (`EINVAL`), and no file
   is made (`PaykanFile_open`; docs/stdlib/io.md).
+- A program that ran out of memory crashed with a segmentation fault, and lost what it had
+  printed to a pipe or a file: an allocation outside `memory::Buffer` (an object, a string,
+  a `HashMap`'s entry, a `Queue`'s node) was used without a check.  `Paykan_malloc` and
+  `Paykan_realloc`, which the generated code and the runtime allocate with, now never return
+  NULL: when the memory is not there the program panics with `paykan: out of memory
+  allocating <n> bytes`, after flushing its output, and exits with status 134.  A
+  `memory::Buffer` and an `io::File` read still report `OutOfMemory`, through internal
+  allocations that return NULL with `ENOMEM` and leave the old block as it was
+  (`Paykan_tryMalloc`, `Paykan_tryRealloc`).  An allocation of 0 bytes is a block of its
+  own on every platform, so NULL always means out of memory (C lets `malloc(0)` return
+  NULL and `realloc(p, 0)` free `p`).
 
 ## [0.2.0] - 2026-10-20
 

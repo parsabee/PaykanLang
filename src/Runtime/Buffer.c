@@ -59,23 +59,22 @@ static void buffer_check_index(const PaykanBuffer *buf, int64_t i) {
                          (unsigned long long)i, (unsigned long long)buf->len);
 }
 
-/// Room for @p cap values: 0, or C's errno (ENOMEM when the size does not
-/// fit) with the buffer unchanged.
+/// Room for @p cap values: 0, or ENOMEM (the size does not fit, or the
+/// memory is not there) with the buffer unchanged.
 static int buffer_try_realloc(PaykanBuffer *buf, int64_t cap) {
   const size_t size = (size_t)buf->type->size;
   if (size && (size_t)cap > SIZE_MAX / size)
     return ENOMEM;
-  errno = 0;
-  void *data = Paykan_realloc(buf->data, (size_t)cap * size);
-  if (!data && cap > 0 && size > 0)
-    return errno ? errno : ENOMEM;
+  void *data = Paykan_tryRealloc(buf->data, (size_t)cap * size);
+  if (!data)
+    return ENOMEM;
   buf->data = data;
   buf->cap = cap;
   return 0;
 }
 
 /// Make the buffer @p len values long, the new ones all zero bytes: 0, or
-/// C's errno with the buffer unchanged.  The allocation at least doubles, so
+/// ENOMEM with the buffer unchanged.  The allocation at least doubles, so
 /// growing a value at a time is amortised O(1).
 static int buffer_try_lengthen(PaykanBuffer *buf, int64_t len) {
   if (len <= buf->len)

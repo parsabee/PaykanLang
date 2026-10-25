@@ -118,14 +118,14 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
   // One line, including the trailing '\n' when there is one.
   size_t cap = 128;
   size_t used = 0;
-  char *buf = (char *)Paykan_malloc(cap);
+  char *buf = (char *)Paykan_tryMalloc(cap);
   if (!buf)
     return file_read_no_memory(buf);
   int c;
   while ((c = fgetc(f->handle)) != EOF) {
     if (used + 1 >= cap) {
       cap *= 2;
-      char *grown = (char *)Paykan_realloc(buf, cap);
+      char *grown = (char *)Paykan_tryRealloc(buf, cap);
       if (!grown)
         return file_read_no_memory(buf);
       buf = grown;
@@ -142,7 +142,7 @@ PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n) {
   PaykanFile *f = (PaykanFile *)self;
   if (file_closed(f, "readbytes") || n <= 0)
     return PaykanShared_new(&PaykanObject_None);
-  char *buf = (char *)Paykan_malloc((size_t)n);
+  char *buf = (char *)Paykan_tryMalloc((size_t)n);
   if (!buf)
     return file_read_no_memory(buf);
   return file_read_result(buf, fread(buf, 1, (size_t)n, f->handle));
@@ -154,7 +154,7 @@ PaykanShared *PaykanFile_read(PaykanObject *self) {
     return PaykanShared_new(&PaykanObject_None);
   size_t cap = 4096;
   size_t used = 0;
-  char *buf = (char *)Paykan_malloc(cap);
+  char *buf = (char *)Paykan_tryMalloc(cap);
   if (!buf)
     return file_read_no_memory(buf);
   size_t got;
@@ -162,7 +162,7 @@ PaykanShared *PaykanFile_read(PaykanObject *self) {
     used += got;
     if (used == cap) {
       cap *= 2;
-      char *grown = (char *)Paykan_realloc(buf, cap);
+      char *grown = (char *)Paykan_tryRealloc(buf, cap);
       if (!grown)
         return file_read_no_memory(buf);
       buf = grown;

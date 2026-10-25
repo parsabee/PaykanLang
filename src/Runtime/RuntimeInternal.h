@@ -52,6 +52,17 @@ static inline int64_t Paykan_vcall_equals(PaykanObject *self,
 PAYKAN_NORETURN void Paykan_runtime_panic(const char *fmt, ...)
     PAYKAN_PRINTF_FORMAT(1, 2);
 
+// -- allocations that may fail
+//
+// Paykan_malloc and Paykan_realloc panic when the memory is not there.
+// These are the same allocations for the callers that report it instead
+// (memory::Buffer's OutOfMemory, an io::File read's): NULL with errno ENOMEM,
+// a realloc's @p ptr then still valid and unchanged.  A size of 0 gives a
+// block too, so NULL always means out of memory.
+
+void *Paykan_tryMalloc(size_t size);
+void *Paykan_tryRealloc(void *ptr, size_t size);
+
 // -- equals helpers
 //
 // Every `*_equals` has the same calling convention, its slot's: `other`

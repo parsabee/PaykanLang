@@ -7,10 +7,18 @@
 // tracking one (a size header before every block, plus live counters).  The
 // mode must not change while blocks are live: a block is freed by the
 // back-end that allocated it.
+//
+// A back-end's malloc and realloc return NULL with errno ENOMEM when the
+// memory is not there (C does not promise that libc sets errno), and a block
+// for a size of 0 too, so NULL always means out of memory and a realloc
+// that fails never frees the old block.  Paykan_malloc and Paykan_realloc
+// panic then; Paykan_tryMalloc and Paykan_tryRealloc (RuntimeInternal.h)
+// return the NULL to a caller that reports it.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,9 +26,17 @@
 
 // -- Passthrough back-end
 
-static void *passthrough_malloc(size_t size) { return malloc(size); }
+static void *passthrough_malloc(size_t size) {
+  void *p = malloc(size ? size : 1);
+  if (!p)
+    errno = ENOMEM;
+  return p;
+}
 static void *passthrough_realloc(void *p, size_t size) {
-  return realloc(p, size);
+  void *grown = realloc(p, size ? size : 1);
+  if (!grown)
+    errno = ENOMEM;
+  return grown;
 }
 static void passthrough_free(void *p) { free(p); }
 
@@ -70,8 +86,10 @@ static PaykanHeapHeader *heap_header_of(void *payload) {
 static void *tracking_malloc(size_t size) {
   PaykanHeapHeader *h =
       (PaykanHeapHeader *)malloc(PAYKAN_HEAP_HEADER_SIZE + size);
-  if (!h)
+  if (!h) {
+    errno = ENOMEM;
     return NULL;
+  }
   h->magic = PAYKAN_HEAP_MAGIC;
   h->size = (uint64_t)size;
   heap_record_alloc((uint64_t)size);
@@ -88,8 +106,10 @@ static void *tracking_realloc(void *ptr, size_t size) {
 
   PaykanHeapHeader *newH =
       (PaykanHeapHeader *)realloc(oldH, PAYKAN_HEAP_HEADER_SIZE + size);
-  if (!newH)
+  if (!newH) {
+    errno = ENOMEM;
     return NULL; // original block left intact, counters unchanged
+  }
 
   // Adjust the live-byte count for the size delta; block count is unchanged.
   g_stats.liveBytes += (int64_t)size - (int64_t)oldSize;
@@ -120,8 +140,24 @@ static int g_tracking_enabled = 0;
 
 // -- Entry points
 
-void *Paykan_malloc(size_t size) { return g_malloc(size); }
-void *Paykan_realloc(void *ptr, size_t size) { return g_realloc(ptr, size); }
+void *Paykan_malloc(size_t size) {
+  void *p = g_malloc(size);
+  if (!p)
+    Paykan_runtime_panic("out of memory allocating %zu bytes", size);
+  return p;
+}
+
+void *Paykan_realloc(void *ptr, size_t size) {
+  void *p = g_realloc(ptr, size);
+  if (!p)
+    Paykan_runtime_panic("out of memory allocating %zu bytes", size);
+  return p;
+}
+
+void *Paykan_tryMalloc(size_t size) { return g_malloc(size); }
+
+void *Paykan_tryRealloc(void *ptr, size_t size) { return g_realloc(ptr, size); }
+
 void Paykan_free(void *ptr) { g_free(ptr); }
 
 // -- Mode selection / diagnostics

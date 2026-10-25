@@ -613,9 +613,9 @@ void PaykanBuffer_reserve(void *t, void *b, int64_t n);
 void PaykanBuffer_grow(void *t, void *b, int64_t by);
 void PaykanBuffer_shrink(void *t, void *b, int64_t by);
 /// PaykanBuffer_grow and PaykanBuffer_reserve that report a failure
-/// instead of panicking: 0, or C's errno (ENOMEM when the memory, or the
-/// size, is not there) with the buffer unchanged.  The standard library's
-/// memory::Buffer turns it into an Error.
+/// instead of panicking: 0, or ENOMEM (the memory, or the size, is not
+/// there) with the buffer unchanged.  The standard library's memory::Buffer
+/// turns it into an Error.
 int64_t PaykanBuffer_tryGrow(void *t, void *b, int64_t by);
 int64_t PaykanBuffer_tryReserve(void *t, void *b, int64_t n);
 
@@ -735,6 +735,13 @@ void Paykan_args_free(PaykanShared **args, int64_t count);
 // The back-end is selected once at start-up (--track-heap in the driver, or
 // the test harness), before any allocation.  Immortal singletons (None,
 // Stdin) are static and never pass through here.
+//
+// An allocation never returns NULL: when the memory is not there the program
+// panics (`paykan: out of memory allocating <size> bytes`, after flushing
+// stdout like every panic).  Generated code uses the block unchecked.  The
+// runtime's own callers that report running out of memory instead
+// (memory::Buffer's OutOfMemory, an io::File read's) allocate through
+// internal functions that return NULL (RuntimeInternal.h).
 
 typedef struct PaykanHeapStats {
   int64_t liveBlocks;    // currently-allocated blocks (alloc - free)
@@ -745,11 +752,13 @@ typedef struct PaykanHeapStats {
   int64_t peakBytes;     // high-water mark of liveBytes
 } PaykanHeapStats;
 
-/// Allocate `size` bytes.  Returns NULL on failure.
+/// Allocate `size` bytes (a block of its own for 0 too), or panic when the
+/// memory is not there.
 void *Paykan_malloc(size_t size);
 
-/// Resize a block previously returned by Paykan_malloc/Paykan_realloc.
-/// Passing NULL behaves like Paykan_malloc.
+/// Resize a block previously returned by Paykan_malloc/Paykan_realloc to
+/// `size` bytes, or panic when the memory is not there.  Passing NULL
+/// behaves like Paykan_malloc.
 void *Paykan_realloc(void *ptr, size_t size);
 
 /// Free a block previously returned by Paykan_malloc/Paykan_realloc.

@@ -1569,6 +1569,67 @@ TEST(Driver, HeapStatisticsFollowTheProgramsOutputInAPipe) {
   std::filesystem::remove_all(dir);
 }
 
+// A program that runs out of memory panics (exit 134) with a message that
+// says so, after what it printed: here under a 96 MB address-space limit, with
+// stdout a pipe, a HashMap, a string and a chain of objects that grow until
+// an allocation fails.  Built at -O0 and -O2.  Linux only: macOS does not
+// limit allocations by RLIMIT_AS, and an ASan or TSan runtime cannot start
+// under it.
+TEST(Driver, AProgramOutOfMemoryPanicsAfterItsOutput) {
+#if !defined(__linux__)
+  GTEST_SKIP() << "RLIMIT_AS limits allocations on Linux only";
+#elif defined(PAYKAN_TEST_SHADOW_SANITIZER)
+  GTEST_SKIP() << "an ASan or TSan runtime cannot start under a low RLIMIT_AS";
+#else
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_oom_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "oom.pkn").string();
+  std::ofstream(src) << "import ::collections; import ::io;\n"
+                        "class Node { next: Node?; }\n"
+                        "fn main(args: view Str[]) -> int {\n"
+                        "  io::println(\"start\");\n"
+                        "  if args[1] == \"map\" {\n"
+                        "    m = collections::HashMap<int, int>(); i = 0;\n"
+                        "    while True { m.put(i, i); i = i + 1; }\n"
+                        "  }\n"
+                        "  if args[1] == \"str\" {\n"
+                        "    s = \"x\";\n"
+                        "    while True { s = s + s; }\n"
+                        "  }\n"
+                        "  head: Node? = None;\n"
+                        "  while True { head = Node(head); }\n"
+                        "  return 0;\n"
+                        "}\n";
+  auto runOutOfMemory = [](const std::string &exe, const std::string &what) {
+    auto r = run("ulimit -v 98304 && " + exe + " " + what + " 2>&1");
+    EXPECT_EQ(r.exitCode, 134) << exe << " " << what << ": " << r.out;
+    EXPECT_EQ(r.out.rfind("start\n", 0), 0U)
+        << exe << " " << what << ": " << r.out;
+    // A HashMap's buckets are a memory::Buffer, which fails with
+    // OutOfMemory ("out of memory: Cannot allocate memory"); every other
+    // allocation is Paykan_malloc's.
+    EXPECT_NE(r.out.find(what == "map" ? "\npaykan: out of memory"
+                                       : "\npaykan: out of memory allocating "),
+              std::string::npos)
+        << exe << " " << what << ": " << r.out;
+  };
+  auto buildAndRun = [&](const std::string &opt) {
+    auto exe = (dir / ("oom" + opt)).string();
+    auto [rc, out] =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    ASSERT_EQ(rc, 0) << opt << ": " << out;
+    runOutOfMemory(exe, "map");
+    runOutOfMemory(exe, "str");
+    runOutOfMemory(exe, "objects");
+  };
+  buildAndRun("-O0");
+  buildAndRun("-O2");
+  std::filesystem::remove_all(dir);
+#endif
+}
+
 // Reproducible output (#102): modules are named by their canonical module
 // names, so nothing the compiler produces depends on where the sources live
 // or on the directory it runs in.

@@ -1026,6 +1026,7 @@ crossing into the runtime is `cast` to `i64` first.
 ; Paykan_retain or Paykan_release for the rest, the C path calls Runtime.h's
 ; static inline Paykan_retain_inline and Paykan_release_inline, which do the
 ; same.  `unbox` is the identity on both: neither calls PaykanShared_get.
+; Paykan_malloc never returns NULL: it panics when the memory is not there.
 Paykan_malloc(i64) -> ptr        Paykan_free(ptr) -> void
 Paykan_retain(box) -> void       Paykan_release(box) -> void
 PaykanShared_new(obj) -> box     PaykanShared_get(box) -> obj

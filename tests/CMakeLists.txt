@@ -478,6 +478,7 @@ add_executable(runtime_tests
     Runtime/WeakTests.cpp
     Runtime/FileTests.cpp
     Runtime/ErrorTests.cpp
+    Runtime/HeapTests.cpp
     Runtime/OptionalNullTests.cpp
     Runtime/TupleTests.cpp
     Runtime/StructTests.cpp
@@ -524,6 +525,12 @@ target_link_libraries(driver_tests
 add_dependencies(driver_tests paykan paykan_incompatible_plugins paykan_build_id)
 if(PAYKAN_COVERAGE)
     target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_COVERAGE=1)
+endif()
+# The programs a sanitizer build links map ASan's or TSan's shadow memory,
+# more address space than the out-of-memory test's RLIMIT_AS leaves them.
+if(PAYKAN_ASAN OR PAYKAN_TSAN)
+    target_compile_definitions(driver_tests PRIVATE
+                               PAYKAN_TEST_SHADOW_SANITIZER=1)
 endif()
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).
 foreach(be IN LISTS PAYKAN_RUN_BACKENDS)

@@ -683,6 +683,10 @@ Do not assume that sharing a reference-counted object across threads is safe tod
 - `destroy` runs automatically and releases everything an object owns, transitively.
 - A `weak` reference never keeps an object alive and never dangles: it reads as `None` once
   the object is gone.
+- Running out of memory stops the program with a panic, `paykan: out of memory allocating
+  <n> bytes`, after what it printed is flushed: an allocation never goes on with a null
+  reference. A `memory::Buffer` reports it instead, as `OutOfMemory`
+  ([::memory](../stdlib/memory.md)).
 - A borrowed result never outlives what it names. A `-> view T` result is held by its caller,
   and an `-> inout T` result can only point into storage its caller keeps alive while the
   result is used: `self`, or what an `inout` parameter names and the object a reference held
