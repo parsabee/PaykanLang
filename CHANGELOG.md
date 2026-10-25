@@ -317,13 +317,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (keeping one for the window, `both(t, t)`) and 727 parameters (165 of them handed on),
   with 128 retains at keeps, and leaves one parameter owned from its entry (sample 66's
   `use(p)`, which passes `p` to an `inout` parameter); the reference-count elimination
-  removes the 251 retains and 276 releases it removed before and lends 2 moves (samples
-  49 and 54).  No program of the corpus gives a field read to another module's native
-  function (the print family's were lent already, `println<Str>` being given nothing
-  that reaches an object), so the flag changes nothing there.  So the retains in
-  `--emit-pir` fall from PR #340's 1385 to 1232 (−11%: 1089 copies, 142 keeps, one
-  prologue) and, after the reference-count elimination, from 1135 to 979 (−14%); the 4407
-  and 4131 releases stay, 672 of them asking a parameter's bit.  A program makes fewer
+  removes 251 retains and 276 releases, one of each more than the 250 and 275 it removed
+  before (in `tests/Stdlib/box_test.pkn`, `alias = total`'s, now that `Counter(total)`
+  is lent `total` instead of handed a copy of it), and lends 2 moves (samples 49 and 54),
+  whose retains go too (`--stats`: `rc-elimination retains removed` 253).  No program of
+  the corpus gives a field read to another module's native function (the print family's
+  were lent already, `println<Str>` being given nothing that reaches an object), so the
+  flag changes nothing there.  And an `__init__`'s first assignment of a field releases
+  no old value (docs/pir.md §7): the object is new, and nothing else reaches its fields
+  while `self` is only the place they are assigned in or the values assigned are
+  variables, so every assignment of a default `__init__` is one, and so are the leading
+  ones of most written ones (141 releases in the corpus, 25 of them `weak.release`s).
+  The keeps had made such an `__init__` too large for the backend to inline into its
+  constructor, which then paid a call and a test of each old value where it had paid
+  neither (binary trees' `Node.__init__` with gcc, a stack's or queue's
+  `_Node<Str>.__init__` with LLVM).  So the retains in `--emit-pir` fall from PR #340's
+  1385 to 1232 (−11%: 1089 copies, 142 keeps, one prologue) and, after the
+  reference-count elimination, from 1135 to 979 (−14%); the releases from 4407 to 4291
+  and from 4132 to 4015 (−3%), 672 of them asking a parameter's bit.  A program makes fewer
   retains and as many fewer releases when it runs (in the probes' own code, `show(a);
   pass(a); keep(h, a)` makes 1 retain and 8 releases instead of 7 and 14, a chain of
   hand-offs 0 and 40 instead of 10 and 50, the writes of `w1_written` 12 and 110 instead
@@ -332,20 +343,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of 6140 and 10236 at depth 10, 4.19 and 8.39 million instead of 6.29 and 10.49
   million at depth 20), and every object dies where it did: the corpus prints and frees
   memory as before on every backend at `-O0`, `-O1` and `-O2`, and the moves at last use
-  make the same moves.  The generated code of a function that takes no box
-  (fib, the dispatch benchmark's `area` methods) is unchanged.  At `-O2`, against the
-  part 1 and 4 build, callgrind counts the same instructions for fib, 0.2% fewer for
-  dispatch, 0.25% fewer for binary trees (1.9% more before moves were lent), 0.4 to 2.9%
-  fewer for the hash map and set loops, 5.3% fewer for a queue of ints, as many for the
-  priority queues and a stack of ints, and 1.1% more for a queue and 4.9% more for a
-  stack of strings, which hand temporaries over and so pay a bit test at each release
-  and keep instead of one in the prologue.  The C path (`--emit-c`, gcc `-O2`) counts as
-  many for fib, dispatch and a virtual call loop, and 6.7% more for binary trees: gcc
-  no longer inlines `Node.__init__`, which its two keeps make larger, into the
-  constructor.  CPU times (median of 5 runs, pinned to one CPU) moved by −10% to +8% on
-  the container loops and by −5% to +4% on binary trees, dispatch and fib, within what
-  repeated runs differ by on this machine (fib's C, which runs the same instructions,
-  measured +24%).
+  make the same moves.  The generated code of a function that neither takes a box nor
+  inlines one that does is unchanged: fib's, and the dispatch benchmark's `area`
+  methods, constructors and destructors (its `main` passes `List<Shape>.push` the mask,
+  and LLVM now inlines that push into it).  At `-O2`, against the part 1 and 4 build,
+  callgrind counts the same instructions for fib, 0.2% fewer for dispatch, 1.8% fewer
+  for binary trees, 0.5 to 3.0% fewer for the hash map and set loops, 1.3 to 6.9% fewer
+  for the stacks and queues of ints and strings, and as many for the priority queues.
+  The C path (`--emit-c`, gcc `-O2`) counts as many for fib, dispatch and a virtual
+  call loop, and 1.1% more for binary trees, whose constructor tests the two bits of the
+  mask `make` passes it.  (While an `__init__`'s first assignments still released the
+  old values, binary trees' C counted 6.7% more, and a stack and a queue of strings 4.9%
+  and 1.1% more.)  CPU times (median of 5 runs, pinned to one CPU) moved by −15% to +9%
+  on the container loops and by −11% to +8% on binary trees, dispatch and fib, within
+  what repeated runs differ by on this machine (fib's LLVM build, whose code is the
+  same, measured −8%; binary trees', which cachegrind finds making fewer instructions and
+  data accesses and the same cache misses, +5%).
   Per-parameter conventions in the interface (`Sig.conv`, `nConventions`) are retired,
   always 0 (docs/design/pkm.md §3.5, §5.9).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive
