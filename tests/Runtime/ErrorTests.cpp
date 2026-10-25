@@ -75,7 +75,10 @@ TEST(ErrorText, AValueOutsideCIntIsAnUnknownError) {
   EXPECT_EQ(errorText(INT64_MAX), "Unknown error 9223372036854775807");
   // The code is the full value's too: none of these is an errno.
   EXPECT_EQ(Paykan_error_code(two32 + ENOENT), PAYKAN_ERROR_OTHER);
-  // In C's int, the text is still strerror's.
-  EXPECT_EQ(errorText(INT_MAX), strerror(INT_MAX));
-  EXPECT_EQ(errorText(INT_MIN), strerror(INT_MIN));
+  // In C's int, the text is still strerror's (copied before the next call
+  // of strerror, which may reuse the buffer of an unknown errno's text).
+  const std::string intMax = strerror(INT_MAX);
+  EXPECT_EQ(errorText(INT_MAX), intMax);
+  const std::string intMin = strerror(INT_MIN);
+  EXPECT_EQ(errorText(INT_MIN), intMin);
 }
