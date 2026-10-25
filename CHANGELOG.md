@@ -975,6 +975,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   docs/language/03-functions.md gave a native function's parameter without a type the
   message of a lambda's or a method's; they now give the one the frontends report,
   `parameter 'x' needs a type ('x: int'): a native function's parameters have types`.
+- docs/grammar.md's `implMember` gave a `static fn` a block body only, though `static fn
+  f() -> int => 1;` is accepted, and documented in docs/language/03-functions.md: it ends
+  with `( block | "=>" expression ";" )`, as a `funcDecl` does.
 
 ## [0.2.0] - 2026-10-20
 

@@ -952,7 +952,7 @@ EnumDecl *Parser::parseEnumDecl() {
 
 // implDecl ::= "impl" ( typeAnnotation "for" )? modulePath
 //              "{" implMember* "}"
-// implMember ::= ( "view" | "static" )? "fn" ... block
+// implMember ::= ( "view" | "static" )? "fn" ... ( block | "=>" expr ";" )
 ImplDecl *Parser::parseImplDecl() {
   SourceLocation start = consume().Loc; // "impl"
   if (!at(Tok::Ident)) {

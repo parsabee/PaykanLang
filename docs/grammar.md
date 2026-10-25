@@ -173,7 +173,8 @@ implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
                 ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
 implMember  ::= funcDecl                          -- funcDecl without typeParams
               | "static" "fn" IDENT "(" paramList? ")"
-                ( "->" ( "view" | "inout" )? typeAnnotation )? block
+                ( "->" ( "view" | "inout" )? typeAnnotation )?
+                ( block | "=>" expression ";" )
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
