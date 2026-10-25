@@ -575,16 +575,18 @@ if(PAYKAN_TEST_SUITE_samples AND PAYKAN_SAMPLES_BACKENDS)
     # executables.
     paykan_add_python_test(SamplesParityBuild samples_parity.py --build
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
-    # The corpus at -O0 too (the default is -O2), which keeps the
-    # unoptimised code paths of both backends covered.
+    # The corpus at -O0 too (the default is -O2), run and built, which keeps
+    # the unoptimised code paths of both backends covered.
     paykan_add_python_test(SamplesParityO0 samples_parity.py -O 0
+                --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    paykan_add_python_test(SamplesParityBuildO0 samples_parity.py --build -O 0
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     # They compile the same import samples through the same per-project
     # object / bitcode caches (samples/imports/*/.paykan_cache): one at a
     # time.
     if(TEST SamplesParity)
         set_tests_properties(SamplesParity SamplesParityBuild SamplesParityO0
-            PROPERTIES RESOURCE_LOCK paykan_samples_cache)
+            SamplesParityBuildO0 PROPERTIES RESOURCE_LOCK paykan_samples_cache)
     endif()
 
     # Concurrent builds with different flags (-O0 / -O2, plain / ASan) of one
@@ -612,11 +614,19 @@ endif()
 
 # The standard library's tests (tests/Stdlib) on every backend that runs
 # programs, against the standard library the build staged next to `paykan`
-# (stdlib/CMakeLists.txt, scripts/stdlib_tests.py) (stdlib).
+# (stdlib/CMakeLists.txt, scripts/stdlib_tests.py), at -O0 and -O2 on every
+# path: `paykan run`, `paykan build` and the C `--emit-c` prints, compiled
+# with the runtime's sources by the C compiler of this build (stdlib).
 paykan_test_suite(stdlib PAYKAN_TEST_SUITE_stdlib)
 if(PAYKAN_TEST_SUITE_stdlib AND PAYKAN_SAMPLES_BACKENDS)
     if(TARGET paykan_stdlib)
-        paykan_add_python_test(StdlibTests stdlib_tests.py
+        paykan_add_python_test(StdlibTests stdlib_tests.py -O 0 -O 2
+                    --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+        paykan_add_python_test(StdlibTestsBuild stdlib_tests.py --build
+                    -O 0 -O 2
+                    --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+        paykan_add_python_test(StdlibTestsC stdlib_tests.py
+                    --cc ${CMAKE_C_COMPILER} -O 0 -O 2
                     --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     else()
         message(STATUS "The stdlib tests are skipped: the build compiles no "

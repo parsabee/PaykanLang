@@ -571,6 +571,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `stdlib/CMakeLists.txt`, which stages it, runs every suite (tests/suites.json,
   `scripts/affected_tests.py`).  The `TestSelection` test (`configure` suite,
   `scripts/test_selection.py`) checks both picks.
+- Tests: the standard library's tests (`tests/Stdlib`, `scripts/stdlib_tests.py`) run on
+  every path at -O0 and -O2, where they ran only with `paykan run` at -O2: `paykan run`
+  (`StdlibTests`), `paykan build` (`StdlibTestsBuild`, `--build`) and the C `--emit-c`
+  prints, compiled with the runtime's sources (`StdlibTestsC`, `--cc <compiler>`).  The
+  samples corpus is built at -O0 too (`SamplesParityBuildO0`).
 
 ### Removed
 
