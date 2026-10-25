@@ -14,9 +14,11 @@
 #include "Pipeline.h"
 #include "paykan/lowering/Lowering.h"
 #include "paykan/modules/ModuleResolver.h"
+#include "paykan/pir/Lend.h"
 #include "paykan/pir/MoveAtLastUse.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Pass.h"
+#include "paykan/pir/RCElimination.h"
 #include "paykan/pir/Verifier.h"
 
 #include <llvm/IR/LLVMContext.h>
@@ -232,11 +234,14 @@ inline RunResult compileAndRunWithFrontend(const std::string &source,
   return detail::runAnalysed(a, nullptr, "");
 }
 
-/// Like compileAndRun, with the copies at a variable's last use made moves
-/// as the driver makes them (docs/pir.md §12): when its objects die is what
-/// it is in a program the driver runs.
-inline RunResult compileMoveAndRun(const std::string &source) {
-  auto a = detail::analyse(source, "");
+namespace detail {
+
+/// @p source lowered as the driver lowers a program to run, through
+/// @p passes (what they did added to @p stats), and run.
+inline RunResult runThrough(const std::string &source,
+                            const pir::PassManager &passes,
+                            pir::Statistics &stats) {
+  auto a = analyse(source, "");
   if (!a.Ok)
     return a.Failure;
   pir::Program program;
@@ -245,11 +250,33 @@ inline RunResult compileMoveAndRun(const std::string &source) {
                               errs, nullptr, lowering::Copies::Shared,
                               lowering::World::Closed))
     return {-1, "", "lowering failed: " + errs.str(), false};
+  if (Status s = passes.run(program, stats); !s)
+    return {-1, "", s.message(), false};
+  return runProgramMLIR(program, nullptr, "", a.Ctx.Resolver.get());
+}
+
+} // namespace detail
+
+/// Like compileAndRun, with the copies at a variable's last use made moves
+/// as the driver makes them (docs/pir.md §12): when its objects die is what
+/// it is in a program the driver runs.
+inline RunResult compileMoveAndRun(const std::string &source) {
   pir::PassManager passes(/*verifyEach=*/true);
   passes.add(pir::createMovesAtLastUsePass());
-  if (Status s = passes.run(program); !s)
-    return {-1, "", s.message(), false};
-  return detail::runProgramMLIR(program, nullptr, "", a.Ctx.Resolver.get());
+  pir::Statistics stats;
+  return detail::runThrough(source, passes, stats);
+}
+
+/// Like compileAndRun, through every pass the driver runs on a program's
+/// code (docs/pir.md §12): the moves at last use, the lending and the
+/// reference-count elimination, what they did added to @p stats.
+inline RunResult compilePassesAndRun(const std::string &source,
+                                     pir::Statistics &stats) {
+  pir::PassManager passes(/*verifyEach=*/true);
+  passes.add(pir::createMovesAtLastUsePass());
+  passes.add(pir::createLendingPass());
+  passes.add(pir::createRCEliminationPass());
+  return detail::runThrough(source, passes, stats);
 }
 
 /// Parse the hand-written PIR program @p text and run it, verified as the

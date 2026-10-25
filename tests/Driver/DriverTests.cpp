@@ -1085,8 +1085,10 @@ TEST(Driver, StatsCountTheReferenceCountElimination) {
       << lib.out;
 }
 
-// The lending pass counts the copies the lowering made only to hand an
-// argument over that the moves at last use left (`lending marks`), and
+// The lending pass lends the copies the lowering made only to hand an
+// argument over that the moves at last use left where the caller's
+// reference outlives the call (`lending marks`, `lending arguments lent`,
+// `lending copies kept for the window`; here the first `take(a)`'s), and
 // clears their mark (docs/pir.md §6, §12).  --pir-skip=<pass>[,<pass>] (not
 // in --help) leaves passes out: here the lending pass, whose marks then
 // stay in what --emit-pir prints, and the reference-count elimination.  A
@@ -1104,10 +1106,13 @@ TEST(Driver, PirSkipLeavesPassesOut) {
                          "  moves-at-last-use retains removed : 1\n"
                          "  moves-at-last-use releases removed : 1\n"
                          "  lending marks : 1\n"
+                         "  lending arguments lent : 1\n"
+                         "  lending copies kept for the window : 0\n"
                          "  rc-elimination retains removed : 0\n"),
             std::string::npos)
       << all.out;
   EXPECT_EQ(all.out.find("retain lend "), std::string::npos) << all.out;
+  EXPECT_NE(all.out.find("call @take(lent %a."), std::string::npos) << all.out;
   auto skip =
       run(paykan + " --stats --pir-skip=lending,rc-elimination --emit-pir " +
           src + " 2>&1");

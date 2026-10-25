@@ -1311,9 +1311,9 @@ TEST(Pkm, AModuleFileAssumesNothingOfItsClassesSubclasses) {
 
 // A module's code, in a cache entry and in its `.pkm`, keeps no mark of the
 // copies the lowering made only to hand an argument over (`retain lend`,
-// docs/pir.md §6): the lending pass clears them before the code is kept.
-// Each copy is a plain retain there, whatever the importer's program does
-// with its own.
+// docs/pir.md §6): the lending pass lends them or clears them before the
+// code is kept, here lending both copies of `x`, which `both` keeps for the
+// calls, whatever the importer's program does with its own.
 TEST(Pkm, ModuleCodeKeepsNoLendMark) {
   REQUIRE_BACKEND();
   fs::path dir =
@@ -1343,7 +1343,9 @@ TEST(Pkm, ModuleCodeKeepsNoLendMark) {
     auto code = paykan(std::string("pkm dump --section=code ") + file);
     ASSERT_EQ(code.exitCode, 0) << code.out;
     EXPECT_TRUE(contains(code.out, "shared fn @Pair<Str>.both(")) << code.out;
-    EXPECT_TRUE(contains(code.out, "  retain %x.6\n")) << code.out;
+    EXPECT_TRUE(contains(code.out, " [3] (lent %x.6)\n")) << code.out;
+    EXPECT_TRUE(contains(code.out, " [3] (lent %x.9)\n")) << code.out;
+    EXPECT_FALSE(contains(code.out, "retain %x.6\n")) << code.out;
     EXPECT_FALSE(contains(code.out, "retain lend")) << code.out;
   }
   fs::remove_all(dir);

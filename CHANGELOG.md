@@ -284,17 +284,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   machine function.  An out-of-tree backend must give every lending function, slot and
   function value its mask, pass each call's from its arguments' ownership and read `owned`
   from it (docs/writing-a-backend.md); C code calling a runtime `equals` passes a mask;
-  `.pkm` files, cache entries and plugins of 0.2.0 are not accepted.  Nothing is lent yet:
-  every call hands every argument over, so programs run, print and free memory as they did,
-  with the same retains and releases.  A function that takes a box starts with a prologue
-  that retains each parameter its caller lent (docs/pir.md §3), so its body owns it either
-  way, and the lowering marks the copies a callee could be lent instead (a variable's, or
-  a field's no call in use may let go of, docs/pir.md §7), which a new pass, `lending`,
-  counts (`--stats`: `lending marks`) and clears (docs/pir.md §12).  The corpus's
-  `--emit-pir` is what it was but for the prologues, the runtime `equals` externs and a
-  string `match`'s mask, the moves at last use and the reference-count elimination make
-  the same moves and removals in every program, and the generated code of a function that
-  takes no box (fib, the dispatch benchmark's `area` calls) is unchanged.
+  `.pkm` files, cache entries and plugins of 0.2.0 are not accepted.  A function that takes
+  a box starts with a prologue that retains each parameter its caller lent (docs/pir.md
+  §3), so its body owns it either way.  The lowering marks the copies a callee could be
+  lent instead (a variable's, or a field's no call in use may let go of, docs/pir.md §7),
+  and a new pass, `lending`, lends each one whose object the caller keeps alive through
+  the call: the copy's retain goes and the argument is `lent`, unless a statement between
+  the read and the call, or one in an `&&`, `||`, `?:` or `match` among them, may let the
+  object go, as in `f(x, x)`, `f(x.name, x)` or `f(x.name, c && g(x))` at `x`'s last use
+  (docs/pir.md §12; `--stats`: `lending marks`, `lending arguments lent`, `lending copies
+  kept for the window`).  In the 122 programs of the corpus that compile (samples, leak
+  checks, standard library tests, imports) it lends 296 of the 297 marks and keeps one for
+  the window (`both(t, t)`), so the callers' retains in `--emit-pir` fall from 1385 to 1089
+  (−21%; from 1135 to 838 after the reference-count elimination, which removes one pair
+  more, the copy of a variable that is now lent rather than copied in its range), beside
+  the 742 retains of the prologues.  The callee's prologue retains what it is lent, so a
+  program makes the same retains and releases when it runs, those of a lent argument in
+  the callee instead of before the call, and every object dies where it did: the corpus
+  prints and frees memory as it did on every backend, the moves at last use make the same
+  moves in every program, and the generated code of a function that takes no box (fib, the
+  dispatch benchmark's `area` calls) is unchanged.
   Per-parameter conventions in the interface (`Sig.conv`, `nConventions`) are retired,
   always 0 (docs/design/pkm.md §3.5, §5.9).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive

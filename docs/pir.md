@@ -224,8 +224,10 @@ i64) -> i64` is the target of an `equals` slot of type `(obj, box) -> i64`.
 `destroy`, `toString` and `main` have no box parameter and take no mask.
 The lowering hands every argument over (each bit of every call's mask is
 set), so code without a `lent` or `owned(%o)` runs as it did before the mask
-existed.  Each body it makes of a lending function starts, before anything
-else, with a *prologue* for each box parameter with a bit:
+existed; the lending pass (§12) then lends the copies a caller makes of a
+reference it keeps for the whole call.  Each body the lowering makes of a
+lending function starts, before anything else, with a *prologue* for each
+box parameter with a bit:
 
 ```
 %p.own = owned %p
@@ -238,7 +240,8 @@ if %p.lent {
 so the body owns each of its parameters whichever way the caller passed
 it: with the bit set, it is the body as it was before the mask; with it
 clear, the retain makes the reference the body lets go of, while the
-caller keeps its own.
+caller keeps its own.  A lent argument so costs the retain at the callee's
+entry that the caller's copy cost before the call.
 
 ## 4. Module-level items
 
@@ -618,9 +621,11 @@ CodeGen enforced, now in one place.
   callee's ownership mask (§3) is a `retain lend` (§6) when it is of a
   variable no later part of the statement may replace, or of a read of
   storage the function does not own that no call in use may let go of
-  ("Reads a call may replace", below); the lending pass clears the mark
-  (§12).  A temporary is handed over as it is.  Arguments to runtime
-  builtins are borrowed; temporaries are released after the call.
+  ("Reads a call may replace", below); the lending pass makes it a `lent`
+  argument without the retain where nothing between the read and the call
+  may let the caller's object go, and a plain `retain` elsewhere (§12).  A
+  temporary is handed over as it is.  Arguments to runtime builtins are
+  borrowed; temporaries are released after the call.
 * **Returns** of reference types are +1 boxes.  Runtime methods returning a
   reference also return a +1 box.
 * **Fixed-size arrays of references** own one reference per element slot,
@@ -1240,6 +1245,8 @@ paykan pass stats:
   moves-at-last-use retains removed : 2
   moves-at-last-use releases removed : 2
   lending marks : 2
+  lending arguments lent : 2
+  lending copies kept for the window : 0
   rc-elimination retains removed : 1
   rc-elimination releases removed : 1
 Hello, world!
@@ -1250,9 +1257,10 @@ hands its two parameters to the fields at their last use, and matches a
 field, `match p.next { q: Person { greet(q.name); } None { greet(p.name); }
 }`, where the binding `q` needs no reference of its own inside the
 match's; the copies of `q.name` and `p.name` for `greet` are the
-lowering's two `retain lend` marks.  The counters are those of the passes this run ran, so a module
-built from its source in this run counts, and one loaded from its `.pkm`
-does not.)
+lowering's two `retain lend` marks, and both are lent: `q` and `p` keep
+what they name alive through the call.  The counters are those of the
+passes this run ran, so a module built from its source in this run counts,
+and one loaded from its `.pkm` does not.)
 
 **The dead-code pass** (`include/paykan/pir/DeadCode.h`,
 `dropDeadCode` / `createDeadCodePass`) erases every function, class and
@@ -1466,12 +1474,65 @@ through it again in the program that imports them, which leaves them as
 they are: on its own output the pass changes nothing.
 
 **The lending pass** (`include/paykan/pir/Lend.h`, `lend` /
-`createLendingPass`) counts the `retain lend` marks (§6) the moves at last
-use leave (`lending marks`) and clears them: a mark on a copy the moves
-made a move went with its retain, and each left is a plain `retain` from
-then on.  The driver runs it on every program right after the moves at
-last use, and on a module's code before its `.pkm` is written, so no
-backend, no `.pkm` and no cache entry sees a mark.
+`createLendingPass`) lends the arguments the moves at last use left a copy
+for that the caller's own reference keeps alive for the whole call.  It
+looks at each `retain lend %v` (§6; a mark on a copy the moves made a move
+went with its retain) and lends `%v` when:
+
+- `%v` has two uses, the mark and one box argument of a `call`, `vcall` or
+  `icall` later in the mark's block, an argument of a lending callee with a
+  bit in the ownership mask (§3) that hands it over;
+- `%v` is read from a local of the function, its **root**: loaded from it,
+  or reached from a `load` of it through `field.load`, `ptr.load`, `unbox`,
+  `field.addr` and `ptr.add`, all in that block (`x`, `x.name`, `n.name` for
+  an `inout` name `n`, `self.n` in a struct method); a read through a call's
+  result, a `select`, a `weak.load` or a `mem` local is no read to lend;
+- and the **window**, the statements of the block from the root's load to
+  the call, the call included, and every statement nested in them (the
+  `if`s and `switch`es `&&`, `||`, `?:` and a `match` lower to, a loop), has
+  none that may let the root's object go: a `store` into the root (a
+  reassignment, or the null the moves store at a hand-off), its address
+  (`local.addr`) or a use of one, a `release` of a load of it, a load of it
+  cast, selected, or handed on (a call's argument it does not lend, a
+  `store`, `field.store`, `ptr.store` or `ret` of it) where the function
+  retains it fewer times than it hands it on, so that what is handed on may
+  be the root's own reference; for a root that holds a pointer (an `inout`
+  name, a struct method's `self`), a use of the pointer but to read through
+  it (as a call's argument, the address of a `ptr.store`); and a
+  `field.store` into a field the read reads.
+
+Then the retain goes and the argument is `lent`; otherwise the mark is
+cleared and the copy stays a plain `retain`.  So `f(x)`, `f(x.name)`,
+`f(x, x)` and `f(x.name, g(x))` lend where `x` is read again after the
+call, and at `x`'s last use, where the moves hand `x` itself over,
+`f(x, x)` keeps the first copy, `f(x.name, x)` and `f(x.name, g(x))` keep
+the read's, and so does `f(x.name, c && g(x))`, whose move into `g` is in
+the `if` the `&&` lowers to.  The counters are `lending marks` (the marks
+found), `lending arguments lent` and `lending copies kept for the window`.
+
+*Why it is right.*  The root is a local, a parameter's slot, or what an
+`inout` name or `self` points to: what it refers to is kept alive by the
+function, or by its caller for the whole call (no module-level variable
+exists, captures are copies, and no callee can name the function's
+locals).  The lowering marks a read only where no call in use may let go
+of a reference of the read slot's class (§7, "Reads a call may replace"),
+and a variable only where no later part of the statement may replace it;
+what that cannot see, the root itself written or handed on in the window,
+is what the window check rules out, in any arm of any region.  So the
+object the argument names is alive from the read until the call returns,
+through a reference other than the copy's: the copy's +1, which the callee
+released or handed on, was never the last reference, and lending it moves
+no death.  The callee's prologue (§3) retains a lent argument on entry, so
+the count it runs with is the one the copy gave it.  The verdicts are given
+on the function as the moves left it, then applied: lending an argument
+removes a retain together with the hand-off it paid for, which no other
+verdict counts on.
+
+The driver runs it on every program right after the moves at last use,
+and on a module's code before its `.pkm` is written, so no backend, no
+`.pkm` and no cache entry sees a mark.  On its own output it finds no
+mark, and the moves at last use find no copy in a lent argument, so a
+module's code goes through the program's passes unchanged.
 
 **The reference-count elimination pass** (`include/paykan/pir/RCElimination.h`,
 `eliminateRedundantRC` / `createRCEliminationPass`) removes a `retain`

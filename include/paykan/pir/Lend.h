@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
-// The lending pass (docs/pir.md §12): it counts the copies the lowering
-// made only to hand a box argument over (`retain lend`, docs/pir.md §6)
-// that the moves at last use left, and clears their mark.
+// The lending pass (docs/pir.md §12): a copy the lowering made only to hand
+// a box argument over (`retain lend`, docs/pir.md §6) that the moves at
+// last use left becomes a lent argument without its retain where the
+// caller's own reference outlives the call, and every mark is cleared.
 // Backend-independent; the driver runs it after the moves on every program
 // and on the code of every module it writes to a `.pkm`, which so keeps no
 // mark.
@@ -22,16 +23,29 @@ struct LendCounts {
   /// The `retain lend` marks found, each a copy the lowering made only to
   /// hand an argument of a lending callee over.
   uint64_t Marks = 0;
+  /// The marks whose copy went: the argument is lent.
+  uint64_t Lent = 0;
+  /// The marks whose copy stayed because a statement from the read to the
+  /// call may let the object the caller keeps go (the window check).
+  uint64_t KeptForWindow = 0;
 };
 
-/// Count the `retain lend` marks of @p f and clear them: each is a plain
-/// `retain` from then on.  A mark the moves at last use met was a copy
-/// they made a move, whose retain went with its mark; the ones left are
-/// copies of a reference the caller keeps for the call.
-LendCounts lend(Function &f);
+/// Lend the arguments of @p f's calls that its `retain lend` marks may lend
+/// and clear every mark (docs/pir.md §12): the mark's value is read from a
+/// local of @p f (the root), loaded or through unboxes and field and
+/// element reads and addresses, in the block of the call, and is used by
+/// the mark and by one box argument of that call alone, an argument with a
+/// bit in the ownership mask of a lending callee (@p m, the module @p f is
+/// in, declares the callees); and no statement from the root's load to the
+/// call, nor one nested in those, stores into the root, takes its address,
+/// releases a load of it, hands on a load of it that was not retained
+/// first, or does anything but read through the pointer the root holds.
+/// Then the copy's retain goes and the argument is `lent`.  Every other
+/// mark is a plain `retain` from then on.
+LendCounts lend(Function &f, const Module &m);
 
 /// lend on every function the program defines, as a pass ("lending"),
-/// counting "marks".
+/// counting "marks", "arguments lent" and "copies kept for the window".
 std::unique_ptr<Pass> createLendingPass();
 
 } // namespace paykan::pir

@@ -3489,8 +3489,9 @@ TEST(LoweringLend, BoxParametersPastTheSixtyFourthAreAlwaysHandedOver) {
 // going with its retain.  A temporary (`Node("tmp")`) is handed over as it
 // is.  `n.name` is a field read `println<Str>` may be lent: it is given
 // nothing that reaches an object, so it cannot reach the field.  The copy
-// for a store (`h.n = n`) is no argument's.  The lending pass clears the
-// marks the moves leave.
+// for a store (`h.n = n`) is no argument's.  The lending pass lends the
+// copies the moves leave, which main's `a` and show's `n` outlive, and
+// clears their marks.
 TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
   const char *const source = R"(import ::io;
     class Node {
@@ -3560,9 +3561,20 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
   lending.add(pir::createLendingPass());
   ASSERT_TRUE(lending.run(mv.Program, stats));
   EXPECT_EQ(stats.get("lending", "marks"), 4u); // main's three, show's
+  EXPECT_EQ(stats.get("lending", "arguments lent"), 4u);
+  EXPECT_EQ(stats.get("lending", "copies kept for the window"), 0u);
   const std::string text = pir::toString(mv.Program);
   EXPECT_EQ(text.find("retain lend "), std::string::npos) << text;
-  EXPECT_NE(function(text, "main").find("  retain %a.4\n"), std::string::npos)
+  m = function(text, "main");
+  EXPECT_NE(m.find("  %a.4 = load %a.0\n"
+                   "  call @show(lent %a.4)\n"
+                   "  %a.5 = load %a.0\n"
+                   "  call @pass(lent %a.5)\n"),
+            std::string::npos)
+      << m;
+  EXPECT_NE(m.find("  call @keep(%h.7, lent %a.8)\n"), std::string::npos) << m;
+  EXPECT_EQ(count(m, "retain "), 0u) << m;
+  EXPECT_NE(function(text, "show").find("(lent %name."), std::string::npos)
       << text;
 }
 
