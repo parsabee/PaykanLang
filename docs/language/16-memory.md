@@ -531,8 +531,13 @@ only reads it or passes it on: neither the caller nor the function retains it, a
 does not release it. Where the function keeps it (stores it in a field or a variable, returns
 it), it retains it there, so the place it is kept in has a reference of its own. A temporary,
 and a variable at its last use, are handed over as before: the function releases them when it
-is done, or hands them on, so they die where they always did. Which way an argument goes is
-decided at each call; nothing in the function's declaration says it.
+is done, or hands them on, so they die where they always did. A variable at its last use is
+lent all the same where another reference the caller holds outlives the call, so that the
+function's release could never be the last: a `match` binding passed on in its arm, whose
+object the matched value holds until the `match` ends (`x: Node { c = c + count(x); }` costs
+no count but the matched value's), or a copy of a variable the caller reads again (`u = t;
+count(u);`). Which way an argument goes is decided at each call; nothing in the function's
+declaration says it.
 
 ```pkn
 import ::io;

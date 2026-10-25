@@ -24,9 +24,15 @@
 // its reference, and whether anything that can let go of a reference came.
 // A while is walked until the phases at its head stop changing.  The pass
 // sweeps the function until a sweep removes nothing.
+//
+// A local's retain whose reference the local hands to a lending callee (a
+// move, Sweep::moveOf) is judged as if the argument were lent and the local
+// released right after the call: that release ends the range there, and
+// when the pair can go, the argument is lent instead.
 
 #include "paykan/pir/RCElimination.h"
 
+#include "Callees.h"
 #include "Names.h"
 
 #include <algorithm>
@@ -377,6 +383,10 @@ struct Candidate {
   /// releases end the range.
   const Stmt *Into = nullptr;
   LocalId L = kNoLocal;
+  /// For a local that hands its reference to a lending callee: the call,
+  /// whose argument Arg is judged lent, the local released right after it.
+  const Stmt *Lends = nullptr;
+  size_t Arg = 0;
   /// The local V was loaded from, when it may keep the object alive.
   LocalId M = kNoLocal;
   /// Where the walk starts: the block that defines V and the statement
@@ -618,6 +628,12 @@ private:
       if (touches)
         keeperTouched(s);
     }
+    // The move judged lent: the local's release right after the call ends
+    // the range.  The call can let go (K3 fails), so only the enclosing
+    // reference or the local V was loaded from can keep the object alive
+    // across it.
+    if (&st == C.Lends)
+      return end(st, s);
     return s;
   }
 
@@ -700,7 +716,7 @@ private:
 /// One sweep of the pass over a function.
 class Sweep {
 public:
-  explicit Sweep(Function &f) : Fn(f), F(f) {}
+  Sweep(Function &f, const Callees &callees) : Fn(f), Cs(callees), F(f) {}
 
   /// Remove what can go; false when nothing could.
   bool run(RCCounts &counts) {
@@ -709,30 +725,41 @@ public:
         candidate(*it, counts);
     if (Removed.empty())
       return false;
-    erase(Fn.Body);
+    apply(Fn.Body);
     return true;
   }
 
 private:
   Function &Fn;
+  const Callees &Cs;
   Facts F;
   std::unordered_set<const Stmt *> Removed;
+  /// The calls whose arguments, by index, a removed pair lends.
+  std::unordered_map<const Stmt *, std::vector<size_t>> Loans;
 
-  void erase(Block &b) {
+  /// Lend the loans' arguments and remove the removed statements.
+  void apply(Block &b) {
+    for (Stmt &s : b.Stmts)
+      if (auto it = Loans.find(&s); it != Loans.end()) {
+        Instr &call = std::get<Instr>(s);
+        call.Own.resize(call.Args.size());
+        for (size_t a : it->second)
+          call.Own[a].K = ArgOwnership::Lent;
+      }
     std::erase_if(b.Stmts, [&](const Stmt &s) { return Removed.contains(&s); });
     for (Stmt &s : b.Stmts) {
       if (auto *x = std::get_if<If>(&s)) {
-        erase(*x->Then);
+        apply(*x->Then);
         if (x->Else)
-          erase(*x->Else);
+          apply(*x->Else);
       } else if (auto *x = std::get_if<Switch>(&s)) {
         for (Switch::Case &c : x->Cases)
-          erase(*c.Body);
+          apply(*c.Body);
         if (x->Default)
-          erase(*x->Default);
+          apply(*x->Default);
       } else if (auto *x = std::get_if<While>(&s)) {
-        erase(*x->CondBlock);
-        erase(*x->Body);
+        apply(*x->CondBlock);
+        apply(*x->Body);
       }
     }
   }
@@ -774,6 +801,44 @@ private:
                               !Removed.contains(F.Def[v]));
     }
     return releases;
+  }
+
+  /// Whether local @p l, stored only by @p store and never addressed, hands
+  /// the reference it holds to a lending callee once, a move to lend (the
+  /// call and the argument go into @p c): every load of it releases it or
+  /// leaves its reference where it is but one, used by that one argument
+  /// alone, in its own block, an argument the call may lend (Callees).
+  bool moveOf(LocalId l, const Stmt *store, Candidate &c) const {
+    if (Fn.Locals[l].Ty != Type::Box || F.Addressed[l] ||
+        F.Stores[l].size() != 1 || F.Stores[l].front() != store)
+      return false;
+    const Stmt *call = nullptr;
+    size_t arg = 0;
+    for (ValueId v : F.Loads[l]) {
+      if (F.Kind[v] != LoadKind::Taking)
+        continue;
+      if (call || F.Uses[v].size() != 1)
+        return false;
+      const Stmt *s = F.Uses[v].front();
+      const auto *in = std::get_if<Instr>(s);
+      if (!in ||
+          (in->Op != Opcode::Call && in->Op != Opcode::VCall &&
+           in->Op != Opcode::ICall) ||
+          F.Info.at(s).At.B != F.Info.at(F.Def[v]).At.B)
+        return false;
+      const auto at =
+          std::find_if(in->Args.begin(), in->Args.end(),
+                       [&](const Operand &o) { return sameValue(o, v); });
+      arg = static_cast<size_t>(at - in->Args.begin());
+      if (!Cs.lendable(*in, arg))
+        return false;
+      call = s;
+    }
+    if (!call)
+      return false;
+    c.Lends = call;
+    c.Arg = arg;
+    return true;
   }
 
   /// The top-level statement of @p b, at or after @p from, that holds the
@@ -837,17 +902,24 @@ private:
       return false;
     Removed.insert(c.R);
     for (const Stmt *s : walk.Ends) {
+      // The move ends the range by the release judged after it: the
+      // argument is lent, and the release is never made.
+      if (s == c.Lends) {
+        Loans[s].push_back(c.Arg);
+        ++counts.MovesLent;
+        continue;
+      }
       Removed.insert(s);
       // A local's release goes with its load.
       if (c.L != kNoLocal)
         Removed.insert(F.Def[std::get<Instr>(*s).Args[0].valueId()]);
+      ++counts.Releases;
     }
     if (c.L != kNoLocal) {
       F.Borrowing[c.L] = true;
       F.Owned[c.L] = false;
     }
     ++counts.Retains;
-    counts.Releases += walk.Ends.size();
     return true;
   }
 
@@ -862,16 +934,16 @@ private:
     c.R = r;
     c.V = v;
     // A retain stored right away into a local: the local's releases end
-    // its range; failing that, the value's.
+    // its range, or the call it is moved into; failing that, the value's.
     if (const Stmt *next = after(r)) {
       const auto *store = std::get_if<Instr>(next);
-      if (store && store->Op == Opcode::Store && sameValue(store->Args[0], v) &&
-          rangeLocal(store->Local, next)) {
+      if (store && store->Op == Opcode::Store && sameValue(store->Args[0], v)) {
         Candidate local = c;
         local.Into = next;
         local.L = store->Local;
         local.M = keeper(v, local.L);
-        if (tryRemove(local, counts))
+        if ((rangeLocal(local.L, next) || moveOf(local.L, next, local)) &&
+            tryRemove(local, counts))
           return;
       }
     }
@@ -887,32 +959,40 @@ private:
   }
 };
 
+RCCounts eliminateIn(Function &f, const Callees &callees) {
+  RCCounts counts;
+  if (f.IsExtern)
+    return counts;
+  while (Sweep(f, callees).run(counts)) {
+  }
+  return counts;
+}
+
 class RCEliminationPass : public Pass {
 public:
   std::string_view name() const override { return "rc-elimination"; }
   Status run(Program &program, Statistics &stats) override {
     RCCounts total;
-    for (Module &m : program.Modules)
+    for (Module &m : program.Modules) {
+      const Callees callees(m);
       for (Function &f : m.Functions) {
-        const RCCounts c = eliminateRedundantRC(f);
+        const RCCounts c = eliminateIn(f, callees);
         total.Retains += c.Retains;
         total.Releases += c.Releases;
+        total.MovesLent += c.MovesLent;
       }
+    }
     stats.add(name(), "retains removed", total.Retains);
     stats.add(name(), "releases removed", total.Releases);
+    stats.add(name(), "moves lent", total.MovesLent);
     return Status::ok();
   }
 };
 
 } // namespace
 
-RCCounts eliminateRedundantRC(Function &f) {
-  RCCounts counts;
-  if (f.IsExtern)
-    return counts;
-  while (Sweep(f).run(counts)) {
-  }
-  return counts;
+RCCounts eliminateRedundantRC(Function &f, const Module &m) {
+  return eliminateIn(f, Callees(m));
 }
 
 std::unique_ptr<Pass> createRCEliminationPass() {

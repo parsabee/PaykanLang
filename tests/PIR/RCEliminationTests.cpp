@@ -24,9 +24,10 @@ using namespace paykan::pir;
 namespace {
 
 // What the programs below call: @take, @count and @index release their
-// argument (an owned argument, as a user function's is), @cond is a test
-// that may run any code, @replace may store into the slot it is given the
-// address of, @Node.visit a method.
+// argument when it is handed over (a lending function's, as a user
+// function's is, docs/pir.md §3), @cond is a test that may run any code,
+// @replace may store into the slot it is given the address of, @Node.visit
+// a method.
 const std::string kPrelude = R"(module "m"
 extern fn @$rt.Paykan_panic_index(i64, i64) -> void
 extern fn @$rt.PaykanString_length(obj) -> i64
@@ -53,12 +54,18 @@ fn @Node.visit(%self: obj) -> void {
 }
 
 fn @take(%p: box) -> void {
-  release %p
+  %o = owned %p
+  if %o {
+    release %p
+  }
   ret
 }
 
 fn @count(%p: box) -> i64 {
-  release %p
+  %o = owned %p
+  if %o {
+    release %p
+  }
   ret 1
 }
 
@@ -67,7 +74,10 @@ fn @cond() -> bool {
 }
 
 fn @index(%p: box) -> i64 {
-  release %p
+  %o = owned %p
+  if %o {
+    release %p
+  }
   ret 0
 }
 
@@ -97,9 +107,10 @@ Result eliminate(const std::string &text, const std::string &name = "f") {
   r.P = std::move(*p);
   auto errors = verify(r.P);
   EXPECT_TRUE(errors.empty()) << formatErrors(errors);
-  for (Function &f : r.P.Modules.front().Functions)
+  Module &m = r.P.Modules.front();
+  for (Function &f : m.Functions)
     if (f.Name == name)
-      r.Counts = eliminateRedundantRC(f);
+      r.Counts = eliminateRedundantRC(f, m);
   errors = verify(r.P);
   EXPECT_TRUE(errors.empty()) << formatErrors(errors) << toString(r.P);
   return r;
@@ -155,6 +166,42 @@ fn @f(%n: box) -> i64 {
   %c3 = load %c
   %n3 = load %np
   release %n3
+  ret %c3
+}
+)";
+
+/// kTreeMatch as the moves at last use and the lending pass leave it: the
+/// binding's reference goes to @count (a move), and @f's parameter is lent.
+const std::string kMovedTreeMatch = R"(
+fn @f(%n: box) -> i64 {
+  local %np: box
+  local %c: i64
+  local %x: box
+  %o = owned %n
+  store %np, %n
+  store %c, 1
+  %n2 = load %np
+  %no = unbox %n2
+  %l = field.load %no, Node.l
+  retain %l
+  %so = unbox %l
+  %none = cmp eq %so, null obj
+  if %none {
+  } else {
+    retain %l
+    store %x, %l
+    %c1 = load %c
+    %x1 = load %x
+    %k = call @count(%x1)
+    %c2 = add %c1, %k
+    store %c, %c2
+  }
+  release %l
+  %c3 = load %c
+  %n3 = load %np
+  if %o {
+    release %n3
+  }
   ret %c3
 }
 )";
@@ -223,9 +270,11 @@ TEST(RCElimination, TheTreeMatchKeepsItsSubjectAndLosesTheBinding) {
   EXPECT_EQ(r.Counts.Releases, 1u);
 }
 
-TEST(RCElimination, AfterTheMovesTheTreeMatchHasNothingLeftToRemove) {
-  // The moves at last use hand the binding's reference to @count: that
-  // retain is the argument's now, and the subject's stays for the call.
+TEST(RCElimination, AfterTheMovesTheTreeMatchLendsTheMove) {
+  // The moves at last use hand the binding's reference to @count, whose
+  // release of it is never the last: the subject's retain holds the child
+  // across the call.  The move is lent instead, and its retain goes; the
+  // subject's stays for the call (#98 part 3 is what would remove it).
   ParseError err;
   auto p = parseProgram(kPrelude + kTreeMatch, err);
   ASSERT_TRUE(p) << err.str();
@@ -235,12 +284,15 @@ TEST(RCElimination, AfterTheMovesTheTreeMatchHasNothingLeftToRemove) {
   Statistics stats;
   ASSERT_TRUE(pm.run(*p, stats));
   EXPECT_EQ(stats.get("moves-at-last-use", "transfers"), 1u);
-  EXPECT_EQ(stats.get("rc-elimination", "retains removed"), 0u);
+  EXPECT_EQ(stats.get("rc-elimination", "retains removed"), 1u);
+  EXPECT_EQ(stats.get("rc-elimination", "releases removed"), 0u);
+  EXPECT_EQ(stats.get("rc-elimination", "moves lent"), 1u);
   Result r;
   r.P = std::move(*p);
   const std::string out = f(r);
-  EXPECT_EQ(count(out, "retain"), 2u) << out;
+  EXPECT_EQ(count(out, "retain"), 1u) << out;
   EXPECT_EQ(count(out, "release %l"), 1u) << out;
+  EXPECT_EQ(count(out, "call @count(lent %x1"), 1u) << out;
 }
 
 TEST(RCElimination, AFieldReadKeepsItsRetainAcrossACall) {
@@ -1248,9 +1300,178 @@ fn @f(%p: box, %w: weak) -> void {
   EXPECT_EQ(r.Counts.Retains, 0u);
 }
 
-TEST(RCElimination, ALocalHandedOnIsNoRangeOfItsOwn) {
-  // The binding's reference goes to @take (a move): no release of the
-  // local ends a range.
+// -- Moves lent
+
+TEST(RCElimination, TheTreeMatchAfterTheMovesLendsTheBinding) {
+  // `match n.l { x: Node { c = c + count(x); } None { } }` as the moves at
+  // last use leave it: the binding's reference goes to @count.  The
+  // subject's retain encloses the call, so the release @count makes of the
+  // binding's reference is never the last: judged as if the binding were
+  // lent and released right after the call, the pair goes, the call is
+  // lent the child, and only the subject's retain and release are left
+  // (2 operations per child, where there were 4).
+  Result r = eliminate(kMovedTreeMatch);
+  EXPECT_EQ(f(r), R"(fn @f(%n.1: box) -> i64 {
+  local %np.0: box
+  local %c.1: i64
+  local %x.2: box
+  %o.2 = owned %n.1
+  store %np.0, %n.1
+  store %c.1, 1
+  %n2.3 = load %np.0
+  %no.4 = unbox %n2.3
+  %l.5 = field.load %no.4, Node.l
+  retain %l.5
+  %so.6 = unbox %l.5
+  %none.7 = cmp eq %so.6, null obj
+  if %none.7 {
+  } else {
+    store %x.2, %l.5
+    %c1.8 = load %c.1
+    %x1.9 = load %x.2
+    %k.10 = call @count(lent %x1.9)
+    %c2.11 = add %c1.8, %k.10
+    store %c.1, %c2.11
+  }
+  release %l.5
+  %c3.12 = load %c.1
+  %n3.13 = load %np.0
+  if %o.2 {
+    release %n3.13
+  }
+  ret %c3.12
+}
+)");
+  EXPECT_EQ(r.Counts.Retains, 1u);
+  EXPECT_EQ(r.Counts.Releases, 0u);
+  EXPECT_EQ(r.Counts.MovesLent, 1u);
+}
+
+TEST(RCElimination, ABindingMovedIntoACallInALoopIsLent) {
+  // The match in a loop body: each iteration's binding is moved into
+  // @count inside its subject's range, and is lent.
+  Result r = eliminate(R"(
+fn @f(%o: obj) -> i64 {
+  local %x: box
+  local %c: i64
+  store %c, 0
+  while {
+    %c0 = load %c
+    %more = cmp lt %c0, 10
+    cond %more
+  } {
+    %l = field.load %o, Node.l
+    retain %l
+    %so = unbox %l
+    %none = cmp eq %so, null obj
+    if %none {
+      break
+    } else {
+      retain %l
+      store %x, %l
+      %x1 = load %x
+      %k = call @count(%x1)
+      %c1 = load %c
+      %c2 = add %c1, %k
+      store %c, %c2
+    }
+    release %l
+  }
+  %c3 = load %c
+  ret %c3
+}
+)");
+  const std::string out = f(r);
+  EXPECT_EQ(count(out, "retain %l"), 1u) << out;
+  EXPECT_EQ(count(out, "call @count(lent %x1"), 1u) << out;
+  EXPECT_EQ(r.Counts.MovesLent, 1u);
+}
+
+TEST(RCElimination, AMoveOnOnePathIsLentAndTheReleaseOnTheOtherGoes) {
+  // `x: Node { if b { c = count(x); } }`: the binding is moved into @count
+  // on one path and released at the end of the arm on the other.  Both end
+  // its range: the move is lent and the release goes with the retain.
+  Result r = eliminate(R"(
+fn @f(%o: obj, %b: bool) -> i64 {
+  local %x: box
+  local %c: i64
+  store %c, 0
+  %l = field.load %o, Node.l
+  retain %l
+  retain %l
+  store %x, %l
+  if %b {
+    %x1 = load %x
+    %k = call @count(%x1)
+    store %c, %k
+  } else {
+    %t = load %x
+    release %t
+  }
+  release %l
+  %c3 = load %c
+  ret %c3
+}
+)");
+  const std::string out = f(r);
+  EXPECT_EQ(count(out, "retain %l"), 1u) << out;
+  EXPECT_EQ(count(out, "release"), 1u) << out;
+  EXPECT_EQ(count(out, "call @count(lent %x1"), 1u) << out;
+  EXPECT_EQ(r.Counts.Retains, 1u);
+  EXPECT_EQ(r.Counts.Releases, 1u);
+  EXPECT_EQ(r.Counts.MovesLent, 1u);
+}
+
+TEST(RCElimination, ACopyMovedIntoACallIsLentWhileItsLocalKeepsTheObject) {
+  // `u = t; count(u)` with t used after: t's slot keeps its reference
+  // across the call, so u's copy is lent to @count.
+  Result r = eliminate(R"(
+fn @f(%t: box) -> i64 {
+  local %tp: box
+  local %u: box
+  %o = owned %t
+  store %tp, %t
+  %t1 = load %tp
+  retain %t1
+  store %u, %t1
+  %u1 = load %u
+  %k = call @count(%u1)
+  %t2 = load %tp
+  %to = unbox %t2
+  %v = field.load %to, Node.v
+  %t3 = load %tp
+  if %o {
+    release %t3
+  }
+  ret %k
+}
+)");
+  const std::string out = f(r);
+  EXPECT_EQ(count(out, "retain"), 0u) << out;
+  EXPECT_EQ(count(out, "call @count(lent %u1"), 1u) << out;
+  EXPECT_EQ(r.Counts.MovesLent, 1u);
+  // The local handed on in the range keeps nothing: u's copy stays owned.
+  Result taken = eliminate(R"(
+fn @f(%t: box) -> i64 {
+  local %tp: box
+  local %u: box
+  store %tp, %t
+  %t1 = load %tp
+  retain %t1
+  store %u, %t1
+  %t2 = load %tp
+  call @take(%t2)
+  %u1 = load %u
+  %k = call @count(%u1)
+  ret %k
+}
+)");
+  EXPECT_EQ(count(f(taken), "retain %t1"), 1u) << f(taken);
+  EXPECT_EQ(taken.Counts.MovesLent, 0u);
+}
+
+TEST(RCElimination, AFreshReferenceLendsTheMoveNestedInIt) {
+  // A `weak.load` encloses the binding's range: the move is lent.
   Result r = eliminate(R"(
 fn @f(%w: weak) -> void {
   local %x: box
@@ -1263,20 +1484,116 @@ fn @f(%w: weak) -> void {
   ret
 }
 )");
+  EXPECT_EQ(count(f(r), "retain %s"), 0u) << f(r);
+  EXPECT_EQ(count(f(r), "call @take(lent %x1"), 1u) << f(r);
+  EXPECT_EQ(r.Counts.MovesLent, 1u);
+}
+
+TEST(RCElimination, AnEnclosingReferenceHandedOnInTheRangeLendsNoMove) {
+  // %s's own reference goes to @take before the binding is moved into
+  // @count: then nothing but the binding's reference holds the object, so
+  // the move stays owned and its retain stays.
+  Result r = eliminate(R"(
+fn @f(%w: weak) -> i64 {
+  local %x: box
+  %s = weak.load %w
+  retain %s
+  store %x, %s
+  call @take(%s)
+  %x1 = load %x
+  %k = call @count(%x1)
+  ret %k
+}
+)");
   EXPECT_EQ(count(f(r), "retain %s"), 1u) << f(r);
+  EXPECT_EQ(count(f(r), "lent"), 0u) << f(r);
+  EXPECT_EQ(r.Counts.MovesLent, 0u);
+}
+
+TEST(RCElimination, AMoveIntoACalleeThatDoesNotLendStays) {
+  // A C function takes its arguments as its C signature says, with no
+  // ownership mask (a module-less extern, docs/pir.md §3): a hand-off to
+  // one is no range of the local's own, and it is never lent.  Neither is
+  // a box parameter past the 64th, which is always handed over.
+  Result r = eliminate(R"(
+extern fn @$c.keep(box) -> void
+
+fn @f(%w: weak) -> void {
+  local %x: box
+  %s = weak.load %w
+  retain %s
+  store %x, %s
+  %x1 = load %x
+  call @$c.keep(%x1)
+  release %s
+  ret
+}
+)");
+  EXPECT_EQ(count(f(r), "retain %s"), 1u) << f(r);
+  EXPECT_EQ(r.Counts.MovesLent, 0u);
+  std::string params, args;
+  for (int i = 0; i < 65; ++i) {
+    params += std::string(i ? ", " : "") + "%p" + std::to_string(i) + ": box";
+    args += std::string(i ? ", " : "") + (i < 64 ? "null box" : "%x1");
+  }
+  Result past = eliminate("fn @wide(" + params + R"() -> void {
+  ret
+}
+
+fn @f(%w: weak) -> void {
+  local %x: box
+  %s = weak.load %w
+  retain %s
+  store %x, %s
+  %x1 = load %x
+  call @wide()" + args + R"()
+  release %s
+  ret
+}
+)");
+  EXPECT_EQ(count(f(past), "retain %s"), 1u) << f(past);
+  EXPECT_EQ(past.Counts.MovesLent, 0u);
+}
+
+TEST(RCElimination, AVirtualOrIndirectMoveIsLent) {
+  // Every vtable slot and function type with a box parameter lends.
+  Result r = eliminate(R"(
+fn @f(%w: weak, %fp: ptr, %o: obj) -> void {
+  local %x: box
+  local %y: box
+  %s = weak.load %w
+  retain %s
+  store %x, %s
+  retain %s
+  store %y, %s
+  %x1 = load %x
+  icall %fp : (box) -> void (%x1)
+  %y1 = load %y
+  vcall %o : (obj, box) -> void [1] (%y1)
+  release %s
+  ret
+}
+)");
+  EXPECT_EQ(count(f(r), "retain"), 0u) << f(r);
+  EXPECT_EQ(count(f(r), "(lent %x1."), 1u) << f(r);
+  EXPECT_EQ(count(f(r), "(lent %y1."), 1u) << f(r);
+  EXPECT_EQ(r.Counts.MovesLent, 2u);
 }
 
 // -- The pass
 
 TEST(RCElimination, ItChangesNothingOnItsOwnOutput) {
-  for (const std::string &text : {kTreeMatch, manySubjects(3)}) {
+  for (const std::string &text :
+       {kTreeMatch, kMovedTreeMatch, manySubjects(3)}) {
     Result once = eliminate(text);
     const std::string first = toString(once.P);
-    for (Function &g : once.P.Modules.front().Functions)
+    Module &m = once.P.Modules.front();
+    for (Function &g : m.Functions)
       if (g.Name == "f") {
-        const RCCounts again = eliminateRedundantRC(g);
+        const RCCounts again = eliminateRedundantRC(g, m);
         EXPECT_EQ(again.Retains, 0u);
         EXPECT_EQ(again.Releases, 0u);
+        EXPECT_EQ(again.MovesLent, 0u);
       }
     EXPECT_EQ(toString(once.P), first);
   }
@@ -1296,7 +1613,8 @@ TEST(RCElimination, ThePassCountsWhatItDid) {
   stats.print(os);
   EXPECT_EQ(os.str(), "paykan pass stats:\n"
                       "  rc-elimination retains removed : 4\n"
-                      "  rc-elimination releases removed : 4\n");
+                      "  rc-elimination releases removed : 4\n"
+                      "  rc-elimination moves lent : 0\n");
 }
 
 TEST(RCElimination, ItsTimeGrowsWithTheFunction) {
@@ -1319,7 +1637,7 @@ TEST(RCElimination, ItsTimeGrowsWithTheFunction) {
         if (g.Name == "f")
           fn = &g;
       const std::clock_t start = std::clock();
-      const RCCounts c = eliminateRedundantRC(*fn);
+      const RCCounts c = eliminateRedundantRC(*fn, p->Modules.front());
       const double took =
           static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
       EXPECT_EQ(c.Retains, 2 * n);

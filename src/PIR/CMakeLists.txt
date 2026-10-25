@@ -6,6 +6,7 @@
 
 add_library(paykan_pir STATIC
     Binary.cpp
+    Callees.cpp
     DeadCode.cpp
     Lend.cpp
     MoveAtLastUse.cpp

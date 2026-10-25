@@ -23,6 +23,9 @@ struct RCCounts {
   uint64_t Retains = 0;
   /// Releases removed with them: one per path out of each retain's range.
   uint64_t Releases = 0;
+  /// Moves lent: arguments that handed a local's reference over and are
+  /// `lent` now, the retain that paid for it removed.
+  uint64_t MovesLent = 0;
 };
 
 /// Remove from @p f each `retain` and the releases that end what it made
@@ -59,12 +62,24 @@ struct RCCounts {
 /// call in the range it stays, since the callee may write that field and
 /// free the object (the field-load hazard), and so does every hold the
 /// lowering makes; the retains nested in it go.  A local whose retain went
-/// holds a borrowed reference from then on.  The whole runs again until it
-/// removes nothing.
-RCCounts eliminateRedundantRC(Function &f);
+/// holds a borrowed reference from then on.
+///
+/// A *move* is lent the same way: when the local the retain is stored into
+/// hands its reference over once, as the box argument of a call that may
+/// lend it (a box parameter with a bit in a lending callee's ownership mask,
+/// docs/pir.md §3; @p m declares the callees), and every other load of the
+/// local releases it or leaves its reference where it is, the range is
+/// judged as if the argument were lent and the local released right after
+/// the call.  Where the pair can go, the retain goes and the argument is
+/// `lent`; the release the callee would have made is never made, and was
+/// never the last, since the enclosing reference or the local keeping the
+/// object alive outlives the call.  The whole runs again until it removes
+/// nothing.
+RCCounts eliminateRedundantRC(Function &f, const Module &m);
 
 /// eliminateRedundantRC on every function the program defines, as a pass
-/// ("rc-elimination"), counting "retains removed" and "releases removed".
+/// ("rc-elimination"), counting "retains removed", "releases removed" and
+/// "moves lent".
 std::unique_ptr<Pass> createRCEliminationPass();
 
 } // namespace paykan::pir

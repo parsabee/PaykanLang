@@ -10,9 +10,12 @@
 //            beside its object handed over at its last use; every way a
 //            callee writes its parameter, called with a variable it keeps
 //            and at the variable's last use; and a field read the callee
-//            replaces, given to every kind of call.  The `weak`
-//            references show when each object dies: where it did before
-//            arguments were lent, when what last held it lets it go.
+//            replaces, given to every kind of call; a variable at its
+//            last use that something else the caller holds keeps alive:
+//            a match binding counted down a tree, and one whose field the
+//            callee clears.  The `weak` references show when each object
+//            dies: where it did before arguments were lent, when what
+//            last held it lets it go.
 // expect-stdout: inner reads a
 // expect-stdout: in outer, after inner: gone
 // expect-stdout: in main, after outer: gone
@@ -52,6 +55,12 @@
 // expect-stdout: generic: a6
 // expect-stdout: super: a7
 // expect-stdout: kept: a3 a7
+// expect-stdout: nodes: 15
+// expect-stdout: in dropAndRead, after the field let go: alive
+// expect-stdout: dropAndRead reads m
+// expect-stdout: after the match: gone
+// expect-stdout: inner reads t
+// expect-stdout: t still t
 
 import ::io;
 
@@ -350,10 +359,70 @@ fn kinds() {
   io::println("kept: " + k.m.name + " " + c.m.name);
 }
 
+// -- Moves lent: a variable at its last use something else keeps alive
+
+class Tree {
+  l: Tree?;
+  r: Tree?;
+}
+
+fn grow(d: int) -> Tree {
+  if d == 0 {
+    return Tree(None, None);
+  }
+  return Tree(grow(d - 1), grow(d - 1));
+}
+
+// Each child is lent to count: the matched value holds it until its match
+// ends.
+fn count(n: Tree) -> int {
+  c = 1;
+  match n.l {
+    x: Tree { c = c + count(x); }
+    None { }
+  }
+  match n.r {
+    x: Tree { c = c + count(x); }
+    None { }
+  }
+  return c;
+}
+
+class Slot {
+  n: Node?;
+}
+
+// Lets go of the field its argument was matched from, then reads the
+// argument: the matched value keeps it alive until the match ends.
+fn dropAndRead(n: Node, s: Slot, w: view Watcher) {
+  s.n = None;
+  report(w, "in dropAndRead, after the field let go");
+  io::println("dropAndRead reads " + n.name);
+}
+
+fn movesLent() {
+  io::println("nodes: " + Str(count(grow(3))));
+
+  m = Node("m");
+  wm = Watcher(m);
+  s = Slot(m);
+  match s.n {
+    x: Node { dropAndRead(x, s, wm); }   // x's last use
+    None { }
+  }
+  report(wm, "after the match");
+
+  t = Node("t");
+  u = t;
+  inner(u);                  // u's last use: t keeps the node
+  io::println("t still " + t.name);
+}
+
 fn main() -> int {
   handOffs();
   hazards();
   writes();
   kinds();
+  movesLent();
   return 0;
 }

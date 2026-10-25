@@ -1269,6 +1269,7 @@ paykan pass stats:
   lending retains at keeps : 2
   rc-elimination retains removed : 1
   rc-elimination releases removed : 1
+  rc-elimination moves lent : 0
 Hello, world!
 ```
 
@@ -1722,9 +1723,38 @@ release go: the subject's token holds the node until the match ends.  With
 nothing in the arm that can let go (`c = c + x.v`), both pairs go, the
 binding's first.  In the program the driver compiles, the moves at last use
 run first and hand the binding's reference to `@count` (`x` is not read
-again): its retain is then the argument's, which an owned parameter needs,
-and the match keeps one retain more than the ideal, which borrowed
-parameters (#98 part 2) would remove.
+again): its retain is then the argument's, and `@count` releases it when it
+returns, which the next rule removes.
+
+**Moves lent.**  A local whose reference a call is handed (a move at last
+use) is lent to the call instead where the function keeps the object alive
+across it otherwise.  For a retain stored at once into a box local that
+nothing else stores into, whose address is never taken, and whose loads
+all release it or only borrow but one, used by one argument alone, in its
+own block, of a call that may lend it (a box parameter with a bit in a
+lending callee's ownership mask, §3), the range is judged as if that
+argument were `lent` and the local released right after the call; that
+release ends the range there.  The call may run any code, so only an
+enclosing reference or a local can keep the object alive across it.  When
+the pair can go, the retain goes and the argument is `lent`; the release
+is never made, and neither is the one the callee would have made of what
+it was handed.  In the match above, after the moves:
+
+```
+retain %l                  ; the subject
+...
+  store %x, %l             ; the binding: its retain is gone
+  %x1 = load %x
+  %k = call @count(lent %x1)
+...
+release %l                 ; the subject's
+```
+
+so each child costs the subject's retain and release, where it cost four
+operations; an unheld match subject (#98 part 3) would remove those too.
+`--stats` counts the arguments so lent (`rc-elimination moves lent`); the
+retain is one of the "retains removed", and the release it went with is not
+one of the "releases removed", since no `release` is in the code.
 
 **Why it is right.**  Removing the pair lowers the object's count by one
 exactly in the range, on every path through it, and leaves it as it was
@@ -1735,7 +1765,12 @@ nothing in the range can release a reference or overwrite one, every
 reference it had at the retain.  So no count reaches zero at another point
 than before: every object is destroyed where it was, what its destruction
 does happens then, and a `weak` reference reads what it read.  No release
-is added or moved.
+is added or moved.  A move lent is the same pair: handed the local's
+reference, the callee releases it before it returns or keeps it, and its
+release is never the last, since the enclosing reference or the local
+outlives the call; lent it, the callee releases nothing and retains where
+it keeps (the lending pass above), so after the call the object has the
+references it had, and in the call one fewer, never none.
 
 The driver runs it on every program right after the lending pass, and on
 a module's code before its `.pkm` is written, after the lending pass; on
