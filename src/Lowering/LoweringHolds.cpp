@@ -103,15 +103,27 @@ private:
   /// A call is made that does @p effect: every read in use whose reference
   /// it may let go of takes one of its own.  A read of storage the function
   /// never hands on whose reference it cannot let go of, though it may let
-  /// go of others (replaces), is read by a `stable` load (isStableRead).
+  /// go of others (replaces), is read by a `stable` load (isStableRead).  A
+  /// read of LentReads already has a reference of its own, its argument's
+  /// copy, which the callee is not lent if the call may let go of it.
   void call(const Effect &effect) {
     for (const ast::Expr *read : Live)
-      if (replaces(effect, read))
+      if (L.LentReads.count(read)) {
+        if (replaces(effect, read, /*forLending=*/true))
+          L.NotLendable.insert(read);
+      } else if (replaces(effect, read)) {
         L.HeldReads.insert(read);
-      else if (effect.Releases)
+      } else if (effect.Releases) {
         L.StableReads.insert(read);
+      }
   }
-  bool replaces(const Effect &effect, const ast::Expr *read) const;
+  bool replaces(const Effect &effect, const ast::Expr *read,
+                bool forLending = false) const;
+  /// The box read @p u leaves, given to a lending callee as a box of its
+  /// own: a read of LentReads, in use until the call returns (its one
+  /// element), unless its storage is a variable's that the statement may
+  /// change (HeldVars).
+  std::vector<const ast::Expr *> lendable(const Use &u);
   bool gives(ast::Expr *arg, Callee callee) const;
   Use variable(ast::Identifier *id) const;
   Use field(ast::MemberAccessExpr *ma);
@@ -205,14 +217,21 @@ static const ast::Identifier *rootOf(const ast::Expr *e) {
 // (Effect::Releases): MoveAtLastUse keeps another variable's hand-off a
 // copy while a borrowed read of it is in use across a call, and that
 // variable's object would then die later than it does with the hold.
+//
+// A read to be lent (@p forLending) is the copy a box argument takes, a
+// reference of its own whatever the read is rooted in: the call can take
+// what the read found from the callee only by letting go of the slot's
+// reference, so the slot's class decides for every root, as it does for
+// the storage the function never hands on.
 bool ModuleLowering::BorrowedReads::replaces(const Effect &effect,
-                                             const ast::Expr *read) const {
+                                             const ast::Expr *read,
+                                             bool forLending) const {
   if (L.isFixedRead(read))
     return false;
   if (effect.Unknown)
     return true;
   const ast::Identifier *root = rootOf(read);
-  if (!root || !L.CurrentScope->isStable(root->getName()))
+  if (!forLending && (!root || !L.CurrentScope->isStable(root->getName())))
     return effect.Releases;
   auto *ct = ast::dyn_cast<ast::ClassType>(L.slotType(read->getResolvedType()));
   if (!ct)
@@ -222,6 +241,27 @@ bool ModuleLowering::BorrowedReads::replaces(const Effect &effect,
     if (effect.Types.count(L.slotType(c)))
       return true;
   return false;
+}
+
+std::vector<const ast::Expr *>
+ModuleLowering::BorrowedReads::lendable(const Use &u) {
+  if (!u.Read)
+    return {};
+  if (const ast::Identifier *root = rootOf(u.Read);
+      root && L.HeldVars.count(root->getName()))
+    return {};
+  L.LentReads.insert(u.Read);
+  return {u.Read};
+}
+
+bool ModuleLowering::isLentRead(const ast::Expr *e) const {
+  // `Str(s)` is `s`.
+  while (const auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
+    if (!IdentityCtors.count(ce->getCalleeName()) || ce->getNumArguments() != 1)
+      break;
+    e = ce->getArguments()[0];
+  }
+  return LentReads.count(e) && !NotLendable.count(e) && !isHeldRead(e);
 }
 
 ModuleLowering::BorrowedReads::Use
@@ -335,12 +375,15 @@ void ModuleLowering::BorrowedReads::binary(ast::BinaryExpr *be) {
   const bool refs = lt && rt && ast::isRefType(lt) && ast::isRefType(rt);
   if (refs && (eq || be->getOpcode() == ast::BinaryOpcode::Add)) {
     // `a == b` is `a.equals(b)`, a Str's the runtime's; `a + b` joins two
-    // strings in the runtime.  The left operand is in use until then.
+    // strings in the runtime.  The left operand is in use until then, and
+    // so is the right one of `==`, which `equals` (a vtable slot, which
+    // lends) is given as a box of its own (lendable).
     Use a = eval(lhs);
     within(holds(a), [&] {
-      eval(rhs);
+      Use b = eval(rhs);
       if (eq)
-        call(L.valueMethodEffect(lt, names::kMethodEquals));
+        within(lendable(b),
+               [&] { call(L.valueMethodEffect(lt, names::kMethodEquals)); });
     });
     return;
   }
@@ -385,8 +428,17 @@ ModuleLowering::BorrowedReads::arguments(const std::vector<ast::Expr *> &args,
                          (mem ? callee == Callee::Native ||
                                     arg->isViewedByCall() || isSliceArg(arg)
                               : u.Read && borrowed());
-    if (!mem && !inPlace)
-      continue; // a reference of its own, or a value
+    if (!mem && !inPlace) {
+      // A reference of its own, or a value.  A box read given to a callee
+      // of the program, which lends, is in use until the call returns if
+      // it is to be lent instead.
+      if (callee == Callee::Program) {
+        std::vector<const ast::Expr *> lent = lendable(u);
+        Live.insert(Live.end(), lent.begin(), lent.end());
+        through.insert(through.end(), lent.begin(), lent.end());
+      }
+      continue;
+    }
     Live.insert(Live.end(), h.begin(), h.end());
     if (inPlace)
       through.insert(through.end(), h.begin(), h.end());

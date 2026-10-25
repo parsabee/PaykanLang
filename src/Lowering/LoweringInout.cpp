@@ -167,6 +167,7 @@ void ModuleLowering::noteHeldReads(ast::Stmt *s) {
   };
   for (ast::Expr *e : exprs)
     findChanges(e);
+  HeldVars = changed;
   if (changed.empty())
     return;
   for (ast::Expr *t : targets)
@@ -229,6 +230,31 @@ void ModuleLowering::nameParams(pir::Function &fn, size_t first,
       fn.Params[at++].Name = p.getName();
     if (ast::dyn_cast<ast::SliceType>(p.ParamType) && at < fn.Params.size())
       fn.Params[at++].Name = p.getName() + ".len";
+  }
+}
+
+// A function that lends (docs/pir.md §3) may be lent each box parameter
+// with a bit in its ownership mask: the caller keeps the object alive until
+// the call returns.  The body lowered here owns its parameters, releasing
+// each at every way out and handing it on at its last use, so a lent one is
+// retained first, while the one handed over is taken as it is.  Whatever
+// the caller passed, the body after this does what it did before the mask
+// existed (docs/pir.md §3).
+void ModuleLowering::emitParamPrologue(const pir::Function &fn) {
+  if (!pir::lends(fn))
+    return;
+  for (size_t i = 0; i < fn.Params.size(); ++i) {
+    const pir::Value &p = fn.Params[i];
+    if (p.Ty != Type::Box || pir::boxIndex(fn.Sig, i) >= pir::kOwnershipBits)
+      continue;
+    Val param(pir::Operand::value(p), Type::Box);
+    const std::string name = p.Name.empty() ? "param" : p.Name;
+    Val lent = B.unary(pir::Opcode::Not, B.owned(param, name + ".own"),
+                       name + ".lent");
+    pir::If *s = B.openIf(lent, /*withElse=*/false);
+    B.enter(*s->Then);
+    emitRetain(param);
+    B.leave();
   }
 }
 

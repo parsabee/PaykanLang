@@ -387,7 +387,8 @@ Val ModuleLowering::emitClosureCall(const Val &addr, ast::FunctionType *fnt,
     }
     if (paramTy == Type::Box) {
       // Callee-consumes ABI: a +1 box for every expression form.
-      Val v = emitAsShared(arg);
+      Val v = emitAsShared(
+          arg, hasOwnershipBit(sig, pir::lendsType(sig), args.size()));
       if (!v)
         return Val();
       args.push_back(v);

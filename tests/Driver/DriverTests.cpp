@@ -1085,6 +1085,59 @@ TEST(Driver, StatsCountTheReferenceCountElimination) {
       << lib.out;
 }
 
+// The lending pass counts the copies the lowering made only to hand an
+// argument over that the moves at last use left (`lending marks`), and
+// clears their mark (docs/pir.md §6, §12).  --pir-skip=<pass>[,<pass>] (not
+// in --help) leaves passes out: here the lending pass, whose marks then
+// stay in what --emit-pir prints, and the reference-count elimination.  A
+// name no pass has, and --emit-pkm, are refused.
+TEST(Driver, PirSkipLeavesPassesOut) {
+  REQUIRE_BACKEND();
+  auto src =
+      writeTmp("class N { n: int; }\n"
+               "fn take(x: N) -> int { return x.n; }\n"
+               "fn main() -> int { a = N(7); return take(a) + take(a); }\n");
+  const std::string paykan = kPaykan;
+  auto all = run(paykan + " --stats --emit-pir " + src + " 2>&1");
+  EXPECT_EQ(all.exitCode, 0) << all.out;
+  EXPECT_NE(all.out.find("  moves-at-last-use transfers : 1\n"
+                         "  moves-at-last-use retains removed : 1\n"
+                         "  moves-at-last-use releases removed : 1\n"
+                         "  lending marks : 1\n"
+                         "  rc-elimination retains removed : 0\n"),
+            std::string::npos)
+      << all.out;
+  EXPECT_EQ(all.out.find("retain lend "), std::string::npos) << all.out;
+  auto skip =
+      run(paykan + " --stats --pir-skip=lending,rc-elimination --emit-pir " +
+          src + " 2>&1");
+  EXPECT_EQ(skip.exitCode, 0) << skip.out;
+  EXPECT_NE(skip.out.find("  moves-at-last-use transfers : 1\n"),
+            std::string::npos)
+      << skip.out;
+  EXPECT_EQ(skip.out.find("  lending "), std::string::npos) << skip.out;
+  EXPECT_EQ(skip.out.find("  rc-elimination "), std::string::npos) << skip.out;
+  EXPECT_NE(skip.out.find("  retain lend %a."), std::string::npos) << skip.out;
+  EXPECT_EQ(run(paykanRun() + " --pir-skip=lending " + src).exitCode, 14);
+  auto unknown =
+      run(paykan + " --pir-skip=lending,folding --check-only " + src + " 2>&1");
+  EXPECT_NE(unknown.exitCode, 0);
+  EXPECT_NE(unknown.out.find("--pir-skip: no PIR pass is named 'folding'"),
+            std::string::npos)
+      << unknown.out;
+  std::string pkm = src + ".pkm";
+  auto lib = run(paykan + " --pir-skip=lending --emit-pkm -o " + pkm + " " +
+                 src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(lib.exitCode, 0);
+  EXPECT_NE(lib.out.find("--pir-skip cannot be used with --emit-pkm"),
+            std::string::npos)
+      << lib.out;
+  EXPECT_FALSE(std::filesystem::exists(pkm));
+  auto help = run(paykan + " --help 2>&1");
+  EXPECT_EQ(help.out.find("pir-skip"), std::string::npos) << help.out;
+}
+
 TEST(Driver, EmitCPrintsCSource) {
   REQUIRE_BACKEND();
   auto src = writeTmp("class P { x: int; }\n"

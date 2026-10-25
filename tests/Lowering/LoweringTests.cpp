@@ -9,6 +9,7 @@
 #include "ModuleName.h"
 #include "TestUtils.h"
 #include "paykan/lowering/Lowering.h"
+#include "paykan/pir/Lend.h"
 #include "paykan/pir/MoveAtLastUse.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Pass.h"
@@ -21,6 +22,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace paykan;
 using namespace paykan::test;
@@ -94,15 +96,51 @@ size_t count(const std::string &text, const std::string &needle) {
   return n;
 }
 
-/// The printed body of function @p name ("fn @name(...)" up to the closing
-/// brace at column 0).
-std::string function(const std::string &text, const std::string &name) {
+/// The printed function @p name ("fn @name(...)" up to the closing brace
+/// at column 0), its parameters' prologue included.
+std::string fullFunction(const std::string &text, const std::string &name) {
   size_t start = text.find("fn @" + name + "(");
   if (start == std::string::npos)
     return "";
   size_t end = text.find("\n}\n", start);
   return text.substr(start, end == std::string::npos ? std::string::npos
                                                      : end + 3 - start);
+}
+
+/// The printed function @p name without its parameters' prologue (`%o =
+/// owned %p`, `%l = not %o`, `if %l { retain %p }`, docs/pir.md §3), which
+/// the prologue tests check: what the body does with its parameters.
+std::string function(const std::string &text, const std::string &name) {
+  std::istringstream in(fullFunction(text, name));
+  std::vector<std::string> lines;
+  for (std::string line; std::getline(in, line);)
+    lines.push_back(line);
+  std::string out;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    auto value = [](const std::string &line) {
+      return line.substr(2, line.find(' ', 2) - 2);
+    };
+    const std::string &l = lines[i];
+    const size_t own = l.find(" = owned ");
+    if (own != std::string::npos && i + 4 < lines.size() &&
+        l.starts_with("  %")) {
+      const std::string o = value(l);
+      const std::string n = value(lines[i + 1]);
+      std::string rest;
+      for (size_t k = i + 1; k <= i + 4; ++k)
+        rest.append(lines[k]).append("\n");
+      std::string prologue;
+      prologue.append("  ").append(n).append(" = not ").append(o);
+      prologue.append("\n  if ").append(n).append(" {\n    retain ");
+      prologue.append(l.substr(own + 9)).append("\n  }\n");
+      if (rest == prologue) {
+        i += 4;
+        continue;
+      }
+    }
+    out.append(l).append("\n");
+  }
+  return out;
 }
 
 /// The value the first instruction of @p f containing @p what defines
@@ -1585,9 +1623,9 @@ TEST(Lowering, InitMakesTheObjectOneOfItsClassOnceItsFieldsAreAssigned) {
   EXPECT_LT(b.find("call @A.__init__("), b.find("vtable.store")) << b;
   std::string c = function(t, "C.__init__");
   EXPECT_EQ(count(c, "vtable.store"), 1u) << c;
-  EXPECT_NE(c.find("  call @B.__init__(%self.4, %arg1.5)\n"
-                   "  %self.6 = load %self.0\n"
-                   "  vtable.store %self.6, C\n"),
+  EXPECT_NE(c.find("  call @B.__init__(%self.6, %arg1.7)\n"
+                   "  %self.8 = load %self.0\n"
+                   "  vtable.store %self.8, C\n"),
             std::string::npos)
       << c;
   // The constructor installs the class's vtable with `new`, before any
@@ -3095,7 +3133,8 @@ TEST(LoweringMoves, SelfIsNeverHandedOn) {
 TEST(LoweringMoves, AFieldReadInUseAcrossALaterCallKeepsTheCopy) {
   // The name read from h.node is in use while `label` runs, and x may be
   // what keeps that node alive (the pass does not ask what a call does): x
-  // is handed to takeName as a copy.  The read `replace` could free, as it
+  // is handed to takeName as a copy (an argument's, `retain lend`,
+  // docs/pir.md §6).  The read `replace` could free, as it
   // may assign h.node, has a reference of its own (docs/pir.md §7, "Reads a
   // call may replace"), so there x moves, as it does with no such read.
   auto l = lowerMoved(R"(
@@ -3123,10 +3162,11 @@ TEST(LoweringMoves, AFieldReadInUseAcrossALaterCallKeepsTheCopy) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "kept");
-  EXPECT_EQ(count(f, "retain %x."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend %x."), 1u) << f;
   for (const char *fn : {"held", "moved"}) {
     f = function(l.Text, fn);
     EXPECT_EQ(count(f, "retain %x."), 0u) << fn << "\n" << f;
+    EXPECT_EQ(count(f, "retain lend %x."), 0u) << fn << "\n" << f;
   }
   f = function(l.Text, "held");
   EXPECT_TRUE(heldAcross(f, defined(f, ", Named.name"), "call @replace(")) << f;
@@ -3158,7 +3198,7 @@ TEST(LoweringMoves, AMethodKeepsACopyWhileItStillUsesSelf) {
   EXPECT_EQ(count(f, "retain"), 0u) << f;
   EXPECT_EQ(count(f, "release %"), 2u) << f; // the fields' old values
   f = function(l.Text, "Named.give");
-  EXPECT_EQ(count(f, "retain %n."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend %n."), 1u) << f;
 }
 
 TEST(LoweringMoves, AViewIsNeverHandedOn) {
@@ -3176,9 +3216,9 @@ TEST(LoweringMoves, AViewIsNeverHandedOn) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "outer");
   EXPECT_NE(f.find(": box view"), std::string::npos) << f;
-  EXPECT_EQ(count(f, "retain %n."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend %n."), 1u) << f;
   f = function(l.Text, "local");
-  EXPECT_EQ(count(f, "retain %v."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend %v."), 1u) << f;
   f = function(l.Text, "plain");
   EXPECT_EQ(count(f, "retain"), 0u) << f;
 }
@@ -3279,4 +3319,374 @@ TEST(LoweringMoves, AStableReadOfAContainersStateKeepsTheHandOff) {
     EXPECT_TRUE(stableLoad(f, "ptr.load box, %self.addr")) << fn << "\n" << f;
     EXPECT_EQ(count(f, "retain "), 0u) << fn << "\n" << f;
   }
+}
+
+// -- Box parameters (docs/pir.md §3) and the copies an argument may be lent
+// instead (docs/pir.md §6, `retain lend`)
+
+namespace {
+
+/// The box parameters whose prologue (docs/pir.md §3) the printed function
+/// @p name of @p text starts with, in order, and "misplaced" for one after
+/// the start of its body.
+std::vector<std::string> prologueOf(const std::string &text,
+                                    const std::string &name) {
+  const std::string full = fullFunction(text, name);
+  // The body's first statement that is no `local`: the prologue is before.
+  std::istringstream body(function(text, name));
+  std::string first;
+  for (std::string line; std::getline(body, line);)
+    if (line.starts_with("  ") && !line.starts_with("  local ")) {
+      first = line;
+      break;
+    }
+  const size_t end =
+      first.empty() ? full.size() : full.find("\n" + first + "\n");
+  std::vector<std::string> params;
+  for (size_t at = full.find(" = owned "); at != std::string::npos;
+       at = full.find(" = owned ", at + 1))
+    params.push_back(at < end
+                         ? full.substr(at + 9, full.find('\n', at) - at - 9)
+                         : "misplaced");
+  return params;
+}
+
+/// How the argument @p arg of the first instruction of @p f containing
+/// @p call (up to its argument list) is copied for it: "lend" by a `retain
+/// lend` (docs/pir.md §6), "copy" by a plain `retain`, "" when nothing
+/// before the call retains it.
+std::string argCopy(const std::string &f, const std::string &call,
+                    size_t arg = 0) {
+  const size_t c = f.find(call);
+  if (c == std::string::npos)
+    return "no call";
+  const size_t open = c + call.size();
+  std::string args = f.substr(open, f.find(')', open) - open) + ", ";
+  for (size_t i = 0; i < arg && args.find(", ") != std::string::npos; ++i)
+    args = args.substr(args.find(", ") + 2);
+  const std::string v = args.substr(0, args.find(", "));
+  const std::string before = f.substr(0, c);
+  if (before.find("retain lend " + v + "\n") != std::string::npos)
+    return "lend";
+  if (before.find("retain " + v + "\n") != std::string::npos)
+    return "copy";
+  return "";
+}
+
+} // namespace
+
+// Every body the lowering makes of a function that lends (docs/pir.md §3)
+// starts with its box parameters' prologue, before it stores them: a
+// function, a native function's body, an instance of a generic one, a
+// class's method, `impl` method, `__init__` and constructor, a struct's
+// method, `__init__` and constructor, a lambda's code and the code of a
+// function used as a value.  Each owns its parameters whether the caller
+// handed them over or lent them.  A function without a box parameter
+// (`fib`, `main`, a destructor) has none; a tagged union's variant is made
+// in place, by no function.
+TEST(LoweringLend, EveryBodyThatLendsStartsWithItsParametersPrologue) {
+  auto l = lower(R"(
+    class Node { name: Str; }
+    class C {
+      n: Node;
+      view fn virt(m: Node) -> int { return 1; }
+    }
+    impl C {
+      fn __init__(n: Node) { self.n = n; }
+      view fn meth(m: Node) -> int { return 2; }
+    }
+    struct S { n: Node; }
+    impl S {
+      fn __init__(n: Node) { self.n = n; }
+      view fn meth(m: Node) -> int { return 3; }
+    }
+    enum E { A(n: Node), B }
+    native fn put(fd: int, s: view Str) -> int = "pk_test_put";
+    fn f(n: Node) -> int { return 4; }
+    fn id<T>(x: T) -> T { return x; }
+    fn fib(n: int) -> int { return n; }
+    fn main() -> int {
+      n = Node("a");
+      c = C(n);
+      s = S(n);
+      e = E::A(n);
+      g = fn(m: Node) -> int { return 5; };
+      h = f;
+      return f(n) + c.virt(n) + c.meth(n) + s.meth(n) + g(n) + h(n) +
+             id(n).name.len() + fib(1) + put(1, "p");
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_NE(fullFunction(l.Text, "f")
+                .find("  local %n.0: box\n"
+                      "  %n.own.2 = owned %n.1\n"
+                      "  %n.lent.3 = not %n.own.2\n"
+                      "  if %n.lent.3 {\n"
+                      "    retain %n.1\n"
+                      "  }\n"
+                      "  store %n.0, %n.1\n"),
+            std::string::npos)
+      << l.Text;
+  using Names = std::vector<std::string>;
+  struct Case {
+    const char *Fn;
+    Names Params;
+  };
+  for (const Case &c : {
+           Case{"f", {"%n.1"}},
+           Case{"put", {"%s.2"}},
+           Case{"id<Node>", {"%x.1"}},
+           Case{"C.virt", {"%m.2"}},
+           Case{"C.meth", {"%m.2"}},
+           Case{"C.__init__", {"%n.2"}},
+           Case{"C", {"%n.1"}},
+           Case{"S.meth", {"%m.2"}},
+           Case{"S.__init__", {"%n.2"}},
+           Case{"S", {"%n.1"}},
+           Case{"Node.__init__", {"%name.2"}},
+           Case{"Node", {"%name.1"}},
+           Case{"fn.main.0.call", {"%m.2"}},
+           Case{"fn.ref.main.f.call", {"%2"}},
+           Case{"fib", {}},
+           Case{"main", {}},
+           Case{"C.destroy", {}},
+           Case{"Node.destroy", {}},
+       }) {
+    ASSERT_FALSE(fullFunction(l.Text, c.Fn).empty()) << c.Fn << "\n" << l.Text;
+    EXPECT_EQ(prologueOf(l.Text, c.Fn), c.Params) << c.Fn << "\n"
+                                                  << fullFunction(l.Text, c.Fn);
+  }
+  EXPECT_EQ(l.Text.find("fn @E"), std::string::npos) << l.Text;
+}
+
+// The 65th box parameter and those after it have no bit in the ownership
+// mask (docs/pir.md §3): they are always handed over, so they have no
+// prologue, and the copy of an argument for one is no `retain lend`.
+TEST(LoweringLend, BoxParametersPastTheSixtyFourthAreAlwaysHandedOver) {
+  std::string params, args;
+  for (int i = 0; i < 65; ++i) {
+    params += (i ? ", p" : "p") + std::to_string(i) + ": Str";
+    args += i ? ", s" : "s";
+  }
+  auto l = lower("fn wide(" + params + ") -> int { return 0; }\n" +
+                 "fn main() -> int { s: Str = \"s\"; return wide(" + args +
+                 "); }\n");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::vector<std::string> expected;
+  expected.reserve(64);
+  for (int i = 0; i < 64; ++i)
+    expected.push_back("%p" + std::to_string(i) + "." + std::to_string(i + 1));
+  EXPECT_EQ(prologueOf(l.Text, "wide"), expected) << l.Text;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, "retain lend %s."), 64u) << m;
+  EXPECT_EQ(argCopy(m, "call @wide(", 63), "lend") << m;
+  EXPECT_EQ(argCopy(m, "call @wide(", 64), "copy") << m;
+}
+
+// The copy the lowering makes only to hand a variable over to a lending
+// callee is a `retain lend` (docs/pir.md §6): at each call given `a` here,
+// the last too, which the moves at last use then make a move, the mark
+// going with its retain.  A temporary (`Node("tmp")`) is handed over as it
+// is.  `n.name` is a field read `println<Str>` may be lent: it is given
+// nothing that reaches an object, so it cannot reach the field.  The copy
+// for a store (`h.n = n`) is no argument's.  The lending pass clears the
+// marks the moves leave.
+TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
+  const char *const source = R"(import ::io;
+    class Node {
+      name: Str;
+      next: Node?;
+    }
+    fn show(n: Node) {
+      io::println(n.name);
+    }
+    fn keep(h: Holder, n: Node) {
+      h.n = n;
+    }
+    fn pass(n: Node) {
+      show(n);
+    }
+    class Holder {
+      n: Node?;
+    }
+    fn main() -> int {
+      a = Node("a", None);
+      show(a);
+      pass(a);
+      h = Holder(None);
+      keep(h, a);
+      show(Node("tmp", None));
+      show(a);
+      return 0;
+    }
+  )";
+  auto l = lower(source);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, "retain lend %a."), 4u) << m;
+  EXPECT_EQ(count(m, "retain lend %h."), 1u) << m;
+  EXPECT_EQ(count(m, "retain "), 5u) << m;
+  EXPECT_EQ(argCopy(m, "call @show(%call."), "") << m;
+  std::string f = function(l.Text, "show");
+  EXPECT_EQ(argCopy(f, "call @\"$::io::println<Str>\"("), "lend") << f;
+  f = function(l.Text, "pass");
+  EXPECT_EQ(argCopy(f, "call @show("), "lend") << f;
+  f = function(l.Text, "keep");
+  EXPECT_EQ(count(f, "retain lend "), 0u) << f;
+  EXPECT_EQ(count(f, "retain %n."), 1u) << f;
+
+  pir::Statistics stats;
+  auto mv = moved(lower(source), stats);
+  ASSERT_TRUE(mv.Ok) << mv.Error;
+  m = function(mv.Text, "main");
+  EXPECT_NE(m.find("  retain lend %a.4\n"
+                   "  call @show(%a.4)\n"),
+            std::string::npos)
+      << m;
+  EXPECT_NE(m.find("  retain lend %a.5\n"
+                   "  call @pass(%a.5)\n"),
+            std::string::npos)
+      << m;
+  EXPECT_NE(m.find("  retain lend %a.8\n"
+                   "  call @keep(%h.7, %a.8)\n"),
+            std::string::npos)
+      << m;
+  EXPECT_NE(m.find("  call @show(%call.11)\n"
+                   "  %a.12 = load %a.0\n"
+                   "  call @show(%a.12)\n"),
+            std::string::npos)
+      << m;
+  pir::PassManager lending(/*verifyEach=*/true);
+  lending.add(pir::createLendingPass());
+  ASSERT_TRUE(lending.run(mv.Program, stats));
+  EXPECT_EQ(stats.get("lending", "marks"), 4u); // main's three, show's
+  const std::string text = pir::toString(mv.Program);
+  EXPECT_EQ(text.find("retain lend "), std::string::npos) << text;
+  EXPECT_NE(function(text, "main").find("  retain %a.4\n"), std::string::npos)
+      << text;
+}
+
+// A box read from storage the function does not own, given to a lending
+// callee, is a copy the callee may be lent (`retain lend`) unless a call
+// made while it is in use may let go of it (docs/pir.md §7, "Reads a call
+// may replace"): the callee, or the call of a later argument, storing into
+// a slot of its class or of what holds it, or doing what is not known.  A
+// callee given nothing that reaches an object cannot reach the storage at
+// all.  A read of a variable the statement gives to an `inout` parameter
+// is not lent.  What a class's `toString` and `==` do is known in a closed
+// world, where no importer derives a class from Node.
+TEST(LoweringLend, AReadIsLentUnlessACallInUseMayLetItGo) {
+  const char *const source = R"(import ::io;
+    class Node { name: Str; }
+    class H { n: Node; s: Str; }
+    fn strs(m: Node, h: H) { h.s = "z"; }
+    fn nodes(m: Node, h: H) { h.n = Node("z"); }
+    fn clear(h: H) -> int { h.n = Node("c"); return 0; }
+    fn later(m: Node, k: int) -> int { return k; }
+    fn name(s: Str) -> int { return s.len(); }
+    fn swap(m: Node, h: inout H) { h = H(Node("w"), "w"); }
+    fn same(a: Node, h: H) -> bool { return a == h.n; }
+    fn main() -> int {
+      h = H(Node("a"), "s");
+      strs(h.n, h);
+      nodes(h.n, h);
+      k = later(h.n, clear(h));
+      k = k + name(h.n.name);
+      io::println(h.n.name);
+      io::println(h.n);
+      swap(h.n, h);
+      if same(h.n, h) { k = k + 1; }
+      return k;
+    }
+  )";
+  for (lowering::World world :
+       {lowering::World::Open, lowering::World::Closed}) {
+    const bool closed = world == lowering::World::Closed;
+    auto l = lower(source, "", lowering::Copies::Shared, world);
+    ASSERT_TRUE(l.Ok) << l.Error;
+    std::string m = function(l.Text, "main");
+    EXPECT_EQ(argCopy(m, "call @strs("), "lend") << m;
+    EXPECT_EQ(argCopy(m, "call @nodes("), "copy") << m;
+    EXPECT_EQ(argCopy(m, "call @later("), "copy") << m;
+    EXPECT_EQ(argCopy(m, "call @name("), "lend") << m;
+    EXPECT_EQ(argCopy(m, "call @\"$::io::println<Str>\"("), "lend") << m;
+    EXPECT_EQ(argCopy(m, "call @\"$::io::println<Node>\"("),
+              closed ? "lend" : "copy")
+        << m;
+    EXPECT_EQ(argCopy(m, "call @swap("), "copy") << m;
+    EXPECT_EQ(argCopy(m, "call @same("), closed ? "lend" : "copy") << m;
+    std::string f = function(l.Text, "same");
+    EXPECT_EQ(argCopy(f, "[2] ("), closed ? "lend" : "copy") << f;
+  }
+}
+
+// Each kind of call given the field its callee replaces (plan probe k1):
+// a function, a method through the vtable, a constructor, a struct's
+// method, a function value, an instance of a generic function and
+// `__super__`; none of them is lent the read, while each is the variable
+// holding the object.  A field read of a variable the statement gives to an
+// `inout` parameter (`f(x.name, x)`), or to a struct's method that may
+// change it (`st.set(st.n.name, st.n)`), is not lent either.
+TEST(LoweringLend, NoKindOfCallIsLentAReadItMayLetGo) {
+  auto l = lower(R"(import ::io;
+    class Node { name: Str; }
+    class Holder { n: Node; }
+    fn direct(m: Node, h: Holder) {
+      h.n = Node("z");
+      io::println(m.name);
+    }
+    class Base { view fn take(m: Node, h: Holder) { io::println("base"); } }
+    class Derived : Base {
+      view fn take(m: Node, h: Holder) { h.n = Node("z"); }
+    }
+    class Keeper { m: Node; }
+    impl Keeper {
+      fn __init__(m: Node, h: Holder) { h.n = Node("z"); self.m = m; }
+    }
+    class Parent { m: Node; }
+    impl Parent {
+      fn __init__(m: Node, h: Holder) { h.n = Node("z"); self.m = m; }
+    }
+    class Child : Parent {}
+    impl Child { fn __init__(h: Holder) { __super__(h.n, h); } }
+    struct S { k: int; }
+    impl S { view fn meth(m: Node, h: Holder) { h.n = Node("z"); } }
+    fn gen<T>(m: T, h: Holder) -> T {
+      h.n = Node("z");
+      return m;
+    }
+    fn f(s: Str, n: inout Node) { n = Node("other"); }
+    struct Q { n: Node; }
+    impl Q { fn set(s: Str, v: Node) { self.n = Node("z"); } }
+    fn main() -> int {
+      h = Holder(Node("a"));
+      direct(h.n, h);
+      b: Base = Derived();
+      b.take(h.n, h);
+      k = Keeper(h.n, h);
+      s = S(1);
+      s.meth(h.n, h);
+      g = fn(m: Node) -> Str { h.n = Node("z"); return m.name; };
+      io::println(g(h.n));
+      io::println(gen(h.n, h).name);
+      c = Child(h);
+      x = Node("x");
+      f(x.name, x);
+      st = Q(Node("n"));
+      st.set(st.n.name, st.n);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string m = function(l.Text, "main");
+  EXPECT_EQ(count(m, "retain %n."), 6u) << m;
+  EXPECT_EQ(count(m, "retain lend %n."), 0u) << m;
+  EXPECT_EQ(count(m, "retain lend %h."), 6u) << m;
+  std::string c = function(l.Text, "Child.__init__");
+  EXPECT_EQ(count(c, "retain %n."), 1u) << c;
+  EXPECT_EQ(count(c, "retain lend %n."), 0u) << c;
+  EXPECT_EQ(count(c, "retain lend %h."), 1u) << c;
+  EXPECT_NE(argCopy(m, "call @f("), "lend") << m;
+  EXPECT_NE(argCopy(m, "call @Q.set(", 1), "lend") << m;
+  EXPECT_NE(argCopy(m, "call @Q.set(", 2), "lend") << m;
 }

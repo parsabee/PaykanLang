@@ -370,7 +370,8 @@ private:
     ~ScopeGuard();
   };
 
-  /// Saves and restores all per-function emission state around one body.
+  /// Saves and restores all per-function emission state around one body,
+  /// which starts with the parameters' prologue (emitParamPrologue).
   struct FunctionStateGuard {
     ModuleLowering &L;
     pir::Builder::State SavedBuilder;
@@ -434,6 +435,22 @@ private:
   /// object it is in is (MemTemps).
   void noteBorrowedReads(ast::Stmt *s);
   struct BorrowedReads;
+  /// The variables noteHeldReads found the statement it last read may
+  /// change (given to an `inout` parameter, or the receiver of a struct
+  /// method that may change it): no read of their storage is lent.
+  std::unordered_set<std::string> HeldVars;
+  /// The box reads noteBorrowedReads found given to a lending callee
+  /// (docs/pir.md §3) as a box of their own, a copy the callee may be lent
+  /// instead (`retain lend`, docs/pir.md §6): of a field, an element, or
+  /// what an `inout` parameter names, in storage of no variable of HeldVars.
+  std::unordered_set<const ast::Expr *> LentReads;
+  /// The reads of LentReads in use where a call is made that may let go of
+  /// what they read: their copy is the caller's (not lent).
+  std::unordered_set<const ast::Expr *> NotLendable;
+  /// Whether the box read @p e, an argument of a lending callee (or the
+  /// argument `Str(e)` is), may be lent: in LentReads, of none of whose
+  /// calls in use it is NotLendable, and not held (isHeldRead).
+  bool isLentRead(const ast::Expr *e) const;
   bool isHeldRead(const ast::Expr *e) const { return HeldReads.count(e) > 0; }
   bool isStableRead(const ast::Expr *e) const {
     return StableReads.count(e) > 0 && !isHeldRead(e);
@@ -560,7 +577,10 @@ private:
   /// of a struct, `t.0`, `a[i]` of a fixed-size array), or null (a field of
   /// an object, a call's result).
   ast::Identifier *storageRoot(ast::Expr *place);
-  Val takeSharedOwnership(ast::Expr *expr, const Val &val);
+  /// @p val, the box of @p expr, as a reference of its own: a fresh +1 box
+  /// as it is, a borrowed one retained, by a `retain lend` when @p lend
+  /// and isLentRead(@p expr).
+  Val takeSharedOwnership(ast::Expr *expr, const Val &val, bool lend = false);
   Val promoteIntToFloat(const Val &v, ast::Type *targetTy);
   /// @p v, computed for the numeric type @p ty, in the type's canonical form
   /// (docs/design/sized-types.md): a narrow integer's low bits sign- or
@@ -598,17 +618,28 @@ private:
   /// (takeInoutResult).
   using InoutPlaces = std::vector<std::pair<Val, ast::Type *>>;
 
-  void emitRetain(const Val &shared) { B.retain(shared); }
+  void emitRetain(const Val &shared, bool lend = false) {
+    B.retain(shared, lend);
+  }
   void emitRelease(const Val &shared) { B.release(shared); }
   Val emitSharedNew(const Val &raw, std::string name = "shared");
   Val emitSharedGet(const Val &shared, std::string name = "obj");
   Val emitUnwrappedRef(ast::Expr *expr, std::string name = "ref.obj");
-  Val emitAsShared(ast::Expr *expr);
+  /// @p expr as a box of its own (a +1 one).  With @p lend, for a box
+  /// argument with a bit in its lending callee's ownership mask
+  /// (hasOwnershipBit), a copy of a variable that noteHeldReads does not
+  /// hold, or of a read of LentReads, is a `retain lend` (docs/pir.md §6).
+  Val emitAsShared(ast::Expr *expr, bool lend = false);
+  /// Whether the parameter @p param of a function of signature @p sig that
+  /// lends when @p lends says so (pir::lends, pir::lendsType) is a box with
+  /// a bit in its ownership mask (docs/pir.md §3).
+  static bool hasOwnershipBit(const pir::Signature &sig, bool lends,
+                              size_t param);
   /// @p arg's box for a native function to borrow: a variable's or a
   /// field's as it is, anything else a +1 box added to @p keep, which the
   /// caller releases after the call.
   Val emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep);
-  Val emitAsSharedRaw(ast::Expr *expr);
+  Val emitAsSharedRaw(ast::Expr *expr, bool lend);
 
   // -- String temporaries
 
@@ -1036,6 +1067,12 @@ private:
   /// number).
   void appendParamTypes(std::vector<pir::Type> &out, ast::Type *ty,
                         ast::ParamMode mode);
+  /// The start of the body of @p fn, when it lends (docs/pir.md §3): for
+  /// each box parameter %p with a bit in the ownership mask, `%p.own =
+  /// owned %p`, `%p.lent = not %p.own` and `if %p.lent { retain %p }`, so
+  /// that the body owns every parameter, as it did before the mask,
+  /// whether its caller handed it over or lent it.
+  void emitParamPrologue(const pir::Function &fn);
   /// Name @p fn's PIR parameters from @p first after @p params (a slice's
   /// second is `<name>.len`).
   static void nameParams(pir::Function &fn, size_t first,

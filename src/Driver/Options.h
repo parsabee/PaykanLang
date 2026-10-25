@@ -81,6 +81,11 @@ struct Options {
   /// --object=<file>[,<file>...] (repeatable): objects or archives defining
   /// the program's native functions (#198), linked by every native backend.
   std::vector<std::string> Objects;
+  /// --pir-skip=<pass>[,<pass>...] (repeatable, not in --help): the PIR
+  /// passes not to run, by name (docs/pir.md §12), to compare the code made
+  /// without them.  It implies --no-module-cache, so no cache entry keeps
+  /// code made without them, and no `.pkm` is written with it.
+  std::vector<std::string> SkipPasses;
   bool EmitPkm = false;        // --emit-pkm: write the module's .pkm, stop
   bool RebuildModules = false; // --rebuild-modules: ignore cache entries
   bool NoModuleCache = false;  // --no-module-cache: never read or write it

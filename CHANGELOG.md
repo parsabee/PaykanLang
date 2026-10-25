@@ -286,9 +286,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from it (docs/writing-a-backend.md); C code calling a runtime `equals` passes a mask;
   `.pkm` files, cache entries and plugins of 0.2.0 are not accepted.  Nothing is lent yet:
   every call hands every argument over, so programs run, print and free memory as they did,
-  with the same retains and releases (the corpus's `--emit-pir` differs from before only
-  in the runtime `equals` externs and a string `match`'s mask), and the generated code of
-  a function that takes no box (fib, the dispatch benchmark's `area` calls) is unchanged.
+  with the same retains and releases.  A function that takes a box starts with a prologue
+  that retains each parameter its caller lent (docs/pir.md §3), so its body owns it either
+  way, and the lowering marks the copies a callee could be lent instead (a variable's, or
+  a field's no call in use may let go of, docs/pir.md §7), which a new pass, `lending`,
+  counts (`--stats`: `lending marks`) and clears (docs/pir.md §12).  The corpus's
+  `--emit-pir` is what it was but for the prologues, the runtime `equals` externs and a
+  string `match`'s mask, the moves at last use and the reference-count elimination make
+  the same moves and removals in every program, and the generated code of a function that
+  takes no box (fib, the dispatch benchmark's `area` calls) is unchanged.
   Per-parameter conventions in the interface (`Sig.conv`, `nConventions`) are retired,
   always 0 (docs/design/pkm.md §3.5, §5.9).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive

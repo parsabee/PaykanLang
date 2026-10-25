@@ -1257,9 +1257,10 @@ TEST(Pkm, ModuleCodeKeepsWhatTheModuleAndItsImportersUse) {
 // The main module of a program knows every class derived from its classes
 // (docs/pir.md §7), so its copy of `HashMap<Str, Dog>.put` reads the map's
 // table in place across `_Table.put`, which lets go only of Dogs and
-// strings, by a stable load.  Written to a `.pkm` file, which a module that
-// derives a class holding anything from `Dog` may import, the same file
-// holds the table across the call.
+// strings, by a stable load: it retains nothing but its parameters when
+// they are lent (their prologue, docs/pir.md §3).  Written to a `.pkm`
+// file, which a module that derives a class holding anything from `Dog`
+// may import, the same file holds the table across the call.
 TEST(Pkm, AModuleFileAssumesNothingOfItsClassesSubclasses) {
   REQUIRE_BACKEND();
   fs::path dir =
@@ -1291,12 +1292,60 @@ TEST(Pkm, AModuleFileAssumesNothingOfItsClassesSubclasses) {
   const std::string module = put(code.out);
   ASSERT_FALSE(program.empty()) << pir.out;
   ASSERT_FALSE(module.empty()) << code.out;
-  EXPECT_TRUE(contains(program, "= ptr.load box, %self.addr.4 stable\n"))
+  EXPECT_TRUE(contains(program, "= ptr.load box, %self.addr.8 stable\n"))
       << program;
-  EXPECT_FALSE(contains(program, "retain ")) << program;
-  EXPECT_TRUE(contains(module, "= ptr.load box, %self.addr.4\n")) << module;
-  EXPECT_TRUE(contains(module, "retain %elem.5\n")) << module;
-  EXPECT_TRUE(contains(module, "release %elem.5\n")) << module;
+  size_t retains = 0;
+  for (size_t at = program.find("retain "); at != std::string::npos;
+       at = program.find("retain ", at + 1))
+    ++retains;
+  EXPECT_EQ(retains, 2u) << program;
+  EXPECT_TRUE(contains(program, "  if %k.lent.5 {\n    retain %k.2\n  }\n"))
+      << program;
+  EXPECT_TRUE(contains(program, "  if %v.lent.7 {\n    retain %v.3\n  }\n"))
+      << program;
+  EXPECT_TRUE(contains(module, "= ptr.load box, %self.addr.8\n")) << module;
+  EXPECT_TRUE(contains(module, "retain %elem.9\n")) << module;
+  EXPECT_TRUE(contains(module, "release %elem.9\n")) << module;
+  fs::remove_all(dir);
+}
+
+// A module's code, in a cache entry and in its `.pkm`, keeps no mark of the
+// copies the lowering made only to hand an argument over (`retain lend`,
+// docs/pir.md §6): the lending pass clears them before the code is kept.
+// Each copy is a plain retain there, whatever the importer's program does
+// with its own.
+TEST(Pkm, ModuleCodeKeepsNoLendMark) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_lend_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib.pkn",
+            "class Pair<T> {\n"
+            "  a: T;\n"
+            "  view fn first(x: T) -> int { return 1; }\n"
+            "  view fn both(x: T) -> int {\n"
+            "    return self.first(x) + self.first(x);\n"
+            "  }\n"
+            "}\n"
+            "fn make(s: Str) -> Pair<Str> { return Pair<Str>(s); }\n");
+  writeFile(dir / "main.pkn", "import lib;\n"
+                              "fn main() -> int {\n"
+                              "  p = lib::make(\"x\");\n"
+                              "  return p.both(\"y\");\n"
+                              "}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto ran = paykan("main.pkn");
+  EXPECT_EQ(ran.exitCode, 2) << ran.out;
+  ASSERT_EQ(paykan("--emit-pkm lib.pkn").exitCode, 0);
+  for (const char *file : {".paykan_cache/lib.pkm", "lib.pkm"}) {
+    auto code = paykan(std::string("pkm dump --section=code ") + file);
+    ASSERT_EQ(code.exitCode, 0) << code.out;
+    EXPECT_TRUE(contains(code.out, "shared fn @Pair<Str>.both(")) << code.out;
+    EXPECT_TRUE(contains(code.out, "  retain %x.6\n")) << code.out;
+    EXPECT_FALSE(contains(code.out, "retain lend")) << code.out;
+  }
   fs::remove_all(dir);
 }
 

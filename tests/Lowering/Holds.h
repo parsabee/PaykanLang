@@ -7,6 +7,7 @@
 
 #pragma once
 
+#include "paykan/pir/Lend.h"
 #include "paykan/pir/MoveAtLastUse.h"
 #include "paykan/pir/PIR.h"
 #include "paykan/pir/Pass.h"
@@ -122,12 +123,14 @@ private:
 };
 
 /// @p program, verified, through the code passes the driver runs on every
-/// program, verified after each: the moves at last use, then the
-/// reference-count elimination (docs/pir.md §12).  "" when every hold the
-/// moves leave keeps a retain after the elimination, else what failed.
+/// program, verified after each: the moves at last use, the lending pass,
+/// then the reference-count elimination (docs/pir.md §12).  "" when every
+/// hold the moves leave keeps a retain after the elimination, else what
+/// failed.
 inline std::string codePassesKeepHolds(pir::Program &program) {
   pir::PassManager moves(/*verifyEach=*/true);
   moves.add(pir::createMovesAtLastUsePass());
+  moves.add(pir::createLendingPass());
   if (Status s = moves.run(program); !s)
     return s.message();
   const Holds holds(program);

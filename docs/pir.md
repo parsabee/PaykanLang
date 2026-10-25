@@ -224,7 +224,21 @@ i64) -> i64` is the target of an `equals` slot of type `(obj, box) -> i64`.
 `destroy`, `toString` and `main` have no box parameter and take no mask.
 The lowering hands every argument over (each bit of every call's mask is
 set), so code without a `lent` or `owned(%o)` runs as it did before the mask
-existed.
+existed.  Each body it makes of a lending function starts, before anything
+else, with a *prologue* for each box parameter with a bit:
+
+```
+%p.own = owned %p
+%p.lent = not %p.own
+if %p.lent {
+  retain %p
+}
+```
+
+so the body owns each of its parameters whichever way the caller passed
+it: with the bit set, it is the body as it was before the mask; with it
+clear, the retain makes the reference the body lets go of, while the
+caller keeps its own.
 
 ## 4. Module-level items
 
@@ -600,8 +614,13 @@ CodeGen enforced, now in one place.
   whose arms call no code) takes none.  This is what a backend receives.
 * **Arguments** to user functions/methods, `__super__` and the virtual `equals`
   are owned (+1) boxes that the callee releases on exit (callee-consumes).
-  Arguments to runtime builtins are borrowed; temporaries are released after the
-  call.
+  The copy made only to hand a box over to a parameter with a bit in its
+  callee's ownership mask (§3) is a `retain lend` (§6) when it is of a
+  variable no later part of the statement may replace, or of a read of
+  storage the function does not own that no call in use may let go of
+  ("Reads a call may replace", below); the lending pass clears the mark
+  (§12).  A temporary is handed over as it is.  Arguments to runtime
+  builtins are borrowed; temporaries are released after the call.
 * **Returns** of reference types are +1 boxes.  Runtime methods returning a
   reference also return a +1 box.
 * **Fixed-size arrays of references** own one reference per element slot,
@@ -857,6 +876,21 @@ CodeGen enforced, now in one place.
   variable or a value parameter is never stable, since the variable may be
   what keeps its object alive.  The mark is the lowering's promise for the
   statement only, not a reference of the load's own.
+
+  A box read of storage the function does not own (a field's, an
+  element's, what an `inout` name names) given to a lending callee (§3)
+  as a box of its own is the argument's copy, a reference of the caller's
+  own, which the callee could be lent instead: it is in use from its
+  evaluation until the call returns, through the later arguments.  Every
+  call made in that span, the callee's included, is asked what a read of
+  storage the function never hands on is asked, whatever the read is
+  rooted in: whether it may let go of a reference of the read slot's
+  class (a field stored only at construction never), or does what is not
+  known.  When none may, and the statement neither gives the variable the
+  read is rooted in to an `inout` parameter nor calls a method of its
+  struct that may change it, the copy is a `retain lend` (§6); it takes
+  nothing from the holds above, which stay what they are.  A callee given
+  nothing that reaches an object (`println<Str>(h.name)`) is no such call.
 
   The lowering follows the order in which a statement evaluates its
   parts, and a read in use where a call that may replace it is made takes
@@ -1205,6 +1239,7 @@ paykan pass stats:
   moves-at-last-use transfers : 2
   moves-at-last-use retains removed : 2
   moves-at-last-use releases removed : 2
+  lending marks : 2
   rc-elimination retains removed : 1
   rc-elimination releases removed : 1
 Hello, world!
@@ -1214,7 +1249,8 @@ Hello, world!
 hands its two parameters to the fields at their last use, and matches a
 field, `match p.next { q: Person { greet(q.name); } None { greet(p.name); }
 }`, where the binding `q` needs no reference of its own inside the
-match's.  The counters are those of the passes this run ran, so a module
+match's; the copies of `q.name` and `p.name` for `greet` are the
+lowering's two `retain lend` marks.  The counters are those of the passes this run ran, so a module
 built from its source in this run counts, and one loaded from its `.pkm`
 does not.)
 
@@ -1429,6 +1465,14 @@ is made of moved code too.  A module's `CODE` copies of instantiations go
 through it again in the program that imports them, which leaves them as
 they are: on its own output the pass changes nothing.
 
+**The lending pass** (`include/paykan/pir/Lend.h`, `lend` /
+`createLendingPass`) counts the `retain lend` marks (§6) the moves at last
+use leave (`lending marks`) and clears them: a mark on a copy the moves
+made a move went with its retain, and each left is a plain `retain` from
+then on.  The driver runs it on every program right after the moves at
+last use, and on a module's code before its `.pkm` is written, so no
+backend, no `.pkm` and no cache entry sees a mark.
+
 **The reference-count elimination pass** (`include/paykan/pir/RCElimination.h`,
 `eliminateRedundantRC` / `createRCEliminationPass`) removes a `retain`
 together with the releases that end the reference it made, where something
@@ -1537,9 +1581,9 @@ than before: every object is destroyed where it was, what its destruction
 does happens then, and a `weak` reference reads what it read.  No release
 is added or moved.
 
-The driver runs it on every program right after the moves at last use, and
-on a module's code before its `.pkm` is written, after the moves; on its
-own output, and after the moves again, it changes nothing.
+The driver runs it on every program right after the lending pass, and on
+a module's code before its `.pkm` is written, after the lending pass; on
+its own output, and after the moves again, it changes nothing.
 
 **What is left is cheap.**  Each backend has the fast path of a `retain`
 and a `release` inline: a null box is skipped, a retain of a count below
