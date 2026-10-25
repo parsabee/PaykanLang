@@ -886,6 +886,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cases (docs/design/mlir-backend.md, "The shared lowering"); the PIR such a match lowers to
   was already valid.  `samples/codegen/70_match_int64_max.pkn` puts the arm first, second,
   last and alone, with a default arm and without one.
+- The two native-function errors that list what crosses into C left out the sized numeric
+  types, which cross as `int` and `float` do: `native fn f(s: Str)` said `only int, float,
+  bool, char and an enum without fields cross into C by value`, and `native fn g(a: A?)`
+  said `cannot cross into C (int, float, bool, char, an enum without fields, Str and Obj
+  can, ...)`.  Both now name `a sized numeric type` after `char`
+  (docs/language/03-functions.md, "Native Functions").
 
 ## [0.2.0] - 2026-10-20
 

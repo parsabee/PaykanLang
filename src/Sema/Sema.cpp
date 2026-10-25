@@ -3992,9 +3992,10 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     error(node->getLocation(),
           "native function '" + node->getName() + "': " + what + " '" +
               typeName(t) +
-              "' cannot cross into C (int, float, bool, char, an enum "
-              "without fields, Str and Obj can, Str? and Obj? as a result, "
-              "and any type where a generic native function says 'T')");
+              "' cannot cross into C (int, float, bool, char, a sized "
+              "numeric type, an enum without fields, Str and Obj can, Str? "
+              "and Obj? as a result, and any type where a generic native "
+              "function says 'T')");
     ok = false;
   };
   for (size_t i = 0; i < paramTypes.size(); ++i)
@@ -4051,8 +4052,8 @@ bool Sema::checkNativeParamModes(const ast::FuncDecl *node,
           "native function '" + node->getName() + "': parameter '" +
               p.getName() + "' must be 'view' or 'inout' ('" + p.getName() +
               ": view " + ty +
-              "'); only int, float, bool, char and an enum without fields "
-              "cross into C by value");
+              "'); only int, float, bool, char, a sized numeric type and "
+              "an enum without fields cross into C by value");
     ok = false;
   }
   return ok;

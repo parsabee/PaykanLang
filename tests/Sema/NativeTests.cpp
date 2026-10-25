@@ -87,8 +87,29 @@ TEST(Native, OnlyScalarsCrossByValue) {
   r = semaCheck("native fn f(s: Str) = \"pk_f\";\n"
                 "fn main() -> int { return 0; }");
   EXPECT_NE(r.Diagnostics.find("('s: view Str'); only int, float, bool, "
-                               "char and an enum without fields cross into "
-                               "C by value"),
+                               "char, a sized numeric type and an enum "
+                               "without fields cross into C by value"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+// A sized numeric type crosses by value, as its 8-byte slot, and both
+// messages that list what crosses say so.
+TEST(Native, SizedTypesCrossByValue) {
+  auto r = semaCheck(R"(
+    native fn f(a: u8, b: i32, c: unsigned, d: f32) -> u16 = "pk_f";
+    fn main() -> int { return int(f(1, 2, 3, 4.0)); }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  r = semaCheck("class A {}\n"
+                "native fn g(a: A?) -> int = \"pk_g\";\n"
+                "fn main() -> int { return 0; }");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("parameter 'a' of type 'A?' cannot cross into "
+                               "C (int, float, bool, char, a sized numeric "
+                               "type, an enum without fields, Str and Obj "
+                               "can,"),
             std::string::npos)
       << r.Diagnostics;
 }

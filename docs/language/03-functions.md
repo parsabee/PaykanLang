@@ -972,7 +972,8 @@ without fields cross into C by value.  Any other parameter is a `view`,
 which C borrows for the call, or an `inout`, which C changes in place: a
 call never shares a reference with C, so it costs no reference counting
 (`parameter 's' must be 'view' or 'inout' ('s: view Str'); only int, float,
-bool, char and an enum without fields cross into C by value`).  Only these
+bool, char, a sized numeric type and an enum without fields cross into C by
+value`).  Only these
 types cross, with the runtime's own convention (an enum whose variants have
 fields, [a tagged union](07-enums.md#variants-with-fields), does not):
 
