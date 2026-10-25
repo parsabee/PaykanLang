@@ -851,6 +851,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lists, so it took 600 nested blocks or 600 nested lambdas, which no frontend parses.  It
   now counts the levels the frontends count, in the AST, and rejects one more with the same
   message (docs/plugins/ast-format.md section 3).
+- Recovering from `nesting too deep` in nested arrays of arrays took time quadratic in their
+  depth: `[[[...0; 1]; 1]; 1]` 20000 deep took 38 seconds and reported 20001 errors (and
+  parentheses, subscripts and calls inside such arrays one minute), each printing the
+  whole line, as the statement's recovery stopped at the `;` of each `[v; n]` left open.
+  The brackets, parentheses or arguments one level too deep are now skipped whole, through
+  their closer, as a block one level too deep is: the limit is the only error, in 0.1
+  seconds, and the statement after them is parsed (docs/grammar.md section 9).
 
 ## [0.2.0] - 2026-10-20
 

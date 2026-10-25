@@ -573,9 +573,11 @@ on the way), at the next class, struct, `impl` or trait member (`fn`,
 `view fn`, `static`, `;`, `}`) and at the next top-level declaration
 (`import`, `class`, `struct`, `enum`, `trait`, `impl`, `fn`, `view fn`,
 `native`), so one file can
-report several independent errors. Another frontend may recover less (for
-example only at `;` inside a block). Any error makes the parse fail; a file
-with errors is never handed to Sema.
+report several independent errors. Past the nesting limit it skips the
+block, the brackets or the parentheses one level too deep whole, through
+their closer, so the limit is the only error the construct gives. Another
+frontend may recover less (for example only at `;` inside a block). Any
+error makes the parse fail; a file with errors is never handed to Sema.
 
 Nesting deeper than 512 levels is rejected with `nesting too deep (more
 than 512 levels)` by every frontend, so that pathological input can

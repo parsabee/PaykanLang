@@ -413,6 +413,27 @@ void Parser::skipPastMatchingBrace() {
   }
 }
 
+void Parser::skipToMatchingCloser() {
+  for (unsigned depth = 0; !at(Tok::Eof); consume()) {
+    switch (kind()) {
+    case Tok::LParen:
+    case Tok::LBracket:
+    case Tok::LBrace:
+      ++depth;
+      break;
+    case Tok::RParen:
+    case Tok::RBracket:
+    case Tok::RBrace:
+      if (depth == 0)
+        return;
+      --depth;
+      break;
+    default:
+      break;
+    }
+  }
+}
+
 void Parser::skipToStatementBoundary() {
   unsigned depth = 0;
   for (;;) {
@@ -2331,8 +2352,14 @@ Expr *Parser::parsePostfix() {
         e = Ctx.make<MemberAccessExpr>(span(start), e, name);
       }
     } else if (at(Tok::LBracket)) {
-      if (!enterNesting())
-        return nullptr;
+      if (!enterNesting()) {
+        // As in an argument list: the subscript is skipped whole.
+        consume();
+        skipToMatchingCloser();
+        if (!expect(Tok::RBracket, "to close the subscript"))
+          return nullptr;
+        continue;
+      }
       consume();
       Expr *index = parseExpression();
       leaveNesting();
@@ -2349,8 +2376,15 @@ Expr *Parser::parsePostfix() {
 bool Parser::parseArgumentList(Tok closer, std::vector<Expr *> &out) {
   if (at(closer))
     return true;
-  if (!enterNesting())
-    return false;
+  if (!enterNesting()) {
+    // As in a block (#132): the rest of the list is not parsed.  Skip it
+    // whole, up to its closer, and hand back no elements: the enclosing
+    // expression then resumes after it, so the limit is the only error.  The
+    // statement's own recovery would stop at the first `;` in it, the count
+    // of an array `[v; n]`, and report each enclosing level's rest (#58).
+    skipToMatchingCloser();
+    return true;
+  }
   bool ok = true;
   do {
     Expr *arg = parseExpression();
@@ -2471,8 +2505,14 @@ Expr *Parser::parsePrimary() {
 
   case Tok::LParen: {
     consume();
-    if (!enterNesting())
-      return nullptr;
+    if (!enterNesting()) {
+      // As in an argument list: skip to the `)`, and a `None` stands for
+      // the expression (the parse has failed: nothing reads it).
+      skipToMatchingCloser();
+      if (!expect(Tok::RParen, "to close the parenthesised expression"))
+        return nullptr;
+      return Ctx.make<NoneLiteral>(span(start));
+    }
     Expr *first = parseExpression();
     if (!first) {
       leaveNesting();

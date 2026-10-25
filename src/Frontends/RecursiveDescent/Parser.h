@@ -107,6 +107,10 @@ private:
   void skipToStatementBoundary();
   /// Inside a block whose '{' was consumed: skip through its matching '}'.
   void skipPastMatchingBrace();
+  /// Inside brackets whose opener was consumed: skip to the matching closer,
+  /// balancing `()`, `[]` and `{}` on the way.  The closer (or an unmatched
+  /// one, or the end of the file) is left as the current token.
+  void skipToMatchingCloser();
 
   // -- Declarations
   ast::ImportDecl *parseImportDecl();

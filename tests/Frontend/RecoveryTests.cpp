@@ -8,8 +8,10 @@
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace paykan::frontend::recursive_descent;
@@ -153,6 +155,40 @@ TEST(Recovery, DeepNestingIsRejectedNotCrashed) {
   auto r = parse(src);
   EXPECT_GE(r.Errors, 1u);
   EXPECT_NE(r.Text.find("nesting too deep"), std::string::npos);
+}
+
+// Past the limit, nested brackets are skipped whole, through the closer
+// matching the one too many, so the limit is the only error and the
+// statement after them is parsed (#58).  The statement's own recovery used
+// to stop at the first `;` in them, the count of an array `[v; n]`, and
+// each of 20000 levels was an error of its own: 38 seconds, each error
+// printing the whole line.
+TEST(Recovery, NestingTooDeepInBracketsIsTheOnlyError) {
+  const int n = 20000;
+  const std::vector<std::pair<std::string, std::string>> levels = {
+      {"[", "; 1]"},    // an array of arrays
+      {"[(", "); 1]"},  // parentheses
+      {"[a[", "]; 1]"}, // subscripts
+      {"[f(", "); 1]"}, // calls
+  };
+  for (const auto &[open, close] : levels) {
+    std::string src = "fn main() -> int { x = ";
+    for (int i = 0; i < n; ++i)
+      src += open;
+    src += "0";
+    for (int i = 0; i < n; ++i)
+      src += close;
+    src += ";\ny = ; return 0; }\n";
+    const auto start = std::chrono::steady_clock::now();
+    auto r = parse(src);
+    const auto took = std::chrono::steady_clock::now() - start;
+    EXPECT_EQ(r.Errors, 2u) << open;
+    ASSERT_FALSE(r.Diags.empty()) << open;
+    EXPECT_EQ(r.Diags[0].Message, "nesting too deep (more than 512 levels)")
+        << open;
+    EXPECT_EQ(errorLines(r), (std::vector<size_t>{1, 2})) << open;
+    EXPECT_LT(took, std::chrono::seconds(5)) << open;
+  }
 }
 
 TEST(Recovery, NoDiagEngineFallsBackToStderr) {
