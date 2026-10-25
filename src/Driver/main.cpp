@@ -21,6 +21,7 @@
 #include "paykan/pir/Binary.h"
 #include "paykan/pir/DeadCode.h"
 #include "paykan/pir/MoveAtLastUse.h"
+#include "paykan/pir/RCElimination.h"
 #include "paykan/pir/Pass.h"
 #include "paykan/pir/Printer.h"
 #include "paykan/pir/Verifier.h"
@@ -68,6 +69,7 @@ paykan::pir::Module copyOf(const paykan::pir::Module &m) {
 /// too.
 void addCodePasses(paykan::pir::PassManager &passes) {
   passes.add(paykan::pir::createMovesAtLastUsePass());
+  passes.add(paykan::pir::createRCEliminationPass());
 }
 
 /// Whether the program is verified after each PIR pass, so that a pass

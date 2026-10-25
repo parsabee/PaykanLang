@@ -249,6 +249,10 @@ inline constexpr const char *kPaykanWeakLoad = "Paykan_weak_load";
 inline constexpr const char *kPaykanWeakRelease = "Paykan_weak_release";
 inline constexpr const char *kPaykanRetain = "Paykan_retain";
 inline constexpr const char *kPaykanRelease = "Paykan_release";
+// Their fast paths, Runtime.h's static inline functions (not ABI symbols):
+// what the C of --emit-c calls instead.
+inline constexpr const char *kPaykanRetainInline = "Paykan_retain_inline";
+inline constexpr const char *kPaykanReleaseInline = "Paykan_release_inline";
 
 // Tracking heap allocator.  Generated code allocates object structs through
 // kPaykanMalloc too, so its allocations are counted with the runtime's own

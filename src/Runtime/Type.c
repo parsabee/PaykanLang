@@ -21,12 +21,12 @@ static PaykanShared *type_ref(const PaykanType *type, const void *value,
 void PaykanType_copy(const PaykanType *type, void *dst, const void *src) {
   memcpy(dst, src, (size_t)type->size);
   for (int64_t k = 0; k < type->nrefs; ++k)
-    Paykan_retain(type_ref(type, dst, k));
+    Paykan_retain_inline(type_ref(type, dst, k));
 }
 
 void PaykanType_drop(const PaykanType *type, void *value) {
   for (int64_t k = 0; k < type->nrefs; ++k)
-    Paykan_release(type_ref(type, value, k));
+    Paykan_release_inline(type_ref(type, value, k));
 }
 
 int PaykanType_isUnset(const PaykanType *type, const void *value) {
