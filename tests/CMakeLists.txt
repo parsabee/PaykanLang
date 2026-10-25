@@ -616,7 +616,10 @@ endif()
 # programs, against the standard library the build staged next to `paykan`
 # (stdlib/CMakeLists.txt, scripts/stdlib_tests.py), at -O0 and -O2 on every
 # path: `paykan run`, `paykan build` and the C `--emit-c` prints, compiled
-# with the runtime's sources by the C compiler of this build (stdlib).
+# with the runtime's sources by `cc`, as the driver tests' C path is.  Not
+# by this build's C compiler: that can be one only CMake drives right (the
+# coverage job's prebuilt clang finds the macOS SDK's headers only through
+# the -isysroot CMake adds) (stdlib).
 paykan_test_suite(stdlib PAYKAN_TEST_SUITE_stdlib)
 if(PAYKAN_TEST_SUITE_stdlib AND PAYKAN_SAMPLES_BACKENDS)
     if(TARGET paykan_stdlib)
@@ -626,7 +629,7 @@ if(PAYKAN_TEST_SUITE_stdlib AND PAYKAN_SAMPLES_BACKENDS)
                     -O 0 -O 2
                     --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
         paykan_add_python_test(StdlibTestsC stdlib_tests.py
-                    --cc ${CMAKE_C_COMPILER} -O 0 -O 2
+                    --cc cc -O 0 -O 2
                     --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     else()
         message(STATUS "The stdlib tests are skipped: the build compiles no "
