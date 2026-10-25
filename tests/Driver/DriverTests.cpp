@@ -1531,6 +1531,44 @@ TEST(Driver, RunForwardsArgumentsAndTracksTheHeap) {
   EXPECT_NE(out.find("live blocks       : 0"), std::string::npos) << out;
 }
 
+// The heap statistics come after the program's own output, also when stdout
+// is a pipe (fully buffered) and stderr is the same pipe: the runtime flushes
+// stdout before printing them.  Checked with `paykan run --track-heap` and
+// with a built program run with PAYKAN_TRACK_HEAP, at -O0 and -O2.
+TEST(Driver, HeapStatisticsFollowTheProgramsOutputInAPipe) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_heap_order_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "hello.pkn").string();
+  std::ofstream(src)
+      << "import ::io; fn main() -> int { io::println(\"Hello, world!\"); "
+         "return 0; }";
+  auto expectOrder = [](const std::string &what, const CmdResult &r) {
+    EXPECT_EQ(r.exitCode, 0) << what << ": " << r.out;
+    size_t hello = r.out.find("Hello, world!\n");
+    size_t stats = r.out.find("paykan heap stats:");
+    ASSERT_NE(hello, std::string::npos) << what << ": " << r.out;
+    ASSERT_NE(stats, std::string::npos) << what << ": " << r.out;
+    EXPECT_LT(hello, stats) << what << ": " << r.out;
+    EXPECT_NE(r.out.find("live blocks       : 0"), std::string::npos)
+        << what << ": " << r.out;
+  };
+  auto runAndBuild = [&](const std::string &opt) {
+    expectOrder("run " + opt, run(paykanRun() + " " + opt + " --track-heap " +
+                                  src + " 2>&1 | cat"));
+    auto exe = (dir / ("hello" + opt)).string();
+    auto [rc, out] =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    ASSERT_EQ(rc, 0) << opt << ": " << out;
+    expectOrder("build " + opt,
+                run("PAYKAN_TRACK_HEAP=1 " + exe + " 2>&1 | cat"));
+  };
+  runAndBuild("-O0");
+  runAndBuild("-O2");
+  std::filesystem::remove_all(dir);
+}
+
 // Reproducible output (#102): modules are named by their canonical module
 // names, so nothing the compiler produces depends on where the sources live
 // or on the directory it runs in.

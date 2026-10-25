@@ -781,7 +781,8 @@ int64_t Paykan_heap_live_bytes(void);
 int64_t Paykan_heap_total_reallocs(void);
 
 /// Print the current heap statistics to stderr (a leak warning is appended if
-/// any blocks remain live).  If tracking is disabled, prints a notice instead.
+/// any blocks remain live), after flushing stdout, so that they follow what
+/// the program printed.  If tracking is disabled, prints a notice instead.
 void Paykan_heap_dump(void);
 
 // Every object struct starts with PaykanObject's header (the vtable, then the

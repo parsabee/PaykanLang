@@ -756,6 +756,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dies right after the call returns instead of during it: a later death, only in a program
   that used freed memory.  Each reference element of a tuple, struct or tagged union
   compared or printed costs one retain and one release more.
+- The heap statistics of `paykan run --track-heap`, and of a built program run with
+  `PAYKAN_TRACK_HEAP` set, came before the program's own output when standard output was a
+  pipe or a file that standard error shared (`paykan run --track-heap hello.pkn 2>&1 | cat`
+  printed `paykan heap stats:` first).  The runtime now flushes standard output before it
+  prints them (`Paykan_heap_dump`), on all three paths.
 
 ## [0.2.0] - 2026-10-20
 
