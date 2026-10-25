@@ -422,8 +422,9 @@ private:
                  const std::string &what) {
     if (From != Origin::Frontend || isName(s, kind))
       return true;
+    // Quoted as the format writes it: a plugin's name can hold any byte.
     fail(at, "expected " + std::string(nameKindText(kind)) + ": " + what +
-                 ", not \"" + s + "\"");
+                 ", not " + quote(s));
     return false;
   }
 

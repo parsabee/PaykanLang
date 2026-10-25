@@ -55,6 +55,11 @@ inline constexpr unsigned kMaxDepth = 4112;
 /// than kMaxDepth lists, which read() would not accept.
 bool write(const TranslationUnit &unit, std::ostream &os, std::string &error);
 
+/// @p s as the format writes a string: in double quotes, with `\"`, `\\`,
+/// `\n`, `\t`, `\r`, and `\xHH` for every other byte outside printable
+/// ASCII.
+std::string quote(std::string_view s);
+
 /// Where and why read() failed.
 struct ReadError {
   /// 1-based position in the text (0 when unknown).

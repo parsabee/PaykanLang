@@ -1152,6 +1152,9 @@ TEST(ASTInterchange, NamesAreTheGrammars) {
        "expected an identifier: the variable's name, not \"_\""},
       {fn + "(decl (var \"1x\" _ (int 1)))))))",
        "expected an identifier: the variable's name, not \"1x\""},
+      // Quoted as the format writes it, not with the raw bytes.
+      {fn + "(decl (var \"K\\x00z\\n\\\"\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"K\\x00z\\n\\\"\""},
       {fn + "(assign (ident \"io::x\") (int 3))))))",
        "expected an identifier: the name, not \"io::x\""},
       {fn + "(destructure (targets (target \"io::a\" _) (target \"b\" _)) "

@@ -935,7 +935,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a call of `"$::result::Result::Ok"` named what only the compiler's renamed templates
   name.  It now rejects each, with its position (`an enum needs at least one variant`, `a
   match needs at least one arm`, `(wildcard-arm ...) has no binding: its binding is ""`,
-  `expected an identifier: the variable's name, not "a b"`): a name is an identifier, not a
+  `expected an identifier: the variable's name, not "a b"`, the name quoted as the format
+  writes a string, so a NUL in it prints as `\x00`): a name is an identifier, not a
   keyword or `_`, and a qualified one only where the grammar writes a module path (a
   callee, an enum, a type, a superclass, an `impl`'s type, an import's base)
   (docs/plugins/ast-format.md sections 2 and 3).  The grammar's keywords are
