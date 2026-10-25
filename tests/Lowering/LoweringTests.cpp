@@ -5,6 +5,7 @@
 // produce (docs/pir.md §7).  The programs' behaviour is covered by the
 // CodeGen suite, run on the mlir backend.
 
+#include "Lowering/Holds.h"
 #include "ModuleName.h"
 #include "TestUtils.h"
 #include "paykan/lowering/Lowering.h"
@@ -35,7 +36,8 @@ struct Lowered {
 
 /// Parse, check, lower, verify and print @p source (@p projectRoot for
 /// imports), the instantiations of other modules' templates as @p copies
-/// says, the main module knowing what @p world says.
+/// says, the main module knowing what @p world says; and check that the
+/// code passes keep every hold of what it printed.
 Lowered lower(const std::string &source, const std::string &projectRoot = "",
               lowering::Copies copies = lowering::Copies::Shared,
               lowering::World world = lowering::World::Open) {
@@ -67,6 +69,18 @@ Lowered lower(const std::string &source, const std::string &projectRoot = "",
     return l;
   }
   l.Text = pir::toString(l.Program);
+  // What the driver runs next, the code passes (docs/pir.md §12), on a
+  // copy: what they make verifies, and every hold keeps a retain.
+  pir::ParseError perr;
+  auto copy = pir::parseProgram(l.Text, perr);
+  if (!copy) {
+    l.Error = "printed PIR does not parse: " + perr.str();
+    return l;
+  }
+  if (std::string e = codePassesKeepHolds(*copy); !e.empty()) {
+    l.Error = "code passes: " + e + "\n" + l.Text;
+    return l;
+  }
   l.Ok = true;
   return l;
 }

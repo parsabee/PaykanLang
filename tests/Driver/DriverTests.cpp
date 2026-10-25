@@ -1054,6 +1054,37 @@ TEST(Driver, StatsCountTheMovesAtLastUse) {
       << lib.out;
 }
 
+// A match on a field whose arms call nothing: the reference-count
+// elimination removes its subject's retain and its binding's, with their
+// releases on every way out (docs/pir.md §12), in a program and in a
+// module's code.
+TEST(Driver, StatsCountTheReferenceCountElimination) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("class N { n: int; next: N?; }\n"
+                      "fn sum(x: N) -> int {\n"
+                      "  match x.next {\n"
+                      "    m: N { return x.n + m.n; }\n"
+                      "    None { return x.n; }\n"
+                      "  }\n"
+                      "}\n"
+                      "fn main() -> int { return sum(N(1, N(2, None))); }\n");
+  auto [rc, out] = run(paykanRun() + " --stats " + src + " 2>&1");
+  EXPECT_EQ(rc, 3) << out;
+  EXPECT_NE(out.find("  rc-elimination retains removed : 2\n"
+                     "  rc-elimination releases removed : 4\n"),
+            std::string::npos)
+      << out;
+  std::string pkm = src + ".pkm";
+  auto lib = run(std::string(kPaykan) + " --no-module-cache --stats " +
+                 "--emit-pkm -o " + pkm + " " + src + " 2>&1");
+  std::filesystem::remove(src);
+  std::filesystem::remove(pkm);
+  EXPECT_EQ(lib.exitCode, 0) << lib.out;
+  EXPECT_NE(lib.out.find("  rc-elimination retains removed : 2\n"),
+            std::string::npos)
+      << lib.out;
+}
+
 TEST(Driver, EmitCPrintsCSource) {
   REQUIRE_BACKEND();
   auto src = writeTmp("class P { x: int; }\n"

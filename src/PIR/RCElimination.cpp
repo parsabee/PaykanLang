@@ -5,12 +5,13 @@
 //
 // The references a function makes are counted by the value they were made
 // on, its *tokens*: `retain %v` makes one on %v, and a value made with one
-// (a call's box, `weak.load`, `box`, a box parameter) has one.  A token ends
-// at `release %v`, or where %v is handed on: a call's argument, a store
-// into a field, into memory or into a local that owns what it holds, `ret`.
-// A box local owns what is stored into it unless every load of it only
-// borrows (a *borrowing* local: what the pass leaves where it removed a
-// local's retain, whose releases went with it).
+// (a call's box, `weak.load`, `box`, a box parameter) has one; a field's or
+// an element's read has none, `stable` or not.  A token ends at `release
+// %v`, or where %v is handed on: a call's argument, a store into a field,
+// into memory or into a local that owns what it holds, `ret`.  A box local
+// owns what is stored into it unless every load of it only borrows (a
+// *borrowing* local: what the pass leaves where it removed a local's
+// retain, whose releases went with it).
 //
 // Each retain is a candidate, the later and deeper first, so that a pair
 // nested in another goes before the other is judged.  One walk over the
@@ -63,19 +64,19 @@ bool inertCall(std::string_view callee) {
     return false;
   callee.remove_prefix(kRuntimePrefix.size());
   static const std::unordered_set<std::string_view> inert = {
-      names::kPaykanStringNew,        names::kPaykanStringConcat,
-      names::kPaykanStringCharAt,     names::kPaykanStringAt,
-      names::kPaykanStringFromInt,    names::kPaykanStringFromUint,
-      names::kPaykanStringFromFloat,  names::kPaykanStringFromBool,
-      names::kPaykanStringFromChar,   names::kPaykanStringParseInt,
-      names::kPaykanStringParseUint,  names::kPaykanStringParseFloat,
-      names::kPaykanStringParseBool,  names::kPaykanStringLength,
-      names::kPaykanStringToString,   names::kPaykanStringHash,
-      names::kPaykanIntHash,          names::kPaykanDispose,
-      names::kPaykanMalloc,           names::kPaykanRoundF16,
-      names::kPaykanPanicDivByZero,   names::kPaykanPanicDivOverflow,
-      names::kPaykanPanicFloatToInt,  names::kPaykanPanicFloatToType,
-      names::kPaykanPanicIntToChar,   names::kPaykanPanicIndex,
+      names::kPaykanStringNew,       names::kPaykanStringConcat,
+      names::kPaykanStringCharAt,    names::kPaykanStringAt,
+      names::kPaykanStringFromInt,   names::kPaykanStringFromUint,
+      names::kPaykanStringFromFloat, names::kPaykanStringFromBool,
+      names::kPaykanStringFromChar,  names::kPaykanStringParseInt,
+      names::kPaykanStringParseUint, names::kPaykanStringParseFloat,
+      names::kPaykanStringParseBool, names::kPaykanStringLength,
+      names::kPaykanStringToString,  names::kPaykanStringHash,
+      names::kPaykanIntHash,         names::kPaykanDispose,
+      names::kPaykanMalloc,          names::kPaykanRoundF16,
+      names::kPaykanPanicDivByZero,  names::kPaykanPanicDivOverflow,
+      names::kPaykanPanicFloatToInt, names::kPaykanPanicFloatToType,
+      names::kPaykanPanicIntToChar,  names::kPaykanPanicIndex,
       names::kPaykanPanicForStep,
   };
   return inert.contains(callee);
@@ -132,10 +133,18 @@ Use useOf(const Instr &in) {
 
 /// What a load of a box local does to the local's reference.
 enum class LoadKind : uint8_t {
-  Borrow,  // nothing: what it hands on or releases it retained first
+  Borrow,  // nothing: what it releases it retained first, and it hands
+           // nothing on
+  Copy,    // nothing, but it hands on what it retained: a copy, which the
+           // moves at last use may turn into a hand-off of the reference
   Release, // `%t = load %x` whose one use is `release %t`: the release
   Taking,  // may release or hand on the local's reference
 };
+
+/// Whether a load of @p kind leaves the local's reference where it is.
+bool leavesReference(LoadKind kind) {
+  return kind == LoadKind::Borrow || kind == LoadKind::Copy;
+}
 
 /// What one sweep knows of a function: where each statement is, where
 /// each value is defined and used, and what each box local holds.
@@ -167,7 +176,7 @@ public:
       if (f.Locals[l].Ty != Type::Box || Addressed[l])
         continue;
       Borrowing[l] = std::all_of(Loads[l].begin(), Loads[l].end(), [&](auto v) {
-        return Kind[v] == LoadKind::Borrow;
+        return leavesReference(Kind[v]);
       });
       Owned[l] = !Borrowing[l] &&
                  std::all_of(Stores[l].begin(), Stores[l].end(),
@@ -178,9 +187,12 @@ public:
   const Function &F;
   /// By statement: its place, its number in the order the body is written
   /// and the last number of the statements inside it.
-  std::unordered_map<const Stmt *, Place> PlaceOf;
-  std::unordered_map<const Stmt *, uint32_t> Pos;
-  std::unordered_map<const Stmt *, uint32_t> End;
+  struct Where {
+    Place At;
+    uint32_t Pos = 0;
+    uint32_t End = 0;
+  };
+  std::unordered_map<const Stmt *, Where> Info;
   /// The retains, in the order the body is written.
   std::vector<const Stmt *> Retains;
   /// By value: its definition (null for a parameter), its type, and each
@@ -235,7 +247,7 @@ public:
   }
   /// The statement before @p s in its block, or null.
   const Stmt *before(const Stmt *s) const {
-    const Place p = PlaceOf.at(s);
+    const Place p = Info.at(s).At;
     return p.Index ? &p.B->Stmts[p.Index - 1] : nullptr;
   }
 
@@ -252,8 +264,7 @@ private:
   }
   void stmt(const Block &b, size_t i) {
     const Stmt &s = b.Stmts[i];
-    PlaceOf[&s] = {&b, i};
-    Pos[&s] = Next++;
+    Info[&s] = {.At = {.B = &b, .Index = i}, .Pos = Next++, .End = 0};
     if (const auto *in = std::get_if<Instr>(&s)) {
       if (in->Result.Ty != Type::Void && in->Result.Id < Def.size()) {
         Def[in->Result.Id] = &s;
@@ -288,22 +299,23 @@ private:
       if (x->Value)
         use(*x->Value, &s);
     }
-    End[&s] = Next - 1;
+    Info[&s].End = Next - 1;
   }
 
   /// A load releases the local's reference when its one use is a release;
   /// it borrows when its uses are in its own block and, in their order, it
-  /// never hands on or releases more than it retained.
+  /// never hands on or releases more than it retained, and copies when it
+  /// also hands some of that on.
   LoadKind loadKind(ValueId v) const {
     const std::vector<const Stmt *> &uses = Uses[v];
     if (uses.size() == 1)
       if (const auto *in = std::get_if<Instr>(uses.front());
           in && in->Op == Opcode::Release)
         return LoadKind::Release;
-    const Place def = PlaceOf.at(Def[v]);
+    const Place def = Info.at(Def[v]).At;
     std::vector<std::pair<size_t, Use>> events;
     for (const Stmt *s : uses) {
-      const Place at = PlaceOf.at(s);
+      const Place at = Info.at(s).At;
       const auto *in = std::get_if<Instr>(s);
       if (at.B != def.B || !in)
         return LoadKind::Taking;
@@ -312,6 +324,7 @@ private:
     std::sort(events.begin(), events.end(),
               [](const auto &a, const auto &b) { return a.first < b.first; });
     int held = 0;
+    bool handsOn = false;
     for (const auto &[at, u] : events) {
       if (u == Use::Other)
         return LoadKind::Taking;
@@ -319,8 +332,9 @@ private:
         ++held;
       else if (u != Use::Borrow && --held < 0)
         return LoadKind::Taking;
+      handsOn = handsOn || u == Use::HandOn || u == Use::Store;
     }
-    return LoadKind::Borrow;
+    return handsOn ? LoadKind::Copy : LoadKind::Borrow;
   }
 
   /// Whether the value @p s stores holds a reference of its own: null, a
@@ -335,7 +349,8 @@ private:
       return true;
     const Stmt *prev = before(&s);
     const auto *in = prev ? std::get_if<Instr>(prev) : nullptr;
-    return in && in->Op == Opcode::Retain && sameValue(in->Args[0], o.valueId());
+    return in && in->Op == Opcode::Retain &&
+           sameValue(in->Args[0], o.valueId());
   }
 };
 
@@ -372,7 +387,7 @@ public:
     s = block(*C.B, C.From, C.To, s);
     if (s.P[kLive].Reached)
       Failed = true;
-    return !Failed && (K1 || K2 || K3);
+    return !Failed && Entered && (K1 || K2 || K3);
   }
 
   /// The releases that end the range.
@@ -414,6 +429,8 @@ private:
   const Candidate &C;
   std::vector<Loop> Loops;
   bool Failed = false;
+  // Whether a path reached the retain: one no path reaches is not judged.
+  bool Entered = false;
   // Which keeper still holds: the enclosing reference, the local, nothing
   // that can let go.
   bool K1 = true;
@@ -425,8 +442,7 @@ private:
       return b;
     if (!b.Reached)
       return a;
-    return {true, std::min(a.N, b.N), std::min(a.D, b.D),
-            a.Intact && b.Intact};
+    return {true, std::min(a.N, b.N), std::min(a.D, b.D), a.Intact && b.Intact};
   }
   static State merge(const State &a, const State &b) {
     State s;
@@ -475,6 +491,7 @@ private:
     State out;
     out.P[kLive] = merge(s.P[kBefore], s.P[kAfter]);
     out.P[kLive].D = 0;
+    Entered = Entered || out.P[kLive].Reached;
     check(out);
     return out;
   }
@@ -506,7 +523,11 @@ private:
   }
 
   /// Whether @p o is a load of M (not V) that may release or hand on M's
-  /// reference.
+  /// reference, or copy it: a copy the moves at last use may turn into a
+  /// hand-off, run again on this pass's output, as they are on a module's
+  /// code in the program that imports it.  They follow what a load of M
+  /// refers to, but not what a local whose retain this pass removed holds,
+  /// which they take for a reference of the local's own.
   bool takesFromKeeper(const Operand &o) const {
     return C.M != kNoLocal && isLoadOf(o, C.M) && !sameValue(o, C.V) &&
            F.Kind[o.valueId()] != LoadKind::Borrow;
@@ -539,7 +560,8 @@ private:
     if (&st == C.Into)
       return s;
     if (in.Op == Opcode::Release) {
-      if (C.L != kNoLocal && isLoadOf(in.Args[0], C.L)) {
+      if (C.L != kNoLocal && isLoadOf(in.Args[0], C.L) &&
+          F.Kind[in.Args[0].valueId()] == LoadKind::Release) {
         // The local holds nothing to release off the range.
         if (!s.P[kLive].Reached)
           Failed = true;
@@ -573,10 +595,10 @@ private:
     if (s.P[kLive].Reached && letsGo(in))
       K3 = false;
     if (C.M != kNoLocal) {
+      const Use u = useOf(in);
       const bool touches =
           (in.Op == Opcode::Store && in.Local == C.M) ||
-          ((useOf(in) == Use::Release || useOf(in) == Use::HandOn ||
-            useOf(in) == Use::Store) &&
+          (u != Use::Retain && u != Use::Borrow &&
            std::any_of(in.Args.begin(), in.Args.end(),
                        [&](const Operand &o) { return takesFromKeeper(o); }));
       if (touches)
@@ -627,7 +649,7 @@ private:
       return merge(t, x->Else ? block(*x->Else, s) : s);
     }
     if (const auto *x = std::get_if<Switch>(&st)) {
-      State out = x->Default ? block(*x->Default, s)
+      State out = x->Default       ? block(*x->Default, s)
                   : exhaustive(*x) ? State()
                                    : s;
       for (const Switch::Case &c : x->Cases)
@@ -651,8 +673,7 @@ private:
         leave(s);
       } else {
         Loop &l = Loops.back();
-        State &to =
-            std::holds_alternative<Break>(st) ? l.Breaks : l.Continues;
+        State &to = std::holds_alternative<Break>(st) ? l.Breaks : l.Continues;
         to = merge(to, s);
       }
       return {};
@@ -704,17 +725,16 @@ private:
 
   /// Whether every use of @p v is one the walk follows.
   bool followed(ValueId v) const {
-    return std::all_of(F.Uses[v].begin(), F.Uses[v].end(),
-                       [&](const Stmt *s) {
-                         if (const auto *in = std::get_if<Instr>(s))
-                           return useOf(*in) != Use::Other;
-                         return std::holds_alternative<Return>(*s);
-                       });
+    return std::all_of(F.Uses[v].begin(), F.Uses[v].end(), [&](const Stmt *s) {
+      if (const auto *in = std::get_if<Instr>(s))
+        return useOf(*in) != Use::Other;
+      return std::holds_alternative<Return>(*s);
+    });
   }
 
   /// The statement after @p s in its block that is still there, or null.
   const Stmt *after(const Stmt *s) const {
-    const Place p = F.PlaceOf.at(s);
+    const Place p = F.Info.at(s).At;
     for (size_t i = p.Index + 1; i < p.B->Stmts.size(); ++i)
       if (!Removed.contains(&p.B->Stmts[i]))
         return &p.B->Stmts[i];
@@ -744,7 +764,7 @@ private:
     size_t lo = from, hi = b.Stmts.size() - 1;
     while (lo < hi) {
       const size_t mid = lo + (hi - lo) / 2;
-      if (F.End.at(&b.Stmts[mid]) < pos)
+      if (F.Info.at(&b.Stmts[mid]).End < pos)
         lo = mid + 1;
       else
         hi = mid;
@@ -758,7 +778,7 @@ private:
   bool region(Candidate &c) const {
     const Stmt *def = F.Def[c.V];
     if (def) {
-      const Place p = F.PlaceOf.at(def);
+      const Place p = F.Info.at(def).At;
       c.B = p.B;
       c.From = p.Index + 1;
     } else {
@@ -767,12 +787,12 @@ private:
     }
     if (c.From >= c.B->Stmts.size())
       return false;
-    const uint32_t first = F.Pos.at(&c.B->Stmts[c.From]);
-    const uint32_t last = F.End.at(&c.B->Stmts.back());
-    const uint32_t r = F.Pos.at(c.R);
+    const uint32_t first = F.Info.at(&c.B->Stmts[c.From]).Pos;
+    const uint32_t last = F.Info.at(&c.B->Stmts.back()).End;
+    const uint32_t r = F.Info.at(c.R).Pos;
     uint32_t end = r;
     auto within = [&](const Stmt *s, uint32_t from) {
-      const uint32_t at = F.Pos.at(s);
+      const uint32_t at = F.Info.at(s).Pos;
       end = std::max(end, at);
       return from <= at && at <= last;
     };
@@ -827,8 +847,8 @@ private:
     // its range; failing that, the value's.
     if (const Stmt *next = after(r)) {
       const auto *store = std::get_if<Instr>(next);
-      if (store && store->Op == Opcode::Store &&
-          sameValue(store->Args[0], v) && rangeLocal(store->Local, next)) {
+      if (store && store->Op == Opcode::Store && sameValue(store->Args[0], v) &&
+          rangeLocal(store->Local, next)) {
         Candidate local = c;
         local.Into = next;
         local.L = store->Local;

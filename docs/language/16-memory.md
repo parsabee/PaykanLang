@@ -459,17 +459,20 @@ the same objects. The variable `s` simply stays readable afterwards.
 ## Reference counts the compiler removes
 
 The compiler also removes a retain together with the releases that undo it, wherever
-something else keeps the object alive in between, so that no count changes where nothing
-could see the difference. A `match` on a reference takes one of its own for the whole match
-(the arms may reassign what it read), and its binding another; the binding's goes, since the
-match's keeps the object alive until the match ends. The match's own goes too when nothing in
-it can let go of a reference (no function or method call, no assignment of a reference): then
-the field or variable it read keeps the object. A variable read while nothing reassigns it
-needs no reference of its own for the read either.
+something else keeps the object alive in between, so that no count changes where something
+could see the difference. A `match` on a field takes a reference of its own for the whole
+match (an arm may assign the field), and its binding takes another; the binding's goes, since
+the match's keeps the object alive until the match ends. The match's own goes too when
+nothing in it can let go of a reference (no function or method call, no assignment of a
+reference): then the field it read keeps the object. A reference read from a variable for one
+operation (an operand of `==`, say) needs none of its own while nothing reassigns the
+variable, and one read from a field none while nothing can let go of a reference.
 
-The compiler keeps the match's reference when the match calls code, because that code may
-reassign what the match read and drop the object an arm is using. Here `clear` sets `l.head`
-to `None` while the arm still uses `n`, the node `l.head` held:
+The compiler keeps a reference whenever code that may let the object go runs while it is in
+use: the match's when an arm calls code, which may assign the field the match read and drop
+the object the arm is using, and every reference a read through an object takes for a call
+([Reads a call may replace](../pir.md#7-what-the-lowering-makes-explicit-the-ownership-rules)).
+Here `clear` sets `l.head` to `None` while the arm still uses `n`, the node `l.head` held:
 
 ```pkn
 import ::io;

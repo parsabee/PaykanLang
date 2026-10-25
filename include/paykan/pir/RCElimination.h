@@ -43,20 +43,24 @@ struct RCCounts {
 ///   same value (a match subject's retain, a `weak.load`, a call's result, a
 ///   box parameter), not released or handed on inside the range;
 /// * a *local*: the value was loaded from a box local whose every store
-///   holds a reference of its own and that is not stored, released or
-///   handed on from the load to the end of the range, nor addressed;
+///   holds a reference of its own and that is not stored, released, handed
+///   on or copied (retained and handed on, which the moves at last use may
+///   make a hand-off) from the load to the end of the range, nor
+///   addressed;
 /// * *nothing that can let go*: the range holds no `release` but the
 ///   value's own, no `free`, no `vcall` or `icall`, no call but the
 ///   runtime's string, hash, rounding, allocation, disposal and panic
 ///   helpers, and no store that may overwrite a reference (`field.store`
 ///   or `ptr.store` of a box, `mem.copy`, `mem.zero`).
 ///
-/// A box read from a field or an element has no reference of its own and
-/// no local keeping it, so only the last can remove its first retain: with
-/// a call in the range it stays, since the callee may write that field and
-/// free the object (the field-load hazard); the retains nested in it go.
-/// A local whose retain went holds a borrowed reference from then on.  The
-/// whole runs again until it removes nothing.
+/// A box read from a field or an element has no reference of its own, a
+/// `stable` one neither (the mark holds for its statement only), and no
+/// local keeping it, so only the last can remove its first retain: with a
+/// call in the range it stays, since the callee may write that field and
+/// free the object (the field-load hazard), and so does every hold the
+/// lowering makes; the retains nested in it go.  A local whose retain went
+/// holds a borrowed reference from then on.  The whole runs again until it
+/// removes nothing.
 RCCounts eliminateRedundantRC(Function &f);
 
 /// eliminateRedundantRC on every function the program defines, as a pass

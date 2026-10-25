@@ -23,9 +23,10 @@ using namespace paykan::pir;
 
 namespace {
 
-// What the programs below call: @take and @count release their argument
-// (an owned argument, as a user function's is), @cond is a test that may
-// run any code, @Node.visit a method.
+// What the programs below call: @take, @count and @index release their
+// argument (an owned argument, as a user function's is), @cond is a test
+// that may run any code, @replace may store into the slot it is given the
+// address of, @Node.visit a method.
 const std::string kPrelude = R"(module "m"
 extern fn @$rt.Paykan_panic_index(i64, i64) -> void
 extern fn @$rt.PaykanString_length(obj) -> i64
@@ -33,6 +34,7 @@ extern fn @$rt.PaykanString_length(obj) -> i64
 class Node {
   field l: box
   field v: i64
+  field xs: mem(16, 8)
   vtable {
     destroy = @Node.destroy : (obj) -> void
     visit = @Node.visit : (obj) -> void
@@ -62,6 +64,15 @@ fn @count(%p: box) -> i64 {
 
 fn @cond() -> bool {
   ret true
+}
+
+fn @index(%p: box) -> i64 {
+  release %p
+  ret 0
+}
+
+fn @replace(%p: ptr) -> box {
+  ret null box
 }
 
 fn @main() -> i64 {
@@ -158,13 +169,13 @@ std::string manySubjects(size_t n) {
     os << "  local %x" << i << ": box\n";
   for (size_t i = 0; i < n; ++i)
     os << "  %l" << i << " = field.load %o, Node.l\n  retain %l" << i
-       << "\n  %s" << i << " = unbox %l" << i << "\n  %z" << i
-       << " = cmp eq %s" << i << ", null obj\n  if %z" << i
-       << " {\n  } else {\n    retain %l" << i << "\n    store %x" << i
-       << ", %l" << i << "\n    %y" << i << " = load %x" << i
-       << "\n    %yo" << i << " = unbox %y" << i << "\n    %v" << i
-       << " = field.load %yo" << i << ", Node.v\n    %t" << i << " = load %x"
-       << i << "\n    release %t" << i << "\n  }\n  release %l" << i << "\n";
+       << "\n  %s" << i << " = unbox %l" << i << "\n  %z" << i << " = cmp eq %s"
+       << i << ", null obj\n  if %z" << i << " {\n  } else {\n    retain %l"
+       << i << "\n    store %x" << i << ", %l" << i << "\n    %y" << i
+       << " = load %x" << i << "\n    %yo" << i << " = unbox %y" << i
+       << "\n    %v" << i << " = field.load %yo" << i << ", Node.v\n    %t" << i
+       << " = load %x" << i << "\n    release %t" << i << "\n  }\n  release %l"
+       << i << "\n";
   os << "  ret\n}\n";
   return os.str();
 }
@@ -271,6 +282,225 @@ fn @f(%o: obj) -> i64 {
   EXPECT_EQ(r.Counts.Releases, 1u);
 }
 
+// Every hold the lowering makes for a read through an object, or of a
+// variable a call may replace (docs/pir.md §7, "Reads a call may replace"),
+// as it makes it: the retain after the read, a call that may run code
+// while the value or the storage it is in is used, the release after the
+// use.  The call may let the field (the element, the variable) go, so each
+// retain is what keeps the object alive, and none of them goes.
+TEST(RCElimination, EveryHoldAcrossACallStays) {
+  struct Case {
+    const char *Name, *Fn, *Held;
+  };
+  const Case cases[] = {
+      // `h.b.s + g(h)`: the left operand until `+`.
+      {"operand", R"(
+fn @f(%h: box) -> i64 {
+  local %hp: box
+  store %hp, %h
+  %h1 = load %hp
+  %ho = unbox %h1
+  %b = field.load %ho, Node.l
+  %bo = unbox %b
+  %s = field.load %bo, Node.l
+  retain %s
+  %h2 = load %hp
+  retain %h2
+  %g = call @count(%h2)
+  %so = unbox %s
+  %n = call @$rt.PaykanString_length(%so)
+  release %s
+  %h3 = load %hp
+  release %h3
+  ret %n
+}
+)",
+       "%s"},
+      // `h.b.m()`: the receiver until its method returns.
+      {"receiver", R"(
+fn @f(%h: box) -> void {
+  local %hp: box
+  store %hp, %h
+  %h1 = load %hp
+  %ho = unbox %h1
+  %b = field.load %ho, Node.l
+  retain %b
+  %bo = unbox %b
+  vcall %bo : (obj) -> void [1] ()
+  release %b
+  %h3 = load %hp
+  release %h3
+  ret
+}
+)",
+       "%b"},
+      // `h.b.v = g(h)`: the object written to until the value is stored.
+      {"target", R"(
+fn @f(%h: box) -> void {
+  local %hp: box
+  store %hp, %h
+  %h1 = load %hp
+  %ho = unbox %h1
+  %b = field.load %ho, Node.l
+  retain %b
+  %bo = unbox %b
+  %h2 = load %hp
+  retain %h2
+  %g = call @count(%h2)
+  field.store %bo, Node.v, %g
+  release %b
+  %h3 = load %hp
+  release %h3
+  ret
+}
+)",
+       "%b"},
+      // `h.b.xs[g(h)]`: the object an array is in while its index is
+      // computed.
+      {"storage", R"(
+fn @f(%h: box) -> i64 {
+  local %hp: box
+  store %hp, %h
+  %h1 = load %hp
+  %ho = unbox %h1
+  %b = field.load %ho, Node.l
+  retain %b
+  %bo = unbox %b
+  %xs = field.addr %bo, Node.xs
+  %h2 = load %hp
+  retain %h2
+  %i = call @index(%h2)
+  %off = mul %i, 8
+  %at = ptr.add %xs, %off
+  %e = ptr.load i64, %at
+  release %b
+  %h3 = load %hp
+  release %h3
+  ret %e
+}
+)",
+       "%b"},
+      // `xs[i].m()` of an `inout` slice: an element, read where it is.
+      {"element", R"(
+fn @f(%p: ptr) -> void {
+  %e = ptr.load box, %p
+  retain %e
+  %eo = unbox %e
+  vcall %eo : (obj) -> void [1] ()
+  release %e
+  ret
+}
+)",
+       "%e"},
+      // `r: inout int[2] = h.b.xs` and a call: a hidden owned local holds
+      // the object until r's scope ends.
+      {"inout local", R"(
+fn @f(%h: box) -> i64 {
+  local %hp: box
+  local %r.obj: box
+  store %hp, %h
+  %h1 = load %hp
+  %ho = unbox %h1
+  %b = field.load %ho, Node.l
+  retain %b
+  %bo = unbox %b
+  %xs = field.addr %bo, Node.xs
+  store %r.obj, %b
+  %c = call @cond()
+  %e = ptr.load i64, %xs
+  %t = load %r.obj
+  release %t
+  %h3 = load %hp
+  release %h3
+  ret %e
+}
+)",
+       "%b"},
+      // A field read stable for its statement, then kept in a variable
+      // across a call: the mark is the lowering's promise for the
+      // statement only, not a reference.
+      {"stable", R"(
+fn @f(%o: obj) -> void {
+  local %x: box
+  %b = field.load %o, Node.l stable
+  retain %b
+  store %x, %b
+  %c = call @cond()
+  %t = load %x
+  release %t
+  ret
+}
+)",
+       "%b"},
+      // `s + repl(s)`: a variable a call is given the address of.
+      {"variable", R"(
+fn @f(%n: box) -> i64 {
+  local %np: box
+  store %np, %n
+  %v = load %np
+  retain %v
+  %at = local.addr %np
+  %r = call @replace(%at)
+  %vo = unbox %v
+  %k = call @$rt.PaykanString_length(%vo)
+  release %v
+  release %r
+  %e = load %np
+  release %e
+  ret %k
+}
+)",
+       "%v"},
+      // What an `inout` result points into (`f(b).k`, `b` an `inout`
+      // argument): the box its argument holds, read once the call returns,
+      // while the address is used.
+      {"inout result", R"(
+fn @f(%p: ptr) -> i64 {
+  %r = call @replace(%p)
+  %e = ptr.load box, %p
+  retain %e
+  %c = call @cond()
+  %eo = unbox %e
+  %v = field.load %eo, Node.v
+  release %e
+  release %r
+  ret %v
+}
+)",
+       "%e"},
+  };
+  for (const Case &c : cases) {
+    Result r = eliminate(c.Fn);
+    const std::string out = f(r);
+    const std::string held = c.Held;
+    EXPECT_EQ(count(out, "retain " + held + "."), 1u) << c.Name << "\n" << out;
+    EXPECT_EQ(r.Counts.Retains, 0u) << c.Name << "\n" << out;
+    EXPECT_EQ(r.Counts.Releases, 0u) << c.Name << "\n" << out;
+  }
+}
+
+TEST(RCElimination, AStableReadLosesItsRetainOnlyWhereNothingCanLetGo) {
+  // The same read as a hold's but with no call in its range: the field
+  // keeps the object, stable or not.
+  Result r = eliminate(R"(
+fn @f(%o: obj) -> i64 {
+  local %x: box
+  %b = field.load %o, Node.l stable
+  retain %b
+  store %x, %b
+  %x1 = load %x
+  %xo = unbox %x1
+  %v = field.load %xo, Node.v
+  %t = load %x
+  release %t
+  ret %v
+}
+)");
+  EXPECT_EQ(count(f(r), "retain"), 0u) << f(r);
+  EXPECT_EQ(count(f(r), "release"), 0u) << f(r);
+  EXPECT_EQ(r.Counts.Retains, 1u);
+}
+
 TEST(RCElimination, AVirtualCallKeepsTheSubjectAndNotTheBinding) {
   Result r = eliminate(R"(
 fn @f(%o: obj) -> void {
@@ -304,10 +534,9 @@ fn @f(%o: obj) -> void {
 
 TEST(RCElimination, AnIndirectCallAReleaseOrAFreeLetsGo) {
   // Each may free what the field held.
-  for (const char *between :
-       {"  icall %fn : () -> void ()\n",
-        "  %w = field.load %o, Node.l\n  release %w\n",
-        "  %q = new Node\n  free %q\n"}) {
+  for (const char *between : {"  icall %fn : () -> void ()\n",
+                              "  %w = field.load %o, Node.l\n  release %w\n",
+                              "  %q = new Node\n  free %q\n"}) {
     Result r = eliminate(std::string(R"(
 fn @f(%o: obj, %fn: ptr) -> void {
   %l = field.load %o, Node.l
@@ -433,6 +662,50 @@ fn @f(%a: box) -> void {
   EXPECT_EQ(count(f(r), "retain %v"), 1u) << f(r);
 }
 
+TEST(RCElimination, AReleaseOfARetainedReadOfALocalIsNotTheLocals) {
+  // %a's retain is its own, released by `release %a` (it stays: a copy of
+  // %x and a call come before it); only `release %t` releases what %x
+  // holds and ends the binding's range, inside the subject's.
+  Result r = eliminate(R"(
+fn @f(%o: obj) -> void {
+  local %x: box
+  %l = field.load %o, Node.l
+  retain %l
+  retain %l
+  store %x, %l
+  %a = load %x
+  retain %a
+  %b = load %x
+  retain %b
+  call @take(%b)
+  %c = call @cond()
+  release %a
+  %t = load %x
+  release %t
+  release %l
+  ret
+}
+)");
+  EXPECT_EQ(f(r), R"(fn @f(%o.1: obj) -> void {
+  local %x.0: box
+  %l.2 = field.load %o.1, Node.l
+  retain %l.2
+  store %x.0, %l.2
+  %a.3 = load %x.0
+  retain %a.3
+  %b.4 = load %x.0
+  retain %b.4
+  call @take(%b.4)
+  %c.5 = call @cond()
+  release %a.3
+  release %l.2
+  ret
+}
+)");
+  EXPECT_EQ(r.Counts.Retains, 1u);
+  EXPECT_EQ(r.Counts.Releases, 1u);
+}
+
 TEST(RCElimination, AParameterHandedOnAtItsLastUseKeepsNothing) {
   // A move at last use (#186): the parameter's own reference goes to @take,
   // which may free the object while %a still names it.
@@ -453,9 +726,42 @@ fn @f(%n: box) -> i64 {
   EXPECT_EQ(count(f(r), "retain %a"), 1u) << f(r);
 }
 
-TEST(RCElimination, AParameterCopiedKeepsWhatItHolds) {
-  // The same with a copy: the parameter keeps its own reference until its
-  // release at the end.
+TEST(RCElimination, AParameterReadInTheRangeKeepsWhatItHolds) {
+  // Reads of the parameter that leave its reference where it is (an unbox,
+  // a field read, a retain released again) in the range, and a call: the
+  // parameter keeps its own reference until its release at the end.
+  Result r = eliminate(R"(
+fn @f(%n: box) -> i64 {
+  local %np: box
+  store %np, %n
+  %a = load %np
+  retain %a
+  %b = load %np
+  %bo = unbox %b
+  %w = field.load %bo, Node.v
+  %c = load %np
+  retain %c
+  %k = call @cond()
+  release %c
+  %ao = unbox %a
+  %v = field.load %ao, Node.v
+  release %a
+  %e = load %np
+  release %e
+  ret %v
+}
+)");
+  EXPECT_EQ(count(f(r), "retain"), 0u) << f(r);
+  EXPECT_EQ(count(f(r), "release"), 1u) << f(r);
+  EXPECT_EQ(r.Counts.Retains, 2u);
+}
+
+TEST(RCElimination, AParameterCopiedInTheRangeKeepsTheRead) {
+  // A copy of the parameter (retained, then handed to @take) is one the
+  // moves at last use may make a hand-off of the parameter's reference
+  // when they run again on this output (a module's code in the program
+  // that imports it), and they would not see %a, nor a local %a is stored
+  // in, depend on it: the retain made for %a stays.
   Result r = eliminate(R"(
 fn @f(%n: box) -> i64 {
   local %np: box
@@ -473,8 +779,9 @@ fn @f(%n: box) -> i64 {
   ret %v
 }
 )");
-  EXPECT_EQ(count(f(r), "retain %a"), 0u) << f(r);
+  EXPECT_EQ(count(f(r), "retain %a"), 1u) << f(r);
   EXPECT_EQ(count(f(r), "retain %b"), 1u) << f(r);
+  EXPECT_EQ(r.Counts.Retains, 0u);
 }
 
 TEST(RCElimination, AMoveIntoAParameterInsideTheSubjectsRangeKeepsTheSubject) {

@@ -1,22 +1,25 @@
 // 67 — reference-count elimination: a retain and its releases removed
-// where something else keeps the object alive
+// where something else keeps the object alive, and the ones it keeps
 // Exercises: the compiler's reference-count elimination (docs/pir.md §12,
 //            "The reference-count elimination pass";
 //            docs/language/16-memory.md, "Reference counts the compiler
 //            removes") on each shape it judges: a match on a field whose
 //            arm calls nothing (its subject's and its binding's retains
-//            go); a match whose arm calls code that clears the field it
-//            read, so that only the match holds the node (its subject's
-//            retain stays: the field-load hazard); `x.next = x.next.next`
-//            under a match on `x.next`; an array element replaced by a call
-//            while a match holds it; a match on a weak field; a walk with
-//            `break` and `continue`; and a return from inside a match.  The
-//            `weak` references show when each object dies: where it would
-//            without the pass, at the end of what last held it.
+//            go); then the hazards, each the only thing in its match that
+//            can let go of a reference, so that the match's own reference
+//            is all that keeps the node it read alive: a call that clears
+//            the field the match read, `x.next = x.next.next` under a match
+//            on `x.next`, a call that replaces the array element the match
+//            read, and a loop over an array whose callee empties it; then a
+//            match on a weak field, a walk with `break` and `continue`, and
+//            a return from inside a match.  The `weak` references show when
+//            each object dies: where it does without the pass, when what
+//            last held it lets it go.
 // expect-stdout: no call: 3 | a's next alive
-// expect-stdout: cleared: a alive b | after: gone
-// expect-stdout: unlinked: y alive | list: xz | y gone
-// expect-stdout: element: old! new | old gone
+// expect-stdout: cleared: a0 | a gone, c gone
+// expect-stdout: unlinked: y | list: xz | y gone
+// expect-stdout: element: old0 | old gone, new
+// expect-stdout: iterated: 17
 // expect-stdout: weak: w1 of w | gone: none, other
 // expect-stdout: walk: 1+4=5 | stopped at 3
 // expect-stdout: early: 2 | 0 | e alive
@@ -60,29 +63,25 @@ fn clear(l: List) -> int {
   return 0;
 }
 
-/// A match on l.head whose arm clears l: the node lives on in the match.
-fn cleared(l: List, w: view Watch) -> Str {
-  out = "";
+/// A match on l.head whose arm clears l: the node lives on in the match,
+/// which alone holds it until the match ends.
+fn cleared(l: List) -> Str {
   match l.head {
     n: Node {
       k = clear(l);
-      out = n.name + " " + state(w);
-      match n.next {
-        m: Node { out = out + " " + m.name; }
-        None { }
-      }
+      return n.name + Str(k);
     }
-    None { }
+    None { return "none"; }
   }
-  return out;
 }
 
-/// x.next = x.next.next while a match holds x.next.
-fn unlink(x: Node, w: view Watch) -> Str {
+/// x.next = x.next.next while a match holds x.next: the node unlinked
+/// lives on in the match.
+fn unlink(x: Node) -> Str {
   match x.next {
     n: Node {
       x.next = n.next;
-      return n.name + " " + state(w);
+      return n.name;
     }
     None { return "none"; }
   }
@@ -101,9 +100,9 @@ class Bag {
 }
 
 /// Replaces the bag's first element.
-fn swapIn(b: Bag) -> Str {
-  b.items[0] = Node("new", 0, None);
-  return "!";
+fn swapIn(b: Bag) -> int {
+  b.items[0] = Node("new", 7, None);
+  return 0;
 }
 
 /// A match on an element whose arm replaces it: the old one lives on in
@@ -111,14 +110,40 @@ fn swapIn(b: Bag) -> Str {
 fn element(b: Bag) -> Str {
   match b.items[0] {
     n: Node {
-      s = swapIn(b);
-      match b.items[0] {
-        m: Node { return n.name + s + " " + m.name; }
-        None { return "?"; }
-      }
+      k = swapIn(b);
+      return n.name + Str(k);
     }
     None { return "none"; }
   }
+}
+
+/// The name of the bag's first element.
+fn firstName(b: Bag) -> Str {
+  match b.items[0] {
+    n: Node { return n.name; }
+    None { return "none"; }
+  }
+}
+
+/// Empties the bag: each element loses its holder.
+fn empty(b: Bag) -> int {
+  b.items[0] = None;
+  b.items[1] = None;
+  return 10;
+}
+
+/// Iterates over the bag while `empty` empties it: the node the match read
+/// lives on in the match (no weak reference keeps its memory: it is freed
+/// when it dies).
+fn iterate(b: Bag) -> int {
+  total = 0;
+  for i in 0..2 {
+    match b.items[i] {
+      n: Node { total = total + empty(b) + n.v; }
+      None { }
+    }
+  }
+  return total;
 }
 
 /// A match on a weak field: the reference the read makes holds the
@@ -172,19 +197,25 @@ fn main() -> int {
 
   c = Node("c", 3, None);
   wc = Watch(c);
-  l = List(Node("a", 1, Node("b", 2, c)));
-  io::println("cleared: " + cleared(l, wc) + " | after: " + state(wc));
+  a1 = Node("a", 1, Node("b", 2, c));
+  wa = Watch(a1);
+  io::println("cleared: " + cleared(List(a1)) + " | a " + state(wa) + ", c "
+      + state(wc));
 
   y = Node("y", 2, Node("z", 3, None));
   wy = Watch(y);
   x = Node("x", 1, y);
-  io::println("unlinked: " + unlink(x, wy) + " | list: " + names(x) + " | y "
+  io::println("unlinked: " + unlink(x) + " | list: " + names(x) + " | y "
       + state(wy));
 
   old = Node("old", 0, None);
   wo = Watch(old);
   bag = Bag([old, None]);
-  io::println("element: " + element(bag) + " | old " + state(wo));
+  io::println("element: " + element(bag) + " | old " + state(wo) + ", "
+      + firstName(bag));
+
+  io::println("iterated: "
+      + Str(iterate(Bag([Node("p", 7, None), Node("q", 9, None)]))));
 
   n = Node("w", 1, None);
   wn = Watch(n);
@@ -192,14 +223,14 @@ fn main() -> int {
   n = Node("other", 0, None);
   io::println(" | gone: " + weakName(wn) + ", " + n.name);
 
-  list = Node("h", 0, Node("i", 1, Node("j", 2, Node("k", 4, Node("l", 3,
-      Node("m", 5, None))))));
+  list = Node("h", 0, Node("i", 1,
+      Node("j", 2, Node("k", 4, Node("l", 3, Node("m", 5, None))))));
   io::println("walk: " + walk(list));
 
   e = Node("e", 0, Node("f", 2, None));
   g = Node("g", 0, Node("h", -1, None));
   we = Watch(e);
-  io::println("early: " + Str(early(e)) + " | " + Str(early(g)) + " | "
-      + e.name + " " + state(we));
+  io::println("early: " + Str(early(e)) + " | " + Str(early(g)) + " | " + e.name
+      + " " + state(we));
   return 0;
 }

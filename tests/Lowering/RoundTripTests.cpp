@@ -11,6 +11,7 @@
 // each makes verifies and round-trips, and counts no more references than
 // before.
 
+#include "Lowering/Holds.h"
 #include "ModuleName.h"
 #include "TestUtils.h"
 #include "paykan/lowering/Lowering.h"
@@ -329,7 +330,7 @@ TEST(PIRMoves, EveryCorpusProgramCountsNoMoreReferencesAndFewerWhereOneMoves) {
 }
 
 TEST(PIRRCElimination, EveryCorpusProgramCountsNoMoreReferencesAfterThePass) {
-  size_t checked = 0, fewer = 0;
+  size_t checked = 0, fewer = 0, held = 0;
   size_t retains = 0, retainsAfter = 0, releases = 0, releasesAfter = 0;
   std::vector<std::string> programs = corpus();
   for (const std::string &path : programsIn(PAYKAN_STDLIB_TESTS_DIR))
@@ -346,21 +347,31 @@ TEST(PIRRCElimination, EveryCorpusProgramCountsNoMoreReferencesAfterThePass) {
     error = moved(program, stats);
     ASSERT_TRUE(error.empty()) << path << ": " << error;
     const ReferenceCounting before(program);
+    const test::Holds holds(program);
     error = eliminated(program, stats);
     ASSERT_TRUE(error.empty()) << path << ": " << error;
     const ReferenceCounting after(program);
-    // A retain goes with a release on each path out of its range, so at
-    // least as many releases go as retains.
+    // Nothing is added; a retain goes with a release on each path out of
+    // its range, so at least as many releases go as retains.
+    ASSERT_LE(after.Retains, before.Retains) << path;
+    ASSERT_LE(after.Releases, before.Releases) << path;
     const uint64_t gone = stats.get("rc-elimination", "retains removed");
     EXPECT_EQ(before.Retains - after.Retains, gone) << path;
     EXPECT_EQ(before.Releases - after.Releases,
               stats.get("rc-elimination", "releases removed"))
         << path;
-    EXPECT_LE(after.Retains, before.Retains) << path;
     EXPECT_LE(before.Retains - after.Retains, before.Releases - after.Releases)
         << path;
     if (gone > 0)
       ++fewer;
+    // Every hold keeps a retain: a read in use across a call that may let
+    // its field or element go (the field-load hazard).
+    const test::Holds left(program);
+    for (const test::Holds::Read &r : holds.Held) {
+      ++held;
+      EXPECT_TRUE(left.retained(r))
+          << path << ": @" << r.Function << " %" << r.Value;
+    }
     EXPECT_EQ(roundTrip(program), "") << path;
     // The code passes again (a module's code goes through them before its
     // `.pkm` is written, and again in the program that imports it) change
@@ -378,11 +389,13 @@ TEST(PIRRCElimination, EveryCorpusProgramCountsNoMoreReferencesAfterThePass) {
     releasesAfter += after.Releases;
   }
   EXPECT_GT(checked, 100u);
-  // Most programs read a field into a match or a temporary with nothing
-  // between that can let go, or bind a match subject.
-  EXPECT_GT(fewer, checked / 3) << fewer << " of " << checked;
+  // A match on a field whose arms call nothing, a binding inside its
+  // subject's range, a read of a variable nothing reassigns: in a fair
+  // share of the programs, and of the standard library's code they copy.
+  EXPECT_GT(fewer, checked / 10) << fewer << " of " << checked;
+  EXPECT_GT(held, 100u);
   std::cout << "[ rc-elimination ] " << checked << " programs, " << fewer
-            << " with pairs removed: retains " << retains << " -> "
-            << retainsAfter << ", releases " << releases << " -> "
-            << releasesAfter << "\n";
+            << " with pairs removed, " << held << " holds kept: retains "
+            << retains << " -> " << retainsAfter << ", releases " << releases
+            << " -> " << releasesAfter << "\n";
 }

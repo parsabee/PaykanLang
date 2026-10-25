@@ -78,17 +78,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every module written to a `.pkm`, removes a `retain` together with the releases that end
   the reference it made where something else keeps the object alive in between: another
   reference the function holds on the same value (a match subject's around its binding's,
-  a `weak.load`'s, a box parameter), a local that is not reassigned, released or handed on
-  meanwhile, or nothing in between that can let go of a reference (no call that may run
-  code, no release, no store over a reference).  A reference read from a field or an array
-  element keeps its first retain whenever a call that may run code comes before its
-  release, since the callee may clear the field and free the object (the field-load
-  hazard); the retains nested in it go.  A pair is removed only when it is balanced on
-  every way out of its range (`ret`, `break`, `continue`, a panic), so every object is
-  destroyed where it was before.  Over the samples and the standard library's tests it
-  removes, after the moves, RETAINS_PCT of the retains and RELEASES_PCT of the releases.
-  `--stats` counts `rc-elimination retains removed` and `releases removed`.
-
+  a `weak.load`'s, a box parameter), a local that is not reassigned, released, handed on or
+  copied meanwhile, or nothing in between that can let go of a reference (no call that may
+  run code, no release, no store over a reference).  A reference read from a field or an
+  array element, `stable` or not, keeps its first retain whenever a call that may run code
+  comes before its release, since the callee may clear the field and free the object (the
+  field-load hazard): every hold the lowering makes stays, which the lowering tests check
+  for every program they lower and the corpus tests for every sample, and the retains
+  nested in a hold go.  A pair is removed only when it is balanced on every way out of its
+  range (`ret`, `break`, `continue`, a panic), so every object is destroyed where it was
+  before: every sample and standard-library test prints what it printed without the pass,
+  with the same heap statistics, at `-O0`, `-O1` and `-O2`.  Over the samples and the standard library's tests
+  it removes, after the moves, 22% of the retains and 9% of the releases of the lowered
+  programs (3368 to 2615, 9360 to 8535), and 19% and 7% of what `--emit-pir` prints of the
+  runnable ones (1387 to 1129, 4399 to 4110).  `--stats` counts `rc-elimination retains
+  removed` and `releases removed`.  `samples/codegen/67_reference_count_elimination.pkn`
+  runs each shape and each hazard (a callee that clears the field a match read, `x.next =
+  x.next.next`, an array element replaced or emptied by a call), clean under ASan, LSan and
+  UBSan through `--emit-c`.
 - Adjacent string literals are one literal, joined at compile time, as in C and C++
   (docs/grammar.md §1, docs/language/04-strings-and-conversions.md, #197): `"this message
   is far too long " "to fit on one line"` may be split across lines, with comments between

@@ -1365,9 +1365,11 @@ else keeps the object alive in between.  It counts the references a
 function makes by the value they were made on, the value's **tokens**:
 `retain %v` makes one on `%v`, and a value made with one has it: a call's,
 a `vcall`'s or an `icall`'s box (not a native function's), a `weak.load`'s,
-a `box`'s, and a box parameter (owned, §7).  A token ends at `release %v`,
-or where `%v` is handed on: an argument of any call, a `field.store` or
-`ptr.store` of it, a `store` into a local that owns what it holds, `ret
+a `box`'s, and a box parameter (owned, §7).  A `field.load` or a
+`ptr.load` makes none, `stable` or not: the mark is the lowering's promise
+for its statement only (§6), not a reference.  A token ends at `release
+%v`, or where `%v` is handed on: an argument of any call, a `field.store`
+or `ptr.store` of it, a `store` into a local that owns what it holds, `ret
 %v`.  A box local owns what is stored into it unless every load of it only
 borrows: hands on and releases no more, in its own block, than it retained
 first (a local whose retain the pass removed is one, its releases gone).
@@ -1376,7 +1378,8 @@ The **range** of a retain runs, on every path from it, to the first
 `release` of what it made: of `%v`; or, for a retain followed at once by
 the `store` of `%v` into a box local that nothing else stores into, whose
 address is never taken and whose every load either releases it (`%t = load
-%x`, `release %t`) or only borrows, to the first release of that local.  A
+%x`, `release %t`) or only borrows, to the first release of that local (a
+`release` of a load that retained first releases that load's own).  A
 retain and the releases that end its range are removed when the range is
 **balanced** — every path from the retain reaches exactly one of those
 releases, or `unreachable`, before it leaves the block that defines `%v`
@@ -1391,9 +1394,15 @@ point of the range, one of these **keeps the object alive**:
 - a **local**: `%v` was loaded from a box local whose address is never
   taken, whose every store holds a reference of its own (a fresh value, a
   parameter, `null`, or one the instruction before retained) and that is not
-  stored into, nor released or handed on through another of its loads (a
-  move at last use is one), from that load to the end of the range; and
-  `%v`'s own tokens are not handed on beyond the ones the range made;
+  stored into, nor released, handed on or copied through another of its
+  loads (a move at last use hands it on; a copy retains and hands on), from
+  that load to the end of the range; and `%v`'s own tokens are not handed
+  on beyond the ones the range made.  A copy counts because the moves at
+  last use, run again on this pass's output (a module's code, in the
+  program that imports it), may make it a hand-off of the local's
+  reference: they follow what a load of the local refers to, but take a
+  local whose retain this pass removed for one holding a reference of its
+  own, and would not see that it depends on the local;
 - **nothing that can let go**: no `release` but of `%v`, no `free`, `vcall`
   or `icall`, no call but of the runtime's string, hash, rounding,
   allocation, disposal and panic helpers (`PaykanString_equals` releases
@@ -1434,7 +1443,10 @@ release %l                 ; the subject's
 
 the subject's retain stays, since `@count` may set `n.l` to `None` and free
 the node the arm still uses: whether a callee can write the field is not
-asked, any call that may run code keeps it.  The binding's retain and
+asked, any call that may run code keeps it.  So does every hold the
+lowering makes (§7, "Reads a call may replace"): a hold is the first retain
+of what it read, in use across a call that may let go of a reference, and
+the call stops the last rule.  The binding's retain and
 release go: the subject's token holds the node until the match ends.  With
 nothing in the arm that can let go (`c = c + x.v`), both pairs go, the
 binding's first.  In the program the driver compiles, the moves at last use
