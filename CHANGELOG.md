@@ -869,6 +869,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the statement) cannot be passed to 'inout' parameter 'n'`).
   `samples/leak-check/31_conditional_receivers.pkn` reads, assigns, passes and matches such
   fields on both branches.
+- `<`, `<=`, `>` and `>=` on two `char`s compared their bytes as signed, so a byte of 128 to
+  255 ordered below every ASCII one, against the language's ordering by code, `0` to `255`
+  as `int(c)` reads it: `char(200) > char(100)` was `False`, and so was `"é"[0] > 'z'`, on
+  every path.  The lowering now zero-extends both chars to `int`s, as `int(c)` does, before
+  it orders them; `==` and `!=` are unchanged (docs/pir.md §6: PIR's `cmp` on two chars
+  still orders them signed, and the lowering no longer gives it two to order).
+  `samples/codegen/69_char_ordering.pkn` orders every pair of eleven codes on both sides of
+  128 under each operator, bytes of a UTF-8 string and a sort.
 
 ## [0.2.0] - 2026-10-20
 

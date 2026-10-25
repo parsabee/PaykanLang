@@ -436,7 +436,7 @@ unless stated):
                                                ; the lowering guards 0 and INT64_MIN/-1
 %r = neg %a                                    ; i64 or f64
 %r = not %a                                    ; bool
-%r = cmp eq %a, %b | ne | lt | le | gt | ge    ; -> bool; also on bool and char (signed);
+%r = cmp eq %a, %b | ne | lt | le | gt | ge    ; -> bool; also on bool and char;
                                                ; eq/ne also on box/obj/ptr
 %r = select %c, %a, %b                         ; bool ? a : b (no side effects)
 %r = itof %a                                   ; i64 -> f64 (numeric)
@@ -463,6 +463,12 @@ an operation, and give `unsigned` (`u64`) its unsigned semantics:
 ```
 
 (`f16` rounding is the runtime call `@$rt.Paykan_round_f16(f64) -> f64`.)
+
+On two `char`s, `lt`, `le`, `gt` and `ge` order the bytes as signed, `-128`
+to `127`.  A Paykan `char` orders by its code, `0` to `255`
+(docs/language/04-strings-and-conversions.md): the lowering zero-extends both
+operands to `i64` (`cast ... to i64`, as `int<char>` does) and compares
+those, so it never orders two `char`s itself.
 
 On `f64`, `cmp` follows IEEE 754: `ne` is *unordered* (true when either
 operand is NaN; it is exactly `not (eq a, b)`), and `eq`, `lt`, `le`, `gt`,

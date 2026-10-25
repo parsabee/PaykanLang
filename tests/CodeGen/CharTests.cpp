@@ -79,6 +79,61 @@ TEST(Char, GreaterThan) {
   EXPECT_EQ(r.StdOut, "true\n");
 }
 
+// `<`, `<=`, `>` and `>=` order chars by their code, 0..255, as `int(c)`
+// reads it: every pair of a few codes on both sides of 128, each a row of
+// bits per operator, worked out here.  They compared the bytes signed, so
+// 128..255 were below 0.
+TEST(Char, OrderingIsByCode) {
+  const std::vector<int> codes = {0, 1, 127, 128, 200, 255};
+  auto holds = [](int op, int a, int b) {
+    switch (op) {
+    case 0:
+      return a < b;
+    case 1:
+      return a <= b;
+    case 2:
+      return a > b;
+    default:
+      return a >= b;
+    }
+  };
+  std::string expected;
+  for (int a : codes) {
+    for (int op = 0; op < 4; ++op) {
+      for (int b : codes)
+        expected += holds(op, a, b) ? '1' : '0';
+      expected += op == 3 ? '\n' : ' ';
+    }
+  }
+  auto r = compileAndRun(R"(
+    import ::io;
+    fn bits(a: char, op: int) -> Str {
+      codes: int[6] = [0, 1, 127, 128, 200, 255];
+      out = "";
+      for i in 0..6 {
+        b = char(codes[i]);
+        r = a >= b;
+        if op == 0 { r = a < b; }
+        if op == 1 { r = a <= b; }
+        if op == 2 { r = a > b; }
+        out = out + (if r then "1" else "0");
+      }
+      return out;
+    }
+    fn main() -> int {
+      codes: int[6] = [0, 1, 127, 128, 200, 255];
+      for i in 0..6 {
+        a = char(codes[i]);
+        io::println(bits(a, 0) + " " + bits(a, 1) + " " + bits(a, 2) + " " +
+            bits(a, 3));
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, expected);
+}
+
 // -- String indexing: s[i] -> char
 
 TEST(Char, StringIndexYieldsChar) {

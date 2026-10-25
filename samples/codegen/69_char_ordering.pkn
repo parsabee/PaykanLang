@@ -1,0 +1,90 @@
+// 69 — char ordering: `<`, `<=`, `>` and `>=` order chars by their code,
+// 0..255, as `int(c)` gives it (docs/language/04-strings-and-conversions.md)
+// Exercises: every pair of codes from a table on both sides of 128 under each
+//            of the four operators (a row of bits per code: `<`, `<=`, `>`,
+//            `>=` against each code of the table in turn); the bytes of a
+//            UTF-8 string against ASCII ones, a char field and a parameter;
+//            the smallest and largest byte of a string; an insertion sort of
+//            a char[7] by `<`.  The lowering zero-extends both chars before
+//            the compare: PIR's `cmp` on two chars orders their bytes
+//            signed, which put 128..255 below 0 (docs/pir.md §6).
+// expect-stdout: 0 01111111111 11111111111 00000000000 10000000000
+// expect-stdout: 1 00111111111 01111111111 10000000000 11000000000
+// expect-stdout: 65 00011111111 00111111111 11000000000 11100000000
+// expect-stdout: 122 00001111111 00011111111 11100000000 11110000000
+// expect-stdout: 127 00000111111 00001111111 11110000000 11111000000
+// expect-stdout: 128 00000011111 00000111111 11111000000 11111100000
+// expect-stdout: 129 00000001111 00000011111 11111100000 11111110000
+// expect-stdout: 195 00000000111 00000001111 11111110000 11111111000
+// expect-stdout: 200 00000000011 00000000111 11111111000 11111111100
+// expect-stdout: 254 00000000001 00000000011 11111111100 11111111110
+// expect-stdout: 255 00000000000 00000000001 11111111110 11111111111
+// expect-stdout: True True True True
+// expect-stdout: min 97 max 195
+// expect-stdout: 0 1 65 127 128 200 255
+
+import ::io;
+
+class Byte {
+  c: char;
+}
+
+fn below(a: char, b: char) -> bool {
+  return a < b;
+}
+
+fn bits(a: char, vs: int[11], op: int) -> Str {
+  out = "";
+  for i in 0..11 {
+    b = char(vs[i]);
+    r = a >= b;
+    if op == 0 { r = a < b; }
+    if op == 1 { r = a <= b; }
+    if op == 2 { r = a > b; }
+    out = out + (if r then "1" else "0");
+  }
+  return out;
+}
+
+fn main() -> int {
+  // Every pair of codes on both sides of 128, under each operator.
+  vs: int[11] = [0, 1, 65, 122, 127, 128, 129, 195, 200, 254, 255];
+  for i in 0..11 {
+    a = char(vs[i]);
+    io::println(Str(vs[i]) + " " + bits(a, vs, 0) + " " + bits(a, vs, 1) + " "
+        + bits(a, vs, 2) + " " + bits(a, vs, 3));
+  }
+
+  // The bytes of a string ("é" is C3 A9 in UTF-8), a field and a parameter.
+  e = "é";
+  z = Byte('z');
+  io::println(Str(e[0] > z.c) + " " + Str(e[1] > 'z') + " " + Str(e[0] > e[1])
+      + " " + Str(below(z.c, e[1])));
+
+  // The smallest and the largest byte of a string.
+  s = "aé~" + Str(char(127)) + Str(char(128));
+  lo = s[0];
+  hi = s[0];
+  for i in 1..s.len() {
+    if s[i] < lo { lo = s[i]; }
+    if s[i] > hi { hi = s[i]; }
+  }
+  io::println("min " + Str(int(lo)) + " max " + Str(int(hi)));
+
+  // An insertion sort by `<`.
+  cs: char[7] =
+      [char(200), 'A', char(255), char(0), char(128), char(127), char(1)];
+  for i in 1..7 {
+    j = i;
+    while j > 0 && cs[j] < cs[j - 1] {
+      t = cs[j];
+      cs[j] = cs[j - 1];
+      cs[j - 1] = t;
+      j = j - 1;
+    }
+  }
+  sorted = Str(int(cs[0]));
+  for i in 1..7 { sorted = sorted + " " + Str(int(cs[i])); }
+  io::println(sorted);
+  return 0;
+}
