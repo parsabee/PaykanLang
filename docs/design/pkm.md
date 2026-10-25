@@ -1307,7 +1307,7 @@ source required), in this order:
 | `pir_version ≠ pir::kPIRVersion` (the release's) | `Rejected(PIR)` |
 | `runtime_abi ≠ kRuntimeABIVersion` (the release's) | `Rejected(ABI)` |
 | `target` ≠ host abstract target | `Rejected(Target)` |
-| `core.version` (+ `build`) | **cache:** ≠ `kVersion`/build id ⇒ `Stale` (a rebuild is free and protects against codegen fixes between versions with unchanged PIR/ABI numbers). **prebuilt:** not on `PAYKAN_PKM_COMPATIBLE_VERSIONS` (new, in `cmake/PluginCompat.cmake`, generated into `PluginCompat.h`, the #103 mechanism #113 and #153 ask to reuse) ⇒ `Rejected(Toolchain)` |
+| `core.version` (+ `build`) | **cache:** ≠ `kVersion`/build id ⇒ `Stale` (a rebuild is free and protects against codegen fixes between versions with unchanged PIR/ABI numbers). **prebuilt:** not on `PAYKAN_PKM_COMPATIBLE_VERSIONS` (new, in `cmake/PluginCompat.cmake`, generated into `PluginCompat.h`, the #103 mechanism #113 and #153 ask to reuse) ⇒ `Rejected(Toolchain)`; for a development build (one with a build id), also another build id ⇒ `Rejected(Toolchain)`: its formats and runtime ABI are its sources', which two builds of one version may not share (a `PaykanType` gained a word within 0.3.0-dev) |
 | no `CODE` and no usable payload | `Usable` for `--check-only`; `NoCode` when code is needed |
 | `source` hash (when a source is found) | `Stale` |
 | each `Dep`: current `iface_hash` or `tmpl_hash` differs (§2.3) | `Stale`; dependency not found ⇒ `Rejected(MissingDependency)` |

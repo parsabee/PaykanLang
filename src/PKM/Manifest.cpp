@@ -419,6 +419,14 @@ Verdict checkCompatibility(const Manifest &m, const HostIdentity &host,
                    "compiled by paykan " + m.Core.Version +
                        ", which this paykan " + host.CoreVersion +
                        " does not accept");
+  } else if (!host.CoreBuild.empty() && m.Core.Build != host.CoreBuild) {
+    // A development build's formats and runtime ABI are its sources': two
+    // builds of one version may differ in them, a release's never do.
+    return verdict(K::Rejected, R::Toolchain,
+                   "of another build (" +
+                       (m.Core.Build.empty() ? "none" : m.Core.Build) +
+                       "); this development build (" + host.CoreBuild +
+                       ") takes only its own");
   }
   return Verdict{};
 }

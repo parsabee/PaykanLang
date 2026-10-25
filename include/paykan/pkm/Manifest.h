@@ -146,7 +146,9 @@ struct HostIdentity {
 };
 
 /// Cache: a `.paykan_cache` entry whose source is at hand (a mismatch is
-/// Stale and rebuilt).  Prebuilt: a distributed file (a mismatch rejects).
+/// Stale and rebuilt).  Prebuilt: a distributed file (a mismatch rejects): of
+/// a version the host accepts, and for a development build (a CoreBuild) of
+/// that very build.
 enum class Policy { Cache, Prebuilt };
 
 struct Verdict {

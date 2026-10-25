@@ -296,10 +296,17 @@ TEST(Manifest, Verdicts) {
   EXPECT_EQ(checkCompatibility(x, host, Policy::Prebuilt).Outcome, K::Usable);
   x.Core.Version = "0.1.1";
   expect(x, Policy::Prebuilt, K::Rejected, R::Toolchain);
+  // core.build: a development build (one with a build ID) takes only its own
+  // files, a cache entry of another rebuilt, a prebuilt file rejected; a
+  // release takes a prebuilt file of any build of a version it accepts.
   x = m;
   x.Core.Build = "other";
   expect(x, Policy::Cache, K::Stale, R::Toolchain);
-  EXPECT_EQ(checkCompatibility(x, host, Policy::Prebuilt).Outcome, K::Usable);
+  expect(x, Policy::Prebuilt, K::Rejected, R::Toolchain);
+  HostIdentity release = host;
+  release.CoreBuild = "";
+  EXPECT_EQ(checkCompatibility(x, release, Policy::Prebuilt).Outcome,
+            K::Usable);
   // The first failing row wins.
   x = m;
   x.RuntimeAbi = 6;
