@@ -273,7 +273,8 @@ PaykanFile *PaykanFile_new(void);
 
 /// Open a file at `path` with the given `mode` string (e.g. "r", "w").
 /// Returns a PaykanShared* wrapping a PaykanFile on success, or NULL with
-/// C's errno in `*err` on failure.
+/// C's errno in `*err` on failure: EINVAL for a path or a mode holding a NUL
+/// byte, which fopen would read only up to it.
 PaykanShared *PaykanFile_open(PaykanObject *path, PaykanObject *mode,
                               int64_t *err);
 void PaykanFile_destroy(PaykanObject *self);

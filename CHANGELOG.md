@@ -775,6 +775,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `No such file or directory`, and `fromErrno(4294967296)` was `Other` with
   `Success`.  Such a value, which `strerror` cannot take, now has the text `Unknown error
   <errno>` (`Paykan_error_text`; docs/stdlib/error.md).
+- `io::open` cut a path or a mode short at a NUL byte, as C's `fopen` reads them:
+  `io::open("nul\0trunc.txt", "w")` opened and wrote a file named `nul`, and
+  `io::open("three.txt", "w\0garbage")` opened `three.txt` to write.  A path or a mode
+  holding a NUL byte is now not opened: `Err` with `InvalidArgument` (`EINVAL`), and no file
+  is made (`PaykanFile_open`; docs/stdlib/io.md).
 
 ## [0.2.0] - 2026-10-20
 

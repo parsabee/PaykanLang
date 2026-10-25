@@ -639,7 +639,8 @@ directory of the process. The result is `Ok` with the `File` as its `value`, or 
 the file could not be opened; then its `error` has the code of C's `errno` and C's
 `strerror` text as its message: `NotFound` (`No such file or directory`),
 `PermissionDenied`, `IsADirectory` (a directory opened to write), `InvalidArgument` (a mode
-`fopen` does not take), and the rest of [the mapping](error.md#errorcode). Opening a directory to read succeeds on Linux; its
+`fopen` does not take, or a path or a mode holding a NUL byte, `"\0"`, which C would read
+only up to it), and the rest of [the mapping](error.md#errorcode). Opening a directory to read succeeds on Linux; its
 reads then fail with `IsADirectory`.
 
 #### `stdin`
@@ -721,6 +722,7 @@ then, when the buffer is written out (a full disk, say), is not reported to the 
 | `open` without the permission | `PermissionDenied` |
 | `open` of a directory to write | `IsADirectory` |
 | `open` with a mode `fopen` rejects | `InvalidArgument` |
+| `open` of a path, or with a mode, holding a NUL byte (`"\0"`) | `InvalidArgument` |
 | a read with nothing left | `EndOfFile` |
 | `readbytes(n)` with `n <= 0` | `InvalidArgument` |
 | `write` to a file not open for writing (`stdin()`, a `"r"` file) | `InvalidArgument` |

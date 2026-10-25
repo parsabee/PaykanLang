@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
 
 extern "C" {
@@ -151,6 +152,44 @@ TEST(FileOpen, FailureReturnsNullAndErrno) {
 
   Paykan_dispose((PaykanObject *)pathStr);
   Paykan_dispose((PaykanObject *)modeStr);
+}
+
+// fopen reads a path and a mode up to their first NUL byte, so a Str holding
+// one would open another file, or in another mode: it is not opened, EINVAL
+// (InvalidArgument), and nothing is made under the part before the NUL.
+TEST(FileOpen, ANulByteInThePathOrTheModeIsInvalid) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("paykan_file_nul_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  const std::string prefix = (dir / "nul").string();
+  const std::string path = prefix + std::string("\0trunc.txt", 10);
+  PaykanObject *pathStr =
+      (PaykanObject *)PaykanString_new(path.data(), (int64_t)path.size());
+  PaykanObject *write = strObj("w");
+  int64_t err = 0;
+  EXPECT_EQ(PaykanFile_open(pathStr, write, &err), nullptr);
+  EXPECT_EQ(err, EINVAL);
+  EXPECT_EQ(Paykan_error_code(err), PAYKAN_ERROR_INVALID_ARGUMENT);
+  EXPECT_FALSE(std::filesystem::exists(prefix));
+
+  const std::string file = (dir / "three.txt").string();
+  PaykanObject *fileStr = strObj(file.c_str());
+  PaykanObject *mode = (PaykanObject *)PaykanString_new("w\0garbage", 9);
+  err = 0;
+  EXPECT_EQ(PaykanFile_open(fileStr, mode, &err), nullptr);
+  EXPECT_EQ(err, EINVAL);
+  EXPECT_FALSE(std::filesystem::exists(file));
+
+  // Through ::io's native too.
+  err = 0;
+  EXPECT_EQ(Paykan_io_open(pathStr, write, &err), nullptr);
+  EXPECT_EQ(err, EINVAL);
+
+  Paykan_dispose(pathStr);
+  Paykan_dispose(write);
+  Paykan_dispose(fileStr);
+  Paykan_dispose(mode);
+  std::filesystem::remove_all(dir);
 }
 
 TEST(FileOpen, OpenForWrite) {

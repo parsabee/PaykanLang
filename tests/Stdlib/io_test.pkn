@@ -5,7 +5,8 @@ import ::result as res;
 // ::io's File: open and write (the file closes with its last reference),
 // read back, the error of a write on a file opened for reading (which the
 // reads after it do not inherit), the end of the file, a read whose buffer
-// cannot be allocated, a missing file.
+// cannot be allocated, a missing file, a path or a mode holding a NUL byte
+// (not opened: nothing is made under the part before it).
 
 /// The name of the code of @p r's error, `Ok` when it made a value.
 fn codeOf<T>(r: res::Result<T, err::Error>) -> Str {
@@ -50,6 +51,10 @@ fn main() -> int {
   write("io_test.txt");
   read("io_test.txt");
   io::println(codeOf(io::open("io_test_missing.txt", "r")));
+  io::println(codeOf(io::open("io_test_nul\0.txt", "w")));
+  io::println(codeOf(io::open("io_test_nul", "r")));
+  io::println(codeOf(io::open("io_test_mode.txt", "w\0x")));
+  io::println(codeOf(io::open("io_test_mode.txt", "r")));
   io::println(err::fromErrno(0).message());
   return 0;
 }

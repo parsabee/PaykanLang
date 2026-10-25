@@ -40,6 +40,13 @@ PaykanShared *PaykanFile_open(PaykanObject *pathObj, PaykanObject *modeObj,
                               int64_t *err) {
   PaykanString *path = (PaykanString *)pathObj;
   PaykanString *mode = (PaykanString *)modeObj;
+  // fopen reads each up to its first NUL byte: a path or a mode holding one
+  // would open another file, or in another mode.
+  if (memchr(path->data, '\0', (size_t)path->len) ||
+      memchr(mode->data, '\0', (size_t)mode->len)) {
+    *err = EINVAL;
+    return (PaykanShared *)0;
+  }
   FILE *handle = fopen(path->data, mode->data);
   if (!handle) {
     *err = errno;
