@@ -109,7 +109,10 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   functions and warn of a declaration of one with other types (GCC's
   `-Wbuiltin-declaration-mismatch`, Clang's
   `-Wincompatible-library-redeclaration`): a unit with native functions
-  turns that warning off after the includes.  A native function bound to a
+  turns that warning off after the includes.  They also know some of them
+  as pure (`floor`, `isnan`) and warn of a call that drops the result, so a
+  native function's result that nothing reads is kept and cast to void
+  (`double v14 = floor(v5); (void)v14;`).  A native function bound to a
   function `Runtime.h` declares (the standard library's `Paykan_io_write`,
   the Buffer functions of a `List`'s instance) is declared the same way; one
   of the functions compiled code calls has their signature ([PIR](pir.md)

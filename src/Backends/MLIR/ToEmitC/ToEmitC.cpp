@@ -277,7 +277,9 @@ StringRef calledRuntime(StringRef callee) {
 
 /// A call, by name.  A runtime function's pointer arguments go as `void *`
 /// and its pointer result is cast; an unread result is not kept (C would
-/// warn about the variable).
+/// warn about the variable), but a native function's is, cast to void: C
+/// knows some of the C library's functions as pure (`floor`, `isnan`) and
+/// warns of a call of one that drops its result.
 struct CallLowering : CPattern<func::CallOp> {
   using CPattern::CPattern;
   LogicalResult matchAndRewrite(func::CallOp op, OpAdaptor a,
@@ -292,14 +294,19 @@ struct CallLowering : CPattern<func::CallOp> {
                          ? castTo(r, loc, ptr(), v)
                          : v);
     bool used = op->getNumResults() && !op->getResult(0).use_empty();
-    Type result = used ? convert(op->getResult(0).getType()) : Type();
-    if (used && !result)
+    bool voided = !used && op->getNumResults() &&
+                  U.NativeFunctions.count(op.getCallee().str());
+    Type result = used || voided ? convert(op->getResult(0).getType()) : Type();
+    if ((used || voided) && !result)
       return failure();
     Type callResult =
         runtime && result && isa<emitc::PointerType>(result) ? ptr() : result;
     auto call = emitc::CallOpaqueOp::create(
         r, loc, callResult ? TypeRange{callResult} : TypeRange{},
         runtime ? calledRuntime(op.getCallee()) : op.getCallee(), args);
+    if (voided)
+      emitc::VerbatimOp::create(r, loc, r.getStringAttr("(void){};"),
+                                call.getResults());
     if (!used) {
       r.eraseOp(op);
       return success();

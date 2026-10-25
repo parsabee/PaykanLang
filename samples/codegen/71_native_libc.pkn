@@ -6,7 +6,8 @@
 //            of --emit-c renames each native's symbol while it includes the
 //            headers and declares the natives from their own signatures
 //            after them (docs/c-backend.md, "Native functions"); `run` and
-//            `build` call the same functions.
+//            `build` call the same functions.  A call of `floor`, which C
+//            knows as pure, whose result is not read.
 // expect-stdout: 3
 // expect-stdout: 9223372036854775807
 // expect-stdout: 42
@@ -18,12 +19,14 @@ native fn llabs(x: int) -> int = "llabs";
 native fn labs(x: i64) -> i64 = "labs";
 native fn fabs(x: float) -> float = "fabs";
 native fn quit(code: int) = "exit";
+native fn floor(x: float) -> float = "floor";
 
 fn main() -> int {
   io::println(llabs(-3));
   io::println(llabs(-9223372036854775807));
   io::println(labs(-42));
   io::println(fabs(-2.5));
+  floor(2.5);
   if llabs(-1) != 1 {
     quit(3);
   }
