@@ -132,7 +132,7 @@ to resolve, which reports unknown names.
 | `(break LOC)`, `(continue LOC)` | |
 | `(match LOC EXPR ARM...)` | `match e { ... }` |
 | `(type-arm LOC STR TYPE QUAL? BLOCK)` | `b: T { ... }`; the binding `STR` is `""` for `T { ... }`. `QUAL` is a binding's mode, `(qual view)` for `b: view T { ... }` or `(qual inout)`, and needs a binding |
-| `(value-arm LOC STR EXPR BLOCK)` | `42 { ... }`, `"hi" { ... }`; binding as above |
+| `(value-arm LOC STR EXPR BLOCK)` | `42 { ... }`, `"hi" { ... }`: the `EXPR` is a literal, an `int`, `float`, `bool`, `char`, `string` or `none` (a negative number one too, `(int -1)`); binding as above |
 | `(wildcard-arm LOC STR BLOCK)` | `_ { ... }` |
 
 ### Expressions
@@ -189,7 +189,8 @@ also makes the grammar's own checks that the recursive-descent frontend
 makes while parsing (`void?`, nested optionals, `_` for the body of a
 function that is neither a class's method nor a trait's, `(native ...)` on
 a method, `(qual static)` outside an `impl` block, a `decl` without an
-initialiser that is not `weak`). Everything else (unknown
+initialiser that is not `weak`, a `value-arm` whose pattern is not a
+literal). Everything else (unknown
 names, types that don't match, ...) is Sema's job, with the same
 diagnostics as for any frontend.
 

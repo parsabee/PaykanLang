@@ -1427,6 +1427,14 @@ private:
     return f.done() ? out : nullptr;
   }
 
+  /// Whether @p tag is a literal's, the nodes a value arm's pattern is.
+  static bool literalTag(const std::string &tag) {
+    for (const char *t : {"int", "float", "bool", "char", "string", "none"})
+      if (tag == t)
+        return true;
+    return false;
+  }
+
   MatchArm *matchArm(const SExpr &e) {
     if (e.K != SExpr::List)
       return fail(e, "expected a match arm"), nullptr;
@@ -1449,7 +1457,14 @@ private:
         arm->setMode(mode);
       }
     } else if (e.Text == "value-arm") {
-      Expr *pattern = expr(f, "the matched value");
+      // The check the grammar makes (docs/grammar.md): the pattern is a
+      // literal, a negative number's (`(int -1)`) included.
+      const SExpr *pe = f.anyList("the matched value");
+      if (pe && !literalTag(pe->Text))
+        return fail(*pe, "a value arm's pattern is a literal (int, float, "
+                         "bool, char, string or none)"),
+               nullptr;
+      Expr *pattern = pe ? expr(*pe) : nullptr;
       CompoundStmt *body = pattern ? block(f, "the arm's body") : nullptr;
       if (body)
         arm = Ctx.make<MatchArm>(loc, *binding, pattern, body);

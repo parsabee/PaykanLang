@@ -1052,6 +1052,35 @@ TEST(ASTInterchange, ALocalDeclarationHasAnInitialiser) {
   EXPECT_NE(tu, nullptr) << error;
 }
 
+// A value arm's pattern is a literal, as the grammar's is: one of a
+// negative number (`(int -1)`, `(float -2.5)`) included, but not an
+// expression, which failed PIR verification (`switch case %1 is not a
+// constant`) after Sema took it.
+TEST(ASTInterchange, AValueArmsPatternIsALiteral) {
+  const std::string pre = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
+                          "(params) _ (block (match (ident \"x\") (value-arm "
+                          "\"\" ";
+  for (const char *pattern :
+       {"(ident \"k\")", "(binary add (int 1) (int 2))", "(unary neg (int 1))",
+        "(call \"g\" (type-args))"}) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(pre + pattern + " (block)))))))", ctx, error), nullptr)
+        << pattern;
+    EXPECT_EQ(error, "1:94: a value arm's pattern is a literal (int, float, "
+                     "bool, char, string or none)")
+        << pattern;
+  }
+  for (const char *pattern :
+       {"(int -1)", "(int -9223372036854775808)", "(float -2.5)", "(bool true)",
+        "(char 97)", "(string \"s\")", "(none)"}) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_NE(read(pre + pattern + " (block)))))))", ctx, error), nullptr)
+        << pattern << ": " << error;
+  }
+}
+
 // A `for` loop is its variable as a `var` with no initialiser, the range's
 // ends, the step or `_`, the body, and a trailing `(inclusive)` for `..=`.
 TEST(ASTInterchange, ForLoops) {

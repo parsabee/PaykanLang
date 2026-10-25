@@ -467,3 +467,43 @@ TEST(ControlFlow, IntMatchLiteralArmsNotExhaustive) {
   EXPECT_FALSE(r.Ok);
   EXPECT_NE(r.Diagnostics.find("does not always return"), std::string::npos);
 }
+
+// A value arm's pattern is a literal.  No parser builds another, but a
+// frontend could hand one over: `match 1 { k { } 1 + 2 { } _ { } }`, with
+// `k` a variable, passed Sema and failed PIR verification (`switch case %1
+// is not a constant`).
+TEST(ControlFlow, ValueArmPatternIsALiteral) {
+  namespace ast = paykan::ast;
+  ast::ASTContext ctx;
+  auto at = [](size_t col) { return ast::SourceLocation(3, col, 3, col + 1); };
+  auto *k =
+      ctx.make<ast::VarDecl>(ast::SourceLocation(2, 3, 2, 9), ctx.intern("k"),
+                             nullptr, ctx.make<ast::IntegerLiteral>(at(1), 1));
+  auto arm = [&](ast::SourceLocation loc, ast::Expr *pattern) {
+    return ctx.make<ast::MatchArm>(loc, ctx.intern(""), pattern,
+                                   ctx.make<ast::CompoundStmt>(loc));
+  };
+  std::vector<ast::MatchArm *> arms = {
+      arm(at(13), ctx.make<ast::Identifier>(at(13), ctx.intern("k"))),
+      arm(at(20),
+          ctx.make<ast::BinaryExpr>(at(20), ast::BinaryOpcode::Add,
+                                    ctx.make<ast::IntegerLiteral>(at(20), 1),
+                                    ctx.make<ast::IntegerLiteral>(at(24), 2))),
+      arm(at(30), ctx.make<ast::IntegerLiteral>(at(30), -1)),
+      ctx.make<ast::MatchArm>(at(36), ctx.intern(""),
+                              static_cast<ast::Type *>(nullptr),
+                              ctx.make<ast::CompoundStmt>(at(36)))};
+  auto *match = ctx.make<ast::MatchStmt>(
+      at(3), ctx.make<ast::IntegerLiteral>(at(9), 1), std::move(arms));
+  auto r = semaCheckAST(
+      ctx, mainOfStatements(
+               ctx, {ctx.make<ast::DeclStmt>(k->getLocation(), k), match}));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+  for (const char *diag : {"3:13: error: a value-match arm's pattern must be "
+                           "a literal",
+                           "3:20: error: a value-match arm's pattern must be "
+                           "a literal"})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+}

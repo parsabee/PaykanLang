@@ -4654,14 +4654,32 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
         declarePoisoned(CurrentScope, arm->getBinding());
         ok = false;
       }
-      // A numeric literal takes the subject's sized type when it fits.
-      auto *litTy = resolveExprType(arm->getLiteralPattern(), subjectTy);
-      if (litTy && !typesEqual(litTy, subjectTy)) {
-        error(arm->getLocation(), "match arm literal of type '" +
-                                      typeName(litTy) +
-                                      "' does not match subject type '" +
-                                      typeName(subjectTy) + "'");
+      // The pattern is a literal, as the grammar's is (docs/grammar.md
+      // section 6): a switch case, or the value an equality compares with.
+      // The parser and the AST interchange reader build no other; an AST that
+      // has one is rejected here, before the lowering.
+      ast::Expr *pattern = arm->getLiteralPattern();
+      const bool literal = ast::isa<ast::IntegerLiteral>(pattern) ||
+                           ast::isa<ast::FloatLiteral>(pattern) ||
+                           ast::isa<ast::BoolLiteral>(pattern) ||
+                           ast::isa<ast::CharLiteral>(pattern) ||
+                           ast::isa<ast::StringLiteral>(pattern) ||
+                           ast::isa<ast::NoneLiteral>(pattern);
+      if (!literal) {
+        error(arm->getLocation(),
+              "a value-match arm's pattern must be a literal (a number, a "
+              "character, a string, True, False or None)");
         ok = false;
+      } else {
+        // A numeric literal takes the subject's sized type when it fits.
+        auto *litTy = resolveExprType(pattern, subjectTy);
+        if (litTy && !typesEqual(litTy, subjectTy)) {
+          error(arm->getLocation(), "match arm literal of type '" +
+                                        typeName(litTy) +
+                                        "' does not match subject type '" +
+                                        typeName(subjectTy) + "'");
+          ok = false;
+        }
       }
     } else {
       // A type-named arm in a value-mode match.

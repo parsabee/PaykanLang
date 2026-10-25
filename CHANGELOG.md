@@ -894,6 +894,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   local starts without one, as None)`), so none reaches the lowering.  A `weak` local
   without one (`weak w: Node?;`, which starts as `None`) and a `for` loop's variable stay
   as they are.
+- A frontend plugin's AST, or the `ast-text` frontend's input, could give a `match` arm on a
+  number, a character or a string a pattern that is not a literal, which the grammar has
+  no way to write: `(value-arm "" (ident "k") ...)` or `(binary add (int 1) (int 2))`
+  passed `--check-only` and failed PIR verification at run time (`switch case %1 is not a
+  constant`).  The AST interchange reader now rejects it (`a value arm's pattern is a
+  literal (int, float, bool, char, string or none)`, docs/plugins/ast-format.md), and Sema
+  rejects such an arm whichever frontend built it (`a value-match arm's pattern must be a
+  literal (a number, a character, a string, True, False or None)`).  A negative number's
+  literal, `(int -1)`, stays a pattern.
 
 ## [0.2.0] - 2026-10-20
 
