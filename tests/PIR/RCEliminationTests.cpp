@@ -1167,6 +1167,56 @@ fn @f(%w: weak, %q: box) -> void {
   EXPECT_EQ(passed.Counts.Retains, 0u);
 }
 
+TEST(RCElimination, ALentParameterKeepsWhatItHoldsForTheWholeCall) {
+  // A box parameter the lending pass lent (docs/pir.md §12): its slot holds
+  // the caller's reference, which encloses the whole call, or its own until
+  // its release at the end, which asks the bit.  Either way the slot keeps
+  // the object alive across the range: the read's pair goes across a call,
+  // as for a parameter the body owns, and the conditional release stays.
+  Result r = eliminate(kLook + R"(
+fn @f(%n: box) -> i64 {
+  local %np: box
+  %o = owned %n
+  store %np, %n
+  %a = load %np
+  retain %a
+  %k = call @cond()
+  call @look(lent %a)
+  %ao = unbox %a
+  %v = field.load %ao, Node.v
+  release %a
+  %e = load %np
+  if %o {
+    release %e
+  }
+  ret %v
+}
+)");
+  EXPECT_EQ(count(f(r), "retain"), 0u) << f(r);
+  EXPECT_EQ(count(f(r), "release"), 1u) << f(r);
+  EXPECT_EQ(r.Counts.Retains, 1u);
+  EXPECT_EQ(r.Counts.Releases, 1u);
+  // Handed on in the range with its bit, it may be the callee that frees
+  // the object (when it was handed over): the read keeps its retain.
+  Result handed = eliminate(kLook + R"(
+fn @f(%n: box) -> i64 {
+  local %np: box
+  %o = owned %n
+  store %np, %n
+  %a = load %np
+  retain %a
+  %b = load %np
+  call @look(owned(%o) %b)
+  %ao = unbox %a
+  %v = field.load %ao, Node.v
+  release %a
+  ret %v
+}
+)");
+  EXPECT_EQ(count(f(handed), "retain %a"), 1u) << f(handed);
+  EXPECT_EQ(handed.Counts.Retains, 0u);
+}
+
 TEST(RCElimination, AConditionalRetainOrReleaseIsNeverPaired) {
   // A parameter's prologue retains it only when it was lent, and its exit
   // releases it only when it was handed over: on one path of each `if` the

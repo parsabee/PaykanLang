@@ -1089,10 +1089,13 @@ TEST(Driver, StatsCountTheReferenceCountElimination) {
 // argument over that the moves at last use left where the caller's
 // reference outlives the call (`lending marks`, `lending arguments lent`,
 // `lending copies kept for the window`; here the first `take(a)`'s), and
-// clears their mark (docs/pir.md §6, §12).  --pir-skip=<pass>[,<pass>] (not
-// in --help) leaves passes out: here the lending pass, whose marks then
-// stay in what --emit-pir prints, and the reference-count elimination.  A
-// name no pass has, and --emit-pkm, are refused.
+// clears their mark (docs/pir.md §6, §12); and it lends the box parameters
+// their bodies never write (`lending parameters lent`, `handed on`, `owned
+// on entry`, `retains at keeps`; here take's x, whose release then asks the
+// bit).  --pir-skip=<pass>[,<pass>] (not in --help) leaves passes out: here
+// the lending pass, whose marks and prologues then stay in what --emit-pir
+// prints, and the reference-count elimination.  A name no pass has, and
+// --emit-pkm, are refused.
 TEST(Driver, PirSkipLeavesPassesOut) {
   REQUIRE_BACKEND();
   auto src =
@@ -1108,11 +1111,19 @@ TEST(Driver, PirSkipLeavesPassesOut) {
                          "  lending marks : 1\n"
                          "  lending arguments lent : 1\n"
                          "  lending copies kept for the window : 0\n"
+                         "  lending parameters lent : 1\n"
+                         "  lending parameters handed on : 0\n"
+                         "  lending parameters owned on entry : 0\n"
+                         "  lending retains at keeps : 0\n"
                          "  rc-elimination retains removed : 0\n"),
             std::string::npos)
       << all.out;
   EXPECT_EQ(all.out.find("retain lend "), std::string::npos) << all.out;
   EXPECT_NE(all.out.find("call @take(lent %a."), std::string::npos) << all.out;
+  EXPECT_NE(all.out.find("  if %x.own.2 {\n    release %7\n  }\n"),
+            std::string::npos)
+      << all.out;
+  EXPECT_EQ(all.out.find("retain %x.1"), std::string::npos) << all.out;
   auto skip =
       run(paykan + " --stats --pir-skip=lending,rc-elimination --emit-pir " +
           src + " 2>&1");
@@ -1123,6 +1134,9 @@ TEST(Driver, PirSkipLeavesPassesOut) {
   EXPECT_EQ(skip.out.find("  lending "), std::string::npos) << skip.out;
   EXPECT_EQ(skip.out.find("  rc-elimination "), std::string::npos) << skip.out;
   EXPECT_NE(skip.out.find("  retain lend %a."), std::string::npos) << skip.out;
+  EXPECT_NE(skip.out.find("  if %x.lent.3 {\n    retain %x.1\n  }\n"),
+            std::string::npos)
+      << skip.out;
   EXPECT_EQ(run(paykanRun() + " --pir-skip=lending " + src).exitCode, 14);
   auto unknown =
       run(paykan + " --pir-skip=lending,folding --check-only " + src + " 2>&1");

@@ -3,12 +3,14 @@
 // Borrowed box parameters (#98, docs/pir.md §3, §12): the programs that
 // pin down when an object dies, run through the passes the driver runs (the
 // moves at last use, the lending, the reference-count elimination).  A copy
-// the caller makes of a reference it keeps for the call is lent instead;
-// each program prints what it printed before borrowed parameters, so every
-// object still dies where it did, and frees everything it allocates.  Each
-// also says how many arguments the lending pass lent, and how many copies it
-// kept because something between the read and the call may let the object
-// go (the window).
+// the caller makes of a reference it keeps for the call is lent instead,
+// and a callee that never writes a parameter releases, hands on or keeps it
+// only as its ownership mask says; each program prints what it printed
+// before borrowed parameters, so every object still dies where it did, and
+// frees everything it allocates.  Each also says how many arguments the
+// lending pass lent, how many copies it kept because something between the
+// read and the call may let the object go (the window), and some how many
+// parameters it lent and how many their bodies own from their entry.
 
 #include "CodeGenTestUtils.h"
 
@@ -105,6 +107,13 @@ fn main() -> int {
                       "in outer, after inner: gone\n");
   EXPECT_EQ(stats.get("lending", "arguments lent"), 9u);
   EXPECT_EQ(stats.get("lending", "copies kept for the window"), 0u);
+  // rebind writes its n: it owns it from its entry.  outer hands its n on
+  // to inner, and each constructor (Node, Watcher, Holder) its parameter
+  // to its `__init__`; stash and the `__init__`s of Node and Holder keep
+  // theirs in a field (Watcher's makes a weak reference of its own).
+  EXPECT_EQ(stats.get("lending", "parameters owned on entry"), 1u);
+  EXPECT_EQ(stats.get("lending", "parameters handed on"), 4u);
+  EXPECT_EQ(stats.get("lending", "retains at keeps"), 3u);
   g.expectNoLeaks("t1_forward");
 }
 
@@ -716,5 +725,44 @@ fn main() -> int {
                       "after moves: gone gone gone gone gone gone\n");
   EXPECT_EQ(stats.get("lending", "arguments lent"), 32u);
   EXPECT_EQ(stats.get("lending", "copies kept for the window"), 0u);
+  // The six writers own their n (or s) from their entry; toNone's `n =
+  // None` stores null, and its n is lent.
+  EXPECT_EQ(stats.get("lending", "parameters owned on entry"), 6u);
   g.expectNoLeaks("w1_written");
+}
+
+// The 65th box parameter and those after it have no bit in the ownership
+// mask (docs/pir.md §3): handed over always, each a copy of the variable
+// the caller keeps, which the callee releases; the 64 before them are lent
+// and released by nobody.
+TEST(BorrowedParams, BoxParametersPastTheSixtyFourthAreHandedOver) {
+  LeakGuard g;
+  pir::Statistics stats;
+  std::string params;
+  std::string args;
+  for (int i = 0; i < 66; ++i) {
+    params += (i ? ", s" : "s") + std::to_string(i) + ": Str";
+    args += i ? ", a" : "a";
+  }
+  auto r = compilePassesAndRun("import ::io;\n"
+                               "fn wide(" +
+                                   params +
+                                   ") -> Str {\n"
+                                   "  return s0 + s63 + s64 + s65;\n"
+                                   "}\n"
+                                   "fn main() -> int {\n"
+                                   "  a = \"a\" + \"1\";\n"
+                                   "  io::println(wide(" +
+                                   args +
+                                   ") + a);\n"
+                                   "  return 0;\n"
+                                   "}\n",
+                               stats);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "a1a1a1a1a1\n");
+  // main's 64 copies for wide, and println's of the result's concatenation.
+  EXPECT_GE(stats.get("lending", "arguments lent"), 64u);
+  EXPECT_EQ(stats.get("lending", "parameters owned on entry"), 0u);
+  g.expectNoLeaks("wide");
 }

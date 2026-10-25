@@ -53,9 +53,10 @@ assigned a new tuple.
 ## The Reference Counts
 
 Each heap object carries a **reference count**. Storing a reference (in a variable, a field,
-an array or a tuple, or by passing it to a function) increments the count; when a reference
-goes away (a variable goes out of scope, a field or element is overwritten, an object holding
-it is destroyed) the count is decremented. When it reaches zero, the object is destroyed:
+an array or a tuple) increments the count, and so does passing it to a function that keeps it
+(see [Borrowed parameters](#borrowed-parameters)); when a reference goes away (a variable goes
+out of scope, a field or element is overwritten, an object holding it is destroyed) the count
+is decremented. When it reaches zero, the object is destroyed:
 its own references are released, which may destroy further objects in turn, and its memory
 is freed. You never write any of this; the compiler inserts the counting.
 
@@ -131,11 +132,13 @@ reference names it:
 
 - **Assignment** `x = y` retains the new object and releases whatever `x` referred to before, so
   reassigning a variable cannot leak the previous value.
-- **Passing to a function** gives it a reference of its own, which keeps the object alive while
-  the function holds it: until it returns, or until it hands the reference on in turn. The
-  reference the caller holds is unaffected, so an object the caller still holds outlives the call
-  (at a variable's last use, that reference is the one passed: see
-  [Ownership transfers](#ownership-transfers)).
+- **Passing to a function** lends it the caller's reference when the caller keeps the object
+  alive for the whole call, and gives it a reference of its own otherwise (a temporary, or a
+  variable at its last use: see [Ownership transfers](#ownership-transfers)), which keeps the
+  object alive while the function holds it: until it returns, or until it hands the reference
+  on in turn. A function takes a reference of its own to what it was lent only where it keeps
+  it (see [Borrowed parameters](#borrowed-parameters)). The reference the caller holds is
+  unaffected, so an object the caller still holds outlives the call.
 - **Returning** transfers ownership of the result to the caller.
 - **Storing into a field or array slot** retains the stored object; overwriting a slot releases
   the value it previously held.
@@ -518,6 +521,80 @@ Nothing else changes: an object is destroyed at the same point as without these 
 `weak` reference reads what it would, and the program frees the same objects. `--stats`
 counts the retains and releases removed ([docs/pir.md §12](../pir.md#12-passes) has the
 rules).
+
+## Borrowed parameters
+
+A function is **lent** an argument when the caller keeps a reference of its own to the object
+for the whole call: a variable it reads again afterwards, a parameter of its own, or a field
+nothing in the call can replace. A lent argument costs no count at all where the function
+only reads it or passes it on: neither the caller nor the function retains it, and the function
+does not release it. Where the function keeps it (stores it in a field or a variable, returns
+it), it retains it there, so the place it is kept in has a reference of its own. A temporary,
+and a variable at its last use, are handed over as before: the function releases them when it
+is done, or hands them on, so they die where they always did. Which way an argument goes is
+decided at each call; nothing in the function's declaration says it.
+
+```pkn
+import ::io;
+
+class Node {
+  name: Str;
+}
+
+class Watcher {
+  weak target: Node?;
+}
+
+fn state(w: view Watcher) -> Str {
+  match w.target {
+    Node { return "alive"; }
+    None { return "gone"; }
+  }
+}
+
+// Only reads its parameter: lent, its count never changes.
+fn show(n: Node) {
+  io::println(n.name);
+}
+
+class Holder {
+  n: Node?;
+}
+
+// Keeps its parameter: the field takes a reference of its own.
+fn keep(h: Holder, n: Node) {
+  h.n = n;
+}
+
+fn main() -> int {
+  a = Node("a");
+  w = Watcher(a);
+  show(a);                    // lent: main reads a again below
+  h = Holder(None);
+  keep(h, a);                 // lent too
+  h.n = None;
+  io::println("after the field let go: " + state(w));
+  show(a);                    // a's last use: handed over, a dies in show
+  io::println("after show: " + state(w));
+  return 0;
+}
+```
+
+Output:
+
+```
+a
+after the field let go: alive
+a
+after show: gone
+```
+
+A function that assigns its parameter (`n = Node("b")`, `s += "!"`, passing it to an `inout`
+parameter) owns it from its start instead, as every function did before: then the parameter
+is its own variable. Nothing else changes: an object is destroyed at the same point whether
+it is lent or not, a `weak` reference reads what it would, and the program frees the same
+objects. `--stats` counts the arguments lent and the parameters
+([docs/pir.md §12](../pir.md#12-passes) has the rules).
 
 ## Strings, Arrays and Tuples
 

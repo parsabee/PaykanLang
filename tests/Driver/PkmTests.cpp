@@ -1257,10 +1257,11 @@ TEST(Pkm, ModuleCodeKeepsWhatTheModuleAndItsImportersUse) {
 // The main module of a program knows every class derived from its classes
 // (docs/pir.md §7), so its copy of `HashMap<Str, Dog>.put` reads the map's
 // table in place across `_Table.put`, which lets go only of Dogs and
-// strings, by a stable load: it retains nothing but its parameters when
-// they are lent (their prologue, docs/pir.md §3).  Written to a `.pkm`
-// file, which a module that derives a class holding anything from `Dog`
-// may import, the same file holds the table across the call.
+// strings, by a stable load: it retains nothing, and hands its parameters
+// on with their bits, whether they were lent or handed over (docs/pir.md
+// §3, §12).  Written to a `.pkm` file, which a module that derives a class
+// holding anything from `Dog` may import, the same file holds the table
+// across the call.
 TEST(Pkm, AModuleFileAssumesNothingOfItsClassesSubclasses) {
   REQUIRE_BACKEND();
   fs::path dir =
@@ -1298,10 +1299,9 @@ TEST(Pkm, AModuleFileAssumesNothingOfItsClassesSubclasses) {
   for (size_t at = program.find("retain "); at != std::string::npos;
        at = program.find("retain ", at + 1))
     ++retains;
-  EXPECT_EQ(retains, 2u) << program;
-  EXPECT_TRUE(contains(program, "  if %k.lent.5 {\n    retain %k.2\n  }\n"))
-      << program;
-  EXPECT_TRUE(contains(program, "  if %v.lent.7 {\n    retain %v.3\n  }\n"))
+  EXPECT_EQ(retains, 0u) << program;
+  EXPECT_TRUE(contains(program, "(%recv.obj.10, owned(%k.own.4) %k.11, "
+                                "owned(%v.own.6) %v.12)\n"))
       << program;
   EXPECT_TRUE(contains(module, "= ptr.load box, %self.addr.8\n")) << module;
   EXPECT_TRUE(contains(module, "retain %elem.9\n")) << module;
@@ -1348,6 +1348,71 @@ TEST(Pkm, ModuleCodeKeepsNoLendMark) {
     EXPECT_FALSE(contains(code.out, "retain %x.6\n")) << code.out;
     EXPECT_FALSE(contains(code.out, "retain lend")) << code.out;
   }
+  fs::remove_all(dir);
+}
+
+// A module's compiled code is lent what its importer keeps (#98 part 2,
+// docs/pir.md §3, §12): the program's copies of `s` and `n` for lib's
+// constructor, its `stash`, which keeps the node in a field, and its
+// native function's body, and for the standard library's List and
+// HashMap, are lent arguments, and the compiled callees, whose lending ran
+// when their `.pkm` was made, release nothing they were lent and retain
+// what they keep.  The program frees everything and prints what it did.
+TEST(Pkm, ACompiledCalleeIsLentWhatItsImporterKeeps) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_lent_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib.pkn",
+            "native fn width(s: view Str) -> int = \"pk_lent_width\";\n"
+            "class Node { name: Str; }\n"
+            "class Holder { n: Node?; }\n"
+            "fn stash(h: Holder, n: Node) { h.n = n; }\n"
+            "fn named(n: Node) -> Str { return n.name; }\n");
+  writeFile(dir / "lib.c", "#include <stdint.h>\n"
+                           "int64_t pk_lent_width(void *s) { return s ? 7 : 0; "
+                           "}\n");
+  writeFile(
+      dir / "main.pkn",
+      "import ::io;\n"
+      "import ::collections as c;\n"
+      "import lib;\n"
+      "fn main() -> int {\n"
+      "  s = \"abc\" + \"def\";\n"
+      "  n = lib::Node(s);\n"
+      "  h = lib::Holder(None);\n"
+      "  lib::stash(h, n);\n"
+      "  l = c::List<lib::Node>();\n"
+      "  l.push(n);\n"
+      "  m = c::HashMap<Str, Str>();\n"
+      "  m.put(s, \"v\");\n"
+      "  io::println(Str<int>(lib::width(s)) + \" \" + lib::named(n) +\n"
+      "              \" \" + l.at(0).name + \" \" + m.getOr(s, s) + \" \" + "
+      "s);\n"
+      "  return 0;\n"
+      "}\n");
+  auto in = [&](const std::string &cmd) {
+    return run("cd " + dir.string() + " && " + cmd);
+  };
+  ASSERT_EQ(in("cc -std=c11 -fPIC -c lib.c -o lib.o").exitCode, 0);
+  auto ran = in(paykanCmd() + " --track-heap --object=lib.o main.pkn");
+  EXPECT_EQ(ran.exitCode, 0) << ran.out;
+  EXPECT_TRUE(contains(ran.out, "7 abcdef abcdef v abcdef\n")) << ran.out;
+  EXPECT_TRUE(contains(ran.out, "live blocks       : 0\n")) << ran.out;
+  // lib came from its cache entry this time: its compiled code is lent to.
+  auto again = in(paykanCmd() + " --track-heap --object=lib.o main.pkn");
+  EXPECT_EQ(again.out, ran.out);
+  auto pir = in(paykanCmd() + " --emit-pir main.pkn");
+  ASSERT_EQ(pir.exitCode, 0) << pir.out;
+  for (const char *call :
+       {"call @\"lib::Node\"(lent %s.", "call @\"lib::stash\"(%h.8, lent %n.",
+        "call @List<Node>.push(%l.addr.12, lent %n.",
+        "call @\"HashMap<Str, Str>.put\"(%m.addr.16, lent %s.",
+        "call @\"lib::width\"(lent %s.",
+        "call @\"HashMap<Str, Str>.getOr\"(%m.addr.40, lent %s.41, lent %s."})
+    EXPECT_TRUE(contains(pir.out, call)) << call << "\n" << pir.out;
+  // n's last use hands it over.
+  EXPECT_TRUE(contains(pir.out, "call @\"lib::named\"(%n.")) << pir.out;
   fs::remove_all(dir);
 }
 

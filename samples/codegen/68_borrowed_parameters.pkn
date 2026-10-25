@@ -1,0 +1,363 @@
+// 68 — borrowed parameters: a caller lends what it keeps alive, and a
+// callee asks whether it was lent
+// Exercises: the compiler's lending (docs/language/16-memory.md, "Borrowed
+//            parameters"; docs/pir.md §3, "Box parameters and the ownership
+//            mask", and §12, "The lending pass"): a variable passed to a
+//            function that only reads it, hands it on or keeps it in a
+//            field; a parameter handed on at its last use, a temporary,
+//            one reassigned, one kept in a field the callee then clears;
+//            a field read whose call replaces the field (a hold), and one
+//            beside its object handed over at its last use; every way a
+//            callee writes its parameter, called with a variable it keeps
+//            and at the variable's last use; and a field read the callee
+//            replaces, given to every kind of call.  The `weak`
+//            references show when each object dies: where it did before
+//            arguments were lent, when what last held it lets it go.
+// expect-stdout: inner reads a
+// expect-stdout: in outer, after inner: gone
+// expect-stdout: in main, after outer: gone
+// expect-stdout: in rebind, after the assignment: gone
+// expect-stdout: in main, after rebind: gone
+// expect-stdout: in stash, after the field let go: gone
+// expect-stdout: in main, after stash: gone
+// expect-stdout: inner reads t
+// expect-stdout: in outer, after inner: gone
+// expect-stdout: kept: k | k alive
+// expect-stdout: still have original string
+// expect-stdout: in nameAndNode, after the assignment: gone
+// expect-stdout: name xname
+// expect-stdout: in main, after nameAndNode: gone
+// expect-stdout: copies:
+// expect-stdout:   assign: old is alive, n = b
+// expect-stdout:   compound: s = a!
+// expect-stdout:   viaInout: old is alive, n = c
+// expect-stdout:   destructure: old is alive, n = m
+// expect-stdout:   toNone: old is alive
+// expect-stdout:   armInout: old is alive, n = arm
+// expect-stdout:   inoutLocal: old is alive, n = loc
+// expect-stdout: after copies: a is alive, a = a
+// expect-stdout: moves:
+// expect-stdout:   assign: old is gone, n = b
+// expect-stdout:   viaInout: old is gone, n = c
+// expect-stdout:   toNone: old is gone
+// expect-stdout:   destructure: old is gone, n = m
+// expect-stdout:   armInout: old is gone, n = arm
+// expect-stdout:   inoutLocal: old is gone, n = loc
+// expect-stdout: after moves: gone gone gone gone gone gone
+// expect-stdout: direct: a1
+// expect-stdout: vcall: a2
+// expect-stdout: ctor: a3
+// expect-stdout: struct method: a4
+// expect-stdout: icall: a5
+// expect-stdout: generic: a6
+// expect-stdout: super: a7
+// expect-stdout: kept: a3 a7
+
+import ::io;
+
+class Node {
+  name: Str;
+}
+
+class Watcher {
+  weak target: Node?;
+}
+
+fn report(w: view Watcher, tag: view Str) {
+  match w.target {
+    t: Node { io::println(tag + ": alive"); }
+    None { io::println(tag + ": gone"); }
+  }
+}
+
+fn state(w: view Watcher) -> Str {
+  match w.target {
+    Node { return "alive"; }
+    None { return "gone"; }
+  }
+}
+
+// -- Lent, handed on, kept: each object dies where it did
+
+// Reads its parameter only.
+fn inner(n: Node) {
+  io::println("inner reads " + n.name);
+}
+
+// Hands its parameter on at its last use, then does more work.
+fn outer(n: Node, w: view Watcher) {
+  inner(n);
+  report(w, "in outer, after inner");
+}
+
+// Reassigns its parameter.
+fn rebind(n: Node, w: view Watcher) {
+  n = Node("other");
+  report(w, "in rebind, after the assignment");
+}
+
+class Holder {
+  n: Node?;
+}
+
+// Keeps its parameter in a field, then lets the field go.
+fn stash(h: Holder, n: Node, w: view Watcher) {
+  h.n = n;
+  h.n = None;
+  report(w, "in stash, after the field let go");
+}
+
+// Keeps its parameter in a field the caller reads afterwards.
+fn keep(h: Holder, n: Node) {
+  h.n = n;
+}
+
+fn handOffs() {
+  a = Node("a");
+  wa = Watcher(a);
+  outer(a, wa);              // a's last use: handed over
+  report(wa, "in main, after outer");
+
+  b = Node("b");
+  wb = Watcher(b);
+  rebind(b, wb);
+  report(wb, "in main, after rebind");
+
+  c = Node("c");
+  wc = Watcher(c);
+  h = Holder(None);
+  stash(h, c, wc);
+  report(wc, "in main, after stash");
+
+  // A temporary handed to outer: outer hands it on to inner.
+  wt = Watcher(None);
+  outer(Node("t"), wt);
+
+  // Lent to keep, which retains what it keeps.
+  k = Node("k");
+  wk = Watcher(k);
+  g = Holder(None);
+  keep(g, k);
+  label = "";
+  match g.n {
+    m: Node { label = m.name; }
+    None { label = "none"; }
+  }
+  io::println("kept: " + label + " | " + k.name + " " + state(wk));
+}
+
+// -- Reads the caller holds
+
+class Pair {
+  n: Node?;
+  s: Str;
+}
+
+// The callee replaces the field its argument was read from, then reads
+// the argument: the caller keeps the argument alive (a hold).
+fn clearThenRead(s: Str, p: Pair) {
+  p.s = "replaced";
+  io::println("still have " + s);
+}
+
+// Given a node's name and the node at its last use: the node may die
+// inside, the name must not.
+fn nameAndNode(s: Str, n: Node, w: view Watcher) {
+  n = Node("other");
+  report(w, "in nameAndNode, after the assignment");
+  io::println("name " + s);
+}
+
+fn hazards() {
+  p = Pair(None, "original " + "string");
+  clearThenRead(p.s, p);
+
+  x = Node("x" + "name");
+  wx = Watcher(x);
+  nameAndNode(x.name, x, wx);   // x's last use
+  report(wx, "in main, after nameAndNode");
+}
+
+// -- Every way a callee writes its parameter: it owns it from its entry
+
+fn assign(n: Node, w: view Watcher) {
+  n = Node("b");
+  io::println("  assign: old is " + state(w) + ", n = " + n.name);
+}
+
+fn compound(s: Str) {
+  s += "!";
+  io::println("  compound: s = " + s);
+}
+
+fn bump(n: inout Node) {
+  n = Node("c");
+}
+
+fn viaInout(n: Node, w: view Watcher) {
+  bump(n);
+  io::println("  viaInout: old is " + state(w) + ", n = " + n.name);
+}
+
+fn pair(a: Node) -> (Node, int) { return (a, 1); }
+
+fn destructure(n: Node, w: view Watcher) {
+  n, k = pair(Node("m"));
+  io::println("  destructure: old is " + state(w) + ", n = " + n.name);
+}
+
+fn armInout(n: Node, w: view Watcher) {
+  match n {
+    s: inout Node { s = Node("arm"); }
+  }
+  io::println("  armInout: old is " + state(w) + ", n = " + n.name);
+}
+
+fn inoutLocal(n: Node, w: view Watcher) {
+  r: inout = n;
+  r = Node("loc");
+  io::println("  inoutLocal: old is " + state(w) + ", n = " + n.name);
+}
+
+fn toNone(n: Node?, w: view Watcher) {
+  n = None;
+  io::println("  toNone: old is " + state(w));
+}
+
+fn writes() {
+  a = Node("a");
+  wa = Watcher(a);
+  io::println("copies:");
+  assign(a, wa);
+  compound(a.name);
+  viaInout(a, wa);
+  destructure(a, wa);
+  toNone(a, wa);
+  armInout(a, wa);
+  inoutLocal(a, wa);
+  io::println("after copies: a is " + state(wa) + ", a = " + a.name);
+  io::println("moves:");
+  b = Node("b0");
+  wb = Watcher(b);
+  assign(b, wb);
+  c = Node("c0");
+  wc = Watcher(c);
+  viaInout(c, wc);
+  d = Node("d0");
+  wd = Watcher(d);
+  toNone(d, wd);
+  e = Node("e0");
+  we = Watcher(e);
+  destructure(e, we);
+  f = Node("f0");
+  wf = Watcher(f);
+  armInout(f, wf);
+  g = Node("g0");
+  wg = Watcher(g);
+  inoutLocal(g, wg);
+  io::println("after moves: " + state(wb) + " " + state(wc) + " " +
+              state(wd) + " " + state(we) + " " + state(wf) + " " +
+              state(wg));
+}
+
+// -- A read the callee replaces, given to every kind of call
+
+class Cell {
+  n: Node;
+}
+
+fn direct(m: Node, h: Cell) {
+  h.n = Node("z");
+  io::println("direct: " + m.name);
+}
+
+class Base {
+  view fn take(m: Node, h: Cell) {
+    io::println("base");
+  }
+}
+
+class Derived: Base {
+  view fn take(m: Node, h: Cell) {
+    h.n = Node("z");
+    io::println("vcall: " + m.name);
+  }
+}
+
+class Keeper {
+  m: Node;
+}
+
+impl Keeper {
+  fn __init__(m: Node, h: Cell) {
+    h.n = Node("z");
+    self.m = m;
+    io::println("ctor: " + m.name);
+  }
+}
+
+class Parent {
+  m: Node;
+}
+
+impl Parent {
+  fn __init__(m: Node, h: Cell) {
+    h.n = Node("z");
+    self.m = m;
+    io::println("super: " + m.name);
+  }
+}
+
+class Child: Parent {
+}
+
+impl Child {
+  fn __init__(h: Cell) {
+    __super__(h.n, h);
+  }
+}
+
+struct S {
+  k: int;
+}
+
+impl S {
+  view fn meth(m: Node, h: Cell) {
+    h.n = Node("z");
+    io::println("struct method: " + m.name);
+  }
+}
+
+fn gen<T>(m: T, h: Cell) -> T {
+  h.n = Node("z");
+  return m;
+}
+
+fn kinds() {
+  h = Cell(Node("a" + "1"));
+  direct(h.n, h);
+  h.n = Node("a" + "2");
+  b: Base = Derived();
+  b.take(h.n, h);
+  h.n = Node("a" + "3");
+  k = Keeper(h.n, h);
+  h.n = Node("a" + "4");
+  s = S(1);
+  s.meth(h.n, h);
+  h.n = Node("a" + "5");
+  f = fn(m: Node) -> Str { h.n = Node("z"); return m.name; };
+  io::println("icall: " + f(h.n));
+  h.n = Node("a" + "6");
+  io::println("generic: " + gen(h.n, h).name);
+  h.n = Node("a" + "7");
+  c = Child(h);
+  io::println("kept: " + k.m.name + " " + c.m.name);
+}
+
+fn main() -> int {
+  handOffs();
+  hazards();
+  writes();
+  kinds();
+  return 0;
+}

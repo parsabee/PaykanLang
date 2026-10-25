@@ -4,18 +4,21 @@
 // box argument it lends, which it keeps because a statement from the read
 // to the call, or one nested in those, may let the caller's object go (the
 // window), and which it keeps because the copy is no read of a local the
-// call could be lent; and that the moves at last use and the pass change
-// nothing on the pass's own output.
+// call could be lent; which box parameters it lends, where their bodies
+// then ask the ownership mask, and which keep their prologue; and that the
+// code passes change nothing on the pass's own output.
 
 #include "paykan/pir/Lend.h"
 #include "paykan/pir/MoveAtLastUse.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Pass.h"
 #include "paykan/pir/Printer.h"
+#include "paykan/pir/RCElimination.h"
 #include "paykan/pir/Verifier.h"
 
 #include <gtest/gtest.h>
 
+#include <map>
 #include <sstream>
 #include <string>
 
@@ -25,9 +28,10 @@ using namespace paykan::pir;
 namespace {
 
 // What every program below calls.  The callees lend (a box parameter, a
-// definition): @take and @g keep nothing, @two takes two boxes, @pair a box
-// and a bool, @poke a pointer (an `inout` argument); Node's slot `look`
-// takes a box too.  The runtime's `equals` does not lend.
+// definition, each starting with its parameters' prologue, docs/pir.md §3):
+// @take and @g keep nothing, @two takes two boxes, @pair a box and a bool,
+// @poke a pointer (an `inout` argument); Node's slot `look` takes a box
+// too.  The runtime's `equals` does not lend.
 const std::string kPrelude = R"(module "m"
 extern fn @$rt.PaykanObject_equals(obj, box, i64) -> i64
 
@@ -50,27 +54,57 @@ fn @Node.destroy(%self: obj) -> void {
 }
 
 fn @Node.look(%self: obj, %p: box) -> void {
+  %po = owned %p
+  %pl = not %po
+  if %pl {
+    retain %p
+  }
   release %p
   ret
 }
 
 fn @take(%p: box) -> void {
+  %po = owned %p
+  %pl = not %po
+  if %pl {
+    retain %p
+  }
   release %p
   ret
 }
 
 fn @two(%p: box, %q: box) -> void {
+  %po = owned %p
+  %pl = not %po
+  if %pl {
+    retain %p
+  }
+  %qo = owned %q
+  %ql = not %qo
+  if %ql {
+    retain %q
+  }
   release %p
   release %q
   ret
 }
 
 fn @pair(%p: box, %b: bool) -> void {
+  %po = owned %p
+  %pl = not %po
+  if %pl {
+    retain %p
+  }
   release %p
   ret
 }
 
 fn @g(%p: box) -> bool {
+  %po = owned %p
+  %pl = not %po
+  if %pl {
+    retain %p
+  }
   release %p
   ret true
 }
@@ -114,7 +148,7 @@ Lent lendIn(const std::string &text, bool moveFirst,
       continue;
     if (moveFirst)
       l.Moves = moveAtLastUse(f);
-    l.Counts = lend(f, m);
+    l.Counts = lendArguments(f, m);
   }
   errors = verify(l.P);
   EXPECT_TRUE(errors.empty()) << formatErrors(errors) << toString(l.P);
@@ -759,7 +793,7 @@ fn @f(%a: box) -> void {
   Module &m = p->Modules.front();
   for (Function &fn : m.Functions)
     if (fn.Name == "f") {
-      const LendCounts c = lend(fn, m);
+      const LendCounts c = lendArguments(fn, m);
       EXPECT_EQ(c.Marks, 1u);
       EXPECT_EQ(c.Lent, 0u);
     }
@@ -789,6 +823,644 @@ fn @f(%a: box) -> void {
   EXPECT_EQ(l.Counts.Lent, 0u);
 }
 
+// -- The callee half: which parameters are lent
+
+/// What lend did to each function, by name.
+struct Every {
+  Program P;
+  std::map<std::string, LendCounts> By;
+  std::string Error;
+};
+
+/// The prelude and @p text parsed and verified; then, on every function,
+/// moveAtLastUse when @p moveFirst and lend (both halves); and the result
+/// verified.  Error: what lend reported.
+Every lendEvery(const std::string &text, bool moveFirst = false) {
+  Every e;
+  ParseError err;
+  auto p = parseProgram(kPrelude + text, err);
+  EXPECT_TRUE(p) << err.str();
+  if (!p)
+    return e;
+  e.P = std::move(*p);
+  auto errors = verify(e.P);
+  EXPECT_TRUE(errors.empty()) << formatErrors(errors);
+  Module &m = e.P.Modules.front();
+  for (Function &fn : m.Functions) {
+    if (moveFirst)
+      moveAtLastUse(fn);
+    StatusOr<LendCounts> c = lend(fn, m);
+    if (!c) {
+      e.Error = c.status().message();
+      return e;
+    }
+    e.By[fn.Name] = *c;
+  }
+  errors = verify(e.P);
+  EXPECT_TRUE(errors.empty()) << formatErrors(errors) << toString(e.P);
+  return e;
+}
+
+/// The printed function @p name of @p e.
+std::string printed(const Every &e, const std::string &name = "f") {
+  const std::string text = toString(e.P);
+  const size_t start = text.find("fn @" + name + "(");
+  if (start == std::string::npos)
+    return "";
+  return text.substr(start, text.find("\n}\n", start) + 3 - start);
+}
+
+/// The prologue of box parameter %@p p: `%<p>o = owned %p`, `%<p>l = not
+/// %<p>o`, `if %<p>l { retain %p }`.
+std::string prologue(const std::string &p) {
+  return "  %" + p + "o = owned %" + p + "\n  %" + p + "l = not %" + p +
+         "o\n  if %" + p + "l {\n    retain %" + p + "\n  }\n";
+}
+
+/// A class Cell with one box field, v.
+const std::string kCell = R"(
+class Cell {
+  field v: box
+  vtable {
+    destroy = @Cell.destroy : (obj) -> void
+  }
+}
+
+fn @Cell.destroy(%self: obj) -> void {
+  %v = field.load %self, Cell.v
+  release %v
+  free %self
+  ret
+}
+)";
+
+TEST(LendParams, ANeverWrittenParameterIsReleasedOnlyWhenItWasHandedOver) {
+  // The prologue's retain goes; each exit's release of the slot asks the
+  // bit.  A lent argument it lends on, and a borrow, change nothing.
+  Every e = lendEvery(R"(
+fn @f(%a: box) -> void {
+  local %x: box
+)" + prologue("a") + R"(  store %x, %a
+  %x1 = load %x
+  call @take(lent %x1)
+  %c = call @cond()
+  if %c {
+    %w = load %x
+    release %w
+    ret
+  }
+  %z = load %x
+  %zo = unbox %z
+  release %z
+  ret
+}
+)");
+  EXPECT_EQ(printed(e), R"(fn @f(%a.1: box) -> void {
+  local %x.0: box
+  %ao.2 = owned %a.1
+  store %x.0, %a.1
+  %x1.4 = load %x.0
+  call @take(lent %x1.4)
+  %c.5 = call @cond()
+  if %c.5 {
+    %w.6 = load %x.0
+    if %ao.2 {
+      release %w.6
+    }
+    ret
+  }
+  %z.7 = load %x.0
+  %zo.8 = unbox %z.7
+  if %ao.2 {
+    release %z.7
+  }
+  ret
+}
+)");
+  const LendCounts &c = e.By["f"];
+  EXPECT_EQ(c.ParamsLent, 1u);
+  EXPECT_EQ(c.ParamsHandedOn, 0u);
+  EXPECT_EQ(c.ParamsOwnedOnEntry, 0u);
+  EXPECT_EQ(c.RetainsAtKeeps, 0u);
+  // The prelude's @take releases what it was handed over only.
+  EXPECT_NE(printed(e, "take").find("  %po.2 = owned %p.1\n"
+                                    "  if %po.2 {\n"
+                                    "    release %p.1\n"
+                                    "  }\n"),
+            std::string::npos)
+      << printed(e, "take");
+}
+
+TEST(LendParams, AHandOffPassesTheBitOnAndTheLastKeeperRetains) {
+  // push -> pushFront -> Cell -> Cell.__init__ -> the field: each hands its
+  // parameter on with its own bit (owned(%o)); only the field's store
+  // retains, and only when the outermost caller lent.  A function value's
+  // code hands its parameter to its target the same way.
+  Every e = lendEvery(kCell + R"(
+fn @push(%s: ptr, %v: box) -> void {
+  local %vp: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  call @pushFront(%s, %v1)
+  ret
+}
+
+fn @pushFront(%s: ptr, %v: box) -> void {
+  local %vp: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  %n = call @Cell(%v1)
+  ptr.store %s, %n
+  ret
+}
+
+fn @Cell(%v: box) -> box {
+)" + prologue("v") + R"(  %o = new Cell
+  %b = box %o
+  call @Cell.__init__(%o, %v)
+  ret %b
+}
+
+fn @Cell.__init__(%self: obj, %v: box) -> void {
+  local %vp: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  field.store %self, Cell.v, %v1
+  ret
+}
+
+fn @fn.ref.m.take.call(%closure: obj, %p: box) -> void {
+)" + prologue("p") + R"(  call @take(%p)
+  ret
+}
+)");
+  EXPECT_NE(
+      printed(e, "push").find("call @pushFront(%s.1, owned(%vo.3) %v1.5)"),
+      std::string::npos)
+      << printed(e, "push");
+  EXPECT_NE(printed(e, "pushFront").find("call @Cell(owned(%vo.3) %v1.5)"),
+            std::string::npos)
+      << printed(e, "pushFront");
+  EXPECT_NE(
+      printed(e, "Cell").find("call @Cell.__init__(%o.4, owned(%vo.2) %v.1)"),
+      std::string::npos)
+      << printed(e, "Cell");
+  EXPECT_NE(printed(e, "Cell.__init__")
+                .find("  %v1.5 = load %vp.0\n"
+                      "  if %vl.4 {\n"
+                      "    retain %v1.5\n"
+                      "  }\n"
+                      "  field.store %self.1, Cell.v, %v1.5\n"),
+            std::string::npos)
+      << printed(e, "Cell.__init__");
+  EXPECT_NE(
+      printed(e, "fn.ref.m.take.call").find("call @take(owned(%po.3) %p.2)"),
+      std::string::npos)
+      << printed(e, "fn.ref.m.take.call");
+  for (const char *f : {"push", "pushFront", "Cell", "fn.ref.m.take.call"}) {
+    EXPECT_EQ(e.By[f].ParamsHandedOn, 1u) << f;
+    EXPECT_EQ(e.By[f].RetainsAtKeeps, 0u) << f;
+    EXPECT_EQ(count(printed(e, f), "retain"), 0u) << printed(e, f);
+  }
+  EXPECT_EQ(e.By["Cell.__init__"].ParamsLent, 1u);
+  EXPECT_EQ(e.By["Cell.__init__"].RetainsAtKeeps, 1u);
+}
+
+TEST(LendParams, AKeepRetainsWhenTheParameterWasLent) {
+  // What takes the parameter's reference without asking its bit: a field,
+  // another local, memory, `ret`, and a callee without the parameter's
+  // bit (the runtime's `equals`, which releases the box it is given, and
+  // a 65th box parameter).  Each is preceded by a retain when the
+  // parameter was lent; the copies the body makes stay as they are.
+  std::ostringstream wide;
+  wide << "fn @wide(";
+  for (int i = 0; i < 65; ++i)
+    wide << (i ? ", " : "") << "%w" << i << ": box";
+  wide << ") -> void {\n  ret\n}\n";
+  Every e = lendEvery(kCell + wide.str() + R"(
+fn @field(%self: obj, %v: box) -> void {
+  local %vp: box
+)" + prologue("v") + R"(  store %vp, %v
+  %c = load %vp
+  retain %c
+  call @take(%c)
+  %v1 = load %vp
+  field.store %self, Cell.v, %v1
+  ret
+}
+
+fn @local(%v: box) -> void {
+  local %vp: box
+  local %y: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  store %y, %v1
+  %y1 = load %y
+  release %y1
+  ret
+}
+
+fn @memory(%v: box, %out: ptr) -> void {
+  local %vp: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  ptr.store %out, %v1
+  ret
+}
+
+fn @id(%v: box) -> box {
+  local %vp: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  ret %v1
+}
+
+fn @equals(%self: obj, %v: box) -> i64 {
+  local %vp: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  %r = call @$rt.PaykanObject_equals(%self, %v1, 1)
+  ret %r
+}
+
+fn @last(%v: box) -> void {
+  local %vp: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  call @wide()" + [] {
+    std::string args;
+    for (int i = 0; i < 64; ++i)
+      args += "null box, ";
+    return args;
+  }() + R"(%v1)
+  ret
+}
+)");
+  auto kept = [&](const std::string &f, const std::string &v,
+                  const std::string &consumer) {
+    const std::string text = printed(e, f);
+    const std::string guarded = "    retain " + v + "\n  }\n  " + consumer;
+    EXPECT_NE(text.find(guarded), std::string::npos) << guarded << "\n" << text;
+    EXPECT_EQ(count(text, "if %vl."), 1u) << text;
+    EXPECT_EQ(count(text, "retain %v."), 0u) << text;
+    EXPECT_EQ(e.By[f].ParamsLent, 1u) << f;
+    EXPECT_EQ(e.By[f].RetainsAtKeeps, 1u) << f;
+  };
+  kept("field", "%v1.6", "field.store %self.1, Cell.v, %v1.6\n");
+  kept("local", "%v1.4", "store %y.1, %v1.4\n");
+  kept("memory", "%v1.5", "ptr.store %out.2, %v1.5\n");
+  kept("id", "%v1.4", "ret %v1.4\n");
+  kept("equals", "%v1.5",
+       "%r.6 = call @$rt.PaykanObject_equals(%self.1, %v1.5, 1)\n");
+  kept("last", "%v1.4", "call @wide(");
+  // The copy into @take stays a copy.
+  EXPECT_NE(printed(e, "field").find("  retain %c.5\n  call @take(%c.5)\n"),
+            std::string::npos)
+      << printed(e, "field");
+  // The local the parameter is kept in releases what it holds, as before.
+  EXPECT_NE(printed(e, "local").find("  %y1.5 = load %y.1\n  release %y1.5\n"),
+            std::string::npos)
+      << printed(e, "local");
+}
+
+TEST(LendParams, AParameterTheBodyWritesKeepsItsPrologue) {
+  // Each way w1_written's callees write a parameter, as the lowering
+  // writes it: a value stored into the slot (an assignment, `s += "!"`,
+  // destructuring), the slot's address (an `inout` argument, `r: inout =
+  // n`, a match arm's `inout` binding).  The body owns the parameter from
+  // its entry, so nothing changes.  `n = None` stores null: no write; the
+  // release of what it replaced asks the bit.
+  Every e = lendEvery(R"(
+fn @mk() -> box {
+  ret null box
+}
+
+fn @assign(%a: box) -> void {
+  local %x: box
+)" + prologue("a") + R"(  store %x, %a
+  %n = call @mk()
+  %old = load %x
+  release %old
+  store %x, %n
+  %z = load %x
+  release %z
+  ret
+}
+
+fn @viaInout(%a: box) -> void {
+  local %x: box
+)" + prologue("a") + R"(  store %x, %a
+  %xa = local.addr %x
+  call @poke(%xa)
+  %z = load %x
+  release %z
+  ret
+}
+
+fn @toNone(%a: box) -> void {
+  local %x: box
+)" + prologue("a") + R"(  store %x, %a
+  %old = load %x
+  release %old
+  store %x, null box
+  %z = load %x
+  release %z
+  ret
+}
+)");
+  for (const char *f : {"assign", "viaInout"}) {
+    EXPECT_NE(printed(e, f).find("  %ao.2 = owned %a.1\n"
+                                 "  %al.3 = not %ao.2\n"
+                                 "  if %al.3 {\n"
+                                 "    retain %a.1\n"
+                                 "  }\n"),
+              std::string::npos)
+        << printed(e, f);
+    EXPECT_EQ(printed(e, f).find("if %ao"), std::string::npos) << printed(e, f);
+    EXPECT_EQ(e.By[f].ParamsOwnedOnEntry, 1u) << f;
+    EXPECT_EQ(e.By[f].ParamsLent, 0u) << f;
+  }
+  EXPECT_EQ(printed(e, "toNone"), R"(fn @toNone(%a.1: box) -> void {
+  local %x.0: box
+  %ao.2 = owned %a.1
+  store %x.0, %a.1
+  %old.4 = load %x.0
+  if %ao.2 {
+    release %old.4
+  }
+  store %x.0, null box
+  %z.5 = load %x.0
+  if %ao.2 {
+    release %z.5
+  }
+  ret
+}
+)");
+  EXPECT_EQ(e.By["toNone"].ParamsLent, 1u);
+}
+
+TEST(LendParams, EveryWayOutOfTheBodyAsksTheBit) {
+  // An early return, a `break` and a `continue` out of a loop, the arm a
+  // release was moved into beside the arm that hands the parameter on:
+  // each path lets go of the parameter's reference once, and each place
+  // that does asks the bit.
+  Every e = lendEvery(R"(
+fn @f(%a: box) -> void {
+  local %x: box
+)" + prologue("a") + R"(  store %x, %a
+  while {
+    %c = call @cond()
+    cond %c
+  } {
+    %d = call @cond()
+    if %d {
+      %w = load %x
+      release %w
+      ret
+    }
+    %e = call @cond()
+    if %e {
+      break
+    }
+    continue
+  }
+  %k = call @cond()
+  if %k {
+    %y = load %x
+    store %x, null box
+    call @take(%y)
+  } else {
+    %z = load %x
+    release %z
+  }
+  ret
+}
+)");
+  const std::string out = printed(e);
+  EXPECT_NE(out.find("      %w.6 = load %x.0\n"
+                     "      if %ao.2 {\n"
+                     "        release %w.6\n"
+                     "      }\n"
+                     "      ret\n"),
+            std::string::npos)
+      << out;
+  EXPECT_NE(out.find("    call @take(owned(%ao.2) %y.9)\n"), std::string::npos)
+      << out;
+  EXPECT_NE(out.find("    %z.10 = load %x.0\n"
+                     "    if %ao.2 {\n"
+                     "      release %z.10\n"
+                     "    }\n"),
+            std::string::npos)
+      << out;
+  EXPECT_EQ(count(out, "retain"), 0u) << out;
+  EXPECT_EQ(e.By["f"].ParamsHandedOn, 1u);
+}
+
+TEST(LendParams, AParameterWithoutASlotIsLentWhereItIsUsed) {
+  // A constructor's parameter is handed straight to `__init__`; a native
+  // function's body unboxes its parameter for C and releases it: neither
+  // stores it in a slot.
+  Every e = lendEvery(R"(
+extern fn @$c.put(obj) -> i64
+
+fn @put(%s: box) -> i64 {
+)" + prologue("s") + R"(  %o = unbox %s
+  %r = call @$c.put(%o)
+  release %s
+  ret %r
+}
+)");
+  EXPECT_EQ(printed(e, "put"), R"(fn @put(%s.1: box) -> i64 {
+  %so.2 = owned %s.1
+  %o.4 = unbox %s.1
+  %r.5 = call @$c.put(%o.4)
+  if %so.2 {
+    release %s.1
+  }
+  ret %r.5
+}
+)");
+  EXPECT_EQ(e.By["put"].ParamsLent, 1u);
+}
+
+TEST(LendParams, ABoxLentToCThroughATemporaryIsNoKeep) {
+  // A native function's argument passed by address: the body stores the
+  // parameter into a local only C reads, through its address, and then
+  // releases its own reference.  The store keeps nothing.
+  Every e = lendEvery(R"(
+extern fn @$c.set(ptr) -> void
+
+fn @set(%v: box) -> void {
+  local %vp: box view
+  local %vv: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  store %vv, %v1
+  %va = local.addr %vv
+  call @$c.set(%va)
+  %z = load %vp
+  release %z
+  ret
+}
+)");
+  const std::string out = printed(e, "set");
+  EXPECT_NE(out.find("  store %vv.1, %v1.4\n"), std::string::npos) << out;
+  EXPECT_EQ(count(out, "retain"), 0u) << out;
+  EXPECT_NE(out.find("  if %vo.2 {\n    release %z.6\n  }\n"),
+            std::string::npos)
+      << out;
+  EXPECT_EQ(e.By["set"].ParamsLent, 1u);
+}
+
+TEST(LendParams, AReferenceLetGoOfTwiceOnAPathKeepsThePrologue) {
+  // Each path lets go of the parameter's reference once in a body the
+  // lowering made; where what the pass takes for that does not add up
+  // (here a store into a local that is never released, handed to a
+  // Paykan function by address, and the slot's release on the same path),
+  // the pass does not know which one does, and the parameter is owned
+  // from its entry, as before.
+  Every e = lendEvery(R"(
+fn @f(%v: box) -> void {
+  local %vp: box
+  local %t: box
+)" + prologue("v") + R"(  store %vp, %v
+  %v1 = load %vp
+  store %t, %v1
+  %ta = local.addr %t
+  call @poke(%ta)
+  %z = load %vp
+  release %z
+  ret
+}
+
+fn @g2(%v: box) -> void {
+  local %vp: box
+)" + prologue("v") + R"(  store %vp, %v
+  %c = call @cond()
+  if %c {
+    %y = load %vp
+    call @take(%y)
+  }
+  ret
+}
+)");
+  for (const char *f : {"f", "g2"}) {
+    EXPECT_NE(printed(e, f).find("    retain %v.1\n"), std::string::npos)
+        << printed(e, f);
+    EXPECT_EQ(e.By[f].ParamsOwnedOnEntry, 1u) << f;
+    EXPECT_EQ(count(printed(e, f), "owned("), 0u) << printed(e, f);
+  }
+}
+
+TEST(LendParams, ABodyWithoutItsPrologueIsAnInternalError) {
+  // Lent, a body that releases its parameter without asking its bit would
+  // release the caller's reference: the lowering starts every body with
+  // its prologues, and the pass says when one does not.  A parameter the
+  // body only borrows, and one the pass lent already (its `owned` stays),
+  // are fine; so is the 65th box parameter, which has no bit.
+  Every bad = lendEvery(R"(
+fn @f(%a: box) -> void {
+  local %x: box
+  store %x, %a
+  %z = load %x
+  release %z
+  ret
+}
+)");
+  EXPECT_NE(bad.Error.find("internal compiler error: @f takes its box "
+                           "parameter %a.1 as its own"),
+            std::string::npos)
+      << bad.Error;
+  std::ostringstream wide;
+  wide << "fn @wide(";
+  for (int i = 0; i < 65; ++i)
+    wide << (i ? ", " : "") << "%w" << i << ": box";
+  wide << ") -> void {\n  release %w64\n  ret\n}\n";
+  Every ok = lendEvery(wide.str() + R"(
+fn @borrows(%a: box) -> bool {
+  %o = unbox %a
+  %n = cmp eq %o, null obj
+  ret %n
+}
+
+fn @lent(%a: box) -> void {
+  %ao = owned %a
+  if %ao {
+    release %a
+  }
+  ret
+}
+)");
+  EXPECT_EQ(ok.Error, "");
+  EXPECT_EQ(printed(ok, "lent"), R"(fn @lent(%a.1: box) -> void {
+  %ao.2 = owned %a.1
+  if %ao.2 {
+    release %a.1
+  }
+  ret
+}
+)");
+}
+
+TEST(LendParams, TheCodePassesChangeNothingOnTheirOutput) {
+  // A module's code, lent before its `.pkm` is written, goes through the
+  // program's passes again: the moves find no copy in a keep's
+  // conditional retain and no release to move to in a conditional one,
+  // the lending finds no prologue to lend and no mark, and the
+  // elimination finds no pair.
+  const std::string text = kPrelude + kCell + R"(
+fn @f(%a: box, %b: box, %s: obj) -> void {
+  local %x: box
+  local %y: box
+)" + prologue("a") + prologue("b") +
+                           R"(  store %x, %a
+  store %y, %b
+  %x1 = load %x
+  retain lend %x1
+  call @take(%x1)
+  %x2 = load %x
+  retain %x2
+  call @take(%x2)
+  %y1 = load %y
+  field.store %s, Cell.v, %y1
+  %c = call @cond()
+  if %c {
+    %x3 = load %x
+    call @take(%x3)
+    ret
+  }
+  %x4 = load %x
+  release %x4
+  ret
+}
+)";
+  ParseError err;
+  auto p = parseProgram(text, err);
+  ASSERT_TRUE(p) << err.str();
+  PassManager once(/*verifyEach=*/true);
+  once.add(createMovesAtLastUsePass());
+  once.add(createLendingPass());
+  once.add(createRCEliminationPass());
+  Statistics first;
+  ASSERT_TRUE(once.run(*p, first));
+  EXPECT_GT(first.get("lending", "parameters handed on"), 0u);
+  EXPECT_EQ(first.get("lending", "retains at keeps"), 1u);
+  const std::string after = toString(*p);
+  PassManager again(/*verifyEach=*/true);
+  again.add(createMovesAtLastUsePass());
+  again.add(createLendingPass());
+  again.add(createRCEliminationPass());
+  again.add(createLendingPass());
+  Statistics second;
+  ASSERT_TRUE(again.run(*p, second));
+  EXPECT_EQ(toString(*p), after);
+  EXPECT_EQ(second.get("moves-at-last-use", "transfers"), 0u);
+  EXPECT_EQ(second.get("lending", "parameters lent"), 0u);
+  EXPECT_EQ(second.get("lending", "parameters handed on"), 0u);
+  EXPECT_EQ(second.get("lending", "retains at keeps"), 0u);
+  EXPECT_EQ(second.get("rc-elimination", "retains removed"), 0u);
+}
+
 // -- The pass
 
 TEST(Lend, ThePassLendsEveryFunctionAndCountsWhatItDid) {
@@ -796,6 +1468,11 @@ TEST(Lend, ThePassLendsEveryFunctionAndCountsWhatItDid) {
   auto p = parseProgram(kPrelude + R"(
 fn @f(%a: box) -> void {
   local %x: box
+  %ao = owned %a
+  %al = not %ao
+  if %al {
+    retain %a
+  }
   store %x, %a
   %v = load %x
   retain lend %v
@@ -829,6 +1506,11 @@ fn @f(%a: box, %p: ptr) -> void {
   local %x: box
   local %t: bool
   local %n: ptr
+  %ao = owned %a
+  %al = not %ao
+  if %al {
+    retain %a
+  }
   store %x, %a
   store %n, %p
   %v = load %x

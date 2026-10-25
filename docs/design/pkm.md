@@ -909,7 +909,11 @@ call hands an argument over or lends it (#98 part 2, docs/pir.md §3) is
 chosen at the call, in the code, and the ownership mask a lending
 function takes is part of the runtime ABI, so it is no interface data: a
 callee's code may lend what it did not without an interface change, and
-a caller in another module lends to it what its own code chooses. The `pass level` flag bits are
+a caller in another module lends to it what its own code chooses.  So is
+what a body does with a parameter it may be lent: every lending body asks
+its mask (`owned`, or the prologue that retains a lent parameter on
+entry, docs/pir.md §3), in `CODE` and in `OBJ` alike, so any caller may
+lend it any box argument with a bit. The `pass level` flag bits are
 reserved for a later post-pass variant (PR #104 §5.4 option C); storing
 post-pass PIR per `-O` was rejected (N copies per file).
 
@@ -975,9 +979,10 @@ splits it
 - **Moves.** The code passes every program goes through (docs/pir.md §12:
   moves at last use, the lending pass, then reference-count elimination)
   run on what the trim left, and what they make is verified, so the
-  compiled code and the copies in `CODE` are both made by them, and no
-  `retain lend` mark is kept; a program that imports the module runs them
-  on its copies again, which changes nothing more.
+  compiled code and the copies in `CODE` are both made by them, no
+  `retain lend` mark is kept, and each parameter the lending pass lent
+  asks its bit where its body lets go of it; a program that imports the
+  module runs them on its copies again, which changes nothing more.
 - **Split.** The module's shared copies of instantiations stay PIR in
   `CODE`: a program keeps one of each and drops what its `main` does not
   reach, and an importer instantiating the same type links to them. Every
@@ -1600,7 +1605,7 @@ Reserved now so no later major bump is needed:
 | #147 traits | `TRAIT`, `IMPL`, `Bounds`, `T_TRAIT_OBJ`, trait default bodies in `TMPL` |
 | #160 generics | `TMPL` section, `INST` part, `ERASABLE`, `erased`/`nHiddenParams`, `ClassObjRec`, `$class` spelling |
 | #96 inline optionals, #99 weak (done: type code 16, opcodes 30, 31 and 49, a class field's flags byte) | type codes 8–16, opcodes 26–31, `T_WEAK` |
-| #98 borrowed params | per-call ownership in `CODE` (opcode 54, marks 55 and 56, §5.5); the ownership mask in the runtime ABI; `Sig.conv` and `nConventions` retired (0) |
+| #98 borrowed params | per-call ownership in `CODE` (opcode 54, marks 55 and 56, §5.5); the ownership mask in the runtime ABI, asked by every lending body in `CODE` and `OBJ`; `Sig.conv` and `nConventions` retired (0) |
 | #93 one allocation | header kind is a property of `runtime_abi`, nothing per class |
 | #153 runtime as library | manifest `runtime_abi` + `libraries` (`RUNTIME`, `ALLOCATOR`); payload flag bit 5 |
 | #21 C FFI | `cExport`/`cName`; `EXPORTS_C`; `C_LIBRARY` entries |

@@ -144,7 +144,9 @@ the function's copy only.
 
 Strings and objects are passed by reference: the function receives the same object as its
 caller, so a field it assigns or a method that changes the object is seen by the caller.
-The reference count of the object is incremented on entry and decremented on return.
+A caller that keeps the object alive for the whole call lends it, and the function changes
+no reference count unless it keeps the object (see
+[Borrowed parameters](16-memory.md#borrowed-parameters)).
 Assigning to the parameter makes it refer to another object; the caller's variable is
 unaffected. More in [Classes](05-classes.md) and [Memory](16-memory.md).
 
@@ -1005,7 +1007,9 @@ cannot return `inout`, and cannot be `main`.
 A call in the module that declares the function calls C directly, lending
 the caller's own references (a temporary argument is released after the
 call).  A call from another module goes through the function's Paykan body,
-which holds a reference to each argument for the call.
+which only reads its parameters: it is lent what the caller keeps, and
+releases after the call only what it was handed (a temporary, a variable
+at its last use; see [Borrowed parameters](16-memory.md#borrowed-parameters)).
 
 ### Generic native functions
 

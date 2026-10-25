@@ -240,8 +240,19 @@ if %p.lent {
 so the body owns each of its parameters whichever way the caller passed
 it: with the bit set, it is the body as it was before the mask; with it
 clear, the retain makes the reference the body lets go of, while the
-caller keeps its own.  A lent argument so costs the retain at the callee's
-entry that the caller's copy cost before the call.
+caller keeps its own.  The lending pass (§12) then lends each parameter
+the body never writes: the `if` goes, the `owned` stays, and each place
+the body lets go of the parameter's own reference asks the bit instead.
+A release happens only when the parameter was handed over (`if %p.own {
+release %v }`), a box argument of a lending callee with a bit hands it on
+with it (`owned(%p.own) %v`), and what keeps it (a store into another
+local, a `field.store`, a `ptr.store`, a `ret`, an argument of a callee
+without its bit) is preceded by a retain when it was lent (`if %p.lent {
+retain %v }`).  A lent argument so costs the callee nothing where it only
+reads it or hands it on, and one retain where it keeps it.  A body without
+the prologue is right only as long as it lets go of no parameter that may
+be lent; the lending pass reports an internal compiler error for one that
+would.
 
 ## 4. Module-level items
 
@@ -616,16 +627,21 @@ CodeGen enforced, now in one place.
   field read held where nothing can let go of a reference (a match subject
   whose arms call no code) takes none.  This is what a backend receives.
 * **Arguments** to user functions/methods, `__super__` and the virtual `equals`
-  are owned (+1) boxes that the callee releases on exit (callee-consumes).
-  The copy made only to hand a box over to a parameter with a bit in its
+  are owned (+1) boxes that the callee releases on exit (callee-consumes),
+  its prologue (§3) retaining any it is lent.  The copy made only to hand
+  a box over to a parameter with a bit in its
   callee's ownership mask (§3) is a `retain lend` (§6) when it is of a
   variable no later part of the statement may replace, or of a read of
   storage the function does not own that no call in use may let go of
   ("Reads a call may replace", below); the lending pass makes it a `lent`
   argument without the retain where nothing between the read and the call
   may let the caller's object go, and a plain `retain` elsewhere (§12).  A
-  temporary is handed over as it is.  Arguments to runtime builtins are
-  borrowed; temporaries are released after the call.
+  temporary is handed over as it is.  The lending pass also lends each
+  parameter a body never writes: such a body lets go of it, hands it on
+  or keeps it only as its bit says, so an argument is lent unless it is
+  handed over, and the callee retains a lent one only where it keeps it.
+  Arguments to runtime builtins are borrowed; temporaries are released
+  after the call.
 * **Returns** of reference types are +1 boxes.  Runtime methods returning a
   reference also return a +1 box.
 * **Fixed-size arrays of references** own one reference per element slot,
@@ -1247,6 +1263,10 @@ paykan pass stats:
   lending marks : 2
   lending arguments lent : 2
   lending copies kept for the window : 0
+  lending parameters lent : 4
+  lending parameters handed on : 2
+  lending parameters owned on entry : 0
+  lending retains at keeps : 2
   rc-elimination retains removed : 1
   rc-elimination releases removed : 1
 Hello, world!
@@ -1258,9 +1278,13 @@ field, `match p.next { q: Person { greet(q.name); } None { greet(p.name); }
 }`, where the binding `q` needs no reference of its own inside the
 match's; the copies of `q.name` and `p.name` for `greet` are the
 lowering's two `retain lend` marks, and both are lent: `q` and `p` keep
-what they name alive through the call.  The counters are those of the
-passes this run ran, so a module built from its source in this run counts,
-and one loaded from its `.pkm` does not.)
+what they name alive through the call.  No body writes a box parameter:
+`greet`'s and `io::println`'s are lent, released only when handed over;
+`Person`'s constructor hands its two on to `__init__` with their bits,
+and `__init__`, whose two are lent too, retains each where it stores it
+when it was lent.  The counters are those of the passes this run ran, so
+a module built from its source in this run counts, and one loaded from
+its `.pkm` does not.)
 
 **The dead-code pass** (`include/paykan/pir/DeadCode.h`,
 `dropDeadCode` / `createDeadCodePass`) erases every function, class and
@@ -1474,8 +1498,12 @@ through it again in the program that imports them, which leaves them as
 they are: on its own output the pass changes nothing.
 
 **The lending pass** (`include/paykan/pir/Lend.h`, `lend` /
-`createLendingPass`) lends the arguments the moves at last use left a copy
-for that the caller's own reference keeps alive for the whole call.  It
+`createLendingPass`) has two halves.  The caller's (`lendArguments`) lends
+the arguments the moves at last use left a copy for that the caller's own
+reference keeps alive for the whole call; the callee's (`lendParameters`),
+on what the first left, lends the box parameters their bodies never write.
+
+*Arguments.*  The pass
 looks at each `retain lend %v` (§6; a mark on a copy the moves made a move
 went with its retain) and lends `%v` when:
 
@@ -1522,17 +1550,77 @@ is what the window check rules out, in any arm of any region.  So the
 object the argument names is alive from the read until the call returns,
 through a reference other than the copy's: the copy's +1, which the callee
 released or handed on, was never the last reference, and lending it moves
-no death.  The callee's prologue (§3) retains a lent argument on entry, so
-the count it runs with is the one the copy gave it.  The verdicts are given
+no death.  A callee whose prologue stays (§3) retains a lent argument on
+entry, so the count it runs with is the one the copy gave it; one the
+parameters half lends never lets go of it.  The verdicts are given
 on the function as the moves left it, then applied: lending an argument
 removes a retain together with the hand-off it paid for, which no other
 verdict counts on.
 
+*Parameters.*  Each box parameter `%p` with a bit (§3) whose prologue is
+at the top of its body is judged on the body as the moves and the caller
+half left it.  Its **own reference** is `%p` itself, or, when the body
+stores `%p` into a slot at its top, each load of the slot; each of their
+uses is a borrow (an `unbox`, a `cmp`, a `weak.new`, a `lent` argument, a
+`store` into a local that is never loaded and whose address only module-
+less externs are given, a `native fn` body's argument passed by address),
+a `retain` (a copy), or a use that lets go of it: a `release`, an
+argument a call does not lend, a `store`, a `field.store`, a `ptr.store`,
+a `ret`.  Of the uses of one value that let go of it, the one no retain of
+the value before it paid for lets go of the parameter's reference.  The
+parameter is **owned on entry**, and its prologue stays, when:
+
+- the body **writes** it: stores into its slot anything but `null` after
+  the slot's first store (an assignment, `s += "!"`, destructuring), or
+  takes the slot's address (an `inout` argument, `r: inout = n`, a match
+  arm's `inout` binding); a store of `null` (`n = None`, or the moves'
+  null at a hand-off) is no write;
+- a use is none of these, or which one lets go of the reference is not
+  clear (more uses that let go of a value than one more than its retains,
+  in more than one block);
+- or some path from the entry to a `ret` does not let go of the reference
+  exactly once, counting a load of the slot only while the slot is not
+  null: what the pass took for letting go then only borrows.  A lowered
+  body lets go of it once on each path, so this only keeps the prologue
+  where the pass would be wrong.
+
+Every other parameter is lent: its prologue's `if` (and its `not`, unless
+a keep asks it) goes, and each use that lets go of the reference asks the
+bit, as §3 says: a `release` happens under `if %p.own`, an argument of a
+lending callee's box parameter with a bit is `owned(%p.own)` (a
+**forward**: the callee lets go of it as its own caller said), and any
+other use (a **keep**) is preceded by `if %p.lent { retain %v }`.  So `take(a)`
+at the last use of a parameter `a` is `call @take(owned(%a.own) %a.2)`:
+`take` releases `a` only when `a`'s own caller handed it over.  A
+constructor hands its parameters to `__init__` this way, and a function
+value's code to its function; a chain `push → pushFront → Node(v) →
+__init__` retains `v` once, at the field store, and only when the
+outermost caller lent it.  The counters are `lending parameters lent`
+(lent, handed on to no callee), `lending parameters handed on` (lent, and
+forwarded at least once), `lending parameters owned on entry` and
+`lending retains at keeps`.  A box parameter with a bit whose body has
+neither its prologue nor its `owned` but lets go of it is an internal
+compiler error: lent, the body would release the caller's reference.
+
+*Why it is right.*  With the bit set the rewritten body is the one the
+lowering made, without a retain that never ran.  With it clear the caller
+keeps the object alive until the call returns (it lent it: the caller half
+above), so the reference the prologue would have made was never the last:
+the body now releases nothing of it, a forward lends it on, and a keep
+makes the reference the place it is kept in owns, at the moment the
+original handed it over.  The written parameters, and those whose uses the
+pass does not follow, own it from their entry as before.  So every count
+the program can observe changes only where nothing could see it, and no
+object dies at another point.
+
 The driver runs it on every program right after the moves at last use,
 and on a module's code before its `.pkm` is written, so no backend, no
 `.pkm` and no cache entry sees a mark.  On its own output it finds no
-mark, and the moves at last use find no copy in a lent argument, so a
-module's code goes through the program's passes unchanged.
+mark and no prologue it has not judged (a lent parameter keeps only its
+`owned`), the moves at last use find no copy in a lent argument or a
+keep's conditional retain and no release to hand a copy to in a
+conditional one, so a module's code goes through the program's passes
+unchanged.
 
 **The reference-count elimination pass** (`include/paykan/pir/RCElimination.h`,
 `eliminateRedundantRC` / `createRCEliminationPass`) removes a `retain`
@@ -1541,7 +1629,9 @@ else keeps the object alive in between.  It counts the references a
 function makes by the value they were made on, the value's **tokens**:
 `retain %v` makes one on `%v`, and a value made with one has it: a call's,
 a `vcall`'s or an `icall`'s box (not a native function's), a `weak.load`'s,
-a `box`'s, and a box parameter (owned, §7).  A `field.load` or a
+a `box`'s, and a box parameter: handed over (§7), or lent (§3, the
+lending pass above), when the caller's reference, which encloses the whole
+call, is what it stands for.  A `field.load` or a
 `ptr.load` makes none, `stable` or not: the mark is the lowering's promise
 for its statement only (§6), not a reference.  A token ends at `release
 %v`, or where `%v` is handed on: an argument of any call, a `field.store`
@@ -1587,7 +1677,12 @@ point of the range, one of these **keeps the object alive**:
   ones the range made.
 
 The pair goes with, for a local's, each release's load; the local holds a
-borrowed reference from then on.  The retains are judged from the last to
+borrowed reference from then on.  A `retain` or a `release` under an `if`
+of a parameter's bit (a prologue's, a lent parameter's keep or release) is
+never one of a pair: on the other path of the `if` it has no other half,
+so its range is not balanced.  A lent parameter's slot keeps what it holds
+as a parameter's slot always did, until a release or hand-off of it,
+which the pass reads as one whichever bit it asks.  The retains are judged from the last to
 the first, so that a pair nested in another goes before the other is
 judged, and the function is swept again until a sweep removes nothing.
 Each judgement is one walk of the structured body from `%v`'s definition

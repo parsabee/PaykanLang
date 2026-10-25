@@ -1777,6 +1777,80 @@ TEST(Ownership, AStringIsReadBeforeItsIndex) {
 
 // Boxing the same object twice gives the same pointer (the object's own) with
 // a bumped strong count -- what makes every raw-alias boxing site safe.
+// A parameter lent to its callee (#98 part 2, docs/pir.md §12) is the
+// caller's: the callee releases nothing of it, retains what it keeps, and
+// hands it on with its bit.  Kept in a field, it lives as long as the field
+// after the caller let go of it; handed on through a method to the field of
+// another object, the same; handed over at the caller's last use, the
+// object dies with its last keeper.  A read the callee's call replaces
+// (`self.a.b.name` while `g` assigns `x.a`) stays alive for the read.
+TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
+  LeakGuard g;
+  paykan::pir::Statistics stats;
+  auto r = compilePassesAndRun(R"(import ::io;
+    class Node { name: Str; }
+    class Probe { weak p: Node?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.p {
+          Node { return "alive"; }
+          None { return "gone"; }
+        }
+      }
+    }
+    class Holder { n: Node?; }
+    impl Holder {
+      fn take(n: Node) { self.n = n; }
+      view fn relay(n: Node, other: Holder) { other.take(n); }
+    }
+    class B { name: Str; }
+    class A { b: B; }
+    class X {
+      a: A;
+      fn m() -> Str { return self.a.b.name + g(self); }
+    }
+    fn g(x: X) -> Str {
+      x.a = A(B("new"));
+      return "!";
+    }
+    fn main() -> int {
+      h = Holder(None);
+      k = Holder(None);
+      n = Node("n");
+      probe = Probe(n);
+      h.take(n);
+      h.relay(n, k);
+      io::println(n.name + " " + probe.state());
+      n = Node("m");
+      io::println("dropped: " + probe.state());
+      h.n = None;
+      io::println("h let go: " + probe.state());
+      k.n = None;
+      io::println("k let go: " + probe.state());
+      last = Node("last");
+      lastProbe = Probe(last);
+      h.take(last);
+      h.n = None;
+      io::println("handed over: " + lastProbe.state() + " " + n.name);
+      x = X(A(B("old" + "name")));
+      io::println(x.m() + " now " + x.a.b.name);
+      return 0;
+    }
+  )",
+                               stats);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "n alive\n"
+                      "dropped: alive\n"
+                      "h let go: alive\n"
+                      "k let go: gone\n"
+                      "handed over: gone m\n"
+                      "oldname! now new\n");
+  EXPECT_GT(stats.get("lending", "parameters handed on"), 0u);
+  EXPECT_GT(stats.get("lending", "retains at keeps"), 0u);
+  g.expectNoLeaks("ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper");
+}
+
 TEST(Ownership, SharedNewRetainsTheObject) {
   PaykanObject *obj = PaykanObject_new();
   PaykanShared *first = PaykanShared_new(obj);
