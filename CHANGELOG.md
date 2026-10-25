@@ -944,11 +944,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   signature after them, once, ahead of the C of every module (one that does not bind the
   symbol may call it as the runtime's: `fmod` for a float's `%`, `Paykan_panic_index` for an
   index check), and turns off the compilers' warning of a library function declared with
-  other types (docs/c-backend.md, "Native functions").  A call that does not read such a
-  function's result keeps it and casts it to void: `floor(x);` was `statement with no
-  effect` to GCC and `ignoring return value of function declared with const attribute` to
-  Clang, which know `floor` as pure.  `samples/codegen/71_native_libc.pkn` binds `llabs`,
-  `labs`, `fabs`, `exit` and `floor`; the CStrictC11 check compiles it with GCC and Clang.
+  other types (docs/c-backend.md, "Native functions").  `Runtime.h`'s `static inline`
+  functions, which the rename covers too, call no C library function: `Paykan_vtable_of`
+  copies the vtable pointer a byte at a time, not with `memcpy`, which a native function may
+  bind.  A call that does not read such a function's result keeps it and casts it to void:
+  `floor(x);` was `statement with no effect` to GCC and `ignoring return value of function
+  declared with const attribute` to Clang, which know `floor` as pure.
+  `samples/codegen/71_native_libc.pkn` binds `llabs`, `labs`, `fabs`, `exit` and `floor`;
+  the CStrictC11 check compiles it with GCC and Clang.
 - The time and memory it took to compile a function grew with the square of how deeply its
   blocks nest, and an `if` with a long `elif` chain nests one block per arm: the PIR
   verifier, which checks every lowered program, copied the values visible in a block into

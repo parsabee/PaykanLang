@@ -1936,6 +1936,62 @@ TEST(Driver, AnImportsNativeOfARuntimeFunctionIsDeclaredForEveryModule) {
   std::filesystem::remove_all(dir);
 }
 
+// The C of --emit-c includes Runtime.h with each native function's C symbol
+// renamed (`#define memcpy pk__hidden_memcpy`), so the header's static
+// inline functions are compiled under the rename too, and one that called a
+// C library function a native function binds would call a function nothing
+// defines: Paykan_vtable_of called memcpy ("undefined reference to
+// `pk__hidden_memcpy'").  Each inline function, compiled and called under
+// the rename of the C library functions the C path itself calls, links and
+// works, at -O0 and -O2 (without _FORTIFY_SOURCE, whose inline memcpy would
+// define the renamed one).
+TEST(Driver, RuntimeHeaderInlinesCallNoRenamedFunction) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_rt_inline_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "inl.c").string();
+  std::ofstream(src) << R"(#undef _FORTIFY_SOURCE
+#define memcpy pk__hidden_memcpy
+#define memmove pk__hidden_memmove
+#define memset pk__hidden_memset
+#define getenv pk__hidden_getenv
+#include <stdlib.h>
+#include <string.h>
+#include "Runtime.h"
+#undef memcpy
+#undef memmove
+#undef memset
+#undef getenv
+int main(void) {
+  PaykanMethod table[1] = {0};
+  PaykanMethod *header[2] = {table, 0};
+  PaykanType *type = NULL;
+  Paykan_retain_inline(NULL);
+  Paykan_release_inline(NULL);
+  if (type)
+    return (int)(PaykanType_ref(type, 0) + PaykanType_unset(type, 0));
+  return Paykan_vtable_of(header) == table &&
+                 PaykanShared_get_inline(NULL) == NULL
+             ? 0
+             : 1;
+}
+)";
+  std::string runtime = shellWord(PAYKAN_RUNTIME_SOURCE_DIR);
+  for (const char *opt : {"-O0", "-O2"}) {
+    auto exe = (dir / (std::string("inl") + opt)).string();
+    std::string cmd = "cc -std=c11 -pedantic-errors -Wall -Wextra -Werror ";
+    cmd.append(opt).append(" -I ").append(runtime).append(" ");
+    cmd.append(shellWord(src)).append(" ").append(runtime);
+    cmd.append("/*.c -lm -o ").append(shellWord(exe)).append(" 2>&1");
+    auto cc = run(cmd);
+    ASSERT_EQ(cc.exitCode, 0) << opt << ": " << cc.out;
+    auto r = run(shellWord(exe) + " 2>&1");
+    EXPECT_EQ(r.exitCode, 0) << opt << ": " << r.out;
+  }
+  std::filesystem::remove_all(dir);
+}
+
 // Reproducible output (#102): modules are named by their canonical module
 // names, so nothing the compiler produces depends on where the sources live
 // or on the directory it runs in.

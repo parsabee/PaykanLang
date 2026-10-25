@@ -176,12 +176,19 @@ PAYKAN_STATIC_ASSERT(sizeof(PaykanObject) == 16,
                      "the object header is a vtable and two 32-bit counts");
 
 /// The vtable of any Paykan object, whatever its struct type: the header's
-/// first word, copied out with memcpy so that it is never read through an
-/// lvalue of another struct type (C11 6.5p7).  The generated C reads every
-/// vtable this way.
+/// first word, copied out a byte at a time (C11 6.5p7 lets a character type
+/// read any object) so that it is never read through an lvalue of another
+/// struct type.  The runtime reads every vtable this way.  Not with memcpy:
+/// the C of --emit-c includes this header with a native function's C symbol
+/// renamed, which may be memcpy (docs/c-backend.md, "Native functions"), so
+/// the inline functions here call no C library function.  GCC and Clang
+/// make the copy one load.
 static inline PaykanMethod *Paykan_vtable_of(const void *obj) {
   PaykanMethod *vtable;
-  memcpy(&vtable, obj, sizeof vtable);
+  const unsigned char *from = (const unsigned char *)obj;
+  unsigned char *to = (unsigned char *)&vtable;
+  for (size_t i = 0; i < sizeof vtable; ++i)
+    to[i] = from[i];
   return vtable;
 }
 
@@ -432,7 +439,9 @@ void Paykan_weak_release(PaykanWeak *weak);
 // (src/Backends/MLIR/ToLLVM/ToLLVM.cpp), and the runtime calls them
 // everywhere but in Shared.c, which defines the functions.  The functions
 // above stay the ABI: the JIT's symbol table, compiled code that calls them
-// and native code may use either.
+// and native code may use either.  Like every inline function here, they
+// call no C library function (see Paykan_vtable_of), only runtime functions
+// that take a box, which no native function binds.
 
 /// Paykan_retain, inline.
 static inline void Paykan_retain_inline(PaykanShared *shared) {

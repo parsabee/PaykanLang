@@ -98,7 +98,10 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   taking an `int64_t`.  So each native function's symbol is renamed while
   the headers are included, `#define llabs pk__hidden_llabs` before them and
   `#undef llabs` after, and the header's declaration is of another name.
-  The `#undef` also drops a macro a header defines for the symbol (`isnan`
+  The rename covers everything the headers say, but `Runtime.h`'s `static
+  inline` functions call no C library function, and no runtime function a
+  native function can bind, so only declarations change.  The `#undef`
+  also drops a macro a header defines for the symbol (`isnan`
   in `<math.h>`, or `memcpy` in macOS's `<string.h>` when it fortifies), so
   the C calls the native function.  The native functions are declared once,
   right after the includes, ahead of every module's part: a module that
