@@ -6,6 +6,10 @@
 #include "TestUtils.h"
 #include <gtest/gtest.h>
 
+#include <string>
+#include <utility>
+#include <vector>
+
 using namespace paykan::test;
 
 TEST(Mov, RemovedKeywordIsOneErrorPerUse) {
@@ -32,6 +36,39 @@ TEST(Mov, RemovedKeywordIsOneErrorPerUse) {
                 std::string::npos)
           << fe << ":\n"
           << os.str();
+    }
+    std::filesystem::remove(path);
+  }
+}
+
+// The removal is reported at the `mov`, before the operand is parsed, so the
+// diagnostics come in source order (docs/grammar.md section 9): an outer
+// `mov`'s before an inner one's, and before a syntax error in its operand.
+TEST(Mov, ReportedInSourceOrder) {
+  const std::string removed =
+      "error: " + std::string(paykan::frontend::kMovRemoved);
+  const std::pair<const char *, std::vector<std::string>> cases[] = {
+      {"fn main() -> int { s = \"a\"; u = mov mov s; return 0; }",
+       {"1:33: " + removed, "1:37: " + removed}},
+      {"fn main() -> int { b = mov ; return 0; }",
+       {"1:24: " + removed, "1:28: error: unexpected ';'"}},
+  };
+  for (const auto &[src, errors] : cases) {
+    auto path = writeTempFile(src);
+    for (const std::string &fe : paykan::frontend::Registry::get().names()) {
+      paykan::parser::ParserDriver drv(fe);
+      std::ostringstream os;
+      paykan::sema::DiagEngine diag(os);
+      diag.setSourceInfo(path, &drv.getSourceLines());
+      drv.setDiagEngine(&diag);
+      EXPECT_NE(drv.parseFile(path), 0) << fe << ": " << src;
+      EXPECT_EQ(drv.getErrorCount(), errors.size()) << fe << ":\n" << os.str();
+      size_t at = 0;
+      for (const std::string &e : errors) {
+        at = os.str().find(path + ":" + e, at);
+        ASSERT_NE(at, std::string::npos) << fe << ": " << e << " in order in\n"
+                                         << os.str();
+      }
     }
     std::filesystem::remove(path);
   }

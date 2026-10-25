@@ -962,6 +962,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`include/paykan/Frontend.h`) takes the driver's `sema::DiagEngine &` to report them
   through, as `parse` does, so such a frontend is rebuilt for it, as the 0.3.0 version
   requires anyway.
+- A `mov` in the operand of another was reported first: `u = mov mov s;` gave the inner
+  `'mov' was removed in v0.2.0; ownership transfers are inferred` (at 1:37) before the
+  outer one (1:33), though every frontend reports its errors in source order
+  (docs/grammar.md section 9), and `mov` before an operand that does not parse (`b = mov
+  ;`) was not reported at all.  The removal is now reported at the `mov`, before its
+  operand is parsed.
 
 ## [0.2.0] - 2026-10-20
 

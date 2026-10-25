@@ -2356,16 +2356,15 @@ Expr *Parser::parseUnary() {
     if (!enterNesting())
       return nullptr;
     Token op = consume();
+    // `mov` is retired (#145), and reported at once, so that its error comes
+    // before any in the operand (`mov mov s`), in source order.  The operand
+    // still parses, and becomes the expression.
+    if (op.Kind == Tok::KwMov)
+      error(op.Loc, std::string(kMovRemoved));
     Expr *operand = parseUnary();
     leaveNesting();
-    if (!operand)
-      return nullptr;
-    // `mov` is retired (#145).  The operand still parses, so the removal is
-    // the only diagnostic.
-    if (op.Kind == Tok::KwMov) {
-      error(op.Loc, std::string(kMovRemoved));
+    if (!operand || op.Kind == Tok::KwMov)
       return operand;
-    }
     return Ctx.make<UnaryExpr>(
         span(op.Loc), op.Kind == Tok::Not ? UnaryOpcode::Not : UnaryOpcode::Neg,
         operand);
