@@ -912,9 +912,11 @@ name (`extern fn @$rt.Paykan_free(ptr) -> void`, `extern obj
 crossing into the runtime is `cast` to `i64` first.
 
 ```
-; memory / RC (first-class ops, listed for completeness; the backends
-; inline the fast paths of retain and release, Runtime.h's
-; Paykan_retain_inline and Paykan_release_inline, and call these for the rest)
+; memory / RC (first-class ops, listed for completeness).  A retain's and a
+; release's fast path is inline (§12): the LLVM path emits it and calls
+; Paykan_retain or Paykan_release for the rest, the C path calls Runtime.h's
+; static inline Paykan_retain_inline and Paykan_release_inline, which do the
+; same.  `unbox` is the identity on both: neither calls PaykanShared_get.
 Paykan_malloc(i64) -> ptr        Paykan_free(ptr) -> void
 Paykan_retain(box) -> void       Paykan_release(box) -> void
 PaykanShared_new(obj) -> box     PaykanShared_get(box) -> obj
@@ -1468,10 +1470,16 @@ is added or moved.
 
 The driver runs it on every program right after the moves at last use, and
 on a module's code before its `.pkm` is written, after the moves; on its
-own output, and after the moves again, it changes nothing.  What it leaves
-the backends make cheap: the LLVM path inlines the fast path of each
-`Paykan_retain` (an increment of the header's count below the limit) and of
-each `Paykan_release` that leaves the object alive (a decrement of a count
-above one), calling the runtime for the rest, and the C path calls
-Runtime.h's `Paykan_retain_inline` and `Paykan_release_inline`, which do
-the same (§8).
+own output, and after the moves again, it changes nothing.
+
+**What is left is cheap.**  Each backend has the fast path of a `retain`
+and a `release` inline: a null box is skipped, a retain of a count below
+the limit increments the header's 32-bit count, and a release of a count
+above one decrements it; only the rest calls `Paykan_retain` (which panics
+at the limit) or `Paykan_release` (which destroys the object), so each
+does what the call did, at every count.  The LLVM path emits that code for
+every call at every `-O` (`src/Backends/MLIR/ToLLVM/ToLLVM.cpp`, the
+common case weighted as likely), the module code in a `.pkm` included; the
+C path calls Runtime.h's `static inline` `Paykan_retain_inline` and
+`Paykan_release_inline`, which the runtime uses too.  The functions stay
+the ABI (§8).

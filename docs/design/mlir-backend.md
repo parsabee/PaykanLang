@@ -126,7 +126,12 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
   on an `i32`.  A case that returns, breaks or continues is lowered as an
   `if`'s branch would be.
 * **ARC, allocation, weak references** become calls to the runtime
-  (`func.call`), as both of the replaced translations did.
+  (`func.call`), as both of the replaced translations did.  Each target
+  then has the fast path of a `retain` and a `release` inline (docs/pir.md
+  §12): the LLVM path expands each call into the count's test, its
+  increment or decrement in place, and the call for the rest; the C path
+  calls Runtime.h's `static inline` `Paykan_retain_inline` and
+  `Paykan_release_inline`, which do the same.
 * **Objects.**  Every class's layout is computed once, as C lays out the
   object (docs/pir.md §5: the 16-byte header, then the fields at their
   alignment): a field access is the object's address plus the field's

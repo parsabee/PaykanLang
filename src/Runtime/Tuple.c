@@ -158,10 +158,10 @@ static void render_scalar(StrBuf *sb, int64_t kind, const char *at) {
       break;
     }
     // The element's own toString (a +1 Str box, consumed here).
-    PaykanShared *s = Paykan_vcall_toString(PaykanShared_get(box));
-    PaykanString *str = (PaykanString *)PaykanShared_get(s);
+    PaykanShared *s = Paykan_vcall_toString(PaykanShared_get_inline(box));
+    PaykanString *str = (PaykanString *)PaykanShared_get_inline(s);
     sb_append(sb, str->data, (size_t)str->len);
-    Paykan_release(s);
+    Paykan_release_inline(s);
     break;
   }
   case PAYKAN_KIND_INT:
@@ -267,8 +267,8 @@ static int scalar_equals(int64_t kind, const char *a, const char *b) {
     if (!sa || !sb)
       return sa == sb; // two None are equal; None and an object are not
     // The virtual `equals` consumes its argument box: hand it a +1.
-    Paykan_retain(sb);
-    return Paykan_vcall_equals(PaykanShared_get(sa), sb) != 0;
+    Paykan_retain_inline(sb);
+    return Paykan_vcall_equals(PaykanShared_get_inline(sa), sb) != 0;
   }
   case PAYKAN_KIND_INT:
   case PAYKAN_KIND_UINT:

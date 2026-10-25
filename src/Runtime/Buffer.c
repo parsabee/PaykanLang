@@ -48,8 +48,7 @@ static void PaykanBuffer_destroy(PaykanObject *self) {
 
 /// The buffer whose box is at @p box (an `inout Obj` argument).
 static PaykanBuffer *buffer_at(const void *box) {
-  return (PaykanBuffer *)PaykanShared_get_inline(
-      *(PaykanShared *const *)box);
+  return (PaykanBuffer *)PaykanShared_get_inline(*(PaykanShared *const *)box);
 }
 
 /// @p n as a value count; a negative one is the program's mistake.

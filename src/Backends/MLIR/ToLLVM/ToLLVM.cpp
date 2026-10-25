@@ -494,8 +494,8 @@ struct InlineReferenceCountsPass
     std::vector<LLVM::CallOp> calls;
     getOperation().walk([&](LLVM::CallOp call) {
       std::optional<StringRef> callee = call.getCallee();
-      if (callee && (*callee == names::kPaykanRetain ||
-                     *callee == names::kPaykanRelease))
+      if (callee &&
+          (*callee == names::kPaykanRetain || *callee == names::kPaykanRelease))
         calls.push_back(call);
     });
     for (LLVM::CallOp call : calls)
@@ -533,20 +533,19 @@ struct InlineReferenceCountsPass
                            DenseI32ArrayAttr(), done, check);
 
     b.setInsertionPointToEnd(check);
-    Value at = LLVM::GEPOp::create(
-        b, loc, ptr, b.getI8Type(), box,
-        ArrayRef<LLVM::GEPArg>{
-            static_cast<int32_t>(offsetof(PaykanObject, strong))});
+    Value at = LLVM::GEPOp::create(b, loc, ptr, b.getI8Type(), box,
+                                   ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(
+                                       offsetof(PaykanObject, strong))});
     Value n = LLVM::LoadOp::create(b, loc, count, at);
     auto constant = [&](int64_t v) -> Value {
       return LLVM::ConstantOp::create(b, loc, count,
                                       b.getIntegerAttr(count, v));
     };
-    Value common =
-        retain ? LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::ne, n,
-                                      constant(PAYKAN_REF_MAX))
-               : LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::sgt, n,
-                                      constant(1));
+    Value common = retain
+                       ? LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::ne,
+                                              n, constant(PAYKAN_REF_MAX))
+                       : LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::sgt,
+                                              n, constant(1));
     // The call is the rare path: laid out away from the common one.
     LLVM::CondBrOp::create(b, loc, common, ValueRange(), ValueRange(),
                            b.getDenseI32ArrayAttr({2000, 1}), fast, slow);

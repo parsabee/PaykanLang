@@ -69,13 +69,13 @@ PAYKAN_NORETURN void Paykan_runtime_panic(const char *fmt, ...)
 
 /// The object of the consumed `other` box, or NULL for a NULL box.
 static inline PaykanObject *Paykan_equals_unbox_other(PaykanShared *other) {
-  return PaykanShared_get(other);
+  return PaykanShared_get_inline(other);
 }
 
 /// Release the consumed `other` box (null-safe); returns @p result.
 static inline int64_t Paykan_equals_consume_other(PaykanShared *other,
                                                   int64_t result) {
-  Paykan_release(other);
+  Paykan_release_inline(other);
   return result;
 }
 

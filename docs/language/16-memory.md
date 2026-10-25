@@ -77,6 +77,11 @@ Two operations maintain the strong count:
 - **release** — decrements the count when a reference goes away (a variable leaves scope, a field
   or slot is overwritten, a temporary is discarded).
 
+Each is a few instructions in the compiled code, with no call: a retain adds one to the count in
+the object's header and a release subtracts one. Only a release that brings the count to zero,
+which destroys the object, and a retain at the limit, which stops the program, call into the
+runtime.
+
 The weak count is the number of `weak` variables and fields that refer to the object (see
 [Weak References](#weak-references)); it never keeps the object alive.
 

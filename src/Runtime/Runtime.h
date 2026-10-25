@@ -391,10 +391,12 @@ void Paykan_weak_release(PaykanWeak *weak);
 // case, inline: a retain of a count below the limit is an increment, and a
 // release that leaves the object alive (its count above one) a decrement.
 // Anything else calls the function, which panics at the limit or destroys
-// the object.  The C of --emit-c calls these, the LLVM path emits the same
-// code (src/Backends/MLIR/ToLLVM/ToLLVM.cpp), and the runtime copies and
-// drops a container's values with them; the functions above stay the ABI,
-// for the JIT's symbol table and native code.
+// the object, so each does exactly what its function does, at every count.
+// The C of --emit-c calls these, the LLVM path emits the same code
+// (src/Backends/MLIR/ToLLVM/ToLLVM.cpp), and the runtime calls them
+// everywhere but in Shared.c, which defines the functions.  The functions
+// above stay the ABI: the JIT's symbol table, compiled code that calls them
+// and native code may use either.
 
 /// Paykan_retain, inline.
 static inline void Paykan_retain_inline(PaykanShared *shared) {
