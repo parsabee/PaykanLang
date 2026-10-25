@@ -40,8 +40,9 @@ inline constexpr uint32_t kFormatVersion = kVersionNumber;
 
 /// The deepest list nesting read() accepts.  Deep enough for any program
 /// within the frontends' nesting limit (frontend::kMaxNesting levels, each a
-/// few lists deep); it bounds the reader's recursion, and so what an AST from
-/// a plugin can make Sema recurse through.
+/// few lists deep); it bounds the reader's recursion.  read() holds the AST
+/// to that limit too, counting the levels the frontends count, and so bounds
+/// what an AST from a plugin can make Sema recurse through.
 inline constexpr unsigned kMaxDepth = 2048;
 
 /// Write @p unit in the interchange format.  Returns false, with the reason

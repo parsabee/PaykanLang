@@ -839,6 +839,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C code of a generic native function is compiled against 0.3.0's `Runtime.h`.  A type
   that names no such word (`int`, `Str?`) costs no more on `at`, `get`, `copy` and
   `swap`: the buffer looks at `nunset` before it calls `PaykanType_isUnset`.
+- Deeply nested lambda bodies, function-type results and array type suffixes did not count
+  toward the nesting limit, and overflowed the stack: `fn() => fn() => ... 0` 5000 deep
+  and `() -> () -> ... int` 10000 deep crashed the parser (exit status 139), 3000 nested
+  lambdas crashed `paykan run`, and `int[][]...` 20000 deep crashed Sema.  A lambda's and
+  a function's `=>` body (as the block it stands for), a lambda's result type, a function
+  type's result and each `[]`, `[N]` and `?` suffix, around the levels of the type it
+  wraps, are now a level each, and 513 of them are `nesting too deep (more than 512
+  levels)` (docs/grammar.md section 9).  The AST interchange reader, which reads the AST
+  of a frontend plugin and the `ast-text` frontend's input, held an AST only to its 2048
+  lists, so it took 600 nested blocks or 600 nested lambdas, which no frontend parses.  It
+  now counts the levels the frontends count, in the AST, and rejects one more with the same
+  message (docs/plugins/ast-format.md section 3).
 
 ## [0.2.0] - 2026-10-20
 

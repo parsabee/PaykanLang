@@ -29,12 +29,17 @@
 
 namespace paykan::frontend {
 
-/// Deepest nesting of blocks, parentheses, brackets, type applications,
-/// prefix operators and conditional expressions a frontend accepts
-/// (docs/grammar.md section 9).  Every frontend rejects deeper input with
-/// `nesting too deep (more than kMaxNesting levels)`, so that pathological
-/// input can overflow neither a recursive-descent parser's native stack nor
-/// the recursive passes after parsing (Sema, the AST printer).
+/// Deepest nesting a frontend accepts (docs/grammar.md section 9): of
+/// blocks (a function's or a lambda's `=>` body is one), declaration
+/// bodies, parentheses, brackets, arguments, prefix operators, conditional
+/// expressions, type applications, tuple and function types (a function
+/// type's result and a lambda's result type are a level), and type suffixes
+/// (`[]`, `[N]`, `?`, each a level around the type it wraps).  Every
+/// frontend rejects deeper input with `nesting too deep (more than
+/// kMaxNesting levels)`, so that pathological input can overflow neither a
+/// recursive-descent parser's native stack nor the recursive passes after
+/// parsing (Sema, the AST printer); the AST interchange reader counts the
+/// same levels (paykan/ast/Interchange.h).
 inline constexpr unsigned kMaxNesting = 512;
 
 /// The diagnostic every frontend reports at a `mov` keyword (#145).  `mov`

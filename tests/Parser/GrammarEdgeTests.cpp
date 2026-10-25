@@ -182,6 +182,34 @@ TEST(GrammarEdge, NestingLimitIsTheSameOnEveryFrontend) {
     return inMain("x: " + repeat("(int, ", n) + "int" + repeat(")", n) +
                   " = 1;");
   });
+  // A lambda's body, a function's `=>` body, a function type's result and a
+  // lambda's result type are a level each, as a block is (#16).
+  expectLimit("lambda bodies", [](int n) {
+    return inMain("f = " + repeat("fn() => ", n) + "0;");
+  });
+  expectLimit("expression bodies", [](int n) {
+    return "fn f() => " + repeat("-", n) + "1;\n" + inMain("");
+  });
+  expectLimit("function-type results", [](int n) {
+    return inMain("x: " + repeat("() -> ", n) + "int = f;");
+  });
+  expectLimit("lambda result types", [](int n) {
+    return inMain("f = fn() -> " + repeat("() -> ", n - 1) + "int => g;");
+  });
+  // Each type suffix is a level around the type it wraps.
+  expectLimit("array type suffixes", [](int n) {
+    return inMain("x: int" + repeat("[]", n) + " = y;");
+  });
+  expectLimit("fixed-size array suffixes", [](int n) {
+    return inMain("x: int" + repeat("[1]", n) + " = y;");
+  });
+  expectLimit("optional suffixes", [](int n) {
+    return inMain("x: int" + repeat("?[]", n / 2) + (n % 2 ? "?" : "") +
+                  " = y;");
+  });
+  expectLimit("suffixes of a type application", [](int n) {
+    return inMain("x: B<int>" + repeat("[]", n - 1) + " = y;");
+  });
   // Mixed: a prefix operator and a parenthesis are a level each.
   expectLimit("mixed", [](int n) {
     std::string s = "x = " + repeat("-(", n / 2) + (n % 2 ? "-1" : "1") +
@@ -226,8 +254,10 @@ TEST(GrammarEdge, NestingTooDeepInBlocksIsTheOnlyError) {
 
 TEST(GrammarEdge, PathologicalNestingIsRejectedNotCrashed) {
   // 100,000 levels used to overflow the stack in the passes after a parse
-  // that kept its own stack on the heap (Sema, the AST printer).
-  for (const char *open : {"{ ", "(", "-", "if a then "}) {
+  // that kept its own stack on the heap (Sema, the AST printer), and lambda
+  // bodies, function-type results and type suffixes in the parser or in
+  // Sema (#16).
+  for (const char *open : {"{ ", "(", "-", "if a then ", "fn() => "}) {
     std::string src = "import ::io; fn main() -> int { ";
     std::string o(open);
     if (o == "{ ")
@@ -235,6 +265,13 @@ TEST(GrammarEdge, PathologicalNestingIsRejectedNotCrashed) {
     else
       src += "x = " + repeat(o, 100000) + "1;";
     EXPECT_FALSE(parsesOnEveryFrontend(src + " return 0; }", open));
+  }
+  for (const char *suffix : {"() -> ", "[]", "[1]", "?[]"}) {
+    const std::string s(suffix);
+    const std::string type =
+        s == "() -> " ? repeat(s, 100000) + "int" : "int" + repeat(s, 100000);
+    EXPECT_FALSE(parsesOnEveryFrontend(
+        "fn g(x: " + type + ") -> int { return 0; }\n" + inMain(""), suffix));
   }
 }
 

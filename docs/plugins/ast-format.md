@@ -171,7 +171,15 @@ the rules above: unknown tags, missing or extra fields, a field of the wrong
 kind, an empty name where one is required, a tuple or destructuring with
 fewer than two elements, an `array-repeat` count below 1, a byte value out
 of range, a malformed location, an unknown escape, a version it does not
-read, and nesting beyond the limit. It
+read, and nesting beyond the limits: more than 2048 lists, and more than
+the frontends' 512 levels (`nesting too deep (more than 512 levels)`),
+counted in the AST as [`../grammar.md`](../grammar.md) section 9 counts
+them in the source (a block's statements, the members of a declaration's
+body, a `match`'s arms, the operand of a `unary`, a `ternary`'s fields, the
+arguments of a call, the elements of an `array` or a `tuple`, a
+`subscript`'s index, a `lambda`'s result type, a type's arguments,
+elements, parameters and result, and the type an `array-type`,
+`fixed-array-type` or `optional-type` wraps are each a level in). It
 also makes the grammar's own checks that the recursive-descent frontend
 makes while parsing (`void?`, nested optionals, `_` for the body of a
 function that is neither a class's method nor a trait's, `(native ...)` on

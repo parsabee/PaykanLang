@@ -12,7 +12,10 @@
 //
 // The text comes from a plugin: nothing in it is trusted.  Every failure is
 // a ReadError with a position, never an assertion; nesting is bounded
-// (kMaxDepth), and so is every recursion here.
+// (kMaxDepth lists), and so is every recursion here.  The AST is held to the
+// frontends' own nesting limit too (frontend::kMaxNesting), counted as the
+// recursive-descent frontend counts it, so that an AST from a plugin can make
+// the passes after it recurse no deeper than a parsed program can.
 
 #include "Names.h"
 #include "paykan/Frontend.h"
@@ -268,8 +271,36 @@ public:
 private:
   ASTContext &Ctx;
   ReadError &Err;
+  /// The levels of nesting (frontend::kMaxNesting) around what is built.
+  unsigned Depth = 0;
 
   bool failed() const { return !Err.Message.empty(); }
+
+  /// One level of nesting, as the frontends count them (docs/grammar.md
+  /// section 9), around the fields read while it lives: a block's
+  /// statements, a declaration body's members, a match's arms, an operand
+  /// of a prefix operator or a conditional, the arguments of a call, an
+  /// array's or a tuple's elements, a subscript's index, a lambda's result
+  /// type, a type's arguments, elements, parameters, result or the type a
+  /// suffix wraps.  The AST has no parentheses, so a parenthesised
+  /// expression's level is not there to count: what a frontend parsed
+  /// within the limit is within it here.
+  class Nested {
+  public:
+    Nested(Builder &b, const SExpr &at) : B(b) {
+      if (++B.Depth > frontend::kMaxNesting)
+        B.fail(at, "nesting too deep (more than " +
+                       std::to_string(frontend::kMaxNesting) + " levels)");
+    }
+    ~Nested() { --B.Depth; }
+    Nested(const Nested &) = delete;
+    Nested &operator=(const Nested &) = delete;
+    /// False when this level is one too many.
+    bool ok() const { return B.Depth <= frontend::kMaxNesting; }
+
+  private:
+    Builder &B;
+  };
 
   void fail(const SExpr &at, const std::string &msg) {
     if (failed())
@@ -542,6 +573,9 @@ private:
     const SExpr *fl = f.list("fields");
     if (!fl)
       return nullptr;
+    Nested body(*this, *fl);
+    if (!body.ok())
+      return nullptr;
     for (const SExpr &v : fl->Items) {
       if (v.K != SExpr::List || v.Text != "var")
         return fail(v, "expected a field: (var ...)"), nullptr;
@@ -593,7 +627,12 @@ private:
         return nullptr;
     }
     std::vector<FuncDecl *> methods;
-    if (!methodList(f, methods, FuncKind::ImplMethod) || !f.done())
+    {
+      Nested body(*this, e);
+      if (!body.ok() || !methodList(f, methods, FuncKind::ImplMethod))
+        return nullptr;
+    }
+    if (!f.done())
       return nullptr;
     return Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait,
                               std::move(params));
@@ -610,7 +649,12 @@ private:
     if (!bounds.empty())
       return fail(e, "a trait's type parameters cannot have bounds"), nullptr;
     std::vector<FuncDecl *> methods;
-    if (!methodList(f, methods, FuncKind::Requirement) || !f.done())
+    {
+      Nested body(*this, e);
+      if (!body.ok() || !methodList(f, methods, FuncKind::Requirement))
+        return nullptr;
+    }
+    if (!f.done())
       return nullptr;
     return Ctx.make<TraitDecl>(loc, *name, std::move(tparams),
                                std::move(methods));
@@ -776,6 +820,9 @@ private:
     std::vector<FuncDecl *> methods;
     const SExpr *fl = f.list("fields");
     if (!fl)
+      return nullptr;
+    Nested body(*this, *fl);
+    if (!body.ok())
       return nullptr;
     for (const SExpr &v : fl->Items) {
       if (v.K != SExpr::List || v.Text != "var")
@@ -1016,13 +1063,18 @@ private:
       return Ctx.make<ClassType>(loc, *name, nullptr);
     }
     if (e.Text == "array-type") {
-      Type *elem = type(f, "the element type");
+      Nested inner(*this, e);
+      Type *elem = inner.ok() ? type(f, "the element type") : nullptr;
       if (!elem || !f.done())
         return nullptr;
       return Ctx.make<ArrayType>(loc, elem);
     }
     if (e.Text == "fixed-array-type") {
-      Type *elem = type(f, "the element type");
+      Type *elem = nullptr;
+      {
+        Nested inner(*this, e);
+        elem = inner.ok() ? type(f, "the element type") : nullptr;
+      }
       if (!elem)
         return nullptr;
       // `_`: a length the declaration infers (docs/grammar.md).
@@ -1046,7 +1098,11 @@ private:
       return Ctx.make<FixedArrayType>(loc, elem, n);
     }
     if (e.Text == "optional-type") {
-      Type *inner = type(f, "the inner type");
+      Type *inner = nullptr;
+      {
+        Nested level(*this, e);
+        inner = level.ok() ? type(f, "the inner type") : nullptr;
+      }
       if (!inner || !f.done())
         return nullptr;
       // The checks the grammar makes (docs/grammar.md).
@@ -1060,6 +1116,9 @@ private:
       return Ctx.make<OptionalType>(loc, inner);
     }
     if (e.Text == "tuple-type") {
+      Nested inner(*this, e);
+      if (!inner.ok())
+        return nullptr;
       std::vector<Type *> elems;
       while (!f.atEnd()) {
         Type *t = type(f, "an element type");
@@ -1073,7 +1132,9 @@ private:
       return Ctx.make<TupleType>(loc, std::move(elems));
     }
     if (e.Text == "fn-type") {
-      const SExpr *pl = f.list("params");
+      // The parameters and the result, one level in.
+      Nested inner(*this, e);
+      const SExpr *pl = inner.ok() ? f.list("params") : nullptr;
       if (!pl)
         return nullptr;
       std::vector<Type *> params;
@@ -1097,7 +1158,8 @@ private:
     }
     if (e.Text == "generic-type") {
       const std::string *name = f.name("the generic type's name");
-      if (!name)
+      Nested inner(*this, e);
+      if (!name || !inner.ok())
         return nullptr;
       std::vector<Type *> args;
       while (!f.atEnd()) {
@@ -1143,6 +1205,9 @@ private:
     const std::string &t = e.Text;
     Stmt *out = nullptr;
     if (t == "block") {
+      Nested inner(*this, e);
+      if (!inner.ok())
+        return nullptr;
       std::vector<Stmt *> stmts;
       while (!f.atEnd()) {
         Stmt *s = stmt(f, "a statement");
@@ -1246,7 +1311,7 @@ private:
       out = Ctx.make<MemberAssignStmt>(loc, recv, *field, v);
     } else if (t == "subscript-assign") {
       Expr *arr = expr(f, "the array");
-      Expr *idx = arr ? expr(f, "the index") : nullptr;
+      Expr *idx = arr ? nestedExpr(f, e, "the index") : nullptr;
       Expr *v = idx ? expr(f, "the assigned value") : nullptr;
       if (!v)
         return nullptr;
@@ -1256,6 +1321,9 @@ private:
       if (!subject)
         return nullptr;
       std::vector<MatchArm *> arms;
+      Nested inner(*this, e);
+      if (!inner.ok())
+        return nullptr;
       for (const SExpr *a : f.rest()) {
         MatchArm *arm = matchArm(*a);
         if (!arm)
@@ -1349,12 +1417,43 @@ private:
     return e ? expr(*e) : nullptr;
   }
 
-  bool exprs(Fields &f, std::vector<Expr *> &out) {
+  /// expr(@p f, @p what) one level of nesting inside @p parent.
+  Expr *nestedExpr(Fields &f, const SExpr &parent, const char *what) {
+    Nested inner(*this, parent);
+    return inner.ok() ? expr(f, what) : nullptr;
+  }
+
+  /// The remaining fields, expressions (the arguments of a call, the
+  /// elements of an array or a tuple), one level of nesting inside
+  /// @p parent when there are any.
+  bool exprs(Fields &f, const SExpr &parent, std::vector<Expr *> &out) {
+    if (f.atEnd())
+      return true;
+    Nested inner(*this, parent);
+    if (!inner.ok())
+      return false;
     while (!f.atEnd()) {
       Expr *x = expr(f, "an expression");
       if (!x)
         return false;
       out.push_back(x);
+    }
+    return true;
+  }
+
+  /// The type arguments in @p list into @p out, one level of nesting
+  /// inside it.
+  bool typeArgs(const SExpr &list, std::vector<Type *> &out) {
+    Nested inner(*this, list);
+    if (!inner.ok())
+      return false;
+    for (const SExpr &ta : list.Items) {
+      if (ta.K != SExpr::List)
+        return fail(ta, "expected a type"), false;
+      Type *ty = type(ta);
+      if (!ty)
+        return false;
+      out.push_back(ty);
     }
     return true;
   }
@@ -1430,7 +1529,7 @@ private:
         return fail(*op,
                     "unknown unary operator '" + op->Text + "' (neg, not)"),
                nullptr;
-      Expr *x = expr(f, "the operand");
+      Expr *x = nestedExpr(f, e, "the operand");
       if (!x)
         return nullptr;
       out = Ctx.make<UnaryExpr>(
@@ -1458,27 +1557,22 @@ private:
       if (!tl)
         return nullptr;
       std::vector<Type *> targs;
-      for (const SExpr &ta : tl->Items) {
-        if (ta.K != SExpr::List)
-          return fail(ta, "expected a type"), nullptr;
-        Type *ty = type(ta);
-        if (!ty)
-          return nullptr;
-        targs.push_back(ty);
-      }
+      if (!tl->Items.empty() && !typeArgs(*tl, targs))
+        return nullptr;
       std::vector<Expr *> args;
-      if (!exprs(f, args))
+      if (!exprs(f, e, args))
         return nullptr;
       out = Ctx.make<CallExpr>(loc, *callee, std::move(args), std::move(targs));
     } else if (t == "method-call") {
       Expr *recv = expr(f, "the receiver");
       const std::string *name = recv ? f.name("the method's name") : nullptr;
       std::vector<Expr *> args;
-      if (!name || !exprs(f, args))
+      if (!name || !exprs(f, e, args))
         return nullptr;
       out = Ctx.make<MethodCallExpr>(loc, recv, *name, std::move(args));
     } else if (t == "ternary") {
-      Expr *c = expr(f, "the condition");
+      Nested inner(*this, e);
+      Expr *c = inner.ok() ? expr(f, "the condition") : nullptr;
       Expr *a = c ? expr(f, "the value if true") : nullptr;
       Expr *b = a ? expr(f, "the value if false") : nullptr;
       if (!b)
@@ -1492,11 +1586,11 @@ private:
       out = Ctx.make<MemberAccessExpr>(loc, recv, *name);
     } else if (t == "array") {
       std::vector<Expr *> elems;
-      if (!exprs(f, elems))
+      if (!exprs(f, e, elems))
         return nullptr;
       out = Ctx.make<ArrayLiteralExpr>(loc, std::move(elems));
     } else if (t == "array-repeat") {
-      Expr *v = expr(f, "the repeated value");
+      Expr *v = nestedExpr(f, e, "the repeated value");
       int64_t n = 0;
       if (!v || !f.integer("the count", n))
         return nullptr;
@@ -1505,7 +1599,7 @@ private:
       out = Ctx.make<ArrayLiteralExpr>(loc, std::vector<Expr *>{v}, n);
     } else if (t == "subscript") {
       Expr *arr = expr(f, "the array");
-      Expr *idx = arr ? expr(f, "the index") : nullptr;
+      Expr *idx = arr ? nestedExpr(f, e, "the index") : nullptr;
       if (!idx)
         return nullptr;
       out = Ctx.make<SubscriptExpr>(loc, arr, idx);
@@ -1517,14 +1611,8 @@ private:
       // A generic enum's (type-args TYPE...), `Option<int>::Nothing`.
       std::vector<Type *> targs;
       if (const SExpr *tl = f.optionalList("type-args")) {
-        for (const SExpr &ta : tl->Items) {
-          if (ta.K != SExpr::List)
-            return fail(ta, "expected a type"), nullptr;
-          Type *ty = type(ta);
-          if (!ty)
-            return nullptr;
-          targs.push_back(ty);
-        }
+        if (!typeArgs(*tl, targs))
+          return nullptr;
         if (targs.empty())
           return fail(*tl, "(type-args) of an enum value needs a type"),
                  nullptr;
@@ -1538,12 +1626,8 @@ private:
       if (!callee)
         return nullptr;
       std::vector<Expr *> args;
-      while (!f.atEnd()) {
-        Expr *a = expr(f, "an argument");
-        if (!a)
-          return nullptr;
-        args.push_back(a);
-      }
+      if (!exprs(f, e, args))
+        return nullptr;
       return Ctx.make<CallValueExpr>(loc, callee, std::move(args));
     } else if (t == "lambda") {
       const SExpr *pl = f.list("params");
@@ -1563,7 +1647,8 @@ private:
       }
       Type *ret = nullptr;
       if (!f.absent()) {
-        ret = type(f, "the result type or _");
+        Nested inner(*this, e);
+        ret = inner.ok() ? type(f, "the result type or _") : nullptr;
         if (!ret)
           return nullptr;
       }
@@ -1592,7 +1677,7 @@ private:
       return lambda;
     } else if (t == "tuple") {
       std::vector<Expr *> elems;
-      if (!exprs(f, elems))
+      if (!exprs(f, e, elems))
         return nullptr;
       if (elems.size() < 2)
         return fail(e, "a tuple needs at least two elements"), nullptr;

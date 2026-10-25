@@ -577,10 +577,21 @@ report several independent errors. Another frontend may recover less (for
 example only at `;` inside a block). Any error makes the parse fail; a file
 with errors is never handed to Sema.
 
-Nesting (blocks, parentheses, brackets, type applications, prefix
-operators and conditional expressions) deeper than 512 levels is rejected
-with `nesting too deep` by every frontend, so pathological inputs cannot
-overflow the stack of the parser or of the passes after it.
+Nesting deeper than 512 levels is rejected with `nesting too deep (more
+than 512 levels)` by every frontend, so that pathological input can
+overflow the stack neither of the parser nor of the passes after it. Each
+of these is a level: a block, and a function's or a lambda's `=>` body,
+which stands for one; a class, struct, `impl` or trait body; the arms of a
+`match`; a parenthesised expression or a tuple's elements; the arguments
+of a call and the elements of an array literal; a subscript's index; the
+operand of a prefix operator; a conditional expression; a type
+application's arguments; a tuple type's elements; a function type's
+parameters and its result, and a lambda's result type; and each type
+suffix (`[]`, `[N]`, `?`), around the levels of the type it wraps, so that
+`B<int>[][]` is three levels deep, as its AST is. The AST interchange
+reader counts the same levels in the AST it reads, which has no
+parentheses to count ([`plugins/ast-format.md`](plugins/ast-format.md)
+section 3).
 
 Every frontend reports lexical and syntax errors in source order, and
 locate the common ones alike (a tuple index with leading zeros at its `.`,

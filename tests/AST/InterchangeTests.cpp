@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -448,11 +449,11 @@ TEST(ASTInterchange, RejectsMalformedInput) {
 }
 
 TEST(ASTInterchange, NestingIsBounded) {
-  auto nested = [](unsigned depth) {
-    // (paykan-ast 1 (unit (fn ... (block (expr <depth - 6 unary lists>)))))
+  // (paykan-ast 1 (unit (fn ... (block (expr <unary> (int 1)))))): every
+  // unary is a level of nesting, as the function's body is.
+  auto nested = [](unsigned unary) {
     std::string text = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
                        "_ (block (expr ";
-    unsigned unary = depth - 6;
     for (unsigned i = 0; i < unary; ++i)
       text += "(unary neg ";
     text += "(int 1)";
@@ -461,11 +462,171 @@ TEST(ASTInterchange, NestingIsBounded) {
   };
   ast::ASTContext ctx;
   std::string error;
-  EXPECT_NE(read(nested(ic::kMaxDepth - 1), ctx, error), nullptr) << error;
-  EXPECT_EQ(read(nested(ic::kMaxDepth + 10), ctx, error), nullptr);
+  // The text is at most kMaxDepth lists deep...
+  EXPECT_EQ(read(nested(ic::kMaxDepth), ctx, error), nullptr);
   EXPECT_NE(error.find("nesting too deep (more than 2048 levels)"),
             std::string::npos)
       << error;
+  // ... and the AST the frontends' 512 levels.
+  EXPECT_NE(read(nested(511), ctx, error), nullptr) << error;
+  EXPECT_EQ(read(nested(512), ctx, error), nullptr);
+  EXPECT_NE(error.find("nesting too deep (more than 512 levels)"),
+            std::string::npos)
+      << error;
+}
+
+namespace {
+
+/// The program @p source parsed by the recursive-descent frontend: its
+/// driver, which holds the AST, or null after a syntax error.
+std::unique_ptr<parser::ParserDriver> parseSource(const std::string &source) {
+  static int counter = 0;
+  auto path = std::filesystem::temp_directory_path() /
+              ("paykan_interchange_" + std::to_string(::getpid()) + "_" +
+               std::to_string(counter++) + ".pkn");
+  std::ofstream(path) << source;
+  auto driver = std::make_unique<parser::ParserDriver>("recursive-descent");
+  std::ostringstream quiet;
+  sema::DiagEngine diag(quiet);
+  driver->setDiagEngine(&diag);
+  const int rc = driver->parseFile(path.string());
+  std::filesystem::remove(path);
+  return rc == 0 ? std::move(driver) : nullptr;
+}
+
+std::string repeat(const std::string &s, int n) {
+  std::string out;
+  for (int i = 0; i < n; ++i)
+    out += s;
+  return out;
+}
+
+/// `n` nested @p open ... @p close around @p inner.
+std::string nest(const std::string &open, const std::string &inner,
+                 const std::string &close, int n) {
+  return repeat(open, n) + inner + repeat(close, n);
+}
+
+std::string mainOf(const std::string &body) {
+  return "fn main() -> int { " + body + " return 0; }\n";
+}
+
+std::string mainAst(const std::string &stmt) {
+  return "(paykan-ast 1 (unit (fn \"main\" (type-params) (params) "
+         "(named-type \"int\") (block " +
+         stmt + " (return (int 0))))))";
+}
+
+const std::string kInt = "(named-type \"int\")";
+
+} // namespace
+
+// The reader holds the AST to the frontends' nesting limit and counts the
+// levels the recursive-descent frontend counts (docs/grammar.md section 9):
+// each construct parsed at the limit reads back, and the AST one level
+// deeper is rejected with the frontends' message.  `n` levels inside the
+// function's body, as GrammarEdgeTests counts them.
+TEST(ASTInterchange, NestingLimitIsTheFrontends) {
+  struct Kind {
+    const char *What;
+    std::string (*Source)(int);
+    std::string (*Ast)(int);
+  };
+  const Kind kinds[] = {
+      {"blocks", [](int n) { return mainOf(nest("{ ", "", "} ", n)); },
+       [](int n) { return mainAst(nest("(block ", "", ")", n)); }},
+      {"prefix operators",
+       [](int n) { return mainOf("x = " + repeat("-", n) + "a;"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(unary neg ", "(ident \"a\")", ")", n) + ")");
+       }},
+      {"calls",
+       [](int n) { return mainOf("x = " + nest("f(", "1", ")", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(call \"f\" (type-args) ", "(int 1)", ")", n) +
+                        ")");
+       }},
+      {"subscripts",
+       [](int n) { return mainOf("x = " + nest("a[", "1", "]", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(subscript (ident \"a\") ", "(int 1)", ")", n) +
+                        ")");
+       }},
+      {"lambda bodies",
+       [](int n) { return mainOf("f = " + repeat("fn() => ", n) + "0;"); },
+       [](int n) {
+         return mainAst("(assign (ident \"f\") " +
+                        nest("(lambda (params) _ (block (return ", "(int 0)",
+                             ")) (inferred))", n) +
+                        ")");
+       }},
+      {"expression bodies",
+       [](int n) {
+         return "fn f() => " + repeat("-", n) + "1;\n" + mainOf("");
+       },
+       [](int n) {
+         return "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                "(block (return " +
+                nest("(unary neg ", "(int 1)", ")", n) + ")) (inferred))))";
+       }},
+      {"function-type results",
+       [](int n) { return mainOf("x: " + repeat("() -> ", n) + "int = f;"); },
+       [](int n) {
+         return mainAst("(decl (var \"x\" " +
+                        nest("(fn-type (params) ", kInt, ")", n) +
+                        " (ident \"f\")))");
+       }},
+      {"lambda result types",
+       [](int n) {
+         return mainOf("f = fn() -> " + repeat("() -> ", n - 1) + "int => g;");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"f\") (lambda (params) " +
+                        nest("(fn-type (params) ", kInt, ")", n - 1) +
+                        " (block (return (ident \"g\")))))");
+       }},
+      {"array type suffixes",
+       [](int n) { return mainOf("x: int" + repeat("[]", n) + " = y;"); },
+       [](int n) {
+         return mainAst("(decl (var \"x\" " +
+                        nest("(array-type ", kInt, ")", n) +
+                        " (ident \"y\")))");
+       }},
+      {"fixed-size array suffixes",
+       [](int n) { return mainOf("x: int" + repeat("[1]", n) + " = y;"); },
+       [](int n) {
+         return mainAst("(decl (var \"x\" " +
+                        nest("(fixed-array-type ", kInt, " 1)", n) +
+                        " (ident \"y\")))");
+       }},
+      {"suffixes of a type application",
+       [](int n) {
+         return mainOf("x: B<int>" + repeat("[]", n - 1) + " = y;");
+       },
+       [](int n) {
+         return mainAst("(decl (var \"x\" " +
+                        nest("(array-type ",
+                             "(generic-type \"B\" " + kInt + ")", ")", n - 1) +
+                        " (ident \"y\")))");
+       }},
+  };
+  for (const Kind &k : kinds) {
+    auto parsed = parseSource(k.Source(511));
+    ASSERT_NE(parsed, nullptr) << k.What;
+    EXPECT_EQ(parseSource(k.Source(512)), nullptr) << k.What;
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_NE(read(write(*parsed->getRoot()), ctx, error), nullptr)
+        << k.What << ": " << error;
+    EXPECT_NE(read(k.Ast(511), ctx, error), nullptr) << k.What << ": " << error;
+    EXPECT_EQ(read(k.Ast(512), ctx, error), nullptr) << k.What;
+    EXPECT_NE(error.find("nesting too deep (more than 512 levels)"),
+              std::string::npos)
+        << k.What << ": " << error;
+  }
 }
 
 // A `view fn` ends with `(qual view)`; nothing else qualifies a function.

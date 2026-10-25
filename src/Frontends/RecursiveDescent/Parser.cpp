@@ -57,6 +57,34 @@ makeImportList(ASTContext &C, SourceLocation loc, const std::string &base,
   return C.make<ImportDecl>(loc, C.intern(base), isSystem, std::move(ms));
 }
 
+/// The levels of nesting the type @p ty spans as its AST shows them
+/// (docs/grammar.md section 9): one for a type application's arguments, a
+/// tuple type's elements, a function type's parameters and its result, and
+/// one for each type suffix around the type it wraps.  Recursion over a type
+/// the parser built within the nesting limit.
+unsigned typeLevels(const Type *ty) {
+  auto deepest = [](const std::vector<Type *> &types) {
+    unsigned d = 0;
+    for (const Type *t : types)
+      d = std::max(d, typeLevels(t));
+    return d;
+  };
+  if (auto *a = dyn_cast<ArrayType>(ty))
+    return 1 + typeLevels(a->getElementType());
+  if (auto *a = dyn_cast<FixedArrayType>(ty))
+    return 1 + typeLevels(a->getElementType());
+  if (auto *o = dyn_cast<OptionalType>(ty))
+    return 1 + typeLevels(o->getInnerType());
+  if (auto *t = dyn_cast<TupleType>(ty))
+    return 1 + deepest(t->getElementTypes());
+  if (auto *g = dyn_cast<GenericType>(ty))
+    return 1 + deepest(g->getArgs());
+  if (auto *f = dyn_cast<FunctionType>(ty))
+    return 1 + std::max(deepest(f->getParamTypes()),
+                        typeLevels(f->getReturnType()));
+  return 0;
+}
+
 bool isRelational(Tok k) {
   return k == Tok::Less || k == Tok::Greater || k == Tok::LessEq ||
          k == Tok::GreaterEq || k == Tok::EqEq || k == Tok::NotEq;
@@ -1252,7 +1280,11 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   if (expressionBody) {
     consume();
     SourceLocation from = cur().Loc;
+    // A level of nesting, as the block `{ return ...; }` it stands for is.
+    if (!enterNesting())
+      return nullptr;
     Expr *value = parseExpression();
+    leaveNesting();
     if (!value)
       return nullptr;
     std::vector<Stmt *> ret{Ctx.make<ReturnStmt>(span(from), value)};
@@ -2041,7 +2073,12 @@ Type *Parser::parsePrimaryType() {
                            " T' is not supported in a function type");
       return nullptr;
     }
+    // The result is a level of nesting, as the parameters are: `() -> ()
+    // -> ...` nests one level per arrow.
+    if (!enterNesting())
+      return nullptr;
     Type *ret = parseTypeAnnotation();
+    leaveNesting();
     if (!ret)
       return nullptr;
     return Ctx.make<FunctionType>(span(start), std::move(elems),
@@ -2089,8 +2126,21 @@ Type *Parser::parseTypeAnnotation() {
   Type *ty = parsePrimaryType();
   if (!ty)
     return nullptr;
+  if (!at(Tok::LBracket) && !at(Tok::Question))
+    return ty;
+  // Each suffix is a level of nesting around the type it wraps, the levels
+  // inside that type included (typeLevels): `B<int>[][]` nests three deep,
+  // as its AST does.  They are all left at the end of the annotation.
+  struct RestoreDepth {
+    unsigned &Level;
+    unsigned Outer;
+    ~RestoreDepth() { Level = Outer; }
+  } restoreDepth{Depth, Depth};
+  Depth += typeLevels(ty);
   for (;;) {
     if (at(Tok::LBracket)) {
+      if (!enterNesting())
+        return nullptr;
       // A `[` after a type can only open the `[]` or `[n]` suffix: report
       // the missing `]` where it is missing.
       consume();
@@ -2116,6 +2166,8 @@ Type *Parser::parseTypeAnnotation() {
                                 : FixedArrayType::kInferredLength);
           if (!(at(Tok::LBracket) && isLength(peek(1).Kind)))
             break;
+          if (!enterNesting()) // each length is an array of its own
+            return nullptr;
           consume();
         }
         for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
@@ -2126,6 +2178,8 @@ Type *Parser::parseTypeAnnotation() {
         return nullptr;
       ty = Ctx.make<ArrayType>(span(start), ty);
     } else if (at(Tok::Question)) {
+      if (!enterNesting())
+        return nullptr;
       Token q = consume();
       // `void` has no value to make optional; the other builtin value types
       // (`int?`, ...) box through the runtime's boxed classes (an enum
@@ -2463,7 +2517,11 @@ Expr *Parser::parsePrimary() {
                              std::string(cur().Text) + " T' is not supported");
         return nullptr;
       }
+      // A level of nesting, as a function type's result is.
+      if (!enterNesting())
+        return nullptr;
       retTy = parseTypeAnnotation();
+      leaveNesting();
       if (!retTy)
         return nullptr;
     }
@@ -2478,7 +2536,11 @@ Expr *Parser::parsePrimary() {
     if (at(Tok::FatArrow)) {
       consume();
       SourceLocation from = cur().Loc;
+      // A level of nesting, as the block it stands for is.
+      if (!enterNesting())
+        return nullptr;
       Expr *value = parseExpression();
+      leaveNesting();
       if (!value)
         return nullptr;
       std::vector<Stmt *> ret{Ctx.make<ReturnStmt>(span(from), value)};
