@@ -1139,15 +1139,21 @@ standard error after the last pass ran:
 ```text
 $ paykan --stats run greet.pkn
 paykan pass stats:
-  moves-at-last-use transfers : 1
-  moves-at-last-use retains removed : 1
-  moves-at-last-use releases removed : 1
+  moves-at-last-use transfers : 2
+  moves-at-last-use retains removed : 2
+  moves-at-last-use releases removed : 2
+  rc-elimination retains removed : 1
+  rc-elimination releases removed : 1
 Hello, world!
 ```
 
-(`greet.pkn` passes a variable to `greet(name: Str)` at its last use; the
-counters are those of the passes this run ran, so a module built from its
-source in this run counts, and one loaded from its `.pkm` does not.)
+(`greet.pkn` makes a `Person(name: Str, next: Person?)`, whose `__init__`
+hands its two parameters to the fields at their last use, and matches a
+field, `match p.next { q: Person { greet(q.name); } None { greet(p.name); }
+}`, where the binding `q` needs no reference of its own inside the
+match's.  The counters are those of the passes this run ran, so a module
+built from its source in this run counts, and one loaded from its `.pkm`
+does not.)
 
 **The dead-code pass** (`include/paykan/pir/DeadCode.h`,
 `dropDeadCode` / `createDeadCodePass`) erases every function, class and

@@ -40,6 +40,7 @@
 #include <cstddef>
 #include <iterator>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace paykan::mlir_backend {
@@ -491,27 +492,26 @@ struct InlineReferenceCountsPass
   }
 
   void runOnOperation() override {
-    std::vector<LLVM::CallOp> calls;
+    std::vector<std::pair<LLVM::CallOp, bool>> calls; // (call, a retain's)
     getOperation().walk([&](LLVM::CallOp call) {
       std::optional<StringRef> callee = call.getCallee();
       if (callee &&
           (*callee == names::kPaykanRetain || *callee == names::kPaykanRelease))
-        calls.push_back(call);
+        calls.emplace_back(call, *callee == names::kPaykanRetain);
     });
-    for (LLVM::CallOp call : calls)
-      expand(call);
+    for (auto [call, retain] : calls)
+      expand(call, retain);
   }
 
-  /// `head: ...; call; rest` becomes
+  /// `head: ...; call; rest`, the call a retain's if @p retain, becomes
   ///
   ///   head:  ...; cond_br (box == null), done, check
   ///   check: n = load i32 (box + 8); cond_br (fast), fast, slow
   ///   fast:  store n +/- 1; br done
   ///   slow:  call; br done
   ///   done:  rest
-  static void expand(LLVM::CallOp call) {
+  static void expand(LLVM::CallOp call, bool retain) {
     MLIRContext *ctx = call.getContext();
-    const bool retain = *call.getCallee() == names::kPaykanRetain;
     Location loc = call.getLoc();
     Value box = call.getArgOperands().front();
     Type ptr = llvmPtr(ctx);

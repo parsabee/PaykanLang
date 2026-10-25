@@ -77,8 +77,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compiler removes"), run after the moves at last use on every program and on the code of
   every module written to a `.pkm`, removes a `retain` together with the releases that end
   the reference it made where something else keeps the object alive in between: another
-  reference the function holds on the same value (a match subject's around its binding's,
-  a `weak.load`'s, a box parameter), a local that is not reassigned, released, handed on or
+  reference the function holds on the same value (a match subject's around its binding's, a
+  `weak.load`'s, a box parameter), a local that is not reassigned, released, handed on or
   copied meanwhile, or nothing in between that can let go of a reference (no call that may
   run code, no release, no store over a reference).  A reference read from a field or an
   array element, `stable` or not, keeps its first retain whenever a call that may run code
@@ -88,11 +88,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nested in a hold go.  A pair is removed only when it is balanced on every way out of its
   range (`ret`, `break`, `continue`, a panic), so every object is destroyed where it was
   before: every sample and standard-library test prints what it printed without the pass,
-  with the same heap statistics, at `-O0`, `-O1` and `-O2`.  Over the samples and the standard library's tests
-  it removes, after the moves, 22% of the retains and 9% of the releases of the lowered
-  programs (3368 to 2615, 9360 to 8535), and 19% and 7% of what `--emit-pir` prints of the
-  runnable ones (1387 to 1129, 4399 to 4110).  `--stats` counts `rc-elimination retains
-  removed` and `releases removed`.  `samples/codegen/67_reference_count_elimination.pkn`
+  with the same heap statistics, at `-O0`, `-O1` and `-O2`.  Over the samples and the
+  standard library's tests it removes, after the moves, 22% of the retains and 9% of the
+  releases of the lowered programs (3368 to 2615, 9360 to 8535), and 19% and 7% of what
+  `--emit-pir` prints of the runnable ones (1387 to 1129, 4399 to 4110).  It speeds up
+  little on its own: in the `match` of binary trees the subject's retain is a hold across
+  the call and the argument's the one an owned parameter takes (borrowed parameters, #98
+  part 2, would remove it), and what is left costs a few instructions with the inline
+  retains and releases (*Changed*).  `--stats` counts `rc-elimination retains removed` and
+  `rc-elimination releases removed`.  `samples/codegen/67_reference_count_elimination.pkn`
   runs each shape and each hazard (a callee that clears the field a match read, `x.next =
   x.next.next`, an array element replaced or emptied by a call), clean under ASan, LSan and
   UBSan through `--emit-c`.
@@ -322,14 +326,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before reads as it did (docs/design/pkm.md §5.5).  A read rooted in a variable, which the
   function may hand on, keeps its reference across any call that may let go of one, so the
   moves at last use there stay as they were.
-- The fast paths of `Paykan_retain` and `Paykan_release` are inline in the generated code
-  (#98, part 4): a null box is skipped, a retain below the limit increments the object's
-  count and a release that leaves it above zero decrements it, with a call of the runtime
-  only for the rest (the limit's panic, a destruction).  The LLVM path emits them at every
-  `-O`; the C of `--emit-c` calls Runtime.h's new `static inline` `Paykan_retain_inline` and
-  `Paykan_release_inline` (strict C11), which the runtime's container copies and drops use
-  too, and `PaykanShared_get_inline` is there for native code.  The out-of-line functions
-  stay the ABI.  BENCHMARK_SUMMARY
+- A retain and a release are inline in the generated code (#98, part 4), no longer a call
+  of the runtime: a null box is skipped, a retain below the limit adds one to the count in
+  the object's header and a release that leaves the count above zero subtracts one, and
+  only a retain at the limit (which panics) and a release that destroys the object call
+  `Paykan_retain` or `Paykan_release`, so each does what the call did, at every count.  The
+  LLVM path emits that code for every call at every `-O`, in the standard library's
+  compiled code too (`src/Backends/MLIR/ToLLVM/ToLLVM.cpp`); the C of `--emit-c` calls
+  Runtime.h's new `static inline` `Paykan_retain_inline` and `Paykan_release_inline`
+  (strict C11), and `PaykanShared_get_inline` joins them for native code (`unbox` already
+  was the identity on both paths, never a call).  The runtime calls them everywhere but in
+  the file that defines the functions: a container's copies and drops, the argument an
+  `equals` consumes, printing.  The functions stay the ABI, for the JIT's symbol table,
+  code compiled before and native code.  With the reference-count elimination (*Added*),
+  built with `-O2` against a Release-built runtime, in CPU time (the median of 5 runs
+  pinned to one CPU, in three rounds) and in instructions executed: binary trees (4 trees
+  of depth 22, 33.5M nodes, counted through the `match` of #98) takes 8 to 14% less time on
+  the LLVM path and 9 to 12% on the C path, and 12.7% and 11.9% fewer instructions, all of
+  it from the inline paths (the same C with them turned back into calls executes the
+  instructions it did before); 60 rounds of `List.get` and a virtual call over 1M objects
+  of three classes 9 to 21% less time on the LLVM path and 7% and 12% fewer instructions
+  (LLVM, C); loops of millions of operations on the standard library's containers 10 to 41%
+  less time (`Stack<int>` 34 to 40%, `Queue<Str>` 32 to 34%, `HashMap<int, int>` 26 to 38%,
+  `HashSet<Str>` 19 to 29%, `MaxPriorityQueue<Str>` 14 to 16%, `MinPriorityQueue<int>` 10
+  to 15%; `Stack<int>` 37% fewer instructions); and `fib(40)`, which counts no references,
+  is the same machine code and the same instructions.
 - An object handed on at a variable's last use lives as long as its destination holds it,
   no longer until the variable's scope ends (docs/language/16-memory.md, "Ownership
   transfers").  Nothing is ever released earlier than its last holder lets it go, and
