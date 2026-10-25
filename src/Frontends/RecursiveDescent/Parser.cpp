@@ -271,6 +271,25 @@ bool Parser::enterNesting() {
   return true;
 }
 
+Parser::ChainScope::ChainScope(Parser &p)
+    : P(p), Outer(std::exchange(p.ChainHeight, 0)) {}
+
+Parser::ChainScope::~ChainScope() {
+  P.ChainHeight = std::max(Outer, P.ChainHeight);
+}
+
+unsigned Parser::ChainScope::take() { return std::exchange(P.ChainHeight, 0); }
+
+void Parser::ChainScope::finish(unsigned height) { P.ChainHeight = height; }
+
+bool Parser::checkChain(unsigned height, SourceLocation at) {
+  if (height <= kMaxChain)
+    return true;
+  error(at, "nesting too deep (more than " + std::to_string(kMaxChain) +
+                " levels)");
+  return false;
+}
+
 // -- Diagnostics
 
 void Parser::error(SourceLocation loc, const std::string &msg) {
@@ -1678,12 +1697,15 @@ std::optional<BinaryOpcode> compoundOpcode(Tok k) {
 // with a copy of its expression.
 bool Parser::parseExprOrAssignStatement(Stmt *&out) {
   SourceLocation start = cur().Loc;
+  ChainScope chain(*this);
   Expr *lhs = parseExpression();
   if (!lhs)
     return false;
+  unsigned height = chain.take();
 
   const std::optional<BinaryOpcode> compound = compoundOpcode(kind());
   if (!compound && !at(Tok::Assign)) {
+    chain.finish(height);
     if (!expect(Tok::Semi, "after the expression"))
       return false;
     out = Ctx.make<ExprStmt>(span(start), lhs);
@@ -1702,6 +1724,11 @@ bool Parser::parseExprOrAssignStatement(Stmt *&out) {
   Expr *value = parseExpression();
   if (!value)
     return false;
+  height = std::max(height, chain.take());
+  // `x += e` is `x = x + e`: its `+` is a link over both.
+  if (compound && !checkChain(++height, op.Loc))
+    return false;
+  chain.finish(height);
   if (compound)
     value = Ctx.make<BinaryExpr>(span(start), *compound,
                                  ast::ASTCloner(Ctx, {}).cloneExpr(lhs), value);
@@ -1828,34 +1855,52 @@ bool Parser::ifStartsStatement() {
 
 // ifStmt   ::= "if" expression block elseTail?
 // elseTail ::= "elif" expression block elseTail? | "else" block
-// An `elif` is an IfStmt nested as the else branch, as `else if` was.
+// An `elif` is an IfStmt nested as the else branch, as `else if` was, and so
+// a level of nesting, as that `if` in an `else` block would be: the passes
+// after parsing, down to the MLIR backend's regions, nest each one in the
+// one before.  The chain is parsed in a loop, its levels all left at its end.
 Stmt *Parser::parseIfStmt() {
-  SourceLocation start = consume().Loc; // "if" or "elif"
-  Expr *cond = parseExpression();
-  if (!cond)
-    return nullptr;
-  if (!at(Tok::LBrace)) {
-    errorAtCurrent("expected '{' after the 'if' condition");
-    return nullptr;
-  }
-  CompoundStmt *thenBlock = parseBlock();
-  if (!thenBlock)
-    return nullptr;
+  struct Branch {
+    SourceLocation Start; // of the `if` or the `elif`
+    Expr *Cond;
+    CompoundStmt *Then;
+  };
+  std::vector<Branch> branches;
+  SavedDepth savedDepth(*this);
   Stmt *elseBranch = nullptr;
-  if (at(Tok::KwElif)) {
-    elseBranch = parseIfStmt();
-    if (!elseBranch)
+  for (;;) {
+    if (!branches.empty() && !enterNesting())
       return nullptr;
-  } else if (accept(Tok::KwElse)) {
-    if (at(Tok::KwIf)) {
-      errorAtCurrent("an if-statement spells 'else if' as 'elif'");
+    SourceLocation start = consume().Loc; // "if" or "elif"
+    Expr *cond = parseExpression();
+    if (!cond)
+      return nullptr;
+    if (!at(Tok::LBrace)) {
+      errorAtCurrent("expected '{' after the 'if' condition");
       return nullptr;
     }
-    elseBranch = parseBlock();
-    if (!elseBranch)
+    CompoundStmt *thenBlock = parseBlock();
+    if (!thenBlock)
       return nullptr;
+    branches.push_back({start, cond, thenBlock});
+    if (at(Tok::KwElif))
+      continue;
+    if (accept(Tok::KwElse)) {
+      if (at(Tok::KwIf)) {
+        errorAtCurrent("an if-statement spells 'else if' as 'elif'");
+        return nullptr;
+      }
+      elseBranch = parseBlock();
+      if (!elseBranch)
+        return nullptr;
+    }
+    break;
   }
-  return Ctx.make<IfStmt>(span(start), cond, thenBlock, elseBranch);
+  // Innermost first: each `elif` is the else branch of the branch before.
+  for (auto it = branches.rbegin(); it != branches.rend(); ++it)
+    elseBranch =
+        Ctx.make<IfStmt>(span(it->Start), it->Cond, it->Then, elseBranch);
+  return elseBranch;
 }
 
 // whileStmt ::= "while" expression block
@@ -2152,11 +2197,7 @@ Type *Parser::parseTypeAnnotation() {
   // Each suffix is a level of nesting around the type it wraps, the levels
   // inside that type included (typeLevels): `B<int>[][]` nests three deep,
   // as its AST does.  They are all left at the end of the annotation.
-  struct RestoreDepth {
-    unsigned &Level;
-    unsigned Outer;
-    ~RestoreDepth() { Level = Outer; }
-  } restoreDepth{Depth, Depth};
+  SavedDepth savedDepth(*this);
   Depth += typeLevels(ty);
   for (;;) {
     if (at(Tok::LBracket)) {
@@ -2250,19 +2291,33 @@ Expr *Parser::parseTernary() {
 
 // Precedence climbing over the table in binaryPrecedence().  Relational
 // operators do not chain: `a < b < c` is a syntax error.
+//
+// Each operator is a link of a chain (frontend::kMaxChain) over the deeper of
+// its operands, so `1 + 1 + ...` is rejected at its 2049th operator; the
+// limit is checked before the right operand too, so that a long chain is
+// rejected where it becomes one.
 Expr *Parser::parseBinary(int minPrec) {
   SourceLocation start = cur().Loc;
+  ChainScope chain(*this);
   Expr *lhs = parseUnary();
   if (!lhs)
     return nullptr;
+  unsigned height = chain.take();
   for (;;) {
     Tok op = kind();
     int prec = binaryPrecedence(op);
-    if (prec == 0 || prec < minPrec)
+    if (prec == 0 || prec < minPrec) {
+      chain.finish(height);
       return lhs;
-    consume();
+    }
+    const Token opTok = consume();
+    if (!checkChain(height + 1, opTok.Loc))
+      return nullptr;
     Expr *rhs = parseBinary(prec + 1);
     if (!rhs)
+      return nullptr;
+    height = std::max(height, chain.take()) + 1;
+    if (!checkChain(height, opTok.Loc))
       return nullptr;
     lhs = Ctx.make<BinaryExpr>(span(start), binaryOpcode(op), lhs, rhs);
     if (isRelational(op) && isRelational(kind())) {
@@ -2297,12 +2352,26 @@ Expr *Parser::parseUnary() {
 }
 
 // postfix ::= primary ( "." IDENT ( "(" args ")" )? | "." INT | "[" expr "]" )*
+//
+// Each suffix is a link of a chain (frontend::kMaxChain), as each binary
+// operator is, over the deeper of the expression before it and its own
+// arguments or index; it is checked at the suffix's first token, before its
+// arguments and after them.
 Expr *Parser::parsePostfix() {
   SourceLocation start = cur().Loc;
+  ChainScope chain(*this);
   Expr *e = parsePrimary();
   if (!e)
     return nullptr;
+  unsigned height = chain.take();
   for (;;) {
+    const SourceLocation suffix = cur().Loc;
+    if (!at(Tok::LParen) && !at(Tok::Dot) && !at(Tok::LBracket)) {
+      chain.finish(height);
+      return e;
+    }
+    if (!checkChain(height + 1, suffix))
+      return nullptr;
     if (at(Tok::LParen)) {
       // `xs[0](1)`, `t.0(x)`, `make()(2)`: a call of a function value that
       // is not named (a named one is a CallExpr or a MethodCallExpr).
@@ -2312,9 +2381,7 @@ Expr *Parser::parsePostfix() {
           !expect(Tok::RParen, "to close the argument list"))
         return nullptr;
       e = Ctx.make<CallValueExpr>(span(start), e, std::move(args));
-      continue;
-    }
-    if (at(Tok::Dot)) {
+    } else if (at(Tok::Dot)) {
       Token dot = consume();
       if (at(Tok::Int) && cur().Offset == dot.Offset + 1) {
         // Tuple index `t.0`: the digits glued to the dot.  Leading zeros are
@@ -2335,23 +2402,22 @@ Expr *Parser::parsePostfix() {
           return nullptr;
         }
         e = Ctx.make<TupleIndexExpr>(span(start), e, static_cast<size_t>(n));
-        continue;
-      }
-      if (!at(Tok::Ident)) {
+      } else if (!at(Tok::Ident)) {
         errorAtCurrent("expected a field or method name after '.'");
         return nullptr;
-      }
-      const std::string &name = intern(consume().Text);
-      if (accept(Tok::LParen)) {
-        std::vector<Expr *> args;
-        if (!parseArgumentList(Tok::RParen, args) ||
-            !expect(Tok::RParen, "to close the argument list"))
-          return nullptr;
-        e = Ctx.make<MethodCallExpr>(span(start), e, name, std::move(args));
       } else {
-        e = Ctx.make<MemberAccessExpr>(span(start), e, name);
+        const std::string &name = intern(consume().Text);
+        if (accept(Tok::LParen)) {
+          std::vector<Expr *> args;
+          if (!parseArgumentList(Tok::RParen, args) ||
+              !expect(Tok::RParen, "to close the argument list"))
+            return nullptr;
+          e = Ctx.make<MethodCallExpr>(span(start), e, name, std::move(args));
+        } else {
+          e = Ctx.make<MemberAccessExpr>(span(start), e, name);
+        }
       }
-    } else if (at(Tok::LBracket)) {
+    } else {
       if (!enterNesting()) {
         // As in an argument list: the subscript is skipped whole.
         consume();
@@ -2366,9 +2432,10 @@ Expr *Parser::parsePostfix() {
       if (!index || !expect(Tok::RBracket, "to close the subscript"))
         return nullptr;
       e = Ctx.make<SubscriptExpr>(span(start), e, index);
-    } else {
-      return e;
     }
+    height = std::max(height, chain.take()) + 1;
+    if (!checkChain(height, suffix))
+      return nullptr;
   }
 }
 

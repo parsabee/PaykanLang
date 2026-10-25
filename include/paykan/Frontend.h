@@ -30,7 +30,8 @@
 namespace paykan::frontend {
 
 /// Deepest nesting a frontend accepts (docs/grammar.md section 9): of
-/// blocks (a function's or a lambda's `=>` body is one), declaration
+/// blocks (a function's or a lambda's `=>` body is one), `elif`s (each the
+/// `if` of an else branch), declaration
 /// bodies, parentheses, brackets, arguments, prefix operators, conditional
 /// expressions, type applications, tuple and function types (a function
 /// type's result and a lambda's result type are a level), and type suffixes
@@ -41,6 +42,17 @@ namespace paykan::frontend {
 /// parsing (Sema, the AST printer); the AST interchange reader counts the
 /// same levels (paykan/ast/Interchange.h).
 inline constexpr unsigned kMaxNesting = 512;
+
+/// Longest chain a frontend accepts (docs/grammar.md section 9): of binary
+/// operators (`1 + 1 + ...`) and of postfix suffixes (calls, field and
+/// method accesses, tuple indexes and subscripts: `s.trim().trim()...`),
+/// each a link over its operands.  The links are counted along every path
+/// down the AST, through nested expressions too, so that however chains
+/// combine the AST is no deeper than kMaxChain links plus kMaxNesting
+/// levels.  Every frontend rejects a longer one with `nesting too deep (more
+/// than kMaxChain levels)`, and the AST interchange reader counts the same
+/// links; the passes after parsing take a chain in a loop.
+inline constexpr unsigned kMaxChain = 2048;
 
 /// The diagnostic every frontend reports at a `mov` keyword (#145).  `mov`
 /// stays reserved; the operand after it still parses.

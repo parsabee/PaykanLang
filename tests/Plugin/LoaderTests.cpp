@@ -822,31 +822,46 @@ TEST_F(FrontendPlugin, Rejections) {
   EXPECT_FALSE(ran("recursive-descent", ".called"));
 }
 
-// A plugin's AST may nest deeper than the built-in frontend's nesting limit
-// allows (up to the format's own limit): Sema and the lowering get through
-// it, and deeper text is refused by the reader.
+// A plugin's AST is held to the frontends' limits (docs/grammar.md section
+// 9): nested as deep as they allow, 511 operators in the function's body,
+// and a chain of 2048 operators under them, Sema and the lowering get
+// through it; one level or one link more, or text nested deeper than the
+// format's lists, is refused by the reader.
 TEST_F(FrontendPlugin, DeepASTs) {
-  auto program = [](unsigned unary) {
+  auto program = [](unsigned unary, unsigned links) {
     std::string text = "(paykan-ast " + kAst +
                        " (unit (fn \"main\" (type-params) "
                        "(params) (named-type \"int\") (block (return ";
     for (unsigned i = 0; i < unary; ++i)
       text += "(unary neg ";
-    text += "(int 1)" + std::string(unary, ')') + ")))))\n";
+    for (unsigned i = 0; i < links; ++i)
+      text += "(binary add ";
+    text += "(int 1)";
+    for (unsigned i = 0; i < links; ++i)
+      text += " (int 1))";
+    text += std::string(unary, ')') + ")))))\n";
     return text;
   };
   fs::path deep = Scratch / "deep.pkn";
-  std::ofstream(deep) << program(2040);
+  std::ofstream(deep) << program(511, 2048);
   auto r = paykan(withFe("--emit-pir " + quote(deep.string())));
   EXPECT_EQ(r.Code, 0) << r.Err.substr(0, 2000);
   EXPECT_NE(r.Out.find("fn @main() -> i64"), std::string::npos);
-  fs::path tooDeep = Scratch / "too-deep.pkn";
-  std::ofstream(tooDeep) << program(2100);
-  auto t = paykan(withFe("--check-only " + quote(tooDeep.string())));
-  EXPECT_EQ(t.Code, 1);
-  EXPECT_NE(t.Err.find("returned an invalid AST: 1:"), std::string::npos)
-      << t.Err;
-  EXPECT_NE(t.Err.find("nesting too deep (more than 2048 levels)"),
-            std::string::npos)
-      << t.Err;
+  const struct {
+    unsigned Unary, Links;
+    const char *Error;
+  } tooDeep[] = {
+      {512, 0, "nesting too deep (more than 512 levels)"},
+      {0, 2049, "nesting too deep (more than 2048 levels)"},
+      {4200, 0, "nesting too deep (more than 4112 levels)"},
+  };
+  for (const auto &c : tooDeep) {
+    fs::path p = Scratch / "too-deep.pkn";
+    std::ofstream(p) << program(c.Unary, c.Links);
+    auto t = paykan(withFe("--check-only " + quote(p.string())));
+    EXPECT_EQ(t.Code, 1) << c.Error;
+    EXPECT_NE(t.Err.find("returned an invalid AST: 1:"), std::string::npos)
+        << t.Err;
+    EXPECT_NE(t.Err.find(c.Error), std::string::npos) << t.Err;
+  }
 }

@@ -583,8 +583,10 @@ Nesting deeper than 512 levels is rejected with `nesting too deep (more
 than 512 levels)` by every frontend, so that pathological input can
 overflow the stack neither of the parser nor of the passes after it. Each
 of these is a level: a block, and a function's or a lambda's `=>` body,
-which stands for one; a class, struct, `impl` or trait body; the arms of a
-`match`; a parenthesised expression or a tuple's elements; the arguments
+which stands for one; an `elif`, which is the `if` of an else branch (so
+an `if` takes at most 510 `elif`s in a function's body); a class, struct,
+`impl` or trait body; the arms of a `match`; a parenthesised expression or
+a tuple's elements; the arguments
 of a call and the elements of an array literal; a subscript's index; the
 operand of a prefix operator; a conditional expression; a type
 application's arguments; a tuple type's elements; a function type's
@@ -594,6 +596,18 @@ suffix (`[]`, `[N]`, `?`), around the levels of the type it wraps, so that
 reader counts the same levels in the AST it reads, which has no
 parentheses to count ([`plugins/ast-format.md`](plugins/ast-format.md)
 section 3).
+
+A chain of more than 2048 links is rejected with `nesting too deep (more
+than 2048 levels)` by every frontend, for the same reason. Each binary
+operator is a link over its two operands, and each postfix suffix (a call
+`(...)`, a field `.f`, a method call `.m(...)`, a tuple index `.0`, a
+subscript `[i]`) over the expression it applies to and its arguments or
+index; `x += e` is a link over `x` and `e`. The links are counted along
+every path down the AST, through parentheses, operands and arguments, and
+the levels of nesting are not: `1 + 1 + ...` takes 2049 terms, `s.trim()
+.trim()...` 2048 calls, and `(a + b + ...) + c + ...` counts the links on
+both sides of the parenthesis together. The AST interchange reader counts
+the same links.
 
 Every frontend reports lexical and syntax errors in source order, and
 locate the common ones alike (a tuple index with leading zeros at its `.`,

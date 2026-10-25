@@ -167,6 +167,22 @@ run_step("paykan --frontend=ast-text run (pure virtual)"
 if(NOT STEP_OUTPUT STREQUAL expected_run)
     message(FATAL_ERROR "pure virtual methods through ast-text differ:\n${STEP_OUTPUT}")
 endif()
+# Chains at the limit, 2048 links (docs/grammar.md section 9), run through
+# ast-text as from the source: the AST is written, read back and compiled.
+string(REPEAT " + 1" 2048 sum)
+string(REPEAT ".toString()" 2048 calls)
+file(WRITE ${WORK_DIR}/chain.pkn "import ::io;\nfn main() -> int {\n  x: int = 1${sum};\n  s = \"a\"${calls};\n  io::println(x.toString() + s);\n  return 0;\n}\n")
+run_step("paykan run (chain)" COMMAND ${paykan} run ${WORK_DIR}/chain.pkn)
+if(NOT STEP_OUTPUT STREQUAL "2049a\n")
+    message(FATAL_ERROR "the chain at the limit printed:\n${STEP_OUTPUT}")
+endif()
+run_step("paykan --emit-ast (chain)" COMMAND ${paykan} --emit-ast ${WORK_DIR}/chain.pkn)
+file(WRITE ${WORK_DIR}/chain.ast "${STEP_OUTPUT}")
+run_step("paykan --frontend=ast-text run (chain)"
+    COMMAND ${paykan} --frontend=ast-text run ${WORK_DIR}/chain.ast)
+if(NOT STEP_OUTPUT STREQUAL "2049a\n")
+    message(FATAL_ERROR "the chain at the limit through ast-text printed:\n${STEP_OUTPUT}")
+endif()
 
 # -- The advanced static path: a C++ backend in a driver of its own ----------
 set(build ${WORK_DIR}/static-driver)

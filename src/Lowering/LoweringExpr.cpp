@@ -21,10 +21,60 @@ using pir::Type;
 // -- Dispatch
 
 Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
+  if (!ChainValues.empty()) {
+    auto emitted = ChainValues.find(node);
+    if (emitted != ChainValues.end()) {
+      Val v = emitted->second;
+      ChainValues.erase(emitted);
+      return v;
+    }
+  }
+  emitChainBelow(node);
   Val v = ast::ExprVisitor<ExprEmitter, Val>::visit(node);
+  assert(!ChainValues.count(ast::chainOperand(node)) &&
+         "a chain link's visitor emits its operand");
   if (!v || !isOptionalWrap(node))
     return v;
   return L.emitSome(v, node->getCoercedType());
+}
+
+bool ModuleLowering::ExprEmitter::takesOperandFirst(const ast::Expr *e) const {
+  if (const auto *b = ast::dyn_cast<ast::BinaryExpr>(e))
+    return b->getOpcode() != ast::BinaryOpcode::Eq &&
+           b->getOpcode() != ast::BinaryOpcode::Ne;
+  // visitMethodCallExpr: the receiver of a method of a class or of a
+  // builtin type goes through visit() (emitReceiver) before anything else;
+  // a field's function value, a struct's, a tuple's, an enum's, an
+  // optional's, a slice's or a fixed-size array's is taken in place.
+  if (const auto *m = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    const ast::Type *recv = m->getReceiver()->getResolvedType();
+    return !m->isFieldCall() && recv &&
+           (ast::isa<ast::ClassType>(recv) || ast::isa<ast::BuiltinType>(recv));
+  }
+  // lowerMemberAccessExpr: a class's field (emitReceiver); a struct's, or
+  // one held in memory, is read in place.
+  if (const auto *m = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return !ast::isMemType(m->getResolvedType()) &&
+           !L.getExprStructType(m->getReceiver());
+  return false;
+}
+
+void ModuleLowering::ExprEmitter::emitChainBelow(ast::Expr *e) {
+  std::vector<ast::Expr *> links;
+  for (ast::Expr *x = e; takesOperandFirst(x);) {
+    ast::Expr *operand = ast::chainOperand(x);
+    if (!ast::chainOperand(operand) || ChainValues.count(operand))
+      break;
+    links.push_back(operand);
+    x = operand;
+  }
+  if (links.empty())
+    return;
+  // Each link is taken as its operand's visitor would take it.
+  const bool wantAddress = std::exchange(WantAddress, false);
+  for (auto it = links.rbegin(); it != links.rend(); ++it)
+    ChainValues[*it] = visit(*it);
+  WantAddress = wantAddress;
 }
 
 // -- Literals
@@ -272,10 +322,10 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
 
 Val ModuleLowering::ExprEmitter::emitShortCircuit(ast::BinaryExpr *node,
                                                   bool isAnd) {
-  pir::LocalId tmp = L.B.addLocal(isAnd ? "and" : "or", Type::Bool);
   Val lhs = visit(node->getLHS());
   if (!lhs)
     return Val();
+  pir::LocalId tmp = L.B.addLocal(isAnd ? "and" : "or", Type::Bool);
   pir::If *s = L.B.openIf(lhs, true);
   // and: lhs ? rhs : false        or: lhs ? true : rhs
   L.B.enter(*s->Then);

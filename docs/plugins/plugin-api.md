@@ -117,7 +117,9 @@ typedef struct PaykanFrontend {
   [`../grammar.md`](../grammar.md) and must build exactly the AST the
   recursive-descent frontend builds; input nested deeper than
   `input->max_nesting` (512) is rejected with
-  `nesting too deep (more than 512 levels)`.
+  `nesting too deep (more than 512 levels)`, and a chain longer than 2048
+  links with `nesting too deep (more than 2048 levels)`
+  ([`../grammar.md`](../grammar.md) section 9).
 
 `PaykanFrontendInput`: `filename`, `source` / `source_size` (NUL-terminated),
 `ast_format_version` (`PAYKAN_AST_FORMAT_VERSION`, the format `paykan`

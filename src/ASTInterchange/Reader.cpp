@@ -13,14 +13,16 @@
 // The text comes from a plugin: nothing in it is trusted.  Every failure is
 // a ReadError with a position, never an assertion; nesting is bounded
 // (kMaxDepth lists), and so is every recursion here.  The AST is held to the
-// frontends' own nesting limit too (frontend::kMaxNesting), counted as the
-// recursive-descent frontend counts it, so that an AST from a plugin can make
-// the passes after it recurse no deeper than a parsed program can.
+// frontends' own limits too, nesting (frontend::kMaxNesting) and chains
+// (frontend::kMaxChain), counted as the recursive-descent frontend counts
+// them, so that an AST from a plugin can make the passes after it recurse no
+// deeper than a parsed program can.
 
 #include "Names.h"
 #include "paykan/Frontend.h"
 #include "paykan/ast/Interchange.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <cmath>
@@ -30,10 +32,14 @@
 #include <memory>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace paykan::ast::interchange {
+
+static_assert(kMaxDepth == 4 * frontend::kMaxNesting + frontend::kMaxChain + 16,
+              "kMaxDepth fits every AST within the frontends' limits");
 
 std::string ReadError::str() const {
   if (!Line)
@@ -273,6 +279,9 @@ private:
   ReadError &Err;
   /// The levels of nesting (frontend::kMaxNesting) around what is built.
   unsigned Depth = 0;
+  /// The chain links (frontend::kMaxChain) on the deepest path down what
+  /// was built since the innermost Link began.
+  unsigned ChainHeight = 0;
 
   bool failed() const { return !Err.Message.empty(); }
 
@@ -300,6 +309,34 @@ private:
 
   private:
     Builder &B;
+  };
+
+  /// A link of a chain, as the frontends count them (docs/grammar.md
+  /// section 9): a `binary`, and a `call-value`, `member`, `method-call`,
+  /// `tuple-index` or `subscript` (also as the target of a
+  /// `member-assign` or a `subscript-assign`), one level of the chain over
+  /// the deepest of the fields built while it lives.
+  class Link {
+  public:
+    Link(Builder &b, const SExpr &at)
+        : B(b), At(at), Outer(std::exchange(b.ChainHeight, 0)) {}
+    ~Link() { B.ChainHeight = std::max(Outer, B.ChainHeight); }
+    Link(const Link &) = delete;
+    Link &operator=(const Link &) = delete;
+    /// Count the link, once its fields are built: false (failed) when it is
+    /// one too many.
+    bool ok() {
+      if (++B.ChainHeight <= frontend::kMaxChain)
+        return true;
+      B.fail(At, "nesting too deep (more than " +
+                     std::to_string(frontend::kMaxChain) + " levels)");
+      return false;
+    }
+
+  private:
+    Builder &B;
+    const SExpr &At;
+    unsigned Outer;
   };
 
   void fail(const SExpr &at, const std::string &msg) {
@@ -1257,7 +1294,13 @@ private:
         if (x->Text != "block" && x->Text != "if")
           return fail(*x, "the else branch is a (block ...) or an (if ...)"),
                  nullptr;
-        els = stmt(*x);
+        if (x->Text == "if") {
+          // An `elif`: a level of nesting, as the frontends count it.
+          Nested level(*this, *x);
+          els = level.ok() ? stmt(*x) : nullptr;
+        } else {
+          els = stmt(*x);
+        }
         if (!els)
           return nullptr;
       }
@@ -1303,15 +1346,27 @@ private:
     } else if (t == "continue") {
       out = Ctx.make<ContinueStmt>(loc);
     } else if (t == "member-assign") {
-      Expr *recv = expr(f, "the receiver");
+      Expr *recv = nullptr;
+      {
+        Link target(*this, e); // the `recv.field` assigned to
+        recv = expr(f, "the receiver");
+        if (recv && !target.ok())
+          return nullptr;
+      }
       const std::string *field = recv ? f.name("the field's name") : nullptr;
       Expr *v = field ? expr(f, "the assigned value") : nullptr;
       if (!v)
         return nullptr;
       out = Ctx.make<MemberAssignStmt>(loc, recv, *field, v);
     } else if (t == "subscript-assign") {
-      Expr *arr = expr(f, "the array");
-      Expr *idx = arr ? nestedExpr(f, e, "the index") : nullptr;
+      Expr *arr = nullptr, *idx = nullptr;
+      {
+        Link target(*this, e); // the `arr[idx]` assigned to
+        arr = expr(f, "the array");
+        idx = arr ? nestedExpr(f, e, "the index") : nullptr;
+        if (idx && !target.ok())
+          return nullptr;
+      }
       Expr *v = idx ? expr(f, "the assigned value") : nullptr;
       if (!v)
         return nullptr;
@@ -1475,7 +1530,68 @@ private:
     return false;
   }
 
+  /// The list a link of a chain builds first, its operand (a `binary`'s
+  /// left operand; the function value, receiver, tuple or array of a
+  /// suffix), when @p e is a link with one; else null.
+  static const SExpr *chainOperand(const SExpr &e) {
+    if (e.K != SExpr::List)
+      return nullptr;
+    size_t at = !e.Items.empty() && e.Items[0].K == SExpr::Location ? 1 : 0;
+    if (e.Text == "binary")
+      ++at; // the operator
+    else if (e.Text != "call-value" && e.Text != "member" &&
+             e.Text != "method-call" && e.Text != "tuple-index" &&
+             e.Text != "subscript")
+      return nullptr;
+    if (at >= e.Items.size() || e.Items[at].K != SExpr::List)
+      return nullptr;
+    return &e.Items[at];
+  }
+
+  /// The expressions, and their chain heights, of the links of a chain
+  /// below the one being built, built innermost first (buildChainBelow)
+  /// and not taken yet.
+  std::unordered_map<const SExpr *, std::pair<Expr *, unsigned>> ChainBuilt;
+
+  /// When @p e is a link of a chain whose operand is a link too: build the
+  /// links below @p e, innermost first, so that reading a chain of any
+  /// length recurses no deeper than a few links.  Each link builds its
+  /// operand first, so that is the order they are built in anyway; a link
+  /// counts in the chain height of the link above it when that takes it.
+  void buildChainBelow(const SExpr &e) {
+    const SExpr *operand = chainOperand(e);
+    if (!operand || !chainOperand(*operand) || ChainBuilt.count(operand))
+      return;
+    std::vector<const SExpr *> links;
+    for (const SExpr *x = operand; chainOperand(*x); x = chainOperand(*x))
+      links.push_back(x);
+    for (auto it = links.rbegin(); it != links.rend(); ++it) {
+      const unsigned outer = std::exchange(ChainHeight, 0);
+      Expr *built = node(**it);
+      ChainBuilt[*it] = {built, ChainHeight};
+      ChainHeight = outer;
+    }
+  }
+
   Expr *expr(const SExpr &e) {
+    if (failed())
+      return nullptr;
+    if (!ChainBuilt.empty()) {
+      auto built = ChainBuilt.find(&e);
+      if (built != ChainBuilt.end()) {
+        auto [x, height] = built->second;
+        ChainBuilt.erase(built);
+        ChainHeight = std::max(ChainHeight, height);
+        return x;
+      }
+    }
+    buildChainBelow(e);
+    return node(e);
+  }
+
+  /// expr(@p e) of a link whose operand was built already, and of
+  /// everything else.
+  Expr *node(const SExpr &e) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
     const std::string &t = e.Text;
@@ -1541,9 +1657,10 @@ private:
         return nullptr;
       if (!binaryOp(op->Text, bop))
         return fail(*op, "unknown binary operator '" + op->Text + "'"), nullptr;
+      Link link(*this, e);
       Expr *lhs = expr(f, "the left operand");
       Expr *rhs = lhs ? expr(f, "the right operand") : nullptr;
-      if (!rhs)
+      if (!rhs || !link.ok())
         return nullptr;
       out = Ctx.make<BinaryExpr>(loc, bop, lhs, rhs);
     } else if (t == "ident") {
@@ -1564,10 +1681,11 @@ private:
         return nullptr;
       out = Ctx.make<CallExpr>(loc, *callee, std::move(args), std::move(targs));
     } else if (t == "method-call") {
+      Link link(*this, e);
       Expr *recv = expr(f, "the receiver");
       const std::string *name = recv ? f.name("the method's name") : nullptr;
       std::vector<Expr *> args;
-      if (!name || !exprs(f, e, args))
+      if (!name || !exprs(f, e, args) || !link.ok())
         return nullptr;
       out = Ctx.make<MethodCallExpr>(loc, recv, *name, std::move(args));
     } else if (t == "ternary") {
@@ -1579,9 +1697,10 @@ private:
         return nullptr;
       out = Ctx.make<TernaryExpr>(loc, c, a, b);
     } else if (t == "member") {
+      Link link(*this, e);
       Expr *recv = expr(f, "the receiver");
       const std::string *name = recv ? f.name("the field's name") : nullptr;
-      if (!name)
+      if (!name || !link.ok())
         return nullptr;
       out = Ctx.make<MemberAccessExpr>(loc, recv, *name);
     } else if (t == "array") {
@@ -1598,9 +1717,10 @@ private:
         return fail(e, "an array has at least one element"), nullptr;
       out = Ctx.make<ArrayLiteralExpr>(loc, std::vector<Expr *>{v}, n);
     } else if (t == "subscript") {
+      Link link(*this, e);
       Expr *arr = expr(f, "the array");
       Expr *idx = arr ? nestedExpr(f, e, "the index") : nullptr;
-      if (!idx)
+      if (!idx || !link.ok())
         return nullptr;
       out = Ctx.make<SubscriptExpr>(loc, arr, idx);
     } else if (t == "enum-value") {
@@ -1622,11 +1742,12 @@ private:
       return fail(e, "(mov ...): " + std::string(frontend::kMovRemoved)),
              nullptr;
     } else if (t == "call-value") {
+      Link link(*this, e);
       Expr *callee = expr(f, "the function value");
       if (!callee)
         return nullptr;
       std::vector<Expr *> args;
-      if (!exprs(f, e, args))
+      if (!exprs(f, e, args) || !link.ok())
         return nullptr;
       return Ctx.make<CallValueExpr>(loc, callee, std::move(args));
     } else if (t == "lambda") {
@@ -1683,9 +1804,10 @@ private:
         return fail(e, "a tuple needs at least two elements"), nullptr;
       out = Ctx.make<TupleLiteralExpr>(loc, std::move(elems));
     } else if (t == "tuple-index") {
+      Link link(*this, e);
       Expr *tup = expr(f, "the tuple");
       int64_t idx = 0;
-      if (!tup || !f.integer("the index", idx))
+      if (!tup || !f.integer("the index", idx) || !link.ok())
         return nullptr;
       if (idx < 0)
         return fail(e, "a tuple index is not negative"), nullptr;

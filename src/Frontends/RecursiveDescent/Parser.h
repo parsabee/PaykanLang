@@ -70,6 +70,43 @@ private:
   unsigned Depth = 0; // nesting depth guard (see enterNesting)
   bool enterNesting();
   void leaveNesting() { --Depth; }
+  /// Puts Depth back when it ends: for levels entered one by one in a loop
+  /// and all left at its end.
+  class SavedDepth {
+  public:
+    explicit SavedDepth(Parser &p) : P(p), Outer(p.Depth) {}
+    ~SavedDepth() { P.Depth = Outer; }
+    SavedDepth(const SavedDepth &) = delete;
+    SavedDepth &operator=(const SavedDepth &) = delete;
+
+  private:
+    Parser &P;
+    unsigned Outer;
+  };
+  /// The chain links (frontend::kMaxChain) on the deepest path down what
+  /// was parsed since the innermost ChainScope began: each binary operator,
+  /// postfix suffix and `elif` is a link over the deepest of its operands.
+  unsigned ChainHeight = 0;
+  /// Measures the chain links of what is parsed while it lives, in parts
+  /// (take()); when it ends, its height counts in the enclosing scope's.
+  class ChainScope {
+  public:
+    explicit ChainScope(Parser &p);
+    ~ChainScope();
+    ChainScope(const ChainScope &) = delete;
+    ChainScope &operator=(const ChainScope &) = delete;
+    /// The height of what was parsed since the last take() (or the start).
+    unsigned take();
+    /// End with @p height, the height of what this scope parsed.
+    void finish(unsigned height);
+
+  private:
+    Parser &P;
+    unsigned Outer;
+  };
+  /// Whether a link at @p at, @p height links high, is within kMaxChain
+  /// (else reported).
+  bool checkChain(unsigned height, ast::SourceLocation at);
 
   // -- Diagnostics
   void error(ast::SourceLocation loc, const std::string &msg);

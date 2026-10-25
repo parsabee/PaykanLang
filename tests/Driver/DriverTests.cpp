@@ -966,6 +966,49 @@ TEST(Driver, IntDivNonZeroSucceeds) {
   EXPECT_EQ(rc, 3); // 17 / 5 == 3, returned as the process exit code
 }
 
+// -- The chain limit (#17)
+
+// A chain at the limit, 2048 links (docs/grammar.md section 9), compiles and
+// runs, on every path, and its AST is written (--emit-ast); one link more is
+// the frontend's error.  Typing and lowering such a chain overflowed the
+// stack, and its AST could not be written.
+TEST(Driver, ChainAtTheLimitRunsAndWritesItsAST) {
+  REQUIRE_BACKEND();
+  auto program = [](int links) {
+    std::string sum = "1", str = "\"a\"";
+    for (int i = 0; i < links; ++i) {
+      sum += " + 1";
+      str += ".toString()";
+    }
+    return "import ::io;\nfn main() -> int {\n  x: int = " + sum +
+           ";\n  s = " + str + ";\n  io::println(x.toString() + s);\n" +
+           "  return 0;\n}\n";
+  };
+  auto src = writeTmp(program(2048));
+  auto [rc, out] = run(paykanRun() + " -O0 " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out.substr(0, 2000);
+  EXPECT_EQ(out, "2049a\n");
+  auto exe = src + ".bin";
+  auto [brc, bout] =
+      run(paykanRun() + " -O2 build " + src + " -o " + exe + " 2>&1 && " + exe);
+  EXPECT_EQ(brc, 0) << bout.substr(0, 2000);
+  EXPECT_EQ(bout, "2049a\n");
+  auto [crc, c] = run(paykanRun() + " -O0 --emit-c " + src + " 2>&1");
+  EXPECT_EQ(crc, 0) << c.substr(0, 2000);
+  auto [arc, ast] = run(std::string(kPaykan) + " --emit-ast " + src);
+  EXPECT_EQ(arc, 0);
+  EXPECT_EQ(ast.rfind("(paykan-ast ", 0), 0u) << ast.substr(0, 2000);
+  auto longer = writeTmp(program(2049));
+  auto [lrc, lout] =
+      run(std::string(kPaykan) + " --check-only " + longer + " 2>&1");
+  EXPECT_EQ(lrc, 1);
+  EXPECT_NE(lout.find("error: nesting too deep (more than 2048 levels)"),
+            std::string::npos)
+      << lout.substr(0, 2000);
+  for (const std::string &f : {src, exe, longer})
+    std::filesystem::remove(f);
+}
+
 // -- The --dump-ast flag
 
 TEST(Driver, DumpAstProducesOutput) {

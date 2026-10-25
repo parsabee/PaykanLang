@@ -174,7 +174,8 @@ not a parse error.
 
 File ≤ 2^40 bytes; `section_count` ≤ 1024; `MANIFEST` ≤ 1 MiB; a manifest
 string ≤ 64 KiB; a list ≤ 65 536 entries and ≤ remaining bytes; LEB128 ≤ 10
-bytes; nesting caps per section (§4: 2048 AST levels; §5: 512 PIR levels).
+bytes; nesting caps per section (§4: the AST interchange format's, 4112
+lists and the frontends' limits; §5: 512 PIR levels).
 
 ### 1.7 Reader order
 

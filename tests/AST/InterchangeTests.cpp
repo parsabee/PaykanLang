@@ -464,7 +464,7 @@ TEST(ASTInterchange, NestingIsBounded) {
   std::string error;
   // The text is at most kMaxDepth lists deep...
   EXPECT_EQ(read(nested(ic::kMaxDepth), ctx, error), nullptr);
-  EXPECT_NE(error.find("nesting too deep (more than 2048 levels)"),
+  EXPECT_NE(error.find("nesting too deep (more than 4112 levels)"),
             std::string::npos)
       << error;
   // ... and the AST the frontends' 512 levels.
@@ -612,6 +612,11 @@ TEST(ASTInterchange, NestingLimitIsTheFrontends) {
                              "(generic-type \"B\" " + kInt + ")", ")", n - 1) +
                         " (ident \"y\")))");
        }},
+      {"elif chains",
+       [](int n) { return mainOf("if a { }" + repeat(" elif a { }", n - 1)); },
+       [](int n) {
+         return mainAst(nest("(if (ident \"a\") (block) ", "_", ")", n));
+       }},
   };
   for (const Kind &k : kinds) {
     auto parsed = parseSource(k.Source(511));
@@ -627,6 +632,104 @@ TEST(ASTInterchange, NestingLimitIsTheFrontends) {
               std::string::npos)
         << k.What << ": " << error;
   }
+}
+
+// The reader holds the AST to the frontends' chain limit too, counting the
+// links the recursive-descent frontend counts: each chain parsed at the
+// limit, 2048 links, reads back, and the AST one link longer is rejected
+// with the frontends' message.
+TEST(ASTInterchange, ChainLimitIsTheFrontends) {
+  struct Kind {
+    const char *What;
+    std::string (*Source)(int);
+    std::string (*Ast)(int);
+  };
+  const Kind kinds[] = {
+      {"+ chains",
+       [](int n) { return mainOf("x = a" + repeat(" + 1", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(binary add ", "(ident \"a\")", " (int 1))", n) +
+                        ")");
+       }},
+      {"method calls",
+       [](int n) { return mainOf("x = a" + repeat(".m()", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(method-call ", "(ident \"a\")", " \"m\")", n) +
+                        ")");
+       }},
+      {"fields", [](int n) { return mainOf("x = a" + repeat(".f", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(member ", "(ident \"a\")", " \"f\")", n) + ")");
+       }},
+      {"tuple indexes",
+       [](int n) { return mainOf("x = a" + repeat(".0", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(tuple-index ", "(ident \"a\")", " 0)", n) + ")");
+       }},
+      {"subscripts",
+       [](int n) { return mainOf("x = a" + repeat("[1]", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(subscript ", "(ident \"a\")", " (int 1))", n) +
+                        ")");
+       }},
+      {"calls of function values",
+       [](int n) { return mainOf("x = (a)" + repeat("()", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(call-value ", "(ident \"a\")", ")", n) + ")");
+       }},
+      {"fields assigned to",
+       [](int n) { return mainOf("a" + repeat(".f", n) + " = 1;"); },
+       [](int n) {
+         return mainAst("(member-assign " +
+                        nest("(member ", "(ident \"a\")", " \"f\")", n - 1) +
+                        " \"f\" (int 1))");
+       }},
+      {"elements assigned to",
+       [](int n) { return mainOf("a" + repeat("[1]", n) + " = 1;"); },
+       [](int n) {
+         return mainAst(
+             "(subscript-assign " +
+             nest("(subscript ", "(ident \"a\")", " (int 1))", n - 1) +
+             " (int 1) (int 1))");
+       }},
+  };
+  for (const Kind &k : kinds) {
+    auto parsed = parseSource(k.Source(2048));
+    ASSERT_NE(parsed, nullptr) << k.What;
+    EXPECT_EQ(parseSource(k.Source(2049)), nullptr) << k.What;
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_NE(read(write(*parsed->getRoot()), ctx, error), nullptr)
+        << k.What << ": " << error;
+    EXPECT_NE(read(k.Ast(2048), ctx, error), nullptr)
+        << k.What << ": " << error;
+    EXPECT_EQ(read(k.Ast(2049), ctx, error), nullptr) << k.What;
+    EXPECT_NE(error.find("nesting too deep (more than 2048 levels)"),
+              std::string::npos)
+        << k.What << ": " << error;
+  }
+}
+
+// The deepest AST within the frontends' limits, a chain of 2048 links in
+// 511 levels of lambdas declared in blocks (four lists a level), is written
+// and read back: kMaxDepth holds it.
+TEST(ASTInterchange, TheDeepestProgramRoundTrips) {
+  auto parsed =
+      parseSource(mainOf(repeat("let f = fn() { ", 511) + "x = a" +
+                         repeat(" + 1", 2048) + ";" + repeat(" };", 511)));
+  ASSERT_NE(parsed, nullptr);
+  const std::string text = write(*parsed->getRoot());
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(write(*back), text);
 }
 
 // A `view fn` ends with `(qual view)`; nothing else qualifies a function.
@@ -1197,7 +1300,7 @@ TEST(ASTInterchange, WriteRefusesTooDeepATree) {
   std::ostringstream os;
   std::string error;
   EXPECT_FALSE(ic::write(*tu, os, error));
-  EXPECT_EQ(error, "nesting too deep (more than 2048 levels)");
+  EXPECT_EQ(error, "nesting too deep (more than 4112 levels)");
 }
 
 // Only a parsed AST can be written: a type Sema resolves to (an enum type)

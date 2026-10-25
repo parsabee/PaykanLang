@@ -59,7 +59,8 @@ $ paykan --emit-ast hello.pkn
 - `_` stands for an absent field ("none").
 - Whitespace (space, tab, newline, carriage return) separates atoms; `;`
   starts a comment that runs to the end of the line.
-- Nesting is limited to 2048 lists (`kMaxDepth`); deeper input is rejected.
+- Nesting is limited to 4112 lists (`kMaxDepth`), which holds every AST
+  within the frontends' limits; deeper input is rejected.
 
 The whole text is one list:
 
@@ -171,15 +172,19 @@ the rules above: unknown tags, missing or extra fields, a field of the wrong
 kind, an empty name where one is required, a tuple or destructuring with
 fewer than two elements, an `array-repeat` count below 1, a byte value out
 of range, a malformed location, an unknown escape, a version it does not
-read, and nesting beyond the limits: more than 2048 lists, and more than
-the frontends' 512 levels (`nesting too deep (more than 512 levels)`),
-counted in the AST as [`../grammar.md`](../grammar.md) section 9 counts
-them in the source (a block's statements, the members of a declaration's
-body, a `match`'s arms, the operand of a `unary`, a `ternary`'s fields, the
-arguments of a call, the elements of an `array` or a `tuple`, a
-`subscript`'s index, a `lambda`'s result type, a type's arguments,
-elements, parameters and result, and the type an `array-type`,
-`fixed-array-type` or `optional-type` wraps are each a level in). It
+read, and nesting beyond the limits: more than 4112 lists, and more than
+the frontends' 512 levels or 2048 links of a chain (`nesting too deep (more
+than 512 levels)`, `nesting too deep (more than 2048 levels)`), counted in
+the AST as [`../grammar.md`](../grammar.md) section 9 counts them in the
+source. A block's statements, the members of a declaration's body, a
+`match`'s arms, an `if` that is an `else` branch, the operand of a `unary`,
+a `ternary`'s fields, the arguments of a call, the elements of an `array`
+or a `tuple`, a `subscript`'s index, a `lambda`'s result type, a type's
+arguments, elements, parameters and result, and the type an `array-type`,
+`fixed-array-type` or `optional-type` wraps are each a level in; a
+`binary`, `call-value`, `member`, `method-call`, `tuple-index` and
+`subscript` (and the target of a `member-assign` or a `subscript-assign`)
+is a link over the deepest of its fields. It
 also makes the grammar's own checks that the recursive-descent frontend
 makes while parsing (`void?`, nested optionals, `_` for the body of a
 function that is neither a class's method nor a trait's, `(native ...)` on

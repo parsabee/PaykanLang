@@ -1570,6 +1570,17 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
   PAYKAN_UNREACHABLE("unknown UnaryOpcode");
 }
 
+void Sema::ExprChecker::typeChainBelow(ast::Expr *e) {
+  ast::Expr *operand = ast::chainOperand(e);
+  if (!operand || !ast::chainOperand(operand) || ChainTypes.count(operand))
+    return;
+  std::vector<ast::Expr *> links;
+  for (ast::Expr *x = operand; ast::chainOperand(x); x = ast::chainOperand(x))
+    links.push_back(x);
+  for (auto it = links.rbegin(); it != links.rend(); ++it)
+    ChainTypes[*it] = visit(*it);
+}
+
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // A numeric literal operand takes the other operand's sized type (`x + 1`
   // with `x: u8` adds two `u8`), so the non-literal operand is typed first.

@@ -38,12 +38,16 @@ namespace paykan::ast::interchange {
 /// dotted version (`0.2.0`).
 inline constexpr uint32_t kFormatVersion = kVersionNumber;
 
-/// The deepest list nesting read() accepts.  Deep enough for any program
-/// within the frontends' nesting limit (frontend::kMaxNesting levels, each a
-/// few lists deep); it bounds the reader's recursion.  read() holds the AST
-/// to that limit too, counting the levels the frontends count, and so bounds
-/// what an AST from a plugin can make Sema recurse through.
-inline constexpr unsigned kMaxDepth = 2048;
+/// The deepest list nesting read() accepts and write() writes: 4 x 512 + 2048
+/// + 16.  Every AST within the frontends' limits fits: each of their 512
+/// levels of nesting (frontend::kMaxNesting) is at most four lists deep (a
+/// block, then `(decl (var ... (lambda ...)))` around the next block), each
+/// of 2048 links of a chain (frontend::kMaxChain) is one, and the
+/// declarations around them are a few.  It bounds the reader's recursion
+/// over the text; read() then holds the AST to the frontends' limits
+/// themselves, counted as they count them, and so bounds what an AST from a
+/// plugin can make Sema recurse through.
+inline constexpr unsigned kMaxDepth = 4112;
 
 /// Write @p unit in the interchange format.  Returns false, with the reason
 /// in @p error, for a node no frontend produces (a type Sema resolved, say):

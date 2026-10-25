@@ -858,6 +858,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The brackets, parentheses or arguments one level too deep are now skipped whole, through
   their closer, as a block one level too deep is: the limit is the only error, in 0.1
   seconds, and the statement after them is parsed (docs/grammar.md section 9).
+- Long chains of operators and postfix suffixes overflowed the stack on valid programs:
+  `x = 1 + 1 + ...` with 10000 terms, `True && ...` and `x - x - ...` crashed Sema (exit
+  status 139), `"a".toString().toString()...` 5000 deep crashed the lowering, `x.0.0...`
+  and `x[0][0]...` 20000 deep crashed Sema, and 20000 `elif`s crashed `paykan run`.  The
+  recursive-descent frontend took ASTs that the AST interchange format could not hold (3000
+  terms, 3000 `elif`s, or 511 nested `let f = fn() { ... };`: `paykan --emit-ast` failed
+  with `nesting too deep (more than 2048 levels)`), so no frontend plugin could hand them to
+  `paykan`.  Now:
+  - A chain of more than 2048 links along any path down the AST is `nesting too deep (more
+    than 2048 levels)` on every frontend: each binary operator is a link over its two
+    operands, each call, field, method call, tuple index and subscript over the expression
+    it applies to and its arguments, and `x += e` over `x` and `e`, counted through
+    parentheses, operands and arguments (docs/grammar.md section 9,
+    `frontend::kMaxChain`).  An `elif` is a level of nesting, as the `if` of an `else`
+    block: an `if` takes up to 510 of them in a function's body.
+  - Sema, the lowering (with its analyses of the reads a call may replace) and the copies
+    of a generic's body take a chain from its innermost link out, in a loop, and the
+    lowering's address of a field of a struct, an element of a tuple or of an array in a
+    chain of them is one loop too.  Every chain and nesting within the limits, and the
+    deepest mixes of them (2048 links in 511 levels of lambdas), compiles and runs on
+    every path (`paykan run`, `paykan build`, `--emit-c`) with a quarter of the default
+    stack, 2 MB, in a debug build.
+  - The AST interchange format nests up to 4112 lists (`kMaxDepth`), which holds every AST
+    within the limits, and its reader counts the links and the levels as the frontends do,
+    so an AST from a plugin, or the `ast-text` frontend's input, is held to the same limits
+    (docs/plugins/ast-format.md section 3).
 
 ## [0.2.0] - 2026-10-20
 

@@ -755,8 +755,25 @@ private:
     /// Every expression is emitted through here (it hides the visitor's own
     /// dispatch), so a primitive that Sema marked for its optional slot
     /// comes out as the optional value that slot expects, whichever site
-    /// consumes it.
+    /// consumes it.  A chain's links below @p node are emitted first,
+    /// innermost out (emitChainBelow), so that emitting a chain of any
+    /// length recurses no deeper than a few links.
     Val visit(ast::Expr *node);
+
+    /// Whether the visitor of the chain link @p e emits its operand
+    /// (ast::chainOperand) before anything else and with visit(): a binary
+    /// operator but `==` and `!=` (which may compare in place), a call of a
+    /// method of a class, `Str` included, or of a builtin type's, and a
+    /// read of a class's field that is not held in memory.
+    bool takesOperandFirst(const ast::Expr *e) const;
+    /// When @p e takes its operand first and that is a link of a chain:
+    /// emit the links below @p e that are taken so, innermost first, and
+    /// keep their values in ChainValues for the visit that comes to each.
+    /// That is the order they are emitted in anyway.
+    void emitChainBelow(ast::Expr *e);
+    /// The values of the links emitChainBelow emitted and nothing has taken
+    /// yet.
+    std::unordered_map<const ast::Expr *, Val> ChainValues;
 
     /// `int<Str>`, `float<Str>`, `bool<Str>`: the optional value of the
     /// runtime's parse; an invalid Val for any other call.
@@ -991,6 +1008,17 @@ private:
   Val emitFixedElementAddress(ast::Expr *array, ast::Expr *index);
   /// The address of element @p index of the tuple @p tuple.
   Val emitTupleElementAddress(ast::Expr *tuple, size_t index);
+  /// The value held in memory that @p e is a part of, when it is one, read
+  /// in place: a struct's field (`s.f`), a tuple's element (`t.0`) or an
+  /// element of a fixed-size array or a slice (`a[i]`); else null.
+  ast::Expr *wholeOf(ast::Expr *e);
+  /// The address of the part @p e (wholeOf) of the value at @p whole: its
+  /// element's or field's offset, an index after its bounds check.
+  Val emitPartAddress(ast::Expr *e, const Val &whole);
+  /// emitFixedElementAddress, and emitTupleElementAddress, of the array or
+  /// the tuple at @p base.
+  Val elementAddressIn(ast::Expr *array, ast::Expr *index, const Val &base);
+  Val tupleElementIn(ast::Expr *tuple, size_t index, const Val &base);
   /// Write the value of @p e, of a type held in memory, into the bytes at
   /// @p dst: a literal element by element, anything else copied.  @p e must
   /// not read @p dst (a new variable's storage).
