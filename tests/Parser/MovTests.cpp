@@ -43,7 +43,8 @@ TEST(Mov, RemovedKeywordIsOneErrorPerUse) {
 
 // The removal is reported at the `mov`, before the operand is parsed, so the
 // diagnostics come in source order (docs/grammar.md section 9): an outer
-// `mov`'s before an inner one's, and before a syntax error in its operand.
+// `mov`'s before an inner one's, and before a syntax or a lexical error in
+// its operand.
 TEST(Mov, ReportedInSourceOrder) {
   const std::string removed =
       "error: " + std::string(paykan::frontend::kMovRemoved);
@@ -52,6 +53,8 @@ TEST(Mov, ReportedInSourceOrder) {
        {"1:33: " + removed, "1:37: " + removed}},
       {"fn main() -> int { b = mov ; return 0; }",
        {"1:24: " + removed, "1:28: error: unexpected ';'"}},
+      {"fn main() -> int { s = \"a\"; u = mov $ s; return 0; }",
+       {"1:33: " + removed, "1:37: error: invalid character '$'"}},
   };
   for (const auto &[src, errors] : cases) {
     auto path = writeTempFile(src);

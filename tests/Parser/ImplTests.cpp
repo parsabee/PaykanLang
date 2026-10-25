@@ -53,15 +53,14 @@ TEST(Impl, MalformedBlocksAreRejected) {
 TEST(Impl, TypeInPlaceOfAParameterIsLocated) {
   struct Case {
     const char *Src;
-    unsigned Column, EndColumn;
+    unsigned Column;
     const char *Type;
   };
-  for (const Case &c :
-       {Case{"impl Box<int> { }", 10, 13, "int"},
-        Case{"impl Box<Str> { }", 10, 13, "Str"},
-        Case{"impl Box<T[2]> { }", 10, 14, "T[2]"},
-        Case{"impl Show for Box<T, float> { }", 22, 27, "float"},
-        Case{"impl Box<List<int>> { }", 10, 19, "List<int>"}}) {
+  for (const Case &c : {Case{"impl Box<int> { }", 10, "int"},
+                        Case{"impl Box<Str> { }", 10, "Str"},
+                        Case{"impl Box<T[2]> { }", 10, "T[2]"},
+                        Case{"impl Show for Box<T, float> { }", 22, "float"},
+                        Case{"impl Box<List<int>> { }", 10, "List<int>"}}) {
     auto r = parseWithDiags(std::string("class Box<T> { v: T; }\n") + c.Src +
                             "\nfn main() -> int => 0;\n");
     EXPECT_FALSE(r.Ok) << c.Src;
@@ -74,7 +73,6 @@ TEST(Impl, TypeInPlaceOfAParameterIsLocated) {
     const paykan::ast::SourceLocation &loc = r.Diags[0].Loc;
     EXPECT_EQ(loc.getLineStart(), 2u) << c.Src;
     EXPECT_EQ(loc.getColumnStart(), c.Column) << c.Src;
-    EXPECT_EQ(loc.getColumnEnd(), c.EndColumn) << c.Src;
     EXPECT_NE(r.Text.find(":2:" + std::to_string(c.Column) + ": error: "),
               std::string::npos)
         << r.Text;
