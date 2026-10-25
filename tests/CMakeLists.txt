@@ -675,11 +675,15 @@ endif()
 
 # A plain configure (no options but this build's LLVM) is the core build:
 # recursive-descent + mlir, nothing downloaded, no third-party/ or _deps/
-# (#123).  Configure only, in a scratch directory of its own.  Not in a
-# coverage build: it runs no instrumented code, and scripts/coverage.py
-# requires every test to write a profile.  (configure)
+# (#123).  Configure only, in a scratch directory of its own.  And the suites
+# CI picks for a change (scripts/affected_tests.py) include every suite the
+# change can affect: a standard library source picks every suite that
+# imports it (scripts/test_selection.py).  Not in a coverage build: they run
+# no instrumented code, and scripts/coverage.py requires every test to write
+# a profile.  (configure)
 paykan_test_suite(configure PAYKAN_TEST_SUITE_configure)
 if(PAYKAN_TEST_SUITE_configure AND NOT PAYKAN_COVERAGE)
+    paykan_add_python_test(TestSelection test_selection.py)
     add_test(NAME DefaultConfigure
         COMMAND ${CMAKE_COMMAND}
                 -DSOURCE_DIR=${CMAKE_SOURCE_DIR}

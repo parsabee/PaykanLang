@@ -569,7 +569,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pir-mlir` and the end-to-end group (`codegen`, `driver`, `plugin`, `samples`, `stdlib`,
   `c-strict`, `docs`, `out-of-tree`), where it ran only `stdlib`; one that changes
   `stdlib/CMakeLists.txt`, which stages it, runs every suite (tests/suites.json,
-  `scripts/affected_tests.py`).
+  `scripts/affected_tests.py`).  The `TestSelection` test (`configure` suite,
+  `scripts/test_selection.py`) checks both picks.
 
 ### Removed
 
