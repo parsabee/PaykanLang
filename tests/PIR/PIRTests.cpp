@@ -3,6 +3,7 @@
 // PIR text round trip (parser <-> printer) and verifier tests.
 
 #include "Programs.h"
+#include "paykan/pir/Builder.h"
 #include "paykan/pir/PIR.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Printer.h"
@@ -426,23 +427,37 @@ TEST(PIRVerifier, AValueIsVisibleOnlyInItsBlock) {
 
 namespace {
 
-/// A function whose body is an elif chain of n arms, written the way the
-/// lowering writes one: each arm's test is in the else block of the arm
+/// A program whose @main is an elif chain of n arms, built the way the
+/// lowering builds one: each arm's test is in the else block of the arm
 /// before it, so the blocks nest n deep and every earlier test's value is
-/// visible in an arm.
-std::string elifChain(size_t n) {
-  std::ostringstream os;
-  os << "module \"m\"\nfn @main() -> i64 {\n  local %r: i64\n"
-     << "  local %x: i64\n  store %x, 7\n";
+/// visible in an arm.  It is built rather than parsed: the PIR parser
+/// recurses once per block, which runs out of stack 4000 blocks deep in a
+/// sanitizer build.
+Program elifChain(size_t n) {
+  Program p;
+  Module &m = p.Modules.emplace_back();
+  m.Name = "m";
+  Function &f = m.Functions.emplace_back();
+  f.Name = "main";
+  f.Sig.Ret = Type::I64;
+  Builder b(&f);
+  const LocalId r = b.addLocal("r", Type::I64);
+  const LocalId x = b.addLocal("x", Type::I64);
+  b.store(x, Val::i64(7));
+  for (size_t i = 0; i < n; ++i) {
+    const Val k = Val::i64(static_cast<int64_t>(i));
+    const Val xi = b.load(x);
+    If *arm = b.openIf(b.cmp(CmpPred::Eq, xi, k), /*withElse=*/true);
+    b.enter(*arm->Then);
+    b.store(r, b.binary(Opcode::Add, xi, k));
+    b.leave();
+    b.enter(*arm->Else); // the next arm goes here
+  }
+  b.store(r, Val::i64(-1));
   for (size_t i = 0; i < n; ++i)
-    os << "  %x" << i << " = load %x\n  %c" << i << " = cmp eq %x" << i << ", "
-       << i << "\n  if %c" << i << " {\n  %v" << i << " = add %x" << i << ", "
-       << i << "\n  store %r, %v" << i << "\n  } else {\n";
-  os << "  store %r, -1\n";
-  for (size_t i = 0; i < n; ++i)
-    os << "  }\n";
-  os << "  %result = load %r\n  ret %result\n}\n";
-  return os.str();
+    b.leave();
+  b.emitRet(b.load(r));
+  return p;
 }
 
 } // namespace
@@ -454,16 +469,12 @@ TEST(PIRVerifier, ALongElifChainVerifiesInTimeInProportion) {
   // 4000 arms).  The time measured is the processor time the verifier
   // spends, which a parallel ctest preempting it does not stretch.
   auto seconds = [](size_t arms, int times) {
-    ParseError err;
-    auto p = parseProgram(elifChain(arms), err);
-    EXPECT_TRUE(p) << err.str();
-    if (!p)
-      return 0.0;
+    const Program p = elifChain(arms);
     double best = 0;
     for (int run = 0; run < 3; ++run) {
       const std::clock_t start = std::clock();
       for (int i = 0; i < times; ++i) {
-        const std::vector<VerifyError> errors = verify(*p);
+        const std::vector<VerifyError> errors = verify(p);
         EXPECT_TRUE(errors.empty()) << formatErrors(errors);
       }
       const double took =
