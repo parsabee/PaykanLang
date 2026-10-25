@@ -12,3 +12,15 @@ NotFound
 InvalidArgument
 NotFound
 Ok
+w+ Ok EndOfFile Ok
+one
+two
+r+ Ok Ok Ok
+one
+def
+two
+a+ Ok EndOfFile Ok
+abc
+def
+one
+two

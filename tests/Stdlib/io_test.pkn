@@ -6,7 +6,9 @@ import ::result as res;
 // read back, the error of a write on a file opened for reading (which the
 // reads after it do not inherit), the end of the file, a read whose buffer
 // cannot be allocated, a missing file, a path or a mode holding a NUL byte
-// (not opened: nothing is made under the part before it).
+// (not opened: nothing is made under the part before it), and a write, a
+// read and a write on a file opened for update ("w+", "r+", "a+"), which
+// keeps both writes, the read starting where the first one ended.
 
 /// The name of the code of @p r's error, `Ok` when it made a value.
 fn codeOf<T>(r: res::Result<T, err::Error>) -> Str {
@@ -47,6 +49,34 @@ fn read(path: Str) {
   }
 }
 
+/// A write, a read and a write on the file at @p path, holding "abc\ndef\n",
+/// opened with the update mode @p mode; then the file read back.
+fn update(path: Str, mode: Str) {
+  match io::open(path, "w") {
+    f: Ok { f.value.write("abc\ndef\n"); }
+    _ { }
+  }
+  match io::open(path, mode) {
+    u: Ok {
+      f = u.value;
+      w1 = err::name(f.write("one\n").code);
+      r = codeOf(f.read());
+      w2 = err::name(f.write("two\n").code);
+      io::println(mode + " " + w1 + " " + r + " " + w2);
+    }
+    _ { }
+  }
+  match io::open(path, "r") {
+    f: Ok {
+      match f.value.read() {
+        s: Ok { io::print(s.value); }
+        _ { }
+      }
+    }
+    _ { }
+  }
+}
+
 fn main() -> int {
   write("io_test.txt");
   read("io_test.txt");
@@ -56,5 +86,8 @@ fn main() -> int {
   io::println(codeOf(io::open("io_test_mode.txt", "w\0x")));
   io::println(codeOf(io::open("io_test_mode.txt", "r")));
   io::println(err::fromErrno(0).message());
+  update("io_test_update.txt", "w+");
+  update("io_test_update.txt", "r+");
+  update("io_test_update.txt", "a+");
   return 0;
 }

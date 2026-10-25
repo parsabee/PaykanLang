@@ -9,7 +9,10 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
+#include <unistd.h>
 
 extern "C" {
 #include "Runtime.h"
@@ -532,6 +535,181 @@ TEST(FileRead, ReturnsNoneOnEmptyFile) {
   Paykan_dispose((PaykanObject *)pathStr);
   Paykan_dispose((PaykanObject *)modeStr);
   std::remove(path.c_str());
+}
+
+// -- Update modes ("r+", "w+", "a+"): reads and writes on one stream
+
+/// Everything in the file at @p path.
+static std::string fileText(const std::string &path) {
+  std::ifstream in(path, std::ios::binary);
+  EXPECT_TRUE(in) << "cannot reopen " << path;
+  return std::string((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+}
+
+/// The file at @p path opened with @p mode through ::io's native.
+static PaykanShared *ioOpen(const std::string &path, const char *mode) {
+  PaykanObject *pathStr = strObj(path.c_str());
+  PaykanObject *modeStr = strObj(mode);
+  int64_t err = 0;
+  PaykanShared *f = Paykan_io_open(pathStr, modeStr, &err);
+  Paykan_dispose(pathStr);
+  Paykan_dispose(modeStr);
+  EXPECT_NE(f, nullptr) << path << " (" << mode << "): errno " << err;
+  return f;
+}
+
+/// ::io's write of @p s: its errno, 0 when it wrote.
+static int64_t ioWrite(PaykanShared *f, const char *s) {
+  PaykanObject *str = strObj(s);
+  int64_t err = Paykan_io_write(f, str);
+  Paykan_dispose(str);
+  return err;
+}
+
+/// What a read through ::io gave, @p r with @p err: its text, "EOF" at the
+/// end of the file, or the errno of its failure.
+static std::string ioText(PaykanShared *r, int64_t err) {
+  if (!r)
+    return err ? "errno " + std::to_string(err) : "EOF";
+  auto *s = (PaykanString *)PaykanShared_get(r);
+  std::string text(s->data, (size_t)s->len);
+  Paykan_release(r);
+  return text;
+}
+
+static std::string ioReadln(PaykanShared *f) {
+  int64_t err = 0;
+  PaykanShared *r = Paykan_io_readln(f, &err);
+  return ioText(r, err);
+}
+
+static std::string ioReadbytes(PaykanShared *f, int64_t n) {
+  int64_t err = 0;
+  PaykanShared *r = Paykan_io_readbytes(f, n, &err);
+  return ioText(r, err);
+}
+
+static std::string ioRead(PaykanShared *f) {
+  int64_t err = 0;
+  PaykanShared *r = Paykan_io_read(f, &err);
+  return ioText(r, err);
+}
+
+/// What a read through a PaykanFile method gave: its text, or "None".
+static std::string methodText(PaykanShared *r) {
+  PaykanObject *o = PaykanShared_get(r);
+  std::string text = o == &PaykanObject_None
+                         ? "None"
+                         : std::string(((PaykanString *)o)->data,
+                                       (size_t)((PaykanString *)o)->len);
+  Paykan_release(r);
+  return text;
+}
+
+// C lets a read follow a write on an update stream only after an fflush, and
+// a write follow a read only after a file positioning call (C11 7.21.5.3);
+// without them the C library dropped the first write.  In "w+": the read
+// after the write finds the end of the file, and the second write follows
+// the first.
+TEST(FileUpdate, WPlusKeepsAWriteThatAReadFollows) {
+  std::string path = makeTempFile("old\n");
+  ASSERT_FALSE(path.empty());
+  PaykanShared *f = ioOpen(path, "w+");
+  ASSERT_NE(f, nullptr);
+  EXPECT_EQ(ioWrite(f, "hello\n"), 0);
+  EXPECT_EQ(ioRead(f), "EOF");
+  EXPECT_EQ(ioWrite(f, "world\n"), 0);
+  Paykan_release(f);
+  EXPECT_EQ(fileText(path), "hello\nworld\n");
+  std::remove(path.c_str());
+}
+
+// In "r+", from the start of the file: each read starts where the write
+// before it ended, and each write where the read before it stopped (or at
+// the end, after a read that reached it), through every read.
+TEST(FileUpdate, RPlusReadsAndWritesWhereTheOtherStopped) {
+  std::string path = makeTempFile("abcdef\nghi\n");
+  ASSERT_FALSE(path.empty());
+  PaykanShared *f = ioOpen(path, "r+");
+  ASSERT_NE(f, nullptr);
+  EXPECT_EQ(ioWrite(f, "XY"), 0);
+  EXPECT_EQ(ioReadbytes(f, 3), "cde");
+  EXPECT_EQ(ioWrite(f, "Z"), 0);
+  EXPECT_EQ(ioReadln(f), "\n");
+  EXPECT_EQ(ioWrite(f, "W"), 0);
+  EXPECT_EQ(ioRead(f), "hi\n");
+  EXPECT_EQ(ioWrite(f, "!"), 0);
+  EXPECT_EQ(ioReadln(f), "EOF");
+  Paykan_release(f);
+  EXPECT_EQ(fileText(path), "XYcdeZ\nWhi\n!");
+  std::remove(path.c_str());
+}
+
+// In "a+" every write goes to the end of the file, so the read after one
+// finds the end (where C leaves the first read before any write differs:
+// the start on Linux, the end on macOS, so the test does not read first).
+TEST(FileUpdate, APlusKeepsAWriteThatAReadFollows) {
+  std::string path = makeTempFile("abcdef\n");
+  ASSERT_FALSE(path.empty());
+  PaykanShared *f = ioOpen(path, "a+");
+  ASSERT_NE(f, nullptr);
+  EXPECT_EQ(ioWrite(f, "hello\n"), 0);
+  EXPECT_EQ(ioRead(f), "EOF");
+  EXPECT_EQ(ioWrite(f, "world\n"), 0);
+  EXPECT_EQ(ioReadbytes(f, 4), "EOF");
+  Paykan_release(f);
+  EXPECT_EQ(fileText(path), "abcdef\nhello\nworld\n");
+  std::remove(path.c_str());
+}
+
+// The PaykanFile methods (the File vtable's slots) follow the same rule.
+TEST(FileUpdate, TheFileMethodsMixReadsAndWrites) {
+  std::string path = makeTempFile("abcdef\n");
+  ASSERT_FALSE(path.empty());
+  PaykanShared *f = ioOpen(path, "r+");
+  ASSERT_NE(f, nullptr);
+  PaykanObject *x = strObj("X");
+  PaykanObject *y = strObj("Y");
+  PaykanFile_write(f, x);
+  EXPECT_EQ(methodText(PaykanFile_readbytes(f, 2)), "bc");
+  PaykanFile_write(f, y);
+  EXPECT_EQ(methodText(PaykanFile_readln(f)), "ef\n");
+  PaykanFile_write(f, x);
+  EXPECT_EQ(methodText(PaykanFile_read(f)), "None");
+  Paykan_release(f);
+  EXPECT_EQ(fileText(path), "XbcYef\nX");
+
+  f = ioOpen(path, "w+");
+  ASSERT_NE(f, nullptr);
+  PaykanFile_write(f, x);
+  EXPECT_EQ(methodText(PaykanFile_readln(f)), "None");
+  PaykanFile_write(f, y);
+  Paykan_release(f);
+  EXPECT_EQ(fileText(path), "XY");
+
+  Paykan_dispose(x);
+  Paykan_dispose(y);
+  std::remove(path.c_str());
+}
+
+// What a write left in the C library's buffer is written out before a read:
+// when that fails (a full device), the read fails with its errno instead of
+// reading past the lost data.  /dev/full takes no byte, and reads as zeros;
+// the read is longer than the C library's buffer, which glibc reads into
+// directly, dropping the buffered write unless it was written out first.
+TEST(FileUpdate, AWriteThatCannotBeWrittenOutFailsTheReadAfterIt) {
+  if (access("/dev/full", R_OK | W_OK) != 0)
+    GTEST_SKIP() << "no /dev/full";
+  PaykanShared *f = ioOpen("/dev/full", "r+");
+  ASSERT_NE(f, nullptr);
+  EXPECT_EQ(ioWrite(f, "hello"), 0); // buffered
+  // (Not EXPECT_EQ, which would print the 64 KiB of zeros it read before.)
+  std::string got = ioReadbytes(f, 65536);
+  EXPECT_TRUE(got == "errno " + std::to_string(ENOSPC))
+      << got.size() << " bytes: " << got.substr(0, 16);
+  EXPECT_EQ(Paykan_error_code(ENOSPC), PAYKAN_ERROR_NO_SPACE);
+  Paykan_release(f);
 }
 
 // -- PaykanFile_Stdin singleton safety

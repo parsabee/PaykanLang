@@ -798,6 +798,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header to the size, which wrapped around to a block of 8 bytes.  A size with no room
   for the header is now out of memory before anything is allocated, so these are
   `OutOfMemory` too, the buffer unchanged (`Heap.c`).
+- A file opened for update (`"r+"`, `"w+"`, `"a+"`) lost a write that a read followed:
+  `f.write("hello\n"); f.read(); f.write("world\n");` on a `"w+"` file left only
+  `world\n` in it, though the first write had reported `Ok`.  C lets a read follow a write
+  on such a stream only after an `fflush`, and a write follow a read only after a file
+  positioning call (C11 7.21.5.3), and glibc drops what a write left in its buffer under a
+  read longer than the buffer.  Each `io::File` now remembers whether it last read or
+  wrote, flushes its stream before a read that follows a write, and positions it
+  (`fseek(f, 0, SEEK_CUR)`) before a write that follows a read: a read after a write starts
+  where the write ended, a write after a read where the read stopped (at the end in
+  `"a+"`), and a read fails with the error of writing out the data before it (`NoSpace`
+  on a full disk) instead of reading past it (`PaykanFile.lastOp`; docs/stdlib/io.md).
 
 ## [0.2.0] - 2026-10-20
 

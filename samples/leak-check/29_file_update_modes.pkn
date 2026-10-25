@@ -1,0 +1,129 @@
+// Isolates: files opened for update ("w+", "r+", "a+") whose reads and
+// writes alternate on one stream.  C lets a read follow a write there only
+// after an fflush, and a write follow a read only after a file positioning
+// call (C11 7.21.5.3): the runtime makes that call when the stream switches
+// from one to the other, so no write is lost, each read starts where the
+// write before it ended, and each write where the read before it stopped.
+//   * "w+": a write, a read (the end of the file), a write, a read;
+//   * "r+": a write at the start, then readbytes, readln and read, each
+//     followed by a write;
+//   * "a+": every write goes to the end, so the read after one finds the
+//     end there.
+// Each file is then read back whole.
+//
+// Runtime sites: file_start_read and file_write (File.c), PaykanFile_new
+// (File.c), the read buffers and the Strs they make.
+//
+// Expected under --track-heap: live blocks : 0.
+//
+// args: {tmpdir}
+
+import ::io;
+import ::error as err;
+import ::result as res;
+
+// expect-stdout: w+ write: Ok
+// expect-stdout: w+ read: EndOfFile
+// expect-stdout: w+ write: Ok
+// expect-stdout: w+ readbytes: EndOfFile
+// expect-stdout: hello
+// expect-stdout: world
+// expect-stdout: r+ write: Ok
+// expect-stdout: r+ readbytes: cd
+// expect-stdout: r+ write: Ok
+// expect-stdout: r+ readln: fgh
+// expect-stdout: r+ write: Ok
+// expect-stdout: r+ read: jkl
+// expect-stdout: r+ write: Ok
+// expect-stdout: XYcdZfgh
+// expect-stdout: Wjkl
+// expect-stdout: !
+// expect-stdout: a+ write: Ok
+// expect-stdout: a+ read: EndOfFile
+// expect-stdout: a+ write: Ok
+// expect-stdout: a+ readln: EndOfFile
+// expect-stdout: abc
+// expect-stdout: hello
+// expect-stdout: world
+
+// The path of the scratch file `name`: in the first argument's directory
+// (the samples harnesses pass a fresh one per run, `// args: {tmpdir}`, so
+// parallel runs never share a file), else in /tmp.
+fn scratchPath(args: view Str[], name: Str) -> Str {
+  if args.len() > 1 {
+    return args[1] + "/" + name;
+  }
+  return "/tmp/" + name;
+}
+
+/// The text @p r read, or the name of its error's code.
+fn text(r: res::Result<Str, err::Error>) -> Str {
+  match r {
+    s: Ok { return s.value; }
+    e: Err { return err::name(e.error.code); }
+  }
+}
+
+/// Makes the file at @p path hold just @p s.
+fn fill(path: Str, s: Str) {
+  match io::open(path, "w") {
+    f: Ok { f.value.write(s); }
+    e: Err { io::println("fill: " + err::name(e.error.code)); }
+  }
+}
+
+/// Prints all of the file at @p path.
+fn show(path: Str) {
+  match io::open(path, "r") {
+    f: Ok { io::print(text(f.value.read())); }
+    e: Err { io::println("show: " + err::name(e.error.code)); }
+  }
+}
+
+fn main(args: view Str[]) -> int {
+  w = scratchPath(args, "pkn_update_w.txt");
+  fill(w, "old\n");
+  match io::open(w, "w+") {
+    o: Ok {
+      f = o.value;
+      io::println("w+ write: " + err::name(f.write("hello\n").code));
+      io::println("w+ read: " + text(f.read()));
+      io::println("w+ write: " + err::name(f.write("world\n").code));
+      io::println("w+ readbytes: " + text(f.readbytes(1)));
+    }
+    e: Err { io::println("w+: " + err::name(e.error.code)); }
+  }
+  show(w);
+
+  r = scratchPath(args, "pkn_update_r.txt");
+  fill(r, "abcdefgh\nijkl\n");
+  match io::open(r, "r+") {
+    o: Ok {
+      f = o.value;
+      io::println("r+ write: " + err::name(f.write("XY").code));
+      io::println("r+ readbytes: " + text(f.readbytes(2)));
+      io::println("r+ write: " + err::name(f.write("Z").code));
+      io::print("r+ readln: " + text(f.readln()));
+      io::println("r+ write: " + err::name(f.write("W").code));
+      io::print("r+ read: " + text(f.read()));
+      io::println("r+ write: " + err::name(f.write("!\n").code));
+    }
+    e: Err { io::println("r+: " + err::name(e.error.code)); }
+  }
+  show(r);
+
+  a = scratchPath(args, "pkn_update_a.txt");
+  fill(a, "abc\n");
+  match io::open(a, "a+") {
+    o: Ok {
+      f = o.value;
+      io::println("a+ write: " + err::name(f.write("hello\n").code));
+      io::println("a+ read: " + text(f.read()));
+      io::println("a+ write: " + err::name(f.write("world\n").code));
+      io::println("a+ readln: " + text(f.readln()));
+    }
+    e: Err { io::println("a+: " + err::name(e.error.code)); }
+  }
+  show(a);
+  return 0;
+}

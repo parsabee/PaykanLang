@@ -1630,6 +1630,81 @@ TEST(Driver, AProgramOutOfMemoryPanicsAfterItsOutput) {
 #endif
 }
 
+// A file opened for update ("w+", "r+", "a+") keeps a write that a read
+// follows, and each read and write starts where the other stopped: C needs
+// an fflush or a file positioning call between the two (C11 7.21.5.3),
+// which the runtime makes when the stream switches.  Each read's result is
+// written back into the file, so the files say what was read.  Run and
+// built at -O0 and -O2; the files are checked byte for byte.
+TEST(Driver, FileUpdateModesKeepEveryWrite) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_update_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "update.pkn").string();
+  std::ofstream(src)
+      << "import ::io; import ::error as err; import ::result as res;\n"
+         "fn shown(r: res::Result<Str, err::Error>) -> Str {\n"
+         "  match r {\n"
+         "    s: Ok { return \"<\" + s.value + \">\"; }\n"
+         "    e: Err { return \"<\" + err::name(e.error.code) + \">\"; }\n"
+         "  }\n"
+         "}\n"
+         "fn update(path: Str, mode: Str) {\n"
+         "  match io::open(path, \"w\") {\n"
+         "    f: Ok { f.value.write(\"abc\\ndef\\nghi\\n\"); }\n"
+         "    _ { }\n"
+         "  }\n"
+         "  match io::open(path, mode) {\n"
+         "    u: Ok {\n"
+         "      f = u.value;\n"
+         "      f.write(\"one\\n\");\n"
+         "      f.write(shown(f.readbytes(2)));\n"
+         "      f.write(shown(f.read()));\n"
+         "      f.write(\"two\\n\");\n"
+         "    }\n"
+         "    _ { }\n"
+         "  }\n"
+         "}\n"
+         "fn main(args: view Str[]) -> int {\n"
+         "  update(args[1] + \"/w.txt\", \"w+\");\n"
+         "  update(args[1] + \"/r.txt\", \"r+\");\n"
+         "  update(args[1] + \"/a.txt\", \"a+\");\n"
+         "  return 0;\n"
+         "}\n";
+  auto contents = [](const std::filesystem::path &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>());
+  };
+  auto expectFiles = [&](const std::string &what, const std::string &cmd) {
+    auto out = dir / what;
+    std::filesystem::create_directories(out);
+    auto r = run(cmd + " " + out.string() + " 2>&1");
+    EXPECT_EQ(r.exitCode, 0) << what << ": " << r.out;
+    // "w+" empties the file: both reads find the end.
+    EXPECT_EQ(contents(out / "w.txt"), "one\n<EndOfFile><EndOfFile>two\n")
+        << what;
+    // "r+" writes over the start, reads on after it, writes on after that.
+    EXPECT_EQ(contents(out / "r.txt"), "one\nde<de>i\n<i\n>two\n") << what;
+    // "a+" writes at the end, where the reads after the writes start.
+    EXPECT_EQ(contents(out / "a.txt"),
+              "abc\ndef\nghi\none\n<EndOfFile><EndOfFile>two\n")
+        << what;
+  };
+  auto runAndBuild = [&](const std::string &opt) {
+    expectFiles("run" + opt, paykanRun() + " " + opt + " " + src);
+    auto exe = (dir / ("update" + opt)).string();
+    auto [rc, out] =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    ASSERT_EQ(rc, 0) << opt << ": " << out;
+    expectFiles("build" + opt, exe);
+  };
+  runAndBuild("-O0");
+  runAndBuild("-O2");
+  std::filesystem::remove_all(dir);
+}
+
 // Reproducible output (#102): modules are named by their canonical module
 // names, so nothing the compiler produces depends on where the sources live
 // or on the directory it runs in.

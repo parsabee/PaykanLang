@@ -261,11 +261,23 @@ extern PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS];
 // Inherits Object.  The first three vtable slots match Object's layout;
 // File-specific slots follow (PAYKAN_SLOT_FILE_*).
 
+/// What a file's stream did last.  C lets a read follow a write on a stream
+/// opened for update ("r+", "w+", "a+") only after an fflush, and a write
+/// follow a read only after a file positioning call (C11 7.21.5.3); File.c's
+/// reads and writes make that call when the stream switches, so a program
+/// mixes the two freely.  Generated code never reads it.
+typedef enum PaykanFileOp {
+  PAYKAN_FILE_OP_NONE = 0, // opened, or positioned since the last read
+  PAYKAN_FILE_OP_READ = 1,
+  PAYKAN_FILE_OP_WRITE = 2, // its output may still be in C's buffer
+} PaykanFileOp;
+
 typedef struct PaykanFile {
   PaykanMethod *vtable; // points to PaykanFile_vtable
   int32_t strong;       // object header (see PaykanObject)
   int32_t weak;
-  FILE *handle; // underlying C file handle (NULL if closed)
+  FILE *handle;        // underlying C file handle (NULL if closed)
+  PaykanFileOp lastOp; // what the stream did last
 } PaykanFile;
 
 // Constructor / destructor.
@@ -298,7 +310,9 @@ extern PaykanFile PaykanFile_Stdin;
 // errno (Runtime.h, "Errors"): a write returns it, 0 when it succeeded; a
 // read returns a fresh Str, or NULL with the errno in `*err`, 0 there meaning
 // the end of the file.  `err` is an int64_t, the native's `inout int`, passed
-// as the address the native ABI gives it.
+// as the address the native ABI gives it.  Reads and writes mix in any order
+// (PaykanFileOp): a read after a write first writes out what the write left
+// in C's buffer, and fails with the errno when that fails.
 
 /// `fopen(path, mode)`: the file (owned +1), or NULL with C's errno in
 /// `*err`.

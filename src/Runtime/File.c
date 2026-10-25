@@ -31,6 +31,7 @@ PaykanFile *PaykanFile_new(void) {
   f->strong = 0; // unowned until boxed
   f->weak = 0;
   f->handle = NULL;
+  f->lastOp = PAYKAN_FILE_OP_NONE;
   return f;
 }
 
@@ -84,6 +85,43 @@ static int file_closed(const PaykanFile *f, const char *op) {
   return 1;
 }
 
+// C lets a read follow a write on a stream opened for update ("r+", "w+",
+// "a+") only after an fflush or a file positioning call, and a write follow
+// a read only after a positioning call, unless the read met the end of the
+// file (C11 7.21.5.3).  Without them a C library may drop what the write
+// left in its buffer (glibc does, under a read longer than the buffer).
+// Every read and write of a PaykanFile goes through these two, which make
+// the call when the stream switches.
+
+/// Readies @p f's open stream for a read: 0, or EOF when what the writes
+/// before it left in C's buffer cannot be written out.  That sets the
+/// stream's error indicator and errno, for the read to report, and keeps
+/// the stream a writing one: the next read tries again.
+static int file_start_read(PaykanFile *f) {
+  if (f->lastOp == PAYKAN_FILE_OP_WRITE && fflush(f->handle) == EOF)
+    return EOF;
+  f->lastOp = PAYKAN_FILE_OP_READ;
+  return 0;
+}
+
+/// Writes @p s to @p f's open stream, with errno zeroed first: the bytes C
+/// took.  `fseek(0, SEEK_CUR)` positions the stream where its reads left
+/// off; a stream that cannot be positioned (a pipe, a terminal) fails that
+/// with ESPIPE and is written where it is.
+static size_t file_write(PaykanFile *f, const PaykanString *s) {
+  if (f->lastOp == PAYKAN_FILE_OP_READ) {
+    (void)fseek(f->handle, 0, SEEK_CUR);
+    f->lastOp = PAYKAN_FILE_OP_NONE;
+  }
+  errno = 0;
+  size_t n = fwrite(s->data, 1, (size_t)s->len, f->handle);
+  // A write that took nothing (an empty one, or one the stream refuses)
+  // leaves nothing buffered.
+  if (n)
+    f->lastOp = PAYKAN_FILE_OP_WRITE;
+  return n;
+}
+
 /// None for a read whose buffer could not be allocated, with errno ENOMEM
 /// (a read sets errno to 0 first, so its caller can tell).  Frees @p buf.
 static PaykanShared *file_read_no_memory(char *buf) {
@@ -108,12 +146,12 @@ void PaykanFile_write(PaykanObject *self, PaykanObject *strObj) {
   PaykanString *str = (PaykanString *)strObj;
   if (file_closed(f, "write"))
     return;
-  fwrite(str->data, 1, (size_t)str->len, f->handle);
+  (void)file_write(f, str);
 }
 
 PaykanShared *PaykanFile_readln(PaykanObject *self) {
   PaykanFile *f = (PaykanFile *)self;
-  if (file_closed(f, "readln"))
+  if (file_closed(f, "readln") || file_start_read(f))
     return PaykanShared_new(&PaykanObject_None);
   // One line, including the trailing '\n' when there is one.
   size_t cap = 128;
@@ -140,7 +178,7 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
 
 PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n) {
   PaykanFile *f = (PaykanFile *)self;
-  if (file_closed(f, "readbytes") || n <= 0)
+  if (file_closed(f, "readbytes") || n <= 0 || file_start_read(f))
     return PaykanShared_new(&PaykanObject_None);
   char *buf = (char *)Paykan_tryMalloc((size_t)n);
   if (!buf)
@@ -150,7 +188,7 @@ PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n) {
 
 PaykanShared *PaykanFile_read(PaykanObject *self) {
   PaykanFile *f = (PaykanFile *)self;
-  if (file_closed(f, "read"))
+  if (file_closed(f, "read") || file_start_read(f))
     return PaykanShared_new(&PaykanObject_None);
   size_t cap = 4096;
   size_t used = 0;
@@ -190,6 +228,7 @@ PaykanFile PaykanFile_Stdin = {
     .strong = 1, // immortal: nothing releases this reference
     .weak = 0,
     .handle = NULL, // stdin is not a constant expression: set at startup
+    .lastOp = PAYKAN_FILE_OP_NONE,
 };
 
 __attribute__((constructor)) static void PaykanFile_Stdin_init(void) {
@@ -239,8 +278,7 @@ int64_t Paykan_io_write(PaykanObject *file, PaykanObject *str) {
   PaykanString *s = (PaykanString *)str;
   if (!f->handle)
     return EBADF;
-  errno = 0;
-  if (fwrite(s->data, 1, (size_t)s->len, f->handle) != (size_t)s->len) {
+  if (file_write(f, s) != (size_t)s->len) {
     int err = errno ? errno : EIO;
     // The failure is this call's, reported now: the next read of the stream
     // is not to mistake the error flag for its own.
