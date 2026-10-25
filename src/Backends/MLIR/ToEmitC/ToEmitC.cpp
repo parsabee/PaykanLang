@@ -1050,6 +1050,22 @@ std::string withPrototypes(const std::string &c) {
   return out;
 }
 
+/// `case INT64_MIN:` in place of the `case -9223372036854775808:` MLIR's C
+/// emitter prints for a switch case of INT64_MIN (a `match` arm's pattern,
+/// docs/language/08-match.md), which C cannot spell as a literal (see
+/// Int64MinLowering).  Only a case starts a line with `case `.
+std::string withInt64MinCases(std::string c) {
+  const std::string_view literal = "case -9223372036854775808:";
+  for (size_t at = c.find(literal); at != std::string::npos;
+       at = c.find(literal, at + 1)) {
+    size_t line = c.rfind('\n', at);
+    line = line == std::string::npos ? 0 : line + 1;
+    if (c.find_first_not_of(' ', line) == at)
+      c.replace(at, literal.size(), "case INT64_MIN:");
+  }
+  return c;
+}
+
 } // namespace
 
 void loadEmitCDialects(MLIRContext &ctx) {
@@ -1074,7 +1090,7 @@ Status translateToC(ModuleOp module, llvm::raw_ostream &os) {
   llvm::raw_string_ostream cs(c);
   if (failed(emitc::translateToCpp(module, cs)))
     return Status::error("EmitC -> C translation failed:\n" + diagnostics);
-  os << withPrototypes(c);
+  os << withInt64MinCases(withPrototypes(c));
   return Status::ok();
 }
 

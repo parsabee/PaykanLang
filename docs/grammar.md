@@ -78,7 +78,9 @@ Any other byte is a lexical error (`invalid character 'X'`).
 - `INT` is a 64-bit signed integer. The scanner never sees a sign (`-` is a
   separate token), so `9223372036854775808` is out of range
   (`integer is out of range: ...`); `INT64_MIN` is written as the expression
-  `-9223372036854775807 - 1`.
+  `-9223372036854775807 - 1`.  Right after a `-`, the scanner takes that
+  magnitude too, for the match pattern `-9223372036854775808` (§6), which is
+  `INT64_MIN`; the parser rejects it anywhere else, with the same error.
 - `FLOAT` is converted with `strtod` and must denote a finite float:
   a literal that overflows to infinity (`1e999`) or a nonzero one that
   underflows to zero (`1e-400`) is an error (`float is out of range: ...`).
@@ -345,6 +347,7 @@ matchStmt ::= "match" expression "{" matchArm+ "}"
 matchArm  ::= typeAnnotation block
             | IDENT ":" ( "view" | "inout" )? typeAnnotation block
             | literal block
+            | "-" ( INT | FLOAT ) block          -- a negative number
             | "_" block
 literal   ::= INT | FLOAT | BOOL | CHAR | stringLiteral | NONE
 stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
@@ -406,8 +409,14 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   range, one spelled `step` right after the range's end starts the step,
   and anywhere else each is an ordinary name (`for in in 0..step step step {`
   parses).  The step is null in the AST when it is not written.
-- Match arms: a wildcard `_`, a literal pattern (bare literal tokens only,
-  so `-1` is not a pattern), a type with an optional binding, in any order.
+- Match arms: a wildcard `_`, a literal pattern, a type with an optional
+  binding, in any order.  A literal pattern is a literal, or a negative
+  number: `-` and an `INT` or a `FLOAT` (`-1`, `- 2.5`) is one
+  `IntegerLiteral` or `FloatLiteral` of the negated value, spanning both
+  tokens, not a `UnaryExpr`; `-9223372036854775808` is `INT64_MIN` (§1).
+  Anything else after the `-` is a syntax error (`unexpected '-'; expected
+  a type`).  Sema rejects a pattern that is not a literal, whichever
+  frontend built it (`a value-match arm's pattern must be a literal ...`).
   A binding may borrow the subject, `n: view T` or `n: inout T`
   (`MatchArm::getMode`); with
   the mode before the name (`view n: T`) the syntax error shows the fix.

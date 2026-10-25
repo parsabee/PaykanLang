@@ -1009,6 +1009,86 @@ TEST(Driver, ChainAtTheLimitRunsAndWritesItsAST) {
     std::filesystem::remove(f);
 }
 
+// -- Negative numbers as match patterns (#51)
+
+// `-1`, `- 7`, `-2.5`, `-0.0` and INT64_MIN, `-9223372036854775808`, are
+// match patterns (docs/grammar.md section 6), on every path, at -O0 and
+// -O2: `run`, `build`, and the strict C11 `--emit-c` prints, in which
+// INT64_MIN is no literal a case can be.  The exit status has a bit for
+// each call that took its arm.  A `-1` pattern on an unsigned subject is the
+// error a `-1` assigned to one is, on every path.
+TEST(Driver, NegativeNumbersAreMatchPatternsOnEveryPath) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_negpat_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "negpat.pkn").string();
+  std::ofstream(src) << "fn ints(n: int) -> int {\n"
+                        "  match n {\n"
+                        "    -1 { return 1; }\n"
+                        "    -9223372036854775808 { return 2; }\n"
+                        "    - 7 { return 4; }\n"
+                        "    7 { return 0; }\n"
+                        "    _ { return 8; }\n"
+                        "  }\n"
+                        "}\n"
+                        "fn floats(x: float) -> int {\n"
+                        "  match x {\n"
+                        "    -2.5 { return 16; }\n"
+                        "    -0.0 { return 32; }\n"
+                        "    _ { return 0; }\n"
+                        "  }\n"
+                        "}\n"
+                        "fn main() -> int {\n"
+                        "  return ints(-1) + ints(-9223372036854775807 - 1) +\n"
+                        "         ints(-7) + ints(1) + floats(-2.5) +\n"
+                        "         floats(0.0);\n"
+                        "}\n";
+  auto everyPath = [&](const std::string &opt) {
+    auto ran = run(paykanRun() + " " + opt + " " + src + " 2>&1");
+    EXPECT_EQ(ran.exitCode, 63) << opt << ": " << ran.out;
+    auto exe = (dir / ("negpat" + opt)).string();
+    auto built =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    ASSERT_EQ(built.exitCode, 0) << opt << ": " << built.out;
+    EXPECT_EQ(run(exe).exitCode, 63) << opt;
+    auto c = (dir / ("negpat" + opt + ".c")).string();
+    auto emitted = run(std::string(kPaykan) + " " + opt + " --emit-c " + src +
+                       " > " + c + " 2>&1");
+    ASSERT_EQ(emitted.exitCode, 0) << opt;
+    auto cexe = (dir / ("negpat-c" + opt)).string();
+    auto cc =
+        run("cc -std=c11 -pedantic-errors -Wall -Wextra -Werror " + opt +
+            " -I " PAYKAN_RUNTIME_SOURCE_DIR " " + c +
+            " " PAYKAN_RUNTIME_SOURCE_DIR "/*.c -lm -o " + cexe + " 2>&1");
+    ASSERT_EQ(cc.exitCode, 0) << opt << ": " << cc.out;
+    EXPECT_EQ(run(cexe).exitCode, 63) << opt;
+  };
+  everyPath("-O0");
+  everyPath("-O2");
+  const std::string message = "error: the literal -1 does not fit in "
+                              "'unsigned' (0 to 18446744073709551615)";
+  auto pattern = (dir / "unsigned.pkn").string();
+  std::ofstream(pattern) << "fn main() -> int {\n"
+                            "  u: unsigned = 5;\n"
+                            "  match u { -1 { } _ { } }\n"
+                            "  v: unsigned = -1;\n"
+                            "  return 0;\n"
+                            "}\n";
+  auto rejects = [&](const std::string &how) {
+    auto r = run(paykanRun() + how + pattern + " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << how << ": " << r.out;
+    EXPECT_NE(r.out.find(":3:13: " + message), std::string::npos)
+        << how << ": " << r.out;
+    EXPECT_NE(r.out.find(":4:17: " + message), std::string::npos)
+        << how << ": " << r.out;
+  };
+  rejects(" run ");
+  rejects(" -o " + (dir / "unsigned").string() + " build ");
+  rejects(" --emit-c ");
+  std::filesystem::remove_all(dir);
+}
+
 // -- The --dump-ast flag
 
 TEST(Driver, DumpAstProducesOutput) {

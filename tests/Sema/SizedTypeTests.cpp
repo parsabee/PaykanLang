@@ -285,6 +285,41 @@ TEST(SizedTypes, SizedTypesAreTypeArgumentsOptionalsAndMatchSubjects) {
               "'i32'");
 }
 
+// A negative number is a match pattern, one literal (docs/grammar.md
+// section 6), which takes a sized subject's type when it fits, as one
+// assigned to it does: `-1` on an unsigned or `-129` on an i8 is the error a
+// `-1` or `-129` assigned to one is.
+TEST(SizedTypes, NegativePatternsFitTheSubjectAsAssignedLiteralsDo) {
+  expectOk(inMain(R"(
+    n: i32 = -7;  match n { -7 { } - 8 { } _ { } }
+    b: i8 = -128;  match b { -128 { } 127 { } _ { } }
+    f: f32 = -1.5;  match f { -1.5 { } -0.0 { } _ { } }
+    m = 0;  match m { -9223372036854775808 { } _ { } }
+  )"));
+  for (const auto &[pattern, assigned] :
+       {std::pair<const char *, const char *>{
+            "u: unsigned = 5; match u { -1 { } _ { } }", "u: unsigned = -1;"},
+        {"b: i8 = 5; match b { -129 { } _ { } }", "b: i8 = -129;"},
+        {"h: u8 = 5; match h { -1 { } _ { } }", "h: u8 = -1;"}}) {
+    auto byPattern = semaCheck(inMain(pattern));
+    auto byAssignment = semaCheck(inMain(assigned));
+    EXPECT_FALSE(byPattern.Ok) << pattern;
+    EXPECT_FALSE(byAssignment.Ok) << assigned;
+    // The same message, but for its column.
+    auto message = [](const std::string &diags) {
+      size_t at = diags.find("error: ");
+      return at == std::string::npos
+                 ? diags
+                 : diags.substr(at, diags.find('\n', at) - at);
+    };
+    EXPECT_EQ(message(byPattern.Diagnostics), message(byAssignment.Diagnostics))
+        << pattern;
+  }
+  expectError(inMain("u: unsigned = 5; match u { -1 { } _ { } }"),
+              "error: the literal -1 does not fit in 'unsigned' (0 to "
+              "18446744073709551615)");
+}
+
 TEST(SizedTypes, TheSizedTypesTakeEightByteSlots) {
   // A fixed-size array's element size is the type's slot: 8 bytes for every
   // numeric type, 1 for bool and char, so `u8[3]` is three 8-byte slots and

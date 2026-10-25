@@ -903,6 +903,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejects such an arm whichever frontend built it (`a value-match arm's pattern must be a
   literal (a number, a character, a string, True, False or None)`).  A negative number's
   literal, `(int -1)`, stays a pattern.
+- A negative number could not be a `match` pattern: `match n { -1 { ... } _ { ... } }` was
+  `unexpected '-'; expected a type`, though the AST interchange format's `(int -1)` was one,
+  and docs/language/08-match.md did not say so.  `-` and an integer or a float, together
+  or apart (`-1`, `- 2.5`), is now one literal of the negated value (docs/grammar.md
+  section 6), which takes a sized subject's type when it fits as an assigned one does: `-1`
+  on an `unsigned` is `the literal -1 does not fit in 'unsigned' (0 to
+  18446744073709551615)`.  The smallest `int` is the pattern `-9223372036854775808`: the
+  lexer takes that magnitude right after a `-`, and the parser rejects it anywhere else
+  with the error it had (`integer is out of range: 9223372036854775808`), so an expression
+  still writes it `-9223372036854775807 - 1`.  The C `--emit-c` prints spelled such a
+  `switch` case `case -9223372036854775808:`, which a C compiler rejects as a constant too
+  large for any signed type (from an AST plugin's `(int -9223372036854775808)` pattern
+  too); it is `case INT64_MIN:`.  `samples/codegen/69_negative_patterns.pkn` runs them.
 
 ## [0.2.0] - 2026-10-20
 

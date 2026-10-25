@@ -2016,7 +2016,8 @@ Stmt *Parser::parseMatchStmt() {
 
 // matchArm ::= typeAnnotation "{" stmts "}"
 //            | IDENT ":" ( "view" | "inout" )? typeAnnotation "{" stmts "}"
-//            | literal "{" stmts "}" | "_" "{" stmts "}"
+//            | literal "{" stmts "}" | "-" ( INT | FLOAT ) "{" stmts "}"
+//            | "_" "{" stmts "}"
 MatchArm *Parser::parseMatchArm() {
   SourceLocation start = cur().Loc;
   const std::string *binding = &intern("");
@@ -2028,6 +2029,18 @@ MatchArm *Parser::parseMatchArm() {
     // wildcard
   } else if (isLiteralToken(kind())) {
     pattern = parseLiteral();
+  } else if (at(Tok::Minus) && (kind(1) == Tok::Int || kind(1) == Tok::Float)) {
+    // `-1`, `-2.5`: a negative number, one literal of the negated value
+    // spanning the `-` (as the AST interchange format's `(int -1)` is).  An
+    // INT right after a `-` may be INT64_MIN's magnitude, which the lexer
+    // gives as INT64_MIN: `-9223372036854775808` is INT64_MIN.
+    consume(); // '-'
+    Token t = consume();
+    if (t.Kind == Tok::Int)
+      pattern = Ctx.make<IntegerLiteral>(
+          span(start), t.IntValue < 0 ? t.IntValue : -t.IntValue);
+    else
+      pattern = Ctx.make<FloatLiteral>(span(start), -t.FloatValue);
   } else {
     if ((at(Tok::KwView) || at(Tok::KwInout)) && kind(1) == Tok::Ident &&
         kind(2) == Tok::Colon) {
@@ -2469,6 +2482,13 @@ Expr *Parser::parseLiteral() {
   Token t = consume();
   switch (t.Kind) {
   case Tok::Int:
+    // INT64_MIN's magnitude, which the lexer takes right after a `-` for a
+    // negative match pattern (parseMatchArm), is out of range anywhere else,
+    // and kept as 0, as the lexer keeps another.
+    if (t.IntValue < 0) {
+      error(t.Loc, "integer is out of range: " + std::string(t.Text));
+      return Ctx.make<IntegerLiteral>(t.Loc, 0);
+    }
     return Ctx.make<IntegerLiteral>(t.Loc, t.IntValue);
   case Tok::Float:
     return Ctx.make<FloatLiteral>(t.Loc, t.FloatValue);

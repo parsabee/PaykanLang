@@ -409,3 +409,54 @@ TEST(GrammarEdge, CommonErrorsAreLocatedAlike) {
     }
   }
 }
+
+// -- Negative numbers are match patterns (#51)
+
+// `-` and a number is one literal of the negated value, spanning both (the
+// AST interchange format's `(int -1)`), with or without space between them;
+// INT64_MIN's magnitude is taken after the `-`, so `-9223372036854775808`
+// is INT64_MIN.  Anything else after a `-` is still not a pattern.  It was
+// `unexpected '-'; expected a type`, though the AST interchange reader took
+// `(int -1)` and Sema and the lowering ran it.
+TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
+  auto [ok, driver] = parse("fn main() -> int {\n"
+                            "  match 1 { -1 { } - 2 { } 3 { } _ { } }\n"
+                            "  match 1.5 { -2.5 { } -0.0 { } _ { } }\n"
+                            "  match 1 { -9223372036854775808 { } _ { } }\n"
+                            "  return 0;\n"
+                            "}\n");
+  ASSERT_TRUE(ok);
+  std::string dump = dumpAST(*driver);
+  for (const char *line :
+       {"IntegerLiteral <2:13-2:15> -1\n", "IntegerLiteral <2:20-2:23> -2\n",
+        "IntegerLiteral <2:28-2:29> 3\n",
+        "FloatLiteral <3:15-3:19> -2.500000e+00\n",
+        "FloatLiteral <3:24-3:28> -0.000000e+00\n",
+        "IntegerLiteral <4:13-4:33> -9223372036854775808\n"})
+    EXPECT_NE(dump.find(line), std::string::npos) << line << dump;
+  EXPECT_EQ(dump.find("UnaryExpr"), std::string::npos) << dump;
+  for (const char *arm : {"-True", "--1", "-x", "-'a'", "-\"s\"", "-None"}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  match 1 { ") +
+                            arm + " { } _ { } }\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << arm;
+    ASSERT_FALSE(r.Diags.empty()) << arm;
+    EXPECT_EQ(r.Diags[0].Message, "unexpected '-'; expected a type") << arm;
+  }
+}
+
+// INT64_MIN's magnitude is a pattern's only: anywhere else it is out of
+// range, as an INT after any other token is, also right after a `-` (where
+// the lexer takes it): an expression writes INT64_MIN as
+// `-9223372036854775807 - 1` (docs/grammar.md section 1).
+TEST(GrammarEdge, TheMagnitudeOfInt64MinIsOnlyAPatterns) {
+  for (const char *expr : {"-9223372036854775808", "5 - 9223372036854775808",
+                           "9223372036854775808"}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  x = ") + expr +
+                            ";\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << expr;
+    ASSERT_EQ(r.Diags.size(), 1u) << expr;
+    EXPECT_EQ(r.Diags[0].Message, "integer is out of range: "
+                                  "9223372036854775808")
+        << expr;
+  }
+}

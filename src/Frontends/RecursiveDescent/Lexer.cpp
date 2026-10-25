@@ -5,6 +5,7 @@
 
 #include <cerrno>
 #include <cmath>
+#include <cstdint>
 #include <cstdlib>
 #include <string_view>
 #include <utility>
@@ -564,13 +565,24 @@ Token Lexer::lexNumber(size_t start, size_t line, size_t col, bool afterDot) {
     return t;
   }
   // The scanner never sees a sign (`-` is its own token), so INT64_MIN's
-  // magnitude is out of range here and must be written as an expression,
-  // e.g. `-9223372036854775807 - 1`.
+  // magnitude is out of range here, but right after a `-`: there it is the
+  // IntValue INT64_MIN, which negates to itself, for the negative match
+  // pattern `-9223372036854775808` (parseMatchArm).  The parser rejects it
+  // anywhere else (parseLiteral), where INT64_MIN is written as an
+  // expression, e.g. `-9223372036854775807 - 1`.
   errno = 0;
   long long v = std::strtoll(text.c_str(), nullptr, 10);
   if (errno == ERANGE) {
-    error(line, col, "integer is out of range: " + text);
-    v = 0;
+    errno = 0;
+    const unsigned long long magnitude =
+        std::strtoull(text.c_str(), nullptr, 10);
+    if (PrevKind == Tok::Minus && errno == 0 &&
+        magnitude == static_cast<unsigned long long>(INT64_MAX) + 1) {
+      v = INT64_MIN;
+    } else {
+      error(line, col, "integer is out of range: " + text);
+      v = 0;
+    }
   }
   t.IntValue = static_cast<int64_t>(v);
   return t;

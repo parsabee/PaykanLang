@@ -1,0 +1,50 @@
+// 69 — negative numbers as match patterns
+// Exercises: `-1` and `-2.5` as the patterns of a value-mode match, one
+//            literal each (docs/grammar.md §6): on int, on float (where `-0.0`
+//            matches `0.0`), on a sized type (`-128` on an i8), with a space
+//            after the `-`, and INT64_MIN, `-9223372036854775808`, which is a
+//            pattern although an expression writes it `-9223372036854775807 -
+//            1`; in a switch, beside positive arms and the wildcard.
+// expect-stdout: minus one, minus two, int64 min, other, other
+// expect-stdout: minus two and a half, zero, other
+// expect-stdout: i8 min, i8 max, other
+
+import ::io;
+
+fn name(n: int) -> Str {
+  match n {
+    -1 { return "minus one"; }
+    - 2 { return "minus two"; }
+    -9223372036854775808 { return "int64 min"; }
+    1 { return "one"; }
+    _ { return "other"; }
+  }
+}
+
+fn floatName(x: float) -> Str {
+  match x {
+    -2.5 { return "minus two and a half"; }
+    -0.0 { return "zero"; }
+    _ { return "other"; }
+  }
+}
+
+fn byteName(b: i8) -> Str {
+  match b {
+    -128 { return "i8 min"; }
+    127 { return "i8 max"; }
+    _ { return "other"; }
+  }
+}
+
+fn main() -> int {
+  min = -9223372036854775807 - 1;
+  io::println(name(-1) + ", " + name(-2) + ", " + name(min) + ", "
+      + name(9223372036854775807) + ", " + name(2));
+  io::println(floatName(-2.5) + ", " + floatName(0.0) + ", " + floatName(2.5));
+  lo: i8 = -128;
+  hi: i8 = 127;
+  zero: i8 = 0;
+  io::println(byteName(lo) + ", " + byteName(hi) + ", " + byteName(zero));
+  return 0;
+}
