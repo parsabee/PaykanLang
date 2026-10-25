@@ -10,12 +10,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <limits>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace paykan::pir;
 using paykan::pir::test::kProgram;
@@ -351,6 +354,129 @@ fn @main() -> i64 {
 }
 )");
   EXPECT_NE(errs.find("outside its block"), std::string::npos) << errs;
+}
+
+// A value is visible from its definition to the end of its block, and in the
+// blocks nested there: not in a sibling branch or case, not after its if,
+// switch or while.  A while's condition values reach its body only.
+TEST(PIRVerifier, AValueIsVisibleOnlyInItsBlock) {
+  auto errs = [](const std::string &body) {
+    return verifyText("module \"m\"\nfn @main() -> i64 {\n" + body + "}\n");
+  };
+  auto outside = [](const std::string &value) {
+    return "m:@main: use of value '%" + value +
+           "' before its definition or outside its block\n";
+  };
+  EXPECT_EQ(errs("  %a = add 1, 2\n"
+                 "  if true {\n"
+                 "    %b = add %a, 1\n"
+                 "    while {\n"
+                 "      %c = add %b, 1\n"
+                 "      %d = cmp lt %c, %a\n"
+                 "      cond %d\n"
+                 "    } {\n"
+                 "      %e = add %c, %b\n"
+                 "    }\n"
+                 "  }\n"
+                 "  ret %a\n"),
+            "");
+  EXPECT_EQ(errs("  if true {\n"
+                 "    %a = add 1, 2\n"
+                 "  } else {\n"
+                 "    %b = add %a, 1\n"
+                 "  }\n"
+                 "  ret 0\n"),
+            outside("1"));
+  EXPECT_EQ(errs("  switch 1 {\n"
+                 "  case 1 {\n"
+                 "    %a = add 1, 2\n"
+                 "  }\n"
+                 "  default {\n"
+                 "    %b = add %a, 1\n"
+                 "  }\n"
+                 "  }\n"
+                 "  ret 0\n"),
+            outside("1"));
+  EXPECT_EQ(errs("  while {\n"
+                 "    %a = cmp lt 1, 2\n"
+                 "    cond %a\n"
+                 "  } {\n"
+                 "    %b = add 1, 2\n"
+                 "  }\n"
+                 "  %c = not %a\n"
+                 "  ret 0\n"),
+            outside("1"));
+  EXPECT_EQ(errs("  while {\n"
+                 "    %a = cmp lt 1, 2\n"
+                 "    cond %a\n"
+                 "  } {\n"
+                 "    %b = add 1, 2\n"
+                 "  }\n"
+                 "  ret %b\n"),
+            outside("2"));
+  // A value defined again in a nested block is reported, and after the
+  // block the first definition is visible again, with its own type.
+  EXPECT_EQ(errs("  %a.5 = add 1, 2\n"
+                 "  if true {\n"
+                 "    %b.5 = cmp eq 1, 2\n"
+                 "  }\n"
+                 "  ret %a.5\n"),
+            "m:@main: value '%5' is defined twice\n");
+}
+
+namespace {
+
+/// A function whose body is an elif chain of n arms, written the way the
+/// lowering writes one: each arm's test is in the else block of the arm
+/// before it, so the blocks nest n deep and every earlier test's value is
+/// visible in an arm.
+std::string elifChain(size_t n) {
+  std::ostringstream os;
+  os << "module \"m\"\nfn @main() -> i64 {\n  local %r: i64\n"
+     << "  local %x: i64\n  store %x, 7\n";
+  for (size_t i = 0; i < n; ++i)
+    os << "  %x" << i << " = load %x\n  %c" << i << " = cmp eq %x" << i << ", "
+       << i << "\n  if %c" << i << " {\n  %v" << i << " = add %x" << i << ", "
+       << i << "\n  store %r, %v" << i << "\n  } else {\n";
+  os << "  store %r, -1\n";
+  for (size_t i = 0; i < n; ++i)
+    os << "  }\n";
+  os << "  %result = load %r\n  ret %result\n}\n";
+  return os.str();
+}
+
+} // namespace
+
+TEST(PIRVerifier, ALongElifChainVerifiesInTimeInProportion) {
+  // Closing a block undoes what the block defined, so one chain of 4000 arms
+  // takes about as long as sixteen chains of 250, where copying the visible
+  // values at every block made it take thirteen times as long (seconds, for
+  // 4000 arms).  The time measured is the processor time the verifier
+  // spends, which a parallel ctest preempting it does not stretch.
+  auto seconds = [](size_t arms, int times) {
+    ParseError err;
+    auto p = parseProgram(elifChain(arms), err);
+    EXPECT_TRUE(p) << err.str();
+    if (!p)
+      return 0.0;
+    double best = 0;
+    for (int run = 0; run < 3; ++run) {
+      const std::clock_t start = std::clock();
+      for (int i = 0; i < times; ++i) {
+        const std::vector<VerifyError> errors = verify(*p);
+        EXPECT_TRUE(errors.empty()) << formatErrors(errors);
+      }
+      const double took =
+          static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
+      best = run == 0 ? took : std::min(best, took);
+    }
+    return best;
+  };
+  const double small = seconds(250, 16);
+  const double large = seconds(4000, 1);
+  EXPECT_LT(large, 4 * small)
+      << small << " s for 16 x 250 arms, then " << large << " s for 4000";
+  EXPECT_LT(large, 1.0) << large << " s for 4000 arms";
 }
 
 TEST(PIRVerifier, RejectsTypeMismatches) {

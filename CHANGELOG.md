@@ -925,6 +925,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   library function declared with other types (docs/c-backend.md, "Native functions").
   `samples/codegen/71_native_libc.pkn` binds `llabs`, `labs`, `fabs` and `exit`; the
   CStrictC11 check compiles it with GCC and Clang.
+- The time and memory it took to compile a function grew with the square of how deeply
+  its blocks nest, and an `if` with a long `elif` chain nests one block per arm: the PIR
+  verifier, which checks every lowered program, copied the values visible in a block into
+  each block in it.  `--emit-pir` of a function of 4000 arms took 18 s and 703 MB (1.2 s
+  and 64 MB for 1000), and `build` 24 s and 725 MB.  The verifier now keeps the visible
+  values in a scope stack, so a block costs what it defines: closing it takes its own
+  definitions back out.  The 4000 arms take 1.2 s and 33 MB to `--emit-pir`, most of it
+  spent printing 96 MB of indented PIR, and 7.8 s and 82 MB to `build`, most of it in the
+  MLIR and LLVM pipelines.  The verifier reports what it did before, and the samples
+  compile as fast as they did.
 
 ## [0.2.0] - 2026-10-20
 
