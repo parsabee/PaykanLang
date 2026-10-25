@@ -378,8 +378,12 @@ LogicalResult ModuleLowering::run() {
     std::string link = FunctionNames[f.getSymName()];
     erase.push_back(f);
     if (f.isExternal()) {
-      runtime(link, f.getFunctionType(),
-              !f.getModule() && !::paykan::pir::isNativeName(f.getSymName()));
+      const bool native = ::paykan::pir::isNativeName(f.getSymName());
+      func::FuncOp decl =
+          runtime(link, f.getFunctionType(), !f.getModule() && !native);
+      // A native function of the runtime's symbol is the runtime's.
+      if (native && !decl->hasAttr(kRuntimeAttr))
+        decl->setAttr(kNativeAttr, UnitAttr::get(Ctx));
       continue;
     }
     auto fn = func::FuncOp::create(B, Loc, link, f.getFunctionType());

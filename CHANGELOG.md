@@ -914,6 +914,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the lowering declares and calls the C function with (`sema::nativeSignature`), and the
   PIR verifier rejects a native and a runtime extern of one C symbol, in a module or in
   two, with different signatures (docs/pir.md §4, §9).
+- `--emit-c` gave C that did not compile for a native function bound straight to a C
+  library function, which `run` and `build` call fine: `native fn llabs(x: int) -> int =
+  "llabs"` failed with `conflicting types for 'llabs'; have 'int64_t(int64_t)'`, since
+  `<stdlib.h>` declares `long long llabs(long long)`, and `native fn quit(code: int) =
+  "exit"` likewise.  The C now renames each native function's symbol while it includes
+  the headers (`#define llabs pk__hidden_llabs` before them, `#undef llabs` after, which
+  also drops a macro a header defines for the symbol, such as `isnan`), declares the native
+  function from its own signature after them, and turns off the compilers' warning of a
+  library function declared with other types (docs/c-backend.md, "Native functions").
+  `samples/codegen/71_native_libc.pkn` binds `llabs`, `labs`, `fabs` and `exit`; the
+  CStrictC11 check compiles it with GCC and Clang.
 
 ## [0.2.0] - 2026-10-20
 

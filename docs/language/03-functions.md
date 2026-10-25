@@ -1100,6 +1100,14 @@ them only at the count's limit or to destroy the object.  A
 `PaykanString`'s `data` and `len` may be read directly.  See
 `samples/imports/14_native`.
 
+A native function can also bind a C library function directly, with the C
+types the table above gives its signature: `native fn llabs(x: int) -> int =
+"llabs";` calls the C library's `llabs` on every path.  The C of `--emit-c`
+declares each native function from that signature, not from the C
+headers' declaration of the symbol (`long long llabs(long long)`, or a macro
+for it), so it compiles wherever `run` and `build` work ([The C
+backend](../c-backend.md)).
+
 ---
 
 ## Semantic Checks
