@@ -335,13 +335,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   make the same moves.  The generated code of a function that takes no box
   (fib, the dispatch benchmark's `area` methods) is unchanged.  At `-O2`, against the
   part 1 and 4 build, callgrind counts the same instructions for fib, 0.2% fewer for
-  dispatch, 0.4 to 2.9% fewer for the hash map and set loops and 0.1% fewer for a
-  priority queue of strings, and 1.9% more for binary trees, 1.1% more for a queue and
-  4.9% more for a stack of strings, which hand temporaries over and so pay a bit test at
-  each release and keep instead of one in the prologue.  CPU times (median of 5 runs,
-  pinned to one CPU) moved by −10% to +4% on the container loops and by −5% to +3% on
-  binary trees and fib, within what repeated runs differ by on this machine; dispatch
-  measured +20%, and −6% in a second run of nine.
+  dispatch, 0.25% fewer for binary trees (1.9% more before moves were lent), 0.4 to 2.9%
+  fewer for the hash map and set loops, 5.3% fewer for a queue of ints, as many for the
+  priority queues and a stack of ints, and 1.1% more for a queue and 4.9% more for a
+  stack of strings, which hand temporaries over and so pay a bit test at each release
+  and keep instead of one in the prologue.  The C path (`--emit-c`, gcc `-O2`) counts as
+  many for fib, dispatch and a virtual call loop, and 6.7% more for binary trees: gcc
+  no longer inlines `Node.__init__`, which its two keeps make larger, into the
+  constructor.  CPU times (median of 5 runs, pinned to one CPU) moved by −10% to +8% on
+  the container loops and by −5% to +4% on binary trees, dispatch and fib, within what
+  repeated runs differ by on this machine (fib's C, which runs the same instructions,
+  measured +24%).
   Per-parameter conventions in the interface (`Sig.conv`, `nConventions`) are retired,
   always 0 (docs/design/pkm.md §3.5, §5.9).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive
