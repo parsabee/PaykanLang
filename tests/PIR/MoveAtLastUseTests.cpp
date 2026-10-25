@@ -13,7 +13,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <chrono>
+#include <ctime>
 #include <sstream>
 #include <string>
 
@@ -1091,7 +1091,9 @@ fn @f(%self: obj, %a: box, %c: bool) -> void {
 
 TEST(MoveAtLastUse, AChainUnderABorrowedReferenceTakesTimeInProportion) {
   // One round moves the whole chain: four times the hand-offs take about
-  // four times as long, where a round per hand-off would take sixteen.
+  // four times as long, where a round per hand-off would take sixteen.  The
+  // time measured is the processor time the test spends, which a parallel
+  // ctest preempting it does not stretch.
   auto seconds = [](size_t n) {
     double best = 0;
     for (int run = 0; run < 3; ++run) {
@@ -1104,12 +1106,12 @@ TEST(MoveAtLastUse, AChainUnderABorrowedReferenceTakesTimeInProportion) {
       for (Function &g : p->Modules.front().Functions)
         if (g.Name == "f")
           fn = &g;
-      const auto start = std::chrono::steady_clock::now();
+      const std::clock_t start = std::clock();
       const MoveCounts c = moveAtLastUse(*fn);
-      const std::chrono::duration<double> took =
-          std::chrono::steady_clock::now() - start;
+      const double took =
+          static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
       EXPECT_EQ(c.Transfers, n);
-      best = run == 0 ? took.count() : std::min(best, took.count());
+      best = run == 0 ? took : std::min(best, took);
     }
     return best;
   };
@@ -1408,7 +1410,8 @@ TEST(MoveAtLastUse, ItsTimeGrowsWithTheFunctionNotWithCopiesTimesItsSize) {
   // Each copy's last use, and each release and null store after the
   // moves, is found by one walk of the function for all of them.  Four
   // times the copies in a function four times the size take about four
-  // times as long; a walk per copy would take sixteen.
+  // times as long; a walk per copy would take sixteen.  The time measured
+  // is the processor time the test spends, as above.
   auto seconds = [](size_t n) {
     double best = 0;
     for (int run = 0; run < 3; ++run) {
@@ -1421,13 +1424,13 @@ TEST(MoveAtLastUse, ItsTimeGrowsWithTheFunctionNotWithCopiesTimesItsSize) {
       for (Function &g : p->Modules.front().Functions)
         if (g.Name == "f")
           fn = &g;
-      const auto start = std::chrono::steady_clock::now();
+      const std::clock_t start = std::clock();
       const MoveCounts c = moveAtLastUse(*fn);
-      const std::chrono::duration<double> took =
-          std::chrono::steady_clock::now() - start;
+      const double took =
+          static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
       EXPECT_EQ(c.Transfers, n);
       EXPECT_EQ(c.Releases, n);
-      best = run == 0 ? took.count() : std::min(best, took.count());
+      best = run == 0 ? took : std::min(best, took);
     }
     return best;
   };
