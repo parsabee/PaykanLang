@@ -865,3 +865,35 @@ TEST_F(FrontendPlugin, DeepASTs) {
     EXPECT_NE(t.Err.find(c.Error), std::string::npos) << t.Err;
   }
 }
+
+// A plugin's AST may have no locations or coarse ones
+// (docs/plugins/ast-format.md): two constructs then share one, and the same
+// error about each is two reports, not one reported twice.  So a debug
+// build's double-report guard (DiagEngine.h) leaves them alone: both are
+// printed and the check fails with status 1, not an abort.
+TEST_F(FrontendPlugin, SameErrorAtASharedLocation) {
+  // `#` marks where each node's location goes.
+  const std::string program =
+      "(paykan-ast " + kAst +
+      " (unit (fn# \"main\" (type-params) (params) (named-type \"int\") "
+      "(block# (expr# (call# \"nope\" (type-args))) "
+      "(expr# (call# \"nope\" (type-args))) (return# (int# 0))))))\n";
+  for (const char *at : {"", " @1:1-1:5"}) {
+    std::string text;
+    for (char c : program)
+      if (c == '#')
+        text += at;
+      else
+        text += c;
+    fs::path p = Scratch / "shared.pkn";
+    std::ofstream(p) << text;
+    auto r = paykan(withFe("--check-only " + quote(p.string())));
+    EXPECT_EQ(r.Code, 1) << at << r.Err;
+    const std::string error = "error: call to undeclared function 'nope'";
+    size_t first = r.Err.find(error);
+    ASSERT_NE(first, std::string::npos) << at << r.Err;
+    EXPECT_NE(r.Err.find(error, first + 1), std::string::npos) << at << r.Err;
+    EXPECT_EQ(r.Err.find("internal compiler error"), std::string::npos)
+        << at << r.Err;
+  }
+}

@@ -943,6 +943,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the recursive-descent lexer's table matches.  A `.pkm`'s templates, whose renamed bodies
   name `$::module::name`, are read with `interchange::Origin::Templates`
   (`include/paykan/ast/Interchange.h`), which keeps those names.
+- A debug build of `paykan` aborted (`internal compiler error: the same diagnostic was
+  reported twice`, exit status 134) on a frontend plugin's AST, or the `ast-text` frontend's
+  input, with no locations or coarse ones: two calls of an undeclared function whose nodes
+  had no location, or shared `@1:1-1:5`, gave the same error twice, which the guard against
+  a construct reported twice (`DiagEngine.h`) took for one repeat.  The guard no longer
+  checks a diagnostic without a location, and is off for a frontend plugin's AST
+  (`DiagEngine::setExactLocations`), whose locations may be coarse
+  (docs/plugins/ast-format.md): both errors are printed and the check fails with status 1,
+  as in a release build.
 
 ## [0.2.0] - 2026-10-20
 

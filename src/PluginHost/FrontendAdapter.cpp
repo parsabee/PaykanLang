@@ -34,6 +34,10 @@ public:
                               std::string_view source, ast::ASTContext &ctx,
                               sema::DiagEngine &diag,
                               const frontend::Options &opts) override {
+    // The plugin's diagnostics and the AST it returns carry its locations,
+    // which may be coarse or missing (docs/plugins/ast-format.md): two
+    // constructs can share one, so the same error about each is no repeat.
+    diag.setExactLocations(false);
     std::string file(filename), text(source);
     PaykanSession s = session(file, diag, std::cerr); // Out: debug traces
     PaykanFrontendInput in = input(file, text, opts);

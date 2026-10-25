@@ -726,7 +726,8 @@ fn main() -> int { a = s::twice(1); b = s::twice(2); return 0; }
 
 // The diagnostic engine's debug-build guard (#112): the same diagnostic group
 // (an error plus its notes) reported twice is an internal error, while the
-// same message with different notes or at another location is not.  The
+// same message with different notes or at another location is not, and
+// neither is a repeat with no location or with inexact locations.  The
 // check is an assertion in the library, so it needs a library built with
 // assertions: PAYKAN_TEST_LIBRARY_NDEBUG marks an installed one built
 // without (paykan_add_frontend_tests).
@@ -744,6 +745,19 @@ TEST(Generics, DiagEngineRejectsIdenticalRepeat) {
     diag.error(b, "msg");   // another location
     diag.warning(a, "msg"); // another severity
     EXPECT_EQ(diag.getErrorCount(), 3u);
+  }
+  {
+    // A diagnostic with no location cannot be told from the same one about
+    // another construct, and with inexact locations (a frontend plugin's
+    // AST) neither can one that has a location: no group is checked.
+    std::ostringstream os;
+    paykan::sema::DiagEngine diag(os);
+    diag.error(paykan::ast::SourceLocation(), "msg");
+    diag.error(paykan::ast::SourceLocation(), "msg");
+    diag.setExactLocations(false);
+    diag.error(a, "msg");
+    diag.error(a, "msg");
+    EXPECT_EQ(diag.getErrorCount(), 4u);
   }
   EXPECT_DEATH(
       {

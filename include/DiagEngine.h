@@ -54,9 +54,14 @@ class DiagEngine {
   // twice -- so it aborts instead of being silently deduplicated.  The same
   // error repeated with different notes (e.g. once per template instantiation,
   // each with its own "in instantiation of" note) is a different group and is
-  // allowed, and so is the same message at another location.
+  // allowed, and so is the same message at another location.  A group whose
+  // error or warning has no location, or any group while the locations are
+  // not exact (setExactLocations), is not checked: it cannot be told from
+  // the same report about another construct.
   std::string CurrentGroup;
   std::unordered_set<std::string> SeenGroups;
+  bool ExactLocations = true;
+  bool CheckGroup = true;
   void closeGroup();
 
 public:
@@ -75,6 +80,14 @@ public:
   }
   const std::string &getSourceName() const { return SourceName; }
   const std::vector<std::string> *getSourceLines() const { return SourceLines; }
+
+  // Whether every construct the diagnostics are about has a location of its
+  // own, as the built-in frontend's AST does (the default).  A frontend
+  // plugin's AST may carry coarse locations or none
+  // (docs/plugins/ast-format.md), where two constructs share one: the
+  // double-report guard is then off, since the same error about each is no
+  // repeat.
+  void setExactLocations(bool exact) { ExactLocations = exact; }
 
   void error(ast::SourceLocation loc, const std::string &msg);
   void warning(ast::SourceLocation loc, const std::string &msg);

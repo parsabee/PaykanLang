@@ -55,7 +55,8 @@ $ paykan --emit-ast hello.pkn
   end of the node in the source). It is optional and, when present, is the
   first field of a list. A missing location means "unknown"; diagnostics
   about such a node have no position, so a frontend should give every node
-  one.
+  one. Locations may be coarse: nodes can share one, and the same error
+  about each of them is reported for each.
 - `_` stands for an absent field ("none").
 - Whitespace (space, tab, newline, carriage return) separates atoms; `;`
   starts a comment that runs to the end of the line.
