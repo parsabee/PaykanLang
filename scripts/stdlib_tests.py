@@ -98,7 +98,7 @@ def run(args, path, program, opt, workdir):
     c_file.write_text(emitted.stdout)
     level = opt[0] if opt else "-O2"
     cc = sh([tool, *c_strict.STRICT_FLAGS, level, "-I", str(c_strict.RUNTIME),
-             str(c_file), *args.runtimes[(tool, level)], args.stdlib, "-lm",
+             str(c_file), *args.runtimes[(tool, level)], *args.stdlib, "-lm",
              "-o", str(exe)], workdir)
     return run_exe(exe, workdir) if cc.returncode == 0 else failed(tool, cc)
 
@@ -174,7 +174,8 @@ def main():
     mode.add_argument("--cc", action="append",
                       help="run the C `paykan --emit-c` prints, compiled "
                            "with this C compiler (repeatable)")
-    ap.add_argument("-j", "--jobs", type=int, default=4)
+    ap.add_argument("-j", "--jobs", type=int, default=4,
+                    help="programs checked at once (default 4)")
     ap.add_argument("--update", action="store_true",
                     help="rewrite the .expected files")
     args = ap.parse_args()
@@ -191,7 +192,8 @@ def main():
         (TESTS / "panics").glob("*.pkn"))
     with tempfile.TemporaryDirectory(prefix="paykan-stdlib-") as workdir:
         if args.cc:
-            args.stdlib = c_strict.stdlib_archive(args.paykan, workdir)
+            archive = c_strict.stdlib_archive(args.paykan, workdir)
+            args.stdlib = [archive] if archive else []
             args.runtimes = {}
             for cc in args.cc:
                 for opt in args.opts:
