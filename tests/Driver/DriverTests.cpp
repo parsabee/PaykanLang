@@ -1094,8 +1094,11 @@ TEST(Driver, StatsCountTheReferenceCountElimination) {
 // on entry`, `retains at keeps`; here take's x, whose release then asks the
 // bit).  --pir-skip=<pass>[,<pass>] (not in --help) leaves passes out: here
 // the lending pass, whose marks and prologues then stay in what --emit-pir
-// prints, and the reference-count elimination.  A name no pass has, and
-// --emit-pkm, are refused.
+// prints, and the reference-count elimination.  It leaves them out of the
+// code the run lowers only: code a `.pkm` holds went through them when it
+// was written, as the shared `ok<Str, Error>` the standard library's io
+// made did (the program's own `println<Str>` keeps its prologue).  A name
+// no pass has, and --emit-pkm, are refused.
 TEST(Driver, PirSkipLeavesPassesOut) {
   REQUIRE_BACKEND();
   auto src =
@@ -1138,6 +1141,34 @@ TEST(Driver, PirSkipLeavesPassesOut) {
             std::string::npos)
       << skip.out;
   EXPECT_EQ(run(paykanRun() + " --pir-skip=lending " + src).exitCode, 14);
+  auto reads = writeTmp("import ::io;\n"
+                        "fn main() -> int {\n"
+                        "  match io::stdin().readln() {\n"
+                        "    line: Ok { io::println(line.value); return 1; }\n"
+                        "    _ { return 0; }\n"
+                        "  }\n"
+                        "}\n");
+  auto imported =
+      run(paykan + " --pir-skip=lending --emit-pir " + reads + " 2>&1");
+  std::filesystem::remove(reads);
+  EXPECT_EQ(imported.exitCode, 0) << imported.out;
+  const size_t ok =
+      imported.out.find("shared fn @\"$::result::ok<Str, Error>\"(");
+  const size_t println =
+      imported.out.find("shared fn @\"$::io::println<Str>\"(");
+  ASSERT_NE(ok, std::string::npos) << imported.out;
+  ASSERT_NE(println, std::string::npos) << imported.out;
+  const std::string okBody =
+      imported.out.substr(ok, imported.out.find("\n}\n", ok) - ok);
+  const std::string printlnBody = imported.out.substr(
+      println, imported.out.find("\n}\n", println) - println);
+  EXPECT_EQ(okBody.find("    retain %value.1\n"), std::string::npos) << okBody;
+  EXPECT_NE(okBody.find("  if %value.lent.4 {\n    retain %value.6\n  }\n"),
+            std::string::npos)
+      << okBody;
+  EXPECT_NE(printlnBody.find("  if %value.lent.3 {\n    retain %value.1\n"),
+            std::string::npos)
+      << printlnBody;
   auto unknown =
       run(paykan + " --pir-skip=lending,folding --check-only " + src + " 2>&1");
   EXPECT_NE(unknown.exitCode, 0);

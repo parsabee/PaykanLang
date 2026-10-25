@@ -84,7 +84,13 @@ struct Options {
   /// --pir-skip=<pass>[,<pass>...] (repeatable, not in --help): the PIR
   /// passes not to run, by name (docs/pir.md §12), to compare the code made
   /// without them.  It implies --no-module-cache, so no cache entry keeps
-  /// code made without them, and no `.pkm` is written with it.
+  /// code made without them, and no `.pkm` is written with it.  It leaves
+  /// them out of the code this run lowers, the program's and that of the
+  /// modules it compiles from source; code read from a `.pkm` (a prebuilt
+  /// module's, the standard library's, and each shared instantiation such a
+  /// module made, which the program shares rather than makes again) went
+  /// through every pass when the `.pkm` was written, and keeps what they
+  /// did.
   std::vector<std::string> SkipPasses;
   bool EmitPkm = false;        // --emit-pkm: write the module's .pkm, stop
   bool RebuildModules = false; // --rebuild-modules: ignore cache entries
