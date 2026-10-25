@@ -763,13 +763,26 @@ TEST_F(FrontendPlugin, ParseFailures) {
 TEST_F(FrontendPlugin, DumpTokens) {
   auto r = paykan(withFe("--dump-tokens " + quote(kSample)));
   EXPECT_EQ(r.Code, 0) << r.Err;
-  EXPECT_EQ(r.Out, "tokens of " + kSample + ": " +
-                       std::to_string(fs::file_size(kSample)) + " bytes\n");
+  const std::string listing = "tokens of " + kSample + ": " +
+                              std::to_string(fs::file_size(kSample)) +
+                              " bytes\n";
+  EXPECT_EQ(r.Out, listing);
   auto f = paykan(withFe("--dump-tokens " + quote(kSample)),
                   "PAYKAN_TEST_FE_MODE=fail");
+  EXPECT_EQ(f.Code, 1);
   EXPECT_NE(f.Err.find("error: frontend 'test-fe' failed (status 3)"),
             std::string::npos)
       << f.Err;
+  // A lexical error is the frontends' diagnostic, with the file, the
+  // position and the snippet, and fails the dump, which is written whole.
+  auto e = paykan(withFe("--dump-tokens " + quote(kSample)),
+                  "PAYKAN_TEST_FE_MODE=errors");
+  EXPECT_EQ(e.Code, 1);
+  EXPECT_EQ(e.Out, listing);
+  EXPECT_NE(e.Err.find(kSample + ":1:5: error: bad character\n"),
+            std::string::npos)
+      << e.Err;
+  EXPECT_NE(e.Err.find("    |     ^\n"), std::string::npos) << e.Err;
 }
 
 TEST_F(FrontendPlugin, Rejections) {

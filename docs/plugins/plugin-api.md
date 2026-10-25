@@ -112,7 +112,13 @@ typedef struct PaykanFrontend {
   ([`ast-format.md`](ast-format.md#3-what-the-reader-checks)). Imported
   modules are parsed with the same frontend.
 - **`dump_tokens`** (optional): `--dump-tokens`, one token per line through
-  `host->write_output`. `NULL` means not supported.
+  `host->write_output`. Report each lexical error with `host->diagnostic`,
+  as in `parse` (it prints with the source line and a caret), and go on
+  with the listing; `paykan --dump-tokens` exits with status 1 after an
+  error, or when the callback returns an error code. `NULL` means not
+  supported. (A static C++ frontend's `Frontend::dumpTokens` reports them
+  through the `sema::DiagEngine` it is given, as its `parse` does:
+  [`include/paykan/Frontend.h`](../../include/paykan/Frontend.h).)
 - **Grammar and limits.** The frontend implements
   [`../grammar.md`](../grammar.md) and must build exactly the AST the
   recursive-descent frontend builds; input nested deeper than

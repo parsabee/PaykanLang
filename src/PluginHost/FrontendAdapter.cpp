@@ -78,11 +78,11 @@ public:
   }
 
   bool dumpTokens(std::string_view filename, std::string_view source,
-                  std::ostream &os) override {
+                  std::ostream &os, sema::DiagEngine &diag) override {
     if (!F->dump_tokens)
       return false;
+    diag.setExactLocations(false); // the plugin's, as in parse
     std::string file(filename), text(source);
-    sema::DiagEngine diag(std::cerr);
     PaykanSession s = session(file, diag, os);
     PaykanFrontendInput in = input(file, text, frontend::Options());
     int rc = F->dump_tokens(F->data, &s, &in);

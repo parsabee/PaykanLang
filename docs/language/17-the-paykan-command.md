@@ -71,7 +71,7 @@ These print an intermediate form of the program to standard output and stop.
 | `--emit-pir` | PIR, the backend-neutral intermediate representation ([PIR](../pir.md)), as the backend gets it: what `main` reaches |
 | `--emit-ast` | the parsed program in the AST interchange format ([AST format](../plugins/ast-format.md)) |
 | `--dump-ast` | the parsed program as a readable tree |
-| `--dump-tokens` | the token stream, for frontends that support it |
+| `--dump-tokens` | the token stream, for frontends that support it; a lexical error is reported as a syntax error is, and the listing is printed whole, but `paykan` exits with status 1 |
 | `--trace-parser`, `--trace-scanner` | the frontend's debugging traces, if it has them |
 
 `--emit-pir` is a good way to see what the compiler does with your code, including the

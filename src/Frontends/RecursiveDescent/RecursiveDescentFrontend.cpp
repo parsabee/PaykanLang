@@ -27,10 +27,10 @@ public:
   }
 
   bool dumpTokens(std::string_view /*filename*/, std::string_view source,
-                  std::ostream &os) override {
-    // Lexical errors are printed to stderr by the fallback engine; the dump
-    // itself is still complete (bad bytes are skipped), so it succeeds.
-    recursive_descent::dumpTokens(source, os, nullptr);
+                  std::ostream &os, sema::DiagEngine &diag) override {
+    // The listing is complete whatever the lexical errors (the bad bytes are
+    // skipped); they are reported through diag.
+    recursive_descent::dumpTokens(source, os, &diag);
     return true;
   }
 };

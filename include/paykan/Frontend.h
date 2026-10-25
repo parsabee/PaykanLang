@@ -135,14 +135,17 @@ public:
                             ast::ASTContext &ctx, sema::DiagEngine &diag,
                             const Options &opts) = 0;
 
-  /// Write the token stream of @p source to @p os, one token per line
-  /// (--dump-tokens).  Returns false when the frontend does not support it;
-  /// the default does not.
+  /// Write the token stream of @p source, the full text of @p filename, to
+  /// @p os, one token per line (--dump-tokens).  Every lexical error is
+  /// reported through @p diag, as in parse, and the listing goes on past it;
+  /// the driver fails the dump when @p diag counted an error.  Returns false
+  /// when the frontend does not support it; the default does not.
   virtual bool dumpTokens(std::string_view filename, std::string_view source,
-                          std::ostream &os) {
+                          std::ostream &os, sema::DiagEngine &diag) {
     (void)filename;
     (void)source;
     (void)os;
+    (void)diag;
     return false;
   }
 };

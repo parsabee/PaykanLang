@@ -519,6 +519,32 @@ TEST(Driver, DumpTokensPrintsTheTokenStream) {
   EXPECT_NE(out.find("4:1-4:1 EOF\n"), std::string::npos) << out;
 }
 
+// A lexical error is reported as the frontend's other diagnostics are, with
+// the file, the position and a snippet (docs/grammar.md section 9), and
+// fails the dump, which is still written whole (the bad bytes skipped).
+TEST(Driver, DumpTokensReportsLexicalErrors) {
+  auto src = writeTmp("fn main() -> int { x = 1 $ 2; return \"abc; }\n");
+  auto [rc, err] =
+      run(std::string(kPaykan) + " --dump-tokens " + src + " 2>&1 >/dev/null");
+  auto [rcOut, out] =
+      run(std::string(kPaykan) + " --dump-tokens " + src + " 2>/dev/null");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 1) << err;
+  EXPECT_EQ(err, src +
+                     ":1:26: error: invalid character '$'\n"
+                     "  1 | fn main() -> int { x = 1 $ 2; return \"abc; }\n"
+                     "    |                          ^\n" +
+                     src +
+                     ":1:38: error: unterminated string literal (string "
+                     "literals cannot span multiple lines; use \\n)\n"
+                     "  1 | fn main() -> int { x = 1 $ 2; return \"abc; }\n"
+                     "    |                                      ^~~~~~~\n");
+  EXPECT_EQ(rcOut, 1);
+  EXPECT_NE(out.find("1:24-1:25 INT 1\n1:28-1:29 INT 2\n"), std::string::npos)
+      << out;
+  EXPECT_NE(out.find("2:1-2:1 EOF\n"), std::string::npos) << out;
+}
+
 TEST(Driver, DumpTokensFailsOnUnreadableFile) {
   auto [rc, out] = run(std::string(kPaykan) +
                        " --dump-tokens /nonexistent/paykan_no_such.pkn 2>&1");

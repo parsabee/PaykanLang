@@ -952,6 +952,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`DiagEngine::setExactLocations`), whose locations may be coarse
   (docs/plugins/ast-format.md): both errors are printed and the check fails with status 1,
   as in a release build.
+- `paykan --dump-tokens` exited with status 0 on a lexical error, which it printed in a
+  format of its own without the file (`error @1.26: invalid character '$'`), and so did a
+  frontend plugin's `dump_tokens` that failed or reported an error.  A lexical error is now
+  reported as a syntax error is (`l.pkn:1:26: error: invalid character '$'`, with the
+  source line and a caret, docs/grammar.md section 9), the listing is still printed whole,
+  and `paykan` exits with status 1 (docs/language/17-the-paykan-command.md,
+  docs/plugins/plugin-api.md).  A static C++ frontend's `Frontend::dumpTokens`
+  (`include/paykan/Frontend.h`) takes the driver's `sema::DiagEngine &` to report them
+  through, as `parse` does, so such a frontend is rebuilt for it, as the 0.3.0 version
+  requires anyway.
 
 ## [0.2.0] - 2026-10-20
 

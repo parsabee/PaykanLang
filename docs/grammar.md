@@ -580,7 +580,9 @@ column, as `--dump-ast` prints them. Rules that every frontend follows:
 ## 9. Diagnostics and recovery
 
 Diagnostics go through `DiagEngine` in the clang-style
-`file:line:col: error: message` format with a source snippet and caret.
+`file:line:col: error: message` format with a source snippet and caret,
+the lexical errors `--dump-tokens` finds too (it still lists every token,
+then fails).
 The messages listed in this document are binding (tests assert on them);
 the wording of other syntax errors (`unexpected X; expected Y`) is up to
 each frontend, and the differential check compares ASTs and accept/reject,
