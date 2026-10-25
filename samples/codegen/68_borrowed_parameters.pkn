@@ -199,7 +199,9 @@ fn viaInout(n: Node, w: view Watcher) {
   io::println("  viaInout: old is " + state(w) + ", n = " + n.name);
 }
 
-fn pair(a: Node) -> (Node, int) { return (a, 1); }
+fn pair(a: Node) -> (Node, int) {
+  return (a, 1);
+}
 
 fn destructure(n: Node, w: view Watcher) {
   n, k = pair(Node("m"));
@@ -255,9 +257,8 @@ fn writes() {
   g = Node("g0");
   wg = Watcher(g);
   inoutLocal(g, wg);
-  io::println("after moves: " + state(wb) + " " + state(wc) + " " +
-              state(wd) + " " + state(we) + " " + state(wf) + " " +
-              state(wg));
+  io::println("after moves: " + state(wb) + " " + state(wc) + " " + state(wd)
+      + " " + state(we) + " " + state(wf) + " " + state(wg));
 }
 
 // -- A read the callee replaces, given to every kind of call
@@ -272,9 +273,7 @@ fn direct(m: Node, h: Cell) {
 }
 
 class Base {
-  view fn take(m: Node, h: Cell) {
-    io::println("base");
-  }
+  view fn take(m: Node, h: Cell) { io::println("base"); }
 }
 
 class Derived: Base {
@@ -308,13 +307,10 @@ impl Parent {
   }
 }
 
-class Child: Parent {
-}
+class Child: Parent { }
 
 impl Child {
-  fn __init__(h: Cell) {
-    __super__(h.n, h);
-  }
+  fn __init__(h: Cell) { __super__(h.n, h); }
 }
 
 struct S {

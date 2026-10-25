@@ -1562,9 +1562,9 @@ at the top of its body is judged on the body as the moves and the caller
 half left it.  Its **own reference** is `%p` itself, or, when the body
 stores `%p` into a slot at its top, each load of the slot; each of their
 uses is a borrow (an `unbox`, a `cmp`, a `weak.new`, a `lent` argument, a
-`store` into a local that is never loaded and whose address only module-
-less externs are given, a `native fn` body's argument passed by address),
-a `retain` (a copy), or a use that lets go of it: a `release`, an
+`store` into a local that is never loaded and whose address is given to
+runtime and native C functions only, as a `native fn` body's argument
+passed by address is), a `retain` (a copy), or a use that lets go of it: a `release`, an
 argument a call does not lend, a `store`, a `field.store`, a `ptr.store`,
 a `ret`.  Of the uses of one value that let go of it, the one no retain of
 the value before it paid for lets go of the parameter's reference.  The
@@ -1576,8 +1576,8 @@ parameter is **owned on entry**, and its prologue stays, when:
   arm's `inout` binding); a store of `null` (`n = None`, or the moves'
   null at a hand-off) is no write;
 - a use is none of these, or which one lets go of the reference is not
-  clear (more uses that let go of a value than one more than its retains,
-  in more than one block);
+  clear (a value let go of more often than once more than it is retained,
+  or retained and let go of in more than one block);
 - or some path from the entry to a `ret` does not let go of the reference
   exactly once, counting a load of the slot only while the slot is not
   null: what the pass took for letting go then only borrows.  A lowered
@@ -1589,9 +1589,9 @@ a keep asks it) goes, and each use that lets go of the reference asks the
 bit, as §3 says: a `release` happens under `if %p.own`, an argument of a
 lending callee's box parameter with a bit is `owned(%p.own)` (a
 **forward**: the callee lets go of it as its own caller said), and any
-other use (a **keep**) is preceded by `if %p.lent { retain %v }`.  So `take(a)`
-at the last use of a parameter `a` is `call @take(owned(%a.own) %a.2)`:
-`take` releases `a` only when `a`'s own caller handed it over.  A
+other use (a **keep**) is preceded by `if %p.lent { retain %v }`.  So
+`take(a)` at the last use of a parameter `a` is `call @take(owned(%a.own)
+%a.2)`: `take` releases `a` only when `a`'s own caller handed it over.  A
 constructor hands its parameters to `__init__` this way, and a function
 value's code to its function; a chain `push → pushFront → Node(v) →
 __init__` retains `v` once, at the field store, and only when the

@@ -284,26 +284,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   machine function.  An out-of-tree backend must give every lending function, slot and
   function value its mask, pass each call's from its arguments' ownership and read `owned`
   from it (docs/writing-a-backend.md); C code calling a runtime `equals` passes a mask;
-  `.pkm` files, cache entries and plugins of 0.2.0 are not accepted.  A function that takes
-  a box starts with a prologue that retains each parameter its caller lent (docs/pir.md
-  §3), so its body owns it either way.  The lowering marks the copies a callee could be
-  lent instead (a variable's, or a field's no call in use may let go of, docs/pir.md §7),
-  and a new pass, `lending`, lends each one whose object the caller keeps alive through
-  the call: the copy's retain goes and the argument is `lent`, unless a statement between
-  the read and the call, or one in an `&&`, `||`, `?:` or `match` among them, may let the
-  object go, as in `f(x, x)`, `f(x.name, x)` or `f(x.name, c && g(x))` at `x`'s last use
-  (docs/pir.md §12; `--stats`: `lending marks`, `lending arguments lent`, `lending copies
-  kept for the window`).  In the 122 programs of the corpus that compile (samples, leak
-  checks, standard library tests, imports) it lends 296 of the 297 marks and keeps one for
-  the window (`both(t, t)`), so the callers' retains in `--emit-pir` fall from 1385 to 1089
-  (−21%; from 1135 to 838 after the reference-count elimination, which removes one pair
-  more, the copy of a variable that is now lent rather than copied in its range), beside
-  the 742 retains of the prologues.  The callee's prologue retains what it is lent, so a
-  program makes the same retains and releases when it runs, those of a lent argument in
-  the callee instead of before the call, and every object dies where it did: the corpus
-  prints and frees memory as it did on every backend, the moves at last use make the same
-  moves in every program, and the generated code of a function that takes no box (fib, the
-  dispatch benchmark's `area` calls) is unchanged.
+  `.pkm` files, cache entries and plugins of 0.2.0 are not accepted.  Each body the
+  lowering makes of a function that takes a box starts with a prologue that retains each
+  parameter its caller lent (docs/pir.md §3), so it owns it either way.  The lowering
+  marks the copies a callee could be lent instead (a variable's, or a field's no call in
+  use may let go of, docs/pir.md §7), and a new pass, `lending`, lends on both sides of a
+  call (docs/pir.md §12).  It lends each marked copy whose object the caller keeps alive
+  through the call: the copy's retain goes and the argument is `lent`, unless a statement
+  between the read and the call, or one in an `&&`, `||`, `?:` or `match` among them, may
+  let the object go, as in `f(x, x)`, `f(x.name, x)` or `f(x.name, c && g(x))` at `x`'s
+  last use.  And it lends each box parameter its body never writes: the prologue's
+  retain goes, and the body releases the parameter only when it was handed over (`if
+  %p.own { release %v }`), hands it on with its own bit (`owned(%p.own) %v`: a chain
+  `push -> pushFront -> Node(v) -> __init__` retains `v` once, at the field store, and
+  only when the outermost caller lent it), and retains it where it keeps it (in a field,
+  a variable or memory, as its result, for a callee without its bit) only when it was
+  lent.  A parameter the body assigns or gives to an `inout` parameter, or uses in a way
+  the pass does not follow, keeps its prologue (`--stats`: `lending marks`, `lending
+  arguments lent`, `lending copies kept for the window`, `lending parameters lent`,
+  `lending parameters handed on`, `lending parameters owned on entry`, `lending retains
+  at keeps`).  In the 122 programs of the corpus that compile (samples, leak checks,
+  standard library tests, imports) it lends 296 of the 297 marks (keeping one for the
+  window, `both(t, t)`) and 727 parameters (165 of them handed on), with 128 retains at
+  keeps, and leaves one parameter owned from its entry (sample 66's `use(p)`, which
+  passes `p` to an `inout` parameter).  So the retains in `--emit-pir` fall from PR
+  #340's 1385 to 1232 (−11%: 1089 copies, 142 keeps, one prologue) and, after the
+  reference-count elimination, which removes as much as before, from 1135 to 981 (−14%);
+  the 4407 and 4131 releases stay, 672 of them asking a parameter's bit.  A program makes
+  fewer retains and as many fewer releases when it runs (in the probes' own code,
+  `show(a); pass(a); keep(h, a)` makes 1 retain and 8 releases instead of 7 and 14, a
+  chain of hand-offs 0 and 40 instead of 10 and 50, the writes of `w1_written` 12 and 110
+  instead of 44 and 143), and every object dies where it did: the corpus prints and
+  frees memory as before on every backend at `-O0`, `-O1` and `-O2`, and the moves at
+  last use make the same moves.  The generated code of a function that takes no box
+  (fib, the dispatch benchmark's `area` methods) is unchanged.  At `-O2`, against the
+  part 1 and 4 build, callgrind counts the same instructions for fib, 0.2% fewer for
+  dispatch, 0.4 to 2.9% fewer for the hash map and set loops and 0.1% fewer for a
+  priority queue of strings, and 1.9% more for binary trees, 1.1% more for a queue and
+  4.9% more for a stack of strings, which hand temporaries over and so pay a bit test at
+  each release and keep instead of one in the prologue.  CPU times (median of 5 runs,
+  pinned to one CPU) moved by −10% to +4% on the container loops and by −5% to +3% on
+  binary trees and fib, within what repeated runs differ by on this machine; dispatch
+  measured +20%, and −6% in a second run of nine.
   Per-parameter conventions in the interface (`Sig.conv`, `nConventions`) are retired,
   always 0 (docs/design/pkm.md §3.5, §5.9).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive

@@ -72,7 +72,7 @@ fn main() -> int {
   t1 = name(h);
   handOn(h, Node("t2"));
   t2 = name(h);
-  io::println("temporaries: " + t1 + " " + t2 + " " + read(Node("t3")) + " " +
-              same(Node("t4")).name);
+  io::println("temporaries: " + t1 + " " + t2 + " " + read(Node("t3")) + " "
+      + same(Node("t4")).name);
   return 0;
 }
