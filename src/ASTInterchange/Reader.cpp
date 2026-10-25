@@ -256,7 +256,8 @@ private:
 /// unwinds by returning null.
 class Builder {
 public:
-  Builder(ASTContext &ctx, ReadError &err) : Ctx(ctx), Err(err) {}
+  Builder(ASTContext &ctx, ReadError &err, Origin origin)
+      : Ctx(ctx), Err(err), From(origin) {}
 
   TranslationUnit *top(const SExpr &form) {
     if (form.Text != "paykan-ast")
@@ -277,6 +278,8 @@ public:
 private:
   ASTContext &Ctx;
   ReadError &Err;
+  /// Who wrote the text: a frontend's names are the grammar's.
+  Origin From;
   /// The levels of nesting (frontend::kMaxNesting) around what is built.
   unsigned Depth = 0;
   /// The chain links (frontend::kMaxChain) on the deepest path down what
@@ -349,6 +352,81 @@ private:
 
   const std::string &intern(const std::string &s) { return Ctx.intern(s); }
 
+  /// What a NAME may be where it stands, as the grammar writes it there
+  /// (docs/grammar.md sections 1 and 5).
+  enum class NameKind {
+    Ident,     ///< an identifier: anything declared, a member, a local
+    Path,      ///< identifiers joined by `::`: a callee, an enum, a type
+    TypeParam, ///< an identifier, or an untyped parameter's `typeof(x)`
+    TypeName,  ///< a Path, or an untyped parameter's `typeof(x)`
+    Member,    ///< an identifier, or a tuple index (`t.0 = e`)
+  };
+
+  static bool isPath(std::string_view s) {
+    for (size_t at = 0;;) {
+      size_t sep = s.find("::", at);
+      if (!frontend::isIdentifier(s.substr(at, sep - at)))
+        return false;
+      if (sep == std::string_view::npos)
+        return true;
+      at = sep + 2;
+    }
+  }
+
+  static bool isName(std::string_view s, NameKind kind) {
+    auto untyped = [&] {
+      return frontend::isIdentifier(names::untypedParamOf(s));
+    };
+    switch (kind) {
+    case NameKind::Ident:
+      return frontend::isIdentifier(s);
+    case NameKind::Path:
+      return isPath(s);
+    case NameKind::TypeParam:
+      return frontend::isIdentifier(s) || untyped();
+    case NameKind::TypeName:
+      return isPath(s) || untyped();
+    case NameKind::Member:
+      // A tuple index as the parser reads it: digits without a leading
+      // zero, at most INT64_MAX.
+      return frontend::isIdentifier(s) ||
+             (!s.empty() &&
+              s.find_first_not_of("0123456789") == std::string_view::npos &&
+              (s.size() == 1 || s[0] != '0') &&
+              (s.size() < 19 ||
+               (s.size() == 19 && s <= "9223372036854775807")));
+    }
+    return false;
+  }
+
+  static const char *nameKindText(NameKind kind) {
+    switch (kind) {
+    case NameKind::Ident:
+      return "an identifier";
+    case NameKind::Path:
+      return "an identifier or a qualified name (a::b)";
+    case NameKind::TypeParam:
+      return "an identifier or an untyped parameter's typeof(x)";
+    case NameKind::TypeName:
+      return "an identifier, a qualified name (a::b) or an untyped "
+             "parameter's typeof(x)";
+    case NameKind::Member:
+      return "an identifier or a tuple index";
+    }
+    return "";
+  }
+
+  /// Fail at @p at unless @p s is a NAME of @p kind (@p what is the
+  /// field's role, for the message), in a frontend's text.
+  bool checkName(const SExpr &at, const std::string &s, NameKind kind,
+                 const std::string &what) {
+    if (From != Origin::Frontend || isName(s, kind))
+      return true;
+    fail(at, "expected " + std::string(nameKindText(kind)) + ": " + what +
+                 ", not \"" + s + "\"");
+    return false;
+  }
+
   /// The fields of one list, read left to right.
   class Fields {
   public:
@@ -406,16 +484,28 @@ private:
       return &B.intern(e->Text);
     }
 
-    /// A non-empty string.
-    const std::string *name(const char *what) {
+    /// A NAME of @p kind.
+    const std::string *name(const char *what, NameKind kind = NameKind::Ident) {
       const SExpr *at = atEnd() ? nullptr : &L.Items[I];
       const std::string *s = string(what);
       if (s && s->empty()) {
         B.fail(*at, std::string("empty name: ") + what);
         return nullptr;
       }
-      return s;
+      return s && B.checkName(*at, *s, kind, what) ? s : nullptr;
     }
+
+    /// A NAME of @p kind, or "" for none.
+    const std::string *optionalName(const char *what,
+                                    NameKind kind = NameKind::Ident) {
+      const SExpr *at = atEnd() ? nullptr : &L.Items[I];
+      const std::string *s = string(what);
+      return s && (s->empty() || B.checkName(*at, *s, kind, what)) ? s
+                                                                   : nullptr;
+    }
+
+    /// The field read last (the caller read one).
+    const SExpr &last() const { return L.Items[I - 1]; }
 
     const SExpr *symbol(const char *what) {
       const SExpr *e = next(what);
@@ -641,7 +731,7 @@ private:
   ImplDecl *implDecl(const SExpr &e) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
-    const std::string *typeName = f.string("the type's name");
+    const std::string *typeName = f.name("the type's name", NameKind::Path);
     if (!typeName)
       return nullptr;
     // `impl Box<T>`: (type-params NAME...) after the type's name.
@@ -650,6 +740,8 @@ private:
       for (const SExpr &item : tl->Items) {
         if (item.K != SExpr::String || item.Text.empty())
           return fail(item, "expected a type parameter name"), nullptr;
+        if (!checkName(item, item.Text, NameKind::Ident, "a type parameter"))
+          return nullptr;
         params.push_back(&intern(item.Text));
       }
       if (params.empty())
@@ -729,7 +821,7 @@ private:
     bool system = false;
     if (!f.boolean("whether the import is a system import (::name)", system))
       return nullptr;
-    const std::string *base = f.string("the base path");
+    const std::string *base = f.optionalName("the base path", NameKind::Path);
     if (!base)
       return nullptr;
     std::vector<ImportDecl::Module> modules;
@@ -738,7 +830,7 @@ private:
         return fail(*m, "expected (module \"name\" \"alias\")"), nullptr;
       Fields mf(*this, *m);
       const std::string *name = mf.name("the module's name");
-      const std::string *alias = name ? mf.string("the alias") : nullptr;
+      const std::string *alias = name ? mf.optionalName("the alias") : nullptr;
       if (!alias || !mf.done())
         return nullptr;
       modules.push_back({name, alias});
@@ -798,6 +890,9 @@ private:
       variants.push_back(v);
       payloads.emplace_back();
     }
+    // The check the grammar makes (docs/grammar.md).
+    if (variants.empty())
+      return fail(e, "an enum needs at least one variant"), nullptr;
     auto *ed = Ctx.make<EnumDecl>(loc, *name, std::move(variants),
                                   std::move(payloads), std::move(params));
     ed->setTypeParamBounds(std::move(bounds));
@@ -817,7 +912,7 @@ private:
       const std::string *p = nullptr;
       if (item.K == SExpr::List && item.Text == "bound") {
         Fields bf(*this, item);
-        p = bf.name("a type parameter");
+        p = bf.name("a type parameter", NameKind::TypeParam);
         if (!p)
           return false;
         while (!bf.atEnd()) {
@@ -830,6 +925,9 @@ private:
           return fail(item, "(bound ...) needs at least one trait"), false;
         anyBound = true;
       } else if (item.K == SExpr::String && !item.Text.empty()) {
+        if (!checkName(item, item.Text, NameKind::TypeParam,
+                       "a type parameter"))
+          return false;
         p = &intern(item.Text);
       } else {
         return fail(item, "expected a type parameter: \"T\" or "
@@ -848,7 +946,8 @@ private:
     Fields f(*this, e);
     SourceLocation loc = f.location();
     const std::string *name = f.name("the class's name");
-    const std::string *super = name ? f.string("the superclass") : nullptr;
+    const std::string *super =
+        name ? f.optionalName("the superclass", NameKind::Path) : nullptr;
     std::vector<const std::string *> params;
     TypeParamBounds bounds;
     if (!super || !typeParams(f, params, bounds))
@@ -932,7 +1031,10 @@ private:
                            "top-level function can (a 'native fn')"),
                nullptr;
       Fields nf(*this, *nl);
-      const std::string *symbol = nf.name("the C symbol");
+      // Any C symbol, which is no NAME of the grammar's.
+      const std::string *symbol = nf.string("the C symbol");
+      if (symbol && symbol->empty())
+        return fail(nf.last(), "empty name: the C symbol"), nullptr;
       if (!symbol || !nf.done() || !f.done())
         return nullptr;
       auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, nullptr,
@@ -1025,9 +1127,9 @@ private:
   VarDecl *varDecl(const SExpr &e, bool discardable = false) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
-    const std::string *name = discardable
-                                  ? f.string("the variable's name (\"\" for _)")
-                                  : f.name("the variable's name");
+    const std::string *name =
+        discardable ? f.optionalName("the variable's name (\"\" for _)")
+                    : f.name("the variable's name");
     if (!name)
       return nullptr;
     Type *ty = nullptr;
@@ -1087,7 +1189,7 @@ private:
     Fields f(*this, e);
     SourceLocation loc = f.location();
     if (e.Text == "named-type") {
-      const std::string *name = f.name("the type's name");
+      const std::string *name = f.name("the type's name", NameKind::TypeName);
       if (!name || !f.done())
         return nullptr;
       // As the recursive-descent frontend does: a builtin (int, ...) or a
@@ -1194,7 +1296,8 @@ private:
                                     ret);
     }
     if (e.Text == "generic-type") {
-      const std::string *name = f.name("the generic type's name");
+      const std::string *name =
+          f.name("the generic type's name", NameKind::Path);
       Nested inner(*this, e);
       if (!name || !inner.ok())
         return nullptr;
@@ -1359,7 +1462,8 @@ private:
         if (recv && !target.ok())
           return nullptr;
       }
-      const std::string *field = recv ? f.name("the field's name") : nullptr;
+      const std::string *field =
+          recv ? f.name("the field's name", NameKind::Member) : nullptr;
       Expr *v = field ? expr(f, "the assigned value") : nullptr;
       if (!v)
         return nullptr;
@@ -1391,6 +1495,9 @@ private:
           return nullptr;
         arms.push_back(arm);
       }
+      // The check the grammar makes (docs/grammar.md).
+      if (arms.empty())
+        return fail(e, "a match needs at least one arm"), nullptr;
       out = Ctx.make<MatchStmt>(loc, subject, std::move(arms));
     } else if (t == "destructure") {
       const SExpr *tl = f.list("targets");
@@ -1402,7 +1509,8 @@ private:
           return fail(te, "expected (target \"name\" TYPE-or-_)"), nullptr;
         Fields tf(*this, te);
         SourceLocation tloc = tf.location();
-        const std::string *name = tf.string("the target's name (\"\" for _)");
+        const std::string *name =
+            tf.optionalName("the target's name (\"\" for _)");
         if (!name)
           return nullptr;
         Type *ty = nullptr;
@@ -1440,9 +1548,17 @@ private:
       return fail(e, "expected a match arm"), nullptr;
     Fields f(*this, e);
     SourceLocation loc = f.location();
-    const std::string *binding = f.string("the arm's binding (\"\" for none)");
+    const std::string *binding =
+        f.optionalName("the arm's binding (\"\" for none)");
     if (!binding)
       return nullptr;
+    // The checks the grammar makes (docs/grammar.md): only a type arm binds
+    // the subject.
+    if (!binding->empty() && e.Text != "type-arm")
+      return fail(f.last(), "(" + e.Text +
+                                " ...) has no binding: its "
+                                "binding is \"\""),
+             nullptr;
     MatchArm *arm = nullptr;
     if (e.Text == "type-arm") {
       Type *ty = type(f, "the matched type");
@@ -1690,7 +1806,7 @@ private:
         return nullptr;
       out = Ctx.make<Identifier>(loc, *name);
     } else if (t == "call") {
-      const std::string *callee = f.name("the callee's name");
+      const std::string *callee = f.name("the callee's name", NameKind::Path);
       const SExpr *tl = callee ? f.list("type-args") : nullptr;
       if (!tl)
         return nullptr;
@@ -1745,7 +1861,7 @@ private:
         return nullptr;
       out = Ctx.make<SubscriptExpr>(loc, arr, idx);
     } else if (t == "enum-value") {
-      const std::string *en = f.name("the enum's name");
+      const std::string *en = f.name("the enum's name", NameKind::Path);
       const std::string *v = en ? f.name("the variant's name") : nullptr;
       if (!v)
         return nullptr;
@@ -1842,8 +1958,8 @@ private:
 
 } // namespace
 
-TranslationUnit *read(std::string_view text, ASTContext &ctx,
-                      ReadError &error) {
+TranslationUnit *read(std::string_view text, ASTContext &ctx, ReadError &error,
+                      Origin origin) {
   error = ReadError();
   Lexer lexer(text);
   SExpr form;
@@ -1851,7 +1967,7 @@ TranslationUnit *read(std::string_view text, ASTContext &ctx,
     error = lexer.Err;
     return nullptr;
   }
-  Builder b(ctx, error);
+  Builder b(ctx, error, origin);
   TranslationUnit *tu = b.top(form);
   if (!error.Message.empty())
     return nullptr;

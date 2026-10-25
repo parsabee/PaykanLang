@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "Lexer.h"
+#include "paykan/Frontend.h"
 
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <iterator>
 #include <string_view>
 #include <utility>
 
@@ -44,6 +46,10 @@ constexpr Keyword kKeywords[] = {
     {"let", Tok::KwLet},       {"weak", Tok::KwWeak},
     {"trait", Tok::KwTrait},   {"struct", Tok::KwStruct},
 };
+
+// The table spells the grammar's keywords, frontend::kKeywords, each once
+// (LexerTests checks that each of those lexes as a keyword).
+static_assert(std::size(kKeywords) == std::size(frontend::kKeywords));
 
 } // namespace
 

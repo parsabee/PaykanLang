@@ -556,7 +556,9 @@ TmplSection
 ```
 
 `Sema::encodeTemplates` writes it and `Sema::decodeTemplates` reads the
-unit back (`interchange::read`) into an `ASTContext` of its own, which the
+unit back (`interchange::read`, with `Origin::Templates`: the renamed
+`$<module>::name` strings of §4.8 are no names a frontend's AST may hold,
+docs/plugins/ast-format.md §3) into an `ASTContext` of its own, which the
 importer's `ModuleTemplates` keeps alive; an importer then registers and
 instantiates the templates exactly as a source import's. The interchange
 text is the release's (its version is the release's, like every format), so

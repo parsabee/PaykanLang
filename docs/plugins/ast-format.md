@@ -73,10 +73,24 @@ own (`0.2.0` for paykan 0.2.0). Nothing but whitespace and comments may follow.
 
 ## 2. Nodes
 
-In the tables, `LOC` is the optional location, `NAME` a non-empty string,
+In the tables, `LOC` is the optional location, `NAME` a name (below),
 `STR` any string, `INT` an integer, `TYPE`, `EXPR` and `STMT` one node of
 that class, `BLOCK` a `(block ...)`, `X?` means "X or `_`", and `X...` zero
 or more.
+
+A `NAME` is a string the grammar writes there ([`../grammar.md`](../grammar.md)
+section 1): an identifier, `[_a-zA-Z][_a-zA-Z0-9]*` and not a keyword or
+`_`.  Where the grammar writes a module path, a name may be qualified,
+identifiers joined by `::`: the callee of a `call` (`"io::println"`,
+`"Box::of"`), the enum of an `enum-value` (`"Color"`, `"io"` for the
+function value `io::println`), the name of a `named-type` or a
+`generic-type` (`"m::T"`), an `impl`'s `TYPE`, a class's `SUPER` and an
+`import`'s `BASE`.  An untyped parameter's type parameter, and its type, is
+`typeof(x)` ([`../language/03-functions.md`](../language/03-functions.md#untyped-parameters)),
+and the field a `member-assign` assigns may be a tuple index (`"0"`, for
+`t.0 = e`, which Sema rejects).  A string that may be `""` (an alias, a
+binding, a superclass, a destructuring target or a `for` loop's variable)
+is otherwise a name too.
 
 ### Declarations
 
@@ -85,7 +99,7 @@ or more.
 | `(unit LOC DECL...)` | the file. Each `DECL` is an `import`, `enum`, `struct`, `class`, `fn`, `trait` or `impl`, in any order |
 | `(import LOC SYSTEM BASE MODULE...)` | `import`. `SYSTEM` is `true` for `import ::name`, else `false`; `BASE` is the path before the last segment (`"a::b"` for `import a::b::m`, `""` for none); at least one `MODULE` |
 | `(module NAME ALIAS)` | one imported module; `ALIAS` is a string, `""` for none (`import m as x` has `(module "m" "x")`; `import a::{m, n}` has two) |
-| `(enum LOC NAME (type-params NAME...)? VARIANT...)` | `enum E { A, B }`: the name, then the variants. A generic enum's type parameters follow its name, at least one (`enum M<T>` is `(enum "M" (type-params "T") ...)`); an enum that is not generic has no `type-params`. A variant without fields is its `NAME`; one with fields is `(variant NAME VAR...)`, each field a `var` with a type and no initialiser (`B(x: int)` is `(variant "B" (var "x" (named-type "int") _))`) |
+| `(enum LOC NAME (type-params NAME...)? VARIANT...)` | `enum E { A, B }`: the name, then the variants, at least one. A generic enum's type parameters follow its name, at least one (`enum M<T>` is `(enum "M" (type-params "T") ...)`); an enum that is not generic has no `type-params`. A variant without fields is its `NAME`; one with fields is `(variant NAME VAR...)`, each field a `var` with a type and no initialiser (`B(x: int)` is `(variant "B" (var "x" (named-type "int") _))`) |
 | `(class LOC NAME SUPER (type-params NAME...) (fields VAR...) (methods FN...))` | a class. `SUPER` is the superclass's name or `""`; a generic class has type parameters. Each field is a `var` with a type and no initialiser. A method may have `_` in place of its body: a pure virtual method, `fn area() -> float;` ([`../language/05-classes.md`](../language/05-classes.md#pure-virtual-methods)) |
 | `(struct LOC NAME (type-params NAME...) (fields VAR...))` | a struct ([`../language/11-structs.md`](../language/11-structs.md)): the name, the type parameters of a generic one, and its fields (at least one), each a `var` with a type and no initialiser. A struct body has no methods: they are in its `impl` blocks |
 | `(bound NAME TYPE...)` | in `type-params`, in place of `NAME`: a type parameter with bounds, the traits as types (`T: Show + Into<int>` is `(bound "T" (named-type "Show") (generic-type "Into" ...))`) |
@@ -130,10 +144,10 @@ to resolve, which reports unknown names.
 | `(while LOC EXPR BLOCK)` | |
 | `(for LOC VAR EXPR EXPR EXPR BLOCK (inclusive)?)` | `for i in a..b step s { ... }`: the loop's variable as a `var` with no initialiser (`(var "i" TYPE _)`, `TYPE` its annotation or `_`; the name is `""` for `for _ in ...`), the range's start and end, the step or `_` (none written), the body, and a trailing `(inclusive)` for `..=` |
 | `(break LOC)`, `(continue LOC)` | |
-| `(match LOC EXPR ARM...)` | `match e { ... }` |
+| `(match LOC EXPR ARM...)` | `match e { ... }`, at least one `ARM` |
 | `(type-arm LOC STR TYPE QUAL? BLOCK)` | `b: T { ... }`; the binding `STR` is `""` for `T { ... }`. `QUAL` is a binding's mode, `(qual view)` for `b: view T { ... }` or `(qual inout)`, and needs a binding |
-| `(value-arm LOC STR EXPR BLOCK)` | `42 { ... }`, `"hi" { ... }`: the `EXPR` is a literal, an `int`, `float`, `bool`, `char`, `string` or `none` (a negative number one too: `-1 { ... }` has `(int -1)`); binding as above |
-| `(wildcard-arm LOC STR BLOCK)` | `_ { ... }` |
+| `(value-arm LOC STR EXPR BLOCK)` | `42 { ... }`, `"hi" { ... }`: the `EXPR` is a literal, an `int`, `float`, `bool`, `char`, `string` or `none` (a negative number one too: `-1 { ... }` has `(int -1)`); the binding `STR` is `""` |
+| `(wildcard-arm LOC STR BLOCK)` | `_ { ... }`; the binding `STR` is `""` |
 
 ### Expressions
 
@@ -190,9 +204,14 @@ makes while parsing (`void?`, nested optionals, `_` for the body of a
 function that is neither a class's method nor a trait's, `(native ...)` on
 a method, `(qual static)` outside an `impl` block, a `decl` without an
 initialiser that is not `weak`, a `value-arm` whose pattern is not a
-literal). Everything else (unknown
-names, types that don't match, ...) is Sema's job, with the same
-diagnostics as for any frontend.
+literal, an `enum` without a variant, a `match` without an arm, a binding on
+a `value-arm` or a `wildcard-arm`, and a `NAME` the grammar does not write
+where it stands: `"a b"`, a keyword, or a qualified `"io::x"` as a
+variable's name). A module's templates in a `.pkm` (its TMPL section,
+[`../design/pkm.md`](../design/pkm.md)) are read with the compiler's own
+canonical names (`$::io::_print`), which a frontend's AST cannot name.
+Everything else (unknown names, types that don't match, ...) is Sema's job,
+with the same diagnostics as for any frontend.
 
 When the reader rejects a frontend's output, compiling fails with
 

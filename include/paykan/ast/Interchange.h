@@ -66,10 +66,23 @@ struct ReadError {
   std::string str() const;
 };
 
+/// What wrote the text read() reads, which decides the names it takes.
+enum class Origin {
+  /// A frontend (a plugin's AST): every NAME is one the grammar writes where
+  /// it stands, an identifier, a qualified name, ...
+  /// (docs/plugins/ast-format.md section 3).
+  Frontend,
+  /// The compiler, the templates of a module (a `.pkm`'s TMPL section),
+  /// whose names are the canonical ones it gives what a module declares
+  /// (`$::io::_print`), which no program writes.
+  Templates,
+};
+
 /// Parse @p text into @p ctx and return its translation unit, or null with
 /// @p error set.  The text must be one `(paykan-ast <version> (unit ...))`
 /// form of a supported version, with nothing but whitespace and comments
-/// after it.
-TranslationUnit *read(std::string_view text, ASTContext &ctx, ReadError &error);
+/// after it, written as @p origin says.
+TranslationUnit *read(std::string_view text, ASTContext &ctx, ReadError &error,
+                      Origin origin = Origin::Frontend);
 
 } // namespace paykan::ast::interchange

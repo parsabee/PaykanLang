@@ -1081,6 +1081,154 @@ TEST(ASTInterchange, AValueArmsPatternIsALiteral) {
   }
 }
 
+// An enum has a variant and a match an arm, as the grammar's have: an enum
+// without one was read and checked, and a match without one ran.
+TEST(ASTInterchange, AnEnumHasAVariantAndAMatchAnArm) {
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_EQ(read("(paykan-ast 1 (unit (enum \"E\") (fn \"f\" (type-params) "
+                 "(params) _ (block))))",
+                 ctx, error),
+            nullptr);
+  EXPECT_EQ(error, "1:21: an enum needs at least one variant");
+  EXPECT_EQ(read("(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                 "(block (match (ident \"x\"))))))",
+                 ctx, error),
+            nullptr);
+  EXPECT_EQ(error, "1:61: a match needs at least one arm");
+}
+
+// Only a type arm binds the subject: the binding of a value or a wildcard
+// arm is "".  The one on a wildcard arm was dropped (`use of undeclared
+// variable 'w'` where it was used).
+TEST(ASTInterchange, OnlyATypeArmHasABinding) {
+  const std::string pre = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
+                          "(params) _ (block (match (ident \"x\") ";
+  struct Case {
+    const char *Arm;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(value-arm \"b\" (int 1) (block))",
+             "1:91: (value-arm ...) has no binding: its binding is \"\""},
+        Case{"(wildcard-arm \"w\" (block))",
+             "1:94: (wildcard-arm ...) has no binding: its binding is \"\""}}) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(pre + c.Arm + ")))))", ctx, error), nullptr) << c.Arm;
+    EXPECT_EQ(error, c.Error) << c.Arm;
+  }
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_NE(read(pre + "(type-arm \"b\" (named-type \"Str\") (block)) " +
+                     "(value-arm \"\" (int 1) (block)) " +
+                     "(wildcard-arm \"\" (block)))))))",
+                 ctx, error),
+            nullptr)
+      << error;
+}
+
+// A NAME is what the grammar writes where it stands (docs/grammar.md
+// sections 1 and 5): an identifier, not a keyword; a qualified name only
+// for a callee, a type, an enum, a superclass, an `impl`'s type and an
+// import's base; `typeof(x)` only as an untyped parameter's type; and a
+// tuple index only as an assigned field.  `a b`, `io::x` and `../..` were
+// read, and a plugin could name what no program can (`$::m::_f`).  The
+// compiler's own templates (a `.pkm`'s TMPL section) keep their canonical
+// names.
+TEST(ASTInterchange, NamesAreTheGrammars) {
+  const std::string fn = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
+                         "(params) _ (block ";
+  struct Case {
+    std::string Text;
+    const char *Error;
+  };
+  const Case cases[] = {
+      {fn + "(decl (var \"a b\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"a b\""},
+      {fn + "(decl (var \"match\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"match\""},
+      {fn + "(decl (var \"_\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"_\""},
+      {fn + "(decl (var \"1x\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"1x\""},
+      {fn + "(assign (ident \"io::x\") (int 3))))))",
+       "expected an identifier: the name, not \"io::x\""},
+      {fn + "(destructure (targets (target \"io::a\" _) (target \"b\" _)) "
+            "(ident \"t\"))))))",
+       "expected an identifier: the target's name (\"\" for _), not "
+       "\"io::a\""},
+      {fn + "(expr (call \"$rt.panic\" (type-args)))))))",
+       "expected an identifier or a qualified name (a::b): the callee's "
+       "name, not \"$rt.panic\""},
+      {fn + "(expr (call \"$::m::_f\" (type-args)))))))",
+       "expected an identifier or a qualified name (a::b): the callee's "
+       "name, not \"$::m::_f\""},
+      {fn + "(expr (call \"m::\" (type-args)))))))",
+       "expected an identifier or a qualified name (a::b): the callee's "
+       "name, not \"m::\""},
+      {fn + "(member-assign (ident \"t\") \"01\" (int 1))))))",
+       "expected an identifier or a tuple index: the field's name, not "
+       "\"01\""},
+      {fn + "(expr (member (ident \"t\") \"0\"))))))",
+       "expected an identifier: the field's name, not \"0\""},
+      {fn + "(decl (var \"x\" (named-type \"int[3]\") (int 1)))))))",
+       "expected an identifier, a qualified name (a::b) or an untyped "
+       "parameter's typeof(x): the type's name, not \"int[3]\""},
+      {"(paykan-ast 1 (unit (fn \"foo::bar\" (type-params) (params) _ "
+       "(block))))",
+       "expected an identifier: the function's name, not \"foo::bar\""},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params \"T U\") (params) _ "
+       "(block))))",
+       "expected an identifier or an untyped parameter's typeof(x): a type "
+       "parameter, not \"T U\""},
+      {"(paykan-ast 1 (unit (import true \"\" (module \"io\" \"a::b\"))))",
+       "expected an identifier: the alias, not \"a::b\""},
+      {"(paykan-ast 1 (unit (import false \"../..\" (module \"m\" \"\"))))",
+       "expected an identifier or a qualified name (a::b): the base path, "
+       "not \"../..\""},
+      {"(paykan-ast 1 (unit (import true \"\" (module \"../etc\" \"\"))))",
+       "expected an identifier: the module's name, not \"../etc\""},
+      {"(paykan-ast 1 (unit (class \"C\" \"a b\" (type-params) (fields) "
+       "(methods))))",
+       "expected an identifier or a qualified name (a::b): the superclass, "
+       "not \"a b\""},
+      {"(paykan-ast 1 (unit (enum \"E\" \"A\" \"B-C\")))",
+       "expected an identifier: a variant, not \"B-C\""},
+  };
+  for (const Case &c : cases) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(c.Text, ctx, error), nullptr) << c.Text;
+    EXPECT_NE(error.find(c.Error), std::string::npos)
+        << c.Text << ": " << error;
+  }
+  // What the grammar writes there reads.
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(
+      "(paykan-ast 1 (unit (import false \"a::b\" (module \"m\" \"x\")) "
+      "(class \"C\" \"m::Base\" (type-params) (fields) (methods)) "
+      "(impl \"geo::Point\" (methods)) "
+      "(fn \"g\" (type-params \"typeof(x)\") "
+      "(params (param \"x\" (named-type \"typeof(x)\"))) _ (block)) "
+      "(fn \"f\" (type-params) (params) _ (block "
+      "(decl (var \"_t\" (named-type \"m::T\") (call \"m::f\" (type-args)))) "
+      "(member-assign (ident \"t\") \"0\" (int 1)) "
+      "(member-assign (ident \"t\") \"x9\" (int 1)) "
+      "(expr (enum-value \"m::E\" \"A\"))))))",
+      ctx, error);
+  EXPECT_NE(tu, nullptr) << error;
+  // A template's canonical names are the compiler's own.
+  const std::string tmpl = "(paykan-ast " + kVersion +
+                           " (unit (fn \"f\" (type-params \"T\") (params) _ "
+                           "(block (expr (call \"$::m::_f\" (type-args)))))))";
+  ic::ReadError err;
+  EXPECT_NE(ic::read(tmpl, ctx, err, ic::Origin::Templates), nullptr)
+      << err.str();
+  EXPECT_EQ(ic::read(tmpl, ctx, err), nullptr);
+}
+
 // A `for` loop is its variable as a `var` with no initialiser, the range's
 // ends, the step or `_`, the body, and a trailing `(inclusive)` for `..=`.
 TEST(ASTInterchange, ForLoops) {

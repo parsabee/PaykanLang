@@ -916,6 +916,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `switch` case `case -9223372036854775808:`, which a C compiler rejects as a constant too
   large for any signed type (from an AST plugin's `(int -9223372036854775808)` pattern
   too); it is `case INT64_MIN:`.  `samples/codegen/69_negative_patterns.pkn` runs them.
+- The AST interchange reader took ASTs the grammar has no way to write, from a frontend
+  plugin or as the `ast-text` frontend's input: an enum without a variant and a `match`
+  without an arm (both checked and ran), a binding on a wildcard arm (dropped: `use of
+  undeclared variable 'w'` where it was used) or a value arm, and names that are not the
+  grammar's: a local `"a b"` ran, an assignment to `"io::x"`, a destructuring target
+  `"io::a"`, an import alias `"a::b"` or a module `"../../etc/passwd"` passed `--check-only`,
+  and a call of `"$::result::Result::Ok"` named what only the compiler's renamed templates
+  name.  It now rejects each, with its position (`an enum needs at least one variant`, `a
+  match needs at least one arm`, `(wildcard-arm ...) has no binding: its binding is ""`,
+  `expected an identifier: the variable's name, not "a b"`): a name is an identifier, not a
+  keyword or `_`, and a qualified one only where the grammar writes a module path (a
+  callee, an enum, a type, a superclass, an `impl`'s type, an import's base)
+  (docs/plugins/ast-format.md sections 2 and 3).  The grammar's keywords are
+  `frontend::kKeywords` (`include/paykan/Frontend.h`, with `frontend::isIdentifier`), which
+  the recursive-descent lexer's table matches.  A `.pkm`'s templates, whose renamed bodies
+  name `$::module::name`, are read with `interchange::Origin::Templates`
+  (`include/paykan/ast/Interchange.h`), which keeps those names.
 
 ## [0.2.0] - 2026-10-20
 
