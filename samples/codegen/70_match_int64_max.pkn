@@ -1,0 +1,135 @@
+// 70 — a value match with an arm of 9223372036854775807 (INT64_MAX), the
+// largest `int`
+// Exercises: the arm first, second, last and alone, with a default arm and
+//            without one, each arm returning, assigning a variable, or
+//            continuing and breaking a loop; an `unsigned` subject's arm of
+//            the same bits; each called with every arm's value, INT64_MIN
+//            (no arm's) and others.  A match on integer literals is an
+//            scf.index_switch, whose set of cases takes INT64_MAX (and
+//            INT64_MIN) for its empty (and tombstone) key: such an arm is an
+//            scf.if around the switch of the others
+//            (docs/design/mlir-backend.md, "The shared lowering").
+// expect-stdout: first 1 9 2 3 9 9
+// expect-stdout: second 2 9 1 3 9 9
+// expect-stdout: last 3 9 1 2 9 9
+// expect-stdout: alone 1 9 9 9 9 9
+// expect-stdout: noDefault 2 9 1 9 9 9
+// expect-stdout: assigns 2 9 9 1 9 9
+// expect-stdout: assignsNoDefault 2 5 3 1 5 5
+// expect-stdout: uns 2 9 1 9
+// expect-stdout: loop 2 4
+
+import ::io;
+
+// Each case returns: INT64_MAX first, second, last, alone, and with no
+// default arm.
+fn first(n: int) -> int {
+  match n {
+    9223372036854775807 { return 1; }
+    0 { return 2; }
+    7 { return 3; }
+    _ { return 9; }
+  }
+}
+
+fn second(n: int) -> int {
+  match n {
+    0 { return 1; }
+    9223372036854775807 { return 2; }
+    7 { return 3; }
+    _ { return 9; }
+  }
+}
+
+fn last(n: int) -> int {
+  match n {
+    0 { return 1; }
+    7 { return 2; }
+    9223372036854775807 { return 3; }
+    _ { return 9; }
+  }
+}
+
+fn alone(n: int) -> int {
+  match n {
+    9223372036854775807 { return 1; }
+    _ { return 9; }
+  }
+}
+
+fn noDefault(n: int) -> int {
+  match n {
+    0 { return 1; }
+    9223372036854775807 { return 2; }
+  }
+  return 9;
+}
+
+// Each case assigns, with a default arm and without one.
+fn assigns(n: int) -> int {
+  r = 5;
+  match n {
+    7 { r = 1; }
+    9223372036854775807 { r = 2; }
+    _ { r = 9; }
+  }
+  return r;
+}
+
+fn assignsNoDefault(n: int) -> int {
+  r = 5;
+  match n {
+    7 { r = 1; }
+    9223372036854775807 { r = 2; }
+    0 { r = 3; }
+  }
+  return r;
+}
+
+// An unsigned's case of the same bits.
+fn uns(n: unsigned) -> int {
+  match n {
+    1 { return 1; }
+    9223372036854775807 { return 2; }
+    _ { return 9; }
+  }
+}
+
+// Arms that continue and break a loop.
+fn loop(xs: int[6]) -> int {
+  seen = 0;
+  for i in 0..6 {
+    match xs[i] {
+      9223372036854775807 { continue; }
+      7 { break; }
+      _ { }
+    }
+    seen = seen + 1;
+  }
+  return seen;
+}
+
+fn row(name: Str, f: (int) -> int, xs: int[6]) {
+  out = name;
+  for i in 0..6 { out = out + " " + Str(f(xs[i])); }
+  io::println(out);
+}
+
+fn main() -> int {
+  max = 9223372036854775807;
+  min = -max - 1;
+  xs: int[6] = [max, min, 0, 7, 1, max - 1];
+  row("first", first, xs);
+  row("second", second, xs);
+  row("last", last, xs);
+  row("alone", alone, xs);
+  row("noDefault", noDefault, xs);
+  row("assigns", assigns, xs);
+  row("assignsNoDefault", assignsNoDefault, xs);
+  u: unsigned = 9223372036854775807;
+  io::println("uns " + Str(uns(u)) + " " + Str(uns(u + 1)) + " " + Str(uns(1))
+      + " " + Str(uns(u - 1)));
+  io::println("loop " + Str(loop(xs)) + " "
+      + Str(loop([1, max, 2, max, 3, 4])));
+  return 0;
+}

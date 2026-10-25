@@ -361,6 +361,77 @@ TEST(PIRMLIR, SwitchesAreIndexSwitches) {
   EXPECT_NE(c.find("switch ("), std::string::npos) << c;
 }
 
+// Cases of INT64_MAX and INT64_MIN, the empty and tombstone keys of the
+// DenseSet scf.index_switch keeps its cases in: one with another case and a
+// default in tail position, and one of only the two as a statement.
+const char *const kDenseSetKeySwitches = R"(module "main"
+fn @pick(%x.1: i64) -> i64 {
+  switch %x.1 {
+    case 9223372036854775807 {
+      ret 10
+    }
+    case 4 {
+      ret 20
+    }
+    case -9223372036854775808 {
+      ret 30
+    }
+    default {
+      ret 40
+    }
+  }
+}
+
+fn @keys(%x.1: i64) -> i64 {
+  local %r.0: i64
+  store %r.0, 0
+  switch %x.1 {
+    case -9223372036854775808 {
+      store %r.0, 1
+    }
+    case 9223372036854775807 {
+      store %r.0, 2
+    }
+  }
+  %v.2 = load %r.0
+  ret %v.2
+}
+
+fn @main() -> i64 {
+  %a.1 = call @pick(4)
+  %b.2 = call @keys(9223372036854775807)
+  %c.3 = add %a.1, %b.2
+  ret %c.3
+}
+)";
+
+// Such a case is an scf.if on the value's being it, around the dispatch among
+// the other cases: the scf.index_switch of @pick's case 4, and nothing but
+// @keys's default (none).  Both targets take it: the C spells INT64_MIN.
+TEST(PIRMLIR, DenseSetKeyCasesAreIfs) {
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  std::string scf = scfText(kDenseSetKeySwitches, *ctx, err);
+  ASSERT_FALSE(scf.empty()) << err;
+  expectRoundTrip(scf, *ctx);
+  for (const char *text : {"arith.constant 9223372036854775807 : i64",
+                           "arith.constant -9223372036854775808 : i64",
+                           "arith.cmpi eq", "scf.if", "case 4 {"})
+    EXPECT_NE(scf.find(text), std::string::npos) << text << "\n" << scf;
+  size_t sw = scf.find("scf.index_switch");
+  ASSERT_NE(sw, std::string::npos) << scf;
+  EXPECT_EQ(scf.find("scf.index_switch", sw + 1), std::string::npos) << scf;
+  EXPECT_EQ(scf.find("case 9223372036854775807"), std::string::npos) << scf;
+  EXPECT_EQ(scf.find("case -9223372036854775808"), std::string::npos) << scf;
+
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string c = emitCText(kDenseSetKeySwitches, ctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod);
+  for (const char *text : {"INT64_MIN", "9223372036854775807", "switch ("})
+    EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
+}
+
 TEST(PIRMLIR, LinkNamesAreCIdentifiers) {
   EXPECT_EQ(mlir_backend::linkName("main", "f"), "pk_main_Sf");
   EXPECT_EQ(mlir_backend::linkName("geometry::shapes", "Point.move"),

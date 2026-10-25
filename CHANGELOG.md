@@ -877,6 +877,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still orders them signed, and the lowering no longer gives it two to order).
   `samples/codegen/69_char_ordering.pkn` orders every pair of eleven codes on both sides of
   128 under each operator, bytes of a UTF-8 string and a sort.
+- A value `match` with an arm of `9223372036854775807`, the largest `int`, and any other arm
+  failed to compile on every path (`the MLIR pipeline failed: 'scf.index_switch' op has
+  duplicate case value: 9223372036854775807`) unless that arm came first: `match n { 0 {
+  ... } 9223372036854775807 { ... } _ { ... } }`.  The switch such a match lowers to keeps
+  its cases in a set that takes `INT64_MAX` (and `INT64_MIN`) for its empty (and deleted)
+  key.  A case of either value is now a test of its own, around the switch of the other
+  cases (docs/design/mlir-backend.md, "The shared lowering"); the PIR such a match lowers to
+  was already valid.  `samples/codegen/70_match_int64_max.pkn` puts the arm first, second,
+  last and alone, with a default arm and without one.
 
 ## [0.2.0] - 2026-10-20
 

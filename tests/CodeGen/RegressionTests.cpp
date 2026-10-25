@@ -685,6 +685,35 @@ TEST(Regression, MatchOnALiteralSubject) {
   g.expectNoLeaks("MatchOnALiteralSubject");
 }
 
+// A value match with an arm of 9223372036854775807 (INT64_MAX) and any other
+// arm failed the MLIR pipeline ("'scf.index_switch' op has duplicate case
+// value"): the DenseSet of the switch's cases takes INT64_MAX for its empty
+// key.  The arm second, with and without a default, each arm's value and
+// INT64_MIN, which is no arm's.
+TEST(Regression, MatchArmOfInt64Max) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    fn cls(n: int) -> int {
+      match n { 0 { return 1; } 9223372036854775807 { return 2; } _ { return 3; } }
+    }
+    fn set(n: int) -> int {
+      r = 5;
+      match n { 0 { r = 1; } 9223372036854775807 { r = 2; } }
+      return r;
+    }
+    fn main() -> int {
+      max = 9223372036854775807;
+      min = -max - 1;
+      io::println(Str(cls(max)) + Str(cls(0)) + Str(cls(min)) + Str(cls(7)));
+      io::println(Str(set(max)) + Str(set(0)) + Str(set(min)) + Str(set(7)));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "2133\n2155\n");
+  g.expectNoLeaks("MatchArmOfInt64Max");
+}
+
 // #86: methods were lowered to `<Class>_<method>`, so a user function spelled
 // that way (`K_w`, `K_destroy`) collided with the method or the generated
 // destructor.  They are now `<Class>.<method>`, which no identifier can spell.

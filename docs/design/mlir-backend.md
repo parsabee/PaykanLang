@@ -124,7 +124,12 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
   conversions make it a C `switch` (`emitc.switch`); the LLVM path makes it
   an LLVM `switch` on the whole 64-bit value itself, as upstream's switches
   on an `i32`.  A case that returns, breaks or continues is lowered as an
-  `if`'s branch would be.
+  `if`'s branch would be.  `scf.index_switch` keeps its cases in a
+  `DenseSet<int64_t>`, whose empty and tombstone keys are `INT64_MAX` and
+  `INT64_MIN`, so a case of either of those (an `i64`'s: a `char`'s or a
+  `bool`'s is at most 255) is an `scf.if` on the value's being it instead,
+  with the `scf.index_switch` of the other cases (if any are left) in its
+  `else`.
 * **ARC, allocation, weak references** become calls to the runtime
   (`func.call`), as both of the replaced translations did.  Each target
   then has the fast path of a `retain` and a `release` inline (docs/pir.md
