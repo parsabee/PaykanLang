@@ -200,11 +200,15 @@ ModuleCode splitModuleCode(pir::Module module) {
 
   // CODE keeps its copies, and the compiled declarations an importer may
   // name (synthesized ones only while a copy or a declaration uses them);
-  // each part, the declarations and constants its code uses.
+  // each part, the declarations and constants its code uses.  CODE also
+  // keeps the module's native C functions, which its compiled code calls:
+  // a program checks that its modules bind each C symbol with one
+  // signature (lowering::checkNativeSymbols).
   pir::Roots codeRoots;
   codeRoots.Functions = [](const pir::Module &m, const pir::Function &f) {
     return (!f.IsExtern && f.Shared) ||
-           (m.isCompiled(f) && !f.Shared && !synthesized(f.Name));
+           (m.isCompiled(f) && !f.Shared && !synthesized(f.Name)) ||
+           (f.IsExtern && f.Module.empty() && pir::isNativeName(f.Name));
   };
   codeRoots.Classes = [](const pir::Module &m, const pir::Class &c) {
     return (!c.IsExtern && c.Shared) ||

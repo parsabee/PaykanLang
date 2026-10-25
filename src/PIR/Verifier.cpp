@@ -218,6 +218,20 @@ private:
           programName(f.Symbol, "extern function symbol");
       }
     }
+    // A native extern and the runtime's of one C symbol name one C
+    // function, which has one signature (as two modules' must,
+    // cSymbolClashes).
+    for (const Function &f : m.Functions) {
+      if (!f.IsExtern || !f.Module.empty() || !isNativeName(f.Name))
+        continue;
+      auto rt = Index.Functions.find(runtimeName(externCSymbol(f.Name)));
+      if (rt != Index.Functions.end() && rt->second->IsExtern &&
+          rt->second->Module.empty() && !(rt->second->Sig == f.Sig))
+        error(where, "native extern '@" + f.Name + "' is declared " +
+                         sigStr(f.Sig) + " but runtime extern '@" +
+                         rt->second->Name + "' of the same C symbol " +
+                         sigStr(rt->second->Sig));
+    }
     for (const CStrGlobal &g : m.CStrs)
       programName(g.Name, "cstr global");
     for (const DataGlobal &g : m.Datas)
@@ -1182,9 +1196,35 @@ void verifyProgramLinks(const Program &p, std::vector<VerifyError> &errors) {
   if (!p.Modules.empty() && !p.Modules.front().findFunction("main"))
     errors.push_back(
         {p.Modules.front().Name, "main module defines no '@main'"});
+  // One module's native and runtime externs are its own to check.
+  for (const CSymbolClash &c : cSymbolClashes(p))
+    if (c.FirstModule != c.OtherModule)
+      errors.push_back({c.OtherModule->Name,
+                        "extern fn '@" + c.Other->Name + "' is declared " +
+                            sigStr(c.Other->Sig) + " but module '" +
+                            c.FirstModule->Name + "' declares '@" +
+                            c.First->Name + "' of the same C symbol " +
+                            sigStr(c.First->Sig)});
 }
 
 } // namespace
+
+std::vector<CSymbolClash> cSymbolClashes(const Program &p) {
+  std::vector<CSymbolClash> clashes;
+  std::unordered_map<std::string, std::pair<const Module *, const Function *>>
+      first;
+  for (const Module &m : p.Modules)
+    for (const Function &f : m.Functions) {
+      if (!f.IsExtern || !f.Module.empty())
+        continue;
+      std::string symbol = externCSymbol(f.Name);
+      auto [it, fresh] = first.try_emplace(symbol, &m, &f);
+      if (!fresh && !(it->second.second->Sig == f.Sig))
+        clashes.push_back(
+            {std::move(symbol), it->second.first, it->second.second, &m, &f});
+    }
+  return clashes;
+}
 
 std::vector<VerifyError> verify(const Module &m) {
   std::vector<VerifyError> errors;

@@ -193,7 +193,16 @@ not the runtime's, so backends declare it from the PIR signature (C:
 parameters, releases them and returns the result; a reference result is the
 C function's owned box.  The objects that define the
 `$c.` symbols are not part of PIR: the driver hands them to the backends
-(`backend::Input::Objects`, `--object`).
+(`backend::Input::Objects`, `--object`).  A C symbol names one C function,
+so every module-less extern of it in a program, a native one or the
+runtime's (`@$c.X` and `@$rt.X` name the C function `X`), has one
+signature (§9): Sema checks a module's native functions against one another
+and against the runtime's signatures (§8), computing a native function's
+from its Paykan signature as the lowering does (`sema::nativeSignature`,
+`include/NativeABI.h`), and the driver checks the modules of a program
+against one another once they are lowered (`lowering::checkNativeSymbols`).
+A module's CODE (docs/design/pkm.md) keeps the `$c.` externs its compiled
+code calls for that check.
 
 **Box parameters and the ownership mask.**  A function *lends* when it has
 a `box` parameter and is not a module-less extern: a definition, another
@@ -1099,7 +1108,10 @@ Paykan_args_free(PaykanShared **args, int64_t count) -> void
 
 `names::kCodeGenRequiredSymbols` in `include/Names.h` is the authoritative
 list; the mlir backend's JIT symbol table must cover it, and an executable links
-`libpaykan_runtime.a`.
+`libpaykan_runtime.a`.  `pir::runtimeSignature` (`include/paykan/pir/PIR.h`)
+holds the signatures above, and C's `fmod(f64, f64) -> f64`, which a backend
+calls for an `f64` `rem`: a native function bound to one of these symbols
+must have its signature (§4).
 
 Vtable slot layouts of runtime classes (slot index = position):
 
@@ -1152,7 +1164,9 @@ The verifier rejects a program when:
   is read or written with `load`/`store`/`field.load`/`field.store`; a `mem`
   slot's size is not a positive multiple of its alignment, or its alignment
   is not 1, 2, 4 or 8;
-* a runtime or native extern takes or returns an optional;
+* a runtime or native extern takes or returns an optional; a native extern
+  `$c.X` and the runtime extern `$rt.X` of the same C symbol have different
+  signatures;
 * `break`/`continue` appear outside a `while` or in its condition region,
   or a condition region ends the function; a statement follows a
   terminator in the same block (a terminator is `break`, `continue`, `ret`,
@@ -1187,7 +1201,9 @@ module`, `extern class`) names a module that is not in the program, or a
 function or class that module does not define (in its PIR, or as a
 compiled declaration), or one whose signature or field layout differs from
 the definition, or is shared when the definition is not (or the other way
-round); the main module defines no `@main`.  A compiled declaration is the
+round); the main module defines no `@main`; two modules' module-less
+externs of one C symbol (`$c.X` or `$rt.X`, `pir::cSymbolClashes`) have
+different signatures.  A compiled declaration is the
 definition of its module's compiled code, which PIR does not hold, so it is
 not checked against one.
 

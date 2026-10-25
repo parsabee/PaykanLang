@@ -186,6 +186,14 @@ inline std::string externCSymbol(std::string_view name) {
   return runtimeSymbol(name);
 }
 
+/// The signature of the runtime C function @p symbol: what a `$rt.` extern
+/// of it declares, or for one a backend calls itself (for `new`, `free`,
+/// the weak references and a float's `rem`), what the backend calls it
+/// with.  Null for any other symbol.  A C symbol has one signature in a
+/// program, so a native function bound to one of these must have it too
+/// (docs/language/03-functions.md, "Native Functions").
+const Signature *runtimeSignature(std::string_view symbol);
+
 // -- Values and operands
 
 /// An SSA value defined by a parameter or an instruction.  Ids are unique per

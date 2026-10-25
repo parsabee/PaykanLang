@@ -967,6 +967,21 @@ native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
 The string is the C symbol.  The rest of the program calls the function like
 any other.
 
+A C symbol names one C function, with one C signature: the C types the
+table below gives the native function's parameters and result.  Native
+functions may bind a symbol again only with that signature (`int` and `u32`
+both cross as an `int64_t`, so they give the same one).  Two in one module
+that do not agree are an error (`native function 'g' binds C symbol 'llabs',
+which 'f' already binds with a different signature`), and so are two in
+different modules of a program, once it is put together, whether the other
+module is built from source or loaded from its `.pkm` (`native functions of
+modules 'main' and 'na' bind C symbol 'llabs' with different signatures`).
+A native function bound to a function of the runtime that compiled code
+calls itself (`PaykanString_concat`, `Paykan_malloc`, ...) must have that
+function's signature (`native function 'cat' binds C symbol
+'PaykanString_concat', a function of the runtime, with a different
+signature`).
+
 Only `int`, `float`, `bool`, `char`, a sized numeric type and an enum
 without fields cross into C by value.  Any other parameter is a `view`,
 which C borrows for the call, or an `inout`, which C changes in place: a

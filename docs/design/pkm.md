@@ -998,7 +998,10 @@ splits it
   compiled declaration (an extern naming its own module, docs/pir.md §3)
   listing the module's names its compiled body uses, which a program's
   dead-code pass keeps while it keeps the function. Compiled classes keep
-  their layout and vtable description in `CODE`. Synthesized items
+  their layout and vtable description in `CODE`, and so do the module's
+  native C functions (`extern fn @$c.<symbol>`), which its compiled code
+  calls: a program checks that its modules bind each C symbol with one
+  signature (docs/pir.md §4). Synthesized items
   (closures, local instantiations) are declared only while a copy or a
   declaration uses them. With a backend that compiles nothing, `CODE` is
   the trimmed module, whole (the portable form).

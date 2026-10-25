@@ -13,11 +13,13 @@ add_library(paykan_sema STATIC
     SemaStruct.cpp
     SemaLambda.cpp
     SemaVisibility.cpp
+    NativeABI.cpp
 )
 target_link_libraries(paykan_sema
     PUBLIC  paykan_diag
             paykan_frontend
             paykan_modules
+            paykan_pir
     PRIVATE paykan_ast_interchange
             paykan_compile_options
 )

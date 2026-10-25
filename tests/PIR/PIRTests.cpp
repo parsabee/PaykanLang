@@ -1237,6 +1237,80 @@ fn @main() -> i64 {
   EXPECT_EQ(runtimeName("Paykan_println"), "$rt.Paykan_println");
 }
 
+// A C symbol names one C function, with one signature: a native extern
+// (`$c.X`) and the runtime's (`$rt.X`) of one module must agree, and so must
+// any two of a program's modules (findings 39, new-F3-1).  Before, the
+// verifier let the pair through and the MLIR pipeline failed on the call.
+TEST(PIRVerifier, OneCSymbolHasOneSignature) {
+  const char *clash = R"(module "main"
+extern fn @$rt.PaykanString_concat(obj, obj) -> obj
+extern fn @$c.PaykanString_concat(i64) -> i64
+fn @main() -> i64 {
+  %r = call @$c.PaykanString_concat(1)
+  ret %r
+}
+)";
+  EXPECT_EQ(verifyText(clash),
+            "main: native extern '@$c.PaykanString_concat' is declared (i64) "
+            "-> i64 but runtime extern '@$rt.PaykanString_concat' of the "
+            "same C symbol (obj, obj) -> obj\n");
+  // The runtime's own signature is fine.
+  EXPECT_EQ(verifyText(R"(module "main"
+extern fn @$rt.PaykanString_length(obj) -> i64
+extern fn @$c.PaykanString_length(obj) -> i64
+fn @main() -> i64 {
+  ret 0
+}
+)"),
+            "");
+
+  // Across modules: each module's extern is valid on its own.
+  const char *twoModules = R"(module "main"
+extern fn @$c.llabs(f64) -> f64
+fn @main() -> i64 {
+  %r = call @$c.llabs(-2.5)
+  ret 0
+}
+module "na"
+extern fn @$c.llabs(i64) -> i64
+extern fn @$rt.fmod(f64, f64) -> f64
+fn @ca(%x: i64) -> i64 {
+  %r = call @$c.llabs(%x)
+  ret %r
+}
+module "nb"
+extern fn @$c.fmod(i64, i64) -> i64
+extern fn @$c.llabs(i64) -> i64
+fn @cb(%x: i64) -> i64 {
+  %r = call @$c.fmod(%x, %x)
+  ret %r
+}
+)";
+  EXPECT_EQ(verifyText(twoModules),
+            "na: extern fn '@$c.llabs' is declared (i64) -> i64 but module "
+            "'main' declares '@$c.llabs' of the same C symbol (f64) -> f64\n"
+            "nb: extern fn '@$c.fmod' is declared (i64, i64) -> i64 but "
+            "module 'na' declares '@$rt.fmod' of the same C symbol (f64, "
+            "f64) -> f64\n"
+            "nb: extern fn '@$c.llabs' is declared (i64) -> i64 but module "
+            "'main' declares '@$c.llabs' of the same C symbol (f64) -> "
+            "f64\n");
+  ParseError err;
+  auto p = parseProgram(twoModules, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  std::vector<CSymbolClash> clashes = cSymbolClashes(*p);
+  ASSERT_EQ(clashes.size(), 3u);
+  EXPECT_EQ(clashes[0].Symbol, "llabs");
+  EXPECT_EQ(clashes[0].FirstModule->Name, "main");
+  EXPECT_EQ(clashes[0].OtherModule->Name, "na");
+  EXPECT_EQ(clashes[1].Symbol, "fmod");
+  EXPECT_EQ(clashes[1].First->Name, "$rt.fmod");
+  EXPECT_EQ(clashes[1].Other->Name, "$c.fmod");
+  EXPECT_EQ(clashes[2].OtherModule->Name, "nb");
+}
+
 // -- Sized numeric types (docs/design/sized-types.md)
 
 // `wrap`, `mask`, `udiv`, `urem`, `ucmp`, `utof`, `ftou` and `fround32`

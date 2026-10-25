@@ -4,6 +4,7 @@
 #include "Sema.h"
 #include "ASTClone.h"
 #include "Names.h"
+#include "NativeABI.h"
 #include "SemaInternal.h"
 #include "paykan/modules/ModuleResolver.h"
 
@@ -4029,7 +4030,36 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     error(node->getLocation(), "'main' cannot be a native function");
     ok = false;
   }
-  return ok;
+  return ok && checkNativeSymbol(node);
+}
+
+// A C symbol names one C function, whose signature its every declaration in
+// the program must give (or a backend would declare it twice): a native
+// function binding a symbol another one of the module binds, or one the
+// runtime defines, must bind it with the same C signature.  The same one
+// twice is fine.
+bool Sema::checkNativeSymbol(const ast::FuncDecl *node) {
+  const std::string &symbol = node->getNativeSymbol();
+  const pir::Signature sig = nativeSignature(Ctx, *node);
+  if (const pir::Signature *rt = pir::runtimeSignature(symbol)) {
+    if (*rt == sig)
+      return true;
+    error(node->getLocation(),
+          "native function '" + displayName(node->getName()) +
+              "' binds C symbol '" + symbol +
+              "', a function of the runtime, with a different signature");
+    return false;
+  }
+  auto [it, fresh] =
+      NativeSymbols.try_emplace(symbol, NativeBinding{node, sig});
+  if (fresh || it->second.Sig == sig)
+    return true;
+  error(node->getLocation(), "native function '" +
+                                 displayName(node->getName()) +
+                                 "' binds C symbol '" + symbol + "', which '" +
+                                 displayName(it->second.Decl->getName()) +
+                                 "' already binds with a different signature");
+  return false;
 }
 
 // Only a scalar crosses into C by value.  C borrows anything else, as a

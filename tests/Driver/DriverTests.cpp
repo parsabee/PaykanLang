@@ -1368,6 +1368,52 @@ TEST(Driver, ObjectListLinksEveryNativeObject) {
   std::filesystem::remove_all(dir);
 }
 
+// Two modules that bind one C symbol with different C signatures (finding
+// 39) each check on their own: the program is rejected once it is lowered,
+// naming both modules, whether the import is built from source or loaded
+// from the module cache, whose CODE keeps the C functions its compiled code
+// calls.  It used to run, calling llabs with a double (`-2.5`).
+TEST(Driver, ModulesBindACSymbolWithOneSignature) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_native_clash_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "na.pkn") << "native fn fa(x: int) -> int = \"llabs\";\n"
+                                   "fn ca(x: int) -> int { return fa(x); }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io;\nimport na;\n"
+         "native fn fb(x: float) -> float = \"llabs\";\n"
+         "fn main() -> int { io::println(na::ca(-3)); io::println(fb(-2.5)); "
+         "return 0; }\n";
+  std::ofstream(dir / "ok.pkn")
+      << "import ::io;\nimport na;\n"
+         "native fn fc(x: int) -> int = \"llabs\";\n"
+         "fn main() -> int { io::println(na::ca(-3) + fc(-4)); return 0; }\n";
+  const std::string main = (dir / "main.pkn").string();
+  const std::string clash =
+      "error: native functions of modules 'main' and 'na' bind C symbol "
+      "'llabs' with different signatures\n";
+  auto fresh = run(paykanRun() + " --no-module-cache " + main + " 2>&1");
+  EXPECT_EQ(fresh.exitCode, 1) << fresh.out;
+  EXPECT_EQ(fresh.out, clash);
+  // ok.pkn binds llabs as na does: it runs, and na gets its cache entry.
+  auto ok = run(paykanRun() + " " + (dir / "ok.pkn").string() + " 2>&1");
+  EXPECT_EQ(ok.exitCode, 0) << ok.out;
+  EXPECT_EQ(ok.out, "7\n");
+  EXPECT_TRUE(std::filesystem::exists(dir / ".paykan_cache" / "na.pkm"));
+  for (const std::string &how :
+       {std::string(" "), std::string(" --emit-c "),
+        " build -o " + (dir / "main.out").string() + " "}) {
+    std::string cmd = paykanRun();
+    cmd.append(how).append(main).append(" 2>&1");
+    auto cached = run(cmd);
+    EXPECT_EQ(cached.exitCode, 1) << how << "\n" << cached.out;
+    EXPECT_EQ(cached.out, clash) << how;
+  }
+  std::filesystem::remove_all(dir);
+}
+
 TEST(Driver, EmitCRejectsAnotherBackend) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { return 0; }");

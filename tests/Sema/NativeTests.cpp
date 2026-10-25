@@ -189,3 +189,118 @@ TEST(Native, MainCannotBeNative) {
             std::string::npos)
       << r.Diagnostics;
 }
+
+// A C symbol names one C function: native functions may bind it again only
+// with the C signature it has (finding 39).  Paykan types that cross as
+// the same C type give the same signature.
+TEST(Native, OneCSymbolHasOneSignature) {
+  auto r = semaCheck(R"(
+    enum Dir { Up, Down }
+    native fn f(x: int) -> int = "llabs";
+    native fn g(y: int) -> int = "llabs";
+    native fn h(x: u32) -> i16 = "llabs";
+    native fn d(x: Dir) -> int = "llabs";
+    native fn len(s: view Str) -> int = "pk_len";
+    native fn size(o: view Obj) -> int = "pk_len";
+    native fn pick<T>(a: view T) -> T = "pk_pick";
+    fn main() -> int {
+      x = pick<int>(1);
+      s = pick<Str>("s");
+      return f(-3) + g(-4) + int(h(5)) + d(Dir::Up) + len(s) + size("b") + x;
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  for (const char *decls : {
+           // a reference against a scalar
+           "native fn f(s: view Str) -> int = \"pk_s\";\n"
+           "native fn g(s: int) -> int = \"pk_s\";",
+           // a float against an int, in a parameter and the result
+           "native fn f(x: int) -> int = \"llabs\";\n"
+           "native fn g(x: float) -> float = \"llabs\";",
+           // a result against none
+           "native fn f(x: int) = \"pk_s\";\n"
+           "native fn g(x: int) -> int = \"pk_s\";",
+           // a value against its address
+           "native fn f(x: int) -> int = \"pk_s\";\n"
+           "native fn g(x: inout int) -> int = \"pk_s\";",
+           // another parameter
+           "native fn f(x: int) -> int = \"pk_s\";\n"
+           "native fn g(x: int, y: int) -> int = \"pk_s\";",
+       }) {
+    r = semaCheck(std::string(decls) + "\nfn main() -> int { return 0; }");
+    EXPECT_EQ(r.ErrorCount, 1u) << decls << "\n" << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find("native function 'g' binds C symbol '"),
+              std::string::npos)
+        << decls << "\n"
+        << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find(
+                  "', which 'f' already binds with a different signature"),
+              std::string::npos)
+        << decls << "\n"
+        << r.Diagnostics;
+  }
+
+  // A generic native function's instances pass a PaykanType and the
+  // result's storage first: not what a plain one with its types takes.
+  r = semaCheck(R"(
+    native fn plain(a: int) -> int = "pk_p";
+    native fn pick<T>(a: view T) -> T = "pk_p";
+    fn main() -> int { return plain(1) + pick<int>(2); }
+  )");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("native function 'pick<int>' binds C symbol "
+                               "'pk_p', which 'plain' already binds with a "
+                               "different signature"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+// A native function may bind a C function of the runtime, which compiled
+// code calls with its own signature, only with that signature (finding
+// new-F3-1): `PaykanString_concat` is what `+` on strings calls, and
+// `Paykan_malloc` what a backend allocates an object with.
+TEST(Native, RuntimeSymbolsKeepTheirSignature) {
+  for (const char *decl : {
+           "native fn cat(a: int) -> int = \"PaykanString_concat\";",
+           "native fn cat(a: view Str, b: view Str) -> int = "
+           "\"PaykanString_concat\";",
+           "native fn grab(n: int) -> int = \"Paykan_malloc\";",
+           "native fn rem(x: int, y: int) -> int = \"fmod\";",
+       }) {
+    auto r = semaCheck(std::string(decl) +
+                       "\nfn main() -> int { s = \"a\" + \"b\"; return 0; }");
+    EXPECT_EQ(r.ErrorCount, 1u) << decl << "\n" << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find("', a function of the runtime, with a "
+                                 "different signature"),
+              std::string::npos)
+        << decl << "\n"
+        << r.Diagnostics;
+  }
+  auto r = semaCheck("native fn cat(a: int) -> int = \"PaykanString_concat\";"
+                     "\nfn main() -> int { return 0; }");
+  EXPECT_NE(r.Diagnostics.find("native function 'cat' binds C symbol "
+                               "'PaykanString_concat', a function of the "
+                               "runtime, with a different signature"),
+            std::string::npos)
+      << r.Diagnostics;
+
+  // Its own signature is fine, and so are the standard library's bindings
+  // (`Paykan_io_write`, `fmod`, the Buffer functions, ...), the same one
+  // twice in a program included.
+  r = semaCheck(R"(
+    import ::io;
+    import ::math;
+    import ::collections;
+    native fn len(s: view Str) -> int = "PaykanString_length";
+    native fn rem(x: float, y: float) -> float = "fmod";
+    native fn write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
+    fn main() -> int {
+      xs = collections::List<int>();
+      xs.push(1);
+      io::println(math::sqrt(rem(9.0, 7.0)));
+      return len("ab") + int(xs.len());
+    }
+  )");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+}
