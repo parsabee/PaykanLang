@@ -887,8 +887,9 @@ area 12, float 3.75
   (`x: view T`, with `T` a written type parameter).
 - Only a free function's parameters may leave out their types. A lambda's, a method's, a
   `static fn`'s and a trait method's need theirs (`parameter 'x' needs a type ('x: int'):
-  only a free function's parameters can leave it out`), as do a native function's and
-  `main`'s.
+  only a free function's parameters can leave it out`), as do a native function's
+  (`parameter 'x' needs a type ('x: int'): a native function's parameters have types`)
+  and `main`'s.
 
 ---
 

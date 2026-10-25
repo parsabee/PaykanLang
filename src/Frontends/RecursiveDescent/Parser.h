@@ -203,7 +203,12 @@ private:
   // -- Types
   ast::Type *parseTypeAnnotation();
   ast::Type *parsePrimaryType();
-  bool parseTypeArgList(std::vector<ast::Type *> &out);
+  bool parseTypeArgList(std::vector<ast::Type *> &out,
+                        std::vector<ast::SourceLocation> *starts = nullptr);
+  /// The first token of each type argument of the generic type parsed last
+  /// (the outermost, which is finished last): where parseImplDecl reports a
+  /// builtin one, whose type node is shared and has no location.
+  std::vector<ast::SourceLocation> LastTypeArgStarts;
 
   // -- Expressions
   ast::Expr *parseExpression();

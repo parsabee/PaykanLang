@@ -986,13 +986,18 @@ ImplDecl *Parser::parseImplDecl() {
     typeName = ast::typeName(target);
   } else if (auto *generic = dyn_cast<GenericType>(target)) {
     typeName = generic->getName();
-    for (Type *arg : generic->getArgs()) {
+    const std::vector<Type *> &args = generic->getArgs();
+    for (size_t i = 0; i < args.size(); ++i) {
+      Type *arg = args[i];
       auto *param = dyn_cast<ClassType>(arg);
       if (!param || Ctx.lookupType(param->getName()) ||
           param->getName().find("::") != std::string::npos) {
-        error(arg->getLocation(), "expected a type parameter name in 'impl " +
-                                      typeName + "<...>', not the type '" +
-                                      ast::typeName(arg) + "'");
+        // A builtin type (`impl Box<int>`) is shared and has no location:
+        // the argument's first token is where it is written.
+        SourceLocation at = arg->getLocation().isValid() ? arg->getLocation()
+                                                         : LastTypeArgStarts[i];
+        error(at, "expected a type parameter name in 'impl " + typeName +
+                      "<...>', not the type '" + ast::typeName(arg) + "'");
         return nullptr;
       }
       typeParams.push_back(&intern(param->getName()));
@@ -2086,8 +2091,11 @@ MatchArm *Parser::parseMatchArm() {
 //               typeArgList ">" | "(" typeAnnotation ( "," typeAnnotation )+
 //               ")"
 
-bool Parser::parseTypeArgList(std::vector<Type *> &out) {
+bool Parser::parseTypeArgList(std::vector<Type *> &out,
+                              std::vector<SourceLocation> *starts) {
   do {
+    if (starts)
+      starts->push_back(cur().Loc);
     Type *t = parseTypeAnnotation();
     if (!t)
       return false;
@@ -2190,10 +2198,12 @@ Type *Parser::parsePrimaryType() {
     if (!enterNesting())
       return nullptr;
     std::vector<Type *> args;
-    bool ok = parseTypeArgList(args);
+    std::vector<SourceLocation> starts;
+    bool ok = parseTypeArgList(args, &starts);
     leaveNesting();
     if (!ok || !expect(Tok::Greater, "to close the type argument list"))
       return nullptr;
+    LastTypeArgStarts = std::move(starts);
     return Ctx.make<GenericType>(span(start), intern(name), std::move(args));
   }
 

@@ -47,6 +47,40 @@ TEST(Impl, MalformedBlocksAreRejected) {
   }
 }
 
+// A type where a type parameter's name goes is reported at the argument,
+// a builtin type too, whose type node is shared and has no location of its
+// own (the error had no position, so no file, line or caret).
+TEST(Impl, TypeInPlaceOfAParameterIsLocated) {
+  struct Case {
+    const char *Src;
+    unsigned Column, EndColumn;
+    const char *Type;
+  };
+  for (const Case &c :
+       {Case{"impl Box<int> { }", 10, 13, "int"},
+        Case{"impl Box<Str> { }", 10, 13, "Str"},
+        Case{"impl Box<T[2]> { }", 10, 14, "T[2]"},
+        Case{"impl Show for Box<T, float> { }", 22, 27, "float"},
+        Case{"impl Box<List<int>> { }", 10, 19, "List<int>"}}) {
+    auto r = parseWithDiags(std::string("class Box<T> { v: T; }\n") + c.Src +
+                            "\nfn main() -> int => 0;\n");
+    EXPECT_FALSE(r.Ok) << c.Src;
+    ASSERT_EQ(r.Diags.size(), 1u) << c.Src << r.Text;
+    EXPECT_EQ(r.Diags[0].Message,
+              std::string("expected a type parameter name in 'impl Box<...>', "
+                          "not the type '") +
+                  c.Type + "'")
+        << c.Src;
+    const paykan::ast::SourceLocation &loc = r.Diags[0].Loc;
+    EXPECT_EQ(loc.getLineStart(), 2u) << c.Src;
+    EXPECT_EQ(loc.getColumnStart(), c.Column) << c.Src;
+    EXPECT_EQ(loc.getColumnEnd(), c.EndColumn) << c.Src;
+    EXPECT_NE(r.Text.find(":2:" + std::to_string(c.Column) + ": error: "),
+              std::string::npos)
+        << r.Text;
+  }
+}
+
 // A generic type's `impl` block names its type parameters, in either form.
 TEST(Impl, GenericBlockNamesItsTypeParameters) {
   auto [ok, driver] = parse(R"(

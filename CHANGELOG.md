@@ -968,6 +968,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (docs/grammar.md section 9), and `mov` before an operand that does not parse (`b = mov
   ;`) was not reported at all.  The removal is now reported at the `mov`, before its
   operand is parsed.
+- `impl Box<int> { }` was `error: expected a type parameter name in 'impl Box<...>', not
+  the type 'int'` with no position, so no file, line or caret: a builtin type (`int`,
+  `Str`, ...) in a type parameter's place has no location of its own.  It is now reported
+  at the argument (`impl.pkn:2:10: error: ...`).  docs/grammar.md and
+  docs/language/03-functions.md gave a native function's parameter without a type the
+  message of a lambda's or a method's; they now give the one the frontends report,
+  `parameter 'x' needs a type ('x: int'): a native function's parameters have types`.
 
 ## [0.2.0] - 2026-10-20
 
