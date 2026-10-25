@@ -157,8 +157,12 @@ static void render_scalar(StrBuf *sb, int64_t kind, const char *at) {
       sb_append(sb, "None", 4);
       break;
     }
-    // The element's own toString (a +1 Str box, consumed here).
+    // The element's own toString (a +1 Str box, consumed here).  The value
+    // is the caller's storage, which the toString may write: the element is
+    // held while it runs, as a call's receiver is.
+    Paykan_retain_inline(box);
     PaykanShared *s = Paykan_vcall_toString(PaykanShared_get_inline(box));
+    Paykan_release_inline(box);
     PaykanString *str = (PaykanString *)PaykanShared_get_inline(s);
     sb_append(sb, str->data, (size_t)str->len);
     Paykan_release_inline(s);
@@ -266,9 +270,14 @@ static int scalar_equals(int64_t kind, const char *a, const char *b) {
     PaykanShared *sb = load_box(b);
     if (!sa || !sb)
       return sa == sb; // two None are equal; None and an object are not
-    // The virtual `equals` consumes its argument box: hand it a +1.
+    // The virtual `equals` consumes its argument box: hand it a +1.  The
+    // values are the caller's storage, which the equals may write: the
+    // receiver is held while it runs, as a call's receiver is.
     Paykan_retain_inline(sb);
-    return Paykan_vcall_equals(PaykanShared_get_inline(sa), sb) != 0;
+    Paykan_retain_inline(sa);
+    int64_t equal = Paykan_vcall_equals(PaykanShared_get_inline(sa), sb);
+    Paykan_release_inline(sa);
+    return equal != 0;
   }
   case PAYKAN_KIND_INT:
   case PAYKAN_KIND_UINT:

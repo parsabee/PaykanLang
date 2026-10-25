@@ -643,6 +643,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   method 'm' of class 'A'; it is the implicit receiver`, as a parameter named `self` is
   (docs/language/05-classes.md, "Declaration").  A lambda written in a method may still
   name its parameter `self`, and a free function's variables may take the name.
+- The `==` and `toString()` of a tuple, a struct or a tagged union called an element's
+  `equals` or `toString` without holding the element, which the value only borrows from the
+  storage it is in: an override that replaced that storage while it ran (through a closure
+  assigning the field holding the tuple, `h.t = (Item("z"), 2)`) freed its own object, and
+  read freed memory after (`self.tag` printed garbage).  The runtime now holds the element
+  while its `equals` or `toString` runs, as a call's receiver is held, so such an element
+  dies right after the call returns instead of during it: a later death, only in a program
+  that used freed memory.  Each reference element of a tuple, struct or tagged union
+  compared or printed costs one retain and one release more.
 
 ## [0.2.0] - 2026-10-20
 

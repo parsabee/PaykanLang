@@ -108,6 +108,67 @@ PaykanShared *point(int64_t x) {
   return PaykanShared_new((PaykanObject *)p);
 }
 
+// -- An element whose toString and equals write the storage the tuple is in,
+// as a Paykan override can (through a closure that assigns the field holding
+// the tuple): Replacer releases the reference in gReplacedSlot and clears it,
+// then records how many Replacers have been destroyed so far.
+
+struct Replacer {
+  PaykanMethod *vtable;
+  int32_t strong;
+  int32_t weak;
+};
+
+PaykanShared **gReplacedSlot = nullptr;
+int gReplacersDestroyed = 0;
+int gDestroyedDuringCall = -1;
+
+void Replacer_destroy(PaykanObject *self) {
+  (void)self;
+  ++gReplacersDestroyed;
+}
+
+void replaceSlot() {
+  Paykan_release(*gReplacedSlot);
+  *gReplacedSlot = nullptr;
+  gDestroyedDuringCall = gReplacersDestroyed;
+}
+
+PaykanShared *Replacer_toString(PaykanObject *self) {
+  (void)self;
+  replaceSlot();
+  return str("R");
+}
+
+int64_t Replacer_equals(PaykanObject *self, PaykanShared *other) {
+  (void)self;
+  replaceSlot();
+  Paykan_release(other); // `other` is consumed
+  return 0;
+}
+
+PaykanMethod Replacer_vtable[PAYKAN_OBJECT_SLOTS] = {
+    reinterpret_cast<PaykanMethod>(&Replacer_destroy),
+    reinterpret_cast<PaykanMethod>(&Replacer_toString),
+    reinterpret_cast<PaykanMethod>(&Replacer_equals),
+};
+
+PaykanShared *replacer() {
+  auto *r = static_cast<Replacer *>(Paykan_malloc(sizeof(Replacer)));
+  r->vtable = Replacer_vtable;
+  r->strong = 0;
+  r->weak = 0;
+  return PaykanShared_new((PaykanObject *)r);
+}
+
+/// Replacers start counting their deaths from zero; @p slot is the one the
+/// next toString or equals clears.
+void replacing(PaykanShared **slot) {
+  gReplacedSlot = slot;
+  gReplacersDestroyed = 0;
+  gDestroyedDuringCall = -1;
+}
+
 // -- Tuple types as the compiler lays them out
 
 // (int, float, bool, char, Str)
@@ -261,6 +322,19 @@ TEST(TupleToString, ClassElementRendersThroughItsToString) {
   EXPECT_EQ(t.a->strong, 1);
   EXPECT_EQ(t.b->strong, 1);
   release(t);
+}
+
+// An element's toString may release the tuple's own reference to it (the
+// tuple is in storage the toString can write): the element is held while
+// its toString runs, and dies when it returns.
+TEST(TupleToString, ElementIsHeldWhileItsToStringRuns) {
+  TrackingHeap heap;
+  Refs t = {replacer(), nullptr};
+  replacing(&t.a);
+  EXPECT_EQ(render(&t, kRefsLayout), "(R, None)");
+  EXPECT_EQ(gDestroyedDuringCall, 0);
+  EXPECT_EQ(gReplacersDestroyed, 1);
+  EXPECT_EQ(t.a, nullptr);
 }
 
 TEST(TupleToString, LongRenderingGrowsBuffer) {
@@ -419,6 +493,35 @@ TEST(TupleEquals, ReferencesCompareThroughEquals) {
   EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
   release(a);
   release(b);
+}
+
+// An element's equals may release either tuple's reference to the elements
+// it compares (the tuples are in storage the equals can write): the
+// receiver is held while it runs, and `other` is the equals' own reference.
+TEST(TupleEquals, ReceiverIsHeldWhileItsEqualsRuns) {
+  TrackingHeap heap;
+  Refs a = {replacer(), nullptr};
+  Refs b = {replacer(), nullptr};
+  replacing(&a.a);
+  EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
+  EXPECT_EQ(gDestroyedDuringCall, 0);
+  EXPECT_EQ(gReplacersDestroyed, 1); // the receiver, once its equals returned
+  EXPECT_EQ(a.a, nullptr);
+  EXPECT_EQ(b.a->strong, 1);
+  release(b);
+}
+
+TEST(TupleEquals, OtherIsHeldWhileTheEqualsRuns) {
+  TrackingHeap heap;
+  Refs a = {replacer(), nullptr};
+  Refs b = {replacer(), nullptr};
+  replacing(&b.a);
+  EXPECT_EQ(eq(&a, &b, kRefsLayout), 0);
+  EXPECT_EQ(gDestroyedDuringCall, 0);
+  EXPECT_EQ(gReplacersDestroyed, 1); // `other`, released by the equals
+  EXPECT_EQ(b.a, nullptr);
+  EXPECT_EQ(a.a->strong, 1);
+  release(a);
 }
 
 // The first unequal element decides: the elements after it are not compared.
