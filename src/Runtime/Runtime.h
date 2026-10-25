@@ -343,7 +343,8 @@ enum {
 /// The ErrorCode (its ordinal) of the C `errno` @p err; 0 is `Ok`, and an
 /// errno with no code of its own is `Other`.
 int64_t Paykan_error_code(int64_t err);
-/// C's `strerror` text for @p err, as a fresh Str (owned +1).
+/// C's `strerror` text for @p err, as a fresh Str (owned +1), or for a value
+/// outside C's int, which strerror cannot take, `Unknown error <err>`.
 PaykanShared *Paykan_error_text(int64_t err);
 
 // -- Shared: strong and weak references to a PaykanObject

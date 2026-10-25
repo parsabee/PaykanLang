@@ -9,6 +9,8 @@
 #include "RuntimeInternal.h"
 
 #include <errno.h>
+#include <limits.h>
+#include <stdio.h>
 #include <string.h>
 
 int64_t Paykan_error_code(int64_t err) {
@@ -65,6 +67,13 @@ int64_t Paykan_error_code(int64_t err) {
 }
 
 PaykanShared *Paykan_error_text(int64_t err) {
+  // strerror takes an int: a value outside it is no errno, and its text is
+  // its own number, not that of the int it would be truncated to.
+  if (err < INT_MIN || err > INT_MAX) {
+    char text[40];
+    int n = snprintf(text, sizeof text, "Unknown error %lld", (long long)err);
+    return PaykanShared_new((PaykanObject *)PaykanString_new(text, n));
+  }
   const char *text = strerror((int)err);
   return PaykanShared_new(
       (PaykanObject *)PaykanString_new(text, (int64_t)strlen(text)));

@@ -1,0 +1,16 @@
+import ::io;
+import ::error as err;
+
+// ::error's fromErrno: none() for 0, the code of an errno, and for a value
+// outside C's int (no errno, and one strerror cannot take) the code Other
+// with the text `Unknown error <value>`, not the text of the int it would
+// be truncated to (ENOENT's, 0's).
+
+fn main() -> int {
+  io::println(err::fromErrno(0) == err::none());
+  io::println(err::name(err::fromErrno(2).code));
+  io::println(err::fromErrno(4294967298));
+  io::println(err::fromErrno(4294967296));
+  io::println(err::fromErrno(-4294967296));
+  return 0;
+}

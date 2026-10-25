@@ -770,6 +770,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to <n> values` (or `by <n> values`), as `PaykanBuffer_tryGrow` and `PaykanBuffer_tryReserve`
   report `ENOMEM` for it, instead of `the count cannot be negative`, and `PaykanBuffer_shrink`
   with one with `buffer shrink by <n>: it has only <len> values`.
+- `err::fromErrno` gave a value outside C's `int` the code of the whole value but the text
+  of the `int` it was truncated to: `fromErrno(4294967298)` (2^32 + `ENOENT`) was `Other`
+  with `No such file or directory`, and `fromErrno(4294967296)` was `Other` with
+  `Success`.  Such a value, which `strerror` cannot take, now has the text `Unknown error
+  <errno>` (`Paykan_error_text`; docs/stdlib/error.md).
 
 ## [0.2.0] - 2026-10-20
 

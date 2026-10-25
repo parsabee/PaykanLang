@@ -153,5 +153,7 @@ fn fromErrno(errno: int) -> Error
 The `Error` of a C library failure whose `errno` is `errno`: its code by the table under
 [`ErrorCode`](#errorcode), and C's `strerror` text as its message (`No such file or
 directory` for `ENOENT`; for a number C does not know, the code `Other` and C's text for
-it, `Unknown error 99999` with glibc). `fromErrno(0)` is `none()`. It is for code that calls C through
+it, `Unknown error 99999` with glibc, and for one outside C's `int`, which `strerror`
+cannot take, `Other` and `Unknown error <errno>` on every platform). `fromErrno(0)` is
+`none()`. It is for code that calls C through
 [native functions](../language/03-functions.md#native-functions), as `::io` does.
