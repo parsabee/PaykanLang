@@ -1275,6 +1275,12 @@ private:
       VarDecl *vd = v ? varDecl(*v) : nullptr;
       if (!vd)
         return nullptr;
+      // The check the grammar makes (docs/grammar.md): a local starts with
+      // its initialiser's value, a `weak` one without one as None.
+      if (!vd->getInitExpr() && !vd->isWeak())
+        return fail(*v, "a local declaration has an initialiser (only a "
+                        "(weak) one may leave it out)"),
+               nullptr;
       out = Ctx.make<DeclStmt>(loc, vd);
     } else if (t == "expr") {
       Expr *x = expr(f, "the expression");

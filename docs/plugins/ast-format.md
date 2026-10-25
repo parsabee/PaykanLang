@@ -118,7 +118,7 @@ to resolve, which reports unknown names.
 | Node | Meaning |
 |---|---|
 | `(block LOC STMT...)` | `{ ... }` |
-| `(decl LOC VAR)` | a declaration statement, `x: T = e;` |
+| `(decl LOC VAR)` | a declaration statement, `x: T = e;`. Its `VAR` has an initialiser, but a `weak` one, which starts as `None` without one (`weak w: Node?;`) |
 | `(assign LOC (ident LOC NAME) EXPR)` | `x = e;` (declares `x` on first assignment, as in the language) |
 | `(member-assign LOC EXPR NAME EXPR)` | `recv.field = e;` |
 | `(subscript-assign LOC EXPR EXPR EXPR)` | `arr[i] = e;` |
@@ -188,7 +188,8 @@ is a link over the deepest of its fields. It
 also makes the grammar's own checks that the recursive-descent frontend
 makes while parsing (`void?`, nested optionals, `_` for the body of a
 function that is neither a class's method nor a trait's, `(native ...)` on
-a method, `(qual static)` outside an `impl` block). Everything else (unknown
+a method, `(qual static)` outside an `impl` block, a `decl` without an
+initialiser that is not `weak`). Everything else (unknown
 names, types that don't match, ...) is Sema's job, with the same
 diagnostics as for any frontend.
 

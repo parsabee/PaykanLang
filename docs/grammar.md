@@ -366,7 +366,10 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   evaluated twice, once to read it and once to assign it: `xs[f()] += 1`
   calls `f` twice.
 - `varDecl "=" expression` is a declaration with an initializer; a bare
-  `x: int;` is not a statement.
+  `x: int;` is not a statement.  Only a `weakDecl` may leave out its
+  initializer, and Sema rejects a `DeclStmt` of any other `VarDecl` without
+  one, whichever frontend built it (`variable 'x' needs an initial value
+  ...`).
 - `letDecl` declares one local that cannot be reassigned
   (`VarDecl::isLet`); its type, when not written, is its initializer's.
   The `VarDecl` and its `DeclStmt` start at `let`.  `let` starts nothing

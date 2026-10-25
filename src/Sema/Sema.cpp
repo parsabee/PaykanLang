@@ -3408,7 +3408,23 @@ bool Sema::visitCompoundStmt(ast::CompoundStmt *node) {
   return visitStatements(node->getStatements());
 }
 
-bool Sema::visitDeclStmt(ast::DeclStmt *node) { return visit(node->getDecl()); }
+bool Sema::visitDeclStmt(ast::DeclStmt *node) {
+  // A local starts with its initializer's value, a `weak` one without one as
+  // `None` (docs/grammar.md section 6).  The parser and the AST interchange
+  // reader build no other; an AST that has one is rejected here, before the
+  // lowering would leave a reference null.  The variable is still declared
+  // with its type, so its uses are checked as usual.  (A for loop's variable
+  // and a field are VarDecls with no initializer too, outside a DeclStmt.)
+  auto *vd = ast::dyn_cast<ast::VarDecl>(node->getDecl());
+  bool ok = true;
+  if (vd && vd->getType() && !vd->getInitExpr() && !vd->isWeak()) {
+    error(vd->getLocation(), "variable '" + vd->getName() +
+                                 "' needs an initial value (only a 'weak' "
+                                 "local starts without one, as None)");
+    ok = false;
+  }
+  return visit(node->getDecl()) && ok;
+}
 
 bool Sema::visitExprStmt(ast::ExprStmt *node) {
   // Type-check the expression; we discard the type.

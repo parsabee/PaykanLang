@@ -884,6 +884,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     within the limits, and its reader counts the links and the levels as the frontends do,
     so an AST from a plugin, or the `ast-text` frontend's input, is held to the same limits
     (docs/plugins/ast-format.md section 3).
+- A frontend plugin's AST, or the `ast-text` frontend's input, could declare a local without
+  an initial value, which the grammar has no way to write (`x: int;` is not a statement):
+  `(decl (var "s" (named-type "Str") _))` passed every check and `io::println(s)` crashed
+  (exit status 139) on a null reference.  The AST interchange reader now rejects a `decl`
+  without an initialiser that is not `weak` (`a local declaration has an initialiser (only
+  a (weak) one may leave it out)`, docs/plugins/ast-format.md), and Sema rejects such a
+  local whichever frontend built it (`variable 's' needs an initial value (only a 'weak'
+  local starts without one, as None)`), so none reaches the lowering.  A `weak` local
+  without one (`weak w: Node?;`, which starts as `None`) and a `for` loop's variable stay
+  as they are.
 
 ## [0.2.0] - 2026-10-20
 

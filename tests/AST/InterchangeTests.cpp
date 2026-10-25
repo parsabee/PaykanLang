@@ -169,7 +169,7 @@ TEST(ASTInterchange, ReadsEveryNode) {
       (block
         (decl (var "x" (optional-type (named-type "int")) (none)))
         (decl (var "t" (tuple-type (named-type "int") (named-type "m::T")) (tuple (int 1) (int -2))))
-        (decl (var "g" (generic-type "Box" (named-type "float")) _))
+        (decl (var "g" (generic-type "Box" (named-type "float")) (ident "b")))
         (assign (ident "y") (float 1.5))
         (expr (call "f" (type-args (named-type "bool")) (float inf) (float -inf) (float nan) (float 2e3)))
         (if (bool true) (block (break)) (if (bool false) (block (continue)) (block)))
@@ -1029,6 +1029,27 @@ TEST(ASTInterchange, LetLocals) {
   EXPECT_NE(error.find("a let declaration has an initialiser"),
             std::string::npos)
       << error;
+}
+
+// A local declaration has an initialiser, as the grammar's has (`x: int;` is
+// not a statement), but a `weak` one, which starts as None.  It was read
+// without one, and a `Str` local was a null reference at run time.  A for
+// loop's variable and a field have none, outside a `decl`.
+TEST(ASTInterchange, ALocalDeclarationHasAnInitialiser) {
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_EQ(read("(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                 "(block (decl (var \"s\" (named-type \"Str\") _))))))",
+                 ctx, error),
+            nullptr);
+  EXPECT_EQ(error, "1:67: a local declaration has an initialiser (only a "
+                   "(weak) one may leave it out)");
+  ast::TranslationUnit *tu =
+      read("(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+           "(decl (var \"w\" (optional-type (named-type \"Obj\")) _ (weak))) "
+           "(for (var \"i\" _ _) (int 0) (int 3) _ (block))))))",
+           ctx, error);
+  EXPECT_NE(tu, nullptr) << error;
 }
 
 // A `for` loop is its variable as a `var` with no initialiser, the range's
