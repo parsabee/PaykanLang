@@ -66,11 +66,14 @@ TEST(Mov, ReportedInSourceOrder) {
       drv.setDiagEngine(&diag);
       EXPECT_NE(drv.parseFile(path), 0) << fe << ": " << src;
       EXPECT_EQ(drv.getErrorCount(), errors.size()) << fe << ":\n" << os.str();
+      const std::string out = os.str();
       size_t at = 0;
       for (const std::string &e : errors) {
-        at = os.str().find(path + ":" + e, at);
+        std::string error = path + ":";
+        error += e;
+        at = out.find(error, at);
         ASSERT_NE(at, std::string::npos) << fe << ": " << e << " in order in\n"
-                                         << os.str();
+                                         << out;
       }
     }
     std::filesystem::remove(path);
