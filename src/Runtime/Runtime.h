@@ -472,10 +472,25 @@ static inline PaykanObject *PaykanShared_get_inline(PaykanShared *shared) {
 // it does for a non-generic native function.
 //
 // A PaykanType describes a value of the type as it is stored: its size and
-// alignment, its kind, and where it holds references (PaykanShared* boxes),
-// which a copy retains and a drop releases.  The compiler emits one per
-// type, as constant data; the kind codes must match
+// alignment, its kind, where it holds references (PaykanShared* boxes),
+// which a copy retains and a drop releases, and how storage that was never
+// set, all zero bytes, differs from every value.  The compiler emits one
+// per type, as constant data; the kind codes must match
 // paykan::names::NativeTypeKind in include/Names.h.
+//
+// All zero bytes is a value of most types: 0, 0.0, False, char 0, None, an
+// enum's first variant, and a tuple, a struct or a tagged union's first
+// variant whose fields' zero bytes are values.  It is no value of a
+// reference that may not be None (a class, Str, Obj), of a function value
+// (its code word, the address of its code, is 0 only in None), or of a
+// tuple, a struct or a tagged union's first variant with a field of such a
+// type.  For one of those the PaykanType lists `nunset` words of the value,
+// each 8 bytes at a byte offset, that are all 0 only in storage never set:
+// every value has one of them nonzero.  For a reference or a function value
+// it is the reference or the code word; for a tuple or a struct, those of
+// one field whose zero bytes are no value; for a tagged union, the tag and
+// then those of its first variant's fields (a value of another variant has
+// a nonzero tag).  A type whose zero bytes are a value lists none.
 
 typedef enum PaykanTypeKind {
   PAYKAN_KIND_INT = 0,      // int64_t (also enum values)
@@ -499,17 +514,26 @@ typedef enum PaykanTypeKind {
 } PaykanTypeKind;
 
 /// Followed in memory by `nrefs` int64_t words, one per reference: its byte
-/// offset in the value << 1, | 1 if it may be NULL (PaykanType_ref).
+/// offset in the value << 1, | 1 if it may be NULL (PaykanType_ref); then by
+/// `nunset` words, the byte offsets of the words that are all 0 only in
+/// storage never set (PaykanType_unset).
 typedef struct PaykanType {
-  int64_t size;  ///< bytes of a value
-  int64_t align; ///< its alignment
-  int64_t kind;  ///< PaykanTypeKind
-  int64_t nrefs; ///< references in a value
+  int64_t size;   ///< bytes of a value
+  int64_t align;  ///< its alignment
+  int64_t kind;   ///< PaykanTypeKind
+  int64_t nrefs;  ///< references in a value
+  int64_t nunset; ///< words telling storage never set; 0: zeros are a value
 } PaykanType;
 
 /// The word of the @p k-th reference of a @p type value.
 static inline int64_t PaykanType_ref(const PaykanType *type, int64_t k) {
   return ((const int64_t *)(type + 1))[k];
+}
+
+/// The byte offset of the @p k-th word that tells a @p type value from
+/// storage never set.
+static inline int64_t PaykanType_unset(const PaykanType *type, int64_t k) {
+  return ((const int64_t *)(type + 1))[type->nrefs + k];
 }
 
 /// Make @p dst (uninitialised storage for a @p type value) a copy of the
@@ -518,8 +542,9 @@ void PaykanType_copy(const PaykanType *type, void *dst, const void *src);
 /// Release the references the @p type value at @p value holds; the storage
 /// is then uninitialised.
 void PaykanType_drop(const PaykanType *type, void *value);
-/// True if a reference the @p type value at @p value holds that may not be
-/// NULL is: storage that was never set.
+/// True if @p value is storage that was never set: @p type has words that
+/// tell it (`nunset`), and they are all 0 there.  Never for a type whose
+/// zero bytes are a value.
 int PaykanType_isUnset(const PaykanType *type, const void *value);
 
 // -- Tuples
@@ -596,10 +621,11 @@ int64_t PaykanEnum_equals(const void *a, const void *b, const int64_t *layout);
 // native function's parameters: `void *` for a PaykanType and any other
 // address.  An index or a count is the program's `unsigned` in an int64_t,
 // so one of 2^63 or more is negative here.  A new value is all zero bytes:
-// 0, False or None.  Destroying the buffer drops the values.  An index out
+// 0, False or None, or for a type whose zero bytes are no value (above),
+// storage never set.  Destroying the buffer drops the values.  An index out
 // of bounds, a count the memory is not there for (2^63 or more never is),
-// shrinking by more than len and reading a never-set reference of a type
-// that may not be NULL panic, with the index or count printed unsigned.
+// shrinking by more than len and reading a value never set panic, with the
+// index or count printed unsigned.
 
 typedef struct PaykanBuffer {
   PaykanMethod *vtable; // points to PaykanBuffer_vtable
@@ -619,8 +645,9 @@ int64_t PaykanBuffer_len(void *t, PaykanObject *b);
 void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i);
 /// Copy value @p i to @p out (uninitialised), retaining its references.
 void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i);
-/// 1 when value @p i is in range and set (a reference slot that may not be
-/// None is unset until stored), else 0: what a checked read tests first.
+/// 1 when value @p i is in range and set (a slot of a type whose zero bytes
+/// are no value is unset until stored: PaykanType_isUnset), else 0: what a
+/// checked read tests first.
 int64_t PaykanBuffer_isSet(void *t, PaykanObject *b, int64_t i);
 void PaykanBuffer_set(void *t, void *b, int64_t i, void *v);
 void PaykanBuffer_reserve(void *t, void *b, int64_t n);

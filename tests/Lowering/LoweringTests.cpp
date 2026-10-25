@@ -320,8 +320,11 @@ TEST(Lowering, GenericNativeFunctionPassesTypesAndAddresses) {
     }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
-  // One PaykanType per type: size, alignment, kind, references (offsets).
-  EXPECT_NE(l.Text.find("data @.type0 = [8, 8, 4, 1, 0]"), std::string::npos)
+  // One PaykanType per type: size, alignment, kind, the counts of its
+  // references and of the words that tell storage never set, then those
+  // (offsets): a Str is its reference, which is never NULL in a value.
+  EXPECT_NE(l.Text.find("data @.type0 = [8, 8, 4, 1, 1, 0, 0]"),
+            std::string::npos)
       << l.Text;
   EXPECT_NE(l.Text.find("extern fn @$c.pk_test_pick(ptr, ptr, bool, ptr, "
                         "ptr) -> void"),
@@ -371,7 +374,7 @@ TEST(Lowering, NativeInoutArgumentsAreAddresses) {
   EXPECT_NE(l.Text.find("extern fn @$c.pk_test_swap(ptr, ptr, ptr)"),
             std::string::npos)
       << l.Text;
-  EXPECT_NE(l.Text.find("data @.type0 = [1, 1, 2, 0]"), std::string::npos)
+  EXPECT_NE(l.Text.find("data @.type0 = [1, 1, 2, 0, 0]"), std::string::npos)
       << l.Text;
   std::string main = function(l.Text, "main");
   EXPECT_NE(main.find("call @$c.pk_test_bump(%n.addr"), std::string::npos)
@@ -393,10 +396,65 @@ TEST(Lowering, GenericNativeFunctionDescribesInlineOptionals) {
     }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
-  EXPECT_NE(l.Text.find("data @.type0 = [16, 8, 5, 0]"), std::string::npos)
+  EXPECT_NE(l.Text.find("data @.type0 = [16, 8, 5, 0, 0]"), std::string::npos)
       << l.Text;
-  EXPECT_NE(l.Text.find("data @.type1 = [2, 1, 5, 0]"), std::string::npos)
+  EXPECT_NE(l.Text.find("data @.type1 = [2, 1, 5, 0, 0]"), std::string::npos)
       << l.Text;
+}
+
+// A PaykanType names the words of a value that are all zero only in storage
+// never set (a buffer's new slot): a reference that may not be None, a
+// function value's code word, and for a tagged union whose first variant
+// holds one, the tag and then that variant's words.  A type whose zero
+// bytes are a value names none: an int, an optional (None), an enum whose
+// first variant holds only values and optionals.
+TEST(Lowering, GenericNativeFunctionDescribesStorageNeverSet) {
+  auto l = lower(R"(
+    native fn keep<T>(v: view T) = "pk_keep";
+    enum F { B(s: Str), A }
+    enum G { A(n: int, s: Str?), B(s: Str) }
+    enum H { X(s: Str), Y }
+    enum E { A(h: H), B }
+    enum Maybe<T> { Just(v: T), Nothing }
+    struct S { n: int; f: () -> int; }
+    struct P { f: F; s: Str; }
+    fn main() -> int {
+      keep<F>(F::A);
+      keep<() -> int>(fn() => 1);
+      o: (() -> int)? = None;
+      keep<(() -> int)?>(o);
+      keep<S>(S(1, fn() => 2));
+      keep<G>(G::B("x"));
+      keep<E>(E::B);
+      keep<Maybe<Str>>(Maybe<Str>::Nothing);
+      keep<Maybe<int>>(Maybe<int>::Nothing);
+      keep<P>(P(F::A, "p"));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *descriptor : {
+           // F: the tag at 0, B's Str at 8 (nullable: NULL in an A).
+           "= [16, 8, 6, 1, 2, 17, 0, 8]\n",
+           // () -> int: the code word at 0, the closure (nullable) at 8.
+           "= [16, 8, 6, 1, 1, 17, 0]\n",
+           // Its optional: the same 16 bytes, None all zeros.
+           "= [16, 8, 6, 1, 0, 17]\n",
+           // S: the function value at 8, its code word.
+           "= [24, 8, 6, 1, 1, 33, 8]\n",
+           // G: zeros are A(0, None).
+           "= [32, 8, 6, 2, 0, 33, 49]\n",
+           // E: its tag, A's H's tag, then H's X's Str.
+           "= [24, 8, 6, 1, 3, 33, 0, 8, 16]\n",
+           // Maybe<int>: zeros are Just(0).
+           "= [16, 8, 6, 0, 0]\n",
+           // P: its Str alone tells, the fewest words.
+           "= [24, 8, 6, 2, 1, 17, 32, 16]\n",
+       })
+    EXPECT_NE(l.Text.find(descriptor), std::string::npos) << descriptor << "\n"
+                                                          << l.Text;
+  // Maybe<Str> is described as F is: one descriptor for both.
+  EXPECT_EQ(count(l.Text, "= [16, 8, 6, 1, 2, 17, 0, 8]\n"), 1u) << l.Text;
 }
 
 // -- Calls: callee-consumes ABI for user functions, borrow for builtins
@@ -2235,8 +2293,8 @@ TEST(Lowering, OptionalValueSizesFollowTheirPayloads) {
     EXPECT_NE(m.find(local), std::string::npos) << local << "\n" << m;
   // d's second element is one `char?` in.
   EXPECT_NE(m.find("ptr.add %d.addr.7, 2\n"), std::string::npos) << m;
-  EXPECT_NE(l.Text.find("= [16, 8, 5, 0]"), std::string::npos) << l.Text;
-  EXPECT_NE(l.Text.find("= [2, 1, 5, 0]"), std::string::npos) << l.Text;
+  EXPECT_NE(l.Text.find("= [16, 8, 5, 0, 0]"), std::string::npos) << l.Text;
+  EXPECT_NE(l.Text.find("= [2, 1, 5, 0, 0]"), std::string::npos) << l.Text;
 }
 
 // A fixed-size array is a `mem` local reached through its address: an

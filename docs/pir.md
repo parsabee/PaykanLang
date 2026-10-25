@@ -260,7 +260,7 @@ would.
 module "<name>"                     ; the canonical module name (`geometry::shapes`; the main module: its file stem)
 
 cstr  @.str0  = "hello\n"  len 6   ; NUL-terminated literal data (`ptr`)
-data  @.type0 = [8, 8, 0, 0]       ; constant i64 words: a `PaykanType` descriptor (`ptr`)
+data  @.type0 = [8, 8, 0, 0, 0]    ; constant i64 words: a `PaykanType` descriptor (`ptr`)
 data  @.tuple0 = [2, 0, 0, 4, 8]   ; constant i64 words: a tuple layout (`ptr`)
 bytes @.b0    = [0, 4]             ; constant bytes (`ptr`)
 
@@ -284,7 +284,14 @@ fn / extern fn                      ; §3
 ```
 
 The lowering emits a `.typeN` `data` global for each type argument of a
-generic native function, and a `.tupleN` one, the layout of a tuple type
+generic native function (`Runtime.h`, "Generic native functions": the size,
+the alignment, the `PaykanTypeKind`, the number of references and the number
+of words that tell storage never set from a value, then each reference's byte
+offset `<< 1`, `| 1` when it may be null, then each of those words' byte
+offsets; `[16, 8, 6, 1, 2, 17, 0, 8]` is `enum F { B(s: Str), A }`: a 16-byte
+tuple whose reference at 8 may be null, never set when its tag at 0 and that
+reference are both 0, and a type whose zero bytes are a value, an `int` or an
+optional, names no such word), and a `.tupleN` one, the layout of a tuple type
 (`Runtime.h`, "Tuples": the element count, then each element's
 `PaykanTypeKind` and byte offset, an optional's payload kind, a nested tuple's
 layout), for each tuple type that is printed, compared or converted with
@@ -690,7 +697,10 @@ CodeGen enforced, now in one place.
   a struct, one after another, all zeros but the current variant's: its
   copies, retains and releases are that tuple's (a null reference is
   skipped), and a container's type descriptor marks each of its references
-  nullable.  `E::B(x, y)` zeroes the value, stores the tag and initialises
+  nullable.  All zeros is its first variant with zero fields, so when those
+  are no value (a `Str` among them) the descriptor names the tag and the
+  first variant's words that tell storage never set.  `E::B(x, y)` zeroes
+  the value, stores the tag and initialises
   the fields in place; a `match` copies the subject, `switch`es on its tag
   and binds an arm's fields as a copy of the struct (an `inout` arm's copy
   is assigned back to the subject, as that variant, after its last use in
@@ -710,7 +720,9 @@ CodeGen enforced, now in one place.
   one is `fn.addr` of the code and, for a closure, `new`, a `field.store`
   per capture and `box`; a call loads both words, retains the closure for
   the call and `icall`s the code with the function type's signature.  An
-  optional function value is the same 16 bytes, None all zeros.
+  optional function value is the same 16 bytes, None all zeros, so the
+  type descriptor of a function value (not of its optional) names its code
+  word, never 0 in a value, as the word that tells storage never set.
 * **Fields** own their box; `field.store` is preceded by a retain-or-steal
   of the new value and the old value is released (null-checked).  An
   `__init__`'s leading assignments that give a field of its class's body

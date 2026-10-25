@@ -1,0 +1,12 @@
+// expect-panic: buffer value 1 was never set
+import ::io;
+import ::memory;
+
+fn main() -> int {
+  b = memory::Buffer<() -> int>();
+  b.push(fn() => 1);
+  b.grow(1);
+  f = b.get(1);
+  io::println(f());
+  return 0;
+}

@@ -41,16 +41,19 @@ struct TrackingHeap {
   }
 };
 
+// A type holding one reference: its word, then (when it may not be NULL)
+// the reference again, as the word that tells storage never set.
 struct RefType {
   PaykanType head;
   int64_t ref;
+  int64_t unset;
 };
 
 // Not const: the PaykanBuffer_* functions take a PaykanType as a `void *`.
-PaykanType kInt = {8, 8, PAYKAN_KIND_INT, 0};
-PaykanType kFloat = {8, 8, PAYKAN_KIND_FLOAT, 0};
-RefType kStr = {{8, 8, PAYKAN_KIND_OBJECT, 1}, 0};
-RefType kOpt = {{8, 8, PAYKAN_KIND_OPTIONAL, 1}, 1}; // may be NULL
+PaykanType kInt = {8, 8, PAYKAN_KIND_INT, 0, 0};
+PaykanType kFloat = {8, 8, PAYKAN_KIND_FLOAT, 0, 0};
+RefType kStr = {{8, 8, PAYKAN_KIND_OBJECT, 1, 1}, 0, 0};
+RefType kOpt = {{8, 8, PAYKAN_KIND_OPTIONAL, 1, 0}, 1, 0}; // may be NULL
 
 // A 24-byte value with a reference in the middle, as a struct would be.
 struct Wide {
@@ -58,8 +61,54 @@ struct Wide {
   PaykanShared *ref;
   bool flag;
 };
-RefType kWide = {{sizeof(Wide), alignof(Wide), PAYKAN_KIND_OBJECT, 1},
-                 (int64_t)offsetof(Wide, ref) << 1};
+RefType kWide = {{sizeof(Wide), alignof(Wide), PAYKAN_KIND_OBJECT, 1, 1},
+                 (int64_t)offsetof(Wide, ref) << 1,
+                 (int64_t)offsetof(Wide, ref)};
+
+// `enum F { B(s: Str), A }` as the compiler lays it out: the tag, then B's
+// Str, NULL in an A.  Zeros are B with a NULL Str, no value: the tag and the
+// Str tell storage never set.
+struct Union {
+  int64_t tag;
+  PaykanShared *s;
+};
+struct UnionType {
+  PaykanType head;
+  int64_t ref;
+  int64_t unset[2];
+};
+UnionType kUnion = {
+    {sizeof(Union), alignof(Union), PAYKAN_KIND_TUPLE, 1, 2},
+    (int64_t)offsetof(Union, s) << 1 | 1,
+    {(int64_t)offsetof(Union, tag), (int64_t)offsetof(Union, s)}};
+
+// A function value, `() -> int`: its code word, never 0 in a value, then
+// its closure, NULL when it captures nothing.
+struct Function {
+  int64_t code;
+  PaykanShared *closure;
+};
+RefType kFunction = {
+    {sizeof(Function), alignof(Function), PAYKAN_KIND_TUPLE, 1, 1},
+    (int64_t)offsetof(Function, closure) << 1 | 1,
+    (int64_t)offsetof(Function, code)};
+
+// `enum G { A(n: int, s: Str?), B(s: Str) }`: zeros are A(0, None), a
+// value, so no word tells.
+struct Valued {
+  int64_t tag;
+  int64_t n;
+  PaykanShared *a;
+  PaykanShared *b;
+};
+struct ValuedType {
+  PaykanType head;
+  int64_t refs[2];
+};
+ValuedType kValued = {
+    {sizeof(Valued), alignof(Valued), PAYKAN_KIND_TUPLE, 2, 0},
+    {(int64_t)offsetof(Valued, a) << 1 | 1,
+     (int64_t)offsetof(Valued, b) << 1 | 1}};
 
 PaykanObject *obj(PaykanShared *buf) { return PaykanShared_get(buf); }
 
@@ -281,6 +330,81 @@ TEST(BufferDeath, NeverSetReferencePanics) {
   EXPECT_DEATH(PaykanBuffer_copy(&kStr.head, &out, obj(buf), 0),
                "was never set");
   Paykan_release(buf);
+}
+
+// A slot of a tagged union whose first variant holds a reference is unset
+// until stored: zeros are that variant with a NULL reference.  A value of
+// another variant, the reference NULL in it, is set.
+TEST(Buffer, ANeverSetTaggedUnionIsUnset) {
+  TrackingHeap heap;
+  PaykanShared *buf = PaykanBuffer_new(&kUnion.head, 3);
+  for (int64_t i = 0; i < 3; ++i)
+    EXPECT_EQ(PaykanBuffer_isSet(&kUnion.head, obj(buf), i), 0) << i;
+  Union named = {0, str("x")};
+  PaykanBuffer_set(&kUnion.head, &buf, 0, &named);
+  Union other = {1, nullptr};
+  PaykanBuffer_set(&kUnion.head, &buf, 1, &other);
+  EXPECT_EQ(PaykanBuffer_isSet(&kUnion.head, obj(buf), 0), 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kUnion.head, obj(buf), 1), 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kUnion.head, obj(buf), 2), 0);
+  Union got = {};
+  PaykanBuffer_copy(&kUnion.head, &got, obj(buf), 1);
+  EXPECT_EQ(got.tag, 1);
+  EXPECT_EQ(got.s, nullptr);
+  PaykanBuffer_copy(&kUnion.head, &got, obj(buf), 0);
+  EXPECT_EQ(got.s, named.s);
+  EXPECT_EQ(named.s->strong, 3); // named, the slot and got
+  PaykanType_drop(&kUnion.head, &got);
+  PaykanType_drop(&kUnion.head, &named);
+  Paykan_release(buf);
+}
+
+// A function value's slot is unset until stored: its code word is 0.  One
+// that captures nothing (a NULL closure) is set.
+TEST(Buffer, ANeverSetFunctionValueIsUnset) {
+  TrackingHeap heap;
+  PaykanShared *buf = PaykanBuffer_new(&kFunction.head, 2);
+  EXPECT_EQ(PaykanBuffer_isSet(&kFunction.head, obj(buf), 0), 0);
+  Function f = {0x1000, nullptr};
+  PaykanBuffer_set(&kFunction.head, &buf, 0, &f);
+  EXPECT_EQ(PaykanBuffer_isSet(&kFunction.head, obj(buf), 0), 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kFunction.head, obj(buf), 1), 0);
+  Function got = {};
+  PaykanBuffer_copy(&kFunction.head, &got, obj(buf), 0);
+  EXPECT_EQ(got.code, 0x1000);
+  Paykan_release(buf);
+}
+
+// A type whose zeros are a value has no slot that is unset: a new one reads
+// as that value, even with references that are NULL in it.
+TEST(Buffer, ZerosAreAValueOfATypeThatNamesNoWord) {
+  TrackingHeap heap;
+  PaykanShared *buf = PaykanBuffer_new(&kValued.head, 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kValued.head, obj(buf), 0), 1);
+  Valued got = {1, 2, nullptr, nullptr};
+  PaykanBuffer_copy(&kValued.head, &got, obj(buf), 0);
+  EXPECT_EQ(got.tag, 0);
+  EXPECT_EQ(got.n, 0);
+  EXPECT_EQ(got.a, nullptr);
+  EXPECT_EQ(got.b, nullptr);
+  PaykanShared *opts = PaykanBuffer_new(&kOpt.head, 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kOpt.head, obj(opts), 0), 1);
+  Paykan_release(opts);
+  Paykan_release(buf);
+}
+
+TEST(BufferDeath, NeverSetTaggedUnionOrFunctionValuePanics) {
+  PaykanShared *buf = PaykanBuffer_new(&kUnion.head, 1);
+  EXPECT_DEATH(PaykanBuffer_get(&kUnion.head, obj(buf), 0),
+               "buffer value 0 was never set");
+  Union out = {};
+  EXPECT_DEATH(PaykanBuffer_copy(&kUnion.head, &out, obj(buf), 0),
+               "buffer value 0 was never set");
+  Paykan_release(buf);
+  PaykanShared *fns = PaykanBuffer_new(&kFunction.head, 2);
+  EXPECT_DEATH(PaykanBuffer_get(&kFunction.head, obj(fns), 1),
+               "buffer value 1 was never set");
+  Paykan_release(fns);
 }
 
 // A count is an `unsigned` too: one of 2^63 or more (negative here) is more

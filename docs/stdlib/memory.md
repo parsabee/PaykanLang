@@ -62,10 +62,48 @@ copying a buffer copies the reference, so every copy shares the same slots, as c
 slice header do, and the storage goes with the last copy.
 
 A buffer has `len()` slots, and grows and shrinks only when asked to. A new slot holds zero
-bytes: `0`, `0.0`, `False`, char `0` or `None`. A slot of a reference type that cannot be
-`None` (a class, `Str`, a tuple) is **unset** until it is stored. The buffer holds its own
-reference to each value it stores, and drops it when the slot is overwritten or shrunk
-away, or the buffer goes. Every index and count is an `unsigned`.
+bytes: `0`, `0.0`, `False`, char `0`, `None`, or an enum's first variant. Where zero bytes
+are no value of `T`, a slot is **unset** until it is stored:
+
+- a reference that cannot be `None`: a class, `Str`, `Obj`;
+- a function value, `() -> int` (zero bytes are only its optional's `None`);
+- a tuple or a struct with an element or a field of such a type, `(int, Str)`;
+- a tagged union whose first variant has a field of such a type, `enum Shape { Named(s:
+  Str), Empty }`, a generic one's instantiation too (`Maybe<Str>` for `enum Maybe<T> {
+  Just(v: T), Nada }`).
+
+The rest have no unset slot: a new slot of `enum Count { Tally(n: int, s: Str?), Label(s:
+Str) }` is `Tally(n: 0, s: None)`, of `Maybe<int>` `Just(v: 0)`, of an optional `None`.
+
+```pkn
+import ::io;
+import ::error as err;
+import ::memory;
+
+enum Shape { Named(s: Str), Empty }
+
+fn main() -> int {
+  shapes = memory::Buffer<Shape>();
+  shapes.grow(2);                     // two unset slots
+  shapes.set(1, Shape::Empty);
+  io::println(err::name(shapes.swap(0, 1).code));
+  shapes.set(0, Shape::Named("n"));
+  io::println(err::name(shapes.swap(0, 1).code));
+  io::println(shapes.at(1));
+  return 0;
+}
+```
+
+Output:
+
+```
+NotFound
+Ok
+Named(s: n)
+```
+
+The buffer holds its own reference to each value it stores, and drops it when the slot is
+overwritten or shrunk away, or the buffer goes. Every index and count is an `unsigned`.
 
 What can go wrong is reported as an `::error` value, not a panic: the methods that can fail
 return an `err::Error` (or a `res::Result<T, err::Error>`) and leave the buffer unchanged

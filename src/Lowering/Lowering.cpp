@@ -1671,21 +1671,25 @@ ModuleLowering::localNative(const std::string &name) const {
 // A value of every type but a tuple is stored as one PIR slot: a reference
 // as its box, None as a null one, an inline optional as its presence flag
 // and payload (docs/pir.md §1).  A tuple is its elements in place, each
-// reference among them at its offset.
+// reference among them at its offset.  After the references come the words
+// that tell storage never set from a value (unsetWords).
 Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
   // A function value, an optional tuple or struct, or a tagged union is
   // described as its shape, a tuple; under an optional's shape (the presence
   // flag, then the value) a reference is null for None, and in a tagged
-  // union's for every variant but the current one: nullable, not unset.
+  // union's for every variant but the current one: nullable.  What tells a
+  // value from storage never set is the type's, not its shape's: an
+  // optional function value's shape is a function value's.
   const bool optional =
       ast::isa<ast::OptionalType>(ty) || ast::isPayloadEnum(ty);
+  std::vector<int64_t> unset = unsetWords(ty, 0);
   ty = memShapeOf(ty);
   const Type slot = toPIRType(ty);
   std::vector<int64_t> words = {pir::storeSize(slot), pir::storeAlign(slot),
-                                nativeTypeKind(ty), 0};
+                                nativeTypeKind(ty), 0, 0};
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
     MemLayout l = memLayout(tt);
-    words = {l.Size, l.Align, kNativeKindTuple, 0};
+    words = {l.Size, l.Align, kNativeKindTuple, 0, 0};
     std::function<void(ast::TupleType *, int64_t, bool)> refs =
         [&](ast::TupleType *t, int64_t base, bool nullable) {
           for (size_t i = 0; i < t->getArity(); ++i) {
@@ -1706,6 +1710,8 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
     words[3] = 1;
     words.push_back(ast::isa<ast::OptionalType>(ty) ? 1 : 0); // offset 0
   }
+  words[4] = static_cast<int64_t>(unset.size());
+  words.insert(words.end(), unset.begin(), unset.end());
   std::string key;
   for (int64_t w : words) {
     key += std::to_string(w);
@@ -1717,6 +1723,45 @@ Val ModuleLowering::emitTypeDescriptor(ast::Type *ty) {
     Mod.Datas.push_back({it->second, std::move(words)});
   }
   return Val::symbol(it->second, Type::Ptr);
+}
+
+// All zero bytes, a buffer's new slot, is a value of every type but a
+// reference that may not be None, a function value (its code word is 0 only
+// in None) and what holds one where zeros put it.  A tuple or a struct
+// holds one in any element: one element's words tell, the fewest.  A tagged
+// union holds one when its first variant does, as zeros are that variant:
+// its tag and then that variant's words, since a value of another variant
+// has a nonzero tag.  Under an optional nothing does: zeros are None.
+std::vector<int64_t> ModuleLowering::unsetWords(ast::Type *ty, int64_t base) {
+  if (ast::isa<ast::OptionalType>(ty))
+    return {};
+  if (ast::isFunctionValue(ty))
+    return {base + functionCodeOffset()};
+  if (ast::isPayloadEnum(ty)) {
+    auto *et = ast::cast<ast::EnumType>(ty);
+    ast::StructType *first = et->getPayload(0);
+    if (!first)
+      return {};
+    std::vector<int64_t> words =
+        unsetWords(first, base + variantPayloadOffset(et, 0));
+    if (!words.empty())
+      words.insert(words.begin(),
+                   base + tupleElementOffset(enumCarrier(et), 0)); // the tag
+    return words;
+  }
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    std::vector<int64_t> fewest;
+    for (size_t i = 0; i < tt->getArity(); ++i) {
+      std::vector<int64_t> words =
+          unsetWords(tt->getElementType(i), base + tupleElementOffset(tt, i));
+      if (!words.empty() && (fewest.empty() || words.size() < fewest.size()))
+        fewest = std::move(words);
+    }
+    return fewest;
+  }
+  if (ast::isRefType(ty))
+    return {base};
+  return {};
 }
 
 unsigned char ModuleLowering::nativeTypeKind(ast::Type *ty) const {

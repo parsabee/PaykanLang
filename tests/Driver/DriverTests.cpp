@@ -1705,6 +1705,90 @@ TEST(Driver, FileUpdateModesKeepEveryWrite) {
   std::filesystem::remove_all(dir);
 }
 
+// A memory::Buffer slot never set, of a type whose zero bytes are no value,
+// panics when at() or get() reads it, after what the program printed: a
+// tagged union whose first variant holds a Str, a function value, and a
+// struct holding one.  Before, at() lent the zeros as that first variant and
+// get() gave a function value whose call jumped to address 0.  On every
+// path, at -O0 and -O2: `run`, `build`, and the C `--emit-c` prints, linked
+// with the runtime's sources and the standard library's compiled code.
+TEST(Driver, ABufferSlotNeverSetPanicsOnEveryPath) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_unset_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "unset.pkn").string();
+  std::ofstream(src) << "import ::io; import ::memory;\n"
+                        "enum Shape { Named(s: Str), Empty }\n"
+                        "struct Handler { id: int; run: () -> int; }\n"
+                        "fn main(args: view Str[]) -> int {\n"
+                        "  io::println(\"start\");\n"
+                        "  if args[1] == \"union\" {\n"
+                        "    b = memory::Buffer<Shape>(); b.grow(1);\n"
+                        "    io::println(b.at(0));\n"
+                        "  }\n"
+                        "  if args[1] == \"function\" {\n"
+                        "    b = memory::Buffer<() -> int>();\n"
+                        "    b.push(fn() => 1); b.grow(1);\n"
+                        "    f = b.get(1); io::println(f());\n"
+                        "  }\n"
+                        "  if args[1] == \"struct\" {\n"
+                        "    b = memory::Buffer<Handler>(); b.grow(1);\n"
+                        "    h = b.get(0); io::println(h.run());\n"
+                        "  }\n"
+                        "  return 0;\n"
+                        "}\n";
+  // The standard library's compiled code, which the C links with.
+  auto extract = [&](const std::filesystem::path &pkm) {
+    auto obj = (dir / (pkm.stem().string() + ".o")).string();
+    auto x = run(std::string(kPaykan) + " pkm extract --object " +
+                 pkm.string() + " -o " + obj + " 2>&1");
+    EXPECT_TRUE(x.exitCode == 0 ||
+                x.out.find("has no compiled code") != std::string::npos)
+        << x.out;
+    return x.exitCode == 0 ? " " + obj : std::string();
+  };
+  std::string stdlib;
+  for (const auto &e :
+       std::filesystem::directory_iterator(PAYKAN_TEST_STDLIB_DIR))
+    stdlib += extract(e.path());
+  // Each of the program's cases panics after printing "start".
+  auto expectPanics = [](const std::string &how, const std::string &cmd) {
+    auto expect = [&](const std::string &what, const std::string &message) {
+      auto r = run(cmd + " " + what + " 2>&1");
+      EXPECT_EQ(r.exitCode, 134) << how << " " << what << ": " << r.out;
+      EXPECT_EQ(r.out.rfind("start\n", 0), 0U)
+          << how << " " << what << ": " << r.out;
+      EXPECT_NE(r.out.find("\npaykan: " + message + "\n"), std::string::npos)
+          << how << " " << what << ": " << r.out;
+    };
+    expect("union", "buffer value 0 was never set");
+    expect("function", "buffer value 1 was never set");
+    expect("struct", "buffer value 0 was never set");
+  };
+  auto everyPath = [&](const std::string &opt) {
+    expectPanics("run " + opt, paykanRun() + " " + opt + " " + src);
+    auto exe = (dir / ("unset" + opt)).string();
+    auto built =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    ASSERT_EQ(built.exitCode, 0) << opt << ": " << built.out;
+    expectPanics("build " + opt, exe);
+    auto c = (dir / ("unset" + opt + ".c")).string();
+    auto emitted = run(std::string(kPaykan) + " " + opt + " --emit-c " + src +
+                       " > " + c + " 2>&1");
+    ASSERT_EQ(emitted.exitCode, 0) << opt << ": " << emitted.out;
+    auto cexe = (dir / ("unset-c" + opt)).string();
+    auto cc = run("cc -std=c11 " + opt + " -I " PAYKAN_RUNTIME_SOURCE_DIR " " +
+                  c + " " PAYKAN_RUNTIME_SOURCE_DIR "/*.c" + stdlib +
+                  " -lm -o " + cexe + " 2>&1");
+    ASSERT_EQ(cc.exitCode, 0) << opt << ": " << cc.out;
+    expectPanics("C " + opt, cexe);
+  };
+  everyPath("-O0");
+  everyPath("-O2");
+  std::filesystem::remove_all(dir);
+}
+
 // Reproducible output (#102): modules are named by their canonical module
 // names, so nothing the compiler produces depends on where the sources live
 // or on the directory it runs in.

@@ -3,7 +3,7 @@
 //
 // Paykan runtime — copying and dropping a value of any type through its
 // PaykanType (Runtime.h, "Generic native functions"), for the C code of
-// generic native functions.
+// generic native functions, and telling storage never set from a value.
 
 #include "Runtime.h"
 
@@ -30,8 +30,11 @@ void PaykanType_drop(const PaykanType *type, void *value) {
 }
 
 int PaykanType_isUnset(const PaykanType *type, const void *value) {
-  for (int64_t k = 0; k < type->nrefs; ++k)
-    if (!(PaykanType_ref(type, k) & 1) && !type_ref(type, value, k))
-      return 1;
-  return 0;
+  for (int64_t k = 0; k < type->nunset; ++k) {
+    int64_t word;
+    memcpy(&word, (const char *)value + PaykanType_unset(type, k), sizeof word);
+    if (word)
+      return 0;
+  }
+  return type->nunset != 0;
 }

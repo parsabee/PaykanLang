@@ -1,0 +1,13 @@
+// expect-panic: buffer value 0 was never set
+import ::io;
+import ::memory;
+
+// Zeros are Named with no Str: no value, so a slot never set is unset.
+enum Shape { Named(s: Str), Empty }
+
+fn main() -> int {
+  b = memory::Buffer<Shape>();
+  b.grow(1);
+  io::println(b.at(0));
+  return 0;
+}

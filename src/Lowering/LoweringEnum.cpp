@@ -10,7 +10,9 @@
 // variant's fields set and every other variant's all zeros, so a copy's
 // retains and a release's releases are a tuple's (a null reference is
 // skipped), and a container's type descriptor marks each reference in it
-// nullable.  What is the enum's own:
+// nullable; all zeros is the first variant with zero fields, so the
+// descriptor tells storage never set by the tag and that variant's words
+// when those are no value (emitTypeDescriptor).  What is the enum's own:
 //
 //   * a variant is made in place (`E::B(1, s)`): zeros, the tag, then each
 //     field initialised as a struct's is;

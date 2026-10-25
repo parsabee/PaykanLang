@@ -1046,7 +1046,12 @@ const void *sample_get(const PaykanType *t, PaykanObject *b, int64_t i);
 A `PaykanType` holds a value's `size` and `align`, its `kind`
 (`PaykanTypeKind`: int, float, bool, char, object, optional or tuple), and where it
 holds references: `nrefs` words follow it, each a `PaykanShared *`'s byte
-offset `<< 1`, `| 1` if it may be `NULL` (`PaykanType_ref`).  An `int` or a
+offset `<< 1`, `| 1` if it may be `NULL` (`PaykanType_ref`).  After them come
+`nunset` words, the byte offsets of the 8-byte words that are all 0 only in
+storage never set (`PaykanType_unset`; `PaykanType_isUnset` tests them): a
+reference that may not be `NULL`, a function value's code word, and a tagged
+union's tag with its first variant's words.  A type whose zero bytes are a
+value, an `int` or an optional, has none.  An `int` or a
 `float` is 8 bytes, a `bool` or a `char` 1, an `int?` or a `float?` 16 and a
 `bool?` or a `char?` 2 (a `bool` that is true when it is present, then its
 payload at the payload's alignment), and a reference an 8-byte

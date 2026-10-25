@@ -10,7 +10,9 @@
 // box for a function that changes it (`inout`).  An index or a count is the
 // program's `unsigned` in an int64_t, so one of 2^63 or more is negative
 // here; a panic prints it unsigned, as the program wrote it.  A value that
-// was never set is all zero bytes: 0, False, or None.
+// was never set is all zero bytes: 0, False, or None, or for a type whose
+// zero bytes are no value (a class, a function value, a tagged union whose
+// first variant holds one) storage the type's PaykanType tells apart.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -51,6 +53,13 @@ static void PaykanBuffer_destroy(PaykanObject *self) {
 /// The buffer whose box is at @p box (an `inout Obj` argument).
 static PaykanBuffer *buffer_at(const void *box) {
   return (PaykanBuffer *)PaykanShared_get_inline(*(PaykanShared *const *)box);
+}
+
+/// Whether the value at @p v of type @p t was never set.  Only a type with
+/// words that tell (`nunset`) is looked at, so a type whose zero bytes are a
+/// value (an int, a Str?) pays for no call.
+static int buffer_unset(const PaykanType *t, const void *v) {
+  return t->nunset && PaykanType_isUnset(t, v);
 }
 
 static void buffer_check_index(const PaykanBuffer *buf, int64_t i) {
@@ -131,7 +140,7 @@ void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i) {
   PaykanBuffer *buf = (PaykanBuffer *)b;
   buffer_check_index(buf, i);
   void *v = buffer_value(buf, i);
-  if (PaykanType_isUnset((const PaykanType *)t, v))
+  if (buffer_unset((const PaykanType *)t, v))
     Paykan_runtime_panic("buffer value %llu was never set",
                          (unsigned long long)i);
   return v;
@@ -140,7 +149,7 @@ void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i) {
 int64_t PaykanBuffer_isSet(void *t, PaykanObject *b, int64_t i) {
   PaykanBuffer *buf = (PaykanBuffer *)b;
   return i >= 0 && i < buf->len &&
-         !PaykanType_isUnset((const PaykanType *)t, buffer_value(buf, i));
+         !buffer_unset((const PaykanType *)t, buffer_value(buf, i));
 }
 
 void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i) {

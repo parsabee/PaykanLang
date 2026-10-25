@@ -809,6 +809,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   where the write ended, a write after a read where the read stopped (at the end in
   `"a+"`), and a read fails with the error of writing out the data before it (`NoSpace`
   on a full disk) instead of reading past it (`PaykanFile.lastOp`; docs/stdlib/io.md).
+- A `memory::Buffer` slot never set was taken for a value when zero bytes are no value of
+  its type but a reference among them may be null: a tagged union whose first variant holds
+  a `Str`, a class or a function value, and a function value itself.  With `enum F { B(s:
+  Str), A }`, `copy(0)` of a new slot gave `Ok` and a `B` whose `Str` was a null reference
+  (a segmentation fault once read, `B(s: None)` printed), `swap` with it succeeded, and a
+  new `() -> int` slot's `get` gave a function value whose call jumped to address 0.  Such
+  a slot is now unset, as a `Str`'s is: `copy` and `swap` give `NotFound`, and `at` and
+  `get` panic with `buffer value <i> was never set` (docs/stdlib/memory.md).  So is one of
+  a struct or a tuple holding a function value, of a tagged union whose first variant holds
+  such a tagged union, and of a generic one's instantiation (`Maybe<Str>`); a type whose
+  zero bytes are a value has no unset slot (`int`, an optional, `enum G { A(n: int, s:
+  Str?), B(s: Str) }`, whose new slot is `A(n: 0, s: None)`).  A `PaykanType` has a fifth
+  word, `nunset`, and after its references names the words of a value that are all 0 only
+  in storage never set: a reference that cannot be `None`, a function value's code word,
+  or a tagged union's tag and its first variant's words (`PaykanType_unset`; Runtime.h,
+  "Generic native functions"; docs/pir.md §4).  It is part of 0.3.0's runtime ABI, so
+  C code of a generic native function is compiled against 0.3.0's `Runtime.h`.  A type
+  that names no such word (`int`, `Str?`) costs no more on `at`, `get`, `copy` and
+  `swap`: the buffer looks at `nunset` before it calls `PaykanType_isUnset`.
 
 ## [0.2.0] - 2026-10-20
 

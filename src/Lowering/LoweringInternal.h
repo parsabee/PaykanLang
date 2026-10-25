@@ -723,6 +723,10 @@ private:
   /// The PaykanType (src/Runtime/Runtime.h) a generic native function is
   /// passed for @p ty: a module data global, one per distinct description.
   Val emitTypeDescriptor(ast::Type *ty);
+  /// The byte offsets of the words of a @p ty value at @p base that are all
+  /// 0 only in storage never set, its PaykanType's `nunset` words: none
+  /// when all zero bytes are a value of @p ty.
+  std::vector<int64_t> unsetWords(ast::Type *ty, int64_t base);
   /// The kind word of @p ty's PaykanType.
   unsigned char nativeTypeKind(ast::Type *ty) const;
   Val emitValueMatch(ast::MatchStmt *node, const Val &subjRaw);
@@ -839,6 +843,10 @@ private:
   /// layout, retains, releases, equality and type descriptors of function
   /// values are this tuple's.
   ast::TupleType *functionValueShape();
+  /// Where a function value's code word is in functionValueShape(): never
+  /// 0 in a value, so a type descriptor names it among the words that tell
+  /// storage never set (emitTypeDescriptor).
+  static int64_t functionCodeOffset();
   /// What a value of @p ty held in memory is laid out as: @p ty itself, or
   /// a tuple for a function value (functionValueShape()), for the optional
   /// of a tuple, a struct or a tagged union (`(bool, T)`: present, then the

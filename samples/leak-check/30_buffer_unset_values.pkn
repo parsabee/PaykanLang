@@ -1,0 +1,123 @@
+// Isolates: memory::Buffer slots never set, of the types whose zero bytes
+// are no value: a tagged union whose first variant holds a Str, a function
+// value, a struct with a function field, a tagged union whose first variant
+// holds such a tagged union, and a generic one.  copy() of such a slot is
+// NotFound, and swap() with one is NotFound and leaves both slots as they
+// were; once set, each slot reads back.  A slot of a type whose zero bytes
+// are a value (an int, an optional function value, a tagged union whose
+// first variant holds an int and an optional, Maybe<int>) reads as that
+// value.
+//
+// Runtime sites: PaykanType_isUnset (Type.c) through PaykanBuffer_isSet,
+// PaykanBuffer_copy and PaykanBuffer_set (Buffer.c), and the Strs and the
+// closures the slots hold.
+//
+// Expected under --track-heap: live blocks : 0.
+
+import ::io;
+import ::error as err;
+import ::memory;
+
+// expect-stdout: Shape: NotFound set NotFound
+// expect-stdout: Shape: NotFound set
+// expect-stdout: Shape: Ok Empty Named(s: n)
+// expect-stdout: fn: NotFound set NotFound 3
+// expect-stdout: fn: Ok 3 4
+// expect-stdout: Handler: NotFound set 12
+// expect-stdout: Outer: NotFound set set Wrap(i: Nothing) Bare
+// expect-stdout: Outer: Wrap(i: Text(s: t))
+// expect-stdout: Maybe<Str>: NotFound set Nada
+// expect-stdout: int: set 0
+// expect-stdout: fn?: set None
+// expect-stdout: Counted: set Count(n: 0, s: None)
+// expect-stdout: Maybe<int>: set Just(v: 0)
+
+enum Shape { Named(s: Str), Empty }
+enum Inner { Text(s: Str), Nothing }
+enum Outer { Wrap(i: Inner), Bare }
+enum Maybe<T> { Just(v: T), Nada }
+enum Counted {
+  Count(n: int, s: Str?),
+  Label(s: Str)
+}
+
+struct Handler {
+  id: int;
+  run: () -> int;
+}
+
+// What copy() of slot `i` gives: "set", or the error's name.
+fn copied<T>(b: memory::Buffer<T>, i: int) -> Str {
+  match b.copy(unsigned(i)) {
+    v: Ok { return "set"; }
+    e: Err { return err::name(e.error.code); }
+  }
+}
+
+fn main() -> int {
+  shapes = memory::Buffer<Shape>();
+  shapes.grow(3);
+  shapes.set(1, Shape::Empty);
+  io::println("Shape: " + copied(shapes, 0) + " " + copied(shapes, 1) + " "
+      + err::name(shapes.swap(0, 1).code));
+  io::println("Shape: " + copied(shapes, 0) + " " + copied(shapes, 1));
+  shapes.set(0, Shape::Named("n"));
+  io::println("Shape: " + err::name(shapes.swap(0, 1).code) + " "
+      + shapes.at(0).toString() + " " + shapes.at(1).toString());
+
+  s = "abc";
+  fns = memory::Buffer<() -> int>();
+  fns.grow(2);
+  fns.set(1, fn() => s.len());
+  f = fns.get(1);
+  io::println("fn: " + copied(fns, 0) + " " + copied(fns, 1) + " "
+      + err::name(fns.swap(0, 1).code) + " " + Str(f()));
+  fns.set(0, fn() => 4);
+  io::println("fn: " + err::name(fns.swap(1, 0).code) + " " + Str(fns.get(0)())
+      + " " + Str(fns.get(1)()));
+
+  handlers = memory::Buffer<Handler>();
+  handlers.grow(1);
+  first = copied(handlers, 0);
+  handlers.set(0, Handler(4, fn() => 12));
+  h = handlers.get(0);
+  io::println("Handler: " + first + " " + copied(handlers, 0) + " "
+      + Str(h.run()));
+
+  outers = memory::Buffer<Outer>();
+  outers.grow(3);
+  outers.set(1, Outer::Wrap(Inner::Nothing));
+  outers.set(2, Outer::Bare);
+  io::println("Outer: " + copied(outers, 0) + " " + copied(outers, 1) + " "
+      + copied(outers, 2) + " " + outers.at(1).toString() + " "
+      + outers.at(2).toString());
+  outers.set(0, Outer::Wrap(Inner::Text("t")));
+  io::println("Outer: " + outers.get(0).toString());
+
+  maybes = memory::Buffer<Maybe<Str>>();
+  maybes.grow(2);
+  maybes.set(1, Maybe<Str>::Nada);
+  io::println("Maybe<Str>: " + copied(maybes, 0) + " " + copied(maybes, 1) + " "
+      + maybes.at(1).toString());
+
+  ints = memory::Buffer<int>();
+  ints.grow(1);
+  io::println("int: " + copied(ints, 0) + " " + Str(ints.at(0)));
+
+  options = memory::Buffer<(() -> int)?>();
+  options.grow(1);
+  match options.get(0) {
+    o: () -> int { io::println("fn?: " + copied(options, 0) + " " + Str(o())); }
+    None { io::println("fn?: " + copied(options, 0) + " None"); }
+  }
+
+  counted = memory::Buffer<Counted>();
+  counted.grow(1);
+  io::println("Counted: " + copied(counted, 0) + " "
+      + counted.at(0).toString());
+
+  justs = memory::Buffer<Maybe<int>>();
+  justs.grow(1);
+  io::println("Maybe<int>: " + copied(justs, 0) + " " + justs.at(0).toString());
+  return 0;
+}

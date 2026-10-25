@@ -9,8 +9,10 @@
 // A buffer has len() slots.  Every index and count is an `unsigned`.  It
 // grows and shrinks only when asked to, and growing a slot at a time is
 // amortised O(1).  A new slot holds zero bytes, which is the value 0, 0.0,
-// False, char 0 or None.  A reference slot that may not be None (a class,
-// Str, a tuple) is unset until stored.
+// False, char 0, None or an enum's first variant.  A slot of a type whose
+// zero bytes are no value is unset until stored: a class or Str, a function
+// value, and a tuple, a struct or a tagged union's first variant holding
+// one (the runtime's PaykanType_isUnset).
 //
 // What can go wrong is reported as ::error's errors, not a panic: memory
 // that is not there for new slots is `OutOfMemory` (the buffer unchanged),

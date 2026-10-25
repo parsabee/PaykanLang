@@ -137,7 +137,10 @@ object's field of type `((int) -> int)?` is `None` already.
   closures by the object's `equals`, identity, two nulls being equal.
 * A `PaykanType` descriptor for a function type (a generic native function's
   argument, a `Buffer<(int) -> int>`'s element) is the tuple's: 16 bytes,
-  one optional reference at offset 8.
+  one optional reference at offset 8.  It also names the code word, at
+  offset 0, as the word that tells storage never set (a buffer's new slot):
+  it is 0 only there and in None, so an optional function type's names
+  none.
 
 At `-O2` LLVM turns an `icall` whose code is known into a direct call, often
 inlined: a lambda passed straight to the function that calls it costs no
