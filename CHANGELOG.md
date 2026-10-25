@@ -791,6 +791,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`Paykan_tryMalloc`, `Paykan_tryRealloc`).  An allocation of 0 bytes is a block of its
   own on every platform, so NULL always means out of memory (C lets `malloc(0)` return
   NULL and `realloc(p, 0)` free `p`).
+- Under `--track-heap` (or `PAYKAN_TRACK_HEAP`), a `memory::Buffer` asked for nearly all of
+  memory overflowed the heap: `reserve(2305843009213693951)` of a `Buffer<int>`, 2^64 - 8
+  bytes, crashed with a segmentation fault and `grow` with `heap corruption or invalid free`,
+  where without tracking both are `OutOfMemory`.  The tracking allocator added its 16-byte
+  header to the size, which wrapped around to a block of 8 bytes.  A size with no room
+  for the header is now out of memory before anything is allocated, so these are
+  `OutOfMemory` too, the buffer unchanged (`Heap.c`).
 
 ## [0.2.0] - 2026-10-20
 

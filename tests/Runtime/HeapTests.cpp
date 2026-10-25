@@ -43,6 +43,12 @@ struct Heap {
 /// left for the tracking back-end's header.
 constexpr size_t kTooBig = SIZE_MAX / 2;
 
+/// Sizes the tracking back-end's 16-byte header does not fit beside: with
+/// it they wrap around to a block of 8, 0 and 15 bytes.  SIZE_MAX - 8 is
+/// what a memory::Buffer of 2^61 - 1 ints asks for.
+constexpr size_t kNoRoomForTheHeader[] = {SIZE_MAX - 8, SIZE_MAX - 15,
+                                          SIZE_MAX};
+
 /// Whether the @p n bytes at @p p are all @p c.
 bool allBytes(const void *p, size_t n, char c) {
   const char *bytes = static_cast<const char *>(p);
@@ -80,6 +86,28 @@ TEST(Heap, AFailedTryReallocKeepsTheBlock) {
       EXPECT_EQ(Paykan_heap_live_blocks(), 1);
       EXPECT_EQ(Paykan_heap_live_bytes(), 32);
     }
+    Paykan_free(p);
+  }
+}
+
+// The tracking back-end adds its header to the size before it allocates: a
+// size that leaves no room for it is out of memory, as it is without
+// tracking, and allocates nothing.
+TEST(Heap, TrackingRejectsASizeWithNoRoomForTheHeader) {
+  Heap heap(1);
+  for (size_t size : kNoRoomForTheHeader) {
+    errno = 0;
+    EXPECT_EQ(Paykan_tryMalloc(size), nullptr) << size;
+    EXPECT_EQ(errno, ENOMEM) << size;
+    EXPECT_EQ(Paykan_heap_live_blocks(), 0) << size;
+    void *p = Paykan_malloc(32);
+    std::memset(p, 'x', 32);
+    errno = 0;
+    EXPECT_EQ(Paykan_tryRealloc(p, size), nullptr) << size;
+    EXPECT_EQ(errno, ENOMEM) << size;
+    EXPECT_TRUE(allBytes(p, 32, 'x')) << size;
+    EXPECT_EQ(Paykan_heap_live_blocks(), 1) << size;
+    EXPECT_EQ(Paykan_heap_live_bytes(), 32) << size;
     Paykan_free(p);
   }
 }
@@ -150,5 +178,24 @@ TEST(HeapDeath, MallocAndReallocPanicWhenOutOfMemory) {
         },
         message)
         << tracking;
+  }
+  for (size_t size : kNoRoomForTheHeader) {
+    const std::string noRoom =
+        "paykan: out of memory allocating " + std::to_string(size) + " bytes";
+    EXPECT_DEATH(
+        {
+          Paykan_heap_set_tracking(1);
+          Paykan_malloc(size);
+        },
+        noRoom)
+        << size;
+    EXPECT_DEATH(
+        {
+          Paykan_heap_set_tracking(1);
+          void *p = Paykan_malloc(8);
+          Paykan_realloc(p, size);
+        },
+        noRoom)
+        << size;
   }
 }

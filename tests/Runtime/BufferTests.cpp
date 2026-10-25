@@ -9,6 +9,7 @@
 
 #include "Names.h"
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -224,6 +225,25 @@ TEST(Buffer, AllocationGrowsGeometricallyAndShrinks) {
   EXPECT_GE(cap(buf), 1000);
   PaykanBuffer_shrink(&kInt, &buf, 999);
   EXPECT_EQ(cap(buf), 8);
+  Paykan_release(buf);
+}
+
+// 2^61 - 1 ints are 2^64 - 8 bytes, which a size_t holds but not with the
+// tracking allocator's header: ENOMEM, as without tracking, and the buffer
+// is unchanged, whether it had no allocation (malloc) or one (realloc).
+TEST(Buffer, ValuesWithNoRoomForTheTrackingHeaderAreOutOfMemory) {
+  TrackingHeap heap;
+  const int64_t most = (INT64_C(1) << 61) - 1;
+  PaykanShared *buf = PaykanBuffer_new(&kInt, 0);
+  EXPECT_EQ(PaykanBuffer_tryReserve(&kInt, &buf, most), ENOMEM);
+  EXPECT_EQ(PaykanBuffer_len(&kInt, obj(buf)), 0);
+  EXPECT_EQ(cap(buf), 0);
+  PaykanBuffer_grow(&kInt, &buf, 1);
+  setInt(&buf, 0, 7);
+  EXPECT_EQ(PaykanBuffer_tryGrow(&kInt, &buf, most - 1), ENOMEM);
+  EXPECT_EQ(PaykanBuffer_tryReserve(&kInt, &buf, most), ENOMEM);
+  EXPECT_EQ(PaykanBuffer_len(&kInt, obj(buf)), 1);
+  EXPECT_EQ(intAt(buf, 0), 7);
   Paykan_release(buf);
 }
 

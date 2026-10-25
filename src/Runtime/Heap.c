@@ -56,6 +56,12 @@ typedef struct PaykanHeapHeader {
 #define PAYKAN_HEAP_HEADER_SIZE                                                \
   ((sizeof(PaykanHeapHeader) + 15UL) & ~((size_t)15UL))
 
+// The largest payload whose block, header included, a size_t can measure.
+// A larger one is out of memory: the sum would wrap around to a small block
+// (2^64 - 8 bytes, a memory::Buffer of 2^61 - 1 ints, to 8) that the header
+// and the payload overflow, or to 0, which realloc may take as a free.
+#define PAYKAN_HEAP_MAX_PAYLOAD (SIZE_MAX - PAYKAN_HEAP_HEADER_SIZE)
+
 static PaykanHeapStats g_stats;
 
 static void heap_record_alloc(uint64_t size) {
@@ -85,7 +91,9 @@ static PaykanHeapHeader *heap_header_of(void *payload) {
 
 static void *tracking_malloc(size_t size) {
   PaykanHeapHeader *h =
-      (PaykanHeapHeader *)malloc(PAYKAN_HEAP_HEADER_SIZE + size);
+      size <= PAYKAN_HEAP_MAX_PAYLOAD
+          ? (PaykanHeapHeader *)malloc(PAYKAN_HEAP_HEADER_SIZE + size)
+          : NULL;
   if (!h) {
     errno = ENOMEM;
     return NULL;
@@ -105,7 +113,9 @@ static void *tracking_realloc(void *ptr, size_t size) {
   uint64_t oldSize = oldH->size;
 
   PaykanHeapHeader *newH =
-      (PaykanHeapHeader *)realloc(oldH, PAYKAN_HEAP_HEADER_SIZE + size);
+      size <= PAYKAN_HEAP_MAX_PAYLOAD
+          ? (PaykanHeapHeader *)realloc(oldH, PAYKAN_HEAP_HEADER_SIZE + size)
+          : NULL;
   if (!newH) {
     errno = ENOMEM;
     return NULL; // original block left intact, counters unchanged
