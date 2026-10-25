@@ -578,10 +578,12 @@ int64_t PaykanEnum_equals(const void *a, const void *b, const int64_t *layout);
 // (a `view Obj`), or one that changes it as the address of its box (an
 // `inout Obj`).  They are declared with the C types the backends give a
 // native function's parameters: `void *` for a PaykanType and any other
-// address.  A new value is all zero bytes: 0, False or None.  Destroying the
-// buffer drops the values.  An index out of bounds, a negative count,
+// address.  An index or a count is the program's `unsigned` in an int64_t,
+// so one of 2^63 or more is negative here.  A new value is all zero bytes:
+// 0, False or None.  Destroying the buffer drops the values.  An index out
+// of bounds, a count the memory is not there for (2^63 or more never is),
 // shrinking by more than len and reading a never-set reference of a type
-// that may not be NULL panic.
+// that may not be NULL panic, with the index or count printed unsigned.
 
 typedef struct PaykanBuffer {
   PaykanMethod *vtable; // points to PaykanBuffer_vtable

@@ -761,6 +761,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pipe or a file that standard error shared (`paykan run --track-heap hello.pkn 2>&1 | cat`
   printed `paykan heap stats:` first).  The runtime now flushes standard output before it
   prints them (`Paykan_heap_dump`), on all three paths.
+- A `memory::Buffer` panic printed an index of 2^63 or more, an `unsigned` the program
+  passed, as a negative number: `b.at(unsigned(9223372036854775807) + unsigned(1))` panicked
+  with `buffer index -9223372036854775808 out of bounds (len=1)`.  The runtime's Buffer
+  panics now print indices and counts unsigned (`buffer index 9223372036854775808 out of
+  bounds (len=1)`).  A count of 2^63 or more given to the runtime's `PaykanBuffer_new`,
+  `PaykanBuffer_reserve` or `PaykanBuffer_grow` panics with `out of memory growing a buffer
+  to <n> values` (or `by <n> values`), as `PaykanBuffer_tryGrow` and `PaykanBuffer_tryReserve`
+  report `ENOMEM` for it, instead of `the count cannot be negative`, and `PaykanBuffer_shrink`
+  with one with `buffer shrink by <n>: it has only <len> values`.
 
 ## [0.2.0] - 2026-10-20
 

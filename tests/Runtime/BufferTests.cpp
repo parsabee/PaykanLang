@@ -10,6 +10,7 @@
 #include "Names.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -235,6 +236,23 @@ TEST(BufferDeath, OutOfBoundsPanics) {
   Paykan_release(buf);
 }
 
+// An index is the standard library's `unsigned`, in an int64_t: one of 2^63
+// or more is negative here, and a panic prints it as the program wrote it.
+TEST(BufferDeath, AnIndexPastINT64MaxPanicsUnsigned) {
+  PaykanShared *buf = PaykanBuffer_new(&kInt, 3);
+  EXPECT_DEATH(PaykanBuffer_get(&kInt, obj(buf), -1),
+               "buffer index 18446744073709551615 out of bounds \\(len=3\\)");
+  EXPECT_DEATH(PaykanBuffer_get(&kInt, obj(buf), INT64_MIN),
+               "buffer index 9223372036854775808 out of bounds \\(len=3\\)");
+  int64_t out = 0;
+  EXPECT_DEATH(PaykanBuffer_copy(&kInt, &out, obj(buf), INT64_MIN),
+               "buffer index 9223372036854775808 out of bounds \\(len=3\\)");
+  EXPECT_DEATH(setInt(&buf, -2, 1),
+               "buffer index 18446744073709551614 out of bounds \\(len=3\\)");
+  EXPECT_EQ(PaykanBuffer_isSet(&kInt, obj(buf), INT64_MIN), 0);
+  Paykan_release(buf);
+}
+
 TEST(BufferDeath, NeverSetReferencePanics) {
   PaykanShared *buf = PaykanBuffer_new(&kStr.head, 1);
   EXPECT_DEATH(PaykanBuffer_get(&kStr.head, obj(buf), 0),
@@ -245,14 +263,21 @@ TEST(BufferDeath, NeverSetReferencePanics) {
   Paykan_release(buf);
 }
 
+// A count is an `unsigned` too: one of 2^63 or more (negative here) is more
+// values than there is memory for (PaykanBuffer_tryGrow's ENOMEM), and the
+// panics print it unsigned.
 TEST(BufferDeath, BadCountsPanic) {
   PaykanShared *buf = PaykanBuffer_new(&kInt, 3);
-  EXPECT_DEATH(PaykanBuffer_new(&kInt, -1), "cannot be negative");
+  EXPECT_DEATH(PaykanBuffer_new(&kInt, -1),
+               "out of memory growing a buffer to 18446744073709551615 values");
   EXPECT_DEATH(PaykanBuffer_grow(&kInt, &buf, -2),
-               "buffer grow by -2: the count cannot be negative");
-  EXPECT_DEATH(PaykanBuffer_reserve(&kInt, &buf, -1), "cannot be negative");
+               "out of memory growing a buffer by 18446744073709551614 values");
+  EXPECT_DEATH(PaykanBuffer_reserve(&kInt, &buf, INT64_MIN),
+               "out of memory growing a buffer to 9223372036854775808 values");
   EXPECT_DEATH(PaykanBuffer_shrink(&kInt, &buf, 4),
                "buffer shrink by 4: it has only 3 values");
+  EXPECT_DEATH(PaykanBuffer_shrink(&kInt, &buf, -1),
+               "buffer shrink by 18446744073709551615: it has only 3 values");
   Paykan_release(buf);
 }
 

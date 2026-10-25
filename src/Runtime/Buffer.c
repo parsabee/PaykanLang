@@ -7,8 +7,10 @@
 // `type->size` bytes (Runtime.h, "Buffer").  The program reaches it only
 // through generic native functions, which are passed T's PaykanType first
 // and then the buffer: its object, borrowed (`view`), or the address of its
-// box for a function that changes it (`inout`).  A value that was never set
-// is all zero bytes: 0, False, or None.
+// box for a function that changes it (`inout`).  An index or a count is the
+// program's `unsigned` in an int64_t, so one of 2^63 or more is negative
+// here; a panic prints it unsigned, as the program wrote it.  A value that
+// was never set is all zero bytes: 0, False, or None.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
@@ -51,18 +53,10 @@ static PaykanBuffer *buffer_at(const void *box) {
   return (PaykanBuffer *)PaykanShared_get_inline(*(PaykanShared *const *)box);
 }
 
-/// @p n as a value count; a negative one is the program's mistake.
-static int64_t buffer_count(const char *what, int64_t n) {
-  if (n < 0)
-    Paykan_runtime_panic("buffer %s %lld: the count cannot be negative", what,
-                         (long long)n);
-  return n;
-}
-
 static void buffer_check_index(const PaykanBuffer *buf, int64_t i) {
   if (i < 0 || i >= buf->len)
-    Paykan_runtime_panic("buffer index %lld out of bounds (len=%lld)",
-                         (long long)i, (long long)buf->len);
+    Paykan_runtime_panic("buffer index %llu out of bounds (len=%llu)",
+                         (unsigned long long)i, (unsigned long long)buf->len);
 }
 
 /// Room for @p cap values: 0, or C's errno (ENOMEM when the size does not
@@ -102,21 +96,21 @@ static int buffer_try_lengthen(PaykanBuffer *buf, int64_t len) {
   return 0;
 }
 
-/// buffer_try_lengthen, for the callers that panic when it fails.
+/// buffer_try_lengthen, for the callers that panic when it fails.  A length
+/// of 2^63 or more (negative here) does not fit either.
 static void buffer_lengthen(PaykanBuffer *buf, int64_t len) {
-  if (buffer_try_lengthen(buf, len))
-    Paykan_runtime_panic("out of memory growing a buffer to %lld values",
-                         (long long)len);
+  if (len < 0 || buffer_try_lengthen(buf, len))
+    Paykan_runtime_panic("out of memory growing a buffer to %llu values",
+                         (unsigned long long)len);
 }
 
 static void buffer_realloc(PaykanBuffer *buf, int64_t cap) {
   if (buffer_try_realloc(buf, cap))
-    Paykan_runtime_panic("out of memory resizing a buffer to %lld values",
-                         (long long)cap);
+    Paykan_runtime_panic("out of memory resizing a buffer to %llu values",
+                         (unsigned long long)cap);
 }
 
 PaykanShared *PaykanBuffer_new(void *t, int64_t n) {
-  int64_t len = buffer_count("of", n);
   PaykanBuffer *buf = (PaykanBuffer *)Paykan_malloc(sizeof(PaykanBuffer));
   buf->vtable = PaykanBuffer_vtable;
   buf->strong = 0; // unowned until boxed
@@ -125,7 +119,7 @@ PaykanShared *PaykanBuffer_new(void *t, int64_t n) {
   buf->data = NULL;
   buf->len = 0;
   buf->cap = 0;
-  buffer_lengthen(buf, len);
+  buffer_lengthen(buf, n);
   return PaykanShared_new((PaykanObject *)buf);
 }
 
@@ -139,7 +133,8 @@ void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i) {
   buffer_check_index(buf, i);
   void *v = buffer_value(buf, i);
   if (PaykanType_isUnset((const PaykanType *)t, v))
-    Paykan_runtime_panic("buffer value %lld was never set", (long long)i);
+    Paykan_runtime_panic("buffer value %llu was never set",
+                         (unsigned long long)i);
   return v;
 }
 
@@ -171,17 +166,17 @@ void PaykanBuffer_set(void *type, void *b, int64_t i, void *v) {
 
 void PaykanBuffer_reserve(void *t, void *b, int64_t n) {
   (void)t;
-  buffer_lengthen(buffer_at(b), buffer_count("reserve", n));
+  buffer_lengthen(buffer_at(b), n);
 }
 
 void PaykanBuffer_grow(void *t, void *b, int64_t by) {
   (void)t;
   PaykanBuffer *buf = buffer_at(b);
-  int64_t n = buffer_count("grow by", by);
-  if (n > INT64_MAX - buf->len)
-    Paykan_runtime_panic("out of memory growing a buffer by %lld values",
-                         (long long)n);
-  buffer_lengthen(buf, buf->len + n);
+  // A count of 2^63 or more (negative here) cannot fit either.
+  if (by < 0 || by > INT64_MAX - buf->len)
+    Paykan_runtime_panic("out of memory growing a buffer by %llu values",
+                         (unsigned long long)by);
+  buffer_lengthen(buf, buf->len + by);
 }
 
 int64_t PaykanBuffer_tryGrow(void *t, void *b, int64_t by) {
@@ -204,12 +199,11 @@ int64_t PaykanBuffer_tryReserve(void *t, void *b, int64_t n) {
 void PaykanBuffer_shrink(void *t, void *b, int64_t by) {
   (void)t;
   PaykanBuffer *buf = buffer_at(b);
-  int64_t n = buffer_count("shrink by", by);
-  if (n > buf->len)
-    Paykan_runtime_panic("buffer shrink by %lld: it has only %lld values",
-                         (long long)n, (long long)buf->len);
-  buffer_drop(buf, buf->len - n, buf->len);
-  buf->len -= n;
+  if (by < 0 || by > buf->len)
+    Paykan_runtime_panic("buffer shrink by %llu: it has only %llu values",
+                         (unsigned long long)by, (unsigned long long)buf->len);
+  buffer_drop(buf, buf->len - by, buf->len);
+  buf->len -= by;
   int64_t cap = buf->cap;
   while (cap / 2 >= PAYKAN_BUFFER_MIN_CAP && buf->len <= cap / 4)
     cap /= 2;

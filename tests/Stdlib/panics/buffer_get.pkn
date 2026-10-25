@@ -1,0 +1,10 @@
+// expect-panic: buffer index 9223372036854775808 out of bounds (len=1)
+import ::io;
+import ::memory;
+
+fn main() -> int {
+  b = memory::Buffer<Str>();
+  b.push("one");
+  io::println(b.get(unsigned(9223372036854775807) + unsigned(1)));
+  return 0;
+}
