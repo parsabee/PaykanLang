@@ -869,6 +869,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the statement) cannot be passed to 'inout' parameter 'n'`).
   `samples/leak-check/31_conditional_receivers.pkn` reads, assigns, passes and matches such
   fields on both branches.
+- What a `view` holds could change through a conditional of it: with `a: view Node` and
+  `b: Node`, `(if k == 0 then a else b).inc()` called a method that is not a `view fn` on
+  `a`'s object, and `(if k == 0 then a else b).child` could be stored, passed to a
+  parameter that is not `view` or returned.  Once a field of a conditional's object was
+  compiled (above), `(if k == 0 then a else b).n = 7`, `+=` and `bump((if k == 0 then a
+  else b).n)` wrote it too, and so did `(if k == 0 then self else o).n = 99` in a `view
+  fn`.  Sema's `view` checks looked only at a variable the place is in; a conditional's
+  object is now what either branch holds, and it gets the errors that branch would (`'a'
+  is a 'view' parameter; cannot assign to its field 'n'`, `'self' is read-only in 'view fn
+  peek'; ...`), nested conditionals and `view` locals included.  A method that changes
+  `self` through a conditional is no longer told it never changes `self` (`make it a
+  'view fn'`).
 - `<`, `<=`, `>` and `>=` on two `char`s compared their bytes as signed, so a byte of 128 to
   255 ordered below every ASCII one, against the language's ordering by code, `0` to `255`
   as `int(c)` reads it: `char(200) > char(100)` was `False`, and so was `"é"[0] > 'z'`, on

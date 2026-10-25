@@ -236,7 +236,10 @@ or an element (`'c' is a 'view' parameter; cannot assign to its field 'n'`), no 
 element passed to an `inout` parameter, and only a `view fn` can be called on it
 (`toString`, `equals`, `len`, or a method of its class declared `view fn`, see
 [Methods that don't change `self`](05-classes.md#methods-that-dont-change-self); `'c' is a
-'view' parameter; 'tick' is not a 'view fn'`).
+'view' parameter; 'tick' is not a 'view fn'`). A conditional's object is what one of its
+branches holds, so it cannot change where either branch's could not: with `d` a `Counter`
+that may change, `(if k == 0 then c else d).n = 2` and `(if k == 0 then c else d).tick()`
+are the same errors.
 
 ```pkn
 import ::io;
