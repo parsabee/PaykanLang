@@ -277,6 +277,46 @@ int failBackend(const paykan::Status &s) {
   return EXIT_FAILURE;
 }
 
+/// Whether @p a and @p b are one file, however each is spelled: through
+/// `.`, `..` or repeated slashes, a symbolic or a hard link, or in another
+/// case on a case-insensitive file system.  A path that names no file is no
+/// other file.
+bool sameFile(const std::filesystem::path &a, const std::filesystem::path &b) {
+  std::error_code ec;
+  return std::filesystem::equivalent(a, b, ec) && !ec;
+}
+
+/// Why the driver must not write @p output: it is a file the command reads
+/// (the source file, or the module file of `pkm`, or an --object file);
+/// "" when it is none of them.
+std::string overwritesInput(const std::string &output, const Options &opts) {
+  std::vector<std::string> inputs{opts.InputFilename};
+  inputs.insert(inputs.end(), opts.Objects.begin(), opts.Objects.end());
+  for (const std::string &input : inputs) {
+    if (!sameFile(output, input))
+      continue;
+    std::string why = "the output '";
+    why += output;
+    why += "' is the input file '";
+    why += input;
+    why += "' (choose another with -o)";
+    return why;
+  }
+  return {};
+}
+
+/// The executable `build` writes without -o, in the current directory: the
+/// source file's name without its `.pkn` (or `.pk`) extension, or with
+/// `.out` added to a name that has neither (`prog` gives `prog.out`, and
+/// `prog.pkn.bak` gives `prog.pkn.bak.out`, not the name of another
+/// source).
+std::string defaultExecutable(const std::string &input) {
+  std::filesystem::path name = std::filesystem::path(input).filename();
+  if (name.extension() == ".pkn" || name.extension() == ".pk")
+    return name.stem().string();
+  return name.string() + ".out";
+}
+
 /// Selecting a plugin this paykan does not accept (#103), an ambiguous
 /// one, or naming a --plugin file that is rejected: exit status 2.
 constexpr int kExitIncompatiblePlugin = 2;
@@ -371,6 +411,8 @@ int pkmTool(const Options &opts) {
                                                     .replace_extension(".o")
                                                     .string()
                                               : opts.OutputPath;
+    if (std::string why = overwritesInput(out, opts); !why.empty())
+      return fail(why);
     if (paykan::Status s =
             backend->emitModuleObject(toBackend(*object), opts.optLevel(), out);
         !s)
@@ -734,6 +776,8 @@ int main(int argc, char *argv[]) {
                                     ? std::filesystem::path(opts.InputFilename)
                                           .replace_extension(".pkm")
                                     : std::filesystem::path(opts.OutputPath);
+    if (std::string why = overwritesInput(out.string(), opts); !why.empty())
+      return fail(why);
     std::vector<std::string> deps;
     for (auto *imp : root->getImports())
       for (auto &m : imp->getModules())
@@ -827,7 +871,11 @@ int main(int argc, char *argv[]) {
     if (!caps.EmitExecutable)
       return fail("backend '" + backendName + "' cannot build executables");
     paykan::backend::EmitOptions eo;
-    eo.OutputPath = opts.OutputPath;
+    eo.OutputPath = opts.OutputPath.empty()
+                        ? defaultExecutable(opts.InputFilename)
+                        : opts.OutputPath;
+    if (std::string why = overwritesInput(eo.OutputPath, opts); !why.empty())
+      return fail(why);
     paykan::Status s =
         backend->emit(in, paykan::backend::EmitKind::Executable, eo, std::cout);
     return s ? EXIT_SUCCESS : failBackend(s);

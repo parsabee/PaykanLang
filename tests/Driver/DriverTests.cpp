@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -23,6 +24,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <sys/wait.h>
@@ -2292,4 +2294,160 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
         "'io::File' cannot be constructed here: its initializer '___init__' "
         "is private to module '::io'"})
     EXPECT_NE(out.find(line), std::string::npos) << line << "\n" << out;
+}
+
+// -- What the driver writes: never a file the command reads (finding 18)
+
+namespace {
+
+/// A fresh, empty directory for one test, under the temporary directory.
+std::filesystem::path freshDir(const std::string &name) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_" + name + "_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  return dir;
+}
+
+const std::string kHello =
+    "import ::io;\nfn main() -> int { io::println(\"hello\"); return 0; }\n";
+
+/// Names of @p file, in @p dir, other than its own, as a command run in
+/// @p dir may spell them: `./f`, `<dir>//f`, `sub/../f`, a symbolic and a
+/// hard link, and the name in upper case when the file system ignores case
+/// (macOS's, by default).
+std::vector<std::string> otherNames(const std::filesystem::path &dir,
+                                    const std::string &file) {
+  namespace fs = std::filesystem;
+  fs::create_directories(dir / "sub");
+  fs::create_symlink(file, dir / ("sym_" + file));
+  fs::create_hard_link(dir / file, dir / ("hard_" + file));
+  std::vector<std::string> names{"./" + file, dir.string() + "//" + file,
+                                 "sub/../" + file, "sym_" + file,
+                                 "hard_" + file};
+  std::string upper = file;
+  for (char &c : upper)
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  if (fs::exists(dir / upper))
+    names.push_back(upper);
+  return names;
+}
+
+} // namespace
+
+// `build` without -o drops only a `.pkn` or `.pk` extension: a source file
+// with another, or none, gets `.out` added, so the executable replaces
+// neither it (`noext`) nor another source (`main.pkn` for `main.pkn.bak`).
+TEST(Driver, BuildsDefaultOutputNeverReplacesASource) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("build_default");
+  const char *const sources[] = {"noext", "main.pkn", "main.pkn.bak",
+                                 "short.pk"};
+  for (const char *name : sources)
+    std::ofstream(dir / name) << kHello;
+  for (const auto &[source, output] :
+       {std::pair{"noext", "noext.out"},
+        std::pair{"main.pkn.bak", "main.pkn.bak.out"},
+        std::pair{"short.pk", "short"}}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " build " + source + " 2>&1");
+    EXPECT_EQ(rc, 0) << source << ": " << out;
+    auto [rc2, out2] = run((dir / output).string() + " 2>&1");
+    EXPECT_EQ(rc2, 0) << output << ": " << out2;
+    EXPECT_EQ(out2, "hello\n") << output;
+  }
+  for (const char *name : sources)
+    EXPECT_EQ(slurp(dir / name), kHello) << name;
+  std::filesystem::remove_all(dir);
+}
+
+// An output that is the source file or an --object file, by any name, is
+// an error, and the file keeps its bytes: -o's, and the default (`same`, a
+// link to `same.pkn`).
+TEST(Driver, BuildNeverWritesOverItsInput) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("build_same");
+  std::ofstream(dir / "same.pkn") << kHello;
+  std::ofstream(dir / "obj.o") << "not an object";
+  auto refused = [&](const std::string &args, const std::string &output,
+                     const std::string &input) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + paykanRun() + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_NE(out.find("paykan: the output '" + output +
+                       "' is the input file '" + input +
+                       "' (choose another with -o)"),
+              std::string::npos)
+        << args << ": " << out;
+  };
+  std::vector<std::string> names = otherNames(dir, "same.pkn");
+  names.emplace_back("same.pkn");
+  for (const std::string &name : names)
+    refused(" build same.pkn -o " + name, name, "same.pkn");
+  std::filesystem::create_symlink("same.pkn", dir / "same");
+  refused(" build same.pkn", "same", "same.pkn");
+  refused(" build same.pkn --object=obj.o -o ./obj.o", "./obj.o", "obj.o");
+  EXPECT_EQ(slurp(dir / "same.pkn"), kHello);
+  EXPECT_EQ(slurp(dir / "obj.o"), "not an object");
+  std::filesystem::remove_all(dir);
+}
+
+// --emit-pkm: the module file is never written over the source file, by any
+// name, nor by default over a source file whose name ends in `.pkm`.
+TEST(Driver, EmitPkmNeverWritesOverItsInput) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("emitpkm_same");
+  const std::string lib = "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "lib.pkn") << lib;
+  std::ofstream(dir / "odd.pkm") << lib;
+  auto refused = [&](const std::string &args, const std::string &output,
+                     const std::string &input) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + paykanRun() + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_NE(out.find("paykan: the output '" + output +
+                       "' is the input file '" + input + "'"),
+              std::string::npos)
+        << args << ": " << out;
+  };
+  std::vector<std::string> names = otherNames(dir, "lib.pkn");
+  names.emplace_back("lib.pkn");
+  for (const std::string &name : names)
+    refused(" --emit-pkm lib.pkn -o " + name, name, "lib.pkn");
+  refused(" --emit-pkm odd.pkm", "odd.pkm", "odd.pkm");
+  EXPECT_EQ(slurp(dir / "lib.pkn"), lib);
+  EXPECT_EQ(slurp(dir / "odd.pkm"), lib);
+  std::filesystem::remove_all(dir);
+}
+
+// `pkm extract --object`: the object is never written over the module
+// file, by any name, nor by default over a module file named `<name>.o`.
+TEST(Driver, PkmExtractNeverWritesOverTheModuleFile) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("extract_same");
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto emit = run("cd " + dir.string() + " && " + paykanRun() +
+                  " --emit-pkm lib.pkn 2>&1");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  const std::string pkm = slurp(dir / "lib.pkm");
+  std::filesystem::copy_file(dir / "lib.pkm", dir / "mod.o");
+  auto refused = [&](const std::string &args, const std::string &output,
+                     const std::string &input) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + kPaykan + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_NE(out.find("paykan: the output '" + output +
+                       "' is the input file '" + input + "'"),
+              std::string::npos)
+        << args << ": " << out;
+  };
+  std::vector<std::string> names = otherNames(dir, "lib.pkm");
+  names.emplace_back("lib.pkm");
+  for (const std::string &name : names)
+    refused(" pkm extract --object lib.pkm -o " + name, name, "lib.pkm");
+  refused(" pkm extract --object mod.o", "mod.o", "mod.o");
+  EXPECT_EQ(slurp(dir / "lib.pkm"), pkm);
+  EXPECT_EQ(slurp(dir / "mod.o"), pkm);
+  std::filesystem::remove_all(dir);
 }

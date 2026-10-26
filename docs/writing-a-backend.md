@@ -208,8 +208,9 @@ public:
   capabilities before calling the backend, so `emit`/`run` only ever see
   requests the backend declared.
 - **`emit()`** translates the program. For `EmitKind::Source` the output goes
-  to `out`; for `Object`/`Executable` it goes to `opts.OutputPath` (`""` means
-  a default next to the input).
+  to `out`; for `Object`/`Executable` it goes to `opts.OutputPath`, which the
+  driver always names (`build`'s `-o`, or one made from the source file's
+  name).
 - **`run()`** executes the program and returns its exit code. `args[0]` is the
   script path, like `argv[0]`. `opts.TrackHeap` is the driver's `--track-heap`:
   an in-process backend switches the runtime's tracking allocator on

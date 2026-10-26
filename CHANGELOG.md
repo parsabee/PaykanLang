@@ -962,6 +962,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MB to `--emit-pir`, most of it spent printing 96 MB of indented PIR, and 7.8 s and 82 MB
   to `build`, most of it in the MLIR and LLVM pipelines.  The verifier reports what it did
   before, and the samples compile as fast as they did.
+- `paykan build` could write its executable over the source file, and `--emit-pkm` and
+  `pkm extract --object` their output over their input, each with exit status 0: `build
+  noext` replaced `noext`, `build main.pkn.bak` replaced `main.pkn` (another source), and
+  `build same.pkn -o ./same.pkn`, `--emit-pkm lib.pkn -o lib.pkn` and `pkm extract --object
+  lib.pkm -o lib.pkm` replaced the file they read.  The driver now writes no file the
+  command reads, the source file, the module file of `pkm extract` or an `--object` file,
+  whatever path names it (`./a.pkn`, `d//a.pkn`, `sub/../a.pkn`, a symbolic or a hard link,
+  or another case on a case-insensitive file system): `paykan: the output './same.pkn' is
+  the input file 'same.pkn' (choose another with -o)`, exit status 1.  `build`'s default
+  output drops only a `.pkn` or `.pk` extension and adds `.out` to a name with neither
+  (`noext.out`, `main.pkn.bak.out`); the driver names it, so the backends have no default
+  of their own (docs/language/17-the-paykan-command.md, "Commands").
 
 ## [0.2.0] - 2026-10-20
 

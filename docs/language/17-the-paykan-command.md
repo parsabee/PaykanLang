@@ -17,9 +17,11 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
   compiles the program and runs it. Everything after the source file is passed to the
   program, so options for `paykan` itself go before the file. `paykan`'s exit status is the
   program's: what `main` returned, or 134 when the program panicked.
-- **`build`** compiles the program into a native executable named by `-o`, or after the
-  source file without its extension. `build` takes no program arguments, so its options may
-  also come after the file.
+- **`build`** compiles the program into a native executable named by `-o`, or else written
+  to the current directory and named after the source file without its `.pkn` (or `.pk`)
+  extension: `prog.pkn` gives `prog`, and a name with neither gets `.out` added, so `prog`
+  gives `prog.out`. `build` takes no program arguments, so its options may also come after
+  the file.
 - **`pkm`** inspects a module file (see [Module Files](15-modules.md#module-files)): `dump`
   prints it (`--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads` prints one
   part; `tmpl` adds the text of the generic templates, `code` is exactly the module's PIR
@@ -30,6 +32,11 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
 
 The source file is the program's **main file**. Its directory is the source root from which
 imports are resolved (see [Modules](15-modules.md)).
+
+No command writes over a file it reads. When the file that `build`, `--emit-pkm` or
+`pkm extract` is to write is the source file, the module file `pkm extract` reads or an
+`--object` file, under any name (another spelling of its path, such as `./prog.pkn`, or a
+symbolic or a hard link), `paykan` writes nothing, says so and exits with status 1.
 
 When compilation fails, `paykan` prints the errors and exits with status 1. A wrong
 option prints a message suggesting `--help`, and also exits with 1.
