@@ -32,7 +32,10 @@
 #include "paykan/plugin_api.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -277,6 +280,28 @@ int failBackend(const paykan::Status &s) {
   return EXIT_FAILURE;
 }
 
+/// @p status for a command that wrote to standard output, once what it
+/// wrote is flushed, or EXIT_FAILURE with a message when some of it could
+/// not be written (a full disk, say): a stream that failed takes no more
+/// output, so the error is reported here, at the end.  The message gives
+/// the reason when the final flush is the write that failed; that of an
+/// earlier write may since have been overwritten (coreutils' close_stdout
+/// does the same).
+int finishStdout(int status) {
+  bool failed = !std::cout;
+  std::cout.clear();
+  errno = 0;
+  std::cout.flush();
+  int error = errno;
+  if (!failed && std::cout && !std::ferror(stdout))
+    return status;
+  std::cerr << "paykan: cannot write to standard output";
+  if (error != 0)
+    std::cerr << ": " << std::strerror(error);
+  std::cerr << "\n";
+  return EXIT_FAILURE;
+}
+
 /// Whether @p a and @p b are one file, however each is spelled: through
 /// `.`, `..` or repeated slashes, a symbolic or a hard link, or in another
 /// case on a case-insensitive file system.  A path that names no file is no
@@ -441,7 +466,7 @@ int pkmTool(const Options &opts) {
     std::ostream nowhere(nullptr);
     if (!codeText(nowhere))
       ok = false;
-    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    return finishStdout(ok ? EXIT_SUCCESS : EXIT_FAILURE);
   }
   pkm::DumpOptions dopts;
   using S = pkm::DumpOptions::Section;
@@ -475,8 +500,7 @@ int pkmTool(const Options &opts) {
       std::cout << "pir:\n";
     ok = codeText(std::cout);
   }
-  std::cout.flush();
-  return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+  return finishStdout(ok ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
 /// The canonical name of the main module and the root its imports are
@@ -557,7 +581,7 @@ int main(int argc, char *argv[]) {
   const Options &opts = parsed.Opts;
   if (opts.ShowHelp && !opts.ShowVersion) {
     paykan::driver::printUsage(std::cout, argv[0]);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   if (opts.Cmd == Command::Pkm) {
     if (!parsed.Error.empty())
@@ -583,15 +607,15 @@ int main(int argc, char *argv[]) {
       paykan::plugin::loadPlugins(discovery);
   if (opts.ShowVersion) {
     printVersion(plugins);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   if (opts.ListFrontends) {
     listFrontends(plugins);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   if (opts.ListBackends) {
     listBackends(plugins);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   if (!parsed.Error.empty())
     return fail(parsed.Error + ". Try: '" + argv[0] + " --help'");
@@ -644,8 +668,9 @@ int main(int argc, char *argv[]) {
   driver.setDiagEngine(&diag);
 
   if (opts.DumpTokens)
-    return driver.dumpTokens(opts.InputFilename, std::cout) == 0 ? EXIT_SUCCESS
-                                                                 : EXIT_FAILURE;
+    return finishStdout(driver.dumpTokens(opts.InputFilename, std::cout) == 0
+                            ? EXIT_SUCCESS
+                            : EXIT_FAILURE);
 
   if (driver.parseFile(opts.InputFilename) != 0) {
     std::cerr << "parsing failed with " << driver.getErrorCount()
@@ -657,15 +682,14 @@ int main(int argc, char *argv[]) {
   if (opts.DumpAST) {
     paykan::ast::ASTPrinter printer(std::cout);
     printer.visit(root);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   if (opts.EmitAST) {
     // What a frontend plugin returns (docs/plugins/ast-format.md).
     std::string error;
     if (!paykan::ast::interchange::write(*root, std::cout, error))
       return fail("cannot write the AST: " + error);
-    std::cout.flush();
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
 
   // -- Backend
@@ -865,8 +889,7 @@ int main(int argc, char *argv[]) {
     stats.print(std::cerr);
   if (opts.EmitPIR) {
     paykan::pir::print(program, std::cout);
-    std::cout.flush();
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   in.Program = &program;
   // The compiled code of the modules loaded from a `.pkm` that has some.
@@ -884,8 +907,7 @@ int main(int argc, char *argv[]) {
     eo.SourceStage = opts.EmitStage;
     paykan::Status s =
         backend->emit(in, paykan::backend::EmitKind::Source, eo, std::cout);
-    std::cout.flush();
-    return s ? EXIT_SUCCESS : failBackend(s);
+    return s ? finishStdout(EXIT_SUCCESS) : failBackend(s);
   }
 
   if (opts.Cmd == Command::Build) {

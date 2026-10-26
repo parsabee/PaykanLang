@@ -993,6 +993,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extract -o` fail.  Only the module cache makes its directories now: `paykan: cannot write
   nd/sub/x.pkm: the directory 'nd/sub' does not exist`, exit status 1.  The standard
   library's build makes its staging directory before it writes the modules there.
+- A command whose standard output could not be written exited with status 0, its output
+  lost: `paykan --emit-c hello.pkn > /dev/full`, and the same for `--emit-pir`,
+  `--emit-llvm`, `--emit-mlir`, `--emit-ast`, `--dump-ast`, `--dump-tokens`, `--help`,
+  `--version`, `--list-*`, `pkm dump` and `pkm check`.  Each now checks standard output once
+  it is done: `paykan: cannot write to standard output: No space left on device` (the reason
+  when the last write is the one that failed), exit status 1.
 
 ## [0.2.0] - 2026-10-20
 

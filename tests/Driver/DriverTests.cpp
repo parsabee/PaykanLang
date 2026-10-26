@@ -2469,3 +2469,36 @@ TEST(Driver, EmitPkmMakesNoDirectory) {
   std::filesystem::remove_all(dir);
 }
 
+// Standard output that cannot be written (a full disk: Linux's /dev/full)
+// is an error, exit status 1, for every command that prints, never a
+// success with the output lost (finding 69).
+TEST(Driver, AnUnwritableStandardOutputIsAnError) {
+  if (!std::filesystem::exists("/dev/full"))
+    GTEST_SKIP() << "no /dev/full";
+  REQUIRE_BACKEND();
+  auto dir = freshDir("devfull");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto emit = run("cd " + dir.string() + " && " + paykanRun() +
+                  " --emit-pkm lib.pkn 2>&1");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  for (const char *args :
+       {" --emit-c hello.pkn", " --emit-llvm hello.pkn",
+        " --emit-pir hello.pkn", " --emit-mlir=pir hello.pkn",
+        " --emit-ast hello.pkn", " --dump-ast hello.pkn",
+        " --dump-tokens hello.pkn", " --help", " --version", " --list-backends",
+        " --list-frontends", " pkm dump lib.pkm", " pkm check lib.pkm"}) {
+    // Standard error to the pipe, standard output to /dev/full.
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() + args +
+                         " 2>&1 >/dev/full");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    // The reason when the last write is the one that failed (as
+    // coreutils' close_stdout gives it).
+    const std::string head = "paykan: cannot write to standard output";
+    EXPECT_TRUE(out == head + "\n" ||
+                out == head + ": No space left on device\n")
+        << args << ": " << out;
+  }
+  std::filesystem::remove_all(dir);
+}
