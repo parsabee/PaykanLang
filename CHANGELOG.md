@@ -856,6 +856,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     program of 400 small modules took 16.5 s of processor time to print its LLVM IR from
     the cache, and takes 1 s now: a module prints on its own, the program verified once,
     when it is imported.  The keys' text changes, so every cached `.bc` is rebuilt once.
+  - `--emit-c` wrote a string constant as one C string literal, however long, but C11
+    promises a compiler only 4095 characters in a literal, counted after adjacent literals
+    are joined, so the C of a program with a longer string (which adjacent literals make
+    easily) failed the strict build docs/c-backend.md promises: `-std=c11
+    -pedantic-errors` reported `string length '4096' is greater than the length '4095'
+    ISO C99 compilers are required to support`.  A longer string is now written as its
+    bytes, character constants in braces, then the terminating `0`.  docs/c-backend.md
+    ("Standard C") names the limits only a program's own size passes, such as an object of
+    more than 65,535 bytes.  `samples/codegen/80_long_string_literal.pkn` holds a string of
+    4096 bytes.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

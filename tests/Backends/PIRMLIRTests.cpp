@@ -575,6 +575,60 @@ TEST(PIRMLIR, PanicGuardsAreNoExits) {
   EXPECT_EQ(braceDepth(twelve), braceDepth(one)) << twelve;
 }
 
+/// A program that prints a string of @p n bytes: `a`, 0x80 and `'` over
+/// and over.
+std::string printsLongString(size_t n) {
+  const char *const pieces[] = {"a", "\\x80", "'"};
+  std::string text;
+  for (size_t i = 0; i < n; ++i)
+    text += pieces[i % 3];
+  return R"(module "main"
+cstr @.str0 = ")" +
+         text + "\" len " + std::to_string(n) + R"(
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.Paykan_println(obj) -> void
+extern fn @$rt.PaykanString_destroy(obj) -> void
+
+fn @main() -> i64 {
+  %s.1 = call @$rt.PaykanString_new(@.str0, )" +
+         std::to_string(n) + R"()
+  call @$rt.Paykan_println(%s.1)
+  call @$rt.PaykanString_destroy(%s.1)
+  ret 0
+}
+)";
+}
+
+// A string constant is a C string literal up to the 4095 characters C11
+// promises a compiler accepts in one (5.2.4.1, counted after adjacent
+// literals are joined), and past them its bytes as character constants in
+// braces, sixteen to a line, then the terminating 0 (SW-13).
+TEST(PIRMLIR, StringsPastTheLongestLiteralAreBraced) {
+  // Each module before the context it is in: emitCText makes a new one.
+  std::unique_ptr<mlir::MLIRContext> ctx4095, ctx4096;
+  mlir::OwningOpRef<mlir::ModuleOp> mod4095, mod4096;
+  std::string err;
+  std::string c = emitCText(printsLongString(4095), ctx4095, mod4095, err);
+  ASSERT_FALSE(c.empty()) << err;
+  size_t at = c.find("static const char pk_main_S_2Estr0[4096] = \"a\\200'");
+  ASSERT_NE(at, std::string::npos) << c;
+  EXPECT_EQ(c.find("'a',", at), std::string::npos) << c;
+
+  c = emitCText(printsLongString(4096), ctx4096, mod4096, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod4096);
+  at = c.find("static const char pk_main_S_2Estr0[4097] = {\n"
+              "  'a', '\\200', '\\'', 'a',");
+  ASSERT_NE(at, std::string::npos) << c;
+  size_t end = c.find(';', at);
+  ASSERT_NE(end, std::string::npos) << c;
+  std::string init = c.substr(at, end - at);
+  EXPECT_EQ(init.find('"'), std::string::npos) << init;
+  // 4096 bytes are 256 lines of sixteen, and the 0 closes the last.
+  EXPECT_EQ(std::count(init.begin(), init.end(), '\n'), 257) << init;
+  EXPECT_TRUE(init.ends_with("'a', 0\n}")) << init;
+}
+
 // Native functions bound to C library functions a header declares with
 // other C types (finding 80): the C renames each one's symbol while it
 // includes the headers, and declares it from its PIR signature after them,

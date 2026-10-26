@@ -204,7 +204,12 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   `cast` between `f64` and `i64` reinterprets the bits with `memcpy`.
 * **Constants.**  Strings and data are `static const` arrays
   (`static const char pk_hello_S_2Estr0[3] = "hi";`), an empty one `{0}` of
-  one element; a `?` in a string is escaped, so no trigraph forms.
+  one element; a `?` in a string is escaped, so no trigraph forms.  A
+  string longer than 4095 bytes, the longest string literal C11 requires a
+  compiler to accept (counted after adjacent literals are joined, so
+  splitting one would not help), is written as its bytes instead: character
+  constants in braces, sixteen to a line, then the terminating `0`
+  (`{'a', '\303', ..., 0}`).
 * **Control flow** is structured, as PIR is.  An `if` is C's `if`; a `while`
   is a `do { ... } while (cond);` whose body evaluates the condition and runs
   the loop's body under an `if` on it.  `break`, `continue` and an early
@@ -245,6 +250,16 @@ conversion between function and object pointers except through `uintptr_t`,
 no type punning except through `memcpy`, and no reserved identifiers (every
 generated name starts with a lowercase prefix: `pk_`, `pkvt_`, `pkicall_`,
 `pkrt_`, `paykan_main`, `v<n>`).
+
+The exception is a program large enough to pass one of the minimum limits
+C11 sets for every compiler (its section 5.2.4.1): a strictly conforming
+program stays within them, and GCC and Clang accept far more.  The C keeps
+within the 4095 characters of a string literal (see Constants above), but
+not within the limits a program's own size sets: an object of more than
+65,535 bytes (a string constant or a fixed-size array that large), more than
+127 nested blocks (see Control flow above), a `switch` of more than 1023
+cases (a `match` with that many arms) or a source line of more than 4095
+characters (a long string literal's).
 
 The `CStrictC11` ctest (`scripts/c_strict.py`) enforces this over the runnable
 programs of the samples corpus (`samples/codegen`, `samples/leak-check` and

@@ -195,7 +195,8 @@ there, at the MLIR level:
   `run` does; unread values are dropped (canonicalisation) and unread
   parameters marked `(void)`, so C warns about no unused variable; and an
   empty parameter list is printed `(void)`, not the C++ `()` of MLIR's
-  emitter.
+  emitter; and a string constant longer than the 4095 characters C11
+  promises in a literal is a braced array of character constants.
 
 ## Steps
 

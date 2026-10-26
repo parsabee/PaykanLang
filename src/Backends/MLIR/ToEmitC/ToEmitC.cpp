@@ -145,6 +145,48 @@ std::string cStringLiteral(StringRef data) {
   return out + "\"";
 }
 
+/// The longest string literal C11 requires a compiler to accept (5.2.4.1,
+/// counted after adjacent literals are joined).
+constexpr size_t kMaxCStringLiteral = 4095;
+
+/// `'<c>'`: a C character constant of the byte @p c, as cStringLiteral
+/// spells it in a string; one past ASCII is an octal escape, whose value
+/// converts back to the same byte in a `char`.
+std::string cCharConstant(unsigned char c) {
+  switch (c) {
+  case '\\':
+    return "'\\\\'";
+  case '\'':
+    return "'\\''";
+  case '\n':
+    return "'\\n'";
+  case '\t':
+    return "'\\t'";
+  case '\r':
+    return "'\\r'";
+  default:
+    if (c >= 0x20 && c < 0x7f)
+      return std::string{'\'', static_cast<char>(c), '\''};
+    char buf[8];
+    std::snprintf(buf, sizeof buf, "'\\%03o'", c);
+    return buf;
+  }
+}
+
+/// The initializer of the `char` array holding @p data and its terminating
+/// 0: a string literal, or, past the longest literal C11 promises, the
+/// bytes as character constants in braces, sixteen to a line.
+std::string cStringInitializer(StringRef data) {
+  if (data.size() <= kMaxCStringLiteral)
+    return cStringLiteral(data);
+  std::string out = "{";
+  for (size_t i = 0; i < data.size(); ++i) {
+    out += i % 16 == 0 ? "\n  " : " ";
+    out += cCharConstant(static_cast<unsigned char>(data[i])) + ",";
+  }
+  return out + " 0\n}";
+}
+
 /// An array initializer: `{a, b, ...}`, `{0}` when empty (C11 has no `{}`).
 std::string braced(const std::vector<std::string> &items) {
   if (items.empty())
@@ -723,7 +765,7 @@ struct CStrLowering : CPattern<P::CStrOp> {
   LogicalResult matchAndRewrite(P::CStrOp op, OpAdaptor,
                                 ConversionPatternRewriter &r) const override {
     constantArray(r, op, op.getSymName(), opaque(getContext(), "char"),
-                  op.getValue().size() + 1, cStringLiteral(op.getValue()));
+                  op.getValue().size() + 1, cStringInitializer(op.getValue()));
     return success();
   }
 };
