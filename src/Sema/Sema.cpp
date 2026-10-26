@@ -1599,12 +1599,37 @@ void Sema::ExprChecker::typeChainBelow(ast::Expr *e) {
     ChainTypes[*it] = visit(*it);
 }
 
+Sema::ExprChecker::OtherSide
+Sema::ExprChecker::needsOtherSide(const ast::Expr *e) const {
+  if (const auto *t = ast::dyn_cast<ast::TernaryExpr>(e))
+    return std::min(needsOtherSide(t->getTrueExpr()),
+                    needsOtherSide(t->getFalseExpr()));
+  if (const auto *ev = ast::dyn_cast<ast::EnumValueExpr>(e))
+    return S.EnumTemplates.count(ev->getEnumName()) && !ev->hasTypeArgs()
+               ? OtherSide::Needed
+               : OtherSide::NotNeeded;
+  if (const auto *call = ast::dyn_cast<ast::CallExpr>(e)) {
+    const std::string &callee = call->getCalleeName();
+    const size_t sep = callee.rfind(names::kQualSep);
+    if (sep != std::string::npos && !call->hasTypeArgs() &&
+        S.EnumTemplates.count(callee.substr(0, sep)))
+      return OtherSide::Helps;
+  }
+  return OtherSide::NotNeeded;
+}
+
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // A numeric literal operand takes the other operand's sized type (`x + 1`
-  // with `x: u8` adds two `u8`), so the non-literal operand is typed first.
+  // with `x: u8` adds two `u8`), so the non-literal operand is typed first,
+  // and so is the operand of `==` or `!=` a generic enum's variant without
+  // type arguments takes them from (`Maybe::Nothing == m`).
   ast::Type *lhsTy = nullptr;
   ast::Type *rhsTy = nullptr;
-  if (isNumericLiteral(node->getLHS()) && !isNumericLiteral(node->getRHS())) {
+  const bool equality = node->getOpcode() == ast::BinaryOpcode::Eq ||
+                        node->getOpcode() == ast::BinaryOpcode::Ne;
+  if ((isNumericLiteral(node->getLHS()) && !isNumericLiteral(node->getRHS())) ||
+      (equality &&
+       needsOtherSide(node->getLHS()) > needsOtherSide(node->getRHS()))) {
     rhsTy = visit(node->getRHS());
     lhsTy = visitOperand(node->getLHS(), rhsTy);
   } else {
@@ -2556,8 +2581,9 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
 
 ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
   // A generic enum's variant in an arm takes its type arguments from the
-  // slot the value flows into, else (the false arm) from the true arm's
-  // type: `if c then Maybe::Just(1) else Maybe::Nothing`.
+  // slot the value flows into, else from the other arm's type: the arm
+  // that needs it less is typed first (`if c then Maybe::Just(1) else
+  // Maybe::Nothing`, `if c then Maybe::Nothing else Maybe::Just(1)`).
   ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
   auto visitArm = [&](ast::Expr *arm, ast::Type *want) {
     if (want &&
@@ -2567,8 +2593,16 @@ ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
     return visit(arm);
   };
   auto *condTy = visit(node->getCondition());
-  auto *trueTy = visitArm(node->getTrueExpr(), expected);
-  auto *falseTy = visitArm(node->getFalseExpr(), expected ? expected : trueTy);
+  ast::Type *trueTy = nullptr;
+  ast::Type *falseTy = nullptr;
+  if (!expected && needsOtherSide(node->getTrueExpr()) >
+                       needsOtherSide(node->getFalseExpr())) {
+    falseTy = visitArm(node->getFalseExpr(), nullptr);
+    trueTy = visitArm(node->getTrueExpr(), falseTy);
+  } else {
+    trueTy = visitArm(node->getTrueExpr(), expected);
+    falseTy = visitArm(node->getFalseExpr(), expected ? expected : trueTy);
+  }
   if (!condTy || !trueTy || !falseTy)
     return nullptr;
 

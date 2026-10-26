@@ -1171,6 +1171,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arithmetic, the ordering compares and equality ask (docs/language/02-basics.md,
   "Relational & Equality").  `samples/codegen/73_int_float_equality.pkn` compares the pair
   in each order, through a parameter, a field and a loop's condition.
+- A generic enum's variant written without type arguments took them from the other side of
+  `==` or `!=`, or the other arm of a conditional expression, only when it came second:
+  `x == Maybe::Nothing` and `if c then Maybe::Just(n) else Maybe::Nothing` compiled, but
+  `Maybe::Nothing == x`, `Maybe::Nothing != Maybe::Just(1)` and `b = if n > 0 then
+  Maybe::Nothing else Maybe::Just(n)` were `cannot infer the type arguments of generic enum
+  'Maybe' for 'Maybe::Nothing': ...`, and `Result::Ok(1) == r` could not infer `E`, against
+  docs/language/07-enums.md, which names no order.  The side that needs the other's type
+  less is now typed first (`ExprChecker::needsOtherSide`: a variant without fields needs it,
+  one with fields may infer its type arguments from them, anything else does not), in
+  either order of `==` and `!=` and of a conditional's arms, nested conditionals and a
+  conditional compared with a variant too; so `Maybe::Just(200) == small` with `small:
+  Maybe<u8>` compares two `Maybe<u8>`, as its mirror did.  `Maybe::Nothing ==
+  Maybe::Nothing` stays an error, having nothing to take them from.
+  `samples/codegen/74_generic_enum_either_side.pkn` runs each form.
 
 ## [0.2.0] - 2026-10-20
 

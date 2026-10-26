@@ -1,0 +1,49 @@
+// 74 — a generic enum's variant takes its type arguments from either side
+// Exercises: a variant written without type arguments, `Maybe::Nothing`, on
+//            either side of `==` and `!=` and in either arm of a conditional
+//            expression, takes them from the other side or arm
+//            (docs/language/07-enums.md, "Generic enums"): in both orders,
+//            in a nested conditional, against a conditional, and a variant
+//            made with fields that leaves a type argument open
+//            (`Res::Ok(1)`), or whose field takes the other side's sized
+//            type (`Maybe::Just(200)` against a `Maybe<u8>`).
+// expect-stdout: False False True True
+// expect-stdout: Nothing Just(value: 2)
+// expect-stdout: False True
+// expect-stdout: Nothing Nothing Just(value: 2)
+// expect-stdout: False True
+// expect-stdout: True False True
+
+import ::io;
+
+enum Maybe<T> {
+  Just(value: T),
+  Nothing
+}
+
+enum Res<T, E> { Ok(v: T), Err(e: E) }
+
+fn main() -> int {
+  x = Maybe::Just(5);
+  n = 2;
+  io::println(Str(Maybe::Nothing == x) + " " + Str(x == Maybe::Nothing) + " "
+      + Str(Maybe::Nothing != x) + " " + Str(x != Maybe::Nothing));
+  b = if n > 0 then Maybe::Nothing else Maybe::Just(n);
+  c = if n > 5 then Maybe::Nothing else Maybe::Just(n);
+  io::println(b.toString() + " " + c.toString());
+  io::println(Str(b == x) + " " + Str(c == Maybe::Just(2)));
+  d = if n > 5 then Maybe::Nothing else if n > 1 then Maybe::Nothing
+      else Maybe::Just(n);
+  e = if n > 5 then Maybe::Nothing else if n > 3 then Maybe::Just(n)
+      else Maybe::Nothing;
+  f = if n > 5 then Maybe::Nothing else if n > 1 then Maybe::Just(n)
+      else Maybe::Nothing;
+  io::println(d.toString() + " " + e.toString() + " " + f.toString());
+  io::println(Str(Maybe::Nothing == (if n > 1 then x else Maybe::Nothing)) + " "
+      + Str(x != (if n > 1 then Maybe::Nothing else Maybe::Nothing)));
+  r = Res<int, Str>::Ok(1);
+  small: Maybe<u8> = Maybe::Just(200);
+  io::println(Str(Res::Ok(1) == r) + " " + Str(Res::Err("no") == r) + " "
+      + Str(Maybe::Just(200) == small));
+  return 0;
+}

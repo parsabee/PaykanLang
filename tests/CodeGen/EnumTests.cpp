@@ -366,3 +366,35 @@ fn main() -> int {
   EXPECT_EQ(r.ExitCode, 56);
   g.expectNoLeaks("GenericEnums");
 }
+
+// A variant without type arguments takes them from either side of `==` and
+// `!=`, and from either arm of a conditional, here with a `Str` payload
+// whose references the compares and the arms must keep and release.
+TEST(EnumCodeGen, GenericVariantsTakeTheOtherSideEitherWay) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+import ::io;
+enum Maybe<T> { Just(value: T), Nothing }
+enum Result<T, E> { Ok(value: T), Err(error: E) }
+fn pick(n: int, s: Str) -> Str {
+  m = if n > 0 then Maybe::Nothing else Maybe::Just(s);
+  k = if n > 1 then Maybe::Just(s) else Maybe::Nothing;
+  return m.toString() + " " + k.toString() + " " +
+         Str(Maybe::Nothing == m) + " " + Str(Maybe::Nothing != k);
+}
+fn main() -> int {
+  io::println(pick(0, "a"));
+  io::println(pick(1, "b"));
+  io::println(pick(2, "c"));
+  r: Result<int, Str> = Result::Err("bad");
+  io::println(Str(Result::Err("bad") == r) + " " + Str(Result::Ok(1) != r));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "Just(value: a) Nothing False False\n"
+                      "Nothing Nothing True False\n"
+                      "Nothing Just(value: c) True True\n"
+                      "True True\n");
+  g.expectNoLeaks("GenericVariantsTakeTheOtherSideEitherWay");
+}

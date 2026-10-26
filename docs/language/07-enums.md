@@ -569,7 +569,9 @@ A variant written without its type arguments gets them, in this order:
 2. **From the type the value flows into**, when that is an instantiation of the same enum: a
    variable's declared type, a parameter's, a result's, a field's, an array element's, the
    other side of `==` or `!=`, or the other arm of a conditional expression (`if n > 0 then
-   Maybe::Just(n) else Maybe::Nothing`). It comes before inference, so `m: Maybe<u8> =
+   Maybe::Just(n) else Maybe::Nothing`). The other side or arm may be on either side
+   (`Maybe::Nothing == m`, `if n > 0 then Maybe::Nothing else Maybe::Just(n)`): the one that
+   needs the other's type less is typed first. It comes before inference, so `m: Maybe<u8> =
    Maybe::Just(200)` holds a `u8`.
 3. **Inferred from the variant's fields**, as a generic class's constructor infers them:
    `Maybe::Just(3)` is a `Maybe<int>`, and `Maybe::Just(x)` in a generic function a `Maybe<T>`.

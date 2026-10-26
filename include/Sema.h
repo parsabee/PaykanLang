@@ -719,10 +719,25 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     ast::Type *visitOperand(ast::Expr *operand, ast::Type *otherTy) {
       if (otherTy &&
           (isNumericLiteral(operand) || ast::isa<ast::EnumValueExpr>(operand) ||
-           ast::isa<ast::CallExpr>(operand)))
+           ast::isa<ast::CallExpr>(operand) ||
+           ast::isa<ast::TernaryExpr>(operand)))
         return visitExpecting(operand, otherTy);
       return visit(operand);
     }
+    /// How much an operand of `==` or `!=`, or an arm of a conditional
+    /// expression, needs the type of the other operand or arm: a generic
+    /// enum's variant written without type arguments takes them from it.
+    enum class OtherSide {
+      NotNeeded, ///< typed on its own
+      Helps,     ///< `Maybe::Just(n)`: may infer them from its fields
+      Needed,    ///< `Maybe::Nothing`: has no fields to infer them from
+    };
+    /// What @p e needs (a conditional, what the less needy of its arms
+    /// does).  Of two sides, the one that needs the other less is typed
+    /// first and gives its type to the other, so `Maybe::Nothing == m` and
+    /// `if c then Maybe::Nothing else Maybe::Just(n)` work as their mirrors
+    /// do.
+    OtherSide needsOtherSide(const ast::Expr *e) const;
 
     /// A literal flowing into a fixed-size array slot: exactly its length
     /// of elements, each of its element type.

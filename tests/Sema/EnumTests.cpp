@@ -422,6 +422,55 @@ struct Cell<T> { m: Maybe<T>; }
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
+// A variant without type arguments takes them from the other side of `==`
+// or `!=`, or the other arm of a conditional, whichever side it is on: the
+// side that needs the other less is typed first.  `Maybe::Nothing == x` and
+// `if c then Maybe::Nothing else Maybe::Just(n)` were `cannot infer the
+// type arguments`, though their mirrors compiled.
+TEST(Enum, GenericVariantsTakeTheOtherSideEitherWay) {
+  auto r = semaCheck(withEnums(kGeneric, R"(
+    x = Maybe::Just(5);
+    n = 2;
+    a: bool = Maybe::Nothing == x;
+    b: bool = x == Maybe::Nothing;
+    c: bool = Maybe::Nothing != x;
+    d: bool = Maybe::Nothing != Maybe::Just(1);
+    e = if n > 0 then Maybe::Nothing else Maybe::Just(n);
+    f = if n > 0 then Maybe::Just(n) else Maybe::Nothing;
+    g = if n > 5 then Maybe::Nothing else if n > 1 then Maybe::Nothing
+        else Maybe::Just(n);
+    h: bool = Maybe::Nothing == (if n > 1 then x else Maybe::Nothing);
+    i: bool = x != (if n > 1 then Maybe::Nothing else Maybe::Nothing);
+    k: Maybe<int> = e;
+    k = f;
+    k = g;
+    r = Result<int, Str>::Ok(1);
+    o: bool = Result::Ok(1) == r;
+    p: bool = Result::Err("no") != r;
+    q = if n > 0 then Result::Err("no") else r;
+    small: Maybe<u8> = Maybe::Just(200);
+    s: bool = Maybe::Just(200) == small;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+}
+
+// With nothing to take them from on either side, they are still an error.
+TEST(Enum, GenericVariantsWithNoSideToTakeFrom) {
+  const std::string message =
+      "cannot infer the type arguments of generic enum 'Maybe' for "
+      "'Maybe::Nothing'";
+  for (const char *body :
+       {"a = Maybe::Nothing == Maybe::Nothing;",
+        "a = Maybe::Nothing != Maybe::Nothing;",
+        "n = 1; a = if n > 0 then Maybe::Nothing else Maybe::Nothing;"}) {
+    auto r = semaCheck(withEnums(kGeneric, body));
+    EXPECT_FALSE(r.Ok) << body;
+    EXPECT_NE(r.Diagnostics.find(message), std::string::npos) << body << "\n"
+                                                              << r.Diagnostics;
+  }
+}
+
 TEST(Enum, GenericVariantsChecked) {
   expectGenericError("x = Maybe::Nothing;",
                      "cannot infer the type arguments of generic enum 'Maybe' "
