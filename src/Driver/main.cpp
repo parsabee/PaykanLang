@@ -583,7 +583,10 @@ int main(int argc, char *argv[]) {
     paykan::driver::printUsage(std::cout, argv[0]);
     return finishStdout(EXIT_SUCCESS);
   }
-  if (opts.Cmd == Command::Pkm) {
+  // `pkm` loads no plugin, but --version and --list-* (which need them)
+  // still answer after it.
+  if (opts.Cmd == Command::Pkm &&
+      !(opts.ShowVersion || opts.ListFrontends || opts.ListBackends)) {
     if (!parsed.Error.empty())
       return fail(parsed.Error + ". Try: '" + argv[0] + " --help'");
     return pkmTool(opts);

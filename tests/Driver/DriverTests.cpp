@@ -2526,3 +2526,15 @@ TEST(Driver, RunTracksTheHeapUnderPaykanTrackHeap) {
   EXPECT_FALSE(std::filesystem::exists(dir / "h"));
   std::filesystem::remove_all(dir);
 }
+
+// --version, -v and --list-* answer after `pkm` too, as --help does, where
+// they said "cannot open ''" (finding 72).
+TEST(Driver, InformationOptionsAnswerAfterPkm) {
+  for (const char *option :
+       {"--version", "-v", "--list-backends", "--list-frontends"}) {
+    auto plain = run(std::string(kPaykan) + " " + option + " 2>&1");
+    auto afterPkm = run(std::string(kPaykan) + " pkm " + option + " 2>&1");
+    EXPECT_EQ(afterPkm.exitCode, 0) << option << ": " << afterPkm.out;
+    EXPECT_EQ(afterPkm.out, plain.out) << option;
+  }
+}

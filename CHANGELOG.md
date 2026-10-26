@@ -1007,6 +1007,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PAYKAN_TRACK_HEAP=1 paykan run hello.pkn` printed no heap statistics: only an executable
   `build` wrote read the variable, though the documentation says every program does.  `run`
   now tracks the heap when it is set, as under `--track-heap`.
+- `paykan pkm --version`, `pkm -v`, `pkm --list-backends` and `pkm --list-frontends`
+  failed with `paykan: cannot open ''`: the `pkm` command ran before the information
+  options, which it took for a module file's.  They now answer after `pkm` as they do
+  without it, as `pkm --help` already did.
 
 ## [0.2.0] - 2026-10-20
 
