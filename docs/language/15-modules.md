@@ -104,7 +104,9 @@ result: int = M::add(3, 4);
 An **alias** replaces the qualifier. It is useful for shortening long module paths, and
 required when two modules would otherwise share one: a qualifier (an alias, a plain
 import's last path segment, or a full module path) names exactly one module, so
-`import a::util; import b::util;` is an error; write `import b::util as bu;` instead.
+`import a::util; import b::util;` is an error (`import of module 'b::util': qualifier
+'util' already names module 'a::util' (give one of them an alias with 'as')`, each module
+by its canonical name, `::io` for a system module); write `import b::util as bu;` instead.
 Importing the same module under a second qualifier is fine.
 
 ### Selective Import

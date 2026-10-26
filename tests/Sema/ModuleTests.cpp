@@ -711,15 +711,25 @@ TEST(Module, OneQualifierForTwoModulesErr) {
   writeFile(tmp, "util.pkn", "fn f() -> int { return 3; }\n");
   // Two last segments `util`, two equal aliases, and a qualifier spelled like
   // another import's full path.
-  for (const char *imports : {"import a::util;\nimport b::util;\n",
-                              "import a::util as u;\nimport b::util as u;\n",
-                              "import util as v;\nimport b::util;\n"}) {
+  for (const auto &[imports, message] :
+       {std::pair{"import a::util;\nimport b::util;\n",
+                  "import of module 'b::util': qualifier 'util' already names "
+                  "module 'a::util'"},
+        std::pair{"import a::util as u;\nimport b::util as u;\n",
+                  "import of module 'b::util': qualifier 'u' already names "
+                  "module 'a::util'"},
+        std::pair{"import util as v;\nimport b::util;\n",
+                  "import of module 'b::util': qualifier 'util' already names "
+                  "module 'util'"},
+        std::pair{"import ::io as util;\nimport util;\n",
+                  "import of module 'util': qualifier 'util' already names "
+                  "module '::io'"}}) {
     auto main =
         writeFile(tmp, "main.pkn",
                   std::string(imports) + "fn main() -> int { return 0; }\n");
     auto r = semaCheckFile(main, tmp);
     EXPECT_FALSE(r.Ok) << imports;
-    EXPECT_NE(r.Diagnostics.find("already names module"), std::string::npos)
+    EXPECT_NE(r.Diagnostics.find(message), std::string::npos)
         << imports << r.Diagnostics;
   }
   // A qualifier may name the same module twice, and aliases keep two

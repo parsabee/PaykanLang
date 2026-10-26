@@ -1755,6 +1755,43 @@ TEST(Driver, ModulesBindACSymbolWithOneSignature) {
   std::filesystem::remove_all(dir);
 }
 
+// Finding 89: two imports binding one qualifier name each module by its
+// canonical name, so a system module keeps its `::` on whichever side of
+// the message it is; it was `import of module 'io': qualifier 'util'
+// already names module 'a::util'`.
+TEST(Driver, AQualifierClashNamesEachModuleCanonically) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_qual_clash_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "a");
+  std::ofstream(dir / "a" / "util.pkn") << "fn u() -> int => 1;\n";
+  std::ofstream(dir / "user_first.pkn")
+      << "import a::util;\nimport ::io as util;\nfn main() -> int => 0;\n";
+  std::ofstream(dir / "system_first.pkn")
+      << "import ::io as util;\nimport a::util;\nfn main() -> int => 0;\n";
+  const struct {
+    const char *File;
+    const char *Message;
+  } cases[] = {
+      {"user_first.pkn",
+       "user_first.pkn:2:1: error: import of module '::io': qualifier 'util' "
+       "already names module 'a::util' (give one of them an alias with "
+       "'as')"},
+      {"system_first.pkn",
+       "system_first.pkn:2:1: error: import of module 'a::util': qualifier "
+       "'util' already names module '::io' (give one of them an alias with "
+       "'as')"}};
+  for (const auto &c : cases) {
+    auto r = run("cd " + dir.string() + " && " + paykanRun() +
+                 " --no-module-cache " + c.File + " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << c.File << ": " << r.out;
+    EXPECT_NE(r.out.find(c.Message), std::string::npos)
+        << c.File << ": " << r.out;
+  }
+  std::filesystem::remove_all(dir);
+}
+
 TEST(Driver, EmitCRejectsAnotherBackend) {
   REQUIRE_BACKEND();
   auto src = writeTmp("fn main() -> int { return 0; }");

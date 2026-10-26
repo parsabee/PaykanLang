@@ -839,8 +839,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// last path segment, and its full module path) -> the module it names.
   /// One qualifier cannot name two modules: `util::f` would be ambiguous.
   struct ImportQualifier {
-    std::string Module;     ///< canonical module name
-    std::string ModulePath; ///< as written, e.g. `a::util`
+    std::string Module; ///< canonical module name (`::io`, `a::util`)
   };
   StringMap<ImportQualifier> ImportQualifiers;
 

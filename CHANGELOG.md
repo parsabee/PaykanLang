@@ -1232,6 +1232,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second `'io::nosuch' is not a function of module '::io'`, naming the module as imported;
   `unknown enum type 'Nope'` stays for a qualifier that is no module's
   (docs/language/14-function-types.md, "Function Values").
+- Two imports binding one qualifier name each module by its canonical name: `import
+  a::util; import ::io as util;` said `import of module 'io': qualifier 'util' already names
+  module 'a::util'`, dropping the system module's `::` (and `... already names module 'io'`
+  in the other order); it is `import of module '::io': ...` and `... already names module
+  '::io'` now (docs/language/15-modules.md, "Aliased Import").
 
 ## [0.2.0] - 2026-10-20
 

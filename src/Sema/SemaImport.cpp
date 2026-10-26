@@ -1523,13 +1523,14 @@ bool Sema::processImport(ast::ImportDecl *node) {
     bool clash = false;
     for (const std::string *name :
          {&qualifier, static_cast<const std::string *>(&fullPath)}) {
-      auto [it, fresh] = ImportQualifiers.try_emplace(
-          *name, ImportQualifier{canonical, fullPath});
+      auto [it, fresh] =
+          ImportQualifiers.try_emplace(*name, ImportQualifier{canonical});
       if (fresh || it->second.Module == canonical)
         continue;
+      // Each module by its canonical name: `::io` for a system module.
       error(node->getLocation(),
-            "import of module '" + fullPath + "': qualifier '" + *name +
-                "' already names module '" + it->second.ModulePath +
+            "import of module '" + canonical + "': qualifier '" + *name +
+                "' already names module '" + it->second.Module +
                 "' (give one of them an alias with 'as')");
       clash = true;
       break;
