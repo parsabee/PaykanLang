@@ -525,8 +525,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A `match` on an enum, or on integer, `char` or `bool` literals, is a `switch` statement in
   PIR (docs/pir.md §6), a case per value and the wildcard its default, instead of an if-else
-  chain; one on floats, classes, optionals or strings stays a chain.  Both targets switch on
-  it: the LLVM IR at every optimisation level (`switch i64`), and `--emit-c`'s C (`switch`).
+  chain.  One on floats, classes, optionals or strings tests its arms in turn, each only
+  while none before it held, then switches on the index of the first that held (*Fixed*).
+  Both targets switch on it: the LLVM IR at every optimisation level (`switch i64`), and
+  `--emit-c`'s C (`switch`).
 - LLVM is 22.1.8 (was 17.0.6, for the llvm backend), whose prebuilt release includes MLIR.
   Only what PaykanLang uses is extracted (headers, the LLVM and MLIR libraries and the tools
   the build and the scripts run), about 2 GB of the archive's 12.  The prebuilt LLVM links
@@ -910,6 +912,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     conditional as an operand.  So the reader takes no `(binary add (int 1) (binary add
     ...))` 2048 deep, which no frontend can write and which overflowed Sema at 2 MB, an `==`
     chain the lowering took a level a link, or an `&&` nesting 2048 regions for `--emit-c`.
+- A `match` on strings, floats or classes with thousands of arms overflowed the stack on a
+  valid program: 3000 string arms crashed `--emit-pir`, `paykan run`, `paykan build` and
+  `--emit-c` (exit status 139) with a quarter of the default stack, 2 MB, as the lowering
+  nested each arm's test in the `else` of the one before, a block an arm, which the passes
+  and backends recurse through.  The lowering tests the arms in turn, each only while none
+  before it held, as before, then switches on the index of the first that held
+  (docs/pir.md section 6): two blocks deep however many arms there are.
 - A frontend plugin's AST, or the `ast-text` frontend's input, could declare a local without
   an initial value, which the grammar has no way to write (`x: int;` is not a statement):
   `(decl (var "s" (named-type "Str") _))` passed every check and `io::println(s)` crashed

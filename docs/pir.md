@@ -419,8 +419,11 @@ else its `default` block (nothing, without one); a block does not fall into
 the next.  Its value is an `i64`, `char` or `bool`, every case a constant of
 that type, no two of them equal.  The lowering dispatches a `match` on an
 enum, or on integer, `char` or `bool` literals, with one; a `match` on
-floats, classes (a vtable test per arm), optionals or strings is an if-else
-chain.
+floats, classes (a vtable test per arm), optionals or strings tests its arms
+in turn, each in an `if` that runs it only while none before it held, stores
+the index of the first that held in a local (`-1` for none), then `switch`es
+on that index, with the wildcard (or nothing) as its `default`: two blocks
+deep however many arms there are.
 
 Nothing may follow `break`, `continue`, `ret` or `unreachable` in the same
 block.  An `if` whose `then` and `else` blocks both end that way is itself a

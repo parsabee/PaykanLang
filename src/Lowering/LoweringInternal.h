@@ -734,7 +734,9 @@ private:
   void emitMatchSwitch(const Val &subj,
                        const std::vector<std::pair<Val, ast::MatchArm *>> &arms,
                        ast::MatchArm *wildcard);
-  /// Emit `if (check0) body0 else if (check1) body1 ... else default`.
+  /// Emit what `if (check0) body0 else if (check1) body1 ... else default`
+  /// does, flat: the index of the first check that holds, the checks after
+  /// it not evaluated, then a switch on it.
   void emitMatchChain(size_t n, const std::function<Val(size_t)> &emitCheck,
                       const std::function<void(size_t)> &emitBody,
                       const std::function<void()> &emitDefault);

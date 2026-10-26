@@ -18,6 +18,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -1849,10 +1850,51 @@ TEST(Lowering, PrimitiveMatchesAreSwitches) {
   std::string b = function(l.Text, "b");
   EXPECT_NE(b.find("case true {"), std::string::npos) << b;
   EXPECT_NE(b.find("case false {"), std::string::npos) << b;
+  // A float or Str match tests its arms in turn, then switches on the index
+  // of the first that held.
   for (const char *chain : {"f", "s"}) {
     std::string fn = function(l.Text, chain);
-    EXPECT_EQ(fn.find("switch"), std::string::npos) << fn;
-    EXPECT_NE(fn.find("if %"), std::string::npos) << fn;
+    EXPECT_NE(fn.find("select %match.eq."), std::string::npos) << fn;
+    EXPECT_NE(fn.find("switch %match.arm."), std::string::npos) << fn;
+  }
+}
+
+// A match on strings or floats used to nest each arm's test in the else of
+// the one before, a region an arm, which the passes and backends after the
+// lowering recurse into: 3000 arms overflowed them at 2 MB.  Its depth is
+// now the same however many arms it has.
+TEST(Lowering, AStrOrFloatMatchIsAsDeepForAnyNumberOfArms) {
+  auto depth = [](const std::string &text) {
+    size_t deepest = 0;
+    for (size_t at = 0; at < text.size();) {
+      size_t end = text.find('\n', at);
+      if (end == std::string::npos)
+        end = text.size();
+      size_t indent = text.find_first_not_of(' ', at);
+      if (indent < end)
+        deepest = std::max(deepest, indent - at);
+      at = end + 1;
+    }
+    return deepest;
+  };
+  auto match = [](const char *type, size_t arms) {
+    std::string src = "fn m(x: " + std::string(type) + ") -> int { match x {";
+    for (size_t i = 0; i < arms; ++i) {
+      std::string n = std::to_string(i);
+      src += std::string(type) == "Str" ? " \"" + n + "\" { return " + n + "; }"
+                                        : " " + n + ".5 { return " + n + "; }";
+    }
+    return src + " _ { return -1; } } }\nfn main() -> int { return 0; }\n";
+  };
+  for (const char *type : {"Str", "float"}) {
+    auto two = lower(match(type, 2));
+    auto forty = lower(match(type, 40));
+    ASSERT_TRUE(two.Ok) << two.Error;
+    ASSERT_TRUE(forty.Ok) << forty.Error;
+    std::string m = function(forty.Text, "m");
+    EXPECT_EQ(depth(m), depth(function(two.Text, "m"))) << m;
+    EXPECT_EQ(count(m, "if %match.open."), 39u) << m;
+    EXPECT_EQ(count(m, "switch %match.arm."), 1u) << m;
   }
 }
 
@@ -1903,8 +1945,11 @@ TEST(Lowering, ClassMatchComparesVTablesAndBindsAnOwnedVariable) {
   EXPECT_NE(m.find("vtable.load %"), std::string::npos) << m;
   EXPECT_NE(m.find("vtable.addr B"), std::string::npos) << m;
   EXPECT_NE(m.find("vtable.addr A"), std::string::npos) << m;
-  // Nested if / else chain with the wildcard in the innermost else.
-  EXPECT_EQ(count(m, "if %is."), 2u) << m;
+  // Each class is tested in turn, A only while B failed, then a switch on
+  // the first that held, with the wildcard as its default.
+  EXPECT_EQ(count(m, "select %is."), 2u) << m;
+  EXPECT_EQ(count(m, "if %match.open."), 1u) << m;
+  EXPECT_NE(m.find("switch %match.arm."), std::string::npos) << m;
   // The binding is an owned box local: the arm retains the subject box
   // (a call result the match owns) and releases it at arm exit; the match
   // releases the subject itself once, at the end.
