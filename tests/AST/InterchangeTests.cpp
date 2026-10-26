@@ -617,6 +617,83 @@ TEST(ASTInterchange, NestingLimitIsTheFrontends) {
        [](int n) {
          return mainAst(nest("(if (ident \"a\") (block) ", "_", ")", n));
        }},
+      // An operand the grammar writes in parentheses is the level its
+      // parenthesis is, in the AST, which has none.
+      {"right operands",
+       [](int n) {
+         return mainOf("x = " + nest("a + (", "a + a", ")", n) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(binary add (ident \"a\") ",
+                             "(binary add (ident \"a\") (ident \"a\"))", ")",
+                             n) +
+                        ")");
+       }},
+      {"right operands of &&",
+       [](int n) {
+         return mainOf("x = " + nest("a && (", "a && a", ")", n) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(binary and (ident \"a\") ",
+                             "(binary and (ident \"a\") (ident \"a\"))", ")",
+                             n) +
+                        ")");
+       }},
+      {"comparisons of comparisons",
+       [](int n) {
+         return mainOf("x = " + nest("(", "a == b", ") == b", n) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(binary eq ",
+                             "(binary eq (ident \"a\") (ident \"b\"))",
+                             " (ident \"b\"))", n) +
+                        ")");
+       }},
+      // `-(a + ...)`: the prefix operator and the parenthesis, two levels.
+      {"operations under a prefix operator",
+       [](int n) {
+         return mainOf("x = " + std::string(n % 2 ? "-" : "") +
+                       nest("-(a + ", "a", ")", n / 2) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        std::string(n % 2 ? "(unary neg " : "") +
+                        nest("(unary neg (binary add (ident \"a\") ",
+                             "(ident \"a\")", "))", n / 2) +
+                        (n % 2 ? ")" : "") + ")");
+       }},
+      {"operations a suffix applies to",
+       [](int n) {
+         return mainOf("x = " + nest("(a + ", "a", ").m()", n) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(method-call (binary add (ident \"a\") ",
+                             "(ident \"a\")", ") \"m\")", n) +
+                        ")");
+       }},
+      // `if (if a then 1 else 2) then 1 else 2`: the conditional and the
+      // parenthesis, two levels; an even count is in a block.
+      {"conditionals as conditions",
+       [](int n) {
+         const int k = (n + 1 - n % 2) / 2;
+         const std::string x =
+             "x = " +
+             nest("if (", "if a then 1 else 2", ") then 1 else 2", k - 1) + ";";
+         return mainOf(n % 2 ? x : "{ " + x + " }");
+       },
+       [](int n) {
+         const int k = (n + 1 - n % 2) / 2;
+         const std::string x =
+             "(assign (ident \"x\") " +
+             nest("(ternary ", "(ternary (ident \"a\") (int 1) (int 2))",
+                  " (int 1) (int 2))", k - 1) +
+             ")";
+         return mainAst(n % 2 ? x : "(block " + x + ")");
+       }},
   };
   for (const Kind &k : kinds) {
     auto parsed = parseSource(k.Source(511));

@@ -896,7 +896,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The AST interchange format nests up to 4112 lists (`kMaxDepth`), which holds every AST
     within the limits, and its reader counts the links and the levels as the frontends do,
     so an AST from a plugin, or the `ast-text` frontend's input, is held to the same limits
-    (docs/plugins/ast-format.md section 3).
+    (docs/plugins/ast-format.md section 3).  An operand the grammar writes in parentheses
+    is the level its parenthesis is, though the AST has none: a right operand of the same
+    or a lower precedence (`a + (b + c)`), a comparison compared (`(a == b) == c`), an
+    operation under a prefix operator or before a suffix (`-(a + b)`, `(a + b).m()`), a
+    conditional as an operand.  So the reader takes no `(binary add (int 1) (binary add
+    ...))` 2048 deep, which no frontend can write and which overflowed Sema at 2 MB, an `==`
+    chain the lowering took a level a link, or an `&&` nesting 2048 regions for `--emit-c`.
 - A frontend plugin's AST, or the `ast-text` frontend's input, could declare a local without
   an initial value, which the grammar has no way to write (`x: int;` is not a statement):
   `(decl (var "s" (named-type "Str") _))` passed every check and `io::println(s)` crashed

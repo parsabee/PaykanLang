@@ -196,10 +196,20 @@ source. A block's statements, the members of a declaration's body, a
 a `ternary`'s fields, the arguments of a call, the elements of an `array`
 or a `tuple`, a `subscript`'s index, a `lambda`'s result type, a type's
 arguments, elements, parameters and result, and the type an `array-type`,
-`fixed-array-type` or `optional-type` wraps are each a level in; a
-`binary`, `call-value`, `member`, `method-call`, `tuple-index` and
-`subscript` (and the target of a `member-assign` or a `subscript-assign`)
-is a link over the deepest of its fields. It
+`fixed-array-type` or `optional-type` wraps are each a level in. The AST
+has no parentheses, but an operand the grammar writes in them is a level
+too, as its parenthesis is: a `ternary` as an operand, a `binary` as the
+right operand of one of the same or a higher precedence or the left
+operand of one of a higher precedence, a comparison as an operand of a
+comparison, a `binary` as the operand of a `unary`, a `binary` or a `unary`
+as what a `call-value`, `member`, `method-call`, `tuple-index` or
+`subscript` applies to, and a `lambda` with `(inferred)` as a left operand
+or what such a suffix applies to. So `(binary add (int 1) (binary add (int
+1) (int 1)))`, `1 + (1 + 1)`, is a level deeper than its left-nested twin,
+and 512 levels of it are `nesting too deep`. A `binary`, `call-value`,
+`member`, `method-call`, `tuple-index` and `subscript` (and the target of a
+`member-assign` or a `subscript-assign`) is a link over the deepest of its
+fields. It
 also makes the grammar's own checks that the recursive-descent frontend
 makes while parsing (`void?`, nested optionals, `_` for the body of a
 function that is neither a class's method nor a trait's, `(native ...)` on

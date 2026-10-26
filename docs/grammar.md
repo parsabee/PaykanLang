@@ -617,8 +617,10 @@ parameters and its result, and a lambda's result type; and each type
 suffix (`[]`, `[N]`, `?`), around the levels of the type it wraps, so that
 `B<int>[][]` is three levels deep, as its AST is. The AST interchange
 reader counts the same levels in the AST it reads, which has no
-parentheses to count ([`plugins/ast-format.md`](plugins/ast-format.md)
-section 3).
+parentheses: there an operand that needs them where it stands (`a + (b +
+c)`, `(a == b) == c`, `-(a + b)`, `(a + b).m()`, `(if c then a else b) +
+d`) is the level its parenthesis is
+([`plugins/ast-format.md`](plugins/ast-format.md) section 3).
 
 A chain of more than 2048 links is rejected with `nesting too deep (more
 than 2048 levels)` by every frontend, for the same reason. Each binary

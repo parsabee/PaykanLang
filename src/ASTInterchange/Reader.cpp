@@ -1465,7 +1465,7 @@ private:
       Expr *recv = nullptr;
       {
         Link target(*this, e); // the `recv.field` assigned to
-        recv = expr(f, "the receiver");
+        recv = operand(f, e, "the receiver", Operand::Receiver);
         if (recv && !target.ok())
           return nullptr;
       }
@@ -1479,7 +1479,7 @@ private:
       Expr *arr = nullptr, *idx = nullptr;
       {
         Link target(*this, e); // the `arr[idx]` assigned to
-        arr = expr(f, "the array");
+        arr = operand(f, e, "the array", Operand::Receiver);
         idx = arr ? nestedExpr(f, e, "the index") : nullptr;
         if (idx && !target.ok())
           return nullptr;
@@ -1622,6 +1622,104 @@ private:
     return inner.ok() ? expr(f, what) : nullptr;
   }
 
+  /// Where an operand stands: a binary operator's left or right operand, a
+  /// prefix operator's, the expression a suffix applies to (a call of a
+  /// function value, a field, a method call, a tuple index, a subscript, or
+  /// the target of an assignment to one), or a conditional's condition.
+  enum class Operand { Left, Right, Prefix, Receiver, Condition };
+
+  /// The precedence the grammar gives @p op (docs/grammar.md section 6):
+  /// 1 for `||` up to 5 for `*`, `/` and `%`; the relational operators'
+  /// (kRelational) do not chain.
+  static int precedence(BinaryOpcode op) {
+    switch (op) {
+    case BinaryOpcode::Or:
+      return 1;
+    case BinaryOpcode::And:
+      return 2;
+    case BinaryOpcode::Lt:
+    case BinaryOpcode::Gt:
+    case BinaryOpcode::Le:
+    case BinaryOpcode::Ge:
+    case BinaryOpcode::Eq:
+    case BinaryOpcode::Ne:
+      return kRelational;
+    case BinaryOpcode::Add:
+    case BinaryOpcode::Sub:
+      return 4;
+    case BinaryOpcode::Mul:
+    case BinaryOpcode::Div:
+    case BinaryOpcode::Mod:
+      return 5;
+    case BinaryOpcode::Count:
+      break;
+    }
+    return 0;
+  }
+  static constexpr int kRelational = 3;
+
+  /// Whether the operand @p e, at @p where of a binary operator of
+  /// precedence @p prec, is one the grammar writes in parentheses there:
+  /// a conditional anywhere; a binary operator's of lower precedence on the
+  /// left (or a comparison's of a comparison), of the same or lower on the
+  /// right, and any as the operand of a prefix operator or what a suffix
+  /// applies to; a prefix operator's as what a suffix applies to; and a
+  /// lambda with an expression body (`fn() => e`, (inferred)) on the left
+  /// or before a suffix, where its body would take what follows.  The AST
+  /// has no parentheses, but such an operand is a level of nesting, as its
+  /// parenthesis is for the frontends (docs/grammar.md section 9): the AST
+  /// of a program is held to the nesting its source has.
+  static bool operandNests(const SExpr &e, Operand where, int prec) {
+    if (e.K != SExpr::List)
+      return false;
+    if (e.Text == "ternary")
+      return true;
+    if (e.Text == "lambda")
+      return (where == Operand::Left || where == Operand::Receiver) &&
+             !e.Items.empty() && e.Items.back().K == SExpr::List &&
+             e.Items.back().Text == "inferred";
+    if (e.Text == "unary")
+      return where == Operand::Receiver;
+    const int q = binaryPrecedenceOf(e);
+    if (!q)
+      return false;
+    switch (where) {
+    case Operand::Left:
+      return q < prec || (q == prec && prec == kRelational);
+    case Operand::Right:
+      return q <= prec;
+    case Operand::Prefix:
+    case Operand::Receiver:
+      return true;
+    case Operand::Condition:
+      return false;
+    }
+    return false;
+  }
+
+  /// The precedence of the operator of the `binary` @p e, or 0 when @p e is
+  /// not one with an operator the format names.
+  static int binaryPrecedenceOf(const SExpr &e) {
+    if (e.K != SExpr::List || e.Text != "binary")
+      return 0;
+    size_t at = !e.Items.empty() && e.Items[0].K == SExpr::Location ? 1 : 0;
+    BinaryOpcode op{};
+    if (at >= e.Items.size() || e.Items[at].K != SExpr::Symbol ||
+        !binaryOp(e.Items[at].Text, op))
+      return 0;
+    return precedence(op);
+  }
+
+  /// expr(@p f, @p what), the operand of @p parent at @p where (of a binary
+  /// operator of precedence @p prec): one level of nesting inside
+  /// @p parent when the grammar writes it in parentheses (operandNests).
+  Expr *operand(Fields &f, const SExpr &parent, const char *what, Operand where,
+                int prec = 0) {
+    if (!f.atEnd() && operandNests(*f.peekList(), where, prec))
+      return nestedExpr(f, parent, what);
+    return expr(f, what);
+  }
+
   /// The remaining fields, expressions (the arguments of a call, the
   /// elements of an array or a tuple), one level of nesting inside
   /// @p parent when there are any.
@@ -1677,17 +1775,22 @@ private:
   /// The list a link of a chain builds first, its operand (a `binary`'s
   /// left operand; the function value, receiver, tuple or array of a
   /// suffix), when @p e is a link with one; else null.
+  /// An operand written in parentheses (operandNests) is not one: it is
+  /// built inside its level of nesting, by its link.
   static const SExpr *chainOperand(const SExpr &e) {
     if (e.K != SExpr::List)
       return nullptr;
     size_t at = !e.Items.empty() && e.Items[0].K == SExpr::Location ? 1 : 0;
+    const int prec = binaryPrecedenceOf(e);
     if (e.Text == "binary")
       ++at; // the operator
     else if (e.Text != "call-value" && e.Text != "member" &&
              e.Text != "method-call" && e.Text != "tuple-index" &&
              e.Text != "subscript")
       return nullptr;
-    if (at >= e.Items.size() || e.Items[at].K != SExpr::List)
+    if (at >= e.Items.size() || e.Items[at].K != SExpr::List ||
+        operandNests(e.Items[at], prec ? Operand::Left : Operand::Receiver,
+                     prec))
       return nullptr;
     return &e.Items[at];
   }
@@ -1789,7 +1892,9 @@ private:
         return fail(*op,
                     "unknown unary operator '" + op->Text + "' (neg, not)"),
                nullptr;
-      Expr *x = nestedExpr(f, e, "the operand");
+      Nested inner(*this, e);
+      Expr *x =
+          inner.ok() ? operand(f, e, "the operand", Operand::Prefix) : nullptr;
       if (!x)
         return nullptr;
       out = Ctx.make<UnaryExpr>(
@@ -1802,8 +1907,10 @@ private:
       if (!binaryOp(op->Text, bop))
         return fail(*op, "unknown binary operator '" + op->Text + "'"), nullptr;
       Link link(*this, e);
-      Expr *lhs = expr(f, "the left operand");
-      Expr *rhs = lhs ? expr(f, "the right operand") : nullptr;
+      const int prec = precedence(bop);
+      Expr *lhs = operand(f, e, "the left operand", Operand::Left, prec);
+      Expr *rhs = lhs ? operand(f, e, "the right operand", Operand::Right, prec)
+                      : nullptr;
       if (!rhs || !link.ok())
         return nullptr;
       out = Ctx.make<BinaryExpr>(loc, bop, lhs, rhs);
@@ -1826,7 +1933,7 @@ private:
       out = Ctx.make<CallExpr>(loc, *callee, std::move(args), std::move(targs));
     } else if (t == "method-call") {
       Link link(*this, e);
-      Expr *recv = expr(f, "the receiver");
+      Expr *recv = operand(f, e, "the receiver", Operand::Receiver);
       const std::string *name = recv ? f.name("the method's name") : nullptr;
       std::vector<Expr *> args;
       if (!name || !exprs(f, e, args) || !link.ok())
@@ -1834,7 +1941,8 @@ private:
       out = Ctx.make<MethodCallExpr>(loc, recv, *name, std::move(args));
     } else if (t == "ternary") {
       Nested inner(*this, e);
-      Expr *c = inner.ok() ? expr(f, "the condition") : nullptr;
+      Expr *c = inner.ok() ? operand(f, e, "the condition", Operand::Condition)
+                           : nullptr;
       Expr *a = c ? expr(f, "the value if true") : nullptr;
       Expr *b = a ? expr(f, "the value if false") : nullptr;
       if (!b)
@@ -1842,7 +1950,7 @@ private:
       out = Ctx.make<TernaryExpr>(loc, c, a, b);
     } else if (t == "member") {
       Link link(*this, e);
-      Expr *recv = expr(f, "the receiver");
+      Expr *recv = operand(f, e, "the receiver", Operand::Receiver);
       const std::string *name = recv ? f.name("the field's name") : nullptr;
       if (!name || !link.ok())
         return nullptr;
@@ -1862,7 +1970,7 @@ private:
       out = Ctx.make<ArrayLiteralExpr>(loc, std::vector<Expr *>{v}, n);
     } else if (t == "subscript") {
       Link link(*this, e);
-      Expr *arr = expr(f, "the array");
+      Expr *arr = operand(f, e, "the array", Operand::Receiver);
       Expr *idx = arr ? nestedExpr(f, e, "the index") : nullptr;
       if (!idx || !link.ok())
         return nullptr;
@@ -1887,7 +1995,7 @@ private:
              nullptr;
     } else if (t == "call-value") {
       Link link(*this, e);
-      Expr *callee = expr(f, "the function value");
+      Expr *callee = operand(f, e, "the function value", Operand::Receiver);
       if (!callee)
         return nullptr;
       std::vector<Expr *> args;
@@ -1949,7 +2057,7 @@ private:
       out = Ctx.make<TupleLiteralExpr>(loc, std::move(elems));
     } else if (t == "tuple-index") {
       Link link(*this, e);
-      Expr *tup = expr(f, "the tuple");
+      Expr *tup = operand(f, e, "the tuple", Operand::Receiver);
       int64_t idx = 0;
       if (!tup || !f.integer("the index", idx) || !link.ok())
         return nullptr;

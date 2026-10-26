@@ -836,10 +836,11 @@ TEST_F(FrontendPlugin, Rejections) {
 }
 
 // A plugin's AST is held to the frontends' limits (docs/grammar.md section
-// 9): nested as deep as they allow, 511 operators in the function's body,
-// and a chain of 2048 operators under them, Sema and the lowering get
-// through it; one level or one link more, or text nested deeper than the
-// format's lists, is refused by the reader.
+// 9): nested as deep as they allow, 510 prefix operators in the function's
+// body and a chain of 2048 operators under them, which the source writes in
+// parentheses, a level more, Sema and the lowering get through it; one
+// level or one link more, or text nested deeper than the format's lists,
+// is refused by the reader.
 TEST_F(FrontendPlugin, DeepASTs) {
   auto program = [](unsigned unary, unsigned links) {
     std::string text = "(paykan-ast " + kAst +
@@ -856,7 +857,7 @@ TEST_F(FrontendPlugin, DeepASTs) {
     return text;
   };
   fs::path deep = Scratch / "deep.pkn";
-  std::ofstream(deep) << program(511, 2048);
+  std::ofstream(deep) << program(510, 2048);
   auto r = paykan(withFe("--emit-pir " + quote(deep.string())));
   EXPECT_EQ(r.Code, 0) << r.Err.substr(0, 2000);
   EXPECT_NE(r.Out.find("fn @main() -> i64"), std::string::npos);
@@ -865,6 +866,7 @@ TEST_F(FrontendPlugin, DeepASTs) {
     const char *Error;
   } tooDeep[] = {
       {512, 0, "nesting too deep (more than 512 levels)"},
+      {511, 1, "nesting too deep (more than 512 levels)"},
       {0, 2049, "nesting too deep (more than 2048 levels)"},
       {4200, 0, "nesting too deep (more than 4112 levels)"},
   };
