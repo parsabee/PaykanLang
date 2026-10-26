@@ -37,11 +37,12 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -369,8 +370,9 @@ std::string defaultExecutable(const std::string &input) {
 /// What @p print returns (EXIT_SUCCESS, or the status of a failure it
 /// reported), run on where an --emit-* option prints: -o's file, or
 /// standard output without -o.  The file is never one the command reads,
-/// and when not all of it could be written it is removed, as a compiler
-/// removes an output it could not finish.
+/// and is written once all of it was printed, as a module file is
+/// (pkm::writeFileAtomically): a failure leaves what the path names as it
+/// was.
 template <typename Print> int printOutput(const Options &opts, Print &&print) {
   if (opts.OutputPath.empty()) {
     int status = print(std::cout);
@@ -379,17 +381,14 @@ template <typename Print> int printOutput(const Options &opts, Print &&print) {
   const std::string &path = opts.OutputPath;
   if (std::string why = overwritesInput(path, opts); !why.empty())
     return fail(why);
-  std::ofstream file(path, std::ios::binary | std::ios::trunc);
-  if (!file)
-    return fail("cannot write '" + path + "': " + std::strerror(errno));
-  int status = print(file);
-  file.close();
-  if (status == EXIT_SUCCESS && !file)
-    status = fail("cannot write '" + path + "'");
-  if (std::error_code ec;
-      status != EXIT_SUCCESS && std::filesystem::is_regular_file(path, ec))
-    std::filesystem::remove(path, ec);
-  return status;
+  std::ostringstream text;
+  if (int status = print(text); status != EXIT_SUCCESS)
+    return status;
+  const std::string bytes = std::move(text).str();
+  paykan::Status s = pkm::writeFileAtomically(
+      path,
+      std::span(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+  return s ? EXIT_SUCCESS : fail("cannot write '" + path + "': " + s.message());
 }
 
 /// Selecting a plugin this paykan does not accept (#103), an ambiguous

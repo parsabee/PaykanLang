@@ -31,7 +31,8 @@
  * gives a Paykan main and $PAYKAN_TRACK_HEAP and exits with argc, and link
  * it with the host's link_executable (run() then runs it with
  * run_executable).  $PAYKAN_TEST_PLUGIN_FAIL makes emit fail: "diag" with an
- * error diagnostic (and a warning first), anything else silently (status 5).
+ * error diagnostic (and a warning first), "partial" with one after some
+ * output, anything else silently (status 5).
  * $PAYKAN_TEST_PLUGIN_RUN changes what run() runs: "no-args" the program
  * with num_args 0, "missing" a file that does not exist.
  */
@@ -128,6 +129,11 @@ __attribute__((unused)) static int test_emit(void *data, PaykanSession *s,
       say(s, PAYKAN_DIAG_WARNING, NULL, 2, 0, "a warning first");
       say(s, PAYKAN_DIAG_ERROR, NULL, 3, 7, "test failure requested");
       say(s, PAYKAN_DIAG_ERROR, "other.pkn", 0, 0, "and a second error");
+      return PAYKAN_ERROR;
+    }
+    if (strcmp(fail, "partial") == 0) {
+      host->write_output(s, "partial output\n", 15);
+      say(s, PAYKAN_DIAG_ERROR, NULL, 0, 0, "failed after some output");
       return PAYKAN_ERROR;
     }
     return 5;

@@ -2668,6 +2668,33 @@ TEST(Driver, EmitOptionsWriteToTheOutputFile) {
   std::filesystem::remove_all(dir);
 }
 
+// A command line an --emit-* option rejects writes nothing: the stage of
+// `--emit-mlir=<stage>` is checked as the command line is read, where an
+// unknown one was found only once -o's file was emptied, and the file was
+// then removed (a symbolic link given as -o was removed, its file emptied).
+TEST(Driver, ARejectedEmitLeavesItsOutputAlone) {
+  REQUIRE_BACKEND();
+  namespace fs = std::filesystem;
+  auto dir = freshDir("emit_rejected");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::ofstream(dir / "keep.txt") << "keep";
+  std::ofstream(dir / "target.txt") << "keep";
+  fs::create_symlink("target.txt", dir / "link.txt");
+  for (const char *output : {"keep.txt", "link.txt"}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " --emit-mlir=bogus hello.pkn -o " + output + " 2>&1");
+    EXPECT_EQ(rc, 1) << output << ": " << out;
+    EXPECT_EQ(out.find("paykan: unknown MLIR stage 'bogus' (expected pir, "
+                       "scf, llvm or emitc). Try: '"),
+              0U)
+        << output << ": " << out;
+  }
+  EXPECT_EQ(slurp(dir / "keep.txt"), "keep");
+  EXPECT_TRUE(fs::is_symlink(dir / "link.txt"));
+  EXPECT_EQ(slurp(dir / "target.txt"), "keep");
+  std::filesystem::remove_all(dir);
+}
+
 // Malformed command lines get errors that say what is wrong (finding 74):
 // an option is named as it was spelled, `--emit-mlir` takes a stage, and
 // only -O, -O<n> and -O=<n> are an optimization level.

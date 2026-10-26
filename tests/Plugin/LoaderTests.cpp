@@ -310,6 +310,32 @@ TEST_F(PluginLoader, BackendDiagnosticsAndFailures) {
   EXPECT_EQ(debug.Err, "paykan: plugin: debug from the test plugin\n");
 }
 
+// An --emit-* option writes -o's file once the backend printed all of it:
+// a backend that fails, even after some output, leaves what -o names as it
+// was, where the file was emptied and then removed, and a symbolic link
+// given as -o was removed with its file emptied.
+TEST_F(PluginLoader, AFailedEmitLeavesItsOutputFileAlone) {
+  std::string cmd = "--no-plugins " + flag("plugin", plugin("good", "good")) +
+                    " --backend=test-good --emit-source " + quote(kSample);
+  std::ofstream(Cwd() / "keep.txt") << "keep";
+  std::ofstream(Cwd() / "target.txt") << "keep";
+  fs::create_symlink("target.txt", Cwd() / "link.txt");
+  for (const char *mode : {"diag", "partial"})
+    for (const char *output : {"keep.txt", "link.txt"}) {
+      auto r = paykan(cmd + " -o " + output,
+                      std::string("PAYKAN_TEST_PLUGIN_FAIL=") + mode);
+      EXPECT_EQ(r.Code, 1) << mode << " " << output << ": " << r.Err;
+      EXPECT_EQ(r.Out, "") << mode << " " << output;
+    }
+  EXPECT_EQ(slurp(Cwd() / "keep.txt"), "keep");
+  EXPECT_TRUE(fs::is_symlink(Cwd() / "link.txt"));
+  EXPECT_EQ(slurp(Cwd() / "target.txt"), "keep");
+  // A backend that succeeds writes the file whole.
+  auto ok = paykan(cmd + " -o keep.txt");
+  EXPECT_EQ(ok.Code, 0) << ok.Err;
+  EXPECT_NE(slurp(Cwd() / "keep.txt").find("module "), std::string::npos);
+}
+
 TEST_F(PluginLoader, PluginPathIsSearchedButNeverTheWorkingDirectory) {
   // A plugin in the working directory: an empty $PAYKAN_PLUGIN_PATH entry
   // does not mean ".", and nothing else searches it.

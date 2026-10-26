@@ -269,6 +269,12 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
                                        argv, stage, r.Error)) {
       if (!r.Error.empty())
         return r;
+      if (std::find(std::begin(kMLIRStages), std::end(kMLIRStages), stage) ==
+          std::end(kMLIRStages)) {
+        r.Error = "unknown MLIR stage '" + stage +
+                  "' (expected pir, scf, llvm or emitc)";
+        return r;
+      }
       emitMLIR = true;
       o.EmitStage = std::move(stage);
       continue;

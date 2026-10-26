@@ -603,7 +603,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `-o <file>` names the file an `--emit-*` option (`--emit-c`, `--emit-llvm`,
   `--emit-mlir`, `--emit-source`, `--emit-pir`, `--emit-ast`) writes what it prints, where
   `paykan --emit-c f.pkn -o f.c` printed the C and wrote no `f.c`; like every file the
-  driver writes, it is never the source file.  Without `-o` they print to standard output.
+  driver writes, it is never the source file.  The file is written once all of it was
+  printed, as a module file is, so a backend that fails leaves what `-o` names as it was.
+  Without `-o` they print to standard output.
 
 ### Removed
 
@@ -1048,8 +1050,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optimization level 'utput'`, and `build hello.pkn -o ""` said `option '--o' requires a
   value`.  `--emit-mlir <stage>` now takes only a stage's name (``option '--emit-mlir'
   needs a stage: --emit-mlir=<stage> (pir, scf, llvm or emitc)``), only `-O`, `-O<n>` and
-  `-O=<n>` are an optimization level (`unknown command line argument '--Output'`), and a
-  message names an option as it was spelled (`option '-o' requires a value`).
+  `-O=<n>` are an optimization level (`unknown command line argument '--Output'`), a
+  message names an option as it was spelled (`option '-o' requires a value`), and the
+  stage of `--emit-mlir=<stage>` is checked as the command line is read (`unknown MLIR
+  stage 'bogus' (expected pir, scf, llvm or emitc)`).
 - `paykan --object=libtext.a main.pkn` failed with `JIT error: The file was not recognized
   as a valid object file`, though `--object` takes archives and `build` linked the same
   one: the JIT took object files only.  `run` now loads an archive's members as a linker
