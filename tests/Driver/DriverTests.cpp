@@ -1802,9 +1802,10 @@ TEST(Driver, ACharOrderedAgainstANumberIsAnErrorOnEveryPath) {
   const std::string exe = src + ".exe";
   const std::string message =
       "4:6: error: operands of '<' have mismatched types 'char' and 'int'";
-  for (const std::string &cmd :
-       {paykanRun() + " " + src, paykanRun() + " -o " + exe + " build " + src,
-        paykanRun() + " --emit-c " + src}) {
+  const std::vector<std::string> commands = {
+      paykanRun() + " " + src, paykanRun() + " -o " + exe + " build " + src,
+      paykanRun() + " --emit-c " + src};
+  for (const std::string &cmd : commands) {
     auto r = run(cmd + " 2>&1");
     EXPECT_EQ(r.exitCode, 1) << cmd << ": " << r.out;
     EXPECT_NE(r.out.find(message), std::string::npos) << cmd << ": " << r.out;

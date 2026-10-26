@@ -214,52 +214,37 @@ fn main() -> int {
 }
 )");
   EXPECT_FALSE(r.Ok);
-  const std::string fn = "has type '(int) -> int', which does not implement it";
-  for (const std::string &d : std::vector<std::string>{
-           "'S' does not implement trait 'Show', which 'io::println' requires "
-           "of "
-           "'T': its field 'f' " +
-               fn,
-           "no method 'toString' on type 'S', which does not implement trait "
-           "'Show': its field 'f' " +
-               fn,
-           "'(int, (int) -> int)' does not implement trait 'Show', which "
-           "'io::println' requires of 'T': its element 1 " +
-               fn,
-           "no method 'toString' on type '(int, S)', which does not implement "
-           "trait 'Show': its element 1 has type 'S', whose field 'f' " +
-               fn,
-           "'Outer' does not implement trait 'Show', which 'io::println' "
-           "requires "
-           "of 'T': its field 's' has type 'S', whose field 'f' " +
-               fn,
-           "no method 'toString' on type 'O', which does not implement trait "
-           "'Show': its field 'g' has type '((int) -> int)?', which does not "
-           "implement it",
-           "'E' does not implement trait 'Show', which 'io::println' requires "
-           "of "
-           "'T': its field 'h' of variant 'F' " +
-               fn,
-           "no method 'toString' on type 'E', which does not implement trait "
-           "'Show': its field 'h' of variant 'F' " +
-               fn,
-           "'S?' does not implement trait 'Show', which 'io::println' requires "
-           "of "
-           "'T': its field 'f' " +
-               fn,
-           "no method 'toString' on type 'S?', which does not implement trait "
-           "'Show': its field 'f' " +
-               fn,
-           "'S' does not implement trait 'Show', which 'show' requires of 'X': "
-           "its field 'f' " +
-               fn,
-           "no method 'toString' on type 'Maybe<(int) -> int>', which does not "
-           "implement trait 'Show': its field 'v' of variant 'Just' " +
-               fn,
-           "'((int) -> int)?' does not implement trait 'Show', which "
-           "'io::println' requires of 'T'\n"})
+  auto expect = [&](const std::string &d) {
     EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
                                                         << r.Diagnostics;
+  };
+  const std::string fn = "has type '(int) -> int', which does not implement it";
+  const std::string println = "which 'io::println' requires of 'T': its ";
+  const std::string noToString = "no method 'toString' on type ";
+  const std::string notShow = "which does not implement trait 'Show': its ";
+  expect("'S' does not implement trait 'Show', " + println + "field 'f' " + fn);
+  expect(noToString + "'S', " + notShow + "field 'f' " + fn);
+  expect("'(int, (int) -> int)' does not implement trait 'Show', " + println +
+         "element 1 " + fn);
+  expect(noToString + "'(int, S)', " + notShow +
+         "element 1 has type 'S', whose field 'f' " + fn);
+  expect("'Outer' does not implement trait 'Show', " + println +
+         "field 's' has type 'S', whose field 'f' " + fn);
+  expect(noToString + "'O', " + notShow +
+         "field 'g' has type '((int) -> int)?', which does not implement it");
+  expect("'E' does not implement trait 'Show', " + println +
+         "field 'h' of variant 'F' " + fn);
+  expect(noToString + "'E', " + notShow + "field 'h' of variant 'F' " + fn);
+  expect("'S?' does not implement trait 'Show', " + println + "field 'f' " +
+         fn);
+  expect(noToString + "'S?', " + notShow + "field 'f' " + fn);
+  expect("'S' does not implement trait 'Show', which 'show' requires of 'X': "
+         "its field 'f' " +
+         fn);
+  expect(noToString + "'Maybe<(int) -> int>', " + notShow +
+         "field 'v' of variant 'Just' " + fn);
+  expect("'((int) -> int)?' does not implement trait 'Show', which "
+         "'io::println' requires of 'T'\n");
   EXPECT_EQ(r.ErrorCount, 13) << r.Diagnostics;
 }
 
