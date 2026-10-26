@@ -103,7 +103,10 @@ never starts `_S`, so the two never meet).
 Each module's PIR (the main module whole, an imported one its copies and
 declarations) is then lowered and its LLVM IR cached as before, under the
 text of what is left of it: another program's use of a module leaves
-another part of it, which is cached afresh.
+another part of it, which is cached afresh.  That text is the module's
+imported MLIR printed on its own (the program is verified once, when it is
+imported), so the keys of a program's modules cost time in proportion to
+the program, not to its size times its modules.
 
 `--emit-c` prints the C of the program's PIR; a compiled module's code is
 not C, and is linked as an object (`paykan pkm extract --object`), so for

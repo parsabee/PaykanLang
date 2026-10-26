@@ -117,21 +117,34 @@ public:
   const std::filesystem::path Path;
 };
 
-/// A function matching an int against @p arms literal arms, each returning
-/// its value modulo 100, called on 7.
-std::string manyArms(int arms) {
-  std::string src = "fn pick(x: int) -> int {\n  match x {\n";
-  for (int i = 0; i < arms; ++i) {
-    const std::string k = std::to_string(i);
-    src += "    ";
-    src += k;
-    src += " { return ";
-    src += std::to_string(i % 100);
-    src += "; }\n";
+/// @p text, `#` standing for @p i.
+std::string numbered(const char *text, int i) {
+  const std::string k = std::to_string(i);
+  std::string s;
+  for (const char *c = text; *c; ++c) {
+    if (*c == '#')
+      s += k;
+    else
+      s += *c;
   }
-  src += "    _ { return 0; }\n  }\n}\n"
+  return s;
+}
+
+/// numbered(@p text, i) for each i of 0 .. @p n - 1.
+std::string repeated(const char *text, int n) {
+  std::string s;
+  for (int i = 0; i < n; ++i)
+    s += numbered(text, i);
+  return s;
+}
+
+/// A function matching an int against @p arms literal arms, each returning
+/// its value, called on 7.
+std::string manyArms(int arms) {
+  return "fn pick(x: int) -> int {\n  match x {\n" +
+         repeated("    # { return #; }\n", arms) +
+         "    _ { return 0; }\n  }\n}\n"
          "fn main() -> int { return pick(7); }\n";
-  return src;
 }
 
 } // namespace
@@ -143,14 +156,13 @@ std::string manyArms(int arms) {
 // second now.
 TEST(Scaling, PanicGuardsLeaveTheFunctionFlat) {
   ScratchDir dir("guards");
-  std::string src = "fn id(x: int) -> int => x;\n"
-                    "fn main() -> int {\n"
-                    "  a = id(1000000);\n"
-                    "  b = id(3);\n"
-                    "  s = 0;\n";
-  for (int i = 0; i < 3000; ++i)
-    src += "  s += a / b;\n";
-  src += "  return s % 256;\n}\n";
+  const std::string src = "fn id(x: int) -> int => x;\n"
+                          "fn main() -> int {\n"
+                          "  a = id(1000000);\n"
+                          "  b = id(3);\n"
+                          "  s = 0;\n" +
+                          repeated("  s += a / b;\n", 3000) +
+                          "  return s % 256;\n}\n";
   const std::string path = dir.write("guards.pkn", src);
   Timed t = timed(std::string(kPaykan) + " --emit-mlir=scf " + path +
                   " 2>&1 >/dev/null");
@@ -198,26 +210,13 @@ TEST(Scaling, RunAtO0GeneratesCodeAsBuildDoes) {
 // its last, with nothing to undo, takes 0.1 GB and 2 s.
 TEST(Scaling, ALongRunOfIfsLowersToCFInLinearMemory) {
   ScratchDir dir("ifs");
-  std::string src = "fn f(k: int) -> int {\n  r = -1;\n";
-  for (int i = 0; i < 3000; ++i) {
-    const std::string k = std::to_string(i);
-    src += "  if k == ";
-    src += k;
-    src += " {\n    r = ";
-    src += k;
-    src += ";\n  }\n";
-  }
-  src += "  return r;\n}\nfn g(s: Str) -> int {\n  match s {\n";
-  for (int i = 0; i < 2000; ++i) {
-    const std::string k = std::to_string(i);
-    src += "    \"k";
-    src += k;
-    src += "\" { return ";
-    src += k;
-    src += "; }\n";
-  }
-  src += "    _ { return -1; }\n  }\n}\n"
-         "fn main() -> int { return f(2999) % 256 + g(\"k5\"); }\n";
+  const std::string src =
+      "fn f(k: int) -> int {\n  r = -1;\n" +
+      repeated("  if k == # {\n    r = #;\n  }\n", 3000) +
+      "  return r;\n}\nfn g(s: Str) -> int {\n  match s {\n" +
+      repeated("    \"k#\" { return #; }\n", 2000) +
+      "    _ { return -1; }\n  }\n}\n"
+      "fn main() -> int { return f(2999) % 256 + g(\"k5\"); }\n";
   const std::string path = dir.write("ifs.pkn", src);
   Timed t = timed(std::string(kPaykan) + " --emit-mlir=llvm " + path +
                   " 2>&1 >/dev/null");
@@ -226,4 +225,30 @@ TEST(Scaling, ALongRunOfIfsLowersToCFInLinearMemory) {
   EXPECT_LT(t.Seconds, 10 * slowdown());
   Timed run = timed(std::string(kPaykan) + " run -O0 " + path + " 2>&1");
   EXPECT_EQ(run.ExitCode, 2999 % 256 + 5) << run.Out;
+}
+
+// Each imported module's code is cached under a key made from its MLIR,
+// printed (SW-18).  Printing a module nested in the program verified and
+// numbered the whole program each time, so a program of 400 tiny modules
+// took 16.5 s of processor time to print its LLVM IR from the cache, and
+// takes 1 s now.
+TEST(Scaling, AModulesCacheKeyIsMadeFromItsOwnCode) {
+  ScratchDir dir("modules");
+  std::filesystem::create_directories(dir.Path / "w");
+  for (int i = 0; i < 400; ++i)
+    dir.write(
+        numbered("w/m#.pkn", i),
+        numbered("class C# { v: int; }\nfn f() -> C# { return C#(#); }\n", i));
+  const std::string main = "import ::io;\n" + repeated("import w::m#;\n", 400) +
+                           "fn main() -> int {\n  io::println(Str(0" +
+                           repeated(" + m#::f().v", 400) +
+                           "));\n  return 0;\n}\n";
+  const std::string path = dir.write("main.pkn", main);
+  Timed first = timed(std::string(kPaykan) + " run " + path + " 2>&1");
+  ASSERT_EQ(first.ExitCode, 0) << first.Out;
+  EXPECT_EQ(first.Out, "79800\n");
+  Timed t =
+      timed(std::string(kPaykan) + " --emit-llvm " + path + " 2>&1 >/dev/null");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_LT(t.Seconds, 5 * slowdown());
 }

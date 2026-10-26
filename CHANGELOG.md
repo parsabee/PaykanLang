@@ -850,6 +850,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     each split moved everything after it.  The same patterns now run on each op once, a
     block's last first and an op before those in its regions, with nothing to undo: 2 s
     and 0.1 GB (docs/design/mlir-backend.md).
+  - Compiling a program took time quadratic in its number of modules on the LLVM path: each
+    imported module's cached LLVM IR is keyed on the module's MLIR as text, and printing a
+    module nested in the program verified and numbered the whole program each time.  A
+    program of 400 small modules took 16.5 s of processor time to print its LLVM IR from
+    the cache, and takes 1 s now: a module prints on its own, the program verified once,
+    when it is imported.  The keys' text changes, so every cached `.bc` is rebuilt once.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
