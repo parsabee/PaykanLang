@@ -17,6 +17,7 @@
 #include "Names.h"
 #include "Runtime.h"
 
+#include <llvm/ADT/StringSet.h>
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/Conversion/ArithToLLVM/ArithToLLVM.h>
 #include <mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h>
@@ -493,6 +494,16 @@ struct ConvertToLLVMPass
     for (ModuleOp m : modules())
       if (failed(applyFullConversion(m, target, frozen)))
         return signalPassFailure();
+    // The runtime's panics never return, as Runtime.h declares them: a panic
+    // guard's branch ends at its call.
+    llvm::StringSet<> noReturn;
+    for (const char *name : names::kNoReturnRuntimeFunctions)
+      noReturn.insert(name);
+    getOperation().walk([&](LLVM::LLVMFuncOp f) {
+      if (f.isExternal() && noReturn.contains(f.getName()))
+        f.setPassthroughAttr(
+            ArrayAttr::get(ctx, {StringAttr::get(ctx, "noreturn")}));
+    });
   }
 
   /// The modules to convert: the operated-on one, or each one nested in it.

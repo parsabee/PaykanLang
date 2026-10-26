@@ -465,6 +465,16 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringLength,
 };
 
+/// The runtime functions that never return: every one Runtime.h declares
+/// PAYKAN_NORETURN.  The LLVM path declares them `noreturn` too, so a panic
+/// guard's branch ends at its call (the C path has Runtime.h's prototypes).
+inline constexpr const char *kNoReturnRuntimeFunctions[] = {
+    kPaykanPanicDivByZero,   kPaykanPanicDivOverflow, kPaykanPanicFloatToInt,
+    kPaykanPanicFloatToType, kPaykanPanicIntToChar,   kPaykanPanicToChar,
+    kPaykanPanicIndex,       kPaykanPanicForStep,     kPaykanPanicPureVirtual,
+    kPaykanPanicMessage,     kPaykanPanicValue,       kPaykanUnreachableView,
+};
+
 // -- Kinds of values
 //
 // The `kind` word of a PaykanType (src/Runtime/Runtime.h, "Generic native

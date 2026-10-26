@@ -117,7 +117,11 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
   the statements after one that may have set it run under `scf.if` on the
   flag being clear, and a loop's condition region stops the loop once it is
   set.  A `return`'s value goes into a local the function returns at its
-  end.  LLVM's optimiser removes the flag again; C keeps it.
+  end.  LLVM's optimiser removes the flag again; C keeps it.  `unreachable`
+  sets no flag: it follows a call of one of the runtime's panics, which
+  never return (`noreturn` on the LLVM path, `_Noreturn` in `Runtime.h`),
+  so what follows a panic check runs beside it, not under an `scf.if` of
+  its own.
 * **Switches.**  A PIR `switch` (a `match` on an enum, or on integer,
   `char` or `bool` literals) becomes an `scf.index_switch` on its value as
   an index (a `char` or `bool` zero-extended, as its cases are).  Upstream

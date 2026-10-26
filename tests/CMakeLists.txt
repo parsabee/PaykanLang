@@ -511,6 +511,7 @@ if(PAYKAN_TEST_SUITE_driver)
 add_executable(driver_tests
     Driver/DriverTests.cpp
     Driver/PkmTests.cpp
+    Driver/ScalingTests.cpp
 )
 target_compile_definitions(driver_tests
     PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
@@ -554,13 +555,21 @@ if(PAYKAN_SANITIZER_FLAGS)
 endif()
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).
 foreach(be IN LISTS PAYKAN_RUN_BACKENDS)
-    add_test(NAME DriverTests.${be} COMMAND driver_tests)
+    add_test(NAME DriverTests.${be}
+             COMMAND driver_tests --gtest_filter=-Scaling.*)
     # No plugins from the plugin directories: the listings these tests
     # check exactly are the build's own (tests/Plugin/LoaderTests.cpp
     # covers discovery).
     set_tests_properties(DriverTests.${be} PROPERTIES
         ENVIRONMENT "PAYKAN_TEST_BACKEND=${be};PAYKAN_NO_PLUGINS=1")
 endforeach()
+# The compiler's time on large programs (Driver/ScalingTests.cpp), once:
+# labelled, so a loaded machine can run them apart (ctest -L scaling).
+if(PAYKAN_RUN_BACKENDS)
+    add_test(NAME DriverScaling COMMAND driver_tests --gtest_filter=Scaling.*)
+    set_tests_properties(DriverScaling PROPERTIES
+        LABELS scaling ENVIRONMENT "PAYKAN_NO_PLUGINS=1")
+endif()
 endif()
 
 # The script-driven tests (scripts/*.py, standard library only) run with the

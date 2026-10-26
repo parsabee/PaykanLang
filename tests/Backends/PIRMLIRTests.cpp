@@ -24,6 +24,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <filesystem>
@@ -430,6 +431,148 @@ TEST(PIRMLIR, DenseSetKeyCasesAreIfs) {
   expectOnlyEmitCOps(*mod);
   for (const char *text : {"INT64_MIN", "9223372036854775807", "switch ("})
     EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
+}
+
+/// One panic guard on dividing %a by %b, as the lowering emits them
+/// (docs/pir.md §7), adding the quotient to the local %s; `#` stands for
+/// the guard's number.
+const char *const kDivisionGuard = R"(  %z# = cmp eq %b, 0
+  if %z# {
+    call @$rt.Paykan_panic_div_by_zero()
+    unreachable
+  }
+  %q# = div %a, %b
+  %t# = load %s
+  %u# = add %t#, %q#
+  store %s, %u#
+)";
+
+/// @p n division guards.
+std::string divisionGuards(int n) {
+  std::string s;
+  for (int i = 0; i < n; ++i)
+    for (const char *c = kDivisionGuard; *c; ++c) {
+      if (*c == '#')
+        s += std::to_string(i);
+      else
+        s += *c;
+    }
+  return s;
+}
+
+/// A program of panic guards: @guards has @p n of them; @early returns
+/// early, then has @p n; @loop has one in a loop's body; @never only
+/// panics.
+std::string panicGuards(int n) {
+  return R"(module "main"
+extern fn @$rt.Paykan_panic_div_by_zero() -> void
+
+fn @guards(%a: i64, %b: i64) -> i64 {
+  local %s: i64
+  store %s, 0
+)" + divisionGuards(n) +
+         R"(  %r = load %s
+  ret %r
+}
+
+fn @early(%a: i64, %b: i64) -> i64 {
+  local %s: i64
+  store %s, 0
+  %neg = cmp lt %a, 0
+  if %neg {
+    ret 0
+  }
+)" + divisionGuards(n) +
+         R"(  %r = load %s
+  ret %r
+}
+
+fn @loop(%n: i64) -> i64 {
+  local %i: i64
+  store %i, 1
+  while {
+    %c = load %i
+    %le = cmp le %c, %n
+    cond %le
+  } {
+    %j = load %i
+    %z = cmp eq %j, 0
+    if %z {
+      call @$rt.Paykan_panic_div_by_zero()
+      unreachable
+    }
+    %q = div 100, %j
+    %k = add %j, %q
+    store %i, %k
+  }
+  %r = load %i
+  ret %r
+}
+
+fn @never() -> i64 {
+  call @$rt.Paykan_panic_div_by_zero()
+  unreachable
+}
+
+fn @main() -> i64 {
+  %g = call @guards(10, 2)
+  %e = call @early(10, 2)
+  %l = call @loop(3)
+  %ge = add %g, %e
+  %r = add %ge, %l
+  ret %r
+}
+)";
+}
+
+/// The deepest nesting of braces in @p c.
+int braceDepth(const std::string &c) {
+  int depth = 0, deepest = 0;
+  for (char ch : c) {
+    if (ch == '{')
+      deepest = std::max(deepest, ++depth);
+    else if (ch == '}')
+      --depth;
+  }
+  return deepest;
+}
+
+// A panic guard's `if` ends in `unreachable` after its call, which does not
+// return: no exit, so what follows the guard runs beside it, under no
+// `scf.if` on an exit flag (SW-02).  Only @early, whose early return sets
+// the flag, has one, tested once after the return's `if`; @loop's condition
+// does not test it.  The C is as deep for twelve guards as for one: clang
+// rejects C nested past 256 brackets.
+TEST(PIRMLIR, PanicGuardsAreNoExits) {
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  std::string scf = scfText(panicGuards(12), *ctx, err);
+  ASSERT_FALSE(scf.empty()) << err;
+  expectRoundTrip(scf, *ctx);
+  size_t flag = scf.find("pir.alloca \"exit\"");
+  ASSERT_NE(flag, std::string::npos) << scf;
+  EXPECT_EQ(scf.find("pir.alloca \"exit\"", flag + 1), std::string::npos)
+      << scf;
+  EXPECT_LT(scf.find("func.func @pk_main_Searly"), flag) << scf;
+  EXPECT_GT(scf.find("func.func @pk_main_Sloop"), flag) << scf;
+  // The flag (the only i8 slot) is read once: by the `if` around what
+  // follows the return.
+  size_t reads = 0;
+  std::istringstream lines(scf);
+  for (std::string line; std::getline(lines, line);)
+    reads += line.find("pir.ptr_load") != std::string::npos &&
+             line.ends_with(": i8");
+  EXPECT_EQ(reads, 1u) << scf;
+
+  // Each module before the context it is in: emitCText makes a new one.
+  std::unique_ptr<mlir::MLIRContext> ctx1, ctx12;
+  mlir::OwningOpRef<mlir::ModuleOp> mod1, mod12;
+  std::string one = emitCText(panicGuards(1), ctx1, mod1, err);
+  ASSERT_FALSE(one.empty()) << err;
+  std::string twelve = emitCText(panicGuards(12), ctx12, mod12, err);
+  ASSERT_FALSE(twelve.empty()) << err;
+  expectOnlyEmitCOps(*mod12);
+  EXPECT_EQ(braceDepth(twelve), braceDepth(one)) << twelve;
 }
 
 // Native functions bound to C library functions a header declares with

@@ -210,7 +210,15 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   the loop's body under an `if` on it.  `break`, `continue` and an early
   `return` set the function's exit flag; the statements after one that may
   have set it run under an `if` on the flag being clear, a loop stops once it
-  is set, and the function returns its result from a local at its end.
+  is set, and the function returns its result from a local at its end.  A
+  panic check (a division's, an index's, a conversion's) is no such exit:
+  the runtime's panics are `_Noreturn`, so what follows a check runs beside
+  it, and a function of a thousand checks is no deeper than one of none.
+  Each early exit and each `elif` does nest what follows it one block
+  deeper, so a function with more than about 250 of them nests past the 256
+  levels of brackets Clang accepts by default (`bracket nesting level
+  exceeded maximum of 256`; GCC sets no limit): compile its C with
+  `-fbracket-depth=N`, or split the function.
 * **C's `main`** sets the runtime up as `paykan run` does: with
   `PAYKAN_TRACK_HEAP` set, the tracking allocator before the program and the
   heap statistics after it; the command-line arguments as the Paykan `main`'s

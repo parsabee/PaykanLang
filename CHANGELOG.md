@@ -817,6 +817,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     passes, so the static counts recorded here do not move.  The receiver of a struct
     method that may change `self` is still its storage, as an `inout` argument is.
     `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape.
+  - Every check that panics on a bad operand (an integer `/` or `%`, an index into a
+    fixed-size array, a conversion's range, a `for` loop's step) nested the rest of its
+    function one level deeper, under an `scf.if` on the function's exit flag and so in the
+    C: Clang rejected the C of a function with 128 integer divisions (`bracket nesting
+    level exceeded maximum of 256`), and the compile time grew with the square of the
+    checks on every path (3000 divisions in one function took 97 s to reach
+    `--emit-mlir=scf`, and take 1.3 s now).  A check ends in `unreachable` after a panic,
+    which never returns, so it is no exit now: what follows it runs beside it, and the
+    runtime's panics are declared `noreturn` on the LLVM path, as `Runtime.h` declares them
+    `_Noreturn` for the C (docs/c-backend.md, "Control flow").  An early `return`, a
+    `break`, a `continue` and an `elif` still nest what follows them, so Clang's default
+    limit still takes a function of about 250 of them (documented there).
+    `samples/codegen/79_many_guards.pkn` makes 920 checks in one function.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

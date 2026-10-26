@@ -624,7 +624,9 @@ than 512 levels)` by every frontend, so that pathological input can
 overflow the stack neither of the parser nor of the passes after it. Each
 of these is a level: a block, and a function's or a lambda's `=>` body,
 which stands for one; an `elif`, which is the `if` of an else branch (so
-an `if` takes at most 510 `elif`s in a function's body); a class, struct,
+an `if` takes at most 510 `elif`s in a function's body, and the C of
+`--emit-c` fewer under Clang: [the C output](c-backend.md#the-generated-c),
+"Control flow"); a class, struct,
 `impl` or trait body; the arms of a `match`; a parenthesised expression or
 a tuple's elements; the arguments
 of a call and the elements of an array literal; a subscript's index; the

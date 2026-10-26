@@ -1,0 +1,213 @@
+// 79 — a panic guard leaves what follows it unnested
+// Exercises: one function of 200 integer divisions, 260 reads of a
+//            fixed-size array at an index known only when it runs and 260
+//            `u8` remainders, each behind a check that panics on a bad
+//            operand.  A panic does not return, so the code after a check
+//            runs beside it, not inside it: the C is no deeper for these
+//            920 checks (a division has two) than for one, where clang
+//            rejects brackets nested past 256, and the compile time grows
+//            with the function's length.  The checks still panic: a
+//            divisor of zero would.
+// expect-stdout: quotients: 66666600
+// expect-stdout: reads: 780
+// expect-stdout: remainders: 8
+
+import ::io;
+
+fn id(x: int) -> int => x;
+
+fn small(x: u8) -> u8 => x;
+
+fn crunch(a: int, b: int, i: int, m: u8, n: u8) -> Str {
+  q = 0;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  q += a / b + a / b + a / b + a / b;
+  xs: int[4] = [1, 2, 3, 4];
+  r = 0;
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  r += xs[i] + xs[i] + xs[i] + xs[i];
+  k: u8 = 0;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  k += m % n + m % n + m % n + m % n;
+  return "quotients: " + Str(q) + "\nreads: " + Str(r) + "\nremainders: "
+      + Str(k);
+}
+
+fn main() -> int {
+  io::println(crunch(id(1000000), id(3), id(2), small(200), small(3)));
+  return 0;
+}

@@ -509,6 +509,52 @@ fn @main() -> i64 {
   EXPECT_EQ(r.ExitCode, 3);
 }
 
+// The runtime's panics are declared noreturn, as Runtime.h declares them, so
+// a panic guard's branch ends at its call: the division after the guard is
+// what follows the `if`, not the call (SW-02).
+TEST(PIRLLVM, PanicsAreNoreturn) {
+  const char *src = R"(module "t"
+extern fn @$rt.Paykan_panic_div_by_zero() -> void
+extern fn @$rt.Paykan_panic_index(i64, i64) -> void
+fn @quot(%a: i64, %b: i64) -> i64 {
+  %z = cmp eq %b, 0
+  if %z {
+    call @$rt.Paykan_panic_div_by_zero()
+    unreachable
+  }
+  %q = div %a, %b
+  %neg = cmp lt %q, 0
+  if %neg {
+    call @$rt.Paykan_panic_index(%q, 0)
+    unreachable
+  }
+  ret %q
+}
+fn @main() -> i64 {
+  %r = call @quot(84, 2)
+  ret %r
+}
+)";
+  std::string err;
+  std::string ir = translatePIR(src, err);
+  ASSERT_FALSE(ir.empty()) << err;
+  for (const char *panic :
+       {"@Paykan_panic_div_by_zero(", "@Paykan_panic_index("}) {
+    auto decls = linesWith(ir, std::string("declare void ") + panic);
+    ASSERT_EQ(decls.size(), 1u) << panic << "\n" << ir;
+    const size_t at = ir.find(decls.front());
+    const size_t attrs = ir.rfind("; Function Attrs:", at);
+    ASSERT_NE(attrs, std::string::npos) << panic << "\n" << ir;
+    EXPECT_EQ(ir.find('\n', attrs) + 1, at) << panic << "\n" << ir;
+    EXPECT_NE(ir.substr(attrs, at - attrs).find("noreturn"), std::string::npos)
+        << panic << "\n"
+        << ir;
+  }
+  auto r = runPIR(src);
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 42);
+}
+
 // -- Reference counts
 //
 // `retain` and `release` have their fast paths inline (ToLLVM.cpp,
