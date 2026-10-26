@@ -490,6 +490,47 @@ TEST(Enum, GenericVariantsTakeTheOtherSideEitherWay) {
   EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
 }
 
+// A generic function's call whose parameters leave a type parameter open
+// (`none()`, `ok(1)`) needs the other side's type, and so does a variant
+// whose fields leave one open (`Pair::Left(1)`) or whose field needs it
+// (`Maybe::Just(Maybe::Nothing)`): the side that needs it less is typed
+// first, whichever it is, and a variant made with fields that can infer
+// them stays first against such a call.
+TEST(Enum, GenericCallsAndOpenVariantsTakeTheOtherSideEitherWay) {
+  auto r = semaCheck(withEnums(std::string(kGeneric) + R"(
+    enum Pair<A, B> { Both(a: A, b: B), Left(a: A), Neither }
+    fn none<T>() -> Maybe<T> => Maybe::Nothing;
+    fn ok<T, E>(v: T) -> Result<T, E> => Result::Ok(v);)",
+                               R"(
+    n = 2;
+    a: bool = Maybe::Just(1) == none();
+    b: bool = none() == Maybe::Just(1);
+    c: bool = Maybe::Just(1) != none();
+    d = if n > 0 then Maybe::Just(2) else none();
+    e = if n > 0 then none() else Maybe::Just(2);
+    f = if n > 0 then Maybe::Just(2) else (if n > 1 then none() else none());
+    m: Maybe<int> = d;
+    m = e;
+    m = f;
+    r = Result<int, Str>::Ok(1);
+    g: bool = ok(1) == r;
+    h: bool = r == ok(1);
+    i = if n > 0 then ok(1) else r;
+    j = if n > 0 then r else ok(1);
+    k: Result<int, Str> = i;
+    k = j;
+    l: bool = Pair::Left(1) == Pair::Both(1, "s");
+    o = if n > 0 then Pair::Left(1) else Pair::Both(1, "s");
+    p: Pair<int, Str> = o;
+    q: bool = Maybe::Just(Maybe::Nothing) == Maybe::Just(Maybe::Just(1));
+    s = if n > 0 then Maybe::Just(Maybe::Nothing) else Maybe::Just(Maybe::Just(1));
+    t: Maybe<Maybe<int>> = s;
+    u: bool = Maybe::Just(none()) == Maybe::Just(Maybe::Just(1));
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+}
+
 // With nothing to take them from on either side, they are still an error.
 TEST(Enum, GenericVariantsWithNoSideToTakeFrom) {
   const std::string message =
@@ -503,6 +544,20 @@ TEST(Enum, GenericVariantsWithNoSideToTakeFrom) {
     EXPECT_FALSE(r.Ok) << body;
     EXPECT_NE(r.Diagnostics.find(message), std::string::npos) << body << "\n"
                                                               << r.Diagnostics;
+  }
+  // Nor does a generic call against another that needs it.
+  for (const char *body :
+       {"a = none() == none();", "n = 1; a = if n > 0 then none() else none();",
+        "a = none() == Maybe::Nothing;"}) {
+    auto r = semaCheck(withEnums(
+        std::string(kGeneric) + "\nfn none<T>() -> Maybe<T> => Maybe::Nothing;",
+        body));
+    EXPECT_FALSE(r.Ok) << body;
+    EXPECT_NE(r.Diagnostics.find("cannot infer type parameter 'T' of 'none' "
+                                 "from the call arguments"),
+              std::string::npos)
+        << body << "\n"
+        << r.Diagnostics;
   }
 }
 

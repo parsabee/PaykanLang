@@ -571,8 +571,13 @@ A variant written without its type arguments gets them, in this order:
    other side of `==` or `!=`, or the other arm of a conditional expression (`if n > 0 then
    Maybe::Just(n) else Maybe::Nothing`). The other side or arm may be on either side
    (`Maybe::Nothing == m`, `if n > 0 then Maybe::Nothing else Maybe::Just(n)`): the one that
-   needs the other's type less is typed first. It comes before inference, so `m: Maybe<u8> =
-   Maybe::Just(200)` holds a `u8`.
+   needs the other's type less is typed first. A variant without fields needs it, and so does
+   one whose fields leave a type parameter open (`Pair::Left(1)` of an `enum Pair<A, B> {
+   Both(a: A, b: B), Left(a: A) }`) or whose field needs it (`Maybe::Just(Maybe::Nothing)`),
+   and a call of a generic function whose arguments leave one open (`none()` of a `fn
+   none<T>() -> Maybe<T>`); another variant made with fields needs it less, and anything
+   else not at all. Of two sides that need it as much, the first is typed first. It comes
+   before inference, so `m: Maybe<u8> = Maybe::Just(200)` holds a `u8`.
 3. **Inferred from the variant's fields**, as a generic class's constructor infers them:
    `Maybe::Just(3)` is a `Maybe<int>`, and `Maybe::Just(x)` in a generic function a `Maybe<T>`.
 

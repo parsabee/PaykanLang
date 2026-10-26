@@ -1228,14 +1228,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Maybe::Nothing == x`, `Maybe::Nothing != Maybe::Just(1)` and `b = if n > 0 then
   Maybe::Nothing else Maybe::Just(n)` were `cannot infer the type arguments of generic enum
   'Maybe' for 'Maybe::Nothing': ...`, and `Result::Ok(1) == r` could not infer `E`, against
-  docs/language/07-enums.md, which names no order.  The side that needs the other's type
-  less is now typed first (`ExprChecker::needsOtherSide`: a variant without fields needs it,
-  one with fields may infer its type arguments from them, anything else does not), in
-  either order of `==` and `!=` and of a conditional's arms, nested conditionals and a
+  docs/language/07-enums.md, which names no order.  So could a generic function's call that
+  takes its type arguments from the type its result flows into (`fn none<T>() -> Maybe<T>`,
+  `res::ok(1)`): `r == res::ok(1)` compiled, `res::ok(1) == r` did not.  The side that
+  needs the other's type less is now typed first (`ExprChecker::needsOtherSide`: a variant
+  without fields needs it, and so does a variant whose fields leave a type parameter open
+  (`Pair::Left(1)` of a `Pair<A, B>`, `Result::Ok(1)`) or whose field needs it
+  (`Maybe::Just(Maybe::Nothing)`), and a generic function's call whose parameters leave
+  one open; another variant made with fields may infer them from its fields; anything else
+  does not need it; of two that need it as much, the first is typed first), in either
+  order of `==` and `!=` and of a conditional's arms, nested conditionals and a
   conditional compared with a variant too; so `Maybe::Just(200) == small` with `small:
-  Maybe<u8>` compares two `Maybe<u8>`, as its mirror did.  `Maybe::Nothing ==
-  Maybe::Nothing` stays an error, having nothing to take them from.
-  `samples/codegen/74_generic_enum_either_side.pkn` runs each form.
+  Maybe<u8>` compares two `Maybe<u8>`, as its mirror did, and `Maybe::Just(1) == none()`
+  and `if c then Maybe::Just(2) else none()` give `none` the variant's type, as they did.
+  `Maybe::Nothing == Maybe::Nothing` and `none() == none()` stay errors, having nothing to
+  take them from.  `samples/codegen/74_generic_enum_either_side.pkn` runs each form.
 - A declaration named like a type an import reached is reported as the conflict it is,
   whatever it declares: `enum ErrorCode { A }` in a program that imports `::io` was
   `redefinition of enum 'ErrorCode'`, and `enum Error { B }`, `struct ErrorCode { ... }`,

@@ -742,17 +742,20 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     }
     /// How much an operand of `==` or `!=`, or an arm of a conditional
     /// expression, needs the type of the other operand or arm: a generic
-    /// enum's variant written without type arguments takes them from it.
+    /// enum's variant, or a call of a generic function, written without
+    /// type arguments takes them from it.
     enum class OtherSide {
       NotNeeded, ///< typed on its own
       Helps,     ///< `Maybe::Just(n)`: may infer them from its fields
-      Needed,    ///< `Maybe::Nothing`: has no fields to infer them from
+      Needed,    ///< `Maybe::Nothing`, `Result::Ok(1)`, `none()`: cannot
+                 ///< infer them all from its fields or arguments
     };
     /// What @p e needs (a conditional, what the less needy of its arms
     /// does).  Of two sides, the one that needs the other less is typed
-    /// first and gives its type to the other, so `Maybe::Nothing == m` and
-    /// `if c then Maybe::Nothing else Maybe::Just(n)` work as their mirrors
-    /// do.
+    /// first and gives its type to the other, so `Maybe::Nothing == m`,
+    /// `if c then Maybe::Nothing else Maybe::Just(n)` and `Maybe::Just(1)
+    /// == none()` work as their mirrors do; of two that need it as much,
+    /// the first.
     OtherSide needsOtherSide(const ast::Expr *e) const;
 
     /// A literal flowing into a fixed-size array slot: exactly its length

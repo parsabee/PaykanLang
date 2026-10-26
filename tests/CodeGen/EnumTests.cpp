@@ -398,3 +398,41 @@ fn main() -> int {
                       "True True\n");
   g.expectNoLeaks("GenericVariantsTakeTheOtherSideEitherWay");
 }
+
+// A generic function's call that takes its type arguments from the other
+// side (`none()`, `ok(s)`) next to a variant made with fields, in either
+// order, and a variant whose fields leave one open against one that does
+// not.
+TEST(EnumCodeGen, GenericCallsTakeTheOtherSideEitherWay) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(
+import ::io;
+enum Maybe<T> { Just(value: T), Nothing }
+enum Result<T, E> { Ok(value: T), Err(error: E) }
+enum Pair<A, B> { Both(a: A, b: B), Left(a: A), Neither }
+fn none<T>() -> Maybe<T> => Maybe::Nothing;
+fn ok<T, E>(v: T) -> Result<T, E> => Result::Ok(v);
+fn pick(n: int, s: Str) -> Str {
+  m = if n > 0 then Maybe::Just(s) else none();
+  k = if n > 1 then none() else Maybe::Just(s);
+  r: Result<Str, int> = Result::Ok(s);
+  o = if n > 0 then ok(s + "!") else r;
+  p = if n > 0 then Pair::Left(s) else Pair::Both(s, n);
+  return m.toString() + " " + k.toString() + " " + o.toString() + " " +
+         p.toString() + " " + Str(Maybe::Just(s) == none()) + " " +
+         Str(none() != Maybe::Just(s)) + " " + Str(ok(s) == r);
+}
+fn main() -> int {
+  io::println(pick(0, "a"));
+  io::println(pick(2, "b"));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(
+      r.StdOut,
+      "Nothing Just(value: a) Ok(value: a) Both(a: a, b: 0) False True "
+      "True\n"
+      "Just(value: b) Nothing Ok(value: b!) Left(a: b) False True True\n");
+  g.expectNoLeaks("GenericCallsTakeTheOtherSideEitherWay");
+}

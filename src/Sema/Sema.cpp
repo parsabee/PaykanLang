@@ -1653,6 +1653,45 @@ void Sema::ExprChecker::typeChainBelow(ast::Expr *e) {
     ChainTypes[*it] = visit(*it);
 }
 
+namespace {
+
+// Adds to @p out the names in @p t where inference can bind a type
+// parameter (Sema::unifyTypes): a named type, and the parts of a slice,
+// tuple, optional, function or generic type.
+void inferableNames(ast::Type *t, StringSet &out) {
+  if (!t)
+    return;
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(t)) {
+    out.insert(ct->getName());
+  } else if (auto *at = ast::dyn_cast<ast::ArrayType>(t)) {
+    inferableNames(at->getElementType(), out);
+  } else if (auto *tt = ast::dyn_cast<ast::TupleType>(t)) {
+    for (ast::Type *el : tt->getElementTypes())
+      inferableNames(el, out);
+  } else if (auto *ot = ast::dyn_cast<ast::OptionalType>(t)) {
+    inferableNames(ot->getInnerType(), out);
+  } else if (auto *ft = ast::dyn_cast<ast::FunctionType>(t)) {
+    for (ast::Type *p : ft->getParamTypes())
+      inferableNames(p, out);
+    inferableNames(ft->getReturnType(), out);
+  } else if (auto *gt = ast::dyn_cast<ast::GenericType>(t)) {
+    for (ast::Type *arg : gt->getArgs())
+      inferableNames(arg, out);
+  }
+}
+
+// Whether @p types name every one of @p params where inference can bind it.
+bool inferableFrom(const std::vector<const std::string *> &params,
+                   const std::vector<ast::Type *> &types) {
+  StringSet named;
+  for (ast::Type *t : types)
+    inferableNames(t, named);
+  return std::all_of(params.begin(), params.end(),
+                     [&](const std::string *p) { return named.count(*p); });
+}
+
+} // namespace
+
 Sema::ExprChecker::OtherSide
 Sema::ExprChecker::needsOtherSide(const ast::Expr *e) const {
   if (const auto *t = ast::dyn_cast<ast::TernaryExpr>(e))
@@ -1662,21 +1701,54 @@ Sema::ExprChecker::needsOtherSide(const ast::Expr *e) const {
     return S.EnumTemplates.count(ev->getEnumName()) && !ev->hasTypeArgs()
                ? OtherSide::Needed
                : OtherSide::NotNeeded;
-  if (const auto *call = ast::dyn_cast<ast::CallExpr>(e)) {
-    const std::string &callee = call->getCalleeName();
-    const size_t sep = callee.rfind(names::kQualSep);
-    if (sep != std::string::npos && !call->hasTypeArgs() &&
-        S.EnumTemplates.count(callee.substr(0, sep)))
-      return OtherSide::Helps;
+  const auto *call = ast::dyn_cast<ast::CallExpr>(e);
+  if (!call || call->hasTypeArgs())
+    return OtherSide::NotNeeded;
+  const std::string &callee = call->getCalleeName();
+  // `none()`, `res::ok(1)`: a generic function's type parameters that its
+  // parameters leave open come from the type its result flows into.
+  if (auto fn = S.FuncTemplates.find(callee); fn != S.FuncTemplates.end()) {
+    std::vector<ast::Type *> paramTypes;
+    for (const ast::Param &p : fn->second->getParams())
+      paramTypes.push_back(p.ParamType);
+    return inferableFrom(fn->second->getTypeParams(), paramTypes)
+               ? OtherSide::NotNeeded
+               : OtherSide::Needed;
   }
-  return OtherSide::NotNeeded;
+  // `Maybe::Just(n)`: a generic enum's variant made with fields, which its
+  // arguments are typed for without the other side's type.  It needs that
+  // type when the fields leave a type parameter open (`Pair::Left(1)` of a
+  // `Pair<A, B>`, `Result::Ok(1)`) or an argument needs it
+  // (`Maybe::Just(Maybe::Nothing)`); otherwise it may infer them.
+  const size_t sep = callee.rfind(names::kQualSep);
+  if (sep == std::string::npos)
+    return OtherSide::NotNeeded;
+  auto tmpl = S.EnumTemplates.find(callee.substr(0, sep));
+  if (tmpl == S.EnumTemplates.end())
+    return OtherSide::NotNeeded;
+  const ast::EnumDecl *ed = tmpl->second;
+  const std::string_view variant = std::string_view(callee).substr(sep + 2);
+  for (size_t v = 0; v < ed->getNumVariants(); ++v) {
+    if (*ed->getVariants()[v] != variant)
+      continue;
+    std::vector<ast::Type *> fieldTypes;
+    for (const ast::VarDecl *f : ed->getPayload(v))
+      fieldTypes.push_back(f->getType());
+    if (!inferableFrom(ed->getTypeParams(), fieldTypes))
+      return OtherSide::Needed;
+  }
+  for (const ast::Expr *arg : call->getArguments())
+    if (needsOtherSide(arg) == OtherSide::Needed)
+      return OtherSide::Needed;
+  return OtherSide::Helps;
 }
 
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // A numeric literal operand takes the other operand's sized type (`x + 1`
   // with `x: u8` adds two `u8`), so the non-literal operand is typed first,
-  // and so is the operand of `==` or `!=` a generic enum's variant without
-  // type arguments takes them from (`Maybe::Nothing == m`).
+  // and so is the operand of `==` or `!=` a generic enum's variant or a
+  // generic function's call without type arguments takes them from
+  // (`Maybe::Nothing == m`, `res::ok(1) == r`; needsOtherSide).
   ast::Type *lhsTy = nullptr;
   ast::Type *rhsTy = nullptr;
   const bool equality = node->getOpcode() == ast::BinaryOpcode::Eq ||
@@ -2635,10 +2707,11 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
-  // A generic enum's variant in an arm takes its type arguments from the
-  // slot the value flows into, else from the other arm's type: the arm
-  // that needs it less is typed first (`if c then Maybe::Just(1) else
-  // Maybe::Nothing`, `if c then Maybe::Nothing else Maybe::Just(1)`).
+  // A generic enum's variant or a generic function's call in an arm takes
+  // its type arguments from the slot the value flows into, else from the
+  // other arm's type: the arm that needs it less is typed first (`if c then
+  // Maybe::Just(1) else Maybe::Nothing`, `if c then Maybe::Nothing else
+  // Maybe::Just(1)`, `if c then none() else Maybe::Just(1)`).
   ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
   auto visitArm = [&](ast::Expr *arm, ast::Type *want) {
     if (want &&
