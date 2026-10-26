@@ -232,7 +232,7 @@ G = gating (a mismatch yields a verdict), I = informational.
 | `0x01` | `module` | `str` | G | canonical module name; must equal the name the importer resolved |
 | `0x03` | `contents` | `u32` bitset | G | bit 0 `HAS_CODE`, 1 `HAS_TEMPLATES`, 2 `HAS_MAIN`, 3 `SYSTEM` (name starts with `::`), 4 `HAS_STATIC_INIT` (#170 lazily initialised storage), 5 `EXPORTS_C` (#21), 6 `HAS_OBJECT` (the module's code is compiled, §5.13). Must agree with the section table |
 | `0x05` | `core` | `{str version; u32 major, minor, patch; str prerelease; str build}` | G | the PaykanLang that produced the file (`include/Version.h.in`). `build` is `""` for a release (configured with `-DPAYKAN_RELEASE=ON`, which the release workflow and the Homebrew formula pass); for every other build, a development build of the last release's version included, it is the build ID: a hash of the contents of `src/` and `include/`, recomputed on every build (`kBuildId` in the generated `BuildId.h`, `cmake/BuildId.cmake`; never an executable size/mtime). For a development build, a cache entry of another build is Stale (#188) and a prebuilt file of another build is `Rejected(Toolchain)`; a release takes a prebuilt file of any build of a version it accepts (§8.2) |
-| `0x07` | `format_versions` | `{u32 iface_version, tmpl_version, pir_version, code_encoding, debug_version}` | G | `iface_version` and `pir_version` are the release's (§11), like `PAYKAN_PIR_TEXT_VERSION`, so text, binary and manifest agree by construction. `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
+| `0x07` | `format_versions` | `{u32 iface_version, tmpl_version, pir_version, code_encoding, debug_version}` | G | `iface_version` and `pir_version` are the release's (§11), like `PAYKAN_PIR_TEXT_VERSION`, so text, binary and manifest agree by construction. `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR (§5, [pir.md §11](../pir.md#11-binary-form)) |
 | `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, defined in `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this): the release version, like every format (§11) |
 | `0x0B` | `target` | `{u8 pointer_size, slot_size, endianness, int_width, float_width}` | G | the abstract target PIR assumes: `8, 8, 1, 64, 64` (`Runtime.h` LP64 LE asserts). Not a triple: PIR and interface are the same for every LP64 LE triple; the triple belongs to a payload |
 | `0x0D` | `deps` | `list<Dep>` | G | direct imports only, sorted by canonical name; §2.3 |
@@ -763,7 +763,7 @@ for that reason; the lowering is deterministic already.
 | 5 | `box` | | 18 | `view`: marks the local whose slot type follows as a `view`'s (docs/pir.md §3); only there |
 | | | | 19–255 | reserved |
 
-A reader of codec 1.x rejects reserved codes. A `static_assert`-checked
+A reader of this codec version rejects reserved codes. A `static_assert`-checked
 table in `include/paykan/pir/Codes.h` holds both the opcode names the
 printer uses and these codes, with a test that every enumerator has both.
 
@@ -1142,8 +1142,9 @@ Rejected: backend-written sidecar files (#106 B: two files to keep in sync,
 integrity has to bind them) and backend-embedded interfaces (#106 A: a
 bitcode/ELF parser in the core).
 
-**C plugin API** (append-only; `PAYKAN_PLUGIN_API_VERSION` stays 1 with
-`struct_size` gating). To keep `PaykanBackend` small and leave room for
+**C plugin API** (append-only, with `struct_size` gating;
+`PAYKAN_PLUGIN_API_VERSION` is the release version, §11, so a loadable
+plugin is rebuilt for each release). To keep `PaykanBackend` small and leave room for
 #25's `load_symbol`, the callbacks live in their own descriptor reached
 through one appended pointer field:
 
@@ -1668,8 +1669,13 @@ any payload code.
 Landed so far: A1 (header-only, `include/paykan/support/`, and without
 `AtomicFile`), A2 (without the linkage and
 attribute flags), A3 and A4, and A6 and B1 in the prototype form the status
-at the top describes (no `PAYKAN_PKM_COMPATIBLE_VERSIONS` list yet). A5, B2
-and phases C and D have not landed.
+at the top describes (no `PAYKAN_PKM_COMPATIBLE_VERSIONS` list yet); D1 in
+the form §4.8 describes (templates in `TMPL` as renamed interchange text,
+and each module's own copies of the instantiations it uses, with no `INST`
+part and no erased copies); and of C3, a module's compiled code, held in its
+`OBJ` section (§5.13) rather than in a payload, with the C backend's
+`.c/.o/.key` cache gone with that backend. A5, B2 and the rest of phases C
+and D have not landed.
 
 | PR | Lands | Depends on |
 |---|---|---|

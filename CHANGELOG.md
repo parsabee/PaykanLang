@@ -1101,6 +1101,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows `build <source-file> [-o <output>]` and
   `--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads|all`, the list the error
   for an unknown section prints, both made from one table.
+- The plugin documentation said the plugin API version changes only when `plugin_api.h`
+  changes incompatibly, and that a plugin built against an older header keeps loading into a
+  newer `paykan`.  The version is the release's, and a `paykan` loads only plugins of its
+  own: a loadable plugin is rebuilt for each release, and this one rejects a plugin built
+  for 0.2.0 (`built for plugin API 0.2.0; this paykan supports plugin API 0.3.0`) whatever
+  the plugin compatibility list holds.  docs/writing-a-backend.md §7,
+  docs/plugins/overview.md, docs/plugins/pir-for-backends.md and docs/design/pkm.md now say
+  so, and docs/pir.md gives the binary PIR codec's version as the release's, not 1.0.
 
 ## [0.2.0] - 2026-10-20
 
