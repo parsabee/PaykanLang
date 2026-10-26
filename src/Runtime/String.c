@@ -183,9 +183,12 @@ static int64_t string_integer_to_f32(const PaykanString *s, double *out) {
     unsigned below = 0;
     for (int b = 0; b < shift - 1 && !below; ++b)
       below = limb_bit(limb, b);
-    if ((below || (mantissa & 1u)) && ++mantissa == (UINT32_C(1) << 24)) {
-      mantissa >>= 1;
-      ++shift;
+    if (below || (mantissa & 1u)) {
+      ++mantissa;
+      if (mantissa == (UINT32_C(1) << 24)) {
+        mantissa >>= 1;
+        ++shift;
+      }
     }
   }
   // The largest f32 is (2^24 - 1) * 2^104.
