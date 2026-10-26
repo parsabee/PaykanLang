@@ -24,6 +24,7 @@
 #include <sstream>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <sys/wait.h>
@@ -1897,7 +1898,18 @@ TEST(Driver, ErrorsStopAtTheErrorLimit) {
   EXPECT_NE(three.out.find("note: stopping after 3 errors, the error limit"),
             std::string::npos)
       << three.out;
-  for (const char *bad : {"x", "-1", "1e3", "12345678901"}) {
+  auto one = run(std::string(kPaykan) + " --error-limit=1 --check-only " + src +
+                 " 2>&1");
+  EXPECT_EQ(countOf(one.out, "error: "), 1u) << one.out;
+  EXPECT_NE(one.out.find("note: stopping after 1 error, the error limit"),
+            std::string::npos)
+      << one.out;
+  // Leading zeros are the number's: nine digits after them at most.
+  auto zeros =
+      run(std::string(kPaykan) + " --error-limit=0000000005 " + src + " 2>&1");
+  EXPECT_EQ(zeros.exitCode, 1) << zeros.out;
+  EXPECT_EQ(countOf(zeros.out, "error: "), 5u) << zeros.out;
+  for (const char *bad : {"x", "-1", "1e3", "12345678901", "01234567890"}) {
     auto r = run(std::string(kPaykan) + " --error-limit=" + bad + " " + src +
                  " 2>&1");
     EXPECT_EQ(r.exitCode, 1) << bad << ": " << r.out;
@@ -1977,11 +1989,14 @@ TEST(Driver, ALongSourceLineIsShownAsAWindowAroundTheCaret) {
   for (int i = 0; i < 100; ++i)
     body += " c" + std::to_string(i) + " = 2;";
   body += " return 0; }";
-  auto src = writeTmp("// short\n" + body + "\n");
+  // The line above is as long (a comment), the line below short.
+  std::string above = "//" + body.substr(2);
+  std::replace(above.begin(), above.end(), 'a', 'z');
+  auto src = writeTmp("// short\n" + above + "\n" + body + "\n// end\n");
   auto r = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
   EXPECT_EQ(r.exitCode, 1) << r.out;
   const std::string col = std::to_string(body.find("nope") + 1);
-  EXPECT_NE(r.out.find(":2:" + col +
+  EXPECT_NE(r.out.find(":3:" + col +
                        ": error: use of undeclared variable "
                        "'nope'"),
             std::string::npos)
@@ -1990,16 +2005,41 @@ TEST(Driver, ALongSourceLineIsShownAsAWindowAroundTheCaret) {
   std::vector<std::string> shown;
   for (std::string l; std::getline(lines, l);)
     shown.push_back(l);
-  ASSERT_EQ(shown.size(), 4u) << r.out;
-  EXPECT_EQ(shown[1], "  1 | ...") << r.out;
-  const std::string gutter = "  2 | ...";
+  ASSERT_EQ(shown.size(), 5u) << r.out;
+  // 120 characters with the ellipses, after the gutter.
+  const std::string gutter = "  3 | ...";
   ASSERT_EQ(shown[2].substr(0, gutter.size()), gutter) << r.out;
-  EXPECT_EQ(shown[2].size(), gutter.size() + 120 + 3) << r.out;
+  EXPECT_EQ(shown[2].size(), 6u + 120u) << r.out;
   EXPECT_EQ(shown[2].substr(shown[2].size() - 3), "...") << r.out;
   // The caret and its underline under `nope`.
   EXPECT_EQ(shown[3].find("^~~~"), shown[2].find("nope")) << r.out;
   EXPECT_EQ(shown[3].substr(0, 6), "    | ") << r.out;
+  // The long line above it is shown from the same column; the short line
+  // below it whole.
+  const size_t from = body.find(shown[2].substr(gutter.size(), 40));
+  ASSERT_NE(from, std::string::npos) << r.out;
+  EXPECT_EQ(shown[1], "  2 | ..." + above.substr(from, 114) + "...") << r.out;
+  EXPECT_EQ(shown[4], "  4 | // end") << r.out;
   std::filesystem::remove(src);
+
+  // A line of 120 characters is shown whole; one of 121 in 120.
+  for (const size_t width : {120u, 121u}) {
+    std::string line = "fn main() -> int { return zz; }";
+    line.insert(19, width - line.size(), ' ');
+    auto w = writeTmp(line + "\n");
+    auto o = run(std::string(kPaykan) + " --check-only " + w + " 2>&1");
+    EXPECT_NE(o.out.find(width == 120 ? "  1 | " + line + "\n"
+                                      : "  1 | ..." + line.substr(4) + "\n"),
+              std::string::npos)
+        << o.out;
+    EXPECT_NE(
+        o.out.find("\n    | " + std::string(width == 120 ? 0 : 3, ' ') +
+                   std::string(line.find("zz") - (width == 120 ? 0 : 4), ' ') +
+                   "^~\n"),
+        std::string::npos)
+        << o.out;
+    std::filesystem::remove(w);
+  }
 
   // A tab and UTF-8 characters before the caret: one character each.
   auto utf =
@@ -2021,7 +2061,39 @@ TEST(Driver, ALongSourceLineIsShownAsAWindowAroundTheCaret) {
   EXPECT_EQ(h.exitCode, 1);
   EXPECT_EQ(countOf(h.out, "error: "), 20u);
   EXPECT_LT(h.out.size(), 16384u) << h.out.substr(0, 4000);
+  // All of them: each as long as one.
+  auto all = run(std::string(kPaykan) + " --error-limit=0 --check-only " + big +
+                 " 2>&1");
+  EXPECT_EQ(countOf(all.out, "error: "), 10000u);
+  EXPECT_LT(all.out.size(), 10000u * 300u);
   std::filesystem::remove(big);
+}
+
+// A byte that is in no UTF-8 character (a Latin-1 or Windows-1252 file's
+// `\xA9`, a stray continuation byte) is a character of its own: the lexer's
+// `invalid character` error shows its line and a caret under it, at the
+// start of a line and in the middle of one.  A line that started with one
+// sent the snippet's caret past the end of memory.
+TEST(Driver, AByteInNoUTF8CharacterIsShownAsOne) {
+  for (const auto &[text, expected] :
+       {std::pair<std::string, std::string>{
+            "fn main() -> int {\n\xA9 return 0; }\n",
+            "  2 | \xA9 return 0; }\n    | ^\n"},
+        {"fn main() -> int {\n\x80\x80 return 0;\n}\n",
+         "  2 | \x80\x80 return 0;\n    |  ^\n  3 | }\n"},
+        {"fn main() -> int {\n  s = \"\xC3\xA9\"; \xA9 return 0;\n}\n",
+         "  2 |   s = \"\xC3\xA9\"; \xA9 return 0;\n    | " +
+             std::string(11, ' ') + "^\n"},
+        {"fn main() -> int {\n\x80" + std::string(300, 'a') + "\n}\n",
+         "  2 | \x80" + std::string(116, 'a') + "...\n    | ^\n"}}) {
+    auto src = writeTmp(text);
+    auto r = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << r.out;
+    EXPECT_NE(r.out.find("error: invalid character"), std::string::npos)
+        << r.out;
+    EXPECT_NE(r.out.find(expected), std::string::npos) << r.out;
+    std::filesystem::remove(src);
+  }
 }
 
 TEST(Driver, EmitCRejectsAnotherBackend) {

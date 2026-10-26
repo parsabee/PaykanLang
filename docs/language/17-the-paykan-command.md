@@ -33,12 +33,15 @@ imports are resolved (see [Modules](15-modules.md)).
 
 When compilation fails, `paykan` prints the errors and exits with status 1. It prints the
 first 20 errors, and after them `note: stopping after 20 errors, the error limit
-(--error-limit=N sets it, and --error-limit=0 shows every error)` and nothing more; warnings
-and notes do not count, and the exit status is 1 whatever the limit. Each error shows its
-line with a caret under the place; a line longer than 120 characters is shown as the 120
-around the caret, with `...` where it is cut (a tab and a UTF-8 character count as one, and
-the caret stays under its character). A wrong option prints a message suggesting `--help`,
-and also exits with 1.
+(--error-limit=N sets it, and --error-limit=0 shows every error)` and no more diagnostics;
+warnings and notes do not count, and the exit status is 1 whatever the limit. (A file that
+does not parse still ends with `parsing failed with N error(s)`, which counts every error.)
+Each error shows its line with a caret under the place, and the lines above and below it. A
+line longer than 120 characters is shown in 120 around the caret, `...` standing for what
+is cut before or after; a line above or below it that fits in 120 is shown whole, a longer
+one from the same column. A tab and a UTF-8 character count as one, and so does each byte
+that is in no UTF-8 character, so the caret stays under its character. A wrong option
+prints a message suggesting `--help`, and also exits with 1.
 
 ## Options
 

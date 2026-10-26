@@ -266,15 +266,18 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         valueOption(name, "error-limit", i, argc, argv, limit, r.Error)) {
       if (!r.Error.empty())
         return r;
-      // A count of errors: digits only, at most nine of them.
-      if (limit.size() > 9 ||
+      // A count of errors: digits only, at most nine of them after any
+      // leading zeros.
+      const size_t significant =
+          std::min(limit.find_first_not_of('0'), limit.size());
+      if (limit.size() - significant > 9 ||
           limit.find_first_not_of("0123456789") != std::string::npos) {
         r.Error = "invalid error limit '" + limit +
                   "' (expected a number of errors, or 0 for no limit)";
         return r;
       }
       o.ErrorLimit = 0;
-      for (char c : limit)
+      for (char c : limit.substr(significant))
         o.ErrorLimit = o.ErrorLimit * 10 + static_cast<unsigned>(c - '0');
       continue;
     }

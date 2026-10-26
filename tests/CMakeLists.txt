@@ -673,6 +673,7 @@ if(PAYKAN_TEST_SUITE_frontend)
 add_executable(frontend_tests
     Frontend/LexerTests.cpp
     Frontend/RecoveryTests.cpp
+    Frontend/SnippetTests.cpp
     Frontend/FuzzSmokeTests.cpp
     Frontend/DifferentialTests.cpp
 )

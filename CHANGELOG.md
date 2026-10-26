@@ -650,14 +650,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   11-structs.md, "Semantic Checks").
 - A compilation prints at most 20 errors: past them `paykan` prints `note: stopping after
   20 errors, the error limit (--error-limit=N sets it, and --error-limit=0 shows every
-  error)` and no more diagnostics, though it still exits with status 1.  The new
-  `--error-limit=N` sets the limit (`0` for none); warnings and notes do not count, and an
-  imported module's errors count against the importer's limit.  And a source line longer
-  than 120 characters is shown as the 120 around the caret, cut with `...`, the lines above
-  and below it as the same characters, where every error printed its whole line and the
-  lines around it: 10000 errors on one 148 KB line printed 2.2 GB, and print 5 KB now.
-  The caret counts a UTF-8 character as one, where it counted its bytes and stood to the
-  right of its place after one (docs/language/17-the-paykan-command.md).
+  error)` and no more diagnostics, though it still exits with status 1 (and a file that
+  does not parse still ends with `parsing failed with N error(s)`, counting them all).  The
+  new `--error-limit=N` sets the limit (`0` for none; leading zeros are allowed); warnings
+  and notes do not count, and an imported module's errors count against the importer's
+  limit.  And a source line longer than 120 characters is shown in 120 around the caret,
+  `...` standing for what is cut, a line above or below it whole if it fits in 120 and
+  from the same column if not, where every error printed its whole line and the lines
+  around it: 10000 errors on one 148 KB line printed 2.2 GB, and print 5 KB now; with
+  `--error-limit=0`, 20000 errors on one 100 KB line take 1 s to print 5 MB, where they
+  took 24 s to print 2.8 GB.  Only the characters around the caret are looked at, so an
+  error's cost does not grow with its line either.  A caret whose column is past its line
+  (a frontend plugin's AST of another file) stands after the line's last character.  The
+  caret counts a UTF-8 character as one, and each byte in none (a Latin-1 file's `©`) as
+  one too, where it counted bytes and stood to the right of its place after a UTF-8
+  character (docs/language/17-the-paykan-command.md).
 - A field named like a type is an error whatever declares it: `class C { u8: int; }` with
   `impl C { fn __init__() { self.u8 = 1; } }`, `struct S { Str: int; }` with its own
   `__init__` and `enum E { B(u8: int) }` compiled, since only the default `__init__`'s
