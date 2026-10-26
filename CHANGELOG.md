@@ -828,14 +828,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     runtime's panics are declared `noreturn` on the LLVM path, as `Runtime.h` declares them
     `_Noreturn` for the C (docs/c-backend.md, "Control flow").  An early `return`, a
     `break`, a `continue` and an `elif` still nest what follows them, so Clang's default
-    limit still takes a function of about 250 of them (documented there).
+    limit still rejects a function with more than about 250 of them (documented there).
     `samples/codegen/79_many_guards.pkn` makes 920 checks in one function.
   - A `match` with many literal arms compiled in time quadratic in its arms: the lowering
     and PIR's verifier compared each case of its switch with every case before it, to drop
     or reject one listed twice (20000 arms took 35 s to reach `--emit-pir`, and take 0.5 s
-    now).  Both keep a set of the cases seen, which holds two cases as one exactly when they
-    were before (`pir::CaseSet`, with `pir::sameConstant`'s equality: an `i64`, a `char` or
-    a `bool` constant of the same value, and never a float).  And `run -O0` generated code
+    now).  Both keep a set of the cases seen, which holds two cases as one exactly when the
+    comparison did (`pir::CaseSet`, with `pir::sameConstant`'s equality: an `i64`, a `char`
+    or a `bool` constant of the same value, and never a float).  And `run -O0` generated code
     at LLVM's default level from a module it had not optimised, which took 47 s for a
     5000-armed match whose `build -O0` takes 2.6 s: the JIT now generates code at the
     level a native build does for the same `-O` (no optimisation at `-O0`, LLVM's least at
