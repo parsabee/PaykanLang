@@ -803,6 +803,15 @@ private:
     /// call's `inout` result.
     Val emitStructMethodCall(ast::MethodCallExpr *node, ast::StructType *st,
                              bool wantAddress);
+    /// visitMethodCallExpr's kinds of call, each in a frame of its own: a
+    /// field's function value, `hash()`, an optional's `toString()`, a
+    /// tuple's, a struct's, an enum's or a builtin type's, and a class's
+    /// method.
+    Val emitFieldCall(ast::MethodCallExpr *node);
+    Val emitHashCall(ast::MethodCallExpr *node);
+    Val emitOptionalToStringCall(ast::MethodCallExpr *node);
+    Val emitShowCall(ast::MethodCallExpr *node);
+    Val emitClassMethodCall(ast::MethodCallExpr *node, bool wantAddress);
     Val emitShortCircuit(ast::BinaryExpr *node, bool isAnd);
     /// The panics before an integer `/` or `%`: a zero divisor, and for a
     /// division of `int` values (@p checkOverflow) INT64_MIN / -1.
@@ -898,8 +907,16 @@ private:
                              const std::vector<ast::Type *> &captureTys,
                              const std::vector<bool> &captureWeak);
   /// The code of lambda @p node (and its closure class, when it captures
-  /// anything), made once: the code's function name.
+  /// anything), made once: the code's function name.  Its body is lowered
+  /// before this returns, unless this is in another lambda's body: then
+  /// after that body (PendingLambdas).
   const std::string &lowerLambda(ast::LambdaExpr *node);
+  /// The body of the lambda @p node, which lowerLambda declared.
+  void emitLambdaBody(ast::LambdaExpr *node);
+  /// The lambdas whose bodies are lowered next, in order, while
+  /// LoweringLambdaBodies: each one met in a body lowered before it.
+  std::vector<ast::LambdaExpr *> PendingLambdas;
+  bool LoweringLambdaBodies = false;
   /// Write a function value of lambda @p node to @p dst: its code, and a new
   /// closure with its captures copied in (owned by @p dst).
   void emitLambdaInto(ast::LambdaExpr *node, const Val &dst);

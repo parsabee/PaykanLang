@@ -1148,6 +1148,85 @@ TEST(Driver, ChainsOfEveryKindAtTheLimitFitAQuarterOfTheStack) {
     std::filesystem::remove(f);
 }
 
+// One function a kind of nesting, @p levels deep in its body (as
+// docs/grammar.md section 9 counts them, the body a level of its own): blocks,
+// statements and expressions of each kind, a type, lambdas, and the deepest
+// mix, lambdas in lambdas' blocks around a chain of @p links links.
+static std::string everyNestingKind(int levels, int links) {
+  auto rep = [](const std::string &s, int n) {
+    std::string out;
+    for (int i = 0; i < n; ++i)
+      out += s;
+    return out;
+  };
+  std::string chain = "1";
+  for (int i = 0; i < links; ++i)
+    chain += " + 1";
+  const int n = levels;
+  const std::pair<const char *, std::string> kinds[] = {
+      {"k_blocks", rep("{ ", n) + "x = 1;" + rep(" }", n)},
+      {"k_ifs", "a = True; " + rep("if a { ", n) + "x = 1;" + rep(" }", n)},
+      {"k_whiles",
+       "a = False; " + rep("while a { ", n) + "x = 1;" + rep(" }", n)},
+      {"k_matches", "x = 1; " + rep("match x { 1 { ", n / 2) + "y = 1;" +
+                        rep(" } _ { } }", n / 2)},
+      {"k_parens", "x = " + rep("(", n) + "1" + rep(")", n) + ";"},
+      {"k_operands", "x = " + rep("1 + (", n) + "1" + rep(")", n) + ";"},
+      {"k_arrays", "x = " + rep("[", n) + "1" + rep("]", n) + ";"},
+      {"k_calls", "x = " + rep("id(", n) + "1" + rep(")", n) + ";"},
+      {"k_arguments",
+       "o = O(); x = " + rep("o.m(", n) + "1" + rep(")", n) + ";"},
+      {"k_prefix", "a = 1; x = " + rep("-", n) + "a;"},
+      {"k_conditionals", "a = True; x = " + rep("if a then 1 else ", n) + "2;"},
+      {"k_types",
+       "x: " + rep("B<", n - 1) + "int" + rep(">", n - 1) + "? = None;"},
+      {"k_lambdas", "let f = " + rep("fn() => ", n) + "0;"},
+      {"k_deepest", "let f = " + rep("fn() { ", n - 1) + "x = " + chain + ";" +
+                        rep(" };", n - 1)},
+  };
+  std::string src = "import ::io;\n"
+                    "class B<T> { v: T; }\n"
+                    "class O { view fn m(x: int) -> int { return x; } }\n"
+                    "fn id(x: int) -> int { return x; }\n";
+  std::string sum;
+  for (const auto &[name, body] : kinds) {
+    src += "fn " + std::string(name) + "() -> int { " + body + " return 0; }\n";
+    sum += std::string(sum.empty() ? "" : " + ") + name + "()";
+  }
+  return src + "fn main() -> int {\n  io::println((" + sum +
+         ").toString());\n  return 0;\n}\n";
+}
+
+// Each kind of nesting at the limit, 511 levels in a function's body, and
+// the deepest mix of nesting and a chain, compile and run on every path in
+// a quarter of the default stack (atLimitStack): `run`, which takes the
+// MLIR backend's regions to the JIT, and `--emit-c`, whose translation
+// recurses once a region (#17).
+TEST(Driver, NestingOfEveryKindAtTheLimitFitsAQuarterOfTheStack) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(everyNestingKind(511, 2048));
+  auto [rc, out] =
+      run(atLimitStack() + paykanRun() + " -O0 run " + src + " 2>/dev/null");
+  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(out, "0\n");
+  auto [prc, pir] = run(atLimitStack() + std::string(kPaykan) +
+                        " -O2 --emit-pir " + src + " 2>&1");
+  EXPECT_EQ(prc, 0) << pir.substr(0, 2000);
+  auto [crc, c] =
+      run(atLimitStack() + paykanRun() + " -O0 --emit-c " + src + " 2>&1");
+  EXPECT_EQ(crc, 0) << c.substr(0, 2000);
+  // One level more is the frontend's error.
+  auto deeper = writeTmp(everyNestingKind(512, 0));
+  auto [drc, dout] =
+      run(std::string(kPaykan) + " --check-only " + deeper + " 2>&1");
+  EXPECT_EQ(drc, 1);
+  EXPECT_NE(dout.find("error: nesting too deep (more than 512 levels)"),
+            std::string::npos)
+      << dout.substr(0, 2000);
+  for (const std::string &f : {src, deeper})
+    std::filesystem::remove(f);
+}
+
 // -- Negative numbers as match patterns (#51)
 
 // `-1`, `- 7`, `-2.5`, `-0.0` and INT64_MIN, `-9223372036854775808`, are

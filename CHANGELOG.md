@@ -889,10 +889,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     chain of them is one loop too, through the calls in such a chain as well: a struct's
     methods (`p.m().m()...`, generic structs' too), a field's function value
     (`c.f().f()...`), and the element, the field or the function value of a call's result
-    (`c.t().0.t().0...`, `p.a()[0]...`, `c.g()()...`).  Every chain and nesting within the limits, and the
-    deepest mixes of them (2048 links in 511 levels of lambdas), compiles and runs on
-    every path (`paykan run`, `paykan build`, `--emit-c`) with a quarter of the default
-    stack, 2 MB, in a debug build.
+    (`c.t().0.t().0...`, `p.a()[0]...`, `c.g()()...`).  A lambda in a lambda's body is
+    lowered after that body, in a loop too, and the parser, the AST interchange reader
+    (which reads its text's lists in a loop) and the lowering of method calls hold the
+    frames a nesting recurses through small: a level of `let f = fn() { ... };` took about
+    16 KB of an AddressSanitizer build's stack (without its fake stack for use after return)
+    in the parser and 17 KB in the lowering,
+    which overflowed 8 MB at 511 levels, and takes 6 KB in the parser and none in the
+    lowering.  Every chain and nesting within the limits, and the deepest mixes of them
+    (2048 links in 511 levels of lambdas), compiles and runs on every path (`paykan run`,
+    `paykan build`, `--emit-c`) with a quarter of the default stack, 2 MB, in a debug
+    build, and the test suite checks that it does.
   - The AST interchange format nests up to 4112 lists (`kMaxDepth`), which holds every AST
     within the limits, and its reader counts the links and the levels as the frontends do,
     so an AST from a plugin, or the `ast-text` frontend's input, is held to the same limits
