@@ -488,6 +488,11 @@ fn mk() -> keys::Key { return keys::Key(1, 2); }
 fn mkc() -> keys::CK { return keys::CK(4); }
 )";
 
+// main uses keys' types and conformances directly, through mid, through a
+// template body of keys (distinct), and through the instantiations of keys'
+// generic types that keys made (mkKeyed, mkBox) and that main makes itself
+// (`Keyed<Str>`, `GBox<Str>`: their `impl Trait for` blocks go with the
+// templates).
 TEST(Module, HashableAcrossModulesOk) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_hashable").string();
   std::filesystem::remove_all(tmp);
@@ -512,6 +517,8 @@ fn main() -> int {
   t.add(Sub(1));
   io::println(Str(h(keys::mkKeyed()) == h(7)) + " " + Str(h(keys::mkBox())));
   io::println(Str(h(mid::mk()) + h(mid::mkc())) + keys::mkBox().name());
+  io::println(Str(h(keys::Keyed<Str>("a")) == h("a")) + " " +
+              Str(h(keys::GBox<Str>("x"))) + keys::GBox<Str>("x").name());
   io::println(Str(keys::distinct(0)));
   return 0;
 }
@@ -591,6 +598,81 @@ fn main() -> int { return 0; }
         "is not supported yet"})
     EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
                                                         << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// A generic class's `impl Hashable for` block goes with its template: an
+// importer's instantiation checks it as the module would check its own
+// (`Box<float>` in gb is the same error), in gb's file, with the importer's
+// request as the note.
+TEST(Module, ImporterInstantiationChecksTraitBlock) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_trait_block").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "gb.pkn", R"(class Box<T> { v: T; }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }
+)");
+  auto main = writeFile(tmp, "main.pkn", R"(import gb;
+fn main() -> int { b = gb::Box<float>(1.5); return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"gb.pkn:3:59: error: method call on non-class type 'float'",
+        "main.pkn:2:24: note: in instantiation of 'Box<float>' requested here"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// A block of the module's own trait gives an importer's instantiation its
+// methods, as the module's own `GBox<int>` has them, but not the trait,
+// which the importer cannot name (#147): its own trait of that name is
+// another trait, which GBox does not implement.  Instantiated before the
+// `impl` blocks are checked (a field) and after (a call) alike.
+TEST(Module, ModuleTraitBlockGivesMethodsOnly) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_module_trait_block").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "gb.pkn", R"(trait Named { view fn name() -> Str; }
+class GBox<T> { v: T; }
+impl GBox<T> { fn __init__(v: T) { self.v = v; } }
+impl Named for GBox<T> { view fn name() -> Str { return "gbox"; } }
+fn named<T: Named>(x: view T) -> Str { return x.name(); }
+fn mine() -> Str { return named(GBox<int>(1)); }
+)");
+  auto methods = writeFile(tmp, "methods.pkn", R"(import gb;
+class H { b: gb::GBox<Str>; }
+impl H { fn __init__() { self.b = gb::GBox<Str>("s"); } }
+fn main() -> int {
+  s = gb::GBox<float>(1.5).name() + H().b.name() + gb::mine();
+  return 0;
+}
+)");
+  auto onlyMethods = semaCheckFile(methods, tmp);
+  EXPECT_TRUE(onlyMethods.Ok) << onlyMethods.Diagnostics;
+
+  auto own = writeFile(tmp, "own.pkn", R"(import gb;
+trait Named { view fn name() -> Str; }
+class H { b: gb::GBox<Str>; }
+fn g<T: Named>(x: view T) -> Str { return x.name(); }
+fn main() -> int {
+  s = gb::GBox<Str>("s").name() + g(gb::GBox<Str>("s")) + g(gb::GBox<float>(1.5));
+  return 0;
+}
+)");
+  // A second variable, not an assignment: SemaFileResult is not the same
+  // struct in every Sema test file.
+  auto r = semaCheckFile(own, tmp);
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"own.pkn:6:35: error: 'GBox<Str>' does not implement trait 'Named', "
+        "which 'g' requires of 'T'",
+        "own.pkn:6:59: error: 'GBox<float>' does not implement trait 'Named', "
+        "which 'g' requires of 'T'"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("no method"), std::string::npos)
+      << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
 

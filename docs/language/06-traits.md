@@ -262,7 +262,9 @@ Output:
 
 The `impl` block stays in the type's module: an importer can neither write `impl Hashable
 for keys::Key` nor repeat it for a subclass of an imported `Hashable` class, which is
-`Hashable` through its superclass.
+`Hashable` through its superclass. A generic type's `impl Hashable for Box<T>` block goes
+with its template, so every instantiation is `Hashable`, also one an importer makes
+([Generics](13-generics.md#modules)).
 
 ## ValueType
 
@@ -315,8 +317,9 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 
 ## Not Supported Yet
 
-Traits of another module (an importer cannot name them, their `impl ... for` blocks
-are not in the module interface, and a template of that module bounded by one cannot be
-instantiated from the importer: `unknown trait 'Named'`), `impl ... for` a built-in type, an
-enum or a class of another module, default methods, `static fn` requirements, and trait
-objects.
+Traits of another module (an importer cannot name them; a type's conformance to one is
+not in the module interface, so an `impl Named for Box<T>` block gives an importer's
+`lib::Box<Str>` its methods, not the trait; and a template of that module bounded by one
+cannot be instantiated from the importer: `unknown trait 'Named'`), `impl ... for` a
+built-in type, an enum or a class of another module, default methods, `static fn`
+requirements, and trait objects.

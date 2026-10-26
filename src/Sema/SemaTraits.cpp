@@ -244,6 +244,19 @@ std::optional<Sema::TraitRef> Sema::resolveTraitRef(ast::Type *ref,
   return tr;
 }
 
+std::string Sema::traitAnnotationName(const ast::Type *ref) {
+  if (const auto *ct = ast::dyn_cast<ast::ClassType>(ref))
+    return ct->getName();
+  if (const auto *gt = ast::dyn_cast<ast::GenericType>(ref))
+    return gt->getName();
+  return "";
+}
+
+bool Sema::namesBuiltinTrait(const ast::Type *ref) const {
+  auto it = Traits.find(traitAnnotationName(ref));
+  return it != Traits.end() && it->second.IsBuiltin;
+}
+
 std::string Sema::traitRefName(const TraitRef &tr) {
   std::string s = tr.Trait->Decl->getName();
   if (tr.Args.empty())
@@ -365,6 +378,14 @@ std::string Sema::noTextReason(ast::Type *ty) {
 }
 
 bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
+  // A block of another module's template (CurrentOrigin: its instantiation
+  // is being checked) whose trait is not built in implements that module's
+  // own trait, which no importer can name or resolve (#147).  Its methods
+  // joined the instantiation (populateImplMethods); its conformance is not
+  // recorded here.  Resolving the name here would find this module's trait
+  // of the same name: another trait.
+  if (CurrentOrigin && !namesBuiltinTrait(im->getTrait()))
+    return true;
   auto tr = resolveTraitRef(im->getTrait(), {}, im->getLocation());
   if (!tr)
     return false;

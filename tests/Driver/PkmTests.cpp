@@ -2033,7 +2033,8 @@ namespace {
 /// lib::keys declares a struct, a class and a private struct with `impl
 /// Hashable for` blocks and makes instantiations of its generic types;
 /// lib::mid only returns keys' types and lib::lib2's template body uses one.
-/// main uses each as a `HashMap`/`HashSet` key or a `T: Hashable` argument.
+/// main uses each as a `HashMap`/`HashSet` key or a `T: Hashable` argument,
+/// and so are the instantiations of keys' generic types it makes itself.
 struct ConformanceProject {
   fs::path Dir;
   explicit ConformanceProject(const std::string &name) {
@@ -2100,8 +2101,8 @@ fn main() -> int {
   t = collections::HashSet<Sub>();
   t.add(Sub(1)); t.add(Sub(1));
   io::println(Str(m.len()) + " " + Str(s.len()) + " " + Str(t.len()));
-  io::println(Str(h(keys::mkKeyed()) == h(7)));
-  io::println(Str(h(keys::mkBox())) + " " + keys::mkBox().name());
+  io::println(Str(h(keys::mkKeyed()) == h(7)) + " " + Str(h(keys::Keyed<Str>("a")) == h("a")));
+  io::println(Str(h(keys::mkBox())) + " " + Str(h(keys::GBox<Str>("x"))) + " " + keys::GBox<Str>("x").name());
   io::println(Str(keys::distinct(0)));
   io::println(Str(lib::lib2::count(0)));
   return 0;
@@ -2114,7 +2115,7 @@ fn main() -> int {
   }
 };
 
-const char *kConformanceOutput = "1 2 1\nTrue\n3 box\n2\n1\n";
+const char *kConformanceOutput = "1 2 1\nTrue True\n3 3 box\n2\n1\n";
 
 } // namespace
 
@@ -2219,6 +2220,25 @@ TEST(Pkm, ConformancesAcrossModules) {
   EXPECT_TRUE(contains(mid.out, "  struct Key [imported from \"lib::keys\"]"))
       << mid.out;
   EXPECT_TRUE(contains(mid.out, "  impl Hashable for Key\n")) << mid.out;
+
+  // keys' templates carry every `impl` block of its generic types, `impl
+  // Trait for` blocks too: GBox's plain, Hashable and Named blocks, and
+  // Keyed's Hashable block.
+  auto tmpl = p.paykan(kPaykan, "pkm dump --section=tmpl pk/lib/keys.pkm");
+  ASSERT_EQ(tmpl.exitCode, 0) << tmpl.out;
+  EXPECT_TRUE(contains(tmpl.out, "  impls 4\n    class 0\n    class 0\n"
+                                 "    class 0\n    struct 0\n"))
+      << tmpl.out;
+  auto count = [&](const std::string &what) {
+    size_t n = 0;
+    for (size_t at = tmpl.out.find(what); at != std::string::npos;
+         at = tmpl.out.find(what, at + 1))
+      ++n;
+    return n;
+  };
+  EXPECT_EQ(count("(for\n"), 3u) << tmpl.out;
+  EXPECT_EQ(count(" \"Hashable\"))\n"), 2u) << tmpl.out;
+  EXPECT_EQ(count(" \"Named\"))\n"), 1u) << tmpl.out;
 }
 
 // The conformances are part of the interface: adding or removing one makes

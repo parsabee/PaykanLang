@@ -1394,8 +1394,7 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
     mt->Classes.push_back(cloner.cloneTemplate(cd));
     if (auto it = TemplateImpls.find(cd); it != TemplateImpls.end())
       for (auto *im : it->second)
-        if (!im->getTrait())
-          mt->Impls[mt->Classes.back()].push_back(cloner.cloneTemplate(im));
+        mt->Impls[mt->Classes.back()].push_back(cloner.cloneTemplate(im));
   }
   for (auto *fn : tu->getGenericFuncDecls())
     if (FuncTemplates.count(fn->getName()))
@@ -1406,8 +1405,7 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
     mt->Structs.push_back(cloner.cloneTemplate(sd));
     if (auto it = TemplateImpls.find(sd); it != TemplateImpls.end())
       for (auto *im : it->second)
-        if (!im->getTrait())
-          mt->Impls[mt->Structs.back()].push_back(cloner.cloneTemplate(im));
+        mt->Impls[mt->Structs.back()].push_back(cloner.cloneTemplate(im));
   }
   for (auto *ed : tu->getGenericEnumDecls())
     if (EnumTemplates.count(ed->getName()))

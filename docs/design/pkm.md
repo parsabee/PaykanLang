@@ -559,7 +559,8 @@ manifest's `HAS_TEMPLATES` bit.
 of the source imports of §4.8, already resolved by renaming, so they need no
 node codec of their own. The section frames the [AST interchange
 format](../plugins/ast-format.md) text of a unit holding the module's
-generic classes, structs, enums and functions and their `impl` blocks, as
+generic classes, structs, enums and functions and their `impl` blocks,
+`impl Trait for` blocks too (§4.8), as
 `Sema::exportTemplates` produced them (an enum has no `impl` block, and its
 instantiations no code: an importer's `Maybe<int>` is an `ENUM` record of
 its own `IFACE` like any enum):
@@ -696,6 +697,16 @@ without erasure or `INST` (§4.5 stays the plan for erased copies):
   instantiation is `$<module>::f<int>`. Type names are unique across a
   program (Sema rejects two types of one name anywhere in its imports), so
   one name is one instantiation program-wide.
+- **`impl Trait for` blocks.** A generic class's or struct's trait blocks
+  go with its template, their trait names not renamed: a built-in trait is
+  the same in every module, and a module names no other module's traits.
+  An importer's instantiation checks a built-in trait's block (`impl
+  Hashable for Box<T>`) as the module would check it and records the
+  conformance; an instantiation the module made carries it in `IFACE`
+  instead (§3.5 row 4). A block of the module's own trait gives the
+  importer's instantiation its methods only: `Sema::checkTraitImpl` neither
+  resolves the trait there, where its name is another trait or none, nor
+  records the conformance (#147).
 - **Emission: one copy per module, one per program.** Every module lowers
   its own copy of each instantiation of another module's template its code
   uses (`ForeignClasses`, `ForeignFunctions`, `ForeignStructs`), as

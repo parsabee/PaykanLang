@@ -661,6 +661,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A class whose superclass is another module's `Hashable` class cannot repeat `impl
   Hashable for` (`class 'Sub' already implements 'Hashable' (through 'CK')`), as in one
   module.  It is `Hashable` through its superclass.
+- An importer's instantiation of another module's generic type checks the type's `impl
+  Hashable for` block, which was left out before.  So `gb::Box<float>`, with `impl
+  Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }`, is now `method
+  call on non-class type 'float'` in gb's file, as `Box<float>` is in gb itself.
 
 ### Removed
 
@@ -1271,10 +1275,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     module that only returns one.
   - The interface records the conformance (an `IMPL` record, docs/design/pkm.md §3.5;
     `pkm dump` shows `impl Hashable for Key`).
-  - Generic types: an instantiation the module made carries the conformance in the
-    interface.
-  - The 0.2.0 entry saying a struct is a `HashMap` key across modules now holds.  A
-    module's own trait does not cross yet (#147).
+  - Generic types: `impl Trait for` blocks now go with the template.  An importer's
+    `lib::Box<Str>` has their methods and, for `Hashable`, the trait, checked when it is
+    instantiated as the module would check it.  An instantiation the module made carries
+    the conformance in the interface.
+  - The 0.2.0 entries saying a struct is a `HashMap` key across modules, that generic
+    structs' `impl Trait for` blocks work across modules, and that an `impl Named for
+    Box<T>` block works in an importer now hold.  A module's own trait does not cross yet
+    (#147).
 
 ## [0.2.0] - 2026-10-20
 

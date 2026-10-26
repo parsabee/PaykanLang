@@ -989,8 +989,10 @@ public:
     std::vector<ast::FuncDecl *> Functions;
     std::vector<ast::StructDecl *> Structs;
     std::vector<ast::EnumDecl *> Enums;
-    /// The `impl` blocks of each of Classes and Structs (not `impl Trait
-    /// for`, whose trait an importer cannot name).
+    /// The `impl` blocks of each of Classes and Structs, `impl Trait for`
+    /// blocks too: a built-in trait's gives an importer's instantiation the
+    /// trait, a block of the module's own trait only its methods (#147,
+    /// checkTraitImpl).
     std::unordered_map<const ast::Decl *, std::vector<ast::ImplDecl *>> Impls;
     /// The modules the bodies name, the module itself first: canonical
     /// name and the file ModuleCache knows it by.
@@ -1629,6 +1631,12 @@ private:
   std::optional<TraitRef> resolveTraitRef(ast::Type *ref, const Subst &subst,
                                           ast::SourceLocation loc);
   static std::string traitRefName(const TraitRef &tr);
+  /// Whether the trait annotation @p ref names a built-in trait (`Show`,
+  /// `Hashable`, `ValueType`): the same trait in every module.
+  bool namesBuiltinTrait(const ast::Type *ref) const;
+  /// The trait name the annotation @p ref spells (`Named` of `Named<T>`);
+  /// "" for an annotation that names no trait.
+  static std::string traitAnnotationName(const ast::Type *ref);
   /// The type whose implementation of @p tr @p ty has (itself or, for a
   /// class, a superclass); nullptr if it does not implement it.
   const ast::Type *traitImplOwner(ast::Type *ty, const TraitRef &tr);

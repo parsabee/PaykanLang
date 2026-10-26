@@ -137,9 +137,11 @@ fn main() -> int {
 // importer makes them keys of `HashMap` and `HashSet` and arguments of a
 // `T: Hashable` function, also when it reaches them through another module
 // (mid) or a template body of theirs (keys::distinct over the private
-// `_Priv`), and so are the instantiations keys made.  An importer's subclass
-// is Hashable through its superclass, whose `hash` it may override when the
-// class body declares it.
+// `_Priv`), and so are the instantiations of keys' generic types, those keys
+// made and those main makes (`Keyed<Str>`, `GBox<Str>`, whose `impl Trait
+// for` blocks go with the templates; `impl Named for GBox<T>` gives
+// `GBox<Str>` its `name`).  An importer's subclass is Hashable through its
+// superclass, whose `hash` it may override when the class body declares it.
 TEST(Traits, HashableAcrossModules) {
   LeakGuard guard;
   auto dir = tempDir() / "pkn_trait_hashable";
@@ -202,8 +204,8 @@ fn main() -> int {
   t = collections::HashSet<Sub>();
   t.add(Sub(1)); t.add(Sub(1));
   io::println(Str(m.len()) + " " + Str(s.len()) + " " + Str(t.len()));
-  io::println(Str(h(keys::mkKeyed()) == h(7)));
-  io::println(Str(h(keys::mkBox())) + " " + keys::mkBox().name());
+  io::println(Str(h(keys::mkKeyed()) == h(7)) + " " + Str(h(keys::Keyed<Str>("a")) == h("a")));
+  io::println(Str(h(keys::mkBox())) + " " + Str(h(keys::GBox<Str>("x"))) + " " + keys::GBox<Str>("x").name());
   io::println(Str(keys::distinct(0)));
   c: keys::CK2 = Sub2(3);
   io::println(Str(h(c)) + " " + Str(h(Sub2(1))) + " " + Str(h(keys::CK2(5))));
@@ -212,7 +214,7 @@ fn main() -> int {
 )pkn";
   auto r = compileAndRunFile((dir / "main.pkn").string());
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "1 2 1\nTrue\n3 box\n2\n99 99 5\n");
+  EXPECT_EQ(r.StdOut, "1 2 1\nTrue True\n3 3 box\n2\n99 99 5\n");
   guard.expectNoLeaks("Hashable across modules");
   std::filesystem::remove_all(dir);
 }
