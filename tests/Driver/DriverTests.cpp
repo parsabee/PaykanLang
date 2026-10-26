@@ -1035,6 +1035,119 @@ TEST(Driver, ChainAtTheLimitRunsAndWritesItsAST) {
     std::filesystem::remove(f);
 }
 
+// The stack the programs at the frontend's limits are compiled with: a
+// quarter of the default 8 MB, so that a pass recursing once per link of a
+// chain, or deeper than it should per level of nesting, fails here in every
+// build; in a sanitizer build, whose frames are 2 to 4 times larger, the
+// default itself.
+static std::string atLimitStack() {
+#ifdef PAYKAN_TEST_SANITIZED
+  return "ulimit -s 8192 && ";
+#else
+  return "ulimit -s 2048 && ";
+#endif
+}
+
+// A chain of @p links links: @p head, @p step repeated, padded with the
+// one-link @p pad, and the one-link @p end, if any.
+static std::string chainOf(int links, const std::string &head,
+                           const std::vector<std::string> &step,
+                           const std::string &pad,
+                           const std::string &end = "") {
+  const int body = links - (end.empty() ? 0 : 1);
+  const int steps = body / static_cast<int>(step.size());
+  std::string out = head;
+  for (int i = 0; i < steps; ++i)
+    for (const std::string &s : step)
+      out += s;
+  for (int i = steps * static_cast<int>(step.size()); i < body; ++i)
+    out += pad;
+  return out + end;
+}
+
+// One function a chain of each kind, @p links links long: binary operators,
+// and each suffix on each kind of receiver that is emitted before the
+// suffix, a struct's, a generic struct's and a class's method, field, tuple
+// element, array element and function value, and a string's character.
+static std::string everyChainKind(int links) {
+  struct Kind {
+    const char *Name;
+    std::string Chain;
+  };
+  const Kind kinds[] = {
+      {"c_sum", chainOf(links, "1", {" + 1"}, " + 1")},
+      {"c_and", chainOf(links, "True", {" && True"}, " && True")},
+      {"c_str",
+       chainOf(links, "\"a\"", {".toString()"}, ".toString()", ".len()")},
+      {"c_chr", chainOf(links, "\"ab\"", {"[0]", ".toString()"}, ".toString()",
+                        ".len()")},
+      {"c_smc", chainOf(links, "P(0)", {".m()"}, ".m()", ".x")},
+      {"c_gsmc", chainOf(links, "G<int>(0)", {".m()"}, ".m()", ".x")},
+      {"c_stup", chainOf(links, "P(0)", {".t()", ".0"}, ".m()", ".x")},
+      {"c_ssub", chainOf(links, "P(0)", {".a()", "[0]"}, ".m()", ".x")},
+      {"c_scv", chainOf(links, "P(0)", {".g()", "()"}, ".m()", ".x")},
+      {"c_sfc", chainOf(links, "smk(0)", {".f()"}, ".f()", ".x")},
+      {"c_cmc", chainOf(links, "mk(0)", {".m()"}, ".m()", ".x")},
+      {"c_ctup", chainOf(links, "mk(0)", {".t()", ".0"}, ".m()", ".x")},
+      {"c_csub", chainOf(links, "mk(0)", {".a()", "[0]"}, ".m()", ".x")},
+      {"c_ccv", chainOf(links, "mk(0)", {".g()", "()"}, ".m()", ".x")},
+      {"c_cfc", chainOf(links, "mk(0)", {".f()"}, ".f()", ".x")},
+      {"c_cps", chainOf(links, "mk(0)", {".p", ".c()"}, ".m()", ".x")},
+  };
+  std::string src =
+      "import ::io;\n"
+      "struct P { x: int; }\n"
+      "impl P {\n"
+      "  view fn m() -> P { return P(self.x + 1); }\n"
+      "  view fn t() -> (P, int) { return (P(self.x + 1), 0); }\n"
+      "  view fn a() -> P[1] { return [P(self.x + 1)]; }\n"
+      "  view fn g() -> () -> P { n = self.x; return fn() -> P { return "
+      "P(n + 1); }; }\n"
+      "  view fn c() -> C { return mk(self.x + 1); }\n"
+      "}\n"
+      "struct G<T> { x: T; }\n"
+      "impl G<T> { view fn m() -> G<T> { return G<T>(self.x); } }\n"
+      "struct S { f: () -> S; x: int; }\n"
+      "class C { x: int; f: () -> C; p: P;\n"
+      "  view fn m() -> C { return mk(self.x + 1); }\n"
+      "  view fn t() -> (C, int) { return (mk(self.x + 1), 0); }\n"
+      "  view fn a() -> C[1] { return [mk(self.x + 1)]; }\n"
+      "  view fn g() -> () -> C { n = self.x; return fn() -> C { return "
+      "mk(n + 1); }; }\n"
+      "}\n"
+      "fn mk(x: int) -> C { return C(x, fn() -> C { return mk(x + 1); }, "
+      "P(x)); }\n"
+      "fn smk(x: int) -> S { return S(fn() -> S { return smk(x + 1); }, x); "
+      "}\n";
+  std::string print;
+  for (const Kind &k : kinds) {
+    src += "fn " + std::string(k.Name) + "() => " + k.Chain + ";\n";
+    print += std::string(print.empty() ? "" : " + \" \" + ") + k.Name +
+             "().toString()";
+  }
+  return src + "fn main() -> int {\n  io::println(" + print +
+         ");\n  return 0;\n}\n";
+}
+
+// A chain of each kind takes the value of each of its links in turn, and at
+// the limit, 2048 links, is typed, lowered and optimised in a quarter of
+// the default stack (atLimitStack): each link's operand is emitted before
+// it in a loop, not by a recursion a level per link (#17).
+TEST(Driver, ChainsOfEveryKindAtTheLimitFitAQuarterOfTheStack) {
+  REQUIRE_BACKEND();
+  auto small = writeTmp(everyChainKind(12));
+  auto [rc, out] = run(paykanRun() + " -O0 run " + small + " 2>&1");
+  EXPECT_EQ(rc, 0) << out.substr(0, 2000);
+  EXPECT_EQ(out, "13 True 1 1 11 0 6 6 6 11 11 6 6 6 11 6\n");
+  auto src = writeTmp(everyChainKind(2048));
+  auto [prc, pir] = run(atLimitStack() + std::string(kPaykan) +
+                        " -O2 --emit-pir " + src + " 2>&1");
+  EXPECT_EQ(prc, 0) << pir.substr(0, 2000);
+  EXPECT_NE(pir.find("fn @c_smc("), std::string::npos) << pir.substr(0, 2000);
+  for (const std::string &f : {small, src})
+    std::filesystem::remove(f);
+}
+
 // -- Negative numbers as match patterns (#51)
 
 // `-1`, `- 7`, `-2.5`, `-0.0` and INT64_MIN, `-9223372036854775808`, are

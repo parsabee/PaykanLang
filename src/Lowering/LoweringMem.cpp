@@ -269,6 +269,27 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
   return {};
 }
 
+ast::Expr *ModuleLowering::memValueVisitsFirst(ast::Expr *e) {
+  // As emitMemValue, branch by branch.
+  if (isMemOptionalWrap(e) || ast::isa<ast::NoneLiteral>(e) ||
+      isFunctionValueExpr(e) || isVariantExpr(e) ||
+      ast::isa<ast::Identifier>(e))
+    return nullptr;
+  if (wholeOf(e)) {
+    ast::Expr *whole = e;
+    while (wholeOf(whole))
+      whole = wholeOf(whole);
+    return memValueVisitsFirst(whole);
+  }
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return ma->getReceiver();
+  if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e) ||
+      ast::isa<ast::CallValueExpr>(e))
+    return e->isInoutResult() && ast::isMemType(e->getResolvedType()) ? nullptr
+                                                                      : e;
+  return nullptr;
+}
+
 Val ModuleLowering::emitMemAddress(ast::Expr *e) {
   MemValue v = emitMemValue(e);
   // The temporary is what emitMemValue built: a tuple or a struct made the

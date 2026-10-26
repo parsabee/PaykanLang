@@ -760,16 +760,18 @@ private:
     /// length recurses no deeper than a few links.
     Val visit(ast::Expr *node);
 
-    /// Whether the visitor of the chain link @p e emits its operand
-    /// (ast::chainOperand) before anything else and with visit(): a binary
-    /// operator but `==` and `!=` (which may compare in place), a call of a
-    /// method of a class, `Str` included, or of a builtin type's, and a
-    /// read of a class's field that is not held in memory.
-    bool takesOperandFirst(const ast::Expr *e) const;
-    /// When @p e takes its operand first and that is a link of a chain:
-    /// emit the links below @p e that are taken so, innermost first, and
-    /// keep their values in ChainValues for the visit that comes to each.
-    /// That is the order they are emitted in anyway.
+    /// The expression the visitor of the chain link @p e passes to visit()
+    /// before it emits anything else, or null: a binary operator's left
+    /// operand (but `==`'s and `!=`'s, which may compare in place); a class's
+    /// or a builtin type's receiver, or a class's field's; and for a struct's
+    /// method or field, a tuple index, a subscript of a fixed-size array or
+    /// a call of a function value, what the operand's bytes are found from
+    /// (memValueVisitsFirst).  Each mirrors its visitor's branches.
+    ast::Expr *visitedFirst(ast::Expr *e);
+    /// When the link @p e visits a link first: emit the links below @p e
+    /// that are visited so, innermost first, and keep their values in
+    /// ChainValues for the visit that comes to each.  That is the order
+    /// they are emitted in anyway.
     void emitChainBelow(ast::Expr *e);
     /// The values of the links emitChainBelow emitted and nothing has taken
     /// yet.
@@ -980,6 +982,13 @@ private:
   /// variable's own (or, for an `inout` one, the value it names), an
   /// element's or a field's, or a temporary.
   MemValue emitMemValue(ast::Expr *e);
+  /// The expression emitMemValue(@p e) passes to visit() before it emits
+  /// anything else, or null: a call itself, the object of a class's field,
+  /// and for an element or a struct's field, the same for the whole it is
+  /// in.  Null for a call with an `inout` result held in memory, which
+  /// leaves what holds its storage in MemTemps for the consumer, past the
+  /// mark that consumer took before it (ExprEmitter::emitChainBelow).
+  ast::Expr *memValueVisitsFirst(ast::Expr *e);
   /// emitMemValue's address, borrowed: a temporary holding references is
   /// added to MemTemps, for its consumer to release with releaseMemTemps
   /// once done with it.

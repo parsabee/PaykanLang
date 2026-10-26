@@ -886,7 +886,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Sema, the lowering (with its analyses of the reads a call may replace) and the copies
     of a generic's body take a chain from its innermost link out, in a loop, and the
     lowering's address of a field of a struct, an element of a tuple or of an array in a
-    chain of them is one loop too.  Every chain and nesting within the limits, and the
+    chain of them is one loop too, through the calls in such a chain as well: a struct's
+    methods (`p.m().m()...`, generic structs' too), a field's function value
+    (`c.f().f()...`), and the element, the field or the function value of a call's result
+    (`c.t().0.t().0...`, `p.a()[0]...`, `c.g()()...`).  Every chain and nesting within the limits, and the
     deepest mixes of them (2048 links in 511 levels of lambdas), compiles and runs on
     every path (`paykan run`, `paykan build`, `--emit-c`) with a quarter of the default
     stack, 2 MB, in a debug build.

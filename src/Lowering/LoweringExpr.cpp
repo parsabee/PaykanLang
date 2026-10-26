@@ -31,46 +31,80 @@ Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
   }
   emitChainBelow(node);
   Val v = ast::ExprVisitor<ExprEmitter, Val>::visit(node);
-  assert(!ChainValues.count(ast::chainOperand(node)) &&
-         "a chain link's visitor emits its operand");
+  assert(!ChainValues.count(visitedFirst(node)) &&
+         "a chain link's visitor emits the link it visits first");
   if (!v || !isOptionalWrap(node))
     return v;
   return L.emitSome(v, node->getCoercedType());
 }
 
-bool ModuleLowering::ExprEmitter::takesOperandFirst(const ast::Expr *e) const {
-  if (const auto *b = ast::dyn_cast<ast::BinaryExpr>(e))
+ast::Expr *ModuleLowering::ExprEmitter::visitedFirst(ast::Expr *e) {
+  // As visitBinaryExpr: `==` and `!=` may compare in place.
+  if (auto *b = ast::dyn_cast<ast::BinaryExpr>(e))
     return b->getOpcode() != ast::BinaryOpcode::Eq &&
-           b->getOpcode() != ast::BinaryOpcode::Ne;
-  // visitMethodCallExpr: the receiver of a method of a class or of a
-  // builtin type goes through visit() (emitReceiver) before anything else;
-  // a field's function value, a struct's, a tuple's, an enum's, an
-  // optional's, a slice's or a fixed-size array's is taken in place.
-  if (const auto *m = ast::dyn_cast<ast::MethodCallExpr>(e)) {
-    const ast::Type *recv = m->getReceiver()->getResolvedType();
-    return !m->isFieldCall() && recv &&
-           (ast::isa<ast::ClassType>(recv) || ast::isa<ast::BuiltinType>(recv));
+                   b->getOpcode() != ast::BinaryOpcode::Ne
+               ? b->getLHS()
+               : nullptr;
+  // As visitMethodCallExpr, branch by branch.
+  if (auto *m = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    ast::Expr *recv = m->getReceiver();
+    ast::Type *ty = recv->getResolvedType();
+    if (!ty)
+      return nullptr;
+    // A field's function value: in a struct's bytes, or in an object.
+    if (m->isFieldCall())
+      return L.getExprStructType(recv) ? L.memValueVisitsFirst(recv) : recv;
+    if (ast::isa<ast::SliceType>(ty))
+      return nullptr;
+    if (ast::isa<ast::FixedArrayType>(ty))
+      return ast::isa<ast::Identifier>(recv) ? nullptr
+                                             : L.memValueVisitsFirst(recv);
+    if (L.getExprStructType(recv) && m->getMethodName() != kMethodToString)
+      return L.memValueVisitsFirst(recv);
+    if ((ast::isa<ast::OptionalType>(ty) &&
+         m->getMethodName() == kMethodToString) ||
+        ast::isa<ast::TupleType>(ty) || ast::isa<ast::EnumType>(ty))
+      return ast::isMemType(ty) ? L.memValueVisitsFirst(recv) : recv;
+    // A builtin type's method, or a class's (emitReceiver).
+    return recv;
   }
-  // lowerMemberAccessExpr: a class's field (emitReceiver); a struct's, or
-  // one held in memory, is read in place.
-  if (const auto *m = ast::dyn_cast<ast::MemberAccessExpr>(e))
-    return !ast::isMemType(m->getResolvedType()) &&
-           !L.getExprStructType(m->getReceiver());
-  return false;
+  // As lowerMemberAccessExpr: a field held in memory is its address; a
+  // struct's field is read in place, in its bytes; a class's, in its object.
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    if (ast::isMemType(ma->getResolvedType()))
+      return L.memValueVisitsFirst(ma);
+    return L.getExprStructType(ma->getReceiver())
+               ? L.memValueVisitsFirst(ma->getReceiver())
+               : ma->getReceiver();
+  }
+  // As visitTupleIndexExpr: an element in the tuple's bytes.
+  if (auto *t = ast::dyn_cast<ast::TupleIndexExpr>(e))
+    return L.memValueVisitsFirst(
+        ast::isMemType(t->getResolvedType()) ? t : t->getTuple());
+  // As visitSubscriptExpr: an element in a fixed-size array's or a slice's
+  // bytes; a string's character, of the string (emitReceiver).
+  if (auto *s = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    ast::Type *arrTy = s->getArray()->getResolvedType();
+    if (!ast::dyn_cast<ast::FixedArrayType>(arrTy) &&
+        !ast::dyn_cast<ast::SliceType>(arrTy))
+      return s->getArray();
+    return L.memValueVisitsFirst(
+        ast::isMemType(s->getResolvedType()) ? s : s->getArray());
+  }
+  // As visitCallValueExpr: the function value in place.
+  if (auto *c = ast::dyn_cast<ast::CallValueExpr>(e))
+    return L.memValueVisitsFirst(c->getCallee());
+  return nullptr;
 }
 
 void ModuleLowering::ExprEmitter::emitChainBelow(ast::Expr *e) {
   std::vector<ast::Expr *> links;
-  for (ast::Expr *x = e; takesOperandFirst(x);) {
-    ast::Expr *operand = ast::chainOperand(x);
-    if (!ast::chainOperand(operand) || ChainValues.count(operand))
-      break;
-    links.push_back(operand);
-    x = operand;
-  }
+  for (ast::Expr *x = visitedFirst(e);
+       x && ast::chainOperand(x) && !ChainValues.count(x); x = visitedFirst(x))
+    links.push_back(x);
   if (links.empty())
     return;
-  // Each link is taken as its operand's visitor would take it.
+  // Each link is taken as the visitor of the one above it would take it.
   const bool wantAddress = std::exchange(WantAddress, false);
   for (auto it = links.rbegin(); it != links.rend(); ++it)
     ChainValues[*it] = visit(*it);
