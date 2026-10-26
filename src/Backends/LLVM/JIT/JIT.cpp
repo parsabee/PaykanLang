@@ -209,7 +209,8 @@ llvm::Error setHostLayout(llvm::Module &module) {
 llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
                               std::unique_ptr<llvm::LLVMContext> ctx,
                               const std::vector<std::string> &args,
-                              const std::vector<std::string> &nativeObjects) {
+                              const std::vector<std::string> &nativeObjects,
+                              llvm::CodeGenOptLevel codeGen) {
   // Inspect main's param count before the module is consumed by the JIT.
   unsigned mainParamCount = 0;
   if (auto *mainIRFn = module->getFunction("main"))
@@ -247,12 +248,21 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
 
-  // Build the JIT.  Its default object linking layer registers the code's
-  // EH frames itself: the in-process executor hands JITLink the addresses
-  // of the registration functions, which are linked into this binary, so
-  // nothing is looked up by name in the running process (LLVM 17 needed
-  // them passed explicitly here on Linux).
-  auto jitOrErr = llvm::orc::LLJITBuilder().create();
+  // Build the JIT, for the host (as setHostLayout() laid the module out)
+  // and generating code at @p codeGen: at -O0, where the module is not
+  // optimised, the fast instruction selector, as a native -O0 build's.
+  // Its default object linking layer registers the code's EH frames
+  // itself: the in-process executor hands JITLink the addresses of the
+  // registration functions, which are linked into this binary, so nothing
+  // is looked up by name in the running process (LLVM 17 needed them
+  // passed explicitly here on Linux).
+  auto jtmb = llvm::orc::JITTargetMachineBuilder::detectHost();
+  if (!jtmb)
+    return jtmb.takeError();
+  jtmb->setCodeGenOptLevel(codeGen);
+  auto jitOrErr = llvm::orc::LLJITBuilder()
+                      .setJITTargetMachineBuilder(std::move(*jtmb))
+                      .create();
   if (!jitOrErr)
     return jitOrErr.takeError();
   auto &jit = *jitOrErr;

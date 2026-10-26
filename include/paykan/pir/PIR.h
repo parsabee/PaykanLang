@@ -9,12 +9,14 @@
 
 #pragma once
 
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -256,6 +258,22 @@ struct Operand {
 /// Whether @p a and @p b are the same i64, char or bool constant (two cases
 /// of a switch that are one).
 bool sameConstant(const Operand &a, const Operand &b);
+
+/// The cases of a switch seen so far, one the same as another exactly when
+/// sameConstant says so, so that a case listed twice is found in time
+/// linear in the cases: an i64, a char or a bool constant is one already
+/// seen when the set holds that constant of that kind, and no other operand
+/// (a float, a value) ever is.
+class CaseSet {
+public:
+  /// Adds @p c: false when the set already holds the same constant.
+  bool insert(const Operand &c);
+
+private:
+  std::unordered_set<int64_t> I64s;
+  std::bitset<256> Chars;
+  std::bitset<2> Bools;
+};
 
 // -- Instructions
 

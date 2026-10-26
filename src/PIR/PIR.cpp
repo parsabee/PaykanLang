@@ -179,4 +179,22 @@ bool sameConstant(const Operand &a, const Operand &b) {
   return false;
 }
 
+bool CaseSet::insert(const Operand &c) {
+  if (const auto *x = std::get_if<int64_t>(&c.V))
+    return I64s.insert(*x).second;
+  if (const auto *x = std::get_if<char>(&c.V)) {
+    const auto i = static_cast<unsigned char>(*x);
+    const bool fresh = !Chars.test(i);
+    Chars.set(i);
+    return fresh;
+  }
+  if (const auto *x = std::get_if<bool>(&c.V)) {
+    const size_t i = *x ? 1 : 0;
+    const bool fresh = !Bools.test(i);
+    Bools.set(i);
+    return fresh;
+  }
+  return true; // no other operand is the same constant as another
+}
+
 } // namespace paykan::pir

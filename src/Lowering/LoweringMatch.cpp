@@ -78,14 +78,10 @@ void ModuleLowering::emitMatchSwitch(
     const Val &subj, const std::vector<std::pair<Val, ast::MatchArm *>> &arms,
     ast::MatchArm *wildcard) {
   pir::Switch *s = B.openSwitch(subj);
-  std::vector<const pir::Operand *> seen;
+  pir::CaseSet seen;
   for (const auto &[value, arm] : arms) {
-    bool again = false;
-    for (const pir::Operand *o : seen)
-      again |= pir::sameConstant(*o, value.Op);
-    if (again)
+    if (!seen.insert(value.Op))
       continue;
-    seen.push_back(&value.Op);
     B.enter(B.addCase(s, value));
     emitMatchArmBody(arm);
     B.leave();

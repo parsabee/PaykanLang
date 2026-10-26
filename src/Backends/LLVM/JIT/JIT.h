@@ -7,6 +7,7 @@
 
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
+#include <llvm/Support/CodeGen.h>
 #include <llvm/Support/Error.h>
 
 #include <memory>
@@ -31,11 +32,14 @@ llvm::Error setHostLayout(llvm::Module &module);
 ///              linked into the JIT with the module (an archive's members
 ///              as a linker takes them, when they define a symbol still
 ///              undefined).
+/// @param codeGen  How hard the JIT's code generator optimises, as a native
+///              build's does at the same -O.
 /// Returns the exit code from main(), or an Error on failure.
 llvm::Expected<int>
 runModule(std::unique_ptr<llvm::Module> module,
           std::unique_ptr<llvm::LLVMContext> ctx,
           const std::vector<std::string> &args = {},
-          const std::vector<std::string> &nativeObjects = {});
+          const std::vector<std::string> &nativeObjects = {},
+          llvm::CodeGenOptLevel codeGen = llvm::CodeGenOptLevel::Default);
 
 } // namespace paykan::jit

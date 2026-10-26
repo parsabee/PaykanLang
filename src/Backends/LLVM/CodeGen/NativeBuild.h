@@ -29,6 +29,10 @@ namespace paykan::llvm_codegen {
 /// program's result as the exit status.
 Status addEntryPoint(llvm::Module &module);
 
+/// The code generator's level for -O@p optLevel: None, Less, Default and
+/// Aggressive for -O0 to -O3, in a native build and in the JIT alike.
+llvm::CodeGenOptLevel codeGenOptLevel(unsigned optLevel);
+
 /// A TargetMachine for the host (default triple, host CPU and features,
 /// position-independent code) generating code at -O<optLevel>.
 StatusOr<std::unique_ptr<llvm::TargetMachine>>
@@ -43,15 +47,16 @@ Status writeObjectFile(llvm::Module &module, llvm::TargetMachine &tm,
 /// optimise it at -O@p optLevel.
 Status prepareForJIT(llvm::Module &module, unsigned optLevel);
 
-/// Run the module prepared by prepareForJIT() in process: @p args are the
-/// program's arguments (args[0] the script path), @p objects define its
-/// native functions; with @p trackHeap the runtime's tracking allocator
-/// counts its blocks and the statistics are printed at exit.
+/// Run the module prepared by prepareForJIT() in process, its code
+/// generated at -O@p optLevel: @p args are the program's arguments (args[0]
+/// the script path), @p objects define its native functions; with
+/// @p trackHeap the runtime's tracking allocator counts its blocks and the
+/// statistics are printed at exit.
 StatusOr<int> runInProcess(std::unique_ptr<llvm::Module> module,
                            std::unique_ptr<llvm::LLVMContext> ctx,
                            std::span<const std::string> args,
                            const std::vector<std::string> &objects,
-                           bool trackHeap);
+                           unsigned optLevel, bool trackHeap);
 
 /// The program as a native object for the host at @p path: @p module (not
 /// yet optimised) with the C entry point, optimised at -O@p optLevel.

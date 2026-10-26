@@ -96,6 +96,23 @@ public:
   const std::filesystem::path Path;
 };
 
+/// A function matching an int against @p arms literal arms, each returning
+/// its value modulo 100, called on 7.
+std::string manyArms(int arms) {
+  std::string src = "fn pick(x: int) -> int {\n  match x {\n";
+  for (int i = 0; i < arms; ++i) {
+    const std::string k = std::to_string(i);
+    src += "    ";
+    src += k;
+    src += " { return ";
+    src += std::to_string(i % 100);
+    src += "; }\n";
+  }
+  src += "    _ { return 0; }\n  }\n}\n"
+         "fn main() -> int { return pick(7); }\n";
+  return src;
+}
+
 } // namespace
 
 // Every integer division is behind two checks that panic, and a panic does
@@ -118,4 +135,35 @@ TEST(Scaling, PanicGuardsLeaveTheFunctionFlat) {
                   " 2>&1 >/dev/null");
   ASSERT_EQ(t.ExitCode, 0) << t.Out;
   EXPECT_LT(t.Seconds, 20 * slowdown());
+}
+
+// A match's literal arms are a switch whose cases the lowering and PIR's
+// verifier each check for one listed twice, with a set of the cases seen
+// (SW-16): 20000 arms took 35 s to reach --emit-pir when each case was
+// compared with every case before it, and take half a second now.
+TEST(Scaling, ALargeMatchFindsItsRepeatedCasesInLinearTime) {
+  ScratchDir dir("arms");
+  const std::string path = dir.write("arms.pkn", manyArms(20000));
+  Timed t =
+      timed(std::string(kPaykan) + " --emit-pir " + path + " 2>&1 >/dev/null");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_LT(t.Seconds, 10 * slowdown());
+}
+
+// `run -O0` generates code as `build -O0` does, with the fast instruction
+// selector (SW-16): `run -O0` of a 5000-armed match took 47 s, against 2.6 s
+// for `build -O0`, when the JIT generated code at its default level from
+// the unoptimised module.  Now it takes about as long as the build, which
+// also links.
+TEST(Scaling, RunAtO0GeneratesCodeAsBuildDoes) {
+  ScratchDir dir("run_o0");
+  const std::string path = dir.write("arms.pkn", manyArms(5000));
+  const std::string exe = (dir.Path / "arms").string();
+  Timed build = timed(std::string(kPaykan) + " build -O0 " + path + " -o " +
+                      exe + " 2>&1");
+  ASSERT_EQ(build.ExitCode, 0) << build.Out;
+  Timed run = timed(std::string(kPaykan) + " run -O0 " + path + " 2>&1");
+  EXPECT_EQ(run.ExitCode, 7) << run.Out;
+  EXPECT_LT(run.Seconds, 2 * build.Seconds + 5 * slowdown())
+      << "build -O0: " << build.Seconds << " s";
 }

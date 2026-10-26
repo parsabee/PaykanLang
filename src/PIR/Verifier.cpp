@@ -1033,16 +1033,15 @@ private:
         error("switch on " + operandStr(sw.Value) + " of type " + typeName(t) +
               ", expected i64, char or bool");
       bool terminated = sw.Default != nullptr;
-      for (size_t i = 0; i < sw.Cases.size(); ++i) {
-        const Switch::Case &c = sw.Cases[i];
+      CaseSet seen;
+      for (const Switch::Case &c : sw.Cases) {
         if (c.Value.isValue()) {
           error("switch case " + operandStr(c.Value) + " is not a constant");
         } else {
           if (t != Type::Void)
             expect(c.Value, t, "switch case");
-          for (size_t j = 0; j < i; ++j)
-            if (sameConstant(sw.Cases[j].Value, c.Value))
-              error("switch case " + operandStr(c.Value) + " listed twice");
+          if (!seen.insert(c.Value))
+            error("switch case " + operandStr(c.Value) + " listed twice");
         }
         if (!c.Body) {
           error("switch case without a block");
