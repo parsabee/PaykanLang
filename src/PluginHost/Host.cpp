@@ -172,9 +172,11 @@ int runExecutable(PaykanSession *s, const char *path, const char *const *args,
   std::vector<std::string> rest;
   for (size_t i = 1; i < numArgs; ++i)
     rest.emplace_back(args[i] ? args[i] : "");
+  // No arguments: one empty argv[0], what Linux makes of an empty argv
+  // (other systems refuse one), and the runtime told it is no argument.
   std::string argv0 = numArgs && args[0] ? args[0] : "";
   // The runtime reads these (src/Runtime): heap statistics at exit, and a
-  // program started with argc == 0.
+  // program started with no arguments.
   std::vector<std::pair<std::string, std::string>> env;
   if (trackHeap)
     env.emplace_back(names::kPaykanTrackHeapEnv, "1");
@@ -183,7 +185,7 @@ int runExecutable(PaykanSession *s, const char *path, const char *const *args,
   std::cout.flush();
   std::cerr.flush();
   std::ostringstream errs;
-  int rc = toolchain::spawn(path, rest, numArgs ? &argv0 : nullptr, env, errs);
+  int rc = toolchain::spawn(path, rest, argv0, env, errs);
   if (rc < 0) {
     std::string msg = message(errs);
     error(s, msg.empty() ? std::string("cannot run '") + path + "'" : msg);

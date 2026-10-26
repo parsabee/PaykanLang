@@ -31,6 +31,8 @@
  * argc, and link it with the host's link_executable (run() then runs it with
  * run_executable).  $PAYKAN_TEST_PLUGIN_FAIL makes emit fail: "diag" with an
  * error diagnostic (and a warning first), anything else silently (status 5).
+ * $PAYKAN_TEST_PLUGIN_RUN changes what run() runs: "no-args" the program
+ * with num_args 0, "missing" a file that does not exist.
  */
 
 #include "paykan/plugin_api.h"
@@ -147,6 +149,7 @@ __attribute__((unused)) static int test_run(void *data, PaykanSession *s,
                                             const PaykanBackendInput *in,
                                             const PaykanRunRequest *req,
                                             int *exit_code) {
+  const char *mode = getenv("PAYKAN_TEST_PLUGIN_RUN");
   char exe[4096];
   const char *dir;
   (void)data;
@@ -154,11 +157,18 @@ __attribute__((unused)) static int test_run(void *data, PaykanSession *s,
   dir = host->temp_dir(s);
   if (!dir)
     return PAYKAN_ERROR;
+  if (mode && strcmp(mode, "missing") == 0) {
+    snprintf(exe, sizeof(exe), "%s/missing", dir);
+    return host->run_executable(s, exe, req->args, req->num_args,
+                                req->track_heap, exit_code);
+  }
   snprintf(exe, sizeof(exe), "%s/program", dir);
   if (test_emit(&host, s, in, PAYKAN_EMIT_EXECUTABLE, exe) != PAYKAN_OK)
     return PAYKAN_ERROR;
-  return host->run_executable(s, exe, req->args, req->num_args, req->track_heap,
-                              exit_code);
+  return host->run_executable(
+      s, exe, req->args,
+      mode && strcmp(mode, "no-args") == 0 ? 0 : req->num_args,
+      req->track_heap, exit_code);
 }
 
 #ifndef TP_PLUGIN_SIZE

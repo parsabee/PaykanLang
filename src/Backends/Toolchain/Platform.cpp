@@ -7,12 +7,14 @@
 #include "Platform.h"
 
 // -- Platform headers
-// POSIX (every supported platform): process spawning, mkdtemp, getpid and
-// access, and the dynamic loader (dlopen / dlsym; in libc on current glibc
-// and on macOS, libdl on older glibc: CMAKE_DL_LIBS).
+// POSIX (every supported platform): process spawning (fork, execvp, a
+// close-on-exec pipe, waitpid), mkdtemp, getpid and access, and the dynamic
+// loader (dlopen / dlsym; in libc on current glibc and on macOS, libdl on older
+// glibc: CMAKE_DL_LIBS).
 #if !defined(_WIN32)
 #include <dlfcn.h>
 #endif
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -99,34 +101,62 @@ std::string executablePath() {
 }
 
 int spawn(const std::string &path, const std::vector<std::string> &args,
-          const std::string *argv0,
+          const std::string &argv0,
           const std::vector<std::pair<std::string, std::string>> &extraEnv,
           std::ostream &errs) {
+  std::vector<char *> cargv;
+  cargv.reserve(args.size() + 2);
+  cargv.push_back(const_cast<char *>(argv0.c_str()));
+  for (const auto &a : args)
+    cargv.push_back(const_cast<char *>(a.c_str()));
+  cargv.push_back(nullptr);
+  // A failed exec comes back through a pipe whose ends close on exec: the
+  // child writes execvp's errno there before it exits, and a successful
+  // exec closes the child's end, so the parent reads the errno or end of
+  // file.  pipe and fcntl, as macOS has no pipe2; nothing else in the
+  // compiler starts processes, so no other child inherits the ends before
+  // they are marked.
+  int report[2];
+  if (pipe(report) != 0) {
+    errs << "cannot run '" << path << "': " << std::strerror(errno) << "\n";
+    return -1;
+  }
+  for (int fd : report)
+    fcntl(fd, F_SETFD, FD_CLOEXEC);
   pid_t pid = fork();
   if (pid < 0) {
-    errs << "fork failed: " << std::strerror(errno) << "\n";
+    errs << "cannot run '" << path << "': " << std::strerror(errno) << "\n";
+    close(report[0]);
+    close(report[1]);
     return -1;
   }
   if (pid == 0) {
+    close(report[0]);
     for (const auto &[k, v] : extraEnv)
       setenv(k.c_str(), v.c_str(), 1);
-    std::vector<char *> cargv;
-    if (argv0)
-      cargv.push_back(const_cast<char *>(argv0->c_str()));
-    for (const auto &a : args)
-      cargv.push_back(const_cast<char *>(a.c_str()));
-    cargv.push_back(nullptr);
     execvp(path.c_str(), cargv.data());
-    std::fprintf(stderr, "exec of '%s' failed: %s\n", path.c_str(),
-                 std::strerror(errno));
+    int err = errno;
+    ssize_t written = write(report[1], &err, sizeof err);
+    (void)written; // the parent then sees no errno, only the 127
     _exit(127);
   }
+  close(report[1]);
+  int execErrno = 0;
+  ssize_t got = 0;
+  do
+    got = read(report[0], &execErrno, sizeof execErrno);
+  while (got < 0 && errno == EINTR);
+  close(report[0]);
   int status = 0;
   while (waitpid(pid, &status, 0) < 0) {
     if (errno != EINTR) {
       errs << "waitpid failed: " << std::strerror(errno) << "\n";
       return -1;
     }
+  }
+  if (got == static_cast<ssize_t>(sizeof execErrno)) {
+    errs << "cannot run '" << path << "': " << std::strerror(execErrno) << "\n";
+    return -1;
   }
   if (WIFEXITED(status))
     return WEXITSTATUS(status);

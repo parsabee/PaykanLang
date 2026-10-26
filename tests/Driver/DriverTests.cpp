@@ -2712,3 +2712,20 @@ TEST(Driver, RunLoadsAnArchiveOfNativeObjects) {
   EXPECT_NE(out.find("cannot load 'notes.o': "), std::string::npos) << out;
   std::filesystem::remove_all(dir);
 }
+
+// A C compiler that cannot be started is reported as such (finding 81):
+// spawn learns of the failed exec through a close-on-exec pipe, where `build`
+// said `exec of '...' failed` and then `linking failed (... exited with
+// 127)`, as if the compiler had run.
+TEST(Driver, BuildReportsACompilerThatCannotRun) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("no_cc");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::string cc = (dir / "nosuchcc").string();
+  auto [rc, out] = run("cd " + dir.string() + " && CC=" + shellWord(cc) + " " +
+                       paykanRun() + " build hello.pkn -o hello 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_EQ(out, "cannot run '" + cc + "': No such file or directory\n");
+  EXPECT_FALSE(std::filesystem::exists(dir / "hello"));
+  std::filesystem::remove_all(dir);
+}

@@ -57,11 +57,11 @@ void setPackageRuntime(std::string lib, std::string includeDir);
 /// Directory of the running executable, or "".
 std::string executableDir();
 
-/// Run @p path with @p args after @p argv0 as the child's argv (no argv at
-/// all when @p argv0 is null, i.e. argc == 0) and @p extraEnv added to the
-/// environment.  Returns the exit status, 128 + signal, or -1.
+/// Run @p path with @p argv0 and then @p args as the child's argv and
+/// @p extraEnv added to the environment.  Returns the exit status, 128 +
+/// signal, or -1 with a message on @p errs when it could not be run.
 int spawn(const std::string &path, const std::vector<std::string> &args,
-          const std::string *argv0,
+          const std::string &argv0,
           const std::vector<std::pair<std::string, std::string>> &extraEnv,
           std::ostream &errs);
 

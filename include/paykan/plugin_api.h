@@ -177,11 +177,13 @@ typedef struct PaykanHost {
                          size_t num_inputs, const char *output_path);
 
   /* Run the executable path with argv = args[0..num_args) (args[0] becomes
-   * its argv[0]; num_args == 0 runs it with argc == 0) and wait for it.
-   * track_heap != 0 switches on the runtime's heap statistics
+   * its argv[0]; num_args == 0 runs it with no arguments: its argv is one
+   * empty argv[0], and a Paykan program's args slice is empty) and wait for
+   * it.  track_heap != 0 switches on the runtime's heap statistics
    * (--track-heap).  Stores the exit status (128 + the signal number when
    * it was killed) in *exit_code.  Returns PAYKAN_OK, or PAYKAN_ERROR with a
-   * diagnostic when it could not be run. */
+   * diagnostic when it could not be run (no such file, or one the system
+   * will not start). */
   int (*run_executable)(PaykanSession *session, const char *path,
                         const char *const *args, size_t num_args,
                         uint32_t track_heap, int *exit_code);

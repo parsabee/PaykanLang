@@ -223,10 +223,17 @@ Status buildHostExecutable(
   // The system toolchain, with the sanitizer / coverage flags of a sanitizer
   // / coverage build, whose runtime archive is instrumented.
   std::ostringstream errs;
+  // The toolchain's lines end in a newline; a Status message does not.
+  auto failed = [&errs] {
+    std::string msg = errs.str();
+    while (!msg.empty() && msg.back() == '\n')
+      msg.pop_back();
+    return Status::error(msg);
+  };
   toolchain::Toolchain tc;
   tc.ExtraObjects = objects;
   if (!toolchain::resolveToolchain(tc, errs))
-    return Status::error(errs.str());
+    return failed();
   toolchain::TempDir tmp;
   if (tmp.Path.empty())
     return Status::error("cannot create a temporary directory");
@@ -234,7 +241,7 @@ Status buildHostExecutable(
   if (Status s = emitObject(object); !s)
     return s;
   if (!toolchain::linkExecutable({object}, output, tc, errs))
-    return Status::error(errs.str());
+    return failed();
   return Status::ok();
 }
 

@@ -31,14 +31,16 @@ namespace paykan::toolchain::platform {
 ///   `paykan` on $PATH.
 std::string executablePath();
 
-/// Run @p path (looked up on $PATH when it has no slash) with @p args after
-/// @p argv0 as the child's argv (no argv at all when @p argv0 is null, i.e.
-/// argc == 0) and @p extraEnv added to its environment, and wait for it.
-/// Returns the exit status, 128 + the signal number, or -1 (with a message
-/// on @p errs) when it could not be run.  POSIX fork / execvp / waitpid on
-/// every platform.
+/// Run @p path (looked up on $PATH when it has no slash) with @p argv0 and
+/// then @p args as the child's argv and @p extraEnv added to its
+/// environment, and wait for it.  Returns the exit status, 128 + the signal
+/// number, or -1 with a message on @p errs when it could not be run (`cannot
+/// run '<path>': No such file or directory`).  POSIX fork / execvp / waitpid
+/// on every platform; the child reports a failed exec through a
+/// close-on-exec pipe, so a program that ran and exited with 127 is not
+/// taken for one that never started.
 int spawn(const std::string &path, const std::vector<std::string> &args,
-          const std::string *argv0,
+          const std::string &argv0,
           const std::vector<std::pair<std::string, std::string>> &extraEnv,
           std::ostream &errs);
 

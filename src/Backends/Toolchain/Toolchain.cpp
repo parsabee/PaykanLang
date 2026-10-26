@@ -99,11 +99,11 @@ std::string executableDir() {
   return exe.empty() ? "" : fs::path(exe).parent_path().string();
 }
 
-/// Run @p path with @p args after @p argv0 as the child's argv (no argv at
-/// all when @p argv0 is null, i.e. argc == 0) and @p extraEnv added to the
-/// environment.  Returns the exit status, 128 + signal, or -1.
+/// Run @p path with @p argv0 and then @p args as the child's argv and
+/// @p extraEnv added to the environment.  Returns the exit status, 128 +
+/// signal, or -1 with a message on @p errs when it could not be run.
 int spawn(const std::string &path, const std::vector<std::string> &args,
-          const std::string *argv0,
+          const std::string &argv0,
           const std::vector<std::pair<std::string, std::string>> &extraEnv,
           std::ostream &errs) {
   return platform::spawn(path, args, argv0, extraEnv, errs);
@@ -205,7 +205,9 @@ bool linkExecutable(const std::vector<std::string> &objects,
   link.push_back(tcnames::kFlagLibm);
   link.push_back(tcnames::kFlagOutput);
   link.push_back(outputPath);
-  int rc = spawn(tc.CC, link, &tc.CC, {}, errs);
+  int rc = spawn(tc.CC, link, tc.CC, {}, errs);
+  if (rc < 0)
+    return false; // errs says why
   if (rc != 0) {
     errs << "linking failed (" << tc.CC << " exited with " << rc << ")\n";
     return false;

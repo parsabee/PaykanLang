@@ -1042,6 +1042,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before the C library; a file that is neither is named (`JIT error: cannot load 'x.o':
   The file was not recognized as a valid object file`), and one that cannot be read says
   why (`cannot read 'x.a': No such file or directory`).
+- A program that could not be started was taken for one that ran and exited with status
+  127: a backend plugin's `host->run_executable` of a missing file returned `PAYKAN_OK`
+  with exit code 127 (after `exec of '...' failed` on standard error), and `paykan build`
+  with a C compiler that is not there said `linking failed (nosuchcc exited with 127)`.
+  The child now reports a failed exec through a close-on-exec pipe: `run_executable`
+  returns `PAYKAN_ERROR` with `cannot run '<path>': No such file or directory`, and
+  `build` says `cannot run 'nosuchcc': No such file or directory`.  `run_executable` with
+  no arguments was documented to run the program with `argc == 0`, which Linux turns into
+  one empty `argv[0]` and other systems refuse; it now passes one empty `argv[0]` on every
+  system, as docs/plugins/plugin-api.md now says.
 
 ## [0.2.0] - 2026-10-20
 
