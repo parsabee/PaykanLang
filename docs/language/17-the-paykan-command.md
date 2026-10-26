@@ -31,8 +31,14 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
 The source file is the program's **main file**. Its directory is the source root from which
 imports are resolved (see [Modules](15-modules.md)).
 
-When compilation fails, `paykan` prints the errors and exits with status 1. A wrong
-option prints a message suggesting `--help`, and also exits with 1.
+When compilation fails, `paykan` prints the errors and exits with status 1. It prints the
+first 20 errors, and after them `note: stopping after 20 errors, the error limit
+(--error-limit=N sets it, and --error-limit=0 shows every error)` and nothing more; warnings
+and notes do not count, and the exit status is 1 whatever the limit. Each error shows its
+line with a caret under the place; a line longer than 120 characters is shown as the 120
+around the caret, with `...` where it is cut (a tab and a UTF-8 character count as one, and
+the caret stays under its character). A wrong option prints a message suggesting `--help`,
+and also exits with 1.
 
 ## Options
 
@@ -54,6 +60,7 @@ option prints a message suggesting `--help`, and also exits with 1.
 | `--verbose` | print one line per imported module on standard error: where it came from (its source, a cache entry, a prebuilt file) and why a cache entry was not used; and one line per cache entry written |
 | `--stats` | print what the compiler's passes over PIR did on standard error, once the last of them ran: the [transfers](16-memory.md#ownership-transfers) the moves at last use made and the retains and releases they removed, and the retains and releases the [reference-count elimination](16-memory.md#reference-counts-the-compiler-removes) removed, in the program and in the modules built from source in this run ([PIR](../pir.md#12-passes)) |
 | `--object=<files>` | link these object files or archives (comma-separated; repeatable): they define the program's `native fn`s ([Native functions](03-functions.md#native-functions)) |
+| `--error-limit=N` | print at most `N` errors, then a note that the limit was reached (default `20`; `0` prints every error); warnings and notes do not count |
 | `--` | ends `paykan`'s options: a file name starting with `-` can follow |
 
 ### Looking inside the compiler

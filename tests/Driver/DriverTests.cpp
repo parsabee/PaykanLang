@@ -23,6 +23,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <sys/wait.h>
@@ -1790,6 +1791,191 @@ TEST(Driver, AQualifierClashNamesEachModuleCanonically) {
         << c.File << ": " << r.out;
   }
   std::filesystem::remove_all(dir);
+}
+
+namespace {
+
+// The diagnostics of @p out of a kind ("error: ", "warning: ", "note: ").
+size_t countOf(const std::string &out, const std::string &kind) {
+  size_t n = 0;
+  for (size_t at = out.find(kind); at != std::string::npos;
+       at = out.find(kind, at + 1))
+    ++n;
+  return n;
+}
+
+// `fn main` assigning @p n undeclared variables, one per line: n errors.
+std::string undeclaredUses(int n) {
+  std::string src = "fn main() -> int {\n";
+  for (int i = 0; i < n; ++i)
+    src += "  x" + std::to_string(i) + " = y" + std::to_string(i) + ";\n";
+  return src + "  return 0;\n}\n";
+}
+
+const char *const kLimitNote =
+    "note: stopping after 20 errors, the error limit (--error-limit=N sets "
+    "it, and --error-limit=0 shows every error)\n";
+
+} // namespace
+
+// Added item B: a compilation prints at most 20 errors, then a note that the
+// limit was reached and nothing more; --error-limit=N changes it and 0
+// removes it.  The exit status is the error status either way.
+TEST(Driver, ErrorsStopAtTheErrorLimit) {
+  auto src = writeTmp(undeclaredUses(30));
+  auto dflt = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  EXPECT_EQ(dflt.exitCode, 1) << dflt.out;
+  EXPECT_EQ(countOf(dflt.out, "error: "), 20u) << dflt.out;
+  EXPECT_NE(dflt.out.find("'y19'"), std::string::npos) << dflt.out;
+  EXPECT_EQ(dflt.out.find("'y20'"), std::string::npos) << dflt.out;
+  ASSERT_GE(dflt.out.size(), std::string(kLimitNote).size());
+  EXPECT_EQ(dflt.out.substr(dflt.out.size() - std::string(kLimitNote).size()),
+            kLimitNote);
+  for (const auto &[option, errors, note] :
+       {std::tuple{" --error-limit=3", 3u, true},
+        std::tuple{" --error-limit 3", 3u, true},
+        std::tuple{" --error-limit=30", 30u, false},
+        std::tuple{" --error-limit=0", 30u, false}}) {
+    for (const char *how : {" --check-only ", " "}) {
+      std::string cmd = paykanRun();
+      cmd.append(option).append(how).append(src).append(" 2>&1");
+      auto r = run(cmd);
+      EXPECT_EQ(r.exitCode, 1) << option << how << r.out;
+      EXPECT_EQ(countOf(r.out, "error: "), errors) << option << how << r.out;
+      EXPECT_EQ(r.out.find("note: stopping after") != std::string::npos, note)
+          << option << how << r.out;
+    }
+  }
+  auto three = run(std::string(kPaykan) + " --error-limit=3 --check-only " +
+                   src + " 2>&1");
+  EXPECT_NE(three.out.find("note: stopping after 3 errors, the error limit"),
+            std::string::npos)
+      << three.out;
+  for (const char *bad : {"x", "-1", "1e3", "12345678901"}) {
+    auto r = run(std::string(kPaykan) + " --error-limit=" + bad + " " + src +
+                 " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << bad << ": " << r.out;
+    EXPECT_NE(r.out.find(std::string("invalid error limit '") + bad +
+                         "' (expected a number of errors, or 0 for no "
+                         "limit)"),
+              std::string::npos)
+        << bad << ": " << r.out;
+  }
+  auto help = run(std::string(kPaykan) + " --help 2>&1");
+  EXPECT_NE(help.out.find("--error-limit=N   - Print at most N errors "
+                          "(default 20; 0 for no limit)"),
+            std::string::npos)
+      << help.out;
+  std::filesystem::remove(src);
+}
+
+// Warnings and notes do not count against the limit: a note that follows a
+// printed error is printed, and 25 warnings are printed whole.
+TEST(Driver, WarningsAndNotesDoNotCountAgainstTheErrorLimit) {
+  std::string calls = "fn g<T>() -> int { return 0; }\nfn main() -> int {\n";
+  for (int i = 0; i < 25; ++i)
+    calls += "  a" + std::to_string(i) + " = g();\n";
+  auto src = writeTmp(calls + "  return 0;\n}\n");
+  auto r = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  EXPECT_EQ(countOf(r.out, "error: "), 20u) << r.out;
+  // Each error's hint, and the limit's note.
+  EXPECT_EQ(countOf(r.out, "note: "), 21u) << r.out;
+  std::filesystem::remove(src);
+
+  std::string methods = "struct P { x: int; }\nimpl P {\n";
+  for (int i = 0; i < 25; ++i)
+    methods += "  fn g" + std::to_string(i) + "() -> int { return self.x; }\n";
+  src = writeTmp(methods + "}\nfn main() -> int { return 0; }\n");
+  auto w = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  EXPECT_EQ(w.exitCode, 0) << w.out;
+  EXPECT_EQ(countOf(w.out, "warning: "), 25u) << w.out;
+  EXPECT_EQ(w.out.find("note: stopping"), std::string::npos) << w.out;
+  std::filesystem::remove(src);
+}
+
+// An imported module's errors count against the same limit as the
+// importer's: one compilation.
+TEST(Driver, AnImportedModulesErrorsShareTheErrorLimit) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_error_limit_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "lib");
+  std::string lib = "fn f() -> int {\n";
+  for (int i = 0; i < 15; ++i)
+    lib += "  a" + std::to_string(i) + " = b" + std::to_string(i) + ";\n";
+  std::ofstream(dir / "lib" / "m.pkn") << lib << "  return 0;\n}\n";
+  std::string main = "import lib::m;\nfn main() -> int {\n";
+  for (int i = 0; i < 15; ++i)
+    main += "  c" + std::to_string(i) + " = d" + std::to_string(i) + ";\n";
+  std::ofstream(dir / "main.pkn") << main << "  return m::f();\n}\n";
+  auto r = run("cd " + dir.string() + " && " + std::string(kPaykan) +
+               " --no-module-cache --check-only main.pkn 2>&1");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  EXPECT_EQ(countOf(r.out, "lib/m.pkn:"), 15u) << r.out;
+  EXPECT_EQ(countOf(r.out, "error: "), 20u) << r.out;
+  EXPECT_NE(r.out.find(kLimitNote), std::string::npos) << r.out;
+  std::filesystem::remove_all(dir);
+}
+
+// Added item B: a source line longer than 120 characters is shown as the
+// 120 around the caret, cut with "...", the caret under its character with
+// tabs and UTF-8 before it; the lines around it show the same characters.
+// So 10000 errors on one 140 KB line print a few kilobytes, not a copy of
+// the line per error.
+TEST(Driver, ALongSourceLineIsShownAsAWindowAroundTheCaret) {
+  std::string body = "fn main() -> int {";
+  for (int i = 0; i < 100; ++i)
+    body += " a" + std::to_string(i) + " = 1;";
+  body += " b = nope;";
+  for (int i = 0; i < 100; ++i)
+    body += " c" + std::to_string(i) + " = 2;";
+  body += " return 0; }";
+  auto src = writeTmp("// short\n" + body + "\n");
+  auto r = run(std::string(kPaykan) + " --check-only " + src + " 2>&1");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  const std::string col = std::to_string(body.find("nope") + 1);
+  EXPECT_NE(r.out.find(":2:" + col +
+                       ": error: use of undeclared variable "
+                       "'nope'"),
+            std::string::npos)
+      << r.out;
+  std::istringstream lines(r.out);
+  std::vector<std::string> shown;
+  for (std::string l; std::getline(lines, l);)
+    shown.push_back(l);
+  ASSERT_EQ(shown.size(), 4u) << r.out;
+  EXPECT_EQ(shown[1], "  1 | ...") << r.out;
+  const std::string gutter = "  2 | ...";
+  ASSERT_EQ(shown[2].substr(0, gutter.size()), gutter) << r.out;
+  EXPECT_EQ(shown[2].size(), gutter.size() + 120 + 3) << r.out;
+  EXPECT_EQ(shown[2].substr(shown[2].size() - 3), "...") << r.out;
+  // The caret and its underline under `nope`.
+  EXPECT_EQ(shown[3].find("^~~~"), shown[2].find("nope")) << r.out;
+  EXPECT_EQ(shown[3].substr(0, 6), "    | ") << r.out;
+  std::filesystem::remove(src);
+
+  // A tab and UTF-8 characters before the caret: one character each.
+  auto utf =
+      writeTmp("fn main() -> int {\n\ts = \"\xC3\xA9\xC3\xA9\xE2\x82\xAC\"; "
+               "t = nope;\n  return 0;\n}\n");
+  auto u = run(std::string(kPaykan) + " --check-only " + utf + " 2>&1");
+  EXPECT_NE(u.out.find("  2 | \ts = \"\xC3\xA9\xC3\xA9\xE2\x82\xAC\"; t = "
+                       "nope;\n    | \t               ^~~~\n"),
+            std::string::npos)
+      << u.out;
+  std::filesystem::remove(utf);
+
+  // 10000 errors on one line.
+  std::string huge = "fn main() -> int {";
+  for (int i = 0; i < 10000; ++i)
+    huge += " x" + std::to_string(i) + " = y" + std::to_string(i) + ";";
+  auto big = writeTmp(huge + " return 0; }\n");
+  auto h = run(std::string(kPaykan) + " --check-only " + big + " 2>&1");
+  EXPECT_EQ(h.exitCode, 1);
+  EXPECT_EQ(countOf(h.out, "error: "), 20u);
+  EXPECT_LT(h.out.size(), 16384u) << h.out.substr(0, 4000);
+  std::filesystem::remove(big);
 }
 
 TEST(Driver, EmitCRejectsAnotherBackend) {

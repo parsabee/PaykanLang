@@ -31,9 +31,16 @@ enum class PkmVerb {
 /// compile time, and the code it runs is up to 2.5x faster.
 inline constexpr unsigned kDefaultOptLevel = 2;
 
+/// The errors a compilation prints without --error-limit=N: past them, a
+/// note says the limit was reached and nothing more is printed.
+inline constexpr unsigned kDefaultErrorLimit = 20;
+
 /// Everything the driver reads from the command line.
 struct Options {
   Command Cmd = Command::Run;
+  /// --error-limit=N: the errors printed (DiagEngine::setErrorLimit); 0 for
+  /// no limit.
+  unsigned ErrorLimit = kDefaultErrorLimit;
 
   /// The source file to compile (the first positional argument after the
   /// optional command word).

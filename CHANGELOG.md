@@ -648,6 +648,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a bodiless one in an `impl` block is the syntax error `'destroy' is reserved for the
   compiler-generated destructor and cannot be declared` (docs/language/05-classes.md,
   11-structs.md, "Semantic Checks").
+- A compilation prints at most 20 errors: past them `paykan` prints `note: stopping after
+  20 errors, the error limit (--error-limit=N sets it, and --error-limit=0 shows every
+  error)` and no more diagnostics, though it still exits with status 1.  The new
+  `--error-limit=N` sets the limit (`0` for none); warnings and notes do not count, and an
+  imported module's errors count against the importer's limit.  And a source line longer
+  than 120 characters is shown as the 120 around the caret, cut with `...`, the lines above
+  and below it as the same characters, where every error printed its whole line and the
+  lines around it: 10000 errors on one 148 KB line printed 2.2 GB, and print 5 KB now.
+  The caret counts a UTF-8 character as one, where it counted its bytes and stood to the
+  right of its place after one (docs/language/17-the-paykan-command.md).
 
 ### Removed
 

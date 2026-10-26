@@ -262,6 +262,23 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
 
+    if (std::string limit;
+        valueOption(name, "error-limit", i, argc, argv, limit, r.Error)) {
+      if (!r.Error.empty())
+        return r;
+      // A count of errors: digits only, at most nine of them.
+      if (limit.size() > 9 ||
+          limit.find_first_not_of("0123456789") != std::string::npos) {
+        r.Error = "invalid error limit '" + limit +
+                  "' (expected a number of errors, or 0 for no limit)";
+        return r;
+      }
+      o.ErrorLimit = 0;
+      for (char c : limit)
+        o.ErrorLimit = o.ErrorLimit * 10 + static_cast<unsigned>(c - '0');
+      continue;
+    }
+
     // -O<n>, -O=<n>, and -O <n>.
     if (name.size() >= 1 && name[0] == 'O') {
       std::string_view level = name.substr(1);
@@ -411,6 +428,8 @@ void printUsage(std::ostream &os, const char *argv0) {
      << "                      for a module of the standard library)\n"
      << "  -O<n>             - Optimization level (0-3, default "
      << kDefaultOptLevel << "; -O0 for debugging)\n"
+     << "  --error-limit=N   - Print at most N errors (default "
+     << kDefaultErrorLimit << "; 0 for no limit)\n"
      << "  --version, -v     - Print the version and exit\n"
      << "  --help, -h        - Print this help and exit\n";
 }

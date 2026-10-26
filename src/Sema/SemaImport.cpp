@@ -660,6 +660,7 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   auto importDriverPtr = std::make_shared<parser::ParserDriver>(moduleFrontend);
   // Diagnostics name the module's file by its path from the source root.
   DiagEngine importDiag(Diags.getOS());
+  importDiag.shareErrorLimit(Diags); // one compilation's errors
   importDiag.setSourceInfo(displayPath(path),
                            &importDriverPtr->getSourceLines());
   importDriverPtr->setDiagEngine(&importDiag);

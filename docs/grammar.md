@@ -585,7 +585,10 @@ column, as `--dump-ast` prints them. Rules that every frontend follows:
 ## 9. Diagnostics and recovery
 
 Diagnostics go through `DiagEngine` in the clang-style
-`file:line:col: error: message` format with a source snippet and caret.
+`file:line:col: error: message` format with a source snippet and caret (a
+line over 120 characters shows the 120 around the caret, cut with `...`),
+and at most `--error-limit=N` errors (20 by default) are printed
+([The paykan command](language/17-the-paykan-command.md)).
 So do the lexical errors `--dump-tokens` finds: it lists every token, then
 fails.
 The messages listed in this document are binding (tests assert on them);
