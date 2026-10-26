@@ -2626,13 +2626,25 @@ TEST(Driver, AnUnwritableStandardOutputIsAnError) {
     auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() + args +
                          " 2>&1 >/dev/full");
     EXPECT_EQ(rc, 1) << args << ": " << out;
-    // The reason when the last write is the one that failed (as
-    // coreutils' close_stdout gives it).
-    const std::string head = "paykan: cannot write to standard output";
-    EXPECT_TRUE(out == head + "\n" ||
-                out == head + ": No space left on device\n")
-        << args << ": " << out;
+    // The reason the first write that failed gave, which `--emit-c` and
+    // `--emit-llvm` lost: their stream failed at a write before the last.
+    EXPECT_EQ(out, "paykan: cannot write to standard output: No space left on "
+                   "device\n")
+        << args;
   }
+  // -o's file, here a link to /dev/full, says why too.
+  std::filesystem::create_symlink("/dev/full", dir / "full");
+  for (const auto &[args, message] :
+       {std::pair{" --emit-c hello.pkn -o full",
+                  "paykan: cannot write 'full': No space left on device\n"},
+        std::pair{" --emit-pkm lib.pkn -o full",
+                  "paykan: cannot write full: No space left on device\n"}}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + paykanRun() + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_EQ(out, message) << args;
+  }
+  EXPECT_TRUE(std::filesystem::is_symlink(dir / "full"));
   std::filesystem::remove_all(dir);
 }
 

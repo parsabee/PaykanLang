@@ -44,6 +44,7 @@
 #include <optional>
 #include <span>
 #include <sstream>
+#include <streambuf>
 #include <string>
 #include <vector>
 
@@ -306,23 +307,68 @@ int failBackend(const paykan::Status &s) {
   return EXIT_FAILURE;
 }
 
+/// What std::cout writes through: C's stdout, as the stream synchronised
+/// with stdio does, keeping the reason the first write that failed gave.
+/// A stream that failed takes no more output, and a later call may change
+/// errno before finishStdout reports the failure.
+class StdoutBuffer : public std::streambuf {
+public:
+  /// The errno of the first write or flush that failed, or 0.
+  int firstError() const { return FirstError; }
+
+protected:
+  int_type overflow(int_type c) override {
+    if (traits_type::eq_int_type(c, traits_type::eof()))
+      return traits_type::not_eof(c);
+    char ch = traits_type::to_char_type(c);
+    return put(&ch, 1) ? c : traits_type::eof();
+  }
+  std::streamsize xsputn(const char *s, std::streamsize n) override {
+    return put(s, static_cast<size_t>(n)) ? n : 0;
+  }
+  int sync() override {
+    errno = 0;
+    if (std::fflush(stdout) == 0)
+      return 0;
+    note(errno);
+    return -1;
+  }
+
+private:
+  bool put(const char *s, size_t n) {
+    errno = 0;
+    if (std::fwrite(s, 1, n, stdout) == n)
+      return true;
+    note(errno);
+    return false;
+  }
+  void note(int error) {
+    if (FirstError == 0)
+      FirstError = error != 0 ? error : EIO;
+  }
+  int FirstError = 0;
+};
+
+/// The one StdoutBuffer, which std::cout writes through from the start of
+/// main.  It is never destroyed: std::cout is flushed once more at exit.
+StdoutBuffer &stdoutBuffer() {
+  static auto *buffer = new StdoutBuffer;
+  return *buffer;
+}
+
 /// @p status for a command that wrote to standard output, once what it
 /// wrote is flushed, or EXIT_FAILURE with a message when some of it could
 /// not be written (a full disk, say): a stream that failed takes no more
-/// output, so the error is reported here, at the end.  The message gives
-/// the reason when the final flush is the write that failed; that of an
-/// earlier write may since have been overwritten (coreutils' close_stdout
-/// does the same).
+/// output, so the error is reported here, at the end, with the reason the
+/// first write that failed gave (StdoutBuffer).
 int finishStdout(int status) {
   bool failed = !std::cout;
   std::cout.clear();
-  errno = 0;
   std::cout.flush();
-  int error = errno;
   if (!failed && std::cout && !std::ferror(stdout))
     return status;
   std::cerr << "paykan: cannot write to standard output";
-  if (error != 0)
+  if (int error = stdoutBuffer().firstError(); error != 0)
     std::cerr << ": " << std::strerror(error);
   std::cerr << "\n";
   return EXIT_FAILURE;
@@ -646,6 +692,7 @@ std::vector<std::string> modulePath(const Options &opts) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+  std::cout.rdbuf(&stdoutBuffer());
   auto parsed = paykan::driver::parseCommandLine(argc, argv);
   const Options &opts = parsed.Opts;
   if (opts.ShowHelp && !opts.ShowVersion) {

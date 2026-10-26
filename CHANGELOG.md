@@ -1043,8 +1043,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lost: `paykan --emit-c hello.pkn > /dev/full`, and the same for `--emit-pir`,
   `--emit-llvm`, `--emit-mlir`, `--emit-ast`, `--dump-ast`, `--dump-tokens`, `--help`,
   `--version`, `--list-*`, `pkm dump` and `pkm check`.  Each now checks standard output once
-  it is done: `paykan: cannot write to standard output: No space left on device` (the reason
-  when the last write is the one that failed), exit status 1.
+  it is done: `paykan: cannot write to standard output: No space left on device`, the reason
+  the first write that failed gave, exit status 1.  A file `-o` names that cannot be
+  written says why too (`paykan: cannot write 'out.c': No space left on device`).
 - `PAYKAN_TRACK_HEAP=1 paykan run hello.pkn` printed no heap statistics: only an executable
   `build` wrote read the variable, though the documentation says every program does.  `run`
   now tracks the heap when it is set, as under `--track-heap`.
