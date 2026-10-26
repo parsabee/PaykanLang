@@ -66,6 +66,14 @@ bool Sema::checkFunctionValue(const std::string &name, const FunctionSig &sig,
   return true;
 }
 
+bool Sema::errorGenericFunctionValue(const std::string &name,
+                                     ast::SourceLocation loc) {
+  error(loc, "'" + displayName(name) +
+                 "' is a generic function; a generic function cannot be a "
+                 "function value yet (wrap a call to it in a lambda)");
+  return false;
+}
+
 bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
                            ast::SourceLocation loc) {
   if (LambdaStack.empty() || !owner)

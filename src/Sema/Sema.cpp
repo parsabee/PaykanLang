@@ -1262,10 +1262,7 @@ ast::Type *Sema::ExprChecker::visitIdentifier(ast::Identifier *node) {
       return fnt;
     }
     if (S.FuncTemplates.count(node->getName())) {
-      S.error(node->getLocation(),
-              "'" + node->getName() +
-                  "' is a generic function; a generic function cannot be a "
-                  "function value yet (wrap a call to it in a lambda)");
+      S.errorGenericFunctionValue(node->getName(), node->getLocation());
       return nullptr;
     }
   }
@@ -1362,10 +1359,22 @@ ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
       node->setResolvedType(fnt);
       return fnt;
     }
-    if (S.reportPrivateImport(qualified, node->getLocation()) ||
-        S.reportPrivateImport(node->getEnumName(), node->getLocation()))
+    if (S.FuncTemplates.count(qualified)) {
+      S.errorGenericFunctionValue(qualified, node->getLocation());
       return nullptr;
-    if (!S.isFailedImportUse(node->getEnumName()))
+    }
+    if (S.reportPrivateImport(qualified, node->getLocation()) ||
+        S.reportPrivateImport(node->getEnumName(), node->getLocation()) ||
+        S.isFailedImportUse(node->getEnumName()))
+      return nullptr;
+    // Under an import's qualifier, a value is one of the module's
+    // functions.
+    if (auto q = S.ImportQualifiers.find(node->getEnumName());
+        q != S.ImportQualifiers.end())
+      S.error(node->getLocation(), "'" + qualified +
+                                       "' is not a function of module '" +
+                                       q->second.Module + "'");
+    else
       S.error(node->getLocation(),
               "unknown enum type '" + node->getEnumName() + "'");
     return nullptr;

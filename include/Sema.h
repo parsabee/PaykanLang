@@ -200,6 +200,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// reports why not otherwise.
   bool checkFunctionValue(const std::string &name, const FunctionSig &sig,
                           ast::SourceLocation loc);
+  /// Reports, at @p loc, that the generic function @p name (`g`, `io::println`)
+  /// cannot be a function value, and returns false.
+  bool errorGenericFunctionValue(const std::string &name,
+                                 ast::SourceLocation loc);
   /// Check a call of the function value of type @p fnt (`f(args)`, a call
   /// through a variable or a field) named @p what in diagnostics: the
   /// arguments' types and modes.  The result type, or nullptr.

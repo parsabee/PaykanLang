@@ -1224,6 +1224,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and leaves its name free, as a program's `class Result` next to the library's showed
   (docs/language/02-basics.md, "Builtin Names Are Reserved"; 15-modules.md;
   docs/stdlib/index.md).
+- A module's generic function used as a value, `x = io::println`, was `unknown enum type
+  'io'`, and so was a name the module does not have (`x = io::nosuch`, `col::List`).  The
+  first is now the error a local generic function gets, `'io::println' is a generic
+  function; a generic function cannot be a function value yet (wrap a call to it in a
+  lambda)` (one helper, `Sema::errorGenericFunctionValue`, says it for both), and the
+  second `'io::nosuch' is not a function of module '::io'`, naming the module as imported;
+  `unknown enum type 'Nope'` stays for a qualifier that is no module's
+  (docs/language/14-function-types.md, "Function Values").
 
 ## [0.2.0] - 2026-10-20
 
