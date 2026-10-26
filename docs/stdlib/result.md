@@ -15,7 +15,7 @@ import ::error as err;
 import ::result as res;
 
 fn parsePort(s: Str) -> res::Result<int, err::Error> {
-  match int(s) {
+  match s.toInt() {
     n: int {
       if n > 0 && n < 65536 { return res::ok(n); }
       return res::fail(err::Error(err::ErrorCode::InvalidArgument, "out of range: " + s));

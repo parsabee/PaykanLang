@@ -3063,9 +3063,9 @@ TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalValue) {
   // The runtime parses into a local; the result is that value as the
   // present optional, or None (#96): no box.
   auto l = lower(R"(
-    fn p(s: Str) -> int? { return int<Str>(s); }
-    fn q(s: Str) -> float? { return float<Str>(s); }
-    fn t(s: Str) -> bool? { return bool<Str>(s); }
+    fn p(s: Str) -> int? { return s.toInt(); }
+    fn q(s: Str) -> float? { return s.toFloat(); }
+    fn t(s: Str) -> bool? { return s.toBool(); }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -3098,8 +3098,7 @@ TEST(Lowering, StrParseMethodsCallTheRuntimeParseOfTheirType) {
     fn f(s: Str) -> f32? { return s.toF32(); }
     fn g(s: Str) -> f16? { return s.toF16(); }
     fn h(s: Str) -> bool? { return s.toBool(); }
-    fn k(s: Str) -> u32? { return u32(s); }
-    fn m(s: Str) -> f32? { return f32<Str>(s); }
+    fn k(s: Str) -> u32? { return s.toU32(); }
     fn t(s: Str) -> u16? { return (s + "0").toU16(); }
     fn main() -> int { return 0; }
   )");
@@ -3114,7 +3113,6 @@ TEST(Lowering, StrParseMethodsCallTheRuntimeParseOfTheirType) {
       {"g", "PaykanString_parse_f16(", "none opt_f64"},
       {"h", "PaykanString_parse_bool(", "none opt_bool"},
       {"k", "PaykanString_parse_uint(", "none opt_i64"},
-      {"m", "PaykanString_parse_f32(", "none opt_f64"},
       {"t", "PaykanString_parse_uint(", "none opt_i64"},
   };
   for (const auto &e : expected) {
@@ -3134,7 +3132,7 @@ TEST(Lowering, StrParseMethodsCallTheRuntimeParseOfTheirType) {
     EXPECT_NE(fn.find("cmp ge"), std::string::npos) << fn;
     EXPECT_NE(fn.find("cmp le"), std::string::npos) << fn;
   }
-  for (const char *wide : {"a", "c", "e", "f", "g", "h", "m"})
+  for (const char *wide : {"a", "c", "e", "f", "g", "h"})
     EXPECT_EQ(function(l.Text, wide).find("cmp le"), std::string::npos)
         << function(l.Text, wide);
   // The concatenation the receiver is, disposed of after the parse.

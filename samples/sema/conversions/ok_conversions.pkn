@@ -1,4 +1,5 @@
-// Every conversion constructor `Target<Source>(value)` with its result type.
+// Every conversion constructor `Target<Source>(value)` with its result type,
+// and Str's parses, which give the optional of their type.
 fn main() -> int {
   i: int = 1;
   f: float = 1.5;
@@ -9,15 +10,15 @@ fn main() -> int {
   s2: Str = Str<float>(f);
   s3: Str = Str<bool>(b);
   s4: Str = Str<char>(c);
-  p1: int? = int<Str>(s);       // None for an invalid string
-  p2: float? = float<Str>(s);
+  p1: int? = s.toInt();         // None for an invalid string
+  p2: float? = s.toFloat();
   n1: int = int<float>(f);
   n2: float = float<int>(i);
   n3: int = int<bool>(b);
   n4: bool = bool<int>(i);
   n5: int = int<char>(c);
   n6: char = char<int>(i);
-  q1: bool? = bool<Str>(s);     // exactly "True" / "False"
+  q1: bool? = s.toBool();       // exactly "True" / "False"
   // A parsed optional is unwrapped before it is formatted.
   match p1 {
     x: int { t: Str = Str<int>(x); }

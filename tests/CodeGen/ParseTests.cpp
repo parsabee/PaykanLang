@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 // CodeGen tests: the fallible parses, Str's `s.toInt()` -> `int?` & co.
-// (docs/language/04-strings-and-conversions.md, "Parsing a string"), and the
-// older `int<Str>(s)` -> `int?` and `float<Str>(s)` -> `float?` (#64).
+// (docs/language/04-strings-and-conversions.md, "Parsing a string").
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
@@ -34,18 +33,18 @@ fn show(o: float?) -> Str {
 }
 )";
 
-// -- int<Str>
+// -- toInt()
 
 TEST(ParseInt, ValidStrings) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kShowInt) + wrapMain(R"(
-    io::println(show(int<Str>("0")));
-    io::println(show(int<Str>("42")));
-    io::println(show(int<Str>("-99")));
-    io::println(show(int<Str>("+7")));
-    io::println(show(int<Str>("007")));
-    io::println(show(int<Str>("9223372036854775807")));
-    io::println(show(int<Str>("-9223372036854775808")));
+    io::println(show("0".toInt()));
+    io::println(show("42".toInt()));
+    io::println(show("-99".toInt()));
+    io::println(show("+7".toInt()));
+    io::println(show("007".toInt()));
+    io::println(show("9223372036854775807".toInt()));
+    io::println(show("-9223372036854775808".toInt()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "0\n42\n-99\n7\n7\n9223372036854775807\n"
@@ -56,15 +55,15 @@ TEST(ParseInt, ValidStrings) {
 TEST(ParseInt, InvalidStringsAreNone) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kShowInt) + wrapMain(R"(
-    io::println(show(int<Str>("")));
-    io::println(show(int<Str>("abc")));
-    io::println(show(int<Str>("12abc")));
-    io::println(show(int<Str>("3.14")));
-    io::println(show(int<Str>(" 12")));
-    io::println(show(int<Str>("12 ")));
-    io::println(show(int<Str>("-")));
-    io::println(show(int<Str>("9223372036854775808")));
-    io::println(show(int<Str>("-9223372036854775809")));
+    io::println(show("".toInt()));
+    io::println(show("abc".toInt()));
+    io::println(show("12abc".toInt()));
+    io::println(show("3.14".toInt()));
+    io::println(show(" 12".toInt()));
+    io::println(show("12 ".toInt()));
+    io::println(show("-".toInt()));
+    io::println(show("9223372036854775808".toInt()));
+    io::println(show("-9223372036854775809".toInt()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "None\nNone\nNone\nNone\nNone\nNone\nNone\nNone\nNone\n");
@@ -79,7 +78,7 @@ TEST(ParseInt, ResultIsAnOrdinaryIntOptional) {
     valid: int = 0;
     i: int = 0;
     while i < inputs.len() {
-      v = int<Str>(inputs[i]);            // int?
+      v = inputs[i].toInt();            // int?
       if v != None { valid = valid + 1; }
       match v {
         n: int { total = total + n; }
@@ -88,28 +87,28 @@ TEST(ParseInt, ResultIsAnOrdinaryIntOptional) {
       i = i + 1;
     }
     io::println(Str<int>(valid) + " " + Str<int>(total));
-    io::println(int<Str>("5"));
-    io::println(int<Str>("five"));
-    io::println(Str<bool>(int<Str>("5") == int<Str>("05")));
+    io::println("5".toInt());
+    io::println("five".toInt());
+    io::println(Str<bool>("5".toInt() == "05".toInt()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "3 60\n5\nNone\nTrue\n");
   g.expectNoLeaks("ParseInt.ResultIsAnOrdinaryIntOptional");
 }
 
-// -- float<Str>
+// -- toFloat()
 
 TEST(ParseFloat, ValidStrings) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kShowFloat) + wrapMain(R"(
-    io::println(show(float<Str>("0")));
-    io::println(show(float<Str>("2.5")));
-    io::println(show(float<Str>("-2.718")));
-    io::println(show(float<Str>("1e2")));
-    io::println(show(float<Str>("-0.0")));
-    io::println(show(float<Str>("nan")));
-    io::println(show(float<Str>("inf")));
-    io::println(show(float<Str>("-inf")));
+    io::println(show("0".toFloat()));
+    io::println(show("2.5".toFloat()));
+    io::println(show("-2.718".toFloat()));
+    io::println(show("1e2".toFloat()));
+    io::println(show("-0.0".toFloat()));
+    io::println(show("nan".toFloat()));
+    io::println(show("inf".toFloat()));
+    io::println(show("-inf".toFloat()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "0\n2.5\n-2.718\n100\n-0\nnan\ninf\n-inf\n");
@@ -119,12 +118,12 @@ TEST(ParseFloat, ValidStrings) {
 TEST(ParseFloat, InvalidStringsAreNone) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kShowFloat) + wrapMain(R"(
-    io::println(show(float<Str>("")));
-    io::println(show(float<Str>("xyz")));
-    io::println(show(float<Str>("1.2.3")));
-    io::println(show(float<Str>(" 1.5")));
-    io::println(show(float<Str>("1.5 ")));
-    io::println(show(float<Str>("1e999")));
+    io::println(show("".toFloat()));
+    io::println(show("xyz".toFloat()));
+    io::println(show("1.2.3".toFloat()));
+    io::println(show(" 1.5".toFloat()));
+    io::println(show("1.5 ".toFloat()));
+    io::println(show("1e999".toFloat()));
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "None\nNone\nNone\nNone\nNone\nNone\n");
@@ -137,18 +136,18 @@ TEST(ParseFloat, InvalidStringsAreNone) {
 TEST(ParseFloat, SubnormalsParseAndOutOfRangeIsNone) {
   LeakGuard g;
   auto r = compileAndRun(std::string(kShowFloat) + wrapMain(R"(
-    io::println(show(float<Str>("1e-310")));
-    io::println(show(float<Str>("5e-324")));
-    io::println(show(float<Str>("-5e-324")));
-    io::println(show(float<Str>("2.2250738585072014e-308")));
-    io::println(show(float<Str>("0e-999")));
-    io::println(show(float<Str>("1e-400")));
-    io::println(show(float<Str>("-1e999")));
+    io::println(show("1e-310".toFloat()));
+    io::println(show("5e-324".toFloat()));
+    io::println(show("-5e-324".toFloat()));
+    io::println(show("2.2250738585072014e-308".toFloat()));
+    io::println(show("0e-999".toFloat()));
+    io::println(show("1e-400".toFloat()));
+    io::println(show("-1e999".toFloat()));
     x = 5e-324;
     y = 1e-310;
     io::println(Str<float>(x) + " " + Str<float>(y) + " " + Str<float>(x * 2.0));
     io::println(Str<bool>(x > 0.0) + " " + Str<bool>(x / 2.0 == 0.0));
-    match float<Str>("1e-310") {
+    match "1e-310".toFloat() {
       v: float { io::println(Str<bool>(v == y)); }
       None { io::println("None"); }
     }

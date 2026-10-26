@@ -1,6 +1,6 @@
 // Isolates: the allocations of the conversion constructors (#64).  Every
 // `Str<...>` result is a fresh Str temporary (destroyed after use, or owned
-// by its variable); an `int<Str>` / `float<Str>` result is an optional value
+// by its variable); a `toInt()` / `toFloat()` result is an optional value
 // and allocates nothing (#96), and neither do the numeric conversions.
 // Exercised in a loop, as a call argument, a returned value, a field and a
 // match subject.
@@ -26,7 +26,7 @@ impl Cell {
 }
 
 fn parseOr(s: Str, d: int) -> int {
-  match int<Str>(s) {
+  match s.toInt() {
     n: int { return n; }
     None { return d; }
   }
@@ -53,13 +53,13 @@ fn main() -> int {
 
   c = Cell();
   c.label = Str(2.5);
-  c.value = int("7");
-  c.value = int<Str>("nope");
-  c.value = int("7");
+  c.value = "7".toInt();
+  c.value = "nope".toInt();
+  c.value = "7".toInt();
   io::println(c.label);
 
-  f = float<Str>("1.25");
-  f = float("bad");
+  f = "1.25".toFloat();
+  f = "bad".toFloat();
   n = int<float>(7.9) + int(False) + int<char>(char(0));
   io::println(Str<bool>(bool<int>(n)) + " " + Str(char(97)) + " "
       + Str<int>(n));

@@ -146,14 +146,14 @@ TEST(SizedTypes, PrintingAndParsing) {
     a: i8 = -5;  b: u16 = 65535;  c: f32 = 0.25;  d: f16 = 0.5;  u: unsigned = 7;
     io::println(Str(a) + " " + Str(b) + " " + Str(c) + " " + Str(d) + " " + Str(u));
     io::println(a.toString() + " " + Str<u16>(b) + " " + c.toString() + " " + Str<unsigned>(u));
-    p: u8? = u8("255");  q: u8? = u8("256");  r: i8? = i8("-128");  s: i8? = i8("-129");
+    p: u8? = "255".toU8();  q: u8? = "256".toU8();  r: i8? = "-128".toI8();  s: i8? = "-129".toI8();
     io::print(p); io::print(" "); io::print(q); io::print(" "); io::print(r); io::print(" "); io::println(s);
-    t: unsigned? = unsigned("18446744073709551615");  v: unsigned? = unsigned("18446744073709551616");
-    w: unsigned? = unsigned("-1");  x: unsigned? = unsigned("+1");  y: unsigned? = unsigned("");
+    t: unsigned? = "18446744073709551615".toUnsigned();  v: unsigned? = "18446744073709551616".toUnsigned();
+    w: unsigned? = "-1".toUnsigned();  x: unsigned? = "+1".toUnsigned();  y: unsigned? = "".toUnsigned();
     io::print(t); io::print(" "); io::print(v); io::print(" "); io::print(w); io::print(" "); io::print(x); io::print(" "); io::println(y);
-    z: f32? = f32("0.1");  zz: f16? = f16("70000");  zi: i32? = i32(" 5");
+    z: f32? = "0.1".toF32();  zz: f16? = "70000".toF16();  zi: i32? = " 5".toI32();
     io::print(z); io::print(" "); io::print(zz); io::print(" "); io::println(zi);
-    match u16("65535") { n: u16 { io::println(Str(n + 1)); } None { io::println("none"); } }
+    match "65535".toU16() { n: u16 { io::println(Str(n + 1)); } None { io::println("none"); } }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "-5 65535 0.25 0.5 7\n-5 65535 0.25 7\n"
@@ -163,8 +163,8 @@ TEST(SizedTypes, PrintingAndParsing) {
   g.expectNoLeaks("SizedTypes.PrintingAndParsing");
 }
 
-// The parses of the older `T(s)` form are Str's (`s.toU8()` & co.): every
-// unsigned width refuses a sign, as `unsigned` did (finding 43).
+// Every unsigned width's parse (`s.toU8()` & co.) refuses a sign, as
+// `unsigned`'s did (finding 43).
 TEST(SizedTypes, UnsignedParsesRefuseEverySign) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
@@ -172,12 +172,12 @@ TEST(SizedTypes, UnsignedParsesRefuseEverySign) {
     i = 0;
     while i < signs.len() {
       s = signs[i];
-      io::print(u8(s)); io::print(" "); io::print(u16<Str>(s)); io::print(" ");
-      io::print(u32(s)); io::print(" "); io::println(unsigned<Str>(s));
+      io::print(s.toU8()); io::print(" "); io::print(s.toU16()); io::print(" ");
+      io::print(s.toU32()); io::print(" "); io::println(s.toUnsigned());
       i = i + 1;
     }
-    io::print(u8("1")); io::print(" "); io::print(u16("0")); io::print(" ");
-    io::print(u32("4294967295")); io::print(" "); io::println(u64("7"));
+    io::print("1".toU8()); io::print(" "); io::print("0".toU16()); io::print(" ");
+    io::print("4294967295".toU32()); io::print(" "); io::println("7".toUnsigned());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "None None None None\nNone None None None\n"
@@ -192,12 +192,12 @@ TEST(SizedTypes, UnsignedParsesRefuseEverySign) {
 TEST(SizedTypes, SizedFloatParseOverflowIsNone) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
-    io::print(f16("70000")); io::print(" "); io::print(f16<Str>("65520")); io::print(" ");
-    io::print(f32("1e39")); io::print(" "); io::println(f32<Str>("3.4028235677973366e38"));
-    io::print(f16("65519")); io::print(" "); io::print(f16("1e-9")); io::print(" ");
-    io::print(f32("1e-46")); io::print(" "); io::println(f32("3.4028235e38"));
-    io::print(f16("inf")); io::print(" "); io::print(f32("-inf")); io::print(" ");
-    io::print(f16("nan")); io::print(" "); io::println(f32("1e-400"));
+    io::print("70000".toF16()); io::print(" "); io::print("65520".toF16()); io::print(" ");
+    io::print("1e39".toF32()); io::print(" "); io::println("3.4028235677973366e38".toF32());
+    io::print("65519".toF16()); io::print(" "); io::print("1e-9".toF16()); io::print(" ");
+    io::print("1e-46".toF32()); io::print(" "); io::println("3.4028235e38".toF32());
+    io::print("inf".toF16()); io::print(" "); io::print("-inf".toF32()); io::print(" ");
+    io::print("nan".toF16()); io::print(" "); io::println("1e-400".toF32());
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "None None None None\n65504 0 0 3.40282e+38\n"

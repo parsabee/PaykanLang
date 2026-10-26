@@ -2,7 +2,7 @@
 // parses, the largest and smallest normal floats, and parses that fall
 // outside the range.
 // Exercises: subnormal constants (they reach the PIR text and both backends'
-// output as constants), float<Str> of subnormals (strtod also flags those
+// output as constants), toFloat() of subnormals (strtod also flags those
 // with ERANGE), and None for a value too large (would be inf) or too small
 // (nonzero but rounds to zero).  A literal out of range, like `1e999`, is a
 // compile-time error: infinity is computed instead.
@@ -26,7 +26,7 @@ fn show(o: float?) -> Str {
 }
 
 fn same(s: Str, want: float) -> bool {
-  match float<Str>(s) {
+  match s.toFloat() {
     f: float { return f == want; }
     None { return False; }
   }
@@ -42,9 +42,9 @@ fn main() -> int {
       + Str<float>(1.7976931348623157e308));
   io::println("parsed: " + Str(same("5e-324", least)) + " "
       + Str<bool>(same("1e-310", sub)));
-  io::println("too large: " + show(float("1e999")));
-  io::println("too small: " + show(float<Str>("1e-400")));
-  io::println("zero: " + show(float("0e-999")));
+  io::println("too large: " + show("1e999".toFloat()));
+  io::println("too small: " + show("1e-400".toFloat()));
+  io::println("zero: " + show("0e-999".toFloat()));
   io::println("computed: " + Str(1.7976931348623157e308 * 10.0));
   return 0;
 }

@@ -73,7 +73,7 @@ fn main() -> int {
       Str(float(u)) + " " + Str(u64(1.5)) + " " + Str(-n) + " " + Str(n / -1));
 
   // Parsing into T?, printed through println's optional rendering.
-  p: u16? = u16("65535");
+  p: u16? = "65535".toU16();
   match p {
     v: u16 {
       match v {
@@ -83,11 +83,11 @@ fn main() -> int {
     }
     None { io::print("none "); }
   }
-  q: u8? = u8("256");
-  r: i8? = i8("-128");
-  s: unsigned? = unsigned("18446744073709551615");
-  t: unsigned? = unsigned("-1");
-  w: f32? = f32("0.1");
+  q: u8? = "256".toU8();
+  r: i8? = "-128".toI8();
+  s: unsigned? = "18446744073709551615".toUnsigned();
+  t: unsigned? = "-1".toUnsigned();
+  w: f32? = "0.1".toF32();
   io::print(q);
   io::print(" ");
   io::print(r);

@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // CodeGen tests: the conversion constructors `Target<Source>(value)` (#64) —
 // `Str<int|float|bool|char>` and the numeric conversions between int, float,
-// bool and char, with their edge cases — and `bool<Str>` (#88).  The parses
-// (`int<Str>`, `float<Str>`) are in ParseTests.cpp; the panics (out-of-range
-// `int<float>` / `char<int>`) are death tests in DriverTests.cpp.  Every test
+// bool and char, with their edge cases — and Str's `toBool()` and the parse
+// of a conversion's text (#88).  The other parses (`toInt()`, `toFloat()`)
+// are in ParseTests.cpp; the panics (out-of-range `int<float>` /
+// `char<int>`) are death tests in DriverTests.cpp.  Every test
 // runs on the backend the suite is built for (llvm and c) and checks zero
 // live heap blocks.
 
@@ -201,13 +202,13 @@ TEST(Conversion, NestedAndInsideOtherExpressions) {
   g.expectNoLeaks("Conversion.NestedAndInsideOtherExpressions");
 }
 
-// -- bool<Str> (#88)
+// -- toBool() and the round trips through a text (#88)
 
-TEST(Conversion, BoolOfStrParsesExactlyTrueAndFalse) {
+TEST(Conversion, ToBoolParsesExactlyTrueAndFalse) {
   LeakGuard g;
   auto r = compileAndRun(R"(import ::io;
     fn show(s: Str) -> Str {
-      match bool<Str>(s) {
+      match s.toBool() {
         b: bool { if b { return "yes"; } return "no"; }
         None { return "None"; }
       }
@@ -218,17 +219,17 @@ TEST(Conversion, BoolOfStrParsesExactlyTrueAndFalse) {
               show("") + " " + show(" True") + " " + show("False "));
       // The round trip with Str<bool>.
       t = 1 < 2;
-      match bool<Str>(Str<bool>(t)) { b: bool { io::println(Str<bool>(b == t)); } None { } }
-      match bool<Str>(Str<bool>(!t)) { b: bool { io::println(Str<bool>(b == !t)); } None { } }
-      io::println(bool<Str>("True"));
-      io::println(bool<Str>("maybe"));
+      match Str<bool>(t).toBool() { b: bool { io::println(Str<bool>(b == t)); } None { } }
+      match Str<bool>(!t).toBool() { b: bool { io::println(Str<bool>(b == !t)); } None { } }
+      io::println("True".toBool());
+      io::println("maybe".toBool());
       return 0;
     }
   )");
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "yes no\nNone None None None None None\nTrue\nTrue\n"
                       "True\nNone\n");
-  g.expectNoLeaks("Conversion.BoolOfStrParsesExactlyTrueAndFalse");
+  g.expectNoLeaks("Conversion.ToBoolParsesExactlyTrueAndFalse");
 }
 
 TEST(Conversion, ParseRoundTrips) {
@@ -237,17 +238,17 @@ TEST(Conversion, ParseRoundTrips) {
     inputs: Str[4] = ["0", "-7", "123456789", "x"];
     i = 0;
     while i < inputs.len() {
-      match int<Str>(inputs[i]) {
+      match inputs[i].toInt() {
         n: int { io::println(Str<bool>(Str<int>(n) == inputs[i])); }
         None { io::println("None"); }
       }
       i = i + 1;
     }
-    match float<Str>(Str<float>(0.1)) {
+    match Str<float>(0.1).toFloat() {
       f: float { io::println(Str<float>(f)); }
       None { }
     }
-    match bool<Str>(Str<bool>(False)) {
+    match Str<bool>(False).toBool() {
       b: bool { io::println(Str<bool>(b)); }
       None { }
     }
@@ -255,6 +256,35 @@ TEST(Conversion, ParseRoundTrips) {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "True\nTrue\nTrue\nNone\n0.1\nFalse\n");
   g.expectNoLeaks("Conversion.ParseRoundTrips");
+}
+
+// Every parse of the same text, and a parse's optional kept and printed.
+TEST(Conversion, EachParseOfOneText) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    fn show(s: Str) -> Str {
+      out = "";
+      match s.toInt() { n: int { out = out + "int " + Str(n); } None { out = out + "-"; } }
+      match s.toFloat() { f: float { out = out + " float " + Str(f); } None { out = out + " -"; } }
+      match s.toBool() { b: bool { out = out + " bool " + Str(b); } None { out = out + " -"; } }
+      return out;
+    }
+    fn main() -> int {
+      io::println(show("12"));
+      io::println(show("1.5"));
+      io::println(show("True"));
+      io::println(show("nope"));
+      io::println("x".toInt());
+      kept: int? = "7".toInt();
+      io::println(kept);
+      io::println("1e999".toFloat());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "int 12 float 12 -\n- float 1.5 -\n"
+                      "- - bool True\n- - -\nNone\n7\nNone\n");
+  g.expectNoLeaks("Conversion.EachParseOfOneText");
 }
 
 // -- The inferred form Target(value) (#88)
@@ -279,32 +309,4 @@ TEST(Conversion, InferredFormMatchesTheExplicitOne) {
   EXPECT_EQ(r.StdOut, "-42|-42\n2.5|2.5\nTrue|True\nq|q\n10.5False!\n"
                       "2 -10.5 1 False 113 A\nHello\n");
   g.expectNoLeaks("Conversion.InferredFormMatchesTheExplicitOne");
-}
-
-TEST(Conversion, InferredParses) {
-  LeakGuard g;
-  auto r = compileAndRun(R"(import ::io;
-    fn show(s: Str) -> Str {
-      out = "";
-      match int(s) { n: int { out = out + "int " + Str(n); } None { out = out + "-"; } }
-      match float(s) { f: float { out = out + " float " + Str(f); } None { out = out + " -"; } }
-      match bool(s) { b: bool { out = out + " bool " + Str(b); } None { out = out + " -"; } }
-      return out;
-    }
-    fn main() -> int {
-      io::println(show("12"));
-      io::println(show("1.5"));
-      io::println(show("True"));
-      io::println(show("nope"));
-      io::println(int("x"));
-      kept: int? = int("7");
-      io::println(kept);
-      io::println(float("1e999"));
-      return 0;
-    }
-  )");
-  ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "int 12 float 12 -\n- float 1.5 -\n"
-                      "- - bool True\n- - -\nNone\n7\nNone\n");
-  g.expectNoLeaks("Conversion.InferredParses");
 }

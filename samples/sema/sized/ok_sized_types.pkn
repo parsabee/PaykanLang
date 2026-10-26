@@ -26,7 +26,7 @@ fn main() -> int {
   k: u8 = u8(300);                 // 44: the low bits
   l: int = int(c) + 1;
   m: f64 = float(g);               // f64 is float
-  n: unsigned? = unsigned("18446744073709551615");
+  n: unsigned? = "18446744073709551615".toUnsigned();
   o = Str(a) + a.toString() + Str(g) + Str(e);
   p = a.hash() + e.hash();
   px = Pixel(1, 2, 3, 0.5);

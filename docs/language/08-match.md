@@ -673,7 +673,7 @@ match io::open("/tmp/data.txt", "r") {
 number. They are unwrapped in optional mode, and the arm binds a plain `int`:
 
 ```pkn
-match int<Str>(s) {
+match s.toInt() {
   n: int { return "ok: " + Str<int>(n); }
   None   { return "not a number: " + s; }
 }

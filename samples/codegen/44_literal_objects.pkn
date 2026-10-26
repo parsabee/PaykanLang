@@ -108,6 +108,6 @@ fn main() -> int {
     }
   }
   io::print("int<Str>:    ");
-  io::println(int<Str>("42"));
+  io::println("42".toInt());
   return 0;
 }

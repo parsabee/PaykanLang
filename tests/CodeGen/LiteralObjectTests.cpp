@@ -55,7 +55,7 @@ TEST(LiteralObject, SubscriptAsMatchSubjectAndConversionArgument) {
         "lit" { io::println("lit"); }
         _ { io::println("no"); }
       }
-      io::println(int<Str>("42"));
+      io::println("42".toInt());
       return 0;
     }
   )",

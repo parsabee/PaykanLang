@@ -182,7 +182,7 @@ fn main() -> int {
           digits = digits + Str(line[i]);
           i = i + 1;
         }
-        match int(digits) {
+        match digits.toInt() {
           n: int { total = total + n; }
           None   { bad = bad + 1; }
         }
@@ -521,7 +521,7 @@ fn main(args: view Str[]) -> int {
     }
     "done" {
       if args.len() != 3 { return usage(); }
-      match int(args[2]) {
+      match args[2].toInt() {
         n: int {
           if !tasks.complete(n) {
             io::printerrln("no task " + args[2]);

@@ -191,7 +191,7 @@ TEST(FloatCompare, NaNThroughTupleOptionalAndMatch) {
     t2: (float, int) = (n, 1);
     io::println(Str<bool>(t1 == t2) + " " + Str<bool>(t1 != t2));
     // Two present `float?`s compare their values with ==.
-    f: float? = float<Str>("nan");
+    f: float? = "nan".toFloat();
     io::println(Str<bool>(f == f) + " " + Str<bool>(f != f));
     // A float value match tests each arm with ==: NaN takes the wildcard.
     match n {

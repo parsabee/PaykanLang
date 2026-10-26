@@ -1,7 +1,7 @@
-// Sample 20 — Parsing with int<Str> / float<Str>
+// Sample 20 — Parsing with toInt() / toFloat()
 //
-// int<Str>(s: Str) -> int?    parses a decimal integer string.
-// float<Str>(s: Str) -> float?  parses a floating-point string.
+// s.toInt() -> int?      parses a decimal integer string.
+// s.toFloat() -> float?  parses a floating-point string.
 // Both return None for a string that is not a valid number.  Use match to
 // unwrap the result (the arm binds a plain int / float).  The optionals are
 // values: they print as the number or None and compare by value.
@@ -9,7 +9,7 @@
 import ::io;
 
 fn tryParseInt(s: Str) -> Str {
-  match int<Str>(s) {
+  match s.toInt() {
     n: int {
       return "ok: " + Str<int>(n);
     }
@@ -20,7 +20,7 @@ fn tryParseInt(s: Str) -> Str {
 }
 
 fn tryParseFloat(s: Str) -> Str {
-  match float(s) {
+  match s.toFloat() {
     f: float { return "ok: " + Str(f); }
     None {
       return "invalid: '" + s + "'";
@@ -67,7 +67,7 @@ fn main() -> int {
   total = 0;
   inputs: Str[6] = ["10", "20", "bad", "30", "nope", "40"];
   while i < inputs.len() {
-    if int<Str>(inputs[i]) != None {
+    if inputs[i].toInt() != None {
       total = total + 1;
     }
     i = i + 1;
@@ -77,11 +77,11 @@ fn main() -> int {
   // === printing and comparing the optionals ===
   io::println("=== print / compare ===");
 
-  io::println(int<Str>("7"));
-  io::println(Str(int<Str>("7") == int("7")));
-  io::println(Str(int<Str>("7") == int("8")));
-  io::println(float<Str>("1.5"));
-  io::println(int("nope"));
+  io::println("7".toInt());
+  io::println(Str("7".toInt() == "7".toInt()));
+  io::println(Str("7".toInt() == "8".toInt()));
+  io::println("1.5".toFloat());
+  io::println("nope".toInt());
 
   return 0;
 }
