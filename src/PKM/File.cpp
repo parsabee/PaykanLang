@@ -15,7 +15,6 @@
 #include <atomic>
 #include <cstring>
 #include <fstream>
-#include <iterator>
 #include <random>
 
 namespace paykan::pkm {
@@ -399,12 +398,27 @@ Status writeFileAtomically(const std::filesystem::path &path,
 
 StatusOr<std::vector<uint8_t>>
 readFileBytes(const std::filesystem::path &path) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::file_status status = fs::status(path, ec);
+  if (fs::is_directory(status))
+    return Status::error("'" + path.string() + "' is a directory, not a file");
+  if (fs::exists(status) && !fs::is_regular_file(status))
+    return Status::error("'" + path.string() + "' is not a regular file");
   std::ifstream in(path, std::ios::binary);
   if (!in)
     return Status::error("cannot open '" + path.string() + "'");
-  std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)),
-                             std::istreambuf_iterator<char>());
-  if (in.bad())
+  // The size of the file opened (a writer may rename another over the
+  // path), read with istream::read, which reports a failed read in the
+  // stream's state rather than by throwing.
+  in.seekg(0, std::ios::end);
+  std::streamoff size = in.tellg();
+  in.seekg(0, std::ios::beg);
+  if (!in || size < 0)
+    return Status::error("cannot read '" + path.string() + "'");
+  std::vector<uint8_t> bytes(static_cast<size_t>(size));
+  in.read(reinterpret_cast<char *>(bytes.data()), size);
+  if (in.gcount() != size)
     return Status::error("cannot read '" + path.string() + "'");
   return bytes;
 }

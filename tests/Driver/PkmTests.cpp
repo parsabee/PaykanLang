@@ -668,6 +668,23 @@ TEST(Pkm, CheckReportsTheVerdict) {
   EXPECT_TRUE(contains(noVerb.out, "unknown pkm command")) << noVerb.out;
 }
 
+// A directory is not a module file: every verb says so and exits with 1,
+// never an uncaught std::ios_base::failure (SIGABRT, status 134; finding 33).
+TEST(Pkm, ADirectoryIsNotAModuleFile) {
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_dir_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "d.pkm");
+  const std::string path = (dir / "d.pkm").string();
+  for (const char *verb : {"dump", "check", "extract --object"}) {
+    auto r = run(std::string(kPaykan) + " pkm " + verb + " " + path);
+    EXPECT_EQ(r.exitCode, 1) << verb << ": " << r.out;
+    EXPECT_EQ(r.out, "paykan: '" + path + "' is a directory, not a file\n")
+        << verb;
+  }
+  fs::remove_all(dir);
+}
+
 TEST(Pkm, HelpDocumentsTheFlags) {
   auto r = run(std::string(kPaykan) + " --help");
   ASSERT_EQ(r.exitCode, 0);

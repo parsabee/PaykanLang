@@ -974,6 +974,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output drops only a `.pkn` or `.pk` extension and adds `.out` to a name with neither
   (`noext.out`, `main.pkn.bak.out`); the driver names it, so the backends have no default
   of their own (docs/language/17-the-paykan-command.md, "Commands").
+- `paykan pkm dump`, `pkm check` and `pkm extract --object` aborted on a directory
+  (`terminate called after throwing an instance of 'std::__ios_failure'`, exit status 134).
+  A module file is now read only when it is a regular file, and read whole with
+  `istream::read`, which reports a failed read rather than throwing: `paykan: 'd.pkm' is a
+  directory, not a file`, exit status 1.
 
 ## [0.2.0] - 2026-10-20
 

@@ -351,6 +351,11 @@ TEST(Container, Files) {
   }
   EXPECT_EQ(entries, 1u);
   EXPECT_FALSE(readFileBytes(dir / "missing.pkm"));
+  // A directory is an error, not an exception from the stream (finding 33).
+  StatusOr<std::vector<uint8_t>> ofDir = readFileBytes(dir / "a");
+  ASSERT_FALSE(ofDir);
+  EXPECT_EQ(ofDir.status().message(),
+            "'" + (dir / "a").string() + "' is a directory, not a file");
   fs::remove_all(dir);
 }
 

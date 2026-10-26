@@ -127,6 +127,8 @@ private:
 /// file.
 Status writeFileAtomically(const std::filesystem::path &path,
                            std::span<const uint8_t> bytes);
+/// The bytes of the regular file at @p path; an error for a directory or
+/// any other kind of file, and for one that cannot be read.
 StatusOr<std::vector<uint8_t>> readFileBytes(const std::filesystem::path &path);
 
 } // namespace paykan::pkm
