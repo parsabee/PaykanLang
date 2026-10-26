@@ -348,7 +348,9 @@ adder(1)` is `False`, and two different lambdas are never equal, even with the s
 
 A function type is a [`ValueType`](06-traits.md#valuetype) (`fn keep<T: ValueType>(x: T)`
 takes `square`).  It is not an `Obj`: it cannot be printed, converted to a `Str`, stored
-in an `Obj` slot, matched by class, or given to a `T: Show` or `T: Hashable` bound.  An
+in an `Obj` slot, matched by class, or given to a `T: Show` or `T: Hashable` bound.  Nor
+can a tuple, struct, enum or optional holding one, which does not implement `Show` either
+(`io::println((1, f))` is an error naming the element).  An
 optional function value, `((int) -> int)?`, takes the same 16 bytes: `None` is the value
 with no code.
 
@@ -441,7 +443,7 @@ Output:
 | Capturing a borrow or `self` | a `view` or `inout` parameter or local, a `view fn`'s `self`, a struct method's `self` |
 | Capturing a borrowed variable | `x: inout = k;` then `fn() -> int { return k; }` while `x` is live; a reference a live `view` local views |
 | A lambda body's rule | `break` outside its own loop, a missing `return`, a duplicate parameter |
-| A closure as an object | `io::println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Show` |
+| A closure as an object | `io::println(f)`, `o: Obj = f`, `f.toString()`, `show(f)` with `T: Show`; the same for a tuple, struct or enum holding `f` |
 
 ## Not Yet Supported
 

@@ -605,6 +605,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`StdlibTests`), `paykan build` (`StdlibTestsBuild`, `--build`) and the C `--emit-c`
   prints, compiled with the runtime's sources (`StdlibTestsC`, `--cc <compiler>`).  The
   samples corpus is built at -O0 too (`SamplesParityBuildO0`).
+- A tuple, struct, enum or optional holding a function value does not implement `Show`
+  (*Fixed*): `io::println(S(fn(x: int) => x + k))` for `struct S { f: (int) -> int; }`,
+  `io::println((1, f))`, `E::F(f).toString()` for `enum E { F(h: (int) -> int), N }` and
+  `O(None)` for `struct O { g: ((int) -> int)?; }` compiled and printed the closure's code
+  address and environment (`S(f: (139785902924240, Object@0x55b69d53ee30))`, `O(g: (0,
+  None))`), different on every run.  An aggregate now implements `Show` only when every
+  element, field, variant field and optional's value does (`Sema::hasText`, the one rule
+  for which types show themselves), so these are errors naming the part that does not:
+  `'S' does not implement trait 'Show', which 'io::println' requires of 'T': its field 'f'
+  has type '(int) -> int', which does not implement it`, for a `T: Show` bound,
+  `toString()` (`no method 'toString' on type 'S', which does not implement trait 'Show':
+  ...`) and `impl Show for S {}` (`struct 'S' cannot implement 'Show' (its 'toString' is
+  built in): ...`), through nested aggregates (`its field 's' has type 'S', whose field 'f'
+  has type ...`).  A function value inside an object does not count: the object shows
+  itself through its class.  No program of the standard library, the samples or the docs
+  printed such a value.
 
 ### Removed
 

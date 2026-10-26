@@ -178,6 +178,141 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
 }
 
+// A tuple, struct, enum or optional shows itself when every part does.  A
+// function value does not, so one holding a function value (directly, as an
+// optional, or inside another aggregate) does not implement `Show`: no
+// print function, no `T: Show` bound and no `toString()` takes it, and the
+// message names the part.  They implemented it and printed the closure's
+// code address and environment.
+TEST(Traits, AnAggregateHoldingAFunctionValueIsNotShow) {
+  auto r = semaCheck(R"(import ::io;
+struct S { f: (int) -> int; }
+struct Outer { n: int; s: S; }
+struct O { g: ((int) -> int)?; }
+enum E { F(h: (int) -> int), N }
+enum Maybe<X> { Just(v: X), Nothing }
+fn show<X: Show>(x: view X) -> Str { return x.toString(); }
+fn main() -> int {
+  k = 5;
+  s = S(fn(x: int) => x + k);
+  io::println(s);
+  io::println(s.toString());
+  io::println((1, fn(x: int) => x));
+  io::println((1, s).toString());
+  io::println(Outer(1, s));
+  io::println(O(None).toString());
+  io::println(E::N);
+  io::println(E::N.toString());
+  o: S? = s;
+  io::println(o);
+  io::println(o.toString());
+  io::println(show(s));
+  io::println(Maybe::Just(fn(x: int) => x).toString());
+  of: ((int) -> int)? = None;
+  io::println(of);
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  const std::string fn = "has type '(int) -> int', which does not implement it";
+  for (const std::string &d : std::vector<std::string>{
+           "'S' does not implement trait 'Show', which 'io::println' requires "
+           "of "
+           "'T': its field 'f' " +
+               fn,
+           "no method 'toString' on type 'S', which does not implement trait "
+           "'Show': its field 'f' " +
+               fn,
+           "'(int, (int) -> int)' does not implement trait 'Show', which "
+           "'io::println' requires of 'T': its element 1 " +
+               fn,
+           "no method 'toString' on type '(int, S)', which does not implement "
+           "trait 'Show': its element 1 has type 'S', whose field 'f' " +
+               fn,
+           "'Outer' does not implement trait 'Show', which 'io::println' "
+           "requires "
+           "of 'T': its field 's' has type 'S', whose field 'f' " +
+               fn,
+           "no method 'toString' on type 'O', which does not implement trait "
+           "'Show': its field 'g' has type '((int) -> int)?', which does not "
+           "implement it",
+           "'E' does not implement trait 'Show', which 'io::println' requires "
+           "of "
+           "'T': its field 'h' of variant 'F' " +
+               fn,
+           "no method 'toString' on type 'E', which does not implement trait "
+           "'Show': its field 'h' of variant 'F' " +
+               fn,
+           "'S?' does not implement trait 'Show', which 'io::println' requires "
+           "of "
+           "'T': its field 'f' " +
+               fn,
+           "no method 'toString' on type 'S?', which does not implement trait "
+           "'Show': its field 'f' " +
+               fn,
+           "'S' does not implement trait 'Show', which 'show' requires of 'X': "
+           "its field 'f' " +
+               fn,
+           "no method 'toString' on type 'Maybe<(int) -> int>', which does not "
+           "implement trait 'Show': its field 'v' of variant 'Just' " +
+               fn,
+           "'((int) -> int)?' does not implement trait 'Show', which "
+           "'io::println' requires of 'T'\n"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 13) << r.Diagnostics;
+}
+
+// The aggregates whose parts all show themselves do, through every form:
+// printed, `toString()`, an optional of one, a `T: Show` bound, nested.  A
+// function value inside a class does not matter: an object shows itself
+// through `Obj`.
+TEST(Traits, AnAggregateOfShowPartsIsShow) {
+  auto r = semaCheck(R"(import ::io;
+class Handler { f: (int) -> int; }
+impl Handler { fn __init__() { self.f = fn(x: int) => x; } }
+struct P { x: int; name: Str; h: Handler; }
+struct Q { p: P; at: (float, char?); }
+enum E { A(q: Q), B(n: int?), N }
+enum Maybe<X> { Just(v: X), Nothing }
+fn show<X: Show>(x: view X) -> Str { return x.toString(); }
+fn main() -> int {
+  p = P(1, "p", Handler());
+  q = Q(p, (2.5, None));
+  io::println(p);
+  io::println(q.toString());
+  io::println((1, q));
+  io::println(E::A(q));
+  io::println(E::B(None).toString());
+  o: Q? = None;
+  io::println(o);
+  io::println(o.toString());
+  m: Maybe<Q> = Maybe::Just(q);
+  return show(m).len() + show((p, E::N)).len();
+}
+)");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0) << r.Diagnostics;
+}
+
+// A struct's `toString` is built in, so one with a part that has no text
+// cannot implement `Show` with an impl block; one whose parts all have one
+// already does.
+TEST(Traits, AStructWithoutATextCannotImplementShow) {
+  auto r = semaCheck(R"(struct S { f: (int) -> int; }
+struct P { x: int; }
+impl Show for S {}
+impl Show for P {}
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"struct 'S' cannot implement 'Show' (its 'toString' is built "
+                "in): its field 'f' has type '(int) -> int', which does not "
+                "implement it",
+                "struct 'P' already implements 'Show'"});
+  EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;
+}
+
 // int, bool, char and Str implement `Hashable`: `n.hash()` is an `int`.  A
 // class implements it with an `impl Hashable for` block; float, enums and
 // other classes do not.

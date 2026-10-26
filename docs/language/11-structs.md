@@ -80,7 +80,8 @@ copied around like a number. A struct can be generic, like a class
   `self` **is the receiver's storage**: `p.shift(1)` changes `p`.  A `view fn` reads
   `self` only; a `static fn` is called as `Point::origin()`.
 - `==` / `!=` compare **field by field**; `toString()` (and `io::println`) renders
-  `Point(x: 1, y: 2)`.  Every struct implements `Show` and `ValueType`;
+  `Point(x: 1, y: 2)`.  Every struct implements `ValueType`, and `Show` when each field
+  does (not one holding a function value);
   `impl Hashable for` and user traits work as for classes.
 - Parameter modes work as for tuples: a plain parameter is a copy, `view` reads the
   caller's struct, `inout` is the caller's struct.  A field of a struct variable or field
@@ -440,8 +441,12 @@ struct's name and each field's name and value as its own `toString()` shows it:
 Every struct implements the built-in traits `Show` (its `toString`) and `ValueType` (it
 is held in place), so it meets `T: Show` and `T: ValueType` bounds ([Traits](06-traits.md)), and
 `impl Show for A {}` or `impl ValueType for A {}` is an error (`struct 'A' already
-implements 'Show'`).  `Hashable` and user traits are implemented with `impl Trait for
-Name` blocks, as for a class:
+implements 'Show'`).  A struct with a field that does not implement `Show`, a function
+value or an aggregate holding one, does not either, and cannot, since its `toString` is
+built in: `io::println(s)` and `s.toString()` are errors naming the field (`its field 'f'
+has type '(int) -> int', which does not implement it`), and so is `impl Show for S {}`.
+`Hashable` and user traits are implemented with `impl Trait for Name` blocks, as for a
+class:
 
 ```pkn
 import ::io;

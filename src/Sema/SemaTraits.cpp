@@ -267,19 +267,20 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
   auto isBuiltinTrait = [&](const char *name) {
     return tr.Trait->IsBuiltin && tr.Trait->Decl->getName() == name;
   };
-  // An optional shows itself when its value does: "None", or the value's
-  // text (the builtin `Show`).
-  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
-    return isBuiltinTrait(names::kTraitShow) &&
-                   traitImplOwner(ot->getInnerType(), tr)
-               ? ty
-               : nullptr;
-  // A struct is a ValueType and shows its fields (the builtin `Show`);
-  // anything else, an `impl ... for` block gives it.  Before the tuple
-  // cases, which a struct is too.
+  // An optional shows "None" or its value's text, a tuple its elements, a
+  // struct its fields and an enum its variant and its fields (the builtin
+  // `Show`), when each of them has a text.  Before the struct case.
+  const bool aggregate = ast::isa<ast::OptionalType>(ty) ||
+                         ast::isa<ast::TupleType>(ty) ||
+                         ast::isa<ast::EnumType>(ty);
+  if (aggregate && isBuiltinTrait(names::kTraitShow))
+    return hasText(ty) ? ty : nullptr;
+  if (ast::isa<ast::OptionalType>(ty))
+    return nullptr;
+  // A struct is a ValueType; anything else, an `impl ... for` block gives
+  // it.  Before the tuple cases, which a struct is too.
   if (ast::isa<ast::StructType>(ty)) {
-    if (isBuiltinTrait(names::kTraitValueType) ||
-        isBuiltinTrait(names::kTraitShow))
+    if (isBuiltinTrait(names::kTraitValueType))
       return ty;
     return has(ty) ? ty : nullptr;
   }
@@ -288,11 +289,69 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
        ast::isa<ast::FixedArrayType>(ty) || ast::isa<ast::FunctionType>(ty)) &&
       isBuiltinTrait(names::kTraitValueType))
     return ty;
-  // A tuple shows its elements, an enum its variant and its fields (the
-  // builtin `Show`).
   if (ast::isa<ast::TupleType>(ty) || ast::isa<ast::EnumType>(ty))
-    return isBuiltinTrait(names::kTraitShow) ? ty : nullptr;
+    return nullptr;
   return has(ty) ? ty : nullptr;
+}
+
+bool Sema::hasText(ast::Type *ty, std::string *why) {
+  std::set<const ast::Type *> open;
+  return hasText(ty, why, open);
+}
+
+bool Sema::hasText(ast::Type *ty, std::string *why,
+                   std::set<const ast::Type *> &open) {
+  // An optional has its value's text, and "None".
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return hasText(ot->getInnerType(), why, open);
+  // A type without parts has a text when it implements `Show`: a number,
+  // bool and char, and an object through `Obj`.
+  if (!ast::isa<ast::TupleType>(ty) && !ast::isa<ast::EnumType>(ty)) {
+    const TraitRef show{&Traits.find(names::kTraitShow)->second, {}};
+    return traitImplOwner(ty, show) != nullptr;
+  }
+  // An aggregate already being looked into (one that holds itself, an
+  // error reported where it is declared) decides nothing here.
+  if (!open.insert(ty).second)
+    return true;
+  // Whether @p part, named @p what in @p ty, has a text; if not, *why says
+  // so, then why the part has none: "field 's' has type 'S', whose field
+  // 'f' has type '(int) -> int'".
+  auto partHasText = [&](ast::Type *part, const std::string &what) {
+    std::string inner;
+    if (hasText(part, why ? &inner : nullptr, open))
+      return true;
+    if (why)
+      *why = what + " has type '" + typeName(part) + "'" +
+             (inner.empty() ? "" : ", whose " + inner);
+    return false;
+  };
+  bool ok = true;
+  if (auto *st = ast::dyn_cast<ast::StructType>(ty)) {
+    for (size_t i = 0; ok && i < st->getNumFields(); ++i)
+      ok = partHasText(st->getElementType(i),
+                       "field '" + st->getFieldName(i) + "'");
+  } else if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    for (size_t i = 0; ok && i < tt->getArity(); ++i)
+      ok = partHasText(tt->getElementType(i), "element " + std::to_string(i));
+  } else {
+    auto *et = ast::cast<ast::EnumType>(ty);
+    for (size_t v = 0; ok && v < et->getNumVariants(); ++v)
+      if (const ast::StructType *p = et->getPayload(v))
+        for (size_t i = 0; ok && i < p->getNumFields(); ++i)
+          ok = partHasText(p->getElementType(i),
+                           "field '" + p->getFieldName(i) + "' of variant '" +
+                               *et->getVariants()[v] + "'");
+  }
+  open.erase(ty);
+  return ok;
+}
+
+std::string Sema::noTextReason(ast::Type *ty) {
+  std::string why;
+  if (hasText(ty, &why) || why.empty())
+    return "";
+  return "its " + why + ", which does not implement it";
 }
 
 bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
@@ -318,6 +377,15 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
                    ? ""
                    : " (through '" + typeName(const_cast<ast::Type *>(owner)) +
                          "')"));
+    return false;
+  }
+  // A struct's `toString` is built in: one that does not show itself has a
+  // part with no text, and cannot have one.
+  if (ast::isa<ast::StructType>(ty) && tr->Trait->IsBuiltin &&
+      tr->Trait->Decl->getName() == names::kTraitShow) {
+    error(im->getLocation(),
+          "struct '" + name + "' cannot implement '" + trait +
+              "' (its 'toString' is built in): " + noTextReason(ty));
     return false;
   }
   // Recorded even if a requirement is not met, which is reported here, so
@@ -442,9 +510,16 @@ bool Sema::checkBounds(const ast::Decl *tmpl, const std::string &name,
         continue;
       }
       if (!traitImplOwner(args[i], *tr)) {
+        // A tuple, struct, enum or optional that does not show itself names
+        // the part that does not.
+        std::string why;
+        if (tr->Trait->IsBuiltin &&
+            tr->Trait->Decl->getName() == names::kTraitShow)
+          why = noTextReason(args[i]);
         error(loc, "'" + typeName(args[i]) + "' does not implement trait '" +
                        traitRefName(*tr) + "', which '" + displayName(name) +
-                       "' requires of '" + *params[i] + "'");
+                       "' requires of '" + *params[i] + "'" +
+                       (why.empty() ? "" : ": " + why));
         ok = false;
       }
     }

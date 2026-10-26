@@ -91,8 +91,12 @@ You use a built-in trait every time you print: `io::println` is declared
   `float`, `bool`, `char` and every sized numeric type (`n.toString()` is `Str(n)`), tuples (`(1, "a").toString()`
   is `(1, a)`), structs (`Point(x: 1, y: 2)`), enums (the variant's name, `North`, and a
   variant's fields after it, `Rect(w: 2, h: 3)`) and the optional of a `Show` type
-  (`"None"` or the value's text). The standard library's print functions
-  (`io::println<T: Show>`) take any `Show` value.
+  (`"None"` or the value's text). A tuple, struct or enum implements it only when every
+  element, field and variant field does: a function value does not, so `struct S { f: (int)
+  -> int; }` is not `Show` (`'S' does not implement trait 'Show', which 'io::println'
+  requires of 'T': its field 'f' has type '(int) -> int', which does not implement it`, and
+  `s.toString()` is an error), nor is `(1, f)` or an enum with such a variant. The
+  standard library's print functions (`io::println<T: Show>`) take any `Show` value.
 - The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
   `char` and `Str`, every sized integer type, and by a class or a struct with an
   `impl Hashable for` block. The standard library's hash tables take `Hashable` keys (see
@@ -266,6 +270,7 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 | Implemented twice | The class, or a superclass, already implements the trait (every class implements `Show`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
 | Unmet bound | A type argument does not implement a trait its parameter is bounded by |
+| Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Show for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |
 | Trait as a type | A trait is used where a type is expected |
 
 ## Not Supported Yet

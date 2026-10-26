@@ -420,6 +420,14 @@ void Sema::errorOptionalUnwrap(ast::SourceLocation loc,
                  "' without unwrapping (use match)");
 }
 
+void Sema::errorNoToString(ast::SourceLocation loc, ast::Type *ty,
+                           const std::string &why) {
+  error(loc, "no method '" + std::string(names::kMethodToString) +
+                 "' on type '" + typeName(ty) +
+                 "', which does not implement trait '" + names::kTraitShow +
+                 "'" + (why.empty() ? "" : ": " + why));
+}
+
 /// The alignment of a value of @p ty held in memory: a scalar's or a box's
 /// is its size, an optional value's its payload's, an array's its element's,
 /// a tuple's its most aligned element's.
@@ -2075,17 +2083,19 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     return nullptr;
 
   // A method cannot be called on an optional receiver (it may be None),
-  // but for the builtin `Show`'s `toString()` of an optional object or
-  // scalar: "None", or its value's text.
+  // but for the builtin `Show`'s `toString()` of an optional whose value
+  // has a text: "None", or the value's text.
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
-    ast::Type *inner = ot->getInnerType();
     if (node->getMethodName() == names::kMethodToString &&
-        node->getNumArguments() == 0 &&
-        (ast::isa<ast::ClassType>(inner) || ast::isa<ast::TupleType>(inner) ||
-         ast::isa<ast::EnumType>(inner) ||
-         (ast::isa<ast::BuiltinType>(inner) && inner != S.Ctx.getVoidTy()))) {
-      node->setResolvedType(S.Ctx.getStrTy());
-      return S.Ctx.getStrTy();
+        node->getNumArguments() == 0) {
+      if (S.hasText(ot)) {
+        node->setResolvedType(S.Ctx.getStrTy());
+        return S.Ctx.getStrTy();
+      }
+      if (std::string why = S.noTextReason(ot); !why.empty()) {
+        S.errorNoToString(node->getLocation(), ot, why);
+        return nullptr;
+      }
     }
     S.errorOptionalUnwrap(node->getLocation(), ot);
     return nullptr;
@@ -2113,22 +2123,27 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   ast::StructType *st = ast::dyn_cast<ast::StructType>(recvTy);
 
   // `n.toString()` on an int, float, bool or char, on a tuple or a struct,
-  // or on an enum (its variant, and its fields): the builtin `Show`;
-  // `n.hash()` on an int, bool or char, and `s.hash()` on a Str: the builtin
-  // `Hashable`.
+  // or on an enum (its variant, and its fields), each part of which has a
+  // text: the builtin `Show`; `n.hash()` on an int, bool or char, and
+  // `s.hash()` on a Str: the builtin `Hashable`.
   const std::string &mname = node->getMethodName();
   ast::Type *builtinResult = nullptr;
   if (!ct &&
       ((ast::isa<ast::BuiltinType>(recvTy) && recvTy != S.Ctx.getVoidTy()) ||
        ast::isa<ast::TupleType>(recvTy) || ast::isa<ast::EnumType>(recvTy)) &&
-      mname == names::kMethodToString)
+      mname == names::kMethodToString) {
+    if (!S.hasText(recvTy)) {
+      S.errorNoToString(node->getLocation(), recvTy, S.noTextReason(recvTy));
+      return nullptr;
+    }
     builtinResult = S.Ctx.getStrTy();
-  else if (mname == names::kMethodHash &&
-           ((ast::isa<ast::BuiltinType>(recvTy) &&
-             (ast::cast<ast::BuiltinType>(recvTy)->isInteger() ||
-              recvTy == S.Ctx.getBoolTy() || recvTy == S.Ctx.getCharTy())) ||
-            ct == S.Ctx.getStrTy()))
+  } else if (mname == names::kMethodHash &&
+             ((ast::isa<ast::BuiltinType>(recvTy) &&
+               (ast::cast<ast::BuiltinType>(recvTy)->isInteger() ||
+                recvTy == S.Ctx.getBoolTy() || recvTy == S.Ctx.getCharTy())) ||
+              ct == S.Ctx.getStrTy())) {
     builtinResult = S.Ctx.getIntTy();
+  }
   if (builtinResult) {
     if (node->getNumArguments() != 0) {
       S.error(node->getLocation(), "method '" + mname +

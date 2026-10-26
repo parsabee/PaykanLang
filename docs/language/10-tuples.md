@@ -389,7 +389,10 @@ A tuple's `toString()` shows each element through its own `toString()`:
 `None` for an absent optional, an object through its class's `toString`.  A
 tuple meets a `Show` bound (`fn show<T: Show>(x: view T)`, see
 [Traits](06-traits.md)), as `int` does, so `::io`'s `print`, `println`, `printerr`
-and `printerrln` (each `fn println<T: Show>(value: view T)`) print one.
+and `printerrln` (each `fn println<T: Show>(value: view T)`) print one.  A tuple
+with an element that does not implement `Show`, a function value, does not
+either: `io::println((1, f))` and `(1, f).toString()` are errors naming the
+element (`its element 1 has type '(int) -> int', which does not implement it`).
 
 Comparison is element-wise even when both sides are the same variable;
 there is no identity shortcut.  So `float` elements follow IEEE 754: a tuple

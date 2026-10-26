@@ -418,6 +418,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // Emit the unwrap diagnostic for an operation that is not defined on an
   // optional value (member access, method call, subscript, arithmetic, …).
   void errorOptionalUnwrap(ast::SourceLocation loc, ast::OptionalType *optTy);
+  /// Report `x.toString()` on @p ty, a tuple, struct, enum or optional with
+  /// no text, @p why being noTextReason's.
+  void errorNoToString(ast::SourceLocation loc, ast::Type *ty,
+                       const std::string &why);
 
   // Returns the lowest common ancestor in the class hierarchy of two class
   // types, or nullptr if they share no common ancestor.
@@ -1580,6 +1584,23 @@ private:
   /// The type whose implementation of @p tr @p ty has (itself or, for a
   /// class, a superclass); nullptr if it does not implement it.
   const ast::Type *traitImplOwner(ast::Type *ty, const TraitRef &tr);
+  /// Whether @p ty has a text: implements the builtin `Show`, whose
+  /// `toString()` the print functions call.  A number, bool, char and
+  /// object have one; a tuple, struct, enum or optional has one when every
+  /// element, field, variant field or value does, so one holding a function
+  /// value (which has none) has none.  Every rule about which types show
+  /// themselves asks this.  When it has none, @p why (if given) says which
+  /// part has none, from @p ty down ("field 'f' has type '(int) -> int'"),
+  /// or is empty for a type without parts.
+  bool hasText(ast::Type *ty, std::string *why = nullptr);
+  /// hasText, inside the aggregates in @p open (the cycle guard).
+  bool hasText(ast::Type *ty, std::string *why,
+               std::set<const ast::Type *> &open);
+  /// The end of a message that @p ty, which has no text, does not implement
+  /// `Show`: "its field 'f' has type '(int) -> int', which does not
+  /// implement it", naming the part that has none (hasText); "" for a type
+  /// without parts.
+  std::string noTextReason(ast::Type *ty);
   /// Record `impl Trait for A` (@p ty, a class or a struct) and check that
   /// A has every method the trait requires, with its signature.
   bool checkTraitImpl(ast::ImplDecl *im, ast::Type *ty);

@@ -429,7 +429,10 @@ the ones every `match` arm has ([Borrowing the subject](08-match.md#borrowing-th
 ### Text and equality
 
 `toString()`, and so `io::println`, gives the variant's name followed by its fields as a struct
-shows them, `Rect(w: 2, h: 3)`, or the bare name for a variant without fields, `Empty`. `==`
+shows them, `Rect(w: 2, h: 3)`, or the bare name for a variant without fields, `Empty`. An
+enum with a variant field that does not implement `Show`, a function value, does not either,
+whatever its value's variant: `io::println(e)` and `e.toString()` are errors naming the field
+(`its field 'h' of variant 'F' has type '(int) -> int', which does not implement it`). `==`
 and `!=` compare two values of the same tagged union: equal when they are the same variant
 with equal fields (compared as a struct's are: a `Str` by its text, an object by its
 `equals`). As for any enum, there is no ordering.
