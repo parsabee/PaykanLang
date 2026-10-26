@@ -2440,10 +2440,14 @@ Expr *Parser::parseUnary() {
     const Tok op = kind();
     const SourceLocation opLoc = consume().Loc;
     // `mov` is retired (#145), and reported at once, so that its error comes
-    // before any in the operand (`mov mov s`), in source order.  The operand
-    // still parses, and becomes the expression.
-    if (op == Tok::KwMov)
+    // before any in the operand, in source order.  A run of them (`mov mov
+    // s`) is the one error.  The operand still parses, and becomes the
+    // expression.
+    if (op == Tok::KwMov) {
       error(opLoc, std::string(kMovRemoved));
+      while (at(Tok::KwMov))
+        consume();
+    }
     Expr *operand = parseUnary();
     leaveNesting();
     if (!operand || op == Tok::KwMov)

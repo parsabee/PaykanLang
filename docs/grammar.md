@@ -505,8 +505,9 @@ branch may be another ternary without them.
 
 `mov` is reserved but no longer part of the grammar (removed in v0.2.0).
 A frontend reports `'mov' was removed in v0.2.0; ownership transfers are
-inferred` (`frontend::kMovRemoved`) once per use and keeps parsing the
-operand after it, so that is the only error.
+inferred` (`frontend::kMovRemoved`) once per use, and once for a run of
+them (`mov mov s`), and keeps parsing the operand after it, so that is the
+only error.
 
 A parenthesised expression is just the inner expression (no node is
 created); `(a)` is a 1-tuple nowhere. A tuple literal has at least two

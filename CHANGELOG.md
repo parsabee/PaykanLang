@@ -995,7 +995,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outer one (1:33), though every frontend reports its errors in source order
   (docs/grammar.md section 9), and `mov` before an operand that does not parse (`b = mov
   ;`) was not reported at all.  The removal is now reported at the `mov`, before its
-  operand is parsed.
+  operand is parsed, and a run of them (`mov mov s`), which was an error a `mov`, is one
+  error at the first.
 - `impl Box<int> { }` was `error: expected a type parameter name in 'impl Box<...>', not
   the type 'int'` with no position, so no file, line or caret: a builtin type (`int`,
   `Str`, ...) in a type parameter's place has no location of its own.  It is now reported
