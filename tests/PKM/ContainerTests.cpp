@@ -338,6 +338,13 @@ TEST(Container, Files) {
   fs::remove_all(dir);
   fs::path file = dir / "a" / "b.pkm";
   std::vector<uint8_t> b = minimalFileBytes();
+  // The directory must exist: the file's writer makes none.
+  Status missing = writeFileAtomically(file, b);
+  ASSERT_FALSE(missing);
+  EXPECT_EQ(missing.message(),
+            "the directory '" + (dir / "a").string() + "' does not exist");
+  EXPECT_FALSE(fs::exists(dir));
+  fs::create_directories(dir / "a");
   Status s = writeFileAtomically(file, b);
   ASSERT_TRUE(s) << s.message();
   StatusOr<std::vector<uint8_t>> back = readFileBytes(file);

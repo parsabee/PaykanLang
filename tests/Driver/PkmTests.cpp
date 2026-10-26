@@ -492,6 +492,7 @@ TEST(Pkm, PrebuiltModuleReplacesItsSourceOnEveryBackend) {
 TEST(Pkm, PrebuiltModulesAreFoundOnTheModulePath) {
   REQUIRE_BACKEND();
   Project p("modulepath");
+  fs::create_directories(p.Dir / "lib");
   ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
                 " --emit-pkm base.pkn -o lib/base.pkm")
                 .exitCode,
@@ -593,6 +594,7 @@ TEST(Pkm, EmitPkmAndDump) {
             "  fn __init__(w: int, h: int) { self.w = w; self.h = h; } }\n"
             "fn describe(r: Rect) -> Str { return \"rect\"; }\n");
   // A nested module named by its path from the project root.
+  fs::create_directories(p.Dir / "out");
   auto emit = run("cd " + p.Dir.string() + " && " + paykanCmd() +
                   " --emit-pkm geometry/shapes.pkn -o out/shapes.pkm");
   ASSERT_EQ(emit.exitCode, 0) << emit.out;
@@ -1615,6 +1617,7 @@ TEST(Pkm, ModuleNameNamesTheEmittedModule) {
   writeFile(dir / "src" / "shapes.pkn", "fn area() -> int { return 6; }\n");
   writeFile(dir / "main.pkn", "import geometry::shapes;\n"
                               "fn main() -> int { return shapes::area(); }\n");
+  fs::create_directories(dir / "geometry");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
   };

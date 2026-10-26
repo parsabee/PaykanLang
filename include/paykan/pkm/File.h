@@ -122,9 +122,8 @@ private:
   std::vector<Pending> Pendings;
 };
 
-/// Writes through a temporary file in the same directory and a rename
-/// (creating the parent directories), so a reader never sees a partial
-/// file.
+/// Writes through a temporary file in the same directory and a rename, so
+/// a reader never sees a partial file.  The directory must exist.
 Status writeFileAtomically(const std::filesystem::path &path,
                            std::span<const uint8_t> bytes);
 /// The bytes of the regular file at @p path; an error for a directory or

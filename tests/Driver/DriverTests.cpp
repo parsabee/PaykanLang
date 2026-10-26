@@ -2451,3 +2451,21 @@ TEST(Driver, PkmExtractNeverWritesOverTheModuleFile) {
   EXPECT_EQ(slurp(dir / "mod.o"), pkm);
   std::filesystem::remove_all(dir);
 }
+
+// `--emit-pkm -o` writes into a directory that exists, as `build -o` and
+// `pkm extract -o` do, and makes none (new-F5-1): only the module cache
+// makes its own.
+TEST(Driver, EmitPkmMakesNoDirectory) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("emitpkm_nodir");
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                       " --emit-pkm lib.pkn -o nd/sub/x.pkm 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_EQ(out, "paykan: cannot write nd/sub/x.pkm: the directory 'nd/sub' "
+                 "does not exist\n");
+  EXPECT_FALSE(std::filesystem::exists(dir / "nd"));
+  std::filesystem::remove_all(dir);
+}
+

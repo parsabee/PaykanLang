@@ -988,6 +988,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   '1bad/x.pkn' after its path: '1bad' is not an identifier (name it with --module-name)`,
   exit status 1.  An absolute path, or one that goes up (`../shapes.pkn`), still names the
   module by its file name (docs/language/17-the-paykan-command.md, `--emit-pkm`).
+- `--emit-pkm -o <path>` made every missing directory of the path, even at the file
+  system's root (`-o /nonexistent/x.pkm` made `/nonexistent`), where `build -o` and `pkm
+  extract -o` fail.  Only the module cache makes its directories now: `paykan: cannot write
+  nd/sub/x.pkm: the directory 'nd/sub' does not exist`, exit status 1.  The standard
+  library's build makes its staging directory before it writes the modules there.
 
 ## [0.2.0] - 2026-10-20
 

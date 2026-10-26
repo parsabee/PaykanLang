@@ -363,13 +363,9 @@ Status writeFileAtomically(const std::filesystem::path &path,
                            std::span<const uint8_t> bytes) {
   namespace fs = std::filesystem;
   std::error_code ec;
-  fs::path dir = path.parent_path();
-  if (!dir.empty()) {
-    fs::create_directories(dir, ec);
-    if (ec)
-      return Status::error("cannot create directory '" + dir.string() +
-                           "': " + ec.message());
-  }
+  if (fs::path dir = path.parent_path();
+      !dir.empty() && !fs::is_directory(dir, ec))
+    return Status::error("the directory '" + dir.string() + "' does not exist");
   // Unique per process and call, so concurrent writers of one cache entry
   // never share a temporary (a crash leaves a stray .tmp, never a partial
   // module file).

@@ -592,7 +592,16 @@ void ModuleResolver::writeCacheEntry(const std::string &canonical,
   StatusOr<std::vector<uint8_t>> bytes =
       encodeFile(canonical, entry.Iface, entry.Deps, entry.SourceBytes, code,
                  entry.Tmpl, object);
-  Status s = bytes ? pkm::writeFileAtomically(path, *bytes) : bytes.status();
+  Status s = bytes.status();
+  if (bytes) {
+    // The cache makes its own directories (an entry of `a::b` is a/b.pkm).
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    s = ec ? Status::error("cannot create directory '" +
+                           relativeToRoot(path.parent_path()) +
+                           "': " + ec.message())
+           : pkm::writeFileAtomically(path, *bytes);
+  }
   log("module " + canonical + ": " +
       (s ? "wrote " + relativeToRoot(path)
          : "cannot write " + relativeToRoot(path) + ": " + s.message()));
