@@ -1637,9 +1637,20 @@ private:
   /// part has none, from @p ty down ("field 'f' has type '(int) -> int'"),
   /// or is empty for a type without parts.
   bool hasText(ast::Type *ty, std::string *why = nullptr);
-  /// hasText, inside the aggregates in @p open (the cycle guard).
-  bool hasText(ast::Type *ty, std::string *why,
-               std::set<const ast::Type *> &open);
+  /// The aggregates one hasText question looks into: the ones it is still
+  /// deciding (the cycle guard, which takes one that holds itself to have
+  /// a text: its error is reported where it is declared), and the ones it
+  /// decided, each with why it has no text if it has none, so that an
+  /// aggregate reached by many paths is looked into once.
+  struct TextQuery {
+    std::set<const ast::Type *> Open;
+    std::unordered_map<const ast::Type *, std::optional<std::string>> Decided;
+    /// How many times the cycle guard answered: a text decided after it
+    /// answered may rest on it, and is not kept in Decided.
+    unsigned Assumed = 0;
+  };
+  /// hasText, as part of @p query.
+  bool hasText(ast::Type *ty, std::string *why, TextQuery &query);
   /// The end of a message that @p ty, which has no text, does not implement
   /// `Show`: "its field 'f' has type '(int) -> int', which does not
   /// implement it", naming the part that has none (hasText); "" for a type
