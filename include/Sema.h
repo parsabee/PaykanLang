@@ -1689,7 +1689,8 @@ private:
   /// parameter @p param to implement @p trait, a trait of that module,
   /// @p module (#147).  At this module's own request of the instantiation
   /// that led to @p loc, when one is on InstantiationStack; at @p loc
-  /// otherwise.  Once per place, template and trait (ReportedForeignBounds).
+  /// otherwise.  Once per place, template, type parameter and trait
+  /// (ReportedForeignBounds).
   void reportForeignTraitBound(const std::string &tmpl,
                                const std::string &param,
                                const std::string &trait,

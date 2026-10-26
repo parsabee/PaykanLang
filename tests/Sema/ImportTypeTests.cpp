@@ -695,17 +695,20 @@ fn main() -> int {
 
 // A template of another module bounded by that module's own trait, directly
 // or through a template its body uses, cannot be instantiated here (#147):
-// reported where this module asks for the instantiation, once, and never
-// satisfied by this module's trait of the same name.  A chain of the
-// module's templates too deep for that request to be known is reported in
-// the module's file.  A built-in bound, a non-generic function and the
-// module's own code are unaffected.
+// reported where this module asks for the instantiation, once for each type
+// parameter, and never satisfied by this module's trait of the same name,
+// whether the template is a function, a class, a struct or an enum and the
+// trait generic or not.  A chain of templates too deep for that request to
+// be known (two of the module's, or one of a third module's calling one of
+// it) is reported in the module's file.  A built-in bound, a non-generic
+// function and the module's own code are unaffected.
 TEST(Module, ForeignTraitBound) {
   auto tmp = paykan::test::tempDir() / "pkn_ms_foreign_bound";
   std::filesystem::remove_all(tmp);
   const std::string t27 = (tmp / "t27").string();
   const std::string defer = (tmp / "defer").string();
   const std::string deep = (tmp / "deep").string();
+  const std::string cap = (tmp / "cap").string();
   const std::string kTraitLib = R"(trait Named { view fn name() -> Str; }
 class Dog { view fn name() -> Str { return "Rex"; } }
 impl Named for Dog {}
@@ -737,6 +740,17 @@ fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
 fn w2<T>(x: T) -> Str { return greet(Dog()); }
 fn w1<T>(x: T) -> Str { return w2(x); }
 )");
+  writeFile(t27, "lib2.pkn", R"(import lib;
+fn go<T>(x: T) -> Str { return lib::wrap(x); }
+)");
+  writeFile(cap, "lib.pkn", R"(trait Named { view fn name() -> Str; }
+trait Conv<U> { view fn conv() -> U; }
+class Gen<T: Named> { v: T; }
+struct SW<T: Named> { v: T; }
+enum EW<T: Named> { A(v: T), B }
+fn cv<T: Conv<int>>(x: view T) -> int { return x.conv(); }
+fn two<A: Named, B: Named>(a: view A, b: view B) -> Str { return a.name() + b.name(); }
+)");
   const std::string kImporterTrait = R"(import ::io;
 import lib;
 trait Named { view fn name() -> Str; }
@@ -755,9 +769,14 @@ fn main() -> int { io::println(lib::greet(Cat())); return 0; }
   struct Case {
     std::string Dir, File, Source, Expected;
   };
-  const std::string kRequires =
-      "requires 'T' to implement trait 'Named' of module 'lib', and another "
-      "module's traits are not supported yet (#147)\n";
+  auto needs = [](const std::string &param, const std::string &trait) {
+    return "requires '" + param + "' to implement trait '" + trait +
+           "' of module 'lib', and another module's traits are not supported "
+           "yet (#147)\n";
+  };
+  const std::string kRequires = needs("T", "Named");
+  const std::string kOtherNamed =
+      "c1.pkn:2:1: note: this module's trait 'Named' is a different trait\n";
   const Case cases[] = {
       {t27, "b.pkn",
        "import ::io;\nimport lib;\nfn main() -> int { "
@@ -827,6 +846,37 @@ fn main() -> int { io::println(lib::greet(Cat())); return 0; }
        "lib.pkn:5:32: error: 'lib::greet' " + kRequires +
            "lib.pkn:6:32: note: in instantiation of 'lib::w2<int>' requested "
            "here\n"},
+      // So is a request of wrap by a third module's template.
+      {t27, "chain.pkn",
+       "import ::io;\nimport lib2;\nfn main() -> int { "
+       "io::println(lib2::go(1)); return 0; }\n",
+       "lib.pkn:5:34: error: 'lib::greet' " + kRequires +
+           "lib2.pkn:2:32: note: in instantiation of 'lib::wrap<int>' "
+           "requested here\n"},
+      // This module's trait of that name satisfies no bound of a class, a
+      // struct or an enum of lib either, and each parameter is reported.
+      {cap, "c1.pkn",
+       "import lib;\ntrait Named { view fn name() -> Str; }\n"
+       "class Cat { view fn name() -> Str { return \"Tom\"; } }\n"
+       "impl Named for Cat {}\nclass Hold { a: lib::Gen<Cat>; }\n"
+       "fn main() -> int {\n  s = lib::SW<Cat>(Cat());\n"
+       "  e = lib::EW<Cat>::B;\n  t = lib::two(Cat(), Cat());\n"
+       "  return 0;\n}\n",
+       "c1.pkn:5:14: error: 'lib::Gen' " + needs("T", "Named") + kOtherNamed +
+           "c1.pkn:7:7: error: 'lib::SW' " + needs("T", "Named") + kOtherNamed +
+           "c1.pkn:8:7: error: 'lib::EW' " + needs("T", "Named") + kOtherNamed +
+           "c1.pkn:9:7: error: 'lib::two' " + needs("A", "Named") +
+           kOtherNamed + "c1.pkn:9:7: error: 'lib::two' " +
+           needs("B", "Named") + kOtherNamed},
+      // Nor does a generic trait of that name.
+      {cap, "c2.pkn",
+       "import lib;\ntrait Conv<U> { view fn conv() -> U; }\n"
+       "class Cat { view fn conv() -> int { return 3; } }\n"
+       "impl Conv<int> for Cat {}\n"
+       "fn main() -> int { return lib::cv(Cat()); }\n",
+       "c2.pkn:5:27: error: 'lib::cv' " + needs("T", "Conv") +
+           "c2.pkn:2:1: note: this module's trait 'Conv' is a different "
+           "trait\n"},
   };
   for (const Case &c : cases) {
     auto r = semaCheckFile(writeFile(c.Dir, c.File, c.Source), c.Dir);

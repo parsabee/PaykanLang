@@ -1294,7 +1294,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to implement trait 'Named' of module 'lib', and another module's traits are not
   supported yet (#147)`, with a note at the use (docs/language/06-traits.md, "Not
   Supported Yet").  Before, it was `unknown trait 'Named'`, for a use inside the module in
-  the very file that declares `Named`.
+  the very file that declares `Named`.  A use two templates deep or more (a generic
+  function of `lib` calling one that calls `greet`, or a template of a third module
+  calling `lib::wrap`) is still reported at the use in lib's file, with the note of the
+  nearest request only, as an instantiation waiting to be checked keeps only that one.
 - A bound error that waited for the `impl` blocks to be known (a class field's type that
   instantiates another module's template, whose field instantiates a bounded one) showed
   that template's line under the importer's file name, with no instantiation note:

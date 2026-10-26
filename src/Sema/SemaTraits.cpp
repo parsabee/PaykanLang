@@ -642,12 +642,13 @@ void Sema::reportForeignTraitBound(const std::string &tmpl,
          it != InstantiationStack.rend() && !own; ++it)
       if (it->Lines == OwnSourceLines && it->File == OwnSourceName)
         own = &*it;
-  // Once per place: a body that uses the template twice is one request.
+  // Once per place and type parameter: a body that uses the template twice
+  // is one request.
   const ast::SourceLocation at = own ? own->RequestLoc : loc;
   const std::string key = (own ? own->File : Diags.getSourceName()) + '\0' +
                           std::to_string(at.getLineStart()) + ':' +
                           std::to_string(at.getColumnStart()) + '\0' + shown +
-                          '\0' + trait;
+                          '\0' + param + '\0' + trait;
   if (!ReportedForeignBounds.insert(key).second) {
     ++SuppressedFollowOns;
     return;

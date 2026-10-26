@@ -357,11 +357,14 @@ lib.pkn:10:34: note: 'lib::greet' is used here
 ```
 
 Calling `lib::greet` itself is reported at the call: `'lib::greet' requires 'T' to
-implement trait 'Named' of module 'lib', ...`, and so is a use deeper in the module (a
-generic function of it calling one that calls `greet`), at the use in the module's file,
-with the instantiation notes. A trait the importer declares under the same name is
-another trait, and never satisfies such a bound. An `impl Named for Box<T>` block of the
-module gives an importer's `lib::Box<Str>` its methods, not the trait.
+implement trait 'Named' of module 'lib', ...`. So is a use two templates deep or more (a
+generic function of `lib` calling one that calls `greet`, or a template of a third module
+calling `lib::wrap`), at the use in `lib`'s file, with the note of the nearest request
+only: the compiler keeps no request further out for an instantiation it checks later, so
+no line of the error may be in the importer's file. A trait the importer declares under
+the same name is another trait, and never satisfies such a bound, of a function, a class,
+a struct or an enum. An `impl Named for Box<T>` block of the module gives an importer's
+`lib::Box<Str>` its methods, not the trait.
 
 Also not supported yet: `impl ... for` a built-in type, an enum or a class of another
 module, default methods, `static fn` requirements, and trait objects.
