@@ -2021,11 +2021,14 @@ bool Sema::inferTypeArgs(const std::string &templateName,
                          ast::SourceLocation loc, std::vector<ast::Type *> &out,
                          const std::string &spelling, ast::Type *resultPattern,
                          ast::Type *expected) {
+  // Named as the program spells it, not by another module's hidden
+  // qualifier (the name of a call in its template).
+  const std::string shown = displayName(templateName);
   const std::string hint =
       "specify the type arguments explicitly: '" +
-      (spelling.empty() ? templateName + "<...>(...)" : spelling) + "'";
+      (spelling.empty() ? shown + "<...>(...)" : spelling) + "'";
   if (paramTypes.size() != argTypes.size()) {
-    error(loc, "cannot infer the type arguments of '" + templateName +
+    error(loc, "cannot infer the type arguments of '" + shown +
                    "': it expects " + std::to_string(paramTypes.size()) +
                    " argument(s), got " + std::to_string(argTypes.size()));
     return false;
@@ -2039,9 +2042,8 @@ bool Sema::inferTypeArgs(const std::string &templateName,
   for (size_t i = 0; i < paramTypes.size(); ++i) {
     if (!unifyTypes(paramTypes[i], argTypes[i], params, bindings, conflict)) {
       error(loc, "cannot infer type parameter '" + conflict.Param + "' of '" +
-                     templateName + "': deduced as both '" +
-                     typeName(conflict.First) + "' and '" +
-                     typeName(conflict.Second) + "'");
+                     shown + "': deduced as both '" + typeName(conflict.First) +
+                     "' and '" + typeName(conflict.Second) + "'");
       note(loc, hint);
       return false;
     }
@@ -2059,8 +2061,8 @@ bool Sema::inferTypeArgs(const std::string &templateName,
   for (auto *p : typeParams) {
     auto it = bindings.find(*p);
     if (it == bindings.end()) {
-      error(loc, "cannot infer type parameter '" + *p + "' of '" +
-                     templateName + "' from the call arguments");
+      error(loc, "cannot infer type parameter '" + *p + "' of '" + shown +
+                     "' from the call arguments");
       note(loc, hint);
       return false;
     }
@@ -2080,7 +2082,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   for (size_t i = 0; i < node->getTypeArgs().size(); ++i) {
     auto *t = resolveType(node->getTypeArgs()[i], loc,
                           "type argument " + std::to_string(i + 1) + " of '" +
-                              callee + "'");
+                              displayName(callee) + "'");
     if (!t)
       return false;
     typeArgs.push_back(t);
@@ -2199,10 +2201,10 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     const std::string member = callee.substr(sep + 2);
     const bool isClass = ClassTemplates.count(owner) != 0;
     if (typeArgs.empty()) {
-      error(loc, "'" + callee + "' is a function of the generic " +
-                     (isClass ? "class" : "struct") + " '" + owner +
-                     "': write '" + owner + "<...>::" + member +
-                     "(...)' with its type arguments");
+      error(loc, "'" + displayName(callee) + "' is a function of the generic " +
+                     (isClass ? "class" : "struct") + " '" +
+                     displayName(owner) + "': write '" + displayName(owner) +
+                     "<...>::" + member + "(...)' with its type arguments");
       return false;
     }
     std::string instName;

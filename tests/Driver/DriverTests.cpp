@@ -1793,6 +1793,52 @@ TEST(Driver, AQualifierClashNamesEachModuleCanonically) {
   std::filesystem::remove_all(dir);
 }
 
+// Finding 99: an error in an imported module's template, reported at its
+// instantiation, names the module's generic enum, its variants and its
+// generic functions as the program spells them (`lib::g::R::Ok`), not by
+// the module's hidden qualifier (`$lib::g::R::Ok`).
+TEST(Driver, ErrorsInAnImportedTemplateNameItsGenericsPlainly) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_hidden_names_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "lib");
+  std::ofstream(dir / "lib" / "g.pkn")
+      << "enum R<T> { Ok(v: T), No }\n"
+         "fn wrap<T>(s: view T) -> R<T> => R::Ok(s);\n"
+         "fn bad<T>(x: T) -> R<int> => R::Ok(x);\n"
+         "fn none<T>(x: T) -> R<T> => R::No(x);\n"
+         "fn pick<U>() -> int => 0;\n"
+         "fn infer<T>(x: T) -> int => pick();\n"
+         "fn guess<T>(x: T) -> int { r = R::No; return 0; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import lib::g;\nfn main() -> int {\n  a = g::wrap(\"x\");\n"
+         "  b = g::bad(\"y\");\n  c = g::none(1);\n  d = g::infer(2);\n"
+         "  e = g::guess(3);\n  return 0;\n}\n";
+  auto r = run("cd " + dir.string() + " && " + std::string(kPaykan) +
+               " --no-module-cache --check-only main.pkn 2>&1");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  for (const char *message :
+       {"lib/g.pkn:2:40: error: 's' is a 'view' parameter; it can only be "
+        "passed to a 'view' parameter, and parameter 1 of 'lib::g::R::Ok' is "
+        "not one",
+        "lib/g.pkn:3:36: error: field 'v' of 'lib::g::R::Ok' has type 'int', "
+        "got 'Str'",
+        "lib/g.pkn:4:29: error: variant 'No' of enum 'R<int>' has no fields: "
+        "write 'lib::g::R::No' without arguments",
+        "lib/g.pkn:6:29: error: cannot infer type parameter 'U' of "
+        "'lib::g::pick' from the call arguments",
+        "lib/g.pkn:7:32: error: cannot infer the type arguments of generic "
+        "enum 'lib::g::R' for 'lib::g::R::No': write them "
+        "('lib::g::R<...>::No'), or give the value a type ('x: "
+        "lib::g::R<...> = lib::g::R::No')",
+        "main.pkn:3:7: note: in instantiation of 'lib::g::wrap<Str>' "
+        "requested here"})
+    EXPECT_NE(r.out.find(message), std::string::npos) << message << "\n"
+                                                      << r.out;
+  EXPECT_EQ(r.out.find('$'), std::string::npos) << r.out;
+  std::filesystem::remove_all(dir);
+}
+
 namespace {
 
 // The diagnostics of @p out of a kind ("error: ", "warning: ", "note: ").

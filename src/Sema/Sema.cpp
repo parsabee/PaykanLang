@@ -1430,7 +1430,10 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
     std::optional<std::vector<ast::Type *>> *argTypes) {
   const ast::SourceLocation loc = node->getLocation();
   const ast::EnumDecl *tmpl = S.EnumTemplates.find(tmplName)->second;
-  const std::string spelled = tmplName + names::kQualSep + variant;
+  // The messages name it as the program spells it, not by another module's
+  // hidden qualifier (a variant made in that module's template).
+  const std::string shown = S.displayName(tmplName);
+  const std::string spelled = shown + names::kQualSep + variant;
   // Written: `Maybe<int>::Just(1)`.
   if (!typeArgAnns.empty()) {
     std::vector<ast::Type *> typeArgs;
@@ -1460,20 +1463,20 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
   while (idx < variants.size() && *variants[idx] != variant)
     ++idx;
   if (idx == variants.size()) {
-    S.error(loc, "enum '" + tmplName + "' has no variant '" + variant + "'");
+    S.error(loc, "enum '" + shown + "' has no variant '" + variant + "'");
     return nullptr;
   }
   const auto &fields = tmpl->getPayload(idx);
   if (fields.empty()) {
     if (argTypes)
-      S.error(loc, "variant '" + variant + "' of enum '" + tmplName +
+      S.error(loc, "variant '" + variant + "' of enum '" + shown +
                        "' has no fields: write '" + spelled +
                        "' without arguments");
     else
-      S.error(loc, "cannot infer the type arguments of generic enum '" +
-                       tmplName + "' for '" + spelled + "': write them ('" +
-                       tmplName + "<...>" + names::kQualSep + variant +
-                       "'), or give the value a type ('x: " + tmplName +
+      S.error(loc, "cannot infer the type arguments of generic enum '" + shown +
+                       "' for '" + spelled + "': write them ('" + shown +
+                       "<...>" + names::kQualSep + variant +
+                       "'), or give the value a type ('x: " + shown +
                        "<...> = " + spelled + "')");
     return nullptr;
   }
@@ -1493,7 +1496,7 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
     for (size_t i = 0; i < fields.size(); ++i)
       list += (i ? ", " : "") + fields[i]->getName() + ": " +
               typeName(fields[i]->getType());
-    S.error(loc, "variant '" + variant + "' of enum '" + tmplName + "' has " +
+    S.error(loc, "variant '" + variant + "' of enum '" + shown + "' has " +
                      std::to_string(fields.size()) + " field(s) (" + list +
                      "), got " + std::to_string(args.size()) + " argument(s)");
     return nullptr;
@@ -1508,9 +1511,9 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
                   .cloneType(f->getType())
             : f->getType());
   std::vector<ast::Type *> typeArgs;
-  if (!S.inferTypeArgs(
-          tmplName, tmpl->getTypeParams(), paramTypes, tys, loc, typeArgs,
-          tmplName + "<...>" + names::kQualSep + variant + "(...)"))
+  if (!S.inferTypeArgs(tmplName, tmpl->getTypeParams(), paramTypes, tys, loc,
+                       typeArgs,
+                       shown + "<...>" + names::kQualSep + variant + "(...)"))
     return nullptr;
   return S.instantiateEnum(tmplName, typeArgs, loc);
 }
@@ -1519,7 +1522,9 @@ ast::Type *
 Sema::ExprChecker::checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
                                     const std::string &variant,
                                     const std::vector<ast::Type *> *argTypes) {
-  const std::string &callee = node->getCalleeName();
+  // For the messages only: as the program spells it, not by another
+  // module's hidden qualifier (a call in that module's template).
+  const std::string callee = S.displayName(node->getCalleeName());
   int64_t idx = enumTy->findVariant(variant);
   if (idx < 0) {
     S.error(node->getLocation(), "enum '" + enumTy->getName() +

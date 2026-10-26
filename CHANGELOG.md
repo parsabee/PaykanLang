@@ -1267,6 +1267,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected binding poisons the name, and an assignment or a destructuring target binding it
   again is now its follow-on (`Sema::rebindsPoisonedFunctionName`), in an inner block too
   (docs/language/02-basics.md, "Scoping Rules").
+- An error in an imported module's template, reported where the program instantiates it,
+  names the module's generic enum, its variants and its generic functions as the program
+  spells them: `R::Ok(s)` in `fn wrap<T>(s: view T) -> R<T>` of `lib::g` said `parameter 1
+  of '$lib::g::R::Ok' is not one`, with the module's hidden qualifier, and so did a
+  variant's wrong field type, a variant written with arguments it has no fields for, the
+  type arguments a variant or a generic function's call cannot infer (`'$lib::g::pick'`)
+  and their hints; they say `lib::g::R::Ok` and `lib::g::pick` now.
 
 ## [0.2.0] - 2026-10-20
 
