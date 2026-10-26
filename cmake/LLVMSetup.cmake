@@ -224,7 +224,7 @@ include(HandleLLVMOptions)    # Applies LLVM-recommended compiler flags
 add_library(paykan_llvm INTERFACE)
 
 # paykan_llvm_no_werror(<target>...): warnings are not errors in <target>.
-# For the targets that include LLVM headers (the llvm backend and its JIT,
+# For the targets that include LLVM headers (the mlir backend and its JIT,
 # and the tests that use them): the project is C++20, and LLVM's headers,
 # C++17 code, draw warnings there that our code can't fix, e.g. libstdc++
 # 15's #warning on the <ciso646> include in llvm/Support/Threading.h.  The

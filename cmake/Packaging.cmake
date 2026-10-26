@@ -21,8 +21,9 @@
 # ("1.2.3-rc1" becomes "1.2.3~rc1", which sorts before "1.2.3").  The
 # package depends on the shared libraries `paykan` links (computed by
 # dpkg-shlibdeps) and on a C compiler that provides `cc` (gcc or clang, each of
-# which registers the `cc` alternative) with the C library headers: the c
-# backend runs `cc` to compile and link every program.
+# which registers the `cc` alternative) with the C library headers: `paykan
+# build` runs `cc` to link every executable, and the C `--emit-c` prints is
+# compiled with it.
 #
 # Included last from the top-level CMakeLists.txt, after every install() rule.
 
@@ -49,9 +50,11 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
 set(CPACK_PACKAGE_DESCRIPTION
     "PaykanLang (.pkn) is a statically-typed, object-oriented language with
 automatic reference counting, a module system and generics.  This package
-holds the paykan compiler (the recursive-descent frontend and the C backend,
-which compiles programs with the system C compiler), its runtime, and the
-headers and CMake package for building frontend and backend plugins.")
+holds the paykan compiler (the recursive-descent frontend and the mlir
+backend, which runs programs with LLVM's JIT, builds executables, linking them
+with the system C compiler, and prints C11 with --emit-c), its runtime, its
+standard library, and the headers and CMake package for building frontend and
+backend plugins.")
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_VERSION_MAJOR ${PAYKAN_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PAYKAN_VERSION_MINOR})

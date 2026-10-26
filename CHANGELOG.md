@@ -1091,6 +1091,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Sema checks it again for an AST made another way: `the C symbol 'a b' of native function
   'f' is not a C identifier`, `the C symbol 'int' of native function 'f' is a C keyword`
   (docs/language/03-functions.md, "Native Functions").
+- The Debian package's description still said it held "the C backend, which compiles
+  programs with the system C compiler", a backend that is gone.  It now names the mlir
+  backend, which runs programs with LLVM's JIT, builds executables (linking them with the
+  system C compiler) and prints C11 with `--emit-c`.  Comments in the build files and the
+  scripts that named the c and llvm backends or LLVM 17 name the mlir backend and LLVM 22.
 
 ## [0.2.0] - 2026-10-20
 
