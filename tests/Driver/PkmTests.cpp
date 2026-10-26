@@ -688,6 +688,24 @@ TEST(Pkm, ADirectoryIsNotAModuleFile) {
   fs::remove_all(dir);
 }
 
+// A module file that comes through a pipe (`cat base.pkm | paykan pkm dump
+// /dev/stdin`, or `<(...)`) is read to its end, as any file is; reading
+// only regular files, as the fix of finding 33 first did, refused it
+// (`'/dev/stdin' is not a regular file`).
+TEST(Pkm, AModuleFileCanComeThroughAPipe) {
+  Project p("pipe");
+  auto cd = "cd " + p.Dir.string() + " && ";
+  ASSERT_EQ(run(cd + paykanCmd() + " --emit-pkm base.pkn").exitCode, 0);
+  auto file = run(cd + kPaykan + " pkm dump base.pkm");
+  ASSERT_EQ(file.exitCode, 0) << file.out;
+  auto piped = run(cd + "cat base.pkm | " + kPaykan + " pkm dump /dev/stdin");
+  EXPECT_EQ(piped.exitCode, 0) << piped.out;
+  EXPECT_EQ(piped.out, file.out);
+  auto check = run(cd + "cat base.pkm | " + kPaykan + " pkm check /dev/stdin");
+  EXPECT_EQ(check.exitCode, 0) << check.out;
+  EXPECT_EQ(check.out, "/dev/stdin: usable\n");
+}
+
 TEST(Pkm, HelpDocumentsTheFlags) {
   auto r = run(std::string(kPaykan) + " --help");
   ASSERT_EQ(r.exitCode, 0);

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -378,6 +379,43 @@ TEST(Container, Files) {
   ASSERT_FALSE(ofDir);
   EXPECT_EQ(ofDir.status().message(),
             "'" + (dir / "a").string() + "' is a directory, not a file");
+  fs::remove_all(dir);
+}
+
+// What is not a regular file is read to its end: a FIFO, as a pipe
+// (`pkm dump <(cat lib.pkm)`) is, which reading only regular files refused
+// ("'/dev/fd/63' is not a regular file").  More than one read's worth.
+TEST(Container, ReadsAFifoToItsEnd) {
+  namespace fs = std::filesystem;
+  fs::path dir = testDir("fifo");
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  fs::path fifo = dir / "fifo";
+  ASSERT_EQ(mkfifo(fifo.c_str(), 0600), 0) << std::strerror(errno);
+  std::vector<uint8_t> bytes;
+  for (int i = 0; bytes.size() < 200000; ++i) {
+    std::vector<uint8_t> b = minimalFileBytes("m" + std::to_string(i));
+    bytes.insert(bytes.end(), b.begin(), b.end());
+  }
+  // The writer's open waits for a reader, and its close ends the reads.
+  std::thread writer([&] {
+    std::ofstream out(fifo, std::ios::binary);
+    out.write(reinterpret_cast<const char *>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+  });
+  StatusOr<std::vector<uint8_t>> back = readFileBytes(fifo);
+  if (!back) {
+    // Release the writer: open the FIFO and drain it.
+    int reader = open(fifo.c_str(), O_RDONLY);
+    std::vector<char> sink(4096);
+    while (reader >= 0 && read(reader, sink.data(), sink.size()) > 0) {
+    }
+    if (reader >= 0)
+      close(reader);
+  }
+  writer.join();
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, bytes);
   fs::remove_all(dir);
 }
 

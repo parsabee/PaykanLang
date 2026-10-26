@@ -433,20 +433,32 @@ readFileBytes(const std::filesystem::path &path) {
   fs::file_status status = fs::status(path, ec);
   if (fs::is_directory(status))
     return Status::error("'" + path.string() + "' is a directory, not a file");
-  if (fs::exists(status) && !fs::is_regular_file(status))
-    return Status::error("'" + path.string() + "' is not a regular file");
   std::ifstream in(path, std::ios::binary);
   if (!in)
     return Status::error("cannot open '" + path.string() + "'");
+  // Read with istream::read, which reports a failed read in the stream's
+  // state rather than by throwing.
+  std::vector<uint8_t> bytes;
+  if (!fs::is_regular_file(status)) {
+    // A pipe or a device (`<(cat lib.pkm)`, /dev/stdin) has no size: it is
+    // read to its end.
+    std::vector<char> chunk(size_t{1} << 16);
+    do {
+      in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+      bytes.insert(bytes.end(), chunk.data(), chunk.data() + in.gcount());
+    } while (in);
+    if (!in.eof())
+      return Status::error("cannot read '" + path.string() + "'");
+    return bytes;
+  }
   // The size of the file opened (a writer may rename another over the
-  // path), read with istream::read, which reports a failed read in the
-  // stream's state rather than by throwing.
+  // path).
   in.seekg(0, std::ios::end);
   std::streamoff size = in.tellg();
   in.seekg(0, std::ios::beg);
   if (!in || size < 0)
     return Status::error("cannot read '" + path.string() + "'");
-  std::vector<uint8_t> bytes(static_cast<size_t>(size));
+  bytes.resize(static_cast<size_t>(size));
   in.read(reinterpret_cast<char *>(bytes.data()), size);
   if (in.gcount() != size)
     return Status::error("cannot read '" + path.string() + "'");

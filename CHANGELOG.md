@@ -1013,9 +1013,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (docs/language/17-the-paykan-command.md, "Commands").
 - `paykan pkm dump`, `pkm check` and `pkm extract --object` aborted on a directory
   (`terminate called after throwing an instance of 'std::__ios_failure'`, exit status 134).
-  A module file is now read only when it is a regular file, and read whole with
-  `istream::read`, which reports a failed read rather than throwing: `paykan: 'd.pkm' is a
-  directory, not a file`, exit status 1.
+  A directory is now an error, `paykan: 'd.pkm' is a directory, not a file`, exit status 1,
+  and a module file is read with `istream::read`, which reports a failed read rather than
+  throwing: a regular file whole, and a pipe or a device to its end (`cat lib.pkm | paykan
+  pkm dump /dev/stdin`).
 - `--emit-pkm ./geometry/shapes.pkn` (and `geometry/./shapes.pkn`) named the module
   `shapes`, not `geometry::shapes` as `geometry/shapes.pkn` does, so an importer of
   `geometry::shapes` rejected the file (`names module 'shapes'. Rebuild it from source.`);
