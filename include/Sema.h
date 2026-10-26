@@ -598,6 +598,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// module's template that module's.  No variable may be bound to it, so a
   /// call by the name always means the function.
   bool isFunctionNameForVariable(const std::string &name) const;
+  /// True (counting a suppressed follow-on) if @p name is such a function's
+  /// and the binding of it in scope is poisoned: an assignment that bound it
+  /// was reported, and a later assignment or destructuring target binding
+  /// it again is that error's follow-on (it is reported once).
+  bool rebindsPoisonedFunctionName(const std::string &name);
   /// This module's top-level functions, generic and `native` ones included,
   /// by name: known before any signature is checked, so a method's
   /// parameter is checked against them too.

@@ -1092,6 +1092,16 @@ bool Sema::isTypeNameForVariable(const std::string &name) const {
          (ast::builtinKindOfName(name, kind) && kind != ast::BuiltinType::Void);
 }
 
+bool Sema::rebindsPoisonedFunctionName(const std::string &name) {
+  if (!isFunctionNameForVariable(name))
+    return false;
+  Scope *owner = CurrentScope->findOwner(name);
+  if (!owner || !ast::isa<ast::PoisonType>(owner->lookup(name)))
+    return false;
+  ++SuppressedFollowOns;
+  return true;
+}
+
 bool Sema::isFunctionNameForVariable(const std::string &name) const {
   // Another module's template names its own module's functions under that
   // module's hidden qualifier; this module's are unqualified.
@@ -2900,6 +2910,10 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       ok = false;
       continue;
     }
+    if (rebindsPoisonedFunctionName(name)) {
+      ok = false;
+      continue;
+    }
     if (!checkBinderName(name, target.Loc) || !checkNotSelf(name, target.Loc)) {
       // A function's name is poisoned, as in visitAssignStmt.
       if (isFunctionNameForVariable(name) && !CurrentScope->findOwner(name))
@@ -3609,8 +3623,10 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   }
 
   // Guard: the target name must not shadow a type, a function or a reserved
-  // name.  A function's name is then poisoned, so its uses that follow are
-  // not reported again as uses of the function.
+  // name.  A function's name is then poisoned, so its uses and assignments
+  // that follow are not reported again.
+  if (rebindsPoisonedFunctionName(varName))
+    return false;
   if (!checkBinderName(varName, node->getLocation())) {
     if (isFunctionNameForVariable(varName) && !CurrentScope->findOwner(varName))
       declarePoisoned(CurrentScope, varName);

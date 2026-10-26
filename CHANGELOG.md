@@ -1260,6 +1260,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `('int[3]')`.  The fixed-size array error names the field it can be: `... can only be a
   local variable, a parameter, a result or a class field for now`, where it said `a field`
   (docs/language/09-arrays.md, "Slices" and "Limits for now"; 10-tuples.md).
+- The error for a local named like a function of the module is reported once, as its
+  entry above says: `func = 1; func = 2; func = 3;` reported `'func' is a function of this
+  module and cannot be used as a variable` three times, once per assignment, and a
+  destructuring target binding the name again (`func, b = (3, 4)`) once more.  The first
+  rejected binding poisons the name, and an assignment or a destructuring target binding it
+  again is now its follow-on (`Sema::rebindsPoisonedFunctionName`), in an inner block too
+  (docs/language/02-basics.md, "Scoping Rules").
 
 ## [0.2.0] - 2026-10-20
 

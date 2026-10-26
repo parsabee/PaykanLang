@@ -408,6 +408,17 @@ TEST(BinderName, LocalsRejectFunctionNames) {
   expectOneBinderError("native fn func(x: int) -> int = \"pk_func\";\n" +
                            wrapMain("func = 1;"),
                        kFnMsg);
+  // Finding 95: the assignments and destructuring targets that bind the
+  // rejected name again are its follow-ons, in an inner block too; each
+  // reported again before.
+  expectOneBinderError(kFunc + wrapMain("func = 1; func = 2; func = 3;"),
+                       kFnMsg);
+  expectOneBinderError(kFunc + wrapMain("func = 1;\n if True { func = 2; }\n"
+                                        " func, b = (3, 4); a, func = (5, 6);\n"
+                                        " io::println(func + a + b);"),
+                       kFnMsg);
+  expectOneBinderError(
+      kFunc + wrapMain("func, b = (1, 2); func = 3; io::println(b);"), kFnMsg);
 }
 
 TEST(BinderName, ParametersAndBindingsRejectFunctionNames) {
