@@ -86,6 +86,7 @@
     ["src/*", "all"],
     ["include/*", "all"],
 
+    ["samples/imports/14_native/*", ["driver", "samples", "c-strict", "docs", "lowering", "ast-interchange", "frontend", "plugin", "out-of-tree"]],
     ["samples/*", ["samples", "c-strict", "docs", "lowering", "ast-interchange", "frontend", "plugin", "out-of-tree"]],
     ["scripts/samples_parity.py", ["samples"]],
     ["scripts/cache_race.py", ["samples"]],

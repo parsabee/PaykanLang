@@ -158,8 +158,9 @@ bool Sema::checkTraitDecls(ast::TranslationUnit *tu) {
           "method '" + fn->getName() + "' of trait '" + td->getName() + "'";
       bool paramsOk = checkDistinctParams(fn, what);
       for (const auto &p : fn->getParams())
-        paramsOk = paramsOk && checkBinderName(p.getName(), fn->getLocation(),
-                                               /*binds=*/false);
+        paramsOk =
+            paramsOk && checkBinderName(p.getName(), p.Loc,
+                                        /*binds=*/false, "a parameter name");
       RequiredSig sig;
       if (!paramsOk ||
           !resolveRequirement(fn, placeholders, td->getName(), sig)) {
@@ -185,11 +186,11 @@ bool Sema::resolveRequirement(const ast::FuncDecl *fn, const Subst &subst,
   }
   for (const auto &p : fn->getParams()) {
     if (p.getName() == names::kSelf) {
-      error(fn->getLocation(), "'self' cannot be used as a parameter name of " +
-                                   what + "; it is the implicit receiver");
+      error(p.Loc, "'self' cannot be used as a parameter name of " + what +
+                       "; it is the implicit receiver");
       return false;
     }
-    auto *t = resolveValueType(cloner.cloneType(p.ParamType), fn->getLocation(),
+    auto *t = resolveValueType(cloner.cloneType(p.ParamType), p.Loc,
                                "parameter '" + p.getName() + "' of " + what);
     if (!t)
       return false;
@@ -318,34 +319,42 @@ const ast::Type *Sema::traitImplOwner(ast::Type *ty, const TraitRef &tr) {
 }
 
 bool Sema::hasText(ast::Type *ty, std::string *why) {
-  std::set<const ast::Type *> open;
-  return hasText(ty, why, open);
+  TextQuery query;
+  return hasText(ty, why, query);
 }
 
-bool Sema::hasText(ast::Type *ty, std::string *why,
-                   std::set<const ast::Type *> &open) {
+bool Sema::hasText(ast::Type *ty, std::string *why, TextQuery &query) {
   // An optional has its value's text, and "None".
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
-    return hasText(ot->getInnerType(), why, open);
+    return hasText(ot->getInnerType(), why, query);
   // A type without parts has a text when it implements `Show`: a number,
   // bool and char, and an object through `Obj`.
   if (!ast::isa<ast::TupleType>(ty) && !ast::isa<ast::EnumType>(ty)) {
     const TraitRef show{&Traits.find(names::kTraitShow)->second, {}};
     return traitImplOwner(ty, show) != nullptr;
   }
+  // Decided already, by another path to it.
+  if (auto done = query.Decided.find(ty); done != query.Decided.end()) {
+    if (done->second && why)
+      *why = *done->second;
+    return !done->second;
+  }
   // An aggregate already being looked into (one that holds itself, an
   // error reported where it is declared) decides nothing here.
-  if (!open.insert(ty).second)
+  if (!query.Open.insert(ty).second) {
+    ++query.Assumed;
     return true;
-  // Whether @p part, named @p what in @p ty, has a text; if not, *why says
-  // so, then why the part has none: "field 's' has type 'S', whose field
-  // 'f' has type '(int) -> int'".
+  }
+  const unsigned assumedBefore = query.Assumed;
+  // Whether @p part, named @p what in @p ty, has a text; if not, the reason
+  // says so, then why the part has none: "field 's' has type 'S', whose
+  // field 'f' has type '(int) -> int'".
+  std::string reason;
   auto partHasText = [&](ast::Type *part, const std::string &what) {
     std::string inner;
-    if (hasText(part, why ? &inner : nullptr, open))
+    if (hasText(part, &inner, query))
       return true;
-    if (why)
-      *why = what + " has type '" + typeName(part) + "'" +
+    reason = what + " has type '" + typeName(part) + "'" +
              (inner.empty() ? "" : ", whose " + inner);
     return false;
   };
@@ -366,7 +375,16 @@ bool Sema::hasText(ast::Type *ty, std::string *why,
                            "field '" + p->getFieldName(i) + "' of variant '" +
                                *et->getVariants()[v] + "'");
   }
-  open.erase(ty);
+  query.Open.erase(ty);
+  // A missing text is the parts', whatever the guard answered; a text is
+  // kept only if the guard did not answer for any part.
+  if (!ok) {
+    if (why)
+      *why = reason;
+    query.Decided.emplace(ty, std::move(reason));
+  } else if (query.Assumed == assumedBefore) {
+    query.Decided.emplace(ty, std::nullopt);
+  }
   return ok;
 }
 

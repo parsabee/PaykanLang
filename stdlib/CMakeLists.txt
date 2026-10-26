@@ -51,7 +51,9 @@ foreach(src IN LISTS PAYKAN_STDLIB_SOURCES)
         list(APPEND imported ${PAYKAN_STDLIB_STAGE_DIR}/${CMAKE_MATCH_1}.pkm)
     endforeach()
     set(pkm ${PAYKAN_STDLIB_STAGE_DIR}/${module}.pkm)
+    # `--emit-pkm -o` writes into a directory that exists.
     add_custom_command(OUTPUT ${pkm}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${PAYKAN_STDLIB_STAGE_DIR}
         COMMAND ${CMAKE_COMMAND} -E env ${paykan_env}
                 $<TARGET_FILE:paykan> --no-module-cache --emit-pkm
                 --module-name=::${module} -o ${pkm} ${src}

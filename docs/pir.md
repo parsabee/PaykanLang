@@ -308,8 +308,16 @@ layout), for each tuple type that is printed, compared or converted with
 "Structs": a tuple's layout with the struct's name after the count and each
 field's name before its entry, a name being its byte length then its bytes
 packed eight to a word; a struct nested in a tuple or a struct is an entry of
-kind `STRUCT`, its layout inline).  A `bytes` global (raw constant bytes) is
-part of the format, though the lowering emits none.
+kind `STRUCT`, its layout inline), and a `.enumN` one for each enum type that
+is (`Runtime.h`, "Enums": the variant count, then each variant's name, a word
+that is 1 when it has fields and, when it has, the byte offset of its fields
+in the value and their struct's layout, named for the variant;
+`[2, 1, 69, 0, 1, 82, 1, 8, 1, 1, 82, 1, 119, 0, 0]` is `enum Sh { E, R(w:
+int) }`'s.  An enum nested in a tuple or a struct is an entry of kind `ENUM`,
+its layout inline, and an optional one an `OPTIONAL` entry whose payload kind
+is `ENUM`, followed by a whole `ENUM` entry, as an optional struct's is).  A
+`bytes` global (raw constant bytes) is part of the format, though the lowering
+emits none.
 
 Every symbol a function body references must be declared in its module: a call
 to a runtime function needs the `extern fn`, a field access needs the `class`
@@ -1295,7 +1303,8 @@ and backends and `print(decode(encode(m))) == print(m)` byte for byte.  The
 format is specified in [`design/pkm.md`](design/pkm.md) §5 (layout, type and
 opcode codes, records, determinism) and §6.1 (the symbol index); in short:
 
-- **Layout.** Magic `PIRB`, codec version (1.0), PIR version
+- **Layout.** Magic `PIRB`, codec version (the release version, like the
+  PIR version: `kVersionNumber`, 200 for 0.2.0), PIR version
   (`pir::kPIRVersion`, `include/paykan/pir/Version.h`; the same number as
   `PAYKAN_PIR_TEXT_VERSION`), flags, a string table, the module name, then
   the item tables in the printer's order (extern globals, cstrs, datas,

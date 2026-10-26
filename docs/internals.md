@@ -81,11 +81,20 @@ documents the C interface field by field.
 
 `paykan` caches compiled modules in a `.paykan_cache` directory next to the sources: each
 imported module's `.pkm` file and the mlir backend's LLVM bitcode of it (see
-[the compilation cache](language/17-the-paykan-command.md#the-compilation-cache)). An entry
-is keyed on its source, its imports and the format versions, so a compiler whose generated
-code, runtime ABI, PIR, `.pkm` format or value layout changed without a version bump still
-trusts what an older build wrote, and running those cached modules can crash. After such a change, delete every cache
-before running a program or a test:
+[the compilation cache](language/17-the-paykan-command.md#the-compilation-cache)). A `.pkm`
+entry is used only when its source and its imports are unchanged and this very `paykan`
+wrote it: its manifest records the version and, for a development build, the build ID, a
+hash of every file under `src/` and `include/` (`cmake/BuildId.cmake`). An entry another
+build wrote is stale and rebuilt, and `--verbose` says so (`is stale (compiled by paykan
+0.3.0-dev (46766aa1e1eaf316); this is paykan 0.3.0-dev (b7d975d89acc6d2b))`). A bitcode
+entry's key holds the size and modification time of the `paykan` executable, so a rebuilt
+compiler translates those again. A release build has no build ID and trusts the entries of
+its own version, which the version bump of each release keeps apart from the last one's.
+
+The build ID does not see a change outside `src/` and `include/` that changes the code a
+development build generates (a compiler flag set in `cmake/`, say): the compiler built
+after it still uses the `.pkm` entries the one before it wrote. After such a change, delete
+every cache before running a program or a test:
 
 ```sh
 find . -name .paykan_cache -type d -prune -exec rm -rf {} +

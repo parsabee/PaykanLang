@@ -121,14 +121,14 @@ fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 4) << r.Diagnostics;
-  expectAll(r, {"1:11: error: duplicate parameter 'x' in method 'm' of trait "
+  expectAll(r, {"1:24: error: duplicate parameter 'x' in method 'm' of trait "
                 "'T'",
-                "2:11: error: 'u8' is a type name and cannot be used as a "
-                "variable",
-                "4:11: error: 'Str' is a type name and cannot be used as a "
-                "variable",
-                "4:47: error: 'A' is a type name and cannot be used as a "
-                "variable"});
+                "2:16: error: 'u8' is a type name and cannot be used as a "
+                "parameter name",
+                "4:29: error: 'Str' is a type name and cannot be used as a "
+                "parameter name",
+                "4:52: error: 'A' is a type name and cannot be used as a "
+                "parameter name"});
 
   auto ok = semaCheck(R"(trait T { fn m(x: int, y: int) -> int; fn n(f: int); }
 class A { view fn z() -> int { return 0; } }
@@ -346,6 +346,35 @@ fn main() -> int {
   expect("'((int) -> int)?' does not implement trait 'Show', which "
          "'io::println' requires of 'T'\n");
   EXPECT_EQ(r.ErrorCount, 13) << r.Diagnostics;
+}
+
+// An aggregate whose parts share their types (a DAG) is decided part by
+// part, each type once per question (Sema::TextQuery), and a part with no
+// text is named through every level down to it.
+TEST(Traits, ShowThroughSharedPartsNamesTheWholePath) {
+  auto r = semaCheck(R"(import ::io;
+struct F { f: (int) -> int; }
+enum E0 { Z, Y(g: F) }
+enum E1 { A(x: E0), B(y: E0), C(z: E0) }
+enum E2 { A(x: E1), B(y: E1), C(z: E1) }
+struct Ok1 { a: (int, char); b: (int, char); }
+struct Ok2 { a: Ok1; b: Ok1; c: Ok1?; }
+fn main() -> int {
+  io::println(Ok2(Ok1((1, 'a'), (2, 'b')), Ok1((3, 'c'), (4, 'd')), None));
+  io::println(E2::C(E1::A(E0::Z)));
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(
+                "'E2' does not implement trait 'Show', which 'io::println' "
+                "requires of 'T': its field 'x' of variant 'A' has type 'E1', "
+                "whose field 'x' of variant 'A' has type 'E0', whose field 'g' "
+                "of variant 'Y' has type 'F', whose field 'f' has type '(int) "
+                "-> int', which does not implement it"),
+            std::string::npos)
+      << r.Diagnostics;
 }
 
 // The aggregates whose parts all show themselves do, through every form:

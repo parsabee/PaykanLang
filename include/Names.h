@@ -47,6 +47,34 @@ inline bool isModulePrivateName(std::string_view name) {
 inline bool isPrivateName(std::string_view name) {
   return isTypePrivateName(name) || isModulePrivateName(name);
 }
+/// Why @p symbol cannot be the C symbol of a `native fn`, or "" when it can:
+/// it must be a C identifier (an ASCII letter or `_`, then ASCII letters,
+/// digits and `_`) other than a C keyword (C11 6.4.1), so that the C
+/// declaration `--emit-c` writes compiles and a linker can name it.
+inline std::string_view cSymbolProblem(std::string_view symbol) {
+  constexpr std::string_view kKeywords[] = {
+      "auto",       "break",     "case",           "char",
+      "const",      "continue",  "default",        "do",
+      "double",     "else",      "enum",           "extern",
+      "float",      "for",       "goto",           "if",
+      "inline",     "int",       "long",           "register",
+      "restrict",   "return",    "short",          "signed",
+      "sizeof",     "static",    "struct",         "switch",
+      "typedef",    "union",     "unsigned",       "void",
+      "volatile",   "while",     "_Alignas",       "_Alignof",
+      "_Atomic",    "_Bool",     "_Complex",       "_Generic",
+      "_Imaginary", "_Noreturn", "_Static_assert", "_Thread_local"};
+  if (symbol.empty() || (symbol[0] >= '0' && symbol[0] <= '9'))
+    return "is not a C identifier";
+  for (char c : symbol)
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '_'))
+      return "is not a C identifier";
+  for (std::string_view keyword : kKeywords)
+    if (symbol == keyword)
+      return "is a C keyword";
+  return "";
+}
 /// The type parameter an untyped parameter of a named function adds
 /// (`fn double(x) = x * 2;` is `fn double<typeof(x)>(x: typeof(x))`): a
 /// name no program can write, so it shadows no type.
@@ -304,9 +332,18 @@ inline constexpr const char *kPaykanHeapLiveBytes = "Paykan_heap_live_bytes";
 // -- Environment variables
 
 inline constexpr const char *kPaykanStdlibEnv = "PAYKAN_STDLIB";
+/// Set (to any value): a program tracks its heap and prints the statistics
+/// at exit, as under `paykan run --track-heap` (an executable's entry code
+/// reads it too).
+inline constexpr const char *kPaykanTrackHeapEnv = "PAYKAN_TRACK_HEAP";
 /// `:`-separated directories of prebuilt `.pkm` modules, searched after the
 /// --module-path directories.
 inline constexpr const char *kPaykanModulePathEnv = "PAYKAN_MODULE_PATH";
+/// Set by the plugin host for a program it runs with no arguments, which it
+/// starts with one empty argv[0]: the runtime's Paykan_args_new then gives
+/// an empty slice, and unsets it (src/Runtime/IO.c spells it too).  Private:
+/// not for users to set.
+inline constexpr const char *kPaykanHostNoArgsEnv = "__PAYKAN_HOST_NO_ARGS";
 
 // -- Module system
 

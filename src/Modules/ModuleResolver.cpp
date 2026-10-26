@@ -59,6 +59,9 @@ struct ModuleResolver::Entry {
   /// Loaded: its compiled code, when CODE declares it.
   std::optional<pkm::Object> Object;
   bool KeepUncached = false; ///< Built: not cacheable()
+  /// Built: the cache entry writeCacheEntry() wrote ("" before, or when it
+  /// could not be written).
+  std::filesystem::path Written;
 };
 
 /// A .pkm read for a module whose dependencies are still being resolved,
@@ -118,6 +121,11 @@ pkm::HostIdentity ModuleResolver::hostIdentity() {
 void ModuleResolver::log(const std::string &line) const {
   if (Opts.Verbose)
     *Opts.Verbose << line << "\n";
+}
+
+void ModuleResolver::noteRead(const std::filesystem::path &path) {
+  if (std::find(FilesRead.begin(), FilesRead.end(), path) == FilesRead.end())
+    FilesRead.push_back(path);
 }
 
 std::string
@@ -194,6 +202,7 @@ Resolution ModuleResolver::resolveSource(const std::string &canonical,
   std::string shown = relativeToRoot(cache);
   std::vector<uint8_t> sourceBytes;
   if (auto it = Pendings.find(canonical); it == Pendings.end()) {
+    noteRead(source);
     StatusOr<std::vector<uint8_t>> bytes = pkm::readFileBytes(source);
     if (!bytes)
       return fromSource("cache " + shown + " unusable (" +
@@ -275,6 +284,7 @@ Resolution ModuleResolver::load(const std::string &canonical,
   if (auto it = Pendings.find(canonical); it != Pendings.end()) {
     p = it->second.get();
   } else {
+    noteRead(path);
     StatusOr<std::vector<uint8_t>> bytes = pkm::readFileBytes(path);
     if (!bytes)
       return unusable("cannot be read (" + bytes.status().message() + ")");
@@ -408,6 +418,7 @@ void ModuleResolver::built(const std::string &canonical, pkm::Interface iface,
     }
     iface.Mods.push_back(std::move(ref));
   }
+  noteRead(e.Path);
   if (StatusOr<std::vector<uint8_t>> bytes = pkm::readFileBytes(e.Path))
     e.SourceBytes = std::move(*bytes);
   e.IfaceHash = support::sha256(pkm::writeInterface(iface));
@@ -493,6 +504,16 @@ std::string ModuleResolver::displayPath(const std::string &canonical) const {
   return it == Entries.end() ? std::string() : relativeToRoot(it->second->Path);
 }
 
+std::string ModuleResolver::moduleFile(const std::string &canonical) const {
+  auto it = Entries.find(canonical);
+  if (it == Entries.end())
+    return "";
+  const Entry &e = *it->second;
+  if (e.State == Entry::State::Loaded)
+    return e.Path.string();
+  return e.State == Entry::State::Built ? e.Written.string() : "";
+}
+
 // -- Writing
 
 StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
@@ -537,7 +558,7 @@ StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
   m.Libraries.push_back({static_cast<uint8_t>(pkm::LibKind::Runtime),
                          "paykan_runtime", kVersion, Host.RuntimeAbi,
                          pkm::kLibRequiredAtLink});
-  m.Frontend = {Opts.FrontendName, "", ""};
+  m.Frontend = {Opts.FrontendName, Opts.FrontendVersion, Opts.FrontendPlugin};
   m.Producer = {"paykan", kVersion};
   m.PluginApi = PAYKAN_PLUGIN_API_VERSION;
 
@@ -587,12 +608,23 @@ void ModuleResolver::writeCacheEntry(const std::string &canonical,
   if (!Opts.WriteCache || it == Entries.end() ||
       it->second->State != Entry::State::Built || it->second->KeepUncached)
     return;
-  const Entry &entry = *it->second;
+  Entry &entry = *it->second;
   std::filesystem::path path = cachePath(canonical);
   StatusOr<std::vector<uint8_t>> bytes =
       encodeFile(canonical, entry.Iface, entry.Deps, entry.SourceBytes, code,
                  entry.Tmpl, object);
-  Status s = bytes ? pkm::writeFileAtomically(path, *bytes) : bytes.status();
+  Status s = bytes.status();
+  if (bytes) {
+    // The cache makes its own directories (an entry of `a::b` is a/b.pkm).
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    s = ec ? Status::error("cannot create directory '" +
+                           relativeToRoot(path.parent_path()) +
+                           "': " + ec.message())
+           : pkm::writeFileAtomically(path, *bytes);
+  }
+  if (s)
+    entry.Written = path;
   log("module " + canonical + ": " +
       (s ? "wrote " + relativeToRoot(path)
          : "cannot write " + relativeToRoot(path) + ": " + s.message()));

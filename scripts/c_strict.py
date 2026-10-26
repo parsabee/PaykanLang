@@ -6,11 +6,13 @@ and every compiler named with --cc, the whole-program `paykan --emit-c`
 output (the mlir backend's C, through EmitC) is compiled with STRICT_FLAGS at
 each --opt level, linked with a copy of the runtime (src/Runtime/*.c) built
 by the same compiler with the same flags and with the compiled code of the
-modules it imports (`paykan pkm extract --object` of each module file: the
-standard library's and the program's cache entries, as archives), and run.
-Every executable must exit like `paykan run --track-heap` does, print the
-same stdout and stderr (apart from the heap statistics) and end with 0 live
-heap blocks.
+modules it imports (`paykan pkm extract --object` of each module file
+`paykan --list-modules` names, as docs/c-backend.md builds it: the standard
+library's, the program's cache entries and prebuilt modules', as archives),
+and run.  One more program imports a module only as a prebuilt module file,
+from a --module-path directory: the 13_pkm sample's.  Every executable must
+exit like `paykan run --track-heap` does, print the same stdout and stderr
+(apart from the heap statistics) and end with 0 live heap blocks.
 
 Usage:
     c_strict.py --paykan build/bin/paykan --cc gcc --cc clang \\
@@ -19,6 +21,7 @@ Usage:
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -112,37 +115,63 @@ def module_archive(paykan, pkms, outdir, name):
     return str(archive)
 
 
-def stdlib_archive(paykan, outdir):
-    """The standard library's compiled code, as one archive."""
+def stdlib_dir(paykan):
+    """The standard library's directory, as `paykan --version` names it."""
     version = tool([paykan, "--version"])
     for line in version.stdout.splitlines():
         if line.startswith("standard library: "):
-            stdlib = Path(line[len("standard library: "):])
-            return module_archive(paykan, sorted(stdlib.glob("**/*.pkm")),
-                                  outdir, "stdlib")
+            return Path(line[len("standard library: "):]).resolve()
     raise SystemExit("FAIL: `paykan --version` names no standard library")
 
 
-def check_sample(args, sample, idx, runtimes, outdir):
-    """[(label, problems)] for one sample."""
+def stdlib_archive(paykan, outdir):
+    """The standard library's compiled code, as one archive."""
+    return module_archive(paykan, sorted(stdlib_dir(paykan).glob("**/*.pkm")),
+                          outdir, "stdlib")
+
+
+def prebuilt_import(paykan, outdir):
+    """The 13_pkm sample with geometry::shapes only as a prebuilt module file
+    in a --module-path directory, which the C build must find as well as the
+    cache entries: its main.pkn and the flags it is compiled with."""
+    sample = ROOT / "samples" / "imports" / "13_pkm"
+    root = Path(outdir) / "prebuilt"
+    (root / "lib" / "geometry").mkdir(parents=True)
+    (root / "prog").mkdir()
+    shutil.copy(sample / "main.pkn", root / "prog" / "main.pkn")
+    shutil.copy(sample / "geometry" / "shapes.pkn", root / "shapes.pkn")
+    p = tool([paykan, "--emit-pkm", "--module-name=geometry::shapes",
+              str(root / "shapes.pkn"), "-o",
+              str(root / "lib" / "geometry" / "shapes.pkm")])
+    if p.returncode != 0:
+        raise SystemExit(f"FAIL --emit-pkm geometry::shapes:\n{p.stderr}")
+    return root / "prog" / "main.pkn", [f"--module-path={root / 'lib'}"]
+
+
+def check_sample(args, sample, idx, runtimes, outdir, flags):
+    """[(label, problems)] for one sample, compiled with paykan @p flags."""
     results = []
     objects = sp.object_flags(sample, outdir)
-    ref_p = tool([args.paykan, "--track-heap", *objects, str(sample),
+    ref_p = tool([args.paykan, "--track-heap", *flags, *objects, str(sample),
                   *sp.sample_args(sample, outdir)])
     ref = sp.normalise(ref_p)
     if ref[3] not in (0, None):  # None: a panic aborts before the report
         return [("reference run", [f"live blocks {ref[3]} (exit {ref[0]})"])]
-    emitted = tool([args.paykan, "--emit-c", str(sample)])
+    emitted = tool([args.paykan, *flags, "--emit-c", str(sample)])
     if emitted.returncode != 0:
         return [("emit-c", [emitted.stderr.strip()])]
     c_file = Path(outdir) / f"s{idx}.c"
     c_file.write_text(emitted.stdout)
-    # The compiled code of the program's own modules: their cache entries,
-    # which --emit-c has just written (the archive lets the linker take only
-    # the program's modules of the directory's).
-    cache = sample.parent / ".paykan_cache"
-    local = module_archive(args.paykan, sorted(cache.glob("**/*.pkm")),
-                           outdir, f"s{idx}")
+    # The compiled code of the modules the C declares, from the files
+    # --list-modules names: the standard library's from its archive (made
+    # once), the others' (cache entries, which --emit-c has just written,
+    # and prebuilt modules) extracted here.
+    listed = tool([args.paykan, *flags, "--list-modules", str(sample)])
+    if listed.returncode != 0:
+        return [("list-modules", [listed.stderr.strip()])]
+    own = [f for f in map(Path, listed.stdout.splitlines())
+           if args.stdlib_dir not in (ROOT / f).resolve().parents]
+    local = module_archive(args.paykan, own, outdir, f"s{idx}")
     modules = [a for a in (local, args.stdlib) if a]
     # A sample's native C (#198) is held to the same flags, compiled with the
     # generated C.
@@ -179,6 +208,7 @@ def main():
     EXTRA.extend(args.cflag)
 
     with tempfile.TemporaryDirectory(prefix="paykan-c-strict-") as outdir:
+        args.stdlib_dir = stdlib_dir(args.paykan)
         args.stdlib = stdlib_archive(args.paykan, outdir)
         runtimes = {}
         for ci, cc in enumerate(args.cc):
@@ -186,26 +216,31 @@ def main():
                 d = Path(outdir) / f"rt{ci}{opt}"
                 d.mkdir()
                 runtimes[(cc, opt)] = build_runtime(cc, opt, d)
-        files = corpus()
+        # (name, main file, paykan flags)
+        cases = [(str(rel(f)), f, []) for f in corpus()]
+        prebuilt, flags = prebuilt_import(args.paykan, outdir)
+        cases.append(("samples/imports/13_pkm/main.pkn (geometry::shapes "
+                      "prebuilt, --module-path)", prebuilt, flags))
         with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
             all_results = list(pool.map(
-                lambda t: check_sample(args, t[1], t[0], runtimes, outdir),
-                enumerate(files)))
+                lambda t: check_sample(args, t[1][1], t[0], runtimes, outdir,
+                                       t[1][2]),
+                enumerate(cases)))
 
     failures = 0
     tally = {}
-    for sample, results in zip(files, all_results):
+    for (name, _, _), results in zip(cases, all_results):
         for label, problems in results:
             ok, total = tally.get(label, (0, 0))
             tally[label] = (ok + (not problems), total + 1)
             if problems:
                 failures += 1
-                print(f"FAIL {rel(sample)} [{label}]: " + "; ".join(problems))
+                print(f"FAIL {name} [{label}]: " + "; ".join(problems))
             elif args.verbose:
-                print(f"ok   {rel(sample)} [{label}]")
+                print(f"ok   {name} [{label}]")
     for label, (ok, total) in tally.items():
         print(f"{ok}/{total} {label}")
-    print(f"{len(files)} programs, flags: {' '.join(STRICT_FLAGS)}")
+    print(f"{len(cases)} programs, flags: {' '.join(STRICT_FLAGS)}")
     return 1 if failures else 0
 
 

@@ -1,7 +1,7 @@
 # Standard library
 
-The standard library is written in Paykan and ships with the compiler. It has five
-modules: printing and files, errors as values, the containers, the storage the containers
+The standard library is written in Paykan and ships with the compiler. It has six
+modules: printing and files, errors, results, the containers, the storage the containers
 are built on, and the C library's math functions. This page says how to import them, what
 they have in common, and where the compiler finds them; each module has a page of its own
 that documents every name it declares.
@@ -53,7 +53,7 @@ What the modules have in common:
   [private](../language/15-modules.md#private-to-the-module): a container's `__` fields and
   methods are reachable only from its own methods, and a module's `_` functions and classes
   (`collections::_Entry`, `memory::_new`) only from inside the module. A program that names
-  one is rejected (`'__size' is private to 'HashMap<int, int>': it is reachable only from
+  one is rejected (`'__table' is private to 'HashMap<int, int>': it is reachable only from
   its own methods`, `'memory::_new' is private to module '::memory'`). These pages do not
   document them.
 - **Type names are global** across an import graph, so a program that imports `::io` (which

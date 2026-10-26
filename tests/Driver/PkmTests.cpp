@@ -495,6 +495,7 @@ TEST(Pkm, PrebuiltModuleReplacesItsSourceOnEveryBackend) {
 TEST(Pkm, PrebuiltModulesAreFoundOnTheModulePath) {
   REQUIRE_BACKEND();
   Project p("modulepath");
+  fs::create_directories(p.Dir / "lib");
   ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
                 " --emit-pkm base.pkn -o lib/base.pkm")
                 .exitCode,
@@ -596,6 +597,7 @@ TEST(Pkm, EmitPkmAndDump) {
             "  fn __init__(w: int, h: int) { self.w = w; self.h = h; } }\n"
             "fn describe(r: Rect) -> Str { return \"rect\"; }\n");
   // A nested module named by its path from the project root.
+  fs::create_directories(p.Dir / "out");
   auto emit = run("cd " + p.Dir.string() + " && " + paykanCmd() +
                   " --emit-pkm geometry/shapes.pkn -o out/shapes.pkm");
   ASSERT_EQ(emit.exitCode, 0) << emit.out;
@@ -670,6 +672,41 @@ TEST(Pkm, CheckReportsTheVerdict) {
       run(std::string(kPaykan) + " pkm " + (p.Dir / "base.pkm").string());
   EXPECT_NE(noVerb.exitCode, 0);
   EXPECT_TRUE(contains(noVerb.out, "unknown pkm command")) << noVerb.out;
+}
+
+// A directory is not a module file: every verb says so and exits with 1,
+// never an uncaught std::ios_base::failure (SIGABRT, status 134; finding 33).
+TEST(Pkm, ADirectoryIsNotAModuleFile) {
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_dir_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  fs::create_directories(dir / "d.pkm");
+  const std::string path = (dir / "d.pkm").string();
+  for (const char *verb : {"dump", "check", "extract --object"}) {
+    auto r = run(std::string(kPaykan) + " pkm " + verb + " " + path);
+    EXPECT_EQ(r.exitCode, 1) << verb << ": " << r.out;
+    EXPECT_EQ(r.out, "paykan: '" + path + "' is a directory, not a file\n")
+        << verb;
+  }
+  fs::remove_all(dir);
+}
+
+// A module file that comes through a pipe (`cat base.pkm | paykan pkm dump
+// /dev/stdin`, or `<(...)`) is read to its end, as any file is; reading
+// only regular files, as the fix of finding 33 first did, refused it
+// (`'/dev/stdin' is not a regular file`).
+TEST(Pkm, AModuleFileCanComeThroughAPipe) {
+  Project p("pipe");
+  auto cd = "cd " + p.Dir.string() + " && ";
+  ASSERT_EQ(run(cd + paykanCmd() + " --emit-pkm base.pkn").exitCode, 0);
+  auto file = run(cd + kPaykan + " pkm dump base.pkm");
+  ASSERT_EQ(file.exitCode, 0) << file.out;
+  auto piped = run(cd + "cat base.pkm | " + kPaykan + " pkm dump /dev/stdin");
+  EXPECT_EQ(piped.exitCode, 0) << piped.out;
+  EXPECT_EQ(piped.out, file.out);
+  auto check = run(cd + "cat base.pkm | " + kPaykan + " pkm check /dev/stdin");
+  EXPECT_EQ(check.exitCode, 0) << check.out;
+  EXPECT_EQ(check.out, "/dev/stdin: usable\n");
 }
 
 TEST(Pkm, HelpDocumentsTheFlags) {
@@ -1747,6 +1784,7 @@ TEST(Pkm, ModuleNameNamesTheEmittedModule) {
   writeFile(dir / "src" / "shapes.pkn", "fn area() -> int { return 6; }\n");
   writeFile(dir / "main.pkn", "import geometry::shapes;\n"
                               "fn main() -> int { return shapes::area(); }\n");
+  fs::create_directories(dir / "geometry");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
   };
@@ -1763,6 +1801,48 @@ TEST(Pkm, ModuleNameNamesTheEmittedModule) {
   auto badName = paykan("--emit-pkm --module-name=a::1b src/shapes.pkn");
   EXPECT_NE(badName.exitCode, 0);
   EXPECT_TRUE(contains(badName.out, "is not a module name")) << badName.out;
+  fs::remove_all(dir);
+}
+
+// --emit-pkm names a module by its path made normal, so `./a/b.pkn` and
+// `a/./b.pkn` are `a::b`, as `a/b.pkn` is, and an importer of `a::b` loads
+// the file without the source.  A path with a part that is no identifier
+// names no module (finding 52).
+TEST(Pkm, EmitPkmNamesTheModuleByItsNormalPath) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_normal_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  const std::string area = "fn area(w: int, h: int) -> int { return w * h; }\n";
+  writeFile(dir / "main.pkn",
+            "import a::b;\nfn main() -> int { return b::area(2, 3); }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  for (const char *spelling : {"./a/b.pkn", "a/./b.pkn"}) {
+    writeFile(dir / "a" / "b.pkn", area);
+    auto emit = paykan(std::string("--emit-pkm -o a/b.pkm ") + spelling);
+    ASSERT_EQ(emit.exitCode, 0) << spelling << ": " << emit.out;
+    auto manifest = run(std::string(kPaykan) + " pkm dump --section=manifest " +
+                        (dir / "a" / "b.pkm").string());
+    EXPECT_TRUE(contains(manifest.out, "  module a::b\n"))
+        << spelling << ": " << manifest.out;
+    fs::remove(dir / "a" / "b.pkn");
+    auto r = paykan("main.pkn");
+    EXPECT_EQ(r.exitCode, 6) << spelling << ": " << r.out;
+  }
+  for (const auto &[path, part] :
+       {std::pair{"1bad/x.pkn", "1bad"}, std::pair{"a/my-mod.pkn", "my-mod"}}) {
+    writeFile(dir / path, area);
+    auto bad = paykan(std::string("--emit-pkm ") + path);
+    EXPECT_EQ(bad.exitCode, 1) << path << ": " << bad.out;
+    EXPECT_EQ(bad.out, std::string("paykan: cannot name the module of '") +
+                           path + "' after its path: '" + part +
+                           "' is not an identifier (name it with "
+                           "--module-name)\n");
+    EXPECT_FALSE(fs::exists(fs::path(dir / path).replace_extension(".pkm")))
+        << path;
+  }
   fs::remove_all(dir);
 }
 
@@ -2356,6 +2436,7 @@ TEST(Pkm, ConformancesAcrossModules) {
     // Prebuilt: every library a .pkm file on the module path, its source
     // gone.
     fs::remove_all(p.Dir / "pk");
+    fs::create_directories(p.Dir / "pk" / "lib");
     for (const char *m : {"keys", "mid", "m2", "lib2"}) {
       auto emit = p.paykan(cmd, std::string("--emit-pkm -o pk/lib/") + m +
                                     ".pkm lib/" + m + ".pkn");
@@ -2703,6 +2784,7 @@ void expectOnEveryPath(const EveryPathProject &p) {
     // Prebuilt: every library a .pkm file on the module path, its source
     // gone.
     fs::remove_all(p.Dir / "pk");
+    fs::create_directories(p.Dir / "pk" / "lib");
     for (const std::string &lib : p.Libs) {
       const fs::path source = fs::path("lib") / (lib + ".pkn");
       const fs::path pkm = fs::path("pk") / "lib" / (lib + ".pkm");

@@ -200,6 +200,17 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
   bool ok = true;
   const std::string &name = sd->getName();
   const std::string what = describeStruct(st);
+  // An instantiation's field names are its template's (a generic struct's,
+  // or a generic enum's for a variant's fields), checked there.
+  const ast::Decl *tmpl = nullptr;
+  if (const StructInstantiationInfo *info = structInstantiationInfo(st))
+    tmpl = info->Template;
+  else if (ast::EnumType *et = st->getVariantEnum())
+    if (const EnumInstantiationInfo *info = enumInstantiationInfo(et))
+      tmpl = info->Template;
+  tmpl = localTemplate(tmpl);
+  if (tmpl)
+    checkTemplateFieldNames(tmpl);
   StringSet fieldNames;
   bool selfHeld = false; // a field holding the struct was reported
   for (auto *field : sd->getFields()) {
@@ -207,6 +218,18 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     if (!fieldNames.insert(field->getName()).second) {
       error(field->getLocation(),
             "duplicate field '" + field->getName() + "' in " + what);
+      ok = false;
+      continue;
+    }
+    // Checked here, whether or not the struct writes its `__init__` (a
+    // variant's fields too, which have none).
+    if (tmpl && isTypeNameForVariable(field->getName())) {
+      ++SuppressedFollowOns; // reported at the template
+      ok = false;
+      continue;
+    }
+    if (!tmpl && !checkBinderName(field->getName(), field->getLocation(),
+                                  /*binds=*/false, "a field name")) {
       ok = false;
       continue;
     }
@@ -335,7 +358,8 @@ bool Sema::declareDefaultInit(ast::StructDecl *sd, ast::StructType *st) {
   std::vector<ast::Stmt *> body;
   for (size_t i = 0; i < st->getNumFields(); ++i) {
     const std::string &interned = Ctx.intern(st->getFieldName(i));
-    params.push_back({&interned, st->getElementType(i)});
+    params.push_back(
+        {&interned, st->getElementType(i), ast::ParamMode::Value, loc});
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
         Ctx.make<ast::Identifier>(loc, interned)));

@@ -787,9 +787,11 @@ void Paykan_flush(void);
 // -- Program arguments
 //
 // `fn main(args: view Str[])` is passed a slice of the program's arguments:
-// one string per argv entry, or none when PAYKAN_NO_ARGS is set (the kernel
-// always supplies an argv[0], so a caller that wants none says so).  The
-// entry point makes them before main runs and drops them after it returns.
+// one string per argv entry, or none for a program the plugin host runs
+// with no arguments (it starts it with one empty argv[0], as not every
+// system starts a program with argc == 0, and says so in a private
+// environment variable).  The entry point makes them before main runs and
+// drops them after it returns.
 
 /// The boxed strings of argv, @p *count of them.
 PaykanShared **Paykan_args_new(int argc, char **argv, int64_t *count);

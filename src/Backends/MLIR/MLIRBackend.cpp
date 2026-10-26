@@ -29,7 +29,6 @@
 #include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/Triple.h>
 
-#include <filesystem>
 #include <memory>
 #include <ostream>
 #include <span>
@@ -120,9 +119,7 @@ public:
       return emitSource(in, opts.SourceStage, out);
     case EmitKind::Object: {
       auto ctx = std::make_unique<llvm::LLVMContext>();
-      return emitObject(in, *ctx,
-                        opts.OutputPath.empty() ? defaultOutput(in) + ".o"
-                                                : opts.OutputPath);
+      return emitObject(in, *ctx, opts.OutputPath);
     }
     case EmitKind::Executable: {
       auto ctx = std::make_unique<llvm::LLVMContext>();
@@ -130,8 +127,7 @@ public:
           [&](const std::string &object) {
             return emitObject(in, *ctx, object);
           },
-          in.Objects,
-          opts.OutputPath.empty() ? defaultOutput(in) : opts.OutputPath);
+          in.Objects, opts.OutputPath);
     }
     }
     return Status::error("unknown emit kind");
@@ -218,14 +214,6 @@ private:
     if (!module)
       return module.status();
     return llvm_codegen::emitHostObject(**module, in.OptLevel, path);
-  }
-
-  /// The default output path of `build`: the input's stem, in the current
-  /// directory.
-  static std::string defaultOutput(const Input &in) {
-    std::string output =
-        std::filesystem::path(in.InputFilename).stem().string();
-    return output.empty() ? "a.out" : output;
   }
 };
 

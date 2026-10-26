@@ -1682,7 +1682,7 @@ TEST(Lowering, InitMakesTheObjectOneOfItsClassOnceItsFieldsAreAssigned) {
   EXPECT_LT(b.find("call @A.__init__("), b.find("vtable.store")) << b;
   std::string c = function(t, "C.__init__");
   EXPECT_EQ(count(c, "vtable.store"), 1u) << c;
-  EXPECT_NE(c.find("  call @B.__init__(%self.6, %arg1.7)\n"
+  EXPECT_NE(c.find("  call @B.__init__(%self.6, %f.7)\n"
                    "  %self.8 = load %self.0\n"
                    "  vtable.store %self.8, C\n"),
             std::string::npos)
@@ -1879,15 +1879,11 @@ TEST(Lowering, AStrOrFloatMatchIsAsDeepForAnyNumberOfArms) {
   };
   auto match = [](const char *type, size_t arms) {
     std::string src = "fn m(x: " + std::string(type) + ") -> int { match x {";
+    const bool str = std::string(type) == "Str";
     for (size_t i = 0; i < arms; ++i) {
-      const std::string n = std::to_string(i);
-      const bool text = std::string(type) == "Str";
-      src.append(text ? " \"" : " ")
-          .append(n)
-          .append(text ? "\"" : ".5")
-          .append(" { return ")
-          .append(n)
-          .append("; }");
+      std::string n = std::to_string(i);
+      src.append(str ? " \"" : " ").append(n).append(str ? "\"" : ".5");
+      src.append(" { return ").append(n).append("; }");
     }
     return src + " _ { return -1; } } }\nfn main() -> int { return 0; }\n";
   };

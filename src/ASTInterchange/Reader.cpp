@@ -1021,6 +1021,27 @@ private:
     return cd;
   }
 
+  /// A function's or a lambda's parameters, @p pl's `(param LOC NAME TYPE
+  /// QUAL?)` each.  A parameter without a location is at @p loc, its
+  /// function's or its lambda's (a location is optional).
+  bool paramList(const SExpr &pl, SourceLocation loc, std::vector<Param> &out) {
+    for (const SExpr &p : pl.Items) {
+      if (p.K != SExpr::List || p.Text != "param")
+        return fail(p, "expected (param \"name\" TYPE)"), false;
+      Fields pf(*this, p);
+      SourceLocation ploc = pf.location();
+      if (!ploc.isValid())
+        ploc = loc;
+      const std::string *pname = pf.name("the parameter's name");
+      Type *pty = pname ? type(pf, "the parameter's type") : nullptr;
+      ParamMode mode = ParamMode::Value;
+      if (!pty || !paramMode(pf, mode) || !pf.done())
+        return false;
+      out.push_back({pname, pty, mode, ploc});
+    }
+    return true;
+  }
+
   /// A function declared as @p kind says.  Its body, and its `(qual
   /// static)`, are checked as the grammar's are (docs/grammar.md): only a
   /// top-level function is native, only a class's or a trait's method has
@@ -1038,20 +1059,9 @@ private:
     if (modulePrivateInit)
       name = &Ctx.intern(names::kMethodInit);
     const SExpr *pl = f.list("params");
-    if (!pl)
-      return nullptr;
     std::vector<Param> params;
-    for (const SExpr &p : pl->Items) {
-      if (p.K != SExpr::List || p.Text != "param")
-        return fail(p, "expected (param \"name\" TYPE)"), nullptr;
-      Fields pf(*this, p);
-      const std::string *pname = pf.name("the parameter's name");
-      Type *pty = pname ? type(pf, "the parameter's type") : nullptr;
-      ParamMode mode = ParamMode::Value;
-      if (!pty || !paramMode(pf, mode) || !pf.done())
-        return nullptr;
-      params.push_back({pname, pty, mode});
-    }
+    if (!pl || !paramList(*pl, loc, params))
+      return nullptr;
     Type *ret = nullptr;
     if (!f.absent()) {
       ret = type(f, "the return type or _");
@@ -1078,6 +1088,10 @@ private:
         return fail(nf.last(), "empty name: the C symbol"), nullptr;
       if (!symbol || !nf.done() || !f.done())
         return nullptr;
+      if (std::string_view why = names::cSymbolProblem(*symbol); !why.empty())
+        return fail(*nl, "the C symbol '" + *symbol + "' of native function '" +
+                             *name + "' " + std::string(why)),
+               nullptr;
       auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, nullptr,
                                     std::move(tparams));
       fn->setNativeSymbol(*symbol);
@@ -2044,20 +2058,9 @@ private:
       return Ctx.make<CallValueExpr>(loc, callee, std::move(args));
     } else if (t == "lambda") {
       const SExpr *pl = f.list("params");
-      if (!pl)
-        return nullptr;
       std::vector<Param> params;
-      for (const SExpr &p : pl->Items) {
-        if (p.K != SExpr::List || p.Text != "param")
-          return fail(p, "expected (param \"name\" TYPE)"), nullptr;
-        Fields pf(*this, p);
-        const std::string *pname = pf.name("the parameter's name");
-        Type *pty = pname ? type(pf, "the parameter's type") : nullptr;
-        ParamMode mode = ParamMode::Value;
-        if (!pty || !paramMode(pf, mode) || !pf.done())
-          return nullptr;
-        params.push_back({pname, pty, mode});
-      }
+      if (!pl || !paramList(*pl, loc, params))
+        return nullptr;
       Type *ret = nullptr;
       if (!f.absent()) {
         Nested inner(*this, e);

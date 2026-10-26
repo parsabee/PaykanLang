@@ -1000,16 +1000,16 @@ void Sema::declarePoisoned(Scope *scope, std::string_view name) {
 }
 
 bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc,
-                           bool binds) {
+                           bool binds, std::string_view what) {
   if (isTypeNameForVariable(name)) {
-    error(loc,
-          "'" + name + "' is a type name and cannot be used as a variable");
+    error(loc, "'" + name + "' is a type name and cannot be used as " +
+                   std::string(what));
     return false;
   }
   if (binds && isFunctionNameForVariable(name)) {
     error(loc, "'" + name +
-                   "' is a function of this module and cannot be used as a "
-                   "variable");
+                   "' is a function of this module and cannot be used as " +
+                   std::string(what));
     return false;
   }
   return true;
@@ -1034,8 +1034,7 @@ bool Sema::checkDistinctParams(const ast::FuncDecl *fn,
   StringSet seen;
   for (const ast::Param &p : fn->getParams())
     if (!seen.insert(p.getName()).second) {
-      error(fn->getLocation(),
-            "duplicate parameter '" + p.getName() + "' in " + what);
+      error(p.Loc, "duplicate parameter '" + p.getName() + "' in " + what);
       return false;
     }
   return true;
@@ -1090,6 +1089,16 @@ bool Sema::isTypeNameForVariable(const std::string &name) const {
          (CurrentTypeParams && CurrentTypeParams->count(name)) ||
          name == names::kObj || name == names::kString ||
          (ast::builtinKindOfName(name, kind) && kind != ast::BuiltinType::Void);
+}
+
+bool Sema::rebindsPoisonedFunctionName(const std::string &name) {
+  if (!isFunctionNameForVariable(name))
+    return false;
+  Scope *owner = CurrentScope->findOwner(name);
+  if (!owner || !ast::isa<ast::PoisonType>(owner->lookup(name)))
+    return false;
+  ++SuppressedFollowOns;
+  return true;
 }
 
 bool Sema::isFunctionNameForVariable(const std::string &name) const {
@@ -1440,7 +1449,10 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
     std::optional<std::vector<ast::Type *>> *argTypes) {
   const ast::SourceLocation loc = node->getLocation();
   const ast::EnumDecl *tmpl = S.EnumTemplates.find(tmplName)->second;
-  const std::string spelled = tmplName + names::kQualSep + variant;
+  // The messages name it as the program spells it, not by another module's
+  // hidden qualifier (a variant made in that module's template).
+  const std::string shown = S.displayName(tmplName);
+  const std::string spelled = shown + names::kQualSep + variant;
   // Written: `Maybe<int>::Just(1)`.
   if (!typeArgAnns.empty()) {
     std::vector<ast::Type *> typeArgs;
@@ -1470,20 +1482,20 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
   while (idx < variants.size() && *variants[idx] != variant)
     ++idx;
   if (idx == variants.size()) {
-    S.error(loc, "enum '" + tmplName + "' has no variant '" + variant + "'");
+    S.error(loc, "enum '" + shown + "' has no variant '" + variant + "'");
     return nullptr;
   }
   const auto &fields = tmpl->getPayload(idx);
   if (fields.empty()) {
     if (argTypes)
-      S.error(loc, "variant '" + variant + "' of enum '" + tmplName +
+      S.error(loc, "variant '" + variant + "' of enum '" + shown +
                        "' has no fields: write '" + spelled +
                        "' without arguments");
     else
-      S.error(loc, "cannot infer the type arguments of generic enum '" +
-                       tmplName + "' for '" + spelled + "': write them ('" +
-                       tmplName + "<...>" + names::kQualSep + variant +
-                       "'), or give the value a type ('x: " + tmplName +
+      S.error(loc, "cannot infer the type arguments of generic enum '" + shown +
+                       "' for '" + spelled + "': write them ('" + shown +
+                       "<...>" + names::kQualSep + variant +
+                       "'), or give the value a type ('x: " + shown +
                        "<...> = " + spelled + "')");
     return nullptr;
   }
@@ -1503,7 +1515,7 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
     for (size_t i = 0; i < fields.size(); ++i)
       list += (i ? ", " : "") + fields[i]->getName() + ": " +
               typeName(fields[i]->getType());
-    S.error(loc, "variant '" + variant + "' of enum '" + tmplName + "' has " +
+    S.error(loc, "variant '" + variant + "' of enum '" + shown + "' has " +
                      std::to_string(fields.size()) + " field(s) (" + list +
                      "), got " + std::to_string(args.size()) + " argument(s)");
     return nullptr;
@@ -1518,9 +1530,9 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
                   .cloneType(f->getType())
             : f->getType());
   std::vector<ast::Type *> typeArgs;
-  if (!S.inferTypeArgs(
-          tmplName, tmpl->getTypeParams(), paramTypes, tys, loc, typeArgs,
-          tmplName + "<...>" + names::kQualSep + variant + "(...)"))
+  if (!S.inferTypeArgs(tmplName, tmpl->getTypeParams(), paramTypes, tys, loc,
+                       typeArgs,
+                       shown + "<...>" + names::kQualSep + variant + "(...)"))
     return nullptr;
   return S.instantiateEnum(tmplName, typeArgs, loc);
 }
@@ -1529,7 +1541,9 @@ ast::Type *
 Sema::ExprChecker::checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
                                     const std::string &variant,
                                     const std::vector<ast::Type *> *argTypes) {
-  const std::string &callee = node->getCalleeName();
+  // For the messages only: as the program spells it, not by another
+  // module's hidden qualifier (a call in that module's template).
+  const std::string callee = S.displayName(node->getCalleeName());
   int64_t idx = enumTy->findVariant(variant);
   if (idx < 0) {
     S.error(node->getLocation(), "enum '" + enumTy->getName() +
@@ -1659,6 +1673,45 @@ void Sema::ExprChecker::typeChainBelow(ast::Expr *e) {
     ChainTypes[*it] = visit(*it);
 }
 
+namespace {
+
+// Adds to @p out the names in @p t where inference can bind a type
+// parameter (Sema::unifyTypes): a named type, and the parts of a slice,
+// tuple, optional, function or generic type.
+void inferableNames(ast::Type *t, StringSet &out) {
+  if (!t)
+    return;
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(t)) {
+    out.insert(ct->getName());
+  } else if (auto *at = ast::dyn_cast<ast::ArrayType>(t)) {
+    inferableNames(at->getElementType(), out);
+  } else if (auto *tt = ast::dyn_cast<ast::TupleType>(t)) {
+    for (ast::Type *el : tt->getElementTypes())
+      inferableNames(el, out);
+  } else if (auto *ot = ast::dyn_cast<ast::OptionalType>(t)) {
+    inferableNames(ot->getInnerType(), out);
+  } else if (auto *ft = ast::dyn_cast<ast::FunctionType>(t)) {
+    for (ast::Type *p : ft->getParamTypes())
+      inferableNames(p, out);
+    inferableNames(ft->getReturnType(), out);
+  } else if (auto *gt = ast::dyn_cast<ast::GenericType>(t)) {
+    for (ast::Type *arg : gt->getArgs())
+      inferableNames(arg, out);
+  }
+}
+
+// Whether @p types name every one of @p params where inference can bind it.
+bool inferableFrom(const std::vector<const std::string *> &params,
+                   const std::vector<ast::Type *> &types) {
+  StringSet named;
+  for (ast::Type *t : types)
+    inferableNames(t, named);
+  return std::all_of(params.begin(), params.end(),
+                     [&](const std::string *p) { return named.count(*p); });
+}
+
+} // namespace
+
 Sema::ExprChecker::OtherSide
 Sema::ExprChecker::needsOtherSide(const ast::Expr *e) const {
   if (const auto *t = ast::dyn_cast<ast::TernaryExpr>(e))
@@ -1668,21 +1721,54 @@ Sema::ExprChecker::needsOtherSide(const ast::Expr *e) const {
     return S.EnumTemplates.count(ev->getEnumName()) && !ev->hasTypeArgs()
                ? OtherSide::Needed
                : OtherSide::NotNeeded;
-  if (const auto *call = ast::dyn_cast<ast::CallExpr>(e)) {
-    const std::string &callee = call->getCalleeName();
-    const size_t sep = callee.rfind(names::kQualSep);
-    if (sep != std::string::npos && !call->hasTypeArgs() &&
-        S.EnumTemplates.count(callee.substr(0, sep)))
-      return OtherSide::Helps;
+  const auto *call = ast::dyn_cast<ast::CallExpr>(e);
+  if (!call || call->hasTypeArgs())
+    return OtherSide::NotNeeded;
+  const std::string &callee = call->getCalleeName();
+  // `none()`, `res::ok(1)`: a generic function's type parameters that its
+  // parameters leave open come from the type its result flows into.
+  if (auto fn = S.FuncTemplates.find(callee); fn != S.FuncTemplates.end()) {
+    std::vector<ast::Type *> paramTypes;
+    for (const ast::Param &p : fn->second->getParams())
+      paramTypes.push_back(p.ParamType);
+    return inferableFrom(fn->second->getTypeParams(), paramTypes)
+               ? OtherSide::NotNeeded
+               : OtherSide::Needed;
   }
-  return OtherSide::NotNeeded;
+  // `Maybe::Just(n)`: a generic enum's variant made with fields, which its
+  // arguments are typed for without the other side's type.  It needs that
+  // type when the fields leave a type parameter open (`Pair::Left(1)` of a
+  // `Pair<A, B>`, `Result::Ok(1)`) or an argument needs it
+  // (`Maybe::Just(Maybe::Nothing)`); otherwise it may infer them.
+  const size_t sep = callee.rfind(names::kQualSep);
+  if (sep == std::string::npos)
+    return OtherSide::NotNeeded;
+  auto tmpl = S.EnumTemplates.find(callee.substr(0, sep));
+  if (tmpl == S.EnumTemplates.end())
+    return OtherSide::NotNeeded;
+  const ast::EnumDecl *ed = tmpl->second;
+  const std::string_view variant = std::string_view(callee).substr(sep + 2);
+  for (size_t v = 0; v < ed->getNumVariants(); ++v) {
+    if (*ed->getVariants()[v] != variant)
+      continue;
+    std::vector<ast::Type *> fieldTypes;
+    for (const ast::VarDecl *f : ed->getPayload(v))
+      fieldTypes.push_back(f->getType());
+    if (!inferableFrom(ed->getTypeParams(), fieldTypes))
+      return OtherSide::Needed;
+  }
+  for (const ast::Expr *arg : call->getArguments())
+    if (needsOtherSide(arg) == OtherSide::Needed)
+      return OtherSide::Needed;
+  return OtherSide::Helps;
 }
 
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // A numeric literal operand takes the other operand's sized type (`x + 1`
   // with `x: u8` adds two `u8`), so the non-literal operand is typed first,
-  // and so is the operand of `==` or `!=` a generic enum's variant without
-  // type arguments takes them from (`Maybe::Nothing == m`).
+  // and so is the operand of `==` or `!=` a generic enum's variant or a
+  // generic function's call without type arguments takes them from
+  // (`Maybe::Nothing == m`, `res::ok(1) == r`; needsOtherSide).
   ast::Type *lhsTy = nullptr;
   ast::Type *rhsTy = nullptr;
   const bool equality = node->getOpcode() == ast::BinaryOpcode::Eq ||
@@ -2661,10 +2747,11 @@ ast::Type *Sema::ExprChecker::visitSubscriptExpr(ast::SubscriptExpr *node) {
 }
 
 ast::Type *Sema::ExprChecker::visitTernaryExpr(ast::TernaryExpr *node) {
-  // A generic enum's variant in an arm takes its type arguments from the
-  // slot the value flows into, else from the other arm's type: the arm
-  // that needs it less is typed first (`if c then Maybe::Just(1) else
-  // Maybe::Nothing`, `if c then Maybe::Nothing else Maybe::Just(1)`).
+  // A generic enum's variant or a generic function's call in an arm takes
+  // its type arguments from the slot the value flows into, else from the
+  // other arm's type: the arm that needs it less is typed first (`if c then
+  // Maybe::Just(1) else Maybe::Nothing`, `if c then Maybe::Nothing else
+  // Maybe::Just(1)`, `if c then none() else Maybe::Just(1)`).
   ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
   auto visitArm = [&](ast::Expr *arm, ast::Type *want) {
     if (want &&
@@ -2885,6 +2972,16 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       const std::string &name = target.getName();
       if (!seen.insert(name).second || isTypeNameForVariable(name))
         continue;
+      // A function's name is reported all the same, and poisoned, as in
+      // visitAssignStmt.
+      if (isFunctionNameForVariable(name)) {
+        if (!rebindsPoisonedFunctionName(name)) {
+          checkBinderName(name, target.Loc);
+          if (!CurrentScope->findOwner(name))
+            declarePoisoned(CurrentScope, name);
+        }
+        continue;
+      }
       if (target.DeclType) {
         if (CurrentScope->contains(name))
           continue; // a redeclaration: the existing binding stands
@@ -2937,6 +3034,10 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
 
     if (!seen.insert(name).second) {
       error(target.Loc, "duplicate target '" + name + "' in destructuring");
+      ok = false;
+      continue;
+    }
+    if (rebindsPoisonedFunctionName(name)) {
       ok = false;
       continue;
     }
@@ -3457,6 +3558,27 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
     InstantiationStack = std::move(savedStack);
   }
   DeferredOptionalChecks.clear();
+  // Every type's name is known: the fields of a template that was not
+  // instantiated yet are checked as an instantiation's would be, in the
+  // order the templates are written.
+  std::vector<const ast::Decl *> templates(node->getGenericClassDecls().begin(),
+                                           node->getGenericClassDecls().end());
+  templates.insert(templates.end(), node->getGenericStructDecls().begin(),
+                   node->getGenericStructDecls().end());
+  templates.insert(templates.end(), node->getGenericEnumDecls().begin(),
+                   node->getGenericEnumDecls().end());
+  // By position, never by address, so the order is deterministic; stable,
+  // so templates without a position keep the AST's order.
+  // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
+  std::stable_sort(templates.begin(), templates.end(),
+                   [](const ast::Decl *a, const ast::Decl *b) {
+                     return std::pair(a->getLocation().getLineStart(),
+                                      a->getLocation().getColumnStart()) <
+                            std::pair(b->getLocation().getLineStart(),
+                                      b->getLocation().getColumnStart());
+                   });
+  for (const ast::Decl *tmpl : templates)
+    checkTemplateFieldNames(tmpl);
   // Then the traits' signatures, which may name the classes, and the
   // `impl` blocks, which record what implements a trait; only then can a
   // template's bounds be checked (SemaTraits.cpp).
@@ -3739,15 +3861,22 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   if (!valTy) {
     // The value's error was reported.  A first assignment still declares the
     // variable -- poisoned -- so its uses are not reported as undeclared; an
-    // existing variable keeps its type.
+    // existing variable keeps its type.  A function's name is reported all
+    // the same, binding it being an error of its own, so the binding that
+    // poisons it always has its error (rebindsPoisonedFunctionName).
+    if (isFunctionNameForVariable(varName) &&
+        !rebindsPoisonedFunctionName(varName))
+      checkBinderName(varName, node->getLocation());
     if (!isTypeNameForVariable(varName) && !CurrentScope->findOwner(varName))
       declarePoisoned(CurrentScope, varName);
     return false;
   }
 
   // Guard: the target name must not shadow a type, a function or a reserved
-  // name.  A function's name is then poisoned, so its uses that follow are
-  // not reported again as uses of the function.
+  // name.  A function's name is then poisoned, so its uses and assignments
+  // that follow are not reported again.
+  if (rebindsPoisonedFunctionName(varName))
+    return false;
   if (!checkBinderName(varName, node->getLocation())) {
     if (isFunctionNameForVariable(varName) && !CurrentScope->findOwner(varName))
       declarePoisoned(CurrentScope, varName);
@@ -4177,15 +4306,15 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   }
   std::vector<ast::Type *> paramTypes;
   for (auto &p : node->getMutableParams()) {
-    if (!checkBinderName(p.getName(), node->getLocation(),
-                         /*binds=*/!node->isNative())) {
+    if (!checkBinderName(p.getName(), p.Loc, /*binds=*/!node->isNative(),
+                         "a parameter name")) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
     }
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
-    auto *ty = resolveValueType(p.ParamType, node->getLocation(),
-                                "parameter '" + p.getName() + "'");
+    auto *ty =
+        resolveValueType(p.ParamType, p.Loc, "parameter '" + p.getName() + "'");
     if (!ty) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
@@ -4299,6 +4428,13 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
 // twice is fine.
 bool Sema::checkNativeSymbol(const ast::FuncDecl *node) {
   const std::string &symbol = node->getNativeSymbol();
+  // The frontends reject such a symbol; an AST made another way may not.
+  if (std::string_view why = names::cSymbolProblem(symbol); !why.empty()) {
+    error(node->getLocation(),
+          "the C symbol '" + symbol + "' of native function '" +
+              displayName(node->getName()) + "' " + std::string(why));
+    return false;
+  }
   const pir::Signature sig = nativeSignature(Ctx, *node);
   if (pir::isRuntimeSymbol(symbol)) {
     if (const pir::Signature *rt = pir::runtimeSignature(symbol);

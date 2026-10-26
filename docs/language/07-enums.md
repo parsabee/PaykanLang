@@ -500,6 +500,8 @@ Output:
 - A `view` is never stored in a field: `E::B(v)` with a `view` parameter `v` is an error, as
   storing it in a struct is.
 - A tagged union does not cross into C ([Native functions](03-functions.md#native-functions)),
+  other than as a type argument of a generic native function, whose `PaykanType` gives it
+  the kind of a tuple ([Generic native functions](03-functions.md#generic-native-functions)),
   and is not `Hashable` (so it is not a `HashMap` key).
 - An imported tagged union is used the same way: `geo::Shape::Rect(1, 2)` makes one and the
   arms are bare (`r: Rect`); its fields' struct is `geo::Shape::Rect`.
@@ -571,8 +573,13 @@ A variant written without its type arguments gets them, in this order:
    other side of `==` or `!=`, or the other arm of a conditional expression (`if n > 0 then
    Maybe::Just(n) else Maybe::Nothing`). The other side or arm may be on either side
    (`Maybe::Nothing == m`, `if n > 0 then Maybe::Nothing else Maybe::Just(n)`): the one that
-   needs the other's type less is typed first. It comes before inference, so `m: Maybe<u8> =
-   Maybe::Just(200)` holds a `u8`.
+   needs the other's type less is typed first. A variant without fields needs it, and so does
+   one whose fields leave a type parameter open (`Pair::Left(1)` of an `enum Pair<A, B> {
+   Both(a: A, b: B), Left(a: A) }`) or whose field needs it (`Maybe::Just(Maybe::Nothing)`),
+   and a call of a generic function whose arguments leave one open (`none()` of a `fn
+   none<T>() -> Maybe<T>`); another variant made with fields needs it less, and anything
+   else not at all. Of two sides that need it as much, the first is typed first. It comes
+   before inference, so `m: Maybe<u8> = Maybe::Just(200)` holds a `u8`.
 3. **Inferred from the variant's fields**, as a generic class's constructor infers them:
    `Maybe::Just(3)` is a `Maybe<int>`, and `Maybe::Just(x)` in a generic function a `Maybe<T>`.
 
@@ -617,7 +624,7 @@ holds it in field 'tail'`), and a recursive one goes through a class, as `Expr` 
 | Binding a variant without fields | `x: Empty { … }` where the variant `Empty` has no fields |
 | Unknown field | `r.z` where the variant's fields have no `z` (`no field 'z' in variant 'Rect' of enum 'Shape'`) |
 | Enum holds itself | A variant's fields hold the enum, directly or through a struct or a tuple |
-| Bad field | Two fields of one variant share a name, a field is a fixed-size array, or a `view` is stored in one |
+| Bad field | Two fields of one variant share a name, one is named like a type (`B(u8: int)`: `'u8' is a type name and cannot be used as a field name`), a field is a fixed-size array, or a `view` is stored in one |
 | Generic enum without type arguments | `m: Maybe = …` for a generic `Maybe` (`write 'Maybe<...>'`) |
 | Type arguments cannot be inferred | A variant of a generic enum without written type arguments, an expected type of the same enum, or fields that determine them (`x = Maybe::Nothing;`, `Result::Ok(1)`) |
 | Wrong type arguments | `Maybe<int, int>` for a one-parameter enum, an argument that does not satisfy a bound, or `Color<int>` for an enum that is not generic |

@@ -7,6 +7,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace paykan::driver {
@@ -45,8 +46,10 @@ struct Options {
   /// The source file to compile (the first positional argument after the
   /// optional command word).
   std::string InputFilename;
-  /// Arguments forwarded to the Paykan program: everything after the source
-  /// file, verbatim, including arguments that look like options.
+  /// Arguments forwarded to the Paykan program under `run`: everything after
+  /// the source file, verbatim, including arguments that look like options.
+  /// What asks for anything else (`build`, `pkm`, --check-only, --emit-*)
+  /// takes none, so its options may follow the file.
   std::vector<std::string> ProgramArgs;
 
   /// --frontend=<name>; "" selects the build's default.
@@ -56,6 +59,9 @@ struct Options {
   /// --backend=<name>; "" selects the build's default.
   std::string Backend;
   bool ListBackends = false; // --list-backends
+  /// --list-modules: print the module file of each module whose compiled
+  /// code the program links (what --emit-c's C needs as objects) and stop.
+  bool ListModules = false;
 
   /// --plugin=<file> (repeatable): plugin libraries to load, in order,
   /// before the plugin directories are searched (paykan/PluginLoader.h).
@@ -64,7 +70,8 @@ struct Options {
   /// the user and system directories); --plugin files are still loaded.
   bool NoPlugins = false;
 
-  /// -o <file>: the output of `build` or `--emit-pkm`.
+  /// -o <file>: the output of `build`, `--emit-pkm`, `pkm extract` or an
+  /// --emit-* option (which prints to standard output without it).
   std::string OutputPath;
   /// --module-name=<name>: the canonical name of the module `--emit-pkm`
   /// writes (`geometry::shapes`, or `::collections` for a module of the
@@ -146,6 +153,17 @@ struct ParseResult {
 /// `pkm`); the next is the source file (after `pkm`: the verb, then the
 /// module file), and everything after it belongs to the program.
 ParseResult parseCommandLine(int argc, const char *const *argv);
+
+/// The parts `pkm dump --section=<name>` prints, in the order `--help` and
+/// the error for another name list them: `all`, the default, is every part
+/// and `code` the PIR text of the module's code.
+inline constexpr std::string_view kPkmDumpSections[] = {
+    "manifest", "sections", "iface",    "tmpl", "code",
+    "symidx",   "obj",      "payloads", "all"};
+
+/// The names of kPkmDumpSections, @p sep between two of them and @p lastSep
+/// before the last one.
+std::string pkmDumpSectionList(std::string_view sep, std::string_view lastSep);
 
 /// Print the usage text.
 void printUsage(std::ostream &os, const char *argv0);

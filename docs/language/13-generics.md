@@ -437,9 +437,10 @@ same<float>(1, 2.0);      // ok (1 promotes to float)
 
 A type parameter the arguments leave open is taken from the type the call's value flows
 into, when the function's result type names it: a declared variable, a parameter, a
-`return`, a field or an array element, as for a generic enum's variant ([Generic
-Enums](07-enums.md#generic-enums)). The arguments come first, and what they determine stays
-theirs:
+`return`, a field, an array element, the other side of `==` or `!=` or the other arm of a
+conditional expression (in either order: `res::ok(1) == r` and `r == res::ok(1)`), as for a
+generic enum's variant ([Generic Enums](07-enums.md#generic-enums)). The arguments come
+first, and what they determine stays theirs:
 
 ```pkn
 fn none<T>() -> T? { return None; }
@@ -483,7 +484,8 @@ m = ident<Node?>(n);               // optional type argument
 
 A tuple type argument is a value like any tuple: `Box<(int, Str)>`'s field
 holds the tuple's elements in place, a `T` parameter is a copy of one, and a
-tuple meets a `T: Show` bound.
+tuple meets a `T: Show` bound when its elements do (`(int, Str)` does, a tuple
+holding a function value does not).
 
 Because each instantiation is checked separately, a `T?` in a template is
 an optional of whatever `T` is: `Slot<int>` below holds an `int?` (an
@@ -653,6 +655,6 @@ d = gen::Box<int>(1);     // the same class as c's
 ## Not Supported Yet
 
 Variance, default type arguments, explicit specialisation, generic methods (a method's or a
-`static fn`'s own type parameters), generic superclasses, and one shared copy of an
-instantiation over class-type arguments (erasure,
-[#160](https://github.com/parsabee/PaykanLang/issues/160)).
+`static fn`'s own type parameters) and generic superclasses. Each instantiation is compiled on its
+own, also over class-type arguments; sharing one compiled copy among those would be an
+optimisation a program cannot observe.

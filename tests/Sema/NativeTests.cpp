@@ -387,3 +387,24 @@ TEST(Native, EntryAndCPathSymbolsKeepTheirSignature) {
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
+
+// Sema checks a C symbol too, for an AST no frontend checked (the parser
+// and the AST reader reject such a symbol first): `a b` gave C that did not
+// compile and a JIT link that failed.
+TEST(Native, ASymbolThatIsNoCIdentifierIsRejected) {
+  auto [ok, driver] = parse("native fn f() -> int = \"pk_f\";\n"
+                            "fn main() -> int { return f(); }\n");
+  ASSERT_TRUE(ok);
+  static const std::string kBad = "a b";
+  driver->getRoot()->getFuncDecls()[0]->setNativeSymbol(kBad);
+  std::ostringstream os;
+  paykan::sema::DiagEngine diag(os);
+  diag.setSourceInfo(driver->getCurrentFile(), &driver->getSourceLines());
+  paykan::sema::Sema sema(driver->getASTContext(), diag, "",
+                          driver->getFrontendName());
+  EXPECT_FALSE(sema.run(driver->getRoot()).Ok);
+  EXPECT_NE(os.str().find("the C symbol 'a b' of native function 'f' is not "
+                          "a C identifier"),
+            std::string::npos)
+      << os.str();
+}

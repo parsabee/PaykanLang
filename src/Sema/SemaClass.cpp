@@ -557,12 +557,29 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
   if (auto *super = ct->getSuperClass())
     ct->reinheritVTable(super);
 
+  // An instantiation's field names are its template's, checked there.
+  const InstantiationInfo *info = instantiationInfo(ct);
+  const ast::Decl *tmpl = localTemplate(info ? info->Template : nullptr);
+  if (tmpl)
+    checkTemplateFieldNames(tmpl);
+
   // -- fields --
   StringSet fieldNames;
   for (auto *field : cd->getFields()) {
     if (!fieldNames.insert(field->getName()).second) {
       error(field->getLocation(), "duplicate field '" + field->getName() +
                                       "' in class '" + cd->getName() + "'");
+      ok = false;
+      continue;
+    }
+    // Checked here, whether or not the class writes its `__init__`.
+    if (tmpl && isTypeNameForVariable(field->getName())) {
+      ++SuppressedFollowOns; // reported at the template
+      ok = false;
+      continue;
+    }
+    if (!tmpl && !checkBinderName(field->getName(), field->getLocation(),
+                                  /*binds=*/false, "a field name")) {
       ok = false;
       continue;
     }
@@ -691,7 +708,9 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
   std::vector<ast::Stmt *> body;
 
   // The superclass constructor's arguments, named as it names them where
-  // that is free (a field of this class may take the name).
+  // that is free (a field of this class may take the name).  An imported
+  // class's names are its modes', which it has only when one parameter is
+  // `view` or `inout`; `argN` stands for a name it does not have.
   ast::ClassType *super = ct->getSuperClass();
   if (const ast::MethodDecl *superInit =
           super && super != Ctx.getObjTy()
@@ -700,14 +719,16 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
     const ast::ParamModes &modes = superInit->getParamModes();
     std::vector<ast::Expr *> args;
     for (size_t i = 0; i < superInit->getNumParams(); ++i) {
-      std::string name = modes.name(i);
+      std::string name = superInit->getParamName(i);
+      if (name.empty())
+        name = modes.name(i);
       if (name.empty())
         name = "arg" + std::to_string(i + 1);
       while (!used.insert(name).second)
         name += "_";
       const std::string &interned = Ctx.intern(name);
       params.push_back(
-          {&interned, superInit->getParamTypes()[i], modes.mode(i)});
+          {&interned, superInit->getParamTypes()[i], modes.mode(i), loc});
       args.push_back(Ctx.make<ast::Identifier>(loc, interned));
     }
     body.push_back(Ctx.make<ast::ExprStmt>(
@@ -716,7 +737,7 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
   }
   for (auto &[name, type] : ct->getFields()) {
     const std::string &interned = Ctx.intern(name);
-    params.push_back({&interned, type});
+    params.push_back({&interned, type, ast::ParamMode::Value, loc});
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
         Ctx.make<ast::Identifier>(loc, interned)));
@@ -788,20 +809,19 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
     // `self` is the implicit receiver of every method; a parameter of the
     // same name would silently shadow it in the body scope.
     if (p.getName() == names::kSelf) {
-      error(method->getLocation(),
-            "'" + std::string(names::kSelf) +
-                "' cannot be used as a parameter name of method '" +
-                method->getName() + "' in " + typeKindWord(owner) + " '" +
-                className + "'; it is the implicit receiver");
+      error(p.Loc, "'" + std::string(names::kSelf) +
+                       "' cannot be used as a parameter name of method '" +
+                       method->getName() + "' in " + typeKindWord(owner) +
+                       " '" + className + "'; it is the implicit receiver");
       return nullptr;
     }
-    if (!checkBinderName(p.getName(), method->getLocation(),
-                         /*binds=*/!DeclaringDefaultInit))
+    if (!checkBinderName(p.getName(), p.Loc, /*binds=*/!DeclaringDefaultInit,
+                         "a parameter name"))
       return nullptr;
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
     auto *pty =
-        resolveValueType(p.ParamType, method->getLocation(),
+        resolveValueType(p.ParamType, p.Loc,
                          "parameter '" + p.getName() + "' of method '" +
                              method->getName() + "' in '" + className + "'");
     if (!pty)
@@ -865,6 +885,10 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   ast::ParamModes modes = ast::paramModes(method->getParams());
   modes.Result = method->getResultMode();
   mdecl->setParamModes(std::move(modes));
+  std::vector<const std::string *> names;
+  for (const ast::Param &p : method->getParams())
+    names.push_back(p.Name);
+  mdecl->setParamNames(std::move(names));
   mdecl->setModulePrivateInit(method->isModulePrivateInit());
   return mdecl;
 }
@@ -967,6 +991,31 @@ bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
             std::string(typeKindWord(owner)) + " '" + typeName(owner) + "'" +
             (ast::isa<ast::StructType>(owner) ? " (a struct has none)" : ""));
   return true;
+}
+
+void Sema::checkTemplateFieldNames(const ast::Decl *tmpl) {
+  if (!TemplateFieldsChecked.insert(tmpl).second)
+    return;
+  // Not under an instantiation (its notes would name one of many) nor a
+  // generic body's type parameters: the template's fields are checked as a
+  // struct's are.
+  std::vector<InstantiationFrame> frames =
+      std::exchange(InstantiationStack, {});
+  const StringSet *typeParams = std::exchange(CurrentTypeParams, nullptr);
+  auto check = [&](const std::vector<ast::VarDecl *> &fields) {
+    for (const ast::VarDecl *field : fields)
+      checkBinderName(field->getName(), field->getLocation(),
+                      /*binds=*/false, "a field name");
+  };
+  if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
+    check(cd->getFields());
+  else if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
+    check(sd->getFields());
+  else if (const auto *ed = ast::dyn_cast<ast::EnumDecl>(tmpl))
+    for (size_t v = 0; v < ed->getNumVariants(); ++v)
+      check(ed->getPayload(v));
+  CurrentTypeParams = typeParams;
+  InstantiationStack = std::move(frames);
 }
 
 bool Sema::rejectBodyInits(ast::TranslationUnit *tu) {
@@ -2021,11 +2070,14 @@ bool Sema::inferTypeArgs(const std::string &templateName,
                          ast::SourceLocation loc, std::vector<ast::Type *> &out,
                          const std::string &spelling, ast::Type *resultPattern,
                          ast::Type *expected) {
+  // Named as the program spells it, not by another module's hidden
+  // qualifier (the name of a call in its template).
+  const std::string shown = displayName(templateName);
   const std::string hint =
       "specify the type arguments explicitly: '" +
-      (spelling.empty() ? templateName + "<...>(...)" : spelling) + "'";
+      (spelling.empty() ? shown + "<...>(...)" : spelling) + "'";
   if (paramTypes.size() != argTypes.size()) {
-    error(loc, "cannot infer the type arguments of '" + templateName +
+    error(loc, "cannot infer the type arguments of '" + shown +
                    "': it expects " + std::to_string(paramTypes.size()) +
                    " argument(s), got " + std::to_string(argTypes.size()));
     return false;
@@ -2039,9 +2091,8 @@ bool Sema::inferTypeArgs(const std::string &templateName,
   for (size_t i = 0; i < paramTypes.size(); ++i) {
     if (!unifyTypes(paramTypes[i], argTypes[i], params, bindings, conflict)) {
       error(loc, "cannot infer type parameter '" + conflict.Param + "' of '" +
-                     templateName + "': deduced as both '" +
-                     typeName(conflict.First) + "' and '" +
-                     typeName(conflict.Second) + "'");
+                     shown + "': deduced as both '" + typeName(conflict.First) +
+                     "' and '" + typeName(conflict.Second) + "'");
       note(loc, hint);
       return false;
     }
@@ -2059,8 +2110,8 @@ bool Sema::inferTypeArgs(const std::string &templateName,
   for (auto *p : typeParams) {
     auto it = bindings.find(*p);
     if (it == bindings.end()) {
-      error(loc, "cannot infer type parameter '" + *p + "' of '" +
-                     templateName + "' from the call arguments");
+      error(loc, "cannot infer type parameter '" + *p + "' of '" + shown +
+                     "' from the call arguments");
       note(loc, hint);
       return false;
     }
@@ -2080,7 +2131,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   for (size_t i = 0; i < node->getTypeArgs().size(); ++i) {
     auto *t = resolveType(node->getTypeArgs()[i], loc,
                           "type argument " + std::to_string(i + 1) + " of '" +
-                              callee + "'");
+                              displayName(callee) + "'");
     if (!t)
       return false;
     typeArgs.push_back(t);
@@ -2199,10 +2250,10 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     const std::string member = callee.substr(sep + 2);
     const bool isClass = ClassTemplates.count(owner) != 0;
     if (typeArgs.empty()) {
-      error(loc, "'" + callee + "' is a function of the generic " +
-                     (isClass ? "class" : "struct") + " '" + owner +
-                     "': write '" + owner + "<...>::" + member +
-                     "(...)' with its type arguments");
+      error(loc, "'" + displayName(callee) + "' is a function of the generic " +
+                     (isClass ? "class" : "struct") + " '" +
+                     displayName(owner) + "': write '" + displayName(owner) +
+                     "<...>::" + member + "(...)' with its type arguments");
       return false;
     }
     std::string instName;

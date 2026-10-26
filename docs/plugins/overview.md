@@ -164,15 +164,14 @@ rejected plugin, the first exists and the second never does.
 ## Compatibility and stability
 
 - **The plugin API** (`plugin_api.h`, `PAYKAN_PLUGIN_API_VERSION`) is a
-  versioned C contract. Within one API version, fields are only ever appended
-  to the structs; every struct starts with `struct_size`, and the reader never
-  looks past it. So a plugin built against an older header keeps loading into
-  a newer `paykan` of the same API version. An incompatible change bumps the
-  version.
-- **The program text** is versioned separately: the AST a frontend returns
-  (`PAYKAN_AST_FORMAT_VERSION`, [`ast-format.md`](ast-format.md)) and the PIR
-  text a backend receives (`PAYKAN_PIR_TEXT_VERSION`,
-  [`pir-for-backends.md`](pir-for-backends.md)).
+  versioned C contract. Its version is the release's (200 for 0.2.0), and
+  `paykan` loads only plugins of its own, so a loadable plugin is rebuilt for
+  each release. Every struct starts with `struct_size`, and the reader never
+  looks past it.
+- **The program text** has version numbers of its own, also the release's:
+  the AST a frontend returns (`PAYKAN_AST_FORMAT_VERSION`,
+  [`ast-format.md`](ast-format.md)) and the PIR text a backend receives
+  (`PAYKAN_PIR_TEXT_VERSION`, [`pir-for-backends.md`](pir-for-backends.md)).
 - **The build version** list (#103) is the release's statement of which
   plugin builds it accepts; see
   [`writing-a-backend.md` §7](../writing-a-backend.md#7-plugin-compatibility).
