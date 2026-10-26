@@ -6,8 +6,8 @@
 // the rewrite the error of a pair the families leave out names, an
 // `unsigned`'s `toInt()`, the closed set (unlisted and custom type
 // arguments), the missing-specialization hint, a parse written as a
-// conversion (a method of `Str` now), wrong arity and argument types, and
-// what became of the removed builtins.
+// conversion (a method of `Str` now), `Str` of every value with a text,
+// wrong arity and argument types, and what became of the removed builtins.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -76,15 +76,20 @@ TEST(Conversion, InferredDeclarationsTakeTheResultType) {
 // ─── a parse is a method of Str (docs/language/04-strings-and-conversions.md,
 // ─── "Parsing a string")
 
-/// The one error of @p body, whose text is @p message (the whole line after
-/// `error: `).
-static void expectOneError(const std::string &body,
-                           const std::string &message) {
-  auto r = semaCheck(inMain(body));
+/// The one error of the program @p src, whose text is @p message (the whole
+/// line after `error: `).
+static void expectOneErrorIn(const std::string &src,
+                             const std::string &message) {
+  auto r = semaCheck(src);
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("error: " + message + "\n"), std::string::npos)
       << r.Diagnostics;
+}
+/// expectOneErrorIn of `main` with the statements @p body.
+static void expectOneError(const std::string &body,
+                           const std::string &message) {
+  expectOneErrorIn(inMain(body), message);
 }
 
 TEST(Conversion, APrimitiveDoesNotParseAStr) {
@@ -393,9 +398,6 @@ TEST(Conversion, AnUnsignedHasToInt) {
 // ─── unsupported pairs ──────────────────────────────────────────────────────
 
 TEST(Conversion, UnlistedTypeArgumentsNameTheClosedSet) {
-  expectError(inMain("x = Str<Str>(\"a\");"),
-              "no specialization of 'Str' for 'Str'; its specializations "
-              "are int, float, bool, char");
   expectError(inMain("x = bool<float>(1.5);"),
               "no specialization of 'bool' for 'float'; its specializations "
               "are int, i8, i16, i32, u8, u16, u32, unsigned, bool\n");
@@ -405,29 +407,24 @@ TEST(Conversion, UnlistedTypeArgumentsNameTheClosedSet) {
   expectError(inMain("x = char<float>(1.5);"),
               "no specialization of 'char' for 'float'; its specializations "
               "are int, i8, i16, i32, u8, u16, u32, unsigned, char\n");
-  expectError(inMain("x = Str<Obj>(\"a\");"),
-              "no specialization of 'Str' for 'Obj'");
-  expectError(inMain("o: int? = 1;\n x = Str<int?>(o);"),
-              "no specialization of 'Str' for 'int?'");
   expectError(inMain("x = int<Missing>(1);"),
               "source type of conversion 'int' has unknown class type "
               "'Missing'");
 }
 
 TEST(Conversion, CustomTypesAreNeverSpecializations) {
-  // A user class can't add specializations; toString() stringifies it.
+  // A user type can't add specializations to a primitive; `Str` takes it
+  // as its text (StrTakesEveryTypeWithAText).
   const std::string point = "class Point {}\n"
                             "impl Point { fn __init__() { } }\n";
-  expectError(point + "fn main() -> int { x = Str<Point>(Point()); return 0; }",
-              "no specialization of 'Str' for 'Point'; its specializations "
-              "are int, float, bool, char");
   expectError(point + "fn main() -> int { x = int<Point>(Point()); return 0; }",
               "no specialization of 'int' for 'Point'; its specializations "
               "are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, "
               "char\n");
   expectError("enum Color { Red }\n"
-              "fn main() -> int { x = Str<Color>(Color::Red); return 0; }",
-              "no specialization of 'Str' for 'Color'");
+              "fn main() -> int { x = bool<Color>(Color::Red); return 0; }",
+              "no specialization of 'bool' for 'Color'; its specializations "
+              "are int, i8, i16, i32, u8, u16, u32, unsigned, bool\n");
   expectOk(point + "fn main() -> int { s: Str = Point().toString(); "
                    "return 0; }");
 }
@@ -504,13 +501,11 @@ TEST(Conversion, InferredFormIsTheExplicitOne) {
 }
 
 TEST(Conversion, InferredFormNeedsAnExactSource) {
-  // No widening and no unwrapping: the argument's own type must be a source.
+  // No widening and no unwrapping: the argument's own type must be a source
+  // (an optional's text is its own: StrTakesEveryTypeWithAText).
   expectError(inMain("x = bool(1.5);"),
               "no specialization of 'bool' for 'float'; its specializations "
               "are int, i8, i16, i32, u8, u16, u32, unsigned, bool\n");
-  expectError(inMain("o: int? = 1;\n x = Str(o);"),
-              "no specialization of 'Str' for 'int?'; its specializations "
-              "are int, float, bool, char");
   expectError(inMain("o: int? = 1;\n x = int(o);"),
               "no specialization of 'int' for 'int?'; its specializations "
               "are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, "
@@ -525,25 +520,15 @@ TEST(Conversion, InferredFormRejectsEveryOtherType) {
     return decls + "import ::io; fn main() -> int {\n" + body +
            "\n  return 0;\n}\n";
   };
-  const std::string strSet =
-      "; its specializations are int, float, bool, char, "
-      "i8, i16, i32, u8, u16, u32, unsigned, f16, f32";
-  expectError(prog("a = A(); s = Str(a);"),
-              "no specialization of 'Str' for 'A'" + strSet);
-  expectError(prog("s = Str(Color::Red);"),
-              "no specialization of 'Str' for 'Color'" + strSet);
-  expectError(prog("o = None; s = Str(o);"),
-              "no specialization of 'Str' for 'Obj'" + strSet);
-  expectError(prog("s = Str(None);"),
-              "no specialization of 'Str' for 'Obj'" + strSet);
-  expectError(prog("xs: int[1] = [1]; s = Str(xs);"),
-              "no specialization of 'Str' for 'int[1]'" + strSet);
   expectError(prog("a = A(); n = int(a);"),
               "no specialization of 'int' for 'A'; its specializations are "
               "int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, char\n");
   expectError(prog("n = float(None);"),
               "no specialization of 'float' for 'Obj'; its specializations are "
               "int, float, i8, i16, i32, u8, u16, u32, unsigned, f16, f32\n");
+  expectError(prog("n = char(Color::Red);"),
+              "no specialization of 'char' for 'Color'; its specializations "
+              "are int, i8, i16, i32, u8, u16, u32, unsigned, char\n");
 }
 
 TEST(Conversion, InferredFormTakesExactlyOneArgument) {
@@ -571,15 +556,124 @@ TEST(Conversion, InferredFormInsideGenericsAndCalls) {
 }
 
 TEST(Conversion, StrCopyConstructorStillWorks) {
-  // `Str(s)` with a `Str` is not a conversion.
+  // `Str(s)` with a `Str` is not a conversion: `s` itself, as `Str<Str>(s)`
+  // is.  A `Str?` has a text, "None" or the string.
   expectOk(inMain(R"(
     s = "abc";
     t: Str = Str(s);
     u: Str = Str("lit");
+    v: Str = Str<Str>(s);
+    w: Str = Str<Str>("lit");
+    o: Str? = "a";
+    x: Str = Str(o);
+    y: Str = Str<Str?>(o);
   )"));
-  expectError(inMain("o: Str? = \"a\";\n t = Str(o);"),
-              "cannot use optional 'Str?' as 'Str' without unwrapping");
+  expectOneError("t = Str<Str>(3);",
+                 "argument of 'Str<Str>' has type 'int', expected 'Str'");
+  expectOneError("o: Str? = \"a\"; t = Str<Str>(o);",
+                 "cannot use optional 'Str?' as 'Str' without unwrapping "
+                 "(use match)");
   expectError(inMain("t = Str();"), "function 'Str' expects 1 argument(s)");
+}
+
+// ─── Str of every value with a text (docs/language/04-strings-and-
+// ─── conversions.md, "To a string")
+
+// `Str(x)` is `x.toString()` for every type with a text: an optional, a
+// tuple, a struct, an enum, an object, `None`; in the explicit form too.
+TEST(Conversion, StrTakesEveryTypeWithAText) {
+  const std::string decls = R"(
+    class P { x: int; view fn toString() -> Str { return "P"; } }
+    class Q { }
+    struct S { a: int; b: Str; }
+    enum E { A, B(n: int) }
+    enum Color { Red, Green }
+    fn show<T>(x: T) -> Str { return Str(x); }
+  )";
+  expectOk(decls + inMain(R"(
+    o: int? = None;  so: Str? = "s";  po: P? = P(1);
+    a: Str = Str(o);
+    b: Str = Str(so);
+    c: Str = Str(po);
+    d: Str = Str((1, "a", 2.5));
+    e: Str = Str(S(1, "b"));
+    f: Str = Str(E::B(4));
+    g: Str = Str(E::A);
+    h: Str = Str(Color::Red);
+    i: Str = Str(P(2));
+    j: Str = Str(Q());
+    ob: Obj = P(3);
+    k: Str = Str(ob);
+    l: Str = Str(None);
+    m: Str = show(P(4)) + show((1, 2)) + show(o) + show(S(2, "c"));
+    t = (P(5), Color::Green);
+    n: Str = Str(t);
+  )"));
+  expectOk(decls + inMain(R"(
+    o: int? = 3;  p = P(1);
+    a: Str = Str<int?>(o);
+    b: Str = Str<P>(p);
+    c: Str = Str<(int, Str)>((1, "a"));
+    d: Str = Str<S>(S(1, "b"));
+    e: Str = Str<Color>(Color::Red);
+  )"));
+  // The argument has exactly the type written.
+  expectOneErrorIn(decls + inMain("x = Str<P>(3);"),
+                   "argument of 'Str<P>' has type 'int', expected 'P'");
+  expectOneErrorIn(decls + inMain("p = P(1); x = Str<P?>(p);"),
+                   "argument of 'Str<P?>' has type 'P', expected 'P?'");
+  expectOneErrorIn(decls + inMain("x = Str<Obj>(\"a\");"),
+                   "argument of 'Str<Obj>' has type 'Str', expected 'Obj'");
+}
+
+// A value without a text (a function value, a fixed-size array, a slice, or
+// an aggregate holding one) is no `Str`: the error names the part.
+TEST(Conversion, StrOfAValueWithoutATextNamesThePart) {
+  const std::string decls = R"(
+    struct F { n: int; f: (int) -> int; }
+    enum G { A, B(f: () -> void) }
+    fn show<T>(x: T) -> Str { return Str(x); }
+  )";
+  auto only = [&](const std::string &body, const std::string &message) {
+    expectOneErrorIn(decls + inMain(body), message);
+  };
+  only("x = Str(fn(n: int) => n);",
+       "'Str' cannot convert a value of type '(int) -> int', which does not "
+       "implement trait 'Show'");
+  only("x = Str(F(1, fn(n: int) => n));",
+       "'Str' cannot convert a value of type 'F', which does not implement "
+       "trait 'Show': its field 'f' has type '(int) -> int', which does not "
+       "implement it");
+  only("x = Str<F>(F(1, fn(n: int) => n));",
+       "'Str' cannot convert a value of type 'F', which does not implement "
+       "trait 'Show': its field 'f' has type '(int) -> int', which does not "
+       "implement it");
+  only("xs: int[3] = [1, 2, 3]; x = Str(xs);",
+       "'Str' cannot convert a value of type 'int[3]', which does not "
+       "implement trait 'Show'");
+  only("x = Str((1, fn() {}));",
+       "'Str' cannot convert a value of type '(int, () -> void)', which does "
+       "not implement trait 'Show': its element 1 has type '() -> void', "
+       "which does not implement it");
+  only("x = Str(G::A);",
+       "'Str' cannot convert a value of type 'G', which does not implement "
+       "trait 'Show': its field 'f' of variant 'B' has type '() -> void', "
+       "which does not implement it");
+  expectOneErrorIn("fn s(v: view int[]) -> Str { return Str(v); }\n" +
+                       inMain(""),
+                   "'Str' cannot convert a value of type 'int[]', which does "
+                   "not implement trait 'Show'");
+  // Checked per instantiation: the note names it.
+  auto g = semaCheck(decls + inMain("x = show(fn() {});"));
+  EXPECT_EQ(g.ErrorCount, 1u) << g.Diagnostics;
+  EXPECT_NE(g.Diagnostics.find("error: 'Str' cannot convert a value of type "
+                               "'() -> void', which does not implement trait "
+                               "'Show'\n"),
+            std::string::npos)
+      << g.Diagnostics;
+  EXPECT_NE(g.Diagnostics.find("note: in instantiation of 'show<() -> void>'"),
+            std::string::npos)
+      << g.Diagnostics;
 }
 
 // ─── the removed builtins ───────────────────────────────────────────────────
@@ -642,9 +736,30 @@ TEST(Conversion, StrPlusANumberNeedsStr) {
   expectError(inMain("s = 2.5 + \"b\";"),
               "operator '+' is not defined for types 'float' and 'Str' "
               "(convert the 'float' with 'Str(...)')");
-  expectError(inMain("b: u8 = 1; s = \"c\" + b;"),
-              "operator '+' is not defined for types 'Str' and 'u8'");
+  expectOneError("b: u8 = 1; s = \"c\" + b;",
+                 "operator '+' is not defined for types 'Str' and 'u8' "
+                 "(convert the 'u8' with 'Str(...)')");
   expectOk(inMain("n: int = 3; s: Str = \"a\" + Str(n) + \"b\";"));
+}
+
+// So does any other value with a text; a value without one gets no hint.
+TEST(Conversion, StrPlusAValueWithATextNeedsStr) {
+  const std::string p = "class P { }\n";
+  expectOneErrorIn(p + inMain("x = \"a\" + P();"),
+                   "operator '+' is not defined for types 'Str' and 'P' "
+                   "(convert the 'P' with 'Str(...)')");
+  expectOneErrorIn(p + inMain("x = P() + \"a\";"),
+                   "operator '+' is not defined for types 'P' and 'Str' "
+                   "(convert the 'P' with 'Str(...)')");
+  expectOneError("x = \"a\" + (1, 2);",
+                 "operator '+' is not defined for types 'Str' and '(int, int)' "
+                 "(convert the '(int, int)' with 'Str(...)')");
+  expectOneError("xs: int[3] = [1, 2, 3]; x = \"a\" + xs;",
+                 "operator '+' is not defined for types 'Str' and 'int[3]'");
+  expectOneError("f = fn(n: int) => n; x = \"a\" + f;",
+                 "operator '+' is not defined for types 'Str' and "
+                 "'(int) -> int'");
+  expectOk(p + inMain("x: Str = \"a\" + Str(P()) + Str((1, 2));"));
 }
 
 // ─── Str's parse methods (docs/language/04-strings-and-conversions.md,

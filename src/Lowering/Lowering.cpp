@@ -635,6 +635,8 @@ bool ModuleLowering::exprAlreadyShared(ast::Expr *expr) const {
       return exprAlreadyShared(ce->getArguments()[0]);
     if (FunctionTable.count(ce->getCalleeName()))
       return false;
+    // A function's result, and `Str(x)` of a value with a text, which is
+    // `x.toString()`'s (showCallOf): a +1 box.
     return true;
   }
   return false;

@@ -3154,6 +3154,51 @@ TEST(Lowering, TheFamiliesPairsAreInline) {
   EXPECT_EQ(count(l.Text, "call @$rt."), 1u) << l.Text; // h's panic
 }
 
+// `Str(x)` of a value no runtime conversion takes is `x.toString()` (the
+// lowering's showCallOf): an object's `toString` slot, a tuple's runtime
+// text, an optional's "None" or its value's, held as `h.p.toString()`
+// holds `h.p`.  It is the code of the call it stands for, and no `Str<...>`
+// callee reaches the PIR.  `Str<Str>(s)` is `s`.
+TEST(Lowering, StrOfAValueIsItsToString) {
+  const std::string decls = R"(
+    class P { x: int; view fn toString() -> Str { return "P"; } }
+    class H { p: P; }
+    fn main() -> int { return 0; }
+  )";
+  auto l = lower(decls + R"(
+    fn a(p: P) -> Str { return Str(p); }
+    fn b(t: (int, Str)) -> Str { return Str(t); }
+    fn c(o: int?) -> Str { return Str(o); }
+    fn d(h: H) -> Str { return Str(h.p); }
+    fn e(s: Str) -> Str { return Str<Str>(s); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_EQ(count(l.Text, "Str<"), 0u) << l.Text;
+  std::string a = function(l.Text, "a");
+  EXPECT_NE(a.find("= vcall %p.obj."), std::string::npos) << a;
+  EXPECT_NE(a.find(" : P [1] ()"), std::string::npos) << a;
+  EXPECT_NE(function(l.Text, "b").find("call @$rt.PaykanTuple_toString("),
+            std::string::npos)
+      << l.Text;
+  std::string c = function(l.Text, "c");
+  EXPECT_NE(c.find("is_some %o."), std::string::npos) << c;
+  EXPECT_NE(c.find("call @$rt.PaykanString_from_int("), std::string::npos) << c;
+  std::string d = function(l.Text, "d");
+  EXPECT_NE(d.find("retain %p."), std::string::npos) << d;
+  EXPECT_NE(d.find(" : P [1] ()"), std::string::npos) << d;
+  EXPECT_EQ(count(function(l.Text, "e"), "call "), 0u) << l.Text;
+  auto t = lower(decls + R"(
+    fn a(p: P) -> Str { return p.toString(); }
+    fn b(t: (int, Str)) -> Str { return t.toString(); }
+    fn c(o: int?) -> Str { return o.toString(); }
+    fn d(h: H) -> Str { return h.p.toString(); }
+    fn e(s: Str) -> Str { return s; }
+  )");
+  ASSERT_TRUE(t.Ok) << t.Error;
+  for (const char *fn : {"a", "b", "c", "d"})
+    EXPECT_EQ(fullFunction(l.Text, fn), fullFunction(t.Text, fn)) << fn;
+}
+
 TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalValue) {
   // The runtime parses into a local; the result is that value as the
   // present optional, or None (#96): no box.

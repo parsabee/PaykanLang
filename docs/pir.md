@@ -1015,8 +1015,12 @@ CodeGen enforced, now in one place.
   in the array's `mem` (16 bytes for `int?` and `float?`, 2 for `bool?` and
   `char?`), read and written in place, and so is an `int?` element of a
   tuple, at its offset.
-* **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
-  `PaykanString_from_int` & co. (an owned string temporary).  A parse,
+* **Conversions** (`Target<Source>(value)`, #64): `Str<…>` of a scalar
+  calls `PaykanString_from_int` & co. (an owned string temporary).  `Str<T>`
+  of any other type with a text is `x.toString()`, lowered as that call is
+  (an object's `vcall` of its `toString` slot, `PaykanTuple_toString` & co.,
+  an optional's branch; a fresh box), and `Str<Str>(s)` is `s`: no `Str<…>`
+  callee reaches the PIR.  A parse,
   `s.toInt()` / `s.toFloat()` / `s.toBool()` & co. (no conversion parses a
   `Str`), calls `PaykanString_parse_int` / `PaykanString_parse_float` /
   `PaykanString_parse_bool` on the borrowed string with the `local.addr` of

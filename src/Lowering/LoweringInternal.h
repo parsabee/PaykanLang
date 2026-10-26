@@ -662,6 +662,13 @@ private:
 
   /// A `Str<...>` conversion: returns an owned PaykanString temporary.
   static bool isStrConversion(const std::string &callee);
+  /// `Str(x)` of a value no runtime conversion takes (a `Str<T>` callee
+  /// Sema's textConversion rebinds it to, which FunctionTable does not
+  /// hold): the call `x.toString()` it is, built once per call; nullptr for
+  /// any other call.  The emitter and both hold analyses (BorrowedReads,
+  /// EffectScan) take it in place of the call, so they agree on what it runs.
+  ast::MethodCallExpr *showCallOf(ast::CallExpr *ce);
+  std::unordered_map<const ast::CallExpr *, ast::MethodCallExpr *> ShowCalls;
 
   // -- Optionals
 

@@ -477,6 +477,9 @@ ModuleLowering::BorrowedReads::result(const ast::Expr *call, bool place,
 
 ModuleLowering::BorrowedReads::Use
 ModuleLowering::BorrowedReads::callExpr(ast::CallExpr *ce, bool place) {
+  // `Str(x)` of a value with a text is `x.toString()`.
+  if (ast::MethodCallExpr *show = L.showCallOf(ce))
+    return methodCall(show, place);
   const std::string &name = ce->getCalleeName();
   const std::vector<ast::Expr *> &args = ce->getArguments();
   // `Str(s)` is `s`.
@@ -953,6 +956,9 @@ void ModuleLowering::EffectScan::expr(ast::Expr *e) {
 }
 
 void ModuleLowering::EffectScan::call(ast::CallExpr *ce) {
+  // `Str(x)` of a value with a text is `x.toString()`.
+  if (ast::MethodCallExpr *show = L.showCallOf(ce))
+    return methodCall(show);
   const std::string &name = ce->getCalleeName();
   const std::vector<ast::Expr *> &args = ce->getArguments();
   exprs(args);

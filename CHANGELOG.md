@@ -271,6 +271,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     value. On top of that, a sign is allowed for the signed and float types, and
     `toFloat()` accepts what C's `strtod` accepts, `"inf"` and `"nan"` included.
   - The methods are builtins, not `Str` vtable slots, so the runtime ABI does not change.
+- **`Str(x)` takes every value that has a text** and gives the text `x.toString()` gives:
+  - an optional (`"None"` or its value's text), `Str?` included;
+  - a tuple, a struct, an enum;
+  - an object (its `toString()`) and `None`.
+
+  A value without a text is an error that names the part without one: `'Str' cannot
+  convert a value of type 'F', which does not implement trait 'Show': its field 'f' has
+  type '(int) -> int', which does not implement it`.
 - **New conversions:**
   - `i8` … `u32`, `int` and `unsigned` convert from `bool` (0 or 1) and from `char` (its
     code: `u8(c)` is the byte, `i8(c)` its signed reading).

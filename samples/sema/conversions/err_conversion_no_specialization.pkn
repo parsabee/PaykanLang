@@ -1,11 +1,11 @@
 // The inferred form picks the specialization for the argument's exact type;
-// a user class has none.
+// a user class has none of a primitive's.
 class A {}
 impl A {
   fn __init__() { }
 }
 fn main() -> int {
   a = A();
-  s = Str(a);   // error: no specialization of 'Str' for 'A'; its specializations are int, float, bool, char, i8, i16, i32, u8, u16, u32, unsigned, f16, f32
+  n = int(a);   // error: no specialization of 'int' for 'A'; its specializations are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, char
   return 0;
 }

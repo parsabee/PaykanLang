@@ -441,9 +441,8 @@ a != Point(2, 1): True
 ```
 
 `io::println(a)` works because `io::println` accepts any object (any `Show` value) and
-prints it with `toString()`.
-`Str(a)` does not: the `Str` conversions are only for the built-in types. Call
-`a.toString()` when you need the string.
+prints it with `toString()`. `Str(a)` gives the same text, `a.toString()`, when you need
+the string ([To a string](04-strings-and-conversions.md#to-a-string)).
 
 ## Checking the class at run time
 

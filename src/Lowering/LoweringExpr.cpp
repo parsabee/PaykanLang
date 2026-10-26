@@ -693,6 +693,24 @@ bool ModuleLowering::isStrConversion(const std::string &callee) {
   return callee.rfind(std::string(kString) + "<", 0) == 0;
 }
 
+ast::MethodCallExpr *ModuleLowering::showCallOf(ast::CallExpr *ce) {
+  if (!isStrConversion(ce->getCalleeName()) ||
+      FunctionTable.count(ce->getCalleeName()) || ce->getNumArguments() != 1)
+    return nullptr;
+  auto [it, added] = ShowCalls.try_emplace(ce, nullptr);
+  if (added) {
+    // A fresh +1 box, as exprAlreadyShared and exprProducesFreshBox take
+    // the call (a reference result, a callee FunctionTable does not hold):
+    // what a method's `Str` result is.  In FunctionTable, the call would
+    // be a string temporary, which the box is not.
+    it->second = ASTCtx.make<ast::MethodCallExpr>(
+        ce->getLocation(), ce->getArguments()[0],
+        ASTCtx.intern(kMethodToString), std::vector<ast::Expr *>{});
+    it->second->setResolvedType(ASTCtx.getStrTy());
+  }
+  return it->second;
+}
+
 // Inline numeric conversions `Target<Source>(value)` (#64), the pairs of
 // the families (docs/language/04-strings-and-conversions.md, "Between
 // numbers").  This is the one place their semantics are defined; every
@@ -830,6 +848,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     return L.emitFunctionValueCall(id, node->getArguments(),
                                    node->getResolvedType());
   }
+  if (ast::MethodCallExpr *show = L.showCallOf(node))
+    return visitMethodCallExpr(show);
   if (Val conv = emitConversion(node))
     return conv;
 
@@ -1047,14 +1067,14 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       st && node->getMethodName() != kMethodToString)
     return emitStructMethodCall(node, st, wantAddress);
   // `o.toString()` on an optional (the builtin `Show`).
-  if (ast::isa<ast::OptionalType>(recvResolved) &&
+  if (ast::dyn_cast<ast::OptionalType>(recvResolved) &&
       node->getMethodName() == kMethodToString)
     return emitOptionalToStringCall(node);
   // `t.toString()` on a tuple, a struct or an enum, `n.toString()` on an
   // int, float, bool or char (the builtin `Show`).
-  if (ast::isa<ast::TupleType>(recvResolved) ||
-      ast::isa<ast::EnumType>(recvResolved) ||
-      (recvResolved && ast::isa<ast::BuiltinType>(recvResolved)))
+  if (ast::dyn_cast<ast::TupleType>(recvResolved) ||
+      ast::dyn_cast<ast::EnumType>(recvResolved) ||
+      ast::dyn_cast<ast::BuiltinType>(recvResolved))
     return emitShowCall(node);
   return emitClassMethodCall(node, wantAddress);
 }

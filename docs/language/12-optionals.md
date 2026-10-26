@@ -596,6 +596,7 @@ maybe: Node? = None;
 io::println(maybe);        // None
 n: int? = 5;
 s: Str = n.toString();     // "5"
+t: Str = Str(maybe);       // "None", as Str(x) is x.toString()
 ```
 
 A `view` is never converted either: a `view T` cannot be passed to a `view T?` parameter or

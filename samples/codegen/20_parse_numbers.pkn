@@ -29,8 +29,8 @@ fn tryParseFloat(s: Str) -> Str {
 }
 
 fn main() -> int {
-  // === int<Str> ===
-  io::println("=== int<Str> ===");
+  // === toInt() ===
+  io::println("=== toInt() ===");
 
   // valid integers
   io::println(tryParseInt("0"));
@@ -45,8 +45,8 @@ fn main() -> int {
   io::println(tryParseInt("3.14"));
   io::println(tryParseInt("9223372036854775808"));  // INT64_MAX + 1
 
-  // === float<Str> ===
-  io::println("=== float<Str> ===");
+  // === toFloat() ===
+  io::println("=== toFloat() ===");
 
   // valid floats
   io::println(tryParseFloat("0"));

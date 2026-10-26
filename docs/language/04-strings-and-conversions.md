@@ -211,7 +211,9 @@ constructors**.
 
 ### To a string
 
-`Str(x)` works for `int`, `float`, `bool`, `char` and the sized numeric types:
+`Str(x)` works for every value that has a text: every type that implements the built-in
+trait `Show` ([Traits](06-traits.md)). It gives the text `x.toString()` gives, which is
+also what `io::println(x)` prints. A number, a `bool` and a `char` give theirs:
 
 ```pkn
 import ::io;
@@ -237,9 +239,79 @@ An integer is its decimal digits, with a `-` for negatives (an `unsigned` has no
 an exponent for very large or small numbers; the special values print as `-0`, `nan`,
 `inf` and `-inf`. A `bool` is `True` or `False`, and a `char` a one-character string.
 
-`Str(...)` does not work on objects of your own classes; give the class a `toString()`
-method instead ([Classes](05-classes.md)). `Str(s)` with a `Str` argument is not a
-conversion: it is the `Str` constructor, and returns the string itself.
+Every other value with a text converts the same way:
+
+| Value | Its text |
+|-------|----------|
+| an optional (`int?`, `Str?`, `Point?`) | `None`, or the value's text |
+| `None` | `None` |
+| a tuple | its elements in parentheses, a string unquoted: `(1, a, 2.5)` |
+| a struct | its name and fields: `Size(w: 2, h: 3)` |
+| an enum | its variant, then the variant's fields: `North`, `Circle(r: 1.5)` |
+| an object, an `Obj` | its `toString()`, the one of its own class ([Classes](05-classes.md)); a class without one prints `Name@0x...`, its address |
+| a `Str` | the string itself |
+
+```pkn
+import ::io;
+
+class Point {
+  x: int;
+  y: int;
+  view fn toString() -> Str { return "Point(" + Str(self.x) + ", " + Str(self.y) + ")"; }
+}
+
+struct Size { w: int; h: int; }
+
+enum Shape { Circle(r: float), Square(side: int) }
+
+fn main() -> int {
+  o: int? = None;
+  s: Str? = "hi";
+  p = Point(1, 2);
+  io::println(Str(o) + " " + Str(s) + " " + Str(p) + " " + Str(None));
+  io::println(Str((1, "a", 2.5)) + " " + Str(Size(2, 3)) + " " + Str(Shape::Circle(1.5)));
+  io::println(Str(p) == p.toString());
+  return 0;
+}
+```
+
+Output:
+
+```
+None hi Point(1, 2) None
+(1, a, 2.5) Size(w: 2, h: 3) Circle(r: 1.5)
+True
+```
+
+`Str(s)` of a `Str` is the string itself, the same object, and so is `Str<Str>(s)`. In a
+generic function, `Str(x)` with `x: T` works for every `T` it is instantiated with that has
+a text.
+
+A function value has no text, nor has a fixed-size array or a slice (print one element at
+a time), nor a tuple, struct or enum holding one. `Str` of such a value is an error that
+names the part without a text:
+
+```pkn
+struct F {
+  n: int;
+  f: (int) -> int;
+}
+
+fn main() -> int {
+  s = Str(F(1, fn(x: int) => x * 2));
+  return 0;
+}
+```
+
+Error:
+
+```
+'Str' cannot convert a value of type 'F', which does not implement trait 'Show': its field 'f' has type '(int) -> int', which does not implement it
+```
+
+`+` joins two strings, so a value is converted first: `"x = " + Str(p)`. A `+` of a `Str`
+and another value with a text is an error that says so (`operator '+' is not defined for
+types 'Str' and 'Point' (convert the 'Point' with 'Str(...)')`).
 
 ### Between numbers
 
@@ -475,8 +547,9 @@ The argument must then have exactly that type: `Str<float>(3)` is an error, as `
 
 ### Specializations
 
-The conversions are **specializations of the builtin types**. Each builtin target has a
-fixed, closed set of them, one for each type it converts *from*. `Target(value)` picks the
+The conversions are **specializations of the builtin types**. Each primitive target has a
+fixed, closed set of them, one for each type it converts *from*; `Str` has one for every
+type with a text ([To a string](#to-a-string)). `Target(value)` picks the
 specialization whose source is **exactly** the type of `value`: `Str(n)` with an `int` is
 `Str<int>`, and `int(f)` with a `float` is `int<float>`. Nothing is widened or unwrapped to
 find one. An `int` argument does not reach `float`'s `Str` specialization, and an `int?`
@@ -485,7 +558,7 @@ value unchanged: `float(2.5)` is `float<float>(2.5)`.
 
 | Target  | Specializations (the source types) | Result                                   |
 |---------|------------------------------------|------------------------------------------|
-| `Str`   | `int`, `float`, `bool`, `char`, and every sized numeric type | `Str`           |
+| `Str`   | every type with a text: the primitives, `Str`, optionals, tuples, structs, enums, classes, `Obj` | `Str` |
 | `int`, `i8`, `i16`, `i32` | `int`, `float`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `f16`, `f32`, `bool`, `char` | `T` |
 | `unsigned`, `u8`, `u16`, `u32` | `int`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `bool`, `char` | `T` |
 | `float`, `f16`, `f32` | `int`, `float`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `f16`, `f32` | `T` |
@@ -519,22 +592,23 @@ What each specialization does:
 | `f32<int>(n)`, `float<u8>(b)`, … | integer → float | The nearest value of the target, rounded once (`f32(16777217)` is `16777216`) |
 | `f16<float>(f)`, `float<f32>(x)`, … | float → float | Rounded to the target's precision; too large is its infinity (`f16(0.1)` is `0.0999756`, `f16(70000.0)` is `inf`) |
 | `Str<u8>(b)`, `Str<f32>(x)`, … | sized → `Str` | As `Str<int>` / `Str<float>`; `Str<unsigned>` prints the unsigned value |
+| `Str<Point>(p)`, `Str<int?>(o)`, `Str<(int, Str)>(t)`, … | any other type with a text → `Str` | `x.toString()`: an object's own, an optional's `None` or its value's, a tuple's, struct's or enum's text |
+| `Str<Str>(s)`     | `Str` → `Str`      | The string itself                                             |
 
-**The set is closed.** When no specialization's source is the argument's type, a user class
-included, the call is a compile-time error that lists the target's specializations. For a
-pair a family leaves out ([Between numbers](#between-numbers)) it names the conversion to
-write instead, and for a `Str` argument and a number or `bool` target, the method that
-parses the string. The explicit form reports a type argument outside the set the same way.
-A class cannot add a specialization; `toString()` is the way to turn an object into a
-`Str`:
+**The set is closed** for every target but `Str`, whose sources are the types with a
+text. When no specialization's source is the argument's type, a user class included, the
+call is a compile-time error that lists the target's specializations. For a pair a family
+leaves out ([Between numbers](#between-numbers)) it names the conversion to write instead,
+and for a `Str` argument and a number or `bool` target, the method that parses the string.
+The explicit form reports a type argument outside the set the same way. A class cannot add
+a specialization to a primitive; its `toString()` is what `Str(x)` gives:
 
 ```pkn
 a = Point();
-s = Str(a);         // error: no specialization of 'Str' for 'Point'; its specializations
-                    //        are int, float, bool, char, i8, i16, i32, u8, u16, u32,
-                    //        unsigned, f16, f32
-o = None;
-t = Str(o);         // error: no specialization of 'Str' for 'Obj'; ...
+n = int(a);         // error: no specialization of 'int' for 'Point'; its specializations
+                    //        are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool,
+                    //        char
+s = Str(a);         // the text a.toString() gives
 x = bool(2.5);      // error: no specialization of 'bool' for 'float'; its specializations
                     //        are int, i8, i16, i32, u8, u16, u32, unsigned, bool
 w = u8(2.5);        // error: no specialization of 'u8' for 'float': convert the 'float' to
