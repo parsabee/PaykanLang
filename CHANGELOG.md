@@ -1076,6 +1076,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   neither.  It now links those of the files `paykan --list-modules` names
   (docs/c-backend.md), and the `CStrictC11` test builds every sample that way, and the 13_pkm
   sample with its module prebuilt in a `--module-path` directory.
+- A module file's frontend record named the frontend only: its version and its plugin were
+  always empty (`frontend "recursive-descent" "" plugin ""`).  It now has the built-in
+  frontend's version, the `paykan` version that wrote the file (`frontend
+  "recursive-descent" "0.3.0-dev" plugin ""` from a development build), or a plugin
+  frontend's plugin, by its descriptor's name, and that plugin's version (docs/design/pkm.md
+  §2.2).  The `ast-text` example frontend names the AST format versions it reads and is
+  given (for example `ast-text reads AST format 0.3.0 only, not 0.2.0`), where it said
+  `format 1`.
 
 ## [0.2.0] - 2026-10-20
 

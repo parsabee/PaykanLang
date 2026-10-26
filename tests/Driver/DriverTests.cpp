@@ -2831,3 +2831,31 @@ TEST(Driver, ListModulesNamesEveryModuleFileTheProgramLinks) {
   }
   std::filesystem::remove_all(dir);
 }
+
+// A module file names the frontend that parsed its source with its version,
+// this paykan's for the built-in one (finding 103: the version was always
+// empty), in a cache entry and in an --emit-pkm file alike.
+TEST(Driver, ModuleFilesNameTheirFrontendAndItsVersion) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("frontend_record");
+  std::filesystem::create_directories(dir / "lib");
+  std::ofstream(dir / "lib" / "twice.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import lib::twice;\nfn main() -> int { return lib::twice::twice(0); "
+         "}\n";
+  auto cd = "cd " + dir.string() + " && " + paykanRun();
+  auto r = run(cd + " main.pkn 2>&1");
+  ASSERT_EQ(r.exitCode, 0) << r.out;
+  auto e = run(cd + " --emit-pkm lib/twice.pkn -o twice.pkm 2>&1");
+  ASSERT_EQ(e.exitCode, 0) << e.out;
+  const std::string line = std::string("  frontend \"recursive-descent\" \"") +
+                           paykan::kVersion + "\" plugin \"\"\n";
+  for (const char *file : {".paykan_cache/lib/twice.pkm", "twice.pkm"}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + std::string(kPaykan) +
+                         " pkm dump --section=manifest " + file + " 2>&1");
+    EXPECT_EQ(rc, 0) << file << ": " << out;
+    EXPECT_NE(out.find(line), std::string::npos) << file << ":\n" << out;
+  }
+  std::filesystem::remove_all(dir);
+}

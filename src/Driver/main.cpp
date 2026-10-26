@@ -225,6 +225,29 @@ void printVersion(const paykan::plugin::LoadReport &plugins) {
   printRejected(plugins);
 }
 
+/// Record in @p opts the frontend @p name that parses the program, as its
+/// module files keep it (docs/design/pkm.md §2.2, tag 0x20): a built-in
+/// frontend has this paykan's version and no plugin; a plugin's frontend
+/// has the plugin's own version, and the plugin is named by its descriptor
+/// (else by its file's name).
+void recordFrontend(const std::string &name,
+                    const paykan::plugin::LoadReport &plugins,
+                    paykan::modules::ResolverOptions &opts) {
+  opts.FrontendName = name;
+  const auto *e = paykan::frontend::Registry::get().find(name);
+  if (!e || e->Path.empty()) {
+    opts.FrontendVersion = paykan::kVersion;
+    return;
+  }
+  for (const auto &f : plugins.Files)
+    if (f.Path == e->Path) {
+      opts.FrontendVersion = f.Version;
+      opts.FrontendPlugin =
+          f.Name.empty() ? std::filesystem::path(f.Path).filename().string()
+                         : f.Name;
+    }
+}
+
 // --list-frontends / --list-backends: one line per plugin,
 // "<name>[ (default)][: <description>][ [<file>]]",
 // "<name> (incompatible: <why>)[ [<file>]]" for a plugin this paykan does
@@ -753,7 +776,7 @@ int main(int argc, char *argv[]) {
   // there is no source, the source otherwise (docs/design/pkm.md §8).
   paykan::modules::ResolverOptions resolverOpts;
   resolverOpts.ProjectRoot = projectRoot;
-  resolverOpts.FrontendName = driver.getFrontendName();
+  recordFrontend(driver.getFrontendName(), plugins, resolverOpts);
   resolverOpts.ModulePath = modulePath(opts);
   resolverOpts.ReadCache = !opts.RebuildModules && !opts.NoModuleCache;
   resolverOpts.WriteCache = !opts.NoModuleCache;

@@ -238,7 +238,7 @@ G = gating (a mismatch yields a verdict), I = informational.
 | `0x0D` | `deps` | `list<Dep>` | G | direct imports only, sorted by canonical name; §2.3 |
 | `0x0F` | `source` | `{hash sha256; u64 size}` | G (cache) / I (prebuilt) | the module's source file exactly as read. Absent for generated modules |
 | `0x11` | `libraries` | `list<Lib>` | G (link) | §2.4 |
-| `0x20` | `frontend` | `{str name, version, plugin}` | I | which frontend parsed the source. **Decision: recorded, not gating.** Frontends must produce identical ASTs (differential tests enforce it); the record answers "who produced this" when they do not |
+| `0x20` | `frontend` | `{str name, version, plugin}` | I | which frontend parsed the source: a built-in frontend's name, the core version and an empty `plugin`, or a plugin's frontend's name, the plugin's own version and the plugin's name (its descriptor's, else its file's). **Decision: recorded, not gating.** Frontends must produce identical ASTs (differential tests enforce it); the record answers "who produced this" when they do not |
 | `0x22` | `producer` | `{str tool, version}` | I | `"paykan"`, `kVersion`; a third-party writer names itself |
 | `0x24` | `plugin_api` | `u32` | I | `PAYKAN_PLUGIN_API_VERSION` of the producer; gating per payload, not per module |
 | `0x26` | `opt_pipeline` | `str` | I | `""` in v0.2.0 (`CODE` is pre-pass PIR, §5.9). Reserved for #97 |

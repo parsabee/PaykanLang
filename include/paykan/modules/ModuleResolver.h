@@ -36,8 +36,12 @@ struct ResolverOptions {
   /// The source root imports are resolved against ("" = the current
   /// directory); the cache lives under it (names::kCacheDir).
   std::string ProjectRoot;
-  /// The frontend name recorded in the manifests ("" = the default).
+  /// The frontend the manifests record (docs/design/pkm.md §2.2, tag 0x20):
+  /// its name ("" = the default), its version, and the plugin it comes
+  /// from ("" for a built-in frontend).
   std::string FrontendName;
+  std::string FrontendVersion;
+  std::string FrontendPlugin;
   /// Where prebuilt modules are looked for after "next to the source":
   /// the --module-path directories, then $PAYKAN_MODULE_PATH.
   std::vector<std::string> ModulePath;

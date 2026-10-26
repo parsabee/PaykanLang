@@ -681,6 +681,25 @@ TEST_F(FrontendPlugin, ListedWithItsFile) {
   EXPECT_FALSE(ran("test-fe", ".called"));
 }
 
+// A module file names the frontend that parsed its source, with the
+// version and the plugin it came from (finding 103: the version and the
+// plugin were always empty).
+TEST_F(FrontendPlugin, ModuleFilesNameThePluginsFrontend) {
+  fs::path lib = Scratch / "lib.pkn";
+  std::ofstream(Scratch / "lib.src")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  emitAST((Scratch / "lib.src").string(), lib);
+  auto w = paykan(withFe("--emit-pkm --module-name=lib " + quote(lib.string()) +
+                         " -o " + quote((Scratch / "lib.pkm").string())));
+  ASSERT_EQ(w.Code, 0) << w.Err;
+  auto d = paykan("pkm dump --section=manifest " +
+                  quote((Scratch / "lib.pkm").string()));
+  ASSERT_EQ(d.Code, 0) << d.Err;
+  EXPECT_TRUE(hasLine(d.Out, "  frontend \"test-fe\" \"0.1\" plugin "
+                             "\"test-fe-plugin\""))
+      << d.Out;
+}
+
 // The whole corpus that needs no imports: --emit-ast through the plugin
 // gives the same AST and the same PIR as the source itself.
 TEST_F(FrontendPlugin, CarriesEverySampleProgram) {

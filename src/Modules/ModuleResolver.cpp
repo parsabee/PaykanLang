@@ -550,7 +550,7 @@ StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
   m.Libraries.push_back({static_cast<uint8_t>(pkm::LibKind::Runtime),
                          "paykan_runtime", kVersion, Host.RuntimeAbi,
                          pkm::kLibRequiredAtLink});
-  m.Frontend = {Opts.FrontendName, "", ""};
+  m.Frontend = {Opts.FrontendName, Opts.FrontendVersion, Opts.FrontendPlugin};
   m.Producer = {"paykan", kVersion};
   m.PluginApi = PAYKAN_PLUGIN_API_VERSION;
 
