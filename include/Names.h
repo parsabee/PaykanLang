@@ -76,6 +76,14 @@ inline constexpr const char *kTraitHashable =
 /// cannot implement.
 inline constexpr const char *kTraitValueType = "ValueType";
 inline constexpr const char *kMethodHash = "hash";
+/// The built-in traits an `impl ... for` block gives a class or a struct, so
+/// the conformances a module interface records (pkm IMPL,
+/// docs/design/pkm.md §3.5).  `Show` and `ValueType` are not: every class
+/// has `Show` through `Obj`, and the rest follow from a type's structure
+/// (src/Sema/SemaTraits.cpp, traitImplOwner).
+inline bool isImplBuiltinTrait(std::string_view n) {
+  return n == kTraitHashable;
+}
 inline constexpr const char *kSelfType = "Self"; ///< The implementing type
 inline constexpr const char *kMethodLength = "len";
 inline constexpr const char *kMethodConcat = "concat";

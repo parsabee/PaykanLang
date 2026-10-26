@@ -40,11 +40,19 @@ enum class PartTag : uint32_t {
   Diag = 7
 };
 
-/// DECLS record tags (§3.5); TRAIT, IMPL, CONST and TEMPLATE_* are not
-/// written by the prototype.  STRUCT (9) is the prototype's record for a
-/// struct type (docs/language/11-structs.md): a name, fields and methods,
-/// like a CLASS without a superclass or a vtable.
-enum class DeclTag : uint8_t { Enum = 1, Class = 2, Func = 5, Struct = 9 };
+/// DECLS record tags (§3.5); TRAIT, CONST and TEMPLATE_* are not written by
+/// the prototype.  IMPL is written in its prototype form, `Str for; Str
+/// trait`, for a CLASS or STRUCT record's conformance to a built-in trait an
+/// `impl` block implements (names::isImplBuiltinTrait).  STRUCT (9) is the
+/// prototype's record for a struct type (docs/language/11-structs.md): a
+/// name, fields and methods, like a CLASS without a superclass or a vtable.
+enum class DeclTag : uint8_t {
+  Enum = 1,
+  Class = 2,
+  Impl = 4,
+  Func = 5,
+  Struct = 9
+};
 
 /// A MODS entry (§3.3): index 0 is the module itself (hashes zero), the
 /// rest its direct dependencies sorted by canonical name.
@@ -137,6 +145,14 @@ struct StructRec {
   bool operator==(const StructRec &) const = default;
 };
 
+/// ModuleInfo::ImplInfo: `impl Trait for TypeName`, a conformance recorded
+/// on the type itself (a subclass has its superclass's).
+struct ImplRec {
+  std::string TypeName; ///< a CLASS or STRUCT record of the blob
+  std::string Trait;    ///< names::isImplBuiltinTrait
+  bool operator==(const ImplRec &) const = default;
+};
+
 /// ModuleInfo::EnumInfo.
 struct EnumRec {
   std::string Name;
@@ -158,20 +174,23 @@ struct Interface {
   std::vector<ClassRec> Classes;
   std::vector<EnumRec> Enums;
   std::vector<StructRec> Structs;
+  std::vector<ImplRec> Impls;
   std::string DisplayFile; ///< DIAG: project-relative; "" writes no DIAG
   bool operator==(const Interface &) const = default;
 };
 
-/// Deterministic: dependencies and records are sorted by name, the string
-/// table is in first-use order.
+/// Deterministic: dependencies and records are sorted by name (IMPL
+/// records by type, then trait), the string table is in first-use order.
 std::vector<uint8_t> writeInterface(const Interface &iface);
 
 /// The checks of §3.7 that apply to the prototype records: magic/major,
 /// parts in bounds, aligned and non-overlapping, STRS valid, MODS[0] equal
 /// to @p expectedModule, dependencies sorted and unique, records sorted by
 /// (tag, name) with unique names per kind, every string index in range,
-/// function and method flags known, and kMethodPure only on a class's
-/// virtual method (not `__init__`, `___init__` or `destroy`).
+/// function and method flags known, kMethodPure only on a class's virtual
+/// method (not `__init__`, `___init__` or `destroy`), and an IMPL record
+/// naming a CLASS or STRUCT record of the blob and a built-in trait an
+/// `impl` block implements, with (type, trait) sorted and unique.
 StatusOr<Interface> readInterface(std::span<const uint8_t> bytes,
                                   std::string_view expectedModule);
 

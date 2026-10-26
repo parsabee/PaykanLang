@@ -148,6 +148,41 @@ TEST(Dump, NativeFunctions) {
       << d;
 }
 
+// A conformance's IMPL record follows the classes, in record order.
+TEST(Dump, Impls) {
+  Writer w;
+  w.add(Kind::Manifest, kFlagRequired, encodeManifest(minimalManifest("m")));
+  Interface i;
+  i.Module = "m";
+  ClassRec ck;
+  ck.Name = "CK";
+  ck.OriginModule = "m";
+  ck.Methods = {{"hash", "int", {}, kMethodView | kMethodImpl, {}}};
+  i.Classes.push_back(ck);
+  StructRec key;
+  key.Name = "Key";
+  key.OriginModule = "m";
+  key.Fields = {{"a", "int", false}};
+  key.Methods = {{"hash", "int", {}, kMethodView | kMethodImpl, {}}};
+  i.Structs.push_back(key);
+  i.Functions.push_back({"Key", "Key", {"int"}, {}, false});
+  i.Impls = {{"Key", "Hashable"}, {"CK", "Hashable"}};
+  w.add(Kind::Iface, kFlagRequired, writeInterface(i));
+  StatusOr<std::vector<uint8_t>> out = w.finish();
+  ASSERT_TRUE(out) << out.status().message();
+  DumpOptions o;
+  o.Which = DumpOptions::Section::Iface;
+  std::string d = dumpOf(*out, o);
+  EXPECT_NE(d.find("  class CK super \"\" [local from \"m\"]\n"
+                   "    method hash() -> int flags 0x6\n"
+                   "  impl Hashable for CK\n"
+                   "  impl Hashable for Key\n"
+                   "  func Key(int) -> Key\n"
+                   "  struct Key [local from \"m\"]\n"),
+            std::string::npos)
+      << d;
+}
+
 TEST(Dump, CorruptInterfaceIsReported) {
   Writer w;
   w.add(Kind::Manifest, kFlagRequired, encodeManifest(minimalManifest()));
