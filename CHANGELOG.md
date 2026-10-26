@@ -979,6 +979,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A module file is now read only when it is a regular file, and read whole with
   `istream::read`, which reports a failed read rather than throwing: `paykan: 'd.pkm' is a
   directory, not a file`, exit status 1.
+- `--emit-pkm ./geometry/shapes.pkn` (and `geometry/./shapes.pkn`) named the module
+  `shapes`, not `geometry::shapes` as `geometry/shapes.pkn` does, so an importer of
+  `geometry::shapes` rejected the file (`names module 'shapes'. Rebuild it from source.`);
+  and a path with a part that is no identifier gave a module no import can name
+  (`--emit-pkm 1bad/x.pkn` wrote `module 1bad::x`).  The path is now made normal first, and
+  each part of the name it gives must be an identifier: `paykan: cannot name the module of
+  '1bad/x.pkn' after its path: '1bad' is not an identifier (name it with --module-name)`,
+  exit status 1.  An absolute path, or one that goes up (`../shapes.pkn`), still names the
+  module by its file name (docs/language/17-the-paykan-command.md, `--emit-pkm`).
 
 ## [0.2.0] - 2026-10-20
 

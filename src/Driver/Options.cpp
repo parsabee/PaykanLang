@@ -3,8 +3,9 @@
 
 #include "Options.h"
 
+#include "ModuleName.h"
+
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <iterator>
 #include <ostream>
@@ -333,23 +334,8 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       r.Error = "--module-name names the module --emit-pkm writes";
       return r;
     }
-    // `a::b`, or `::a` for a module of the standard library: identifiers
-    // separated by `::`.
-    std::string_view rest(o.ModuleName);
-    if (rest.starts_with("::"))
-      rest.remove_prefix(2);
-    bool valid = !rest.empty();
-    for (size_t start = 0; valid && start <= rest.size();) {
-      size_t sep = std::min(rest.find("::", start), rest.size());
-      std::string_view part = rest.substr(start, sep - start);
-      valid =
-          !part.empty() && !std::isdigit(static_cast<unsigned char>(part[0]));
-      for (char c : part)
-        valid =
-            valid && (std::isalnum(static_cast<unsigned char>(c)) || c == '_');
-      start = sep + 2;
-    }
-    if (!valid) {
+    // `a::b`, or `::a` for a module of the standard library.
+    if (!module_name::isModuleName(o.ModuleName)) {
       r.Error = "--module-name: '" + o.ModuleName +
                 "' is not a module name (identifiers separated by '::')";
       return r;

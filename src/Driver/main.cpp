@@ -482,13 +482,16 @@ int pkmTool(const Options &opts) {
 /// The canonical name of the main module and the root its imports are
 /// resolved against.  Normally the file's stem and its directory.  For
 /// `--emit-pkm` of a module given by a relative path inside the project
-/// (`geometry/shapes.pkn`, run from the project root), the module is named
-/// by that path (`geometry::shapes`) and the root is the current directory,
-/// so the file is what an importer of `geometry::shapes` expects.
-/// --module-name names it outright (the standard library's build names its
-/// modules `::name`).
-void mainModuleIdentity(const Options &opts, std::string &name,
-                        std::string &projectRoot) {
+/// (`geometry/shapes.pkn`, or `./geometry/shapes.pkn`, run from the project
+/// root), the module is named by that path made normal (`geometry::shapes`)
+/// and the root is the current directory, so the file is what an importer
+/// of `geometry::shapes` expects; one given by an absolute path or one
+/// that goes up (`/src/shapes.pkn`, `../shapes.pkn`) is named by its
+/// stem.  Each part of the name --emit-pkm gives a module must be an
+/// identifier, which an import can name.  --module-name names it outright
+/// (the standard library's build names its modules `::name`).
+paykan::Status mainModuleIdentity(const Options &opts, std::string &name,
+                                  std::string &projectRoot) {
   std::filesystem::path input(opts.InputFilename);
   name = paykan::module_name::mainModuleName(opts.InputFilename);
   projectRoot = input.parent_path().string();
@@ -496,20 +499,37 @@ void mainModuleIdentity(const Options &opts, std::string &name,
     // --module-name: as given (its imports still resolve against the
     // file's directory).
     name = opts.ModuleName;
-    return;
+    return paykan::Status::ok();
   }
-  if (!opts.EmitPkm || input.is_absolute() || !input.has_parent_path())
-    return;
-  std::string nested;
-  for (const auto &c : input.parent_path()) {
-    std::string part = c.string();
-    if (part == "." || part == ".." || part.empty() ||
-        part.find("::") != std::string::npos)
-      return;
-    nested += part + "::";
+  if (!opts.EmitPkm)
+    return paykan::Status::ok();
+  std::filesystem::path normal = input.lexically_normal();
+  std::vector<std::string> parts;
+  if (!normal.is_absolute())
+    for (const auto &c : normal.parent_path()) {
+      if (c == "..") {
+        parts.clear();
+        break;
+      }
+      parts.push_back(c.string());
+    }
+  parts.push_back(normal.stem().string());
+  for (const std::string &part : parts)
+    if (!paykan::module_name::isIdentifier(part))
+      return paykan::Status::error(
+          "cannot name the module of '" + opts.InputFilename +
+          "' after its path: '" + part +
+          "' is not an identifier (name it with --module-name)");
+  if (parts.size() > 1) {
+    name.clear();
+    for (const std::string &part : parts) {
+      if (!name.empty())
+        name += paykan::module_name::kSep;
+      name += part;
+    }
+    projectRoot = "";
   }
-  name = nested + name;
-  projectRoot = "";
+  return paykan::Status::ok();
 }
 
 /// The --module-path directories, then $PAYKAN_MODULE_PATH's.
@@ -670,7 +690,8 @@ int main(int argc, char *argv[]) {
 
   // -- Semantic analysis
   std::string mainName, projectRoot;
-  mainModuleIdentity(opts, mainName, projectRoot);
+  if (paykan::Status s = mainModuleIdentity(opts, mainName, projectRoot); !s)
+    return fail(s.message());
   // Imports go through the resolver: a source module's `.pkm` cache entry
   // under <root>/.paykan_cache when it is fresh, a prebuilt `.pkm` when
   // there is no source, the source otherwise (docs/design/pkm.md §8).

@@ -25,6 +25,7 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <sys/wait.h>
@@ -1630,6 +1631,48 @@ TEST(Pkm, ModuleNameNamesTheEmittedModule) {
   auto badName = paykan("--emit-pkm --module-name=a::1b src/shapes.pkn");
   EXPECT_NE(badName.exitCode, 0);
   EXPECT_TRUE(contains(badName.out, "is not a module name")) << badName.out;
+  fs::remove_all(dir);
+}
+
+// --emit-pkm names a module by its path made normal, so `./a/b.pkn` and
+// `a/./b.pkn` are `a::b`, as `a/b.pkn` is, and an importer of `a::b` loads
+// the file without the source.  A path with a part that is no identifier
+// names no module (finding 52).
+TEST(Pkm, EmitPkmNamesTheModuleByItsNormalPath) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_normal_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  const std::string area = "fn area(w: int, h: int) -> int { return w * h; }\n";
+  writeFile(dir / "main.pkn",
+            "import a::b;\nfn main() -> int { return b::area(2, 3); }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  for (const char *spelling : {"./a/b.pkn", "a/./b.pkn"}) {
+    writeFile(dir / "a" / "b.pkn", area);
+    auto emit = paykan(std::string("--emit-pkm -o a/b.pkm ") + spelling);
+    ASSERT_EQ(emit.exitCode, 0) << spelling << ": " << emit.out;
+    auto manifest = run(std::string(kPaykan) + " pkm dump --section=manifest " +
+                        (dir / "a" / "b.pkm").string());
+    EXPECT_TRUE(contains(manifest.out, "  module a::b\n"))
+        << spelling << ": " << manifest.out;
+    fs::remove(dir / "a" / "b.pkn");
+    auto r = paykan("main.pkn");
+    EXPECT_EQ(r.exitCode, 6) << spelling << ": " << r.out;
+  }
+  for (const auto &[path, part] :
+       {std::pair{"1bad/x.pkn", "1bad"}, std::pair{"a/my-mod.pkn", "my-mod"}}) {
+    writeFile(dir / path, area);
+    auto bad = paykan(std::string("--emit-pkm ") + path);
+    EXPECT_EQ(bad.exitCode, 1) << path << ": " << bad.out;
+    EXPECT_EQ(bad.out, std::string("paykan: cannot name the module of '") +
+                           path + "' after its path: '" + part +
+                           "' is not an identifier (name it with "
+                           "--module-name)\n");
+    EXPECT_FALSE(fs::exists(fs::path(dir / path).replace_extension(".pkm")))
+        << path;
+  }
   fs::remove_all(dir);
 }
 
