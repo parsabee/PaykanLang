@@ -283,9 +283,14 @@ None hi Point(1, 2) None
 True
 ```
 
-`Str(s)` of a `Str` is the string itself, the same object, and so is `Str<Str>(s)`. In a
-generic function, `Str(x)` with `x: T` works for every `T` it is instantiated with that has
-a text.
+`Str(s)` of a `Str` is the string itself, the same object, and so is `Str<Str>(s)`. Being
+the same object, which `concat` can change, it takes no `view` of a string
+([A `view` stays a `view`](03-functions.md#a-view-of-a-reference-stays-a-view)): with `v`
+a `view Str` parameter, `Str(v)` is an error (`'v' is a 'view' parameter; it can only be
+passed to a 'view' parameter, and parameter 1 of 'Str' is not one`), as `return v` is.
+`v.toString()` is a copy of the string, and takes a `view`. In a generic function,
+`Str(x)` with `x: T` works for every `T` it is instantiated with that has a text, except
+that a `view T` at `T` = `Str` is that error; `x.toString()` works for every `T`.
 
 A function value has no text, nor has a fixed-size array or a slice (print one element at
 a time), nor a tuple, struct or enum holding one. `Str` of such a value is an error that

@@ -3380,6 +3380,13 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
               "', expected '" + sourceName + "'");
     return nullptr;
   }
+  // `Str<Str>(s)` is the `Str` constructor, which returns `s` itself and so
+  // takes no `view`, as `Str(s)` takes none.
+  if (pair->Spelled == names::kString) {
+    const FunctionSig *ctor = lookupFunction(names::kString);
+    checkViewArgs(ctor->Modes, ctor->ParamTypes, node->getArguments(),
+                  names::kString);
+  }
 
   return applyConversion(node, pair);
 }

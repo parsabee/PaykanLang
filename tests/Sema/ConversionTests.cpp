@@ -576,6 +576,58 @@ TEST(Conversion, StrCopyConstructorStillWorks) {
   expectError(inMain("t = Str();"), "function 'Str' expects 1 argument(s)");
 }
 
+// `Str(s)` and `Str<Str>(s)` of a `Str` are the constructor, the same
+// object, which `concat` can change: neither takes a `view`, whatever the
+// form (docs/language/03-functions.md, "A view of a reference stays a
+// view").  `s.toString()` is a copy, and `Str` of any other type is its
+// `toString()`, so both take one.
+TEST(Conversion, StrOfAStrTakesNoView) {
+  const std::string notOne =
+      "; it can only be passed to a 'view' parameter, and parameter 1 of "
+      "'Str' is not one";
+  for (const char *form : {"Str", "Str<Str>"}) {
+    const std::string f = form;
+    expectOneErrorIn("fn keep(v: view Str) -> Str => " + f + "(v);\n" +
+                         inMain(""),
+                     "'v' is a 'view' parameter" + notOne);
+    expectOneErrorIn("class K { s: Str; view fn get() -> Str => " + f +
+                         "(self.s); }\n" + inMain(""),
+                     "'self' is read-only in 'view fn get'" + notOne);
+    expectOneError("s = \"a\"; y: view = s; t = " + f + "(y);",
+                   "'y' is a 'view' local" + notOne);
+    expectOneErrorIn("fn first(xs: view Str[]) -> Str => " + f + "(xs[0]);\n" +
+                         inMain(""),
+                     "'xs' is a 'view' parameter" + notOne);
+  }
+  // A generic `view T` at `T` = `Str` is the same error, with the
+  // instantiation noted; `x.toString()` takes any `view`.
+  auto r = semaCheck("fn show<T: Show>(x: view T) -> Str => Str(x);\n" +
+                     inMain("a = show(1); b = show(\"s\");"));
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("error: 'x' is a 'view' parameter" + notOne),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("note: in instantiation of 'show<Str>'"),
+            std::string::npos)
+      << r.Diagnostics;
+  expectOk(R"(
+    struct R { a: int; }
+    class P { x: int; }
+    fn show<T: Show>(x: view T) -> Str => x.toString();
+    fn copy(s: view Str) -> Str => s.toString();
+    fn opt(s: view Str?) -> Str => Str(s);
+    fn tup(t: view (Str, int)) -> Str => Str(t);
+    fn st(r: view R) -> Str => Str<R>(r);
+    fn obj(p: view P) -> Str => Str(p);
+    class K { s: Str; view fn get() -> Str => self.s.toString(); }
+    fn main() -> int {
+      a = show("s") + copy("t") + opt("u") + tup(("v", 1)) + st(R(1));
+      b = obj(P(2)) + K("w").get();
+      return 0;
+    }
+  )");
+}
+
 // ─── Str of every value with a text (docs/language/04-strings-and-
 // ─── conversions.md, "To a string")
 

@@ -276,9 +276,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - a tuple, a struct, an enum;
   - an object (its `toString()`) and `None`.
 
-  A value without a text is an error that names the part without one: `'Str' cannot
-  convert a value of type 'F', which does not implement trait 'Show': its field 'f' has
-  type '(int) -> int', which does not implement it`.
+  A `Str` is the string itself, the same object, in both forms (`Str(s)`, `Str<Str>(s)`),
+  so neither takes a `view` of one; `s.toString()` is a copy. A value without a text is an
+  error that names the part without one: `'Str' cannot convert a value of type 'F', which
+  does not implement trait 'Show': its field 'f' has type '(int) -> int', which does not
+  implement it`.
 - **New conversions:**
   - `i8` … `u32`, `int` and `unsigned` convert from `bool` (0 or 1) and from `char` (its
     code: `u8(c)` is the byte, `i8(c)` its signed reading).
