@@ -1038,11 +1038,16 @@ TEST(Driver, ChainAtTheLimitRunsAndWritesItsAST) {
 // The stack the programs at the frontend's limits are compiled with: a
 // quarter of the default 8 MB, so that a pass recursing once per link of a
 // chain, or deeper than it should per level of nesting, fails here in every
-// build; in a sanitizer build, whose frames are 2 to 4 times larger, the
-// default itself.
+// build; half of it in an unoptimised clang build, whose frames can be 4
+// times GCC's (clang -O0 gives every local a slot of its own: the lowering's
+// frame for a binary operator is 4 KB, not 0.9 KB, so 511 levels of operands
+// take 2 MB in it alone); in a sanitizer build, whose frames are 2 to 4 times
+// larger still, the default itself.
 static std::string atLimitStack() {
-#ifdef PAYKAN_TEST_SANITIZED
+#if defined(PAYKAN_TEST_SANITIZED)
   return "ulimit -s 8192 && ";
+#elif defined(__clang__) && !defined(__OPTIMIZE__)
+  return "ulimit -s 4096 && ";
 #else
   return "ulimit -s 2048 && ";
 #endif

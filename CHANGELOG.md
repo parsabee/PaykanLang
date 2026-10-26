@@ -930,8 +930,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the lowering, which overflowed 8 MB at 511 levels, and takes 6 KB in the parser and none
     in the lowering.  Every chain and nesting within the limits, and the deepest mixes of
     them (2048 links in 511 levels of lambdas), compiles and runs on every path (`paykan
-    run`, `paykan build`, `--emit-c`) with a quarter of the default stack, 2 MB, in a debug
-    build, and the test suite checks that it does.
+    run`, `paykan build`, `--emit-c`) with a quarter of the default stack, 2 MB, in a GCC
+    debug build, and with half of it, 4 MB, in a clang one, whose unoptimised frames can be
+    4 times larger (4 KB, not 0.9 KB, for a binary operator in the lowering), and the test
+    suite checks that it does.
   - The AST interchange format nests up to 4112 lists (`kMaxDepth`), which holds every AST
     within the limits, and its reader counts the links and the levels as the frontends do,
     so an AST from a plugin, or the `ast-text` frontend's input, is held to the same limits
