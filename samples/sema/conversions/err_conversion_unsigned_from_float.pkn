@@ -1,0 +1,10 @@
+// An unsigned type takes no float, and a float type no `bool` or `char`:
+// the error names the conversion through `int`.
+fn main() -> int {
+  f = 2.5;
+  a = unsigned(f);   // error: no specialization of 'unsigned' for 'float': convert the 'float' to an 'int' first: 'unsigned(int(...))' truncates toward zero, then keeps the low 64 bits
+  h: f16 = 1.5;
+  b = u8<f16>(h);    // error: no specialization of 'u8' for 'f16': convert the 'f16' to an 'int' first: 'u8(int(...))' truncates toward zero, then keeps the low 8 bits
+  c = float(True);   // error: no specialization of 'float' for 'bool': convert the 'bool' to an 'int' first: 'float(int(...))'
+  return 0;
+}

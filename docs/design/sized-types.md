@@ -19,12 +19,12 @@ end each have the default this implementation takes.
 | Float arithmetic | `+ - * /` on `f32` or `f16` are computed in `f64` and rounded to the type's precision after each operation (exact for these operations, as `f64` has enough bits); comparisons are IEEE as for `float` |
 | Mixing | an operation needs both operands of one type; the only promotion is the existing `int` with `float` (to `float`); anything else is spelled with a conversion (`operator '+' is not defined for types 'i32' and 'int' (the operands must have one type: convert one with 'i32(...)' or 'int(...)')`) |
 | Literals | an integer literal (and `-literal`) takes the integer type the context expects when it fits that type (`x: u8 = 255`, `x + 1`, `x == 0`, a `match` arm, an argument, a field, an element, a `T?` slot), an error when it does not (`the literal 256 does not fit in 'u8' (0 to 255)`); a float literal, or an integer literal, takes `f32` or `f16` the same way (an error when its magnitude rounds to infinity); only the literal itself adapts (`100 + 100` is an `int` expression); without a context an integer literal is `int` and a float literal `float` |
-| Conversions | `i8(x)` … `f16(x)`, `unsigned(x)` and `int(x)`, `float(x)` from any numeric type: integer to integer wraps to the width; float to integer truncates toward zero and panics outside the target's range (as `int(x)` does); integer to float rounds to nearest; `Str(x)` prints; `s.toI8()` … parse a `Str` to `i8?` …, `None` when the text is not a number of that type |
+| Conversions | `T(x)` takes the sources of `T`'s family (docs/language/04-strings-and-conversions.md, "Between numbers"): a signed type every signed type, `u8`, `u16`, `u32`, every float type, `bool` and `char`; an unsigned type every integer type, `bool` and `char`; a float type every number; each type itself.  Integer to integer wraps to the width; float to integer truncates toward zero and panics outside the target's range (as `int(x)` does); integer to float rounds to nearest, once; `Str(x)` prints; `s.toI8()` … parse a `Str` to `i8?` …, `None` when the text is not a number of that type |
 | Methods and traits | `toString()` and `hash()` on every numeric type; every numeric type is `Show`, `Hashable` and `ValueType`, as `int` and `float` are |
 | Optionals and match | `i32?`, `u8?`, `f32?` are value optionals like `int?`; `match` on a sized integer compares with literals of its type |
 | Runtime | one new type kind, `PAYKAN_KIND_UINT`, so a `u64` in a struct, tuple or array prints unsigned; `f16` rounding and the unsigned `toString`/parse are runtime functions; the ABI version stays |
-| PIR | new instructions `wrap N`, `mask N`, `udiv`, `urem`, `ucmp`, `utof`, `ftou` and `fround32`; `f16` rounding is a runtime call; the format version stays (caches are cleared) |
-| Not in this change | bit operations and shifts (the language has none), integer literal suffixes (`1u8`), hexadecimal literals, `char` conversions to the new types (`u8(int(c))`), implicit widening (`i32` to `int`), overflow checks |
+| PIR | new instructions `wrap N`, `mask N`, `udiv`, `urem`, `ucmp`, `utof`, `ftou` and `fround32` (`ftou` is no longer produced, as no unsigned type converts from a float); `f16` rounding is a runtime call; the format version stays (caches are cleared) |
+| Not in this change | bit operations and shifts (the language has none), integer literal suffixes (`1u8`), hexadecimal literals, implicit widening (`i32` to `int`), overflow checks |
 
 ## Types and spelling
 
@@ -49,8 +49,8 @@ the instruction that restores the form: `wrap 8` sign-extends the low 8 bits,
 (ties-to-even, subnormals and overflow to infinity included).
 
 `u64` is the one type whose canonical form is not its `int` reading: its
-division, remainder, ordering, conversions to and from `f64` and printing
-are unsigned (`udiv`, `urem`, `ucmp`, `utof`, `ftou`, `PaykanString_from_uint`,
+division, remainder, ordering, conversion to `f64` and printing are
+unsigned (`udiv`, `urem`, `ucmp`, `utof`, `PaykanString_from_uint`,
 `PaykanString_parse_uint`); addition, subtraction, multiplication, equality
 and hashing are the same bits as `int`'s.  The narrower unsigned types are
 non-negative in canonical form, so their signed division and ordering are
@@ -58,9 +58,15 @@ right.
 
 An `f32` literal is rounded by the compiler; an `f16` literal lowers to the
 `Paykan_round_f16` call on its `f64` value, so the compiler and the runtime
-share one rounding.  An integer converts to `f32` or `f16` through `f64`
-(`itof` then the rounding), which is the correctly rounded result for every
-integer an `f32` or `f16` can distinguish.  The `INT64_MIN / -1` guard of
+share one rounding.  An integer converts to `f32` or `f16` in one rounding.
+A narrower integer goes through `f64` (`itof` or `utof`, then the rounding),
+as it is exact in an `f64`; so does any integer into `f16`, whose overflow
+at 65520 lies far below 2^53.  An `int` or `unsigned` into `f32` is rounded
+by the runtime (`Paykan_int_to_f32`, `Paykan_uint_to_f32`), or by the
+compiler for a constant or an integer literal in an `f32` slot: its `f64`
+is already rounded beyond 2^53, and rounding that again can give the other
+neighbour (`f32(1152921573326323713)` is 2^60 + 2^37, where the `f64`,
+2^60 + 2^36, rounds to 2^60).  The `INT64_MIN / -1` guard of
 `int` division is not emitted for a narrower type, whose quotient wraps
 (`i8(-128) / i8(-1)` is `-128`).  An integer literal is at most
 `9223372036854775807`, so the upper half of `unsigned` is reached through a
@@ -82,15 +88,23 @@ defined for types 'i32' and 'int'`, written `x + i32(y)` or `int(x) + y`.
 
 ## Conversions
 
-The conversion call `T(x)` takes every numeric type for every numeric `T`,
-with `Str(x)` as for `int` and `float`; a `Str` is parsed with its method
-`s.toT()` (giving `T?`), not converted.  Integer to integer keeps the low bits of the two's-complement
-value (`u8(300)` is `44`, `i8(200)` is `-56`, `unsigned(-1)` is
-`18446744073709551615`, `int(unsigned(-1))` is `-1`); float to integer
-truncates toward zero and panics when the value is outside the target's
-range, `NaN` included, as `int(x)` does; integer to float rounds to nearest,
-and `f16(70000.0)` is infinity.  `char` converts to and from `int` only, as
-before.
+The conversion call `T(x)` takes the sources of `T`'s family, with `Str(x)`
+as for `int` and `float`; a `Str` is parsed with its method `s.toT()`
+(giving `T?`), not converted.  The signed types (`int`, `i8`, `i16`, `i32`)
+take every signed type, `u8`, `u16` and `u32` (which they hold exactly when
+wide enough), every float type, `bool` and `char`, but not `unsigned`,
+which can be larger than any of them (`u.toInt()` gives its value as an
+`int?`; `i32(u32(u))` keeps its low bits).  The unsigned types take every
+integer type, `bool` and `char`, but no float (`u8(int(f))` truncates, then
+wraps).  The float types take every number.  `bool` and `char` take every
+integer type, and every type takes itself.  Integer to integer keeps the
+low bits of the two's-complement value (`u8(300)` is `44`, `i8(200)` is
+`-56`, `unsigned(-1)` is `18446744073709551615`, `i32(u32(4294967295))` is
+`-1`); float to integer truncates toward zero and panics when the value is
+outside the target's range, `NaN` included, as `int(x)` does; integer to
+float rounds to nearest, once, and `f16(70000.0)` is infinity; a `bool` is
+1 or 0 and a `char` its byte code; an integer to `char` panics outside
+0..255, naming its source type (`char<i32>(300)`), which a `u8` never is.
 
 ## Printing and parsing
 
@@ -122,7 +136,9 @@ range is 0 or a subnormal, as its literal is.
 4. **Literal suffixes (`1u8`) and hexadecimal literals?**  Not yet; the
    context rule makes suffixes rare, and hexadecimal literals are a lexer
    change on their own.
-5. **Should `u8` convert from `char`?**  Not yet: `char` keeps its single
-   conversion to `int`; `u8(int(c))` spells a byte.
+5. **Should `u8` convert from `char`?**  Yes, as every integer type does:
+   `u8(c)` is the byte, `i8(c)` its signed reading, and `char(b)` of a `u8`
+   is the character (docs/language/04-strings-and-conversions.md, "Between
+   numbers").
 6. **Bitwise operators?**  The language has none; they are the natural next
    step for the unsigned types and a separate change.

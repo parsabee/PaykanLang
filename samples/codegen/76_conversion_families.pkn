@@ -1,0 +1,71 @@
+// 76 — the conversions of each family
+// Exercises: `T(x)` between the numbers, `bool` and `char`
+//            (docs/language/04-strings-and-conversions.md, "Between
+//            numbers"): a signed type from every signed type, from `u8`,
+//            `u16` and `u32`, from a float, a `bool` and a `char`; an
+//            unsigned type from every integer type, a `bool` and a `char`;
+//            a float type from every number; `bool` and `char` from every
+//            integer type; a type from itself; an `unsigned`'s `toInt()`;
+//            the rewrites of the pairs the families leave out
+//            (`i32(u32(u))`, `unsigned(int(f))`); and an `f32` of a wide
+//            integer rounded once, from a variable, a constant and a literal
+//            in an `f32` slot alike.
+// expect-stdout: 44 200 4294967295 -1 -2 1 -23
+// expect-stdout: 18446744073709551615 255 65535 65 0 122
+// expect-stdout: 1.84467e+19 inf 4.29497e+09 -2.75 0.0999756
+// expect-stdout: True False True ABC
+// expect-stdout: -7 200 2.5 x False
+// expect-stdout: -1 41 None 2 255
+// expect-stdout: fits 9223372036854775807
+// expect-stdout: 1152921642045800448 1152921642045800448 1152921642045800448 True
+
+import ::io;
+
+fn code(c: char) -> u8 {
+  return u8(c);
+}
+
+fn main() -> int {
+  // The signed family: wrapping, exact, truncating, 1 or 0, a byte code.
+  b: u8 = 200;
+  w: u32 = 4294967295;
+  k: f32 = -2.75;
+  io::println(Str(i8(300)) + " " + Str(i16(b)) + " " + Str(int(w)) + " "
+      + Str(i32(w)) + " " + Str(i8(k)) + " " + Str(int(True)) + " "
+      + Str(i8(char(233))));
+
+  // The unsigned family: the low bits, 1 or 0, a byte code.
+  u = unsigned(-1);
+  io::println(Str(u) + " " + Str(u8(u)) + " " + Str(u16(i8(-1))) + " "
+      + Str(unsigned('A')) + " " + Str(u32(False)) + " " + Str(code('z')));
+
+  // The float family: the nearest value of the type.
+  io::println(Str(float(u)) + " " + Str(f16(70000)) + " " + Str(f32(w)) + " "
+      + Str(float(k)) + " " + Str(f16(0.1)));
+
+  // `bool` and `char` from every integer type.
+  io::println(Str(bool(b)) + " " + Str(bool(u8(0))) + " " + Str(bool(u)) + " "
+      + Str(char(b - 135)) + Str(char(i32(66))) + Str(char(unsigned(67))));
+
+  // A type from itself is the value.
+  n = -7;
+  io::println(Str(int(n)) + " " + Str(u8(b)) + " " + Str(float(2.5)) + " "
+      + Str(char('x')) + " " + Str(bool(False)));
+
+  // An unsigned's value as an int?, and the rewrites of the pairs left out.
+  big = u / 2 + 1;
+  io::println(Str(i32(u32(u))) + " " + unsigned(41).toInt().toString() + " "
+      + big.toInt().toString() + " " + Str(unsigned(int(2.9))) + " "
+      + Str(u8(int(255.5))));
+  match (big - 1).toInt() {
+    v: int { io::println("fits " + Str(v)); }
+    None { io::println("too big"); }
+  }
+
+  // An f32 of an int beyond 2^53 is rounded once.
+  m = 1152921573326323713;
+  x: f32 = 1152921573326323713;
+  io::println(Str(int(f32(m))) + " " + Str(int(f32(1152921573326323713))) + " "
+      + Str(int(x)) + " " + Str(f32(m) == x));
+  return 0;
+}

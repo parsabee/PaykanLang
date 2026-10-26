@@ -1293,7 +1293,7 @@ TEST(Pkm, AModuleFileAssumesNothingOfItsClassesSubclasses) {
                               "fn main() -> int {\n"
                               "  d = c::HashMap<Str, Dog>();\n"
                               "  d.put(\"d\", Dog(\"rex\"));\n"
-                              "  return int(d.len());\n"
+                              "  return int(u32(d.len()));\n"
                               "}\n");
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
@@ -1646,7 +1646,7 @@ TEST(Pkm, StandardLibraryIsPkmFilesOnly) {
             "import ::io;\nimport ::collections;\n"
             "fn main() -> int { xs = collections::List<Str>();\n"
             "  xs.push(\"a\"); xs.push(\"b\");\n"
-            "  io::println(xs.get(1)); return int(xs.len()); }\n");
+            "  io::println(xs.get(1)); return int(u32(xs.len())); }\n");
   auto r = run("cd " + dir.string() + " && " + paykanCmd() +
                " --verbose --no-module-cache main.pkn");
   EXPECT_EQ(r.exitCode, 2) << r.out;

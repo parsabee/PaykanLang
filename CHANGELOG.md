@@ -271,6 +271,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     value. On top of that, a sign is allowed for the signed and float types, and
     `toFloat()` accepts what C's `strtod` accepts, `"inf"` and `"nan"` included.
   - The methods are builtins, not `Str` vtable slots, so the runtime ABI does not change.
+- **New conversions:**
+  - `i8` … `u32`, `int` and `unsigned` convert from `bool` (0 or 1) and from `char` (its
+    code: `u8(c)` is the byte, `i8(c)` its signed reading).
+  - `bool(x)` converts from every integer type (`x != 0`).
+  - `char(x)` converts from every integer type, and never panics from a `u8`.
+  - `T(x)` of a `T` is the value itself (`i64(n)` with an `int` `n`, `float(2.5)`).
+  - `u.toInt()` gives an `unsigned`'s value as an `int?`, `None` above
+    9223372036854775807.
 
 ### Changed
 
@@ -691,6 +699,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   method 'toInt()', which returns 'int?'`. Migration: `T(s)` and `T<Str>(s)` become
   `s.toT()` (`int`/`i64`: `toInt`, `unsigned`/`u64`: `toUnsigned`, `float`/`f64`:
   `toFloat`, `bool`: `toBool`, `u8`: `toU8` …).
+- **Breaking:** the conversions follow the target's family
+  (docs/language/04-strings-and-conversions.md, "Between numbers"):
+  - `int`, `i8`, `i16` and `i32` no longer convert from `unsigned` (`int(unsigned(-1))`
+    was `-1`). Write `u.toInt()`, an `int?`; or `i32(u32(u))`, which gives what `i32(u)`
+    gave; or keep the arithmetic `unsigned`.
+  - `unsigned`, `u8`, `u16` and `u32` no longer convert from a float (`u8(255.5)` was
+    `255`). Write `u8(int(f))`, after checking the range: it wraps where the old conversion
+    panicked.
+  - Every conversion that remains gives the result it gave in 0.2.0, except the fixes
+    below.
+  - The lists in `no specialization of …; its specializations are …` change accordingly.
 - An `f32` or `f16` from a text with a fraction or an exponent (a literal, or `toF32()` and
   `toF16()`) is documented as the `float` nearest the text rounded to the type, as C's
   `(float)strtod(s)` is. For a text of 13 or more significant digits very close to a point
@@ -1344,6 +1363,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   below the type's range still rounds to 0, as the literal does.
 - The `f32` literal `3.4028235677973366e38`, the midpoint above the largest `f32`, compiled
   and was `inf`. It is now `the literal 3.40282e+38 does not fit in 'f32'`.
+- `f32(n)` of an `int` or `unsigned` above 2^53, and such an integer literal in an `f32`
+  slot, were rounded twice, through `float` (`f32(1152921573326323713)` was 2^60). They are
+  now rounded once (2^60+2^37), as docs/design/sized-types.md says.
 
 ## [0.2.0] - 2026-10-20
 

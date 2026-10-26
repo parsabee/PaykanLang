@@ -50,20 +50,22 @@ TEST(SizedTypes, UnsignedIsReadUnsigned) {
     io::println(Str(u % 10));                // 5
     io::println(Str(u > 1) + " " + Str(u < 1) + " " + Str(u >= u) + " " + Str(1 <= u));
     io::println(Str(u == unsigned(-1)) + " " + Str(u != 0));
-    io::println(Str(int(u)));                // -1
+    io::println(Str(i32(u32(u))));           // -1: the low 32 bits
+    io::println(u.toInt());                  // None: beyond the int range
     io::println(Str(float(u)));              // 1.84467e+19
     io::println(Str(u + 2));                 // 1 (wraps)
     v: unsigned = 9223372036854775807;
     io::println(Str(v + v + 1));             // 18446744073709551615
-    io::println(Str(unsigned(1.5)) + " " + Str(unsigned(18446744073709549568.0)));
+    io::println(Str(unsigned(int(1.5))) + " " + Str(unsigned(int(9223372036854774784.0))));
     io::println(u.toString());
     o: unsigned? = u;
     io::println(o);
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "18446744073709551615\n9223372036854775807\n5\n"
-                      "True False True True\nTrue True\n-1\n1.84467e+19\n1\n"
-                      "18446744073709551615\n1 18446744073709549568\n"
+                      "True False True True\nTrue True\n-1\nNone\n"
+                      "1.84467e+19\n1\n"
+                      "18446744073709551615\n1 9223372036854774784\n"
                       "18446744073709551615\n18446744073709551615\n");
   g.expectNoLeaks("SizedTypes.UnsignedIsReadUnsigned");
 }
@@ -104,7 +106,7 @@ TEST(SizedTypes, ConversionsBetweenIntegersKeepTheLowBits) {
   auto r = compileAndRun(wrapMain(R"(
     io::println(Str(u8(300)) + " " + Str(u8(-1)) + " " + Str(i8(200)) + " " + Str(i8(-129)));
     io::println(Str(u16(65536)) + " " + Str(i16(32768)) + " " + Str(u32(-1)) + " " + Str(i32(2147483648)));
-    io::println(Str(unsigned(-1)) + " " + Str(int(unsigned(-1))));
+    io::println(Str(unsigned(-1)) + " " + Str(i32(u32(unsigned(-1)))));
     a: i8 = -1;
     io::println(Str(u8(a)) + " " + Str(u16(a)) + " " + Str(u32(a)) + " " + Str(unsigned(a)) + " " + Str(int(a)));
     b: u8 = 255;
@@ -123,10 +125,10 @@ TEST(SizedTypes, ConversionsBetweenIntegersKeepTheLowBits) {
 TEST(SizedTypes, ConversionsWithFloatsTruncateAndRound) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
-    io::println(Str(i8(-128.9)) + " " + Str(i8(127.9)) + " " + Str(u8(255.5)) + " " + Str(u8(0.5)));
-    io::println(Str(i32(-1.5)) + " " + Str(u16(65535.9)) + " " + Str(int(-2.9)));
+    io::println(Str(i8(-128.9)) + " " + Str(i8(127.9)) + " " + Str(u8(int(255.5))) + " " + Str(u8(int(0.5))));
+    io::println(Str(i32(-1.5)) + " " + Str(u16(int(65535.9))) + " " + Str(int(-2.9)));
     f: f32 = 100.75;
-    io::println(Str(i8(f)) + " " + Str(u8(f)) + " " + Str(int(f)));
+    io::println(Str(i8(f)) + " " + Str(u8(int(f))) + " " + Str(int(f)));
     h: f16 = -3.5;
     io::println(Str(i16(h)) + " " + Str(int(h)));
     io::println(Str(f32(16777217)) + " " + Str(f16(2049)) + " " + Str(float(i8(-5))));

@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 // Sema tests: conversion constructors `Target<Source>(value)` (#64, #88) —
 // every specialization of each builtin target and its result type, the
-// closed set (unlisted and custom type arguments), the missing-specialization
-// hint, a parse written as a conversion (a method of `Str` now), wrong arity
-// and argument types, and what became of the removed builtins.
+// sources of each family (every target and source, both forms), identity,
+// the rewrite the error of a pair the families leave out names, an
+// `unsigned`'s `toInt()`, the closed set (unlisted and custom type
+// arguments), the missing-specialization hint, a parse written as a
+// conversion (a method of `Str` now), wrong arity and argument types, and
+// what became of the removed builtins.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
+#include <iterator>
+#include <vector>
 
 using namespace paykan::test;
 
@@ -114,15 +119,15 @@ TEST(Conversion, APrimitiveDoesNotParseAStr) {
   // `char` has no parse: the ordinary error, with its list.
   expectOneError(s + "o = char(s);",
                  "no specialization of 'char' for 'Str'; its specializations "
-                 "are int");
+                 "are int, i8, i16, i32, u8, u16, u32, unsigned, char");
   expectOneError("o = char<Str>(\"a\");",
                  "no specialization of 'char' for 'Str'; its specializations "
-                 "are int");
+                 "are int, i8, i16, i32, u8, u16, u32, unsigned, char");
   // An optional string is no `Str`: the ordinary error.
   expectOneError("s: Str? = \"1\"; o = int(s);",
                  "no specialization of 'int' for 'Str?'; its specializations "
-                 "are float, bool, char, i8, i16, i32, u8, u16, u32, unsigned, "
-                 "f16, f32");
+                 "are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, "
+                 "char");
 }
 
 // A program written for the older parse gets one error at each of its old
@@ -154,24 +159,252 @@ TEST(Conversion, AParseWrittenAsAConversionIsOneError) {
       << r.Diagnostics;
 }
 
+// ─── the families (docs/language/04-strings-and-conversions.md, "Between
+// ─── numbers")
+
+namespace {
+
+/// The primitives, in the order a diagnostic lists them, each with a value
+/// of its type.
+struct Primitive {
+  const char *Name;
+  const char *Value;
+};
+constexpr Primitive kPrimitives[] = {
+    {"int", "1"},      {"float", "1.5"}, {"i8", "1"},    {"i16", "1"},
+    {"i32", "1"},      {"u8", "1"},      {"u16", "1"},   {"u32", "1"},
+    {"unsigned", "1"}, {"f16", "1.5"},   {"f32", "1.5"}, {"bool", "True"},
+    {"char", "'c'"}};
+
+/// What `target(v)` is for each target (a row) and the source `v` has (a
+/// column), both in kPrimitives' order: '.' a conversion, '2' the error of
+/// an `unsigned` into the signed family, '3' of a float into the unsigned
+/// family, '4' of a `bool` or a `char` into the float family, '0' the error
+/// that lists the target's sources.
+constexpr const char *kFamilies[] = {
+    "........2....", // int
+    "...........44", // float
+    "........2....", // i8
+    "........2....", // i16
+    "........2....", // i32
+    ".3.......33..", // u8
+    ".3.......33..", // u16
+    ".3.......33..", // u32
+    ".3.......33..", // unsigned
+    "...........44", // f16
+    "...........44", // f32
+    ".0.......00.0", // bool
+    ".0.......000.", // char
+};
+
+/// The method of `Str` that parses each primitive (char: none).
+constexpr const char *kParseMethods[] = {
+    "toInt", "toFloat",    "toI8",  "toI16", "toI32",  "toU8", "toU16",
+    "toU32", "toUnsigned", "toF16", "toF32", "toBool", nullptr};
+
+/// The sources of the target @p t, as an error lists them.
+std::string sourceList(size_t t) {
+  std::string list;
+  for (size_t i = 0; i < std::size(kPrimitives); ++i)
+    if (kFamilies[t][i] == '.')
+      list += (list.empty() ? "" : ", ") + std::string(kPrimitives[i].Name);
+  return list;
+}
+
+/// The error of `target(v)` for the rejected cell (@p t, @p s).
+std::string familyError(size_t t, size_t s) {
+  const std::string target = kPrimitives[t].Name;
+  const std::string source = kPrimitives[s].Name;
+  const std::string miss =
+      "no specialization of '" + target + "' for '" + source + "'";
+  const std::string bits = target == "unsigned" ? "64" : target.substr(1);
+  switch (kFamilies[t][s]) {
+  case '2':
+    if (target == "int")
+      return miss + ": an 'unsigned' can be larger than any 'int'; its "
+                    "method 'toInt()' returns 'int?', None above "
+                    "9223372036854775807";
+    return miss + ": an 'unsigned' can be larger than any '" + target + "'; '" +
+           target + "(u" + bits + "(...))' keeps its low " + bits + " bits";
+  case '3':
+    return miss + ": convert the '" + source + "' to an 'int' first: '" +
+           target + "(int(...))' truncates toward zero, then keeps the low " +
+           bits + " bits";
+  case '4':
+    return miss + ": convert the '" + source + "' to an 'int' first: '" +
+           target + "(int(...))'";
+  default:
+    return miss + "; its specializations are " + sourceList(t);
+  }
+}
+
+/// The inferred and the explicit form of a conversion to @p target of
+/// @p arg, of type @p source.
+std::vector<std::string> conversionForms(const std::string &target,
+                                         const std::string &arg,
+                                         const std::string &source) {
+  return {target + "(" + arg + ")", target + "<" + source + ">(" + arg + ")"};
+}
+
+/// A program that declares `v: source = value` and then @p statement.
+std::string withValue(const std::string &source, const std::string &value,
+                      const std::string &statement) {
+  return "fn main() -> int {\n  v: " + source + " = " + value + ";\n  " +
+         statement + "\n  return 0;\n}\n";
+}
+
+} // namespace
+
+// Every (target, source) pair of the primitives, in the inferred and the
+// explicit form: a conversion whose result is the target, or the one error
+// of its cell.
+TEST(Conversion, SourceSetsAreTheFamilies) {
+  for (size_t t = 0; t < std::size(kPrimitives); ++t) {
+    for (size_t s = 0; s < std::size(kPrimitives); ++s) {
+      const std::string target = kPrimitives[t].Name;
+      const std::string source = kPrimitives[s].Name;
+      for (const std::string &call : conversionForms(target, "v", source)) {
+        std::string trace = call;
+        SCOPED_TRACE(trace.append(" with v: ").append(source));
+        std::string declaration = "x: ";
+        declaration.append(target).append(" = ").append(call).append(";");
+        auto r =
+            semaCheck(withValue(source, kPrimitives[s].Value, declaration));
+        if (kFamilies[t][s] == '.') {
+          EXPECT_TRUE(r.Ok) << r.Diagnostics;
+          continue;
+        }
+        EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+        EXPECT_NE(r.Diagnostics.find("error: " + familyError(t, s) + "\n"),
+                  std::string::npos)
+            << r.Diagnostics;
+      }
+    }
+  }
+}
+
+// `Str` takes every primitive; a primitive takes no `Str`: the error names
+// its parse, or lists the sources of `char`, which has none.
+TEST(Conversion, StrAndThePrimitives) {
+  for (size_t t = 0; t < std::size(kPrimitives); ++t) {
+    const std::string name = kPrimitives[t].Name;
+    SCOPED_TRACE(name);
+    const std::vector<std::string> shows = conversionForms("Str", "v", name);
+    std::string texts = "a: Str = ";
+    texts.append(shows[0]).append(" + ").append(shows[1]).append(";");
+    expectOk(withValue(name, kPrimitives[t].Value, texts));
+    std::string error = "no specialization of '";
+    error.append(name).append("' for 'Str'");
+    if (const char *method = kParseMethods[t])
+      error.append(": parse a 'Str' with its method '")
+          .append(method)
+          .append("()', which returns '")
+          .append(name)
+          .append("?'");
+    else
+      error.append("; its specializations are ").append(sourceList(t));
+    for (const std::string &call : conversionForms(name, "v", "Str")) {
+      std::string parse = "x = ";
+      parse.append(call).append(";");
+      auto r = semaCheck(withValue("Str", "\"1\"", parse));
+      EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+      EXPECT_NE(r.Diagnostics.find("error: " + error + "\n"), std::string::npos)
+          << r.Diagnostics;
+    }
+  }
+}
+
+// The errors of the pairs the families leave out, as the language reference
+// gives them.
+TEST(Conversion, TheFamiliesNameTheRewrite) {
+  expectOneError("u: unsigned = 1; n = int(u);",
+                 "no specialization of 'int' for 'unsigned': an 'unsigned' can "
+                 "be larger than any 'int'; its method 'toInt()' returns "
+                 "'int?', None above 9223372036854775807");
+  expectOneError("u: unsigned = 1; n = i32<unsigned>(u);",
+                 "no specialization of 'i32' for 'unsigned': an 'unsigned' can "
+                 "be larger than any 'i32'; 'i32(u32(...))' keeps its low 32 "
+                 "bits");
+  expectOneError("u: u64 = 1; n = i16(u);",
+                 "no specialization of 'i16' for 'unsigned': an 'unsigned' can "
+                 "be larger than any 'i16'; 'i16(u16(...))' keeps its low 16 "
+                 "bits");
+  expectOneError("n = u8(255.5);",
+                 "no specialization of 'u8' for 'float': convert the 'float' "
+                 "to an 'int' first: 'u8(int(...))' truncates toward zero, "
+                 "then keeps the low 8 bits");
+  expectOneError("f: f64 = 2.5; n = u64<f64>(f);",
+                 "no specialization of 'unsigned' for 'float': convert the "
+                 "'float' to an 'int' first: 'unsigned(int(...))' truncates "
+                 "toward zero, then keeps the low 64 bits");
+  expectOneError("h: f16 = 2.5; n = u32(h);",
+                 "no specialization of 'u32' for 'f16': convert the 'f16' to "
+                 "an 'int' first: 'u32(int(...))' truncates toward zero, then "
+                 "keeps the low 32 bits");
+  expectOneError("x = float(True);",
+                 "no specialization of 'float' for 'bool': convert the 'bool' "
+                 "to an 'int' first: 'float(int(...))'");
+  expectOneError("x = f32<char>('a');",
+                 "no specialization of 'f32' for 'char': convert the 'char' to "
+                 "an 'int' first: 'f32(int(...))'");
+  // One error at each, and none from what is built on it.
+  expectOneError("u: unsigned = 1; n: int = int(u) + 1;",
+                 "no specialization of 'int' for 'unsigned': an 'unsigned' can "
+                 "be larger than any 'int'; its method 'toInt()' returns "
+                 "'int?', None above 9223372036854775807");
+}
+
+// `T(x)` of a `T` is the value itself, under any spelling of the type.
+TEST(Conversion, IdentityIsTheValue) {
+  expectOk(inMain(R"(
+    n: int = 5;  b: u8 = 7;  k: f32 = 1.5;  u: unsigned = 2;
+    a1: int = int(5);  a2: float = float(2.5);  a3: bool = bool(True);
+    a4: char = char('x');  a5: int = i64(n);  a6: u8 = u8(b);
+    a7: f32 = f32<f32>(k);  a8: int = int<int>(1);  a9: unsigned = u64(u);
+    a10: float = f64<float>(2.5);
+  )"));
+}
+
+// `u.toInt()`: an `unsigned`'s value as an `int?`, a builtin method like
+// `hash()` with no arguments, on an `unsigned` only.
+TEST(Conversion, AnUnsignedHasToInt) {
+  expectOk(inMain(R"(
+    u: unsigned = 7;
+    a: int? = u.toInt();
+    b: int? = unsigned(-1).toInt();
+    w: u64 = 3;
+    c: int? = w.toInt();
+    match u.toInt() { n: int { m: int = n + 1; } None { } }
+  )"));
+  expectOneError("u: unsigned = 7; n: int = u.toInt();",
+                 "cannot use optional 'int?' as 'int' without unwrapping (use "
+                 "match)");
+  expectOneError("u: unsigned = 7; n = u.toInt(1);",
+                 "method 'toInt' expects 0 argument(s), got 1");
+  expectOneError("o: unsigned? = 7; n = o.toInt();",
+                 "cannot use optional 'unsigned?' as 'unsigned' without "
+                 "unwrapping (use match)");
+  expectOneError("a: u32 = 7; n = a.toInt();",
+                 "method call on non-class type 'u32'");
+  expectOneError("n = 7; m = n.toInt();",
+                 "method call on non-class type 'int'");
+}
+
 // ─── unsupported pairs ──────────────────────────────────────────────────────
 
 TEST(Conversion, UnlistedTypeArgumentsNameTheClosedSet) {
-  expectError(inMain("x = int<int>(1);"),
-              "no specialization of 'int' for 'int'; its specializations "
-              "are float, bool, char");
   expectError(inMain("x = Str<Str>(\"a\");"),
               "no specialization of 'Str' for 'Str'; its specializations "
               "are int, float, bool, char");
   expectError(inMain("x = bool<float>(1.5);"),
               "no specialization of 'bool' for 'float'; its specializations "
-              "are int\n");
+              "are int, i8, i16, i32, u8, u16, u32, unsigned, bool\n");
   expectError(inMain("x = char<Str>(\"a\");"),
               "no specialization of 'char' for 'Str'; its specializations "
-              "are int");
-  expectError(inMain("x = float<bool>(True);"),
-              "no specialization of 'float' for 'bool'; its specializations "
-              "are int, i8");
+              "are int, i8, i16, i32, u8, u16, u32, unsigned, char\n");
+  expectError(inMain("x = char<float>(1.5);"),
+              "no specialization of 'char' for 'float'; its specializations "
+              "are int, i8, i16, i32, u8, u16, u32, unsigned, char\n");
   expectError(inMain("x = Str<Obj>(\"a\");"),
               "no specialization of 'Str' for 'Obj'");
   expectError(inMain("o: int? = 1;\n x = Str<int?>(o);"),
@@ -190,7 +423,8 @@ TEST(Conversion, CustomTypesAreNeverSpecializations) {
               "are int, float, bool, char");
   expectError(point + "fn main() -> int { x = int<Point>(Point()); return 0; }",
               "no specialization of 'int' for 'Point'; its specializations "
-              "are float, bool, char");
+              "are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, "
+              "char\n");
   expectError("enum Color { Red }\n"
               "fn main() -> int { x = Str<Color>(Color::Red); return 0; }",
               "no specialization of 'Str' for 'Color'");
@@ -271,21 +505,16 @@ TEST(Conversion, InferredFormIsTheExplicitOne) {
 
 TEST(Conversion, InferredFormNeedsAnExactSource) {
   // No widening and no unwrapping: the argument's own type must be a source.
-  expectError(inMain("x = float(2.5);"),
-              "no specialization of 'float' for 'float'; its specializations "
-              "are int, i8");
-  expectError(inMain("x = char('a');"),
-              "no specialization of 'char' for 'char'; its specializations "
-              "are int");
   expectError(inMain("x = bool(1.5);"),
               "no specialization of 'bool' for 'float'; its specializations "
-              "are int\n");
+              "are int, i8, i16, i32, u8, u16, u32, unsigned, bool\n");
   expectError(inMain("o: int? = 1;\n x = Str(o);"),
               "no specialization of 'Str' for 'int?'; its specializations "
               "are int, float, bool, char");
   expectError(inMain("o: int? = 1;\n x = int(o);"),
               "no specialization of 'int' for 'int?'; its specializations "
-              "are float, bool, char");
+              "are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, "
+              "char\n");
 }
 
 TEST(Conversion, InferredFormRejectsEveryOtherType) {
@@ -311,11 +540,10 @@ TEST(Conversion, InferredFormRejectsEveryOtherType) {
               "no specialization of 'Str' for 'int[1]'" + strSet);
   expectError(prog("a = A(); n = int(a);"),
               "no specialization of 'int' for 'A'; its specializations are "
-              "float, bool, char, i8, i16, i32, u8, u16, u32, unsigned, f16, "
-              "f32");
+              "int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, char\n");
   expectError(prog("n = float(None);"),
               "no specialization of 'float' for 'Obj'; its specializations are "
-              "int, i8, i16, i32, u8, u16, u32, unsigned, f16, f32");
+              "int, float, i8, i16, i32, u8, u16, u32, unsigned, f16, f32\n");
 }
 
 TEST(Conversion, InferredFormTakesExactlyOneArgument) {

@@ -115,9 +115,15 @@ void ModuleLowering::ExprEmitter::emitChainBelow(ast::Expr *e) {
 
 Val ModuleLowering::ExprEmitter::visitIntegerLiteral(
     ast::IntegerLiteral *node) {
-  // `1` flowing into an `f32` or `f16` slot is that float (Sema typed it).
+  // `1` flowing into an `f32` or `f16` slot is that float (Sema typed it),
+  // rounded once, as `f32(n)` is: an `f32` straight from the integer (the
+  // f64 of one beyond 2^53 is already rounded), an `f16` from the f64,
+  // which is exact below its 65520 overflow.
   ast::Type *ty = node->getResolvedType();
-  if (ast::BuiltinType::isFloatKind(L.builtinKind(ty)))
+  const ast::BuiltinType::Kind k = L.builtinKind(ty);
+  if (k == ast::BuiltinType::F32)
+    return Val::f64(static_cast<double>(static_cast<float>(node->getValue())));
+  if (ast::BuiltinType::isFloatKind(k))
     return L.canonicalize(Val::f64(static_cast<double>(node->getValue())), ty);
   return Val::i64(node->getValue());
 }
@@ -687,16 +693,26 @@ bool ModuleLowering::isStrConversion(const std::string &callee) {
   return callee.rfind(std::string(kString) + "<", 0) == 0;
 }
 
-// Inline numeric conversions `Target<Source>(value)` (#64).  This is the one
-// place their semantics are defined; every backend inherits it, and nothing
-// here is undefined behaviour in C or LLVM IR (--emit-c is strict C11):
-//   int<float>  truncates toward zero; NaN, +-inf and values outside int64
-//               panic (Paykan_panic_float_to_int) before the `ftoi`;
-//   float<int>  nearest double (`itof`);
-//   int<bool>   1 / 0;          bool<int>  `!= 0`;
-//   int<char>   the char's byte code 0..255 (`cast` zero-extends);
-//   char<int>   the byte with that code; outside 0..255 panics
-//               (Paykan_panic_int_to_char).
+// Inline numeric conversions `Target<Source>(value)` (#64), the pairs of
+// the families (docs/language/04-strings-and-conversions.md, "Between
+// numbers").  This is the one place their semantics are defined; every
+// backend inherits it, and nothing here is undefined behaviour in C or LLVM
+// IR (--emit-c is strict C11):
+//   T<T>         the value itself;
+//   int<float>   & co. (a signed target) truncate toward zero; NaN, +-inf
+//                and values outside the target panic
+//                (Paykan_panic_float_to_int, _to_type) before the `ftoi`;
+//   float<int>   & co. the nearest value, rounded once: `itof` / `utof`,
+//                then the target's rounding; `f32<int>` and `f32<unsigned>`
+//                round in the runtime (Paykan_int_to_f32, _uint_to_f32), as
+//                the f64 an `itof` gives is already rounded beyond 2^53;
+//   integer from an integer: the low bits of the value; from a `bool`, 1
+//                or 0; from a `char`, its byte code 0..255 (`cast`
+//                zero-extends), then the low bits (`i8`);
+//   bool<int>    & co. `!= 0`;
+//   char<int>    & co. the byte with that code; outside 0..255 panics
+//                (Paykan_panic_int_to_char for `int`, Paykan_panic_to_char
+//                naming the source for the rest), which a `u8` never is.
 // Returns an invalid Val when @p node is not a numeric conversion.
 Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
   using ast::BuiltinType;
@@ -709,8 +725,8 @@ Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
   const BuiltinType::Kind tk = L.builtinKind(target);
   const BuiltinType::Kind sk = L.builtinKind(source);
   Val v = visit(node->getArguments()[0]);
-  if (!v)
-    return Val();
+  if (!v || tk == sk)
+    return v; // a number, a bool and a char are already canonical
   auto panicUnless = [&](const Val &ok, const char *panicFn,
                          const std::vector<Val> &args) {
     Val bad = L.B.unary(Opcode::Not, ok, "conv.bad");
@@ -721,16 +737,14 @@ Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
     L.B.leave();
   };
   if (BuiltinType::isIntegerKind(tk) && BuiltinType::isFloatKind(sk)) {
-    // The doubles whose truncation fits the target: [-2^63, 2^63) for
-    // `int` (no double lies strictly between -2^63 - 1 and -2^63), (lo - 1,
-    // hi) for the others; both compares are ordered, so NaN fails them.
-    const unsigned bits = BuiltinType::integerBits(tk);
-    const bool isUnsigned = BuiltinType::isUnsignedKind(tk);
-    const double hi = std::ldexp(1.0, isUnsigned ? bits : bits - 1);
+    // A signed target (Sema has no float source for an unsigned one).  The
+    // doubles whose truncation fits it: [-2^63, 2^63) for `int` (no double
+    // lies strictly between -2^63 - 1 and -2^63), (lo - 1, hi) for the
+    // others; both compares are ordered, so NaN fails them.
+    const double hi = std::ldexp(1.0, BuiltinType::integerBits(tk) - 1);
     Val lo = tk == BuiltinType::Int
                  ? L.B.cmp(CmpPred::Ge, v, Val::f64(-hi), "conv.lo")
-                 : L.B.cmp(CmpPred::Gt, v,
-                           Val::f64(isUnsigned ? -1.0 : -hi - 1.0), "conv.lo");
+                 : L.B.cmp(CmpPred::Gt, v, Val::f64(-hi - 1.0), "conv.lo");
     Val inRange =
         L.B.select(lo, L.B.cmp(CmpPred::Lt, v, Val::f64(hi), "conv.hi"),
                    Val::boolean(false), "conv.ok");
@@ -742,11 +756,23 @@ Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
                   {v, L.internString(name),
                    Val::i64(static_cast<int64_t>(name.size()))});
     }
-    if (tk == BuiltinType::U64)
-      return L.B.ftou(v, "conv.uint");
     return L.B.ftoi(v, "conv.int"); // in range: already canonical
   }
   if (BuiltinType::isFloatKind(tk) && BuiltinType::isIntegerKind(sk)) {
+    if (tk == BuiltinType::F32 &&
+        (sk == BuiltinType::Int || sk == BuiltinType::U64)) {
+      // Rounded once, to the f32 nearest the integer (new-F3c-2).
+      if (auto *c = std::get_if<int64_t>(&v.Op.V))
+        return Val::f64(sk == BuiltinType::U64
+                            ? static_cast<double>(
+                                  static_cast<float>(static_cast<uint64_t>(*c)))
+                            : static_cast<double>(static_cast<float>(*c)));
+      return L.callRuntime(sk == BuiltinType::U64 ? kPaykanUintToF32
+                                                  : kPaykanIntToF32,
+                           {v}, "f32");
+    }
+    // Exact in an f64 for any narrower source, so one rounding to `f32`;
+    // an `f16` overflows from 65520, far below 2^53.
     Val f;
     if (sk == BuiltinType::U64)
       f = L.B.utof(v, "conv.float");
@@ -758,21 +784,32 @@ Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
     return L.canonicalize(v, target); // the low bits of the value
   if (BuiltinType::isFloatKind(tk) && BuiltinType::isFloatKind(sk))
     return L.canonicalize(v, target); // rounded to the target's precision
-  if (tk == BuiltinType::Int && sk == BuiltinType::Bool)
-    return L.coerceBoolToI64(v, Type::I64);
-  if (tk == BuiltinType::Bool && sk == BuiltinType::Int)
+  if (BuiltinType::isIntegerKind(tk) && sk == BuiltinType::Bool)
+    return L.coerceBoolToI64(v, Type::I64); // 1 and 0 fit every width
+  if (BuiltinType::isIntegerKind(tk) && sk == BuiltinType::Char)
+    return L.canonicalize(L.B.cast(v, Type::I64, "conv.code"), target);
+  if (tk == BuiltinType::Bool && BuiltinType::isIntegerKind(sk))
     return L.B.cmp(CmpPred::Ne, v, Val::i64(0), "conv.bool");
-  if (tk == BuiltinType::Int && sk == BuiltinType::Char)
-    return L.B.cast(v, Type::I64, "conv.code");
-  if (tk != BuiltinType::Char || sk != BuiltinType::Int)
+  if (tk != BuiltinType::Char || !BuiltinType::isIntegerKind(sk))
     return Val();
-  // char<int>: range-check, then map the code 128..255 to the signed byte
+  // char<S>: range-check (on the canonical slot, where an `unsigned` of 2^63
+  // or more is negative), then map the code 128..255 to the signed byte
   // with the same bits before the truncating cast, so C's `(int8_t)`
-  // conversion only ever sees an in-range value.
-  Val lo = L.B.cmp(CmpPred::Ge, v, Val::i64(0), "conv.lo");
-  Val hi = L.B.cmp(CmpPred::Le, v, Val::i64(255), "conv.hi");
-  panicUnless(L.B.select(lo, hi, Val::boolean(false), "conv.ok"),
-              kPaykanPanicIntToChar, {v});
+  // conversion only ever sees an in-range value.  A `u8` is in range.
+  if (sk != BuiltinType::U8) {
+    Val lo = L.B.cmp(CmpPred::Ge, v, Val::i64(0), "conv.lo");
+    Val hi = L.B.cmp(CmpPred::Le, v, Val::i64(255), "conv.hi");
+    Val ok = L.B.select(lo, hi, Val::boolean(false), "conv.ok");
+    if (sk == BuiltinType::Int) {
+      panicUnless(ok, kPaykanPanicIntToChar, {v});
+    } else {
+      const std::string name = ast::typeName(source);
+      panicUnless(ok, kPaykanPanicToChar,
+                  {v, Val::i64(BuiltinType::isUnsignedKind(sk) ? 1 : 0),
+                   L.internString(name),
+                   Val::i64(static_cast<int64_t>(name.size()))});
+    }
+  }
   Val high = L.B.cmp(CmpPred::Gt, v, Val::i64(127), "conv.high");
   Val wrapped = L.B.binary(Opcode::Sub, v, Val::i64(256), "conv.wrap");
   Val byte = L.B.select(high, wrapped, v, "conv.byte");
@@ -1000,6 +1037,10 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       recvResolved == L.ASTCtx.getStrTy() &&
       ast::strParseKind(node->getMethodName(), target))
     return emitStrParseCall(node, target);
+  // `u.toInt()` on an `unsigned`: its value as an `int?`.
+  if (L.builtinKind(recvResolved) == ast::BuiltinType::U64 &&
+      node->getMethodName() == kMethodToInt)
+    return emitUnsignedToInt(node);
   // A struct's method, called directly on the receiver's storage
   // (LoweringStruct.cpp); its `toString()` is the builtin one, below.
   if (auto *st = L.getExprStructType(node->getReceiver());
@@ -1069,6 +1110,19 @@ Val ModuleLowering::ExprEmitter::emitStrParseCall(
   if (!str)
     return Val();
   return emitParseOf(str.Raw, str.Owned, target);
+}
+
+// `u.toInt()` on an `unsigned` (visitMethodCallExpr): the value as the
+// present `int?`, or None from 2^63 on, which the slot's bits hold as a
+// negative int64.
+Val ModuleLowering::ExprEmitter::emitUnsignedToInt(ast::MethodCallExpr *node) {
+  Val v = visit(node->getReceiver());
+  if (!v)
+    return Val();
+  Val fits = L.B.cmp(CmpPred::Ge, v, Val::i64(0), "toint.fits");
+  Val some = L.B.some(v, "some");
+  Val none = L.B.none(some.Ty, "none");
+  return L.B.select(fits, some, none, "toint.opt");
 }
 
 // `o.toString()` on an optional (the builtin `Show`): "None", or the value's

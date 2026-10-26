@@ -243,14 +243,31 @@ conversion: it is the `Str` constructor, and returns the string itself.
 
 ### Between numbers
 
-| Conversion   | Result                                                      |
-|--------------|-------------------------------------------------------------|
-| `float(n)`   | the `int` `n` as a `float`: the nearest one (exact up to 2^53) |
-| `int(f)`     | the `float` `f` truncated toward zero; panics on NaN, an infinity or a value out of range |
-| `int(b)`     | `1` for `True`, `0` for `False`                             |
-| `bool(n)`    | `n != 0`                                                    |
-| `int(c)`     | the byte value of the `char` `c`, `0` to `255`              |
-| `char(n)`    | the `char` with byte value `n`; panics outside `0` to `255` |
+The numbers come in three **families**: the signed integers `int` (also spelled `i64`),
+`i8`, `i16` and `i32`; the unsigned integers `unsigned` (also `u64`), `u8`, `u16` and `u32`;
+and the floats `float` (also `f64`), `f16` and `f32`. A type converts from the types its
+family takes, and from itself (`int(n)` with an `int` is `n`):
+
+| Target                       | Converts from                                                  |
+|------------------------------|----------------------------------------------------------------|
+| `int`, `i8`, `i16`, `i32`    | every signed type, `u8`, `u16`, `u32`, every float type, `bool`, `char` |
+| `unsigned`, `u8`, `u16`, `u32` | every integer type, `bool`, `char`                           |
+| `float`, `f16`, `f32`        | every integer type, every float type                           |
+| `bool`                       | every integer type                                             |
+| `char`                       | every integer type                                             |
+
+What a conversion gives:
+
+| Conversion        | Result                                                                  |
+|-------------------|-------------------------------------------------------------------------|
+| integer → integer | the value when it fits, else the low bits of its two's-complement form: `u8(300)` is `44`, `i8(200)` is `-56`, `unsigned(-1)` is `18446744073709551615`, `u8(i8(-1))` is `255` |
+| float → integer   | truncated toward zero; panics on NaN, an infinity or a value outside the target's range (`int(-2.9)` is `-2`, `i8(128.0)` panics) |
+| integer → float   | the nearest value of the target, rounded once: `float(n)` is exact up to 2^53, `f32(16777217)` is `16777216`, `f16(70000)` is `inf` |
+| float → float     | rounded to the target's precision; too large is its infinity (`f16(0.1)` is `0.0999756`) |
+| `bool` → integer  | `1` for `True`, `0` for `False`                                         |
+| `char` → integer  | the byte value, `0` to `255`, then the low bits: `u8('a')` is `97`; an `i8` reads the byte as signed |
+| integer → `bool`  | `n != 0`                                                                |
+| integer → `char`  | the `char` with that byte value; panics outside `0` to `255` (a `u8` never does) |
 
 ```pkn
 import ::io;
@@ -273,12 +290,11 @@ Output:
 False 1
 ```
 
-The sized numeric types (`u8`, `i32`, `unsigned`, `f32`, …) convert the same way, from and
-to every other numeric type: `u8(n)` keeps the low 8 bits of an `int` (`u8(300)` is `44`),
-`int(b)` widens a `u8` back, `i32(f)` truncates a `float` and panics outside the `i32`
-range, and `f32(f)` rounds a `float` to single precision.  Two values of different numeric
-types never meet in an operation without one of these conversions (see [Sized numeric
-types](02-basics.md#sized-numeric-types)).
+The sized numeric types (`u8`, `i32`, `unsigned`, `f32`, …) convert the same way: `u8(n)`
+keeps the low 8 bits of an `int` (`u8(300)` is `44`), `int(b)` widens a `u8` back, `i32(f)`
+truncates a `float` and panics outside the `i32` range, and `f32(f)` rounds a `float` to
+single precision. Two values of different numeric types never meet in an operation without
+one of these conversions (see [Sized numeric types](02-basics.md#sized-numeric-types)).
 
 ```pkn
 import ::io;
@@ -287,6 +303,7 @@ fn main() -> int {
   b: u8 = 200;
   io::println(Str(u8(300)) + " " + Str(int(b) + 100) + " " + Str(b + 100));
   io::println(Str(unsigned(-1)) + " " + Str(f32(0.1)));
+  io::println(Str(u8('a')) + " " + Str(bool(b)) + " " + Str(char(u8(65))));
   return 0;
 }
 ```
@@ -296,6 +313,51 @@ Output:
 ```
 44 300 44
 18446744073709551615 0.1
+97 True A
+```
+
+Three kinds of pair are left out, and the error of each names the way to write it:
+
+- **An `unsigned` into a signed type.** An `unsigned` can be larger than any `int`.
+  `u.toInt()` gives its value as an `int?`, `None` above `9223372036854775807`; `i32(u32(u))`
+  keeps its low 32 bits; or keep the arithmetic `unsigned`.
+- **A float into an unsigned type.** Convert it to an `int` first: `u8(int(f))` truncates
+  toward zero, then keeps the low 8 bits. Check the range first, as it wraps a value out of
+  range rather than stopping.
+- **A `bool` or a `char` into a float type.** Convert it to an `int` first: `float(int(c))`.
+
+```pkn
+fn main() -> int {
+  u: unsigned = 7;
+  n = int(u);
+  return 0;
+}
+```
+
+Error:
+
+```
+no specialization of 'int' for 'unsigned': an 'unsigned' can be larger than any 'int'; its method 'toInt()' returns 'int?', None above 9223372036854775807
+```
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  u = unsigned(-1);
+  io::println(unsigned(42).toInt());
+  io::println(u.toInt());
+  io::println(Str(i32(u32(u))) + " " + Str(u8(int(255.9))));
+  return 0;
+}
+```
+
+Output:
+
+```
+42
+None
+-1 255
 ```
 
 ### Parsing a string
@@ -418,17 +480,17 @@ fixed, closed set of them, one for each type it converts *from*. `Target(value)`
 specialization whose source is **exactly** the type of `value`: `Str(n)` with an `int` is
 `Str<int>`, and `int(f)` with a `float` is `int<float>`. Nothing is widened or unwrapped to
 find one. An `int` argument does not reach `float`'s `Str` specialization, and an `int?`
-must be unwrapped with `match` first. A conversion between a type and itself, such as
-`float(2.5)`, does not exist either.
+must be unwrapped with `match` first. Each primitive has the specialization of itself, the
+value unchanged: `float(2.5)` is `float<float>(2.5)`.
 
 | Target  | Specializations (the source types) | Result                                   |
 |---------|------------------------------------|------------------------------------------|
 | `Str`   | `int`, `float`, `bool`, `char`, and every sized numeric type | `Str`           |
-| `int`   | `float`, `bool`, `char`, and every sized numeric type | `int`           |
-| `float` | `int`, and every sized numeric type | `float`                                 |
-| `i8` … `u32`, `unsigned`, `f16`, `f32` | every other numeric type | `T`                     |
-| `bool`  | `int`                              | `bool`                                   |
-| `char`  | `int`                              | `char`                                   |
+| `int`, `i8`, `i16`, `i32` | `int`, `float`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `f16`, `f32`, `bool`, `char` | `T` |
+| `unsigned`, `u8`, `u16`, `u32` | `int`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `bool`, `char` | `T` |
+| `float`, `f16`, `f32` | `int`, `float`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `f16`, `f32` | `T` |
+| `bool`  | `int`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `bool` | `bool`  |
+| `char`  | `int`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`, `char` | `char`  |
 
 No type converts *from* a `Str`: a string is parsed with its methods ([Parsing a
 string](#parsing-a-string)), each of which returns an optional.
@@ -447,21 +509,24 @@ What each specialization does:
 | `Str<char>(c)`    | `char` → `Str`     | A one-character string                                        |
 | `int<float>(f)`   | `float` → `int`    | Truncates toward zero; panics on NaN, ±inf or out of range    |
 | `float<int>(n)`   | `int` → `float`    | The nearest `float` (exact up to 2^53)                        |
-| `int<bool>(b)`    | `bool` → `int`     | `1` for `True`, `0` for `False`                               |
-| `bool<int>(n)`    | `int` → `bool`     | `n != 0`                                                      |
-| `int<char>(c)`    | `char` → `int`     | The character's byte code, `0`..`255`                         |
-| `char<int>(n)`    | `int` → `char`     | The character with byte code `n`; panics outside `0`..`255`   |
-| `u8<int>(n)`, `i32<unsigned>(u)`, `int<u8>(b)`, … | integer → integer | The low bits of the two's-complement value: `u8(300)` is `44`, `i8(200)` is `-56`, `unsigned(-1)` is `18446744073709551615`, `int(unsigned(-1))` is `-1` |
-| `i8<float>(f)`, `unsigned<f32>(x)`, … | float → integer | Truncates toward zero; panics on NaN, ±inf or a value outside the target's range (`i8(-128.9)` is `-128`, `i8(128.0)` panics) |
-| `f32<int>(n)`, `float<u8>(b)`, … | integer → float | The nearest value of the target (`f32(16777217)` is `16777216`) |
+| `int<bool>(b)`, `u8<bool>(b)`, … | `bool` → integer | `1` for `True`, `0` for `False`                    |
+| `bool<int>(n)`, `bool<u8>(b)`, … | integer → `bool` | `n != 0`                                           |
+| `int<char>(c)`, `u8<char>(c)`, … | `char` → integer | The character's byte code, `0`..`255`, then the low bits (`i8<char>` reads it as signed) |
+| `char<int>(n)`, `char<u16>(h)`, … | integer → `char` | The character with byte code `n`; panics outside `0`..`255` (never from a `u8`) |
+| `int<int>(n)`, `f32<f32>(x)`, … | a type → itself | The value                                          |
+| `u8<int>(n)`, `i32<u32>(w)`, `int<u8>(b)`, … | integer → integer | The low bits of the two's-complement value: `u8(300)` is `44`, `i8(200)` is `-56`, `unsigned(-1)` is `18446744073709551615`, `i32(u32(4294967295))` is `-1` |
+| `i8<float>(f)`, `int<f32>(x)`, … | float → signed integer | Truncates toward zero; panics on NaN, ±inf or a value outside the target's range (`i8(-128.9)` is `-128`, `i8(128.0)` panics) |
+| `f32<int>(n)`, `float<u8>(b)`, … | integer → float | The nearest value of the target, rounded once (`f32(16777217)` is `16777216`) |
 | `f16<float>(f)`, `float<f32>(x)`, … | float → float | Rounded to the target's precision; too large is its infinity (`f16(0.1)` is `0.0999756`, `f16(70000.0)` is `inf`) |
 | `Str<u8>(b)`, `Str<f32>(x)`, … | sized → `Str` | As `Str<int>` / `Str<float>`; `Str<unsigned>` prints the unsigned value |
 
 **The set is closed.** When no specialization's source is the argument's type, a user class
-included, the call is a compile-time error that lists the target's specializations, or,
-for a `Str` argument and a number or `bool` target, names the method that parses the
-string. The explicit form reports a type argument outside the set the same way. A class
-cannot add a specialization; `toString()` is the way to turn an object into a `Str`:
+included, the call is a compile-time error that lists the target's specializations. For a
+pair a family leaves out ([Between numbers](#between-numbers)) it names the conversion to
+write instead, and for a `Str` argument and a number or `bool` target, the method that
+parses the string. The explicit form reports a type argument outside the set the same way.
+A class cannot add a specialization; `toString()` is the way to turn an object into a
+`Str`:
 
 ```pkn
 a = Point();
@@ -470,8 +535,11 @@ s = Str(a);         // error: no specialization of 'Str' for 'Point'; its specia
                     //        unsigned, f16, f32
 o = None;
 t = Str(o);         // error: no specialization of 'Str' for 'Obj'; ...
-x = float(2.5);     // error: no specialization of 'float' for 'float'; its specializations
-                    //        are int, i8, i16, i32, u8, u16, u32, unsigned, f16, f32
+x = bool(2.5);      // error: no specialization of 'bool' for 'float'; its specializations
+                    //        are int, i8, i16, i32, u8, u16, u32, unsigned, bool
+w = u8(2.5);        // error: no specialization of 'u8' for 'float': convert the 'float' to
+                    //        an 'int' first: 'u8(int(...))' truncates toward zero, then
+                    //        keeps the low 8 bits
 y = int<float>(3);  // error: argument of 'int<float>' has type 'int', expected 'float'
 n = u8("7");        // error: no specialization of 'u8' for 'Str': parse a 'Str' with its
                     //        method 'toU8()', which returns 'u8?'
@@ -481,13 +549,16 @@ n = u8("7");        // error: no specialization of 'u8' for 'Str': parse a 'Str'
 
 `int<float>` of NaN, of an infinity, or of a value outside the `int` range (`-2^63` to just
 under `2^63`) stops the program, and so does a float-to-integer conversion to a sized type
-outside that type's range (`i8(128.0)`). So does `char<int>` outside `0`..`255`. Each
-prints a message naming the value and aborts, like an integer division by zero:
+outside that type's range (`i8(128.0)`). So does `char(n)` of an integer outside
+`0`..`255`, from any integer type but `u8`. Each prints a message naming the conversion and
+the value and aborts, like an integer division by zero; an unsigned value prints unsigned:
 
 ```
 paykan: int<float>(inf): the value is NaN, infinite or outside the int range
 paykan: i8<float>(128): the value is NaN, infinite or outside the i8 range
 paykan: char<int>(300): the value is outside the char range 0..255
+paykan: char<i32>(300): the value is outside the char range 0..255
+paykan: char<unsigned>(18446744073709551615): the value is outside the char range 0..255
 ```
 
 A panic (these, an integer division by zero or `INT64_MIN / -1`, an index out of bounds)

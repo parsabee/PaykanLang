@@ -65,6 +65,8 @@ inline std::string_view untypedParamOf(std::string_view typeParam) {
 
 inline constexpr const char *kMethodDestroy = "destroy";
 inline constexpr const char *kMethodToString = "toString";
+/// Str's parse into an `int`, and an `unsigned`'s value as an `int?`.
+inline constexpr const char *kMethodToInt = "toInt";
 inline constexpr const char *kMethodEquals = "equals";
 
 // Traits
@@ -119,7 +121,7 @@ struct StrParseMethod {
 /// "Parsing a string"), one per primitive that parses: each gives the
 /// optional of its type.  Builtins, not vtable slots.
 inline constexpr StrParseMethod kStrParseMethods[] = {
-    {"toInt", kTypeInt},           {"toI8", kTypeI8},
+    {kMethodToInt, kTypeInt},      {"toI8", kTypeI8},
     {"toI16", kTypeI16},           {"toI32", kTypeI32},
     {"toUnsigned", kTypeUnsigned}, {"toU8", kTypeU8},
     {"toU16", kTypeU16},           {"toU32", kTypeU32},
@@ -256,6 +258,8 @@ inline constexpr const char *kPaykanPanicDivOverflow =
 inline constexpr const char *kPaykanPanicFloatToInt =
     "Paykan_panic_float_to_int";
 inline constexpr const char *kPaykanPanicIntToChar = "Paykan_panic_int_to_char";
+/// The panic of `char<S>` for a source other than `int`, which it names
+inline constexpr const char *kPaykanPanicToChar = "Paykan_panic_to_char";
 inline constexpr const char *kPaykanPanicFloatToType =
     "Paykan_panic_float_to_type";
 inline constexpr const char *kPaykanPanicForStep = "Paykan_panic_for_step";
@@ -263,6 +267,9 @@ inline constexpr const char *kPaykanPanicPureVirtual =
     "Paykan_panic_pure_virtual";
 /// `f16` rounding (docs/design/sized-types.md)
 inline constexpr const char *kPaykanRoundF16 = "Paykan_round_f16";
+/// `f32<int>` and `f32<unsigned>`, rounded once
+inline constexpr const char *kPaykanIntToF32 = "Paykan_int_to_f32";
+inline constexpr const char *kPaykanUintToF32 = "Paykan_uint_to_f32";
 inline constexpr const char *kPaykanPanicIndex = "Paykan_panic_index";
 
 // Reference counting
@@ -376,6 +383,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicFloatToInt,
     kPaykanPanicFloatToType,
     kPaykanPanicIntToChar,
+    kPaykanPanicToChar,
     kPaykanPanicIndex,
     kPaykanPanicForStep,
     kPaykanPanicPureVirtual,
@@ -397,6 +405,8 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringParseF16,
     // Sized numeric types
     kPaykanRoundF16,
+    kPaykanIntToF32,
+    kPaykanUintToF32,
     // Hash
     kPaykanIntHash,
     kPaykanStringHash,

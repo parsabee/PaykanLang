@@ -18,7 +18,7 @@ fn main() -> int {
   c: i8 = -128;
   d: unsigned = 7;
   e: u64 = d;                      // u64 is unsigned
-  f: i64 = int(e);                 // i64 is int
+  f: i64 = int(u32(e));            // i64 is int; u32 widens into it
   g: f32 = 1.5;
   h: f16 = g16(1);
   i = clamp(300, 0, 255);          // the literals are i32 arguments

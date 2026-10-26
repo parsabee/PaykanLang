@@ -2217,7 +2217,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // or on an enum (its variant, and its fields), each part of which has a
   // text: the builtin `Show`; `n.hash()` on an int, bool or char, and
   // `s.hash()` on a Str: the builtin `Hashable`; `s.toInt()` & co. on a Str:
-  // its parses, each the optional of its type.
+  // its parses, each the optional of its type; `u.toInt()` on an `unsigned`:
+  // its value as an `int?`, None above the `int` range.
   const std::string &mname = node->getMethodName();
   ast::Type *builtinResult = nullptr;
   ast::BuiltinType::Kind parsed = ast::BuiltinType::Void;
@@ -2238,6 +2239,9 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
     builtinResult = S.Ctx.getIntTy();
   } else if (ct == S.Ctx.getStrTy() && ast::strParseKind(mname, parsed)) {
     builtinResult = S.Ctx.getOptionalType(S.Ctx.getBuiltinType(parsed));
+  } else if (recvTy == S.Ctx.getBuiltinType(ast::BuiltinType::U64) &&
+             mname == names::kMethodToInt) {
+    builtinResult = S.Ctx.getOptionalType(S.Ctx.getIntTy());
   }
   if (builtinResult) {
     if (node->getNumArguments() != 0) {
@@ -3070,10 +3074,13 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
 // builtin target has a fixed, closed set of specializations (the valid
 // sources), and no other type, builtin or user-defined, can be one. The source
 // is written (`Str<int>(n)`, checkConversion) or inferred from the argument's
-// exact type (`Str(n)`, inferConversion).  The semantics live in the lowering
-// (Lowering/LoweringExpr.cpp, emitConversion and the runtime table), which both
-// backends inherit.  A primitive does not parse a `Str`: that is a method of
-// the string (`s.toInt()`), which the error names.
+// exact type (`Str(n)`, inferConversion).  The numeric targets take the
+// sources of their family (docs/language/04-strings-and-conversions.md,
+// "Between numbers"), and the error of a pair a family leaves out names the
+// rewrite.  The semantics live in the lowering (Lowering/LoweringExpr.cpp,
+// emitConversion and the runtime table), which both backends inherit.  A
+// primitive does not parse a `Str`: that is a method of the string
+// (`s.toInt()`), which the error names.
 
 struct ConversionPair {
   std::string Target;
@@ -3083,10 +3090,38 @@ struct ConversionPair {
 
 namespace {
 
+/// The primitive sources, in the order a diagnostic lists them.
+constexpr ast::BuiltinType::Kind kConversionSources[] = {
+    ast::BuiltinType::Int, ast::BuiltinType::Float, ast::BuiltinType::I8,
+    ast::BuiltinType::I16, ast::BuiltinType::I32,   ast::BuiltinType::U8,
+    ast::BuiltinType::U16, ast::BuiltinType::U32,   ast::BuiltinType::U64,
+    ast::BuiltinType::F16, ast::BuiltinType::F32,   ast::BuiltinType::Bool,
+    ast::BuiltinType::Char};
+
+/// Whether `t(x)` takes an `s` (docs/language/04-strings-and-conversions.md,
+/// "Between numbers"): every primitive its own value; the float family every
+/// number; the unsigned family every integer, `bool` and `char`; the signed
+/// family the same but `unsigned`, and every float; `bool` and `char` every
+/// integer.
+bool convertsFrom(ast::BuiltinType::Kind t, ast::BuiltinType::Kind s) {
+  using B = ast::BuiltinType;
+  if (t == s)
+    return true;
+  if (B::isFloatKind(t))
+    return B::isNumericKind(s);
+  if (B::isUnsignedKind(t))
+    return B::isIntegerKind(s) || s == B::Bool || s == B::Char;
+  if (B::isIntegerKind(t))
+    return (B::isIntegerKind(s) && s != B::U64) || B::isFloatKind(s) ||
+           s == B::Bool || s == B::Char;
+  if (t == B::Bool || t == B::Char)
+    return B::isIntegerKind(s);
+  return false;
+}
+
 /// The conversions, grouped by target, each group in the order its
-/// diagnostics list it: `Str` from every scalar; `int`, `float` and the
-/// sized numeric types from every other numeric type; `bool` and `char`
-/// from `int` only (docs/design/sized-types.md).
+/// diagnostics list it: `Str` from every scalar, and each primitive from the
+/// sources convertsFrom gives it, in kConversionSources' order.
 const std::vector<ConversionPair> &conversions() {
   static const std::vector<ConversionPair> kTable = [] {
     using ast::BuiltinType;
@@ -3094,40 +3129,50 @@ const std::vector<ConversionPair> &conversions() {
     auto add = [&](const std::string &target, const std::string &source) {
       t.push_back({target, source, target + "<" + source + ">"});
     };
-    // The numeric types, in the order the diagnostics list them.
-    std::vector<std::string> numerics;
-    for (BuiltinType::Kind k :
-         {BuiltinType::Int, BuiltinType::Float, BuiltinType::I8,
-          BuiltinType::I16, BuiltinType::I32, BuiltinType::U8, BuiltinType::U16,
-          BuiltinType::U32, BuiltinType::U64, BuiltinType::F16,
-          BuiltinType::F32})
-      numerics.push_back(ast::builtinKindName(k));
-    add(names::kString, names::kTypeInt);
-    add(names::kString, names::kTypeFloat);
-    add(names::kString, names::kTypeBool);
-    add(names::kString, names::kTypeChar);
-    for (size_t i = 2; i < numerics.size(); ++i)
-      add(names::kString, numerics[i]);
-    for (const std::string &target : numerics) {
-      for (const std::string &source : numerics)
-        if (source != target)
-          add(target, source);
-      // `int` also converts the two non-numeric scalars, as before the sized
-      // types (so its list reads `float, bool, char, i8, ...`).
-      if (target == names::kTypeInt) {
-        ConversionPair boolPair{target, names::kTypeBool,
-                                target + "<" + names::kTypeBool + ">"};
-        ConversionPair charPair{target, names::kTypeChar,
-                                target + "<" + names::kTypeChar + ">"};
-        auto at = t.end() - static_cast<long>(numerics.size() - 2);
-        t.insert(at, {boolPair, charPair});
-      }
-    }
-    add(names::kTypeBool, names::kTypeInt);
-    add(names::kTypeChar, names::kTypeInt);
+    // `Str` lists `bool` and `char` after `int` and `float`.
+    for (BuiltinType::Kind source :
+         {BuiltinType::Int, BuiltinType::Float, BuiltinType::Bool,
+          BuiltinType::Char, BuiltinType::I8, BuiltinType::I16,
+          BuiltinType::I32, BuiltinType::U8, BuiltinType::U16, BuiltinType::U32,
+          BuiltinType::U64, BuiltinType::F16, BuiltinType::F32})
+      add(names::kString, ast::builtinKindName(source));
+    for (BuiltinType::Kind target : kConversionSources)
+      for (BuiltinType::Kind source : kConversionSources)
+        if (convertsFrom(target, source))
+          add(ast::builtinKindName(target), ast::builtinKindName(source));
     return t;
   }();
   return kTable;
+}
+
+/// The rewrite of a pair the families leave out, after the target and the
+/// source: an `unsigned` into the signed family, a float into the unsigned
+/// family, a `bool` or a `char` into the float family.  Empty for any other
+/// pair.
+std::string conversionHint(const std::string &target,
+                           const std::string &source) {
+  using B = ast::BuiltinType;
+  B::Kind t = B::Void;
+  B::Kind s = B::Void;
+  if (!ast::builtinKindOfName(target, t) || !ast::builtinKindOfName(source, s))
+    return {};
+  const std::string bits = std::to_string(B::integerBits(t));
+  if (B::isIntegerKind(t) && !B::isUnsignedKind(t) && s == B::U64) {
+    if (t == B::Int)
+      return ": an 'unsigned' can be larger than any 'int'; its method '" +
+             std::string(names::kMethodToInt) +
+             "()' returns 'int?', None above 9223372036854775807";
+    return ": an 'unsigned' can be larger than any '" + target + "'; '" +
+           target + "(u" + bits + "(...))' keeps its low " + bits + " bits";
+  }
+  if (B::isUnsignedKind(t) && B::isFloatKind(s))
+    return ": convert the '" + source + "' to an 'int' first: '" + target +
+           "(int(...))' truncates toward zero, then keeps the low " + bits +
+           " bits";
+  if (B::isFloatKind(t) && (s == B::Bool || s == B::Char))
+    return ": convert the '" + source + "' to an 'int' first: '" + target +
+           "(int(...))'";
+  return {};
 }
 
 /// The specialization set of @p target, for a diagnostic: "int, float, ...".
@@ -3166,15 +3211,19 @@ std::string parseMovedMessage(const std::string &target,
 }
 
 /// The no-match error, for the explicit and the inferred form alike: a
-/// parse's names its method, any other lists the target's specializations.
+/// parse's names its method, a pair a family leaves out its rewrite
+/// (conversionHint), any other lists the target's specializations.
 /// Either way the call has no type, so nothing built on it is reported
 /// again: a program written for the older parse gets one error at each.
 std::string noSpecializationMessage(const std::string &target,
                                     const std::string &source) {
   if (std::string moved = parseMovedMessage(target, source); !moved.empty())
     return moved;
-  return "no specialization of '" + target + "' for '" + source +
-         "'; its specializations are " + specializationList(target);
+  const std::string miss =
+      "no specialization of '" + target + "' for '" + source + "'";
+  if (std::string hint = conversionHint(target, source); !hint.empty())
+    return miss + hint;
+  return miss + "; its specializations are " + specializationList(target);
 }
 
 /// The conversion target of a callee: the target itself (`int`), or the

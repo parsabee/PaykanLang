@@ -137,6 +137,36 @@ TEST(Numeric, RoundF16KeepsSubnormalsAndSpecials) {
   EXPECT_EQ(std::signbit(Paykan_round_f16(-0.0)), true);
 }
 
+// `f32<int>` and `f32<unsigned>`: the integer rounded once to the nearest
+// f32, ties to even (new-F3c-2), where its f64 rounded again can be the
+// other neighbour.
+TEST(Numeric, IntToF32RoundsOnce) {
+  // 2^60 + 2^36 + 1: just above the midpoint 2^60 + 2^36 between 2^60 and
+  // 2^60 + 2^37, which is the f64 of it (so twice rounded is 2^60).
+  const int64_t n = (INT64_C(1) << 60) + (INT64_C(1) << 36) + 1;
+  EXPECT_EQ(Paykan_int_to_f32(n), std::ldexp(1.0, 60) + std::ldexp(1.0, 37));
+  EXPECT_EQ(static_cast<double>(static_cast<float>(static_cast<double>(n))),
+            std::ldexp(1.0, 60));
+  EXPECT_EQ(Paykan_int_to_f32(-n),
+            -(std::ldexp(1.0, 60) + std::ldexp(1.0, 37)));
+  EXPECT_EQ(Paykan_int_to_f32(INT64_MIN), -std::ldexp(1.0, 63));
+  EXPECT_EQ(Paykan_int_to_f32(INT64_MAX), std::ldexp(1.0, 63));
+  EXPECT_EQ(Paykan_int_to_f32(16777217), 16777216.0); // a tie, to even
+  EXPECT_EQ(Paykan_int_to_f32(16777219), 16777220.0); // a tie, to even
+  EXPECT_EQ(Paykan_int_to_f32(-3), -3.0);
+  EXPECT_EQ(Paykan_int_to_f32(0), 0.0);
+  EXPECT_FALSE(std::signbit(Paykan_int_to_f32(0)));
+  // The uint64 of the bits: 2^64 - 1 is 2^64; 2^63 + 2^39 + 1 is
+  // 2^63 + 2^40 (its f64, 2^63 + 2^39, is the midpoint, rounded to 2^63).
+  EXPECT_EQ(Paykan_uint_to_f32(-1), std::ldexp(1.0, 64));
+  const uint64_t u = (UINT64_C(1) << 63) + (UINT64_C(1) << 39) + 1;
+  EXPECT_EQ(Paykan_uint_to_f32(static_cast<int64_t>(u)),
+            std::ldexp(1.0, 63) + std::ldexp(1.0, 40));
+  EXPECT_EQ(static_cast<double>(static_cast<float>(static_cast<double>(u))),
+            std::ldexp(1.0, 63));
+  EXPECT_EQ(Paykan_uint_to_f32(7), 7.0);
+}
+
 TEST(Numeric, ParseF32RoundsTheFloatOfTheText) {
   EXPECT_EQ(f32Of("0.1"), static_cast<double>(0.1f));
   EXPECT_EQ(f32Of("2.5"), 2.5);

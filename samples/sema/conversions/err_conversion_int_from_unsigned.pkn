@@ -1,0 +1,9 @@
+// A signed type takes no `unsigned`, which can be larger than any of them:
+// the error names `toInt()`, or the conversion through the unsigned type of
+// the same width.
+fn main() -> int {
+  u: unsigned = 7;
+  a = int(u);        // error: no specialization of 'int' for 'unsigned': an 'unsigned' can be larger than any 'int'; its method 'toInt()' returns 'int?', None above 9223372036854775807
+  b = i32<u64>(u);   // error: no specialization of 'i32' for 'unsigned': an 'unsigned' can be larger than any 'i32'; 'i32(u32(...))' keeps its low 32 bits
+  return 0;
+}

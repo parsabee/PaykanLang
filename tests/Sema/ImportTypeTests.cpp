@@ -597,7 +597,7 @@ import lib::mid;
 import lib::lib2;
 fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
 fn main() -> int {
-  return h(mid::mk()) + h(ks::Key(3, 4)) + h(lib::keys::CK(5)) + int(lib2::count(0));
+  return h(mid::mk()) + h(ks::Key(3, 4)) + h(lib::keys::CK(5)) + int(u32(lib2::count(0)));
 }
 )");
   auto r = semaCheckFile(main, tmp);

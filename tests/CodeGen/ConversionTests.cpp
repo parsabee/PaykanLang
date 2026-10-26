@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 // CodeGen tests: the conversion constructors `Target<Source>(value)` (#64) —
 // `Str<int|float|bool|char>` and the numeric conversions between int, float,
-// bool and char, with their edge cases — and Str's `toBool()` and the parse
-// of a conversion's text (#88).  The other parses (`toInt()`, `toFloat()`)
-// are in ParseTests.cpp; the panics (out-of-range `int<float>` /
-// `char<int>`) are death tests in DriverTests.cpp.  Every test
+// bool and char, with their edge cases; every pair of the families
+// (docs/language/04-strings-and-conversions.md, "Between numbers"): a `bool`
+// and a `char` to and from every integer type, identity, an `unsigned`'s
+// `toInt()`, and an `f32` of a wide integer rounded once — and Str's
+// `toBool()` and the parse of a conversion's text (#88).  The other parses
+// (`toInt()`, `toFloat()`) are in ParseTests.cpp; the panics (out-of-range
+// `int<float>` / `char<S>`) are death tests in DriverTests.cpp.  Every test
 // runs on the backend the suite is built for (llvm and c) and checks zero
 // live heap blocks.
 
 #include "CodeGenTestUtils.h"
 #include <gtest/gtest.h>
+#include <iterator>
 
 using namespace paykan::test;
 
@@ -309,4 +313,139 @@ TEST(Conversion, InferredFormMatchesTheExplicitOne) {
   EXPECT_EQ(r.StdOut, "-42|-42\n2.5|2.5\nTrue|True\nq|q\n10.5False!\n"
                       "2 -10.5 1 False 113 A\nHello\n");
   g.expectNoLeaks("Conversion.InferredFormMatchesTheExplicitOne");
+}
+
+// -- The families (docs/language/04-strings-and-conversions.md, "Between
+// -- numbers")
+
+// Every pair the families have, inferred, on one value of each source: none
+// is left unlowered.  The table is tests/Sema/ConversionTests.cpp's ('.' a
+// conversion).
+TEST(Conversion, EveryPairOfTheFamiliesRuns) {
+  struct Primitive {
+    const char *Name;
+    const char *Value;
+  };
+  static constexpr Primitive kPrimitives[] = {
+      {"int", "65"},      {"float", "65.5"}, {"i8", "65"},    {"i16", "65"},
+      {"i32", "65"},      {"u8", "65"},      {"u16", "65"},   {"u32", "65"},
+      {"unsigned", "65"}, {"f16", "65.5"},   {"f32", "65.5"}, {"bool", "True"},
+      {"char", "'A'"}};
+  static constexpr const char *kFamilies[] = {
+      "........2....", "...........44", "........2....", "........2....",
+      "........2....", ".3.......33..", ".3.......33..", ".3.......33..",
+      ".3.......33..", "...........44", "...........44", ".0.......00.0",
+      ".0.......000.",
+  };
+  auto isFloat = [](const std::string &t) {
+    return t == "float" || t == "f16" || t == "f32";
+  };
+  std::string body, expected;
+  for (size_t s = 0; s < std::size(kPrimitives); ++s)
+    body += "v" + std::to_string(s) + ": " + kPrimitives[s].Name + " = " +
+            kPrimitives[s].Value + ";\n";
+  for (size_t t = 0; t < std::size(kPrimitives); ++t) {
+    const std::string target = kPrimitives[t].Name;
+    for (size_t s = 0; s < std::size(kPrimitives); ++s) {
+      if (kFamilies[t][s] != '.')
+        continue;
+      const std::string source = kPrimitives[s].Name;
+      body += "io::println(Str(" + target + "(v" + std::to_string(s) + ")));\n";
+      if (target == "bool")
+        expected += "True\n";
+      else if (target == "char")
+        expected += "A\n";
+      else if (source == "bool")
+        expected += "1\n";
+      else if (isFloat(target) && isFloat(source))
+        expected += "65.5\n";
+      else
+        expected += "65\n";
+    }
+  }
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(body));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, expected);
+  g.expectNoLeaks("Conversion.EveryPairOfTheFamiliesRuns");
+}
+
+TEST(Conversion, BoolAndCharToAndFromEveryIntegerType) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    io::println(Str(u8('a')) + " " + Str(i8(char(195))) + " " + Str(u8(char(195))));
+    io::println(Str(i16(char(255))) + " " + Str(unsigned('A')) + " " + Str(u32('z')));
+    io::println(Str(unsigned(True)) + " " + Str(u16(False)) + " " + Str(i8(True)));
+    io::println(Str(bool(u8(3))) + " " + Str(bool(unsigned(0))) + " " +
+        Str(bool(unsigned(-1))) + " " + Str(bool(i8(-128))));
+    io::println(Str(char(u8(65))) + Str(char(i32(66))) + Str(char(unsigned(67))) +
+        Str(char(i8(68))) + Str(char(u16(69))));
+    y: u8 = 200;
+    io::println(Str(int(char(y))) + " " + Str(u8(char(y)) == y));
+    s = "é";
+    io::println(Str(char(u8(195)) == s[0]) + " " + Str(i8(s[0])));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "97 -61 195\n255 65 122\n1 0 1\n"
+                      "True False True True\nABCDE\n200 True\nTrue -61\n");
+  g.expectNoLeaks("Conversion.BoolAndCharToAndFromEveryIntegerType");
+}
+
+TEST(Conversion, IdentityIsTheValue) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    b: u8 = 255;  n = -7;  k: f32 = 0.1;  h: f16 = 0.1;  u = unsigned(-1);
+    io::println(Str(int(5)) + " " + Str(float(2.5)) + " " + Str(bool(True)) +
+        " " + Str(char('x')) + " " + Str(u8(b)) + " " + Str(i64(n)));
+    io::println(Str(f32(k) == k) + " " + Str(f16(h)) + " " + Str(u64(u)) +
+        " " + Str(int<int>(n)) + " " + Str(f64<float>(0.5)));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "5 2.5 True x 255 -7\n"
+                      "True 0.0999756 18446744073709551615 -7 0.5\n");
+  g.expectNoLeaks("Conversion.IdentityIsTheValue");
+}
+
+TEST(Conversion, AnUnsignedsToIntIsItsValueOrNone) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    io::println(unsigned(7).toInt());
+    io::println(unsigned(-1).toInt());
+    m: unsigned = 9223372036854775807;
+    io::println(m.toInt());
+    io::println((m + 1).toInt());
+    match unsigned(41).toInt() {
+      n: int { io::println(Str(n + 1)); }
+      None { io::println("none"); }
+    }
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "7\nNone\n9223372036854775807\nNone\n42\n");
+  g.expectNoLeaks("Conversion.AnUnsignedsToIntIsItsValueOrNone");
+}
+
+// `f32(n)` of an `int` or an `unsigned` is the f32 nearest n, rounded once
+// (new-F3c-2), for a variable, a constant and an integer literal in an f32
+// slot alike: 2^60 + 2^36 + 1 is 2^60 + 2^37, where the f64 (2^60 + 2^36)
+// rounded again gives 2^60; 2^63 + 2^39 + 1 is 2^63 + 2^40, not 2^63.
+TEST(Conversion, F32OfAWideIntegerIsRoundedOnce) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    n = 1152921573326323713;
+    x: f32 = 1152921573326323713;
+    io::println(Str(int(f32(n))) + " " + Str(int(f32(1152921573326323713))) +
+        " " + Str(int(x)));
+    io::println(Str(int(f32(-n))) + " " + Str(int(f32(float(n)))));
+    u = unsigned(-9223371487098961919);
+    io::println(Str(f32(u) == f32(9223373136366403584.0)) + " " +
+        Str(f32(unsigned(-9223371487098961919)) == f32(9223373136366403584.0)));
+    io::println(Str(f32(unsigned(-1)) == f32(18446744073709551616.0)) + " " +
+        Str(int(f32(i32(16777217)))));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1152921642045800448 1152921642045800448 "
+                      "1152921642045800448\n"
+                      "-1152921642045800448 1152921504606846976\n"
+                      "True True\nTrue 16777216\n");
+  g.expectNoLeaks("Conversion.F32OfAWideIntegerIsRoundedOnce");
 }

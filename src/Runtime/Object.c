@@ -157,6 +157,12 @@ double Paykan_round_f16(double value) {
   return copysign(rounded, value);
 }
 
+double Paykan_int_to_f32(int64_t value) { return (double)(float)value; }
+
+double Paykan_uint_to_f32(int64_t bits) {
+  return (double)(float)(uint64_t)bits;
+}
+
 void Paykan_panic_index(int64_t index, int64_t len) {
   Paykan_runtime_panic("array index %lld out of bounds (len=%lld)",
                        (long long)index, (long long)len);
@@ -166,4 +172,15 @@ void Paykan_panic_int_to_char(int64_t value) {
   Paykan_runtime_panic(
       "char<int>(%lld): the value is outside the char range 0..255",
       (long long)value);
+}
+
+void Paykan_panic_to_char(int64_t value, int64_t isUnsigned, const char *source,
+                          int64_t len) {
+  if (isUnsigned)
+    Paykan_runtime_panic(
+        "char<%.*s>(%llu): the value is outside the char range 0..255",
+        (int)len, source, (unsigned long long)(uint64_t)value);
+  Paykan_runtime_panic(
+      "char<%.*s>(%lld): the value is outside the char range 0..255", (int)len,
+      source, (long long)value);
 }

@@ -809,12 +809,14 @@ private:
                              bool wantAddress);
     /// visitMethodCallExpr's kinds of call, each in a frame of its own: a
     /// field's function value, `hash()`, a Str's parse into @p target
-    /// (`s.toInt()` & co.), an optional's `toString()`, a tuple's, a
-    /// struct's, an enum's or a builtin type's, and a class's method.
+    /// (`s.toInt()` & co.), an `unsigned`'s `toInt()`, an optional's
+    /// `toString()`, a tuple's, a struct's, an enum's or a builtin type's,
+    /// and a class's method.
     Val emitFieldCall(ast::MethodCallExpr *node);
     Val emitHashCall(ast::MethodCallExpr *node);
     Val emitStrParseCall(ast::MethodCallExpr *node,
                          ast::BuiltinType::Kind target);
+    Val emitUnsignedToInt(ast::MethodCallExpr *node);
     Val emitOptionalToStringCall(ast::MethodCallExpr *node);
     Val emitShowCall(ast::MethodCallExpr *node);
     Val emitClassMethodCall(ast::MethodCallExpr *node, bool wantAddress);

@@ -111,10 +111,12 @@ bool callMayRelease(std::string_view callee) {
       names::kPaykanStringLength,     names::kPaykanStringToString,
       names::kPaykanStringHash,       names::kPaykanIntHash,
       names::kPaykanDispose,          names::kPaykanMalloc,
-      names::kPaykanRoundF16,         names::kPaykanPanicDivByZero,
+      names::kPaykanRoundF16,         names::kPaykanIntToF32,
+      names::kPaykanUintToF32,        names::kPaykanPanicDivByZero,
       names::kPaykanPanicDivOverflow, names::kPaykanPanicFloatToInt,
       names::kPaykanPanicFloatToType, names::kPaykanPanicIntToChar,
-      names::kPaykanPanicIndex,       names::kPaykanPanicForStep,
+      names::kPaykanPanicToChar,      names::kPaykanPanicIndex,
+      names::kPaykanPanicForStep,
   };
   return !inert.contains(callee);
 }

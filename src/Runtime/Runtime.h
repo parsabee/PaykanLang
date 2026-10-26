@@ -711,6 +711,13 @@ PAYKAN_NORETURN void Paykan_panic_float_to_int(double value);
 /// the char range 0..255.
 PAYKAN_NORETURN void Paykan_panic_int_to_char(int64_t value);
 
+/// Paykan_panic_int_to_char for `char<S>(value)` from an integer type other
+/// than `int`, the one named by the @p len bytes at @p source
+/// (`char<i32>(300)`); @p value is printed unsigned when @p isUnsigned is
+/// nonzero (`char<unsigned>(18446744073709551615)`).
+PAYKAN_NORETURN void Paykan_panic_to_char(int64_t value, int64_t isUnsigned,
+                                          const char *source, int64_t len);
+
 /// Paykan_panic_float_to_int for a conversion to the integer type named by
 /// the @p len bytes at @p target (`i8<float>(value)`, ...).
 PAYKAN_NORETURN void
@@ -721,6 +728,13 @@ Paykan_panic_float_to_type(double value, const char *target, int64_t len);
 /// @p value rounded to the nearest binary16 (`f16`) value, ties to even:
 /// subnormals are kept, and a magnitude of 65520 or more becomes infinity.
 double Paykan_round_f16(double value);
+
+/// @p value, an `int`, rounded once to the nearest f32 (ties to even), as the
+/// f64 slot holds it: `f32<int>`.  Every int64 is within the f32 range.
+double Paykan_int_to_f32(int64_t value);
+/// Paykan_int_to_f32 for an `unsigned`, whose value is the uint64 with the
+/// bits of @p bits: `f32<unsigned>`.
+double Paykan_uint_to_f32(int64_t bits);
 
 /// Print a diagnostic naming @p index and @p len and abort: a fixed-size
 /// array's element read or written at an index outside 0..len-1.

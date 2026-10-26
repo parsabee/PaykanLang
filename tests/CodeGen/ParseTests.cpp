@@ -403,7 +403,8 @@ TEST(StrParse, EveryKindOfReceiver) {
 // a string"): for each text and type, either `x: T = <text>;` compiles and
 // `"<text>".toT()` is that value, or the literal is an error and the parse
 // is None.  A sign is a literal's only for a signed or a float type: an
-// unsigned type refuses one (UnsignedIntegersRefuseEverySign).
+// unsigned type refuses one (UnsignedIntegersRefuseEverySign).  An integer
+// beyond 2^53 is rounded once into an f32, as a literal and as a text.
 TEST(StrParse, LiteralsAndParsesAgree) {
   struct Type {
     const char *Name;
@@ -468,6 +469,8 @@ TEST(StrParse, LiteralsAndParsesAgree) {
       "65520",
       "16777217",
       "9007199254740993",
+      "1152921573326323713",
+      "-1152921573326323713",
       "-7",
       "0",
   };
