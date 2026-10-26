@@ -386,6 +386,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   // `S` -> `T`, `T?` -> `Obj`; never `T?` -> `T`).
   bool isAssignable(ast::Type *dst, ast::Type *src) const;
 
+  /// The type the two operands of a binary operator, of the different types
+  /// @p lhs and @p rhs, are both converted to, or nullptr when they have
+  /// none: `float` for `int` with `float`, either way round, the one
+  /// promotion between operands (docs/language/02-basics.md, "Sized numeric
+  /// types").  Arithmetic, the ordering compares and `==` / `!=` all ask
+  /// this one rule.
+  ast::Type *promotedOperandType(const ast::Type *lhs,
+                                 const ast::Type *rhs) const;
+
   // Expression-level assignability: isAssignable(dst, srcTy) plus the two
   // optional-type rules that depend on the expression itself, both of which
   // are RECORDED on the AST for the lowering:

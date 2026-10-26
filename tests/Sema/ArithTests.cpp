@@ -110,6 +110,45 @@ TEST(Arith, EqualityTypeMismatch) {
   EXPECT_FALSE(r.Ok);
 }
 
+// `==` and `!=` take an `int` with a `float`, either way round, as `<` and
+// the arithmetic do: the int is converted to float.  They were `operands of
+// '==' have mismatched types 'int' and 'float'`.
+TEST(Arith, EqualityPromotesIntWithFloat) {
+  auto r = semaCheck(wrapMain(R"(
+    x = 2;
+    y = 2.0;
+    a: bool = x == y;
+    b: bool = y != x;
+    c: bool = 1 == 1.0;
+    d: bool = 2.5 != x;
+    e: bool = x <= y;
+  )"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0) << r.Diagnostics;
+}
+
+// The promotion is between two operands of `int` and `float` only: a tuple
+// whose elements differ so is another type, and a sized type has none (a
+// literal takes its type instead).
+TEST(Arith, EqualityPromotesNoOtherPair) {
+  auto r = semaCheck(wrapMain(R"(
+    t = (1, 2) == (1, 2.0);
+    n: i32 = 2;
+    y = 1.0;
+    z = n == y;
+    f: f32 = 1.5;
+    w = f != 2;
+  )"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;
+  for (const char *e :
+       {"operands of '==' have mismatched types '(int, int)' and '(int, "
+        "float)'",
+        "operator '==' is not defined for types 'i32' and 'float'"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+}
+
 // -- Builtins
 
 TEST(Arith, OutAcceptsMultipleArgs) {

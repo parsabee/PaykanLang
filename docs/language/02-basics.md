@@ -648,7 +648,11 @@ under [Conversions](04-strings-and-conversions.md#conversions)).
 ### Relational & Equality
 
 `<`, `>`, `<=`, `>=`, `==`, `!=` — result is `bool`.
-Equality operators require compatible types.
+The two operands have one type, as for arithmetic, with the one promotion: an `int` and a
+`float`, in either order, compare as floats (`2 == 2.0` and `2 <= 2.0` are `True`, `2 !=
+2.5` is `True`).  Otherwise equality takes two classes when one is a subclass of the other,
+and anything else is an error (`operands of '==' have mismatched types 'Str' and 'int'`),
+two tuples whose elements differ so too (`(1, 2) == (1, 2.0)`).
 
 For **reference types** (classes, `Str`), `==` dispatches to `equals`: `a == b` invokes
 `a.equals(b)` through the vtable, and `a != b` is its negation. A class may override `equals` to

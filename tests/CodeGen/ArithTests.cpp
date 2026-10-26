@@ -93,11 +93,12 @@ namespace {
 
 /// A program that prints, one line per (lhs, rhs) pair, the six comparison
 /// results as T/F in the order != == < <= > >=.  `n` is a NaN computed at
-/// run time (inf - inf), `one` is 1.0.
+/// run time (inf - inf), `one` is 1.0 and `k` the int 2.
 std::string floatCompareProgram(const std::vector<std::string> &pairs) {
   std::string body = "  inf: float = 1.0e308 * 10.0;\n"
                      "  n: float = inf - inf;\n"
-                     "  one: float = 1.0;\n";
+                     "  one: float = 1.0;\n"
+                     "  k = 2;\n";
   for (size_t i = 0; i + 1 < pairs.size(); i += 2) {
     const std::string &a = pairs[i], &b = pairs[i + 1];
     body += "  io::println(\"\"";
@@ -141,6 +142,25 @@ TEST(FloatCompare, NoNaN) {
                       "TFFFTT\n"   // 2 vs 1
                       "TFFFTT\n"   // inf vs 1
                       "FTFTFT\n"); // 0.0 == -0.0
+}
+
+// An `int` against a `float`, either way round, converted to float for
+// `==` and `!=` as for the ordering compares: literals, a variable, a NaN.
+// `==` and `!=` were errors on the pair.
+TEST(FloatCompare, IntWithFloat) {
+  auto r = compileAndRun(
+      floatCompareProgram({"1", "one", "one", "1", "2", "one", "one", "2", "k",
+                           "2.0", "2.5", "k", "k", "n", "0", "-0.0"}));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "FTFTFT\n"   // 1 vs 1.0
+                      "FTFTFT\n"   // 1.0 vs 1
+                      "TFFFTT\n"   // 2 vs 1.0
+                      "TFTTFF\n"   // 1.0 vs 2
+                      "FTFTFT\n"   // k = 2 vs 2.0
+                      "TFFFTT\n"   // 2.5 vs k
+                      "TFFFFF\n"   // k vs NaN
+                      "FTFTFT\n"); // 0 vs -0.0
 }
 
 TEST(FloatCompare, NaNNotEqualAsAConditionAndANegation) {

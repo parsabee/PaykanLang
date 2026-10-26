@@ -1162,6 +1162,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MB to `--emit-pir`, most of it spent printing 96 MB of indented PIR, and 7.8 s and 82 MB
   to `build`, most of it in the MLIR and LLVM pipelines.  The verifier reports what it did
   before, and the samples compile as fast as they did.
+- `==` and `!=` did not take an `int` with a `float`, though `<`, `<=`, `>`, `>=` and the
+  arithmetic did and the docs say the one promotion is `int` with `float`: `x == y` with
+  `x = 2; y = 2.0;`, `1 == 1.0` and `2.5 != x` were `operands of '==' have mismatched types
+  'int' and 'float'`.  They now compare as floats, the int converted (`2 == 2.0` is `True`,
+  a NaN is unequal to every int), on every path; `(1, 2) == (1, 2.0)` stays an error, the
+  tuples being of two types.  The pairing is one rule, `Sema::promotedOperandType`, which
+  arithmetic, the ordering compares and equality ask (docs/language/02-basics.md,
+  "Relational & Equality").  `samples/codegen/73_int_float_equality.pkn` compares the pair
+  in each order, through a parameter, a field and a loop's condition.
 
 ## [0.2.0] - 2026-10-20
 

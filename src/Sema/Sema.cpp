@@ -224,6 +224,15 @@ bool Sema::typesEqual(ast::Type *a, ast::Type *b) {
   return false;
 }
 
+ast::Type *Sema::promotedOperandType(const ast::Type *lhs,
+                                     const ast::Type *rhs) const {
+  const ast::Type *intTy = Ctx.getIntTy();
+  ast::Type *floatTy = Ctx.getFloatTy();
+  if ((lhs == intTy && rhs == floatTy) || (lhs == floatTy && rhs == intTy))
+    return floatTy;
+  return nullptr;
+}
+
 bool Sema::isAssignable(ast::Type *dst, ast::Type *src) const {
   if (dst == src)
     return true;
@@ -1670,10 +1679,8 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   auto *rhsBT = ast::dyn_cast<ast::BuiltinType>(rhsTy);
   const bool numericPair =
       lhsBT && rhsBT && lhsBT->isNumeric() && rhsBT->isNumeric();
-  const bool intWithFloat =
-      (lhsTy == S.Ctx.getIntTy() && rhsTy == S.Ctx.getFloatTy()) ||
-      (lhsTy == S.Ctx.getFloatTy() && rhsTy == S.Ctx.getIntTy());
-  if (numericPair && lhsTy != rhsTy && !intWithFloat) {
+  ast::Type *promoted = S.promotedOperandType(lhsTy, rhsTy);
+  if (numericPair && lhsTy != rhsTy && !promoted) {
     S.error(node->getLocation(),
             "operator '" + std::string(node->getOpcodeStr()) +
                 "' is not defined for types '" + typeName(lhsTy) + "' and '" +
@@ -1687,8 +1694,10 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   if ((node->getOpcode() == ast::BinaryOpcode::Eq ||
        node->getOpcode() == ast::BinaryOpcode::Ne)) {
     // Same type is always OK (types are canonical, so `(int, Str) == (int,
-    // Str)` unifies while `(int, Str) == (Str, int)` stays an error).
-    if (!typesEqual(lhsTy, rhsTy)) {
+    // Str)` unifies while `(int, Str) == (Str, int)` stays an error), and
+    // so is `int` with `float`, compared as floats (`2 == 2.0`); not two
+    // tuples whose elements differ so (`(1, 2) == (1, 2.0)`).
+    if (!typesEqual(lhsTy, rhsTy) && !promoted) {
       // Allow class subtype comparisons (either direction).
       auto *lhsCT = ast::dyn_cast<ast::ClassType>(lhsTy);
       auto *rhsCT = ast::dyn_cast<ast::ClassType>(rhsTy);
@@ -1724,11 +1733,7 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   case ast::BinaryOpcode::Div:
   case ast::BinaryOpcode::Mod:
     // One numeric type gives that type; `int` with `float` gives `float`.
-    if (numericPair && lhsTy == rhsTy)
-      return lhsTy;
-    if (lhsTy == S.Ctx.getFloatTy() || rhsTy == S.Ctx.getFloatTy())
-      return S.Ctx.getFloatTy();
-    return S.Ctx.getIntTy();
+    return promoted ? promoted : lhsTy;
 
   // Relational / Equality: result is bool.
   case ast::BinaryOpcode::Lt:
