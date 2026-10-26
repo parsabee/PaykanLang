@@ -200,7 +200,7 @@ files, the cache and prebuilt modules in detail.
 
 | Variable | Effect |
 |----------|--------|
-| `CC` | the C compiler `build` links executables with (default `cc`) |
+| `CC` | the C compiler `build` links executables with (default `cc`); words after the first are its first arguments, as with `make` (`CC='ccache cc'`, `CC='gcc -m64'`), the value split at white space with no quoting |
 | `PAYKAN_RUNTIME_DIR` | where to find the runtime (`lib/` and `include/paykan/` under it) |
 | `PAYKAN_STDLIB` | the directory of system imports, `import ::name;`, instead of the installed standard library ([Modules](15-modules.md)) |
 | `PAYKAN_MODULE_PATH` | `:`-separated directories of prebuilt `.pkm` modules, searched after the `--module-path` directories |

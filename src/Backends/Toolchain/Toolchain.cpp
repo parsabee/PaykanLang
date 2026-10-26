@@ -126,8 +126,15 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
     // the flags it needs to find the system headers and libraries (the
     // macOS SDK for a clang that has no default one).
     const char *buildCC = PAYKAN_DEFAULT_CC;
-    if (cc && cc[0]) {
-      tc.CC = cc;
+    // $CC may carry arguments, as make's does (`ccache cc`, `gcc -m64`): its
+    // first word is the program, and the others go first among its flags.
+    std::vector<std::string> ccWords;
+    if (cc)
+      appendFlags(cc, ccWords);
+    if (!ccWords.empty()) {
+      tc.CC = ccWords.front();
+      tc.ExtraFlags.insert(tc.ExtraFlags.begin(), ccWords.begin() + 1,
+                           ccWords.end());
     } else if (buildCC[0]) {
       tc.CC = buildCC;
       appendFlags(PAYKAN_DEFAULT_CC_FLAGS, tc.ExtraFlags);
@@ -197,10 +204,11 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
 bool linkExecutable(const std::vector<std::string> &objects,
                     const std::string &outputPath, const Toolchain &tc,
                     std::ostream &errs) {
-  std::vector<std::string> link = objects;
+  // The flags first, right after the program: those of $CC may be its
+  // operand (`ccache cc`).
+  std::vector<std::string> link = tc.ExtraFlags;
+  link.insert(link.end(), objects.begin(), objects.end());
   link.insert(link.end(), tc.ExtraObjects.begin(), tc.ExtraObjects.end());
-  for (const auto &f : tc.ExtraFlags)
-    link.push_back(f);
   link.push_back(tc.RuntimeLib);
   link.push_back(tcnames::kFlagLibm);
   link.push_back(tcnames::kFlagOutput);

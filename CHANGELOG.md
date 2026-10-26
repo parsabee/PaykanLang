@@ -1052,6 +1052,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no arguments was documented to run the program with `argc == 0`, which Linux turns into
   one empty `argv[0]` and other systems refuse; it now passes one empty `argv[0]` on every
   system, as docs/plugins/plugin-api.md now says.
+- `CC='ccache cc' paykan build` and `CC='gcc -m64' paykan build` failed (`exec of 'gcc
+  -m64' failed: No such file or directory`): the whole of `$CC` was taken for the
+  program's name.  As with `make`, its first word is now the program and the others its
+  first arguments, the value split at white space with no quoting; the linker's flags
+  follow them, before the objects (docs/language/17-the-paykan-command.md, "Environment
+  variables").
 
 ## [0.2.0] - 2026-10-20
 

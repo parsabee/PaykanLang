@@ -21,10 +21,11 @@ namespace paykan::toolchain {
 
 /// Where the C compiler and the runtime are.
 struct Toolchain {
-  /// C compiler command; empty means `$CC`, then `cc` (in a coverage
-  /// build, the C compiler that built the runtime).
+  /// C compiler program; empty means `$CC`'s first word (its other words go
+  /// to the front of ExtraFlags), then `cc` (in a coverage build, the C
+  /// compiler that built the runtime).
   std::string CC;
-  /// Extra flags appended to every compile (e.g. "-O2").
+  /// Extra flags, right after CC in every compile (e.g. "-O2").
   std::vector<std::string> ExtraFlags;
   /// Object files or archives linked into every executable: the objects
   /// defining a program's native functions (--object, #198).

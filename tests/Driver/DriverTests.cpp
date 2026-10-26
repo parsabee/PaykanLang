@@ -2729,3 +2729,23 @@ TEST(Driver, BuildReportsACompilerThatCannotRun) {
   EXPECT_FALSE(std::filesystem::exists(dir / "hello"));
   std::filesystem::remove_all(dir);
 }
+
+// $CC may carry arguments (finding 71): its first word is the program, the
+// others come right after it (`env cc` runs cc, as `ccache cc` would), where
+// `build` ran the whole value as one program's name (`exec of 'cc -O0'
+// failed`).
+TEST(Driver, BuildRunsTheCompilerCCNamesWithItsArguments) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("cc_words");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  for (const char *cc : {"cc -O0", "env cc", "  cc  "}) {
+    std::filesystem::remove(dir / "hello");
+    auto [rc, out] = run("cd " + dir.string() + " && CC=" + shellWord(cc) +
+                         " " + paykanRun() + " build hello.pkn -o hello 2>&1");
+    EXPECT_EQ(rc, 0) << cc << ": " << out;
+    auto [rc2, out2] = run((dir / "hello").string() + " 2>&1");
+    EXPECT_EQ(rc2, 0) << cc << ": " << out2;
+    EXPECT_EQ(out2, "hello\n") << cc;
+  }
+  std::filesystem::remove_all(dir);
+}
