@@ -61,6 +61,27 @@ struct SExpr {
   std::string Text;
   /// A list's elements after the tag.
   std::vector<SExpr> Items;
+
+  SExpr() = default;
+  SExpr(SExpr &&) = default;
+  SExpr &operator=(SExpr &&) = default;
+  SExpr(const SExpr &) = delete;
+  SExpr &operator=(const SExpr &) = delete;
+  /// The lists in the list are taken apart in a loop, not by a recursion a
+  /// level per list: they nest up to kMaxDepth deep.
+  ~SExpr() {
+    if (Items.empty())
+      return;
+    std::vector<std::vector<SExpr>> pending;
+    pending.push_back(std::move(Items));
+    while (!pending.empty()) {
+      std::vector<SExpr> items = std::move(pending.back());
+      pending.pop_back();
+      for (SExpr &item : items)
+        if (!item.Items.empty())
+          pending.push_back(std::move(item.Items));
+    }
+  }
 };
 
 class Lexer {
@@ -74,7 +95,7 @@ public:
       return fail("the text is empty: expected (paykan-ast ...)");
     if (Text[Pos] != '(')
       return fail("expected (paykan-ast ...)");
-    if (!list(out, 1))
+    if (!list(out))
       return false;
     skipSpace();
     if (Pos < Text.size())
@@ -125,10 +146,8 @@ private:
            c == '\t' || c == '\n' || c == '\r';
   }
 
-  bool list(SExpr &out, unsigned depth) {
-    if (depth > kMaxDepth)
-      return fail("nesting too deep (more than " + std::to_string(kMaxDepth) +
-                  " levels)");
+  /// The list at Pos, '(' on: its tag, then its items.
+  bool openList(SExpr &out) {
     out.K = SExpr::List;
     out.Line = Line;
     out.Column = Column;
@@ -141,22 +160,39 @@ private:
     if (tag.K != SExpr::Symbol)
       return fail("expected a tag after '(', not '" + tag.Text + "'");
     out.Text = std::move(tag.Text);
-    for (;;) {
+    return true;
+  }
+
+  /// The list at Pos into @p out, and the lists in it: in a loop, the
+  /// lists open innermost last in a stack of their own (each one's address
+  /// holds until it is closed, as only the innermost gets items), not by a
+  /// recursion a level per list.
+  bool list(SExpr &out) {
+    if (!openList(out))
+      return false;
+    std::vector<SExpr *> open{&out};
+    while (!open.empty()) {
+      SExpr &list = *open.back();
       skipSpace();
       if (Pos >= Text.size())
-        return fail("unterminated list (" + out.Text + " ...) from " +
-                    std::to_string(out.Line) + ":" +
-                    std::to_string(out.Column));
+        return fail("unterminated list (" + list.Text + " ...) from " +
+                    std::to_string(list.Line) + ":" +
+                    std::to_string(list.Column));
       char c = Text[Pos];
       if (c == ')') {
         advance();
-        return true;
+        open.pop_back();
+        continue;
       }
-      out.Items.emplace_back();
-      SExpr &item = out.Items.back();
+      list.Items.emplace_back();
+      SExpr &item = list.Items.back();
       if (c == '(') {
-        if (!list(item, depth + 1))
+        if (open.size() >= kMaxDepth)
+          return fail("nesting too deep (more than " +
+                      std::to_string(kMaxDepth) + " levels)");
+        if (!openList(item))
           return false;
+        open.push_back(&item);
       } else if (c == '"') {
         if (!string(item))
           return false;
@@ -164,6 +200,7 @@ private:
         atom(item);
       }
     }
+    return true;
   }
 
   static int hexDigit(char c) {
@@ -349,6 +386,9 @@ private:
     Err.Column = at.Column;
     Err.Message = msg;
   }
+  /// fail() with a literal: the string is made here, not in the frame of a
+  /// builder that a deep AST may hold hundreds of times over.
+  void fail(const SExpr &at, const char *msg) { fail(at, std::string(msg)); }
 
   const std::string &intern(const std::string &s) { return Ctx.intern(s); }
 
