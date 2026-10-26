@@ -64,6 +64,53 @@ static CmdResult run(const std::string &cmd) {
   return {WEXITSTATUS(rc), out};
 }
 
+// Run @p argv (a path, no $PATH search) in @p dir with @p env added to the
+// environment and SIGCHLD ignored, as a parent may leave it for the
+// programs it starts: their children are then reaped for them, so no wait
+// for one succeeds.  Standard output and error are both captured.
+static CmdResult
+runIgnoringSigchld(const std::filesystem::path &dir,
+                   const std::vector<std::string> &argv,
+                   const std::pair<std::string, std::string> &env) {
+  int out[2];
+  if (pipe(out) != 0)
+    return {-1, "pipe failed"};
+  pid_t pid = fork();
+  if (pid < 0)
+    return {-1, "fork failed"};
+  if (pid == 0) {
+    std::signal(SIGCHLD, SIG_IGN);
+    dup2(out[1], STDOUT_FILENO);
+    dup2(out[1], STDERR_FILENO);
+    close(out[0]);
+    close(out[1]);
+    if (chdir(dir.c_str()) != 0)
+      _exit(126);
+    setenv(env.first.c_str(), env.second.c_str(), 1);
+    std::vector<char *> args;
+    for (const std::string &a : argv)
+      args.push_back(const_cast<char *>(a.c_str()));
+    args.push_back(nullptr);
+    execv(args[0], args.data());
+    _exit(127);
+  }
+  close(out[1]);
+  std::string text;
+  std::array<char, 4096> buf{};
+  for (ssize_t n; (n = read(out[0], buf.data(), buf.size())) != 0;) {
+    if (n < 0 && errno == EINTR)
+      continue;
+    if (n < 0)
+      break;
+    text.append(buf.data(), static_cast<size_t>(n));
+  }
+  close(out[0]);
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  return {WIFEXITED(status) ? WEXITSTATUS(status) : -1, text};
+}
+
 // True when the build has a backend that can run programs (an empty
 // PAYKAN_BACKENDS builds a compiler that only parses and checks).
 static bool hasBackend() {
@@ -2829,16 +2876,31 @@ TEST(Driver, RunLoadsAnArchiveOfNativeObjects) {
 // A C compiler that cannot be started is reported as such (finding 81):
 // spawn learns of the failed exec through a close-on-exec pipe, where `build`
 // said `exec of '...' failed` and then `linking failed (... exited with
-// 127)`, as if the compiler had run.
+// 127)`, as if the compiler had run.  So it is when paykan's parent left
+// SIGCHLD ignored, which paykan inherits: its children are then reaped for
+// it and no wait for one succeeds, which spawn reported first (`waitpid
+// failed: No child processes`).
 TEST(Driver, BuildReportsACompilerThatCannotRun) {
   REQUIRE_BACKEND();
   auto dir = freshDir("no_cc");
   std::ofstream(dir / "hello.pkn") << kHello;
   std::string cc = (dir / "nosuchcc").string();
-  auto [rc, out] = run("cd " + dir.string() + " && CC=" + shellWord(cc) + " " +
-                       paykanRun() + " build hello.pkn -o hello 2>&1");
+  const std::string cmd = "cd " + dir.string() + " && CC=" + shellWord(cc) +
+                          " " + paykanRun() + " build hello.pkn -o hello 2>&1";
+  const std::string message =
+      "cannot run '" + cc + "': No such file or directory\n";
+  auto [rc, out] = run(cmd);
   EXPECT_EQ(rc, 1) << out;
-  EXPECT_EQ(out, "cannot run '" + cc + "': No such file or directory\n");
+  EXPECT_EQ(out, message);
+  // Started without a shell, which would take SIGCHLD back.
+  std::vector<std::string> argv{kPaykan};
+  if (!testBackend().empty())
+    argv.push_back("--backend=" + testBackend());
+  for (const char *arg : {"build", "hello.pkn", "-o", "hello"})
+    argv.emplace_back(arg);
+  auto [rc2, out2] = runIgnoringSigchld(dir, argv, {"CC", cc});
+  EXPECT_EQ(rc2, 1) << out2;
+  EXPECT_EQ(out2, message);
   EXPECT_FALSE(std::filesystem::exists(dir / "hello"));
   std::filesystem::remove_all(dir);
 }

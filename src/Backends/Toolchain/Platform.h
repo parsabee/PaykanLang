@@ -38,7 +38,9 @@ std::string executablePath();
 /// run '<path>': No such file or directory`).  POSIX fork / execvp / waitpid
 /// on every platform; the child reports a failed exec through a
 /// close-on-exec pipe, so a program that ran and exited with 127 is not
-/// taken for one that never started.
+/// taken for one that never started.  The child's environment is made
+/// before the fork (a variable @p extraEnv names replaces the
+/// environment's), so the child only execs.
 int spawn(const std::string &path, const std::vector<std::string> &args,
           const std::string &argv0,
           const std::vector<std::pair<std::string, std::string>> &extraEnv,

@@ -1072,10 +1072,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with a C compiler that is not there said `linking failed (nosuchcc exited with 127)`.
   The child now reports a failed exec through a close-on-exec pipe: `run_executable`
   returns `PAYKAN_ERROR` with `cannot run '<path>': No such file or directory`, and
-  `build` says `cannot run 'nosuchcc': No such file or directory`.  `run_executable` with
-  no arguments was documented to run the program with `argc == 0`, which Linux turns into
-  one empty `argv[0]` and other systems refuse; it now passes one empty `argv[0]` on every
-  system, as docs/plugins/plugin-api.md now says.
+  `build` says `cannot run 'nosuchcc': No such file or directory`, also when `paykan`'s
+  parent left `SIGCHLD` ignored (no wait for a child then succeeds, and `waitpid failed: No
+  child processes` was all it said).  The child's environment is made before the fork, so
+  between the fork and the exec the child calls only what is safe there, where it called
+  `setenv`.  `run_executable` with no arguments was documented to run the program with
+  `argc == 0`, which Linux turns into one empty `argv[0]` and other systems refuse; it now
+  passes one empty `argv[0]` on every system, as docs/plugins/plugin-api.md now says.
 - `CC='ccache cc' paykan build` and `CC='gcc -m64' paykan build` failed (`exec of 'gcc
   -m64' failed: No such file or directory`): the whole of `$CC` was taken for the
   program's name.  As with `make`, its first word is now the program and the others its
