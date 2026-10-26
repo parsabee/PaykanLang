@@ -247,7 +247,9 @@ slot: `p: (Node?, int) = (None, 1)` and
 [Optionals](12-optionals.md#literals-take-their-destinations-types)).
 
 An element cannot be a fixed-size array for now (`tuple element 0: a fixed-size array
-('int[2]') can only be a local variable, a parameter, a result or a field for now`).
+('int[2]') can only be a local variable, a parameter, a result or a class field for now`),
+nor a slice (`variable 't' element 0 has type 'int[]': a slice can only be a 'view' or
+'inout' parameter, and a tuple element cannot be an array yet`).
 
 ---
 

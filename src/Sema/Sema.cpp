@@ -616,7 +616,7 @@ bool Sema::errorFixedArrayHere(ast::SourceLocation loc, ast::Type *ty,
   }
   error(loc, where + ": a fixed-size array ('" + typeName(ty) +
                  "') can only be a local variable, a parameter, a result or "
-                 "a field for now");
+                 "a class field for now");
   return false;
 }
 
@@ -689,6 +689,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   const bool allowFixed = std::exchange(FixedArrayAllowed, false);
   const bool allowInferred = std::exchange(InferredLengthAllowed, false);
   const bool allowSlice = std::exchange(SliceAllowed, false);
+  const char *noArray = std::exchange(NoArrayHolder, nullptr);
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
   // A parameter's slice, resolved already.
@@ -758,14 +759,22 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
   // `T[]` is a slice, the type of a `view` or `inout` parameter only.
   if (auto *at = ast::dyn_cast<ast::ArrayType>(ty)) {
     if (!allowSlice) {
-      const std::string elem = typeName(at->getElementType());
-      error(loc, context + " has type '" + typeName(at) +
-                     "': a slice can only be a 'view' or 'inout' parameter, "
-                     "and an array has a length ('" +
-                     (ast::isa<ast::FunctionType>(at->getElementType())
-                          ? "(" + elem + ")"
-                          : elem) +
-                     "[3]')");
+      std::string msg = context + " has type '" + typeName(at) +
+                        "': a slice can only be a 'view' or 'inout' parameter";
+      if (noArray) {
+        msg += ", and ";
+        msg += noArray;
+        msg += " cannot be an array yet";
+      } else if (allowFixed) {
+        // Here a fixed-size array would do.
+        const std::string elem = typeName(at->getElementType());
+        msg += ", and an array has a length ('" +
+               (ast::isa<ast::FunctionType>(at->getElementType())
+                    ? "(" + elem + ")"
+                    : elem) +
+               "[3]')";
+      }
+      error(loc, msg);
       return nullptr;
     }
     FixedArrayAllowed = true; // a slice's elements may be fixed-size arrays
@@ -928,6 +937,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     std::vector<ast::Type *> elems;
     elems.reserve(tt->getArity());
     for (size_t i = 0; i < tt->getArity(); ++i) {
+      NoArrayHolder = "a tuple element";
       auto *elemTy = resolveType(tt->getElementType(i), loc,
                                  context + " element " + std::to_string(i));
       if (!elemTy)

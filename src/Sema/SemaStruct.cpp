@@ -213,6 +213,8 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     // Resolved as a class field is (so a fixed-size array parses), then
     // the array is reported: a struct cannot hold one yet, like a tuple.
     FixedArrayAllowed = true;
+    NoArrayHolder =
+        st->getVariantEnum() ? "a variant's field" : "a struct field";
     auto *fty =
         resolveValueType(field->getType(), field->getLocation(), context);
     if (!fty) {

@@ -297,7 +297,8 @@ typeArgList    ::= typeAnnotation ( "," typeAnnotation )*
   `view` or `inout` parameter's slice
   ([language/09-arrays.md](language/09-arrays.md#slices)): Sema rejects it
   anywhere else (`variable 'x' has type 'int[]': a slice can only be a 'view'
-  or 'inout' parameter, and an array has a length ('int[3]')`).
+  or 'inout' parameter, and an array has a length ('int[3]')`, or `..., and a
+  struct field cannot be an array yet` where no fixed-size array would do).
 - `T?` is rejected at parse time when `T` is `void` (`optional type 'void?'
   is not supported`) or already optional (`nested optional type 'Str??' is
   not supported`). The other builtin value types have optional forms

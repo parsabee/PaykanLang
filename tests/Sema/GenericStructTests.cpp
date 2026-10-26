@@ -188,8 +188,8 @@ fn main() -> int {
                 "'Plain' is not a generic struct and takes no type arguments",
                 "'Plain' is not generic and takes no type arguments",
                 "type argument 1 of 'Bad': a fixed-size array ('int[2]') can "
-                "only be a local variable, a parameter, a result or a field "
-                "for now"});
+                "only be a local variable, a parameter, a result or a class "
+                "field for now"});
 }
 
 TEST(GenericStruct, Inference) {

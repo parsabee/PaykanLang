@@ -1241,6 +1241,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   array), was `'' is not a variant of enum 'E'`; it names the type and what an arm names
   now: `'int' is not a variant of enum 'E': an arm names one of its variants, such as 'A'`
   (docs/language/08-match.md, "Semantic Checks").
+- A slice type outside a parameter suggests a length only where a fixed-size array would
+  do: `struct P { a: int[]; }`, `enum E { A(a: int[]) }` and `t: (int[], int)` were told
+  `... a slice can only be a 'view' or 'inout' parameter, and an array has a length
+  ('int[3]')`, which those positions reject in turn; they now end `..., and a struct field
+  (a variant's field, a tuple element) cannot be an array yet`, an optional's value or a
+  type argument (`int[]?`) gets no hint, and a local, a result and a class field keep
+  `('int[3]')`.  The fixed-size array error names the field it can be: `... can only be a
+  local variable, a parameter, a result or a class field for now`, where it said `a field`
+  (docs/language/09-arrays.md, "Slices" and "Limits for now"; 10-tuples.md).
 
 ## [0.2.0] - 2026-10-20
 

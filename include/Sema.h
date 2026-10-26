@@ -459,14 +459,20 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   // -- Fixed-size arrays (docs/language/09-arrays.md)
   //
-  // For now only a local variable, a parameter, a result and a field have a
-  // `T[n]` type (set around the resolveType of its annotation, which takes
-  // the flag), of scalars, enums, references or other such arrays.
+  // For now only a local variable, a parameter, a result and a class field
+  // have a `T[n]` type (set around the resolveType of its annotation, which
+  // takes the flag), of scalars, enums, references or other such arrays.
 
   bool FixedArrayAllowed = false;
   /// Set around the resolveType of a `view` or `inout` parameter's type:
   /// only there is `T[]` (a slice) a type.
   bool SliceAllowed = false;
+  /// Set around the resolveType of a type that cannot be an array yet,
+  /// though a fixed-size array may parse there to be reported later (a
+  /// struct's or a variant's field) or is reported at once (a tuple's
+  /// element): what holds it, for the slice error's hint, which suggests
+  /// a fixed-size array only where one would do.
+  const char *NoArrayHolder = nullptr;
   /// Set around the resolveType of a variable declaration's annotation when
   /// it has an initializer: only there can a length be `_` (inferred).
   bool InferredLengthAllowed = false;

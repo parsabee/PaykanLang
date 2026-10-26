@@ -845,7 +845,10 @@ Output:
   or passed to a 'view' or 'inout' array parameter`).
 - `T[]` is a slice only there: a variable, a field, a result or any other type written
   `int[]` is an error (`variable 'x' has type 'int[]': a slice can only be a 'view' or
-  'inout' parameter, and an array has a length ('int[3]')`).
+  'inout' parameter, and an array has a length ('int[3]')`). The length is suggested only
+  where a fixed-size array would do; a struct's or a variant's field and a tuple element
+  say instead that they cannot be an array yet (`..., and a struct field cannot be an array
+  yet`).
 - A generic `xs: view T[]` takes `T` from the array's elements.
 
 The program's entry point takes its command-line arguments as a slice,
@@ -860,7 +863,7 @@ An array is only ever a local variable, a parameter, a result or a class's field
 be a struct's field (`a struct field cannot be a fixed-size array yet`), a tuple element, an
 optional (`int[3]?`), a type argument (`Box<int[3]>`) or a `match` arm, and
 it does not convert to `Obj`; each is an error such as `tuple element 0: a fixed-size array
-('int[2]') can only be a local variable, a parameter, a result or a field for now`.
+('int[2]') can only be a local variable, a parameter, a result or a class field for now`.
 
 - Arrays have no `==` (`operator '==' is not defined for types 'int[2]' and 'int[2]'`).
 - An array is not printed and has no `toString`; print its elements.
