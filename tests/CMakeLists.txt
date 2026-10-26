@@ -514,6 +514,7 @@ target_compile_definitions(driver_tests
     PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
             PAYKAN_INCOMPATIBLE_PLUGINS_BIN="$<TARGET_FILE:paykan_incompatible_plugins>"
             PAYKAN_RUNTIME_SOURCE_DIR="${CMAKE_SOURCE_DIR}/src/Runtime"
+            PAYKAN_SAMPLES_DIR="${CMAKE_SOURCE_DIR}/samples"
             PAYKAN_TEST_ACCEPTED_VERSIONS="${PAYKAN_TEST_ACCEPTED_VERSIONS}"
             PAYKAN_EXPECTED_DEFAULT_BACKEND="${PAYKAN_DEFAULT_BACKEND}"
 )

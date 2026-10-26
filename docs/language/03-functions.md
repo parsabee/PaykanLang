@@ -1097,8 +1097,9 @@ paykan --object=text.o,more.o main.pkn          # run (the JIT loads the objects
 paykan build --object=text.o main.pkn -o main   # an executable
 ```
 
-`run` loads the objects into the JIT, so build them position-independent
-(`-fPIC`).  There, the C code may call the C library and the runtime functions
+`run` loads the objects into the JIT, and of an archive the members that
+define a symbol the program needs, as a linker does, so build them
+position-independent (`-fPIC`).  There, the C code may call the C library and the runtime functions
 compiled code uses (`PaykanString_new`, `PaykanShared_new`, `Paykan_retain`,
 `Paykan_release`, ...); `build` links the objects into the executable, which
 can call any runtime function.  `Runtime.h`'s `static inline`

@@ -1035,6 +1035,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   needs a stage: --emit-mlir=<stage> (pir, scf, llvm or emitc)``), only `-O`, `-O<n>` and
   `-O=<n>` are an optimization level (`unknown command line argument '--Output'`), and a
   message names an option as it was spelled (`option '-o' requires a value`).
+- `paykan --object=libtext.a main.pkn` failed with `JIT error: The file was not recognized
+  as a valid object file`, though `--object` takes archives and `build` linked the same
+  one: the JIT took object files only.  `run` now loads an archive's members as a linker
+  does, each when it defines a symbol the program still needs, searching the archives
+  before the C library; a file that is neither is named (`JIT error: cannot load 'x.o':
+  The file was not recognized as a valid object file`), and one that cannot be read says
+  why (`cannot read 'x.a': No such file or directory`).
 
 ## [0.2.0] - 2026-10-20
 

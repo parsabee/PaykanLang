@@ -2678,3 +2678,37 @@ TEST(Driver, MalformedCommandLinesAreReportedAsWritten) {
   }
   std::filesystem::remove(src);
 }
+
+// -- The toolchain, and the programs the driver links and runs
+
+// `run --object=<archive>` loads the archive's members the program needs
+// into the JIT, as `build` links them (finding 19): the 14_native sample
+// prints the same with its object as an archive.  A file that is neither
+// is named in the error.  The JIT used to take object files only ("The file
+// was not recognized as a valid object file").
+TEST(Driver, RunLoadsAnArchiveOfNativeObjects) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("run_archive");
+  for (const char *name : {"main.pkn", "text.pkn", "text.c"})
+    std::filesystem::copy_file(std::filesystem::path(PAYKAN_SAMPLES_DIR) /
+                                   "imports" / "14_native" / name,
+                               dir / name);
+  auto cc = run("cd " + dir.string() + " && cc -std=c11 -fPIC -I " +
+                shellWord(PAYKAN_RUNTIME_SOURCE_DIR) +
+                " -c text.c -o text.o 2>&1 && ar rcs libtext.a text.o 2>&1");
+  ASSERT_EQ(cc.exitCode, 0) << cc.out;
+  const std::string expected = "HELLO, NATIVE\nLOUD!\n3\nfound: in a "
+                               "haystack\nnot found\n[spaced out]\n";
+  for (const char *object : {"text.o", "libtext.a"}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " --object=" + object + " main.pkn 2>&1");
+    EXPECT_EQ(rc, 0) << object << ": " << out;
+    EXPECT_EQ(out, expected) << object;
+  }
+  std::ofstream(dir / "notes.o") << "not an object";
+  auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                       " --object=notes.o main.pkn 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_NE(out.find("cannot load 'notes.o': "), std::string::npos) << out;
+  std::filesystem::remove_all(dir);
+}

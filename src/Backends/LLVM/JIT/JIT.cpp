@@ -13,6 +13,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include <llvm/BinaryFormat/Magic.h>
 #include <llvm/ExecutionEngine/Orc/ExecutionUtils.h>
 #include <llvm/ExecutionEngine/Orc/LLJIT.h>
 #include <llvm/ExecutionEngine/Orc/ThreadSafeModule.h>
@@ -272,23 +273,40 @@ llvm::Expected<int> runModule(std::unique_ptr<llvm::Module> module,
   if (auto err = jit->addIRModule(std::move(tsm)))
     return std::move(err);
 
-  // The program's native C (#198): its objects are linked like the module,
-  // their runtime calls resolve against the table above, and their libc
-  // calls against this process.
+  // The program's native C (#198): its objects and archives are linked like
+  // the module, their runtime calls resolve against the table above, and
+  // their libc calls against this process.  An archive's members load as a
+  // linker loads them, each when it defines a symbol still undefined; the
+  // archives are searched before the process, as a linker searches them
+  // before the C library.
+  for (const std::string &path : nativeObjects) {
+    auto buf = llvm::MemoryBuffer::getFile(path);
+    if (!buf)
+      return llvm::createStringError(buf.getError(), "cannot read '%s': %s",
+                                     path.c_str(),
+                                     buf.getError().message().c_str());
+    auto cannotLoad = [&path](llvm::Error err) {
+      return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                     "cannot load '%s': %s", path.c_str(),
+                                     llvm::toString(std::move(err)).c_str());
+    };
+    if (llvm::identify_magic((*buf)->getBuffer()) ==
+        llvm::file_magic::archive) {
+      auto archive = llvm::orc::StaticLibraryDefinitionGenerator::Create(
+          jit->getObjLinkingLayer(), std::move(*buf));
+      if (!archive)
+        return cannotLoad(archive.takeError());
+      mainDylib.addGenerator(std::move(*archive));
+    } else if (auto err = jit->addObjectFile(std::move(*buf))) {
+      return cannotLoad(std::move(err));
+    }
+  }
   if (!nativeObjects.empty()) {
     auto libc = llvm::orc::DynamicLibrarySearchGenerator::GetForCurrentProcess(
         jit->getDataLayout().getGlobalPrefix());
     if (!libc)
       return libc.takeError();
     mainDylib.addGenerator(std::move(*libc));
-  }
-  for (const std::string &path : nativeObjects) {
-    auto buf = llvm::MemoryBuffer::getFile(path);
-    if (!buf)
-      return llvm::createStringError(buf.getError(), "cannot read '%s'",
-                                     path.c_str());
-    if (auto err = jit->addObjectFile(std::move(*buf)))
-      return std::move(err);
   }
 
   // Look up main and call it.
