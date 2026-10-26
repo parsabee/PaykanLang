@@ -967,8 +967,9 @@ cannot express itself, such as the standard library's file I/O (#198,
 native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
 ```
 
-The string is the C symbol.  The rest of the program calls the function like
-any other.
+The string is the C symbol, a C identifier other than a C keyword (`= "a b"`
+is an error: `the C symbol 'a b' of native function 'f' is not a C
+identifier`).  The rest of the program calls the function like any other.
 
 A C symbol names one C function, with one C signature: the C types the
 table below gives the native function's parameters and result.  Native

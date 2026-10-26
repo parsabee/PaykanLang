@@ -47,6 +47,34 @@ inline bool isModulePrivateName(std::string_view name) {
 inline bool isPrivateName(std::string_view name) {
   return isTypePrivateName(name) || isModulePrivateName(name);
 }
+/// Why @p symbol cannot be the C symbol of a `native fn`, or "" when it can:
+/// it must be a C identifier (an ASCII letter or `_`, then ASCII letters,
+/// digits and `_`) other than a C keyword (C11 6.4.1), so that the C
+/// declaration `--emit-c` writes compiles and a linker can name it.
+inline std::string_view cSymbolProblem(std::string_view symbol) {
+  constexpr std::string_view kKeywords[] = {
+      "auto",       "break",     "case",           "char",
+      "const",      "continue",  "default",        "do",
+      "double",     "else",      "enum",           "extern",
+      "float",      "for",       "goto",           "if",
+      "inline",     "int",       "long",           "register",
+      "restrict",   "return",    "short",          "signed",
+      "sizeof",     "static",    "struct",         "switch",
+      "typedef",    "union",     "unsigned",       "void",
+      "volatile",   "while",     "_Alignas",       "_Alignof",
+      "_Atomic",    "_Bool",     "_Complex",       "_Generic",
+      "_Imaginary", "_Noreturn", "_Static_assert", "_Thread_local"};
+  if (symbol.empty() || (symbol[0] >= '0' && symbol[0] <= '9'))
+    return "is not a C identifier";
+  for (char c : symbol)
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '_'))
+      return "is not a C identifier";
+  for (std::string_view keyword : kKeywords)
+    if (symbol == keyword)
+      return "is a C keyword";
+  return "";
+}
 /// The type parameter an untyped parameter of a named function adds
 /// (`fn double(x) = x * 2;` is `fn double<typeof(x)>(x: typeof(x))`): a
 /// name no program can write, so it shadows no type.

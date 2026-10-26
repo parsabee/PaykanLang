@@ -36,6 +36,30 @@ TEST(Native, MalformedDeclarationsAreRejected) {
   }
 }
 
+// The C symbol is a C identifier, not a C keyword: one that is not made C
+// that did not compile (`extern int64_t a b(void);`) and a JIT link that
+// failed (`Symbols not found: [ a b ]`).
+TEST(Native, TheSymbolIsACIdentifier) {
+  const std::pair<const char *, const char *> cases[] = {
+      {"a b", "is not a C identifier"},  {"", "is not a C identifier"},
+      {"1abc", "is not a C identifier"}, {"a-b", "is not a C identifier"},
+      {"int", "is a C keyword"},         {"_Bool", "is a C keyword"}};
+  for (const auto &[symbol, why] : cases) {
+    auto r = parseWithDiags(std::string("native fn f() -> int = \"") + symbol +
+                            "\";\nfn main() -> int { return f(); }\n");
+    EXPECT_FALSE(r.Ok) << symbol;
+    EXPECT_NE(r.Text.find(std::string("1:24: error: the C symbol '") + symbol +
+                          "' of native function 'f' " + why),
+              std::string::npos)
+        << symbol << ": " << r.Text;
+  }
+  for (const char *symbol : {"_pk_x", "Abc_9", "integer", "_"}) {
+    auto [ok, _] = parse(std::string("native fn f() -> int = \"") + symbol +
+                         "\";\nfn main() -> int { return f(); }\n");
+    EXPECT_TRUE(ok) << symbol;
+  }
+}
+
 // A generic native function is a template, like any generic function.
 TEST(Native, GenericDeclarationParses) {
   auto [ok, driver] = parse(R"(

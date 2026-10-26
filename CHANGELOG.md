@@ -1084,6 +1084,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   §2.2).  The `ast-text` example frontend names the AST format versions it reads and is
   given (for example `ast-text reads AST format 0.3.0 only, not 0.2.0`), where it said
   `format 1`.
+- A native function's C symbol was not checked: `native fn f() -> int = "a b";` was
+  accepted, and gave C that did not compile (`extern int64_t a b(void);`) and a link that
+  failed (`JIT session error: Symbols not found: [ a b ]`); `""` failed PIR verification.
+  The parser and the AST reader now take only a C identifier that is not a C keyword, and
+  Sema checks it again for an AST made another way: `the C symbol 'a b' of native function
+  'f' is not a C identifier`, `the C symbol 'int' of native function 'f' is a C keyword`
+  (docs/language/03-functions.md, "Native Functions").
 
 ## [0.2.0] - 2026-10-20
 
