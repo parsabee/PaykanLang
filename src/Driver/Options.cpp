@@ -32,7 +32,7 @@ constexpr Flag kFlags[] = {
     {"emit-ast", &Options::EmitAST,
      "Print the parsed AST in the AST interchange format and exit"},
     {"emit-source", &Options::EmitSource,
-     "Write the backend's source output (C, LLVM IR, ...) to stdout"},
+     "Print the backend's source output (C, LLVM IR, ...) and exit"},
     {"emit-pir", &Options::EmitPIR,
      "Print the program's PIR (the backend-neutral IR) and exit"},
     {"emit-pkm", &Options::EmitPkm,
@@ -494,11 +494,11 @@ void printUsage(std::ostream &os, const char *argv0) {
     os << "  --" << f.Name
        << std::string(16 - std::string_view(f.Name).size(), ' ') << "- "
        << f.Help << "\n";
-  os << "  --emit-llvm       - Emit the program's LLVM IR to stdout "
+  os << "  --emit-llvm       - Print the program's LLVM IR and exit "
         "(--emit-source)\n"
-     << "  --emit-c          - Emit the program's C to stdout\n"
-     << "  --emit-mlir=<stage> - Emit MLIR at a stage of the mlir backend to "
-        "stdout\n"
+     << "  --emit-c          - Print the program's C and exit\n"
+     << "  --emit-mlir=<stage> - Print MLIR at a stage of the mlir backend and "
+        "exit\n"
      << "                      (pir: the imported PIR dialect; scf: after "
         "the shared\n"
      << "                      lowering; llvm: the LLVM dialect; emitc: "
@@ -519,8 +519,8 @@ void printUsage(std::ostream &os, const char *argv0) {
         "functions\n"
      << "  -o <file>         - Output file of `build`, `--emit-pkm`, `pkm "
         "extract` and\n"
-     << "                      the --emit-* outputs (standard output without "
-        "it)\n"
+     << "                      what the --emit-* options print (stdout "
+        "without it)\n"
      << "  --module-name=<name> - The module `--emit-pkm` writes "
         "(`a::b`, or `::name`\n"
      << "                      for a module of the standard library)\n"

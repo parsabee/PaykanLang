@@ -46,9 +46,11 @@ When compilation fails, `paykan` prints the errors and exits with status 1. A wr
 option prints a message suggesting `--help`, and also exits with 1. So does a command line
 that asks for two things, such as `build` and `--emit-c`, or `--check-only` and `--emit-pir`
 (`run`, `build`, `pkm`, `--check-only`, `--emit-pkm` and the options that print the
-program or what it is linked with exclude each other), and one with an option that does nothing there, such as `-o`
-under `run` or `--check-only`, `--section` outside `pkm dump` or `--track-heap` outside
-`run`.
+program or what it is linked with exclude each other), and one that gives `-o` where
+nothing is written (under `run`, `--check-only`, `--dump-*`, `--list-modules`, `pkm dump`
+or `pkm check`), `--section` outside `pkm dump`, `--track-heap` outside `run`,
+`--module-name` without `--emit-pkm`, or `--pir-skip` with it. Other options are accepted
+where they change nothing, as `-O<n>` and `--stats` are with `--check-only`.
 
 ## Options
 

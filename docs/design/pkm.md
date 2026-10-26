@@ -65,10 +65,15 @@ map onto three *classes* of section rather than three literal sections:
 | 2. "loadable by Sema for semantic analysis" | **sema** | `IFACE`, `TMPL` | Sema (and the lowering, to declare externs) |
 | 3. "everything not needed for semantic analysis; binary" | **binary** | `CODE`, `OBJ`, `SYMIDX`, `DEBUG`, `PAYLOAD`* | the driver (PIR) and the active backend (compiled code, payload) |
 
-A file with **no `PAYLOAD`** is the **portable** form: it is complete, and
-any backend whose PIR version and runtime ABI match regenerates native
-code from `CODE`. A payload is only ever a cache of `CODE` for one backend,
-target and configuration.
+A file with **no `OBJ`** and no `PAYLOAD` is the **portable** form: its
+`CODE` holds all of the module's code, and any backend whose PIR version
+and runtime ABI match generates native code from it. A file with `OBJ`,
+which a backend that compiles modules writes (the mlir backend's files,
+the standard library's among them), keeps the compiled code only there,
+and `CODE` declares it (§5.13): only a backend that links what that
+backend made can use the file, though its interface and the PIR it keeps
+are backend-neutral. A payload is only ever a cache of `CODE` for one
+backend, target and configuration.
 
 Terms: *canonical name* is the module identity (`include/ModuleName.h`:
 `geometry::shapes`, `::io`, main's stem); *interface* is what Sema sees;

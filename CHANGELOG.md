@@ -587,12 +587,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepted and did nothing: the executable tracks its heap when it runs with
   `PAYKAN_TRACK_HEAP` set (docs/language/17-the-paykan-command.md,
   docs/language/16-memory.md).
-- A command line asks for one thing, and an option that does nothing there is an error,
-  where it was ignored: two of `run`, `build`, `pkm`, `--check-only`, `--emit-pkm` and the
-  options that print the program (`--emit-c --emit-pir` printed PIR, `--check-only
-  --emit-pir` printed nothing, `build --emit-c` printed C and built nothing), `-o` under
-  `run`, `--check-only`, `--dump-*` or `pkm dump|check`, `--section` outside `pkm dump`,
-  and `--track-heap` outside `run`.  The error names what clashes (`--check-only and
+- A command line asks for one thing, and `-o`, `--section` and `--track-heap` are errors
+  where they do nothing, where they were ignored: two of `run`, `build`, `pkm`,
+  `--check-only`, `--emit-pkm` and the options that print the program (`--emit-c
+  --emit-pir` printed PIR, `--check-only --emit-pir` printed nothing, `build --emit-c`
+  printed C and built nothing), `-o` under `run`, `--check-only`, `--dump-*`,
+  `--list-modules` or `pkm dump|check`, `--section` outside `pkm dump`, and `--track-heap`
+  outside `run`.  Other options are still accepted where they change nothing (`-O3` and
+  `--stats` with `--check-only`).  The error names what clashes (`--check-only and
   --emit-pir exclude each other`, ``-o does not apply to `run` ``, ``--section applies to
   `pkm dump` ``).  The options that print the program take no program arguments, as
   `build` and `--emit-pkm` do, so their options may follow the file, and an extra argument
@@ -1122,7 +1124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   listed `pkm dump`'s sections without `tmpl` and `all`, which the command takes.  It now
   shows `build <source-file> [-o <output>]` and
   `--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads|all`, the list the error
-  for an unknown section prints, both made from one table.
+  for an unknown section prints, both made from one table.  The lines of the `--emit-*`
+  options say they print, not that they write to stdout: `-o` names where.
 - The plugin documentation said the plugin API version changes only when `plugin_api.h`
   changes incompatibly, and that a plugin built against an older header keeps loading into a
   newer `paykan`.  The version is the release's, and a `paykan` loads only plugins of its
