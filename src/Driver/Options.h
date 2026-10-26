@@ -38,8 +38,10 @@ struct Options {
   /// The source file to compile (the first positional argument after the
   /// optional command word).
   std::string InputFilename;
-  /// Arguments forwarded to the Paykan program: everything after the source
-  /// file, verbatim, including arguments that look like options.
+  /// Arguments forwarded to the Paykan program under `run`: everything after
+  /// the source file, verbatim, including arguments that look like options.
+  /// What asks for anything else (`build`, `pkm`, --check-only, --emit-*)
+  /// takes none, so its options may follow the file.
   std::vector<std::string> ProgramArgs;
 
   /// --frontend=<name>; "" selects the build's default.
@@ -57,7 +59,8 @@ struct Options {
   /// the user and system directories); --plugin files are still loaded.
   bool NoPlugins = false;
 
-  /// -o <file>: the output of `build` or `--emit-pkm`.
+  /// -o <file>: the output of `build`, `--emit-pkm`, `pkm extract` or an
+  /// --emit-* option (which prints to standard output without it).
   std::string OutputPath;
   /// --module-name=<name>: the canonical name of the module `--emit-pkm`
   /// writes (`geometry::shapes`, or `::collections` for a module of the

@@ -581,6 +581,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepted and did nothing: the executable tracks its heap when it runs with
   `PAYKAN_TRACK_HEAP` set (docs/language/17-the-paykan-command.md,
   docs/language/16-memory.md).
+- A command line asks for one thing, and an option that does nothing there is an error,
+  where it was ignored: two of `run`, `build`, `pkm`, `--check-only`, `--emit-pkm` and the
+  options that print the program (`--emit-c --emit-pir` printed PIR, `--check-only
+  --emit-pir` printed nothing, `build --emit-c` printed C and built nothing), `-o` under
+  `run`, `--check-only`, `--dump-*` or `pkm dump|check`, `--section` outside `pkm dump`,
+  and `--track-heap` outside `run`.  The error names what clashes (`--check-only and
+  --emit-pir exclude each other`, ``-o does not apply to `run` ``, ``--section applies to
+  `pkm dump` ``).  The options that print the program take no program arguments, as
+  `build` and `--emit-pkm` do, so their options may follow the file, and an extra argument
+  names the option it is extra to (`unexpected argument 'extra' (--check-only takes one
+  file and no program arguments)`, where `--emit-pkm hello.pkn extra` said `` `build`
+  takes one file``).  Under `run`, everything after the source file is still the program's
+  (docs/language/17-the-paykan-command.md, "Commands").
+- `-o <file>` names the file an `--emit-*` option (`--emit-c`, `--emit-llvm`,
+  `--emit-mlir`, `--emit-source`, `--emit-pir`, `--emit-ast`) writes what it prints, where
+  `paykan --emit-c f.pkn -o f.c` printed the C and wrote no `f.c`; like every file the
+  driver writes, it is never the source file.  Without `-o` they print to standard output.
 
 ### Removed
 

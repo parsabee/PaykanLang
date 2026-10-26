@@ -10,6 +10,7 @@
 #include <iterator>
 #include <ostream>
 #include <string_view>
+#include <utility>
 
 namespace paykan::driver {
 
@@ -114,6 +115,45 @@ bool valueOption(std::string_view name, const char *key, int &i, int argc,
   return true;
 }
 
+/// The option of the backend's source output that was given: --emit-llvm,
+/// --emit-c, --emit-mlir or --emit-source; null for none.
+const char *sourceOption(const Options &o, bool emitLLVM, bool emitC,
+                         bool emitMLIR) {
+  if (emitLLVM)
+    return "--emit-llvm";
+  if (emitC)
+    return "--emit-c";
+  if (emitMLIR)
+    return "--emit-mlir";
+  return o.EmitSource ? "--emit-source" : nullptr;
+}
+
+/// What the command line asks for other than `run`, the default, in this
+/// order: `build`, `pkm <verb>`, and the options that print or write
+/// something and stop (@p source: sourceOption's).  A command line asks
+/// for one thing.
+std::vector<std::string> givenModes(const Options &o, bool sawVerb,
+                                    const char *source) {
+  std::vector<std::string> modes;
+  if (o.Cmd == Command::Build)
+    modes.emplace_back("`build`");
+  if (o.Cmd == Command::Pkm)
+    modes.emplace_back(!sawVerb                   ? "`pkm`"
+                       : o.Verb == PkmVerb::Dump  ? "`pkm dump`"
+                       : o.Verb == PkmVerb::Check ? "`pkm check`"
+                                                  : "`pkm extract`");
+  for (const auto &[given, option] :
+       {std::pair{o.CheckOnly, "--check-only"},
+        std::pair{o.DumpTokens, "--dump-tokens"},
+        std::pair{o.DumpAST, "--dump-ast"}, std::pair{o.EmitAST, "--emit-ast"},
+        std::pair{o.EmitPIR, "--emit-pir"}, std::pair{o.EmitPkm, "--emit-pkm"}})
+    if (given)
+      modes.emplace_back(option);
+  if (source)
+    modes.emplace_back(source);
+  return modes;
+}
+
 } // namespace
 
 ParseResult parseCommandLine(int argc, const char *const *argv) {
@@ -122,6 +162,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   bool optionsEnded = false;
   bool sawCommand = false;
   bool sawVerb = false;
+  bool explicitRun = false;
   bool emitLLVM = false;
   bool emitC = false;
   bool emitMLIR = false;
@@ -130,9 +171,12 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     std::string_view arg = argv[i];
 
     // For `run`, everything after the source file belongs to the program.
-    // `build`, `pkm` and `--emit-pkm` have no program arguments, so their
+    // `build`, `pkm` and the options that print or write something and stop
+    // (--emit-pkm, --check-only, ...) have no program arguments, so their
     // options may follow the file.
-    if (!o.InputFilename.empty() && o.Cmd == Command::Run && !o.EmitPkm) {
+    if (!o.InputFilename.empty() && o.Cmd == Command::Run &&
+        givenModes(o, sawVerb, sourceOption(o, emitLLVM, emitC, emitMLIR))
+            .empty()) {
       o.ProgramArgs.emplace_back(arg);
       continue;
     }
@@ -147,6 +191,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         o.Cmd = arg == "build" ? Command::Build
                 : arg == "pkm" ? Command::Pkm
                                : Command::Run;
+        explicitRun = arg == "run";
         sawCommand = true;
         continue;
       }
@@ -167,9 +212,15 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         continue;
       }
       if (!o.InputFilename.empty()) {
-        r.Error = "unexpected argument '" + std::string(arg) + "' (`" +
-                  (o.Cmd == Command::Pkm ? "pkm" : "build") +
-                  "` takes one file and no program arguments)";
+        // What the command line asks for: under `run`, the rest is the
+        // program's.
+        std::string mode =
+            givenModes(o, sawVerb, sourceOption(o, emitLLVM, emitC, emitMLIR))
+                .front();
+        r.Error = "unexpected argument '" + std::string(arg) + "' (" + mode +
+                  (o.Cmd == Command::Pkm
+                       ? " takes one module file)"
+                       : " takes one file and no program arguments)");
         return r;
       }
       o.InputFilename = std::string(arg);
@@ -321,9 +372,35 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     if (emitC)
       o.EmitStage = "c";
   }
+  // One thing asked for, and only options that apply to it.
+  const char *source = sourceOption(o, emitLLVM, emitC, emitMLIR);
+  std::vector<std::string> modes = givenModes(o, sawVerb, source);
+  if (explicitRun)
+    modes.insert(modes.begin(), "`run`");
+  if (modes.size() > 1) {
+    r.Error = modes[0] + " and " + modes[1] + " exclude each other";
+    return r;
+  }
+  const std::string mode = modes.empty() ? "`run`" : modes.front();
+  bool writes = o.Cmd == Command::Build ||
+                (o.Cmd == Command::Pkm && o.Verb == PkmVerb::Extract) ||
+                o.EmitPkm || o.EmitAST || o.EmitPIR || source;
+  if (!o.OutputPath.empty() && !writes) {
+    r.Error = "-o does not apply to " + mode;
+    return r;
+  }
+  if (!o.PkmSection.empty() &&
+      (o.Cmd != Command::Pkm || o.Verb != PkmVerb::Dump)) {
+    r.Error = "--section applies to `pkm dump`";
+    return r;
+  }
   if (o.TrackHeap && o.Cmd == Command::Build) {
     r.Error = "--track-heap applies to `run`: to track the heap of a program "
               "`build` wrote, run it with PAYKAN_TRACK_HEAP set";
+    return r;
+  }
+  if (o.TrackHeap && mode != "`run`") {
+    r.Error = "--track-heap applies to `run`, not to " + mode;
     return r;
   }
   if (!o.SkipPasses.empty()) {
@@ -396,7 +473,10 @@ void printUsage(std::ostream &os, const char *argv0) {
         "(comma-separated;\n"
      << "                      repeatable): they define the native "
         "functions\n"
-     << "  -o <file>         - Output file of `build` or `--emit-pkm`\n"
+     << "  -o <file>         - Output file of `build`, `--emit-pkm`, `pkm "
+        "extract` and\n"
+     << "                      the --emit-* outputs (standard output without "
+        "it)\n"
      << "  --module-name=<name> - The module `--emit-pkm` writes "
         "(`a::b`, or `::name`\n"
      << "                      for a module of the standard library)\n"

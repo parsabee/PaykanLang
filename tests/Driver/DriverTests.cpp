@@ -2538,3 +2538,103 @@ TEST(Driver, InformationOptionsAnswerAfterPkm) {
     EXPECT_EQ(afterPkm.out, plain.out) << option;
   }
 }
+
+// A command line asks for one thing, and takes only options that apply to
+// it: two of `run`, `build`, `pkm` and the options that print or write
+// something and stop, or -o, --section or --track-heap where they do
+// nothing, are errors rather than ignored (finding 68).
+TEST(Driver, ConflictingOptionsAreRejected) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("conflicts");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto emit = run("cd " + dir.string() + " && " + paykanRun() +
+                  " --emit-pkm lib.pkn 2>&1");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  for (const auto &[args, message] :
+       {std::pair{"--emit-pir --check-only hello.pkn",
+                  "--check-only and --emit-pir exclude each other"},
+        std::pair{"--emit-c --emit-pir hello.pkn",
+                  "--emit-pir and --emit-c exclude each other"},
+        std::pair{"--dump-ast --emit-ast hello.pkn",
+                  "--dump-ast and --emit-ast exclude each other"},
+        std::pair{"build --emit-c hello.pkn -o bx",
+                  "`build` and --emit-c exclude each other"},
+        std::pair{"build --emit-pkm hello.pkn",
+                  "`build` and --emit-pkm exclude each other"},
+        std::pair{"run --check-only hello.pkn",
+                  "`run` and --check-only exclude each other"},
+        std::pair{"pkm dump lib.pkm --emit-pir",
+                  "`pkm dump` and --emit-pir exclude each other"},
+        std::pair{"run -o foo hello.pkn", "-o does not apply to `run`"},
+        std::pair{"-o foo hello.pkn", "-o does not apply to `run`"},
+        std::pair{"--check-only hello.pkn -o x",
+                  "-o does not apply to --check-only"},
+        std::pair{"--dump-ast -o x hello.pkn",
+                  "-o does not apply to --dump-ast"},
+        std::pair{"pkm check lib.pkm -o x", "-o does not apply to `pkm check`"},
+        std::pair{"--section=iface hello.pkn",
+                  "--section applies to `pkm dump`"},
+        std::pair{"pkm check --section=iface lib.pkm",
+                  "--section applies to `pkm dump`"},
+        std::pair{"--emit-c --track-heap hello.pkn",
+                  "--track-heap applies to `run`, not to --emit-c"},
+        std::pair{"--check-only hello.pkn extra",
+                  "unexpected argument 'extra' (--check-only takes one file "
+                  "and no program arguments)"},
+        std::pair{"--emit-c hello.pkn extra",
+                  "unexpected argument 'extra' (--emit-c takes one file and "
+                  "no program arguments)"}}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + kPaykan + " " + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_EQ(out.find(std::string("paykan: ") + message + ". Try: '"), 0U)
+        << args << ": " << out;
+  }
+  EXPECT_FALSE(std::filesystem::exists(dir / "bx"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "foo"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "x"));
+  // Under `run` everything after the source file is still the program's.
+  auto args = run("cd " + dir.string() + " && " + kPaykan +
+                  " hello.pkn --emit-c -o x 2>&1");
+  EXPECT_EQ(args.exitCode, 0) << args.out;
+  EXPECT_EQ(args.out, "hello\n");
+  std::filesystem::remove_all(dir);
+}
+
+// The --emit-* options write to -o's file, before or after the source
+// file, what they print without it, and never over the source file (the
+// overwrite guard of finding 18; finding 68).
+TEST(Driver, EmitOptionsWriteToTheOutputFile) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("emit_o");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  for (const char *option : {"--emit-c", "--emit-llvm", "--emit-pir",
+                             "--emit-mlir=scf", "--emit-ast"}) {
+    auto printed = run("cd " + dir.string() + " && " + paykanRun() + " " +
+                       option + " hello.pkn 2>/dev/null");
+    ASSERT_EQ(printed.exitCode, 0) << option;
+    for (const std::string &args :
+         {std::string(option) + " -o out.txt hello.pkn",
+          std::string(option) + " hello.pkn -o out.txt"}) {
+      std::filesystem::remove(dir / "out.txt");
+      auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() + " " +
+                           args + " 2>&1");
+      EXPECT_EQ(rc, 0) << args << ": " << out;
+      EXPECT_EQ(out, "") << args;
+      EXPECT_EQ(slurp(dir / "out.txt"), printed.out) << args;
+    }
+    for (const char *name : {"hello.pkn", "./hello.pkn"}) {
+      auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() + " " +
+                           option + " hello.pkn -o " + name + " 2>&1");
+      EXPECT_EQ(rc, 1) << option << ": " << out;
+      EXPECT_NE(out.find(std::string("paykan: the output '") + name +
+                         "' is the input file 'hello.pkn'"),
+                std::string::npos)
+          << option << ": " << out;
+    }
+  }
+  EXPECT_EQ(slurp(dir / "hello.pkn"), kHello);
+  std::filesystem::remove_all(dir);
+}

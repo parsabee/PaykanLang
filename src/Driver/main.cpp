@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -340,6 +341,32 @@ std::string defaultExecutable(const std::string &input) {
   if (name.extension() == ".pkn" || name.extension() == ".pk")
     return name.stem().string();
   return name.string() + ".out";
+}
+
+/// What @p print returns (EXIT_SUCCESS, or the status of a failure it
+/// reported), run on where an --emit-* option prints: -o's file, or
+/// standard output without -o.  The file is never one the command reads,
+/// and when not all of it could be written it is removed, as a compiler
+/// removes an output it could not finish.
+template <typename Print> int printOutput(const Options &opts, Print &&print) {
+  if (opts.OutputPath.empty()) {
+    int status = print(std::cout);
+    return status == EXIT_SUCCESS ? finishStdout(status) : status;
+  }
+  const std::string &path = opts.OutputPath;
+  if (std::string why = overwritesInput(path, opts); !why.empty())
+    return fail(why);
+  std::ofstream file(path, std::ios::binary | std::ios::trunc);
+  if (!file)
+    return fail("cannot write '" + path + "': " + std::strerror(errno));
+  int status = print(file);
+  file.close();
+  if (status == EXIT_SUCCESS && !file)
+    status = fail("cannot write '" + path + "'");
+  if (std::error_code ec;
+      status != EXIT_SUCCESS && std::filesystem::is_regular_file(path, ec))
+    std::filesystem::remove(path, ec);
+  return status;
 }
 
 /// Selecting a plugin this paykan does not accept (#103), an ambiguous
@@ -689,10 +716,12 @@ int main(int argc, char *argv[]) {
   }
   if (opts.EmitAST) {
     // What a frontend plugin returns (docs/plugins/ast-format.md).
-    std::string error;
-    if (!paykan::ast::interchange::write(*root, std::cout, error))
-      return fail("cannot write the AST: " + error);
-    return finishStdout(EXIT_SUCCESS);
+    return printOutput(opts, [&](std::ostream &os) {
+      std::string error;
+      if (!paykan::ast::interchange::write(*root, os, error))
+        return fail("cannot write the AST: " + error);
+      return EXIT_SUCCESS;
+    });
   }
 
   // -- Backend
@@ -890,10 +919,11 @@ int main(int argc, char *argv[]) {
     return fail(s.message());
   if (opts.Stats)
     stats.print(std::cerr);
-  if (opts.EmitPIR) {
-    paykan::pir::print(program, std::cout);
-    return finishStdout(EXIT_SUCCESS);
-  }
+  if (opts.EmitPIR)
+    return printOutput(opts, [&](std::ostream &os) {
+      paykan::pir::print(program, os);
+      return EXIT_SUCCESS;
+    });
   in.Program = &program;
   // The compiled code of the modules loaded from a `.pkm` that has some.
   if (caps.CompileModules)
@@ -908,9 +938,11 @@ int main(int argc, char *argv[]) {
       return fail("backend '" + backendName + "' has no source output");
     paykan::backend::EmitOptions eo;
     eo.SourceStage = opts.EmitStage;
-    paykan::Status s =
-        backend->emit(in, paykan::backend::EmitKind::Source, eo, std::cout);
-    return s ? finishStdout(EXIT_SUCCESS) : failBackend(s);
+    return printOutput(opts, [&](std::ostream &os) {
+      paykan::Status s =
+          backend->emit(in, paykan::backend::EmitKind::Source, eo, os);
+      return s ? EXIT_SUCCESS : failBackend(s);
+    });
   }
 
   if (opts.Cmd == Command::Build) {

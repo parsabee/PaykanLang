@@ -33,13 +33,18 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
 The source file is the program's **main file**. Its directory is the source root from which
 imports are resolved (see [Modules](15-modules.md)).
 
-No command writes over a file it reads. When the file that `build`, `--emit-pkm` or
-`pkm extract` is to write is the source file, the module file `pkm extract` reads or an
+No command writes over a file it reads. When the file that `build`, `--emit-pkm`,
+`pkm extract` or an `--emit-*` option is to write is the source file, the module file `pkm extract` reads or an
 `--object` file, under any name (another spelling of its path, such as `./prog.pkn`, or a
 symbolic or a hard link), `paykan` writes nothing, says so and exits with status 1.
 
 When compilation fails, `paykan` prints the errors and exits with status 1. A wrong
-option prints a message suggesting `--help`, and also exits with 1.
+option prints a message suggesting `--help`, and also exits with 1. So does a command line
+that asks for two things, such as `build` and `--emit-c`, or `--check-only` and `--emit-pir`
+(`run`, `build`, `pkm`, `--check-only`, `--emit-pkm` and the options that print the
+program exclude each other), and one with an option that does nothing there, such as `-o`
+under `run` or `--check-only`, `--section` outside `pkm dump` or `--track-heap` outside
+`run`.
 
 ## Options
 
@@ -47,7 +52,7 @@ option prints a message suggesting `--help`, and also exits with 1.
 
 | Option | Effect |
 |--------|--------|
-| `-o <file>` | the output file of `build` |
+| `-o <file>` | the output file of `build`, of `--emit-pkm`, of `pkm extract`, and of the `--emit-*` options, which print to standard output without it |
 | `-O<n>` | optimization level, `0` to `3` (also `-O <n>` and `-O=<n>`); the default is `2`, and `-O0` compiles fastest and is easiest to debug |
 | `--backend=<name>` | the backend to compile with (see below) |
 | `--frontend=<name>` | the parser to read the source with; the built-in one, `recursive-descent`, is the default |
@@ -65,9 +70,11 @@ option prints a message suggesting `--help`, and also exits with 1.
 
 ### Looking inside the compiler
 
-These print an intermediate form of the program to standard output and stop.
-`--emit-c`, `--emit-llvm` and `--emit-mlir` are the mlir backend's (with another
-`--backend` they are an error), and only one of them may be given:
+These print an intermediate form of the program to standard output and stop; the
+`--emit-*` ones write it to `-o <file>` when it is given. Like `build`, they take no program
+arguments, so their options may follow the file. `--emit-c`, `--emit-llvm` and `--emit-mlir`
+are the mlir backend's (with another `--backend` they are an error), and only one of them
+may be given:
 
 | Option | Prints |
 |--------|--------|
