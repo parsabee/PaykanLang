@@ -474,6 +474,41 @@ TEST(BinderName, LocalsRejectFunctionNames) {
       kFunc + wrapMain("func, b = (1, 2); func = 3; io::println(b);"), kFnMsg);
 }
 
+// The binding that poisons a function's name is reported though its value
+// has an error of its own (`func = nope;` reported only `nope`, and the
+// follow-on rule then hid the name's error at every later binding), once,
+// at the first binding: an assignment, a destructuring target annotated
+// or not (an annotated one bound the name), and one of a value that is
+// no tuple.
+TEST(BinderName, AFunctionsNameIsReportedWhenTheValueFails) {
+  const std::string nope = "use of undeclared variable 'nope'";
+  auto countOf = [](const std::string &text, const std::string &what) {
+    size_t n = 0;
+    for (size_t at = text.find(what); at != std::string::npos;
+         at = text.find(what, at + what.size()))
+      ++n;
+    return n;
+  };
+  for (const char *body :
+       {"func = nope; func = 2;", "func = nope; func = nope; func, b = (1, 2);",
+        "func = nope;\n if True { func = 2; }", "func, b = nope; func = 2;",
+        "func: int, b: int = nope; func = 3;", "a, func = 5; func = 6;"}) {
+    auto r = semaCheck(kFunc + wrapMain(body));
+    EXPECT_FALSE(r.Ok) << body;
+    EXPECT_EQ(countOf(r.Diagnostics, kFnMsg), 1u) << body << "\n"
+                                                  << r.Diagnostics;
+    const size_t column = std::string(body).find("func") + 1;
+    EXPECT_NE(r.Diagnostics.find("3:" + std::to_string(column) +
+                                 ": error: " + kFnMsg),
+              std::string::npos)
+        << body << "\n"
+        << r.Diagnostics;
+  }
+  auto r = semaCheck(kFunc + wrapMain("func = nope; func = nope;"));
+  EXPECT_EQ(countOf(r.Diagnostics, nope), 2u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+}
+
 TEST(BinderName, ParametersAndBindingsRejectFunctionNames) {
   const std::string paramMsg = "'func' is a function of this module and "
                                "cannot be used as a parameter name";

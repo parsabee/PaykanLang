@@ -1008,8 +1008,9 @@ enums.
   lambda's included), `for` loop variable or `match` binding can take the name of one of
   the module's functions, a generic or a `native` one included, wherever the function is
   declared (`'func' is a function of this module and cannot be used as a variable`, `... as
-  a parameter name` at a parameter, once: the assignments that bind the name again are
-  follow-ons of it). So a call by the name
+  a parameter name` at a parameter, once, at the first binding, even when its value has an
+  error of its own: the assignments that bind the name again are follow-ons of it). So a
+  call by the name
   always means the function. A field may share a function's name (it is
   read as `obj.func`), and so may another module's function, which is always qualified
   (`io::println`).

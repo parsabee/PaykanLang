@@ -2932,6 +2932,16 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
       const std::string &name = target.getName();
       if (!seen.insert(name).second || isTypeNameForVariable(name))
         continue;
+      // A function's name is reported all the same, and poisoned, as in
+      // visitAssignStmt.
+      if (isFunctionNameForVariable(name)) {
+        if (!rebindsPoisonedFunctionName(name)) {
+          checkBinderName(name, target.Loc);
+          if (!CurrentScope->findOwner(name))
+            declarePoisoned(CurrentScope, name);
+        }
+        continue;
+      }
       if (target.DeclType) {
         if (CurrentScope->contains(name))
           continue; // a redeclaration: the existing binding stands
@@ -3693,7 +3703,12 @@ bool Sema::visitAssignStmt(ast::AssignStmt *node) {
   if (!valTy) {
     // The value's error was reported.  A first assignment still declares the
     // variable -- poisoned -- so its uses are not reported as undeclared; an
-    // existing variable keeps its type.
+    // existing variable keeps its type.  A function's name is reported all
+    // the same, binding it being an error of its own, so the binding that
+    // poisons it always has its error (rebindsPoisonedFunctionName).
+    if (isFunctionNameForVariable(varName) &&
+        !rebindsPoisonedFunctionName(varName))
+      checkBinderName(varName, node->getLocation());
     if (!isTypeNameForVariable(varName) && !CurrentScope->findOwner(varName))
       declarePoisoned(CurrentScope, varName);
     return false;
