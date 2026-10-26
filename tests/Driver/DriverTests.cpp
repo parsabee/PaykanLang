@@ -2920,12 +2920,21 @@ TEST(Driver, BuildReportsACompilerThatCannotRun) {
 // $CC may carry arguments (finding 71): its first word is the program, the
 // others come right after it (`env cc` runs cc, as `ccache cc` would), where
 // `build` ran the whole value as one program's name (`exec of 'cc -O0'
-// failed`).
+// failed`).  A coverage build links its programs with the compiler that
+// built the runtime, whose profile runtime matches the archive's
+// instrumentation: there $CC names that one, with the flags it is given by
+// default.
 TEST(Driver, BuildRunsTheCompilerCCNamesWithItsArguments) {
   REQUIRE_BACKEND();
   auto dir = freshDir("cc_words");
   std::ofstream(dir / "hello.pkn") << kHello;
-  for (const char *cc : {"cc -O0", "env cc", "  cc  "}) {
+#ifdef PAYKAN_TEST_DEFAULT_CC
+  const std::string compiler = PAYKAN_TEST_DEFAULT_CC;
+#else
+  const std::string compiler = "cc";
+#endif
+  for (const std::string &cc :
+       {compiler + " -O0", "env " + compiler, "  " + compiler + "  "}) {
     std::filesystem::remove(dir / "hello");
     auto [rc, out] = run("cd " + dir.string() + " && CC=" + shellWord(cc) +
                          " " + paykanRun() + " build hello.pkn -o hello 2>&1");

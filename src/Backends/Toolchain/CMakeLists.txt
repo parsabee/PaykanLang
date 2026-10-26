@@ -44,6 +44,14 @@ if(PAYKAN_COVERAGE_FLAGS)
         endif()
     endif()
 endif()
+# That compiler and its flags, for the driver test that sets $CC itself
+# (tests/CMakeLists.txt): $CC replaces the default, flags and all.
+set(_paykan_toolchain_default_cc_words
+    ${_paykan_toolchain_default_cc} ${_paykan_toolchain_default_cc_flags})
+list(JOIN _paykan_toolchain_default_cc_words " "
+     _paykan_toolchain_default_cc_line)
+set_property(GLOBAL PROPERTY PAYKAN_DEFAULT_CC_LINE
+             "${_paykan_toolchain_default_cc_line}")
 # On macOS the runtime archive is built for CMAKE_OSX_DEPLOYMENT_TARGET (CMake
 # 4 defaults it to the host's version, which can be newer than the system
 # cc's default).  Programs linked against the archive target the same

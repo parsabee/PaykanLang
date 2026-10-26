@@ -527,6 +527,15 @@ target_link_libraries(driver_tests
 add_dependencies(driver_tests paykan paykan_incompatible_plugins paykan_build_id)
 if(PAYKAN_COVERAGE)
     target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_COVERAGE=1)
+    # The compiler (and flags) a coverage build links programs with by
+    # default, the one that built the runtime: a test that sets $CC names
+    # it, since any other's profile runtime may not match the runtime
+    # archive's instrumentation (src/Backends/Toolchain/CMakeLists.txt).
+    get_property(_paykan_test_default_cc GLOBAL PROPERTY PAYKAN_DEFAULT_CC_LINE)
+    if(_paykan_test_default_cc)
+        target_compile_definitions(driver_tests PRIVATE
+            PAYKAN_TEST_DEFAULT_CC="${_paykan_test_default_cc}")
+    endif()
 endif()
 # The programs a sanitizer build links map ASan's or TSan's shadow memory,
 # more address space than the out-of-memory test's RLIMIT_AS leaves them.
