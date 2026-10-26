@@ -146,6 +146,41 @@ TEST(Enum, MatchUnknownVariantRejected) {
   EXPECT_FALSE(r.Ok);
 }
 
+// Finding 50: an arm whose type is no name (`int`, a tuple, an optional, an
+// array) names it in the error, which was "'' is not a variant of enum 'E'",
+// and says what an arm names; a name keeps its message.
+TEST(Enum, MatchArmOfANonNameTypeNamesIt) {
+  auto r = semaCheck(R"(enum E { A(x: int), B }
+fn main() -> int {
+  e = E::A(1);
+  match e {
+    a: int { }
+    t: (int, Str) { }
+    o: E? { }
+    k: int[3] { }
+    Q { }
+    _ { }
+  }
+  return 0;
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"5:5: error: 'int' is not a variant of enum 'E': an arm names one of "
+        "its variants, such as 'A'",
+        "6:5: error: '(int, Str)' is not a variant of enum 'E': an arm names "
+        "one of its variants, such as 'A'",
+        "7:5: error: 'E?' is not a variant of enum 'E': an arm names one of "
+        "its variants, such as 'A'",
+        "8:5: error: 'int[3]' is not a variant of enum 'E': an arm names one "
+        "of its variants, such as 'A'",
+        "9:5: error: 'Q' is not a variant of enum 'E'\n"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("''"), std::string::npos) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 5) << r.Diagnostics;
+}
+
 TEST(Enum, MatchWildcardNotLastRejected) {
   auto r = semaCheck(withEnums("enum Color { Red, Green }", R"(
     c: Color = Color::Red;

@@ -701,7 +701,7 @@ match f.readln() {
 | Arm type not a subtype | A type arm names a class that is not the subject type or a subtype of it |
 | Arm naming an abstract class | A type arm names an abstract class (or, on a `T?`, a strict subclass of `T` that is abstract): `a 'match' arm cannot name abstract class 'Shape': an object is of it only while it is being constructed` |
 | Unknown arm type | A type arm names a class that is not declared anywhere |
-| Unknown enum variant | A variant arm names an identifier that is not a variant of the subject enum |
+| Unknown enum variant | A variant arm names an identifier that is not a variant of the subject enum, or a type that is no name (`a: int { }`: `'int' is not a variant of enum 'E': an arm names one of its variants, such as 'A'`) |
 | Binding a variant without fields | `x: Variant { … }` where the variant has no fields to bind |
 | Qualified variant arm | A variant arm is written qualified (`base::Color::Green`); arms use the bare variant name (`Green`) |
 | Literal type mismatch | A value arm's literal has a different type than the subject |

@@ -1237,6 +1237,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   module 'a::util'`, dropping the system module's `::` (and `... already names module 'io'`
   in the other order); it is `import of module '::io': ...` and `... already names module
   '::io'` now (docs/language/15-modules.md, "Aliased Import").
+- A `match` arm on an enum whose type is no name, `a: int { }` (or a tuple, an optional, an
+  array), was `'' is not a variant of enum 'E'`; it names the type and what an arm names
+  now: `'int' is not a variant of enum 'E': an arm names one of its variants, such as 'A'`
+  (docs/language/08-match.md, "Semantic Checks").
 
 ## [0.2.0] - 2026-10-20
 

@@ -4866,6 +4866,18 @@ bool Sema::checkEnumMatch(ast::MatchStmt *node, ast::EnumType *subjectTy) {
           msg += "' is not a valid match arm; use the bare variant name '";
           msg += bare + "'";
           error(arm->getLocation(), msg);
+        } else if (variant.empty()) {
+          // A type that is no name (`int`, `(int, Str)`, `E?`, `int[3]`)
+          // cannot be one.
+          std::string msg = "'" + typeName(arm->getArmType()) +
+                            "' is not a variant of enum '" +
+                            subjectTy->getName() + "'";
+          if (subjectTy->getNumVariants() != 0) {
+            msg += ": an arm names one of its variants, such as '";
+            msg += *subjectTy->getVariants().front();
+            msg += "'";
+          }
+          error(arm->getLocation(), msg);
         } else {
           error(arm->getLocation(), "'" + variant +
                                         "' is not a variant of enum '" +
