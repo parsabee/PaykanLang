@@ -3430,13 +3430,16 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
                    node->getGenericStructDecls().end());
   templates.insert(templates.end(), node->getGenericEnumDecls().begin(),
                    node->getGenericEnumDecls().end());
-  std::sort(templates.begin(), templates.end(),
-            [](const ast::Decl *a, const ast::Decl *b) {
-              return std::pair(a->getLocation().getLineStart(),
-                               a->getLocation().getColumnStart()) <
-                     std::pair(b->getLocation().getLineStart(),
-                               b->getLocation().getColumnStart());
-            });
+  // By position, never by address, so the order is deterministic; stable,
+  // so templates without a position keep the AST's order.
+  // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
+  std::stable_sort(templates.begin(), templates.end(),
+                   [](const ast::Decl *a, const ast::Decl *b) {
+                     return std::pair(a->getLocation().getLineStart(),
+                                      a->getLocation().getColumnStart()) <
+                            std::pair(b->getLocation().getLineStart(),
+                                      b->getLocation().getColumnStart());
+                   });
   for (const ast::Decl *tmpl : templates)
     checkTemplateFieldNames(tmpl);
   // Then the traits' signatures, which may name the classes, and the
