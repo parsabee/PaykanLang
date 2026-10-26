@@ -582,6 +582,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in a generic class `unknown class type 'U'`.  The AST interchange reader rejects a
   class's or an `impl` block's method with `(type-params ...)` alike
   (docs/grammar.md section 4, docs/language/13-generics.md, "Declaring a Generic Function").
+- Two new limits hold a program to what the passes after the frontend can take on a
+  quarter of the default stack (*Fixed*, docs/grammar.md section 9), on every frontend and
+  in the AST interchange reader:
+  - A chain of more than 2048 links is `nesting too deep (more than 2048 levels)`
+    (`frontend::kMaxChain`): each binary operator, call, field, method call, tuple index
+    and subscript is a link, counted along any path down the expression, so `x = 1 + 1 +
+    ...` with 3000 terms, which compiled, is rejected.  Split such a chain with locals
+    (`a = x0 + ... + x999; b = a + x1000 + ...;`).
+  - An `elif` is a level of nesting, as the `if` of an `else` block, so an `if` takes up
+    to 510 of them in a function's body, and more are `nesting too deep (more than 512
+    levels)` (`frontend::kMaxNesting`).  Write a longer chain as a `match`, which takes any
+    number of arms, or as `if`s in turn that each `return`.
+  - The AST interchange format nests up to 4112 lists (`kMaxDepth`, was 2048), and its
+    reader counts the levels and links the frontends count, an operand the grammar writes
+    in parentheses (`a + (b + c)`, `(a == b) == c`) as the level its parenthesis is
+    (docs/plugins/ast-format.md section 3): a frontend plugin's AST deeper than the
+    frontends parse is rejected.
 
 ### Removed
 
