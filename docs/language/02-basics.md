@@ -1073,8 +1073,9 @@ The same rule applies between user declarations: `fn Point()` next to `class Poi
 rejected with `'Point' is already declared as a class`, and a function or class cannot
 reuse an enum's name. A builtin class or type name, or the name of a type the program
 declares or imports, cannot name a field (a class's, a struct's or a variant's, whether or
-not its type writes `__init__`), a parameter or a local variable either. It is reported at
-the field, the parameter or the variable, as what it would name: `'Str' is a type name and
+not its type writes `__init__`, and a generic type's once, at its declaration, whether or
+not it is instantiated), a parameter or a local variable either. It is reported at the
+field, the parameter or the variable, as what it would name: `'Str' is a type name and
 cannot be used as a variable` (`... as a parameter name`, `... as a field name`). Nor can a
 function of the module name a parameter or a local variable
 ([Scoping Rules](#scoping-rules)).

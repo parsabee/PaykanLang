@@ -1423,6 +1423,21 @@ private:
   /// or an `impl` block's) named so is reported, and true returned.
   bool rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner);
 
+  /// Report each field of this module's generic class, struct or enum
+  /// @p tmpl (a variant's too) named like a type, once, at the field: its
+  /// first instantiation asks (populateClassType, populateStructType), and
+  /// after the declarations every template does, so one never instantiated
+  /// is checked too.  An instantiation leaves such a field out as a
+  /// follow-on of that error.
+  void checkTemplateFieldNames(const ast::Decl *tmpl);
+  /// The local template @p tmpl, or nullptr for another module's (whose
+  /// fields its module checked) and for none.
+  const ast::Decl *localTemplate(const ast::Decl *tmpl) const {
+    return tmpl && !foreignOrigin(tmpl) ? tmpl : nullptr;
+  }
+  /// The templates checkTemplateFieldNames looked at.
+  std::unordered_set<const ast::Decl *> TemplateFieldsChecked;
+
   /// Check that every `impl` block names a class or a struct of this
   /// module, and make its `static fn`s the module's functions `Type::name`.
   bool checkImplDecls(ast::TranslationUnit *tu);

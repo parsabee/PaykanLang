@@ -670,7 +670,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `__init__` and `enum E { B(u8: int) }` compiled, since only the default `__init__`'s
   parameters were checked, which a written one replaces and a variant has none of, against
   docs/language/02-basics.md ("Builtin Names Are Reserved").  The field itself is checked
-  now: `'u8' is a type name and cannot be used as a field name`, at the field.  And a
+  now: `'u8' is a type name and cannot be used as a field name`, at the field; a generic
+  type's once, at its template, whether or not it is instantiated (`struct Box<T> { u8: T;
+  }` compiled until a program instantiated it, and was then reported once per
+  instantiation).  And a
   parameter named like a type or like a function of the module is reported at the
   parameter, as one (`'u8' is a type name and cannot be used as a parameter name`), where
   the error stood under the whole function, lambda or trait requirement (the whole struct

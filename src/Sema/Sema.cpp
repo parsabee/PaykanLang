@@ -3421,6 +3421,24 @@ bool Sema::visitTranslationUnit(ast::TranslationUnit *node) {
     InstantiationStack = std::move(savedStack);
   }
   DeferredOptionalChecks.clear();
+  // Every type's name is known: the fields of a template that was not
+  // instantiated yet are checked as an instantiation's would be, in the
+  // order the templates are written.
+  std::vector<const ast::Decl *> templates(node->getGenericClassDecls().begin(),
+                                           node->getGenericClassDecls().end());
+  templates.insert(templates.end(), node->getGenericStructDecls().begin(),
+                   node->getGenericStructDecls().end());
+  templates.insert(templates.end(), node->getGenericEnumDecls().begin(),
+                   node->getGenericEnumDecls().end());
+  std::sort(templates.begin(), templates.end(),
+            [](const ast::Decl *a, const ast::Decl *b) {
+              return std::pair(a->getLocation().getLineStart(),
+                               a->getLocation().getColumnStart()) <
+                     std::pair(b->getLocation().getLineStart(),
+                               b->getLocation().getColumnStart());
+            });
+  for (const ast::Decl *tmpl : templates)
+    checkTemplateFieldNames(tmpl);
   // Then the traits' signatures, which may name the classes, and the
   // `impl` blocks, which record what implements a trait; only then can a
   // template's bounds be checked (SemaTraits.cpp).

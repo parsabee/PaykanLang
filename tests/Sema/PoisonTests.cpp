@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace paykan::test;
@@ -419,6 +420,43 @@ TEST(BinderName, FieldsRejectReservedNames) {
                                      "cannot be used as a field name"),
             std::string::npos)
       << generic.Diagnostics;
+}
+
+// A generic type's field named like a type is reported at its template,
+// once: one never instantiated (a library's export compiled cleanly), one
+// instantiated twice (reported per instantiation), one instantiated by a
+// field declared before it; of a struct, a class and an enum.  A field
+// named like the template's own type parameter is not a type's name.
+TEST(BinderName, ATemplatesFieldsAreCheckedAtTheTemplate) {
+  const std::string field = "is a type name and cannot be used as a field name";
+  auto r = semaCheck("struct Box<T> { u8: T; }\nclass G<T> { Str: T; }\n"
+                     "enum M<T> { J(int: T), N }\n" +
+                     wrapMain(""));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  for (const char *at :
+       {"1:17: error: 'u8' ", "2:14: error: 'Str' ", "3:15: error: 'int' "})
+    EXPECT_NE(r.Diagnostics.find(at + field), std::string::npos)
+        << at << "\n"
+        << r.Diagnostics;
+  for (const auto &[src, at] :
+       {std::pair<std::string, std::string>{
+            "struct Box<T> { u8: T; }\n" +
+                wrapMain("a = Box<int>(1); b = Box<Str>(\"x\");"),
+            "1:17: error: 'u8' "},
+        {"class G<T> { u8: T; }\n" +
+             wrapMain("a = G<int>(1); b = G<Str>(\"x\");"),
+         "1:14: error: 'u8' "},
+        {"enum M<T> { J(u8: T), N }\n" +
+             wrapMain("a = M::J(1); b = M::J(\"x\");"),
+         "1:15: error: 'u8' "},
+        {"class H { b: Box<int>; }\nstruct Box<T> { u8: T; }\n" +
+             wrapMain("h = H(Box<int>(1));"),
+         "2:17: error: 'u8' "}})
+    expectOneBinderError(src, at + field);
+  auto own = semaCheck("struct Box<T> { T: int; v: T; }\n" +
+                       wrapMain("b = Box<int>(1, 2); io::println(b.T);"));
+  EXPECT_TRUE(own.Ok) << own.Diagnostics;
 }
 
 TEST(BinderName, MatchBindingsRejectReservedNames) {

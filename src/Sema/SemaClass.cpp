@@ -557,6 +557,12 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
   if (auto *super = ct->getSuperClass())
     ct->reinheritVTable(super);
 
+  // An instantiation's field names are its template's, checked there.
+  const InstantiationInfo *info = instantiationInfo(ct);
+  const ast::Decl *tmpl = localTemplate(info ? info->Template : nullptr);
+  if (tmpl)
+    checkTemplateFieldNames(tmpl);
+
   // -- fields --
   StringSet fieldNames;
   for (auto *field : cd->getFields()) {
@@ -567,8 +573,13 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       continue;
     }
     // Checked here, whether or not the class writes its `__init__`.
-    if (!checkBinderName(field->getName(), field->getLocation(),
-                         /*binds=*/false, "a field name")) {
+    if (tmpl && isTypeNameForVariable(field->getName())) {
+      ++SuppressedFollowOns; // reported at the template
+      ok = false;
+      continue;
+    }
+    if (!tmpl && !checkBinderName(field->getName(), field->getLocation(),
+                                  /*binds=*/false, "a field name")) {
       ok = false;
       continue;
     }
@@ -980,6 +991,31 @@ bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
             std::string(typeKindWord(owner)) + " '" + typeName(owner) + "'" +
             (ast::isa<ast::StructType>(owner) ? " (a struct has none)" : ""));
   return true;
+}
+
+void Sema::checkTemplateFieldNames(const ast::Decl *tmpl) {
+  if (!TemplateFieldsChecked.insert(tmpl).second)
+    return;
+  // Not under an instantiation (its notes would name one of many) nor a
+  // generic body's type parameters: the template's fields are checked as a
+  // struct's are.
+  std::vector<InstantiationFrame> frames =
+      std::exchange(InstantiationStack, {});
+  const StringSet *typeParams = std::exchange(CurrentTypeParams, nullptr);
+  auto check = [&](const std::vector<ast::VarDecl *> &fields) {
+    for (const ast::VarDecl *field : fields)
+      checkBinderName(field->getName(), field->getLocation(),
+                      /*binds=*/false, "a field name");
+  };
+  if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
+    check(cd->getFields());
+  else if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
+    check(sd->getFields());
+  else if (const auto *ed = ast::dyn_cast<ast::EnumDecl>(tmpl))
+    for (size_t v = 0; v < ed->getNumVariants(); ++v)
+      check(ed->getPayload(v));
+  CurrentTypeParams = typeParams;
+  InstantiationStack = std::move(frames);
 }
 
 bool Sema::rejectBodyInits(ast::TranslationUnit *tu) {
