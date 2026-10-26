@@ -260,6 +260,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows who compiled it.  `paykan --version` names the standard library's directory.
 - Backends may compile modules (the `CompileModules` capability: `compileModule`,
   `objectKind`, `emitModuleObject`, and `Input::Compiled`, docs/writing-a-backend.md).
+- `paykan --list-modules prog.pkn` prints the module file of each imported module whose
+  compiled code the program links, one per line: the standard library's, the cache entries
+  of the imports built from source and the prebuilt modules' (next to the source, in a
+  `--module-path` directory or in `$PAYKAN_MODULE_PATH`).  They are the files whose objects
+  `--emit-c`'s C is linked with, and docs/c-backend.md's build loops over them.
 
 ### Changed
 
@@ -1065,6 +1070,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   started inherited it.  The host now sets a private one, and the runtime takes away only
   the one empty `argv[0]` the host starts such a program with, and unsets the variable
   once it has read it (on the systems that have `unsetenv`).
+- The documented build of `--emit-c`'s C failed for a program that imports a prebuilt
+  module (`undefined reference to pk_geometry_3A_3Ashapes_Sarea`): it linked the objects of
+  the standard library's module files and the cache entries only, and a prebuilt module has
+  neither.  It now links those of the files `paykan --list-modules` names
+  (docs/c-backend.md), and the `CStrictC11` test builds every sample that way, and the 13_pkm
+  sample with its module prebuilt in a `--module-path` directory.
 
 ## [0.2.0] - 2026-10-20
 

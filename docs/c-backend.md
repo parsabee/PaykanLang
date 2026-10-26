@@ -28,12 +28,18 @@ C: a module file keeps its code other than its copies of instantiations
 compiled (LLVM bitcode, [Module Files](language/15-modules.md#module-files)),
 so the C declares those functions and the program links them as objects.
 `paykan pkm extract --object` writes one module file's compiled code as an
-object, and the C keeps everything that code uses.  To build the C:
+object, and the C keeps everything that code uses.  `paykan --list-modules`
+names those module files, one per line: the standard library's, the cache
+entries of the imports built from source (under `.paykan_cache` in the
+program's directory, which `--emit-c` writes) and those of the prebuilt
+modules it found (next to the source, in a `--module-path` directory or in
+`$PAYKAN_MODULE_PATH`).  Give it the options `--emit-c` was given.  To
+build the C:
 
 ```sh
 paykan --emit-c prog.pkn > prog.c
 i=0
-for m in <prefix>/lib/paykan/stdlib/<version>/*.pkm $(find .paykan_cache -name '*.pkm'); do
+paykan --list-modules prog.pkn | while IFS= read -r m; do
   i=$((i + 1))
   paykan pkm extract --object "$m" -o "module$i.o"
 done
@@ -42,10 +48,7 @@ cc -std=c11 -O2 -I<prefix>/include/paykan prog.c libmodules.a \
    <prefix>/lib/libpaykan_runtime.a -lm -o prog
 ```
 
-(The archive lets the linker take only the modules the program has;
-`paykan --version` names the standard library's directory, and
-`.paykan_cache` under the program's directory holds its own imported
-modules once a compile has written them.)
+(The archive lets the linker take only the code the program uses.)
 
 `<prefix>` is the installation: `/usr` for the Debian package, the unpacked
 `paykanlang/` directory of a release tarball.  The executable behaves as one

@@ -51,6 +51,9 @@ struct Options {
   /// --backend=<name>; "" selects the build's default.
   std::string Backend;
   bool ListBackends = false; // --list-backends
+  /// --list-modules: print the module file of each module whose compiled
+  /// code the program links (what --emit-c's C needs as objects) and stop.
+  bool ListModules = false;
 
   /// --plugin=<file> (repeatable): plugin libraries to load, in order,
   /// before the plugin directories are searched (paykan/PluginLoader.h).

@@ -42,7 +42,7 @@ When compilation fails, `paykan` prints the errors and exits with status 1. A wr
 option prints a message suggesting `--help`, and also exits with 1. So does a command line
 that asks for two things, such as `build` and `--emit-c`, or `--check-only` and `--emit-pir`
 (`run`, `build`, `pkm`, `--check-only`, `--emit-pkm` and the options that print the
-program exclude each other), and one with an option that does nothing there, such as `-o`
+program or what it is linked with exclude each other), and one with an option that does nothing there, such as `-o`
 under `run` or `--check-only`, `--section` outside `pkm dump` or `--track-heap` outside
 `run`.
 
@@ -70,8 +70,8 @@ under `run` or `--check-only`, `--section` outside `pkm dump` or `--track-heap` 
 
 ### Looking inside the compiler
 
-These print an intermediate form of the program to standard output and stop; the
-`--emit-*` ones write it to `-o <file>` when it is given. Like `build`, they take no program
+These print an intermediate form of the program, or what it is linked with, to standard
+output and stop; the `--emit-*` ones write it to `-o <file>` when it is given. Like `build`, they take no program
 arguments, so their options may follow the file. `--emit-c`, `--emit-llvm` and `--emit-mlir`
 are the mlir backend's (with another `--backend` they are an error), and only one of them
 may be given:
@@ -83,6 +83,7 @@ may be given:
 | `--emit-mlir=<stage>` | (also `--emit-mlir <stage>`) the program as MLIR at a stage of the mlir backend: `pir`, the program imported into the `pir` dialect, `scf`, after the lowering both targets share, `llvm`, the LLVM dialect, or `emitc`, EmitC, the C `--emit-c` prints ([the MLIR backend](../design/mlir-backend.md)) |
 | `--emit-source` | the selected backend's output, whatever its language (the mlir backend's is LLVM IR) |
 | `--emit-pir` | PIR, the backend-neutral intermediate representation ([PIR](../pir.md)), as the backend gets it: what `main` reaches |
+| `--list-modules` | the module file of each imported module whose compiled code the program links, one per line (the standard library's, a cache entry, a prebuilt module's): the files whose objects `--emit-c`'s C is linked with ([The C output](../c-backend.md)) |
 | `--emit-ast` | the parsed program in the AST interchange format ([AST format](../plugins/ast-format.md)) |
 | `--dump-ast` | the parsed program as a readable tree |
 | `--dump-tokens` | the token stream, for frontends that support it |
@@ -154,7 +155,7 @@ links only what it uses ([Module Files](15-modules.md#module-files)).
   which any C11 compiler builds against the runtime ([The C output](../c-backend.md)). The
   code of a module compiled into its module file (the standard library's, a cached import's)
   is not C: it is linked as an object, which `paykan pkm extract --object` writes, and the C
-  keeps everything that code uses.
+  keeps everything that code uses. `--list-modules` names those module files.
 
 `--emit-mlir=<stage>` prints the program at a stage of the pipeline. Other backends are
 plugins ([Plugins](#plugins)), selected with `--backend=<name>`. The repository's test suite

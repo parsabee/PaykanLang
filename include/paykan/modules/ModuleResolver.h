@@ -133,6 +133,10 @@ public:
   std::span<const uint8_t> templates(const std::string &canonical) const;
   /// The file a diagnostic names for a Loaded module (project-relative).
   std::string displayPath(const std::string &canonical) const;
+  /// The module file of @p canonical as the driver can open it: the `.pkm`
+  /// a Loaded module was read from, or the cache entry writeCacheEntry()
+  /// wrote for a module built from source; "" for neither.
+  std::string moduleFile(const std::string &canonical) const;
 
   /// The modules built from source whose cache entries are to be written
   /// once the program verified (none when the cache is not written), and

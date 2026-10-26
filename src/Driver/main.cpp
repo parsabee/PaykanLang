@@ -932,6 +932,22 @@ int main(int argc, char *argv[]) {
         compiled.try_emplace(m.Name, toBackend(*o));
   for (const auto &[name, o] : compiled)
     in.Compiled[name] = &o;
+  if (opts.ListModules) {
+    // The files the C of --emit-c needs as objects: it declares the
+    // functions of these modules (docs/c-backend.md).
+    std::vector<std::string> files;
+    for (const auto &[name, o] : compiled) {
+      std::string file = resolver.moduleFile(name);
+      if (file.empty())
+        return fail("the compiled code of module '" + name +
+                    "' is in no module file: its cache entry could not be "
+                    "written");
+      files.push_back(std::move(file));
+    }
+    for (const std::string &file : files)
+      std::cout << file << "\n";
+    return finishStdout(EXIT_SUCCESS);
+  }
 
   if (opts.EmitSource) {
     if (!caps.EmitSource)

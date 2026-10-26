@@ -42,6 +42,9 @@ constexpr Flag kFlags[] = {
      "List the available frontends and exit"},
     {"list-backends", &Options::ListBackends,
      "List the available backends and exit"},
+    {"list-modules", &Options::ListModules,
+     "Print the module file of each module whose compiled code the program "
+     "links (the objects --emit-c's C needs), one per line, and exit"},
     {"no-plugins", &Options::NoPlugins,
      "Don't search the plugin directories (--plugin files still load)"},
     {"rebuild-modules", &Options::RebuildModules,
@@ -150,7 +153,8 @@ std::vector<std::string> givenModes(const Options &o, bool sawVerb,
        {std::pair{o.CheckOnly, "--check-only"},
         std::pair{o.DumpTokens, "--dump-tokens"},
         std::pair{o.DumpAST, "--dump-ast"}, std::pair{o.EmitAST, "--emit-ast"},
-        std::pair{o.EmitPIR, "--emit-pir"}, std::pair{o.EmitPkm, "--emit-pkm"}})
+        std::pair{o.EmitPIR, "--emit-pir"}, std::pair{o.EmitPkm, "--emit-pkm"},
+        std::pair{o.ListModules, "--list-modules"}})
     if (given)
       modes.emplace_back(option);
   if (source)

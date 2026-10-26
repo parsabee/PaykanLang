@@ -59,6 +59,9 @@ struct ModuleResolver::Entry {
   /// Loaded: its compiled code, when CODE declares it.
   std::optional<pkm::Object> Object;
   bool KeepUncached = false; ///< Built: not cacheable()
+  /// Built: the cache entry writeCacheEntry() wrote ("" before, or when it
+  /// could not be written).
+  std::filesystem::path Written;
 };
 
 /// A .pkm read for a module whose dependencies are still being resolved,
@@ -493,6 +496,16 @@ std::string ModuleResolver::displayPath(const std::string &canonical) const {
   return it == Entries.end() ? std::string() : relativeToRoot(it->second->Path);
 }
 
+std::string ModuleResolver::moduleFile(const std::string &canonical) const {
+  auto it = Entries.find(canonical);
+  if (it == Entries.end())
+    return "";
+  const Entry &e = *it->second;
+  if (e.State == Entry::State::Loaded)
+    return e.Path.string();
+  return e.State == Entry::State::Built ? e.Written.string() : "";
+}
+
 // -- Writing
 
 StatusOr<std::vector<uint8_t>> ModuleResolver::encodeFile(
@@ -587,7 +600,7 @@ void ModuleResolver::writeCacheEntry(const std::string &canonical,
   if (!Opts.WriteCache || it == Entries.end() ||
       it->second->State != Entry::State::Built || it->second->KeepUncached)
     return;
-  const Entry &entry = *it->second;
+  Entry &entry = *it->second;
   std::filesystem::path path = cachePath(canonical);
   StatusOr<std::vector<uint8_t>> bytes =
       encodeFile(canonical, entry.Iface, entry.Deps, entry.SourceBytes, code,
@@ -602,6 +615,8 @@ void ModuleResolver::writeCacheEntry(const std::string &canonical,
                            "': " + ec.message())
            : pkm::writeFileAtomically(path, *bytes);
   }
+  if (s)
+    entry.Written = path;
   log("module " + canonical + ": " +
       (s ? "wrote " + relativeToRoot(path)
          : "cannot write " + relativeToRoot(path) + ": " + s.message()));

@@ -2773,3 +2773,61 @@ TEST(Driver, TheEnvironmentLeavesAProgramsArgumentsAlone) {
   }
   std::filesystem::remove_all(dir);
 }
+
+// --list-modules names the module file of every module whose compiled code
+// the program links (finding 67): the C build recipe extracted the objects
+// of the standard library's files and the cache entries only, so a program
+// importing a prebuilt module (here from --module-path) did not link
+// (`undefined reference to pk_geometry_3A_3Ashapes_Sarea`).
+TEST(Driver, ListModulesNamesEveryModuleFileTheProgramLinks) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("list_modules");
+  std::filesystem::create_directories(dir / "lib" / "geometry");
+  std::filesystem::create_directories(dir / "local");
+  std::ofstream(dir / "shapes.pkn")
+      << "fn area(w: int, h: int) -> int { return w * h; }\n";
+  std::ofstream(dir / "local" / "twice.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io;\nimport geometry::shapes;\nimport local::twice;\n"
+         "fn main() -> int {\n"
+         "  io::println(Str<int>(local::twice::twice("
+         "geometry::shapes::area(2, 3))));\n"
+         "  return 0;\n}\n";
+  auto cd = "cd " + dir.string() + " && " + paykanRun();
+  auto lib = run(cd + " --emit-pkm --module-name=geometry::shapes shapes.pkn "
+                      "-o lib/geometry/shapes.pkm 2>&1");
+  ASSERT_EQ(lib.exitCode, 0) << lib.out;
+  std::filesystem::remove(dir / "shapes.pkn");
+  auto [rc, out] = run(cd + " --list-modules --module-path=lib main.pkn 2>&1");
+  ASSERT_EQ(rc, 0) << out;
+  std::vector<std::string> files;
+  std::istringstream lines(out);
+  for (std::string line; std::getline(lines, line);)
+    files.push_back(line);
+  for (const char *file :
+       {".paykan_cache/local/twice.pkm", "lib/geometry/shapes.pkm"})
+    EXPECT_NE(std::find(files.begin(), files.end(), file), files.end())
+        << file << " in:\n"
+        << out;
+  EXPECT_TRUE(std::any_of(files.begin(), files.end(), [](const auto &f) {
+    return f.ends_with("/io.pkm");
+  })) << out;
+  for (const std::string &file : files) {
+    std::filesystem::path path(file);
+    EXPECT_TRUE(std::filesystem::is_regular_file(
+        path.is_absolute() ? path : dir / path))
+        << file;
+  }
+  // It is a thing of its own, printed to standard output.
+  for (const auto &[args, message] :
+       {std::pair{" --list-modules --emit-c main.pkn",
+                  "--list-modules and --emit-c exclude each other"},
+        std::pair{" --list-modules main.pkn -o list.txt",
+                  "-o does not apply to --list-modules"}}) {
+    auto [rc2, out2] = run(cd + args + " 2>&1");
+    EXPECT_EQ(rc2, 1) << args << ": " << out2;
+    EXPECT_NE(out2.find(message), std::string::npos) << args << ": " << out2;
+  }
+  std::filesystem::remove_all(dir);
+}
