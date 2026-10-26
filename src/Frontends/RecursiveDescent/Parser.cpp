@@ -227,8 +227,8 @@ const Token &Parser::peek(size_t k) {
   return Buf[Pos + k];
 }
 
-Token Parser::consume() {
-  Token t = peek();
+const Token &Parser::consume() {
+  const Token &t = peek();
   if (t.Kind != Tok::Eof) {
     PrevEnd = t.Loc;
     ++Pos;
@@ -299,6 +299,10 @@ void Parser::error(SourceLocation loc, const std::string &msg) {
   report(loc, msg);
 }
 
+void Parser::error(SourceLocation loc, const char *msg) {
+  error(loc, std::string(msg));
+}
+
 void Parser::report(SourceLocation loc, const std::string &msg) {
   ++ErrorCount;
   if (Diags) {
@@ -308,6 +312,10 @@ void Parser::report(SourceLocation loc, const std::string &msg) {
               << "-" << loc.getLineEnd() << "." << loc.getColumnEnd() << ": "
               << msg << "\n";
   }
+}
+
+bool Parser::errorAtCurrent(const char *expected) {
+  return errorAtCurrent(std::string(expected));
 }
 
 bool Parser::errorAtCurrent(const std::string &expected) {
@@ -1376,9 +1384,9 @@ CompoundStmt *Parser::parseBlock() {
     errorAtCurrent("expected '{'");
     return nullptr;
   }
-  Token lbrace = consume();
-  SourceLocation after(lbrace.Loc.getLineEnd(), lbrace.Loc.getColumnEnd(),
-                       lbrace.Loc.getLineEnd(), lbrace.Loc.getColumnEnd());
+  const SourceLocation lbrace = consume().Loc;
+  SourceLocation after(lbrace.getLineEnd(), lbrace.getColumnEnd(),
+                       lbrace.getLineEnd(), lbrace.getColumnEnd());
   auto *block = Ctx.make<CompoundStmt>(after);
   if (!enterNesting()) {
     // The rest of this block is not parsed.  Skip it whole, through its
@@ -1389,7 +1397,7 @@ CompoundStmt *Parser::parseBlock() {
   }
   parseStatementsUntilBrace(block);
   leaveNesting();
-  if (!expectCloseBrace("to close the block", lbrace.Loc))
+  if (!expectCloseBrace("to close the block", lbrace))
     return nullptr;
   return block;
 }
@@ -1421,19 +1429,8 @@ bool Parser::parseStatement(Stmt *&out) {
     consume();
     return true;
 
-  case Tok::KwReturn: {
-    consume();
-    Expr *value = nullptr;
-    if (!at(Tok::Semi)) {
-      value = parseExpression();
-      if (!value)
-        return false;
-    }
-    if (!expect(Tok::Semi, "after the return statement"))
-      return false;
-    out = Ctx.make<ReturnStmt>(span(start), value);
-    return true;
-  }
+  case Tok::KwReturn:
+    return parseReturnStmt(out);
 
   case Tok::KwBreak:
     consume();
@@ -1506,38 +1503,59 @@ bool Parser::parseStatement(Stmt *&out) {
     if (kind(1) == Tok::Colon &&
         (kind(2) == Tok::KwView || kind(2) == Tok::KwInout))
       return parseBorrowDecl(out);
-    if (kind(1) == Tok::Colon) {
-      VarDecl *decl = parseVarDecl();
-      if (!decl)
-        return false;
-      if (at(Tok::Comma)) {
-        std::vector<DestructureStmt::Target> targets;
-        targets.push_back(DestructureStmt::Target{
-            &decl->getName(), decl->getType(), decl->getLocation()});
-        return parseDestructureStatement(start, std::move(targets), out);
-      }
-      if (!expect(Tok::Assign, "(a variable declaration needs an initial "
-                               "value)"))
-        return false;
-      Expr *init = parseExpression();
-      if (!init)
-        return false;
-      // The declaration spans name through initializer; the `;` is only part
-      // of the statement.
-      auto *vd = Ctx.make<VarDecl>(span(start), decl->getName(),
-                                   decl->getType(), init);
-      auto *ds = Ctx.make<DeclStmt>(span(start), vd);
-      if (!expect(Tok::Semi, "after the declaration"))
-        return false;
-      out = ds;
-      return true;
-    }
+    if (kind(1) == Tok::Colon)
+      return parseTypedDecl(out);
     return parseExprOrAssignStatement(out);
   }
 
   default:
     return parseExprOrAssignStatement(out);
   }
+}
+
+// "return" expression? ";" (parseStatement).
+bool Parser::parseReturnStmt(Stmt *&out) {
+  SourceLocation start = consume().Loc; // "return"
+  Expr *value = nullptr;
+  if (!at(Tok::Semi)) {
+    value = parseExpression();
+    if (!value)
+      return false;
+  }
+  if (!expect(Tok::Semi, "after the return statement"))
+    return false;
+  out = Ctx.make<ReturnStmt>(span(start), value);
+  return true;
+}
+
+// varDecl "=" expression ";", or the first target of a destructuring
+// (parseStatement).
+bool Parser::parseTypedDecl(Stmt *&out) {
+  SourceLocation start = cur().Loc;
+  VarDecl *decl = parseVarDecl();
+  if (!decl)
+    return false;
+  if (at(Tok::Comma)) {
+    std::vector<DestructureStmt::Target> targets;
+    targets.push_back(DestructureStmt::Target{&decl->getName(), decl->getType(),
+                                              decl->getLocation()});
+    return parseDestructureStatement(start, std::move(targets), out);
+  }
+  if (!expect(Tok::Assign, "(a variable declaration needs an initial "
+                           "value)"))
+    return false;
+  Expr *init = parseExpression();
+  if (!init)
+    return false;
+  // The declaration spans name through initializer; the `;` is only part of
+  // the statement.
+  auto *vd =
+      Ctx.make<VarDecl>(span(start), decl->getName(), decl->getType(), init);
+  auto *ds = Ctx.make<DeclStmt>(span(start), vd);
+  if (!expect(Tok::Semi, "after the declaration"))
+    return false;
+  out = ds;
+  return true;
 }
 
 // borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "="
@@ -1725,13 +1743,14 @@ bool Parser::parseExprOrAssignStatement(Stmt *&out) {
     out = Ctx.make<ExprStmt>(span(start), lhs);
     return true;
   }
-  const Token op = consume();
+  const SourceLocation opLoc = cur().Loc;
+  const std::string_view opText = consume().Text;
 
   // Check the target before the value so that recovery resumes at this
   // statement's `;` rather than the next one's.
   if (!isa<Identifier>(lhs) && !isa<MemberAccessExpr>(lhs) &&
       !isa<SubscriptExpr>(lhs) && !isa<TupleIndexExpr>(lhs)) {
-    error(start, "left-hand side of '" + std::string(op.Text) +
+    error(start, "left-hand side of '" + std::string(opText) +
                      "' must be an identifier, field access, or subscript");
     return false;
   }
@@ -1740,15 +1759,27 @@ bool Parser::parseExprOrAssignStatement(Stmt *&out) {
     return false;
   height = std::max(height, chain.take());
   // `x += e` is `x = x + e`: its `+` is a link over both.
-  if (compound && !checkChain(++height, op.Loc))
+  if (compound && !checkChain(++height, opLoc))
     return false;
   chain.finish(height);
   if (compound)
-    value = Ctx.make<BinaryExpr>(span(start), *compound,
-                                 ast::ASTCloner(Ctx, {}).cloneExpr(lhs), value);
+    value =
+        Ctx.make<BinaryExpr>(span(start), *compound, cloneTarget(lhs), value);
   if (!expect(Tok::Semi, "after the assignment"))
     return false;
-  SourceLocation loc = span(start);
+  out = assignment(span(start), lhs, value);
+  return true;
+}
+
+// A copy of the target @p lhs of a compound assignment, which reads it
+// (parseExprOrAssignStatement).
+Expr *Parser::cloneTarget(Expr *lhs) {
+  return ast::ASTCloner(Ctx, {}).cloneExpr(lhs);
+}
+
+// The statement `lhs = value` at @p loc (parseExprOrAssignStatement).
+Stmt *Parser::assignment(SourceLocation loc, Expr *lhs, Expr *value) {
+  Stmt *out = nullptr;
   if (auto *id = dyn_cast<Identifier>(lhs)) {
     out = Ctx.make<AssignStmt>(loc, id, value);
   } else if (auto *ma = dyn_cast<MemberAccessExpr>(lhs)) {
@@ -1765,7 +1796,7 @@ bool Parser::parseExprOrAssignStatement(Stmt *&out) {
     out = Ctx.make<MemberAssignStmt>(
         loc, ti->getTuple(), Ctx.intern(std::to_string(ti->getIndex())), value);
   }
-  return true;
+  return out;
 }
 
 // destructureTarget ::= IDENT | IDENT ":" typeAnnotation | "_"
@@ -2342,14 +2373,14 @@ Expr *Parser::parseBinary(int minPrec) {
       chain.finish(height);
       return lhs;
     }
-    const Token opTok = consume();
-    if (!checkChain(height + 1, opTok.Loc))
+    const SourceLocation opLoc = consume().Loc;
+    if (!checkChain(height + 1, opLoc))
       return nullptr;
     Expr *rhs = parseBinary(prec + 1);
     if (!rhs)
       return nullptr;
     height = std::max(height, chain.take()) + 1;
-    if (!checkChain(height, opTok.Loc))
+    if (!checkChain(height, opLoc))
       return nullptr;
     lhs = Ctx.make<BinaryExpr>(span(start), binaryOpcode(op), lhs, rhs);
     if (isRelational(op) && isRelational(kind())) {
@@ -2365,18 +2396,19 @@ Expr *Parser::parseUnary() {
   if (at(Tok::Not) || at(Tok::Minus) || at(Tok::KwMov)) {
     if (!enterNesting())
       return nullptr;
-    Token op = consume();
+    const Tok op = kind();
+    const SourceLocation opLoc = consume().Loc;
     // `mov` is retired (#145), and reported at once, so that its error comes
     // before any in the operand (`mov mov s`), in source order.  The operand
     // still parses, and becomes the expression.
-    if (op.Kind == Tok::KwMov)
-      error(op.Loc, std::string(kMovRemoved));
+    if (op == Tok::KwMov)
+      error(opLoc, std::string(kMovRemoved));
     Expr *operand = parseUnary();
     leaveNesting();
-    if (!operand || op.Kind == Tok::KwMov)
+    if (!operand || op == Tok::KwMov)
       return operand;
     return Ctx.make<UnaryExpr>(
-        span(op.Loc), op.Kind == Tok::Not ? UnaryOpcode::Not : UnaryOpcode::Neg,
+        span(opLoc), op == Tok::Not ? UnaryOpcode::Not : UnaryOpcode::Neg,
         operand);
   }
   return parsePostfix();
@@ -2407,47 +2439,9 @@ Expr *Parser::parsePostfix() {
       // `xs[0](1)`, `t.0(x)`, `make()(2)`: a call of a function value that
       // is not named (a named one is a CallExpr or a MethodCallExpr).
       consume();
-      std::vector<Expr *> args;
-      if (!parseArgumentList(Tok::RParen, args) ||
-          !expect(Tok::RParen, "to close the argument list"))
-        return nullptr;
-      e = Ctx.make<CallValueExpr>(span(start), e, std::move(args));
+      e = parseCallSuffix(e, start, /*method=*/nullptr);
     } else if (at(Tok::Dot)) {
-      Token dot = consume();
-      if (at(Tok::Int) && cur().Offset == dot.Offset + 1) {
-        // Tuple index `t.0`: the digits glued to the dot.  Leading zeros are
-        // rejected so every index has exactly one spelling.
-        Token idx = consume();
-        std::string digits(idx.Text);
-        // Located at the whole `.N`, as if it were one token.
-        SourceLocation at(dot.Loc.getLineStart(), dot.Loc.getColumnStart(),
-                          idx.Loc.getLineEnd(), idx.Loc.getColumnEnd());
-        if (digits.size() > 1 && digits[0] == '0') {
-          error(at, "tuple index must not have leading zeros: ." + digits);
-          return nullptr;
-        }
-        errno = 0;
-        long long n = std::strtoll(digits.c_str(), nullptr, 10);
-        if (errno == ERANGE) {
-          error(at, "tuple index is out of range: ." + digits);
-          return nullptr;
-        }
-        e = Ctx.make<TupleIndexExpr>(span(start), e, static_cast<size_t>(n));
-      } else if (!at(Tok::Ident)) {
-        errorAtCurrent("expected a field or method name after '.'");
-        return nullptr;
-      } else {
-        const std::string &name = intern(consume().Text);
-        if (accept(Tok::LParen)) {
-          std::vector<Expr *> args;
-          if (!parseArgumentList(Tok::RParen, args) ||
-              !expect(Tok::RParen, "to close the argument list"))
-            return nullptr;
-          e = Ctx.make<MethodCallExpr>(span(start), e, name, std::move(args));
-        } else {
-          e = Ctx.make<MemberAccessExpr>(span(start), e, name);
-        }
-      }
+      e = parseDotSuffix(e, start);
     } else {
       if (!enterNesting()) {
         // As in an argument list: the subscript is skipped whole.
@@ -2464,10 +2458,59 @@ Expr *Parser::parsePostfix() {
         return nullptr;
       e = Ctx.make<SubscriptExpr>(span(start), e, index);
     }
+    if (!e)
+      return nullptr;
     height = std::max(height, chain.take()) + 1;
     if (!checkChain(height, suffix))
       return nullptr;
   }
+}
+
+// The arguments and `)` of a call of the function value @p e, or of its
+// method @p method, after the `(` (parsePostfix).
+Expr *Parser::parseCallSuffix(Expr *e, SourceLocation start,
+                              const std::string *method) {
+  std::vector<Expr *> args;
+  if (!parseArgumentList(Tok::RParen, args) ||
+      !expect(Tok::RParen, "to close the argument list"))
+    return nullptr;
+  if (method)
+    return Ctx.make<MethodCallExpr>(span(start), e, *method, std::move(args));
+  return Ctx.make<CallValueExpr>(span(start), e, std::move(args));
+}
+
+// `.N`, `.f` or `.m(...)` after @p e (parsePostfix).
+Expr *Parser::parseDotSuffix(Expr *e, SourceLocation start) {
+  const SourceLocation dot = cur().Loc;
+  const size_t dotOffset = consume().Offset;
+  if (at(Tok::Int) && cur().Offset == dotOffset + 1) {
+    // Tuple index `t.0`: the digits glued to the dot.  Leading zeros are
+    // rejected so every index has exactly one spelling.
+    const Token &idx = consume();
+    std::string digits(idx.Text);
+    // Located at the whole `.N`, as if it were one token.
+    SourceLocation at(dot.getLineStart(), dot.getColumnStart(),
+                      idx.Loc.getLineEnd(), idx.Loc.getColumnEnd());
+    if (digits.size() > 1 && digits[0] == '0') {
+      error(at, "tuple index must not have leading zeros: ." + digits);
+      return nullptr;
+    }
+    errno = 0;
+    long long n = std::strtoll(digits.c_str(), nullptr, 10);
+    if (errno == ERANGE) {
+      error(at, "tuple index is out of range: ." + digits);
+      return nullptr;
+    }
+    return Ctx.make<TupleIndexExpr>(span(start), e, static_cast<size_t>(n));
+  }
+  if (!at(Tok::Ident)) {
+    errorAtCurrent("expected a field or method name after '.'");
+    return nullptr;
+  }
+  const std::string &name = intern(consume().Text);
+  if (accept(Tok::LParen))
+    return parseCallSuffix(e, start, &name);
+  return Ctx.make<MemberAccessExpr>(span(start), e, name);
 }
 
 // argumentList ::= ( expression ( "," expression )* )?
@@ -2568,174 +2611,191 @@ bool Parser::tryGenericCallArgs(std::vector<Type *> &out, std::string &member) {
 //           | "(" expression ")" | "(" expression ( "," expression )+ ")" |
 //           "[" args "]"
 Expr *Parser::parsePrimary() {
-  SourceLocation start = cur().Loc;
   if (isLiteralToken(kind()))
     return parseLiteral();
-
+  // Each kind in a function of its own, so that the frame a nested
+  // expression recurses through holds only its kind's locals.
   switch (kind()) {
-  case Tok::Ident: {
-    std::string name(consume().Text);
-    std::string path; // everything before the last `::`
-    while (at(Tok::ColonColon) && kind(1) == Tok::Ident) {
-      consume();
-      if (!path.empty())
-        path += "::";
-      path += name;
-      name = std::string(consume().Text);
-    }
-    std::string full = path.empty() ? name : path + "::" + name;
-
-    std::vector<Type *> typeArgs;
-    std::string member; // `Box<int>::of(...)`: the instantiation's function
-    bool generic = at(Tok::Less) && tryGenericCallArgs(typeArgs, member);
-    // `Option<int>::Nothing`: a generic enum's variant without fields.
-    if (generic && !member.empty() && !at(Tok::LParen))
-      return Ctx.make<EnumValueExpr>(span(start), intern(full), intern(member),
-                                     std::move(typeArgs));
-    if (!member.empty())
-      full += "::" + member;
-    if (generic || at(Tok::LParen)) {
-      consume(); // '('
-      std::vector<Expr *> args;
-      if (!parseArgumentList(Tok::RParen, args) ||
-          !expect(Tok::RParen, "to close the argument list"))
-        return nullptr;
-      return Ctx.make<CallExpr>(span(start), intern(full), std::move(args),
-                                std::move(typeArgs));
-    }
-    if (!path.empty())
-      return Ctx.make<EnumValueExpr>(span(start), intern(path), intern(name));
-    return Ctx.make<Identifier>(start, intern(name));
-  }
-
-  case Tok::LParen: {
-    consume();
-    if (!enterNesting()) {
-      // As in an argument list: skip to the `)`, and a `None` stands for
-      // the expression (the parse has failed: nothing reads it).
-      skipToMatchingCloser();
-      if (!expect(Tok::RParen, "to close the parenthesised expression"))
-        return nullptr;
-      return Ctx.make<NoneLiteral>(span(start));
-    }
-    Expr *first = parseExpression();
-    if (!first) {
-      leaveNesting();
-      return nullptr;
-    }
-    if (!at(Tok::Comma)) {
-      leaveNesting();
-      if (!expect(Tok::RParen, "to close the parenthesised expression"))
-        return nullptr;
-      return first; // a parenthesised expression is just that expression
-    }
-    // Tuple literal (e1, e2, ...): no 1-tuples.
-    std::vector<Expr *> elems{first};
-    while (accept(Tok::Comma)) {
-      Expr *e = parseExpression();
-      if (!e) {
-        leaveNesting();
-        return nullptr;
-      }
-      elems.push_back(e);
-    }
-    leaveNesting();
-    if (!expect(Tok::RParen, "to close the tuple literal"))
-      return nullptr;
-    return Ctx.make<TupleLiteralExpr>(span(start), std::move(elems));
-  }
-
-  case Tok::KwFn: {
-    // A lambda: a function without a name, in expression position.
-    consume();
-    if (!expect(Tok::LParen, "after 'fn' (a lambda has no name: 'fn(x: int) "
-                             "-> int { ... }')"))
-      return nullptr;
-    std::vector<Param> params;
-    if (!parseParamList(params, kOnlyFreeFunctionsUntyped) ||
-        !expect(Tok::RParen, "to close the parameter list"))
-      return nullptr;
-    Type *retTy = nullptr;
-    if (accept(Tok::Arrow)) {
-      if (at(Tok::KwView) || at(Tok::KwInout)) {
-        error(cur().Loc, "a lambda's result is a copy: '-> " +
-                             std::string(cur().Text) + " T' is not supported");
-        return nullptr;
-      }
-      // A level of nesting, as a function type's result is.
-      if (!enterNesting())
-        return nullptr;
-      retTy = parseTypeAnnotation();
-      leaveNesting();
-      if (!retTy)
-        return nullptr;
-    }
-    // `fn(x: int) -> int => x * 2` is `fn(x: int) -> int { return x * 2; }`,
-    // and without the result type, `fn(x: int) => x * 2`, the result type
-    // is the expression's (Sema infers it).
-    if (at(Tok::Assign)) {
-      errorAtCurrent("a lambda's expression body starts with '=>', not '=': "
-                     "'fn(...) => ...'");
-      return nullptr;
-    }
-    if (at(Tok::FatArrow)) {
-      consume();
-      SourceLocation from = cur().Loc;
-      // A level of nesting, as the block it stands for is.
-      if (!enterNesting())
-        return nullptr;
-      Expr *value = parseExpression();
-      leaveNesting();
-      if (!value)
-        return nullptr;
-      std::vector<Stmt *> ret{Ctx.make<ReturnStmt>(span(from), value)};
-      auto *body = Ctx.make<CompoundStmt>(span(from), std::move(ret));
-      auto *lambda =
-          Ctx.make<LambdaExpr>(span(start), std::move(params), retTy, body);
-      lambda->setInferredResult(retTy == nullptr);
-      return lambda;
-    }
-    if (!at(Tok::LBrace)) {
-      errorAtCurrent("expected '{' or '=>' to start the lambda's body");
-      return nullptr;
-    }
-    CompoundStmt *body = parseBlock();
-    if (!body)
-      return nullptr;
-    return Ctx.make<LambdaExpr>(span(start), std::move(params), retTy, body);
-  }
-
-  case Tok::LBracket: {
-    consume();
-    std::vector<Expr *> elems;
-    if (!parseArgumentList(Tok::RBracket, elems))
-      return nullptr;
-    // `[v; n]`: n copies of v.
-    if (elems.size() == 1 && accept(Tok::Semi)) {
-      if (!at(Tok::Int)) {
-        errorAtCurrent("expected the number of copies, an integer literal");
-        return nullptr;
-      }
-      Token n = consume();
-      if (n.IntValue < 1) {
-        error(n.Loc, "an array has at least one element: the count must be 1 "
-                     "or more");
-        return nullptr;
-      }
-      if (!expect(Tok::RBracket, "to close the array literal"))
-        return nullptr;
-      return Ctx.make<ArrayLiteralExpr>(span(start), std::move(elems),
-                                        n.IntValue);
-    }
-    if (!expect(Tok::RBracket, "to close the array literal"))
-      return nullptr;
-    return Ctx.make<ArrayLiteralExpr>(span(start), std::move(elems));
-  }
-
+  case Tok::Ident:
+    return parseNamePrimary();
+  case Tok::LParen:
+    return parseParenPrimary();
+  case Tok::KwFn:
+    return parseLambda();
+  case Tok::LBracket:
+    return parseArrayLiteral();
   default:
     errorAtCurrent("expected an expression");
     return nullptr;
   }
+}
+
+// A name: a variable, an enum's value, or a call of a function, a generic
+// one or a module's (parsePrimary).
+Expr *Parser::parseNamePrimary() {
+  SourceLocation start = cur().Loc;
+  std::string name(consume().Text);
+  std::string path; // everything before the last `::`
+  while (at(Tok::ColonColon) && kind(1) == Tok::Ident) {
+    consume();
+    if (!path.empty())
+      path += "::";
+    path += name;
+    name = std::string(consume().Text);
+  }
+  std::string full = path.empty() ? name : path + "::" + name;
+
+  std::vector<Type *> typeArgs;
+  std::string member; // `Box<int>::of(...)`: the instantiation's function
+  bool generic = at(Tok::Less) && tryGenericCallArgs(typeArgs, member);
+  // `Option<int>::Nothing`: a generic enum's variant without fields.
+  if (generic && !member.empty() && !at(Tok::LParen))
+    return Ctx.make<EnumValueExpr>(span(start), intern(full), intern(member),
+                                   std::move(typeArgs));
+  if (!member.empty())
+    full += "::" + member;
+  if (generic || at(Tok::LParen)) {
+    consume(); // '('
+    std::vector<Expr *> args;
+    if (!parseArgumentList(Tok::RParen, args) ||
+        !expect(Tok::RParen, "to close the argument list"))
+      return nullptr;
+    return Ctx.make<CallExpr>(span(start), intern(full), std::move(args),
+                              std::move(typeArgs));
+  }
+  if (!path.empty())
+    return Ctx.make<EnumValueExpr>(span(start), intern(path), intern(name));
+  return Ctx.make<Identifier>(start, intern(name));
+}
+
+// "(" expression ")" or a tuple literal (parsePrimary).
+Expr *Parser::parseParenPrimary() {
+  SourceLocation start = cur().Loc;
+  consume();
+  if (!enterNesting()) {
+    // As in an argument list: skip to the `)`, and a `None` stands for
+    // the expression (the parse has failed: nothing reads it).
+    skipToMatchingCloser();
+    if (!expect(Tok::RParen, "to close the parenthesised expression"))
+      return nullptr;
+    return Ctx.make<NoneLiteral>(span(start));
+  }
+  Expr *first = parseExpression();
+  if (!first) {
+    leaveNesting();
+    return nullptr;
+  }
+  if (!at(Tok::Comma)) {
+    leaveNesting();
+    if (!expect(Tok::RParen, "to close the parenthesised expression"))
+      return nullptr;
+    return first; // a parenthesised expression is just that expression
+  }
+  // Tuple literal (e1, e2, ...): no 1-tuples.
+  std::vector<Expr *> elems{first};
+  while (accept(Tok::Comma)) {
+    Expr *e = parseExpression();
+    if (!e) {
+      leaveNesting();
+      return nullptr;
+    }
+    elems.push_back(e);
+  }
+  leaveNesting();
+  if (!expect(Tok::RParen, "to close the tuple literal"))
+    return nullptr;
+  return Ctx.make<TupleLiteralExpr>(span(start), std::move(elems));
+}
+
+// A lambda: a function without a name, in expression position
+// (parsePrimary).
+Expr *Parser::parseLambda() {
+  SourceLocation start = cur().Loc;
+  consume();
+  if (!expect(Tok::LParen, "after 'fn' (a lambda has no name: 'fn(x: int) "
+                           "-> int { ... }')"))
+    return nullptr;
+  std::vector<Param> params;
+  if (!parseParamList(params, kOnlyFreeFunctionsUntyped) ||
+      !expect(Tok::RParen, "to close the parameter list"))
+    return nullptr;
+  Type *retTy = nullptr;
+  if (accept(Tok::Arrow)) {
+    if (at(Tok::KwView) || at(Tok::KwInout)) {
+      error(cur().Loc, "a lambda's result is a copy: '-> " +
+                           std::string(cur().Text) + " T' is not supported");
+      return nullptr;
+    }
+    // A level of nesting, as a function type's result is.
+    if (!enterNesting())
+      return nullptr;
+    retTy = parseTypeAnnotation();
+    leaveNesting();
+    if (!retTy)
+      return nullptr;
+  }
+  // `fn(x: int) -> int => x * 2` is `fn(x: int) -> int { return x * 2; }`,
+  // and without the result type, `fn(x: int) => x * 2`, the result type
+  // is the expression's (Sema infers it).
+  if (at(Tok::Assign)) {
+    errorAtCurrent("a lambda's expression body starts with '=>', not '=': "
+                   "'fn(...) => ...'");
+    return nullptr;
+  }
+  if (at(Tok::FatArrow)) {
+    consume();
+    SourceLocation from = cur().Loc;
+    // A level of nesting, as the block it stands for is.
+    if (!enterNesting())
+      return nullptr;
+    Expr *value = parseExpression();
+    leaveNesting();
+    if (!value)
+      return nullptr;
+    std::vector<Stmt *> ret{Ctx.make<ReturnStmt>(span(from), value)};
+    auto *body = Ctx.make<CompoundStmt>(span(from), std::move(ret));
+    auto *lambda =
+        Ctx.make<LambdaExpr>(span(start), std::move(params), retTy, body);
+    lambda->setInferredResult(retTy == nullptr);
+    return lambda;
+  }
+  if (!at(Tok::LBrace)) {
+    errorAtCurrent("expected '{' or '=>' to start the lambda's body");
+    return nullptr;
+  }
+  CompoundStmt *body = parseBlock();
+  if (!body)
+    return nullptr;
+  return Ctx.make<LambdaExpr>(span(start), std::move(params), retTy, body);
+}
+
+// "[" args "]" or "[" expression ";" INT "]" (parsePrimary).
+Expr *Parser::parseArrayLiteral() {
+  SourceLocation start = cur().Loc;
+  consume();
+  std::vector<Expr *> elems;
+  if (!parseArgumentList(Tok::RBracket, elems))
+    return nullptr;
+  // `[v; n]`: n copies of v.
+  if (elems.size() == 1 && accept(Tok::Semi)) {
+    if (!at(Tok::Int)) {
+      errorAtCurrent("expected the number of copies, an integer literal");
+      return nullptr;
+    }
+    Token n = consume();
+    if (n.IntValue < 1) {
+      error(n.Loc, "an array has at least one element: the count must be 1 "
+                   "or more");
+      return nullptr;
+    }
+    if (!expect(Tok::RBracket, "to close the array literal"))
+      return nullptr;
+    return Ctx.make<ArrayLiteralExpr>(span(start), std::move(elems),
+                                      n.IntValue);
+  }
+  if (!expect(Tok::RBracket, "to close the array literal"))
+    return nullptr;
+  return Ctx.make<ArrayLiteralExpr>(span(start), std::move(elems));
 }
 
 } // namespace paykan::frontend::recursive_descent
