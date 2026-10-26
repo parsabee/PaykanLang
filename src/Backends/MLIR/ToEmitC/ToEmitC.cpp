@@ -972,7 +972,8 @@ void addEntryPoint(Unit &u) {
   b.setInsertionPointToEnd(m.getBody());
   std::ostringstream c;
   c << "int main(int argc, char **argv) {\n"
-    << "  int track = getenv(\"PAYKAN_TRACK_HEAP\") != NULL;\n"
+    << "  int track = getenv(\"" << names::kPaykanTrackHeapEnv
+    << "\") != NULL;\n"
     << "  if (track) {\n"
     << "    " << names::kPaykanHeapSetTracking << "(1);\n"
     << "    " << names::kPaykanHeapReset << "();\n"

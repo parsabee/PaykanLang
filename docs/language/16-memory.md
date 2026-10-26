@@ -170,6 +170,10 @@ paykan heap stats:
 compiler version.) The test suite runs every example in this documentation, and every sample
 program in the repository, this way.
 
+`PAYKAN_TRACK_HEAP`, set to any value, does the same as `--track-heap` for `paykan run`, and
+it is how an executable `paykan build` wrote is checked (`PAYKAN_TRACK_HEAP=1 ./hello`):
+`--track-heap` applies to `run`, so `build` rejects it.
+
 ## Reference Cycles
 
 Reference counting has one blind spot. It reclaims an object when its count reaches zero,

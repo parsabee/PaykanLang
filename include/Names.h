@@ -272,6 +272,10 @@ inline constexpr const char *kPaykanHeapLiveBytes = "Paykan_heap_live_bytes";
 // -- Environment variables
 
 inline constexpr const char *kPaykanStdlibEnv = "PAYKAN_STDLIB";
+/// Set (to any value): a program tracks its heap and prints the statistics
+/// at exit, as under `paykan run --track-heap` (an executable's entry code
+/// reads it too).
+inline constexpr const char *kPaykanTrackHeapEnv = "PAYKAN_TRACK_HEAP";
 /// `:`-separated directories of prebuilt `.pkm` modules, searched after the
 /// --module-path directories.
 inline constexpr const char *kPaykanModulePathEnv = "PAYKAN_MODULE_PATH";

@@ -576,6 +576,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`StdlibTests`), `paykan build` (`StdlibTestsBuild`, `--build`) and the C `--emit-c`
   prints, compiled with the runtime's sources (`StdlibTestsC`, `--cc <compiler>`).  The
   samples corpus is built at -O0 too (`SamplesParityBuildO0`).
+- `paykan build --track-heap` is an error (``--track-heap applies to `run`: to track the
+  heap of a program `build` wrote, run it with PAYKAN_TRACK_HEAP set``), where it was
+  accepted and did nothing: the executable tracks its heap when it runs with
+  `PAYKAN_TRACK_HEAP` set (docs/language/17-the-paykan-command.md,
+  docs/language/16-memory.md).
 
 ### Removed
 
@@ -999,6 +1004,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--version`, `--list-*`, `pkm dump` and `pkm check`.  Each now checks standard output once
   it is done: `paykan: cannot write to standard output: No space left on device` (the reason
   when the last write is the one that failed), exit status 1.
+- `PAYKAN_TRACK_HEAP=1 paykan run hello.pkn` printed no heap statistics: only an executable
+  `build` wrote read the variable, though the documentation says every program does.  `run`
+  now tracks the heap when it is set, as under `--track-heap`.
 
 ## [0.2.0] - 2026-10-20
 

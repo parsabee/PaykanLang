@@ -932,7 +932,8 @@ int main(int argc, char *argv[]) {
   progArgs.insert(progArgs.end(), opts.ProgramArgs.begin(),
                   opts.ProgramArgs.end());
   paykan::backend::RunOptions ro;
-  ro.TrackHeap = opts.TrackHeap;
+  ro.TrackHeap = opts.TrackHeap ||
+                 std::getenv(paykan::names::kPaykanTrackHeapEnv) != nullptr;
   auto result = backend->run(in, progArgs, ro);
   if (!result)
     return failBackend(result.status());

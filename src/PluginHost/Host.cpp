@@ -8,6 +8,7 @@
 
 #include "PluginHost.h"
 
+#include "Names.h"
 #include "paykan/Registry.h"
 
 #include <cstdlib>
@@ -176,7 +177,7 @@ int runExecutable(PaykanSession *s, const char *path, const char *const *args,
   // program started with argc == 0.
   std::vector<std::pair<std::string, std::string>> env;
   if (trackHeap)
-    env.emplace_back("PAYKAN_TRACK_HEAP", "1");
+    env.emplace_back(names::kPaykanTrackHeapEnv, "1");
   if (!numArgs)
     env.emplace_back("PAYKAN_NO_ARGS", "1");
   std::cout.flush();

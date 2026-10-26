@@ -2502,3 +2502,27 @@ TEST(Driver, AnUnwritableStandardOutputIsAnError) {
   }
   std::filesystem::remove_all(dir);
 }
+
+// PAYKAN_TRACK_HEAP under `run` tracks the heap as --track-heap does, as it
+// does for an executable `build` wrote; `build --track-heap`, which did
+// nothing, is an error (finding 22).
+TEST(Driver, RunTracksTheHeapUnderPaykanTrackHeap) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("trackheap");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  auto [rc, out] = run("cd " + dir.string() + " && PAYKAN_TRACK_HEAP=1 " +
+                       paykanRun() + " hello.pkn 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_NE(out.find("hello\n"), std::string::npos) << out;
+  EXPECT_NE(out.find("live blocks       : 0"), std::string::npos) << out;
+  auto [rc2, out2] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " build --track-heap hello.pkn -o h 2>&1");
+  EXPECT_EQ(rc2, 1) << out2;
+  EXPECT_NE(out2.find("paykan: --track-heap applies to `run`: to track the "
+                      "heap of a program `build` wrote, run it with "
+                      "PAYKAN_TRACK_HEAP set"),
+            std::string::npos)
+      << out2;
+  EXPECT_FALSE(std::filesystem::exists(dir / "h"));
+  std::filesystem::remove_all(dir);
+}

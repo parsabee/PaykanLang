@@ -52,8 +52,8 @@ constexpr Flag kFlags[] = {
     {"stats", &Options::Stats,
      "Report what the PIR passes did (on stderr), after the last one ran"},
     {"track-heap", &Options::TrackHeap,
-     "Track runtime heap allocations and dump statistics (incl. leaks) at "
-     "exit"},
+     "Run with heap tracking and dump statistics (incl. leaks) at exit; "
+     "a built program tracks its heap under PAYKAN_TRACK_HEAP"},
     {"trace-parser", &Options::TraceParsing,
      "Enable the frontend's parser debug traces, if it has them"},
     {"trace-scanner", &Options::TraceScanning,
@@ -320,6 +320,11 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     o.EmitSource = true;
     if (emitC)
       o.EmitStage = "c";
+  }
+  if (o.TrackHeap && o.Cmd == Command::Build) {
+    r.Error = "--track-heap applies to `run`: to track the heap of a program "
+              "`build` wrote, run it with PAYKAN_TRACK_HEAP set";
+    return r;
   }
   if (!o.SkipPasses.empty()) {
     if (o.EmitPkm) {

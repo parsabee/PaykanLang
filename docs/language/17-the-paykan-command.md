@@ -51,7 +51,7 @@ option prints a message suggesting `--help`, and also exits with 1.
 | `-O<n>` | optimization level, `0` to `3` (also `-O <n>` and `-O=<n>`); the default is `2`, and `-O0` compiles fastest and is easiest to debug |
 | `--backend=<name>` | the backend to compile with (see below) |
 | `--frontend=<name>` | the parser to read the source with; the built-in one, `recursive-descent`, is the default |
-| `--track-heap` | run with heap tracking and print the allocation statistics to standard error at exit ([Memory](16-memory.md)) |
+| `--track-heap` | run with heap tracking and print the allocation statistics to standard error at exit ([Memory](16-memory.md)). It applies to `run`, and `build` rejects it: an executable `build` wrote tracks its heap when it runs with `PAYKAN_TRACK_HEAP` set |
 | `--check-only` | parse and type-check, then stop: no code is generated and nothing runs. It also accepts a module that has no `main`, which makes it handy for checking a library module on its own |
 | `--emit-pkm` | compile one module and write its `.pkm` module file to `-o <file>`, in a directory that exists, or next to the source, then stop. The module may have no `main`. Like `build`, it takes no program arguments, so `-o` may follow the file. The module is named by its path from the current directory (`geometry/shapes.pkn`, or `./geometry/shapes.pkn`, is `geometry::shapes`), or by its file name when the path is absolute or goes up (`../shapes.pkn` is `shapes`); each part of the name must be an identifier, or `--module-name` must name it |
 | `--module-name=<name>` | with `--emit-pkm`: the canonical name the module file records, instead of the one its path gives it (`a::b`, or `::name` for a module of the standard library, as the library's build compiles them) |
@@ -199,4 +199,4 @@ files, the cache and prebuilt modules in detail.
 | `PAYKAN_MODULE_PATH` | `:`-separated directories of prebuilt `.pkm` modules, searched after the `--module-path` directories |
 | `PAYKAN_PLUGIN_PATH` | more directories to load plugins from, separated by `:` |
 | `PAYKAN_NO_PLUGINS` | set to anything but `0`: do not search the plugin directories, like `--no-plugins` |
-| `PAYKAN_TRACK_HEAP` | when set (to any value), a program prints the heap statistics at exit as under `--track-heap`, an executable made by `build` included |
+| `PAYKAN_TRACK_HEAP` | when set (to any value), a program prints the heap statistics at exit as under `--track-heap`, whether `paykan run` runs it or it is an executable made by `build` |
