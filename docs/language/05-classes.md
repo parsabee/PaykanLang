@@ -7,10 +7,10 @@ rules: declarations, fields, methods, construction, inheritance and the `Obj` ro
 
 ## Declaring a class
 
-A class lists its **fields** (each with a type) and then its **methods**. Its constructor,
-the method called `__init__`, goes in an `impl` block for the class; it runs when an object
-is created and must give every field a value. Inside methods, `self` is the object the
-method was called on. You never write `self` in a parameter list:
+A class lists its **fields** (each with a type) and its **methods**, usually the fields
+first. Its constructor, the method called `__init__`, goes in an `impl` block for the class;
+it runs when an object is created and must give every field a value. Inside methods, `self`
+is the object the method was called on. You never write `self` in a parameter list:
 
 ```pkn
 import ::io;
@@ -594,7 +594,8 @@ The rest of this chapter gives the precise rules.
 ## Declaration
 
 - The keyword is `class`, followed by an `UpperCamelCase` name. The body contains **field
-  declarations** then **method declarations**.
+  declarations** and **method declarations** in any order (the fields usually first); the
+  default `__init__` takes the fields in the order they are declared.
 - `self` is in scope inside every method. It is **never written in the parameter list**, and
   it cannot be assigned (`cannot assign to 'self'`) or name anything else: no declaration,
   `for` loop variable, `match` binding or destructuring target in a method's body can be

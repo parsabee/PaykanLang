@@ -30,8 +30,9 @@ The example in [`src/Backends/PrintPIR`](../src/Backends/PrintPIR) is the smalle
 complete loadable backend, in plain C (it prints the PIR it receives); copy it
 to start your own.
 
-**Stability.** Unlike the language (stable in the 0.2 series, see
-[`language/02-basics.md`](language/02-basics.md)), the
+**Stability.** Unlike the parts of the language its reference calls
+stable (tuples, optionals and generics, in the 0.2 series: see
+[Stability](language/index.md#stability)), the
 plugin interfaces are not yet stable: `plugin_api.h` (versioned by
 `PAYKAN_PLUGIN_API_VERSION`), the PIR text (`PAYKAN_PIR_TEXT_VERSION`), and
 the C++ interfaces of the built-in plugins may change between 0.x releases.
@@ -208,8 +209,9 @@ public:
   capabilities before calling the backend, so `emit`/`run` only ever see
   requests the backend declared.
 - **`emit()`** translates the program. For `EmitKind::Source` the output goes
-  to `out`; for `Object`/`Executable` it goes to `opts.OutputPath` (`""` means
-  a default next to the input).
+  to `out`; for `Object`/`Executable` it goes to `opts.OutputPath`, which the
+  driver always names (`build`'s `-o`, or one made from the source file's
+  name).
 - **`run()`** executes the program and returns its exit code. `args[0]` is the
   script path, like `argv[0]`. `opts.TrackHeap` is the driver's `--track-heap`:
   an in-process backend switches the runtime's tracking allocator on
@@ -428,7 +430,13 @@ PaykanLang version it was **built with**, and each release carries an explicit
 - **The plugin API version.** A loadable plugin also declares the
   `PAYKAN_PLUGIN_API_VERSION` it is built for; a `paykan` that does not
   support it rejects the file (`rejected plugin <file>: built for plugin API
-  N; ...`). It changes only when `plugin_api.h` changes incompatibly.
+  N; ...`). It is the release version, packed like every format's (200 for
+  0.2.0, [`plugins/plugin-api.md`](plugins/plugin-api.md)), and a `paykan`
+  supports only its own, so every release changes it: a loadable plugin
+  built against another release's `plugin_api.h` is rejected whatever the
+  list below holds, and is rebuilt for each release. The list's older
+  versions admit static C++ plugins, and loadable plugins built against
+  this release's header that pin an older version with `BUILT_WITH`.
 - **The list.** It lives in one place,
   [`cmake/PluginCompat.cmake`](../cmake/PluginCompat.cmake)
   (`PAYKAN_PLUGIN_COMPATIBLE_VERSIONS`). CMake compiles it into the core and
@@ -482,9 +490,9 @@ PaykanLang version it was **built with**, and each release carries an explicit
 `CMakeLists.txt`, the one place the version is spelled) is always on it: the
 list starts with `${PAYKAN_VERSION}`, so a version bump needs no change to it.
 Add an older version after it only if plugins built with that version still
-work with this release: `plugin_api.h` (or its API version is still
-supported), the PIR text, the runtime ABI (`Runtime.h`), and for static C++
-plugins `Frontend.h`, `Backend.h`, `Registry.h` and the AST and `ASTContext`
-a frontend sees, are unchanged since, or changed only compatibly. Drop it when any of them changes
-incompatibly. The CHANGELOG entry of each release states which plugin build
+work with this release: the PIR text, the runtime ABI (`Runtime.h`), and for
+static C++ plugins `Frontend.h`, `Backend.h`, `Registry.h` and the AST and
+`ASTContext` a frontend sees, are unchanged since, or changed only
+compatibly (a loadable plugin of another release fails the plugin API check
+anyway). Drop it when any of them changes incompatibly. The CHANGELOG entry of each release states which plugin build
 versions it accepts.

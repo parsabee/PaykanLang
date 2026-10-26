@@ -1290,9 +1290,13 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
       errorAtCurrent("expected the C symbol as a string literal");
       return nullptr;
     }
+    SourceLocation symbolLoc = cur().Loc;
     std::string pieces = consume().StrValue;
     while (at(Tok::String))
       pieces += consume().StrValue;
+    if (std::string_view why = names::cSymbolProblem(pieces); !why.empty())
+      error(symbolLoc, "the C symbol '" + pieces + "' of native function '" +
+                           name + "' " + std::string(why));
     const std::string &symbol = intern(pieces);
     if (!expect(Tok::Semi, "after a native function"))
       return nullptr;

@@ -107,7 +107,7 @@ $ cmake --install build --prefix /usr/local
 ### Checking the installation
 
 `paykan --version` prints the version and lists the frontend and backends the compiler
-has, with the plugin directories it searches:
+has, with the standard library it uses and the plugin directories it searches:
 
 ```text
 $ paykan --version
@@ -116,6 +116,7 @@ accepts plugins built with PaykanLang <version>
 frontend recursive-descent (built with PaykanLang <version>, compatible)
 backend mlir (built with PaykanLang <version>, compatible): MLIR <llvm-version>
 plugin API <version>
+standard library: <prefix>/lib/paykan/stdlib/<version>
 plugin directories: ...
 ```
 
@@ -223,7 +224,10 @@ Output printed before a panic is never lost: standard output is flushed first.
 
 ## Source files
 
-PaykanLang source files use the `.pkn` extension (`.pk` is accepted too). A file contains
+PaykanLang source files use the `.pkn` extension. The main file, the one `paykan` is given,
+may have another one (`.pk`, say, which `build` drops from the executable's name as it drops
+`.pkn`), but an imported module is found only as a `.pkn` file or a prebuilt `.pkm`
+([Modules](15-modules.md)). A file contains
 only declarations (imports, functions, classes, structs, enums, traits and `impl` blocks),
 in any order: a function may call another one declared further down the file. There are no
 statements at the top level, so all code lives in functions.

@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -61,6 +62,54 @@ static CmdResult run(const std::string &cmd) {
     out += buf.data();
   int rc = pclose(fp);
   return {WEXITSTATUS(rc), out};
+}
+
+// Run @p argv (a path, no $PATH search) in @p dir with @p env added to the
+// environment and SIGCHLD ignored, as a parent may leave it for the
+// programs it starts: their children are then reaped for them, so no wait
+// for one succeeds.  Standard output and error are both captured.
+static CmdResult
+runIgnoringSigchld(const std::filesystem::path &dir,
+                   const std::vector<std::string> &argv,
+                   const std::pair<std::string, std::string> &env) {
+  std::vector<char *> args;
+  args.reserve(argv.size() + 1);
+  for (const std::string &a : argv)
+    args.push_back(const_cast<char *>(a.c_str()));
+  args.push_back(nullptr);
+  int out[2];
+  if (pipe(out) != 0)
+    return {-1, "pipe failed"};
+  pid_t pid = fork();
+  if (pid < 0)
+    return {-1, "fork failed"};
+  if (pid == 0) {
+    std::signal(SIGCHLD, SIG_IGN);
+    dup2(out[1], STDOUT_FILENO);
+    dup2(out[1], STDERR_FILENO);
+    close(out[0]);
+    close(out[1]);
+    if (chdir(dir.c_str()) != 0)
+      _exit(126);
+    setenv(env.first.c_str(), env.second.c_str(), 1);
+    execv(args[0], args.data());
+    _exit(127);
+  }
+  close(out[1]);
+  std::string text;
+  std::array<char, 4096> buf{};
+  for (ssize_t n; (n = read(out[0], buf.data(), buf.size())) != 0;) {
+    if (n < 0 && errno == EINTR)
+      continue;
+    if (n < 0)
+      break;
+    text.append(buf.data(), static_cast<size_t>(n));
+  }
+  close(out[0]);
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  return {WIFEXITED(status) ? WEXITSTATUS(status) : -1, text};
 }
 
 // True when the build has a backend that can run programs (an empty
@@ -1040,11 +1089,16 @@ TEST(Driver, ChainAtTheLimitRunsAndWritesItsAST) {
 // The stack the programs at the frontend's limits are compiled with: a
 // quarter of the default 8 MB, so that a pass recursing once per link of a
 // chain, or deeper than it should per level of nesting, fails here in every
-// build; in a sanitizer build, whose frames are 2 to 4 times larger, the
-// default itself.
+// build; half of it in an unoptimised clang build, whose frames can be 4
+// times GCC's (clang -O0 gives every local a slot of its own: the lowering's
+// frame for a binary operator is 4 KB, not 0.9 KB, so 511 levels of operands
+// take 2 MB in it alone); in a sanitizer build, whose frames are 2 to 4 times
+// larger still, the default itself.
 static std::string atLimitStack() {
-#ifdef PAYKAN_TEST_SANITIZED
+#if defined(PAYKAN_TEST_SANITIZED)
   return "ulimit -s 8192 && ";
+#elif defined(__clang__) && !defined(__OPTIMIZE__)
+  return "ulimit -s 4096 && ";
 #else
   return "ulimit -s 2048 && ";
 #endif
@@ -2999,4 +3053,750 @@ TEST(Driver, StandardLibraryPrivateMembersAreEnforced) {
         "'io::File' cannot be constructed here: its initializer '___init__' "
         "is private to module '::io'"})
     EXPECT_NE(out.find(line), std::string::npos) << line << "\n" << out;
+}
+
+// -- What the driver writes: never a file the command reads (finding 18)
+
+namespace {
+
+/// A fresh, empty directory for one test, under the temporary directory.
+std::filesystem::path freshDir(const std::string &name) {
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_" + name + "_" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  return dir;
+}
+
+const std::string kHello =
+    "import ::io;\nfn main() -> int { io::println(\"hello\"); return 0; }\n";
+
+/// Names of @p file, in @p dir, other than its own, as a command run in
+/// @p dir may spell them: `./f`, `<dir>//f`, `sub/../f`, a symbolic and a
+/// hard link, and the name in upper case when the file system ignores case
+/// (macOS's, by default).
+std::vector<std::string> otherNames(const std::filesystem::path &dir,
+                                    const std::string &file) {
+  namespace fs = std::filesystem;
+  fs::create_directories(dir / "sub");
+  fs::create_symlink(file, dir / ("sym_" + file));
+  fs::create_hard_link(dir / file, dir / ("hard_" + file));
+  std::vector<std::string> names{"./" + file, dir.string() + "//" + file,
+                                 "sub/../" + file, "sym_" + file,
+                                 "hard_" + file};
+  std::string upper = file;
+  for (char &c : upper)
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  if (fs::exists(dir / upper))
+    names.push_back(upper);
+  return names;
+}
+
+} // namespace
+
+// `build` without -o drops only a `.pkn` or `.pk` extension: a source file
+// with another, or none, gets `.out` added, so the executable replaces
+// neither it (`noext`) nor another source (`main.pkn` for `main.pkn.bak`);
+// and so does one whose name without it would still have one, in any case
+// (`main.pkn.pkn` gave `main.pkn`, another source).
+TEST(Driver, BuildsDefaultOutputNeverReplacesASource) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("build_default");
+  const char *const sources[] = {"noext",     "main.pkn",     "main.pkn.bak",
+                                 "short.pk",  "main.pkn.pkn", "x.pk",
+                                 "x.pk.pkn",  "y.pkn",        "y.pkn.pk",
+                                 "z.PKN.pkn", "z.PKN"};
+  for (const char *name : sources)
+    std::ofstream(dir / name) << kHello;
+  for (const auto &[source, output] :
+       {std::pair{"noext", "noext.out"},
+        std::pair{"main.pkn.bak", "main.pkn.bak.out"},
+        std::pair{"short.pk", "short"},
+        std::pair{"main.pkn.pkn", "main.pkn.pkn.out"},
+        std::pair{"x.pk.pkn", "x.pk.pkn.out"},
+        std::pair{"y.pkn.pk", "y.pkn.pk.out"},
+        std::pair{"z.PKN.pkn", "z.PKN.pkn.out"}}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " build " + source + " 2>&1");
+    EXPECT_EQ(rc, 0) << source << ": " << out;
+    auto [rc2, out2] = run((dir / output).string() + " 2>&1");
+    EXPECT_EQ(rc2, 0) << output << ": " << out2;
+    EXPECT_EQ(out2, "hello\n") << output;
+  }
+  for (const char *name : sources)
+    EXPECT_EQ(slurp(dir / name), kHello) << name;
+  std::filesystem::remove_all(dir);
+}
+
+// An output that is the source file or an --object file, by any name, is
+// an error, and the file keeps its bytes: -o's, and the default (`same`, a
+// link to `same.pkn`).
+TEST(Driver, BuildNeverWritesOverItsInput) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("build_same");
+  std::ofstream(dir / "same.pkn") << kHello;
+  std::ofstream(dir / "obj.o") << "not an object";
+  auto refused = [&](const std::string &args, const std::string &output,
+                     const std::string &input) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + paykanRun() + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_NE(out.find("paykan: the output '" + output +
+                       "' is the input file '" + input +
+                       "' (choose another with -o)"),
+              std::string::npos)
+        << args << ": " << out;
+  };
+  std::vector<std::string> names = otherNames(dir, "same.pkn");
+  names.emplace_back("same.pkn");
+  for (const std::string &name : names)
+    refused(" build same.pkn -o " + name, name, "same.pkn");
+  std::filesystem::create_symlink("same.pkn", dir / "same");
+  refused(" build same.pkn", "same", "same.pkn");
+  refused(" build same.pkn --object=obj.o -o ./obj.o", "./obj.o", "obj.o");
+  EXPECT_EQ(slurp(dir / "same.pkn"), kHello);
+  EXPECT_EQ(slurp(dir / "obj.o"), "not an object");
+  std::filesystem::remove_all(dir);
+}
+
+// --emit-pkm: the module file is never written over the source file, by any
+// name, nor by default over a source file whose name ends in `.pkm`.
+TEST(Driver, EmitPkmNeverWritesOverItsInput) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("emitpkm_same");
+  const std::string lib = "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "lib.pkn") << lib;
+  std::ofstream(dir / "odd.pkm") << lib;
+  auto refused = [&](const std::string &args, const std::string &output,
+                     const std::string &input) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + paykanRun() + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_NE(out.find("paykan: the output '" + output +
+                       "' is the input file '" + input + "'"),
+              std::string::npos)
+        << args << ": " << out;
+  };
+  std::vector<std::string> names = otherNames(dir, "lib.pkn");
+  names.emplace_back("lib.pkn");
+  for (const std::string &name : names)
+    refused(" --emit-pkm lib.pkn -o " + name, name, "lib.pkn");
+  refused(" --emit-pkm odd.pkm", "odd.pkm", "odd.pkm");
+  EXPECT_EQ(slurp(dir / "lib.pkn"), lib);
+  EXPECT_EQ(slurp(dir / "odd.pkm"), lib);
+  std::filesystem::remove_all(dir);
+}
+
+// Nor over a file of a module the program imports, its source or a prebuilt
+// module file (here from --module-path; the standard library's are found
+// the same way): `build main.pkn -o lib.pkn`, `--emit-c ... -o lib.pkn`
+// and `--emit-pkm ... -o <prebuilt>.pkm` replaced it with exit status 0.
+TEST(Driver, NoCommandWritesOverAnImportedModule) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("imports_same");
+  std::filesystem::create_directories(dir / "mods" / "geometry");
+  const std::string lib = "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "lib.pkn") << lib;
+  std::ofstream(dir / "shapes.pkn")
+      << "fn area(w: int, h: int) -> int { return w * h; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io;\nimport lib;\nimport geometry::shapes;\n"
+         "fn main() -> int {\n"
+         "  io::println(Str<int>(lib::twice(geometry::shapes::area(2, 3))));\n"
+         "  return 0;\n}\n";
+  auto cd = "cd " + dir.string() + " && " + paykanRun();
+  auto made = run(cd + " --emit-pkm --module-name=geometry::shapes shapes.pkn "
+                       "-o mods/geometry/shapes.pkm 2>&1");
+  ASSERT_EQ(made.exitCode, 0) << made.out;
+  const std::string prebuilt = slurp(dir / "mods" / "geometry" / "shapes.pkm");
+  for (const auto &[args, output, input] :
+       {std::tuple{"build main.pkn -o lib.pkn", "lib.pkn", "lib.pkn"},
+        std::tuple{"build main.pkn -o mods//geometry/shapes.pkm",
+                   "mods//geometry/shapes.pkm", "mods/geometry/shapes.pkm"},
+        std::tuple{"--emit-c main.pkn -o ./lib.pkn", "./lib.pkn", "lib.pkn"},
+        std::tuple{"--emit-pir main.pkn -o mods/geometry/shapes.pkm",
+                   "mods/geometry/shapes.pkm", "mods/geometry/shapes.pkm"},
+        std::tuple{"--emit-pkm main.pkn -o mods/geometry/shapes.pkm",
+                   "mods/geometry/shapes.pkm", "mods/geometry/shapes.pkm"}}) {
+    auto [rc, out] =
+        run(cd + " --module-path=mods " + std::string(args) + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_NE(out.find(std::string("paykan: the output '") + output +
+                       "' is the input file '" + input +
+                       "' (choose another with -o)"),
+              std::string::npos)
+        << args << ": " << out;
+  }
+  EXPECT_EQ(slurp(dir / "lib.pkn"), lib);
+  EXPECT_EQ(slurp(dir / "mods" / "geometry" / "shapes.pkm"), prebuilt);
+  auto ran = run(cd + " --module-path=mods main.pkn 2>&1");
+  EXPECT_EQ(ran.exitCode, 0) << ran.out;
+  EXPECT_EQ(ran.out, "12\n");
+  std::filesystem::remove_all(dir);
+}
+
+// `pkm extract --object`: the object is never written over the module
+// file, by any name, nor by default over a module file named `<name>.o`.
+TEST(Driver, PkmExtractNeverWritesOverTheModuleFile) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("extract_same");
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto emit = run("cd " + dir.string() + " && " + paykanRun() +
+                  " --emit-pkm lib.pkn 2>&1");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  const std::string pkm = slurp(dir / "lib.pkm");
+  std::filesystem::copy_file(dir / "lib.pkm", dir / "mod.o");
+  auto refused = [&](const std::string &args, const std::string &output,
+                     const std::string &input) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + kPaykan + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_NE(out.find("paykan: the output '" + output +
+                       "' is the input file '" + input + "'"),
+              std::string::npos)
+        << args << ": " << out;
+  };
+  std::vector<std::string> names = otherNames(dir, "lib.pkm");
+  names.emplace_back("lib.pkm");
+  for (const std::string &name : names)
+    refused(" pkm extract --object lib.pkm -o " + name, name, "lib.pkm");
+  refused(" pkm extract --object mod.o", "mod.o", "mod.o");
+  EXPECT_EQ(slurp(dir / "lib.pkm"), pkm);
+  EXPECT_EQ(slurp(dir / "mod.o"), pkm);
+  std::filesystem::remove_all(dir);
+}
+
+// `--emit-pkm -o` writes into a directory that exists, as `build -o` and
+// `pkm extract -o` do, and makes none (new-F5-1): only the module cache
+// makes its own.
+TEST(Driver, EmitPkmMakesNoDirectory) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("emitpkm_nodir");
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                       " --emit-pkm lib.pkn -o nd/sub/x.pkm 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_EQ(out, "paykan: cannot write nd/sub/x.pkm: the directory 'nd/sub' "
+                 "does not exist\n");
+  EXPECT_FALSE(std::filesystem::exists(dir / "nd"));
+  std::filesystem::remove_all(dir);
+}
+
+// --emit-pkm -o writes into what its path names, as `build -o` and `pkm
+// extract -o` do: a symbolic link keeps naming its file, which gets the
+// module file, and a device (here reached through a link) stays one, where
+// the rename that replaces a regular file replaced the link, and `-o
+// /dev/null` run as root replaced /dev/null with a regular file.
+TEST(Driver, EmitPkmWritesIntoWhatItsOutputNames) {
+  REQUIRE_BACKEND();
+  namespace fs = std::filesystem;
+  auto dir = freshDir("emitpkm_nodes");
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "file.pkm") << "precious";
+  fs::create_symlink("file.pkm", dir / "link.pkm");
+  fs::create_symlink("/dev/null", dir / "null");
+  for (const char *output : {"link.pkm", "null"}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " --emit-pkm lib.pkn -o " + output + " 2>&1");
+    EXPECT_EQ(rc, 0) << output << ": " << out;
+    EXPECT_EQ(out, "") << output;
+    EXPECT_TRUE(fs::is_symlink(dir / output)) << output;
+  }
+  EXPECT_TRUE(fs::is_character_file(dir / "null"));
+  auto check =
+      run("cd " + dir.string() + " && " + kPaykan + " pkm check file.pkm 2>&1");
+  EXPECT_EQ(check.exitCode, 0) << check.out;
+  EXPECT_EQ(check.out, "file.pkm: usable\n");
+  std::filesystem::remove_all(dir);
+}
+
+// Standard output that cannot be written (a full disk: Linux's /dev/full)
+// is an error, exit status 1, for every command that prints, never a
+// success with the output lost (finding 69).
+TEST(Driver, AnUnwritableStandardOutputIsAnError) {
+  if (!std::filesystem::exists("/dev/full"))
+    GTEST_SKIP() << "no /dev/full";
+  REQUIRE_BACKEND();
+  auto dir = freshDir("devfull");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto emit = run("cd " + dir.string() + " && " + paykanRun() +
+                  " --emit-pkm lib.pkn 2>&1");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  for (const char *args :
+       {" --emit-c hello.pkn", " --emit-llvm hello.pkn",
+        " --emit-pir hello.pkn", " --emit-mlir=pir hello.pkn",
+        " --emit-ast hello.pkn", " --dump-ast hello.pkn",
+        " --dump-tokens hello.pkn", " --help", " --version", " --list-backends",
+        " --list-frontends", " pkm dump lib.pkm", " pkm check lib.pkm"}) {
+    // Standard error to the pipe, standard output to /dev/full.
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() + args +
+                         " 2>&1 >/dev/full");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    // The reason the first write that failed gave, which `--emit-c` and
+    // `--emit-llvm` lost: their stream failed at a write before the last.
+    EXPECT_EQ(out, "paykan: cannot write to standard output: No space left on "
+                   "device\n")
+        << args;
+  }
+  // -o's file, here a link to /dev/full, says why too.
+  std::filesystem::create_symlink("/dev/full", dir / "full");
+  for (const auto &[args, message] :
+       {std::pair{" --emit-c hello.pkn -o full",
+                  "paykan: cannot write 'full': No space left on device\n"},
+        std::pair{" --emit-pkm lib.pkn -o full",
+                  "paykan: cannot write full: No space left on device\n"}}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + paykanRun() + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_EQ(out, message) << args;
+  }
+  EXPECT_TRUE(std::filesystem::is_symlink(dir / "full"));
+  std::filesystem::remove_all(dir);
+}
+
+// PAYKAN_TRACK_HEAP under `run` tracks the heap as --track-heap does, as it
+// does for an executable `build` wrote; `build --track-heap`, which did
+// nothing, is an error (finding 22).
+TEST(Driver, RunTracksTheHeapUnderPaykanTrackHeap) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("trackheap");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  auto [rc, out] = run("cd " + dir.string() + " && PAYKAN_TRACK_HEAP=1 " +
+                       paykanRun() + " hello.pkn 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_NE(out.find("hello\n"), std::string::npos) << out;
+  EXPECT_NE(out.find("live blocks       : 0"), std::string::npos) << out;
+  auto [rc2, out2] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " build --track-heap hello.pkn -o h 2>&1");
+  EXPECT_EQ(rc2, 1) << out2;
+  EXPECT_NE(out2.find("paykan: --track-heap applies to `run`: to track the "
+                      "heap of a program `build` wrote, run it with "
+                      "PAYKAN_TRACK_HEAP set"),
+            std::string::npos)
+      << out2;
+  EXPECT_FALSE(std::filesystem::exists(dir / "h"));
+  std::filesystem::remove_all(dir);
+}
+
+// --version, -v and --list-* answer after `pkm` too, as --help does, where
+// they said "cannot open ''" (finding 72).
+TEST(Driver, InformationOptionsAnswerAfterPkm) {
+  for (const char *option :
+       {"--version", "-v", "--list-backends", "--list-frontends"}) {
+    auto plain = run(std::string(kPaykan) + " " + option + " 2>&1");
+    auto afterPkm = run(std::string(kPaykan) + " pkm " + option + " 2>&1");
+    EXPECT_EQ(afterPkm.exitCode, 0) << option << ": " << afterPkm.out;
+    EXPECT_EQ(afterPkm.out, plain.out) << option;
+  }
+}
+
+// A command line asks for one thing, and takes only options that apply to
+// it: two of `run`, `build`, `pkm` and the options that print or write
+// something and stop, or -o, --section or --track-heap where they do
+// nothing, are errors rather than ignored (finding 68).
+TEST(Driver, ConflictingOptionsAreRejected) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("conflicts");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto emit = run("cd " + dir.string() + " && " + paykanRun() +
+                  " --emit-pkm lib.pkn 2>&1");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  for (const auto &[args, message] :
+       {std::pair{"--emit-pir --check-only hello.pkn",
+                  "--check-only and --emit-pir exclude each other"},
+        std::pair{"--emit-c --emit-pir hello.pkn",
+                  "--emit-pir and --emit-c exclude each other"},
+        std::pair{"--dump-ast --emit-ast hello.pkn",
+                  "--dump-ast and --emit-ast exclude each other"},
+        std::pair{"build --emit-c hello.pkn -o bx",
+                  "`build` and --emit-c exclude each other"},
+        std::pair{"build --emit-pkm hello.pkn",
+                  "`build` and --emit-pkm exclude each other"},
+        std::pair{"run --check-only hello.pkn",
+                  "`run` and --check-only exclude each other"},
+        std::pair{"pkm dump lib.pkm --emit-pir",
+                  "`pkm dump` and --emit-pir exclude each other"},
+        std::pair{"run -o foo hello.pkn", "-o does not apply to `run`"},
+        std::pair{"-o foo hello.pkn", "-o does not apply to `run`"},
+        std::pair{"--check-only hello.pkn -o x",
+                  "-o does not apply to --check-only"},
+        std::pair{"--dump-ast -o x hello.pkn",
+                  "-o does not apply to --dump-ast"},
+        std::pair{"pkm check lib.pkm -o x", "-o does not apply to `pkm check`"},
+        std::pair{"--section=iface hello.pkn",
+                  "--section applies to `pkm dump`"},
+        std::pair{"pkm check --section=iface lib.pkm",
+                  "--section applies to `pkm dump`"},
+        std::pair{"--emit-c --track-heap hello.pkn",
+                  "--track-heap applies to `run`, not to --emit-c"},
+        std::pair{"--check-only hello.pkn extra",
+                  "unexpected argument 'extra' (--check-only takes one file "
+                  "and no program arguments)"},
+        std::pair{"--emit-c hello.pkn extra",
+                  "unexpected argument 'extra' (--emit-c takes one file and "
+                  "no program arguments)"}}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + kPaykan + " " + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_EQ(out.find(std::string("paykan: ") + message + ". Try: '"), 0U)
+        << args << ": " << out;
+  }
+  EXPECT_FALSE(std::filesystem::exists(dir / "bx"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "foo"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "x"));
+  // Under `run` everything after the source file is still the program's.
+  auto args = run("cd " + dir.string() + " && " + kPaykan +
+                  " hello.pkn --emit-c -o x 2>&1");
+  EXPECT_EQ(args.exitCode, 0) << args.out;
+  EXPECT_EQ(args.out, "hello\n");
+  std::filesystem::remove_all(dir);
+}
+
+// The --emit-* options write to -o's file, before or after the source
+// file, what they print without it, and never over the source file (the
+// overwrite guard of finding 18; finding 68).
+TEST(Driver, EmitOptionsWriteToTheOutputFile) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("emit_o");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  for (const char *option : {"--emit-c", "--emit-llvm", "--emit-pir",
+                             "--emit-mlir=scf", "--emit-ast"}) {
+    auto printed = run("cd " + dir.string() + " && " + paykanRun() + " " +
+                       option + " hello.pkn 2>/dev/null");
+    ASSERT_EQ(printed.exitCode, 0) << option;
+    for (const std::string &args :
+         {std::string(option) + " -o out.txt hello.pkn",
+          std::string(option) + " hello.pkn -o out.txt"}) {
+      std::filesystem::remove(dir / "out.txt");
+      auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() + " " +
+                           args + " 2>&1");
+      EXPECT_EQ(rc, 0) << args << ": " << out;
+      EXPECT_EQ(out, "") << args;
+      EXPECT_EQ(slurp(dir / "out.txt"), printed.out) << args;
+    }
+    for (const char *name : {"hello.pkn", "./hello.pkn"}) {
+      auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() + " " +
+                           option + " hello.pkn -o " + name + " 2>&1");
+      EXPECT_EQ(rc, 1) << option << ": " << out;
+      EXPECT_NE(out.find(std::string("paykan: the output '") + name +
+                         "' is the input file 'hello.pkn'"),
+                std::string::npos)
+          << option << ": " << out;
+    }
+  }
+  EXPECT_EQ(slurp(dir / "hello.pkn"), kHello);
+  std::filesystem::remove_all(dir);
+}
+
+// A command line an --emit-* option rejects writes nothing: the stage of
+// `--emit-mlir=<stage>` is checked as the command line is read, where an
+// unknown one was found only once -o's file was emptied, and the file was
+// then removed (a symbolic link given as -o was removed, its file emptied).
+TEST(Driver, ARejectedEmitLeavesItsOutputAlone) {
+  REQUIRE_BACKEND();
+  namespace fs = std::filesystem;
+  auto dir = freshDir("emit_rejected");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::ofstream(dir / "keep.txt") << "keep";
+  std::ofstream(dir / "target.txt") << "keep";
+  fs::create_symlink("target.txt", dir / "link.txt");
+  for (const char *output : {"keep.txt", "link.txt"}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " --emit-mlir=bogus hello.pkn -o " + output + " 2>&1");
+    EXPECT_EQ(rc, 1) << output << ": " << out;
+    EXPECT_EQ(out.find("paykan: unknown MLIR stage 'bogus' (expected pir, "
+                       "scf, llvm or emitc). Try: '"),
+              0U)
+        << output << ": " << out;
+  }
+  EXPECT_EQ(slurp(dir / "keep.txt"), "keep");
+  EXPECT_TRUE(fs::is_symlink(dir / "link.txt"));
+  EXPECT_EQ(slurp(dir / "target.txt"), "keep");
+  std::filesystem::remove_all(dir);
+}
+
+// Malformed command lines get errors that say what is wrong (finding 74):
+// an option is named as it was spelled, `--emit-mlir` takes a stage, and
+// only -O, -O<n> and -O=<n> are an optimization level.
+TEST(Driver, MalformedCommandLinesAreReportedAsWritten) {
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  const std::vector<std::pair<std::string, std::string>> cases = {
+      {"--emit-mlir " + src, "option '--emit-mlir' needs a stage: "
+                             "--emit-mlir=<stage> (pir, scf, llvm or emitc)"},
+      {"-emit-mlir", "option '-emit-mlir' needs a stage: --emit-mlir=<stage> "
+                     "(pir, scf, llvm or emitc)"},
+      {"--Output " + src, "unknown command line argument '--Output'"},
+      {"-Ofast " + src, "unknown command line argument '-Ofast'"},
+      {"build " + src + " -o ''", "option '-o' requires a value"},
+      {"--frontend= " + src, "option '--frontend' requires a value"},
+      {"--check-only " + src + " --O", "option '--O' requires a value"},
+      {"--emit-pkm " + src + " extra",
+       "unexpected argument 'extra' (--emit-pkm takes one file and no "
+       "program arguments)"},
+      {"pkm dump a.pkm b.pkm",
+       "unexpected argument 'b.pkm' (`pkm dump` takes one module file)"}};
+  for (const auto &[args, message] : cases) {
+    auto [rc, out] = run(std::string(kPaykan) + " " + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_EQ(out.find("paykan: " + message + ". Try: '"), 0U)
+        << args << ": " << out;
+  }
+  // The space form with a stage, and the levels, still work.
+  EXPECT_EQ(run(std::string(kPaykan) + " --emit-mlir pir " + src +
+                " > /dev/null 2>&1")
+                .exitCode,
+            hasBackend() ? 0 : 1);
+  for (const char *level : {"-O", "-O0", "-O=1", "--O2"}) {
+    auto [rc, out] =
+        run(std::string(kPaykan) + " --check-only " + level +
+            (std::string(level) == "-O" ? " 3 " : " ") + src + " 2>&1");
+    EXPECT_EQ(rc, 0) << level << ": " << out;
+  }
+  std::filesystem::remove(src);
+}
+
+// -- The toolchain, and the programs the driver links and runs
+
+// `run --object=<archive>` loads the archive's members the program needs
+// into the JIT, as `build` links them (finding 19): the 14_native sample
+// prints the same with its object as an archive.  A file that is neither
+// is named in the error.  The JIT used to take object files only ("The file
+// was not recognized as a valid object file").
+TEST(Driver, RunLoadsAnArchiveOfNativeObjects) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("run_archive");
+  for (const char *name : {"main.pkn", "text.pkn", "text.c"})
+    std::filesystem::copy_file(std::filesystem::path(PAYKAN_SAMPLES_DIR) /
+                                   "imports" / "14_native" / name,
+                               dir / name);
+  auto cc = run("cd " + dir.string() + " && cc -std=c11 -fPIC -I " +
+                shellWord(PAYKAN_RUNTIME_SOURCE_DIR) +
+                " -c text.c -o text.o 2>&1 && ar rcs libtext.a text.o 2>&1");
+  ASSERT_EQ(cc.exitCode, 0) << cc.out;
+  const std::string expected = "HELLO, NATIVE\nLOUD!\n3\nfound: in a "
+                               "haystack\nnot found\n[spaced out]\n";
+  for (const char *object : {"text.o", "libtext.a"}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " --object=" + object + " main.pkn 2>&1");
+    EXPECT_EQ(rc, 0) << object << ": " << out;
+    EXPECT_EQ(out, expected) << object;
+  }
+  std::ofstream(dir / "notes.o") << "not an object";
+  auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                       " --object=notes.o main.pkn 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_NE(out.find("cannot load 'notes.o': "), std::string::npos) << out;
+  std::filesystem::remove_all(dir);
+}
+
+// A C compiler that cannot be started is reported as such (finding 81):
+// spawn learns of the failed exec through a close-on-exec pipe, where `build`
+// said `exec of '...' failed` and then `linking failed (... exited with
+// 127)`, as if the compiler had run.  So it is when paykan's parent left
+// SIGCHLD ignored, which paykan inherits: its children are then reaped for
+// it and no wait for one succeeds, which spawn reported first (`waitpid
+// failed: No child processes`).
+TEST(Driver, BuildReportsACompilerThatCannotRun) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("no_cc");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::string cc = (dir / "nosuchcc").string();
+  const std::string cmd = "cd " + dir.string() + " && CC=" + shellWord(cc) +
+                          " " + paykanRun() + " build hello.pkn -o hello 2>&1";
+  const std::string message =
+      "cannot run '" + cc + "': No such file or directory\n";
+  auto [rc, out] = run(cmd);
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_EQ(out, message);
+  // Started without a shell, which would take SIGCHLD back.
+  std::vector<std::string> argv{kPaykan};
+  if (!testBackend().empty())
+    argv.push_back("--backend=" + testBackend());
+  for (const char *arg : {"build", "hello.pkn", "-o", "hello"})
+    argv.emplace_back(arg);
+  auto [rc2, out2] = runIgnoringSigchld(dir, argv, {"CC", cc});
+  EXPECT_EQ(rc2, 1) << out2;
+  EXPECT_EQ(out2, message);
+  EXPECT_FALSE(std::filesystem::exists(dir / "hello"));
+  std::filesystem::remove_all(dir);
+}
+
+// $CC may carry arguments (finding 71): its first word is the program, the
+// others come right after it (`env cc` runs cc, as `ccache cc` would), where
+// `build` ran the whole value as one program's name (`exec of 'cc -O0'
+// failed`).  A coverage build links its programs with the compiler that
+// built the runtime, whose profile runtime matches the archive's
+// instrumentation: there $CC names that one, with the flags it is given by
+// default.
+TEST(Driver, BuildRunsTheCompilerCCNamesWithItsArguments) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("cc_words");
+  std::ofstream(dir / "hello.pkn") << kHello;
+#ifdef PAYKAN_TEST_DEFAULT_CC
+  const std::string compiler = PAYKAN_TEST_DEFAULT_CC;
+#else
+  const std::string compiler = "cc";
+#endif
+  for (const std::string &cc :
+       {compiler + " -O0", "env " + compiler, "  " + compiler + "  "}) {
+    std::filesystem::remove(dir / "hello");
+    auto [rc, out] = run("cd " + dir.string() + " && CC=" + shellWord(cc) +
+                         " " + paykanRun() + " build hello.pkn -o hello 2>&1");
+    EXPECT_EQ(rc, 0) << cc << ": " << out;
+    auto [rc2, out2] = run((dir / "hello").string() + " 2>&1");
+    EXPECT_EQ(rc2, 0) << cc << ": " << out2;
+    EXPECT_EQ(out2, "hello\n") << cc;
+  }
+  std::filesystem::remove_all(dir);
+}
+
+// A program's arguments are its own whatever the environment says (finding
+// 76): PAYKAN_NO_ARGS, set to anything (even 0), used to strip every argument,
+// argv[0] included, so `args[0]` panicked.  The plugin host's private
+// variable, the only one left, takes away only the one empty argv[0] the host
+// starts a program with when it has no arguments.
+TEST(Driver, TheEnvironmentLeavesAProgramsArgumentsAlone) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("no_args");
+  std::ofstream(dir / "args.pkn")
+      << "import ::io;\nfn main(args: view Str[]) -> int {\n"
+         "  io::println(Str(args.len()) + \" \" + args[0]);\n  return 0;\n}\n";
+  auto b = run("cd " + dir.string() + " && " + paykanRun() +
+               " build args.pkn -o args 2>&1");
+  ASSERT_EQ(b.exitCode, 0) << b.out;
+  for (const char *env :
+       {"PAYKAN_NO_ARGS=0", "PAYKAN_NO_ARGS=1", "__PAYKAN_HOST_NO_ARGS=1"}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + env + " ./args x y 2>&1");
+    EXPECT_EQ(rc, 0) << env << ": " << out;
+    EXPECT_EQ(out, "3 ./args\n") << env;
+  }
+  std::filesystem::remove_all(dir);
+}
+
+// --list-modules names the module file of every module whose compiled code
+// the program links (finding 67): the C build recipe extracted the objects
+// of the standard library's files and the cache entries only, so a program
+// importing a prebuilt module (here from --module-path) did not link
+// (`undefined reference to pk_geometry_3A_3Ashapes_Sarea`).
+TEST(Driver, ListModulesNamesEveryModuleFileTheProgramLinks) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("list_modules");
+  std::filesystem::create_directories(dir / "lib" / "geometry");
+  std::filesystem::create_directories(dir / "local");
+  std::ofstream(dir / "shapes.pkn")
+      << "fn area(w: int, h: int) -> int { return w * h; }\n";
+  std::ofstream(dir / "local" / "twice.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io;\nimport geometry::shapes;\nimport local::twice;\n"
+         "fn main() -> int {\n"
+         "  io::println(Str<int>(local::twice::twice("
+         "geometry::shapes::area(2, 3))));\n"
+         "  return 0;\n}\n";
+  auto cd = "cd " + dir.string() + " && " + paykanRun();
+  auto lib = run(cd + " --emit-pkm --module-name=geometry::shapes shapes.pkn "
+                      "-o lib/geometry/shapes.pkm 2>&1");
+  ASSERT_EQ(lib.exitCode, 0) << lib.out;
+  std::filesystem::remove(dir / "shapes.pkn");
+  auto [rc, out] = run(cd + " --list-modules --module-path=lib main.pkn 2>&1");
+  ASSERT_EQ(rc, 0) << out;
+  std::vector<std::string> files;
+  std::istringstream lines(out);
+  for (std::string line; std::getline(lines, line);)
+    files.push_back(line);
+  for (const char *file :
+       {".paykan_cache/local/twice.pkm", "lib/geometry/shapes.pkm"})
+    EXPECT_NE(std::find(files.begin(), files.end(), file), files.end())
+        << file << " in:\n"
+        << out;
+  EXPECT_TRUE(std::any_of(files.begin(), files.end(), [](const auto &f) {
+    return f.ends_with("/io.pkm");
+  })) << out;
+  for (const std::string &file : files) {
+    std::filesystem::path path(file);
+    EXPECT_TRUE(std::filesystem::is_regular_file(
+        path.is_absolute() ? path : dir / path))
+        << file;
+  }
+  // It is a thing of its own, printed to standard output.
+  for (const auto &[args, message] :
+       {std::pair{" --list-modules --emit-c main.pkn",
+                  "--list-modules and --emit-c exclude each other"},
+        std::pair{" --list-modules main.pkn -o list.txt",
+                  "-o does not apply to --list-modules"}}) {
+    auto [rc2, out2] = run(cd + args + " 2>&1");
+    EXPECT_EQ(rc2, 1) << args << ": " << out2;
+    EXPECT_NE(out2.find(message), std::string::npos) << args << ": " << out2;
+  }
+  std::filesystem::remove_all(dir);
+}
+
+// A module file names the frontend that parsed its source with its version,
+// this paykan's for the built-in one (finding 103: the version was always
+// empty), in a cache entry and in an --emit-pkm file alike.
+TEST(Driver, ModuleFilesNameTheirFrontendAndItsVersion) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("frontend_record");
+  std::filesystem::create_directories(dir / "lib");
+  std::ofstream(dir / "lib" / "twice.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import lib::twice;\nfn main() -> int { return lib::twice::twice(0); "
+         "}\n";
+  auto cd = "cd " + dir.string() + " && " + paykanRun();
+  auto r = run(cd + " main.pkn 2>&1");
+  ASSERT_EQ(r.exitCode, 0) << r.out;
+  auto e = run(cd + " --emit-pkm lib/twice.pkn -o twice.pkm 2>&1");
+  ASSERT_EQ(e.exitCode, 0) << e.out;
+  const std::string line = std::string("  frontend \"recursive-descent\" \"") +
+                           paykan::kVersion + "\" plugin \"\"\n";
+  for (const char *file : {".paykan_cache/lib/twice.pkm", "twice.pkm"}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + std::string(kPaykan) +
+                         " pkm dump --section=manifest " + file + " 2>&1");
+    EXPECT_EQ(rc, 0) << file << ": " << out;
+    EXPECT_NE(out.find(line), std::string::npos) << file << ":\n" << out;
+  }
+  std::filesystem::remove_all(dir);
+}
+
+// `--help` shows `build`'s -o as optional, and lists every part `pkm dump
+// --section=` prints, as its error for an unknown one does; each of them
+// is accepted (finding 88).
+TEST(Driver, HelpListsEveryPkmDumpSection) {
+  REQUIRE_BACKEND();
+  auto help = run(std::string(kPaykan) + " --help 2>&1");
+  ASSERT_EQ(help.exitCode, 0) << help.out;
+  EXPECT_NE(help.out.find(" [options] build <source-file> [-o <output>]\n"),
+            std::string::npos)
+      << help.out;
+  EXPECT_NE(help.out.find(" pkm dump <file.pkm> [--section=manifest|sections|"
+                          "iface|tmpl|code|symidx|obj|payloads|all]\n"),
+            std::string::npos)
+      << help.out;
+  auto dir = freshDir("dump_sections");
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto cd = "cd " + dir.string() + " && ";
+  auto emit = run(cd + paykanRun() + " --emit-pkm lib.pkn 2>&1");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  for (const char *section : {"manifest", "sections", "iface", "tmpl", "code",
+                              "symidx", "obj", "payloads", "all"}) {
+    auto [rc, out] =
+        run(cd + kPaykan + " pkm dump --section=" + section + " lib.pkm 2>&1");
+    EXPECT_EQ(rc, 0) << section << ": " << out;
+  }
+  auto bad = run(cd + kPaykan + " pkm dump --section=nope lib.pkm 2>&1");
+  EXPECT_EQ(bad.exitCode, 1) << bad.out;
+  EXPECT_EQ(bad.out, "paykan: unknown section 'nope' (expected manifest, "
+                     "sections, iface, tmpl, code, symidx, obj, payloads or "
+                     "all)\n");
+  std::filesystem::remove_all(dir);
 }

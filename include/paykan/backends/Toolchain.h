@@ -21,10 +21,11 @@ namespace paykan::toolchain {
 
 /// Where the C compiler and the runtime are.
 struct Toolchain {
-  /// C compiler command; empty means `$CC`, then `cc` (in a coverage
-  /// build, the C compiler that built the runtime).
+  /// C compiler program; empty means `$CC`'s first word (its other words go
+  /// to the front of ExtraFlags), then `cc` (in a coverage build, the C
+  /// compiler that built the runtime).
   std::string CC;
-  /// Extra flags appended to every compile (e.g. "-O2").
+  /// Extra flags, right after CC in every compile (e.g. "-O2").
   std::vector<std::string> ExtraFlags;
   /// Object files or archives linked into every executable: the objects
   /// defining a program's native functions (--object, #198).
@@ -57,11 +58,11 @@ void setPackageRuntime(std::string lib, std::string includeDir);
 /// Directory of the running executable, or "".
 std::string executableDir();
 
-/// Run @p path with @p args after @p argv0 as the child's argv (no argv at
-/// all when @p argv0 is null, i.e. argc == 0) and @p extraEnv added to the
-/// environment.  Returns the exit status, 128 + signal, or -1.
+/// Run @p path with @p argv0 and then @p args as the child's argv and
+/// @p extraEnv added to the environment.  Returns the exit status, 128 +
+/// signal, or -1 with a message on @p errs when it could not be run.
 int spawn(const std::string &path, const std::vector<std::string> &args,
-          const std::string *argv0,
+          const std::string &argv0,
           const std::vector<std::pair<std::string, std::string>> &extraEnv,
           std::ostream &errs);
 

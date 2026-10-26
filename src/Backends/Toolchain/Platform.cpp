@@ -7,18 +7,22 @@
 #include "Platform.h"
 
 // -- Platform headers
-// POSIX (every supported platform): process spawning, mkdtemp, getpid and
-// access, and the dynamic loader (dlopen / dlsym; in libc on current glibc
-// and on macOS, libdl on older glibc: CMAKE_DL_LIBS).
+// POSIX (every supported platform): process spawning (fork, execvp, a
+// close-on-exec pipe, waitpid), mkdtemp, getpid and access, and the dynamic
+// loader (dlopen / dlsym; in libc on current glibc and on macOS, libdl on older
+// glibc: CMAKE_DL_LIBS).
 #if !defined(_WIN32)
 #include <dlfcn.h>
 #endif
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #if defined(__APPLE__)
-// macOS: _NSGetExecutablePath (realpath is in <cstdlib>).
+// macOS: _NSGetExecutablePath (realpath is in <cstdlib>), and _NSGetEnviron,
+// the environment, which a library cannot name as `environ`.
+#include <crt_externs.h>
 #include <mach-o/dyld.h>
 #elif defined(__linux__)
 // Linux: the executable is the /proc/self/exe symlink, read with
@@ -30,6 +34,7 @@
 // to the $PATH search.
 #endif
 
+#include <algorithm>
 #include <bit>
 #include <cerrno>
 #include <cstdint>
@@ -37,7 +42,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <string_view>
 #include <system_error>
+#include <utility>
 
 namespace paykan::toolchain::platform {
 
@@ -91,6 +98,38 @@ std::string searchPath(const std::string &name) {
   return "";
 }
 
+/// The process's environment: what a child is started with, and what
+/// execvp reads.
+char **&environment() {
+#if defined(__APPLE__)
+  return *_NSGetEnviron();
+#else
+  return environ; // <unistd.h>, with the _GNU_SOURCE C++ compilers define
+#endif
+}
+
+/// "NAME=value" for each variable of the environment, but those @p extraEnv
+/// names, and then those of @p extraEnv: what a child started with
+/// @p extraEnv added to the environment has.
+std::vector<std::string> childEnvironment(
+    const std::vector<std::pair<std::string, std::string>> &extraEnv) {
+  std::vector<std::string> env;
+  for (char **e = environment(); e && *e; ++e) {
+    std::string_view entry(*e);
+    std::string_view name = entry.substr(0, entry.find('='));
+    if (std::none_of(extraEnv.begin(), extraEnv.end(),
+                     [&](const auto &kv) { return kv.first == name; }))
+      env.emplace_back(entry);
+  }
+  for (const auto &[name, value] : extraEnv) {
+    std::string entry = name;
+    entry += '=';
+    entry += value;
+    env.push_back(std::move(entry));
+  }
+  return env;
+}
+
 } // namespace
 
 std::string executablePath() {
@@ -99,34 +138,85 @@ std::string executablePath() {
 }
 
 int spawn(const std::string &path, const std::vector<std::string> &args,
-          const std::string *argv0,
+          const std::string &argv0,
           const std::vector<std::pair<std::string, std::string>> &extraEnv,
           std::ostream &errs) {
+  std::vector<char *> cargv;
+  cargv.reserve(args.size() + 2);
+  cargv.push_back(const_cast<char *>(argv0.c_str()));
+  for (const auto &a : args)
+    cargv.push_back(const_cast<char *>(a.c_str()));
+  cargv.push_back(nullptr);
+  // The child's environment is made here: between fork and exec the child
+  // of a process that may have threads calls only what is safe there, and
+  // setenv is not.
+  std::vector<std::string> env;
+  std::vector<char *> cenv;
+  if (!extraEnv.empty()) {
+    env = childEnvironment(extraEnv);
+    for (std::string &entry : env)
+      cenv.push_back(entry.data());
+    cenv.push_back(nullptr);
+  }
+  auto cannotRun = [&](int error) {
+    errs << "cannot run '" << path << "': " << std::strerror(error) << "\n";
+    return -1;
+  };
+  // A failed exec comes back through a pipe whose ends close on exec: the
+  // child writes execvp's errno there before it exits, and a successful
+  // exec closes the child's end, so the parent reads the errno or end of
+  // file.  pipe and fcntl, as macOS has no pipe2; nothing else in the
+  // compiler starts processes, so no other child inherits the ends before
+  // they are marked.
+  int report[2];
+  if (pipe(report) != 0)
+    return cannotRun(errno);
+  for (int fd : report)
+    if (fcntl(fd, F_SETFD, FD_CLOEXEC) != 0) {
+      int error = errno;
+      close(report[0]);
+      close(report[1]);
+      return cannotRun(error);
+    }
   pid_t pid = fork();
   if (pid < 0) {
-    errs << "fork failed: " << std::strerror(errno) << "\n";
-    return -1;
+    int error = errno;
+    close(report[0]);
+    close(report[1]);
+    return cannotRun(error);
   }
   if (pid == 0) {
-    for (const auto &[k, v] : extraEnv)
-      setenv(k.c_str(), v.c_str(), 1);
-    std::vector<char *> cargv;
-    if (argv0)
-      cargv.push_back(const_cast<char *>(argv0->c_str()));
-    for (const auto &a : args)
-      cargv.push_back(const_cast<char *>(a.c_str()));
-    cargv.push_back(nullptr);
+    close(report[0]);
+    if (!cenv.empty())
+      environment() = cenv.data();
     execvp(path.c_str(), cargv.data());
-    std::fprintf(stderr, "exec of '%s' failed: %s\n", path.c_str(),
-                 std::strerror(errno));
+    int err = errno;
+    ssize_t written = write(report[1], &err, sizeof err);
+    (void)written; // the parent then sees no errno, only the 127
     _exit(127);
   }
+  close(report[1]);
+  int execErrno = 0;
+  ssize_t got = 0;
+  do
+    got = read(report[0], &execErrno, sizeof execErrno);
+  while (got < 0 && errno == EINTR);
+  close(report[0]);
   int status = 0;
-  while (waitpid(pid, &status, 0) < 0) {
+  int waitErrno = 0;
+  while (waitpid(pid, &status, 0) < 0)
     if (errno != EINTR) {
-      errs << "waitpid failed: " << std::strerror(errno) << "\n";
-      return -1;
+      waitErrno = errno;
+      break;
     }
+  // A failed exec first: its errno came through the pipe whether or not
+  // the child could be waited for (with SIGCHLD ignored, a parent's
+  // children are reaped for it and waitpid fails with ECHILD).
+  if (got == static_cast<ssize_t>(sizeof execErrno))
+    return cannotRun(execErrno);
+  if (waitErrno != 0) {
+    errs << "waitpid failed: " << std::strerror(waitErrno) << "\n";
+    return -1;
   }
   if (WIFEXITED(status))
     return WEXITSTATUS(status);

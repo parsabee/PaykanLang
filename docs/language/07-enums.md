@@ -500,6 +500,8 @@ Output:
 - A `view` is never stored in a field: `E::B(v)` with a `view` parameter `v` is an error, as
   storing it in a struct is.
 - A tagged union does not cross into C ([Native functions](03-functions.md#native-functions)),
+  other than as a type argument of a generic native function, whose `PaykanType` gives it
+  the kind of a tuple ([Generic native functions](03-functions.md#generic-native-functions)),
   and is not `Hashable` (so it is not a `HashMap` key).
 - An imported tagged union is used the same way: `geo::Shape::Rect(1, 2)` makes one and the
   arms are bare (`r: Rect`); its fields' struct is `geo::Shape::Rect`.

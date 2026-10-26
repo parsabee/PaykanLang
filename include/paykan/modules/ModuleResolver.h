@@ -36,8 +36,12 @@ struct ResolverOptions {
   /// The source root imports are resolved against ("" = the current
   /// directory); the cache lives under it (names::kCacheDir).
   std::string ProjectRoot;
-  /// The frontend name recorded in the manifests ("" = the default).
+  /// The frontend the manifests record (docs/design/pkm.md §2.2, tag 0x20):
+  /// its name ("" = the default), its version, and the plugin it comes
+  /// from ("" for a built-in frontend).
   std::string FrontendName;
+  std::string FrontendVersion;
+  std::string FrontendPlugin;
   /// Where prebuilt modules are looked for after "next to the source":
   /// the --module-path directories, then $PAYKAN_MODULE_PATH.
   std::vector<std::string> ModulePath;
@@ -133,6 +137,18 @@ public:
   std::span<const uint8_t> templates(const std::string &canonical) const;
   /// The file a diagnostic names for a Loaded module (project-relative).
   std::string displayPath(const std::string &canonical) const;
+  /// The module file of @p canonical as the driver can open it: the `.pkm`
+  /// a Loaded module was read from, or the cache entry writeCacheEntry()
+  /// wrote for a module built from source; "" for neither.
+  std::string moduleFile(const std::string &canonical) const;
+  /// Every file read for the imports so far, each once, in the order they
+  /// were first read: the sources (of the modules built from source, and of
+  /// those whose cache entry was checked against it) and the `.pkm` files
+  /// (cache entries, prebuilt modules, the standard library's), which the
+  /// driver never writes over.
+  const std::vector<std::filesystem::path> &filesRead() const {
+    return FilesRead;
+  }
 
   /// The modules built from source whose cache entries are to be written
   /// once the program verified (none when the cache is not written), and
@@ -187,6 +203,8 @@ private:
              const pkm::Object *object) const;
   std::filesystem::path cachePath(const std::string &canonical) const;
   void log(const std::string &line) const;
+  /// Adds @p path to filesRead() unless it is there.
+  void noteRead(const std::filesystem::path &path);
 
   ResolverOptions Opts;
   pkm::HostIdentity Host;
@@ -196,6 +214,8 @@ private:
   /// Modules whose resolution is waiting on a dependency (a cycle through
   /// hand-edited cache entries falls back to building from source).
   std::set<std::string> Awaiting;
+  /// What filesRead() returns.
+  std::vector<std::filesystem::path> FilesRead;
 };
 
 } // namespace paykan::modules

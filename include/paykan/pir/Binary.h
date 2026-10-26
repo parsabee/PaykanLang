@@ -61,7 +61,7 @@ enum class SymbolKind : uint8_t {
   Bytes = 6,
   ExternGlobal = 7,
   Slot = 8,     // reserved (#170)
-  ClassObj = 9, // reserved (#160)
+  ClassObj = 9, // reserved, never written: the #160 erasure was dropped
 };
 
 /// One record of the blob: the bytes [Offset, Offset + Length) are exactly

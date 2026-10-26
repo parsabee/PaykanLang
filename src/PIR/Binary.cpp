@@ -160,7 +160,7 @@ public:
       W.bytes(g.Bytes);
     }
     W.uleb(0); // SlotRec (#170)
-    W.uleb(0); // ClassObjRec (#160)
+    W.uleb(0); // ClassObjRec: reserved, always empty (no #160 erasure)
     W.uleb(m.Classes.size());
     for (const Class &c : m.Classes)
       klass(c);

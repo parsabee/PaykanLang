@@ -10,7 +10,6 @@
 
 #include "paykan/pir/Printer.h"
 
-#include <filesystem>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -52,11 +51,11 @@ public:
       break;
     case backend::EmitKind::Object:
       k = PAYKAN_EMIT_OBJECT;
-      output = defaultOutput(in, opts, ".o");
+      output = opts.OutputPath;
       break;
     case backend::EmitKind::Executable:
       k = PAYKAN_EMIT_EXECUTABLE;
-      output = defaultOutput(in, opts, "");
+      output = opts.OutputPath;
       break;
     }
     int rc = B->emit(B->data, &call.Session, &call.Input, k,
@@ -138,19 +137,6 @@ private:
     std::string ProjectRoot;
     bool Ok = true;
   };
-
-  /// -o, or what the built-in backends default to: the input's stem (plus
-  /// @p ext), "a.out" for an executable without one.
-  static std::string defaultOutput(const backend::Input &in,
-                                   const backend::EmitOptions &opts,
-                                   const char *ext) {
-    if (!opts.OutputPath.empty())
-      return opts.OutputPath;
-    std::string stem = std::filesystem::path(in.InputFilename).stem().string();
-    if (stem.empty())
-      return *ext ? std::string("a") + ext : std::string("a.out");
-    return stem + ext;
-  }
 
   const PaykanBackend *B;
 };

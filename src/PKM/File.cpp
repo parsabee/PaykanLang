@@ -13,9 +13,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
-#include <iterator>
 #include <random>
 
 namespace paykan::pkm {
@@ -360,17 +361,50 @@ StatusOr<std::vector<uint8_t>> Writer::finish() const {
 
 // --- Files ------------------------------------------------------------------
 
+namespace {
+
+/// Writes @p bytes to @p path, opened as std::fopen opens a file to write:
+/// made when it is missing, emptied when it exists, through a symbolic
+/// link.  "" when every byte was written, else the reason the open, a
+/// write or the flush gave (`No space left on device`).
+std::string writeBytes(const std::filesystem::path &path,
+                       std::span<const uint8_t> bytes) {
+  errno = 0;
+  std::FILE *f = std::fopen(path.string().c_str(), "wb");
+  if (!f)
+    return std::strerror(errno ? errno : EIO);
+  int error = 0;
+  errno = 0;
+  if (!bytes.empty() &&
+      std::fwrite(bytes.data(), 1, bytes.size(), f) != bytes.size())
+    error = errno ? errno : EIO;
+  errno = 0;
+  if (std::fflush(f) != 0 && error == 0)
+    error = errno ? errno : EIO;
+  errno = 0;
+  if (std::fclose(f) != 0 && error == 0)
+    error = errno ? errno : EIO;
+  return error ? std::strerror(error) : "";
+}
+
+} // namespace
+
 Status writeFileAtomically(const std::filesystem::path &path,
                            std::span<const uint8_t> bytes) {
   namespace fs = std::filesystem;
   std::error_code ec;
-  fs::path dir = path.parent_path();
-  if (!dir.empty()) {
-    fs::create_directories(dir, ec);
-    if (ec)
-      return Status::error("cannot create directory '" + dir.string() +
-                           "': " + ec.message());
+  // What is not a regular file is written in place, as a program writes the
+  // file it is given: a rename would replace a symbolic link, a device or a
+  // FIFO itself (`-o /dev/null` made /dev/null a regular file), and a
+  // directory is an error.
+  if (fs::file_status node = fs::symlink_status(path, ec);
+      fs::exists(node) && !fs::is_regular_file(node)) {
+    std::string why = writeBytes(path, bytes);
+    return why.empty() ? Status::ok() : Status::error(why);
   }
+  if (fs::path dir = path.parent_path();
+      !dir.empty() && !fs::is_directory(dir, ec))
+    return Status::error("the directory '" + dir.string() + "' does not exist");
   // Unique per process and call, so concurrent writers of one cache entry
   // never share a temporary (a crash leaves a stray .tmp, never a partial
   // module file).
@@ -378,14 +412,9 @@ Status writeFileAtomically(const std::filesystem::path &path,
   std::random_device rd;
   fs::path tmp = path;
   tmp += ".tmp" + std::to_string(rd()) + "-" + std::to_string(counter++);
-  {
-    std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-    out.write(reinterpret_cast<const char *>(bytes.data()),
-              static_cast<std::streamsize>(bytes.size()));
-    if (!out) {
-      fs::remove(tmp, ec);
-      return Status::error("cannot write '" + tmp.string() + "'");
-    }
+  if (std::string why = writeBytes(tmp, bytes); !why.empty()) {
+    fs::remove(tmp, ec);
+    return Status::error(why);
   }
   fs::rename(tmp, path, ec);
   if (ec) {
@@ -399,12 +428,39 @@ Status writeFileAtomically(const std::filesystem::path &path,
 
 StatusOr<std::vector<uint8_t>>
 readFileBytes(const std::filesystem::path &path) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::file_status status = fs::status(path, ec);
+  if (fs::is_directory(status))
+    return Status::error("'" + path.string() + "' is a directory, not a file");
   std::ifstream in(path, std::ios::binary);
   if (!in)
     return Status::error("cannot open '" + path.string() + "'");
-  std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(in)),
-                             std::istreambuf_iterator<char>());
-  if (in.bad())
+  // Read with istream::read, which reports a failed read in the stream's
+  // state rather than by throwing.
+  std::vector<uint8_t> bytes;
+  if (!fs::is_regular_file(status)) {
+    // A pipe or a device (`<(cat lib.pkm)`, /dev/stdin) has no size: it is
+    // read to its end.
+    std::vector<char> chunk(size_t{1} << 16);
+    do {
+      in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+      bytes.insert(bytes.end(), chunk.data(), chunk.data() + in.gcount());
+    } while (in);
+    if (!in.eof())
+      return Status::error("cannot read '" + path.string() + "'");
+    return bytes;
+  }
+  // The size of the file opened (a writer may rename another over the
+  // path).
+  in.seekg(0, std::ios::end);
+  std::streamoff size = in.tellg();
+  in.seekg(0, std::ios::beg);
+  if (!in || size < 0)
+    return Status::error("cannot read '" + path.string() + "'");
+  bytes.resize(static_cast<size_t>(size));
+  in.read(reinterpret_cast<char *>(bytes.data()), size);
+  if (in.gcount() != size)
     return Status::error("cannot read '" + path.string() + "'");
   return bytes;
 }

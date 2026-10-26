@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Parsa Bagheri
+// SPDX-License-Identifier: Apache-2.0
+//
 // 15_native_generic — the C side of main.pkn's generic native functions.
 //
 // Each gets a PaykanType for its type argument first.  A `T` argument is the

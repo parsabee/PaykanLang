@@ -1881,12 +1881,9 @@ TEST(Lowering, AStrOrFloatMatchIsAsDeepForAnyNumberOfArms) {
     std::string src = "fn m(x: " + std::string(type) + ") -> int { match x {";
     const bool str = std::string(type) == "Str";
     for (size_t i = 0; i < arms; ++i) {
-      const std::string n = std::to_string(i);
-      src += str ? " \"" : " ";
-      src += n;
-      src += str ? "\" { return " : ".5 { return ";
-      src += n;
-      src += "; }";
+      std::string n = std::to_string(i);
+      src.append(str ? " \"" : " ").append(n).append(str ? "\"" : ".5");
+      src.append(" { return ").append(n).append("; }");
     }
     return src + " _ { return -1; } } }\nfn main() -> int { return 0; }\n";
   };
