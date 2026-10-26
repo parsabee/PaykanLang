@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-#include <chrono>
+#include <ctime>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -179,15 +179,17 @@ TEST(Recovery, NestingTooDeepInBracketsIsTheOnlyError) {
     for (int i = 0; i < n; ++i)
       src += close;
     src += ";\ny = ; return 0; }\n";
-    const auto start = std::chrono::steady_clock::now();
+    // Processor time, which the tests running beside this one leave alone.
+    const std::clock_t start = std::clock();
     auto r = parse(src);
-    const auto took = std::chrono::steady_clock::now() - start;
+    const double took =
+        static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
     EXPECT_EQ(r.Errors, 2u) << open;
     ASSERT_FALSE(r.Diags.empty()) << open;
     EXPECT_EQ(r.Diags[0].Message, "nesting too deep (more than 512 levels)")
         << open;
     EXPECT_EQ(errorLines(r), (std::vector<size_t>{1, 2})) << open;
-    EXPECT_LT(took, std::chrono::seconds(5)) << open;
+    EXPECT_LT(took, 5.0) << open;
   }
 }
 
