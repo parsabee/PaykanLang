@@ -108,6 +108,42 @@ fn main() -> int { return 0; }
                 "'int' is a built-in type"});
 }
 
+// A requirement's parameters follow a function's rules (findings 63 and
+// new-F1b-1): distinct names, none naming a type.  It has no body, so a
+// function of the module may name one, as for a native function.  Each
+// error is reported once, at the requirement.
+TEST(Traits, RequirementParametersAreChecked) {
+  auto r = semaCheck(R"(trait T { fn m(x: int, x: int); }
+trait U { fn n(u8: int); }
+class A {}
+trait V { view fn k(a: int, Str: int) -> int; fn j(A: int); }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 4) << r.Diagnostics;
+  expectAll(r, {"1:11: error: duplicate parameter 'x' in method 'm' of trait "
+                "'T'",
+                "2:11: error: 'u8' is a type name and cannot be used as a "
+                "variable",
+                "4:11: error: 'Str' is a type name and cannot be used as a "
+                "variable",
+                "4:47: error: 'A' is a type name and cannot be used as a "
+                "variable"});
+
+  auto ok = semaCheck(R"(trait T { fn m(x: int, y: int) -> int; fn n(f: int); }
+class A { view fn z() -> int { return 0; } }
+impl A {
+  fn m(x: int, y: int) -> int { return x + y; }
+  fn n(v: int) {}
+}
+impl T for A {}
+fn f() {}
+fn main() -> int { return A().m(1, 2); }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  EXPECT_EQ(ok.ErrorCount, 0) << ok.Diagnostics;
+}
+
 TEST(Traits, TraitsAreNotTypes) {
   auto r = semaCheck(R"(trait Named { view fn name() -> Str; }
 trait Into<T> { view fn into() -> T; }

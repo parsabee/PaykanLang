@@ -264,7 +264,7 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 | Error | Trigger |
 |-------|---------|
 | Trait name taken | A trait is named like a class, enum, function or another trait, or a built-in trait (`Show`, `Hashable`, `ValueType`) |
-| Bad requirement | A requirement names an unknown type, repeats a name, or is `__init__` / `destroy` |
+| Bad requirement | A requirement names an unknown type, repeats a method's name, has two parameters of one name or one named like a type (`fn m(u8: int)`) or `self`, or is `__init__` / `destroy` |
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
 | Implemented twice | The class, or a superclass, already implements the trait (every class implements `Show`) |

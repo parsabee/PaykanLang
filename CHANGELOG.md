@@ -628,6 +628,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and 'char'` for `100 > c`), with the line and caret of the compare.  Compare with a char
   (`c < 'd'`) or the byte value (`int(c) < 100`) (docs/language/02-basics.md, "Relational &
   Equality").  No program that compiled is rejected.
+- A trait requirement's parameters follow a function's rules: two of one name (`trait T {
+  fn m(x: int, x: int); }`) are `duplicate parameter 'x' in method 'm' of trait 'T'`, and
+  one named like a type (`fn m(u8: int)`, a class's name) is `'u8' is a type name and
+  cannot be used as a variable`, at the requirement.  Both were accepted, unlike a
+  function's or a method's parameters (docs/language/06-traits.md, "Semantic Checks").  A
+  function of the module may still name one, the requirement having no body, as for a
+  native function.
 
 ### Removed
 

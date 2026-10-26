@@ -151,8 +151,18 @@ bool Sema::checkTraitDecls(ast::TranslationUnit *tu) {
               "a trait cannot require '" + fn->getName() + "'");
         ok = false;
       }
+      // A requirement's parameters follow every function's rules: distinct
+      // names, none a type's.  It has no body, so a function of the module
+      // can name one (as a native function's).
+      const std::string what =
+          "method '" + fn->getName() + "' of trait '" + td->getName() + "'";
+      bool paramsOk = checkDistinctParams(fn, what);
+      for (const auto &p : fn->getParams())
+        paramsOk = paramsOk && checkBinderName(p.getName(), fn->getLocation(),
+                                               /*binds=*/false);
       RequiredSig sig;
-      if (!resolveRequirement(fn, placeholders, td->getName(), sig)) {
+      if (!paramsOk ||
+          !resolveRequirement(fn, placeholders, td->getName(), sig)) {
         it->second.Erroneous = true;
         ok = false;
       }
