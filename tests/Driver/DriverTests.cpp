@@ -72,6 +72,11 @@ static CmdResult
 runIgnoringSigchld(const std::filesystem::path &dir,
                    const std::vector<std::string> &argv,
                    const std::pair<std::string, std::string> &env) {
+  std::vector<char *> args;
+  args.reserve(argv.size() + 1);
+  for (const std::string &a : argv)
+    args.push_back(const_cast<char *>(a.c_str()));
+  args.push_back(nullptr);
   int out[2];
   if (pipe(out) != 0)
     return {-1, "pipe failed"};
@@ -87,10 +92,6 @@ runIgnoringSigchld(const std::filesystem::path &dir,
     if (chdir(dir.c_str()) != 0)
       _exit(126);
     setenv(env.first.c_str(), env.second.c_str(), 1);
-    std::vector<char *> args;
-    for (const std::string &a : argv)
-      args.push_back(const_cast<char *>(a.c_str()));
-    args.push_back(nullptr);
     execv(args[0], args.data());
     _exit(127);
   }
