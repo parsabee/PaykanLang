@@ -150,7 +150,8 @@ never searches beyond the source root and the module path.
 ### System Imports
 
 A leading `::` marks a **system** import: `import ::io;` (or `import ::{io, result};`) looks for
-`io.pkn` in the standard-library directory instead of the source root. That directory is
+`io.pkn`, or the prebuilt `io.pkm` the installed library ships, in the standard-library
+directory instead of the source root. That directory is
 the first of `$PAYKAN_STDLIB` when the environment variable is set, the installed standard
 library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable's
 `<prefix>/bin/`) when it exists, and `<source-root>/stdlib`. A system module is otherwise an
