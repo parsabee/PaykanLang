@@ -22,7 +22,7 @@ this repository, always built and the default; other backends are plugins
 | Modules | a module's `.pkm` keeps its copies of instantiations as PIR and the rest of its code as LLVM bitcode (`compileModule`), which a program links on demand; shared copies link under names without their module |
 | The shared lowering | `pir` → `func` + `scf` + `arith`, and the few `pir` memory ops neither upstream path covers; one pass, used by both targets (`--emit-mlir=scf`) |
 | Where the targets part | after the shared lowering, at the MLIR level: upstream conversions take `func`, `scf` and `arith` to the `llvm` dialect and to EmitC; the remaining `pir` ops get one small pattern set per target |
-| LLVM | the `llvm` dialect (`--emit-mlir=llvm`), translated to LLVM IR, then the existing JIT, native object build, bitcode cache and `--emit-llvm` |
+| LLVM | the `llvm` dialect (`--emit-mlir=llvm`), translated to LLVM IR, then the existing JIT, native object build, bitcode cache and `--emit-llvm`; on the way `scf` becomes `cf` by upstream's patterns (the backend's own for `scf.index_switch`), each op lowered once and a block's last first, so the work and the memory grow with the function's length, not its square |
 | C | EmitC, printed by MLIR's C emitter (`--emit-c`) |
 | Options | `--emit-mlir=<stage>`, `pir`, `scf`, `llvm` or `emitc`: the program after that stage, on stdout |
 | Backends | `mlir` alone, always built and the default; it replaced `c` and `llvm`, whose `PAYKAN_BACKENDS` names now build it, with a warning (step 6) |

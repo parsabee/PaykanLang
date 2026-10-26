@@ -1,25 +1,26 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 //
-// The compiler's time on large programs: each program here is one that a
-// cost quadratic in its size, or worse, made take minutes, compiled under a
-// bound that leaves the linear compiler a wide margin.  The time measured is
-// the processor time `paykan` spends (getrusage of the children), which the
-// tests running beside these leave alone; ctest runs them as DriverScaling,
-// labelled `scaling`, apart from the other driver tests.
+// The compiler's time and memory on large programs: each program here is
+// one that a cost quadratic in its size made take minutes or gigabytes,
+// compiled under a bound that leaves the linear compiler a wide margin.
+// The time measured is the processor time `paykan` spends, which the tests
+// running beside these leave alone, and the memory its peak resident size;
+// ctest runs them as DriverScaling, labelled `scaling`, apart from the
+// other driver tests.
 
 #include <gtest/gtest.h>
 
 #include <array>
-#include <cstdio>
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <unistd.h>
 
 #include <sys/resource.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 #ifndef PAYKAN_BIN
 #error "PAYKAN_BIN must be defined via CMake compile definition"
@@ -29,8 +30,8 @@ namespace {
 
 const char *const kPaykan = PAYKAN_BIN;
 
-/// How much slower than a plain build the compiler under test may be: a
-/// sanitized or coverage build's is several times slower.
+/// How much slower and larger than a plain build's the compiler under test
+/// may be: a sanitized or coverage build's is several times either.
 double slowdown() {
 #if defined(PAYKAN_TEST_SANITIZED) || defined(PAYKAN_TEST_COVERAGE)
   return 4;
@@ -43,30 +44,50 @@ struct Timed {
   int ExitCode = -1;
   std::string Out;
   double Seconds = 0; // processor time, user and system
+  double PeakMiB = 0; // the largest resident size of a process it ran
 };
 
-double cpuSeconds(const rusage &u) {
-  return static_cast<double>(u.ru_utime.tv_sec + u.ru_stime.tv_sec) +
-         static_cast<double>(u.ru_utime.tv_usec + u.ru_stime.tv_usec) / 1e6;
-}
-
 /// Run @p cmd through the shell: its exit status, its standard output, and
-/// the processor time it took.
+/// the processor time and memory it and the processes it waited for took.
 Timed timed(const std::string &cmd) {
   Timed t;
-  rusage before{};
-  getrusage(RUSAGE_CHILDREN, &before);
-  FILE *fp = popen(cmd.c_str(), "r");
-  if (!fp)
+  int out[2];
+  if (pipe(out) != 0)
     return t;
+  const pid_t pid = fork();
+  if (pid < 0)
+    return t;
+  if (pid == 0) {
+    dup2(out[1], STDOUT_FILENO);
+    close(out[0]);
+    close(out[1]);
+    execl("/bin/sh", "sh", "-c", cmd.c_str(), static_cast<char *>(nullptr));
+    _exit(127);
+  }
+  close(out[1]);
   std::array<char, 4096> buf{};
-  while (fgets(buf.data(), buf.size(), fp))
-    t.Out += buf.data();
-  const int rc = pclose(fp);
-  rusage after{};
-  getrusage(RUSAGE_CHILDREN, &after);
-  t.ExitCode = WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
-  t.Seconds = cpuSeconds(after) - cpuSeconds(before);
+  for (ssize_t n; (n = read(out[0], buf.data(), buf.size())) != 0;) {
+    if (n < 0 && errno == EINTR)
+      continue;
+    if (n < 0)
+      break;
+    t.Out.append(buf.data(), static_cast<size_t>(n));
+  }
+  close(out[0]);
+  int status = 0;
+  rusage usage{};
+  while (wait4(pid, &status, 0, &usage) < 0 && errno == EINTR) {
+  }
+  t.ExitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  t.Seconds =
+      static_cast<double>(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) +
+      static_cast<double>(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) /
+          1e6;
+#ifdef __APPLE__
+  t.PeakMiB = static_cast<double>(usage.ru_maxrss) / (1024.0 * 1024.0);
+#else
+  t.PeakMiB = static_cast<double>(usage.ru_maxrss) / 1024.0;
+#endif
   return t;
 }
 
@@ -166,4 +187,43 @@ TEST(Scaling, RunAtO0GeneratesCodeAsBuildDoes) {
   EXPECT_EQ(run.ExitCode, 7) << run.Out;
   EXPECT_LT(run.Seconds, 2 * build.Seconds + 5 * slowdown())
       << "build -O0: " << build.Seconds << " s";
+}
+
+// A long run of `if`s in one function, and a match on a Str with many arms
+// (a test of each in turn), are thousands of scf.if ops in one block, which
+// the lowering to cf splits one after another (SW-17).  The conversion
+// driver it ran under recorded every op each split moved, to undo it, and
+// each split moved everything after it: 3000 ifs and 2000 arms took 1.3 GB
+// and 19.5 s to reach --emit-mlir=llvm.  Lowering the ops of a block from
+// its last, with nothing to undo, takes 0.1 GB and 2 s.
+TEST(Scaling, ALongRunOfIfsLowersToCFInLinearMemory) {
+  ScratchDir dir("ifs");
+  std::string src = "fn f(k: int) -> int {\n  r = -1;\n";
+  for (int i = 0; i < 3000; ++i) {
+    const std::string k = std::to_string(i);
+    src += "  if k == ";
+    src += k;
+    src += " {\n    r = ";
+    src += k;
+    src += ";\n  }\n";
+  }
+  src += "  return r;\n}\nfn g(s: Str) -> int {\n  match s {\n";
+  for (int i = 0; i < 2000; ++i) {
+    const std::string k = std::to_string(i);
+    src += "    \"k";
+    src += k;
+    src += "\" { return ";
+    src += k;
+    src += "; }\n";
+  }
+  src += "    _ { return -1; }\n  }\n}\n"
+         "fn main() -> int { return f(2999) % 256 + g(\"k5\"); }\n";
+  const std::string path = dir.write("ifs.pkn", src);
+  Timed t = timed(std::string(kPaykan) + " --emit-mlir=llvm " + path +
+                  " 2>&1 >/dev/null");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_LT(t.PeakMiB, 400 * slowdown());
+  EXPECT_LT(t.Seconds, 10 * slowdown());
+  Timed run = timed(std::string(kPaykan) + " run -O0 " + path + " 2>&1");
+  EXPECT_EQ(run.ExitCode, 2999 % 256 + 5) << run.Out;
 }

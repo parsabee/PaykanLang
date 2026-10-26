@@ -33,7 +33,9 @@
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/Dialect/SCF/IR/SCF.h>
 #include <mlir/IR/BuiltinAttributes.h>
+#include <mlir/IR/Iterators.h>
 #include <mlir/Pass/Pass.h>
+#include <mlir/Rewrite/PatternApplicator.h>
 #include <mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h>
 #include <mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h>
 #include <mlir/Target/LLVMIR/Export.h>
@@ -429,7 +431,17 @@ struct IndexSwitchLowering : OpRewritePattern<scf::IndexSwitchOp> {
   }
 };
 
-/// Upstream's SCF to cf conversion, but for scf.index_switch.
+/// Upstream's SCF to cf patterns, but for scf.index_switch, applied to each
+/// scf op once, in an order that keeps the work linear in the function's
+/// size.  Lowering an op splits its block after it, moving what follows it
+/// to a new block: the ops of a block are lowered from its last to its
+/// first, so that what follows each is only what precedes the next one
+/// lowered.  And an op before those in its regions, which then become
+/// blocks of its parent's region: a pattern sees its op's regions as the
+/// shared lowering built them (a loop's condition one block ending in
+/// scf.condition).  No pattern rolls back, so nothing is recorded to undo:
+/// the conversion driver, which records every op a split moves, took
+/// time and memory quadratic in the number of ops in a block (SW-17).
 struct SCFToCFPass : public PassWrapper<SCFToCFPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SCFToCFPass)
 
@@ -446,14 +458,35 @@ struct SCFToCFPass : public PassWrapper<SCFToCFPass, OperationPass<ModuleOp>> {
     RewritePatternSet patterns(ctx);
     populateSCFToControlFlowConversionPatterns(patterns);
     patterns.add<IndexSwitchLowering>(ctx, /*benefit=*/2);
-    ConversionTarget target(*ctx);
-    target
-        .addIllegalOp<scf::ForallOp, scf::ForOp, scf::IfOp, scf::IndexSwitchOp,
-                      scf::ParallelOp, scf::WhileOp, scf::ExecuteRegionOp>();
-    target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
-    if (failed(applyPartialConversion(getOperation(), target,
-                                      std::move(patterns))))
-      signalPassFailure();
+    FrozenRewritePatternSet frozen(std::move(patterns));
+    PatternApplicator applicator(frozen);
+    applicator.applyDefaultCostModel();
+    PatternRewriter rewriter(ctx);
+    // A pattern may make scf ops of its own (a parallel loop's are for
+    // loops): those are lowered in another round.
+    for (std::vector<Operation *> ops = scfOps(); !ops.empty();
+         ops = scfOps()) {
+      for (Operation *op : ops) {
+        rewriter.setInsertionPoint(op);
+        if (failed(applicator.matchAndRewrite(op, rewriter))) {
+          op->emitError("cannot lower '") << op->getName() << "' to cf";
+          return signalPassFailure();
+        }
+      }
+    }
+  }
+
+  /// The scf ops left, each before those in its regions, a block's last
+  /// first.
+  std::vector<Operation *> scfOps() {
+    std::vector<Operation *> ops;
+    getOperation().walk<WalkOrder::PreOrder, ReverseIterator>(
+        [&](Operation *op) {
+          if (isa<scf::SCFDialect>(op->getDialect()) &&
+              !op->hasTrait<OpTrait::IsTerminator>())
+            ops.push_back(op);
+        });
+    return ops;
   }
 };
 

@@ -841,6 +841,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     level a native build does for the same `-O` (no optimisation at `-O0`, LLVM's least at
     `-O1`, its default at `-O2` as before, its most at `-O3`), and takes 0.3 s
     (docs/language/17-the-paykan-command.md).
+  - The LLVM path's lowering of `scf` to `cf` took time and memory quadratic in the number
+    of `if`s in one function's block (a long run of `if` statements, or a `match` on a
+    `Str` or a float with many arms, which tests each in turn): a function of 3000 `if`s
+    beside a 2000-armed `Str` match took 19.5 s and 1.3 GB to reach `--emit-mlir=llvm`,
+    on every path but the C one.  Lowering an `scf.if` splits its block after it, and the
+    conversion driver recorded every op each split moved, so that it could undo it, while
+    each split moved everything after it.  The same patterns now run on each op once, a
+    block's last first and an op before those in its regions, with nothing to undo: 2 s
+    and 0.1 GB (docs/design/mlir-backend.md).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
