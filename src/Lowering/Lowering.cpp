@@ -904,7 +904,7 @@ void ModuleLowering::emitScopeCleanup(Scope &scope) {
       emitRelease(B.load(it->Local));
   }
   for (auto it = scope.MemVars.rbegin(); it != scope.MemVars.rend(); ++it)
-    emitMemRelease(B.localAddr(it->Local, "mem.addr"), it->ASTType);
+    emitMemDrop(B.localAddr(it->Local, "mem.addr"), it->ASTType);
   for (auto it = scope.PendingReleases.rbegin();
        it != scope.PendingReleases.rend(); ++it)
     emitRelease(*it);

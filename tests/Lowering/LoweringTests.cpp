@@ -257,6 +257,89 @@ fn main() -> int {
   EXPECT_EQ(count(call, "retain nonnull %d."), 1u) << call;
 }
 
+namespace {
+
+/// A tagged union of @p n variants, every third one with a field holding a
+/// reference, and a function returning from a `match` arm of each.
+std::string unionOfMany(int n) {
+  std::string src = "enum Many { ";
+  for (int i = 0; i < n; ++i)
+    src += (i ? ", V" : "V") + std::to_string(i) +
+           (i % 3 == 0 ? "(a: int, s: Str)" : "");
+  src += " }\nfn name(m: Many) -> Str {\n  match m {\n";
+  for (int i = 0; i < n; ++i)
+    src += "    V" + std::to_string(i) + " { return \"V" + std::to_string(i) +
+           "\"; }\n";
+  return src + "  }\n}\nfn main() -> int {\n"
+               "  return int(name(Many::V3(1, \"q\")).len());\n}\n";
+}
+
+} // namespace
+
+// A value held in memory with more than four references is released, when
+// a scope is left, by one call of its type's drop function (SW-03): a
+// `match` returning from each arm of a union grows with its variants, not
+// with its variants times their fields (3.7 times the code for twice the
+// variants when each way out released every variant's fields).  The
+// union's drop function switches on the tag and releases the fields of
+// the variant it names; a value of four references is released in place.
+TEST(Lowering, ALargeValueIsReleasedByOneCallAtEachWayOut) {
+  Lowered l50 = lower(unionOfMany(50));
+  Lowered l100 = lower(unionOfMany(100));
+  ASSERT_TRUE(l50.Ok) << l50.Error;
+  ASSERT_TRUE(l100.Ok) << l100.Error;
+  const std::string f50 = function(l50.Text, "name");
+  const std::string f100 = function(l100.Text, "name");
+  EXPECT_LT(count(f100, "\n"), 2.5 * count(f50, "\n"));
+  // Each of the 100 arms' returns, and the way out after the match no arm
+  // takes, drops the subject's copy and the parameter's: no reference is
+  // released in place.
+  EXPECT_EQ(count(f100, "release "), 0u) << f100;
+  EXPECT_EQ(count(f100, "call @.drop.Many("), 2u * 101) << f100;
+  const std::string drop = fullFunction(l100.Text, ".drop.Many");
+  EXPECT_NE(drop.find("fn @.drop.Many(%at.1: ptr) -> void {\n"
+                      "  %tag.2 = ptr.load i64, %at.1\n"
+                      "  switch %tag.2 {\n    case 0 {\n"),
+            std::string::npos)
+      << drop;
+  EXPECT_EQ(count(drop, "    case "), 34u) << drop;
+  EXPECT_EQ(count(drop, "release "), 34u) << drop;
+  EXPECT_EQ(count(drop, "default"), 0u) << drop;
+  // Four references: released in place.
+  Lowered small = lower(unionOfMany(10));
+  ASSERT_TRUE(small.Ok) << small.Error;
+  EXPECT_EQ(small.Text.find(".drop."), std::string::npos) << small.Text;
+  EXPECT_EQ(count(function(small.Text, "name"), "release "), 2u * 11 * 4)
+      << function(small.Text, "name");
+}
+
+// A struct of many references is released by its drop function too, and a
+// union nested in it by a switch on its tag inside that function.
+TEST(Lowering, ADropFunctionReleasesANestedUnionByItsTag) {
+  Lowered l = lower(R"(
+enum Two { A(s: Str), B(t: Str, u: Str) }
+struct Wide {
+  a: Str;
+  b: Str;
+  c: Str;
+  two: Two;
+}
+fn len(w: Wide, k: int) -> int {
+  if k == 0 { return w.a.len(); }
+  return w.c.len();
+}
+fn main() -> int {
+  return len(Wide("a", "b", "c", Two::A("s")), 1);
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_EQ(count(function(l.Text, "len"), "call @.drop.Wide("), 2u) << l.Text;
+  const std::string drop = fullFunction(l.Text, ".drop.Wide");
+  EXPECT_EQ(count(drop, "release "), 6u) << drop;
+  EXPECT_EQ(count(drop, "switch "), 1u) << drop;
+  EXPECT_EQ(l.Text.find(".drop.Two"), std::string::npos) << l.Text;
+}
+
 TEST(Lowering, StringTemporaryPassedToBuiltinIsDestroyedAfterTheCall) {
   auto l = lower(R"(
     fn main() -> int { n = "hi".len(); return n; }

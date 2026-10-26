@@ -1,0 +1,96 @@
+// Isolates: values held in memory with more than four references among
+// their parts:
+//   * released where a scope is left by one call of the type's drop
+//     function (docs/pir.md §7): a tagged union's releases its current
+//     variant's fields only (the first variant's, a later one's, one with
+//     no fields), a struct's each of its fields, and a struct's and an
+//     array's the unions in them by their tags; and a parameter whose
+//     references were handed on at its last use, its slots null when its
+//     drop runs;
+//   * released in place: a union in a class's field (its `destroy`), and
+//     the old value an assignment replaces.
+//
+// Runtime sites: the Strs each variant and struct holds, the object, and
+// the Strs the matches build.
+//
+// Expected under --track-heap: live blocks : 0.
+
+import ::io;
+
+// expect-stdout: circle c1
+// expect-stdout: empty
+// expect-stdout: square s2
+// expect-stdout: label xyz
+// expect-stdout: ace
+// expect-stdout: square t3
+// expect-stdout: circle u e
+// expect-stdout: label mno
+
+enum Shape {
+  Circle(name: Str, tag: Str),
+  Empty,
+  Square(name: Str, side: int),
+  Label(a: Str, b: Str, c: Str)
+}
+
+struct Wide {
+  a: Str;
+  b: Str;
+  c: Str;
+  d: Str;
+  e: Str;
+}
+
+struct Holder {
+  s: Shape;
+  n: int;
+}
+
+class Box {
+  shape: Shape;
+  wide: Wide;
+}
+
+fn describe(s: Shape) -> Str {
+  match s {
+    c: Circle { return "circle " + c.name; }
+    Empty { return "empty"; }
+    q: Square { return "square " + q.name + Str(q.side); }
+    l: Label { return "label " + l.a + l.b + l.c; }
+  }
+}
+
+fn pick(w: Wide, k: int) -> Str {
+  if k == 0 {
+    return w.a;
+  }
+  if k == 2 {
+    return w.c;
+  }
+  if k == 4 {
+    return w.e;
+  }
+  return w.b;
+}
+
+fn pass(s: Shape) -> Shape {
+  return s;
+}
+
+fn main() -> int {
+  shapes = [Shape::Circle("c" + "1", "t"), Shape::Empty, Shape::Square("s", 2),
+      Shape::Label("x", "y", "z")];
+  for i in 0..4 {
+    io::println(describe(shapes[i]));
+  }
+  w = Wide("a", "b", "c", "d", "e");
+  io::println(pick(w, 0) + pick(w, 2) + pick(w, 4));
+  h = Holder(Shape::Label("p", "q", "r"), 1);
+  h.s = Shape::Square("t", 3);
+  io::println(describe(h.s));
+  b = Box(Shape::Circle("u", "v"), w);
+  io::println(describe(b.shape) + " " + b.wide.e);
+  moved = pass(Shape::Label("m", "n", "o"));
+  io::println(describe(moved));
+  return 0;
+}

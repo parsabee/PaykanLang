@@ -75,6 +75,11 @@ int64_t alignTo(int64_t n, int64_t align) {
 /// Up to this many slots are visited one by one; more in a loop.
 constexpr int64_t kUnrolledSlots = 4;
 
+/// Up to this many references are released in place; more by a call of the
+/// type's drop function, so that a scope's way out (each `return` of each
+/// `match` arm) costs one call, not a release per reference.
+constexpr size_t kReleasesInPlace = 4;
+
 /// Whether @p e is a literal whose value is all zero bits.
 bool isZeroLiteral(const ast::Expr *e) {
   if (const auto *i = ast::dyn_cast<ast::IntegerLiteral>(e))
@@ -326,7 +331,7 @@ void ModuleLowering::releaseMemTemps(size_t mark) {
     auto [v, ty] = MemTemps.back();
     MemTemps.pop_back();
     if (ty)
-      emitMemRelease(v, ty);
+      emitMemDrop(v, ty);
     else
       emitRelease(v);
   }
@@ -389,6 +394,94 @@ void ModuleLowering::emitMemRetain(const Val &addr, ast::Type *ty) {
 
 void ModuleLowering::emitMemRelease(const Val &addr, ast::Type *ty) {
   forEachMemRef(addr, ty, [&](const Val &box) { emitRelease(box); });
+}
+
+void ModuleLowering::emitMemDrop(const Val &local, ast::Type *ty) {
+  if (local && memReleaseCount(ty) > kReleasesInPlace) {
+    B.call(dropFunction(ty), {{Type::Ptr}, Type::Void}, {local});
+    return;
+  }
+  emitMemRelease(local, ty);
+}
+
+size_t ModuleLowering::memReleaseCount(ast::Type *ty) {
+  if (!holdsRef(ty))
+    return 0;
+  if (auto it = MemReleaseCounts.find(ty); it != MemReleaseCounts.end())
+    return it->second;
+  size_t n = 0;
+  if (ast::Type *shape = memShapeOf(ty); shape != ty) {
+    n = memReleaseCount(shape);
+  } else if (ast::isRefType(ty)) {
+    n = 1;
+  } else if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    for (ast::Type *e : tt->getElementTypes())
+      n += memReleaseCount(e);
+  } else {
+    const auto inner = innermostElements(ast::cast<ast::FixedArrayType>(ty));
+    const size_t each = memReleaseCount(inner.first);
+    n = inner.second <= kUnrolledSlots
+            ? static_cast<size_t>(inner.second) * each
+            : each;
+  }
+  MemReleaseCounts[ty] = n;
+  return n;
+}
+
+std::string ModuleLowering::dropFunction(ast::Type *ty) {
+  const std::string name = std::string(pir::kDropPrefix) + ast::typeName(ty);
+  if (FuncByName.count(name))
+    return name;
+  pir::Function *fn = getOrCreateFunction(name, {{Type::Ptr}, Type::Void});
+  fn->Params[0].Name = "at";
+  FunctionStateGuard fnState(*this, fn, nullptr, nullptr);
+  emitMemReleaseByTag(Val(pir::Operand::value(fn->Params[0]), Type::Ptr), ty);
+  B.emitRetVoid();
+  return name;
+}
+
+void ModuleLowering::emitMemReleaseByTag(const Val &addr, ast::Type *ty) {
+  if (!holdsRef(ty))
+    return;
+  if (ast::isPayloadEnum(ty)) {
+    // The tag's variant only: every other one's fields are zeros.
+    auto *et = ast::cast<ast::EnumType>(ty);
+    pir::Switch *s = B.openSwitch(B.ptrLoad(addr, Type::I64, "tag"));
+    for (size_t i = 0; i < et->getNumVariants(); ++i) {
+      ast::StructType *payload = et->getPayload(i);
+      if (!payload || !holdsRef(payload))
+        continue;
+      B.enter(B.addCase(s, Val::i64(static_cast<int64_t>(i))));
+      emitMemReleaseByTag(
+          B.ptrAdd(addr, Val::i64(variantPayloadOffset(et, i)), "variant.addr"),
+          payload);
+      B.leave();
+    }
+    return;
+  }
+  if (ast::Type *shape = memShapeOf(ty); shape != ty) {
+    emitMemReleaseByTag(addr, shape);
+    return;
+  }
+  if (ast::isRefType(ty)) {
+    emitRelease(B.ptrLoad(addr, Type::Box, "elem"));
+    return;
+  }
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    for (size_t i = 0; i < tt->getArity(); ++i) {
+      if (!holdsRef(tt->getElementType(i)))
+        continue;
+      const int64_t off = tupleElementOffset(tt, i);
+      emitMemReleaseByTag(off == 0 ? addr
+                                   : B.ptrAdd(addr, Val::i64(off), "elem.addr"),
+                          tt->getElementType(i));
+    }
+    return;
+  }
+  const auto inner = innermostElements(ast::cast<ast::FixedArrayType>(ty));
+  ast::Type *elemTy = inner.first;
+  forEachSlot(addr, 0, inner.second, memLayout(elemTy).Size,
+              [&](const Val &at) { emitMemReleaseByTag(at, elemTy); });
 }
 
 ast::Expr *ModuleLowering::wholeOf(ast::Expr *e) {

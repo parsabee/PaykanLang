@@ -1030,9 +1030,16 @@ public:
     }
     // A reference in a mem local: what an address into it reads or writes.
     // The release of another of the local's references is no use of this
-    // one.
+    // one, and a call of a drop function, which is given the local's
+    // address, releases every one of them (docs/pir.md §7).
     if (in.Op == Opcode::Release && releasesOtherPart(in.Args[0], s))
       return Event::None;
+    if (in.Op == Opcode::Call && isDropName(in.Callee) && in.Args.size() == 1 &&
+        O.from(in.Args[0], s.L)) {
+      int64_t at = 0;
+      return O.offsetIn(in.Args[0], s.L, at) && at == 0 ? Event::Release
+                                                        : Event::Bad;
+    }
     for (size_t i = 0; i < in.Args.size(); ++i) {
       const Operand &o = in.Args[i];
       if (!O.from(o, s.L))

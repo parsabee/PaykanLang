@@ -881,6 +881,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the moves at last use may have emptied the slot.
     `samples/codegen/81_field_struct_store_retained.pkn` writes such fields through a
     variable, a capture and a loop's variable.
+  - A `match` on a tagged union whose arms return took time quadratic in the union's
+    variants to compile: each way out of a scope (every `return`, `break` and `continue`,
+    and its end) released every reference of every variant of each value the scope held in
+    memory, one release per slot written out in full.  Matched by 100 returning arms, a
+    union of 100 variants lowered to 14,766 lines of PIR and took 4.6 s to `run`, and one
+    of 200 variants more than 30 s.  A struct, a tuple, a fixed-size array or a tagged
+    union with more than four references among its parts is now released there by one
+    call of its type's drop function, `@.drop.<type>(ptr)`, which the lowering writes once
+    per type in the module (docs/pir.md §7) and which releases a tagged union's references
+    by its tag, the current variant's fields only.  A release of an empty slot does
+    nothing, so a value whose references were handed on, or whose bytes are all zero, is
+    safe to drop.  The 100 variants take 1,477 lines and 0.12 s, the 200 2,873 lines and 0.24 s.
+    The moves at last use count a drop function's call as the release of each of its
+    local's references, and PIR's verifier checks that a drop function is `(ptr) -> void`
+    and is given the whole of a `mem` local (docs/pir.md §9).  A smaller value, and one
+    released anywhere else (an assignment's old value, an object's field when the object
+    is destroyed), is released in place as before.  The static counts recorded here were
+    taken before this change: over the samples and the standard library's tests,
+    `--emit-pir` prints the same retains and `mem.copy`s as without it and 9 fewer
+    releases (5079), whose 4 drop calls are in `samples/codegen/60_tagged_unions.pkn` and
+    `samples/imports/18_tagged_unions`.  `samples/leak-check/33_drop_by_tag.pkn` drops
+    each kind of value with no live block left on every path.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

@@ -659,12 +659,28 @@ CodeGen enforced, now in one place.
 * **Scope exit** releases the scope's owned variables in reverse declaration
   order, then any pending temporaries (a match subject), on every path:
   fall-through, `ret` (all scopes), `break`/`continue` (scopes inside the loop).
+  A value held in memory whose release takes more than four `release`s (a
+  struct, a tuple, an array or a tagged union with more than four
+  references, an array's elements counted once when a loop visits them, a
+  union's every variant's fields) is released by one call of its type's
+  **drop function**, `fn @.drop.<type>(%at: ptr) -> void`, which the module
+  makes once and calls with the `local.addr` of the local or temporary
+  holding the value; so each way out of a scope costs a call for it, not a
+  release of each reference (each `ret` of each arm of a `match` on a union
+  of a hundred variants released every variant's fields).  A union's drop
+  function `switch`es on its tag and releases the fields of that variant
+  only: the others' are zeros, and a union all zeros (never set, or whose
+  references were handed on) releases null references.  Any other release
+  of a value held in memory (an assignment's old value, an object's field in
+  its `destroy`) stays in place.
 * **Moves at last use** (§12) then change both rules for a variable handed
   on at its last use: the copy takes no reference of its own, and the
-  variable owns nothing from there on.  Its release is gone from the paths
-  through the copy (or, where an `if` or a `switch` joins them with paths
-  that kept the variable, moved to the end of the one arm that did), and its
-  slot may keep the pointer it handed on, which nothing reads again.
+  variable owns nothing from there on (a drop function's call counts as the
+  release of each reference of the local it is given).  Its release is gone
+  from the paths through the copy (or, where an `if` or a `switch` joins
+  them with paths that kept the variable, moved to the end of the one arm
+  that did), and its slot may keep the pointer it handed on, which nothing
+  reads again.
 * **Reference-count elimination** (§12) then removes a `retain` with the
   releases that end the reference it made where something else keeps the
   object alive: a variable whose retain went (a match binding inside its
@@ -1274,6 +1290,8 @@ The verifier rejects a program when:
   be a native `$c.<symbol>`), or anything else (a function, a module extern's
   `symbol`, a `cstr`/`data`/`bytes` global) has either name;
 * `@main` has a signature other than `() -> i64` or `(ptr, i64) -> i64`;
+* a drop function (`@.drop.<type>`, §7) is not `(ptr) -> void`, or a call
+  of one is given anything but the `local.addr` of a `mem` local;
 * a function that is not a compiled declaration has `uses`, or a `uses`
   names nothing the module declares; a runtime extern is `shared`.
 
@@ -1464,22 +1482,24 @@ It is the slot's **last use** when every path from the copy reaches the
 slot's release before anything else happens to the slot, or ends in
 `unreachable`.  The release is a `load` or `ptr.load` of the slot whose one
 use is the `release` right after it: a scope exit's, or the one an
-assignment makes of the value it replaces.  Anything else on the way is a
-use: another read of the slot; a write to it; a `ret` or the end of the
-function (a slot that is never released does not own its value); or a use
-of an *alias*, a value that refers to the slot's object without a
-reference of its own: a box loaded from the slot before the copy, the
-object unboxed from it, a field read or an address computed from it, a
-`weak.new` of it and the `weak` local holding that.  A value whose only
-other use is a `retain` earlier in the same block holds a reference of its
-own, and its use is none of these: the box the copy hands its consumer,
+assignment makes of the value it replaces; or, for a `mem` local's slot, a
+`call` of a drop function given the local's `local.addr` (§7), which
+releases every reference of the local, the nulls a move left included.
+Anything else on the way is a use: another read of the slot; a write to it;
+a `ret` or the end of the function (a slot that is never released does not
+own its value); or a use of an *alias*, a value that refers to the slot's
+object without a reference of its own: a box loaded from the slot before the
+copy, the object unboxed from it, a field read or an address computed from
+it, a `weak.new` of it and the `weak` local holding that.  A value whose
+only other use is a `retain` earlier in the same block holds a reference of
+its own, and its use is none of these: the box the copy hands its consumer,
 and an earlier copy of the slot wherever it is used afterwards.  So in
 `f(a, a)` only the second argument can move: a copy made after the slot's
-reads the slot first.  Loops are paths like any other: a variable read
-again on the next iteration is still in use; one reassigned first is
-released by the assignment.  An absent `else` or `default` is a path too,
-the one on which no case matches, unless the cases of a `switch` are both
-values of a `bool`.
+reads the slot first.  Loops are paths like any other: a variable read again
+on the next iteration is still in use; one reassigned first is released by
+the assignment.  An absent `else` or `default` is a path too, the one on
+which no case matches, unless the cases of a `switch` are both values of a
+`bool`.
 
 A last use is moved only when no **borrowed reference** may depend on the
 slot's object.  After a move the destination may let the object go before

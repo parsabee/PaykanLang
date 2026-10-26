@@ -188,6 +188,22 @@ inline std::string externCSymbol(std::string_view name) {
   return runtimeSymbol(name);
 }
 
+// -- Drop functions
+
+/// A module's drop function (`@.drop.<type>`, a name no Paykan identifier
+/// can spell) takes the address of a whole `mem` local, `(ptr) -> void`,
+/// and releases the references of the value held there (docs/pir.md §7):
+/// what the lowering calls, when a scope is left, instead of a release of
+/// each of many references.  Each call of one is given a `local.addr`, so
+/// the moves at last use read it as the release of each of the local's
+/// references.
+inline constexpr std::string_view kDropPrefix = ".drop.";
+
+/// True when @p name is a drop function's.
+inline bool isDropName(std::string_view name) {
+  return name.size() > kDropPrefix.size() && name.starts_with(kDropPrefix);
+}
+
 /// The signature of the runtime C function @p symbol: what a `$rt.` extern
 /// of it declares, or for one a backend calls itself (for `new`, `free`,
 /// the weak references and a float's `rem`; an executable's entry code; the

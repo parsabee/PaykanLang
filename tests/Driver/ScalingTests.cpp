@@ -227,6 +227,30 @@ TEST(Scaling, ALongRunOfIfsLowersToCFInLinearMemory) {
   EXPECT_EQ(run.ExitCode, 2999 % 256 + 5) << run.Out;
 }
 
+// Leaving a scope releases each value held in memory there, and a tagged
+// union's references are every variant's fields: a match returning from
+// each arm of a 200-variant union released them all at each return, code
+// quadratic in the variants that took more than 30 s to run (SW-03).  A
+// value of more than four references is released by one call of its
+// type's drop function now, which releases its variant's fields only.
+TEST(Scaling, AScopesWayOutReleasesALargeValueByOneCall) {
+  ScratchDir dir("drop");
+  std::string variants;
+  for (int i = 0; i < 200; ++i)
+    variants += numbered(i % 3 == 0 ? ", V#(a: int, s: Str)" : ", V#", i);
+  const std::string src = "import ::io;\nenum Many { " + variants.substr(2) +
+                          " }\nfn name(m: Many) -> Str {\n  match m {\n" +
+                          repeated("    V# { return \"V#\"; }\n", 200) +
+                          "  }\n}\nfn main() -> int {\n"
+                          "  io::println(name(Many::V3(1, \"q\")));\n"
+                          "  return 0;\n}\n";
+  const std::string path = dir.write("many.pkn", src);
+  Timed t = timed(std::string(kPaykan) + " run " + path + " 2>&1");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_EQ(t.Out, "V3\n");
+  EXPECT_LT(t.Seconds, 10 * slowdown());
+}
+
 // Each imported module's code is cached under a key made from its MLIR,
 // printed (SW-18).  Printing a module nested in the program verified and
 // numbered the whole program each time, so a program of 400 tiny modules

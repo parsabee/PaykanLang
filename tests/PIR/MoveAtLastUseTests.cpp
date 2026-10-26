@@ -1298,6 +1298,76 @@ fn @f(%a: box, %dst: ptr) -> void {
   EXPECT_NE(out.find("release %old."), std::string::npos) << out;
 }
 
+// A drop function (docs/pir.md §7) releases the references of the whole
+// local whose address it is given, so a call of one at scope exit is the
+// release a copy before it moves to: `return t` hands t's references on,
+// and the drop that follows releases the nulls left in t's slots.
+const char *const kDropPair = R"(
+fn @.drop.Pair(%at: ptr) -> void {
+  %e0 = ptr.load box, %at
+  release %e0
+  %a1 = ptr.add %at, 8
+  %e1 = ptr.load box, %a1
+  release %e1
+  ret
+}
+)";
+
+TEST(MoveAtLastUse, AValueItsDropFunctionReleasesMovesAtItsLastUse) {
+  Moved m = ::move(std::string(kDropPair) + R"(
+fn @f(%a: box, %b: box, %dst: ptr) -> void {
+  local %t: mem(16, 8)
+  %ta = local.addr %t
+  ptr.store %ta, %a
+  %t1 = ptr.add %ta, 8
+  ptr.store %t1, %b
+  mem.copy %dst, %ta, 16
+  %e0 = ptr.load box, %dst
+  retain %e0
+  %d1 = ptr.add %dst, 8
+  %e1 = ptr.load box, %d1
+  retain %e1
+  %tr = local.addr %t
+  call @.drop.Pair(%tr)
+  ret
+}
+)");
+  const std::string out = f(m);
+  EXPECT_EQ(count(out, "retain"), 0u) << out;
+  EXPECT_EQ(count(out, "null box"), 2u) << out;
+  EXPECT_EQ(count(out, "call @.drop.Pair("), 1u) << out;
+  EXPECT_EQ(m.Counts.Transfers, 1u);
+  EXPECT_EQ(m.Counts.Retains, 2u);
+}
+
+// A read of the local after the copy, before its drop, keeps the copy one.
+TEST(MoveAtLastUse, AValueReadBeforeItsDropIsNotMoved) {
+  Moved m = ::move(std::string(kDropPair) + R"(
+fn @f(%a: box, %b: box, %dst: ptr) -> void {
+  local %t: mem(16, 8)
+  %ta = local.addr %t
+  ptr.store %ta, %a
+  %t1 = ptr.add %ta, 8
+  ptr.store %t1, %b
+  mem.copy %dst, %ta, 16
+  %e0 = ptr.load box, %dst
+  retain %e0
+  %d1 = ptr.add %dst, 8
+  %e1 = ptr.load box, %d1
+  retain %e1
+  %tr = local.addr %t
+  %x = ptr.load box, %tr
+  call @use(%x)
+  call @.drop.Pair(%tr)
+  ret
+}
+)");
+  const std::string out = f(m);
+  EXPECT_EQ(count(out, "retain"), 2u) << out;
+  EXPECT_EQ(count(out, "null box"), 0u) << out;
+  EXPECT_EQ(m.Counts.Transfers, 0u);
+}
+
 TEST(MoveAtLastUse, AnIfBetweenAHeldValuesLoadsAndItsCopyKeepsItACopy) {
   // The retain is taken before the copy, but the if between its load and
   // the copy may write the slot: the bytes copied need not be the

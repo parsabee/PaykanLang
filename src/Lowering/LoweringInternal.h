@@ -1068,6 +1068,25 @@ private:
   /// @p addr (nothing for one of plain values).
   void emitMemRetain(const Val &addr, ast::Type *ty);
   void emitMemRelease(const Val &addr, ast::Type *ty);
+  /// emitMemRelease of the value of type @p ty a whole `mem` local holds,
+  /// at @p local, its `local.addr`: when a scope is left, or a temporary is
+  /// done with.  More than a few references are released by a call of the
+  /// type's drop function, so that each way out of a scope costs one call.
+  void emitMemDrop(const Val &local, ast::Type *ty);
+  /// The releases emitMemRelease writes in place for a value of type @p ty:
+  /// one per reference, an array's element's once when a loop visits them,
+  /// and every variant's fields of a tagged union.
+  size_t memReleaseCount(ast::Type *ty);
+  std::unordered_map<const ast::Type *, size_t> MemReleaseCounts;
+  /// The module's drop function of @p ty, `.drop.<ty>(ptr)` (docs/pir.md
+  /// §7), made once: its name.  It releases the references of the value at
+  /// the address it takes as emitMemReleaseByTag does.
+  std::string dropFunction(ast::Type *ty);
+  /// Release the references of the value of type @p ty at @p addr, those of
+  /// a tagged union's current variant only, by a `switch` on its tag: the
+  /// other variants' fields are zeros, and a union all zeros (never set, or
+  /// whose references were handed on) releases null references.
+  void emitMemReleaseByTag(const Val &addr, ast::Type *ty);
   /// Call @p fn with the box in each reference slot of the value of type
   /// @p ty at @p addr.
   void forEachMemRef(const Val &addr, ast::Type *ty,

@@ -1145,6 +1145,53 @@ fn @main() -> i64 {
     EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
 }
 
+// A drop function (docs/pir.md §7) is `(ptr) -> void`, and every call of
+// one is given the `local.addr` of a mem local: the whole value it releases.
+TEST(PIRVerifier, ADropFunctionIsGivenAWholeMemLocal) {
+  const std::string drop = R"(module "m"
+fn @.drop.Pair(%at: ptr) -> void {
+  %e = ptr.load box, %at
+  release %e
+  ret
+}
+)";
+  std::string errs = verifyText(drop + R"(fn @f(%p: ptr) -> void {
+  local %t: mem(16, 8)
+  local %n: i64
+  %ta = local.addr %t
+  call @.drop.Pair(%ta)
+  %t8 = ptr.add %ta, 8
+  call @.drop.Pair(%t8)
+  call @.drop.Pair(%p)
+  %na = local.addr %n
+  call @.drop.Pair(%na)
+  ret
+}
+fn @main() -> i64 {
+  ret 0
+}
+)");
+  // The calls given %t8, %p and %na; not the one given %ta.
+  size_t given = 0;
+  for (size_t at = errs.find("not the local.addr of a mem local");
+       at != std::string::npos;
+       at = errs.find("not the local.addr of a mem local", at + 1))
+    ++given;
+  EXPECT_EQ(given, 3u) << errs;
+  errs = verifyText(R"(module "m"
+fn @.drop.Pair(%at: ptr) -> i64 {
+  ret 0
+}
+fn @main() -> i64 {
+  ret 0
+}
+)");
+  EXPECT_NE(errs.find("drop function '@.drop.Pair' is (ptr) -> i64, not (ptr) "
+                      "-> void"),
+            std::string::npos)
+      << errs;
+}
+
 // A vtable slot's target is the same machine function: a lending slot type
 // takes the ownership mask, which a runtime target spells out.
 TEST(PIRVerifier, AVTableTargetHasTheSlotsMachineSignature) {

@@ -220,6 +220,11 @@ private:
         if (!f.Symbol.empty())
           programName(f.Symbol, "extern function symbol");
       }
+      // A drop function takes a mem local's address and returns nothing
+      // (§7).
+      if (isDropName(f.Name) && !(f.Sig == Signature{{Type::Ptr}, Type::Void}))
+        error(where, "drop function '@" + f.Name + "' is " + sigStr(f.Sig) +
+                         ", not (ptr) -> void");
     }
     // A native extern and the runtime's of one C symbol name one C
     // function, which has one signature (as two modules' must,
@@ -383,6 +388,8 @@ private:
     /// a copy of everything visible.
     std::vector<std::pair<ValueId, std::optional<Type>>> Scopes;
     std::unordered_set<ValueId> EverDefined;
+    /// The values a `local.addr` of a mem local defined.
+    std::unordered_set<ValueId> MemLocalAddrs;
 
     void error(const std::string &msg) { MV.error(Where, msg); }
 
@@ -708,6 +715,12 @@ private:
         expectArgs(in.Args, 0, it->second->Sig, "'@" + in.Callee + "'");
         expectOwnership(in, it->second->Sig, lends(*it->second),
                         "'@" + in.Callee + "'");
+        // A drop function is given a whole mem local (§7).
+        if (isDropName(in.Callee) && in.Args.size() == 1 &&
+            (!in.Args[0].isValue() ||
+             !MemLocalAddrs.count(in.Args[0].valueId())))
+          error("call to drop function '@" + in.Callee + "' is given " +
+                operandStr(in.Args[0]) + ", not the local.addr of a mem local");
         result(in, it->second->Sig.Ret);
         break;
       }
@@ -905,6 +918,8 @@ private:
                 std::string(typeName(F.Locals[in.Local].Ty)) +
                 " (only i64, f64, bool, char, optional, box and mem slots "
                 "have addresses)");
+        else if (F.Locals[in.Local].Ty == Type::Mem)
+          MemLocalAddrs.insert(in.Result.Id);
         result(in, Type::Ptr);
         break;
       case Opcode::FieldAddr: {
