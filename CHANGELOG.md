@@ -170,8 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     declaration; a generic function's is inferred for each instantiation.
   - An expression with no value is an error that asks for a braced body, and
     a function whose expression depends on its own result type (`fn fact(n:
-    int) => ... fact(n - 1)`) is one that asks for the result type. A method writes its result type (`fn area() ->
-    int => ...`); a `static fn` infers.
+    int) => ... fact(n - 1)`) is one that asks for the result type. A method
+    writes its result type (`fn area() -> int => ...`); a `static fn` infers.
   - The AST interchange format marks such a function or lambda with
     `(inferred)` (docs/plugins/ast-format.md), so a template in a `.pkm` keeps
     it.
