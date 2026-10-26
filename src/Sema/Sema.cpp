@@ -1000,16 +1000,16 @@ void Sema::declarePoisoned(Scope *scope, std::string_view name) {
 }
 
 bool Sema::checkBinderName(const std::string &name, ast::SourceLocation loc,
-                           bool binds) {
+                           bool binds, std::string_view what) {
   if (isTypeNameForVariable(name)) {
-    error(loc,
-          "'" + name + "' is a type name and cannot be used as a variable");
+    error(loc, "'" + name + "' is a type name and cannot be used as " +
+                   std::string(what));
     return false;
   }
   if (binds && isFunctionNameForVariable(name)) {
     error(loc, "'" + name +
-                   "' is a function of this module and cannot be used as a "
-                   "variable");
+                   "' is a function of this module and cannot be used as " +
+                   std::string(what));
     return false;
   }
   return true;
@@ -1034,8 +1034,7 @@ bool Sema::checkDistinctParams(const ast::FuncDecl *fn,
   StringSet seen;
   for (const ast::Param &p : fn->getParams())
     if (!seen.insert(p.getName()).second) {
-      error(fn->getLocation(),
-            "duplicate parameter '" + p.getName() + "' in " + what);
+      error(p.Loc, "duplicate parameter '" + p.getName() + "' in " + what);
       return false;
     }
   return true;
@@ -4061,15 +4060,15 @@ bool Sema::declareFunctionSignature(ast::FuncDecl *node) {
   }
   std::vector<ast::Type *> paramTypes;
   for (auto &p : node->getMutableParams()) {
-    if (!checkBinderName(p.getName(), node->getLocation(),
-                         /*binds=*/!node->isNative())) {
+    if (!checkBinderName(p.getName(), p.Loc, /*binds=*/!node->isNative(),
+                         "a parameter name")) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;
     }
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
-    auto *ty = resolveValueType(p.ParamType, node->getLocation(),
-                                "parameter '" + p.getName() + "'");
+    auto *ty =
+        resolveValueType(p.ParamType, p.Loc, "parameter '" + p.getName() + "'");
     if (!ty) {
       ErroneousNames.insert(node->getName()); // as for the return type
       return false;

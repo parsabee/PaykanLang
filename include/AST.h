@@ -369,6 +369,9 @@ struct Param {
   const std::string *Name; // points into ASTContext::StringPool (stable)
   Type *ParamType;
   ParamMode Mode = ParamMode::Value; // `x: view int`, `x: inout int`
+  /// Where it is written, `x: int`: its function's location for one the
+  /// compiler declares, or one read from an AST without it.
+  SourceLocation Loc;
 
   const std::string &getName() const { return *Name; }
 };

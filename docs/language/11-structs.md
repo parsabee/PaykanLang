@@ -656,6 +656,7 @@ Point(x: 4, y: 2) 6 True
 | Superclass | `struct A : B { ... }` |
 | Method in the body | `struct A { x: int; fn f() {} }` |
 | Duplicate field | `struct A { x: int; x: int; }` |
+| Field named like a type | `struct A { u8: int; }` or `struct A { Str: int; }`, with or without an `__init__`: `'u8' is a type name and cannot be used as a field name` |
 | Taken name | `struct A` next to a class, enum, function or trait `A`; `struct Str` |
 | Contains itself | `struct A { b: B; } struct B { a: A; }`; `struct C { c: (int, C); }` |
 | Array field | `struct A { xs: int[3]; }` |

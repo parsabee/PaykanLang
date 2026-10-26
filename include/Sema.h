@@ -610,14 +610,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   /// The guard every binder applies to the name it binds (#126): an inferred
   /// or typed declaration, a destructuring target, a function or method
-  /// parameter, a lambda's, a `for` loop's variable, a match binding.
-  /// Reports, at @p loc, a name that cannot be a variable (see
-  /// isTypeNameForVariable and isFunctionNameForVariable) and returns false.
-  /// @p binds is false for a parameter no code of the program uses (a native
-  /// function's, or a default `__init__`'s, which are the fields): it is not
-  /// refused for a function's name.
+  /// parameter, a lambda's, a `for` loop's variable, a match binding, and a
+  /// field.  Reports, at @p loc, a name that cannot be a variable (see
+  /// isTypeNameForVariable and isFunctionNameForVariable) as what it cannot
+  /// be used as, @p what ("a parameter name"), and returns false.  @p binds
+  /// is false for a name no code of the program reads as a variable (a
+  /// native function's parameter, a field, a default `__init__`'s
+  /// parameter): it is not refused for a function's name.
   bool checkBinderName(const std::string &name, ast::SourceLocation loc,
-                       bool binds = true);
+                       bool binds = true, std::string_view what = "a variable");
   /// In a method's own body (not a lambda's in it, which is a function of
   /// its own), `self` names what the method was called on, and the rules on
   /// `self` (an `__init__`'s field assignments, a `view fn`'s read-only
@@ -626,7 +627,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// is reported at @p loc, and false returned.
   bool checkNotSelf(const std::string &name, ast::SourceLocation loc);
   /// Reports a parameter of @p fn named like an earlier one, as a
-  /// duplicate in @p what ("function 'f'"), and returns false.
+  /// duplicate in @p what ("function 'f'") at it, and returns false.
   bool checkDistinctParams(const ast::FuncDecl *fn, const std::string &what);
 
   /// checkBinderName for a match arm's binding (of type @p bindTy), and its

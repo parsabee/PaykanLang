@@ -158,8 +158,9 @@ bool Sema::checkTraitDecls(ast::TranslationUnit *tu) {
           "method '" + fn->getName() + "' of trait '" + td->getName() + "'";
       bool paramsOk = checkDistinctParams(fn, what);
       for (const auto &p : fn->getParams())
-        paramsOk = paramsOk && checkBinderName(p.getName(), fn->getLocation(),
-                                               /*binds=*/false);
+        paramsOk =
+            paramsOk && checkBinderName(p.getName(), p.Loc,
+                                        /*binds=*/false, "a parameter name");
       RequiredSig sig;
       if (!paramsOk ||
           !resolveRequirement(fn, placeholders, td->getName(), sig)) {
@@ -185,11 +186,11 @@ bool Sema::resolveRequirement(const ast::FuncDecl *fn, const Subst &subst,
   }
   for (const auto &p : fn->getParams()) {
     if (p.getName() == names::kSelf) {
-      error(fn->getLocation(), "'self' cannot be used as a parameter name of " +
-                                   what + "; it is the implicit receiver");
+      error(p.Loc, "'self' cannot be used as a parameter name of " + what +
+                       "; it is the implicit receiver");
       return false;
     }
-    auto *t = resolveValueType(cloner.cloneType(p.ParamType), fn->getLocation(),
+    auto *t = resolveValueType(cloner.cloneType(p.ParamType), p.Loc,
                                "parameter '" + p.getName() + "' of " + what);
     if (!t)
       return false;

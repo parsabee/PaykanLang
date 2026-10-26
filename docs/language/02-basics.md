@@ -1007,8 +1007,9 @@ enums.
 - A local never hides a function of the module: no variable, parameter (a method's or a
   lambda's included), `for` loop variable or `match` binding can take the name of one of
   the module's functions, a generic or a `native` one included, wherever the function is
-  declared (`'func' is a function of this module and cannot be used as a variable`, once:
-  the assignments that bind the name again are follow-ons of it). So a call by the name
+  declared (`'func' is a function of this module and cannot be used as a variable`, `... as
+  a parameter name` at a parameter, once: the assignments that bind the name again are
+  follow-ons of it). So a call by the name
   always means the function. A field may share a function's name (it is
   read as `obj.func`), and so may another module's function, which is always qualified
   (`io::println`).
@@ -1069,10 +1070,13 @@ own `Result`.
 
 The same rule applies between user declarations: `fn Point()` next to `class Point` is
 rejected with `'Point' is already declared as a class`, and a function or class cannot
-reuse an enum's name. A builtin class or type name cannot name a field, parameter or local
-variable either: it is a type name (`'Str' is a type name and cannot be used as a
-variable`). Nor can a function of the module name a parameter or a local variable
-([Scoping Rules](#scoping-rules)).
+reuse an enum's name. A builtin class or type name, or a type's the program declares or
+imports, cannot name a field (a class's, a struct's or a variant's, whether or not its type
+writes `__init__`), a parameter or a local variable either. It is a type name, reported at
+the field, the parameter or the variable as what it would name: `'Str' is a type name and
+cannot be used as a variable` (`... as a parameter name`, `... as a field name`). Nor can a
+function of the module name a parameter or a local variable ([Scoping
+Rules](#scoping-rules)).
 
 ---
 

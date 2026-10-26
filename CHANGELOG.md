@@ -631,7 +631,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A trait requirement's parameters follow a function's rules: two of one name (`trait T {
   fn m(x: int, x: int); }`) are `duplicate parameter 'x' in method 'm' of trait 'T'`, and
   one named like a type (`fn m(u8: int)`, a class's name) is `'u8' is a type name and
-  cannot be used as a variable`, at the requirement.  Both were accepted, unlike a
+  cannot be used as a parameter name`, at the parameter.  Both were accepted, unlike a
   function's or a method's parameters (docs/language/06-traits.md, "Semantic Checks").  A
   function of the module may still name one, the requirement having no body, as for a
   native function.
@@ -658,6 +658,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lines around it: 10000 errors on one 148 KB line printed 2.2 GB, and print 5 KB now.
   The caret counts a UTF-8 character as one, where it counted its bytes and stood to the
   right of its place after one (docs/language/17-the-paykan-command.md).
+- A field named like a type is an error whatever declares it: `class C { u8: int; }` with
+  `impl C { fn __init__() { self.u8 = 1; } }`, `struct S { Str: int; }` with its own
+  `__init__` and `enum E { B(u8: int) }` compiled, since only the default `__init__`'s
+  parameters were checked, which a written one replaces and a variant has none of, against
+  docs/language/02-basics.md ("Builtin Names Are Reserved").  The field itself is checked
+  now: `'u8' is a type name and cannot be used as a field name`, at the field.  And a
+  parameter named like a type or like a function of the module is reported at the
+  parameter, as one (`'u8' is a type name and cannot be used as a parameter name`), where
+  the error stood under the whole function, lambda or trait requirement (the whole struct
+  or class for a field) and said `... as a variable`; so is a parameter's type error
+  (`parameter 'v' cannot have type 'void'`), a method's parameter named `self`, and a
+  duplicate parameter, at the second.  A `param` of the AST interchange format has its
+  location, which is optional: one without it is at its function's or lambda's
+  (docs/plugins/ast-format.md).
 
 ### Removed
 

@@ -566,6 +566,12 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       ok = false;
       continue;
     }
+    // Checked here, whether or not the class writes its `__init__`.
+    if (!checkBinderName(field->getName(), field->getLocation(),
+                         /*binds=*/false, "a field name")) {
+      ok = false;
+      continue;
+    }
     // Fields must not shadow superclass fields.
     for (auto *super = ct->getSuperClass(); super;
          super = super->getSuperClass()) {
@@ -707,7 +713,7 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
         name += "_";
       const std::string &interned = Ctx.intern(name);
       params.push_back(
-          {&interned, superInit->getParamTypes()[i], modes.mode(i)});
+          {&interned, superInit->getParamTypes()[i], modes.mode(i), loc});
       args.push_back(Ctx.make<ast::Identifier>(loc, interned));
     }
     body.push_back(Ctx.make<ast::ExprStmt>(
@@ -716,7 +722,7 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
   }
   for (auto &[name, type] : ct->getFields()) {
     const std::string &interned = Ctx.intern(name);
-    params.push_back({&interned, type});
+    params.push_back({&interned, type, ast::ParamMode::Value, loc});
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
         Ctx.make<ast::Identifier>(loc, interned)));
@@ -788,20 +794,19 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
     // `self` is the implicit receiver of every method; a parameter of the
     // same name would silently shadow it in the body scope.
     if (p.getName() == names::kSelf) {
-      error(method->getLocation(),
-            "'" + std::string(names::kSelf) +
-                "' cannot be used as a parameter name of method '" +
-                method->getName() + "' in " + typeKindWord(owner) + " '" +
-                className + "'; it is the implicit receiver");
+      error(p.Loc, "'" + std::string(names::kSelf) +
+                       "' cannot be used as a parameter name of method '" +
+                       method->getName() + "' in " + typeKindWord(owner) +
+                       " '" + className + "'; it is the implicit receiver");
       return nullptr;
     }
-    if (!checkBinderName(p.getName(), method->getLocation(),
-                         /*binds=*/!DeclaringDefaultInit))
+    if (!checkBinderName(p.getName(), p.Loc, /*binds=*/!DeclaringDefaultInit,
+                         "a parameter name"))
       return nullptr;
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
     auto *pty =
-        resolveValueType(p.ParamType, method->getLocation(),
+        resolveValueType(p.ParamType, p.Loc,
                          "parameter '" + p.getName() + "' of method '" +
                              method->getName() + "' in '" + className + "'");
     if (!pty)

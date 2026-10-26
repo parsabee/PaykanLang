@@ -1168,7 +1168,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
           &name,
           Ctx.make<ClassType>(span(nameTok.Loc),
                               intern(names::untypedParamType(name)), nullptr),
-          ParamMode::Value});
+          ParamMode::Value, nameTok.Loc});
       continue;
     }
     if (!expect(Tok::Colon, "after the parameter name"))
@@ -1181,7 +1181,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
     Type *ty = parseTypeAnnotation();
     if (!ty)
       return false;
-    out.push_back(Param{&name, ty, mode});
+    out.push_back(Param{&name, ty, mode, span(nameTok.Loc)});
   } while (accept(Tok::Comma));
   return true;
 }

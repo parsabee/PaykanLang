@@ -210,6 +210,13 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
       ok = false;
       continue;
     }
+    // Checked here, whether or not the struct writes its `__init__` (a
+    // variant's fields too, which have none).
+    if (!checkBinderName(field->getName(), field->getLocation(),
+                         /*binds=*/false, "a field name")) {
+      ok = false;
+      continue;
+    }
     // Resolved as a class field is (so a fixed-size array parses), then
     // the array is reported: a struct cannot hold one yet, like a tuple.
     FixedArrayAllowed = true;
@@ -335,7 +342,8 @@ bool Sema::declareDefaultInit(ast::StructDecl *sd, ast::StructType *st) {
   std::vector<ast::Stmt *> body;
   for (size_t i = 0; i < st->getNumFields(); ++i) {
     const std::string &interned = Ctx.intern(st->getFieldName(i));
-    params.push_back({&interned, st->getElementType(i)});
+    params.push_back(
+        {&interned, st->getElementType(i), ast::ParamMode::Value, loc});
     body.push_back(Ctx.make<ast::MemberAssignStmt>(
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
         Ctx.make<ast::Identifier>(loc, interned)));

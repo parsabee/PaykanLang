@@ -354,18 +354,71 @@ TEST(BinderName, DestructuringTargetsRejectReservedNames) {
   expectOneBinderError(kPoint + wrapMain("Point: int, b = (1, 2);"), kPointMsg);
 }
 
+// A parameter, and a field, is reported at itself, as what it names
+// (finding 49: at the function, the class or the struct, as a variable).
+const std::string kStrParamMsg =
+    "'Str' is a type name and cannot be used as a parameter name";
+
 TEST(BinderName, FunctionParametersRejectReservedNames) {
-  expectOneBinderError(
-      "fn f(Str: int) -> int { return 0; }\n" + wrapMain("n = f(1);"), kStrMsg);
+  expectOneBinderError("fn f(a: int, Str: int) -> int { return 0; }\n" +
+                           wrapMain("n = f(1, 2);"),
+                       "1:14: error: " + kStrParamMsg);
   expectOneBinderError(kPoint + "fn f(Point: int) -> int { return Point; }\n" +
                            wrapMain("n = f(1);"),
-                       kPointMsg);
+                       "3:6: error: 'Point' is a type name and cannot be used "
+                       "as a parameter name");
+  // A native function's too, and a lambda's.
+  expectOneBinderError("native fn nat(n: int, u8: int) -> int = \"pk_nat\";\n" +
+                           wrapMain("n = nat(1, 2);"),
+                       "1:23: error: 'u8' is a type name and cannot be used "
+                       "as a parameter name");
+  expectOneBinderError(wrapMain("f = fn(a: int,\n         Str: int) => a;"),
+                       "3:10: error: " + kStrParamMsg);
 }
 
 TEST(BinderName, MethodParametersRejectReservedNames) {
   expectOneBinderError("class C { fn m(Str: int) -> int { return 0; } }\n" +
                            wrapMain("c = C(); n = c.m(1);"),
-                       kStrMsg);
+                       "1:16: error: " + kStrParamMsg);
+  expectOneBinderError("struct S { n: int; }\n"
+                       "impl S { fn m(n: int, Str: int) {} }\n" +
+                           wrapMain("s = S(1);"),
+                       "2:23: error: " + kStrParamMsg);
+}
+
+// A field is checked itself, so whether or not its type writes `__init__`
+// (which took one named like a type, finding 49), a variant's and a generic
+// type's too.
+TEST(BinderName, FieldsRejectReservedNames) {
+  const std::string u8Field =
+      "error: 'u8' is a type name and cannot be used as a field name";
+  expectOneBinderError("struct S { x: int; u8: int; }\n" + wrapMain(""),
+                       "1:20: " + u8Field);
+  expectOneBinderError("class C { u8: int; }\n" + wrapMain(""),
+                       "1:11: " + u8Field);
+  expectOneBinderError("class C { u8: int; }\n"
+                       "impl C { fn __init__() { self.u8 = 1; } }\n" +
+                           wrapMain("c = C(); io::println(c.u8);"),
+                       "1:11: " + u8Field);
+  expectOneBinderError(kPoint +
+                           "struct S {\n  Point: int;\n}\n"
+                           "impl S { fn __init__() { self.Point = 2; } }\n" +
+                           wrapMain("s = S(); io::println(s.Point);"),
+                       "4:3: error: 'Point' is a type name and cannot be used "
+                       "as a field name");
+  expectOneBinderError("enum E { A, B(n: int, u8: int) }\n" +
+                           wrapMain("e = E::B(1, 2);"),
+                       "1:23: " + u8Field);
+  expectOneBinderError("class Base { n: int; }\nclass D : Base { u8: int; }\n" +
+                           wrapMain("d = D(1, 2);"),
+                       "2:18: " + u8Field);
+  auto generic =
+      semaCheck("struct Box<T> { int: T; }\n" + wrapMain("b = Box<int>(1);"));
+  EXPECT_FALSE(generic.Ok);
+  EXPECT_NE(generic.Diagnostics.find("1:17: error: 'int' is a type name and "
+                                     "cannot be used as a field name"),
+            std::string::npos)
+      << generic.Diagnostics;
 }
 
 TEST(BinderName, MatchBindingsRejectReservedNames) {
@@ -422,20 +475,22 @@ TEST(BinderName, LocalsRejectFunctionNames) {
 }
 
 TEST(BinderName, ParametersAndBindingsRejectFunctionNames) {
+  const std::string paramMsg = "'func' is a function of this module and "
+                               "cannot be used as a parameter name";
   expectOneBinderError(kFunc + "fn g(func: int) -> int { return func; }\n" +
                            wrapMain("n = g(1);"),
-                       kFnMsg);
+                       "2:6: error: " + paramMsg);
   expectOneBinderError(kFunc + wrapMain("f = fn(func: int) => func * 2;"),
-                       kFnMsg);
+                       paramMsg);
   // A method's, declared before the function.
   expectOneBinderError("class C { fn m(func: int) -> int { return func; } }\n" +
                            kFunc + wrapMain("n = C().m(1);"),
-                       kFnMsg);
+                       "1:16: error: " + paramMsg);
   expectOneBinderError(
       "struct S { a: int; }\n"
       "impl S { view fn m(func: int) -> int { return func; } }\n" +
           kFunc + wrapMain("n = func(2);"),
-      kFnMsg);
+      paramMsg);
   expectOneBinderError(
       kPoint + kFunc +
           wrapMain("o: Obj = Point();\n match o { func: Point { "

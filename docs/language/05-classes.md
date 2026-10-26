@@ -1148,6 +1148,7 @@ created for that argument list. See [Generics](13-generics.md).
 | Error | Trigger |
 |-------|---------|
 | Class name taken | The class is named like a builtin class (`class Str`) or type (`class int`), an enum, or another class — a class name is also its constructor, so top-level names are shared (see [Builtin Names Are Reserved](02-basics.md#builtin-names-are-reserved)) |
+| Field named like a type | `class C { u8: int; }`, a field named like a builtin type, a class or another type, whether or not the class writes its `__init__`: `'u8' is a type name and cannot be used as a field name`, at the field (see [Builtin Names Are Reserved](02-basics.md#builtin-names-are-reserved)) |
 | Missing field init in `__init__` | `__init__` exits with an uninitialised field on some path |
 | Field read before it is assigned | `self.count = self.start;` in `__init__` before `self.start` is assigned on every path: `field 'start' is read before it is assigned` |
 | `self` used before every field is assigned | A method called on `self`, `self` passed, stored, returned or captured in `__init__` before every field is assigned, or in `__super__(...)`'s arguments: `'self' is used before every field is assigned: 'start' is not assigned yet` |

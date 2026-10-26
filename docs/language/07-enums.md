@@ -617,7 +617,7 @@ holds it in field 'tail'`), and a recursive one goes through a class, as `Expr` 
 | Binding a variant without fields | `x: Empty { … }` where the variant `Empty` has no fields |
 | Unknown field | `r.z` where the variant's fields have no `z` (`no field 'z' in variant 'Rect' of enum 'Shape'`) |
 | Enum holds itself | A variant's fields hold the enum, directly or through a struct or a tuple |
-| Bad field | Two fields of one variant share a name, a field is a fixed-size array, or a `view` is stored in one |
+| Bad field | Two fields of one variant share a name, one is named like a type (`B(u8: int)`: `'u8' is a type name and cannot be used as a field name`), a field is a fixed-size array, or a `view` is stored in one |
 | Generic enum without type arguments | `m: Maybe = …` for a generic `Maybe` (`write 'Maybe<...>'`) |
 | Type arguments cannot be inferred | A variant of a generic enum without written type arguments, an expected type of the same enum, or fields that determine them (`x = Maybe::Nothing;`, `Result::Ok(1)`) |
 | Wrong type arguments | `Maybe<int, int>` for a one-parameter enum, an argument that does not satisfy a bound, or `Color<int>` for an enum that is not generic |

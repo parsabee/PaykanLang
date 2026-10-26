@@ -177,8 +177,8 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
   for (ast::Param &p : node->getMutableParams()) {
     FixedArrayAllowed = true;
     SliceAllowed = p.Mode != ast::ParamMode::Value;
-    auto *pty = resolveValueType(p.ParamType, node->getLocation(),
-                                 "parameter '" + p.getName() + "'");
+    auto *pty =
+        resolveValueType(p.ParamType, p.Loc, "parameter '" + p.getName() + "'");
     if (pty)
       p.ParamType = pty;
     else
@@ -202,11 +202,11 @@ ast::Type *Sema::checkLambda(ast::LambdaExpr *node) {
     return nullptr;
   StringSet seen;
   for (const ast::Param &p : node->getParams()) {
-    if (!checkBinderName(p.getName(), node->getLocation()))
+    if (!checkBinderName(p.getName(), p.Loc, /*binds=*/true,
+                         "a parameter name"))
       return nullptr;
     if (!seen.insert(p.getName()).second) {
-      error(node->getLocation(),
-            "duplicate parameter '" + p.getName() + "' in the lambda");
+      error(p.Loc, "duplicate parameter '" + p.getName() + "' in the lambda");
       return nullptr;
     }
   }

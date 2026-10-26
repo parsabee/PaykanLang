@@ -121,14 +121,14 @@ fn main() -> int { return 0; }
 )");
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 4) << r.Diagnostics;
-  expectAll(r, {"1:11: error: duplicate parameter 'x' in method 'm' of trait "
+  expectAll(r, {"1:24: error: duplicate parameter 'x' in method 'm' of trait "
                 "'T'",
-                "2:11: error: 'u8' is a type name and cannot be used as a "
-                "variable",
-                "4:11: error: 'Str' is a type name and cannot be used as a "
-                "variable",
-                "4:47: error: 'A' is a type name and cannot be used as a "
-                "variable"});
+                "2:16: error: 'u8' is a type name and cannot be used as a "
+                "parameter name",
+                "4:29: error: 'Str' is a type name and cannot be used as a "
+                "parameter name",
+                "4:52: error: 'A' is a type name and cannot be used as a "
+                "parameter name"});
 
   auto ok = semaCheck(R"(trait T { fn m(x: int, y: int) -> int; fn n(f: int); }
 class A { view fn z() -> int { return 0; } }
