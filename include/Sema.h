@@ -960,6 +960,19 @@ public:
       bool operator==(const EnumInfo &) const = default;
     };
     std::vector<EnumInfo> ExportedEnums;
+    /// The conformances of ExportedClasses and ExportedStructs to the
+    /// built-in traits an `impl ... for` block gives
+    /// (names::isImplBuiltinTrait), each recorded on its type itself (a
+    /// subclass has its superclass's): `impl Hashable for Key`.  Local or
+    /// reached, private or not, instantiations too: an importer reconstructs
+    /// the type from this interface alone and needs them for bounds.  Sorted
+    /// by (TypeName, Trait).
+    struct ImplInfo {
+      std::string TypeName;
+      std::string Trait;
+      bool operator==(const ImplInfo &) const = default;
+    };
+    std::vector<ImplInfo> ExportedImpls;
     /// The module's generic classes and functions; null when it has none.
     std::shared_ptr<const ModuleTemplates> Templates;
     bool operator==(const ModuleInfo &) const = default;
@@ -1639,6 +1652,13 @@ private:
   /// Record `impl Trait for A` (@p ty, a class or a struct) and check that
   /// A has every method the trait requires, with its signature.
   bool checkTraitImpl(ast::ImplDecl *im, ast::Type *ty);
+  /// Whether method @p m has the signature @p sig of requirement @p req.
+  static bool sameSignature(const ast::MethodDecl *m, const ast::FuncDecl *req,
+                            const RequiredSig &sig);
+  /// "" when @p ty has every method @p tr requires, with its signature;
+  /// otherwise why not: "it has no method 'view fn hash() -> int'", "its
+  /// 'view fn hash() -> Str' does not match 'view fn hash() -> int'".
+  std::string unmetRequirement(ast::Type *ty, const TraitRef &tr);
 
   // A type parameter's bounds are checked when its template is instantiated,
   // once the `impl ... for` blocks are recorded (TraitImplsKnown); until

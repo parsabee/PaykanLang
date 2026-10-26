@@ -3,7 +3,7 @@
 // Codegen tests: traits.  The methods of an `impl ... for` block run like any
 // `impl` block's, `Self` among their types, and a subclass has them too.  A
 // generic body calls what its bounds require, also in a template of another
-// module.
+// module, and a type's `Hashable` crosses modules with it.
 
 #include "CodeGenTestUtils.h"
 #include <filesystem>
@@ -130,6 +130,90 @@ fn main() -> int {
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
   EXPECT_EQ(r.StdOut, "<P> <P> <s>\n");
   guard.expectNoLeaks("Show across modules");
+  std::filesystem::remove_all(dir);
+}
+
+// A struct's and a class's `impl Hashable for` blocks cross modules: the
+// importer makes them keys of `HashMap` and `HashSet` and arguments of a
+// `T: Hashable` function, also when it reaches them through another module
+// (mid) or a template body of theirs (keys::distinct over the private
+// `_Priv`), and so are the instantiations keys made.  An importer's subclass
+// is Hashable through its superclass, whose `hash` it may override when the
+// class body declares it.
+TEST(Traits, HashableAcrossModules) {
+  LeakGuard guard;
+  auto dir = tempDir() / "pkn_trait_hashable";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir / "lib");
+  std::ofstream(dir / "lib" / "keys.pkn") << R"pkn(import ::collections;
+struct Key { a: int; b: int; }
+impl Hashable for Key { view fn hash() -> int { return (self.a * 31 + self.b).hash(); } }
+class CK {
+  v: int;
+  view fn equals(other: Obj) -> bool {
+    match other {
+      p: CK { return p.v == self.v; }
+      _ { return False; }
+    }
+  }
+}
+impl CK { fn __init__(v: int) { self.v = v; } }
+impl Hashable for CK { view fn hash() -> int { return self.v.hash(); } }
+struct _Priv { n: int; }
+impl Hashable for _Priv { view fn hash() -> int { return self.n.hash(); } }
+fn distinct<T>(x: T) -> unsigned {
+  s = collections::HashSet<_Priv>(); s.add(_Priv(1)); s.add(_Priv(1)); s.add(_Priv(2));
+  return s.len();
+}
+trait Named { view fn name() -> Str; }
+struct Keyed<K: Hashable> { k: K; }
+impl Hashable for Keyed<K> { view fn hash() -> int { return self.k.hash(); } }
+class GBox<T> { v: T; }
+impl GBox<T> { fn __init__(v: T) { self.v = v; } }
+impl Hashable for GBox<T> { view fn hash() -> int { return 3; } }
+impl Named for GBox<T> { view fn name() -> Str { return "box"; } }
+fn mkKeyed() -> Keyed<int> { return Keyed<int>(7); }
+fn mkBox() -> GBox<int> { return GBox<int>(1); }
+class CK2 { n: int; view fn hash() -> int { return self.n; } }
+impl CK2 { fn __init__(n: int) { self.n = n; } }
+impl Hashable for CK2 {}
+)pkn";
+  std::ofstream(dir / "lib" / "mid.pkn") << R"pkn(import lib::keys;
+fn mk() -> keys::Key { return keys::Key(1, 2); }
+fn mkc() -> keys::CK { return keys::CK(4); }
+)pkn";
+  std::ofstream(dir / "main.pkn") << R"pkn(import ::io;
+import ::collections;
+import lib::keys;
+import lib::mid;
+class Sub : keys::CK {
+  view fn equals(other: Obj) -> bool { match other { p: Sub { return p.v == self.v; } _ { return False; } } }
+}
+impl Sub { fn __init__(v: int) { __super__(v); } }
+class Sub2 : keys::CK2 { view fn hash() -> int { return 99; } }
+impl Sub2 { fn __init__(n: int) { __super__(n); } }
+fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
+fn main() -> int {
+  m = collections::HashMap<keys::Key, int>();
+  m.put(keys::Key(1, 2), 5);
+  m.put(mid::mk(), 6);
+  s = collections::HashSet<keys::CK>();
+  s.add(keys::CK(3)); s.add(keys::CK(3)); s.add(mid::mkc());
+  t = collections::HashSet<Sub>();
+  t.add(Sub(1)); t.add(Sub(1));
+  io::println(Str(m.len()) + " " + Str(s.len()) + " " + Str(t.len()));
+  io::println(Str(h(keys::mkKeyed()) == h(7)));
+  io::println(Str(h(keys::mkBox())) + " " + keys::mkBox().name());
+  io::println(Str(keys::distinct(0)));
+  c: keys::CK2 = Sub2(3);
+  io::println(Str(h(c)) + " " + Str(h(Sub2(1))) + " " + Str(h(keys::CK2(5))));
+  return 0;
+}
+)pkn";
+  auto r = compileAndRunFile((dir / "main.pkn").string());
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "1 2 1\nTrue\n3 box\n2\n99 99 5\n");
+  guard.expectNoLeaks("Hashable across modules");
   std::filesystem::remove_all(dir);
 }
 

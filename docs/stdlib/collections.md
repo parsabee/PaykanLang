@@ -103,8 +103,8 @@ None
 - The keys of a `HashMap` or `HashSet` implement the builtin trait
   [`Hashable`](../language/06-traits.md#hashable): `int`, `bool`, `char`, `Str`, a sized
   integer type (`u32`, `unsigned`, ...), or a class or a struct with an `impl Hashable for`
-  block. A `float` key is rejected (`'float' does not implement trait 'Hashable', which
-  'collections::HashMap' requires of 'K'`).
+  block in its own module, also when it is imported. A `float` key is rejected (`'float'
+  does not implement trait 'Hashable', which 'collections::HashMap' requires of 'K'`).
 
 ---
 

@@ -435,14 +435,7 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
       ok = false;
       continue;
     }
-    bool same = m->isView() == req->isView() &&
-                typesEqual(m->getReturnType(), sig.Ret) &&
-                m->getParamTypes().size() == sig.Params.size() &&
-                m->getParamModes().Result == sig.Modes.Result;
-    for (size_t i = 0; same && i < sig.Params.size(); ++i)
-      same = typesEqual(m->getParamTypes()[i], sig.Params[i]) &&
-             m->getParamModes().mode(i) == sig.Modes.mode(i);
-    if (!same) {
+    if (!sameSignature(m, req, sig)) {
       std::string msg = "'";
       msg += fnSignature(m->isView(), m->getName(), m->getParamTypes(),
                          m->getParamModes(), m->getReturnType());
@@ -465,6 +458,42 @@ bool Sema::checkTraitImpl(ast::ImplDecl *im, ast::Type *ty) {
       ok = false;
     }
   return ok;
+}
+
+bool Sema::sameSignature(const ast::MethodDecl *m, const ast::FuncDecl *req,
+                         const RequiredSig &sig) {
+  bool same = m->isView() == req->isView() &&
+              typesEqual(m->getReturnType(), sig.Ret) &&
+              m->getParamTypes().size() == sig.Params.size() &&
+              m->getParamModes().Result == sig.Modes.Result;
+  for (size_t i = 0; same && i < sig.Params.size(); ++i)
+    same = typesEqual(m->getParamTypes()[i], sig.Params[i]) &&
+           m->getParamModes().mode(i) == sig.Modes.mode(i);
+  return same;
+}
+
+std::string Sema::unmetRequirement(ast::Type *ty, const TraitRef &tr) {
+  Subst subst{{std::string(names::kSelfType), ty}};
+  const auto &params = tr.Trait->Decl->getTypeParams();
+  for (size_t i = 0; i < params.size() && i < tr.Args.size(); ++i)
+    subst[*params[i]] = tr.Args[i];
+  const std::string trait = traitRefName(tr);
+  for (auto *req : tr.Trait->Decl->getMethods()) {
+    RequiredSig sig;
+    if (!resolveRequirement(req, subst, trait, sig))
+      return "a requirement of '" + trait + "' does not resolve";
+    const std::string want = fnSignature(req->isView(), req->getName(),
+                                         sig.Params, sig.Modes, sig.Ret);
+    const ast::MethodDecl *m = methodOf(ty, req->getName());
+    if (!m)
+      return "it has no method '" + want + "'";
+    if (!sameSignature(m, req, sig))
+      return "its '" +
+             fnSignature(m->isView(), m->getName(), m->getParamTypes(),
+                         m->getParamModes(), m->getReturnType()) +
+             "' does not match '" + want + "'";
+  }
+  return "";
 }
 
 bool Sema::checkBoundDecls(ast::TranslationUnit *tu) {

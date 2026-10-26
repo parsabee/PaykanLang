@@ -658,6 +658,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lines around it: 10000 errors on one 148 KB line printed 2.2 GB, and print 5 KB now.
   The caret counts a UTF-8 character as one, where it counted its bytes and stood to the
   right of its place after one (docs/language/17-the-paykan-command.md).
+- A class whose superclass is another module's `Hashable` class cannot repeat `impl
+  Hashable for` (`class 'Sub' already implements 'Hashable' (through 'CK')`), as in one
+  module.  It is `Hashable` through its superclass.
 
 ### Removed
 
@@ -1260,6 +1263,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `('int[3]')`.  The fixed-size array error names the field it can be: `... can only be a
   local variable, a parameter, a result or a class field for now`, where it said `a field`
   (docs/language/09-arrays.md, "Slices" and "Limits for now"; 10-tuples.md).
+- A type's conformance to `Hashable` crosses modules and `.pkm` files
+  (docs/language/06-traits.md, "Hashable").
+  - `impl Hashable for Key` in module `keys` makes `keys::Key` a key of `HashMap` and
+    `HashSet`, and an argument of any `T: Hashable` template, in every importer: from its
+    source, the module cache (or `--no-module-cache`) or a prebuilt `.pkm`, and through a
+    module that only returns one.
+  - The interface records the conformance (an `IMPL` record, docs/design/pkm.md §3.5;
+    `pkm dump` shows `impl Hashable for Key`).
+  - Generic types: an instantiation the module made carries the conformance in the
+    interface.
+  - The 0.2.0 entry saying a struct is a `HashMap` key across modules now holds.  A
+    module's own trait does not cross yet (#147).
 
 ## [0.2.0] - 2026-10-20
 

@@ -440,3 +440,215 @@ fn main() -> int {
     EXPECT_EQ(r.Diagnostics.find(std::string("error") + ok), std::string::npos);
   std::filesystem::remove_all(tmp);
 }
+
+// ─── Conformances and traits across modules ─────────────────────────────────
+//
+// A type's conformance to a built-in trait (`impl Hashable for Key`) is part
+// of its module's interface: an importer sees it wherever it reaches the
+// type, directly, through another module or through a template body.
+
+// The module keys of the conformance tests: a struct and a class with an
+// `impl Hashable for` block, a private struct that a template body uses, and
+// instantiations the module makes of its generic types.
+static const char *const kKeysLibModule = R"(import ::collections;
+struct Key { a: int; b: int; }
+impl Hashable for Key { view fn hash() -> int { return (self.a * 31 + self.b).hash(); } }
+class CK {
+  v: int;
+  view fn equals(other: Obj) -> bool {
+    match other {
+      p: CK { return p.v == self.v; }
+      _ { return False; }
+    }
+  }
+}
+impl CK { fn __init__(v: int) { self.v = v; } }
+impl Hashable for CK { view fn hash() -> int { return self.v.hash(); } }
+struct _Priv { n: int; }
+impl Hashable for _Priv { view fn hash() -> int { return self.n.hash(); } }
+fn distinct<T>(x: T) -> unsigned {
+  s = collections::HashSet<_Priv>(); s.add(_Priv(1)); s.add(_Priv(1)); s.add(_Priv(2));
+  return s.len();
+}
+trait Named { view fn name() -> Str; }
+struct Keyed<K: Hashable> { k: K; }
+impl Hashable for Keyed<K> { view fn hash() -> int { return self.k.hash(); } }
+class GBox<T> { v: T; }
+impl GBox<T> { fn __init__(v: T) { self.v = v; } }
+impl Hashable for GBox<T> { view fn hash() -> int { return 3; } }
+impl Named for GBox<T> { view fn name() -> Str { return "box"; } }
+fn mkKeyed() -> Keyed<int> { return Keyed<int>(7); }
+fn mkBox() -> GBox<int> { return GBox<int>(1); }
+)";
+
+// The module mid: it only mentions keys' types, so its interface describes
+// them (and their conformances) again.
+static const char *const kKeysMidModule = R"(import lib::keys;
+fn mk() -> keys::Key { return keys::Key(1, 2); }
+fn mkc() -> keys::CK { return keys::CK(4); }
+)";
+
+TEST(Module, HashableAcrossModulesOk) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_hashable").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/keys.pkn", kKeysLibModule);
+  writeFile(tmp, "lib/mid.pkn", kKeysMidModule);
+  auto main = writeFile(tmp, "main.pkn", R"(import ::io;
+import ::collections;
+import lib::keys;
+import lib::mid;
+class Sub : keys::CK {
+  view fn equals(other: Obj) -> bool { match other { p: Sub { return p.v == self.v; } _ { return False; } } }
+}
+impl Sub { fn __init__(v: int) { __super__(v); } }
+fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
+fn main() -> int {
+  m = collections::HashMap<keys::Key, int>();
+  m.put(keys::Key(1, 2), 5);
+  m.put(mid::mk(), 6);
+  s = collections::HashSet<keys::CK>();
+  s.add(keys::CK(3)); s.add(mid::mkc());
+  t = collections::HashSet<Sub>();
+  t.add(Sub(1));
+  io::println(Str(h(keys::mkKeyed()) == h(7)) + " " + Str(h(keys::mkBox())));
+  io::println(Str(h(mid::mk()) + h(mid::mkc())) + keys::mkBox().name());
+  io::println(Str(keys::distinct(0)));
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// keys' conformances reach main three ways: keys itself (aliased, and by its
+// full path), mid's description of Key, and lib2's template body (keys under
+// its hidden qualifier).  They are one fact each, not a duplicate.
+TEST(Module, ConformanceReachedTwiceIsOne) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_hashable_twice").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/keys.pkn", kKeysLibModule);
+  writeFile(tmp, "lib/mid.pkn", kKeysMidModule);
+  writeFile(tmp, "lib/lib2.pkn", R"(import lib::keys;
+import ::collections;
+fn count<T>(x: T) -> unsigned {
+  s = collections::HashSet<keys::Key>(); s.add(keys::Key(1, 2)); s.add(keys::Key(1, 2));
+  return s.len();
+}
+)");
+  auto main = writeFile(tmp, "main.pkn", R"(import lib::keys as ks;
+import lib::mid;
+import lib::lib2;
+fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
+fn main() -> int {
+  return h(mid::mk()) + h(ks::Key(3, 4)) + h(lib::keys::CK(5)) + int(lib2::count(0));
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// A subclass of another module's Hashable class is Hashable through it, and
+// cannot repeat the conformance, as in one module.
+TEST(Module, RedeclaredThroughImportedSuperclassErr) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_hashable_sub").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/keys.pkn", kKeysLibModule);
+  auto main = writeFile(tmp, "main.pkn", R"(import lib::keys;
+class Sub : keys::CK {}
+impl Hashable for Sub {}
+fn main() -> int { return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("main.pkn:3:1: error: class 'Sub' already "
+                               "implements 'Hashable' (through 'CK')"),
+            std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// Only the type's module declares its conformances.
+TEST(Module, ReimplementImportedConformanceErr) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_hashable_reimpl").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/keys.pkn", kKeysLibModule);
+  auto main = writeFile(tmp, "main.pkn", R"(import lib::keys;
+impl Hashable for keys::Key { view fn hash() -> int { return 1; } }
+impl Hashable for Key { view fn hash() -> int { return 1; } }
+impl Hashable for keys::CK { view fn hash() -> int { return 1; } }
+fn main() -> int { return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"main.pkn:2:1: error: an 'impl' block for a struct of another module "
+        "is not supported yet",
+        "main.pkn:3:1: error: an 'impl' block for a struct of another module "
+        "is not supported yet",
+        "main.pkn:4:1: error: an 'impl' block for a class of another module "
+        "is not supported yet"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// ─── ERR: an interface that contradicts itself ──────────────────────────────
+//
+// The .pkm reader rejects an IMPL record of a trait other than Hashable, or of
+// a type the file does not describe; a seeded cache entry bypasses it, and
+// whether the type has the trait's methods is Sema's to check.
+
+TEST(Module, ExportedConformanceIsChecked) {
+  auto tmp = paykan::test::tempDir() / "pkn_ms_forged_impl";
+  std::filesystem::remove_all(tmp);
+  auto libPath =
+      writeFile(tmp.string(), "lib.pkn", "fn real() -> int { return 1; }\n");
+  auto key = std::filesystem::canonical(libPath).string();
+
+  using Info = paykan::sema::Sema::ModuleInfo;
+  auto structOf = [](const char *name, const char *hashResult) {
+    Info::StructInfo si;
+    si.Name = name;
+    si.OriginModule = "lib";
+    si.Fields = {{"a", "int"}};
+    if (hashResult) // `view fn hash() -> <hashResult>` of an `impl` block
+      si.Methods = {{"hash", hashResult, {}, 6, {}}};
+    return si;
+  };
+  Info info;
+  info.ExportedStructs = {structOf("Bad", "Str"), structOf("Key", "int"),
+                          structOf("Plain", nullptr)};
+  info.ExportedImpls = {{"Bad", "Hashable"},
+                        {"Ghost", "Hashable"},
+                        {"Key", "Named"},
+                        {"Key", "Show"},
+                        {"Plain", "Hashable"}};
+  paykan::sema::Sema::ModuleCache[key] = std::move(info);
+
+  auto main = writeFile(tmp.string(), "main.pkn", R"(
+import lib;
+fn main() -> int { return 0; }
+)");
+  auto r = semaCheckFile(main, tmp.string());
+  paykan::sema::Sema::ModuleCache.erase(key);
+
+  EXPECT_FALSE(r.Ok);
+  for (const char *expected :
+       {"import of module 'lib': the interface says 'Bad' implements "
+        "'Hashable', but its 'view fn hash() -> Str' does not match 'view fn "
+        "hash() -> int'",
+        "import of module 'lib': the interface says 'Ghost' implements "
+        "'Hashable', but it describes no class or struct 'Ghost'",
+        "import of module 'lib': the interface says 'Key' implements 'Named', "
+        "which is not a built-in trait an 'impl' block implements",
+        "import of module 'lib': the interface says 'Key' implements 'Show', "
+        "which is not a built-in trait an 'impl' block implements",
+        "import of module 'lib': the interface says 'Plain' implements "
+        "'Hashable', but it has no method 'view fn hash() -> int'"})
+    EXPECT_NE(r.Diagnostics.find(expected), std::string::npos)
+        << "missing: " << expected << "\n"
+        << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}

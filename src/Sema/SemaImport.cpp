@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <sstream>
+#include <tuple>
 #include <utility>
 
 namespace paykan {
@@ -212,6 +213,13 @@ static void sortModuleInfo(Sema::ModuleInfo &info) {
             byLocalThenName);
   std::sort(info.ExportedFunctions.begin(), info.ExportedFunctions.end(),
             [](const auto &a, const auto &b) { return a.Name < b.Name; });
+  // The conformances come from TraitImpls, keyed by pointer: sorted, their
+  // order is deterministic.
+  std::sort(info.ExportedImpls.begin(), info.ExportedImpls.end(),
+            [](const auto &a, const auto &b) {
+              return std::tie(a.TypeName, a.Trait) <
+                     std::tie(b.TypeName, b.Trait);
+            });
 }
 
 // -- Failed imports and diagnostics
@@ -329,6 +337,19 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     mi.Modes = m->getParamModes();
     return mi;
   };
+  // The conformances of @p ty, which the CLASS or STRUCT record @p name
+  // describes, to the built-in traits an `impl` block gives.  Called from
+  // the record loops, so an IMPL record always names a record of its blob,
+  // and never for a builtin type (registerBuiltinTraits gave those theirs).
+  auto exportImpls = [&](const ast::Type *ty, const std::string &name) {
+    auto it = TraitImpls.find(ty);
+    if (it == TraitImpls.end())
+      return;
+    for (const TraitRef &tr : it->second)
+      if (tr.Trait->IsBuiltin && tr.Args.empty() &&
+          names::isImplBuiltinTrait(tr.Trait->Decl->getName()))
+        info.ExportedImpls.push_back({name, tr.Trait->Decl->getName()});
+  };
 
   for (auto &[name, ct] : Ctx.getClassTypes()) {
     // The registry holds each class under its canonical name and again
@@ -362,6 +383,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     for (auto *m : methods)
       ci.Methods.push_back(methodInfo(m));
     info.ExportedClasses.push_back(std::move(ci));
+    exportImpls(ct, name);
   }
 
   // Struct types: fields in declaration order, then `__init__` and the
@@ -385,6 +407,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     for (auto *m : st->getImplMethods())
       si.Methods.push_back(methodInfo(m));
     info.ExportedStructs.push_back(std::move(si));
+    exportImpls(st, name);
   }
 
   // Enum types: name + variants in declaration order, and those with fields
@@ -493,6 +516,8 @@ pkm::Interface Sema::toInterface(const ModuleInfo &info) {
   for (auto &ei : info.ExportedEnums)
     iface.Enums.push_back({ei.Name, ei.Variants, ei.IsLocal, ei.OriginModule,
                            ei.PayloadVariants});
+  for (auto &ii : info.ExportedImpls)
+    iface.Impls.push_back({ii.TypeName, ii.Trait});
   return iface;
 }
 
@@ -530,6 +555,8 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
   for (auto &er : iface.Enums)
     info.ExportedEnums.push_back({er.Name, er.Variants, er.IsLocal,
                                   er.OriginModule, er.PayloadVariants});
+  for (auto &ir : iface.Impls)
+    info.ExportedImpls.push_back({ir.TypeName, ir.Trait});
   sortModuleInfo(info);
   return info;
 }
@@ -1064,6 +1091,51 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     return ok;
   };
 
+  // Record the module's conformances to the built-in traits, once every
+  // type and method of it exists.  The file's reader checked the trait and
+  // the type's record; a seeded ModuleCache entry bypasses it, so both are
+  // checked again, and so is that the type has the trait's methods.  Keyed
+  // by type, a conformance is the same under any qualifier.
+  auto registerExportedImpls = [&]() -> bool {
+    bool ok = true;
+    for (const auto &ii : info.ExportedImpls) {
+      const std::string says = diagPrefix + "the interface says '" +
+                               ii.TypeName + "' implements '" + ii.Trait + "'";
+      ast::Type *ty = Ctx.lookupStructType(ii.TypeName);
+      if (!ty)
+        ty = Ctx.lookupClassType(ii.TypeName);
+      auto t = Traits.find(ii.Trait);
+      if (!ty) {
+        error(loc, says + ", but it describes no class or struct '" +
+                       ii.TypeName + "'");
+        ok = false;
+        continue;
+      }
+      if (t == Traits.end() || !t->second.IsBuiltin ||
+          !names::isImplBuiltinTrait(ii.Trait)) {
+        error(loc, says + ", which is not a built-in trait an 'impl' block "
+                          "implements");
+        ok = false;
+        continue;
+      }
+      const TraitRef tr{&t->second, {}};
+      // The same conformance reached again (another import path, the hidden
+      // qualifier, a superclass's): one fact.
+      if (traitImplOwner(ty, tr))
+        continue;
+      if (std::string why = unmetRequirement(ty, tr); !why.empty()) {
+        std::string msg = says;
+        msg += ", but ";
+        msg += why;
+        error(loc, msg);
+        ok = false;
+        continue;
+      }
+      TraitImpls[ty].push_back(tr);
+    }
+    return ok;
+  };
+
   auto injectFnAs = [&](const ModuleInfo::FunctionInfo &fi,
                         const std::string &name) -> bool {
     if (lookupFunction(name))
@@ -1092,9 +1164,12 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     return true;
   };
 
-  // Types first (function signatures name them), then functions as
-  // qualifier::name and fullModulePath::name, then templates.
+  // Types first (function signatures name them) with their conformances,
+  // then functions as qualifier::name and fullModulePath::name, then
+  // templates.
   bool ok = registerExportedTypes();
+  if (ok && !registerExportedImpls())
+    ok = false;
   for (auto &fi : info.ExportedFunctions) {
     if (!hiddenInject && isModuleOwnName(fi.Name))
       continue; // the module's own: a private function or type's constructor

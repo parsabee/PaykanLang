@@ -224,6 +224,46 @@ The standard library's `HashMap<K, V>` and `HashSet<K>` require `K: Hashable` (s
 [Collections](../stdlib/collections.md)). Declaring a trait named `Hashable` is an
 error, as for `Show`.
 
+A conformance crosses modules with its type. A struct or a class of module `keys` with an
+`impl Hashable for` block is `Hashable` in every module that imports `keys`, and wherever
+the type is reached through another module (a function of `mid` that returns a
+`keys::Key`), whether `keys` is compiled from its source or loaded from a `.pkm` file
+([Prebuilt modules](15-modules.md#prebuilt-modules)):
+
+```pkn
+// file: keys.pkn
+struct Key { a: int; b: int; }
+
+impl Hashable for Key {
+  view fn hash() -> int { return (self.a * 31 + self.b).hash(); }
+}
+```
+
+```pkn
+import ::io;
+
+import ::collections;
+import keys;
+
+fn main() -> int {
+  counts = collections::HashMap<keys::Key, int>();
+  counts.put(keys::Key(1, 2), 5);
+  counts.put(keys::Key(1, 2), 6);
+  io::println(Str(counts.len()) + " " + Str(counts.get(keys::Key(1, 2))));
+  return 0;
+}
+```
+
+Output:
+
+```
+1 6
+```
+
+The `impl` block stays in the type's module: an importer can neither write `impl Hashable
+for keys::Key` nor repeat it for a subclass of an imported `Hashable` class, which is
+`Hashable` through its superclass.
+
 ## ValueType
 
 `ValueType` is a built-in trait with no methods. It is implemented by the types whose
@@ -267,7 +307,7 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 | Bad requirement | A requirement names an unknown type, repeats a method's name, has two parameters of one name or one named like a type (`fn m(u8: int)`) or `self`, or is `__init__` / `destroy` |
 | Missing or mismatched method | The class has no method a requirement names, or its signature differs |
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
-| Implemented twice | The class, or a superclass, already implements the trait (every class implements `Show`) |
+| Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Show`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
 | Unmet bound | A type argument does not implement a trait its parameter is bounded by |
 | Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Show for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |

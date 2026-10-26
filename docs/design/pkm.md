@@ -505,7 +505,8 @@ with its superclass's prefix (the cross-module `reinheritVTable`),
 trait methods with equal signatures (the §3.2 prototype `IMPL` record names
 the type of a `CLASS` or `STRUCT` record of the blob and a built-in trait
 an `impl` block implements, and the records are sorted by `(for, trait)`
-and unique), `CONST.value` kind matches its type;
+and unique; an importer also checks that the type has the trait's methods,
+with their signatures), `CONST.value` kind matches its type;
 `INST` records reference existing templates with matching arity, concrete
 arguments and a `form` consistent with `ERASABLE`; `flags.has_TMPL` agrees
 with the container. A failure is reported once at the import site

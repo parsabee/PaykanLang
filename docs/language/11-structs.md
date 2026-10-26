@@ -82,7 +82,8 @@ copied around like a number. A struct can be generic, like a class
 - `==` / `!=` compare **field by field**; `toString()` (and `io::println`) renders
   `Point(x: 1, y: 2)`.  Every struct implements `ValueType`, and `Show` when each field
   does (not one holding a function value);
-  `impl Hashable for` and user traits work as for classes.
+  `impl Hashable for` and user traits work as for classes; a struct's `Hashable` crosses
+  modules with it (a user trait's does not yet, #147).
 - Parameter modes work as for tuples: a plain parameter is a copy, `view` reads the
   caller's struct, `inout` is the caller's struct.  A field of a struct variable or field
   is an `inout` place (`bump(p.x)`).
@@ -482,9 +483,9 @@ Point(x: 1, y: 2) Point 2 True True False
 ```
 
 Values that are `==` must hash the same, so `hash` reads the fields `==` compares.  A
-`Hashable` struct is a key of the standard library's `HashMap<K, V>` and `HashSet<K>`
-([Collections](../stdlib/collections.md)), and any struct is an element of `List<T>` and the other
-collections:
+`Hashable` struct, of this module or an imported one, is a key of the standard library's
+`HashMap<K, V>` and `HashSet<K>` ([Collections](../stdlib/collections.md)), and any struct
+is an element of `List<T>` and the other collections:
 
 ```pkn
 import ::io;

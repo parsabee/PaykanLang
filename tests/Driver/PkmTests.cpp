@@ -14,6 +14,7 @@
 #include "BuildId.h"
 #include "Version.h"
 #include "paykan/pkm/File.h"
+#include "paykan/pkm/Interface.h"
 #include "paykan/pkm/Manifest.h"
 
 #include <array>
@@ -2022,5 +2023,354 @@ TEST(Pkm, SizedTypesCrossModulesAndPkm) {
   ASSERT_EQ(paykan("--emit-pkm lib/pix.pkn").exitCode, 0);
   fs::remove(dir / "lib" / "pix.pkn");
   check("from the .pkm");
+  fs::remove_all(dir);
+}
+
+// -- Conformances across modules (docs/language/06-traits.md, "Hashable")
+
+namespace {
+
+/// lib::keys declares a struct, a class and a private struct with `impl
+/// Hashable for` blocks and makes instantiations of its generic types;
+/// lib::mid only returns keys' types and lib::lib2's template body uses one.
+/// main uses each as a `HashMap`/`HashSet` key or a `T: Hashable` argument.
+struct ConformanceProject {
+  fs::path Dir;
+  explicit ConformanceProject(const std::string &name) {
+    Dir = fs::temp_directory_path() /
+          ("pkm_" + name + "_" + std::to_string(getpid()));
+    fs::remove_all(Dir);
+    writeFile(Dir / "lib" / "keys.pkn", R"(import ::collections;
+struct Key { a: int; b: int; }
+impl Hashable for Key { view fn hash() -> int { return (self.a * 31 + self.b).hash(); } }
+class CK {
+  v: int;
+  view fn equals(other: Obj) -> bool {
+    match other {
+      p: CK { return p.v == self.v; }
+      _ { return False; }
+    }
+  }
+}
+impl CK { fn __init__(v: int) { self.v = v; } }
+impl Hashable for CK { view fn hash() -> int { return self.v.hash(); } }
+struct _Priv { n: int; }
+impl Hashable for _Priv { view fn hash() -> int { return self.n.hash(); } }
+fn distinct<T>(x: T) -> unsigned {
+  s = collections::HashSet<_Priv>(); s.add(_Priv(1)); s.add(_Priv(1)); s.add(_Priv(2));
+  return s.len();
+}
+trait Named { view fn name() -> Str; }
+struct Keyed<K: Hashable> { k: K; }
+impl Hashable for Keyed<K> { view fn hash() -> int { return self.k.hash(); } }
+class GBox<T> { v: T; }
+impl GBox<T> { fn __init__(v: T) { self.v = v; } }
+impl Hashable for GBox<T> { view fn hash() -> int { return 3; } }
+impl Named for GBox<T> { view fn name() -> Str { return "box"; } }
+fn mkKeyed() -> Keyed<int> { return Keyed<int>(7); }
+fn mkBox() -> GBox<int> { return GBox<int>(1); }
+)");
+    writeFile(Dir / "lib" / "mid.pkn", R"(import lib::keys;
+fn mk() -> keys::Key { return keys::Key(1, 2); }
+fn mkc() -> keys::CK { return keys::CK(4); }
+)");
+    writeFile(Dir / "lib" / "lib2.pkn", R"(import lib::keys;
+import ::collections;
+fn count<T>(x: T) -> unsigned {
+  s = collections::HashSet<keys::Key>(); s.add(keys::Key(1, 2)); s.add(keys::Key(1, 2));
+  return s.len();
+}
+)");
+    writeFile(Dir / "main.pkn", R"(import ::io;
+import ::collections;
+import lib::keys;
+import lib::mid;
+import lib::lib2;
+class Sub : keys::CK {
+  view fn equals(other: Obj) -> bool { match other { p: Sub { return p.v == self.v; } _ { return False; } } }
+}
+impl Sub { fn __init__(v: int) { __super__(v); } }
+fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
+fn main() -> int {
+  m = collections::HashMap<keys::Key, int>();
+  m.put(keys::Key(1, 2), 5);
+  m.put(mid::mk(), 6);
+  s = collections::HashSet<keys::CK>();
+  s.add(keys::CK(3)); s.add(keys::CK(3)); s.add(mid::mkc());
+  t = collections::HashSet<Sub>();
+  t.add(Sub(1)); t.add(Sub(1));
+  io::println(Str(m.len()) + " " + Str(s.len()) + " " + Str(t.len()));
+  io::println(Str(h(keys::mkKeyed()) == h(7)));
+  io::println(Str(h(keys::mkBox())) + " " + keys::mkBox().name());
+  io::println(Str(keys::distinct(0)));
+  io::println(Str(lib::lib2::count(0)));
+  return 0;
+}
+)");
+  }
+  ~ConformanceProject() { fs::remove_all(Dir); }
+  CmdResult paykan(const std::string &cmd, const std::string &args) const {
+    return run("cd " + Dir.string() + " && " + cmd + " " + args);
+  }
+};
+
+const char *kConformanceOutput = "1 2 1\nTrue\n3 box\n2\n1\n";
+
+} // namespace
+
+// A type's conformance to Hashable reaches main on every path a module
+// comes from: its source with a cold and a warm cache, --no-module-cache,
+// --rebuild-modules, prebuilt files, and a prebuilt keys under modules
+// built from source; run, built at -O0 and -O2, and as C.
+TEST(Pkm, ConformancesAcrossModules) {
+  REQUIRE_BACKEND();
+  ConformanceProject p("conformances");
+  const char *libs[] = {"lib::keys", "lib::mid", "lib::lib2"};
+  for (const std::string &be : runnableBackends()) {
+    const std::string cmd = std::string(kPaykan) + backendFlag(be);
+    // `paykan [flags] main.pkn` runs main without a leak, and its output.
+    auto runs = [&](const std::string &flags, const std::string &how) {
+      auto r = p.paykan(cmd, flags + " --track-heap main.pkn");
+      EXPECT_EQ(r.exitCode, 0) << be << ", " << how << ":\n" << r.out;
+      EXPECT_TRUE(contains(r.out, kConformanceOutput))
+          << be << ", " << how << ":\n"
+          << r.out;
+      EXPECT_TRUE(contains(r.out, "live blocks       : 0"))
+          << be << ", " << how << ":\n"
+          << r.out;
+      return r.out;
+    };
+    // `paykan build -O<n>` with @p flags, whose executable prints the same.
+    auto builds = [&](const std::string &flags, const std::string &how) {
+      for (const char *opt : {"-O0", "-O2"}) {
+        const fs::path exe = p.Dir / ("prog" + std::string(opt));
+        auto b = p.paykan(cmd, std::string(opt) + " " + flags + " build -o " +
+                                   exe.string() + " main.pkn");
+        ASSERT_EQ(b.exitCode, 0) << be << ", " << how << " " << opt << ":\n"
+                                 << b.out;
+        auto ran = run(exe.string());
+        EXPECT_EQ(ran.exitCode, 0) << be << ", " << how << " " << opt;
+        EXPECT_EQ(ran.out, kConformanceOutput)
+            << be << ", " << how << " " << opt;
+        fs::remove(exe);
+      }
+      auto c = p.paykan(cmd, flags + " --emit-c main.pkn");
+      EXPECT_EQ(c.exitCode, 0) << be << ", " << how << " --emit-c:\n"
+                               << c.out.substr(0, 4000);
+    };
+
+    fs::remove_all(p.Dir / ".paykan_cache");
+    runs("", "cold cache");
+    std::string warm = runs("--verbose", "warm cache");
+    for (const char *m : libs)
+      EXPECT_TRUE(contains(warm, std::string("module ") + m + ": cache "))
+          << m << "\n"
+          << warm;
+    EXPECT_FALSE(contains(warm, "building from source")) << warm;
+    builds("", "cache");
+    runs("--no-module-cache", "--no-module-cache");
+    runs("--rebuild-modules", "--rebuild-modules");
+
+    // Prebuilt: every library a .pkm file on the module path, its source
+    // gone.
+    fs::remove_all(p.Dir / "pk");
+    for (const char *m : {"keys", "mid", "lib2"}) {
+      auto emit = p.paykan(cmd, std::string("--emit-pkm -o pk/lib/") + m +
+                                    ".pkm lib/" + m + ".pkn");
+      ASSERT_EQ(emit.exitCode, 0) << be << ": " << emit.out;
+    }
+    fs::rename(p.Dir / "lib", p.Dir / "src");
+    fs::remove_all(p.Dir / ".paykan_cache");
+    std::string pre = runs("--module-path=pk --verbose", "prebuilt");
+    for (const char *m : libs)
+      EXPECT_TRUE(contains(pre, std::string("module ") + m + ": prebuilt pk/"))
+          << m << "\n"
+          << pre;
+    builds("--module-path=pk", "prebuilt");
+
+    // Mixed: keys prebuilt beside the sources of mid and lib2.
+    fs::rename(p.Dir / "src", p.Dir / "lib");
+    fs::rename(p.Dir / "lib" / "keys.pkn", p.Dir / "keys.away");
+    fs::copy_file(p.Dir / "pk" / "lib" / "keys.pkm",
+                  p.Dir / "lib" / "keys.pkm");
+    fs::remove_all(p.Dir / ".paykan_cache");
+    std::string mixed = runs("--verbose", "mixed");
+    EXPECT_TRUE(contains(mixed, "module lib::keys: prebuilt lib/keys.pkm"))
+        << mixed;
+    EXPECT_TRUE(builtFromSource(mixed, "lib::mid")) << mixed;
+    fs::remove(p.Dir / "lib" / "keys.pkm");
+    fs::rename(p.Dir / "keys.away", p.Dir / "lib" / "keys.pkn");
+  }
+
+  // keys' interface records the conformances of its types, its private
+  // struct's and those of the instantiations it made, not a user trait's;
+  // mid's records those of the types it describes again.
+  auto keys = p.paykan(kPaykan, "pkm dump --section=iface pk/lib/keys.pkm");
+  ASSERT_EQ(keys.exitCode, 0) << keys.out;
+  EXPECT_TRUE(contains(keys.out, "  impl Hashable for CK\n"
+                                 "  impl Hashable for GBox<int>\n"
+                                 "  impl Hashable for Key\n"
+                                 "  impl Hashable for Keyed<int>\n"
+                                 "  impl Hashable for _Priv\n"))
+      << keys.out;
+  EXPECT_FALSE(contains(keys.out, "Named")) << keys.out;
+  auto mid = p.paykan(kPaykan, "pkm dump --section=iface pk/lib/mid.pkm");
+  ASSERT_EQ(mid.exitCode, 0) << mid.out;
+  EXPECT_TRUE(contains(mid.out, "  struct Key [imported from \"lib::keys\"]"))
+      << mid.out;
+  EXPECT_TRUE(contains(mid.out, "  impl Hashable for Key\n")) << mid.out;
+}
+
+// The conformances are part of the interface: adding or removing one makes
+// the importers' cache entries stale, and a prebuilt importer built against
+// the other interface is rejected.
+TEST(Pkm, AConformanceEditRebuildsTheImporter) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_impl_edit_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  const std::string v1 =
+      "struct Key { a: int; b: int; }\n"
+      "impl Key { view fn hash() -> int { return self.a * 31 + self.b; } }\n";
+  const std::string v2 = v1 + "impl Hashable for Key {}\n";
+  writeFile(dir / "keys.pkn", v1);
+  writeFile(dir / "mid.pkn", "import keys;\n"
+                             "fn mk() -> keys::Key { return keys::Key(1, 2); "
+                             "}\n");
+  // ok compiles with either keys; main needs the conformance.
+  writeFile(dir / "ok.pkn",
+            "import mid;\nfn main() -> int { return mid::mk().hash(); }\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\nimport mid;\n"
+            "fn h<T: Hashable>(x: view T) -> int { return x.hash(); }\n"
+            "fn main() -> int { io::println(Str(h(mid::mk()))); return 0; "
+            "}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  const char *unmet =
+      "'Key' does not implement trait 'Hashable', which 'h' requires of 'T'";
+  ASSERT_EQ(paykan("ok.pkn").exitCode, 33);
+  auto before = paykan("main.pkn");
+  EXPECT_NE(before.exitCode, 0) << before.out;
+  EXPECT_TRUE(contains(before.out, unmet)) << before.out;
+
+  writeFile(dir / "keys.pkn", v2);
+  auto added = paykan("--verbose main.pkn");
+  EXPECT_EQ(added.exitCode, 0) << added.out;
+  EXPECT_TRUE(contains(added.out, "33\n")) << added.out;
+  EXPECT_TRUE(contains(added.out, "module mid: cache .paykan_cache/mid.pkm is "
+                                  "stale (the interface of module 'keys' "
+                                  "changed); building from source"))
+      << added.out;
+
+  writeFile(dir / "keys.pkn", v1);
+  auto removed = paykan("--verbose main.pkn");
+  EXPECT_NE(removed.exitCode, 0) << removed.out;
+  EXPECT_TRUE(contains(removed.out, unmet)) << removed.out;
+  EXPECT_TRUE(contains(removed.out, "module mid: cache .paykan_cache/mid.pkm "
+                                    "is stale (the interface of module "
+                                    "'keys' changed)"))
+      << removed.out;
+
+  // mid.pkm built against v2's keys, beside v1's keys.pkm.
+  writeFile(dir / "keys.pkn", v2);
+  ASSERT_EQ(paykan("--emit-pkm mid.pkn").exitCode, 0);
+  writeFile(dir / "keys.pkn", v1);
+  ASSERT_EQ(paykan("--emit-pkm keys.pkn").exitCode, 0);
+  fs::remove(dir / "keys.pkn");
+  fs::remove(dir / "mid.pkn");
+  fs::remove_all(dir / ".paykan_cache");
+  auto stale = paykan("main.pkn");
+  EXPECT_NE(stale.exitCode, 0) << stale.out;
+  EXPECT_TRUE(contains(stale.out, "error: module 'mid' (mid.pkm) was built "
+                                  "against another interface of module "
+                                  "'keys'. Rebuild it from source."))
+      << stale.out;
+  fs::remove_all(dir);
+}
+
+namespace {
+
+/// Rewrite the IFACE section of the .pkm file at @p path with @p change.
+void rewriteIface(const fs::path &path, const std::string &module,
+                  const std::function<void(paykan::pkm::Interface &)> &change) {
+  std::string bytes = slurp(path);
+  auto file = paykan::pkm::File::read(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+  ASSERT_TRUE(file) << file.status().message();
+  auto iface = paykan::pkm::readInterface(
+      (*file).section(paykan::pkm::Kind::Iface), module);
+  ASSERT_TRUE(iface) << iface.status().message();
+  paykan::pkm::Interface changed = *iface;
+  change(changed);
+  paykan::pkm::Writer w;
+  for (const auto &e : (*file).sections()) {
+    auto s = (*file).section(static_cast<paykan::pkm::Kind>(e.Kind));
+    if (e.Kind == static_cast<uint32_t>(paykan::pkm::Kind::Iface))
+      w.add(e.Kind, e.Flags, paykan::pkm::writeInterface(changed));
+    else
+      w.add(e.Kind, e.Flags, std::vector<uint8_t>(s.begin(), s.end()));
+  }
+  auto patched = w.finish();
+  ASSERT_TRUE(patched) << patched.status().message();
+  writeFile(path, std::string((*patched).begin(), (*patched).end()));
+}
+
+} // namespace
+
+// A prebuilt file whose interface claims a conformance it cannot have: the
+// reader rejects one to a trait an `impl` block cannot give, the importer
+// one whose type lacks the trait's methods.
+TEST(Pkm, AForgedConformanceIsRejected) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_impl_forged_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "keys.pkn",
+            "struct Key { a: int; }\n"
+            "impl Hashable for Key { view fn hash() -> int { return self.a; } "
+            "}\n"
+            "struct Plain { a: int; }\n");
+  writeFile(dir / "main.pkn",
+            "import keys;\n"
+            "fn h<T: Hashable>(x: view T) -> int { return x.hash(); }\n"
+            "fn main() -> int { return h(keys::Key(5)); }\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  ASSERT_EQ(paykan("--emit-pkm keys.pkn").exitCode, 0);
+  fs::remove(dir / "keys.pkn");
+  ASSERT_EQ(paykan("main.pkn").exitCode, 5);
+  const std::string pristine = slurp(dir / "keys.pkm");
+
+  rewriteIface(dir / "keys.pkm", "keys", [](paykan::pkm::Interface &i) {
+    ASSERT_EQ(i.Impls.size(), 1u);
+    i.Impls[0].Trait = "Named";
+  });
+  const char *notBuiltin = "has a bad IFACE section: DECLS: 'impl Named for "
+                           "Key': 'Named' is not a built-in trait an 'impl' "
+                           "block implements";
+  auto named = paykan("main.pkn");
+  EXPECT_NE(named.exitCode, 0) << named.out;
+  EXPECT_TRUE(contains(named.out, notBuiltin)) << named.out;
+  auto check = paykan("pkm check keys.pkm");
+  EXPECT_NE(check.exitCode, 0) << check.out;
+  EXPECT_TRUE(contains(check.out, "DECLS: 'impl Named for Key': 'Named' is not "
+                                  "a built-in trait an 'impl' block "
+                                  "implements"))
+      << check.out;
+
+  writeFile(dir / "keys.pkm", pristine);
+  rewriteIface(dir / "keys.pkm", "keys", [](paykan::pkm::Interface &i) {
+    i.Impls.push_back({"Plain", "Hashable"});
+  });
+  auto plain = paykan("main.pkn");
+  EXPECT_NE(plain.exitCode, 0) << plain.out;
+  EXPECT_TRUE(contains(plain.out, "error: import of module 'keys': the "
+                                  "interface says 'Plain' implements "
+                                  "'Hashable', but it has no method 'view fn "
+                                  "hash() -> int'"))
+      << plain.out;
   fs::remove_all(dir);
 }
