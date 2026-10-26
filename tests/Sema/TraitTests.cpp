@@ -195,6 +195,30 @@ fn main() -> int {
       << r.Diagnostics;
 }
 
+// A bounded generic enum named before the `impl` blocks are known (a class
+// field's type) is checked once they are, as a generic class is: at the
+// field.
+TEST(Traits, BoundedGenericEnumDeferred) {
+  auto ok = semaCheck(R"(// A key, or none.
+enum Maybe<T: Hashable> { Nothing, Just(v: T) }
+class C { m: Maybe<int>; }
+impl C { fn __init__() { self.m = Maybe<int>::Nothing; } }
+fn main() -> int { c = C(); return 0; }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  EXPECT_EQ(ok.ErrorCount, 0) << ok.Diagnostics;
+
+  auto r = semaCheck(R"(// A key, or none.
+enum Maybe<T: Hashable> { Nothing, Just(v: T) }
+class C { m: Maybe<float>; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
+  expectAll(r, {":3:11: error: 'float' does not implement trait 'Hashable', "
+                "which 'Maybe' requires of 'T'"});
+}
+
 // int, float, bool and char implement `Show`: `n.toString()` is a `Str`.  So
 // does an enum: its variant's name.
 TEST(Traits, ScalarsImplementShow) {

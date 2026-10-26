@@ -1671,13 +1671,6 @@ private:
   // A type parameter's bounds are checked when its template is instantiated,
   // once the `impl ... for` blocks are recorded (TraitImplsKnown); until
   // then the check waits in PendingBoundChecks.
-  struct PendingBoundCheck {
-    const ast::Decl *Template;
-    std::string Name;
-    std::vector<ast::Type *> Args;
-    ast::SourceLocation Loc;
-  };
-  std::vector<PendingBoundCheck> PendingBoundChecks;
   bool TraitImplsKnown = false;
   /// Templates with a bound that names no trait (reported with them).
   std::set<const ast::Decl *> BadBounds;
@@ -1692,6 +1685,17 @@ private:
                    const std::vector<ast::Type *> &args,
                    ast::SourceLocation loc);
   bool checkPendingBounds();
+  /// Report that @p tmpl, another module's template, requires its type
+  /// parameter @p param to implement @p trait, a trait of that module,
+  /// @p module (#147).  At this module's own request of the instantiation
+  /// that led to @p loc, when one is on InstantiationStack; at @p loc
+  /// otherwise.  Once per place, template and trait (ReportedForeignBounds).
+  void reportForeignTraitBound(const std::string &tmpl,
+                               const std::string &param,
+                               const std::string &trait,
+                               const std::string &module,
+                               ast::SourceLocation loc);
+  StringSet ReportedForeignBounds;
 
   // -- Generics
   //
@@ -1769,6 +1773,19 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// A bound check waiting for TraitImplsKnown.
+  struct PendingBoundCheck {
+    const ast::Decl *Template;
+    const std::vector<const std::string *> *Params; // the template's own
+    const ast::TypeParamBounds *Bounds;             // the template's own
+    std::string Name;
+    std::vector<ast::Type *> Args;
+    ast::SourceLocation Loc;
+    /// Where it was asked for: the diagnostic's file and instantiation notes.
+    const ModuleTemplates *Origin;
+    std::vector<InstantiationFrame> Frames;
+  };
+  std::vector<PendingBoundCheck> PendingBoundChecks;
   /// Whether every struct's fields are known (populateStructs): until then
   /// a struct's size is not, and the checks of the optionals resolved so far
   /// (a class's fields and signatures) wait in DeferredOptionalChecks.
@@ -1845,6 +1862,10 @@ private:
   /// The module whose template is being checked (CurrentModule), or nullptr
   /// for this module's own code.
   const ModuleTemplates *CurrentOrigin = nullptr;
+  /// This module's own file (Sema::run): an InstantiationFrame in it is a
+  /// request this module's code made.
+  std::string OwnSourceName;
+  const std::vector<std::string> *OwnSourceLines = nullptr;
   /// While alive, the code checked is @p origin's module's (a template of
   /// another module, or this module's own code for a null origin), and
   /// diagnostics point into that module's file.

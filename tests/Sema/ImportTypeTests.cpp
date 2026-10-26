@@ -40,6 +40,23 @@ static SemaFileResult semaCheckFile(const std::string &filePath,
   return {ok, os.str()};
 }
 
+/// The errors and notes of @p diags, one per line without the source text
+/// shown under each, every file named by its last component.
+static std::string diagSummary(const std::string &diags) {
+  std::istringstream in(diags);
+  std::string out;
+  for (std::string line; std::getline(in, line);) {
+    size_t kind = line.find(": error: ");
+    if (kind == std::string::npos)
+      kind = line.find(": note: ");
+    if (kind == std::string::npos)
+      continue;
+    const size_t slash = line.rfind('/', kind);
+    out += (slash == std::string::npos ? line : line.substr(slash + 1)) + "\n";
+  }
+  return out;
+}
+
 // ─── OK: exported signatures that name other types of the SAME module ────────
 //
 // Exported classes are reconstructed from an unordered registry, so a method
@@ -673,6 +690,223 @@ fn main() -> int {
                                                         << r.Diagnostics;
   EXPECT_EQ(r.Diagnostics.find("no method"), std::string::npos)
       << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// A template of another module bounded by that module's own trait, directly
+// or through a template its body uses, cannot be instantiated here (#147):
+// reported where this module asks for the instantiation, once, and never
+// satisfied by this module's trait of the same name.  A chain of the
+// module's templates too deep for that request to be known is reported in
+// the module's file.  A built-in bound, a non-generic function and the
+// module's own code are unaffected.
+TEST(Module, ForeignTraitBound) {
+  auto tmp = paykan::test::tempDir() / "pkn_ms_foreign_bound";
+  std::filesystem::remove_all(tmp);
+  const std::string t27 = (tmp / "t27").string();
+  const std::string defer = (tmp / "defer").string();
+  const std::string deep = (tmp / "deep").string();
+  const std::string kTraitLib = R"(trait Named { view fn name() -> Str; }
+class Dog { view fn name() -> Str { return "Rex"; } }
+impl Named for Dog {}
+fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
+fn wrap<T>(x: T) -> Str { return greet(Dog()); }
+fn wrapn() -> Str { return greet(Dog()); }
+class Holder<T> { v: T; fn say() -> Str { return greet(Dog()); } }
+fn wrap2<T>(x: T) -> Str { return greet(Dog()) + greet(Dog()); }
+fn sh<T: Show>(x: view T) -> Str { return x.toString(); }
+fn shw<T>(x: T) -> Str { return sh(x); }
+)";
+  writeFile(t27, "lib.pkn", kTraitLib);
+  writeFile(defer, "lib.pkn", R"(trait Named { view fn name() -> Str; }
+class Dog { view fn name() -> Str { return "Rex"; } }
+impl Named for Dog {}
+class Gen<T: Named> { v: int; }
+impl Gen<T> { fn __init__() { self.v = 1; } }
+class Holder<T> {
+  g: Gen<Dog>;
+}
+impl Holder<T> { fn __init__() { self.g = Gen<Dog>(); } }
+class Mid<T> { g: Gen<Dog>; }
+class Outer<T> { m: Mid<T>; }
+)");
+  writeFile(deep, "lib.pkn", R"(trait Named { view fn name() -> Str; }
+class Dog { view fn name() -> Str { return "Rex"; } }
+impl Named for Dog {}
+fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
+fn w2<T>(x: T) -> Str { return greet(Dog()); }
+fn w1<T>(x: T) -> Str { return w2(x); }
+)");
+  const std::string kImporterTrait = R"(import ::io;
+import lib;
+trait Named { view fn name() -> Str; }
+class Cat { view fn name() -> Str { return "Tom"; } }
+impl Named for Cat {}
+fn main() -> int { io::println(lib::greet(Cat())); return 0; }
+)";
+  // An unrelated trait of the same name is not that one either.
+  const std::string kUnrelatedTrait = R"(import ::io;
+import lib;
+trait Named { view fn other() -> int; }
+class Cat { view fn name() -> Str { return "Tom"; } view fn other() -> int { return 1; } }
+impl Named for Cat {}
+fn main() -> int { io::println(lib::greet(Cat())); return 0; }
+)";
+  struct Case {
+    std::string Dir, File, Source, Expected;
+  };
+  const std::string kRequires =
+      "requires 'T' to implement trait 'Named' of module 'lib', and another "
+      "module's traits are not supported yet (#147)\n";
+  const Case cases[] = {
+      {t27, "b.pkn",
+       "import ::io;\nimport lib;\nfn main() -> int { "
+       "io::println(lib::greet(lib::Dog())); return 0; }\n",
+       "b.pkn:3:32: error: 'lib::greet' " + kRequires},
+      {t27, "a.pkn",
+       "import ::io;\nimport lib;\nfn main() -> int { "
+       "io::println(lib::wrap(1)); return 0; }\n",
+       "a.pkn:3:32: error: 'lib::wrap<int>' cannot be instantiated here: it "
+       "uses 'lib::greet', which " +
+           kRequires + "lib.pkn:5:34: note: 'lib::greet' is used here\n"},
+      // Two uses in the body are one request.
+      {t27, "twice.pkn",
+       "import ::io;\nimport lib;\nfn main() -> int { "
+       "io::println(lib::wrap2(1)); return 0; }\n",
+       "twice.pkn:3:32: error: 'lib::wrap2<int>' cannot be instantiated here: "
+       "it uses 'lib::greet', which " +
+           kRequires + "lib.pkn:8:35: note: 'lib::greet' is used here\n"},
+      {t27, "d.pkn",
+       "import ::io;\nimport lib;\nfn main() -> int { h = lib::Holder<int>(1); "
+       "io::println(lib::wrapn()); return 0; }\n",
+       "d.pkn:3:24: error: 'Holder<int>' cannot be instantiated here: it uses "
+       "'lib::greet', which " +
+           kRequires + "lib.pkn:7:50: note: 'lib::greet' is used here\n"},
+      // In this module's own template, once for its instantiations.
+      {t27, "mine.pkn",
+       "import ::io;\nimport lib;\nfn mine<T>(x: T) -> Str { return "
+       "lib::greet(lib::Dog()); }\nfn main() -> int { io::println(mine(1) + "
+       "mine(True)); return 0; }\n",
+       "mine.pkn:3:34: error: 'lib::greet' " + kRequires +
+           "mine.pkn:4:32: note: in instantiation of 'mine<int>' requested "
+           "here\n"},
+      {t27, "c2.pkn", kImporterTrait,
+       "c2.pkn:6:32: error: 'lib::greet' " + kRequires +
+           "c2.pkn:3:1: note: this module's trait 'Named' is a different "
+           "trait\n"},
+      {t27, "c3.pkn", kUnrelatedTrait,
+       "c3.pkn:6:32: error: 'lib::greet' " + kRequires +
+           "c3.pkn:3:1: note: this module's trait 'Named' is a different "
+           "trait\n"},
+      // A field and the `__init__` that assigns it are one request.
+      {defer, "main.pkn",
+       "import lib;\nclass M { h: lib::Holder<int>; }\nimpl M { fn __init__() "
+       "{ self.h = lib::Holder<int>(); } }\nfn main() -> int { m = M(); "
+       "return 0; }\n",
+       "main.pkn:2:11: error: 'Holder<int>' cannot be instantiated here: it "
+       "uses 'lib::Gen', which " +
+           kRequires + "lib.pkn:7:3: note: 'lib::Gen' is used here\n"},
+      {defer, "main2.pkn",
+       "import lib;\nstruct S { k: lib::Gen<lib::Dog>; }\nfn main() -> int { "
+       "return 0; }\n",
+       "main2.pkn:2:12: error: 'lib::Gen' " + kRequires},
+      // The instantiations between the request and the use are noted.
+      {defer, "main3.pkn",
+       "import lib;\nclass M { o: lib::Outer<int>; }\nfn main() -> int { "
+       "return 0; }\n",
+       "main3.pkn:2:11: error: 'Outer<int>' cannot be instantiated here: it "
+       "uses 'lib::Gen', which " +
+           kRequires +
+           "lib.pkn:10:16: note: 'lib::Gen' is used here\n"
+           "lib.pkn:11:18: note: in instantiation of 'Mid<int>' requested "
+           "here\n"},
+      // The request of w2 is in lib's file: the use is reported there.
+      {deep, "a.pkn",
+       "import ::io;\nimport lib;\nfn main() -> int { "
+       "io::println(lib::w1(1)); return 0; }\n",
+       "lib.pkn:5:32: error: 'lib::greet' " + kRequires +
+           "lib.pkn:6:32: note: in instantiation of 'lib::w2<int>' requested "
+           "here\n"},
+  };
+  for (const Case &c : cases) {
+    auto r = semaCheckFile(writeFile(c.Dir, c.File, c.Source), c.Dir);
+    EXPECT_FALSE(r.Ok) << c.File;
+    EXPECT_EQ(diagSummary(r.Diagnostics), c.Expected) << c.File << "\n"
+                                                      << r.Diagnostics;
+  }
+
+  // A built-in bound, a function that is not generic, and the module's own
+  // instantiations check.
+  auto ok = semaCheckFile(
+      writeFile(t27, "ok.pkn",
+                "import ::io;\nimport lib;\nfn main() -> int { "
+                "io::println(lib::wrapn() + lib::sh(5) + lib::shw(6)); "
+                "return 0; }\n"),
+      t27);
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  auto own = semaCheckFile(
+      writeFile(tmp.string(), "own.pkn",
+                kTraitLib + "fn main() -> int { s = wrap(1) + wrap2(2) + "
+                            "Holder<int>(3).say() + shw(4); return 0; }\n"),
+      tmp.string());
+  EXPECT_TRUE(own.Ok) << own.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
+// A bound check made before the `impl` blocks were known, of a template of
+// another module's template, is reported in that template's file, with the
+// instantiation notes, as one made after: never at that line of this file.
+TEST(Module, DeferredBoundErrorNamesTheTemplatesFile) {
+  auto tmp = paykan::test::tempDir() / "pkn_ms_deferred_bound";
+  std::filesystem::remove_all(tmp);
+  const std::string own = (tmp / "own").string();
+  const std::string viaStdDir = (tmp / "std").string();
+  writeFile(own, "lib.pkn", R"(class Set<K: Hashable> { k: K; }
+struct _F { a: float; }
+class Holder<T> {
+  s: Set<_F>;
+}
+)");
+  writeFile(viaStdDir, "lib.pkn", R"(import ::collections;
+struct _F { a: float; }
+class Holder<T> {
+  s: collections::HashSet<_F>;
+}
+)");
+  const std::string kMain =
+      "import lib;\nclass M { h: lib::Holder<int>; }\nfn main() -> int { "
+      "return 0; }\n";
+  auto r = semaCheckFile(writeFile(own, "main.pkn", kMain), own);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "lib.pkn:4:3: error: '_F' does not implement trait 'Hashable', "
+            "which 'lib::Set' requires of 'K'\n"
+            "main.pkn:2:11: note: in instantiation of 'Holder<int>' requested "
+            "here\n")
+      << r.Diagnostics;
+
+  // Through a template of the standard library, which goes on to the
+  // templates it uses.
+  auto viaStd =
+      semaCheckFile(writeFile(viaStdDir, "main.pkn", kMain), viaStdDir);
+  EXPECT_FALSE(viaStd.Ok);
+  const std::string summary = diagSummary(viaStd.Diagnostics);
+  EXPECT_EQ(summary.rfind(
+                "lib.pkn:4:3: error: '_F' does not implement trait "
+                "'Hashable', which '::collections::HashSet' requires of 'K'\n"
+                "main.pkn:2:11: note: in instantiation of 'Holder<int>' "
+                "requested here\n",
+                0),
+            0u)
+      << viaStd.Diagnostics;
+  std::istringstream lines(summary);
+  for (std::string line; std::getline(lines, line);) {
+    if (line.rfind("main.pkn:", 0) == 0) {
+      EXPECT_EQ(line, "main.pkn:2:11: note: in instantiation of 'Holder<int>' "
+                      "requested here")
+          << viaStd.Diagnostics;
+    }
+  }
   std::filesystem::remove_all(tmp);
 }
 

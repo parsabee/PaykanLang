@@ -665,6 +665,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Hashable for` block, which was left out before.  So `gb::Box<float>`, with `impl
   Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }`, is now `method
   call on non-class type 'float'` in gb's file, as `Box<float>` is in gb itself.
+- A bound of another module's template is never resolved against the importer's own
+  traits.  An importer that declared a `trait Named` of its own satisfied
+  `lib::greet<T: Named>` with it, whatever the trait's methods.  That is now the #147
+  error under Fixed, with a note at the importer's trait.
 
 ### Removed
 
@@ -1283,6 +1287,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     structs' `impl Trait for` blocks work across modules, and that an `impl Named for
     Box<T>` block works in an importer now hold.  A module's own trait does not cross yet
     (#147).
+- A template of another module bounded by that module's own trait, directly or through a
+  template its body uses (an unbounded `fn wrap<T>` calling `fn greet<T: Named>`, a
+  generic class's method), is reported where the importer instantiates it:
+  `'lib::wrap<int>' cannot be instantiated here: it uses 'lib::greet', which requires 'T'
+  to implement trait 'Named' of module 'lib', and another module's traits are not
+  supported yet (#147)`, with a note at the use (docs/language/06-traits.md, "Not
+  Supported Yet").  Before, it was `unknown trait 'Named'`, for a use inside the module in
+  the very file that declares `Named`.
+- A bound error that waited for the `impl` blocks to be known (a class field's type that
+  instantiates another module's template, whose field instantiates a bounded one) showed
+  that template's line under the importer's file name, with no instantiation note:
+  `main.pkn:846:3` for a line of collections.pkn.  It now names the template's file, with
+  the instantiation notes.
+- A bounded generic enum used before the `impl` blocks were checked (a class field `m:
+  Maybe<int>` of `enum Maybe<T: Hashable>`) crashed the compiler.  It is now checked like
+  a generic class.
 
 ## [0.2.0] - 2026-10-20
 

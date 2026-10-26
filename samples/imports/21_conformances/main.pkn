@@ -1,0 +1,59 @@
+// OK: a type's conformance to `Hashable` crosses modules with it
+// (docs/language/06-traits.md, "Hashable"). lib::keys gives a struct, a
+// class, a private struct and two generic types an `impl Hashable for`
+// block; lib::mid only returns keys' types. Here they are HashMap and
+// HashSet keys and arguments of a `T: Hashable` function: reached directly
+// and through mid, as instantiations keys made (Keyed<int>, GBox<int>) and
+// ones made here (Keyed<Str>, GBox<Str>), and through a subclass of CK.
+// Whether the modules come from their source or their `.pkm` files (the
+// second run of the sample).
+//
+// expect-stdout: 1 2 1
+// expect-stdout: True True
+// expect-stdout: 3 3 box
+// expect-stdout: 2
+
+import ::io;
+import ::collections;
+import lib::keys;
+import lib::mid;
+
+// Hashable through CK. Its own `equals`: a class pattern matches the exact
+// class.
+class Sub : keys::CK {
+  view fn equals(other: Obj) -> bool {
+    match other {
+      p: Sub { return p.v == self.v; }
+      _ { return False; }
+    }
+  }
+}
+
+impl Sub {
+  fn __init__(v: int) { __super__(v); }
+}
+
+fn h<T: Hashable>(x: view T) -> int {
+  return x.hash();
+}
+
+fn main() -> int {
+  m = collections::HashMap<keys::Key, int>();
+  m.put(keys::Key(1, 2), 5);
+  m.put(mid::mk(), 6);
+  s = collections::HashSet<keys::CK>();
+  s.add(keys::CK(3));
+  s.add(keys::CK(3));
+  s.add(mid::mkc());
+  t = collections::HashSet<Sub>();
+  t.add(Sub(1));
+  t.add(Sub(1));
+  io::println(Str(m.len()) + " " + Str(s.len()) + " " + Str(t.len()));
+
+  io::println(Str(h(keys::mkKeyed()) == h(7)) + " "
+      + Str(h(keys::Keyed<Str>("a")) == h("a")));
+  io::println(Str(h(keys::mkBox())) + " " + Str(h(keys::GBox<Str>("x"))) + " "
+      + keys::GBox<Str>("x").name());
+  io::println(Str(keys::distinct(0)));
+  return 0;
+}

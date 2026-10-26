@@ -2394,3 +2394,148 @@ TEST(Pkm, AForgedConformanceIsRejected) {
       << plain.out;
   fs::remove_all(dir);
 }
+
+namespace {
+
+/// The errors and notes of @p out, without the source text under each.
+std::string diagLines(const std::string &out) {
+  std::istringstream lines(out);
+  std::string kept;
+  for (std::string line; std::getline(lines, line);)
+    if (contains(line, ": error: ") || contains(line, ": note: "))
+      kept += line + "\n";
+  return kept;
+}
+
+} // namespace
+
+// A template of another module bounded by that module's own trait is
+// reported at the importer's request (#147), and a bound checked once the
+// `impl` blocks are known in the template's file, whether the module comes
+// from its source, the cache, or a prebuilt file, on run, build and
+// --emit-c alike; the module's function that is not generic runs on each.
+TEST(Pkm, AForeignTraitBoundIsReportedOnEveryPath) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_foreign_bound_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib" / "pets.pkn", R"(trait Named { view fn name() -> Str; }
+class Dog { view fn name() -> Str { return "Rex"; } }
+impl Named for Dog {}
+fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
+fn wrap<T>(x: T) -> Str { return greet(Dog()); }
+fn wrapn() -> Str { return greet(Dog()); }
+class Set<K: Hashable> { k: K; }
+struct _F { a: float; }
+class Holder<T> {
+  s: Set<_F>;
+}
+)");
+  writeFile(dir / "lib" / "greeter.pkn",
+            "import lib::pets;\n"
+            "fn hi() -> Str { return pets::wrapn(); }\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\n"
+            "import lib::pets;\n"
+            "class M { h: pets::Holder<int>; }\n"
+            "fn main() -> int { io::println(pets::wrap(1)); return 0; }\n");
+  writeFile(dir / "ok.pkn", "import ::io;\n"
+                            "import lib::greeter;\n"
+                            "import lib::pets;\n"
+                            "fn main() -> int {\n"
+                            "  io::println(greeter::hi() + \" \" + "
+                            "pets::wrapn());\n"
+                            "  return 0;\n"
+                            "}\n");
+  const std::string kErrors =
+      "lib/pets.pkn:10:3: error: '_F' does not implement trait 'Hashable', "
+      "which 'lib::pets::Set' requires of 'K'\n"
+      "main.pkn:3:11: note: in instantiation of 'Holder<int>' requested here\n"
+      "main.pkn:4:32: error: 'lib::pets::wrap<int>' cannot be instantiated "
+      "here: it uses 'lib::pets::greet', which requires 'T' to implement trait "
+      "'Named' of module 'lib::pets', and another module's traits are not "
+      "supported yet (#147)\n"
+      "lib/pets.pkn:5:34: note: 'lib::pets::greet' is used here\n";
+  // `paykan --backend=<be> <args>` from the project directory.
+  auto paykanOn = [&](const std::string &be, const std::string &args) {
+    return run("cd " + dir.string() + " && " + kPaykan + backendFlag(be) + " " +
+               args);
+  };
+  for (const std::string &be : runnableBackends()) {
+    auto paykan = [&](const std::string &args) { return paykanOn(be, args); };
+    // main is rejected with kErrors by run, build at -O0 and -O2, and
+    // --emit-c; ok runs, built too, without a leak.
+    auto every = [&](const std::string &flags, const std::string &how) {
+      auto r = paykan(flags + " main.pkn");
+      EXPECT_NE(r.exitCode, 0) << be << ", " << how << ":\n" << r.out;
+      EXPECT_EQ(diagLines(r.out), kErrors) << be << ", " << how << ":\n"
+                                           << r.out;
+      for (const char *opt : {"-O0", "-O2"}) {
+        const fs::path exe = dir / ("prog" + std::string(opt));
+        auto b = paykan(std::string(opt) + " " + flags + " build -o " +
+                        exe.string() + " main.pkn");
+        EXPECT_NE(b.exitCode, 0) << be << ", " << how << " " << opt;
+        EXPECT_EQ(diagLines(b.out), kErrors)
+            << be << ", " << how << " " << opt << ":\n"
+            << b.out;
+        auto okb = paykan(std::string(opt) + " " + flags + " build -o " +
+                          exe.string() + " ok.pkn");
+        ASSERT_EQ(okb.exitCode, 0) << be << ", " << how << " " << opt << ":\n"
+                                   << okb.out;
+        auto ran = run(exe.string());
+        EXPECT_EQ(ran.exitCode, 0) << be << ", " << how << " " << opt;
+        EXPECT_EQ(ran.out, "hello, Rex hello, Rex\n")
+            << be << ", " << how << " " << opt;
+        fs::remove(exe);
+      }
+      auto c = paykan(flags + " --emit-c main.pkn");
+      EXPECT_NE(c.exitCode, 0) << be << ", " << how << " --emit-c";
+      EXPECT_EQ(diagLines(c.out), kErrors)
+          << be << ", " << how << " --emit-c:\n"
+          << c.out.substr(0, 4000);
+      auto okc = paykan(flags + " --emit-c ok.pkn");
+      EXPECT_EQ(okc.exitCode, 0) << be << ", " << how << " --emit-c:\n"
+                                 << okc.out.substr(0, 4000);
+      auto ok = paykan(flags + " --track-heap ok.pkn");
+      EXPECT_EQ(ok.exitCode, 0) << be << ", " << how << ":\n" << ok.out;
+      EXPECT_TRUE(contains(ok.out, "hello, Rex hello, Rex\n"))
+          << be << ", " << how << ":\n"
+          << ok.out;
+      EXPECT_TRUE(contains(ok.out, "live blocks       : 0"))
+          << be << ", " << how << ":\n"
+          << ok.out;
+    };
+
+    // From source: ok writes the cache entries main then reads.
+    fs::remove_all(dir / ".paykan_cache");
+    every("", "cold cache");
+    auto warm = paykan("--verbose main.pkn");
+    EXPECT_TRUE(contains(warm.out, "module lib::pets: cache ")) << warm.out;
+    EXPECT_EQ(diagLines(warm.out), kErrors) << be << ", warm:\n" << warm.out;
+    every("", "warm cache");
+    every("--no-module-cache", "--no-module-cache");
+    every("--rebuild-modules", "--rebuild-modules");
+
+    // Prebuilt: both libraries .pkm files on the module path, the sources
+    // gone (the notes in pets' file have no source text to show).
+    fs::remove_all(dir / "pk");
+    for (const char *m : {"pets", "greeter"}) {
+      auto emit = paykan(std::string("--emit-pkm -o pk/lib/") + m +
+                         ".pkm lib/" + m + ".pkn");
+      ASSERT_EQ(emit.exitCode, 0) << be << ": " << emit.out;
+    }
+    fs::rename(dir / "lib", dir / "src");
+    fs::remove_all(dir / ".paykan_cache");
+    every("--module-path=pk", "prebuilt");
+
+    // Mixed: pets prebuilt beside greeter's source.
+    fs::rename(dir / "src", dir / "lib");
+    fs::rename(dir / "lib" / "pets.pkn", dir / "pets.away");
+    fs::copy_file(dir / "pk" / "lib" / "pets.pkm", dir / "lib" / "pets.pkm");
+    fs::remove_all(dir / ".paykan_cache");
+    every("", "mixed");
+    fs::remove(dir / "lib" / "pets.pkm");
+    fs::rename(dir / "pets.away", dir / "lib" / "pets.pkn");
+  }
+  fs::remove_all(dir);
+}

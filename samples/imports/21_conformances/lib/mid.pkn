@@ -1,0 +1,12 @@
+// Module: lib/mid
+// Only returns keys of lib::keys: its interface describes them, with their
+// conformances, again.
+import lib::keys;
+
+fn mk() -> keys::Key {
+  return keys::Key(1, 2);
+}
+
+fn mkc() -> keys::CK {
+  return keys::CK(4);
+}

@@ -1,0 +1,20 @@
+// Module: pets
+// A trait of this module, and templates bounded by it: greet directly, wrap
+// through the template its body uses.
+trait Named {
+  view fn name() -> Str;
+}
+
+class Dog {
+  view fn name() -> Str { return "Rex"; }
+}
+
+impl Named for Dog {}
+
+fn greet<T: Named>(x: view T) -> Str {
+  return "hello, " + x.name();
+}
+
+fn wrap<T>(x: T) -> Str {
+  return greet(Dog());
+}

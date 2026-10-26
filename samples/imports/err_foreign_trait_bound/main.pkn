@@ -1,0 +1,16 @@
+// ERROR: a template of another module bounded by that module's own trait,
+// directly or through a template its body uses, cannot be instantiated here
+// yet (#147): the error is reported at the request here, with a note at the
+// use in that module's file.
+//   main.pkn:14:15: error: 'pets::wrap<int>' cannot be instantiated here: it
+//   uses 'pets::greet', which requires 'T' to implement trait 'Named' of
+//   module 'pets', and another module's traits are not supported yet (#147)
+//   pets.pkn:19:10: note: 'pets::greet' is used here
+import ::io;
+import pets;
+
+fn main() -> int {
+  // ERROR: Named is pets' own trait
+  io::println(pets::wrap(1));
+  return 0;
+}

@@ -312,14 +312,56 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 | Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Show`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
 | Unmet bound | A type argument does not implement a trait its parameter is bounded by |
+| Trait of another module | A template of another module is bounded, directly or through a template it uses, by that module's own trait ([#147](https://github.com/parsabee/PaykanLang/issues/147); see below) |
 | Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Show for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |
 | Trait as a type | A trait is used where a type is expected |
 
 ## Not Supported Yet
 
-Traits of another module (an importer cannot name them; a type's conformance to one is
-not in the module interface, so an `impl Named for Box<T>` block gives an importer's
-`lib::Box<Str>` its methods, not the trait; and a template of that module bounded by one
-cannot be instantiated from the importer: `unknown trait 'Named'`), `impl ... for` a
-built-in type, an enum or a class of another module, default methods, `static fn`
-requirements, and trait objects.
+Traits of another module. An importer cannot name one, in a bound or in an `impl ... for`,
+and a type's conformance to one is not in the module interface. A template of that module
+bounded by one, directly or through a template it uses (an unbounded `fn wrap<T>` calling
+`greet<T: Named>`, or a method of a generic class that does), cannot be instantiated from
+the importer ([#147](https://github.com/parsabee/PaykanLang/issues/147)). The error is
+reported where the importer asks for the instantiation, with a note at the use:
+
+```pkn
+// file: lib.pkn
+trait Named { view fn name() -> Str; }
+
+class Dog { view fn name() -> Str { return "Rex"; } }
+
+impl Named for Dog {}
+
+fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
+
+fn wrap<T>(x: T) -> Str { return greet(Dog()); }
+```
+
+```pkn
+import ::io;
+
+import lib;
+
+fn main() -> int {
+  io::println(lib::wrap(1));
+  return 0;
+}
+```
+
+Error:
+
+```
+main.pkn:6:15: error: 'lib::wrap<int>' cannot be instantiated here: it uses 'lib::greet', which requires 'T' to implement trait 'Named' of module 'lib', and another module's traits are not supported yet (#147)
+lib.pkn:10:34: note: 'lib::greet' is used here
+```
+
+Calling `lib::greet` itself is reported at the call: `'lib::greet' requires 'T' to
+implement trait 'Named' of module 'lib', ...`, and so is a use deeper in the module (a
+generic function of it calling one that calls `greet`), at the use in the module's file,
+with the instantiation notes. A trait the importer declares under the same name is
+another trait, and never satisfies such a bound. An `impl Named for Box<T>` block of the
+module gives an importer's `lib::Box<Str>` its methods, not the trait.
+
+Also not supported yet: `impl ... for` a built-in type, an enum or a class of another
+module, default methods, `static fn` requirements, and trait objects.

@@ -706,7 +706,10 @@ without erasure or `INST` (§4.5 stays the plan for erased copies):
   instead (§3.5 row 4). A block of the module's own trait gives the
   importer's instantiation its methods only: `Sema::checkTraitImpl` neither
   resolves the trait there, where its name is another trait or none, nor
-  records the conformance (#147).
+  records the conformance (#147).  For the same reason a bound of another
+  module's template that is not a built-in trait is never resolved in the
+  importer: `Sema::checkBounds` reports it as the #147 error, at the
+  importer's request of the instantiation that led to it.
 - **Emission: one copy per module, one per program.** Every module lowers
   its own copy of each instantiation of another module's template its code
   uses (`ForeignClasses`, `ForeignFunctions`, `ForeignStructs`), as

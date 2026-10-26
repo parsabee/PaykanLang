@@ -585,12 +585,15 @@ d = gen::Box<int>(1);     // the same class as c's
 - **Names in a body are the module's.** A template's body is resolved where
   it is declared: `_serial`, `Box` and `util::bracket` above are what
   `lib::gen` declares and imports, whatever the importer calls those names
-  (its own `_serial`, its own `util`). A template may use the module's
-  [private](15-modules.md#private-to-the-module) names: the importer runs that code,
-  it just cannot write the names.
+  (its own `_serial`, its own `util`). So are the traits its bounds name: an
+  importer's own trait of the same name never satisfies one. A template may
+  use the module's [private](15-modules.md#private-to-the-module) names: the
+  importer runs that code, it just cannot write the names.
 - **Checked per instantiation, as the module would check it.** An error in
   the body is reported in the template's file, with the instantiation note
-  at the request.
+  at the request. A bound by the module's own trait is the exception: the
+  importer cannot instantiate such a template yet, which is reported at the
+  request ([Traits](06-traits.md#not-supported-yet)).
 - **One class per instantiation per program.** Class names are global
   across imports, so `Box<int>` is one class whoever instantiates it: the
   template's module, the importer, or another importer. Values pass between
