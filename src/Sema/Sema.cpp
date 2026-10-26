@@ -1170,14 +1170,34 @@ std::string floatText(double value) {
   return buf;
 }
 
+/// The hint for a parse method of `Str` spelled with another name of its
+/// type (`toI64` for `toInt`): there is one method per type, under its
+/// canonical name.  Empty for any other method.
+std::string parseAliasHint(const std::string &method) {
+  struct Alias {
+    const char *Method;
+    const char *Hint;
+  };
+  static constexpr Alias kAliases[] = {
+      {"toI64", " (an 'i64' is an 'int': parse it with 'toInt()')"},
+      {"toU64", " (a 'u64' is an 'unsigned': parse it with 'toUnsigned()')"},
+      {"toF64", " (an 'f64' is a 'float': parse it with 'toFloat()')"},
+  };
+  for (const Alias &a : kAliases)
+    if (method == a.Method)
+      return a.Hint;
+  return {};
+}
+
 /// Whether the finite @p value, rounded to the float kind @p k, stays finite.
 bool floatFits(ast::BuiltinType::Kind k, double value) {
   if (std::isinf(value) || std::isnan(value))
     return true; // `inf` and `nan` are not literals; nothing to check
   switch (k) {
   case ast::BuiltinType::F32:
-    return std::fabs(value) <= 3.4028235677973366e+38; // the f32 maximum,
-                                                       // plus half an ulp
+    // Below 2^128 - 2^103, the f32 maximum plus half an ulp: that midpoint
+    // itself is a tie, which rounds to even, that is to infinity.
+    return std::fabs(value) < 0x1.ffffffp+127;
   case ast::BuiltinType::F16:
     return std::fabs(value) < 65520.0; // rounds to the f16 maximum, 65504
   default:
@@ -2196,9 +2216,11 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // `n.toString()` on an int, float, bool or char, on a tuple or a struct,
   // or on an enum (its variant, and its fields), each part of which has a
   // text: the builtin `Show`; `n.hash()` on an int, bool or char, and
-  // `s.hash()` on a Str: the builtin `Hashable`.
+  // `s.hash()` on a Str: the builtin `Hashable`; `s.toInt()` & co. on a Str:
+  // its parses, each the optional of its type.
   const std::string &mname = node->getMethodName();
   ast::Type *builtinResult = nullptr;
+  ast::BuiltinType::Kind parsed = ast::BuiltinType::Void;
   if (!ct &&
       ((ast::isa<ast::BuiltinType>(recvTy) && recvTy != S.Ctx.getVoidTy()) ||
        ast::isa<ast::TupleType>(recvTy) || ast::isa<ast::EnumType>(recvTy)) &&
@@ -2214,6 +2236,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                 recvTy == S.Ctx.getBoolTy() || recvTy == S.Ctx.getCharTy())) ||
               ct == S.Ctx.getStrTy())) {
     builtinResult = S.Ctx.getIntTy();
+  } else if (ct == S.Ctx.getStrTy() && ast::strParseKind(mname, parsed)) {
+    builtinResult = S.Ctx.getOptionalType(S.Ctx.getBuiltinType(parsed));
   }
   if (builtinResult) {
     if (node->getNumArguments() != 0) {
@@ -2270,8 +2294,11 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   "', which is not a function type)");
       return nullptr;
     }
-    S.error(node->getLocation(), "no method '" + node->getMethodName() +
-                                     "' on type '" + ownerName + "'");
+    S.error(node->getLocation(),
+            "no method '" + node->getMethodName() + "' on type '" + ownerName +
+                "'" +
+                (ct == S.Ctx.getStrTy() ? parseAliasHint(node->getMethodName())
+                                        : std::string()));
     return nullptr;
   }
 

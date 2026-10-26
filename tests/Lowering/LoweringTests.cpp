@@ -1880,9 +1880,14 @@ TEST(Lowering, AStrOrFloatMatchIsAsDeepForAnyNumberOfArms) {
   auto match = [](const char *type, size_t arms) {
     std::string src = "fn m(x: " + std::string(type) + ") -> int { match x {";
     for (size_t i = 0; i < arms; ++i) {
-      std::string n = std::to_string(i);
-      src += std::string(type) == "Str" ? " \"" + n + "\" { return " + n + "; }"
-                                        : " " + n + ".5 { return " + n + "; }";
+      const std::string n = std::to_string(i);
+      const bool text = std::string(type) == "Str";
+      src.append(text ? " \"" : " ")
+          .append(n)
+          .append(text ? "\"" : ".5")
+          .append(" { return ")
+          .append(n)
+          .append("; }");
     }
     return src + " _ { return -1; } } }\nfn main() -> int { return 0; }\n";
   };
@@ -3077,6 +3082,68 @@ TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalValue) {
     EXPECT_NE(fn.find(e[2]), std::string::npos) << fn;
     EXPECT_EQ(fn.find(" = box "), std::string::npos) << fn;
   }
+}
+
+TEST(Lowering, StrParseMethodsCallTheRuntimeParseOfTheirType) {
+  // `s.toInt()` & co. are the same parse: an unsigned width reads no sign
+  // (parse_uint) and a narrow one is range-checked; a sized float is the
+  // runtime's value of the type, not rounded again; the receiver is
+  // borrowed, a temporary one released after the parse.
+  auto l = lower(R"(
+    fn a(s: Str) -> int? { return s.toInt(); }
+    fn b(s: Str) -> i8? { return s.toI8(); }
+    fn c(s: Str) -> unsigned? { return s.toUnsigned(); }
+    fn d(s: Str) -> u8? { return s.toU8(); }
+    fn e(s: Str) -> float? { return s.toFloat(); }
+    fn f(s: Str) -> f32? { return s.toF32(); }
+    fn g(s: Str) -> f16? { return s.toF16(); }
+    fn h(s: Str) -> bool? { return s.toBool(); }
+    fn k(s: Str) -> u32? { return u32(s); }
+    fn m(s: Str) -> f32? { return f32<Str>(s); }
+    fn t(s: Str) -> u16? { return (s + "0").toU16(); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const char *expected[][3] = {
+      {"a", "PaykanString_parse_int(", "none opt_i64"},
+      {"b", "PaykanString_parse_int(", "none opt_i64"},
+      {"c", "PaykanString_parse_uint(", "none opt_i64"},
+      {"d", "PaykanString_parse_uint(", "none opt_i64"},
+      {"e", "PaykanString_parse_float(", "none opt_f64"},
+      {"f", "PaykanString_parse_f32(", "none opt_f64"},
+      {"g", "PaykanString_parse_f16(", "none opt_f64"},
+      {"h", "PaykanString_parse_bool(", "none opt_bool"},
+      {"k", "PaykanString_parse_uint(", "none opt_i64"},
+      {"m", "PaykanString_parse_f32(", "none opt_f64"},
+      {"t", "PaykanString_parse_uint(", "none opt_i64"},
+  };
+  for (const auto &e : expected) {
+    std::string fn = function(l.Text, e[0]);
+    EXPECT_EQ(count(fn, "call @$rt.PaykanString_parse_"), 1u) << fn;
+    EXPECT_NE(fn.find(std::string("call @$rt.") + e[1]), std::string::npos)
+        << fn;
+    EXPECT_NE(fn.find(" = some "), std::string::npos) << fn;
+    EXPECT_NE(fn.find(e[2]), std::string::npos) << fn;
+    EXPECT_EQ(fn.find(" = box "), std::string::npos) << fn;
+    // No rounding after the parse, nor a range check of a 64-bit one.
+    EXPECT_EQ(fn.find("fround32"), std::string::npos) << fn;
+    EXPECT_EQ(fn.find("Paykan_round_f16"), std::string::npos) << fn;
+  }
+  for (const char *narrow : {"b", "d", "k", "t"}) {
+    std::string fn = function(l.Text, narrow);
+    EXPECT_NE(fn.find("cmp ge"), std::string::npos) << fn;
+    EXPECT_NE(fn.find("cmp le"), std::string::npos) << fn;
+  }
+  for (const char *wide : {"a", "c", "e", "f", "g", "h", "m"})
+    EXPECT_EQ(function(l.Text, wide).find("cmp le"), std::string::npos)
+        << function(l.Text, wide);
+  // The concatenation the receiver is, disposed of after the parse.
+  std::string t = function(l.Text, "t");
+  const size_t parse = t.find("PaykanString_parse_uint(%concat");
+  ASSERT_NE(parse, std::string::npos) << t;
+  EXPECT_NE(t.find("call @$rt.Paykan_dispose(%concat", parse),
+            std::string::npos)
+      << t;
 }
 
 // -- Moves at last use (docs/pir.md §12): a copy at a variable's last use is

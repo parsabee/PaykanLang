@@ -298,6 +298,76 @@ Output:
 18446744073709551615 0.1
 ```
 
+### Parsing a string
+
+A string's methods parse it into a number or a `bool`: `s.toInt()`, `s.toI8()`, `s.toI16()`,
+`s.toI32()`, `s.toUnsigned()`, `s.toU8()`, `s.toU16()`, `s.toU32()`, `s.toFloat()`,
+`s.toF16()`, `s.toF32()` and `s.toBool()`. Parsing can fail (`"12abc"` is not a number), so
+each one does not return its type but the *optional* of it: `s.toInt()` is an `int?`, either
+a number or `None`. You get the number out with `match`:
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  inputs = ["42", "-8", "12abc", " 7", "9223372036854775808"];
+  i = 0;
+  while i < inputs.len() {
+    match inputs[i].toInt() {
+      n: int { io::println("'" + inputs[i] + "' is the number " + Str(n)); }
+      None   { io::println("'" + inputs[i] + "' is not a number"); }
+    }
+    i = i + 1;
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+'42' is the number 42
+'-8' is the number -8
+'12abc' is not a number
+' 7' is not a number
+'9223372036854775808' is not a number
+```
+
+The first arm runs when the parse succeeded and binds the number to `n`; the `None` arm
+runs when it failed. [Optionals](12-optionals.md#unwrapping-with-match) explains `match` on
+optionals in full.
+
+The parses are strict. The whole string must be the value, with no surrounding whitespace,
+and the empty string is never one. A text parses exactly when it is a valid literal of the
+type, and gives that literal's value; on top of that, a signed or a float type takes a
+leading `+` or `-`, and `toFloat()` takes the other spellings of C's `strtod`.
+
+| Method | Gives | Accepts | `None` when |
+|---|---|---|---|
+| `toInt()` | `int?` | an optional `+` or `-`, then decimal digits | outside `-9223372036854775808` to `9223372036854775807` |
+| `toI8()`, `toI16()`, `toI32()` | `i8?`, `i16?`, `i32?` | the same | outside the type's range (`"-129".toI8()`) |
+| `toUnsigned()` | `unsigned?` | decimal digits, no sign | it has a sign (`"+1"`, `"-0"`), or is above `18446744073709551615` |
+| `toU8()`, `toU16()`, `toU32()` | `u8?`, `u16?`, `u32?` | the same | it has a sign (`"+1".toU8()`), or is above `255`, `65535`, `4294967295` |
+| `toFloat()` | `float?` | what C's `strtod` accepts: digits with an optional fraction and exponent (`"2.5"`, `".5"`, `"1e3"`), hexadecimal (`"0x10"`), `inf`, `infinity` and `nan` in any case, with an optional sign | the value is too large, which would be infinity (`"1e999"`), or too small, not zero but rounding to zero (`"1e-400"`): the range rule of float literals. Subnormal values (`"5e-324"`) parse, and `"inf"` and `"nan"` are spelled out, so they parse |
+| `toF32()`, `toF16()` | `f32?`, `f16?` | the same | as for `toFloat()`, and when a finite text rounds to infinity in the type (`"1e39".toF32()`, `"70000".toF16()`), as its literal is an error. A text below the type's range is 0 or a subnormal, as its literal is (`"1e-9".toF16()` is `0`) |
+| `toBool()` | `bool?` | exactly `"True"` and `"False"`, the spellings `Str(b)` prints | anything else (`"true"`, `"1"`, `" True"`) |
+
+So the text a number or a `bool` prints parses back: `Str(n).toInt()` gives `n` for every
+`int`, and `Str(b).toBool()` gives `b`. A float prints six significant digits
+(`Str(0.1234567)` is `"0.123457"`), so its text gives back the value only when those digits
+are exact (`0.5`, `65504`, `inf`). There is one method per type, under the type's name:
+`"7".toI64()` is an error that names `toInt()`, since an `i64` is an `int`.
+
+A `float` text becomes the `float` (`f64`) nearest to it. An `f32` or `f16` from a text with
+a fraction or an exponent — a literal in an `f32` or `f16` slot, or `s.toF32()` and
+`s.toF16()` — is that `float` rounded to the type, as C's `(float)strtod(s)` is. That is two
+roundings. It can give the other neighbour than a single rounding would, but only for a
+text with many significant digits (13 or more) lying very close to the point halfway
+between two neighbouring values of the type. `x: f32 = 1.0000000596046448;` and
+`"1.0000000596046448".toF32()` are both `1`, where rounding the text once gives
+`1.0000001`. A literal and the parse of the same text always give the same value. An
+integer text becomes an `f32` or `f16` in one rounding.
+
 ### From a string: parsing
 
 `int(s)`, `float(s)` and `bool(s)` parse a string. Parsing can fail (`"12abc"` is not a
@@ -347,8 +417,11 @@ surrounding whitespace.
   `bool(Str(b))` gives back `b`. Anything else (`"true"`, `"1"`, `" True"`) is `None`.
 - The sized types parse the same way into an optional of their own (`u8(s)` is a `u8?`,
   `unsigned(s)` an `unsigned?`, `f32(s)` an `f32?`), `None` when the text is not a number
-  of the type: outside its range (`u8("256")`), or signed for an `unsigned`
-  (`unsigned("-1")`).
+  of the type: outside its range (`u8("256")`), or signed for an unsigned type
+  (`unsigned("-1")`, `u8("+1")`).
+- Each of these is the method of [Parsing a string](#parsing-a-string) by another
+  spelling: `int(s)` is `s.toInt()`, `u8(s)` is `s.toU8()`, and they parse exactly the
+  same texts.
 
 ### The explicit form
 

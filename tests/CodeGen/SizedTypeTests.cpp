@@ -159,8 +159,50 @@ TEST(SizedTypes, PrintingAndParsing) {
   EXPECT_EQ(r.StdOut, "-5 65535 0.25 0.5 7\n-5 65535 0.25 7\n"
                       "255 None -128 None\n"
                       "18446744073709551615 None None None None\n"
-                      "0.1 inf None\n0\n");
+                      "0.1 None None\n0\n");
   g.expectNoLeaks("SizedTypes.PrintingAndParsing");
+}
+
+// The parses of the older `T(s)` form are Str's (`s.toU8()` & co.): every
+// unsigned width refuses a sign, as `unsigned` did (finding 43).
+TEST(SizedTypes, UnsignedParsesRefuseEverySign) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    signs: Str[4] = ["+1", "-0", "+0", "-1"];
+    i = 0;
+    while i < signs.len() {
+      s = signs[i];
+      io::print(u8(s)); io::print(" "); io::print(u16<Str>(s)); io::print(" ");
+      io::print(u32(s)); io::print(" "); io::println(unsigned<Str>(s));
+      i = i + 1;
+    }
+    io::print(u8("1")); io::print(" "); io::print(u16("0")); io::print(" ");
+    io::print(u32("4294967295")); io::print(" "); io::println(u64("7"));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "None None None None\nNone None None None\n"
+                      "None None None None\nNone None None None\n"
+                      "1 0 4294967295 7\n");
+  g.expectNoLeaks("SizedTypes.UnsignedParsesRefuseEverySign");
+}
+
+// A sized float parse of finite text that rounds to infinity in the type is
+// None, as the literal of that text is an error (finding 11); text below
+// the type's range rounds to 0, as the literal does.
+TEST(SizedTypes, SizedFloatParseOverflowIsNone) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    io::print(f16("70000")); io::print(" "); io::print(f16<Str>("65520")); io::print(" ");
+    io::print(f32("1e39")); io::print(" "); io::println(f32<Str>("3.4028235677973366e38"));
+    io::print(f16("65519")); io::print(" "); io::print(f16("1e-9")); io::print(" ");
+    io::print(f32("1e-46")); io::print(" "); io::println(f32("3.4028235e38"));
+    io::print(f16("inf")); io::print(" "); io::print(f32("-inf")); io::print(" ");
+    io::print(f16("nan")); io::print(" "); io::println(f32("1e-400"));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "None None None None\n65504 0 0 3.40282e+38\n"
+                      "inf -inf nan None\n");
+  g.expectNoLeaks("SizedTypes.SizedFloatParseOverflowIsNone");
 }
 
 TEST(SizedTypes, HashingAndEquality) {

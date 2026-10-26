@@ -218,6 +218,13 @@ bool builtinKindOfName(std::string_view name, BuiltinType::Kind &kind) {
   return false;
 }
 
+bool strParseKind(std::string_view method, BuiltinType::Kind &kind) {
+  for (const names::StrParseMethod &m : names::kStrParseMethods)
+    if (method == m.Method)
+      return builtinKindOfName(m.Target, kind);
+  return false;
+}
+
 void BuiltinType::initOps() {
   switch (TypeKind) {
   case U8:

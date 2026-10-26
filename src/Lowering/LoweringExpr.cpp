@@ -627,53 +627,47 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
   return result;
 }
 
-// `int<Str>(s)`, `float<Str>(s)`, `bool<Str>(s)` and `i8<Str>(s)` & co.: the
-// runtime parses the borrowed string into a local and says whether it is
-// valid; the result is that value as the present `int?` & co., or None.  A
-// sized integer is parsed as a 64-bit one and refused outside its range; a
-// sized float is rounded.
-Val ModuleLowering::ExprEmitter::emitParse(ast::CallExpr *node) {
+// The parse of the string object @p str into the primitive @p target, the
+// core of `s.toInt()` & co. and of the older `int<Str>(s)` & co.: the runtime
+// parses the borrowed string into a local and says whether it is valid; the
+// result is that value as the present `int?` & co., or None.  @p owned, a
+// temporary @p str is part of, is released after the parse.  A sized
+// integer is parsed as a 64-bit one (an unsigned one without a sign) and
+// refused outside its range; a sized float is the runtime's value of the
+// type, refused when finite text rounds to infinity in it.
+Val ModuleLowering::ExprEmitter::emitParseOf(const Val &str,
+                                             const ExprValue &owned,
+                                             ast::BuiltinType::Kind target) {
   using ast::BuiltinType;
-  const std::string &name = node->getCalleeName();
-  ast::Type *target = nullptr;
-  ast::Type *source = nullptr;
-  if (!L.conversionTypes(name, target, source) ||
-      source != L.ASTCtx.getStrTy() || node->getNumArguments() != 1)
-    return Val();
-  const BuiltinType::Kind kind = L.builtinKind(target);
-  const char *parse = nullptr;
+  const char *parse = kPaykanStringParseInt;
   Type payload = Type::I64;
-  if (kind == BuiltinType::Bool) {
+  if (target == BuiltinType::Bool) {
     parse = kPaykanStringParseBool;
-  } else if (BuiltinType::isFloatKind(kind)) {
+  } else if (target == BuiltinType::F32) {
+    parse = kPaykanStringParseF32;
+    payload = Type::F64;
+  } else if (target == BuiltinType::F16) {
+    parse = kPaykanStringParseF16;
+    payload = Type::F64;
+  } else if (target == BuiltinType::Float) {
     parse = kPaykanStringParseFloat;
     payload = Type::F64;
-  } else if (kind == BuiltinType::U64) {
+  } else if (BuiltinType::isUnsignedKind(target)) {
     parse = kPaykanStringParseUint;
-  } else if (BuiltinType::isIntegerKind(kind)) {
-    parse = kPaykanStringParseInt;
   }
-  if (!parse)
-    return Val();
-  ast::Expr *argExpr = node->getArguments()[0];
-  Val str = visit(argExpr);
-  if (!str)
-    return Val();
-  ExprValue ev = L.classifyExpr(argExpr, str);
-  if (L.exprAlreadyShared(argExpr) && str.Ty == Type::Box)
-    str = L.emitSharedGet(str, "parse.str");
   pir::LocalId out = L.B.addLocal("parsed", payload);
   Val ok = L.callRuntime(parse, {str, L.B.localAddr(out, "parsed.addr")},
                          "parse.ok");
-  L.releaseIfOwned(ev);
+  L.releaseIfOwned(owned);
   Val v = L.B.load(out, "parsed");
-  if (kind == BuiltinType::Bool)
+  if (target == BuiltinType::Bool)
     v = L.B.cmp(CmpPred::Ne, v, Val::i64(0), "parsed.bool");
   Val valid = L.B.cmp(CmpPred::Ne, ok, Val::i64(0), "parse.valid");
-  const unsigned bits = BuiltinType::integerBits(kind);
-  if (BuiltinType::isIntegerKind(kind) && bits < 64) {
-    // Within the type's range, else None.
-    const bool isUnsigned = BuiltinType::isUnsignedKind(kind);
+  const unsigned bits = BuiltinType::integerBits(target);
+  if (BuiltinType::isIntegerKind(target) && bits < 64) {
+    // Within the type's range, else None.  The compares are signed: an
+    // unsigned parse of 2^63 or more holds a negative int64, below 0.
+    const bool isUnsigned = BuiltinType::isUnsignedKind(target);
     const int64_t lo =
         isUnsigned ? 0 : -static_cast<int64_t>(1ULL << (bits - 1));
     const int64_t hi = static_cast<int64_t>(
@@ -682,11 +676,28 @@ Val ModuleLowering::ExprEmitter::emitParse(ast::CallExpr *node) {
     Val notHigh = L.B.cmp(CmpPred::Le, v, Val::i64(hi), "parse.hi");
     Val inRange = L.B.select(notLow, notHigh, Val::boolean(false), "parse.in");
     valid = L.B.select(valid, inRange, Val::boolean(false), "parse.valid");
+    v = L.canonicalize(v, L.ASTCtx.getBuiltinType(target));
   }
-  v = L.canonicalize(v, target);
   Val some = L.B.some(v, "some");
   Val none = L.B.none(some.Ty, "none");
   return L.B.select(valid, some, none, "parsed.opt");
+}
+
+// `int<Str>(s)`, `float<Str>(s)`, `bool<Str>(s)` and `i8<Str>(s)` & co.: the
+// parse of their argument (emitParseOf), as `s.toInt()` & co. are.
+Val ModuleLowering::ExprEmitter::emitParse(ast::CallExpr *node) {
+  ast::Type *target = nullptr;
+  ast::Type *source = nullptr;
+  if (!L.conversionTypes(node->getCalleeName(), target, source) ||
+      source != L.ASTCtx.getStrTy() || node->getNumArguments() != 1)
+    return Val();
+  const ast::BuiltinType::Kind kind = L.builtinKind(target);
+  if (kind != ast::BuiltinType::Bool && !ast::BuiltinType::isNumericKind(kind))
+    return Val();
+  Receiver str = L.emitReceiver(node->getArguments()[0], "parse.str");
+  if (!str)
+    return Val();
+  return emitParseOf(str.Raw, str.Owned, kind);
 }
 
 bool ModuleLowering::isStrConversion(const std::string &callee) {
@@ -1003,6 +1014,11 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
       (ast::isa<ast::BuiltinType>(recvResolved) ||
        recvResolved == L.ASTCtx.getStrTy()))
     return emitHashCall(node);
+  // `s.toInt()` & co. on a Str: its parses.
+  if (ast::BuiltinType::Kind target = ast::BuiltinType::Void;
+      recvResolved == L.ASTCtx.getStrTy() &&
+      ast::strParseKind(node->getMethodName(), target))
+    return emitStrParseCall(node, target);
   // A struct's method, called directly on the receiver's storage
   // (LoweringStruct.cpp); its `toString()` is the builtin one, below.
   if (auto *st = L.getExprStructType(node->getReceiver());
@@ -1061,6 +1077,17 @@ Val ModuleLowering::ExprEmitter::emitHashCall(ast::MethodCallExpr *node) {
     v = L.B.cast(v, Type::I64, "hash.ext");
   const pir::Function &rt = L.declareRuntime(kPaykanIntHash);
   return L.B.call(rt.Name, rt.Sig, {v}, "hash");
+}
+
+// `s.toInt()` & co. (visitMethodCallExpr): the parse of the receiver into
+// @p target (emitParseOf).  Str is final, so the call is direct; a fresh
+// temporary receiver is released after it.
+Val ModuleLowering::ExprEmitter::emitStrParseCall(
+    ast::MethodCallExpr *node, ast::BuiltinType::Kind target) {
+  Receiver str = L.emitReceiver(node->getReceiver(), "parse.str");
+  if (!str)
+    return Val();
+  return emitParseOf(str.Raw, str.Owned, target);
 }
 
 // `o.toString()` on an optional (the builtin `Show`): "None", or the value's

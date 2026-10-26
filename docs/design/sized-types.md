@@ -64,7 +64,7 @@ integer an `f32` or `f16` can distinguish.  The `INT64_MIN / -1` guard of
 `int` division is not emitted for a narrower type, whose quotient wraps
 (`i8(-128) / i8(-1)` is `-128`).  An integer literal is at most
 `9223372036854775807`, so the upper half of `unsigned` is reached through a
-conversion or a parse (`unsigned(-1)`, `unsigned("18446744073709551615")`).
+conversion or a parse (`unsigned(-1)`, `"18446744073709551615".toUnsigned()`).
 
 ## Typing
 
@@ -95,9 +95,17 @@ before.
 ## Printing and parsing
 
 `toString()` and `Str(x)` print signed integers as `int` does, `u64` with
-`%llu`, and every float with the `%g` form `float` uses.  `i8(s)` … parse
-the text as a 64-bit number and refuse one outside the type's range;
-`unsigned(s)` parses an unsigned 64-bit number.
+`%llu`, and every float with the `%g` form `float` uses.  Str's methods
+parse, each into the optional of its type (`s.toI8()` … `s.toF32()`,
+docs/language/04-strings-and-conversions.md, "Parsing a string"; `i8(s)` …
+are the same parses).  A signed type's parse reads a 64-bit number and
+refuses one outside the type's range.  An unsigned type's reads an unsigned
+64-bit number, which has no sign (`"+1"` and `"-0"` are refused, as
+`unsigned` always refused them), and refuses one outside the type's range.
+An `f32` or `f16` parse is the `f64` nearest the text rounded to the type,
+the value the literal of that text has, and refuses a finite text that
+rounds to infinity, whose literal is an error; a text below the type's
+range is 0 or a subnormal, as its literal is.
 
 ## Open questions
 

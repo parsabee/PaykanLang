@@ -1257,6 +1257,9 @@ const char *builtinKindName(BuiltinType::Kind k);
 /// The kind a type keyword names, with its alternative spellings; false when
 /// @p name is not a builtin type's.
 bool builtinKindOfName(std::string_view name, BuiltinType::Kind &kind);
+/// The kind the parse method @p method of `Str` (`toInt` ... `toBool`,
+/// names::kStrParseMethods) parses into; false when it is not one.
+bool strParseKind(std::string_view method, BuiltinType::Kind &kind);
 
 // Method declaration (name + signature + flags)
 class MethodDecl : public Decl {

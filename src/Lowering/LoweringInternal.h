@@ -779,8 +779,13 @@ private:
     /// yet.
     std::unordered_map<const ast::Expr *, Val> ChainValues;
 
-    /// `int<Str>`, `float<Str>`, `bool<Str>`: the optional value of the
-    /// runtime's parse; an invalid Val for any other call.
+    /// The optional value of the runtime's parse of the string object
+    /// @p str into @p target, the core of `s.toInt()` & co.; @p owned, a
+    /// temporary @p str is part of, is released after the parse.
+    Val emitParseOf(const Val &str, const ExprValue &owned,
+                    ast::BuiltinType::Kind target);
+    /// `int<Str>`, `float<Str>`, `bool<Str>` & co.: emitParseOf of the
+    /// argument; an invalid Val for any other call.
     Val emitParse(ast::CallExpr *node);
 
     Val emitIdentityCtor(ast::CallExpr *node);
@@ -806,11 +811,13 @@ private:
     Val emitStructMethodCall(ast::MethodCallExpr *node, ast::StructType *st,
                              bool wantAddress);
     /// visitMethodCallExpr's kinds of call, each in a frame of its own: a
-    /// field's function value, `hash()`, an optional's `toString()`, a
-    /// tuple's, a struct's, an enum's or a builtin type's, and a class's
-    /// method.
+    /// field's function value, `hash()`, a Str's parse into @p target
+    /// (`s.toInt()` & co.), an optional's `toString()`, a tuple's, a
+    /// struct's, an enum's or a builtin type's, and a class's method.
     Val emitFieldCall(ast::MethodCallExpr *node);
     Val emitHashCall(ast::MethodCallExpr *node);
+    Val emitStrParseCall(ast::MethodCallExpr *node,
+                         ast::BuiltinType::Kind target);
     Val emitOptionalToStringCall(ast::MethodCallExpr *node);
     Val emitShowCall(ast::MethodCallExpr *node);
     Val emitClassMethodCall(ast::MethodCallExpr *node, bool wantAddress);

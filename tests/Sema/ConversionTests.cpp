@@ -361,3 +361,94 @@ TEST(Conversion, StrPlusANumberNeedsStr) {
               "operator '+' is not defined for types 'Str' and 'u8'");
   expectOk(inMain("n: int = 3; s: Str = \"a\" + Str(n) + \"b\";"));
 }
+
+// ─── Str's parse methods (docs/language/04-strings-and-conversions.md,
+// ─── "Parsing a string")
+
+TEST(StrParse, EachMethodGivesTheOptionalOfItsType) {
+  // Each declaration states the result type, so a wrong one is an error.
+  expectOk(inMain(R"(
+    s: Str = "1";
+    a: int? = s.toInt();
+    b: i8? = s.toI8();
+    c: i16? = s.toI16();
+    d: i32? = s.toI32();
+    e: unsigned? = s.toUnsigned();
+    f: u8? = s.toU8();
+    g: u16? = s.toU16();
+    h: u32? = s.toU32();
+    i: float? = s.toFloat();
+    j: f16? = s.toF16();
+    k: f32? = s.toF32();
+    l: bool? = s.toBool();
+    m: i64? = "2".toInt();
+    n: u64? = "3".toUnsigned();
+    o: f64? = "4".toFloat();
+  )"));
+  expectError(inMain(R"(n: int = "1".toInt();)"),
+              "cannot use optional 'int?' as 'int' without unwrapping");
+  expectError(inMain(R"(n: u8? = "1".toU16();)"),
+              "initializer of type 'u16?' does not match declared type 'u8?'");
+  expectOk(inMain(R"(
+    match "7".toU8() { n: u8 { m: u8 = n + 1; } None { } }
+  )"));
+}
+
+TEST(StrParse, TheMethodsTakeNoArgument) {
+  expectError(inMain(R"(o = "1".toInt(2);)"),
+              "method 'toInt' expects 0 argument(s), got 1");
+  expectError(inMain(R"(o = "1".toF32("x", 2);)"),
+              "method 'toF32' expects 0 argument(s), got 2");
+}
+
+TEST(StrParse, AnOptionalReceiverIsUnwrappedFirst) {
+  expectError(inMain(R"(s: Str? = "1"; o = s.toInt();)"),
+              "cannot use optional 'Str?' as 'Str' without unwrapping (use "
+              "match)");
+}
+
+TEST(StrParse, OnlyAStrHasThem) {
+  expectError(inMain("o = (3).toInt();"),
+              "method call on non-class type 'int'");
+  expectError("class P { }\n" + inMain("p = P(); o = p.toInt();"),
+              "no method 'toInt' on type 'P'");
+  // A class of the program may have its own method of that name.
+  expectOk("class P { view fn toInt() -> int { return 1; } }\n" +
+           inMain("p = P(); n: int = p.toInt();"));
+}
+
+TEST(StrParse, AnotherSpellingOfTheTypeNamesTheMethod) {
+  expectError(inMain(R"(o = "1".toI64();)"),
+              "no method 'toI64' on type 'Str' (an 'i64' is an 'int': parse "
+              "it with 'toInt()')");
+  expectError(inMain(R"(o = "1".toU64();)"),
+              "no method 'toU64' on type 'Str' (a 'u64' is an 'unsigned': "
+              "parse it with 'toUnsigned()')");
+  expectError(inMain(R"(o = "1".toF64();)"),
+              "no method 'toF64' on type 'Str' (an 'f64' is a 'float': parse "
+              "it with 'toFloat()')");
+  auto r = semaCheck(inMain(R"(o = "1".toChar();)"));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_NE(r.Diagnostics.find("no method 'toChar' on type 'Str'\n"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(StrParse, InGenericBodiesAndOnViews) {
+  expectOk(R"(
+    fn first<T>(x: T) -> int? { return x.toInt(); }
+    fn lenient(s: view Str) -> u8? { return s.toU8(); }
+    fn main() -> int {
+      a: int? = first("12");
+      b: u8? = lenient("7");
+      c: float? = "2.5".toFloat();
+      return 0;
+    }
+  )");
+  // Checked per instantiation: an `int` has no `toInt()`.
+  expectError(R"(
+    fn first<T>(x: T) -> int? { return x.toInt(); }
+    fn main() -> int { a: int? = first(12); return 0; }
+  )",
+              "method call on non-class type 'int'");
+}

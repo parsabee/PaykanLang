@@ -1015,12 +1015,16 @@ CodeGen enforced, now in one place.
   `char?`), read and written in place, and so is an `int?` element of a
   tuple, at its offset.
 * **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
-  `PaykanString_from_int` & co. (an owned string temporary); `int<Str>` /
-  `float<Str>` / `bool<Str>` call `PaykanString_parse_int` /
-  `PaykanString_parse_float` / `PaykanString_parse_bool` with the
-  `local.addr` of a local the value is parsed into, and are the `select` of
-  `some` of that value (a valid string) or `none` (`bool<Str>` accepts
-  exactly `"True"` and `"False"`).  The numeric ones are inline: `int<float>` checks
+  `PaykanString_from_int` & co. (an owned string temporary).  A parse,
+  `s.toInt()` / `s.toFloat()` / `s.toBool()` & co. (or the older `int<Str>`
+  & co.), calls `PaykanString_parse_int` / `PaykanString_parse_float` /
+  `PaykanString_parse_bool` on the borrowed string with the `local.addr` of
+  a local the value is parsed into, and is the `select` of `some` of that
+  value (a valid string) or `none` (`toBool()` accepts exactly `"True"` and
+  `"False"`).  Every unsigned width calls `PaykanString_parse_uint`, which
+  takes no sign; `toF32()` and `toF16()` call `PaykanString_parse_f32` /
+  `PaykanString_parse_f16`, whose value is already the type's, with no
+  `fround32` or rounding call after it.  The numeric ones are inline: `int<float>` checks
   `cmp ge %f, -2^63` and `cmp lt %f, 2^63` (both false for NaN) and calls
   `@$rt.Paykan_panic_float_to_int(%f)` then `unreachable` otherwise, before the
   `ftoi`; `float<int>` is `itof`; `int<bool>` and `int<char>` are `cast`s to
@@ -1039,9 +1043,9 @@ CodeGen enforced, now in one place.
   `mask 8`, `float<unsigned>` is `utof`, `unsigned<float>` guards `[0, 2^64)`
   then `ftou`, `i8<float>` guards `(-129, 128)` and calls
   `@$rt.Paykan_panic_float_to_type(%f, @.strN, 2)` otherwise, then `ftoi`);
-  `Str<unsigned>` and `unsigned<Str>` call `PaykanString_from_uint` /
-  `PaykanString_parse_uint`, and a parse into a narrow integer compares the
-  parsed `i64` against the type's range before the `some`.
+  `Str<unsigned>` calls `PaykanString_from_uint`, and a parse into a
+  narrow integer compares the parsed `i64` against the type's range before
+  the `some`.
 
 ## 8. Runtime ABI (extern declarations the lowering may emit)
 
@@ -1081,7 +1085,9 @@ PaykanString_equals(obj, box, i64) -> i64   PaykanString_toString(obj) -> box
 PaykanString_length(obj) -> i64
 PaykanString_parse_int(obj, ptr) -> i64     PaykanString_parse_float(obj, ptr) -> i64
 PaykanString_parse_bool(obj, ptr) -> i64    ; 1 and the value at ptr, or 0 (and 0 there)
-PaykanString_from_uint(i64) -> obj      PaykanString_parse_uint(obj, ptr) -> i64   ; `unsigned`
+PaykanString_from_uint(i64) -> obj      PaykanString_parse_uint(obj, ptr) -> i64   ; `unsigned`, no sign
+PaykanString_parse_f32(obj, ptr) -> i64     PaykanString_parse_f16(obj, ptr) -> i64
+                                        ; the f64 slot of the f32 / f16 value; 0 when finite text rounds to infinity
 ; hash (the builtin Hashable's `hash()`)
 PaykanInt_hash(i64) -> i64              PaykanString_hash(obj) -> i64
 ; tuples: the address of the value (of both, for equals), then its layout

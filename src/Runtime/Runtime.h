@@ -232,9 +232,9 @@ PaykanString *PaykanString_from_float(double value);
 PaykanString *PaykanString_from_bool(int64_t value);
 PaykanString *PaykanString_from_char(int8_t c);
 
-// The parses behind `int<Str>`, `float<Str>` and `bool<Str>`: each returns 1
-// and stores the value in *out when the whole string is one, else returns 0
-// and stores 0 (the lowering makes the `int?` & co. of the two).
+// The parses behind Str's `toInt()` & co. (and `int<Str>` & co.): each
+// returns 1 and stores the value in *out when the whole string is one, else
+// returns 0 and stores 0 (the lowering makes the `int?` & co. of the two).
 /// A decimal integer: an optional sign and digits, the whole string, no
 /// surrounding whitespace, within int64.
 int64_t PaykanString_parse_int(PaykanObject *str, int64_t *out);
@@ -245,6 +245,18 @@ int64_t PaykanString_parse_uint(PaykanObject *str, int64_t *out);
 /// the whole string, no leading whitespace, not overflowing or
 /// underflowing (a subnormal result is accepted).
 int64_t PaykanString_parse_float(PaykanObject *str, double *out);
+/// `s.toF32()`: PaykanString_parse_float's value rounded to the nearest f32
+/// (C's `(float)strtod`), stored as the f64 slot holds it; an integer text
+/// beyond 2^53 is that integer rounded once instead.  Refused (0) when finite
+/// text rounds to infinity in f32 (from 2^128 - 2^103, the midpoint above
+/// FLT_MAX); `inf` and `nan` are kept, and a value below the f32 range is 0
+/// or a subnormal.
+int64_t PaykanString_parse_f32(PaykanObject *str, double *out);
+/// `s.toF16()`: PaykanString_parse_float's value rounded to f16
+/// (Paykan_round_f16).  Refused (0) when finite text rounds to infinity in
+/// f16 (a magnitude from 65520); `inf` and `nan` are kept, and a value below
+/// the f16 range is 0 or a subnormal.
+int64_t PaykanString_parse_f16(PaykanObject *str, double *out);
 /// Exactly "True" (1) or "False" (0), the spellings `Str<bool>` prints.
 int64_t PaykanString_parse_bool(PaykanObject *str, int64_t *out);
 int8_t PaykanString_char_at(PaykanObject *self, int64_t idx);

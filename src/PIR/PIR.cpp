@@ -58,6 +58,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanStringParseInt, {{kObj, kPtr}, kI64}},
     {kPaykanStringParseFloat, {{kObj, kPtr}, kI64}},
     {kPaykanStringParseBool, {{kObj, kPtr}, kI64}},
+    {kPaykanStringParseF32, {{kObj, kPtr}, kI64}},
+    {kPaykanStringParseF16, {{kObj, kPtr}, kI64}},
     // The vtable `equals`s spell out their slot's ownership mask
     // (docs/pir.md §3, §8).
     {kPaykanStringEquals, {{kObj, kBox, kI64}, kI64}},

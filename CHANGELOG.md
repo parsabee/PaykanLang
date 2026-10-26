@@ -260,6 +260,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows who compiled it.  `paykan --version` names the standard library's directory.
 - Backends may compile modules (the `CompileModules` capability: `compileModule`,
   `objectKind`, `emitModuleObject`, and `Input::Compiled`, docs/writing-a-backend.md).
+- **Parsing is a method of `Str`** (docs/language/04-strings-and-conversions.md, "Parsing a
+  string").
+  - The methods are `s.toInt()`, `s.toI8()`, `s.toI16()`, `s.toI32()`, `s.toUnsigned()`,
+    `s.toU8()`, `s.toU16()`, `s.toU32()`, `s.toFloat()`, `s.toF16()`, `s.toF32()` and
+    `s.toBool()`.
+  - Each gives an optional of its type, and `None` when the whole string is not a value of
+    it.
+  - A text parses exactly when it is a valid literal of the type, and gives the literal's
+    value. On top of that, a sign is allowed for the signed and float types, and
+    `toFloat()` accepts what C's `strtod` accepts, `"inf"` and `"nan"` included.
+  - The methods are builtins, not `Str` vtable slots, so the runtime ABI does not change.
 
 ### Changed
 
@@ -674,6 +685,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traits.  An importer that declared a `trait Named` of its own satisfied
   `lib::greet<T: Named>` with it, whatever the trait's methods.  That is now the #147
   error under Fixed, with a note at the importer's trait.
+- An `f32` or `f16` from a text with a fraction or an exponent (a literal, or `toF32()` and
+  `toF16()`) is documented as the `float` nearest the text rounded to the type, as C's
+  `(float)strtod(s)` is. For a text of 13 or more significant digits very close to a point
+  halfway between two values of the type, this can differ from rounding the text once
+  (`1.0000000596046448` is `1` as an `f32`). A literal and the parse of its text always
+  agree.
 
 ### Removed
 
@@ -1314,6 +1331,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A bounded generic enum used before the `impl` blocks were checked (a class field `m:
   Maybe<int>` of `enum Maybe<T: Hashable>`) crashed the compiler.  It is now checked like
   a generic class.
+- `u8`, `u16` and `u32` parses accepted a sign where `unsigned` did not (`u32("+1")` was
+  `1`, `u8("-0")` was `0`). Every unsigned width now rejects one: `"+1".toU8()` is `None`.
+- `f16` and `f32` parses gave `inf` for finite text out of their range (`f16("70000")`,
+  `f32("1e39")`). The parse is now `None`, as the literal of that text is an error. Text
+  below the type's range still rounds to 0, as the literal does.
+- The `f32` literal `3.4028235677973366e38`, the midpoint above the largest `f32`, compiled
+  and was `inf`. It is now `the literal 3.40282e+38 does not fit in 'f32'`.
 
 ## [0.2.0] - 2026-10-20
 

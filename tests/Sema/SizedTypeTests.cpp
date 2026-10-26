@@ -111,6 +111,19 @@ TEST(SizedTypes, ALiteralOutsideTheTypesRangeIsAnError) {
               "the literal 1e+39 does not fit in 'f32'");
 }
 
+// The midpoint above the largest f32, 2^128 - 2^103, is a tie that rounds to
+// even, which is infinity: the literal does not fit, as
+// `"3.4028235677973366e38".toF32()` is None.  Below it, a literal rounds to
+// the largest f32.
+TEST(SizedTypes, AnF32LiteralFitsBelowTheOverflowMidpoint) {
+  expectError(inMain("a: f32 = 3.4028235677973366e38;"),
+              "the literal 3.40282e+38 does not fit in 'f32'");
+  expectError(inMain("a: f32 = -3.4028235677973366e38;"),
+              "the literal -3.40282e+38 does not fit in 'f32'");
+  expectOk(inMain("a: f32 = 3.4028235e38; b: f32 = -3.4028235e38;"));
+  expectOk(inMain("a: f32 = 3.4028235677973362e38;"));
+}
+
 TEST(SizedTypes, OnlyALiteralAdapts) {
   // A compound expression of literals is an `int`; an `int` variable is one.
   expectError(inMain("a: i8 = 100 + 100;"),

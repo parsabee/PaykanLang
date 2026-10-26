@@ -71,10 +71,10 @@ PaykanString *PaykanString_from_char(int8_t c) {
   return PaykanString_new((const char *)&c, 1);
 }
 
-// -- Parses (`int<Str>`, `float<Str>`, `bool<Str>`)
+// -- Parses (Str's toInt() & co.)
 
 /// True when @p s starts with a character strtoll / strtod would skip as
-/// leading whitespace, which `int<Str>` / `float<Str>` reject.
+/// leading whitespace, which every parse rejects.
 static int string_starts_with_space(const PaykanString *s) {
   return s->len > 0 && isspace((unsigned char)s->data[0]);
 }
@@ -126,6 +126,51 @@ int64_t PaykanString_parse_float(PaykanObject *str, double *out) {
   if (errno != 0 && (errno != ERANGE || isinf(val) || val == 0.0))
     return 0;
   *out = val;
+  return 1;
+}
+
+/// `s.toF32()`: an integer text beyond 2^53 is that integer rounded once
+/// (as `f32(n)`); any other text is PaykanString_parse_float's value rounded
+/// to f32 (C's (float)strtod).  Finite text whose value rounds to infinity in
+/// f32 is refused; "inf" and "nan" are kept; a value below the f32 range is
+/// 0 or a subnormal, as an f32 literal is.
+int64_t PaykanString_parse_f32(PaykanObject *str, double *out) {
+  int64_t n;
+  if (PaykanString_parse_int(str, &n) &&
+      (n > (INT64_C(1) << 53) || n < -(INT64_C(1) << 53))) {
+    *out = (double)(float)n;
+    return 1;
+  }
+  double d;
+  if (!PaykanString_parse_float(str, &d)) {
+    *out = 0.0;
+    return 0;
+  }
+  // From 2^128 - 2^103, the midpoint above FLT_MAX (a tie, rounded to even,
+  // that is up), a value rounds to infinity; the guard also keeps the
+  // conversion below in range, as C11 6.3.1.5 requires.
+  if (!isinf(d) && !isnan(d) && fabs(d) >= 0x1.ffffffp+127) {
+    *out = 0.0;
+    return 0;
+  }
+  *out = isinf(d) || isnan(d) ? d : (double)(float)d;
+  return 1;
+}
+
+/// `s.toF16()`: PaykanString_parse_float's value rounded to f16
+/// (Paykan_round_f16); finite text that rounds to infinity is refused.
+int64_t PaykanString_parse_f16(PaykanObject *str, double *out) {
+  double d;
+  if (!PaykanString_parse_float(str, &d)) {
+    *out = 0.0;
+    return 0;
+  }
+  double r = Paykan_round_f16(d);
+  if (isinf(r) && !isinf(d)) {
+    *out = 0.0;
+    return 0;
+  }
+  *out = r;
   return 1;
 }
 

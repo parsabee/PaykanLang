@@ -416,9 +416,12 @@ Output:
 - **Conversions** between any two numeric types use the conversion constructors
   (`u8(300)` is `44`, `i8(200)` is `-56`, `int(unsigned(-1))` is `-1`, `i32(-1.5)` is `-1`,
   `f16(0.1)` is `0.0999756`): see [Conversions](04-strings-and-conversions.md#conversions).
-  `Str(x)` prints any numeric value (an `unsigned` without a sign), and `u8(s)`,
-  `unsigned(s)`, `f32(s)` … parse a `Str` into a `u8?`, `unsigned?`, `f32?` …, `None` when
-  the text is not a number of that type (`u8("256")` is `None`).
+  `Str(x)` prints any numeric value (an `unsigned` without a sign), and `s.toU8()`,
+  `s.toUnsigned()`, `s.toF32()` … parse a `Str` into a `u8?`, `unsigned?`, `f32?` …, `None`
+  when the text is not a number of that type (`"256".toU8()` and `"+1".toU8()` are `None`):
+  see [Parsing a string](04-strings-and-conversions.md#parsing-a-string).  An `f32` or `f16`
+  from a text with a fraction or an exponent, a literal's or a parse's, is the `float`
+  nearest the text rounded to the type.
 - **Methods and traits.**  Every numeric type has `toString()` and is `Show` and
   `ValueType`; the integer types have `hash()` and are `Hashable`, so a `u32` is a
   `HashMap` key.  A sized type has an optional (`u8?`), is a `match` subject with literal

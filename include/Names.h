@@ -109,6 +109,24 @@ inline constexpr const char *kTypeF16 = "f16";
 inline constexpr const char *kTypeF32 = "f32";
 inline constexpr const char *kTypeF64 = "f64";
 
+/// A parse method of `Str` and the type it parses into, by the type's
+/// keyword (ast::builtinKindOfName resolves it).
+struct StrParseMethod {
+  const char *Method;
+  const char *Target;
+};
+/// The parse methods of `Str` (docs/language/04-strings-and-conversions.md,
+/// "Parsing a string"), one per primitive that parses: each gives the
+/// optional of its type.  Builtins, not vtable slots.
+inline constexpr StrParseMethod kStrParseMethods[] = {
+    {"toInt", kTypeInt},           {"toI8", kTypeI8},
+    {"toI16", kTypeI16},           {"toI32", kTypeI32},
+    {"toUnsigned", kTypeUnsigned}, {"toU8", kTypeU8},
+    {"toU16", kTypeU16},           {"toU32", kTypeU32},
+    {"toFloat", kTypeFloat},       {"toF16", kTypeF16},
+    {"toF32", kTypeF32},           {"toBool", kTypeBool},
+};
+
 // Conversion constructors `Target<Source>(value)` (#64, #88): the closed set
 // of specializations of the builtin types.  Sema rebinds a conversion call's
 // callee to its spelled form, which is what the lowering dispatches on.
@@ -148,6 +166,8 @@ inline constexpr const char *kPaykanStringParseInt = "PaykanString_parse_int";
 inline constexpr const char *kPaykanStringParseFloat =
     "PaykanString_parse_float";
 inline constexpr const char *kPaykanStringParseBool = "PaykanString_parse_bool";
+inline constexpr const char *kPaykanStringParseF32 = "PaykanString_parse_f32";
+inline constexpr const char *kPaykanStringParseF16 = "PaykanString_parse_f16";
 inline constexpr const char *kPaykanStringFromFloat = "PaykanString_from_float";
 inline constexpr const char *kPaykanStringFromBool = "PaykanString_from_bool";
 inline constexpr const char *kPaykanStringToString = "PaykanString_toString";
@@ -376,6 +396,8 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringParseUint,
     kPaykanStringParseFloat,
     kPaykanStringParseBool,
+    kPaykanStringParseF32,
+    kPaykanStringParseF16,
     // Sized numeric types
     kPaykanRoundF16,
     // Hash
