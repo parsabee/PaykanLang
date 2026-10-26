@@ -1340,15 +1340,20 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   // destructor, as Sema says of one with a body.)
   if (at(Tok::Semi)) {
     if (kind != FuncKind::ClassMethod) {
+      // `destroy` is reserved whatever its body: reported at the function,
+      // as Sema reports one with a body (which names its type).
+      if ((kind == FuncKind::ImplMethod || kind == FuncKind::StaticFn) &&
+          name == names::kMethodDestroy) {
+        error(span(start), "'destroy' is reserved for the compiler-generated "
+                           "destructor and cannot be declared");
+        return nullptr;
+      }
       std::string why;
       if (kind == FuncKind::StaticFn)
         why = "'" + name + "' has no body: a 'static fn' needs one";
       else if (kind == FuncKind::ImplMethod && name == names::kMethodInit)
         why = "'" + std::string(spelled) +
               "' has no body: an initializer needs one";
-      else if (kind == FuncKind::ImplMethod && name == names::kMethodDestroy)
-        why = "'destroy' is reserved for the compiler-generated destructor "
-              "and cannot be declared";
       else if (kind == FuncKind::ImplMethod)
         why = "'" + name +
               "' in an 'impl' block has no body: an 'impl' block's methods "

@@ -645,9 +645,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in class 'A'` (`... in struct 'P' (a struct has none)`), for a class body's method and
   an `impl` block's method or `static fn` of a class or a struct, generic or not
   (`Sema::rejectReservedDestroy`), and a call of the rejected `static fn` is a follow-on;
-  a bodiless one in an `impl` block is the syntax error `'destroy' is reserved for the
-  compiler-generated destructor and cannot be declared` (docs/language/05-classes.md,
-  11-structs.md, "Semantic Checks").
+  a bodiless one in an `impl` block, a `static fn` too, is the syntax error `'destroy' is
+  reserved for the compiler-generated destructor and cannot be declared`, at the function
+  as Sema's (docs/language/05-classes.md, 11-structs.md, "Semantic Checks").
 - A compilation prints at most 20 errors: past them `paykan` prints `note: stopping after
   20 errors, the error limit (--error-limit=N sets it, and --error-limit=0 shows every
   error)` and no more diagnostics, though it still exits with status 1 (and a file that
