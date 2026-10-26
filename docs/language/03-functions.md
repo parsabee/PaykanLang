@@ -999,7 +999,8 @@ call never shares a reference with C, so it costs no reference counting
 bool, char, a sized numeric type and an enum without fields cross into C by
 value`).  Only these
 types cross, with the runtime's own convention (an enum whose variants have
-fields, [a tagged union](07-enums.md#variants-with-fields), does not):
+fields, [a tagged union](07-enums.md#variants-with-fields), does not, other than as a type
+argument of a [generic native function](#generic-native-functions)):
 
 | Paykan | C | Notes |
 |--------|---|-------|

@@ -482,6 +482,14 @@ syntax error (parenthesise one comparison). The condition of a ternary is
 a `logicalOr`, so a nested ternary there needs parentheses; the `else`
 branch may be another ternary without them.
 
+Evaluation is left to right, whatever the precedence: a binary
+expression's left operand before its right one, a call's callee and then
+its arguments in order, a method's receiver before its arguments, a
+subscript's base before its index, a tuple or array literal's elements in
+order, and an assignment's target place before its value; `&&` and `||`
+evaluate their right operand only when needed, and a ternary only the
+branch it chooses ([Evaluation order](language/02-basics.md#evaluation-order)).
+
 `mov` is reserved but no longer part of the grammar (removed in v0.2.0).
 A frontend reports `'mov' was removed in v0.2.0; ownership transfers are
 inferred` (`frontend::kMovRemoved`) once per use and keeps parsing the

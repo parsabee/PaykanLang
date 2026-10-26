@@ -638,6 +638,7 @@ d = gen::Box<int>(1);     // the same class as c's
 
 ## Not Supported Yet
 
-Variance, default type arguments, explicit specialisation, generic methods on non-generic classes,
-generic superclasses, and one shared copy of an instantiation over class-type arguments
-(erasure, [#160](https://github.com/parsabee/PaykanLang/issues/160)).
+Variance, default type arguments, explicit specialisation, generic methods on non-generic classes
+and generic superclasses. Each instantiation is compiled on its own, also over class-type
+arguments; sharing one compiled copy among those would be an optimisation a program cannot
+observe.

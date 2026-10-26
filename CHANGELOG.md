@@ -130,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `toString()` and `io::println` show `Rect(w: 2, h: 3)`; `==` and `!=`
     compare the variant and its fields.
   - A variant cannot hold its own enum (hold it in a class instead), a field
-    is not a fixed-size array yet, and a tagged union does not cross into C.
+    is not a fixed-size array yet, and a tagged union does not cross into C
+    other than as a type argument of a generic native function.
   - Imported tagged unions work from a source and from a `.pkm`: an `ENUM`
     record lists its variants with fields, whose fields are `STRUCT` records
     (docs/design/pkm.md). The AST interchange format writes such a variant as
@@ -167,9 +168,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `fn(x: int) => x * 2`, the result type is the expression's. Sema infers a
     function's before checking any other body, so it may be used before its
     declaration; a generic function's is inferred for each instantiation.
-  - An expression with no value, and a function whose expression depends on
-    its own result type (`fn fact(n: int) => ... fact(n - 1)`), are errors that
-    ask for the result type. A method writes its result type (`fn area() ->
+  - An expression with no value is an error that asks for a braced body, and
+    a function whose expression depends on its own result type (`fn fact(n:
+    int) => ... fact(n - 1)`) is one that asks for the result type. A method writes its result type (`fn area() ->
     int => ...`); a `static fn` infers.
   - The AST interchange format marks such a function or lambda with
     `(inferred)` (docs/plugins/ast-format.md), so a template in a `.pkm` keeps
@@ -1469,7 +1470,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `let` local declarations: `let n = 3;` and `let s: Str = "a";` declare a variable
   that cannot be reassigned (`'n' is declared with 'let' and cannot be reassigned`),
   neither by assignment nor by destructuring.  `let` needs an initializer and applies to
-  local declarations only; it fixes the variable, not the object it refers to.  `let` is
+  local declarations only; it fixes the variable, not the object a class-typed one refers
+  to (an array's elements and a struct's fields are part of its value).  `let` is
   a reserved word now.  In the AST interchange format a `let` local carries `(let)`.
 
 - Imported modules are compiled to `.pkm` module files (docs/design/pkm.md, prototype of
