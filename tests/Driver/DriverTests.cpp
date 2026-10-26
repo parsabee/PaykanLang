@@ -2115,11 +2115,12 @@ TEST(Driver, ALongSourceLineIsShownAsAWindowAroundTheCaret) {
   EXPECT_EQ(h.exitCode, 1);
   EXPECT_EQ(countOf(h.out, "error: "), 20u);
   EXPECT_LT(h.out.size(), 16384u) << h.out.substr(0, 4000);
-  // All of them: each as long as one.
+  // All of them: each as long as one. An error names its file, whose
+  // temporary path is 40 characters longer on macOS than in /tmp.
   auto all = run(std::string(kPaykan) + " --error-limit=0 --check-only " + big +
                  " 2>&1");
   EXPECT_EQ(countOf(all.out, "error: "), 10000u);
-  EXPECT_LT(all.out.size(), 10000u * 300u);
+  EXPECT_LT(all.out.size(), 10000u * (300u + big.size()));
   std::filesystem::remove(big);
 }
 
