@@ -904,22 +904,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     block: an `if` takes up to 510 of them in a function's body, and past them the rest
     of the chain is skipped after the block one level too deep, so the limit is its only
     error.
-  - Sema, the lowering (with its analyses of the reads a call may replace) and the copies
-    of a generic's body take a chain from its innermost link out, in a loop, and the
-    lowering's address of a field of a struct, an element of a tuple or of an array in a
-    chain of them is one loop too, through the calls in such a chain as well: a struct's
-    methods (`p.m().m()...`, generic structs' too), a field's function value
-    (`c.f().f()...`), and the element, the field or the function value of a call's result
-    (`c.t().0.t().0...`, `p.a()[0]...`, `c.g()()...`).  A lambda in a lambda's body is
-    lowered after that body, in a loop too, and the parser, the AST interchange reader
-    (which reads its text's lists in a loop) and the lowering of method calls hold the
-    frames a nesting recurses through small: a level of `let f = fn() { ... };` took about
-    16 KB of an AddressSanitizer build's stack (without its fake stack for use after return)
-    in the parser and 17 KB in the lowering,
-    which overflowed 8 MB at 511 levels, and takes 6 KB in the parser and none in the
-    lowering.  Every chain and nesting within the limits, and the deepest mixes of them
-    (2048 links in 511 levels of lambdas), compiles and runs on every path (`paykan run`,
-    `paykan build`, `--emit-c`) with a quarter of the default stack, 2 MB, in a debug
+  - Sema, the lowering (with its analyses of the reads a call may replace) and the copies of
+    a generic's body take a chain from its innermost link out, in a loop, and the lowering's
+    address of a field of a struct, an element of a tuple or of an array in a chain of them
+    is one loop too, through the calls in such a chain as well: a struct's methods
+    (`p.m().m()...`, generic structs' too), a field's function value (`c.f().f()...`), and
+    the element, the field or the function value of a call's result (`c.t().0.t().0...`,
+    `p.a()[0]...`, `c.g()()...`).  A lambda in a lambda's body is lowered after that body,
+    in a loop too, and the parser, the AST interchange reader (which reads its text's lists
+    in a loop) and the lowering of method calls hold the frames a nesting recurses through
+    small: a level of `let f = fn() { ... };` took about 16 KB of an AddressSanitizer
+    build's stack (without its fake stack for use after return) in the parser and 17 KB in
+    the lowering, which overflowed 8 MB at 511 levels, and takes 6 KB in the parser and none
+    in the lowering.  Every chain and nesting within the limits, and the deepest mixes of
+    them (2048 links in 511 levels of lambdas), compiles and runs on every path (`paykan
+    run`, `paykan build`, `--emit-c`) with a quarter of the default stack, 2 MB, in a debug
     build, and the test suite checks that it does.
   - The AST interchange format nests up to 4112 lists (`kMaxDepth`), which holds every AST
     within the limits, and its reader counts the links and the levels as the frontends do,
@@ -933,11 +932,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     chain the lowering took a level a link, or an `&&` nesting 2048 regions for `--emit-c`.
 - A `match` on strings, floats or classes with thousands of arms overflowed the stack on a
   valid program: 3000 string arms crashed `--emit-pir`, `paykan run`, `paykan build` and
-  `--emit-c` (exit status 139) with a quarter of the default stack, 2 MB, as the lowering
-  nested each arm's test in the `else` of the one before, a block an arm, which the passes
-  and backends recurse through.  The lowering tests the arms in turn, each only while none
-  before it held, as before, then switches on the index of the first that held
-  (docs/pir.md section 6): two blocks deep however many arms there are.
+  `--emit-c` (exit status 139) with a quarter of the default stack, 2 MB, and 10000 with the
+  default 8 MB, as the lowering nested each arm's test in the `else` of the one before, a
+  block an arm, which the passes and backends recurse through.  The lowering tests the arms
+  in turn, each only while none before it held, as before, then switches on the index of the
+  first that held (docs/pir.md section 6): two blocks deep however many arms there are.
 - A frontend plugin's AST, or the `ast-text` frontend's input, could declare a local without
   an initial value, which the grammar has no way to write (`x: int;` is not a statement):
   `(decl (var "s" (named-type "Str") _))` passed every check and `io::println(s)` crashed
