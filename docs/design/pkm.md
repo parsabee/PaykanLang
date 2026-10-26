@@ -589,6 +589,12 @@ spelling has a space after commas (`Pair<Str, int>`); **open question 3.**
 
 ### 4.5 Hybrid erasure and the `INST` part (#160)
 
+**Obsolete.** #160 closed without erasure: every instantiation is compiled
+on its own (§4.8), and one copy shared by class-type arguments would only be
+an optimisation no program can observe.  The format keeps what this section
+reserved (the `INST` part, the `erased` and `hasClassObj` bits, `ClassObjRec`),
+written as zero or empty; the design is kept as the record of the choice.
+
 #160: class-type arguments share one **erased** copy compiled by the
 defining module (runtime class passed as a hidden argument); value-type
 arguments get a **specialised** copy; mixed lists specialise over the value
@@ -729,7 +735,7 @@ CODE blob
   --- string table: uleb count ; count × bytes (UTF-8, no NUL; entry 0 = "") ---
   str  module name   (canonical)
   --- item tables, fixed order, each `uleb n` then n records ---
-  ExternGlobalRec*  CStrRec*  DataRec*  BytesRec*  SlotRec* (#170; 0 today)  ClassObjRec* (#160; 0 today)  ClassRec*  FunctionRec*
+  ExternGlobalRec*  CStrRec*  DataRec*  BytesRec*  SlotRec* (#170; 0 today)  ClassObjRec* (obsolete, always 0: §4.5)  ClassRec*  FunctionRec*
   u32  trailer "BRIP"   (a truncated blob never ends here)
 ```
 
@@ -854,7 +860,7 @@ FunctionRec
   uleb recordLength      bytes that follow (lets SYMIDX point here and a reader skip or decode one function)
   str  name
   u32  flags             bit0 extern ; bit1 hasModule ; bit2 hasSymbol ; bits3-4 linkage (0 external, 1 hidden, 2 internal; §9.3)
-                         bit5 linkonce (reserved, written 0; §4.5 makes it unnecessary) ; bit6 erased (nHiddenParams follows; #160)
+                         bit5 linkonce (reserved, written 0; §4.5 makes it unnecessary) ; bit6 erased (obsolete, written 0: §4.5)
                          bit7 noreturn ; bit8 inline ; bit9 noinline ; bit10 cold (#171) ; bit11 cExport (cName follows; #21) ; bit12 hasAttrs
   sig  signature
   [bit1] str module ; [bit2] str symbol ; [bit6] uleb nHiddenParams ; [bit11] str cName
@@ -866,7 +872,7 @@ FunctionRec
   uleb nextValueId
   Block body
 ClassRec
-  str name ; u32 flags (bit0 extern ; bit1 final #18 ; bit2 abstract #18 ; bit3 singleton #168 ; bit4 hasClassObj #160 ; bits5-6 linkage ; bit7 linkonce reserved)
+  str name ; u32 flags (bit0 extern ; bit1 final #18 ; bit2 abstract #18 ; bit3 singleton (obsolete, written 0: #168 is not planned) ; bit4 hasClassObj (obsolete, written 0: §4.5) ; bits5-6 linkage ; bit7 linkonce reserved)
   str super ("" = root) ; [bit0] str module
   uleb nFields ; nFields × (str name ; slot type)           layout order, ancestors first
   uleb nSlots  ; nSlots  × (str slot ; str target ("" = null) ; sig)
@@ -874,8 +880,8 @@ ExternGlobalRec  str name ; u8 kind (0 obj, 1 vtable)        always $rt.
 CStrRec          str name ; bytes                            no NUL stored
 DataRec          str name ; uleb n ; n × sleb
 BytesRec         str name ; bytes                            raw constant bytes, any values
-SlotRec (#170)   str name ; u32 flags (bits0-1 linkage ; bit2 constant ; bit3 lazy ; bit4 singletonInstance #168) ; type ; [bit2] Operand init
-ClassObjRec (#160) str name ; str class ; uleb nTypeArgs ; nTypeArgs × str
+SlotRec (#170)   str name ; u32 flags (bits0-1 linkage ; bit2 constant ; bit3 lazy ; bit4 singletonInstance, obsolete: #168 is not planned) ; type ; [bit2] Operand init
+ClassObjRec (obsolete, never written: §4.5) str name ; str class ; uleb nTypeArgs ; nTypeArgs × str
 ```
 
 The reader checks that a function body ends exactly at `recordLength`
@@ -925,6 +931,9 @@ reserved for a later post-pass variant (PR #104 §5.4 option C); storing
 post-pass PIR per `-O` was rejected (N copies per file).
 
 ### 5.10 Generics in `CODE` (#160)
+
+The erased body and the class object below are obsolete (§4.5); a module's
+copies of instantiations are ordinary records (§4.8).
 
 | Piece | Representation | Linkage |
 |---|---|---|
@@ -1614,7 +1623,7 @@ Reserved now so no later major bump is needed:
 | #167 explicit self / static methods | `MFlags.STATIC`, `MUT_SELF`; `direct[]` |
 | #18 override/final/pure | `MFlags.FINAL/OVERRIDE/PURE`; `cflags.FINAL`; class `abstract` bit (pure virtual methods done: the prototype's method flags byte, bit 4, §3.2; abstractness is recomputed, never stored) |
 | #147 traits | `TRAIT`, `IMPL`, `Bounds`, `T_TRAIT_OBJ`, trait default bodies in `TMPL` |
-| #160 generics | `TMPL` section, `INST` part, `ERASABLE`, `erased`/`nHiddenParams`, `ClassObjRec`, `$class` spelling |
+| #160 generics | `TMPL` section (in use, §4.8); obsolete, §4.5: `INST` part, `ERASABLE`, `erased`/`nHiddenParams`, `ClassObjRec`, `$class` spelling |
 | #96 inline optionals, #99 weak (done: type code 16, opcodes 30, 31 and 49, a class field's flags byte) | type codes 8–16, opcodes 26–31, `T_WEAK` |
 | #98 borrowed params | per-call ownership in `CODE` (opcode 54, marks 55 and 56, §5.5); the ownership mask in the runtime ABI, asked by every lending body in `CODE` and `OBJ`; `Sig.conv` and `nConventions` retired (0); a `FUNC` record's native flag (§3.5) |
 | #93 one allocation | header kind is a property of `runtime_abi`, nothing per class |
