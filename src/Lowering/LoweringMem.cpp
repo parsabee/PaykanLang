@@ -148,6 +148,25 @@ void ModuleLowering::emitMemOptionalWrap(ast::Expr *e, const Val &dst) {
 }
 
 ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
+  MemValue v = emitMemRead(e);
+  if (!v.Addr || v.Temp || !SnapshotReads.count(e))
+    return v;
+  // Read where it is, and used once operands after it have run, which may
+  // write it (noteBorrowedReads): the value it has now, in a temporary.
+  return {copyToTemporary(v.Addr, memTypeOf(e), "snap"), /*Temp=*/true};
+}
+
+Val ModuleLowering::copyToTemporary(const Val &addr, ast::Type *ty,
+                                    const std::string &name) {
+  MemLayout l = memLayout(ty);
+  pir::LocalId tmp = B.addMemLocal(name, l.Size, l.Align);
+  Val copy = B.localAddr(tmp, name + ".addr");
+  B.memCopy(copy, addr, Val::i64(l.Size));
+  emitMemRetain(copy, ty);
+  return copy;
+}
+
+ModuleLowering::MemValue ModuleLowering::emitMemRead(ast::Expr *e) {
   // A tuple or a struct made the present value of its optional: the
   // optional, in a temporary.
   if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
@@ -199,13 +218,9 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
       return {addr};
     // A read its statement may change the variable under (noteHeldReads):
     // a copy of its own, in a temporary.
-    ast::Type *ty = CurrentScope->lookupASTType(id->getName());
-    MemLayout l = memLayout(ty);
-    pir::LocalId tmp = B.addMemLocal("held", l.Size, l.Align);
-    Val copy = B.localAddr(tmp, "held.addr");
-    B.memCopy(copy, addr, Val::i64(l.Size));
-    emitMemRetain(copy, ty);
-    return {copy, /*Temp=*/true};
+    return {copyToTemporary(addr, CurrentScope->lookupASTType(id->getName()),
+                            "held"),
+            /*Temp=*/true};
   }
   // An element, or a struct's field, in the bytes of the value it is part
   // of, at its offset: the whole's address first, then each part's in it,

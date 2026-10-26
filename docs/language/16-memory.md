@@ -640,6 +640,16 @@ retains and releases the references it holds as a tuple does. Assigning a field 
 (`p.name = s`) retains the new reference and releases the one it replaces. A method's `self`
 is the receiver's storage, so a method allocates nothing to be called. See [Structs](11-structs.md).
 
+An array, a tuple, a struct or a tagged union is passed by address: the callee copies a plain
+parameter when the call starts, and reads a `view` parameter where it is. So a call with an
+argument that may write that storage after it is read (`f(p, bump(p))` with `bump(p: inout
+Point)`, `f(c.p, reset(c))` with `reset` storing into `c.p`) gives the callee a copy the caller
+takes where the argument is evaluated, its references retained and released after the call,
+as `==` does with its left operand: the value passed or compared is the one read
+([Evaluation order](02-basics.md#evaluation-order)). Where no later operand may write it, as in
+almost every call, nothing more is copied: a later call given only values that reach no object,
+or whose code stores into nothing its caller holds, cannot.
+
 ## `None`
 
 `None` is a singleton `Obj` representing the absence of a value. Because it is a shared global

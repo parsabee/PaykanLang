@@ -452,6 +452,15 @@ private:
   /// The reads of LentReads in use where a call is made that may let go of
   /// what they read: their copy is the caller's (not lent).
   std::unordered_set<const ast::Expr *> NotLendable;
+  /// The values held in memory, read where they are, that noteBorrowedReads
+  /// found the statement may write before they are used: an argument
+  /// passed by address (which its callee copies, or reads, only once the
+  /// later arguments have run), a struct's `view fn` receiver, the left
+  /// operand of `==` or `!=`, when an operand after it may write its
+  /// storage.  Each is copied into a temporary where it is read
+  /// (emitMemValue), so it is the value it had then, as a box read or a
+  /// number is (docs/language/02-basics.md, "Evaluation order").
+  std::unordered_set<const ast::Expr *> SnapshotReads;
   /// Whether the box read @p e, an argument of a lending callee (or the
   /// argument `Str(e)` is), may be lent: in LentReads, of none of whose
   /// calls in use it is NotLendable, and not held (isHeldRead).
@@ -482,12 +491,17 @@ private:
     /// may hold one, or makes a call that may (the rule without the types,
     /// which a read rooted in the function's own variables keeps).
     bool Releases = false;
+    /// It may store into storage its caller may hold, a reference or not:
+    /// a field of an object (but the one an `__init__` makes), an element
+    /// of such storage, what an `inout` name or a struct method's `self`
+    /// names.
+    bool Stores = false;
     /// The classes of the slots whose references it may let go of: the
     /// ones it may store into, and every one an object or a value it lets
     /// go of may hold (whose dying may let them go).
     std::unordered_set<const ast::Type *> Types;
 
-    static Effect unknown() { return {true, true, {}}; }
+    static Effect unknown() { return {true, true, true, {}}; }
     void add(const Effect &other);
   };
   /// What a call of @p fn does: Unknown for null or a function without a
@@ -1012,8 +1026,14 @@ private:
   };
   /// The bytes of @p e, an expression of a type held in memory: a
   /// variable's own (or, for an `inout` one, the value it names), an
-  /// element's or a field's, or a temporary.
+  /// element's or a field's, or a temporary; for a read of SnapshotReads, a
+  /// copy of them taken now, in a temporary.
   MemValue emitMemValue(ast::Expr *e);
+  /// emitMemValue, without the copy a read of SnapshotReads takes.
+  MemValue emitMemRead(ast::Expr *e);
+  /// A temporary named @p name holding a copy of the value of type @p ty at
+  /// @p addr, its references retained: its address.
+  Val copyToTemporary(const Val &addr, ast::Type *ty, const std::string &name);
   /// The expression emitMemValue(@p e) passes to visit() before it emits
   /// anything else, or null: a call itself, the object of a class's field,
   /// and for an element or a struct's field, the same for the whole it is

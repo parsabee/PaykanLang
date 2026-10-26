@@ -812,7 +812,47 @@ value
 ```
 
 A value read before a call is the one used, even when the call replaces what the variable
-holds ([Exclusivity](03-functions.md#exclusivity)).
+holds ([Exclusivity](03-functions.md#exclusivity)). That holds for a value held in memory too,
+a struct, a tuple, a fixed-size array or a tagged union: passed to a parameter (plain or
+`view`), compared with `==` or `!=`, or the receiver of a struct's `view fn`, it is the value it
+had where it was evaluated, whatever a later argument or the right operand writes to where it
+came from: through an `inout` argument, a method that may change it, or a call given the object
+it is in. The receiver of a struct's method that may change `self` is its storage, as an `inout`
+argument is: the method sees what the arguments wrote to it.
+
+```pkn
+import ::io;
+
+struct Point {
+  x: int;
+  y: int;
+}
+
+fn shift(p: inout Point) -> int {
+  p = Point(p.x + 10, p.y);
+  return 0;
+}
+
+fn show(p: Point, n: int) -> Str {
+  return "(" + Str(p.x) + ", " + Str(p.y) + ")";
+}
+
+fn main() -> int {
+  p = Point(1, 2);
+  io::println(show(p, shift(p)));               // p as it was before shift
+  io::println(Str(p == Point(shift(p) + 11, 2))); // (11, 2) == (11, 2)
+  io::println(show(p, 0));
+  return 0;
+}
+```
+
+Output:
+
+```
+(1, 2)
+True
+(21, 2)
+```
 
 ---
 

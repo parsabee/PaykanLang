@@ -798,6 +798,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stability sweep: lowering and backends.**
+  - A struct, a tuple, a fixed-size array or a tagged union passed as an argument, or as the
+    left operand of `==` or `!=`, was read only once the later operands had run, so one that
+    wrote its storage changed the value the callee or the comparison saw: with `reset(c)`
+    storing into `c.p` and `bump(p: inout P)`, `first(c.p, reset(c))`, `first(p, bump(p))`
+    and `q == P(bump(q) + 9)` used the values written (9, 9, `True`), not those read (1, 1,
+    `False`), on every path, and so did a method's, a constructor's, `__super__`'s and a
+    function value's arguments, a `view` or slice parameter and the receiver of a struct's
+    `view fn`.  Such a value is passed by address, and its callee copies it (or reads it
+    where it is) when the call starts.  Now, when an operand after it may write its storage
+    (an `inout` argument naming it or a part of it, a struct method that may change it, or a
+    call given what reaches the object it is in whose code may store into storage its
+    caller holds), the caller copies it where it is evaluated, into a temporary whose
+    references it releases after the use (docs/language/02-basics.md, "Evaluation order";
+    docs/pir.md §7, "Reads a call may replace").  No other value is copied: the samples and
+    the standard library's tests lower to the same PIR as before, with and without the
+    passes, so the static counts recorded here do not move.  The receiver of a struct
+    method that may change `self` is still its storage, as an `inout` argument is.
+    `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

@@ -983,6 +983,27 @@ CodeGen enforced, now in one place.
   read in use where no such call is made is read in place, with no
   `retain`.
 
+  A value held in memory that is read where it is but used only once
+  the operands after it have run (an argument passed by address, which
+  its callee copies when the call starts or reads where it is; the
+  receiver of a struct's `view fn`; the left operand of `==` and `!=`)
+  is copied where it is evaluated, into a temporary of the caller's
+  (`mem.copy` into a `snap` local and a `retain` of each reference,
+  released once it is used), when an operand after it may write its
+  storage: an `inout` argument naming it or a part of it (not another
+  part, `s.q` of `s.p`, nor another field of an object), a struct
+  method that may change it, or a call given what reaches an object
+  whose code may store into storage its caller holds (a field of an
+  object but the one an `__init__` makes, an element of such storage,
+  what an `inout` name or a struct method's `self` names: read from the
+  code as the classes above are, "not known" counting), when it is in an
+  object or names the caller's storage.  The call's own `inout`
+  arguments write nothing it is given by value before its callee
+  copies it.  So `first(c.p, reset(c))` passes the `c.p` read before
+  `reset` stored into it, and every other such value is passed or
+  compared where it is, as before (the samples and the standard
+  library's tests lower to the same PIR).
+
   A call's `inout` result used where it is (bound to an `inout` local,
   passed to an `inout` parameter, a value held in memory) may also be in
   an object that one of the call's `inout` arguments holds, or that a

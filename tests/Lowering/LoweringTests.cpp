@@ -1430,6 +1430,66 @@ TEST(Lowering, AnInoutResultHoldsWhatItsInoutArgumentsHold) {
   EXPECT_LT(call, f.find("mem.copy %y.obj.addr.")) << f;
 }
 
+// A value held in memory passed by address, a struct's `view fn` receiver
+// and the left operand of `==` are copied where they are evaluated (into a
+// `snap` temporary, its references retained) only when an operand after
+// them may write their storage (docs/pir.md §7, "Reads a call may
+// replace"): an `inout` argument naming it or a part of it, a struct method
+// that may change it, a call given the object it is in that may store into
+// storage its caller holds.  A later call that writes another part, writes
+// nothing its caller holds, or is given nothing that reaches it, a write
+// before the read and the call's own `inout` arguments (its callee copies
+// its parameters first) take no copy.
+TEST(Lowering, AValueReadWhereItIsIsCopiedOnlyWhenALaterOperandMayWriteIt) {
+  const std::string decls = R"(
+    struct P { a: int; }
+    struct Pair { p: P; q: P; }
+    impl Pair {
+      fn bumpQ() -> int { self.q = P(7); return 0; }
+      view fn get(x: int) -> int => self.p.a;
+    }
+    class C { p: P; n: int; }
+    fn first(p: P, x: int) -> int => p.a;
+    fn both(p: P, q: inout P) -> int => p.a;
+    fn reset(c: C) -> int { c.p = P(9); return 0; }
+    fn reads(c: C) -> int => c.p.a;
+    fn make(c: C) -> C => C(c.p, 0);
+    fn bump(p: inout P) -> int { p = P(9); return 0; }
+    fn bumpN(n: inout int) -> int { n = 9; return 0; }
+    fn bumpPair(s: inout Pair) -> int { s = Pair(P(9), P(9)); return 0; }
+    fn k() -> int => 0;
+  )";
+  struct Case {
+    const char *Name;
+    const char *Body;
+    size_t Copies;
+  };
+  const Case cases[] = {
+      {"fieldReset", "c = C(P(1), 1); return first(c.p, reset(c));", 1},
+      {"localInout", "p = P(1); return first(p, bump(p));", 1},
+      {"equality", "q = P(1); return if q == P(bump(q)) then 1 else 0;", 1},
+      {"partWritten", "s = Pair(P(1), P(2)); return first(s.q, s.bumpQ());", 1},
+      {"viewReceiver", "s = Pair(P(1), P(2)); return s.get(bumpPair(s));", 1},
+      {"nested", "c = C(P(1), 1); return first(c.p, first(c.p, reset(c)));", 2},
+      {"otherPart", "s = Pair(P(1), P(2)); return first(s.q, bump(s.p));", 0},
+      {"otherField", "c = C(P(1), 1); return first(c.p, bumpN(c.n));", 0},
+      {"readsOnly", "c = C(P(1), 1); return first(c.p, reads(c));", 0},
+      {"makesNew", "c = C(P(1), 1); return first(c.p, make(c).n);", 0},
+      {"givenNothing", "c = C(P(1), 1); return first(c.p, k());", 0},
+      {"writtenBefore", "p = P(1); return bump(p) + first(p, 0);", 0},
+      {"ownArgument", "p = P(1); return both(p, p);", 0},
+  };
+  for (const Case &c : cases) {
+    auto l = lower(decls + "fn " + c.Name + "() -> int { " + c.Body +
+                       " }\nfn main() -> int { return 0; }",
+                   "", lowering::Copies::Shared, lowering::World::Closed);
+    ASSERT_TRUE(l.Ok) << c.Name << ": " << l.Error;
+    const std::string f = function(l.Text, c.Name);
+    EXPECT_EQ(count(f, "mem.copy %snap.addr."), c.Copies) << c.Name << "\n"
+                                                          << f;
+  }
+}
+
 // A string's character: the string is read before its index is computed,
 // with a reference of its own across a call there that may replace it, and
 // in place across one that cannot.

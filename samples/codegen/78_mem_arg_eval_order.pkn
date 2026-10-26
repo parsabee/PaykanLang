@@ -1,0 +1,199 @@
+// 78 — a value held in memory is read where it is evaluated
+// Exercises: a struct, a tuple, a fixed-size array or a tagged union passed
+//            to a parameter (which the callee copies, or reads where it is,
+//            only once the later arguments have run), the receiver of a
+//            struct's `view fn` and the left operand of `==`, while an
+//            operand after it writes its storage: through an `inout`
+//            argument, a struct's method that may change it, or a call that
+//            reaches it through an object or a closure.  The value used is
+//            the one read, as for a number or a string
+//            (docs/language/02-basics.md, "Evaluation order"), on a call of
+//            a function, a method, a constructor and a function value, and
+//            no copy is made where no later operand may write it.
+// expect-stdout: field: 1 1
+// expect-stdout: inout: 1 1 1 A(n: 1)
+// expect-stdout: equality: False True False
+// expect-stdout: method: 1 1 1
+// expect-stdout: constructor: 1 1
+// expect-stdout: function value: 1 1 1
+// expect-stdout: view: 1 1
+// expect-stdout: shared: a11 a11
+// expect-stdout: unchanged: 1 9 2
+
+import ::io;
+
+struct P {
+  a: int;
+}
+
+struct Named {
+  name: Str;
+  n: int;
+}
+
+struct Pair {
+  p: P;
+  q: P;
+}
+
+impl Pair {
+  fn bumpQ() -> int { self.q = P(7); return 0; }
+}
+
+struct Counter {
+  k: int;
+}
+
+impl Counter {
+  view fn get(x: int) -> int => self.k;
+}
+
+class Holder {
+  p: P;
+  named: Named;
+  n: int;
+}
+
+class Shown {
+  p: P;
+  x: int;
+}
+
+struct Made {
+  p: P;
+  x: int;
+}
+
+class Reader {
+  base: int;
+  view fn first(p: P, x: int) -> int => p.a + self.base;
+}
+
+enum E { A(n: int), B, }
+
+fn first(p: P, x: int) -> int => p.a;
+fn firstN(n: int, x: int) -> int => n;
+fn firstT(t: (int, int), x: int) -> int => t.0;
+fn firstA(a: int[3], x: int) -> int => a[0];
+fn tag(e: E, x: int) -> Str => e.toString();
+fn label(v: Named, x: int) -> Str => v.name + Str(v.n);
+fn look(p: view P, x: int) -> int => p.a;
+fn total(xs: view int[], x: int) -> int => xs[0];
+
+fn reset(h: Holder) -> int {
+  h.p = P(9);
+  h.named = Named("z" + Str(9), 9);
+  return 0;
+}
+
+fn bump(p: inout P) -> int {
+  p = P(9);
+  return 0;
+}
+
+fn bumpT(t: inout (int, int)) -> int {
+  t = (9, 9);
+  return 0;
+}
+
+fn bumpA(a: inout int[3]) -> int {
+  a = [9, 9, 9];
+  return 0;
+}
+
+fn bumpE(e: inout E) -> int {
+  e = E::B;
+  return 0;
+}
+
+fn bumpN(n: inout int) -> int {
+  n = 9;
+  return 0;
+}
+
+fn bumpCounter(c: inout Counter) -> int {
+  c = Counter(9);
+  return 0;
+}
+
+fn fresh() -> Holder => Holder(P(1), Named("a" + Str(1), 1), 1);
+
+fn main() -> int {
+  // Read through an object that a later call, given the object, writes.
+  h = fresh();
+  a = first(h.p, reset(h));
+  h = fresh();
+  c = first(h.p, first(h.p, reset(h)));
+  io::println("field: " + Str(a) + " " + Str(c));
+
+  // A variable a later `inout` argument writes.
+  p = P(1);
+  i1 = first(p, bump(p));
+  t = (1, 2);
+  i2 = firstT(t, bumpT(t));
+  arr = [1, 2, 3];
+  i3 = firstA(arr, bumpA(arr));
+  e = E::A(1);
+  i4 = tag(e, bumpE(e));
+  io::println("inout: " + Str(i1) + " " + Str(i2) + " " + Str(i3) + " " + i4);
+
+  // The left operand of `==` and `!=` is the value read first.
+  q = P(1);
+  e1 = q == P(bump(q) + 9);
+  t = (1, 2);
+  e2 = t != (bumpT(t) + 9, 9);
+  h = fresh();
+  e3 = h.p == P(reset(h) + 9);
+  io::println("equality: " + Str(e1) + " " + Str(e2) + " " + Str(e3));
+
+  // A method's arguments, and the receiver of a struct's `view fn`.
+  r = Reader(0);
+  h = fresh();
+  m1 = r.first(h.p, reset(h));
+  counter = Counter(1);
+  m2 = counter.get(bumpCounter(counter));
+  pair = Pair(P(1), P(2));
+  m3 = first(pair.q, pair.bumpQ()) - 1;
+  io::println("method: " + Str(m1) + " " + Str(m2) + " " + Str(m3));
+
+  // A constructor's arguments, of a class and of a struct.
+  h = fresh();
+  shown = Shown(h.p, reset(h));
+  h = fresh();
+  made = Made(h.p, reset(h));
+  io::println("constructor: " + Str(shown.p.a) + " " + Str(made.p.a));
+
+  // A function value's arguments; a closure that reaches the object.
+  g = first;
+  h = fresh();
+  f1 = g(h.p, reset(h));
+  p = P(1);
+  f2 = g(p, bump(p));
+  h = fresh();
+  later = fn() -> int => reset(h);
+  f3 = first(h.p, later());
+  io::println("function value: " + Str(f1) + " " + Str(f2) + " " + Str(f3));
+
+  // A `view` parameter and a slice see the value read too.
+  p = P(1);
+  v1 = look(p, bump(p));
+  arr = [1, 2, 3];
+  v2 = total(arr, bumpA(arr));
+  io::println("view: " + Str(v1) + " " + Str(v2));
+
+  // The copy keeps what its references share alive, and lets it go.
+  h = fresh();
+  s1 = label(h.named, reset(h));
+  h = fresh();
+  s2 = label(h.named, first(h.p, reset(h)));
+  io::println("shared: " + s1 + " " + s2);
+
+  // As before: a number is read where it is evaluated, and a later call
+  // that writes another part leaves the value alone (and takes no copy).
+  h = fresh();
+  u1 = firstN(h.n, bumpN(h.n));
+  pair = Pair(P(1), P(2));
+  u2 = first(pair.q, bump(pair.p));
+  io::println("unchanged: " + Str(u1) + " " + Str(h.n) + " " + Str(u2));
+  return 0;
+}

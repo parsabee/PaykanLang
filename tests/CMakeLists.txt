@@ -160,6 +160,7 @@ add_executable(codegen_tests
     CodeGen/TraitTests.cpp
     CodeGen/PureVirtualTests.cpp
     CodeGen/BorrowedParamTests.cpp
+    CodeGen/EvalOrderTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
