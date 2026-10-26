@@ -80,7 +80,7 @@ may be given:
 |--------|--------|
 | `--emit-c` | the program's C, one strictly conforming C11 translation unit ([The C output](../c-backend.md)) |
 | `--emit-llvm` | the program's LLVM IR, as `run` executes it at the `-O<n>` level (the mlir backend's `--emit-source`) |
-| `--emit-mlir=<stage>` | the program as MLIR at a stage of the mlir backend: `pir`, the program imported into the `pir` dialect, `scf`, after the lowering both targets share, `llvm`, the LLVM dialect, or `emitc`, EmitC, the C `--emit-c` prints ([the MLIR backend](../design/mlir-backend.md)) |
+| `--emit-mlir=<stage>` | (also `--emit-mlir <stage>`) the program as MLIR at a stage of the mlir backend: `pir`, the program imported into the `pir` dialect, `scf`, after the lowering both targets share, `llvm`, the LLVM dialect, or `emitc`, EmitC, the C `--emit-c` prints ([the MLIR backend](../design/mlir-backend.md)) |
 | `--emit-source` | the selected backend's output, whatever its language (the mlir backend's is LLVM IR) |
 | `--emit-pir` | PIR, the backend-neutral intermediate representation ([PIR](../pir.md)), as the backend gets it: what `main` reaches |
 | `--emit-ast` | the parsed program in the AST interchange format ([AST format](../plugins/ast-format.md)) |

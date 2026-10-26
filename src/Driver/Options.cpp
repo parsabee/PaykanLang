@@ -95,11 +95,15 @@ bool parseLevel(std::string_view text, unsigned &level) {
   return true;
 }
 
+/// The stages of the mlir backend --emit-mlir=<stage> names.
+constexpr std::string_view kMLIRStages[] = {"pir", "scf", "llvm", "emitc"};
+
 /// `--<key>=<value>` or `--<key> <value>`.  Returns true when @p name is this
-/// option; @p value is then set, or @p error on a missing value.
-bool valueOption(std::string_view name, const char *key, int &i, int argc,
-                 const char *const *argv, std::string &value,
-                 std::string &error) {
+/// option; @p value is then set, or @p error on a missing value, which names
+/// the option as it was @p spelled (`-o`, `--frontend`).
+bool valueOption(std::string_view name, std::string_view spelled,
+                 const char *key, int &i, int argc, const char *const *argv,
+                 std::string &value, std::string &error) {
   std::string_view k(key);
   if (name != k &&
       !(name.size() > k.size() && name.starts_with(k) && name[k.size()] == '='))
@@ -110,7 +114,7 @@ bool valueOption(std::string_view name, const char *key, int &i, int argc,
   else if (i + 1 < argc)
     v = argv[++i];
   if (v.empty())
-    error = std::string("option '--") + key + "' requires a value";
+    error = "option '" + std::string(spelled) + "' requires a value";
   value = std::string(v);
   return true;
 }
@@ -169,6 +173,8 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
 
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
+    // The option as given, for its messages (`-o`, `--frontend`).
+    std::string_view spelled = arg.substr(0, arg.find('='));
 
     // For `run`, everything after the source file belongs to the program.
     // `build`, `pkm` and the options that print or write something and stop
@@ -244,8 +250,19 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
 
-    if (std::string stage;
-        valueOption(name, "emit-mlir", i, argc, argv, stage, r.Error)) {
+    // `--emit-mlir <stage>` takes a stage's name only: in `--emit-mlir
+    // prog.pkn` the file is not one.
+    if (name == "emit-mlir" &&
+        (i + 1 >= argc ||
+         std::find(std::begin(kMLIRStages), std::end(kMLIRStages),
+                   std::string_view(argv[i + 1])) == std::end(kMLIRStages))) {
+      r.Error = "option '" + std::string(arg) +
+                "' needs a stage: --emit-mlir=<stage> (pir, scf, llvm or "
+                "emitc)";
+      return r;
+    }
+    if (std::string stage; valueOption(name, spelled, "emit-mlir", i, argc,
+                                       argv, stage, r.Error)) {
       if (!r.Error.empty())
         return r;
       emitMLIR = true;
@@ -253,7 +270,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
     if (std::string plugin;
-        valueOption(name, "plugin", i, argc, argv, plugin, r.Error)) {
+        valueOption(name, spelled, "plugin", i, argc, argv, plugin, r.Error)) {
       if (!r.Error.empty())
         return r;
       o.Plugins.push_back(std::move(plugin));
@@ -266,7 +283,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
     if (std::string list;
-        valueOption(name, "object", i, argc, argv, list, r.Error)) {
+        valueOption(name, spelled, "object", i, argc, argv, list, r.Error)) {
       if (!r.Error.empty())
         return r;
       for (size_t start = 0; start <= list.size();) {
@@ -278,7 +295,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
     if (std::string list;
-        valueOption(name, "pir-skip", i, argc, argv, list, r.Error)) {
+        valueOption(name, spelled, "pir-skip", i, argc, argv, list, r.Error)) {
       if (!r.Error.empty())
         return r;
       for (size_t start = 0; start <= list.size();) {
@@ -296,32 +313,38 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       }
       continue;
     }
-    if (std::string dir;
-        valueOption(name, "module-path", i, argc, argv, dir, r.Error)) {
+    if (std::string dir; valueOption(name, spelled, "module-path", i, argc,
+                                     argv, dir, r.Error)) {
       if (!r.Error.empty())
         return r;
       o.ModulePath.push_back(std::move(dir));
       continue;
     }
-    if (valueOption(name, "frontend", i, argc, argv, o.Frontend, r.Error) ||
-        valueOption(name, "backend", i, argc, argv, o.Backend, r.Error) ||
-        valueOption(name, "section", i, argc, argv, o.PkmSection, r.Error) ||
-        valueOption(name, "module-name", i, argc, argv, o.ModuleName,
+    if (valueOption(name, spelled, "frontend", i, argc, argv, o.Frontend,
                     r.Error) ||
-        valueOption(name, "o", i, argc, argv, o.OutputPath, r.Error)) {
+        valueOption(name, spelled, "backend", i, argc, argv, o.Backend,
+                    r.Error) ||
+        valueOption(name, spelled, "section", i, argc, argv, o.PkmSection,
+                    r.Error) ||
+        valueOption(name, spelled, "module-name", i, argc, argv, o.ModuleName,
+                    r.Error) ||
+        valueOption(name, spelled, "o", i, argc, argv, o.OutputPath, r.Error)) {
       if (!r.Error.empty())
         return r;
       continue;
     }
 
-    // -O<n>, -O=<n>, and -O <n>.
-    if (name.size() >= 1 && name[0] == 'O') {
-      std::string_view level = name.substr(1);
+    // -O<n>, -O=<n>, and -O <n>: `-Ofast` or `--Output` is no level.
+    if (std::string_view level = name.substr(1);
+        name[0] == 'O' && (level.empty() || level[0] == '=' ||
+                           std::all_of(level.begin(), level.end(), [](char c) {
+                             return c >= '0' && c <= '9';
+                           }))) {
       if (!level.empty() && level[0] == '=')
         level.remove_prefix(1);
       if (level.empty()) {
         if (i + 1 >= argc) {
-          r.Error = "option '-O' requires a value";
+          r.Error = "option '" + std::string(spelled) + "' requires a value";
           return r;
         }
         level = argv[++i];

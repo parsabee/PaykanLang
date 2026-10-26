@@ -2638,3 +2638,43 @@ TEST(Driver, EmitOptionsWriteToTheOutputFile) {
   EXPECT_EQ(slurp(dir / "hello.pkn"), kHello);
   std::filesystem::remove_all(dir);
 }
+
+// Malformed command lines get errors that say what is wrong (finding 74):
+// an option is named as it was spelled, `--emit-mlir` takes a stage, and
+// only -O, -O<n> and -O=<n> are an optimization level.
+TEST(Driver, MalformedCommandLinesAreReportedAsWritten) {
+  auto src = writeTmp("fn main() -> int { return 0; }");
+  const std::vector<std::pair<std::string, std::string>> cases = {
+      {"--emit-mlir " + src, "option '--emit-mlir' needs a stage: "
+                             "--emit-mlir=<stage> (pir, scf, llvm or emitc)"},
+      {"-emit-mlir", "option '-emit-mlir' needs a stage: --emit-mlir=<stage> "
+                     "(pir, scf, llvm or emitc)"},
+      {"--Output " + src, "unknown command line argument '--Output'"},
+      {"-Ofast " + src, "unknown command line argument '-Ofast'"},
+      {"build " + src + " -o ''", "option '-o' requires a value"},
+      {"--frontend= " + src, "option '--frontend' requires a value"},
+      {"--check-only " + src + " --O", "option '--O' requires a value"},
+      {"--emit-pkm " + src + " extra",
+       "unexpected argument 'extra' (--emit-pkm takes one file and no "
+       "program arguments)"},
+      {"pkm dump a.pkm b.pkm",
+       "unexpected argument 'b.pkm' (`pkm dump` takes one module file)"}};
+  for (const auto &[args, message] : cases) {
+    auto [rc, out] = run(std::string(kPaykan) + " " + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_EQ(out.find("paykan: " + message + ". Try: '"), 0U)
+        << args << ": " << out;
+  }
+  // The space form with a stage, and the levels, still work.
+  EXPECT_EQ(run(std::string(kPaykan) + " --emit-mlir pir " + src +
+                " > /dev/null 2>&1")
+                .exitCode,
+            hasBackend() ? 0 : 1);
+  for (const char *level : {"-O", "-O0", "-O=1", "--O2"}) {
+    auto [rc, out] =
+        run(std::string(kPaykan) + " --check-only " + level +
+            (std::string(level) == "-O" ? " 3 " : " ") + src + " 2>&1");
+    EXPECT_EQ(rc, 0) << level << ": " << out;
+  }
+  std::filesystem::remove(src);
+}

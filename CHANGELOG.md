@@ -1028,6 +1028,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed with `paykan: cannot open ''`: the `pkm` command ran before the information
   options, which it took for a module file's.  They now answer after `pkm` as they do
   without it, as `pkm --help` already did.
+- Malformed command lines got misleading errors: `--emit-mlir hello.pkn` took the file for
+  the stage and said `no source file specified`, `--Output hello.pkn` said `invalid
+  optimization level 'utput'`, and `build hello.pkn -o ""` said `option '--o' requires a
+  value`.  `--emit-mlir <stage>` now takes only a stage's name (``option '--emit-mlir'
+  needs a stage: --emit-mlir=<stage> (pir, scf, llvm or emitc)``), only `-O`, `-O<n>` and
+  `-O=<n>` are an optimization level (`unknown command line argument '--Output'`), and a
+  message names an option as it was spelled (`option '-o' requires a value`).
 
 ## [0.2.0] - 2026-10-20
 
