@@ -67,6 +67,7 @@ under `run` or `--check-only`, `--section` outside `pkm dump` or `--track-heap` 
 | `--verbose` | print one line per imported module on standard error: where it came from (its source, a cache entry, a prebuilt file) and why a cache entry was not used; and one line per cache entry written |
 | `--stats` | print what the compiler's passes over PIR did on standard error, once the last of them ran: the [transfers](16-memory.md#ownership-transfers) the moves at last use made and the retains and releases they removed, and the retains and releases the [reference-count elimination](16-memory.md#reference-counts-the-compiler-removes) removed, in the program and in the modules built from source in this run ([PIR](../pir.md#12-passes)) |
 | `--object=<files>` | link these object files or archives (comma-separated; repeatable): they define the program's `native fn`s ([Native functions](03-functions.md#native-functions)) |
+| `--trace-parser`, `--trace-scanner` | a frontend that has debugging traces prints them on standard error while it parses, and the command goes on as without them; the built-in frontend has none, so with it they change nothing |
 | `--` | ends `paykan`'s options: a file name starting with `-` can follow |
 
 ### Looking inside the compiler
@@ -88,7 +89,6 @@ may be given:
 | `--emit-ast` | the parsed program in the AST interchange format ([AST format](../plugins/ast-format.md)) |
 | `--dump-ast` | the parsed program as a readable tree |
 | `--dump-tokens` | the token stream, for frontends that support it |
-| `--trace-parser`, `--trace-scanner` | the frontend's debugging traces, if it has them |
 
 `--emit-pir` is a good way to see what the compiler does with your code, including the
 reference counting it inserts:
@@ -176,17 +176,19 @@ against. An installed `paykan` finds it next to itself (`../lib` and `../include
 
 Compiling a program writes a `.paykan_cache/` directory in the source root. Each imported
 module's compiled form is cached there as a `.pkm` module file (`a::b` under
-`.paykan_cache/a/b.pkm`): its interface for the type checker and its PIR for the backends,
-with a manifest recording the compiler that wrote it, the source it was built from and the
-interface of every module it imports. On the next run an entry is used when all of those
+`.paykan_cache/a/b.pkm`): its interface for the type checker, its code compiled by the
+backend (LLVM bitcode, for the mlir backend) with the PIR that declares it, and a manifest
+recording the compiler that wrote it, the source it was built from and the interface of
+every module it imports. On the next run an entry is used when all of those
 are unchanged and the rest is recompiled, so editing `main.pkn` in a large project does not
 recompile every library module, editing a function body recompiles one module, and changing
 a class or a signature also recompiles the modules that use it. A module's entry holds its
 generic templates too, and its own copies of the instantiations of other modules' templates
 it uses (`collections::List<int>`), so editing a generic body recompiles every module that
-imports its module, directly or not. The mlir backend also caches each imported module's LLVM IR there, as bitcode
-(`.paykan_cache/a/b.bc`), and translates the module again only when the part of it the
-program uses or the compiler changed.
+imports its module, directly or not. Those copies stay PIR in the entry, and the mlir
+backend caches their LLVM IR there too, as bitcode (`.paykan_cache/a/b.bc`, and
+`.paykan_cache/@system/io.bc` for `::io`), translating them again only when the part of
+them the program uses or the compiler changed.
 
 The cache is safe to share and to delete:
 
