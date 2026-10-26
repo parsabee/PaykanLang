@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace paykan::ast::interchange {
@@ -85,35 +86,7 @@ private:
        << l.getLineEnd() << ":" << l.getColumnEnd();
   }
 
-  void str(const std::string &s) {
-    static const char hex[] = "0123456789abcdef";
-    OS << " \"";
-    for (unsigned char c : s) {
-      switch (c) {
-      case '"':
-        OS << "\\\"";
-        break;
-      case '\\':
-        OS << "\\\\";
-        break;
-      case '\n':
-        OS << "\\n";
-        break;
-      case '\t':
-        OS << "\\t";
-        break;
-      case '\r':
-        OS << "\\r";
-        break;
-      default:
-        if (c < 0x20 || c >= 0x7f)
-          OS << "\\x" << hex[c >> 4] << hex[c & 0xf];
-        else
-          OS << static_cast<char>(c);
-      }
-    }
-    OS << "\"";
-  }
+  void str(const std::string &s) { OS << " " << quote(s); }
   void sym(const char *s) { OS << " " << s; }
   void none() { OS << " _"; }
 
@@ -815,6 +788,39 @@ bool write(const TranslationUnit &unit, std::ostream &os, std::string &error) {
   bool ok = w.unit(unit);
   error = w.Error;
   return ok;
+}
+
+std::string quote(std::string_view s) {
+  static const char hex[] = "0123456789abcdef";
+  std::string out = "\"";
+  for (unsigned char c : s) {
+    switch (c) {
+    case '"':
+      out += "\\\"";
+      break;
+    case '\\':
+      out += "\\\\";
+      break;
+    case '\n':
+      out += "\\n";
+      break;
+    case '\t':
+      out += "\\t";
+      break;
+    case '\r':
+      out += "\\r";
+      break;
+    default:
+      if (c < 0x20 || c >= 0x7f) {
+        out += "\\x";
+        out += hex[c >> 4];
+        out += hex[c & 0xf];
+      } else {
+        out += static_cast<char>(c);
+      }
+    }
+  }
+  return out + "\"";
 }
 
 } // namespace paykan::ast::interchange

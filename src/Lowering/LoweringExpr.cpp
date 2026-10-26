@@ -21,10 +21,94 @@ using pir::Type;
 // -- Dispatch
 
 Val ModuleLowering::ExprEmitter::visit(ast::Expr *node) {
+  if (!ChainValues.empty()) {
+    auto emitted = ChainValues.find(node);
+    if (emitted != ChainValues.end()) {
+      Val v = emitted->second;
+      ChainValues.erase(emitted);
+      return v;
+    }
+  }
+  emitChainBelow(node);
   Val v = ast::ExprVisitor<ExprEmitter, Val>::visit(node);
+  assert(!ChainValues.count(visitedFirst(node)) &&
+         "a chain link's visitor emits the link it visits first");
   if (!v || !isOptionalWrap(node))
     return v;
   return L.emitSome(v, node->getCoercedType());
+}
+
+ast::Expr *ModuleLowering::ExprEmitter::visitedFirst(ast::Expr *e) {
+  // As visitBinaryExpr: `==` and `!=` may compare in place.
+  if (auto *b = ast::dyn_cast<ast::BinaryExpr>(e))
+    return b->getOpcode() != ast::BinaryOpcode::Eq &&
+                   b->getOpcode() != ast::BinaryOpcode::Ne
+               ? b->getLHS()
+               : nullptr;
+  // As visitMethodCallExpr, branch by branch.
+  if (auto *m = ast::dyn_cast<ast::MethodCallExpr>(e)) {
+    ast::Expr *recv = m->getReceiver();
+    ast::Type *ty = recv->getResolvedType();
+    if (!ty)
+      return nullptr;
+    // A field's function value: in a struct's bytes, or in an object.
+    if (m->isFieldCall())
+      return L.getExprStructType(recv) ? L.memValueVisitsFirst(recv) : recv;
+    if (ast::isa<ast::SliceType>(ty))
+      return nullptr;
+    if (ast::isa<ast::FixedArrayType>(ty))
+      return ast::isa<ast::Identifier>(recv) ? nullptr
+                                             : L.memValueVisitsFirst(recv);
+    if (L.getExprStructType(recv) && m->getMethodName() != kMethodToString)
+      return L.memValueVisitsFirst(recv);
+    if ((ast::isa<ast::OptionalType>(ty) &&
+         m->getMethodName() == kMethodToString) ||
+        ast::isa<ast::TupleType>(ty) || ast::isa<ast::EnumType>(ty))
+      return ast::isMemType(ty) ? L.memValueVisitsFirst(recv) : recv;
+    // A builtin type's method, or a class's (emitReceiver).
+    return recv;
+  }
+  // As lowerMemberAccessExpr: a field held in memory is its address; a
+  // struct's field is read in place, in its bytes; a class's, in its object.
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+    if (ast::isMemType(ma->getResolvedType()))
+      return L.memValueVisitsFirst(ma);
+    return L.getExprStructType(ma->getReceiver())
+               ? L.memValueVisitsFirst(ma->getReceiver())
+               : ma->getReceiver();
+  }
+  // As visitTupleIndexExpr: an element in the tuple's bytes.
+  if (auto *t = ast::dyn_cast<ast::TupleIndexExpr>(e))
+    return L.memValueVisitsFirst(
+        ast::isMemType(t->getResolvedType()) ? t : t->getTuple());
+  // As visitSubscriptExpr: an element in a fixed-size array's or a slice's
+  // bytes; a string's character, of the string (emitReceiver).
+  if (auto *s = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    ast::Type *arrTy = s->getArray()->getResolvedType();
+    if (!ast::dyn_cast<ast::FixedArrayType>(arrTy) &&
+        !ast::dyn_cast<ast::SliceType>(arrTy))
+      return s->getArray();
+    return L.memValueVisitsFirst(
+        ast::isMemType(s->getResolvedType()) ? s : s->getArray());
+  }
+  // As visitCallValueExpr: the function value in place.
+  if (auto *c = ast::dyn_cast<ast::CallValueExpr>(e))
+    return L.memValueVisitsFirst(c->getCallee());
+  return nullptr;
+}
+
+void ModuleLowering::ExprEmitter::emitChainBelow(ast::Expr *e) {
+  std::vector<ast::Expr *> links;
+  for (ast::Expr *x = visitedFirst(e);
+       x && ast::chainOperand(x) && !ChainValues.count(x); x = visitedFirst(x))
+    links.push_back(x);
+  if (links.empty())
+    return;
+  // Each link is taken as the visitor of the one above it would take it.
+  const bool wantAddress = std::exchange(WantAddress, false);
+  for (auto it = links.rbegin(); it != links.rend(); ++it)
+    ChainValues[*it] = visit(*it);
+  WantAddress = wantAddress;
 }
 
 // -- Literals
@@ -272,10 +356,10 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
 
 Val ModuleLowering::ExprEmitter::emitShortCircuit(ast::BinaryExpr *node,
                                                   bool isAnd) {
-  pir::LocalId tmp = L.B.addLocal(isAnd ? "and" : "or", Type::Bool);
   Val lhs = visit(node->getLHS());
   if (!lhs)
     return Val();
+  pir::LocalId tmp = L.B.addLocal(isAnd ? "and" : "or", Type::Bool);
   pir::If *s = L.B.openIf(lhs, true);
   // and: lhs ? rhs : false        or: lhs ? true : rhs
   L.B.enter(*s->Then);
@@ -897,21 +981,11 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     ast::MethodCallExpr *node) {
   const bool wantAddress = std::exchange(WantAddress, false);
   ast::Type *recvResolved = node->getReceiver()->getResolvedType();
-  // `obj.cb(args)` with `cb` a field of function type: the field's closure,
-  // borrowed for the call (the receiver, kept for the call, holds it).
-  if (node->isFieldCall()) {
-    ast::Type *fieldTy = nullptr;
-    if (auto *ct = ast::dyn_cast<ast::ClassType>(recvResolved))
-      fieldTy = ct->findField(node->getMethodName());
-    else if (auto *st = ast::dyn_cast<ast::StructType>(recvResolved))
-      fieldTy = st->findField(node->getMethodName());
-    auto *ma = L.ASTCtx.make<ast::MemberAccessExpr>(
-        node->getLocation(), node->getReceiver(),
-        L.ASTCtx.intern(node->getMethodName()));
-    ma->setResolvedType(fieldTy);
-    return L.emitFunctionValueCall(ma, node->getArguments(),
-                                   node->getResolvedType());
-  }
+  // Each kind of call in a function of its own, so that the frame a call
+  // in a call's arguments recurses through holds only its kind's locals.
+  // `obj.cb(args)` with `cb` a field of function type.
+  if (node->isFieldCall())
+    return emitFieldCall(node);
   // A fixed-size array's `len()`: its length.  An element receiver is still
   // evaluated, for its index and its bounds check.
   if (ast::dyn_cast<ast::SliceType>(recvResolved))
@@ -924,22 +998,52 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     L.releaseMemTemps(mark);
     return Val::i64(ft->getLength());
   }
-  // `n.hash()` on an int, bool or char (the builtin `Hashable`): the
-  // runtime's hash of its value, the char's code or the bool's 0 or 1.
-  if (recvResolved && ast::isa<ast::BuiltinType>(recvResolved) &&
-      node->getMethodName() == kMethodHash) {
-    Val v = visit(node->getReceiver());
-    if (!v)
-      return Val();
-    if (v.Ty != Type::I64)
-      v = L.B.cast(v, Type::I64, "hash.ext");
-    const pir::Function &rt = L.declareRuntime(kPaykanIntHash);
-    return L.B.call(rt.Name, rt.Sig, {v}, "hash");
-  }
+  // `x.hash()` on an int, bool, char or Str (the builtin `Hashable`).
+  if (recvResolved && node->getMethodName() == kMethodHash &&
+      (ast::isa<ast::BuiltinType>(recvResolved) ||
+       recvResolved == L.ASTCtx.getStrTy()))
+    return emitHashCall(node);
+  // A struct's method, called directly on the receiver's storage
+  // (LoweringStruct.cpp); its `toString()` is the builtin one, below.
+  if (auto *st = L.getExprStructType(node->getReceiver());
+      st && node->getMethodName() != kMethodToString)
+    return emitStructMethodCall(node, st, wantAddress);
+  // `o.toString()` on an optional (the builtin `Show`).
+  if (ast::isa<ast::OptionalType>(recvResolved) &&
+      node->getMethodName() == kMethodToString)
+    return emitOptionalToStringCall(node);
+  // `t.toString()` on a tuple, a struct or an enum, `n.toString()` on an
+  // int, float, bool or char (the builtin `Show`).
+  if (ast::isa<ast::TupleType>(recvResolved) ||
+      ast::isa<ast::EnumType>(recvResolved) ||
+      (recvResolved && ast::isa<ast::BuiltinType>(recvResolved)))
+    return emitShowCall(node);
+  return emitClassMethodCall(node, wantAddress);
+}
+
+// `obj.cb(args)` with `cb` a field of function type: the field's closure,
+// borrowed for the call (the receiver, kept for the call, holds it)
+// (visitMethodCallExpr).
+Val ModuleLowering::ExprEmitter::emitFieldCall(ast::MethodCallExpr *node) {
+  ast::Type *recvResolved = node->getReceiver()->getResolvedType();
+  ast::Type *fieldTy = nullptr;
+  if (auto *ct = ast::dyn_cast<ast::ClassType>(recvResolved))
+    fieldTy = ct->findField(node->getMethodName());
+  else if (auto *st = ast::dyn_cast<ast::StructType>(recvResolved))
+    fieldTy = st->findField(node->getMethodName());
+  auto *ma = L.ASTCtx.make<ast::MemberAccessExpr>(
+      node->getLocation(), node->getReceiver(),
+      L.ASTCtx.intern(node->getMethodName()));
+  ma->setResolvedType(fieldTy);
+  return L.emitFunctionValueCall(ma, node->getArguments(),
+                                 node->getResolvedType());
+}
+
+// `x.hash()` (the builtin `Hashable`) (visitMethodCallExpr).
+Val ModuleLowering::ExprEmitter::emitHashCall(ast::MethodCallExpr *node) {
   // `s.hash()` on a Str: the runtime's hash of its bytes.  Str is final, so
   // the call is direct; a fresh temporary receiver is released after it.
-  if (recvResolved == L.ASTCtx.getStrTy() &&
-      node->getMethodName() == kMethodHash) {
+  if (node->getReceiver()->getResolvedType() == L.ASTCtx.getStrTy()) {
     Receiver receiver = L.emitReceiver(node->getReceiver());
     if (!receiver)
       return Val();
@@ -948,85 +1052,84 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
     L.releaseIfOwned(receiver.Owned);
     return h;
   }
-  // A struct's method, called directly on the receiver's storage
-  // (LoweringStruct.cpp); its `toString()` is the builtin one, below.
-  if (auto *st = L.getExprStructType(node->getReceiver());
-      st && node->getMethodName() != kMethodToString)
-    return emitStructMethodCall(node, st, wantAddress);
-  // `o.toString()` on an optional (the builtin `Show`): "None", or the
-  // value's text, as a fresh box like any method's `Str` result.
-  if (ast::isa<ast::OptionalType>(recvResolved) &&
-      node->getMethodName() == kMethodToString) {
-    if (ast::isMemOptional(recvResolved)) {
-      // A tuple's, a struct's or a tagged union's, in place: its presence
-      // flag, then its layout's text.
-      size_t mark = L.MemTemps.size();
-      Val addr = L.emitMemAddress(node->getReceiver());
-      if (!addr)
-        return Val();
-      ast::Type *value = ast::stripOptional(recvResolved);
-      pir::LocalId text = L.B.addLocal("opt.str", Type::Box);
-      pir::If *s = L.B.openIf(L.emitMemOptionalIsNone(addr, recvResolved),
-                              /*withElse=*/true);
-      L.B.enter(*s->Then);
-      L.B.store(text,
-                L.emitSharedNew(L.callRuntime(kPaykanStringNew,
-                                              {L.internString(kNoneText),
-                                               Val::i64(static_cast<int64_t>(
-                                                   std::strlen(kNoneText)))},
-                                              "opt.str"),
-                                "str.shared"));
-      L.B.leave();
-      L.B.enter(*s->Else);
-      Val payload =
-          L.B.ptrAdd(addr, Val::i64(L.memOptionalPayloadOffset(recvResolved)),
-                     "opt.value.addr");
-      Val raw;
-      if (auto *et = ast::dyn_cast<ast::EnumType>(value))
-        raw = L.emitEnumToStringAt(payload, et);
-      else
-        raw = L.callRuntime(
-            ast::isa<ast::StructType>(value) ? kPaykanStructToString
-                                             : kPaykanTupleToString,
-            {payload, L.emitTupleLayout(ast::cast<ast::TupleType>(value))},
-            "tup.str");
-      L.B.store(text, L.emitSharedNew(raw, "str.shared"));
-      L.B.leave();
-      Val str = L.B.load(text, "opt.str");
-      L.releaseMemTemps(mark);
-      return str;
-    }
-    if (ast::isValueOptional(recvResolved)) {
-      Val v = visit(node->getReceiver());
-      if (!v)
-        return Val();
-      return L.emitSharedNew(L.emitOptionalToString(v, recvResolved),
-                             "str.shared");
-    }
-    Receiver receiver = L.emitReceiver(node->getReceiver());
-    if (!receiver)
+  // `n.hash()` on an int, bool or char (the builtin `Hashable`): the
+  // runtime's hash of its value, the char's code or the bool's 0 or 1.
+  Val v = visit(node->getReceiver());
+  if (!v)
+    return Val();
+  if (v.Ty != Type::I64)
+    v = L.B.cast(v, Type::I64, "hash.ext");
+  const pir::Function &rt = L.declareRuntime(kPaykanIntHash);
+  return L.B.call(rt.Name, rt.Sig, {v}, "hash");
+}
+
+// `o.toString()` on an optional (the builtin `Show`): "None", or the value's
+// text, as a fresh box like any method's `Str` result (visitMethodCallExpr).
+Val ModuleLowering::ExprEmitter::emitOptionalToStringCall(
+    ast::MethodCallExpr *node) {
+  ast::Type *recvResolved = node->getReceiver()->getResolvedType();
+  if (ast::isMemOptional(recvResolved)) {
+    // A tuple's, a struct's or a tagged union's, in place: its presence
+    // flag, then its layout's text.
+    size_t mark = L.MemTemps.size();
+    Val addr = L.emitMemAddress(node->getReceiver());
+    if (!addr)
       return Val();
-    const pir::Function &toString = L.declareRuntime(kPaykanObjectToString);
-    Val str = L.B.vcall(L.emitNoneObject(receiver.Raw), "", 1, toString.Sig, {},
-                        "str");
-    L.releaseIfOwned(receiver.Owned);
+    ast::Type *value = ast::stripOptional(recvResolved);
+    pir::LocalId text = L.B.addLocal("opt.str", Type::Box);
+    pir::If *s = L.B.openIf(L.emitMemOptionalIsNone(addr, recvResolved),
+                            /*withElse=*/true);
+    L.B.enter(*s->Then);
+    L.B.store(text,
+              L.emitSharedNew(L.callRuntime(kPaykanStringNew,
+                                            {L.internString(kNoneText),
+                                             Val::i64(static_cast<int64_t>(
+                                                 std::strlen(kNoneText)))},
+                                            "opt.str"),
+                              "str.shared"));
+    L.B.leave();
+    L.B.enter(*s->Else);
+    Val payload =
+        L.B.ptrAdd(addr, Val::i64(L.memOptionalPayloadOffset(recvResolved)),
+                   "opt.value.addr");
+    Val raw;
+    if (auto *et = ast::dyn_cast<ast::EnumType>(value))
+      raw = L.emitEnumToStringAt(payload, et);
+    else
+      raw = L.callRuntime(
+          ast::isa<ast::StructType>(value) ? kPaykanStructToString
+                                           : kPaykanTupleToString,
+          {payload, L.emitTupleLayout(ast::cast<ast::TupleType>(value))},
+          "tup.str");
+    L.B.store(text, L.emitSharedNew(raw, "str.shared"));
+    L.B.leave();
+    Val str = L.B.load(text, "opt.str");
+    L.releaseMemTemps(mark);
     return str;
   }
-  // `t.toString()` on a tuple, a struct or an enum (the builtin `Show`): its
-  // text, as a fresh box like any method's `Str` result.
-  if (ast::isa<ast::TupleType>(recvResolved) ||
-      ast::isa<ast::EnumType>(recvResolved)) {
-    Val str = ast::isa<ast::EnumType>(recvResolved)
-                  ? L.emitEnumToString(node->getReceiver())
-                  : L.emitTupleToString(node->getReceiver());
-    if (!str)
+  if (ast::isValueOptional(recvResolved)) {
+    Val v = visit(node->getReceiver());
+    if (!v)
       return Val();
-    return L.emitSharedNew(str, "str.shared");
+    return L.emitSharedNew(L.emitOptionalToString(v, recvResolved),
+                           "str.shared");
   }
-  // `n.toString()` on an int, float, bool or char (the builtin `Show`): its
-  // `Str` conversion, as a fresh box like any method's `Str` result.
-  if (auto *bt = recvResolved ? ast::dyn_cast<ast::BuiltinType>(recvResolved)
-                              : nullptr) {
+  Receiver receiver = L.emitReceiver(node->getReceiver());
+  if (!receiver)
+    return Val();
+  const pir::Function &toString = L.declareRuntime(kPaykanObjectToString);
+  Val str =
+      L.B.vcall(L.emitNoneObject(receiver.Raw), "", 1, toString.Sig, {}, "str");
+  L.releaseIfOwned(receiver.Owned);
+  return str;
+}
+
+// `t.toString()` on a tuple, a struct or an enum, `n.toString()` on an int,
+// float, bool or char (the builtin `Show`): its text, as a fresh box like any
+// method's `Str` result (visitMethodCallExpr).
+Val ModuleLowering::ExprEmitter::emitShowCall(ast::MethodCallExpr *node) {
+  ast::Type *recvResolved = node->getReceiver()->getResolvedType();
+  if (auto *bt = ast::dyn_cast<ast::BuiltinType>(recvResolved)) {
     Val v = visit(node->getReceiver());
     if (!v)
       return Val();
@@ -1036,7 +1139,18 @@ Val ModuleLowering::ExprEmitter::visitMethodCallExpr(
                        {L.coerceBoolToI64(v, rt.Sig.Params[0])}, "str");
     return L.emitSharedNew(str, "str.shared");
   }
+  Val str = ast::isa<ast::EnumType>(recvResolved)
+                ? L.emitEnumToString(node->getReceiver())
+                : L.emitTupleToString(node->getReceiver());
+  if (!str)
+    return Val();
+  return L.emitSharedNew(str, "str.shared");
+}
 
+// A method of a class, `Str`'s and `Obj`'s included: its slot, or an `impl`
+// method directly (visitMethodCallExpr).
+Val ModuleLowering::ExprEmitter::emitClassMethodCall(ast::MethodCallExpr *node,
+                                                     bool wantAddress) {
   // A fresh temporary receiver is released after the call (the method
   // borrows it).
   Receiver receiver = L.emitReceiver(node->getReceiver());

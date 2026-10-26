@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -168,7 +169,7 @@ TEST(ASTInterchange, ReadsEveryNode) {
       (block
         (decl (var "x" (optional-type (named-type "int")) (none)))
         (decl (var "t" (tuple-type (named-type "int") (named-type "m::T")) (tuple (int 1) (int -2))))
-        (decl (var "g" (generic-type "Box" (named-type "float")) _))
+        (decl (var "g" (generic-type "Box" (named-type "float")) (ident "b")))
         (assign (ident "y") (float 1.5))
         (expr (call "f" (type-args (named-type "bool")) (float inf) (float -inf) (float nan) (float 2e3)))
         (if (bool true) (block (break)) (if (bool false) (block (continue)) (block)))
@@ -448,11 +449,11 @@ TEST(ASTInterchange, RejectsMalformedInput) {
 }
 
 TEST(ASTInterchange, NestingIsBounded) {
-  auto nested = [](unsigned depth) {
-    // (paykan-ast 1 (unit (fn ... (block (expr <depth - 6 unary lists>)))))
+  // (paykan-ast 1 (unit (fn ... (block (expr <unary> (int 1)))))): every
+  // unary is a level of nesting, as the function's body is.
+  auto nested = [](unsigned unary) {
     std::string text = "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) "
                        "_ (block (expr ";
-    unsigned unary = depth - 6;
     for (unsigned i = 0; i < unary; ++i)
       text += "(unary neg ";
     text += "(int 1)";
@@ -461,11 +462,351 @@ TEST(ASTInterchange, NestingIsBounded) {
   };
   ast::ASTContext ctx;
   std::string error;
-  EXPECT_NE(read(nested(ic::kMaxDepth - 1), ctx, error), nullptr) << error;
-  EXPECT_EQ(read(nested(ic::kMaxDepth + 10), ctx, error), nullptr);
-  EXPECT_NE(error.find("nesting too deep (more than 2048 levels)"),
+  // The text is at most kMaxDepth lists deep...
+  EXPECT_EQ(read(nested(ic::kMaxDepth), ctx, error), nullptr);
+  EXPECT_NE(error.find("nesting too deep (more than 4112 levels)"),
             std::string::npos)
       << error;
+  // ... and the AST the frontends' 512 levels.
+  EXPECT_NE(read(nested(511), ctx, error), nullptr) << error;
+  EXPECT_EQ(read(nested(512), ctx, error), nullptr);
+  EXPECT_NE(error.find("nesting too deep (more than 512 levels)"),
+            std::string::npos)
+      << error;
+}
+
+namespace {
+
+/// The program @p source parsed by the recursive-descent frontend: its
+/// driver, which holds the AST, or null after a syntax error.
+std::unique_ptr<parser::ParserDriver> parseSource(const std::string &source) {
+  static int counter = 0;
+  auto path = std::filesystem::temp_directory_path() /
+              ("paykan_interchange_" + std::to_string(::getpid()) + "_" +
+               std::to_string(counter++) + ".pkn");
+  std::ofstream(path) << source;
+  auto driver = std::make_unique<parser::ParserDriver>("recursive-descent");
+  std::ostringstream quiet;
+  sema::DiagEngine diag(quiet);
+  driver->setDiagEngine(&diag);
+  const int rc = driver->parseFile(path.string());
+  std::filesystem::remove(path);
+  return rc == 0 ? std::move(driver) : nullptr;
+}
+
+std::string repeat(const std::string &s, int n) {
+  std::string out;
+  for (int i = 0; i < n; ++i)
+    out += s;
+  return out;
+}
+
+/// `n` nested @p open ... @p close around @p inner.
+std::string nest(const std::string &open, const std::string &inner,
+                 const std::string &close, int n) {
+  return repeat(open, n) + inner + repeat(close, n);
+}
+
+std::string mainOf(const std::string &body) {
+  return "fn main() -> int { " + body + " return 0; }\n";
+}
+
+std::string mainAst(const std::string &stmt) {
+  return "(paykan-ast 1 (unit (fn \"main\" (type-params) (params) "
+         "(named-type \"int\") (block " +
+         stmt + " (return (int 0))))))";
+}
+
+const std::string kInt = "(named-type \"int\")";
+
+} // namespace
+
+// The reader holds the AST to the frontends' nesting limit and counts the
+// levels the recursive-descent frontend counts (docs/grammar.md section 9):
+// each construct parsed at the limit reads back, and the AST one level
+// deeper is rejected with the frontends' message.  `n` levels inside the
+// function's body, as GrammarEdgeTests counts them.
+TEST(ASTInterchange, NestingLimitIsTheFrontends) {
+  struct Kind {
+    const char *What;
+    std::string (*Source)(int);
+    std::string (*Ast)(int);
+  };
+  const Kind kinds[] = {
+      {"blocks", [](int n) { return mainOf(nest("{ ", "", "} ", n)); },
+       [](int n) { return mainAst(nest("(block ", "", ")", n)); }},
+      {"prefix operators",
+       [](int n) { return mainOf("x = " + repeat("-", n) + "a;"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(unary neg ", "(ident \"a\")", ")", n) + ")");
+       }},
+      {"calls",
+       [](int n) { return mainOf("x = " + nest("f(", "1", ")", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(call \"f\" (type-args) ", "(int 1)", ")", n) +
+                        ")");
+       }},
+      {"subscripts",
+       [](int n) { return mainOf("x = " + nest("a[", "1", "]", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(subscript (ident \"a\") ", "(int 1)", ")", n) +
+                        ")");
+       }},
+      {"lambda bodies",
+       [](int n) { return mainOf("f = " + repeat("fn() => ", n) + "0;"); },
+       [](int n) {
+         return mainAst("(assign (ident \"f\") " +
+                        nest("(lambda (params) _ (block (return ", "(int 0)",
+                             ")) (inferred))", n) +
+                        ")");
+       }},
+      {"expression bodies",
+       [](int n) {
+         return "fn f() => " + repeat("-", n) + "1;\n" + mainOf("");
+       },
+       [](int n) {
+         return "(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                "(block (return " +
+                nest("(unary neg ", "(int 1)", ")", n) + ")) (inferred))))";
+       }},
+      {"function-type results",
+       [](int n) { return mainOf("x: " + repeat("() -> ", n) + "int = f;"); },
+       [](int n) {
+         return mainAst("(decl (var \"x\" " +
+                        nest("(fn-type (params) ", kInt, ")", n) +
+                        " (ident \"f\")))");
+       }},
+      {"lambda result types",
+       [](int n) {
+         return mainOf("f = fn() -> " + repeat("() -> ", n - 1) + "int => g;");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"f\") (lambda (params) " +
+                        nest("(fn-type (params) ", kInt, ")", n - 1) +
+                        " (block (return (ident \"g\")))))");
+       }},
+      {"array type suffixes",
+       [](int n) { return mainOf("x: int" + repeat("[]", n) + " = y;"); },
+       [](int n) {
+         return mainAst("(decl (var \"x\" " +
+                        nest("(array-type ", kInt, ")", n) +
+                        " (ident \"y\")))");
+       }},
+      {"fixed-size array suffixes",
+       [](int n) { return mainOf("x: int" + repeat("[1]", n) + " = y;"); },
+       [](int n) {
+         return mainAst("(decl (var \"x\" " +
+                        nest("(fixed-array-type ", kInt, " 1)", n) +
+                        " (ident \"y\")))");
+       }},
+      {"suffixes of a type application",
+       [](int n) {
+         return mainOf("x: B<int>" + repeat("[]", n - 1) + " = y;");
+       },
+       [](int n) {
+         return mainAst("(decl (var \"x\" " +
+                        nest("(array-type ",
+                             "(generic-type \"B\" " + kInt + ")", ")", n - 1) +
+                        " (ident \"y\")))");
+       }},
+      {"elif chains",
+       [](int n) { return mainOf("if a { }" + repeat(" elif a { }", n - 1)); },
+       [](int n) {
+         return mainAst(nest("(if (ident \"a\") (block) ", "_", ")", n));
+       }},
+      // An operand the grammar writes in parentheses is the level its
+      // parenthesis is, in the AST, which has none.
+      {"right operands",
+       [](int n) {
+         return mainOf("x = " + nest("a + (", "a + a", ")", n) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(binary add (ident \"a\") ",
+                             "(binary add (ident \"a\") (ident \"a\"))", ")",
+                             n) +
+                        ")");
+       }},
+      {"right operands of &&",
+       [](int n) {
+         return mainOf("x = " + nest("a && (", "a && a", ")", n) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(binary and (ident \"a\") ",
+                             "(binary and (ident \"a\") (ident \"a\"))", ")",
+                             n) +
+                        ")");
+       }},
+      {"comparisons of comparisons",
+       [](int n) {
+         return mainOf("x = " + nest("(", "a == b", ") == b", n) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(binary eq ",
+                             "(binary eq (ident \"a\") (ident \"b\"))",
+                             " (ident \"b\"))", n) +
+                        ")");
+       }},
+      // `-(a + ...)`: the prefix operator and the parenthesis, two levels.
+      {"operations under a prefix operator",
+       [](int n) {
+         return mainOf("x = " + std::string(n % 2 ? "-" : "") +
+                       nest("-(a + ", "a", ")", n / 2) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        std::string(n % 2 ? "(unary neg " : "") +
+                        nest("(unary neg (binary add (ident \"a\") ",
+                             "(ident \"a\")", "))", n / 2) +
+                        (n % 2 ? ")" : "") + ")");
+       }},
+      {"operations a suffix applies to",
+       [](int n) {
+         return mainOf("x = " + nest("(a + ", "a", ").m()", n) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(method-call (binary add (ident \"a\") ",
+                             "(ident \"a\")", ") \"m\")", n) +
+                        ")");
+       }},
+      // `if (if a then 1 else 2) then 1 else 2`: the conditional and the
+      // parenthesis, two levels; an even count is in a block.
+      {"conditionals as conditions",
+       [](int n) {
+         const int k = (n + 1 - n % 2) / 2;
+         const std::string x =
+             "x = " +
+             nest("if (", "if a then 1 else 2", ") then 1 else 2", k - 1) + ";";
+         return mainOf(n % 2 ? x : "{ " + x + " }");
+       },
+       [](int n) {
+         const int k = (n + 1 - n % 2) / 2;
+         const std::string x =
+             "(assign (ident \"x\") " +
+             nest("(ternary ", "(ternary (ident \"a\") (int 1) (int 2))",
+                  " (int 1) (int 2))", k - 1) +
+             ")";
+         return mainAst(n % 2 ? x : "(block " + x + ")");
+       }},
+  };
+  for (const Kind &k : kinds) {
+    auto parsed = parseSource(k.Source(511));
+    ASSERT_NE(parsed, nullptr) << k.What;
+    EXPECT_EQ(parseSource(k.Source(512)), nullptr) << k.What;
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_NE(read(write(*parsed->getRoot()), ctx, error), nullptr)
+        << k.What << ": " << error;
+    EXPECT_NE(read(k.Ast(511), ctx, error), nullptr) << k.What << ": " << error;
+    EXPECT_EQ(read(k.Ast(512), ctx, error), nullptr) << k.What;
+    EXPECT_NE(error.find("nesting too deep (more than 512 levels)"),
+              std::string::npos)
+        << k.What << ": " << error;
+  }
+}
+
+// The reader holds the AST to the frontends' chain limit too, counting the
+// links the recursive-descent frontend counts: each chain parsed at the
+// limit, 2048 links, reads back, and the AST one link longer is rejected
+// with the frontends' message.
+TEST(ASTInterchange, ChainLimitIsTheFrontends) {
+  struct Kind {
+    const char *What;
+    std::string (*Source)(int);
+    std::string (*Ast)(int);
+  };
+  const Kind kinds[] = {
+      {"+ chains",
+       [](int n) { return mainOf("x = a" + repeat(" + 1", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(binary add ", "(ident \"a\")", " (int 1))", n) +
+                        ")");
+       }},
+      {"method calls",
+       [](int n) { return mainOf("x = a" + repeat(".m()", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(method-call ", "(ident \"a\")", " \"m\")", n) +
+                        ")");
+       }},
+      {"fields", [](int n) { return mainOf("x = a" + repeat(".f", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(member ", "(ident \"a\")", " \"f\")", n) + ")");
+       }},
+      {"tuple indexes",
+       [](int n) { return mainOf("x = a" + repeat(".0", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(tuple-index ", "(ident \"a\")", " 0)", n) + ")");
+       }},
+      {"subscripts",
+       [](int n) { return mainOf("x = a" + repeat("[1]", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(subscript ", "(ident \"a\")", " (int 1))", n) +
+                        ")");
+       }},
+      {"calls of function values",
+       [](int n) { return mainOf("x = (a)" + repeat("()", n) + ";"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(call-value ", "(ident \"a\")", ")", n) + ")");
+       }},
+      {"fields assigned to",
+       [](int n) { return mainOf("a" + repeat(".f", n) + " = 1;"); },
+       [](int n) {
+         return mainAst("(member-assign " +
+                        nest("(member ", "(ident \"a\")", " \"f\")", n - 1) +
+                        " \"f\" (int 1))");
+       }},
+      {"elements assigned to",
+       [](int n) { return mainOf("a" + repeat("[1]", n) + " = 1;"); },
+       [](int n) {
+         return mainAst(
+             "(subscript-assign " +
+             nest("(subscript ", "(ident \"a\")", " (int 1))", n - 1) +
+             " (int 1) (int 1))");
+       }},
+  };
+  for (const Kind &k : kinds) {
+    auto parsed = parseSource(k.Source(2048));
+    ASSERT_NE(parsed, nullptr) << k.What;
+    EXPECT_EQ(parseSource(k.Source(2049)), nullptr) << k.What;
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_NE(read(write(*parsed->getRoot()), ctx, error), nullptr)
+        << k.What << ": " << error;
+    EXPECT_NE(read(k.Ast(2048), ctx, error), nullptr)
+        << k.What << ": " << error;
+    EXPECT_EQ(read(k.Ast(2049), ctx, error), nullptr) << k.What;
+    EXPECT_NE(error.find("nesting too deep (more than 2048 levels)"),
+              std::string::npos)
+        << k.What << ": " << error;
+  }
+}
+
+// The deepest AST within the frontends' limits, a chain of 2048 links in
+// 511 levels of lambdas declared in blocks (four lists a level), is written
+// and read back: kMaxDepth holds it.
+TEST(ASTInterchange, TheDeepestProgramRoundTrips) {
+  auto parsed =
+      parseSource(mainOf(repeat("let f = fn() { ", 511) + "x = a" +
+                         repeat(" + 1", 2048) + ";" + repeat(" };", 511)));
+  ASSERT_NE(parsed, nullptr);
+  const std::string text = write(*parsed->getRoot());
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(write(*back), text);
 }
 
 // A `view fn` ends with `(qual view)`; nothing else qualifies a function.
@@ -767,6 +1108,207 @@ TEST(ASTInterchange, LetLocals) {
       << error;
 }
 
+// A local declaration has an initialiser, as the grammar's has (`x: int;` is
+// not a statement), but a `weak` one, which starts as None.  It was read
+// without one, and a `Str` local was a null reference at run time.  A for
+// loop's variable and a field have none, outside a `decl`.
+TEST(ASTInterchange, ALocalDeclarationHasAnInitialiser) {
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_EQ(read("(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                 "(block (decl (var \"s\" (named-type \"Str\") _))))))",
+                 ctx, error),
+            nullptr);
+  EXPECT_EQ(error, "1:67: a local declaration has an initialiser (only a "
+                   "(weak) one may leave it out)");
+  ast::TranslationUnit *tu =
+      read("(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
+           "(decl (var \"w\" (optional-type (named-type \"Obj\")) _ (weak))) "
+           "(for (var \"i\" _ _) (int 0) (int 3) _ (block))))))",
+           ctx, error);
+  EXPECT_NE(tu, nullptr) << error;
+}
+
+// A value arm's pattern is a literal, as the grammar's is: one of a
+// negative number (`(int -1)`, `(float -2.5)`) included, but not an
+// expression, which failed PIR verification (`switch case %1 is not a
+// constant`) after Sema took it.
+TEST(ASTInterchange, AValueArmsPatternIsALiteral) {
+  const std::string pre = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
+                          "(params) _ (block (match (ident \"x\") (value-arm "
+                          "\"\" ";
+  for (const char *pattern :
+       {"(ident \"k\")", "(binary add (int 1) (int 2))", "(unary neg (int 1))",
+        "(call \"g\" (type-args))"}) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(pre + pattern + " (block)))))))", ctx, error), nullptr)
+        << pattern;
+    EXPECT_EQ(error, "1:94: a value arm's pattern is a literal (int, float, "
+                     "bool, char, string or none)")
+        << pattern;
+  }
+  for (const char *pattern :
+       {"(int -1)", "(int -9223372036854775808)", "(float -2.5)", "(bool true)",
+        "(char 97)", "(string \"s\")", "(none)"}) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_NE(read(pre + pattern + " (block)))))))", ctx, error), nullptr)
+        << pattern << ": " << error;
+  }
+}
+
+// An enum has a variant and a match an arm, as the grammar's have: an enum
+// without one was read and checked, and a match without one ran.
+TEST(ASTInterchange, AnEnumHasAVariantAndAMatchAnArm) {
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_EQ(read("(paykan-ast 1 (unit (enum \"E\") (fn \"f\" (type-params) "
+                 "(params) _ (block))))",
+                 ctx, error),
+            nullptr);
+  EXPECT_EQ(error, "1:21: an enum needs at least one variant");
+  EXPECT_EQ(read("(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ "
+                 "(block (match (ident \"x\"))))))",
+                 ctx, error),
+            nullptr);
+  EXPECT_EQ(error, "1:61: a match needs at least one arm");
+}
+
+// Only a type arm binds the subject: the binding of a value or a wildcard
+// arm is "".  The one on a wildcard arm was dropped (`use of undeclared
+// variable 'w'` where it was used).
+TEST(ASTInterchange, OnlyATypeArmHasABinding) {
+  const std::string pre = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
+                          "(params) _ (block (match (ident \"x\") ";
+  struct Case {
+    const char *Arm;
+    const char *Error;
+  };
+  for (const Case &c :
+       {Case{"(value-arm \"b\" (int 1) (block))",
+             "1:91: (value-arm ...) has no binding: its binding is \"\""},
+        Case{"(wildcard-arm \"w\" (block))",
+             "1:94: (wildcard-arm ...) has no binding: its binding is \"\""}}) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(pre + c.Arm + ")))))", ctx, error), nullptr) << c.Arm;
+    EXPECT_EQ(error, c.Error) << c.Arm;
+  }
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_NE(read(pre + "(type-arm \"b\" (named-type \"Str\") (block)) " +
+                     "(value-arm \"\" (int 1) (block)) " +
+                     "(wildcard-arm \"\" (block)))))))",
+                 ctx, error),
+            nullptr)
+      << error;
+}
+
+// A NAME is what the grammar writes where it stands (docs/grammar.md
+// sections 1 and 5): an identifier, not a keyword; a qualified name only
+// for a callee, a type, an enum, a superclass, an `impl`'s type and an
+// import's base; `typeof(x)` only as an untyped parameter's type; and a
+// tuple index only as an assigned field.  `a b`, `io::x` and `../..` were
+// read, and a plugin could name what no program can (`$::m::_f`).  The
+// compiler's own templates (a `.pkm`'s TMPL section) keep their canonical
+// names.
+TEST(ASTInterchange, NamesAreTheGrammars) {
+  const std::string fn = "(paykan-ast 1 (unit (fn \"f\" (type-params) "
+                         "(params) _ (block ";
+  struct Case {
+    std::string Text;
+    const char *Error;
+  };
+  const Case cases[] = {
+      {fn + "(decl (var \"a b\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"a b\""},
+      {fn + "(decl (var \"match\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"match\""},
+      {fn + "(decl (var \"_\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"_\""},
+      {fn + "(decl (var \"1x\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"1x\""},
+      // Quoted as the format writes it, not with the raw bytes.
+      {fn + "(decl (var \"K\\x00z\\n\\\"\" _ (int 1)))))))",
+       "expected an identifier: the variable's name, not \"K\\x00z\\n\\\"\""},
+      {fn + "(assign (ident \"io::x\") (int 3))))))",
+       "expected an identifier: the name, not \"io::x\""},
+      {fn + "(destructure (targets (target \"io::a\" _) (target \"b\" _)) "
+            "(ident \"t\"))))))",
+       "expected an identifier: the target's name (\"\" for _), not "
+       "\"io::a\""},
+      {fn + "(expr (call \"$rt.panic\" (type-args)))))))",
+       "expected an identifier or a qualified name (a::b): the callee's "
+       "name, not \"$rt.panic\""},
+      {fn + "(expr (call \"$::m::_f\" (type-args)))))))",
+       "expected an identifier or a qualified name (a::b): the callee's "
+       "name, not \"$::m::_f\""},
+      {fn + "(expr (call \"m::\" (type-args)))))))",
+       "expected an identifier or a qualified name (a::b): the callee's "
+       "name, not \"m::\""},
+      {fn + "(member-assign (ident \"t\") \"01\" (int 1))))))",
+       "expected an identifier or a tuple index: the field's name, not "
+       "\"01\""},
+      {fn + "(expr (member (ident \"t\") \"0\"))))))",
+       "expected an identifier: the field's name, not \"0\""},
+      {fn + "(decl (var \"x\" (named-type \"int[3]\") (int 1)))))))",
+       "expected an identifier, a qualified name (a::b) or an untyped "
+       "parameter's typeof(x): the type's name, not \"int[3]\""},
+      {"(paykan-ast 1 (unit (fn \"foo::bar\" (type-params) (params) _ "
+       "(block))))",
+       "expected an identifier: the function's name, not \"foo::bar\""},
+      {"(paykan-ast 1 (unit (fn \"f\" (type-params \"T U\") (params) _ "
+       "(block))))",
+       "expected an identifier or an untyped parameter's typeof(x): a type "
+       "parameter, not \"T U\""},
+      {"(paykan-ast 1 (unit (import true \"\" (module \"io\" \"a::b\"))))",
+       "expected an identifier: the alias, not \"a::b\""},
+      {"(paykan-ast 1 (unit (import false \"../..\" (module \"m\" \"\"))))",
+       "expected an identifier or a qualified name (a::b): the base path, "
+       "not \"../..\""},
+      {"(paykan-ast 1 (unit (import true \"\" (module \"../etc\" \"\"))))",
+       "expected an identifier: the module's name, not \"../etc\""},
+      {"(paykan-ast 1 (unit (class \"C\" \"a b\" (type-params) (fields) "
+       "(methods))))",
+       "expected an identifier or a qualified name (a::b): the superclass, "
+       "not \"a b\""},
+      {"(paykan-ast 1 (unit (enum \"E\" \"A\" \"B-C\")))",
+       "expected an identifier: a variant, not \"B-C\""},
+  };
+  for (const Case &c : cases) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(c.Text, ctx, error), nullptr) << c.Text;
+    EXPECT_NE(error.find(c.Error), std::string::npos)
+        << c.Text << ": " << error;
+  }
+  // What the grammar writes there reads.
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu = read(
+      "(paykan-ast 1 (unit (import false \"a::b\" (module \"m\" \"x\")) "
+      "(class \"C\" \"m::Base\" (type-params) (fields) (methods)) "
+      "(impl \"geo::Point\" (methods)) "
+      "(fn \"g\" (type-params \"typeof(x)\") "
+      "(params (param \"x\" (named-type \"typeof(x)\"))) _ (block)) "
+      "(fn \"f\" (type-params) (params) _ (block "
+      "(decl (var \"_t\" (named-type \"m::T\") (call \"m::f\" (type-args)))) "
+      "(member-assign (ident \"t\") \"0\" (int 1)) "
+      "(member-assign (ident \"t\") \"x9\" (int 1)) "
+      "(expr (enum-value \"m::E\" \"A\"))))))",
+      ctx, error);
+  EXPECT_NE(tu, nullptr) << error;
+  // A template's canonical names are the compiler's own.
+  const std::string tmpl = "(paykan-ast " + kVersion +
+                           " (unit (fn \"f\" (type-params \"T\") (params) _ "
+                           "(block (expr (call \"$::m::_f\" (type-args)))))))";
+  ic::ReadError err;
+  EXPECT_NE(ic::read(tmpl, ctx, err, ic::Origin::Templates), nullptr)
+      << err.str();
+  EXPECT_EQ(ic::read(tmpl, ctx, err), nullptr);
+}
+
 // A `for` loop is its variable as a `var` with no initialiser, the range's
 // ends, the step or `_`, the body, and a trailing `(inclusive)` for `..=`.
 TEST(ASTInterchange, ForLoops) {
@@ -1036,7 +1578,7 @@ TEST(ASTInterchange, WriteRefusesTooDeepATree) {
   std::ostringstream os;
   std::string error;
   EXPECT_FALSE(ic::write(*tu, os, error));
-  EXPECT_EQ(error, "nesting too deep (more than 2048 levels)");
+  EXPECT_EQ(error, "nesting too deep (more than 4112 levels)");
 }
 
 // Only a parsed AST can be written: a type Sema resolves to (an enum type)
@@ -1455,6 +1997,56 @@ TEST(Interchange, NativeAndStaticOnlyWhereTheGrammarHasThem) {
                  "(type-params) (params) _ (block) (qual static)))) "
                  "(fn \"twice\" (type-params) (params) _ (native "
                  "\"twice\"))))",
+                 ctx, error),
+            nullptr)
+      << error;
+}
+
+// Only a free function is generic, as the grammar has it: a class body's
+// method (pure virtual or not), an `impl` block's method and a `static fn`
+// with type parameters of their own get the recursive-descent frontend's
+// error, where they were read and their type parameters ignored.
+TEST(Interchange, OnlyAFreeFunctionIsGeneric) {
+  const std::string method(paykan::frontend::kGenericMethod);
+  const std::string staticFn(paykan::frontend::kGenericStaticFn);
+  struct Case {
+    const char *Text;
+    const std::string &Error;
+  };
+  const Case cases[] = {
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"f\" (type-params \"T\") (params) _ (block))))))",
+       method},
+      {"(paykan-ast 1 (unit (class \"A\" \"\" (type-params) (fields) "
+       "(methods (fn \"f\" (type-params \"T\") (params) _ _)))))",
+       method},
+      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"f\" (type-params "
+       "(bound \"T\" (named-type \"Show\"))) (params) _ (block))))))",
+       method},
+      {"(paykan-ast 1 (unit (impl \"A\" (methods (fn \"id\" (type-params "
+       "\"T\") (params (param \"y\" (named-type \"T\"))) (named-type \"T\") "
+       "(block (return (ident \"y\"))) (qual static))))))",
+       staticFn},
+  };
+  for (const Case &c : cases) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(c.Text, ctx, error), nullptr) << c.Text;
+    EXPECT_NE(error.find(c.Error), std::string::npos) << c.Text << "\n"
+                                                      << error;
+  }
+  // A generic type's methods use its type parameters; a free function's are
+  // its own.
+  ast::ASTContext ctx;
+  std::string error;
+  EXPECT_NE(read("(paykan-ast 1 (unit (class \"Box\" \"\" (type-params \"T\") "
+                 "(fields (var \"v\" (named-type \"T\") _)) (methods)) "
+                 "(impl \"Box\" (type-params \"T\") (methods (fn \"get\" "
+                 "(type-params) (params) (named-type \"T\") (block (return "
+                 "(member (ident \"self\") \"v\"))) (qual view)))) "
+                 "(fn \"id\" (type-params \"T\") (params (param \"x\" "
+                 "(named-type \"T\"))) (named-type \"T\") (block (return "
+                 "(ident \"x\"))))))",
                  ctx, error),
             nullptr)
       << error;

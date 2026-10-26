@@ -207,20 +207,23 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
     emitMemRetain(copy, ty);
     return {copy, /*Temp=*/true};
   }
-  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
-    return {emitFixedElementAddress(se->getArray(), se->getIndex())};
-  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
-    return {emitTupleElementAddress(ti->getTuple(), ti->getIndex())};
+  // An element, or a struct's field, in the bytes of the value it is part
+  // of, at its offset: the whole's address first, then each part's in it,
+  // outward.  A loop, as a chain of parts (`s.a.b.c`, `t.0.1`) may be
+  // thousands long (frontend::kMaxChain).
+  if (wholeOf(e)) {
+    std::vector<ast::Expr *> parts;
+    ast::Expr *whole = e;
+    for (; wholeOf(whole); whole = wholeOf(whole))
+      parts.push_back(whole);
+    Val addr = emitMemAddress(whole);
+    for (auto it = parts.rbegin(); addr && it != parts.rend(); ++it)
+      addr = emitPartAddress(*it, addr);
+    return {addr};
+  }
   // A field, in its object: a call-rooted one (`mk().xs`) is kept until the
-  // consumer is done with the address.  A struct's field is in the struct's
-  // bytes, at its offset, like a tuple's element.
+  // consumer is done with the address.
   if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
-    if (auto *st = getExprStructType(ma->getReceiver())) {
-      int idx = st->fieldIndex(ma->getFieldName());
-      assert(idx >= 0 && "Sema should have verified the field exists");
-      return {
-          emitTupleElementAddress(ma->getReceiver(), static_cast<size_t>(idx))};
-    }
     Receiver recv = emitReceiver(ma->getReceiver(), "obj");
     if (!recv)
       return {};
@@ -269,6 +272,27 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
   reportInternalError("a value held in memory that is not a variable, a "
                       "field, an element, a literal, a conditional or a call");
   return {};
+}
+
+ast::Expr *ModuleLowering::memValueVisitsFirst(ast::Expr *e) {
+  // As emitMemValue, branch by branch.
+  if (isMemOptionalWrap(e) || ast::isa<ast::NoneLiteral>(e) ||
+      isFunctionValueExpr(e) || isVariantExpr(e) ||
+      ast::isa<ast::Identifier>(e))
+    return nullptr;
+  if (wholeOf(e)) {
+    ast::Expr *whole = e;
+    while (wholeOf(whole))
+      whole = wholeOf(whole);
+    return memValueVisitsFirst(whole);
+  }
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return ma->getReceiver();
+  if (ast::isa<ast::CallExpr>(e) || ast::isa<ast::MethodCallExpr>(e) ||
+      ast::isa<ast::CallValueExpr>(e))
+    return e->isInoutResult() && ast::isMemType(e->getResolvedType()) ? nullptr
+                                                                      : e;
+  return nullptr;
 }
 
 Val ModuleLowering::emitMemAddress(ast::Expr *e) {
@@ -352,15 +376,49 @@ void ModuleLowering::emitMemRelease(const Val &addr, ast::Type *ty) {
   forEachMemRef(addr, ty, [&](const Val &box) { emitRelease(box); });
 }
 
+ast::Expr *ModuleLowering::wholeOf(ast::Expr *e) {
+  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+    ast::Type *arrTy = se->getArray()->getResolvedType();
+    return ast::isa<ast::FixedArrayType>(arrTy) ||
+                   ast::isa<ast::SliceType>(arrTy)
+               ? se->getArray()
+               : nullptr;
+  }
+  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
+    return ti->getTuple();
+  if (auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+    return getExprStructType(ma->getReceiver()) ? ma->getReceiver() : nullptr;
+  return nullptr;
+}
+
+Val ModuleLowering::emitPartAddress(ast::Expr *e, const Val &whole) {
+  if (auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
+    return elementAddressIn(se->getArray(), se->getIndex(), whole);
+  if (auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
+    return tupleElementIn(ti->getTuple(), ti->getIndex(), whole);
+  // A struct's field is in the struct's bytes, at its offset, like a
+  // tuple's element.
+  auto *ma = ast::cast<ast::MemberAccessExpr>(e);
+  int idx =
+      getExprStructType(ma->getReceiver())->fieldIndex(ma->getFieldName());
+  assert(idx >= 0 && "Sema should have verified the field exists");
+  return tupleElementIn(ma->getReceiver(), static_cast<size_t>(idx), whole);
+}
+
 Val ModuleLowering::emitFixedElementAddress(ast::Expr *array,
                                             ast::Expr *index) {
+  Val base = emitMemAddress(array);
+  if (!base)
+    return Val();
+  return elementAddressIn(array, index, base);
+}
+
+Val ModuleLowering::elementAddressIn(ast::Expr *array, ast::Expr *index,
+                                     const Val &base) {
   auto *ft = ast::dyn_cast<ast::FixedArrayType>(array->getResolvedType());
   ast::Type *elemTy = ft ? ft->getElementType()
                          : ast::cast<ast::SliceType>(array->getResolvedType())
                                ->getElementType();
-  Val base = emitMemAddress(array);
-  if (!base)
-    return Val();
   int64_t elemSize = memLayout(elemTy).Size;
   // Sema checked a constant index into a fixed-size array.
   if (auto *lit = ast::dyn_cast<ast::IntegerLiteral>(index); lit && ft)
@@ -388,6 +446,11 @@ Val ModuleLowering::emitTupleElementAddress(ast::Expr *tuple, size_t index) {
   Val base = emitMemAddress(tuple);
   if (!base)
     return Val();
+  return tupleElementIn(tuple, index, base);
+}
+
+Val ModuleLowering::tupleElementIn(ast::Expr *tuple, size_t index,
+                                   const Val &base) {
   int64_t off = tupleElementOffset(
       ast::cast<ast::TupleType>(tuple->getResolvedType()), index);
   return off == 0 ? base : B.ptrAdd(base, Val::i64(off), "elem.addr");

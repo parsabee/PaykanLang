@@ -13,6 +13,7 @@
 #include "paykan/pir/PIR.h"
 #include "paykan/pkm/Interface.h"
 
+#include <cassert>
 #include <deque>
 #include <filesystem>
 #include <memory>
@@ -628,12 +629,39 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// the node (Expr::ResolvedType).  Every expression therefore carries its
     /// static type after Sema; the lowering relies on this for identifiers and
     /// literals too, e.g. to tell a `T?`-typed operand from a `T` one.
+    ///
+    /// A chain's links below @p e are typed first, innermost out
+    /// (typeChainBelow), so that typing a chain of any length recurses no
+    /// deeper than a few links: each link's visitor finds the type of the
+    /// operand it visits first (ast::chainOperand) already there.
     ast::Type *visit(ast::Expr *e) {
+      if (!ChainTypes.empty()) {
+        auto typed = ChainTypes.find(e);
+        if (typed != ChainTypes.end()) {
+          ast::Type *ty = typed->second;
+          ChainTypes.erase(typed);
+          return ty;
+        }
+      }
+      typeChainBelow(e);
       ast::Type *ty = ast::ExprVisitor<ExprChecker, ast::Type *>::visit(e);
+      assert(!ChainTypes.count(ast::chainOperand(e)) &&
+             "a chain link's visitor visits its operand");
       if (ty)
         e->setResolvedType(ty);
       return ty;
     }
+
+    /// When @p e is a link of a chain whose operand is a link too: visit
+    /// the links below @p e, innermost first, each as its operand's visitor
+    /// would, and keep their types (null for an error, reported) in
+    /// ChainTypes for the visit that comes to each.  The links' visitors
+    /// take their operand before anything else, so this is the order they
+    /// are visited in anyway.
+    void typeChainBelow(ast::Expr *e);
+    /// The types of the links typeChainBelow visited and nothing has taken
+    /// yet.
+    std::unordered_map<const ast::Expr *, ast::Type *> ChainTypes;
 
     /// visit(@p e) where the value flows into a slot of type @p expected
     /// (nullptr: unknown).  An array or tuple literal uses it: its

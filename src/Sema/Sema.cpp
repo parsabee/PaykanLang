@@ -1571,6 +1571,17 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
   PAYKAN_UNREACHABLE("unknown UnaryOpcode");
 }
 
+void Sema::ExprChecker::typeChainBelow(ast::Expr *e) {
+  ast::Expr *operand = ast::chainOperand(e);
+  if (!operand || !ast::chainOperand(operand) || ChainTypes.count(operand))
+    return;
+  std::vector<ast::Expr *> links;
+  for (ast::Expr *x = operand; ast::chainOperand(x); x = ast::chainOperand(x))
+    links.push_back(x);
+  for (auto it = links.rbegin(); it != links.rend(); ++it)
+    ChainTypes[*it] = visit(*it);
+}
+
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
   // A numeric literal operand takes the other operand's sized type (`x + 1`
   // with `x: u8` adds two `u8`), so the non-literal operand is typed first.
@@ -3398,7 +3409,23 @@ bool Sema::visitCompoundStmt(ast::CompoundStmt *node) {
   return visitStatements(node->getStatements());
 }
 
-bool Sema::visitDeclStmt(ast::DeclStmt *node) { return visit(node->getDecl()); }
+bool Sema::visitDeclStmt(ast::DeclStmt *node) {
+  // A local starts with its initializer's value, a `weak` one without one as
+  // `None` (docs/grammar.md section 6).  The parser and the AST interchange
+  // reader build no other; an AST that has one is rejected here, before the
+  // lowering would leave a reference null.  The variable is still declared
+  // with its type, so its uses are checked as usual.  (A for loop's variable
+  // and a field are VarDecls with no initializer too, outside a DeclStmt.)
+  auto *vd = ast::dyn_cast<ast::VarDecl>(node->getDecl());
+  bool ok = true;
+  if (vd && vd->getType() && !vd->getInitExpr() && !vd->isWeak()) {
+    error(vd->getLocation(), "variable '" + vd->getName() +
+                                 "' needs an initial value (only a 'weak' "
+                                 "local starts without one, as None)");
+    ok = false;
+  }
+  return visit(node->getDecl()) && ok;
+}
 
 bool Sema::visitExprStmt(ast::ExprStmt *node) {
   // Type-check the expression; we discard the type.
@@ -4676,14 +4703,32 @@ bool Sema::checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy) {
         declarePoisoned(CurrentScope, arm->getBinding());
         ok = false;
       }
-      // A numeric literal takes the subject's sized type when it fits.
-      auto *litTy = resolveExprType(arm->getLiteralPattern(), subjectTy);
-      if (litTy && !typesEqual(litTy, subjectTy)) {
-        error(arm->getLocation(), "match arm literal of type '" +
-                                      typeName(litTy) +
-                                      "' does not match subject type '" +
-                                      typeName(subjectTy) + "'");
+      // The pattern is a literal, as the grammar's is (docs/grammar.md
+      // section 6): a switch case, or the value an equality compares with.
+      // The parser and the AST interchange reader build no other; an AST that
+      // has one is rejected here, before the lowering.
+      ast::Expr *pattern = arm->getLiteralPattern();
+      const bool literal = ast::isa<ast::IntegerLiteral>(pattern) ||
+                           ast::isa<ast::FloatLiteral>(pattern) ||
+                           ast::isa<ast::BoolLiteral>(pattern) ||
+                           ast::isa<ast::CharLiteral>(pattern) ||
+                           ast::isa<ast::StringLiteral>(pattern) ||
+                           ast::isa<ast::NoneLiteral>(pattern);
+      if (!literal) {
+        error(arm->getLocation(),
+              "a value-match arm's pattern must be a literal (a number, a "
+              "character, a string, True, False or None)");
         ok = false;
+      } else {
+        // A numeric literal takes the subject's sized type when it fits.
+        auto *litTy = resolveExprType(pattern, subjectTy);
+        if (litTy && !typesEqual(litTy, subjectTy)) {
+          error(arm->getLocation(), "match arm literal of type '" +
+                                        typeName(litTy) +
+                                        "' does not match subject type '" +
+                                        typeName(subjectTy) + "'");
+          ok = false;
+        }
       }
     } else {
       // A type-named arm in a value-mode match.

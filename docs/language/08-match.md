@@ -88,6 +88,34 @@ unknown command 'frobnicate'
 six
 ```
 
+A negative number is a pattern too, `-` and the number written together or apart: `-1`,
+`- 2.5`, and the smallest `int`, `-9223372036854775808` (which an expression writes
+`-9223372036854775807 - 1`, [Basics](02-basics.md#literals)):
+
+```pkn
+import ::io;
+
+fn sign(n: int) -> Str {
+  match n {
+    -1 { return "minus one"; }
+    0 { return "zero"; }
+    -9223372036854775808 { return "the smallest int"; }
+    _ { return "something else"; }
+  }
+}
+
+fn main() -> int {
+  io::println(sign(-1) + ", " + sign(-9223372036854775807 - 1) + ", " + sign(5));
+  return 0;
+}
+```
+
+Output:
+
+```
+minus one, the smallest int, something else
+```
+
 A `bool` match with both `True` and `False` arms is exhaustive. On numbers and strings
 there are always values you did not list, so a `match` that must produce a result needs a
 `_` arm.
@@ -190,8 +218,10 @@ The rest of this chapter gives the precise rules.
     an enum, `name: Variant { … }` binds the variant's fields.
   - `name: view TypeName { … }` / `name: inout TypeName { … }`: the binding borrows the
     subject, read-only or as its storage ([Borrowing the subject](#borrowing-the-subject)).
-  - `literal { … }`: value pattern (`int`, `float`, `bool`, `char`, or `Str` literal; a
-    numeric literal takes a sized subject's type, `match b { 255 { … } }` with `b: u8`).
+  - `literal { … }`: value pattern (`int`, `float`, `bool`, `char`, or `Str` literal, or
+    a negative number, `-1 { … }`; a numeric literal takes a sized subject's type, `match
+    b { 255 { … } }` with `b: u8`, and one that does not fit it is an error, `-1` on an
+    `unsigned` as when assigned).
   - `_ { … }`: wildcard catch-all.
 - The first matching arm wins, and only that one runs; there is no fallthrough.
 - `_` must be the **last** arm. Any arm after it is unreachable and rejected.
@@ -498,8 +528,10 @@ match n {
   }
   ```
 
-Each literal must have the same type as the subject. A literal of the wrong type, or a type-name
-arm in a value-mode `match`, is an error:
+Each literal must have the same type as the subject, and a number must fit a sized one as
+it must when assigned to it (`-1` on an `unsigned` is `the literal -1 does not fit in
+'unsigned' (0 to 18446744073709551615)`). A literal of the wrong type, or a type-name arm in
+a value-mode `match`, is an error:
 
 ```pkn
 match n {            // n: int
@@ -673,6 +705,7 @@ match f.readln() {
 | Binding a variant without fields | `x: Variant { … }` where the variant has no fields to bind |
 | Qualified variant arm | A variant arm is written qualified (`base::Color::Green`); arms use the bare variant name (`Green`) |
 | Literal type mismatch | A value arm's literal has a different type than the subject |
+| Literal out of range | A value arm's number does not fit the subject's sized type (`-1` on an `unsigned`, `256` on a `u8`), as when assigned to it |
 | Type name in value mode | A value-mode `match` has a type-name arm instead of a literal |
 | Binding redeclaration | An arm body redeclares the arm's binding name |
 | Binding named `self` | In a method's body, an arm's binding is named `self`, which names the method's object or receiver (`'self' cannot be used as a variable name in method 'm' of class 'C'; it is the implicit receiver`) |

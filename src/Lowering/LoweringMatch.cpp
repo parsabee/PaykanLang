@@ -3,7 +3,8 @@
 //
 // AST -> PIR lowering: `match` in its three modes (class / optional, value,
 // enum).  A match on an enum or on integer, char or bool literals is a
-// `switch`; one on classes, optionals, strings or floats an if-else chain.
+// `switch`; one on classes, optionals, strings or floats tests its arms in
+// turn, then switches on the first that matched (emitMatchChain).
 
 #include "LoweringInternal.h"
 #include "Names.h"
@@ -28,26 +29,46 @@ void ModuleLowering::emitMatchArmBody(ast::MatchArm *arm) {
   emitBody(arm->getBody());
 }
 
-// if (check(0)) body(0) else if (check(1)) body(1) ... else default().
-// Each check is evaluated only when every earlier one failed, exactly like
-// the former block chain.
+// arm = the first i whose check(i) holds (-1 for none), each check evaluated
+// only while none before it has, as an `if`/`else if` chain would; then
+// switch (arm) { case 0 { body(0) } ... default { default() } }.  Two blocks
+// deep however many arms there are: a chain nests each test in the else of
+// the one before, a block an arm, and the passes and backends after the
+// lowering recurse once a block (3000 arms on strings overflowed them at
+// 2 MB).
 void ModuleLowering::emitMatchChain(size_t n,
                                     const std::function<Val(size_t)> &emitCheck,
                                     const std::function<void(size_t)> &emitBody,
                                     const std::function<void()> &emitDefault) {
-  std::vector<pir::Block *> opened;
+  if (n == 0) {
+    emitDefault();
+    return;
+  }
+  const Val none = Val::i64(-1);
+  pir::LocalId arm = B.addLocal("match.arm", Type::I64);
   for (size_t i = 0; i < n; ++i) {
+    pir::If *open = nullptr;
+    if (i > 0) {
+      open = B.openIf(
+          B.cmp(CmpPred::Eq, B.load(arm, "match.arm"), none, "match.open"),
+          /*withElse=*/false);
+      B.enter(*open->Then);
+    }
     Val isMatch = emitCheck(i);
-    pir::If *s = B.openIf(isMatch, /*withElse=*/true);
-    B.enter(*s->Then);
+    B.store(arm, B.select(isMatch, Val::i64(static_cast<int64_t>(i)), none,
+                          "match.arm"));
+    if (open)
+      B.leave();
+  }
+  pir::Switch *s = B.openSwitch(B.load(arm, "match.arm"));
+  for (size_t i = 0; i < n; ++i) {
+    B.enter(B.addCase(s, Val::i64(static_cast<int64_t>(i))));
     emitBody(i);
     B.leave();
-    B.enter(*s->Else);
-    opened.push_back(s->Else.get());
   }
+  B.enter(B.addDefault(s));
   emitDefault();
-  for (size_t i = 0; i < opened.size(); ++i)
-    B.leave();
+  B.leave();
 }
 
 // switch (subj) { case c(0) { body(0) } ... default { the wildcard's } }.
@@ -271,7 +292,8 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
 }
 
 // Value-mode match: a switch over the literal arms of an integer, char or
-// bool subject, an equality chain over those of a float or Str one.
+// bool subject, a test of each in turn over those of a float or Str one
+// (emitMatchChain).
 // `subjRaw` is a raw scalar for primitives or a raw PaykanString* for Str
 // subjects.
 Val ModuleLowering::emitValueMatch(ast::MatchStmt *node, const Val &subjRaw) {

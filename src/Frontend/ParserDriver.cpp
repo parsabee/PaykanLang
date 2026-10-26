@@ -92,13 +92,17 @@ int ParserDriver::dumpTokens(const std::string &filename, std::ostream &os) {
   Prepared p;
   if (!prepare(filename, diag, p))
     return 1;
-  if (!p.FE->dumpTokens(filename, p.Source, os)) {
+  // The frontend reports lexical errors through diag, so they carry the
+  // file's name and lines as syntax errors do; any of them fails the dump.
+  unsigned before = diag.getErrorCount();
+  if (!p.FE->dumpTokens(filename, p.Source, os, diag)) {
     ++im.ErrorCount;
     diag.error(ast::SourceLocation(), "frontend '" + im.FrontendName +
                                           "' does not support --dump-tokens");
     return 1;
   }
-  return 0;
+  im.ErrorCount = diag.getErrorCount() - before;
+  return im.ErrorCount > 0 ? 1 : 0;
 }
 
 /// Create the frontend and read @p filename into @p out.  On failure reports

@@ -245,3 +245,28 @@ TEST(Weak, IsOtherwiseAnOptional) {
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
+
+// A local starts with a value, and only a `weak` one may leave out its
+// initializer (it starts as None).  No parser builds another, but a frontend
+// could hand one over: a `Str` local was then a null reference at run time.
+TEST(Weak, OnlyAWeakLocalHasNoInitialValue) {
+  namespace ast = paykan::ast;
+  ast::ASTContext ctx;
+  auto *s = ctx.make<ast::VarDecl>(ast::SourceLocation(3, 3, 3, 10),
+                                   ctx.intern("s"), ctx.getStrTy(), nullptr);
+  auto *w =
+      ctx.make<ast::VarDecl>(ast::SourceLocation(4, 3, 4, 16), ctx.intern("w"),
+                             ctx.getOptionalType(ctx.getObjTy()), nullptr);
+  w->setWeak(true);
+  auto r = semaCheckAST(
+      ctx,
+      mainOfStatements(ctx, {ctx.make<ast::DeclStmt>(s->getLocation(), s),
+                             ctx.make<ast::DeclStmt>(w->getLocation(), w)}));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("3:3: error: variable 's' needs an initial "
+                               "value (only a 'weak' local starts without "
+                               "one, as None)"),
+            std::string::npos)
+      << r.Diagnostics;
+}

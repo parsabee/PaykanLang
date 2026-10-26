@@ -29,18 +29,73 @@
 
 namespace paykan::frontend {
 
-/// Deepest nesting of blocks, parentheses, brackets, type applications,
-/// prefix operators and conditional expressions a frontend accepts
-/// (docs/grammar.md section 9).  Every frontend rejects deeper input with
-/// `nesting too deep (more than kMaxNesting levels)`, so that pathological
-/// input can overflow neither a recursive-descent parser's native stack nor
-/// the recursive passes after parsing (Sema, the AST printer).
+/// Deepest nesting a frontend accepts (docs/grammar.md section 9): of
+/// blocks (a function's or a lambda's `=>` body is one), `elif`s (each the
+/// `if` of an else branch), declaration
+/// bodies, parentheses, brackets, arguments, prefix operators, conditional
+/// expressions, type applications, tuple and function types (a function
+/// type's result and a lambda's result type are a level), and type suffixes
+/// (`[]`, `[N]`, `?`, each a level around the type it wraps).  Every
+/// frontend rejects deeper input with `nesting too deep (more than
+/// kMaxNesting levels)`, so that pathological input can overflow neither a
+/// recursive-descent parser's native stack nor the recursive passes after
+/// parsing (Sema, the AST printer); the AST interchange reader counts the
+/// same levels (paykan/ast/Interchange.h).
 inline constexpr unsigned kMaxNesting = 512;
+
+/// Longest chain a frontend accepts (docs/grammar.md section 9): of binary
+/// operators (`1 + 1 + ...`) and of postfix suffixes (calls, field and
+/// method accesses, tuple indexes and subscripts: `s.trim().trim()...`),
+/// each a link over its operands.  The links are counted along every path
+/// down the AST, through nested expressions too, so that however chains
+/// combine the AST is no deeper than kMaxChain links plus kMaxNesting
+/// levels.  Every frontend rejects a longer one with `nesting too deep (more
+/// than kMaxChain levels)`, and the AST interchange reader counts the same
+/// links; the passes after parsing take a chain in a loop.
+inline constexpr unsigned kMaxChain = 2048;
+
+/// The grammar's keywords (docs/grammar.md section 1), which no identifier
+/// spells: an identifier, IDENT, is a letter or `_` followed by letters,
+/// digits and `_`, and is none of these.  The AST interchange reader holds a
+/// plugin's names to it (isIdentifier).
+inline constexpr std::string_view kKeywords[] = {
+    "import", "as",       "class", "struct", "enum", "match", "mov",   "fn",
+    "native", "return",   "if",    "then",   "else", "elif",  "while", "for",
+    "break",  "continue", "True",  "False",  "None", "_",     "view",  "inout",
+    "let",    "weak",     "impl",  "static", "trait"};
+
+/// Whether @p s is an identifier, the grammar's IDENT (kKeywords).
+inline bool isIdentifier(std::string_view s) {
+  auto letter = [](char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+  };
+  if (s.empty() || !letter(s[0]))
+    return false;
+  for (char c : s)
+    if (!letter(c) && !(c >= '0' && c <= '9'))
+      return false;
+  for (std::string_view k : kKeywords)
+    if (s == k)
+      return false;
+  return true;
+}
 
 /// The diagnostic every frontend reports at a `mov` keyword (#145).  `mov`
 /// stays reserved; the operand after it still parses.
 inline constexpr std::string_view kMovRemoved =
     "'mov' was removed in v0.2.0; ownership transfers are inferred";
+
+/// The diagnostics every frontend reports for a method's or a `static fn`'s
+/// own type parameters (docs/grammar.md section 4): only a free function is
+/// generic, and a generic type's methods use the type's.
+inline constexpr std::string_view kGenericMethod =
+    "a method cannot have type parameters of its own: only a free function "
+    "is generic (the methods of a generic class or struct use its type "
+    "parameters)";
+inline constexpr std::string_view kGenericStaticFn =
+    "a 'static fn' cannot have type parameters of its own: only a free "
+    "function is generic (the static fns of a generic class or struct use "
+    "its type parameters)";
 
 /// Per-parse options.  A frontend ignores the ones it does not support.
 struct Options {
@@ -80,14 +135,17 @@ public:
                             ast::ASTContext &ctx, sema::DiagEngine &diag,
                             const Options &opts) = 0;
 
-  /// Write the token stream of @p source to @p os, one token per line
-  /// (--dump-tokens).  Returns false when the frontend does not support it;
-  /// the default does not.
+  /// Write the token stream of @p source, the full text of @p filename, to
+  /// @p os, one token per line (--dump-tokens).  Every lexical error is
+  /// reported through @p diag, as in parse, and the listing goes on past it;
+  /// the driver fails the dump when @p diag counted an error.  Returns false
+  /// when the frontend does not support it; the default does not.
   virtual bool dumpTokens(std::string_view filename, std::string_view source,
-                          std::ostream &os) {
+                          std::ostream &os, sema::DiagEngine &diag) {
     (void)filename;
     (void)source;
     (void)os;
+    (void)diag;
     return false;
   }
 };

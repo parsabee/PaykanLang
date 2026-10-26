@@ -18,8 +18,9 @@
  *   noast       returns PAYKAN_OK with neither an AST nor an error
  *   fail        returns 7 without a diagnostic
  *   trace       writes a trace line (to standard error) first
- * dump_tokens writes one line naming the file and its size, or with
- * PAYKAN_TEST_FE_MODE=fail returns 3.  Every callback creates
+ * dump_tokens writes one line naming the file and its size, after a lexical
+ * error with PAYKAN_TEST_FE_MODE=errors, or with PAYKAN_TEST_FE_MODE=fail
+ * returns 3.  Every callback creates
  * <$PAYKAN_TEST_MARKER_DIR>/<TP_NAME>.called, the global constructor
  * <...>/<TP_NAME>.ctor.
  */
@@ -127,6 +128,8 @@ static int test_dump_tokens(void *data, PaykanSession *s,
   mark(".called");
   if (mode("fail"))
     return 3;
+  if (mode("errors"))
+    say(s, PAYKAN_DIAG_ERROR, NULL, 1, 5, "bad character");
   n = snprintf(line, sizeof(line), "tokens of %s: %lu bytes\n", in->filename,
                (unsigned long)in->source_size);
   return host->write_output(s, line, (size_t)n);

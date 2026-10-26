@@ -775,7 +775,7 @@ TEST(PIRLLVM, SwitchCasesOfTheDenseSetKeys) {
         int64_t want = form == Form::StoresWithoutDefault ? 5 : 99;
         for (size_t i = 0; i < order.size(); ++i)
           if (order[i] == in)
-            want = static_cast<int64_t>(10 * (i + 1));
+            want = 10 * (static_cast<int64_t>(i) + 1);
         checks.push_back({fn, in, want});
       }
     }

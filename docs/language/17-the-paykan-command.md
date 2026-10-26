@@ -93,7 +93,7 @@ may be given:
 | `--list-modules` | the module file of each imported module whose compiled code the program links, one per line (the standard library's, a cache entry, a prebuilt module's): the files whose objects `--emit-c`'s C is linked with ([The C output](../c-backend.md)) |
 | `--emit-ast` | the parsed program in the AST interchange format ([AST format](../plugins/ast-format.md)) |
 | `--dump-ast` | the parsed program as a readable tree |
-| `--dump-tokens` | the token stream, for frontends that support it |
+| `--dump-tokens` | the token stream, for frontends that support it; a lexical error is reported as a syntax error is, and the listing is printed whole, but `paykan` exits with status 1 |
 
 `--emit-pir` is a good way to see what the compiler does with your code, including the
 reference counting it inserts:

@@ -54,7 +54,9 @@ private:
   const Token &cur() { return peek(0); }
   Tok kind(size_t k = 0) { return peek(k).Kind; }
   bool at(Tok k) { return kind() == k; }
-  Token consume();
+  /// The current token, consumed: a reference into Buf, which holds until
+  /// the next token is lexed (copy it to keep it past a peek()).
+  const Token &consume();
   bool accept(Tok k);
   /// Consume @p k or report "expected X" (unless speculating) and return false.
   bool expect(Tok k, const char *context = nullptr);
@@ -70,9 +72,51 @@ private:
   unsigned Depth = 0; // nesting depth guard (see enterNesting)
   bool enterNesting();
   void leaveNesting() { --Depth; }
+  /// Puts Depth back when it ends: for levels entered one by one in a loop
+  /// and all left at its end.
+  class SavedDepth {
+  public:
+    explicit SavedDepth(Parser &p) : P(p), Outer(p.Depth) {}
+    ~SavedDepth() { P.Depth = Outer; }
+    SavedDepth(const SavedDepth &) = delete;
+    SavedDepth &operator=(const SavedDepth &) = delete;
+
+  private:
+    Parser &P;
+    unsigned Outer;
+  };
+  /// The chain links (frontend::kMaxChain) on the deepest path down what
+  /// was parsed since the innermost ChainScope began: each binary operator
+  /// and postfix suffix is a link over the deepest of its operands (an
+  /// `elif` is a level of nesting, enterNesting).
+  unsigned ChainHeight = 0;
+  /// Measures the chain links of what is parsed while it lives, in parts
+  /// (take()); when it ends, its height counts in the enclosing scope's.
+  class ChainScope {
+  public:
+    explicit ChainScope(Parser &p);
+    ~ChainScope();
+    ChainScope(const ChainScope &) = delete;
+    ChainScope &operator=(const ChainScope &) = delete;
+    /// The height of what was parsed since the last take() (or the start).
+    unsigned take();
+    /// End with @p height, the height of what this scope parsed.
+    void finish(unsigned height);
+
+  private:
+    Parser &P;
+    unsigned Outer;
+  };
+  /// Whether a link at @p at, @p height links high, is within kMaxChain
+  /// (else reported).
+  bool checkChain(unsigned height, ast::SourceLocation at);
 
   // -- Diagnostics
   void error(ast::SourceLocation loc, const std::string &msg);
+  /// error() with a message that is a literal: the string is made here, not
+  /// in the caller's frame, which a recursion of the parser may hold 512
+  /// times over (docs/grammar.md section 9).
+  void error(ast::SourceLocation loc, const char *msg);
   /// Count and emit one error (error() minus the speculation check and the
   /// flush of pending lexical errors).
   void report(ast::SourceLocation loc, const std::string &msg);
@@ -81,6 +125,8 @@ private:
   /// token is the one right after a lexical error (the lexer reported the
   /// real problem there), or a syntax error was already reported at it.
   bool errorAtCurrent(const std::string &expected);
+  /// errorAtCurrent() with a literal, made into a string here (as error()'s).
+  bool errorAtCurrent(const char *expected);
   /// Buf indices lexed right after a lexical error, in order.
   std::vector<size_t> LexErrorTokens;
   /// Lexical errors not reported yet, in source order: each is reported when
@@ -107,6 +153,13 @@ private:
   void skipToStatementBoundary();
   /// Inside a block whose '{' was consumed: skip through its matching '}'.
   void skipPastMatchingBrace();
+  /// After an if-statement's block: skip the `elif` and `else` branches
+  /// after it, each condition (balancing `()` and `[]`) and its block.
+  void skipElseTail();
+  /// Inside brackets whose opener was consumed: skip to the matching closer,
+  /// balancing `()`, `[]` and `{}` on the way.  The closer (or an unmatched
+  /// one, or the end of the file) is left as the current token.
+  void skipToMatchingCloser();
 
   // -- Declarations
   ast::ImportDecl *parseImportDecl();
@@ -145,6 +198,11 @@ private:
   /// Returns false on error.  @p out is null for an empty statement `;`.
   bool parseStatement(ast::Stmt *&out);
   bool parseExprOrAssignStatement(ast::Stmt *&out);
+  ast::Expr *cloneTarget(ast::Expr *lhs);
+  ast::Stmt *assignment(ast::SourceLocation loc, ast::Expr *lhs,
+                        ast::Expr *value);
+  bool parseReturnStmt(ast::Stmt *&out);
+  bool parseTypedDecl(ast::Stmt *&out);
   bool parseLetDecl(ast::Stmt *&out);
   bool parseWeakDecl(ast::Stmt *&out);
   bool
@@ -162,7 +220,12 @@ private:
   // -- Types
   ast::Type *parseTypeAnnotation();
   ast::Type *parsePrimaryType();
-  bool parseTypeArgList(std::vector<ast::Type *> &out);
+  bool parseTypeArgList(std::vector<ast::Type *> &out,
+                        std::vector<ast::SourceLocation> *starts = nullptr);
+  /// The first token of each type argument of the generic type parsed last
+  /// (the outermost, which is finished last): where parseImplDecl reports a
+  /// builtin one, whose type node is shared and has no location.
+  std::vector<ast::SourceLocation> LastTypeArgStarts;
 
   // -- Expressions
   ast::Expr *parseExpression();
@@ -170,7 +233,14 @@ private:
   ast::Expr *parseBinary(int minPrec);
   ast::Expr *parseUnary();
   ast::Expr *parsePostfix();
+  ast::Expr *parseCallSuffix(ast::Expr *e, ast::SourceLocation start,
+                             const std::string *method);
+  ast::Expr *parseDotSuffix(ast::Expr *e, ast::SourceLocation start);
   ast::Expr *parsePrimary();
+  ast::Expr *parseNamePrimary();
+  ast::Expr *parseParenPrimary();
+  ast::Expr *parseLambda();
+  ast::Expr *parseArrayLiteral();
   ast::Expr *parseLiteral();
   bool parseArgumentList(Tok closer, std::vector<ast::Expr *> &out);
   /// `< typeArgList > (`, or `< typeArgList > :: IDENT (` (a function of

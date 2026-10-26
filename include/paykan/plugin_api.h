@@ -301,8 +301,11 @@ typedef struct PaykanFrontend {
   int (*parse)(void *data, PaykanSession *session,
                const PaykanFrontendInput *input, PaykanFrontendOutput *output);
   /* --dump-tokens: write the token stream of input->source with
-   * host->write_output, one token per line.  May be NULL (not supported).
-   * Returns PAYKAN_OK or an error code. */
+   * host->write_output, one token per line, reporting each lexical error
+   * with host->diagnostic (as parse does) and going on with the listing.
+   * May be NULL (not supported).  Returns PAYKAN_OK, or an error code when
+   * the frontend itself failed; paykan --dump-tokens exits with status 1
+   * after a reported error or an error code. */
   int (*dump_tokens)(void *data, PaykanSession *session,
                      const PaykanFrontendInput *input);
 } PaykanFrontend;

@@ -8,8 +8,10 @@
 
 #include <gtest/gtest.h>
 
+#include <ctime>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace paykan::frontend::recursive_descent;
@@ -153,6 +155,68 @@ TEST(Recovery, DeepNestingIsRejectedNotCrashed) {
   auto r = parse(src);
   EXPECT_GE(r.Errors, 1u);
   EXPECT_NE(r.Text.find("nesting too deep"), std::string::npos);
+}
+
+// Past the limit, nested brackets are skipped whole, through the closer
+// matching the one too many, so the limit is the only error and the
+// statement after them is parsed (#58).  The statement's own recovery used
+// to stop at the first `;` in them, the count of an array `[v; n]`, and
+// each of 20000 levels was an error of its own: 38 seconds, each error
+// printing the whole line.
+TEST(Recovery, NestingTooDeepInBracketsIsTheOnlyError) {
+  const int n = 20000;
+  const std::vector<std::pair<std::string, std::string>> levels = {
+      {"[", "; 1]"},    // an array of arrays
+      {"[(", "); 1]"},  // parentheses
+      {"[a[", "]; 1]"}, // subscripts
+      {"[f(", "); 1]"}, // calls
+  };
+  for (const auto &[open, close] : levels) {
+    std::string src = "fn main() -> int { x = ";
+    for (int i = 0; i < n; ++i)
+      src += open;
+    src += "0";
+    for (int i = 0; i < n; ++i)
+      src += close;
+    src += ";\ny = ; return 0; }\n";
+    // Processor time, which the tests running beside this one leave alone.
+    const std::clock_t start = std::clock();
+    auto r = parse(src);
+    const double took =
+        static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
+    EXPECT_EQ(r.Errors, 2u) << open;
+    ASSERT_FALSE(r.Diags.empty()) << open;
+    EXPECT_EQ(r.Diags[0].Message, "nesting too deep (more than 512 levels)")
+        << open;
+    EXPECT_EQ(errorLines(r), (std::vector<size_t>{1, 2})) << open;
+    EXPECT_LT(took, 5.0) << open;
+  }
+}
+
+// An `if` takes up to 510 `elif`s in a function's body.  Past them the
+// block one level too deep is skipped, and so is the rest of the chain, each
+// branch as deep or deeper, braces in its condition too: the limit is the
+// only error, where the next `elif`'s level was a second, and the statement
+// after the chain is parsed.
+TEST(Recovery, ElifsPastTheLimitAreOneError) {
+  for (int n : {510, 511, 600}) {
+    std::string src = "fn main() -> int { x = 0;\n  if x == 0 { x = 1; }";
+    for (int i = 1; i <= n; ++i)
+      src += " elif x == " + std::to_string(i) + " { x = 1; }";
+    if (n > 510)
+      src += " elif ok(fn() -> bool { return [True; 1][0]; }) { x = 1; }";
+    src += " else { x = 2; }\n  y = ; return 0; }\n";
+    auto r = parse(src);
+    std::vector<size_t> lines{3};
+    if (n > 510) {
+      lines.insert(lines.begin(), 2);
+      ASSERT_FALSE(r.Diags.empty()) << n;
+      EXPECT_EQ(r.Diags[0].Message, "nesting too deep (more than 512 levels)")
+          << n;
+    }
+    EXPECT_EQ(r.Errors, lines.size()) << n;
+    EXPECT_EQ(errorLines(r), lines) << n;
+  }
 }
 
 TEST(Recovery, NoDiagEngineFallsBackToStderr) {

@@ -734,7 +734,9 @@ private:
   void emitMatchSwitch(const Val &subj,
                        const std::vector<std::pair<Val, ast::MatchArm *>> &arms,
                        ast::MatchArm *wildcard);
-  /// Emit `if (check0) body0 else if (check1) body1 ... else default`.
+  /// Emit what `if (check0) body0 else if (check1) body1 ... else default`
+  /// does, flat: the index of the first check that holds, the checks after
+  /// it not evaluated, then a switch on it.
   void emitMatchChain(size_t n, const std::function<Val(size_t)> &emitCheck,
                       const std::function<void(size_t)> &emitBody,
                       const std::function<void()> &emitDefault);
@@ -755,8 +757,27 @@ private:
     /// Every expression is emitted through here (it hides the visitor's own
     /// dispatch), so a primitive that Sema marked for its optional slot
     /// comes out as the optional value that slot expects, whichever site
-    /// consumes it.
+    /// consumes it.  A chain's links below @p node are emitted first,
+    /// innermost out (emitChainBelow), so that emitting a chain of any
+    /// length recurses no deeper than a few links.
     Val visit(ast::Expr *node);
+
+    /// The expression the visitor of the chain link @p e passes to visit()
+    /// before it emits anything else, or null: a binary operator's left
+    /// operand (but `==`'s and `!=`'s, which may compare in place); a class's
+    /// or a builtin type's receiver, or a class's field's; and for a struct's
+    /// method or field, a tuple index, a subscript of a fixed-size array or
+    /// a call of a function value, what the operand's bytes are found from
+    /// (memValueVisitsFirst).  Each mirrors its visitor's branches.
+    ast::Expr *visitedFirst(ast::Expr *e);
+    /// When the link @p e visits a link first: emit the links below @p e
+    /// that are visited so, innermost first, and keep their values in
+    /// ChainValues for the visit that comes to each.  That is the order
+    /// they are emitted in anyway.
+    void emitChainBelow(ast::Expr *e);
+    /// The values of the links emitChainBelow emitted and nothing has taken
+    /// yet.
+    std::unordered_map<const ast::Expr *, Val> ChainValues;
 
     /// `int<Str>`, `float<Str>`, `bool<Str>`: the optional value of the
     /// runtime's parse; an invalid Val for any other call.
@@ -784,6 +805,15 @@ private:
     /// call's `inout` result.
     Val emitStructMethodCall(ast::MethodCallExpr *node, ast::StructType *st,
                              bool wantAddress);
+    /// visitMethodCallExpr's kinds of call, each in a frame of its own: a
+    /// field's function value, `hash()`, an optional's `toString()`, a
+    /// tuple's, a struct's, an enum's or a builtin type's, and a class's
+    /// method.
+    Val emitFieldCall(ast::MethodCallExpr *node);
+    Val emitHashCall(ast::MethodCallExpr *node);
+    Val emitOptionalToStringCall(ast::MethodCallExpr *node);
+    Val emitShowCall(ast::MethodCallExpr *node);
+    Val emitClassMethodCall(ast::MethodCallExpr *node, bool wantAddress);
     Val emitShortCircuit(ast::BinaryExpr *node, bool isAnd);
     /// The panics before an integer `/` or `%`: a zero divisor, and for a
     /// division of `int` values (@p checkOverflow) INT64_MIN / -1.
@@ -879,8 +909,16 @@ private:
                              const std::vector<ast::Type *> &captureTys,
                              const std::vector<bool> &captureWeak);
   /// The code of lambda @p node (and its closure class, when it captures
-  /// anything), made once: the code's function name.
+  /// anything), made once: the code's function name.  Its body is lowered
+  /// before this returns, unless this is in another lambda's body: then
+  /// after that body (PendingLambdas).
   const std::string &lowerLambda(ast::LambdaExpr *node);
+  /// The body of the lambda @p node, which lowerLambda declared.
+  void emitLambdaBody(ast::LambdaExpr *node);
+  /// The lambdas whose bodies are lowered next, in order, while
+  /// LoweringLambdaBodies: each one met in a body lowered before it.
+  std::vector<ast::LambdaExpr *> PendingLambdas;
+  bool LoweringLambdaBodies = false;
   /// Write a function value of lambda @p node to @p dst: its code, and a new
   /// closure with its captures copied in (owned by @p dst).
   void emitLambdaInto(ast::LambdaExpr *node, const Val &dst);
@@ -963,6 +1001,13 @@ private:
   /// variable's own (or, for an `inout` one, the value it names), an
   /// element's or a field's, or a temporary.
   MemValue emitMemValue(ast::Expr *e);
+  /// The expression emitMemValue(@p e) passes to visit() before it emits
+  /// anything else, or null: a call itself, the object of a class's field,
+  /// and for an element or a struct's field, the same for the whole it is
+  /// in.  Null for a call with an `inout` result held in memory, which
+  /// leaves what holds its storage in MemTemps for the consumer, past the
+  /// mark that consumer took before it (ExprEmitter::emitChainBelow).
+  ast::Expr *memValueVisitsFirst(ast::Expr *e);
   /// emitMemValue's address, borrowed: a temporary holding references is
   /// added to MemTemps, for its consumer to release with releaseMemTemps
   /// once done with it.
@@ -991,6 +1036,17 @@ private:
   Val emitFixedElementAddress(ast::Expr *array, ast::Expr *index);
   /// The address of element @p index of the tuple @p tuple.
   Val emitTupleElementAddress(ast::Expr *tuple, size_t index);
+  /// The value held in memory that @p e is a part of, when it is one, read
+  /// in place: a struct's field (`s.f`), a tuple's element (`t.0`) or an
+  /// element of a fixed-size array or a slice (`a[i]`); else null.
+  ast::Expr *wholeOf(ast::Expr *e);
+  /// The address of the part @p e (wholeOf) of the value at @p whole: its
+  /// element's or field's offset, an index after its bounds check.
+  Val emitPartAddress(ast::Expr *e, const Val &whole);
+  /// emitFixedElementAddress, and emitTupleElementAddress, of the array or
+  /// the tuple at @p base.
+  Val elementAddressIn(ast::Expr *array, ast::Expr *index, const Val &base);
+  Val tupleElementIn(ast::Expr *tuple, size_t index, const Val &base);
   /// Write the value of @p e, of a type held in memory, into the bytes at
   /// @p dst: a literal element by element, anything else copied.  @p e must
   /// not read @p dst (a new variable's storage).

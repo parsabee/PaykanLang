@@ -59,8 +59,9 @@ public:
   const std::string &getFrontendName() const;
 
   /// Write the token stream of @p filename to @p os (--dump-tokens).  Returns
-  /// 0 on success, non-zero when the file cannot be read or the frontend has
-  /// no token dump (reported through the diagnostics like parseFile).
+  /// 0 on success, non-zero when the file cannot be read, the frontend has
+  /// no token dump or the source has a lexical error (each reported through
+  /// the diagnostics like parseFile, and counted in getErrorCount).
   int dumpTokens(const std::string &filename, std::ostream &os);
 
 private:

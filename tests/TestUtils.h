@@ -193,4 +193,29 @@ inline SemaResult semaCheck(const std::string &source) {
   return {semaCtx.Ok, diagOS.str(), semaCtx.ErrorCount};
 }
 
+/// Run semantic analysis on @p tu, an AST built by hand in @p ctx: one that
+/// no frontend's parser builds, as a frontend could still hand it over.
+inline SemaResult semaCheckAST(ast::ASTContext &ctx, ast::TranslationUnit *tu) {
+  std::ostringstream diagOS;
+  sema::DiagEngine diag(diagOS);
+  sema::Sema sema(ctx, diag, "", testFrontend());
+  auto semaCtx = sema.run(tu);
+  return {semaCtx.Ok, diagOS.str(), semaCtx.ErrorCount};
+}
+
+/// The unit `fn main() -> int { STMTS... return 0; }` in @p ctx, for
+/// semaCheckAST: @p stmts, then nodes of its own, located on line 9.
+inline ast::TranslationUnit *mainOfStatements(ast::ASTContext &ctx,
+                                              std::vector<ast::Stmt *> stmts) {
+  const ast::SourceLocation at(9, 1, 9, 10);
+  stmts.push_back(
+      ctx.make<ast::ReturnStmt>(at, ctx.make<ast::IntegerLiteral>(at, 0)));
+  auto *body = ctx.make<ast::CompoundStmt>(at, std::move(stmts));
+  auto *fn = ctx.make<ast::FuncDecl>(
+      at, ctx.intern("main"), std::vector<ast::Param>{}, ctx.getIntTy(), body);
+  return ctx.make<ast::TranslationUnit>(at, std::vector<ast::ImportDecl *>{},
+                                        std::vector<ast::ClassDecl *>{},
+                                        std::vector<ast::FuncDecl *>{fn});
+}
+
 } // namespace paykan::test

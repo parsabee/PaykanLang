@@ -1,10 +1,15 @@
 // Copyright (c) 2026 Parsa Bagheri
 // SPDX-License-Identifier: Apache-2.0
 // Parser tests: `mov` is retired (#145).  The keyword stays reserved and every
-// frontend reports frontend::kMovRemoved at it, once per use.
+// frontend reports frontend::kMovRemoved at it, once per use, and once for a
+// run of them (`mov mov s`).
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
+
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace paykan::test;
 
@@ -17,6 +22,8 @@ TEST(Mov, RemovedKeywordIsOneErrorPerUse) {
       {"import ::io; fn make() -> Str { return \"x\"; }\n"
        "fn main() -> int { t = mov make(); io::println(mov t); return 0; }",
        2},
+      // A run was an error a `mov`, 511 of them before the nesting limit.
+      {"fn main() -> int { s = \"a\"; u = mov mov mov s; return 0; }", 1},
   };
   for (const auto &[src, errors] : cases) {
     auto path = writeTempFile(src);
@@ -32,6 +39,47 @@ TEST(Mov, RemovedKeywordIsOneErrorPerUse) {
                 std::string::npos)
           << fe << ":\n"
           << os.str();
+    }
+    std::filesystem::remove(path);
+  }
+}
+
+// The removal is reported at the `mov`, before the operand is parsed, so the
+// diagnostics come in source order (docs/grammar.md section 9): an outer
+// `mov`'s before an inner one's, and before a syntax or a lexical error in
+// its operand.  A run of them is reported at its first.
+TEST(Mov, ReportedInSourceOrder) {
+  const std::string removed =
+      "error: " + std::string(paykan::frontend::kMovRemoved);
+  const std::pair<const char *, std::vector<std::string>> cases[] = {
+      {"fn main() -> int { s = \"a\"; u = mov (mov s); return 0; }",
+       {"1:33: " + removed, "1:38: " + removed}},
+      {"fn main() -> int { s = \"a\"; u = mov mov s; return 0; }",
+       {"1:33: " + removed}},
+      {"fn main() -> int { b = mov ; return 0; }",
+       {"1:24: " + removed, "1:28: error: unexpected ';'"}},
+      {"fn main() -> int { s = \"a\"; u = mov $ s; return 0; }",
+       {"1:33: " + removed, "1:37: error: invalid character '$'"}},
+  };
+  for (const auto &[src, errors] : cases) {
+    auto path = writeTempFile(src);
+    for (const std::string &fe : paykan::frontend::Registry::get().names()) {
+      paykan::parser::ParserDriver drv(fe);
+      std::ostringstream os;
+      paykan::sema::DiagEngine diag(os);
+      diag.setSourceInfo(path, &drv.getSourceLines());
+      drv.setDiagEngine(&diag);
+      EXPECT_NE(drv.parseFile(path), 0) << fe << ": " << src;
+      EXPECT_EQ(drv.getErrorCount(), errors.size()) << fe << ":\n" << os.str();
+      const std::string out = os.str();
+      size_t at = 0;
+      for (const std::string &e : errors) {
+        std::string error = path + ":";
+        error += e;
+        at = out.find(error, at);
+        ASSERT_NE(at, std::string::npos) << fe << ": " << e << " in order in\n"
+                                         << out;
+      }
     }
     std::filesystem::remove(path);
   }

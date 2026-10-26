@@ -358,9 +358,12 @@ fn unbox<T>(b: Box<T>) -> T { return b.get(); }
 fn pick<A, B>(a: A, b: B) -> B { return b; }
 ```
 
-Only free functions can be generic; methods of a non-generic class cannot
-declare their own type parameters (a generic class's methods use the class's
-parameters).
+Only free functions can be generic: a method, in a class body or an `impl`
+block, and a `static fn` cannot declare their own type parameters (a generic
+class's or struct's methods use its parameters). `fn map<U>(x: U) -> U` in a
+class body is a syntax error, `a method cannot have type parameters of its own:
+only a free function is generic (the methods of a generic class or struct use
+its type parameters)`; a `static fn`'s says `a 'static fn' cannot ...`.
 
 A free function's parameter written without its type has a type parameter of
 its own, after the written ones: `fn pick(a, b) => b;` is generic in both
@@ -630,6 +633,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Type parameter used as a value | `y = T;`, `T()` inside a generic body |
 | Duplicate / shadowing type parameter | `class P<T, T>`, `class Bar<Foo>` when `Foo` is a type, `impl Box<Foo>` |
 | `impl` type parameters | `impl Box` or `impl Box<T, U>` for a one-parameter `Box`, `impl A<T>` for a non-generic `A` |
+| Generic method | A method or a `static fn` declares type parameters of its own, `fn map<U>(x: U) -> U` in a class body or an `impl` block (a syntax error): `a method cannot have type parameters of its own: only a free function is generic ...`, `a 'static fn' cannot have type parameters of its own: ...` |
 | Name reuse | a class or function named like a generic declaration |
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
 | Inference failure / ambiguity | see [Inference](#inference) |
@@ -638,7 +642,7 @@ d = gen::Box<int>(1);     // the same class as c's
 
 ## Not Supported Yet
 
-Variance, default type arguments, explicit specialisation, generic methods on non-generic classes
-and generic superclasses. Each instantiation is compiled on its own, also over class-type
-arguments; sharing one compiled copy among those would be an optimisation a program cannot
-observe.
+Variance, default type arguments, explicit specialisation, generic methods (a method's or a
+`static fn`'s own type parameters) and generic superclasses. Each instantiation is compiled on its
+own, also over class-type arguments; sharing one compiled copy among those would be an
+optimisation a program cannot observe.

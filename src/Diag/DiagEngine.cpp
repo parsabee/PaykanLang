@@ -33,13 +33,18 @@ DiagEngine::~DiagEngine() { closeGroup(); }
 void DiagEngine::emit(Diagnostic::Severity level, ast::SourceLocation loc,
                       const std::string &msg) {
 #ifndef NDEBUG
-  if (level != Diagnostic::Note)
+  // Only a group whose error or warning has a location is checked, and only
+  // while the locations are exact (DiagEngine.h).
+  if (level != Diagnostic::Note) {
     closeGroup();
-  CurrentGroup += SourceName + ":" + std::to_string(loc.getLineStart()) + ":" +
-                  std::to_string(loc.getColumnStart()) + "-" +
-                  std::to_string(loc.getLineEnd()) + ":" +
-                  std::to_string(loc.getColumnEnd()) + ": " +
-                  std::to_string(static_cast<int>(level)) + ": " + msg + "\n";
+    CheckGroup = loc.isValid();
+  }
+  if (CheckGroup && ExactLocations)
+    CurrentGroup += SourceName + ":" + std::to_string(loc.getLineStart()) +
+                    ":" + std::to_string(loc.getColumnStart()) + "-" +
+                    std::to_string(loc.getLineEnd()) + ":" +
+                    std::to_string(loc.getColumnEnd()) + ": " +
+                    std::to_string(static_cast<int>(level)) + ": " + msg + "\n";
 #endif
   Diagnostics.push_back({level, loc, msg});
   if (level == Diagnostic::Error)

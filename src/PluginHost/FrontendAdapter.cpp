@@ -34,6 +34,10 @@ public:
                               std::string_view source, ast::ASTContext &ctx,
                               sema::DiagEngine &diag,
                               const frontend::Options &opts) override {
+    // The plugin's diagnostics and the AST it returns carry its locations,
+    // which may be coarse or missing (docs/plugins/ast-format.md): two
+    // constructs can share one, so the same error about each is no repeat.
+    diag.setExactLocations(false);
     std::string file(filename), text(source);
     PaykanSession s = session(file, diag, std::cerr); // Out: debug traces
     PaykanFrontendInput in = input(file, text, opts);
@@ -74,11 +78,11 @@ public:
   }
 
   bool dumpTokens(std::string_view filename, std::string_view source,
-                  std::ostream &os) override {
+                  std::ostream &os, sema::DiagEngine &diag) override {
     if (!F->dump_tokens)
       return false;
+    diag.setExactLocations(false); // the plugin's, as in parse
     std::string file(filename), text(source);
-    sema::DiagEngine diag(std::cerr);
     PaykanSession s = session(file, diag, os);
     PaykanFrontendInput in = input(file, text, frontend::Options());
     int rc = F->dump_tokens(F->data, &s, &in);

@@ -109,8 +109,10 @@ std::string inMain(const std::string &stmts) {
 }
 
 // Parse @p src with every frontend: true if every one accepts it; false if
-// every one rejects it, first with `nesting too deep`.
-bool parsesOnEveryFrontend(const std::string &src, const std::string &what) {
+// every one rejects it, first with `nesting too deep (more than @p limit
+// levels)`.
+bool parsesOnEveryFrontend(const std::string &src, const std::string &what,
+                           unsigned limit = 512) {
   auto path = writeTempFile(src);
   int accepted = 0, rejected = 0;
   for (const std::string &fe : paykan::frontend::Registry::get().names()) {
@@ -127,7 +129,8 @@ bool parsesOnEveryFrontend(const std::string &src, const std::string &what) {
     // follow-on errors after it).
     const std::string text = os.str();
     EXPECT_EQ(text.find("error: "),
-              text.find("error: nesting too deep (more than 512 levels)"))
+              text.find("error: nesting too deep (more than " +
+                        std::to_string(limit) + " levels)"))
         << fe << ", " << what << ":\n"
         << text.substr(0, 2000);
   }
@@ -182,6 +185,39 @@ TEST(GrammarEdge, NestingLimitIsTheSameOnEveryFrontend) {
     return inMain("x: " + repeat("(int, ", n) + "int" + repeat(")", n) +
                   " = 1;");
   });
+  // A lambda's body, a function's `=>` body, a function type's result and a
+  // lambda's result type are a level each, as a block is (#16).
+  expectLimit("lambda bodies", [](int n) {
+    return inMain("f = " + repeat("fn() => ", n) + "0;");
+  });
+  expectLimit("expression bodies", [](int n) {
+    return "fn f() => " + repeat("-", n) + "1;\n" + inMain("");
+  });
+  expectLimit("function-type results", [](int n) {
+    return inMain("x: " + repeat("() -> ", n) + "int = f;");
+  });
+  expectLimit("lambda result types", [](int n) {
+    return inMain("f = fn() -> " + repeat("() -> ", n - 1) + "int => g;");
+  });
+  // Each type suffix is a level around the type it wraps.
+  expectLimit("array type suffixes", [](int n) {
+    return inMain("x: int" + repeat("[]", n) + " = y;");
+  });
+  expectLimit("fixed-size array suffixes", [](int n) {
+    return inMain("x: int" + repeat("[1]", n) + " = y;");
+  });
+  expectLimit("optional suffixes", [](int n) {
+    return inMain("x: int" + repeat("?[]", n / 2) + (n % 2 ? "?" : "") +
+                  " = y;");
+  });
+  expectLimit("suffixes of a type application", [](int n) {
+    return inMain("x: B<int>" + repeat("[]", n - 1) + " = y;");
+  });
+  // An `elif` is the `if` of an else branch, a level of its own; its block
+  // is one more.
+  expectLimit("elif chains", [](int n) {
+    return inMain("if a { }" + repeat(" elif a { }", n - 1));
+  });
   // Mixed: a prefix operator and a parenthesis are a level each.
   expectLimit("mixed", [](int n) {
     std::string s = "x = " + repeat("-(", n / 2) + (n % 2 ? "-1" : "1") +
@@ -192,6 +228,76 @@ TEST(GrammarEdge, NestingLimitIsTheSameOnEveryFrontend) {
   EXPECT_TRUE(parsesOnEveryFrontend(
       inMain(repeat("{ ", 511) + "f(); x = []; " + repeat("} ", 511)),
       "empty brackets at the limit"));
+}
+
+// -- The chain limit is the same on every frontend (#17)
+//
+// docs/grammar.md section 9: each binary operator and each postfix suffix is
+// a link of a chain over the deeper of its operands, and a chain of more
+// than 2048 links along any path down the AST is rejected with `nesting too
+// deep (more than 2048 levels)`.  Each construct is built with exactly 2048
+// links (accepted) and 2049 (rejected).
+
+namespace {
+
+// The chain @p make(n) is n links long.
+template <typename F> void expectChainLimit(const char *what, F make) {
+  EXPECT_TRUE(
+      parsesOnEveryFrontend(make(2048), std::string(what) + " x2048", 2048));
+  EXPECT_FALSE(
+      parsesOnEveryFrontend(make(2049), std::string(what) + " x2049", 2048));
+}
+
+// @p n copies of @p term joined by @p op: n - 1 links.
+std::string joined(const std::string &term, const std::string &op, int n) {
+  std::string out = term;
+  for (int i = 1; i < n; ++i)
+    out += op + term;
+  return out;
+}
+
+} // namespace
+
+TEST(GrammarEdge, ChainLimitIsTheSameOnEveryFrontend) {
+  expectChainLimit("+ chains", [](int n) {
+    return inMain("x = " + joined("1", " + ", n + 1) + ";");
+  });
+  expectChainLimit("&& chains", [](int n) {
+    return inMain("x = " + joined("a", " && ", n + 1) + ";");
+  });
+  expectChainLimit("method calls", [](int n) {
+    return inMain("x = s" + repeat(".m()", n) + ";");
+  });
+  expectChainLimit(
+      "fields", [](int n) { return inMain("x = s" + repeat(".f", n) + ";"); });
+  expectChainLimit("tuple indexes", [](int n) {
+    return inMain("x = t" + repeat(".0", n) + ";");
+  });
+  expectChainLimit("subscripts", [](int n) {
+    return inMain("x = a" + repeat("[0]", n) + ";");
+  });
+  // `f()` is a call of `f`; `(f)()` one of the value `f` holds.
+  expectChainLimit("calls of function values", [](int n) {
+    return inMain("x = (f)" + repeat("()", n) + ";");
+  });
+  // A field assigned to is a link, and `+=` is one more over it.
+  expectChainLimit("compound assignments", [](int n) {
+    return inMain("s" + repeat(".f", n - 1) + " += 1;");
+  });
+  // Links count along every path down the AST: through parentheses, the
+  // operand of a higher precedence and the arguments of a call.
+  expectChainLimit("parenthesised chains", [](int n) {
+    return inMain("x = " + repeat("(", 64) + "1" +
+                  repeat(repeat(" + 1", 32) + ")", 64) +
+                  repeat(" + 1", n - 2048) + ";");
+  });
+  expectChainLimit("chains of higher precedence", [](int n) {
+    return inMain("x = 1 + " + joined("1", " * ", 1025) +
+                  repeat(" + 1", n - 1025) + ";");
+  });
+  expectChainLimit("chains in arguments", [](int n) {
+    return inMain("x = f(fn() => a" + repeat(".b", n - 1) + ").c;");
+  });
 }
 
 // Past the limit, the nested block is skipped whole: the nesting error is the
@@ -226,8 +332,10 @@ TEST(GrammarEdge, NestingTooDeepInBlocksIsTheOnlyError) {
 
 TEST(GrammarEdge, PathologicalNestingIsRejectedNotCrashed) {
   // 100,000 levels used to overflow the stack in the passes after a parse
-  // that kept its own stack on the heap (Sema, the AST printer).
-  for (const char *open : {"{ ", "(", "-", "if a then "}) {
+  // that kept its own stack on the heap (Sema, the AST printer), and lambda
+  // bodies, function-type results and type suffixes in the parser or in
+  // Sema (#16).
+  for (const char *open : {"{ ", "(", "-", "if a then ", "fn() => "}) {
     std::string src = "import ::io; fn main() -> int { ";
     std::string o(open);
     if (o == "{ ")
@@ -235,6 +343,18 @@ TEST(GrammarEdge, PathologicalNestingIsRejectedNotCrashed) {
     else
       src += "x = " + repeat(o, 100000) + "1;";
     EXPECT_FALSE(parsesOnEveryFrontend(src + " return 0; }", open));
+  }
+  // And 100,000 links of a chain, in Sema and the lowering (#17).
+  for (const char *link : {" + 1", ".m()", ".0", "[0]"}) {
+    EXPECT_FALSE(parsesOnEveryFrontend(
+        inMain("x = a" + repeat(link, 100000) + ";"), link, 2048));
+  }
+  for (const char *suffix : {"() -> ", "[]", "[1]", "?[]"}) {
+    const std::string s(suffix);
+    const std::string type =
+        s == "() -> " ? repeat(s, 100000) + "int" : "int" + repeat(s, 100000);
+    EXPECT_FALSE(parsesOnEveryFrontend(
+        "fn g(x: " + type + ") -> int { return 0; }\n" + inMain(""), suffix));
   }
 }
 
@@ -287,5 +407,56 @@ TEST(GrammarEdge, CommonErrorsAreLocatedAlike) {
       EXPECT_LE(last, col) << d;
       last = col;
     }
+  }
+}
+
+// -- Negative numbers are match patterns (#51)
+
+// `-` and a number is one literal of the negated value, spanning both (the
+// AST interchange format's `(int -1)`), with or without space between them;
+// INT64_MIN's magnitude is taken after the `-`, so `-9223372036854775808`
+// is INT64_MIN.  Anything else after a `-` is still not a pattern.  It was
+// `unexpected '-'; expected a type`, though the AST interchange reader took
+// `(int -1)` and Sema and the lowering ran it.
+TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
+  auto [ok, driver] = parse("fn main() -> int {\n"
+                            "  match 1 { -1 { } - 2 { } 3 { } _ { } }\n"
+                            "  match 1.5 { -2.5 { } -0.0 { } _ { } }\n"
+                            "  match 1 { -9223372036854775808 { } _ { } }\n"
+                            "  return 0;\n"
+                            "}\n");
+  ASSERT_TRUE(ok);
+  std::string dump = dumpAST(*driver);
+  for (const char *line :
+       {"IntegerLiteral <2:13-2:15> -1\n", "IntegerLiteral <2:20-2:23> -2\n",
+        "IntegerLiteral <2:28-2:29> 3\n",
+        "FloatLiteral <3:15-3:19> -2.500000e+00\n",
+        "FloatLiteral <3:24-3:28> -0.000000e+00\n",
+        "IntegerLiteral <4:13-4:33> -9223372036854775808\n"})
+    EXPECT_NE(dump.find(line), std::string::npos) << line << dump;
+  EXPECT_EQ(dump.find("UnaryExpr"), std::string::npos) << dump;
+  for (const char *arm : {"-True", "--1", "-x", "-'a'", "-\"s\"", "-None"}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  match 1 { ") +
+                            arm + " { } _ { } }\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << arm;
+    ASSERT_FALSE(r.Diags.empty()) << arm;
+    EXPECT_EQ(r.Diags[0].Message, "unexpected '-'; expected a type") << arm;
+  }
+}
+
+// INT64_MIN's magnitude is a pattern's only: anywhere else it is out of
+// range, as an INT after any other token is, also right after a `-` (where
+// the lexer takes it): an expression writes INT64_MIN as
+// `-9223372036854775807 - 1` (docs/grammar.md section 1).
+TEST(GrammarEdge, TheMagnitudeOfInt64MinIsOnlyAPatterns) {
+  for (const char *expr : {"-9223372036854775808", "5 - 9223372036854775808",
+                           "9223372036854775808"}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  x = ") + expr +
+                            ";\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << expr;
+    ASSERT_EQ(r.Diags.size(), 1u) << expr;
+    EXPECT_EQ(r.Diags[0].Message, "integer is out of range: "
+                                  "9223372036854775808")
+        << expr;
   }
 }

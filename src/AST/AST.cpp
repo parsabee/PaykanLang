@@ -471,9 +471,58 @@ Type *ASTCloner::cloneType(Type *ty) {
   return ty;
 }
 
+Expr *ASTCloner::cloneLink(Expr *link, Expr *operand) {
+  auto loc = link->getLocation();
+  auto cloneArgs = [&](const std::vector<Expr *> &args) {
+    std::vector<Expr *> out;
+    out.reserve(args.size());
+    for (auto *a : args)
+      out.push_back(cloneExpr(a));
+    return out;
+  };
+  switch (link->getKind()) {
+  case ASTNode::NK_BinaryExpr: {
+    auto *b = cast<BinaryExpr>(link);
+    return Ctx.make<BinaryExpr>(loc, b->getOpcode(), operand,
+                                cloneExpr(b->getRHS()));
+  }
+  case ASTNode::NK_MethodCallExpr: {
+    auto *m = cast<MethodCallExpr>(link);
+    return Ctx.make<MethodCallExpr>(loc, operand, in(m->getMethodName()),
+                                    cloneArgs(m->getArguments()));
+  }
+  case ASTNode::NK_MemberAccessExpr:
+    return Ctx.make<MemberAccessExpr>(
+        loc, operand, in(cast<MemberAccessExpr>(link)->getFieldName()));
+  case ASTNode::NK_SubscriptExpr:
+    return Ctx.make<SubscriptExpr>(
+        loc, operand, cloneExpr(cast<SubscriptExpr>(link)->getIndex()));
+  case ASTNode::NK_TupleIndexExpr:
+    return Ctx.make<TupleIndexExpr>(loc, operand,
+                                    cast<TupleIndexExpr>(link)->getIndex());
+  case ASTNode::NK_CallValueExpr:
+    return Ctx.make<CallValueExpr>(
+        loc, operand, cloneArgs(cast<CallValueExpr>(link)->getArguments()));
+  default:
+    break;
+  }
+  assert(false && "ASTCloner::cloneLink: not a link of a chain");
+  return nullptr;
+}
+
 Expr *ASTCloner::cloneExpr(Expr *e) {
   if (!e)
     return nullptr;
+  if (chainOperand(e)) {
+    std::vector<Expr *> links;
+    Expr *x = e;
+    for (; chainOperand(x); x = chainOperand(x))
+      links.push_back(x);
+    Expr *copy = cloneExpr(x);
+    for (auto it = links.rbegin(); it != links.rend(); ++it)
+      copy = cloneLink(*it, copy);
+    return copy;
+  }
   auto loc = e->getLocation();
   switch (e->getKind()) {
   case ASTNode::NK_IntegerLiteral:
@@ -492,11 +541,6 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     auto *u = cast<UnaryExpr>(e);
     return Ctx.make<UnaryExpr>(loc, u->getOpcode(), cloneExpr(u->getOperand()));
   }
-  case ASTNode::NK_BinaryExpr: {
-    auto *b = cast<BinaryExpr>(e);
-    return Ctx.make<BinaryExpr>(loc, b->getOpcode(), cloneExpr(b->getLHS()),
-                                cloneExpr(b->getRHS()));
-  }
   case ASTNode::NK_Identifier:
     return Ctx.make<Identifier>(loc, in(cast<Identifier>(e)->getName()));
   case ASTNode::NK_CallExpr: {
@@ -511,24 +555,11 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     return Ctx.make<CallExpr>(loc, in(Names ? Names->callee(callee) : callee),
                               std::move(args), std::move(typeArgs));
   }
-  case ASTNode::NK_MethodCallExpr: {
-    auto *m = cast<MethodCallExpr>(e);
-    std::vector<Expr *> args;
-    for (auto *a : m->getArguments())
-      args.push_back(cloneExpr(a));
-    return Ctx.make<MethodCallExpr>(loc, cloneExpr(m->getReceiver()),
-                                    in(m->getMethodName()), std::move(args));
-  }
   case ASTNode::NK_TernaryExpr: {
     auto *t = cast<TernaryExpr>(e);
     return Ctx.make<TernaryExpr>(loc, cloneExpr(t->getCondition()),
                                  cloneExpr(t->getTrueExpr()),
                                  cloneExpr(t->getFalseExpr()));
-  }
-  case ASTNode::NK_MemberAccessExpr: {
-    auto *m = cast<MemberAccessExpr>(e);
-    return Ctx.make<MemberAccessExpr>(loc, cloneExpr(m->getReceiver()),
-                                      in(m->getFieldName()));
   }
   case ASTNode::NK_ArrayLiteralExpr: {
     auto *a = cast<ArrayLiteralExpr>(e);
@@ -537,11 +568,6 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
       elems.push_back(cloneExpr(el));
     return Ctx.make<ArrayLiteralExpr>(loc, std::move(elems),
                                       a->getRepeatCount());
-  }
-  case ASTNode::NK_SubscriptExpr: {
-    auto *s = cast<SubscriptExpr>(e);
-    return Ctx.make<SubscriptExpr>(loc, cloneExpr(s->getArray()),
-                                   cloneExpr(s->getIndex()));
   }
   case ASTNode::NK_EnumValueExpr: {
     auto *ev = cast<EnumValueExpr>(e);
@@ -562,19 +588,6 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     for (auto *el : t->getElements())
       elems.push_back(cloneExpr(el));
     return Ctx.make<TupleLiteralExpr>(loc, std::move(elems));
-  }
-  case ASTNode::NK_TupleIndexExpr: {
-    auto *ti = cast<TupleIndexExpr>(e);
-    return Ctx.make<TupleIndexExpr>(loc, cloneExpr(ti->getTuple()),
-                                    ti->getIndex());
-  }
-  case ASTNode::NK_CallValueExpr: {
-    auto *c = cast<CallValueExpr>(e);
-    std::vector<Expr *> args;
-    for (auto *a : c->getArguments())
-      args.push_back(cloneExpr(a));
-    return Ctx.make<CallValueExpr>(loc, cloneExpr(c->getCallee()),
-                                   std::move(args));
   }
   case ASTNode::NK_LambdaExpr: {
     // The copy has no captures: Sema records them when it checks the copy.

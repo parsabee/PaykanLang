@@ -88,6 +88,16 @@ struct ModuleLowering::BorrowedReads {
   Use eval(ast::Expr *e, bool place = false);
 
 private:
+  /// What the links of a chain below the expression being evaluated left,
+  /// evaluated innermost first (evalChainBelow) and not taken yet.
+  std::unordered_map<const ast::Expr *, Use> Evaluated;
+  /// When @p e is a link of a chain whose operand (ast::chainOperand) is a
+  /// link too: evaluate the links below @p e, innermost first, so that
+  /// evaluating a chain of any length recurses no deeper than a few links.
+  /// Each link evaluates its operand, not as a place, before it does
+  /// anything else, so that is the order they are evaluated in anyway.
+  void evalChainBelow(ast::Expr *e);
+
   static std::vector<const ast::Expr *> holds(const Use &u) {
     if (u.Read)
       return {u.Read};
@@ -557,10 +567,30 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
 
 // Evaluate @p e (as a place, when its storage is what is used: an `inout`
 // argument or local, a borrowed `match` subject) and say what it leaves.
+void ModuleLowering::BorrowedReads::evalChainBelow(ast::Expr *e) {
+  ast::Expr *operand = ast::chainOperand(e);
+  if (!operand || !ast::chainOperand(operand) || Evaluated.count(operand))
+    return;
+  std::vector<ast::Expr *> links;
+  for (ast::Expr *x = operand; ast::chainOperand(x); x = ast::chainOperand(x))
+    links.push_back(x);
+  for (auto it = links.rbegin(); it != links.rend(); ++it)
+    Evaluated[*it] = eval(*it);
+}
+
 ModuleLowering::BorrowedReads::Use
 ModuleLowering::BorrowedReads::eval(ast::Expr *e, bool place) {
   if (!e)
     return {};
+  if (!place && !Evaluated.empty()) {
+    auto done = Evaluated.find(e);
+    if (done != Evaluated.end()) {
+      Use u = std::move(done->second);
+      Evaluated.erase(done);
+      return u;
+    }
+  }
+  evalChainBelow(e);
   // A variable as a place: its storage is the function's, or the caller's,
   // which the caller keeps.
   if (auto *id = ast::dyn_cast<ast::Identifier>(e))

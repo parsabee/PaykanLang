@@ -385,3 +385,28 @@ TEST(Class, MethodWithoutBodyOrSemicolon) {
             std::string::npos)
       << r.Text;
 }
+
+// A class body's method cannot have type parameters of its own, with a body
+// or pure virtual: they were parsed and ignored (`fn f<T>(x: int)` compiled,
+// `fn map<U>(x: U)` was `unknown class type 'U'`).  Only a free function is
+// generic; a generic class's methods use its type parameters.
+TEST(Class, MethodsAreNotGeneric) {
+  auto r = parseWithDiags("class A {\n"
+                          "  fn f<T>(x: int) -> int { return x; }\n"
+                          "  view fn g<T: Show>() -> Str;\n"
+                          "  fn h() -> int => 1;\n"
+                          "}\n"
+                          "fn main() -> int { return 0; }\n");
+  EXPECT_FALSE(r.Ok);
+  ASSERT_EQ(r.Diags.size(), 2u) << r.Text;
+  for (const auto &d : r.Diags)
+    EXPECT_EQ(d.Message, paykan::frontend::kGenericMethod) << r.Text;
+  EXPECT_EQ(r.Diags[0].Loc.getLineStart(), 2u);
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 7u);
+  EXPECT_EQ(r.Diags[1].Loc.getLineStart(), 3u);
+  EXPECT_EQ(r.Diags[1].Loc.getColumnStart(), 12u);
+  auto [ok, _] = parse("class Box<T> { v: T; view fn get() -> T { return "
+                       "self.v; } fn put(x: T) { self.v = x; } }\n"
+                       "fn main() -> int { return 0; }\n");
+  EXPECT_TRUE(ok);
+}

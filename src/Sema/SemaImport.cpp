@@ -1378,7 +1378,8 @@ Sema::decodeTemplates(std::span<const uint8_t> bytes,
   pkm::Templates *t = &*read;
   auto ctx = std::make_shared<ast::ASTContext>();
   ast::interchange::ReadError err;
-  ast::TranslationUnit *tu = ast::interchange::read(t->Ast, *ctx, err);
+  ast::TranslationUnit *tu = ast::interchange::read(
+      t->Ast, *ctx, err, ast::interchange::Origin::Templates);
   if (!tu)
     return Status::error("TMPL: the bodies do not read: " + err.str());
   if (!tu->getImports().empty() || !tu->getClassDecls().empty() ||

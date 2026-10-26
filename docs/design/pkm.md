@@ -179,7 +179,8 @@ not a parse error.
 
 File ≤ 2^40 bytes; `section_count` ≤ 1024; `MANIFEST` ≤ 1 MiB; a manifest
 string ≤ 64 KiB; a list ≤ 65 536 entries and ≤ remaining bytes; LEB128 ≤ 10
-bytes; nesting caps per section (§4: 2048 AST levels; §5: 512 PIR levels).
+bytes; nesting caps per section (§4: the AST interchange format's, 4112
+lists and the frontends' limits; §5: 512 PIR levels).
 
 ### 1.7 Reader order
 
@@ -560,7 +561,9 @@ TmplSection
 ```
 
 `Sema::encodeTemplates` writes it and `Sema::decodeTemplates` reads the
-unit back (`interchange::read`) into an `ASTContext` of its own, which the
+unit back (`interchange::read`, with `Origin::Templates`: the renamed
+`$<module>::name` strings of §4.8 are no names a frontend's AST may hold,
+docs/plugins/ast-format.md §3) into an `ASTContext` of its own, which the
 importer's `ModuleTemplates` keeps alive; an importer then registers and
 instantiates the templates exactly as a source import's. The interchange
 text is the release's (its version is the release's, like every format), so
