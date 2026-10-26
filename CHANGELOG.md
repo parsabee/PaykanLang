@@ -621,6 +621,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has type ...`).  A function value inside an object does not count: the object shows
   itself through its class.  No program of the standard library, the samples or the docs
   printed such a value.
+- A `char` ordered against a number by `<`, `<=`, `>` or `>=` is an error, as `==` on the
+  pair is: `c < 100`, `c < n` and `100 > c` got past Sema and stopped the compiler with
+  `paykan: PIR verification failed: ... cmp operands have different types: char and i64`
+  on every path, and now are `operands of '<' have mismatched types 'char' and 'int'` (`'int'
+  and 'char'` for `100 > c`), with the line and caret of the compare.  Compare with a char
+  (`c < 'd'`) or the byte value (`int(c) < 100`) (docs/language/02-basics.md, "Relational &
+  Equality").  No program that compiled is rejected.
 
 ### Removed
 

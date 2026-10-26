@@ -652,7 +652,9 @@ The two operands have one type, as for arithmetic, with the one promotion: an `i
 `float`, in either order, compare as floats (`2 == 2.0` and `2 <= 2.0` are `True`, `2 !=
 2.5` is `True`).  Otherwise equality takes two classes when one is a subclass of the other,
 and anything else is an error (`operands of '==' have mismatched types 'Str' and 'int'`),
-two tuples whose elements differ so too (`(1, 2) == (1, 2.0)`).
+two tuples whose elements differ so too (`(1, 2) == (1, 2.0)`).  A `char` compares with a
+`char` only, by `<` as by `==`: `c < 100` is `operands of '<' have mismatched types 'char'
+and 'int'`, so write `c < 'd'`, or `int(c) < 100` for its byte value.
 
 For **reference types** (classes, `Str`), `==` dispatches to `equals`: `a == b` invokes
 `a.equals(b)` through the vtable, and `a != b` is its negation. A class may override `equals` to

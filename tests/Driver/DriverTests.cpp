@@ -1791,6 +1791,30 @@ TEST(Driver, FloatNotEqualIsUnordered) {
   std::filesystem::remove(src);
 }
 
+// A char ordered against a number is Sema's error on every path, as `==`
+// on the pair is: `run`, `build` and `--emit-c` each report it and stop.
+// `c < n` got past Sema and failed PIR verification (`cmp operands have
+// different types: char and i64`).
+TEST(Driver, ACharOrderedAgainstANumberIsAnErrorOnEveryPath) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp("fn main() -> int {\n  c = 'a';\n  n = 100;\n"
+                      "  if c < n { return 1; }\n  return 0;\n}\n");
+  const std::string exe = src + ".exe";
+  const std::string message =
+      "4:6: error: operands of '<' have mismatched types 'char' and 'int'";
+  for (const std::string &cmd :
+       {paykanRun() + " " + src, paykanRun() + " -o " + exe + " build " + src,
+        paykanRun() + " --emit-c " + src}) {
+    auto r = run(cmd + " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << cmd << ": " << r.out;
+    EXPECT_NE(r.out.find(message), std::string::npos) << cmd << ": " << r.out;
+    EXPECT_EQ(r.out.find("PIR verification"), std::string::npos)
+        << cmd << ": " << r.out;
+  }
+  EXPECT_FALSE(std::filesystem::exists(exe));
+  std::filesystem::remove(src);
+}
+
 // `build` gives a native executable, linked against the runtime, that
 // behaves like `run`: arguments, exit code, PAYKAN_TRACK_HEAP, at -O0 and
 // -O2.

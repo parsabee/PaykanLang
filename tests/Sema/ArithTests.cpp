@@ -149,6 +149,48 @@ TEST(Arith, EqualityPromotesNoOtherPair) {
                                                         << r.Diagnostics;
 }
 
+// A char orders against a char only, as it equals one only: `c < 100` and
+// `c < n` were accepted and failed PIR verification (`cmp operands have
+// different types: char and i64`), while `c == 100` was this error.
+TEST(Arith, CharComparesWithACharOnly) {
+  auto r = semaCheck(wrapMain(R"(
+    c = 'a';
+    n = 100;
+    u: u8 = 7;
+    a = c < 100;
+    b = c < n;
+    d = 100 > c;
+    e = c <= n;
+    f = c >= 3;
+    g = c > u;
+    h = c < 1.5;
+    i = c == n;
+  )"));
+  EXPECT_FALSE(r.Ok);
+  for (const char *e : {"operands of '<' have mismatched types 'char' and "
+                        "'int'",
+                        "operands of '>' have mismatched types 'int' and "
+                        "'char'",
+                        "operands of '<=' have mismatched types 'char' and "
+                        "'int'",
+                        "operands of '>=' have mismatched types 'char' and "
+                        "'int'",
+                        "operands of '>' have mismatched types 'char' and "
+                        "'u8'",
+                        "operands of '<' have mismatched types 'char' and "
+                        "'float'",
+                        "operands of '==' have mismatched types 'char' and "
+                        "'int'"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+  auto ok = semaCheck(wrapMain(R"(
+    c = 'a';
+    a: bool = c < 'd' && 'z' >= c && int(c) < 100 && 100 > int(c);
+  )"));
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+}
+
 // -- Builtins
 
 TEST(Arith, OutAcceptsMultipleArgs) {

@@ -134,7 +134,8 @@ freed is in [Memory](16-memory.md#strings-arrays-and-tuples).
 
 A `char` is one byte, written in single quotes: `'a'`, `'\n'`, `'\''`, `'\\'`. Characters
 compare with `==`, `!=`, `<`, `<=`, `>` and `>=` by their byte value, `0` to `255` as
-`int(c)` reads it, which makes range checks such as "is this a digit?" easy:
+`int(c)` reads it, which makes range checks such as "is this a digit?" easy. Both sides are
+chars: `c < 100` is an error, and `int(c) < 100` compares the byte value:
 
 ```pkn
 import ::io;

@@ -1715,25 +1715,26 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     return nullptr;
   }
 
-  // Equality requires compatible types.
-  if ((node->getOpcode() == ast::BinaryOpcode::Eq ||
-       node->getOpcode() == ast::BinaryOpcode::Ne)) {
-    // Same type is always OK (types are canonical, so `(int, Str) == (int,
-    // Str)` unifies while `(int, Str) == (Str, int)` stays an error), and
-    // so is `int` with `float`, compared as floats (`2 == 2.0`); not two
-    // tuples whose elements differ so (`(1, 2) == (1, 2.0)`).
-    if (!typesEqual(lhsTy, rhsTy) && !promoted) {
-      // Allow class subtype comparisons (either direction).
-      auto *lhsCT = ast::dyn_cast<ast::ClassType>(lhsTy);
-      auto *rhsCT = ast::dyn_cast<ast::ClassType>(rhsTy);
-      if (!lhsCT || !rhsCT ||
-          (!lhsCT->isSubtypeOf(rhsCT) && !rhsCT->isSubtypeOf(lhsCT))) {
-        S.error(node->getLocation(),
-                "operands of '" + std::string(node->getOpcodeStr()) +
-                    "' have mismatched types '" + typeName(lhsTy) + "' and '" +
-                    typeName(rhsTy) + "'");
-        return nullptr;
-      }
+  // A comparison takes two operands of one type (types are canonical, so
+  // `(int, Str) == (int, Str)` unifies while `(int, Str) == (Str, int)`
+  // stays an error), or `int` with `float`, compared as floats (`2 ==
+  // 2.0`), and equality two classes one of which is the other's subclass.
+  // Not two tuples whose elements differ so (`(1, 2) == (1, 2.0)`), nor a
+  // char with a number, for `<` as for `==` (`c < 100`).
+  const ast::BinaryOpcode op = node->getOpcode();
+  const bool comparison =
+      op == ast::BinaryOpcode::Lt || op == ast::BinaryOpcode::Gt ||
+      op == ast::BinaryOpcode::Le || op == ast::BinaryOpcode::Ge || equality;
+  if (comparison && !typesEqual(lhsTy, rhsTy) && !promoted) {
+    auto *lhsCT = ast::dyn_cast<ast::ClassType>(lhsTy);
+    auto *rhsCT = ast::dyn_cast<ast::ClassType>(rhsTy);
+    if (!equality || !lhsCT || !rhsCT ||
+        (!lhsCT->isSubtypeOf(rhsCT) && !rhsCT->isSubtypeOf(lhsCT))) {
+      S.error(node->getLocation(),
+              "operands of '" + std::string(node->getOpcodeStr()) +
+                  "' have mismatched types '" + typeName(lhsTy) + "' and '" +
+                  typeName(rhsTy) + "'");
+      return nullptr;
     }
   }
 
