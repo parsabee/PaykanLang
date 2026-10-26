@@ -86,8 +86,9 @@ private:
     unsigned Outer;
   };
   /// The chain links (frontend::kMaxChain) on the deepest path down what
-  /// was parsed since the innermost ChainScope began: each binary operator,
-  /// postfix suffix and `elif` is a link over the deepest of its operands.
+  /// was parsed since the innermost ChainScope began: each binary operator
+  /// and postfix suffix is a link over the deepest of its operands (an
+  /// `elif` is a level of nesting, enterNesting).
   unsigned ChainHeight = 0;
   /// Measures the chain links of what is parsed while it lives, in parts
   /// (take()); when it ends, its height counts in the enclosing scope's.
