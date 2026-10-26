@@ -61,7 +61,8 @@ class DiagEngine {
   std::string CurrentGroup;
   std::unordered_set<std::string> SeenGroups;
   bool ExactLocations = true;
-  bool CheckGroup = true;
+  // Whether the open group is checked: used by debug builds only.
+  [[maybe_unused]] bool CheckGroup = true;
   void closeGroup();
 
 public:
