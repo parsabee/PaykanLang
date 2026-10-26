@@ -152,6 +152,9 @@ private:
   void skipToStatementBoundary();
   /// Inside a block whose '{' was consumed: skip through its matching '}'.
   void skipPastMatchingBrace();
+  /// After an if-statement's block: skip the `elif` and `else` branches
+  /// after it, each condition (balancing `()` and `[]`) and its block.
+  void skipElseTail();
   /// Inside brackets whose opener was consumed: skip to the matching closer,
   /// balancing `()`, `[]` and `{}` on the way.  The closer (or an unmatched
   /// one, or the end of the file) is left as the current token.

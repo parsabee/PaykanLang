@@ -884,7 +884,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     it applies to and its arguments, and `x += e` over `x` and `e`, counted through
     parentheses, operands and arguments (docs/grammar.md section 9,
     `frontend::kMaxChain`).  An `elif` is a level of nesting, as the `if` of an `else`
-    block: an `if` takes up to 510 of them in a function's body.
+    block: an `if` takes up to 510 of them in a function's body, and past them the rest
+    of the chain is skipped after the block one level too deep, so the limit is its only
+    error.
   - Sema, the lowering (with its analyses of the reads a call may replace) and the copies
     of a generic's body take a chain from its innermost link out, in a loop, and the
     lowering's address of a field of a struct, an element of a tuple or of an array in a

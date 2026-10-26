@@ -191,6 +191,32 @@ TEST(Recovery, NestingTooDeepInBracketsIsTheOnlyError) {
   }
 }
 
+// An `if` takes up to 510 `elif`s in a function's body.  Past them the
+// block one level too deep is skipped, and so is the rest of the chain, each
+// branch as deep or deeper, braces in its condition too: the limit is the
+// only error, where the next `elif`'s level was a second, and the statement
+// after the chain is parsed.
+TEST(Recovery, ElifsPastTheLimitAreOneError) {
+  for (int n : {510, 511, 600}) {
+    std::string src = "fn main() -> int { x = 0;\n  if x == 0 { x = 1; }";
+    for (int i = 1; i <= n; ++i)
+      src += " elif x == " + std::to_string(i) + " { x = 1; }";
+    if (n > 510)
+      src += " elif ok(fn() -> bool { return [True; 1][0]; }) { x = 1; }";
+    src += " else { x = 2; }\n  y = ; return 0; }\n";
+    auto r = parse(src);
+    std::vector<size_t> lines{3};
+    if (n > 510) {
+      lines.insert(lines.begin(), 2);
+      ASSERT_FALSE(r.Diags.empty()) << n;
+      EXPECT_EQ(r.Diags[0].Message, "nesting too deep (more than 512 levels)")
+          << n;
+    }
+    EXPECT_EQ(r.Errors, lines.size()) << n;
+    EXPECT_EQ(errorLines(r), lines) << n;
+  }
+}
+
 TEST(Recovery, NoDiagEngineFallsBackToStderr) {
   paykan::ast::ASTContext ctx;
   auto out = parseSource(ctx, "fn main() -> int { return }", nullptr);

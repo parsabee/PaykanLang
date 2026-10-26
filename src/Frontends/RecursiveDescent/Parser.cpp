@@ -461,6 +461,39 @@ void Parser::skipToMatchingCloser() {
   }
 }
 
+void Parser::skipElseTail() {
+  while (at(Tok::KwElif) || at(Tok::KwElse)) {
+    const bool last = at(Tok::KwElse);
+    consume();
+    for (unsigned depth = 0; depth > 0 || !at(Tok::LBrace); consume()) {
+      switch (kind()) {
+      case Tok::Eof:
+        return;
+      case Tok::LParen:
+      case Tok::LBracket:
+        ++depth;
+        break;
+      case Tok::RParen:
+      case Tok::RBracket:
+        if (depth > 0)
+          --depth;
+        break;
+      case Tok::Semi:
+      case Tok::RBrace:
+        if (depth == 0)
+          return; // no block: the statement's recovery goes on from here
+        break;
+      default:
+        break;
+      }
+    }
+    consume(); // the block's '{'
+    skipPastMatchingBrace();
+    if (last)
+      return;
+  }
+}
+
 void Parser::skipToStatementBoundary() {
   unsigned depth = 0;
   for (;;) {
@@ -1924,10 +1957,18 @@ Stmt *Parser::parseIfStmt() {
       errorAtCurrent("expected '{' after the 'if' condition");
       return nullptr;
     }
+    // A block one level too deep is skipped, the limit its error
+    // (parseBlock), and every branch after it is as deep or deeper: skip
+    // them whole too, so the limit is the chain's only error.
+    const bool tooDeep = Depth >= kMaxNesting;
     CompoundStmt *thenBlock = parseBlock();
     if (!thenBlock)
       return nullptr;
     branches.push_back({start, cond, thenBlock});
+    if (tooDeep) {
+      skipElseTail();
+      break;
+    }
     if (at(Tok::KwElif))
       continue;
     if (accept(Tok::KwElse)) {

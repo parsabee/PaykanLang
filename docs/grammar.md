@@ -598,7 +598,9 @@ on the way), at the next class, struct, `impl` or trait member (`fn`,
 `native`), so one file can
 report several independent errors. Past the nesting limit it skips the
 block, the brackets or the parentheses one level too deep whole, through
-their closer, so the limit is the only error the construct gives. Another
+their closer, and after an `if`'s or an `elif`'s block one level too deep
+the rest of its `elif` and `else` branches, deeper still, so the limit is
+the only error the construct gives. Another
 frontend may recover less (for example only at `;` inside a block). Any
 error makes the parse fail; a file with errors is never handed to Sema.
 
