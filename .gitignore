@@ -46,6 +46,10 @@ compile_commands.json
 # Log files
 *.log
 
+# Python bytecode (a script of scripts/ that imports another writes
+# scripts/__pycache__)
+__pycache__/
+
 # CTest's scratch directory (a ctest run from the source root)
 Testing/
 
