@@ -42,6 +42,24 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows, bool copy) {
   if (const BorrowResult *r = borrowResultOf(e))
     if (r->Mode == ast::ParamMode::View)
       return "the result of '" + r->Callee + "' is a 'view'";
+  // A field or element of a conditional's object is one of its branches'
+  // (`(if c then a else b).n`): it cannot change where either branch's
+  // could not.  Past an object on the way to the conditional, what changes
+  // is that object, which a copy of the branch would name as well.
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(placeBase(e))) {
+    for (const ast::Expr *p = e; p != te && !copy;) {
+      ast::Type *t = p->getResolvedType();
+      copy = t && ast::isa<ast::ClassType>(ast::stripOptional(t));
+      if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p))
+        p = ma->getReceiver();
+      else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p))
+        p = se->getArray();
+      else
+        p = ast::cast<ast::TupleIndexExpr>(p)->getTuple();
+    }
+    std::string why = frozenPlace(te->getTrueExpr(), borrows, copy);
+    return why.empty() ? frozenPlace(te->getFalseExpr(), borrows, copy) : why;
+  }
   const ast::Identifier *root = placeRoot(e);
   if (!root)
     return "";

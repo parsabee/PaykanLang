@@ -34,6 +34,19 @@ static inline int64_t Paykan_vcall_equals(PaykanObject *self,
               Paykan_vtable_of(self)[PAYKAN_SLOT_EQUALS])(self, other, owned);
 }
 
+// -- branch hints
+//
+// PAYKAN_UNLIKELY(x) is x, telling the compiler it is seldom true;
+// PAYKAN_COLD marks a function only such a branch calls, kept out of line.
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PAYKAN_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#define PAYKAN_COLD __attribute__((cold, noinline))
+#else
+#define PAYKAN_UNLIKELY(x) (x)
+#define PAYKAN_COLD
+#endif
+
 // -- panics
 
 #if defined(__GNUC__) || defined(__clang__)

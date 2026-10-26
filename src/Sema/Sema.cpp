@@ -4,6 +4,7 @@
 #include "Sema.h"
 #include "ASTClone.h"
 #include "Names.h"
+#include "NativeABI.h"
 #include "SemaInternal.h"
 #include "paykan/modules/ModuleResolver.h"
 
@@ -4019,9 +4020,10 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     error(node->getLocation(),
           "native function '" + node->getName() + "': " + what + " '" +
               typeName(t) +
-              "' cannot cross into C (int, float, bool, char, an enum "
-              "without fields, Str and Obj can, Str? and Obj? as a result, "
-              "and any type where a generic native function says 'T')");
+              "' cannot cross into C (int, float, bool, char, a sized "
+              "numeric type, an enum without fields, Str and Obj can, Str? "
+              "and Obj? as a result, and any type where a generic native "
+              "function says 'T')");
     ok = false;
   };
   for (size_t i = 0; i < paramTypes.size(); ++i)
@@ -4055,7 +4057,47 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
     error(node->getLocation(), "'main' cannot be a native function");
     ok = false;
   }
-  return ok;
+  return ok && checkNativeSymbol(node);
+}
+
+// A C symbol names one C function, whose signature its every declaration in
+// the program must give (or a backend would declare it twice): a native
+// function binding a symbol another one of the module binds, or one the
+// runtime defines, must bind it with the same C signature.  The same one
+// twice is fine.
+bool Sema::checkNativeSymbol(const ast::FuncDecl *node) {
+  const std::string &symbol = node->getNativeSymbol();
+  const pir::Signature sig = nativeSignature(Ctx, *node);
+  if (pir::isRuntimeSymbol(symbol)) {
+    if (const pir::Signature *rt = pir::runtimeSignature(symbol);
+        rt && *rt == sig)
+      return true;
+    error(node->getLocation(),
+          "native function '" + displayName(node->getName()) +
+              "' binds C symbol '" + symbol +
+              "', a function of the runtime, with a different signature");
+    return false;
+  }
+  const std::string file = Diags.getSourceName();
+  const std::vector<std::string> *lines = Diags.getSourceLines();
+  auto [it, fresh] =
+      NativeSymbols.try_emplace(symbol, NativeBinding{node, sig, file, lines});
+  if (fresh || it->second.Sig == sig)
+    return true;
+  const NativeBinding &first = it->second;
+  error(node->getLocation(), "native function '" +
+                                 displayName(node->getName()) +
+                                 "' binds C symbol '" + symbol + "', which '" +
+                                 displayName(first.Decl->getName()) +
+                                 "' already binds with a different signature");
+  // Where the first one is, which may be another file: the program's own
+  // native function, when the later one is an instance of a generic native
+  // function of the standard library.
+  Diags.setSourceInfo(first.File, first.Lines);
+  note(first.Decl->getLocation(),
+       "'" + displayName(first.Decl->getName()) + "' binds it here");
+  Diags.setSourceInfo(file, lines);
+  return false;
 }
 
 // Only a scalar crosses into C by value.  C borrows anything else, as a
@@ -4078,8 +4120,8 @@ bool Sema::checkNativeParamModes(const ast::FuncDecl *node,
           "native function '" + node->getName() + "': parameter '" +
               p.getName() + "' must be 'view' or 'inout' ('" + p.getName() +
               ": view " + ty +
-              "'); only int, float, bool, char and an enum without fields "
-              "cross into C by value");
+              "'); only int, float, bool, char, a sized numeric type and "
+              "an enum without fields cross into C by value");
     ok = false;
   }
   return ok;

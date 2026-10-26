@@ -12,6 +12,7 @@
 #include "ModuleName.h"
 #include "Names.h"
 #include "paykan/lowering/Lowering.h"
+#include "paykan/pir/Verifier.h"
 
 #include <string_view>
 #include <variant>
@@ -282,6 +283,28 @@ void shareInstantiations(pir::Program &program) {
       if (!f.IsExtern)
         visit(f.Body);
   }
+}
+
+bool checkNativeSymbols(const pir::Program &program, std::ostream &errs) {
+  const std::vector<pir::CSymbolClash> clashes = pir::cSymbolClashes(program);
+  for (const pir::CSymbolClash &c : clashes) {
+    const bool firstNative = pir::isNativeName(c.First->Name);
+    const bool otherNative = pir::isNativeName(c.Other->Name);
+    if (firstNative && otherNative)
+      errs << "error: native functions of modules '" << c.FirstModule->Name
+           << "' and '" << c.OtherModule->Name << "' bind C symbol '"
+           << c.Symbol << "' with different signatures\n";
+    else if (firstNative || otherNative)
+      errs << "error: a native function of module '"
+           << (firstNative ? c.FirstModule : c.OtherModule)->Name
+           << "' binds C symbol '" << c.Symbol
+           << "', a function of the runtime, with a different signature\n";
+    else
+      errs << "internal compiler error: modules '" << c.FirstModule->Name
+           << "' and '" << c.OtherModule->Name << "' declare runtime function '"
+           << c.Symbol << "' with different signatures\n";
+  }
+  return clashes.empty();
 }
 
 bool lowerProgram(const sema::SemaContext &ctx, ast::TranslationUnit *tu,

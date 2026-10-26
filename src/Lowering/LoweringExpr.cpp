@@ -476,7 +476,17 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
   ast::Type *resultTy = node->getResolvedType();
   auto canon = [&](const Val &v) { return L.canonicalize(v, resultTy); };
 
-  switch (node->getOpcode()) {
+  // A char orders by its code, 0..255: both are zero-extended, as `int<char>`
+  // is, since PIR's `cmp` on two chars orders their bytes signed.
+  const ast::BinaryOpcode op = node->getOpcode();
+  if (lhs.Ty == Type::Char && rhs.Ty == Type::Char &&
+      (op == ast::BinaryOpcode::Lt || op == ast::BinaryOpcode::Gt ||
+       op == ast::BinaryOpcode::Le || op == ast::BinaryOpcode::Ge)) {
+    lhs = L.B.cast(lhs, Type::I64, "lhs.code");
+    rhs = L.B.cast(rhs, Type::I64, "rhs.code");
+  }
+
+  switch (op) {
   case ast::BinaryOpcode::Add:
     if ((lhs.Ty == Type::Box || lhs.Ty == Type::Obj) &&
         (rhs.Ty == Type::Box || rhs.Ty == Type::Obj)) {

@@ -170,19 +170,19 @@ endif()
 # A negative number as a match pattern is one literal in the AST, `(int -1)`
 # (docs/plugins/ast-format.md): ast-text reads back the AST the source has,
 # and the program runs through it as from the source.
-set(negative ${PAYKAN_SOURCE_DIR}/samples/codegen/69_negative_patterns.pkn)
+set(negative ${PAYKAN_SOURCE_DIR}/samples/codegen/72_negative_patterns.pkn)
 run_step("paykan --emit-ast (negative patterns)" COMMAND ${paykan} --emit-ast ${negative})
 set(expected_ast "${STEP_OUTPUT}")
-file(WRITE ${WORK_DIR}/69_negative_patterns.ast "${STEP_OUTPUT}")
+file(WRITE ${WORK_DIR}/72_negative_patterns.ast "${STEP_OUTPUT}")
 run_step("paykan --frontend=ast-text --emit-ast (negative patterns)"
-    COMMAND ${paykan} --frontend=ast-text --emit-ast ${WORK_DIR}/69_negative_patterns.ast)
+    COMMAND ${paykan} --frontend=ast-text --emit-ast ${WORK_DIR}/72_negative_patterns.ast)
 if(NOT STEP_OUTPUT STREQUAL expected_ast)
     message(FATAL_ERROR "negative patterns read back through ast-text differ:\n${STEP_OUTPUT}")
 endif()
 run_step("paykan run (negative patterns)" COMMAND ${paykan} run ${negative})
 set(expected_run "${STEP_OUTPUT}")
 run_step("paykan --frontend=ast-text run (negative patterns)"
-    COMMAND ${paykan} --frontend=ast-text run ${WORK_DIR}/69_negative_patterns.ast)
+    COMMAND ${paykan} --frontend=ast-text run ${WORK_DIR}/72_negative_patterns.ast)
 if(NOT STEP_OUTPUT STREQUAL expected_run)
     message(FATAL_ERROR "negative patterns through ast-text differ:\n${STEP_OUTPUT}")
 endif()

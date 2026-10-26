@@ -157,6 +157,74 @@ fn main() -> int { return 0; })");
           "'inout' parameter 'n'"});
 }
 
+// A field of a conditional's object is a field of what one of its branches
+// holds: it cannot change where either branch's could not, through an
+// assignment, a compound one, an `inout` argument or a call of a method that
+// is not a `view fn` (a `view` parameter, a `view` local, `self` in a `view
+// fn`, nested conditionals too), and a reference it holds is not stored,
+// passed to a parameter that is not `view` or returned where a `view`'s
+// could not be.  It used to change the object the `view` holds.  Where both
+// branches can change, it can, through a captured copy's object as well; and
+// a method that changes `self` so is not told to be a `view fn`.
+TEST(ParamMode, AConditionalsObjectIsEachBranchs) {
+  auto r = semaCheck(R"(class Node {
+  n: int;
+  next: Node?;
+  fn inc() { self.n = self.n + 1; }
+  view fn peek(o: Node, k: int) -> int { (if k == 0 then self else o).n = 9; return self.n; }
+  fn setBoth(o: Node, k: int) { (if k == 0 then self else o).n = 1; }
+}
+struct S { o: Node; }
+fn bump(x: inout int) { x = x + 1; }
+fn keep(x: Node?) -> int { return 0; }
+fn out(a: view Node, b: Node, k: int) -> Node? {
+  b.next = (if k == 0 then a else b).next;
+  keep((if k == 0 then b else a).next);
+  return (if k == 0 then a else b).next;
+}
+fn f(a: view Node, b: Node, k: int) {
+  (if k == 0 then a else b).n = 7;
+  (if k == 0 then b else a).n += 1;
+  bump((if k == 0 then a else a).n);
+  (if k == 0 then a else b).inc();
+  (if k == 0 then b else (if k == 1 then b else a)).n = 1;
+  v: view = b;
+  (if k == 0 then v else b).n = 2;
+}
+fn g(a: Node, b: Node, s: S, t: S, k: int) {
+  (if k == 0 then a else b).n = 7;
+  (if k == 0 then a else b).n += 1;
+  bump((if k == 0 then a else b).n);
+  (if k == 0 then a else b).inc();
+  h = fn() { (if k == 0 then s else t).o.n = 5; (if k == 0 then s else t).o = Node(1, None); };
+  h();
+}
+fn main() -> int { return 0; })");
+  EXPECT_EQ(r.ErrorCount, 11u) << r.Diagnostics;
+  expectErrors(
+      r, {":5:42: error: 'self' is read-only in 'view fn peek'; cannot assign "
+          "to its field 'n'",
+          ":12:12: error: 'a' is a 'view' parameter; it cannot be stored",
+          ":13:8: error: 'a' is a 'view' parameter; it can only be passed to "
+          "a 'view' parameter, and parameter 1 of 'keep' is not one",
+          ":14:10: error: 'a' is a 'view' parameter; it cannot be returned",
+          ":17:3: error: 'a' is a 'view' parameter; cannot assign to its "
+          "field 'n'",
+          ":18:3: error: 'a' is a 'view' parameter; cannot assign to its "
+          "field 'n'",
+          ":19:8: error: 'a' is a 'view' parameter; it cannot be passed to "
+          "'inout' parameter 'x'",
+          ":20:3: error: 'a' is a 'view' parameter; 'inc' is not a 'view fn'",
+          ":21:3: error: 'a' is a 'view' parameter; cannot assign to its "
+          "field 'n'",
+          ":23:3: error: 'v' is a 'view' local; cannot assign to its field "
+          "'n'",
+          ":30:49: error: 's' is captured by copy by the function"});
+  EXPECT_EQ(r.Diagnostics.find("'setBoth' never changes 'self'"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
 // The arguments of an `inout` parameter of a class type: a variable or field
 // of exactly that class, so a subclass variable cannot be given another
 // subclass; not `self`, and not a `let` local, though a field of what one

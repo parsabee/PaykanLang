@@ -3,6 +3,7 @@
 // PIR text round trip (parser <-> printer) and verifier tests.
 
 #include "Programs.h"
+#include "paykan/pir/Builder.h"
 #include "paykan/pir/PIR.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Printer.h"
@@ -10,12 +11,15 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <limits>
 #include <sstream>
 #include <string>
+#include <vector>
 
 using namespace paykan::pir;
 using paykan::pir::test::kProgram;
@@ -351,6 +355,139 @@ fn @main() -> i64 {
 }
 )");
   EXPECT_NE(errs.find("outside its block"), std::string::npos) << errs;
+}
+
+// A value is visible from its definition to the end of its block, and in the
+// blocks nested there: not in a sibling branch or case, not after its if,
+// switch or while.  A while's condition values reach its body only.
+TEST(PIRVerifier, AValueIsVisibleOnlyInItsBlock) {
+  auto errs = [](const std::string &body) {
+    return verifyText("module \"m\"\nfn @main() -> i64 {\n" + body + "}\n");
+  };
+  auto outside = [](const std::string &value) {
+    return "m:@main: use of value '%" + value +
+           "' before its definition or outside its block\n";
+  };
+  EXPECT_EQ(errs("  %a = add 1, 2\n"
+                 "  if true {\n"
+                 "    %b = add %a, 1\n"
+                 "    while {\n"
+                 "      %c = add %b, 1\n"
+                 "      %d = cmp lt %c, %a\n"
+                 "      cond %d\n"
+                 "    } {\n"
+                 "      %e = add %c, %b\n"
+                 "    }\n"
+                 "  }\n"
+                 "  ret %a\n"),
+            "");
+  EXPECT_EQ(errs("  if true {\n"
+                 "    %a = add 1, 2\n"
+                 "  } else {\n"
+                 "    %b = add %a, 1\n"
+                 "  }\n"
+                 "  ret 0\n"),
+            outside("1"));
+  EXPECT_EQ(errs("  switch 1 {\n"
+                 "  case 1 {\n"
+                 "    %a = add 1, 2\n"
+                 "  }\n"
+                 "  default {\n"
+                 "    %b = add %a, 1\n"
+                 "  }\n"
+                 "  }\n"
+                 "  ret 0\n"),
+            outside("1"));
+  EXPECT_EQ(errs("  while {\n"
+                 "    %a = cmp lt 1, 2\n"
+                 "    cond %a\n"
+                 "  } {\n"
+                 "    %b = add 1, 2\n"
+                 "  }\n"
+                 "  %c = not %a\n"
+                 "  ret 0\n"),
+            outside("1"));
+  EXPECT_EQ(errs("  while {\n"
+                 "    %a = cmp lt 1, 2\n"
+                 "    cond %a\n"
+                 "  } {\n"
+                 "    %b = add 1, 2\n"
+                 "  }\n"
+                 "  ret %b\n"),
+            outside("2"));
+  // A value defined again in a nested block is reported, and after the
+  // block the first definition is visible again, with its own type.
+  EXPECT_EQ(errs("  %a.5 = add 1, 2\n"
+                 "  if true {\n"
+                 "    %b.5 = cmp eq 1, 2\n"
+                 "  }\n"
+                 "  ret %a.5\n"),
+            "m:@main: value '%5' is defined twice\n");
+}
+
+namespace {
+
+/// A program whose @main is an elif chain of n arms, built the way the
+/// lowering builds one: each arm's test is in the else block of the arm
+/// before it, so the blocks nest n deep and every earlier test's value is
+/// visible in an arm.  It is built rather than parsed: the PIR parser
+/// recurses once per block, which runs out of stack 4000 blocks deep in a
+/// sanitizer build.
+Program elifChain(size_t n) {
+  Program p;
+  Module &m = p.Modules.emplace_back();
+  m.Name = "m";
+  Function &f = m.Functions.emplace_back();
+  f.Name = "main";
+  f.Sig.Ret = Type::I64;
+  Builder b(&f);
+  const LocalId r = b.addLocal("r", Type::I64);
+  const LocalId x = b.addLocal("x", Type::I64);
+  b.store(x, Val::i64(7));
+  for (size_t i = 0; i < n; ++i) {
+    const Val k = Val::i64(static_cast<int64_t>(i));
+    const Val xi = b.load(x);
+    If *arm = b.openIf(b.cmp(CmpPred::Eq, xi, k), /*withElse=*/true);
+    b.enter(*arm->Then);
+    b.store(r, b.binary(Opcode::Add, xi, k));
+    b.leave();
+    b.enter(*arm->Else); // the next arm goes here
+  }
+  b.store(r, Val::i64(-1));
+  for (size_t i = 0; i < n; ++i)
+    b.leave();
+  b.emitRet(b.load(r));
+  return p;
+}
+
+} // namespace
+
+TEST(PIRVerifier, ALongElifChainVerifiesInTimeInProportion) {
+  // Closing a block undoes what the block defined, so one chain of 4000 arms
+  // takes about as long as sixteen chains of 250, where copying the visible
+  // values at every block made it take thirteen times as long (seconds, for
+  // 4000 arms).  The time measured is the processor time the verifier
+  // spends, which a parallel ctest preempting it does not stretch.
+  auto seconds = [](size_t arms, int times) {
+    const Program p = elifChain(arms);
+    double best = 0;
+    for (int run = 0; run < 3; ++run) {
+      const std::clock_t start = std::clock();
+      for (int i = 0; i < times; ++i) {
+        const std::vector<VerifyError> errors = verify(p);
+        EXPECT_TRUE(errors.empty()) << formatErrors(errors);
+      }
+      const double took =
+          static_cast<double>(std::clock() - start) / CLOCKS_PER_SEC;
+      best = run == 0 ? took : std::min(best, took);
+    }
+    return best;
+  };
+  const double small = seconds(250, 16);
+  const double large = seconds(4000, 1);
+  EXPECT_LT(large, 4 * small)
+      << small << " s for 16 x 250 arms, then " << large << " s for 4000";
+  EXPECT_LT(large, 1.0) << large << " s for 4000 arms";
 }
 
 TEST(PIRVerifier, RejectsTypeMismatches) {
@@ -1235,6 +1372,80 @@ fn @main() -> i64 {
   EXPECT_FALSE(isRuntimeName("$rt."));
   EXPECT_EQ(runtimeSymbol("$rt.Paykan_println"), "Paykan_println");
   EXPECT_EQ(runtimeName("Paykan_println"), "$rt.Paykan_println");
+}
+
+// A C symbol names one C function, with one signature: a native extern
+// (`$c.X`) and the runtime's (`$rt.X`) of one module must agree, and so must
+// any two of a program's modules (findings 39, new-F3-1).  Before, the
+// verifier let the pair through and the MLIR pipeline failed on the call.
+TEST(PIRVerifier, OneCSymbolHasOneSignature) {
+  const char *clash = R"(module "main"
+extern fn @$rt.PaykanString_concat(obj, obj) -> obj
+extern fn @$c.PaykanString_concat(i64) -> i64
+fn @main() -> i64 {
+  %r = call @$c.PaykanString_concat(1)
+  ret %r
+}
+)";
+  EXPECT_EQ(verifyText(clash),
+            "main: native extern '@$c.PaykanString_concat' is declared (i64) "
+            "-> i64 but runtime extern '@$rt.PaykanString_concat' of the "
+            "same C symbol (obj, obj) -> obj\n");
+  // The runtime's own signature is fine.
+  EXPECT_EQ(verifyText(R"(module "main"
+extern fn @$rt.PaykanString_length(obj) -> i64
+extern fn @$c.PaykanString_length(obj) -> i64
+fn @main() -> i64 {
+  ret 0
+}
+)"),
+            "");
+
+  // Across modules: each module's extern is valid on its own.
+  const char *twoModules = R"(module "main"
+extern fn @$c.llabs(f64) -> f64
+fn @main() -> i64 {
+  %r = call @$c.llabs(-2.5)
+  ret 0
+}
+module "na"
+extern fn @$c.llabs(i64) -> i64
+extern fn @$rt.fmod(f64, f64) -> f64
+fn @ca(%x: i64) -> i64 {
+  %r = call @$c.llabs(%x)
+  ret %r
+}
+module "nb"
+extern fn @$c.fmod(i64, i64) -> i64
+extern fn @$c.llabs(i64) -> i64
+fn @cb(%x: i64) -> i64 {
+  %r = call @$c.fmod(%x, %x)
+  ret %r
+}
+)";
+  EXPECT_EQ(verifyText(twoModules),
+            "na: extern fn '@$c.llabs' is declared (i64) -> i64 but module "
+            "'main' declares '@$c.llabs' of the same C symbol (f64) -> f64\n"
+            "nb: extern fn '@$c.fmod' is declared (i64, i64) -> i64 but "
+            "module 'na' declares '@$rt.fmod' of the same C symbol (f64, "
+            "f64) -> f64\n"
+            "nb: extern fn '@$c.llabs' is declared (i64) -> i64 but module "
+            "'main' declares '@$c.llabs' of the same C symbol (f64) -> "
+            "f64\n");
+  ParseError err;
+  auto p = parseProgram(twoModules, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  std::vector<CSymbolClash> clashes = cSymbolClashes(*p);
+  ASSERT_EQ(clashes.size(), 3u);
+  EXPECT_EQ(clashes[0].Symbol, "llabs");
+  EXPECT_EQ(clashes[0].FirstModule->Name, "main");
+  EXPECT_EQ(clashes[0].OtherModule->Name, "na");
+  EXPECT_EQ(clashes[1].Symbol, "fmod");
+  EXPECT_EQ(clashes[1].First->Name, "$rt.fmod");
+  EXPECT_EQ(clashes[1].Other->Name, "$c.fmod");
+  EXPECT_EQ(clashes[2].OtherModule->Name, "nb");
 }
 
 // -- Sized numeric types (docs/design/sized-types.md)

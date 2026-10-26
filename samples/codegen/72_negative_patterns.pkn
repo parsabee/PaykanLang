@@ -1,4 +1,4 @@
-// 69 — negative numbers as match patterns
+// 72 — negative numbers as match patterns
 // Exercises: `-1` and `-2.5` as the patterns of a value-mode match, one
 //            literal each (docs/grammar.md §6): on int, on float (where `-0.0`
 //            matches `0.0`), on a sized type (`-128` on an i8), with a space

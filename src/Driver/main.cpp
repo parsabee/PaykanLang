@@ -683,6 +683,8 @@ int main(int argc, char *argv[]) {
           opts.EmitPkm ? paykan::lowering::World::Open
                        : paykan::lowering::World::Closed))
     return fail("lowering to PIR failed");
+  if (!paykan::lowering::checkNativeSymbols(program, std::cerr))
+    return EXIT_FAILURE;
   auto errors = paykan::pir::verify(program);
   if (opts.EmitPkm) {
     // A library module has no entry point; everything else about the

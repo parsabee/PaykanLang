@@ -1,0 +1,91 @@
+// Isolates: fields of a conditional `(if c then a else b)` of class type,
+// the object one of its branches gives (a variable's, or a new one the
+// statement then drops), on both branches:
+//   * read: a `Str` and an `int` field, a `weak` field, an element of a
+//     tuple field, a tuple and a struct field whole, joined with `+`;
+//   * assigned: an `int`, a `Str`, a tuple, a struct and an optional field;
+//   * passed to an `inout` parameter (an `int` and a `Str` field), and
+//     matched (an optional field);
+//   * a method called on it, as before.
+//
+// Runtime sites: the objects and Strs the fields hold, the box each
+// conditional gives (released after the statement), and the new object in
+// one branch.
+//
+// Expected under --track-heap: live blocks : 0.
+
+import ::io;
+
+// expect-stdout: a a
+// expect-stdout: a1
+// expect-stdout: ta10
+// expect-stdout: ta21
+// expect-stdout: True
+// expect-stdout: hi a 1
+// expect-stdout: b b
+// expect-stdout: c2
+// expect-stdout: tb20
+// expect-stdout: tb43
+// expect-stdout: False
+// expect-stdout: hi b 2
+// expect-stdout: 5 bb tbb 7
+// expect-stdout: 3 bb!
+// expect-stdout: next bb!
+
+struct Point {
+  x: int;
+  y: int;
+}
+
+class Node {
+  name: Str;
+  n: int;
+  t: (int, Str);
+  p: Point;
+  next: Node?;
+  weak back: Node?;
+
+  view fn greet(k: int) -> Str { return "hi " + self.name + " " + Str(k); }
+}
+
+fn bump(x: inout int) {
+  x = x + 1;
+}
+
+fn shout(s: inout Str) {
+  s = s + "!";
+}
+
+fn main() -> int {
+  a = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
+  b = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
+  b.back = a;
+  for k in 1..=2 {
+    x = (if k == 1 then a else b).name;
+    io::println(x + " " + (if k == 1 then a else b).name);
+    io::println((if k == 1 then a
+        else Node("c", 3, (30, "tc"), Point(5, 6), None, None)).name + Str(k));
+    io::println((if k == 1 then a else b).t.1
+        + Str((if k == 1 then a else b).t.0));
+    t = (if k == 1 then a else b).t;
+    p = (if k == 1 then a else b).p;
+    io::println(t.1 + Str(p.y) + Str((if k == 1 then a else b).p.x));
+    io::println((if k == 1 then a else b).back == None);
+    io::println((if k == 1 then a else b).greet(k));
+  }
+  (if a.n == 1 then a else b).n = 5;
+  (if a.n == 5 then b else a).name = "bb";
+  (if a.n == 5 then b else a).t = (21, "tbb");
+  (if a.n == 5 then b else a).p = Point(7, 8);
+  (if a.n == 5 then a else b).next = b;
+  io::println(Str(a.n) + " " + b.name + " " + b.t.1 + " " + Str(b.p.x));
+  bump((if a.n == 5 then b else a).n);
+  shout((if a.n == 5 then b else a).name);
+  io::println(Str(b.n) + " " + b.name);
+  match (if a.n == 5 then a else b).next {
+    nx: Node { io::println("next " + nx.name); }
+    _ { io::println("no next"); }
+  }
+  a.next = None;
+  return 0;
+}

@@ -23,7 +23,8 @@
 //   a returned value goes into a slot the function returns at its end.  A
 //   function whose returns are all in tail position needs none of it.
 // * A switch becomes scf.index_switch, which each target makes its own
-//   switch.
+//   switch; a case of INT64_MAX or INT64_MIN, which its set of cases cannot
+//   hold, is an scf.if around it.
 
 #include "PIRToStandard.h"
 
@@ -42,6 +43,7 @@
 #include <mlir/IR/SymbolTable.h>
 
 #include <cstdio>
+#include <limits>
 #include <optional>
 #include <string>
 #include <vector>
@@ -196,6 +198,11 @@ private:
   /// is a type: the switch's value of that type, else null.
   Value lowerSwitchWith(P::SwitchOp op, Type result,
                         llvm::function_ref<Value(Region *)> fill);
+  /// The dispatch of @p v among @p cases, each run by its region in
+  /// @p regions, else @p rest (null: none), for lowerSwitchWith.
+  Value lowerCases(Value v, ArrayRef<int64_t> cases, ArrayRef<Region *> regions,
+                   Region *rest, Type result,
+                   llvm::function_ref<Value(Region *)> fill);
   /// Fill @p to, a block of an scf op, with @p fill(@p from) and the yield
   /// of what it returns (a result-less scf.if's blocks have theirs).
   void fillCase(Block *to, Region *from, Type result,
@@ -371,8 +378,12 @@ LogicalResult ModuleLowering::run() {
     std::string link = FunctionNames[f.getSymName()];
     erase.push_back(f);
     if (f.isExternal()) {
-      runtime(link, f.getFunctionType(),
-              !f.getModule() && !::paykan::pir::isNativeName(f.getSymName()));
+      const bool native = ::paykan::pir::isNativeName(f.getSymName());
+      func::FuncOp decl =
+          runtime(link, f.getFunctionType(), !f.getModule() && !native);
+      // A native function of the runtime's symbol is the runtime's.
+      if (native && !decl->hasAttr(kRuntimeAttr))
+        decl->setAttr(kNativeAttr, UnitAttr::get(Ctx));
       continue;
     }
     auto fn = func::FuncOp::create(B, Loc, link, f.getFunctionType());
@@ -609,7 +620,6 @@ void FunctionLowering::fillCase(Block *to, Region *from, Type result,
 
 Value FunctionLowering::lowerSwitchWith(
     P::SwitchOp op, Type result, llvm::function_ref<Value(Region *)> fill) {
-  Value v = lookup(op.getValue());
   // An i64 is its own case value; a char or a bool (i8, i1) is zero-extended,
   // as its cases are.
   SmallVector<int64_t> cases;
@@ -619,6 +629,45 @@ Value FunctionLowering::lowerSwitchWith(
                         ? static_cast<int64_t>(value.getZExtValue())
                         : value.getSExtValue());
   }
+  SmallVector<Region *> regions;
+  for (Region &r : op.getCaseRegions())
+    regions.push_back(&r);
+  Region &rest = op.getDefaultRegion();
+  return lowerCases(lookup(op.getValue()), cases, regions,
+                    rest.empty() ? nullptr : &rest, result, fill);
+}
+
+Value FunctionLowering::lowerCases(Value v, ArrayRef<int64_t> cases,
+                                   ArrayRef<Region *> regions, Region *rest,
+                                   Type result,
+                                   llvm::function_ref<Value(Region *)> fill) {
+  // scf.index_switch keeps its cases in a DenseSet, whose empty and tombstone
+  // keys are INT64_MAX and INT64_MIN: a case of either (an i64's) is an
+  // scf.if on `v == case` instead, around the dispatch among the others.
+  const auto *key = llvm::find_if(cases, [](int64_t c) {
+    return c == std::numeric_limits<int64_t>::max() ||
+           c == std::numeric_limits<int64_t>::min();
+  });
+  if (key != cases.end()) {
+    const size_t i = key - cases.begin();
+    Value isCase = arith::CmpIOp::create(
+        B, Loc, arith::CmpIPredicate::eq, v,
+        arith::ConstantIntOp::create(B, Loc, v.getType(), *key));
+    auto branch =
+        scf::IfOp::create(B, Loc, result ? TypeRange(result) : TypeRange(),
+                          isCase, /*withElseRegion=*/true);
+    fillCase(branch.thenBlock(), regions[i], result, fill);
+    SmallVector<int64_t> otherCases(cases);
+    SmallVector<Region *> otherRegions(regions);
+    otherCases.erase(otherCases.begin() + i);
+    otherRegions.erase(otherRegions.begin() + i);
+    fillCase(branch.elseBlock(), nullptr, result, [&](Region *) {
+      return lowerCases(v, otherCases, otherRegions, rest, result, fill);
+    });
+    return result ? branch.getResult(0) : Value();
+  }
+  if (cases.empty())
+    return fill(rest);
   Value index =
       v.getType().getIntOrFloatBitWidth() < 64
           ? arith::IndexCastUIOp::create(B, Loc, B.getIndexType(), v)
@@ -627,11 +676,9 @@ Value FunctionLowering::lowerSwitchWith(
   auto sw = scf::IndexSwitchOp::create(B, Loc,
                                        result ? TypeRange(result) : TypeRange(),
                                        index, cases, cases.size());
-  for (auto [to, from] : llvm::zip(sw.getCaseRegions(), op.getCaseRegions()))
-    fillCase(&to.emplaceBlock(), &from, result, fill);
-  Region &rest = op.getDefaultRegion();
-  fillCase(&sw.getDefaultRegion().emplaceBlock(),
-           rest.empty() ? nullptr : &rest, result, fill);
+  for (auto [to, from] : llvm::zip(sw.getCaseRegions(), regions))
+    fillCase(&to.emplaceBlock(), from, result, fill);
+  fillCase(&sw.getDefaultRegion().emplaceBlock(), rest, result, fill);
   return result ? sw.getResult(0) : Value();
 }
 

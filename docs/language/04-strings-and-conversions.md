@@ -133,8 +133,8 @@ freed is in [Memory](16-memory.md#strings-arrays-and-tuples).
 ### Characters and bytes
 
 A `char` is one byte, written in single quotes: `'a'`, `'\n'`, `'\''`, `'\\'`. Characters
-compare with `==`, `!=`, `<`, `<=`, `>` and `>=` by their byte value, which makes
-range checks such as "is this a digit?" easy:
+compare with `==`, `!=`, `<`, `<=`, `>` and `>=` by their byte value, `0` to `255` as
+`int(c)` reads it, which makes range checks such as "is this a digit?" easy:
 
 ```pkn
 import ::io;

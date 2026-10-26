@@ -34,4 +34,23 @@ std::vector<VerifyError> verify(const Module &m);
 /// One line per error.
 std::string formatErrors(const std::vector<VerifyError> &errors);
 
+/// Two module-less externs of a program that name one C symbol with
+/// different signatures: a native function's (`$c.<symbol>`) and another
+/// module's, or a native function's and the runtime's (`$rt.<symbol>`).
+/// A C function has one signature, and a backend declares it once, so
+/// verify() rejects such a program.
+struct CSymbolClash {
+  std::string Symbol;
+  /// The first extern that names the symbol, and its module.
+  const Module *FirstModule = nullptr;
+  const Function *First = nullptr;
+  /// A later one with another signature, and its module.
+  const Module *OtherModule = nullptr;
+  const Function *Other = nullptr;
+};
+
+/// Every module-less extern of @p p that names the C symbol of an earlier
+/// one with another signature, in the order of the modules.
+std::vector<CSymbolClash> cSymbolClashes(const Program &p);
+
 } // namespace paykan::pir
