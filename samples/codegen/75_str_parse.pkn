@@ -6,7 +6,8 @@
 //            string"): unwrapping with `match`, the range of each type, a
 //            sign refused by every unsigned type, an f32 or f16 text that
 //            rounds to infinity being None while one below the range rounds
-//            to 0, a literal and the parse of its text agreeing, and a
+//            to 0, a literal and the parse of its text agreeing, an
+//            integer text rounded once into an f32 at any size, and a
 //            receiver that is a literal, a local, a struct's field, a
 //            class's field, `self`'s field, a `view` parameter, a list's
 //            element, a concatenation and a call's result.
@@ -18,6 +19,7 @@
 // expect-stdout: 65504 None None 0 0.0999756
 // expect-stdout: True False None None
 // expect-stdout: agree agree agree agree agree
+// expect-stdout: agree agree agree agree
 // expect-stdout: 200 65535 65535 255 None True 128 42 7
 
 import ::io;
@@ -96,6 +98,14 @@ fn main() -> int {
       + same(3.4028235e38, "3.4028235e38".toF32()) + " "
       + same(1e-46, "1e-46".toF32()) + " " + same(16777217, "16777217".toF32())
       + " " + same(0.1, "0.1".toF32()));
+
+  // An integer text is rounded once into an f32, at any size, as `f32(u)`
+  // is: 2^63 + 2^39 + 1 and 2^64 + 2^40 + 1, whose f64s are midpoints, and
+  // 2^128 - 2^103 - 1, just below the one above the largest f32.
+  io::println(same(9223373136366403584.0, "9223372586610589697".toF32()) + " "
+      + same(-9223373136366403584.0, "-9223372586610589697".toF32()) + " "
+      + same(18446746272732807168.0, "18446745173221179393".toF32()) + " "
+      + same(3.4028235e38, "340282356779733661637539395458142568447".toF32()));
 
   // Any receiver: it is borrowed for the parse, a temporary one released.
   r = Reading("200");

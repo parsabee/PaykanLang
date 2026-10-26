@@ -247,7 +247,8 @@ int64_t PaykanString_parse_uint(PaykanObject *str, int64_t *out);
 int64_t PaykanString_parse_float(PaykanObject *str, double *out);
 /// `s.toF32()`: PaykanString_parse_float's value rounded to the nearest f32
 /// (C's `(float)strtod`), stored as the f64 slot holds it; an integer text
-/// beyond 2^53 is that integer rounded once instead.  Refused (0) when finite
+/// (a sign and digits) is that integer rounded once instead, at any
+/// magnitude, as `f32(n)` rounds one.  Refused (0) when finite
 /// text rounds to infinity in f32 (from 2^128 - 2^103, the midpoint above
 /// FLT_MAX); `inf` and `nan` are kept, and a value below the f32 range is 0
 /// or a subnormal.

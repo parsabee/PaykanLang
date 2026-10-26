@@ -505,7 +505,9 @@ text with many significant digits (13 or more) lying very close to the point hal
 between two neighbouring values of the type. `x: f32 = 1.0000000596046448;` and
 `"1.0000000596046448".toF32()` are both `1`, where rounding the text once gives
 `1.0000001`. A literal and the parse of the same text always give the same value. An
-integer text becomes an `f32` or `f16` in one rounding.
+integer text, of any size, becomes an `f32` or `f16` in one rounding, as `f32(n)` rounds an
+integer: `"9223372586610589697".toF32()` is 2^63 + 2^40, where the `float` nearest the text
+would round to 2^63.
 
 A type does not parse a string by being called with it: `int(s)` and `int<Str>(s)` are an
 error that names the method, and so are `u8(s)`, `float(s)`, `bool(s)` and the others.

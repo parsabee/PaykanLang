@@ -119,7 +119,9 @@ refuses one outside the type's range.  An unsigned type's reads an unsigned
 An `f32` or `f16` parse is the `f64` nearest the text rounded to the type,
 the value the literal of that text has, and refuses a finite text that
 rounds to infinity, whose literal is an error; a text below the type's
-range is 0 or a subnormal, as its literal is.
+range is 0 or a subnormal, as its literal is.  An integer text is instead
+the integer rounded once, at any size (`PaykanString_parse_f32` rounds its
+digits, not its `f64`), as `f32(n)` rounds an `int` or `unsigned`.
 
 ## Open questions
 

@@ -317,8 +317,9 @@ TEST(StrParse, Floats) {
 }
 
 // The value of an f32 or f16 text is the float nearest the text rounded to
-// the type (C's `(float)strtod`), and an integer text beyond 2^53 is that
-// integer rounded once.
+// the type (C's `(float)strtod`), and an integer text is that integer
+// rounded once, at any size (2^63 + 2^39 + 1 and 2^64 + 2^40 + 1, whose
+// f64s are midpoints, as f32(u) rounds one).
 TEST(StrParse, SizedFloatRounding) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
@@ -327,12 +328,25 @@ TEST(StrParse, SizedFloatRounding) {
       v: f32 { io::println(float(v) == 1152921642045800448.0); }
       None { }
     }
+    match "9223372586610589697".toF32() {
+      v: f32 {
+        match "9223372586610589697".toUnsigned() {
+          u: unsigned { io::println(v == f32(u) && float(v) == 9223373136366403584.0); }
+          None { }
+        }
+      }
+      None { }
+    }
+    match "-18446745173221179393".toF32() {
+      v: f32 { io::println(float(v) == -18446746272732807168.0); }
+      None { }
+    }
     match "16777217".toF32() { v: f32 { io::println(float(v) == 16777216.0); } None { } }
     match "1.00048828125".toF16() { v: f16 { io::println(float(v) == 1.0); } None { } }
     match "2049".toF16() { v: f16 { io::println(float(v) == 2048.0); } None { } }
   )"));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
-  EXPECT_EQ(r.StdOut, "True\nTrue\nTrue\nTrue\nTrue\n");
+  EXPECT_EQ(r.StdOut, "True\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\n");
   g.expectNoLeaks("StrParse.SizedFloatRounding");
 }
 

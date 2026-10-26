@@ -1373,9 +1373,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   below the type's range still rounds to 0, as the literal does.
 - The `f32` literal `3.4028235677973366e38`, the midpoint above the largest `f32`, compiled
   and was `inf`. It is now `the literal 3.40282e+38 does not fit in 'f32'`.
-- `f32(n)` of an `int` or `unsigned` above 2^53, and such an integer literal in an `f32`
-  slot, were rounded twice, through `float` (`f32(1152921573326323713)` was 2^60). They are
-  now rounded once (2^60+2^37), as docs/design/sized-types.md says.
+- `f32(n)` of an `int` or `unsigned` above 2^53, such an integer literal in an `f32` slot,
+  and the `f32` parse of such an integer text (`f32("1152921573326323713")`), were rounded
+  twice, through `float` (`f32(1152921573326323713)` was 2^60). They are now rounded once
+  (2^60+2^37), as docs/design/sized-types.md says; `s.toF32()` rounds an integer text of
+  any size once (`"9223372586610589697".toF32()` is 2^63+2^40, where it was 2^63).
 
 ## [0.2.0] - 2026-10-20
 

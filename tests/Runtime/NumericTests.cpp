@@ -196,6 +196,57 @@ TEST(Numeric, ParseF32RoundsTheFloatOfTheText) {
   EXPECT_EQ(f32Of("16777217"), 16777216.0);
 }
 
+// An integer text outside the int range is rounded once too, as `f32(u)`
+// rounds an `unsigned` and as one beyond uint64 would be: its f64 can be the
+// midpoint between two f32s, which a second rounding breaks to the even one.
+TEST(Numeric, ParseF32RoundsAWideIntegerTextOnce) {
+  // 2^63 + 2^39 + 1, whose f64 is the midpoint 2^63 + 2^39: 2^63 + 2^40,
+  // where (float)strtod gives 2^63.
+  EXPECT_EQ(f32Of("9223372586610589697"),
+            std::ldexp(1.0, 63) + std::ldexp(1.0, 40));
+  EXPECT_EQ(f32Of("-9223372586610589697"),
+            -(std::ldexp(1.0, 63) + std::ldexp(1.0, 40)));
+  EXPECT_EQ(f32Of("-9223372036854775809"), -std::ldexp(1.0, 63));
+  // 2^64 + 2^40 + 1 and 2^100 + 2^76 + 1, beyond uint64.
+  EXPECT_EQ(f32Of("18446745173221179393"),
+            std::ldexp(1.0, 64) + std::ldexp(1.0, 41));
+  EXPECT_EQ(f32Of("18446745173221179392"), std::ldexp(1.0, 64)); // a tie
+  EXPECT_EQ(f32Of("1267650675786093127411026624513"),
+            std::ldexp(1.0, 100) + std::ldexp(1.0, 77));
+  // 2^128 - 2^103 - 1 is just below the midpoint above FLT_MAX, which is
+  // its f64: once rounded it is FLT_MAX, where its f64 overflows.
+  EXPECT_EQ(f32Of("340282356779733661637539395458142568447"),
+            static_cast<double>(FLT_MAX));
+  for (const char *big :
+       {"340282356779733661637539395458142568448",
+        "-340282356779733661637539395458142568448",
+        "999999999999999999999999999999999999999",
+        "1000000000000000000000000000000000000000000000000000"})
+    EXPECT_TRUE(refused(PaykanString_parse_f32, big)) << big;
+  // Leading zeros do not count, and a sign is kept on zero.
+  EXPECT_EQ(f32Of("+0000000000000000000000000000000000000000000000000001"),
+            1.0);
+  EXPECT_EQ(f32Of("00"), 0.0);
+  EXPECT_FALSE(std::signbit(f32Of("+0")));
+  EXPECT_TRUE(std::signbit(f32Of("-000")));
+  for (const char *bad : {"+", "-", "+-1", "1-", "12a", " 12", "12 "})
+    EXPECT_TRUE(refused(PaykanString_parse_f32, bad)) << bad;
+  EXPECT_TRUE(refused(PaykanString_parse_f32, std::string("1\0"
+                                                          "2",
+                                                          3)));
+  // Every uint64 text is f32(u): rounded once, as Paykan_uint_to_f32 does.
+  uint64_t u = UINT64_C(0x9E3779B97F4A7C15);
+  for (int i = 0; i < 20000; ++i) {
+    u ^= u << 13;
+    u ^= u >> 7;
+    u ^= u << 17;
+    const uint64_t n = u >> (i % 40); // magnitudes from 2^24 to 2^64
+    EXPECT_EQ(f32Of(std::to_string(n)),
+              Paykan_uint_to_f32(static_cast<int64_t>(n)))
+        << n;
+  }
+}
+
 TEST(Numeric, ParseF32KeepsInfAndNanAndRefusesOverflow) {
   EXPECT_TRUE(std::isinf(f32Of("inf")));
   EXPECT_GT(f32Of("inf"), 0.0);
