@@ -1027,6 +1027,44 @@ TEST(Class, DefaultInitNeedsEveryField) {
                                                         << r.Diagnostics;
 }
 
+// A subclass's default `__init__` takes the superclass constructor's
+// parameters by the names they are declared with (finding 84: `arg1`,
+// `arg2`, ... when none was `view` or `inout`), up a chain of default ones
+// and from a written `__init__`; one a field also names gets a `_`.
+TEST(Class, DefaultInitNamesTheSuperclassParameters) {
+  auto r = semaCheck(R"(
+    class Point { x: int; y: int; }
+    class Named : Point { name: Str; }
+    class Tagged : Named { tag: int; }
+    class Base { n: int; }
+    impl Base { fn __init__(start: int, label: Str) { self.n = start; } }
+    class Derived : Base { label: int; }
+    class Square : Base {}
+    class Cube : Square { d: int; }
+    impl Cube { fn __init__(w: int) { self.d = w; } }
+    fn main() -> int {
+      a = Named(1, 2);
+      b = Tagged(1, 2, "p");
+      c = Derived(1);
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"function 'Named' expects 3 argument(s), got 2 (it has no '__init__', "
+        "so it takes x: int, y: int, name: Str)",
+        "function 'Tagged' expects 4 argument(s), got 3 (it has no "
+        "'__init__', so it takes x: int, y: int, name: Str, tag: int)",
+        "function 'Derived' expects 3 argument(s), got 1 (it has no "
+        "'__init__', so it takes start: int, label_: Str, label: int)",
+        "'__init__' in class 'Cube' must call '__super__' as its first "
+        "statement because its superclass 'Square' has fields to initialize "
+        "(its default '__init__' takes start: int, label: Str)"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+}
+
 // An `__init__` of a subclass calls the superclass's default one when it
 // has fields to set; one of a class with none, up the chain, does nothing.
 TEST(Class, SuperCallOfADefaultInit) {

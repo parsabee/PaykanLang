@@ -1282,6 +1282,10 @@ private:
   uint8_t MethodFlags;
   ParamModes Modes;               // `n: inout int`
   bool ModulePrivateInit = false; // the type's `___init__` (Names.h)
+  // The parameters' names as the declaration writes them, for diagnostics
+  // (the calling convention is the Modes'): empty for a method declared
+  // without them, a builtin's or an imported class's.
+  std::vector<const std::string *> ParamNames;
 
 public:
   MethodDecl(SourceLocation loc, const std::string &internedName, Type *retTy,
@@ -1295,6 +1299,14 @@ public:
   size_t getNumParams() const { return ParamTypes.size(); }
   const ParamModes &getParamModes() const { return Modes; }
   void setParamModes(ParamModes modes) { Modes = std::move(modes); }
+  /// The name parameter @p i is declared with, or "" when the method has
+  /// none at hand.
+  std::string getParamName(size_t i) const {
+    return i < ParamNames.size() ? *ParamNames[i] : std::string();
+  }
+  void setParamNames(std::vector<const std::string *> names) {
+    ParamNames = std::move(names);
+  }
 
   bool isPrivate() const { return MethodFlags & Private; }
   bool isVirtual() const { return !isPrivate() && !isImpl(); }

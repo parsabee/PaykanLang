@@ -831,6 +831,11 @@ function 'Point' expects 2 argument(s), got 1 (it has no '__init__', so it takes
 ```
 
 - A class with no fields, and no superclass with any, is built with no arguments: `Empty()`.
+- A subclass's names the superclass constructor's arguments as it declares them: `Named(3,
+  4)` is `function 'Named' expects 3 argument(s), got 2 (it has no '__init__', so it takes
+  x: int, y: int, name: Str)`, and one a field of the subclass also names gets a `_` (`x_:
+  int`). An imported superclass's are `arg1`, `arg2`, ... unless one of them is `view` or
+  `inout`: its module records no other names.
 - A generic class's infers its type arguments from the fields: with `class Box<T> { v: T; }`,
   `Box(3)` is a `Box<int>` (see [Generics](13-generics.md)).
 - Writing an `__init__` replaces the default one.

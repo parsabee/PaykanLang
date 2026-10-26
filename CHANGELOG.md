@@ -1288,6 +1288,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   variant's wrong field type, a variant written with arguments it has no fields for, the
   type arguments a variant or a generic function's call cannot infer (`'$lib::g::pick'`)
   and their hints; they say `lib::g::R::Ok` and `lib::g::pick` now.
+- A subclass's default `__init__` names the superclass constructor's parameters as they
+  are declared: `Named(1, 2)` for `class Named : Point { name: Str; }` with `class Point {
+  x: int; y: int; }` said `function 'Named' expects 3 argument(s), got 2 (it has no
+  '__init__', so it takes arg1: int, arg2: int, name: Str)`, and says `... so it takes x:
+  int, y: int, name: Str` now, through a chain of default ones and from a written
+  `__init__` too, as does the error of an `__init__` that does not call `__super__` (`its
+  default '__init__' takes ...`).  The names are the method's own
+  (`MethodDecl::ParamNames`), kept apart from its parameters' modes, which the calling
+  convention reads and which named the parameters only when one was `view` or `inout`.  An
+  imported superclass's are still `arg1`, `arg2`, ... unless one of them is `view` or
+  `inout`, its module recording no other names (docs/language/05-classes.md, "The default
+  `__init__`").
 
 ## [0.2.0] - 2026-10-20
 

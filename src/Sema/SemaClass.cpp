@@ -697,7 +697,9 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
   std::vector<ast::Stmt *> body;
 
   // The superclass constructor's arguments, named as it names them where
-  // that is free (a field of this class may take the name).
+  // that is free (a field of this class may take the name).  An imported
+  // class's names are its modes', which it has only when one parameter is
+  // `view` or `inout`; `argN` stands for a name it does not have.
   ast::ClassType *super = ct->getSuperClass();
   if (const ast::MethodDecl *superInit =
           super && super != Ctx.getObjTy()
@@ -706,7 +708,9 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
     const ast::ParamModes &modes = superInit->getParamModes();
     std::vector<ast::Expr *> args;
     for (size_t i = 0; i < superInit->getNumParams(); ++i) {
-      std::string name = modes.name(i);
+      std::string name = superInit->getParamName(i);
+      if (name.empty())
+        name = modes.name(i);
       if (name.empty())
         name = "arg" + std::to_string(i + 1);
       while (!used.insert(name).second)
@@ -870,6 +874,10 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   ast::ParamModes modes = ast::paramModes(method->getParams());
   modes.Result = method->getResultMode();
   mdecl->setParamModes(std::move(modes));
+  std::vector<const std::string *> names;
+  for (const ast::Param &p : method->getParams())
+    names.push_back(p.Name);
+  mdecl->setParamNames(std::move(names));
   mdecl->setModulePrivateInit(method->isModulePrivateInit());
   return mdecl;
 }
