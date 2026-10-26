@@ -2337,18 +2337,26 @@ std::vector<std::string> otherNames(const std::filesystem::path &dir,
 
 // `build` without -o drops only a `.pkn` or `.pk` extension: a source file
 // with another, or none, gets `.out` added, so the executable replaces
-// neither it (`noext`) nor another source (`main.pkn` for `main.pkn.bak`).
+// neither it (`noext`) nor another source (`main.pkn` for `main.pkn.bak`);
+// and so does one whose name without it would still have one, in any case
+// (`main.pkn.pkn` gave `main.pkn`, another source).
 TEST(Driver, BuildsDefaultOutputNeverReplacesASource) {
   REQUIRE_BACKEND();
   auto dir = freshDir("build_default");
-  const char *const sources[] = {"noext", "main.pkn", "main.pkn.bak",
-                                 "short.pk"};
+  const char *const sources[] = {"noext",     "main.pkn",     "main.pkn.bak",
+                                 "short.pk",  "main.pkn.pkn", "x.pk",
+                                 "x.pk.pkn",  "y.pkn",        "y.pkn.pk",
+                                 "z.PKN.pkn", "z.PKN"};
   for (const char *name : sources)
     std::ofstream(dir / name) << kHello;
   for (const auto &[source, output] :
        {std::pair{"noext", "noext.out"},
         std::pair{"main.pkn.bak", "main.pkn.bak.out"},
-        std::pair{"short.pk", "short"}}) {
+        std::pair{"short.pk", "short"},
+        std::pair{"main.pkn.pkn", "main.pkn.pkn.out"},
+        std::pair{"x.pk.pkn", "x.pk.pkn.out"},
+        std::pair{"y.pkn.pk", "y.pkn.pk.out"},
+        std::pair{"z.PKN.pkn", "z.PKN.pkn.out"}}) {
     auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
                          " build " + source + " 2>&1");
     EXPECT_EQ(rc, 0) << source << ": " << out;

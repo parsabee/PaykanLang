@@ -1002,8 +1002,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or another case on a case-insensitive file system): `paykan: the output './same.pkn' is
   the input file 'same.pkn' (choose another with -o)`, exit status 1.  `build`'s default
   output drops only a `.pkn` or `.pk` extension and adds `.out` to a name with neither
-  (`noext.out`, `main.pkn.bak.out`); the driver names it, so the backends have no default
-  of their own (docs/language/17-the-paykan-command.md, "Commands").
+  (`noext.out`, `main.pkn.bak.out`) and to one that would still end in one
+  (`main.pkn.pkn.out`, where `build main.pkn.pkn` replaced `main.pkn`); the driver names
+  it, so the backends have no default of their own (docs/language/17-the-paykan-command.md,
+  "Commands").
 - `paykan pkm dump`, `pkm check` and `pkm extract --object` aborted on a directory
   (`terminate called after throwing an instance of 'std::__ios_failure'`, exit status 134).
   A module file is now read only when it is a regular file, and read whole with

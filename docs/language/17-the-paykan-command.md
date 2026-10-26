@@ -19,9 +19,10 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
   program's: what `main` returned, or 134 when the program panicked.
 - **`build`** compiles the program into a native executable named by `-o`, or else written
   to the current directory and named after the source file without its `.pkn` (or `.pk`)
-  extension: `prog.pkn` gives `prog`, and a name with neither gets `.out` added, so `prog`
-  gives `prog.out`. `build` takes no program arguments, so its options may also come after
-  the file.
+  extension: `prog.pkn` gives `prog`. A name with neither gets `.out` added, so `prog`
+  gives `prog.out`, and so does one that would still end in one (`main.pkn.pkn` gives
+  `main.pkn.pkn.out`), so the executable never takes a source file's name. `build` takes
+  no program arguments, so its options may also come after the file.
 - **`pkm`** inspects a module file (see [Module Files](15-modules.md#module-files)): `dump`
   prints it (`--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads` prints one
   part and `--section=all`, the default, every one; `tmpl` adds the text of the generic

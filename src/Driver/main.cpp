@@ -32,6 +32,7 @@
 #include "paykan/plugin_api.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -355,14 +356,24 @@ std::string overwritesInput(const std::string &output, const Options &opts) {
   return {};
 }
 
-/// The executable `build` writes without -o, in the current directory: the
-/// source file's name without its `.pkn` (or `.pk`) extension, or with
-/// `.out` added to a name that has neither (`prog` gives `prog.out`, and
-/// `prog.pkn.bak` gives `prog.pkn.bak.out`, not the name of another
-/// source).
+/// The executable `build` writes without -o, in the current directory.  A
+/// source file named with a `.pkn` (or `.pk`) extension gives its name
+/// without it (`prog.pkn` gives `prog`), unless what is left still has
+/// one, in either case for a file system that ignores case; that name and
+/// any other get `.out` added (`prog` gives `prog.out`, `prog.pkn.bak`
+/// `prog.pkn.bak.out` and `main.pkn.pkn` `main.pkn.pkn.out`), so the
+/// executable never takes the name of another source.
 std::string defaultExecutable(const std::string &input) {
   std::filesystem::path name = std::filesystem::path(input).filename();
-  if (name.extension() == ".pkn" || name.extension() == ".pk")
+  auto sourceExtension = [](const std::filesystem::path &p, bool anyCase) {
+    std::string ext = p.extension().string();
+    if (anyCase)
+      std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+      });
+    return ext == ".pkn" || ext == ".pk";
+  };
+  if (sourceExtension(name, false) && !sourceExtension(name.stem(), true))
     return name.stem().string();
   return name.string() + ".out";
 }
