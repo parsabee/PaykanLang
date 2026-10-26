@@ -279,6 +279,11 @@ inline constexpr const char *kPaykanTrackHeapEnv = "PAYKAN_TRACK_HEAP";
 /// `:`-separated directories of prebuilt `.pkm` modules, searched after the
 /// --module-path directories.
 inline constexpr const char *kPaykanModulePathEnv = "PAYKAN_MODULE_PATH";
+/// Set by the plugin host for a program it runs with no arguments, which it
+/// starts with one empty argv[0]: the runtime's Paykan_args_new then gives
+/// an empty slice, and unsets it (src/Runtime/IO.c spells it too).  Private:
+/// not for users to set.
+inline constexpr const char *kPaykanHostNoArgsEnv = "__PAYKAN_HOST_NO_ARGS";
 
 // -- Module system
 

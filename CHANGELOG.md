@@ -1058,6 +1058,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first arguments, the value split at white space with no quoting; the linker's flags
   follow them, before the objects (docs/language/17-the-paykan-command.md, "Environment
   variables").
+- An executable lost all its arguments, `args[0]` included, when `PAYKAN_NO_ARGS` was set
+  in its environment, to any value: `PAYKAN_NO_ARGS=0 ./prog x y` gave `main` an empty
+  `args`, and `args[0]` panicked.  The variable, meant only for the plugin host's
+  `run_executable` with no arguments, was public, and every program the executable
+  started inherited it.  The host now sets a private one, and the runtime takes away only
+  the one empty `argv[0]` the host starts such a program with, and unsets the variable
+  once it has read it (on the systems that have `unsetenv`).
 
 ## [0.2.0] - 2026-10-20
 

@@ -980,8 +980,7 @@ void addEntryPoint(Unit &u) {
     << "  }\n";
   std::string call = std::string(kPaykanMain) + "()";
   if (u.MainTakesArgs) {
-    // args: view Str[], a slice of the arguments' strings (Paykan_args_new,
-    // which also honours PAYKAN_NO_ARGS).
+    // args: view Str[], a slice of the arguments' strings (Paykan_args_new).
     c << "  int64_t args_len;\n"
       << "  PaykanShared **args = " << names::kPaykanArgsNew
       << "(argc, argv, &args_len);\n";

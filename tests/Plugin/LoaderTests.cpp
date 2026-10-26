@@ -255,8 +255,9 @@ TEST_F(PluginLoader, BackendBuildsAndRunsThroughTheHost) {
   auto r = paykan("--no-plugins " + flag("plugin", good) +
                   " --backend=test-good run " + quote(kSample) + " a b");
   EXPECT_EQ(r.Code, 3) << r.Err; // argc
-  EXPECT_EQ(r.Out,
-            "arg 0: " + kSample + "\narg 1: a\narg 2: b\ntrack-heap: off\n");
+  EXPECT_EQ(r.Out, "arg 0: " + kSample +
+                       "\narg 1: a\narg 2: b\nargs slice: 3 (no-args variable "
+                       "unset)\ntrack-heap: off\n");
   auto t = paykan("--no-plugins " + flag("plugin", good) +
                   " --backend=test-good --track-heap run " + quote(kSample));
   EXPECT_EQ(t.Code, 1) << t.Err;
@@ -265,16 +266,19 @@ TEST_F(PluginLoader, BackendBuildsAndRunsThroughTheHost) {
 
 // run_executable with no arguments gives the program one empty argv[0] on
 // every system (finding 81: the documentation promised argc == 0, which Linux
-// turns into an empty argv[0] and other systems refuse), and an executable
-// that cannot be started is an error, where the host reported it as exit
-// status 127.
+// turns into an empty argv[0] and other systems refuse), which the runtime
+// gives a Paykan main as no argument; the private variable that says so is
+// unset once read (finding 76), so the program's own children never see it.
+// An executable that cannot be started is an error, where the host reported
+// it as exit status 127.
 TEST_F(PluginLoader, RunExecutableWithNoArgumentsOrNoExecutable) {
   std::string good = plugin("good", "good");
   std::string cmd = "--no-plugins " + flag("plugin", good) +
                     " --backend=test-good run " + quote(kSample) + " a b";
   auto none = paykan(cmd, "PAYKAN_TEST_PLUGIN_RUN=no-args");
   EXPECT_EQ(none.Code, 1) << none.Err; // argc
-  EXPECT_EQ(none.Out, "arg 0: \ntrack-heap: off\n");
+  EXPECT_EQ(none.Out, "arg 0: \nargs slice: 0 (no-args variable unset)\n"
+                      "track-heap: off\n");
   auto missing = paykan(cmd, "PAYKAN_TEST_PLUGIN_RUN=missing");
   EXPECT_EQ(missing.Code, 1) << missing.Err;
   EXPECT_EQ(missing.Out, "");

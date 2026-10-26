@@ -27,8 +27,9 @@
  *
  * The full backend (the default variant) exercises the whole host table:
  * emit(SOURCE) writes the PIR; emit(EXECUTABLE) and run() write a small C
- * program that prints its arguments and $PAYKAN_TRACK_HEAP and exits with
- * argc, and link it with the host's link_executable (run() then runs it with
+ * program that prints its arguments, the size of the args slice the runtime
+ * gives a Paykan main and $PAYKAN_TRACK_HEAP and exits with argc, and link
+ * it with the host's link_executable (run() then runs it with
  * run_executable).  $PAYKAN_TEST_PLUGIN_FAIL makes emit fail: "diag" with an
  * error diagnostic (and a warning first), anything else silently (status 5).
  * $PAYKAN_TEST_PLUGIN_RUN changes what run() runs: "no-args" the program
@@ -86,8 +87,14 @@ static const char *write_program(PaykanSession *s, char *buf, size_t size) {
       "#include \"Runtime.h\"\n"
       "int main(int argc, char **argv) {\n"
       "  const char *track = getenv(\"PAYKAN_TRACK_HEAP\");\n"
+      "  int64_t count = 0;\n"
+      "  PaykanShared **args = Paykan_args_new(argc, argv, &count);\n"
       "  for (int i = 0; i < argc; ++i)\n"
       "    printf(\"arg %d: %s\\n\", i, argv[i]);\n"
+      "  printf(\"args slice: %lld (no-args variable %s)\\n\",\n"
+      "         (long long)count,\n"
+      "         getenv(\"__PAYKAN_HOST_NO_ARGS\") ? \"set\" : \"unset\");\n"
+      "  Paykan_args_free(args, count);\n"
       "  printf(\"track-heap: %s\\n\", track ? track : \"off\");\n"
       "  return argc;\n"
       "}\n";

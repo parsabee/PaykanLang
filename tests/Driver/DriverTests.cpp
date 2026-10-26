@@ -2749,3 +2749,27 @@ TEST(Driver, BuildRunsTheCompilerCCNamesWithItsArguments) {
   }
   std::filesystem::remove_all(dir);
 }
+
+// A program's arguments are its own whatever the environment says (finding
+// 76): PAYKAN_NO_ARGS, set to anything (even 0), used to strip every argument,
+// argv[0] included, so `args[0]` panicked.  The plugin host's private
+// variable, the only one left, takes away only the one empty argv[0] the host
+// starts a program with when it has no arguments.
+TEST(Driver, TheEnvironmentLeavesAProgramsArgumentsAlone) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("no_args");
+  std::ofstream(dir / "args.pkn")
+      << "import ::io;\nfn main(args: view Str[]) -> int {\n"
+         "  io::println(Str(args.len()) + \" \" + args[0]);\n  return 0;\n}\n";
+  auto b = run("cd " + dir.string() + " && " + paykanRun() +
+               " build args.pkn -o args 2>&1");
+  ASSERT_EQ(b.exitCode, 0) << b.out;
+  for (const char *env :
+       {"PAYKAN_NO_ARGS=0", "PAYKAN_NO_ARGS=1", "__PAYKAN_HOST_NO_ARGS=1"}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + env + " ./args x y 2>&1");
+    EXPECT_EQ(rc, 0) << env << ": " << out;
+    EXPECT_EQ(out, "3 ./args\n") << env;
+  }
+  std::filesystem::remove_all(dir);
+}

@@ -211,9 +211,9 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
 * **C's `main`** sets the runtime up as `paykan run` does: with
   `PAYKAN_TRACK_HEAP` set, the tracking allocator before the program and the
   heap statistics after it; the command-line arguments as the Paykan `main`'s
-  `args` slice (`Paykan_args_new`, which also honours `PAYKAN_NO_ARGS`, and
-  `Paykan_args_free` after it returns), or `(void)argc; (void)argv;` when it
-  takes none; and the Paykan `main`'s result as the exit status.
+  `args` slice (`Paykan_args_new`, and `Paykan_args_free` after it returns),
+  or `(void)argc; (void)argv;` when it takes none; and the Paykan `main`'s
+  result as the exit status.
 * **Nothing unused.**  Values nothing reads are dropped before the
   conversion, a constant nothing reads is not emitted, a call result nothing
   reads is not bound, and a parameter a function does not read is consumed

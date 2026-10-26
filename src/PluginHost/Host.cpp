@@ -181,7 +181,7 @@ int runExecutable(PaykanSession *s, const char *path, const char *const *args,
   if (trackHeap)
     env.emplace_back(names::kPaykanTrackHeapEnv, "1");
   if (!numArgs)
-    env.emplace_back("PAYKAN_NO_ARGS", "1");
+    env.emplace_back(names::kPaykanHostNoArgsEnv, "1");
   std::cout.flush();
   std::cerr.flush();
   std::ostringstream errs;

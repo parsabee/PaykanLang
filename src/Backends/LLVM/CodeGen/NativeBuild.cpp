@@ -88,7 +88,7 @@ Status addEntryPoint(llvm::Module &module) {
   llvm::Value *argCount = nullptr;
   if (takesArgs) {
     // args: view Str[] -- a slice of the arguments' strings
-    // (Paykan_args_new, which also honours PAYKAN_NO_ARGS).
+    // (Paykan_args_new).
     llvm::Value *countSlot = b.CreateAlloca(i64, nullptr, "args.len.addr");
     llvm::Value *args =
         b.CreateCall(fn(names::kPaykanArgsNew, ptr, {i32, ptr, ptr}),
