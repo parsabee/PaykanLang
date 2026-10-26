@@ -461,14 +461,25 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   return r;
 }
 
+std::string pkmDumpSectionList(std::string_view sep, std::string_view lastSep) {
+  std::string out;
+  const size_t n = std::size(kPkmDumpSections);
+  for (size_t i = 0; i < n; ++i) {
+    if (i > 0)
+      out += i + 1 == n ? lastSep : sep;
+    out += kPkmDumpSections[i];
+  }
+  return out;
+}
+
 void printUsage(std::ostream &os, const char *argv0) {
   os << "OVERVIEW: Paykan language compiler\n\n"
      << "USAGE: " << argv0
      << " [options] [run] <source-file> [program arguments]\n"
-     << "       " << argv0 << " [options] build <source-file> -o <output>\n"
+     << "       " << argv0 << " [options] build <source-file> [-o <output>]\n"
      << "       " << argv0
-     << " pkm dump <file.pkm> [--section=manifest|sections|iface|symidx|"
-        "code|obj|payloads]\n"
+     << " pkm dump <file.pkm> [--section=" << pkmDumpSectionList("|", "|")
+     << "]\n"
      << "       " << argv0 << " pkm check <file.pkm>\n"
      << "       " << argv0
      << " pkm extract --object <file.pkm> [-o <file.o>]\n\n"

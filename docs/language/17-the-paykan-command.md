@@ -24,8 +24,9 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
   the file.
 - **`pkm`** inspects a module file (see [Module Files](15-modules.md#module-files)): `dump`
   prints it (`--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads` prints one
-  part; `tmpl` adds the text of the generic templates, `code` is exactly the module's PIR
-  text, and `obj` says who compiled its code, for which target), `check` prints whether this
+  part and `--section=all`, the default, every one; `tmpl` adds the text of the generic
+  templates, `code` is exactly the module's PIR text, and `obj` says who compiled its code,
+  for which target), `check` prints whether this
   `paykan` can use it and exits with 0 when it can, and `extract --object` writes the
   module's compiled code as a native object file (`-o <file>`, or the module file's name
   with `.o`, at the `-O<n>` level): what a program's `--emit-c` C is linked with.

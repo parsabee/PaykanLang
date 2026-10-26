@@ -7,6 +7,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace paykan::driver {
@@ -145,6 +146,17 @@ struct ParseResult {
 /// `pkm`); the next is the source file (after `pkm`: the verb, then the
 /// module file), and everything after it belongs to the program.
 ParseResult parseCommandLine(int argc, const char *const *argv);
+
+/// The parts `pkm dump --section=<name>` prints, in the order `--help` and
+/// the error for another name list them: `all`, the default, is every part
+/// and `code` the PIR text of the module's code.
+inline constexpr std::string_view kPkmDumpSections[] = {
+    "manifest", "sections", "iface",    "tmpl", "code",
+    "symidx",   "obj",      "payloads", "all"};
+
+/// The names of kPkmDumpSections, @p sep between two of them and @p lastSep
+/// before the last one.
+std::string pkmDumpSectionList(std::string_view sep, std::string_view lastSep);
 
 /// Print the usage text.
 void printUsage(std::ostream &os, const char *argv0);

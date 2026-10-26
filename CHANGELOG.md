@@ -1096,6 +1096,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backend, which runs programs with LLVM's JIT, builds executables (linking them with the
   system C compiler) and prints C11 with `--emit-c`.  Comments in the build files and the
   scripts that named the c and llvm backends or LLVM 17 name the mlir backend and LLVM 22.
+- `paykan --help` showed `build <source-file> -o <output>`, though `-o` is optional, and
+  listed `pkm dump`'s sections without `tmpl` and `all`, which the command takes.  It now
+  shows `build <source-file> [-o <output>]` and
+  `--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads|all`, the list the error
+  for an unknown section prints, both made from one table.
 
 ## [0.2.0] - 2026-10-20
 

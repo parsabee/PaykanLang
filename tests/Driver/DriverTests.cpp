@@ -2859,3 +2859,37 @@ TEST(Driver, ModuleFilesNameTheirFrontendAndItsVersion) {
   }
   std::filesystem::remove_all(dir);
 }
+
+// `--help` shows `build`'s -o as optional, and lists every part `pkm dump
+// --section=` prints, as its error for an unknown one does; each of them
+// is accepted (finding 88).
+TEST(Driver, HelpListsEveryPkmDumpSection) {
+  REQUIRE_BACKEND();
+  auto help = run(std::string(kPaykan) + " --help 2>&1");
+  ASSERT_EQ(help.exitCode, 0) << help.out;
+  EXPECT_NE(help.out.find(" [options] build <source-file> [-o <output>]\n"),
+            std::string::npos)
+      << help.out;
+  EXPECT_NE(help.out.find(" pkm dump <file.pkm> [--section=manifest|sections|"
+                          "iface|tmpl|code|symidx|obj|payloads|all]\n"),
+            std::string::npos)
+      << help.out;
+  auto dir = freshDir("dump_sections");
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  auto cd = "cd " + dir.string() + " && ";
+  auto emit = run(cd + paykanRun() + " --emit-pkm lib.pkn 2>&1");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  for (const char *section : {"manifest", "sections", "iface", "tmpl", "code",
+                              "symidx", "obj", "payloads", "all"}) {
+    auto [rc, out] =
+        run(cd + kPaykan + " pkm dump --section=" + section + " lib.pkm 2>&1");
+    EXPECT_EQ(rc, 0) << section << ": " << out;
+  }
+  auto bad = run(cd + kPaykan + " pkm dump --section=nope lib.pkm 2>&1");
+  EXPECT_EQ(bad.exitCode, 1) << bad.out;
+  EXPECT_EQ(bad.out, "paykan: unknown section 'nope' (expected manifest, "
+                     "sections, iface, tmpl, code, symidx, obj, payloads or "
+                     "all)\n");
+  std::filesystem::remove_all(dir);
+}

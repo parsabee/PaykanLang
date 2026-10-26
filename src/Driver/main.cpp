@@ -539,9 +539,8 @@ int pkmTool(const Options &opts) {
   else if (sec == "payloads")
     dopts.Which = S::Payloads;
   else if (!codeOnly)
-    return fail("unknown section '" + sec +
-                "' (expected manifest, sections, iface, tmpl, code, "
-                "symidx, obj, payloads or all)");
+    return fail("unknown section '" + sec + "' (expected " +
+                paykan::driver::pkmDumpSectionList(", ", " or ") + ")");
   if (!codeOnly)
     pkm::dump(*file, std::cout, dopts);
   bool ok = true;
