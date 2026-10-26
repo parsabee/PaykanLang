@@ -484,7 +484,8 @@ m = ident<Node?>(n);               // optional type argument
 
 A tuple type argument is a value like any tuple: `Box<(int, Str)>`'s field
 holds the tuple's elements in place, a `T` parameter is a copy of one, and a
-tuple meets a `T: Show` bound.
+tuple meets a `T: Show` bound when its elements do (`(int, Str)` does, a tuple
+holding a function value does not).
 
 Because each instantiation is checked separately, a `T?` in a template is
 an optional of whatever `T` is: `Slot<int>` below holds an `int?` (an

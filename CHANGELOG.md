@@ -627,7 +627,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on every path, and now are `operands of '<' have mismatched types 'char' and 'int'` (`'int'
   and 'char'` for `100 > c`), with the line and caret of the compare.  Compare with a char
   (`c < 'd'`) or the byte value (`int(c) < 100`) (docs/language/02-basics.md, "Relational &
-  Equality").  No program that compiled is rejected.
+  Equality").  No program that ran or built is rejected, though `--check-only` accepted
+  these.
 - A trait requirement's parameters follow a function's rules: two of one name (`trait T {
   fn m(x: int, x: int); }`) are `duplicate parameter 'x' in method 'm' of trait 'T'`, and
   one named like a type (`fn m(u8: int)`, a class's name) is `'u8' is a type name and
@@ -681,7 +682,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`parameter 'v' cannot have type 'void'`), a method's parameter named `self`, and a
   duplicate parameter, at the second.  A `param` of the AST interchange format has its
   location, which is optional: one without it is at its function's or lambda's
-  (docs/plugins/ast-format.md).
+  (docs/plugins/ast-format.md).  `--emit-ast` writes it, so a reader of the format takes it
+  (the 0.2.0 format had none).
 
 ### Removed
 

@@ -185,8 +185,9 @@ imported with `import ::io;`.
 | `io::printerrln(v)`  | Print to stderr, then a newline         |
 
 Each is `fn print<T: Show>(value: view T)`: it takes **exactly one** argument of any type
-that implements `Show` (an object, a `Str`, a number, a `bool`, a `char`, a tuple, a struct
-or an optional of one) and writes its `toString()`. Paykan has no variadic functions or
+that implements `Show` (an object, a `Str`, a number, a `bool`, a `char`, and a tuple, a
+struct, an enum or an optional whose parts all do, so not one holding a function value)
+and writes its `toString()`. Paykan has no variadic functions or
 overloading, so there is no multi-argument form: `io::println(n)` prints a number on its
 own, and to print several pieces on one line, convert the numbers with `Str(...)` and join
 the pieces with `+` (string concatenation).
