@@ -715,7 +715,7 @@ Val ModuleLowering::takeSharedOwnership(ast::Expr *expr, const Val &val,
   // Fresh +1 boxes are owned as-is; a borrowed box (plain ref-typed field
   // read) is retained because its slot keeps its own reference.
   if (!exprProducesFreshBox(expr))
-    emitRetain(val, lend && isLentRead(expr));
+    emitRetain(val, lend && isLentRead(expr), expr->getResolvedType());
   return val;
 }
 
@@ -1918,7 +1918,8 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr, bool lend) {
     if (declared && holdsBox(id->getName())) {
       Val sharedPtr = loadVarBox(id->getName());
       const bool inout = CurrentScope->inoutType(id->getName()) == Type::Box;
-      emitRetain(sharedPtr, lend && (inout ? isLentRead(id) : !isHeldRead(id)));
+      emitRetain(sharedPtr, lend && (inout ? isLentRead(id) : !isHeldRead(id)),
+                 id->getResolvedType());
       return sharedPtr;
     }
   }

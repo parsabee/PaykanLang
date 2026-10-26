@@ -27,6 +27,12 @@ inline constexpr const char *kMainModuleAttr = "pir.main";
 /// has none: it is declared from its signature.
 inline constexpr const char *kRuntimeAttr = "pir.runtime";
 
+/// The attribute the lowering puts on a call of Paykan_retain or
+/// Paykan_release whose box is never null: a `retain nonnull`'s
+/// (docs/pir.md §6), or a release of the value one retains.  The inline
+/// fast path of each target makes no test for null.
+inline constexpr const char *kNonNullAttr = "pir.nonnull";
+
 /// The attribute the lowering puts on a native function's declaration
 /// (`$c.<symbol>`, #198): the C path declares it from its signature, out of
 /// the way of a C header's declaration of the symbol.

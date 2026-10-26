@@ -14,6 +14,7 @@
 #include "ToLLVM.h"
 
 #include "Dialect/PIRDialect.h"
+#include "Lowering/PIRToStandard.h"
 #include "Names.h"
 #include "Runtime.h"
 
@@ -558,8 +559,10 @@ struct ConvertToLLVMPass
 /// C path calls: a null box does nothing, a retain of a count below the
 /// limit increments the object's strong count, and a release of a count
 /// above one decrements it.  Anything else makes the call, which panics at
-/// the limit or destroys the object.  At every -O: the code is there
-/// before LLVM optimises anything.
+/// the limit or destroys the object.  A call the shared lowering marks
+/// kNonNullAttr, of a box that is never null, makes no test for null, as
+/// Paykan_retain_nonnull_inline and Paykan_release_nonnull_inline.  At
+/// every -O: the code is there before LLVM optimises anything.
 struct InlineReferenceCountsPass
     : public PassWrapper<InlineReferenceCountsPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(InlineReferenceCountsPass)
@@ -590,6 +593,8 @@ struct InlineReferenceCountsPass
   ///   fast:  store n +/- 1; br done
   ///   slow:  call; br done
   ///   done:  rest
+  ///
+  /// with `head: ...; br check` for a call marked kNonNullAttr.
   static void expand(LLVM::CallOp call, bool retain) {
     MLIRContext *ctx = call.getContext();
     Location loc = call.getLoc();
@@ -606,11 +611,15 @@ struct InlineReferenceCountsPass
     Block *fast = b.createBlock(slow);
 
     b.setInsertionPointToEnd(head);
-    Value null = LLVM::ZeroOp::create(b, loc, ptr);
-    Value isNull =
-        LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::eq, box, null);
-    LLVM::CondBrOp::create(b, loc, isNull, ValueRange(), ValueRange(),
-                           DenseI32ArrayAttr(), done, check);
+    if (call->removeAttr(kNonNullAttr)) {
+      LLVM::BrOp::create(b, loc, ValueRange(), check);
+    } else {
+      Value null = LLVM::ZeroOp::create(b, loc, ptr);
+      Value isNull =
+          LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::eq, box, null);
+      LLVM::CondBrOp::create(b, loc, isNull, ValueRange(), ValueRange(),
+                             DenseI32ArrayAttr(), done, check);
+    }
 
     b.setInsertionPointToEnd(check);
     Value at = LLVM::GEPOp::create(b, loc, ptr, b.getI8Type(), box,

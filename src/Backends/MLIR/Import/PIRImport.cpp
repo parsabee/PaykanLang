@@ -480,7 +480,7 @@ private:
     case P::Opcode::FnAddr:
       return define(in, FnAddrOp::create(B, Loc, in.Callee));
     case P::Opcode::Retain:
-      RetainOp::create(B, Loc, arg(0));
+      RetainOp::create(B, Loc, arg(0), in.NonNull);
       return;
     case P::Opcode::Release:
       ReleaseOp::create(B, Loc, arg(0));

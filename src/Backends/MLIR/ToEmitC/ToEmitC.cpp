@@ -306,14 +306,19 @@ struct RuntimeDeclLowering : CPattern<func::FuncOp> {
   }
 };
 
-/// The function a call of runtime function @p callee calls: Runtime.h's
-/// inline fast path of Paykan_retain and Paykan_release, the function
-/// itself for any other.
-StringRef calledRuntime(StringRef callee) {
+/// The function a call @p op of a runtime function calls: Runtime.h's
+/// inline fast path of Paykan_retain and Paykan_release, with no test for
+/// null when the shared lowering marks the box never null (kNonNullAttr);
+/// the function itself for any other.
+StringRef calledRuntime(func::CallOp op) {
+  StringRef callee = op.getCallee();
+  const bool nonnull = op->hasAttr(kNonNullAttr);
   if (callee == names::kPaykanRetain)
-    return names::kPaykanRetainInline;
+    return nonnull ? names::kPaykanRetainNonNullInline
+                   : names::kPaykanRetainInline;
   if (callee == names::kPaykanRelease)
-    return names::kPaykanReleaseInline;
+    return nonnull ? names::kPaykanReleaseNonNullInline
+                   : names::kPaykanReleaseInline;
   return callee;
 }
 
@@ -345,7 +350,7 @@ struct CallLowering : CPattern<func::CallOp> {
         runtime && result && isa<emitc::PointerType>(result) ? ptr() : result;
     auto call = emitc::CallOpaqueOp::create(
         r, loc, callResult ? TypeRange{callResult} : TypeRange{},
-        runtime ? calledRuntime(op.getCallee()) : op.getCallee(), args);
+        runtime ? calledRuntime(op) : op.getCallee(), args);
     if (voided)
       emitc::VerbatimOp::create(r, loc, r.getStringAttr("(void){};"),
                                 call.getResults());

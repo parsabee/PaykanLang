@@ -143,7 +143,11 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
   §12): the LLVM path expands each call into the count's test, its
   increment or decrement in place, and the call for the rest; the C path
   calls Runtime.h's `static inline` `Paykan_retain_inline` and
-  `Paykan_release_inline`, which do the same.
+  `Paykan_release_inline`, which do the same.  A `retain nonnull`'s call
+  (`pir.retain nonnull`, of a box that is never null), and a release of
+  the same value, carry the attribute `pir.nonnull`: the LLVM path makes no
+  test for null there, and the C path calls
+  `Paykan_retain_nonnull_inline` or `Paykan_release_nonnull_inline`.
 * **Objects.**  Every class's layout is computed once, as C lays out the
   object (docs/pir.md §5: the 16-byte header, then the fields at their
   alignment): a field access is the object's address plus the field's

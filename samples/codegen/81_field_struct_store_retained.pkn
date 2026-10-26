@@ -1,0 +1,70 @@
+// 81 — a field written through an object a variable or a capture holds
+// Exercises: a struct or fixed-size array field assigned through an object
+//            read from a field into a variable, captured by a lambda, or
+//            read in a loop, and an optional one, on every path.  The retain
+//            of a value whose type is a class that is not optional makes no
+//            test for null (docs/pir.md §6, `retain nonnull`): with one,
+//            GCC's -Warray-bounds at -O1 and above followed the null path
+//            into the field's write, and the strict C build failed.
+// expect-stdout: field: 8
+// expect-stdout: capture: 8 8
+// expect-stdout: loop: 2
+// expect-stdout: optional: 5 None
+
+import ::io;
+
+struct P {
+  a: int;
+  b: int;
+  c: int;
+}
+
+class C {
+  p: P;
+  xs: int[3];
+}
+
+class H {
+  c: C;
+  o: C?;
+}
+
+fn set(h: H) {
+  d = h.c;
+  d.p = P(7, 8, 9);
+}
+
+fn setEach(hs: H[3]) -> int {
+  n = 0;
+  for i in 0..3 {
+    d = hs[i].c;
+    d.xs = [i, i, i];
+    n = n + d.xs[1];
+  }
+  return n - 1;
+}
+
+fn setOptional(h: H) -> Str {
+  match h.o {
+    e: C {
+      e.p = P(4, 5, 6);
+      return Str(e.p.b);
+    }
+    None { return "None"; }
+  }
+}
+
+fn main() -> int {
+  h = H(C(P(1, 2, 3), [1, 2, 3]), C(P(1, 2, 3), [1, 2, 3]));
+  set(h);
+  io::println("field: " + Str(h.c.p.b));
+  c = h.c;
+  k = fn() { c.p = P(7, 8, 9); c.xs = [7, 8, 9]; };
+  k();
+  io::println("capture: " + Str(c.p.b) + " " + Str(c.xs[1]));
+  hs = [h, H(C(P(0, 0, 0), [0, 0, 0]), None), h];
+  io::println("loop: " + Str(setEach(hs)));
+  none = H(C(P(0, 0, 0), [0, 0, 0]), None);
+  io::println("optional: " + setOptional(h) + " " + setOptional(none));
+  return 0;
+}

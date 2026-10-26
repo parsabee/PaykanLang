@@ -98,6 +98,8 @@ const RuntimeSig kRuntimeSigs[] = {
     {"getenv", {{kPtr}, kPtr}},
     {kPaykanRetainInline, {{kBox}, kVoid}},
     {kPaykanReleaseInline, {{kBox}, kVoid}},
+    {kPaykanRetainNonNullInline, {{kBox}, kVoid}},
+    {kPaykanReleaseNonNullInline, {{kBox}, kVoid}},
     {"memmove", {{kPtr, kPtr, kI64}, kPtr}},
     {"memcpy", {{kPtr, kPtr, kI64}, kPtr}},
 };

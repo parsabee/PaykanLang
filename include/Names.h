@@ -310,9 +310,14 @@ inline constexpr const char *kPaykanWeakRelease = "Paykan_weak_release";
 inline constexpr const char *kPaykanRetain = "Paykan_retain";
 inline constexpr const char *kPaykanRelease = "Paykan_release";
 // Their fast paths, Runtime.h's static inline functions (not ABI symbols):
-// what the C of --emit-c calls instead.
+// what the C of --emit-c calls instead, and for a box that is never null
+// (a `retain nonnull`'s, docs/pir.md §6) the ones that make no test for it.
 inline constexpr const char *kPaykanRetainInline = "Paykan_retain_inline";
 inline constexpr const char *kPaykanReleaseInline = "Paykan_release_inline";
+inline constexpr const char *kPaykanRetainNonNullInline =
+    "Paykan_retain_nonnull_inline";
+inline constexpr const char *kPaykanReleaseNonNullInline =
+    "Paykan_release_nonnull_inline";
 
 // Tracking heap allocator.  Generated code allocates object structs through
 // kPaykanMalloc too, so its allocations are counted with the runtime's own

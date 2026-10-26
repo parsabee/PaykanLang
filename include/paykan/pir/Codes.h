@@ -83,7 +83,7 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     // 53 kStableLoadCode.
     // Whether a box parameter was handed over (docs/pir.md §3).
     {Opcode::Owned, 54, "owned"},
-    // 55 kOwnershipCode, 56 kLendCode, 57-255 reserved.
+    // 55 kOwnershipCode, 56 kLendCode, 57 kNonNullCode, 58-255 reserved.
 };
 
 struct TypeEntry {
@@ -120,6 +120,10 @@ inline constexpr uint8_t kOwnershipCode = 55;
 /// The code written before a `retain`'s opcode when it is a `retain lend`
 /// (docs/pir.md §6): no opcode has it.
 inline constexpr uint8_t kLendCode = 56;
+
+/// The code written before a `retain`'s opcode, after a lend mark, when it
+/// is a `retain nonnull` (docs/pir.md §6): no opcode has it.
+inline constexpr uint8_t kNonNullCode = 57;
 
 namespace detail {
 

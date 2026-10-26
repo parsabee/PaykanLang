@@ -575,6 +575,52 @@ TEST(PIRMLIR, PanicGuardsAreNoExits) {
   EXPECT_EQ(braceDepth(twelve), braceDepth(one)) << twelve;
 }
 
+// A `retain nonnull`, of a box that is never null (docs/pir.md §6), and a
+// release of the same value call Runtime.h's fast paths that test no box
+// for null; a release of another value, a load of the slot the box was
+// stored in, calls the one that does (SW-14).
+TEST(PIRMLIR, ANonNullRetainCallsTheFastPathsWithNoNullTest) {
+  const char *const text = R"(module "main"
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+cstr @.s = "s" len 1
+
+fn @main() -> i64 {
+  local %l: box
+  %o = call @$rt.PaykanString_new(@.s, 1)
+  %b = box %o
+  retain nonnull %b
+  release %b
+  store %l, %b
+  %c = load %l
+  release %c
+  ret 0
+}
+)";
+  auto count = [](const std::string &in, const std::string &what) {
+    size_t n = 0;
+    for (size_t at = in.find(what); at != std::string::npos;
+         at = in.find(what, at + what.size()))
+      ++n;
+    return n;
+  };
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  std::string scf = scfText(text, *ctx, err);
+  ASSERT_FALSE(scf.empty()) << err;
+  expectRoundTrip(scf, *ctx);
+  EXPECT_EQ(count(scf, "{pir.nonnull}"), 2u) << scf;
+
+  std::unique_ptr<mlir::MLIRContext> cctx;
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string c = emitCText(text, cctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod);
+  EXPECT_EQ(count(c, "Paykan_retain_nonnull_inline("), 1u) << c;
+  EXPECT_EQ(count(c, "Paykan_release_nonnull_inline("), 1u) << c;
+  EXPECT_EQ(count(c, "Paykan_release_inline("), 1u) << c;
+  EXPECT_EQ(count(c, "Paykan_retain_inline("), 0u) << c;
+}
+
 /// A program that prints a string of @p n bytes: `a`, 0x80 and `'` over
 /// and over.
 std::string printsLongString(size_t n) {

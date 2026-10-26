@@ -1404,6 +1404,7 @@ TEST(Pkm, ModuleCodeKeepsNoLendMark) {
     EXPECT_TRUE(contains(code.out, " [3] (lent %x.6)\n")) << code.out;
     EXPECT_TRUE(contains(code.out, " [3] (lent %x.9)\n")) << code.out;
     EXPECT_FALSE(contains(code.out, "retain %x.6\n")) << code.out;
+    EXPECT_FALSE(contains(code.out, "retain nonnull %x.6\n")) << code.out;
     EXPECT_FALSE(contains(code.out, "retain lend")) << code.out;
   }
   fs::remove_all(dir);

@@ -476,6 +476,27 @@ static inline void Paykan_release_inline(PaykanShared *shared) {
   }
 }
 
+/// Paykan_retain_inline of a box that is never NULL: the C of --emit-c
+/// calls it for a value of a class type that is not optional (a `retain
+/// nonnull`, docs/pir.md §6).  With no test for NULL, a compiler sees no
+/// path on which the box is NULL, which GCC's -Warray-bounds would follow
+/// to a later write into the object.
+static inline void Paykan_retain_nonnull_inline(PaykanShared *shared) {
+  if (shared->strong != PAYKAN_REF_MAX)
+    ++shared->strong;
+  else
+    Paykan_retain(shared);
+}
+
+/// Paykan_release_inline of a box that is never NULL (the value a `retain
+/// nonnull` retains).
+static inline void Paykan_release_nonnull_inline(PaykanShared *shared) {
+  if (shared->strong > 1)
+    --shared->strong;
+  else
+    Paykan_release(shared);
+}
+
 /// PaykanShared_get, inline: the identity.
 static inline PaykanObject *PaykanShared_get_inline(PaykanShared *shared) {
   return shared;

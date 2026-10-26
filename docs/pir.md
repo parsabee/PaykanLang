@@ -540,6 +540,7 @@ names the mask.
 ```
 retain %b            ; box -> void              Paykan_retain
 retain lend %b       ; the same: a copy made only to hand an argument over
+retain nonnull %b    ; the same, of a box that is never null
 release %b           ; box -> void              Paykan_release (null-safe)
 %b = box %o          ; obj -> box               PaykanShared_new: the object, strong +1
 %o = unbox %b        ; box -> obj               the identity (null -> null)
@@ -560,6 +561,16 @@ A `retain lend` is a retain the lowering makes only so that a box argument
 is handed over, which a pass may make a lent argument instead; every other
 pass and every backend reads it as a plain `retain`, and a module may
 contain none (the lowering's marks are cleared before code is kept).
+
+A `retain nonnull` (`retain lend nonnull` with both marks) retains a box
+that is never null: the lowering marks a retain of a value whose type is a
+class that is not optional, which Sema reads only once it is set and a
+native function never returns as null.  A backend retains it with no test
+for null, and releases the same value (`release %b` of that `%b`) with
+none either; a `release` of anything else, such as a load of a local's slot
+the moves at last use (§12) may have emptied, keeps its test.  Without the
+mark a retain promises nothing, so a module written before the mark existed
+reads as before.
 
 A `field.load` or a `ptr.load` of a `box` may end in `stable`: the slot
 it reads keeps its reference for as long as the statement it is part of
@@ -1104,7 +1115,8 @@ crossing into the runtime is `cast` to `i64` first.
 ; release's fast path is inline (§12): the LLVM path emits it and calls
 ; Paykan_retain or Paykan_release for the rest, the C path calls Runtime.h's
 ; static inline Paykan_retain_inline and Paykan_release_inline, which do the
-; same.  `unbox` is the identity on both: neither calls PaykanShared_get.
+; same (Paykan_retain_nonnull_inline and Paykan_release_nonnull_inline, with
+; no test for null, for a `retain nonnull`'s box, §6).  `unbox` is the identity on both: neither calls PaykanShared_get.
 ; Paykan_malloc never returns NULL: it panics when the memory is not there.
 Paykan_malloc(i64) -> ptr        Paykan_free(ptr) -> void
 Paykan_retain(box) -> void       Paykan_release(box) -> void
@@ -1177,7 +1189,7 @@ list; the mlir backend's JIT symbol table must cover it, and an executable links
 `libpaykan_runtime.a`.  `pir::runtimeSignature` (`include/paykan/pir/PIR.h`)
 holds the signatures above in PIR types (a `size_t` an `i64`), the C path's
 `Paykan_retain_inline(box) -> void` and `Paykan_release_inline(box) ->
-void`, and C's `fmod(f64, f64) -> f64`, which a backend calls for an `f64`
+void` (and their `_nonnull_` variants), and C's `fmod(f64, f64) -> f64`, which a backend calls for an `f64`
 `rem`; none for the three that take a C `int`, which no PIR type is
 (`Paykan_args_new`, `Paykan_heap_set_tracking`, `memset`).  A native
 function bound to one of these symbols (`pir::isRuntimeSymbol`) must have
@@ -1255,8 +1267,8 @@ The verifier rejects a program when:
   a lending callee with a bit in the ownership mask (§3; never one of a
   runtime or native extern), or passes a bit that is not a `bool` value; an
   instruction other than a call has an argument ownership, or one other than
-  a `retain` is `lend`; `owned` names anything but a box parameter of its
-  function with a bit in the mask;
+  a `retain` is `lend` or `nonnull`; `owned` names anything but a box
+  parameter of its function with a bit in the mask;
 * a runtime extern (`extern fn` without a `module`, `extern obj`, `extern
   vtable`) is not named `$rt.<symbol>` (a module-less `extern fn` may instead
   be a native `$c.<symbol>`), or anything else (a function, a module extern's
@@ -1285,8 +1297,8 @@ versioned, by the release like every format: `PAYKAN_PIR_TEXT_VERSION` in
 `include/paykan/plugin_api.h` is the release version packed as
 major * 10000 + minor * 100 + patch (300 for 0.3.0), the same number the binary
 form stores.  0.3.0's adds a call argument's ownership (`lent`,
-`owned(%o)`), `owned` and `retain lend` (§6), and with them the ownership
-mask a lending function takes (§3).
+`owned(%o)`), `owned`, `retain lend` and `retain nonnull` (§6), and with
+them the ownership mask a lending function takes (§3).
 
 ```
 module "01"
@@ -1336,11 +1348,12 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
 - **Codes.** Types and opcodes are written as the fixed codes of
   `include/paykan/pir/Codes.h`, the one table that also holds the mnemonics
   of §10, never as the C++ enumerator's value; a reader rejects a code it
-  does not know.  Four codes mark what follows them: 18 a `view` local's
+  does not know.  Five codes mark what follows them: 18 a `view` local's
   slot type (§3), 53 a `stable` load's opcode (§6), 55 a call's opcode
   after the ownership of its arguments that are not handed over (each one's
-  index, `lent` or `owned(%o)` and its bit), 56 a `retain lend`'s opcode; a
-  record without one reads as before the mark existed, unmarked.  `owned`
+  index, `lent` or `owned(%o)` and its bit), 56 a `retain lend`'s opcode,
+  57 a `retain nonnull`'s opcode (after a 56 when it is both); a record
+  without one reads as before the mark existed, unmarked.  `owned`
   is opcode 54.
 - **Functions** are length-prefixed records, so a reader can skip or decode
   one function on its own (`decodeFunction`), and the symbol index
@@ -1890,7 +1903,8 @@ a module's code before its `.pkm` is written, after the lending pass; on
 its own output, and after the moves again, it changes nothing.
 
 **What is left is cheap.**  Each backend has the fast path of a `retain`
-and a `release` inline: a null box is skipped, a retain of a count below
+and a `release` inline: a null box is skipped (with no test at all for the
+box of a `retain nonnull`, §6, and a release of it), a retain of a count below
 the limit increments the header's 32-bit count, and a release of a count
 above one decrements it; only the rest calls `Paykan_retain` (which panics
 at the limit) or `Paykan_release` (which destroys the object), so each

@@ -165,13 +165,21 @@ bool stableLoad(const std::string &f, const std::string &what) {
   return line.ends_with(" stable");
 }
 
+/// Where @p f first retains the box @p value with the marks @p marks
+/// (`lend `, or none), and `nonnull` or not (docs/pir.md §6): npos when it
+/// does not.
+size_t findRetain(const std::string &f, const std::string &value,
+                  const std::string &marks = "") {
+  return std::min(f.find("retain " + marks + value + "\n"),
+                  f.find("retain " + marks + "nonnull " + value + "\n"));
+}
+
 /// Whether the box @p value is retained before the first @p call of @p f and
 /// released after it: a reference of its own while the call runs.
 bool heldAcross(const std::string &f, const std::string &value,
                 const std::string &call) {
   const size_t c = f.find(call);
-  return !value.empty() && c != std::string::npos &&
-         f.find("retain " + value + "\n") < c &&
+  return !value.empty() && c != std::string::npos && findRetain(f, value) < c &&
          f.find("release " + value + "\n", c) != std::string::npos;
 }
 
@@ -205,6 +213,48 @@ TEST(Lowering, OwnedVariablesAreReleasedInReverseOrderAtScopeExit) {
   EXPECT_NE(loadB, std::string::npos) << m;
   EXPECT_NE(loadA, std::string::npos) << m;
   EXPECT_LT(loadB, loadA);
+}
+
+// A retain of a value whose type is a class that is not optional, which is
+// never null, is a `retain nonnull` (docs/pir.md §6): a field read into a
+// variable, a variable captured, a capture copied into the closure's call;
+// a retain of an optional's value is a plain one (SW-14).
+TEST(Lowering, ARetainOfAClassValueIsNonNull) {
+  Lowered l = lower(R"(
+struct P {
+  a: int;
+}
+
+class C {
+  p: P;
+}
+
+class H {
+  c: C;
+  o: C?;
+}
+
+fn set(h: H) -> int {
+  d = h.c;
+  d.p = P(7);
+  e = h.o;
+  k = fn() -> int { return d.p.a; };
+  return k();
+}
+
+fn main() -> int {
+  h = H(C(P(1)), None);
+  return set(h);
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string set = function(l.Text, "set");
+  EXPECT_EQ(count(set, "retain nonnull %c."), 1u) << set;
+  EXPECT_EQ(count(set, "retain nonnull %d."), 1u) << set;
+  EXPECT_EQ(count(set, "retain %o."), 1u) << set;
+  EXPECT_EQ(count(set, "retain nonnull"), 2u) << set;
+  const std::string call = function(l.Text, "fn.main.0.call");
+  EXPECT_EQ(count(call, "retain nonnull %d."), 1u) << call;
 }
 
 TEST(Lowering, StringTemporaryPassedToBuiltinIsDestroyedAfterTheCall) {
@@ -1338,7 +1388,7 @@ TEST(Lowering, StorageInAnObjectACallMayReplaceKeepsTheObject) {
     const size_t hold = f.find(std::string("store %") + b.Local + ".obj.");
     ASSERT_NE(hold, std::string::npos) << f;
     const std::string store = f.substr(hold, f.find('\n', hold) - hold);
-    EXPECT_LT(f.find("retain " + a + "\n"), hold) << f;
+    EXPECT_LT(findRetain(f, a), hold) << f;
     EXPECT_EQ(store.substr(store.size() - a.size()), a) << f;
   }
 }
@@ -1386,7 +1436,7 @@ TEST(Lowering, StrOfAFieldIsRetainedWhenHandedOn) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "Gen.show");
   const std::string v = defined(f, ", Gen.v");
-  EXPECT_LT(f.find("retain " + v + "\n"), f.find("ret " + v)) << f;
+  EXPECT_LT(findRetain(f, v), f.find("ret " + v)) << f;
 }
 
 // An `inout` result used after its call may be in the object an `inout`
@@ -3240,7 +3290,7 @@ TEST(Lowering, StrOfAValueIsItsToString) {
   EXPECT_NE(c.find("is_some %o."), std::string::npos) << c;
   EXPECT_NE(c.find("call @$rt.PaykanString_from_int("), std::string::npos) << c;
   std::string d = function(l.Text, "d");
-  EXPECT_NE(d.find("retain %p."), std::string::npos) << d;
+  EXPECT_NE(d.find("retain nonnull %p."), std::string::npos) << d;
   EXPECT_NE(d.find(" : P [1] ()"), std::string::npos) << d;
   EXPECT_EQ(count(function(l.Text, "e"), "call "), 0u) << l.Text;
   auto t = lower(decls + R"(
@@ -3580,11 +3630,16 @@ TEST(LoweringMoves, AFieldReadInUseAcrossALaterCallKeepsTheCopy) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "kept");
-  EXPECT_EQ(count(f, "retain lend %x."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend nonnull %x."), 1u) << f;
   for (const char *fn : {"held", "moved"}) {
     f = function(l.Text, fn);
-    EXPECT_EQ(count(f, "retain %x."), 0u) << fn << "\n" << f;
-    EXPECT_EQ(count(f, "retain lend %x."), 0u) << fn << "\n" << f;
+    EXPECT_EQ(count(f, "retain %x.") + count(f, "retain nonnull %x."), 0u)
+        << fn << "\n"
+        << f;
+    EXPECT_EQ(count(f, "retain lend %x.") + count(f, "retain lend nonnull %x."),
+              0u)
+        << fn << "\n"
+        << f;
   }
   f = function(l.Text, "held");
   EXPECT_TRUE(heldAcross(f, defined(f, ", Named.name"), "call @replace(")) << f;
@@ -3617,7 +3672,7 @@ TEST(LoweringMoves, AMethodKeepsACopyWhileItStillUsesSelf) {
   // The fields' first values replace nothing (docs/pir.md §7).
   EXPECT_EQ(count(f, "release %"), 0u) << f;
   f = function(l.Text, "Named.give");
-  EXPECT_EQ(count(f, "retain lend %n."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend nonnull %n."), 1u) << f;
 }
 
 TEST(LoweringMoves, AViewIsNeverHandedOn) {
@@ -3635,9 +3690,9 @@ TEST(LoweringMoves, AViewIsNeverHandedOn) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "outer");
   EXPECT_NE(f.find(": box view"), std::string::npos) << f;
-  EXPECT_EQ(count(f, "retain lend %n."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend nonnull %n."), 1u) << f;
   f = function(l.Text, "local");
-  EXPECT_EQ(count(f, "retain lend %v."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend nonnull %v."), 1u) << f;
   f = function(l.Text, "plain");
   EXPECT_EQ(count(f, "retain"), 0u) << f;
 }
@@ -3785,9 +3840,9 @@ std::string argCopy(const std::string &f, const std::string &call,
     args = args.substr(args.find(", ") + 2);
   const std::string v = args.substr(0, args.find(", "));
   const std::string before = f.substr(0, c);
-  if (before.find("retain lend " + v + "\n") != std::string::npos)
+  if (findRetain(before, v, "lend ") != std::string::npos)
     return "lend";
-  if (before.find("retain " + v + "\n") != std::string::npos)
+  if (findRetain(before, v) != std::string::npos)
     return "copy";
   return "";
 }
@@ -3897,7 +3952,7 @@ TEST(LoweringLend, BoxParametersPastTheSixtyFourthAreAlwaysHandedOver) {
     expected.push_back("%p" + std::to_string(i) + "." + std::to_string(i + 1));
   EXPECT_EQ(prologueOf(l.Text, "wide"), expected) << l.Text;
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "retain lend %s."), 64u) << m;
+  EXPECT_EQ(count(m, "retain lend nonnull %s."), 64u) << m;
   EXPECT_EQ(argCopy(m, "call @wide(", 63), "lend") << m;
   EXPECT_EQ(argCopy(m, "call @wide(", 64), "copy") << m;
 }
@@ -3943,8 +3998,8 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
   auto l = lower(source);
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "retain lend %a."), 4u) << m;
-  EXPECT_EQ(count(m, "retain lend %h."), 1u) << m;
+  EXPECT_EQ(count(m, "retain lend nonnull %a."), 4u) << m;
+  EXPECT_EQ(count(m, "retain lend nonnull %h."), 1u) << m;
   EXPECT_EQ(count(m, "retain "), 5u) << m;
   EXPECT_EQ(argCopy(m, "call @show(%call."), "") << m;
   std::string f = function(l.Text, "show");
@@ -3959,15 +4014,15 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
   auto mv = moved(lower(source), stats);
   ASSERT_TRUE(mv.Ok) << mv.Error;
   m = function(mv.Text, "main");
-  EXPECT_NE(m.find("  retain lend %a.4\n"
+  EXPECT_NE(m.find("  retain lend nonnull %a.4\n"
                    "  call @show(%a.4)\n"),
             std::string::npos)
       << m;
-  EXPECT_NE(m.find("  retain lend %a.5\n"
+  EXPECT_NE(m.find("  retain lend nonnull %a.5\n"
                    "  call @pass(%a.5)\n"),
             std::string::npos)
       << m;
-  EXPECT_NE(m.find("  retain lend %a.8\n"
+  EXPECT_NE(m.find("  retain lend nonnull %a.8\n"
                    "  call @keep(%h.7, %a.8)\n"),
             std::string::npos)
       << m;
@@ -4110,13 +4165,17 @@ TEST(LoweringLend, NoKindOfCallIsLentAReadItMayLetGo) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "retain %n."), 6u) << m;
-  EXPECT_EQ(count(m, "retain lend %n."), 0u) << m;
-  EXPECT_EQ(count(m, "retain lend %h."), 6u) << m;
+  EXPECT_EQ(count(m, "retain nonnull %n."), 6u) << m;
+  EXPECT_EQ(count(m, "retain lend %n.") + count(m, "retain lend nonnull %n."),
+            0u)
+      << m;
+  EXPECT_EQ(count(m, "retain lend nonnull %h."), 6u) << m;
   std::string c = function(l.Text, "Child.__init__");
-  EXPECT_EQ(count(c, "retain %n."), 1u) << c;
-  EXPECT_EQ(count(c, "retain lend %n."), 0u) << c;
-  EXPECT_EQ(count(c, "retain lend %h."), 1u) << c;
+  EXPECT_EQ(count(c, "retain nonnull %n."), 1u) << c;
+  EXPECT_EQ(count(c, "retain lend %n.") + count(c, "retain lend nonnull %n."),
+            0u)
+      << c;
+  EXPECT_EQ(count(c, "retain lend nonnull %h."), 1u) << c;
   EXPECT_NE(argCopy(m, "call @f("), "lend") << m;
   EXPECT_NE(argCopy(m, "call @Q.set(", 1), "lend") << m;
   EXPECT_NE(argCopy(m, "call @Q.set(", 2), "lend") << m;

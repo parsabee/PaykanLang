@@ -483,8 +483,12 @@ def PIR_OwnershipOp : PIR_Op<"ownership", [Pure]> {
 //===----------------------------------------------------------------------===//
 
 def PIR_RetainOp : PIR_Op<"retain"> {
-  let arguments = (ins PIR_BoxType:$box);
-  let assemblyFormat = "$box attr-dict";
+  let description = [{
+    `nonnull`: the box is never null (a `retain nonnull`, docs/pir.md §6),
+    so neither it nor a release of the same value tests for null.
+  }];
+  let arguments = (ins PIR_BoxType:$box, UnitAttr:$nonnull);
+  let assemblyFormat = "(`nonnull` $nonnull^)? $box attr-dict";
 }
 
 def PIR_ReleaseOp : PIR_Op<"release"> {

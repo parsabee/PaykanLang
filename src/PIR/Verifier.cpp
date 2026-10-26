@@ -568,6 +568,9 @@ private:
               "have one)");
       if (in.Lend && in.Op != Opcode::Retain)
         error(std::string("a lend '") + opName(in) + "' (only a retain lends)");
+      if (in.NonNull && in.Op != Opcode::Retain)
+        error(std::string("a nonnull '") + opName(in) +
+              "' (only a retain is marked nonnull)");
       switch (in.Op) {
       case Opcode::Add:
       case Opcode::Sub:

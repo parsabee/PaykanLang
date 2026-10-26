@@ -818,7 +818,7 @@ printer uses and these codes, with a test that every enumerator has both.
 
 ```
 Operand := u8 kind ; payload     0 value (uleb id ≥ 1) | 1 i64 sleb | 2 f64 | 3 bool u8 | 4 char u8 | 5 null box | 6 null obj | 7 symbol str
-InstrRec := [Mark] ; u8 opcode ; uleb result id (0 = none) ; [type result type ; str result name] ; per-opcode fields ; uleb nArgs ; Operand[nArgs]
+InstrRec := [Mark] ; [u8 57] ; u8 opcode ; uleb result id (0 = none) ; [type result type ; str result name] ; per-opcode fields ; uleb nArgs ; Operand[nArgs]
 Mark     := u8 53 | u8 56 | u8 55 ; uleb n ; n × (uleb argIndex ; u8 kind ; [kind 2] Operand)     kind: 1 lent, 2 passed (its bit follows)
 ```
 
@@ -832,9 +832,11 @@ code 55 and the ownership of those arguments, at least one, by increasing
 index into the arguments (a vcall's receiver and an icall's callee are
 arguments 0), before its opcode; every other argument is handed over, so
 a call whose arguments all are has no mark and is written as before.  A
-reader rejects 56 before anything but a `retain`, 55 before anything but
-a call, an empty or unordered list, an index past the arguments and a
-kind other than 1 or 2.
+`retain nonnull` (docs/pir.md §6) has the code 57 right before its
+opcode, after a 56 when it is a `retain lend nonnull`.  A reader rejects
+56 and 57 before anything but a `retain`, 55 before anything but a call,
+an empty or unordered list, an index past the arguments and a kind other
+than 1 or 2.
 
 | op | PIR | per-opcode fields | args |
 |---|---|---|---|
@@ -875,7 +877,8 @@ kind other than 1 or 2.
 | 54 | `owned` (docs/pir.md §3): whether the box parameter operand was handed over | — | 1 |
 | 55 | the ownership of the call, vcall or icall whose opcode follows (docs/pir.md §6), its list after it; only there | | |
 | 56 | `lend`: marks the `retain` whose opcode follows as a `retain lend` (docs/pir.md §6); only there | | |
-| 57–255 | reserved | | |
+| 57 | `nonnull`: marks the `retain` whose opcode follows as a `retain nonnull` (docs/pir.md §6), after a 56 when it is both; only there | | |
+| 58–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults
 of `PIR.h`, as the text parser produces, so round-trip equality holds. An

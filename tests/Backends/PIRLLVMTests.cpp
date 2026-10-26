@@ -736,6 +736,48 @@ fn @main() -> i64 {
   EXPECT_EQ(linesWith(ir, "call void @Paykan_release(").size(), 2u) << ir;
 }
 
+// A `retain nonnull`, of a box that is never null (docs/pir.md §6), and a
+// release of the same value test no box for null; a release of another
+// value, a load of the slot the box was stored in, still does (SW-14).
+TEST(PIRLLVM, ANonNullRetainTestsNoBoxForNull) {
+  auto program = [](const char *retain) {
+    return std::string(kCounted) + R"(
+fn @main() -> i64 {
+  local %l: box
+  %o = new C
+  %b = box %o
+  )" + retain +
+           R"( %b
+  %two = call @strong(%b)
+  release %b
+  store %l, %b
+  %c = load %l
+  release %c
+  %r = mul %two, 10
+  ret %r
+}
+)";
+  };
+  std::string err;
+  std::string ir = translatePIR(program("retain nonnull"), err);
+  ASSERT_FALSE(ir.empty()) << err;
+  EXPECT_EQ(linesWith(ir, "icmp eq ptr").size(), 1u) << ir;
+  // The counts as before: a test of each, the call for the rest.
+  EXPECT_EQ(linesWith(ir, "icmp ne i32 ").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "icmp sgt i32 ").size(), 2u) << ir;
+  EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "call void @Paykan_release(").size(), 2u) << ir;
+  EXPECT_EQ(ir.find("nonnull"), std::string::npos) << ir;
+  ir = translatePIR(program("retain"), err);
+  ASSERT_FALSE(ir.empty()) << err;
+  EXPECT_EQ(linesWith(ir, "icmp eq ptr").size(), 3u) << ir;
+
+  auto r = runPIR(program("retain nonnull"));
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 20);
+  EXPECT_EQ(r.Out, "destroyed\n");
+}
+
 TEST(PIRLLVM, InlineRetainsAndReleasesCountAndTheLastOneDestroys) {
   auto r = runPIR(std::string(kCounted) + R"(
 fn @main() -> i64 {

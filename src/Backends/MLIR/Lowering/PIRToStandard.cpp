@@ -1017,11 +1017,20 @@ void FunctionLowering::lowerInstr(Operation *op) {
                P::FnAddrOp::create(B, Loc, M.functionLinkName(o.getCallee())));
       })
       // ARC and objects.
-      .Case([&](P::RetainOp) {
-        callRuntime(names::kPaykanRetain, {box}, {}, {operand(0)});
+      // A box a `retain nonnull` retains is never null, at that retain and
+      // at a release of the same value.
+      .Case([&](P::RetainOp o) {
+        auto call = callRuntime(names::kPaykanRetain, {box}, {}, {operand(0)});
+        if (o.getNonnull())
+          call->setAttr(kNonNullAttr, B.getUnitAttr());
       })
-      .Case([&](P::ReleaseOp) {
-        callRuntime(names::kPaykanRelease, {box}, {}, {operand(0)});
+      .Case([&](P::ReleaseOp o) {
+        auto call = callRuntime(names::kPaykanRelease, {box}, {}, {operand(0)});
+        if (llvm::any_of(o.getBox().getUsers(), [](Operation *user) {
+              auto retain = dyn_cast<P::RetainOp>(user);
+              return retain && retain.getNonnull();
+            }))
+          call->setAttr(kNonNullAttr, B.getUnitAttr());
       })
       .Case([&](P::BoxOp) {
         define(op, resultOf(callRuntime(names::kPaykanSharedNew, {obj}, {box},

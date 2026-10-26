@@ -402,13 +402,15 @@ public:
     return emit(std::move(i));
   }
 
-  /// `retain %b`, or with @p lend `retain lend %b`: a copy made only to hand
-  /// an argument over (docs/pir.md §6).
-  void retain(const Val &box, bool lend = false) {
+  /// `retain %b`; with @p lend `retain lend %b`, a copy made only to hand
+  /// an argument over, and with @p nonnull `retain nonnull %b`, of a box
+  /// that is never null (docs/pir.md §6).
+  void retain(const Val &box, bool lend = false, bool nonnull = false) {
     Instr i;
     i.Op = Opcode::Retain;
     i.Args = {box.Op};
     i.Lend = lend;
+    i.NonNull = nonnull;
     emit(std::move(i));
   }
   void release(const Val &box) {

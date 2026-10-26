@@ -866,6 +866,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     ("Standard C") names the limits only a program's own size passes, such as an object of
     more than 65,535 bytes.  `samples/codegen/80_long_string_literal.pkn` holds a string of
     4096 bytes.
+  - The C of a program that assigned a struct or a fixed-size array field of an object it
+    held in a variable or a lambda's capture (`d = h.c; d.p = P(7, 8, 9);`, `k = fn() {
+    c.p = P(7, 8, 9); };`) failed the strict build at GCC's `-O1` and above: `-Werror`
+    reported `'__builtin_memcpy' offset [0, 23] is out of the bounds [0, 0]
+    [-Warray-bounds]`.  The retain that made the variable's reference tested the box for
+    `NULL`, and GCC followed that path into the field's write.  A value whose type is a
+    class that is not optional is never `NULL` (Sema reads one only once it is set, and a
+    native function never returns one as `NULL`), so the lowering now marks the retain of
+    one `retain nonnull` (docs/pir.md §6, a new mark in PIR's text and binary forms, code
+    57), and both paths retain it, and release the same value, with no test for null:
+    Runtime.h's new `Paykan_retain_nonnull_inline` and `Paykan_release_nonnull_inline` on
+    the C path (docs/c-backend.md).  A release of a variable's slot keeps its test, since
+    the moves at last use may have emptied the slot.
+    `samples/codegen/81_field_struct_store_retained.pkn` writes such fields through a
+    variable, a capture and a loop's variable.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

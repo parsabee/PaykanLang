@@ -248,6 +248,37 @@ TEST(SharedInline, AWeakReferenceOutlivesTheLastRelease) {
   Paykan_heap_set_tracking(0);
 }
 
+// The variants for a box that is never NULL do the same at every count.
+TEST(SharedInline, TheNonNullVariantsCountAsTheOthers) {
+  gDestroys = 0;
+  for (int32_t n : {1, 2, 1000, PAYKAN_REF_MAX - 1}) {
+    PaykanShared *s = counted();
+    s->strong = n;
+    Paykan_retain_nonnull_inline(s);
+    EXPECT_EQ(s->strong, n + 1);
+    Paykan_release_nonnull_inline(s);
+    EXPECT_EQ(s->strong, n);
+    s->strong = 1;
+    Paykan_release(s);
+  }
+  EXPECT_EQ(gDestroys, 4);
+  Paykan_heap_set_tracking(1);
+  Paykan_heap_reset();
+  PaykanShared *s = counted();
+  Paykan_release_nonnull_inline(s);
+  EXPECT_EQ(gDestroys, 5);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+  Paykan_heap_set_tracking(0);
+}
+
+TEST(SharedInlineDeathTest, ANonNullRetainPastTheLimitPanics) {
+  PaykanShared *s = counted();
+  s->strong = PAYKAN_REF_MAX;
+  EXPECT_DEATH(Paykan_retain_nonnull_inline(s), "too many strong references");
+  s->strong = 1;
+  Paykan_release(s);
+}
+
 TEST(SharedInline, NullIsANoOp) {
   Paykan_retain_inline(nullptr);
   Paykan_release_inline(nullptr);

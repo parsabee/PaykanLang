@@ -640,8 +640,21 @@ private:
   /// (takeInoutResult).
   using InoutPlaces = std::vector<std::pair<Val, ast::Type *>>;
 
-  void emitRetain(const Val &shared, bool lend = false) {
-    B.retain(shared, lend);
+  /// `retain`: with @p lend a `retain lend`, and a `retain nonnull` when
+  /// @p ty, the type of the value retained, says it is never null
+  /// (neverNull).
+  void emitRetain(const Val &shared, bool lend = false,
+                  ast::Type *ty = nullptr) {
+    B.retain(shared, lend, neverNull(ty));
+  }
+  /// Whether a box of type @p ty is never null: a class value that is not
+  /// optional.  Sema reads such a value only once it is set (a variable
+  /// once assigned, a field once its `__init__` has stored it), and a
+  /// native function never returns null for one; only a slot the moves at
+  /// last use emptied, or memory never set (a tagged union's other
+  /// variants), holds null, and neither is read as a value.
+  static bool neverNull(ast::Type *ty) {
+    return ast::isRefType(ty) && !ast::isa<ast::OptionalType>(ty);
   }
   void emitRelease(const Val &shared) { B.release(shared); }
   Val emitSharedNew(const Val &raw, std::string name = "shared");

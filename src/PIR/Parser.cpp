@@ -1280,10 +1280,15 @@ private:
       break;
     }
     case Opcode::Retain:
-      // `retain lend %v` (docs/pir.md §6).
+      // `retain lend %v`, `retain nonnull %v`, `retain lend nonnull %v`
+      // (docs/pir.md §6).
       if (isWord("lend")) {
         advance();
         in.Lend = true;
+      }
+      if (isWord("nonnull")) {
+        advance();
+        in.NonNull = true;
       }
       if (!parseCommaOperands(in.Args, 1))
         return false;

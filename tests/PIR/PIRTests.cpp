@@ -1112,7 +1112,8 @@ fn @main() -> i64 {
   EXPECT_EQ(errs.find("box parameter 63"), std::string::npos) << errs;
 
   // Only a call's arguments have an ownership, as many as it has
-  // arguments, and only a retain lends: what the text cannot write.
+  // arguments, and only a retain lends or is nonnull: what the text cannot
+  // write.
   ParseError err;
   auto p = parseProgram(R"(module "m"
 fn @f(%a: box) -> void {
@@ -1132,12 +1133,14 @@ fn @main() -> i64 {
   auto &body = p->Modules[0].Functions[0].Body.Stmts;
   std::get<Instr>(body[0]).Own.resize(2);
   std::get<Instr>(body[1]).Lend = true;
+  std::get<Instr>(body[1]).NonNull = true;
   std::get<Instr>(body[2]).Own.resize(2);
   errs = formatErrors(verify(*p));
   for (const char *e :
        {"'add' gives its operands an ownership (only a call's arguments have "
         "one)",
         "a lend 'release' (only a retain lends)",
+        "a nonnull 'release' (only a retain is marked nonnull)",
         "call to '@f' gives the ownership of 2 argument(s), but passes 1"})
     EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
 }

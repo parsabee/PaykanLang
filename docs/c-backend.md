@@ -194,6 +194,12 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   `Paykan_release_inline`: the object's count is incremented, or decremented
   while it stays above zero, in place, and `Paykan_retain` or
   `Paykan_release` is called only at the limit or to destroy the object.
+  The retain of a value whose type is a class that is not optional, which
+  is never `NULL` (a `retain nonnull`, docs/pir.md §6), and a release of
+  the same value call `Paykan_retain_nonnull_inline` and
+  `Paykan_release_nonnull_inline`, which do the same with no test for
+  `NULL`: a test would give GCC a path on which the object is `NULL`, which
+  `-Warray-bounds` follows into a later write of one of its fields.
   Native functions and other modules' functions are declared `extern` from
   their PIR signatures.
 * **Arithmetic.**  Integer arithmetic is done in `uint64_t` and converted

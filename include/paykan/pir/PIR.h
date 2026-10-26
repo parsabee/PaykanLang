@@ -386,6 +386,10 @@ struct Instr {
   /// argument over, which the lending pass may lend instead.  Every other
   /// pass and every backend reads it as a plain retain.
   bool Lend = false;
+  /// Retain: a `retain nonnull`, of a box that is never null, a value of
+  /// a class type that is not optional (docs/pir.md §6): a backend
+  /// retains it, and releases the same value, with no test for null.
+  bool NonNull = false;
 
   /// The ownership of argument @p i (Owned when Own says nothing).
   ArgOwnership::Kind ownership(size_t i) const {

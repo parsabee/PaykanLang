@@ -242,12 +242,15 @@ private:
 
   void instr(const Instr &in) {
     // A stable load's opcode follows its mark, a `retain lend`'s its own,
-    // and a call's with an argument that is not owned the ownership of its
-    // arguments that are not (§5.5).
+    // a `retain nonnull`'s its own (after a lend mark), and a call's with
+    // an argument that is not owned the ownership of its arguments that
+    // are not (§5.5).
     if (in.Stable)
       W.u8(kStableLoadCode);
     if (in.Lend)
       W.u8(kLendCode);
+    if (in.NonNull)
+      W.u8(kNonNullCode);
     ownership(in);
     W.u8(opcodeEntry(in.Op).Code);
     W.uleb(in.Result.Id);
@@ -722,8 +725,8 @@ private:
     if (!R.u8(code))
       return false;
     // A stable load's opcode follows its mark, a `retain lend`'s its own,
-    // and a call's the ownership of its arguments that are not owned
-    // (§5.5).
+    // a `retain nonnull`'s its own (after a lend mark), and a call's the
+    // ownership of its arguments that are not owned (§5.5).
     in.Stable = code == kStableLoadCode;
     in.Lend = code == kLendCode;
     std::vector<std::pair<size_t, ArgOwnership>> own;
@@ -732,6 +735,9 @@ private:
       return false;
     if ((in.Stable || in.Lend || owns) && !R.u8(code))
       return false;
+    in.NonNull = code == kNonNullCode;
+    if (in.NonNull && !R.u8(code))
+      return false;
     if (!opcodeFromCode(code, in.Op))
       return R.fail("reserved opcode", R.offset() - 1);
     if (in.Stable && in.Op != Opcode::FieldLoad && in.Op != Opcode::PtrLoad)
@@ -739,6 +745,9 @@ private:
                     R.offset() - 1);
     if (in.Lend && in.Op != Opcode::Retain)
       return R.fail("a lend mark before an instruction that is no retain",
+                    R.offset() - 1);
+    if (in.NonNull && in.Op != Opcode::Retain)
+      return R.fail("a nonnull mark before an instruction that is no retain",
                     R.offset() - 1);
     if (owns && in.Op != Opcode::Call && in.Op != Opcode::VCall &&
         in.Op != Opcode::ICall)

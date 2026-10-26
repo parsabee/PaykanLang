@@ -602,7 +602,7 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
   // box (exprProducesFreshBox).
   if (ast::isRefType(fieldASTTy) && !weak &&
       (recv.Owned.isOwned() || isHeldRead(node)))
-    emitRetain(fieldVal);
+    emitRetain(fieldVal, /*lend=*/false, fieldASTTy);
   releaseIfOwned(recv.Owned);
   return fieldVal;
 }
