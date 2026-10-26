@@ -1021,6 +1021,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extract -o` fail.  Only the module cache makes its directories now: `paykan: cannot write
   nd/sub/x.pkm: the directory 'nd/sub' does not exist`, exit status 1.  The standard
   library's build makes its staging directory before it writes the modules there.
+- `--emit-pkm -o <path>` replaced what the path named with a regular file when it was not
+  one: `-o /dev/null` made `/dev/null` a regular file (for the whole system, when run as
+  root), and a FIFO or a symbolic link was replaced, the link's file left as it was, where
+  `build -o` and `pkm extract -o` write into it.  A module file is now written through a
+  temporary file and a rename only over a regular file or a path that names nothing, so
+  that no reader sees half of it, and in place otherwise: a link's file gets the module
+  file, and a device or a FIFO stays one.  A module file that cannot be written says why
+  (`paykan: cannot write lib.pkm: No space left on device`), where the message named the
+  temporary file and gave no reason.
 - A command whose standard output could not be written exited with status 0, its output
   lost: `paykan --emit-c hello.pkn > /dev/full`, and the same for `--emit-pir`,
   `--emit-llvm`, `--emit-mlir`, `--emit-ast`, `--dump-ast`, `--dump-tokens`, `--help`,

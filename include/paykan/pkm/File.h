@@ -122,8 +122,13 @@ private:
   std::vector<Pending> Pendings;
 };
 
-/// Writes through a temporary file in the same directory and a rename, so
-/// a reader never sees a partial file.  The directory must exist.
+/// Writes @p bytes at @p path.  A regular file, or a path that names
+/// nothing, is written through a temporary file in the same directory and a
+/// rename, so a reader never sees a partial file; the directory must exist.
+/// What is not a regular file is written in place, as a program writes the
+/// file it is given: a symbolic link keeps naming its file, a device or a
+/// FIFO stays one.  A failure's message is its reason (`No space left on
+/// device`).
 Status writeFileAtomically(const std::filesystem::path &path,
                            std::span<const uint8_t> bytes);
 /// The bytes of the regular file at @p path; an error for a directory or

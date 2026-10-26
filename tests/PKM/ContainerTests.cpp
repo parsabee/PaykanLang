@@ -5,7 +5,15 @@
 
 #include "PKMTestUtils.h"
 
+#include <cerrno>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <string>
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 using namespace pkmtest;
 
@@ -332,9 +340,16 @@ TEST(Container, TruncationAndBitFlipsNeverCrash) {
     }
 }
 
+/// A directory of the temporary directory for one test of this process:
+/// build trees that run the suite at once never share one.
+std::filesystem::path testDir(const std::string &name) {
+  return std::filesystem::temp_directory_path() /
+         ("paykan_pkm_" + name + "_" + std::to_string(getpid()));
+}
+
 TEST(Container, Files) {
   namespace fs = std::filesystem;
-  fs::path dir = fs::temp_directory_path() / "paykan_pkm_tests";
+  fs::path dir = testDir("files");
   fs::remove_all(dir);
   fs::path file = dir / "a" / "b.pkm";
   std::vector<uint8_t> b = minimalFileBytes();
@@ -363,6 +378,61 @@ TEST(Container, Files) {
   ASSERT_FALSE(ofDir);
   EXPECT_EQ(ofDir.status().message(),
             "'" + (dir / "a").string() + "' is a directory, not a file");
+  fs::remove_all(dir);
+}
+
+// What is not a regular file is written in place: the rename that replaces
+// a regular file whole would replace the node itself, so `--emit-pkm -o`
+// made a symbolic link, a device (`-o /dev/null`, run as root, replaced
+// /dev/null) or a FIFO a regular file.  The device here is reached through
+// a link, so this test never writes over /dev/null itself.
+TEST(Container, WritesIntoWhatIsNotARegularFile) {
+  namespace fs = std::filesystem;
+  fs::path dir = testDir("nodes");
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  std::vector<uint8_t> b = minimalFileBytes();
+  // A link to a file: the file gets the bytes, and the link stays.
+  std::ofstream(dir / "file") << "old";
+  fs::create_symlink("file", dir / "link");
+  Status s = writeFileAtomically(dir / "link", b);
+  ASSERT_TRUE(s) << s.message();
+  EXPECT_TRUE(fs::is_symlink(dir / "link"));
+  StatusOr<std::vector<uint8_t>> back = readFileBytes(dir / "file");
+  ASSERT_TRUE(back) << back.status().message();
+  EXPECT_EQ(*back, b);
+  // A link to a device: the device stays one.
+  fs::create_symlink("/dev/null", dir / "null");
+  s = writeFileAtomically(dir / "null", b);
+  ASSERT_TRUE(s) << s.message();
+  EXPECT_TRUE(fs::is_symlink(dir / "null"));
+  EXPECT_TRUE(fs::is_character_file(dir / "null"));
+  // A FIFO stays one, and its reader gets the bytes.
+  fs::path fifo = dir / "fifo";
+  ASSERT_EQ(mkfifo(fifo.c_str(), 0600), 0) << std::strerror(errno);
+  int reader = open(fifo.c_str(), O_RDONLY | O_NONBLOCK);
+  ASSERT_GE(reader, 0) << std::strerror(errno);
+  s = writeFileAtomically(fifo, b);
+  EXPECT_TRUE(s) << s.message();
+  EXPECT_TRUE(fs::is_fifo(fs::symlink_status(fifo)));
+  std::vector<uint8_t> got(b.size() + 1);
+  ssize_t n = read(reader, got.data(), got.size());
+  close(reader);
+  ASSERT_EQ(n, static_cast<ssize_t>(b.size()));
+  got.resize(b.size());
+  EXPECT_EQ(got, b);
+  // A directory is an error that says why.
+  fs::create_directories(dir / "d");
+  Status ofDir = writeFileAtomically(dir / "d", b);
+  ASSERT_FALSE(ofDir);
+  EXPECT_EQ(ofDir.message(), std::strerror(EISDIR));
+  // No temporary file is left behind.
+  size_t entries = 0;
+  for (const auto &e : fs::directory_iterator(dir)) {
+    (void)e;
+    ++entries;
+  }
+  EXPECT_EQ(entries, 5u);
   fs::remove_all(dir);
 }
 

@@ -2469,6 +2469,35 @@ TEST(Driver, EmitPkmMakesNoDirectory) {
   std::filesystem::remove_all(dir);
 }
 
+// --emit-pkm -o writes into what its path names, as `build -o` and `pkm
+// extract -o` do: a symbolic link keeps naming its file, which gets the
+// module file, and a device (here reached through a link) stays one, where
+// the rename that replaces a regular file replaced the link, and `-o
+// /dev/null` run as root replaced /dev/null with a regular file.
+TEST(Driver, EmitPkmWritesIntoWhatItsOutputNames) {
+  REQUIRE_BACKEND();
+  namespace fs = std::filesystem;
+  auto dir = freshDir("emitpkm_nodes");
+  std::ofstream(dir / "lib.pkn")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "file.pkm") << "precious";
+  fs::create_symlink("file.pkm", dir / "link.pkm");
+  fs::create_symlink("/dev/null", dir / "null");
+  for (const char *output : {"link.pkm", "null"}) {
+    auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                         " --emit-pkm lib.pkn -o " + output + " 2>&1");
+    EXPECT_EQ(rc, 0) << output << ": " << out;
+    EXPECT_EQ(out, "") << output;
+    EXPECT_TRUE(fs::is_symlink(dir / output)) << output;
+  }
+  EXPECT_TRUE(fs::is_character_file(dir / "null"));
+  auto check =
+      run("cd " + dir.string() + " && " + kPaykan + " pkm check file.pkm 2>&1");
+  EXPECT_EQ(check.exitCode, 0) << check.out;
+  EXPECT_EQ(check.out, "file.pkm: usable\n");
+  std::filesystem::remove_all(dir);
+}
+
 // Standard output that cannot be written (a full disk: Linux's /dev/full)
 // is an error, exit status 1, for every command that prints, never a
 // success with the output lost (finding 69).
