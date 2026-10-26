@@ -245,7 +245,8 @@ signature with ';' (a pure virtual method)` for an `impl` block's method,
 and `'f' has no body: a 'static fn' needs one` and `'__init__' has no body:
 an initializer needs one` for a `static fn` and an initializer (named as
 written, `___init__` too); `destroy`, which is never declared, gets
-`'destroy' is the compiler-generated destructor and cannot be overridden`.
+`'destroy' is reserved for the compiler-generated destructor and cannot be
+declared`.
 
 A parameter's type may start with its mode, `view` or `inout`
 ([language/03-functions.md](language/03-functions.md)):

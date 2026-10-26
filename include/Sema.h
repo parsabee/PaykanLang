@@ -1399,6 +1399,11 @@ private:
   /// Reject an `__init__` in a class body: it goes in an `impl` block.
   bool rejectBodyInits(ast::TranslationUnit *tu);
 
+  /// `destroy` names a class's compiler-generated destructor, and a struct
+  /// has none: a method or `static fn` @p fn of @p owner (its class body's
+  /// or an `impl` block's) named so is reported, and true returned.
+  bool rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner);
+
   /// Check that every `impl` block names a class or a struct of this
   /// module, and make its `static fn`s the module's functions `Type::name`.
   bool checkImplDecls(ast::TranslationUnit *tu);

@@ -347,8 +347,9 @@ TEST(Class, BodilessFunctionsOutsideAClassBodyAreRejected) {
              "error: '__init__' has no body: an initializer needs one"},
         Case{"fn ___init__();",
              "error: '___init__' has no body: an initializer needs one"},
-        Case{"fn destroy();", "error: 'destroy' is the compiler-generated "
-                              "destructor and cannot be overridden"}}) {
+        Case{"fn destroy();", "error: 'destroy' is reserved for the "
+                              "compiler-generated destructor and cannot be "
+                              "declared"}}) {
     auto impl = parseWithDiags(std::string("class A {}\nimpl A { ") + c.Member +
                                " }\nfn main() -> int { return 0; }\n");
     EXPECT_FALSE(impl.Ok) << c.Member;

@@ -109,6 +109,81 @@ TEST(Class, DestroyOverrideRejected) {
   EXPECT_NE(r.Diagnostics.find("destroy"), std::string::npos) << r.Diagnostics;
 }
 
+// `destroy` cannot be declared (pre-#18-destroy): one error, the same
+// everywhere, for a class body's method and an `impl` block's method or
+// `static fn` of a class or a struct, generic ones too (for each
+// instantiation).  A call of a rejected `static fn` is a follow-on.
+TEST(Class, DestroyIsReservedEverywhere) {
+  auto r = semaCheck(R"(class A { x: int; fn destroy() {} }
+class B { x: int; }
+impl B { fn destroy() {} static fn destroy() -> int { return 1; } }
+struct P { x: int; }
+impl P { view fn destroy() {} }
+impl P { static fn destroy() -> int { return 2; } }
+class G<T> { x: T; }
+impl G<T> { fn destroy() {} }
+struct Q<T> { x: T; }
+impl Q<T> { fn destroy() {} }
+struct R<T> { x: T; }
+impl R<T> { static fn destroy() -> int { return 3; } }
+fn main() -> int {
+  g = G(1);
+  q = Q(1);
+  return B::destroy() + P::destroy() + R<int>::destroy();
+}
+)");
+  EXPECT_FALSE(r.Ok);
+  const char *const kReserved =
+      "'destroy' is reserved for the compiler-generated destructor and cannot "
+      "be declared in ";
+  for (const std::string &where :
+       {"1:19: error: " + std::string(kReserved) + "class 'A'",
+        "3:10: error: " + std::string(kReserved) + "class 'B'",
+        "3:33: error: " + std::string(kReserved) + "class 'B'",
+        "5:10: error: " + std::string(kReserved) +
+            "struct 'P' (a struct has "
+            "none)",
+        "6:17: error: " + std::string(kReserved) +
+            "struct 'P' (a struct has "
+            "none)",
+        "8:13: error: " + std::string(kReserved) + "class 'G<int>'",
+        "10:13: error: " + std::string(kReserved) +
+            "struct 'Q<int>' (a "
+            "struct has none)",
+        "12:20: error: " + std::string(kReserved) +
+            "struct 'R<int>' (a "
+            "struct has none)"})
+    EXPECT_NE(r.Diagnostics.find(where), std::string::npos) << where << "\n"
+                                                            << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 8) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("already has a method"), std::string::npos)
+      << r.Diagnostics;
+
+  // A call of the struct's rejected method is a follow-on; the class's
+  // still finds the destructor, which cannot be called directly.
+  auto call = semaCheck(R"(struct P { x: int; }
+impl P { fn destroy() {} }
+class C { x: int; }
+fn main() -> int {
+  p = P(1);
+  p.destroy();
+  c = C(1);
+  c.destroy();
+  return 0;
+}
+)");
+  EXPECT_FALSE(call.Ok);
+  EXPECT_NE(call.Diagnostics.find("2:10: error: " + std::string(kReserved) +
+                                  "struct 'P' (a struct has none)"),
+            std::string::npos)
+      << call.Diagnostics;
+  EXPECT_NE(call.Diagnostics.find("8:3: error: 'destroy' cannot be called "
+                                  "directly"),
+            std::string::npos)
+      << call.Diagnostics;
+  EXPECT_EQ(call.ErrorCount, 2) << call.Diagnostics;
+}
+
 // -- Duplicate definitions
 
 TEST(Class, DuplicateName) {

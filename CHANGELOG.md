@@ -635,6 +635,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function's or a method's parameters (docs/language/06-traits.md, "Semantic Checks").  A
   function of the module may still name one, the requirement having no body, as for a
   native function.
+- `destroy` cannot name a method or a `static fn` anywhere: a struct's `impl` block took
+  `fn destroy()` as an ordinary method, which no call could reach (`p.destroy()` was
+  `'destroy' cannot be called directly; an object is destroyed automatically ...`, wrong for
+  a struct), and `static fn destroy()` too, a generic struct's as well; a class's `impl`
+  block got `class 'A' already has a method 'destroy' (from 'Obj')` and its body `'destroy'
+  is the compiler-generated destructor and cannot be overridden`.  Each is now the one
+  error `'destroy' is reserved for the compiler-generated destructor and cannot be declared
+  in class 'A'` (`... in struct 'P' (a struct has none)`), for a class body's method and
+  an `impl` block's method or `static fn` of a class or a struct, generic or not
+  (`Sema::rejectReservedDestroy`), and a call of the rejected `static fn` is a follow-on;
+  a bodiless one in an `impl` block is the syntax error `'destroy' is reserved for the
+  compiler-generated destructor and cannot be declared` (docs/language/05-classes.md,
+  11-structs.md, "Semantic Checks").
 
 ### Removed
 

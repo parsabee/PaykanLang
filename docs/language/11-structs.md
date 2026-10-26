@@ -672,6 +672,7 @@ Point(x: 4, y: 2) 6 True
 | `__super__` | in a struct's `__init__` |
 | Assigning `self` | `self = A(1)` in a method |
 | Duplicate method | two `fn m()` across `impl` blocks; `fn toString()` |
+| A method named `destroy` | `fn destroy()` or `static fn destroy()` in an `impl` block: `'destroy' is reserved for the compiler-generated destructor and cannot be declared in struct 'P' (a struct has none)` |
 | `let` field assignment | `let a = A(1); a.x = 2;` |
 | `view` field assignment | `fn f(a: view A) { a.x = 1; }`; in a `view fn` |
 | Field of a struct in a tuple | `t.1.x = 3` |

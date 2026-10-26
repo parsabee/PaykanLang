@@ -927,6 +927,10 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
     for (auto *fn : im->getMethods()) {
       if (fn->isStatic())
         continue;
+      if (rejectReservedDestroy(fn, ct)) {
+        ok = false;
+        continue;
+      }
       const std::string &name = fn->getName();
       // __init__ is the same here as in the class body: the class's own,
       // never inherited or called through the vtable.
@@ -950,6 +954,19 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
       }
     }
   return ok;
+}
+
+bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
+  // A class's `destroy` is emitted for it (releasing the fields and freeing
+  // the object) and is final; a struct, a value, is never destroyed.
+  if (fn->getName() != names::kMethodDestroy)
+    return false;
+  error(fn->getLocation(),
+        "'destroy' is reserved for the compiler-generated destructor and "
+        "cannot be declared in " +
+            std::string(typeKindWord(owner)) + " '" + typeName(owner) + "'" +
+            (ast::isa<ast::StructType>(owner) ? " (a struct has none)" : ""));
+  return true;
 }
 
 bool Sema::rejectBodyInits(ast::TranslationUnit *tu) {
@@ -1034,6 +1051,12 @@ bool Sema::checkImplDecls(ast::TranslationUnit *tu) {
     for (auto *fn : im->getMethods()) {
       if (!fn->isStatic())
         continue;
+      if (rejectReservedDestroy(fn, target)) {
+        // Its calls are follow-ons.
+        ErroneousNames.insert(name + names::kQualSep + fn->getName());
+        ok = false;
+        continue;
+      }
       if (methodOf(target, fn->getName())) {
         error(fn->getLocation(), std::string(typeKindWord(target)) + " '" +
                                      name + "' already has a method '" +
@@ -1097,13 +1120,7 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     classCtx.MethodName = method->getName();
     classCtx.ViewMethod = method->isView();
 
-    // `destroy` is the compiler-generated destructor: it is emitted for every
-    // class (releasing fields and freeing the object) and is final. User
-    // classes may not declare or override it.
-    if (method->getName() == names::kMethodDestroy) {
-      error(method->getLocation(),
-            "'destroy' is the compiler-generated destructor and cannot be "
-            "overridden");
+    if (rejectReservedDestroy(method, ct)) {
       ok = false;
       continue;
     }
@@ -1709,6 +1726,10 @@ void Sema::declareInstantiationStatics(const std::string &instName,
       if (!fn->isStatic())
         continue;
       const std::string name = instName + names::kQualSep + fn->getName();
+      if (rejectReservedDestroy(fn, type)) {
+        ErroneousNames.insert(name); // its calls are follow-ons
+        continue;
+      }
       if (methodOf(type, fn->getName())) {
         error(fn->getLocation(), std::string(typeKindWord(type)) + " '" +
                                      instName + "' already has a method '" +

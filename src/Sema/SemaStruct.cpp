@@ -300,6 +300,10 @@ bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st) {
     for (auto *fn : im->getMethods()) {
       if (fn->isStatic())
         continue; // the module's function `S::f` (checkImplDecls)
+      if (rejectReservedDestroy(fn, st)) {
+        ok = false;
+        continue;
+      }
       const std::string &name = fn->getName();
       // `toString` is every struct's (the builtin `Show`): `Point(x: 1,
       // y: 2)`, which nested structs and tuples print too.

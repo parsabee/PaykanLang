@@ -1336,8 +1336,8 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   // A class body's method whose signature ends with `;` is pure virtual: a
   // vtable slot with no definition (docs/language/05-classes.md); no other
   // function may leave out its body.  (An initializer is named as written,
-  // `___init__` too, and `destroy` gets the class body's error: it is the
-  // compiler-generated destructor.)
+  // `___init__` too, and `destroy` is reserved for the compiler-generated
+  // destructor, as Sema says of one with a body.)
   if (at(Tok::Semi)) {
     if (kind != FuncKind::ClassMethod) {
       std::string why;
@@ -1347,8 +1347,8 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
         why = "'" + std::string(spelled) +
               "' has no body: an initializer needs one";
       else if (kind == FuncKind::ImplMethod && name == names::kMethodDestroy)
-        why = "'destroy' is the compiler-generated destructor and cannot be "
-              "overridden";
+        why = "'destroy' is reserved for the compiler-generated destructor "
+              "and cannot be declared";
       else if (kind == FuncKind::ImplMethod)
         why = "'" + name +
               "' in an 'impl' block has no body: an 'impl' block's methods "
