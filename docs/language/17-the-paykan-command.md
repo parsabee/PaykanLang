@@ -35,10 +35,12 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
 The source file is the program's **main file**. Its directory is the source root from which
 imports are resolved (see [Modules](15-modules.md)).
 
-No command writes over a file it reads. When the file that `build`, `--emit-pkm`,
-`pkm extract` or an `--emit-*` option is to write is the source file, the module file `pkm extract` reads or an
-`--object` file, under any name (another spelling of its path, such as `./prog.pkn`, or a
-symbolic or a hard link), `paykan` writes nothing, says so and exits with status 1.
+No command writes over its input. When the file that `build`, `--emit-pkm`, `pkm extract`
+or an `--emit-*` option is to write is the source file, the source or module file of a
+module the program imports (the standard library's too), the module file `pkm extract`
+reads or an `--object` file, under any name (another spelling of its path, such as
+`./prog.pkn`, or a symbolic or a hard link), `paykan` writes nothing, says so and exits
+with status 1.
 
 When compilation fails, `paykan` prints the errors and exits with status 1. A wrong
 option prints a message suggesting `--help`, and also exits with 1. So does a command line

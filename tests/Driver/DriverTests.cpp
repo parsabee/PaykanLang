@@ -24,6 +24,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -2425,6 +2426,54 @@ TEST(Driver, EmitPkmNeverWritesOverItsInput) {
   refused(" --emit-pkm odd.pkm", "odd.pkm", "odd.pkm");
   EXPECT_EQ(slurp(dir / "lib.pkn"), lib);
   EXPECT_EQ(slurp(dir / "odd.pkm"), lib);
+  std::filesystem::remove_all(dir);
+}
+
+// Nor over a file of a module the program imports, its source or a prebuilt
+// module file (here from --module-path; the standard library's are found
+// the same way): `build main.pkn -o lib.pkn`, `--emit-c ... -o lib.pkn`
+// and `--emit-pkm ... -o <prebuilt>.pkm` replaced it with exit status 0.
+TEST(Driver, NoCommandWritesOverAnImportedModule) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("imports_same");
+  std::filesystem::create_directories(dir / "mods" / "geometry");
+  const std::string lib = "fn twice(x: int) -> int { return 2 * x; }\n";
+  std::ofstream(dir / "lib.pkn") << lib;
+  std::ofstream(dir / "shapes.pkn")
+      << "fn area(w: int, h: int) -> int { return w * h; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io;\nimport lib;\nimport geometry::shapes;\n"
+         "fn main() -> int {\n"
+         "  io::println(Str<int>(lib::twice(geometry::shapes::area(2, 3))));\n"
+         "  return 0;\n}\n";
+  auto cd = "cd " + dir.string() + " && " + paykanRun();
+  auto made = run(cd + " --emit-pkm --module-name=geometry::shapes shapes.pkn "
+                       "-o mods/geometry/shapes.pkm 2>&1");
+  ASSERT_EQ(made.exitCode, 0) << made.out;
+  const std::string prebuilt = slurp(dir / "mods" / "geometry" / "shapes.pkm");
+  for (const auto &[args, output, input] :
+       {std::tuple{"build main.pkn -o lib.pkn", "lib.pkn", "lib.pkn"},
+        std::tuple{"build main.pkn -o mods//geometry/shapes.pkm",
+                   "mods//geometry/shapes.pkm", "mods/geometry/shapes.pkm"},
+        std::tuple{"--emit-c main.pkn -o ./lib.pkn", "./lib.pkn", "lib.pkn"},
+        std::tuple{"--emit-pir main.pkn -o mods/geometry/shapes.pkm",
+                   "mods/geometry/shapes.pkm", "mods/geometry/shapes.pkm"},
+        std::tuple{"--emit-pkm main.pkn -o mods/geometry/shapes.pkm",
+                   "mods/geometry/shapes.pkm", "mods/geometry/shapes.pkm"}}) {
+    auto [rc, out] =
+        run(cd + " --module-path=mods " + std::string(args) + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_NE(out.find(std::string("paykan: the output '") + output +
+                       "' is the input file '" + input +
+                       "' (choose another with -o)"),
+              std::string::npos)
+        << args << ": " << out;
+  }
+  EXPECT_EQ(slurp(dir / "lib.pkn"), lib);
+  EXPECT_EQ(slurp(dir / "mods" / "geometry" / "shapes.pkm"), prebuilt);
+  auto ran = run(cd + " --module-path=mods main.pkn 2>&1");
+  EXPECT_EQ(ran.exitCode, 0) << ran.out;
+  EXPECT_EQ(ran.out, "12\n");
   std::filesystem::remove_all(dir);
 }
 

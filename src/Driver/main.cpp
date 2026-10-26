@@ -338,11 +338,17 @@ bool sameFile(const std::filesystem::path &a, const std::filesystem::path &b) {
 }
 
 /// Why the driver must not write @p output: it is a file the command reads
-/// (the source file, or the module file of `pkm`, or an --object file);
-/// "" when it is none of them.
-std::string overwritesInput(const std::string &output, const Options &opts) {
+/// (the source file, or the module file of `pkm`, an --object file, or a
+/// file @p resolver, when given, read for the imports: a source or a
+/// module file); "" when it is none of them.
+std::string
+overwritesInput(const std::string &output, const Options &opts,
+                const paykan::modules::ModuleResolver *resolver = nullptr) {
   std::vector<std::string> inputs{opts.InputFilename};
   inputs.insert(inputs.end(), opts.Objects.begin(), opts.Objects.end());
+  if (resolver)
+    for (const std::filesystem::path &file : resolver->filesRead())
+      inputs.push_back(file.string());
   for (const std::string &input : inputs) {
     if (!sameFile(output, input))
       continue;
@@ -380,17 +386,21 @@ std::string defaultExecutable(const std::string &input) {
 
 /// What @p print returns (EXIT_SUCCESS, or the status of a failure it
 /// reported), run on where an --emit-* option prints: -o's file, or
-/// standard output without -o.  The file is never one the command reads,
-/// and is written once all of it was printed, as a module file is
+/// standard output without -o.  The file is never one the command reads
+/// (overwritesInput, with @p resolver when the imports were resolved), and
+/// is written once all of it was printed, as a module file is
 /// (pkm::writeFileAtomically): a failure leaves what the path names as it
 /// was.
-template <typename Print> int printOutput(const Options &opts, Print &&print) {
+template <typename Print>
+int printOutput(const Options &opts,
+                const paykan::modules::ModuleResolver *resolver,
+                Print &&print) {
   if (opts.OutputPath.empty()) {
     int status = print(std::cout);
     return status == EXIT_SUCCESS ? finishStdout(status) : status;
   }
   const std::string &path = opts.OutputPath;
-  if (std::string why = overwritesInput(path, opts); !why.empty())
+  if (std::string why = overwritesInput(path, opts, resolver); !why.empty())
     return fail(why);
   std::ostringstream text;
   if (int status = print(text); status != EXIT_SUCCESS)
@@ -748,7 +758,7 @@ int main(int argc, char *argv[]) {
   }
   if (opts.EmitAST) {
     // What a frontend plugin returns (docs/plugins/ast-format.md).
-    return printOutput(opts, [&](std::ostream &os) {
+    return printOutput(opts, nullptr, [&](std::ostream &os) {
       std::string error;
       if (!paykan::ast::interchange::write(*root, os, error))
         return fail("cannot write the AST: " + error);
@@ -885,7 +895,8 @@ int main(int argc, char *argv[]) {
                                     ? std::filesystem::path(opts.InputFilename)
                                           .replace_extension(".pkm")
                                     : std::filesystem::path(opts.OutputPath);
-    if (std::string why = overwritesInput(out.string(), opts); !why.empty())
+    if (std::string why = overwritesInput(out.string(), opts, &resolver);
+        !why.empty())
       return fail(why);
     std::vector<std::string> deps;
     for (auto *imp : root->getImports())
@@ -952,7 +963,7 @@ int main(int argc, char *argv[]) {
   if (opts.Stats)
     stats.print(std::cerr);
   if (opts.EmitPIR)
-    return printOutput(opts, [&](std::ostream &os) {
+    return printOutput(opts, &resolver, [&](std::ostream &os) {
       paykan::pir::print(program, os);
       return EXIT_SUCCESS;
     });
@@ -986,7 +997,7 @@ int main(int argc, char *argv[]) {
       return fail("backend '" + backendName + "' has no source output");
     paykan::backend::EmitOptions eo;
     eo.SourceStage = opts.EmitStage;
-    return printOutput(opts, [&](std::ostream &os) {
+    return printOutput(opts, &resolver, [&](std::ostream &os) {
       paykan::Status s =
           backend->emit(in, paykan::backend::EmitKind::Source, eo, os);
       return s ? EXIT_SUCCESS : failBackend(s);
@@ -1000,7 +1011,8 @@ int main(int argc, char *argv[]) {
     eo.OutputPath = opts.OutputPath.empty()
                         ? defaultExecutable(opts.InputFilename)
                         : opts.OutputPath;
-    if (std::string why = overwritesInput(eo.OutputPath, opts); !why.empty())
+    if (std::string why = overwritesInput(eo.OutputPath, opts, &resolver);
+        !why.empty())
       return fail(why);
     paykan::Status s =
         backend->emit(in, paykan::backend::EmitKind::Executable, eo, std::cout);

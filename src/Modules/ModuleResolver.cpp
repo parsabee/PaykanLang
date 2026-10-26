@@ -123,6 +123,11 @@ void ModuleResolver::log(const std::string &line) const {
     *Opts.Verbose << line << "\n";
 }
 
+void ModuleResolver::noteRead(const std::filesystem::path &path) {
+  if (std::find(FilesRead.begin(), FilesRead.end(), path) == FilesRead.end())
+    FilesRead.push_back(path);
+}
+
 std::string
 ModuleResolver::relativeToRoot(const std::filesystem::path &path) const {
   std::error_code ec;
@@ -197,6 +202,7 @@ Resolution ModuleResolver::resolveSource(const std::string &canonical,
   std::string shown = relativeToRoot(cache);
   std::vector<uint8_t> sourceBytes;
   if (auto it = Pendings.find(canonical); it == Pendings.end()) {
+    noteRead(source);
     StatusOr<std::vector<uint8_t>> bytes = pkm::readFileBytes(source);
     if (!bytes)
       return fromSource("cache " + shown + " unusable (" +
@@ -278,6 +284,7 @@ Resolution ModuleResolver::load(const std::string &canonical,
   if (auto it = Pendings.find(canonical); it != Pendings.end()) {
     p = it->second.get();
   } else {
+    noteRead(path);
     StatusOr<std::vector<uint8_t>> bytes = pkm::readFileBytes(path);
     if (!bytes)
       return unusable("cannot be read (" + bytes.status().message() + ")");
@@ -411,6 +418,7 @@ void ModuleResolver::built(const std::string &canonical, pkm::Interface iface,
     }
     iface.Mods.push_back(std::move(ref));
   }
+  noteRead(e.Path);
   if (StatusOr<std::vector<uint8_t>> bytes = pkm::readFileBytes(e.Path))
     e.SourceBytes = std::move(*bytes);
   e.IfaceHash = support::sha256(pkm::writeInterface(iface));
