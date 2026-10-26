@@ -78,6 +78,13 @@ impl Named for GBox<T> {
   view fn name() -> Str { return "box"; }
 }
 
+// A key, or none: its bound is checked once the conformances are known, for
+// a class field's type too.
+enum Maybe<T: Hashable> {
+  Just(v: T),
+  Nothing
+}
+
 // Instantiations this module makes: their conformances are in its interface.
 fn mkKeyed() -> Keyed<int> {
   return Keyed<int>(7);

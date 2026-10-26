@@ -605,11 +605,12 @@ d = gen::Box<int>(1);     // the same class as c's
   `Box<Str>` and `gen::Box<Str>`, is an error: type names are global across
   the import graph.
 - A generic class's or struct's `impl` blocks go with it, `impl Trait for`
-  blocks too. `impl Hashable for Box<T>` makes every instantiation
-  `Hashable`, whichever module makes it, and is checked there as the module
-  would check it: an importer's `gen::Box<float>` is an error when
-  `Box<float>` is one in `lib::gen`. A block of the module's own trait gives
-  an importer's instantiation its methods, not the trait: an importer cannot
+  blocks too, and each instantiation checks their methods as the module
+  would check its own, whichever module makes it: an importer's
+  `gen::Box<float>` is an error when `Box<float>` is one in `lib::gen`, even
+  for a method the importer never calls. `impl Hashable for Box<T>` makes
+  every instantiation `Hashable`. A block of the module's own trait gives an
+  importer's instantiation its methods, not the trait: an importer cannot
   name another module's traits yet
   ([#147](https://github.com/parsabee/PaykanLang/issues/147),
   [Traits](06-traits.md#not-supported-yet)).

@@ -662,9 +662,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Hashable for` (`class 'Sub' already implements 'Hashable' (through 'CK')`), as in one
   module.  It is `Hashable` through its superclass.
 - An importer's instantiation of another module's generic type checks the type's `impl
-  Hashable for` block, which was left out before.  So `gb::Box<float>`, with `impl
-  Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }`, is now `method
-  call on non-class type 'float'` in gb's file, as `Box<float>` is in gb itself.
+  Trait for` blocks, which were left out before, as the module checks its own
+  instantiations: also the methods the importer never calls.  So `gb::Box<float>`, with
+  `impl Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }`, is now
+  `method call on non-class type 'float'` in gb's file, as `Box<float>` is in gb itself.
+  A block of gb's own trait is checked the same way (`impl Named for Box<T>`, whose
+  `name` returns `self.v.name()`, is that error for `gb::Box<int>`), and `impl Show for
+  SBox<T> {}` makes `gb::SBox<int>` the error `class 'SBox<int>' already implements 'Show'
+  (through 'Obj')`.
 - A bound of another module's template is never resolved against the importer's own
   traits.  An importer that declared a `trait Named` of its own satisfied
   `lib::greet<T: Named>` with it, whatever the trait's methods.  That is now the #147
@@ -1302,7 +1307,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instantiates another module's template, whose field instantiates a bounded one) showed
   that template's line under the importer's file name, with no instantiation note:
   `main.pkn:846:3` for a line of collections.pkn.  It now names the template's file, with
-  the instantiation notes.
+  the instantiation notes.  In one module too, such an error in a template a field's
+  type instantiates (`h: Holder<int>`, with `class Holder<T> { g: Gen<float>; }` and
+  `class Gen<T: Hashable>`) now has the `in instantiation of 'Holder<int>' requested here`
+  note, as a bound error found earlier has.
 - A bounded generic enum used before the `impl` blocks were checked (a class field `m:
   Maybe<int>` of `enum Maybe<T: Hashable>`) crashed the compiler.  It is now checked like
   a generic class.

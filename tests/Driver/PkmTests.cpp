@@ -23,9 +23,12 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include <sys/wait.h>
@@ -2032,9 +2035,12 @@ namespace {
 
 /// lib::keys declares a struct, a class and a private struct with `impl
 /// Hashable for` blocks and makes instantiations of its generic types;
-/// lib::mid only returns keys' types and lib::lib2's template body uses one.
-/// main uses each as a `HashMap`/`HashSet` key or a `T: Hashable` argument,
-/// and so are the instantiations of keys' generic types it makes itself.
+/// lib::mid returns keys' types and declares a subclass of one, lib::m2
+/// makes other instantiations of keys' generic types, and lib::lib2's
+/// template body uses one.  main uses each as a `HashMap`/`HashSet` key or a
+/// `T: Hashable` argument, and so are the instantiations of keys' generic
+/// types it makes itself, and as type arguments of bounded generic enums,
+/// keys' and its own, in field types.
 struct ConformanceProject {
   fs::path Dir;
   explicit ConformanceProject(const std::string &name) {
@@ -2068,12 +2074,22 @@ class GBox<T> { v: T; }
 impl GBox<T> { fn __init__(v: T) { self.v = v; } }
 impl Hashable for GBox<T> { view fn hash() -> int { return 3; } }
 impl Named for GBox<T> { view fn name() -> Str { return "box"; } }
+enum Maybe<T: Hashable> { Just(v: T), Nothing }
 fn mkKeyed() -> Keyed<int> { return Keyed<int>(7); }
 fn mkBox() -> GBox<int> { return GBox<int>(1); }
 )");
     writeFile(Dir / "lib" / "mid.pkn", R"(import lib::keys;
 fn mk() -> keys::Key { return keys::Key(1, 2); }
 fn mkc() -> keys::CK { return keys::CK(4); }
+class MSub : keys::CK {
+  view fn equals(other: Obj) -> bool { match other { p: MSub { return p.v == self.v; } _ { return False; } } }
+}
+impl MSub { fn __init__(v: int) { __super__(v); } }
+fn mksub(v: int) -> MSub { return MSub(v); }
+)");
+    writeFile(Dir / "lib" / "m2.pkn", R"(import lib::keys;
+fn mkBox() -> keys::GBox<bool> { return keys::GBox<bool>(True); }
+fn mkKeyed() -> keys::Keyed<keys::Key> { return keys::Keyed<keys::Key>(keys::Key(2, 3)); }
 )");
     writeFile(Dir / "lib" / "lib2.pkn", R"(import lib::keys;
 import ::collections;
@@ -2086,12 +2102,21 @@ fn count<T>(x: T) -> unsigned {
 import ::collections;
 import lib::keys;
 import lib::mid;
+import lib::m2;
 import lib::lib2;
 class Sub : keys::CK {
   view fn equals(other: Obj) -> bool { match other { p: Sub { return p.v == self.v; } _ { return False; } } }
 }
 impl Sub { fn __init__(v: int) { __super__(v); } }
 fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
+enum Opt<T: Hashable> { Some(v: T), No }
+class Slots { m: keys::Maybe<keys::Key>; o: Opt<keys::CK>; }
+impl Slots {
+  fn __init__() {
+    self.m = keys::Maybe<keys::Key>::Just(keys::Key(4, 0));
+    self.o = Opt<keys::CK>::Some(keys::CK(5));
+  }
+}
 fn main() -> int {
   m = collections::HashMap<keys::Key, int>();
   m.put(keys::Key(1, 2), 5);
@@ -2105,6 +2130,15 @@ fn main() -> int {
   io::println(Str(h(keys::mkBox())) + " " + Str(h(keys::GBox<Str>("x"))) + " " + keys::GBox<Str>("x").name());
   io::println(Str(keys::distinct(0)));
   io::println(Str(lib::lib2::count(0)));
+  a = collections::HashSet<mid::MSub>();
+  a.add(mid::mksub(1)); a.add(mid::MSub(1)); a.add(mid::MSub(2));
+  b = collections::HashSet<keys::Keyed<keys::Key>>();
+  b.add(m2::mkKeyed()); b.add(m2::mkKeyed());
+  io::println(Str(a.len()) + " " + Str(b.len()) + " " + Str(h(m2::mkBox())) + " " + m2::mkBox().name());
+  slots = Slots();
+  a0 = 0;
+  match slots.m { j: Just { a0 = j.v.a; } Nothing {} }
+  match slots.o { some: Some { io::println(Str(a0) + " " + Str(some.v.v)); } No {} }
   return 0;
 }
 )");
@@ -2115,7 +2149,8 @@ fn main() -> int {
   }
 };
 
-const char *kConformanceOutput = "1 2 1\nTrue True\n3 3 box\n2\n1\n";
+const char *kConformanceOutput =
+    "1 2 1\nTrue True\n3 3 box\n2\n1\n2 1 3 box\n4 5\n";
 
 } // namespace
 
@@ -2126,7 +2161,7 @@ const char *kConformanceOutput = "1 2 1\nTrue True\n3 3 box\n2\n1\n";
 TEST(Pkm, ConformancesAcrossModules) {
   REQUIRE_BACKEND();
   ConformanceProject p("conformances");
-  const char *libs[] = {"lib::keys", "lib::mid", "lib::lib2"};
+  const char *libs[] = {"lib::keys", "lib::mid", "lib::m2", "lib::lib2"};
   for (const std::string &be : runnableBackends()) {
     const std::string cmd = std::string(kPaykan) + backendFlag(be);
     // `paykan [flags] main.pkn` runs main without a leak, and its output.
@@ -2175,7 +2210,7 @@ TEST(Pkm, ConformancesAcrossModules) {
     // Prebuilt: every library a .pkm file on the module path, its source
     // gone.
     fs::remove_all(p.Dir / "pk");
-    for (const char *m : {"keys", "mid", "lib2"}) {
+    for (const char *m : {"keys", "mid", "m2", "lib2"}) {
       auto emit = p.paykan(cmd, std::string("--emit-pkm -o pk/lib/") + m +
                                     ".pkm lib/" + m + ".pkn");
       ASSERT_EQ(emit.exitCode, 0) << be << ": " << emit.out;
@@ -2189,7 +2224,7 @@ TEST(Pkm, ConformancesAcrossModules) {
           << pre;
     builds("--module-path=pk", "prebuilt");
 
-    // Mixed: keys prebuilt beside the sources of mid and lib2.
+    // Mixed: keys prebuilt beside the sources of mid, m2 and lib2.
     fs::rename(p.Dir / "src", p.Dir / "lib");
     fs::rename(p.Dir / "lib" / "keys.pkn", p.Dir / "keys.away");
     fs::copy_file(p.Dir / "pk" / "lib" / "keys.pkm",
@@ -2205,7 +2240,8 @@ TEST(Pkm, ConformancesAcrossModules) {
 
   // keys' interface records the conformances of its types, its private
   // struct's and those of the instantiations it made, not a user trait's;
-  // mid's records those of the types it describes again.
+  // mid's records those of the types it describes again, and none of its
+  // subclass of CK; m2's those of the instantiations it made.
   auto keys = p.paykan(kPaykan, "pkm dump --section=iface pk/lib/keys.pkm");
   ASSERT_EQ(keys.exitCode, 0) << keys.out;
   EXPECT_TRUE(contains(keys.out, "  impl Hashable for CK\n"
@@ -2220,6 +2256,14 @@ TEST(Pkm, ConformancesAcrossModules) {
   EXPECT_TRUE(contains(mid.out, "  struct Key [imported from \"lib::keys\"]"))
       << mid.out;
   EXPECT_TRUE(contains(mid.out, "  impl Hashable for Key\n")) << mid.out;
+  EXPECT_TRUE(contains(mid.out, "  class MSub super \"CK\" [local from "
+                                "\"lib::mid\"]\n"))
+      << mid.out;
+  EXPECT_FALSE(contains(mid.out, "for MSub")) << mid.out;
+  auto m2 = p.paykan(kPaykan, "pkm dump --section=iface pk/lib/m2.pkm");
+  ASSERT_EQ(m2.exitCode, 0) << m2.out;
+  EXPECT_TRUE(contains(m2.out, "  impl Hashable for GBox<bool>\n")) << m2.out;
+  EXPECT_TRUE(contains(m2.out, "  impl Hashable for Keyed<Key>\n")) << m2.out;
 
   // keys' templates carry every `impl` block of its generic types, `impl
   // Trait for` blocks too: GBox's plain, Hashable and Named blocks, and
@@ -2339,9 +2383,10 @@ void rewriteIface(const fs::path &path, const std::string &module,
 
 } // namespace
 
-// A prebuilt file whose interface claims a conformance it cannot have: the
-// reader rejects one to a trait an `impl` block cannot give, the importer
-// one whose type lacks the trait's methods.
+// A .pkm file whose interface claims a conformance it cannot have: the
+// reader rejects one to a trait an `impl` block cannot give, so a cache
+// entry is rebuilt from the source and a prebuilt file is an error, and the
+// importer one whose type lacks the trait's methods.
 TEST(Pkm, AForgedConformanceIsRejected) {
   REQUIRE_BACKEND();
   auto dir = fs::temp_directory_path() /
@@ -2359,18 +2404,37 @@ TEST(Pkm, AForgedConformanceIsRejected) {
   auto paykan = [&](const std::string &args) {
     return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
   };
+  auto toNamed = [](paykan::pkm::Interface &i) {
+    ASSERT_EQ(i.Impls.size(), 1u);
+    i.Impls[0].Trait = "Named";
+  };
+  const char *notBuiltin = "has a bad IFACE section: DECLS: 'impl Named for "
+                           "Key': 'Named' is not a built-in trait an 'impl' "
+                           "block implements";
+
+  // The cache entry, then the one rebuilt in its place.
+  ASSERT_EQ(paykan("main.pkn").exitCode, 5);
+  rewriteIface(dir / ".paykan_cache" / "keys.pkm", "keys", toNamed);
+  auto rebuilt = paykan("--verbose main.pkn");
+  EXPECT_EQ(rebuilt.exitCode, 5) << rebuilt.out;
+  EXPECT_TRUE(contains(rebuilt.out, std::string("module keys: cache "
+                                                ".paykan_cache/keys.pkm ") +
+                                        notBuiltin))
+      << rebuilt.out;
+  EXPECT_TRUE(contains(rebuilt.out, "; building from source\n")) << rebuilt.out;
+  auto again = paykan("--verbose main.pkn");
+  EXPECT_EQ(again.exitCode, 5) << again.out;
+  EXPECT_TRUE(
+      contains(again.out, "module keys: cache .paykan_cache/keys.pkm usable"))
+      << again.out;
+  fs::remove_all(dir / ".paykan_cache");
+
   ASSERT_EQ(paykan("--emit-pkm keys.pkn").exitCode, 0);
   fs::remove(dir / "keys.pkn");
   ASSERT_EQ(paykan("main.pkn").exitCode, 5);
   const std::string pristine = slurp(dir / "keys.pkm");
 
-  rewriteIface(dir / "keys.pkm", "keys", [](paykan::pkm::Interface &i) {
-    ASSERT_EQ(i.Impls.size(), 1u);
-    i.Impls[0].Trait = "Named";
-  });
-  const char *notBuiltin = "has a bad IFACE section: DECLS: 'impl Named for "
-                           "Key': 'Named' is not a built-in trait an 'impl' "
-                           "block implements";
+  rewriteIface(dir / "keys.pkm", "keys", toNamed);
   auto named = paykan("main.pkn");
   EXPECT_NE(named.exitCode, 0) << named.out;
   EXPECT_TRUE(contains(named.out, notBuiltin)) << named.out;
@@ -2407,6 +2471,115 @@ std::string diagLines(const std::string &out) {
   return kept;
 }
 
+/// Modules lib/<name>.pkn (module lib::<name>) of Libs in Dir, and programs
+/// beside them.
+struct EveryPathProject {
+  fs::path Dir;
+  std::vector<std::string> Libs;
+  /// The library prebuilt beside the others' sources on the mixed path.
+  std::string Mixed;
+  /// Programs and the errors and notes each is rejected with.
+  std::vector<std::pair<std::string, std::string>> Rejected;
+  /// A program that runs and prints OkOutput.
+  std::string Ok;
+  std::string OkOutput;
+};
+
+/// Each program of @p p.Rejected is rejected with exactly its errors and
+/// notes by run, build at -O0 and -O2, and --emit-c, and @p p.Ok runs, built
+/// too, and prints its output without a leak, on every path the modules come
+/// from: their sources with a cold and a warm cache, --no-module-cache,
+/// --rebuild-modules, prebuilt files with the sources gone (where a note in
+/// a library's file has no source text to show), and @p p.Mixed prebuilt
+/// beside the others' sources.
+void expectOnEveryPath(const EveryPathProject &p) {
+  // The words of a command line.
+  auto words = [](std::initializer_list<std::string_view> parts) {
+    std::string line;
+    for (std::string_view part : parts)
+      line.append(" ").append(part);
+    return line;
+  };
+  for (const std::string &be : runnableBackends()) {
+    // `paykan --backend=<be> <args>` from the project directory.
+    auto paykan = [&](const std::string &args) {
+      return run("cd " + p.Dir.string() + " && " + kPaykan + backendFlag(be) +
+                 args);
+    };
+    const std::string exe = (p.Dir / "prog").string();
+    auto every = [&](const std::string &flags, const std::string &how) {
+      SCOPED_TRACE(testing::Message() << be << ", " << how);
+      for (const auto &[prog, errors] : p.Rejected) {
+        SCOPED_TRACE(prog);
+        auto r = paykan(words({flags, prog}));
+        EXPECT_NE(r.exitCode, 0) << r.out;
+        EXPECT_EQ(diagLines(r.out), errors) << r.out;
+        for (const char *opt : {"-O0", "-O2"}) {
+          auto b = paykan(words({opt, flags, "build -o", exe, prog}));
+          EXPECT_NE(b.exitCode, 0) << opt;
+          EXPECT_EQ(diagLines(b.out), errors) << opt << ":\n" << b.out;
+        }
+        auto c = paykan(words({flags, "--emit-c", prog}));
+        EXPECT_NE(c.exitCode, 0) << "--emit-c";
+        EXPECT_EQ(diagLines(c.out), errors) << "--emit-c:\n"
+                                            << c.out.substr(0, 4000);
+      }
+      SCOPED_TRACE(p.Ok);
+      for (const char *opt : {"-O0", "-O2"}) {
+        auto b = paykan(words({opt, flags, "build -o", exe, p.Ok}));
+        ASSERT_EQ(b.exitCode, 0) << opt << ":\n" << b.out;
+        auto ran = run(exe);
+        EXPECT_EQ(ran.exitCode, 0) << opt;
+        EXPECT_EQ(ran.out, p.OkOutput) << opt;
+        fs::remove(exe);
+      }
+      auto c = paykan(words({flags, "--emit-c", p.Ok}));
+      EXPECT_EQ(c.exitCode, 0) << "--emit-c:\n" << c.out.substr(0, 4000);
+      auto ok = paykan(words({flags, "--track-heap", p.Ok}));
+      EXPECT_EQ(ok.exitCode, 0) << ok.out;
+      EXPECT_TRUE(contains(ok.out, p.OkOutput)) << ok.out;
+      EXPECT_TRUE(contains(ok.out, "live blocks       : 0")) << ok.out;
+    };
+
+    // From source: the cold run writes the cache entries the warm one reads.
+    fs::remove_all(p.Dir / ".paykan_cache");
+    every("", "cold cache");
+    auto warm = paykan(words({"--verbose", p.Ok}));
+    for (const std::string &lib : p.Libs)
+      EXPECT_TRUE(contains(warm.out, "module lib::" + lib + ": cache "))
+          << be << ", " << lib << ":\n"
+          << warm.out;
+    EXPECT_FALSE(contains(warm.out, "building from source")) << warm.out;
+    every("", "warm cache");
+    every("--no-module-cache", "--no-module-cache");
+    every("--rebuild-modules", "--rebuild-modules");
+
+    // Prebuilt: every library a .pkm file on the module path, its source
+    // gone.
+    fs::remove_all(p.Dir / "pk");
+    for (const std::string &lib : p.Libs) {
+      const fs::path source = fs::path("lib") / (lib + ".pkn");
+      const fs::path pkm = fs::path("pk") / "lib" / (lib + ".pkm");
+      auto emit =
+          paykan(words({"--emit-pkm -o", pkm.string(), source.string()}));
+      ASSERT_EQ(emit.exitCode, 0) << be << ": " << emit.out;
+    }
+    fs::rename(p.Dir / "lib", p.Dir / "src");
+    fs::remove_all(p.Dir / ".paykan_cache");
+    every("--module-path=pk", "prebuilt");
+
+    // Mixed: one library prebuilt beside the others' sources.
+    fs::rename(p.Dir / "src", p.Dir / "lib");
+    fs::rename(p.Dir / "lib" / (p.Mixed + ".pkn"), p.Dir / "mixed.away");
+    fs::copy_file(p.Dir / "pk" / "lib" / (p.Mixed + ".pkm"),
+                  p.Dir / "lib" / (p.Mixed + ".pkm"));
+    fs::remove_all(p.Dir / ".paykan_cache");
+    every("", "mixed");
+    fs::remove(p.Dir / "lib" / (p.Mixed + ".pkm"));
+    fs::rename(p.Dir / "mixed.away", p.Dir / "lib" / (p.Mixed + ".pkn"));
+  }
+}
+
 } // namespace
 
 // A template of another module bounded by that module's own trait is
@@ -2416,10 +2589,12 @@ std::string diagLines(const std::string &out) {
 // --emit-c alike; the module's function that is not generic runs on each.
 TEST(Pkm, AForeignTraitBoundIsReportedOnEveryPath) {
   REQUIRE_BACKEND();
-  auto dir = fs::temp_directory_path() /
-             ("pkm_foreign_bound_" + std::to_string(getpid()));
-  fs::remove_all(dir);
-  writeFile(dir / "lib" / "pets.pkn", R"(trait Named { view fn name() -> Str; }
+  EveryPathProject p;
+  p.Dir = fs::temp_directory_path() /
+          ("pkm_foreign_bound_" + std::to_string(getpid()));
+  fs::remove_all(p.Dir);
+  writeFile(p.Dir / "lib" / "pets.pkn",
+            R"(trait Named { view fn name() -> Str; }
 class Dog { view fn name() -> Str { return "Rex"; } }
 impl Named for Dog {}
 fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
@@ -2431,111 +2606,122 @@ class Holder<T> {
   s: Set<_F>;
 }
 )");
-  writeFile(dir / "lib" / "greeter.pkn",
+  writeFile(p.Dir / "lib" / "greeter.pkn",
             "import lib::pets;\n"
             "fn hi() -> Str { return pets::wrapn(); }\n");
-  writeFile(dir / "main.pkn",
+  writeFile(p.Dir / "main.pkn",
             "import ::io;\n"
             "import lib::pets;\n"
             "class M { h: pets::Holder<int>; }\n"
             "fn main() -> int { io::println(pets::wrap(1)); return 0; }\n");
-  writeFile(dir / "ok.pkn", "import ::io;\n"
-                            "import lib::greeter;\n"
-                            "import lib::pets;\n"
-                            "fn main() -> int {\n"
-                            "  io::println(greeter::hi() + \" \" + "
-                            "pets::wrapn());\n"
-                            "  return 0;\n"
-                            "}\n");
-  const std::string kErrors =
-      "lib/pets.pkn:10:3: error: '_F' does not implement trait 'Hashable', "
-      "which 'lib::pets::Set' requires of 'K'\n"
-      "main.pkn:3:11: note: in instantiation of 'Holder<int>' requested here\n"
-      "main.pkn:4:32: error: 'lib::pets::wrap<int>' cannot be instantiated "
-      "here: it uses 'lib::pets::greet', which requires 'T' to implement trait "
-      "'Named' of module 'lib::pets', and another module's traits are not "
-      "supported yet (#147)\n"
-      "lib/pets.pkn:5:34: note: 'lib::pets::greet' is used here\n";
-  // `paykan --backend=<be> <args>` from the project directory.
-  auto paykanOn = [&](const std::string &be, const std::string &args) {
-    return run("cd " + dir.string() + " && " + kPaykan + backendFlag(be) + " " +
-               args);
-  };
-  for (const std::string &be : runnableBackends()) {
-    auto paykan = [&](const std::string &args) { return paykanOn(be, args); };
-    // main is rejected with kErrors by run, build at -O0 and -O2, and
-    // --emit-c; ok runs, built too, without a leak.
-    auto every = [&](const std::string &flags, const std::string &how) {
-      auto r = paykan(flags + " main.pkn");
-      EXPECT_NE(r.exitCode, 0) << be << ", " << how << ":\n" << r.out;
-      EXPECT_EQ(diagLines(r.out), kErrors) << be << ", " << how << ":\n"
-                                           << r.out;
-      for (const char *opt : {"-O0", "-O2"}) {
-        const fs::path exe = dir / ("prog" + std::string(opt));
-        auto b = paykan(std::string(opt) + " " + flags + " build -o " +
-                        exe.string() + " main.pkn");
-        EXPECT_NE(b.exitCode, 0) << be << ", " << how << " " << opt;
-        EXPECT_EQ(diagLines(b.out), kErrors)
-            << be << ", " << how << " " << opt << ":\n"
-            << b.out;
-        auto okb = paykan(std::string(opt) + " " + flags + " build -o " +
-                          exe.string() + " ok.pkn");
-        ASSERT_EQ(okb.exitCode, 0) << be << ", " << how << " " << opt << ":\n"
-                                   << okb.out;
-        auto ran = run(exe.string());
-        EXPECT_EQ(ran.exitCode, 0) << be << ", " << how << " " << opt;
-        EXPECT_EQ(ran.out, "hello, Rex hello, Rex\n")
-            << be << ", " << how << " " << opt;
-        fs::remove(exe);
-      }
-      auto c = paykan(flags + " --emit-c main.pkn");
-      EXPECT_NE(c.exitCode, 0) << be << ", " << how << " --emit-c";
-      EXPECT_EQ(diagLines(c.out), kErrors)
-          << be << ", " << how << " --emit-c:\n"
-          << c.out.substr(0, 4000);
-      auto okc = paykan(flags + " --emit-c ok.pkn");
-      EXPECT_EQ(okc.exitCode, 0) << be << ", " << how << " --emit-c:\n"
-                                 << okc.out.substr(0, 4000);
-      auto ok = paykan(flags + " --track-heap ok.pkn");
-      EXPECT_EQ(ok.exitCode, 0) << be << ", " << how << ":\n" << ok.out;
-      EXPECT_TRUE(contains(ok.out, "hello, Rex hello, Rex\n"))
-          << be << ", " << how << ":\n"
-          << ok.out;
-      EXPECT_TRUE(contains(ok.out, "live blocks       : 0"))
-          << be << ", " << how << ":\n"
-          << ok.out;
-    };
+  writeFile(p.Dir / "ok.pkn", "import ::io;\n"
+                              "import lib::greeter;\n"
+                              "import lib::pets;\n"
+                              "fn main() -> int {\n"
+                              "  io::println(greeter::hi() + \" \" + "
+                              "pets::wrapn());\n"
+                              "  return 0;\n"
+                              "}\n");
+  p.Libs = {"pets", "greeter"};
+  p.Mixed = "pets";
+  p.Rejected = {
+      {"main.pkn",
+       "lib/pets.pkn:10:3: error: '_F' does not implement trait 'Hashable', "
+       "which 'lib::pets::Set' requires of 'K'\n"
+       "main.pkn:3:11: note: in instantiation of 'Holder<int>' requested "
+       "here\n"
+       "main.pkn:4:32: error: 'lib::pets::wrap<int>' cannot be instantiated "
+       "here: it uses 'lib::pets::greet', which requires 'T' to implement "
+       "trait 'Named' of module 'lib::pets', and another module's traits are "
+       "not supported yet (#147)\n"
+       "lib/pets.pkn:5:34: note: 'lib::pets::greet' is used here\n"}};
+  p.Ok = "ok.pkn";
+  p.OkOutput = "hello, Rex hello, Rex\n";
+  expectOnEveryPath(p);
+  fs::remove_all(p.Dir);
+}
 
-    // From source: ok writes the cache entries main then reads.
-    fs::remove_all(dir / ".paykan_cache");
-    every("", "cold cache");
-    auto warm = paykan("--verbose main.pkn");
-    EXPECT_TRUE(contains(warm.out, "module lib::pets: cache ")) << warm.out;
-    EXPECT_EQ(diagLines(warm.out), kErrors) << be << ", warm:\n" << warm.out;
-    every("", "warm cache");
-    every("--no-module-cache", "--no-module-cache");
-    every("--rebuild-modules", "--rebuild-modules");
-
-    // Prebuilt: both libraries .pkm files on the module path, the sources
-    // gone (the notes in pets' file have no source text to show).
-    fs::remove_all(dir / "pk");
-    for (const char *m : {"pets", "greeter"}) {
-      auto emit = paykan(std::string("--emit-pkm -o pk/lib/") + m +
-                         ".pkm lib/" + m + ".pkn");
-      ASSERT_EQ(emit.exitCode, 0) << be << ": " << emit.out;
-    }
-    fs::rename(dir / "lib", dir / "src");
-    fs::remove_all(dir / ".paykan_cache");
-    every("--module-path=pk", "prebuilt");
-
-    // Mixed: pets prebuilt beside greeter's source.
-    fs::rename(dir / "src", dir / "lib");
-    fs::rename(dir / "lib" / "pets.pkn", dir / "pets.away");
-    fs::copy_file(dir / "pk" / "lib" / "pets.pkm", dir / "lib" / "pets.pkm");
-    fs::remove_all(dir / ".paykan_cache");
-    every("", "mixed");
-    fs::remove(dir / "lib" / "pets.pkm");
-    fs::rename(dir / "pets.away", dir / "lib" / "pets.pkn");
-  }
-  fs::remove_all(dir);
+// A generic type's `impl Trait for` blocks go with its template whether its
+// module comes from its source, the cache or a prebuilt file, and an
+// importer's instantiation checks them as the module would check its own:
+// an `impl Hashable for` block's body, a block of the module's own trait,
+// whose methods it gets but not the trait, and an `impl Show for` block of
+// a class.  An importer's subclass of the module's Hashable class is
+// Hashable through it, and cannot repeat the conformance.
+TEST(Pkm, TraitBlocksAndSubclassesOnEveryPath) {
+  REQUIRE_BACKEND();
+  EveryPathProject p;
+  p.Dir = fs::temp_directory_path() /
+          ("pkm_trait_blocks_" + std::to_string(getpid()));
+  fs::remove_all(p.Dir);
+  writeFile(p.Dir / "lib" / "gb.pkn", R"(trait Named { view fn name() -> Str; }
+class Box<T> { v: T; }
+impl Box<T> { fn __init__(v: T) { self.v = v; } }
+impl Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }
+impl Named for Box<T> { view fn name() -> Str { return "gbox"; } }
+class NBox<T> { v: T; }
+impl NBox<T> { fn __init__(v: T) { self.v = v; } }
+impl Named for NBox<T> { view fn name() -> Str { return self.v.name(); } }
+class SBox<T> { v: T; }
+impl SBox<T> { fn __init__(v: T) { self.v = v; } }
+impl Show for SBox<T> {}
+class CK { v: int; }
+impl CK { fn __init__(v: int) { self.v = v; } }
+impl Hashable for CK { view fn hash() -> int { return self.v; } }
+)");
+  writeFile(p.Dir / "lib" / "mk.pkn",
+            "import lib::gb;\n"
+            "fn mk() -> gb::Box<int> { return gb::Box<int>(6); }\n");
+  const std::string kRequest = ".pkn:2:24: note: in instantiation of '";
+  writeFile(p.Dir / "pf.pkn",
+            "import lib::gb;\n"
+            "fn main() -> int { b = gb::Box<float>(1.5); return 0; }\n");
+  writeFile(p.Dir / "named.pkn",
+            "import lib::gb;\n"
+            "fn main() -> int { b = gb::NBox<int>(1); return 0; }\n");
+  writeFile(p.Dir / "show.pkn",
+            "import lib::gb;\n"
+            "fn main() -> int { b = gb::SBox<int>(1); return 0; }\n");
+  writeFile(p.Dir / "own.pkn",
+            "import lib::gb;\n"
+            "trait Named { view fn name() -> Str; }\n"
+            "fn g<T: Named>(x: view T) -> Str { return x.name(); }\n"
+            "fn main() -> int { s = g(gb::Box<Str>(\"s\")); return 0; }\n");
+  writeFile(p.Dir / "sub.pkn", "import lib::gb;\n"
+                               "class Sub : gb::CK {}\n"
+                               "impl Hashable for Sub {}\n"
+                               "fn main() -> int { return 0; }\n");
+  writeFile(p.Dir / "ok.pkn",
+            R"(import ::io;
+import lib::gb;
+import lib::mk;
+fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
+class Sub : gb::CK {}
+impl Sub { fn __init__(v: int) { __super__(v); } }
+fn main() -> int {
+  io::println(gb::Box<Str>("s").name() + " " + gb::NBox<gb::Box<int>>(gb::Box<int>(1)).name());
+  io::println(Str(h(gb::Box<int>(4)) == h(4)) + " " + Str(h(Sub(2))) + " " + Str(h(mk::mk()) == h(6)));
+  return 0;
+}
+)");
+  p.Libs = {"gb", "mk"};
+  p.Mixed = "gb";
+  p.Rejected = {
+      {"pf.pkn", "lib/gb.pkn:4:59: error: method call on non-class type "
+                 "'float'\npf" +
+                     kRequest + "Box<float>' requested here\n"},
+      {"named.pkn", "lib/gb.pkn:8:57: error: method call on non-class type "
+                    "'int'\nnamed" +
+                        kRequest + "NBox<int>' requested here\n"},
+      {"show.pkn", "lib/gb.pkn:11:1: error: class 'SBox<int>' already "
+                   "implements 'Show' (through 'Obj')\nshow" +
+                       kRequest + "SBox<int>' requested here\n"},
+      {"own.pkn", "own.pkn:4:24: error: 'Box<Str>' does not implement trait "
+                  "'Named', which 'g' requires of 'T'\n"},
+      {"sub.pkn", "sub.pkn:3:1: error: class 'Sub' already implements "
+                  "'Hashable' (through 'CK')\n"}};
+  p.Ok = "ok.pkn";
+  p.OkOutput = "gbox gbox\nTrue 2 True\n";
+  expectOnEveryPath(p);
+  fs::remove_all(p.Dir);
 }

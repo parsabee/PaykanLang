@@ -494,36 +494,62 @@ class GBox<T> { v: T; }
 impl GBox<T> { fn __init__(v: T) { self.v = v; } }
 impl Hashable for GBox<T> { view fn hash() -> int { return 3; } }
 impl Named for GBox<T> { view fn name() -> Str { return "box"; } }
+enum Maybe<T: Hashable> { Just(v: T), Nothing }
 fn mkKeyed() -> Keyed<int> { return Keyed<int>(7); }
 fn mkBox() -> GBox<int> { return GBox<int>(1); }
 )";
 
-// The module mid: it only mentions keys' types, so its interface describes
-// them (and their conformances) again.
+// The module mid: it only mentions keys' types, and declares a subclass of
+// one, so its interface describes them (and their conformances) again.
 static const char *const kKeysMidModule = R"(import lib::keys;
 fn mk() -> keys::Key { return keys::Key(1, 2); }
 fn mkc() -> keys::CK { return keys::CK(4); }
+class MSub : keys::CK {
+  view fn equals(other: Obj) -> bool { match other { p: MSub { return p.v == self.v; } _ { return False; } } }
+}
+impl MSub { fn __init__(v: int) { __super__(v); } }
+fn mksub(v: int) -> MSub { return MSub(v); }
 )";
 
-// main uses keys' types and conformances directly, through mid, through a
-// template body of keys (distinct), and through the instantiations of keys'
-// generic types that keys made (mkKeyed, mkBox) and that main makes itself
-// (`Keyed<Str>`, `GBox<Str>`: their `impl Trait for` blocks go with the
-// templates).
+// The module m2: it instantiates keys' generic types for types neither keys
+// nor main does, so its interface describes those instantiations, with
+// their conformances.
+static const char *const kKeysM2Module = R"(import lib::keys;
+fn mkBox() -> keys::GBox<bool> { return keys::GBox<bool>(True); }
+fn mkKeyed() -> keys::Keyed<keys::Key> { return keys::Keyed<keys::Key>(keys::Key(2, 3)); }
+)";
+
+// main uses keys' types and conformances directly, through mid (also a
+// subclass declared there), through a template body of keys (distinct), and
+// through the instantiations of keys' generic types that keys made (mkKeyed,
+// mkBox), that m2 made, and that main makes itself (`Keyed<Str>`,
+// `GBox<Str>`: their `impl Trait for` blocks go with the templates); and
+// they are type arguments of bounded generic enums, keys' and main's, in
+// field types, which are checked once the conformances are known.
 TEST(Module, HashableAcrossModulesOk) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_hashable").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "lib/keys.pkn", kKeysLibModule);
   writeFile(tmp, "lib/mid.pkn", kKeysMidModule);
+  writeFile(tmp, "lib/m2.pkn", kKeysM2Module);
   auto main = writeFile(tmp, "main.pkn", R"(import ::io;
 import ::collections;
 import lib::keys;
 import lib::mid;
+import lib::m2;
 class Sub : keys::CK {
   view fn equals(other: Obj) -> bool { match other { p: Sub { return p.v == self.v; } _ { return False; } } }
 }
 impl Sub { fn __init__(v: int) { __super__(v); } }
 fn h<T: Hashable>(x: view T) -> int { return x.hash(); }
+enum Opt<T: Hashable> { Some(v: T), No }
+class Slots { m: keys::Maybe<keys::Key>; o: Opt<keys::CK>; }
+impl Slots {
+  fn __init__() {
+    self.m = keys::Maybe<keys::Key>::Just(keys::Key(4, 0));
+    self.o = Opt<keys::CK>::Some(keys::CK(5));
+  }
+}
 fn main() -> int {
   m = collections::HashMap<keys::Key, int>();
   m.put(keys::Key(1, 2), 5);
@@ -537,6 +563,12 @@ fn main() -> int {
   io::println(Str(h(keys::Keyed<Str>("a")) == h("a")) + " " +
               Str(h(keys::GBox<Str>("x"))) + keys::GBox<Str>("x").name());
   io::println(Str(keys::distinct(0)));
+  a = collections::HashSet<mid::MSub>();
+  a.add(mid::mksub(1)); a.add(mid::MSub(2));
+  b = collections::HashSet<keys::Keyed<keys::Key>>();
+  b.add(m2::mkKeyed());
+  io::println(Str(a.len() + b.len()) + " " + Str(h(m2::mkBox())) + m2::mkBox().name());
+  slots = Slots();
   return 0;
 }
 )");
@@ -618,27 +650,58 @@ fn main() -> int { return 0; }
   std::filesystem::remove_all(tmp);
 }
 
-// A generic class's `impl Hashable for` block goes with its template: an
-// importer's instantiation checks it as the module would check its own
+// A generic class's `impl Trait for` blocks go with its template: an
+// importer's instantiation checks them as the module would check its own
 // (`Box<float>` in gb is the same error), in gb's file, with the importer's
-// request as the note.
+// request as the note, also a block of gb's own trait and an `impl Show
+// for` block, whose methods main never calls.
 TEST(Module, ImporterInstantiationChecksTraitBlock) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_trait_block").string();
   std::filesystem::remove_all(tmp);
   writeFile(tmp, "gb.pkn", R"(class Box<T> { v: T; }
 impl Box<T> { fn __init__(v: T) { self.v = v; } }
 impl Hashable for Box<T> { view fn hash() -> int { return self.v.hash(); } }
+trait Named { view fn name() -> Str; }
+class NBox<T> { v: T; }
+impl NBox<T> { fn __init__(v: T) { self.v = v; } }
+impl Named for NBox<T> { view fn name() -> Str { return self.v.name(); } }
+class SBox<T> { v: T; }
+impl SBox<T> { fn __init__(v: T) { self.v = v; } }
+impl Show for SBox<T> {}
 )");
   auto main = writeFile(tmp, "main.pkn", R"(import gb;
 fn main() -> int { b = gb::Box<float>(1.5); return 0; }
 )");
   auto r = semaCheckFile(main, tmp);
   EXPECT_FALSE(r.Ok);
-  for (const char *d :
-       {"gb.pkn:3:59: error: method call on non-class type 'float'",
-        "main.pkn:2:24: note: in instantiation of 'Box<float>' requested here"})
-    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
-                                                        << r.Diagnostics;
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "gb.pkn:3:59: error: method call on non-class type 'float'\n"
+            "main.pkn:2:24: note: in instantiation of 'Box<float>' requested "
+            "here\n")
+      << r.Diagnostics;
+  auto named = semaCheckFile(
+      writeFile(tmp, "named.pkn",
+                "import gb;\nfn main() -> int { b = gb::NBox<int>(1); return "
+                "0; }\n"),
+      tmp);
+  EXPECT_FALSE(named.Ok);
+  EXPECT_EQ(diagSummary(named.Diagnostics),
+            "gb.pkn:7:57: error: method call on non-class type 'int'\n"
+            "named.pkn:2:24: note: in instantiation of 'NBox<int>' requested "
+            "here\n")
+      << named.Diagnostics;
+  auto show = semaCheckFile(
+      writeFile(tmp, "show.pkn",
+                "import gb;\nfn main() -> int { b = gb::SBox<int>(1); return "
+                "0; }\n"),
+      tmp);
+  EXPECT_FALSE(show.Ok);
+  EXPECT_EQ(diagSummary(show.Diagnostics),
+            "gb.pkn:10:1: error: class 'SBox<int>' already implements 'Show' "
+            "(through 'Obj')\n"
+            "show.pkn:2:24: note: in instantiation of 'SBox<int>' requested "
+            "here\n")
+      << show.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
 

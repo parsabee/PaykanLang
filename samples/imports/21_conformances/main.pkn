@@ -1,10 +1,13 @@
 // OK: a type's conformance to `Hashable` crosses modules with it
 // (docs/language/06-traits.md, "Hashable"). lib::keys gives a struct, a
 // class, a private struct and two generic types an `impl Hashable for`
-// block; lib::mid only returns keys' types. Here they are HashMap and
+// block; lib::mid returns keys' types and declares a subclass of CK, and
+// lib::m2 instantiates keys' generic types. Here they are HashMap and
 // HashSet keys and arguments of a `T: Hashable` function: reached directly
-// and through mid, as instantiations keys made (Keyed<int>, GBox<int>) and
-// ones made here (Keyed<Str>, GBox<Str>), and through a subclass of CK.
+// and through mid, as instantiations keys made (Keyed<int>, GBox<int>), m2
+// made (Keyed<Key>, GBox<bool>) and ones made here (Keyed<Str>, GBox<Str>),
+// through a subclass of CK here and in mid, and as the type arguments of
+// bounded generic enums of keys and of this module, fields of a class.
 // Whether the modules come from their source or their `.pkm` files (the
 // second run of the sample).
 //
@@ -12,11 +15,14 @@
 // expect-stdout: True True
 // expect-stdout: 3 3 box
 // expect-stdout: 2
+// expect-stdout: 2 1 3 box
+// expect-stdout: 4 5
 
 import ::io;
 import ::collections;
 import lib::keys;
 import lib::mid;
+import lib::m2;
 
 // Hashable through CK. Its own `equals`: a class pattern matches the exact
 // class.
@@ -37,6 +43,24 @@ fn h<T: Hashable>(x: view T) -> int {
   return x.hash();
 }
 
+enum Opt<T: Hashable> {
+  Some(v: T),
+  No
+}
+
+// Field types that instantiate bounded generic enums with imported keys.
+class Slots {
+  m: keys::Maybe<keys::Key>;
+  o: Opt<keys::CK>;
+}
+
+impl Slots {
+  fn __init__() {
+    self.m = keys::Maybe<keys::Key>::Just(keys::Key(4, 0));
+    self.o = Opt<keys::CK>::Some(keys::CK(5));
+  }
+}
+
 fn main() -> int {
   m = collections::HashMap<keys::Key, int>();
   m.put(keys::Key(1, 2), 5);
@@ -55,5 +79,26 @@ fn main() -> int {
   io::println(Str(h(keys::mkBox())) + " " + Str(h(keys::GBox<Str>("x"))) + " "
       + keys::GBox<Str>("x").name());
   io::println(Str(keys::distinct(0)));
+
+  a = collections::HashSet<mid::MSub>();
+  a.add(mid::mksub(1));
+  a.add(mid::MSub(1));
+  a.add(mid::MSub(2));
+  b = collections::HashSet<keys::Keyed<keys::Key>>();
+  b.add(m2::mkKeyed());
+  b.add(m2::mkKeyed());
+  io::println(Str(a.len()) + " " + Str(b.len()) + " " + Str(h(m2::mkBox()))
+      + " " + m2::mkBox().name());
+
+  slots = Slots();
+  a0 = 0;
+  match slots.m {
+    j: Just { a0 = j.v.a; }
+    Nothing {}
+  }
+  match slots.o {
+    some: Some { io::println(Str(a0) + " " + Str(some.v.v)); }
+    No {}
+  }
   return 0;
 }
