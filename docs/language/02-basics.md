@@ -429,7 +429,8 @@ Output:
   nearest the text rounded to the type.
 - **Methods and traits.**  Every numeric type has `toString()` and is `Show` and
   `ValueType`; the integer types have `hash()` and are `Hashable`, so a `u32` is a
-  `HashMap` key.  A sized type has an optional (`u8?`), is a `match` subject with literal
+  `HashMap` key; an `unsigned` also has `u.toInt()`, its value as an `int?` (`None` above
+  9223372036854775807).  A sized type has an optional (`u8?`), is a `match` subject with literal
   arms, and is a type argument like any value type (`Box<u8>`, `List<f32>`).
 - **Not yet:** bitwise operators and shifts, literal suffixes (`1u8`), hexadecimal
   literals, and implicit widening (`i32` to `int`).  The design is in

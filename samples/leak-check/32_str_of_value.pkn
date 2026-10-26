@@ -30,19 +30,14 @@ import ::collections;
 
 class Node {
   name: Str;
-  view fn toString() -> Str {
-    return self.name + "";
-  }
+  view fn toString() -> Str { return self.name + ""; }
 }
 
 struct Tag {
   label: Str;
 }
 
-enum Maybe {
-  Some(text: Str),
-  Empty,
-}
+enum Maybe { Some(text: Str), Empty, }
 
 class Box {
   node: Node;
@@ -70,12 +65,8 @@ class C {
 
 class H {
   c: C;
-  view fn show() -> Str {
-    return Str(self.c);
-  }
-  view fn told() -> Str {
-    return self.c.toString();
-  }
+  view fn show() -> Str { return Str(self.c); }
+  view fn told() -> Str { return self.c.toString(); }
 }
 
 class B {
@@ -89,16 +80,12 @@ class A {
 // The next `toString()` of `h.c` replaces `h.c`, which holds it alone.
 fn arm(h: H, n: int) {
   v = h;
-  h.c = C("two" + Str(n), fn() {
-    v.c = C("three" + Str(n), fn() {});
-  });
+  h.c = C("two" + Str(n), fn() { v.c = C("three" + Str(n), fn() {}); });
 }
 
 fn armB(b: B, n: int) {
   v = b;
-  b.c = C("four" + Str(n), fn() {
-    v.c = C("five" + Str(n), fn() {});
-  });
+  b.c = C("four" + Str(n), fn() { v.c = C("five" + Str(n), fn() {}); });
 }
 
 fn main() -> int {
@@ -109,8 +96,8 @@ fn main() -> int {
   t: Str? = None;
   q: Node? = make(2);
   r: Node? = None;
-  io::println(Str(o) + " " + Str(p) + " " + Str(s) + " " + Str(t) + " "
-      + Str(q) + " " + Str(r));
+  io::println(Str(o) + " " + Str(p) + " " + Str(s) + " " + Str(t) + " " + Str(q)
+      + " " + Str(r));
   ob: Obj = make(0);
   io::println(Str(("t" + Str(3), make(4))) + " " + Str(Tag("g" + Str(5))) + " "
       + Str(Maybe::Some("v" + Str(6))) + " " + Str(make(7)) + " " + Str(ob)

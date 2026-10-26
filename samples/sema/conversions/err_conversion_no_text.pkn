@@ -1,6 +1,9 @@
 // Str(x) takes every value with a text; a function value, a fixed-size
 // array, or a value holding one has none, and the error names the part.
-struct F { n: int; f: (int) -> int; }
+struct F {
+  n: int;
+  f: (int) -> int;
+}
 fn main() -> int {
   a = Str(fn(x: int) => x);   // error: 'Str' cannot convert a value of type '(int) -> int', which does not implement trait 'Show'
   b = Str(F(1, fn(x: int) => x));   // error: 'Str' cannot convert a value of type 'F', which does not implement trait 'Show': its field 'f' has type '(int) -> int', which does not implement it

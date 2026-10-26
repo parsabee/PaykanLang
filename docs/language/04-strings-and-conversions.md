@@ -98,10 +98,11 @@ on non-array type 'Str'`). To change a string, build a new one with `+`. The ord
 operators (`<`, `>`, `<=`, `>=`) are not defined on strings (`operator '<' is not defined
 for types 'Str' and 'Str'`); compare characters instead.
 
-Besides `len()`, a string has the methods every object has, `toString()` (the string
-itself) and `equals(o)`, and `hash()` (a `Str` is `Hashable`, so it can be a `HashMap`
-key; see [Traits](06-traits.md)). One more method, `s.concat(t)`, appends `t` to `s` in
-place. A string is an object, shared by every variable, field or parameter that holds it,
+Besides `len()`, a string has the methods every object has, `toString()` (a copy of the
+string) and `equals(o)`, and `hash()` (a `Str` is `Hashable`, so it can be a `HashMap`
+key; see [Traits](06-traits.md)). Twelve methods parse it, `s.toInt()` … `s.toBool()`
+([Parsing a string](#parsing-a-string)). One more method, `s.concat(t)`, appends `t` to `s`
+in place. A string is an object, shared by every variable, field or parameter that holds it,
 so the change is seen through all of them, while `+` leaves its operands alone; `concat`
 cannot be called through a `view` (`'s' is a 'view' parameter; 'concat' is not a 'view
 fn'`):
@@ -248,7 +249,7 @@ Every other value with a text converts the same way:
 | a tuple | its elements in parentheses, a string unquoted: `(1, a, 2.5)` |
 | a struct | its name and fields: `Size(w: 2, h: 3)` |
 | an enum | its variant, then the variant's fields: `North`, `Circle(r: 1.5)` |
-| an object, an `Obj` | its `toString()`, the one of its own class ([Classes](05-classes.md)); a class without one prints `Name@0x...`, its address |
+| an object, an `Obj` | its `toString()`, the one of its own class ([Classes](05-classes.md)); a class without one prints `Object@0x...`, its address |
 | a `Str` | the string itself |
 
 ```pkn
@@ -316,7 +317,9 @@ Error:
 
 `+` joins two strings, so a value is converted first: `"x = " + Str(p)`. A `+` of a `Str`
 and another value with a text is an error that says so (`operator '+' is not defined for
-types 'Str' and 'Point' (convert the 'Point' with 'Str(...)')`).
+types 'Str' and 'Point' (convert the 'Point' with 'Str(...)')`). An optional operand is
+first the error that it is not unwrapped (`cannot use optional 'int?' as 'int' without
+unwrapping (use match)`), though `Str(o)` converts it as it is.
 
 ### Between numbers
 
@@ -560,8 +563,9 @@ type with a text ([To a string](#to-a-string)). `Target(value)` picks the
 specialization whose source is **exactly** the type of `value`: `Str(n)` with an `int` is
 `Str<int>`, and `int(f)` with a `float` is `int<float>`. Nothing is widened or unwrapped to
 find one. An `int` argument does not reach `float`'s `Str` specialization, and an `int?`
-must be unwrapped with `match` first. Each primitive has the specialization of itself, the
-value unchanged: `float(2.5)` is `float<float>(2.5)`.
+must be unwrapped with `match` before `int(...)`, `float(...)` or any other numeric
+conversion (`Str(o)` takes the `int?` itself, as `Str<int?>`). Each primitive has the
+specialization of itself, the value unchanged: `float(2.5)` is `float<float>(2.5)`.
 
 | Target  | Specializations (the source types) | Result                                   |
 |---------|------------------------------------|------------------------------------------|

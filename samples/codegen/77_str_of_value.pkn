@@ -76,13 +76,11 @@ fn main() -> int {
 
   // A Str is itself.
   word = "same";
-  io::println(Str(word) + " " + Str<Str>(word) + " "
-      + Str(Str(word) == word));
+  io::println(Str(word) + " " + Str<Str>(word) + " " + Str(Str(word) == word));
 
   // The same text as toString(), and as println prints it.
   q = Plain(1);
-  io::println(Str(Str(q) == q.toString()) + " "
-      + Str(Str(Size(1, 1)) == Size(1, 1).toString()) + " "
-      + Str(Str(a) == a.toString()));
+  io::println(Str(Str(q) == q.toString()) + " " + Str(Str(Size(1, 1))
+      == Size(1, 1).toString()) + " " + Str(Str(a) == a.toString()));
   return 0;
 }
