@@ -70,8 +70,9 @@ Status addEntryPoint(llvm::Module &module) {
   b.SetInsertPoint(bb);
   // PAYKAN_TRACK_HEAP: select the tracking allocator before the program
   // allocates anything (the C path's main() does the same).
-  llvm::Value *trackEnv = b.CreateCall(
-      fn("getenv", ptr, {ptr}), {b.CreateGlobalString("PAYKAN_TRACK_HEAP")});
+  llvm::Value *trackEnv =
+      b.CreateCall(fn("getenv", ptr, {ptr}),
+                   {b.CreateGlobalString(names::kPaykanTrackHeapEnv)});
   llvm::Value *track = b.CreateIsNotNull(trackEnv, "track");
   auto *trackOn = llvm::BasicBlock::Create(ctx, "track.on", entry);
   auto *start = llvm::BasicBlock::Create(ctx, "start", entry);
@@ -87,7 +88,7 @@ Status addEntryPoint(llvm::Module &module) {
   llvm::Value *argCount = nullptr;
   if (takesArgs) {
     // args: view Str[] -- a slice of the arguments' strings
-    // (Paykan_args_new, which also honours PAYKAN_NO_ARGS).
+    // (Paykan_args_new).
     llvm::Value *countSlot = b.CreateAlloca(i64, nullptr, "args.len.addr");
     llvm::Value *args =
         b.CreateCall(fn(names::kPaykanArgsNew, ptr, {i32, ptr, ptr}),
@@ -222,10 +223,17 @@ Status buildHostExecutable(
   // The system toolchain, with the sanitizer / coverage flags of a sanitizer
   // / coverage build, whose runtime archive is instrumented.
   std::ostringstream errs;
+  // The toolchain's lines end in a newline; a Status message does not.
+  auto failed = [&errs] {
+    std::string msg = errs.str();
+    while (!msg.empty() && msg.back() == '\n')
+      msg.pop_back();
+    return Status::error(msg);
+  };
   toolchain::Toolchain tc;
   tc.ExtraObjects = objects;
   if (!toolchain::resolveToolchain(tc, errs))
-    return Status::error(errs.str());
+    return failed();
   toolchain::TempDir tmp;
   if (tmp.Path.empty())
     return Status::error("cannot create a temporary directory");
@@ -233,7 +241,7 @@ Status buildHostExecutable(
   if (Status s = emitObject(object); !s)
     return s;
   if (!toolchain::linkExecutable({object}, output, tc, errs))
-    return Status::error(errs.str());
+    return failed();
   return Status::ok();
 }
 

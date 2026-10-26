@@ -6,10 +6,10 @@ reference is, where one may be declared, how it is read and written, and how
 the runtime keeps an object's counts in the object itself.  The decisions fit
 the language as it is (objects behind reference counts, destruction
 deterministic and iterative, `view` / `inout` borrows checked at compile
-time).  The PIR format, the runtime ABI and the `.pkm` format change shape but
-not version: their versions stay fixed until 0.2.0 (`docs/design/pkm.md`),
-and a compiler with this change does not trust the caches of an older one
-([clear them](../internals.md#the-compilation-caches)).  The open questions at the end have the default this
+time).  The PIR format, the runtime ABI and the `.pkm` format change shape;
+like every format they are versioned by the release (`docs/design/pkm.md`
+§11), and a development build of `paykan` uses only the cache entries it
+wrote itself ([the compilation caches](../internals.md#the-compilation-caches)).  The open questions at the end have the default this
 implementation takes.
 
 ## Summary of the decisions

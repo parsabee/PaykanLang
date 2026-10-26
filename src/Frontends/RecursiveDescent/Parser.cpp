@@ -1168,7 +1168,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
           &name,
           Ctx.make<ClassType>(span(nameTok.Loc),
                               intern(names::untypedParamType(name)), nullptr),
-          ParamMode::Value});
+          ParamMode::Value, nameTok.Loc});
       continue;
     }
     if (!expect(Tok::Colon, "after the parameter name"))
@@ -1181,7 +1181,7 @@ bool Parser::parseParamList(std::vector<Param> &out, const char *untyped) {
     Type *ty = parseTypeAnnotation();
     if (!ty)
       return false;
-    out.push_back(Param{&name, ty, mode});
+    out.push_back(Param{&name, ty, mode, span(nameTok.Loc)});
   } while (accept(Tok::Comma));
   return true;
 }
@@ -1290,9 +1290,13 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
       errorAtCurrent("expected the C symbol as a string literal");
       return nullptr;
     }
+    SourceLocation symbolLoc = cur().Loc;
     std::string pieces = consume().StrValue;
     while (at(Tok::String))
       pieces += consume().StrValue;
+    if (std::string_view why = names::cSymbolProblem(pieces); !why.empty())
+      error(symbolLoc, "the C symbol '" + pieces + "' of native function '" +
+                           name + "' " + std::string(why));
     const std::string &symbol = intern(pieces);
     if (!expect(Tok::Semi, "after a native function"))
       return nullptr;
@@ -1340,15 +1344,20 @@ FuncDecl *Parser::parseFuncDecl(FuncKind kind) {
   // destructor, as Sema says of one with a body.)
   if (at(Tok::Semi)) {
     if (kind != FuncKind::ClassMethod) {
+      // `destroy` is reserved whatever its body: reported at the function,
+      // as Sema reports one with a body (which names its type).
+      if ((kind == FuncKind::ImplMethod || kind == FuncKind::StaticFn) &&
+          name == names::kMethodDestroy) {
+        error(span(start), "'destroy' is reserved for the compiler-generated "
+                           "destructor and cannot be declared");
+        return nullptr;
+      }
       std::string why;
       if (kind == FuncKind::StaticFn)
         why = "'" + name + "' has no body: a 'static fn' needs one";
       else if (kind == FuncKind::ImplMethod && name == names::kMethodInit)
         why = "'" + std::string(spelled) +
               "' has no body: an initializer needs one";
-      else if (kind == FuncKind::ImplMethod && name == names::kMethodDestroy)
-        why = "'destroy' is reserved for the compiler-generated destructor "
-              "and cannot be declared";
       else if (kind == FuncKind::ImplMethod)
         why = "'" + name +
               "' in an 'impl' block has no body: an 'impl' block's methods "

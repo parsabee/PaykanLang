@@ -73,12 +73,12 @@ it back out unchanged.
 
 ## Stability
 
-`PAYKAN_PIR_TEXT_VERSION` is bumped whenever the text form changes
-incompatibly: a construct is removed or changes meaning, or a construct a
-backend must handle is added. A backend should refuse (report an error
-through `host->diagnostic`) a `pir_text_version` it does not know. While
-PaykanLang is below 1.0, a minor release may bump it; the CHANGELOG says so,
-and the release's plugin compatibility list then drops the versions whose
+`PAYKAN_PIR_TEXT_VERSION` is the release version (200 for 0.2.0), like
+every format's, so each release changes it. A backend should refuse (report
+an error through `host->diagnostic`) a `pir_text_version` it does not know.
+When the text form changes incompatibly (a construct is removed or changes
+meaning, or a construct a backend must handle is added), the CHANGELOG says
+so, and the release's plugin compatibility list drops the versions whose
 plugins would misread it.
 
 The printer and parser in the core (`src/PIR/Printer.cpp`,

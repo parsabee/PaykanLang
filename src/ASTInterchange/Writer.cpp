@@ -226,7 +226,7 @@ private:
     typeParams(d.getTypeParams(), d.getTypeParamBounds());
     open("params");
     for (const Param &p : d.getParams()) {
-      open("param");
+      openAt("param", p.Loc);
       str(p.getName());
       type(p.ParamType);
       if (p.Mode != ParamMode::Value) {
@@ -745,7 +745,7 @@ private:
       open("lambda", l);
       open("params");
       for (const Param &p : l->getParams()) {
-        open("param");
+        openAt("param", p.Loc);
         str(p.getName());
         type(p.ParamType);
         if (p.Mode != ParamMode::Value) {

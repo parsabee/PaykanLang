@@ -36,45 +36,126 @@ DiagEngine::~DiagEngine() { closeGroup(); }
 namespace {
 
 // A source line of up to kSnippetWidth characters is shown whole; a longer
-// one as the kSnippetWidth characters around the caret, with kEllipsis
-// where it is cut, so that a diagnostic's size does not grow with its line.
-// A character is a UTF-8 code point, a tab included (printed as a tab under
-// itself in the caret line too, so the caret stays under its character).
+// one as kSnippetWidth characters around the caret, a kEllipsis among them
+// standing for the characters cut before or after, so that a diagnostic's
+// size does not grow with its line.  Only the window and the few
+// characters around it are looked at, never the rest of the line, so the
+// cost does not grow with it either.  A character is a UTF-8 code point, a
+// tab one too (printed as a tab under itself in the caret line, so the
+// caret stays under its character), and so is each byte that is in no code
+// point (invalid UTF-8, which a terminal shows as one character a byte).
 constexpr size_t kSnippetWidth = 120;
 constexpr std::string_view kEllipsis = "...";
 
-// The byte offset of each character of @p line, then line.size().
-std::vector<size_t> charStarts(const std::string &line) {
-  std::vector<size_t> starts;
-  for (size_t i = 0; i < line.size(); ++i)
-    if ((static_cast<unsigned char>(line[i]) & 0xC0) != 0x80)
-      starts.push_back(i);
-  starts.push_back(line.size());
-  return starts;
+// The length in bytes of the code point the byte @p lead starts: 1 for an
+// ASCII byte and for a byte that starts none.
+size_t sequenceLength(unsigned char lead) {
+  if ((lead & 0xE0) == 0xC0)
+    return 2;
+  if ((lead & 0xF0) == 0xE0)
+    return 3;
+  if ((lead & 0xF8) == 0xF0)
+    return 4;
+  return 1;
 }
 
-// The index of the character the byte @p offset of a line is in, given its
-// charStarts; past the end, the character count plus the bytes after it.
-size_t charAt(const std::vector<size_t> &starts, size_t offset) {
-  if (offset >= starts.back())
-    return starts.size() - 1 + (offset - starts.back());
-  return static_cast<size_t>(
-             std::upper_bound(starts.begin(), starts.end(), offset) -
-             starts.begin()) -
-         1;
+// Whether byte @p i of @p line starts a character: any byte but a
+// continuation byte (10xxxxxx) of the code point a lead byte before it
+// starts.  It is decided by the three bytes before it, so the line can be
+// walked either way from any byte.
+bool startsChar(std::string_view line, size_t i) {
+  if ((static_cast<unsigned char>(line[i]) & 0xC0) != 0x80)
+    return true;
+  for (size_t back = 1; back <= 3 && back <= i; ++back) {
+    const auto b = static_cast<unsigned char>(line[i - back]);
+    if ((b & 0xC0) != 0x80)
+      return sequenceLength(b) <= back;
+  }
+  return true;
 }
 
-// Characters [first, first + kSnippetWidth) of @p line, an ellipsis where
-// characters before or after them are left out.
-void printWindow(std::ostream &os, const std::string &line, size_t first) {
-  const std::vector<size_t> starts = charStarts(line);
-  const size_t count = starts.size() - 1;
-  const size_t from = std::min(first, count);
-  const size_t to = std::min(first + kSnippetWidth, count);
-  if (from > 0)
+// The character start @p n characters after the one at @p at, or the
+// line's end.
+size_t forward(std::string_view line, size_t at, size_t n) {
+  for (; n > 0 && at < line.size(); --n) {
+    ++at;
+    while (at < line.size() && !startsChar(line, at))
+      ++at;
+  }
+  return at;
+}
+
+// The character start @p n characters before the one at @p at, or 0.
+size_t backward(std::string_view line, size_t at, size_t n) {
+  for (; n > 0 && at > 0; --n) {
+    --at;
+    while (at > 0 && !startsChar(line, at))
+      --at;
+  }
+  return at;
+}
+
+// What a snippet shows of a line: its bytes [From, To), each at a
+// character's start (or the end), after an ellipsis when characters come
+// before From and before one when characters come after To.
+struct Window {
+  size_t From = 0;
+  size_t To = 0;
+};
+
+// The window of @p line from the character at byte @p first: as many
+// characters as fit in kSnippetWidth with the ellipses.
+Window windowFrom(std::string_view line, size_t first) {
+  const size_t room = kSnippetWidth - (first > 0 ? kEllipsis.size() : 0);
+  const size_t to = forward(line, first, room);
+  if (to == line.size())
+    return {.From = first, .To = to};
+  return {.From = first, .To = forward(line, first, room - kEllipsis.size())};
+}
+
+// Whether @p line has at most kSnippetWidth characters.
+bool fits(std::string_view line) {
+  return line.size() <= kSnippetWidth ||
+         forward(line, 0, kSnippetWidth) == line.size();
+}
+
+// The window of @p line around the character at byte @p caret: the whole
+// line if it fits, else kSnippetWidth characters with the ellipses, the
+// caret at most half of them from the start.
+Window around(std::string_view line, size_t caret) {
+  if (fits(line))
+    return {.From = 0, .To = line.size()};
+  constexpr size_t half = kSnippetWidth / 2;
+  const size_t first = backward(line, caret, half);
+  // Near the end: the last characters, and the cut before them.
+  if (first > 0 &&
+      forward(line, caret, kSnippetWidth - kEllipsis.size() - half) ==
+          line.size())
+    return {.From =
+                backward(line, line.size(), kSnippetWidth - kEllipsis.size()),
+            .To = line.size()};
+  return windowFrom(line, first);
+}
+
+// The window of @p line, above or below the caret's line, beside @p w, the
+// caret line's: the whole line if it fits, else the characters from w's
+// first byte on (the line's last ones if it ends before that byte).
+Window beside(std::string_view line, const Window &w) {
+  if (fits(line))
+    return {.From = 0, .To = line.size()};
+  if (w.From >= line.size())
+    return around(line, line.size());
+  size_t first = w.From;
+  while (first < line.size() && !startsChar(line, first))
+    ++first;
+  return windowFrom(line, first);
+}
+
+void printWindow(std::ostream &os, std::string_view line, const Window &w) {
+  if (w.From > 0)
     os << kEllipsis;
-  os << std::string_view(line).substr(starts[from], starts[to] - starts[from]);
-  if (to < count)
+  os << line.substr(w.From, w.To - w.From);
+  if (w.To < line.size())
     os << kEllipsis;
 }
 
@@ -108,7 +189,8 @@ void DiagEngine::emit(Diagnostic::Severity level, ast::SourceLocation loc,
     if (Limit->Max != 0 && Limit->Printed == Limit->Max) {
       Limit->Reached = true;
       OS << "note: stopping after " << Limit->Max
-         << " errors, the error limit (--error-limit=N sets it, and "
+         << (Limit->Max == 1 ? " error" : " errors")
+         << ", the error limit (--error-limit=N sets it, and "
             "--error-limit=0 shows every error)\n";
       return;
     }
@@ -145,50 +227,50 @@ void DiagEngine::emit(Diagnostic::Severity level, ast::SourceLocation loc,
   size_t nextLineNo = std::min(lineNo + 1, SourceLines->size());
   size_t gutterWidth = std::max<size_t>(3, std::to_string(nextLineNo).size());
 
-  // The characters of the caret's line around it, the same for the lines
-  // around it.
-  const std::string &line = (*SourceLines)[lineNo - 1];
-  const std::vector<size_t> starts = charStarts(line);
-  const size_t count = starts.size() - 1;
-  const size_t startByte = std::max<size_t>(1, loc.getColumnStart()) - 1;
-  const size_t caret = charAt(starts, startByte);
-  size_t first = 0;
-  if (count > kSnippetWidth && caret > kSnippetWidth / 2)
-    first = std::min(caret - kSnippetWidth / 2, count - kSnippetWidth);
+  // The window of the caret's line around the caret, and the lines around
+  // it beside it.  A caret past the line's end (a column of another file
+  // than the line's, as a frontend plugin may give) stands after its last
+  // character.
+  const std::string_view line = (*SourceLines)[lineNo - 1];
+  size_t caret = std::min<size_t>(std::max<size_t>(1, loc.getColumnStart()) - 1,
+                                  line.size());
+  while (caret > 0 && caret < line.size() && !startsChar(line, caret))
+    --caret;
+  const Window window = around(line, caret);
 
-  auto printLine = [&](size_t no) {
+  auto printLine = [&](size_t no, const Window &w) {
     const std::string noStr = std::to_string(no);
     OS << std::string(gutterWidth - noStr.size(), ' ') << noStr << " | ";
-    printWindow(OS, (*SourceLines)[no - 1], first);
+    printWindow(OS, (*SourceLines)[no - 1], w);
     OS << "\n";
+  };
+  auto printNeighbour = [&](size_t no) {
+    printLine(no, beside((*SourceLines)[no - 1], window));
   };
 
   if (prevLineNo < lineNo)
-    printLine(prevLineNo);
-  printLine(lineNo);
+    printNeighbour(prevLineNo);
+  printLine(lineNo, window);
 
-  // The underline covers the location's characters on this line, up to the
-  // window's end.
-  size_t width = 1;
-  if (loc.getLineEnd() == loc.getLineStart() &&
-      loc.getColumnEnd() > loc.getColumnStart())
-    width = charAt(starts, loc.getColumnEnd() - 1) - caret;
-  const size_t room =
-      first + kSnippetWidth > caret ? first + kSnippetWidth - caret : 1;
-  width = std::clamp<size_t>(width, 1, room);
-
+  // The caret under its character, and the underline over the location's
+  // characters on this line, up to the window's end.
   std::string marker = std::string(gutterWidth, ' ') + " | ";
-  if (first > 0)
+  if (window.From > 0)
     marker.append(kEllipsis.size(), ' ');
-  for (size_t c = first; c < caret; ++c)
-    marker.push_back(c < count && line[starts[c]] == '\t' ? '\t' : ' ');
+  for (size_t at = window.From; at < caret; at = forward(line, at, 1))
+    marker.push_back(line[at] == '\t' ? '\t' : ' ');
   marker.push_back('^');
-  if (width > 1)
-    marker.append(width - 1, '~');
+  if (loc.getLineEnd() == loc.getLineStart() &&
+      loc.getColumnEnd() > loc.getColumnStart()) {
+    const size_t end = std::min<size_t>(loc.getColumnEnd() - 1, window.To);
+    for (size_t at = forward(line, caret, 1); at < end;
+         at = forward(line, at, 1))
+      marker.push_back('~');
+  }
   OS << marker << "\n";
 
   if (nextLineNo > lineNo)
-    printLine(nextLineNo);
+    printNeighbour(nextLineNo);
 }
 
 void DiagEngine::error(ast::SourceLocation loc, const std::string &msg) {

@@ -26,9 +26,11 @@ llvm::Error setHostLayout(llvm::Module &module);
 /// @param args  Arguments passed to the Paykan main function as its
 ///              `view Str[]` slice.
 ///              args[0] should be the script path (like argv[0] for scripts).
-/// @param nativeObjects  Object files defining the program's native
-///              functions (--object, #198; position-independent), linked
-///              into the JIT with the module.
+/// @param nativeObjects  Object files and archives defining the program's
+///              native functions (--object, #198; position-independent),
+///              linked into the JIT with the module (an archive's members
+///              as a linker takes them, when they define a symbol still
+///              undefined).
 /// Returns the exit code from main(), or an Error on failure.
 llvm::Expected<int>
 runModule(std::unique_ptr<llvm::Module> module,

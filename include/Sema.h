@@ -598,6 +598,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// module's template that module's.  No variable may be bound to it, so a
   /// call by the name always means the function.
   bool isFunctionNameForVariable(const std::string &name) const;
+  /// True (counting a suppressed follow-on) if @p name is such a function's
+  /// and the binding of it in scope is poisoned: the assignment that bound
+  /// it was reported (whether or not its value had an error of its own),
+  /// and a later assignment or destructuring target binding it again is
+  /// that error's follow-on (it is reported once).
+  bool rebindsPoisonedFunctionName(const std::string &name);
   /// This module's top-level functions, generic and `native` ones included,
   /// by name: known before any signature is checked, so a method's
   /// parameter is checked against them too.
@@ -605,14 +611,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
 
   /// The guard every binder applies to the name it binds (#126): an inferred
   /// or typed declaration, a destructuring target, a function or method
-  /// parameter, a lambda's, a `for` loop's variable, a match binding.
-  /// Reports, at @p loc, a name that cannot be a variable (see
-  /// isTypeNameForVariable and isFunctionNameForVariable) and returns false.
-  /// @p binds is false for a parameter no code of the program uses (a native
-  /// function's, or a default `__init__`'s, which are the fields): it is not
-  /// refused for a function's name.
+  /// parameter, a lambda's, a `for` loop's variable, a match binding, and a
+  /// field.  Reports, at @p loc, a name that cannot be a variable (see
+  /// isTypeNameForVariable and isFunctionNameForVariable) as what it cannot
+  /// be used as, @p what ("a parameter name"), and returns false.  @p binds
+  /// is false for a name no code of the program reads as a variable (a
+  /// native function's parameter, a field, a default `__init__`'s
+  /// parameter): it is not refused for a function's name.
   bool checkBinderName(const std::string &name, ast::SourceLocation loc,
-                       bool binds = true);
+                       bool binds = true, std::string_view what = "a variable");
   /// In a method's own body (not a lambda's in it, which is a function of
   /// its own), `self` names what the method was called on, and the rules on
   /// `self` (an `__init__`'s field assignments, a `view fn`'s read-only
@@ -621,7 +628,7 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// is reported at @p loc, and false returned.
   bool checkNotSelf(const std::string &name, ast::SourceLocation loc);
   /// Reports a parameter of @p fn named like an earlier one, as a
-  /// duplicate in @p what ("function 'f'"), and returns false.
+  /// duplicate in @p what ("function 'f'") at it, and returns false.
   bool checkDistinctParams(const ast::FuncDecl *fn, const std::string &what);
 
   /// checkBinderName for a match arm's binding (of type @p bindTy), and its
@@ -736,17 +743,20 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     }
     /// How much an operand of `==` or `!=`, or an arm of a conditional
     /// expression, needs the type of the other operand or arm: a generic
-    /// enum's variant written without type arguments takes them from it.
+    /// enum's variant, or a call of a generic function, written without
+    /// type arguments takes them from it.
     enum class OtherSide {
       NotNeeded, ///< typed on its own
       Helps,     ///< `Maybe::Just(n)`: may infer them from its fields
-      Needed,    ///< `Maybe::Nothing`: has no fields to infer them from
+      Needed,    ///< `Maybe::Nothing`, `Result::Ok(1)`, `none()`: cannot
+                 ///< infer them all from its fields or arguments
     };
     /// What @p e needs (a conditional, what the less needy of its arms
     /// does).  Of two sides, the one that needs the other less is typed
-    /// first and gives its type to the other, so `Maybe::Nothing == m` and
-    /// `if c then Maybe::Nothing else Maybe::Just(n)` work as their mirrors
-    /// do.
+    /// first and gives its type to the other, so `Maybe::Nothing == m`,
+    /// `if c then Maybe::Nothing else Maybe::Just(n)` and `Maybe::Just(1)
+    /// == none()` work as their mirrors do; of two that need it as much,
+    /// the first.
     OtherSide needsOtherSide(const ast::Expr *e) const;
 
     /// A literal flowing into a fixed-size array slot: exactly its length
@@ -1428,6 +1438,21 @@ private:
   /// or an `impl` block's) named so is reported, and true returned.
   bool rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner);
 
+  /// Report each field of this module's generic class, struct or enum
+  /// @p tmpl (a variant's too) named like a type, once, at the field: its
+  /// first instantiation asks (populateClassType, populateStructType), and
+  /// after the declarations every template does, so one never instantiated
+  /// is checked too.  An instantiation leaves such a field out as a
+  /// follow-on of that error.
+  void checkTemplateFieldNames(const ast::Decl *tmpl);
+  /// The local template @p tmpl, or nullptr for another module's (whose
+  /// fields its module checked) and for none.
+  const ast::Decl *localTemplate(const ast::Decl *tmpl) const {
+    return tmpl && !foreignOrigin(tmpl) ? tmpl : nullptr;
+  }
+  /// The templates checkTemplateFieldNames looked at.
+  std::unordered_set<const ast::Decl *> TemplateFieldsChecked;
+
   /// Check that every `impl` block names a class or a struct of this
   /// module, and make its `static fn`s the module's functions `Type::name`.
   bool checkImplDecls(ast::TranslationUnit *tu);
@@ -1649,9 +1674,20 @@ private:
   /// part has none, from @p ty down ("field 'f' has type '(int) -> int'"),
   /// or is empty for a type without parts.
   bool hasText(ast::Type *ty, std::string *why = nullptr);
-  /// hasText, inside the aggregates in @p open (the cycle guard).
-  bool hasText(ast::Type *ty, std::string *why,
-               std::set<const ast::Type *> &open);
+  /// The aggregates one hasText question looks into: the ones it is still
+  /// deciding (the cycle guard, which takes one that holds itself to have
+  /// a text: its error is reported where it is declared), and the ones it
+  /// decided, each with why it has no text if it has none, so that an
+  /// aggregate reached by many paths is looked into once.
+  struct TextQuery {
+    std::set<const ast::Type *> Open;
+    std::unordered_map<const ast::Type *, std::optional<std::string>> Decided;
+    /// How many times the cycle guard answered: a text decided after it
+    /// answered may rest on it, and is not kept in Decided.
+    unsigned Assumed = 0;
+  };
+  /// hasText, as part of @p query.
+  bool hasText(ast::Type *ty, std::string *why, TextQuery &query);
   /// The end of a message that @p ty, which has no text, does not implement
   /// `Show`: "its field 'f' has type '(int) -> int', which does not
   /// implement it", naming the part that has none (hasText); "" for a type

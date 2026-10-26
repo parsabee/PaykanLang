@@ -42,6 +42,34 @@ inline std::vector<std::string_view> components(std::string_view path) {
   }
 }
 
+/// Whether @p part is an identifier, as each component of a module name
+/// is: an ASCII letter or `_`, then ASCII letters, digits and `_`.
+inline bool isIdentifier(std::string_view part) {
+  if (part.empty() || (part[0] >= '0' && part[0] <= '9'))
+    return false;
+  for (char c : part)
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '_'))
+      return false;
+  return true;
+}
+
+/// Whether @p name is a module name: identifiers separated by "::"
+/// (`geometry::shapes`), after a leading "::" for a module of the standard
+/// library (`::io`).
+inline bool isModuleName(std::string_view name) {
+  if (name.starts_with(kSep))
+    name.remove_prefix(kSep.size());
+  while (true) {
+    size_t sep = name.find(kSep);
+    if (!isIdentifier(name.substr(0, sep)))
+      return false;
+    if (sep == std::string_view::npos)
+      return true;
+    name.remove_prefix(sep + kSep.size());
+  }
+}
+
 /// The canonical name of the module an import names: the module path with
 /// empty components dropped (`a::::b` reads a/b.pkn, so it is `a::b`), and
 /// a leading "::" for a system import, which keeps `import ::io` apart from

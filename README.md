@@ -203,7 +203,8 @@ and links it against the runtime with the system C compiler (`$CC`, or `cc`). `-
 value becomes the process exit code, and extra command-line arguments after the source file are passed to
 `main(args: view Str[])` (with `args[0]` the source-file path under `run`, and the executable's path for a
 program made by `build`). Source files use the
-`.pkn` extension (`.pk` is also accepted).
+`.pkn` extension. The main file may have another one (`.pk`, say), but an imported module
+is found only as a `.pkn` file or a prebuilt `.pkm`.
 
 ---
 

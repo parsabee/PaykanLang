@@ -146,11 +146,13 @@ error: 'rate' is declared with 'let' and cannot be reassigned
 
 `let` applies to local declarations only: not to parameters, fields or destructuring
 (`let a, b = t;` is a syntax error, `'let' declares one variable; destructuring with 'let'
-is not supported yet`). It fixes the variable, not the object it refers to: `let p =
-Point(1, 2);` can still be followed by `p.x = 5;`. An array's elements are part of its
-value, so those of a `let` array cannot be assigned. A `let` variable cannot be passed to an
-`inout` parameter ([Parameter modes](03-functions.md#parameter-modes-view-and-inout)), only
-to a plain or `view` one. Like any variable, an inner block may declare its own variable
+is not supported yet`). It fixes the variable, not the object a class-typed one refers to:
+for a class `Point`, `let p = Point(1, 2);` can still be followed by `p.x = 5;`. An array's
+elements and a struct's fields are part of its value, so those of a `let` array or struct
+cannot be assigned (`'s' is declared with 'let'; its fields are part of its value and
+cannot be assigned`, [Fields](11-structs.md#fields)). A `let` variable cannot be passed to
+an `inout` parameter ([Parameter modes](03-functions.md#parameter-modes-view-and-inout)),
+only to a plain or `view` one. Like any variable, an inner block may declare its own variable
 with the same name.
 
 A variable declared with `weak` refers to an object without keeping it alive. Its type is
@@ -488,8 +490,8 @@ n = apply(square, 3);               // 9
 
 | Slot       | Signature                       | Default              |
 |------------|---------------------------------|----------------------|
-| `toString` | `fn toString() -> Str`          | Returns `Object@<address>` (a per-class name is planned) |
-| `equals`   | `fn equals(other: Obj) -> bool` | Identity comparison  |
+| `toString` | `view fn toString() -> Str`     | Returns `Object@<address>` (a per-class name is planned) |
+| `equals`   | `view fn equals(other: Obj) -> bool` | Identity comparison  |
 | `destroy`  | (compiler-generated)            | Destructor — final, runs on last release |
 
 `None` is an `Obj` literal representing the absence of a value.
@@ -757,6 +759,53 @@ Comparison and equality operators do **not** chain: `1 < 2 < 3` and `1 < 2 == Tr
 errors (`relational operators cannot be chained; parenthesise the comparison`) — parenthesize
 instead, e.g. `(1 < 2) == True`. Parenthesise whenever in doubt.
 
+### Evaluation order
+
+An expression is evaluated left to right, whatever the precedence of its operators:
+
+- a binary operator's left operand before its right one; `&&` and `||` evaluate their right
+  one only when it is needed ([Logical](#logical));
+- a call's arguments in order, after the function it calls (`pick()(a, b)` calls `pick`
+  first), and a method's receiver before its arguments;
+- a subscript's base before its index;
+- the elements of a tuple or an array literal in order;
+- in an assignment, the place assigned (the object whose field it is, or the array and the
+  index of an element) before the value. A [compound assignment](#compound-assignment)
+  evaluates its target twice.
+
+A ternary evaluates its condition, then only the branch it chooses.
+
+```pkn
+import ::io;
+
+fn tag(name: Str, v: int) -> int {
+  io::println(name);
+  return v;
+}
+
+fn main() -> int {
+  xs = [10, 20, 30];
+  n = tag("a", 1) + tag("b", 2) * tag("c", 3);
+  xs[tag("index", 0)] = tag("value", n);
+  io::println(Str(xs[0]));
+  return 0;
+}
+```
+
+Output:
+
+```
+a
+b
+c
+index
+value
+7
+```
+
+A value read before a call is the one used, even when the call replaces what the variable
+holds ([Exclusivity](03-functions.md#exclusivity)).
+
 ---
 
 ## Statements
@@ -1007,8 +1056,11 @@ enums.
 - A local never hides a function of the module: no variable, parameter (a method's or a
   lambda's included), `for` loop variable or `match` binding can take the name of one of
   the module's functions, a generic or a `native` one included, wherever the function is
-  declared (`'func' is a function of this module and cannot be used as a variable`). So a
-  call by the name always means the function. A field may share a function's name (it is
+  declared (`'func' is a function of this module and cannot be used as a variable`, `... as
+  a parameter name` at a parameter, once, at the first binding, even when its value has an
+  error of its own: the assignments that bind the name again are follow-ons of it). So a
+  call by the name
+  always means the function. A field may share a function's name (it is
   read as `obj.func`), and so may another module's function, which is always qualified
   (`io::println`).
 - A local never hides a method's `self`: in a method's body no declaration, `for` loop
@@ -1068,9 +1120,13 @@ own `Result`.
 
 The same rule applies between user declarations: `fn Point()` next to `class Point` is
 rejected with `'Point' is already declared as a class`, and a function or class cannot
-reuse an enum's name. A builtin class or type name cannot name a field, parameter or local
-variable either: it is a type name (`'Str' is a type name and cannot be used as a
-variable`). Nor can a function of the module name a parameter or a local variable
+reuse an enum's name. A builtin class or type name, or the name of a type the program
+declares or imports, cannot name a field (a class's, a struct's or a variant's, whether or
+not its type writes `__init__`, and a generic type's once, at its declaration, whether or
+not it is instantiated), a parameter or a local variable either. It is reported at the
+field, the parameter or the variable, as what it would name: `'Str' is a type name and
+cannot be used as a variable` (`... as a parameter name`, `... as a field name`). Nor can a
+function of the module name a parameter or a local variable
 ([Scoping Rules](#scoping-rules)).
 
 ---

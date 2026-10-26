@@ -170,6 +170,10 @@ paykan heap stats:
 compiler version.) The test suite runs every example in this documentation, and every sample
 program in the repository, this way.
 
+`PAYKAN_TRACK_HEAP`, set to any value, does the same as `--track-heap` for `paykan run`, and
+it is how an executable `paykan build` wrote is checked (`PAYKAN_TRACK_HEAP=1 ./hello`):
+`--track-heap` applies to `run`, so `build` rejects it.
+
 ## Reference Cycles
 
 Reference counting has one blind spot. It reclaims an object when its count reaches zero,
@@ -640,8 +644,11 @@ is the receiver's storage, so a method allocates nothing to be called. See [Stru
 
 `None` is a singleton `Obj` representing the absence of a value. Because it is a shared global
 rather than an allocation, retaining and releasing it is harmless and it is never destroyed.
-`None` is what a read like `readln` holds as its result's `value` at end of input, distinguished with `match`
-(see [Optionals](12-optionals.md#unwrapping-with-match)).
+`None` is what an optional holds when it holds nothing (the `msg` of an `Error` that has no
+message, say), distinguished with `match` (see
+[Optionals](12-optionals.md#unwrapping-with-match)). A read like `readln` at end of input
+holds no `None`: it returns an `Err` whose code is `EndOfFile`
+([End of file](../stdlib/io.md#end-of-file-failed-reads-and-buffering)).
 
 ### Optional types
 

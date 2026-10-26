@@ -246,7 +246,8 @@ and `'f' has no body: a 'static fn' needs one` and `'__init__' has no body:
 an initializer needs one` for a `static fn` and an initializer (named as
 written, `___init__` too); `destroy`, which is never declared, gets
 `'destroy' is reserved for the compiler-generated destructor and cannot be
-declared`.
+declared` at the function, an `impl` block's method or `static fn`, as
+Sema reports one with a body.
 
 A parameter's type may start with its mode, `view` or `inout`
 ([language/03-functions.md](language/03-functions.md)):
@@ -505,6 +506,14 @@ syntax error (parenthesise one comparison). The condition of a ternary is
 a `logicalOr`, so a nested ternary there needs parentheses; the `else`
 branch may be another ternary without them.
 
+Evaluation is left to right, whatever the precedence: a binary
+expression's left operand before its right one, a call's callee and then
+its arguments in order, a method's receiver before its arguments, a
+subscript's base before its index, a tuple or array literal's elements in
+order, and an assignment's target place before its value; `&&` and `||`
+evaluate their right operand only when needed, and a ternary only the
+branch it chooses ([Evaluation order](language/02-basics.md#evaluation-order)).
+
 `mov` is reserved but no longer part of the grammar (removed in v0.2.0).
 A frontend reports `'mov' was removed in v0.2.0; ownership transfers are
 inferred` (`frontend::kMovRemoved`) once per use, and once for a run of
@@ -586,7 +595,7 @@ column, as `--dump-ast` prints them. Rules that every frontend follows:
 
 Diagnostics go through `DiagEngine` in the clang-style
 `file:line:col: error: message` format with a source snippet and caret (a
-line over 120 characters shows the 120 around the caret, cut with `...`),
+line over 120 characters is shown in 120 around the caret, cut with `...`),
 and at most `--error-limit=N` errors (20 by default) are printed
 ([The paykan command](language/17-the-paykan-command.md)).
 So do the lexical errors `--dump-tokens` finds: it lists every token, then

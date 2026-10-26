@@ -52,9 +52,11 @@ None
   all of them, and `==` is True only for the same container. `copy()` (on a `List`) or
   `toList()` makes a new one.
 - **A container is a struct**, so the rules of [structs](../language/11-structs.md) apply:
-  a container in a `let` variable cannot be changed (`'xs' is declared with 'let'; its value
-  cannot change, and 'push' is not a 'view fn'`), a `view` of one calls only its `view fn`s,
-  it is not an `Obj`: where one is needed, put the container in a
+  through a `let` variable only its `view fn`s can be called (`'xs' is declared with 'let';
+  its value cannot change, and 'push' is not a 'view fn'`), though a copy of it, or a plain
+  parameter it is passed to, is the same container and can change it (`ys = xs;
+  ys.push(2);` adds to `xs` too); a `view` of one calls only its `view fn`s; and it is not
+  an `Obj`: where one is needed, put the container in a
   [`Box`](memory.md) (with `import ::memory as mem;`, `b = mem::Box(xs);`), an object
   whose `get()` is the container itself (`b.get().push(1);`), and its own
   `toString()` is a struct's, which shows its private field. `listToString` prints a list's

@@ -86,8 +86,9 @@ struct Input {
 };
 
 struct EmitOptions {
-  /// Output file for Object / Executable; "" means a default next to the
-  /// input.  Source output goes to the stream emit() is given.
+  /// Output file for Object / Executable, which the driver always names
+  /// (`build`'s -o, or one made from the source file's name).
+  /// Source output goes to the stream emit() is given.
   std::string OutputPath;
   /// For Source: which of the backend's source forms to write ("" for its
   /// default), for a backend with several (the mlir backend's stages,

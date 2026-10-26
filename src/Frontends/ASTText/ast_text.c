@@ -19,6 +19,7 @@
 
 #include "paykan/plugin_api.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -36,7 +37,17 @@ static int ast_text_parse(void *data, PaykanSession *session,
   char *copy;
   (void)data;
   if (input->ast_format_version != PAYKAN_AST_FORMAT_VERSION) {
-    error(session, "ast-text reads AST format 1 only");
+    /* The versions are packed as major * 10000 + minor * 100 + patch. */
+    char msg[128];
+    snprintf(msg, sizeof(msg),
+             "ast-text reads AST format %u.%u.%u only, not %u.%u.%u",
+             (unsigned)PAYKAN_AST_FORMAT_VERSION / 10000,
+             (unsigned)PAYKAN_AST_FORMAT_VERSION / 100 % 100,
+             (unsigned)PAYKAN_AST_FORMAT_VERSION % 100,
+             (unsigned)input->ast_format_version / 10000,
+             (unsigned)input->ast_format_version / 100 % 100,
+             (unsigned)input->ast_format_version % 100);
+    error(session, msg);
     output->error_count = 1;
     return PAYKAN_OK;
   }
