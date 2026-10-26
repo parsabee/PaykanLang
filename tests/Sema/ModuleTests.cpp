@@ -678,7 +678,8 @@ fn main() -> int { return Box(); }
 )");
   auto r = semaCheckFile(main, tmp);
   EXPECT_FALSE(r.Ok);
-  EXPECT_NE(r.Diagnostics.find("'Box' is already declared as a class"),
+  EXPECT_NE(r.Diagnostics.find("function 'Box' conflicts with an imported type "
+                               "of the same name"),
             std::string::npos)
       << r.Diagnostics;
   std::filesystem::remove_all(tmp);

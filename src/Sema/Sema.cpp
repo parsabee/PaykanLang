@@ -87,6 +87,32 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     error(loc, "'" + name + "' is a builtin type and cannot be redeclared");
     return false;
   }
+  // Type names are global across an import graph (docs/language/
+  // 15-modules.md): a declaration named like a class, struct or enum an
+  // import reached conflicts with it, whatever it declares.
+  const bool imported = ImportedTypeOrigins.count(name) != 0;
+  const auto importConflict = [&] {
+    const char *what = "function";
+    switch (kind) {
+    case DeclKind::Function:
+      break;
+    case DeclKind::Class:
+      what = "class";
+      break;
+    case DeclKind::Enum:
+      what = "enum";
+      break;
+    case DeclKind::Trait:
+      what = "trait";
+      break;
+    case DeclKind::Struct:
+      what = "struct";
+      break;
+    }
+    error(loc, std::string(what) + " '" + name +
+                   "' conflicts with an imported type of the same name");
+    return false;
+  };
   // Compiler builtins are registered before any user declaration and must
   // never be replaced.  Which names are builtin is not spelled out here: a
   // class is builtin iff the ASTContext bootstrap flagged it
@@ -96,11 +122,8 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
   if (auto *ct = Ctx.lookupClassType(name)) {
     if (ct->isBuiltin())
       error(loc, "'" + name + "' is a builtin class and cannot be redeclared");
-    else if (kind == DeclKind::Class)
-      // Local classes are checked before any of them is registered, so a
-      // class hit while declaring a class can only come from an import.
-      error(loc, "class '" + name +
-                     "' conflicts with an imported type of the same name");
+    else if (imported)
+      return importConflict();
     else
       error(loc, "'" + name + "' is already declared as a class");
     return false;
@@ -110,13 +133,9 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     return false;
   }
   if (Ctx.lookupStructType(name)) {
-    if (kind == DeclKind::Struct && !LocalStructNames.count(name))
-      // Local structs are checked before any of them is registered, so a
-      // struct hit while declaring a struct can only come from an import
-      // (or, for a generic struct, from a struct of the module).
-      error(loc, "struct '" + name +
-                     "' conflicts with an imported type of the same name");
-    else if (kind == DeclKind::Class)
+    if (imported)
+      return importConflict();
+    if (kind == DeclKind::Class)
       error(loc,
             "class '" + name + "' conflicts with a struct of the same name");
     else
@@ -124,6 +143,8 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     return false;
   }
   if (Ctx.lookupEnumType(name)) {
+    if (imported)
+      return importConflict();
     if (kind == DeclKind::Enum)
       error(loc, "redefinition of enum '" + name + "'");
     else if (kind == DeclKind::Class)

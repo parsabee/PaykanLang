@@ -228,6 +228,70 @@ TEST(Class, TheStandardLibrarysNamesAreNotReserved) {
       << r.Diagnostics;
 }
 
+// Finding 44: a declaration of any kind named like a type an import reached
+// conflicts with it, in the words of the class case above, an enum's too
+// (it was "redefinition of enum 'ErrorCode'", and a struct or enum named
+// like an imported type of the other kind "'Error' is already declared as a
+// struct").  Two enums of the program stay a redefinition.  A generic type
+// of a module (`Result`) leaves its name free: the program's own `Result`
+// is a class of its own, next to `res::Result<T, E>`.
+TEST(Class, ADeclarationNamedLikeAnImportedTypeConflictsWithIt) {
+  auto r = semaCheck(R"(import ::io;
+enum ErrorCode { A }
+enum Error { B }
+trait File {}
+enum E { X }
+enum E { Y }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(r.Ok);
+  for (const char *d :
+       {"2:1: error: enum 'ErrorCode' conflicts with an imported type of the "
+        "same name",
+        "3:1: error: enum 'Error' conflicts with an imported type of the same "
+        "name",
+        "4:1: error: trait 'File' conflicts with an imported type of the "
+        "same name",
+        "6:1: error: redefinition of enum 'E'"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4) << r.Diagnostics;
+
+  auto kinds = semaCheck(R"(import ::io;
+struct ErrorCode { x: int; }
+fn Error() -> int { return 1; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_FALSE(kinds.Ok);
+  for (const char *d :
+       {"2:1: error: struct 'ErrorCode' conflicts with an imported type of "
+        "the same name",
+        "3:1: error: function 'Error' conflicts with an imported type of the "
+        "same name"})
+    EXPECT_NE(kinds.Diagnostics.find(d), std::string::npos)
+        << d << "\n"
+        << kinds.Diagnostics;
+  EXPECT_EQ(kinds.Diagnostics.find("already declared"), std::string::npos)
+      << kinds.Diagnostics;
+
+  auto own = semaCheck(R"(import ::io;
+import ::result as res;
+class Result { v: int; }
+fn half(n: int) -> res::Result<int, Str> {
+  return if n % 2 == 0 then res::Result::Ok(n / 2) else res::Result::Err("odd");
+}
+fn main() -> int {
+  r = Result(3);
+  match half(4) {
+    h: Ok { io::println(h.value + r.v); }
+    e: Err { io::println(e.error); }
+  }
+  return 0;
+}
+)");
+  EXPECT_TRUE(own.Ok) << own.Diagnostics;
+}
+
 // The conversion builtins removed by #64 no longer reserve their names.
 TEST(Class, RemovedConversionNamesAreFree) {
   auto r = semaCheck(withClasses("class StrInt {}\n"

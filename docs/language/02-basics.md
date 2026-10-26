@@ -1060,8 +1060,11 @@ fn float(x: int) -> int { ... }    // error: 'float' is a builtin type and canno
 The names of the standard library (`print`, `println`, `open`, `File`, `Error`, ...) are
 not builtins: a program may declare its own `fn print` or `class File`. Type names are
 global across an import graph, though ([Modules](15-modules.md)), so a program that imports
-`::io` cannot also declare its own `File`, `Error`, `Result` or `ErrorCode` (`class 'File'
-conflicts with an imported type of the same name`).
+`::io` cannot also declare a class, struct, enum, trait or function named `File`, `Error`
+or `ErrorCode` (`class 'File' conflicts with an imported type of the same name`, `enum
+'ErrorCode' ...`). A generic type of a module, such as `Result` or `List`, is named through
+its module (`res::Result<int, Str>`) and leaves its name free: a program may declare its
+own `Result`.
 
 The same rule applies between user declarations: `fn Point()` next to `class Point` is
 rejected with `'Point' is already declared as a class`, and a function or class cannot

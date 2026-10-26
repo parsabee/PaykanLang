@@ -1441,9 +1441,6 @@ private:
   /// The structs of the module's enums' variants' fields (`E::V`), by enum
   /// name: a struct that holds the enum holds them in place.
   StringMap<std::vector<std::string>> EnumPayloadStructs;
-  /// Their names (a later declaration of one of them is a redefinition,
-  /// not a conflict with an import).
-  StringSet LocalStructNames;
   /// The structs in the order populateStructs resolved them: every struct
   /// before the structs that hold it.
   std::vector<ast::StructDecl *> SortedStructs;

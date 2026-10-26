@@ -61,7 +61,6 @@ bool Sema::declareStructs(ast::TranslationUnit *tu) {
     }
     Ctx.registerStructType(name, sd->getLocation());
     DeclaredStructs.push_back(sd);
-    LocalStructNames.insert(name);
   }
   return ok;
 }

@@ -1212,6 +1212,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Maybe<u8>` compares two `Maybe<u8>`, as its mirror did.  `Maybe::Nothing ==
   Maybe::Nothing` stays an error, having nothing to take them from.
   `samples/codegen/74_generic_enum_either_side.pkn` runs each form.
+- A declaration named like a type an import reached is reported as the conflict it is,
+  whatever it declares: `enum ErrorCode { A }` in a program that imports `::io` was
+  `redefinition of enum 'ErrorCode'`, and `enum Error { B }`, `struct ErrorCode { ... }`,
+  `trait File {}` or `fn Error()` said `'Error' is already declared as a struct` (or a
+  class, or an enum), as if the program had declared it; each is now `enum 'ErrorCode'
+  conflicts with an imported type of the same name` (`struct ...`, `trait ...`, `function
+  ...`), the words `class File` already got.  Two enums of the program stay `redefinition of
+  enum 'E'`.  And the docs no longer say a program that imports `::io` cannot declare its
+  own `Result`: a generic type of a module is named through it (`res::Result<int, Str>`)
+  and leaves its name free, as a program's `class Result` next to the library's showed
+  (docs/language/02-basics.md, "Builtin Names Are Reserved"; 15-modules.md;
+  docs/stdlib/index.md).
 
 ## [0.2.0] - 2026-10-20
 

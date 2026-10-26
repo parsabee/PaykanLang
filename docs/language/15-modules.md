@@ -255,8 +255,10 @@ What `C` cannot do without importing `A` is *spell* the type: `t = w.get()` is f
 declared name, type names are global across the import graph (the main file and everything
 it imports, directly or not): if two modules reachable from one file both declare a class
 (or struct, or enum) called `Node`, importing them is an error naming both modules. A file
-also cannot declare a class, struct or enum with the same name as a type reached through any
-of its imports.
+also cannot declare a class, struct, enum, trait or function with the same name as a type
+reached through any of its imports (`enum 'Node' conflicts with an imported type of the same
+name`). A generic type is not reached by its name: its instantiations are
+(`Box<int>`), spelled through its module (`m::Box<int>`), so a file may declare its own `Box`.
 
 ```pkn
 // file: geometry/point.pkn
