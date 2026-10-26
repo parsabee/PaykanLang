@@ -784,9 +784,6 @@ private:
     /// temporary @p str is part of, is released after the parse.
     Val emitParseOf(const Val &str, const ExprValue &owned,
                     ast::BuiltinType::Kind target);
-    /// `int<Str>`, `float<Str>`, `bool<Str>` & co.: emitParseOf of the
-    /// argument; an invalid Val for any other call.
-    Val emitParse(ast::CallExpr *node);
 
     Val emitIdentityCtor(ast::CallExpr *node);
     Val emitConversion(ast::CallExpr *node);

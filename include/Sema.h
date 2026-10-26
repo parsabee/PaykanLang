@@ -1984,7 +1984,7 @@ private:
                              const std::vector<ast::Type *> &argTypes);
 
   /// Rebind a checked conversion @p node to @p pair's spelled form and
-  /// return its result type (the optional target for a parse).
+  /// return its result type, the target.
   ast::Type *applyConversion(ast::CallExpr *node, const ConversionPair *pair);
 
   /// Check a conversion constructor `Target<Source>(value)` (#64, #88): the

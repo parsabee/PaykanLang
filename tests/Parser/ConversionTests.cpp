@@ -30,8 +30,8 @@ TEST(Conversion, EveryPairParsesAsACallWithOneTypeArgument) {
       b = Str<float>(1.5);
       c = Str<bool>(True);
       d = Str<char>('c');
-      e = int<Str>("1");
-      f = float<Str>("1.5");
+      e = u8<int>(1);
+      f = f32<float>(1.5);
       g = int<float>(1.5);
       h = float<int>(1);
       i = int<bool>(True);
@@ -43,10 +43,10 @@ TEST(Conversion, EveryPairParsesAsACallWithOneTypeArgument) {
   )");
   ASSERT_TRUE(ok);
   auto values = assignedValues(driver->getRoot());
-  const char *const callees[] = {"Str", "Str",   "Str", "Str",  "int", "float",
+  const char *const callees[] = {"Str", "Str",   "Str", "Str",  "u8",  "f32",
                                  "int", "float", "int", "bool", "int", "char"};
   const char *const sources[] = {"int",  "float", "bool",  "char",
-                                 "Str",  "Str",   "float", "int",
+                                 "int",  "float", "float", "int",
                                  "bool", "int",   "char",  "int"};
   ASSERT_EQ(values.size(), 12u);
   for (size_t i = 0; i < values.size(); ++i) {
@@ -67,7 +67,7 @@ TEST(Conversion, NestedAndInsideExpressions) {
       s = Str<float>(float<int>(a) * 2.0) + Str<bool>(a < b);
       n = int<float>(2.5) + int<bool>(a > b) * int<char>('a');
       m = Str<int>(n).len();
-      t = (int<Str>("1"), char<int>(65));
+      t = (int<u8>(1), char<int>(65));
       xs = [int<float>(1.0), a < b];
       if a < b && b > a { }
       return 0;

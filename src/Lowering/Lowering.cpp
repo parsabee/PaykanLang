@@ -537,7 +537,6 @@ void ModuleLowering::bootstrapBuiltins() {
   }
   reg(kConvStrBool, kPaykanStringFromBool);
   reg(kConvStrChar, kPaykanStringFromChar);
-  // (`int<Str>` & co. are emitParse.)
   IdentityCtors.insert(kString);
 }
 

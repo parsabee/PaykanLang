@@ -134,15 +134,12 @@ inline constexpr const char *kConvStrInt = "Str<int>";
 inline constexpr const char *kConvStrFloat = "Str<float>";
 inline constexpr const char *kConvStrBool = "Str<bool>";
 inline constexpr const char *kConvStrChar = "Str<char>";
-inline constexpr const char *kConvIntStr = "int<Str>";
-inline constexpr const char *kConvFloatStr = "float<Str>";
 inline constexpr const char *kConvIntFloat = "int<float>";
 inline constexpr const char *kConvFloatInt = "float<int>";
 inline constexpr const char *kConvIntBool = "int<bool>";
 inline constexpr const char *kConvBoolInt = "bool<int>";
 inline constexpr const char *kConvIntChar = "int<char>";
 inline constexpr const char *kConvCharInt = "char<int>";
-inline constexpr const char *kConvBoolStr = "bool<Str>";
 
 // -- Runtime C symbol names
 

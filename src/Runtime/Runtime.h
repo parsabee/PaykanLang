@@ -232,9 +232,9 @@ PaykanString *PaykanString_from_float(double value);
 PaykanString *PaykanString_from_bool(int64_t value);
 PaykanString *PaykanString_from_char(int8_t c);
 
-// The parses behind Str's `toInt()` & co. (and `int<Str>` & co.): each
-// returns 1 and stores the value in *out when the whole string is one, else
-// returns 0 and stores 0 (the lowering makes the `int?` & co. of the two).
+// The parses behind Str's `toInt()` & co.: each returns 1 and stores the
+// value in *out when the whole string is one, else returns 0 and stores 0
+// (the lowering makes the `int?` & co. of the two).
 /// A decimal integer: an optional sign and digits, the whole string, no
 /// surrounding whitespace, within int64.
 int64_t PaykanString_parse_int(PaykanObject *str, int64_t *out);

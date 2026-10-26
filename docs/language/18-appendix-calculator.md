@@ -516,7 +516,7 @@ language:
 - Add functions such as `abs(x)` and `sqrt(x)`: parse a name followed by `(`, dispatch on
   the name with a value-mode `match` on the `Str`, and call `math::abs` or `math::sqrt`.
 - Add `:save <file>` and `:load <file>` commands that write the variables with `io::open` and
-  read them back with `readln` and `float(...)`.
+  read them back with `readln` and `toFloat()`.
 - Run the result with `paykan --track-heap` to check that it still frees everything.
 
 Back to the [contents](index.md).

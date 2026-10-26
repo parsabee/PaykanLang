@@ -3006,7 +3006,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   // Register type-conversion builtins (take unique builtin types — no ownership
   // check needed).
   auto *StrTy = Ctx.getStrTy();
-  // The conversions (`Str<int>(n)`, `int<Str>(s)`, ...) are not functions:
+  // The conversions (`Str<int>(n)`, `int<float>(x)`, ...) are not functions:
   // checkConversion handles them (#64).
   declareFunction(names::kString, StrTy, {StrTy}, true);
 
@@ -3072,28 +3072,27 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
 // is written (`Str<int>(n)`, checkConversion) or inferred from the argument's
 // exact type (`Str(n)`, inferConversion).  The semantics live in the lowering
 // (Lowering/LoweringExpr.cpp, emitConversion and the runtime table), which both
-// backends inherit.
+// backends inherit.  A primitive does not parse a `Str`: that is a method of
+// the string (`s.toInt()`), which the error names.
 
 struct ConversionPair {
   std::string Target;
   std::string Source;
   std::string Spelled; // the rebound callee the lowering dispatches on
-  bool Parses;         // a parse of a Str: the result is the optional target
 };
 
 namespace {
 
 /// The conversions, grouped by target, each group in the order its
 /// diagnostics list it: `Str` from every scalar; `int`, `float` and the
-/// sized numeric types from a `Str` (a parse) and from every other numeric
-/// type; `bool` and `char` from `int` only (docs/design/sized-types.md).
+/// sized numeric types from every other numeric type; `bool` and `char`
+/// from `int` only (docs/design/sized-types.md).
 const std::vector<ConversionPair> &conversions() {
   static const std::vector<ConversionPair> kTable = [] {
     using ast::BuiltinType;
     std::vector<ConversionPair> t;
-    auto add = [&](const std::string &target, const std::string &source,
-                   bool parses) {
-      t.push_back({target, source, target + "<" + source + ">", parses});
+    auto add = [&](const std::string &target, const std::string &source) {
+      t.push_back({target, source, target + "<" + source + ">"});
     };
     // The numeric types, in the order the diagnostics list them.
     std::vector<std::string> numerics;
@@ -3103,31 +3102,29 @@ const std::vector<ConversionPair> &conversions() {
           BuiltinType::U32, BuiltinType::U64, BuiltinType::F16,
           BuiltinType::F32})
       numerics.push_back(ast::builtinKindName(k));
-    add(names::kString, names::kTypeInt, false);
-    add(names::kString, names::kTypeFloat, false);
-    add(names::kString, names::kTypeBool, false);
-    add(names::kString, names::kTypeChar, false);
+    add(names::kString, names::kTypeInt);
+    add(names::kString, names::kTypeFloat);
+    add(names::kString, names::kTypeBool);
+    add(names::kString, names::kTypeChar);
     for (size_t i = 2; i < numerics.size(); ++i)
-      add(names::kString, numerics[i], false);
+      add(names::kString, numerics[i]);
     for (const std::string &target : numerics) {
-      add(target, names::kString, true);
       for (const std::string &source : numerics)
         if (source != target)
-          add(target, source, false);
+          add(target, source);
       // `int` also converts the two non-numeric scalars, as before the sized
-      // types (so its list reads `Str, float, bool, char, i8, ...`).
+      // types (so its list reads `float, bool, char, i8, ...`).
       if (target == names::kTypeInt) {
         ConversionPair boolPair{target, names::kTypeBool,
-                                target + "<" + names::kTypeBool + ">", false};
+                                target + "<" + names::kTypeBool + ">"};
         ConversionPair charPair{target, names::kTypeChar,
-                                target + "<" + names::kTypeChar + ">", false};
+                                target + "<" + names::kTypeChar + ">"};
         auto at = t.end() - static_cast<long>(numerics.size() - 2);
         t.insert(at, {boolPair, charPair});
       }
     }
-    add(names::kTypeBool, names::kTypeInt, false);
-    add(names::kTypeBool, names::kString, true);
-    add(names::kTypeChar, names::kTypeInt, false);
+    add(names::kTypeBool, names::kTypeInt);
+    add(names::kTypeChar, names::kTypeInt);
     return t;
   }();
   return kTable;
@@ -3151,9 +3148,31 @@ const ConversionPair *findConversion(const std::string &target,
   return nullptr;
 }
 
-/// The no-match error, for the explicit and the inferred form alike.
+/// The error of a parse written as a conversion (`int(s)`, `u8<Str>(s)`):
+/// no primitive parses a `Str`, the method of `Str` that parses into
+/// @p target does (docs/language/04-strings-and-conversions.md, "Parsing a
+/// string").  Empty when @p source is not `Str` or @p target has no parse.
+std::string parseMovedMessage(const std::string &target,
+                              const std::string &source) {
+  ast::BuiltinType::Kind kind = ast::BuiltinType::Void;
+  if (source != names::kString || !ast::builtinKindOfName(target, kind))
+    return {};
+  const char *method = ast::strParseMethod(kind);
+  if (!method)
+    return {};
+  return "no specialization of '" + target +
+         "' for 'Str': parse a 'Str' with its method '" + method +
+         "()', which returns '" + target + "?'";
+}
+
+/// The no-match error, for the explicit and the inferred form alike: a
+/// parse's names its method, any other lists the target's specializations.
+/// Either way the call has no type, so nothing built on it is reported
+/// again: a program written for the older parse gets one error at each.
 std::string noSpecializationMessage(const std::string &target,
                                     const std::string &source) {
+  if (std::string moved = parseMovedMessage(target, source); !moved.empty())
+    return moved;
   return "no specialization of '" + target + "' for '" + source +
          "'; its specializations are " + specializationList(target);
 }
@@ -3220,11 +3239,7 @@ ast::Type *Sema::inferConversion(ast::CallExpr *node,
 
 ast::Type *Sema::applyConversion(ast::CallExpr *node,
                                  const ConversionPair *pair) {
-  // The result is the target type; a parse (`int<Str>`, `bool<Str>`, ...) can
-  // fail, so it returns the optional (None for an invalid string).
   ast::Type *result = Ctx.lookupType(pair->Target);
-  if (pair->Parses)
-    result = Ctx.getOptionalType(result);
   node->setCalleeName(Ctx.intern(pair->Spelled));
   node->setResolvedType(result);
   return result;

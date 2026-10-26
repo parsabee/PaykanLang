@@ -1016,8 +1016,8 @@ CodeGen enforced, now in one place.
   tuple, at its offset.
 * **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
   `PaykanString_from_int` & co. (an owned string temporary).  A parse,
-  `s.toInt()` / `s.toFloat()` / `s.toBool()` & co. (or the older `int<Str>`
-  & co.), calls `PaykanString_parse_int` / `PaykanString_parse_float` /
+  `s.toInt()` / `s.toFloat()` / `s.toBool()` & co. (no conversion parses a
+  `Str`), calls `PaykanString_parse_int` / `PaykanString_parse_float` /
   `PaykanString_parse_bool` on the borrowed string with the `local.addr` of
   a local the value is parsed into, and is the `select` of `some` of that
   value (a valid string) or `none` (`toBool()` accepts exactly `"True"` and

@@ -1,0 +1,11 @@
+// A primitive does not parse a string: that is a method of the string, which
+// the error names, with the optional it returns.  Each old parse is one
+// error, and what is built on it reports nothing more.
+fn main() -> int {
+  s: Str = "12";
+  a = int(s);          // error: no specialization of 'int' for 'Str': parse a 'Str' with its method 'toInt()', which returns 'int?'
+  b = u8<Str>(s);      // error: no specialization of 'u8' for 'Str': parse a 'Str' with its method 'toU8()', which returns 'u8?'
+  c: bool = bool(s);   // error: no specialization of 'bool' for 'Str': parse a 'Str' with its method 'toBool()', which returns 'bool?'
+  d = char(s);         // error: no specialization of 'char' for 'Str'; its specializations are int
+  return 0;
+}

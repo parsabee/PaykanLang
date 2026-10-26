@@ -212,16 +212,39 @@ TEST(SizedTypes, EveryNumericPairConverts) {
   )"));
 }
 
-TEST(SizedTypes, ConversionsFromAndToStr) {
+TEST(SizedTypes, ConversionsToStr) {
   expectOk(inMain(R"(
-    a: i8 = 1;  u: unsigned = 2;  k: f32 = 1.5;  h: f16 = 0.5;  s: Str = "1";
+    a: i8 = 1;  u: unsigned = 2;  k: f32 = 1.5;  h: f16 = 0.5;
     s1: Str = Str(a) + Str(u) + Str(k) + Str(h) + Str<u16>(3) + Str<unsigned>(u);
-    p1: i8? = i8(s);  p2: unsigned? = unsigned(s);  p3: f32? = f32(s);
-    p4: u32? = u32<Str>(s);  p5: f16? = f16<Str>(s);  p6: unsigned? = u64(s);
+  )"));
+}
+
+// A sized type parses a `Str` with the method of its name, which the error
+// of the older conversion names, under the type's canonical name.
+TEST(SizedTypes, TheirParsesAreMethodsOfStr) {
+  const std::string s = "s: Str = \"1\"; ";
+  expectError(inMain(s + "p = i8(s);"),
+              "no specialization of 'i8' for 'Str': parse a 'Str' with its "
+              "method 'toI8()', which returns 'i8?'");
+  expectError(inMain(s + "p = u32<Str>(s);"),
+              "no specialization of 'u32' for 'Str': parse a 'Str' with its "
+              "method 'toU32()', which returns 'u32?'");
+  expectError(inMain(s + "p = u64(s);"),
+              "no specialization of 'unsigned' for 'Str': parse a 'Str' with "
+              "its method 'toUnsigned()', which returns 'unsigned?'");
+  expectError(inMain(s + "p = unsigned<Str>(s);"),
+              "no specialization of 'unsigned' for 'Str': parse a 'Str' with "
+              "its method 'toUnsigned()', which returns 'unsigned?'");
+  expectError(inMain(s + "p = f32(s);"),
+              "no specialization of 'f32' for 'Str': parse a 'Str' with its "
+              "method 'toF32()', which returns 'f32?'");
+  expectError(inMain(s + "p = f16<Str>(s);"),
+              "no specialization of 'f16' for 'Str': parse a 'Str' with its "
+              "method 'toF16()', which returns 'f16?'");
+  expectOk(inMain(s + R"(
+    p1: i8? = s.toI8();  p2: unsigned? = s.toUnsigned();  p3: f32? = s.toF32();
     match p1 { x: i8 { t: Str = Str(x); } None { } }
   )"));
-  expectError(inMain("s: Str = \"1\"; a: i8 = i8(s);"),
-              "cannot use optional 'i8?' as 'i8' without unwrapping");
 }
 
 // An explicit conversion expects one argument of its written source type:
@@ -239,12 +262,12 @@ TEST(SizedTypes, AnExplicitConversionWithExtraArgumentsIsAnArityError) {
 TEST(SizedTypes, TheConversionSetIsClosedAndListed) {
   expectError(inMain("a: u8 = u8('a');"),
               "no specialization of 'u8' for 'char'; its specializations are "
-              "Str, int, float, i8, i16, i32, u16, u32, unsigned, f16, f32");
+              "int, float, i8, i16, i32, u16, u32, unsigned, f16, f32");
   expectError(inMain("a: u8 = 1; b: u8 = u8(a);"),
               "no specialization of 'u8' for 'u8'");
   expectError(inMain("a: u8 = 1; b: bool = bool(a);"),
               "no specialization of 'bool' for 'u8'; its specializations are "
-              "int, Str");
+              "int\n");
   expectError(inMain("a: u8 = 1; c: char = char(a);"),
               "no specialization of 'char' for 'u8'; its specializations are "
               "int");

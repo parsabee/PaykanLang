@@ -368,65 +368,27 @@ between two neighbouring values of the type. `x: f32 = 1.0000000596046448;` and
 `1.0000001`. A literal and the parse of the same text always give the same value. An
 integer text becomes an `f32` or `f16` in one rounding.
 
-### From a string: parsing
-
-`int(s)`, `float(s)` and `bool(s)` parse a string. Parsing can fail (`"12abc"` is not a
-number), so they do not return an `int` but an `int?`, an *optional* `int` that is either a
-number or `None`. You get the number out with `match`:
+A type does not parse a string by being called with it: `int(s)` and `int<Str>(s)` are an
+error that names the method, and so are `u8(s)`, `float(s)`, `bool(s)` and the others.
 
 ```pkn
-import ::io;
-
 fn main() -> int {
-  inputs = ["42", "-8", "12abc", " 7", "9223372036854775808"];
-  i = 0;
-  while i < inputs.len() {
-    match int(inputs[i]) {
-      n: int { io::println("'" + inputs[i] + "' is the number " + Str(n)); }
-      None   { io::println("'" + inputs[i] + "' is not a number"); }
-    }
-    i = i + 1;
-  }
+  s = "12";
+  n = int(s);
   return 0;
 }
 ```
 
-Output:
+Error:
 
 ```
-'42' is the number 42
-'-8' is the number -8
-'12abc' is not a number
-' 7' is not a number
-'9223372036854775808' is not a number
+no specialization of 'int' for 'Str': parse a 'Str' with its method 'toInt()', which returns 'int?'
 ```
-
-The first arm runs when the parse succeeded and binds the number to `n`; the `None` arm
-runs when it failed. [Optionals](12-optionals.md#unwrapping-with-match) explains `match` on
-optionals in full. The parsers are strict: the whole string must be the value, with no
-surrounding whitespace.
-
-- `int(s)` accepts an optional `+` or `-` followed by decimal digits, and the value must
-  fit in an `int` (`"9223372036854775808"` is `None`).
-- `float(s)` accepts what C's `strtod` accepts, including exponents and `nan` / `inf`
-  (`"2.5"`, `"1e3"`, `"inf"`). The range rule is the one for float literals: subnormal
-  values (`"5e-324"`, `"1e-310"`) parse, but a value too large (`"1e999"`, which would be
-  infinity) or too small (`"1e-400"`, not zero but rounding to zero) is `None`. `"inf"`
-  and `"nan"` are spelled out, so they parse.
-- `bool(s)` accepts exactly `"True"` and `"False"`, the spellings `Str(b)` prints, so
-  `bool(Str(b))` gives back `b`. Anything else (`"true"`, `"1"`, `" True"`) is `None`.
-- The sized types parse the same way into an optional of their own (`u8(s)` is a `u8?`,
-  `unsigned(s)` an `unsigned?`, `f32(s)` an `f32?`), `None` when the text is not a number
-  of the type: outside its range (`u8("256")`), or signed for an unsigned type
-  (`unsigned("-1")`, `u8("+1")`).
-- Each of these is the method of [Parsing a string](#parsing-a-string) by another
-  spelling: `int(s)` is `s.toInt()`, `u8(s)` is `s.toU8()`, and they parse exactly the
-  same texts.
 
 ### The explicit form
 
 Each conversion has an explicit spelling that names the source type too:
-`Target<Source>(value)`, for example `Str<int>(n)`, `int<float>(f)`, `int<Str>(s)`. It is
+`Target<Source>(value)`, for example `Str<int>(n)`, `int<float>(f)`, `bool<int>(n)`. It is
 the same conversion; the explicit form documents what is being converted and makes the
 compiler check it:
 
@@ -454,19 +416,22 @@ The argument must then have exactly that type: `Str<float>(3)` is an error, as `
 The conversions are **specializations of the builtin types**. Each builtin target has a
 fixed, closed set of them, one for each type it converts *from*. `Target(value)` picks the
 specialization whose source is **exactly** the type of `value`: `Str(n)` with an `int` is
-`Str<int>`, `int(f)` with a `float` is `int<float>`, `int(s)` with a `Str` is `int<Str>`.
-Nothing is widened or unwrapped to find one. An `int` argument does not reach `float`'s
-`Str` specialization, and an `int?` must be unwrapped with `match` first. A conversion
-between a type and itself, such as `float(2.5)`, does not exist either.
+`Str<int>`, and `int(f)` with a `float` is `int<float>`. Nothing is widened or unwrapped to
+find one. An `int` argument does not reach `float`'s `Str` specialization, and an `int?`
+must be unwrapped with `match` first. A conversion between a type and itself, such as
+`float(2.5)`, does not exist either.
 
 | Target  | Specializations (the source types) | Result                                   |
 |---------|------------------------------------|------------------------------------------|
 | `Str`   | `int`, `float`, `bool`, `char`, and every sized numeric type | `Str`           |
-| `int`   | `Str`; `float`, `bool`, `char`, and every sized numeric type | `int?` from `Str`; `int` otherwise |
-| `float` | `Str`; `int`, and every sized numeric type | `float?` from `Str`; `float` otherwise |
-| `i8` … `u32`, `unsigned`, `f16`, `f32` | `Str`; every other numeric type | `T?` from `Str`; `T` otherwise |
-| `bool`  | `int`; `Str`                       | `bool` from `int`; `bool?` from `Str`    |
+| `int`   | `float`, `bool`, `char`, and every sized numeric type | `int`           |
+| `float` | `int`, and every sized numeric type | `float`                                 |
+| `i8` … `u32`, `unsigned`, `f16`, `f32` | every other numeric type | `T`                     |
+| `bool`  | `int`                              | `bool`                                   |
 | `char`  | `int`                              | `char`                                   |
+
+No type converts *from* a `Str`: a string is parsed with its methods ([Parsing a
+string](#parsing-a-string)), each of which returns an optional.
 
 The numeric types are `int`, `float`, `i8`, `i16`, `i32`, `u8`, `u16`, `u32`, `unsigned`,
 `f16` and `f32` (`i64`, `f64` and `u64` are other spellings of the first two and of
@@ -480,9 +445,6 @@ What each specialization does:
 | `Str<float>(f)`   | `float` → `Str`    | `%g` formatting: `"3.14"`, `"2"`, `"1e+20"`, `"-0"`; `"nan"`, `"inf"`, `"-inf"` |
 | `Str<bool>(b)`    | `bool` → `Str`     | `"True"` or `"False"`                                         |
 | `Str<char>(c)`    | `char` → `Str`     | A one-character string                                        |
-| `int<Str>(s)`     | `Str` → `int?`     | The parsed integer, or `None` (see [parsing](#from-a-string-parsing)) |
-| `float<Str>(s)`   | `Str` → `float?`   | The parsed float, or `None` (see [parsing](#from-a-string-parsing)) |
-| `bool<Str>(s)`    | `Str` → `bool?`    | `True` for `"True"`, `False` for `"False"`, else `None`       |
 | `int<float>(f)`   | `float` → `int`    | Truncates toward zero; panics on NaN, ±inf or out of range    |
 | `float<int>(n)`   | `int` → `float`    | The nearest `float` (exact up to 2^53)                        |
 | `int<bool>(b)`    | `bool` → `int`     | `1` for `True`, `0` for `False`                               |
@@ -494,12 +456,12 @@ What each specialization does:
 | `f32<int>(n)`, `float<u8>(b)`, … | integer → float | The nearest value of the target (`f32(16777217)` is `16777216`) |
 | `f16<float>(f)`, `float<f32>(x)`, … | float → float | Rounded to the target's precision; too large is its infinity (`f16(0.1)` is `0.0999756`, `f16(70000.0)` is `inf`) |
 | `Str<u8>(b)`, `Str<f32>(x)`, … | sized → `Str` | As `Str<int>` / `Str<float>`; `Str<unsigned>` prints the unsigned value |
-| `u8<Str>(s)`, `unsigned<Str>(s)`, `f32<Str>(s)`, … | `Str` → `T?` | The parsed value, or `None` when the text is not a number of the type: outside its range (`u8("256")`), or signed for an `unsigned` (`unsigned("-1")`) |
 
 **The set is closed.** When no specialization's source is the argument's type, a user class
-included, the call is a compile-time error that lists the target's specializations. The
-explicit form reports a type argument outside the set the same way. A class cannot add a
-specialization; `toString()` is the way to turn an object into a `Str`:
+included, the call is a compile-time error that lists the target's specializations, or,
+for a `Str` argument and a number or `bool` target, names the method that parses the
+string. The explicit form reports a type argument outside the set the same way. A class
+cannot add a specialization; `toString()` is the way to turn an object into a `Str`:
 
 ```pkn
 a = Point();
@@ -509,8 +471,10 @@ s = Str(a);         // error: no specialization of 'Str' for 'Point'; its specia
 o = None;
 t = Str(o);         // error: no specialization of 'Str' for 'Obj'; ...
 x = float(2.5);     // error: no specialization of 'float' for 'float'; its specializations
-                    //        are Str, int, i8, i16, i32, u8, u16, u32, unsigned, f16, f32
+                    //        are int, i8, i16, i32, u8, u16, u32, unsigned, f16, f32
 y = int<float>(3);  // error: argument of 'int<float>' has type 'int', expected 'float'
+n = u8("7");        // error: no specialization of 'u8' for 'Str': parse a 'Str' with its
+                    //        method 'toU8()', which returns 'u8?'
 ```
 
 ### Panics

@@ -2,6 +2,6 @@
 fn main() -> int {
   a: u16 = 3;
   b = -a;           // error: unary '-' is not defined for type 'u16'
-  c = u8('a');      // error: no specialization of 'u8' for 'char'; its specializations are Str, int, float, i8, i16, i32, u16, u32, unsigned, f16, f32
+  c = u8('a');      // error: no specialization of 'u8' for 'char'; its specializations are int, float, i8, i16, i32, u16, u32, unsigned, f16, f32
   return 0;
 }

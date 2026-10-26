@@ -1260,6 +1260,9 @@ bool builtinKindOfName(std::string_view name, BuiltinType::Kind &kind);
 /// The kind the parse method @p method of `Str` (`toInt` ... `toBool`,
 /// names::kStrParseMethods) parses into; false when it is not one.
 bool strParseKind(std::string_view method, BuiltinType::Kind &kind);
+/// The parse method of `Str` that parses into @p kind (`toInt` for `int`),
+/// the inverse of strParseKind; nullptr when the type has none.
+const char *strParseMethod(BuiltinType::Kind kind);
 
 // Method declaration (name + signature + flags)
 class MethodDecl : public Decl {

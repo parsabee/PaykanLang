@@ -1560,6 +1560,74 @@ TEST(Pkm, PrebuiltModuleCarriesItsTemplates) {
   fs::remove_all(dir);
 }
 
+// A module's parses are Str's methods, from its source, its cache entry and
+// its prebuilt file alike; a template body still written with the older
+// conversion (`int(x)`) is the error that names the method where an
+// importer instantiates it with a `Str`, with the instantiation's note.
+TEST(Pkm, StrParsesAcrossModules) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_str_parse_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib" / "conv.pkn",
+            "fn bytes(s: Str) -> u8? { return s.toU8(); }\n"
+            "fn parsed<T>(x: T) -> int? { return x.toInt(); }\n"
+            "fn old<T>(x: T) -> int? { return int(x); }\n");
+  writeFile(dir / "main.pkn", "import ::io;\nimport lib::conv;\n"
+                              "fn main() -> int {\n"
+                              "  io::println(conv::bytes(\"200\"));\n"
+                              "  io::println(conv::bytes(\"+1\"));\n"
+                              "  io::println(conv::bytes(\"256\"));\n"
+                              "  io::println(conv::parsed(\"-12\"));\n"
+                              "  return 0;\n}\n");
+  writeFile(dir / "bad.pkn", "import lib::conv;\n"
+                             "fn main() -> int {\n"
+                             "  o = conv::old(\"5\");\n"
+                             "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  const std::string expected = "200\nNone\nNone\n-12\n";
+  const std::string e1 = "lib/conv.pkn:3:34: error: no specialization of "
+                         "'int' for 'Str': parse a 'Str' with its method "
+                         "'toInt()', which returns 'int?'";
+  const std::string note = "bad.pkn:3:7: note: in instantiation of ";
+  auto checkBad = [&](const std::string &flags) {
+    auto bad = paykan(flags + " --check-only bad.pkn");
+    EXPECT_NE(bad.exitCode, 0) << bad.out;
+    EXPECT_TRUE(contains(bad.out, e1)) << bad.out;
+    EXPECT_TRUE(contains(bad.out, note)) << bad.out;
+  };
+  // From source, without and with the cache (written, then read).
+  for (const char *flags : {"--no-module-cache", "", ""}) {
+    auto r = paykan(std::string(flags) + " main.pkn");
+    EXPECT_EQ(r.exitCode, 0) << flags << "\n" << r.out;
+    EXPECT_EQ(r.out, expected) << flags;
+  }
+  EXPECT_TRUE(fs::exists(dir / ".paykan_cache"));
+  checkBad("--no-module-cache");
+  checkBad("");
+  // From the prebuilt file, its source gone.
+  ASSERT_EQ(paykan("--emit-pkm lib/conv.pkn").exitCode, 0);
+  fs::remove(dir / "lib" / "conv.pkn");
+  fs::remove_all(dir / ".paykan_cache");
+  for (const char *flags : {"--no-module-cache", ""}) {
+    auto r = paykan(std::string(flags) + " --verbose main.pkn");
+    EXPECT_EQ(r.exitCode, 0) << flags << "\n" << r.out;
+    EXPECT_TRUE(contains(r.out, expected)) << flags << "\n" << r.out;
+    EXPECT_TRUE(contains(r.out, "module lib::conv: prebuilt lib/conv.pkm "
+                                "usable"))
+        << r.out;
+  }
+  // And built ahead of time, the module's code from its file.
+  ASSERT_EQ(paykan("build main.pkn -o prog").exitCode, 0);
+  auto built = run((dir / "prog").string());
+  EXPECT_EQ(built.exitCode, 0) << built.out;
+  EXPECT_EQ(built.out, expected);
+  checkBad("--no-module-cache");
+  fs::remove_all(dir);
+}
+
 // The standard library is staged as .pkm files only, each named `::name`
 // (--module-name): a program loads every module of it, generic ones
 // included, from those files.

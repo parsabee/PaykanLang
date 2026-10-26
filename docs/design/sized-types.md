@@ -19,7 +19,7 @@ end each have the default this implementation takes.
 | Float arithmetic | `+ - * /` on `f32` or `f16` are computed in `f64` and rounded to the type's precision after each operation (exact for these operations, as `f64` has enough bits); comparisons are IEEE as for `float` |
 | Mixing | an operation needs both operands of one type; the only promotion is the existing `int` with `float` (to `float`); anything else is spelled with a conversion (`operator '+' is not defined for types 'i32' and 'int' (the operands must have one type: convert one with 'i32(...)' or 'int(...)')`) |
 | Literals | an integer literal (and `-literal`) takes the integer type the context expects when it fits that type (`x: u8 = 255`, `x + 1`, `x == 0`, a `match` arm, an argument, a field, an element, a `T?` slot), an error when it does not (`the literal 256 does not fit in 'u8' (0 to 255)`); a float literal, or an integer literal, takes `f32` or `f16` the same way (an error when its magnitude rounds to infinity); only the literal itself adapts (`100 + 100` is an `int` expression); without a context an integer literal is `int` and a float literal `float` |
-| Conversions | `i8(x)` … `f16(x)`, `unsigned(x)` and `int(x)`, `float(x)` from any numeric type: integer to integer wraps to the width; float to integer truncates toward zero and panics outside the target's range (as `int(x)` does); integer to float rounds to nearest; `Str(x)` prints; `i8(s)` … parse a `Str` to `i8?` …, `None` when the text is not a number of that type |
+| Conversions | `i8(x)` … `f16(x)`, `unsigned(x)` and `int(x)`, `float(x)` from any numeric type: integer to integer wraps to the width; float to integer truncates toward zero and panics outside the target's range (as `int(x)` does); integer to float rounds to nearest; `Str(x)` prints; `s.toI8()` … parse a `Str` to `i8?` …, `None` when the text is not a number of that type |
 | Methods and traits | `toString()` and `hash()` on every numeric type; every numeric type is `Show`, `Hashable` and `ValueType`, as `int` and `float` are |
 | Optionals and match | `i32?`, `u8?`, `f32?` are value optionals like `int?`; `match` on a sized integer compares with literals of its type |
 | Runtime | one new type kind, `PAYKAN_KIND_UINT`, so a `u64` in a struct, tuple or array prints unsigned; `f16` rounding and the unsigned `toString`/parse are runtime functions; the ABI version stays |
@@ -83,8 +83,8 @@ defined for types 'i32' and 'int'`, written `x + i32(y)` or `int(x) + y`.
 ## Conversions
 
 The conversion call `T(x)` takes every numeric type for every numeric `T`,
-with `Str(x)` and the parse `T(s)` from a `Str` (giving `T?`) as for `int`
-and `float`.  Integer to integer keeps the low bits of the two's-complement
+with `Str(x)` as for `int` and `float`; a `Str` is parsed with its method
+`s.toT()` (giving `T?`), not converted.  Integer to integer keeps the low bits of the two's-complement
 value (`u8(300)` is `44`, `i8(200)` is `-56`, `unsigned(-1)` is
 `18446744073709551615`, `int(unsigned(-1))` is `-1`); float to integer
 truncates toward zero and panics when the value is outside the target's
@@ -98,7 +98,7 @@ before.
 `%llu`, and every float with the `%g` form `float` uses.  Str's methods
 parse, each into the optional of its type (`s.toI8()` … `s.toF32()`,
 docs/language/04-strings-and-conversions.md, "Parsing a string"; `i8(s)` …
-are the same parses).  A signed type's parse reads a 64-bit number and
+are errors that name them).  A signed type's parse reads a 64-bit number and
 refuses one outside the type's range.  An unsigned type's reads an unsigned
 64-bit number, which has no sign (`"+1"` and `"-0"` are refused, as
 `unsigned` always refused them), and refuses one outside the type's range.

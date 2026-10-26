@@ -685,6 +685,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traits.  An importer that declared a `trait Named` of its own satisfied
   `lib::greet<T: Named>` with it, whatever the trait's methods.  That is now the #147
   error under Fixed, with a note at the importer's trait.
+- **Breaking:** a primitive type no longer parses a `Str`. `int(s)`, `float(s)`, `bool(s)`,
+  `unsigned(s)`, `i8(s)` … `f32(s)` and their explicit forms (`int<Str>(s)` …) are errors
+  that name the method: `no specialization of 'int' for 'Str': parse a 'Str' with its
+  method 'toInt()', which returns 'int?'`. Migration: `T(s)` and `T<Str>(s)` become
+  `s.toT()` (`int`/`i64`: `toInt`, `unsigned`/`u64`: `toUnsigned`, `float`/`f64`:
+  `toFloat`, `bool`: `toBool`, `u8`: `toU8` …).
 - An `f32` or `f16` from a text with a fraction or an exponent (a literal, or `toF32()` and
   `toF16()`) is documented as the `float` nearest the text rounded to the type, as C's
   `(float)strtod(s)` is. For a text of 13 or more significant digits very close to a point

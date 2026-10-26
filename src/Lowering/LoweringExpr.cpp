@@ -628,13 +628,13 @@ Val ModuleLowering::ExprEmitter::emitBuiltinCall(ast::CallExpr *node) {
 }
 
 // The parse of the string object @p str into the primitive @p target, the
-// core of `s.toInt()` & co. and of the older `int<Str>(s)` & co.: the runtime
-// parses the borrowed string into a local and says whether it is valid; the
-// result is that value as the present `int?` & co., or None.  @p owned, a
-// temporary @p str is part of, is released after the parse.  A sized
-// integer is parsed as a 64-bit one (an unsigned one without a sign) and
-// refused outside its range; a sized float is the runtime's value of the
-// type, refused when finite text rounds to infinity in it.
+// core of `s.toInt()` & co.: the runtime parses the borrowed string into a
+// local and says whether it is valid; the result is that value as the
+// present `int?` & co., or None.  @p owned, a temporary @p str is part of,
+// is released after the parse.  A sized integer is parsed as a 64-bit one
+// (an unsigned one without a sign) and refused outside its range; a sized
+// float is the runtime's value of the type, refused when finite text rounds
+// to infinity in it.
 Val ModuleLowering::ExprEmitter::emitParseOf(const Val &str,
                                              const ExprValue &owned,
                                              ast::BuiltinType::Kind target) {
@@ -683,23 +683,6 @@ Val ModuleLowering::ExprEmitter::emitParseOf(const Val &str,
   return L.B.select(valid, some, none, "parsed.opt");
 }
 
-// `int<Str>(s)`, `float<Str>(s)`, `bool<Str>(s)` and `i8<Str>(s)` & co.: the
-// parse of their argument (emitParseOf), as `s.toInt()` & co. are.
-Val ModuleLowering::ExprEmitter::emitParse(ast::CallExpr *node) {
-  ast::Type *target = nullptr;
-  ast::Type *source = nullptr;
-  if (!L.conversionTypes(node->getCalleeName(), target, source) ||
-      source != L.ASTCtx.getStrTy() || node->getNumArguments() != 1)
-    return Val();
-  const ast::BuiltinType::Kind kind = L.builtinKind(target);
-  if (kind != ast::BuiltinType::Bool && !ast::BuiltinType::isNumericKind(kind))
-    return Val();
-  Receiver str = L.emitReceiver(node->getArguments()[0], "parse.str");
-  if (!str)
-    return Val();
-  return emitParseOf(str.Raw, str.Owned, kind);
-}
-
 bool ModuleLowering::isStrConversion(const std::string &callee) {
   return callee.rfind(std::string(kString) + "<", 0) == 0;
 }
@@ -722,7 +705,7 @@ Val ModuleLowering::ExprEmitter::emitConversion(ast::CallExpr *node) {
   if (!L.conversionTypes(node->getCalleeName(), target, source) ||
       target == L.ASTCtx.getStrTy() || source == L.ASTCtx.getStrTy() ||
       node->getNumArguments() != 1)
-    return Val(); // `Str<T>` is a runtime call, `T<Str>` emitParse
+    return Val(); // `Str<T>` is a runtime call; nothing converts a `Str`
   const BuiltinType::Kind tk = L.builtinKind(target);
   const BuiltinType::Kind sk = L.builtinKind(source);
   Val v = visit(node->getArguments()[0]);
@@ -812,8 +795,6 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
   }
   if (Val conv = emitConversion(node))
     return conv;
-  if (Val parsed = emitParse(node))
-    return parsed;
 
   if (L.IdentityCtors.count(node->getCalleeName()) &&
       node->getNumArguments() == 1)

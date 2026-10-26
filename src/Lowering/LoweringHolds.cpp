@@ -482,8 +482,8 @@ ModuleLowering::BorrowedReads::callExpr(ast::CallExpr *ce, bool place) {
   // `Str(s)` is `s`.
   if (L.IdentityCtors.count(name) && args.size() == 1)
     return eval(args[0], place);
-  // A variant made in place, a conversion or a parse: no call of the
-  // program, each argument used at once.
+  // A variant made in place or a conversion: no call of the program, each
+  // argument used at once.
   ast::Type *target = nullptr;
   ast::Type *source = nullptr;
   if (ce->getVariantEnum() || L.FunctionTable.count(name) ||
@@ -954,8 +954,8 @@ void ModuleLowering::EffectScan::call(ast::CallExpr *ce) {
   const std::string &name = ce->getCalleeName();
   const std::vector<ast::Expr *> &args = ce->getArguments();
   exprs(args);
-  // `Str(s)`, a variant made in place, a conversion or a parse: the
-  // runtime's, given numbers and strings.
+  // `Str(s)`, a variant made in place or a conversion: the runtime's, given
+  // numbers and strings.
   ast::Type *target = nullptr;
   ast::Type *source = nullptr;
   if ((L.IdentityCtors.count(name) && args.size() == 1) || ce->getVariantEnum())

@@ -3,8 +3,8 @@
 // Sema tests: conversion constructors `Target<Source>(value)` (#64, #88) —
 // every specialization of each builtin target and its result type, the
 // closed set (unlisted and custom type arguments), the missing-specialization
-// hint, wrong arity and argument types, and what became of the removed
-// builtins.
+// hint, a parse written as a conversion (a method of `Str` now), wrong arity
+// and argument types, and what became of the removed builtins.
 
 #include "TestUtils.h"
 #include <gtest/gtest.h>
@@ -33,28 +33,17 @@ static void expectError(const std::string &src, const std::string &needle) {
 TEST(Conversion, EveryPairHasItsResultType) {
   // Each declaration states the result type, so a wrong one is an error.
   expectOk(inMain(R"(
-    i: int = 1;  f: float = 1.5;  b: bool = True;  c: char = 'c';  s: Str = "1";
+    i: int = 1;  f: float = 1.5;  b: bool = True;  c: char = 'c';
     s1: Str = Str<int>(i);
     s2: Str = Str<float>(f);
     s3: Str = Str<bool>(b);
     s4: Str = Str<char>(c);
-    p1: int? = int<Str>(s);
-    p2: float? = float<Str>(s);
     n1: int = int<float>(f);
     n2: float = float<int>(i);
     n3: int = int<bool>(b);
     n4: bool = bool<int>(i);
     n5: int = int<char>(c);
     n6: char = char<int>(i);
-    q1: bool? = bool<Str>(s);
-  )"));
-}
-
-TEST(Conversion, BoolParseReturnsAnOptional) {
-  expectError(inMain("x: bool = bool<Str>(\"True\");"),
-              "cannot use optional 'bool?' as 'bool' without unwrapping");
-  expectOk(inMain(R"(
-    match bool<Str>("True") { b: bool { c: bool = !b; } None { } }
   )"));
 }
 
@@ -70,24 +59,99 @@ TEST(Conversion, BoxedPrimitiveClassesAreGone) {
               "source type of conversion 'Str' has unknown class type 'Char'");
 }
 
-TEST(Conversion, ParsesReturnOptionals) {
-  expectError(inMain("n: int = int<Str>(\"1\");"),
-              "cannot use optional 'int?' as 'int' without unwrapping");
-  expectError(inMain("f: float = float<Str>(\"1\");"),
-              "cannot use optional 'float?' as 'float' without unwrapping");
-  expectOk(inMain(R"(
-    match int<Str>("12") { n: int { x: int = n; } None { } }
-    if float<Str>("x") == None { }
-  )"));
-}
-
 TEST(Conversion, InferredDeclarationsTakeTheResultType) {
   expectOk(inMain(R"(
     a = int<float>(2.5);
     b: int = a + 1;
-    c = int<Str>("4");
-    d: int? = c;
+    c = bool<int>(b);
+    d: bool = c;
   )"));
+}
+
+// ─── a parse is a method of Str (docs/language/04-strings-and-conversions.md,
+// ─── "Parsing a string")
+
+/// The one error of @p body, whose text is @p message (the whole line after
+/// `error: `).
+static void expectOneError(const std::string &body,
+                           const std::string &message) {
+  auto r = semaCheck(inMain(body));
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("error: " + message + "\n"), std::string::npos)
+      << r.Diagnostics;
+}
+
+TEST(Conversion, APrimitiveDoesNotParseAStr) {
+  const std::string s = "s: Str = \"1\"; ";
+  // The inferred and the explicit form alike name the method.
+  expectOneError(s + "o = int(s);",
+                 "no specialization of 'int' for 'Str': parse a 'Str' with its "
+                 "method 'toInt()', which returns 'int?'");
+  expectOneError(s + "o = int<Str>(s);",
+                 "no specialization of 'int' for 'Str': parse a 'Str' with its "
+                 "method 'toInt()', which returns 'int?'");
+  expectOneError(s + "o = i64(s);",
+                 "no specialization of 'int' for 'Str': parse a 'Str' with its "
+                 "method 'toInt()', which returns 'int?'");
+  expectOneError(s + "o = float(s);",
+                 "no specialization of 'float' for 'Str': parse a 'Str' with "
+                 "its method 'toFloat()', which returns 'float?'");
+  expectOneError(s + "o = f64<Str>(s);",
+                 "no specialization of 'float' for 'Str': parse a 'Str' with "
+                 "its method 'toFloat()', which returns 'float?'");
+  expectOneError(s + "o = bool(s);",
+                 "no specialization of 'bool' for 'Str': parse a 'Str' with "
+                 "its method 'toBool()', which returns 'bool?'");
+  expectOneError(s + "o = bool<Str>(\"True\");",
+                 "no specialization of 'bool' for 'Str': parse a 'Str' with "
+                 "its method 'toBool()', which returns 'bool?'");
+  // The explicit form names the source: an argument of another type is not
+  // a second error.
+  expectOneError("o = int<Str>(12);",
+                 "no specialization of 'int' for 'Str': parse a 'Str' with its "
+                 "method 'toInt()', which returns 'int?'");
+  // `char` has no parse: the ordinary error, with its list.
+  expectOneError(s + "o = char(s);",
+                 "no specialization of 'char' for 'Str'; its specializations "
+                 "are int");
+  expectOneError("o = char<Str>(\"a\");",
+                 "no specialization of 'char' for 'Str'; its specializations "
+                 "are int");
+  // An optional string is no `Str`: the ordinary error.
+  expectOneError("s: Str? = \"1\"; o = int(s);",
+                 "no specialization of 'int' for 'Str?'; its specializations "
+                 "are float, bool, char, i8, i16, i32, u8, u16, u32, unsigned, "
+                 "f16, f32");
+}
+
+// A program written for the older parse gets one error at each of its old
+// parses, and none from what surrounds it.
+TEST(Conversion, AParseWrittenAsAConversionIsOneError) {
+  const std::string e1 = "no specialization of 'int' for 'Str': parse a 'Str' "
+                         "with its method 'toInt()', which returns 'int?'";
+  expectOneError("n: int = int(\"1\");", e1);
+  expectOneError("s = \"7\"; m: int? = int(s);", e1);
+  expectOneError(R"(
+    s = "7";
+    match int(s) { n: int { m: int = n + 1; } None { } }
+  )",
+                 e1);
+  expectOneError(R"(
+    s = "7";
+    o = int<Str>(s);
+    if o == None { }
+    io::println(o);
+  )",
+                 e1);
+  expectOneError("t: Str = Str(int(\"1\")) + \"x\";", e1);
+  expectOneError("x = int(\"1\") + 1;", e1);
+  // Each old parse is its own error.
+  auto r = semaCheck(inMain("a = int(\"1\"); b = float<Str>(\"2\");"));
+  EXPECT_NE(r.Diagnostics.find("method 'toInt()'"), std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("method 'toFloat()'"), std::string::npos)
+      << r.Diagnostics;
 }
 
 // ─── unsupported pairs ──────────────────────────────────────────────────────
@@ -95,19 +159,19 @@ TEST(Conversion, InferredDeclarationsTakeTheResultType) {
 TEST(Conversion, UnlistedTypeArgumentsNameTheClosedSet) {
   expectError(inMain("x = int<int>(1);"),
               "no specialization of 'int' for 'int'; its specializations "
-              "are Str, float, bool, char");
+              "are float, bool, char");
   expectError(inMain("x = Str<Str>(\"a\");"),
               "no specialization of 'Str' for 'Str'; its specializations "
               "are int, float, bool, char");
   expectError(inMain("x = bool<float>(1.5);"),
               "no specialization of 'bool' for 'float'; its specializations "
-              "are int, Str");
+              "are int\n");
   expectError(inMain("x = char<Str>(\"a\");"),
               "no specialization of 'char' for 'Str'; its specializations "
               "are int");
   expectError(inMain("x = float<bool>(True);"),
               "no specialization of 'float' for 'bool'; its specializations "
-              "are Str, int");
+              "are int, i8");
   expectError(inMain("x = Str<Obj>(\"a\");"),
               "no specialization of 'Str' for 'Obj'");
   expectError(inMain("o: int? = 1;\n x = Str<int?>(o);"),
@@ -126,7 +190,7 @@ TEST(Conversion, CustomTypesAreNeverSpecializations) {
               "are int, float, bool, char");
   expectError(point + "fn main() -> int { x = int<Point>(Point()); return 0; }",
               "no specialization of 'int' for 'Point'; its specializations "
-              "are Str, float, bool, char");
+              "are float, bool, char");
   expectError("enum Color { Red }\n"
               "fn main() -> int { x = Str<Color>(Color::Red); return 0; }",
               "no specialization of 'Str' for 'Color'");
@@ -155,8 +219,8 @@ TEST(Conversion, ArgumentMustHaveExactlyTheSourceType) {
               "argument of 'float<int>' has type 'float', expected 'int'");
   expectError(inMain("x = Str<char>(\"c\");"),
               "argument of 'Str<char>' has type 'Str', expected 'char'");
-  expectError(inMain("x = int<Str>(12);"),
-              "argument of 'int<Str>' has type 'int', expected 'Str'");
+  expectError(inMain("x = bool<int>(1.5);"),
+              "argument of 'bool<int>' has type 'float', expected 'int'");
   // An optional must be unwrapped first.
   expectError(inMain("o: int? = 1;\n x = Str<int>(o);"),
               "cannot use optional 'int?' as 'int' without unwrapping");
@@ -167,14 +231,11 @@ TEST(Conversion, ArgumentMustHaveExactlyTheSourceType) {
 TEST(Conversion, InferredFormPicksEveryPair) {
   // Each declaration states the result type, so a wrong pick is an error.
   expectOk(inMain(R"(
-    i: int = 1;  f: float = 1.5;  b: bool = True;  c: char = 'c';  s: Str = "1";
+    i: int = 1;  f: float = 1.5;  b: bool = True;  c: char = 'c';
     s1: Str = Str(i);
     s2: Str = Str(f);
     s3: Str = Str(b);
     s4: Str = Str(c);
-    p1: int? = int(s);
-    p2: float? = float(s);
-    q1: bool? = bool(s);
     n1: int = int(f);
     n2: float = float(i);
     n3: int = int(b);
@@ -191,24 +252,20 @@ TEST(Conversion, InferredFormTakesLiterals) {
     f: float = float(3);
     c: char = char(97);
     b: bool = bool(0);
-    p: int? = int("12");
-    q: bool? = bool("True");
   )"));
 }
 
 TEST(Conversion, InferredFormIsTheExplicitOne) {
-  // The same result types (and so the same optionals to unwrap).
-  expectError(inMain("n: int = int(\"1\");"),
-              "cannot use optional 'int?' as 'int' without unwrapping");
-  expectError(inMain("x: float? = int(\"1\");"),
-              "initializer of type 'int?' does not match declared type "
-              "'float?'");
+  // The same result types.
+  expectError(inMain("n: bool = int(2.5);"),
+              "initializer of type 'int' does not match declared type 'bool'");
+  expectError(inMain("x: int? = bool(1);"),
+              "initializer of type 'bool' does not match declared type 'int?'");
   expectOk(inMain(R"(
     a = int(2.5);
     b: int = a + 1;
     s = Str(b);
     t: Str = s;
-    match int("4") { n: int { m: int = n; } None { } }
   )"));
 }
 
@@ -216,19 +273,19 @@ TEST(Conversion, InferredFormNeedsAnExactSource) {
   // No widening and no unwrapping: the argument's own type must be a source.
   expectError(inMain("x = float(2.5);"),
               "no specialization of 'float' for 'float'; its specializations "
-              "are Str, int");
+              "are int, i8");
   expectError(inMain("x = char('a');"),
               "no specialization of 'char' for 'char'; its specializations "
               "are int");
   expectError(inMain("x = bool(1.5);"),
               "no specialization of 'bool' for 'float'; its specializations "
-              "are int, Str");
+              "are int\n");
   expectError(inMain("o: int? = 1;\n x = Str(o);"),
               "no specialization of 'Str' for 'int?'; its specializations "
               "are int, float, bool, char");
-  expectError(inMain("x = int(int(\"1\"));"),
+  expectError(inMain("o: int? = 1;\n x = int(o);"),
               "no specialization of 'int' for 'int?'; its specializations "
-              "are Str, float, bool, char");
+              "are float, bool, char");
 }
 
 TEST(Conversion, InferredFormRejectsEveryOtherType) {
@@ -254,11 +311,11 @@ TEST(Conversion, InferredFormRejectsEveryOtherType) {
               "no specialization of 'Str' for 'int[1]'" + strSet);
   expectError(prog("a = A(); n = int(a);"),
               "no specialization of 'int' for 'A'; its specializations are "
-              "Str, float, bool, char, i8, i16, i32, u8, u16, u32, unsigned, "
-              "f16, f32");
+              "float, bool, char, i8, i16, i32, u8, u16, u32, unsigned, f16, "
+              "f32");
   expectError(prog("n = float(None);"),
               "no specialization of 'float' for 'Obj'; its specializations are "
-              "Str, int, i8, i16, i32, u8, u16, u32, unsigned, f16, f32");
+              "int, i8, i16, i32, u8, u16, u32, unsigned, f16, f32");
 }
 
 TEST(Conversion, InferredFormTakesExactlyOneArgument) {

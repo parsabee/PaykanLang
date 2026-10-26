@@ -2,10 +2,10 @@
 // position is a Str object built from it (like `s = "x"`), never its raw C
 // string, and is released like any other string temporary.
 // Exercises: subscripting a literal (`"ab"[1]`, also as a match subject and a
-// conversion argument), a method call on a literal (`"abc".len()`), a
-// literal in every value position (binding, typed binding, argument, return
-// value, concatenation operand, field, tuple / array / optional element).  Run with --track-heap:
-// zero live blocks.
+// conversion argument), a method call on a literal (`"abc".len()`,
+// `"42".toInt()`), a literal in every value position (binding, typed
+// binding, argument, return value, concatenation operand, field, tuple /
+// array / optional element).  Run with --track-heap: zero live blocks.
 
 import ::io;
 
@@ -24,7 +24,7 @@ import ::io;
 // expect-stdout: tuple:       tup m1m2
 // expect-stdout: array:       zyw q
 // expect-stdout: optional:    opt opt2
-// expect-stdout: int<Str>:    42
+// expect-stdout: toInt():     42
 
 class Tagged {
   name: Str;
@@ -107,7 +107,7 @@ fn main() -> int {
       io::println("optional:    none");
     }
   }
-  io::print("int<Str>:    ");
+  io::print("toInt():     ");
   io::println("42".toInt());
   return 0;
 }

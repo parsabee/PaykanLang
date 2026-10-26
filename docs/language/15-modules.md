@@ -165,7 +165,8 @@ report and `::result` the results they return; `::collections` has lists, linked
 priority queues; `::math` has the mathematical functions (`math::sqrt`, `math::pi()`, …);
 and `::memory` has `Buffer<T>` and `Box<T>`. Printing is `::io`, so a program that prints
 imports it (`import ::io;`, then `io::println(...)`). Only the builtins (`Obj`, `Str` and
-the conversions such as `Str(n)` and `int(s)`, the primitive types) need no import.
+its methods such as `s.toInt()`, the conversions such as `Str(n)` and `int(f)`, the
+primitive types) need no import.
 
 ## What Can Be Imported
 
@@ -466,7 +467,7 @@ fn run(tasks: tl::TaskList, line: Str) {
       if !tasks.add(title, task::parsePriority(priority)) { io::println("the list is full"); }
     }
     "done" {
-      match int(rest) {
+      match rest.toInt() {
         n: int { if !tasks.complete(n) { io::println("no task " + rest); } }
         None   { io::println("not a task number: " + rest); }
       }
