@@ -985,6 +985,11 @@ int main(int argc, char *argv[]) {
   std::map<std::string, paykan::backend::ModuleObject> compiled;
   // What the PIR passes do, to the modules' code and to the program's.
   paykan::pir::Statistics stats;
+  // The C of --emit-c is linked with the compiled code of each module file
+  // --list-modules names: a module whose cache entry could not be written
+  // has none, so its code stays in the program, as under --no-module-cache.
+  const bool linksModuleFiles =
+      (opts.EmitSource && opts.EmitStage == "c") || opts.ListModules;
   for (const std::string &name : resolver.cacheable()) {
     // An import: the main module, first, is never cached (a program's
     // knows what no module that may be imported may know).
@@ -1004,7 +1009,8 @@ int main(int argc, char *argv[]) {
     if (code.Object)
       object = toPkm(*code.Object);
     resolver.writeCacheEntry(name, code.Code, object ? &*object : nullptr);
-    if (code.Object && paykan::modules::providesFor(code.Code, program)) {
+    if (code.Object && paykan::modules::providesFor(code.Code, program) &&
+        (!linksModuleFiles || !resolver.moduleFile(name).empty())) {
       *mod = std::move(code.Code);
       compiled[name] = std::move(*code.Object);
     }
@@ -1096,18 +1102,10 @@ int main(int argc, char *argv[]) {
     in.Compiled[name] = &o;
   if (opts.ListModules) {
     // The files the C of --emit-c needs as objects: it declares the
-    // functions of these modules (docs/c-backend.md).
-    std::vector<std::string> files;
-    for (const auto &[name, o] : compiled) {
-      std::string file = resolver.moduleFile(name);
-      if (file.empty())
-        return fail("the compiled code of module '" + name +
-                    "' is in no module file: its cache entry could not be "
-                    "written");
-      files.push_back(std::move(file));
-    }
-    for (const std::string &file : files)
-      std::cout << file << "\n";
+    // functions of these modules (docs/c-backend.md).  Each compiled module
+    // has one (linksModuleFiles above).
+    for (const auto &[name, o] : compiled)
+      std::cout << resolver.moduleFile(name) << "\n";
     return finishStdout(EXIT_SUCCESS);
   }
 

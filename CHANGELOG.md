@@ -1129,6 +1129,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     such file or directory`).  `build` now checks its executable before it compiles
     anything and says so as the other writers do: `cannot write 'nodir/hello': the
     directory 'nodir' does not exist`, `cannot write 'adir': Is a directory`.
+  - `--emit-c` exited 0 with C that could not be linked when an import built from source
+    could not get its cache entry (a read-only directory, `.paykan_cache` a file): the C
+    declared the module's compiled functions and defined them nowhere (`undefined
+    reference to pk_lib_3A_3Ax_Sv`), since that code was in no module file, and
+    `--list-modules` failed for it.  Such a module's code now stays in the C, as under
+    `--no-module-cache`, and `--list-modules` names the module files the C does need
+    (docs/c-backend.md).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

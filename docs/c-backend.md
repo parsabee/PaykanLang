@@ -33,8 +33,11 @@ names those module files, one per line: the standard library's, the cache
 entries of the imports built from source (under `.paykan_cache` in the
 program's directory, which `--emit-c` writes) and those of the prebuilt
 modules it found (next to the source, in a `--module-path` directory or in
-`$PAYKAN_MODULE_PATH`).  Give it the options `--emit-c` was given.  To
-build the C:
+`$PAYKAN_MODULE_PATH`).  Give it the options `--emit-c` was given.  An import
+built from source whose cache entry cannot be written (the directory is
+read-only, or `.paykan_cache` is a file) has no module file: its code is in
+the C, as that of every import built from source is under
+`--no-module-cache`, and `--list-modules` does not name it.  To build the C:
 
 ```sh
 paykan --emit-c prog.pkn > prog.c

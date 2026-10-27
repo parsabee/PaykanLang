@@ -3955,6 +3955,37 @@ TEST(Driver, ListModulesNamesEveryModuleFileTheProgramLinks) {
   std::filesystem::remove_all(dir);
 }
 
+// An import built from source whose cache entry cannot be written has no
+// module file to link the C of --emit-c with, so its code stays in the C, as
+// under --no-module-cache (SW-23): with `.paykan_cache` a file, the C called
+// `pk_lib_3A_3Ax_Sv` and defined it nowhere, and the build recipe had no
+// object for it (`--list-modules` failed).
+TEST(Driver, EmitCKeepsAnImportWhoseCacheEntryCannotBeWritten) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("emitc_nocache");
+  std::filesystem::create_directories(dir / "lib");
+  std::ofstream(dir / "lib" / "x.pkn") << "fn v() -> int { return 7; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io;\nimport lib::x;\n"
+         "fn main() -> int { io::println(Str(x::v())); return 0; }\n";
+  std::ofstream(dir / ".paykan_cache") << "not a directory\n";
+  CPath c(dir);
+  auto built =
+      c.build((dir / "main.pkn").string(), "-O0", (dir / "main").string());
+  ASSERT_EQ(built.exitCode, 0) << built.out;
+  auto ran = run(shellWord((dir / "main").string()) + " 2>&1");
+  EXPECT_EQ(ran.exitCode, 0) << ran.out;
+  EXPECT_EQ(ran.out, "7\n");
+  // The standard library's file only: lib::x is in the C.
+  auto list = run("cd " + dir.string() + " && " + kPaykan +
+                  " --list-modules main.pkn 2>&1");
+  EXPECT_EQ(list.exitCode, 0) << list.out;
+  EXPECT_NE(list.out.find("/io.pkm\n"), std::string::npos) << list.out;
+  EXPECT_EQ(list.out.find("x.pkm"), std::string::npos) << list.out;
+  EXPECT_TRUE(std::filesystem::is_regular_file(dir / ".paykan_cache"));
+  std::filesystem::remove_all(dir);
+}
+
 // A module file names the frontend that parsed its source with its version,
 // this paykan's for the built-in one (finding 103: the version was always
 // empty), in a cache entry and in an --emit-pkm file alike.
