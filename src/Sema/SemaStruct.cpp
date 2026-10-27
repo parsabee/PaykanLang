@@ -351,9 +351,8 @@ bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st) {
   return ok;
 }
 
-bool Sema::declareDefaultInit(ast::StructDecl *sd, ast::StructType *st) {
+ast::FuncDecl *Sema::defaultInit(ast::StructType *st, ast::SourceLocation loc) {
   // `fn __init__(x: int, y: int) { self.x = x; self.y = y; }`
-  const ast::SourceLocation loc = sd->getLocation();
   std::vector<ast::Param> params;
   std::vector<ast::Stmt *> body;
   for (size_t i = 0; i < st->getNumFields(); ++i) {
@@ -364,9 +363,13 @@ bool Sema::declareDefaultInit(ast::StructDecl *sd, ast::StructType *st) {
         loc, Ctx.make<ast::Identifier>(loc, Ctx.intern(names::kSelf)), interned,
         Ctx.make<ast::Identifier>(loc, interned)));
   }
-  auto *fn = Ctx.make<ast::FuncDecl>(
+  return Ctx.make<ast::FuncDecl>(
       loc, Ctx.intern(names::kMethodInit), std::move(params), nullptr,
       Ctx.make<ast::CompoundStmt>(loc, std::move(body)));
+}
+
+bool Sema::declareDefaultInit(ast::StructDecl *sd, ast::StructType *st) {
+  ast::FuncDecl *fn = defaultInit(st, sd->getLocation());
   bool ok = true;
   DeclaringDefaultInit = true; // its parameters are the fields, checked
   auto *md = declareMethod(fn, st, nullptr, ast::MethodDecl::None, ok);
@@ -478,7 +481,10 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
           FunctionTable[instName].Modes = init->getParamModes();
       }
       StructInstantiationInfos[existing] = StructInstantiationInfo{tmpl, args};
-      return StructInstantiations[instName] = existing;
+      StructInstantiations[instName] = existing;
+      // Its methods are compiled there; what they do is read from a copy.
+      copyImportedInstance(existing, loc);
+      return existing;
     }
     error(loc, "instantiation '" + instName +
                    "' conflicts with an imported struct of the same name "

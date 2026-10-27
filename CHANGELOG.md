@@ -460,7 +460,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a virtual call on one of its classes does what the implementations it may run do
   (`shapes[i].area()` of a `view Shape[]`, the `equals` of a map's `Point` keys), and an
   object of one that dies lets go of what their fields hold (a `Dog` holding a string).  A
-  class of another module, and a method it compiles, stay unknown.  A field no code stores
+  class of another module, and a method it compiles, stay unknown, but for the methods of an
+  instantiation an imported module's interface gives (the `List<Str>` of
+  `collections::split`, its `Buffer<Str>`), which an importer uses as that module's copy:
+  Sema checks a copy of each from its template, in the module's `TMPL`, and the lowering
+  reads what they do from it as from its own copies (docs/design/pkm.md §4.8), so a
+  `MinPriorityQueue<Str>`'s `pop` holds nothing, as when the program makes `Buffer<Str>`
+  itself.  A field no code stores
   into once its object is made (only `self.f = v` in an `__init__`, where `self` is always
   the new object (*Fixed*), and no assignment, `inout` argument, local or `match` arm,
   `-> inout` result or lambda anywhere else) keeps what its `__init__` gave it, so a read of
@@ -816,10 +822,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-O` before, so `run -O0` and `run -O1` now generate less optimised code than they did,
   `run -O3` more optimised code, and `run -O2` the same.  The samples print the same at
   `run -O1` and `run -O3` as at `run -O2`, with the same heap statistics.
-- A `MinPriorityQueue<Str>`'s `pop` holds the queue's state, a retain and a release around
-  the call (one of `Str?` elements holds nothing): `::collections` now makes `List<Str>`
-  and its `Buffer<Str>` for its string functions, and a program uses that module's copies,
-  whose bodies the lowering does not see.
 
 ### Removed
 

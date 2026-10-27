@@ -699,8 +699,7 @@ bool Sema::doesNothing(const ast::ClassType *ct) const {
   return true;
 }
 
-bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
-  const ast::SourceLocation loc = cd->getLocation();
+ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
   StringSet used;
   for (auto &[name, _] : ct->getFields())
     used.insert(name);
@@ -743,9 +742,13 @@ bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
         Ctx.make<ast::Identifier>(loc, interned)));
   }
 
-  auto *fn = Ctx.make<ast::FuncDecl>(
+  return Ctx.make<ast::FuncDecl>(
       loc, Ctx.intern(names::kMethodInit), std::move(params), nullptr,
       Ctx.make<ast::CompoundStmt>(loc, std::move(body)));
+}
+
+bool Sema::declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct) {
+  ast::FuncDecl *fn = defaultInit(ct, cd->getLocation());
   bool ok = true;
   DeclaringDefaultInit = true; // its parameters are the fields, checked
   auto *md = declareMethod(fn, ct, nullptr, ast::MethodDecl::None, ok);
@@ -1633,7 +1636,10 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
           FunctionTable[instName].Modes = init->getParamModes();
       }
       ClassInstantiationInfo[existing] = InstantiationInfo{tmpl, args};
-      return ClassInstantiations[instName] = existing;
+      ClassInstantiations[instName] = existing;
+      // Its methods are compiled there; what they do is read from a copy.
+      copyImportedInstance(existing, loc);
+      return existing;
     }
     error(loc, "instantiation '" + instName +
                    "' conflicts with an imported class of the same name "

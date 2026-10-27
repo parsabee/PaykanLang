@@ -861,8 +861,13 @@ CodeGen enforced, now in one place.
   What a call given more may let go of is read from the code it runs, when
   the module lowers it (its own functions, a struct's method, a class's
   `impl` method, a virtual method of an exact class or, in the main module
-  of a program, of one of its classes, an instantiation it emits): the
-  classes of the slots whose references it may let go of, or "not known".  A slot loses its reference only when it is stored into, or
+  of a program, of one of its classes, an instantiation it emits) or has
+  its template (a method of an instantiation an imported module's
+  interface gives, the `List<Str>` of `collections::split`, whose code
+  that module compiles and the program links: Sema checks a copy of it
+  from the template, docs/design/pkm.md §4.8): the classes of the slots
+  whose references it may let go of, or "not known".  A slot loses its
+  reference only when it is stored into, or
   when what holds it dies, so the classes are those of the slots the code
   stores into outside its own variables (a field, an element, an `inout`
   parameter or local, a `match` arm's `n: inout T`, a struct method's
@@ -885,14 +890,14 @@ CodeGen enforced, now in one place.
   it and passes it only to Buffer functions (`memory::Buffer<T>.__data`)
   holds a buffer, whose death lets go of its values.  Anything else is
   "not known": a function another module compiles (its code is not read
-  here), a method a subclass the module does not know may override, a
-  call through a function value, any other native function given storage
-  to change, a recursion through another function (one calling itself is
-  read as the rest of its body), and any construct the reading does not
-  recognize.  What else such code releases is its own: a variable's or a
-  temporary's reference to an object its caller's storage still holds, or
-  to one it made, and with no variables at module level it reaches
-  nothing else.
+  here) but such a method, a method a subclass the module does not know
+  may override, a call through a function value, any other native
+  function given storage to change, a recursion through another function
+  (one calling itself is read as the rest of its body), and any construct
+  the reading does not recognize.  What else such code releases is its
+  own: a variable's or a temporary's reference to an object its caller's
+  storage still holds, or to one it made, and with no variables at module
+  level it reaches nothing else.
 
   The main module of a program to run or build (`run`, `build`,
   `--emit-pir`, `--emit-c`; not a module `--emit-pkm` writes, which a

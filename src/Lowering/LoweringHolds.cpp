@@ -1454,6 +1454,36 @@ const ast::FuncDecl *ModuleLowering::bodyOf(const std::string &name) const {
   return it == Bodies.end() ? nullptr : it->second;
 }
 
+// An instantiation an import exports (the `List<Str>` of `collections::
+// split`) is that module's copy, which the program links, compiled there.
+// Its methods are its template's bodies with its type arguments, and Sema
+// checked a copy of each from the template (docs/design/pkm.md §4.8): what
+// a call of one does is read from them, as from this module's own copies,
+// which are the same code.  A program that instantiates the template itself
+// reads its own copy instead.
+void ModuleLowering::readImportedCopies() {
+  auto read = [&](const ast::FuncDecl *fn, const std::string &type,
+                  ast::Type *owner) {
+    Bodies[type + names::kNameSep + fn->getName()] = fn;
+    BodyOwners[fn] = owner;
+  };
+  for (const ast::StructDecl *sd : SemaCtx.ImportedInstanceStructs) {
+    ast::StructType *st = ASTCtx.lookupStructType(sd->getName());
+    for (const ast::FuncDecl *fn : sd->getMethods())
+      if (st->findMethod(fn->getName()))
+        read(fn, sd->getName(), st);
+    ImportedCopies.insert(sd->getName());
+  }
+  for (const ast::ClassDecl *cd : SemaCtx.ImportedInstanceClasses) {
+    ast::ClassType *ct = ASTCtx.lookupClassType(cd->getName());
+    for (const ast::FuncDecl *fn : cd->getMethods())
+      if (fn->getName() != names::kMethodDestroy &&
+          ct->findMethod(fn->getName()))
+        read(fn, cd->getName(), ct);
+    ImportedCopies.insert(cd->getName());
+  }
+}
+
 const ModuleLowering::Effect &
 ModuleLowering::effectOf(const ast::FuncDecl *fn) {
   static const Effect kUnknown = Effect::unknown();
@@ -1643,7 +1673,7 @@ ModuleLowering::Effect ModuleLowering::methodEffect(ast::ClassType *ct,
       e = implementation(c, fn);
       break;
     }
-    if (!OwnTypes.count(c->getName()))
+    if (!OwnTypes.count(c->getName()) && !ImportedCopies.count(c->getName()))
       break; // another module's class, compiled there
   }
   if (auto sub = Subclasses.find(ct); sub != Subclasses.end())

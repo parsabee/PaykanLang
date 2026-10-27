@@ -1553,6 +1553,164 @@ bool Sema::injectTemplates(const ModuleInfo &info, const std::string &qualifier,
   return ok;
 }
 
+// -- Copies of the instantiations imported modules export
+//
+// A module's interface gives the instantiations of templates it names (the
+// `List<Str>` `collections::split` returns), and an importer uses that
+// module's copy, which the program links, rather than making its own.  Its
+// methods are compiled there, but each is its template's body with the
+// instantiation's type arguments: an importer that sees the template (in
+// that module's TMPL) checks a copy where its own code would have made its
+// own instantiation, for the lowering to read what the methods do
+// (LoweringHolds.cpp), the same for the module's copy as for its own.
+// Nothing of the copy is lowered or exported.
+
+void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
+  auto *st = ast::dyn_cast<ast::StructType>(type);
+  auto *ct = ast::dyn_cast<ast::ClassType>(type);
+  if (!st && !ct)
+    return;
+  const std::string &name = st ? st->getName() : ct->getName();
+  if (name.find('<') == std::string::npos || !ImportedTypeOrigins.count(name) ||
+      !CopiedInstances.insert(name).second)
+    return;
+  // This module's own instantiation of another module's template is its
+  // copy, lowered here.
+  auto named = [&](const auto *decl) { return decl->getName() == name; };
+  if (std::any_of(ForeignInstantiatedStructDecls.begin(),
+                  ForeignInstantiatedStructDecls.end(), named) ||
+      std::any_of(ForeignInstantiatedClassDecls.begin(),
+                  ForeignInstantiatedClassDecls.end(), named))
+    return;
+  const ast::StructDecl *structTmpl = nullptr;
+  const ast::ClassDecl *classTmpl = nullptr;
+  std::vector<ast::Type *> args;
+  if (const StructInstantiationInfo *info =
+          st ? structInstantiationInfo(st) : nullptr) {
+    structTmpl = info->Template;
+    args = info->Args;
+  } else if (const InstantiationInfo *info =
+                 ct ? instantiationInfo(ct) : nullptr) {
+    classTmpl = info->Template;
+    args = info->Args;
+  }
+  const ast::Decl *tmpl =
+      structTmpl ? static_cast<const ast::Decl *>(structTmpl) : classTmpl;
+  const ModuleTemplates *origin = tmpl ? foreignOrigin(tmpl) : nullptr;
+  if (!origin)
+    return;
+  const std::vector<const std::string *> &params =
+      structTmpl ? structTmpl->getTypeParams() : classTmpl->getTypeParams();
+  Subst subst;
+  for (size_t i = 0; i < args.size(); ++i)
+    subst[*params[i]] = args[i];
+  ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, /*foreign=*/true);
+  PendingInstantiation pending;
+  if (structTmpl)
+    pending.Struct =
+        cloner.cloneStructDecl(const_cast<ast::StructDecl *>(structTmpl), name);
+  else
+    pending.Class =
+        cloner.cloneClassDecl(const_cast<ast::ClassDecl *>(classTmpl), name);
+  std::vector<ast::FuncDecl *> methods = pending.Struct
+                                             ? pending.Struct->getMethods()
+                                             : pending.Class->getMethods();
+  const size_t cloned = methods.size();
+  const InstantiationFrame request = frameAt(name, loc);
+  InstantiationStack.push_back(request);
+  bool ok;
+  {
+    OriginSource inOrigin(*this, origin);
+    ok = copiedMethods(tmpl, args, type, methods);
+  }
+  InstantiationStack.pop_back();
+  if (!ok)
+    return;
+  for (size_t i = cloned; i < methods.size(); ++i) {
+    if (pending.Struct)
+      pending.Struct->addMethod(methods[i]);
+    else
+      pending.Class->addMethod(methods[i]);
+  }
+  if (pending.Struct)
+    ImportedInstanceStructDecls.push_back(pending.Struct);
+  else
+    ImportedInstanceClassDecls.push_back(pending.Class);
+  pending.Name = name;
+  pending.Depth = instantiationDepth() + 1;
+  pending.RequestLoc = loc;
+  pending.Origin = origin;
+  pending.RequestFile = request.File;
+  pending.RequestLines = request.Lines;
+  for (const std::string *p : params)
+    pending.TypeParams.insert(*p);
+  PendingInstantiations.push_back(std::move(pending));
+  // What letting go of one lets go of is read from what its fields hold.
+  if (st)
+    for (size_t i = 0; i < st->getNumFields(); ++i)
+      copyImportedParts(st->getElementType(i), loc);
+  for (ast::ClassType *c = ct; c && !c->isBuiltin(); c = c->getSuperClass())
+    for (const auto &[field, fieldTy] : c->getFields())
+      copyImportedParts(fieldTy, loc);
+}
+
+void Sema::copyImportedParts(ast::Type *type, ast::SourceLocation loc) {
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(type))
+    return copyImportedParts(ot->getInnerType(), loc);
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(type))
+    return copyImportedParts(ft->getElementType(), loc);
+  if (auto *et = ast::dyn_cast<ast::EnumType>(type)) {
+    for (size_t i = 0; i < et->getNumVariants(); ++i)
+      if (ast::StructType *p = et->getPayload(i))
+        for (size_t j = 0; j < p->getNumFields(); ++j)
+          copyImportedParts(p->getElementType(j), loc);
+    return;
+  }
+  if (ast::isa<ast::StructType>(type) || ast::isa<ast::ClassType>(type))
+    return copyImportedInstance(type, loc);
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(type))
+    for (ast::Type *e : tt->getElementTypes())
+      copyImportedParts(e, loc);
+}
+
+bool Sema::copiedMethods(const ast::Decl *tmpl,
+                         const std::vector<ast::Type *> &args, ast::Type *type,
+                         std::vector<ast::FuncDecl *> &methods) {
+  if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
+    for (ast::ImplDecl *im : it->second) {
+      Subst subst;
+      for (size_t i = 0; i < args.size(); ++i)
+        subst[*im->getTypeParams()[i]] = args[i];
+      ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, /*foreign=*/true);
+      for (ast::FuncDecl *fn :
+           cloner.cloneImplDecl(im, typeName(type))->getMethods())
+        if (!fn->isStatic()) // the module's function `Type::name`
+          methods.push_back(fn);
+    }
+  const bool written =
+      std::any_of(methods.begin(), methods.end(), [](const ast::FuncDecl *fn) {
+        return fn->getName() == names::kMethodInit;
+      });
+  if (!written) {
+    auto *ct = ast::dyn_cast<ast::ClassType>(type);
+    methods.push_back(ct ? defaultInit(ct, tmpl->getLocation())
+                         : defaultInit(ast::cast<ast::StructType>(type),
+                                       tmpl->getLocation()));
+  }
+  bool ok = true;
+  for (ast::FuncDecl *fn : methods) {
+    if (!methodOf(type, fn->getName()))
+      return false;
+    DeclaringDefaultInit = !written && fn == methods.back();
+    const bool declared =
+        declareMethod(fn, type, nullptr, ast::MethodDecl::None, ok) != nullptr;
+    DeclaringDefaultInit = false;
+    if (!declared)
+      return false;
+  }
+  return ok;
+}
+
 // -- processImport
 
 bool Sema::processImport(ast::ImportDecl *node) {

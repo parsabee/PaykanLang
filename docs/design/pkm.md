@@ -737,6 +737,35 @@ without erasure or `INST` (§4.5 stays the plan for erased copies):
   name without its module, so a module's compiled code calls whichever copy
   the program kept. Copies are not merged by the linker: strict C11 has no
   COMDAT (#62).
+- **What an imported instantiation's methods do.** An instantiation an
+  imported module's interface gives (the `List<Str>` of
+  `collections::split`, `IFACE`'s `List<Str> [local from "::collections"]`,
+  and its `Buffer<Str>`) is that module's: an importer uses the type as it
+  is and makes no copy of its own, so the program links the module's.
+  What a call of one of its methods may let go of, which the lowering
+  reads from the code a call runs (docs/pir.md §7, "Reads a call may
+  replace"), is still known: each method is its template's body with the
+  instantiation's type arguments.  Where an importer that sees the
+  template (in the `TMPL` of a module it loaded) would make an
+  instantiation of its own, it checks a copy of the module's: where its
+  code names the type (`Sema::instantiateStruct`, `instantiateClass`) or
+  calls one of its methods, and then for the instantiations the copy's
+  fields hold (`Sema::copyImportedInstance`,
+  `SemaContext::ImportedInstanceClasses` and `ImportedInstanceStructs`).
+  The lowering reads the copy's methods as its own copies' and emits
+  nothing of them.  The copy is the code the module compiled, read with
+  what the importer knows, which is never more than the module knew: a
+  call it makes of the module's own functions stays unknown, as in the
+  importer's own copy.  The format gains nothing: the copy depends only on
+  the templates and the interfaces, whose hashes an importer's entry
+  records (§2.3), so an edit of a template that changes what a method does
+  rebuilds the importers that read it.  (A summary of each method's
+  effect written in the exporting module's `IFACE` would not: that `IFACE`
+  and its hash are taken when Sema reports the module, before it is
+  lowered, and an importer rebuilt against the hash would keep a summary
+  that changed without it.)  An importer that uses none of a module's
+  instantiations checks no copy; one that does checks what it would have
+  instantiated itself.
 - **Caching.** A module with templates, or with copies of another module's
   instantiations, is cached like any other. Its importers record its
   `tmpl_hash` as well as its `iface_hash` (§2.3), so an edit of a template's

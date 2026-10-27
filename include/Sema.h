@@ -78,6 +78,14 @@ struct SemaContext {
   /// as their interfaces say (FunctionSig::Native): what such a call does
   /// is known though another module compiles it.
   StringSet ImportedNatives;
+  /// Copies of the instantiations of other modules' templates that the
+  /// modules this one imports export and its code uses (the `List<Str>` of
+  /// `collections::split`): checked here from their templates, though the
+  /// program links the exporting module's, so that the lowering reads what
+  /// their methods do as it reads its own copies' (docs/design/pkm.md
+  /// §4.8).  Nothing of them is lowered.
+  std::vector<ast::ClassDecl *> ImportedInstanceClasses;
+  std::vector<ast::StructDecl *> ImportedInstanceStructs;
 
   explicit operator bool() const { return Ok; }
 };
@@ -1421,6 +1429,8 @@ private:
   /// superclass constructor's arguments and then one per field of the class,
   /// passes the former to `__super__` and stores each of the latter.
   bool declareDefaultInit(ast::ClassDecl *cd, ast::ClassType *ct);
+  /// That default `__init__` of @p ct, at @p loc, not declared yet.
+  ast::FuncDecl *defaultInit(ast::ClassType *ct, ast::SourceLocation loc);
 
   /// The constructor of @p ct does nothing: it is the default `__init__` of
   /// a class with no fields, and so are its superclasses'.  An `__init__` of
@@ -1478,6 +1488,8 @@ private:
   /// Give @p sd, which declares no `__init__`, the default one: one
   /// parameter per field, in order, stored into the field.
   bool declareDefaultInit(ast::StructDecl *sd, ast::StructType *st);
+  /// That default `__init__` of @p st, at @p loc, not declared yet.
+  ast::FuncDecl *defaultInit(ast::StructType *st, ast::SourceLocation loc);
   /// Register the constructor function `Name(...)`.
   void declareConstructor(ast::StructDecl *sd, ast::StructType *st);
   /// Phase 5: the method bodies, over SortedStructs.
@@ -1882,6 +1894,32 @@ private:
   std::vector<ast::FuncDecl *> ForeignInstantiatedFuncDecls;
   /// See SemaContext::ImportedNatives.
   StringSet ImportedNatives;
+  /// See SemaContext::ImportedInstanceClasses.
+  std::vector<ast::ClassDecl *> ImportedInstanceClassDecls;
+  std::vector<ast::StructDecl *> ImportedInstanceStructDecls;
+  /// The instantiations copyImportedInstance has seen, by name.
+  StringSet CopiedInstances;
+  /// When @p type, which this module's code uses at @p loc, is a class or
+  /// struct an imported module's interface gives as an instantiation of a
+  /// template this module sees (its module's TMPL), copy it and queue the
+  /// copy's bodies (SemaContext::ImportedInstanceClasses), once; and the
+  /// instantiations its fields hold (copyImportedParts).  Its uses are the
+  /// ones that would make a copy of this module's own: a name for the type
+  /// (instantiateClass, instantiateStruct), and a call of its method.
+  void copyImportedInstance(ast::Type *type, ast::SourceLocation loc);
+  /// The same for every class and struct a value of @p type holds in place
+  /// or names: an optional's, an array's, a tuple's, a variant's.
+  void copyImportedParts(ast::Type *type, ast::SourceLocation loc);
+  /// The methods of the copy of the imported instantiation @p type of
+  /// @p tmpl with @p args: @p methods, its class body's (cloned with it),
+  /// then the copies of its template's `impl` blocks' and, when none is an
+  /// `__init__`, its default one, which this appends.  Each signature is
+  /// resolved, as an instantiation's are; the type's own methods are the
+  /// ones the exporting module's interface gave it.  False, after which
+  /// the copy is dropped, when one of them is not the type's.
+  bool copiedMethods(const ast::Decl *tmpl,
+                     const std::vector<ast::Type *> &args, ast::Type *type,
+                     std::vector<ast::FuncDecl *> &methods);
 
   /// Register the templates of the module @p info describes under
   /// @p qualifier and @p fullModulePath, and every module their bodies

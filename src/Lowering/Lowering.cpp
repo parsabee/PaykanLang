@@ -579,6 +579,10 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   for (auto *cls : classes)
     declareClass(cls);
   scanFieldStores(node);
+  // After the scan: the code of another module's instantiation stores into
+  // no field of a class this module declares, as its type arguments are
+  // that module's (readImportedCopies).
+  readImportedCopies();
   for (auto *sd : structs)
     visitStructDecl(sd);
   for (auto *cls : classes)

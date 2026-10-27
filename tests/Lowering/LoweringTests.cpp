@@ -1308,11 +1308,11 @@ TEST(Lowering, AReadACallMayReplaceThroughANarrowedArmIsHeld) {
 // elements' and the nodes' references (a LinkedList's pushFront, a map's
 // put and clear over buffers of entries, a heap's pop) holds no read of it;
 // one over elements a subclass may make hold anything (a class key's map,
-// a stack of closures) holds it.  So does one whose effect the lowering
-// cannot see: `Buffer<Str>` is the copy ::collections makes for its string
-// functions' `List<Str>`, which a program that imports it uses as that
-// module's, without its bodies, so a heap of Str's pop holds its state
-// where a heap of Str?'s does not.
+// a stack of closures) holds it.  `Buffer<Str>` is the copy ::collections
+// makes for its string functions' `List<Str>`, which a program that imports
+// it uses as that module's: what its methods do is read from their
+// template, as for `Buffer<Str?>`, the program's own copy, so a heap of
+// Str's pop holds nothing, as a heap of Str?'s does not.
 TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
   auto l = lower(R"(import ::collections as c;
     class Dog { name: Str; }
@@ -1351,7 +1351,7 @@ TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
            Case{"\"HashMap<Str, int>.clear\"",
                 "call @\"_Table<Str, int>.clear\"(", false},
            Case{"MinPriorityQueue<Str?>.pop", "call @_Heap<Str?>.pop(", false},
-           Case{"MinPriorityQueue<Str>.pop", "call @_Heap<Str>.pop(", true},
+           Case{"MinPriorityQueue<Str>.pop", "call @_Heap<Str>.pop(", false},
            Case{"\"HashMap<Str, Dog>.put\"", "call @\"_Table<Str, Dog>.put\"(",
                 true},
            Case{"\"Stack<() -> int>.push\"",
@@ -1368,6 +1368,60 @@ TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
         << c.Fn << "\n"
         << f;
   }
+}
+
+// The instantiations another module's interface gives (`Cell<Str>` and
+// `Slot<Str>` of samples/imports/23_shared_instances' cells, as
+// ::collections' gives `List<Str>`) are that module's copies, which the
+// program links, and their methods are read from the copies Sema checked of
+// their templates (docs/design/pkm.md §4.8): a read in use across `size`,
+// which lets go of nothing, needs no reference of its own; across `put` and
+// `set`, which store over what was read, it is held.
+TEST(Lowering, ImportedInstantiationsAreReadFromTheirTemplates) {
+  const std::string dir = PAYKAN_SAMPLES_DIR "/imports/23_shared_instances";
+  std::ifstream in(dir + "/main.pkn");
+  std::stringstream source;
+  source << in.rdbuf();
+  auto l = lower(source.str(), dir);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  // The copies are the module's: the program declares them.
+  for (const char *fn : {"Cell<Str>.put", "Slot<Str>.set"})
+    EXPECT_NE(l.Text.find(std::string("extern shared fn @") + fn + "("),
+              std::string::npos)
+        << fn << "\n"
+        << l.Text;
+  struct Case {
+    const char *Fn, *Read, *Call;
+    bool Held;
+  };
+  for (const Case &c : {
+           Case{"reads", ", Cell<Str>.v", "call @Cell<Str>.size(", false},
+           Case{"replaces", ", Cell<Str>.v", "call @Cell<Str>.put(", true},
+           Case{"readsSlot", "ptr.load box, %slot.addr",
+                "call @Slot<Str>.size(", false},
+           Case{"setsSlot", "ptr.load box, %slot.addr", "call @Slot<Str>.set(",
+                true},
+       }) {
+    std::string f = function(l.Text, c.Fn);
+    ASSERT_FALSE(f.empty()) << c.Fn << "\n" << l.Text;
+    EXPECT_EQ(heldAcross(f, defined(f, c.Read), c.Call), c.Held) << c.Fn << "\n"
+                                                                 << f;
+  }
+  // So is the method of one a program never names, called on what an
+  // imported function returns.
+  auto called = lower(R"(import cells;
+    class Box { s: Str; }
+    fn viaCall(b: Box) -> Str {
+      let c = cells::cellOf("x");
+      return b.s + Str(c.size());
+    }
+    fn main() -> int { return viaCall(Box("b")).len(); }
+  )",
+                      dir);
+  ASSERT_TRUE(called.Ok) << called.Error;
+  std::string f = function(called.Text, "viaCall");
+  EXPECT_FALSE(heldAcross(f, defined(f, ", Box.s"), "call @Cell<Str>.size("))
+      << f;
 }
 
 // The main module of a program (World::Closed) knows every class derived

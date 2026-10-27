@@ -1,0 +1,29 @@
+// A class and a struct template, and functions whose results make this
+// module export their instantiations for Str: an importer uses this
+// module's copies of Cell<Str> and Slot<Str>.
+
+class Cell<T> {
+  v: T;
+}
+
+impl Cell<T> {
+  // Stores `x` in place of what the cell held, which it lets go of.
+  fn put(x: T) -> int { self.v = x; return 0; }
+
+  view fn size() -> int => 1;
+}
+
+struct Slot<T> {
+  v: T;
+}
+
+impl Slot<T> {
+  // Stores `x` in place of what the slot held, which it lets go of.
+  fn set(x: T) -> int { self.v = x; return 0; }
+
+  view fn size() -> int => 1;
+}
+
+fn cellOf(s: Str) -> Cell<Str> => Cell<Str>(s);
+
+fn slotOf(s: Str) -> Slot<Str> => Slot<Str>(s);
