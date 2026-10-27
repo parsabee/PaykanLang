@@ -1133,13 +1133,19 @@ ast::Type *Sema::ExprChecker::sizedLiteralTarget(const ast::Expr *e,
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(expected))
     expected = ot->getInnerType();
   auto *bt = ast::dyn_cast<ast::BuiltinType>(expected);
-  if (!bt || !bt->isNumeric() || bt->getTypeKind() == ast::BuiltinType::Int ||
-      bt->getTypeKind() == ast::BuiltinType::Float)
+  if (!bt || !bt->isNumeric() || bt->getTypeKind() == ast::BuiltinType::Int)
     return nullptr;
-  // A float literal is never an integer.
   const ast::Expr *lit = e;
   if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(lit))
     lit = u->getOperand();
+  // A `float` slot leaves a literal its own type, which `int` promotes to,
+  // but for one above INT64_MAX, which is no `int`: that is the `float`
+  // (docs/design/bitwise.md).
+  if (bt->getTypeKind() == ast::BuiltinType::Float) {
+    const auto *il = ast::dyn_cast<ast::IntegerLiteral>(lit);
+    return il && il->isAboveInt64Max() ? bt : nullptr;
+  }
+  // A float literal is never an integer.
   if (bt->isInteger() && ast::isa<ast::FloatLiteral>(lit))
     return nullptr;
   return bt;
@@ -1147,29 +1153,46 @@ ast::Type *Sema::ExprChecker::sizedLiteralTarget(const ast::Expr *e,
 
 namespace {
 
-/// The range of the integer kind @p k, as [lo, hi].
-void integerRange(ast::BuiltinType::Kind k, int64_t &lo, int64_t &hi) {
+/// The range of the integer kind @p k as magnitudes: -@p loMagnitude to
+/// @p hi (@p loMagnitude is 0 for an unsigned kind).
+void integerRange(ast::BuiltinType::Kind k, uint64_t &loMagnitude,
+                  uint64_t &hi) {
   const unsigned bits = ast::BuiltinType::integerBits(k);
   if (ast::BuiltinType::isUnsignedKind(k)) {
-    lo = 0;
-    // A literal is at most INT64_MAX; `unsigned` reaches it.
-    hi = bits == 64 ? INT64_MAX : static_cast<int64_t>((1ULL << bits) - 1);
+    loMagnitude = 0;
+    hi = bits == 64 ? UINT64_MAX : (uint64_t{1} << bits) - 1;
   } else {
-    lo = bits == 64 ? INT64_MIN : -static_cast<int64_t>(1ULL << (bits - 1));
-    hi =
-        bits == 64 ? INT64_MAX : static_cast<int64_t>((1ULL << (bits - 1)) - 1);
+    loMagnitude = uint64_t{1} << (bits - 1);
+    hi = loMagnitude - 1;
   }
 }
 
 /// The text of the range of the integer kind @p k for a diagnostic:
 /// `0 to 255`, `-128 to 127`, `0 to 18446744073709551615`.
 std::string integerRangeText(ast::BuiltinType::Kind k) {
-  int64_t lo, hi;
+  uint64_t lo, hi;
   integerRange(k, lo, hi);
-  std::string hiText = std::to_string(hi);
-  if (k == ast::BuiltinType::U64)
-    hiText = "18446744073709551615";
-  return std::to_string(lo) + " to " + hiText;
+  return (lo ? "-" : "") + std::to_string(lo) + " to " + std::to_string(hi);
+}
+
+/// The value of the integer literal @p lit as a sign and a magnitude: a
+/// literal above INT64_MAX is its unsigned value, a negative one (a match
+/// pattern's, or the AST interchange format's `(int -5)`) its magnitude.
+std::pair<bool, uint64_t> literalMagnitude(const ast::IntegerLiteral *lit) {
+  if (lit->isAboveInt64Max())
+    return {false, lit->getUnsignedValue()};
+  if (lit->getValue() < 0)
+    return {true, 0 - lit->getUnsignedValue()};
+  return {false, lit->getUnsignedValue()};
+}
+
+/// The error of the literal @p magnitude, above INT64_MAX, where an `int` is
+/// expected: `the literal N does not fit in 'int' (... ; hint)`, with the
+/// @p hint after the range when there is one.
+std::string wideLiteralText(uint64_t magnitude, const std::string &hint) {
+  return "the literal " + std::to_string(magnitude) +
+         " does not fit in 'int' (" + integerRangeText(ast::BuiltinType::Int) +
+         (hint.empty() ? "" : "; " + hint) + ")";
 }
 
 /// The text of a float literal for a diagnostic.
@@ -1218,23 +1241,26 @@ bool floatFits(ast::BuiltinType::Kind k, double value) {
 
 ast::Type *Sema::ExprChecker::checkSizedLiteral(ast::Expr *node,
                                                 ast::Type *target,
-                                                bool isInteger,
-                                                int64_t intValue,
+                                                bool isInteger, bool negative,
+                                                uint64_t magnitude,
                                                 double floatValue) {
   auto *bt = ast::cast<ast::BuiltinType>(target);
   const ast::BuiltinType::Kind k = bt->getTypeKind();
   if (bt->isInteger()) {
-    int64_t lo, hi;
+    uint64_t lo, hi;
     integerRange(k, lo, hi);
-    if (intValue < lo || intValue > hi) {
-      S.error(node->getLocation(), "the literal " + std::to_string(intValue) +
-                                       " does not fit in '" + typeName(bt) +
-                                       "' (" + integerRangeText(k) + ")");
+    if (negative ? magnitude > lo : magnitude > hi) {
+      S.error(node->getLocation(),
+              "the literal " + std::string(negative ? "-" : "") +
+                  std::to_string(magnitude) + " does not fit in '" +
+                  typeName(bt) + "' (" + integerRangeText(k) + ")");
       return nullptr;
     }
     return bt;
   }
-  const double value = isInteger ? static_cast<double>(intValue) : floatValue;
+  const double value = !isInteger ? floatValue
+                       : negative ? -static_cast<double>(magnitude)
+                                  : static_cast<double>(magnitude);
   if (!floatFits(k, value)) {
     S.error(node->getLocation(), "the literal " + floatText(value) +
                                      " does not fit in '" + typeName(bt) + "'");
@@ -1244,14 +1270,27 @@ ast::Type *Sema::ExprChecker::checkSizedLiteral(ast::Expr *node,
 }
 
 ast::Type *Sema::ExprChecker::visitIntegerLiteral(ast::IntegerLiteral *node) {
-  if (ast::Type *target = std::exchange(S.LiteralExpectation, nullptr))
-    return checkSizedLiteral(node, target, true, node->getValue(), 0.0);
+  if (ast::Type *target = std::exchange(S.LiteralExpectation, nullptr)) {
+    const auto [negative, magnitude] = literalMagnitude(node);
+    return checkSizedLiteral(node, target, true, negative, magnitude, 0.0);
+  }
+  // Without a sized context a literal is an `int`, which one above INT64_MAX
+  // is not (docs/design/bitwise.md).
+  if (node->isAboveInt64Max()) {
+    const std::string value = std::to_string(node->getUnsignedValue());
+    S.error(node->getLocation(),
+            wideLiteralText(node->getUnsignedValue(),
+                            "a literal above 9223372036854775807 needs an "
+                            "unsigned context, as in 'u: unsigned = " +
+                                value + "'"));
+    return nullptr;
+  }
   return S.Ctx.getIntTy();
 }
 
 ast::Type *Sema::ExprChecker::visitFloatLiteral(ast::FloatLiteral *node) {
   if (ast::Type *target = std::exchange(S.LiteralExpectation, nullptr))
-    return checkSizedLiteral(node, target, false, 0, node->getValue());
+    return checkSizedLiteral(node, target, false, false, 0, node->getValue());
   return S.Ctx.getFloatTy();
 }
 
@@ -1610,14 +1649,16 @@ Sema::ExprChecker::checkVariantCall(ast::CallExpr *node, ast::EnumType *enumTy,
 }
 
 ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
+  ast::Expr *operand = node->getOperand();
+  const bool negation = node->getOpcode() == ast::UnaryOpcode::Neg;
   // `-5` flowing into a sized numeric slot: the negated literal takes the
   // slot's type when it fits (`-128` fits an `i8`, `-1` no `u8`).
-  if (ast::Type *target = std::exchange(S.LiteralExpectation, nullptr)) {
-    ast::Expr *operand = node->getOperand();
+  if (ast::Type *target = std::exchange(S.LiteralExpectation, nullptr);
+      target && negation) {
     if (auto *il = ast::dyn_cast<ast::IntegerLiteral>(operand)) {
-      // The literal's magnitude is at most INT64_MAX, so its negation fits.
+      const auto [negative, magnitude] = literalMagnitude(il);
       ast::Type *ty =
-          checkSizedLiteral(node, target, true, -il->getValue(), 0.0);
+          checkSizedLiteral(node, target, true, !negative, magnitude, 0.0);
       if (!ty)
         return nullptr;
       operand->setResolvedType(ty);
@@ -1625,7 +1666,7 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     }
     if (auto *fl = ast::dyn_cast<ast::FloatLiteral>(operand)) {
       ast::Type *ty =
-          checkSizedLiteral(node, target, false, 0, -fl->getValue());
+          checkSizedLiteral(node, target, false, false, 0, -fl->getValue());
       if (!ty)
         return nullptr;
       operand->setResolvedType(ty);
@@ -1633,6 +1674,19 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     }
     // `-(-5)`: the inner negation takes the slot's type.
     S.LiteralExpectation = target;
+  } else if (auto *il = ast::dyn_cast<ast::IntegerLiteral>(operand);
+             il && negation && il->isAboveInt64Max()) {
+    // No sized context: a literal above INT64_MAX is no `int`, INT64_MIN's
+    // magnitude neither, which is written `-9223372036854775807 - 1`
+    // (docs/design/bitwise.md).
+    const bool int64Min =
+        il->getUnsignedValue() == static_cast<uint64_t>(INT64_MAX) + 1;
+    S.error(il->getLocation(),
+            wideLiteralText(il->getUnsignedValue(),
+                            int64Min ? "write the most negative 'int' as "
+                                       "'-9223372036854775807 - 1'"
+                                     : ""));
+    return nullptr;
   }
   auto *operandTy = visit(node->getOperand());
   if (!operandTy)
@@ -2031,7 +2085,17 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
         sig && sig->ParamTypes.size() == node->getNumArguments())
       known = sig;
   std::vector<ast::Type *> expectedArgs;
-  if (known)
+  // `unsigned(0xFFFF_FFFF_FFFF_FFFF)`, `Str(0x8000_0000_0000_0000)`: an
+  // inferred conversion of a literal above INT64_MAX converts it as the
+  // `unsigned` it is (docs/design/bitwise.md).
+  const auto *wide =
+      !node->hasTypeArgs() && node->getNumArguments() == 1 &&
+              S.isConversionTarget(node->getCalleeName())
+          ? ast::dyn_cast<ast::IntegerLiteral>(node->getArguments()[0])
+          : nullptr;
+  if (wide && wide->isAboveInt64Max())
+    expectedArgs = {S.Ctx.getBuiltinType(ast::BuiltinType::U64)};
+  else if (known)
     expectedArgs = known->ParamTypes;
   // `Str<u16>(3)`: the argument of an explicit conversion flows into the
   // written source type, so a literal takes that sized type.

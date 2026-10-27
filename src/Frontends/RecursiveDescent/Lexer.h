@@ -116,8 +116,9 @@ struct Token {
   /// Byte offset of the first character in the source buffer.  Lets the
   /// parser tell `t.0` (adjacent, a tuple index) from `t. 0` (an error).
   size_t Offset = 0;
-  /// Decoded values for literal tokens.
-  int64_t IntValue = 0;
+  /// Decoded values for literal tokens.  An INT's value is 0 to 2^64-1: the
+  /// scanner never sees a sign (docs/design/bitwise.md).
+  uint64_t IntValue = 0;
   double FloatValue = 0.0;
   char CharValue = 0;
   /// Decoded string value (escapes processed) for String tokens.
@@ -163,6 +164,7 @@ private:
   void skipTrivia();
   Token make(Tok k, size_t start, size_t startLine, size_t startCol);
   Token lexNumber(size_t start, size_t line, size_t col, bool afterDot);
+  Token lexPrefixedNumber(size_t start, size_t line, size_t col);
   Token lexIdentOrKeyword(size_t start, size_t line, size_t col);
   bool lexChar(size_t start, size_t line, size_t col, Token &out);
   bool lexString(size_t start, size_t line, size_t col, Token &out);

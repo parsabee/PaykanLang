@@ -728,15 +728,18 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// The sized numeric type a literal @p e flowing into a slot of type
     /// @p expected (or a `T?` of it) takes, nullptr when @p expected is not
     /// one or @p e is not a numeric literal.  `int` and `float` slots leave
-    /// a literal its own type.
+    /// a literal its own type, but for a `float` one an integer literal
+    /// above INT64_MAX takes (docs/design/bitwise.md).
     static ast::Type *sizedLiteralTarget(const ast::Expr *e,
                                          ast::Type *expected);
-    /// The type of the literal @p node with the value @p value flowing into
-    /// the sized type @p target: @p target when the value fits it, else an
-    /// error (`the literal 256 does not fit in 'u8' (0 to 255)`).
+    /// The type of the literal @p node flowing into the sized type
+    /// @p target: @p target when its value fits it, else an error (`the
+    /// literal 256 does not fit in 'u8' (0 to 255)`).  An integer literal's
+    /// value is a sign and a @p magnitude up to 2^64-1, a float literal's
+    /// @p floatValue.
     ast::Type *checkSizedLiteral(ast::Expr *node, ast::Type *target,
-                                 bool isInteger, int64_t intValue,
-                                 double floatValue);
+                                 bool isInteger, bool negative,
+                                 uint64_t magnitude, double floatValue);
     /// visit(@p operand) of a binary operator whose other operand has type
     /// @p otherTy: a numeric literal takes the other operand's sized type,
     /// and a generic enum's variant its type arguments (`m ==

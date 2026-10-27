@@ -320,6 +320,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   string: replacing each of the million line feeds of a 10 MB string takes about a
   second. The language reference's strings chapter, which said the standard library had
   no such functions, points to them.
+- Hexadecimal and binary integer literals (docs/language/02-basics.md, "Literals";
+  docs/design/bitwise.md): `0xFF`, `0b1010_0101`, `_` between two digits (`0xFFFF_0000`),
+  typed by their context as a decimal literal is (`x: u8 = 0xFF`; `y: i8 = 0xFF` is `the
+  literal 255 does not fit in 'i8' (-128 to 127)`: a literal is a value, not a bit pattern).
+  - An integer literal of any base is 0 to 18446744073709551615, so the upper half of
+    `unsigned` is written directly (`m: unsigned = 0xFFFF_FFFF_FFFF_FFFF`); above
+    9223372036854775807 a literal needs an unsigned or float context, and is an `unsigned`
+    as a conversion's argument (`u8(0xFFFF_FFFF_FFFF_FFFF)` is 255).
+  - Malformed literals are lexer errors that name the rule: an upper-case prefix, a
+    misplaced `_`, a digit of another base, octal (`0o17`), a fraction (`0x1.5`), a `_` in a
+    decimal (`1_000`, not yet) and a suffix (`255u8`: `a literal takes its type from the
+    context, as in 'x: u8 = 255'`).
 
 ### Changed
 
@@ -829,6 +841,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   links from `::collections` releases no message after the panic, as one the program makes
   itself does not, and the standard library's code has up to 9 fewer `release`s in a
   program's `--emit-pir`.
+- An integer literal above 9223372036854775807 is no longer a lexical error
+  (`integer is out of range`, which now means 2^64 or more): Sema checks it against its
+  context's type on every frontend (`x: int = 9223372036854775808` is `the literal
+  9223372036854775808 does not fit in 'int' (...)`), and `-9223372036854775808` in an
+  expression is Sema's error with its `-9223372036854775807 - 1` hint.  The AST interchange
+  format's `(int ...)` reads values up to 18446744073709551615.
 
 ### Removed
 

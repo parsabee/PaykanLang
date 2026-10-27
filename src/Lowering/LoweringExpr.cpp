@@ -118,13 +118,20 @@ Val ModuleLowering::ExprEmitter::visitIntegerLiteral(
   // `1` flowing into an `f32` or `f16` slot is that float (Sema typed it),
   // rounded once, as `f32(n)` is: an `f32` straight from the integer (the
   // f64 of one beyond 2^53 is already rounded), an `f16` from the f64,
-  // which is exact below its 65520 overflow.
+  // which is exact below its 65520 overflow.  A literal above INT64_MAX is
+  // its unsigned value; in an integer slot every literal is its bits.
   ast::Type *ty = node->getResolvedType();
   const ast::BuiltinType::Kind k = L.builtinKind(ty);
+  const bool wide = node->isAboveInt64Max();
   if (k == ast::BuiltinType::F32)
-    return Val::f64(static_cast<double>(static_cast<float>(node->getValue())));
+    return Val::f64(
+        static_cast<double>(wide ? static_cast<float>(node->getUnsignedValue())
+                                 : static_cast<float>(node->getValue())));
   if (ast::BuiltinType::isFloatKind(k))
-    return L.canonicalize(Val::f64(static_cast<double>(node->getValue())), ty);
+    return L.canonicalize(
+        Val::f64(wide ? static_cast<double>(node->getUnsignedValue())
+                      : static_cast<double>(node->getValue())),
+        ty);
   return Val::i64(node->getValue());
 }
 

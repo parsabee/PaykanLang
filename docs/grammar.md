@@ -41,7 +41,11 @@ tuple-index rule below.
 
 ```
 IDENT    ::= [_a-zA-Z] [_a-zA-Z0-9]*         (except the keywords and "_")
-INT      ::= [0-9]+
+INT      ::= decimal | hexadecimal | binary
+decimal  ::= [0-9]+
+hexadecimal ::= "0x" hexDigit ( "_"? hexDigit )*
+binary   ::= "0b" [01] ( "_"? [01] )*
+hexDigit ::= [0-9a-fA-F]
 FLOAT    ::= [0-9]+ "." [0-9]* exponent?
            | [0-9]+ exponent
 exponent ::= ("e" | "E") ("+" | "-")? [0-9]+
@@ -75,12 +79,34 @@ Any other byte is a lexical error (`invalid character 'X'`).
 
 ### Literal values
 
-- `INT` is a 64-bit signed integer. The scanner never sees a sign (`-` is a
-  separate token), so `9223372036854775808` is out of range
-  (`integer is out of range: ...`); `INT64_MIN` is written as the expression
-  `-9223372036854775807 - 1`.  Right after a `-`, the scanner takes that
-  magnitude too, for the match pattern `-9223372036854775808` (§6), which is
-  `INT64_MIN`; the parser rejects it anywhere else, with the same error.
+- `INT` is 0 to 18446744073709551615 (2^64 - 1) in every base
+  ([`design/bitwise.md`](design/bitwise.md)). The scanner never sees a sign
+  (`-` is a separate token, with no special case after it); 2^64 or more is
+  out of range (`integer is out of range: 18446744073709551616 (an integer
+  literal is at most 18446744073709551615)`). Sema checks a literal against
+  the type its context gives it, on every frontend: one above
+  9223372036854775807 needs an unsigned or float context, so `INT64_MIN` is
+  written as the expression `-9223372036854775807 - 1`, while the match
+  pattern `-9223372036854775808` (§6) is `INT64_MIN`. Where the grammar
+  needs an `int64`, a fixed-size array's length and a repeat count, a
+  larger `INT` is the parser's `integer is out of range: ...`.
+- After `0x` or `0b` the scanner takes the whole run of letters, digits and
+  `_` as the literal and checks it, so `0xFG` is one error (`invalid digit
+  'G' in hexadecimal literal '0xFG'`), as are an empty run (`0x`: `expected a
+  hexadecimal digit after '0x'`) and a fraction after it (`0x1.5`: `a
+  hexadecimal literal has no fraction`). A hexadecimal or binary literal
+  takes no other `.`: `0xFF.x` is a member of 255, `0x10..0x20` a range, and
+  `0x1e5` the integer 485. The prefixes are lower case (`0XFF`: `the prefix
+  of a hexadecimal literal is '0x', in lower case`), and there are no octal
+  literals (`0o17` is an error; `017` is the decimal 17).
+- A `_` stands between two digits of a hexadecimal or binary literal, one at
+  a time (`0x_FF`, `0xFF_` and `0x1__0`: `a '_' in a number must stand
+  between two digits`). A decimal or float literal takes none: `1_000` and
+  `3.141_592` are one error each (`'_' separates digits only in hexadecimal
+  and binary literals`). A number directly followed by a numeric type's name
+  is one error too (`255u8`, `2.5f32`: `there are no literal suffixes ...`);
+  directly followed by any other identifier it is two tokens, as ever:
+  `0..10step 2` and `if c then 1else 2` are valid.
 - `FLOAT` is converted with `strtod` and must denote a finite float:
   a literal that overflows to infinity (`1e999`) or a nonzero one that
   underflows to zero (`1e-400`) is an error (`float is out of range: ...`).
@@ -425,7 +451,10 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   binding, in any order.  A literal pattern is a literal, or a negative
   number: `-` and an `INT` or a `FLOAT` (`-1`, `- 2.5`) is one
   `IntegerLiteral` or `FloatLiteral` of the negated value, spanning both
-  tokens, not a `UnaryExpr`; `-9223372036854775808` is `INT64_MIN` (§1).
+  tokens, not a `UnaryExpr`; `-9223372036854775808` (or
+  `-0x8000_0000_0000_0000`) is `INT64_MIN` (§1), and a larger magnitude is
+  `integer is out of range: -9223372036854775809`, spanning the `-` and the
+  number.
   Anything else after the `-` is a syntax error (`unexpected '-'; expected
   a type`).  Sema rejects a pattern that is not a literal, whichever
   frontend built it (`a value-match arm's pattern must be a literal ...`).
@@ -669,3 +698,8 @@ specification does not. Every frontend must reject them (the
 - A leading comma in an argument list, array literal or parameter list:
   `f(, 1)`, `[, 1]`, `fn f(, a: int)`.
 - Repeated commas in an enum body after the first variant: `enum E { a,, b }`.
+- Number literals in the forms of other languages, each a lexical error
+  (§1): an upper-case prefix `0X1F`, a misplaced `_` (`0x_FF`, `1__0`), a
+  `_` in a decimal `1_000`, a suffix `255u8` and a fraction `0x1.5`.  `t.0x1`
+  is not a tuple index of 1: the digits after the `.` are the index `0`, and
+  `x1` the identifier after it, a syntax error.

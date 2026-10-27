@@ -84,7 +84,8 @@ std::optional<int64_t> ForStmt::constantStep() const {
   const auto *lit = dyn_cast<IntegerLiteral>(e);
   if (!lit)
     return std::nullopt;
-  // A literal is at most INT64_MAX (docs/grammar.md), so its negation fits.
+  // Sema rejects a literal above INT64_MAX in the `int` step
+  // (docs/design/bitwise.md), so its negation fits.
   return negated ? -lit->getValue() : lit->getValue();
 }
 
@@ -540,8 +541,11 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
   }
   auto loc = e->getLocation();
   switch (e->getKind()) {
-  case ASTNode::NK_IntegerLiteral:
-    return Ctx.make<IntegerLiteral>(loc, cast<IntegerLiteral>(e)->getValue());
+  case ASTNode::NK_IntegerLiteral: {
+    const auto *lit = cast<IntegerLiteral>(e);
+    return Ctx.make<IntegerLiteral>(loc, lit->getValue(),
+                                    lit->isAboveInt64Max());
+  }
   case ASTNode::NK_FloatLiteral:
     return Ctx.make<FloatLiteral>(loc, cast<FloatLiteral>(e)->getValue());
   case ASTNode::NK_BoolLiteral:

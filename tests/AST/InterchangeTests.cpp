@@ -14,6 +14,7 @@
 
 #include "ASTPrinter.h"
 #include "ParserDriver.h"
+#include "Sema.h"
 #include "paykan/ast/Interchange.h"
 
 #include <algorithm>
@@ -2085,4 +2086,74 @@ TEST(Interchange, OnlyAFreeFunctionIsGeneric) {
                  ctx, error),
             nullptr)
       << error;
+}
+
+// An `(int ...)` value spans 64 bits (docs/plugins/ast-format.md): an int64,
+// or one without a sign up to 18446744073709551615, a literal above
+// INT64_MAX that the writer writes back as it reads it.  The other integer
+// fields stay int64s.  Sema checks a wide literal as the frontend's
+// (docs/design/bitwise.md): under a `-`, INT64_MIN's magnitude is the
+// error that names `-9223372036854775807 - 1`.
+TEST(ASTInterchange, IntegersSpanSixtyFourBits) {
+  // `fn main() -> int { STMTS return 0; }`.
+  auto mainOf = [](const std::string &stmts) {
+    return "(paykan-ast 1 (unit (fn @1:1-4:2 \"main\" (type-params) (params) "
+           "(named-type \"int\") (block " +
+           stmts + " (return (int 0))))))";
+  };
+  {
+    ast::ASTContext ctx;
+    std::string error;
+    ast::TranslationUnit *tu = read(
+        mainOf("(decl (var \"u\" (named-type \"unsigned\") "
+               "(int @2:15-2:35 18446744073709551615))) "
+               "(decl (var \"m\" _ (int @3:7-3:27 -9223372036854775808)))"),
+        ctx, error);
+    ASSERT_NE(tu, nullptr) << error;
+    const std::string printed = dump(tu);
+    EXPECT_NE(printed.find("IntegerLiteral <2:15-2:35> 18446744073709551615\n"),
+              std::string::npos)
+        << printed;
+    EXPECT_NE(printed.find("IntegerLiteral <3:7-3:27> -9223372036854775808\n"),
+              std::string::npos)
+        << printed;
+    const std::string text = write(*tu);
+    EXPECT_NE(text.find("(int @2:15-2:35 18446744073709551615)"),
+              std::string::npos)
+        << text;
+    ast::ASTContext again;
+    ast::TranslationUnit *back = read(text, again, error);
+    ASSERT_NE(back, nullptr) << error;
+    EXPECT_EQ(write(*back), text);
+    EXPECT_EQ(dump(back), printed);
+  }
+  for (const char *bad :
+       {"(expr (int 18446744073709551616))",
+        "(expr (int -9223372036854775809))",
+        "(expr (array-repeat (array (int 1)) 9223372036854775808))",
+        "(expr (tuple-index (ident \"t\") 18446744073709551615))"}) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(mainOf(bad), ctx, error), nullptr) << bad;
+    EXPECT_NE(error.find("not a 64-bit integer: "), std::string::npos)
+        << bad << "\n"
+        << error;
+  }
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu =
+      read(mainOf("(decl (var \"x\" _ (unary @2:7-2:28 neg "
+                  "(int @2:8-2:28 9223372036854775808))))"),
+           ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::ostringstream diagOS;
+  sema::DiagEngine diag(diagOS);
+  sema::Sema sema(ctx, diag);
+  EXPECT_FALSE(sema.run(tu).Ok);
+  EXPECT_NE(diagOS.str().find(
+                "2:8: error: the literal 9223372036854775808 does not fit in "
+                "'int' (-9223372036854775808 to 9223372036854775807; write "
+                "the most negative 'int' as '-9223372036854775807 - 1')"),
+            std::string::npos)
+      << diagOS.str();
 }

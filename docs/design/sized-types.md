@@ -24,7 +24,7 @@ end each have the default this implementation takes.
 | Optionals and match | `i32?`, `u8?`, `f32?` are value optionals like `int?`; `match` on a sized integer compares with literals of its type |
 | Runtime | one new type kind, `PAYKAN_KIND_UINT`, so a `u64` in a struct, tuple or array prints unsigned; `f16` rounding and the unsigned `toString`/parse are runtime functions; the ABI version stays |
 | PIR | new instructions `wrap N`, `mask N`, `udiv`, `urem`, `ucmp`, `utof`, `ftou` and `fround32` (`ftou` is no longer produced, as no unsigned type converts from a float); `f16` rounding is a runtime call; the format version stays (caches are cleared) |
-| Not in this change | bit operations and shifts (the language has none), integer literal suffixes (`1u8`), hexadecimal literals, implicit widening (`i32` to `int`), overflow checks |
+| Not in this change | bit operations and shifts (the language has none), integer literal suffixes (`1u8`), implicit widening (`i32` to `int`), overflow checks |
 
 ## Types and spelling
 
@@ -69,8 +69,10 @@ neighbour (`f32(1152921573326323713)` is 2^60 + 2^37, where the `f64`,
 2^60 + 2^36, rounds to 2^60).  The `INT64_MIN / -1` guard of
 `int` division is not emitted for a narrower type, whose quotient wraps
 (`i8(-128) / i8(-1)` is `-128`).  An integer literal is at most
-`9223372036854775807`, so the upper half of `unsigned` is reached through a
-conversion or a parse (`unsigned(-1)`, `"18446744073709551615".toUnsigned()`).
+`18446744073709551615` ([`bitwise.md`](bitwise.md)), so the upper half of
+`unsigned` is written directly (`0xFFFF_FFFF_FFFF_FFFF`) in an unsigned
+context; `unsigned(-1)` and `"18446744073709551615".toUnsigned()` are the
+other spellings.
 
 ## Typing
 
@@ -135,9 +137,10 @@ digits, not its `f64`), as `f32(n)` rounds an `int` or `unsigned`.
 3. **Should `f32` and `f16` print with their own precision?**  No: `%g`
    prints the value the type holds, with the six significant digits `float`
    prints; a rounded `f32` shows the same text as the `f64` it is.
-4. **Literal suffixes (`1u8`) and hexadecimal literals?**  Not yet; the
-   context rule makes suffixes rare, and hexadecimal literals are a lexer
-   change on their own.
+4. **Literal suffixes (`1u8`) and hexadecimal literals?**  Suffixes not
+   yet: the context rule makes them rare, and `255u8` is an error that shows
+   the context to write.  Hexadecimal and binary literals are in, typed by
+   their context as a decimal one is ([`bitwise.md`](bitwise.md)).
 5. **Should `u8` convert from `char`?**  Yes, as every integer type does:
    `u8(c)` is the byte, `i8(c)` its signed reading, and `char(b)` of a `u8`
    is the character (docs/language/04-strings-and-conversions.md, "Between

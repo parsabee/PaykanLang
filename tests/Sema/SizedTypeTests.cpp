@@ -381,6 +381,143 @@ TEST(SizedTypes, NegativePatternsFitTheSubjectAsAssignedLiteralsDo) {
               "18446744073709551615)");
 }
 
+// -- hexadecimal, binary and wide literals (docs/design/bitwise.md)
+
+// A hexadecimal or binary literal is a value, typed by its context as a
+// decimal one is; any literal of 2^63 or more takes an unsigned or float
+// context: a variable's, an operand's, an argument's, a field's, a
+// result's and an optional's.
+TEST(SizedTypes, HexAndBinaryLiteralsTakeTheContextsType) {
+  expectOk(R"(import ::io;
+struct W { v: unsigned; }
+fn takes(n: unsigned) -> unsigned => n;
+fn top() -> unsigned => 0xFFFF_FFFF_FFFF_FFFF;
+fn main() -> int {
+  let a: u8 = 0xFF;
+  let b: u16 = 0xFFFF;
+  let c: u32 = 0xFFFF_FFFF;
+  let d: unsigned = 0xFFFF_FFFF_FFFF_FFFF;
+  let e: unsigned = 18446744073709551615;
+  let f: i8 = -0x80;
+  let g: f32 = 18446744073709551615;
+  let h: float = 0xFFFF_FFFF_FFFF_FFFF;
+  let k: float = -0x8000_0000_0000_0000;
+  let i: int = 0x7FFF_FFFF_FFFF_FFFF;
+  let l: u8 = 0b1111_1111;
+  let o: unsigned? = 0x8000_0000_0000_0000;
+  let t: bool = d == 0x8000_0000_0000_0000 && 0xFFFF_FFFF_FFFF_FFFF != e;
+  let m: unsigned = takes(0xFFFF_FFFF_FFFF_FFFF) + top();
+  let w = W(0x8000_0000_0000_0000);
+  return 0;
+}
+)");
+}
+
+// The fit check of every sized type reaches the type's limits, with the
+// value in decimal; an `int` slot, or none, takes no literal above
+// 9223372036854775807, and the hint names the unsigned context.
+TEST(SizedTypes, LiteralRangesAtTheLimits) {
+  const std::string intRange =
+      "does not fit in 'int' (-9223372036854775808 to 9223372036854775807; ";
+  for (const auto &[stmt, message] :
+       {std::pair<std::string, std::string>{
+            "x: u8 = 0x100;",
+            "the literal 256 does not fit in 'u8' (0 to 255)"},
+        {"y: i8 = 0xFF;", "the literal 255 does not fit in 'i8' (-128 to 127)"},
+        {"z: u32 = 0xFFFF_FFFF_FFFF_FFFF;",
+         "the literal 18446744073709551615 does not fit in 'u32' (0 to "
+         "4294967295)"},
+        {"w: int = 18446744073709551615;",
+         "the literal 18446744073709551615 " + intRange +
+             "a literal above 9223372036854775807 needs an unsigned context, "
+             "as in 'u: unsigned = 18446744073709551615')"},
+        {"w = 9223372036854775808;",
+         "the literal 9223372036854775808 " + intRange +
+             "a literal above 9223372036854775807 needs an unsigned context, "
+             "as in 'u: unsigned = 9223372036854775808')"},
+        {"v: u8 = -0x8000_0000_0000_0000;",
+         "the literal -9223372036854775808 does not fit in 'u8' (0 to 255)"},
+        {"q: i64 = 0x8000_0000_0000_0000;",
+         "the literal 9223372036854775808 " + intRange},
+        {"r: f16 = 0xFFFF_FFFF_FFFF_FFFF;",
+         "the literal 1.84467e+19 does not fit in 'f16'"},
+        {"s: u16? = 0x1_0000;",
+         "the literal 65536 does not fit in 'u16' (0 to 65535)"}})
+    expectError(inMain(stmt), "error: " + message);
+  expectOk(inMain("a: u64 = 18446744073709551615; b: i8 = -128; c: i8 = 127; "
+                  "d: i16 = -0x8000; e: u32 = 0xFFFF_FFFF;"));
+}
+
+// INT64_MIN is still written as an expression: its magnitude under a `-`
+// is a literal above 9223372036854775807 in an `int` context.
+TEST(SizedTypes, Int64MinIsStillWrittenAsAnExpression) {
+  const std::string intRange =
+      "does not fit in 'int' (-9223372036854775808 to 9223372036854775807";
+  expectError(inMain("x = -9223372036854775808;"),
+              "2:6: error: the literal 9223372036854775808 " + intRange +
+                  "; write the most negative 'int' as "
+                  "'-9223372036854775807 - 1')");
+  expectError(inMain("x = 5 - 9223372036854775808;"),
+              "error: the literal 9223372036854775808 " + intRange +
+                  "; a literal above 9223372036854775807 needs an unsigned "
+                  "context, as in 'u: unsigned = 9223372036854775808')");
+  expectError(inMain("x = -18446744073709551615;"),
+              "2:6: error: the literal 18446744073709551615 " + intRange +
+                  ")\n");
+  expectOk(
+      inMain("x = -9223372036854775807 - 1; y: int = -0x7FFF_FFFF_FFFF_FFFF;"));
+}
+
+// A wide literal never reaches what takes an `int` and negates it, a
+// constant `for` step and a constant index: Sema rejects it first.
+TEST(SizedTypes, WideLiteralsNeverReachIntConsumers) {
+  for (const char *stmt :
+       {"for i in 0..10 step -0x8000_0000_0000_0000 { }",
+        "a: int[4] = [1, 2, 3, 4]; x = a[0x8000_0000_0000_0000];",
+        "a: int[4] = [1, 2, 3, 4]; x = a[-0x8000_0000_0000_0000];",
+        "a: int[4] = [1, 2, 3, 4]; a[-0x8000_0000_0000_0000] = 1;",
+        "a: int[4] = [1, 2, 3, 4]; a[0xFFFF_FFFF_FFFF_FFFF] = 1;"}) {
+    auto r = semaCheck(inMain(stmt));
+    EXPECT_FALSE(r.Ok) << stmt;
+    EXPECT_NE(r.Diagnostics.find("does not fit in 'int'"), std::string::npos)
+        << stmt << "\n"
+        << r.Diagnostics;
+    EXPECT_EQ(r.Diagnostics.find("out of bounds"), std::string::npos)
+        << stmt << "\n"
+        << r.Diagnostics;
+  }
+}
+
+// A value arm's literal takes the subject's type, a hexadecimal one too, up
+// to 0xFFFF_FFFF_FFFF_FFFF on an `unsigned`.
+TEST(SizedTypes, HexValueArms) {
+  expectOk(inMain(R"(
+    b: u8 = 1;  match b { 0xFF { } 0b1 { } _ { } }
+    c: i8 = 1;  match c { -0x80 { } 0x7F { } _ { } }
+    u: unsigned = 1;
+    match u { 0xFFFF_FFFF_FFFF_FFFF { } 0x8000_0000_0000_0000 { } 0 { } _ { } }
+  )"));
+  expectError(inMain("c: i8 = 1; match c { 0xFF { } _ { } }"),
+              "error: the literal 255 does not fit in 'i8' (-128 to 127)");
+  expectError(inMain("n = 1; match n { 0xFFFF_FFFF_FFFF_FFFF { } _ { } }"),
+              "error: the literal 18446744073709551615 does not fit in 'int'");
+}
+
+// The argument of an inferred conversion is an `unsigned` when it is a
+// literal above 9223372036854775807; a conversion keeps its low bits.
+TEST(SizedTypes, AWideLiteralConvertsAsAnUnsigned) {
+  expectOk(inMain(R"(
+    let a: unsigned = unsigned(0xFFFF_FFFF_FFFF_FFFF);
+    let f: float = float(0xFFFF_FFFF_FFFF_FFFF);
+    let c: u8 = u8(0xFFFF_FFFF_FFFF_FFFF);
+    let s: Str = Str(0x8000_0000_0000_0000);
+    let n: u8 = u8(300);
+  )"));
+  expectError(inMain("x = int(0xFFFF_FFFF_FFFF_FFFF);"),
+              "error: no specialization of 'int' for 'unsigned': an "
+              "'unsigned' can be larger than any 'int'");
+}
+
 TEST(SizedTypes, TheSizedTypesTakeEightByteSlots) {
   // A fixed-size array's element size is the type's slot: 8 bytes for every
   // numeric type, 1 for bool and char, so `u8[3]` is three 8-byte slots and

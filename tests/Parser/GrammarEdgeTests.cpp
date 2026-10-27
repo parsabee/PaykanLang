@@ -414,15 +414,17 @@ TEST(GrammarEdge, CommonErrorsAreLocatedAlike) {
 
 // `-` and a number is one literal of the negated value, spanning both (the
 // AST interchange format's `(int -1)`), with or without space between them;
-// INT64_MIN's magnitude is taken after the `-`, so `-9223372036854775808`
-// is INT64_MIN.  Anything else after a `-` is still not a pattern.  It was
-// `unexpected '-'; expected a type`, though the AST interchange reader took
-// `(int -1)` and Sema and the lowering ran it.
+// `-9223372036854775808` (or `-0x8000_0000_0000_0000`) is INT64_MIN, and a
+// larger magnitude is out of range.  Anything else after a `-` is still not
+// a pattern.  It was `unexpected '-'; expected a type`, though the AST
+// interchange reader took `(int -1)` and Sema and the lowering ran it.
 TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
   auto [ok, driver] = parse("fn main() -> int {\n"
                             "  match 1 { -1 { } - 2 { } 3 { } _ { } }\n"
                             "  match 1.5 { -2.5 { } -0.0 { } _ { } }\n"
                             "  match 1 { -9223372036854775808 { } _ { } }\n"
+                            "  match 1 { -0x80 { } -0x8000_0000_0000_0000 { } "
+                            "_ { } }\n"
                             "  return 0;\n"
                             "}\n");
   ASSERT_TRUE(ok);
@@ -432,9 +434,24 @@ TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
         "IntegerLiteral <2:28-2:29> 3\n",
         "FloatLiteral <3:15-3:19> -2.500000e+00\n",
         "FloatLiteral <3:24-3:28> -0.000000e+00\n",
-        "IntegerLiteral <4:13-4:33> -9223372036854775808\n"})
+        "IntegerLiteral <4:13-4:33> -9223372036854775808\n",
+        "IntegerLiteral <5:13-5:18> -128\n",
+        "IntegerLiteral <5:23-5:45> -9223372036854775808\n"})
     EXPECT_NE(dump.find(line), std::string::npos) << line << dump;
   EXPECT_EQ(dump.find("UnaryExpr"), std::string::npos) << dump;
+  for (const char *arm : {"-9223372036854775809", "-0x8000_0000_0000_0001",
+                          "- 0xFFFF_FFFF_FFFF_FFFF"}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  match 1 { ") +
+                            arm + " { } _ { } }\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << arm;
+    ASSERT_FALSE(r.Diags.empty()) << arm;
+    std::string magnitude = arm + 1;
+    if (magnitude[0] == ' ')
+      magnitude.erase(0, 1);
+    EXPECT_EQ(r.Diags[0].Message, "integer is out of range: -" + magnitude)
+        << arm;
+    EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 13u) << arm;
+  }
   for (const char *arm : {"-True", "--1", "-x", "-'a'", "-\"s\"", "-None"}) {
     auto r = parseWithDiags(std::string("fn main() -> int {\n  match 1 { ") +
                             arm + " { } _ { } }\n  return 0;\n}\n");
@@ -444,19 +461,52 @@ TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
   }
 }
 
-// INT64_MIN's magnitude is a pattern's only: anywhere else it is out of
-// range, as an INT after any other token is, also right after a `-` (where
-// the lexer takes it): an expression writes INT64_MIN as
-// `-9223372036854775807 - 1` (docs/grammar.md section 1).
-TEST(GrammarEdge, TheMagnitudeOfInt64MinIsOnlyAPatterns) {
+// Number literals in the forms of other languages are rejected (docs/grammar.md
+// section 10), each with one error at the literal, never read as a number
+// followed by an identifier.
+TEST(GrammarEdge, NumberLiteralsOfOtherLanguagesAreRejected) {
+  struct Case {
+    const char *Literal;
+    const char *Error;
+  };
+  const Case cases[] = {
+      {"0X1F", "the prefix of a hexadecimal literal is '0x', in lower case: "
+               "'0X1F'"},
+      {"0x_FF", "a '_' in a number must stand between two digits: '0x_FF'"},
+      {"1__0", "'_' separates digits only in hexadecimal and binary "
+               "literals: '1__0'"},
+      {"1_000", "'_' separates digits only in hexadecimal and binary "
+                "literals: '1_000'"},
+      {"255u8", "there are no literal suffixes: '255u8' (a literal takes its "
+                "type from the context, as in 'x: u8 = 255')"},
+      {"0x1.5", "a hexadecimal literal has no fraction: '0x1.5'"},
+  };
+  for (const Case &c : cases) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  x = ") +
+                            c.Literal + ";\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << c.Literal;
+    ASSERT_EQ(r.Diags.size(), 1u) << c.Literal << "\n" << r.Text;
+    EXPECT_EQ(r.Diags[0].Message, c.Error) << c.Literal;
+    EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 7u) << c.Literal;
+  }
+  EXPECT_FALSE(parse("fn main() -> int {\n  t = (1, 2);\n  x = t.0x1;\n"
+                     "  return 0;\n}\n")
+                   .Ok);
+}
+
+// A literal above INT64_MAX parses wherever a literal does, on every
+// frontend alike: the magnitude of INT64_MIN after a `-` too.  Sema checks
+// it against its context's type (tests/Sema/SizedTypeTests.cpp,
+// LiteralRangesAtTheLimits and Int64MinIsStillWrittenAsAnExpression).
+TEST(GrammarEdge, WideLiteralsParseOnEveryFrontend) {
   for (const char *expr : {"-9223372036854775808", "5 - 9223372036854775808",
                            "9223372036854775808"}) {
     auto r = parseWithDiags(std::string("fn main() -> int {\n  x = ") + expr +
                             ";\n  return 0;\n}\n");
-    EXPECT_FALSE(r.Ok) << expr;
-    ASSERT_EQ(r.Diags.size(), 1u) << expr;
-    EXPECT_EQ(r.Diags[0].Message, "integer is out of range: "
-                                  "9223372036854775808")
+    EXPECT_TRUE(r.Ok) << expr << "\n" << r.Text;
+    EXPECT_TRUE(parse(std::string("fn main() -> int {\n  x = ") + expr +
+                      ";\n  return 0;\n}\n")
+                    .Ok)
         << expr;
   }
 }

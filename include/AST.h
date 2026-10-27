@@ -840,12 +840,21 @@ public:
 class IntegerLiteral : public Expr {
 private:
   int64_t Value;
+  bool AboveInt64Max;
 
 public:
-  IntegerLiteral(SourceLocation loc, int64_t value)
-      : Expr(NK_IntegerLiteral, loc), Value(value) {}
+  /// @p value is the literal's bits.  A literal above INT64_MAX, which only
+  /// an unsigned or float context takes (docs/design/bitwise.md), is
+  /// flagged with @p aboveInt64Max: its value is getUnsignedValue(), 2^63 to
+  /// 2^64-1.  Any other is getValue(), signed (a negative one comes only
+  /// from a match pattern or the AST interchange format's `(int -5)`).
+  IntegerLiteral(SourceLocation loc, int64_t value, bool aboveInt64Max = false)
+      : Expr(NK_IntegerLiteral, loc), Value(value),
+        AboveInt64Max(aboveInt64Max) {}
 
   int64_t getValue() const { return Value; }
+  uint64_t getUnsignedValue() const { return static_cast<uint64_t>(Value); }
+  bool isAboveInt64Max() const { return AboveInt64Max; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_IntegerLiteral;

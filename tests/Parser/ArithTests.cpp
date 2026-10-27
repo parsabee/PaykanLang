@@ -313,16 +313,28 @@ TEST(Arith, IntLiteralMaxAccepted) {
   EXPECT_TRUE(ok);
 }
 
-TEST(Arith, IntLiteralOverflowRejected) {
-  // INT64_MAX + 1: strtoll saturates and sets ERANGE.
+// An integer literal reaches 2^64-1 (docs/design/bitwise.md): the upper
+// half of `unsigned` is written directly, and only 2^64 or more is the
+// lexer's error.  Sema checks a literal against its context's type.
+TEST(Arith, IntLiteralsReachTheUnsignedRange) {
+  auto [ok, _] = parse(R"(
+    fn main() -> int {
+      u: unsigned = 18446744073709551615;
+      v: unsigned = 9223372036854775808;
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(ok);
   auto r = parseWithDiags("fn main() -> int {\n"
-                          "  x: int = 9223372036854775808;\n"
+                          "  x = 18446744073709551616;\n"
                           "  return 0;\n"
                           "}\n");
   ASSERT_FALSE(r.Ok);
-  ASSERT_FALSE(r.Diags.empty());
-  EXPECT_NE(r.Diags[0].Message.find("integer is out of range"),
-            std::string::npos);
+  ASSERT_EQ(r.Diags.size(), 1u) << r.Text;
+  EXPECT_EQ(r.Diags[0].Message, "integer is out of range: "
+                                "18446744073709551616 (an integer literal is "
+                                "at most 18446744073709551615)");
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 7u);
 }
 
 // A float literal must denote a finite float (#73): overflow to +-inf and a
@@ -359,18 +371,50 @@ TEST(Arith, FloatLiteralSubnormalAccepted) {
   EXPECT_TRUE(ok);
 }
 
-TEST(Arith, IntLiteralMinMagnitudeRejected) {
-  // Deliberate: `-` is a separate token, so -9223372036854775808 lexes as
-  // MINUS + the bare magnitude, which overflows.  INT64_MIN must be written
-  // as an expression (e.g. -9223372036854775807 - 1).
-  auto r = parseWithDiags("fn main() -> int {\n"
-                          "  x: int = -9223372036854775808;\n"
-                          "  return 0;\n"
-                          "}\n");
-  ASSERT_FALSE(r.Ok);
-  ASSERT_FALSE(r.Diags.empty());
-  EXPECT_NE(r.Diags[0].Message.find("integer is out of range"),
-            std::string::npos);
+// `-` is a separate token, so -9223372036854775808 is MINUS and the bare
+// magnitude, which parses; Sema rejects it in an `int` context, where
+// INT64_MIN is written as an expression, `-9223372036854775807 - 1`
+// (tests/Sema/SizedTypeTests.cpp).
+TEST(Arith, IntLiteralMinMagnitudeParses) {
+  auto [ok, _] = parse(R"(
+    fn main() -> int {
+      x: int = -9223372036854775808;
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+// Hexadecimal and binary literals are values, in every place an integer
+// literal is: an expression, a fixed-size array's length and a repeat
+// count, where one above INT64_MAX is out of range.
+TEST(Arith, HexAndBinaryLiteralValues) {
+  std::string ast = dumpAST(R"(
+    fn main() -> int {
+      a = 0xFF;
+      b = 0x1e5;
+      c = 0b1010;
+      d: unsigned = 0xFFFF_FFFF_FFFF_FFFF;
+      e: int[0x4] = [0; 0b11];
+      return 0;
+    }
+  )");
+  for (const char *line :
+       {"IntegerLiteral <3:11-3:15> 255\n", "IntegerLiteral <4:11-4:16> 485\n",
+        "IntegerLiteral <5:11-5:17> 10\n",
+        "IntegerLiteral <6:21-6:42> 18446744073709551615\n",
+        "FixedArrayType <7:10-7:18> 4\n", "<7:21-7:30> 3 copies\n"})
+    EXPECT_NE(ast.find(line), std::string::npos) << line << ast;
+  for (const char *decl : {"e: int[0x8000_0000_0000_0000] = [0];",
+                           "e = [0; 0x8000_0000_0000_0000];"}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  ") + decl +
+                            "\n  return 0;\n}\n");
+    ASSERT_FALSE(r.Ok) << decl;
+    ASSERT_EQ(r.Diags.size(), 1u) << decl << "\n" << r.Text;
+    EXPECT_EQ(r.Diags[0].Message,
+              "integer is out of range: 0x8000_0000_0000_0000")
+        << decl;
+  }
 }
 
 TEST(Arith, IntLiteralMinAsExpressionAccepted) {

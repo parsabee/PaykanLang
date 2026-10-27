@@ -265,3 +265,48 @@ TEST(SizedTypes, SizedValuesInAggregatesGenericsAndMatch) {
                       "minus one\nhalf\nNone -300\n");
   g.expectNoLeaks("SizedTypes.SizedValuesInAggregatesGenericsAndMatch");
 }
+
+// Hexadecimal, binary and wide literals (docs/design/bitwise.md) run as the
+// values they are: an `unsigned` up to 2^64-1, compared and divided as one;
+// a match on an `unsigned` hits arms up to 0xFFFF_FFFF_FFFF_FFFF, INT64_MIN's
+// and INT64_MAX's bits among them (a switch's empty and tombstone keys); a
+// float slot takes the value rounded once; a conversion's argument is an
+// `unsigned`; and a generic body keeps the literal (the cloner copies it).
+TEST(SizedTypes, LiteralsAtTheLimitsRun) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+fn arm(u: unsigned) -> Str {
+  match u {
+    0 { return "zero"; }
+    1 { return "one"; }
+    0x7FFF_FFFF_FFFF_FFFF { return "int max"; }
+    0x8000_0000_0000_0000 { return "top"; }
+    0xFFFF_FFFF_FFFF_FFFF { return "max"; }
+    _ { return "miss"; }
+  }
+}
+fn widest<T>(x: T) -> unsigned => 0xFFFF_FFFF_FFFF_FFFF;
+fn main() -> int {
+  let a: u8 = 0xFF;
+  io::println(Str(a) + " " + Str(0b1010_1010) + " " + Str(0xFFFF_FFFF_FFFF_FFFF)
+              + " " + Str(0x8000_0000_0000_0000));
+  let top: unsigned = 0x8000_0000_0000_0000;
+  io::println(Str(top > 1) + " " + Str(top / 2));
+  let arms: unsigned[6] = [0, 1, 0x7FFF_FFFF_FFFF_FFFF, 0x8000_0000_0000_0000,
+                           0xFFFF_FFFF_FFFF_FFFF, 7];
+  for i in 0..6 { io::println(arm(arms[i])); }
+  let f: f32 = 18446744073709551615;
+  let d: float = 18446744073709551615;
+  io::println(Str(f) + " " + Str(d) + " " + Str(u8(0xFFFF_FFFF_FFFF_FFFF)));
+  io::println(Str(widest(1)) + " " + Str(widest("s")));
+  return 0;
+}
+)");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "255 170 18446744073709551615 9223372036854775808\n"
+                      "True 4611686018427387904\n"
+                      "zero\none\nint max\ntop\nmax\nmiss\n"
+                      "1.84467e+19 1.84467e+19 255\n"
+                      "18446744073709551615 18446744073709551615\n");
+  g.expectNoLeaks("SizedTypes.LiteralsAtTheLimitsRun");
+}

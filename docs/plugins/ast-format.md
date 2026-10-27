@@ -154,7 +154,7 @@ to resolve, which reports unknown names.
 
 | Node | Meaning |
 |---|---|
-| `(int LOC INT)` | an integer literal |
+| `(int LOC INT)` | an integer literal: `INT` is -9223372036854775808 to 18446744073709551615. A value above 9223372036854775807 is a literal of 2^63 or more (`0xFFFF_FFFF_FFFF_FFFF` is `(int 18446744073709551615)`), which Sema checks against its context's type as the frontend's ([`../design/bitwise.md`](../design/bitwise.md)); a negative one is a value arm's negative number. Every other `INT` field is a 64-bit signed integer |
 | `(float LOC FLOAT)` | a float literal: a number, or `inf`, `-inf`, `nan`. The writer prints 17 significant digits, so the value reads back exactly |
 | `(bool LOC true)`, `(bool LOC false)` | |
 | `(char LOC INT)` | a character literal: its byte value, 0 to 255 (`'a'` is 97) |

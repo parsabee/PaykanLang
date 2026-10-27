@@ -2416,6 +2416,43 @@ TEST(Pkm, SizedTypesCrossModulesAndPkm) {
   fs::remove_all(dir);
 }
 
+// A literal above INT64_MAX in a template's body is kept with its value in
+// the module file's TMPL (the AST interchange format's `(int ...)` up to
+// 18446744073709551615, docs/design/bitwise.md), and an importer's
+// instantiation returns it.
+TEST(Pkm, AWideLiteralInATemplateKeepsItsValue) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_wide_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib" / "wide.pkn",
+            "fn widest<T>(x: T) -> unsigned => 0xFFFF_FFFF_FFFF_FFFF;\n"
+            "fn top<T>(x: T) -> unsigned => 0x8000_0000_0000_0000;\n");
+  writeFile(dir / "main.pkn", "import ::io; import lib::wide;\n"
+                              "fn main() -> int {\n"
+                              "  io::println(Str(wide::widest(1)) + \" \" + "
+                              "Str(wide::top(\"s\")));\n"
+                              "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  const char *expected = "18446744073709551615 9223372036854775808\n";
+  auto fromSource = paykan("main.pkn");
+  EXPECT_EQ(fromSource.exitCode, 0) << fromSource.out;
+  EXPECT_EQ(fromSource.out, expected);
+  auto emit = paykan("--emit-pkm lib/wide.pkn");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  fs::remove(dir / "lib" / "wide.pkn");
+  auto tmpl = paykan("pkm dump --section=tmpl lib/wide.pkm");
+  EXPECT_EQ(tmpl.exitCode, 0) << tmpl.out;
+  EXPECT_TRUE(contains(tmpl.out, " 18446744073709551615)")) << tmpl.out;
+  EXPECT_TRUE(contains(tmpl.out, " 9223372036854775808)")) << tmpl.out;
+  auto fromPkm = paykan("main.pkn");
+  EXPECT_EQ(fromPkm.exitCode, 0) << fromPkm.out;
+  EXPECT_EQ(fromPkm.out, expected);
+  fs::remove_all(dir);
+}
+
 // -- Conformances across modules (docs/language/06-traits.md, "Hashable")
 
 namespace {

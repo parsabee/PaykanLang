@@ -155,3 +155,5 @@ defaults:
     values: { title: "Design: weak references", parent: Implementation and plugins, nav_order: 13 }
   - scope: { path: design/mlir-backend.md }
     values: { title: "Design: the MLIR backend", parent: Implementation and plugins, nav_order: 14 }
+  - scope: { path: design/bitwise.md }
+    values: { title: "Design: bitwise operators", parent: Implementation and plugins, nav_order: 15 }

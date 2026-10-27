@@ -4,6 +4,7 @@
 #include "Lexer.h"
 #include "paykan/Frontend.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -21,6 +22,50 @@ bool isIdentStart(char c) {
 }
 bool isDigit(char c) { return c >= '0' && c <= '9'; }
 bool isIdentChar(char c) { return isIdentStart(c) || isDigit(c); }
+
+/// Whether @p s names a numeric type: a literal directly followed by one
+/// (`255u8`) is the suffix error.
+bool isNumericTypeName(std::string_view s) {
+  static constexpr std::string_view kNames[] = {
+      "i8",  "i16", "i32", "i64", "u8",  "u16",   "u32",
+      "u64", "f16", "f32", "f64", "int", "float", "unsigned"};
+  return std::find(std::begin(kNames), std::end(kNames), s) != std::end(kNames);
+}
+
+/// The value of the hexadecimal digit @p c, either case; 16 for any other
+/// character.
+unsigned digitValue(char c) {
+  if (isDigit(c))
+    return static_cast<unsigned>(c - '0');
+  if (c >= 'a' && c <= 'f')
+    return static_cast<unsigned>(c - 'a' + 10);
+  if (c >= 'A' && c <= 'F')
+    return static_cast<unsigned>(c - 'A' + 10);
+  return 16;
+}
+
+/// The value of the digits of @p digits in @p base, skipping each `_`, into
+/// @p out; false when it is 2^64 or more.  Every character is a digit of the
+/// base or `_`.
+bool accumulate(std::string_view digits, unsigned base, uint64_t &out) {
+  uint64_t v = 0;
+  for (char c : digits) {
+    if (c == '_')
+      continue;
+    const uint64_t d = digitValue(c);
+    if (v > (UINT64_MAX - d) / base)
+      return false;
+    v = v * base + d;
+  }
+  out = v;
+  return true;
+}
+
+/// The error of an integer literal of 2^64 or more, spelled @p text.
+std::string outOfRange(const std::string &text) {
+  return "integer is out of range: " + text +
+         " (an integer literal is at most 18446744073709551615)";
+}
 
 struct Keyword {
   std::string_view Spelling;
@@ -516,16 +561,29 @@ Token Lexer::next() {
   return t;
 }
 
-// INT    ::= digit+
-// FLOAT  ::= digit+ "." digit* exponent? | digit+ exponent
-// exponent ::= ("e" | "E") ("+" | "-")? digit+
+// INT         ::= decimal | hexadecimal | binary
+// decimal     ::= digit+
+// hexadecimal ::= "0x" hexDigit ( "_"? hexDigit )*
+// binary      ::= "0b" [01] ( "_"? [01] )*
+// FLOAT       ::= digit+ "." digit* exponent? | digit+ exponent
+// exponent    ::= ("e" | "E") ("+" | "-")? digit+
 //
 // Longest match (docs/grammar.md): `1.` is a float, `1e` is the
 // integer 1 followed by the identifier `e`, and `1..` is the integer 1
-// followed by `..` (a range's start, not the float `1.`).  After a `.`
-// (afterDot) only the digits are taken; the parser turns them into a tuple
-// index and validates them (no leading zeros, in range) itself.
+// followed by `..` (a range's start, not the float `1.`).  An integer
+// literal of any base is 0 to 2^64-1 (docs/design/bitwise.md); the scanner
+// never sees a sign.  A `_` stands between two digits of a hexadecimal or
+// binary literal only, and a literal takes no suffix: `1_000` and `255u8`
+// are one error each, while another identifier glued to a number is a token
+// of its own (`0..10step 2`, `1else`).  After a `.` (afterDot) only the
+// digits are taken; the parser turns them into a tuple index and validates
+// them (no leading zeros, in range) itself.
 Token Lexer::lexNumber(size_t start, size_t line, size_t col, bool afterDot) {
+  if (!afterDot && cur() == '0') {
+    const char p = peekAt(1);
+    if (p == 'x' || p == 'X' || p == 'b' || p == 'B' || p == 'o' || p == 'O')
+      return lexPrefixedNumber(start, line, col);
+  }
   while (!atEnd() && isDigit(cur()))
     advance();
   if (afterDot)
@@ -543,20 +601,60 @@ Token Lexer::lexNumber(size_t start, size_t line, size_t col, bool afterDot) {
       ++i;
     return i;
   };
+  // A `_` followed by a digit or another `_` takes the run of digits and
+  // `_` into the literal, which is then the separator error.
+  auto separatorRun = [&]() {
+    if (peekAt(0) != '_' || !(isDigit(peekAt(1)) || peekAt(1) == '_'))
+      return false;
+    while (isDigit(peekAt(0)) || peekAt(0) == '_')
+      advance();
+    return true;
+  };
 
   bool isFloat = false;
-  if (!atEnd() && cur() == '.' && peekAt(1) != '.') {
-    isFloat = true;
-    advance();
-    while (!atEnd() && isDigit(cur()))
+  bool separated = separatorRun();
+  if (!separated) {
+    if (peekAt(0) == '.' && peekAt(1) != '.') {
+      isFloat = true;
       advance();
-    advance(exponentLength());
-  } else if (size_t n = exponentLength()) {
-    isFloat = true;
-    advance(n);
+      while (isDigit(peekAt(0)))
+        advance();
+      separated = separatorRun();
+      if (!separated)
+        advance(exponentLength());
+    } else if (size_t n = exponentLength()) {
+      isFloat = true;
+      advance(n);
+    }
+  }
+  const Tok kind = isFloat ? Tok::Float : Tok::Int;
+  if (separated) {
+    Token t = make(kind, start, line, col);
+    error(line, col,
+          "'_' separates digits only in hexadecimal and binary literals: '" +
+              std::string(t.Text) + "'");
+    return t;
+  }
+  // A numeric type's name glued to the number is a suffix, which the
+  // language does not have: the literal takes its type from the context.
+  if (isIdentStart(peekAt(0))) {
+    size_t n = 0;
+    while (isIdentChar(peekAt(n)))
+      ++n;
+    const std::string_view suffix = Src.substr(Pos, n);
+    if (isNumericTypeName(suffix)) {
+      const std::string_view digits = Src.substr(start, Pos - start);
+      advance(n);
+      Token t = make(kind, start, line, col);
+      error(line, col,
+            "there are no literal suffixes: '" + std::string(t.Text) +
+                "' (a literal takes its type from the context, as in 'x: " +
+                std::string(suffix) + " = " + std::string(digits) + "')");
+      return t;
+    }
   }
 
-  Token t = make(isFloat ? Tok::Float : Tok::Int, start, line, col);
+  Token t = make(kind, start, line, col);
   std::string text(t.Text);
   if (isFloat) {
     // A literal must denote a finite float: one that overflows to ±inf, or
@@ -570,27 +668,63 @@ Token Lexer::lexNumber(size_t start, size_t line, size_t col, bool afterDot) {
     }
     return t;
   }
-  // The scanner never sees a sign (`-` is its own token), so INT64_MIN's
-  // magnitude is out of range here, but right after a `-`: there it is the
-  // IntValue INT64_MIN, which negates to itself, for the negative match
-  // pattern `-9223372036854775808` (parseMatchArm).  The parser rejects it
-  // anywhere else (parseLiteral), where INT64_MIN is written as an
-  // expression, e.g. `-9223372036854775807 - 1`.
-  errno = 0;
-  long long v = std::strtoll(text.c_str(), nullptr, 10);
-  if (errno == ERANGE) {
-    errno = 0;
-    const unsigned long long magnitude =
-        std::strtoull(text.c_str(), nullptr, 10);
-    if (PrevKind == Tok::Minus && errno == 0 &&
-        magnitude == static_cast<unsigned long long>(INT64_MAX) + 1) {
-      v = INT64_MIN;
-    } else {
-      error(line, col, "integer is out of range: " + text);
-      v = 0;
-    }
+  if (!accumulate(t.Text, 10, t.IntValue)) {
+    error(line, col, outOfRange(text));
+    t.IntValue = 0;
   }
-  t.IntValue = static_cast<int64_t>(v);
+  return t;
+}
+
+// `0x...`, `0b...` and the malformed forms around them: after the prefix the
+// whole run of letters, digits and `_` is the literal, checked as one
+// (`0xFG` is one error, not `0xF` and `G`), and so is a fraction after it
+// (`0x1.5`).  A `.` followed by anything else is not part of it: `0xFF.x`
+// is a member of 255 and `0x10..0x20` a range.  Each malformed literal is
+// one error; its token is the INT 0.
+Token Lexer::lexPrefixedNumber(size_t start, size_t line, size_t col) {
+  const char prefix = peekAt(1);
+  advance(2);
+  const size_t runStart = Pos;
+  while (isIdentChar(peekAt(0)))
+    advance();
+  const std::string_view run = Src.substr(runStart, Pos - runStart);
+  const bool fraction = peekAt(0) == '.' && isDigit(peekAt(1));
+  if (fraction) {
+    advance();
+    while (isIdentChar(peekAt(0)))
+      advance();
+  }
+  Token t = make(Tok::Int, start, line, col);
+  const std::string text(t.Text);
+  const bool hex = prefix == 'x' || prefix == 'X';
+  const std::string kind = hex ? "hexadecimal" : "binary";
+  const unsigned base = hex ? 16 : 2;
+  const auto badDigit = std::find_if(run.begin(), run.end(), [&](char c) {
+    return c != '_' && digitValue(c) >= base;
+  });
+  std::string message;
+  if (prefix == 'X' || prefix == 'B')
+    message = "the prefix of a " + kind + " literal is '0" + (hex ? "x" : "b") +
+              "', in lower case: '" + text + "'";
+  else if (prefix == 'o' || prefix == 'O')
+    message = "there are no octal literals: '" + text +
+              "' (write the value in hexadecimal, as '0x...', or in decimal)";
+  else if (run.empty())
+    message = "expected a " + kind + " digit after '0" + prefix + "'";
+  else if (run.front() == '_' || run.back() == '_' ||
+           run.find("__") != std::string_view::npos)
+    message = "a '_' in a number must stand between two digits: '" + text + "'";
+  else if (badDigit != run.end())
+    message = std::string("invalid digit '") + *badDigit + "' in " + kind +
+              " literal '" + text + "'";
+  else if (!accumulate(run, base, t.IntValue))
+    message = outOfRange(text);
+  else if (fraction)
+    message = "a " + kind + " literal has no fraction: '" + text + "'";
+  if (!message.empty()) {
+    error(line, col, message);
+    t.IntValue = 0;
+  }
   return t;
 }
 

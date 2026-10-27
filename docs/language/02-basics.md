@@ -434,8 +434,8 @@ Output:
   `HashMap` key; an `unsigned` also has `u.toInt()`, its value as an `int?` (`None` above
   9223372036854775807).  A sized type has an optional (`u8?`), is a `match` subject with literal
   arms, and is a type argument like any value type (`Box<u8>`, `List<f32>`).
-- **Not yet:** bitwise operators and shifts, literal suffixes (`1u8`), hexadecimal
-  literals, and implicit widening (`i32` to `int`).  The design is in
+- **Not yet:** bitwise operators and shifts, literal suffixes (`1u8`), and implicit
+  widening (`i32` to `int`).  The design is in
   [`design/sized-types.md`](../design/sized-types.md).
 
 ### Arrays
@@ -579,16 +579,55 @@ enums.
 
 | Literal        | Type    | Examples          |
 |----------------|---------|-------------------|
-| Integer        | `int` (or the sized integer type the context expects) | `0`, `42`, `-17`  |
+| Integer        | `int` (or the sized integer type the context expects) | `0`, `42`, `-17`, `0xFF`, `0b1010`, `0xFFFF_0000` |
 | Floating-point | `float` (or `f32` / `f16` when expected) | `3.14`, `0.5`, `1e9` |
 | Boolean        | `bool`  | `True`, `False`   |
 | Character      | `char`  | `'a'`, `'\n'`, `'\t'` |
 | String         | `Str`   | `"hello"`, `""`   |
 | None           | `Obj`   | `None`            |
 
-An integer literal must fit in a signed 64-bit integer; a larger one (above
-`9223372036854775807`) is a compile-time error. `-17` is unary minus applied to the literal
-`17`, so the most negative `int` cannot be written directly — compute it as
+An integer literal is written in decimal (`255`), in hexadecimal after `0x` (`0xFF`, with
+digits of either case) or in binary after `0b` (`0b1111_1111`). A `_` may stand between
+two digits of a hexadecimal or binary literal, to group them (`0xFFFF_0000`). In every
+base an integer literal is 0 to `18446744073709551615`; a larger one is a compile-time
+error (`integer is out of range: ...`). Its type comes from the context, as described in
+[Sized numeric types](#sized-numeric-types), and a literal above `9223372036854775807`
+needs an unsigned or float context: `m: unsigned = 0xFFFF_FFFF_FFFF_FFFF` is fine, while in
+an `int` slot, or with no context, it is an error that names the unsigned context. As the
+argument of a conversion it is an `unsigned`: `u8(0xFFFF_FFFF_FFFF_FFFF)` keeps its low
+bits, `255`. A hexadecimal literal is a value, not a bit pattern: `y: i8 = 0xFF` is `the
+literal 255 does not fit in 'i8' (-128 to 127)`, and the reinterpretation is spelled
+`i8(u8(0xFF))`, which is `-1`.
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  let mask: u32 = 0xFFFF_0000;
+  let bits: u8 = 0b1010_0101;
+  let top: unsigned = 0xFFFF_FFFF_FFFF_FFFF;
+  io::println(Str(mask) + " " + Str(bits) + " " + Str(top));
+  io::println(0xFF.toString() + " " + Str(u8(0xFFFF_FFFF_FFFF_FFFF)) + " " + Str(i8(u8(0xFF))));
+  return 0;
+}
+```
+
+Output:
+
+```
+4294901760 165 18446744073709551615
+255 255 -1
+```
+
+The prefixes are lower case (`0XFF` is an error that says so), and there are no octal
+literals: `0o17` is an error, and `017` is the decimal `17`. A `_` in a decimal literal is
+not a separator (`1_000` is an error), and a literal has no suffix: `255u8` is an error
+that shows the context to write instead, `x: u8 = 255`. A hexadecimal or binary literal
+never takes a `.`: `0xFF.toString()` calls a method of `255`, `0x10..0x20` is a range, and
+`0x1.5` is an error.
+
+`-17` is unary minus applied to the literal `17`, so the most negative `int` cannot be
+written directly: `-9223372036854775808` is an error that says to compute it as
 `-9223372036854775807 - 1`. A `match` pattern is the exception: there `-17` is one literal,
 and `-9223372036854775808` is the most negative `int` ([Match](08-match.md#matching-values)).
 

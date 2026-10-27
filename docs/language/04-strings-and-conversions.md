@@ -374,6 +374,13 @@ What a conversion gives:
 | integer → `bool`  | `n != 0`                                                                |
 | integer → `char`  | the `char` with that byte value; panics outside `0` to `255` (a `u8` never does) |
 
+The literal argument of `T(...)` is an `int` (`u8(300)` is `44`), but for one above
+`9223372036854775807`, which is an `unsigned` ([Literals](02-basics.md#literals)):
+`unsigned(0xFFFF_FFFF_FFFF_FFFF)` is
+`18446744073709551615`, `u8(0xFFFF_FFFF_FFFF_FFFF)` keeps its low bits, `255`, and
+`float(0xFFFF_FFFF_FFFF_FFFF)` is `1.84467e+19`; `int(0xFFFF_FFFF_FFFF_FFFF)` is the error
+of an `unsigned` converted to an `int`.
+
 ```pkn
 import ::io;
 
@@ -505,9 +512,11 @@ runs when it failed. [Optionals](12-optionals.md#unwrapping-with-match) explains
 optionals in full.
 
 The parses are strict. The whole string must be the value, with no surrounding whitespace,
-and the empty string is never one. A text parses exactly when it is a valid literal of the
-type, and gives that literal's value; on top of that, a signed or a float type takes a
-leading `+` or `-`, and `toFloat()` takes the other spellings of C's `strtod`.
+and the empty string is never one. A text parses exactly when it is a valid decimal literal
+of the type, and gives that literal's value; on top of that, a signed or a float type takes
+a leading `+` or `-`, and `toFloat()` takes the other spellings of C's `strtod`. The integer
+parses read decimal only: `0xFF` is a literal, but `"0xFF".toUnsigned()` is `None` (while
+`"0x10".toFloat()` is `16`, as `strtod` reads it).
 
 | Method | Gives | Accepts | `None` when |
 |---|---|---|---|

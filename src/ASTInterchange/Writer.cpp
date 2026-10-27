@@ -597,11 +597,17 @@ private:
       return;
     }
     switch (e->getKind()) {
-    case ASTNode::NK_IntegerLiteral:
+    case ASTNode::NK_IntegerLiteral: {
+      // A literal above INT64_MAX is written as the unsigned value it is.
+      const auto *lit = cast<IntegerLiteral>(e);
       open("int", e);
-      OS << " " << cast<IntegerLiteral>(e)->getValue();
+      if (lit->isAboveInt64Max())
+        OS << " " << lit->getUnsignedValue();
+      else
+        OS << " " << lit->getValue();
       close();
       return;
+    }
     case ASTNode::NK_FloatLiteral:
       open("float", e);
       floating(cast<FloatLiteral>(e)->getValue());

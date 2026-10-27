@@ -288,7 +288,10 @@ void ASTPrinter::visitVarDecl(VarDecl *node) {
 
 void ASTPrinter::visitIntegerLiteral(IntegerLiteral *node) {
   header("IntegerLiteral", node);
-  OS << " " << node->getValue() << "\n";
+  if (node->isAboveInt64Max())
+    OS << " " << node->getUnsignedValue() << "\n";
+  else
+    OS << " " << node->getValue() << "\n";
 }
 
 void ASTPrinter::visitFloatLiteral(FloatLiteral *node) {

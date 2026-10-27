@@ -339,6 +339,7 @@ target_link_libraries(ast_interchange_tests
             paykan_ast_interchange
             paykan_frontend
             paykan_ast_printer
+            paykan_sema
             paykan_compile_options
 )
 paykan_link_plugins(ast_interchange_tests)

@@ -2126,15 +2126,19 @@ MatchArm *Parser::parseMatchArm() {
     pattern = parseLiteral();
   } else if (at(Tok::Minus) && (kind(1) == Tok::Int || kind(1) == Tok::Float)) {
     // `-1`, `-2.5`: a negative number, one literal of the negated value
-    // spanning the `-` (as the AST interchange format's `(int -1)` is).  An
-    // INT right after a `-` may be INT64_MIN's magnitude, which the lexer
-    // gives as INT64_MIN: `-9223372036854775808` is INT64_MIN.
+    // spanning the `-` (as the AST interchange format's `(int -1)` is).
+    // `-9223372036854775808` is INT64_MIN; a larger magnitude is out of
+    // range.
     consume(); // '-'
     Token t = consume();
-    if (t.Kind == Tok::Int)
-      pattern = Ctx.make<IntegerLiteral>(
-          span(start), t.IntValue < 0 ? t.IntValue : -t.IntValue);
-    else
+    if (t.Kind == Tok::Int) {
+      if (t.IntValue > static_cast<uint64_t>(INT64_MAX) + 1) {
+        error(span(start), "integer is out of range: -" + std::string(t.Text));
+        return nullptr;
+      }
+      pattern = Ctx.make<IntegerLiteral>(span(start),
+                                         static_cast<int64_t>(0 - t.IntValue));
+    } else
       pattern = Ctx.make<FloatLiteral>(span(start), -t.FloatValue);
   } else {
     if ((at(Tok::KwView) || at(Tok::KwInout)) && kind(1) == Tok::Ident &&
@@ -2329,15 +2333,20 @@ Type *Parser::parseTypeAnnotation() {
         std::vector<int64_t> lengths;
         for (;;) {
           Token n = consume();
-          if (n.Kind == Tok::Int && n.IntValue < 1) {
+          if (n.Kind == Tok::Int && n.IntValue == 0) {
             error(n.Loc, "a fixed-size array has at least one element: its "
                          "length must be 1 or more");
+            return nullptr;
+          }
+          if (n.Kind == Tok::Int &&
+              n.IntValue > static_cast<uint64_t>(INT64_MAX)) {
+            error(n.Loc, "integer is out of range: " + std::string(n.Text));
             return nullptr;
           }
           if (!expect(Tok::RBracket, "to close the array type"))
             return nullptr;
           lengths.push_back(n.Kind == Tok::Int
-                                ? n.IntValue
+                                ? static_cast<int64_t>(n.IntValue)
                                 : FixedArrayType::kInferredLength);
           if (!(at(Tok::LBracket) && isLength(peek(1).Kind)))
             break;
@@ -2597,14 +2606,11 @@ Expr *Parser::parseLiteral() {
   Token t = consume();
   switch (t.Kind) {
   case Tok::Int:
-    // INT64_MIN's magnitude, which the lexer takes right after a `-` for a
-    // negative match pattern (parseMatchArm), is out of range anywhere else,
-    // and kept as 0, as the lexer keeps another.
-    if (t.IntValue < 0) {
-      error(t.Loc, "integer is out of range: " + std::string(t.Text));
-      return Ctx.make<IntegerLiteral>(t.Loc, 0);
-    }
-    return Ctx.make<IntegerLiteral>(t.Loc, t.IntValue);
+    // A literal above INT64_MAX keeps its bits and is flagged: Sema checks
+    // it against the type its context gives it (docs/design/bitwise.md).
+    return Ctx.make<IntegerLiteral>(t.Loc, static_cast<int64_t>(t.IntValue),
+                                    t.IntValue >
+                                        static_cast<uint64_t>(INT64_MAX));
   case Tok::Float:
     return Ctx.make<FloatLiteral>(t.Loc, t.FloatValue);
   case Tok::KwTrue:
@@ -2837,15 +2843,19 @@ Expr *Parser::parseArrayLiteral() {
       return nullptr;
     }
     Token n = consume();
-    if (n.IntValue < 1) {
+    if (n.IntValue == 0) {
       error(n.Loc, "an array has at least one element: the count must be 1 "
                    "or more");
+      return nullptr;
+    }
+    if (n.IntValue > static_cast<uint64_t>(INT64_MAX)) {
+      error(n.Loc, "integer is out of range: " + std::string(n.Text));
       return nullptr;
     }
     if (!expect(Tok::RBracket, "to close the array literal"))
       return nullptr;
     return Ctx.make<ArrayLiteralExpr>(span(start), std::move(elems),
-                                      n.IntValue);
+                                      static_cast<int64_t>(n.IntValue));
   }
   if (!expect(Tok::RBracket, "to close the array literal"))
     return nullptr;

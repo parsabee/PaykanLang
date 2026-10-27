@@ -580,6 +580,18 @@ private:
       return B.integer(*e, out);
     }
 
+    /// The value of an `(int ...)`: B.literalInteger of the next field.
+    bool literalInteger(const char *what, int64_t &bits, bool &above) {
+      const SExpr *e = next(what);
+      if (!e)
+        return false;
+      if (e->K != SExpr::Number) {
+        B.fail(*e, std::string("expected an integer: ") + what);
+        return false;
+      }
+      return B.literalInteger(*e, bits, above);
+    }
+
     /// The next field, which must be a list tagged @p tag.
     const SExpr *list(const char *tag) {
       const SExpr *e = next(tag);
@@ -652,6 +664,26 @@ private:
       return false;
     }
     return true;
+  }
+
+  /// An integer literal's value (docs/plugins/ast-format.md): an int64, or a
+  /// value without a sign up to 2^64-1, whose bits go to @p bits with
+  /// @p above set (a literal above INT64_MAX, docs/design/bitwise.md).
+  bool literalInteger(const SExpr &e, int64_t &bits, bool &above) {
+    const char *first = e.Text.data(), *last = first + e.Text.size();
+    above = false;
+    if (auto [p, ec] = std::from_chars(first, last, bits);
+        ec == std::errc() && p == last)
+      return true;
+    uint64_t value = 0;
+    if (auto [p, ec] = std::from_chars(first, last, value);
+        ec == std::errc() && p == last) {
+      bits = static_cast<int64_t>(value);
+      above = true;
+      return true;
+    }
+    fail(e, "not a 64-bit integer: " + e.Text);
+    return false;
   }
 
   /// @L:C-L:C
@@ -1899,9 +1931,10 @@ private:
     Expr *out = nullptr;
     if (t == "int") {
       int64_t v = 0;
-      if (!f.integer("the value", v))
+      bool above = false;
+      if (!f.literalInteger("the value", v, above))
         return nullptr;
-      out = Ctx.make<IntegerLiteral>(loc, v);
+      out = Ctx.make<IntegerLiteral>(loc, v, above);
     } else if (t == "float") {
       const SExpr *v = f.next("the value");
       if (!v)
