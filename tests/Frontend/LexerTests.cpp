@@ -227,6 +227,18 @@ TEST(Lexer, LexicalErrorsAreReportedAndSkipped) {
   EXPECT_EQ(d.Lines[3], "1:13-1:14 IDENT d");
 }
 
+// A long run of text that is no token is skipped as a short one is: the
+// lexer called itself once per invalid character, and some 20,000 in a row
+// overflowed the stack (SIGSEGV), far below the size a source may have.
+TEST(Lexer, ALongRunOfInvalidCharactersIsSkipped) {
+  auto d = dump(std::string(100000, '$') + " x");
+  EXPECT_EQ(d.Errors, 100000u);
+  EXPECT_NE(d.Diags.find("1:100000: error: invalid character '$'"),
+            std::string::npos);
+  ASSERT_EQ(d.Lines.size(), 2u);
+  EXPECT_EQ(d.Lines[0], "1:100002-1:100003 IDENT x");
+}
+
 TEST(Lexer, UnterminatedLiterals) {
   auto d = dump("\"abc\n'a\n'\\\nx");
   EXPECT_NE(d.Diags.find("1:1: error: unterminated string literal"),

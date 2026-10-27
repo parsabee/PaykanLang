@@ -467,9 +467,19 @@ void Lexer::skipTrivia() {
 }
 
 Token Lexer::next() {
+  // Text that is no token is skipped in a loop, not by a call per piece: a
+  // line of some 20,000 invalid characters overflowed the stack.
+  Token t;
+  while (!lexToken(t))
+    continue;
+  PrevKind = t.Kind;
+  PrevEnd = Pos;
+  return t;
+}
+
+bool Lexer::lexToken(Token &t) {
   skipTrivia();
   size_t start = Pos, line = Line, col = Col;
-  Token t;
   if (atEnd()) {
     t = make(Tok::Eof, start, line, col);
   } else {
@@ -482,11 +492,9 @@ Token Lexer::next() {
     } else if (isIdentStart(c)) {
       t = lexIdentOrKeyword(start, line, col);
     } else if (c == '\'') {
-      if (!lexChar(start, line, col, t))
-        return next();
+      return lexChar(start, line, col, t);
     } else if (c == '"') {
-      if (!lexString(start, line, col, t))
-        return next();
+      return lexString(start, line, col, t);
     } else {
       Tok k;
       size_t len = 1;
@@ -589,15 +597,13 @@ Token Lexer::next() {
       default:
         advance();
         error(line, col, std::string("invalid character '") + c + "'");
-        return next();
+        return false;
       }
       advance(len);
       t = make(k, start, line, col);
     }
   }
-  PrevKind = t.Kind;
-  PrevEnd = Pos;
-  return t;
+  return true;
 }
 
 // INT         ::= decimal | hexadecimal | binary

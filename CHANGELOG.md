@@ -1196,6 +1196,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     anywhere (`cd src/a && paykan --emit-pkm --module-name=a::b b.pkn` too); otherwise
     against the file's directory, as before (docs/language/17-the-paykan-command.md).
 - A value read from a variable could be freed while still in use when a call later in the
+  - A line of some 20,000 invalid characters (`$`, NUL bytes) overflowed the stack in the
+    lexer (a segmentation fault), far below the 256 MiB a source may have, since it called
+    itself once per character it skipped.  It skips them in a loop: 100,000 `$` in a row
+    are 100,000 `invalid character '$'` errors, 20 of them printed, and exit status 1.
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
   and `l.greet(repl(l))` or `s.n.greet(s.reset())` ran a method on a freed object.  Such a
