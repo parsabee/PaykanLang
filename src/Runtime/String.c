@@ -326,3 +326,42 @@ void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other) {
   lhs->data = newData;
   lhs->len = newLen;
 }
+
+// -- The standard library's ::collections (its string functions)
+//
+// An index is the standard library's `unsigned`, in an int64_t: one of 2^63
+// or more is negative here, so each is compared as a uint64_t, and a panic
+// prints it as the program wrote it.
+
+PaykanShared *PaykanString_slice(PaykanObject *self, int64_t from, int64_t to) {
+  PaykanString *s = (PaykanString *)self;
+  if ((uint64_t)from > (uint64_t)to || (uint64_t)to > (uint64_t)s->len)
+    Paykan_runtime_panic("string slice %llu..%llu out of bounds (len=%lld)",
+                         (unsigned long long)from, (unsigned long long)to,
+                         (long long)s->len);
+  return PaykanShared_new(
+      (PaykanObject *)PaykanString_new(s->data + from, to - from));
+}
+
+int64_t PaykanString_find(PaykanObject *self, PaykanObject *needle,
+                          int64_t from) {
+  const PaykanString *s = (const PaykanString *)self;
+  const PaykanString *n = (const PaykanString *)needle;
+  if ((uint64_t)from > (uint64_t)s->len || n->len > s->len - from)
+    return -1;
+  if (n->len == 0)
+    return from;
+  // Each place the needle's first byte is, up to the last one the whole
+  // needle fits after, compared with the rest of it.
+  const char *at = s->data + from;
+  const char *last = s->data + (s->len - n->len);
+  while (at <= last) {
+    at = (const char *)memchr(at, n->data[0], (size_t)(last - at) + 1);
+    if (!at)
+      return -1;
+    if (memcmp(at + 1, n->data + 1, (size_t)n->len - 1) == 0)
+      return at - s->data;
+    ++at;
+  }
+  return -1;
+}

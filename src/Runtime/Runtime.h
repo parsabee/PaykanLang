@@ -273,6 +273,20 @@ void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other);
 // Test-only: generated code subscripts a Str through PaykanString_char_at.
 PaykanShared *PaykanString_at(PaykanObject *self, int64_t idx);
 
+// The standard library's ::collections (stdlib/collections.pkn): its string
+// functions are built on these, which its natives bind to.  They count
+// bytes, as `len()` and `s[i]` do, borrow the strings they are given, and
+// take each index as the bits of an `unsigned`, compared as a uint64_t.
+/// A new string (owned +1) of the bytes of @p self from @p from up to, not
+/// including, @p to.  Panics unless from <= to <= len, printing both as
+/// unsigned: `string slice 2..7 out of bounds (len=3)`.
+PaykanShared *PaykanString_slice(PaykanObject *self, int64_t from, int64_t to);
+/// The first index from @p from on at which @p needle occurs in @p self, or
+/// -1 when it occurs at none (or @p from is past the end).  An empty needle
+/// occurs at every index up to the length, so it is found at @p from.
+int64_t PaykanString_find(PaykanObject *self, PaykanObject *needle,
+                          int64_t from);
+
 // Global vtable instance.
 extern PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS];
 

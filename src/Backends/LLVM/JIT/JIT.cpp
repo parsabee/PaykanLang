@@ -141,6 +141,9 @@ const RuntimeSymbol kRuntimeSymbols[] = {
     // The standard library's ::error.
     {kPaykanErrorCode,       reinterpret_cast<void *>(&Paykan_error_code)},
     {kPaykanErrorText,       reinterpret_cast<void *>(&Paykan_error_text)},
+    // ... and ::collections's string functions.
+    {kPaykanStringSlice,     reinterpret_cast<void *>(&PaykanString_slice)},
+    {kPaykanStringFind,      reinterpret_cast<void *>(&PaykanString_find)},
 };
 
 // Match dispatch and generated vtable references look builtin vtables up as

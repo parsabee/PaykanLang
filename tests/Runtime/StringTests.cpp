@@ -550,3 +550,129 @@ TEST(IntHash, IsDeterministicAndMixed) {
     EXPECT_LT(bucket, 140);
   }
 }
+
+// -- PaykanString_slice / PaykanString_find (::collections's string functions)
+
+namespace {
+
+/// The bytes of @p text from @p from up to @p to, by PaykanString_slice.
+std::string sliceOf(const std::string &text, int64_t from, int64_t to) {
+  PaykanString *s =
+      PaykanString_new(text.data(), static_cast<int64_t>(text.size()));
+  PaykanShared *r = PaykanString_slice((PaykanObject *)s, from, to);
+  const auto *rs = (const PaykanString *)PaykanShared_get(r);
+  EXPECT_EQ(rs->data[rs->len], '\0');
+  std::string out(rs->data, static_cast<size_t>(rs->len));
+  Paykan_release(r);
+  Paykan_dispose((PaykanObject *)s);
+  return out;
+}
+
+/// PaykanString_find of @p needle in @p text from @p from.
+int64_t findIn(const std::string &text, const std::string &needle,
+               int64_t from) {
+  PaykanString *s =
+      PaykanString_new(text.data(), static_cast<int64_t>(text.size()));
+  PaykanString *n =
+      PaykanString_new(needle.data(), static_cast<int64_t>(needle.size()));
+  int64_t at = PaykanString_find((PaykanObject *)s, (PaykanObject *)n, from);
+  Paykan_dispose((PaykanObject *)n);
+  Paykan_dispose((PaykanObject *)s);
+  return at;
+}
+
+} // namespace
+
+TEST(StringSlice, TakesTheBytesFromUpTo) {
+  EXPECT_EQ(sliceOf("hello", 0, 5), "hello");
+  EXPECT_EQ(sliceOf("hello", 1, 4), "ell");
+  EXPECT_EQ(sliceOf("hello", 4, 5), "o");
+  // An empty slice anywhere from 0 to the length, of an empty string too.
+  EXPECT_EQ(sliceOf("hello", 0, 0), "");
+  EXPECT_EQ(sliceOf("hello", 2, 2), "");
+  EXPECT_EQ(sliceOf("hello", 5, 5), "");
+  EXPECT_EQ(sliceOf("", 0, 0), "");
+  // Bytes, an embedded NUL among them.
+  EXPECT_EQ(sliceOf(std::string("a\0b", 3), 1, 3), std::string("\0b", 2));
+}
+
+TEST(StringSlice, IsANewStringOwnedByTheCaller) {
+  PaykanString *s = PaykanString_new("abc", 3);
+  PaykanShared *r = PaykanString_slice((PaykanObject *)s, 0, 3);
+  PaykanObject *o = PaykanShared_get(r);
+  EXPECT_NE(o, (PaykanObject *)s);
+  EXPECT_EQ((void *)o->vtable, (void *)&PaykanString_vtable);
+  EXPECT_EQ(o->strong, 1);
+  EXPECT_NE(((PaykanString *)o)->data, s->data);
+  Paykan_release(r);
+  EXPECT_STREQ(s->data, "abc");
+  Paykan_dispose((PaykanObject *)s);
+}
+
+TEST(StringSliceDeath, OutOfBoundsPanics) {
+  PaykanString *s = PaykanString_new("abc", 3);
+  auto *o = (PaykanObject *)s;
+  EXPECT_DEATH(PaykanString_slice(o, 2, 7),
+               "string slice 2\\.\\.7 out of bounds \\(len=3\\)");
+  EXPECT_DEATH(PaykanString_slice(o, 4, 4),
+               "string slice 4\\.\\.4 out of bounds \\(len=3\\)");
+  // A slice that ends before it starts.
+  EXPECT_DEATH(PaykanString_slice(o, 2, 1),
+               "string slice 2\\.\\.1 out of bounds \\(len=3\\)");
+  Paykan_dispose(o);
+}
+
+// An index is the standard library's `unsigned`, in an int64_t: one of 2^63
+// or more is negative here, and a panic prints it as the program wrote it.
+TEST(StringSliceDeath, AnIndexPastINT64MaxPanicsUnsigned) {
+  PaykanString *s = PaykanString_new("abc", 3);
+  auto *o = (PaykanObject *)s;
+  EXPECT_DEATH(PaykanString_slice(o, 1, -1),
+               "string slice 1\\.\\.18446744073709551615 out of bounds "
+               "\\(len=3\\)");
+  EXPECT_DEATH(PaykanString_slice(o, INT64_MIN, 2),
+               "string slice 9223372036854775808\\.\\.2 out of bounds "
+               "\\(len=3\\)");
+  Paykan_dispose(o);
+}
+
+TEST(StringFind, FirstIndexFromOn) {
+  EXPECT_EQ(findIn("a,b,c", ",", 0), 1);
+  EXPECT_EQ(findIn("a,b,c", ",", 1), 1);
+  EXPECT_EQ(findIn("a,b,c", ",", 2), 3);
+  EXPECT_EQ(findIn("a,b,c", ",", 4), -1);
+  EXPECT_EQ(findIn("hello", "hello", 0), 0);
+  EXPECT_EQ(findIn("hello", "lo", 0), 3);
+  EXPECT_EQ(findIn("hello", "x", 0), -1);
+  // The first byte matches before the whole needle does.
+  EXPECT_EQ(findIn("aaab", "aab", 0), 1);
+  EXPECT_EQ(findIn("abcabd", "abd", 0), 3);
+  // Occurrences may overlap: each search starts where it is told.
+  EXPECT_EQ(findIn("aaa", "aa", 0), 0);
+  EXPECT_EQ(findIn("aaa", "aa", 1), 1);
+  EXPECT_EQ(findIn("aaa", "aa", 2), -1);
+  // Bytes, an embedded NUL among them.
+  EXPECT_EQ(findIn(std::string("a\0b\0c", 5), std::string("\0c", 2), 0), 3);
+}
+
+TEST(StringFind, ANeedleLongerThanWhatIsLeftIsNotFound) {
+  EXPECT_EQ(findIn("abc", "abcd", 0), -1);
+  EXPECT_EQ(findIn("abc", "bc", 2), -1);
+  EXPECT_EQ(findIn("", "a", 0), -1);
+}
+
+TEST(StringFind, AnEmptyNeedleIsFoundWhereTheSearchStarts) {
+  EXPECT_EQ(findIn("abc", "", 0), 0);
+  EXPECT_EQ(findIn("abc", "", 2), 2);
+  EXPECT_EQ(findIn("abc", "", 3), 3);
+  EXPECT_EQ(findIn("", "", 0), 0);
+}
+
+// From past the end, an `unsigned` of 2^63 or more included, nothing is
+// found: there is no index there.
+TEST(StringFind, FromPastTheEndFindsNothing) {
+  EXPECT_EQ(findIn("abc", "", 4), -1);
+  EXPECT_EQ(findIn("abc", "a", 4), -1);
+  EXPECT_EQ(findIn("abc", "", -1), -1);
+  EXPECT_EQ(findIn("abc", "a", INT64_MIN), -1);
+}
