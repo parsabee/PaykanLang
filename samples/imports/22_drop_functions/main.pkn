@@ -1,0 +1,15 @@
+// OK: a drop function (docs/pir.md §7) that a copy of a template calls,
+// held by another module's .pkm: List<Token>.removeAt, which the standard
+// library's template makes, in tokens; tokens' name<T> made in names.  Each
+// links to the drop function of the module whose code it was lowered with.
+// expect-stdout: 4 b1! w2 b3! w4
+// expect-stdout: w00 b110 w220
+import ::io;
+import tokens;
+import names;
+
+fn main() -> int {
+  io::println(tokens::kept(5));
+  io::println(names::show(0) + " " + names::show(1) + " " + names::show(2));
+  return 0;
+}

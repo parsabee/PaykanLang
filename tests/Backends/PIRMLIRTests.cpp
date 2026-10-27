@@ -621,9 +621,10 @@ fn @main() -> i64 {
   EXPECT_EQ(count(c, "Paykan_retain_inline("), 0u) << c;
 }
 
-// A drop function is called from its own module only (docs/pir.md §7): a
-// static function in the C, declared static too.
-TEST(PIRMLIR, ADropFunctionIsStaticInC) {
+// A drop function links like its module's other functions (docs/pir.md §7):
+// a template's copy lowered with the module may call it from another
+// module's C, so it is not `static`.
+TEST(PIRMLIR, ADropFunctionLinksLikeItsModulesOtherFunctionsInC) {
   const char *const text = R"(module "main"
 extern fn @$rt.PaykanString_new(ptr, i64) -> obj
 cstr @.s = "s" len 1
@@ -657,7 +658,7 @@ fn @main() -> i64 {
     if (line.find("drop") != std::string::npos &&
         line.find("void ") != std::string::npos) {
       ++dropLines;
-      EXPECT_EQ(line.rfind("static void ", 0), 0u) << line;
+      EXPECT_EQ(line.rfind("void ", 0), 0u) << line;
     }
   // Its declaration and its definition.
   EXPECT_EQ(dropLines, 2u) << c;

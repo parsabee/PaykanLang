@@ -778,9 +778,10 @@ fn @main() -> i64 {
   EXPECT_EQ(r.Out, "destroyed\n");
 }
 
-// A drop function is called from its own module only (docs/pir.md §7): it
-// links internally, so that LLVM may inline it where it is called.
-TEST(PIRLLVM, ADropFunctionLinksInsideItsModule) {
+// A drop function links like its module's other functions (docs/pir.md §7):
+// a template's copy lowered with the module may call it from the code of
+// another, which links to it by its name.
+TEST(PIRLLVM, ADropFunctionLinksLikeItsModulesOtherFunctions) {
   const std::string program = std::string(kCounted) + R"(
 fn @.drop.Pair(%at: ptr) -> void {
   %a = ptr.load box, %at
@@ -809,9 +810,10 @@ fn @main() -> i64 {
   std::string err;
   std::string ir = translatePIR(program, err);
   ASSERT_FALSE(ir.empty()) << err;
-  const std::vector<std::string> internal = linesWith(ir, "define internal");
-  ASSERT_EQ(internal.size(), 1u) << ir;
-  EXPECT_NE(internal.front().find("drop"), std::string::npos) << ir;
+  EXPECT_TRUE(linesWith(ir, "define internal").empty()) << ir;
+  const std::vector<std::string> drop = linesWith(ir, "drop_2EPair(");
+  ASSERT_FALSE(drop.empty()) << ir;
+  EXPECT_EQ(drop.front().rfind("define void @", 0), 0u) << ir;
 
   auto r = runPIR(program);
   ASSERT_TRUE(r.Ok) << r.Err;

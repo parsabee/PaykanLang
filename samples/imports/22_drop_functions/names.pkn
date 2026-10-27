@@ -1,0 +1,4 @@
+// An instantiation of tokens' name<T> that this module's .pkm keeps.
+import tokens;
+
+fn show(i: int) -> Str => tokens::name<int>(i * 10, i);

@@ -195,10 +195,10 @@ inline std::string externCSymbol(std::string_view name) {
 /// and releases the references of the value held there (docs/pir.md §7):
 /// what the lowering calls, at a way out of a scope once its function has
 /// written many releases in place, instead of a release of each of many
-/// references.  It is called from its module only, and a backend makes it
-/// private to the module.  Each call of one is given a `local.addr`, so the
-/// moves at last use read it as the release of each of the local's
-/// references.
+/// references.  It links like the module's other functions: a template's
+/// copy the module lowered may call it from another module's code.  Each
+/// call of one is given a `local.addr`, so the moves at last use read it as
+/// the release of each of the local's references.
 inline constexpr std::string_view kDropPrefix = ".drop.";
 
 /// True when @p name is a drop function's.

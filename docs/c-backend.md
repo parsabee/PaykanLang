@@ -272,9 +272,8 @@ its module's name and its symbol's in full, escaped
 (`pk_68__borrowed__parameters_S...`), so the names of one module's
 functions, which have external linkage, often run past 31 characters and
 share their first 31 (in the C of 118 of the samples corpus's 130
-programs), and a `static` one, such as a drop function's for a long type,
-can run past 63.  GCC and Clang take every character of a name as
-significant.
+programs), and some run past 63, such as a drop function's for a long
+type.  GCC and Clang take every character of a name as significant.
 
 The `CStrictC11` ctest (`scripts/c_strict.py`) enforces this over the runnable
 programs of the samples corpus (`samples/codegen`, `samples/leak-check` and

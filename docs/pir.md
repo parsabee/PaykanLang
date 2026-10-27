@@ -678,11 +678,12 @@ CodeGen enforced, now in one place.
   releases where later passes can remove them.  A union's drop function
   `switch`es on its tag and releases the fields of that variant only: the
   others' are zeros, and a union all zeros (never set, or whose references
-  were handed on) releases null references.  A drop function is called from
-  its module only, which a backend makes private to it (internal on the
-  LLVM path, `static` in the C).  Any other release of a value held in
-  memory (an assignment's old value, an object's field in its `destroy`)
-  stays in place.
+  were handed on) releases null references.  A drop function links like
+  its module's other functions: a template's copy the module lowered (a
+  `shared fn`, §3) may call it from the code of another module that keeps
+  the copy, as it calls them.  Any other release of a value held in memory
+  (an assignment's old value, an object's field in its `destroy`) stays in
+  place.
 * **Moves at last use** (§12) then change both rules for a variable handed
   on at its last use: the copy takes no reference of its own, and the
   variable owns nothing from there on (a drop function's call counts as the

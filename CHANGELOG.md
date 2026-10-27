@@ -928,24 +928,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the loop that visits them, and a union every variant's fields) is released there by one
     call of its type's drop function, `@.drop.<type>(ptr)`, which the lowering writes once
     per type in the module (docs/pir.md §7) and which releases a tagged union's references
-    by its tag, the current variant's fields only.  A drop function is private to its
-    module: it links internally on the LLVM path, which may inline it, and is `static` in
-    the C.  A release of an empty slot does nothing, so a value whose references were
-    handed on, or whose bytes are all zero, is safe to drop.  The 100 variants take 2,811
-    lines and 0.42 s, the 200 4,467 lines and 0.70 s.  The moves at last use count a drop
-    function's call as the release of each of its local's references, and PIR's verifier
-    checks that a drop function is `(ptr) -> void` and is given the whole of a `mem` local
-    (docs/pir.md §9).  Any other release of a value held in memory (an assignment's old
-    value, an object's field when the object is destroyed) is in place as before.  Of the
-    146 programs of the samples and the standard library's tests (`samples/codegen`,
-    `samples/leak-check`, `samples/imports` and `tests/Stdlib`), only
-    `samples/leak-check/33_drop_by_tag.pkn`, written to reach them, calls a drop function:
-    every other lowers to the PIR it did without them, so the static counts recorded here
-    do not move, and its loops run as fast (a loop of 50 million `m = mk(); match m
-    {...}` on a union of five references takes 0.25 s at `build -O2`, as it did, where a
-    drop call at the end of its body took 0.75 s).  Sample 33 drops each kind of value in
-    place and by its drop function, a union's by each of its variants and a parameter's
-    whose references were handed on, with no live block left on every path.
+    by its tag, the current variant's fields only.  A drop function links like the module's
+    other functions: a template's copy the module lowered, which a program may keep from
+    the module's `.pkm` (a standard library container's method, or a generic function the
+    module instantiates), calls it from the program's code
+    (`samples/imports/22_drop_functions`).  A release of an empty slot does nothing, so a
+    value whose references were handed on, or whose bytes are all zero, is safe to drop.
+    The 100 variants take 2,811 lines and 0.42 s, the 200 4,467 lines and 0.70 s.  The
+    moves at last use count a drop function's call as the release of each of its local's
+    references, and PIR's verifier checks that a drop function is `(ptr) -> void` and is
+    given the whole of a `mem` local (docs/pir.md §9).  Any other release of a value held
+    in memory (an assignment's old value, an object's field when the object is destroyed)
+    is in place as before.  Of the 147 programs of the samples and the standard library's
+    tests (`samples/codegen`, `samples/leak-check`, `samples/imports` and `tests/Stdlib`),
+    only `samples/leak-check/33_drop_by_tag.pkn` and `samples/imports/22_drop_functions`,
+    written to reach them, call a drop function: every other lowers to the PIR it did
+    without them, so the static counts recorded here do not move, and its loops run as fast
+    (a loop of 50 million `m = mk(); match m {...}` on a union of five references takes
+    0.25 s at `build -O2`, as it did, where a drop call at the end of its body took
+    0.75 s).  Sample 33 drops each kind of value in place and by its drop function, a
+    union's by each of its variants and a parameter's whose references were handed on,
+    with no live block left on every path.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
