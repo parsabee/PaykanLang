@@ -384,6 +384,7 @@ private:
     ast::ClassType *SavedMethodClassType;
     std::unordered_set<pir::ValueId> SavedStringTemps;
     std::vector<LoopContext> SavedLoops;
+    size_t SavedReleasesInPlace = 0;
     FunctionStateGuard(ModuleLowering &l, pir::Function *fn,
                        ast::Type *retASTType, ast::ClassType *methodClassTy);
     ~FunctionStateGuard();
@@ -736,7 +737,10 @@ private:
 
   // -- Statements
 
-  void emitScopeCleanup(Scope &scope);
+  /// Release what @p scope holds: at its end (@p wayOut false), each value
+  /// held in memory in place; on a way out of it (a `return`, `break` or
+  /// `continue`, @p wayOut true) by emitMemDrop.
+  void emitScopeCleanup(Scope &scope, bool wayOut);
   void emitAllScopesCleanup();
   void emitLoopScopesCleanup();
   Val emitImplicitVarDecl(const std::string &name, ast::Expr *rhsExpr,
@@ -1069,10 +1073,19 @@ private:
   void emitMemRetain(const Val &addr, ast::Type *ty);
   void emitMemRelease(const Val &addr, ast::Type *ty);
   /// emitMemRelease of the value of type @p ty a whole `mem` local holds,
-  /// at @p local, its `local.addr`: when a scope is left, or a temporary is
-  /// done with.  More than a few references are released by a call of the
-  /// type's drop function, so that each way out of a scope costs one call.
+  /// at @p local, its `local.addr`: on a way out of a scope, or when a
+  /// temporary is done with.  A value of more than kReleasesInPlace
+  /// references is released in place while the function's
+  /// ReleasesInPlaceLeft lasts, and by a call of its type's drop function
+  /// once it does not: a function's ways out, each of which releases
+  /// everything its scopes hold, cost it code linear in their number.
   void emitMemDrop(const Val &local, ast::Type *ty);
+  /// The releases a function's ways out and temporaries may write in place
+  /// for its values of more than kReleasesInPlace references
+  /// (FunctionStateGuard starts each function with this many), and what is
+  /// left of them in the current one.
+  static constexpr size_t kWayOutReleasesInPlace = 512;
+  size_t ReleasesInPlaceLeft = kWayOutReleasesInPlace;
   /// The releases emitMemRelease writes in place for a value of type @p ty:
   /// one per reference, an array's element's once when a loop visits them,
   /// and every variant's fields of a tagged union.

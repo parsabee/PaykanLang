@@ -232,7 +232,8 @@ TEST(Scaling, ALongRunOfIfsLowersToCFInLinearMemory) {
 // each arm of a 200-variant union released them all at each return, code
 // quadratic in the variants that took more than 30 s to run (SW-03).  A
 // value of more than four references is released by one call of its
-// type's drop function now, which releases its variant's fields only.
+// type's drop function now once the function's ways out have written 512
+// releases in place, and the call releases its variant's fields only.
 TEST(Scaling, AScopesWayOutReleasesALargeValueByOneCall) {
   ScratchDir dir("drop");
   std::string variants;

@@ -659,20 +659,27 @@ CodeGen enforced, now in one place.
 * **Scope exit** releases the scope's owned variables in reverse declaration
   order, then any pending temporaries (a match subject), on every path:
   fall-through, `ret` (all scopes), `break`/`continue` (scopes inside the loop).
-  A value held in memory whose release takes more than four `release`s (a
-  struct, a tuple, an array or a tagged union with more than four
-  references, an array's elements counted once when a loop visits them, a
-  union's every variant's fields) is released by one call of its type's
-  **drop function**, `fn @.drop.<type>(%at: ptr) -> void`, which the module
-  makes once and calls with the `local.addr` of the local or temporary
-  holding the value; so each way out of a scope costs a call for it, not a
-  release of each reference (each `ret` of each arm of a `match` on a union
-  of a hundred variants released every variant's fields).  A union's drop
-  function `switch`es on its tag and releases the fields of that variant
-  only: the others' are zeros, and a union all zeros (never set, or whose
-  references were handed on) releases null references.  Any other release
-  of a value held in memory (an assignment's old value, an object's field in
-  its `destroy`) stays in place.
+  A value held in memory is released in place at the end of its scope.  At
+  a `ret`, `break` or `continue`, and as a statement's temporary, one whose
+  release takes more than four `release`s (a struct, a tuple, an array or a
+  tagged union with more than four references, an array of more than four
+  elements counting its element's once, for the loop that visits them, a
+  union every variant's fields) is released in place until the function's
+  ways out and temporaries have written 512 such releases, and after that
+  by one call of its type's **drop function**, `fn @.drop.<type>(%at: ptr)
+  -> void`, which the module makes once and calls with the `local.addr` of
+  the local or temporary holding the value.  So a function's code grows with
+  its ways out, not with them times the references they release (each `ret`
+  of each arm of a `match` on a union of a hundred variants releasing every
+  variant's fields), while one of a few ways out keeps each value's
+  releases where later passes can remove them.  A union's drop function
+  `switch`es on its tag and releases the fields of that variant only: the
+  others' are zeros, and a union all zeros (never set, or whose references
+  were handed on) releases null references.  A drop function is called from
+  its module only, which a backend makes private to it (internal on the
+  LLVM path, `static` in the C).  Any other release of a value held in
+  memory (an assignment's old value, an object's field in its `destroy`)
+  stays in place.
 * **Moves at last use** (§12) then change both rules for a variable handed
   on at its last use: the copy takes no reference of its own, and the
   variable owns nothing from there on (a drop function's call counts as the

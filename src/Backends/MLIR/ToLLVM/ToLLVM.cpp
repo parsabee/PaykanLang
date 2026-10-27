@@ -523,6 +523,14 @@ struct ConvertToLLVMPass
              BytesLowering, ExternGlobalLowering<P::ExternObjectOp>,
              ExternGlobalLowering<P::ExternVTableOp>, VTableLowering>(types,
                                                                       ctx);
+    // A private definition (a drop function's) links inside its module, so
+    // that LLVM may inline it at each call and drop its own copy: the
+    // linkage the func to llvm patterns read from "llvm.linkage".
+    getOperation().walk([&](func::FuncOp f) {
+      if (f.isPrivate() && !f.isDeclaration())
+        f->setAttr("llvm.linkage",
+                   LLVM::LinkageAttr::get(ctx, LLVM::Linkage::Internal));
+    });
     // Each nested module (one per PIR module) on its own.
     FrozenRewritePatternSet frozen(std::move(patterns));
     for (ModuleOp m : modules())

@@ -75,9 +75,10 @@ int64_t alignTo(int64_t n, int64_t align) {
 /// Up to this many slots are visited one by one; more in a loop.
 constexpr int64_t kUnrolledSlots = 4;
 
-/// Up to this many references are released in place; more by a call of the
-/// type's drop function, so that a scope's way out (each `return` of each
-/// `match` arm) costs one call, not a release per reference.
+/// A value of up to this many references is released in place wherever it
+/// is released; one of more, on a way out of a scope or as a temporary, by
+/// a call of its type's drop function once the function has written
+/// kWayOutReleasesInPlace such releases in place (emitMemDrop).
 constexpr size_t kReleasesInPlace = 4;
 
 /// Whether @p e is a literal whose value is all zero bits.
@@ -397,9 +398,13 @@ void ModuleLowering::emitMemRelease(const Val &addr, ast::Type *ty) {
 }
 
 void ModuleLowering::emitMemDrop(const Val &local, ast::Type *ty) {
-  if (local && memReleaseCount(ty) > kReleasesInPlace) {
-    B.call(dropFunction(ty), {{Type::Ptr}, Type::Void}, {local});
-    return;
+  const size_t n = memReleaseCount(ty);
+  if (local && n > kReleasesInPlace) {
+    if (n > ReleasesInPlaceLeft) {
+      B.call(dropFunction(ty), {{Type::Ptr}, Type::Void}, {local});
+      return;
+    }
+    ReleasesInPlaceLeft -= n;
   }
   emitMemRelease(local, ty);
 }

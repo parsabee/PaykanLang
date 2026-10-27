@@ -621,6 +621,48 @@ fn @main() -> i64 {
   EXPECT_EQ(count(c, "Paykan_retain_inline("), 0u) << c;
 }
 
+// A drop function is called from its own module only (docs/pir.md §7): a
+// static function in the C, declared static too.
+TEST(PIRMLIR, ADropFunctionIsStaticInC) {
+  const char *const text = R"(module "main"
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+cstr @.s = "s" len 1
+
+fn @.drop.P(%at: ptr) -> void {
+  %a = ptr.load box, %at
+  release %a
+  ret
+}
+
+fn @main() -> i64 {
+  local %p: mem(8, 8)
+  %o = call @$rt.PaykanString_new(@.s, 1)
+  %b = box %o
+  %addr = local.addr %p
+  ptr.store %addr, %b
+  %at = local.addr %p
+  call @.drop.P(%at)
+  ret 0
+}
+)";
+  std::unique_ptr<mlir::MLIRContext> ctx;
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string err;
+  std::string c = emitCText(text, ctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod);
+  size_t dropLines = 0;
+  std::istringstream in(c);
+  for (std::string line; std::getline(in, line);)
+    if (line.find("drop") != std::string::npos &&
+        line.find("void ") != std::string::npos) {
+      ++dropLines;
+      EXPECT_EQ(line.rfind("static void ", 0), 0u) << line;
+    }
+  // Its declaration and its definition.
+  EXPECT_EQ(dropLines, 2u) << c;
+}
+
 /// A program that prints a string of @p n bytes: `a`, 0x80 and `'` over
 /// and over.
 std::string printsLongString(size_t n) {

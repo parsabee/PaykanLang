@@ -154,7 +154,7 @@ ModuleLowering::ScopeGuard::ScopeGuard(ModuleLowering &l)
 ModuleLowering::ScopeGuard::~ScopeGuard() {
   // Only emit cleanup if the current block is not yet terminated.
   if (!L.B.isTerminated())
-    L.emitScopeCleanup(ScopeObj);
+    L.emitScopeCleanup(ScopeObj, /*wayOut=*/false);
   L.CurrentScope = ScopeObj.Parent;
 }
 
@@ -171,6 +171,8 @@ ModuleLowering::FunctionStateGuard::FunctionStateGuard(
   // A body starts with an empty string-temp tracker and no enclosing loops.
   std::swap(SavedStringTemps, L.OwnedStringTemps);
   std::swap(SavedLoops, L.LoopStack);
+  SavedReleasesInPlace = std::exchange(L.ReleasesInPlaceLeft,
+                                       ModuleLowering::kWayOutReleasesInPlace);
   L.B.setFunction(fn);
   L.emitParamPrologue(*fn);
 }
@@ -178,6 +180,7 @@ ModuleLowering::FunctionStateGuard::FunctionStateGuard(
 ModuleLowering::FunctionStateGuard::~FunctionStateGuard() {
   std::swap(L.OwnedStringTemps, SavedStringTemps);
   std::swap(L.LoopStack, SavedLoops);
+  L.ReleasesInPlaceLeft = SavedReleasesInPlace;
   L.CurrentFuncReturnASTType = SavedRetASTType;
   L.CurrentMethodClassType = SavedMethodClassType;
   L.B.restoreState(std::move(SavedBuilder));
@@ -889,7 +892,7 @@ ModuleLowering::Receiver ModuleLowering::emitReceiver(ast::Expr *expr,
 
 // -- Scope cleanup
 
-void ModuleLowering::emitScopeCleanup(Scope &scope) {
+void ModuleLowering::emitScopeCleanup(Scope &scope, bool wayOut) {
   // An `inout` arm's binding goes back to its subject first: what it holds
   // and the object of a field it names are released below.
   for (auto it = scope.WriteBacks.rbegin(); it != scope.WriteBacks.rend(); ++it)
@@ -903,8 +906,13 @@ void ModuleLowering::emitScopeCleanup(Scope &scope) {
     else
       emitRelease(B.load(it->Local));
   }
-  for (auto it = scope.MemVars.rbegin(); it != scope.MemVars.rend(); ++it)
-    emitMemDrop(B.localAddr(it->Local, "mem.addr"), it->ASTType);
+  for (auto it = scope.MemVars.rbegin(); it != scope.MemVars.rend(); ++it) {
+    const Val local = B.localAddr(it->Local, "mem.addr");
+    if (wayOut)
+      emitMemDrop(local, it->ASTType);
+    else
+      emitMemRelease(local, it->ASTType);
+  }
   for (auto it = scope.PendingReleases.rbegin();
        it != scope.PendingReleases.rend(); ++it)
     emitRelease(*it);
@@ -912,7 +920,7 @@ void ModuleLowering::emitScopeCleanup(Scope &scope) {
 
 void ModuleLowering::emitAllScopesCleanup() {
   for (Scope *s = CurrentScope; s != nullptr; s = s->Parent)
-    emitScopeCleanup(*s);
+    emitScopeCleanup(*s, /*wayOut=*/true);
 }
 
 void ModuleLowering::emitLoopScopesCleanup() {
@@ -920,7 +928,7 @@ void ModuleLowering::emitLoopScopesCleanup() {
     return;
   Scope *stop = LoopStack.back().EnclosingScope;
   for (Scope *s = CurrentScope; s != nullptr && s != stop; s = s->Parent)
-    emitScopeCleanup(*s);
+    emitScopeCleanup(*s, /*wayOut=*/true);
 }
 
 // -- Statements

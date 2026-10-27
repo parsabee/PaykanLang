@@ -778,6 +778,47 @@ fn @main() -> i64 {
   EXPECT_EQ(r.Out, "destroyed\n");
 }
 
+// A drop function is called from its own module only (docs/pir.md §7): it
+// links internally, so that LLVM may inline it where it is called.
+TEST(PIRLLVM, ADropFunctionLinksInsideItsModule) {
+  const std::string program = std::string(kCounted) + R"(
+fn @.drop.Pair(%at: ptr) -> void {
+  %a = ptr.load box, %at
+  release %a
+  %second = ptr.add %at, 8
+  %b = ptr.load box, %second
+  release %b
+  ret
+}
+
+fn @main() -> i64 {
+  local %p: mem(16, 8)
+  %o1 = new C
+  %b1 = box %o1
+  %o2 = new C
+  %b2 = box %o2
+  %first = local.addr %p
+  ptr.store %first, %b1
+  %second = ptr.add %first, 8
+  ptr.store %second, %b2
+  %at = local.addr %p
+  call @.drop.Pair(%at)
+  ret 0
+}
+)";
+  std::string err;
+  std::string ir = translatePIR(program, err);
+  ASSERT_FALSE(ir.empty()) << err;
+  const std::vector<std::string> internal = linesWith(ir, "define internal");
+  ASSERT_EQ(internal.size(), 1u) << ir;
+  EXPECT_NE(internal.front().find("drop"), std::string::npos) << ir;
+
+  auto r = runPIR(program);
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.Out, "destroyed\ndestroyed\n");
+}
+
 TEST(PIRLLVM, InlineRetainsAndReleasesCountAndTheLastOneDestroys) {
   auto r = runPIR(std::string(kCounted) + R"(
 fn @main() -> i64 {

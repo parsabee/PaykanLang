@@ -642,11 +642,13 @@ is the receiver's storage, so a method allocates nothing to be called. See [Stru
 
 A tagged union is held in place too, its tag followed by every variant's fields, only the
 current variant's set ([Held in place](07-enums.md#held-in-place)), and it retains and releases
-the references its current variant holds. A variable of one of these types whose references
-take more than a few releases is released, when it goes out of scope (at the scope's end, or at
-a `return`, `break` or `continue` leaving it), by one call of a function the compiler writes
-once for the type, which releases a tagged union's references by its tag: a function's code
-does not grow with its ways out times the references its variables' types can hold.
+the references its current variant holds. A value of one of these types is released in place
+at the end of its scope. At a `return`, `break` or `continue` leaving it, and as a statement's
+temporary, one whose references take more than a few releases is released in place too until
+its function has written several hundred such releases, and after that by one call of a
+function the compiler writes once for the type, which releases a tagged union's references by
+its tag: a function's code does not grow with its ways out times the references its values'
+types can hold.
 
 An array, a tuple, a struct or a tagged union is passed by address: the callee copies a plain
 parameter when the call starts, and reads a `view` parameter where it is. So a call with an

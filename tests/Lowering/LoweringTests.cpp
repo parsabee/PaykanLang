@@ -276,13 +276,15 @@ std::string unionOfMany(int n) {
 
 } // namespace
 
-// A value held in memory with more than four references is released, when
-// a scope is left, by one call of its type's drop function (SW-03): a
-// `match` returning from each arm of a union grows with its variants, not
-// with its variants times their fields (3.7 times the code for twice the
-// variants when each way out released every variant's fields).  The
-// union's drop function switches on the tag and releases the fields of
-// the variant it names; a value of four references is released in place.
+// A value held in memory with more than four references is released, on a
+// way out of a scope, in place while its function has written fewer than
+// 512 such releases at its ways out, and by one call of its type's drop
+// function after that (SW-03): a `match` returning from each arm of a union
+// grows with its variants, not with its variants times their fields (3.7
+// times the code for twice the variants when each way out released every
+// variant's fields).  The union's drop function switches on the tag and
+// releases the fields of the variant it names; a value of four references
+// is released in place, and so is every value at the end of its scope.
 TEST(Lowering, ALargeValueIsReleasedByOneCallAtEachWayOut) {
   Lowered l50 = lower(unionOfMany(50));
   Lowered l100 = lower(unionOfMany(100));
@@ -291,11 +293,13 @@ TEST(Lowering, ALargeValueIsReleasedByOneCallAtEachWayOut) {
   const std::string f50 = function(l50.Text, "name");
   const std::string f100 = function(l100.Text, "name");
   EXPECT_LT(count(f100, "\n"), 2.5 * count(f50, "\n"));
-  // Each of the 100 arms' returns, and the way out after the match no arm
-  // takes, drops the subject's copy and the parameter's: no reference is
-  // released in place.
-  EXPECT_EQ(count(f100, "release "), 0u) << f100;
-  EXPECT_EQ(count(f100, "call @.drop.Many("), 2u * 101) << f100;
+  // Each of the 100 arms' returns releases the subject's copy and the
+  // parameter's, 34 references each: the first 15 values in place (510 of
+  // the 512 releases), the other 185 by a call.  The ends of the match's
+  // scope and of the function's, which no arm reaches, release the two in
+  // place.
+  EXPECT_EQ(count(f100, "release "), (15u + 2) * 34) << f100;
+  EXPECT_EQ(count(f100, "call @.drop.Many("), 2u * 100 - 15) << f100;
   const std::string drop = fullFunction(l100.Text, ".drop.Many");
   EXPECT_NE(drop.find("fn @.drop.Many(%at.1: ptr) -> void {\n"
                       "  %tag.2 = ptr.load i64, %at.1\n"
@@ -313,10 +317,40 @@ TEST(Lowering, ALargeValueIsReleasedByOneCallAtEachWayOut) {
       << function(small.Text, "name");
 }
 
-// A struct of many references is released by its drop function too, and a
-// union nested in it by a switch on its tag inside that function.
+// A struct of many references is released by its drop function too, once
+// its function's ways out have written 512 releases in place, and a union
+// nested in it by a switch on its tag inside that function.
 TEST(Lowering, ADropFunctionReleasesANestedUnionByItsTag) {
+  std::string exits;
+  for (int i = 0; i < 90; ++i)
+    exits += "  if k == " + std::to_string(i) + " { return w.a.len(); }\n";
   Lowered l = lower(R"(
+enum Two { A(s: Str), B(t: Str, u: Str) }
+struct Wide {
+  a: Str;
+  b: Str;
+  c: Str;
+  two: Two;
+}
+fn len(w: Wide, k: int) -> int {
+)" + exits + R"(
+  return w.c.len();
+}
+fn main() -> int {
+  return len(Wide("a", "b", "c", Two::A("s")), 1);
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  // 6 references: the first 85 of the 91 returns release w in place.
+  const std::string len = function(l.Text, "len");
+  EXPECT_EQ(count(len, "release "), 85u * 6) << len;
+  EXPECT_EQ(count(len, "call @.drop.Wide("), 6u) << len;
+  const std::string drop = fullFunction(l.Text, ".drop.Wide");
+  EXPECT_EQ(count(drop, "release "), 6u) << drop;
+  EXPECT_EQ(count(drop, "switch "), 1u) << drop;
+  EXPECT_EQ(l.Text.find(".drop.Two"), std::string::npos) << l.Text;
+  // A function of a few ways out releases w in place at each.
+  Lowered few = lower(R"(
 enum Two { A(s: Str), B(t: Str, u: Str) }
 struct Wide {
   a: Str;
@@ -332,12 +366,8 @@ fn main() -> int {
   return len(Wide("a", "b", "c", Two::A("s")), 1);
 }
 )");
-  ASSERT_TRUE(l.Ok) << l.Error;
-  EXPECT_EQ(count(function(l.Text, "len"), "call @.drop.Wide("), 2u) << l.Text;
-  const std::string drop = fullFunction(l.Text, ".drop.Wide");
-  EXPECT_EQ(count(drop, "release "), 6u) << drop;
-  EXPECT_EQ(count(drop, "switch "), 1u) << drop;
-  EXPECT_EQ(l.Text.find(".drop.Two"), std::string::npos) << l.Text;
+  ASSERT_TRUE(few.Ok) << few.Error;
+  EXPECT_EQ(few.Text.find(".drop."), std::string::npos) << few.Text;
 }
 
 TEST(Lowering, StringTemporaryPassedToBuiltinIsDestroyedAfterTheCall) {
@@ -3821,6 +3851,42 @@ TEST(LoweringMoves, HeldValuesCopiedWholeAtTheirLastUseMove) {
 // is a `Str` of a `Lbl`): without it the read would be borrowed across the
 // call, and `x` would stay a copy at take(), dying at the end of f instead
 // of when take returns (docs/pir.md §7).
+// A value of more than four references a loop's body holds is released in
+// place at the end of the body, so a copy of it whole at its last use (a
+// match's subject) leaves no release of it at all, as for one of fewer
+// references: a call of its drop function there kept the local in memory
+// and its copy's slots stored null on every iteration (SW-03).
+TEST(LoweringMoves, AWholeCopyOfALargeValueAtItsLastUseLeavesNoDrop) {
+  auto l = lowerMoved(R"(
+    enum Msg { Text(a: Str, b: Str), Pair(a: Str, b: Str), Other(s: Str) }
+    fn mk(k: Str, i: int) -> Msg {
+      if i % 3 == 0 { return Msg::Text(k, k); }
+      if i % 3 == 1 { return Msg::Pair(k, k); }
+      return Msg::Other(k);
+    }
+    fn work(n: int) -> int {
+      t = 0;
+      k = "x";
+      for i in 0..n {
+        m = mk(k, i);
+        match m {
+          x: Text { t += x.a.len(); }
+          p: Pair { t += 2; }
+          Other { t += 3; }
+        }
+      }
+      return t;
+    }
+    fn main() -> int { return work(3); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string work = function(l.Text, "work");
+  EXPECT_EQ(work.find(".drop."), std::string::npos) << work;
+  EXPECT_EQ(work.find("null box"), std::string::npos) << work;
+  // The subject's five slots, released in place after the match.
+  EXPECT_EQ(count(work, "release "), 2u + 2 + 5 + 1) << work;
+}
+
 TEST(LoweringMoves, AReadRootedInAParameterKeepsTheHandOffBeforeIt) {
   auto l = lowerMoved(R"(
     class Gen<T> { v: T; }

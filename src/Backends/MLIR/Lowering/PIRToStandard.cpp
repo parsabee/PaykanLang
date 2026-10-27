@@ -391,6 +391,10 @@ LogicalResult ModuleLowering::run() {
       continue;
     }
     auto fn = func::FuncOp::create(B, Loc, link, f.getFunctionType());
+    // A drop function is called from its module only (docs/pir.md §7): a
+    // private definition, internal to the module's object and static in C.
+    if (::paykan::pir::isDropName(f.getSymName()))
+      fn.setPrivate();
     bodies.emplace_back(f, fn);
   }
   for (auto &[src, dst] : bodies)

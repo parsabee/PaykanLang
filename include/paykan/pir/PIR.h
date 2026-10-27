@@ -193,9 +193,11 @@ inline std::string externCSymbol(std::string_view name) {
 /// A module's drop function (`@.drop.<type>`, a name no Paykan identifier
 /// can spell) takes the address of a whole `mem` local, `(ptr) -> void`,
 /// and releases the references of the value held there (docs/pir.md §7):
-/// what the lowering calls, when a scope is left, instead of a release of
-/// each of many references.  Each call of one is given a `local.addr`, so
-/// the moves at last use read it as the release of each of the local's
+/// what the lowering calls, at a way out of a scope once its function has
+/// written many releases in place, instead of a release of each of many
+/// references.  It is called from its module only, and a backend makes it
+/// private to the module.  Each call of one is given a `local.addr`, so the
+/// moves at last use read it as the release of each of the local's
 /// references.
 inline constexpr std::string_view kDropPrefix = ".drop.";
 
