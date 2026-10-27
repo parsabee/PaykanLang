@@ -914,12 +914,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     retain of an optional subject's box (`match _open(...) { h: Obj {...} None {...} }`)
     keeps its test, since the same box, null, is released on the way to `None`.  A
     release of a variable's slot keeps its test too, since the moves at last use may have
-    emptied the slot, and so does the retain of each reference a value held in memory
-    holds (a tagged union's other variants are zeros).
+    emptied the slot.  The same failed through an object a value held in memory held (a
+    struct parameter, a copy of a struct, a tuple or an array, a union's variant bound by
+    a `match`, `inout` too, an optional struct's, a lambda's captured struct: `fn set(s:
+    S) { s.c.p = P(5, 6, 7); }`): a copy of such a value retains each class reference it
+    holds with no test now, but those of an optional's payload, a tagged union's variants
+    (whose other variants are zeros) and a function value's closure.
     `samples/codegen/81_field_struct_store_retained.pkn` writes such fields through a
     variable, a capture, a loop's variable, a copy of an `inout` parameter (a lambda's
-    too), of another variable and of an `inout` result, and matches a native function's
-    `Obj?` result to its `None` arm.
+    too), of another variable and of an `inout` result, and through each value above, and
+    matches a native function's `Obj?` result to its `None` arm; its C builds strictly
+    with GCC and Clang at `-O0` to `-O3`.
   - A `match` on a tagged union whose arms return took time quadratic in the union's
     variants to compile: each way out of a scope (every `return`, `break` and `continue`)
     released every reference of every variant of each value the scope held in memory, one

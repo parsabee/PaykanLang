@@ -10,13 +10,20 @@
 //            into the field's write, and the strict C build failed.  A
 //            native function's `Obj?` result matched to its `None` arm: the
 //            type arm's retain of the subject's box keeps its test, since
-//            the same box, null, is released on the way to `None`.
+//            the same box, null, is released on the way to `None`.  The
+//            same through an object a value held in memory holds (a struct
+//            parameter, a copy of a struct, a tuple or an array, a union's
+//            variant bound by a `match`, `inout` too, an optional struct's,
+//            a lambda's captured struct): its copy's retain of a class
+//            reference makes no test either, but in an optional's or a
+//            union's, whose other variants are zeros.
 // expect-stdout: field: 8
 // expect-stdout: capture: 8 8
 // expect-stdout: loop: 2
 // expect-stdout: optional: 5 None
 // expect-stdout: inout: 2 4 3 5 6
 // expect-stdout: native: True
+// expect-stdout: held: 8 5 6 6 3 4 1 0 4 18
 
 import ::io;
 
@@ -81,6 +88,86 @@ fn held(h: inout H) -> inout C {
   return h.c;
 }
 
+struct S {
+  c: C;
+  n: int;
+}
+
+enum U { A(c: C, k: int), B(n: int), }
+
+fn viaStructCopy(s: S) -> int {
+  s2 = s;
+  s2.c.p = P(7, 8, 9);
+  s2.c.xs = [4, 4, 4];
+  return s2.c.p.b;
+}
+
+fn viaParam(s: S) -> int {
+  s.c.p = P(5, 5, 5);
+  return s.c.p.a;
+}
+
+fn viaUnion(u: U) -> int {
+  match u {
+    a: A {
+      a.c.p = P(6, 6, 6);
+      a.c.xs = [6, 6, 6];
+      return a.c.p.a;
+    }
+    B { return 0; }
+  }
+}
+
+fn viaUnionInout(u: inout U) -> int {
+  match u {
+    a: inout A {
+      a.c.p = P(6, 6, 6);
+      return a.c.p.a;
+    }
+    B { return 0; }
+  }
+}
+
+fn viaTuple(t: (C, int)) -> int {
+  t2 = t;
+  t2.0.p = P(3, 3, 3);
+  return t2.0.p.a;
+}
+
+fn viaArray(arr: C[2]) -> int {
+  b = arr;
+  b[0].p = P(2, 2, 2);
+  b[1].xs = [2, 2, 2];
+  return b[0].p.a + b[1].xs[0];
+}
+
+fn viaOptStruct(os: S?) -> int {
+  match os {
+    s: S {
+      s.c.p = P(1, 1, 1);
+      return s.c.p.a;
+    }
+    None { return 0; }
+  }
+}
+
+fn viaClosure(s: S) -> int {
+  k = fn() -> int {
+    s.c.p = P(4, 4, 4);
+    return s.c.p.a;
+  };
+  return k();
+}
+
+fn viaLocalStruct() -> int {
+  s = S(C(P(1, 1, 1), [1, 1, 1]), 1);
+  t = s;
+  t.c.p = P(9, 9, 9);
+  return t.c.p.a + s.c.p.a;
+}
+
+fn fresh() -> C => C(P(1, 2, 3), [1, 2, 3]);
+
 native fn _open(path: view Str, mode: view Str, errno: inout int)
                 -> Obj? = "Paykan_io_open";
 
@@ -125,5 +212,12 @@ fn main() -> int {
   io::println("inout: " + Str(b) + " " + Str(x) + " " + Str(r) + " " + Str(l)
       + " " + Str(c.p.b));
   io::println("native: " + Str(opened("") == None));
+  s = S(fresh(), 1);
+  u = U::A(fresh(), 1);
+  io::println("held: " + Str(viaStructCopy(s)) + " " + Str(viaParam(s)) + " "
+      + Str(viaUnion(u)) + " " + Str(viaUnionInout(u)) + " "
+      + Str(viaTuple((fresh(), 1))) + " " + Str(viaArray([fresh(), fresh()]))
+      + " " + Str(viaOptStruct(s)) + " " + Str(viaOptStruct(None)) + " "
+      + Str(viaClosure(s)) + " " + Str(viaLocalStruct()));
   return 0;
 }

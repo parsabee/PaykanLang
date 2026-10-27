@@ -306,6 +306,79 @@ fn main() -> int {
   EXPECT_EQ(count(copy, "retain %e."), 1u) << copy;
 }
 
+// So is a class reference's of a value held in memory, which a copy retains
+// slot by slot (SW-14): a struct's field, a tuple's element, an array's
+// element, the fields of a union's variant once a `match` binds it.  An
+// optional's payload, a union's variants copied as the union, and the
+// optional fields keep their test: those are zeros where unset.
+TEST(Lowering, ACopyOfAValueRetainsItsClassReferencesNonNull) {
+  Lowered l = lower(R"(
+struct P {
+  a: int;
+}
+
+class C {
+  p: P;
+}
+
+struct S {
+  c: C;
+  o: C?;
+}
+
+enum U {
+  A(c: C),
+  B,
+}
+
+fn copyStruct(s: S, t: (C, int), a: C[2]) -> int {
+  s2 = s;
+  t2 = t;
+  a2 = a;
+  return s2.c.p.a + t2.0.p.a + a2[1].p.a;
+}
+
+fn copyUnion(u: U) -> int {
+  v = u;
+  match v {
+    x: A { return x.c.p.a; }
+    B { return 0; }
+  }
+}
+
+fn copyOptional(os: S?) -> int {
+  t = os;
+  match t {
+    s: S { return s.c.p.a; }
+    None { return 0; }
+  }
+}
+
+fn main() -> int {
+  c = C(P(1));
+  s = S(c, None);
+  return copyStruct(s, (c, 1), [c, c]) + copyUnion(U::A(c)) +
+      copyOptional(s);
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  // The struct's c, the tuple's element and the array's two, and the
+  // struct's o, in the parameters' copies the function makes when it
+  // starts and in the variables' copies.
+  const std::string copy = function(l.Text, "copyStruct");
+  EXPECT_EQ(count(copy, "retain nonnull %elem."), 2u * 4) << copy;
+  EXPECT_EQ(count(copy, "retain %elem."), 2u * 1) << copy;
+  // The union's copy tests its variant's field; the arm's copy does not.
+  const std::string un = function(l.Text, "copyUnion");
+  const size_t arm = un.find("switch ");
+  ASSERT_NE(arm, std::string::npos) << un;
+  EXPECT_EQ(count(un.substr(0, arm), "retain nonnull"), 0u) << un;
+  EXPECT_EQ(count(un.substr(arm), "retain nonnull %elem."), 1u) << un;
+  // The optional's copy tests; its present value's copy tests only o.
+  const std::string opt = function(l.Text, "copyOptional");
+  EXPECT_EQ(count(opt, "retain nonnull %elem."), 1u) << opt;
+}
+
 // A type arm's binding retains the subject's box, the subject's own value:
 // `nonnull` for a class subject, but not for an optional one, whose box is
 // null on the way to its `None` arm, where the same value is released.

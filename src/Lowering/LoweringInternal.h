@@ -1143,9 +1143,13 @@ private:
   /// whose references were handed on) releases null references.
   void emitMemReleaseByTag(const Val &addr, ast::Type *ty);
   /// Call @p fn with the box in each reference slot of the value of type
-  /// @p ty at @p addr.
+  /// @p ty at @p addr, and the type of the reference the slot holds, or
+  /// null for one that may hold null even in a value that is set: an
+  /// optional's payload, a tagged union's variants (the other variants'
+  /// are zeros), a function value's closure (@p set false below them).
   void forEachMemRef(const Val &addr, ast::Type *ty,
-                     const std::function<void(Val)> &fn);
+                     const std::function<void(Val, ast::Type *)> &fn,
+                     bool set = true);
   /// Call @p fn with the address of each of the slots @p from to @p to
   /// (exclusive), @p stride bytes apart, of the memory at @p base: one by
   /// one for a few, in a loop for more.

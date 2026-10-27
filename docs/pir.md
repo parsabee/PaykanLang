@@ -565,7 +565,10 @@ contain none (the lowering's marks are cleared before code is kept).
 A `retain nonnull` (`retain lend nonnull` with both marks) retains a box
 that is never null: the lowering marks a retain of a value whose type is a
 class that is not optional, which Sema reads only once it is set and a
-native function never returns as null.  A backend retains it with no test
+native function never returns as null, and so the retain a copy of a value
+held in memory makes of each such reference it holds, but one in an
+optional's payload, in a tagged union's variants (whose other variants are
+zeros) or a function value's closure.  A backend retains it with no test
 for null, and releases the same value (`release %b` of that `%b`) with
 none either, wherever that release is; a `release` of anything else, such
 as a load of a local's slot the moves at last use (§12) may have emptied,

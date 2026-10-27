@@ -364,16 +364,17 @@ void ModuleLowering::releaseMemTemps(size_t mark) {
   }
 }
 
-void ModuleLowering::forEachMemRef(const Val &addr, ast::Type *ty,
-                                   const std::function<void(Val)> &fn) {
+void ModuleLowering::forEachMemRef(
+    const Val &addr, ast::Type *ty,
+    const std::function<void(Val, ast::Type *)> &fn, bool set) {
   if (!addr || !holdsRef(ty))
     return;
   if (ast::Type *shape = memShapeOf(ty); shape != ty) {
-    forEachMemRef(addr, shape, fn);
+    forEachMemRef(addr, shape, fn, /*set=*/false);
     return;
   }
   if (ast::isRefType(ty)) {
-    fn(B.ptrLoad(addr, Type::Box, "elem"));
+    fn(B.ptrLoad(addr, Type::Box, "elem"), set ? ty : nullptr);
     return;
   }
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
@@ -383,14 +384,14 @@ void ModuleLowering::forEachMemRef(const Val &addr, ast::Type *ty,
       int64_t off = tupleElementOffset(tt, i);
       forEachMemRef(off == 0 ? addr
                              : B.ptrAdd(addr, Val::i64(off), "elem.addr"),
-                    tt->getElementType(i), fn);
+                    tt->getElementType(i), fn, set);
     }
     return;
   }
   const auto inner = innermostElements(ast::cast<ast::FixedArrayType>(ty));
   ast::Type *elemTy = inner.first;
   forEachSlot(addr, 0, inner.second, memLayout(elemTy).Size,
-              [&](const Val &at) { forEachMemRef(at, elemTy, fn); });
+              [&](const Val &at) { forEachMemRef(at, elemTy, fn, set); });
 }
 
 void ModuleLowering::forEachSlot(const Val &base, int64_t from, int64_t to,
@@ -422,11 +423,15 @@ void ModuleLowering::forEachSlotUpTo(const Val &base, int64_t from,
 }
 
 void ModuleLowering::emitMemRetain(const Val &addr, ast::Type *ty) {
-  forEachMemRef(addr, ty, [&](const Val &box) { emitRetain(box); });
+  // A class value of a set value's is never null (neverNull).
+  forEachMemRef(addr, ty, [&](const Val &box, ast::Type *refTy) {
+    emitRetain(box, /*lend=*/false, refTy);
+  });
 }
 
 void ModuleLowering::emitMemRelease(const Val &addr, ast::Type *ty) {
-  forEachMemRef(addr, ty, [&](const Val &box) { emitRelease(box); });
+  forEachMemRef(addr, ty,
+                [&](const Val &box, ast::Type *) { emitRelease(box); });
 }
 
 void ModuleLowering::emitMemDrop(const Val &local, ast::Type *ty) {
