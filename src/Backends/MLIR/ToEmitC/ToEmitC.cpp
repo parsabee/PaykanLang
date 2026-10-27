@@ -31,6 +31,7 @@
 #include "Names.h"
 #include "ToolchainNames.h"
 
+#include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/MapVector.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/ADT/Twine.h>
@@ -870,7 +871,15 @@ std::vector<ModuleOp> modulesOf(ModuleOp top) {
 /// What the conversion needs to know of @p m before it starts, and the
 /// changes that make it C: unread constants dropped (C warns about an
 /// unused static const), and the program's main renamed for C's main().
+/// The symbols @p m reads are collected in one walk of it: a walk for each
+/// constant is quadratic in a function of many string literals.
 void prepare(ModuleOp m, Unit &u) {
+  std::optional<SymbolTable::UseRange> uses =
+      SymbolTable::getSymbolUses(&m.getBodyRegion());
+  llvm::DenseSet<StringAttr> read;
+  if (uses)
+    for (const SymbolTable::SymbolUse &use : *uses)
+      read.insert(use.getSymbolRef().getRootReference());
   std::vector<Operation *> unused;
   for (Operation &op : *m.getBody()) {
     if (auto f = dyn_cast<func::FuncOp>(op)) {
@@ -886,7 +895,7 @@ void prepare(ModuleOp m, Unit &u) {
       continue;
     }
     if (isa<P::CStrOp, P::DataOp, P::BytesOp>(op)) {
-      if (SymbolTable::symbolKnownUseEmpty(&op, m)) {
+      if (uses && !read.contains(SymbolTable::getSymbolName(&op))) {
         unused.push_back(&op);
         continue;
       }

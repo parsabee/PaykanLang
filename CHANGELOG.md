@@ -849,11 +849,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     of `if`s in one function's block (a long run of `if` statements, or a `match` on a
     `Str` or a float with many arms, which tests each in turn): a function of 3000 `if`s
     beside a 2000-armed `Str` match took 19.5 s and 1.3 GB to reach `--emit-mlir=llvm`,
-    on every path but the C one.  Lowering an `scf.if` splits its block after it, and the
+    for `run` and `build`.  Lowering an `scf.if` splits its block after it, and the
     conversion driver recorded every op each split moved, so that it could undo it, while
     each split moved everything after it.  The same patterns now run on each op once, a
     block's last first and an op before those in its regions, with nothing to undo: 2 s
-    and 0.1 GB (docs/design/mlir-backend.md).
+    and 0.1 GB (docs/design/mlir-backend.md).  The C path, which lowers `scf` to EmitC
+    and not to `cf`, took time quadratic in a module's string constants instead, one for
+    each arm of a `match` on a `Str`: it drops a constant nothing reads, and looked for
+    each constant's readers with a walk of the whole module.  The same program took 25 s
+    to reach `--emit-c`, and a 2000-armed `Str` match alone 24 s; one walk of the module
+    finds every constant's readers now, and they take 2.2 s and 1.5 s, for the same C.
   - Compiling a program took time quadratic in its number of modules on the LLVM path: each
     imported module's cached LLVM IR is keyed on the module's MLIR as text, and printing a
     module nested in the program verified and numbered the whole program each time.  A

@@ -227,6 +227,26 @@ TEST(Scaling, ALongRunOfIfsLowersToCFInLinearMemory) {
   EXPECT_EQ(run.ExitCode, 2999 % 256 + 5) << run.Out;
 }
 
+// Each arm of a match on a Str compares with a string constant, and the C
+// path drops a constant nothing reads (C warns about an unused one).  It
+// looked for a constant's readers with a walk of the whole module, once
+// for each constant, so 2000 arms took 24 s of processor time to reach
+// --emit-c, against 1.1 s to reach --emit-mlir=scf, and 3000 arms 57 s.
+// One walk of the module finds every constant's readers now, and the
+// 3000 arms take 2 s.
+TEST(Scaling, AMatchOfManyStrArmsReachesCInLinearTime) {
+  ScratchDir dir("str_arms");
+  const std::string src = "fn g(s: Str) -> int {\n  match s {\n" +
+                          repeated("    \"k#\" { return #; }\n", 3000) +
+                          "    _ { return -1; }\n  }\n}\n"
+                          "fn main() -> int { return g(\"k5\"); }\n";
+  const std::string path = dir.write("arms.pkn", src);
+  Timed t =
+      timed(std::string(kPaykan) + " --emit-c " + path + " 2>&1 >/dev/null");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_LT(t.Seconds, 15 * slowdown());
+}
+
 // Leaving a scope releases each value held in memory there, and a tagged
 // union's references are every variant's fields: a match returning from
 // each arm of a 200-variant union released them all at each return, code
