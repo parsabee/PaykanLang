@@ -463,11 +463,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   class of another module, and a method it compiles, stay unknown, but for the methods of an
   instantiation an imported module's interface gives (the `List<Str>` of
   `collections::split`, its `Buffer<Str>`), which an importer uses as that module's copy:
-  Sema checks a copy of each from its template, in the module's `TMPL`, and the lowering
-  reads what they do from it as from its own copies (docs/design/pkm.md §4.8), so a
-  `MinPriorityQueue<Str>`'s `pop` holds nothing, as when the program makes `Buffer<Str>`
-  itself.  A field no code stores
-  into once its object is made (only `self.f = v` in an `__init__`, where `self` is always
+  Sema checks a copy of each from its template, in the `TMPL` of the template's module,
+  which the program need not import, and the lowering reads what they do from it as from
+  its own copies (docs/design/pkm.md §4.8), so a `MinPriorityQueue<Str>`'s `pop` holds
+  nothing, as when the program makes `Buffer<Str>` itself.  A field no code stores into
+  once its object is made (only `self.f = v` in an `__init__`, where `self` is always
   the new object (*Fixed*), and no assignment, `inout` argument, local or `match` arm,
   `-> inout` result or lambda anywhere else) keeps what its `__init__` gave it, so a read of
   one of `self`, at any depth, needs no reference of its own across any call, one of a

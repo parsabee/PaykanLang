@@ -23,6 +23,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace paykan;
@@ -1446,6 +1447,40 @@ TEST(Lowering, ImportedInstantiationsAreReadFromTheirTemplates) {
   std::string f = function(called.Text, "viaCall");
   EXPECT_FALSE(heldAcross(f, defined(f, ", Box.s"), "call @Cell<Str>.size("))
       << f;
+  // And of one an import gives of a template of a module the program does
+  // not import: `labels` makes cells of strings, with no template of its
+  // own, and the program imports only labels.
+  const auto through = std::filesystem::temp_directory_path() /
+                       ("lowering_instances_" + std::to_string(getpid()));
+  std::filesystem::create_directories(through);
+  std::filesystem::copy_file(dir + "/cells.pkn", through / "cells.pkn",
+                             std::filesystem::copy_options::overwrite_existing);
+  std::ofstream(through / "labels.pkn")
+      << "import cells;\n"
+         "fn labelled(s: Str) -> cells::Cell<Str> => cells::Cell<Str>(s);\n";
+  auto labelled = lower(R"(import labels;
+    class Box { s: Str; }
+    fn sized(b: Box) -> Str {
+      let c = labels::labelled("x");
+      return b.s + Str(c.size());
+    }
+    fn stored(b: Box) -> Str {
+      let c = labels::labelled("x");
+      return b.s + Str(c.put("y"));
+    }
+    fn main() -> int { return sized(Box("b")).len() + stored(Box("b")).len(); }
+  )",
+                        through.string());
+  std::filesystem::remove_all(through);
+  ASSERT_TRUE(labelled.Ok) << labelled.Error;
+  for (const auto &[fn, call, held] :
+       {std::tuple<const char *, const char *, bool>{
+            "sized", "call @Cell<Str>.size(", false},
+        {"stored", "call @Cell<Str>.put(", true}}) {
+    std::string g = function(labelled.Text, fn);
+    EXPECT_EQ(heldAcross(g, defined(g, ", Box.s"), call), held) << fn << "\n"
+                                                                << g;
+  }
 }
 
 // The main module of a program (World::Closed) knows every class derived

@@ -1907,6 +1907,11 @@ private:
   /// ones that would make a copy of this module's own: a name for the type
   /// (instantiateClass, instantiateStruct), and a call of its method.
   void copyImportedInstance(ast::Type *type, ast::SourceLocation loc);
+  /// Register module @p canonical, the origin of an imported instantiation
+  /// (ImportedTypeOrigins), under its hidden qualifier, so that its
+  /// templates are seen, when this module neither imports it nor sees it
+  /// through an import's templates.
+  void seeTemplatesOf(const std::string &canonical, ast::SourceLocation loc);
   /// The same for every class and struct a value of @p type holds in place
   /// or names: an optional's, an array's, a tuple's, a variant's.
   void copyImportedParts(ast::Type *type, ast::SourceLocation loc);

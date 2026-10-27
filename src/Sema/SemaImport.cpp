@@ -1582,6 +1582,7 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
       std::any_of(ForeignInstantiatedClassDecls.begin(),
                   ForeignInstantiatedClassDecls.end(), named))
     return;
+  seeTemplatesOf(ImportedTypeOrigins.at(name), loc);
   const ast::StructDecl *structTmpl = nullptr;
   const ast::ClassDecl *classTmpl = nullptr;
   std::vector<ast::Type *> args;
@@ -1652,6 +1653,29 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   for (ast::ClassType *c = ct; c && !c->isBuiltin(); c = c->getSuperClass())
     for (const auto &[field, fieldTy] : c->getFields())
       copyImportedParts(fieldTy, loc);
+}
+
+// The module of an instantiation's template may be one this module neither
+// imports nor sees through an import's templates: an import's interface
+// gives an instantiation of a template of a module that import imports
+// (`fn make() -> cells::Cell<Str>`).  That module is a dependency of the
+// import, which the import's own resolution located and loaded already,
+// and the import's interface records the hashes of its interface and its
+// templates (docs/design/pkm.md §2.3): seeing its templates here looks up
+// no module the program does not link, and this module's cache entry
+// tracks them through the import's.
+void Sema::seeTemplatesOf(const std::string &canonical,
+                          ast::SourceLocation loc) {
+  if (HiddenModules.count(canonical) ||
+      (FailedModules && FailedModules->count(canonical)))
+    return;
+  const bool system = canonical.starts_with(names::kQualSep);
+  LocatedModule located;
+  if (!locateModule(canonical, system, system ? canonical.substr(2) : canonical,
+                    loc, located))
+    return;
+  if (const ModuleInfo *info = loadModule(canonical, located, loc))
+    injectHidden(*info, canonical, loc);
 }
 
 void Sema::copyImportedParts(ast::Type *type, ast::SourceLocation loc) {
