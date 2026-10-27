@@ -18,6 +18,7 @@
 #include "Names.h"
 #include "Runtime.h"
 
+#include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/Conversion/ArithToLLVM/ArithToLLVM.h>
@@ -523,6 +524,8 @@ struct ConvertToLLVMPass
              BytesLowering, ExternGlobalLowering<P::ExternObjectOp>,
              ExternGlobalLowering<P::ExternVTableOp>, VTableLowering>(types,
                                                                       ctx);
+    for (ModuleOp m : modules())
+      copyDroppedLocals(m);
     // Each nested module (one per PIR module) on its own.
     FrozenRewritePatternSet frozen(std::move(patterns));
     for (ModuleOp m : modules())
@@ -538,6 +541,47 @@ struct ConvertToLLVMPass
         f.setPassthroughAttr(
             ArrayAttr::get(ctx, {StringAttr::get(ctx, "noreturn")}));
     });
+  }
+
+  /// A drop function's call given a local's address (docs/pir.md §7) is
+  /// given a copy of the local instead, in a slot of the function's for the
+  /// local's size, one for every such call: LLVM keeps a local whose address
+  /// a call takes in memory everywhere in its function, where it would keep
+  /// the fields of one it does not in registers.  The local is not used
+  /// again once it is dropped, and the drop function only reads it.
+  void copyDroppedLocals(ModuleOp m) {
+    llvm::StringSet<> drops;
+    for (auto f : m.getOps<func::FuncOp>())
+      if (f->hasAttr(kDropAttr))
+        drops.insert(f.getSymName());
+    if (drops.empty())
+      return;
+    for (auto f : m.getOps<func::FuncOp>()) {
+      llvm::DenseMap<std::pair<int64_t, int64_t>, Value> copies;
+      f.walk([&](func::CallOp call) {
+        if (call.getNumOperands() != 1 || !drops.contains(call.getCallee()))
+          return;
+        auto local = call.getOperand(0).getDefiningOp<P::AllocaOp>();
+        if (!local)
+          return;
+        const std::pair<int64_t, int64_t> key{
+            static_cast<int64_t>(local.getSize()),
+            static_cast<int64_t>(local.getAlign())};
+        Value &copy = copies[key];
+        OpBuilder b(local);
+        if (!copy) {
+          b.setInsertionPointAfter(local);
+          copy = P::AllocaOp::create(b, local.getLoc(), key.first, key.second,
+                                     "dropped")
+                     .getResult();
+        }
+        b.setInsertionPoint(call);
+        Value bytes = arith::ConstantOp::create(b, call.getLoc(),
+                                                b.getI64IntegerAttr(key.first));
+        P::MemCopyOp::create(b, call.getLoc(), copy, local.getResult(), bytes);
+        call->setOperand(0, copy);
+      });
+    }
   }
 
   /// The modules to convert: the operated-on one, or each one nested in it.

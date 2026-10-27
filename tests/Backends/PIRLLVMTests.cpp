@@ -821,6 +821,65 @@ fn @main() -> i64 {
   EXPECT_EQ(r.Out, "destroyed\ndestroyed\n");
 }
 
+// A drop function's call is given a copy of the local it releases, in a
+// slot of its own: LLVM keeps a local whose address a call takes in memory
+// throughout its function, which a loop that drops the local at one of its
+// ways out would otherwise run with every field read from memory.
+TEST(PIRLLVM, ADropFunctionIsGivenACopyOfTheLocal) {
+  const std::string program = std::string(kCounted) + R"(
+fn @.drop.Pair(%at: ptr) -> void {
+  %a = ptr.load box, %at
+  release %a
+  %second = ptr.add %at, 8
+  %b = ptr.load box, %second
+  release %b
+  ret
+}
+
+fn @main() -> i64 {
+  local %p: mem(16, 8)
+  %o1 = new C
+  %b1 = box %o1
+  %o2 = new C
+  %b2 = box %o2
+  %first = local.addr %p
+  ptr.store %first, %b1
+  %second = ptr.add %first, 8
+  ptr.store %second, %b2
+  %at = local.addr %p
+  call @.drop.Pair(%at)
+  ret 0
+}
+)";
+  std::string err;
+  std::string ir = translatePIR(program, err);
+  ASSERT_FALSE(ir.empty()) << err;
+  // The call's argument is the destination of a copy from the local, a
+  // slot of the local's size, not the local.
+  const std::vector<std::string> calls =
+      linesWith(ir, "call void @pk_t_S_2Edrop");
+  ASSERT_EQ(calls.size(), 1u) << ir;
+  const size_t open = calls.front().find("(ptr ");
+  ASSERT_NE(open, std::string::npos) << calls.front();
+  const std::string arg =
+      calls.front().substr(open + 5, calls.front().find(')', open) - open - 5);
+  const std::vector<std::string> copies = linesWith(ir, "@llvm.memmove");
+  const auto copy =
+      std::find_if(copies.begin(), copies.end(), [&](const auto &l) {
+        return l.find("(ptr " + arg + ", ptr ") != std::string::npos;
+      });
+  ASSERT_NE(copy, copies.end()) << ir;
+  EXPECT_NE(copy->find(", i64 16,"), std::string::npos) << *copy;
+  EXPECT_EQ(copy->find("(ptr " + arg + ", ptr " + arg + ","), std::string::npos)
+      << *copy;
+  EXPECT_EQ(linesWith(ir, "alloca [16 x i8]").size(), 2u) << ir;
+
+  auto r = runPIR(program);
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.Out, "destroyed\ndestroyed\n");
+}
+
 TEST(PIRLLVM, InlineRetainsAndReleasesCountAndTheLastOneDestroys) {
   auto r = runPIR(std::string(kCounted) + R"(
 fn @main() -> i64 {

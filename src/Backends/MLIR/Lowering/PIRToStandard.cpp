@@ -388,9 +388,13 @@ LogicalResult ModuleLowering::run() {
       // A native function of the runtime's symbol is the runtime's.
       if (native && !decl->hasAttr(kRuntimeAttr))
         decl->setAttr(kNativeAttr, UnitAttr::get(Ctx));
+      if (::paykan::pir::isDropName(f.getSymName()))
+        decl->setAttr(kDropAttr, UnitAttr::get(Ctx));
       continue;
     }
     auto fn = func::FuncOp::create(B, Loc, link, f.getFunctionType());
+    if (::paykan::pir::isDropName(f.getSymName()))
+      fn->setAttr(kDropAttr, UnitAttr::get(Ctx));
     bodies.emplace_back(f, fn);
   }
   for (auto &[src, dst] : bodies)

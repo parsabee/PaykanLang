@@ -38,6 +38,11 @@ inline constexpr const char *kNonNullAttr = "pir.nonnull";
 /// the way of a C header's declaration of the symbol.
 inline constexpr const char *kNativeAttr = "pir.native";
 
+/// The attribute the lowering puts on a drop function (docs/pir.md §7), a
+/// definition or another module's: the LLVM path gives its call a copy of
+/// the local it releases (ToLLVM.cpp, copyDroppedLocals).
+inline constexpr const char *kDropAttr = "pir.drop";
+
 /// The attribute the import puts on a shared function or class (an
 /// instantiation of a template, pir::Function::Shared): it links under a
 /// name of its own, whichever module holds the copy a program keeps.

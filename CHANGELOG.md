@@ -937,8 +937,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     other functions: a template's copy the module lowered, which a program may keep from
     the module's `.pkm` (a standard library container's method, or a generic function the
     module instantiates), calls it from the program's code
-    (`samples/imports/22_drop_functions`).  A release of an empty slot does nothing, so a
-    value whose references were handed on, or whose bytes are all zero, is safe to drop.
+    (`samples/imports/22_drop_functions`).  On the LLVM path a drop function's call is
+    given a copy of the local, in a slot of its own: LLVM keeps a local whose address a
+    call takes in memory throughout its function, so once a function's ways out had used
+    the 512 releases (90 earlier statements each dropping a struct of six `Str`s), a loop
+    of 30 million `w = mk(k, i); if w.n % 2 == 0 { continue; }` read every field of `w`
+    from memory and ran in 0.57 s at `build -O2` against base's 0.30 s; it takes 0.31 s
+    now, and a function of 45 early returns dropping two such structs 0.39 s against base's
+    0.37 s (0.49 s).  A release of an empty slot does nothing, so a value whose references
+    were handed on, or whose bytes are all zero, is safe to drop.
     The 100 variants take 2,811 lines and 0.42 s, the 200 4,467 lines and 0.70 s.  The
     moves at last use count a drop function's call as the release of each of its local's
     references, and PIR's verifier checks that a drop function is `(ptr) -> void` and is

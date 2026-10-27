@@ -681,9 +681,12 @@ CodeGen enforced, now in one place.
   were handed on) releases null references.  A drop function links like
   its module's other functions: a template's copy the module lowered (a
   `shared fn`, §3) may call it from the code of another module that keeps
-  the copy, as it calls them.  Any other release of a value held in memory
-  (an assignment's old value, an object's field in its `destroy`) stays in
-  place.
+  the copy, as it calls them.  The local is not used once it is dropped
+  and a drop function only reads it, so a backend may give the call a copy
+  of it: the LLVM path does, as LLVM keeps a local whose address a call
+  takes in memory throughout its function.  Any other release of a value
+  held in memory (an assignment's old value, an object's field in its
+  `destroy`) stays in place.
 * **Moves at last use** (§12) then change both rules for a variable handed
   on at its last use: the copy takes no reference of its own, and the
   variable owns nothing from there on (a drop function's call counts as the
