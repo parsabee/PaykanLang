@@ -237,8 +237,9 @@ public:
 // -- Operator enums (at namespace scope so Type can reference them)
 
 enum class UnaryOpcode {
-  Neg, // -
-  Not, // !
+  Neg,    // -
+  Not,    // !
+  BitNot, // ~ (docs/design/bitwise.md)
   Count,
 };
 
@@ -259,8 +260,19 @@ enum class BinaryOpcode {
   // Logical
   And, // &&
   Or,  // ||
+  // Bitwise, on the unsigned types (docs/design/bitwise.md)
+  BitAnd, // &
+  BitOr,  // |
+  BitXor, // ^
+  Shl,    // <<
+  Shr,    // >>, logical
   Count,
 };
+
+// A type holds the operators it has as 32-bit masks (Type::UnaryOps and
+// Type::BinaryOps).
+static_assert(static_cast<unsigned>(UnaryOpcode::Count) <= 32 &&
+              static_cast<unsigned>(BinaryOpcode::Count) <= 32);
 
 // Base for all types
 class Type : public ASTNode {

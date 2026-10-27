@@ -230,6 +230,21 @@ private:
   // -- Expressions
   ast::Expr *parseExpression();
   ast::Expr *parseTernary();
+  /// The binary operator at the current token (binaryOperatorAt).
+  struct OpInfo {
+    int Prec;             ///< 1 (`||`) to 6 (shifts); 0: no operator here
+    ast::BinaryOpcode Op; ///< meaningful when Prec is not 0
+    unsigned Tokens;      ///< `>>` is two `>` tokens
+    bool Relational;      ///< `<`, `>`, `<=`, `>=`, `==`, `!=`: no chains
+    bool Shift;           ///< `<<`, `>>`: no chains
+    bool EndsExpression;  ///< `>>=`, a statement's compound assignment
+  };
+  /// Classifies the operator at the current token, which may span two (a
+  /// `>` directly followed by `>` is `>>`; by `>=`, `>>=`).
+  OpInfo binaryOperatorAt();
+  /// Whether the token after the current one starts where it ends, with
+  /// nothing between them.
+  bool nextIsGlued();
   ast::Expr *parseBinary(int minPrec);
   ast::Expr *parseUnary();
   ast::Expr *parsePostfix();
@@ -237,6 +252,7 @@ private:
                              const std::string *method);
   ast::Expr *parseDotSuffix(ast::Expr *e, ast::SourceLocation start);
   ast::Expr *parsePrimary();
+  ast::Expr *expressionExpected();
   ast::Expr *parseNamePrimary();
   ast::Expr *parseParenPrimary();
   ast::Expr *parseLambda();

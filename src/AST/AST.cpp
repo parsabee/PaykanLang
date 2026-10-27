@@ -38,6 +38,16 @@ const char *BinaryExpr::getOpcodeStr() const {
     return "&&";
   case BinaryOpcode::Or:
     return "||";
+  case BinaryOpcode::BitAnd:
+    return "&";
+  case BinaryOpcode::BitOr:
+    return "|";
+  case BinaryOpcode::BitXor:
+    return "^";
+  case BinaryOpcode::Shl:
+    return "<<";
+  case BinaryOpcode::Shr:
+    return ">>";
   case BinaryOpcode::Count:
     break;
   }
@@ -97,6 +107,8 @@ const char *UnaryExpr::getOpcodeStr() const {
     return "-";
   case UnaryOpcode::Not:
     return "!";
+  case UnaryOpcode::BitNot:
+    return "~";
   case UnaryOpcode::Count:
     break;
   }

@@ -161,8 +161,8 @@ to resolve, which reports unknown names.
 | `(string LOC STR)` | a string literal: its value after the source's escapes are applied |
 | `(none LOC)` | `None` |
 | `(ident LOC NAME)` | a name |
-| `(unary LOC OP EXPR)` | `OP` is `neg` (`-`) or `not` (`!`) |
-| `(binary LOC OP EXPR EXPR)` | `OP` is one of `add sub mul div mod lt gt le ge eq ne and or` |
+| `(unary LOC OP EXPR)` | `OP` is `neg` (`-`), `not` (`!`) or `bitnot` (`~`) |
+| `(binary LOC OP EXPR EXPR)` | `OP` is one of `add sub mul div mod lt gt le ge eq ne and or bitand bitor bitxor shl shr`: `and` and `or` are `&&` and `\|\|`, and `bitand bitor bitxor shl shr` are `& \| ^ << >>` ([`../design/bitwise.md`](../design/bitwise.md)) |
 | `(ternary LOC EXPR EXPR EXPR)` | `c ? a : b` |
 | `(call LOC NAME (type-args TYPE...) EXPR...)` | `f(a, b)`, `first<int>(xs)`, `Point(1, 2)`, `m::f(x)` (the qualified name as one string) |
 | `(method-call LOC EXPR NAME EXPR...)` | `recv.m(a, b)` |
@@ -201,7 +201,8 @@ has no parentheses, but an operand the grammar writes in them is a level
 too, as its parenthesis is: a `ternary` as an operand, a `binary` as the
 right operand of one of the same or a higher precedence or the left
 operand of one of a higher precedence, a comparison as an operand of a
-comparison, a `binary` as the operand of a `unary`, a `binary` or a `unary`
+comparison, a shift (`shl`, `shr`) as an operand of a shift, a `binary` as
+the operand of a `unary`, a `binary` or a `unary`
 as what a `call-value`, `member`, `method-call`, `tuple-index` or
 `subscript` applies to, and a `lambda` with `(inferred)` as a left operand
 or what such a suffix applies to. So `(binary add (int 1) (binary add (int

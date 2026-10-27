@@ -88,6 +88,64 @@ TEST(GrammarEdge, SubscriptComparisonIsNotAGenericCall) {
       parse("fn main() -> int { x: bool = xs[a < b] > (d); return 0; }").Ok);
 }
 
+// `>>` is two `>` tokens written together (docs/design/bitwise.md), so a
+// type argument list still closes with single `>` tokens, before any
+// expression parser sees them; where the speculation for a generic call
+// finds no `(` or `::` after its `>`, it rewinds, and the `>>` is a shift.
+TEST(GrammarEdge, ShiftRightNextToGenerics) {
+  auto [ok, driver] = parse("fn best<T: Cmp<T>>(x: T) -> T { return x; }\n"
+                            "fn main() -> int {\n"
+                            "  b: Box<Box<int>> = mk();\n"
+                            "  c = id<Box<Box<int>>>(a);\n"
+                            "  x: List<List<u8>> = l;\n"
+                            "  o = Option<Box<int>>::Nothing;\n"
+                            "  s = id<Box<u8>>(x) >> 2;\n"
+                            "  t = f<a>>(b);\n"
+                            "  u = a < b >> c;\n"
+                            "  return 0;\n"
+                            "}\n");
+  ASSERT_TRUE(ok);
+  FuncDecl *mainFn = nullptr;
+  for (FuncDecl *f : driver->getRoot()->getFuncDecls())
+    if (f->getName() == "main")
+      mainFn = f;
+  ASSERT_NE(mainFn, nullptr);
+  const auto &stmts = mainFn->getBody()->getStatements();
+  ASSERT_EQ(stmts.size(), 8u);
+  auto valueOf = [&](size_t i) {
+    return cast<AssignStmt>(stmts[i])->getValue();
+  };
+  auto *c = dyn_cast<CallExpr>(valueOf(1));
+  ASSERT_NE(c, nullptr);
+  EXPECT_EQ(c->getTypeArgs().size(), 1u);
+  EXPECT_TRUE(isa<EnumValueExpr>(valueOf(3)));
+  // A generic call, then a shift.
+  auto *s = dyn_cast<BinaryExpr>(valueOf(4));
+  ASSERT_NE(s, nullptr);
+  EXPECT_EQ(s->getOpcode(), BinaryOpcode::Shr);
+  auto *call = dyn_cast<CallExpr>(s->getLHS());
+  ASSERT_NE(call, nullptr);
+  EXPECT_TRUE(call->hasTypeArgs());
+  EXPECT_TRUE(isa<IntegerLiteral>(s->getRHS()));
+  // `f < (a >> b)` and `a < (b >> c)`: comparisons Sema types.
+  for (size_t i : {5u, 6u}) {
+    auto *lt = dyn_cast<BinaryExpr>(valueOf(i));
+    ASSERT_NE(lt, nullptr) << i;
+    EXPECT_EQ(lt->getOpcode(), BinaryOpcode::Lt) << i;
+    EXPECT_TRUE(isa<Identifier>(lt->getLHS())) << i;
+    auto *shr = dyn_cast<BinaryExpr>(lt->getRHS());
+    ASSERT_NE(shr, nullptr) << i;
+    EXPECT_EQ(shr->getOpcode(), BinaryOpcode::Shr) << i;
+  }
+  // `>=` directly after a type argument list's `>` is no `>>=`.
+  auto r = parseWithDiags(
+      "fn main() -> int {\n  a: Box<Box<int>>= v;\n  return 0;\n}\n");
+  ASSERT_FALSE(r.Ok);
+  ASSERT_FALSE(r.Diags.empty());
+  EXPECT_EQ(r.Diags[0].Message,
+            "unexpected '>='; expected '>' to close the type argument list");
+}
+
 // -- The nesting limit is the same on every frontend (#120)
 //
 // docs/grammar.md section 9: nesting deeper than 512 levels is rejected with
@@ -168,6 +226,14 @@ TEST(GrammarEdge, NestingLimitIsTheSameOnEveryFrontend) {
   });
   expectLimit("prefix operators",
               [](int n) { return inMain("x = " + repeat("!", n) + "a;"); });
+  expectLimit("complements",
+              [](int n) { return inMain("x = " + repeat("~", n) + "a;"); });
+  // A shift as a shift's operand is in parentheses, a level, as a
+  // comparison of a comparison is (neither chains).
+  expectLimit("shifts of shifts", [](int n) {
+    return inMain("x = " + repeat("(", n) + "a" + repeat(" << b)", n) +
+                  " << b;");
+  });
   expectLimit("unary minus", [](int n) {
     return inMain("x = a - " + repeat("- ", n) + "a;");
   });
@@ -265,6 +331,10 @@ TEST(GrammarEdge, ChainLimitIsTheSameOnEveryFrontend) {
   expectChainLimit("&& chains", [](int n) {
     return inMain("x = " + joined("a", " && ", n + 1) + ";");
   });
+  for (const char *op : {" & ", " | ", " ^ "})
+    expectChainLimit(op, [op](int n) {
+      return inMain("x = " + joined("a", op, n + 1) + ";");
+    });
   expectChainLimit("method calls", [](int n) {
     return inMain("x = s" + repeat(".m()", n) + ";");
   });
@@ -283,6 +353,9 @@ TEST(GrammarEdge, ChainLimitIsTheSameOnEveryFrontend) {
   // A field assigned to is a link, and `+=` is one more over it.
   expectChainLimit("compound assignments", [](int n) {
     return inMain("s" + repeat(".f", n - 1) + " += 1;");
+  });
+  expectChainLimit(">>= assignments", [](int n) {
+    return inMain("s" + repeat(".f", n - 1) + " >>= 1;");
   });
   // Links count along every path down the AST: through parentheses, the
   // operand of a higher precedence and the arguments of a call.
@@ -508,5 +581,36 @@ TEST(GrammarEdge, WideLiteralsParseOnEveryFrontend) {
                       ";\n  return 0;\n}\n")
                     .Ok)
         << expr;
+  }
+}
+
+// A `>>` or `>>=` with anything between its two tokens, a `>>>`, and a chain
+// of shifts are rejected on every frontend (docs/grammar.md section 10),
+// each with the error that says why.
+TEST(GrammarEdge, ShiftFormsOfOtherLanguagesAreRejected) {
+  struct Case {
+    const char *Statement;
+    const char *Error;
+  };
+  const Case cases[] = {
+      {"x = a > > b;", "unexpected '>'; expected an expression ('>>' is "
+                       "written without a space)"},
+      {"x = a >\n  > b;", "unexpected '>'; expected an expression ('>>' is "
+                          "written without a space)"},
+      {"x > >= 1;", "unexpected '>='; expected an expression ('>>=' is "
+                    "written without a space)"},
+      {"x = a >>> b;", "unexpected '>'; expected an expression (there is no "
+                       "'>>>': '>>' of an unsigned value shifts in zeros)"},
+      {"x = a << b << c;", "unexpected '<<'; shift operators cannot be "
+                           "chained; parenthesise the shift"},
+  };
+  for (const Case &c : cases) {
+    const std::string src = std::string("fn main() -> int {\n  ") +
+                            c.Statement + "\n  return 0;\n}\n";
+    EXPECT_FALSE(parse(src).Ok) << c.Statement;
+    for (const auto &d : diagnosticsOfEveryFrontend(src))
+      EXPECT_NE(d.find(std::string("error: ") + c.Error), std::string::npos)
+          << c.Statement << "\n"
+          << d;
   }
 }

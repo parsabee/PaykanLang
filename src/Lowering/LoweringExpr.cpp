@@ -360,6 +360,7 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
     if (auto *b = std::get_if<bool>(&operand.Op.V))
       return Val::boolean(!*b);
     return L.B.unary(Opcode::Not, operand, "not");
+  case ast::UnaryOpcode::BitNot:
   case ast::UnaryOpcode::Count:
     break;
   }
@@ -563,6 +564,11 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     return L.B.cmp(CmpPred::Ne, lhs, rhs, isFloat ? "fne" : "ne");
   case ast::BinaryOpcode::And:
   case ast::BinaryOpcode::Or:
+  case ast::BinaryOpcode::BitAnd:
+  case ast::BinaryOpcode::BitOr:
+  case ast::BinaryOpcode::BitXor:
+  case ast::BinaryOpcode::Shl:
+  case ast::BinaryOpcode::Shr:
   case ast::BinaryOpcode::Count:
     break;
   }

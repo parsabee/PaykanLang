@@ -59,12 +59,18 @@ enum class Tok : uint8_t {
   KwWeak,
   Underscore, // `_` (destructuring skip / match wildcard); `_x` is an Ident
   // Punctuation and operators
-  Assign,     // =
-  PlusAssign, // +=, then -= *= /= %=: compound assignments (`x += y`)
+  Assign, // =
+  // +=, then -= *= /= %= &= |= ^= <<=: compound assignments (`x += y`).
+  // `>>=` is no token: a `>` directly followed by a `>=`.
+  PlusAssign,
   MinusAssign,
   StarAssign,
   SlashAssign,
   PercentAssign,
+  AmpAssign,
+  PipeAssign,
+  CaretAssign,
+  LessLessAssign,
   Minus,      // -
   Plus,       // +
   Star,       // *
@@ -74,6 +80,7 @@ enum class Tok : uint8_t {
   Greater,    // >
   LessEq,     // <=
   GreaterEq,  // >=
+  LessLess,   // <<  (`>>` is no token: two `>` written together)
   EqEq,       // ==
   NotEq,      // !=
   Not,        // !
@@ -95,6 +102,10 @@ enum class Tok : uint8_t {
   FatArrow,   // =>: an expression body (`fn double(x: int) => x * 2;`)
   AndAnd,     // &&
   OrOr,       // ||
+  Amp,        // &
+  Pipe,       // |
+  Caret,      // ^
+  Tilde,      // ~
 };
 
 /// Human-readable name of a token kind for diagnostics and --dump-tokens:

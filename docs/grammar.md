@@ -69,11 +69,17 @@ Punctuation and operators:
 
 ```
 =  -  +  *  /  %  <  >  <=  >=  ==  !=  !  ?  :  ::  .  ..  ..=  ;  ,
-(  )  {  }  [  ]  ->  =>  &&  ||  +=  -=  *=  /=  %=
+(  )  {  }  [  ]  ->  =>  &&  ||  &  |  ^  ~  <<  +=  -=  *=  /=  %=
+&=  |=  ^=  <<=
 ```
 
 `=>` starts an expression body (`fn double(x: int) => x * 2;`); `= >` is two
 tokens.
+
+`>>` and `>>=` are not tokens: `>>` is two `>` tokens and `>>=` a `>` and a
+`>=`, which the expression grammar (§7) reads as the shift and the compound
+assignment (§6) when they are written together, with nothing between them.
+So a type argument list closes with single `>` tokens: `Box<Box<int>>`.
 
 Any other byte is a lexical error (`invalid character 'X'`).
 
@@ -367,7 +373,8 @@ statement ::= ";"
             | "continue" ";"
             | matchStmt
 
-assignOp  ::= "+=" | "-=" | "*=" | "/=" | "%="
+assignOp  ::= "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<="
+            | ">" ">="                   -- the two adjacent: ">>="
 letDecl   ::= "let" IDENT ( ":" typeAnnotation )? "=" expression ";"
 weakDecl  ::= "weak" IDENT ( ":" typeAnnotation )? ( "=" expression )? ";"
 borrowDecl ::= IDENT ":" ( "view" | "inout" ) typeAnnotation? "=" expression ";"
@@ -400,12 +407,16 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   field access, or subscript`.
 - A compound assignment `target op= value` is the assignment
   `target = target op value`, built by the parser: its value is a
-  `BinaryExpr` (`+=` is `+`, ..., `%=` is `%`) spanning `target op= value`,
-  whose left operand is a copy of the target's expression and whose right
-  operand is `value` whole (`k *= k + 1` is `k = k * (k + 1)`).  The target
-  is checked as `=`'s is (`left-hand side of '+=' must be ...`), and is
-  evaluated twice, once to read it and once to assign it: `xs[f()] += 1`
-  calls `f` twice.
+  `BinaryExpr` (`+=` is `+`, ..., `%=` is `%`, `&=` is `&`, ..., `>>=` is
+  `>>`) spanning `target op= value`, whose left operand is a copy of the
+  target's expression and whose right operand is `value` whole (`k *= k + 1`
+  is `k = k * (k + 1)`).  The target is checked as `=`'s is (`left-hand side
+  of '+=' must be ...`), and is evaluated twice, once to read it and once to
+  assign it: `xs[f()] += 1` calls `f` twice.  `>>=` is a `>` directly
+  followed by a `>=` (§1), where the target's expression ends: `a < b >>= c;`
+  is `left-hand side of '>>=' must be an identifier, field access, or
+  subscript`, and `f(x >>= 1)` is `unexpected '>>='; expected ')' to close
+  the argument list`.
 - `varDecl "=" expression` is a declaration with an initializer; a bare
   `x: int;` is not a statement.  Only a `weakDecl` may leave out its
   initializer, and Sema rejects a `DeclStmt` of any other `VarDecl` without
@@ -475,9 +486,11 @@ logicalOr      ::= logicalAnd ( "||" logicalAnd )*
 logicalAnd     ::= relational ( "&&" relational )*
 relational     ::= additive ( relOp additive )?
 relOp          ::= "<" | ">" | "<=" | ">=" | "==" | "!="
-additive       ::= multiplicative ( ( "+" | "-" ) multiplicative )*
-multiplicative ::= unary ( ( "*" | "/" | "%" ) unary )*
-unary          ::= ( "!" | "-" ) unary | postfix
+additive       ::= multiplicative ( ( "+" | "-" | "|" | "^" ) multiplicative )*
+multiplicative ::= shift ( ( "*" | "/" | "%" | "&" ) shift )*
+shift          ::= unary ( shiftOp unary )?       -- does not associate
+shiftOp        ::= "<<" | ">" ">"                  -- the two '>' adjacent
+unary          ::= ( "!" | "-" | "~" ) unary | postfix
 
 postfix ::= primary postfixOp*
 postfixOp ::= "(" argumentList? ")"                -- call of a function value
@@ -528,12 +541,22 @@ x + 1`, the result type is the expression's, which Sema infers
 (`LambdaExpr::hasInferredResult`); it is not `void`.  The expression extends as
 far as an expression can, so `fn(x: int) => fn(y: int) => x + y` nests.
 
-Precedence, lowest to highest: ternary; `||`; `&&`; relational; `+ -`;
-`* / %`; unary `! -`; postfix. Binary operators are left-associative
-except the relational operators, which do not associate: `a < b < c` is a
-syntax error (parenthesise one comparison). The condition of a ternary is
+Precedence, lowest to highest: ternary; `||`; `&&`; relational; `+ - | ^`;
+`* / % &`; the shifts `<< >>`; unary `! - ~`; postfix. This is Swift's
+grouping, not C's: `a + b << 2` is `a + (b << 2)`, `a & b * c` is
+`(a & b) * c`, and `x & m == 0` is `(x & m) == 0`
+([`design/bitwise.md`](design/bitwise.md)). Binary operators are
+left-associative except the relational operators and the shifts, which do
+not associate: `a < b < c` and `a << b << c` are syntax errors
+(parenthesise one comparison, or one shift). The condition of a ternary is
 a `logicalOr`, so a nested ternary there needs parentheses; the `else`
 branch may be another ternary without them.
+
+`>>` is a `>` directly followed by a `>`: the second token starts where the
+first ends, with no space, newline or comment between them (§1). A `>`
+directly followed by `>=` is a statement's `>>=` (§6), where an expression
+ends. Written apart they are a comparison, and an error where an expression
+is expected (§9).
 
 Evaluation is left to right, whatever the precedence: a binary
 expression's left operand before its right one, a call's callee and then
@@ -583,6 +606,11 @@ matching `>`, and opens type arguments if `(` follows. Both readings agree on
 every input: in `f(a < b, c) > (d)` the `)` closes the call's own parenthesis
 before any `>`, so it is a comparison of `f(a < b, c)` with `(d)` either
 way, with the same AST.
+
+A type argument list closes with single `>` tokens, so the first `>` of a
+`>>` can close one: `id<Box<u8>>(x) >> 2` is a generic call, then a shift.
+Where no `(` or `::` follows the `>`, the `<` is a comparison and the `>>`
+a shift: `a < b >> c` is `a < (b >> c)`, and `f<a>>(b)` is `f < (a >> b)`.
 
 ### Conversion constructors
 
@@ -659,15 +687,15 @@ an `if` takes at most 510 `elif`s in a function's body, and the C of
 `impl` or trait body; the arms of a `match`; a parenthesised expression or
 a tuple's elements; the arguments
 of a call and the elements of an array literal; a subscript's index; the
-operand of a prefix operator; a conditional expression; a type
-application's arguments; a tuple type's elements; a function type's
+operand of a prefix operator (`!`, `-`, `~`); a conditional expression; a
+type application's arguments; a tuple type's elements; a function type's
 parameters and its result, and a lambda's result type; and each type
 suffix (`[]`, `[N]`, `?`), around the levels of the type it wraps, so that
 `B<int>[][]` is three levels deep, as its AST is. The AST interchange
 reader counts the same levels in the AST it reads, which has no
 parentheses: there an operand that needs them where it stands (`a + (b +
-c)`, `(a == b) == c`, `-(a + b)`, `(a + b).m()`, `(if c then a else b) +
-d`) is the level its parenthesis is
+c)`, `(a == b) == c`, `(a << b) << c`, `-(a + b)`, `(a + b).m()`, `(if c
+then a else b) + d`) is the level its parenthesis is
 ([`plugins/ast-format.md`](plugins/ast-format.md) section 3).
 
 A chain of more than 2048 links is rejected with `nesting too deep (more
@@ -681,6 +709,18 @@ the levels of nesting are not: `1 + 1 + ...` takes 2049 terms, `s.trim()
 .trim()...` 2048 calls, and `(a + b + ...) + c + ...` counts the links on
 both sides of the parenthesis together. The AST interchange reader counts
 the same links.
+
+A comparison of a comparison and a shift of a shift are syntax errors
+(`relational operators cannot be chained; parenthesise the comparison`,
+`shift operators cannot be chained; parenthesise the shift`), reported at
+the second operator. Where an expression is expected at a `>` or `>=` that
+follows a `>` with something between them, the error says how `>>` and
+`>>=` are written: `unexpected '>'; expected an expression ('>>' is
+written without a space)`, and `('>>=' is written without a space)` for the
+`>=`. A third `>` directly after a `>>` is `unexpected '>'; expected an
+expression (there is no '>>>': '>>' of an unsigned value shifts in zeros)`.
+A syntax error at a `>` directly followed by `>` or `>=` names it `'>>'`
+or `'>>='` (`unexpected '>>='; expected ')' to close the argument list`).
 
 Every frontend reports lexical and syntax errors in source order, and
 locate the common ones alike (a tuple index with leading zeros at its `.`,
@@ -703,3 +743,6 @@ specification does not. Every frontend must reject them (the
   `_` in a decimal `1_000`, a suffix `255u8` and a fraction `0x1.5`.  `t.0x1`
   is not a tuple index of 1: the digits after the `.` are the index `0`, and
   `x1` the identifier after it, a syntax error.
+- Shifts in the forms of other languages (§7, §9): a `>>` or `>>=` with a
+  space or a newline between its two tokens (`a > > b`, `x > >= 1;`), a
+  `>>>` (`a >>> b`), and a chain of shifts (`a << b << c`).

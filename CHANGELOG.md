@@ -852,6 +852,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   9223372036854775808 does not fit in 'int' (...)`), and `-9223372036854775808` in an
   expression is Sema's error with its `-9223372036854775807 - 1` hint.  The AST interchange
   format's `(int ...)` reads values up to 18446744073709551615.
+- `&`, `|`, `^` and `~` are tokens (no longer `invalid character`).
 
 ### Removed
 

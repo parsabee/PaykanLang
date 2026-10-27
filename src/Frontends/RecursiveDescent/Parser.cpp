@@ -85,69 +85,6 @@ unsigned typeLevels(const Type *ty) {
   return 0;
 }
 
-bool isRelational(Tok k) {
-  return k == Tok::Less || k == Tok::Greater || k == Tok::LessEq ||
-         k == Tok::GreaterEq || k == Tok::EqEq || k == Tok::NotEq;
-}
-
-// Binary operator precedence (higher binds tighter); 0 = not a binary
-// operator.  Relational operators are non-associative (see parseBinary).
-int binaryPrecedence(Tok k) {
-  switch (k) {
-  case Tok::OrOr:
-    return 1;
-  case Tok::AndAnd:
-    return 2;
-  case Tok::Less:
-  case Tok::Greater:
-  case Tok::LessEq:
-  case Tok::GreaterEq:
-  case Tok::EqEq:
-  case Tok::NotEq:
-    return 3;
-  case Tok::Plus:
-  case Tok::Minus:
-    return 4;
-  case Tok::Star:
-  case Tok::Slash:
-  case Tok::Percent:
-    return 5;
-  default:
-    return 0;
-  }
-}
-
-BinaryOpcode binaryOpcode(Tok k) {
-  switch (k) {
-  case Tok::OrOr:
-    return BinaryOpcode::Or;
-  case Tok::AndAnd:
-    return BinaryOpcode::And;
-  case Tok::Less:
-    return BinaryOpcode::Lt;
-  case Tok::Greater:
-    return BinaryOpcode::Gt;
-  case Tok::LessEq:
-    return BinaryOpcode::Le;
-  case Tok::GreaterEq:
-    return BinaryOpcode::Ge;
-  case Tok::EqEq:
-    return BinaryOpcode::Eq;
-  case Tok::NotEq:
-    return BinaryOpcode::Ne;
-  case Tok::Plus:
-    return BinaryOpcode::Add;
-  case Tok::Minus:
-    return BinaryOpcode::Sub;
-  case Tok::Star:
-    return BinaryOpcode::Mul;
-  case Tok::Slash:
-    return BinaryOpcode::Div;
-  default:
-    return BinaryOpcode::Mod;
-  }
-}
-
 bool isLiteralToken(Tok k) {
   return k == Tok::Int || k == Tok::Float || k == Tok::KwTrue ||
          k == Tok::KwFalse || k == Tok::Char || k == Tok::String ||
@@ -321,6 +258,9 @@ bool Parser::errorAtCurrent(const char *expected) {
 bool Parser::errorAtCurrent(const std::string &expected) {
   if (Speculating)
     return false;
+  // A `>` directly followed by `>` or `>=` reads as `>>` or `>>=`
+  // (binaryOperatorAt).  Found before cur(): peek() may grow Buf.
+  const Tok glued = nextIsGlued() ? kind(1) : Tok::Eof;
   const Token &t = cur();
   // Each error recovery resumes at a later token, so a second syntax error
   // at the same token (an unclosed block at end of file, reported once per
@@ -335,6 +275,10 @@ bool Parser::errorAtCurrent(const std::string &expected) {
   std::string found = describe(t.Kind);
   if (t.Kind == Tok::Ident)
     found += " '" + std::string(t.Text) + "'";
+  else if (t.Kind == Tok::Greater && glued == Tok::Greater)
+    found = "'>>'";
+  else if (t.Kind == Tok::Greater && glued == Tok::GreaterEq)
+    found = "'>>='";
   std::string hint;
   if (t.Kind == Tok::KwView || t.Kind == Tok::KwInout)
     hint = " (" + found +
@@ -1746,7 +1690,8 @@ bool Parser::parseWeakDecl(Stmt *&out) {
 
 namespace {
 
-/// The operator of the compound assignment token @p k (`+=` is Add).
+/// The operator of the compound assignment token @p k (`+=` is Add); `>>=`
+/// is two tokens (parseExprOrAssignStatement).
 std::optional<BinaryOpcode> compoundOpcode(Tok k) {
   switch (k) {
   case Tok::PlusAssign:
@@ -1759,6 +1704,14 @@ std::optional<BinaryOpcode> compoundOpcode(Tok k) {
     return BinaryOpcode::Div;
   case Tok::PercentAssign:
     return BinaryOpcode::Mod;
+  case Tok::AmpAssign:
+    return BinaryOpcode::BitAnd;
+  case Tok::PipeAssign:
+    return BinaryOpcode::BitOr;
+  case Tok::CaretAssign:
+    return BinaryOpcode::BitXor;
+  case Tok::LessLessAssign:
+    return BinaryOpcode::Shl;
   default:
     return std::nullopt;
   }
@@ -1768,7 +1721,8 @@ std::optional<BinaryOpcode> compoundOpcode(Tok k) {
 
 // A compound assignment `target op= value` is `target = target op value`
 // (docs/grammar.md): the parser builds the assignment, reading the target
-// with a copy of its expression.
+// with a copy of its expression.  `>>=` is a `>` directly followed by a
+// `>=`, where the expression ended (binaryOperatorAt).
 bool Parser::parseExprOrAssignStatement(Stmt *&out) {
   SourceLocation start = cur().Loc;
   ChainScope chain(*this);
@@ -1777,7 +1731,9 @@ bool Parser::parseExprOrAssignStatement(Stmt *&out) {
     return false;
   unsigned height = chain.take();
 
-  const std::optional<BinaryOpcode> compound = compoundOpcode(kind());
+  const bool shiftAssign = binaryOperatorAt().EndsExpression;
+  const std::optional<BinaryOpcode> compound =
+      shiftAssign ? BinaryOpcode::Shr : compoundOpcode(kind());
   if (!compound && !at(Tok::Assign)) {
     chain.finish(height);
     if (!expect(Tok::Semi, "after the expression"))
@@ -1786,13 +1742,15 @@ bool Parser::parseExprOrAssignStatement(Stmt *&out) {
     return true;
   }
   const SourceLocation opLoc = cur().Loc;
-  const std::string_view opText = consume().Text;
+  std::string opText(consume().Text);
+  if (shiftAssign)
+    opText += consume().Text; // the `>=` of `>>=`
 
   // Check the target before the value so that recovery resumes at this
   // statement's `;` rather than the next one's.
   if (!isa<Identifier>(lhs) && !isa<MemberAccessExpr>(lhs) &&
       !isa<SubscriptExpr>(lhs) && !isa<TupleIndexExpr>(lhs)) {
-    error(start, "left-hand side of '" + std::string(opText) +
+    error(start, "left-hand side of '" + opText +
                      "' must be an identifier, field access, or subscript");
     return false;
   }
@@ -2411,8 +2369,79 @@ Expr *Parser::parseTernary() {
   return Ctx.make<TernaryExpr>(span(start), cond, t, f);
 }
 
-// Precedence climbing over the table in binaryPrecedence().  Relational
-// operators do not chain: `a < b < c` is a syntax error.
+bool Parser::nextIsGlued() {
+  const size_t next = peek(1).Offset; // peek() may grow Buf: before cur()
+  const Token &t = cur();
+  return next == t.Offset + t.Text.size();
+}
+
+// The precedence table of docs/grammar.md section 7, Swift's: 1 `||`, 2 `&&`,
+// 3 the comparisons, 4 `+ - | ^`, 5 `* / % &`, 6 the shifts.  `>>` and `>>=`
+// are no tokens (the lexer keeps a type argument list's `>` single): a `>`
+// directly followed by `>` is the shift, and by `>=` the compound assignment
+// of a statement, where an expression ends.
+Parser::OpInfo Parser::binaryOperatorAt() {
+  auto op = [](int prec, BinaryOpcode code) {
+    return OpInfo{.Prec = prec,
+                  .Op = code,
+                  .Tokens = 1,
+                  .Relational = prec == 3,
+                  .Shift = prec == 6,
+                  .EndsExpression = false};
+  };
+  switch (kind()) {
+  case Tok::OrOr:
+    return op(1, BinaryOpcode::Or);
+  case Tok::AndAnd:
+    return op(2, BinaryOpcode::And);
+  case Tok::Less:
+    return op(3, BinaryOpcode::Lt);
+  case Tok::Greater:
+    if (kind(1) == Tok::Greater && nextIsGlued()) {
+      OpInfo shr = op(6, BinaryOpcode::Shr);
+      shr.Tokens = 2;
+      return shr;
+    }
+    if (kind(1) == Tok::GreaterEq && nextIsGlued()) {
+      OpInfo end = op(0, BinaryOpcode::Shr);
+      end.EndsExpression = true;
+      return end;
+    }
+    return op(3, BinaryOpcode::Gt);
+  case Tok::LessEq:
+    return op(3, BinaryOpcode::Le);
+  case Tok::GreaterEq:
+    return op(3, BinaryOpcode::Ge);
+  case Tok::EqEq:
+    return op(3, BinaryOpcode::Eq);
+  case Tok::NotEq:
+    return op(3, BinaryOpcode::Ne);
+  case Tok::Plus:
+    return op(4, BinaryOpcode::Add);
+  case Tok::Minus:
+    return op(4, BinaryOpcode::Sub);
+  case Tok::Pipe:
+    return op(4, BinaryOpcode::BitOr);
+  case Tok::Caret:
+    return op(4, BinaryOpcode::BitXor);
+  case Tok::Star:
+    return op(5, BinaryOpcode::Mul);
+  case Tok::Slash:
+    return op(5, BinaryOpcode::Div);
+  case Tok::Percent:
+    return op(5, BinaryOpcode::Mod);
+  case Tok::Amp:
+    return op(5, BinaryOpcode::BitAnd);
+  case Tok::LessLess:
+    return op(6, BinaryOpcode::Shl);
+  default:
+    return op(0, BinaryOpcode::Count); // no binary operator
+  }
+}
+
+// Precedence climbing over the table of binaryOperatorAt().  Neither the
+// comparisons nor the shifts chain: `a < b < c` and `a << b << c` are
+// syntax errors.
 //
 // Each operator is a link of a chain (frontend::kMaxChain) over the deeper of
 // its operands, so `1 + 1 + ...` is rejected at its 2049th operator; the
@@ -2425,34 +2454,47 @@ Expr *Parser::parseBinary(int minPrec) {
   if (!lhs)
     return nullptr;
   unsigned height = chain.take();
+  // Whether lhs is a comparison or a shift, which the next operator may
+  // not be.
+  bool relational = false;
+  bool shift = false;
   for (;;) {
-    Tok op = kind();
-    int prec = binaryPrecedence(op);
-    if (prec == 0 || prec < minPrec) {
+    const OpInfo op = binaryOperatorAt();
+    if (relational && op.Relational) {
+      errorAtCurrent("relational operators cannot be chained; parenthesise "
+                     "the comparison");
+      return nullptr;
+    }
+    if (shift && op.Shift) {
+      errorAtCurrent("shift operators cannot be chained; parenthesise the "
+                     "shift");
+      return nullptr;
+    }
+    if (op.Prec == 0 || op.Prec < minPrec) {
       chain.finish(height);
       return lhs;
     }
-    const SourceLocation opLoc = consume().Loc;
+    const SourceLocation opLoc = cur().Loc;
+    for (unsigned i = 0; i < op.Tokens; ++i)
+      consume();
     if (!checkChain(height + 1, opLoc))
       return nullptr;
-    Expr *rhs = parseBinary(prec + 1);
+    Expr *rhs = parseBinary(op.Prec + 1);
     if (!rhs)
       return nullptr;
     height = std::max(height, chain.take()) + 1;
     if (!checkChain(height, opLoc))
       return nullptr;
-    lhs = Ctx.make<BinaryExpr>(span(start), binaryOpcode(op), lhs, rhs);
-    if (isRelational(op) && isRelational(kind())) {
-      errorAtCurrent("relational operators cannot be chained; parenthesise "
-                     "the comparison");
-      return nullptr;
-    }
+    lhs = Ctx.make<BinaryExpr>(span(start), op.Op, lhs, rhs);
+    relational = op.Relational;
+    shift = op.Shift;
   }
 }
 
-// unary ::= ( "!" | "-" ) unary | postfix   ("mov" is reserved: an error)
+// unary ::= ( "!" | "-" | "~" ) unary | postfix   ("mov" is reserved: an
+// error)
 Expr *Parser::parseUnary() {
-  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::KwMov)) {
+  if (at(Tok::Not) || at(Tok::Minus) || at(Tok::Tilde) || at(Tok::KwMov)) {
     if (!enterNesting())
       return nullptr;
     const Tok op = kind();
@@ -2470,9 +2512,12 @@ Expr *Parser::parseUnary() {
     leaveNesting();
     if (!operand || op == Tok::KwMov)
       return operand;
-    return Ctx.make<UnaryExpr>(
-        span(opLoc), op == Tok::Not ? UnaryOpcode::Not : UnaryOpcode::Neg,
-        operand);
+    UnaryOpcode code = UnaryOpcode::Neg;
+    if (op == Tok::Not)
+      code = UnaryOpcode::Not;
+    else if (op == Tok::Tilde)
+      code = UnaryOpcode::BitNot;
+    return Ctx.make<UnaryExpr>(span(opLoc), code, operand);
   }
   return parsePostfix();
 }
@@ -2685,9 +2730,30 @@ Expr *Parser::parsePrimary() {
   case Tok::LBracket:
     return parseArrayLiteral();
   default:
-    errorAtCurrent("expected an expression");
-    return nullptr;
+    return expressionExpected();
   }
+}
+
+// The error of a token that cannot start an expression (parsePrimary), in a
+// function of its own, as each kind's.  At a `>` or `>=` after a `>` it
+// says how `>>` and `>>=` are written, or that there is no `>>>`
+// (docs/grammar.md section 9).
+Expr *Parser::expressionExpected() {
+  auto gluedAt = [this](size_t i) {
+    return Buf[i - 1].Offset + Buf[i - 1].Text.size() == Buf[i].Offset;
+  };
+  const char *hint = "";
+  if (Pos > 0 && (at(Tok::Greater) || at(Tok::GreaterEq)) &&
+      Buf[Pos - 1].Kind == Tok::Greater) {
+    if (!gluedAt(Pos))
+      hint = at(Tok::Greater) ? " ('>>' is written without a space)"
+                              : " ('>>=' is written without a space)";
+    else if (at(Tok::Greater) && Pos >= 2 &&
+             Buf[Pos - 2].Kind == Tok::Greater && gluedAt(Pos - 1))
+      hint = " (there is no '>>>': '>>' of an unsigned value shifts in zeros)";
+  }
+  errorAtCurrent(std::string("expected an expression") + hint);
+  return nullptr;
 }
 
 // A name: a variable, an enum's value, or a call of a function, a generic

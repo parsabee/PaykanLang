@@ -1707,6 +1707,7 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
 
   switch (node->getOpcode()) {
   case ast::UnaryOpcode::Neg:
+  case ast::UnaryOpcode::BitNot:
     return operandTy;
   case ast::UnaryOpcode::Not:
     return S.Ctx.getBoolTy();
@@ -1995,6 +1996,15 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
       return nullptr;
     }
     return S.Ctx.getBoolTy();
+
+  // Bitwise: the operand's type, or a shift's value's
+  // (docs/design/bitwise.md).
+  case ast::BinaryOpcode::BitAnd:
+  case ast::BinaryOpcode::BitOr:
+  case ast::BinaryOpcode::BitXor:
+  case ast::BinaryOpcode::Shl:
+  case ast::BinaryOpcode::Shr:
+    return lhsTy;
   case ast::BinaryOpcode::Count:
     break;
   }

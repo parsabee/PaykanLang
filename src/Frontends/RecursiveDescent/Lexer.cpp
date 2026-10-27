@@ -182,6 +182,14 @@ const char *describe(Tok k) {
     return "'/='";
   case Tok::PercentAssign:
     return "'%='";
+  case Tok::AmpAssign:
+    return "'&='";
+  case Tok::PipeAssign:
+    return "'|='";
+  case Tok::CaretAssign:
+    return "'^='";
+  case Tok::LessLessAssign:
+    return "'<<='";
   case Tok::Minus:
     return "'-'";
   case Tok::Plus:
@@ -200,6 +208,8 @@ const char *describe(Tok k) {
     return "'<='";
   case Tok::GreaterEq:
     return "'>='";
+  case Tok::LessLess:
+    return "'<<'";
   case Tok::EqEq:
     return "'=='";
   case Tok::NotEq:
@@ -242,6 +252,14 @@ const char *describe(Tok k) {
     return "'&&'";
   case Tok::OrOr:
     return "'||'";
+  case Tok::Amp:
+    return "'&'";
+  case Tok::Pipe:
+    return "'|'";
+  case Tok::Caret:
+    return "'^'";
+  case Tok::Tilde:
+    return "'~'";
   }
   return "token";
 }
@@ -330,6 +348,14 @@ const char *tokenKindName(Tok k) {
     return "SLASH_ASSIGN";
   case Tok::PercentAssign:
     return "PERCENT_ASSIGN";
+  case Tok::AmpAssign:
+    return "AMP_ASSIGN";
+  case Tok::PipeAssign:
+    return "PIPE_ASSIGN";
+  case Tok::CaretAssign:
+    return "CARET_ASSIGN";
+  case Tok::LessLessAssign:
+    return "LESS_LESS_ASSIGN";
   case Tok::Minus:
     return "MINUS";
   case Tok::Plus:
@@ -348,6 +374,8 @@ const char *tokenKindName(Tok k) {
     return "LESS_EQ";
   case Tok::GreaterEq:
     return "GREATER_EQ";
+  case Tok::LessLess:
+    return "LESS_LESS";
   case Tok::EqEq:
     return "EQ_EQ";
   case Tok::NotEq:
@@ -390,6 +418,14 @@ const char *tokenKindName(Tok k) {
     return "AND_AND";
   case Tok::OrOr:
     return "OR_OR";
+  case Tok::Amp:
+    return "AMP";
+  case Tok::Pipe:
+    return "PIPE";
+  case Tok::Caret:
+    return "CARET";
+  case Tok::Tilde:
+    return "TILDE";
   }
   return "UNKNOWN";
 }
@@ -465,9 +501,16 @@ Token Lexer::next() {
                        : Tok::Minus;
         break;
       case '<':
-        k = n == '=' ? (len = 2, Tok::LessEq) : Tok::Less;
+        if (n == '<')
+          k = peekAt(2) == '=' ? (len = 3, Tok::LessLessAssign)
+                               : (len = 2, Tok::LessLess);
+        else
+          k = n == '=' ? (len = 2, Tok::LessEq) : Tok::Less;
         break;
       case '>':
+        // `>>` and `>>=` are no tokens: the parser reads a `>` directly
+        // followed by `>` or `>=` as one (docs/grammar.md section 1), so a
+        // type argument list closes with single `>` tokens.
         k = n == '=' ? (len = 2, Tok::GreaterEq) : Tok::Greater;
         break;
       case '=':
@@ -482,24 +525,20 @@ Token Lexer::next() {
         k = n == '=' ? (len = 2, Tok::NotEq) : Tok::Not;
         break;
       case '&':
-        if (n == '&') {
-          k = Tok::AndAnd;
-          len = 2;
-        } else {
-          advance();
-          error(line, col, std::string("invalid character '") + c + "'");
-          return next();
-        }
+        k = n == '&'   ? (len = 2, Tok::AndAnd)
+            : n == '=' ? (len = 2, Tok::AmpAssign)
+                       : Tok::Amp;
         break;
       case '|':
-        if (n == '|') {
-          k = Tok::OrOr;
-          len = 2;
-        } else {
-          advance();
-          error(line, col, std::string("invalid character '") + c + "'");
-          return next();
-        }
+        k = n == '|'   ? (len = 2, Tok::OrOr)
+            : n == '=' ? (len = 2, Tok::PipeAssign)
+                       : Tok::Pipe;
+        break;
+      case '^':
+        k = n == '=' ? (len = 2, Tok::CaretAssign) : Tok::Caret;
+        break;
+      case '~':
+        k = Tok::Tilde;
         break;
       case '+':
         k = n == '=' ? (len = 2, Tok::PlusAssign) : Tok::Plus;

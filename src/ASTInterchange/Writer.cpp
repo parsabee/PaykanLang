@@ -565,10 +565,35 @@ private:
     case BinaryOpcode::And:
       return "and";
     case BinaryOpcode::Or:
+      return "or";
+    case BinaryOpcode::BitAnd:
+      return "bitand";
+    case BinaryOpcode::BitOr:
+      return "bitor";
+    case BinaryOpcode::BitXor:
+      return "bitxor";
+    case BinaryOpcode::Shl:
+      return "shl";
+    case BinaryOpcode::Shr:
+      return "shr";
     case BinaryOpcode::Count:
       break;
     }
-    return "or";
+    __builtin_unreachable();
+  }
+
+  static const char *unaryName(UnaryOpcode op) {
+    switch (op) {
+    case UnaryOpcode::Neg:
+      return "neg";
+    case UnaryOpcode::Not:
+      return "not";
+    case UnaryOpcode::BitNot:
+      return "bitnot";
+    case UnaryOpcode::Count:
+      break;
+    }
+    __builtin_unreachable();
   }
 
   void floating(double v) {
@@ -637,7 +662,7 @@ private:
     case ASTNode::NK_UnaryExpr: {
       const auto *u = cast<UnaryExpr>(e);
       open("unary", u);
-      sym(u->getOpcode() == UnaryOpcode::Neg ? "neg" : "not");
+      sym(unaryName(u->getOpcode()));
       expr(u->getOperand());
       close();
       return;

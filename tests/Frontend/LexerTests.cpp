@@ -51,17 +51,48 @@ TEST(Lexer, KeywordsPunctuationAndLocations) {
 }
 
 TEST(Lexer, LongestMatchOperators) {
-  auto d = dump(":: : -> - <= < >= > == = != ! && ||");
+  auto d = dump(":: : -> - <<= << <= < >= > == = != ! && &= & || |= | ^= ^");
   std::vector<std::string> kinds;
   kinds.reserve(d.Lines.size());
   for (const auto &l : d.Lines)
     kinds.push_back(l.substr(l.find(' ') + 1,
                              l.find(' ', l.find(' ') + 1) - l.find(' ') - 1));
   std::vector<std::string> expected = {
-      "COLON_COLON", "COLON",      "ARROW",   "MINUS", "LESS_EQ",
-      "LESS",        "GREATER_EQ", "GREATER", "EQ_EQ", "ASSIGN",
-      "NOT_EQ",      "NOT",        "AND_AND", "OR_OR", "EOF"};
+      "COLON_COLON",  "COLON",   "ARROW",  "MINUS",       "LESS_LESS_ASSIGN",
+      "LESS_LESS",    "LESS_EQ", "LESS",   "GREATER_EQ",  "GREATER",
+      "EQ_EQ",        "ASSIGN",  "NOT_EQ", "NOT",         "AND_AND",
+      "AMP_ASSIGN",   "AMP",     "OR_OR",  "PIPE_ASSIGN", "PIPE",
+      "CARET_ASSIGN", "CARET",   "EOF"};
   EXPECT_EQ(kinds, expected);
+  EXPECT_EQ(d.Errors, 0u);
+}
+
+TEST(Lexer, BitwiseOperatorTokens) {
+  // `>>` and `>>=` are no tokens: two `>`, and a `>` then a `>=`, which the
+  // parser reads as one when they are written together
+  // (docs/design/bitwise.md).
+  auto d = dump("& | ^ ~ << &= |= ^= <<= && || >> >>= a<<b~c");
+  std::vector<std::string> kinds;
+  kinds.reserve(d.Lines.size());
+  for (const auto &l : d.Lines)
+    kinds.push_back(l.substr(l.find(' ') + 1,
+                             l.find(' ', l.find(' ') + 1) - l.find(' ') - 1));
+  std::vector<std::string> expected = {
+      "AMP",         "PIPE",         "CARET",
+      "TILDE",       "LESS_LESS",    "AMP_ASSIGN",
+      "PIPE_ASSIGN", "CARET_ASSIGN", "LESS_LESS_ASSIGN",
+      "AND_AND",     "OR_OR",        "GREATER",
+      "GREATER",     "GREATER",      "GREATER_EQ",
+      "IDENT",       "LESS_LESS",    "IDENT",
+      "TILDE",       "IDENT",        "EOF"};
+  EXPECT_EQ(kinds, expected);
+  EXPECT_EQ(d.Errors, 0u) << d.Diags;
+  // The two `>` of `>>` are adjacent; their spellings are their own.
+  ASSERT_GE(d.Lines.size(), 15u);
+  EXPECT_EQ(d.Lines[11], "1:31-1:32 GREATER >");
+  EXPECT_EQ(d.Lines[12], "1:32-1:33 GREATER >");
+  EXPECT_EQ(d.Lines[13], "1:34-1:35 GREATER >");
+  EXPECT_EQ(d.Lines[14], "1:35-1:37 GREATER_EQ >=");
 }
 
 TEST(Lexer, KeywordVersusIdentifier) {
@@ -180,13 +211,19 @@ TEST(Lexer, StringAndCharLiterals) {
 }
 
 TEST(Lexer, LexicalErrorsAreReportedAndSkipped) {
-  auto d = dump("a @ b & c | d");
+  auto d = dump("a @ b $ c # d");
   EXPECT_EQ(d.Errors, 3u);
-  EXPECT_NE(d.Diags.find("invalid character '@'"), std::string::npos);
-  EXPECT_NE(d.Diags.find("invalid character '&'"), std::string::npos);
-  EXPECT_NE(d.Diags.find("invalid character '|'"), std::string::npos);
+  EXPECT_NE(d.Diags.find("1:3: error: invalid character '@'"),
+            std::string::npos);
+  EXPECT_NE(d.Diags.find("1:7: error: invalid character '$'"),
+            std::string::npos);
+  EXPECT_NE(d.Diags.find("1:11: error: invalid character '#'"),
+            std::string::npos);
   // The valid tokens around the bad bytes are all still delivered.
   ASSERT_EQ(d.Lines.size(), 5u);
+  EXPECT_EQ(d.Lines[0], "1:1-1:2 IDENT a");
+  EXPECT_EQ(d.Lines[1], "1:5-1:6 IDENT b");
+  EXPECT_EQ(d.Lines[2], "1:9-1:10 IDENT c");
   EXPECT_EQ(d.Lines[3], "1:13-1:14 IDENT d");
 }
 
