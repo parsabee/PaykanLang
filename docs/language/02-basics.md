@@ -434,8 +434,8 @@ Output:
   `HashMap` key; an `unsigned` also has `u.toInt()`, its value as an `int?` (`None` above
   9223372036854775807).  A sized type has an optional (`u8?`), is a `match` subject with literal
   arms, and is a type argument like any value type (`Box<u8>`, `List<f32>`).
-- **Bitwise operators.**  `&`, `|`, `^`, `~`, `<<` and `>>` are the unsigned types' only
-  ([Bitwise operators](#bitwise-operators)).
+- **Bitwise operators.**  The unsigned types have `&`, `|`, `^`, `~`, `<<` and `>>`; the
+  signed and float types have none ([Bitwise operators](#bitwise-operators)).
 - **Not yet:** literal suffixes (`1u8`) and implicit widening (`i32` to `int`).  The design
   is in [`design/sized-types.md`](../design/sized-types.md).
 
