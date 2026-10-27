@@ -3541,9 +3541,12 @@ TEST(Driver, AFileOver256MiBIsTooLarge) {
   auto big = in(std::string(kPaykan) + " --check-only big.pkn");
   EXPECT_EQ(big.exitCode, 1) << big.out;
   EXPECT_NE(big.out.find("'big.pkn' " + source), std::string::npos) << big.out;
+  // An import's file by the path every diagnostic in it uses (SW-34).
   auto import = in(std::string(kPaykan) + " --check-only main.pkn");
   EXPECT_EQ(import.exitCode, 1) << import.out;
-  EXPECT_NE(import.out.find(source), std::string::npos) << import.out;
+  EXPECT_NE(import.out.find("error: 'lib/big.pkn' " + source),
+            std::string::npos)
+      << import.out;
   auto dump = in(std::string(kPaykan) + " pkm dump big.pkm");
   EXPECT_EQ(dump.exitCode, 1) << dump.out;
   EXPECT_EQ(dump.out, "paykan: 'big.pkm' is too large (more than 256 MiB)\n");

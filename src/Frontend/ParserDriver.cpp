@@ -137,6 +137,11 @@ bool ParserDriver::prepare(const std::string &filename, sema::DiagEngine &diag,
   if (!out.FE)
     return fail("unknown frontend '" + im.FrontendName + "'");
 
+  // The file by the name its diagnostics give it (an import's path as it
+  // is shown from where paykan runs), else as given.
+  const std::string &shown =
+      diag.getSourceName().empty() ? filename : diag.getSourceName();
+
   // Read the whole file; the frontend parses the text.  A file that cannot
   // be opened is a diagnostic with no location (there is no source to point
   // at) and a failed parse; library code never exit()s the process.
@@ -147,17 +152,17 @@ bool ParserDriver::prepare(const std::string &filename, sema::DiagEngine &diag,
   // whose read errors are reported rather than thrown.
   std::error_code ec;
   if (std::filesystem::is_directory(filename, ec))
-    return fail("'" + filename + "' is a directory, not a source file");
+    return fail("'" + shown + "' is a directory, not a source file");
   errno = 0;
   std::unique_ptr<std::FILE, int (*)(std::FILE *)> in(
       std::fopen(filename.c_str(), "rb"), &std::fclose);
   if (!in)
-    return fail("cannot open '" + filename + "': " + std::strerror(errno));
+    return fail("cannot open '" + shown + "': " + std::strerror(errno));
   // At most frontend::kMaxSourceBytes: a regular file larger than that is
   // refused before it is read, and a pipe or a device (/dev/stdin, `<(...)`,
   // /dev/zero) is read only until it gives more.
   const std::string tooLarge =
-      "'" + filename + "' is too large for a source file (more than " +
+      "'" + shown + "' is too large for a source file (more than " +
       std::to_string(frontend::kMaxSourceBytes >> 20) + " MiB)";
   if (std::filesystem::is_regular_file(filename, ec) &&
       std::filesystem::file_size(filename, ec) > frontend::kMaxSourceBytes &&
@@ -177,7 +182,7 @@ bool ParserDriver::prepare(const std::string &filename, sema::DiagEngine &diag,
     out.Source.append(buf.data(), n);
   } while (n == kChunk);
   if (std::ferror(in.get()))
-    return fail("cannot read '" + filename + "': " + std::strerror(errno));
+    return fail("cannot read '" + shown + "': " + std::strerror(errno));
 
   std::istringstream lines(out.Source);
   std::string line;

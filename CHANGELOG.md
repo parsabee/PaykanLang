@@ -1181,13 +1181,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     root, which is not that file unless `paykan` runs there: `paykan --check-only
     tasks/main.pkn` reported a mistake in `tasks/tasks/text.pkn` as `tasks/text.pkn:1:27:
     error: ...`, and so did an error in a template's body, the files an import that is not
-    found tried (`not found (tried tasks/nothere.pkn, ...)`) and `--verbose`'s cache
-    entries.  Each is now named by the main file's directory as it was given followed by
-    that path (`tasks/tasks/text.pkn:1:27`, `tasks/.paykan_cache/tasks/text.pkm`), a path
-    that works from the directory `paykan` runs in, and absolute for an absolute main
-    file; the module files record the path from the source root as before, so they are
-    the same wherever `paykan` runs (docs/language/15-modules.md, docs/design/pkm.md
-    §8.6).
+    found tried (`not found (tried tasks/nothere.pkn, ...)`), an imported file that cannot
+    be read or is over the size limit (`'tasks/big.pkn' is too large for a source file`)
+    and `--verbose`'s cache entries.  Each is now named by the main file's directory as it
+    was given followed by that path (`tasks/tasks/text.pkn:1:27`,
+    `tasks/.paykan_cache/tasks/text.pkm`), a path that works from the directory `paykan`
+    runs in, and absolute for an absolute main file; the module files record the path from
+    the source root as before, so they are the same wherever `paykan` runs
+    (docs/language/15-modules.md, docs/design/pkm.md §8.6).
   - `--emit-pkm --module-name=a::b src/a/b.pkn` resolved the module's imports against
     `src/a`, the file's directory, so its sibling `a::c` was looked for as
     `src/a/a/c.pkn` and not found.  When the name's parts before its last are the last
@@ -1195,11 +1196,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     directory above them (`src`), where a program that imports it finds them, run from
     anywhere (`cd src/a && paykan --emit-pkm --module-name=a::b b.pkn` too); otherwise
     against the file's directory, as before (docs/language/17-the-paykan-command.md).
-- A value read from a variable could be freed while still in use when a call later in the
   - A line of some 20,000 invalid characters (`$`, NUL bytes) overflowed the stack in the
     lexer (a segmentation fault), far below the 256 MiB a source may have, since it called
     itself once per character it skipped.  It skips them in a loop: 100,000 `$` in a row
     are 100,000 `invalid character '$'` errors, 20 of them printed, and exit status 1.
+- A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
   and `l.greet(repl(l))` or `s.n.greet(s.reset())` ran a method on a freed object.  Such a
