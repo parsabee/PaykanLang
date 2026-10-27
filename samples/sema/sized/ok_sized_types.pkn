@@ -1,6 +1,6 @@
 // The sized numeric types: literals take the type their context expects,
-// every operation has one operand type, and the conversions cover every
-// numeric pair.
+// every operation has one operand type (a shift's count aside), and the
+// conversions cover every numeric pair.
 struct Pixel {
   r: u8;
   g: u8;
@@ -32,6 +32,12 @@ fn main() -> int {
   px = Pixel(1, 2, 3, 0.5);
   q: bool = px.r < 200 && px.a > 0.25;
   match a { 255 { } _ { } }
+  let r: u8 = a & ~0x0F;           // the bitwise operators: unsigned only
+  let s: u8 = a << d;              // a count of any unsigned type
+  t: u32 = 0xFFFF_0000;
+  t |= 0x0F;
+  t >>= 4;
+  t ^= ~0;
   return 0;
 }
 fn g16(v: f16) -> f16 {

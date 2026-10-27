@@ -252,7 +252,9 @@ void BuiltinType::initOps() {
   case U16:
   case U32:
   case U64:
-    // An unsigned type has no negation; otherwise the integer operators.
+    // An unsigned type has no negation; otherwise the integer operators,
+    // and the bitwise ones, which only the unsigned types have
+    // (docs/design/bitwise.md).
     addBinaryOp(BinaryOpcode::Add);
     addBinaryOp(BinaryOpcode::Sub);
     addBinaryOp(BinaryOpcode::Mul);
@@ -264,6 +266,12 @@ void BuiltinType::initOps() {
     addBinaryOp(BinaryOpcode::Ge);
     addBinaryOp(BinaryOpcode::Eq);
     addBinaryOp(BinaryOpcode::Ne);
+    addUnaryOp(UnaryOpcode::BitNot);
+    addBinaryOp(BinaryOpcode::BitAnd);
+    addBinaryOp(BinaryOpcode::BitOr);
+    addBinaryOp(BinaryOpcode::BitXor);
+    addBinaryOp(BinaryOpcode::Shl);
+    addBinaryOp(BinaryOpcode::Shr);
     break;
   case Int:
   case Float:

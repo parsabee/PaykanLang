@@ -1,0 +1,129 @@
+// 83 — the bitwise operators on the unsigned types
+// Exercises: `&`, `|`, `^` and `~` on a `u8`, a literal operand taking the
+//            other operand's type; `<<` and `>>` on each width with counts
+//            from 0 to 2^64-1, 0 for every count at or above the width
+//            (docs/design/bitwise.md); a count of another width; `~` within
+//            the width, and of a literal in an unsigned slot; Swift's
+//            precedence (`x & m == 0`, `1 << n - 1`, `a + b << 2`,
+//            `a | b ^ c`); the five compound assignments; a generic body
+//            instantiated with `u8` and `unsigned`; and three idioms on an
+//            `unsigned`: a string hash, xorshift64 and a masked rotate, with
+//            a population count by shifts.  Every shift past the width has a
+//            variable count: a literal one is a warning.
+// expect-stdout: 5 245 90 90
+// expect-stdout: u8: 129/129 2/64 128/1 0/0 0/0 0/0 0/0 0/0
+// expect-stdout: u16: 32769/32769 2/16384 32768/1 0/0 0/0 0/0 0/0 0/0
+// expect-stdout: u32: 2147483649/2147483649 2/1073741824 2147483648/1 0/0 0/0 0/0 0/0 0/0
+// expect-stdout: unsigned: 9223372036854775809/9223372036854775809 2/4611686018427387904 9223372036854775808/1 0/0 0/0 0/0 0/0 0/0
+// expect-stdout: 0 0 128
+// expect-stdout: 240 65535 4294967294 18446744073709551615 192
+// expect-stdout: 9223372036854775808 18446744073709551615 15
+// expect-stdout: True 15 14 0
+// expect-stdout: 61
+// expect-stdout: 240 65280
+// expect-stdout: 193409669
+// expect-stdout: 8748534153485358512 3040900993826735515 3453997556048239312
+// expect-stdout: 32 64 0
+// expect-stdout: 3 2 1
+
+import ::io;
+
+// `x << n` and `x >> n` for each count, as `<<`/`>>` pairs.
+fn shifts<T>(name: Str, x: T, counts: unsigned[8]) {
+  line = name + ":";
+  for i in 0..8 {
+    line = line + " " + Str(x << counts[i]) + "/" + Str(x >> counts[i]);
+  }
+  io::println(line);
+}
+
+fn clear<T>(x: T, m: T) -> T => x & ~m;
+
+fn xorshift(s: unsigned) -> unsigned {
+  x = s;
+  x ^= x << 13;
+  x ^= x >> 7;
+  x ^= x << 17;
+  return x;
+}
+
+fn popcount(x: unsigned) -> unsigned {
+  c: unsigned = 0;
+  for i: unsigned in 0..64 {
+    c += (x >> i) & 1;
+  }
+  return c;
+}
+
+fn rotl(x: unsigned, k: unsigned) -> unsigned {
+  return (x << (k & 63)) | (x >> ((0 - k) & 63));
+}
+
+fn main() -> int {
+  let b: u8 = 0b1010_0101;
+  io::println(Str(b & 0x0F) + " " + Str(b | 0xF0) + " " + Str(b ^ 0xFF) + " "
+      + Str(~b));
+
+  let top: unsigned = 0x8000_0000_0000_0000;
+  let max: unsigned = 0xFFFF_FFFF_FFFF_FFFF;
+  let c8: unsigned[8] = [0, 1, 7, 8, 63, 64, top, max];
+  let c16: unsigned[8] = [0, 1, 15, 16, 63, 64, top, max];
+  let c32: unsigned[8] = [0, 1, 31, 32, 63, 64, top, max];
+  let c64: unsigned[8] = [0, 1, 63, 64, 65, 127, top, max];
+  shifts("u8", u8(0x81), c8);
+  shifts("u16", u16(0x8001), c16);
+  shifts("u32", u32(0x8000_0001), c32);
+  shifts("unsigned", unsigned(0x8000_0000_0000_0001), c64);
+
+  let wide: u32 = 256;
+  let far: u8 = 255;
+  let seven: u16 = 7;
+  io::println(Str(u8(1) << wide) + " " + Str(u8(0x80) >> far) + " "
+      + Str(u8(1) << seven));
+
+  io::println(Str(~u8(0x0F)) + " " + Str(~u16(0)) + " " + Str(~u32(1)) + " "
+      + Str(~unsigned(0)) + " " + Str(u8(0b1100_1100) & ~0x0F));
+
+  let z: unsigned = ~0;
+  io::println(Str(unsigned(1) << 63) + " " + Str(z) + " " + Str(max >> 60));
+
+  let x: u8 = 0xF0;
+  let m: u8 = 0x0F;
+  let n: unsigned = 4;
+  let p: u8 = 1;
+  let q: u8 = 2;
+  let r: u8 = 3;
+  io::println(Str(x & m == 0) + " " + Str(unsigned(1) << n - 1) + " "
+      + Str(u8(2) + u8(3) << 2) + " " + Str(p | q ^ r));
+
+  f: u8 = 0;
+  f |= 1;
+  f |= 4;
+  f &= ~1;
+  f ^= 0xFF;
+  f <<= 1;
+  f >>= 2;
+  io::println(Str(f));
+
+  io::println(Str(clear(u8(0xFF), u8(0x0F))) + " "
+      + Str(clear(unsigned(0xFFFF), unsigned(0xFF))));
+
+  let bytes: u8[3] = [97, 98, 99];
+  h: unsigned = 5381;
+  for i in 0..3 {
+    h = ((h << 5) + h) ^ unsigned(bytes[i]);
+  }
+  io::println(Str(h));
+
+  let s1 = xorshift(88172645463325252);
+  let s2 = xorshift(s1);
+  let s3 = xorshift(s2);
+  io::println(Str(s1) + " " + Str(s2) + " " + Str(s3));
+
+  io::println(Str(popcount(0xF0F0_F0F0_F0F0_F0F0)) + " " + Str(popcount(max))
+      + " " + Str(popcount(0)));
+
+  io::println(Str(rotl(0x8000_0000_0000_0001, 1)) + " " + Str(rotl(1, 65)) + " "
+      + Str(rotl(1, 64)));
+  return 0;
+}

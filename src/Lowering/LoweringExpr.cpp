@@ -8,7 +8,9 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <optional>
 #include <utility>
 
 namespace paykan::lowering {
@@ -360,7 +362,21 @@ Val ModuleLowering::ExprEmitter::visitUnaryExpr(ast::UnaryExpr *node) {
     if (auto *b = std::get_if<bool>(&operand.Op.V))
       return Val::boolean(!*b);
     return L.B.unary(Opcode::Not, operand, "not");
-  case ast::UnaryOpcode::BitNot:
+  case ast::UnaryOpcode::BitNot: {
+    // The complement within the width (docs/design/bitwise.md, "Narrow
+    // types and masks"): `xor` with the width's ones for a `u8` or a
+    // `u16`, the 64-bit complement and its `mask 32` for a `u32`.
+    ast::Type *ty = node->getResolvedType();
+    if (auto *c = std::get_if<int64_t>(&operand.Op.V))
+      return L.canonicalize(Val::i64(~*c), ty);
+    const unsigned bits = ast::BuiltinType::integerBits(L.builtinKind(ty));
+    if (bits < 32)
+      return L.B.binary(Opcode::Xor, operand,
+                        Val::i64(static_cast<int64_t>((1ULL << bits) - 1)),
+                        "compl");
+    return L.canonicalize(
+        L.B.binary(Opcode::Xor, operand, Val::i64(-1), "compl"), ty);
+  }
   case ast::UnaryOpcode::Count:
     break;
   }
@@ -423,6 +439,78 @@ Val ModuleLowering::ExprEmitter::emitIntDivGuards(const Val &lhs,
   L.B.emitUnreachable();
   L.B.leave();
   return rhs;
+}
+
+namespace {
+
+/// The values of @p a and @p b, read unsigned, when both are constants.
+std::optional<std::pair<uint64_t, uint64_t>> foldInts(const Val &a,
+                                                      const Val &b) {
+  const auto *x = std::get_if<int64_t>(&a.Op.V);
+  const auto *y = std::get_if<int64_t>(&b.Op.V);
+  if (!x || !y)
+    return std::nullopt;
+  return std::pair{static_cast<uint64_t>(*x), static_cast<uint64_t>(*y)};
+}
+
+/// Whether the shift count @p count is below 64 by its form: `e & k` with
+/// a literal `k` of 0 to 63, or `e % k` with a literal `k` of 1 to 64.  A
+/// masked count and the rotate idiom need no overshift guard.
+bool countBelow64(const ast::Expr *count) {
+  const auto *b = ast::dyn_cast<ast::BinaryExpr>(count);
+  if (!b)
+    return false;
+  auto literal = [](const ast::Expr *e, uint64_t lo, uint64_t hi) {
+    const auto *il = ast::dyn_cast<ast::IntegerLiteral>(e);
+    return il && !il->isAboveInt64Max() && il->getValue() >= 0 &&
+           static_cast<uint64_t>(il->getValue()) >= lo &&
+           static_cast<uint64_t>(il->getValue()) <= hi;
+  };
+  if (b->getOpcode() == ast::BinaryOpcode::BitAnd)
+    return literal(b->getLHS(), 0, 63) || literal(b->getRHS(), 0, 63);
+  if (b->getOpcode() == ast::BinaryOpcode::Mod)
+    return literal(b->getRHS(), 1, 64);
+  return false;
+}
+
+} // namespace
+
+Val ModuleLowering::ExprEmitter::emitShift(bool left, const Val &value,
+                                           const Val &count,
+                                           const ast::Expr *countExpr,
+                                           ast::Type *resultTy) {
+  // A shift by the width or more is 0 (docs/design/bitwise.md, "How each
+  // layer gives 0"); PIR's `shl` and `shr` read the count mod 64.  A `<<`
+  // on a `u8`, `u16` or `u32` can set bits at and above the width, which
+  // its mask clears; a `>>` of a zero-extended value stays so.
+  const unsigned width = ast::BuiltinType::integerBits(L.builtinKind(resultTy));
+  const Opcode op = left ? Opcode::Shl : Opcode::Shr;
+  const char *name = left ? "shl" : "shr";
+  auto finish = [&](const Val &v) {
+    return left ? L.canonicalize(v, resultTy) : v;
+  };
+  if (const auto *c = std::get_if<int64_t>(&count.Op.V)) {
+    // A constant count: 0 at or above the width (the value is evaluated
+    // all the same), a plain shift below it, and two constants fold.
+    const auto n = static_cast<uint64_t>(*c);
+    if (n >= width)
+      return Val::i64(0);
+    if (const auto *v = std::get_if<int64_t>(&value.Op.V)) {
+      const auto x = static_cast<uint64_t>(*v);
+      return finish(Val::i64(static_cast<int64_t>(left ? x << n : x >> n)));
+    }
+    return finish(L.B.binary(op, value, count, name));
+  }
+  Val shifted = L.B.binary(op, value, count, name);
+  // Any other count: 0 from 64 on, by a guard.  From the width to 63 the
+  // mask clears a `<<` and a `>>` gives 0 already, so one comparison with
+  // 64 covers every width; unsigned, so a count of 2^63 or more is no
+  // negative one.
+  if (!countBelow64(countExpr)) {
+    Val inRange = L.B.ucmp(CmpPred::Lt, count, Val::i64(64), "shift.ok");
+    shifted = L.B.select(inRange, shifted, Val::i64(0), name);
+  }
+  return finish(shifted);
 }
 
 Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
@@ -562,13 +650,26 @@ Val ModuleLowering::ExprEmitter::visitBinaryExpr(ast::BinaryExpr *node) {
     return L.B.cmp(CmpPred::Eq, lhs, rhs, isFloat ? "feq" : "eq");
   case ast::BinaryOpcode::Ne:
     return L.B.cmp(CmpPred::Ne, lhs, rhs, isFloat ? "fne" : "ne");
-  case ast::BinaryOpcode::And:
-  case ast::BinaryOpcode::Or:
+  // Of two zero-extended values, zero-extended: no mask
+  // (docs/design/bitwise.md).
   case ast::BinaryOpcode::BitAnd:
+    if (auto c = foldInts(lhs, rhs))
+      return Val::i64(static_cast<int64_t>(c->first & c->second));
+    return L.B.binary(Opcode::And, lhs, rhs, "and");
   case ast::BinaryOpcode::BitOr:
+    if (auto c = foldInts(lhs, rhs))
+      return Val::i64(static_cast<int64_t>(c->first | c->second));
+    return L.B.binary(Opcode::Or, lhs, rhs, "or");
   case ast::BinaryOpcode::BitXor:
+    if (auto c = foldInts(lhs, rhs))
+      return Val::i64(static_cast<int64_t>(c->first ^ c->second));
+    return L.B.binary(Opcode::Xor, lhs, rhs, "xor");
   case ast::BinaryOpcode::Shl:
   case ast::BinaryOpcode::Shr:
+    return emitShift(op == ast::BinaryOpcode::Shl, lhs, rhs, node->getRHS(),
+                     resultTy);
+  case ast::BinaryOpcode::And:
+  case ast::BinaryOpcode::Or:
   case ast::BinaryOpcode::Count:
     break;
   }

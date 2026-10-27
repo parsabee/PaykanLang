@@ -1,0 +1,11 @@
+// A shift's count has an unsigned type, of any width, and the value takes
+// no type from it (docs/design/bitwise.md, "Shifts").
+fn main() -> int {
+  let x: u32 = 1;
+  let i = 3;
+  let a = x << i;                  // error: operator '<<' is not defined for types 'u32' and 'int' (a shift count is unsigned: convert it with 'unsigned(...)')
+  let n: u8 = 3;
+  let b = 1 << n;                  // error: operator '<<' is not defined for types 'int' and 'u8' (the value shifted takes no type from the count: write its type, as in 'unsigned(1)')
+  let c = x << -1;                 // error: the literal -1 does not fit in 'unsigned' (0 to 18446744073709551615)
+  return 0;
+}

@@ -24,7 +24,7 @@ end each have the default this implementation takes.
 | Optionals and match | `i32?`, `u8?`, `f32?` are value optionals like `int?`; `match` on a sized integer compares with literals of its type |
 | Runtime | one new type kind, `PAYKAN_KIND_UINT`, so a `u64` in a struct, tuple or array prints unsigned; `f16` rounding and the unsigned `toString`/parse are runtime functions; the ABI version stays |
 | PIR | new instructions `wrap N`, `mask N`, `udiv`, `urem`, `ucmp`, `utof`, `ftou` and `fround32` (`ftou` is no longer produced, as no unsigned type converts from a float); `f16` rounding is a runtime call; the format version stays (caches are cleared) |
-| Not in this change | bit operations and shifts (the language has none), integer literal suffixes (`1u8`), implicit widening (`i32` to `int`), overflow checks |
+| Not in this change | integer literal suffixes (`1u8`), implicit widening (`i32` to `int`), overflow checks; the bitwise operators came after, on the unsigned types ([`bitwise.md`](bitwise.md)) |
 
 ## Types and spelling
 
@@ -145,5 +145,6 @@ digits, not its `f64`), as `f32(n)` rounds an `int` or `unsigned`.
    `u8(c)` is the byte, `i8(c)` its signed reading, and `char(b)` of a `u8`
    is the character (docs/language/04-strings-and-conversions.md, "Between
    numbers").
-6. **Bitwise operators?**  The language has none; they are the natural next
-   step for the unsigned types and a separate change.
+6. **Bitwise operators?**  Yes, a separate change on the unsigned types
+   only: `&`, `|`, `^`, `~`, `<<` and `>>`, a shift by the width or more
+   giving 0 ([`bitwise.md`](bitwise.md)).

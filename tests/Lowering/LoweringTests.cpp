@@ -3791,6 +3791,95 @@ TEST(Lowering, TheFamiliesPairsAreInline) {
   EXPECT_EQ(count(l.Text, "call @$rt."), 1u) << l.Text; // h's panic
 }
 
+// The bitwise operators (docs/design/bitwise.md, "Lowering to PIR"): `& | ^`
+// and `>>` of zero-extended values take no mask, only a narrow `<<` does; a
+// count that is a constant, or known below 64 (`n & 63`, `n % 64`), takes no
+// guard, any other one `ucmp lt %n, 64` and a `select`; a constant count at
+// or above the width is the constant 0; `~` is one `xor` per width.
+TEST(Lowering, BitwisePIRShapes) {
+  auto l = lower(R"(
+    fn andU8(a: u8, b: u8) -> u8 => a & b;
+    fn orU8(a: u8, b: u8) -> u8 => a | b;
+    fn shlU8(a: u8, n: unsigned) -> u8 => a << n;
+    fn shrU8(a: u8, n: u32) -> u8 => a >> n;
+    fn shlU64(a: unsigned, n: unsigned) -> unsigned => a << n;
+    fn shlConst(a: u8) -> u8 => a << 3;
+    fn shrConst(a: u16) -> u16 => a >> 3;
+    fn shrMasked(x: unsigned, n: unsigned) -> unsigned => x >> (n & 63);
+    fn shlMod(x: unsigned, n: unsigned) -> unsigned => x << (n % 64);
+    fn notU8(a: u8) -> u8 => ~a;
+    fn notU16(a: u16) -> u16 => ~a;
+    fn notU32(a: u32) -> u32 => ~a;
+    fn notU64(a: unsigned) -> unsigned => ~a;
+    fn clearLow(x: u8) -> u8 => x & ~0x0F;
+    fn past(a: u8) -> u8 => a << 8;
+    fn folded() -> u8 => u8(0x81) << 1;
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"andU8", "orU8", "shrU8", "shrConst", "shrMasked"})
+    EXPECT_EQ(function(l.Text, fn).find("mask"), std::string::npos)
+        << fn << "\n"
+        << l.Text;
+  EXPECT_NE(function(l.Text, "andU8").find(" = and %a."), std::string::npos)
+      << l.Text;
+  EXPECT_NE(function(l.Text, "orU8").find(" = or %a."), std::string::npos)
+      << l.Text;
+  // A variable count: the guard, then the narrow `<<`'s mask.
+  const std::string shl8 = function(l.Text, "shlU8");
+  EXPECT_NE(shl8.find(" = shl %a."), std::string::npos) << shl8;
+  EXPECT_NE(shl8.find(" = ucmp lt %n."), std::string::npos) << shl8;
+  EXPECT_NE(shl8.find(", 64\n"), std::string::npos) << shl8;
+  EXPECT_NE(shl8.find(" = select "), std::string::npos) << shl8;
+  EXPECT_NE(shl8.find(" = mask 8 %shl."), std::string::npos) << shl8;
+  const std::string shr8 = function(l.Text, "shrU8");
+  EXPECT_NE(shr8.find(" = shr %a."), std::string::npos) << shr8;
+  EXPECT_NE(shr8.find(" = ucmp lt %n."), std::string::npos) << shr8;
+  const std::string shl64 = function(l.Text, "shlU64");
+  EXPECT_NE(shl64.find(" = ucmp lt %n."), std::string::npos) << shl64;
+  EXPECT_EQ(shl64.find("mask"), std::string::npos) << shl64;
+  // A constant count, or one known below 64: no guard.
+  for (const char *fn : {"shlConst", "shrConst", "shrMasked", "shlMod"}) {
+    const std::string f = function(l.Text, fn);
+    EXPECT_EQ(f.find("ucmp"), std::string::npos) << fn << "\n" << f;
+    EXPECT_EQ(f.find("select"), std::string::npos) << fn << "\n" << f;
+  }
+  EXPECT_NE(function(l.Text, "shlConst").find(", 3\n"), std::string::npos)
+      << l.Text;
+  EXPECT_NE(function(l.Text, "shlConst").find(" = mask 8 %shl."),
+            std::string::npos)
+      << l.Text;
+  EXPECT_NE(function(l.Text, "shrMasked").find(" = and %n."), std::string::npos)
+      << l.Text;
+  EXPECT_NE(function(l.Text, "shlMod").find(" = urem %n."), std::string::npos)
+      << l.Text;
+  // `~` per width.
+  EXPECT_NE(function(l.Text, "notU8").find(" = xor %a.2, 255\n"),
+            std::string::npos)
+      << l.Text;
+  EXPECT_NE(function(l.Text, "notU16").find(" = xor %a.2, 65535\n"),
+            std::string::npos)
+      << l.Text;
+  const std::string not32 = function(l.Text, "notU32");
+  EXPECT_NE(not32.find(" = xor %a.2, -1\n"), std::string::npos) << not32;
+  EXPECT_NE(not32.find(" = mask 32 %compl."), std::string::npos) << not32;
+  const std::string not64 = function(l.Text, "notU64");
+  EXPECT_NE(not64.find(" = xor %a.2, -1\n"), std::string::npos) << not64;
+  EXPECT_EQ(not64.find("mask"), std::string::npos) << not64;
+  // `~0x0F` in a `u8` is the constant 240.
+  EXPECT_NE(function(l.Text, "clearLow").find(" = and %x.2, 240\n"),
+            std::string::npos)
+      << l.Text;
+  // A constant count at the width: the value is read, the result is 0.
+  const std::string past = function(l.Text, "past");
+  EXPECT_EQ(past.find("shl"), std::string::npos) << past;
+  EXPECT_NE(past.find("ret 0\n"), std::string::npos) << past;
+  // Two constants fold, masked to the width: 0x81 << 1 is 2 in a `u8`.
+  const std::string folded = function(l.Text, "folded");
+  EXPECT_EQ(folded.find("shl"), std::string::npos) << folded;
+  EXPECT_NE(folded.find("ret 2\n"), std::string::npos) << folded;
+}
+
 // `Str(x)` of a value no runtime conversion takes is `x.toString()` (the
 // lowering's showCallOf): an object's `toString` slot, a tuple's runtime
 // text, an optional's "None" or its value's, held as `h.p.toString()`

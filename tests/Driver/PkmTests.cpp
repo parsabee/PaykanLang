@@ -2453,6 +2453,53 @@ TEST(Pkm, AWideLiteralInATemplateKeepsItsValue) {
   fs::remove_all(dir);
 }
 
+// Generic bodies using the bitwise operators (docs/design/bitwise.md) are
+// kept in a module's TMPL section: instantiated from the prebuilt module
+// alone, with `u8` and with `unsigned`, they give what the source gives.
+TEST(Pkm, BitwiseTemplatesFromAPrebuiltModule) {
+  REQUIRE_BACKEND();
+  auto dir =
+      fs::temp_directory_path() / ("pkm_bitwise_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib" / "bits.pkn",
+            "fn clear<T>(x: T, m: T) -> T => x & ~m;\n"
+            "fn top<T>(x: T, n: unsigned) -> T => x >> n;\n"
+            "fn mix<T>(x: T, y: T) -> T => (x << 1) ^ (y | x);\n");
+  writeFile(
+      dir / "main.pkn",
+      "import ::io; import lib::bits;\n"
+      "fn main() -> int {\n"
+      "  let n: unsigned = 4;\n"
+      "  let far: unsigned = 64;\n"
+      "  io::println(Str(bits::clear(u8(0xFF), u8(0x0F))) + \" \"\n"
+      "      + Str(bits::clear(unsigned(0xFFFF), unsigned(0xFF))));\n"
+      "  io::println(Str(bits::top(u8(0xF0), n)) + \" \"\n"
+      "      + Str(bits::top(unsigned(0xFFFF_FFFF_FFFF_FFFF), n)) + \" \"\n"
+      "      + Str(bits::top(u8(0xF0), far)));\n"
+      "  io::println(Str(bits::mix(u8(0x81), u8(2))) + \" \"\n"
+      "      + Str(bits::mix(unsigned(0x81), unsigned(2))));\n"
+      "  return 0;\n}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  const char *expected = "240 65280\n15 1152921504606846975 0\n129 385\n";
+  auto fromSource = paykan("main.pkn");
+  EXPECT_EQ(fromSource.exitCode, 0) << fromSource.out;
+  EXPECT_EQ(fromSource.out, expected);
+  auto emit = paykan("--emit-pkm lib/bits.pkn");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  fs::remove(dir / "lib" / "bits.pkn");
+  auto tmpl = paykan("pkm dump --section=tmpl lib/bits.pkm");
+  EXPECT_EQ(tmpl.exitCode, 0) << tmpl.out;
+  for (const char *name :
+       {" bitnot\n", " bitand\n", " shr\n", " shl\n", " bitxor\n", " bitor\n"})
+    EXPECT_TRUE(contains(tmpl.out, name)) << name << "\n" << tmpl.out;
+  auto fromPkm = paykan("main.pkn");
+  EXPECT_EQ(fromPkm.exitCode, 0) << fromPkm.out;
+  EXPECT_EQ(fromPkm.out, expected);
+  fs::remove_all(dir);
+}
+
 // -- Conformances across modules (docs/language/06-traits.md, "Hashable")
 
 namespace {

@@ -434,9 +434,10 @@ Output:
   `HashMap` key; an `unsigned` also has `u.toInt()`, its value as an `int?` (`None` above
   9223372036854775807).  A sized type has an optional (`u8?`), is a `match` subject with literal
   arms, and is a type argument like any value type (`Box<u8>`, `List<f32>`).
-- **Not yet:** bitwise operators and shifts, literal suffixes (`1u8`), and implicit
-  widening (`i32` to `int`).  The design is in
-  [`design/sized-types.md`](../design/sized-types.md).
+- **Bitwise operators.**  `&`, `|`, `^`, `~`, `<<` and `>>` are the unsigned types' only
+  ([Bitwise operators](#bitwise-operators)).
+- **Not yet:** literal suffixes (`1u8`) and implicit widening (`i32` to `int`).  The design
+  is in [`design/sized-types.md`](../design/sized-types.md).
 
 ### Arrays
 
@@ -687,12 +688,129 @@ under [Conversions](04-strings-and-conversions.md#conversions)).
 `-7.5 % 2.0` is `-1.5`), and dividing by zero gives an infinity or NaN rather than panicking
 (`1.0 / 0.0` is `inf`).
 
+### Bitwise operators
+
+| Op | Meaning | Operands | Result |
+|----|---------|----------|--------|
+| `a & b` | bitwise and | one unsigned type | that type |
+| `a \| b` | bitwise or | one unsigned type | that type |
+| `a ^ b` | exclusive or | one unsigned type | that type |
+| `~a` | complement within the type's width | an unsigned type | `a`'s type |
+| `a << n` | shift left; the bits shifted out are lost | `a` unsigned, `n` any unsigned type | `a`'s type |
+| `a >> n` | logical shift right: zeros come in | `a` unsigned, `n` any unsigned type | `a`'s type |
+
+The bitwise operators are defined on the unsigned types only, `u8`, `u16`, `u32` and
+`unsigned` (`u64`), and each has a compound assignment: `&=`, `|=`, `^=`, `<<=` and `>>=`
+([Compound assignment](#compound-assignment)). `~` is the complement; `!` stays the `bool`
+negation. Hexadecimal and binary literals ([Literals](#literals)) are the natural spelling
+of their operands.
+
+```pkn
+import ::io;
+
+fn main() -> int {
+  flags: u8 = 0b0000_0101;
+  flags |= 0b1000_0000;
+  flags &= ~0b0000_0001;
+  io::println(Str(flags));
+  let word: u32 = 0x1234_5678;
+  io::println(Str((word & 0xFF00) >> 8));
+  let n: unsigned = 70;
+  io::println(Str(unsigned(1) << n));
+  io::println(Str(word & 0xF == 8));
+  return 0;
+}
+```
+
+Output:
+
+```
+132
+86
+0
+True
+```
+
+**Operand types.** `&`, `|` and `^` take two operands of one type, as `+` does: `x & y` with
+`x: u8` and `y: u16` is an error that says to convert one. A literal operand takes the other
+operand's type (`x & 0xF0` with `x: u8` is a `u8`, and `x & 0x100` is `the literal 256 does
+not fit in 'u8' (0 to 255)`). A shift's count may have any unsigned type, of any width, and
+the result has the value's type: `x << n` with `x: u8` and `n: unsigned` is a `u8`. A
+literal count is an `unsigned`, so `x << 3` needs no conversion.
+
+A signed, `char`, `bool` or float operand is an error whose hint names the fix: the
+unsigned type of the same width, `&&`, `||`, `!=` or `!` for a `bool`, `unsigned(...)` for a
+shift count.
+
+```pkn
+fn main() -> int {
+  let n = 6;
+  let m = n & 3;
+  return 0;
+}
+```
+
+Error:
+
+```
+error: operator '&' is not defined for types 'int' and 'int' (the bitwise operators take unsigned operands: convert with 'unsigned(...)')
+```
+
+`i32 ^ i32` adds `'^' is exclusive or, not a power`, and `x << i` with `i: int` is `(a shift
+count is unsigned: convert it with 'unsigned(...)')`. A value goes back to `int` with
+`int(x)` for a `u8`, `u16` or `u32`, and with `u.toInt()`, an `int?`, for an `unsigned`
+([Sized numeric types](#sized-numeric-types)).
+
+**Literals.** Only a literal adapts to its context, so two literals are two `int`s, which
+have no bitwise operator: `m: u32 = 1 << 5` is an error, and `u32(1) << 5` is the spelling.
+The shifted value takes no type from the count either: `1 << n` with `n: u8` asks for the
+value's type, `unsigned(1) << n`. `~` directly over a literal takes an unsigned context's
+type, as `-5` takes a signed one's: `y: u8 = ~0` is 255, `z: unsigned = ~0` is
+18446744073709551615, and `x & ~0x0F` with `x: u8` is `x & 240`. With no unsigned context,
+`~5` is `~` of an `int`, an error.
+
+**Shifting by the width or more gives 0.** `x << n` and `x >> n` are 0 for every count `n`
+at or above the width of `x`'s type, up to 18446744073709551615, on every backend; nothing
+panics, and the bits shifted out are lost as unsigned arithmetic wraps.
+
+| Type | Width | 0 for counts |
+|------|-------|--------------|
+| `u8` | 8 | 8 to 18446744073709551615 |
+| `u16` | 16 | 16 to 18446744073709551615 |
+| `u32` | 32 | 32 to 18446744073709551615 |
+| `unsigned` | 64 | 64 to 18446744073709551615 |
+
+A literal count at or above the width is valid and always 0, so the compiler warns: `x << 8`
+with `x: u8` is `warning: the shift count 8 is not less than the width of 'u8' (8 bits): the
+result is always 0`. `>>` is logical: an unsigned value has no sign to copy, and there is no
+`>>>`.
+
+**Precedence.** The operators take Swift's precedence ([Operator
+Precedence](#operator-precedence-highest---lowest)): `<<` and `>>` above `*`, `&` with `*`,
+`|` and `^` with `+`, all above the comparisons. Shifts do not chain (`a << b << c` is an
+error; write `(a << b) << c`). The grouping differs from C's:
+
+| Source | Paykan | C |
+|--------|--------|---|
+| `a + b << 2` | `a + (b << 2)` | `(a + b) << 2` |
+| `1 << n - 1` | `(1 << n) - 1` | `1 << (n - 1)` |
+| `a & b * c` | `(a & b) * c` | `a & (b * c)` |
+| `a + b & c` | `a + (b & c)` | `(a + b) & c` |
+| `a \| b + c` | `(a \| b) + c` | `a \| (b + c)` |
+| `a \| b ^ c` | `(a \| b) ^ c` | `a \| (b ^ c)` |
+| `x & m == 0` | `(x & m) == 0` | `x & (m == 0)` |
+
+**Idioms.** `x & (n - 1)` is `x % n` for a power of two `n`. A count masked with `& 63`
+(`x << (n & 63)`) is always below 64, and the rotate `(x << (k & 63)) | (x >> ((0 - k) &
+63))` of an `unsigned` compiles to one rotate instruction.
+
 ### Unary
 
 | Op  | Meaning     | Type          |
 |-----|-------------|---------------|
 | `-` | Negation    | `int`, `float` and the signed sized types (not `unsigned`, `u8`, `u16`, `u32`) |
 | `!` | Logical NOT | `bool`        |
+| `~` | Complement  | `u8`, `u16`, `u32`, `unsigned` ([Bitwise operators](#bitwise-operators)) |
 
 ### Relational & Equality
 
@@ -793,18 +911,22 @@ inferred by the compiler; see [Ownership transfers](16-memory.md#ownership-trans
 
 | Level | Operators                              | Associativity  |
 |-------|----------------------------------------|----------------|
-| 1     | postfix: `.method()`, `.field`, `f()`, `[i]` | Left     |
-| 2     | `!`, `-` (unary)                       | Right (prefix) |
-| 3     | `*`, `/`, `%`                          | Left           |
-| 4     | `+`, `-`                               | Left           |
-| 5     | `<`, `>`, `<=`, `>=`, `==`, `!=`       | **Non-associative** |
-| 6     | `&&`                                   | Left           |
-| 7     | `\|\|`                                 | Left           |
-| 8     | `if…then…else` (ternary)               | Right          |
+| 1     | postfix: `.method()`, `.field`, `f()`, `[i]`, `.0` | Left |
+| 2     | `!`, `-`, `~` (unary)                  | Right (prefix) |
+| 3     | `<<`, `>>`                             | **Non-associative** |
+| 4     | `*`, `/`, `%`, `&`                     | Left           |
+| 5     | `+`, `-`, `\|`, `^`                    | Left           |
+| 6     | `<`, `>`, `<=`, `>=`, `==`, `!=`       | **Non-associative** |
+| 7     | `&&`                                   | Left           |
+| 8     | `\|\|`                                 | Left           |
+| 9     | `if…then…else` (ternary)               | Right          |
 
 Comparison and equality operators do **not** chain: `1 < 2 < 3` and `1 < 2 == True` are syntax
 errors (`relational operators cannot be chained; parenthesise the comparison`) — parenthesize
-instead, e.g. `(1 < 2) == True`. Parenthesise whenever in doubt.
+instead, e.g. `(1 < 2) == True`. Shifts do not chain either: `a << b << c` is `shift operators
+cannot be chained; parenthesise the shift`. The bitwise operators follow Swift, not C, so `x &
+m == 0` is `(x & m) == 0` ([Bitwise operators](#bitwise-operators) lists where the two
+differ). Parenthesise whenever in doubt.
 
 ### Evaluation order
 
@@ -906,7 +1028,7 @@ let name = expression;               // a variable that cannot be reassigned
 variable = expression;               // assignment
 obj.field = expression;              // field assignment
 arr[i] = expression;                 // subscript assignment
-variable += expression;              // compound assignment: also -= *= /= %=
+variable += expression;              // compound assignment: also -= *= /= %= &= |= ^= <<= >>=
 return expression;                   // return (or bare return; for void)
 ;                                    // empty statement
 { statements... }                    // block (new scope)
@@ -918,11 +1040,13 @@ to it otherwise ([Scoping Rules](#scoping-rules)).
 ### Compound assignment
 
 `x += e` is shorthand for `x = x + e`, and `-=`, `*=`, `/=` and `%=` likewise for `-`,
-`*`, `/` and `%`. The target is any target of `=`: a variable, a field (`p.x += 1`) or an
-element (`xs[i] *= 2`). It is exactly the longer assignment, so the same rules apply: the
-operator must be defined for the types (`s += "!"` appends to a `Str`, `s -= "!"` is
-`operator '-' is not defined for types 'Str' and 'Str'`), a `let` variable or a `view`
-parameter cannot be the target, and a sized integer wraps as `+` does.
+`*`, `/` and `%`, as `&=`, `|=`, `^=`, `<<=` and `>>=` are for the [bitwise
+operators](#bitwise-operators) (`flags |= 0b100`, `x >>= 1`). The target is any target of
+`=`: a variable, a field (`p.x += 1`) or an element (`xs[i] *= 2`). It is exactly the longer
+assignment, so the same rules apply: the operator must be defined for the types (`s += "!"`
+appends to a `Str`, `s -= "!"` is `operator '-' is not defined for types 'Str' and 'Str'`,
+and `i >>= 1` with `i: int` is the `>>` error), a `let` variable or a `view` parameter cannot
+be the target, and a sized integer wraps as `+` does.
 
 ```pkn
 import ::io;

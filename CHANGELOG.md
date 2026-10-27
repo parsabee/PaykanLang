@@ -337,6 +337,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zeros), so every count is defined on every backend: the shared lowering masks the count
   with `& 63`, LLVM never sees a shift by 64 or more, and the C is `(uint64_t)a <<
   ((uint64_t)n & 63)`.  The format versions stay 0.3.0's.
+- Bitwise operators on the unsigned types (docs/language/02-basics.md, "Bitwise
+  operators"; docs/design/bitwise.md): `&`, `|`, `^`, `~`, `<<` and `>>` (logical), and `&=`,
+  `|=`, `^=`, `<<=`, `>>=`, on `u8`, `u16`, `u32` and `unsigned`.
+  - `& | ^` take one type, as `+` does (a literal takes the other operand's: `x & 0xF0`); a
+    shift's count is any unsigned type and the result has the value's type; `~0x0F` takes
+    an unsigned context's type.  A signed, `bool`, `char` or float operand is an error that
+    names the fix (`... (the bitwise operators take unsigned operands: convert with
+    'u32(...)')`, `(for a logical and, write '&&')`, `(a shift count is unsigned: ...)`).
+  - A shift by the type's width or more is 0 and never panics (`u8(1) << 8`, `x >> n` for
+    any `n` up to 2^64-1), on every backend; a literal count that large is a warning.
+  - Swift's precedence: `<< >>` above `* / % &`, above `+ - | ^`, above the comparisons, so
+    `x & mask == 0` is `(x & mask) == 0`; shifts do not chain (`a << b << c` is an error).
+    `>>` is two `>` written together, so `Box<Box<int>>` closes as before.
+  - The AST interchange format names them `bitand bitor bitxor shl shr` and `bitnot`
+    (docs/plugins/ast-format.md); a template using them is kept in a `.pkm`'s TMPL.
 
 ### Changed
 

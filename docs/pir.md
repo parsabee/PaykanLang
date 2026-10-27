@@ -1169,6 +1169,25 @@ CodeGen enforced, now in one place.
   `some %u` or `none`.  `Str<unsigned>` calls `PaykanString_from_uint`, and a
   parse into a narrow integer compares the parsed `i64` against the type's
   range before the `some`.
+* **Bitwise operators** (on the unsigned types, `docs/design/bitwise.md`):
+  `&`, `|` and `^` are `and`, `or` and `xor`, with no mask (of two
+  zero-extended values, zero-extended), and two constants fold.  `~a` is one
+  `xor`: `xor %a, 255` for a `u8`, `xor %a, 65535` for a `u16`, `xor %a, -1`
+  then `mask 32` for a `u32`, `xor %a, -1` for an `unsigned`; a constant
+  folds (`~u8(0x0F)` is `240`).  A shift is `shl` or `shr`, and a `<<` on a
+  `u8`, `u16` or `u32` ends in its `mask N`; a `>>` needs none.  Since `shl`
+  and `shr` read the count mod 64 while a shift by the type's width W or
+  more is 0, the count decides the guard:
+  - a constant count at or above W is the constant `0` (the value is
+    evaluated all the same), one below W a plain `shl`/`shr` by it, and two
+    constants fold;
+  - a count known to be below 64 by its form, `e & k` with a literal `k` of
+    0 to 63 or `e % k` with a literal `k` of 1 to 64, is a plain
+    `shl`/`shr` (a masked count and the rotate idiom stay one instruction);
+  - any other count is guarded: `%ok = ucmp lt %n, 64`, the `shl`/`shr`,
+    then `select %ok, %s, 0`.  Counts from W to 63 need no comparison of
+    their own: the mask clears a narrow `<<`, and a `>>` of a value below
+    2^W is 0.
 
 ## 8. Runtime ABI (extern declarations the lowering may emit)
 

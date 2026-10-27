@@ -1120,9 +1120,17 @@ ast::Type *Sema::resolveExprType(ast::Expr *expr, ast::Type *expected) {
 // -- ExprVisitor
 
 bool Sema::ExprChecker::isNumericLiteral(const ast::Expr *e) {
-  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e))
-    return u->getOpcode() == ast::UnaryOpcode::Neg &&
-           isNumericLiteral(u->getOperand());
+  // `~5` is one, as `-5` is, but not `-~5` or `~~5`
+  // (docs/design/bitwise.md).
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+      u && u->getOpcode() == ast::UnaryOpcode::BitNot)
+    return ast::isa<ast::IntegerLiteral>(u->getOperand());
+  for (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e); u;
+       u = ast::dyn_cast<ast::UnaryExpr>(e)) {
+    if (u->getOpcode() != ast::UnaryOpcode::Neg)
+      return false;
+    e = u->getOperand();
+  }
   return ast::isa<ast::IntegerLiteral>(e) || ast::isa<ast::FloatLiteral>(e);
 }
 
@@ -1136,8 +1144,13 @@ ast::Type *Sema::ExprChecker::sizedLiteralTarget(const ast::Expr *e,
   if (!bt || !bt->isNumeric() || bt->getTypeKind() == ast::BuiltinType::Int)
     return nullptr;
   const ast::Expr *lit = e;
-  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(lit))
+  if (const auto *u = ast::dyn_cast<ast::UnaryExpr>(lit)) {
+    // Only an unsigned slot gives `~5` a type: elsewhere it is `~` of an
+    // `int`, an error (docs/design/bitwise.md).
+    if (u->getOpcode() == ast::UnaryOpcode::BitNot)
+      return bt->isUnsigned() ? bt : nullptr;
     lit = u->getOperand();
+  }
   // A `float` slot leaves a literal its own type, which `int` promotes to,
   // but for one above INT64_MAX, which is no `int`: that is the `float`
   // (docs/design/bitwise.md).
@@ -1200,6 +1213,140 @@ std::string floatText(double value) {
   char buf[64];
   std::snprintf(buf, sizeof(buf), "%g", value);
   return buf;
+}
+
+/// The value of @p e, an integer literal or a negation of one, in decimal
+/// for a hint (`1`, `-1`); empty for any other expression.
+std::string intLiteralText(const ast::Expr *e) {
+  bool negated = false;
+  for (const auto *u = ast::dyn_cast<ast::UnaryExpr>(e);
+       u && u->getOpcode() == ast::UnaryOpcode::Neg;
+       u = ast::dyn_cast<ast::UnaryExpr>(e)) {
+    negated = !negated;
+    e = u->getOperand();
+  }
+  const auto *il = ast::dyn_cast<ast::IntegerLiteral>(e);
+  if (!il)
+    return {};
+  const auto [negative, magnitude] = literalMagnitude(il);
+  return (negative != negated && magnitude ? "-" : "") +
+         std::to_string(magnitude);
+}
+
+/// What an operand of a bitwise operator is, for its error's hint.
+enum class BitOperand { Unsigned, SignedOrChar, Float, Bool, Other };
+
+BitOperand bitOperand(const ast::Type *ty) {
+  const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty);
+  if (!bt)
+    return BitOperand::Other;
+  if (bt->isUnsigned())
+    return BitOperand::Unsigned;
+  if (bt->isInteger() || bt->getTypeKind() == ast::BuiltinType::Char)
+    return BitOperand::SignedOrChar;
+  if (bt->isFloat())
+    return BitOperand::Float;
+  if (bt->getTypeKind() == ast::BuiltinType::Bool)
+    return BitOperand::Bool;
+  return BitOperand::Other;
+}
+
+/// The unsigned type as wide as the signed integer or `char` type @p ty,
+/// which a bitwise operator's hint converts it with: `int` gives
+/// `unsigned`, `i32` `u32`, `i16` `u16`, `i8` and `char` `u8`.
+std::string unsignedOfWidth(const ast::Type *ty) {
+  switch (ast::BuiltinType::integerBits(
+      ast::cast<ast::BuiltinType>(ty)->getTypeKind())) {
+  case 64:
+    return ast::builtinKindName(ast::BuiltinType::U64);
+  case 32:
+    return ast::builtinKindName(ast::BuiltinType::U32);
+  case 16:
+    return ast::builtinKindName(ast::BuiltinType::U16);
+  default: // `i8`, and `char`, which has no integer width
+    return ast::builtinKindName(ast::BuiltinType::U8);
+  }
+}
+
+/// The hint of `unary '~' is not defined for type 'A'`, for an operand of
+/// type @p ty (docs/design/bitwise.md, "Errors").
+std::string complementHint(const ast::Type *ty) {
+  switch (bitOperand(ty)) {
+  case BitOperand::Bool:
+    return " (for a logical not, write '!')";
+  case BitOperand::SignedOrChar:
+    return " (the bitwise operators take unsigned operands: convert with '" +
+           unsignedOfWidth(ty) + "(...)')";
+  case BitOperand::Float:
+    return " (the bitwise operators take unsigned operands, not floats)";
+  case BitOperand::Unsigned:
+  case BitOperand::Other:
+    break;
+  }
+  return {};
+}
+
+/// The hint of `operator 'OP' is not defined for types 'A' and 'B'` for
+/// @p node, a bitwise operator whose operands have types @p lhsTy and
+/// @p rhsTy: the first of docs/design/bitwise.md, "Errors", that applies;
+/// empty when none does.
+std::string bitwiseHint(const ast::BinaryExpr *node, ast::Type *lhsTy,
+                        ast::Type *rhsTy) {
+  const ast::BinaryOpcode op = node->getOpcode();
+  const BitOperand l = bitOperand(lhsTy);
+  const BitOperand r = bitOperand(rhsTy);
+  const bool shift =
+      op == ast::BinaryOpcode::Shl || op == ast::BinaryOpcode::Shr;
+  // `^` of two numbers neither of which is unsigned may be meant as a power.
+  auto numericNotUnsigned = [](const ast::Type *ty) {
+    const auto *bt = ast::dyn_cast<ast::BuiltinType>(ty);
+    return bt && bt->isNumeric() && !bt->isUnsigned();
+  };
+  const std::string power = op == ast::BinaryOpcode::BitXor &&
+                                    numericNotUnsigned(lhsTy) &&
+                                    numericNotUnsigned(rhsTy)
+                                ? "; '^' is exclusive or, not a power"
+                                : "";
+  const std::string unsignedOnly =
+      " (the bitwise operators take unsigned operands: convert ";
+  if (!shift && (l == BitOperand::Bool || r == BitOperand::Bool)) {
+    switch (op) {
+    case ast::BinaryOpcode::BitAnd:
+      return " (for a logical and, write '&&')";
+    case ast::BinaryOpcode::BitOr:
+      return " (for a logical or, write '||')";
+    default:
+      return " (for a logical exclusive or, write '!=')";
+    }
+  }
+  if (shift && l == BitOperand::Unsigned && r == BitOperand::SignedOrChar)
+    return " (a shift count is unsigned: convert it with 'unsigned(...)')";
+  const std::string lhsLiteral = intLiteralText(node->getLHS());
+  const std::string rhsLiteral = intLiteralText(node->getRHS());
+  if (shift && !lhsLiteral.empty() && r == BitOperand::Unsigned)
+    return " (the value shifted takes no type from the count: write its "
+           "type, as in 'unsigned(" +
+           lhsLiteral + ")')";
+  if (!lhsLiteral.empty() && !rhsLiteral.empty())
+    return " (two literals are 'int': give one a type, as in 'unsigned(" +
+           lhsLiteral + ") " + node->getOpcodeStr() + " " + rhsLiteral + "'" +
+           power + ")";
+  if (l == BitOperand::Unsigned && r == BitOperand::SignedOrChar)
+    return unsignedOnly + "the '" + typeName(rhsTy) + "' with '" +
+           typeName(lhsTy) + "(...)')";
+  if (r == BitOperand::Unsigned && l == BitOperand::SignedOrChar)
+    return unsignedOnly + "the '" + typeName(lhsTy) + "' with '" +
+           typeName(rhsTy) + "(...)')";
+  if (l == BitOperand::SignedOrChar || r == BitOperand::SignedOrChar)
+    return unsignedOnly + "with '" +
+           unsignedOfWidth(l == BitOperand::SignedOrChar ? lhsTy : rhsTy) +
+           "(...)'" + power + ")";
+  if (l == BitOperand::Float || r == BitOperand::Float)
+    return op == ast::BinaryOpcode::BitXor
+               ? " ('^' is exclusive or, not a power)"
+               : " (the bitwise operators take unsigned operands, not "
+                 "floats)";
+  return {};
 }
 
 /// The hint for a parse method of `Str` spelled with another name of its
@@ -1674,6 +1821,11 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
     }
     // `-(-5)`: the inner negation takes the slot's type.
     S.LiteralExpectation = target;
+  } else if (target && node->getOpcode() == ast::UnaryOpcode::BitNot) {
+    // `~0x0F` in an unsigned slot (sizedLiteralTarget): the literal is
+    // checked against the slot's type, and its complement is within that
+    // type's width (docs/design/bitwise.md).
+    S.LiteralExpectation = target;
   } else if (auto *il = ast::dyn_cast<ast::IntegerLiteral>(operand);
              il && negation && il->isAboveInt64Max()) {
     // No sized context: a literal above INT64_MAX is no `int`, INT64_MIN's
@@ -1699,9 +1851,12 @@ ast::Type *Sema::ExprChecker::visitUnaryExpr(ast::UnaryExpr *node) {
   }
 
   if (!operandTy->hasUnaryOp(node->getOpcode())) {
-    S.error(node->getLocation(), "unary '" + std::string(node->getOpcodeStr()) +
-                                     "' is not defined for type '" +
-                                     typeName(operandTy) + "'");
+    S.error(node->getLocation(),
+            "unary '" + std::string(node->getOpcodeStr()) +
+                "' is not defined for type '" + typeName(operandTy) + "'" +
+                (node->getOpcode() == ast::UnaryOpcode::BitNot
+                     ? complementHint(operandTy)
+                     : ""));
     return nullptr;
   }
 
@@ -1819,6 +1974,9 @@ Sema::ExprChecker::needsOtherSide(const ast::Expr *e) const {
 }
 
 ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
+  if (node->getOpcode() == ast::BinaryOpcode::Shl ||
+      node->getOpcode() == ast::BinaryOpcode::Shr)
+    return visitShift(node);
   // A numeric literal operand takes the other operand's sized type (`x + 1`
   // with `x: u8` adds two `u8`), so the non-literal operand is typed first,
   // and so is the operand of `==` or `!=` a generic enum's variant or a
@@ -1903,10 +2061,14 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     return " (convert the '" + typeName(other) + "' with 'Str(...)')";
   };
   if (!lhsTy->hasBinaryOp(node->getOpcode(), rhsTy)) {
+    const bool bitwise = node->getOpcode() == ast::BinaryOpcode::BitAnd ||
+                         node->getOpcode() == ast::BinaryOpcode::BitOr ||
+                         node->getOpcode() == ast::BinaryOpcode::BitXor;
     S.error(node->getLocation(),
             "operator '" + std::string(node->getOpcodeStr()) +
                 "' is not defined for types '" + typeName(lhsTy) + "' and '" +
-                typeName(rhsTy) + "'" + concatHint());
+                typeName(rhsTy) + "'" +
+                (bitwise ? bitwiseHint(node, lhsTy, rhsTy) : concatHint()));
     return nullptr;
   }
 
@@ -1997,18 +2159,72 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     }
     return S.Ctx.getBoolTy();
 
-  // Bitwise: the operand's type, or a shift's value's
-  // (docs/design/bitwise.md).
+  // Bitwise: the operands' one type (docs/design/bitwise.md).
   case ast::BinaryOpcode::BitAnd:
   case ast::BinaryOpcode::BitOr:
   case ast::BinaryOpcode::BitXor:
-  case ast::BinaryOpcode::Shl:
-  case ast::BinaryOpcode::Shr:
     return lhsTy;
+  case ast::BinaryOpcode::Shl: // visitShift's
+  case ast::BinaryOpcode::Shr:
   case ast::BinaryOpcode::Count:
     break;
   }
   PAYKAN_UNREACHABLE("unknown BinaryOpcode");
+}
+
+ast::Type *Sema::ExprChecker::visitShift(ast::BinaryExpr *node) {
+  // The value is typed first and takes no type from the count, so a
+  // literal value is an `int`; a literal count is an `unsigned` when the
+  // value is unsigned (`x << 3`, `x << ~0`).  The count may have any
+  // unsigned type, of any width: the one-type rule does not apply, and the
+  // result has the value's type (docs/design/bitwise.md, "Shifts").
+  ast::Expr *value = node->getLHS();
+  ast::Expr *count = node->getRHS();
+  ast::Type *lhsTy = visit(value);
+  if (!lhsTy)
+    return nullptr;
+  const auto *valueBT = ast::dyn_cast<ast::BuiltinType>(lhsTy);
+  ast::Type *rhsTy =
+      valueBT && valueBT->isUnsigned() && isNumericLiteral(count)
+          ? visitExpecting(count, S.Ctx.getBuiltinType(ast::BuiltinType::U64))
+          : visit(count);
+  if (!rhsTy)
+    return nullptr;
+  value->setResolvedType(lhsTy);
+  count->setResolvedType(rhsTy);
+
+  // As for any operator but `==` and `!=`: an optional is unwrapped first.
+  auto *lhsOpt = ast::dyn_cast<ast::OptionalType>(lhsTy);
+  if (auto *opt = lhsOpt ? lhsOpt : ast::dyn_cast<ast::OptionalType>(rhsTy)) {
+    S.errorOptionalUnwrap(node->getLocation(), opt);
+    return nullptr;
+  }
+  if (!lhsTy->hasBinaryOp(node->getOpcode(), rhsTy)) {
+    S.error(node->getLocation(),
+            "operator '" + std::string(node->getOpcodeStr()) +
+                "' is not defined for types '" + typeName(lhsTy) + "' and '" +
+                typeName(rhsTy) + "'" + bitwiseHint(node, lhsTy, rhsTy));
+    return nullptr;
+  }
+
+  // A literal count at or above the width is valid and always gives 0:
+  // a warning, once per place though several instantiations of a generic
+  // body reach it.
+  if (const auto *lit = ast::dyn_cast<ast::IntegerLiteral>(count)) {
+    const uint64_t n = literalMagnitude(lit).second;
+    const unsigned width = ast::BuiltinType::integerBits(
+        ast::cast<ast::BuiltinType>(lhsTy)->getTypeKind());
+    const ast::SourceLocation loc = count->getLocation();
+    if (n >= width && S.WarnedShiftCounts
+                          .insert({S.Diags.getSourceName(), loc.getLineStart(),
+                                   loc.getColumnStart()})
+                          .second)
+      S.warning(loc, "the shift count " + std::to_string(n) +
+                         " is not less than the width of '" + typeName(lhsTy) +
+                         "' (" + std::to_string(width) +
+                         " bits): the result is always 0");
+  }
+  return lhsTy;
 }
 
 ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
