@@ -310,21 +310,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `repeat(s, n)`.
 
   They count bytes, as `s.len()` and `s[i]` do, with every index and size an `unsigned`,
-  take their strings as `view`s and return new ones. `split`, `lines`, `words`, `indexOf`
-  and `contains` take time linear in the string: two new runtime functions,
+  take their strings as `view`s and return new ones. Two new runtime functions,
   `PaykanString_find` (C's `memchr` and `memcmp`) and `PaykanString_slice`, search and copy
-  for them (Runtime.h; the runtime ABI only gains them, and keeps its version). The
-  language reference's strings chapter, which said the standard library had no such
-  functions, points to them.
-
-  `::collections` now makes `List<Str>`, and the `Buffer<Str>` it holds, for its own code,
-  and a program that imports it uses that module's copies, as it does any instantiation an
-  import makes: the lowering does not see their bodies, so a call that reaches them from a
-  container over `Str` elements holds the container's state, a retain and a release around
-  it (a `MinPriorityQueue<Str>`'s `pop`; one of `Str?` elements holds nothing). The C of
-  `--emit-c` is linked with the module objects in an archive (docs/c-backend.md), and the
-  driver tests now link the standard library's that way: an object of `::collections`
-  linked whole into a program that does not import it leaves its `List<Str>` undefined.
+  for them (Runtime.h; the runtime ABI only gains them, and keeps its version), so
+  `split`, `lines`, `words`, `indexOf` and `contains` take time linear in the string for a
+  delimiter or a needle of a few bytes, and at worst proportional to the string's length
+  times the needle's. `join` and `replace` put their pieces together in pairs, which
+  copies each byte of a result of k pieces about log2(k) times, and `repeat` doubles its
+  string: replacing each of the million line feeds of a 10 MB string takes about a
+  second. The language reference's strings chapter, which said the standard library had
+  no such functions, points to them.
 
 ### Changed
 
@@ -821,6 +816,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-O` before, so `run -O0` and `run -O1` now generate less optimised code than they did,
   `run -O3` more optimised code, and `run -O2` the same.  The samples print the same at
   `run -O1` and `run -O3` as at `run -O2`, with the same heap statistics.
+- A `MinPriorityQueue<Str>`'s `pop` holds the queue's state, a retain and a release around
+  the call (one of `Str?` elements holds nothing): `::collections` now makes `List<Str>`
+  and its `Buffer<Str>` for its string functions, and a program uses that module's copies,
+  whose bodies the lowering does not see.
 
 ### Removed
 

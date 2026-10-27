@@ -323,6 +323,32 @@ TEST(Scaling, StringFunctionsTakeLinearTime) {
   EXPECT_LT(t.Seconds, 20 * slowdown());
 }
 
+// join and replace put their pieces together in pairs, as a binary counter
+// carries, so each byte of the result is copied about log2 of the number of
+// pieces times, and repeat doubles its string.  They appended each piece
+// with `concat`, which copies the whole string so far: replacing the line
+// feeds of a 720 KB string took 9 s, so the million of a 10 MB string would
+// take about 40 minutes, and the join of its lines over ten.  The three,
+// with the split, take 2.2 s of processor time under `run -O0`, compiling
+// included.
+TEST(Scaling, StringFunctionsThatBuildAStringMergeItsPieces) {
+  ScratchDir dir("strings_built");
+  const std::string src =
+      "import ::io;\nimport ::collections as c;\n"
+      "fn main() -> int {\n"
+      "  s = \"word word\\n\";\n"
+      "  for _ in 0..20 {\n    s = s + s;\n  }\n"
+      "  io::println(c::replace(s, \"\\n\", \"\\r\\n\").len());\n"
+      "  io::println(c::join(c::split(s, \"\\n\"), \"\\r\\n\").len());\n"
+      "  io::println(c::repeat(\"word word\\n\", 1048576) == s);\n"
+      "  return 0;\n}\n";
+  const std::string path = dir.write("strings.pkn", src);
+  Timed t = timed(std::string(kPaykan) + " run -O0 " + path + " 2>&1");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_EQ(t.Out, "11534336\n11534336\nTrue\n");
+  EXPECT_LT(t.Seconds, 20 * slowdown());
+}
+
 // Each imported module's code is cached under a key made from its MLIR,
 // printed (SW-18).  Printing a module nested in the program verified and
 // numbered the whole program each time, so a program of 400 tiny modules

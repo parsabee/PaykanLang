@@ -381,11 +381,17 @@ True False True
 =-=-=-=-=-=
 ```
 
-`split`, `lines`, `words`, `indexOf` and `contains` take time linear in the length of `s`:
-a search is the runtime's, C's `memchr` for the first byte of the delimiter or the needle
-and `memcmp` for the rest of it where that byte is, and each part is copied out once, never
-built a byte at a time. A 10 MB string of a million lines splits in well under a second.
-`startsWith` and `endsWith` compare the bytes of the prefix or the suffix only. `replace`
-finds the occurrences as `split` does; it, `join` and `repeat` append each piece of their
-result with `concat`, which copies the string it appends to, so their time grows with the
-length of the result times the number of pieces.
+A search is the runtime's: C's `memchr` finds each place the first byte of the delimiter
+or the needle is, and `memcmp` compares the rest of it there. Each part is copied out once,
+never built a byte at a time, so `split`, `lines`, `words`, `indexOf` and `contains` take
+time linear in the length of `s` for a delimiter or a needle of a few bytes. A long one
+costs more where its first byte recurs in `s`: at worst, the time is proportional to the
+length of `s` times the needle's. A 10 MB string of a million lines splits in well under a
+second. `startsWith` and `endsWith` compare the bytes of the prefix or the suffix only.
+
+`replace` finds the occurrences as `split` does. It and `join` put their pieces together in
+pairs, as a binary counter carries (two strings of one piece each make one of two, two of
+two make one of four, and so on), so each byte of a result of k pieces is copied about
+log2(k) times. Appending each piece to the result so far would copy that result once per
+piece. Replacing each of the million line feeds of a 10 MB string takes about a second.
+`repeat` doubles its string, so its time is linear in the length of the result.

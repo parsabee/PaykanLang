@@ -67,7 +67,12 @@ replace("", "a", "b") = ""
 replace("ab", "ab", "abab") = "abab"
 replace("a.b.", ".", "..") = "a..b.."
 replace("one, two, three", ", ", "/") = "one/two/three"
+replace("aaaa", "a", "b") = "bbbb"
+replace("abab", "ab", "") = ""
 -- repeat
-"ababab" "" "" "x" 40
+"ababab" "" "" "x" 40 "" 3000
+-- join, replace and repeat against +
+0 mismatches
 -- every result is a new string
 text text text! text? text# text$ text% text^ text&
+new new new* new@

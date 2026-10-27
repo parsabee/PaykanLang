@@ -751,6 +751,8 @@ Call the plumber
 string, and `out.concat(" ")` would change that string too.
 
 The helpers are written out here to show the loops. A program can use the standard
-library's instead: `::collections` has `trim`, and `substring` does what `slice` does, with
-`split`, `lines`, `words`, `replace` and more beside them
-([Strings](../stdlib/collections.md#strings)).
+library's instead ([Strings](../stdlib/collections.md#strings)), with `split`, `lines`,
+`words`, `replace` and more beside them. `::collections` has a `trim`, which strips the
+vertical tab and the form feed as well, and a `substring`, which takes the bytes `slice`
+takes but checks its `unsigned` indexes: unless `from <= to <= s.len()` it panics, where
+`slice` gives `""` for a `from` after `to`.

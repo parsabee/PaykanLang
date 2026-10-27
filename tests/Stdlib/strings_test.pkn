@@ -62,6 +62,47 @@ fn replaceLine(s: view Str, from: view Str, to: view Str) {
       + c::replace(s, from, to) + "\"");
 }
 
+// `parts` with `sep` between each two, put together with `+` one at a time:
+// what join gives, the slow way.
+fn plusJoin(parts: view c::List<Str>, sep: view Str) -> Str {
+  out = "";
+  for i in 0..parts.len() {
+    if i > 0 {
+      out = out + sep;
+    }
+    out = out + parts.at(i);
+  }
+  return out;
+}
+
+// How many of join, replace and repeat over 0 to 69 pieces, some of them
+// empty, differ from the same put together with `+`: the pieces are merged
+// in pairs, as a binary counter carries, so each count of pieces takes its
+// own shape of merges.
+fn mismatches() -> int {
+  bad = 0;
+  parts = c::List<Str>();
+  for k in 0..70 {
+    let joined = c::join(parts, ", ") == plusJoin(parts, ", ");
+    let glued = c::join(parts, "") == plusJoin(parts, "");
+    let s = c::join(parts, "|");
+    let replaced = c::replace(s, "|", "<>") == plusJoin(parts, "<>");
+    let removed = c::replace(s + "|", "|", "") == plusJoin(parts, "");
+    if !(joined && glued && replaced && removed) {
+      bad = bad + 1;
+    }
+    times = "";
+    for _ in 0..k {
+      times = times + "ab";
+    }
+    if c::repeat("ab", unsigned(k)) != times {
+      bad = bad + 1;
+    }
+    parts.push(c::repeat(Str(k % 10), unsigned(k % 4)));
+  }
+  return bad;
+}
+
 fn main() -> int {
   io::println("-- split, join");
   splitLine("a,b,c", ",");
@@ -151,11 +192,17 @@ fn main() -> int {
   replaceLine("ab", "ab", "abab");
   replaceLine("a.b.", ".", "..");
   replaceLine("one, two, three", ", ", "/");
+  replaceLine("aaaa", "a", "b");
+  replaceLine("abab", "ab", "");
 
   io::println("-- repeat");
   io::println("\"" + c::repeat("ab", 3) + "\" \"" + c::repeat("ab", 0) + "\" \""
       + c::repeat("", 5) + "\" \"" + c::repeat("x", 1) + "\" "
-      + Str(c::repeat("-", 40).len()));
+      + Str(c::repeat("-", 40).len()) + " \"" + c::repeat("", unsigned(-1))
+      + "\" " + Str(c::repeat("xyz", 1000).len()));
+
+  io::println("-- join, replace and repeat against +");
+  io::println(Str(mismatches()) + " mismatches");
 
   io::println("-- every result is a new string");
   let s = "text";
@@ -176,5 +223,13 @@ fn main() -> int {
   l.concat("&");
   io::println(s + " " + parts.at(0) + " " + t + " " + r + " " + j + " " + u
       + " " + v + " " + w + " " + l);
+  // A result of one piece, `to` or an element, is still a copy of it.
+  let to = "new";
+  let x = c::replace("old", "old", to);
+  x.concat("*");
+  let one = c::listOf([to]);
+  let y = c::join(one, "-");
+  y.concat("@");
+  io::println(to + " " + one.at(0) + " " + x + " " + y);
   return 0;
 }
