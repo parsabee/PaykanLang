@@ -3418,6 +3418,40 @@ TEST(Driver, EmitPkmMakesNoDirectory) {
   std::filesystem::remove_all(dir);
 }
 
+// `build` checks the executable it writes before it compiles anything, and
+// says what is wrong as the other writers do (SW-43): into a directory that
+// does not exist, or onto a directory (-o's, or the default `hello` next to a
+// directory of that name), it compiled the whole program and then printed
+// the linker's `cannot open output file`.  The program here does not type
+// check, so a compile would say so first.
+TEST(Driver, BuildChecksItsExecutableBeforeCompiling) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("build_output");
+  std::ofstream(dir / "hello.pkn") << "fn main() -> int { return \"x\"; }\n";
+  std::filesystem::create_directories(dir / "adir");
+  std::filesystem::create_directories(dir / "hello");
+  const std::string isDir = strerror(EISDIR);
+  for (const auto &[args, message] :
+       {std::pair<std::string, std::string>{
+            " build hello.pkn -o nodir/hello",
+            "cannot write 'nodir/hello': the directory 'nodir' does not exist"},
+        {" build -o adir hello.pkn", "cannot write 'adir': " + isDir},
+        {" build hello.pkn", "cannot write 'hello': " + isDir}}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + paykanRun() + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_EQ(out, "paykan: " + message + "\n") << args;
+  }
+  EXPECT_FALSE(std::filesystem::exists(dir / "nodir"));
+  EXPECT_TRUE(std::filesystem::is_directory(dir / "adir"));
+  // With somewhere to write it, the program's own error comes.
+  auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                       " build hello.pkn -o adir/hello 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_NE(out.find("hello.pkn:1:"), std::string::npos) << out;
+  std::filesystem::remove_all(dir);
+}
+
 // --emit-pkm -o writes into what its path names, as `build -o` and `pkm
 // extract -o` do: a symbolic link keeps naming its file, which gets the
 // module file, and a device (here reached through a link) stays one, where

@@ -1113,6 +1113,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the module of 'x/y/if.pkn' after its path: 'if' is a keyword, which no import can
     name (name it with --module-name)`, and `--module-name: 'a::match' is not a module
     name: 'match' is a keyword, which no import can name`.
+  - `build -o` into a directory that does not exist, or onto a directory (or `build
+    hello.pkn` next to a directory `hello`), compiled the whole program and then failed
+    with the linker's own words (`/usr/bin/ld: cannot open output file nodir/hello: No
+    such file or directory`).  `build` now checks its executable before it compiles
+    anything and says so as the other writers do: `cannot write 'nodir/hello': the
+    directory 'nodir' does not exist`, `cannot write 'adir': Is a directory`.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

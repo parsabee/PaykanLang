@@ -70,7 +70,7 @@ where they change nothing, as `-O<n>` and `--stats` are with `--check-only`.
 
 | Option | Effect |
 |--------|--------|
-| `-o <file>` | the output file of `build`, of `--emit-pkm`, of `pkm extract`, and of the `--emit-*` options, which print to standard output without it |
+| `-o <file>` | the output file of `build`, of `--emit-pkm`, of `pkm extract`, and of the `--emit-*` options, which print to standard output without it. It goes in a directory that exists, and is not one: `build` checks its executable before it compiles anything |
 | `-O<n>` | optimization level, `0` to `3` (also `-O <n>` and `-O=<n>`); the default is `2`, and `-O0` compiles fastest and is easiest to debug |
 | `--backend=<name>` | the backend to compile with (see below) |
 | `--frontend=<name>` | the parser to read the source with; the built-in one, `recursive-descent`, is the default |

@@ -430,6 +430,28 @@ std::string defaultExecutable(const std::string &input) {
   return name.string() + ".out";
 }
 
+/// The executable `build` writes: -o's, or defaultExecutable's.
+std::string executableOf(const Options &opts) {
+  return opts.OutputPath.empty() ? defaultExecutable(opts.InputFilename)
+                                 : opts.OutputPath;
+}
+
+/// Why a file cannot be written at @p path, or "" when nothing says so yet:
+/// it is a directory, or the directory it goes in does not exist, said as
+/// every writer says it (printOutput, pkm::writeFileAtomically).  `build`
+/// checks its executable before it compiles anything, where the linker
+/// found out last, in its own words (`cannot open output file`).
+std::string unwritablePath(const std::string &path) {
+  std::error_code ec;
+  if (std::filesystem::is_directory(path, ec))
+    return "cannot write '" + path + "': " + std::strerror(EISDIR);
+  if (std::filesystem::path dir = std::filesystem::path(path).parent_path();
+      !dir.empty() && !std::filesystem::is_directory(dir, ec))
+    return "cannot write '" + path + "': the directory '" + dir.string() +
+           "' does not exist";
+  return {};
+}
+
 /// What @p print returns (EXIT_SUCCESS, or the status of a failure it
 /// reported), run on where an --emit-* option prints: -o's file, or
 /// standard output without -o.  The file is never one the command reads
@@ -812,6 +834,10 @@ int main(int argc, char *argv[]) {
       }
   }
 
+  if (opts.Cmd == Command::Build)
+    if (std::string why = unwritablePath(executableOf(opts)); !why.empty())
+      return fail(why);
+
   // -- Frontend
   // One DiagEngine shared by every pass, wired into the parser up front so
   // syntax errors come out in the same rich source-located format as sema
@@ -1101,9 +1127,7 @@ int main(int argc, char *argv[]) {
     if (!caps.EmitExecutable)
       return fail("backend '" + backendName + "' cannot build executables");
     paykan::backend::EmitOptions eo;
-    eo.OutputPath = opts.OutputPath.empty()
-                        ? defaultExecutable(opts.InputFilename)
-                        : opts.OutputPath;
+    eo.OutputPath = executableOf(opts);
     if (std::string why = overwritesInput(eo.OutputPath, opts, &resolver);
         !why.empty())
       return fail(why);
