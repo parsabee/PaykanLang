@@ -193,7 +193,10 @@ $ paykan --backend=mlir prog.pkn
 
 `build` needs the PaykanLang runtime (a static library and its header) to link programs
 against. An installed `paykan` finds it next to itself (`../lib` and `../include/paykan`);
-`PAYKAN_RUNTIME_DIR` points it elsewhere.
+`PAYKAN_RUNTIME_DIR` points it elsewhere, and when it is set it is the only place looked at,
+as `PAYKAN_STDLIB` is for the standard library: a `PAYKAN_RUNTIME_DIR` without
+`lib/libpaykan_runtime.a` or `include/paykan/Runtime.h` is an error that names the missing
+file, never a reason to link another runtime.
 
 ## The compilation cache
 
@@ -228,7 +231,7 @@ files, the cache and prebuilt modules in detail.
 | Variable | Effect |
 |----------|--------|
 | `CC` | the C compiler `build` links executables with (default `cc`); words after the first are its first arguments, as with `make` (`CC='ccache cc'`, `CC='gcc -m64'`), the value split at white space with no quoting |
-| `PAYKAN_RUNTIME_DIR` | where to find the runtime (`lib/` and `include/paykan/` under it) |
+| `PAYKAN_RUNTIME_DIR` | where to find the runtime (`lib/` and `include/paykan/` under it); when it is set, the only place `build` looks, so a runtime missing there is an error |
 | `PAYKAN_STDLIB` | the directory of system imports, `import ::name;`, instead of the installed standard library ([Modules](15-modules.md)) |
 | `PAYKAN_MODULE_PATH` | `:`-separated directories of prebuilt `.pkm` modules, searched after the `--module-path` directories |
 | `PAYKAN_PLUGIN_PATH` | more directories to load plugins from, separated by `:` |

@@ -868,6 +868,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expression is Sema's error with its `-9223372036854775807 - 1` hint.  The AST interchange
   format's `(int ...)` reads values up to 18446744073709551615.
 - `&`, `|`, `^` and `~` are tokens (no longer `invalid character`).
+- **Stability sweep: modules, pkm and driver.**
+  - `$PAYKAN_RUNTIME_DIR`, when it is set, is the only place `build` (and a plugin
+    backend's `runtime_library`) takes the runtime from, as `$PAYKAN_STDLIB` is the only
+    place of the standard library: one that does not exist, or that lacks
+    `lib/libpaykan_runtime.a` or `include/paykan/Runtime.h`, was passed over without a
+    word for the runtime next to the executable or in the build tree, so a program could
+    be linked with another runtime than the one asked for.  It is now an error naming
+    what is missing (`cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR
+    (/opt/rt): /opt/rt/include/paykan/Runtime.h does not exist`); an empty
+    `PAYKAN_RUNTIME_DIR` is not set (docs/language/17-the-paykan-command.md).
 
 ### Removed
 

@@ -58,8 +58,8 @@
 #       Add an executable <target>: the paykan driver linked with every
 #       installed plugin plus the given ones (static registration needs them
 #       linked whole, which this does).  The driver looks for the runtime
-#       at PAYKAN_RUNTIME_LIBRARY / PAYKAN_RUNTIME_INCLUDE_DIR (after
-#       $PAYKAN_RUNTIME_DIR), wherever its own executable is.
+#       at PAYKAN_RUNTIME_LIBRARY / PAYKAN_RUNTIME_INCLUDE_DIR (unless
+#       $PAYKAN_RUNTIME_DIR is set), wherever its own executable is.
 #       See docs/writing-a-backend.md.
 #   paykan_add_frontend_tests(<frontend> PLUGIN <target-or-file>)
 #       The parser, Sema and frontend suites against a frontend plugin

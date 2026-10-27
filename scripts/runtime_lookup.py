@@ -8,7 +8,9 @@ every backend named with --backend:
 * an installed binary (<prefix>/bin/paykan, outside the build tree) uses its
   own prefix's runtime even though the build tree it was built in still
   exists: a broken runtime in the prefix makes `build` fail on it;
-* $PAYKAN_RUNTIME_DIR overrides the prefix;
+* $PAYKAN_RUNTIME_DIR overrides the prefix, and is the only place looked at
+  when it is set: one that is missing or lacks a file is an error naming it,
+  never a reason to take the prefix's runtime;
 * a binary inside the build tree (below its `.paykan-build-tree` marker) uses
   the build tree's runtime; one outside it with no runtime around does not,
   and reports that it cannot find one (unless the install location configured
@@ -35,6 +37,7 @@ EXPECTED = "runtime ok\n"
 STDLIB = Path(__file__).resolve().parent.parent / "stdlib"
 BROKEN_MARKER = "paykan-runtime-lookup-broken-prefix"
 NOT_FOUND = "cannot find the Paykan runtime"
+NOT_IN_ENV = "cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR"
 
 
 class Checker:
@@ -109,11 +112,11 @@ class Checker:
                     None if p.returncode == 0 and p.stdout == EXPECTED else
                     f"built program exit {p.returncode}\n{p.stdout}{p.stderr}")
 
-    def expect_build_fails(self, label, exe, backend, needle):
+    def expect_build_fails(self, label, exe, backend, needle, env_dir=None):
         """`build` fails with @p needle in its diagnostics."""
         out = Path(tempfile.mkdtemp(dir=self.outdir)) / "prog"
         b = self.paykan(exe, ["build", f"--backend={backend}", "-o", str(out),
-                              str(self.program)])
+                              str(self.program)], env_dir)
         ok = b.returncode != 0 and needle in b.stderr
         self.report(f"{label}: {backend} build",
                     None if ok else f"expected a failure mentioning {needle}; "
@@ -165,6 +168,11 @@ def main():
         bare = c.place(outdir / "bare", None)
         in_build = c.place(Path(in_tree) / "prefix", None)
         broken_lib = str(outdir / "stale" / "lib" / "libpaykan_runtime.a")
+        # A runtime directory with the archive and no header.
+        bare_runtime = outdir / "no-header"
+        (bare_runtime / "lib").mkdir(parents=True)
+        shutil.copy2(args.runtime_lib,
+                     bare_runtime / "lib" / "libpaykan_runtime.a")
         for be in args.backend:
             c.expect_works("installed binary", installed, be)
             # The build tree still exists, but the prefix's own (here
@@ -173,6 +181,18 @@ def main():
                                  be, broken_lib)
             c.expect_works("PAYKAN_RUNTIME_DIR over the prefix", stale, be,
                            env_dir=outdir / "installed")
+            # A good runtime around the binary is not taken in place of
+            # what $PAYKAN_RUNTIME_DIR lacks.
+            missing = outdir / "missing"
+            c.expect_build_fails("PAYKAN_RUNTIME_DIR that does not exist",
+                                 installed, be,
+                                 f"{NOT_IN_ENV} ({missing}): "
+                                 f"{missing}/lib/libpaykan_runtime.a and ",
+                                 env_dir=missing)
+            c.expect_build_fails("PAYKAN_RUNTIME_DIR without its header",
+                                 installed, be,
+                                 f"{bare_runtime}/include/paykan/Runtime.h "
+                                 "does not exist", env_dir=bare_runtime)
             c.expect_works("binary inside the build tree", in_build, be)
             if not Path(args.installed_lib).exists():
                 c.expect_build_fails("binary outside the build tree, no "

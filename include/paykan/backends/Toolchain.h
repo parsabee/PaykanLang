@@ -31,25 +31,27 @@ struct Toolchain {
   /// defining a program's native functions (--object, #198).
   std::vector<std::string> ExtraObjects;
   /// Path of libpaykan_runtime.a and of the directory holding Runtime.h.
-  /// Empty: $PAYKAN_RUNTIME_DIR, then the runtime recorded with
-  /// setPackageRuntime(), then the install layout around the executable
-  /// (`<prefix>/bin` -> `<prefix>/lib`, `<prefix>/include/paykan`), then the
-  /// build tree's runtime (only for a binary inside that build tree), then
-  /// the install location configured at build time.
+  /// Empty: $PAYKAN_RUNTIME_DIR's when it is set (and no other, even when
+  /// it lacks one), else the runtime recorded with setPackageRuntime(),
+  /// then the install layout around the executable (`<prefix>/bin` ->
+  /// `<prefix>/lib`, `<prefix>/include/paykan`), then the build tree's
+  /// runtime (only for a binary inside that build tree), then the install
+  /// location configured at build time.
   std::string RuntimeLib;
   std::string RuntimeIncludeDir;
 };
 
 /// Resolve the defaults of @p tc (compiler and runtime paths).  Returns false
-/// with a message when the runtime cannot be found.  When the runtime is the
+/// with a message when the runtime cannot be found, naming the files
+/// $PAYKAN_RUNTIME_DIR lacks when it is set.  When the runtime is the
 /// build tree's (or installed) one, the sanitizer and coverage flags the
 /// compiler was built with are appended to tc.ExtraFlags: that runtime
 /// archive is instrumented, so programs linked against it need them too.
 bool resolveToolchain(Toolchain &tc, std::ostream &errs);
 
 /// Record the runtime of the installed Paykan package this program was
-/// built against: resolveToolchain() tries it right after
-/// $PAYKAN_RUNTIME_DIR.  A driver made with `paykan_add_driver`
+/// built against: resolveToolchain() tries it first when
+/// $PAYKAN_RUNTIME_DIR is not set.  A driver made with `paykan_add_driver`
 /// (PaykanConfig.cmake) calls it at startup with the package's
 /// PAYKAN_RUNTIME_LIBRARY and PAYKAN_RUNTIME_INCLUDE_DIR, so an out-of-tree
 /// driver finds the runtime wherever its own executable lives.

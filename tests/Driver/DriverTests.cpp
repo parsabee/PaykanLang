@@ -3452,6 +3452,39 @@ TEST(Driver, BuildChecksItsExecutableBeforeCompiling) {
   std::filesystem::remove_all(dir);
 }
 
+// $PAYKAN_RUNTIME_DIR, when it is set, is the only place `build` takes the
+// runtime from, as $PAYKAN_STDLIB is the only place of the standard library
+// (SW-44): one that does not exist, or that lacks the archive or the header,
+// was passed over for another runtime (here the build tree's) without a
+// word.  An empty one is not set.
+TEST(Driver, PaykanRuntimeDirIsTheOnlyRuntimeLookedAt) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("runtime_dir");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::filesystem::create_directories(dir / "partial" / "lib");
+  std::ofstream(dir / "partial" / "lib" / "libpaykan_runtime.a");
+  for (const auto &[runtimeDir, missing] :
+       {std::pair<std::string, std::string>{
+            "none", "none/lib/libpaykan_runtime.a and "
+                    "none/include/paykan/Runtime.h do not exist"},
+        {"partial", "partial/include/paykan/Runtime.h does not exist"}}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && PAYKAN_RUNTIME_DIR=" + runtimeDir +
+            " " + paykanRun() + " build hello.pkn -o h 2>&1");
+    EXPECT_EQ(rc, 1) << runtimeDir << ": " << out;
+    EXPECT_EQ(out, "cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR (" +
+                       runtimeDir + "): " + missing + "\n")
+        << runtimeDir;
+    EXPECT_FALSE(std::filesystem::exists(dir / "h")) << runtimeDir;
+  }
+  auto [rc, out] =
+      run("cd " + dir.string() + " && PAYKAN_RUNTIME_DIR= " + paykanRun() +
+          " build hello.pkn -o h 2>&1 && ./h");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, "hello\n");
+  std::filesystem::remove_all(dir);
+}
+
 // --emit-pkm -o writes into what its path names, as `build -o` and `pkm
 // extract -o` do: a symbolic link keeps naming its file, which gets the
 // module file, and a device (here reached through a link) stays one, where
