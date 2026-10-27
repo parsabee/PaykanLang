@@ -955,6 +955,50 @@ TEST(Pkm, CheckReadsEverySectionAProgramReads) {
                      "UTF-8");
 }
 
+// `pkm check` judges the compiled code by the backend a program would link
+// it with, as `run` and `build` do: an unknown --backend (a typo such as
+// `MLIR`) is an error, as it is for `pkm extract`, and code another backend
+// or target compiled is rejected, as the link rejects it.  Both said
+// `usable`, the first without reading the code at all.
+TEST(Pkm, CheckJudgesTheCodeByTheBackendThatLinksIt) {
+  REQUIRE_BACKEND();
+  Project p("checkbackend");
+  ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                " --emit-pkm base.pkn")
+                .exitCode,
+            0);
+  const fs::path file = p.Dir / "base.pkm";
+  rewriteSection(file, paykan::pkm::Kind::Object, truncateCompiledCode);
+  for (const char *name : {"nosuch", "MLIR"}) {
+    auto r = run(std::string(kPaykan) + " pkm check --backend=" + name + " " +
+                 file.string());
+    EXPECT_EQ(r.exitCode, 1) << name << ": " << r.out;
+    EXPECT_EQ(r.out, "paykan: unknown backend '" + std::string(name) + "'\n");
+  }
+  ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                " --emit-pkm base.pkn")
+                .exitCode,
+            0);
+  paykan::pkm::Object made;
+  rewriteSection(file, paykan::pkm::Kind::Object,
+                 [&](std::vector<uint8_t> &section) {
+                   auto object = paykan::pkm::readObject(section);
+                   ASSERT_TRUE(object) << object.status().message();
+                   made = *object;
+                   (*object).Target = "other-" + (*object).Target;
+                   section = paykan::pkm::writeObject(*object);
+                 });
+  auto r = run(std::string(kPaykan) + " pkm check " + file.string());
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  EXPECT_EQ(r.out, file.string() + ": rejected: its code was compiled by "
+                                   "backend '" +
+                       made.Backend + "' (" + made.Producer + ", " +
+                       made.Format + " for other-" + made.Target +
+                       "); backend '" + made.Backend +
+                       "' links code it compiled itself (" + made.Producer +
+                       " for " + made.Target + ")\n");
+}
+
 // A directory is not a module file: every verb says so and exits with 1,
 // never an uncaught std::ios_base::failure (SIGABRT, status 134; finding 33).
 TEST(Pkm, ADirectoryIsNotAModuleFile) {

@@ -1149,7 +1149,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `rejected: ` or `corrupt: ` and why (`m.pkm: corrupt: has a bad CODE section: binary
     PIR: bad magic at byte 0`), exiting with 1 when the file is not usable.  A file that
     is not a module file at all is `corrupt: ...` too, where it was an error on standard
-    error.
+    error.  Compiled code another backend or target compiled, which the link refuses, is
+    `rejected: its code was compiled by backend 'mlir' (...)`, and an unknown `--backend`
+    (`MLIR`) is an error, as for `pkm extract`, where both said `usable`.
   - `--emit-source` with `--emit-c` or `--emit-mlir` was accepted and one of the two
     outputs dropped without a word (`--emit-c --emit-source` printed the C,
     `--emit-source --emit-mlir=scf` the MLIR).  `--emit-source` is the backend's own

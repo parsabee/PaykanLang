@@ -29,9 +29,10 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
   templates, `code` is exactly the module's PIR text, and `obj` says who compiled its code,
   for which target), `check` reads it as a program that imports it would (its interface,
   its templates, its PIR, verified and checked against its interface, and its compiled code,
-  which the backend reads and verifies) and only then prints one line: `usable`, or
-  `stale: `, `rejected: ` or `corrupt: ` and why, exiting with 0 only when it is usable;
-  and `extract --object` writes the
+  which the backend that links it, the default one or `--backend`'s, reads and verifies;
+  code another backend or target compiled is `rejected`) and only then prints one line:
+  `usable`, or `stale: `, `rejected: ` or `corrupt: ` and why, exiting with 0 only when it
+  is usable; and `extract --object` writes the
   module's compiled code as a native object file (`-o <file>`, or the module file's name
   with `.o`, at the `-O<n>` level): what a program's `--emit-c` C is linked with.
 

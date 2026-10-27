@@ -520,10 +520,11 @@ std::string unknownPlugin(const char *kind, const std::string &name,
 
 /// `pkm check f.pkm`: the file read as an importer reads it (docs/design/
 /// pkm.md §8.4): the verdict against this toolchain (§8.2), then IFACE,
-/// CODE and OBJ (modules::readModuleContents, the backend that would link
-/// the compiled code checking it) and TMPL (Sema::decodeTemplates).  One
-/// line, printed once all of that is read: `usable`, or `stale: `,
-/// `rejected: ` or `corrupt: ` and why; exit status 0 when it is usable.
+/// CODE, TMPL and OBJ (modules::readModuleContents, the backend that would
+/// link the compiled code, the default one or --backend's, checking it, and
+/// rejecting code of another kind).  One line, printed once all of that is
+/// read: `usable`, or `stale: `, `rejected: ` or `corrupt: ` and why; exit
+/// status 0 when it is usable.  An unknown --backend is an error.
 int checkModuleFile(const Options &opts) {
   namespace pkm = paykan::pkm;
   const std::string &path = opts.InputFilename;
@@ -549,25 +550,36 @@ int checkModuleFile(const Options &opts) {
     return verdict(
         (v.Outcome == pkm::Verdict::Kind::Stale ? "stale: " : "rejected: ") +
         v.Message);
-  // The compiled code of the kind the backend a program would use links,
-  // which it reads and verifies, as a program's import does.
+  // The compiled code, read and verified by the backend a program would
+  // link it with, as a program's import does.
   std::string backendName = opts.Backend.empty()
                                 ? std::string(paykan::backend::defaultBackend())
                                 : opts.Backend;
   std::unique_ptr<paykan::backend::Backend> backend =
       paykan::backend::Registry::get().create(backendName);
+  if (!backend)
+    return fail("unknown backend '" + backendName + "'");
+  const bool links = backend->capabilities().CompileModules;
+  const pkm::Object kind = links ? toPkm(backend->objectKind()) : pkm::Object{};
   paykan::modules::ObjectCheck checkObject;
-  if (backend && backend->capabilities().CompileModules)
-    checkObject = [&backend](const pkm::Object &o) {
-      const paykan::backend::ModuleObject code = toBackend(o);
-      return code.sameKind(backend->objectKind())
-                 ? backend->checkModuleObject(code)
-                 : paykan::Status::ok();
+  if (links)
+    checkObject = [&backend, &kind](const pkm::Object &o) {
+      return o.sameKind(kind) ? backend->checkModuleObject(toBackend(o))
+                              : paykan::Status::ok();
     };
   auto contents = paykan::modules::readModuleContents(
       *file, m.Module, checkObject, paykan::sema::Sema::readImport);
   if (!contents)
     return verdict("corrupt: " + contents.status().message());
+  // The backend links only code it compiled itself: a program that imports
+  // the file is refused at the link.
+  if (const std::optional<pkm::Object> &o = (*contents).Object;
+      links && o && !o->sameKind(kind))
+    return verdict("rejected: its code was compiled by backend '" +
+                   o->Backend + "' (" + o->Producer + ", " + o->Format +
+                   " for " + o->Target + "); backend '" + backendName +
+                   "' links code it compiled itself (" + kind.Producer +
+                   " for " + kind.Target + ")");
   return verdict("usable");
 }
 
