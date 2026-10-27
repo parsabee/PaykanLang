@@ -470,6 +470,16 @@ private:
   bool isStableRead(const ast::Expr *e) const {
     return StableReads.count(e) > 0 && !isHeldRead(e);
   }
+  /// The keys of the types a value of type @p ty holds in memory, its own
+  /// among them: each one's ast::typeName, and for a fixed-size array of
+  /// elements of type E also that of the slices of E, `[]E` (sliceKey),
+  /// whose elements it may be.  A value read of a type whose key is not
+  /// one of them is no part of such a value.
+  const std::unordered_set<std::string> &memPartKeys(ast::Type *ty);
+  std::unordered_map<const ast::Type *, std::unordered_set<std::string>>
+      MemPartKeys;
+  /// The key of the elements of a slice of elements of type @p elem.
+  static std::string sliceKey(ast::Type *elem);
   /// Whether a value of type @p ty may reach an object (any class but Str,
   /// a function value, or what holds one): given it, a call can change
   /// whatever the object reaches.
@@ -497,12 +507,24 @@ private:
     /// of such storage, what an `inout` name or a struct method's `self`
     /// names.
     bool Stores = false;
+    /// Of those stores, the ones into an object's field (or a part of what
+    /// it holds), by the field's name: what a pending read in another
+    /// object's field of the same name, or of a value of one of
+    /// StoredParts, may see written (BorrowedReads::writesThroughObjects).
+    /// Its stores through its own `inout` parameters and a struct method's
+    /// `self` are its callers', who give it what they name to change.
+    std::unordered_set<std::string> StoredFields;
+    /// What the values of StoredFields hold in memory (memPartKeys).
+    std::unordered_set<std::string> StoredParts;
+    /// It may store into storage it does not name: a slice's element, what
+    /// a call's `inout` result names.
+    bool StoresElsewhere = false;
     /// The classes of the slots whose references it may let go of: the
     /// ones it may store into, and every one an object or a value it lets
     /// go of may hold (whose dying may let them go).
     std::unordered_set<const ast::Type *> Types;
 
-    static Effect unknown() { return {true, true, true, {}}; }
+    static Effect unknown() { return {true, true, true, {}, {}, true, {}}; }
     void add(const Effect &other);
   };
   /// What a call of @p fn does: Unknown for null or a function without a

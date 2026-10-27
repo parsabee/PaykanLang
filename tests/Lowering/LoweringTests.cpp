@@ -1752,6 +1752,79 @@ TEST(Lowering, AValueReadWhereItIsIsCopiedOnlyWhenALaterOperandMayWriteIt) {
   }
 }
 
+// A later call that stores into objects' fields writes a value read where
+// it is only when the value may be in such a field: one in an object's
+// field of the same name, or storage of the caller's of a type a stored
+// field's value may hold (docs/pir.md §7).  A method of another object
+// storing another field (an RNG's or a counter's `next`), a free function
+// storing one, or the receiver of a struct's `view fn` read from another
+// field take no copy; a store through an `inout` local or a `match` arm's
+// binding is a store into the field it names.
+TEST(Lowering, ACallStoringAnotherFieldWritesNoValueReadWhereItIs) {
+  const std::string decls = R"(
+    struct P { a: Str; n: int; }
+    impl P { view fn plus(k: int) -> int => self.n + k; }
+    struct Wrap { p: P; m: int; }
+    enum Two { A(p: P), B }
+    class C { p: P; n: int; w: Wrap; two: Two; }
+    impl C {
+      fn resetP() -> int { self.p = P("z", 9); return 0; }
+      fn viaLocal() -> int { q: inout = self.p; q = P("z", 9); return 0; }
+      fn viaLocalN() -> int { k: inout = self.n; k = 9; return 0; }
+      fn viaArm() -> int {
+        match self.two { a: inout A { a.p = P("z", 9); } _ {} }
+        return 0;
+      }
+      fn resetW() -> int { self.w = Wrap(P("z", 9), 9); return 0; }
+    }
+    class Counter { v: int; }
+    impl Counter { fn next() -> int { self.v = self.v + 1; return self.v; } }
+    class Log { n: int; }
+    fn logit(l: Log, i: int) -> int { l.n = l.n + i; return 0; }
+    fn first(p: P, x: int) -> int => p.n;
+    fn firstTwo(t: Two, x: int) -> int => 0;
+    fn look(p: view P, x: int) -> int => p.n;
+    fn at(xs: view int[], x: int) -> int => xs[x % 3];
+    class Arrays { xs: int[3]; }
+    fn resetXs(a: Arrays) -> int { a.xs = [9, 9, 9]; return 0; }
+  )";
+  struct Case {
+    const char *Name;
+    const char *Params;
+    const char *Body;
+    size_t Copies;
+  };
+  const Case cases[] = {
+      {"counter", "c: C, ctr: Counter", "return first(c.p, ctr.next());", 0},
+      {"logged", "c: C, l: Log", "return first(c.p, logit(l, 1));", 0},
+      {"element", "c: C, ctr: Counter", "return first(c.w.p, ctr.next());", 0},
+      {"viewRecv", "c: C, ctr: Counter", "return c.p.plus(ctr.next());", 0},
+      {"viewParam", "p: view P, ctr: Counter", "return look(p, ctr.next());",
+       0},
+      {"sliceParam", "xs: view int[], ctr: Counter",
+       "return at(xs, ctr.next());", 0},
+      {"otherLocal", "c: C", "return first(c.p, c.viaLocalN());", 0},
+      {"method", "c: C", "return first(c.p, c.resetP());", 1},
+      {"inoutLocal", "c: C", "return first(c.p, c.viaLocal());", 1},
+      {"armBinding", "c: C", "return firstTwo(c.two, c.viaArm());", 1},
+      {"partOfField", "p: view P, c: C", "return look(p, c.resetW());", 1},
+      {"sliceOfField", "xs: view int[], a: Arrays",
+       "return at(xs, resetXs(a));", 1},
+  };
+  for (const Case &c : cases) {
+    auto l = lower(decls + "fn " + c.Name + "(" + c.Params + ") -> int { " +
+                       c.Body + " }\nfn main() -> int { return 0; }",
+                   "", lowering::Copies::Shared, lowering::World::Closed);
+    ASSERT_TRUE(l.Ok) << c.Name << ": " << l.Error;
+    const std::string f = function(l.Text, c.Name);
+    EXPECT_EQ(count(f, "mem.copy %snap.addr.") +
+                  count(f, "mem.copy %snap.elems."),
+              c.Copies)
+        << c.Name << "\n"
+        << f;
+  }
+}
+
 // A slice parameter passed on to another is the caller's array: when an
 // operand after it may write the array, its elements are copied where it is
 // evaluated, by the length the slice has when the program runs, into
@@ -1763,7 +1836,7 @@ TEST(Lowering, ASlicePassedOnIsCopiedByItsLengthWhenALaterOperandMayWriteIt) {
     class A { xs: int[3]; ss: Str[3]; }
     fn total(xs: view int[], x: int) -> int => xs[0];
     fn names(ss: view Str[], x: int) -> int => ss[0].len();
-    fn reset(a: A) -> int { a.xs = [9, 9, 9]; return 0; }
+    fn reset(a: A) -> int { a.xs = [9, 9, 9]; a.ss = ["x", "y", "z"]; return 0; }
     fn reads(a: A) -> int => a.xs[0];
     fn hazard(xs: view int[], a: A) -> int => total(xs, reset(a));
     fn refs(ss: view Str[], a: A) -> int => names(ss, reset(a));

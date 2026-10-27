@@ -816,19 +816,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     slice parameter passed on to another) and the receiver of a struct's `view fn`.  Such a
     value is passed by address, and its callee copies it (or reads it where it is) when the
     call starts.  Now, when an operand after it may write its storage (an `inout` argument
-    naming it or a part of it, a struct method that may change it, or a call given what
-    reaches the object it is in whose code may store into storage its caller holds), the
-    caller copies it where it is evaluated, into a temporary whose references it releases
-    after the use; a slice passed on, by the length it has when the program runs, into
-    memory allocated for the call and freed after it (docs/language/02-basics.md,
-    "Evaluation order"; docs/pir.md §7, "Reads a call may replace").  No other value is
-    copied: the samples and the standard library's tests lower to the same PIR as before,
-    with and without the passes, so the static counts recorded here do not move.  The
-    receiver of a struct method that may change `self` is still its storage, as an `inout`
-    argument is.  `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape on every path,
-    with `__super__`'s arguments, a function value a field holds, an argument under an
-    `inout` result, one before a closure that writes it and slices passed on to a
-    function, a function value, a method and a constructor.
+    naming it or a part of it, a struct method that may change it, a call given what
+    reaches the object it is in whose code may store into a field of that name, or into a
+    field whose value may hold the caller's storage it names, or a call through a function
+    value, whose code is not known), the caller copies it where it is evaluated, into a
+    temporary whose references it releases after the use; a slice passed on, by the length
+    it has when the program runs, into memory allocated for the call and freed after it
+    (docs/language/02-basics.md, "Evaluation order"; docs/pir.md §7, "Reads a call may
+    replace").  No other value is copied: a later call storing only into other fields
+    (`first(c.p, counter.next())`, `at(xs, rng.next())` with `next` storing an `int`
+    field) leaves the value where it is, as base did, and the samples and the standard
+    library's tests lower to the same PIR as before, with and without the passes, so the
+    static counts recorded here do not move.  The receiver of a struct method that may
+    change `self` is still its storage, as an `inout` argument is.
+    `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape on every path, with
+    `__super__`'s arguments, a function value a field holds, an argument under an `inout`
+    result, one before a closure that writes it, slices passed on to a function, a
+    function value, a method and a constructor, and methods writing the value through an
+    `inout` local, a `match` arm's binding and a field holding it.
   - The `lending` pass took time quadratic in the arguments it lent in one block: it
     removed the retain of each copy it lent one at a time, and each removal moved the rest
     of the block.  A function of 3000 statements `r += first(p, bump(p)) + first(c.p,

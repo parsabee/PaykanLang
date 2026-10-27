@@ -13,8 +13,10 @@
 //            an `inout` result and one before a closure that writes it, and
 //            for a slice parameter passed on to another (copied by its
 //            length when the program runs; to a function, a function
-//            value, a method and a constructor), and no copy is made where
-//            no later operand may write it.
+//            value, a method and a constructor); a later call that writes
+//            it through an `inout` local, a `match` arm's binding or a
+//            field holding it, and no copy where no later operand may
+//            write it (a call storing into another field).
 // expect-stdout: field: 1 1
 // expect-stdout: inout: 1 1 1 A(n: 1)
 // expect-stdout: equality: False True False
@@ -27,6 +29,7 @@
 // expect-stdout: more: 1 1 1 1
 // expect-stdout: slice passed on: 6 a1c3 a1 z1
 // expect-stdout: to a method and a constructor: c3 b
+// expect-stdout: through a name for a field: 1 A(n: 1) 1 1
 
 import ::io;
 
@@ -158,6 +161,40 @@ fn pickOn(ss: view Str[], a: Arrays) -> Str {
 fn keptOn(ss: view Str[], a: Arrays) -> Str => Kept(ss, resetArrays(a)).s;
 
 fn arrays() -> Arrays => Arrays([1, 2, 3], ["a" + Str(1), "b", "c" + Str(3)]);
+
+struct Wrap {
+  p: P;
+  m: int;
+}
+
+class Boxed {
+  p: P;
+  e: E;
+  w: Wrap;
+}
+
+impl Boxed {
+  fn viaLocal() -> int { q: inout = self.p; q = P(9); return 0; }
+  fn viaArm() -> int {
+    match self.e {
+      x: inout A { x.n = 9; }
+      _ {}
+    }
+    return 0;
+  }
+  fn resetW() -> int   { self.w = Wrap(P(9), 9); return 0; }
+}
+
+class Ticker {
+  t: int;
+}
+
+impl Ticker {
+  fn next() -> int { self.t = self.t + 1; return self.t; }
+}
+
+fn boxed() -> Boxed => Boxed(P(1), E::A(1), Wrap(P(1), 1));
+fn lookOn(p: view P, b: Boxed) -> int => look(p, b.resetW());
 
 fn reset(h: Holder) -> int {
   h.p = P(9);
@@ -303,5 +340,20 @@ fn main() -> int {
   arrs = arrays();
   l5 = keptOn(arrs.ss, arrs);
   io::println("to a method and a constructor: " + l4 + " " + l5);
+
+  // A method that writes a field through an `inout` local or a `match`
+  // arm's binding, one that writes the field holding a `view` parameter's
+  // value, and one that writes another object's field (no copy).
+  b = boxed();
+  y1 = first(b.p, b.viaLocal());
+  b = boxed();
+  y2 = tag(b.e, b.viaArm());
+  b = boxed();
+  y3 = lookOn(b.w.p, b);
+  b = boxed();
+  ticker = Ticker(0);
+  y4 = first(b.p, ticker.next());
+  io::println("through a name for a field: " + Str(y1) + " " + y2 + " "
+      + Str(y3) + " " + Str(y4));
   return 0;
 }

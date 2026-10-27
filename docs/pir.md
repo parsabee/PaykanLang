@@ -1031,11 +1031,18 @@ CodeGen enforced, now in one place.
   storage: an `inout` argument naming it or a part of it (not another
   part, `s.q` of `s.p`, nor another field of an object), a struct
   method that may change it, or a call given what reaches an object
-  whose code may store into storage its caller holds (a field of an
-  object but the one an `__init__` makes, an element of such storage,
-  what an `inout` name or a struct method's `self` names: read from the
-  code as the classes above are, "not known" counting), when it is in an
-  object or names the caller's storage.  A slice parameter passed on to
+  whose code may store into a field of an object (but the one an
+  `__init__` makes, or a part of what the field holds, directly or
+  through an `inout` local or a `match` arm's binding naming it) that
+  may hold the value, or into storage it cannot name (a slice's element,
+  what a call's `inout` result names): read from the code as the classes
+  above are, "not known" counting.  A value in an object's field may be
+  in a stored field of the same name; one the function's caller holds
+  (a `view`, `inout` or slice parameter's) in a stored field whose value
+  holds a value of its type in memory (a slice's elements, a fixed-size
+  array of them), whatever its name.  The callee's own stores through
+  its `inout` parameters and a struct method's `self` are the call's
+  arguments' above.  A slice parameter passed on to
   another, the caller's array, is copied the same way by the length it
   has when the program runs: into memory of its own (a `call` of
   `$rt.Paykan_malloc` for the length times the element's size, a
