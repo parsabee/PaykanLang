@@ -1362,7 +1362,9 @@ TEST(Pkm, AModuleFileAssumesNothingOfItsClassesSubclasses) {
                                 "owned(%v.own.6) %v.12)\n"))
       << program;
   EXPECT_TRUE(contains(module, "= ptr.load box, %self.addr.8\n")) << module;
-  EXPECT_TRUE(contains(module, "retain %elem.9\n")) << module;
+  // The table, a struct's field of a class type that is not optional, is
+  // never null (docs/pir.md §6).
+  EXPECT_TRUE(contains(module, "retain nonnull %elem.9\n")) << module;
   EXPECT_TRUE(contains(module, "release %elem.9\n")) << module;
   fs::remove_all(dir);
 }

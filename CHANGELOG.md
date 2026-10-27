@@ -868,19 +868,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     4096 bytes.
   - The C of a program that assigned a struct or a fixed-size array field of an object it
     held in a variable or a lambda's capture (`d = h.c; d.p = P(7, 8, 9);`, `k = fn() {
-    c.p = P(7, 8, 9); };`) failed the strict build at GCC's `-O1` and above: `-Werror`
-    reported `'__builtin_memcpy' offset [0, 23] is out of the bounds [0, 0]
-    [-Warray-bounds]`.  The retain that made the variable's reference tested the box for
-    `NULL`, and GCC followed that path into the field's write.  A value whose type is a
-    class that is not optional is never `NULL` (Sema reads one only once it is set, and a
-    native function never returns one as `NULL`), so the lowering now marks the retain of
-    one `retain nonnull` (docs/pir.md §6, a new mark in PIR's text and binary forms, code
-    57), and both paths retain it, and release the same value, with no test for null:
-    Runtime.h's new `Paykan_retain_nonnull_inline` and `Paykan_release_nonnull_inline` on
-    the C path (docs/c-backend.md).  A release of a variable's slot keeps its test, since
-    the moves at last use may have emptied the slot.
+    c.p = P(7, 8, 9); };`, `d = c; d.p = P(7, 8, 9);` with `c: inout C`) failed the strict
+    build at GCC's `-O1` and above: `-Werror` reported `'__builtin_memcpy' offset [0, 23]
+    is out of the bounds [0, 0] [-Warray-bounds]`.  The retain that made the variable's
+    reference tested the box for `NULL`, and GCC followed that path into the field's write.
+    A value whose type is a class that is not optional is never `NULL` (Sema reads one only
+    once it is set, and a native function never returns one as `NULL`), so the lowering
+    now marks each retain of one `retain nonnull` (docs/pir.md §6, a new mark in PIR's text
+    and binary forms, code 57): a variable's, an `inout` parameter's, a field's or an
+    element's value read, or copied into another variable, a field or the slots of `[v;
+    n]`, a capture into a closure and out of it, a tuple's element taken apart, an `inout`
+    result and the object it is in, a native function's `view` result, and a `match`
+    arm's binding of a subject that is not optional and its write-back.  Both paths
+    retain it, and release the same value, with no test for null: Runtime.h's new
+    `Paykan_retain_nonnull_inline` and `Paykan_release_nonnull_inline` on the C path
+    (docs/c-backend.md).  The mark is of the value, wherever it is used: a type arm's
+    retain of an optional subject's box (`match _open(...) { h: Obj {...} None {...} }`)
+    keeps its test, since the same box, null, is released on the way to `None`.  A
+    release of a variable's slot keeps its test too, since the moves at last use may have
+    emptied the slot, and so does the retain of each reference a value held in memory
+    holds (a tagged union's other variants are zeros).
     `samples/codegen/81_field_struct_store_retained.pkn` writes such fields through a
-    variable, a capture and a loop's variable.
+    variable, a capture, a loop's variable, a copy of an `inout` parameter (a lambda's
+    too), of another variable and of an `inout` result, and matches a native function's
+    `Obj?` result to its `None` arm.
   - A `match` on a tagged union whose arms return took time quadratic in the union's
     variants to compile: each way out of a scope (every `return`, `break` and `continue`)
     released every reference of every variant of each value the scope held in memory, one

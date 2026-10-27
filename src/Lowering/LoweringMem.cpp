@@ -579,7 +579,7 @@ Val ModuleLowering::emitElementLoad(const Val &addr, ast::Type *ty,
 Val ModuleLowering::ownElementRead(ast::Expr *node, const Val &elem,
                                    size_t mark) {
   if (elem.Ty == Type::Box && exprProducesFreshBox(node))
-    emitRetain(elem);
+    emitRetain(elem, /*lend=*/false, node->getResolvedType());
   releaseMemTemps(mark);
   return elem;
 }
@@ -685,7 +685,7 @@ void ModuleLowering::emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
     }
     B.ptrStore(at, v);
     if (ref) // each slot owns a reference
-      emitRetain(v);
+      emitRetain(v, /*lend=*/false, elemTy);
   });
 }
 

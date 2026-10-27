@@ -209,11 +209,12 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
     return L.loadWeakVar(node->getName());
   pir::LocalId local = L.CurrentScope->lookup(node->getName());
   Val val = L.B.load(local, node->getName());
+  auto *astTy = L.CurrentScope->lookupASTType(node->getName());
   // A read its statement may replace the variable's value under
   // (noteHeldReads): the box, with a reference of its own, a fresh +1 one
   // (exprProducesFreshBox).
   auto held = [&](const Val &box) {
-    L.emitRetain(box);
+    L.emitRetain(box, /*lend=*/false, astTy);
     return box;
   };
   // An `inout` parameter: read the caller's storage (a box: borrowed, and
@@ -226,7 +227,6 @@ Val ModuleLowering::ExprEmitter::visitIdentifier(ast::Identifier *node) {
     return t == Type::Box ? L.emitSharedGet(v, node->getName() + ".obj") : v;
   }
   // Owned ref vars store a box — unwrap to the underlying object.
-  auto *astTy = L.CurrentScope->lookupASTType(node->getName());
   if (ast::isRefType(astTy) && L.CurrentScope->isOwned(node->getName())) {
     if (L.isHeldRead(node))
       return held(val);
@@ -1522,8 +1522,8 @@ Val ModuleLowering::visitDestructureStmt(ast::DestructureStmt *node) {
     }
 
     Val v = emitElementLoad(at, elemTy);
-    if (ast::isRefType(elemTy))
-      emitRetain(v); // the binding becomes an owner of the element
+    if (ast::isRefType(elemTy)) // the binding becomes an owner of the element
+      emitRetain(v, /*lend=*/false, elemTy);
     if (!owner) {
       Type pirTy = toPIRType(bindTy);
       if (pirTy == Type::Void)

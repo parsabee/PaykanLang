@@ -567,8 +567,11 @@ that is never null: the lowering marks a retain of a value whose type is a
 class that is not optional, which Sema reads only once it is set and a
 native function never returns as null.  A backend retains it with no test
 for null, and releases the same value (`release %b` of that `%b`) with
-none either; a `release` of anything else, such as a load of a local's slot
-the moves at last use (§12) may have emptied, keeps its test.  Without the
+none either, wherever that release is; a `release` of anything else, such
+as a load of a local's slot the moves at last use (§12) may have emptied,
+keeps its test.  So the mark is of the value, not of the place it is
+retained in: a `match` arm binding a class retains an optional subject's
+box with a plain `retain`, as that box is null on the way to `None`.  Without the
 mark a retain promises nothing, so a module written before the mark existed
 reads as before.
 

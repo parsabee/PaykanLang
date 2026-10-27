@@ -653,7 +653,10 @@ private:
   /// once assigned, a field once its `__init__` has stored it), and a
   /// native function never returns null for one; only a slot the moves at
   /// last use emptied, or memory never set (a tagged union's other
-  /// variants), holds null, and neither is read as a value.
+  /// variants), holds null, and neither is read as a value.  @p ty is the
+  /// type of the value retained, wherever it is used (a backend releases
+  /// the same value with no test either): an optional's box is not
+  /// marked in the arm that knows it is set.
   static bool neverNull(ast::Type *ty) {
     return ast::isRefType(ty) && !ast::isa<ast::OptionalType>(ty);
   }

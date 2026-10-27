@@ -1002,7 +1002,8 @@ Val ModuleLowering::emitImplicitVarDecl(const std::string &name,
       // A variable holding a box: visitIdentifier already unwrapped it; load
       // the box itself and retain it.
       val = loadVarBox(id->getName());
-      emitRetain(val);
+      emitRetain(val, /*lend=*/false,
+                 CurrentScope->lookupASTType(id->getName()));
     } else {
       // Raw value — box it.  A fresh temporary gets its first box; an alias
       // of an already-boxed object (`self`, a match binding, the immortal
@@ -1031,7 +1032,8 @@ void ModuleLowering::emitClassVarRebind(const std::string &name,
   if (auto *ident = ast::dyn_cast<ast::Identifier>(rhsExpr)) {
     if (holdsBox(ident->getName())) {
       newBox = loadVarBox(ident->getName());
-      emitRetain(newBox);
+      emitRetain(newBox, /*lend=*/false,
+                 CurrentScope->lookupASTType(ident->getName()));
     }
   }
   if (!newBox) {
@@ -1558,7 +1560,7 @@ Val ModuleLowering::emitNativeCall(const ast::FuncDecl &node,
   } else if (resultByAddress) {
     result = B.ptrLoad(result, ret, "r.val");
     if (result.Ty == Type::Box)
-      emitRetain(result);
+      emitRetain(result, /*lend=*/false, retTy);
   }
   return result;
 }

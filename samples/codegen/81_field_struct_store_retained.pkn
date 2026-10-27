@@ -1,15 +1,22 @@
 // 81 — a field written through an object a variable or a capture holds
 // Exercises: a struct or fixed-size array field assigned through an object
 //            read from a field into a variable, captured by a lambda, or
-//            read in a loop, and an optional one, on every path.  The retain
+//            read in a loop, copied from an `inout` parameter (a lambda's
+//            too), from another variable or from an `inout` result, and an
+//            optional one, on every path.  The retain
 //            of a value whose type is a class that is not optional makes no
 //            test for null (docs/pir.md §6, `retain nonnull`): with one,
 //            GCC's -Warray-bounds at -O1 and above followed the null path
-//            into the field's write, and the strict C build failed.
+//            into the field's write, and the strict C build failed.  A
+//            native function's `Obj?` result matched to its `None` arm: the
+//            type arm's retain of the subject's box keeps its test, since
+//            the same box, null, is released on the way to `None`.
 // expect-stdout: field: 8
 // expect-stdout: capture: 8 8
 // expect-stdout: loop: 2
 // expect-stdout: optional: 5 None
+// expect-stdout: inout: 2 4 3 5 6
+// expect-stdout: native: True
 
 import ::io;
 
@@ -54,6 +61,41 @@ fn setOptional(h: H) -> Str {
   }
 }
 
+fn viaInout(c: inout C) {
+  d = c;
+  d.p = P(7, 2, 9);
+}
+
+fn viaBinding(c: inout C) {
+  e = c;
+  e.xs = [4, 4, 4];
+}
+
+fn viaRebind(c: inout C, d: C) {
+  e = d;
+  e = c;
+  e.p = P(7, 3, 9);
+}
+
+fn held(h: inout H) -> inout C {
+  return h.c;
+}
+
+native fn _open(path: view Str, mode: view Str, errno: inout int)
+                -> Obj? = "Paykan_io_open";
+
+class F {
+  handle: Obj;
+}
+
+fn opened(path: Str) -> F? {
+  errno = 0;
+  match _open(path, "r", errno) {
+    handle: Obj { return F(handle); }
+    None { return None; }
+  }
+}
+
 fn main() -> int {
   h = H(C(P(1, 2, 3), [1, 2, 3]), C(P(1, 2, 3), [1, 2, 3]));
   set(h);
@@ -66,5 +108,22 @@ fn main() -> int {
   io::println("loop: " + Str(setEach(hs)));
   none = H(C(P(0, 0, 0), [0, 0, 0]), None);
   io::println("optional: " + setOptional(h) + " " + setOptional(none));
+  c = C(P(1, 1, 1), [1, 1, 1]);
+  viaInout(c);
+  b = c.p.b;
+  viaBinding(c);
+  x = c.xs[0];
+  viaRebind(c, C(P(0, 0, 0), [0, 0, 0]));
+  r = c.p.b;
+  f = fn(y: inout C) { d = y; d.p = P(7, 5, 9); };
+  f(c);
+  l = c.p.b;
+  h = H(c, None);
+  at: inout = held(h);
+  q = at;
+  q.p = P(7, 6, 9);
+  io::println("inout: " + Str(b) + " " + Str(x) + " " + Str(r) + " " + Str(l)
+      + " " + Str(c.p.b));
+  io::println("native: " + Str(opened("") == None));
   return 0;
 }

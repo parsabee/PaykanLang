@@ -126,7 +126,7 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
       subjRaw = B.ptrLoad(at, toPIRType(t), "subj");
     } else {
       sharedSubj = B.ptrLoad(at, Type::Box, "subj.box");
-      emitRetain(sharedSubj);
+      emitRetain(sharedSubj, /*lend=*/false, t);
       subjRaw = emitSharedGet(sharedSubj, "subj.obj");
     }
   } else {
@@ -229,10 +229,14 @@ Val ModuleLowering::visitMatchStmt(ast::MatchStmt *node) {
         // exits.  It can therefore be re-assigned, moved or stored like any
         // variable, and stays valid even if the arm re-assigns the subject
         // itself.  The subject is non-null here: a None subject never
-        // reaches a type arm.
+        // reaches a type arm.  Its box is the subject's value, so its
+        // retain is `nonnull` only when the subject's type says so: an
+        // optional subject's box is null on the way to its `None` arm,
+        // where the same value is released.
         Val box;
         if (sharedSubj) {
-          emitRetain(sharedSubj);
+          emitRetain(sharedSubj, /*lend=*/false,
+                     node->getSubject()->getResolvedType());
           box = sharedSubj;
         } else {
           // PaykanShared_new acquires the object's existing unique box (+1).

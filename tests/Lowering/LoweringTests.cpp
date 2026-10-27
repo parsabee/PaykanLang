@@ -257,6 +257,103 @@ fn main() -> int {
   EXPECT_EQ(count(call, "retain nonnull %d."), 1u) << call;
 }
 
+// So is the retain of a variable's class value copied into another variable
+// (SW-14): from an `inout` parameter, as a variable's new value, as a
+// field's new value, and the object an `inout` result is in; an
+// optional's is not.
+TEST(Lowering, ARetainOfAVariablesClassValueIsNonNull) {
+  Lowered l = lower(R"(
+struct P {
+  a: int;
+}
+
+class C {
+  p: P;
+}
+
+class H {
+  c: C;
+  o: C?;
+}
+
+fn held(h: inout H) -> inout C {
+  return h.c;
+}
+
+fn copy(c: inout C, o: C?, h: H) -> int {
+  d = c;
+  e = o;
+  f = d;
+  f = c;
+  h.c = d;
+  g = o;
+  g = e;
+  at: inout = held(h);
+  return d.p.a + f.p.a + at.p.a;
+}
+
+fn main() -> int {
+  c = C(P(1));
+  return copy(c, None, H(c, None));
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string copy = function(l.Text, "copy");
+  EXPECT_EQ(count(copy, "retain nonnull %c."), 2u) << copy;
+  EXPECT_EQ(count(copy, "retain nonnull %d."), 2u) << copy;
+  EXPECT_EQ(count(copy, "retain nonnull %held.obj."), 1u) << copy;
+  EXPECT_EQ(count(copy, "retain %o."), 2u) << copy;
+  EXPECT_EQ(count(copy, "retain %e."), 1u) << copy;
+}
+
+// A type arm's binding retains the subject's box, the subject's own value:
+// `nonnull` for a class subject, but not for an optional one, whose box is
+// null on the way to its `None` arm, where the same value is released.
+TEST(Lowering, AnOptionalSubjectsArmRetainsItsBoxWithATest) {
+  Lowered l = lower(R"(
+struct P {
+  a: int;
+}
+
+class C {
+  p: P;
+}
+
+fn pick(o: C?) -> C? {
+  return o;
+}
+
+fn same(c: C) -> C {
+  return c;
+}
+
+fn arm(o: C?, c: C) -> int {
+  match pick(o) {
+    x: C { return x.p.a; }
+    None { }
+  }
+  match same(c) {
+    y: C { return y.p.a; }
+  }
+  return 0;
+}
+
+fn main() -> int {
+  return arm(None, C(P(1)));
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string arm = function(l.Text, "arm");
+  const size_t pick = arm.find("call @pick(");
+  const size_t same = arm.find("call @same(");
+  ASSERT_NE(pick, std::string::npos) << arm;
+  ASSERT_NE(same, std::string::npos) << arm;
+  const std::string optional = arm.substr(pick, same - pick);
+  EXPECT_EQ(count(optional, "retain %call."), 1u) << arm;
+  EXPECT_EQ(count(optional, "retain nonnull"), 0u) << arm;
+  EXPECT_EQ(count(arm.substr(same), "retain nonnull %call."), 1u) << arm;
+}
+
 namespace {
 
 /// A tagged union of @p n variants, every third one with a field holding a
@@ -731,11 +828,13 @@ TEST(Lowering, AReadACallMayReplaceHasAReferenceOfItsOwn) {
     const size_t call =
         f.find(std::string(fn) == "joined" ? "call @repl(" : "call @replNode(");
     ASSERT_NE(call, std::string::npos) << f;
-    // The read's retain comes before the call, its release after it.
+    // The read's retain comes before the call, its release after it.  The
+    // read is of a class value that is not optional: `nonnull` (SW-14).
     EXPECT_EQ(count(f.substr(0, call), "retain "), 1u) << f;
-    const size_t retain = f.find("retain ");
+    const size_t retain = f.find("retain nonnull ");
+    ASSERT_NE(retain, std::string::npos) << f;
     const std::string read =
-        f.substr(retain + 7, f.find('\n', retain) - retain - 7);
+        f.substr(retain + 15, f.find('\n', retain) - retain - 15);
     const size_t release = f.find("release " + read + "\n");
     ASSERT_NE(release, std::string::npos) << f;
     EXPECT_GT(release, call) << f;
@@ -4157,7 +4256,9 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
   EXPECT_EQ(argCopy(f, "call @show("), "lend") << f;
   f = function(l.Text, "keep");
   EXPECT_EQ(count(f, "retain lend "), 0u) << f;
-  EXPECT_EQ(count(f, "retain %n."), 1u) << f;
+  // `n` is a `Node`, never null, though the field it goes to is optional.
+  EXPECT_EQ(count(f, "retain nonnull %n."), 1u) << f;
+  EXPECT_EQ(count(f, "retain "), 1u) << f;
 
   pir::Statistics stats;
   auto mv = moved(lower(source), stats);

@@ -521,10 +521,11 @@ Val ModuleLowering::loadInoutResult(const Val &addr, ast::Type *astTy) {
   // A value held in memory is used by its address, as a variable's is.
   if (ast::isMemType(astTy))
     return addr;
-  Type t = toPIRType(canonicalizeDeclType(astTy));
+  ast::Type *ty = canonicalizeDeclType(astTy);
+  Type t = toPIRType(ty);
   Val v = B.ptrLoad(addr, t, "res");
   if (t == Type::Box)
-    emitRetain(v);
+    emitRetain(v, /*lend=*/false, ty);
   return v;
 }
 
@@ -558,7 +559,7 @@ void ModuleLowering::holdObjectsIn(const Val &addr, ast::Type *ty) {
     return;
   if (!ast::isMemType(ty)) {
     Val box = B.ptrLoad(addr, Type::Box, "held.obj");
-    emitRetain(box);
+    emitRetain(box, /*lend=*/false, ty);
     MemTemps.emplace_back(box, nullptr);
     return;
   }
@@ -665,7 +666,7 @@ void ModuleLowering::emitWriteBack(const Scope::WriteBack &wb) {
     // A reference: the binding's object replaces the one there (taken
     // before the old one goes, which may be the same).
     Val box = B.load(wb.Binding, "arm.box");
-    emitRetain(box);
+    emitRetain(box, /*lend=*/false, wb.BindTy);
     emitRelease(B.ptrLoad(place, Type::Box, "old.box"));
     B.ptrStore(place, box);
     return;
