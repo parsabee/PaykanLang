@@ -3547,6 +3547,12 @@ TEST(Driver, ConflictingOptionsAreRejected) {
                   "--check-only and --emit-pir exclude each other"},
         std::pair{"--emit-c --emit-pir hello.pkn",
                   "--emit-pir and --emit-c exclude each other"},
+        // Each names another output, where one was silently dropped
+        // (SW-35).
+        std::pair{"--emit-c --emit-source hello.pkn",
+                  "--emit-c and --emit-source exclude each other"},
+        std::pair{"--emit-source --emit-mlir=scf hello.pkn",
+                  "--emit-mlir and --emit-source exclude each other"},
         std::pair{"--dump-ast --emit-ast hello.pkn",
                   "--dump-ast and --emit-ast exclude each other"},
         std::pair{"build --emit-c hello.pkn -o bx",
@@ -3590,6 +3596,15 @@ TEST(Driver, ConflictingOptionsAreRejected) {
                   " hello.pkn --emit-c -o x 2>&1");
   EXPECT_EQ(args.exitCode, 0) << args.out;
   EXPECT_EQ(args.out, "hello\n");
+  // --emit-source is --emit-llvm's output: two names for one (SW-35).
+  auto llvm = run("cd " + dir.string() + " && " + kPaykan +
+                  " --emit-llvm hello.pkn 2>&1");
+  auto both = run("cd " + dir.string() + " && " + kPaykan +
+                  " --emit-llvm --emit-source hello.pkn 2>&1");
+  EXPECT_EQ(llvm.exitCode, 0) << llvm.out;
+  EXPECT_EQ(both.exitCode, 0) << both.out;
+  EXPECT_NE(llvm.out.find("define "), std::string::npos) << llvm.out;
+  EXPECT_EQ(both.out, llvm.out);
   std::filesystem::remove_all(dir);
 }
 

@@ -1099,6 +1099,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     PIR: bad magic at byte 0`), exiting with 1 when the file is not usable.  A file that
     is not a module file at all is `corrupt: ...` too, where it was an error on standard
     error.
+  - `--emit-source` with `--emit-c` or `--emit-mlir` was accepted and one of the two
+    outputs dropped without a word (`--emit-c --emit-source` printed the C,
+    `--emit-source --emit-mlir=scf` the MLIR).  `--emit-source` is the backend's own
+    output, the mlir backend's LLVM IR, so with either of them it is now an error
+    (`--emit-c and --emit-source exclude each other`), as with `--emit-pir`; with
+    `--emit-llvm`, which names the same output, it is accepted.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

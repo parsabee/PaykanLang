@@ -94,7 +94,9 @@ These print an intermediate form of the program, or what it is linked with, to s
 output and stop; the `--emit-*` ones write it to `-o <file>` when it is given. Like `build`, they take no program
 arguments, so their options may follow the file. `--emit-c`, `--emit-llvm` and `--emit-mlir`
 are the mlir backend's (with another `--backend` they are an error), and only one of them
-may be given:
+may be given. `--emit-source` names the backend's own output, so with `--emit-llvm` it asks
+for the same thing twice and is accepted, and with `--emit-c` or `--emit-mlir` it is an
+error:
 
 | Option | Prints |
 |--------|--------|
