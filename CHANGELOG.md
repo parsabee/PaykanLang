@@ -1083,19 +1083,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     its bitcode is not read, one whose module does not verify is not used, and either is
     translated and written again, `--verbose` saying why (`module ::io: bitcode cache
     .paykan_cache/@system/io.bc is corrupt (its bitcode does not match its hash);
-    translating it again`).  An older compiler's entries are translated again once.  A
-    module file's compiled code (its OBJ section) that did not read or verify failed the
-    compile that linked it, with `LLVM ERROR: Broken module found` or an error at the
-    link: the backend now reads and verifies it when the file is loaded
-    (`Backend::checkModuleObject`), so a cache entry's is rebuilt and a prebuilt file's is
-    an error where it is imported (`module 'm' (m.pkm) has a bad OBJ section: the compiled
-    code does not verify: ...`), and the program's LLVM IR is verified before it is
-    optimised or run.  Past that check a module file's compiled code is trusted once its
-    hashes match: bytes crafted to pass them can still crash LLVM's reader, so a prebuilt
-    module is as safe as where it came from (docs/design/pkm.md §8.4).  The modules the
-    mlir backend writes as bitcode no longer carry LLVM's "Debug Info Version" flag (they
-    have no debug info), since the reader verifies a module that has it and stops the
-    process when that module does not verify.
+    translating it again`).  An entry that is no regular file is not read but translated
+    again too: a FIFO blocked the compile for good, and a link to `/dev/zero` was read
+    until LLVM ran out of memory (`LLVM ERROR: out of memory`).  An older compiler's
+    entries are translated again once (`... is stale (an older paykan wrote it, with no
+    header)`, not `corrupt`).  A module file's compiled code (its OBJ section) that did
+    not read or verify failed the compile that linked it, with `LLVM ERROR: Broken module
+    found` or an error at the link: the backend now reads and verifies it when the file is
+    loaded (`Backend::checkModuleObject`), so a cache entry's is rebuilt and a prebuilt
+    file's is an error where it is imported (`module 'm' (m.pkm) has a bad OBJ section:
+    the compiled code does not verify: ...`), and the program's LLVM IR is verified before
+    it is optimised or run.  Past that check a module file's compiled code is trusted once
+    its hashes match: bytes crafted to pass them can still crash LLVM's reader, so a
+    prebuilt module is as safe as where it came from (docs/design/pkm.md §8.4).  The
+    modules the mlir backend writes as bitcode no longer carry LLVM's "Debug Info Version"
+    flag (they have no debug info), since the reader verifies a module that has it and
+    stops the process when that module does not verify.
   - A module file whose CODE did not decode or verify was accepted when it was loaded and
     reported only when the program was lowered, which then went on without the module and
     stopped at an assertion (`Scope::lookup`, SIGABRT); `--check-only` accepted it, and a

@@ -35,6 +35,7 @@
 #include <utility>
 #include <vector>
 
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -474,6 +475,50 @@ TEST(Pkm, DamagedBitcodeCacheEntryIsTranslatedAgain) {
   r = p.runMain("--verbose");
   EXPECT_EQ(r.exitCode, 42) << r.out;
   EXPECT_FALSE(contains(r.out, "bitcode cache")) << r.out;
+}
+
+// A bitcode cache entry that is no regular file is not read but translated
+// again, and the entry written in its place is used: a FIFO blocked the
+// compile for good, and a symbolic link to /dev/zero was read until LLVM
+// ran out of memory (`LLVM ERROR: out of memory`).  An entry an older
+// paykan wrote, bitcode with no header, is stale, not corrupt.
+TEST(Pkm, BitcodeCacheEntryThatIsNoRegularFileIsTranslatedAgain) {
+  REQUIRE_BACKEND();
+  Project p("bitcodefifo");
+  writeFile(p.Dir / "main.pkn", "import ::io;\n"
+                                "fn main() -> int {\n"
+                                "  io::println(\"hi\");\n"
+                                "  return 42;\n"
+                                "}\n");
+  ASSERT_EQ(p.runMain().exitCode, 42);
+  const fs::path bc = p.cache() / "@system" / "io.bc";
+  const std::string pristine = slurp(bc);
+  const std::string entry = "module ::io: bitcode cache "
+                            ".paykan_cache/@system/io.bc ";
+  // Bounded, so a compile that blocks or reads for good fails the test.
+  const std::string paykan = "timeout 60 " + paykanCmd();
+  auto translatedAgain = [&](const std::string &what, const std::string &why) {
+    SCOPED_TRACE(what);
+    auto r = p.runMain("--verbose", paykan);
+    EXPECT_EQ(r.exitCode, 42) << r.out;
+    EXPECT_TRUE(contains(r.out, entry + why + "; translating it again\n"))
+        << r.out;
+    EXPECT_TRUE(fs::is_regular_file(fs::symlink_status(bc)));
+    r = p.runMain("--verbose", paykan);
+    EXPECT_EQ(r.exitCode, 42) << r.out;
+    EXPECT_FALSE(contains(r.out, "bitcode cache")) << r.out;
+  };
+  fs::remove(bc);
+  ASSERT_EQ(mkfifo(bc.c_str(), 0600), 0);
+  translatedAgain("a FIFO", "is corrupt (not a regular file)");
+  fs::remove(bc);
+  fs::create_symlink("/dev/zero", bc);
+  translatedAgain("/dev/zero", "is corrupt (not a regular file)");
+  const size_t bitcode = pristine.find("BC\xC0\xDE");
+  ASSERT_NE(bitcode, std::string::npos);
+  writeFile(bc, pristine.substr(bitcode));
+  translatedAgain("no header",
+                  "is stale (an older paykan wrote it, with no header)");
 }
 
 // A cache entry whose compiled code (OBJ) does not read is rebuilt, though

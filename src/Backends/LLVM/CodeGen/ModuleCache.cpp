@@ -9,6 +9,7 @@
 #include "Names.h"
 #include "Runtime.h"
 #include "Version.h"
+#include "paykan/pkm/File.h"
 
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -167,12 +168,25 @@ struct Cached {
 };
 
 /// The entry at @p path when it holds a translation under @p key that
-/// verifies.
+/// verifies.  It is read only when it is a regular file no larger than a
+/// module file may be (pkm::kMaxFileBytes): a FIFO would block the
+/// compile, a device such as /dev/zero would never end.
 Cached loadCached(const std::string &path, llvm::StringRef key,
                   llvm::LLVMContext &ctx) {
-  auto buf = llvm::MemoryBuffer::getFile(path);
+  llvm::sys::fs::file_status st;
+  if (llvm::sys::fs::status(path, st))
+    return {nullptr, ""};
+  if (st.type() != llvm::sys::fs::file_type::regular_file)
+    return {nullptr, "is corrupt (not a regular file)"};
+  if (st.getSize() > pkm::kMaxFileBytes)
+    return {nullptr, "is corrupt (larger than any module may be)"};
+  auto buf = llvm::MemoryBuffer::getFile(path, /*IsText=*/false,
+                                         /*RequiresNullTerminator=*/false);
   if (!buf)
     return {nullptr, ""};
+  // Bitcode with no header: an entry an older paykan wrote.
+  if ((*buf)->getBuffer().starts_with("BC\xC0\xDE"))
+    return {nullptr, "is stale (an older paykan wrote it, with no header)"};
   StatusOr<CacheEntry> entry = readCacheEntry((*buf)->getBuffer());
   if (!entry)
     return {nullptr, "is corrupt (" + entry.status().message() + ")"};

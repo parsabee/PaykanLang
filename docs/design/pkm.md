@@ -1329,7 +1329,10 @@ executable size/mtime build id is dropped (host state; the manifest's
 `.bc` entry is a header (the magic `PKNBC001`, the key in hex and the
 SHA-256 of the bitcode) followed by the bitcode: an entry whose header
 does not match its bitcode is never parsed, and one whose module does not
-verify is not used; either is translated again (`--verbose` says why).
+verify is not used; either is translated again (`--verbose` says why). An
+entry is read only when it is a regular file no larger than a module file
+may be (a FIFO, or a link to `/dev/zero`, is translated again, not read),
+and bare bitcode, an entry an older paykan wrote, is stale.
 `loadModulePayload` = `parseBitcodeFile` into the session context, kept for
 `linkParts`; JIT runs use the same bitcode.
 
