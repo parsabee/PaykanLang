@@ -151,9 +151,9 @@ std::string manyArms(int arms) {
 
 // Every integer division is behind two checks that panic, and a panic does
 // not return: what follows a check runs beside it.  When each check nested
-// the rest of its function, 3000 divisions in one function took 97 s of
-// processor time to reach `--emit-mlir=scf` (SW-02); they take well under a
-// second now.
+// the rest of its function, 3000 divisions in one function took 75 to 86 s
+// of processor time to reach `--emit-mlir=scf` (SW-02); they take well under
+// a second now.
 TEST(Scaling, PanicGuardsLeaveTheFunctionFlat) {
   ScratchDir dir("guards");
   const std::string src = "fn id(x: int) -> int => x;\n"
@@ -172,7 +172,7 @@ TEST(Scaling, PanicGuardsLeaveTheFunctionFlat) {
 
 // A match's literal arms are a switch whose cases the lowering and PIR's
 // verifier each check for one listed twice, with a set of the cases seen
-// (SW-16): 20000 arms took 35 s to reach --emit-pir when each case was
+// (SW-16): 20000 arms took 46 s to reach --emit-pir when each case was
 // compared with every case before it, and take half a second now.
 TEST(Scaling, ALargeMatchFindsItsRepeatedCasesInLinearTime) {
   ScratchDir dir("arms");
@@ -230,8 +230,8 @@ TEST(Scaling, ALongRunOfIfsLowersToCFInLinearMemory) {
 // Each arm of a match on a Str compares with a string constant, and the C
 // path drops a constant nothing reads (C warns about an unused one).  It
 // looked for a constant's readers with a walk of the whole module, once
-// for each constant, so 2000 arms took 24 s of processor time to reach
-// --emit-c, against 1.1 s to reach --emit-mlir=scf, and 3000 arms 57 s.
+// for each constant, so 2000 arms took 32 s of processor time to reach
+// --emit-c, against 1.1 s to reach --emit-mlir=scf, and 3000 arms 72 s.
 // One walk of the module finds every constant's readers now, and the
 // 3000 arms take 2 s.
 TEST(Scaling, AMatchOfManyStrArmsReachesCInLinearTime) {
@@ -250,7 +250,7 @@ TEST(Scaling, AMatchOfManyStrArmsReachesCInLinearTime) {
 // Leaving a scope releases each value held in memory there, and a tagged
 // union's references are every variant's fields: a match returning from
 // each arm of a 200-variant union released them all at each return, code
-// quadratic in the variants that took more than 30 s to run (SW-03).  A
+// quadratic in the variants that took 28 to 30 s to run (SW-03).  A
 // value of more than four references is released by one call of its
 // type's drop function now once the function's ways out have written 512
 // releases in place, and the call releases its variant's fields only.
@@ -299,7 +299,7 @@ TEST(Scaling, TheLendingPassRemovesABlocksRetainsInOnePass) {
 // Each imported module's code is cached under a key made from its MLIR,
 // printed (SW-18).  Printing a module nested in the program verified and
 // numbered the whole program each time, so a program of 400 tiny modules
-// took 16.5 s of processor time to print its LLVM IR from the cache, and
+// took 19 s of processor time to print its LLVM IR from the cache, and
 // takes 1 s now.
 TEST(Scaling, AModulesCacheKeyIsMadeFromItsOwnCode) {
   ScratchDir dir("modules");

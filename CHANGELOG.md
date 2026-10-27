@@ -845,7 +845,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     function one level deeper, under an `scf.if` on the function's exit flag and so in the
     C: Clang rejected the C of a function with 128 integer divisions (`bracket nesting
     level exceeded maximum of 256`), and the compile time grew with the square of the
-    checks on every path (3000 divisions in one function took 97 s to reach
+    checks on every path (3000 divisions in one function took 75 to 86 s to reach
     `--emit-mlir=scf`, and take 1.3 s now).  A check ends in `unreachable` after a panic,
     which never returns, so it is no exit now: what follows it runs beside it, and the
     runtime's panics are declared `noreturn` on the LLVM path, as `Runtime.h` declares them
@@ -855,17 +855,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `samples/codegen/79_many_guards.pkn` makes 920 checks in one function.
   - A `match` with many literal arms compiled in time quadratic in its arms: the lowering
     and PIR's verifier compared each case of its switch with every case before it, to drop
-    or reject one listed twice (20000 arms took 35 s to reach `--emit-pir`, and take 0.5 s
+    or reject one listed twice (20000 arms took 46 s to reach `--emit-pir`, and take 0.5 s
     now).  Both keep a set of the cases seen, which holds two cases as one exactly when the
     comparison did (`pir::CaseSet`, with `pir::sameConstant`'s equality: an `i64`, a `char`
     or a `bool` constant of the same value, and never a float).  And `run -O0` generated
-    code at LLVM's default level from a module it had not optimised, which took 47 s for a
-    5000-armed match whose `build -O0` takes 2.6 s: the JIT now generates code at the
+    code at LLVM's default level from a module it had not optimised, which took 49 s for a
+    5000-armed match whose `build -O0` took 3 s: the JIT now generates code at the
     level a native build does for the same `-O` (under Changed), and takes 0.3 s.
   - The LLVM path's lowering of `scf` to `cf` took time and memory quadratic in the number
     of `if`s in one function's block (a long run of `if` statements, or a `match` on a
     `Str` or a float with many arms, which tests each in turn): a function of 3000 `if`s
-    beside a 2000-armed `Str` match took 19.5 s and 1.3 GB to reach `--emit-mlir=llvm`,
+    beside a 2000-armed `Str` match took 24 s and 1.3 GB to reach `--emit-mlir=llvm`,
     for `run` and `build`.  Lowering an `scf.if` splits its block after it, and the
     conversion driver recorded every op each split moved, so that it could undo it, while
     each split moved everything after it.  The same patterns now run on each op once, a
@@ -873,13 +873,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and 0.1 GB (docs/design/mlir-backend.md).  The C path, which lowers `scf` to EmitC
     and not to `cf`, took time quadratic in a module's string constants instead, one for
     each arm of a `match` on a `Str`: it drops a constant nothing reads, and looked for
-    each constant's readers with a walk of the whole module.  The same program took 25 s
-    to reach `--emit-c`, and a 2000-armed `Str` match alone 24 s; one walk of the module
+    each constant's readers with a walk of the whole module.  The same program took 38 s
+    to reach `--emit-c`, and a 2000-armed `Str` match alone 32 s; one walk of the module
     finds every constant's readers now, and they take 2.2 s and 1.5 s, for the same C.
   - Compiling a program took time quadratic in its number of modules on the LLVM path: each
     imported module's cached LLVM IR is keyed on the module's MLIR as text, and printing a
     module nested in the program verified and numbered the whole program each time.  A
-    program of 400 small modules took 16.5 s of processor time to print its LLVM IR from
+    program of 400 small modules took 19 s of processor time to print its LLVM IR from
     the cache, and takes 1 s now: a module prints on its own, the program verified once,
     when it is imported.  The keys' text changes, so every cached `.bc` is rebuilt once.
   - `--emit-c` wrote a string constant as one C string literal, however long, but C11
@@ -930,7 +930,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     released every reference of every variant of each value the scope held in memory, one
     release per slot written out in full.  Matched by 100 returning arms, a union of 100
     variants lowered to 14,766 lines of PIR and took 4.6 s to `run`, and one of 200
-    variants to 55,862 lines and more than 30 s.  Such a value is still released in place
+    variants to 55,862 lines and 28 to 30 s.  Such a value is still released in place
     at the end of its scope, and at a way out or as a statement's temporary until its
     function's ways out and temporaries have written 512 releases in place.  After that, a
     struct, a tuple, a fixed-size array or a tagged union whose release takes more than
