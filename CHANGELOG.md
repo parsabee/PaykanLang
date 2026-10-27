@@ -828,6 +828,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     argument is.  `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape on every path,
     with `__super__`'s arguments, a function value a field holds, an argument under an
     `inout` result, one before a closure that writes it and slices passed on.
+  - The `lending` pass took time quadratic in the arguments it lent in one block: it
+    removed the retain of each copy it lent one at a time, and each removal moved the rest
+    of the block.  A function of 3000 statements `r += first(p, bump(p)) + first(c.p,
+    reset(c));`, each lending `reset` its `c` beside the copies of `p` and `c.p` above,
+    took 37 s to reach `--emit-pir` (31 s without those copies).  A block's retains now go
+    in one pass over it: 2.5 s, for the same PIR.
   - Every check that panics on a bad operand (an integer `/` or `%`, an index into a
     fixed-size array, a conversion's range, a `for` loop's step) nested the rest of its
     function one level deeper, under an `scf.if` on the function's exit flag and so in the
