@@ -1,0 +1,180 @@
+// ::collections string functions: split, join, lines, words, indexOf,
+// contains, startsWith, endsWith, substring, trim, replace and repeat, at
+// their edges; each result a new string of its own.
+import ::io;
+import ::collections as c;
+
+// `s` with its backslashes and its whitespace other than spaces escaped, so
+// each byte shows, on one line.
+fn esc(s: view Str) -> Str {
+  let a = c::replace(s, "\\", "\\\\");
+  let b = c::replace(a, "\n", "\\n");
+  let d = c::replace(b, "\r", "\\r");
+  let e = c::replace(d, "\t", "\\t");
+  let f = c::replace(e, Str(char(11)), "\\v");
+  return c::replace(f, Str(char(12)), "\\f");
+}
+
+// The elements of `xs`, each quoted, so an empty one shows: ["a", "", "b"].
+fn show(xs: view c::List<Str>) -> Str {
+  out = "[";
+  for i in 0..xs.len() {
+    if i > 0 {
+      out = out + ", ";
+    }
+    out = out + "\"" + esc(xs.at(i)) + "\"";
+  }
+  return out + "]";
+}
+
+// The text of an index `indexOf` returns: the number, or "None".
+fn idx(i: unsigned?) -> Str {
+  match i {
+    n: unsigned { return Str(n); }
+    None { return "None"; }
+  }
+}
+
+fn splitLine(s: view Str, delim: view Str) {
+  let parts = c::split(s, delim);
+  let back = c::join(parts, delim);
+  io::println("split(\"" + esc(s) + "\", \"" + esc(delim) + "\") = "
+      + show(parts) + " " + Str(parts.len()) + " " + Str(back == s));
+}
+
+fn linesLine(s: view Str) {
+  io::println("lines(\"" + esc(s) + "\") = " + show(c::lines(s)));
+}
+
+fn wordsLine(s: view Str) {
+  io::println("words(\"" + esc(s) + "\") = " + show(c::words(s)));
+}
+
+fn findLine(s: view Str, needle: view Str) {
+  io::println("\"" + s + "\" \"" + needle + "\": indexOf "
+      + idx(c::indexOf(s, needle)) + ", contains " + Str(c::contains(s, needle))
+      + ", startsWith " + Str(c::startsWith(s, needle)) + ", endsWith "
+      + Str(c::endsWith(s, needle)));
+}
+
+fn replaceLine(s: view Str, from: view Str, to: view Str) {
+  io::println("replace(\"" + s + "\", \"" + from + "\", \"" + to + "\") = \""
+      + c::replace(s, from, to) + "\"");
+}
+
+fn main() -> int {
+  io::println("-- split, join");
+  splitLine("a,b,c", ",");
+  splitLine("a,,b", ",");
+  splitLine("", ",");
+  splitLine("abc", ",");
+  splitLine(",a,", ",");
+  splitLine(",", ",");
+  splitLine(",,", ",");
+  splitLine("a::b::::c", "::");
+  splitLine("a:b", "::");
+  splitLine("ab", "abc");
+  splitLine("ab", "ab");
+  splitLine("aaa", "aa");
+  splitLine("one two  three", " ");
+  splitLine("x\r\ny\r\n", "\r\n");
+  let none = c::List<Str>();
+  io::println("join([], \",\") = \"" + c::join(none, ",") + "\"");
+  let empty = c::listOf([""]);
+  io::println("join([\"\"], \",\") = \"" + c::join(empty, ",") + "\"");
+  let two = c::listOf(["", ""]);
+  io::println("join([\"\", \"\"], \",\") = \"" + c::join(two, ",") + "\"");
+  let abc = c::listOf(["a", "b", "c"]);
+  io::println("join(abc, \", \") = \"" + c::join(abc, ", ") + "\", \""
+      + c::join(abc, "") + "\"");
+
+  io::println("-- lines");
+  linesLine("");
+  linesLine("a");
+  linesLine("a\n");
+  linesLine("a\nb");
+  linesLine("a\n\nb\n");
+  linesLine("\n");
+  linesLine("\n\n");
+  linesLine("a\r\nb\r\n");
+  linesLine("a\r\r\n");
+  linesLine("a\rb\r");
+  linesLine("\r\n");
+  linesLine("\r");
+  linesLine("last\nno newline");
+
+  io::println("-- words");
+  wordsLine("");
+  wordsLine("   ");
+  wordsLine("one");
+  wordsLine("  one two\tthree\n\nfour\r\n");
+  wordsLine("a" + Str(char(11)) + "b" + Str(char(12)) + "c");
+  wordsLine("x,y z");
+
+  io::println("-- indexOf, contains, startsWith, endsWith");
+  findLine("hello", "l");
+  findLine("hello", "lo");
+  findLine("hello", "he");
+  findLine("hello", "hello");
+  findLine("hello", "x");
+  findLine("hello", "el");
+  findLine("hello", "");
+  findLine("", "");
+  findLine("", "a");
+  findLine("ab", "abc");
+  findLine("abab", "ab");
+  findLine("aaab", "aab");
+  // Bytes: "é" is two of them, so the "l" after it is at 3.
+  io::println(idx(c::indexOf("héllo", "l")) + " " + Str("héllo".len()));
+
+  io::println("-- substring");
+  let hello = "hello";
+  io::println("\"" + c::substring(hello, 1, 4) + "\" \""
+      + c::substring(hello, 0, 5) + "\" \"" + c::substring(hello, 0, 0)
+      + "\" \"" + c::substring(hello, 5, 5) + "\" \""
+      + c::substring(hello, 2, 2) + "\" \"" + c::substring("", 0, 0) + "\"");
+
+  io::println("-- trim");
+  io::println("\"" + c::trim("  a b  ") + "\" \"" + c::trim("") + "\" \""
+      + c::trim("   ") + "\" \"" + c::trim("x") + "\" \""
+      + esc(c::trim("\t\n x \r\n")) + "\" \"" + c::trim(" é ") + "\"");
+  let vf = Str(char(11)) + "v" + Str(char(12));
+  io::println("\"" + c::trim(vf) + "\" " + Str(c::trim(vf).len()));
+
+  io::println("-- replace");
+  replaceLine("a-b-c", "-", "+");
+  replaceLine("hello", "l", "");
+  replaceLine("hello", "x", "y");
+  replaceLine("aaa", "aa", "b");
+  replaceLine("abc", "abc", "");
+  replaceLine("", "a", "b");
+  replaceLine("ab", "ab", "abab");
+  replaceLine("a.b.", ".", "..");
+  replaceLine("one, two, three", ", ", "/");
+
+  io::println("-- repeat");
+  io::println("\"" + c::repeat("ab", 3) + "\" \"" + c::repeat("ab", 0) + "\" \""
+      + c::repeat("", 5) + "\" \"" + c::repeat("x", 1) + "\" "
+      + Str(c::repeat("-", 40).len()));
+
+  io::println("-- every result is a new string");
+  let s = "text";
+  let parts = c::split(s, ",");
+  let t = c::trim(s);
+  t.concat("!");
+  let r = c::repeat(s, 1);
+  r.concat("?");
+  let j = c::join(parts, ",");
+  j.concat("#");
+  let u = c::substring(s, 0, 4);
+  u.concat("$");
+  let v = c::replace(s, "q", "y");
+  v.concat("%");
+  let w = c::words(s).get(0);
+  w.concat("^");
+  let l = c::lines(s).get(0);
+  l.concat("&");
+  io::println(s + " " + parts.at(0) + " " + t + " " + r + " " + j + " " + u
+      + " " + v + " " + w + " " + l);
+  return 0;
+}

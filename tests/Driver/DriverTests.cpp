@@ -2358,10 +2358,14 @@ static std::string inAPipe(const std::string &cmd) {
 // The C path of a program: the C `paykan --emit-c` prints, compiled at an -O
 // level with the runtime's sources and linked with the standard library's
 // compiled code (`paykan pkm extract --object` of each module file, done
-// once, into the directory the C path is given).
+// once, into the directory the C path is given), in one archive, as
+// docs/c-backend.md builds it: the linker takes only the modules the
+// program uses, whose code calls the copies of instantiations the C of a
+// program that imports them defines (::collections' `List<Str>`).
 class CPath {
 public:
   explicit CPath(const std::filesystem::path &dir) {
+    std::string objects;
     for (const auto &e :
          std::filesystem::directory_iterator(PAYKAN_TEST_STDLIB_DIR)) {
       auto obj = dir / (e.path().stem().string() + ".o");
@@ -2372,8 +2376,13 @@ public:
                   x.out.find("has no compiled code") != std::string::npos)
           << x.out;
       if (x.exitCode == 0)
-        Stdlib += " " + shellWord(obj.string());
+        objects += " " + shellWord(obj.string());
     }
+    auto archive = (dir / "libstdlib.a").string();
+    std::filesystem::remove(archive);
+    auto ar = run("ar rcs " + shellWord(archive) + objects + " 2>&1");
+    EXPECT_EQ(ar.exitCode, 0) << ar.out;
+    Stdlib = " " + shellWord(archive);
   }
 
   // Builds @p src at @p opt into the executable @p exe, giving paykan

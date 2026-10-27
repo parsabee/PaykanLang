@@ -295,6 +295,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `T(x)` of a `T` is the value itself (`i64(n)` with an `int` `n`, `float(2.5)`).
   - `u.toInt()` gives an `unsigned`'s value as an `int?`, `None` above
     9223372036854775807.
+- **Functions on strings in `::collections`** (docs/stdlib/collections.md, "Strings"):
+  - `split(s, delim) -> List<Str>`: every field, empty ones kept (`"a,,b"` gives `["a",
+    "", "b"]`, `""` gives `[""]`), so `join(split(s, d), d) == s`; an empty delimiter
+    panics (`split: the delimiter is empty`).
+  - `join(parts, sep) -> Str`.
+  - `lines(s) -> List<Str>`: split at each `\n`, one `\r` dropped from the end of each line,
+    and no empty last line for a `\n` at the end (`""` has none).
+  - `words(s) -> List<Str>`: the runs between ASCII whitespace, never an empty one.
+  - `indexOf(s, needle) -> unsigned?`, `contains`, `startsWith` and `endsWith`.
+  - `substring(s, from, to) -> Str`, which panics unless `from <= to <= s.len()` (`string
+    slice 2..7 out of bounds (len=3)`), `trim(s)`, `replace(s, from, to)` (every
+    occurrence; an empty `from` panics: `replace: the text to replace is empty`) and
+    `repeat(s, n)`.
+
+  They count bytes, as `s.len()` and `s[i]` do, with every index and size an `unsigned`,
+  take their strings as `view`s and return new ones. `split`, `lines`, `words`, `indexOf`
+  and `contains` take time linear in the string: two new runtime functions,
+  `PaykanString_find` (C's `memchr` and `memcmp`) and `PaykanString_slice`, search and copy
+  for them (Runtime.h; the runtime ABI only gains them, and keeps its version). The
+  language reference's strings chapter, which said the standard library had no such
+  functions, points to them.
+
+  `::collections` now makes `List<Str>`, and the `Buffer<Str>` it holds, for its own code,
+  and a program that imports it uses that module's copies, as it does any instantiation an
+  import makes: the lowering does not see their bodies, so a call that reaches them from a
+  container over `Str` elements holds the container's state, a retain and a release around
+  it (a `MinPriorityQueue<Str>`'s `pop`; one of `Str?` elements holds nothing). The C of
+  `--emit-c` is linked with the module objects in an archive (docs/c-backend.md), and the
+  driver tests now link the standard library's that way: an object of `::collections`
+  linked whole into a program that does not import it leaves its `List<Str>` undefined.
 
 ### Changed
 

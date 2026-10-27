@@ -1,0 +1,8 @@
+// expect-panic: replace: the text to replace is empty
+import ::io;
+import ::collections;
+
+fn main() -> int {
+  io::println(collections::replace("abc", "", "-"));
+  return 0;
+}

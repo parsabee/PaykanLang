@@ -1308,7 +1308,11 @@ TEST(Lowering, AReadACallMayReplaceThroughANarrowedArmIsHeld) {
 // elements' and the nodes' references (a LinkedList's pushFront, a map's
 // put and clear over buffers of entries, a heap's pop) holds no read of it;
 // one over elements a subclass may make hold anything (a class key's map,
-// a stack of closures) holds it.
+// a stack of closures) holds it.  So does one whose effect the lowering
+// cannot see: `Buffer<Str>` is the copy ::collections makes for its string
+// functions' `List<Str>`, which a program that imports it uses as that
+// module's, without its bodies, so a heap of Str's pop holds its state
+// where a heap of Str?'s does not.
 TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
   auto l = lower(R"(import ::collections as c;
     class Dog { name: Str; }
@@ -1320,12 +1324,19 @@ TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
       m.clear();
       d = c::HashMap<Str, Dog>();
       d.put("d", Dog("rex"));
-      q = c::MinPriorityQueue<Str>();
+      q = c::MinPriorityQueue<Str?>();
       q.push("x", 1);
+      p = c::MinPriorityQueue<Str>();
+      p.push("y", 1);
       f = c::Stack<() -> int>();
       f.push(fn() => 2);
-      return s.pop() + int(u32(m.len())) + int(u32(d.len())) + q.pop().len() +
-             f.pop()();
+      n = 0;
+      match q.pop() {
+        x: Str { n = x.len(); }
+        None {}
+      }
+      return s.pop() + int(u32(m.len())) + int(u32(d.len())) + n +
+             p.pop().len() + f.pop()();
     }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -1339,7 +1350,8 @@ TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
                 false},
            Case{"\"HashMap<Str, int>.clear\"",
                 "call @\"_Table<Str, int>.clear\"(", false},
-           Case{"MinPriorityQueue<Str>.pop", "call @_Heap<Str>.pop(", false},
+           Case{"MinPriorityQueue<Str?>.pop", "call @_Heap<Str?>.pop(", false},
+           Case{"MinPriorityQueue<Str>.pop", "call @_Heap<Str>.pop(", true},
            Case{"\"HashMap<Str, Dog>.put\"", "call @\"_Table<Str, Dog>.put\"(",
                 true},
            Case{"\"Stack<() -> int>.push\"",

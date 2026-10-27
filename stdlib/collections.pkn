@@ -1,4 +1,4 @@
-// ::collections: the standard containers.
+// ::collections: the standard containers, and functions on strings.
 //
 //   List<T>                  a growable array
 //   LinkedList<T>            a doubly linked list
@@ -8,6 +8,9 @@
 //                            hash tables of Hashable keys
 //   MinPriorityQueue<T>, MaxPriorityQueue<T>
 //                            binary heaps ordered by an int priority
+//   split, join, lines, words, indexOf, contains, startsWith, endsWith,
+//   substring, trim, replace, repeat
+//                            functions on Str ("Strings", at the end)
 //
 // List, Stack, Queue, HashMap, HashSet and the priority queues are structs,
 // each holding one object that keeps all of its state (LinkedList is that
@@ -26,8 +29,9 @@
 //
 // Names starting with `_` are private (docs/language/15-modules.md,
 // "Private to the module"): `_Entry`, `_Table`, `_Heap`, `_panic`, `_fail`,
-// `_bucket` and the buffer helpers are the module's own, and a `__` field or method is reachable
-// only from its type's methods.
+// `_bucket`, the buffer helpers and the strings' (`_slice`, `_find`,
+// `_isSpace`, `_isAt`) are the module's own, and a `__` field or method is
+// reachable only from its type's methods.
 
 import ::error as err;
 import ::memory as mem;
@@ -1061,4 +1065,182 @@ impl MaxPriorityQueue<T> {
 
   // Remove every element.
   fn clear()                        { self.__heap.clear(); }
+}
+
+// -- Strings ------------------------------------------------------------------
+//
+// Functions on Str.  They count bytes, as `s.len()` and `s[i]` do, and take
+// and return an index or a size as an `unsigned`.  A search is the runtime's
+// (_find: C's memchr for the needle's first byte, memcmp for the rest), and
+// a part of a string is copied out whole (_slice), never built a byte at a
+// time: split, lines, words, indexOf and contains take time linear in their
+// input.  join, repeat and replace append each piece of their result with
+// `concat`.
+
+native fn _slice(s: view Str, from: unsigned, to: unsigned)
+                 -> Str = "PaykanString_slice";
+native fn _find(s: view Str, needle: view Str, from: unsigned)
+                -> int = "PaykanString_find";
+
+// Whether `c` is ASCII whitespace: a space, or a tab, a line feed, a vertical
+// tab, a form feed or a carriage return (the codes 9 to 13).
+fn _isSpace(c: char) -> bool {
+  return c == ' ' || (c >= '\t' && c <= '\r');
+}
+
+// Whether `part` is in `s` at index `at`, which leaves room for it.
+fn _isAt(s: view Str, part: view Str, at: int) -> bool {
+  for i in 0..part.len() {
+    if s[at + i] != part[i] {
+      return False;
+    }
+  }
+  return True;
+}
+
+// The fields of `s` between the occurrences of `delim`, in order, empty ones
+// included: split("a,,b", ",") is ["a", "", "b"], and a string without
+// `delim` is one field, itself ("" too).  join(split(s, d), d) == s.  An
+// empty `delim` panics.
+fn split(s: view Str, delim: view Str) -> List<Str> {
+  if delim.len() == 0 {
+    _panic("split: the delimiter is empty");
+  }
+  out = List<Str>();
+  let step = unsigned(delim.len());
+  from: unsigned = 0;
+  at = _find(s, delim, 0);
+  while at >= 0 {
+    let end = unsigned(at);
+    out.push(_slice(s, from, end));
+    from = end + step;
+    at = _find(s, delim, from);
+  }
+  out.push(_slice(s, from, unsigned(s.len())));
+  return out;
+}
+
+// The elements of `parts` with `sep` between each two: "" for no elements.
+fn join(parts: view List<Str>, sep: view Str) -> Str {
+  let out = "";
+  for i in 0..parts.len() {
+    if i > 0 {
+      out.concat(sep);
+    }
+    out.concat(parts.at(i));
+  }
+  return out;
+}
+
+// The lines of `s`: the text before each "\n", and after the last one when
+// that is not the end of `s`, each without one "\r" it ends with.  "" has
+// no lines.
+fn lines(s: view Str) -> List<Str> {
+  out = List<Str>();
+  let n = s.len();
+  let newline = "\n";
+  from = 0;
+  while from < n {
+    let at = _find(s, newline, unsigned(from));
+    let stop = if at < 0 then n else at;
+    let end = if stop > from && s[stop - 1] == '\r' then stop - 1 else stop;
+    out.push(_slice(s, unsigned(from), unsigned(end)));
+    from = stop + 1;
+  }
+  return out;
+}
+
+// The words of `s`: its runs of bytes other than ASCII whitespace, in order.
+fn words(s: view Str) -> List<Str> {
+  out = List<Str>();
+  let n = s.len();
+  i = 0;
+  while i < n {
+    if _isSpace(s[i]) {
+      i = i + 1;
+    } else {
+      let start = i;
+      while i < n && !_isSpace(s[i]) {
+        i = i + 1;
+      }
+      out.push(_slice(s, unsigned(start), unsigned(i)));
+    }
+  }
+  return out;
+}
+
+// The index of the first occurrence of `needle` in `s`, or None; an empty
+// needle is at 0.
+fn indexOf(s: view Str, needle: view Str) -> unsigned? {
+  let at = _find(s, needle, 0);
+  if at < 0 {
+    return None;
+  }
+  return unsigned(at);
+}
+
+// Whether `needle` occurs in `s`; an empty one does in every string.
+fn contains(s: view Str, needle: view Str) -> bool {
+  return _find(s, needle, 0) >= 0;
+}
+
+// Whether `s` starts with `prefix`.
+fn startsWith(s: view Str, prefix: view Str) -> bool {
+  return prefix.len() <= s.len() && _isAt(s, prefix, 0);
+}
+
+// Whether `s` ends with `suffix`.
+fn endsWith(s: view Str, suffix: view Str) -> bool {
+  return suffix.len() <= s.len() && _isAt(s, suffix, s.len() - suffix.len());
+}
+
+// The bytes of `s` from index `from` up to, not including, `to`, as a new
+// string; unless from <= to <= s.len(), it panics.
+fn substring(s: view Str, from: unsigned, to: unsigned) -> Str {
+  return _slice(s, from, to);
+}
+
+// `s` without the ASCII whitespace at its start and at its end, as a new
+// string.
+fn trim(s: view Str) -> Str {
+  start = 0;
+  end = s.len();
+  while start < end && _isSpace(s[start]) {
+    start = start + 1;
+  }
+  while end > start && _isSpace(s[end - 1]) {
+    end = end - 1;
+  }
+  return _slice(s, unsigned(start), unsigned(end));
+}
+
+// `s` with every occurrence of `from` replaced by `to`, as a new string.  The
+// occurrences are found from the start, each after the one before it ends:
+// replace("aaa", "aa", "b") is "ba".  An empty `from` panics.
+fn replace(s: view Str, from: view Str, to: view Str) -> Str {
+  if from.len() == 0 {
+    _panic("replace: the text to replace is empty");
+  }
+  let out = "";
+  let step = unsigned(from.len());
+  start: unsigned = 0;
+  at = _find(s, from, 0);
+  while at >= 0 {
+    let end = unsigned(at);
+    out.concat(_slice(s, start, end));
+    out.concat(to);
+    start = end + step;
+    at = _find(s, from, start);
+  }
+  out.concat(_slice(s, start, unsigned(s.len())));
+  return out;
+}
+
+// `s` `n` times over, as a new string: "" for n == 0.
+fn repeat(s: view Str, n: unsigned) -> Str {
+  let out = "";
+  for _ in 0..n {
+    out.concat(s);
+  }
+  return out;
 }

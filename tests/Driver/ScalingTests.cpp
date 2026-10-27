@@ -296,6 +296,33 @@ TEST(Scaling, TheLendingPassRemovesABlocksRetainsInOnePass) {
   EXPECT_LT(t.Seconds, 15 * slowdown());
 }
 
+// The standard library's string functions find what they look for with the
+// runtime's search (C's memchr and memcmp) and copy each part out once, so a
+// split, the lines and the words of a string take time linear in its
+// length.  A 10 MB string of a million lines, doubled up from one, is split
+// at each line feed, cut into lines and into words, and searched for a needle
+// it does not hold: `run -O0` takes 1.5 s of processor time, compiling
+// included.  A split that searched from the start of the string for each
+// field, or copied the rest of it after each, would take hours.
+TEST(Scaling, StringFunctionsTakeLinearTime) {
+  ScratchDir dir("strings");
+  const std::string src =
+      "import ::io;\nimport ::collections as c;\n"
+      "fn main() -> int {\n"
+      "  s = \"word word\\n\";\n"
+      "  for _ in 0..20 {\n    s = s + s;\n  }\n"
+      "  io::println(Str(s.len()) + \" \" + Str(c::split(s, \"\\n\").len()));\n"
+      "  io::println(c::lines(s).len());\n"
+      "  io::println(c::words(s).len());\n"
+      "  io::println(c::contains(s, \"word\\nwore\"));\n"
+      "  return 0;\n}\n";
+  const std::string path = dir.write("strings.pkn", src);
+  Timed t = timed(std::string(kPaykan) + " run -O0 " + path + " 2>&1");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_EQ(t.Out, "10485760 1048577\n1048576\n2097152\nFalse\n");
+  EXPECT_LT(t.Seconds, 20 * slowdown());
+}
+
 // Each imported module's code is cached under a key made from its MLIR,
 // printed (SW-18).  Printing a module nested in the program verified and
 // numbered the whole program each time, so a program of 400 tiny modules
