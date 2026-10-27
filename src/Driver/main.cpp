@@ -1031,9 +1031,9 @@ int main(int argc, char *argv[]) {
     // Its templates, for importers to instantiate without its source.
     std::vector<uint8_t> templates;
     if (auto mt = sema.exportTemplates(root, mainName)) {
-      mt->File = resolver.relativeToRoot(opts.InputFilename);
       std::string why;
-      templates = paykan::sema::Sema::encodeTemplates(*mt, why);
+      templates = paykan::sema::Sema::encodeTemplates(
+          *mt, resolver.relativeToRoot(opts.InputFilename), why);
       if (templates.empty())
         return fail("cannot write the templates of " + opts.InputFilename +
                     ": " + why);

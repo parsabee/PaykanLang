@@ -239,20 +239,7 @@ bool Sema::isFailedImportUse(std::string_view name) {
 }
 
 std::string Sema::displayPath(const std::filesystem::path &path) const {
-  if (path.is_relative())
-    return path.string();
-  // An empty root is the current directory (see module_utils::appendPath).
-  std::error_code ec;
-  auto root = std::filesystem::weakly_canonical(
-      ProjectRoot.empty() ? std::filesystem::path(".")
-                          : std::filesystem::path(ProjectRoot),
-      ec);
-  if (ec)
-    return path.string();
-  auto rel = path.lexically_relative(root);
-  if (rel.empty() || *rel.begin() == "..")
-    return path.string();
-  return rel.string();
+  return module_utils::displayPath(ProjectRoot, path);
 }
 
 // -- resolveModulePath
@@ -261,12 +248,7 @@ std::string Sema::resolveModulePath(const std::string &modulePath,
                                     bool isSystem, ast::SourceLocation loc) {
   std::filesystem::path file =
       module_utils::moduleFile(ProjectRoot, isSystem, modulePath);
-  // A project module is shown relative to the source root, like every
-  // imported file.
-  return checkModuleFile(file,
-                         isSystem
-                             ? displayPath(file)
-                             : module_utils::modulePathToRelative(modulePath),
+  return checkModuleFile(file, displayPath(file),
                          module_name::canonicalImportName(modulePath, isSystem),
                          isSystem ? "system module" : "module", loc);
 }
@@ -615,11 +597,8 @@ bool Sema::locateModule(const std::string &canonical, bool isSystem,
     case K::Source:
       // The resolver only checks that something is there; a directory or
       // a special file is diagnosed as before.
-      out.Path = checkModuleFile(
-          r.Path,
-          isSystem ? displayPath(r.Path)
-                   : module_utils::modulePathToRelative(modulePath),
-          canonical, kind, loc);
+      out.Path =
+          checkModuleFile(r.Path, displayPath(r.Path), canonical, kind, loc);
       if (out.Path.empty())
         Resolver->failed(canonical);
       return !out.Path.empty();
@@ -668,6 +647,12 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
           FailedModules->insert(canonical);
         return nullptr;
       }
+      // A cache entry's bodies are in the source it was checked against,
+      // named as every diagnostic names a file; a prebuilt file's are
+      // where it records them.
+      if (std::string source = Resolver->cacheSource(canonical);
+          !source.empty())
+        (*templates)->File = std::move(source);
       // The other modules the bodies name are dependencies of this one,
       // resolved before it: the files they are cached under.
       for (size_t i = 1; i < (*templates)->Uses.size(); ++i) {
@@ -789,7 +774,9 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
     std::vector<uint8_t> tmpl;
     if (info.Templates) {
       std::string why;
-      tmpl = encodeTemplates(*info.Templates, why);
+      tmpl =
+          encodeTemplates(*info.Templates,
+                          module_utils::relativeToRoot(ProjectRoot, path), why);
       if (tmpl.empty()) {
         error(loc, "internal compiler error: the templates of module '" +
                        canonical + "' cannot be written: " + why);
@@ -1438,9 +1425,10 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
 }
 
 std::vector<uint8_t> Sema::encodeTemplates(const ModuleTemplates &mt,
+                                           const std::string &file,
                                            std::string &error) {
   pkm::Templates t;
-  t.File = mt.File;
+  t.File = file;
   for (size_t i = 1; i < mt.Uses.size(); ++i)
     t.Uses.push_back(mt.Uses[i].first);
   // The `impl` blocks after the templates, each with the index of its own.

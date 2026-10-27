@@ -1155,6 +1155,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `--list-modules` failed for it.  Such a module's code now stays in the C, as under
     `--no-module-cache`, and `--list-modules` names the module files the C does need
     (docs/c-backend.md).
+  - An error in an imported module named the module's file by its path from the source
+    root, which is not that file unless `paykan` runs there: `paykan --check-only
+    tasks/main.pkn` reported a mistake in `tasks/tasks/text.pkn` as `tasks/text.pkn:1:27:
+    error: ...`, and so did an error in a template's body, the files an import that is not
+    found tried (`not found (tried tasks/nothere.pkn, ...)`) and `--verbose`'s cache
+    entries.  Each is now named by the main file's directory as it was given followed by
+    that path (`tasks/tasks/text.pkn:1:27`, `tasks/.paykan_cache/tasks/text.pkm`), a path
+    that works from the directory `paykan` runs in, and absolute for an absolute main
+    file; the module files record the path from the source root as before, so they are
+    the same wherever `paykan` runs (docs/language/15-modules.md, docs/design/pkm.md
+    §8.6).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

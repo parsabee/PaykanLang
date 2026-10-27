@@ -660,8 +660,10 @@ TEST(Driver, ImportOfADirectoryIsRejected) {
   auto [rc, out] = run(std::string(kPaykan) + " --check-only " +
                        (dir / "main.pkn").string() + " 2>&1");
   EXPECT_EQ(rc, 1) << out;
-  EXPECT_NE(out.find("error: module 'lib::m': 'lib/m.pkn' is a directory, not "
-                     "a source file"),
+  // Named from the main file's directory as given (SW-34).
+  EXPECT_NE(out.find("error: module 'lib::m': '" +
+                     (dir / "lib" / "m.pkn").string() +
+                     "' is a directory, not a source file"),
             std::string::npos)
       << out;
   // One error: the use of `m::f` is not reported as well.
@@ -4165,5 +4167,93 @@ TEST(Driver, HelpListsEveryPkmDumpSection) {
   EXPECT_EQ(bad.out, "paykan: unknown section 'nope' (expected manifest, "
                      "sections, iface, tmpl, code, symidx, obj, payloads or "
                      "all)\n");
+  std::filesystem::remove_all(dir);
+}
+
+// An imported module's file is named by a path that works from the directory
+// paykan runs in (SW-34): the main file's directory as given, then the
+// file's path from the source root, for an error in the module, for an
+// error in a template's body (from source and from the cache entry), for
+// the files a missing import tried and in --verbose.  An absolute main file
+// gives absolute paths.  They were all named by the path from the source
+// root, which is not a file from anywhere else.
+TEST(Driver, ImportedModulePathsWorkFromTheCurrentDirectory) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("module_paths");
+  auto project = dir / "tasks";
+  std::filesystem::create_directories(project / "tasks");
+  std::ofstream(project / "tasks" / "text.pkn")
+      << "fn slice(s: Str) -> int { return s; }\n";
+  std::ofstream(project / "main.pkn")
+      << "import tasks::text;\nfn main() -> int { return 0; }\n";
+  const std::string here = "cd " + dir.string() + " && " + paykanRun();
+  const std::string error = ":1:27: error: return value of type 'Str'";
+  auto above = run(here + " --check-only tasks/main.pkn 2>&1");
+  EXPECT_EQ(above.exitCode, 1) << above.out;
+  EXPECT_EQ(above.out.rfind("tasks/tasks/text.pkn" + error, 0), 0u)
+      << above.out;
+  EXPECT_NE(above.out.find("\ntasks/main.pkn:1:1: note: in module "
+                           "'tasks::text' imported here\n"),
+            std::string::npos)
+      << above.out;
+  auto inside = run("cd " + project.string() + " && " + paykanRun() +
+                    " --check-only main.pkn 2>&1");
+  EXPECT_EQ(inside.exitCode, 1) << inside.out;
+  EXPECT_EQ(inside.out.rfind("tasks/text.pkn" + error, 0), 0u) << inside.out;
+  auto absolute = run(paykanRun() + " --check-only " +
+                      shellWord((project / "main.pkn").string()) + " 2>&1");
+  EXPECT_EQ(absolute.exitCode, 1) << absolute.out;
+  EXPECT_EQ(
+      absolute.out.rfind((project / "tasks" / "text.pkn").string() + error, 0),
+      0u)
+      << absolute.out;
+
+  // A template's body, from source, then from the cache entry.
+  std::ofstream(project / "tasks" / "box.pkn")
+      << "fn twice<T>(x: T) -> T => x + x;\nfn one() -> int => 1;\n";
+  std::ofstream(project / "warm.pkn")
+      << "import tasks::box;\nfn main() -> int => box::one() - 1;\n";
+  std::ofstream(project / "bad.pkn")
+      << "import tasks::box;\nstruct P { a: int; }\n"
+         "fn main() -> int {\n  let p = box::twice(P(1));\n  return 0;\n}\n";
+  const std::string bodyError =
+      "tasks/tasks/box.pkn:1:27: error: operator '+' is not defined";
+  auto cold = run(here + " --check-only tasks/bad.pkn 2>&1");
+  EXPECT_EQ(cold.exitCode, 1) << cold.out;
+  EXPECT_EQ(cold.out.rfind(bodyError, 0), 0u) << cold.out;
+  auto warm = run(here + " --verbose tasks/warm.pkn 2>&1");
+  EXPECT_EQ(warm.exitCode, 0) << warm.out;
+  EXPECT_NE(warm.out.find("module tasks::box: wrote "
+                          "tasks/.paykan_cache/tasks/box.pkm\n"),
+            std::string::npos)
+      << warm.out;
+  auto cached = run(here + " --verbose --check-only tasks/bad.pkn 2>&1");
+  EXPECT_EQ(cached.exitCode, 1) << cached.out;
+  EXPECT_NE(cached.out.find("module tasks::box: cache "
+                            "tasks/.paykan_cache/tasks/box.pkm usable\n" +
+                            bodyError),
+            std::string::npos)
+      << cached.out;
+  // The backend's bitcode cache, when it keeps one.
+  if (auto bc = project / ".paykan_cache" / "tasks" / "box.bc";
+      std::filesystem::exists(bc)) {
+    std::ofstream(bc, std::ios::trunc) << "not bitcode";
+    auto again = run(here + " --verbose tasks/warm.pkn 2>&1");
+    EXPECT_EQ(again.exitCode, 0) << again.out;
+    EXPECT_NE(again.out.find("module tasks::box: bitcode cache "
+                             "tasks/.paykan_cache/tasks/box.bc is corrupt"),
+              std::string::npos)
+        << again.out;
+  }
+
+  std::ofstream(project / "missing.pkn")
+      << "import tasks::nothere;\nfn main() -> int => 0;\n";
+  auto missing = run(here + " --check-only tasks/missing.pkn 2>&1");
+  EXPECT_EQ(missing.exitCode, 1) << missing.out;
+  EXPECT_NE(missing.out.find("module 'tasks::nothere' not found (tried "
+                             "tasks/tasks/nothere.pkn, "
+                             "tasks/tasks/nothere.pkm)"),
+            std::string::npos)
+      << missing.out;
   std::filesystem::remove_all(dir);
 }

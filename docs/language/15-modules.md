@@ -512,6 +512,13 @@ always the main file's directory, and the compiled modules are cached in
 `tasks/.paykan_cache/`, so after a change only the modules affected by it are recompiled
 ([The compilation cache](#the-compilation-cache)).
 
+An error in a module names the module's file by a path that works from the directory you run
+`paykan` in: the main file's directory as you gave it, then the file's path from the source
+root. A mistake in `text.pkn` is `tasks/tasks/text.pkn:12:5: error: ...` for
+`paykan tasks/main.pkn`, and `tasks/text.pkn:12:5: error: ...` for `paykan main.pkn` run in
+`tasks/`; a main file given by an absolute path gives absolute paths. The files an import
+that is not found tried, and the files `--verbose` names, are given the same way.
+
 ## Module Files
 
 A compiled module is a **`.pkm` module file**: the module's interface (what the type checker
@@ -610,7 +617,7 @@ differently.
 
 | Error | Trigger |
 |-------|---------|
-| Module not found | Neither the `.pkn` file nor a prebuilt `.pkm` of the module path exists: `module 'a::b' not found (tried a/b.pkn, a/b.pkm)` |
+| Module not found | Neither the `.pkn` file nor a prebuilt `.pkm` of the module path exists: `module 'a::b' not found (tried a/b.pkn, a/b.pkm)`, each path as given from where `paykan` runs (`tried proj/a/b.pkn, proj/a/b.pkm` for `paykan proj/main.pkn`) |
 | Unresolved name | Qualified name `Mod::name` where `name` is not in `Mod` (including names `Mod` merely imported) |
 | Circular import | Import graph contains a cycle |
 | Imports nested too deep | A chain of imports more than 256 modules deep: `imports nested too deep (more than 256 modules): 'c::m256' is imported 257 modules deep` |

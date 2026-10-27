@@ -46,6 +46,8 @@ struct ModuleResolver::Entry {
   enum class State { Source, Built, Loaded, Failed };
   State State = State::Failed;
   std::filesystem::path Path; ///< the source (Source, Built) or .pkm (Loaded)
+  /// Loaded from a cache entry: the source it was checked against.
+  std::filesystem::path Source;
   std::vector<uint8_t> SourceBytes; ///< Source, Built: for the manifest
   pkm::Interface Iface;             ///< Built, Loaded
   /// Loaded: its CODE, decoded and verified, until loadCode() takes it.
@@ -177,20 +179,11 @@ void ModuleResolver::noteRead(const std::filesystem::path &path) {
 
 std::string
 ModuleResolver::relativeToRoot(const std::filesystem::path &path) const {
-  std::error_code ec;
-  auto root = std::filesystem::weakly_canonical(
-      Opts.ProjectRoot.empty() ? std::filesystem::path(".")
-                               : std::filesystem::path(Opts.ProjectRoot),
-      ec);
-  if (ec)
-    return path.string();
-  auto abs = std::filesystem::weakly_canonical(path, ec);
-  if (ec)
-    return path.string();
-  auto rel = abs.lexically_relative(root);
-  if (rel.empty() || *rel.begin() == "..")
-    return path.string();
-  return rel.generic_string();
+  return module_utils::relativeToRoot(Opts.ProjectRoot, path);
+}
+
+std::string ModuleResolver::shownPath(const std::filesystem::path &path) const {
+  return module_utils::displayPath(Opts.ProjectRoot, path);
 }
 
 std::filesystem::path
@@ -246,7 +239,7 @@ Resolution ModuleResolver::resolveSource(const std::string &canonical,
   std::error_code ec;
   if (!std::filesystem::is_regular_file(cache, ec))
     return fromSource("no cache entry");
-  std::string shown = relativeToRoot(cache);
+  std::string shown = shownPath(cache);
   std::vector<uint8_t> sourceBytes;
   if (auto it = Pendings.find(canonical); it == Pendings.end()) {
     noteRead(source);
@@ -259,8 +252,10 @@ Resolution ModuleResolver::resolveSource(const std::string &canonical,
   Resolution r = load(canonical, cache, pkm::Policy::Cache, sourceBytes);
   if (r.Outcome == Resolution::Kind::Rejected)
     return fromSource("cache " + shown + " " + r.Message);
-  if (r.Outcome == Resolution::Kind::Loaded)
+  if (r.Outcome == Resolution::Kind::Loaded) {
+    Entries[canonical]->Source = source;
     log("module " + canonical + ": cache " + shown + " usable");
+  }
   return r;
 }
 
@@ -275,14 +270,14 @@ ModuleResolver::resolvePrebuilt(const std::string &canonical,
   for (const std::string &dir : Opts.ModulePath)
     candidates.push_back(module_utils::appendPath(dir, rel));
 
-  std::string tried = relativeToRoot(source);
+  std::string tried = shownPath(source);
   for (const auto &c : candidates) {
-    tried += ", " + relativeToRoot(c);
+    tried += ", " + shownPath(c);
     std::error_code ec;
     if (!std::filesystem::is_regular_file(c, ec))
       continue;
     Resolution r = load(canonical, c, pkm::Policy::Prebuilt, {});
-    std::string shown = relativeToRoot(c);
+    std::string shown = shownPath(c);
     std::string line = "module ";
     line += canonical;
     line += ": prebuilt ";
@@ -545,7 +540,14 @@ ModuleResolver::templates(const std::string &canonical) const {
 
 std::string ModuleResolver::displayPath(const std::string &canonical) const {
   auto it = Entries.find(canonical);
-  return it == Entries.end() ? std::string() : relativeToRoot(it->second->Path);
+  return it == Entries.end() ? std::string() : shownPath(it->second->Path);
+}
+
+std::string ModuleResolver::cacheSource(const std::string &canonical) const {
+  auto it = Entries.find(canonical);
+  return it == Entries.end() || it->second->Source.empty()
+             ? std::string()
+             : shownPath(it->second->Source);
 }
 
 std::string ModuleResolver::moduleFile(const std::string &canonical) const {
@@ -663,15 +665,14 @@ void ModuleResolver::writeCacheEntry(const std::string &canonical,
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     s = ec ? Status::error("cannot create directory '" +
-                           relativeToRoot(path.parent_path()) +
-                           "': " + ec.message())
+                           shownPath(path.parent_path()) + "': " + ec.message())
            : pkm::writeFileAtomically(path, *bytes);
   }
   if (s)
     entry.Written = path;
   log("module " + canonical + ": " +
-      (s ? "wrote " + relativeToRoot(path)
-         : "cannot write " + relativeToRoot(path) + ": " + s.message()));
+      (s ? "wrote " + shownPath(path)
+         : "cannot write " + shownPath(path) + ": " + s.message()));
 }
 
 Status ModuleResolver::writeModuleFile(

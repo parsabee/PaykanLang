@@ -930,8 +930,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// They fail this module too: run() adds them to its error count.
   unsigned ImportedModuleErrors = 0;
 
-  /// @p path for a diagnostic: relative to ProjectRoot (the source root) when
-  /// it lies under it, as given otherwise.
+  /// @p path for a diagnostic (module_utils::displayPath): under the source
+  /// root, ProjectRoot as the main file's path gives it followed by the
+  /// path from the root; as given otherwise.
   std::string displayPath(const std::filesystem::path &path) const;
 
   /// Where imports come from: source files, cache entries or prebuilt
@@ -1104,12 +1105,16 @@ public:
   std::shared_ptr<ModuleTemplates>
   exportTemplates(ast::TranslationUnit *tu, const std::string &canonical);
   /// @p mt as the TMPL section of a .pkm (docs/design/pkm.md §4.3), and
-  /// back.  encodeTemplates returns no bytes, with the reason in @p error,
-  /// for a body the interchange format cannot write.  decodeTemplates
-  /// builds the bodies in an ASTContext of their own (Owner); Uses names
-  /// the modules, and the importer fills in the files they are cached
-  /// under; the bodies have no source lines.
+  /// back.  The section records @p file as the bodies' file: the source's
+  /// path from the source root (module_utils::relativeToRoot), not
+  /// mt.File, which diagnostics show from where the compiler runs.
+  /// encodeTemplates returns no bytes, with the reason in @p error, for a
+  /// body the interchange format cannot write.  decodeTemplates builds the
+  /// bodies in an ASTContext of their own (Owner); Uses names the modules,
+  /// and the importer fills in the files they are cached under; File is
+  /// the recorded one and the bodies have no source lines.
   static std::vector<uint8_t> encodeTemplates(const ModuleTemplates &mt,
+                                              const std::string &file,
                                               std::string &error);
   static StatusOr<std::shared_ptr<ModuleTemplates>>
   decodeTemplates(std::span<const uint8_t> bytes, const std::string &canonical);

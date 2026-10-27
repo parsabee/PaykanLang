@@ -1542,6 +1542,15 @@ module keep `file:line:col`: `DIAG` supplies the project-relative display
 file and declaration positions; `TMPL` nodes carry locations; `DEBUG`
 supplies statement positions for backends and tools.
 
+A file records paths from its source root, the same wherever the compiler
+runs; a diagnostic names a file of the project by the main file's
+directory as it was given followed by that path, which works from the
+directory the compiler runs in (`tasks/tasks/text.pkn` for
+`paykan tasks/main.pkn`, absolute for an absolute main file), and so do
+`--verbose` and an import's `tried` list.  The bodies of a cache entry's
+templates are named by the source the entry was checked against; a
+prebuilt file's by the path it records.
+
 ---
 ## 9. Linkage and mangling (both backends, one scheme)
 

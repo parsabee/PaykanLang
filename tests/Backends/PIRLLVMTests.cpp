@@ -1220,9 +1220,10 @@ fn @helper(%a: i64) -> i64 {
   std::ostringstream second;
   EXPECT_EQ(compile(second), "40");
   EXPECT_EQ(second.str(),
-            "module lib: bitcode cache .paykan_cache/lib.bc is corrupt (its "
-            "module does not verify: Basic Block in function 'f' does not "
-            "have terminator); translating it again\n");
+            "module lib: bitcode cache " + entry.string() +
+                " is corrupt (its module does not verify: Basic Block in "
+                "function 'f' does not have terminator); translating it "
+                "again\n");
   EXPECT_EQ(read(), written);
   std::ostringstream third;
   EXPECT_EQ(compile(third), "40");

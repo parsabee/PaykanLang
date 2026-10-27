@@ -752,11 +752,13 @@ TEST(Module, OneQualifierForTwoModulesErr) {
 // The import's failure is the one error: uses of its qualifier are poisoned
 // (silent follow-ons, like a poisoned binder's), an imported module's own
 // errors are not repeated at each import on the way up, and modules are named
-// by their canonical module name, files by their path from the source root.
+// by their canonical module name, files by the source root as the main file's
+// path gives it followed by their path from the root (SW-34).
 
 namespace {
 
-// Exactly one error, containing @p expected, and no absolute path.
+// Exactly one error, containing @p expected, and the source root @p root
+// only at the start of a file's path.
 void expectOneError(const SemaFileResult &r, const std::string &expected,
                     const std::string &root) {
   EXPECT_FALSE(r.Ok);
@@ -765,10 +767,11 @@ void expectOneError(const SemaFileResult &r, const std::string &expected,
             std::string::npos)
       << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find(expected), std::string::npos) << r.Diagnostics;
-  // The main file's own name is printed in full; nothing else may be.
+  // Files are named by the root followed by their path from it; nothing
+  // else is (a module is named by its canonical name).
   std::string rest = r.Diagnostics;
-  for (size_t at; (at = rest.find(root + "/main.pkn")) != std::string::npos;)
-    rest.erase(at, root.size() + 9);
+  for (size_t at; (at = rest.find(root + "/")) != std::string::npos;)
+    rest.erase(at, root.size() + 1);
   EXPECT_EQ(rest.find(root), std::string::npos) << r.Diagnostics;
 }
 
@@ -796,8 +799,8 @@ fn main() -> int {
 }
 )");
   expectOneError(semaCheckFile(main, tmp),
-                 "module 'lib::nothere' not found (tried lib/nothere.pkn, "
-                 "lib/nothere.pkm)",
+                 "module 'lib::nothere' not found (tried " + tmp +
+                     "/lib/nothere.pkn, " + tmp + "/lib/nothere.pkm)",
                  tmp);
   std::filesystem::remove_all(tmp);
 }
@@ -887,7 +890,8 @@ fn main() -> int { return a::fa() + a::missing(); }
   expectOneError(r, "circular import of module 'lib::a'", tmp);
   // The error is located in the module that closes the cycle; each import on
   // the way there adds a note, not an error.
-  EXPECT_NE(r.Diagnostics.find("lib/c.pkn:1:1: error:"), std::string::npos)
+  EXPECT_NE(r.Diagnostics.find(tmp + "/lib/c.pkn:1:1: error:"),
+            std::string::npos)
       << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("note: in module 'lib::b' imported here"),
             std::string::npos)
@@ -908,7 +912,7 @@ TEST(Module, ErrorsInAnImportedModuleAreNotRepeated) {
 import lib::mid;
 fn main() -> int { return mid::g(); }
 )");
-  expectOneError(semaCheckFile(main, tmp), "lib/bad.pkn:1:", tmp);
+  expectOneError(semaCheckFile(main, tmp), tmp + "/lib/bad.pkn:1:", tmp);
   // A syntax error in a module, likewise.
   writeFile(tmp, "lib/bad.pkn", "fn f() -> int { return 1 }\n");
   auto r = semaCheckFile(main, tmp);
@@ -929,8 +933,8 @@ import lib::m;
 fn main() -> int { return m::f(); }
 )");
   expectOneError(semaCheckFile(main, tmp),
-                 "module 'lib::m': 'lib/m.pkn' is a directory, not a source "
-                 "file",
+                 "module 'lib::m': '" + tmp +
+                     "/lib/m.pkn' is a directory, not a source file",
                  tmp);
   std::filesystem::remove_all(tmp);
 }
@@ -986,8 +990,8 @@ TEST(Module, FailedImportReachedTwiceIsReportedOnce) {
                         "fn main() -> int { return a::f() + x::f(); }\n");
   for (int compilation = 0; compilation < 2; ++compilation) {
     auto r = semaCheckFile(main, tmp);
-    expectOneError(r, "lib/a.pkn:1:1: error: module 'lib::gone' not found",
-                   tmp);
+    expectOneError(
+        r, tmp + "/lib/a.pkn:1:1: error: module 'lib::gone' not found", tmp);
     EXPECT_EQ(countOf(r.Diagnostics, "not found"), 1u) << r.Diagnostics;
     EXPECT_NE(r.Diagnostics.find("main.pkn:1:16: note: module 'lib::a' "
                                  "failed to load; its errors are reported "
@@ -1022,8 +1026,8 @@ TEST(Module, FailedImportInADiamondIsReportedOnce) {
   auto r = semaCheckFile(main, tmp);
   expectOneError(r, "module 'lib::gone' not found", tmp);
   // The module that failed only by importing a failed one fails too, quietly.
-  EXPECT_NE(r.Diagnostics.find("lib/b.pkn:1:1: note: module 'lib::a' failed "
-                               "to load"),
+  EXPECT_NE(r.Diagnostics.find(tmp + "/lib/b.pkn:1:1: note: module 'lib::a' "
+                                     "failed to load"),
             std::string::npos)
       << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("note: in module 'lib::b' imported here"),
@@ -1053,7 +1057,8 @@ TEST(Module, ModuleWithErrorsReachedTwiceIsReportedOnce) {
                         "fn main() -> int { return b::g() + c::h() + x::f(); "
                         "}\n");
   auto r = semaCheckFile(main, tmp);
-  expectOneError(r, "lib/a.pkn:1:17: error: return value of type 'Str'", tmp);
+  expectOneError(r, tmp + "/lib/a.pkn:1:17: error: return value of type 'Str'",
+                 tmp);
   // A syntax error in the module, likewise.
   writeFile(tmp, "lib/a.pkn", "fn f() -> int { return 1 }\n");
   r = semaCheckFile(main, tmp);

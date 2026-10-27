@@ -107,7 +107,7 @@ std::array<uint8_t, kHashSize> bitcodeHash(llvm::StringRef bitcode) {
 
 /// <module name as a path><extension> under the cache directory
 /// (module_name::cacheRelativePath: `geometry::shapes` is
-/// geometry/shapes.bc), as --verbose names it.
+/// geometry/shapes.bc).
 std::string cacheRelative(const std::string &moduleName,
                           llvm::StringRef extension) {
   llvm::SmallString<128> path(names::kCacheDir);
@@ -118,7 +118,8 @@ std::string cacheRelative(const std::string &moduleName,
 }
 
 /// <projectRoot>/<cacheRelative>; an empty project root means the current
-/// directory.
+/// directory.  --verbose names an entry by it, the path from where the
+/// compiler runs.
 std::string cachePath(const std::string &projectRoot,
                       const std::string &relative) {
   llvm::SmallString<256> path(projectRoot);
@@ -262,7 +263,7 @@ compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
         continue;
       }
       if (verbose && !cached.Why.empty())
-        *verbose << "module " << module.Name << ": bitcode cache " << relative
+        *verbose << "module " << module.Name << ": bitcode cache " << path
                  << " " << cached.Why << "; translating it again\n";
       auto part = translate(i);
       if (!part)

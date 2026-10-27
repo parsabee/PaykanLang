@@ -49,7 +49,10 @@ reads or an `--object` file, under any name (another spelling of its path, such 
 `./prog.pkn`, or a symbolic or a hard link), `paykan` writes nothing, says so and exits
 with status 1.
 
-When compilation fails, `paykan` prints the errors and exits with status 1. It prints the
+When compilation fails, `paykan` prints the errors and exits with status 1. An error in an
+imported module names its file by the main file's directory as you gave it followed by the
+module's path from the source root (`tasks/tasks/text.pkn` for `paykan tasks/main.pkn`), a
+path that works from the directory `paykan` runs in, and so does `--verbose`. It prints the
 first 20 errors, and after them `note: stopping after 20 errors, the error limit
 (--error-limit=N sets it, and --error-limit=0 shows every error)` and no more diagnostics;
 warnings and notes do not count, and the exit status is 1 whatever the limit. (A file that

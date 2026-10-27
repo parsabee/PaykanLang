@@ -169,8 +169,11 @@ public:
   const pkm::Object *object(const std::string &canonical) const;
   /// The TMPL section of a Loaded module (empty when it has none).
   std::span<const uint8_t> templates(const std::string &canonical) const;
-  /// The file a diagnostic names for a Loaded module (project-relative).
+  /// The file a diagnostic names for a Loaded module (shownPath).
   std::string displayPath(const std::string &canonical) const;
+  /// The source a Loaded cache entry of @p canonical was checked against,
+  /// as a diagnostic names it (shownPath); "" for a prebuilt file.
+  std::string cacheSource(const std::string &canonical) const;
   /// The module file of @p canonical as the driver can open it: the `.pkm`
   /// a Loaded module was read from, or the cache entry writeCacheEntry()
   /// wrote for a module built from source; "" for neither.
@@ -211,8 +214,12 @@ public:
                          const pkm::Object *object = nullptr);
 
   /// @p path relative to the project root when it lies under it, as given
-  /// otherwise (the same rule as Sema's diagnostics).
+  /// otherwise: what a module file records (module_utils::relativeToRoot).
   std::string relativeToRoot(const std::filesystem::path &path) const;
+  /// @p path as diagnostics and --verbose name it, a path that works from
+  /// the directory the compiler runs in (module_utils::displayPath, as
+  /// Sema's diagnostics do).
+  std::string shownPath(const std::filesystem::path &path) const;
 
 private:
   struct Entry;
