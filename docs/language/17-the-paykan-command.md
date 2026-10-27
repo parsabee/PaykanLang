@@ -36,7 +36,11 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
   with `.o`, at the `-O<n>` level): what a program's `--emit-c` C is linked with.
 
 The source file is the program's **main file**. Its directory is the source root from which
-imports are resolved (see [Modules](15-modules.md)).
+imports are resolved (see [Modules](15-modules.md)). It may be a pipe or a device
+(`/dev/stdin`, `<(...)`), read to its end. A source file, and a module file `pkm` or an
+import reads, is at most 256 MiB: a larger one is an error (`'big.pkn' is too large for a
+source file (more than 256 MiB)`), refused before it is read, and a pipe or a device that
+gives more stops there ([the grammar](../grammar.md#9-diagnostics-and-recovery)).
 
 No command writes over its input. When the file that `build`, `--emit-pkm`, `pkm extract`
 or an `--emit-*` option is to write is the source file, the source or module file of a

@@ -3452,6 +3452,66 @@ TEST(Driver, BuildChecksItsExecutableBeforeCompiling) {
   std::filesystem::remove_all(dir);
 }
 
+// A source file, and a module file, is at most 256 MiB (SW-12): a larger
+// regular file is refused by its size, before it is read (the files here are
+// sparse), and a pipe or a device stops at the limit.  `--check-only
+// /dev/zero` and `pkm dump /dev/zero` read until the allocation failed and
+// aborted with an uncaught std::bad_alloc.  /dev/zero, which never ends, is
+// read under an address-space limit where one stops a reader that does not
+// (Linux, but not under a sanitizer, whose runtime cannot start under one),
+// and elsewhere 300 MB of it come through a pipe.  A pipe is still read to
+// its end.
+TEST(Driver, AFileOver256MiBIsTooLarge) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("too_large");
+  std::filesystem::create_directories(dir / "lib");
+  const uintmax_t over = (uintmax_t{256} << 20) + 1;
+  for (const char *name : {"big.pkn", "big.pkm", "lib/big.pkn"}) {
+    std::ofstream(dir / name).close();
+    std::filesystem::resize_file(dir / name, over);
+  }
+  std::ofstream(dir / "main.pkn")
+      << "import lib::big;\nfn main() -> int { return 0; }\n";
+  std::ofstream(dir / "hello.pkn") << kHello;
+  auto in = [&](const std::string &cmd) {
+    return run("cd " + dir.string() + " && " + cmd + " 2>&1");
+  };
+  const std::string source =
+      "is too large for a source file (more than 256 MiB)";
+  auto big = in(std::string(kPaykan) + " --check-only big.pkn");
+  EXPECT_EQ(big.exitCode, 1) << big.out;
+  EXPECT_NE(big.out.find("'big.pkn' " + source), std::string::npos) << big.out;
+  auto import = in(std::string(kPaykan) + " --check-only main.pkn");
+  EXPECT_EQ(import.exitCode, 1) << import.out;
+  EXPECT_NE(import.out.find(source), std::string::npos) << import.out;
+  auto dump = in(std::string(kPaykan) + " pkm dump big.pkm");
+  EXPECT_EQ(dump.exitCode, 1) << dump.out;
+  EXPECT_EQ(dump.out, "paykan: 'big.pkm' is too large (more than 256 MiB)\n");
+#if defined(__linux__) && !defined(PAYKAN_TEST_SHADOW_SANITIZER)
+  const std::string zero = "ulimit -v 4194304 && " + std::string(kPaykan);
+  const std::string device = "/dev/zero";
+#else
+  const std::string zero =
+      "head -c 300000000 /dev/zero | " + std::string(kPaykan);
+  const std::string device = "/dev/stdin";
+#endif
+  auto check = in(zero + " --check-only " + device);
+  EXPECT_EQ(check.exitCode, 1) << check.out;
+  EXPECT_NE(check.out.find("'" + device + "' " + source), std::string::npos)
+      << check.out;
+  for (const char *verb : {" pkm dump ", " pkm check "}) {
+    auto r = in(zero + verb + device);
+    EXPECT_EQ(r.exitCode, 1) << verb << r.out;
+    EXPECT_EQ(r.out,
+              "paykan: '" + device + "' is too large (more than 256 MiB)\n")
+        << verb;
+  }
+  auto piped = in("cat hello.pkn | " + paykanRun() + " /dev/stdin");
+  EXPECT_EQ(piped.exitCode, 0) << piped.out;
+  EXPECT_EQ(piped.out, "hello\n");
+  std::filesystem::remove_all(dir);
+}
+
 // $PAYKAN_RUNTIME_DIR, when it is set, is the only place `build` takes the
 // runtime from, as $PAYKAN_STDLIB is the only place of the standard library
 // (SW-44): one that does not exist, or that lacks the archive or the header,

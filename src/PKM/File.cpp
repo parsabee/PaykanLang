@@ -436,15 +436,21 @@ readFileBytes(const std::filesystem::path &path) {
   std::ifstream in(path, std::ios::binary);
   if (!in)
     return Status::error("cannot open '" + path.string() + "'");
+  auto tooLarge = [&] {
+    return Status::error("'" + path.string() + "' is too large (more than " +
+                         std::to_string(kMaxFileBytes >> 20) + " MiB)");
+  };
   // Read with istream::read, which reports a failed read in the stream's
   // state rather than by throwing.
   std::vector<uint8_t> bytes;
   if (!fs::is_regular_file(status)) {
     // A pipe or a device (`<(cat lib.pkm)`, /dev/stdin) has no size: it is
-    // read to its end.
+    // read to its end, or until it gives more than the limit (/dev/zero).
     std::vector<char> chunk(size_t{1} << 16);
     do {
       in.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+      if (bytes.size() + static_cast<uint64_t>(in.gcount()) > kMaxFileBytes)
+        return tooLarge();
       bytes.insert(bytes.end(), chunk.data(), chunk.data() + in.gcount());
     } while (in);
     if (!in.eof())
@@ -458,6 +464,8 @@ readFileBytes(const std::filesystem::path &path) {
   in.seekg(0, std::ios::beg);
   if (!in || size < 0)
     return Status::error("cannot read '" + path.string() + "'");
+  if (static_cast<uint64_t>(size) > kMaxFileBytes)
+    return tooLarge();
   bytes.resize(static_cast<size_t>(size));
   in.read(reinterpret_cast<char *>(bytes.data()), size);
   if (in.gcount() != size)

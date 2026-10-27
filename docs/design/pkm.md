@@ -177,7 +177,10 @@ not a parse error.
 
 ### 1.6 Limits
 
-File ≤ 2^40 bytes; `section_count` ≤ 1024; `MANIFEST` ≤ 1 MiB; a manifest
+File ≤ 2^40 bytes, of which `paykan` reads at most 256 MiB (a larger file,
+or a pipe or a device that gives more, is `'<file>' is too large (more than
+256 MiB)`, the limit of a source file too: docs/grammar.md section 9);
+`section_count` ≤ 1024; `MANIFEST` ≤ 1 MiB; a manifest
 string ≤ 64 KiB; a list ≤ 65 536 entries and ≤ remaining bytes; LEB128 ≤ 10
 bytes; nesting caps per section (§4: the AST interchange format's, 4112
 lists and the frontends' limits; §5: 512 PIR levels).

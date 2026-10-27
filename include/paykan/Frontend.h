@@ -23,6 +23,7 @@
 #include "paykan/Keywords.h"
 #include "paykan/Registry.h"
 
+#include <cstddef>
 #include <iosfwd>
 #include <memory>
 #include <string>
@@ -54,6 +55,12 @@ inline constexpr unsigned kMaxNesting = 512;
 /// than kMaxChain levels)`, and the AST interchange reader counts the same
 /// links; the passes after parsing take a chain in a loop.
 inline constexpr unsigned kMaxChain = 2048;
+
+/// Largest source file the compiler reads (docs/grammar.md section 9),
+/// 256 MiB: a larger regular file is refused before it is read, and a pipe
+/// or a device (`/dev/stdin`, `<(...)`, `/dev/zero`) is read only up to it,
+/// with `'<file>' is too large for a source file (more than 256 MiB)`.
+inline constexpr size_t kMaxSourceBytes = size_t{256} << 20;
 
 /// The diagnostic every frontend reports at a `mov` keyword (#145).  `mov`
 /// stays reserved; the operand after it still parses.

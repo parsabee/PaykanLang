@@ -878,6 +878,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     what is missing (`cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR
     (/opt/rt): /opt/rt/include/paykan/Runtime.h does not exist`); an empty
     `PAYKAN_RUNTIME_DIR` is not set (docs/language/17-the-paykan-command.md).
+  - A source file, and a module file `pkm` or an import reads, is at most 256 MiB, a new
+    limit (docs/grammar.md section 9, docs/design/pkm.md §1.6): `--check-only /dev/zero`
+    and `pkm dump /dev/zero` read until an allocation failed and aborted with an
+    uncaught `std::bad_alloc`, and a larger regular file was read whole first.  A regular
+    file over the limit is now refused by its size, before it is read, and a pipe or a
+    device is read only up to it: `'/dev/zero' is too large for a source file (more than
+    256 MiB)`, `paykan: '/dev/zero' is too large (more than 256 MiB)` from `pkm`, exit
+    status 1.  A pipe is still read to its end (`cat prog.pkn | paykan /dev/stdin`), and
+    the source is read through a buffer on the heap rather than 64 KB of the stack.
 
 ### Removed
 
