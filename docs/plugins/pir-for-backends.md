@@ -60,6 +60,12 @@ takes one argument more than its PIR signature lists, the ownership mask
 ([`pir.md` §3](../pir.md#3-functions-and-locals)): the backend gives it the
 parameter, passes every call the mask its arguments' ownership (`lent`,
 `owned(%o)`, handed over when bare) makes, and reads `owned %p` from it.
+The bit operations `and`, `or`, `xor`, `shl` and `shr` take and give `i64`s
+and are defined for every count: a shift reads its count's low six bits
+(the count mod 64, as the x86-64 and AArch64 shift instructions do), so a
+backend masks the count with `& 63` before a shift of its target, whose
+shift by 64 or more is undefined in C and poison in LLVM
+([`pir.md` §6](../pir.md#6-statements-and-instructions)).
 The runtime library and header a native program links against come from the
 host: `host->runtime_library(session)` and
 `host->runtime_include_dir(session)`. The object files named with

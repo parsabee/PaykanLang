@@ -915,7 +915,9 @@ than 1 or 2.
 | 55 | the ownership of the call, vcall or icall whose opcode follows (docs/pir.md §6), its list after it; only there | | |
 | 56 | `lend`: marks the `retain` whose opcode follows as a `retain lend` (docs/pir.md §6); only there | | |
 | 57 | `nonnull`: marks the `retain` whose opcode follows as a `retain nonnull` (docs/pir.md §6), after a 56 when it is both; only there | | |
-| 58–255 | reserved | | |
+| 58–60 | `and or xor` (docs/design/bitwise.md) | — | 2 |
+| 61, 62 | `shl shr`: the count's low six bits | — | 2 |
+| 63–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults
 of `PIR.h`, as the text parser produces, so round-trip equality holds. An

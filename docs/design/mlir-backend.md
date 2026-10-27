@@ -137,6 +137,13 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
   `bool`'s is at most 255) is an `scf.if` on the value's being it instead,
   with the `scf.index_switch` of the other cases (if any are left) in its
   `else`.
+* **Shifts.**  A PIR `shl` or `shr` reads its count's low six bits
+  (docs/pir.md §6), and `arith.shli` and `arith.shrui` give poison for a
+  count of 64 or more, so the count is masked first: `arith.andi %n, 63`,
+  or a constant's low six bits.  The C path prints a shift whose count is
+  so masked, or a constant below 64, as a plain shift of the `uint64_t`,
+  without the `n < 64 ? ... : 0` that upstream's EmitC conversion puts
+  around a shift.
 * **ARC, allocation, weak references** become calls to the runtime
   (`func.call`), as both of the replaced translations did.  Each target
   then has the fast path of a `retain` and a `release` inline (docs/pir.md

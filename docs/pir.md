@@ -489,6 +489,20 @@ an operation, and give `unsigned` (`u64`) its unsigned semantics:
 
 (`f16` rounding is the runtime call `@$rt.Paykan_round_f16(f64) -> f64`.)
 
+**Bit operations** (`docs/design/bitwise.md`), on `i64` only:
+
+```
+%r = and %a, %b | or | xor                     ; i64, i64 -> i64: bitwise
+%r = shl %a, %n                                ; i64: %a << (%n mod 64)
+%r = shr %a, %n                                ; i64: %a >> (%n mod 64), zeros shifted in
+```
+
+A shift reads its count's low six bits, which is what the x86-64 and AArch64
+shift instructions do, so every count is defined: `shl %a, 64` is `%a` and
+`shl %a, 65` is `shl %a, 1`.  The language's rule that a shift by the type's
+width or more gives 0 is the lowering's, which guards a count that is not
+known to be below 64.  `not` stays `bool`'s; a complement is `xor %a, -1`.
+
 On two `char`s, `lt`, `le`, `gt` and `ge` order the bytes as signed, `-128`
 to `127`.  A Paykan `char` orders by its code, `0` to `255`
 (docs/language/04-strings-and-conversions.md): the lowering zero-extends both
@@ -1273,9 +1287,10 @@ The verifier rejects a program when:
   `cmp` on different types or on optionals, a disallowed `cast` pair,
   non-`bool` condition, `some` of anything but `i64`/`f64`/`bool`/`char`,
   `none` of a type that is not an optional, `is_some`/`unwrap` of a value that
-  is not one; `wrap`/`mask`/`udiv`/`urem`/`ucmp`/`utof` of anything but `i64`,
-  `ftou`/`fround32` of anything but `f64`, a `wrap`/`mask` width other than 8,
-  16 or 32);
+  is not one; `wrap`/`mask`/`udiv`/`urem`/`ucmp`/`utof` and
+  `and`/`or`/`xor`/`shl`/`shr` of anything but `i64`, `ftou`/`fround32` of
+  anything but `f64`, a `wrap`/`mask` width other than 8, 16 or 32; a shift's
+  count may be any `i64`);
 * a `call` names an undeclared function or passes the wrong arity/types; a
   `vcall` slot is out of range of the named class's vtable or the argument list
   does not match the slot's signature; an `icall`'s callee is not a `ptr` or
@@ -1355,7 +1370,8 @@ versioned, by the release like every format: `PAYKAN_PIR_TEXT_VERSION` in
 major * 10000 + minor * 100 + patch (300 for 0.3.0), the same number the binary
 form stores.  0.3.0's adds a call argument's ownership (`lent`,
 `owned(%o)`), `owned`, `retain lend` and `retain nonnull` (§6), and with
-them the ownership mask a lending function takes (§3).
+them the ownership mask a lending function takes (§3), and the bit
+operations `and`, `or`, `xor`, `shl` and `shr` (§6).
 
 ```
 module "01"
@@ -1411,7 +1427,7 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
   index, `lent` or `owned(%o)` and its bit), 56 a `retain lend`'s opcode,
   57 a `retain nonnull`'s opcode (after a 56 when it is both); a record
   without one reads as before the mark existed, unmarked.  `owned`
-  is opcode 54.
+  is opcode 54, and `and`, `or`, `xor`, `shl` and `shr` are 58 to 62.
 - **Functions** are length-prefixed records, so a reader can skip or decode
   one function on its own (`decodeFunction`), and the symbol index
   (`index`, `encodeSymbolIndex`) lists every record with its offset, length

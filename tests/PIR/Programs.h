@@ -87,6 +87,15 @@ fn @lend(%a.1: box, %b.2: box, %p.3: obj, %fp.4: ptr) -> void {
   ret
 }
 
+fn @bits(%x.1: i64, %n.2: i64) -> i64 {
+  %a.3 = and %x.1, 255
+  %o.4 = or %a.3, %n.2
+  %e.5 = xor %o.4, -1
+  %l.6 = shl %e.5, %n.2
+  %r.7 = shr %l.6, 3
+  ret %r.7
+}
+
 fn @main() -> i64 {
   local %i.0: i64
   local %acc.1: box

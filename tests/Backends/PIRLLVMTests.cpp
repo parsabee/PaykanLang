@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -492,6 +493,105 @@ fn @helper(%a: i64) -> i64 {
                   {"script", "x", "yz"});
   ASSERT_TRUE(r.Ok) << r.Err;
   EXPECT_EQ(r.ExitCode, 32); // 3 arguments * 10 + the length of "yz"
+}
+
+// `and`, `or`, `xor`, `shl` and `shr` (docs/pir.md §6): a shift's count is
+// read mod 64 and `shr` shifts in zeros, on operands only the run knows
+// (each made from main's argument count, 1, so nothing folds) and on
+// constants.  main returns the number of the first wrong result, or 0.
+TEST(PIRLLVM, BitwiseInstructionsRun) {
+  constexpr int64_t kMin = std::numeric_limits<int64_t>::min();
+  struct Case {
+    const char *Op;
+    int64_t A, B, Want;
+  };
+  const Case cases[] = {{"and", 12, 10, 8},
+                        {"or", 12, 10, 14},
+                        {"xor", 12, 10, 6},
+                        {"xor", -1, kMin, ~kMin},
+                        {"shl", 1, 63, kMin},
+                        {"shl", 1, 64, 1},
+                        {"shl", 1, 65, 2},
+                        {"shl", 3, -1, kMin},
+                        {"shl", -1, 0, -1},
+                        {"shr", -1, 63, 1},
+                        {"shr", -1, 64, -1},
+                        {"shr", kMin, 127, 1},
+                        {"shr", kMin, 1, int64_t{1} << 62}};
+  for (bool constants : {false, true}) {
+    std::ostringstream text;
+    text << "module \"t\"\nfn @main(%args: ptr, %n: i64) -> i64 {\n";
+    for (size_t i = 0; i < std::size(cases); ++i) {
+      const Case &c = cases[i];
+      std::string a = std::to_string(c.A), b = std::to_string(c.B);
+      if (!constants) {
+        text << "  %a" << i << " = mul %n, " << a << "\n  %b" << i
+             << " = mul %n, " << b << "\n";
+        a = "%a" + std::to_string(i);
+        b = "%b" + std::to_string(i);
+      }
+      text << "  %r" << i << " = " << c.Op << " " << a << ", " << b
+           << "\n  %bad" << i << " = cmp ne %r" << i << ", " << c.Want
+           << "\n  if %bad" << i << " {\n    ret " << i + 1 << "\n  }\n";
+    }
+    text << "  ret 0\n}\n";
+    auto r = runPIR(text.str(), {"script"});
+    ASSERT_TRUE(r.Ok) << r.Err;
+    ASSERT_GE(r.ExitCode, 0);
+    const auto failed = static_cast<size_t>(r.ExitCode);
+    ASSERT_LE(failed, std::size(cases));
+    if (failed > 0) {
+      const Case &c = cases[failed - 1];
+      ADD_FAILURE() << (constants ? "constant " : "") << c.Op << " " << c.A
+                    << ", " << c.B << " is not " << c.Want;
+    }
+  }
+}
+
+// The shared lowering masks a shift's count to its low six bits, so LLVM
+// never sees a count of 64 or more (its poison): `and i64 %n, 63` before
+// `shl` or `lshr`, and a constant count masked as it is lowered.
+TEST(PIRLLVM, ShiftCountsAreMaskedInTheIR) {
+  std::string err;
+  std::string ir = translatePIR(R"(module "t"
+fn @shl(%a: i64, %n: i64) -> i64 {
+  %r = shl %a, %n
+  ret %r
+}
+fn @shr(%a: i64, %n: i64) -> i64 {
+  %r = shr %a, %n
+  ret %r
+}
+fn @shl3(%a: i64) -> i64 {
+  %r = shl %a, 67
+  ret %r
+}
+fn @main(%args: ptr, %n: i64) -> i64 {
+  %x = call @shl(%n, %n)
+  %y = call @shr(%x, %n)
+  %z = call @shl3(%y)
+  ret %z
+}
+)",
+                                err);
+  ASSERT_FALSE(ir.empty()) << err;
+  // The body of the function whose link name ends in @p name.
+  auto body = [&](const std::string &name) {
+    size_t at = ir.find(name + "(");
+    EXPECT_NE(at, std::string::npos) << name << "\n" << ir;
+    if (at == std::string::npos)
+      return std::string();
+    return ir.substr(at, ir.find("\n}\n", at) - at);
+  };
+  std::string shl = body("Sshl"), shr = body("Sshr"), shl3 = body("Sshl3");
+  EXPECT_EQ(linesWith(shl, "and i64 %1, 63").size(), 1u) << shl;
+  EXPECT_EQ(linesWith(shl, "shl i64 %0, %").size(), 1u) << shl;
+  EXPECT_EQ(linesWith(shr, "and i64 %1, 63").size(), 1u) << shr;
+  EXPECT_EQ(linesWith(shr, "lshr i64 %0, %").size(), 1u) << shr;
+  EXPECT_TRUE(linesWith(shl3, "and i64").empty()) << shl3;
+  EXPECT_EQ(linesWith(shl3, "shl i64 %0, 3").size(), 1u) << shl3;
+  for (const std::string *f : {&shl, &shr, &shl3})
+    EXPECT_TRUE(linesWith(*f, "icmp").empty()) << *f;
 }
 
 TEST(PIRLLVM, UnreachableAfterNoreturnCall) {

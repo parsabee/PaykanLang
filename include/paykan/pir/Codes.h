@@ -83,7 +83,14 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     // 53 kStableLoadCode.
     // Whether a box parameter was handed over (docs/pir.md §3).
     {Opcode::Owned, 54, "owned"},
-    // 55 kOwnershipCode, 56 kLendCode, 57 kNonNullCode, 58-255 reserved.
+    // 55 kOwnershipCode, 56 kLendCode, 57 kNonNullCode.
+    // Bit operations (docs/design/bitwise.md).
+    {Opcode::And, 58, "and"},
+    {Opcode::Or, 59, "or"},
+    {Opcode::Xor, 60, "xor"},
+    {Opcode::Shl, 61, "shl"},
+    {Opcode::Shr, 62, "shr"},
+    // 63-255 reserved.
 };
 
 struct TypeEntry {
@@ -149,7 +156,7 @@ template <typename T, size_t N> constexpr bool rowsUnique(const T (&table)[N]) {
 // The enumerators are dense from 0, so a complete table has exactly one row
 // per enumerator up to the last one.  Adding an enumerator without a row
 // fails here or in the exhaustive switch of tests/PIR/BinaryTests.cpp.
-static_assert(std::size(kOpcodeTable) == static_cast<size_t>(Opcode::Owned) + 1,
+static_assert(std::size(kOpcodeTable) == static_cast<size_t>(Opcode::Shr) + 1,
               "every Opcode needs a row in kOpcodeTable");
 static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::Weak) + 1,
               "every Type needs a row in kTypeTable");

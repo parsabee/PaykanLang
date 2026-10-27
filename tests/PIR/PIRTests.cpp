@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
+#include <iterator>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -1648,4 +1649,97 @@ TEST(PIR, SizedTypeInstructionsAreTyped) {
       verifyText(fn("  %a = wrap 32 1\n  %b = mask 8 %a\n  %c = fround32 1.5\n"
                     "  %d = ftou %c\n  %e = utof %d\n  %f = ucmp ge %d, %b")),
       "");
+}
+
+// -- Bit operations (docs/design/bitwise.md)
+
+// `and`, `or`, `xor`, `shl` and `shr` print, parse and verify, a shift's
+// count a constant or a value.
+TEST(PIR, BitwiseInstructionsRoundTripAndVerify) {
+  const char *src = R"(module "m"
+
+fn @bits(%x.1: i64, %n.2: i64) -> i64 {
+  %a.3 = and %x.1, 255
+  %o.4 = or %a.3, %n.2
+  %e.5 = xor %o.4, -1
+  %l.6 = shl %x.1, 3
+  %r.7 = shr %e.5, %n.2
+  %s.8 = add %l.6, %r.7
+  ret %s.8
+}
+
+fn @main() -> i64 {
+  %b.1 = call @bits(12, 3)
+  ret %b.1
+}
+)";
+  EXPECT_EQ(reprint(src), src);
+  ParseError err;
+  auto p = parseProgram(src, err);
+  ASSERT_TRUE(p.has_value()) << err.str();
+  if (!p.has_value())
+    return;
+  auto errors = verify(*p);
+  EXPECT_TRUE(errors.empty()) << formatErrors(errors);
+  const Function &f = p->Modules[0].Functions[0];
+  const Opcode ops[] = {Opcode::And, Opcode::Or, Opcode::Xor, Opcode::Shl,
+                        Opcode::Shr};
+  for (size_t i = 0; i < std::size(ops); ++i) {
+    const auto &in = std::get<Instr>(f.Body.Stmts[i]);
+    EXPECT_EQ(in.Op, ops[i]);
+    EXPECT_EQ(in.Result.Ty, Type::I64);
+  }
+}
+
+TEST(PIR, BitwiseInstructionsAreI64Only) {
+  auto fn = [](const std::string &body) {
+    return "module \"m\"\nfn @main() -> i64 {\n" + body + "\n  ret 0\n}\n";
+  };
+  EXPECT_NE(
+      verifyText(fn("  %a = and 1.5, 2")).find("operand of and / or / xor"),
+      std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = xor true, false"))
+                .find("operand of and / or / xor"),
+            std::string::npos);
+  EXPECT_NE(
+      verifyText(fn("  %a = or 1, 'a'")).find("operand of and / or / xor"),
+      std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = shl 1, true")).find("operand of shl / shr"),
+            std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = shr 2.5, 1")).find("operand of shl / shr"),
+            std::string::npos);
+  // Two operands: the parser takes no other count, and the verifier
+  // checks the count of an instruction built in memory.
+  EXPECT_NE(verifyText(fn("  %a = or 1")).find("PARSE ERROR"),
+            std::string::npos);
+  EXPECT_NE(verifyText(fn("  %a = shr 1, 2, 3")).find("PARSE ERROR"),
+            std::string::npos);
+  auto arity = [](Opcode op, size_t count) {
+    Program p;
+    Module &m = p.Modules.emplace_back();
+    m.Name = "m";
+    Function &f = m.Functions.emplace_back();
+    f.Name = "main";
+    f.Sig.Ret = Type::I64;
+    Instr in;
+    in.Op = op;
+    in.Result = {f.NextValueId++, Type::I64, ""};
+    for (size_t i = 0; i < count; ++i)
+      in.Args.push_back(Operand::i64(1));
+    f.Body.Stmts.push_back(std::move(in));
+    f.Body.Stmts.push_back(Return{Operand::value(1)});
+    return formatErrors(verify(p));
+  };
+  EXPECT_NE(arity(Opcode::Or, 1).find("'or' takes 2 operand(s), got 1"),
+            std::string::npos)
+      << arity(Opcode::Or, 1);
+  EXPECT_NE(arity(Opcode::Shr, 3).find("'shr' takes 2 operand(s), got 3"),
+            std::string::npos)
+      << arity(Opcode::Shr, 3);
+  EXPECT_EQ(arity(Opcode::Xor, 2), "");
+  // A count of 64 or more is no error: the count's low six bits.
+  EXPECT_EQ(verifyText(fn("  %a = shl 1, 64\n  %b = shr %a, -1\n"
+                          "  %c = and %b, %a\n  %d = or %c, 0\n"
+                          "  %e = xor %d, 9223372036854775807")),
+            "");
 }

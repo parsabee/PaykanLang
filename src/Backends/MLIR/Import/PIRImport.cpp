@@ -420,6 +420,16 @@ private:
       return define(in, UDivOp::create(B, Loc, arg(0), arg(1)));
     case P::Opcode::URem:
       return define(in, URemOp::create(B, Loc, arg(0), arg(1)));
+    case P::Opcode::And:
+      return define(in, AndOp::create(B, Loc, arg(0), arg(1)));
+    case P::Opcode::Or:
+      return define(in, OrOp::create(B, Loc, arg(0), arg(1)));
+    case P::Opcode::Xor:
+      return define(in, XorOp::create(B, Loc, arg(0), arg(1)));
+    case P::Opcode::Shl:
+      return define(in, ShlOp::create(B, Loc, arg(0), arg(1)));
+    case P::Opcode::Shr:
+      return define(in, ShrOp::create(B, Loc, arg(0), arg(1)));
     case P::Opcode::Neg:
       return define(in, NegOp::create(B, Loc, arg(0)));
     case P::Opcode::Not:

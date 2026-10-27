@@ -332,6 +332,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     misplaced `_`, a digit of another base, octal (`0o17`), a fraction (`0x1.5`), a `_` in a
     decimal (`1_000`, not yet) and a suffix (`255u8`: `a literal takes its type from the
     context, as in 'x: u8 = 255'`).
+- PIR: `and`, `or`, `xor`, `shl` and `shr` on `i64` (docs/pir.md §6; binary codes 58-62,
+  docs/design/pkm.md).  `shl` and `shr` shift by the count's low six bits (`shr` shifts in
+  zeros), so every count is defined on every backend: the shared lowering masks the count
+  with `& 63`, LLVM never sees a shift by 64 or more, and the C is `(uint64_t)a <<
+  ((uint64_t)n & 63)`.  The format versions stay 0.3.0's.
 
 ### Changed
 
