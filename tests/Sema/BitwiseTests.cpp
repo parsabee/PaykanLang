@@ -31,12 +31,14 @@ static void expectError(const std::string &src, const std::string &needle) {
 TEST(Bitwise, TheOperatorsTakeUnsignedTypes) {
   for (const char *ty : {"u8", "u16", "u32", "unsigned", "u64"}) {
     SCOPED_TRACE(ty);
-    const std::string t = ty;
     // Each result has the operands' type: it initializes a `T` variable.
-    expectOk(inMain("let a: " + t + " = 12; let b: " + t + " = 10;\n" +
-                    "let c: " + t + " = a & b; let d: " + t + " = a | b;\n" +
-                    "let e: " + t + " = a ^ b; let f: " + t + " = ~a;\n" +
-                    "let g: " + t + " = a << b; let h: " + t + " = a >> b;"));
+    std::string body = R"(let a: T = 12; let b: T = 10;
+      let c: T = a & b; let d: T = a | b; let e: T = a ^ b; let f: T = ~a;
+      let g: T = a << b; let h: T = a >> b;)";
+    for (size_t at = body.find(": T "); at != std::string::npos;
+         at = body.find(": T ", at))
+      body.replace(at + 2, 1, ty);
+    expectOk(inMain(body));
   }
   // `u8 & u8` is a `u8`, not a `u16`.
   expectError(inMain("let a: u8 = 1; let b: u8 = 2; let z: u16 = a & b;"),

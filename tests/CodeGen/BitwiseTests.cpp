@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace paykan::test;
@@ -42,6 +43,26 @@ uint64_t ones(unsigned bits) {
   return bits == 64 ? UINT64_MAX : (uint64_t{1} << bits) - 1;
 }
 
+/// @p text with every `{NAME}` of @p values replaced by its value.
+std::string
+fill(std::string text,
+     const std::vector<std::pair<std::string, std::string>> &values) {
+  for (const auto &[name, value] : values)
+    for (size_t at = text.find(name); at != std::string::npos;
+         at = text.find(name, at + value.size()))
+      text.replace(at, name.size(), value);
+  return text;
+}
+
+/// @p numbers in decimal, separated by spaces, as a line.
+std::string line(const std::vector<uint64_t> &numbers) {
+  std::string out;
+  for (uint64_t n : numbers)
+    out.append(out.empty() ? "" : " ").append(std::to_string(n));
+  out += '\n';
+  return out;
+}
+
 } // namespace
 
 TEST(Bitwise, AndOrXorNotOnEveryWidth) {
@@ -51,25 +72,19 @@ TEST(Bitwise, AndOrXorNotOnEveryWidth) {
   for (const Width &w : kWidths) {
     const uint64_t a = w.Value | 0x0C;
     const uint64_t b = (w.Value >> 1) | 0x0A;
-    const std::string t = w.Type;
-    const std::string sa = std::to_string(a);
-    const std::string sb = std::to_string(b);
-    body += "  let a" + std::to_string(w.Bits) + ": " + t + " = " + sa +
-            "; let b" + std::to_string(w.Bits) + ": " + t + " = " + sb + ";\n";
-    const std::string va = "a" + std::to_string(w.Bits);
-    const std::string vb = "b" + std::to_string(w.Bits);
     // On variables, then on two constants (folded).
-    body += "  io::println(Str(" + va + " & " + vb + ") + \" \" + Str(" + va +
-            " | " + vb + ") + \" \" + Str(" + va + " ^ " + vb +
-            ") + \" \" + Str(~" + va + "));\n";
-    body += "  io::println(Str(" + t + "(" + sa + ") & " + t + "(" + sb +
-            ")) + \" \" + Str(" + t + "(" + sa + ") | " + sb +
-            ") + \" \" + Str(" + t + "(" + sa + ") ^ " + sb +
-            ") + \" \" + Str(~" + t + "(" + sa + ")));\n";
-    const std::string line =
-        std::to_string(a & b) + " " + std::to_string(a | b) + " " +
-        std::to_string(a ^ b) + " " + std::to_string(~a & ones(w.Bits)) + "\n";
-    expected += line + line;
+    body += fill(R"(  let a{W}: {T} = {A}; let b{W}: {T} = {B};
+  io::println(Str(a{W} & b{W}) + " " + Str(a{W} | b{W}) + " "
+      + Str(a{W} ^ b{W}) + " " + Str(~a{W}));
+  io::println(Str({T}({A}) & {T}({B})) + " " + Str({T}({A}) | {B}) + " "
+      + Str({T}({A}) ^ {B}) + " " + Str(~{T}({A})));
+)",
+                 {{"{W}", std::to_string(w.Bits)},
+                  {"{T}", w.Type},
+                  {"{A}", std::to_string(a)},
+                  {"{B}", std::to_string(b)}});
+    const std::string results = line({a & b, a | b, a ^ b, ~a & ones(w.Bits)});
+    expected.append(results).append(results);
   }
   auto r = compileAndRun(wrapMain(body));
   ASSERT_TRUE(r.CompileOk) << r.StdErr;
@@ -89,29 +104,29 @@ TEST(Bitwise, ShiftsAtAndPastTheWidth) {
     const std::vector<uint64_t> counts = {
         0,  1,  w.Bits - 1, w.Bits, w.Bits + 1,        63,
         64, 65, 255,        65535,  uint64_t{1} << 63, UINT64_MAX};
-    const std::string t = w.Type;
-    const std::string x = "x" + std::to_string(w.Bits);
-    const std::string n = "n" + std::to_string(w.Bits);
-    const std::string value = std::to_string(w.Value);
-    body += "  let " + x + ": " + t + " = " + value + ";\n  let " + n +
-            ": unsigned[" + std::to_string(counts.size()) + "] = [";
+    const std::vector<std::pair<std::string, std::string>> names = {
+        {"{X}", "x" + std::to_string(w.Bits)},
+        {"{N}", "n" + std::to_string(w.Bits)},
+        {"{T}", w.Type},
+        {"{V}", std::to_string(w.Value)}};
+    body += fill("  let {X}: {T} = {V};\n  let {N}: unsigned[12] = [", names);
     for (size_t i = 0; i < counts.size(); ++i)
-      body += (i ? ", " : "") + std::to_string(counts[i]);
+      body.append(i ? ", " : "").append(std::to_string(counts[i]));
     body += "];\n";
     for (size_t i = 0; i < counts.size(); ++i) {
-      const std::string c = std::to_string(counts[i]);
-      const std::string at = n + "[" + std::to_string(i) + "]";
-      body += "  io::println(Str(" + x + " << " + at + ") + \" \" + Str(" + x +
-              " << " + c + ") + \" \" + Str(" + t + "(" + value + ") << " + c +
-              ") + \" \" + Str(" + x + " >> " + at + ") + \" \" + Str(" + x +
-              " >> " + c + ") + \" \" + Str(" + t + "(" + value + ") >> " + c +
-              "));\n";
+      auto withCount = names;
+      withCount.emplace_back("{C}", std::to_string(counts[i]));
+      withCount.emplace_back("{I}", std::to_string(i));
+      body += fill(
+          R"(  io::println(Str({X} << {N}[{I}]) + " " + Str({X} << {C}) + " "
+      + Str({T}({V}) << {C}) + " " + Str({X} >> {N}[{I}]) + " "
+      + Str({X} >> {C}) + " " + Str({T}({V}) >> {C}));
+)",
+          withCount);
       const uint64_t k = counts[i];
-      const std::string shl =
-          std::to_string(k >= w.Bits ? 0 : (w.Value << k) & ones(w.Bits));
-      const std::string shr = std::to_string(k >= w.Bits ? 0 : w.Value >> k);
-      expected += shl + " " + shl + " " + shl + " " + shr + " " + shr + " " +
-                  shr + "\n";
+      const uint64_t shl = k >= w.Bits ? 0 : (w.Value << k) & ones(w.Bits);
+      const uint64_t shr = k >= w.Bits ? 0 : w.Value >> k;
+      expected += line({shl, shl, shl, shr, shr, shr});
     }
   }
   auto r = compileAndRun(wrapMain(body));
