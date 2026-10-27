@@ -1119,6 +1119,21 @@ public:
   static StatusOr<std::shared_ptr<ModuleTemplates>>
   decodeTemplates(std::span<const uint8_t> bytes, const std::string &canonical);
 
+  /// Whether every type the interface @p iface names, in its fields and
+  /// signatures, is a builtin or one it describes, and no parameter is
+  /// `void`: what an importer needs to reconstruct them (injectModule).
+  /// The first that is not when not.
+  static Status checkInterfaceTypes(const pkm::Interface &iface);
+  /// What Sema reads of a module file of @p canonical when the file is
+  /// loaded (modules::FrontendRead): its interface's types
+  /// (checkInterfaceTypes) and its TMPL section @p templates, decoded
+  /// (decodeTemplates; the ModuleTemplates loadModule takes, null without
+  /// templates).  Or why the file cannot be used ("has a bad TMPL section:
+  /// ...").
+  static StatusOr<std::shared_ptr<void>>
+  readImport(const pkm::Interface &iface, std::span<const uint8_t> templates,
+             const std::string &canonical);
+
   /// Set the resolver imports go through (the driver's).  Child Semas
   /// inherit it.
   void setResolver(modules::ModuleResolver *resolver) { Resolver = resolver; }

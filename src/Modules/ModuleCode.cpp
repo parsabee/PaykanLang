@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <map>
+#include <optional>
 #include <set>
 #include <string_view>
 #include <unordered_set>
@@ -248,11 +250,193 @@ bool providesFor(const pir::Module &code, const pir::Program &program) {
   return true;
 }
 
+namespace {
+
+/// The names of the slots of the vtable of the class @p c describes, in
+/// order: IFACE lists them, then the initializer and the `impl` methods,
+/// which have none.
+std::vector<std::string> slotNames(const pkm::ClassRec &c) {
+  std::vector<std::string> slots;
+  for (const pkm::ClassRec::Method &m : c.Methods)
+    if (!(m.Flags & pkm::kMethodImpl) && m.Name != names::kMethodInit &&
+        m.Name != names::kMethodInitModulePrivate)
+      slots.push_back(m.Name);
+  return slots;
+}
+
+/// The PIR type a value of the IFACE type @p type is held in, where its
+/// name alone decides it (sema::pirType): every integer type an `i64`,
+/// every floating-point type an `f64`, `bool`, `char` and `void` their own,
+/// and `Str`, `Obj` and each class the interface describes (@p classes) a
+/// `box`.  Nothing for any other type: a struct's, a tuple's or an array's
+/// layout, an enum's payloads and an optional's element decide theirs.
+std::optional<pir::Type>
+pirTypeOfName(const std::string &type,
+              const std::vector<std::string_view> &classes) {
+  using pir::Type;
+  static const std::pair<std::string_view, Type> kBuiltins[] = {
+      {names::kTypeInt, Type::I64},   {names::kTypeI8, Type::I64},
+      {names::kTypeI16, Type::I64},   {names::kTypeI32, Type::I64},
+      {names::kTypeI64, Type::I64},   {names::kTypeU8, Type::I64},
+      {names::kTypeU16, Type::I64},   {names::kTypeU32, Type::I64},
+      {names::kTypeU64, Type::I64},   {names::kTypeUnsigned, Type::I64},
+      {names::kTypeFloat, Type::F64}, {names::kTypeF16, Type::F64},
+      {names::kTypeF32, Type::F64},   {names::kTypeF64, Type::F64},
+      {names::kTypeBool, Type::Bool}, {names::kTypeChar, Type::Char},
+      {names::kTypeVoid, Type::Void}};
+  for (const auto &[name, ty] : kBuiltins)
+    if (type == name)
+      return ty;
+  if (type == names::kString || type == names::kObj ||
+      std::binary_search(classes.begin(), classes.end(),
+                         std::string_view(type)))
+    return Type::Box;
+  return std::nullopt;
+}
+
+/// The signature the lowering gives a function of the parameters @p params,
+/// passed as @p modes says, and of the result @p ret, or a method of them
+/// whose receiver is passed as @p self (functionSignature, methodSignature):
+/// a slice parameter is its address and its length, an `inout` one its
+/// address, an `inout` result its storage's address, and every other
+/// parameter and the result what pirTypeOfName holds it in.  Nothing when
+/// one of those has no pirTypeOfName, or is a `void` parameter.
+std::optional<pir::Signature>
+derivedSignature(const std::vector<std::string> &params, const std::string &ret,
+                 const pkm::ModeRecs &modes, std::optional<pir::Type> self,
+                 const std::vector<std::string_view> &classes) {
+  pir::Signature sig;
+  if (self)
+    sig.Params.push_back(*self);
+  for (size_t i = 0; i < params.size(); ++i) {
+    if (params[i].ends_with("[]")) {
+      sig.Params.push_back(pir::Type::Ptr);
+      sig.Params.push_back(pir::Type::I64);
+      continue;
+    }
+    if (i < modes.Modes.size() && modes.Modes[i] == pkm::kModeInout) {
+      sig.Params.push_back(pir::Type::Ptr);
+      continue;
+    }
+    std::optional<pir::Type> t = pirTypeOfName(params[i], classes);
+    if (!t || *t == pir::Type::Void)
+      return std::nullopt;
+    sig.Params.push_back(*t);
+  }
+  if (modes.Result == pkm::kModeInout) {
+    sig.Ret = pir::Type::Ptr;
+    return sig;
+  }
+  std::optional<pir::Type> r = pirTypeOfName(ret, classes);
+  if (!r)
+    return std::nullopt;
+  sig.Ret = *r;
+  return sig;
+}
+
+/// "(i64, box) -> void".
+std::string signatureText(const pir::Signature &sig) {
+  std::string s = "(";
+  for (size_t i = 0; i < sig.Params.size(); ++i)
+    s += (i ? ", " : "") + std::string(pir::typeName(sig.Params[i]));
+  return s + ") -> " + pir::typeName(sig.Ret);
+}
+
+} // namespace
+
+Status checkInterface(const pkm::Interface &iface) {
+  auto initializes = [](const std::vector<pkm::ClassRec::Method> &methods) {
+    return std::any_of(methods.begin(), methods.end(),
+                       [](const pkm::ClassRec::Method &m) {
+                         return m.Name == names::kMethodInit ||
+                                m.Name == names::kMethodInitModulePrivate;
+                       });
+  };
+  std::map<std::string, const pkm::ClassRec *> classes;
+  for (const pkm::ClassRec &c : iface.Classes)
+    classes.emplace(c.Name, &c);
+  // The fields of an enum's variant are the struct `Enum::variant`, which
+  // has no initializer of its own; every other struct and every class has
+  // one, the default one if none is written.
+  std::set<std::string> others, variants;
+  for (const pkm::EnumRec &e : iface.Enums)
+    for (const std::string &v : e.PayloadVariants)
+      variants.insert(e.Name + names::kQualSep + v);
+  for (const pkm::StructRec &s : iface.Structs) {
+    others.insert(s.Name);
+    if (!variants.count(s.Name) && !initializes(s.Methods))
+      return Status::error("struct '" + s.Name + "' has no initializer");
+  }
+  for (const pkm::EnumRec &e : iface.Enums)
+    if (!others.insert(e.Name).second)
+      return Status::error("'" + e.Name + "' is a struct and an enum");
+  for (const pkm::ClassRec &c : iface.Classes) {
+    if (others.count(c.Name))
+      return Status::error("'" + c.Name + "' is a class and a struct or enum");
+    if (!initializes(c.Methods))
+      return Status::error("class '" + c.Name + "' has no initializer");
+    if (c.SuperClassName.empty())
+      continue;
+    auto super = classes.find(c.SuperClassName);
+    if (super == classes.end())
+      return Status::error("class '" + c.Name + "' extends '" +
+                           c.SuperClassName + "', which it does not describe");
+    // A subclass's vtable starts with its superclass's, slot for slot: an
+    // importer builds the one from the other.
+    // Its ancestors end at the root.
+    size_t depth = 0;
+    for (auto a = super; a != classes.end() && depth <= classes.size();
+         a = classes.find(a->second->SuperClassName))
+      ++depth;
+    if (depth > classes.size())
+      return Status::error("class '" + c.Name + "' is its own ancestor");
+    const std::vector<std::string> inherited = slotNames(*super->second);
+    const std::vector<std::string> slots = slotNames(c);
+    if (slots.size() < inherited.size() ||
+        !std::equal(inherited.begin(), inherited.end(), slots.begin()))
+      return Status::error("the vtable of class '" + c.Name +
+                           "' does not start with the slots of its "
+                           "superclass '" +
+                           c.SuperClassName + "'");
+  }
+  return Status::ok();
+}
+
 Status checkCodeMatchesInterface(const pir::Module &code,
                                  const pkm::Interface &iface) {
-  auto defined = [&](const std::string &name) {
+  auto definedFunction = [&](const std::string &name) -> const pir::Function * {
     const pir::Function *f = code.findFunction(name);
-    return f && code.defines(*f);
+    return f && code.defines(*f) ? f : nullptr;
+  };
+  std::vector<std::string_view> classNames;
+  classNames.reserve(iface.Classes.size());
+  for (const pkm::ClassRec &c : iface.Classes)
+    classNames.push_back(c.Name);
+  std::sort(classNames.begin(), classNames.end());
+  // A function or method of the module whose signature the interface
+  // decides has it in CODE.
+  auto checkSignature = [&](const std::string &what, const pir::Function &f,
+                            const std::optional<pir::Signature> &derived) {
+    if (!derived || f.Sig == *derived)
+      return Status::ok();
+    return Status::error(what + " is " + signatureText(f.Sig) + " in CODE, " +
+                         signatureText(*derived) + " by its types in IFACE");
+  };
+  auto methodSignature = [&](const pkm::ClassRec::Method &m, pir::Type self) {
+    std::optional<pir::Signature> sig = derivedSignature(
+        m.ParamTypeNames, m.ReturnTypeName, m.Modes, self, classNames);
+    // The virtual `equals` returns the runtime's int64_t.
+    if (sig && self == pir::Type::Obj && m.Name == names::kMethodEquals &&
+        sig->Ret == pir::Type::Bool)
+      sig->Ret = pir::Type::I64;
+    return sig;
+  };
+  // `___init__`, the module's own initializer, is `C.__init__`.
+  auto functionOf = [](const std::string &type, const std::string &method) {
+    return type + names::kNameSep +
+           (method == names::kMethodInitModulePrivate
+                ? std::string(names::kMethodInit)
+                : method);
   };
   for (const pkm::ClassRec &c : iface.Classes) {
     if (!c.IsLocal)
@@ -277,49 +461,103 @@ Status checkCodeMatchesInterface(const pir::Module &code,
     std::sort(declared.begin(), declared.end());
     if (own != declared)
       return Status::error(what + "its fields are not the ones in CODE");
-    // IFACE lists the vtable's slots, then the initializer and the `impl`
-    // methods, which have none.
-    std::vector<std::string> slots;
-    for (const pkm::ClassRec::Method &m : c.Methods)
-      if (!(m.Flags & pkm::kMethodImpl) && m.Name != names::kMethodInit &&
-          m.Name != names::kMethodInitModulePrivate)
-        slots.push_back(m.Name);
+    for (const pkm::ClassRec::Field &f : c.Fields) {
+      auto field = std::find_if(
+          cls->Fields.begin() + static_cast<std::ptrdiff_t>(inherited),
+          cls->Fields.end(),
+          [&](const pir::Field &pf) { return pf.Name == f.FieldName; });
+      // A `weak` field holds a weak reference, whatever its type.
+      std::optional<pir::Type> ty =
+          f.Weak ? pir::Type::Weak : pirTypeOfName(f.TypeName, classNames);
+      if (ty && field->Ty != *ty)
+        return Status::error(what + "field '" + f.FieldName + "' is " +
+                             pir::typeName(field->Ty) + " in CODE, " +
+                             pir::typeName(*ty) + " by its type in IFACE");
+    }
+    const std::vector<std::string> slots = slotNames(c);
     if (slots.size() != cls->VTable.size())
       return Status::error(
           what + "its vtable has " + std::to_string(cls->VTable.size()) +
           " slots in CODE, " + std::to_string(slots.size()) + " in IFACE");
-    for (size_t i = 0; i < slots.size(); ++i)
-      if (slots[i] != cls->VTable[i].Slot)
+    for (size_t i = 0; i < slots.size(); ++i) {
+      const pir::VTableEntry &e = cls->VTable[i];
+      if (slots[i] != e.Slot)
         return Status::error(what + "slot " + std::to_string(i) +
-                             " of its vtable is '" + cls->VTable[i].Slot +
-                             "' in CODE, '" + slots[i] + "' in IFACE");
+                             " of its vtable is '" + e.Slot + "' in CODE, '" +
+                             slots[i] + "' in IFACE");
+      // The lowering fills every slot, a pure virtual method's with its
+      // trap.
+      if (e.Target.empty())
+        return Status::error(what + "slot " + std::to_string(i) + " ('" +
+                             e.Slot + "') of its vtable is empty in CODE");
+    }
+    for (const pkm::ClassRec::Method &m : c.Methods) {
+      std::optional<pir::Signature> sig = methodSignature(m, pir::Type::Obj);
+      if (const pir::Function *f = definedFunction(functionOf(c.Name, m.Name)))
+        if (Status s = checkSignature("method '" + c.Name + "." + m.Name + "'",
+                                      *f, sig);
+            !s)
+          return s;
+      for (size_t i = 0; i < slots.size(); ++i)
+        if (slots[i] == m.Name && sig && !(cls->VTable[i].Sig == *sig))
+          return Status::error(
+              what + "slot " + std::to_string(i) + " ('" + m.Name +
+              "') of its vtable is " + signatureText(cls->VTable[i].Sig) +
+              " in CODE, " + signatureText(*sig) + " by its types in IFACE");
+    }
+    // A class's constructor takes what its initializer takes after the
+    // object, and returns the object's box.
+    const pir::Function *ctor = definedFunction(c.Name);
+    const pir::Function *init =
+        definedFunction(c.Name + names::kNameSep + names::kMethodInit);
+    if (ctor && init &&
+        (ctor->Sig.Ret != pir::Type::Box || init->Sig.Params.empty() ||
+         !std::equal(ctor->Sig.Params.begin(), ctor->Sig.Params.end(),
+                     init->Sig.Params.begin() + 1, init->Sig.Params.end())))
+      return Status::error(
+          what + "its constructor is " + signatureText(ctor->Sig) +
+          " in CODE, its initializer " + signatureText(init->Sig));
   }
   for (const pkm::StructRec &st : iface.Structs) {
     if (!st.IsLocal)
       continue;
-    // A struct's methods are its module's functions `S.m` (the module's own
-    // initializer, `___init__`, is `S.__init__`).
+    // A struct's methods are its module's functions `S.m`, which take the
+    // struct's address first.
     for (const pkm::ClassRec::Method &m : st.Methods) {
-      const std::string method = m.Name == names::kMethodInitModulePrivate
-                                     ? std::string(names::kMethodInit)
-                                     : m.Name;
-      if (!defined(st.Name + names::kNameSep + method))
+      const pir::Function *f = definedFunction(functionOf(st.Name, m.Name));
+      if (!f)
         return Status::error("method '" + st.Name + "." + m.Name +
                              "' is not in CODE");
+      if (Status s = checkSignature("method '" + st.Name + "." + m.Name + "'",
+                                    *f, methodSignature(m, pir::Type::Ptr));
+          !s)
+        return s;
     }
   }
   // A class with a pure virtual method has no constructor function to
   // define: nothing makes one of its own.
   std::set<std::string> abstract;
   for (const pkm::ClassRec &c : iface.Classes)
-    if (std::any_of(c.Methods.begin(), c.Methods.end(),
-                    [](const pkm::ClassRec::Method &m) {
-                      return m.Flags & pkm::kMethodPure;
-                    }))
+    if (c.IsLocal && std::any_of(c.Methods.begin(), c.Methods.end(),
+                                 [](const pkm::ClassRec::Method &m) {
+                                   return m.Flags & pkm::kMethodPure;
+                                 }))
       abstract.insert(c.Name);
-  for (const pkm::FuncRec &f : iface.Functions)
-    if (!abstract.count(f.Name) && !defined(f.Name))
-      return Status::error("function '" + f.Name + "' is not in CODE");
+  for (const pkm::FuncRec &fr : iface.Functions) {
+    if (abstract.count(fr.Name))
+      continue;
+    const pir::Function *f = definedFunction(fr.Name);
+    if (!f)
+      return Status::error("function '" + fr.Name + "' is not in CODE");
+    // A native function's is C's, whose types it adapts.
+    if (!fr.Native)
+      if (Status s = checkSignature(
+              "function '" + fr.Name + "'", *f,
+              derivedSignature(fr.ParamTypeNames, fr.ReturnTypeName, fr.Modes,
+                               std::nullopt, classNames));
+          !s)
+        return s;
+  }
   return Status::ok();
 }
 

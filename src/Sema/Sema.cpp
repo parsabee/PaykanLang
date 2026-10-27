@@ -3429,6 +3429,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     opts.FrontendName = FrontendName;
     opts.ReadCache = false;
     opts.WriteCache = false;
+    opts.ReadFrontend = readImport;
     OwnedResolver = std::make_shared<modules::ModuleResolver>(
         std::move(opts), modules::ModuleResolver::hostIdentity());
     Resolver = OwnedResolver.get();

@@ -54,11 +54,22 @@ ModuleCode splitModuleCode(pir::Module module);
 /// together may use a module's copy its CODE no longer has.
 bool providesFor(const pir::Module &code, const pir::Program &program);
 
+/// Whether the interface @p iface describes its types consistently
+/// (docs/design/pkm.md §8.4 step 4): no name is a class and a struct or an
+/// enum, and each class's superclass is a class it describes, whose vtable
+/// slots begin the class's.  The first inconsistency when not.
+Status checkInterface(const pkm::Interface &iface);
+
 /// Whether @p code, a module's CODE, defines (in its PIR or compiled) what
-/// the module's interface @p iface says it defines, by name
-/// (docs/design/pkm.md §8.4 step 7): each class of the module, with its
-/// superclass, its own fields and the slots of its vtable; each method of
-/// each of its structs; and each function.  The first difference when not.
+/// the module's interface @p iface says it defines (docs/design/pkm.md §8.4
+/// step 7): each class of the module, with its superclass, its own fields,
+/// the slots of its vtable (none empty) and its constructor, which takes
+/// what its initializer takes; each method of each of its structs; and each
+/// function.  Where the types IFACE gives decide a PIR type by their names
+/// alone (an integer, floating-point, `bool`, `char` or `void` type, `Str`,
+/// `Obj` or a class of the interface, a slice parameter, an `inout`
+/// parameter or result), the fields, functions, methods and slots have
+/// those types in CODE.  The first difference when not.
 Status checkCodeMatchesInterface(const pir::Module &code,
                                  const pkm::Interface &iface);
 

@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <functional>
 #include <set>
 #include <sstream>
@@ -274,11 +275,13 @@ TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
               i.Classes[0].Methods.push_back({"peek", "int", {}, 0, {}});
             }),
             "class 'Box<int>': its vtable has 1 slots in CODE, 2 in IFACE");
+  // A struct's methods take its address first.
   EXPECT_EQ(check([](pkm::Interface &i) {
               i.Structs[0].IsLocal = true;
               i.Structs[0].Methods = {{"peek", "int", {}, 0, {}}};
             }),
-            "");
+            "method 'Box<Str>.peek' is (obj) -> i64 in CODE, (ptr) -> i64 by "
+            "its types in IFACE");
   EXPECT_EQ(check([](pkm::Interface &i) { i.Structs[0].IsLocal = true; }),
             "method 'Box<Str>.missing' is not in CODE");
   EXPECT_EQ(check([](pkm::Interface &i) { i.Functions[0].Name = "apu"; }),
@@ -294,6 +297,212 @@ TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
   // An extern of another module is not the module's own.
   EXPECT_EQ(check([](pkm::Interface &i) { i.Functions[0].Name = "lib::f"; }),
             "function 'lib::f' is not in CODE");
+}
+
+// An interface describes its types consistently (docs/design/pkm.md §8.4
+// step 4): an importer reconstructs a class from its superclass, so the
+// superclass is one the interface describes, ancestors end at the root and
+// the superclass's vtable begins the class's; and every class and struct
+// but an enum's variant has an initializer.
+TEST(ModuleCode, AnInterfaceDescribesItsTypesConsistently) {
+  auto check = [](const std::function<void(pkm::Interface &)> &change) {
+    pkm::Interface iface;
+    iface.Module = "m";
+    pkm::ClassRec shape;
+    shape.Name = "Shape";
+    shape.IsLocal = false;
+    shape.OriginModule = "lib";
+    shape.Methods = {{"destroy", "void", {}, 0, {}},
+                     {"area", "int", {}, pkm::kMethodPure, {}},
+                     {"__init__", "void", {}, 0, {}}};
+    pkm::ClassRec sq = shape;
+    sq.Name = "Sq";
+    sq.SuperClassName = "Shape";
+    sq.IsLocal = true;
+    sq.OriginModule = "m";
+    sq.Methods = {{"destroy", "void", {}, 0, {}},
+                  {"area", "int", {}, 0, {}},
+                  {"side", "int", {}, 0, {}},
+                  {"___init__", "void", {"int"}, 0, {}}};
+    iface.Classes = {shape, sq};
+    pkm::EnumRec opt;
+    opt.Name = "Opt";
+    opt.Variants = {"Some", "Other"};
+    opt.PayloadVariants = {"Some"};
+    iface.Enums = {opt};
+    pkm::StructRec some;
+    some.Name = "Opt::Some";
+    some.Fields = {{"value", "int", false}};
+    pkm::StructRec pair;
+    pair.Name = "Pair";
+    pair.Methods = {{"__init__", "void", {}, 0, {}}};
+    iface.Structs = {some, pair};
+    change(iface);
+    Status s = modules::checkInterface(iface);
+    return s ? std::string() : s.message();
+  };
+  EXPECT_EQ(check([](pkm::Interface &) {}), "");
+  EXPECT_EQ(
+      check([](pkm::Interface &i) { i.Classes[1].SuperClassName = "Shapes"; }),
+      "class 'Sq' extends 'Shapes', which it does not describe");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Classes[0].Methods[0].Name = ""; }),
+            "the vtable of class 'Sq' does not start with the slots of its "
+            "superclass 'Shape'");
+  EXPECT_EQ(check([](pkm::Interface &i) {
+              std::swap(i.Classes[1].Methods[0], i.Classes[1].Methods[1]);
+            }),
+            "the vtable of class 'Sq' does not start with the slots of its "
+            "superclass 'Shape'");
+  EXPECT_EQ(
+      check([](pkm::Interface &i) { i.Classes[0].SuperClassName = "Sq"; }),
+      "class 'Shape' is its own ancestor");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Classes[1].Methods.pop_back(); }),
+            "class 'Sq' has no initializer");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Structs[1].Methods.clear(); }),
+            "struct 'Pair' has no initializer");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Enums[0].PayloadVariants = {}; }),
+            "struct 'Opt::Some' has no initializer");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Structs[1].Name = "Sq"; }),
+            "'Sq' is a class and a struct or enum");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Structs[1].Name = "Opt"; }),
+            "'Opt' is a struct and an enum");
+}
+
+// Where the types an interface gives decide PIR types by their names alone,
+// a file's CODE has those types (docs/design/pkm.md §8.4 step 7): its
+// fields, its functions, its methods and its vtable slots, and a class's
+// constructor takes what its initializer takes and returns its box.  The
+// vtable of a class the module defines has no empty slot (the lowering
+// fills a pure virtual method's with its trap).  A file that disagreed was
+// lowered against, and the program crashed or the lowering stopped.
+TEST(ModuleCode, CodeHasTheTypesTheInterfaceGives) {
+  const char *const text = R"(module "m"
+class Point {
+  field x: i64
+  field name: box
+  vtable {
+    destroy = @Point.destroy : (obj) -> void
+    equals = @Point.equals : (obj, box) -> i64
+    norm = @Point.norm : (obj, f64) -> f64
+  }
+}
+fn @Point.destroy(%self.1: obj) -> void {
+  ret
+}
+fn @Point.equals(%self.1: obj, %o.2: box) -> i64 {
+  ret 0
+}
+fn @Point.norm(%self.1: obj, %p.2: f64) -> f64 {
+  ret %p.2
+}
+fn @Point.__init__(%self.1: obj, %x.2: i64, %name.3: box) -> void {
+  ret
+}
+fn @Point(%x.1: i64, %name.2: box) -> box {
+  %o.3 = new Point
+  %b.4 = box %o.3
+  ret %b.4
+}
+fn @scale(%p.1: box, %by.2: i64, %xs.3: ptr, %n.4: i64, %acc.5: ptr) -> box {
+  ret %p.1
+}
+)";
+  auto parse = [&] {
+    pir::ParseError err;
+    auto program = pir::parseProgram(text, err);
+    EXPECT_TRUE(program) << err.str();
+    return program ? std::move(program->Modules.front()) : pir::Module();
+  };
+  const pir::Module code = parse();
+  ASSERT_TRUE(pir::verify(code).empty())
+      << pir::formatErrors(pir::verify(code));
+  auto check =
+      [&](const std::function<void(pkm::Interface &, pir::Module &)> &change) {
+        pkm::Interface iface;
+        iface.Module = "m";
+        pkm::ClassRec point;
+        point.Name = "Point";
+        point.Fields = {{"x", "int", false}, {"name", "Str", false}};
+        point.Methods = {{"destroy", "void", {}, 0, {}},
+                         {"equals", "bool", {"Obj"}, pkm::kMethodView, {}},
+                         {"norm", "float", {"f32"}, 0, {}},
+                         {"__init__", "void", {"int", "Str"}, 0, {}}};
+        iface.Classes = {point};
+        pkm::FuncRec ctor;
+        ctor.Name = "Point";
+        ctor.ReturnTypeName = "Point";
+        ctor.ParamTypeNames = {"int", "Str"};
+        // A slice parameter is its address and its length, an `inout` one its
+        // address.
+        pkm::FuncRec scale;
+        scale.Name = "scale";
+        scale.ReturnTypeName = "Point";
+        scale.ParamTypeNames = {"Point", "u8", "int[]", "int"};
+        scale.Modes.Modes = {pkm::kModeValue, pkm::kModeValue, pkm::kModeView,
+                             pkm::kModeInout};
+        scale.Modes.Names = {"p", "by", "xs", "acc"};
+        iface.Functions = {ctor, scale};
+        pir::Module m = parse();
+        change(iface, m);
+        Status s = modules::checkCodeMatchesInterface(m, iface);
+        return s ? std::string() : s.message();
+      };
+  auto fn = [](pir::Module &m, const std::string &name) -> pir::Function & {
+    return *std::find_if(
+        m.Functions.begin(), m.Functions.end(),
+        [&](const pir::Function &f) { return f.Name == name; });
+  };
+  EXPECT_EQ(check([](pkm::Interface &, pir::Module &) {}), "");
+  EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
+              i.Classes[0].Fields[0].TypeName = "Str";
+            }),
+            "class 'Point': field 'x' is i64 in CODE, box by its type in "
+            "IFACE");
+  EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
+              i.Classes[0].Fields[0].Weak = true;
+            }),
+            "class 'Point': field 'x' is i64 in CODE, weak by its type in "
+            "IFACE");
+  // A type whose PIR type its name does not decide is not compared.
+  EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
+              i.Classes[0].Fields[0].TypeName = "int?";
+            }),
+            "");
+  EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
+              i.Classes[0].Methods[2].ReturnTypeName = "int";
+            }),
+            "method 'Point.norm' is (obj, f64) -> f64 in CODE, (obj, f64) -> "
+            "i64 by its types in IFACE");
+  EXPECT_EQ(check([](pkm::Interface &, pir::Module &m) {
+              m.Classes[0].VTable[2].Sig.Params[1] = pir::Type::I64;
+            }),
+            "class 'Point': slot 2 ('norm') of its vtable is (obj, i64) -> f64 "
+            "in CODE, (obj, f64) -> f64 by its types in IFACE");
+  EXPECT_EQ(check([](pkm::Interface &, pir::Module &m) {
+              m.Classes[0].VTable[1].Target.clear();
+            }),
+            "class 'Point': slot 1 ('equals') of its vtable is empty in CODE");
+  EXPECT_EQ(check([&](pkm::Interface &, pir::Module &m) {
+              fn(m, "Point").Sig.Ret = pir::Type::Void;
+            }),
+            "class 'Point': its constructor is (i64, box) -> void in CODE, its "
+            "initializer (obj, i64, box) -> void");
+  EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &) {
+              i.Functions[1].ReturnTypeName = "int";
+            }),
+            "function 'scale' is (box, i64, ptr, i64, ptr) -> box in CODE, "
+            "(box, i64, ptr, i64, ptr) -> i64 by its types in IFACE");
+  EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &) {
+              i.Functions[1].Modes.Modes[3] = pkm::kModeValue;
+            }),
+            "function 'scale' is (box, i64, ptr, i64, ptr) -> box in CODE, "
+            "(box, i64, ptr, i64, i64) -> box by its types in IFACE");
+  // A native function's signature is C's.
+  EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &) {
+              i.Functions[1].ReturnTypeName = "int";
+              i.Functions[1].Native = true;
+            }),
+            "");
 }
 
 // The lowering stops at an import it cannot lower: the importer is not

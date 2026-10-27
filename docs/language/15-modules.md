@@ -594,13 +594,18 @@ and linked from its code, so the program builds and runs identically without the
 needs the backend that compiled it.
 
 Whichever way a module file reaches a program, it is checked when it is loaded, before
-anything is compiled: its PIR is decoded, verified and checked against its interface (each
-class, with its superclass, fields and virtual methods, each struct method and each function
-the interface names must be in it), and its compiled code is read and verified by the
-backend that links it. A cache entry that fails is rebuilt, and a prebuilt file is an error
-at the import (`module 'm' (m.pkm) has a bad CODE section: ...`, `... has a bad OBJ section:
-the compiled code does not verify: ...`), its PIR under `--check-only` too. Past these checks
-the compiled code is trusted once the file's hashes match. The hashes catch damage,
+anything is compiled: its interface must be consistent (each class's superclass described,
+its virtual methods first in the subclass's), name only types it describes, and describe the
+types it records from other modules as those modules do; its PIR is decoded, verified and
+checked against its interface (each class, with its superclass, fields, virtual methods and
+constructor, each struct method and each function the interface names must be in it, with
+the types the interface gives them where those decide them), and against the PIR of the
+module files it uses; its templates are decoded; and its compiled code is read and verified
+by the backend that links it. A cache entry that fails is rebuilt, and a prebuilt file is an
+error at the import (`module 'm' (m.pkm) has a bad CODE section: ...`, `... has an IFACE
+section that does not match its CODE: ...`, `... has a bad OBJ section: the compiled code
+does not verify: ...`), its PIR and its interface under `--check-only` too. Past these
+checks the compiled code is trusted once the file's hashes match. The hashes catch damage,
 not a file made to pass them, and LLVM's bitcode reader is not hardened against such bytes,
 so use prebuilt modules only from a source you trust.
 

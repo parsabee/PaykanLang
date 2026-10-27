@@ -37,6 +37,15 @@ namespace paykan::modules {
 /// (Backend::checkModuleObject): ok, or why it cannot be linked.
 using ObjectCheck = std::function<Status(const pkm::Object &)>;
 
+/// How the frontend reads what only it understands of a module file of
+/// module @p canonical (Sema::readImport): the type names its interface
+/// @p iface spells, and its TMPL section @p templates (empty when it has
+/// none), into what the frontend keeps of them for the import (null for
+/// nothing), or why the file cannot be used.
+using FrontendRead = std::function<StatusOr<std::shared_ptr<void>>(
+    const pkm::Interface &iface, std::span<const uint8_t> templates,
+    const std::string &canonical)>;
+
 /// A module file's contents, decoded and checked as every importer checks
 /// them (docs/design/pkm.md §8.4).
 struct ModuleContents {
@@ -45,18 +54,22 @@ struct ModuleContents {
   pir::Module Code;
   /// OBJ, when the file has compiled code.
   std::optional<pkm::Object> Object;
+  /// What the FrontendRead made of the file (null without one).
+  std::shared_ptr<void> Frontend;
 };
 
 /// Read @p file, a module file of @p canonical, as an importer does: its
-/// IFACE, its CODE (decoded, naming the module, verified, and defining
-/// what IFACE says the module defines: checkCodeMatchesInterface) and its
-/// OBJ when it has one (read, and checked by @p checkObject when that is
-/// given).  Or why the file cannot be used, as the resolver's diagnostics
-/// word it ("has a bad CODE section: ...").  The manifest's verdict and
-/// the dependencies are the caller's.
+/// IFACE (consistent: checkInterface), its CODE (decoded, naming the
+/// module, verified, and defining what IFACE says the module defines:
+/// checkCodeMatchesInterface), what @p readFrontend reads of it when that
+/// is given, and its OBJ when it has one (read, and checked by
+/// @p checkObject when that is given).  Or why the file cannot be used, as
+/// the resolver's diagnostics word it ("has a bad CODE section: ...").  The
+/// manifest's verdict and the dependencies are the caller's.
 StatusOr<ModuleContents> readModuleContents(const pkm::File &file,
                                             const std::string &canonical,
-                                            const ObjectCheck &checkObject);
+                                            const ObjectCheck &checkObject,
+                                            const FrontendRead &readFrontend);
 
 struct ResolverOptions {
   /// The source root imports are resolved against ("" = the current
@@ -91,6 +104,10 @@ struct ResolverOptions {
   /// file whose code fails is unusable, so a cache entry is rebuilt and a
   /// prebuilt file rejected.
   ObjectCheck CheckObject;
+  /// How the frontend reads its part of a module file (FrontendRead), or
+  /// unset: that part is read when the module is imported, and a file it
+  /// is bad in is an error there, not unusable.
+  FrontendRead ReadFrontend;
 };
 
 /// The answer to resolve() (§8.1 DECIDE).
@@ -164,6 +181,9 @@ public:
   /// file was loaded (§8.4 step 5) and handed over by the first call; a
   /// later call decodes it again.
   StatusOr<pir::Module> loadCode(const std::string &canonical);
+  /// What ReadFrontend made of the file of a Loaded module, handed over by
+  /// the first call (null after it, or when it made nothing).
+  std::shared_ptr<void> takeFrontendData(const std::string &canonical);
   /// The compiled code of a Loaded module (its OBJ section), or null when
   /// its CODE is all of it.
   const pkm::Object *object(const std::string &canonical) const;
@@ -237,6 +257,13 @@ private:
   Resolution load(const std::string &canonical,
                   const std::filesystem::path &path, pkm::Policy policy,
                   std::span<const uint8_t> sourceBytes);
+  /// Whether the types @p iface describes as other modules' are what
+  /// those modules describe (an importer that reaches one only through
+  /// this module builds it from this copy).
+  Status checkImportedTypes(const pkm::Interface &iface) const;
+  /// Whether the externs of @p code, a module's CODE, match the code of
+  /// the modules they name that were loaded (pir::verifyLinks).
+  Status checkLinks(const pir::Module &code) const;
   StatusOr<std::vector<uint8_t>>
   encodeFile(const std::string &canonical, const pkm::Interface &iface,
              const std::vector<std::string> &deps,

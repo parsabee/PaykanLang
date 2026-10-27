@@ -564,16 +564,10 @@ int checkModuleFile(const Options &opts) {
                  ? backend->checkModuleObject(code)
                  : paykan::Status::ok();
     };
-  auto contents =
-      paykan::modules::readModuleContents(*file, m.Module, checkObject);
+  auto contents = paykan::modules::readModuleContents(
+      *file, m.Module, checkObject, paykan::sema::Sema::readImport);
   if (!contents)
     return verdict("corrupt: " + contents.status().message());
-  std::span<const uint8_t> tmpl = (*file).section(pkm::Kind::Tmpl);
-  if (!tmpl.empty())
-    if (auto templates = paykan::sema::Sema::decodeTemplates(tmpl, m.Module);
-        !templates)
-      return verdict("corrupt: has a bad TMPL section: " +
-                     templates.status().message());
   return verdict("usable");
 }
 
@@ -964,6 +958,7 @@ int main(int argc, char *argv[]) {
     resolverOpts.CheckObject = [&backend](const pkm::Object &o) {
       return backend->checkModuleObject(toBackend(o));
     };
+  resolverOpts.ReadFrontend = paykan::sema::Sema::readImport;
   paykan::modules::ModuleResolver resolver(
       resolverOpts, paykan::modules::ModuleResolver::hostIdentity());
   // Sema reuses the DiagEngine constructed above (already carrying the

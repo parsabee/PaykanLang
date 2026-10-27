@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <sstream>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 
 namespace paykan {
@@ -543,6 +544,146 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
   return info;
 }
 
+Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
+  // The types an importer reconstructs, by name, before it resolves a
+  // signature (injectModule): every type an export names is a builtin or
+  // one the interface describes.
+  ast::ASTContext ctx;
+  for (const pkm::EnumRec &e : iface.Enums)
+    ctx.registerEnumType(e.Name, ast::SourceLocation());
+  for (const pkm::StructRec &st : iface.Structs)
+    ctx.registerStructType(st.Name, ast::SourceLocation());
+  // Superclass first (modules::checkInterface found each one described).
+  std::vector<const pkm::ClassRec *> pending;
+  pending.reserve(iface.Classes.size());
+  for (const pkm::ClassRec &c : iface.Classes)
+    pending.push_back(&c);
+  for (bool progress = true; progress && !pending.empty();) {
+    progress = false;
+    for (auto it = pending.begin(); it != pending.end();) {
+      ast::ClassType *super = (*it)->SuperClassName.empty()
+                                  ? ctx.getObjTy()
+                                  : ctx.lookupClassType((*it)->SuperClassName);
+      if (!super) {
+        ++it;
+        continue;
+      }
+      ctx.preRegisterClassType((*it)->Name, super);
+      it = pending.erase(it);
+      progress = true;
+    }
+  }
+  if (!pending.empty())
+    return Status::error("superclass '" + pending.front()->SuperClassName +
+                         "' of class '" + pending.front()->Name +
+                         "' is unknown");
+  // A builtin's name or a record's (an instantiation's too) is looked up
+  // as it is; only a type built of others (`T[]`, `T?`, a tuple, a function
+  // type) is parsed, each once.  A module's interface spells its imports'
+  // types again and again, and a diagnostic's text is made only for the one
+  // that does not resolve.
+  std::vector<std::string_view> described;
+  for (const pkm::ClassRec &c : iface.Classes)
+    described.push_back(c.Name);
+  for (const pkm::StructRec &st : iface.Structs)
+    described.push_back(st.Name);
+  for (const pkm::EnumRec &e : iface.Enums)
+    described.push_back(e.Name);
+  std::sort(described.begin(), described.end());
+  std::unordered_set<std::string_view> composite;
+  auto unknown = [&](const std::string &type) {
+    ast::BuiltinType::Kind kind;
+    if (std::binary_search(described.begin(), described.end(),
+                           std::string_view(type)) ||
+        ast::builtinKindOfName(type, kind) || type == names::kObj ||
+        type == names::kString)
+      return false;
+    if (type.find_first_of("[?(") == std::string::npos)
+      return true;
+    if (composite.count(type))
+      return false;
+    if (!resolveExportedType(ctx, type))
+      return true;
+    composite.insert(type);
+    return false;
+  };
+  auto unknownType = [](const std::string &what, const std::string &type) {
+    return Status::error(what + " has unknown type '" + type + "'");
+  };
+  auto signature = [&](const auto &decl, const std::string &ret,
+                       const std::vector<std::string> &params) {
+    if (unknown(ret))
+      return unknownType("return type of " + decl(), ret);
+    for (size_t i = 0; i < params.size(); ++i) {
+      const bool isVoid = params[i] == names::kTypeVoid;
+      if (!isVoid && !unknown(params[i]))
+        continue;
+      const std::string what =
+          "parameter " + std::to_string(i + 1) + " of " + decl();
+      return isVoid ? Status::error(what + " is void")
+                    : unknownType(what, params[i]);
+    }
+    return Status::ok();
+  };
+  auto members = [&](const char *kind, const std::string &owner,
+                     const std::vector<pkm::ClassRec::Field> &fields,
+                     const std::vector<pkm::ClassRec::Method> &methods) {
+    for (const pkm::ClassRec::Field &f : fields)
+      if (unknown(f.TypeName)) {
+        std::string what = "field '" + f.FieldName + "' of ";
+        what += kind;
+        what += " '" + owner + "'";
+        return unknownType(what, f.TypeName);
+      }
+    for (const pkm::ClassRec::Method &m : methods)
+      if (Status s =
+              signature([&] { return "method '" + owner + "." + m.Name + "'"; },
+                        m.ReturnTypeName, m.ParamTypeNames);
+          !s)
+        return s;
+    return Status::ok();
+  };
+  // A record of another module's type is that module's record
+  // (ModuleResolver::checkImportedTypes), whose types were checked with it;
+  // but for an instantiation that module may not describe.
+  auto checked = [](const auto &record) {
+    return !record.IsLocal && !record.OriginModule.empty() &&
+           record.Name.find('<') == std::string::npos;
+  };
+  for (const pkm::ClassRec &c : iface.Classes)
+    if (Status s = checked(c) ? Status::ok()
+                              : members("class", c.Name, c.Fields, c.Methods);
+        !s)
+      return s;
+  for (const pkm::StructRec &st : iface.Structs)
+    if (Status s = checked(st)
+                       ? Status::ok()
+                       : members("struct", st.Name, st.Fields, st.Methods);
+        !s)
+      return s;
+  for (const pkm::FuncRec &f : iface.Functions)
+    if (Status s = signature([&] { return "function '" + f.Name + "'"; },
+                             f.ReturnTypeName, f.ParamTypeNames);
+        !s)
+      return s;
+  return Status::ok();
+}
+
+StatusOr<std::shared_ptr<void>>
+Sema::readImport(const pkm::Interface &iface,
+                 std::span<const uint8_t> templates,
+                 const std::string &canonical) {
+  if (Status s = checkInterfaceTypes(iface); !s)
+    return Status::error("has a bad IFACE section: " + s.message());
+  if (templates.empty())
+    return std::shared_ptr<void>();
+  auto decoded = decodeTemplates(templates, canonical);
+  if (!decoded)
+    return Status::error("has a bad TMPL section: " +
+                         decoded.status().message());
+  return std::shared_ptr<void>(std::move(*decoded));
+}
+
 // -- Locating and loading a module
 
 bool Sema::importTooDeep(const std::string &canonical,
@@ -638,7 +779,13 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
     std::span<const uint8_t> tmpl =
         Resolver ? Resolver->templates(canonical) : std::span<const uint8_t>();
     if (!tmpl.empty()) {
-      auto templates = decodeTemplates(tmpl, canonical);
+      // Decoded when the file was loaded (readImport), unless the resolver
+      // had no ReadFrontend.
+      StatusOr<std::shared_ptr<ModuleTemplates>> templates =
+          std::static_pointer_cast<ModuleTemplates>(
+              Resolver->takeFrontendData(canonical));
+      if (!*templates)
+        templates = decodeTemplates(tmpl, canonical);
       if (!templates) {
         error(loc,
               "module '" + canonical + "' (" + displayPath(path) +
@@ -1184,10 +1331,11 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   for (auto &fi : info.ExportedFunctions) {
     if (!hiddenInject && isModuleOwnName(fi.Name))
       continue; // the module's own: a private function or type's constructor
-    if (!injectFnAs(fi, qualifier + names::kQualSep + fi.Name))
-      ok = false;
-    if (qualifier != fullModulePath &&
-        !injectFnAs(fi, fullModulePath + names::kQualSep + fi.Name))
+    // A signature that does not resolve is reported once, under the first
+    // name.
+    if (!injectFnAs(fi, qualifier + names::kQualSep + fi.Name) ||
+        (qualifier != fullModulePath &&
+         !injectFnAs(fi, fullModulePath + names::kQualSep + fi.Name)))
       ok = false;
   }
   if (ok && info.Templates &&

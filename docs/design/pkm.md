@@ -1477,15 +1477,46 @@ ignored, not an error). 9. `DEBUG` (advisory). 10. After assembly,
 a file is loaded (`modules::readModuleContents`, which `ModuleResolver`
 and `paykan pkm check` share), so a cache entry that fails any of them is
 rebuilt and a prebuilt file is an error at the import, under
-`--check-only` too: `IFACE` read; `CODE` decoded, naming the module and
-verified; `CODE` checked against `IFACE` by name
-(`modules::checkCodeMatchesInterface`: each class the module defines, with
-its superclass, its own fields and its vtable's slots; each method of each
-of its structs; each function), signatures not yet; `OBJ` read and, when
-the active backend links code of its kind, checked by it
-(`Backend::checkModuleObject`). The decoded `CODE` is kept for the
-lowering, so a module is decoded once. `TMPL` is decoded by Sema, as
-before (§4.3).
+`--check-only` too:
+
+- `IFACE` read and consistent (`modules::checkInterface`): no name is a
+  class and a struct or an enum, each class's superclass is a class it
+  describes, ancestors end at the root, the superclass's vtable slots
+  begin the class's, and every class and struct (an enum variant's fields
+  aside) has an initializer. Every type its records name is a builtin or
+  one it describes, and no parameter is `void` (`Sema::checkInterfaceTypes`,
+  through the resolver's `FrontendRead`).
+- `CODE` decoded, naming the module and verified (the verifier rejects a
+  `void` parameter, an extern's or a vtable slot's too), and checked
+  against `IFACE` (`modules::checkCodeMatchesInterface`): each class the
+  module defines, with its superclass, its own fields, its vtable's slots,
+  none empty, and its constructor, which takes what its initializer takes
+  after the object and returns its box; each method of each of its structs;
+  each function. Where the types `IFACE` gives decide PIR types by their
+  names alone (an integer type `i64`, a floating-point one `f64`, `bool`,
+  `char`, `void`, `Str`, `Obj` and a class of the interface `box`, a slice
+  parameter its address and length, an `inout` parameter or result an
+  address, a `weak` field `weak`), the fields, functions, methods and slots
+  have those types in `CODE`, the derived signatures of §9.1 for those
+  types; a struct's, a tuple's, an array's, an enum's, an optional's or a
+  function type's PIR type is not derived yet.
+- Against the files it depends on (by the resolver; `pkm check` reads the
+  file alone): each record of another module's type (`IsLocal` false) is
+  that module's record of it, but for an instantiation made elsewhere that
+  the module does not describe; and each extern of `CODE` matches the
+  definition in the `CODE` of the module it names when that module was
+  loaded from a file (`pir::verifyLinks`, what `pir::verify(Program)` checks
+  for the whole program).
+- `TMPL` decoded (`Sema::decodeTemplates`, through `FrontendRead`), and
+  the decoded templates kept for the import.
+- `OBJ` read and, when the active backend links code of its kind, checked
+  by it (`Backend::checkModuleObject`).
+
+The decoded `CODE` is kept for the lowering, so a module is decoded once.
+A call through a vtable slot whose signature in an importer differs from
+the one the defining module's `CODE` gives (types these checks do not
+derive) is the file's error in the lowering (`module 'm' (m.pkm) has an
+IFACE section that does not match its CODE: a call of slot 3 of 'C' ...`).
 
 Threat model: a `.pkm` is untrusted (hand-edited, truncated, hostile,
 stale). The reader never allocates from an unchecked count, caps recursion,

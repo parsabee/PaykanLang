@@ -370,6 +370,33 @@ fn main() -> int { return 0; }
   std::filesystem::remove_all(tmp);
 }
 
+// A function whose type does not resolve is reported once, though the
+// import declares it under two names (`m::ghost` and `lib::m::ghost`): the
+// second report was the first one again, which stopped a debug build (the
+// duplicate-diagnostic guard).
+TEST(Module, UnknownExportedTypeOfANestedModuleIsReportedOnce) {
+  auto tmp = paykan::test::tempDir() / "pkn_ms_unknown_nested";
+  std::filesystem::remove_all(tmp);
+  auto libPath =
+      writeFile(tmp.string(), "lib/m.pkn", "fn real() -> int { return 1; }\n");
+  auto key = std::filesystem::canonical(libPath).string();
+  paykan::sema::Sema::ModuleInfo info;
+  info.ExportedFunctions.push_back({"ghost", "Ghost", {}, {}});
+  paykan::sema::Sema::ModuleCache[key] = std::move(info);
+  auto main = writeFile(tmp.string(), "main.pkn",
+                        "import lib::m;\nfn main() -> int { return 0; }\n");
+  auto r = semaCheckFile(main, tmp.string());
+  paykan::sema::Sema::ModuleCache.erase(key);
+  EXPECT_FALSE(r.Ok);
+  const std::string expected = "import of module 'lib::m': return type of "
+                               "function 'ghost' has unknown type 'Ghost'";
+  const size_t first = r.Diagnostics.find(expected);
+  EXPECT_NE(first, std::string::npos) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find(expected, first + 1), std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
 // ─── ERR: a local class clashing with an imported type (#79) ─────────────────
 //
 // Only the clash is reported: the module's other classes stay declared, and a
