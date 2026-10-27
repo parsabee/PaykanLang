@@ -1512,7 +1512,7 @@ it and stops the process when the module does not verify.
 | Flag | Effect |
 |---|---|
 | `--emit-pkm [-o f.pkm]` | compile the input module and write its `.pkm`; portable by default |
-| `--module-name=<name>` | with `--emit-pkm`: the canonical name the file records, identifiers that are not keywords separated by `::` (`::<name>` for the standard library's modules) |
+| `--module-name=<name>` | with `--emit-pkm`: the canonical name the file records, identifiers that are not keywords separated by `::` (`::<name>` for the standard library's modules); the source root is the directory above the name's other parts when they end the file's directory (`a::b` for `src/a/b.pkn`: `src`), else the file's directory |
 | `--with-payload[=<backend>]` (planned) | with `--emit-pkm`: also append the named (or default) backend's payload |
 | `--module-path=<dir>` | repeatable |
 | `--write-payloads={on,off}` (planned) | default on: after a build/run, add the active backend's payload to cached imports |

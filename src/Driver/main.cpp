@@ -677,6 +677,49 @@ int pkmTool(const Options &opts) {
   return finishStdout(ok ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
+/// The source root of a module named @p name by --module-name, read from
+/// @p input: when the name's parts before its last are the last
+/// directories of the file's path (`a::b` for `src/a/b.pkn`, or for
+/// `b.pkn` in the directory `src/a`), the directory above them (`src`), as
+/// the path gives it, or absolute when it does not reach that far; the
+/// module's imports are then where a program importing it finds them.
+/// Otherwise, and for a module of the standard library (`::name`), the
+/// file's directory.
+std::string moduleNameRoot(const std::filesystem::path &input,
+                           const std::string &name) {
+  std::string dir = input.parent_path().string();
+  if (name.starts_with(paykan::module_name::kSep))
+    return dir;
+  std::vector<std::string_view> parts = paykan::module_name::components(name);
+  parts.pop_back();
+  if (parts.empty())
+    return dir;
+  // The directory above @p path's last directories when they are the
+  // name's parts, as a path with them taken off.
+  auto above = [&](const std::filesystem::path &path)
+      -> std::optional<std::filesystem::path> {
+    std::vector<std::filesystem::path> dirs(path.begin(), path.end());
+    if (dirs.size() < parts.size())
+      return std::nullopt;
+    const size_t keep = dirs.size() - parts.size();
+    for (size_t i = 0; i < parts.size(); ++i)
+      if (dirs[keep + i] != parts[i])
+        return std::nullopt;
+    std::filesystem::path root;
+    for (size_t i = 0; i < keep; ++i)
+      root /= dirs[i];
+    return root;
+  };
+  if (auto root = above(input.lexically_normal().parent_path()))
+    return root->string();
+  std::error_code ec;
+  std::filesystem::path abs = std::filesystem::absolute(input, ec);
+  if (!ec)
+    if (auto root = above(abs.lexically_normal().parent_path()))
+      return root->string();
+  return dir;
+}
+
 /// The canonical name of the main module and the root its imports are
 /// resolved against.  Normally the file's stem and its directory.  For
 /// `--emit-pkm` of a module given by a relative path inside the project
@@ -687,16 +730,16 @@ int pkmTool(const Options &opts) {
 /// that goes up (`/src/shapes.pkn`, `../shapes.pkn`) is named by its
 /// stem.  Each part of the name --emit-pkm gives a module must be an
 /// identifier, which an import can name.  --module-name names it outright
-/// (the standard library's build names its modules `::name`).
+/// (the standard library's build names its modules `::name`), and the
+/// root is moduleNameRoot's.
 paykan::Status mainModuleIdentity(const Options &opts, std::string &name,
                                   std::string &projectRoot) {
   std::filesystem::path input(opts.InputFilename);
   name = paykan::module_name::mainModuleName(opts.InputFilename);
   projectRoot = input.parent_path().string();
   if (!opts.ModuleName.empty()) {
-    // --module-name: as given (its imports still resolve against the
-    // file's directory).
     name = opts.ModuleName;
+    projectRoot = moduleNameRoot(input, name);
     return paykan::Status::ok();
   }
   if (!opts.EmitPkm)

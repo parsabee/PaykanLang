@@ -2285,6 +2285,51 @@ TEST(Pkm, EmitPkmRejectsAKeywordInTheModuleName) {
   fs::remove_all(dir);
 }
 
+// --module-name=a::b for `src/a/b.pkn` resolves the module's imports against
+// `src`, the directory above the name's parts before its last, so it finds
+// its sibling `a::c` where a program that imports it does; they were
+// resolved against `src/a`, where `a::c` is `src/a/a/c.pkn` (KF-7).  The
+// same from inside `src/a`; a name whose parts are not the file's
+// directories keeps the file's own directory.
+TEST(Pkm, ModuleNameFindsTheModulesSiblings) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_modroot_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  const std::string sibling = "fn g() -> int => 41;\n";
+  writeFile(dir / "src" / "a" / "b.pkn",
+            "import a::c;\nfn f() -> int => c::g() + 1;\n");
+  writeFile(dir / "src" / "a" / "c.pkn", sibling);
+  writeFile(dir / "use" / "a" / "c.pkn", sibling);
+  writeFile(dir / "use" / "main.pkn",
+            "import a::b;\nfn main() -> int => b::f();\n");
+  auto in = [&](const fs::path &cwd, const std::string &args) {
+    return run("cd " + cwd.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto above =
+      in(dir, "--emit-pkm --module-name=a::b -o use/a/b.pkm src/a/b.pkn");
+  ASSERT_EQ(above.exitCode, 0) << above.out;
+  // The import's cache entry is the project's.
+  EXPECT_TRUE(fs::exists(dir / "src" / ".paykan_cache" / "a" / "c.pkm"));
+  EXPECT_FALSE(fs::exists(dir / "src" / "a" / ".paykan_cache"));
+  auto r = in(dir / "use", "main.pkn");
+  EXPECT_EQ(r.exitCode, 42) << r.out;
+  auto inside =
+      in(dir / "src" / "a", "--emit-pkm --module-name=a::b -o b.pkm b.pkn");
+  ASSERT_EQ(inside.exitCode, 0) << inside.out;
+  // The same file: it records its source by the path from the source root.
+  EXPECT_EQ(slurp(dir / "src" / "a" / "b.pkm"),
+            slurp(dir / "use" / "a" / "b.pkm"));
+  auto other = in(dir, "--emit-pkm --module-name=x::b -o x.pkm src/a/b.pkn");
+  EXPECT_EQ(other.exitCode, 1) << other.out;
+  EXPECT_TRUE(contains(other.out, "src/a/b.pkn:1:1: error: module 'a::c' not "
+                                  "found (tried src/a/a/c.pkn, "
+                                  "src/a/a/c.pkm)"))
+      << other.out;
+  EXPECT_FALSE(fs::exists(dir / "x.pkm"));
+  fs::remove_all(dir);
+}
+
 // A function type in a signature or a field keeps its spelling in a
 // prebuilt module, modes included; an importer passes closures in and calls
 // the ones it gets back, from the source and from the `.pkm` alike.

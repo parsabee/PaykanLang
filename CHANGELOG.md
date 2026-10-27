@@ -1166,6 +1166,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     file; the module files record the path from the source root as before, so they are
     the same wherever `paykan` runs (docs/language/15-modules.md, docs/design/pkm.md
     §8.6).
+  - `--emit-pkm --module-name=a::b src/a/b.pkn` resolved the module's imports against
+    `src/a`, the file's directory, so its sibling `a::c` was looked for as
+    `src/a/a/c.pkn` and not found.  When the name's parts before its last are the last
+    directories of the file's path, the module's imports are now resolved against the
+    directory above them (`src`), where a program that imports it finds them, run from
+    anywhere (`cd src/a && paykan --emit-pkm --module-name=a::b b.pkn` too); otherwise
+    against the file's directory, as before (docs/language/17-the-paykan-command.md).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
