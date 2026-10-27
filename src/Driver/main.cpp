@@ -691,11 +691,14 @@ paykan::Status mainModuleIdentity(const Options &opts, std::string &name,
     }
   parts.push_back(normal.stem().string());
   for (const std::string &part : parts)
-    if (!paykan::module_name::isIdentifier(part))
-      return paykan::Status::error(
-          "cannot name the module of '" + opts.InputFilename +
-          "' after its path: '" + part +
-          "' is not an identifier (name it with --module-name)");
+    if (!paykan::frontend::isIdentifier(part))
+      return paykan::Status::error("cannot name the module of '" +
+                                   opts.InputFilename + "' after its path: '" +
+                                   part + "' is " +
+                                   (paykan::frontend::isKeyword(part)
+                                        ? "a keyword, which no import can name"
+                                        : "not an identifier") +
+                                   " (name it with --module-name)");
   if (parts.size() > 1) {
     name.clear();
     for (const std::string &part : parts) {

@@ -4,6 +4,7 @@
 #include "Options.h"
 
 #include "ModuleName.h"
+#include "paykan/Keywords.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -480,6 +481,13 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     if (!module_name::isModuleName(o.ModuleName)) {
       r.Error = "--module-name: '" + o.ModuleName +
                 "' is not a module name (identifiers separated by '::')";
+      for (std::string_view part : module_name::components(o.ModuleName))
+        if (frontend::isKeyword(part)) {
+          r.Error = "--module-name: '" + o.ModuleName +
+                    "' is not a module name: '" + std::string(part) +
+                    "' is a keyword, which no import can name";
+          break;
+        }
       return r;
     }
   }

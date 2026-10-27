@@ -1105,6 +1105,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     output, the mlir backend's LLVM IR, so with either of them it is now an error
     (`--emit-c and --emit-source exclude each other`), as with `--emit-pir`; with
     `--emit-llvm`, which names the same output, it is accepted.
+  - `--emit-pkm` named a module after a path with a keyword in it, and `--module-name`
+    took one: `--emit-pkm x/y/if.pkn` and `--module-name=a::match` wrote module files
+    no import can name (`import x::y::if;` is a syntax error).  Each part of a module
+    name is now an identifier as the grammar defines it, which no keyword is (the
+    frontends' list, `frontend::kKeywords`, now in `paykan/Keywords.h`): `cannot name
+    the module of 'x/y/if.pkn' after its path: 'if' is a keyword, which no import can
+    name (name it with --module-name)`, and `--module-name: 'a::match' is not a module
+    name: 'match' is a keyword, which no import can name`.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

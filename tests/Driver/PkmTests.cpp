@@ -2241,6 +2241,50 @@ TEST(Pkm, EmitPkmNamesTheModuleByItsNormalPath) {
   fs::remove_all(dir);
 }
 
+// A keyword is no identifier, so it is no part of a module name, given by
+// the path or by --module-name: `--emit-pkm x/y/if.pkn` wrote a module
+// `x::y::if` that no import can name (`import x::y::if;` is a syntax error),
+// and so did `--module-name=a::match` (SW-42).
+TEST(Pkm, EmitPkmRejectsAKeywordInTheModuleName) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_keyword_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  const std::string area = "fn area(w: int, h: int) -> int { return w * h; }\n";
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  for (const auto &[path, part] :
+       {std::pair{"x/y/if.pkn", "if"}, std::pair{"match/ok.pkn", "match"},
+        std::pair{"_/ok.pkn", "_"}}) {
+    writeFile(dir / path, area);
+    auto bad = paykan(std::string("--emit-pkm ") + path);
+    EXPECT_EQ(bad.exitCode, 1) << path << ": " << bad.out;
+    EXPECT_EQ(bad.out, std::string("paykan: cannot name the module of '") +
+                           path + "' after its path: '" + part +
+                           "' is a keyword, which no import can name (name "
+                           "it with --module-name)\n");
+    EXPECT_FALSE(fs::exists(fs::path(dir / path).replace_extension(".pkm")))
+        << path;
+  }
+  writeFile(dir / "x" / "y" / "ok.pkn", area);
+  for (const char *name : {"a::match", "::if", "fn::b"}) {
+    auto bad = paykan(std::string("--emit-pkm --module-name=") + name +
+                      " x/y/ok.pkn -o m.pkm");
+    EXPECT_EQ(bad.exitCode, 1) << name << ": " << bad.out;
+    EXPECT_TRUE(contains(bad.out, std::string("--module-name: '") + name +
+                                      "' is not a module name: '"))
+        << name << ": " << bad.out;
+    EXPECT_TRUE(contains(bad.out, "' is a keyword, which no import can name"))
+        << name << ": " << bad.out;
+    EXPECT_FALSE(fs::exists(dir / "m.pkm")) << name;
+  }
+  // A name that only starts like a keyword is an identifier.
+  auto ok = paykan("--emit-pkm --module-name=a::matches x/y/ok.pkn -o m.pkm");
+  EXPECT_EQ(ok.exitCode, 0) << ok.out;
+  fs::remove_all(dir);
+}
+
 // A function type in a signature or a field keeps its spelling in a
 // prebuilt module, modes included; an importer passes closures in and calls
 // the ones it gets back, from the source and from the `.pkm` alike.
