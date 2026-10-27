@@ -1384,6 +1384,72 @@ fn @helper(%a.1: i64) -> void {
       << errs;
 }
 
+// A parameter is a value, which `void` is not: a signature that takes one
+// is rejected wherever it is declared, an extern's or a vtable slot's too
+// (a module file whose CODE declared one crashed the mlir backend).
+TEST(PIRVerifier, RejectsVoidParameters) {
+  std::string errs = verifyText(R"(module "m"
+extern fn @other(i64, void) -> void module "lib"
+class C {
+  vtable {
+    destroy = @C.destroy : (obj, void) -> void
+  }
+}
+fn @C.destroy(%self.1: obj) -> void {
+  ret
+}
+fn @main() -> i64 {
+  ret 0
+}
+)");
+  EXPECT_NE(errs.find("function '@other' takes a void parameter"),
+            std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("class 'C' vtable slot 0 ('destroy') takes a void "
+                      "parameter"),
+            std::string::npos)
+      << errs;
+}
+
+// The cross-module checks of one module, against the modules at hand: an
+// extern naming a module whose PIR is not at hand is not checked, one
+// naming no module of the program is an error.
+TEST(PIRVerifier, ChecksTheLinksOfOneModule) {
+  ParseError err;
+  auto p = parseProgram(R"(module "main"
+extern fn @helper(i64) -> i64 module "lib"
+extern fn @later() -> void module "built"
+extern fn @elsewhere() -> void module "nowhere"
+fn @main() -> i64 {
+  ret 0
+}
+module "lib"
+fn @helper(%a.1: i64) -> void {
+  ret
+}
+)",
+                        err);
+  ASSERT_TRUE(p) << err.str();
+  const Module &lib = p->Modules[1];
+  const LinkedModules modules =
+      [&](const std::string &name) -> std::optional<const Module *> {
+    if (name == "lib")
+      return &lib;
+    if (name == "built")
+      return nullptr;
+    return std::nullopt;
+  };
+  const std::string errs = formatErrors(verifyLinks(p->Modules[0], modules));
+  EXPECT_NE(errs.find("'@helper' is declared (i64) -> i64 but module 'lib' "
+                      "defines it (i64) -> void"),
+            std::string::npos)
+      << errs;
+  EXPECT_EQ(errs.find("later"), std::string::npos) << errs;
+  EXPECT_NE(errs.find("module 'nowhere', which is not in the program"),
+            std::string::npos)
+      << errs;
+}
+
 // #70: an extern's `symbol` is its name in the defining module, so the
 // importer can declare two modules' `@tag` (and define its own) side by side.
 TEST(PIRVerifier, ExternSymbolLinksSameNamedFunctionsOfTwoModules) {

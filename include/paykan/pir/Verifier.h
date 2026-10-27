@@ -8,6 +8,8 @@
 
 #include "paykan/pir/PIR.h"
 
+#include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,6 +32,19 @@ std::vector<VerifyError> verify(const Program &p);
 /// Verify one module on its own.  References to other modules are only
 /// checked for well-formedness, not resolved.
 std::vector<VerifyError> verify(const Module &m);
+
+/// The modules an extern may name, by name: the module, null for one whose
+/// PIR is not at hand (an extern naming it is not checked), or nothing for
+/// a name that is no module of the program.
+using LinkedModules =
+    std::function<std::optional<const Module *>(const std::string &)>;
+
+/// The cross-module checks verify(Program) makes, for module @p m alone:
+/// each extern of @p m that names another module matches a definition in
+/// the module @p modules gives for its name, shared when it is, with the
+/// same signature or layout.
+std::vector<VerifyError> verifyLinks(const Module &m,
+                                     const LinkedModules &modules);
 
 /// One line per error.
 std::string formatErrors(const std::vector<VerifyError> &errors);
