@@ -244,7 +244,7 @@ token has the value 0.  Every input here is an error today too.
 | `0XFF`, `0B1` | `the prefix of a hexadecimal literal is '0x', in lower case: '0XFF'` (`... a binary literal is '0b' ...`) |
 | `0o17` | `there are no octal literals: '0o17' (write the value in hexadecimal, as '0x...', or in decimal)` |
 | `0x1.5`, `0b1.0` | `a hexadecimal literal has no fraction: '0x1.5'` (`a binary literal ...`) |
-| `1_000`, `3.141_592` | `'_' separates digits only in hexadecimal and binary literals: '1_000'` |
+| `1_000`, `3.141_592`, `1e1_0`, `1_` | `'_' separates digits only in hexadecimal and binary literals: '1_000'` |
 | `255u8`, `1f32`, `2.5f32` (a number directly followed by a numeric type's name) | `there are no literal suffixes: '255u8' (a literal takes its type from the context, as in 'x: u8 = 255')` |
 | 2^64 or more, any base | `integer is out of range: 18446744073709551616 (an integer literal is at most 18446744073709551615)` |
 
@@ -376,15 +376,18 @@ operator adds the first hint that applies:
 | a shift whose value is unsigned and whose count is a signed integer or a `char` | ` (a shift count is unsigned: convert it with 'unsigned(...)')` |
 | a shift whose value is a literal and whose count is unsigned | ` (the value shifted takes no type from the count: write its type, as in 'unsigned(1)')`, with the literal's value |
 | two literals | ` (two literals are 'int': give one a type, as in 'unsigned(1) << 5')`, with the operator and the values |
-| one unsigned operand of type U, the other a signed integer or `char` of type S | ` (the bitwise operators take unsigned operands: convert the 'S' with 'U(...)')` |
-| a signed integer or `char` operand | ` (the bitwise operators take unsigned operands: convert with 'W(...)')`, W the unsigned type of its width: `int` gives `unsigned`, `i32` `u32`, `i16` `u16`, `i8` and `char` `u8` |
+| `&`, `\|` or `^` with one unsigned operand of type U, the other a signed integer or `char` of type S | ` (the bitwise operators take unsigned operands: convert the 'S' with 'U(...)')` |
+| a signed integer or `char` operand, a shift's value too whatever its count | ` (the bitwise operators take unsigned operands: convert with 'W(...)')`, W the unsigned type of its width: `int` gives `unsigned`, `i32` `u32`, `i16` `u16`, `i8` and `char` `u8` |
 | a float operand | ` (the bitwise operators take unsigned operands, not floats)`; for `^`, ` ('^' is exclusive or, not a power)` |
 | anything else | none |
 
 With `^` and numeric operands that are not unsigned, the hint ends in `;
 '^' is exclusive or, not a power`.  `~` takes ` (for a logical not, write
 '!')` for a `bool`, the same-width conversion for a signed integer or
-`char`, and the float text for a float.
+`char`, and the float text for a float.  A shift's count never decides its
+result's type, so a signed value with an unsigned count takes the
+same-width conversion, not the count's type: `i << n` with `i: i32` and
+`n: u8` names `u32(...)`, since `u8(i)` would drop the value's upper bits.
 
 | Program | Error |
 |---------|-------|
@@ -539,10 +542,15 @@ integer fields (a `char`, an `array-repeat` count, a `tuple-index`) stay
 `int64`.
 
 The binary codes and names are new, so a `.pkm` or cache entry written
-after this change is unreadable by an older 0.3.0-dev compiler (`unknown
-binary operator 'bitand'`, `reserved opcode`), as any file of another build
-is (each reader takes only its own build's version); an older file reads as
-before.  `IntegerLiteral`'s layout changes within the dev cycle.
+after this change is unreadable by an older 0.3.0-dev compiler, as any file
+of another build is: a development build takes only files of its own build,
+so its manifest check rejects a prebuilt file (`... build ID ...; this
+paykan is development build ... and takes only files of its own build`)
+and finds a cache entry stale before any section is read
+([`pkm.md`](pkm.md)).  The older readers' own errors for the new names and
+codes (`unknown binary operator 'bitand'`, `reserved opcode`) are therefore
+never printed for such a file.  The readers still take every older name and
+code.  `IntegerLiteral`'s layout changes within the dev cycle.
 
 ## Not in this change
 

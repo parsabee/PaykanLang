@@ -550,19 +550,26 @@ TEST(GrammarEdge, NumberLiteralsOfOtherLanguagesAreRejected) {
                "literals: '1__0'"},
       {"1_000", "'_' separates digits only in hexadecimal and binary "
                 "literals: '1_000'"},
+      {"1e1_0", "'_' separates digits only in hexadecimal and binary "
+                "literals: '1e1_0'"},
+      {"1_", "'_' separates digits only in hexadecimal and binary "
+             "literals: '1_'"},
+      {"1.5_", "'_' separates digits only in hexadecimal and binary "
+               "literals: '1.5_'"},
       {"255u8", "there are no literal suffixes: '255u8' (a literal takes its "
                 "type from the context, as in 'x: u8 = 255')"},
       {"0x1.5", "a hexadecimal literal has no fraction: '0x1.5'"},
   };
   for (const Case &c : cases) {
-    auto r = parseWithDiags(std::string("fn main() -> int {\n  x = ") +
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  let x = ") +
                             c.Literal + ";\n  return 0;\n}\n");
     EXPECT_FALSE(r.Ok) << c.Literal;
     ASSERT_EQ(r.Diags.size(), 1u) << c.Literal << "\n" << r.Text;
     EXPECT_EQ(r.Diags[0].Message, c.Error) << c.Literal;
-    EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 7u) << c.Literal;
+    EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 11u) << c.Literal;
   }
-  EXPECT_FALSE(parse("fn main() -> int {\n  t = (1, 2);\n  x = t.0x1;\n"
+  EXPECT_FALSE(parse("fn main() -> int {\n  let t = (1, 2);\n"
+                     "  let x = t.0x1;\n"
                      "  return 0;\n}\n")
                    .Ok);
 }
@@ -574,10 +581,10 @@ TEST(GrammarEdge, NumberLiteralsOfOtherLanguagesAreRejected) {
 TEST(GrammarEdge, WideLiteralsParseOnEveryFrontend) {
   for (const char *expr : {"-9223372036854775808", "5 - 9223372036854775808",
                            "9223372036854775808"}) {
-    auto r = parseWithDiags(std::string("fn main() -> int {\n  x = ") + expr +
-                            ";\n  return 0;\n}\n");
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  let x = ") +
+                            expr + ";\n  return 0;\n}\n");
     EXPECT_TRUE(r.Ok) << expr << "\n" << r.Text;
-    EXPECT_TRUE(parse(std::string("fn main() -> int {\n  x = ") + expr +
+    EXPECT_TRUE(parse(std::string("fn main() -> int {\n  let x = ") + expr +
                       ";\n  return 0;\n}\n")
                     .Ok)
         << expr;

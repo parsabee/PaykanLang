@@ -421,31 +421,33 @@ TEST(SizedTypes, LiteralRangesAtTheLimits) {
       "does not fit in 'int' (-9223372036854775808 to 9223372036854775807; ";
   for (const auto &[stmt, message] :
        {std::pair<std::string, std::string>{
-            "x: u8 = 0x100;",
+            "let x: u8 = 0x100;",
             "the literal 256 does not fit in 'u8' (0 to 255)"},
-        {"y: i8 = 0xFF;", "the literal 255 does not fit in 'i8' (-128 to 127)"},
-        {"z: u32 = 0xFFFF_FFFF_FFFF_FFFF;",
+        {"let y: i8 = 0xFF;",
+         "the literal 255 does not fit in 'i8' (-128 to 127)"},
+        {"let z: u32 = 0xFFFF_FFFF_FFFF_FFFF;",
          "the literal 18446744073709551615 does not fit in 'u32' (0 to "
          "4294967295)"},
-        {"w: int = 18446744073709551615;",
+        {"let w: int = 18446744073709551615;",
          "the literal 18446744073709551615 " + intRange +
              "a literal above 9223372036854775807 needs an unsigned context, "
              "as in 'u: unsigned = 18446744073709551615')"},
-        {"w = 9223372036854775808;",
+        {"let w = 9223372036854775808;",
          "the literal 9223372036854775808 " + intRange +
              "a literal above 9223372036854775807 needs an unsigned context, "
              "as in 'u: unsigned = 9223372036854775808')"},
-        {"v: u8 = -0x8000_0000_0000_0000;",
+        {"let v: u8 = -0x8000_0000_0000_0000;",
          "the literal -9223372036854775808 does not fit in 'u8' (0 to 255)"},
-        {"q: i64 = 0x8000_0000_0000_0000;",
+        {"let q: i64 = 0x8000_0000_0000_0000;",
          "the literal 9223372036854775808 " + intRange},
-        {"r: f16 = 0xFFFF_FFFF_FFFF_FFFF;",
+        {"let r: f16 = 0xFFFF_FFFF_FFFF_FFFF;",
          "the literal 1.84467e+19 does not fit in 'f16'"},
-        {"s: u16? = 0x1_0000;",
+        {"let s: u16? = 0x1_0000;",
          "the literal 65536 does not fit in 'u16' (0 to 65535)"}})
     expectError(inMain(stmt), "error: " + message);
-  expectOk(inMain("a: u64 = 18446744073709551615; b: i8 = -128; c: i8 = 127; "
-                  "d: i16 = -0x8000; e: u32 = 0xFFFF_FFFF;"));
+  expectOk(inMain("let a: u64 = 18446744073709551615; let b: i8 = -128; "
+                  "let c: i8 = 127; let d: i16 = -0x8000; "
+                  "let e: u32 = 0xFFFF_FFFF;"));
 }
 
 // INT64_MIN is still written as an expression: its magnitude under a `-`
@@ -453,19 +455,19 @@ TEST(SizedTypes, LiteralRangesAtTheLimits) {
 TEST(SizedTypes, Int64MinIsStillWrittenAsAnExpression) {
   const std::string intRange =
       "does not fit in 'int' (-9223372036854775808 to 9223372036854775807";
-  expectError(inMain("x = -9223372036854775808;"),
-              "2:6: error: the literal 9223372036854775808 " + intRange +
+  expectError(inMain("let x = -9223372036854775808;"),
+              "2:10: error: the literal 9223372036854775808 " + intRange +
                   "; write the most negative 'int' as "
                   "'-9223372036854775807 - 1')");
-  expectError(inMain("x = 5 - 9223372036854775808;"),
+  expectError(inMain("let x = 5 - 9223372036854775808;"),
               "error: the literal 9223372036854775808 " + intRange +
                   "; a literal above 9223372036854775807 needs an unsigned "
                   "context, as in 'u: unsigned = 9223372036854775808')");
-  expectError(inMain("x = -18446744073709551615;"),
-              "2:6: error: the literal 18446744073709551615 " + intRange +
+  expectError(inMain("let x = -18446744073709551615;"),
+              "2:10: error: the literal 18446744073709551615 " + intRange +
                   ")\n");
-  expectOk(
-      inMain("x = -9223372036854775807 - 1; y: int = -0x7FFF_FFFF_FFFF_FFFF;"));
+  expectOk(inMain("let x = -9223372036854775807 - 1; "
+                  "let y: int = -0x7FFF_FFFF_FFFF_FFFF;"));
 }
 
 // A wide literal never reaches what takes an `int` and negates it, a
@@ -473,8 +475,8 @@ TEST(SizedTypes, Int64MinIsStillWrittenAsAnExpression) {
 TEST(SizedTypes, WideLiteralsNeverReachIntConsumers) {
   for (const char *stmt :
        {"for i in 0..10 step -0x8000_0000_0000_0000 { }",
-        "a: int[4] = [1, 2, 3, 4]; x = a[0x8000_0000_0000_0000];",
-        "a: int[4] = [1, 2, 3, 4]; x = a[-0x8000_0000_0000_0000];",
+        "let a: int[4] = [1, 2, 3, 4]; let x = a[0x8000_0000_0000_0000];",
+        "let a: int[4] = [1, 2, 3, 4]; let x = a[-0x8000_0000_0000_0000];",
         "a: int[4] = [1, 2, 3, 4]; a[-0x8000_0000_0000_0000] = 1;",
         "a: int[4] = [1, 2, 3, 4]; a[0xFFFF_FFFF_FFFF_FFFF] = 1;"}) {
     auto r = semaCheck(inMain(stmt));
@@ -492,14 +494,14 @@ TEST(SizedTypes, WideLiteralsNeverReachIntConsumers) {
 // to 0xFFFF_FFFF_FFFF_FFFF on an `unsigned`.
 TEST(SizedTypes, HexValueArms) {
   expectOk(inMain(R"(
-    b: u8 = 1;  match b { 0xFF { } 0b1 { } _ { } }
-    c: i8 = 1;  match c { -0x80 { } 0x7F { } _ { } }
-    u: unsigned = 1;
+    let b: u8 = 1;  match b { 0xFF { } 0b1 { } _ { } }
+    let c: i8 = 1;  match c { -0x80 { } 0x7F { } _ { } }
+    let u: unsigned = 1;
     match u { 0xFFFF_FFFF_FFFF_FFFF { } 0x8000_0000_0000_0000 { } 0 { } _ { } }
   )"));
-  expectError(inMain("c: i8 = 1; match c { 0xFF { } _ { } }"),
+  expectError(inMain("let c: i8 = 1; match c { 0xFF { } _ { } }"),
               "error: the literal 255 does not fit in 'i8' (-128 to 127)");
-  expectError(inMain("n = 1; match n { 0xFFFF_FFFF_FFFF_FFFF { } _ { } }"),
+  expectError(inMain("let n = 1; match n { 0xFFFF_FFFF_FFFF_FFFF { } _ { } }"),
               "error: the literal 18446744073709551615 does not fit in 'int'");
 }
 

@@ -107,12 +107,14 @@ Any other byte is a lexical error (`invalid character 'X'`).
   literals (`0o17` is an error; `017` is the decimal 17).
 - A `_` stands between two digits of a hexadecimal or binary literal, one at
   a time (`0x_FF`, `0xFF_` and `0x1__0`: `a '_' in a number must stand
-  between two digits`). A decimal or float literal takes none: `1_000` and
-  `3.141_592` are one error each (`'_' separates digits only in hexadecimal
-  and binary literals`). A number directly followed by a numeric type's name
-  is one error too (`255u8`, `2.5f32`: `there are no literal suffixes ...`);
+  between two digits`). A decimal or float literal takes none: `1_000`,
+  `3.141_592`, `1e1_0` and a `_` after the digits (`1_`, `1.5_`) are one
+  error each (`'_' separates digits only in hexadecimal and binary
+  literals`). A number directly followed by a numeric type's name is one
+  error too (`255u8`, `2.5f32`: `there are no literal suffixes ...`);
   directly followed by any other identifier it is two tokens, as ever:
-  `0..10step 2` and `if c then 1else 2` are valid.
+  `0..10step 2` and `if c then 1else 2` are valid, and `1_x` is `1` and the
+  identifier `_x`.
 - `FLOAT` is converted with `strtod` and must denote a finite float:
   a literal that overflows to infinity (`1e999`) or a nonzero one that
   underflows to zero (`1e-400`) is an error (`float is out of range: ...`).
@@ -739,10 +741,11 @@ specification does not. Every frontend must reject them (the
   `f(, 1)`, `[, 1]`, `fn f(, a: int)`.
 - Repeated commas in an enum body after the first variant: `enum E { a,, b }`.
 - Number literals in the forms of other languages, each a lexical error
-  (§1): an upper-case prefix `0X1F`, a misplaced `_` (`0x_FF`, `1__0`), a
-  `_` in a decimal `1_000`, a suffix `255u8` and a fraction `0x1.5`.  `t.0x1`
-  is not a tuple index of 1: the digits after the `.` are the index `0`, and
-  `x1` the identifier after it, a syntax error.
+  (§1): an upper-case prefix `0X1F`, a misplaced `_` (`0x_FF`, `0x1__0`),
+  a `_` in a decimal (`1_000`, `1__0`, `1e1_0`, `1_`), a suffix `255u8` and
+  a fraction `0x1.5`.  `t.0x1` is not a tuple index of 1: the digits after
+  the `.` are the index `0`, and `x1` the identifier after it, a syntax
+  error.
 - Shifts in the forms of other languages (§7, §9): a `>>` or `>>=` with a
   space or a newline between its two tokens (`a > > b`, `x > >= 1;`), a
   `>>>` (`a >>> b`), and a chain of shifts (`a << b << c`).

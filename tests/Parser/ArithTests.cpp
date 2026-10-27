@@ -319,14 +319,14 @@ TEST(Arith, IntLiteralMaxAccepted) {
 TEST(Arith, IntLiteralsReachTheUnsignedRange) {
   auto [ok, _] = parse(R"(
     fn main() -> int {
-      u: unsigned = 18446744073709551615;
-      v: unsigned = 9223372036854775808;
+      let u: unsigned = 18446744073709551615;
+      let v: unsigned = 9223372036854775808;
       return 0;
     }
   )");
   EXPECT_TRUE(ok);
   auto r = parseWithDiags("fn main() -> int {\n"
-                          "  x = 18446744073709551616;\n"
+                          "  let x = 18446744073709551616;\n"
                           "  return 0;\n"
                           "}\n");
   ASSERT_FALSE(r.Ok);
@@ -334,7 +334,7 @@ TEST(Arith, IntLiteralsReachTheUnsignedRange) {
   EXPECT_EQ(r.Diags[0].Message, "integer is out of range: "
                                 "18446744073709551616 (an integer literal is "
                                 "at most 18446744073709551615)");
-  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 7u);
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 11u);
 }
 
 // A float literal must denote a finite float (#73): overflow to +-inf and a
@@ -378,7 +378,7 @@ TEST(Arith, FloatLiteralSubnormalAccepted) {
 TEST(Arith, IntLiteralMinMagnitudeParses) {
   auto [ok, _] = parse(R"(
     fn main() -> int {
-      x: int = -9223372036854775808;
+      let x: int = -9223372036854775808;
       return 0;
     }
   )");
@@ -391,22 +391,22 @@ TEST(Arith, IntLiteralMinMagnitudeParses) {
 TEST(Arith, HexAndBinaryLiteralValues) {
   std::string ast = dumpAST(R"(
     fn main() -> int {
-      a = 0xFF;
-      b = 0x1e5;
-      c = 0b1010;
-      d: unsigned = 0xFFFF_FFFF_FFFF_FFFF;
-      e: int[0x4] = [0; 0b11];
+      let a = 0xFF;
+      let b = 0x1e5;
+      let c = 0b1010;
+      let d: unsigned = 0xFFFF_FFFF_FFFF_FFFF;
+      let e: int[0x4] = [0; 0b11];
       return 0;
     }
   )");
   for (const char *line :
-       {"IntegerLiteral <3:11-3:15> 255\n", "IntegerLiteral <4:11-4:16> 485\n",
-        "IntegerLiteral <5:11-5:17> 10\n",
-        "IntegerLiteral <6:21-6:42> 18446744073709551615\n",
-        "FixedArrayType <7:10-7:18> 4\n", "<7:21-7:30> 3 copies\n"})
+       {"IntegerLiteral <3:15-3:19> 255\n", "IntegerLiteral <4:15-4:20> 485\n",
+        "IntegerLiteral <5:15-5:21> 10\n",
+        "IntegerLiteral <6:25-6:46> 18446744073709551615\n",
+        "FixedArrayType <7:14-7:22> 4\n", "<7:25-7:34> 3 copies\n"})
     EXPECT_NE(ast.find(line), std::string::npos) << line << ast;
-  for (const char *decl : {"e: int[0x8000_0000_0000_0000] = [0];",
-                           "e = [0; 0x8000_0000_0000_0000];"}) {
+  for (const char *decl : {"let e: int[0x8000_0000_0000_0000] = [0];",
+                           "let e = [0; 0x8000_0000_0000_0000];"}) {
     auto r = parseWithDiags(std::string("fn main() -> int {\n  ") + decl +
                             "\n  return 0;\n}\n");
     ASSERT_FALSE(r.Ok) << decl;

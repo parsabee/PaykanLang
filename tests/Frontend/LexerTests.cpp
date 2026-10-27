@@ -393,6 +393,17 @@ TEST(Lexer, DecimalLiteralsTakeNoSeparatorOrSuffix) {
                     "literals: '3.141_592'"},
       {"1__0", "'_' separates digits only in hexadecimal and binary "
                "literals: '1__0'"},
+      // A `_` after an exponent's digits, or at the end of the digits.
+      {"1e1_0", "'_' separates digits only in hexadecimal and binary "
+                "literals: '1e1_0'"},
+      {"2.5e-3_1", "'_' separates digits only in hexadecimal and binary "
+                   "literals: '2.5e-3_1'"},
+      {"1_", "'_' separates digits only in hexadecimal and binary "
+             "literals: '1_'"},
+      {"1.5_", "'_' separates digits only in hexadecimal and binary "
+               "literals: '1.5_'"},
+      {"1e10_", "'_' separates digits only in hexadecimal and binary "
+                "literals: '1e10_'"},
       {"255u8", "there are no literal suffixes: '255u8'" + hint + "u8 = 255')"},
       {"1f32", "there are no literal suffixes: '1f32'" + hint + "f32 = 1')"},
       {"2.5f32",
@@ -421,4 +432,10 @@ TEST(Lexer, DecimalLiteralsTakeNoSeparatorOrSuffix) {
   EXPECT_EQ(glued.Lines[3], "1:11-1:12 INT 1");
   EXPECT_EQ(glued.Lines[4], "1:12-1:16 KW_ELSE else");
   EXPECT_EQ(glued.Errors, 0u) << glued.Diags;
+  // A `_` followed by a letter starts an identifier glued to the number.
+  auto ident = dump("1_x");
+  ASSERT_EQ(ident.Lines.size(), 3u);
+  EXPECT_EQ(ident.Lines[0], "1:1-1:2 INT 1");
+  EXPECT_EQ(ident.Lines[1], "1:2-1:4 IDENT _x");
+  EXPECT_EQ(ident.Errors, 0u) << ident.Diags;
 }

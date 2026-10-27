@@ -757,9 +757,11 @@ error: operator '&' is not defined for types 'int' and 'int' (the bitwise operat
 ```
 
 `i32 ^ i32` adds `'^' is exclusive or, not a power`, and `x << i` with `i: int` is `(a shift
-count is unsigned: convert it with 'unsigned(...)')`. A value goes back to `int` with
-`int(x)` for a `u8`, `u16` or `u32`, and with `u.toInt()`, an `int?`, for an `unsigned`
-([Sized numeric types](#sized-numeric-types)).
+count is unsigned: convert it with 'unsigned(...)')`. A shift's result has its value's type,
+so a signed value names the unsigned type of its own width whatever the count: `i << n` with
+`i: i32` and `n: u8` is `convert with 'u32(...)'`. A value goes back to `int` with `int(x)`
+for a `u8`, `u16` or `u32`, and with `u.toInt()`, an `int?`, for an `unsigned` ([Sized
+numeric types](#sized-numeric-types)).
 
 **Literals.** Only a literal adapts to its context, so two literals are two `int`s, which
 have no bitwise operator: `m: u32 = 1 << 5` is an error, and `u32(1) << 5` is the spelling.

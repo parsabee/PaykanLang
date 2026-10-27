@@ -180,6 +180,26 @@ TEST(Bitwise, ShiftCounts) {
   expectError(inMain("let x: u8 = 1; let c = x << -1;"),
               "the literal -1 does not fit in 'unsigned' (0 to "
               "18446744073709551615)");
+  // A signed value converts to the unsigned type of its own width, since
+  // the result has the value's type: never to the count's.
+  expectError(inMain("let i: i32 = 1; let n: u8 = 1; let c = i << n;"),
+              "operator '<<' is not defined for types 'i32' and 'u8' (the "
+              "bitwise operators take unsigned operands: convert with "
+              "'u32(...)')\n");
+  expectError(inMain("let i = 1000; let n: u16 = 2; let c = i >> n;"),
+              "operator '>>' is not defined for types 'int' and 'u16' (the "
+              "bitwise operators take unsigned operands: convert with "
+              "'unsigned(...)')\n");
+  expectError(inMain("let i: i16 = 1; let n: unsigned = 1; let c = i << n;"),
+              "operator '<<' is not defined for types 'i16' and 'unsigned' "
+              "(the bitwise operators take unsigned operands: convert with "
+              "'u16(...)')\n");
+  expectError(inMain("let c = 'a'; let n: u8 = 1; let d = c >> n;"),
+              "operator '>>' is not defined for types 'char' and 'u8' (the "
+              "bitwise operators take unsigned operands: convert with "
+              "'u8(...)')\n");
+  // The spelling that hint gives keeps the value's bits.
+  expectOk(inMain("let i: i32 = 1; let n: u8 = 1; let c: u32 = u32(i) << n;"));
   // `& | ^` keep the one-type rule.
   expectError(inMain("let x: u8 = 1; let y: u16 = 2; let c = x & y;"),
               "operator '&' is not defined for types 'u8' and 'u16' (the "

@@ -1331,10 +1331,12 @@ std::string bitwiseHint(const ast::BinaryExpr *node, ast::Type *lhsTy,
     return " (two literals are 'int': give one a type, as in 'unsigned(" +
            lhsLiteral + ") " + node->getOpcodeStr() + " " + rhsLiteral + "'" +
            power + ")";
-  if (l == BitOperand::Unsigned && r == BitOperand::SignedOrChar)
+  // A shift's count never decides its result's type, so a signed value
+  // takes the unsigned type of its own width (below), never the count's.
+  if (!shift && l == BitOperand::Unsigned && r == BitOperand::SignedOrChar)
     return unsignedOnly + "the '" + typeName(rhsTy) + "' with '" +
            typeName(lhsTy) + "(...)')";
-  if (r == BitOperand::Unsigned && l == BitOperand::SignedOrChar)
+  if (!shift && r == BitOperand::Unsigned && l == BitOperand::SignedOrChar)
     return unsignedOnly + "the '" + typeName(lhsTy) + "' with '" +
            typeName(rhsTy) + "(...)')";
   if (l == BitOperand::SignedOrChar || r == BitOperand::SignedOrChar)

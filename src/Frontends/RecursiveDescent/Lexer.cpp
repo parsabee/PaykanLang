@@ -640,10 +640,13 @@ Token Lexer::lexNumber(size_t start, size_t line, size_t col, bool afterDot) {
       ++i;
     return i;
   };
-  // A `_` followed by a digit or another `_` takes the run of digits and
-  // `_` into the literal, which is then the separator error.
+  // A `_` right after the integer, fraction or exponent digits takes the
+  // run of digits and `_` into the literal, which is then the separator
+  // error: followed by a digit, another `_` or no identifier character
+  // (`1_000`, `1__0`, `1e1_0`, `1_`).  A `_` followed by a letter starts an
+  // identifier glued to the number (`1_x`), a token of its own.
   auto separatorRun = [&]() {
-    if (peekAt(0) != '_' || !(isDigit(peekAt(1)) || peekAt(1) == '_'))
+    if (peekAt(0) != '_' || (isIdentStart(peekAt(1)) && peekAt(1) != '_'))
       return false;
     while (isDigit(peekAt(0)) || peekAt(0) == '_')
       advance();
@@ -652,18 +655,18 @@ Token Lexer::lexNumber(size_t start, size_t line, size_t col, bool afterDot) {
 
   bool isFloat = false;
   bool separated = separatorRun();
-  if (!separated) {
-    if (peekAt(0) == '.' && peekAt(1) != '.') {
-      isFloat = true;
+  if (!separated && peekAt(0) == '.' && peekAt(1) != '.') {
+    isFloat = true;
+    advance();
+    while (isDigit(peekAt(0)))
       advance();
-      while (isDigit(peekAt(0)))
-        advance();
-      separated = separatorRun();
-      if (!separated)
-        advance(exponentLength());
-    } else if (size_t n = exponentLength()) {
+    separated = separatorRun();
+  }
+  if (!separated) {
+    if (size_t n = exponentLength()) {
       isFloat = true;
       advance(n);
+      separated = separatorRun();
     }
   }
   const Tok kind = isFloat ? Tok::Float : Tok::Int;
