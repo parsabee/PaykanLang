@@ -166,9 +166,10 @@ links only what it uses ([Module Files](15-modules.md#module-files)).
 - **LLVM IR.** `run` executes the program in-process with LLVM's JIT compiler, with no C
   compiler involved; `build` writes a native object and links it against the runtime with
   the system C compiler: `$CC` when the variable is set, `cc` otherwise. `-O<n>` selects
-  LLVM's optimization pipeline and how hard its code generator works, for `run`'s JIT as
-  for `build`: at `-O0` neither optimizes. `--emit-llvm` (or `--emit-source`) prints the
-  IR.
+  LLVM's optimization pipeline and how hard its code generator works, the same for `run`'s
+  JIT as for `build`: at `-O0` neither optimizes (the code generator uses its fast
+  instruction selector), and the code generator works at its least at `-O1`, its default
+  at `-O2` and its most at `-O3`. `--emit-llvm` (or `--emit-source`) prints the IR.
 - **C.** `--emit-c` prints the program as one strictly conforming C11 translation unit,
   which any C11 compiler builds against the runtime ([The C output](../c-backend.md)). The
   code of a module compiled into its module file (the standard library's, a cached import's)

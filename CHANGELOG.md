@@ -784,6 +784,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   halfway between two values of the type, this can differ from rounding the text once
   (`1.0000000596046448` is `1` as an `f32`). A literal and the parse of its text always
   agree.
+- `paykan run` generates code at the level `paykan build` does for the same `-O`: LLVM's
+  code generator does no optimisation at `-O0` (its fast instruction selector), and works
+  at its least at `-O1`, its default at `-O2` and its most at `-O3`
+  (docs/language/17-the-paykan-command.md).  The JIT used LLVM's default level at every
+  `-O` before, so `run -O0` and `run -O1` now generate less optimised code than they did,
+  `run -O3` more optimised code, and `run -O2` the same.  The samples print the same at
+  `run -O1` and `run -O3` as at `run -O2`, with the same heap statistics.
 
 ### Removed
 
@@ -842,9 +849,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     or a `bool` constant of the same value, and never a float).  And `run -O0` generated
     code at LLVM's default level from a module it had not optimised, which took 47 s for a
     5000-armed match whose `build -O0` takes 2.6 s: the JIT now generates code at the
-    level a native build does for the same `-O` (no optimisation at `-O0`, LLVM's least at
-    `-O1`, its default at `-O2` as before, its most at `-O3`), and takes 0.3 s
-    (docs/language/17-the-paykan-command.md).
+    level a native build does for the same `-O` (under Changed), and takes 0.3 s.
   - The LLVM path's lowering of `scf` to `cf` took time and memory quadratic in the number
     of `if`s in one function's block (a long run of `if` statements, or a `match` on a
     `Str` or a float with many arms, which tests each in turn): a function of 3000 `if`s
