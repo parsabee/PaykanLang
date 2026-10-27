@@ -644,11 +644,11 @@ A tagged union is held in place too, its tag followed by every variant's fields,
 current variant's set ([Held in place](07-enums.md#held-in-place)), and it retains and releases
 the references its current variant holds. A value of one of these types is released in place
 at the end of its scope. At a `return`, `break` or `continue` leaving it, and as a statement's
-temporary, one whose references take more than a few releases is released in place too until
-its function has written several hundred such releases, and after that by one call of a
-function the compiler writes once for the type, which releases a tagged union's references by
-its tag: a function's code does not grow with its ways out times the references its values'
-types can hold.
+temporary, one whose references take more than four releases (an array's elements counting
+once, for the loop that visits them) is released in place too until its function has written
+512 such releases, and after that by one call of a function the compiler writes once for the
+type, which releases a tagged union's references by its tag: a function's code does not grow
+with its ways out times the references its values' types can hold.
 
 An array, a tuple, a struct or a tagged union is passed by address: the callee copies a plain
 parameter when the call starts, and reads a `view` parameter where it is. So a call with an

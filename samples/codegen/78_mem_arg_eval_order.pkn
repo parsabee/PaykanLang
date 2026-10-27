@@ -12,8 +12,9 @@
 //            function value (one a field holds too), for an argument under
 //            an `inout` result and one before a closure that writes it, and
 //            for a slice parameter passed on to another (copied by its
-//            length when the program runs), and no copy is made where no
-//            later operand may write it.
+//            length when the program runs; to a function, a function
+//            value, a method and a constructor), and no copy is made where
+//            no later operand may write it.
 // expect-stdout: field: 1 1
 // expect-stdout: inout: 1 1 1 A(n: 1)
 // expect-stdout: equality: False True False
@@ -25,6 +26,7 @@
 // expect-stdout: unchanged: 1 9 2
 // expect-stdout: more: 1 1 1 1
 // expect-stdout: slice passed on: 6 a1c3 a1 z1
+// expect-stdout: to a method and a constructor: c3 b
 
 import ::io;
 
@@ -136,6 +138,24 @@ fn firstOn(ss: view Str[], a: Arrays) -> Str {
   f = fn(ts: view Str[], x: int) -> Str => ts[0] + "";
   return f(ss, resetArrays(a));
 }
+
+class Picker {
+  n: int;
+  view fn pick(ss: view Str[], x: int) -> Str => ss[2] + "";
+}
+
+class Kept {
+  s: Str;
+}
+
+impl Kept {
+  fn __init__(ss: view Str[], x: int) { self.s = ss[1] + ""; }
+}
+
+fn pickOn(ss: view Str[], a: Arrays) -> Str {
+  return Picker(0).pick(ss, resetArrays(a));
+}
+fn keptOn(ss: view Str[], a: Arrays) -> Str => Kept(ss, resetArrays(a)).s;
 
 fn arrays() -> Arrays => Arrays([1, 2, 3], ["a" + Str(1), "b", "c" + Str(3)]);
 
@@ -278,5 +298,10 @@ fn main() -> int {
   l3 = firstOn(arrs.ss, arrs);
   io::println("slice passed on: " + Str(l1) + " " + l2 + " " + l3 + " "
       + arrs.ss[0]);
+  arrs = arrays();
+  l4 = pickOn(arrs.ss, arrs);
+  arrs = arrays();
+  l5 = keptOn(arrs.ss, arrs);
+  io::println("to a method and a constructor: " + l4 + " " + l5);
   return 0;
 }

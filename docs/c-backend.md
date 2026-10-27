@@ -265,7 +265,16 @@ not within the limits a program's own size sets: an object of more than
 65,535 bytes (a string constant or a fixed-size array that large), more than
 127 nested blocks (see Control flow above), a `switch` of more than 1023
 cases (a `match` with that many arms) or a source line of more than 4095
-characters (a long string literal's).
+characters (a long string literal's).  Nor do its names keep within the
+initial characters C11 promises are significant in an identifier, 31 in
+one with external linkage and 63 in one without: a generated name spells
+its module's name and its symbol's in full, escaped
+(`pk_68__borrowed__parameters_S...`), so the names of one module's
+functions, which have external linkage, often run past 31 characters and
+share their first 31 (in the C of 118 of the samples corpus's 130
+programs), and a `static` one, such as a drop function's for a long type,
+can run past 63.  GCC and Clang take every character of a name as
+significant.
 
 The `CStrictC11` ctest (`scripts/c_strict.py`) enforces this over the runnable
 programs of the samples corpus (`samples/codegen`, `samples/leak-check` and

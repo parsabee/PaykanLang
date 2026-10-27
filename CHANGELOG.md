@@ -827,7 +827,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     receiver of a struct method that may change `self` is still its storage, as an `inout`
     argument is.  `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape on every path,
     with `__super__`'s arguments, a function value a field holds, an argument under an
-    `inout` result, one before a closure that writes it and slices passed on.
+    `inout` result, one before a closure that writes it and slices passed on to a
+    function, a function value, a method and a constructor.
   - The `lending` pass took time quadratic in the arguments it lent in one block: it
     removed the retain of each copy it lent one at a time, and each removal moved the rest
     of the block.  A function of 3000 statements `r += first(p, bump(p)) + first(c.p,
@@ -883,9 +884,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     -pedantic-errors` reported `string length '4096' is greater than the length '4095'
     ISO C99 compilers are required to support`.  A longer string is now written as its
     bytes, character constants in braces, then the terminating `0`.  docs/c-backend.md
-    ("Standard C") names the limits only a program's own size passes, such as an object of
-    more than 65,535 bytes.  `samples/codegen/80_long_string_literal.pkn` holds a string of
-    4096 bytes.
+    ("Standard C") names the limits the C does not keep within: those only a program's own
+    size passes, such as an object of more than 65,535 bytes, and the initial characters
+    C11 promises are significant in a name (31 in an external one, 63 in another), which
+    the generated names, a module's name and a symbol's in full, often run past.
+    `samples/codegen/80_long_string_literal.pkn` holds a string of 4096 bytes.
   - The C of a program that assigned a struct or a fixed-size array field of an object it
     held in a variable or a lambda's capture (`d = h.c; d.p = P(7, 8, 9);`, `k = fn() {
     c.p = P(7, 8, 9); };`, `d = c; d.p = P(7, 8, 9);` with `c: inout C`) failed the strict

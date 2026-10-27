@@ -571,9 +571,9 @@ none either, wherever that release is; a `release` of anything else, such
 as a load of a local's slot the moves at last use (§12) may have emptied,
 keeps its test.  So the mark is of the value, not of the place it is
 retained in: a `match` arm binding a class retains an optional subject's
-box with a plain `retain`, as that box is null on the way to `None`.  Without the
-mark a retain promises nothing, so a module written before the mark existed
-reads as before.
+box with a plain `retain`, as that box is null on the way to `None`.
+Without the mark a retain promises nothing, so a module written before the
+mark existed reads as before.
 
 A `field.load` or a `ptr.load` of a `box` may end in `stable`: the slot
 it reads keeps its reference for as long as the statement it is part of
@@ -1938,15 +1938,15 @@ The driver runs it on every program right after the lending pass, and on
 a module's code before its `.pkm` is written, after the lending pass; on
 its own output, and after the moves again, it changes nothing.
 
-**What is left is cheap.**  Each backend has the fast path of a `retain`
-and a `release` inline: a null box is skipped (with no test at all for the
-box of a `retain nonnull`, §6, and a release of it), a retain of a count below
+**What is left is cheap.**  Each backend has the fast path of a `retain` and
+a `release` inline: a null box is skipped (with no test at all for the box
+of a `retain nonnull`, §6, and a release of it), a retain of a count below
 the limit increments the header's 32-bit count, and a release of a count
 above one decrements it; only the rest calls `Paykan_retain` (which panics
-at the limit) or `Paykan_release` (which destroys the object), so each
-does what the call did, at every count.  The LLVM path emits that code for
-every call at every `-O` (`src/Backends/MLIR/ToLLVM/ToLLVM.cpp`, the
-common case weighted as likely), the module code in a `.pkm` included; the
-C path calls Runtime.h's `static inline` `Paykan_retain_inline` and
-`Paykan_release_inline`, which the runtime uses too.  The functions stay
-the ABI (§8).
+at the limit) or `Paykan_release` (which destroys the object), so each does
+what the call did, at every count.  The LLVM path emits that code for every
+call at every `-O` (`src/Backends/MLIR/ToLLVM/ToLLVM.cpp`, the common case
+weighted as likely), the module code in a `.pkm` included; the C path calls
+Runtime.h's `static inline` `Paykan_retain_inline` and
+`Paykan_release_inline`, which the runtime uses too.  The functions stay the
+ABI (§8).
