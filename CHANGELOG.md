@@ -1043,6 +1043,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     0.75 s).  Sample 33 drops each kind of value in place and by its drop function, a
     union's by each of its variants and a parameter's whose references were handed on,
     with no live block left on every path.
+- **Stability sweep: modules, pkm and driver.**
+  - A damaged bitcode cache entry (`.paykan_cache/a/b.bc`, the mlir backend's LLVM IR of
+    an imported module) crashed every later compile of the program until the cache was
+    deleted, where a damaged entry is promised a rebuild: one changed byte of
+    `.paykan_cache/@system/io.bc` gave a segmentation fault, an LLVM assertion or `LLVM
+    ERROR: Broken module found`, since no hash covered the file and LLVM's bitcode reader
+    is not made for damaged input.  An entry is now a header (a magic number, the entry's
+    key and the SHA-256 of its bitcode) and the bitcode: one whose header does not match
+    its bitcode is not read, one whose module does not verify is not used, and either is
+    translated and written again, `--verbose` saying why (`module ::io: bitcode cache
+    .paykan_cache/@system/io.bc is corrupt (its bitcode does not match its hash);
+    translating it again`).  An older compiler's entries are translated again once.  A
+    module file's compiled code (its OBJ section) that did not read or verify failed the
+    compile that linked it, with `LLVM ERROR: Broken module found` or an error at the
+    link: the backend now reads and verifies it when the file is loaded
+    (`Backend::checkModuleObject`), so a cache entry's is rebuilt and a prebuilt file's is
+    an error where it is imported (`module 'm' (m.pkm) has a bad OBJ section: the compiled
+    code does not verify: ...`), and the program's LLVM IR is verified before it is
+    optimised or run.  Past that check a module file's compiled code is trusted once its
+    hashes match: bytes crafted to pass them can still crash LLVM's reader, so a prebuilt
+    module is as safe as where it came from (docs/design/pkm.md §8.4).  The modules the
+    mlir backend writes as bitcode no longer carry LLVM's "Debug Info Version" flag (they
+    have no debug info), since the reader verifies a module that has it and stops the
+    process when that module does not verify.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

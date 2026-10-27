@@ -562,7 +562,9 @@ uses another module's holds its own copies of the instantiations it uses
 - **The backend's cache.** The mlir backend keeps the LLVM IR of each imported module's PIR
   (its copies of instantiations) in the cache too, as bitcode (`a/b/c.bc`; the main file's is
   never cached), validated by its own key (the part of that PIR the program uses, the
-  compiler and the runtime ABI) and shared between concurrent builds. A program compiles only
+  compiler and the runtime ABI) and by a hash of the bitcode, checked before the bitcode is
+  read, and shared between concurrent builds. An entry whose hash does not match, or whose
+  module does not verify, is compiled again (`--verbose` says why). A program compiles only
   the copies its `main` reaches, so two programs that use different ones of a module keep
   recompiling its entry; the module's other code is compiled once, in its module file. The
   cache options are summed up in
@@ -577,6 +579,14 @@ authoritative when it exists. A prebuilt module is type-checked against from its
 and linked from its code, so the program builds and runs identically without the source
 (see [`samples/imports/13_pkm`](../../samples/imports/13_pkm/README.md)); its compiled code
 needs the backend that compiled it.
+
+Whichever way a module file reaches a program, its compiled code is read and verified by the
+backend that links it when the file is loaded, before anything is compiled: a cache entry
+whose code does not read or verify is rebuilt, and a prebuilt file's is an error at the
+import (`module 'm' (m.pkm) has a bad OBJ section: the compiled code does not verify: ...`).
+Past that check the code is trusted once the file's hashes match. The hashes catch damage,
+not a file made to pass them, and LLVM's bitcode reader is not hardened against such bytes,
+so use prebuilt modules only from a source you trust.
 
 A prebuilt file is used only when this `paykan` can: a file written by another release
 (every format, PIR and the runtime ABI included, is versioned by the release), or built

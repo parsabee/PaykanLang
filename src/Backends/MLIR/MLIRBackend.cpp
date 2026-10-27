@@ -15,6 +15,7 @@
 // (--emit-mlir=<stage>: `pir`, `scf`, `llvm` or `emitc`).
 
 #include "Import/PIRImport.h"
+#include "ModuleCache.h"
 #include "NativeBuild.h"
 #include "Pipeline.h"
 #include "paykan/Backend.h"
@@ -93,21 +94,16 @@ public:
 
   Status emitModuleObject(const ModuleObject &code, unsigned optLevel,
                           const std::string &path) override {
-    const ModuleObject kind = objectKind();
-    if (!code.sameKind(kind))
-      return Status::error("the code was compiled by backend '" + code.Backend +
-                           "' (" + code.Producer + ", " + code.Format +
-                           " for " + code.Target + "), not by this one (" +
-                           kind.Producer + " for " + kind.Target + ")");
     llvm::LLVMContext ctx;
-    llvm::StringRef buffer(reinterpret_cast<const char *>(code.Bytes.data()),
-                           code.Bytes.size());
-    auto module =
-        llvm::parseBitcodeFile(llvm::MemoryBufferRef(buffer, path), ctx);
+    auto module = readObject(code, path, ctx);
     if (!module)
-      return Status::error("the compiled code does not read: " +
-                           llvm::toString(module.takeError()));
+      return module.status();
     return llvm_codegen::emitHostModuleObject(**module, optLevel, path);
+  }
+
+  Status checkModuleObject(const ModuleObject &code) override {
+    llvm::LLVMContext ctx;
+    return readObject(code, "OBJ", ctx).status();
   }
 
   Status emit(const Input &in, EmitKind kind, const EmitOptions &opts,
@@ -148,6 +144,30 @@ public:
   }
 
 private:
+  /// @p code, compiled by this backend, as the module it holds (named
+  /// @p name), verified.
+  StatusOr<std::unique_ptr<llvm::Module>> readObject(const ModuleObject &code,
+                                                     llvm::StringRef name,
+                                                     llvm::LLVMContext &ctx) {
+    const ModuleObject kind = objectKind();
+    if (!code.sameKind(kind))
+      return Status::error("the code was compiled by backend '" + code.Backend +
+                           "' (" + code.Producer + ", " + code.Format +
+                           " for " + code.Target + "), not by this one (" +
+                           kind.Producer + " for " + kind.Target + ")");
+    llvm::StringRef buffer(reinterpret_cast<const char *>(code.Bytes.data()),
+                           code.Bytes.size());
+    auto module =
+        llvm::parseBitcodeFile(llvm::MemoryBufferRef(buffer, name), ctx);
+    if (!module)
+      return Status::error("the compiled code does not read: " +
+                           llvm::toString(module.takeError()));
+    if (std::string why = llvm_codegen::verifyModuleText(**module);
+        !why.empty())
+      return Status::error("the compiled code does not verify: " + why);
+    return std::move(*module);
+  }
+
   /// The source output @p stageName names (see the top of the file).
   Status emitSource(const Input &in, const std::string &stageName,
                     std::ostream &out) {
@@ -205,7 +225,8 @@ private:
         [&](size_t i) -> std::span<const uint8_t> {
           return compiled[i] ? std::span<const uint8_t>(compiled[i]->Bytes)
                              : std::span<const uint8_t>();
-        });
+        },
+        in.Verbose);
   }
 
   Status emitObject(const Input &in, llvm::LLVMContext &ctx,

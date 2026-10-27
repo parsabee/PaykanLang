@@ -16,6 +16,7 @@
 #include "paykan/pkm/File.h"
 #include "paykan/pkm/Interface.h"
 #include "paykan/pkm/Manifest.h"
+#include "paykan/pkm/Object.h"
 
 #include <array>
 #include <cstdio>
@@ -188,6 +189,41 @@ void rewriteManifest(
   auto patched = w.finish();
   ASSERT_TRUE(patched) << patched.status().message();
   writeFile(path, std::string((*patched).begin(), (*patched).end()));
+}
+
+/// Rewrite section @p kind of the .pkm file at @p path with @p change, the
+/// section and table hashes made to match: what a file damaged past what
+/// the container checks looks like.
+void rewriteSection(const fs::path &path, paykan::pkm::Kind kind,
+                    const std::function<void(std::vector<uint8_t> &)> &change) {
+  std::string bytes = slurp(path);
+  auto file = paykan::pkm::File::read(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+  ASSERT_TRUE(file) << file.status().message();
+  paykan::pkm::Writer w;
+  bool found = false;
+  for (const auto &e : (*file).sections()) {
+    auto s = (*file).section(static_cast<paykan::pkm::Kind>(e.Kind));
+    std::vector<uint8_t> section(s.begin(), s.end());
+    if (e.Kind == static_cast<uint32_t>(kind)) {
+      change(section);
+      found = true;
+    }
+    w.add(e.Kind, e.Flags, std::move(section));
+  }
+  ASSERT_TRUE(found) << path << " has no section " << static_cast<int>(kind);
+  auto patched = w.finish();
+  ASSERT_TRUE(patched) << patched.status().message();
+  writeFile(path, std::string((*patched).begin(), (*patched).end()));
+}
+
+/// An OBJ section whose compiled code is cut in half: its framing reads,
+/// its bitcode does not.
+void truncateCompiledCode(std::vector<uint8_t> &section) {
+  auto object = paykan::pkm::readObject(section);
+  ASSERT_TRUE(object) << object.status().message();
+  (*object).Bytes.resize((*object).Bytes.size() / 2);
+  section = paykan::pkm::writeObject(*object);
 }
 
 /// The core.build the .pkm file at @p path records.
@@ -392,6 +428,73 @@ TEST(Pkm, CorruptCacheEntryIsRebuilt) {
       << r.out;
 }
 
+// The mlir backend's bitcode cache entries carry the SHA-256 of their
+// bitcode: one damaged byte, which LLVM's bitcode reader is not made for (a
+// crash, an assertion or `LLVM ERROR: Broken module found` at these
+// offsets of the entry this program writes when the file is the bare
+// bitcode), makes the entry a miss, translated and written again, and
+// --verbose says why.
+TEST(Pkm, DamagedBitcodeCacheEntryIsTranslatedAgain) {
+  REQUIRE_BACKEND();
+  Project p("bitcode");
+  writeFile(p.Dir / "main.pkn", "import ::io;\n"
+                                "fn main() -> int {\n"
+                                "  io::println(\"hi\");\n"
+                                "  return 42;\n"
+                                "}\n");
+  ASSERT_EQ(p.runMain().exitCode, 42);
+  const fs::path bc = p.cache() / "@system" / "io.bc";
+  ASSERT_TRUE(fs::is_regular_file(bc));
+  const std::string pristine = slurp(bc);
+  ASSERT_GT(pristine.size(), 1385u);
+  const std::string miss = "module ::io: bitcode cache "
+                           ".paykan_cache/@system/io.bc is corrupt (";
+  for (size_t offset : {275u, 1370u, 1385u}) {
+    std::string bytes = pristine;
+    bytes[offset] = bytes[offset] ? '\0' : '\xff';
+    writeFile(bc, bytes);
+    auto r = p.runMain("--verbose");
+    EXPECT_EQ(r.exitCode, 42) << offset << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, "hi\n")) << offset << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, miss + "its bitcode does not match its hash); "
+                                       "translating it again\n"))
+        << offset << ": " << r.out;
+    EXPECT_EQ(slurp(bc), pristine) << offset;
+  }
+  writeFile(bc, "not bitcode");
+  auto r = p.runMain("--verbose");
+  EXPECT_EQ(r.exitCode, 42) << r.out;
+  EXPECT_TRUE(contains(r.out, miss + "not a bitcode cache entry); "
+                                     "translating it again\n"))
+      << r.out;
+  // The entry written in its place is used, without a word.
+  r = p.runMain("--verbose");
+  EXPECT_EQ(r.exitCode, 42) << r.out;
+  EXPECT_FALSE(contains(r.out, "bitcode cache")) << r.out;
+}
+
+// A cache entry whose compiled code (OBJ) does not read is rebuilt, though
+// every hash of the file matches: the backend reads the code it would link
+// when the entry is loaded, before anything is compiled.
+TEST(Pkm, CacheEntryWhoseCompiledCodeDoesNotReadIsRebuilt) {
+  REQUIRE_BACKEND();
+  Project p("objcache");
+  ASSERT_EQ(p.runMain().exitCode, 0);
+  rewriteSection(p.entry("base"), paykan::pkm::Kind::Object,
+                 truncateCompiledCode);
+  auto r = p.runMain("--verbose");
+  ASSERT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_TRUE(contains(r.out, kExpected)) << r.out;
+  EXPECT_TRUE(contains(r.out, "module base: cache .paykan_cache/base.pkm has "
+                              "a bad OBJ section: the compiled code does not "
+                              "read: "))
+      << r.out;
+  EXPECT_TRUE(builtFromSource(r.out, "base")) << r.out;
+  auto again = p.runMain("--verbose");
+  ASSERT_EQ(again.exitCode, 0) << again.out;
+  EXPECT_FALSE(builtFromSource(again.out, "base")) << again.out;
+}
+
 TEST(Pkm, RebuildModulesIgnoresTheEntries) {
   REQUIRE_BACKEND();
   Project p("rebuild");
@@ -490,6 +593,32 @@ TEST(Pkm, PrebuiltModuleReplacesItsSourceOnEveryBackend) {
   // The prebuilt file is a module of its own: no cache entry is written for
   // it, and a stale cache entry does not shadow it.
   EXPECT_FALSE(fs::exists(p.entry("base")));
+}
+
+// A prebuilt module whose compiled code (OBJ) does not read is rejected
+// where it is imported, with the other reasons a file is unusable, by
+// every command that would link it: the backend reads it when the file is
+// loaded, not when the program is linked.
+TEST(Pkm, PrebuiltModuleWhoseCompiledCodeDoesNotReadIsRejected) {
+  REQUIRE_BACKEND();
+  Project p("objprebuilt");
+  ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                " --emit-pkm base.pkn")
+                .exitCode,
+            0);
+  fs::remove(p.Dir / "base.pkn");
+  rewriteSection(p.Dir / "base.pkm", paykan::pkm::Kind::Object,
+                 truncateCompiledCode);
+  for (const char *cmd : {"", "--emit-llvm", "build -o prog"}) {
+    auto r = p.runMain(cmd);
+    EXPECT_EQ(r.exitCode, 1) << cmd << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, "error: module 'base' (base.pkm) has a bad "
+                                "OBJ section: the compiled code does not "
+                                "read: "))
+        << cmd << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, ". Rebuild it from source.")) << cmd;
+  }
+  EXPECT_FALSE(fs::exists(p.Dir / "prog"));
 }
 
 TEST(Pkm, PrebuiltModulesAreFoundOnTheModulePath) {

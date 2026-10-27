@@ -1322,8 +1322,11 @@ optimisation, `optLevel = 0xFFFFFFFF` (applied after loading, as today's
 `.bc`); `payloadFormat 2` = a target object (after #162 the plugin may
 prefer it). `backendVersion` = plugin build version + LLVM version; the
 executable size/mtime build id is dropped (host state; the manifest's
-`core.build` covers pre-release builds); the `paykan.abi.version` module
-flag and `paykan.cache.key` metadata go away with the key.
+`core.build` covers pre-release builds). Until then the mlir backend's
+`.bc` entry is a header (the magic `PKNBC001`, the key in hex and the
+SHA-256 of the bitcode) followed by the bitcode: an entry whose header
+does not match its bitcode is never parsed, and one whose module does not
+verify is not used; either is translated again (`--verbose` says why).
 `loadModulePayload` = `parseBitcodeFile` into the session context, kept for
 `linkParts`; JIT runs use the same bitcode.
 
@@ -1471,9 +1474,21 @@ Threat model: a `.pkm` is untrusted (hand-edited, truncated, hostile,
 stale). The reader never allocates from an unchecked count, caps recursion,
 range-checks every index and code, never links a payload whose hashes do
 not verify, and runs the PIR verifier on everything a backend will see, so
-backends keep assuming verified PIR. Payload bytes are the one thing the
-core cannot validate; they are bound to `CODE` by hash and validated by the
-backend (`verifyModule` after `parseBitcodeFile`; the linker for objects).
+backends keep assuming verified PIR. Compiled code (the `OBJ` section,
+§5.13, and later payloads) is the one thing the core cannot validate: the
+backend that links it reads and checks it when the file is loaded
+(`Backend::checkModuleObject`; the mlir backend runs `verifyModule` after
+`parseBitcodeFile`), so a cache entry whose code fails is rebuilt and a
+prebuilt file whose code fails is rejected. **Implemented trust model:**
+past that check, compiled code is trusted once the file's hashes match.
+The hashes catch damage, not a file made to pass them, and LLVM's bitcode
+reader is not hardened against crafted bytes (some crash it inside
+`parseBitcodeFile`), so a prebuilt module is as safe as where it came from.
+Reading untrusted compiled code in a child process, or never trusting it
+and compiling `CODE` again, are the alternatives. The modules the mlir
+backend writes as bitcode carry no "Debug Info Version" flag (they have no
+debug info): the reader verifies a module that has the flag while it reads
+it and stops the process when the module does not verify.
 
 ### 8.5 Driver flags and the `pkm` tool
 

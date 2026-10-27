@@ -371,6 +371,11 @@ Resolution ModuleResolver::load(const std::string &canonical,
       return unusable("is stale (its code was compiled by backend '" +
                       o.Backend + "' (" + o.Producer + " for " + o.Target +
                       "), not by this one)");
+    // Code the active backend links must read and verify (docs/design/
+    // pkm.md §8.4): a backend's reader is not made for damaged input.
+    if (Opts.CheckObject && Opts.CompiledBy && o.sameKind(*Opts.CompiledBy))
+      if (Status s = Opts.CheckObject(o); !s)
+        return unusable("has a bad OBJ section: " + s.message());
     object = std::move(*read);
   }
   auto e = std::make_unique<Entry>();

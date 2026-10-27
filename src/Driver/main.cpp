@@ -851,6 +851,10 @@ int main(int argc, char *argv[]) {
   if (backend)
     resolverOpts.CompiledBy =
         caps.CompileModules ? toPkm(backend->objectKind()) : pkm::Object{};
+  if (caps.CompileModules)
+    resolverOpts.CheckObject = [&backend](const pkm::Object &o) {
+      return backend->checkModuleObject(toBackend(o));
+    };
   paykan::modules::ModuleResolver resolver(
       resolverOpts, paykan::modules::ModuleResolver::hostIdentity());
   // Sema reuses the DiagEngine constructed above (already carrying the
@@ -876,6 +880,7 @@ int main(int argc, char *argv[]) {
   in.ProjectRoot = projectRoot;
   in.OptLevel = opts.optLevel();
   in.Objects = opts.Objects;
+  in.Verbose = opts.Verbose ? &std::cerr : nullptr;
   // -- Lowering
   // Every backend reads PIR: lower the program (the single home of the
   // ownership semantics), verify it, and hand it over.  --emit-pir prints it

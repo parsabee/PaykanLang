@@ -207,6 +207,7 @@ if(PAYKAN_TEST_SUITE_pir_llvm)
     target_include_directories(pir_llvm_tests
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                 ${CMAKE_SOURCE_DIR}/src/Backends/MLIR
+                ${CMAKE_SOURCE_DIR}/src/Backends/LLVM/CodeGen
     )
     target_include_directories(pir_llvm_tests SYSTEM
         PRIVATE ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS}

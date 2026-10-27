@@ -204,9 +204,9 @@ a class or a signature also recompiles the modules that use it. A module's entry
 generic templates too, and its own copies of the instantiations of other modules' templates
 it uses (`collections::List<int>`), so editing a generic body recompiles every module that
 imports its module, directly or not. Those copies stay PIR in the entry, and the mlir
-backend caches their LLVM IR there too, as bitcode (`.paykan_cache/a/b.bc`, and
-`.paykan_cache/@system/io.bc` for `::io`), translating them again only when the part of
-them the program uses or the compiler changed.
+backend caches their LLVM IR there too, as bitcode with a hash of it
+(`.paykan_cache/a/b.bc`, and `.paykan_cache/@system/io.bc` for `::io`), translating them
+again only when the part of them the program uses or the compiler changed.
 
 The cache is safe to share and to delete:
 

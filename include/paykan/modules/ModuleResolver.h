@@ -21,6 +21,7 @@
 #include "paykan/pkm/Object.h"
 
 #include <filesystem>
+#include <functional>
 #include <iosfwd>
 #include <map>
 #include <memory>
@@ -60,6 +61,11 @@ struct ResolverOptions {
   /// and any will do.  A prebuilt file is used whoever compiled it (the
   /// backend reports one it cannot link).
   std::optional<pkm::Object> CompiledBy;
+  /// How the active backend checks compiled code of the CompiledBy kind
+  /// before a program links it (Backend::checkModuleObject), or unset: a
+  /// file whose code fails is unusable, so a cache entry is rebuilt and a
+  /// prebuilt file rejected.
+  std::function<Status(const pkm::Object &)> CheckObject;
 };
 
 /// The answer to resolve() (§8.1 DECIDE).

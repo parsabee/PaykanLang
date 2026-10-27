@@ -5,14 +5,21 @@
 // code and output, or the LLVM IR.
 
 #include "JIT.h"
+#include "ModuleCache.h"
 #include "Pipeline.h"
+#include "paykan/Backend.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Verifier.h"
 
 #include "TestUtils.h"
 
+#include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Function.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
 #include <llvm/Support/Error.h>
+#include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <gtest/gtest.h>
@@ -20,6 +27,8 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <limits>
 #include <sstream>
@@ -103,6 +112,21 @@ std::string translatePIR(const std::string &text, std::string &err) {
   llvm::raw_string_ostream os(ir);
   (*module)->print(os, nullptr);
   return os.str();
+}
+
+/// The bitcode of a module whose one function, `f`, has a block with no
+/// terminator: it reads, and it does not verify.
+std::string unterminatedBitcode() {
+  llvm::LLVMContext ctx;
+  llvm::Module m("unterminated", ctx);
+  auto *fn = llvm::Function::Create(
+      llvm::FunctionType::get(llvm::Type::getVoidTy(ctx), false),
+      llvm::Function::ExternalLinkage, "f", m);
+  llvm::BasicBlock::Create(ctx, "entry", fn);
+  std::string bitcode;
+  llvm::raw_string_ostream os(bitcode);
+  llvm::WriteBitcodeToFile(m, os);
+  return bitcode;
 }
 
 /// FileCheck-style: every line of @p ir that contains @p needle.
@@ -1103,4 +1127,105 @@ fn @main() -> i64 {
   std::string err;
   EXPECT_DEATH(jitPIR(text, {}, err),
                "too many strong references to one object");
+}
+
+// A module's compiled code is read and verified before a program links it
+// (Backend::checkModuleObject, which the driver asks when it loads a module
+// file): code that does not verify is a reason the file is unusable, not a
+// module that stops the process when it is optimised or run.
+TEST(PIRLLVM, CompiledCodeIsReadAndVerifiedBeforeItIsLinked) {
+  auto backend = backend::Registry::get().create("mlir");
+  ASSERT_TRUE(backend);
+  backend::ModuleObject code = backend->objectKind();
+  const std::string bitcode = unterminatedBitcode();
+  code.Bytes.assign(bitcode.begin(), bitcode.end());
+  Status s = backend->checkModuleObject(code);
+  EXPECT_FALSE(s);
+  EXPECT_EQ(s.message(), "the compiled code does not verify: Basic Block in "
+                         "function 'f' does not have terminator");
+  code.Bytes.assign({'B', 'C', 0xc0, 0xde, 0, 1, 2, 3});
+  s = backend->checkModuleObject(code);
+  EXPECT_FALSE(s);
+  EXPECT_EQ(s.message().rfind("the compiled code does not read: ", 0), 0u)
+      << s.message();
+  // What the backend compiles is what it links.
+  pir::ParseError perr;
+  auto module = pir::parseProgram(R"(module "lib"
+fn @helper(%a: i64) -> i64 {
+  %r = mul %a, 10
+  ret %r
+}
+)",
+                                  perr);
+  ASSERT_TRUE(module) << perr.str();
+  auto compiled = backend->compileModule((*module).Modules.front());
+  ASSERT_TRUE(compiled) << compiled.status().message();
+  EXPECT_TRUE(backend->checkModuleObject(*compiled));
+  backend::ModuleObject other = *compiled;
+  other.Producer = "another LLVM";
+  s = backend->checkModuleObject(other);
+  EXPECT_FALSE(s);
+  EXPECT_EQ(s.message().rfind("the code was compiled by backend 'mlir'", 0), 0u)
+      << s.message();
+}
+
+// A bitcode cache entry is used only when the module it holds verifies: one
+// whose header and hash are right but whose bitcode does not verify (which
+// only a hand-made file can be) is translated and written again, and the
+// verbose stream says why.
+TEST(PIRLLVM, ACacheEntryThatDoesNotVerifyIsTranslatedAgain) {
+  const std::filesystem::path root = test::tempDir() / "unverified_cache";
+  std::filesystem::remove_all(root);
+  std::filesystem::create_directories(root);
+  pir::ParseError perr;
+  auto program = pir::parseProgram(R"(module "main"
+extern fn @helper(i64) -> i64 module "lib"
+fn @main() -> i64 {
+  %h = call @helper(4)
+  ret %h
+}
+module "lib"
+fn @helper(%a: i64) -> i64 {
+  %r = mul %a, 10
+  ret %r
+}
+)",
+                                   perr);
+  ASSERT_TRUE(program) << perr.str();
+  auto compile = [&](std::ostream &verbose) {
+    auto ctx = std::make_unique<llvm::LLVMContext>();
+    auto module = mlir_backend::compileProgram(*program, *ctx, "t",
+                                               root.string(), {}, &verbose);
+    if (!module)
+      return std::string("error: ") + module.status().message();
+    auto result = jit::runModule(std::move(*module), std::move(ctx), {});
+    if (!result)
+      return "JIT: " + llvm::toString(result.takeError());
+    return std::to_string(*result);
+  };
+  std::ostringstream first;
+  ASSERT_EQ(compile(first), "40");
+  EXPECT_EQ(first.str(), "");
+  const std::filesystem::path entry = root / ".paykan_cache" / "lib.bc";
+  auto read = [&] {
+    std::ifstream in(entry, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+  };
+  const std::string written = read();
+  auto cached = llvm_codegen::readCacheEntry(written);
+  ASSERT_TRUE(cached) << cached.status().message();
+  std::ofstream(entry, std::ios::binary)
+      << llvm_codegen::encodeCacheEntry((*cached).Key, unterminatedBitcode());
+  std::ostringstream second;
+  EXPECT_EQ(compile(second), "40");
+  EXPECT_EQ(second.str(),
+            "module lib: bitcode cache .paykan_cache/lib.bc is corrupt (its "
+            "module does not verify: Basic Block in function 'f' does not "
+            "have terminator); translating it again\n");
+  EXPECT_EQ(read(), written);
+  std::ostringstream third;
+  EXPECT_EQ(compile(third), "40");
+  EXPECT_EQ(third.str(), "");
+  std::filesystem::remove_all(root);
 }
