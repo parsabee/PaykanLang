@@ -155,7 +155,9 @@ void ModuleLowering::emitMemOptionalWrap(ast::Expr *e, const Val &dst) {
 
 ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
   MemValue v = emitMemRead(e);
-  if (!v.Addr || v.Temp || !SnapshotReads.count(e))
+  // A slice's elements are copied by their number (emitSliceArg).
+  if (!v.Addr || v.Temp || !SnapshotReads.count(e) ||
+      ast::isa<ast::SliceType>(e->getResolvedType()))
     return v;
   // Read where it is, and used once operands after it have run, which may
   // write it (noteBorrowedReads): the value it has now, in a temporary.
@@ -170,6 +172,28 @@ Val ModuleLowering::copyToTemporary(const Val &addr, ast::Type *ty,
   B.memCopy(copy, addr, Val::i64(l.Size));
   emitMemRetain(copy, ty);
   return copy;
+}
+
+Val ModuleLowering::copySliceToTemporary(const Val &addr, const Val &len,
+                                         ast::SliceType *st) {
+  ast::Type *elemTy = st->getElementType();
+  const int64_t stride = memLayout(elemTy).Size;
+  Val size = B.binary(Opcode::Mul, len, Val::i64(stride), "snap.size");
+  Val copy = callRuntime(names::kPaykanMalloc, {size}, "snap.elems");
+  B.memCopy(copy, addr, size);
+  if (holdsRef(elemTy))
+    forEachSlotUpTo(copy, 0, len, stride,
+                    [&](const Val &at) { emitMemRetain(at, elemTy); });
+  MemTemps.emplace_back(copy, st, len);
+  return copy;
+}
+
+void ModuleLowering::releaseSliceCopy(const Val &copy, const Val &len,
+                                      ast::SliceType *st) {
+  if (ast::Type *elemTy = st->getElementType(); holdsRef(elemTy))
+    forEachSlotUpTo(copy, 0, len, memLayout(elemTy).Size,
+                    [&](const Val &at) { emitMemRelease(at, elemTy); });
+  callRuntime(names::kPaykanFree, {copy});
 }
 
 ModuleLowering::MemValue ModuleLowering::emitMemRead(ast::Expr *e) {
@@ -329,9 +353,11 @@ Val ModuleLowering::emitMemAddress(ast::Expr *e) {
 
 void ModuleLowering::releaseMemTemps(size_t mark) {
   while (MemTemps.size() > mark) {
-    auto [v, ty] = MemTemps.back();
+    auto [v, ty, len] = MemTemps.back();
     MemTemps.pop_back();
-    if (ty)
+    if (auto *st = ty ? ast::dyn_cast<ast::SliceType>(ty) : nullptr)
+      releaseSliceCopy(v, len, st);
+    else if (ty)
       emitMemDrop(v, ty);
     else
       emitRelease(v);
@@ -375,11 +401,17 @@ void ModuleLowering::forEachSlot(const Val &base, int64_t from, int64_t to,
       fn(i == 0 ? base : B.ptrAdd(base, Val::i64(i * stride), "elem.addr"));
     return;
   }
+  forEachSlotUpTo(base, from, Val::i64(to), stride, fn);
+}
+
+void ModuleLowering::forEachSlotUpTo(const Val &base, int64_t from,
+                                     const Val &to, int64_t stride,
+                                     const std::function<void(Val)> &fn) {
   pir::LocalId i = B.addLocal("i", Type::I64);
   B.store(i, Val::i64(from));
   pir::While *w = B.openWhile();
   B.enter(*w->CondBlock);
-  B.setWhileCond(w, B.cmp(CmpPred::Lt, B.load(i, "i"), Val::i64(to), "more"));
+  B.setWhileCond(w, B.cmp(CmpPred::Lt, B.load(i, "i"), to, "more"));
   B.leave();
   B.enterLoopBody(*w->Body);
   Val iv = B.load(i, "i");
@@ -731,15 +763,23 @@ bool ModuleLowering::isSliceArg(const ast::Expr *arg) {
 
 bool ModuleLowering::emitSliceArg(ast::Expr *arg, std::vector<Val> &args) {
   // A fixed-size array's bytes (a temporary is released after the call),
-  // or the elements of the slice passed on.
+  // or the elements of the slice passed on: a copy of them, released after
+  // the call too, when an argument after it may write them (SnapshotReads),
+  // as an array's are copied (emitMemValue).
   Val addr = emitMemAddress(arg);
   if (!addr)
     return false;
-  args.push_back(addr);
-  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(arg->getResolvedType()))
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(arg->getResolvedType())) {
+    args.push_back(addr);
     args.push_back(Val::i64(ft->getLength()));
-  else
-    args.push_back(emitSliceLength(arg));
+    return true;
+  }
+  Val len = emitSliceLength(arg);
+  if (SnapshotReads.count(arg))
+    addr = copySliceToTemporary(
+        addr, len, ast::cast<ast::SliceType>(arg->getResolvedType()));
+  args.push_back(addr);
+  args.push_back(len);
   return true;
 }
 

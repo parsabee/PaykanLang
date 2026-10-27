@@ -439,11 +439,17 @@ void ModuleLowering::holdObjects(const std::string &name, std::vector<Val> keep,
   // The objects of a struct's field and of an `inout` result's storage
   // (noteBorrowedReads, takeInoutResult) come in MemTemps past @p mark and
   // are held the same way; a copy of a value held in memory there
-  // (holdObjectsIn) moves into a hidden local of its own.
+  // (holdObjectsIn) moves into a hidden local of its own.  A copy of a
+  // slice's elements an argument took (copySliceToTemporary) is no part of
+  // the storage, which is never a `view` parameter's: it goes now.
   for (size_t i = mark; i < MemTemps.size(); ++i) {
-    const auto &[v, ty] = MemTemps[i];
+    const auto &[v, ty, len] = MemTemps[i];
     if (!ty) {
       keep.push_back(v);
+      continue;
+    }
+    if (auto *st = ast::dyn_cast<ast::SliceType>(ty)) {
+      releaseSliceCopy(v, len, st);
       continue;
     }
     MemLayout l = memLayout(ty);

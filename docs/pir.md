@@ -1034,12 +1034,16 @@ CodeGen enforced, now in one place.
   object but the one an `__init__` makes, an element of such storage,
   what an `inout` name or a struct method's `self` names: read from the
   code as the classes above are, "not known" counting), when it is in an
-  object or names the caller's storage.  The call's own `inout`
-  arguments write nothing it is given by value before its callee
-  copies it.  So `first(c.p, reset(c))` passes the `c.p` read before
-  `reset` stored into it, and every other such value is passed or
-  compared where it is, as before (the samples and the standard
-  library's tests lower to the same PIR).
+  object or names the caller's storage.  A slice parameter passed on to
+  another, the caller's array, is copied the same way by the length it
+  has when the program runs: into memory of its own (a `call` of
+  `$rt.Paykan_malloc` for the length times the element's size, a
+  `mem.copy` and a loop retaining each element's references), passed in
+  its place, and released and freed (`$rt.Paykan_free`) after the call.
+  The call's own `inout` arguments write nothing it is given by value
+  before its callee copies it.  So `first(c.p, reset(c))` passes the
+  `c.p` read before `reset` stored into it; every other such value is
+  passed or compared where it is.
 
   A call's `inout` result used where it is (bound to an `inout` local,
   passed to an `inout` parameter, a value held in memory) may also be in
@@ -1142,7 +1146,8 @@ crossing into the runtime is `cast` to `i64` first.
 ; Paykan_retain or Paykan_release for the rest, the C path calls Runtime.h's
 ; static inline Paykan_retain_inline and Paykan_release_inline, which do the
 ; same (Paykan_retain_nonnull_inline and Paykan_release_nonnull_inline, with
-; no test for null, for a `retain nonnull`'s box, §6).  `unbox` is the identity on both: neither calls PaykanShared_get.
+; no test for null, for a `retain nonnull`'s box, §6).  `unbox` is the
+; identity on both: neither calls PaykanShared_get.
 ; Paykan_malloc never returns NULL: it panics when the memory is not there.
 Paykan_malloc(i64) -> ptr        Paykan_free(ptr) -> void
 Paykan_retain(box) -> void       Paykan_release(box) -> void
@@ -1215,8 +1220,9 @@ list; the mlir backend's JIT symbol table must cover it, and an executable links
 `libpaykan_runtime.a`.  `pir::runtimeSignature` (`include/paykan/pir/PIR.h`)
 holds the signatures above in PIR types (a `size_t` an `i64`), the C path's
 `Paykan_retain_inline(box) -> void` and `Paykan_release_inline(box) ->
-void` (and their `_nonnull_` variants), and C's `fmod(f64, f64) -> f64`, which a backend calls for an `f64`
-`rem`; none for the three that take a C `int`, which no PIR type is
+void` (and their `_nonnull_` variants), and C's `fmod(f64, f64) -> f64`,
+which a backend calls for an `f64` `rem`; none for the three that take a C
+`int`, which no PIR type is
 (`Paykan_args_new`, `Paykan_heap_set_tracking`, `memset`).  A native
 function bound to one of these symbols (`pir::isRuntimeSymbol`) must have
 its signature (§3), which for those three no native function has.

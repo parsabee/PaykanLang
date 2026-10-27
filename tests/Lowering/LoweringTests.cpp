@@ -1752,6 +1752,54 @@ TEST(Lowering, AValueReadWhereItIsIsCopiedOnlyWhenALaterOperandMayWriteIt) {
   }
 }
 
+// A slice parameter passed on to another is the caller's array: when an
+// operand after it may write the array, its elements are copied where it is
+// evaluated, by the length the slice has when the program runs, into
+// memory of its own (Paykan_malloc), their references retained, and
+// released and freed after the call.  With no such operand nothing is
+// copied.
+TEST(Lowering, ASlicePassedOnIsCopiedByItsLengthWhenALaterOperandMayWriteIt) {
+  auto l = lower(R"(
+    class A { xs: int[3]; ss: Str[3]; }
+    fn total(xs: view int[], x: int) -> int => xs[0];
+    fn names(ss: view Str[], x: int) -> int => ss[0].len();
+    fn reset(a: A) -> int { a.xs = [9, 9, 9]; return 0; }
+    fn reads(a: A) -> int => a.xs[0];
+    fn hazard(xs: view int[], a: A) -> int => total(xs, reset(a));
+    fn refs(ss: view Str[], a: A) -> int => names(ss, reset(a));
+    fn safe(xs: view int[], a: A) -> int => total(xs, reads(a));
+    fn main() -> int {
+      a = A([1, 2, 3], ["a", "b", "c"]);
+      return hazard(a.xs, a) + refs(a.ss, a) + safe(a.xs, a);
+    }
+  )",
+                 "", lowering::Copies::Shared, lowering::World::Closed);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"hazard", "refs"}) {
+    const std::string f = function(l.Text, fn);
+    const size_t malloc = f.find("call @$rt.Paykan_malloc(");
+    const size_t copy = f.find("mem.copy %snap.elems.");
+    const size_t call =
+        f.find(std::string(fn) == "hazard" ? "call @total(" : "call @names(");
+    const size_t free = f.find("call @$rt.Paykan_free(%snap.elems.");
+    ASSERT_NE(malloc, std::string::npos) << f;
+    ASSERT_NE(call, std::string::npos) << f;
+    EXPECT_LT(malloc, copy) << f;
+    EXPECT_LT(copy, f.find("call @reset(")) << f;
+    EXPECT_LT(call, free) << f;
+    EXPECT_NE(f.find("(%snap.elems."), std::string::npos) << f;
+  }
+  // Each copied Str is retained in a loop over the slice's length, and
+  // released in another after the call.
+  const std::string refs = function(l.Text, "refs");
+  EXPECT_EQ(count(refs, "while "), 2u) << refs;
+  EXPECT_EQ(count(function(l.Text, "hazard"), "while "), 0u)
+      << function(l.Text, "hazard");
+  const std::string safe = function(l.Text, "safe");
+  EXPECT_EQ(count(safe, "Paykan_malloc"), 0u) << safe;
+  EXPECT_EQ(count(safe, "%snap."), 0u) << safe;
+}
+
 // A string's character: the string is read before its index is computed,
 // with a reference of its own across a call there that may replace it, and
 // in place across one that cannot.

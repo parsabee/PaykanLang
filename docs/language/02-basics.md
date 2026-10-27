@@ -813,12 +813,13 @@ value
 
 A value read before a call is the one used, even when the call replaces what the variable
 holds ([Exclusivity](03-functions.md#exclusivity)). That holds for a value held in memory too,
-a struct, a tuple, a fixed-size array or a tagged union: passed to a parameter (plain or
-`view`), compared with `==` or `!=`, or the receiver of a struct's `view fn`, it is the value it
-had where it was evaluated, whatever a later argument or the right operand writes to where it
-came from: through an `inout` argument, a method that may change it, or a call given the object
-it is in. The receiver of a struct's method that may change `self` is its storage, as an `inout`
-argument is: the method sees what the arguments wrote to it.
+a struct, a tuple, a fixed-size array or a tagged union, and for the elements a slice
+parameter names: passed to a parameter (plain, `view` or a slice, a slice parameter passed on
+to another too), compared with `==` or `!=`, or the receiver of a struct's `view fn`, it is the
+value it had where it was evaluated, whatever a later argument or the right operand writes to
+where it came from: through an `inout` argument, a method that may change it, or a call given
+the object it is in. The receiver of a struct's method that may change `self` is its storage,
+as an `inout` argument is: the method sees what the arguments wrote to it.
 
 ```pkn
 import ::io;

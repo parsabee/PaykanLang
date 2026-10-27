@@ -423,9 +423,11 @@ bool ModuleLowering::BorrowedReads::overlaps(const Storage &r,
 void ModuleLowering::BorrowedReads::pend(const ast::Expr *e) {
   // A value made where it is evaluated (a literal, a call's result, an
   // optional a value is wrapped into) is a temporary already, and a read
-  // the statement holds (noteHeldReads) a copy.  A slice passed on is the
-  // caller's array, not a value.
-  if (!ast::isMemType(e->getResolvedType()) || isMemOptionalWrap(e))
+  // the statement holds (noteHeldReads) a copy.  A slice passed on is read
+  // where it is too, its elements in the caller's array (emitSliceArg).
+  ast::Type *t = e->getResolvedType();
+  if ((!ast::isMemType(t) && !ast::isa<ast::SliceType>(t)) ||
+      isMemOptionalWrap(e))
     return;
   std::optional<Storage> where = storageOf(e);
   if (!where || (where->Var && L.isHeldRead(where->Var)))

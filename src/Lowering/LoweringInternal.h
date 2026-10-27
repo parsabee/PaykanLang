@@ -1054,6 +1054,14 @@ private:
   /// A temporary named @p name holding a copy of the value of type @p ty at
   /// @p addr, its references retained: its address.
   Val copyToTemporary(const Val &addr, ast::Type *ty, const std::string &name);
+  /// A copy of the @p len elements at @p addr of a slice of type @p st, its
+  /// references retained, in memory of its own (Paykan_malloc): its
+  /// address, which goes to MemTemps with @p st and @p len, for
+  /// releaseSliceCopy.
+  Val copySliceToTemporary(const Val &addr, const Val &len, ast::SliceType *st);
+  /// Release the references of the @p len elements of the copy at @p copy
+  /// copySliceToTemporary made of a slice of type @p st, and free it.
+  void releaseSliceCopy(const Val &copy, const Val &len, ast::SliceType *st);
   /// The expression emitMemValue(@p e) passes to visit() before it emits
   /// anything else, or null: a call itself, the object of a class's field,
   /// and for an element or a struct's field, the same for the whole it is
@@ -1067,8 +1075,17 @@ private:
   Val emitMemAddress(ast::Expr *e);
   /// What addresses handed out depend on: temporaries holding references
   /// (with their type), and +1 boxes of the objects holding fields (with
-  /// none).
-  std::vector<std::pair<Val, ast::Type *>> MemTemps;
+  /// none).  A copy of a slice's elements (copySliceToTemporary) comes
+  /// with the slice's type and its length.
+  struct MemTemp {
+    Val V;
+    ast::Type *Ty = nullptr;
+    Val Len;
+    MemTemp() = default;
+    MemTemp(Val v, ast::Type *ty, Val len = Val())
+        : V(std::move(v)), Ty(ty), Len(std::move(len)) {}
+  };
+  std::vector<MemTemp> MemTemps;
   /// Release what was added to MemTemps since its size was @p mark.
   void releaseMemTemps(size_t mark);
   /// Retain, or release, every reference held by the value of type @p ty at
@@ -1112,6 +1129,9 @@ private:
   /// one for a few, in a loop for more.
   void forEachSlot(const Val &base, int64_t from, int64_t to, int64_t stride,
                    const std::function<void(Val)> &fn);
+  /// forEachSlot's loop, up to @p to slots known when the program runs.
+  void forEachSlotUpTo(const Val &base, int64_t from, const Val &to,
+                       int64_t stride, const std::function<void(Val)> &fn);
   /// The address of element @p index of the fixed-size array @p array,
   /// after a bounds check.
   Val emitFixedElementAddress(ast::Expr *array, ast::Expr *index);

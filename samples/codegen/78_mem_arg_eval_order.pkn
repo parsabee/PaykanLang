@@ -8,8 +8,12 @@
 //            reaches it through an object or a closure.  The value used is
 //            the one read, as for a number or a string
 //            (docs/language/02-basics.md, "Evaluation order"), on a call of
-//            a function, a method, a constructor and a function value, and
-//            no copy is made where no later operand may write it.
+//            a function, a method, a constructor (`__super__` too) and a
+//            function value (one a field holds too), for an argument under
+//            an `inout` result and one before a closure that writes it, and
+//            for a slice parameter passed on to another (copied by its
+//            length when the program runs), and no copy is made where no
+//            later operand may write it.
 // expect-stdout: field: 1 1
 // expect-stdout: inout: 1 1 1 A(n: 1)
 // expect-stdout: equality: False True False
@@ -19,6 +23,8 @@
 // expect-stdout: view: 1 1
 // expect-stdout: shared: a11 a11
 // expect-stdout: unchanged: 1 9 2
+// expect-stdout: more: 1 1 1 1
+// expect-stdout: slice passed on: 6 a1c3 a1 z1
 
 import ::io;
 
@@ -79,6 +85,59 @@ fn tag(e: E, x: int) -> Str => e.toString();
 fn label(v: Named, x: int) -> Str => v.name + Str(v.n);
 fn look(p: view P, x: int) -> int => p.a;
 fn total(xs: view int[], x: int) -> int => xs[0];
+fn apply(f: () -> int) -> int => f();
+
+class Base {
+  p: P;
+}
+
+impl Base {
+  fn __init__(p: P, x: int) { self.p = p; }
+}
+
+class Derived : Base {
+  y: int;
+}
+
+impl Derived {
+  fn __init__(h: Holder) { __super__(h.p, reset(h)); self.y = 0; }
+}
+
+class Calls {
+  f: (P, int) -> int;
+}
+
+struct Slot {
+  p: P;
+  q: P;
+}
+
+impl Slot {
+  fn slot() -> inout P { return self.p; }
+}
+
+class Arrays {
+  xs: int[3];
+  ss: Str[3];
+}
+
+fn sum(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2];
+fn ends(ss: view Str[], x: int) -> Str => ss[0] + ss[2];
+
+fn resetArrays(a: Arrays) -> int {
+  a.xs = [9, 9, 9];
+  a.ss = ["z" + Str(1), "z" + Str(2), "z" + Str(3)];
+  return 0;
+}
+
+fn sumOn(xs: view int[], a: Arrays) -> int => sum(xs, resetArrays(a));
+fn endsOn(ss: view Str[], a: Arrays) -> Str => ends(ss, resetArrays(a));
+fn firstOn(ss: view Str[], a: Arrays) -> Str {
+  f = fn(ts: view Str[], x: int) -> Str => ts[0] + "";
+  return f(ss, resetArrays(a));
+}
+
+fn arrays() -> Arrays => Arrays([1, 2, 3], ["a" + Str(1), "b", "c" + Str(3)]);
 
 fn reset(h: Holder) -> int {
   h.p = P(9);
@@ -195,5 +254,29 @@ fn main() -> int {
   pair = Pair(P(1), P(2));
   u2 = first(pair.q, bump(pair.p));
   io::println("unchanged: " + Str(u1) + " " + Str(h.n) + " " + Str(u2));
+
+  // `__super__`'s arguments, a function value a field holds, an argument
+  // under an `inout` result, and one before a closure that writes it.
+  h = fresh();
+  d = Derived(h);
+  o = Calls(first);
+  h = fresh();
+  o1 = o.f(h.p, reset(h));
+  slot = Slot(P(1), P(2));
+  o2 = first(slot.slot(), bump(slot.p));
+  h = fresh();
+  o3 = first(h.p, apply(fn() -> int => reset(h)));
+  io::println("more: " + Str(d.p.a) + " " + Str(o1) + " " + Str(o2) + " "
+      + Str(o3));
+
+  // A slice parameter passed on to another: the elements read.
+  arrs = arrays();
+  l1 = sumOn(arrs.xs, arrs);
+  arrs = arrays();
+  l2 = endsOn(arrs.ss, arrs);
+  arrs = arrays();
+  l3 = firstOn(arrs.ss, arrs);
+  io::println("slice passed on: " + Str(l1) + " " + l2 + " " + l3 + " "
+      + arrs.ss[0]);
   return 0;
 }

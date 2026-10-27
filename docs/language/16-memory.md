@@ -656,9 +656,12 @@ argument that may write that storage after it is read (`f(p, bump(p))` with `bum
 Point)`, `f(c.p, reset(c))` with `reset` storing into `c.p`) gives the callee a copy the caller
 takes where the argument is evaluated, its references retained and released after the call,
 as `==` does with its left operand: the value passed or compared is the one read
-([Evaluation order](02-basics.md#evaluation-order)). Where no later operand may write it, as in
-almost every call, nothing more is copied: a later call given only values that reach no object,
-or whose code stores into nothing its caller holds, cannot.
+([Evaluation order](02-basics.md#evaluation-order)). A slice parameter passed on to another
+names its caller's array, and is copied the same way when a later argument may write the
+array: its elements, as many as the slice has when the program runs, into memory allocated for
+the call and freed after it. Where no later operand may write it, as in almost every call,
+nothing more is copied: a later call given only values that reach no object, or whose code
+stores into nothing its caller holds, cannot.
 
 ## `None`
 

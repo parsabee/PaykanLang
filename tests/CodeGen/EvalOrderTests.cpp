@@ -208,6 +208,50 @@ fn main() -> int {
                "1\n4\n1\n1\n1\n");
 }
 
+// A slice parameter passed on to another sees the elements read too, when a
+// later argument writes them: copied by its length, which only the running
+// program knows, its references kept and let go of after the call, through
+// a function, a method, a constructor and a function value alike.
+TEST(EvalOrder, ASlicePassedOnIsTheValueRead) {
+  expectOutput("slices", R"(class A { xs: int[3]; ss: Str[3]; }
+class K {
+  n: int;
+  view fn pick(ss: view Str[], x: int) -> Str => ss[2] + "";
+}
+class Kept { s: Str; }
+impl Kept { fn __init__(ss: view Str[], x: int) { self.s = ss[1] + ""; } }
+fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2];
+fn names(ss: view Str[], x: int) -> Str => ss[0] + ss[2];
+fn resetA(a: A) -> int {
+  a.xs = [9, 9, 9];
+  a.ss = ["z" + Str(1), "z" + Str(2), "z" + Str(3)];
+  return 0;
+}
+fn ints(xs: view int[], a: A) -> int => total(xs, resetA(a));
+fn strs(ss: view Str[], a: A) -> Str => names(ss, resetA(a));
+fn method(ss: view Str[], a: A) -> Str => K(0).pick(ss, resetA(a));
+fn made(ss: view Str[], a: A) -> Str => Kept(ss, resetA(a)).s;
+fn value(ss: view Str[], a: A) -> Str {
+  f = names;
+  return f(ss, resetA(a));
+}
+fn freshA() -> A => A([1, 2, 3], ["a" + Str(1), "b", "c" + Str(3)]);
+fn main() -> int {
+  a = freshA();
+  io::println(Str(ints(a.xs, a)));
+  a = freshA();
+  io::println(strs(a.ss, a));
+  a = freshA();
+  io::println(method(a.ss, a));
+  a = freshA();
+  io::println(made(a.ss, a));
+  a = freshA();
+  io::println(value(a.ss, a) + " " + a.ss[0]);
+  return 0;
+})",
+               "6\na1c3\nc3\nb\na1c3 z1\n");
+}
+
 // The copy holds its own references: what a later call lets go of from the
 // storage stays alive until the callee has used the copy, and the copy's
 // references are released after the call.
