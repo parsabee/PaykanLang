@@ -705,8 +705,10 @@ level, an import in that module two, and an import 257 levels down is
 `imports nested too deep (more than 256 modules): 'c::m256' is imported 257
 modules deep`, reported at that import, whether the modules on the way are
 built from source (each is analysed while its importer is) or loaded from
-module files (a cache entry is checked against each module it imports
-first).
+cache entries (each is checked against the modules it imports first, and
+one whose imports nest too deep is built from its source). A chain of
+prebuilt module files, which have no source, is reported at the import
+from source that leads to it.
 
 A source file larger than 256 MiB (268435456 bytes) is rejected with
 `'<file>' is too large for a source file (more than 256 MiB)` before it is

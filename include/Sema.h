@@ -1165,10 +1165,14 @@ private:
                     LocatedModule &out);
   /// The exports of module @p canonical: from ModuleCache, from the
   /// interface @p located holds, or by parsing and analysing its source.
-  /// Returns nullptr after reporting the failure.
+  /// Returns nullptr after reporting the failure, with a note that @p loc
+  /// imports the module unless @p importedHere is false (a cache entry's
+  /// dependency, loaded before the entry is used: the entry's importer
+  /// does not import it).
   const ModuleInfo *loadModule(const std::string &canonical,
                                const LocatedModule &located,
-                               ast::SourceLocation loc);
+                               ast::SourceLocation loc,
+                               bool importedHere = true);
   /// Make a module's exports visible under @p qualifier (and
   /// @p fullModulePath): reconstruct its types in Ctx and declare its
   /// functions.  Returns false after reporting a failure.

@@ -720,8 +720,15 @@ bool Sema::locateModule(const std::string &canonical, bool isSystem,
         Resolver->failed(dep);
         continue;
       }
-      // The dependency is imported one level deeper than this module.
+      // The dependency is imported one level deeper than this module.  A
+      // cache entry whose imports nest too deep is built from its source
+      // instead, whose import that is too deep is reported where it is.
       ImportLevel level(ImportDepth);
+      if (ImportDepth && *ImportDepth > kMaxImportDepth &&
+          Resolver->buildFromSource(
+              canonical, "imports module '" + dep + "' more than " +
+                             std::to_string(kMaxImportDepth) + " modules deep"))
+        continue;
       if (importTooDeep(dep, loc)) {
         if (FailedModules)
           FailedModules->insert(dep);
@@ -732,17 +739,22 @@ bool Sema::locateModule(const std::string &canonical, bool isSystem,
       LocatedModule depLocated;
       if (locateModule(dep, depSystem, depSystem ? dep.substr(2) : dep, loc,
                        depLocated))
-        loadModule(dep, depLocated, loc);
+        loadModule(dep, depLocated, loc, /*importedHere=*/false);
       continue;
     }
-    case K::Source:
+    case K::Source: {
       // The resolver only checks that something is there; a directory or
-      // a special file is diagnosed as before.
-      out.Path =
-          checkModuleFile(r.Path, displayPath(r.Path), canonical, kind, loc);
+      // a special file is diagnosed as before.  A module that failed
+      // before has no path: the file its import would be.
+      std::filesystem::path file =
+          r.Path.empty()
+              ? module_utils::moduleFile(ProjectRoot, isSystem, modulePath)
+              : std::filesystem::path(r.Path);
+      out.Path = checkModuleFile(file, displayPath(file), canonical, kind, loc);
       if (out.Path.empty())
         Resolver->failed(canonical);
       return !out.Path.empty();
+    }
     case K::Loaded:
       out.Path = module_utils::realPath(r.Path);
       out.Iface = r.Iface;
@@ -762,7 +774,8 @@ bool Sema::locateModule(const std::string &canonical, bool isSystem,
 
 const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
                                          const LocatedModule &located,
-                                         ast::SourceLocation loc) {
+                                         ast::SourceLocation loc,
+                                         bool importedHere) {
   // Already built or loaded in this process.  The cache outlives a
   // compilation, so it is keyed by the file (a source or a .pkm), never by
   // the name alone: another compilation's module of the same name is
@@ -860,7 +873,8 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
         // It failed only by importing a module whose failure was reported
         // already: that report covers it too.
         ++RepeatedImportFailures;
-        Diags.note(loc, "in module '" + canonical + "' imported here");
+        if (importedHere)
+          Diags.note(loc, "in module '" + canonical + "' imported here");
         return nullptr;
       }
       // Nothing was reported (should not happen): keep the failure visible.
@@ -868,7 +882,8 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
       return nullptr;
     }
     ImportedModuleErrors += moduleErrors;
-    Diags.note(loc, "in module '" + canonical + "' imported here");
+    if (importedHere)
+      Diags.note(loc, "in module '" + canonical + "' imported here");
     return nullptr;
   };
   if (importDriverPtr->parseFile(path) != 0) {

@@ -167,6 +167,11 @@ public:
              std::vector<uint8_t> templates = {});
   /// Sema could not build @p canonical (not found, not a file, errors).
   void failed(const std::string &canonical);
+  /// Build @p canonical from its source instead of the cache entry a
+  /// NeedDependency answer came from, @p why --verbose says (its source's
+  /// own imports then say where any of them fails).  False when the answer
+  /// came from a prebuilt file, which has no source.
+  bool buildFromSource(const std::string &canonical, const std::string &why);
   /// A module built() whose cache entry could not hold all an importer
   /// needs (its code uses an instantiation another module of this program
   /// lowered): writeCache leaves it out, so it is built from source again.
@@ -248,8 +253,20 @@ private:
 
   Resolution resolveSource(const std::string &canonical,
                            const std::filesystem::path &source);
+  /// @p canonical built from @p source, @p why --verbose says.
+  Resolution fromSource(const std::string &canonical,
+                        const std::filesystem::path &source,
+                        const std::string &why);
   Resolution resolvePrebuilt(const std::string &canonical,
                              const std::filesystem::path &source);
+  /// The module files resolvePrebuilt() looks at for @p canonical, whose
+  /// source would be @p source, in order.
+  std::vector<std::filesystem::path>
+  prebuiltCandidates(const std::string &canonical,
+                     const std::filesystem::path &source) const;
+  /// Whether @p canonical has a source or a module file where resolve()
+  /// looks for it.
+  bool exists(const std::string &canonical) const;
   /// Loads the file at @p path for @p canonical under @p policy: the
   /// verdict, the dependencies, then its contents (readModuleContents); the
   /// outcome is Loaded, NeedDependency, or a Source / Rejected / NotFound

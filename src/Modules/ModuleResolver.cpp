@@ -232,20 +232,26 @@ Resolution ModuleResolver::resolve(const std::string &canonical) {
   return resolvePrebuilt(canonical, source);
 }
 
+Resolution ModuleResolver::fromSource(const std::string &canonical,
+                                      const std::filesystem::path &source,
+                                      const std::string &why) {
+  auto e = std::make_unique<Entry>();
+  e->State = Entry::State::Source;
+  e->Path = source;
+  Entries[canonical] = std::move(e);
+  Awaiting.erase(canonical);
+  Pendings.erase(canonical);
+  log("module " + canonical + ": " + why + "; building from source");
+  Resolution r;
+  r.Outcome = Resolution::Kind::Source;
+  r.Path = source.string();
+  return r;
+}
+
 Resolution ModuleResolver::resolveSource(const std::string &canonical,
                                          const std::filesystem::path &source) {
   auto fromSource = [&](const std::string &why) {
-    auto e = std::make_unique<Entry>();
-    e->State = Entry::State::Source;
-    e->Path = source;
-    Entries[canonical] = std::move(e);
-    Awaiting.erase(canonical);
-    Pendings.erase(canonical);
-    log("module " + canonical + ": " + why + "; building from source");
-    Resolution r;
-    r.Outcome = Resolution::Kind::Source;
-    r.Path = source.string();
-    return r;
+    return this->fromSource(canonical, source, why);
   };
   if (!Opts.ReadCache)
     return fromSource("cache not read");
@@ -273,9 +279,9 @@ Resolution ModuleResolver::resolveSource(const std::string &canonical,
   return r;
 }
 
-Resolution
-ModuleResolver::resolvePrebuilt(const std::string &canonical,
-                                const std::filesystem::path &source) {
+std::vector<std::filesystem::path>
+ModuleResolver::prebuiltCandidates(const std::string &canonical,
+                                   const std::filesystem::path &source) const {
   std::vector<std::filesystem::path> candidates;
   candidates.push_back(std::filesystem::path(source).replace_extension(".pkm"));
   std::filesystem::path rel =
@@ -283,7 +289,29 @@ ModuleResolver::resolvePrebuilt(const std::string &canonical,
   rel.replace_extension(".pkm");
   for (const std::string &dir : Opts.ModulePath)
     candidates.push_back(module_utils::appendPath(dir, rel));
+  return candidates;
+}
 
+bool ModuleResolver::exists(const std::string &canonical) const {
+  std::filesystem::path source = module_utils::moduleFile(
+      Opts.ProjectRoot, isSystemName(canonical), modulePathOf(canonical));
+  std::error_code ec;
+  if (std::filesystem::exists(source, ec))
+    return true;
+  const std::vector<std::filesystem::path> candidates =
+      prebuiltCandidates(canonical, source);
+  return std::any_of(candidates.begin(), candidates.end(),
+                     [](const std::filesystem::path &c) {
+                       std::error_code ec;
+                       return std::filesystem::is_regular_file(c, ec);
+                     });
+}
+
+Resolution
+ModuleResolver::resolvePrebuilt(const std::string &canonical,
+                                const std::filesystem::path &source) {
+  const std::vector<std::filesystem::path> candidates =
+      prebuiltCandidates(canonical, source);
   std::string tried = shownPath(source);
   for (const auto &c : candidates) {
     tried += ", " + shownPath(c);
@@ -382,6 +410,11 @@ Resolution ModuleResolver::load(const std::string &canonical,
       if (Awaiting.count(d.Name))
         return unusable("depends on module '" + d.Name +
                         "', whose cache entry depends on it");
+      // A cache entry's: its source's own import of it says why, where it
+      // is (a prebuilt file has no source, and its import is the place).
+      if (policy == pkm::Policy::Cache && !exists(d.Name))
+        return unusable("depends on module '" + d.Name +
+                        "', which is not found");
       Awaiting.insert(canonical);
       Resolution r;
       r.Outcome = Resolution::Kind::NeedDependency;
@@ -585,6 +618,22 @@ void ModuleResolver::failed(const std::string &canonical) {
   Entries[canonical] = std::move(e);
   Awaiting.erase(canonical);
   Pendings.erase(canonical);
+}
+
+bool ModuleResolver::buildFromSource(const std::string &canonical,
+                                     const std::string &why) {
+  // Only a cache entry is pending with a source next to it: a prebuilt
+  // file is looked for when there is none.
+  if (!Pendings.count(canonical) || Entries.count(canonical))
+    return false;
+  std::filesystem::path source = module_utils::moduleFile(
+      Opts.ProjectRoot, isSystemName(canonical), modulePathOf(canonical));
+  std::error_code ec;
+  if (!std::filesystem::exists(source, ec))
+    return false;
+  fromSource(canonical, source,
+             "cache " + shownPath(cachePath(canonical)) + " " + why);
+  return true;
 }
 
 // -- What the lowering reads

@@ -564,6 +564,48 @@ TEST(Pkm, CacheEntryWhoseCodeDoesNotDecodeIsRebuilt) {
       << r.out;
 }
 
+// A cache entry whose bytes pass its hashes but not what reads them later is
+// rebuilt too, as a damaged entry is promised: a TMPL section that does not
+// decode was an error at the import on every run (after `--verbose` called
+// the entry usable), and a dependency renamed to a module there is none of
+// was `module 'bsae' not found` at the import of the module the entry is of.
+TEST(Pkm, CacheEntryDamagedPastItsHashesIsRebuilt) {
+  REQUIRE_BACKEND();
+  Project p("pasthashes");
+  p.writeBase("1", "fn ident<T>(x: T) -> T { return x; }\n");
+  ASSERT_EQ(p.runMain().exitCode, 0);
+  auto rebuilt = [&](const std::string &module, const std::string &why) {
+    SCOPED_TRACE(module);
+    auto r = p.runMain("--verbose");
+    EXPECT_EQ(r.exitCode, 0) << r.out;
+    EXPECT_TRUE(contains(r.out, kExpected)) << r.out;
+    EXPECT_TRUE(contains(r.out, "module " + module + ": cache .paykan_cache/" +
+                                    module + ".pkm " + why))
+        << r.out;
+    EXPECT_TRUE(builtFromSource(r.out, module)) << r.out;
+    r = p.runMain("--verbose");
+    EXPECT_EQ(r.exitCode, 0) << r.out;
+    EXPECT_FALSE(builtFromSource(r.out, module)) << r.out;
+  };
+  rewriteSection(
+      p.entry("base"), paykan::pkm::Kind::Tmpl, [](std::vector<uint8_t> &tmpl) {
+        const std::string name = "ident";
+        auto at =
+            std::search(tmpl.begin(), tmpl.end(), name.begin(), name.end());
+        ASSERT_NE(at, tmpl.end());
+        *at = 0xff;
+      });
+  rebuilt("base",
+          "has a bad TMPL section: TMPL: string is not valid UTF-8 (at byte ");
+  rewriteManifest(p.entry("mid"), [](paykan::pkm::Manifest &m) {
+    for (auto &d : m.Deps)
+      if (d.Name == "base")
+        d.Name = "bsae";
+  });
+  rebuilt("mid", "depends on module 'bsae', which is not found; building "
+                 "from source\n");
+}
+
 TEST(Pkm, RebuildModulesIgnoresTheEntries) {
   REQUIRE_BACKEND();
   Project p("rebuild");
@@ -998,6 +1040,42 @@ TEST(Pkm, CheckJudgesTheCodeByTheBackendThatLinksIt) {
                        "); backend '" + made.Backend +
                        "' links code it compiled itself (" + made.Producer +
                        " for " + made.Target + ")\n");
+}
+
+// A module that failed once and is asked for again (here `x`, a prebuilt
+// file built against another interface of `y`, the module being compiled,
+// which imports it) names the file its import would be in the second
+// report, as before: it named none (`not found (tried )`), the path of the
+// resolver's failed entry, which has none.
+TEST(Pkm, AModuleThatFailedNamesTheFileItsImportWouldBe) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_tried_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "s1" / "y.pkn", "fn yv() -> int { return 1; }\n");
+  writeFile(dir / "s2" / "x.pkn",
+            "import y;\nfn xv() -> int { return y::yv() + 1; }\n");
+  writeFile(dir / "s3" / "y.pkn",
+            "import x;\nfn yv() -> int { return x::xv() + 40; }\n");
+  fs::create_directories(dir / "pre");
+  auto in = [&](const char *sub, const std::string &args) {
+    return run("cd " + (dir / sub).string() + " && " + paykanCmd() + " " +
+               args);
+  };
+  ASSERT_EQ(in("s1", "--emit-pkm y.pkn -o ../pre/y.pkm").exitCode, 0);
+  ASSERT_EQ(in("s2", "--module-path=../pre --emit-pkm x.pkn -o ../pre/x.pkm")
+                .exitCode,
+            0);
+  auto r = in("s3", "--module-path=../pre --no-module-cache --emit-pkm y.pkn "
+                    "-o ../y.pkm");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  EXPECT_TRUE(contains(r.out, "error: module 'x' (../pre/x.pkm) was built "
+                              "against another interface of module 'y'"))
+      << r.out;
+  EXPECT_FALSE(contains(r.out, "(tried )")) << r.out;
+  EXPECT_TRUE(contains(r.out, "error: module 'x' not found (tried x.pkn)\n"))
+      << r.out;
+  fs::remove_all(dir);
 }
 
 // A directory is not a module file: every verb says so and exits with 1,

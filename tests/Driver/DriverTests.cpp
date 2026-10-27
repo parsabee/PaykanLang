@@ -3462,6 +3462,10 @@ TEST(Driver, BuildChecksItsExecutableBeforeCompiling) {
 // once at it, whatever the length of the chain.  With the 256 modules' cache
 // entries written, the same chain one module longer is still too deep: a
 // cache entry is checked against each module it imports, one level deeper.
+// It is reported where it is without them, with the same notes: the entry
+// whose imports nest too deep is built from its source.  It was reported at
+// the outermost import from source, with two notes a level there, each
+// naming a module that import does not import.
 TEST(Driver, ImportsNestedTooDeepAreAnError) {
   REQUIRE_BACKEND();
   auto dir = freshDir("import_depth");
@@ -3504,10 +3508,24 @@ TEST(Driver, ImportsNestedTooDeepAreAnError) {
                                                "m1744.pkm"));
   auto over = paykan("--check-only over_limit.pkn");
   EXPECT_EQ(over.exitCode, 1) << over.out.substr(0, 2000);
-  EXPECT_EQ(over.out.rfind("c/m1743.pkn:1:1: " + tooDeep +
+  EXPECT_EQ(over.out.rfind("c/m1998.pkn:1:1: " + tooDeep +
                                "'c::m1999' is imported 257 modules deep\n",
                            0),
             0U)
+      << over.out.substr(0, 2000);
+  auto notes = [](const std::string &out) {
+    size_t n = 0;
+    for (size_t at = out.find("note:"); at != std::string::npos;
+         at = out.find("note:", at + 1))
+      ++n;
+    return n;
+  };
+  auto cold = paykan("--check-only --no-module-cache over_limit.pkn");
+  EXPECT_EQ(cold.out.rfind("c/m1998.pkn:1:1: " + tooDeep, 0), 0U)
+      << cold.out.substr(0, 2000);
+  EXPECT_EQ(notes(over.out), notes(cold.out));
+  EXPECT_EQ(over.out.find("c/m1743.pkn:1:1: note: in module 'c::m1999'"),
+            std::string::npos)
       << over.out.substr(0, 2000);
   std::filesystem::remove_all(dir);
 }

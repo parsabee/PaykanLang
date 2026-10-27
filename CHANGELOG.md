@@ -895,8 +895,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     modules deep`, exit status 1, however long the chain.  The levels are counted whether
     the modules come from source or from module files (a cache entry is checked against
     each module it imports, one level deeper), so a program is not accepted with a warm
-    cache and rejected with a cold one.  The nested Sema is on the heap, which halves the
-    stack each level takes (2.9 KB in a debug build).
+    cache and rejected with a cold one; and reported at the same import with the same
+    notes, since a cache entry whose imports nest too deep is built from its source.  The
+    nested Sema is on the heap, which halves the stack each level takes (2.9 KB in a debug
+    build).
 
 ### Removed
 
@@ -1103,40 +1105,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     reported only when the program was lowered, which then went on without the module and
     stopped at an assertion (`Scope::lookup`, SIGABRT); `--check-only` accepted it, and a
     cache entry of this kind was called usable and never rebuilt.  A file whose interface
-    did not match its CODE, its own records or the modules it imports, all its hashes
-    made to match, failed PIR's verifier, the lowering's checks (`internal compiler
-    error: a call of slot 6 of 'Seg' does not match the class's definition in its
-    module`, for a file whose copy of an imported superclass lost a slot), or Sema (a
-    signature's unknown type reported under both of the import's names, which stopped a
-    debug build with `the same diagnostic was reported twice`), or it built a program
-    that crashed when it ran (an empty vtable slot, a constructor returning nothing) or
-    crashed the mlir backend (a `void` parameter).  Now, when the file is loaded, its
-    interface is checked for consistency (each superclass a class it describes, whose
-    virtual methods begin its subclass's; every class and struct has an initializer), for
-    types it does not describe, and against the modules whose types it records; its CODE
-    is decoded, verified (a `void` parameter is an error) and checked against the
-    interface: each class the module defines with its superclass, its own fields, its
-    vtable's slots (none empty) and its constructor, each method of each of its structs
-    and each function, and their PIR types wherever the interface's types decide them
-    (an integer or floating-point type, `bool`, `char`, `Str`, a class, a slice, an
-    `inout` parameter); its externs are checked against the CODE of the module files they
-    name; and its templates are decoded.  So such a cache entry is rebuilt and such a
-    prebuilt module is an error at the import, `--check-only` included (`module 'm'
-    (m.pkm) has a bad CODE section: binary PIR: bad magic at byte 0. Rebuild it from
-    source.`, `module 'lib::b' (pre/lib/b.pkm) has a bad IFACE section: the vtable of
-    class 'Line' does not start with the slots of its superclass 'Shape'.`, `... has an
-    IFACE section that does not match its CODE: function 'mk' is (ptr) -> void in CODE,
-    () -> box by its types in IFACE.`).  A slot's signature that differs in a type these
-    checks do not derive (a struct's, a tuple's) is the file's error in the lowering, not
-    an internal compiler error.  The module decoded then is the one the program is
-    lowered with, so nothing is decoded twice: `run` of a program importing every module
-    of the standard library takes the time it did, and its `--check-only` 2 ms more (53
-    to 55 ms, 9% more instructions, in a debug build); in a chain of 60 modules each
-    deriving a class from the one before, whose interfaces hold 1830 class records in
-    all, `--check-only` takes 147 ms where it took 127 ms before these interface checks
-    (16% more instructions) and `run` 675 ms where it took 653.  And the lowering stops
-    at an import it cannot lower, instead of lowering the importer without it
-    (docs/design/pkm.md §8.4).
+    did not match its CODE, its own records or the modules it imports, all its hashes made
+    to match, failed PIR's verifier, the lowering's checks (`internal compiler error: a
+    call of slot 6 of 'Seg' does not match the class's definition in its module`, for a
+    file whose copy of an imported superclass lost a slot), or Sema (a signature's unknown
+    type reported under both of the import's names, which stopped a debug build with `the
+    same diagnostic was reported twice`), or it built a program that crashed when it ran
+    (an empty vtable slot, a constructor returning nothing) or crashed the mlir backend (a
+    `void` parameter).  Now, when the file is loaded, its interface is checked for
+    consistency (each superclass a class it describes, whose virtual methods begin its
+    subclass's; every class and struct has an initializer), for types it does not
+    describe, and against the modules whose types it records; its CODE is decoded,
+    verified (a `void` parameter is an error) and checked against the interface: each
+    class the module defines with its superclass, its own fields, its vtable's slots (none
+    empty) and its constructor, each method of each of its structs and each function, and
+    their PIR types wherever the interface's types decide them (an integer or
+    floating-point type, `bool`, `char`, `Str`, a class, a slice, an `inout` parameter);
+    its externs are checked against the CODE of the module files they name; and its
+    templates are decoded.  So such a cache entry is rebuilt and such a prebuilt module is
+    an error at the import, `--check-only` included (`module 'm' (m.pkm) has a bad CODE
+    section: binary PIR: bad magic at byte 0. Rebuild it from source.`, `module 'lib::b'
+    (pre/lib/b.pkm) has a bad IFACE section: the vtable of class 'Line' does not start
+    with the slots of its superclass 'Shape'.`, `... has an IFACE section that does not
+    match its CODE: function 'mk' is (ptr) -> void in CODE, () -> box by its types in
+    IFACE.`).  A cache entry that records a dependency no source or module file is there
+    for is rebuilt too, its source's own import saying where a dependency is missing
+    (`module 'bsae' not found` was reported at the import of the module the entry is of).
+    A slot's signature that differs in a type these checks do not derive (a struct's, a
+    tuple's) is the file's error in the lowering, not an internal compiler error.  The
+    module decoded then is the one the program is lowered with, so nothing is decoded
+    twice: `run` of a program importing every module of the standard library takes the
+    time it did, and its `--check-only` 2 ms more (53 to 55 ms, 9% more instructions, in a
+    debug build); in a chain of 60 modules each deriving a class from the one before,
+    whose interfaces hold 1830 class records in all, `--check-only` takes 147 ms where it
+    took 127 ms before these interface checks (16% more instructions) and `run` 675 ms
+    where it took 653.  And the lowering stops at an import it cannot lower, instead of
+    lowering the importer without it (docs/design/pkm.md §8.4).
   - `paykan pkm check` printed `usable` for files the compiler rejects or crashes on (a
     CODE section that does not decode, a TMPL section the importer rejects, compiled code
     that does not read or verify, an interface that does not match its CODE), and printed
