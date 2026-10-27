@@ -2,15 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // What a module's `.pkm` keeps of its code (paykan/modules/ModuleCode.h,
 // docs/design/pkm.md §5.13): the instantiations its interface exposes, the
-// trim, and the split into CODE and the code a backend compiles.
+// trim, the split into CODE and the code a backend compiles, and the check
+// that a file's CODE defines what its interface says (§8.4); and that the
+// lowering stops at an import it cannot lower.
 
+#include "TestUtils.h"
+#include "paykan/lowering/Lowering.h"
 #include "paykan/modules/ModuleCode.h"
+#include "paykan/modules/ModuleResolver.h"
 #include "paykan/pir/Parser.h"
 #include "paykan/pir/Verifier.h"
 
 #include <gtest/gtest.h>
 
+#include <functional>
 #include <set>
+#include <sstream>
 #include <string>
 
 using namespace paykan;
@@ -222,4 +229,104 @@ TEST(ModuleCode, ACodeProvidesWhatTheProgramDeclaresFromIt) {
       err);
   ASSERT_TRUE(dropped) << err.str();
   EXPECT_FALSE(modules::providesFor(parts.Code, *dropped));
+}
+
+// A module file is usable only when its CODE defines what its interface
+// says the module defines (docs/design/pkm.md §8.4 step 7): a file whose
+// IFACE names a class, a slot, a field, a method or a function its CODE
+// does not have is rejected when it is loaded, not lowered against.
+TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
+  const pir::Module code = parsed();
+  auto check = [&](const std::function<void(pkm::Interface &)> &change) {
+    pkm::Interface iface = interface();
+    pkm::ClassRec box;
+    box.Name = "Box<int>";
+    box.Fields = {{"v", "int", false}};
+    // The vtable's slots, then the initializer and an `impl` method, which
+    // have none.
+    box.Methods = {{"destroy", "void", {}, 0, {}},
+                   {"__init__", "void", {"int"}, 0, {}},
+                   {"get", "int", {}, pkm::kMethodImpl, {}}};
+    iface.Classes.push_back(box);
+    pkm::StructRec other;
+    other.Name = "Box<Str>";
+    other.IsLocal = false; // another module's: its own CODE defines it
+    other.Methods = {{"missing", "int", {}, 0, {}}};
+    iface.Structs.push_back(other);
+    change(iface);
+    Status s = modules::checkCodeMatchesInterface(code, iface);
+    return s ? std::string() : s.message();
+  };
+  EXPECT_EQ(check([](pkm::Interface &) {}), "");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Classes[0].Name = "Box<long>"; }),
+            "class 'Box<long>' is not in CODE");
+  EXPECT_EQ(
+      check([](pkm::Interface &i) { i.Classes[0].SuperClassName = "Base"; }),
+      "class 'Box<int>': its superclass is '' in CODE, 'Base' in IFACE");
+  EXPECT_EQ(
+      check([](pkm::Interface &i) { i.Classes[0].Fields[0].FieldName = "w"; }),
+      "class 'Box<int>': its fields are not the ones in CODE");
+  EXPECT_EQ(
+      check([](pkm::Interface &i) { i.Classes[0].Methods[0].Name = "drop"; }),
+      "class 'Box<int>': slot 0 of its vtable is 'destroy' in CODE, 'drop' in "
+      "IFACE");
+  EXPECT_EQ(check([](pkm::Interface &i) {
+              i.Classes[0].Methods.push_back({"peek", "int", {}, 0, {}});
+            }),
+            "class 'Box<int>': its vtable has 1 slots in CODE, 2 in IFACE");
+  EXPECT_EQ(check([](pkm::Interface &i) {
+              i.Structs[0].IsLocal = true;
+              i.Structs[0].Methods = {{"peek", "int", {}, 0, {}}};
+            }),
+            "");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Structs[0].IsLocal = true; }),
+            "method 'Box<Str>.missing' is not in CODE");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Functions[0].Name = "apu"; }),
+            "function 'apu' is not in CODE");
+  // An abstract class (a pure virtual method) has no constructor function.
+  EXPECT_EQ(check([](pkm::Interface &i) {
+              i.Classes[0].Methods[0].Flags = pkm::kMethodPure;
+              i.Functions[0].Name = "Box<int>";
+            }),
+            "");
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Functions[0].Name = "Box<int>"; }),
+            "function 'Box<int>' is not in CODE");
+  // An extern of another module is not the module's own.
+  EXPECT_EQ(check([](pkm::Interface &i) { i.Functions[0].Name = "lib::f"; }),
+            "function 'lib::f' is not in CODE");
+}
+
+// The lowering stops at an import it cannot lower: the importer is not
+// lowered without it (it went on, and stopped at an assertion on the first
+// name the import declares).  Lowered with a resolver that did not load
+// `::error`, the program has neither its code nor its analysis.
+TEST(ModuleCode, LoweringStopsAtAnImportItCannotLower) {
+  auto [parseOk, driver] = test::parse(R"(import ::error;
+fn main() -> int {
+  e = error::none();
+  if e.isOk() {
+    return 0;
+  }
+  return 1;
+}
+)");
+  ASSERT_TRUE(parseOk);
+  std::ostringstream diagOS;
+  sema::DiagEngine diag(diagOS);
+  sema::Sema sema(driver->getASTContext(), diag, "");
+  auto ctx = sema.run(driver->getRoot());
+  ASSERT_TRUE(ctx) << diagOS.str();
+  modules::ModuleResolver other({}, modules::ModuleResolver::hostIdentity());
+  pir::Program program;
+  std::ostringstream errs;
+  EXPECT_FALSE(lowering::lowerProgram(ctx, driver->getRoot(), "main", "",
+                                      program, errs, &other));
+  EXPECT_EQ(errs.str(), "internal compiler error: lowering failed for "
+                        "imported module '::error'\n");
+  // With the resolver that loaded it, it lowers.
+  pir::Program lowered;
+  std::ostringstream none;
+  EXPECT_TRUE(
+      lowering::lowerProgram(ctx, driver->getRoot(), "main", "", lowered, none))
+      << none.str();
 }

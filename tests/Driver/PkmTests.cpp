@@ -18,6 +18,7 @@
 #include "paykan/pkm/Manifest.h"
 #include "paykan/pkm/Object.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -495,6 +496,27 @@ TEST(Pkm, CacheEntryWhoseCompiledCodeDoesNotReadIsRebuilt) {
   EXPECT_FALSE(builtFromSource(again.out, "base")) << again.out;
 }
 
+// A cache entry whose CODE does not decode is rebuilt, though every hash
+// of the file matches: CODE is decoded and verified when the entry is
+// loaded, not when the program is lowered (which went on without the
+// module and stopped at an assertion).
+TEST(Pkm, CacheEntryWhoseCodeDoesNotDecodeIsRebuilt) {
+  REQUIRE_BACKEND();
+  Project p("codecache");
+  ASSERT_EQ(p.runMain().exitCode, 0);
+  rewriteSection(p.entry("base"), paykan::pkm::Kind::Code,
+                 [](std::vector<uint8_t> &code) {
+                   std::fill(code.begin(), code.end(), 0);
+                 });
+  auto r = p.runMain("--verbose");
+  ASSERT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_TRUE(contains(r.out, kExpected)) << r.out;
+  EXPECT_TRUE(contains(r.out, "module base: cache .paykan_cache/base.pkm has "
+                              "a bad CODE section: binary PIR: bad magic at "
+                              "byte 0; building from source\n"))
+      << r.out;
+}
+
 TEST(Pkm, RebuildModulesIgnoresTheEntries) {
   REQUIRE_BACKEND();
   Project p("rebuild");
@@ -619,6 +641,34 @@ TEST(Pkm, PrebuiltModuleWhoseCompiledCodeDoesNotReadIsRejected) {
     EXPECT_TRUE(contains(r.out, ". Rebuild it from source.")) << cmd;
   }
   EXPECT_FALSE(fs::exists(p.Dir / "prog"));
+}
+
+// A prebuilt module whose CODE does not decode is rejected where it is
+// imported, by every command, `--check-only` too: CODE is decoded when the
+// file is loaded (the lowering went on without the module and stopped at
+// an assertion, and `--check-only` accepted it).
+TEST(Pkm, PrebuiltModuleWhoseCodeDoesNotDecodeIsRejected) {
+  REQUIRE_BACKEND();
+  Project p("codeprebuilt");
+  ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                " --emit-pkm base.pkn")
+                .exitCode,
+            0);
+  fs::remove(p.Dir / "base.pkn");
+  rewriteSection(p.Dir / "base.pkm", paykan::pkm::Kind::Code,
+                 [](std::vector<uint8_t> &code) {
+                   std::fill(code.begin(), code.end(), 0);
+                 });
+  for (const char *cmd :
+       {"", "--check-only", "--emit-pir", "--emit-c", "build -o prog"}) {
+    auto r = p.runMain(cmd);
+    EXPECT_EQ(r.exitCode, 1) << cmd << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, "error: module 'base' (base.pkm) has a bad "
+                                "CODE section: binary PIR: bad magic at byte "
+                                "0. Rebuild it from source.\n"))
+        << cmd << ": " << r.out;
+    EXPECT_FALSE(contains(r.out, "internal compiler error")) << cmd;
+  }
 }
 
 TEST(Pkm, PrebuiltModulesAreFoundOnTheModulePath) {
@@ -3057,6 +3107,110 @@ TEST(Pkm, AForgedConformanceIsRejected) {
                                   "'Hashable', but it has no method 'view fn "
                                   "hash() -> int'"))
       << plain.out;
+  fs::remove_all(dir);
+}
+
+// A module file whose interface does not match its CODE (a class, a
+// superclass, a vtable slot, a field or a function its CODE does not have)
+// is unusable: a prebuilt one is an error where it is imported, under
+// `--check-only` too, and a cache entry is rebuilt.  The importer was
+// lowered against the interface, and failed PIR's verifier or the
+// lowering's own checks (`internal compiler error`).
+TEST(Pkm, AnInterfaceThatDoesNotMatchItsCodeIsRejected) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_iface_code_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "geo.pkn",
+            "class Shape { name: Str; view fn kind() -> Str { return "
+            "\"shape\"; } }\n"
+            "class Circle : Shape { r: int; view fn kind() -> Str { return "
+            "\"circle\"; } }\n"
+            "impl Circle { fn __init__(r: int) { __super__(\"c\"); self.r = "
+            "r; } }\n"
+            "fn area(c: view Circle) -> int { return 3 * c.r * c.r; }\n");
+  writeFile(dir / "main.pkn", "import geo;\n"
+                              "fn main() -> int {\n"
+                              "  let c = geo::Circle(2);\n"
+                              "  return geo::area(c) + c.kind().len();\n"
+                              "}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  ASSERT_EQ(paykan("main.pkn").exitCode, 18);
+  const std::string cached = slurp(dir / ".paykan_cache" / "geo.pkm");
+  ASSERT_EQ(paykan("--emit-pkm geo.pkn").exitCode, 0);
+  fs::rename(dir / "geo.pkn", dir / "geo.src");
+  const std::string pristine = slurp(dir / "geo.pkm");
+  auto classNamed = [](paykan::pkm::Interface &i,
+                       const std::string &name) -> paykan::pkm::ClassRec & {
+    for (auto &c : i.Classes)
+      if (c.Name == name)
+        return c;
+    ADD_FAILURE() << "no class " << name;
+    return i.Classes.front();
+  };
+  struct Case {
+    const char *What;
+    std::function<void(paykan::pkm::Interface &)> Change;
+    const char *Why;
+  };
+  const Case cases[] = {
+      {"a class renamed",
+       [&](paykan::pkm::Interface &i) {
+         classNamed(i, "Circle").Name = "Circle2";
+       },
+       "class 'Circle2' is not in CODE"},
+      {"a superclass renamed",
+       [&](paykan::pkm::Interface &i) {
+         classNamed(i, "Circle").SuperClassName = "ahape";
+       },
+       "class 'Circle': its superclass is 'Shape' in CODE, 'ahape' in IFACE"},
+      {"a vtable slot renamed",
+       [&](paykan::pkm::Interface &i) {
+         for (auto &m : classNamed(i, "Circle").Methods)
+           if (m.Name == "equals")
+             m.Name = "equal?";
+       },
+       "class 'Circle': slot 2 of its vtable is 'equals' in CODE, 'equal?' "
+       "in IFACE"},
+      {"a field renamed",
+       [&](paykan::pkm::Interface &i) {
+         classNamed(i, "Circle").Fields.front().FieldName = "radius";
+       },
+       "class 'Circle': its fields are not the ones in CODE"},
+      {"a function renamed",
+       [](paykan::pkm::Interface &i) {
+         for (auto &f : i.Functions)
+           if (f.Name == "area")
+             f.Name = "areas";
+       },
+       "function 'areas' is not in CODE"},
+  };
+  const std::string mismatch =
+      "has an IFACE section that does not match its CODE: ";
+  for (const Case &c : cases) {
+    writeFile(dir / "geo.pkm", pristine);
+    rewriteIface(dir / "geo.pkm", "geo", c.Change);
+    for (const char *cmd : {"main.pkn", "--check-only main.pkn"}) {
+      auto r = paykan(cmd);
+      EXPECT_EQ(r.exitCode, 1) << c.What << ", " << cmd << ": " << r.out;
+      EXPECT_TRUE(contains(r.out, "error: module 'geo' (geo.pkm) " + mismatch +
+                                      c.Why + ". Rebuild it from source.\n"))
+          << c.What << ", " << cmd << ": " << r.out;
+    }
+  }
+  // The cache entry, with the source back: rebuilt.
+  fs::remove(dir / "geo.pkm");
+  fs::rename(dir / "geo.src", dir / "geo.pkn");
+  writeFile(dir / ".paykan_cache" / "geo.pkm", cached);
+  rewriteIface(dir / ".paykan_cache" / "geo.pkm", "geo", cases[2].Change);
+  auto rebuilt = paykan("--verbose main.pkn");
+  EXPECT_EQ(rebuilt.exitCode, 18) << rebuilt.out;
+  EXPECT_TRUE(contains(rebuilt.out, "module geo: cache .paykan_cache/geo.pkm " +
+                                        mismatch + cases[2].Why +
+                                        "; building from source\n"))
+      << rebuilt.out;
   fs::remove_all(dir);
 }
 

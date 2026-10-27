@@ -1381,7 +1381,7 @@ paykan [run|build|--emit-pir|--emit-source|--check-only|--emit-pkm] main.pkn
         DECIDE  source exists → cache fresh? LOAD : BUILD → write → LOAD
                 no source     → first prebuilt candidate with verdict Usable → LOAD ; else "module not found (tried …)"
         BUILD   parse → Sema(dep, &graph) (its imports first) → lowerModule → verify → exportInterface → encode → AtomicFile
-        LOAD    readFile → verdict → readInterface → ensure deps' hashes match → LoadedModule{Name, Iface, hashes, Code (lazy), Payloads}
+        LOAD    readFile → verdict → ensure deps' hashes match → readInterface → decode + verify CODE, check it against IFACE → LoadedModule{Name, Iface, hashes, Code, Payloads}
       Sema reconstructs the interface into the importer's ASTContext (the typed-table twin of what SemaImport.cpp does with a ModuleInfo).
  4. lowerModule(main) → pir::Module; externs declared from interfaces (§9.1).
  5. graph.assembleProgram → pir::Program = [main] + post-order of the import DAG (children in import order, each once) + synthetic units; verify(Program).
@@ -1469,6 +1469,20 @@ nothing `internal` is exported; every `INST` with `provided = 0` names a
 defined class/function. 8. `PAYLOAD` per §7.2 (a failing payload is
 ignored, not an error). 9. `DEBUG` (advisory). 10. After assembly,
 `pir::verify(Program)` as today.
+
+**Implemented.** Steps 4, 5 and 7 and the compiled code's check run when
+a file is loaded (`modules::readModuleContents`, in `ModuleResolver`'s
+load), so a cache entry that fails any of them is
+rebuilt and a prebuilt file is an error at the import, under
+`--check-only` too: `IFACE` read; `CODE` decoded, naming the module and
+verified; `CODE` checked against `IFACE` by name
+(`modules::checkCodeMatchesInterface`: each class the module defines, with
+its superclass, its own fields and its vtable's slots; each method of each
+of its structs; each function), signatures not yet; `OBJ` read and, when
+the active backend links code of its kind, checked by it
+(`Backend::checkModuleObject`). The decoded `CODE` is kept for the
+lowering, so a module is decoded once. `TMPL` is decoded by Sema, as
+before (§4.3).
 
 Threat model: a `.pkm` is untrusted (hand-edited, truncated, hostile,
 stale). The reader never allocates from an unchecked count, caps recursion,

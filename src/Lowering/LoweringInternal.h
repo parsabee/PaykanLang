@@ -139,7 +139,9 @@ private:
     std::string Plain;
   };
   std::unordered_map<std::string, ImportedFn> ImportedFunctions;
-  void processImports(ast::TranslationUnit *tu);
+  /// Lower this module's imports and note what it uses of them; false,
+  /// reported, when one cannot be lowered (the module is not lowered then).
+  bool processImports(ast::TranslationUnit *tu);
   /// Mark this module's instantiations of templates shared (pir::Function::
   /// Shared): the classes and structs whose names carry type arguments,
   /// their functions, and the copies of other modules' generic functions.

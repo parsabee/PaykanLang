@@ -1067,6 +1067,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     mlir backend writes as bitcode no longer carry LLVM's "Debug Info Version" flag (they
     have no debug info), since the reader verifies a module that has it and stops the
     process when that module does not verify.
+  - A module file whose CODE did not decode or verify was accepted when it was loaded and
+    reported only when the program was lowered, which then went on without the module and
+    stopped at an assertion (`Scope::lookup`, SIGABRT); `--check-only` accepted it, and a
+    cache entry of this kind was called usable and never rebuilt.  A file whose interface
+    did not match its CODE (a class or a method renamed in IFACE alone) failed PIR's
+    verifier or the lowering's own checks (`internal compiler error: a call of slot 5 of
+    'Circle' does not match the class's definition in its module`).  CODE is now decoded,
+    verified and checked against IFACE when the file is loaded (each class the module
+    defines, with its superclass, its own fields and its vtable's slots, each method of
+    each of its structs and each function, by name), so such a cache entry is rebuilt and
+    such a prebuilt module is an error at the import, `--check-only` included (`module
+    'm' (m.pkm) has a bad CODE section: binary PIR: bad magic at byte 0. Rebuild it from
+    source.`, `... has an IFACE section that does not match its CODE: class 'Circle':
+    slot 2 of its vtable is 'equals' in CODE, 'equal?' in IFACE.`).  The module decoded
+    then is the one the program is lowered with, so nothing is decoded twice: `run` of a
+    program importing every module of the standard library takes the time it did, and
+    its `--check-only` 2 ms more (53 to 55 ms, 8% more instructions, in a debug build).
+    And the lowering stops at an import it cannot lower, instead of lowering the importer
+    without it (docs/design/pkm.md §8.4).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

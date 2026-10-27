@@ -7,7 +7,9 @@
 #include "Names.h"
 #include "paykan/pir/DeadCode.h"
 
+#include <algorithm>
 #include <cctype>
+#include <set>
 #include <string_view>
 #include <unordered_set>
 #include <utility>
@@ -244,6 +246,81 @@ bool providesFor(const pir::Module &code, const pir::Program &program) {
       }
   }
   return true;
+}
+
+Status checkCodeMatchesInterface(const pir::Module &code,
+                                 const pkm::Interface &iface) {
+  auto defined = [&](const std::string &name) {
+    const pir::Function *f = code.findFunction(name);
+    return f && code.defines(*f);
+  };
+  for (const pkm::ClassRec &c : iface.Classes) {
+    if (!c.IsLocal)
+      continue; // its own module's CODE defines it
+    const pir::Class *cls = code.findClass(c.Name);
+    if (!cls || !code.defines(*cls))
+      return Status::error("class '" + c.Name + "' is not in CODE");
+    const std::string what = "class '" + c.Name + "': ";
+    if (cls->Super != c.SuperClassName)
+      return Status::error(what + "its superclass is '" + cls->Super +
+                           "' in CODE, '" + c.SuperClassName + "' in IFACE");
+    // CODE lists every field, the superclass's first; IFACE the class's own.
+    const pir::Class *super =
+        cls->Super.empty() ? nullptr : code.findClass(cls->Super);
+    const size_t inherited = super ? super->Fields.size() : 0;
+    std::vector<std::string> own, declared;
+    for (size_t i = inherited; i < cls->Fields.size(); ++i)
+      own.push_back(cls->Fields[i].Name);
+    for (const pkm::ClassRec::Field &f : c.Fields)
+      declared.push_back(f.FieldName);
+    std::sort(own.begin(), own.end());
+    std::sort(declared.begin(), declared.end());
+    if (own != declared)
+      return Status::error(what + "its fields are not the ones in CODE");
+    // IFACE lists the vtable's slots, then the initializer and the `impl`
+    // methods, which have none.
+    std::vector<std::string> slots;
+    for (const pkm::ClassRec::Method &m : c.Methods)
+      if (!(m.Flags & pkm::kMethodImpl) && m.Name != names::kMethodInit &&
+          m.Name != names::kMethodInitModulePrivate)
+        slots.push_back(m.Name);
+    if (slots.size() != cls->VTable.size())
+      return Status::error(
+          what + "its vtable has " + std::to_string(cls->VTable.size()) +
+          " slots in CODE, " + std::to_string(slots.size()) + " in IFACE");
+    for (size_t i = 0; i < slots.size(); ++i)
+      if (slots[i] != cls->VTable[i].Slot)
+        return Status::error(what + "slot " + std::to_string(i) +
+                             " of its vtable is '" + cls->VTable[i].Slot +
+                             "' in CODE, '" + slots[i] + "' in IFACE");
+  }
+  for (const pkm::StructRec &st : iface.Structs) {
+    if (!st.IsLocal)
+      continue;
+    // A struct's methods are its module's functions `S.m` (the module's own
+    // initializer, `___init__`, is `S.__init__`).
+    for (const pkm::ClassRec::Method &m : st.Methods) {
+      const std::string method = m.Name == names::kMethodInitModulePrivate
+                                     ? std::string(names::kMethodInit)
+                                     : m.Name;
+      if (!defined(st.Name + names::kNameSep + method))
+        return Status::error("method '" + st.Name + "." + m.Name +
+                             "' is not in CODE");
+    }
+  }
+  // A class with a pure virtual method has no constructor function to
+  // define: nothing makes one of its own.
+  std::set<std::string> abstract;
+  for (const pkm::ClassRec &c : iface.Classes)
+    if (std::any_of(c.Methods.begin(), c.Methods.end(),
+                    [](const pkm::ClassRec::Method &m) {
+                      return m.Flags & pkm::kMethodPure;
+                    }))
+      abstract.insert(c.Name);
+  for (const pkm::FuncRec &f : iface.Functions)
+    if (!abstract.count(f.Name) && !defined(f.Name))
+      return Status::error("function '" + f.Name + "' is not in CODE");
+  return Status::ok();
 }
 
 } // namespace paykan::modules

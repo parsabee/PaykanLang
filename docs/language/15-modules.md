@@ -580,11 +580,14 @@ and linked from its code, so the program builds and runs identically without the
 (see [`samples/imports/13_pkm`](../../samples/imports/13_pkm/README.md)); its compiled code
 needs the backend that compiled it.
 
-Whichever way a module file reaches a program, its compiled code is read and verified by the
-backend that links it when the file is loaded, before anything is compiled: a cache entry
-whose code does not read or verify is rebuilt, and a prebuilt file's is an error at the
-import (`module 'm' (m.pkm) has a bad OBJ section: the compiled code does not verify: ...`).
-Past that check the code is trusted once the file's hashes match. The hashes catch damage,
+Whichever way a module file reaches a program, it is checked when it is loaded, before
+anything is compiled: its PIR is decoded, verified and checked against its interface (each
+class, with its superclass, fields and virtual methods, each struct method and each function
+the interface names must be in it), and its compiled code is read and verified by the
+backend that links it. A cache entry that fails is rebuilt, and a prebuilt file is an error
+at the import (`module 'm' (m.pkm) has a bad CODE section: ...`, `... has a bad OBJ section:
+the compiled code does not verify: ...`), its PIR under `--check-only` too. Past these checks
+the compiled code is trusted once the file's hashes match. The hashes catch damage,
 not a file made to pass them, and LLVM's bitcode reader is not hardened against such bytes,
 so use prebuilt modules only from a source you trust.
 

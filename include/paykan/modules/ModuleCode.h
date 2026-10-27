@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "paykan/Status.h"
 #include "paykan/pir/PIR.h"
 #include "paykan/pkm/Interface.h"
 
@@ -52,5 +53,13 @@ ModuleCode splitModuleCode(pir::Module module);
 /// of @p program declare from it: a program whose modules were lowered
 /// together may use a module's copy its CODE no longer has.
 bool providesFor(const pir::Module &code, const pir::Program &program);
+
+/// Whether @p code, a module's CODE, defines (in its PIR or compiled) what
+/// the module's interface @p iface says it defines, by name
+/// (docs/design/pkm.md §8.4 step 7): each class of the module, with its
+/// superclass, its own fields and the slots of its vtable; each method of
+/// each of its structs; and each function.  The first difference when not.
+Status checkCodeMatchesInterface(const pir::Module &code,
+                                 const pkm::Interface &iface);
 
 } // namespace paykan::modules

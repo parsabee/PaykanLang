@@ -33,6 +33,31 @@
 
 namespace paykan::modules {
 
+/// How compiled code (an OBJ section) is checked before a program links it
+/// (Backend::checkModuleObject): ok, or why it cannot be linked.
+using ObjectCheck = std::function<Status(const pkm::Object &)>;
+
+/// A module file's contents, decoded and checked as every importer checks
+/// them (docs/design/pkm.md §8.4).
+struct ModuleContents {
+  pkm::Interface Iface;
+  /// CODE, decoded and verified, defining what Iface says the module does.
+  pir::Module Code;
+  /// OBJ, when the file has compiled code.
+  std::optional<pkm::Object> Object;
+};
+
+/// Read @p file, a module file of @p canonical, as an importer does: its
+/// IFACE, its CODE (decoded, naming the module, verified, and defining
+/// what IFACE says the module defines: checkCodeMatchesInterface) and its
+/// OBJ when it has one (read, and checked by @p checkObject when that is
+/// given).  Or why the file cannot be used, as the resolver's diagnostics
+/// word it ("has a bad CODE section: ...").  The manifest's verdict and
+/// the dependencies are the caller's.
+StatusOr<ModuleContents> readModuleContents(const pkm::File &file,
+                                            const std::string &canonical,
+                                            const ObjectCheck &checkObject);
+
 struct ResolverOptions {
   /// The source root imports are resolved against ("" = the current
   /// directory); the cache lives under it (names::kCacheDir).
@@ -65,7 +90,7 @@ struct ResolverOptions {
   /// before a program links it (Backend::checkModuleObject), or unset: a
   /// file whose code fails is unusable, so a cache entry is rebuilt and a
   /// prebuilt file rejected.
-  std::function<Status(const pkm::Object &)> CheckObject;
+  ObjectCheck CheckObject;
 };
 
 /// The answer to resolve() (§8.1 DECIDE).
@@ -75,8 +100,9 @@ struct Resolution {
     /// calls built()).  Path may not be a regular file: Sema diagnoses that
     /// as before.
     Source,
-    /// Loaded from the `.pkm` at Path: Iface is the interface, the CODE is
-    /// available through loadCode().
+    /// Loaded from the `.pkm` at Path: Iface is the interface, the CODE
+    /// (decoded and verified when the file was loaded) is available
+    /// through loadCode().
     Loaded,
     /// A cache or prebuilt entry depends on module Dependency, which must be
     /// resolved (and built if need be) first; then ask again.
@@ -134,8 +160,10 @@ public:
   /// The direct dependencies of a Loaded module (manifest order).
   const std::vector<std::string> &
   dependencies(const std::string &canonical) const;
-  /// The PIR of a Loaded module: CODE decoded and verified (§8.4 step 5).
-  StatusOr<pir::Module> loadCode(const std::string &canonical) const;
+  /// The PIR of a Loaded module: its CODE, decoded and verified when the
+  /// file was loaded (§8.4 step 5) and handed over by the first call; a
+  /// later call decodes it again.
+  StatusOr<pir::Module> loadCode(const std::string &canonical);
   /// The compiled code of a Loaded module (its OBJ section), or null when
   /// its CODE is all of it.
   const pkm::Object *object(const std::string &canonical) const;
@@ -195,9 +223,10 @@ private:
                            const std::filesystem::path &source);
   Resolution resolvePrebuilt(const std::string &canonical,
                              const std::filesystem::path &source);
-  /// Loads the file at @p path for @p canonical under @p policy up to the
-  /// dependency check; the outcome is Loaded, NeedDependency, or a Source /
-  /// Rejected / NotFound answer with the reason in Message.
+  /// Loads the file at @p path for @p canonical under @p policy: the
+  /// verdict, the dependencies, then its contents (readModuleContents); the
+  /// outcome is Loaded, NeedDependency, or a Source / Rejected / NotFound
+  /// answer with the reason in Message.
   Resolution load(const std::string &canonical,
                   const std::filesystem::path &path, pkm::Policy policy,
                   std::span<const uint8_t> sourceBytes);

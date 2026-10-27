@@ -18,6 +18,7 @@
 #include "Names.h"
 #include "Runtime.h"
 #include "Version.h"
+#include "paykan/modules/ModuleCode.h"
 #include "paykan/pir/Binary.h"
 #include "paykan/pir/Verifier.h"
 #include "paykan/pir/Version.h"
@@ -47,8 +48,10 @@ struct ModuleResolver::Entry {
   std::filesystem::path Path; ///< the source (Source, Built) or .pkm (Loaded)
   std::vector<uint8_t> SourceBytes; ///< Source, Built: for the manifest
   pkm::Interface Iface;             ///< Built, Loaded
-  std::vector<std::string> Deps;    ///< Built, Loaded: direct imports
-  support::Hash256 IfaceHash{};     ///< Built, Loaded
+  /// Loaded: its CODE, decoded and verified, until loadCode() takes it.
+  std::optional<pir::Module> Code;
+  std::vector<std::string> Deps; ///< Built, Loaded: direct imports
+  support::Hash256 IfaceHash{};  ///< Built, Loaded
   /// Built, Loaded: the TMPL section's hash (zero without one).  The
   /// interface hash covers the dependencies' (IFACE's MODS), so an edit of
   /// a template body reaches every module that may hold a copy of an
@@ -101,6 +104,50 @@ std::string describeProducer(const pkm::File &f) {
 }
 
 } // namespace
+
+StatusOr<ModuleContents> readModuleContents(const pkm::File &file,
+                                            const std::string &canonical,
+                                            const ObjectCheck &checkObject) {
+  ModuleContents out;
+  StatusOr<pkm::Interface> iface =
+      pkm::readInterface(file.section(pkm::Kind::Iface), canonical);
+  if (!iface)
+    return Status::error("has a bad IFACE section: " +
+                         iface.status().message());
+  out.Iface = std::move(*iface);
+  // CODE is read now, not when the program is lowered: a file whose code
+  // is bad is unusable (a cache entry is rebuilt, a prebuilt file rejected
+  // where it is imported, --check-only too), and the module decoded here
+  // is the one the lowering gets.
+  std::span<const uint8_t> codeBytes = file.section(pkm::Kind::Code);
+  if (!(file.manifest().Contents & pkm::kContentsHasCode) || codeBytes.empty())
+    return Status::error("has no CODE section");
+  StatusOr<pir::Module> code = pir::binary::decode(codeBytes);
+  if (!code)
+    return Status::error("has a bad CODE section: " + code.status().message());
+  if ((*code).Name != canonical)
+    return Status::error("has a bad CODE section: it names module '" +
+                         (*code).Name + "'");
+  if (auto errors = pir::verify(*code); !errors.empty())
+    return Status::error("has a bad CODE section: it does not verify:\n" +
+                         pir::formatErrors(errors));
+  if (Status s = checkCodeMatchesInterface(*code, out.Iface); !s)
+    return Status::error("has an IFACE section that does not match its CODE: " +
+                         s.message());
+  out.Code = std::move(*code);
+  if (file.manifest().Contents & pkm::kContentsHasObject) {
+    StatusOr<pkm::Object> object =
+        pkm::readObject(file.section(pkm::Kind::Object));
+    if (!object)
+      return Status::error("has a bad OBJ section: " +
+                           object.status().message());
+    if (checkObject)
+      if (Status s = checkObject(*object); !s)
+        return Status::error("has a bad OBJ section: " + s.message());
+    out.Object = std::move(*object);
+  }
+  return out;
+}
 
 ModuleResolver::ModuleResolver(ResolverOptions opts, pkm::HostIdentity host)
     : Opts(std::move(opts)), Host(std::move(host)) {}
@@ -317,9 +364,6 @@ Resolution ModuleResolver::load(const std::string &canonical,
                         : describeProducer(file) + "; " + v.Message);
   if (policy == pkm::Policy::Cache && !pkm::sourceMatches(m, p->SourceBytes))
     return unusable("is stale (the source changed)");
-  if (!(m.Contents & pkm::kContentsHasCode) ||
-      file.section(pkm::Kind::Code).empty())
-    return unusable("has no CODE section");
   // Every direct dependency must be resolved first, so its current
   // interface hash is known; a dependency that is itself waiting on this
   // module can only come from hand-edited files.
@@ -353,40 +397,35 @@ Resolution ModuleResolver::load(const std::string &canonical,
               ? "is stale (the templates of module '" + d.Name + "' changed)"
               : "was built against other templates of module '" + d.Name + "'");
   }
-  StatusOr<pkm::Interface> iface =
-      pkm::readInterface(file.section(pkm::Kind::Iface), canonical);
-  if (!iface)
-    return unusable("has a bad IFACE section: " + iface.status().message());
-  std::optional<pkm::Object> object;
-  if (m.Contents & pkm::kContentsHasObject) {
-    StatusOr<pkm::Object> read =
-        pkm::readObject(file.section(pkm::Kind::Object));
-    if (!read)
-      return unusable("has a bad OBJ section: " + read.status().message());
-    const pkm::Object &o = *read;
-    // A cache entry's code is the active backend's, or it is built again
-    // (a prebuilt file's is checked by the backend that links it).
-    if (policy == pkm::Policy::Cache && Opts.CompiledBy &&
-        !o.sameKind(*Opts.CompiledBy))
-      return unusable("is stale (its code was compiled by backend '" +
-                      o.Backend + "' (" + o.Producer + " for " + o.Target +
-                      "), not by this one)");
-    // Code the active backend links must read and verify (docs/design/
-    // pkm.md §8.4): a backend's reader is not made for damaged input.
-    if (Opts.CheckObject && Opts.CompiledBy && o.sameKind(*Opts.CompiledBy))
-      if (Status s = Opts.CheckObject(o); !s)
-        return unusable("has a bad OBJ section: " + s.message());
-    object = std::move(*read);
-  }
+  // Code the active backend links must read and verify (docs/design/
+  // pkm.md §8.4): a backend's reader is not made for damaged input.
+  auto checkObject = [this](const pkm::Object &o) {
+    return Opts.CheckObject && Opts.CompiledBy && o.sameKind(*Opts.CompiledBy)
+               ? Opts.CheckObject(o)
+               : Status::ok();
+  };
+  StatusOr<ModuleContents> contents =
+      readModuleContents(file, canonical, checkObject);
+  if (!contents)
+    return unusable(contents.status().message());
+  // A cache entry's code is the active backend's, or it is built again
+  // (a prebuilt file's is checked by the backend that links it).
+  if (const std::optional<pkm::Object> &o = (*contents).Object;
+      o && policy == pkm::Policy::Cache && Opts.CompiledBy &&
+      !o->sameKind(*Opts.CompiledBy))
+    return unusable("is stale (its code was compiled by backend '" +
+                    o->Backend + "' (" + o->Producer + " for " + o->Target +
+                    "), not by this one)");
   auto e = std::make_unique<Entry>();
   e->State = Entry::State::Loaded;
   e->Path = path;
-  e->Iface = std::move(*iface);
+  e->Iface = std::move((*contents).Iface);
+  e->Code = std::move((*contents).Code);
   for (const pkm::Manifest::Dep &d : m.Deps)
     e->Deps.push_back(d.Name);
   e->IfaceHash = file.ifaceHash();
   e->TmplHash = file.tmplHash();
-  e->Object = std::move(object);
+  e->Object = std::move((*contents).Object);
   e->File = std::move(p->File);
   Pendings.erase(canonical);
   Awaiting.erase(canonical);
@@ -459,14 +498,20 @@ ModuleResolver::dependencies(const std::string &canonical) const {
   return it == Entries.end() ? none : it->second->Deps;
 }
 
-StatusOr<pir::Module>
-ModuleResolver::loadCode(const std::string &canonical) const {
+StatusOr<pir::Module> ModuleResolver::loadCode(const std::string &canonical) {
   auto it = Entries.find(canonical);
   if (it == Entries.end() || it->second->State != Entry::State::Loaded)
     return Status::error("module '" + canonical +
                          "' was not loaded from a "
                          ".pkm file");
-  const Entry &e = *it->second;
+  Entry &e = *it->second;
+  if (e.Code) {
+    pir::Module code = std::move(*e.Code);
+    e.Code.reset();
+    return code;
+  }
+  // Handed over already: the bytes decoded and verified when they were
+  // loaded.
   std::string shown =
       "module '" + canonical + "' (" + displayPath(canonical) + ")";
   if (!e.File)
@@ -475,13 +520,7 @@ ModuleResolver::loadCode(const std::string &canonical) const {
       pir::binary::decode(e.File->section(pkm::Kind::Code));
   if (!mod)
     return Status::error(shown +
-                         ": CODE does not decode: " + mod.status().message());
-  const pir::Module &decoded = mod.value();
-  if (decoded.Name != canonical)
-    return Status::error(shown + ": CODE names module '" + decoded.Name + "'");
-  if (auto errors = pir::verify(decoded); !errors.empty())
-    return Status::error(shown + ": CODE does not verify:\n" +
-                         pir::formatErrors(errors));
+                         " has a bad CODE section: " + mod.status().message());
   return mod;
 }
 
