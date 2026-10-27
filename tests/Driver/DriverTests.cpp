@@ -3557,13 +3557,14 @@ TEST(Driver, AFileOver256MiBIsTooLarge) {
   EXPECT_EQ(check.exitCode, 1) << check.out;
   EXPECT_NE(check.out.find("'" + device + "' " + source), std::string::npos)
       << check.out;
-  for (const char *verb : {" pkm dump ", " pkm check "}) {
-    auto r = in(zero + verb + device);
-    EXPECT_EQ(r.exitCode, 1) << verb << r.out;
-    EXPECT_EQ(r.out,
-              "paykan: '" + device + "' is too large (more than 256 MiB)\n")
-        << verb;
-  }
+  const std::string tooLarge =
+      "paykan: '" + device + "' is too large (more than 256 MiB)\n";
+  auto dumpDevice = in(zero + " pkm dump " + device);
+  EXPECT_EQ(dumpDevice.exitCode, 1) << dumpDevice.out;
+  EXPECT_EQ(dumpDevice.out, tooLarge);
+  auto checkPkm = in(zero + " pkm check " + device);
+  EXPECT_EQ(checkPkm.exitCode, 1) << checkPkm.out;
+  EXPECT_EQ(checkPkm.out, tooLarge);
   auto piped = in("cat hello.pkn | " + paykanRun() + " /dev/stdin");
   EXPECT_EQ(piped.exitCode, 0) << piped.out;
   EXPECT_EQ(piped.out, "hello\n");
@@ -3580,19 +3581,20 @@ TEST(Driver, PaykanRuntimeDirIsTheOnlyRuntimeLookedAt) {
   auto dir = freshDir("runtime_dir");
   std::ofstream(dir / "hello.pkn") << kHello;
   std::filesystem::create_directories(dir / "partial" / "lib");
-  std::ofstream(dir / "partial" / "lib" / "libpaykan_runtime.a");
-  for (const auto &[runtimeDir, missing] :
+  std::ofstream(dir / "partial" / "lib" / "libpaykan_runtime.a").close();
+  for (const auto &[runtimeDir, message] :
        {std::pair<std::string, std::string>{
-            "none", "none/lib/libpaykan_runtime.a and "
-                    "none/include/paykan/Runtime.h do not exist"},
-        {"partial", "partial/include/paykan/Runtime.h does not exist"}}) {
+            "none", "cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR "
+                    "(none): none/lib/libpaykan_runtime.a and "
+                    "none/include/paykan/Runtime.h do not exist\n"},
+        {"partial", "cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR "
+                    "(partial): partial/include/paykan/Runtime.h does not "
+                    "exist\n"}}) {
     auto [rc, out] =
         run("cd " + dir.string() + " && PAYKAN_RUNTIME_DIR=" + runtimeDir +
             " " + paykanRun() + " build hello.pkn -o h 2>&1");
     EXPECT_EQ(rc, 1) << runtimeDir << ": " << out;
-    EXPECT_EQ(out, "cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR (" +
-                       runtimeDir + "): " + missing + "\n")
-        << runtimeDir;
+    EXPECT_EQ(out, message) << runtimeDir;
     EXPECT_FALSE(std::filesystem::exists(dir / "h")) << runtimeDir;
   }
   auto [rc, out] =
