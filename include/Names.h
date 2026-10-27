@@ -482,6 +482,13 @@ inline constexpr const char *kNoReturnRuntimeFunctions[] = {
     kPaykanPanicIndex,       kPaykanPanicForStep,     kPaykanPanicPureVirtual,
     kPaykanPanicMessage,     kPaykanPanicValue,       kPaykanUnreachableView,
 };
+/// @p symbol is one of kNoReturnRuntimeFunctions.
+inline bool isNoReturnRuntimeFunction(std::string_view symbol) {
+  for (std::string_view name : kNoReturnRuntimeFunctions)
+    if (name == symbol)
+      return true;
+  return false;
+}
 
 // -- Kinds of values
 //

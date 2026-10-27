@@ -636,6 +636,30 @@ TEST(Lowering, NativeFunctionCallsItsCSymbolWithTheBuiltinConvention) {
   EXPECT_EQ(count(main, "retain"), 0u) << main;
 }
 
+// A call in its module of a native function bound to a runtime function
+// that never returns (`Paykan_panic_message`, ::collections' `_panic`) ends
+// its path: what its arguments made is not released after it, as it is
+// after a call of one that returns.
+TEST(Lowering, ANativeCallThatNeverReturnsReleasesNothingAfterIt) {
+  auto l = lower(R"(
+    native fn stop(message: view Str) = "Paykan_panic_message";
+    native fn put(fd: int, s: view Str) -> int = "pk_test_put";
+    fn check(n: int) { if n > 3 { stop("too big: " + Str(n)); } }
+    fn show(n: int) -> int => put(1, "n: " + Str(n));
+    fn main() -> int { check(1); return show(2); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string check = function(l.Text, "check");
+  const size_t stop = check.find("call @$c.Paykan_panic_message(");
+  ASSERT_NE(stop, std::string::npos) << check;
+  EXPECT_NE(check.rfind("box", stop), std::string::npos) << check;
+  EXPECT_EQ(check.find("release", stop), std::string::npos) << check;
+  std::string show = function(l.Text, "show");
+  const size_t put = show.find("call @$c.pk_test_put(");
+  ASSERT_NE(put, std::string::npos) << show;
+  EXPECT_NE(show.find("release", put), std::string::npos) << show;
+}
+
 // An instance of a generic native function passes a PaykanType per type
 // argument, then what its template typed `T` by address: a `view T` as its
 // value's, a `-> T` result through a local C writes, a `-> view T` result as

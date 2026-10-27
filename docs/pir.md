@@ -188,7 +188,11 @@ not the runtime's, so backends declare it from the PIR signature (C:
 `int64_t pk_put(int64_t, PaykanObject *);`) and link it by the name without
 `$c.` (`pir::externCSymbol`).  A call in the declaring module calls
 `@$c.pk_put` itself, with the caller's own references unboxed (and an
-`inout` argument's address).  The `native fn` is also an ordinary function
+`inout` argument's address); when the C function is one of the runtime's
+that never return (`Paykan_panic_message` & co., the ones `Runtime.h`
+declares `PAYKAN_NORETURN`: `names::kNoReturnRuntimeFunctions`), nothing
+after the call runs, and the caller releases nothing its arguments made
+after it.  The `native fn` is also an ordinary function
 `@put`, for other modules' callers, whose body does the same with its
 parameters, releases them and returns the result; a reference result is the
 C function's owned box.  The objects that define the

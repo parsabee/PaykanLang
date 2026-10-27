@@ -822,6 +822,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-O` before, so `run -O0` and `run -O1` now generate less optimised code than they did,
   `run -O3` more optimised code, and `run -O2` the same.  The samples print the same at
   `run -O1` and `run -O3` as at `run -O2`, with the same heap statistics.
+- A call a module makes of its own `native fn` bound to a runtime function that never
+  returns (`Paykan_panic_message`, `Paykan_panic_value`, `Paykan_unreachable_view`: the
+  `_panic` and `_fail` of `::collections`) releases nothing its arguments made after it,
+  where no path went (docs/pir.md §3, "Native names"): the `List<Str>.__check` a program
+  links from `::collections` releases no message after the panic, as one the program makes
+  itself does not, and the standard library's code has up to 9 fewer `release`s in a
+  program's `--emit-pir`.
 
 ### Removed
 
