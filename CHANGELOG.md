@@ -1086,6 +1086,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     its `--check-only` 2 ms more (53 to 55 ms, 8% more instructions, in a debug build).
     And the lowering stops at an import it cannot lower, instead of lowering the importer
     without it (docs/design/pkm.md §8.4).
+  - `paykan pkm check` printed `usable` for files the compiler rejects or crashes on (a
+    CODE section that does not decode, a TMPL section the importer rejects, compiled code
+    that does not read or verify, an interface that does not match its CODE), and printed
+    it before it decoded anything, followed by an error and exit status 1 for some of
+    them.  It now reads the file as a program that imports it does, through the code that
+    loads a module (`modules::readModuleContents`): the verdict against this `paykan`, the
+    interface, CODE (decoded, verified and checked against the interface), the compiled
+    code (read and verified by the backend that would link it: the default one, or
+    `--backend`'s) and the templates, and then prints one line, `usable`, or `stale: `,
+    `rejected: ` or `corrupt: ` and why (`m.pkm: corrupt: has a bad CODE section: binary
+    PIR: bad magic at byte 0`), exiting with 1 when the file is not usable.  A file that
+    is not a module file at all is `corrupt: ...` too, where it was an error on standard
+    error.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

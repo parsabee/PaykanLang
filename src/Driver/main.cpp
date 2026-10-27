@@ -496,12 +496,73 @@ std::string unknownPlugin(const char *kind, const std::string &name,
 
 // -- `paykan pkm`
 
+/// `pkm check f.pkm`: the file read as an importer reads it (docs/design/
+/// pkm.md §8.4): the verdict against this toolchain (§8.2), then IFACE,
+/// CODE and OBJ (modules::readModuleContents, the backend that would link
+/// the compiled code checking it) and TMPL (Sema::decodeTemplates).  One
+/// line, printed once all of that is read: `usable`, or `stale: `,
+/// `rejected: ` or `corrupt: ` and why; exit status 0 when it is usable.
+int checkModuleFile(const Options &opts) {
+  namespace pkm = paykan::pkm;
+  const std::string &path = opts.InputFilename;
+  auto verdict = [&](const std::string &what) {
+    std::cout << path << ": " << what << "\n";
+    return finishStdout(what == "usable" ? EXIT_SUCCESS : EXIT_FAILURE);
+  };
+  auto bytes = pkm::readFileBytes(path);
+  if (!bytes)
+    return fail(bytes.status().message());
+  pkm::Error err;
+  auto file = pkm::File::read(*bytes, {}, &err);
+  if (!file)
+    return verdict((err.Code == pkm::ErrorCode::UnsupportedFormat
+                        ? "rejected: written by another paykan release: "
+                        : "corrupt: ") +
+                   err.str());
+  const pkm::Manifest &m = (*file).manifest();
+  pkm::Verdict v = pkm::checkCompatibility(
+      m, paykan::modules::ModuleResolver::hostIdentity(),
+      pkm::Policy::Prebuilt);
+  if (v.Outcome != pkm::Verdict::Kind::Usable)
+    return verdict(
+        (v.Outcome == pkm::Verdict::Kind::Stale ? "stale: " : "rejected: ") +
+        v.Message);
+  // The compiled code of the kind the backend a program would use links,
+  // which it reads and verifies, as a program's import does.
+  std::string backendName = opts.Backend.empty()
+                                ? std::string(paykan::backend::defaultBackend())
+                                : opts.Backend;
+  std::unique_ptr<paykan::backend::Backend> backend =
+      paykan::backend::Registry::get().create(backendName);
+  paykan::modules::ObjectCheck checkObject;
+  if (backend && backend->capabilities().CompileModules)
+    checkObject = [&backend](const pkm::Object &o) {
+      const paykan::backend::ModuleObject code = toBackend(o);
+      return code.sameKind(backend->objectKind())
+                 ? backend->checkModuleObject(code)
+                 : paykan::Status::ok();
+    };
+  auto contents =
+      paykan::modules::readModuleContents(*file, m.Module, checkObject);
+  if (!contents)
+    return verdict("corrupt: " + contents.status().message());
+  std::span<const uint8_t> tmpl = (*file).section(pkm::Kind::Tmpl);
+  if (!tmpl.empty())
+    if (auto templates = paykan::sema::Sema::decodeTemplates(tmpl, m.Module);
+        !templates)
+      return verdict("corrupt: has a bad TMPL section: " +
+                     templates.status().message());
+  return verdict("usable");
+}
+
 /// `pkm dump f.pkm [--section=...]`: the stable dump (pkm::dump) and, for
-/// the whole file or `--section=code`, the PIR text of CODE.  `pkm check
-/// f.pkm`: the verdict against this toolchain (docs/design/pkm.md §8.2) and
-/// whether IFACE and CODE decode; exit status 0 when the file is usable.
+/// the whole file or `--section=code`, the PIR text of CODE.  `pkm extract
+/// --object f.pkm`: its compiled code as an object.  `pkm check`:
+/// checkModuleFile.
 int pkmTool(const Options &opts) {
   namespace pkm = paykan::pkm;
+  if (opts.Verb == PkmVerb::Check)
+    return checkModuleFile(opts);
   const std::string &path = opts.InputFilename;
   auto bytes = pkm::readFileBytes(path);
   if (!bytes)
@@ -559,30 +620,6 @@ int pkmTool(const Options &opts) {
         !s)
       return fail(path + ": " + s.message());
     return EXIT_SUCCESS;
-  }
-  if (opts.Verb == PkmVerb::Check) {
-    pkm::Verdict v = pkm::checkCompatibility(
-        (*file).manifest(), paykan::modules::ModuleResolver::hostIdentity(),
-        pkm::Policy::Prebuilt);
-    bool ok = v.Outcome == pkm::Verdict::Kind::Usable;
-    std::cout << path << ": "
-              << (ok ? "usable"
-                     : (v.Outcome == pkm::Verdict::Kind::Stale ? "stale: "
-                                                               : "rejected: ") +
-                           v.Message)
-              << "\n";
-    auto iface = pkm::readInterface((*file).section(pkm::Kind::Iface),
-                                    (*file).manifest().Module);
-    if (!iface) {
-      std::cerr << "paykan: " << path
-                << ": IFACE does not decode: " << iface.status().message()
-                << "\n";
-      ok = false;
-    }
-    std::ostream nowhere(nullptr);
-    if (!codeText(nowhere))
-      ok = false;
-    return finishStdout(ok ? EXIT_SUCCESS : EXIT_FAILURE);
   }
   pkm::DumpOptions dopts;
   using S = pkm::DumpOptions::Section;

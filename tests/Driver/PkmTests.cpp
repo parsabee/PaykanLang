@@ -842,8 +842,10 @@ TEST(Pkm, CheckReportsTheVerdict) {
   writeFile(p.Dir / "junk.pkm", "PKM?junk");
   auto junk =
       run(std::string(kPaykan) + " pkm check " + (p.Dir / "junk.pkm").string());
-  EXPECT_NE(junk.exitCode, 0);
-  EXPECT_TRUE(contains(junk.out, "junk.pkm:")) << junk.out;
+  EXPECT_EQ(junk.exitCode, 1);
+  EXPECT_EQ(junk.out.rfind((p.Dir / "junk.pkm").string() + ": corrupt: ", 0),
+            0u)
+      << junk.out;
   auto none = run(std::string(kPaykan) + " pkm check " +
                   (p.Dir / "missing.pkm").string());
   EXPECT_NE(none.exitCode, 0);
@@ -851,6 +853,59 @@ TEST(Pkm, CheckReportsTheVerdict) {
       run(std::string(kPaykan) + " pkm " + (p.Dir / "base.pkm").string());
   EXPECT_NE(noVerb.exitCode, 0);
   EXPECT_TRUE(contains(noVerb.out, "unknown pkm command")) << noVerb.out;
+}
+
+// `pkm check` reads a file as an importer does, and says `usable` only
+// once every section a program would read reads: IFACE, CODE (decoded,
+// verified, defining what IFACE says), TMPL and OBJ (read and verified by
+// the backend that would link it).  It printed `usable` for a file whose
+// CODE, TMPL or OBJ the compiler rejects (or crashes on), and printed it
+// before it decoded anything.
+TEST(Pkm, CheckReadsEverySectionAProgramReads) {
+  REQUIRE_BACKEND();
+  Project p("checksections");
+  writeFile(p.Dir / "gen.pkn", "fn ident<T>(x: T) -> T { return x; }\n"
+                               "fn one() -> int { return ident(1); }\n");
+  for (const char *module : {"base", "gen"})
+    ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                  " --emit-pkm " + module + ".pkn")
+                  .exitCode,
+              0)
+        << module;
+  const std::string base = slurp(p.Dir / "base.pkm");
+  auto check = [&](const std::string &file) {
+    return run(std::string(kPaykan) + " pkm check " + (p.Dir / file).string());
+  };
+  auto corrupt = [&](const std::string &file, const std::string &why) {
+    auto r = check(file);
+    EXPECT_EQ(r.exitCode, 1) << file << ": " << r.out;
+    EXPECT_EQ(r.out.rfind((p.Dir / file).string() + ": corrupt: " + why, 0), 0u)
+        << file << ": " << r.out;
+    EXPECT_FALSE(contains(r.out, "usable")) << file << ": " << r.out;
+  };
+  ASSERT_EQ(check("gen.pkm").out, (p.Dir / "gen.pkm").string() + ": usable\n");
+  rewriteSection(p.Dir / "base.pkm", paykan::pkm::Kind::Code,
+                 [](std::vector<uint8_t> &code) {
+                   std::fill(code.begin(), code.end(), 0);
+                 });
+  corrupt("base.pkm",
+          "has a bad CODE section: binary PIR: bad magic at byte 0\n");
+  writeFile(p.Dir / "base.pkm", base);
+  rewriteSection(p.Dir / "base.pkm", paykan::pkm::Kind::Object,
+                 truncateCompiledCode);
+  corrupt("base.pkm",
+          "has a bad OBJ section: the compiled code does not read: ");
+  // A template's name made invalid UTF-8.
+  rewriteSection(p.Dir / "gen.pkm", paykan::pkm::Kind::Tmpl,
+                 [](std::vector<uint8_t> &tmpl) {
+                   const std::string name = "ident";
+                   auto at = std::search(tmpl.begin(), tmpl.end(), name.begin(),
+                                         name.end());
+                   ASSERT_NE(at, tmpl.end());
+                   *at = 0xff;
+                 });
+  corrupt("gen.pkm", "has a bad TMPL section: TMPL: string is not valid "
+                     "UTF-8");
 }
 
 // A directory is not a module file: every verb says so and exits with 1,
@@ -3091,9 +3146,8 @@ TEST(Pkm, AForgedConformanceIsRejected) {
   EXPECT_TRUE(contains(named.out, notBuiltin)) << named.out;
   auto check = paykan("pkm check keys.pkm");
   EXPECT_NE(check.exitCode, 0) << check.out;
-  EXPECT_TRUE(contains(check.out, "DECLS: 'impl Named for Key': 'Named' is not "
-                                  "a built-in trait an 'impl' block "
-                                  "implements"))
+  EXPECT_EQ(check.out.rfind(std::string("keys.pkm: corrupt: ") + notBuiltin, 0),
+            0u)
       << check.out;
 
   writeFile(dir / "keys.pkm", pristine);
@@ -3199,6 +3253,10 @@ TEST(Pkm, AnInterfaceThatDoesNotMatchItsCodeIsRejected) {
                                       c.Why + ". Rebuild it from source.\n"))
           << c.What << ", " << cmd << ": " << r.out;
     }
+    auto check = paykan("pkm check geo.pkm");
+    EXPECT_EQ(check.exitCode, 1) << c.What << ": " << check.out;
+    EXPECT_EQ(check.out, "geo.pkm: corrupt: " + mismatch + c.Why + "\n")
+        << c.What;
   }
   // The cache entry, with the source back: rebuilt.
   fs::remove(dir / "geo.pkm");

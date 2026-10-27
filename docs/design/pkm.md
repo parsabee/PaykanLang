@@ -1471,8 +1471,8 @@ ignored, not an error). 9. `DEBUG` (advisory). 10. After assembly,
 `pir::verify(Program)` as today.
 
 **Implemented.** Steps 4, 5 and 7 and the compiled code's check run when
-a file is loaded (`modules::readModuleContents`, in `ModuleResolver`'s
-load), so a cache entry that fails any of them is
+a file is loaded (`modules::readModuleContents`, which `ModuleResolver`
+and `paykan pkm check` share), so a cache entry that fails any of them is
 rebuilt and a prebuilt file is an error at the import, under
 `--check-only` too: `IFACE` read; `CODE` decoded, naming the module and
 verified; `CODE` checked against `IFACE` by name
@@ -1523,7 +1523,10 @@ it and stops the process when the module does not verify.
 planned: `--section=debug` and `--symbol=<name>`; stable text;
 golden-tested; `--section=code` prints exactly `pir::print` of the decoded
 module, so it equals `--emit-pir` of the module when it was built),
-`check f.pkm` (verdict against this toolchain, exit status), `extract
+`check f.pkm` (the file read as an importer reads it, through the same
+`modules::readModuleContents`, plus `TMPL` and the verdict against this
+toolchain; then one line, `usable` or `stale:`/`rejected:`/`corrupt:` and
+why, and the exit status), `extract
 --object f.pkm [-o f.o]` (the module's compiled code, `OBJ`, as a native
 object for the host, at `-O<n>`; what a program's `--emit-c` C links with),
 and, planned, `strip`, `extract --payload`, `add-payload` (§7.7).
