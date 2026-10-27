@@ -990,8 +990,9 @@ TEST(Pkm, CheckJudgesTheCodeByTheBackendThatLinksIt) {
                  });
   auto r = run(std::string(kPaykan) + " pkm check " + file.string());
   EXPECT_EQ(r.exitCode, 1) << r.out;
-  EXPECT_EQ(r.out, file.string() + ": rejected: its code was compiled by "
-                                   "backend '" +
+  EXPECT_EQ(r.out, file.string() +
+                       ": rejected: its code was compiled by "
+                       "backend '" +
                        made.Backend + "' (" + made.Producer + ", " +
                        made.Format + " for other-" + made.Target +
                        "); backend '" + made.Backend +

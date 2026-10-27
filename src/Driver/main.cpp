@@ -575,9 +575,9 @@ int checkModuleFile(const Options &opts) {
   // the file is refused at the link.
   if (const std::optional<pkm::Object> &o = (*contents).Object;
       links && o && !o->sameKind(kind))
-    return verdict("rejected: its code was compiled by backend '" +
-                   o->Backend + "' (" + o->Producer + ", " + o->Format +
-                   " for " + o->Target + "); backend '" + backendName +
+    return verdict("rejected: its code was compiled by backend '" + o->Backend +
+                   "' (" + o->Producer + ", " + o->Format + " for " +
+                   o->Target + "); backend '" + backendName +
                    "' links code it compiled itself (" + kind.Producer +
                    " for " + kind.Target + ")");
   return verdict("usable");
