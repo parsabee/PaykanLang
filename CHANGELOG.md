@@ -887,6 +887,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     256 MiB)`, `paykan: '/dev/zero' is too large (more than 256 MiB)` from `pkm`, exit
     status 1.  A pipe is still read to its end (`cat prog.pkn | paykan /dev/stdin`), and
     the source is read through a buffer on the heap rather than 64 KB of the stack.
+  - A chain of imports is at most 256 modules deep, a new limit (docs/grammar.md section
+    9, docs/language/15-modules.md): a chain of about 1460 modules built from source
+    overflowed the stack (a segmentation fault, no diagnostic), since each is analysed by
+    a Sema nested in its importer's.  The import 257 levels down is now an error at that
+    import, `imports nested too deep (more than 256 modules): 'c::m256' is imported 257
+    modules deep`, exit status 1, however long the chain.  The levels are counted whether
+    the modules come from source or from module files (a cache entry is checked against
+    each module it imports, one level deeper), so a program is not accepted with a warm
+    cache and rejected with a cold one.  The nested Sema is on the heap, which halves the
+    stack each level takes (2.9 KB in a debug build).
 
 ### Removed
 

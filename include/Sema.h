@@ -851,6 +851,36 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// detection).
   StringSet *ImportStack = nullptr;
 
+  /// How deep the import being followed is: the imports, from the main
+  /// file's down, whose modules are being located or loaded, shared like
+  /// ImportStack by every Sema of one compilation.  Each module built from
+  /// source on the way is analysed by a nested Sema on the native stack,
+  /// and each cache entry's dependency is located in a nested call, so a
+  /// chain deeper than kMaxImportDepth is an error (docs/grammar.md
+  /// section 9), whether its modules come from source or from module files.
+  unsigned *ImportDepth = nullptr;
+  static constexpr unsigned kMaxImportDepth = 256;
+  /// One more import followed (ImportDepth), for as long as it lives.
+  class ImportLevel {
+  public:
+    explicit ImportLevel(unsigned *depth) : Depth(depth) {
+      if (Depth)
+        ++*Depth;
+    }
+    ~ImportLevel() {
+      if (Depth)
+        --*Depth;
+    }
+    ImportLevel(const ImportLevel &) = delete;
+    ImportLevel &operator=(const ImportLevel &) = delete;
+
+  private:
+    unsigned *Depth;
+  };
+  /// Whether the import of @p canonical, the ImportLevel just entered, is
+  /// nested deeper than kMaxImportDepth; reported at @p loc when it is.
+  bool importTooDeep(const std::string &canonical, ast::SourceLocation loc);
+
   /// Canonical names (ModuleName.h) of the modules that failed to load in
   /// this compilation -- not found, not a source file, or with errors of
   /// their own.  Shared, like ImportStack, by every Sema of one compilation,

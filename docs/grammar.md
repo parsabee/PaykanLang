@@ -700,6 +700,14 @@ c)`, `(a == b) == c`, `(a << b) << c`, `-(a + b)`, `(a + b).m()`, `(if c
 then a else b) + d`) is the level its parenthesis is
 ([`plugins/ast-format.md`](plugins/ast-format.md) section 3).
 
+Imports nest at most 256 modules deep: the main file's import is one
+level, an import in that module two, and an import 257 levels down is
+`imports nested too deep (more than 256 modules): 'c::m256' is imported 257
+modules deep`, reported at that import, whether the modules on the way are
+built from source (each is analysed while its importer is) or loaded from
+module files (a cache entry is checked against each module it imports
+first).
+
 A source file larger than 256 MiB (268435456 bytes) is rejected with
 `'<file>' is too large for a source file (more than 256 MiB)` before it is
 parsed, whichever the frontend: a regular file by its size, before it is

@@ -3452,6 +3452,64 @@ TEST(Driver, BuildChecksItsExecutableBeforeCompiling) {
   std::filesystem::remove_all(dir);
 }
 
+// A chain of imports is at most 256 modules deep (SW-07): each module built
+// from source is analysed by a Sema nested in its importer's, on the native
+// stack, so a chain of about 1460 modules overflowed it (SIGSEGV, no
+// diagnostic).  Here c::m0 .. c::m1999 each import the next: 256 modules from
+// c::m1744 down are accepted, and an import 257 deep is the error, reported
+// once at it, whatever the length of the chain.  With the 256 modules' cache
+// entries written, the same chain one module longer is still too deep: a
+// cache entry is checked against each module it imports, one level deeper.
+TEST(Driver, ImportsNestedTooDeepAreAnError) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("import_depth");
+  std::filesystem::create_directories(dir / "c");
+  const int n = 2000;
+  for (int i = 0; i < n; ++i) {
+    std::ofstream f(dir / "c" / ("m" + std::to_string(i) + ".pkn"));
+    if (i + 1 < n)
+      f << "import c::m" << i + 1 << ";\nfn v() -> int { return m" << i + 1
+        << "::v() + 1; }\n";
+    else
+      f << "fn v() -> int { return 0; }\n";
+  }
+  auto importing = [&](const std::string &file, int first) {
+    std::ofstream(dir / file)
+        << "import c::m" << first << ";\nfn main() -> int { return m" << first
+        << "::v() % 256; }\n";
+  };
+  importing("deep.pkn", 0);
+  importing("at_limit.pkn", n - 256);
+  importing("over_limit.pkn", n - 257);
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && ulimit -s 8192 && " + paykanRun() +
+               " " + args + " 2>&1");
+  };
+  const std::string tooDeep =
+      "error: imports nested too deep (more than 256 modules): ";
+  auto deep = paykan("--check-only --no-module-cache deep.pkn");
+  EXPECT_EQ(deep.exitCode, 1) << deep.out.substr(0, 2000);
+  EXPECT_EQ(deep.out.rfind("c/m255.pkn:1:1: " + tooDeep +
+                               "'c::m256' is imported 257 modules deep\n",
+                           0),
+            0U)
+      << deep.out.substr(0, 2000);
+  EXPECT_EQ(deep.out.find(tooDeep, deep.out.find(tooDeep) + 1),
+            std::string::npos);
+  auto atLimit = paykan("--emit-pir at_limit.pkn > /dev/null");
+  EXPECT_EQ(atLimit.exitCode, 0) << atLimit.out.substr(0, 2000);
+  EXPECT_TRUE(std::filesystem::is_regular_file(dir / ".paykan_cache" / "c" /
+                                               "m1744.pkm"));
+  auto over = paykan("--check-only over_limit.pkn");
+  EXPECT_EQ(over.exitCode, 1) << over.out.substr(0, 2000);
+  EXPECT_EQ(over.out.rfind("c/m1743.pkn:1:1: " + tooDeep +
+                               "'c::m1999' is imported 257 modules deep\n",
+                           0),
+            0U)
+      << over.out.substr(0, 2000);
+  std::filesystem::remove_all(dir);
+}
+
 // A source file, and a module file, is at most 256 MiB (SW-12): a larger
 // regular file is refused by its size, before it is read (the files here are
 // sparse), and a pipe or a device stops at the limit.  `--check-only

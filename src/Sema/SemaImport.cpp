@@ -563,6 +563,17 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
 
 // -- Locating and loading a module
 
+bool Sema::importTooDeep(const std::string &canonical,
+                         ast::SourceLocation loc) {
+  if (!ImportDepth || *ImportDepth <= kMaxImportDepth)
+    return false;
+  error(loc, "imports nested too deep (more than " +
+                 std::to_string(kMaxImportDepth) + " modules): '" + canonical +
+                 "' is imported " + std::to_string(*ImportDepth) +
+                 " modules deep");
+  return true;
+}
+
 bool Sema::locateModule(const std::string &canonical, bool isSystem,
                         const std::string &modulePath, ast::SourceLocation loc,
                         LocatedModule &out) {
@@ -583,6 +594,14 @@ bool Sema::locateModule(const std::string &canonical, bool isSystem,
       // note.
       const std::string &dep = r.Dependency;
       if (FailedModules && FailedModules->count(dep)) {
+        Resolver->failed(dep);
+        continue;
+      }
+      // The dependency is imported one level deeper than this module.
+      ImportLevel level(ImportDepth);
+      if (importTooDeep(dep, loc)) {
+        if (FailedModules)
+          FailedModules->insert(dep);
         Resolver->failed(dep);
         continue;
       }
@@ -729,12 +748,17 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   importDriverPtr->setDiagEngine(nullptr);
 
   // Run Sema on the imported module, reusing the same engine.
-  Sema importSema(importDriverPtr->getASTContext(), importDiag, ProjectRoot,
-                  moduleFrontend);
+  // On the heap: a chain of imports nests one of these per module, so the
+  // native stack holds only the calls (kMaxImportDepth).
+  auto importSemaPtr =
+      std::make_unique<Sema>(importDriverPtr->getASTContext(), importDiag,
+                             ProjectRoot, moduleFrontend);
+  Sema &importSema = *importSemaPtr;
   if (ImportStack)
     ImportStack->insert(canonical);
   importSema.ImportStack = ImportStack;
   importSema.FailedModules = FailedModules;
+  importSema.ImportDepth = ImportDepth;
   importSema.Resolver = Resolver;
 
   auto *importRoot = importDriverPtr->getRoot();
@@ -1763,6 +1787,14 @@ bool Sema::processImport(ast::ImportDecl *node) {
                  "module '" + canonical +
                      "' failed to load; its errors are reported above");
       ++RepeatedImportFailures;
+      poison();
+      continue;
+    }
+    // The module is located and loaded one import deeper than this one.
+    ImportLevel level(ImportDepth);
+    if (importTooDeep(canonical, node->getLocation())) {
+      if (FailedModules)
+        FailedModules->insert(canonical);
       poison();
       continue;
     }

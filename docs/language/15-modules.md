@@ -307,6 +307,12 @@ Circular imports are **not supported**: if `a` imports `b`, `b` cannot import `a
 or through other modules, and such a cycle is a compile-time error. Move what both need into
 a third module.
 
+A chain of imports is at most 256 modules deep: the main file may import a module that
+imports another, and so on, 256 modules down, and the import of a 257th is an error,
+`imports nested too deep (more than 256 modules): 'c::m256' is imported 257 modules deep`,
+whether the modules on the way are built from source or come from module files
+([the grammar](../grammar.md#9-diagnostics-and-recovery)).
+
 ## Project: `tasks` as a multi-file program
 
 `tasks` has outgrown a single file. It now has this layout:
@@ -607,6 +613,7 @@ differently.
 | Module not found | Neither the `.pkn` file nor a prebuilt `.pkm` of the module path exists: `module 'a::b' not found (tried a/b.pkn, a/b.pkm)` |
 | Unresolved name | Qualified name `Mod::name` where `name` is not in `Mod` (including names `Mod` merely imported) |
 | Circular import | Import graph contains a cycle |
+| Imports nested too deep | A chain of imports more than 256 modules deep: `imports nested too deep (more than 256 modules): 'c::m256' is imported 257 modules deep` |
 | Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules |
 | Conflicting type name | Two modules in the import graph declare different classes/structs/enums under one name, or a file declares a type named like an imported one |
 | Unknown exported type | An import's export record names a type nothing provides (a compiler bug or corrupt cache — reported against the `import`, never silently degraded to `Obj`/`void`) |
