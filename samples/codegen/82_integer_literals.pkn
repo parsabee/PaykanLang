@@ -39,11 +39,11 @@ fn main() -> int {
   io::println(Str(m) + " " + Str(top) + " " + Str(w));
   io::println(Str(top > 1) + " " + Str(top / 2));
   io::println(arm(widest(1)) + " " + arm(top) + " " + arm(1) + " " + arm(0)
-              + " " + arm(7));
+      + " " + arm(7));
   let f: f32 = 18446744073709551615;
   let g: float = 0xFFFF_FFFF_FFFF_FFFF;
   let e: i8 = -0x80;
-  io::println(Str(f) + " " + Str(g) + " " + Str(u8(0xFFFF_FFFF_FFFF_FFFF))
-              + " " + Str(e));
+  io::println(Str(f) + " " + Str(g) + " " + Str(u8(0xFFFF_FFFF_FFFF_FFFF)) + " "
+      + Str(e));
   return 0;
 }
