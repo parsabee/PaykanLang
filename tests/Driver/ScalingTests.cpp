@@ -254,6 +254,9 @@ TEST(Scaling, AMatchOfManyStrArmsReachesCInLinearTime) {
 // value of more than four references is released by one call of its
 // type's drop function now once the function's ways out have written 512
 // releases in place, and the call releases its variant's fields only.
+// It runs at -O0, so the time is that of the code the lowering writes (19 s
+// of processor time on base, 0.5 s now), not that of LLVM's optimiser on
+// one large function, which at -O2 varies several-fold between machines.
 TEST(Scaling, AScopesWayOutReleasesALargeValueByOneCall) {
   ScratchDir dir("drop");
   std::string variants;
@@ -266,7 +269,7 @@ TEST(Scaling, AScopesWayOutReleasesALargeValueByOneCall) {
                           "  io::println(name(Many::V3(1, \"q\")));\n"
                           "  return 0;\n}\n";
   const std::string path = dir.write("many.pkn", src);
-  Timed t = timed(std::string(kPaykan) + " run " + path + " 2>&1");
+  Timed t = timed(std::string(kPaykan) + " run -O0 " + path + " 2>&1");
   ASSERT_EQ(t.ExitCode, 0) << t.Out;
   EXPECT_EQ(t.Out, "V3\n");
   EXPECT_LT(t.Seconds, 10 * slowdown());
