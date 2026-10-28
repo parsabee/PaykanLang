@@ -1919,19 +1919,40 @@ bool Sema::copiedMethods(const ast::Decl *tmpl,
 
 // -- processImport
 
+void Sema::claimImportQualifiers(
+    const std::vector<ast::ImportDecl *> &imports) {
+  for (const ast::ImportDecl *imp : imports)
+    for (const auto &m : imp->getModules()) {
+      const std::string path = imp->modulePath(m);
+      const std::string canonical =
+          module_name::canonicalImportName(path, imp->isSystem());
+      ClaimedImportQualifiers.try_emplace(m.qualifier(), canonical);
+      if (!imp->isSystem())
+        ClaimedImportQualifiers.try_emplace(path, canonical);
+    }
+}
+
 bool Sema::processImport(ast::ImportDecl *node) {
   const bool isSystem = node->isSystem();
   bool ok = true;
   for (auto &m : node->getModules()) {
-    std::string fullPath = node->modulePath(m);
+    const std::string fullPath = node->modulePath(m);
     const std::string &qualifier = m.qualifier();
     const std::string canonical =
         module_name::canonicalImportName(fullPath, isSystem);
+    // The full path qualifies the module too, but a system import's yields
+    // to an import that claims it for another module (OD-8): with
+    // `import ::math as cmath;`, `import math as mine;` binds `math`.
+    auto claim = ClaimedImportQualifiers.find(fullPath);
+    const bool pathYields = isSystem &&
+                            claim != ClaimedImportQualifiers.end() &&
+                            claim->second != canonical;
+    const std::string &pathQualifier = pathYields ? qualifier : fullPath;
     // The names a failed import binds are poisoned: their uses were reported
     // with the import (#119).
     // (A name that already names another module keeps it.)
     auto poison = [&] {
-      for (const std::string *name : {&qualifier, &std::as_const(fullPath)}) {
+      for (const std::string *name : {&qualifier, &pathQualifier}) {
         auto it = ImportQualifiers.find(*name);
         if (it == ImportQualifiers.end() || it->second.Module == canonical)
           FailedImportQualifiers.insert(*name);
@@ -1967,8 +1988,7 @@ bool Sema::processImport(ast::ImportDecl *node) {
     ModulePaths[canonical] = located.Path;
     // The names this import binds must not already name another module.
     bool clash = false;
-    for (const std::string *name :
-         {&qualifier, static_cast<const std::string *>(&fullPath)}) {
+    for (const std::string *name : {&qualifier, &pathQualifier}) {
       auto [it, fresh] =
           ImportQualifiers.try_emplace(*name, ImportQualifier{canonical});
       if (fresh || it->second.Module == canonical)
@@ -1982,12 +2002,12 @@ bool Sema::processImport(ast::ImportDecl *node) {
       break;
     }
     if (clash) {
-      ok = false;
+      poison();
       continue;
     }
     const ModuleInfo *info =
         loadModule(canonical, located, node->getLocation());
-    if (!info || !injectModule(*info, qualifier, fullPath, canonical,
+    if (!info || !injectModule(*info, qualifier, pathQualifier, canonical,
                                node->getLocation()))
       poison();
   }

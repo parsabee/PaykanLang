@@ -107,7 +107,8 @@ import's last path segment, or a full module path) names exactly one module, so
 `import a::util; import b::util;` is an error (`import of module 'b::util': qualifier
 'util' already names module 'a::util' (give one of them an alias with 'as')`, each module
 by its canonical name, `::io` for a system module); write `import b::util as bu;` instead.
-Importing the same module under a second qualifier is fine.
+Importing the same module under a second qualifier is fine. A system import's full path is
+`::math`, which no other import spells (see [System Imports](#system-imports)).
 
 ### Selective Import
 
@@ -159,6 +160,21 @@ library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable
 `<prefix>/bin/`) when it exists, and `<source-root>/stdlib`. A system module is otherwise an
 ordinary module, and it is cached under `.paykan_cache/@system/` (see
 [Module Files](#module-files)).
+
+Its full path, the module's canonical name `::math`, never clashes with a module of the
+source root. The path without the `::` qualifies the module too (`math::sqrt` after
+`import ::math as m;`), unless another import of the file binds that name: then it names
+that module. So a program with a module `math.pkn` of its own imports both when the system
+import has an alias, and `math::` is its own module:
+
+```text
+import ::math as cmath;   // cmath::sqrt(16.0)
+import math as mine;      // mine::square(3), and math::square(3)
+```
+
+A plain `import ::math;` binds `math` as its qualifier, which `import math;` (or `import
+math as mine;`, whose full path is `math`) cannot share: `import of module 'math':
+qualifier 'math' already names module '::math' (give one of them an alias with 'as')`.
 
 The standard library ships with the compiler (see [the standard library](../stdlib/index.md)):
 `::io` prints, reads and writes files; `::error` holds the errors that library functions
@@ -629,7 +645,7 @@ differently.
 | Unresolved name | Qualified name `Mod::name` where `name` is not in `Mod` (including names `Mod` merely imported) |
 | Circular import | Import graph contains a cycle |
 | Imports nested too deep | A chain of imports more than 256 modules deep: `imports nested too deep (more than 256 modules): 'c::m256' is imported 257 modules deep` |
-| Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules |
+| Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules; a system import's path without its `::` gives way to another import's (`import ::math as cmath; import math;`) |
 | Conflicting type name | Two modules in the import graph declare different classes/structs/enums under one name, or a file declares a type named like an imported one |
 | Unknown exported type | An import's export record names a type nothing provides (a compiler bug or corrupt cache — reported against the `import`, never silently degraded to `Obj`/`void`) |
 | Private name imported | `Mod::_name` for a function, class, struct, enum or trait whose name starts with `_`: `'Mod::_name' is private to module 'Mod'` |

@@ -1441,6 +1441,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     method of a template is now one for all its instances, warned about once and only
     when every instance could make it a `view fn` (docs/language/05-classes.md, "Methods
     that don't change self").
+  - A module of the program named like a library module could not be imported next to it,
+    even with both imports aliased: with a `math.pkn`, `import ::math as cmath; import math
+    as mine;` was `import of module 'math': qualifier 'math' already names module '::math'
+    (give one of them an alias with 'as')`, and every `mine::` use another error.  A system
+    import's full path binds `math` only when no other import of the file binds that name to
+    another module (OD-8): its full path is `::math`, which never clashes, so the two
+    imports go together, and `math::` names the program's module, as it does with `import
+    ::math as cmath; import math;`.  The path without the `::` still names the library's
+    module when nothing else claims it (`collections::List<int>()` after `import
+    ::collections as c;`), and an alias may now take that name from it (`import ::io as
+    math; import ::math as m;`).  A plain `import ::math;` binds `math` as its qualifier and
+    still clashes with a module `math`, and the uses of the clashing import's other
+    qualifiers are no longer reported again, as for an import that fails
+    (docs/language/15-modules.md, "Aliased Import", "System Imports" and "Semantic
+    Checks").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

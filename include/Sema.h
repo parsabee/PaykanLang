@@ -938,6 +938,15 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   };
   StringMap<ImportQualifier> ImportQualifiers;
 
+  /// The qualifiers this file's imports claim, before any is processed ->
+  /// the module each names: every import's alias or last path segment, and
+  /// the full path of an import from the source root.  A system import's
+  /// full path is its canonical name (`::math`), which no other import
+  /// spells, so it claims nothing: it binds the path without the `::`
+  /// (`math::sqrt` after `import ::math as m;`) only when no import claims
+  /// that name for another module (OD-8), as `import math as mine;` does.
+  StringMap<std::string> ClaimedImportQualifiers;
+
   /// Qualifiers (alias or last path segment, and the full module path) of the
   /// imports that failed -- a module that was not found, did not parse, had
   /// errors of its own or closes an import cycle.  The failure was reported
@@ -1204,6 +1213,9 @@ private:
   bool injectModule(const ModuleInfo &info, const std::string &qualifier,
                     const std::string &fullModulePath,
                     const std::string &moduleName, ast::SourceLocation loc);
+
+  /// Record the qualifiers @p imports claim (ClaimedImportQualifiers).
+  void claimImportQualifiers(const std::vector<ast::ImportDecl *> &imports);
 
   /// Process a single import declaration.
   bool processImport(ast::ImportDecl *node);

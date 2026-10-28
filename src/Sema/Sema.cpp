@@ -3466,6 +3466,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     FailedModules = &localFailedModules;
   if (!ImportDepth)
     ImportDepth = &localImportDepth;
+  claimImportQualifiers(tu->getImports());
   for (auto *imp : tu->getImports())
     processImport(imp);
 

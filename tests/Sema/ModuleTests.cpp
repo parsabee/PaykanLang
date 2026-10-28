@@ -747,6 +747,75 @@ TEST(Module, OneQualifierForTwoModulesErr) {
   std::filesystem::remove_all(tmp);
 }
 
+// ─── A system import's full path is `::math` (SW-22, OD-8) ──────────────────
+//
+// It never clashes with a module of the source root: the path without its
+// `::` qualifies the system module only when no import binds that name to
+// another module.  Base rejected a module `math` imported next to `::math`
+// even with both aliased ("qualifier 'math' already names module '::math'"),
+// so the suggested alias did not help.
+
+TEST(Module, ASystemImportsPathGivesWayToAModuleOfTheSourceRoot) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_system_path").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "math.pkn", "fn square(x: int) -> int { return x * x; }\n");
+  const std::string body =
+      "fn main() -> int { let r: float = cmath::sqrt(16.0); "
+      "return mine::square(3) + math::square(2); }\n";
+  for (const char *imports :
+       {"import ::math as cmath;\nimport math as mine;\n",
+        "import math as mine;\nimport ::math as cmath;\n",
+        "import ::math as cmath;\nimport math;\nimport math as mine;\n"}) {
+    auto main = writeFile(tmp, "main.pkn", imports + body);
+    auto r = semaCheckFile(main, tmp);
+    EXPECT_TRUE(r.Ok) << imports << r.Diagnostics;
+  }
+  // `math::` is the program's module, not the library's.
+  auto main = writeFile(tmp, "main.pkn",
+                        "import ::math as cmath;\nimport math as mine;\n"
+                        "fn main() -> int { let r: float = math::sqrt(16.0); "
+                        "return 0; }\n");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("main.pkn:3:35: error: call to undeclared "
+                               "function 'math::sqrt'"),
+            std::string::npos)
+      << r.Diagnostics;
+  // Nothing else binds `collections`: it still names the library's module,
+  // and so does an alias of a system import that another import uses.
+  main = writeFile(tmp, "main.pkn",
+                   "import ::collections as c;\nimport ::io as math;\n"
+                   "import ::math as m;\n"
+                   "fn main() -> int {\n"
+                   "  xs = collections::List<int>();\n"
+                   "  ys = c::List<Str>();\n"
+                   "  xs.push(1);\n"
+                   "  ys.push(collections::trim(\" x \"));\n"
+                   "  math::println(m::sqrt(4.0));\n"
+                   "  return xs.at(0);\n"
+                   "}\n");
+  r = semaCheckFile(main, tmp);
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // A plain system import binds `math` itself; the module's full path is
+  // `math` too, so the two clash, once: the clashing import's uses are
+  // poisoned like a failed import's.
+  for (const char *imports : {"import ::math;\nimport math as mine;\n",
+                              "import math as mine;\nimport ::math;\n"}) {
+    main = writeFile(tmp, "main.pkn",
+                     std::string(imports) +
+                         "fn main() -> int { return mine::square(3); }\n");
+    r = semaCheckFile(main, tmp);
+    EXPECT_EQ(r.ErrorCount, 1u) << imports << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find("main.pkn:2:1: error: import of module '"),
+              std::string::npos)
+        << imports << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find("qualifier 'math' already names module '"),
+              std::string::npos)
+        << imports << r.Diagnostics;
+  }
+  std::filesystem::remove_all(tmp);
+}
+
 // ─── ERR: a failed import is reported once (#119) ───────────────────────────
 //
 // The import's failure is the one error: uses of its qualifier are poisoned
