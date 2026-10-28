@@ -217,13 +217,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// cannot be a function value, and returns false.
   bool errorGenericFunctionValue(const std::string &name,
                                  ast::SourceLocation loc);
-  /// Check a call of the function value of type @p fnt (`f(args)`, a call
-  /// through a variable or a field) named @p what in diagnostics: the
-  /// arguments' types and modes.  The result type, or nullptr.
+  /// Check @p call, a call of the function value of type @p fnt (`f(args)`,
+  /// a call through a variable or a field) named @p what in diagnostics:
+  /// the arguments' types and modes.  The result type, or nullptr.
   ast::Type *checkFunctionValueCall(ast::FunctionType *fnt,
                                     const std::vector<ast::Expr *> &args,
                                     const std::string &what,
-                                    ast::SourceLocation loc);
+                                    const ast::Expr *call);
 
   /// The kind of variable @p name where it is bound (innermost first).
   VarKind varKind(std::string_view name) const;
@@ -1388,18 +1388,35 @@ private:
   /// An override @p method keeps each parameter's mode of @p base.
   bool checkOverrideModes(const ast::FuncDecl *method,
                           const ast::MethodDecl *base);
-  /// The arguments @p args of a call of @p callee whose parameters have the
-  /// modes @p modes and the types @p paramTys: an `inout` parameter takes a
-  /// variable or a field of exactly its type, never a `view` parameter or a
-  /// `let` local, and what it takes shares no storage with another `inout`
-  /// or `view` argument, nor with the @p receiver of a method call of
-  /// @p method.  Arguments of the wrong type were reported already.
-  bool checkInoutArgs(const ast::ParamModes &modes,
+  /// The arguments @p args of @p call, a call of @p callee whose parameters
+  /// have the modes @p modes and the types @p paramTys: an `inout`
+  /// parameter takes a variable or a field of exactly its type, never a
+  /// `view` parameter or a `let` local, and what it takes shares no storage
+  /// with another `inout` or `view` argument, nor with the @p receiver of a
+  /// method call of @p method.  Nor does a call in a later argument write
+  /// what a `view` argument, or the receiver of a struct's `view fn`,
+  /// borrows (CallWrites).  Arguments of the wrong type were reported
+  /// already.
+  bool checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
                       const std::vector<ast::Type *> &paramTys,
                       const std::vector<ast::Expr *> &args,
                       const std::string &callee,
                       const ast::Expr *receiver = nullptr,
                       const ast::MethodDecl *method = nullptr);
+  /// A place a call writes, named as its caller names it: one passed to an
+  /// `inout` parameter, or the receiver of a method that may change it.
+  struct CallWrite {
+    std::string Path;
+    /// "pass it to 'inout' parameter 'a' of 'bump'", ...
+    std::string What;
+    /// The argument or the receiver naming it, where a conflict is reported.
+    const ast::Expr *At = nullptr;
+    /// Whether a call it is nested in reported it already.
+    bool Reported = false;
+  };
+  /// What each call checkInoutArgs checked writes, for the calls whose
+  /// arguments it is nested in.
+  std::unordered_map<const ast::Expr *, std::vector<CallWrite>> CallWrites;
   /// The places passing @p e borrows, as `checkInoutArgs` compares them: a
   /// variable or a chain of fields on one; an element borrows its array, a
   /// conditional both branches, a borrowed result what its call borrowed.

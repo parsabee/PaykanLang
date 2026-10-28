@@ -995,7 +995,11 @@ to another too), compared with `==` or `!=`, or the receiver of a struct's `view
 value it had where it was evaluated, whatever a later argument or the right operand writes to
 where it came from: through an `inout` argument, a method that may change it, or a call given
 the object it is in. The receiver of a struct's method that may change `self` is its storage,
-as an `inout` argument is: the method sees what the arguments wrote to it.
+as an `inout` argument is: the method sees what the arguments wrote to it. A `view` or slice
+parameter and the receiver of a struct's `view fn` are borrows, which no later argument may
+write through an `inout` argument or a method that may change it
+([Exclusivity](03-functions.md#exclusivity)): what they are given is the value read when a
+later call writes it through the object it is in, or through a function value.
 
 ```pkn
 import ::io;

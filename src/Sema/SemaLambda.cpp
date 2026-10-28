@@ -286,11 +286,12 @@ ast::Type *Sema::inferredResult(ast::LambdaExpr *node) {
 ast::Type *Sema::checkFunctionValueCall(ast::FunctionType *fnt,
                                         const std::vector<ast::Expr *> &args,
                                         const std::string &what,
-                                        ast::SourceLocation loc) {
+                                        const ast::Expr *call) {
   if (args.size() != fnt->getNumParams()) {
-    error(loc, "'" + what + "' has type '" + typeName(fnt) + "': it takes " +
-                   std::to_string(fnt->getNumParams()) + " argument(s), got " +
-                   std::to_string(args.size()));
+    error(call->getLocation(),
+          "'" + what + "' has type '" + typeName(fnt) + "': it takes " +
+              std::to_string(fnt->getNumParams()) + " argument(s), got " +
+              std::to_string(args.size()));
     return nullptr;
   }
   // The parameters by number, as a function type names none.
@@ -317,7 +318,7 @@ ast::Type *Sema::checkFunctionValueCall(ast::FunctionType *fnt,
   }
   if (!ok)
     return nullptr;
-  checkInoutArgs(modes, fnt->getParamTypes(), args, what);
+  checkInoutArgs(call, modes, fnt->getParamTypes(), args, what);
   checkViewArgs(modes, fnt->getParamTypes(), args, what);
   return fnt->getReturnType();
 }

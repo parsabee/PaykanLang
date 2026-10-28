@@ -1,0 +1,15 @@
+// ERROR: 'arr' is passed to 'view' parameter 'xs' of 'total'; a later argument of 'total' cannot pass it to 'inout' parameter 'a' of 'bumpA'
+// A slice parameter is borrowed until the call runs, so a call in a later
+// argument cannot write its array (docs/language/03-functions.md,
+// "Exclusivity").
+fn total(xs: view int[], x: int) -> int => xs[0];
+
+fn bumpA(a: inout int[3]) -> int {
+  a = [9, 9, 9];
+  return 0;
+}
+
+fn main() -> int {
+  arr = [1, 2, 3];
+  return total(arr, bumpA(arr));
+}

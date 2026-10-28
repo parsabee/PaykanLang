@@ -917,6 +917,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     tuple there (`return self.slot().0.n;`), and a character of a string
     (`return self.str()[1];`), are the errors they are elsewhere, where they too were
     internal errors (docs/language/03-functions.md, "Borrowed results").
+  - **Breaking:** a borrow lasts until its call runs (docs/language/03-functions.md,
+    "Exclusivity").  What a call passes to a `view` parameter (a slice parameter too), and
+    the receiver of a struct's `view fn`, no call anywhere in a later argument may write:
+    pass it, what holds it or a part of it to an `inout` parameter, or call a method on
+    it that may change `self`.  With `look(p: view P, x: int)` and `bump(p: inout P)`,
+    `look(p, bump(p))` is `'p' is passed to 'view' parameter 'p' of 'look'; a later
+    argument of 'look' cannot pass it to 'inout' parameter 'p' of 'bump'`, and so are
+    `sum(arr, bumpA(arr))` with `sum(xs: view int[], k: int)`, `sum(xs, clear(xs))` with
+    `xs` an `inout int[]`, `look(h.p, bumpH(h))` (`'h' contains 'h.p', ...`),
+    `p.show(bump(p))` with `show` a `view fn` (`'p' is the receiver of 'view fn show'; an
+    argument of 'show' cannot pass it to ...`) and `look(p, p.reset())` (`... cannot call
+    'reset' on it (not a 'view fn')`), a class's method that may change `self` included.
+    Every call borrows and writes alike: a function's, a method's, a constructor's,
+    `__super__`'s and a function value's; a lambda's body is not part of the call.
+    Exclusivity was a rule of one call, and these programs ran, the callee given a copy of
+    the value read; `samples/codegen/78_mem_arg_eval_order.pkn` had three of them, now
+    `samples/sema` error files.  What the rule does not see is accepted and copied as
+    before: a plain parameter (`first(p, bump(p))`), a write through an object
+    (`look(c.p, reset(c))`) or a function value, a write before the borrow or after it has
+    ended (`add(look(p, 0), bump(p))`), another field (`look(two.x, bump(two.y))`), a
+    lambda's body, and the operands of `==`.
 
 ### Removed
 
@@ -954,7 +975,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     field) leaves the value where it is, as base did, and the samples and the standard
     library's tests lower to the same PIR as before, with and without the passes, so the
     static counts recorded here do not move.  The receiver of a struct method that may
-    change `self` is still its storage, as an `inout` argument is.
+    change `self` is still its storage, as an `inout` argument is.  (For a `view` or slice
+    parameter and the receiver of a struct's `view fn`, an `inout` argument or a method
+    that may change it, in a later argument, is now an error: see Changed.)
     `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape on every path, with
     `__super__`'s arguments, a function value a field holds, an argument under an `inout`
     result, one before a closure that writes it, slices passed on to a function, a

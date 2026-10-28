@@ -1916,7 +1916,8 @@ TEST(Lowering, AValueReadWhereItIsIsCopiedOnlyWhenALaterOperandMayWriteIt) {
     fn make(c: C) -> C => C(c.p, 0);
     fn bump(p: inout P) -> int { p = P(9); return 0; }
     fn bumpN(n: inout int) -> int { n = 9; return 0; }
-    fn bumpPair(s: inout Pair) -> int { s = Pair(P(9), P(9)); return 0; }
+    class Hold { s: Pair; }
+    fn resetHold(h: Hold) -> int { h.s = Pair(P(9), P(9)); return 0; }
     fn k() -> int => 0;
   )";
   struct Case {
@@ -1929,7 +1930,8 @@ TEST(Lowering, AValueReadWhereItIsIsCopiedOnlyWhenALaterOperandMayWriteIt) {
       {"localInout", "p = P(1); return first(p, bump(p));", 1},
       {"equality", "q = P(1); return if q == P(bump(q)) then 1 else 0;", 1},
       {"partWritten", "s = Pair(P(1), P(2)); return first(s.q, s.bumpQ());", 1},
-      {"viewReceiver", "s = Pair(P(1), P(2)); return s.get(bumpPair(s));", 1},
+      {"viewReceiver",
+       "h = Hold(Pair(P(1), P(2))); return h.s.get(resetHold(h));", 1},
       {"nested", "c = C(P(1), 1); return first(c.p, first(c.p, reset(c)));", 2},
       {"otherPart", "s = Pair(P(1), P(2)); return first(s.q, bump(s.p));", 0},
       {"otherField", "c = C(P(1), 1); return first(c.p, bumpN(c.n));", 0},

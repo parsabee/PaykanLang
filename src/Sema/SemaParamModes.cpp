@@ -3,7 +3,8 @@
 // The rules of `view` and `inout` parameters, of any type
 // (docs/language/03-functions.md, "Parameter modes"): overrides,
 // and the arguments an `inout` parameter takes, none of them overlapping
-// anything else the call borrows; and of local borrows
+// anything else the call borrows, nor what it borrows written by a call in
+// a later argument (Exclusivity); and of local borrows
 // (docs/language/02-basics.md, "Local borrows").  Assignments to a
 // `view` parameter or local are checked with `let` locals'
 // (Sema::checkReassignable).
@@ -73,6 +74,90 @@ std::string conflictWith(const std::vector<std::vector<CallUse>> &uses,
         if (std::string why = callConflict(e, use); !why.empty())
           return why;
   return "";
+}
+
+/// A place a call borrows until it runs: a `view` argument's, or the
+/// receiver's of a struct's `view fn`.
+struct Lent {
+  std::string Path;
+  std::string What;  // "passed to 'view' parameter 'xs' of 'sum'", ...
+  std::string Later; // "a later argument of 'sum'", ...
+  size_t From = 0;   // the first argument whose calls cannot write it
+};
+
+/// Why @p path, which a call in a later argument writes (@p what: "pass it
+/// to 'inout' parameter 'a' of 'bump'", ...), cannot share storage with
+/// @p lent; "" if it can.
+std::string nestedConflict(const Lent &lent, const std::string &path,
+                           const std::string &what) {
+  if (!overlaps(lent.Path, path))
+    return "";
+  std::string why = "'" + path + "' ";
+  if (path == lent.Path)
+    why += "is ";
+  else
+    why += (path.size() > lent.Path.size() ? "is part of '" : "contains '") +
+           lent.Path + "', ";
+  return why + lent.What + "; " + lent.Later + " cannot " + what;
+}
+
+/// The calls evaluating @p e makes, @p e among them, in the order they run:
+/// not those in a lambda's body, which runs only when the lambda is called.
+void callsIn(const ast::Expr *e, std::vector<const ast::Expr *> &out) {
+  if (!e)
+    return;
+  auto all = [&](const std::vector<ast::Expr *> &es) {
+    for (const ast::Expr *x : es)
+      callsIn(x, out);
+  };
+  switch (e->getKind()) {
+  case ast::ASTNode::NK_UnaryExpr:
+    callsIn(ast::cast<ast::UnaryExpr>(e)->getOperand(), out);
+    break;
+  case ast::ASTNode::NK_BinaryExpr:
+    callsIn(ast::cast<ast::BinaryExpr>(e)->getLHS(), out);
+    callsIn(ast::cast<ast::BinaryExpr>(e)->getRHS(), out);
+    break;
+  case ast::ASTNode::NK_CallExpr:
+    all(ast::cast<ast::CallExpr>(e)->getArguments());
+    out.push_back(e);
+    break;
+  case ast::ASTNode::NK_CallValueExpr:
+    callsIn(ast::cast<ast::CallValueExpr>(e)->getCallee(), out);
+    all(ast::cast<ast::CallValueExpr>(e)->getArguments());
+    out.push_back(e);
+    break;
+  case ast::ASTNode::NK_MethodCallExpr:
+    callsIn(ast::cast<ast::MethodCallExpr>(e)->getReceiver(), out);
+    all(ast::cast<ast::MethodCallExpr>(e)->getArguments());
+    out.push_back(e);
+    break;
+  case ast::ASTNode::NK_TernaryExpr: {
+    const auto *t = ast::cast<ast::TernaryExpr>(e);
+    callsIn(t->getCondition(), out);
+    callsIn(t->getTrueExpr(), out);
+    callsIn(t->getFalseExpr(), out);
+    break;
+  }
+  case ast::ASTNode::NK_MemberAccessExpr:
+    callsIn(ast::cast<ast::MemberAccessExpr>(e)->getReceiver(), out);
+    break;
+  case ast::ASTNode::NK_ArrayLiteralExpr:
+    all(ast::cast<ast::ArrayLiteralExpr>(e)->getElements());
+    break;
+  case ast::ASTNode::NK_SubscriptExpr:
+    callsIn(ast::cast<ast::SubscriptExpr>(e)->getArray(), out);
+    callsIn(ast::cast<ast::SubscriptExpr>(e)->getIndex(), out);
+    break;
+  case ast::ASTNode::NK_TupleLiteralExpr:
+    all(ast::cast<ast::TupleLiteralExpr>(e)->getElements());
+    break;
+  case ast::ASTNode::NK_TupleIndexExpr:
+    callsIn(ast::cast<ast::TupleIndexExpr>(e)->getTuple(), out);
+    break;
+  default: // a name, a literal, a lambda
+    break;
+  }
 }
 
 } // namespace
@@ -247,7 +332,7 @@ void Sema::borrowedPaths(const ast::Expr *e, std::vector<std::string> &out) {
   }
 }
 
-bool Sema::checkInoutArgs(const ast::ParamModes &modes,
+bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
                           const std::vector<ast::Type *> &paramTys,
                           const std::vector<ast::Expr *> &args,
                           const std::string &callee, const ast::Expr *receiver,
@@ -260,6 +345,11 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
   // different chains that might reach the same object at run time (`a.n`
   // and `b.n`) are not checked, and a plain parameter is a copy.
   std::vector<std::vector<CallUse>> uses;
+  // What the call writes, for the calls it is an argument of; and what it
+  // borrows until it runs, which no call in a later argument may write.
+  std::vector<CallWrite> writes;
+  std::vector<Lent> lent;
+  std::vector<bool> reported(args.size(), false);
   // A struct's method that may change `self` changes the receiver's
   // storage, which the lowering must know of (ast::Expr::isChangedByCall).
   if (receiver && method && !method->isView() &&
@@ -268,39 +358,55 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
   if (receiver && method) {
     std::vector<std::string> paths;
     borrowedPaths(receiver, paths);
+    // A struct's `view fn` reads its receiver's storage where it is.
+    const bool lends = method->isView() &&
+                       ast::isa<ast::StructType>(receiver->getResolvedType());
+    const std::string what =
+        method->isView() ? "the receiver of 'view fn " + callee + "'"
+                         : "the receiver of '" + callee + "' (not a 'view fn')";
+    const std::string changes = "call '" + callee + "' on it (not a 'view fn')";
+    const std::string later = "an argument of '" + callee + "'";
     std::vector<CallUse> recv;
     recv.reserve(paths.size());
-    for (std::string &path : paths)
-      recv.push_back(
-          {std::move(path),
-           method->isView()
-               ? "the receiver of 'view fn " + callee + "'"
-               : "the receiver of '" + callee + "' (not a 'view fn')",
-           "", !method->isView()});
+    for (std::string &path : paths) {
+      if (!method->isView())
+        writes.push_back({path, changes, receiver, false});
+      if (lends)
+        lent.push_back({path, what, later, 0});
+      recv.push_back({std::move(path), what, "", !method->isView()});
+    }
     uses.push_back(std::move(recv));
   }
   for (size_t i = 0; i < args.size() && i < paramTys.size(); ++i) {
     ast::Expr *arg = args[i];
     ast::Type *argTy = arg->getResolvedType();
     // An argument of the wrong type was reported by the call's own check.
-    if (!argTy || !isAssignable(paramTys[i], argTy))
+    if (!argTy || !isAssignable(paramTys[i], argTy)) {
+      reported[i] = true;
       continue;
+    }
     if (modes.mode(i) == ast::ParamMode::View) {
       // The lowering keeps what the argument is part of alive for the call
       // (ast::Expr::isViewedByCall).
       arg->setViewedByCall(true);
       std::vector<std::string> paths;
       borrowedPaths(arg, paths);
+      const std::string param = "'view' parameter '" + modes.name(i) + "'";
+      std::string lends = "passed to " + param;
+      lends += " of '" + callee + "'";
+      const std::string later = "a later argument of '" + callee + "'";
       std::vector<CallUse> mine;
       mine.reserve(paths.size());
-      for (std::string &path : paths)
-        mine.push_back({std::move(path),
-                        "passed to 'view' parameter '" + modes.name(i) + "'",
-                        modes.name(i), false});
+      for (std::string &path : paths) {
+        lent.push_back({path, lends, later, i + 1});
+        mine.push_back(
+            {std::move(path), "passed to " + param, modes.name(i), false});
+      }
       std::string msg = conflictWith(uses, mine);
       uses.push_back(std::move(mine));
       if (!msg.empty()) {
         error(arg->getLocation(), msg);
+        reported[i] = true;
         ok = false;
       }
       continue;
@@ -333,19 +439,56 @@ bool Sema::checkInoutArgs(const ast::ParamModes &modes,
       // An `inout` result passes on what its call borrowed.
       std::vector<std::string> paths;
       borrowedPaths(arg, paths);
+      std::string passes = "pass it to " + param;
+      passes += " of '" + callee + "'";
       std::vector<CallUse> mine;
       mine.reserve(paths.size());
-      for (std::string &path : paths)
+      for (std::string &path : paths) {
+        writes.push_back({path, passes, arg, false});
         mine.push_back(
             {std::move(path), "passed to " + param, modes.name(i), true});
+      }
       msg = conflictWith(uses, mine);
       uses.push_back(std::move(mine));
     }
     if (!msg.empty()) {
       error(arg->getLocation(), msg);
+      reported[i] = true;
       ok = false;
     }
   }
+  // A borrow lasts until the call runs, which reads it where it is, so a
+  // call in a later argument cannot write it either: pass it (or what holds
+  // it, or a part of it) to an `inout` parameter, or call a method that may
+  // change it.  A call writing it through an object, or through a function
+  // value, is not seen here, and the caller copies what such a call may
+  // write (SnapshotReads in the lowering).  A lambda's body runs later.
+  for (size_t j = 0; j < args.size() && !lent.empty(); ++j) {
+    if (reported[j])
+      continue; // the call's own conflict, or a type error, was reported
+    std::vector<const ast::Expr *> calls;
+    callsIn(args[j], calls);
+    for (const ast::Expr *c : calls) {
+      auto it = CallWrites.find(c);
+      if (it == CallWrites.end())
+        continue;
+      for (CallWrite &w : it->second)
+        for (const Lent &l : lent) {
+          if (w.Reported || l.From > j)
+            continue;
+          if (std::string why = nestedConflict(l, w.Path, w.What);
+              !why.empty()) {
+            error(w.At->getLocation(), why);
+            w.Reported = true;
+            ok = false;
+          }
+        }
+    }
+  }
+  if (writes.empty())
+    CallWrites.erase(call);
+  else
+    CallWrites[call] = std::move(writes);
   return ok;
 }
 

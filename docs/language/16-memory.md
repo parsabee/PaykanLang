@@ -664,15 +664,18 @@ argument that may write that storage after it is read (`f(p, bump(p))` with `bum
 Point)`, `f(c.p, reset(c))` with `reset` storing into `c.p`) gives the callee a copy the caller
 takes where the argument is evaluated, its references retained and released after the call,
 as `==` does with its left operand: the value passed or compared is the one read
-([Evaluation order](02-basics.md#evaluation-order)). A slice parameter passed on to another
-names its caller's array, and is copied the same way when a later argument may write the
-array: its elements, as many as the slice has when the program runs, into memory allocated for
-the call and freed after it. Where no later operand may write it, as in almost every call,
-nothing more is copied: a later call given only values that reach no object, or whose code
-stores into nothing its caller holds, cannot, and nor can one whose code stores only into
-objects' fields that cannot hold the value (`f(c.p, counter.next())`, where `next` stores
-only a counter's `int` field). A call through a function value runs code the caller does not
-know, so a value read before it is copied.
+([Evaluation order](02-basics.md#evaluation-order)). For a `view` parameter, a slice and the
+receiver of a struct's `view fn`, a later `inout` argument or method that may change it
+naming that storage is an error instead ([Exclusivity](03-functions.md#exclusivity)), so
+their copies are taken for a write through an object or a function value. A slice parameter
+passed on to another names its caller's array, and is copied the same way when a later
+argument may write the array: its elements, as many as the slice has when the program runs,
+into memory allocated for the call and freed after it. Where no later operand may write it,
+as in almost every call, nothing more is copied: a later call given only values that reach
+no object, or whose code stores into nothing its caller holds, cannot, and nor can one whose
+code stores only into objects' fields that cannot hold the value (`f(c.p, counter.next())`,
+where `next` stores only a counter's `int` field). A call through a function value runs code
+the caller does not know, so a value read before it is copied.
 
 ## `None`
 

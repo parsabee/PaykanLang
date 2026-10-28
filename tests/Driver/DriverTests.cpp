@@ -4310,3 +4310,43 @@ TEST(Driver, AnInoutResultOfATupleElementIsASemaError) {
   EXPECT_FALSE(std::filesystem::exists(exe));
   std::filesystem::remove_all(dir);
 }
+
+// A `view` argument, or a slice, that a call in a later argument writes
+// through an `inout` parameter is Sema's error, on every path: each of them
+// ran the program, the callee given a copy of the value read.
+TEST(Driver, ABorrowALaterArgumentWritesIsASemaError) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("borrow_written_later");
+  const auto src = (dir / "prog.pkn").string();
+  std::ofstream(src)
+      << "struct P { a: int; }\n"
+         "fn look(p: view P, x: int) -> int => p.a;\n"
+         "fn sum(xs: view int[], x: int) -> int => xs[0];\n"
+         "fn bump(p: inout P) -> int { p = P(9); return 0; }\n"
+         "fn bumpA(a: inout int[3]) -> int { a = [9, 9, 9]; return 0; }\n"
+         "fn main() -> int {\n"
+         "  p = P(1);\n"
+         "  arr = [1, 2, 3];\n"
+         "  return look(p, bump(p)) + sum(arr, bumpA(arr));\n"
+         "}\n";
+  const std::string exe = (dir / "prog").string();
+  for (const std::string &mode :
+       {std::string(" --check-only "), std::string(" "),
+        std::string(" --emit-c "), " build -o " + shellWord(exe) + " "}) {
+    auto r = run(paykanRun() + mode + shellWord(src) + " 2>&1 >/dev/null");
+    EXPECT_EQ(r.exitCode, 1) << mode << r.out;
+    EXPECT_EQ(countErrors(r.out), 2u) << mode << r.out;
+    EXPECT_NE(r.out.find("prog.pkn:9:23: error: 'p' is passed to 'view' "
+                         "parameter 'p' of 'look'; a later argument of 'look' "
+                         "cannot pass it to 'inout' parameter 'p' of 'bump'"),
+              std::string::npos)
+        << mode << r.out;
+    EXPECT_NE(r.out.find("prog.pkn:9:44: error: 'arr' is passed to 'view' "
+                         "parameter 'xs' of 'sum'; a later argument of 'sum' "
+                         "cannot pass it to 'inout' parameter 'a' of 'bumpA'"),
+              std::string::npos)
+        << mode << r.out;
+  }
+  EXPECT_FALSE(std::filesystem::exists(exe));
+  std::filesystem::remove_all(dir);
+}

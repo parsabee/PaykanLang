@@ -1,0 +1,18 @@
+// ERROR: 'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter 'p' of 'bump'
+// A `view` parameter is borrowed until the call runs, so a call in a later
+// argument cannot write it (docs/language/03-functions.md, "Exclusivity").
+struct P {
+  a: int;
+}
+
+fn look(p: view P, x: int) -> int => p.a;
+
+fn bump(p: inout P) -> int {
+  p = P(9);
+  return 0;
+}
+
+fn main() -> int {
+  p = P(1);
+  return look(p, bump(p));
+}

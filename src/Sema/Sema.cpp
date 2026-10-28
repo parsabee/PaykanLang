@@ -1527,8 +1527,8 @@ ast::Type *Sema::ExprChecker::visitCallValueExpr(ast::CallValueExpr *node) {
     return nullptr;
   }
   // Named by its type: the callee is an expression.
-  ast::Type *ret = S.checkFunctionValueCall(fnt, node->getArguments(),
-                                            typeName(fnt), node->getLocation());
+  ast::Type *ret =
+      S.checkFunctionValueCall(fnt, node->getArguments(), typeName(fnt), node);
   if (!ret)
     return nullptr;
   node->setResolvedType(ret);
@@ -2287,8 +2287,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                                        "cannot be called");
       return nullptr;
     }
-    ast::Type *ret = S.checkFunctionValueCall(fnt, node->getArguments(), name,
-                                              node->getLocation());
+    ast::Type *ret =
+        S.checkFunctionValueCall(fnt, node->getArguments(), name, node);
     if (!ret)
       return nullptr;
     node->setCalleeIsValue(true);
@@ -2408,7 +2408,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       }
     }
     if (superInit && argTypes.size() == expectedParams.size()) {
-      S.checkInoutArgs(superInit->getParamModes(), expectedParams,
+      S.checkInoutArgs(node, superInit->getParamModes(), expectedParams,
                        node->getArguments(), names::kMethodSuper);
       S.checkViewArgs(superInit->getParamModes(), expectedParams,
                       node->getArguments(), names::kMethodSuper);
@@ -2546,7 +2546,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     }
   }
   const std::string callee = displayName(node->getCalleeName());
-  S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
+  S.checkInoutArgs(node, sig->Modes, sig->ParamTypes, node->getArguments(),
+                   callee);
   S.checkViewArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
   S.noteBorrowResult(node, callee, sig->Modes, sig->ParamTypes, sig->ReturnType,
                      node->getArguments(), nullptr);
@@ -2669,9 +2670,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                                   : static_cast<ast::Type *>(st),
                                node->getMethodName(), node->getLocation()))
         return nullptr;
-      ast::Type *ret =
-          S.checkFunctionValueCall(fnt, node->getArguments(),
-                                   node->getMethodName(), node->getLocation());
+      ast::Type *ret = S.checkFunctionValueCall(fnt, node->getArguments(),
+                                                node->getMethodName(), node);
       if (!ret)
         return nullptr;
       node->setFieldCall(true);
@@ -2750,8 +2750,9 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   sliceArgNote(paramTys[i], argTy));
     }
   }
-  S.checkInoutArgs(method->getParamModes(), paramTys, node->getArguments(),
-                   node->getMethodName(), node->getReceiver(), method);
+  S.checkInoutArgs(node, method->getParamModes(), paramTys,
+                   node->getArguments(), node->getMethodName(),
+                   node->getReceiver(), method);
   // A builtin method reads its arguments; `equals`, like `==`, only
   // compares.
   if (!(ct && ct->isBuiltin()) && node->getMethodName() != names::kMethodEquals)

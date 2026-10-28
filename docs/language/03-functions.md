@@ -446,10 +446,72 @@ The check is conservative: it compares how the arguments are written. Two differ
 paths that reach the same object at run time (`a.n` and `b.n` after `b = a`) are
 accepted, and the callee then sees one storage through both parameters.
 
-Exclusivity is a rule of one call. An expression may read a variable and also pass it to
-an `inout` parameter of a call inside it. Its operands are evaluated left to right, and a
-value read before the call is the one used, even when the call replaces what the variable
-holds:
+A borrow lasts until its call runs. The callee reads what is passed to a `view` parameter
+(a slice parameter, `view T[]`, among them), and the receiver of a struct's `view fn`, where
+it is, and it runs only once its later arguments are evaluated. So a call anywhere in a
+later argument cannot write it either: pass it, what holds it or a part of it to an
+`inout` parameter, or call a method on it that may change `self`. This holds for every
+call, as the one that borrows and as the one that writes: a function's, a method's, a
+constructor's, `__super__`'s and a function value's (whose parameters are named by
+number). A lambda's body is not part of it, since it runs only when the lambda is called.
+
+```pkn
+struct P {
+  a: int;
+}
+
+fn look(p: view P, x: int) -> int => p.a;
+
+fn bump(p: inout P) -> int {
+  p = P(9);
+  return 0;
+}
+
+fn main() -> int {
+  p = P(1);
+  return look(p, bump(p));
+}
+```
+
+Error:
+
+```
+error: 'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter 'p' of 'bump'
+```
+
+The other forms, with `look` and `bump` as above, are errors the same way:
+
+| Call | Error |
+|---|---|
+| `sum(arr, bumpA(arr))` with `fn sum(xs: view int[], k: int)` and `fn bumpA(a: inout int[3])` | `'arr' is passed to 'view' parameter 'xs' of 'sum'; a later argument of 'sum' cannot pass it to 'inout' parameter 'a' of 'bumpA'` |
+| `sum(xs, clear(xs))` in `fn e4(xs: inout int[])`, with `fn clear(xs: inout int[])` | `'xs' is passed to 'view' parameter 'xs' of 'sum'; a later argument of 'sum' cannot pass it to 'inout' parameter 'xs' of 'clear'` |
+| `p.show(bump(p))`, `show` a `view fn` of `P` | `'p' is the receiver of 'view fn show'; an argument of 'show' cannot pass it to 'inout' parameter 'p' of 'bump'` |
+| `look(p, p.reset())`, `reset` a method of `P` that may change `self` | `'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot call 'reset' on it (not a 'view fn')` |
+| `look(h.p, bumpH(h))` with `fn bumpH(h: inout H)` | `'h' contains 'h.p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter 'h' of 'bumpH'` |
+| `look(p, bumpN(p.a))` with `fn bumpN(n: inout int)` | `'p.a' is part of 'p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter 'n' of 'bumpN'` |
+| `look(c.p, c.change())`, `change` a method of `c`'s class that may change `self` | `'c' contains 'c.p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot call 'change' on it (not a 'view fn')` |
+| `Shown(p, bump(p))`, the `__init__` of `Shown` taking `p: view P` (and `__super__(p, bump(p))` likewise) | `'p' is passed to 'view' parameter 'p' of 'Shown'; a later argument of 'Shown' cannot pass it to 'inout' parameter 'p' of 'bump'` |
+| `g(p, bump(p))` with `g = look`, and `look(p, b(p))` with `b = bump` | `'p' is passed to 'view' parameter '1' of 'g'; a later argument of 'g' cannot pass it to 'inout' parameter 'p' of 'bump'`, `'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter '1' of 'b'` |
+| `look(p, id(bump(p)))`, `look(p, if k == 0 then bump(p) else 0)`: deeper in the argument | the error of `look(p, bump(p))` |
+
+What this does not see is accepted, and the callee is then given the value read where the
+argument was evaluated, which the caller copies when a later argument may write it
+([Evaluation order](02-basics.md#evaluation-order)):
+
+- a plain parameter, a copy: `first(p, bump(p))` with `fn first(p: P, x: int)`;
+- a write through an object, or by code the call cannot see: `look(c.p, reset(c))` with
+  `reset` storing into `c.p`, a call through a function value (`look(c.p, f())`), a
+  method whose override writes;
+- a write before the borrow, or one after a borrow that has ended: `look2(bump(p), p)`
+  with `fn look2(x: int, p: view P)`, and `add(look(p, 0), bump(p))`, where the call of
+  `look` has returned;
+- a lambda's body: `look(p, apply(fn(p: inout P) -> int => bump(p)))`;
+- another variable, or another field of the same one: `look(two.x, bump(two.y))`;
+- the operands of `==` and `!=` (`p == P(bump(p) + 9)`).
+
+Outside a borrow, an expression may read a variable and also pass it to an `inout`
+parameter of a call inside it. Its operands are evaluated left to right, and a value read
+before the call is the one used, even when the call replaces what the variable holds:
 
 ```pkn
 import ::io;
