@@ -119,6 +119,11 @@ bool has(const pir::Module &m, const std::string &name) {
   return m.findFunction(name) || m.findClass(name);
 }
 
+pir::Class &classNamed(pir::Module &m, const std::string &name) {
+  return *std::find_if(m.Classes.begin(), m.Classes.end(),
+                       [&](const pir::Class &c) { return c.Name == name; });
+}
+
 } // namespace
 
 TEST(ModuleCode, ExposedTypesAreThoseTheInterfaceSpells) {
@@ -271,7 +276,7 @@ TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
       "class 'Box<int>': its superclass is '' in CODE, 'Base' in IFACE");
   EXPECT_EQ(
       check([](pkm::Interface &i) { i.Classes[0].Fields[0].FieldName = "w"; }),
-      "class 'Box<int>': its fields are not the ones in CODE");
+      "class 'Box<int>': its own fields are (v) in CODE, (w) in IFACE");
   EXPECT_EQ(
       check([](pkm::Interface &i) { i.Classes[0].Methods[0].Name = "drop"; }),
       "class 'Box<int>': slot 0 of its vtable is 'destroy' in CODE, 'drop' in "
@@ -302,6 +307,29 @@ TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
   // An extern of another module is not the module's own.
   EXPECT_EQ(check([](pkm::Interface &i) { i.Functions[0].Name = "lib::f"; }),
             "function 'lib::f' is not in CODE");
+  // A copy of an instantiation the module holds is checked for what it
+  // has, whatever module the interface says it is from: a program may
+  // keep it in its place of its own.  Another module's class CODE does not
+  // define is that module's to check.
+  EXPECT_EQ(check([](pkm::Interface &i) {
+              i.Classes[0].IsLocal = false;
+              i.Classes[0].OriginModule = "lib";
+              i.Classes[0].Fields[0].FieldName = "w";
+            }),
+            "class 'Box<int>': its own fields are (v) in CODE, (w) in IFACE");
+  EXPECT_EQ(check([](pkm::Interface &i) {
+              i.Classes[0].IsLocal = false;
+              i.Classes[0].Name = "Box<long>";
+            }),
+            "");
+  // So is one the interface does not describe: its vtable is the
+  // program's, an empty slot a call of address 0.
+  pir::Module emptied = parsed();
+  classNamed(emptied, "Box<Str>").VTable[0].Target.clear();
+  Status s = modules::checkCodeMatchesInterface(emptied, interface());
+  EXPECT_EQ(s ? "" : s.message(),
+            "class 'Box<Str>': slot 0 ('destroy') of its vtable is empty in "
+            "CODE");
 }
 
 // An interface describes its types consistently (docs/design/pkm.md §8.4
@@ -468,11 +496,22 @@ fn @scale(%p.1: box, %by.2: i64, %xs.3: ptr, %n.4: i64, %acc.5: ptr) -> box {
             }),
             "class 'Point': field 'x' is i64 in CODE, weak by its type in "
             "IFACE");
-  // A type whose PIR type its name does not decide is not compared.
+  // The optional of a scalar is its optional type, of a reference a box.
   EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
               i.Classes[0].Fields[0].TypeName = "int?";
             }),
+            "class 'Point': field 'x' is i64 in CODE, opt_i64 by its type in "
+            "IFACE");
+  EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
+              i.Classes[0].Fields[1].TypeName = "Point?";
+            }),
             "");
+  // The fields are in the order of the layout an importer makes.
+  EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
+              std::swap(i.Classes[0].Fields[0], i.Classes[0].Fields[1]);
+            }),
+            "class 'Point': its own fields are (x, name) in CODE, (name, x) "
+            "in IFACE");
   EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
               i.Classes[0].Methods[2].ReturnTypeName = "int";
             }),
@@ -529,12 +568,244 @@ fn @scale(%p.1: box, %by.2: i64, %xs.3: ptr, %n.4: i64, %acc.5: ptr) -> box {
             }),
             "function 'scale' is (box, i64, ptr, i64, ptr) -> box in CODE, "
             "(box, i64, ptr, i64, ptr, ptr) -> void by its types in IFACE");
-  // A native function's signature is C's.
+  // A native function's is the one of the function that calls C.
   EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &) {
               i.Functions[1].ReturnTypeName = "int";
               i.Functions[1].Native = true;
             }),
+            "function 'scale' is (box, i64, ptr, i64, ptr) -> box in CODE, "
+            "(box, i64, ptr, i64, ptr) -> i64 by its types in IFACE");
+  // Every type an interface can name has its PIR type: the optional of a
+  // scalar or of an enum without payloads its optional type, an enum
+  // without payloads an i64, a tuple, a fixed-size array and a function
+  // value are held in memory.
+  pkm::EnumRec color;
+  color.Name = "Color";
+  color.Variants = {"Red", "Green"};
+  auto param = [&](const std::string &type) {
+    return check([&](pkm::Interface &i, pir::Module &) {
+      i.Enums = {color};
+      i.Functions[1].ParamTypeNames[1] = type;
+    });
+  };
+  const std::string scale = "function 'scale' is (box, i64, ptr, i64, ptr) -> "
+                            "box in CODE, ";
+  EXPECT_EQ(param("Color"), "");
+  EXPECT_EQ(param("u8?"), scale + "(box, opt_i64, ptr, i64, ptr) -> box by "
+                                  "its types in IFACE");
+  EXPECT_EQ(param("Color?"), scale + "(box, opt_i64, ptr, i64, ptr) -> box "
+                                     "by its types in IFACE");
+  EXPECT_EQ(param("char?"), scale + "(box, opt_char, ptr, i64, ptr) -> box "
+                                    "by its types in IFACE");
+  for (const char *memory : {"(int, Str)", "int[3]", "(int) -> int",
+                             "((int) -> int)?", "(int, int)?", "Str[2]?"})
+    EXPECT_EQ(param(memory), scale + "(box, ptr, ptr, i64, ptr) -> box by "
+                                     "its types in IFACE")
+        << memory;
+  EXPECT_EQ(param("(int, Str)[]"), scale + "(box, ptr, i64, ptr, i64, ptr) "
+                                           "-> box by its types in IFACE");
+  EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &) {
+              i.Functions[1].ReturnTypeName = "(int, Str)";
+            }),
+            scale + "(box, i64, ptr, i64, ptr, ptr) -> void by its types in "
+                    "IFACE");
+  // A type the interface does not describe is Sema's to report.
+  EXPECT_EQ(param("Shade?"), "");
+}
+
+// What an importer finds of a class by its name is in CODE (pkm.md §8.4
+// step 7): the initializer a subclass's calls, the constructor, each
+// `impl` method, and for each slot of its vtable the function a subclass
+// inherits, `X.m` for the first class X from it up that has one, which is
+// the slot's target.  A file without them was usable, and the importer
+// stopped with an internal compiler error (`no function for
+// 'Shape.__init__' called by 'Sq.__super__'`) or made a vtable whose slot
+// was empty, a call of address 0.
+TEST(ModuleCode, CodeHasWhatAnImporterFindsByName) {
+  const char *const text = R"(module "m"
+extern fn @$rt.PaykanObject_toString(obj) -> box
+extern fn @"lib::Base.size"(obj) -> i64 module "lib" symbol @Base.size
+extern class Base module "lib" {
+  field b: i64
+}
+class Shape {
+  field n: i64
+  vtable {
+    destroy = @Shape.destroy : (obj) -> void
+    toString = @$rt.PaykanObject_toString : (obj) -> box
+    area = @Shape.area : (obj) -> i64
+  }
+}
+class Square : Shape {
+  field n: i64
+  vtable {
+    destroy = @Square.destroy : (obj) -> void
+    toString = @$rt.PaykanObject_toString : (obj) -> box
+    area = @Shape.area : (obj) -> i64
+  }
+}
+class Brick : Base {
+  field b: i64
+  vtable {
+    destroy = @Brick.destroy : (obj) -> void
+    size = @"lib::Base.size" : (obj) -> i64
+  }
+}
+fn @Shape.destroy(%self.1: obj) -> void {
+  ret
+}
+fn @Shape.area(%self.1: obj) -> i64 {
+  ret 0
+}
+fn @Shape.twice(%self.1: obj) -> i64 {
+  ret 0
+}
+fn @Shape.__init__(%self.1: obj, %n.2: i64) -> void {
+  ret
+}
+fn @Shape(%n.1: i64) -> box {
+  %o.2 = new Shape
+  %b.3 = box %o.2
+  ret %b.3
+}
+fn @Square.destroy(%self.1: obj) -> void {
+  ret
+}
+fn @Square.__init__(%self.1: obj, %n.2: i64) -> void {
+  ret
+}
+fn @Square(%n.1: i64) -> box {
+  %o.2 = new Square
+  %b.3 = box %o.2
+  ret %b.3
+}
+fn @Brick.destroy(%self.1: obj) -> void {
+  ret
+}
+fn @Brick.__init__(%self.1: obj, %b.2: i64) -> void {
+  ret
+}
+fn @Brick(%b.1: i64) -> box {
+  %o.2 = new Brick
+  %b.3 = box %o.2
+  ret %b.3
+}
+)";
+  auto parse = [&] {
+    pir::ParseError err;
+    auto program = pir::parseProgram(text, err);
+    EXPECT_TRUE(program) << err.str();
+    return program ? std::move(program->Modules.front()) : pir::Module();
+  };
+  const pir::Module code = parse();
+  ASSERT_TRUE(pir::verify(code).empty())
+      << pir::formatErrors(pir::verify(code));
+  auto check =
+      [&](const std::function<void(pkm::Interface &, pir::Module &)> &change) {
+        pkm::Interface iface;
+        iface.Module = "m";
+        pkm::ClassRec shape;
+        shape.Name = "Shape";
+        shape.Fields = {{"n", "int", false}};
+        shape.Methods = {{"destroy", "void", {}, 0, {}},
+                         {"toString", "Str", {}, pkm::kMethodView, {}},
+                         {"area", "int", {}, pkm::kMethodView, {}},
+                         {"__init__", "void", {"int"}, 0, {}},
+                         {"twice", "int", {}, pkm::kMethodImpl, {}}};
+        pkm::ClassRec square = shape;
+        square.Name = "Square";
+        square.SuperClassName = "Shape";
+        square.Fields.clear();
+        square.Methods.pop_back();
+        pkm::ClassRec base;
+        base.Name = "Base";
+        base.IsLocal = false;
+        base.OriginModule = "lib";
+        base.Fields = {{"b", "int", false}};
+        base.Methods = {{"destroy", "void", {}, 0, {}},
+                        {"size", "int", {}, 0, {}},
+                        {"__init__", "void", {"int"}, 0, {}}};
+        pkm::ClassRec brick = base;
+        brick.Name = "Brick";
+        brick.IsLocal = true;
+        brick.OriginModule.clear();
+        brick.SuperClassName = "Base";
+        brick.Fields.clear();
+        iface.Classes = {shape, square, base, brick};
+        for (const char *name : {"Shape", "Square", "Brick"}) {
+          pkm::FuncRec ctor;
+          ctor.Name = name;
+          ctor.ReturnTypeName = name;
+          ctor.ParamTypeNames = {"int"};
+          iface.Functions.push_back(ctor);
+        }
+        pir::Module m = parse();
+        change(iface, m);
+        Status s = modules::checkCodeMatchesInterface(m, iface);
+        return s ? std::string() : s.message();
+      };
+  // Rename the function @p from of @p m to @p to wherever it is named, as
+  // one changed byte of CODE's strings does.
+  auto rename = [](pir::Module &m, const std::string &from,
+                   const std::string &to) {
+    for (pir::Function &f : m.Functions)
+      if (f.Name == from)
+        f.Name = to;
+    for (pir::Class &c : m.Classes)
+      for (pir::VTableEntry &e : c.VTable)
+        if (e.Target == from)
+          e.Target = to;
+  };
+  auto renamed = [&](const std::string &from, const std::string &to) {
+    return check([&](pkm::Interface &, pir::Module &m) {
+      rename(m, from, to);
+      ASSERT_TRUE(pir::verify(m).empty()) << pir::formatErrors(pir::verify(m));
+    });
+  };
+  EXPECT_EQ(check([](pkm::Interface &, pir::Module &) {}), "");
+  EXPECT_EQ(renamed("Shape.__init__", "Rhape.__init__"),
+            "method 'Shape.__init__' is not in CODE");
+  EXPECT_EQ(renamed("Shape.twice", "Rhape.twice"),
+            "method 'Shape.twice' is not in CODE");
+  EXPECT_EQ(renamed("Square", "Rquare"),
+            "class 'Square': its constructor is not in CODE");
+  // An abstract class has none.
+  EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &m) {
+              rename(m, "Square", "Rquare");
+              i.Classes[1].Methods[2].Flags |= pkm::kMethodPure;
+              i.Functions.erase(i.Functions.begin() + 1);
+            }),
             "");
+  // The slot's target and what a subclass in another module inherits.
+  EXPECT_EQ(renamed("Shape.area", "Rhape.area"),
+            "class 'Shape': slot 2 ('area') of its vtable names '@Rhape.area' "
+            "in CODE, which is not the class's or an ancestor's method "
+            "'area'");
+  EXPECT_EQ(check([](pkm::Interface &, pir::Module &m) {
+              classNamed(m, "Square").VTable[2].Target = "Shape.twice";
+            }),
+            "class 'Square': slot 2 ('area') of its vtable names "
+            "'@Shape.twice' in CODE, where an importer finds '@Shape.area'");
+  EXPECT_EQ(check([](pkm::Interface &, pir::Module &m) {
+              classNamed(m, "Shape").VTable[1].Target = "Shape.area";
+            }),
+            "class 'Shape': slot 1 ('toString') of its vtable names "
+            "'@Shape.area' in CODE, where an importer finds "
+            "'@$rt.PaykanObject_toString'");
+  // Past a class of another module, a function of that module's.
+  EXPECT_EQ(check([](pkm::Interface &, pir::Module &m) {
+              classNamed(m, "Brick").VTable[1].Target = "Brick.destroy";
+            }),
+            "class 'Brick': slot 1 ('size') of its vtable names "
+            "'@Brick.destroy' in CODE, which is not the class's or an "
+            "ancestor's method 'size'");
+  // A class of another module's is not one the module defines.
+  EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
+              i.Classes[0].IsLocal = false;
+              i.Classes[0].OriginModule = "lib";
+            }),
+            "class 'Shape' is of module 'lib' in IFACE, of this module in "
+            "CODE");
 }
 
 // The lowering stops at an import it cannot lower: the importer is not

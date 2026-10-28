@@ -1127,11 +1127,13 @@ TEST(Pkm, HelpDocumentsTheFlags) {
 namespace {
 
 /// `lib::b` derives `Line` from `lib::a`'s abstract `Shape` and `Seg` from
-/// `Line`, and has a struct and a function returning it; `main` uses them
-/// all (exit status 42).  Its file is tried with an IFACE or a CODE that
-/// disagrees with itself, with its CODE or with `lib::a`, every hash made
-/// to match: a cache entry is rebuilt, a prebuilt file rejected where it
-/// is imported, by `--check-only` too, and `pkm check` says `corrupt`.
+/// `Line`, and has a struct and a function returning it, a function
+/// returning an instance of `lib::a`'s template `Box` (whose copy its CODE
+/// holds) and a native function; `main` uses them all (exit status 42).  Its
+/// file is tried with an IFACE or a CODE that disagrees with itself, with its
+/// CODE or with `lib::a`, every hash made to match: a cache entry is rebuilt, a
+/// prebuilt file rejected where it is imported, by `--check-only` too, and `pkm
+/// check` says `corrupt`.
 struct Hierarchy {
   fs::path Dir;
   explicit Hierarchy(const std::string &name) {
@@ -1141,7 +1143,9 @@ struct Hierarchy {
     writeFile(Dir / "lib" / "a.pkn",
               "class Shape { n: int; m: int;\n"
               "  view fn area() -> int;\n"
-              "  view fn perimeter() -> int { return self.n + self.m; } }\n");
+              "  view fn perimeter() -> int { return self.n + self.m; } }\n"
+              "class Box<T> { v: T; view fn get() -> T { return self.v; } "
+              "}\n");
     writeFile(Dir / "lib" / "b.pkn",
               "import lib::a;\n"
               "class Line : a::Shape { k: int;\n"
@@ -1150,13 +1154,16 @@ struct Hierarchy {
               "  view fn area() -> int { return self.z; } }\n"
               "struct S { q: int; }\n"
               "impl S { view fn get() -> int { return self.q; } }\n"
-              "fn mk() -> S { return S(1); }\n");
+              "fn mk() -> S { return S(1); }\n"
+              "fn bx() -> a::Box<int> { return a::Box<int>(2); }\n"
+              "native fn absval(x: int) -> int = \"llabs\";\n");
     writeFile(Dir / "main.pkn",
               "import lib::b;\n"
               "fn main() -> int {\n"
               "  let s = b::Seg(1, 2, 3, 30);\n"
               "  let t = b::mk();\n"
-              "  return s.perimeter() + s.area() + s.extra() + t.get() + 5;\n"
+              "  return s.perimeter() + s.area() + s.extra() + t.get() +\n"
+              "         b::bx().get() + b::absval(-3);\n"
               "}\n");
   }
   ~Hierarchy() { fs::remove_all(Dir); }
@@ -1310,15 +1317,39 @@ TEST(Pkm, AnInterfaceThatDisagreesIsNotUsed) {
                 "has an IFACE section that does not match its CODE: function "
                 "'mk' is (ptr) -> void in CODE, () -> box by its types in "
                 "IFACE");
+  // Every type has its PIR type: the optional of an int is an opt_i64,
+  // which a subclass's initializer in an importer passed where CODE took
+  // an i64 (`internal compiler error: an optional value where a box is
+  // due` for a class's).
+  expectNotUsed("optional", iface([](Interface &i) {
+                  for (const char *c : {"Line", "Seg"})
+                    for (auto &m : named(i.Classes, c).Methods)
+                      if (m.Name == "__init__")
+                        m.ParamTypeNames[0] = "int?";
+                }),
+                "has an IFACE section that does not match its CODE: method "
+                "'Line.__init__' is (obj, i64, i64, i64) -> void in CODE, "
+                "(obj, opt_i64, i64, i64) -> void by its types in IFACE");
+  // A native function is the module's function that calls C.
+  expectNotUsed("native", iface([](Interface &i) {
+                  named(i.Functions, "absval").ReturnTypeName = "float";
+                }),
+                "has an IFACE section that does not match its CODE: function "
+                "'absval' is (i64) -> i64 in CODE, (i64) -> f64 by its types "
+                "in IFACE");
 }
 
 // A CODE that verifies on its own, and still is not one a program can use:
 // a `void` parameter (the mlir backend crashed on it), an empty vtable slot
-// of a class it defines or a constructor returning nothing (the program
-// built, and crashed when it ran), a function whose struct result is not
-// written through its last parameter or a class whose fields do not begin
-// with its superclass's (the program did not verify), an extern that does
-// not match the module it names.
+// of a class it defines or of a copy of an instantiation, a slot that names
+// another function than the one an importer's subclass inherits, or a
+// constructor returning nothing (the program built, and crashed when it
+// ran), a class's initializer an importer's subclass calls by its name
+// missing (an internal compiler error), a function whose struct result is
+// not written through its last parameter or a class whose fields do not
+// begin with its superclass's (the program did not verify), an extern that
+// does not match the module it names, a function whose next value id is
+// not above its ids (rc-elimination read past its tables).
 TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
   REQUIRE_BACKEND();
   using paykan::pir::Module;
@@ -1327,6 +1358,25 @@ TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
   };
   auto fn = [](Module &m, const std::string &name) -> paykan::pir::Function & {
     return named(m.Functions, name);
+  };
+  // The function @p from renamed @p to wherever CODE names it, as one
+  // changed byte of its strings does.
+  auto rename = [](const std::string &from, const std::string &to) {
+    return [=](const fs::path &file) {
+      rewriteCode(file, [&](Module &m) {
+        for (paykan::pir::Function &f : m.Functions) {
+          if (f.Name == from)
+            f.Name = to;
+          for (std::string &u : f.Uses)
+            if (u == from)
+              u = to;
+        }
+        for (paykan::pir::Class &c : m.Classes)
+          for (paykan::pir::VTableEntry &e : c.VTable)
+            if (e.Target == from)
+              e.Target = to;
+      });
+    };
   };
   expectNotUsed("void", code([&](Module &m) {
                   fn(m, "Shape.__init__").Sig.Params[1] =
@@ -1339,6 +1389,27 @@ TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
                 }),
                 "has an IFACE section that does not match its CODE: class "
                 "'Seg': slot 3 ('area') of its vtable is empty in CODE");
+  expectNotUsed("copy", code([](Module &m) {
+                  named(m.Classes, "Box<int>").VTable[0].Target.clear();
+                }),
+                "has an IFACE section that does not match its CODE: class "
+                "'Box<int>': slot 0 ('destroy') of its vtable is empty in "
+                "CODE");
+  expectNotUsed("target", rename("Line.extra", "Line.extrb"),
+                "has an IFACE section that does not match its CODE: class "
+                "'Line': slot 5 ('extra') of its vtable names '@Line.extrb' "
+                "in CODE, which is not the class's or an ancestor's method "
+                "'extra'");
+  expectNotUsed("init", rename("Line.__init__", "Line.__inix__"),
+                "has an IFACE section that does not match its CODE: method "
+                "'Line.__init__' is not in CODE");
+  expectNotUsed("ids", code([&](Module &m) {
+                  ASSERT_EQ(fn(m, "Box<int>.get").NextValueId, 4u);
+                  fn(m, "Box<int>.get").NextValueId = 3;
+                }),
+                "has a bad CODE section: it does not verify:\nlib::b:@Box<int>"
+                ".get: value '%3' is not below the function's next value id "
+                "3\n");
   expectNotUsed("ctor", code([&](Module &m) {
                   fn(m, "Seg").Sig.Ret = paykan::pir::Type::Void;
                 }),
@@ -3655,10 +3726,10 @@ TEST(Pkm, AnInterfaceThatDoesNotMatchItsCodeIsRejected) {
   writeFile(dir / "geo.pkn",
             "class Shape { name: Str; view fn kind() -> Str { return "
             "\"shape\"; } }\n"
-            "class Circle : Shape { r: int; view fn kind() -> Str { return "
-            "\"circle\"; } }\n"
+            "class Circle : Shape { r: int; d: int; view fn kind() -> Str { "
+            "return \"circle\"; } }\n"
             "impl Circle { fn __init__(r: int) { __super__(\"c\"); self.r = "
-            "r; } }\n"
+            "r; self.d = 2 * r; } }\n"
             "fn area(c: view Circle) -> int { return 3 * c.r * c.r; }\n");
   writeFile(dir / "main.pkn", "import geo;\n"
                               "fn main() -> int {\n"
@@ -3716,7 +3787,16 @@ TEST(Pkm, AnInterfaceThatDoesNotMatchItsCodeIsRejected) {
        [&](paykan::pkm::Interface &i) {
          classNamed(i, "Circle").Fields.front().FieldName = "radius";
        },
-       mismatch + "class 'Circle': its fields are not the ones in CODE"},
+       mismatch + "class 'Circle': its own fields are (r, d) in CODE, "
+                  "(radius, d) in IFACE"},
+      // An importer lays a class out in the order of its fields.
+      {"fields reordered",
+       [&](paykan::pkm::Interface &i) {
+         auto &fields = classNamed(i, "Circle").Fields;
+         std::swap(fields[0], fields[1]);
+       },
+       mismatch + "class 'Circle': its own fields are (r, d) in CODE, (d, "
+                  "r) in IFACE"},
       {"a function renamed",
        [](paykan::pkm::Interface &i) {
          for (auto &f : i.Functions)

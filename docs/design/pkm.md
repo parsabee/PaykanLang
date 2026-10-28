@@ -1490,24 +1490,33 @@ rebuilt and a prebuilt file is an error at the import, under
   one it describes, and no parameter is `void` (`Sema::checkInterfaceTypes`,
   through the resolver's `FrontendRead`).
 - `CODE` decoded, naming the module and verified (the verifier rejects a
-  `void` parameter, an extern's or a vtable slot's too, and a class whose
-  fields do not begin with its superclass's), and checked
-  against `IFACE` (`modules::checkCodeMatchesInterface`): each class the
-  module defines, with its superclass, its own fields, its vtable's slots,
-  none empty, and its constructor, which takes what its initializer takes
-  after the object and returns its box; each method of each of its structs;
-  each function. Where the types `IFACE` gives decide PIR types by their
-  names alone (an integer type `i64`, a floating-point one `f64`, `bool`,
-  `char`, `void`, `Str`, `Obj` and a class of the interface `box`, a slice
-  parameter its address and length, an `inout` parameter or result an
-  address, a `weak` field `weak`), the fields, functions, methods and slots
-  have those types in `CODE`, the derived signatures of §9.1 for those
-  types. In a signature a struct or a tagged union the interface describes,
-  or the optional of one, is held in memory: a parameter of its type is its
-  address (`ptr`), and a result of its type is written where a last `ptr`
-  parameter points, the function returning `void`. Otherwise a struct's, a
-  tuple's, an array's, an enum's, an optional's or a function type's PIR
-  type is not derived yet.
+  `void` parameter, an extern's or a vtable slot's too, a class whose
+  fields do not begin with its superclass's, and a value id at or past its
+  function's next one), and checked against `IFACE`
+  (`modules::checkCodeMatchesInterface`): each class the module defines,
+  with its superclass, its own fields in the order an importer lays them
+  out, its vtable's slots, its initializer and its `impl` methods (which an
+  importer calls by their names, a subclass's initializer its
+  superclass's), and its constructor, which takes what its initializer
+  takes after the object and returns its box; each copy of an
+  instantiation the module holds (a `shared class`, whose vtable a program
+  may take for its own), for what it has; each method of each of its
+  structs; each function, a native one's too (the function that calls C).
+  They have the PIR types `IFACE`'s types give them, the derived
+  signatures of §9.1, which every type an interface names has: an integer
+  type is `i64`, a floating-point one `f64`, `bool`, `char` and `void`
+  their own, `Str`, `Obj` and a class `box`, an enum without payloads
+  `i64`, the optional of a reference `box` and of a scalar or such an enum
+  its optional type (`opt_i64`, ...), a `weak` field `weak`; a struct, a
+  tagged union, a tuple, a fixed-size array, a function value and the
+  optional of one are held in memory, so a parameter of one is its address
+  (`ptr`) and a result of one is written where a last `ptr` parameter
+  points, the function returning `void`; a slice parameter is its address
+  and its length, an `inout` parameter or result an address. And each slot
+  of each class `CODE` defines names the function an importer's subclass
+  inherits for it (`ModuleLowering::findConcreteMethodFuncName`): `X.m` for
+  the first class `X` from the class up that has one, past a class of
+  another module a function of that module, past the root the runtime's.
 - Against the files it depends on (by the resolver; `pkm check` reads the
   file alone): each record of another module's type (`IsLocal` false) is
   that module's record of it, but for an instantiation made elsewhere that
@@ -1522,10 +1531,23 @@ rebuilt and a prebuilt file is an error at the import, under
   it read and verified for the program's link, so the bitcode is read once.
 
 The decoded `CODE` is kept for the lowering, so a module is decoded once.
-A call through a vtable slot whose signature in an importer differs from
-the one the defining module's `CODE` gives (types these checks do not
-derive) is the file's error in the lowering (`module 'm' (m.pkm) has an
-IFACE section that does not match its CODE: a call of slot 3 of 'C' ...`).
+The lowering still checks a call through a vtable slot against the
+class's definition in its module's `CODE`, and reports a difference as the
+file's error (`module 'm' (m.pkm) has an IFACE section that does not match
+its CODE: a call of slot 3 of 'C' ...`).
+
+What `CODE` does not record is the layout of a value held in memory: a
+struct's fields, a tagged union's variants and their payloads, a tuple's
+or a fixed-size array's elements, a function value's, which `IFACE` gives
+and the compiled code was compiled with. A signature passes such a value
+by its address, so it does not show the layout, and nothing ties the two
+but the file's hashes: like the compiled code, the layouts `IFACE` gives
+are trusted once the hashes match. A file whose `IFACE` gives a struct
+its fields in another order or a tagged union another variant, its
+hashes made to match, passes these checks, and the program reads the
+wrong bytes or crashes, as with an `OBJ` changed alike. (A struct without
+an initializer of its own is checked as far as its default one goes,
+which takes its fields in their order.)
 
 Threat model: a `.pkm` is untrusted (hand-edited, truncated, hostile,
 stale). The reader never allocates from an unchecked count, caps recursion,

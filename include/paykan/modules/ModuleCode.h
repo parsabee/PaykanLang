@@ -62,14 +62,18 @@ Status checkInterface(const pkm::Interface &iface);
 
 /// Whether @p code, a module's CODE, defines (in its PIR or compiled) what
 /// the module's interface @p iface says it defines (docs/design/pkm.md §8.4
-/// step 7): each class of the module, with its superclass, its own fields,
-/// the slots of its vtable (none empty) and its constructor, which takes
-/// what its initializer takes; each method of each of its structs; and each
-/// function.  Where the types IFACE gives decide a PIR type by their names
-/// alone (an integer, floating-point, `bool`, `char` or `void` type, `Str`,
-/// `Obj` or a class of the interface, a slice parameter, an `inout`
-/// parameter or result), the fields, functions, methods and slots have
-/// those types in CODE.  The first difference when not.
+/// step 7), and what an importer finds in it by name: each class of the
+/// module, with its superclass, its own fields in their order, the slots of
+/// its vtable, its initializer, its `impl` methods and its constructor,
+/// which takes what its initializer takes; each copy of an instantiation it
+/// holds (a `shared class`), for what it has; each method of each of its
+/// structs; and each function, a native one's too.  The fields, functions,
+/// methods and slots have the PIR types the interface's types give them
+/// (every type an interface names has one: a scalar, a reference's `box`, an
+/// optional's, a value held in memory passed by its address, a slice as its
+/// address and length).  And each slot of each class @p code defines names
+/// the function an importer's subclass inherits for it.  The first
+/// difference when not.
 Status checkCodeMatchesInterface(const pir::Module &code,
                                  const pkm::Interface &iface);
 
