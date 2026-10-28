@@ -1796,9 +1796,8 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   else
     pending.Class =
         cloner.cloneClassDecl(const_cast<ast::ClassDecl *>(classTmpl), name);
-  std::vector<ast::FuncDecl *> methods = pending.Struct
-                                             ? pending.Struct->getMethods()
-                                             : pending.Class->getMethods();
+  std::vector<ast::FuncDecl *> methods =
+      structTmpl ? pending.Struct->getMethods() : pending.Class->getMethods();
   const size_t cloned = methods.size();
   const InstantiationFrame request = frameAt(name, loc);
   InstantiationStack.push_back(request);
