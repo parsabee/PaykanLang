@@ -455,11 +455,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   always 0 (docs/design/pkm.md §3.5, §5.9).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive
   while the result is used (docs/language/03-functions.md, "Where an `inout` result can
-  point"): into `self` (a field of a class's `self`, or a field of a struct or an element
-  of a tuple held in it; a struct's `self` counts as an `inout` parameter), or into what an
-  `inout` parameter names and the object a reference held there refers to (`return n.k;`
-  with `n: inout Node`, `return s.b.k;` with `s: inout S`, `return a[5].k;` with
-  `a: inout B[6]`).  One in a separate object, reached through a field of `self` or past
+  point"): into `self` (a field of a class's `self`, or a field of a struct held in it; a
+  struct's `self` counts as an `inout` parameter), or into what an `inout` parameter
+  names and the object a reference held there refers to (`return n.k;` with `n: inout
+  Node`, `return s.b.k;` with `s: inout S`, `return a[5].k;` with `a: inout B[6]`).
+  One in a separate object, reached through a field of `self` or past
   the object a parameter refers to, wrote to freed memory when another reference replaced
   that field while the result was in use, and is now an error:
   `fn e() -> inout Str => self.c.k;` is `'e' returns an 'inout' reference into 'self.c',
@@ -906,6 +906,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     reference to the None value itself, which never read `None` (`Str(a == None)` printed
     `False`).  With its type written (`weak a: Node? = None;`) it starts as nothing, as
     before (docs/language/16-memory.md, "Weak References").
+  - An `-> inout T` result cannot be an element of a tuple, tuples being immutable:
+    `return self.t.1;`, `return t.0;` with `t: inout (int, int)`, either branch of
+    `return if c then t.0 else t.1;`, and an element of another call's `inout` result
+    (`return self.slot().0;`) are `an element of a tuple cannot be returned 'inout':
+    tuples are immutable`.  The docs said such a result could point into "an element of a
+    tuple", Sema accepted it, and `run`, `build` and `--emit-c` then stopped with
+    `internal compiler error: an 'inout' argument is not a variable or a field`.  A place
+    in another call's `inout` result is now checked as any other: a field of a struct in a
+    tuple there (`return self.slot().0.n;`), and a character of a string
+    (`return self.str()[1];`), are the errors they are elsewhere, where they too were
+    internal errors (docs/language/03-functions.md, "Borrowed results").
 
 ### Removed
 

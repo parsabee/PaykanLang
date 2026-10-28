@@ -383,6 +383,50 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
 }
 
+// A tuple is immutable, so no `inout` result names an element of one: in
+// `self`, in an `inout` parameter (or a struct field of one), in either
+// branch of a conditional, or in another call's `inout` result, where a
+// string's character is no place either.  Each passed Sema and stopped the
+// lowering with an internal error ("an 'inout' argument is not a variable
+// or a field").  A struct field in a tuple element was already an error;
+// an object a tuple element refers to is a separate object.
+TEST(BorrowedResult, InoutResultsAreNoTupleElements) {
+  auto r = semaCheck(R"(struct S { n: int; }
+struct P { t: (int, int); }
+class B {
+  t: (int, int); u: (S, int); s: Str;
+  fn e() -> inout int { return self.t.1; }
+  fn slot() -> inout (int, int) { return self.t; }
+  fn viaSlot() -> inout int { return self.slot().0; }
+  fn sslot() -> inout (S, int) { return self.u; }
+  fn viaSslot() -> inout int { return self.sslot().0.n; }
+  fn str() -> inout Str { return self.s; }
+  fn ch() -> inout char { return self.str()[1]; }
+}
+fn f(t: inout (int, int)) -> inout int { return t.0; }
+fn g(t: inout (int, int), c: bool) -> inout int {
+  return if c then t.0 else t.1;
+}
+fn h(t: inout ((int, int), int)) -> inout (int, int) { return t.0; }
+fn k(p: inout P) -> inout int { return p.t.1; }
+fn whole(t: inout (int, int)) -> inout (int, int) { return t; }
+fn main() -> int { return 0; }
+)");
+  const char *tuple = "error: an element of a tuple cannot be returned "
+                      "'inout': tuples are immutable";
+  for (const char *at :
+       {":5:32:", ":7:38:", ":13:49:", ":15:10:", ":17:63:", ":18:40:"})
+    EXPECT_NE(r.Diagnostics.find(std::string(at) + " " + tuple),
+              std::string::npos)
+        << at << "\n"
+        << r.Diagnostics;
+  expectErrors(r, {":9:39: error: a field of a struct held in a tuple cannot "
+                   "be returned 'inout': tuples are immutable",
+                   ":11:34: error: a character of a string cannot be returned "
+                   "'inout'"});
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+}
+
 // An `inout` result points into storage its caller keeps alive: a class's
 // `self` is the object the caller holds, so a reference reached through one
 // of its fields leads to a separate object, which the caller does not keep
@@ -721,11 +765,12 @@ fn main() -> int {
 // subclass can return a field of its own).  So `self.s.me()`,
 // `self.s.ref()`, `self.w.get()`, `first(self.t)`, `s.ref().k` and
 // `s.me().c.k` stay in what they borrowed, as `self.s.c` and `s.c.k` do: a
-// `C` holds no `S` and no `C`.  Not `self.sv.get()` or `self.sv.px()` (a
-// method of `V` returns a `Str`, or a `P` holding an `int`), `self.sl.ref()`
-// or `s.ref().k` (an `L` holds an `L`), or `deep(n).k` (a `Node` holds a
-// `C`).  A reference followed from a call's result is named by the call and
-// where its result can point.
+// `C` holds no `S` and no `C`.  (`first` itself returns a tuple's element,
+// which is an error of its own: its call is checked by its signature.)  Not
+// `self.sv.get()` or `self.sv.px()` (a method of `V` returns a `Str`, or a `P`
+// holding an `int`), `self.sl.ref()` or `s.ref().k` (an `L` holds an `L`), or
+// `deep(n).k` (a `Node` holds a `C`).  A reference followed from a call's
+// result is named by the call and where its result can point.
 TEST(BorrowedResult, InoutResultsPastWhatACallBorrowedHoldItsType) {
   auto r = semaCheck(R"(class C { k: Str; n: int; }
 struct S { c: C; n: int; }
@@ -801,11 +846,13 @@ fn main() -> int {
            past(":26:47:", "outer<Node>", "deep<Node>", "'n'"),
            std::string(":46:14: note: in instantiation of 'outer<Node>' "
                        "requested here"),
+           std::string(":27:49: error: an element of a tuple cannot be "
+                       "returned 'inout': tuples are immutable"),
        })
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
   EXPECT_FALSE(r.Ok);
-  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
 }
 
 // The rule is checked where the function is defined: an importer of the

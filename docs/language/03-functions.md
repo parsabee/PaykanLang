@@ -670,8 +670,10 @@ Output:
 
 - What it returns is a place an `inout` argument could be: part of `self` (not `self`
   itself) or of an `inout` parameter, not a `view`, a copy or a local, not an array element
-  yet, of exactly the result's type (`an 'inout' result has type 'Animal', but what it
-  returns has type 'Dog'`). A `view fn` cannot return one.
+  yet, not an element of a tuple or a field of a struct held in one (`an element of a tuple
+  cannot be returned 'inout': tuples are immutable`), of exactly the result's type (`an
+  'inout' result has type 'Animal', but what it returns has type 'Dog'`). A `view fn`
+  cannot return one.
 - The caller binds it to an `inout` local, passes it on to an `inout` parameter, calls a
   method on it or reads it (`y = b.num() + 1;` copies). It borrows the receiver and the
   arguments to the call's `inout` parameters, as an `inout` local of them would: while a
@@ -690,9 +692,9 @@ Output:
 An `inout` result can only point into storage its caller keeps alive while the result is
 used:
 
-- Into `self`: a field of a class's `self`, or a field of a struct or an element of a tuple
-  held in it, at any depth (`return self.k;`, `return self.pos.x;`). A struct's `self` is
-  the receiver's storage, as an `inout` parameter's is.
+- Into `self`: a field of a class's `self`, or a field of a struct held in it, at any depth
+  (`return self.k;`, `return self.pos.x;`). A struct's `self` is the receiver's storage, as
+  an `inout` parameter's is.
 - Into what an `inout` parameter names: its storage (`return n;`, `return s.x;`), and the
   object a reference held there refers to: the object of a class-typed one (`return n.k;`
   with `n: inout Node`), or one that a struct, a tuple or a fixed-size array holds

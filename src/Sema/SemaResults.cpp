@@ -175,11 +175,17 @@ std::string Sema::borrowedResultError(const ast::Expr *e) {
               "parameter"
             : "a 'view' result must be part of 'self' or of a 'view' or "
               "'inout' parameter";
-  // A borrow of what a call borrowed: each of those must be ours to lend.
+  // A borrow of what a call borrowed: each of those must be ours to lend,
+  // and the place in the call's `inout` result one an `inout` could name
+  // (not an element of a tuple or a character of a string).
   if (const BorrowResult *r = borrowResultOf(e)) {
     if (inout && r->Mode != ast::ParamMode::Inout)
       return "the result of '" + r->Callee +
              "' is a 'view'; it cannot be returned 'inout'";
+    if (inout)
+      if (std::string why = inoutPlaceError(e, "returned 'inout'");
+          !why.empty())
+        return why;
     for (const ast::Expr *from : r->From) {
       // `self` is not returned when it is the receiver: what the call
       // returns is part of it.

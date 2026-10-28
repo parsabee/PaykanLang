@@ -109,6 +109,11 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
              use;
     e = root = recv;
   }
+  // A tuple's element is no place either, tuples being immutable.  Only an
+  // `inout` result gets here with one: the other uses take a variable, a
+  // field or an element.
+  if (ast::isa<ast::TupleIndexExpr>(place))
+    return "an element of a tuple cannot be " + use + ": tuples are immutable";
   if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(place)) {
     const ast::Type *arr = se->getArray()->getResolvedType();
     return ast::dyn_cast<ast::FixedArrayType>(arr) ||

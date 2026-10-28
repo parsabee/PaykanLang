@@ -4278,3 +4278,35 @@ TEST(Driver, ImportedModulePathsWorkFromTheCurrentDirectory) {
       << missing.out;
   std::filesystem::remove_all(dir);
 }
+
+// An `inout` result that is a tuple's element is Sema's error, on every
+// path that lowers the program: it passed Sema, and each of them stopped at
+// `internal compiler error: an 'inout' argument is not a variable or a
+// field` (`--check-only` accepted it).
+TEST(Driver, AnInoutResultOfATupleElementIsASemaError) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("inout_tuple_result");
+  const auto src = (dir / "prog.pkn").string();
+  std::ofstream(src)
+      << "class B { t: (int, int); fn e() -> inout int { return self.t.1; } }\n"
+         "fn f(t: inout (int, int)) -> inout int { return t.0; }\n"
+         "fn main() -> int { return 0; }\n";
+  const std::string exe = (dir / "prog").string();
+  for (const std::string &mode :
+       {std::string(" --check-only "), std::string(" "),
+        std::string(" --emit-c "), " build -o " + shellWord(exe) + " "}) {
+    auto r = run(paykanRun() + mode + shellWord(src) + " 2>&1 >/dev/null");
+    EXPECT_EQ(r.exitCode, 1) << mode << r.out;
+    EXPECT_EQ(countErrors(r.out), 2u) << mode << r.out;
+    for (const char *at : {"prog.pkn:1:55: error: ", "prog.pkn:2:49: error: "})
+      EXPECT_NE(r.out.find(std::string(at) +
+                           "an element of a tuple cannot be returned 'inout': "
+                           "tuples are immutable"),
+                std::string::npos)
+          << mode << r.out;
+    EXPECT_EQ(r.out.find("internal compiler error"), std::string::npos)
+        << mode << r.out;
+  }
+  EXPECT_FALSE(std::filesystem::exists(exe));
+  std::filesystem::remove_all(dir);
+}
