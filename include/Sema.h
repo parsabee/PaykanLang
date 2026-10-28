@@ -2002,11 +2002,11 @@ private:
   /// other class.
   const InstantiationInfo *instantiationInfo(ast::ClassType *ct);
 
-  /// A template one of whose instantiations is in progress, and how deeply
-  /// that instantiation's name nests its type arguments (argumentNesting).
+  /// A template one of whose instantiations is in progress, and that
+  /// instantiation's name (interned, as its copy of the template has it).
   struct InstantiatingTemplate {
     const ast::Decl *Template;
-    size_t Nesting;
+    const std::string *Name;
   };
   /// Instantiations whose bodies still have to be checked.
   struct PendingInstantiation {

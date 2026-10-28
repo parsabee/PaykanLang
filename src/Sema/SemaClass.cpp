@@ -1679,7 +1679,7 @@ bool Sema::checkGrowingInstantiation(const ast::Decl *tmpl,
   // grown: `Pair<B, A>` inside `Pair<A, B>`, whose own `Pair<B, A>` is the
   // first again.
   if (inner == InstantiatingTemplates.rend() ||
-      argumentNesting(instName) <= inner->Nesting)
+      argumentNesting(instName) <= argumentNesting(*inner->Name))
     return true;
   const std::string shown = displayName(instName);
   if (shown.size() <= kMaxGrowingInstantiationName)
@@ -1922,7 +1922,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
-  const InstantiatingTemplate self{tmpl, argumentNesting(instName)};
+  const InstantiatingTemplate self{tmpl, &clone->getName()};
   InstantiatingTemplates.push_back(self);
   OriginSource inOrigin(*this, origin);
   bool ok = true;
@@ -2156,7 +2156,7 @@ std::string Sema::instantiateFunction(const std::string &name,
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
-  const InstantiatingTemplate self{tmpl, argumentNesting(instName)};
+  const InstantiatingTemplate self{tmpl, &clone->getName()};
   InstantiatingTemplates.push_back(self);
   bool ok;
   {

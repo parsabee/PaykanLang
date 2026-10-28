@@ -1813,7 +1813,9 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   const size_t cloned = methods.size();
   const InstantiationFrame request = frameAt(name, loc);
   InstantiationStack.push_back(request);
-  const InstantiatingTemplate self{tmpl, argumentNesting(name)};
+  const InstantiatingTemplate self{tmpl, structTmpl
+                                             ? &pending.Struct->getName()
+                                             : &pending.Class->getName()};
   InstantiatingTemplates.push_back(self);
   bool ok;
   {

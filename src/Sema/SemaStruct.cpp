@@ -543,7 +543,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
-  const InstantiatingTemplate self{tmpl, argumentNesting(instName)};
+  const InstantiatingTemplate self{tmpl, &clone->getName()};
   InstantiatingTemplates.push_back(self);
   OriginSource inOrigin(*this, origin);
 
@@ -678,7 +678,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
-  InstantiatingTemplates.push_back({tmpl, argumentNesting(instName)});
+  InstantiatingTemplates.push_back({tmpl, &clone->getName()});
   OriginSource inOrigin(*this, origin);
 
   // Cached before the fields are resolved: a field naming this very
