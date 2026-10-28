@@ -5,6 +5,6 @@ class Point {
 }
 
 fn main() -> int {
-  p = Point(1);   // its default __init__ takes x: int, y: int
+  let p = Point(1);   // its default __init__ takes x: int, y: int
   return p.x;
 }

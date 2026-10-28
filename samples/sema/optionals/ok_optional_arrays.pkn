@@ -13,9 +13,9 @@ fn main() -> int {
   xs: Node?[2] = [None, Node(1)];
   xs[0] = Node(2);
   xs[1] = None;
-  e: Node? = xs[0];
-  p: Node? = xs[1];
-  ys: Node?[_] = [None, None];  // the None elements take the declared type
+  let e: Node? = xs[0];
+  let p: Node? = xs[1];
+  let ys: Node?[_] = [None, None];  // the None elements take the declared type
   match xs[0] {
     n: Node {
       io::println(Str<int>(n.v));

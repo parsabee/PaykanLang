@@ -5,9 +5,9 @@ struct F {
   f: (int) -> int;
 }
 fn main() -> int {
-  a = Str(fn(x: int) => x);   // error: 'Str' cannot convert a value of type '(int) -> int', which does not implement trait 'Show'
-  b = Str(F(1, fn(x: int) => x));   // error: 'Str' cannot convert a value of type 'F', which does not implement trait 'Show': its field 'f' has type '(int) -> int', which does not implement it
-  xs: int[3] = [1, 2, 3];
-  c = Str(xs);   // error: 'Str' cannot convert a value of type 'int[3]', which does not implement trait 'Show'
+  let a = Str(fn(x: int) => x);   // error: 'Str' cannot convert a value of type '(int) -> int', which does not implement trait 'Show'
+  let b = Str(F(1, fn(x: int) => x));   // error: 'Str' cannot convert a value of type 'F', which does not implement trait 'Show': its field 'f' has type '(int) -> int', which does not implement it
+  let xs: int[3] = [1, 2, 3];
+  let c = Str(xs);   // error: 'Str' cannot convert a value of type 'int[3]', which does not implement trait 'Show'
   return 0;
 }

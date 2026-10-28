@@ -132,7 +132,7 @@ fn defineConstants(env: hashmap::HashMap) {
 // Evaluate one statement line (an assignment or a bare expression) and print.
 fn evalStatement(src: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
                  quiet: bool) {
-  p: parser::Parser = parser::Parser(src, env);
+  let p: parser::Parser = parser::Parser(src, env);
   target, value = p.parseStatement();
 
   match p.error {
@@ -199,7 +199,7 @@ fn listHistory(history: Ring<(Str, float)>) {
   i: int = 0;
   while i < history.len() {
     entry: view = history.at(i);   // (source, value)
-    value = entry.1;
+    let value = entry.1;
     io::println("  " + Str(i + 1) + ": " + entry.0 + "  => " + show(value));
     i = i + 1;
   }
@@ -274,7 +274,7 @@ fn runCommand(s: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
 // Handle one input line. Returns False only when the user asked to quit.
 fn handle(line: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
           quiet: bool) -> bool {
-  s: Str = utils::stripLine(line);
+  let s: Str = utils::stripLine(line);
   if s.len() == 0 { return True; }
   if s[0] == ':' {
     return runCommand(s, env, history, quiet);
@@ -318,7 +318,7 @@ fn printHelp() {
 // REPL. It covers expressions, assignment, `ans`, the constants, every
 // command and a few errors, and ends with `a` and `b` defined.
 fn demo(env: hashmap::HashMap, history: Ring<(Str, float)>) {
-  script: Str[_] = [ "1 + 2 * 3", "(1 + 2) * 3", "x = 6", "y = x * 7",
+  let script: Str[_] = [ "1 + 2 * 3", "(1 + 2) * 3", "x = 6", "y = x * 7",
       "(x + y) / 4", "ans * 2", "-x + 10 % 4", "2.5 * 2", ":vars", ":history",
       ":del y", "y + 1", ":del y", "1 / 0", "3 +", "4 4", ":frobnicate",
       ":clear", ":vars", "a = 6", "b = a * 7" ];
@@ -382,9 +382,9 @@ fn main(args: view Str[]) -> int {
     i = i + 1;
   }
 
-  env: hashmap::HashMap = hashmap::HashMap();
+  let env: hashmap::HashMap = hashmap::HashMap();
   defineConstants(env);
-  history: Ring<(Str, float)> = Ring<(Str, float)>(("", 0.0));
+  let history: Ring<(Str, float)> = Ring<(Str, float)>(("", 0.0));
   if runDemo { demo(env, history); }
 
   // Batch mode: walk the arguments again and evaluate every expression, in

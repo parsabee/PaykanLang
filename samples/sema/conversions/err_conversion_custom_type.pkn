@@ -4,6 +4,6 @@ impl Point {
   fn __init__() { }
 }
 fn main() -> int {
-  n = int<Point>(Point());   // error: no specialization of 'int' for 'Point'; its specializations are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, char
+  let n = int<Point>(Point());   // error: no specialization of 'int' for 'Point'; its specializations are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, char
   return 0;
 }

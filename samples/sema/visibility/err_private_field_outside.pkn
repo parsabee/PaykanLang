@@ -3,7 +3,7 @@ class Counter {
   __count: int;
 }
 fn main() -> int {
-  c = Counter(0);
+  let c = Counter(0);
   c.__count = 5;                 // error: '__count' is private to 'Counter'
   return c.__count;
 }

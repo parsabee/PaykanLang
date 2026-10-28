@@ -17,9 +17,9 @@ impl Leaf {
 }
 
 fn main() -> int {
-  a: Node? = None;
-  b: Node? = Node(1);
-  l: Leaf? = Leaf(2);
+  let a: Node? = None;
+  let b: Node? = Node(1);
+  let l: Leaf? = Leaf(2);
   if a == None {
     io::println("a is none");
   }
@@ -31,8 +31,8 @@ fn main() -> int {
   }
   io::println(Str<bool>(a == b));
   io::println(Str<bool>(b == l));    // subtype-compatible optionals
-  s: Str? = "x";
-  t: Str? = "x";
+  let s: Str? = "x";
+  let t: Str? = "x";
   io::println(Str<bool>(s == t));
   return 0;
 }

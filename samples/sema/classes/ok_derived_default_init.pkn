@@ -13,6 +13,6 @@ class Derived : Base {
 }
 
 fn main() -> int {
-  d = Derived(1, 2);   // Base's v, then y
+  let d = Derived(1, 2);   // Base's v, then y
   return d.val + d.y;
 }

@@ -41,10 +41,10 @@ fn total(shapes: view Shape[]) -> float {
 }
 
 fn main() -> int {
-  a: Shape = Square("a", 1.0);
-  b: Polygon = Square("b", 2.0);
-  scene = Scene(a, None, [a, b]);
-  box = Box<Shape>(b);
+  let a: Shape = Square("a", 1.0);
+  let b: Polygon = Square("b", 2.0);
+  let scene = Scene(a, None, [a, b]);
+  let box = Box<Shape>(b);
   match scene.extra {
     s: Shape { return 1; }
     None { }

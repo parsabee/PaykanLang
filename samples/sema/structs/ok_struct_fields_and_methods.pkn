@@ -58,11 +58,11 @@ fn main() -> int {
   bump(q.y);
   l = Line(p, q);
   l.a.y = 0;
-  s = Shape(Point::origin());
+  let s = Shape(Point::origin());
   s.at.shift(3);
   ps: Point[2] = [p, q];
   ps[1].x = 9;
-  pair = twice(p);
+  let pair = twice(p);
   io::println(show(l) + " " + Str(p == q) + " " + Str(p.hash()));
   return p.sum() + l.a.x + s.at.moved(1).y + pair.1.x + ps[1].x;
 }

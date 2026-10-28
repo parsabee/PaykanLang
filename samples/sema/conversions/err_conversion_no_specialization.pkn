@@ -5,7 +5,7 @@ impl A {
   fn __init__() { }
 }
 fn main() -> int {
-  a = A();
-  n = int(a);   // error: no specialization of 'int' for 'A'; its specializations are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, char
+  let a = A();
+  let n = int(a);   // error: no specialization of 'int' for 'A'; its specializations are int, float, i8, i16, i32, u8, u16, u32, f16, f32, bool, char
   return 0;
 }

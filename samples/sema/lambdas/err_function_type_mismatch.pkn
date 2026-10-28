@@ -1,7 +1,7 @@
 // ERROR: initializer of type '(view Str) -> int' does not match declared type '(Str) -> int'
 // A parameter's mode is part of the function type.
 fn main() -> int {
-  f: (Str) -> int = fn(s: view Str) -> int {
+  let f: (Str) -> int = fn(s: view Str) -> int {
     return s.len();
   };
   return f("a");

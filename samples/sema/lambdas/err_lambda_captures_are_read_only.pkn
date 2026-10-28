@@ -1,6 +1,6 @@
 // ERROR: cannot assign to 'n': the function captures it by copy, and the copy is read-only (assign it before the function is made, or keep it in an object)
 fn main() -> int {
   n = 1;
-  inc = fn() { n = n + 1; };
+  let inc = fn() { n = n + 1; };
   return n;
 }

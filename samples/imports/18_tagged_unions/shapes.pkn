@@ -34,7 +34,7 @@ fn area(s: Shape) -> int {
 /// template (`n` has no type), instantiated in the importer.
 fn squares(n, side: int) {
   for i in 0..n {
-    s = Shape::Labelled(Str(i), Box(side));
+    let s = Shape::Labelled(Str(i), Box(side));
     io::println(s.toString() + " = " + Str(area(s)));
   }
 }

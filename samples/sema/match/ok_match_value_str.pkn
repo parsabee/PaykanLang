@@ -1,6 +1,6 @@
 // OK: value-mode match on a Str subject with string-literal arms.
 fn main() -> int {
-  s: Str = "World";
+  let s: Str = "World";
   match s {
     "Hello" { }
     "World" { }

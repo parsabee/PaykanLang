@@ -1,6 +1,6 @@
 // ERROR: array index must be int — float is not allowed
 fn main() -> int {
-  a: int[3] = [1, 2, 3];
-  x: int = a[1.0];  // sema error: array index must be 'int', got 'float'
+  let a: int[3] = [1, 2, 3];
+  let x: int = a[1.0];  // sema error: array index must be 'int', got 'float'
   return 0;
 }

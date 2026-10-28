@@ -8,8 +8,8 @@ impl Node {
 }
 
 fn main() -> int {
-  a: Node? = None;
-  n: Node = Node(1);
+  let a: Node? = None;
+  let n: Node = Node(1);
   if a == n { return 1; }   // error: cannot compare optional 'Node?' with non-optional 'Node'
   return 0;
 }

@@ -3,6 +3,6 @@ fn peek(s: view Str) -> view Str {
   return s;
 }
 fn main() -> int {
-  p = peek;
+  let p = peek;
   return 0;
 }

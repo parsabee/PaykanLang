@@ -2,6 +2,6 @@
 // (int -> float promotion does not apply inside tuple elements: each element
 // is laid out with its own type, and no conversion is emitted).
 fn main() -> int {
-  t: (float, int) = (1, 2);
+  let t: (float, int) = (1, 2);
   return 0;
 }

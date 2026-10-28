@@ -35,7 +35,7 @@ class Circle : shapes::Shape {
 }
 
 fn main() -> int {
-  all: shapes::Shape[3] =
+  let all: shapes::Shape[3] =
       [shapes::Square("a", 2.0), Triangle("b", 3.0, 4.0), Circle("c", 1.0)];
   i = 0;
   while i < all.len() {

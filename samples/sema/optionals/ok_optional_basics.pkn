@@ -20,19 +20,19 @@ fn pass(n: Node?) -> Node? {
 
 fn main() -> int {
   a: Node? = None;
-  b: Node? = Node(1);
-  n: Node = Node(2);
-  c: Node? = n;                // Node widens to Node?
+  let b: Node? = Node(1);
+  let n: Node = Node(2);
+  let c: Node? = n;            // Node widens to Node?
   a = b;
   a = None;
   s: Str? = "text";
   s = None;
-  d: Node? = wrap(n);
-  e: Node? = pass(None);
-  f = pass(Node(3));           // inferred Node?
+  let d: Node? = wrap(n);
+  let e: Node? = pass(None);
+  let f = pass(Node(3));       // inferred Node?
   match f {
     // an optional is not an Obj: unwrap it
-    x: Node { o: Obj = x; }
+    x: Node { let o: Obj = x; }
     None { }
   }
   io::println(f);                  // print takes an optional: None or the value

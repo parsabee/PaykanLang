@@ -9,7 +9,7 @@ impl Node {
 }
 
 fn main() -> int {
-  o: Obj = Node(1);
-  n: Node? = o;   // error: initializer of type 'Obj' does not match declared type 'Node?'
+  let o: Obj = Node(1);
+  let n: Node? = o;   // error: initializer of type 'Obj' does not match declared type 'Node?'
   return 0;
 }

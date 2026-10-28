@@ -1,24 +1,24 @@
 // The inferred form `Target(value)` picks the specialization whose source is
 // exactly the argument's type; the result types match the explicit form.
 fn main() -> int {
-  i: int = 1;
-  f: float = 1.5;
-  b: bool = True;
-  c: char = 'c';
-  s: Str = "12";
-  s1: Str = Str(i);             // Str<int>
-  s2: Str = Str(f);             // Str<float>
-  s3: Str = Str(b) + Str(c);    // Str<bool>, Str<char>
-  s4: Str = Str(s);             // not a conversion: the Str constructor
-  p1: int? = s.toInt();         // not a conversion: Str's parses
-  p2: float? = s.toFloat();
-  p3: bool? = s.toBool();
-  n1: int = int(f);             // int<float>
-  n2: float = float(i);         // float<int>
-  n3: bool = bool(i);           // bool<int>
-  n4: char = char(i);           // char<int>
+  let i: int = 1;
+  let f: float = 1.5;
+  let b: bool = True;
+  let c: char = 'c';
+  let s: Str = "12";
+  let s1: Str = Str(i);         // Str<int>
+  let s2: Str = Str(f);         // Str<float>
+  let s3: Str = Str(b) + Str(c);    // Str<bool>, Str<char>
+  let s4: Str = Str(s);         // not a conversion: the Str constructor
+  let p1: int? = s.toInt();     // not a conversion: Str's parses
+  let p2: float? = s.toFloat();
+  let p3: bool? = s.toBool();
+  let n1: int = int(f);         // int<float>
+  let n2: float = float(i);     // float<int>
+  let n3: bool = bool(i);       // bool<int>
+  let n4: char = char(i);       // char<int>
   match p2 {
-    x: float { t: Str = Str(x); }
+    x: float { let t: Str = Str(x); }
     None { }
   }  // Str<float>
   return 0;

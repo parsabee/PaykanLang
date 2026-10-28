@@ -10,6 +10,6 @@ fn main() -> int {
   name: Str, _ = ("seven", 7);
   _, rest = (1, 2.5);
   q, r = divmod(9, 4);      // re-assigns the existing q and r
-  total: float = q + r + rest;
+  let total: float = q + r + rest;
   return q + name.len();
 }

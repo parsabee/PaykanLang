@@ -3,7 +3,7 @@
 import lib;
 
 fn main() -> int {
-  x: int = lib::add(10, 3);
-  y: int = lib::sub(10, 3);
+  let x: int = lib::add(10, 3);
+  let y: int = lib::sub(10, 3);
   return x + y;  // 13 + 7 = 20
 }

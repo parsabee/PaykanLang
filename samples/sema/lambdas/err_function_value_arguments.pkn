@@ -1,5 +1,5 @@
 // ERROR: 'f' has type '(int) -> int': it takes 1 argument(s), got 2
 fn main() -> int {
-  f = fn(x: int) -> int { return x; };
+  let f = fn(x: int) -> int { return x; };
   return f(1, 2);
 }

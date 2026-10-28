@@ -4,6 +4,6 @@ struct A {
   x: int;
 }
 fn main() -> int {
-  o: Obj = A(1);
+  let o: Obj = A(1);
   return 0;
 }

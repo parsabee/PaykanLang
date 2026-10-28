@@ -1,5 +1,5 @@
 // OK: bool[3] declared and initialised
 fn main() -> int {
-  flags: bool[3] = [True, False, True];
+  let flags: bool[3] = [True, False, True];
   return 0;
 }

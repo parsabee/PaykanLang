@@ -3,7 +3,7 @@
 enum Color { Red, Green, Blue, }
 
 fn main() -> int {
-  c: Color = Color::Green;
+  let c: Color = Color::Green;
 
   if c == Color::Green { }
   if c != Color::Red { }

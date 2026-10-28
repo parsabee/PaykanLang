@@ -13,6 +13,6 @@ struct Nine {
 }
 
 fn main() -> int {
-  n: Nine? = None;
+  let n: Nine? = None;
   return 0;
 }

@@ -23,17 +23,17 @@ fn wrap<T>(x: T) -> box::Box<T> {
 }
 
 fn main() -> int {
-  a = box::Box<int>(5);           // explicit type argument
-  b = box::Box("five");           // inferred: Box<Str>
-  c: box::Box<int> = counter::start();
+  let a = box::Box<int>(5);       // explicit type argument
+  let b = box::Box("five");       // inferred: Box<Str>
+  let c: box::Box<int> = counter::start();
   c.set(c.get() + a.get() + box::one().get());
   io::println(Str(c.get()) + " " + b.get() + " " + a.tag());
 
-  p = box::swap(counter::named()); // Pair<int, Str>
+  let p = box::swap(counter::named()); // Pair<int, Str>
   io::println(Str(p.a) + " " + p.b);
 
-  h = Holder<int>(2);
-  w: containers::box::Box<int> = wrap(1);
+  let h = Holder<int>(2);
+  let w: containers::box::Box<int> = wrap(1);
   io::println(Str(h.peek()) + " " + Str(w.get()));
   return 0;
 }

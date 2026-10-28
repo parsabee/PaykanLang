@@ -6,7 +6,7 @@ class Dog : Animal {}
 class Labrador : Dog {}
 
 fn main() -> int {
-  a: Animal = Labrador();
+  let a: Animal = Labrador();
   match a {
     Labrador {
       io::println("labrador");

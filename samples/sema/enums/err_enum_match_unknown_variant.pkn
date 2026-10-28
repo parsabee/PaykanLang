@@ -3,7 +3,7 @@
 enum Color { Red, Green }
 
 fn main() -> int {
-  c: Color = Color::Red;
+  let c: Color = Color::Red;
   match c {
     Red { }
     Green { }

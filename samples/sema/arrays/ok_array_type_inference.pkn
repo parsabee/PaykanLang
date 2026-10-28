@@ -1,7 +1,7 @@
 // OK: element type and length are inferred from the literal — no annotation needed
 fn main() -> int {
-  ints = [1, 2, 3];       // inferred int[3]
-  floats = [1.0, 2.0, 3.0]; // inferred float[3]
-  bools = [True, False];   // inferred bool[2]
+  let ints = [1, 2, 3];   // inferred int[3]
+  let floats = [1.0, 2.0, 3.0]; // inferred float[3]
+  let bools = [True, False];   // inferred bool[2]
   return 0;
 }

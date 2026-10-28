@@ -7,10 +7,10 @@ import lib::nothere;
 class Shape : nothere::Base { }
 
 fn main() -> int {
-  n: int = nothere::f(1);
-  t: nothere::T = nothere::T();
-  c: nothere::Color = nothere::Color::Red;
-  s: Shape = Shape();
+  let n: int = nothere::f(1);
+  let t: nothere::T = nothere::T();
+  let c: nothere::Color = nothere::Color::Red;
+  let s: Shape = Shape();
   io::println(Str(n + lib::nothere::g(t, c, s)));
   return 0;
 }

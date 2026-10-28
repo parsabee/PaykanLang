@@ -4,6 +4,6 @@ struct Node<T> {
   next: Node<T>;
 }
 fn main() -> int {
-  n = Node<int>(1, n);
+  let n = Node<int>(1, n);
   return 0;
 }

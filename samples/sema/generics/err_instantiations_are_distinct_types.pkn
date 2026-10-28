@@ -8,6 +8,6 @@ impl Box<T> {
 }
 
 fn main() -> int {
-  a: Box<int> = Box<Str>("x");
+  let a: Box<int> = Box<Str>("x");
   return 0;
 }

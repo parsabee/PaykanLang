@@ -4,7 +4,7 @@ fn makeInts() -> int[3] {
 }
 
 fn main() -> int {
-  a: int[3] = makeInts();
-  n: int = a.len();
+  let a: int[3] = makeInts();
+  let n: int = a.len();
   return 0;
 }

@@ -13,24 +13,24 @@ fn clamp(v: i32, lo: i32, hi: i32) -> i32 {
   return v;
 }
 fn main() -> int {
-  a: u8 = 255;                     // the literal is a u8
-  b: u8 = a + 1;                   // u8 + u8 (the literal adapts)
-  c: i8 = -128;
-  d: unsigned = 7;
-  e: u64 = d;                      // u64 is unsigned
-  f: i64 = int(u32(e));            // i64 is int; u32 widens into it
-  g: f32 = 1.5;
-  h: f16 = g16(1);
-  i = clamp(300, 0, 255);          // the literals are i32 arguments
-  j: i32? = 5;
-  k: u8 = u8(300);                 // 44: the low bits
-  l: int = int(c) + 1;
-  m: f64 = float(g);               // f64 is float
-  n: unsigned? = "18446744073709551615".toUnsigned();
-  o = Str(a) + a.toString() + Str(g) + Str(e);
-  p = a.hash() + e.hash();
-  px = Pixel(1, 2, 3, 0.5);
-  q: bool = px.r < 200 && px.a > 0.25;
+  let a: u8 = 255;                 // the literal is a u8
+  let b: u8 = a + 1;               // u8 + u8 (the literal adapts)
+  let c: i8 = -128;
+  let d: unsigned = 7;
+  let e: u64 = d;                  // u64 is unsigned
+  let f: i64 = int(u32(e));        // i64 is int; u32 widens into it
+  let g: f32 = 1.5;
+  let h: f16 = g16(1);
+  let i = clamp(300, 0, 255);      // the literals are i32 arguments
+  let j: i32? = 5;
+  let k: u8 = u8(300);             // 44: the low bits
+  let l: int = int(c) + 1;
+  let m: f64 = float(g);           // f64 is float
+  let n: unsigned? = "18446744073709551615".toUnsigned();
+  let o = Str(a) + a.toString() + Str(g) + Str(e);
+  let p = a.hash() + e.hash();
+  let px = Pixel(1, 2, 3, 0.5);
+  let q: bool = px.r < 200 && px.a > 0.25;
   match a { 255 { } _ { } }
   let r: u8 = a & ~0x0F;           // the bitwise operators: unsigned only
   let s: u8 = a << d;              // a count of any unsigned type

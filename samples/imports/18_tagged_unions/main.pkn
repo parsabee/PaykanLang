@@ -9,7 +9,7 @@ import ::io;
 import shapes;
 
 fn main() -> int {
-  all = [shapes::Shape::Rect(2, 3), shapes::Shape::Circle(1.0),
+  let all = [shapes::Shape::Rect(2, 3), shapes::Shape::Circle(1.0),
       shapes::Shape::Empty];
   for i in 0..3 {
     io::print(all[i].toString() + " " + Str(shapes::area(all[i])) + " ");

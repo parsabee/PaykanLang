@@ -3,7 +3,7 @@ class Dog {}
 class Cat {}
 
 fn main() -> int {
-  x: Obj = Dog();
+  let x: Obj = Dog();
   match x { Dog { } Cat { } _ { } }
   return 0;
 }

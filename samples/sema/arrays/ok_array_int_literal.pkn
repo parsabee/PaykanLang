@@ -1,5 +1,5 @@
 // OK: int[3] declared and initialised with a literal
 fn main() -> int {
-  a: int[3] = [1, 2, 3];
+  let a: int[3] = [1, 2, 3];
   return 0;
 }

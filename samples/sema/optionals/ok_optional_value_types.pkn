@@ -16,9 +16,9 @@ fn find(k: int) -> (int, Str)? {
 }
 
 fn main() -> int {
-  c: Color? = Color::Green;
-  p: Point? = Point(1, 2);
-  t = find(1);
+  let c: Color? = Color::Green;
+  let p: Point? = Point(1, 2);
+  let t = find(1);
   match c {
     k: Color { io::println(k == Color::Green); }
     None { io::println("no color"); }

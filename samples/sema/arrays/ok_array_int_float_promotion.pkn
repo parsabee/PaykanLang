@@ -1,5 +1,5 @@
 // OK: mixed int/float literal is promoted to float[3]
 fn main() -> int {
-  a = [1, 2.0, 3];  // inferred float[3]
+  let a = [1, 2.0, 3];  // inferred float[3]
   return 0;
 }

@@ -18,7 +18,7 @@ fn tag() -> Str {
 
 fn main() -> int {
   io::println(util::tag() + " " + bu::tag() + " " + cm::tag());
-  k: util::Counter = util::Counter(5);
+  let k: util::Counter = util::Counter(5);
   io::println(bu::twice(b::util::tag()) + " " + Str<int>(k.next()));
   io::println(tag());
   return 0;

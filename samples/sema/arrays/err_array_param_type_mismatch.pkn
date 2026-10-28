@@ -4,7 +4,7 @@ fn process(words: view Str[]) -> int {
 }
 
 fn main() -> int {
-  nums: int[3] = [1, 2, 3];
+  let nums: int[3] = [1, 2, 3];
   process(nums);  // sema error: argument type 'int[3]' does not match 'Str[]'
   return 0;
 }

@@ -90,7 +90,7 @@ fn main() -> int {
   io::println(Str(a.len()) + " " + Str(b.len()) + " " + Str(h(m2::mkBox()))
       + " " + m2::mkBox().name());
 
-  slots = Slots();
+  let slots = Slots();
   a0 = 0;
   match slots.m {
     j: Just { a0 = j.v.a; }

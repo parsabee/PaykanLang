@@ -50,7 +50,7 @@ impl Entry {
 // any character outside it. Distinct identifier characters get distinct codes,
 // which is all the hash needs.
 fn charOrd(c: char) -> int {
-  alpha: Str =
+  let alpha: Str =
       "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
   i: int = 0;
   while i < alpha.len() {
@@ -103,7 +103,7 @@ class HashMap {
         return False;
       }
       None {
-        b: int = self.indexFor(key);
+        let b: int = self.indexFor(key);
         match self.buckets[b] {
           first: Entry {
             first.append(Entry(key, value));
@@ -125,7 +125,7 @@ class HashMap {
 
   // Delete a key. Returns True if it was present.
   fn remove(key: Str) -> bool {
-    b: int = self.indexFor(key);
+    let b: int = self.indexFor(key);
     match self.buckets[b] {
       first: Entry {
         if first.key.equals(key) {

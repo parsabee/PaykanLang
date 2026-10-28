@@ -4,7 +4,7 @@ fn sum(nums: view int[]) -> int {
 }
 
 fn main() -> int {
-  a: int[3] = [1, 2, 3];
+  let a: int[3] = [1, 2, 3];
   sum(a);
   return 0;
 }

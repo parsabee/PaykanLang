@@ -4,6 +4,6 @@ struct Same<T> {
   b: T;
 }
 fn main() -> int {
-  s = Same(1, "a");
+  let s = Same(1, "a");
   return 0;
 }

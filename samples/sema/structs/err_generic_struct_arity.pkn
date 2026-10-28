@@ -4,6 +4,6 @@ struct Pair<A, B> {
   b: B;
 }
 fn main() -> int {
-  p: Pair<int> = Pair<int>(1);
+  let p: Pair<int> = Pair<int>(1);
   return 0;
 }

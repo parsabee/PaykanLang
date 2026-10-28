@@ -23,7 +23,7 @@ class Triangle : shapes::base::Shape {
 }
 
 fn main() -> int {
-  c: Shape = Circle();
-  t: Shape = Triangle();
+  let c: Shape = Circle();
+  let t: Shape = Triangle();
   return c.area() + t.area();  // 1 + 3 = 4
 }

@@ -3,6 +3,6 @@ class Point {
   x: int;
 }
 fn main() -> int {
-  mk = Point;
+  let mk = Point;
   return 0;
 }
