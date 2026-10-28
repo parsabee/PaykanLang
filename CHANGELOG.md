@@ -1249,6 +1249,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     formed a cycle that leaked it (2 blocks, 56 bytes), on every path.  Every lambda
     inside now captures it weakly too, however deeply nested, and it stays read-only there
     as any capture is (docs/language/16-memory.md, "Weak References").
+  - The docs did not say how an `f32` or `f16` literal meets the ends of its type.  They
+    now do (docs/language/02-basics.md, "Sized numeric types" and "Literals";
+    docs/design/sized-types.md): one that rounds to infinity is an error, the midpoint
+    above the largest value included (`3.4028235677973366e38` for `f32`, an error since the
+    conversions redesign, and `65520` for `f16`), and one below the type's range is 0 or a
+    subnormal of its sign, with no error (`h: f16 = 1e-9;` is `0`), where a `float`
+    literal that rounds to zero (`1e-400`) is one.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

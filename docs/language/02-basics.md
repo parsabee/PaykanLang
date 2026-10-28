@@ -410,7 +410,11 @@ Output:
   not (`the literal 256 does not fit in 'u8' (0 to 255)`).  A float literal (or an integer
   literal) flowing into an `f32` or `f16` slot is that float: an integer literal rounded to
   the type once, as `f32(n)` is, and a float literal as its text is (see [Parsing a
-  string](04-strings-and-conversions.md#parsing-a-string)).  Only a literal adapts: `100 +
+  string](04-strings-and-conversions.md#parsing-a-string)).  One that rounds to infinity in
+  the type is an error (`the literal 1e+39 does not fit in 'f32'`), the midpoint above the
+  largest value included (`3.4028235677973366e38` for `f32`, `65520` for `f16`, which round
+  to even, to infinity); one below the type's range is 0 or a subnormal of its sign, and no
+  error (`h: f16 = 1e-9;` is `0`, `t: f32 = -1e-50;` is `-0`).  Only a literal adapts: `100 +
   100` is an `int` expression, so `q: i8 = 100 + 100;` is an error.  Without a context an
   integer literal is an `int` and a float literal a `float`.
 - **`f16` and `f32` arithmetic** is computed in `float` precision and rounded to the type
@@ -635,7 +639,10 @@ and `-9223372036854775808` is the most negative `int` ([Match](08-match.md#match
 A float literal must name a finite `float`. One too large (`1e999` would be infinity) or too
 small (`1e-400`: not zero, but rounds to zero) is a compile-time error. Subnormal values
 such as `5e-324` are fine, as is zero written with any exponent (`0e-999`). Infinities and
-NaN are computed, not written: `1.0e308 * 10.0`, `0.0 * (1.0e308 * 10.0)`.
+NaN are computed, not written: `1.0e308 * 10.0`, `0.0 * (1.0e308 * 10.0)`. In an `f32` or
+`f16` slot the literal is then rounded to that type: one that rounds to infinity there is an
+error, and one below its range is 0 or a subnormal, without one ([Sized numeric
+types](#sized-numeric-types)).
 
 ### Arithmetic
 

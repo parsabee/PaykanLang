@@ -122,6 +122,24 @@ TEST(SizedTypes, AnF32LiteralFitsBelowTheOverflowMidpoint) {
               "the literal -3.40282e+38 does not fit in 'f32'");
   expectOk(inMain("a: f32 = 3.4028235e38; b: f32 = -3.4028235e38;"));
   expectOk(inMain("a: f32 = 3.4028235677973362e38;"));
+  expectOk(inMain("a: f32 = -3.4028235677973362e38;"));
+}
+
+// So is an f16's, 65520 (65504 plus half an ulp); below it, 65504.
+TEST(SizedTypes, AnF16LiteralFitsBelowTheOverflowMidpoint) {
+  expectError(inMain("a: f16 = 65520.0;"),
+              "the literal 65520 does not fit in 'f16'");
+  expectError(inMain("a: f16 = -65520;"),
+              "the literal -65520 does not fit in 'f16'");
+  expectOk(inMain("a: f16 = 65519.99; b: f16 = -65519.99;"));
+}
+
+// A literal below the type's range is not an error: it is 0 or a subnormal
+// of the type, of its sign, as its parse is (a `float` literal that rounds
+// to zero, `1e-400`, is the lexer's error).
+TEST(SizedTypes, ANarrowFloatLiteralBelowTheRangeIsZero) {
+  expectOk(inMain("a: f16 = 1e-9; b: f32 = 1e-50; c: f32 = -1e-50; "
+                  "d: f32 = 1e-45; e: f16 = 0.00000006;"));
 }
 
 TEST(SizedTypes, OnlyALiteralAdapts) {

@@ -207,6 +207,29 @@ TEST(SizedTypes, SizedFloatParseOverflowIsNone) {
   g.expectNoLeaks("SizedTypes.SizedFloatParseOverflowIsNone");
 }
 
+// A literal just below the overflow midpoint is the type's largest value;
+// one below the type's range is 0 or a subnormal, of its sign, as its parse
+// is.  Neither is an error.
+TEST(SizedTypes, NarrowFloatLiteralsRoundIntoTheRange) {
+  LeakGuard g;
+  auto r = compileAndRun(wrapMain(R"(
+    let big: f32 = 3.4028235677973362e38;
+    let low: f32 = -3.4028235677973362e38;
+    let half: f16 = 65519.99;
+    io::println(Str(big) + " " + Str(low) + " " + Str(half));
+    let a: f16 = 1e-9;
+    let b: f32 = 1e-50;
+    let c: f32 = -1e-50;
+    let d: f32 = 1e-45;
+    let e: f16 = 0.00000006;
+    io::println(Str(a) + " " + Str(b) + " " + Str(c) + " " + Str(d) + " " + Str(e));
+  )"));
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "3.40282e+38 -3.40282e+38 65504\n"
+                      "0 0 -0 1.4013e-45 5.96046e-08\n");
+  g.expectNoLeaks("SizedTypes.NarrowFloatLiteralsRoundIntoTheRange");
+}
+
 TEST(SizedTypes, HashingAndEquality) {
   LeakGuard g;
   auto r = compileAndRun(wrapMain(R"(
