@@ -406,8 +406,8 @@ TEST(FileRoundTrip, WriteAndReadBack) {
     PaykanObject *l2 = strObj("second line\n");
     PaykanFile_write(fObj, l1);
     PaykanFile_write(fObj, l2);
-    PaykanString_destroy(l1);
-    PaykanString_destroy(l2);
+    Paykan_dispose(l1);
+    Paykan_dispose(l2);
 
     Paykan_release(fShared);
     Paykan_dispose((PaykanObject *)pathStr);

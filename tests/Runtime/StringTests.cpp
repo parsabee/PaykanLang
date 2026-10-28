@@ -272,7 +272,9 @@ TEST(StringVtable, LengthViaVtable) {
 TEST(StringVtable, DestroyViaVtable) {
   PaykanString *s = PaykanString_new("bye", 3);
   vtDestroy(s)((PaykanObject *)s);
-  // Should not crash.
+  // Should not crash.  The destroy frees what the string holds; the object
+  // itself is freed after it, as Paykan_release frees one.
+  Paykan_free(s);
 }
 
 // -- PaykanString_at

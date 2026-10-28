@@ -100,9 +100,11 @@ TEST(ObjectVtable, EqualsViaVtable) {
 }
 
 TEST(ObjectVtable, DestroyViaVtable) {
-  // Should not crash.
+  // Should not crash.  The object is freed after its destroy, as
+  // Paykan_release frees one.
   PaykanObject *obj = PaykanObject_new();
   vtDestroy(obj)(obj);
+  Paykan_free(obj);
 }
 
 // -- PaykanObject_None singleton

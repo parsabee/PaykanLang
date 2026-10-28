@@ -1600,6 +1600,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     binary32 (`FLT_MANT_DIG == 24`, `FLT_MAX_EXP == 128`, `FLT_MIN_EXP == -125`), so a
     target whose `float` is another format fails to compile instead of rounding `f32`
     values wrongly (docs/c-backend.md, "Target assumptions"). Every supported target's is.
+  - The runtime's unit tests leaked: the helpers of `NumericTests` and a round trip of
+    `FileTests` freed each string's bytes with `PaykanString_destroy` and never the string,
+    and the two `DestroyViaVtable` cases never freed their object, 20,106 blocks (965,072
+    bytes) in all under macOS's `leaks --atExit` (LeakSanitizer on Linux failed
+    `RuntimeTests` with them). They free each string with `Paykan_dispose`, and an object
+    whose destroy they call through its vtable with `Paykan_free` after it, as
+    `Paykan_release` does: `leaks` finds none.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

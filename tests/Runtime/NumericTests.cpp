@@ -22,7 +22,7 @@ namespace {
 std::string fromUint(int64_t bits) {
   PaykanString *s = PaykanString_from_uint(bits);
   std::string text(s->data, static_cast<size_t>(s->len));
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
   return text;
 }
 
@@ -32,7 +32,7 @@ std::pair<int64_t, int64_t> parseUint(const std::string &text) {
       PaykanString_new(text.data(), static_cast<int64_t>(text.size()));
   int64_t out = -1;
   int64_t ok = PaykanString_parse_uint((PaykanObject *)s, &out);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
   return {ok, out};
 }
 
@@ -45,7 +45,7 @@ std::pair<int64_t, double> parseFloatWith(int64_t (*parse)(PaykanObject *,
       PaykanString_new(text.data(), static_cast<int64_t>(text.size()));
   double out = -1.0;
   int64_t ok = parse((PaykanObject *)s, &out);
-  PaykanString_destroy((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)s);
   return {ok, out};
 }
 
