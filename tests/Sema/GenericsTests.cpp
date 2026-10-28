@@ -545,6 +545,97 @@ TEST(Generics, InstantiationDepthGuard) {
       << r.Diagnostics;
 }
 
+// Ten templates each instantiating the next with a tuple of three of its
+// argument end with an argument of 3^10 ints: each level resolved the
+// arguments it was given again, element by element, and built each
+// element's diagnostic context, and the chain took 26 s (SW-04).  No
+// template instantiates itself there, so it is accepted, however long the
+// names.  A template that does, with an ever-growing argument, stops once
+// the name passes 4,096 characters: at arity 3 that took 28 minutes, at
+// arity 2 the depth limit came first, with 900 KB of names in its notes.
+TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
+  std::string chain;
+  for (int k = 0; k < 10; ++k)
+    chain += "class L" + std::to_string(k) + "<T> { v: T; n: L" +
+             std::to_string(k + 1) + "<(T, T, T)>?; }\n";
+  auto r = semaCheck(
+      chain + "class L10<T> { v: T; }\n"
+              "fn main() -> int { let c = L0<int>(1, None); return c.v; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  // Instantiating itself with the same long argument is no growth.
+  std::string ints = "int";
+  for (int i = 0; i < 1100; ++i)
+    ints += ", int";
+  r = semaCheck("class Node<T> { v: T; next: Node<T>?; }\n"
+                "fn main() -> int { let n: Node<(" +
+                ints + ")>? = None; return 0; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  const std::string limit =
+      "' exceeds the maximum instantiation name length (4096 characters; "
+      "this one has ";
+  struct Case {
+    std::string Src;
+    std::string Error;
+  };
+  const std::vector<Case> cases = {
+      {"class C<T> { v: T; n: C<(T, T)>?; }\n"
+       "fn main() -> int { let s = C<int>(1, None); return 0; }\n",
+       "1:20: error: instantiating 'C<((((((((((int, int), (int, int)), ((int, "
+       "int), (int, int))...' inside an instantiation of 'C" +
+           limit +
+           "7167); a generic class may not instantiate itself with an "
+           "ever-growing type argument"},
+      {"class C<T> { v: T; n: C<(T, T, T)>?; }\n"
+       "fn main() -> int { let s = C<int>(1, None); return 0; }\n",
+       "1:20: error: instantiating 'C<((((((int, int, int), (int, int, int), "
+       "(int, int, int)), (...' inside an instantiation of 'C" +
+           limit + "4374); a generic class"},
+      // Through another template, and through a method body.
+      {"class A<T> { v: T; n: B<(T, T, T)>?; }\n"
+       "class B<T> { v: T; n: A<(T, T, T)>?; }\n"
+       "fn main() -> int { let a = A<int>(1, None); return 0; }\n",
+       "2:20: error: instantiating 'A<((((((int, int, int), (int, int, int), "
+       "(int, int, int)), (...' inside an instantiation of 'A" +
+           limit + "4374); a generic class"},
+      {"class C<T> {\n  v: T;\n  fn grow() -> int {\n"
+       "    let d = C<(T, T, T)>((self.v, self.v, self.v));\n"
+       "    return d.grow();\n  }\n}\n"
+       "fn main() -> int { let c = C<int>(1); return c.grow(); }\n",
+       "4:13: error: instantiating 'C<((((((int, int, int), (int, int, int), "
+       "(int, int, int)), (...' inside an instantiation of 'C" +
+           limit + "4374); a generic class"},
+      {"import ::memory as mem;\n"
+       "struct S<T> { v: T; n: mem::Box<S<(T, T, T)>>?; }\n"
+       "fn main() -> int { let s = S<int>(1, None); return 0; }\n",
+       "' inside an instantiation of 'S" + limit +
+           "4374); a generic struct may not"},
+      {"import ::memory as mem;\n"
+       "enum E<T> { Leaf(v: T), Node(n: mem::Box<E<(T, T, T)>>) }\n"
+       "fn main() -> int { let e = E<int>::Leaf(1); return 0; }\n",
+       "' inside an instantiation of 'E" + limit +
+           "4374); a generic enum may not"},
+      {"fn grow<T>(x: T, n: int) -> int {\n"
+       "  if n == 0 {\n    return 0;\n  }\n"
+       "  return grow((x, x, x), n - 1);\n}\n"
+       "fn main() -> int { return grow(1, 3); }\n",
+       "5:10: error: instantiating 'grow<((((((int, int, int), (int, int, "
+       "int), (int, int, int))...' inside an instantiation of 'grow" +
+           limit + "4377); a generic function may not"},
+  };
+  for (const Case &c : cases) {
+    r = semaCheck(c.Src);
+    EXPECT_FALSE(r.Ok) << c.Src;
+    EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+    EXPECT_TRUE(has(r.Diagnostics, c.Error)) << r.Diagnostics;
+    EXPECT_FALSE(has(r.Diagnostics, "maximum instantiation depth"))
+        << r.Diagnostics;
+    // The notes name the instantiations on the way, each under the limit.
+    EXPECT_LT(r.Diagnostics.size(), 20000u) << r.Diagnostics;
+  }
+}
+
 TEST(Generics, WrongConstructorArgumentNamesInstantiation) {
   auto r = semaCheck(withMain(kBox, "b: Box<int> = Box<int>(\"s\");"));
   EXPECT_FALSE(r.Ok);

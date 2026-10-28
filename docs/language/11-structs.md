@@ -593,7 +593,8 @@ of 'Box<Str>' requested here`), instantiations are cached by their canonical nam
 Str>` is one struct wherever it is used), each instantiation is a distinct nominal type
 (`Pair<int, Str>` is not `Pair<Str, int>`), a template name is global with the other type
 names (`'Pair' is already declared as a generic struct`), and the instantiation depth is
-bounded.  `toString` renders the instantiation's name.  An instantiation of another
+bounded, as is the name of an instantiation made inside one of its own template
+([Generics](13-generics.md#how-errors-are-reported)).  `toString` renders the instantiation's name.  An instantiation of another
 module's generic struct (`gen::Pair<int, Str>`, `gen::Pair(1, "a")`) is made in the
 importer as for a generic class, and is one struct whoever makes it; a module's `.pkm`
 holds its generic structs for its importers to instantiate, as it does its generic classes

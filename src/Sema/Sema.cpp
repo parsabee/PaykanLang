@@ -700,12 +700,38 @@ std::string Sema::letValueRoot(const ast::Expr *e) {
   }
 }
 
+Sema::TypeContext::TypeContext(const TypeContext *parent,
+                               std::initializer_list<std::string_view> pieces)
+    : Parent(parent), NumPieces(pieces.size()) {
+  assert(NumPieces <= kMaxPieces && "a TypeContext holds kMaxPieces pieces");
+  std::copy(pieces.begin(), pieces.end(), Pieces.begin());
+}
+
+std::string Sema::TypeContext::str() const {
+  std::string s = Parent ? Parent->str() : Text;
+  for (size_t i = 0; i < NumPieces; ++i)
+    s += Pieces[i];
+  return s;
+}
+
 ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
-                             const std::string &context) {
+                             const TypeContext &context) {
   const bool allowFixed = std::exchange(FixedArrayAllowed, false);
   const bool allowInferred = std::exchange(InferredLengthAllowed, false);
   const bool allowSlice = std::exchange(SliceAllowed, false);
   const char *noArray = std::exchange(NoArrayHolder, nullptr);
+  // Made here before, and checked then (ResolvedTypes).
+  if (ResolvedTypes.count(ty))
+    return ty;
+  // The canonical tuple, optional or function type made of what this
+  // resolved, remembered as checked unless a check of a part waits for the
+  // structs (it is made again then).
+  const size_t deferredChecks = DeferredOptionalChecks.size();
+  auto checked = [&](ast::Type *canonical) {
+    if (DeferredOptionalChecks.size() == deferredChecks)
+      ResolvedTypes.insert(canonical);
+    return canonical;
+  };
   if (auto *bt = ast::dyn_cast<ast::BuiltinType>(ty))
     return Ctx.getBuiltinType(bt->getTypeKind());
   // A parameter's slice, resolved already.
@@ -752,7 +778,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     if (ClassTemplates.count(ct->getName()) ||
         StructTemplates.count(ct->getName()) ||
         EnumTemplates.count(ct->getName())) {
-      error(loc, context + " names generic " +
+      error(loc, context.str() + " names generic " +
                      (ClassTemplates.count(ct->getName())    ? "class '"
                       : StructTemplates.count(ct->getName()) ? "struct '"
                                                              : "enum '") +
@@ -761,7 +787,7 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       return nullptr;
     }
     if (Traits.count(ct->getName())) {
-      error(loc, context + " names trait '" + ct->getName() +
+      error(loc, context.str() + " names trait '" + ct->getName() +
                      "', which is not a type (use a type parameter bounded "
                      "by it: '<T: " +
                      ct->getName() + ">')");
@@ -770,14 +796,15 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     if (reportPrivateImport(ct->getName(), loc))
       return nullptr;
     if (!isFailedImportUse(ct->getName()))
-      error(loc, context + " has unknown class type '" + ct->getName() + "'");
+      error(loc,
+            context.str() + " has unknown class type '" + ct->getName() + "'");
     return nullptr;
   }
 
   // `T[]` is a slice, the type of a `view` or `inout` parameter only.
   if (auto *at = ast::dyn_cast<ast::ArrayType>(ty)) {
     if (!allowSlice) {
-      std::string msg = context + " has type '" + typeName(at) +
+      std::string msg = context.str() + " has type '" + typeName(at) +
                         "': a slice can only be a 'view' or 'inout' parameter";
       if (noArray) {
         msg += ", and ";
@@ -796,16 +823,17 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       return nullptr;
     }
     FixedArrayAllowed = true; // a slice's elements may be fixed-size arrays
-    auto *elemTy = resolveType(at->getElementType(), loc, context + " element");
+    const TypeContext element(context, {" element"});
+    auto *elemTy = resolveType(at->getElementType(), loc, element);
     if (!elemTy)
       return nullptr;
     if (elemTy == Ctx.getVoidTy()) { // it has no value (resolveValueType)
-      error(loc, context + " has type 'void[]': an array element cannot have "
-                           "type 'void'");
+      error(loc, context.str() + " has type 'void[]': an array element "
+                                 "cannot have type 'void'");
       return nullptr;
     }
     if (fixedElementBytes(elemTy) < 0) {
-      error(loc, context + " has type '" + typeName(elemTy) +
+      error(loc, context.str() + " has type '" + typeName(elemTy) +
                      "[]': a slice of '" + typeName(elemTy) +
                      "' is not supported yet");
       return nullptr;
@@ -821,23 +849,24 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       lengths.push_back(f->getLength());
       elem = f->getElementType();
     }
-    auto *base = resolveType(elem, loc, context + " element");
+    const TypeContext element(context, {" element"});
+    auto *base = resolveType(elem, loc, element);
     if (!base)
       return nullptr;
     ast::Type *fixed = base;
     for (auto it = lengths.rbegin(); it != lengths.rend(); ++it)
       fixed = Ctx.getFixedArrayType(fixed, *it);
     if (base == Ctx.getVoidTy()) { // it has no value (resolveValueType)
-      error(loc, context + " has type '" + typeName(fixed) +
+      error(loc, context.str() + " has type '" + typeName(fixed) +
                      "': an array element cannot have type 'void'");
       return nullptr;
     }
     if (!allowFixed) {
-      errorFixedArrayHere(loc, fixed, context);
+      errorFixedArrayHere(loc, fixed, context.str());
       return nullptr;
     }
     if (fixedElementBytes(base) < 0) {
-      error(loc, context + " has type '" + typeName(fixed) +
+      error(loc, context.str() + " has type '" + typeName(fixed) +
                      "': a fixed-size array of '" + typeName(base) +
                      "' is not supported yet");
       return nullptr;
@@ -846,13 +875,13 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     if (hasInferredLength(fixed)) {
       if (allowInferred)
         return fixed;
-      error(loc, context + " has type '" + typeName(fixed) +
+      error(loc, context.str() + " has type '" + typeName(fixed) +
                      "': a length can be '_' only in a variable declaration "
                      "with an initializer, which gives it");
       return nullptr;
     }
     if (fixedElementBytes(fixed) < 0) {
-      error(loc, context + " has type '" + typeName(fixed) +
+      error(loc, context.str() + " has type '" + typeName(fixed) +
                      "', which is too big: a fixed-size array holds at most " +
                      std::to_string(kMaxFixedArrayElements) + " elements");
       return nullptr;
@@ -866,10 +895,10 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     // template.  The result is an ordinary ClassType.
     std::vector<ast::Type *> args;
     for (size_t i = 0; i < gt->getNumArgs(); ++i) {
-      auto *arg =
-          resolveType(gt->getArgs()[i], loc,
-                      context + " type argument " + std::to_string(i + 1) +
-                          " of '" + gt->getName() + "'");
+      const std::string n = std::to_string(i + 1);
+      const TypeContext argument(
+          context, {" type argument ", n, " of '", gt->getName(), "'"});
+      auto *arg = resolveType(gt->getArgs()[i], loc, argument);
       if (!arg)
         return nullptr;
       args.push_back(arg);
@@ -894,13 +923,13 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     // need a second None to distinguish `None` from `Some(None)` (a
     // template's `T?` of an optional T is that optional: ASTCloner).
     if (inner == Ctx.getVoidTy()) {
-      error(loc, context + " has type 'void?': optional type 'void?' is not "
-                           "supported");
+      error(loc, context.str() + " has type 'void?': optional type 'void?' "
+                                 "is not supported");
       return nullptr;
     }
     if (ast::isa<ast::OptionalType>(inner)) {
-      error(loc, context + " has nested optional type '" + typeName(inner) +
-                     "?', which is not supported");
+      error(loc, context.str() + " has nested optional type '" +
+                     typeName(inner) + "?', which is not supported");
       return nullptr;
     }
     // An optional of a tuple or a struct is held in place, the presence flag
@@ -911,12 +940,12 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     if (ast::isMemType(inner) && !ast::isFunctionValue(inner)) {
       if (!StructsPopulated)
         DeferredOptionalChecks.push_back(
-            {inner, loc, context, CurrentOrigin, InstantiationStack});
+            {inner, loc, context.str(), CurrentOrigin, InstantiationStack});
       else if (!checkOptionalValueSize(inner, loc, context))
         return nullptr;
     }
     // Resolve to the context's canonical (interned) instance, as for arrays.
-    return Ctx.getOptionalType(inner);
+    return checked(Ctx.getOptionalType(inner));
   }
 
   // A struct type is canonical already (a resolved annotation, or a type
@@ -931,24 +960,27 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     std::vector<ast::Type *> params;
     std::vector<ast::ParamMode> modes;
     for (size_t i = 0; i < fnt->getNumParams(); ++i) {
-      const std::string what = context + " parameter " + std::to_string(i + 1);
+      const std::string n = std::to_string(i + 1);
+      const TypeContext what(context, {" parameter ", n});
       FixedArrayAllowed = true;
       SliceAllowed = fnt->getMode(i) != ast::ParamMode::Value;
       auto *pty = resolveType(fnt->getParamType(i), loc, what);
       if (!pty)
         return nullptr;
       if (pty == Ctx.getVoidTy()) {
-        error(loc, what + " cannot have type 'void'");
+        error(loc, what.str() + " cannot have type 'void'");
         return nullptr;
       }
       params.push_back(pty);
       modes.push_back(fnt->getMode(i));
     }
     FixedArrayAllowed = true; // a result may be a fixed-size array
-    auto *ret = resolveType(fnt->getReturnType(), loc, context + " result");
+    const TypeContext result(context, {" result"});
+    auto *ret = resolveType(fnt->getReturnType(), loc, result);
     if (!ret)
       return nullptr;
-    return Ctx.getFunctionType(std::move(params), std::move(modes), ret);
+    return checked(
+        Ctx.getFunctionType(std::move(params), std::move(modes), ret));
   }
 
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
@@ -956,22 +988,22 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
     elems.reserve(tt->getArity());
     for (size_t i = 0; i < tt->getArity(); ++i) {
       NoArrayHolder = "a tuple element";
-      auto *elemTy = resolveType(tt->getElementType(i), loc,
-                                 context + " element " + std::to_string(i));
+      const std::string n = std::to_string(i);
+      const TypeContext element(context, {" element ", n});
+      auto *elemTy = resolveType(tt->getElementType(i), loc, element);
       if (!elemTy)
         return nullptr;
       if (elemTy == Ctx.getVoidTy()) {
-        error(loc, context + " element " + std::to_string(i) +
-                       " cannot have type 'void'");
+        error(loc, element.str() + " cannot have type 'void'");
         return nullptr;
       }
       elems.push_back(elemTy);
     }
     // Same canonicalisation as arrays: the interned per-element-list node.
-    return Ctx.getTupleType(std::move(elems));
+    return checked(Ctx.getTupleType(std::move(elems)));
   }
 
-  error(loc, context + " has unknown type");
+  error(loc, context.str() + " has unknown type");
   return nullptr;
 }
 
@@ -986,11 +1018,11 @@ bool Sema::checkNotVoidValue(ast::Type *ty, const std::string &name,
 }
 
 ast::Type *Sema::resolveValueType(ast::Type *ty, ast::SourceLocation loc,
-                                  const std::string &context) {
+                                  const TypeContext &context) {
   ast::Type *resolved = resolveType(ty, loc, context);
   if (resolved != Ctx.getVoidTy())
     return resolved;
-  error(loc, context + " cannot have type 'void'");
+  error(loc, context.str() + " cannot have type 'void'");
   return nullptr;
 }
 
@@ -5021,10 +5053,13 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
         {p->Name, p->RequestLoc, p->RequestFile, p->RequestLines});
     CurrentTypeParams = &p->TypeParams;
     CurrentInstantiationDepth = p->Depth;
+    std::vector<const ast::Decl *> savedTemplates =
+        std::exchange(InstantiatingTemplates, p->Templates);
     {
       OriginSource inOrigin(*this, p->Origin);
       ok = visitFuncDecl(fn.Decl);
     }
+    InstantiatingTemplates = std::move(savedTemplates);
     InstantiationStack.pop_back();
   } else {
     ok = visitFuncDecl(fn.Decl);

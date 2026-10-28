@@ -592,9 +592,10 @@ bool Sema::populateClassType(ast::ClassDecl *cd, ast::ClassType *ct) {
       }
     }
     FixedArrayAllowed = true; // a field may be a fixed-size array
-    auto *fty = resolveValueType(field->getType(), field->getLocation(),
-                                 "field '" + field->getName() + "' in class '" +
-                                     cd->getName() + "'");
+    auto *fty =
+        resolveValueType(field->getType(), field->getLocation(),
+                         TypeContext({"field '", field->getName(),
+                                      "' in class '", cd->getName(), "'"}));
     if (!fty) {
       ok = false;
       continue;
@@ -840,9 +841,9 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
   ast::Type *retTy = Ctx.getVoidTy();
   if (method->getReturnType()) {
     FixedArrayAllowed = true; // a result may be a fixed-size array
-    retTy = resolveType(method->getReturnType(), method->getLocation(),
-                        "method '" + method->getName() + "' in '" + className +
-                            "'");
+    retTy = resolveType(
+        method->getReturnType(), method->getLocation(),
+        TypeContext({"method '", method->getName(), "' in '", className, "'"}));
     if (!retTy || !checkFixedResult(retTy, method->getResultMode(),
                                     method->getLocation()))
       return nullptr;
@@ -868,10 +869,10 @@ ast::MethodDecl *Sema::declareMethod(ast::FuncDecl *method, ast::Type *owner,
       return nullptr;
     FixedArrayAllowed = true; // a parameter may be a fixed-size array
     SliceAllowed = p.Mode != ast::ParamMode::Value; // or a slice
-    auto *pty =
-        resolveValueType(p.ParamType, p.Loc,
-                         "parameter '" + p.getName() + "' of method '" +
-                             method->getName() + "' in '" + className + "'");
+    auto *pty = resolveValueType(
+        p.ParamType, p.Loc,
+        TypeContext({"parameter '", p.getName(), "' of method '",
+                     method->getName(), "' in '", className, "'"}));
     if (!pty)
       return nullptr;
     p.ParamType = pty;
@@ -1653,6 +1654,37 @@ std::string Sema::instanceNameOf(const ast::Decl *tmpl, const std::string &name,
                 : instantiationName(name, args);
 }
 
+bool Sema::checkGrowingInstantiation(const ast::Decl *tmpl,
+                                     const std::string &instName,
+                                     ast::SourceLocation loc) {
+  if (instName.size() <= kMaxGrowingInstantiationName ||
+      std::find(InstantiatingTemplates.begin(), InstantiatingTemplates.end(),
+                tmpl) == InstantiatingTemplates.end())
+    return true;
+  const std::string shown = displayName(instName);
+  if (shown.size() <= kMaxGrowingInstantiationName)
+    return true; // only its hidden qualifier is long
+  // Shown cut short, at a character's first byte.
+  size_t cut = 60;
+  while ((static_cast<unsigned char>(shown[cut]) & 0xC0) == 0x80)
+    --cut;
+  const auto *fn = ast::dyn_cast<ast::FuncDecl>(tmpl);
+  const char *kind = fn                                ? "function"
+                     : ast::isa<ast::ClassDecl>(tmpl)  ? "class"
+                     : ast::isa<ast::StructDecl>(tmpl) ? "struct"
+                                                       : "enum";
+  error(loc, "instantiating '" + shown.substr(0, cut) +
+                 "...' inside an instantiation of '" +
+                 (fn ? fn->getName() : templateDeclName(tmpl)) +
+                 "' exceeds the maximum instantiation name length (" +
+                 std::to_string(kMaxGrowingInstantiationName) +
+                 " characters; this one has " + std::to_string(shown.size()) +
+                 "); a generic " + kind +
+                 " may not instantiate itself with an ever-growing type "
+                 "argument");
+  return false;
+}
+
 void Sema::reportInstantiationClash(const ast::Decl *tmpl,
                                     const std::string &instName,
                                     ast::SourceLocation loc) {
@@ -1843,6 +1875,10 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     ClassInstantiations[instName] = nullptr;
     return nullptr;
   }
+  if (!checkGrowingInstantiation(tmpl, instName, loc)) {
+    ClassInstantiations[instName] = nullptr;
+    return nullptr;
+  }
 
   // Clone the template with the type parameters substituted.
   std::unordered_map<std::string, ast::Type *> subst;
@@ -1865,6 +1901,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
+  InstantiatingTemplates.push_back(tmpl);
   OriginSource inOrigin(*this, origin);
   bool ok = true;
 
@@ -1921,6 +1958,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     else if (!checkTraitImpl(im, ct))
       ok = false;
   }
+  InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
 
   if (!ok) {
@@ -1938,6 +1976,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
+  pending.Templates = InstantiatingTemplates;
+  pending.Templates.push_back(tmpl);
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedClassDecls : InstantiatedClassDecls)
       .push_back(clone);
@@ -1956,6 +1996,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
   // Declared in the template's module, as the bodies are checked.
   InstantiationStack.push_back(
       {base.Name, base.RequestLoc, base.RequestFile, base.RequestLines});
+  std::vector<const ast::Decl *> savedTemplates =
+      std::exchange(InstantiatingTemplates, base.Templates);
   OriginSource inOrigin(*this, base.Origin);
   for (auto *im : it->second) {
     if (im->getTrait())
@@ -1997,6 +2039,7 @@ void Sema::declareInstantiationStatics(const std::string &instName,
         noteForeignSource(fn, *base.Origin);
     }
   }
+  InstantiatingTemplates = std::move(savedTemplates);
   InstantiationStack.pop_back();
 }
 
@@ -2062,6 +2105,10 @@ std::string Sema::instantiateFunction(const std::string &name,
     FuncInstantiations[instName] = false;
     return "";
   }
+  if (!checkGrowingInstantiation(tmpl, instName, loc)) {
+    FuncInstantiations[instName] = false;
+    return "";
+  }
 
   std::unordered_map<std::string, ast::Type *> subst;
   for (size_t i = 0; i < args.size(); ++i)
@@ -2086,12 +2133,14 @@ std::string Sema::instantiateFunction(const std::string &name,
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
+  InstantiatingTemplates.push_back(tmpl);
   bool ok;
   {
     OriginSource inOrigin(*this, origin);
     TypeParamScope params(*this, tmpl->getTypeParams());
     ok = declareFunctionSignature(clone);
   }
+  InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
   FuncInstantiations[instName] = ok;
   if (!ok)
@@ -2107,6 +2156,8 @@ std::string Sema::instantiateFunction(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
+  pending.Templates = InstantiatingTemplates;
+  pending.Templates.push_back(tmpl);
   queueInstantiation(std::move(pending));
   (origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
       .push_back(clone);
@@ -2525,12 +2576,15 @@ bool Sema::checkPendingInstantiations() {
     CurrentTypeParams = &p.TypeParams;
     const size_t savedDepth = CurrentInstantiationDepth;
     CurrentInstantiationDepth = p.Depth;
+    std::vector<const ast::Decl *> savedTemplates =
+        std::exchange(InstantiatingTemplates, p.Templates);
     bool r;
     if (p.Func && p.Func->hasInferredResult()) {
       // Checked where it was first used (inferResultOf), or now.
       InstantiationStack.pop_back();
       CurrentInstantiationDepth = savedDepth;
       CurrentTypeParams = savedParams;
+      InstantiatingTemplates = std::move(savedTemplates);
       if (!inferResultOf(p.Func->getName(), p.RequestLoc) ||
           InferredFunctions[p.Func->getName()].State != Inference::Done)
         ok = false;
@@ -2544,6 +2598,7 @@ bool Sema::checkPendingInstantiations() {
     }
     CurrentInstantiationDepth = savedDepth;
     CurrentTypeParams = savedParams;
+    InstantiatingTemplates = std::move(savedTemplates);
     InstantiationStack.pop_back();
     if (!r)
       ok = false;

@@ -214,7 +214,7 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
   StringSet fieldNames;
   bool selfHeld = false; // a field holding the struct was reported
   for (auto *field : sd->getFields()) {
-    const std::string context = "field '" + field->getName() + "' in " + what;
+    const TypeContext context({"field '", field->getName(), "' in ", what});
     if (!fieldNames.insert(field->getName()).second) {
       error(field->getLocation(),
             "duplicate field '" + field->getName() + "' in " + what);
@@ -246,7 +246,7 @@ bool Sema::populateStructType(ast::StructDecl *sd, ast::StructType *st) {
     }
     if (holdsFixedArray(fty)) {
       error(field->getLocation(),
-            context + " has type '" + typeName(fty) +
+            context.str() + " has type '" + typeName(fty) +
                 (st->getVariantEnum()
                      ? "': a variant's field cannot be a fixed-size array yet"
                      : "': a struct field cannot be a fixed-size array yet"));
@@ -504,6 +504,10 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     StructInstantiations[instName] = nullptr;
     return nullptr;
   }
+  if (!checkGrowingInstantiation(tmpl, instName, loc)) {
+    StructInstantiations[instName] = nullptr;
+    return nullptr;
+  }
 
   // Clone the template with the type parameters substituted, and its
   // `impl` blocks, each by its own names for the type parameters.
@@ -526,6 +530,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
+  InstantiatingTemplates.push_back(tmpl);
   OriginSource inOrigin(*this, origin);
 
   ast::StructType *st = Ctx.registerStructType(instName, loc);
@@ -551,6 +556,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     else if (!checkTraitImpl(im, st))
       ok = false;
   }
+  InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
 
   if (!ok) {
@@ -569,6 +575,8 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   pending.RequestLines = request.Lines;
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
+  pending.Templates = InstantiatingTemplates;
+  pending.Templates.push_back(tmpl);
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedStructDecls : InstantiatedStructDecls)
       .push_back(clone);
@@ -641,6 +649,10 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
     EnumInstantiations[instName] = nullptr;
     return nullptr;
   }
+  if (!checkGrowingInstantiation(tmpl, instName, loc)) {
+    EnumInstantiations[instName] = nullptr;
+    return nullptr;
+  }
 
   Subst subst;
   for (size_t i = 0; i < args.size(); ++i)
@@ -651,6 +663,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
+  InstantiatingTemplates.push_back(tmpl);
   OriginSource inOrigin(*this, origin);
 
   // Cached before the fields are resolved: a field naming this very
@@ -696,6 +709,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
         ok = false;
       }
   }
+  InstantiatingTemplates.pop_back();
   InstantiationStack.pop_back();
 
   if (!ok) {
@@ -875,7 +889,7 @@ ValueLayout valueLayout(const ast::Type *ty) {
 int64_t Sema::valueSize(const ast::Type *ty) { return valueLayout(ty).Size; }
 
 bool Sema::checkOptionalValueSize(ast::Type *inner, ast::SourceLocation loc,
-                                  const std::string &context) {
+                                  const TypeContext &context) {
   const int64_t size = valueSize(inner);
   if (size <= kOptionalValueLimit)
     return true;
@@ -884,7 +898,7 @@ bool Sema::checkOptionalValueSize(ast::Type *inner, ast::SourceLocation loc,
     ++SuppressedFollowOns; // reported at its first use
     return false;
   }
-  error(loc, context + " has type '" + name +
+  error(loc, context.str() + " has type '" + name +
                  "?': an optional holds a value of up to " +
                  std::to_string(kOptionalValueLimit) +
                  " bytes in place, and '" + name + "' is " +

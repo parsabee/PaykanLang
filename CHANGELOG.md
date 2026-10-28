@@ -1006,6 +1006,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     it: `g<int>(3, 4)` inside `fn outer<T>`, with `fn g<U>(T: int, u: U)`, was `'T' is a
     type name ...`.  `samples/codegen/89_type_parameter_names.pkn` runs the names these
     leave free.
+  - An instantiation requested inside an instantiation of its own template, directly or
+    through other templates (a method's or a function's body included), has a name of at
+    most 4,096 characters as diagnostics spell it, a new limit (docs/grammar.md section 9,
+    docs/language/13-generics.md, "How Errors Are Reported").  A template instantiating
+    itself with an ever-growing argument ran on until the depth limit (16):
+    `class C<T> { v: T; n: C<(T, T, T)>?; }` with `C<int>(1, None)` was still checking
+    after 5 minutes (28 minutes and more were seen), and `n: C<(T, T)>?` stopped after
+    1.5 s, its notes 900 KB of names.  The instantiation whose name passes the limit is now
+    the one error, `instantiating 'C<((((((int, int, int), (int, int, int), (int, int,
+    int)), (...' inside an instantiation of 'C' exceeds the maximum instantiation name
+    length (4096 characters; this one has 4374); a generic class may not instantiate itself
+    with an ever-growing type argument` (the name cut to its first 60 characters), reached
+    in 0.01 s; so it is for a struct, an enum, a function and two templates instantiating
+    each other.  Templates that instantiate one another without coming back to one are
+    held to the depth only, whatever their names: ten classes each holding the next with a
+    tuple of three of its argument (`class L0<T> { v: T; n: L1<(T, T, T)>?; }`, and so on)
+    are accepted, the last name 354,296 characters long.  They took 1.3 s to check, eleven
+    10.8 s and twelve 118 s, as each type a template is given (an argument put into it,
+    a signature written back) was resolved again, element by element, and each element's
+    description, holding the whole instantiation's name, built for its diagnostics.  A
+    tuple, optional or function type resolved once is now itself at once, and the
+    descriptions are built only for an error: 0.03 s, 0.07 s and 0.2 s.  The longest
+    instantiation name in the standard library is 26 characters, in the samples, the
+    stdlib tests and the documentation's examples 55.
 
 ### Removed
 

@@ -377,3 +377,45 @@ TEST(Scaling, AModulesCacheKeyIsMadeFromItsOwnCode) {
   ASSERT_EQ(t.ExitCode, 0) << t.Out;
   EXPECT_LT(t.Seconds, 5 * slowdown());
 }
+
+// Templates that instantiate each other with a tuple of three of their
+// argument, eleven deep, end with an argument of 3^11 ints.  Each level
+// resolved the arguments it was given again, element by element, building
+// for each element a description that holds the whole instantiation's
+// name, so the chain took 10.8 s of processor time to check, and one level
+// more about eight times that (SW-04).  A type resolved once is itself at
+// once now, and the chain takes 0.07 s.
+TEST(Scaling, AnInstantiationChainResolvesEachArgumentOnce) {
+  ScratchDir dir("chain");
+  std::string src = "import ::io;\n";
+  for (int k = 0; k < 11; ++k)
+    src += "class L" + std::to_string(k) + "<T> { v: T; n: L" +
+           std::to_string(k + 1) + "<(T, T, T)>?; }\n";
+  src += "class L11<T> { v: T; }\n"
+         "fn main() -> int { let c = L0<int>(1, None); io::println(c.v); "
+         "return 0; }\n";
+  const std::string path = dir.write("chain.pkn", src);
+  Timed t = timed(std::string(kPaykan) + " --check-only " + path + " 2>&1");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_LT(t.Seconds, 2 * slowdown());
+}
+
+// A template that instantiates itself with a tuple of two or three of its
+// argument stops once the name passes 4,096 characters (SW-04).  The depth
+// limit (16) stopped the first after 1.5 s, with 900 KB of names in its
+// notes, and the second ran for more than 28 minutes; each takes 0.01 s now.
+TEST(Scaling, PolymorphicRecursionStopsAtTheNameLimit) {
+  ScratchDir dir("polymorphic");
+  for (const std::string tuple : {"(T, T)", "(T, T, T)"}) {
+    const std::string path =
+        dir.write("c.pkn", "class C<T> { v: T; n: C<" + tuple +
+                               ">?; }\nfn main() -> int { let s = "
+                               "C<int>(1, None); return 0; }\n");
+    Timed t = timed(std::string(kPaykan) + " --check-only " + path + " 2>&1");
+    EXPECT_EQ(t.ExitCode, 1) << tuple;
+    EXPECT_NE(t.Out.find("exceeds the maximum instantiation name length"),
+              std::string::npos)
+        << t.Out.substr(0, 2000);
+    EXPECT_LT(t.Seconds, 0.5 * slowdown()) << tuple;
+  }
+}

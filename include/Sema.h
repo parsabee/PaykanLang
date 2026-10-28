@@ -13,9 +13,11 @@
 #include "paykan/pir/PIR.h"
 #include "paykan/pkm/Interface.h"
 
+#include <array>
 #include <cassert>
 #include <deque>
 #include <filesystem>
+#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <set>
@@ -24,6 +26,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -478,17 +481,56 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   static ast::ClassType *findLowestCommonAncestor(ast::ClassType *a,
                                                   ast::ClassType *b);
 
+  /// What a type resolveType resolves is, the start of its diagnostics
+  /// ("field 'n' in class 'L1<int>'", and " element 2" for that type's
+  /// tuple element): its pieces are joined only when one is reported, as
+  /// an instantiation's name in them can be long (SW-04).  It lives for a
+  /// resolveType call: a nested type's points at its parent's, and a piece
+  /// views text that outlives the call.
+  class TypeContext {
+  public:
+    // A description whole; implicit, so a call site passes a string.
+    TypeContext(std::string text) : Text(std::move(text)) {}
+    TypeContext(const char *text) : Text(text) {}
+    /// @p pieces, joined.
+    TypeContext(std::initializer_list<std::string_view> pieces)
+        : TypeContext(nullptr, pieces) {}
+    /// @p parent's description, then @p pieces.
+    TypeContext(const TypeContext &parent,
+                std::initializer_list<std::string_view> pieces)
+        : TypeContext(&parent, pieces) {}
+    TypeContext(const TypeContext &) = delete;
+    TypeContext &operator=(const TypeContext &) = delete;
+    std::string str() const;
+
+  private:
+    TypeContext(const TypeContext *parent,
+                std::initializer_list<std::string_view> pieces);
+    static constexpr size_t kMaxPieces = 7;
+    const TypeContext *Parent = nullptr;
+    std::string Text;
+    std::array<std::string_view, kMaxPieces> Pieces{};
+    size_t NumPieces = 0;
+  };
   // Resolve a declared AST Type* to its canonical equivalent from
   // ASTContext (e.g. a BuiltinType(Int) node -> Ctx.getIntTy(), a
   // ClassType("Str") -> Ctx.getStrTy()).  Returns nullptr and
   // emits an error on failure.
   ast::Type *resolveType(ast::Type *ty, ast::SourceLocation loc,
-                         const std::string &context);
+                         const TypeContext &context);
   // resolveType for what holds a value (a variable, a parameter, a field):
   // `void` has none, so it is reported (`<context> cannot have type
   // 'void'`) and nullptr returned.
   ast::Type *resolveValueType(ast::Type *ty, ast::SourceLocation loc,
-                              const std::string &context);
+                              const TypeContext &context);
+  /// The tuple, optional and function types resolveType has made, each
+  /// checked whole, whatever the context: given again (a type argument put
+  /// into a template, a signature written back), one is itself at once,
+  /// without walking its elements again; an argument nested N deep has
+  /// 3^N of them, and was walked once per level (SW-04).  One whose check
+  /// waits for the structs (DeferredOptionalChecks) is not, so that it is
+  /// checked again once they are known.
+  std::unordered_set<const ast::Type *> ResolvedTypes;
   // False (after reporting it) when @p ty, the type of the value a variable
   // @p name is declared with, is `void`: the expression produces none.
   bool checkNotVoidValue(ast::Type *ty, const std::string &name,
@@ -1749,7 +1791,7 @@ private:
   /// Report `inner?` (the @p context at @p loc) when @p inner, a tuple or a
   /// struct, is more than kOptionalValueLimit bytes.
   bool checkOptionalValueSize(ast::Type *inner, ast::SourceLocation loc,
-                              const std::string &context);
+                              const TypeContext &context);
   /// Split the canonical instantiation name @p name (`Tmpl<arg1, arg2>`)
   /// into the template's name and its arguments, resolved in this context;
   /// false when it is not one or an argument does not resolve.
@@ -1953,6 +1995,9 @@ private:
     /// The file RequestLoc is in (see InstantiationFrame).
     std::string RequestFile;
     const std::vector<std::string> *RequestLines = nullptr;
+    /// The templates its body is checked inside: InstantiatingTemplates
+    /// where it was requested, then its own.
+    std::vector<const ast::Decl *> Templates;
   };
   std::vector<PendingInstantiation> PendingInstantiations;
   /// Declare the `static fn`s of the `impl` blocks of the instantiation
@@ -2062,6 +2107,22 @@ private:
   };
   std::vector<PendingTraitImpl> PendingTraitImpls;
   static constexpr size_t kMaxInstantiationDepth = 16;
+  /// The longest name an instantiation made inside an instantiation of its
+  /// own template may have, as diagnostics spell it (OD-2): a longer one
+  /// is the ever-growing type argument the depth limit is for, stopped
+  /// before the names grow to 2^16 or 3^16 types (SW-04).
+  static constexpr size_t kMaxGrowingInstantiationName = 4096;
+  /// The templates of the instantiations in progress here, outermost
+  /// first: those being declared or populated, and, in an instantiation's
+  /// body, the ones it was requested inside (PendingInstantiation::Templates).
+  std::vector<const ast::Decl *> InstantiatingTemplates;
+  /// False, after reporting it, when the instantiation @p instName of
+  /// @p tmpl, requested at @p loc inside an instantiation of @p tmpl
+  /// (InstantiatingTemplates), has a name over kMaxGrowingInstantiationName
+  /// characters.
+  bool checkGrowingInstantiation(const ast::Decl *tmpl,
+                                 const std::string &instName,
+                                 ast::SourceLocation loc);
 
   /// Type parameter names of the instantiation whose body or declarations
   /// are being checked (nullptr outside one).  Used to diagnose a type
