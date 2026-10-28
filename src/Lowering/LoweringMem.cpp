@@ -799,9 +799,16 @@ bool ModuleLowering::emitSliceArg(ast::Expr *arg, std::vector<Val> &args) {
   return true;
 }
 
-std::string ModuleLowering::callLabel(const ast::Expr *e) {
-  if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e))
-    return "'" + sema::Sema::displayName(ce->getCalleeName()) + "'";
+std::string ModuleLowering::callLabel(const ast::Expr *e) const {
+  if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
+    // As Sema names it, though in another module's template, as the
+    // template's file does: its module's functions unqualified.
+    std::string name = sema::Sema::displayName(ce->getCalleeName());
+    if (const std::string own = Source->Module + "::";
+        !Source->Module.empty() && name.starts_with(own))
+      name.erase(0, own.size());
+    return "'" + name + "'";
+  }
   if (const auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e))
     return "'" + mc->getMethodName() + "'";
   if (const auto *be = ast::dyn_cast<ast::BinaryExpr>(e))

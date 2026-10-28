@@ -3486,7 +3486,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      std::move(ImportedNatives),
                      std::move(ImportedInstanceClassDecls),
                      std::move(ImportedInstanceStructDecls),
-                     {OwnSourceName, OwnSourceLines, nullptr}};
+                     {OwnSourceName, OwnSourceLines, nullptr, ""}};
   // The sets live in this frame: a Sema is run once.
   if (ImportStack == &localImportStack)
     ImportStack = nullptr;

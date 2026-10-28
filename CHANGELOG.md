@@ -366,6 +366,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Once per place, however many instantiations of a generic function reach it and
       however many modules lower a copy of one; an instantiation of another module's
       template points into that module's file.
+    - The calls are named as an error names them (`'reset'`, `'first<int>'`, `'f'` for a
+      variable holding a function value), `'=='` for an `==` whose `equals` may write, and
+      `a function value` for a call of another expression; in an instantiation of another
+      module's template, that module's functions without the module, as its file writes
+      them.
     - None for the copies of a struct, a tuple, a fixed-size array or a tagged union (on
       the stack, as a plain parameter's value), and none where nothing is copied.  No
       option turns it off.

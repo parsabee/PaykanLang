@@ -1543,7 +1543,8 @@ const Sema::ModuleTemplates *Sema::foreignOrigin(const ast::Decl *tmpl) const {
 
 void Sema::noteForeignSource(const ast::Decl *d,
                              const ModuleTemplates &origin) {
-  ForeignInstantiationSources[d] = {origin.File, origin.Lines, origin.Owner};
+  ForeignInstantiationSources[d] = {origin.File, origin.Lines, origin.Owner,
+                                    origin.Module};
 }
 
 Sema::OriginSource::OriginSource(Sema &s, const ModuleTemplates *origin)

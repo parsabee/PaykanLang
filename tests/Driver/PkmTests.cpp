@@ -717,7 +717,8 @@ TEST(Pkm, NoModuleCacheNeverReadsOrWrites) {
 // prebuilt file is read; an instantiation of its generic function, with
 // the module that uses it, once though two modules do (`main` and
 // `other`), pointing into the template's file, whose lines a module file
-// does not hold.  `--check-only` compiles nothing and warns of nothing.
+// does not hold, and naming the module's functions as that file does,
+// unqualified.  `--check-only` compiles nothing and warns of nothing.
 TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
   REQUIRE_BACKEND();
   const fs::path dir =
@@ -760,9 +761,8 @@ TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
       "  4 | fn plain(xs: view int[], c: C) -> int => total(xs, reset(c));\n"
       "    |                                                ^~\n"
       "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n";
-  const std::string generic = "lib/slices.pkn:6:51: warning: "
-                              "'lib::slices::reset'" +
-                              copied + "'lib::slices::first<int>'\n";
+  const std::string generic =
+      "lib/slices.pkn:6:51: warning: 'reset'" + copied + "'first<int>'\n";
   const std::string genericLines =
       "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
       "  6 | fn generic<T>(xs: view T[], c: C) -> int => first(xs, "

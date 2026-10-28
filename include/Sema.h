@@ -72,11 +72,16 @@ struct SemaContext {
   std::vector<ast::StructDecl *> ForeignStructs;
   /// A file an AST's source locations point into: its name as diagnostics
   /// show it, and its lines (null when its source is not at hand, as for
-  /// the templates of a module file), which Owner keeps alive.
+  /// the templates of a module file), which Owner keeps alive.  For an
+  /// instantiation of another module's template, Module is that module's
+  /// canonical name, which qualifies its functions where the bodies call
+  /// them (`lib::m::f`, written `f` in the file); empty for the module's
+  /// own file.
   struct SourceFile {
     std::string Name;
     const std::vector<std::string> *Lines = nullptr;
     std::shared_ptr<void> Owner;
+    std::string Module;
   };
   /// The file each of ForeignClasses, ForeignFunctions and ForeignStructs
   /// points into: its template's module's, whose locations a clone keeps.

@@ -1078,6 +1078,12 @@ and the lines around it and a caret under `xs`, as for an error:
 counts.pkn:14:51: warning: 'reset' in a later argument may write the elements of slice 'xs': they are copied to the heap before the call to 'total'
 ```
 
+The calls are named as an error names them: a function, a method or a constructor by its
+name (`'reset'`, and `'first<int>'` for an instantiation of a generic function), a variable
+holding a function value by the variable's (`'f'`), an `==` whose `equals` may write as
+`'=='`, and a call of another expression as `a function value`. In another module's generic
+function, that module's functions are named as its file writes them, without the module.
+
 The warning comes once for each place a slice is copied, however many instantiations of a
 generic function reach it, and no option turns it off. A call that need not see the
 elements as they were can be made first (`k = reset(c);`, then `total(xs, k)`), which copies
