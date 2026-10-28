@@ -13,6 +13,7 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 
 // -- virtual calls
 //
@@ -75,6 +76,26 @@ PAYKAN_NORETURN void Paykan_runtime_panic(const char *fmt, ...)
 
 void *Paykan_tryMalloc(size_t size);
 void *Paykan_tryRealloc(void *ptr, size_t size);
+
+// -- storage never set
+//
+// PaykanType_isUnset (Runtime.h) as an inline function, for memory::Buffer's
+// checked reads (Buffer.c).  Every read tests it, so it is no call there: a
+// call made each read of a type with words to look at (a tagged union whose
+// first variant holds a Str) save and reload its registers around it.
+
+/// True if @p value is storage that was never set: @p type has words that
+/// tell it (`nunset`), and they are all 0 there.
+static inline int PaykanType_isUnset_inline(const PaykanType *type,
+                                            const void *value) {
+  for (int64_t k = 0; k < type->nunset; ++k) {
+    int64_t word;
+    memcpy(&word, (const char *)value + PaykanType_unset(type, k), sizeof word);
+    if (word)
+      return 0;
+  }
+  return type->nunset != 0;
+}
 
 // -- equals helpers
 //

@@ -1625,6 +1625,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     register. docs/language/03-functions.md ("Native Functions") says so now, and shows
     the wrapper returning an `int64_t` to bind instead (KF-9). Mapping `i32` and `u32`
     natives to `int32_t` and `uint32_t` is left for a later release (OD-17).
+  - A checked read of a `memory::Buffer` slot (`at`, `get`, `copy`) of a type whose zero
+    bytes are no value, such as an enum whose first variant holds a `Str`, tested that the
+    slot was set with a call to the runtime's `PaykanType_isUnset`, and a runtime compiled
+    by GCC (CMake's C compiler on Linux) saved and reloaded the read's registers around
+    that call. Setting 1,000,000 such slots and reading them 9,000,000 times (the
+    `buffer_union` program of the allocation slowdown, `build -O2`, median user CPU of 11
+    interleaved runs on an Apple M3 Max, with the runtime built by GCC 16 at CMake's
+    Release flags) took 0.113 s, against 0.106 s at `fab0a56`, before the test was added.
+    The read tests the slot's words itself now, with no call: 0.103 s with GCC, and 0.103 s
+    with Apple clang's runtime (0.111 s before, 0.114 s at `fab0a56`), 8.6% fewer
+    instructions (1.906 billion, from 2.084). The other two programs of the slowdown were
+    not slower than at `fab0a56`, before or after: 10,485,740 objects allocated and freed
+    (`make(18)` 20 times) take 0.296 s (0.301 s at `fab0a56`), and 3,000,000
+    `Str(i) + "x"` 0.484 s (0.506 s).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
