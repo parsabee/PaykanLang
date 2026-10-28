@@ -5,7 +5,9 @@ Ok
 one
 two
 EndOfFile
-OutOfMemory
+EndOfFile
+one
+two
 NotFound
 InvalidArgument
 NotFound

@@ -1581,6 +1581,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     "listToString"). `PaykanString` keeps its layout and the runtime ABI its version; the
     runtime only gains a test hook, `Paykan_heap_total_allocs()`, the number of blocks the
     tracking allocator has allocated (Runtime.h).
+  - `File.readbytes(n)` allocated `n` bytes before reading: `readbytes(1099511627776)` of a
+    5-byte file was `OutOfMemory` where the system does not overcommit memory (Linux) and
+    took 1 TB of address space where it does (macOS), and `readbytes(1000000000)` 1 GB.
+    `n` is a maximum: the buffer starts at 64 KiB (or `n` bytes, when that is less) and
+    doubles as the data fills it: the tracking allocator's peak for either read of the
+    5-byte file is 65,630 bytes, where it was 1,099,511,627,870 and 1,000,000,094
+    (docs/stdlib/io.md, "File.readbytes"). The runtime gains a test hook,
+    `Paykan_heap_peak_bytes()`, the most bytes the tracking allocator has had live at once
+    (Runtime.h).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

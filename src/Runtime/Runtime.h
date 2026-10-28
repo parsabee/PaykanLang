@@ -911,6 +911,10 @@ int64_t Paykan_heap_total_reallocs(void);
 /// check that an operation grows a block instead of allocating another).
 int64_t Paykan_heap_total_allocs(void);
 
+/// The most payload bytes live at once since the last reset (e.g. to check
+/// that an operation allocates no more than it needs).
+int64_t Paykan_heap_peak_bytes(void);
+
 /// Print the current heap statistics to stderr (a leak warning is appended if
 /// any blocks remain live), after flushing stdout, so that they follow what
 /// the program printed.  If tracking is disabled, prints a notice instead.

@@ -699,7 +699,9 @@ view fn readbytes(n: int) -> res::Result<Str, err::Error>
 ```
 
 The next `n` bytes, or fewer at the end of the file. `InvalidArgument` when `n` is not
-positive.
+positive. `n` is a maximum, not a size to allocate: the read's buffer starts at 64 KiB (or
+`n` bytes, when that is less) and doubles as the data fills it, so a large `n` takes about
+as much memory as there is left to read.
 
 #### `File.read`
 
