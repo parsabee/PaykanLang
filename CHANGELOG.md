@@ -1123,28 +1123,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     defines with its superclass, its own fields, its vtable's slots (none empty) and its
     constructor, each method of each of its structs and each function, and their PIR types
     wherever the interface's types decide them (an integer or floating-point type, `bool`,
-    `char`, `Str`, a class, a slice, an `inout` parameter); its externs are checked
-    against the CODE of the module files they name; and its templates are decoded.  So
-    such a cache entry is rebuilt and such a prebuilt module is an error at the import,
-    `--check-only` included (`module 'm' (m.pkm) has a bad CODE section: binary PIR: bad
-    magic at byte 0. Rebuild it from source.`, `module 'lib::b' (pre/lib/b.pkm) has a bad
-    IFACE section: the vtable of class 'Line' does not start with the slots of its
-    superclass 'Shape'.`, `... has an IFACE section that does not match its CODE: function
-    'mk' is (ptr) -> void in CODE, () -> box by its types in IFACE.`).  A cache entry that
-    records a dependency no source or module file is there for is rebuilt too, its
-    source's own import saying where a dependency is missing (`module 'bsae' not found`
-    was reported at the import of the module the entry is of). A slot's signature that
-    differs in a type these checks do not derive (a struct's, a tuple's) is the file's
-    error in the lowering, not an internal compiler error.  The module decoded then is the
-    one the program is lowered with, so nothing is decoded twice: `run` of a program
-    importing every module of the standard library takes 1% fewer instructions than it did
-    and its `--check-only` 1% more (1,196 million and 323 million where there were 1,208
-    million and 320 million, in a debug build); in a chain of 60 modules each deriving a
-    class from the one before, whose interfaces hold 1,830 class records in all, the
-    interface checks add 10% to `--check-only` (1,037 million instructions where there
-    were 938 million) and nothing to `run` (3,208 million where there were 3,228 million,
-    the compiled code being read once).  And the lowering stops at an import it cannot
-    lower, instead of lowering the importer without it (docs/design/pkm.md §8.4).
+    `char`, `Str`, a class, a slice, an `inout` parameter, a struct or tagged union passed
+    or returned in memory); its externs are checked against the CODE of the module files
+    they name; and its templates are decoded.  So such a cache entry is rebuilt and such a
+    prebuilt module is an error at the import, `--check-only` included (`module 'm'
+    (m.pkm) has a bad CODE section: binary PIR: bad magic at byte 0. Rebuild it from
+    source.`, `module 'lib::b' (pre/lib/b.pkm) has a bad IFACE section: the vtable of
+    class 'Line' does not start with the slots of its superclass 'Shape'.`, `... has an
+    IFACE section that does not match its CODE: function 'mk' is (ptr) -> void in CODE, ()
+    -> box by its types in IFACE.`).  A cache entry that records a dependency no source or
+    module file is there for is rebuilt too, its source's own import saying where a
+    dependency is missing (`module 'bsae' not found` was reported at the import of the
+    module the entry is of). A slot's signature that differs in a type these checks do not
+    derive (a tuple's, a function type's) is the file's error in the lowering, not an
+    internal compiler error.  The module decoded then is the one the program is lowered
+    with, so nothing is decoded twice: `run` of a program importing every module of the
+    standard library takes 1% fewer instructions than it did and its `--check-only` 1%
+    more (1,196 million and 323 million where there were 1,208 million and 320 million, in
+    a debug build); in a chain of 60 modules each deriving a class from the one before,
+    whose interfaces hold 1,830 class records in all, the interface checks add 10% to
+    `--check-only` (1,037 million instructions where there were 938 million) and nothing
+    to `run` (3,208 million where there were 3,228 million, the compiled code being read
+    once).  And the lowering stops at an import it cannot lower, instead of lowering the
+    importer without it (docs/design/pkm.md §8.4).
   - `paykan pkm check` printed `usable` for files the compiler rejects or crashes on (a
     CODE section that does not decode, a TMPL section the importer rejects, compiled code
     that does not read or verify, an interface that does not match its CODE), and printed

@@ -237,7 +237,12 @@ TEST(ModuleCode, ACodeProvidesWhatTheProgramDeclaresFromIt) {
 // IFACE names a class, a slot, a field, a method or a function its CODE
 // does not have is rejected when it is loaded, not lowered against.
 TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
-  const pir::Module code = parsed();
+  // `Box<Str>.peek` as a method of a struct `Pair`, one `api` does not
+  // return.
+  pir::Module code = parsed();
+  for (pir::Function &f : code.Functions)
+    if (f.Name == "Box<Str>.peek")
+      f.Name = "Pair.peek";
   auto check = [&](const std::function<void(pkm::Interface &)> &change) {
     pkm::Interface iface = interface();
     pkm::ClassRec box;
@@ -250,7 +255,7 @@ TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
                    {"get", "int", {}, pkm::kMethodImpl, {}}};
     iface.Classes.push_back(box);
     pkm::StructRec other;
-    other.Name = "Box<Str>";
+    other.Name = "Pair";
     other.IsLocal = false; // another module's: its own CODE defines it
     other.Methods = {{"missing", "int", {}, 0, {}}};
     iface.Structs.push_back(other);
@@ -280,10 +285,10 @@ TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
               i.Structs[0].IsLocal = true;
               i.Structs[0].Methods = {{"peek", "int", {}, 0, {}}};
             }),
-            "method 'Box<Str>.peek' is (obj) -> i64 in CODE, (ptr) -> i64 by "
-            "its types in IFACE");
+            "method 'Pair.peek' is (obj) -> i64 in CODE, (ptr) -> i64 by its "
+            "types in IFACE");
   EXPECT_EQ(check([](pkm::Interface &i) { i.Structs[0].IsLocal = true; }),
-            "method 'Box<Str>.missing' is not in CODE");
+            "method 'Pair.missing' is not in CODE");
   EXPECT_EQ(check([](pkm::Interface &i) { i.Functions[0].Name = "apu"; }),
             "function 'apu' is not in CODE");
   // An abstract class (a pure virtual method) has no constructor function.
@@ -497,6 +502,33 @@ fn @scale(%p.1: box, %by.2: i64, %xs.3: ptr, %n.4: i64, %acc.5: ptr) -> box {
             }),
             "function 'scale' is (box, i64, ptr, i64, ptr) -> box in CODE, "
             "(box, i64, ptr, i64, i64) -> box by its types in IFACE");
+  // A struct or a tagged union the interface describes, or the optional of
+  // one, is held in memory: a parameter of it is its address, a result of it
+  // is written where a last parameter points.
+  pkm::StructRec pair;
+  pair.Name = "Pair";
+  pkm::EnumRec cell;
+  cell.Name = "Cell";
+  cell.Variants = {"Empty", "Full"};
+  cell.PayloadVariants = {"Full"};
+  EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &m) {
+              i.Structs = {pair};
+              i.Functions[1].ParamTypeNames[1] = "Pair";
+              fn(m, "scale").Sig.Params[1] = pir::Type::Ptr;
+            }),
+            "");
+  EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &) {
+              i.Structs = {pair};
+              i.Functions[1].ParamTypeNames[1] = "Pair";
+            }),
+            "function 'scale' is (box, i64, ptr, i64, ptr) -> box in CODE, "
+            "(box, ptr, ptr, i64, ptr) -> box by its types in IFACE");
+  EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &) {
+              i.Enums = {cell};
+              i.Functions[1].ReturnTypeName = "Cell?";
+            }),
+            "function 'scale' is (box, i64, ptr, i64, ptr) -> box in CODE, "
+            "(box, i64, ptr, i64, ptr, ptr) -> void by its types in IFACE");
   // A native function's signature is C's.
   EXPECT_EQ(check([&](pkm::Interface &i, pir::Module &) {
               i.Functions[1].ReturnTypeName = "int";

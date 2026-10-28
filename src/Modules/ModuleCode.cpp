@@ -294,17 +294,30 @@ pirTypeOfName(const std::string &type,
   return std::nullopt;
 }
 
+/// True when a value of the IFACE type @p type is held in memory, in place
+/// (ast::isMemType), where its name alone decides it: a struct or a tagged
+/// union the interface describes (@p inMemory), or the optional of one.
+bool heldInMemory(std::string_view type,
+                  const std::vector<std::string_view> &inMemory) {
+  if (type.ends_with('?'))
+    type.remove_suffix(1);
+  return std::binary_search(inMemory.begin(), inMemory.end(), type);
+}
+
 /// The signature the lowering gives a function of the parameters @p params,
 /// passed as @p modes says, and of the result @p ret, or a method of them
 /// whose receiver is passed as @p self (functionSignature, methodSignature):
-/// a slice parameter is its address and its length, an `inout` one its
-/// address, an `inout` result its storage's address, and every other
-/// parameter and the result what pirTypeOfName holds it in.  Nothing when
-/// one of those has no pirTypeOfName, or is a `void` parameter.
+/// a slice parameter is its address and its length, an `inout` one or one
+/// held in memory (heldInMemory) its address, an `inout` result its
+/// storage's address, a result held in memory written where a last
+/// parameter points, and every other parameter and the result what
+/// pirTypeOfName holds it in.  Nothing when one of those has no
+/// pirTypeOfName, or is a `void` parameter.
 std::optional<pir::Signature>
 derivedSignature(const std::vector<std::string> &params, const std::string &ret,
                  const pkm::ModeRecs &modes, std::optional<pir::Type> self,
-                 const std::vector<std::string_view> &classes) {
+                 const std::vector<std::string_view> &classes,
+                 const std::vector<std::string_view> &inMemory) {
   pir::Signature sig;
   if (self)
     sig.Params.push_back(*self);
@@ -314,7 +327,8 @@ derivedSignature(const std::vector<std::string> &params, const std::string &ret,
       sig.Params.push_back(pir::Type::I64);
       continue;
     }
-    if (i < modes.Modes.size() && modes.Modes[i] == pkm::kModeInout) {
+    if ((i < modes.Modes.size() && modes.Modes[i] == pkm::kModeInout) ||
+        heldInMemory(params[i], inMemory)) {
       sig.Params.push_back(pir::Type::Ptr);
       continue;
     }
@@ -325,6 +339,11 @@ derivedSignature(const std::vector<std::string> &params, const std::string &ret,
   }
   if (modes.Result == pkm::kModeInout) {
     sig.Ret = pir::Type::Ptr;
+    return sig;
+  }
+  if (heldInMemory(ret, inMemory)) {
+    sig.Params.push_back(pir::Type::Ptr);
+    sig.Ret = pir::Type::Void;
     return sig;
   }
   std::optional<pir::Type> r = pirTypeOfName(ret, classes);
@@ -413,6 +432,14 @@ Status checkCodeMatchesInterface(const pir::Module &code,
   for (const pkm::ClassRec &c : iface.Classes)
     classNames.push_back(c.Name);
   std::sort(classNames.begin(), classNames.end());
+  std::vector<std::string_view> inMemory;
+  inMemory.reserve(iface.Structs.size() + iface.Enums.size());
+  for (const pkm::StructRec &st : iface.Structs)
+    inMemory.push_back(st.Name);
+  for (const pkm::EnumRec &e : iface.Enums)
+    if (!e.PayloadVariants.empty())
+      inMemory.push_back(e.Name);
+  std::sort(inMemory.begin(), inMemory.end());
   // A function or method of the module whose signature the interface
   // decides has it in CODE.
   auto checkSignature = [&](const std::string &what, const pir::Function &f,
@@ -423,8 +450,9 @@ Status checkCodeMatchesInterface(const pir::Module &code,
                          signatureText(*derived) + " by its types in IFACE");
   };
   auto methodSignature = [&](const pkm::ClassRec::Method &m, pir::Type self) {
-    std::optional<pir::Signature> sig = derivedSignature(
-        m.ParamTypeNames, m.ReturnTypeName, m.Modes, self, classNames);
+    std::optional<pir::Signature> sig =
+        derivedSignature(m.ParamTypeNames, m.ReturnTypeName, m.Modes, self,
+                         classNames, inMemory);
     // The virtual `equals` returns the runtime's int64_t.
     if (sig && self == pir::Type::Obj && m.Name == names::kMethodEquals &&
         sig->Ret == pir::Type::Bool)
@@ -554,7 +582,7 @@ Status checkCodeMatchesInterface(const pir::Module &code,
       if (Status s = checkSignature(
               "function '" + fr.Name + "'", *f,
               derivedSignature(fr.ParamTypeNames, fr.ReturnTypeName, fr.Modes,
-                               std::nullopt, classNames));
+                               std::nullopt, classNames, inMemory));
           !s)
         return s;
   }

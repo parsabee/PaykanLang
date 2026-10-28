@@ -1490,7 +1490,8 @@ rebuilt and a prebuilt file is an error at the import, under
   one it describes, and no parameter is `void` (`Sema::checkInterfaceTypes`,
   through the resolver's `FrontendRead`).
 - `CODE` decoded, naming the module and verified (the verifier rejects a
-  `void` parameter, an extern's or a vtable slot's too), and checked
+  `void` parameter, an extern's or a vtable slot's too, and a class whose
+  fields do not begin with its superclass's), and checked
   against `IFACE` (`modules::checkCodeMatchesInterface`): each class the
   module defines, with its superclass, its own fields, its vtable's slots,
   none empty, and its constructor, which takes what its initializer takes
@@ -1501,8 +1502,12 @@ rebuilt and a prebuilt file is an error at the import, under
   parameter its address and length, an `inout` parameter or result an
   address, a `weak` field `weak`), the fields, functions, methods and slots
   have those types in `CODE`, the derived signatures of §9.1 for those
-  types; a struct's, a tuple's, an array's, an enum's, an optional's or a
-  function type's PIR type is not derived yet.
+  types. In a signature a struct or a tagged union the interface describes,
+  or the optional of one, is held in memory: a parameter of its type is its
+  address (`ptr`), and a result of its type is written where a last `ptr`
+  parameter points, the function returning `void`. Otherwise a struct's, a
+  tuple's, an array's, an enum's, an optional's or a function type's PIR
+  type is not derived yet.
 - Against the files it depends on (by the resolver; `pkm check` reads the
   file alone): each record of another module's type (`IsLocal` false) is
   that module's record of it, but for an instantiation made elsewhere that

@@ -1315,8 +1315,10 @@ TEST(Pkm, AnInterfaceThatDisagreesIsNotUsed) {
 // A CODE that verifies on its own, and still is not one a program can use:
 // a `void` parameter (the mlir backend crashed on it), an empty vtable slot
 // of a class it defines or a constructor returning nothing (the program
-// built, and crashed when it ran), an extern that does not match the module
-// it names.
+// built, and crashed when it ran), a function whose struct result is not
+// written through its last parameter or a class whose fields do not begin
+// with its superclass's (the program did not verify), an extern that does
+// not match the module it names.
 TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
   REQUIRE_BACKEND();
   using paykan::pir::Module;
@@ -1343,6 +1345,13 @@ TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
                 "has an IFACE section that does not match its CODE: class "
                 "'Seg': its constructor is (i64, i64, i64, i64) -> void in "
                 "CODE, its initializer (obj, i64, i64, i64, i64) -> void");
+  // A struct result is written where a last parameter points.
+  expectNotUsed("result", code([&](Module &m) {
+                  fn(m, "mk").Sig.Params[0] = paykan::pir::Type::Obj;
+                }),
+                "has an IFACE section that does not match its CODE: function "
+                "'mk' is (obj) -> void in CODE, (ptr) -> void by its types in "
+                "IFACE");
   expectNotUsed("inherited", code([](Module &m) {
                   named(m.Classes, "Seg").Fields[0].Name = "";
                 }),
