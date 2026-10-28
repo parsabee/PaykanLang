@@ -1525,8 +1525,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     clashing with one an import gave the program (`Result<Str, err::Error>` next to
     `import ::io;`) names its template and has a note at the import it came through, and
     at the other template's declaration when the program sees it.  docs/stdlib/index.md
-    said a program may declare its own `Result`: it now says that the program's
-    instantiations of it are global too, and lists the names `::collections` reserves,
+    and docs/language/02-basics.md said a program may declare its own `Result`: they now
+    say that the program's instantiations of it are global too, and the first lists the
+    names `::collections` reserves,
     `_Node`, `_Entry`, `_Table`, `_Heap` and `_Pieces` (docs/language/13-generics.md,
     "Modules" and "Semantic Checks").
   - A type argument that does not meet its parameter's bound where the bound can be
