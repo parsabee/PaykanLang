@@ -1456,6 +1456,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     qualifiers are no longer reported again, as for an import that fails
     (docs/language/15-modules.md, "Aliased Import", "System Imports" and "Semantic
     Checks").
+  - After a type-name clash with an imported type, the uses of the name were taken for the
+    other module's type and reported again.  A declaration named like a type an import
+    reached (`enum ErrorCode { A, B }` next to `import ::io;`, which imports `::error`'s
+    `ErrorCode`) is now the one error: a use of the name in the file means that declaration
+    and is not reported (it gave `enum 'ErrorCode' has no variant 'A'` for each variant
+    used, and for a class, struct, function or tagged enum named `Error`, `operator '+' is
+    not defined for types 'ErrorCode' and 'int'` or `call to undeclared function 'Error'`,
+    `'Error::make'`, `'Error::A'`).  An import whose module declares a type another module
+    already gave the program reports each such type and then imports nothing of that
+    module, so its other types, its functions and its methods are follow-ons too: `e::mk()`
+    returning the module's `Error` was taken to return `::error`'s, so `e::mk().code + 1`
+    was `operator '+' is not defined for types 'ErrorCode' and 'int'` (docs/language/
+    15-modules.md, "Type names are global" and "Semantic Checks").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

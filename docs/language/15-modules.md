@@ -278,10 +278,13 @@ What `C` cannot do without importing `A` is *spell* the type: `t = w.get()` is f
 **Type names are global.** Because each type is rebuilt once per importing file, keyed by its
 declared name, type names are global across the import graph (the main file and everything
 it imports, directly or not): if two modules reachable from one file both declare a class
-(or struct, or enum) called `Node`, importing them is an error naming both modules. A file
+(or struct, or enum) called `Node`, importing them is an error naming both modules, once for
+each such type, and nothing of the second module is imported: its uses (`tree::Node()`,
+`tree::depth(t)`) are not reported again. A file
 also cannot declare a class, struct, enum, trait or function with the same name as a type
 reached through any of its imports (`enum 'Node' conflicts with an imported type of the same
-name`). A generic type is not reached by its name: its instantiations are
+name`); the name then means that declaration, whose uses in the file (`n: Node`,
+`Node::Leaf`) are not reported again either. A generic type is not reached by its name: its instantiations are
 (`Box<int>`), spelled through its module (`m::Box<int>`), so a file may declare its own `Box`.
 
 ```pkn
@@ -646,7 +649,7 @@ differently.
 | Circular import | Import graph contains a cycle |
 | Imports nested too deep | A chain of imports more than 256 modules deep: `imports nested too deep (more than 256 modules): 'c::m256' is imported 257 modules deep` |
 | Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules; a system import's path without its `::` gives way to another import's (`import ::math as cmath; import math;`) |
-| Conflicting type name | Two modules in the import graph declare different classes/structs/enums under one name, or a file declares a type named like an imported one |
+| Conflicting type name | Two modules in the import graph declare different classes/structs/enums under one name (the import of the second binds none of its names), or a file declares a type named like an imported one (the file's uses of the name are that declaration's) |
 | Unknown exported type | An import's export record names a type nothing provides (a compiler bug or corrupt cache — reported against the `import`, never silently degraded to `Obj`/`void`) |
 | Private name imported | `Mod::_name` for a function, class, struct, enum or trait whose name starts with `_`: `'Mod::_name' is private to module 'Mod'` |
 | Module-private member imported | `x._f`, `x._m()` or `Mod::T::_s()` on a type of another module: `'_f' of 'T' is private to module 'Mod'` |

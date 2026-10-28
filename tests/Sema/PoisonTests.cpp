@@ -316,6 +316,61 @@ TEST(Poison, ColliderDoesNotSilenceTheOriginal) {
       << r.Diagnostics;
 }
 
+// A declaration named like a type an import reached is rejected, and a use
+// of its name here means it, so the uses are follow-ons of that error
+// (SW-33).  Each was taken for the imported type of the name (`::error`'s,
+// which `::io` imports) and reported again: "enum 'ErrorCode' has no
+// variant 'A'", "operator '+' is not defined for types 'ErrorCode' and
+// 'int'", "call to undeclared function 'Error::A'".  The imported type is
+// still named through its module.
+TEST(Poison, UsesOfADeclarationNamedLikeAnImportedTypeAreSilent) {
+  struct Case {
+    const char *Decl, *Uses, *Declared;
+  };
+  for (const Case &c :
+       {Case{"enum ErrorCode { A, B }\n",
+             "fn f(e: ErrorCode) -> int {\n"
+             "  match e { A { return 1; } B { return 2; } }\n"
+             "}\n"
+             "fn main() -> int {\n"
+             "  io::println(Str(ErrorCode::A == ErrorCode::B));\n"
+             "  y: ErrorCode = ErrorCode::A;\n"
+             "  return f(y);\n"
+             "}\n",
+             "enum 'ErrorCode'"},
+        Case{"class Error { code: int; }\n",
+             "class Sub : Error {}\n"
+             "fn f(e: Error) -> int { return e.code + 1; }\n"
+             "fn main() -> int { x = Error(3); return f(x) + x.code; }\n",
+             "class 'Error'"},
+        Case{"struct Error { code: int; }\n",
+             "impl Error {\n"
+             "  static fn make() -> Error => Error(1);\n"
+             "  fn twice() -> int => 2 * self.code;\n"
+             "}\n"
+             "fn main() -> int {\n"
+             "  x = Error::make();\n"
+             "  return x.twice() + Error(2).code;\n"
+             "}\n",
+             "struct 'Error'"},
+        Case{"fn Error(x: int) -> int { return x; }\n",
+             "fn main() -> int { return Error(3) + 1; }\n", "function 'Error'"},
+        Case{"enum Error { A(x: int), B }\n",
+             "fn main() -> int {\n"
+             "  e = Error::A(3);\n"
+             "  match e { a: A { return a.x; } B { return 0; } }\n"
+             "}\n",
+             "enum 'Error'"}})
+    expectOnly(std::string("import ::io;\n") + c.Decl + c.Uses,
+               std::string("2:1: error: ") + c.Declared +
+                   " conflicts with an imported type of the same name");
+  auto r = semaCheck("import ::error as err;\n"
+                     "class Error { code: int; }\n"
+                     "fn f(e: err::Error) -> err::ErrorCode => e.code;\n"
+                     "fn main() -> int { x = f(err::none()); return 0; }\n");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+}
+
 // Reserved binder names (#126): every binder rejects a type name (a builtin
 // one, `Str`, or the program's) with one error, through the same guard.
 

@@ -999,23 +999,40 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   // once, by canonical name, so that it keeps a single identity however many
   // import paths reach it).  Binding a name to a type declared by a
   // DIFFERENT module would silently merge two unrelated types; reject it.
-  auto checkOrigin = [&](const char *kind, const std::string &name,
-                         const std::string &originModule) -> bool {
+  auto clashes = [&](const char *kind, const std::string &name,
+                     const std::string &originModule) -> bool {
     if (originModule.empty())
-      return true; // compiler builtin — identical in every context
+      return false; // compiler builtin — identical in every context
     auto it = ImportedTypeOrigins.find(name);
-    if (it == ImportedTypeOrigins.end()) {
-      ImportedTypeOrigins[name] = originModule;
-      return true;
-    }
-    if (it->second == originModule)
-      return true;
+    if (it == ImportedTypeOrigins.end() || it->second == originModule)
+      return false;
     error(loc, diagPrefix + kind + " '" + name +
                    "' conflicts with a type of the same name declared by "
                    "module '" +
                    it->second + "' (type names are global across imports)");
-    return false;
+    return true;
   };
+  auto recordOrigin = [&](const std::string &name,
+                          const std::string &originModule) {
+    if (!originModule.empty())
+      ImportedTypeOrigins.try_emplace(name, originModule);
+  };
+  // A module with such a type injects nothing (SW-33): its functions', its
+  // methods' and its fields' types, and its aliases, would name the other
+  // module's type.  The import fails, so a use of its qualifier is a
+  // follow-on.
+  bool clash = false;
+  for (const auto &ei : info.ExportedEnums)
+    if (clashes("enum", ei.Name, ei.OriginModule))
+      clash = true;
+  for (const auto &si : info.ExportedStructs)
+    if (clashes("struct", si.Name, si.OriginModule))
+      clash = true;
+  for (const auto &ci : info.ExportedClasses)
+    if (clashes("class", ci.Name, ci.OriginModule))
+      clash = true;
+  if (clash)
+    return false;
 
   auto addClassAliases = [&](ast::ClassType *ct, const std::string &name) {
     if (!hiddenInject && names::isModulePrivateName(name))
@@ -1076,10 +1093,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
 
     // Enums first: class fields and method signatures may be enum-typed.
     for (auto &ei : info.ExportedEnums) {
-      if (!checkOrigin("enum", ei.Name, ei.OriginModule)) {
-        ok = false;
-        continue;
-      }
+      recordOrigin(ei.Name, ei.OriginModule);
       auto *et = Ctx.lookupEnumType(ei.Name);
       if (!et) {
         if (Ctx.lookupClassType(ei.Name)) {
@@ -1102,10 +1116,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     // field is resolved.  Their fields and methods come after the classes.
     std::vector<const ModuleInfo::StructInfo *> createdStructs;
     for (auto &si : info.ExportedStructs) {
-      if (!checkOrigin("struct", si.Name, si.OriginModule)) {
-        ok = false;
-        continue;
-      }
+      recordOrigin(si.Name, si.OriginModule);
       auto *st = Ctx.lookupStructType(si.Name);
       if (!st) {
         if (Ctx.lookupClassType(si.Name) || Ctx.lookupEnumType(si.Name)) {
@@ -1154,10 +1165,7 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     // the same two-phase scheme checkClassDecls uses for a single file.
     std::vector<const ModuleInfo::ClassInfo *> pending, created;
     for (auto &ci : info.ExportedClasses) {
-      if (!checkOrigin("class", ci.Name, ci.OriginModule)) {
-        ok = false;
-        continue;
-      }
+      recordOrigin(ci.Name, ci.OriginModule);
       if (auto *ct = Ctx.lookupClassType(ci.Name)) {
         // Already present — pointer identity preserved.
         if (ci.IsLocal)

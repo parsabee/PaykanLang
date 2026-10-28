@@ -111,6 +111,8 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     }
     error(loc, std::string(what) + " '" + name +
                    "' conflicts with an imported type of the same name");
+    // Its uses mean this declaration, and are follow-ons of this error.
+    ErroneousNames.insert(name);
     return false;
   };
   // Compiler builtins are registered before any user declaration and must
@@ -186,6 +188,14 @@ bool Sema::checkDeclNameAvailable(const std::string &name,
     error(loc, "'" + name + "' is already declared as a generic function");
     return false;
   }
+  return true;
+}
+
+bool Sema::isImportClashUse(std::string_view name) {
+  const std::string_view type = name.substr(0, name.find(names::kQualSep));
+  if (!ErroneousNames.count(type) || !ImportedTypeOrigins.count(type))
+    return false;
+  ++SuppressedFollowOns;
   return true;
 }
 
@@ -711,6 +721,8 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       if (self)
         return self;
     }
+    if (isImportClashUse(ct->getName()))
+      return nullptr;
     // A private type of an imported module, spelled bare: it is that
     // module's own (a qualified spelling is reported below).
     if (names::isModulePrivateName(ct->getName()) &&
@@ -1537,6 +1549,8 @@ ast::Type *Sema::ExprChecker::visitCallValueExpr(ast::CallValueExpr *node) {
 
 ast::Type *Sema::ExprChecker::visitEnumValueExpr(ast::EnumValueExpr *node) {
   ast::Type *expected = std::exchange(S.VariantExpectation, nullptr);
+  if (S.isImportClashUse(node->getEnumName()))
+    return nullptr;
   ast::EnumType *enumTy = nullptr;
   if (S.EnumTemplates.count(node->getEnumName())) {
     // `Maybe<int>::Nothing`, or `Maybe::Nothing` flowing into a
@@ -2488,7 +2502,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     // `m::E::V(x)` names a variant of an enum of the failed module `m`.
     const std::string &callee = node->getCalleeName();
     const auto sep = callee.rfind(names::kQualSep);
-    if (!S.isFailedImportUse(callee) &&
+    if (!S.isFailedImportUse(callee) && !S.isImportClashUse(callee) &&
         (sep == std::string::npos ||
          !S.isFailedImportUse(callee.substr(0, sep))))
       S.error(node->getLocation(),

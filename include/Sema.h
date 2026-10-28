@@ -959,6 +959,12 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// under a failed import's qualifier: its use must not be reported.
   bool isFailedImportUse(std::string_view name);
 
+  /// True (counting a suppressed follow-on) if @p name, or the type part of
+  /// `name::member`, is an imported type's name that a declaration of this
+  /// module took as well (SW-33): the declaration's error was reported, and
+  /// a use of the name here means that declaration, not the imported type.
+  bool isImportClashUse(std::string_view name);
+
   /// Errors reported inside imported modules, through their own DiagEngine
   /// (with their own file name and source lines) and so not counted by Diags.
   /// They fail this module too: run() adds them to its error count.

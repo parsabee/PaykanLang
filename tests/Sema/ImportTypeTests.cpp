@@ -424,6 +424,46 @@ fn main() -> int { k = K(); f = Fine(); return 0; }
   std::filesystem::remove_all(tmp);
 }
 
+// ─── ERR: an imported module's type clashing with another's (SW-33) ─────────
+//
+// The import fails at its first clash, each clashing type reported, and the
+// module injects nothing: its functions, methods and aliases would name the
+// other module's type (`e::mk().code + 1` was "operator '+' is not defined
+// for types 'ErrorCode' and 'int'", `::error`'s `Error` field), so every
+// `e::` use is a follow-on of the import's errors.
+
+TEST(Module, AnImportWhoseTypeClashesInjectsNothing) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_clash_inject").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/e.pkn",
+            "class Error { code: int; }\n"
+            "enum ErrorCode { X }\n"
+            "class Fine { n: int; }\n"
+            "fn mk() -> Error { return Error(3); }\n"
+            "fn fine() -> Fine { return Fine(1); }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(import ::io;
+import lib::e;
+fn main() -> int {
+  x: int = e::mk().code + 1;
+  y = e::Error(4);
+  io::println(Str(y.code) + Str(e::fine().n + e::Fine(2).n));
+  z: e::ErrorCode = e::ErrorCode::X;
+  return x;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main.pkn:2:1: error: import of module 'lib::e': enum 'ErrorCode' "
+            "conflicts with a type of the same name declared by module "
+            "'::error' (type names are global across imports)\n"
+            "main.pkn:2:1: error: import of module 'lib::e': class 'Error' "
+            "conflicts with a type of the same name declared by module "
+            "'::error' (type names are global across imports)\n")
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
 // ─── A module-private initializer is constructed by its module only ─────────
 //
 // `___init__` (docs/language/15-modules.md): an importer cannot construct the
