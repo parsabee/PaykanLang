@@ -1607,6 +1607,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `RuntimeTests` with them). They free each string with `Paykan_dispose`, and an object
     whose destroy they call through its vtable with `Paykan_free` after it, as
     `Paykan_release` does: `leaks` finds none.
+  - Four files of `sema_tests` defined a `struct SemaFileResult` at namespace scope, not all
+    with the same members, which broke C++'s one-definition rule: the linker could take
+    one file's for another's (chunk C moved `ModuleTests.cpp`'s, whose count was left
+    unassigned that way). `ImportTypeTests.cpp`, `OptionalTests.cpp` and `TupleTests.cpp`
+    define theirs in an anonymous namespace too.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
