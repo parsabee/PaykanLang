@@ -314,7 +314,7 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 | Extra method | An `impl ... for` block has a method, or a `static fn`, its trait does not require |
 | Implemented twice | The class, or a superclass (also one of another module), already implements the trait (every class implements `Show`) |
 | Not a trait | An `impl ... for` or a bound names a class, a built-in type or an unknown name, or gives the wrong number of type arguments |
-| Unmet bound | A type argument does not implement a trait its parameter is bounded by |
+| Unmet bound | A type argument does not implement a trait its parameter is bounded by; the instantiation's body and the bounds of the templates it uses are not checked, so it is the one error |
 | Trait of another module | A template of another module is bounded, directly or through a template it uses, by that module's own trait ([#147](https://github.com/parsabee/PaykanLang/issues/147); see below) |
 | Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Show for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |
 | Trait as a type | A trait is used where a type is expected |

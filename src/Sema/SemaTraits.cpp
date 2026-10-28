@@ -15,6 +15,8 @@
 #include "Names.h"
 #include "Sema.h"
 
+#include <algorithm>
+
 namespace paykan {
 namespace sema {
 
@@ -625,6 +627,18 @@ bool Sema::checkPendingBounds() {
   TraitImplsKnown = true;
   bool ok = true;
   for (auto &pc : PendingBoundChecks) {
+    const std::string instName = instanceNameOf(pc.Template, pc.Name, pc.Args);
+    // Asked for in an instantiation whose bounds failed: one a check made
+    // at the request would not have made (KF-6).
+    if (std::any_of(pc.Frames.begin(), pc.Frames.end(),
+                    [&](const InstantiationFrame &f) {
+                      return FailedBoundInstances.count(f.Name) != 0;
+                    })) {
+      FailedBoundInstances.insert(instName);
+      ++SuppressedFollowOns;
+      ok = false;
+      continue;
+    }
     // Checked as where it was asked for: in that module's file, under the
     // instantiations in progress there.
     std::vector<InstantiationFrame> saved =
@@ -632,8 +646,10 @@ bool Sema::checkPendingBounds() {
     {
       OriginSource inOrigin(*this, pc.Origin);
       if (!checkBounds(pc.Template, pc.Name, *pc.Params, *pc.Bounds, pc.Args,
-                       pc.Loc))
+                       pc.Loc)) {
+        FailedBoundInstances.insert(instName);
         ok = false;
+      }
     }
     InstantiationStack = std::move(saved);
   }

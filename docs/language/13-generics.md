@@ -112,7 +112,10 @@ A type parameter can name the traits its type argument must implement, as a **bo
 declared just so. A trait such as `Show` or `Hashable` is built in, and a program declares
 its own with `trait` (see [Traits](06-traits.md)). A call with a type that lacks the trait
 is an error at the call (`'Task' does not implement trait 'Named', which 'f' requires of
-'T'`).
+'T'`). That error is the only one: the instantiation's body is not checked, nor are the
+bounds of the templates it uses, also when it is named before the program's `impl` blocks
+are known (a field's type, `m: collections::HashMap<Foo, int>`), where the bound is checked
+once they are.
 
 Bounds or not, the body of a generic class or function is type-checked again for each set
 of type arguments it is used with. If an operation does not work for one of them, the error

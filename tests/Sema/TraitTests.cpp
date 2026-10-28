@@ -259,6 +259,66 @@ TEST(Traits, DeferredBoundErrorHasTheInstantiationNote) {
   }
 }
 
+// A bound found to fail once the `impl` blocks are known is the one error
+// (KF-6), as one checked at the request is: the instantiation was made
+// before, for a class's or a struct's field, but its bodies are not
+// checked, and the bound of an instantiation made in it is a follow-on.
+// Base also reported the bodies' errors ("method call on non-class type
+// 'int'"), and for a `collections::HashMap<Foo, int>` field nine more in
+// collections.pkn: "no method 'hash' on type 'Foo'" seven times, and
+// `_Table`'s bound twice.  Another request of a template, not made in such
+// an instantiation, is still checked.
+TEST(Traits, AFailedDeferredBoundIsTheOneError) {
+  struct Case {
+    const char *Source, *Error;
+  };
+  const Case cases[] = {
+      {"trait Named { view fn name() -> Str; }\n"
+       "struct Box<T: Named> { v: T; }\n"
+       "impl Box<T> { view fn label() -> Str => self.v.name(); }\n"
+       "class Holder { b: Box<int>; }\n"
+       "fn main() -> int { return 0; }\n",
+       ":4:16: error: 'int' does not implement trait 'Named', which 'Box' "
+       "requires of 'T'"},
+      {"trait Named { view fn name() -> Str; }\n"
+       "class Box<T: Named> {\n"
+       "  v: T;\n"
+       "  view fn label() -> Str { return self.v.name() + \"!\"; }\n"
+       "}\n"
+       "struct S { b: Box<int>; }\n"
+       "fn main() -> int { return 0; }\n",
+       ":6:12: error: 'int' does not implement trait 'Named', which 'Box' "
+       "requires of 'T'"},
+      {"import ::collections;\n"
+       "class Foo { n: int; }\n"
+       "class Holder { m: collections::HashMap<Foo, int>; }\n"
+       "fn main() -> int { return 0; }\n",
+       ":3:16: error: 'Foo' does not implement trait 'Hashable', which "
+       "'collections::HashMap' requires of 'K'"},
+  };
+  for (const Case &c : cases) {
+    auto r = semaCheck(c.Source);
+    EXPECT_FALSE(r.Ok) << c.Source;
+    EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
+    expectAll(r, {c.Error});
+  }
+  auto r = semaCheck(
+      "trait Named { view fn name() -> Str; }\n"
+      "struct Inner<T: Named> { v: T; }\n"
+      "impl Inner<T> { view fn label() -> Str => self.v.name(); }\n"
+      "struct Outer<T: Named> { i: Inner<T>; }\n"
+      "impl Outer<T> {\n"
+      "  view fn label() -> Str => self.i.label() + self.i.v.name();\n"
+      "}\n"
+      "class Holder { o: Outer<int>; j: Inner<Str>; }\n"
+      "fn main() -> int { return 0; }\n");
+  EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;
+  expectAll(r, {":8:16: error: 'int' does not implement trait 'Named', which "
+                "'Outer' requires of 'T'",
+                ":8:31: error: 'Str' does not implement trait 'Named', which "
+                "'Inner' requires of 'T'"});
+}
+
 // int, float, bool and char implement `Show`: `n.toString()` is a `Str`.  So
 // does an enum: its variant's name.
 TEST(Traits, ScalarsImplementShow) {

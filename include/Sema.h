@@ -2019,6 +2019,16 @@ private:
     std::vector<InstantiationFrame> Frames;
   };
   std::vector<PendingBoundCheck> PendingBoundChecks;
+  /// The instantiations whose deferred bound check failed (KF-6): made
+  /// before the check could run, they would not have been made after it,
+  /// so their bodies are not checked, and a bound check of an instantiation
+  /// made in one of them is a follow-on.  By instantiation name.
+  StringSet FailedBoundInstances;
+  /// The name the instantiation of @p tmpl, named @p name where it was
+  /// requested, with @p args has: InstantiationFrame::Name and
+  /// PendingInstantiation::Name of it.
+  std::string instanceNameOf(const ast::Decl *tmpl, const std::string &name,
+                             const std::vector<ast::Type *> &args);
   /// Whether every struct's fields are known (populateStructs): until then
   /// a struct's size is not, and the checks of the optionals resolved so far
   /// (a class's fields and signatures) wait in DeferredOptionalChecks.

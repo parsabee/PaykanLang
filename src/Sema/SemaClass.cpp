@@ -1641,6 +1641,18 @@ static const std::string &templateDeclName(const ast::Decl *tmpl) {
   return ast::cast<ast::EnumDecl>(tmpl)->getName();
 }
 
+std::string Sema::instanceNameOf(const ast::Decl *tmpl, const std::string &name,
+                                 const std::vector<ast::Type *> &args) {
+  const auto *fn = ast::dyn_cast<ast::FuncDecl>(tmpl);
+  if (!fn)
+    return instantiationName(templateDeclName(tmpl), args);
+  // As instantiateFunction names it: per module.
+  const ModuleTemplates *origin = foreignOrigin(tmpl);
+  return origin ? hiddenQualifier(origin->Module) + names::kQualSep +
+                      instantiationName(fn->getName(), args)
+                : instantiationName(name, args);
+}
+
 void Sema::reportInstantiationClash(const ast::Decl *tmpl,
                                     const std::string &instName,
                                     ast::SourceLocation loc) {
@@ -2504,6 +2516,9 @@ bool Sema::checkPendingInstantiations() {
   // index (not iterate) and copy the entry (the vector may reallocate).
   for (size_t i = 0; i < PendingInstantiations.size(); ++i) {
     PendingInstantiation p = PendingInstantiations[i];
+    // Its bounds failed (reported): its bodies would only repeat that.
+    if (FailedBoundInstances.count(p.Name))
+      continue;
     InstantiationStack.push_back(
         {p.Name, p.RequestLoc, p.RequestFile, p.RequestLines});
     const StringSet *savedParams = CurrentTypeParams;

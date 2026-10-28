@@ -1494,6 +1494,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     instantiations of it are global too, and lists the names `::collections` reserves,
     `_Node`, `_Entry`, `_Table`, `_Heap` and `_Pieces` (docs/language/13-generics.md,
     "Modules" and "Semantic Checks").
+  - A type argument that does not meet its parameter's bound where the bound can be
+    checked only once the program's `impl` blocks are known (a class's or a struct's field,
+    `class Holder { m: collections::HashMap<Foo, int>; }`) was reported, and then the
+    instantiation's bodies were checked anyway: `'Foo' does not implement trait 'Hashable',
+    which 'collections::HashMap' requires of 'K'` came with nine more errors in
+    collections.pkn (`no method 'hash' on type 'Foo'` seven times, and `_Table`'s bound
+    twice), and a `Box<int>` of `struct Box<T: Named>` with `method call on non-class type
+    'int'` from its method's body.  The bound error is now the one error, as it is when the
+    bound is checked at the request: the bodies of such an instantiation are not checked,
+    and the bound of an instantiation made in one is a follow-on.  The order of the
+    diagnostics is unchanged (the bounds were already checked before every body)
+    (docs/language/13-generics.md, "How generic code is checked"; 06-traits.md, "Semantic
+    Checks").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
