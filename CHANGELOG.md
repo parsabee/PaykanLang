@@ -968,8 +968,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     argument of 'show' cannot pass it to ...`) and `look(p, p.reset())` (`... cannot call
     'reset' on it (not a 'view fn')`), a class's method that may change `self` included.
     Every call borrows and writes alike: a function's, a method's, a constructor's,
-    `__super__`'s and a function value's; a lambda's body is not part of the call.
-    Exclusivity was a rule of one call, and these programs ran, the callee given a copy of
+    `__super__`'s and a function value's; a lambda's body is not part of the call.  Each
+    write is one error: an `inout` result passed on is written by the call returning it
+    (`look(h.p, bump(h.slot()))` is the error for `slot`), and a write its own call
+    reports, as sharing storage with another of its arguments (`two(p, p.a)`), is not
+    reported again.  Exclusivity was a rule of one call, and these programs ran, the callee given a copy of
     the value read; `samples/codegen/78_mem_arg_eval_order.pkn` had three of them, now
     `samples/sema` error files.  What the rule does not see is accepted and copied as
     before: a plain parameter (`first(p, bump(p))`), a write through an object

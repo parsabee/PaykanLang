@@ -639,6 +639,59 @@ fn main() -> int {
           "'bumpP'"});
 }
 
+// One write, one error.  A call in a later argument that reports a conflict
+// of its own arguments (`two(p, p.a)`) is not reported again for it, only
+// for its other writes.  And an `inout` result passed on to an `inout`
+// parameter is written by the call that returns it, which is the error, not
+// the call it is passed to: a method that is not a `view fn` (a struct's or
+// a class's), or a function through its `inout` parameter.  (Each was a
+// second error, at the same place or at the argument around it.)
+TEST(ParamMode, ACallInALaterArgumentIsReportedOncePerWrite) {
+  auto r = semaCheck(R"(struct P { a: int; }
+struct H { p: P; q: P; }
+impl H { fn slotP() -> inout P { return self.p; } }
+class K { p: P; fn slotK() -> inout P { return self.p; } }
+fn slot(h: inout H) -> inout P { return h.p; }
+fn look(p: view P, x: int) -> int => p.a;
+fn bump(p: inout P) -> int { p = P(9); return 0; }
+fn bumpN(n: inout int) -> int { n = 9; return 0; }
+fn two(p: inout P, n: inout int) -> int => 0;
+fn main() -> int {
+  p = P(1);
+  h = H(P(1), P(2));
+  k = K(P(1));
+  n = look(p, two(p, p.a));
+  n = look(h.p, bump(h.slotP()));
+  n = look(h.p, bumpN(h.slotP().a));
+  n = look(k.p, bump(k.slotK()));
+  n = look(h.p, bump(slot(h)));
+  n = look(h.q, look(h.p, bump(h.slotP())));
+  return n;
+})");
+  EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
+  const std::string slotP =
+      "'h' contains 'h.p', passed to 'view' parameter 'p' of 'look'; a later "
+      "argument of 'look' cannot call 'slotP' on it (not a 'view fn')";
+  for (const char *at : {":15:22", ":16:23", ":19:32"})
+    EXPECT_NE(r.Diagnostics.find(std::string(at) + ": error: " + slotP),
+              std::string::npos)
+        << at << "\n"
+        << r.Diagnostics;
+  expectErrors(
+      r,
+      {":14:22: error: 'p.a' is part of 'p', passed to 'inout' parameter 'p'; "
+       "it cannot also be passed to 'inout' parameter 'n'",
+       ":14:19: error: 'p' is passed to 'view' parameter 'p' of 'look'; a "
+       "later argument of 'look' cannot pass it to 'inout' parameter 'p' of "
+       "'two'",
+       ":17:22: error: 'k' contains 'k.p', passed to 'view' parameter 'p' of "
+       "'look'; a later argument of 'look' cannot call 'slotK' on it (not a "
+       "'view fn')",
+       ":18:27: error: 'h' contains 'h.p', passed to 'view' parameter 'p' of "
+       "'look'; a later argument of 'look' cannot pass it to 'inout' "
+       "parameter 'h' of 'slot'"});
+}
+
 // What the rule does not see stays accepted, the caller copying what a later
 // argument may write (docs/language/02-basics.md, "Evaluation order"): a
 // plain parameter, a write through an object (by a function, a function

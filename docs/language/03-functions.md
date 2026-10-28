@@ -493,6 +493,14 @@ The other forms, with `look` and `bump` as above, are errors the same way:
 | `Shown(p, bump(p))`, the `__init__` of `Shown` taking `p: view P` (and `__super__(p, bump(p))` likewise) | `'p' is passed to 'view' parameter 'p' of 'Shown'; a later argument of 'Shown' cannot pass it to 'inout' parameter 'p' of 'bump'` |
 | `g(p, bump(p))` with `let g = look;`, and `look(p, b(p))` with `let b = bump;` | `'p' is passed to 'view' parameter '1' of 'g'; a later argument of 'g' cannot pass it to 'inout' parameter 'p' of 'bump'`, `'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter '1' of 'b'` |
 | `look(p, id(bump(p)))`, `look(p, if k == 0 then bump(p) else 0)`: deeper in the argument | the error of `look(p, bump(p))` |
+| `look(h.p, bump(h.slot()))`, `slot` a method of `H` returning `inout P` | `'h' contains 'h.p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot call 'slot' on it (not a 'view fn')`: the call returning an `inout` result is what writes it, not the call it is passed to |
+
+Each write is one error, given by the innermost call that borrows what it writes, and none
+when the call making it reports it already, as sharing storage with another of its own
+arguments. `look(p, two(p, p.a))` with `fn two(p: inout P, n: inout int)` is two errors:
+`'p.a' is part of 'p', passed to 'inout' parameter 'p'; it cannot also be passed to 'inout'
+parameter 'n'`, at `p.a`, and `'p' is passed to 'view' parameter 'p' of 'look'; a later
+argument of 'look' cannot pass it to 'inout' parameter 'p' of 'two'`, at `two`'s `p`.
 
 What this does not see is accepted, and the callee is then given the value read where the
 argument was evaluated, which the caller copies when a later argument may write it

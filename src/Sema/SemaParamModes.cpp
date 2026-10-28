@@ -453,12 +453,17 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
       borrowedPaths(arg, paths);
       std::vector<CallUse> mine;
       mine.reserve(paths.size());
-      for (std::string &path : paths) {
-        writes.push_back({path, callee, modes.name(i), arg, false});
+      for (std::string &path : paths)
         mine.push_back(
             {std::move(path), "passed to " + param, modes.name(i), true});
-      }
       msg = conflictWith(uses, mine);
+      // A write for the calls it is nested in to check, unless its conflict
+      // is reported here, or it is an `inout` result's, which the call
+      // returning it writes already: through an `inout` parameter, or as
+      // the receiver of a method that is not a `view fn`.
+      if (msg.empty() && !borrowResultOf(arg))
+        for (const CallUse &use : mine)
+          writes.push_back({use.Path, callee, modes.name(i), arg, false});
       uses.push_back(std::move(mine));
     }
     if (!msg.empty()) {
