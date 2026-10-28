@@ -312,7 +312,8 @@ impl Pair<K, V> {
 - A parameter may not be repeated (`class P<T, T>`) and may not reuse the name
   of a type in scope (`class Bar<Foo>` when `Foo` is a class, `fn f<Str>`).
 - A generic class may extend a **concrete** class: `class Wrap<T> : Base { … }`.
-  The superclass itself cannot be generic.
+  The superclass itself cannot be generic: `class Full : Half<int>` and
+  `class Full<T> : Half<T>` are syntax errors at the `<`.
 - A generic class may mention its own instantiation in signatures
   (`fn link(n: Node<T>)`).
 
@@ -645,6 +646,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Type parameter used as a value | `y = T;`, `T()` inside a generic body |
 | Duplicate / shadowing type parameter | `class P<T, T>`, `class Bar<Foo>` when `Foo` is a type, `impl Box<Foo>` |
 | `impl` type parameters | `impl Box` or `impl Box<T, U>` for a one-parameter `Box`, `impl A<T>` for a non-generic `A` |
+| Generic superclass | `class Full : Half<int> { … }`, `class Full<T> : Half<T> { … }` (a syntax error, at the `<`; the class body is still parsed): `a superclass cannot be generic: a class, generic or not, extends a class that has no type parameters` |
 | Generic method | A method or a `static fn` declares type parameters of its own, `fn map<U>(x: U) -> U` in a class body or an `impl` block (a syntax error): `a method cannot have type parameters of its own: only a free function is generic ...`, `a 'static fn' cannot have type parameters of its own: ...` |
 | Name reuse | a class or function named like a generic declaration |
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |

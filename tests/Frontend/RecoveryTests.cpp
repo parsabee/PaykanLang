@@ -4,6 +4,7 @@
 // in one file are all reported, at statement, class-member and top-level
 // boundaries, and a file with errors always fails.
 
+#include "paykan/Frontend.h"
 #include "paykan/frontends/RecursiveDescent.h"
 
 #include <gtest/gtest.h>
@@ -278,4 +279,22 @@ TEST(Recovery, UnclosedBlocksAtEndOfFileAreOneError) {
   EXPECT_EQ(c.Errors, 1u) << c.Text;
   auto m = parse("import ::io; fn main() -> int { match 1 { _ { \n");
   EXPECT_EQ(m.Errors, 1u) << m.Text;
+}
+
+// After a superclass's type arguments, an error at the `<`, the class body
+// is still parsed: its own errors are reported, and the next declaration
+// is.  The parse stopped at the `<`, so the body's errors went unreported.
+TEST(Recovery, AGenericSuperclassStillParsesTheBody) {
+  auto r = parse("class Half<T> { v: T; }\n"
+                 "class Full : Half<int> {\n" // 2
+                 "  w int;\n"                 // 3
+                 "  fn f() -> int { return ; }\n"
+                 "  fn g( { }\n" // 5
+                 "}\n"
+                 "class Wrap<T> : Half<(T, T)> { w: T; }\n" // 7
+                 "fn main() -> int { x = ; return 0; }\n"); // 8
+  EXPECT_EQ(r.Errors, 5u) << r.Text;
+  EXPECT_EQ(errorLines(r), (std::vector<size_t>{2, 3, 5, 7, 8})) << r.Text;
+  EXPECT_EQ(r.Diags[0].Message, paykan::frontend::kGenericSuperclass);
+  EXPECT_EQ(r.Diags[3].Message, paykan::frontend::kGenericSuperclass);
 }

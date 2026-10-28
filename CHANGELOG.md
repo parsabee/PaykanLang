@@ -1407,6 +1407,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     class implements a trait with 'impl T for C { ... }'` (`impl T for Box<T>` for a
     generic class); a name that is none of these is still `not defined`
     (docs/language/05-classes.md, 06-traits.md and 11-structs.md, "Semantic Checks").
+  - A superclass with type arguments, `class Full : Half<int>` or `class Full<T> :
+    Half<T>`, was a bare `unexpected '<'; expected '{' to open the class body`, and the
+    parse of the class stopped there, so its body's own syntax errors went unreported.
+    It is now `a superclass cannot be generic: a class, generic or not, extends a class
+    that has no type parameters`, at the `<`; the type arguments are read past and the
+    body is parsed.  The AST interchange reader gives the same error for a superclass
+    such as `"Half<int>"`, where it said the name was not an identifier
+    (docs/language/13-generics.md, docs/grammar.md, docs/plugins/ast-format.md).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

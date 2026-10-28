@@ -236,7 +236,10 @@ block, and a struct has no superclass
 block`, `a struct has no superclass`), and so is an empty body (`struct 'S'
 has no fields: a struct has at least one`).
 A class, struct, enum or function with `typeParams` is generic (a template that
-Sema instantiates); the superclass of a generic class is a plain class name.
+Sema instantiates); the superclass of any class is a plain class name, and type
+arguments after it are a syntax error at the `<` (`a superclass cannot be
+generic: ...`, `frontend::kGenericSuperclass`), after which the class body is
+still parsed.
 Only a free function is generic: a method in a class body or an `impl` block,
 pure virtual or not, and a `static fn` have no `typeParams` of their own (the
 methods of a generic class or struct use its), and `<` after their name is a
