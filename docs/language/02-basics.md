@@ -1127,7 +1127,9 @@ appends to a `Str`, `s -= "!"` is `operator '-' is not defined for types 'Str' a
 and `i >>= 1` with `i: int` is the `>>` error), a `let` variable or a `view` parameter cannot
 be the target, and a sized integer wraps as `+` does. An error in the target is reported
 once, though the target is read as well as written (`xs[y] += 1` with no `y` is one `use of
-undeclared variable 'y'`), and the value's own errors still are.
+undeclared variable 'y'`), and the value's own errors still are (`xs[y] += z` with no `z`
+is two). A target that names no variable or no field ends the check, as for `=`: `q.n += z`
+with no `q` is only the error for `q`.
 
 ```pkn
 import ::io;
