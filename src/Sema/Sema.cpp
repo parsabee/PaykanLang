@@ -2377,6 +2377,15 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                                        "' which has no explicit superclass");
       return nullptr;
     }
+    // It assigns the superclass's fields, which are unassigned only before
+    // anything else has run: a second call would store over the first's.
+    if (node != S.CurrentClassCtx->FrontSuperCall) {
+      S.error(node->getLocation(), std::string("'") + names::kMethodSuper +
+                                       "' may be called only once, as the "
+                                       "first statement of '" +
+                                       names::kMethodInit + "'");
+      return nullptr;
+    }
     auto *superInit = superClass->findMethod(names::kMethodInit);
     // A superclass whose initializer is `___init__` is extended by its
     // module only.
@@ -2413,7 +2422,6 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       S.checkViewArgs(superInit->getParamModes(), expectedParams,
                       node->getArguments(), names::kMethodSuper);
     }
-    S.CurrentClassCtx->SuperInitCalled = true;
     return S.Ctx.getVoidTy();
   }
 

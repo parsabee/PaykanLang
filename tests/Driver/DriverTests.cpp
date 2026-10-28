@@ -4425,3 +4425,32 @@ TEST(Driver, ACopiedSliceIsWarnedAboutWhereverTheProgramIsCompiled) {
   }
   std::filesystem::remove_all(dir);
 }
+
+// A second `__super__(...)` is Sema's error on every path: each of them ran
+// the program, and the second call's stores leaked what the first had stored
+// (`--track-heap`: 2 blocks, 35 bytes).
+TEST(Driver, ASecondSuperCallIsASemaError) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("second_super");
+  const auto src = (dir / "prog.pkn").string();
+  std::ofstream(src)
+      << "class A { s: Str; }\n"
+         "impl A { fn __init__() { self.s = \"v\" + Str(1); } }\n"
+         "class C : A {}\n"
+         "impl C { fn __init__() { __super__(); __super__(); } }\n"
+         "fn main() -> int { let c = C(); return 0; }\n";
+  const std::string exe = (dir / "prog").string();
+  for (const std::string &mode :
+       {std::string(" --check-only "), std::string(" --track-heap "),
+        std::string(" --emit-c "), " build -o " + shellWord(exe) + " "}) {
+    auto r = run(paykanRun() + mode + shellWord(src) + " 2>&1 >/dev/null");
+    EXPECT_EQ(r.exitCode, 1) << mode << r.out;
+    EXPECT_EQ(countErrors(r.out), 1u) << mode << r.out;
+    EXPECT_NE(r.out.find("prog.pkn:4:39: error: '__super__' may be called "
+                         "only once, as the first statement of '__init__'"),
+              std::string::npos)
+        << mode << r.out;
+  }
+  EXPECT_FALSE(std::filesystem::exists(exe));
+  std::filesystem::remove_all(dir);
+}

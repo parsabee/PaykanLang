@@ -962,6 +962,60 @@ TEST(Class, SuperMustBeFirstStatement) {
       << r.Diagnostics;
 }
 
+// `__super__(...)` stores the superclass's fields, which only its first
+// statement finds unset: a second call, after the first or under a branch or
+// a loop, was accepted, and its stores leaked what the first had stored.  A
+// call that is not first is the one error, at the call, also when the
+// superclass's `__init__` does nothing (that one was accepted too).
+TEST(Class, SuperIsCalledOnceAsTheFirstStatement) {
+  const std::string classes = "class A { s: Str; }\n"
+                              "impl A { fn __init__(n: int) { self.s = "
+                              "\"v\" + Str(n); } }\n"
+                              "class E {}\n"
+                              "class C : A { n: int; }\n"
+                              "class F : E { n: int; }\n";
+  struct Case {
+    const char *Impl; // line 6
+    unsigned Column;  // of the rejected call
+  };
+  for (const Case &c : {
+           Case{"impl C { fn __init__() { __super__(1); __super__(2); "
+                "self.n = 0; } }",
+                40},
+           Case{"impl C { fn __init__(b: bool) { __super__(1); if b { "
+                "__super__(2); } self.n = 0; } }",
+                54},
+           Case{"impl C { fn __init__() { __super__(1); self.n = 0; "
+                "while self.n < 1 { __super__(2); self.n = 1; } } }",
+                71},
+           Case{"impl C { fn __init__() { self.n = 0; __super__(1); } }", 38},
+           Case{"impl F { fn __init__() { __super__(); __super__(); "
+                "self.n = 0; } }",
+                39},
+           Case{"impl F { fn __init__() { self.n = 0; __super__(); } }", 38},
+       }) {
+    auto r = semaCheck(classes + c.Impl + "\nfn main() -> int { return 0; }\n");
+    EXPECT_FALSE(r.Ok) << c.Impl;
+    EXPECT_EQ(r.ErrorCount, 1u) << c.Impl << "\n" << r.Diagnostics;
+    EXPECT_NE(r.Diagnostics.find(":6:" + std::to_string(c.Column) +
+                                 ": error: '__super__' may be called only "
+                                 "once, as the first statement of '__init__'"),
+              std::string::npos)
+        << c.Impl << "\n"
+        << r.Diagnostics;
+  }
+
+  // The first statement, then the subclass's own stores, stays valid.
+  for (const char *impl :
+       {"impl C { fn __init__() { __super__(1); self.s = \"x\" + Str(3); "
+        "self.n = 0; } }",
+        "impl F { fn __init__() { __super__(); self.n = 0; } }",
+        "impl F { fn __init__() { self.n = 0; } }"}) {
+    auto r = semaCheck(classes + impl + "\nfn main() -> int { return 0; }\n");
+    EXPECT_TRUE(r.Ok) << impl << "\n" << r.Diagnostics;
+  }
+}
+
 TEST(Class, DerivedWithoutInitPassesTheBaseInitsArguments) {
   auto r = semaCheck(R"(
     class Base {

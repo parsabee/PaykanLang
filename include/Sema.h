@@ -275,7 +275,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     std::string MethodName;  // method currently being checked (empty = none)
     bool ViewMethod = false; // it is a `view fn`: `self` is read-only
     bool SuperInitRequired = false; // __init__ must call __super__
-    bool SuperInitCalled = false;   // __super__ has been called
+    /// The `__super__(...)` that is `__init__`'s first statement: the one
+    /// call it may make (null when it does not begin with one).
+    const ast::CallExpr *FrontSuperCall = nullptr;
   };
 
   ClassContext *CurrentClassCtx = nullptr;

@@ -979,6 +979,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`look(c.p, reset(c))`) or a function value, a write before the borrow or after it has
     ended (`add(look(p, 0), bump(p))`), another field (`look(two.x, bump(two.y))`), a
     lambda's body, and the operands of `==`; a slice's copy is warned about (see Added).
+- **Stability sweep: classes, generics and names across modules.**
+  - `__super__(...)` may be called only once, as the first statement of `__init__`: a
+    second call, after the first or under an `if` or a loop (`__super__(1); if b {
+    __super__(2); }`), is an error at that call, `'__super__' may be called only once, as
+    the first statement of '__init__'`.  It was accepted, and its stores of the
+    superclass's fields leaked what the first call had stored (2 blocks, 35 bytes for one
+    `Str` field), on every path.  A call after another statement is the same error, at the
+    call, also when the superclass's `__init__` does nothing (which was accepted); where it
+    has one it was `'__super__' must be the first statement of '__init__' in class 'C'`, at
+    the method (docs/language/05-classes.md, "Inheritance" and "Semantic Checks").
 
 ### Removed
 

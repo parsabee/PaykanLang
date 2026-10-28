@@ -34,14 +34,13 @@ namespace sema {
 
 namespace {
 
-/// Returns true if `stmt` is a bare call to __super__(...) in statement
-/// position (i.e. `__super__(args);`).
-bool isSuperInitCall(ast::Stmt *stmt) {
-  auto *es = ast::dyn_cast<ast::ExprStmt>(stmt);
+/// The `__super__(args);` that is the first of @p stmts, or null.
+const ast::CallExpr *frontSuperCall(const std::vector<ast::Stmt *> &stmts) {
+  auto *es = stmts.empty() ? nullptr : ast::dyn_cast<ast::ExprStmt>(stmts[0]);
   if (!es)
-    return false;
+    return nullptr;
   auto *call = ast::dyn_cast<ast::CallExpr>(es->getExpr());
-  return call && call->getCalleeName() == names::kMethodSuper;
+  return call && call->getCalleeName() == names::kMethodSuper ? call : nullptr;
 }
 
 } // namespace
@@ -400,9 +399,7 @@ bool Sema::checkInitFieldsAssigned(
       entry[i] = true;
   // `__super__(...)` runs first: in its arguments nothing is assigned.
   std::vector<ast::Stmt *> stmts = body->getStatements();
-  if (!stmts.empty() && isSuperInitCall(stmts.front())) {
-    const auto *call = ast::cast<ast::CallExpr>(
-        ast::cast<ast::ExprStmt>(stmts.front())->getExpr());
+  if (const ast::CallExpr *call = frontSuperCall(stmts)) {
     for (const ast::Expr *arg : call->getArguments())
       checkUses(arg, entry, true);
     stmts.erase(stmts.begin());
@@ -1186,7 +1183,10 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
     // superclass (other than the implicit Obj root) declares an __init__ at
     // all — even a zero-parameter one — so the base initializer always runs.
     classCtx.SuperInitRequired = false;
-    classCtx.SuperInitCalled = false;
+    classCtx.FrontSuperCall =
+        method->getName() == names::kMethodInit
+            ? frontSuperCall(method->getBody()->getStatements())
+            : nullptr;
     if (method->getName() == names::kMethodInit && ct->getSuperClass() &&
         ct->getSuperClass() != Ctx.getObjTy()) {
       auto *superInit = ct->getSuperClass()->findMethod(names::kMethodInit);
@@ -1242,39 +1242,27 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
                                            "' does not always return a value");
           ok = false;
         }
-        if (classCtx.SuperInitRequired) {
-          const auto &stmts = method->getBody()->getStatements();
-          bool firstIsSuper = !stmts.empty() && isSuperInitCall(stmts.front());
-          if (!firstIsSuper) {
-            // Distinguish "never called" from "called but not first" so the
-            // diagnostic points the programmer at the actual fix.
-            if (classCtx.SuperInitCalled)
-              error(method->getLocation(),
-                    std::string("'") + names::kMethodSuper +
-                        "' must be the first statement of '" +
-                        names::kMethodInit + "' in class '" + node->getName() +
-                        "'");
-            else {
-              const std::string &super = ct->getSuperClass()->getName();
-              std::string msg = "'";
-              msg += names::kMethodInit;
-              msg += "' in class '" + node->getName() + "' must call '";
-              msg += names::kMethodSuper;
-              msg += "' as its first statement because its superclass '";
-              msg += super + "' ";
-              if (auto d = DefaultInits.find(super); d != DefaultInits.end()) {
-                msg += "has fields to initialize (its default '";
-                msg += names::kMethodInit;
-                msg += "' takes " + paramList(d->second) + ")";
-              } else {
-                msg += "has an '";
-                msg += names::kMethodInit;
-                msg += "'";
-              }
-              error(method->getLocation(), msg);
-            }
-            ok = false;
+        // A `__super__(...)` anywhere but first was reported at the call, so
+        // a body that checked calls it first or not at all.
+        if (classCtx.SuperInitRequired && !classCtx.FrontSuperCall) {
+          const std::string &super = ct->getSuperClass()->getName();
+          std::string msg = "'";
+          msg += names::kMethodInit;
+          msg += "' in class '" + node->getName() + "' must call '";
+          msg += names::kMethodSuper;
+          msg += "' as its first statement because its superclass '";
+          msg += super + "' ";
+          if (auto d = DefaultInits.find(super); d != DefaultInits.end()) {
+            msg += "has fields to initialize (its default '";
+            msg += names::kMethodInit;
+            msg += "' takes " + paramList(d->second) + ")";
+          } else {
+            msg += "has an '";
+            msg += names::kMethodInit;
+            msg += "'";
           }
+          error(method->getLocation(), msg);
+          ok = false;
         }
 
         // Definite-assignment: every own field must be set on every path out

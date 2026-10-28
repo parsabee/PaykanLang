@@ -199,7 +199,7 @@ virtual: the call runs the version of the object's actual class, even through a 
 the base type.
 
 The derived constructor must call the base constructor with `__super__(...)` as its first
-statement:
+statement, and only there:
 
 ```pkn
 import ::io;
@@ -954,7 +954,10 @@ fn main() -> int {
   default one of a class with no fields, and so are its superclasses', may `__super__()` be left
   out: it does nothing. A derived class without an `__init__` gets the default one, which
   calls `__super__` for it.
-- `__super__(…)` may only be called inside `__init__`.
+- `__super__(…)` may only be called inside `__init__`, and only once, as its first statement.
+  It assigns the base's fields, which only the first statement finds unassigned: a second
+  call, after the first or under an `if` or a loop, or one after another statement, is an
+  error (`'__super__' may be called only once, as the first statement of '__init__'`).
 - A method with the same name as a base method is an **override**. The override must have the
   same parameter and return types, and keep each parameter's mode (`view`, `inout`; see
   [Parameter modes](03-functions.md#parameter-modes-view-and-inout)) and the `view fn`
@@ -1159,7 +1162,8 @@ created for that argument list. See [Generics](13-generics.md).
 | `self` used before every field is assigned | A method called on `self`, `self` passed, stored, returned or captured in `__init__` before every field is assigned, or in `__super__(...)`'s arguments: `'self' is used before every field is assigned: 'start' is not assigned yet` |
 | `__init__` with a result type | `fn __init__() -> Str`: `'__init__' cannot have a result type: it sets up 'self' and returns nothing` |
 | Default `__init__` arguments | A class without an `__init__` is constructed with other than its superclass constructor's arguments followed by its fields (`Point()` for `class Point { x: int; }`) |
-| `__super__(…)` not first | Derived `__init__` body does not begin with `__super__(…)` |
+| `__super__(…)` missing | A derived `__init__` whose base has one (other than the default one of a class with no fields) does not begin with `__super__(…)`: `'__init__' in class 'Dog' must call '__super__' as its first statement because its superclass 'Animal' has an '__init__'` |
+| `__super__(…)` twice or not first | A `__super__(…)` call that is not the first statement of `__init__`: a second one, after the first or under an `if` or a loop, or one after another statement: `'__super__' may be called only once, as the first statement of '__init__'`, at the call |
 | `__super__(…)` outside `__init__` | `__super__(…)` called in any method other than `__init__` |
 | Direct call to `destroy` | User code calls `obj.destroy()` explicitly |
 | `weak` field of the wrong type | `weak f: Node;` (not optional) or `weak f: int?;` (not a class): `'weak' field 'f' of class 'C' must be optional ...` / `... has type 'int?'; a weak reference is an optional class type` |
