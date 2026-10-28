@@ -12,6 +12,9 @@
 #include "Names.h"
 #include "Sema.h"
 
+#include <algorithm>
+#include <optional>
+
 namespace paykan {
 namespace sema {
 
@@ -76,20 +79,22 @@ std::string conflictWith(const std::vector<std::vector<CallUse>> &uses,
   return "";
 }
 
-/// A place a call borrows until it runs: a `view` argument's, or the
-/// receiver's of a struct's `view fn`.
+/// A place a call borrows until it runs: what it passes as argument @c Arg
+/// to a `view` parameter, or (no @c Arg) its receiver, a struct, for a
+/// `view fn`.  No call in an argument after it may write it.
 struct Lent {
   std::string Path;
-  std::string What;  // "passed to 'view' parameter 'xs' of 'sum'", ...
-  std::string Later; // "a later argument of 'sum'", ...
-  size_t From = 0;   // the first argument whose calls cannot write it
+  std::optional<size_t> Arg;
 };
 
-/// Why @p path, which a call in a later argument writes (@p what: "pass it
-/// to 'inout' parameter 'a' of 'bump'", ...), cannot share storage with
-/// @p lent; "" if it can.
-std::string nestedConflict(const Lent &lent, const std::string &path,
-                           const std::string &what) {
+/// Why @p path, which a call of @p writer in a later argument writes (passed
+/// to its `inout` parameter @p param, or, with no @p param, the receiver of
+/// @p writer, a method that may change it), cannot share storage with
+/// @p lent, borrowed by a call of @p callee with @p modes; "" if it can.
+std::string nestedConflict(const Lent &lent, const ast::ParamModes &modes,
+                           const std::string &callee, const std::string &path,
+                           const std::string &writer,
+                           const std::optional<std::string> &param) {
   if (!overlaps(lent.Path, path))
     return "";
   std::string why = "'" + path + "' ";
@@ -98,7 +103,17 @@ std::string nestedConflict(const Lent &lent, const std::string &path,
   else
     why += (path.size() > lent.Path.size() ? "is part of '" : "contains '") +
            lent.Path + "', ";
-  return why + lent.What + "; " + lent.Later + " cannot " + what;
+  if (lent.Arg)
+    why += "passed to 'view' parameter '" + modes.name(*lent.Arg) + "' of '" +
+           callee + "'; a later argument";
+  else
+    why += "the receiver of 'view fn " + callee + "'; an argument";
+  why += " of '" + callee + "' cannot ";
+  if (param)
+    why += "pass it to 'inout' parameter '" + *param + "' of '" + writer + "'";
+  else
+    why += "call '" + writer + "' on it (not a 'view fn')";
+  return why;
 }
 
 /// The calls evaluating @p e makes, @p e among them, in the order they run:
@@ -345,11 +360,12 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
   // different chains that might reach the same object at run time (`a.n`
   // and `b.n`) are not checked, and a plain parameter is a copy.
   std::vector<std::vector<CallUse>> uses;
-  // What the call writes, for the calls it is an argument of; and what it
-  // borrows until it runs, which no call in a later argument may write.
+  // What the call writes, for the calls it is an argument of; what it
+  // borrows until it runs, which no call in a later argument may write; and
+  // the arguments whose own conflict or type error was reported.
   std::vector<CallWrite> writes;
   std::vector<Lent> lent;
-  std::vector<bool> reported(args.size(), false);
+  std::vector<size_t> reported;
   // A struct's method that may change `self` changes the receiver's
   // storage, which the lowering must know of (ast::Expr::isChangedByCall).
   if (receiver && method && !method->isView() &&
@@ -364,15 +380,13 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
     const std::string what =
         method->isView() ? "the receiver of 'view fn " + callee + "'"
                          : "the receiver of '" + callee + "' (not a 'view fn')";
-    const std::string changes = "call '" + callee + "' on it (not a 'view fn')";
-    const std::string later = "an argument of '" + callee + "'";
     std::vector<CallUse> recv;
     recv.reserve(paths.size());
     for (std::string &path : paths) {
       if (!method->isView())
-        writes.push_back({path, changes, receiver, false});
-      if (lends)
-        lent.push_back({path, what, later, 0});
+        writes.push_back({path, callee, std::nullopt, receiver, false});
+      if (lends && !args.empty())
+        lent.push_back({path, std::nullopt});
       recv.push_back({std::move(path), what, "", !method->isView()});
     }
     uses.push_back(std::move(recv));
@@ -382,7 +396,7 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
     ast::Type *argTy = arg->getResolvedType();
     // An argument of the wrong type was reported by the call's own check.
     if (!argTy || !isAssignable(paramTys[i], argTy)) {
-      reported[i] = true;
+      reported.push_back(i);
       continue;
     }
     if (modes.mode(i) == ast::ParamMode::View) {
@@ -391,22 +405,20 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
       arg->setViewedByCall(true);
       std::vector<std::string> paths;
       borrowedPaths(arg, paths);
-      const std::string param = "'view' parameter '" + modes.name(i) + "'";
-      std::string lends = "passed to " + param;
-      lends += " of '" + callee + "'";
-      const std::string later = "a later argument of '" + callee + "'";
       std::vector<CallUse> mine;
       mine.reserve(paths.size());
       for (std::string &path : paths) {
-        lent.push_back({path, lends, later, i + 1});
-        mine.push_back(
-            {std::move(path), "passed to " + param, modes.name(i), false});
+        if (i + 1 < args.size())
+          lent.push_back({path, i});
+        mine.push_back({std::move(path),
+                        "passed to 'view' parameter '" + modes.name(i) + "'",
+                        modes.name(i), false});
       }
       std::string msg = conflictWith(uses, mine);
       uses.push_back(std::move(mine));
       if (!msg.empty()) {
         error(arg->getLocation(), msg);
-        reported[i] = true;
+        reported.push_back(i);
         ok = false;
       }
       continue;
@@ -439,12 +451,10 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
       // An `inout` result passes on what its call borrowed.
       std::vector<std::string> paths;
       borrowedPaths(arg, paths);
-      std::string passes = "pass it to " + param;
-      passes += " of '" + callee + "'";
       std::vector<CallUse> mine;
       mine.reserve(paths.size());
       for (std::string &path : paths) {
-        writes.push_back({path, passes, arg, false});
+        writes.push_back({path, callee, modes.name(i), arg, false});
         mine.push_back(
             {std::move(path), "passed to " + param, modes.name(i), true});
       }
@@ -453,7 +463,7 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
     }
     if (!msg.empty()) {
       error(arg->getLocation(), msg);
-      reported[i] = true;
+      reported.push_back(i);
       ok = false;
     }
   }
@@ -463,10 +473,11 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
   // change it.  A call writing it through an object, or through a function
   // value, is not seen here, and the caller copies what such a call may
   // write (SnapshotReads in the lowering).  A lambda's body runs later.
+  std::vector<const ast::Expr *> calls;
   for (size_t j = 0; j < args.size() && !lent.empty(); ++j) {
-    if (reported[j])
-      continue; // the call's own conflict, or a type error, was reported
-    std::vector<const ast::Expr *> calls;
+    if (std::find(reported.begin(), reported.end(), j) != reported.end())
+      continue;
+    calls.clear();
     callsIn(args[j], calls);
     for (const ast::Expr *c : calls) {
       auto it = CallWrites.find(c);
@@ -474,9 +485,10 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
         continue;
       for (CallWrite &w : it->second)
         for (const Lent &l : lent) {
-          if (w.Reported || l.From > j)
+          if (w.Reported || (l.Arg && *l.Arg >= j))
             continue;
-          if (std::string why = nestedConflict(l, w.Path, w.What);
+          if (std::string why =
+                  nestedConflict(l, modes, callee, w.Path, w.Callee, w.Param);
               !why.empty()) {
             error(w.At->getLocation(), why);
             w.Reported = true;
@@ -485,9 +497,7 @@ bool Sema::checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
         }
     }
   }
-  if (writes.empty())
-    CallWrites.erase(call);
-  else
+  if (!writes.empty())
     CallWrites[call] = std::move(writes);
   return ok;
 }

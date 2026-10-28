@@ -1407,8 +1407,9 @@ private:
   /// `inout` parameter, or the receiver of a method that may change it.
   struct CallWrite {
     std::string Path;
-    /// "pass it to 'inout' parameter 'a' of 'bump'", ...
-    std::string What;
+    /// The call's callee, and the `inout` parameter (none for the receiver).
+    std::string Callee;
+    std::optional<std::string> Param;
     /// The argument or the receiver naming it, where a conflict is reported.
     const ast::Expr *At = nullptr;
     /// Whether a call it is nested in reported it already.
