@@ -1059,6 +1059,78 @@ TEST(BorrowedResult, InoutResultsWriteThrough) {
   guard.expectNoLeaks("inout results");
 }
 
+// A field of a conditional's object is a borrowed result when it is one on
+// each branch: an `inout` result is the field of the object the chosen
+// branch holds, written through by an `inout` local and an `inout`
+// argument (an `int` and a string, nested conditionals, an object in a
+// tuple, `self` or a parameter), and the object stays alive while the
+// result is used though another reference replaces it; a `view` result
+// reads the field (of an object, of a struct).  (Sema rejected each: `...
+// must be part of 'self' or of ... parameter, not a new value`.)
+TEST(BorrowedResult, AFieldOfAConditionalIsWrittenThrough) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(import ::io;
+    class K { n: int; s: Str; }
+    class T {
+      n: int; k: K;
+      fn either(o: inout T, c: bool) -> inout int { return (if c then self else o).n; }
+      view fn name(o: view T, c: bool) -> view Str { return (if c then self else o).k.s; }
+    }
+    class H { k: K; }
+    struct P { x: int; s: Str; }
+    fn pick(a: inout K, b: inout K, c: bool) -> inout int { return (if c then a else b).n; }
+    fn pickS(a: inout K, b: inout K, c: bool) -> inout Str { return (if c then a else b).s; }
+    fn nest(a: inout K, b: inout K, d: inout K, c: bool, e: bool) -> inout int {
+      return (if c then (if e then a else b) else d).n;
+    }
+    fn tup(t: inout (K, int), u: inout (K, int), c: bool) -> inout int {
+      return (if c then t else u).0.n;
+    }
+    fn pv(a: view K, b: view K, c: bool) -> view Str { return (if c then a else b).s; }
+    fn pvs(a: view P, b: view P, c: bool) -> view Str { return (if c then a else b).s; }
+    fn bump(n: inout int) { n += 1; }
+    fn add(s: inout Str) { s = s + "+"; }
+    fn main() -> int {
+      a = K(1, "a" + "");
+      b = K(2, "b" + "");
+      p: inout = pick(a, b, True);
+      p = p + 10;
+      bump(pick(a, b, False));
+      q: inout = pickS(a, b, False);
+      q = q + "!";
+      add(pickS(a, b, True));
+      io::println(Str(a.n) + " " + Str(b.n) + " " + a.s + " " + b.s);
+      d = K(3, "d" + "");
+      bump(nest(a, b, d, True, False));
+      bump(nest(a, b, d, False, True));
+      t = (K(4, "t" + ""), 0);
+      u = (K(5, "u" + ""), 0);
+      bump(tup(t, u, False));
+      io::println(Str(b.n) + " " + Str(d.n) + " " + Str(t.0.n) + " " + Str(u.0.n));
+      let x = T(6, K(0, "x" + ""));
+      y = T(7, K(0, "y" + ""));
+      bump(x.either(y, True));
+      bump(x.either(y, False));
+      io::println(Str(x.n) + " " + Str(y.n) + " " + x.name(y, False) + x.name(y, True));
+      let h = H(K(8, "h" + ""));
+      let g = h;
+      e = K(9, "e" + "");
+      r: inout = pickS(h.k, e, True);
+      g.k = K(0, "new" + "");
+      r = r + "?";
+      io::print(r + " ");
+      io::println(h.k.s);
+      v: view = pv(a, b, True);
+      w: view = pvs(P(1, "p" + "1"), P(2, "p" + "2"), False);
+      io::println(v + " " + w);
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "11 3 a+ b!\n4 4 4 6\n7 8 yx\nh? new\na+ p2\n");
+  guard.expectNoLeaks("a field of a conditional as a borrowed result");
+}
+
 // An `inout` result of a tuple, which is held in place, is the address of
 // its storage: it is written through (by an `inout` local, an `inout`
 // argument or another `inout` result), read in place, and copied out only

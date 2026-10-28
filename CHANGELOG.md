@@ -1306,6 +1306,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the storage it returned on every way out of the arm, and what the call borrowed (its
     receiver, its `inout` arguments) cannot be used but through the binding while it is
     live (docs/language/08-match.md, "Borrowing the subject").
+  - A field of a conditional's object could not be a borrowed result, though a conditional
+    of two places can: `return (if c then a else b).n;` with `a` and `b` `inout`
+    parameters of a class, as an `-> inout int`, and `return (if c then a else b).s;` with
+    `view` parameters, as a `-> view Str`, were `... must be part of 'self' or of ...
+    parameter, not a new value`.  Each is accepted when it is one on each branch, nested
+    conditionals and an object in a tuple included; the `inout` result is the field of
+    the object the chosen branch holds, which the caller keeps alive while the result is
+    used.  A branch that is not one gives its own error: a copy, a local, a `view` for an
+    `inout` result, and an object reached through a field of another, `(if c then o else
+    self.k).n`, which `self.k.n` is too.  A conditional's struct or tuple is still a
+    temporary, whose field or element no `inout` result is (docs/language/03-functions.md,
+    "Borrowed results").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

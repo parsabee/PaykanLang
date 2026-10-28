@@ -1311,7 +1311,10 @@ private:
   /// Why @p e cannot be returned as the current function's borrowed result;
   /// "" when it is part of `self` or of a `view` / `inout` parameter (an
   /// `inout` one, and an `inout` argument's place, for an `inout` result).
-  std::string borrowedResultError(const ast::Expr *e);
+  /// With @p holder, @p e is not what is returned but what holds it, a
+  /// conditional's branch (`a` in `(if c then a else b).n`): what it may
+  /// lend is checked, not that it is a place.
+  std::string borrowedResultError(const ast::Expr *e, bool holder = false);
   /// How many more references the place @p e, one an `inout` result may
   /// borrow (borrowedResultError), could follow and stay in what the
   /// function's caller keeps alive: the object a class's `self` is, and the

@@ -522,6 +522,87 @@ fn main() -> int { return 0; }
   EXPECT_EQ(r.ErrorCount, 14u) << r.Diagnostics;
 }
 
+// A field of a conditional's object, `(if c then a else b).n`, is a field of
+// what either branch holds: a borrowed result when it is one on each branch
+// (of `self`, of an `inout` parameter's object, of a `view` parameter's for
+// a `view` result), nested conditionals and an object in a tuple included.
+// (Each was `... must be part of 'self' or of ... parameter, not a new
+// value`.)  A branch that is not one makes it an error: a copy, a local, a
+// `view` for an `inout` result, and an object reached through a field of
+// another (`self.k1`), which the caller does not keep alive.  A
+// conditional's struct or tuple is a temporary, whose field or element no
+// `inout` result is.
+TEST(BorrowedResult, AFieldOfAConditionalIsOneOnEachBranch) {
+  auto ok = semaCheck(R"(class K { n: int; s: Str; }
+class T {
+  n: int; k: K;
+  fn either(o: inout T, c: bool) -> inout int { return (if c then self else o).n; }
+  view fn name(o: view T, c: bool) -> view Str { return (if c then self else o).k.s; }
+}
+struct P { x: int; s: Str; }
+fn pick(a: inout K, b: inout K, c: bool) -> inout int { return (if c then a else b).n; }
+fn nest(a: inout K, b: inout K, d: inout K, c: bool, e: bool) -> inout int {
+  return (if c then (if e then a else b) else d).n;
+}
+fn tup(t: inout (K, int), u: inout (K, int), c: bool) -> inout int {
+  return (if c then t else u).0.n;
+}
+fn pv(a: view K, b: view K, c: bool) -> view Str { return (if c then a else b).s; }
+fn mixed(a: inout K, b: view K, c: bool) -> view Str { return (if c then a else b).s; }
+fn pvs(a: view P, b: view P, c: bool) -> view Str { return (if c then a else b).s; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  auto r = semaCheck(R"(class K { n: int; s: Str; }
+class H {
+  n: int; k1: K; k2: K;
+  fn far(c: bool) -> inout int { return (if c then self.k1 else self.k2).n; }
+  fn half(o: inout K, c: bool) -> inout int { return (if c then o else self.k1).n; }
+}
+struct P { x: int; s: Str; }
+fn copy(a: K, b: inout K, c: bool) -> inout int { return (if c then a else b).n; }
+fn loc(b: inout K, c: bool) -> inout int {
+  k = K(1, "");
+  return (if c then b else k).n;
+}
+fn vf(a: view K, b: inout K, c: bool) -> inout int { return (if c then b else a).n; }
+fn sp(a: inout P, b: inout P, c: bool) -> inout int { return (if c then a else b).x; }
+fn tp(t: inout (int, int), u: inout (int, int), c: bool) -> inout int {
+  return (if c then t else u).0;
+}
+fn vc(a: view K, b: K, c: bool) -> view Str { return (if c then a else b).s; }
+fn main() -> int { return 0; }
+)");
+  auto into = [](const char *at, const char *fn, const char *place) {
+    return std::string(at) + " error: '" + fn +
+           "' returns an 'inout' reference into '" + place +
+           "', a separate object: an 'inout' result can only point into "
+           "'self' or into an 'inout' parameter's storage; return a copy, or "
+           "call an accessor on '" +
+           place + "' directly";
+  };
+  for (const std::string &diag :
+       {into(":4:41:", "far", "(if ... then self.k1 else self.k2)"),
+        into(":5:54:", "half", "(if ... then o else self.k1)"),
+        std::string(":8:58: error: 'a' is a copy: an 'inout' result must be "
+                    "part of 'self' or of an 'inout' parameter"),
+        std::string(":11:10: error: 'k' is a local: an 'inout' result must be "
+                    "part of 'self' or of an 'inout' parameter"),
+        std::string(":13:61: error: 'a' is a 'view' parameter; it cannot be "
+                    "returned 'inout'"),
+        std::string(":14:62: error: a field of a struct that is not a variable "
+                    "or a field (a temporary, which dies with the statement) "
+                    "cannot be returned 'inout'"),
+        std::string(":16:10: error: an element of a tuple cannot be returned "
+                    "'inout': tuples are immutable"),
+        std::string(":18:54: error: 'b' is a copy: a 'view' result must be "
+                    "part of 'self' or of a 'view' or 'inout' parameter")})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+}
+
 // What an `inout` parameter names stays alive with the object a reference
 // held there refers to, and so does a struct's `self`: one object further,
 // not two (`n.c.k`, `n.arr[1].k`, `s.c.d.x`, `self.c.d.x`, a call's result

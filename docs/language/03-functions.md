@@ -602,9 +602,11 @@ hello 4
 - What a `-> view T` function returns must be part of `self` or of a `view` or `inout`
   parameter: the parameter itself, a field or an element reached from it, a `match` arm's
   name for a `view` of one (`match self.head { n: Node { return n.v; } ... }`), or the
-  borrowed result of another call that borrows only those. A new value, a copy parameter or a local
-  is an error: `'d' is a copy: a 'view' result must be part of 'self' or of a 'view' or
-  'inout' parameter`.
+  borrowed result of another call that borrows only those. A conditional is one when each
+  branch is, and a field of a conditional's object when it is one on each branch
+  (`return (if c then a else b).name;` with `a` and `b` `view` parameters). A new value, a
+  copy parameter or a local is an error: `'d' is a copy: a 'view' result must be part of
+  'self' or of a 'view' or 'inout' parameter`.
 - The caller sees the result as a `view` ([A `view` stays a `view`](#a-view-of-a-reference-stays-a-view)):
   it can be read, passed on to a `view` parameter or bound to a `view` local, and a value
   type can be copied out (`k = b.num();`); nothing changes through it and one that shares
@@ -674,6 +676,12 @@ Output:
   cannot be returned 'inout': tuples are immutable`), of exactly the result's type (`an
   'inout' result has type 'Animal', but what it returns has type 'Dog'`). A `view fn`
   cannot return one.
+- A conditional of two such places is one (`return if first then a else b;`), and so is a
+  field of a conditional's object when it is one on each branch (`return (if c then a else
+  b).n;` with `a` and `b` `inout` parameters of a class): it is in what the chosen branch
+  holds. A conditional's struct or tuple is a temporary, whose field or element is not (`a
+  field of a struct that is not a variable or a field (a temporary, which dies with the
+  statement) cannot be returned 'inout'`).
 - The caller binds it to an `inout` local, passes it on to an `inout` parameter, calls a
   method on it or reads it (`y = b.num() + 1;` copies). It borrows the receiver and the
   arguments to the call's `inout` parameters, as an `inout` local of them would: while a
@@ -701,6 +709,8 @@ used:
   (`return s.b.k;` with `s: inout S` and `b` a class-typed field, `return a[5].k;` with
   `a: inout B[6]`). Not an object in a slice (`a: inout B[]`): its caller keeps none of
   them alive.
+- Wherever both branches of a conditional can point, for a field of its object: `return
+  (if c then n else self.c).k;` is an error, as `return self.c.k;` is (below).
 - Wherever another call's `inout` result can point, when all of it is allowed here: the
   storage of the call's receiver and of each of its `inout` arguments, and the object a
   reference held there refers to when that object can hold the result (the receiver's
