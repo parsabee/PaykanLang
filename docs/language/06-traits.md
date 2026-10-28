@@ -58,8 +58,8 @@ trait Named { view fn name() -> Str; }
 fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
 
 fn main() -> int {
-  s = greet("world");
-  n: Named = "x";
+  let s = greet("world");
+  let n: Named = "x";
   return 0;
 }
 ```
@@ -288,8 +288,8 @@ enum Suit { Hearts, Spades }
 fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
 
 fn main() -> int {
-  p = twice((1, "one"));
-  s = twice(Suit::Spades);
+  let p = twice((1, "one"));
+  let s = twice(Suit::Spades);
   io::println(Str(twice(2).1) + " " + p.1.1 + " " + Str(s.0 == Suit::Spades));
   return 0;
 }

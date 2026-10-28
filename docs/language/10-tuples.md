@@ -19,9 +19,9 @@ its elements the same way. Elements are read with `.0`, `.1` and so on:
 import ::io;
 
 fn main() -> int {
-  pair: (int, Str) = (7, "seven");
-  point = (2.5, -1.0, True);          // (float, float, bool)
-  nested = ("a", (1, 2));             // (Str, (int, int))
+  let pair: (int, Str) = (7, "seven");
+  let point = (2.5, -1.0, True);      // (float, float, bool)
+  let nested = ("a", (1, 2));         // (Str, (int, int))
   io::println(pair.1 + " is " + Str(pair.0));
   io::println(Str(point.0 + point.1));
   io::println(Str(nested.1.0 + nested.1.1));
@@ -116,7 +116,7 @@ content):
 import ::io;
 
 fn main() -> int {
-  scores: (Str, int)[3] = [("ada", 92), ("alan", 85), ("grace", 97)];
+  let scores: (Str, int)[3] = [("ada", 92), ("alan", 85), ("grace", 97)];
   i = 0;
   while i < scores.len() {
     name, score = scores[i];
@@ -191,7 +191,7 @@ fn main() -> int {
   io::println("title '" + title + "', priority '" + priority + "'");
   io::println(splitOnce("no separator", '|'));
 
-  tasks = [Task("a", True), Task("b", False), Task("c", True)];
+  let tasks = [Task("a", True), Task("b", False), Task("c", True)];
   done, pending = stats(tasks);
   io::println(Str(done) + " done, " + Str(pending) + " pending");
   return 0;
@@ -328,13 +328,13 @@ impl Box<T> {
 fn swap(p: (int, Str)) -> (Str, int) { return (p.1, p.0); }  // parameter + return
 
 fn main() -> int {
-  r = Range(10, 25);
+  let r = Range(10, 25);
   lo, hi = r.get();
   t = (1, "one");
-  m = t;                                 // a copy of t
+  let m = t;                             // a copy of t
   t = (2, "two");                        // m is still (1, one)
-  keys: (int, Str)[3] = [(0, "k"); 3];   // three copies of (0, k)
-  b = Box<(Str, int)>(swap(m));          // a tuple type argument
+  let keys: (int, Str)[3] = [(0, "k"); 3];   // three copies of (0, k)
+  let b = Box<(Str, int)>(swap(m));      // a tuple type argument
   io::println(Str(hi - lo) + " " + m.1 + " " + t.1 + " " + keys[2].1);
   io::println(b.get());
   return 0;
@@ -408,8 +408,8 @@ itself, while `-0.0` and `0.0` elements compare equal:
 import ::io;
 
 fn main() -> int {
-  nan = 0.0 / 0.0;
-  t = (1, nan);
+  let nan = 0.0 / 0.0;
+  let t = (1, nan);
   io::println(Str(t == t));               // nan != nan
   io::println(Str(t != t));
   io::println(Str((1, 2.5) == (1, 2.5)));

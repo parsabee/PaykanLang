@@ -239,7 +239,7 @@ impl Person {
 }
 
 fn main() -> int {
-  a = Person("Ada");
+  let a = Person("Ada");
   b = Person("Grace");
   a.friend = b;
   b.friend = a;
@@ -308,7 +308,7 @@ impl Node {
 
 fn main() -> int {
   root = Node("root");
-  a = Node("a");
+  let a = Node("a");
   root.add(a);
   weak w: Node? = root;   // reads as root while something holds it
   weak u = a;             // inferred Node?
@@ -448,8 +448,8 @@ fn report(w: view Watcher) {
 }
 
 fn main() -> int {
-  n = Node("first");
-  w = Watcher(n);
+  let n = Node("first");
+  let w = Watcher(n);
   report(w);
   io::println(consume(n));   // the last use of n: consume holds the only reference
   report(w);                 // consume released it when it returned
@@ -514,10 +514,10 @@ fn clear(l: List) -> int {
 }
 
 fn main() -> int {
-  l = List(Node("first"));
+  let l = List(Node("first"));
   match l.head {
     n: Node {
-      k = clear(l);
+      let k = clear(l);
       io::println(n.name + " " + Str(k));   // n lives until the match ends
     }
     None { }
@@ -587,10 +587,10 @@ fn keep(h: Holder, n: Node) {
 }
 
 fn main() -> int {
-  a = Node("a");
-  w = Watcher(a);
+  let a = Node("a");
+  let w = Watcher(a);
   show(a);                    // lent: main reads a again below
-  h = Holder(None);
+  let h = Holder(None);
   keep(h, a);                 // lent too
   h.n = None;
   io::println("after the field let go: " + state(w));

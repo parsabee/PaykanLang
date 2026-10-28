@@ -23,7 +23,7 @@ import ::io;
 
 fn main() -> int {
   nickname: Str? = None;
-  age: int? = 36;          // an int converts to int? automatically
+  let age: int? = 36;      // an int converts to int? automatically
   io::println(nickname);
   io::println(age);
   nickname = "Gracie";
@@ -46,8 +46,8 @@ arithmetic, not to call a method, not to pass to a parameter of type `T`:
 
 ```pkn
 fn main() -> int {
-  age: int? = 36;
-  nextYear = age + 1;
+  let age: int? = 36;
+  let nextYear = age + 1;
   return 0;
 }
 ```
@@ -127,7 +127,7 @@ impl Person {
 }
 
 fn main() -> int {
-  p = Person("Ada");
+  let p = Person("Ada");
   io::println(p.contact());
   p.email = "ada@example.org";
   io::println(p.contact());
@@ -174,7 +174,7 @@ fn find(head: Node?, wanted: int) -> Node? {
 }
 
 fn main() -> int {
-  list = Node(1, Node(2, Node(3, None)));
+  let list = Node(1, Node(2, Node(3, None)));
   match find(list, 2) {
     n: Node { io::println("found " + Str(n.value)); }
     None    { io::println("not found"); }
@@ -223,7 +223,7 @@ class Task {
   due: Str?;
 
   view fn toString() -> Str {
-    text = (if self.done then "[x] " else "[ ] ") + self.title;
+    let text = (if self.done then "[x] " else "[ ] ") + self.title;
     match self.due {
       d: Str { return text + " (due " + d + ")"; }
       None   { return text; }
@@ -274,7 +274,7 @@ fn setDue(list: TaskList, title: Str, due: Str) {
 }
 
 fn main() -> int {
-  list = TaskList();
+  let list = TaskList();
   list.add("file taxes");
   list.add("buy milk");
   setDue(list, "file taxes", "April 15");
@@ -501,15 +501,15 @@ struct Point { x: int; y: int; }
 fn find(n: int) -> Point? { return if n > 0 then Point(n, n * 2) else None; }
 
 fn main() -> int {
-  ps: Point?[2] = [find(3), find(0)];
+  let ps: Point?[2] = [find(3), find(0)];
   io::println(ps[0].toString() + " " + ps[1].toString());
   io::println(ps[0] == find(3));
-  t: (int, Str)? = (2, "two");
+  let t: (int, Str)? = (2, "two");
   match t {
     v: (int, Str) { io::println(v.1); }
     None          { io::println("nothing"); }
   }
-  s: Suit? = None;
+  let s: Suit? = None;
   match s {
     k: Suit { io::println(k == Suit::Spades); }
     None    { io::println("no suit"); }

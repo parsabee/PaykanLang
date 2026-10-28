@@ -19,7 +19,7 @@ fn main() -> int {
   io::println(42);
   io::println((1, "one"));
   io::println(Point(3, 4));
-  n: int? = None;
+  let n: int? = None;
   io::println(n);
   io::print("no newline, ");
   io::println(True);
@@ -60,7 +60,7 @@ import ::error as err;
 fn main() -> int {
   match io::open("notes.txt", "w") {
     w: Ok {
-      f = w.value;
+      let f = w.value;
       f.write("first line\n");
       f.write("second line\n");
     }
@@ -131,7 +131,7 @@ fn main() -> int {
 
   match io::open("shopping.txt", "r") {
     r: Ok {
-      f = r.value;
+      let f = r.value;
       n = 0;
       while True {
         match f.readln() {
@@ -174,7 +174,7 @@ fn main() -> int {
   while True {
     match io::stdin().readln() {
       read: Ok {
-        line = read.value;
+        let line = read.value;
         // drop the trailing newline before parsing
         digits = "";
         i = 0;
@@ -303,8 +303,8 @@ class Task {
   priority: Priority;
 
   view fn toString() -> Str {
-    box = if self.done then "[x] " else "[ ] ";
-    marker = if self.priority == Priority::High then " !" else "";
+    let box = if self.done then "[x] " else "[ ] ";
+    let marker = if self.priority == Priority::High then " !" else "";
     return box + self.title + marker;
   }
 }
@@ -420,7 +420,7 @@ import ::io;
 import tasks::{task, text, list};
 
 fn load(path: Str) -> list::TaskList {
-  tasks = list::TaskList();
+  let tasks = list::TaskList();
   match io::open(path, "r") {
     r: Ok {
       while True {
@@ -442,7 +442,7 @@ fn addLine(tasks: list::TaskList, line: Str) {
     io::printerrln("skipping bad line: " + line);
     return;
   }
-  t = task::Task(title, task::parsePriority(priority));
+  let t = task::Task(title, task::parsePriority(priority));
   t.done = done == "1";
   if !tasks.addTask(t) { io::printerrln("the list is full, skipping: " + line); }
 }
@@ -450,10 +450,10 @@ fn addLine(tasks: list::TaskList, line: Str) {
 fn save(tasks: list::TaskList, path: Str) -> bool {
   match io::open(path, "w") {
     w: Ok {
-      f = w.value;
+      let f = w.value;
       i = 0;
       while i < tasks.count {
-        t = tasks.tasks[i];
+        let t = tasks.tasks[i];
         f.write((if t.done then "1" else "0") + "|"
                 + task::priorityName(t.priority) + "|" + t.title + "\n");
         i = i + 1;
@@ -506,8 +506,8 @@ fn titleFrom(args: view Str[], from: int) -> (Str, task::Priority) {
 
 fn main(args: view Str[]) -> int {
   if args.len() < 2 { return usage(); }
-  path = "tasks.txt";
-  tasks: list::TaskList = store::load(path);
+  let path = "tasks.txt";
+  let tasks: list::TaskList = store::load(path);
   changed = False;
   match args[1] {
     "add" {

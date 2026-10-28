@@ -47,8 +47,8 @@ import ::io;
 import geometry::shapes;
 
 fn main() -> int {
-  c: shapes::Circle = shapes::Circle(2.0);
-  k = shapes::Kind::Round;
+  let c: shapes::Circle = shapes::Circle(2.0);
+  let k = shapes::Kind::Round;
   io::println("area " + Str(shapes::area(c)));
   io::println(Str(k == shapes::Kind::Round));
   return 0;
@@ -314,10 +314,10 @@ import geometry::segment;
 import geometry::point;   // must import point explicitly to NAME Point
 
 fn main() -> int {
-  p1: point::Point   = point::Point(0, 0);
-  p2: point::Point   = point::Point(3, 4);
-  s:  segment::Segment = segment::Segment(p1, p2);
-  a = s.a;                // a Point even without `import geometry::point`
+  let p1: point::Point   = point::Point(0, 0);
+  let p2: point::Point   = point::Point(3, 4);
+  let s:  segment::Segment = segment::Segment(p1, p2);
+  let a = s.a;            // a Point even without `import geometry::point`
   return a.x;
 }
 ```
@@ -375,8 +375,8 @@ class Task {
   priority: Priority;
 
   view fn toString() -> Str {
-    box = if self.done then "[x] " else "[ ] ";
-    marker = if self.priority == Priority::High then " !" else "";
+    let box = if self.done then "[x] " else "[ ] ";
+    let marker = if self.priority == Priority::High then " !" else "";
     return box + self.title + marker;
   }
 }
@@ -506,8 +506,8 @@ fn run(tasks: tl::TaskList, line: Str) {
 }
 
 fn main() -> int {
-  tasks = tl::TaskList();
-  script = ["add buy milk", "add fix the leak|high", "add call mum|low",
+  let tasks = tl::TaskList();
+  let script = ["add buy milk", "add fix the leak|high", "add call mum|low",
             "done 1", "done 9", "list"];
   i = 0;
   while i < script.len() {
