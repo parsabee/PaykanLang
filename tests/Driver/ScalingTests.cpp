@@ -383,8 +383,8 @@ TEST(Scaling, AModulesCacheKeyIsMadeFromItsOwnCode) {
 // resolved the arguments it was given again, element by element, building
 // for each element a description that holds the whole instantiation's
 // name, so the chain took 10.8 s of processor time to check, and one level
-// more about eight times that (SW-04).  A type resolved once is itself at
-// once now, and the chain takes 0.07 s.
+// more 115 s (SW-04).  A type resolved once is itself at once now, and the
+// chain takes 0.07 s.
 TEST(Scaling, AnInstantiationChainResolvesEachArgumentOnce) {
   ScratchDir dir("chain");
   std::string src = "import ::io;\n";
@@ -403,7 +403,9 @@ TEST(Scaling, AnInstantiationChainResolvesEachArgumentOnce) {
 // A template that instantiates itself with a tuple of two or three of its
 // argument stops once the name passes 4,096 characters (SW-04).  The depth
 // limit (16) stopped the first after 1.5 s, with 900 KB of names in its
-// notes, and the second ran for more than 28 minutes; each takes 0.01 s now.
+// notes, and the second ran for more than 5 minutes; each takes 0.01 s now.
+// The second runs only once the first has stopped at the name limit, in
+// time: a compiler without the limit would run on.
 TEST(Scaling, PolymorphicRecursionStopsAtTheNameLimit) {
   ScratchDir dir("polymorphic");
   for (const std::string tuple : {"(T, T)", "(T, T, T)"}) {
@@ -412,11 +414,11 @@ TEST(Scaling, PolymorphicRecursionStopsAtTheNameLimit) {
                                ">?; }\nfn main() -> int { let s = "
                                "C<int>(1, None); return 0; }\n");
     Timed t = timed(std::string(kPaykan) + " --check-only " + path + " 2>&1");
-    EXPECT_EQ(t.ExitCode, 1) << tuple;
-    EXPECT_NE(t.Out.find("exceeds the maximum instantiation name length"),
+    ASSERT_EQ(t.ExitCode, 1) << tuple;
+    ASSERT_NE(t.Out.find("exceeds the maximum instantiation name length"),
               std::string::npos)
         << t.Out.substr(0, 2000);
-    EXPECT_LT(t.Seconds, 0.5 * slowdown()) << tuple;
+    ASSERT_LT(t.Seconds, 0.5 * slowdown()) << tuple;
   }
 }
 
