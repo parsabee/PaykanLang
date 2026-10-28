@@ -19,11 +19,16 @@ static std::string writeFile(const std::string &dir, const std::string &relPath,
   return full.string();
 }
 
+namespace {
+// This file's own: other files of the executable declare a SemaFileResult
+// without the count, and an assignment of one of theirs, which the linker
+// may take for this one's, would leave the count unassigned.
 struct SemaFileResult {
   bool Ok;
   std::string Diagnostics;
   unsigned ErrorCount = 0;
 };
+} // namespace
 
 static SemaFileResult semaCheckFile(const std::string &filePath,
                                     const std::string &projectRoot) {

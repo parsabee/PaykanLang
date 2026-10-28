@@ -2422,6 +2422,10 @@ private:
 
   /// Check the bodies of every pending instantiation (transitively).
   bool checkPendingInstantiations();
+  /// Check the bodies of the pending instantiations, and of those they
+  /// queue in turn, and empty the list; move to @p held each one made only
+  /// for failed bounds so far (madeOnlyForFailedBounds).
+  bool checkPendingInstantiationBodies(std::vector<PendingInstantiation> &held);
 
   /// Append the instantiated declarations to the TranslationUnit.
   void injectInstantiations(ast::TranslationUnit *tu);

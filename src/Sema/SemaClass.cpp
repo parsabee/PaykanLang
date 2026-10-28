@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <iterator>
 #include <unordered_map>
 
 namespace {
@@ -2587,6 +2588,31 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
 
 bool Sema::checkPendingInstantiations() {
   bool ok = true;
+  // Made only for those whose bounds failed: a check made at the request
+  // would not have made it either (KF-6).  Held until every body has been
+  // checked, as one may still ask for it (`Inner<Foo>` in the body of a
+  // `use<int>` queued after it), and then checked with them.
+  std::vector<PendingInstantiation> held;
+  for (;;) {
+    if (!checkPendingInstantiationBodies(held))
+      ok = false;
+    auto freed = std::stable_partition(held.begin(), held.end(),
+                                       [&](const PendingInstantiation &p) {
+                                         return madeOnlyForFailedBounds(p.Name);
+                                       });
+    if (freed == held.end())
+      break;
+    PendingInstantiations.assign(std::make_move_iterator(freed),
+                                 std::make_move_iterator(held.end()));
+    held.erase(freed, held.end());
+  }
+  SuppressedFollowOns += held.size();
+  return ok;
+}
+
+bool Sema::checkPendingInstantiationBodies(
+    std::vector<PendingInstantiation> &held) {
+  bool ok = true;
   // A body may request further instantiations, which append to the list, so
   // index (not iterate) and copy the entry (the vector may reallocate).
   for (size_t i = 0; i < PendingInstantiations.size(); ++i) {
@@ -2594,10 +2620,8 @@ bool Sema::checkPendingInstantiations() {
     // Its bounds failed (reported): its bodies would only repeat that.
     if (FailedBoundInstances.count(p.Name))
       continue;
-    // Made only for those whose bounds failed: a check made at the request
-    // would not have made it either (KF-6).
     if (madeOnlyForFailedBounds(p.Name)) {
-      ++SuppressedFollowOns;
+      held.push_back(std::move(p));
       continue;
     }
     InstantiationStack.push_back(

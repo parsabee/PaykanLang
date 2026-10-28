@@ -1544,8 +1544,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     nor are those of an instantiation only it uses (`Inner<Foo>` for its field `i:
     Inner<T>?`, which gave `no method 'h' on type 'Foo'`, in the library's file when the
     template is another module's), and the bound of an instantiation made in one is a
-    follow-on.  An instantiation the program also uses itself is checked as before.  The order of the
-    diagnostics is unchanged (the bounds were already checked before every body)
+    follow-on.  An instantiation the program also uses itself, in a declaration or in any
+    body (a generic function's or a generic class's method included), is checked as before;
+    when only a body checked after it asks for it, its errors come after that body's.  The
+    order of the other diagnostics is unchanged (the bounds were already checked before
+    every body)
     (docs/language/13-generics.md, "How generic code is checked"; 06-traits.md, "Semantic
     Checks").
   - Checking that a struct, or an enum's variant, does not hold itself in place looked into

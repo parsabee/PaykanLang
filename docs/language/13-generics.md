@@ -116,7 +116,8 @@ is an error at the call (`'Task' does not implement trait 'Named', which 'f' req
 bounds of the templates it uses or the bodies of the instantiations only it uses, also when
 it is named before the program's `impl` blocks are known (a field's type, `m:
 collections::HashMap<Foo, int>`), where the bound is checked once they are. An
-instantiation the program uses elsewhere too is checked as ever.
+instantiation the program uses elsewhere too, in a declaration or in any body (a generic
+function's or a generic class's method included), is checked as ever.
 
 Bounds or not, the body of a generic class or function is type-checked again for each set
 of type arguments it is used with. If an operation does not work for one of them, the error

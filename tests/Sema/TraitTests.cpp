@@ -338,14 +338,25 @@ TEST(Traits, AFailedDeferredBoundIsTheOneError) {
   expectAll(r, {":7:16: error: 'Foo' does not implement trait 'H', which "
                 "'Outer' requires of 'T'"});
   // Its own request, by the program: a field before the failed one, one
-  // after, or a body's.
+  // after, or a body's, also one checked after it, an instantiation's (a
+  // generic function's, a generic class's method).
+  const std::string holder = "class Holder { o: Outer<Foo>?; }\n";
   const std::string uses[] = {
-      "class Other { i: Inner<Foo>?; }\nclass Holder { o: Outer<Foo>?; }\n"
-      "fn main() -> int { return 0; }\n",
-      "class Holder { o: Outer<Foo>?; }\nclass Other { i: Inner<Foo>?; }\n"
-      "fn main() -> int { return 0; }\n",
-      "class Holder { o: Outer<Foo>?; }\n"
-      "fn main() -> int { let i = Inner<Foo>(Foo(1)); return i.get(); }\n"};
+      "class Other { i: Inner<Foo>?; }\n" + holder +
+          "fn main() -> int { return 0; }\n",
+      holder + "class Other { i: Inner<Foo>?; }\n" +
+          "fn main() -> int { return 0; }\n",
+      holder +
+          "fn main() -> int { let i = Inner<Foo>(Foo(1)); return i.get(); }\n",
+      holder + "fn use<U>(u: U) -> int { let i = Inner<Foo>(Foo(1)); "
+               "return i.get(); }\n"
+               "fn main() -> int { return use<int>(1); }\n",
+      holder + "class W<U> { u: U; }\n" +
+          "impl W<U> {\n"
+          "  view fn run() -> int { let i = Inner<Foo>(Foo(1)); "
+          "return i.get(); }\n"
+          "}\n"
+          "fn main() -> int { let w = W<int>(1); return w.run(); }\n"};
   for (const std::string &use : uses) {
     r = semaCheck(unbounded + use);
     EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;

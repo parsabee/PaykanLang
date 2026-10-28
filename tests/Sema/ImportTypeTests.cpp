@@ -1174,6 +1174,26 @@ TEST(Module, AFailedDeferredBoundChecksNoBodyOfTheLibrarys) {
             "main.pkn:3:16: error: 'Foo' does not implement trait 'Hashable', "
             "which 't::Outer' requires of 'T'\n")
       << r.Diagnostics;
+  // Used by the importer too, in a body checked after it: the library's
+  // body is checked for it.
+  r = semaCheckFile(writeFile(dir, "main2.pkn",
+                              "import lib::t;\n"
+                              "class Foo { x: int; }\n"
+                              "class Holder { o: t::Outer<Foo>?; }\n"
+                              "fn use<U>(u: U) -> int {\n"
+                              "  let i = t::Inner<Foo>(Foo(1));\n"
+                              "  return i.get();\n"
+                              "}\n"
+                              "fn main() -> int { return use<int>(1); }\n"),
+                    dir);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main2.pkn:3:16: error: 'Foo' does not implement trait 'Hashable', "
+            "which 't::Outer' requires of 'T'\n"
+            "t.pkn:2:47: error: no method 'hash' on type 'Foo'\n"
+            "t.pkn:3:28: note: in instantiation of 'Inner<Foo>' requested "
+            "here\n")
+      << r.Diagnostics;
   std::filesystem::remove_all(tmp);
 }
 
