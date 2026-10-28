@@ -657,6 +657,42 @@ bool Sema::checkPendingBounds() {
   return ok;
 }
 
+void Sema::noteInstantiationRequest(const std::string &instName) {
+  static const std::string kNone;
+  const std::string &by =
+      InstantiationStack.empty() ? kNone : InstantiationStack.back().Name;
+  if (!TraitImplsKnown) {
+    EarlyRequesters[instName].insert(by);
+    return;
+  }
+  if (FailedBoundInstances.empty() || !EarlyRequesters.count(instName) ||
+      LateRequested.count(instName))
+    return;
+  if (by.empty() ||
+      (!FailedBoundInstances.count(by) && !madeOnlyForFailedBounds(by)))
+    LateRequested.insert(instName);
+}
+
+bool Sema::madeOnlyForFailedBounds(const std::string &instName) {
+  if (FailedBoundInstances.empty())
+    return false;
+  StringSet visiting;
+  return !requestedFreely(instName, visiting);
+}
+
+bool Sema::requestedFreely(const std::string &instName, StringSet &visiting) {
+  auto it = EarlyRequesters.find(instName);
+  if (it == EarlyRequesters.end() || LateRequested.count(instName))
+    return true;
+  if (!visiting.insert(instName).second)
+    return false; // asked for by itself, on the way
+  return std::any_of(it->second.begin(), it->second.end(),
+                     [&](const std::string &by) {
+                       return by.empty() || (!FailedBoundInstances.count(by) &&
+                                             requestedFreely(by, visiting));
+                     });
+}
+
 void Sema::reportForeignTraitBound(const std::string &tmpl,
                                    const std::string &param,
                                    const std::string &trait,

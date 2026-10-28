@@ -2081,6 +2081,22 @@ private:
   /// so their bodies are not checked, and a bound check of an instantiation
   /// made in one of them is a follow-on.  By instantiation name.
   StringSet FailedBoundInstances;
+  /// Who asked for each instantiation before the bounds could be checked
+  /// (TraitImplsKnown false): the innermost instantiation in progress at
+  /// the request, or "" outside one.  By instantiation name.
+  StringMap<StringSet> EarlyRequesters;
+  /// The instantiations of EarlyRequesters asked for again afterwards
+  /// outside every instantiation made only for failed bounds.
+  StringSet LateRequested;
+  /// Note a request, here, of the instantiation @p instName.
+  void noteInstantiationRequest(const std::string &instName);
+  /// Whether the instantiation @p instName was made only for those whose
+  /// deferred bounds failed: each request of it was made inside one of
+  /// them, or inside one made only for them.  Its bodies are a follow-on.
+  bool madeOnlyForFailedBounds(const std::string &instName);
+  /// Whether @p instName was asked for outside each of those (the
+  /// instantiations in @p visiting, on the way, not counting).
+  bool requestedFreely(const std::string &instName, StringSet &visiting);
   /// The name the instantiation of @p tmpl, named @p name where it was
   /// requested, with @p args has: InstantiationFrame::Name and
   /// PendingInstantiation::Name of it.

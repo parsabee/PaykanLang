@@ -1531,7 +1531,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     twice), and a `Box<int>` of `struct Box<T: Named>` with `method call on non-class type
     'int'` from its method's body.  The bound error is now the one error, as it is when the
     bound is checked at the request: the bodies of such an instantiation are not checked,
-    and the bound of an instantiation made in one is a follow-on.  The order of the
+    nor are those of an instantiation only it uses (`Inner<Foo>` for its field `i:
+    Inner<T>?`, which gave `no method 'h' on type 'Foo'`, in the library's file when the
+    template is another module's), and the bound of an instantiation made in one is a
+    follow-on.  An instantiation the program also uses itself is checked as before.  The order of the
     diagnostics is unchanged (the bounds were already checked before every body)
     (docs/language/13-generics.md, "How generic code is checked"; 06-traits.md, "Semantic
     Checks").

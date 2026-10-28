@@ -267,7 +267,10 @@ TEST(Traits, DeferredBoundErrorHasTheInstantiationNote) {
 // 'int'"), and for a `collections::HashMap<Foo, int>` field nine more in
 // collections.pkn: "no method 'hash' on type 'Foo'" seven times, and
 // `_Table`'s bound twice.  Another request of a template, not made in such
-// an instantiation, is still checked.
+// an instantiation, is still checked.  So are the bodies of a template
+// with no bound that such an instantiation uses (`Inner<Foo>` for its
+// field `i: Inner<T>?`): not, when it alone uses them, and still, when the
+// program uses them too.
 TEST(Traits, AFailedDeferredBoundIsTheOneError) {
   struct Case {
     const char *Source, *Error;
@@ -317,6 +320,37 @@ TEST(Traits, AFailedDeferredBoundIsTheOneError) {
                 "'Outer' requires of 'T'",
                 ":8:31: error: 'Str' does not implement trait 'Named', which "
                 "'Inner' requires of 'T'"});
+
+  const std::string unbounded =
+      "trait H { view fn h() -> int; }\n"
+      "class Inner<T> { v: T; }\n"
+      "impl Inner<T> { view fn get() -> int { return self.v.h(); } }\n"
+      "class Outer<T: H> { i: Inner<T>?; }\n"
+      "impl Outer<T> { view fn g() -> int { return 1; } }\n"
+      "class Foo { x: int; }\n";
+  const char *bound =
+      "error: 'Foo' does not implement trait 'H', which 'Outer' requires of "
+      "'T'";
+  const char *body = ":3:47: error: no method 'h' on type 'Foo'";
+  r = semaCheck(unbounded + "class Holder { o: Outer<Foo>?; }\n"
+                            "fn main() -> int { return 0; }\n");
+  EXPECT_EQ(r.ErrorCount, 1) << r.Diagnostics;
+  expectAll(r, {":7:16: error: 'Foo' does not implement trait 'H', which "
+                "'Outer' requires of 'T'"});
+  // Its own request, by the program: a field before the failed one, one
+  // after, or a body's.
+  const std::string uses[] = {
+      "class Other { i: Inner<Foo>?; }\nclass Holder { o: Outer<Foo>?; }\n"
+      "fn main() -> int { return 0; }\n",
+      "class Holder { o: Outer<Foo>?; }\nclass Other { i: Inner<Foo>?; }\n"
+      "fn main() -> int { return 0; }\n",
+      "class Holder { o: Outer<Foo>?; }\n"
+      "fn main() -> int { let i = Inner<Foo>(Foo(1)); return i.get(); }\n"};
+  for (const std::string &use : uses) {
+    r = semaCheck(unbounded + use);
+    EXPECT_EQ(r.ErrorCount, 2) << r.Diagnostics;
+    expectAll(r, {bound, body});
+  }
 }
 
 // int, float, bool and char implement `Show`: `n.toString()` is a `Str`.  So

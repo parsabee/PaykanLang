@@ -1841,6 +1841,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   // its template's own name, however it was spelled here.
   const ModuleTemplates *origin = foreignOrigin(tmpl);
   const std::string instName = instantiationName(tmpl->getName(), args);
+  noteInstantiationRequest(instName);
   if (auto cIt = ClassInstantiations.find(instName);
       cIt != ClassInstantiations.end()) {
     // Cached (nullptr records an earlier failure) -- unless it is another
@@ -2100,6 +2101,7 @@ std::string Sema::instantiateFunction(const std::string &name,
                                       names::kQualSep +
                                       instantiationName(tmpl->getName(), args)
                                 : instantiationName(name, args);
+  noteInstantiationRequest(instName);
   if (auto fIt = FuncInstantiations.find(instName);
       fIt != FuncInstantiations.end())
     return fIt->second ? instName : "";
@@ -2593,6 +2595,12 @@ bool Sema::checkPendingInstantiations() {
     // Its bounds failed (reported): its bodies would only repeat that.
     if (FailedBoundInstances.count(p.Name))
       continue;
+    // Made only for those whose bounds failed: a check made at the request
+    // would not have made it either (KF-6).
+    if (madeOnlyForFailedBounds(p.Name)) {
+      ++SuppressedFollowOns;
+      continue;
+    }
     InstantiationStack.push_back(
         {p.Name, p.RequestLoc, p.RequestFile, p.RequestLines});
     const StringSet *savedParams = CurrentTypeParams;

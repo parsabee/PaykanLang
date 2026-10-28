@@ -1151,6 +1151,32 @@ class Holder<T> {
   std::filesystem::remove_all(tmp);
 }
 
+// The importer's field `t::Outer<Foo>`, whose bound fails once the `impl`
+// blocks are known, is the one error: the library's `Inner<Foo>`, which
+// only it uses, has no body checked, where base also reported "no method
+// 'hash' on type 'Foo'" in lib/t.pkn (KF-6).
+TEST(Module, AFailedDeferredBoundChecksNoBodyOfTheLibrarys) {
+  auto tmp = paykan::test::tempDir() / "pkn_ms_deferred_bound_body";
+  std::filesystem::remove_all(tmp);
+  const std::string dir = tmp.string();
+  writeFile(dir, "lib/t.pkn",
+            "class Inner<T> { v: T; }\n"
+            "impl Inner<T> { view fn get() -> int { return self.v.hash(); } }\n"
+            "class Outer<T: Hashable> { i: Inner<T>?; }\n");
+  auto r = semaCheckFile(writeFile(dir, "main.pkn",
+                                   "import lib::t;\n"
+                                   "class Foo { x: int; }\n"
+                                   "class Holder { o: t::Outer<Foo>?; }\n"
+                                   "fn main() -> int { return 0; }\n"),
+                         dir);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main.pkn:3:16: error: 'Foo' does not implement trait 'Hashable', "
+            "which 't::Outer' requires of 'T'\n")
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
 // ─── ERR: an interface that contradicts itself ──────────────────────────────
 //
 // The .pkm reader rejects an IMPL record of a trait other than Hashable, or of

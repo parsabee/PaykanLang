@@ -467,6 +467,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   // instantiation is named by its template's own name.
   const ModuleTemplates *origin = foreignOrigin(tmpl);
   const std::string instName = instantiationName(tmpl->getName(), args);
+  noteInstantiationRequest(instName);
   if (auto cIt = StructInstantiations.find(instName);
       cIt != StructInstantiations.end()) {
     auto info = cIt->second ? StructInstantiationInfos.find(cIt->second)
@@ -625,6 +626,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
   // Named by its template's own name, as a struct's instantiation is.
   const ModuleTemplates *origin = foreignOrigin(tmpl);
   const std::string instName = instantiationName(tmpl->getName(), args);
+  noteInstantiationRequest(instName);
   if (auto cIt = EnumInstantiations.find(instName);
       cIt != EnumInstantiations.end()) {
     auto info = cIt->second ? EnumInstantiationInfos.find(cIt->second)
