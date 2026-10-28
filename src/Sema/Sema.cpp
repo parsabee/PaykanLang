@@ -5024,6 +5024,18 @@ bool Sema::rejectInferredMethods(ast::TranslationUnit *tu) {
   return ok;
 }
 
+namespace {
+
+/// Whether @p e is `None`, or a conditional each of whose branches is: a
+/// value of no class.
+bool isNoneValue(const ast::Expr *e) {
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return isNoneValue(te->getTrueExpr()) && isNoneValue(te->getFalseExpr());
+  return ast::isa<ast::NoneLiteral>(e);
+}
+
+} // namespace
+
 bool Sema::visitVarDecl(ast::VarDecl *node) {
   // The name must not shadow a type, a function or a reserved name (#126);
   // a function's is poisoned, as in visitAssignStmt.
@@ -5149,8 +5161,18 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   }
 
   // A `weak` local holds a weak reference: its type is `T?` of a class `T`
-  // (`weak y = x;` with `x: T` or `x: T?` infers `T?`).
+  // (`weak y = x;` with `x: T` or `x: T?` infers `T?`).  `None` names no
+  // class: inferred, it would be a weak reference to the None value itself,
+  // which never reads None.
   if (node->isWeak()) {
+    if (!node->getType() && node->getInitExpr() &&
+        isNoneValue(node->getInitExpr())) {
+      error(node->getLocation(),
+            "cannot infer the class of weak local '" + node->getName() +
+                "' from None; write 'weak " + node->getName() + ": T? = None'");
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
     if (!node->getType() && !ast::isa<ast::OptionalType>(declTy) &&
         ast::isa<ast::ClassType>(declTy))
       declTy = Ctx.getOptionalType(declTy);

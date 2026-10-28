@@ -335,8 +335,11 @@ Reading a `weak` variable or field gives a `T?`: the object while it is alive, `
 has been destroyed. The value read is an ordinary optional — matched with `match`, compared
 with `== None`, passed, returned, or stored in a strong variable or field, which then keeps the
 object alive. Assigning a `T` or a `T?` to a `weak` variable or field makes it refer to that
-object (or to nothing, for `None`) without retaining it. A lambda that captures a `weak`
-variable captures it weakly, so a closure can refer to the object that stores it without
+object (or to nothing, for `None`) without retaining it. A `weak` local written without a type
+takes the class of its initializer (`weak u = a;` above is a `Node?`), and `None` has no class:
+`weak a = None;` is an error (`cannot infer the class of weak local 'a' from None; write 'weak
+a: T? = None'`), and `weak a: Node? = None;` starts it as nothing. A lambda that captures a
+`weak` variable captures it weakly, so a closure can refer to the object that stores it without
 forming a cycle (see [Captures](14-function-types.md#captures)). So does a lambda written
 inside that lambda, however deeply nested: a closure that an outer closure returns
 (`outer = fn() -> () -> Str { return fn() -> Str => if me == None then "gone" else

@@ -899,6 +899,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     notes, since a cache entry whose imports nest too deep is built from its source.  The
     nested Sema is on the heap, which halves the stack each level takes (2.9 KB in a debug
     build).
+- **Stability sweep: expressions, places, borrows and closures.**
+  - `weak a = None;`, a `weak` local with no type whose initializer is `None` (or a
+    conditional of two `None`s), is an error: `cannot infer the class of weak local 'a'
+    from None; write 'weak a: T? = None'`.  `None` has no class, and the local was a weak
+    reference to the None value itself, which never read `None` (`Str(a == None)` printed
+    `False`).  With its type written (`weak a: Node? = None;`) it starts as nothing, as
+    before (docs/language/16-memory.md, "Weak References").
 
 ### Removed
 

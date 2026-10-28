@@ -55,6 +55,36 @@ TEST(Weak, TypeIsAnOptionalClass) {
                 "'weak' variable 'c' has type 'Color'"});
 }
 
+// A `weak` local's type comes from its initializer's class, and `None` has
+// none: `weak a = None;` (or a conditional of two Nones) is an error, once,
+// and the local is not reported again where it is used.  (It was a weak
+// reference to the None value itself, which never read None.)  With its
+// type written, it starts as None.
+TEST(Weak, NoneInfersNoClass) {
+  auto r = semaCheck(R"(
+    class N { x: int; }
+    fn main() -> int {
+      c = True;
+      weak a = None;
+      weak b = if c then None else None;
+      weak d: N? = None;
+      weak e: Obj? = None;
+      weak f = if c then None else N(1);
+      a = N(1);
+      if a == None && b == None && d == None && e == None && f == None {
+        return 1;
+      }
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"cannot infer the class of weak local 'a' from None; write "
+                "'weak a: T? = None'",
+                "cannot infer the class of weak local 'b' from None; write "
+                "'weak b: T? = None'"});
+  EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+}
+
 // A weak reference is not a place a strong reference could be written to:
 // no `inout` parameter, local or match arm names a weak local or field.
 TEST(Weak, IsNotAnInoutPlace) {
