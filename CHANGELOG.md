@@ -1451,7 +1451,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     generic`, and for a trait `superclass 'T' of class 'C' is a trait, not a class: a
     class implements a trait with 'impl T for C { ... }'` (`impl T for Box<T>` for a
     generic class); a name that is none of these is still `not defined`
-    (docs/language/05-classes.md, 06-traits.md and 11-structs.md, "Semantic Checks").
+    (docs/language/05-classes.md, 06-traits.md, 11-structs.md and 13-generics.md,
+    "Semantic Checks").
   - A superclass with type arguments, `class Full : Half<int>` or `class Full<T> :
     Half<T>`, was a bare `unexpected '<'; expected '{' to open the class body`, and the
     parse of the class stopped there, so its body's own syntax errors went unreported.
