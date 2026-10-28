@@ -1137,13 +1137,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     differs in a type these checks do not derive (a struct's, a tuple's) is the file's
     error in the lowering, not an internal compiler error.  The module decoded then is the
     one the program is lowered with, so nothing is decoded twice: `run` of a program
-    importing every module of the standard library takes the time it did, and its
-    `--check-only` 9% more instructions (in a debug build); in a chain of 60 modules each
-    deriving a class from the one before, whose interfaces hold 1,830 class records in
-    all, the interface checks add 11% to `--check-only` (1,037 million instructions where
-    there were 938 million) and nothing to `run` (3,207 million where there were 3,228
-    million, the compiled code being read once).  And the lowering stops at an import it
-    cannot lower, instead of lowering the importer without it (docs/design/pkm.md §8.4).
+    importing every module of the standard library takes 1% fewer instructions than it did
+    and its `--check-only` 1% more (1,196 million and 323 million where there were 1,208
+    million and 320 million, in a debug build); in a chain of 60 modules each deriving a
+    class from the one before, whose interfaces hold 1,830 class records in all, the
+    interface checks add 10% to `--check-only` (1,037 million instructions where there
+    were 938 million) and nothing to `run` (3,208 million where there were 3,228 million,
+    the compiled code being read once).  And the lowering stops at an import it cannot
+    lower, instead of lowering the importer without it (docs/design/pkm.md §8.4).
   - `paykan pkm check` printed `usable` for files the compiler rejects or crashes on (a
     CODE section that does not decode, a TMPL section the importer rejects, compiled code
     that does not read or verify, an interface that does not match its CODE), and printed
