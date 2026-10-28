@@ -556,6 +556,8 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
   // again and again, and a diagnostic's text is made only for the one that
   // does not resolve.
   std::vector<std::string_view> described;
+  described.reserve(iface.Classes.size() + iface.Structs.size() +
+                    iface.Enums.size());
   for (const pkm::ClassRec &c : iface.Classes)
     described.push_back(c.Name);
   for (const pkm::StructRec &st : iface.Structs)
