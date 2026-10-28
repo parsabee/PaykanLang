@@ -446,10 +446,17 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   //     so the lowering materialises the `None` singleton for a null box;
   //   * a primitive flowing into an optional primitive slot (`int` ->
   //     `int?`) is marked with the optional so the lowering boxes it.
-  // A class against a class (or an optional of one) where either is
-  // erroneous is not checked: the error that lost it its superclass was
-  // reported, and the mismatch counts as a suppressed follow-on (SW-32).
+  // A class that lost its superclass (or a subclass of one) against a class
+  // that can have subclasses is not checked: the error that lost it the
+  // superclass was reported, and the mismatch counts as a suppressed
+  // follow-on (lostSuperclassMismatch, SW-32).
   bool checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src);
+  /// Whether @p srcTy, which is not assignable to @p dst, might be had each
+  /// class on its class's superclass chain kept its superclass (one lost
+  /// it, SuperclassLost): @p dst is a class that can have subclasses, or an
+  /// optional of one, and @p srcTy a class, or an optional of one into an
+  /// optional.
+  bool lostSuperclassMismatch(ast::Type *dst, ast::Type *srcTy) const;
 
   // An array or tuple literal flowing into a slot whose element types it
   // must take: `[1, 2]` into `int?[]` and `(1, "a")` into `(int?, Str)` box
@@ -1548,6 +1555,10 @@ private:
 
   /// True if @p ct or one of its superclasses is in ErroneousClasses.
   bool isErroneousClass(const ast::ClassType *ct) const;
+  /// The classes registered on Obj because their superclass is undefined,
+  /// rejected, or closes a cycle: what they would be a subclass of is not
+  /// known.  A subset of ErroneousClasses.
+  StringSet SuperclassLost;
 
   /// Resolve a free function's signature (return + parameter types) and
   /// register it in the function table.  Run as a forward-declaration pass

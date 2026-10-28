@@ -1502,10 +1502,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and each place it then met another class added a type mismatch: `x: Animal = Puppy()`
     was `initializer of type 'Puppy' does not match declared type 'Animal' for variable
     'x'`, and an assignment, an argument (a method's too), a return value, an optional and
-    an array element gave their own.  A class matched against a class where either is
-    erroneous is now a follow-on of that error, which is the one reported (the exit status
-    is still 1); a mismatch with a type that is not a class is still reported
-    (docs/language/05-classes.md, "Semantic Checks").
+    an array element gave their own.  Such a class, or a subclass of it, given for a class
+    that can have subclasses is now a follow-on of that error, which is the one reported
+    (the exit status is still 1).  A mismatch it could not have kept its superclass for is
+    still reported: given for a type that is not a class or for a final one (`s: Str =
+    Puppy()`), the other way round (`p: Puppy = Animal()`), or as an optional for a class;
+    so is the mismatch of a class in error whose superclass is intact (`class Puppy :
+    Animal { x: Nope; }` given for a `Cat`) (docs/language/05-classes.md, "Semantic
+    Checks").
   - A clash between two templates' instantiations of one name (type names are global,
     OD-9 b) was reported where the second was made, so a program's own `_Node<int>`,
     instantiated before a `collections::Stack<int>`, gave three errors in the library's

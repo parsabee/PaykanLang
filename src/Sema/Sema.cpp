@@ -355,10 +355,7 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   // the literal and mark each element that is wrapped.
   srcTy = adoptLiteralElements(dst, srcTy, src);
   if (!isAssignable(dst, srcTy)) {
-    auto *dstCT = ast::dyn_cast<ast::ClassType>(ast::stripOptional(dst));
-    auto *srcCT = ast::dyn_cast<ast::ClassType>(ast::stripOptional(srcTy));
-    if (!dstCT || !srcCT ||
-        (!isErroneousClass(dstCT) && !isErroneousClass(srcCT)))
+    if (!lostSuperclassMismatch(dst, srcTy))
       return false;
     ++SuppressedFollowOns;
   }
@@ -368,6 +365,21 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   if (ast::wrapsInOptional(dst, srcTy) || ast::dyn_cast<ast::SliceType>(dst))
     src->setCoercedType(dst);
   return true;
+}
+
+bool Sema::lostSuperclassMismatch(ast::Type *dst, ast::Type *srcTy) const {
+  auto *dstCT = ast::dyn_cast<ast::ClassType>(ast::stripOptional(dst));
+  auto *srcCT = ast::dyn_cast<ast::ClassType>(ast::stripOptional(srcTy));
+  // Whether a class is a subclass of the destination never depends on the
+  // destination's own superclass, and a final one (`Str`) has none.  An
+  // optional into a plain class is no question of subclasses.
+  if (!dstCT || !srcCT || dstCT->isFinal() ||
+      (ast::isa<ast::OptionalType>(srcTy) && !ast::isa<ast::OptionalType>(dst)))
+    return false;
+  for (const ast::ClassType *c = srcCT; c; c = c->getSuperClass())
+    if (SuperclassLost.count(c->getName()))
+      return true;
+  return false;
 }
 
 ast::Type *Sema::adoptLiteralElements(ast::Type *dst, ast::Type *srcTy,

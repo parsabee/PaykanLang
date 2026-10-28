@@ -372,11 +372,15 @@ TEST(Poison, UsesOfADeclarationNamedLikeAnImportedTypeAreSilent) {
 }
 
 // A class whose superclass is in error is registered on Obj, so it matches
-// no class it would have: a mismatch with another class, either way round,
-// is a follow-on of that error (SW-32).  An initializer, an assignment, an
-// argument (a method's too), a return value and an array element were each
-// "... of type 'Puppy' does not match ... 'Animal'".  A mismatch with a type
-// that is not a class is still reported.
+// no class it would have: its mismatch with a class that can have
+// subclasses is a follow-on of that error (SW-32).  An initializer, an
+// assignment, an argument (a method's too), a return value and an array
+// element were each "... of type 'Puppy' does not match ... 'Animal'".  A
+// mismatch it could not have kept its superclass for is still reported:
+// with a type that is not a class or is final (`Str`), the other way round
+// (an `Animal` or a `Cat` is never a `Puppy`), an optional into a class,
+// and a class in error whose superclass is intact (a `Kit` with a wrong
+// override is an `Animal`, never a `Cat`).
 TEST(Poison, AClassThatLostItsSuperclassMismatchesNoClass) {
   const std::string decls =
       "import ::collections;\n"
@@ -392,20 +396,47 @@ TEST(Poison, AClassThatLostItsSuperclassMismatchesNoClass) {
                      "  a: Animal[2] = [Puppy(), Animal()];\n"
                      "  l = collections::List<Animal>();\n"
                      "  l.push(Puppy());\n"
-                     "  z: Puppy = Animal();\n"
                      "  return n;\n"
                      "}\n",
              "3:1: error: superclass 'Nope' of class 'Puppy' is not defined");
-  auto r = semaCheck(decls + "fn main() -> int {\n"
+  auto r = semaCheck(decls + "class Cat { view fn sound() -> Str { return "
+                             "\"meow\"; } }\n"
+                             "class Kit : Animal { view fn sound() -> int { "
+                             "return 1; } }\n"
+                             "fn feed(c: Cat) -> int { return 1; }\n"
+                             "fn main() -> int {\n"
                              "  n: int = Puppy();\n"
                              "  w: Animal = 3;\n"
-                             "  return n;\n"
+                             "  s: Str = Puppy();\n"
+                             "  p: Puppy = Cat();\n"
+                             "  q: Puppy = Animal();\n"
+                             "  o: Puppy? = \"str\";\n"
+                             "  m: Puppy? = None;\n"
+                             "  z: Animal = m;\n"
+                             "  c: Cat = Kit();\n"
+                             "  return n + feed(Kit());\n"
                              "}\n");
-  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
-  for (const char *d : {"6:3: error: initializer of type 'Puppy' does not "
-                        "match declared type 'int' for variable 'n'",
-                        "7:3: error: initializer of type 'int' does not match "
-                        "declared type 'Animal' for variable 'w'"})
+  EXPECT_EQ(r.ErrorCount, 11u) << r.Diagnostics;
+  for (const char *d :
+       {"6:22: error: override of 'Animal.sound() -> Str' has incompatible "
+        "signature 'Kit.sound() -> int'",
+        "9:3: error: initializer of type 'Puppy' does not match declared type "
+        "'int' for variable 'n'",
+        "10:3: error: initializer of type 'int' does not match declared type "
+        "'Animal' for variable 'w'",
+        "11:3: error: initializer of type 'Puppy' does not match declared type "
+        "'Str' for variable 's'",
+        "12:3: error: initializer of type 'Cat' does not match declared type "
+        "'Puppy' for variable 'p'",
+        "13:3: error: initializer of type 'Animal' does not match declared "
+        "type 'Puppy' for variable 'q'",
+        "14:3: error: initializer of type 'Str' does not match declared type "
+        "'Puppy?' for variable 'o'",
+        "16:3: error: initializer of type 'Puppy?' does not match declared "
+        "type 'Animal' for variable 'z'",
+        "17:3: error: initializer of type 'Kit' does not match declared type "
+        "'Cat' for variable 'c'",
+        "18:19: error: argument 1 of 'feed' has type 'Kit', expected 'Cat'"})
     EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
                                                         << r.Diagnostics;
 }

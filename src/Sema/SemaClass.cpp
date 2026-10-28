@@ -457,7 +457,6 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   //          registered on Obj in phase 3) and is marked erroneous.
   std::vector<ast::ClassDecl *> sorted;
   StringMap<uint8_t> color; // 0=white 1=gray(in-progress) 2=black(done)
-  StringSet noSuper;
 
   std::function<void(ast::ClassDecl *)> topoVisit = [&](ast::ClassDecl *cd) {
     if (color[cd->getName()] != 0)
@@ -489,7 +488,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
       }
       if (broken) {
         ok = false;
-        noSuper.insert(cd->getName());
+        SuperclassLost.insert(cd->getName());
         ErroneousClasses.insert(cd->getName());
       }
     }
@@ -504,7 +503,7 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
   //          within this module resolve correctly.
   for (auto *cd : sorted) {
     ast::ClassType *superClass = nullptr;
-    if (cd->hasSuperClass() && !noSuper.count(cd->getName())) {
+    if (cd->hasSuperClass() && !SuperclassLost.count(cd->getName())) {
       superClass = Ctx.lookupClassType(cd->getSuperClassName());
       // Non-inheritable (final) classes cannot be subclassed.
       // Currently this covers built-in types like Str; it will also apply
