@@ -1095,12 +1095,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     loaded (`Backend::checkModuleObject`), so a cache entry's is rebuilt and a prebuilt
     file's is an error where it is imported (`module 'm' (m.pkm) has a bad OBJ section:
     the compiled code does not verify: ...`), and the program's LLVM IR is verified before
-    it is optimised or run.  Past that check a module file's compiled code is trusted once
-    its hashes match: bytes crafted to pass them can still crash LLVM's reader, so a
-    prebuilt module is as safe as where it came from (docs/design/pkm.md §8.4).  The
-    modules the mlir backend writes as bitcode no longer carry LLVM's "Debug Info Version"
-    flag (they have no debug info), since the reader verifies a module that has it and
-    stops the process when that module does not verify.
+    it is optimised or run.  The module the backend reads then is the one the program's
+    link takes, so the bitcode is read once: it was read again to link it, 4.4% of the
+    instructions of `run` in a program of 60 modules.  Past that check a module file's
+    compiled code is trusted once its hashes match: bytes crafted to pass them can still
+    crash LLVM's reader, so a prebuilt module is as safe as where it came from
+    (docs/design/pkm.md §8.4).  The modules the mlir backend writes as bitcode no longer
+    carry LLVM's "Debug Info Version" flag (they have no debug info), since the reader
+    verifies a module that has it and stops the process when that module does not verify.
   - A module file whose CODE did not decode or verify was accepted when it was loaded and
     reported only when the program was lowered, which then went on without the module and
     stopped at an assertion (`Scope::lookup`, SIGABRT); `--check-only` accepted it, and a
@@ -1135,12 +1137,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     tuple's) is the file's error in the lowering, not an internal compiler error.  The
     module decoded then is the one the program is lowered with, so nothing is decoded
     twice: `run` of a program importing every module of the standard library takes the
-    time it did, and its `--check-only` 2 ms more (53 to 55 ms, 9% more instructions, in a
-    debug build); in a chain of 60 modules each deriving a class from the one before,
-    whose interfaces hold 1830 class records in all, `--check-only` takes 147 ms where it
-    took 127 ms before these interface checks (16% more instructions) and `run` 675 ms
-    where it took 653.  And the lowering stops at an import it cannot lower, instead of
-    lowering the importer without it (docs/design/pkm.md §8.4).
+    time it did, and its `--check-only` 9% more instructions (in a debug build); in a
+    chain of 60 modules each deriving a class from the one before, whose interfaces hold
+    1,830 class records in all, the interface checks add 11% to `--check-only` (1,037
+    million instructions where there were 938 million) and nothing to `run` (3,207 million
+    where there were 3,228 million, the compiled code being read once).  And the lowering
+    stops at an import it cannot lower, instead of lowering the importer without it
+    (docs/design/pkm.md §8.4).
   - `paykan pkm check` printed `usable` for files the compiler rejects or crashes on (a
     CODE section that does not decode, a TMPL section the importer rejects, compiled code
     that does not read or verify, an interface that does not match its CODE), and printed

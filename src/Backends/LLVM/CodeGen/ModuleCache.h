@@ -29,10 +29,18 @@ using TranslateModule =
 /// What a backend translates module @p index from, as text: the cache key
 /// covers it.
 using ModuleText = std::function<std::string(size_t index)>;
-/// The bitcode module @p index's code was compiled to ahead of time (its
-/// `.pkm`'s OBJ section), or nothing (and nothing for every module when
-/// unset): its PIR declares that code.
-using CompiledCode = std::function<std::span<const uint8_t>(size_t index)>;
+/// The code module @p index was compiled to ahead of time (its `.pkm`'s OBJ
+/// section) as an LLVM module in the program's context, or null (and null
+/// for every module when unset): its PIR declares that code.  Or why it
+/// cannot be read.
+using CompiledCode =
+    std::function<StatusOr<std::unique_ptr<llvm::Module>>(size_t index)>;
+
+/// @p bitcode, the compiled code of module @p name, read into @p ctx; null
+/// when it is empty.
+StatusOr<std::unique_ptr<llvm::Module>>
+readCompiledCode(std::span<const uint8_t> bitcode, const std::string &name,
+                 llvm::LLVMContext &ctx);
 
 /// Where a backend's translations are cached: each entry is
 /// <projectRoot>/.paykan_cache/<module name as a path><Extension>, and its

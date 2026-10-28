@@ -48,11 +48,13 @@ Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os);
 /// imported modules are served from the bitcode cache under @p projectRoot
 /// (<module>.bc) when what is left of them is unchanged (why an entry was
 /// not used goes to @p verbose, when given), and the part of each module's
-/// @p compiled code the program uses is linked in.
+/// @p compiled code (llvm_codegen::CompiledCode, in @p ctx) the program uses
+/// is linked in.
 StatusOr<std::unique_ptr<llvm::Module>> compileProgram(
     const pir::Program &program, llvm::LLVMContext &ctx,
     const std::string &moduleName, const std::string &projectRoot,
-    const std::function<std::span<const uint8_t>(size_t)> &compiled = {},
+    const std::function<StatusOr<std::unique_ptr<llvm::Module>>(size_t)>
+        &compiled = {},
     std::ostream *verbose = nullptr);
 
 /// One module on its own in LLVM IR (not optimised): what a `.pkm`'s OBJ

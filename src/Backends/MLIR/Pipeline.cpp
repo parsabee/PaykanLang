@@ -84,11 +84,12 @@ Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os) {
   return emitC((*mod).get(), os);
 }
 
-StatusOr<std::unique_ptr<llvm::Module>>
-compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
-               const std::string &moduleName, const std::string &projectRoot,
-               const std::function<std::span<const uint8_t>(size_t)> &compiled,
-               std::ostream *verbose) {
+StatusOr<std::unique_ptr<llvm::Module>> compileProgram(
+    const pir::Program &program, llvm::LLVMContext &ctx,
+    const std::string &moduleName, const std::string &projectRoot,
+    const std::function<StatusOr<std::unique_ptr<llvm::Module>>(size_t)>
+        &compiled,
+    std::ostream *verbose) {
   auto mlirCtx = createContext();
   auto top = importProgram(program, *mlirCtx);
   if (!top)

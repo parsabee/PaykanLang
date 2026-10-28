@@ -257,6 +257,23 @@ std::string verifyModuleText(const llvm::Module &module) {
 }
 
 StatusOr<std::unique_ptr<llvm::Module>>
+readCompiledCode(std::span<const uint8_t> bitcode, const std::string &name,
+                 llvm::LLVMContext &ctx) {
+  if (bitcode.empty())
+    return std::unique_ptr<llvm::Module>();
+  llvm::StringRef buffer(reinterpret_cast<const char *>(bitcode.data()),
+                         bitcode.size());
+  auto code = llvm::parseBitcodeFile(llvm::MemoryBufferRef(buffer, name), ctx);
+  if (!code) {
+    std::string msg = "the compiled code of module '" + name;
+    msg += "' does not read: ";
+    msg += llvm::toString(code.takeError());
+    return Status::error(msg);
+  }
+  return std::move(*code);
+}
+
+StatusOr<std::unique_ptr<llvm::Module>>
 compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
                const std::string &moduleName, const std::string &projectRoot,
                const ModuleCache &cache, const ModuleText &text,
@@ -300,24 +317,15 @@ compileProgram(const pir::Program &program, llvm::LLVMContext &ctx,
   // lists a module after the modules it imports), so what it is asked for
   // is known when it is linked.
   for (size_t i = program.Modules.size(); compiled && i-- > 1;) {
-    std::span<const uint8_t> bytes = compiled(i);
-    if (bytes.empty())
+    StatusOr<std::unique_ptr<llvm::Module>> code = compiled(i);
+    if (!code)
+      return code.status();
+    if (!*code)
       continue;
-    const std::string &name = program.Modules[i].Name;
-    llvm::StringRef buffer(reinterpret_cast<const char *>(bytes.data()),
-                           bytes.size());
-    auto code =
-        llvm::parseBitcodeFile(llvm::MemoryBufferRef(buffer, name), ctx);
-    if (!code) {
-      std::string msg = "the compiled code of module '" + name;
-      msg += "' does not read: ";
-      msg += llvm::toString(code.takeError());
-      return Status::error(msg);
-    }
     if (llvm::Linker::linkModules(**linked, std::move(*code),
                                   llvm::Linker::Flags::LinkOnlyNeeded))
       return Status::error("failed to link the compiled code of module '" +
-                           name + "'");
+                           program.Modules[i].Name + "'");
   }
   // What the optimiser and the code generator get must verify: they stop
   // the process on a module that does not.

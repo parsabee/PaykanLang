@@ -153,8 +153,10 @@ public:
   /// it (the mlir backend parses the bitcode and runs LLVM's verifier).
   /// The driver asks when it loads a module file whose code this backend
   /// would link, so a damaged cache entry is rebuilt and a damaged prebuilt
-  /// module rejected before anything is compiled.  Only called when
-  /// capabilities().CompileModules is set; the default accepts the code.
+  /// module rejected before anything is compiled.  A backend may keep what
+  /// it read for the program it then links (the mlir backend does, so the
+  /// bitcode is read once).  Only called when capabilities().CompileModules
+  /// is set; the default accepts the code.
   virtual Status checkModuleObject(const ModuleObject &code);
 };
 

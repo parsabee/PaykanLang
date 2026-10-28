@@ -21,6 +21,7 @@
 #include "paykan/pir/RCElimination.h"
 #include "paykan/pir/Verifier.h"
 
+#include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/Error.h>
 
@@ -157,11 +158,18 @@ runProgramMLIR(const pir::Program &program,
   auto llvmCtx = std::make_unique<llvm::LLVMContext>();
   auto module = mlir_backend::compileProgram(
       program, *llvmCtx, "test", projectRoot,
-      [&](size_t i) -> std::span<const uint8_t> {
+      [&](size_t i) -> StatusOr<std::unique_ptr<llvm::Module>> {
         const pkm::Object *o =
             resolver ? resolver->object(program.Modules[i].Name) : nullptr;
-        return o ? std::span<const uint8_t>(o->Bytes)
-                 : std::span<const uint8_t>();
+        if (!o)
+          return std::unique_ptr<llvm::Module>();
+        llvm::StringRef bytes(reinterpret_cast<const char *>(o->Bytes.data()),
+                              o->Bytes.size());
+        auto code = llvm::parseBitcodeFile(
+            llvm::MemoryBufferRef(bytes, program.Modules[i].Name), *llvmCtx);
+        if (!code)
+          return Status::error(llvm::toString(code.takeError()));
+        return std::move(*code);
       });
   if (!module)
     return {-1, "", module.status().message(), false};

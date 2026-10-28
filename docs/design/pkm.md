@@ -1513,7 +1513,8 @@ rebuilt and a prebuilt file is an error at the import, under
 - `TMPL` decoded (`Sema::decodeTemplates`, through `FrontendRead`), and
   the decoded templates kept for the import.
 - `OBJ` read and, when the active backend links code of its kind, checked
-  by it (`Backend::checkModuleObject`).
+  by it (`Backend::checkModuleObject`); the mlir backend keeps the module
+  it read and verified for the program's link, so the bitcode is read once.
 
 The decoded `CODE` is kept for the lowering, so a module is decoded once.
 A call through a vtable slot whose signature in an importer differs from
