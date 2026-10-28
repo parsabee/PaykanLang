@@ -1157,12 +1157,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the wrong bytes (docs/design/pkm.md §8.4).  The module decoded then is the one the
     program is lowered with, so nothing is decoded twice: `run` of a program importing
     every module of the standard library takes 1% fewer instructions than it did and its
-    `--check-only` 1% more (1,196 million and 323 million where there were 1,208 million
-    and 320 million, in a debug build); in a chain of 60 modules each deriving a class
-    from the one before, whose interfaces hold 1,830 class records in all, the interface
-    checks add 11% to `--check-only` (1,038 million instructions where there were 938
-    million) and nothing to `run` (3,213 million where there were 3,228 million, the
-    compiled code being read once).  And the lowering stops at an import it cannot
+    `--check-only` 1% more (1,196 million and 324 million where there were 1,208 million
+    and 320 million, in a debug build); in a chain of 60 modules each importing the one
+    before and defining a class, whose interfaces hold 1,830 class records in all, the
+    interface checks add 11% to `--check-only` (1,045 million instructions where there
+    were 938 million) and nothing to `run` (3,215 million where there were 3,228 million,
+    the compiled code being read once).  And the lowering stops at an import it cannot
     lower, instead of lowering the importer without it (docs/design/pkm.md §8.4).
   - `paykan pkm check` printed `usable` for files the compiler rejects or crashes on (a
     CODE section that does not decode, a TMPL section the importer rejects, compiled code

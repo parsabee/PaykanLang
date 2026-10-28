@@ -13,6 +13,7 @@
 #include <optional>
 #include <set>
 #include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -432,6 +433,44 @@ std::string signatureText(const pir::Signature &sig) {
   return s + ") -> " + pir::typeName(sig.Ret);
 }
 
+/// The functions and classes of a module's CODE by their names (the first
+/// of a name, as pir::Module::findFunction finds it).
+class CodeIndex {
+public:
+  explicit CodeIndex(const pir::Module &code) : Code(code) {
+    Functions.reserve(code.Functions.size());
+    for (const pir::Function &f : code.Functions)
+      Functions.emplace(f.Name, &f);
+    Classes.reserve(code.Classes.size());
+    for (const pir::Class &c : code.Classes)
+      Classes.emplace(c.Name, &c);
+  }
+
+  const pir::Module &code() const { return Code; }
+
+  const pir::Function *function(const std::string &name) const {
+    auto it = Functions.find(name);
+    return it == Functions.end() ? nullptr : it->second;
+  }
+
+  /// The function @p name, when the module defines it (in its PIR or
+  /// compiled).
+  const pir::Function *defined(const std::string &name) const {
+    const pir::Function *f = function(name);
+    return f && Code.defines(*f) ? f : nullptr;
+  }
+
+  const pir::Class *cls(const std::string &name) const {
+    auto it = Classes.find(name);
+    return it == Classes.end() ? nullptr : it->second;
+  }
+
+private:
+  const pir::Module &Code;
+  std::unordered_map<std::string_view, const pir::Function *> Functions;
+  std::unordered_map<std::string_view, const pir::Class *> Classes;
+};
+
 /// The runtime's implementation of the root class's method @p method
 /// (`$rt.PaykanObject_toString` for `toString`), or "" for a method the
 /// root does not have.
@@ -452,14 +491,17 @@ std::string rootMethod(const std::string &method) {
 /// while X is a class it defines; past one of another module, an extern
 /// `Y.m` of a function there (which the link checks); and past the root,
 /// the runtime's (rootMethod).  The first slot that does not when not.
-Status checkSlotTargets(const pir::Module &code, const pir::Class &cls) {
+Status checkSlotTargets(const CodeIndex &index, const pir::Class &cls) {
+  const pir::Module &code = index.code();
   for (size_t i = 0; i < cls.VTable.size(); ++i) {
     const pir::VTableEntry &e = cls.VTable[i];
-    const std::string what = "class '" + cls.Name + "': slot " +
-                             std::to_string(i) + " ('" + e.Slot +
-                             "') of its vtable";
+    // "class 'C': slot 3 ('m') of its vtable", for an error.
+    auto slot = [&] {
+      return "class '" + cls.Name + "': slot " + std::to_string(i) + " ('" +
+             e.Slot + "') of its vtable";
+    };
     if (e.Target.empty())
-      return Status::error(what + " is empty in CODE");
+      return Status::error(slot() + " is empty in CODE");
     const std::string method = names::kNameSep + e.Slot;
     std::string found;
     const pir::Class *x = &cls;
@@ -467,15 +509,14 @@ Status checkSlotTargets(const pir::Module &code, const pir::Class &cls) {
       if (depth > code.Classes.size())
         return Status::error("class '" + cls.Name +
                              "' is its own ancestor in CODE");
-      const pir::Function *f = code.findFunction(x->Name + method);
-      if (f && code.defines(*f))
+      if (const pir::Function *f = index.defined(x->Name + method))
         found = f->Name;
       else
-        x = x->Super.empty() ? nullptr : code.findClass(x->Super);
+        x = x->Super.empty() ? nullptr : index.cls(x->Super);
     }
     // The slot names another function, which @p why and @p function say.
     auto wrongTarget = [&](const char *why, const std::string &function) {
-      std::string message = what;
+      std::string message = slot();
       message += " names '@";
       message += e.Target;
       message += "' in CODE, ";
@@ -485,7 +526,7 @@ Status checkSlotTargets(const pir::Module &code, const pir::Class &cls) {
       return Status::error(message);
     };
     if (found.empty() && x) {
-      const pir::Function *t = code.findFunction(e.Target);
+      const pir::Function *t = index.function(e.Target);
       if (t && !code.defines(*t) &&
           (e.Target.ends_with(method) || e.Target == rootMethod(e.Slot)))
         continue;
@@ -565,18 +606,17 @@ Status checkInterface(const pkm::Interface &iface) {
 
 Status checkCodeMatchesInterface(const pir::Module &code,
                                  const pkm::Interface &iface) {
-  auto definedFunction = [&](const std::string &name) -> const pir::Function * {
-    const pir::Function *f = code.findFunction(name);
-    return f && code.defines(*f) ? f : nullptr;
-  };
+  const CodeIndex index(code);
   const DescribedTypes types(iface);
-  // A function or method of the module whose signature the interface
-  // decides has it in CODE.
-  auto checkSignature = [&](const std::string &what, const pir::Function &f,
+  // A function or method of the module (the @p kind @p name) whose
+  // signature the interface decides has it in CODE.
+  auto checkSignature = [&](const char *kind, const std::string &name,
+                            const pir::Function &f,
                             const std::optional<pir::Signature> &derived) {
     if (!derived || f.Sig == *derived)
       return Status::ok();
-    return Status::error(what + " is " + signatureText(f.Sig) + " in CODE, " +
+    return Status::error(std::string(kind) + " '" + name + "' is " +
+                         signatureText(f.Sig) + " in CODE, " +
                          signatureText(*derived) + " by its types in IFACE");
   };
   auto methodSignature = [&](const pkm::ClassRec::Method &m, pir::Type self) {
@@ -605,7 +645,7 @@ Status checkCodeMatchesInterface(const pir::Module &code,
     // The module's own classes are in its CODE; a copy of an instantiation
     // it holds (a `shared class`) is checked as one of them, for what it
     // has.
-    const pir::Class *cls = code.findClass(c.Name);
+    const pir::Class *cls = index.cls(c.Name);
     if (!cls || !code.defines(*cls)) {
       if (c.IsLocal)
         return Status::error("class '" + c.Name + "' is not in CODE");
@@ -622,7 +662,7 @@ Status checkCodeMatchesInterface(const pir::Module &code,
     // CODE lists every field in the order of the layout, the superclass's
     // first; IFACE the class's own, in the order an importer lays them out.
     const pir::Class *super =
-        cls->Super.empty() ? nullptr : code.findClass(cls->Super);
+        cls->Super.empty() ? nullptr : index.cls(cls->Super);
     const size_t inherited = super ? super->Fields.size() : 0;
     std::vector<std::string> own, declared;
     for (size_t i = inherited; i < cls->Fields.size(); ++i)
@@ -659,12 +699,12 @@ Status checkCodeMatchesInterface(const pir::Module &code,
       std::optional<pir::Signature> sig = methodSignature(m, pir::Type::Obj);
       const bool slot =
           std::find(slots.begin(), slots.end(), m.Name) != slots.end();
-      const std::string method = "method '" + c.Name + "." + m.Name + "'";
-      const pir::Function *f = definedFunction(functionOf(c.Name, m.Name));
+      const std::string function = functionOf(c.Name, m.Name);
+      const pir::Function *f = index.defined(function);
       if (!f && compiled && !slot)
-        return Status::error(method + " is not in CODE");
+        return Status::error("method '" + function + "' is not in CODE");
       if (f)
-        if (Status s = checkSignature(method, *f, sig); !s)
+        if (Status s = checkSignature("method", function, *f, sig); !s)
           return s;
       for (size_t i = 0; i < slots.size(); ++i)
         if (slots[i] == m.Name && sig && !(cls->VTable[i].Sig == *sig))
@@ -676,9 +716,9 @@ Status checkCodeMatchesInterface(const pir::Module &code,
     // A class's constructor takes what its initializer takes after the
     // object, and returns the object's box.  A class with a pure virtual
     // method has none: nothing makes one of its own.
-    const pir::Function *ctor = definedFunction(c.Name);
+    const pir::Function *ctor = index.defined(c.Name);
     const pir::Function *init =
-        definedFunction(c.Name + names::kNameSep + names::kMethodInit);
+        index.defined(c.Name + names::kNameSep + names::kMethodInit);
     const bool abstract = std::any_of(c.Methods.begin(), c.Methods.end(),
                                       [](const pkm::ClassRec::Method &m) {
                                         return m.Flags & pkm::kMethodPure;
@@ -699,12 +739,12 @@ Status checkCodeMatchesInterface(const pir::Module &code,
     // A struct's methods are its module's functions `S.m`, which take the
     // struct's address first.
     for (const pkm::ClassRec::Method &m : st.Methods) {
-      const pir::Function *f = definedFunction(functionOf(st.Name, m.Name));
+      const std::string function = functionOf(st.Name, m.Name);
+      const pir::Function *f = index.defined(function);
       if (!f)
-        return Status::error("method '" + st.Name + "." + m.Name +
-                             "' is not in CODE");
-      if (Status s = checkSignature("method '" + st.Name + "." + m.Name + "'",
-                                    *f, methodSignature(m, pir::Type::Ptr));
+        return Status::error("method '" + function + "' is not in CODE");
+      if (Status s = checkSignature("method", function, *f,
+                                    methodSignature(m, pir::Type::Ptr));
           !s)
         return s;
     }
@@ -717,15 +757,15 @@ Status checkCodeMatchesInterface(const pir::Module &code,
                                    return m.Flags & pkm::kMethodPure;
                                  }))
       abstract.insert(c.Name);
-  // A native function is too: CODE has the function that calls C, which
-  // takes and returns what the others do.
+  // Each function, a native one's too: CODE has the function that calls C,
+  // which takes and returns what any other does.
   for (const pkm::FuncRec &fr : iface.Functions) {
     if (abstract.count(fr.Name))
       continue;
-    const pir::Function *f = definedFunction(fr.Name);
+    const pir::Function *f = index.defined(fr.Name);
     if (!f)
       return Status::error("function '" + fr.Name + "' is not in CODE");
-    if (Status s = checkSignature("function '" + fr.Name + "'", *f,
+    if (Status s = checkSignature("function", fr.Name, *f,
                                   derivedSignature(fr.ParamTypeNames,
                                                    fr.ReturnTypeName, fr.Modes,
                                                    std::nullopt, types));
@@ -736,7 +776,7 @@ Status checkCodeMatchesInterface(const pir::Module &code,
   // describe too: a program may take its vtable.
   for (const pir::Class &cls : code.Classes)
     if (code.defines(cls))
-      if (Status s = checkSlotTargets(code, cls); !s)
+      if (Status s = checkSlotTargets(index, cls); !s)
         return s;
   return Status::ok();
 }
