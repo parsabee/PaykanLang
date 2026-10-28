@@ -1727,6 +1727,12 @@ private:
   /// Whether a value of @p ty holds a @p target in place: it is one, or a
   /// tuple or a struct holding one.
   static bool holdsStruct(const ast::Type *ty, const ast::StructType *target);
+  /// holdsStruct, but not looking into the aggregates in @p seen, which
+  /// hold no @p target, and adding those it looks into: one reached by
+  /// many paths (each variant of an enum holding the same enum) is looked
+  /// into once, where the paths to the innermost of n such enums are 3^n.
+  static bool holdsStruct(const ast::Type *ty, const ast::StructType *target,
+                          std::unordered_set<const ast::Type *> &seen);
   /// Instantiated structs in creation order (injectInstantiations).
   std::vector<ast::StructDecl *> InstantiatedStructDecls;
   std::vector<ast::StructDecl *> ForeignInstantiatedStructDecls;

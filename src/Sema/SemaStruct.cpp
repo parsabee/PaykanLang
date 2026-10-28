@@ -401,30 +401,42 @@ void Sema::declareConstructor(ast::StructDecl *sd, ast::StructType *st) {
 
 // static
 bool Sema::holdsStruct(const ast::Type *ty, const ast::StructType *target) {
+  std::unordered_set<const ast::Type *> seen;
+  return holdsStruct(ty, target, seen);
+}
+
+// static
+bool Sema::holdsStruct(const ast::Type *ty, const ast::StructType *target,
+                       std::unordered_set<const ast::Type *> &seen) {
   if (ty == target)
     return true;
   if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    if (!seen.insert(tt).second)
+      return false; // looked into by another path
     for (const ast::Type *e : tt->getElementTypes())
-      if (holdsStruct(e, target))
+      if (holdsStruct(e, target, seen))
         return true;
     return false;
   }
   if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
-    return holdsStruct(ft->getElementType(), target);
+    return holdsStruct(ft->getElementType(), target, seen);
   // An optional struct or tuple holds its value in place.
   if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
-    return holdsStruct(ot->getInnerType(), target);
+    return holdsStruct(ot->getInnerType(), target, seen);
   // An enum holds its variants' fields (those resolved so far: an
   // instantiation of a generic enum is populated as it is made).
-  if (const auto *et = ast::dyn_cast<ast::EnumType>(ty))
+  if (const auto *et = ast::dyn_cast<ast::EnumType>(ty)) {
+    if (!seen.insert(et).second)
+      return false; // looked into by another path
     for (size_t i = 0; i < et->getNumVariants(); ++i)
       if (const ast::StructType *p = et->getPayload(i)) {
         if (p == target)
           return true;
         for (const ast::Type *f : p->getElementTypes())
-          if (holdsStruct(f, target))
+          if (holdsStruct(f, target, seen))
             return true;
       }
+  }
   return false;
 }
 

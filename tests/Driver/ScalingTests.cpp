@@ -419,3 +419,23 @@ TEST(Scaling, PolymorphicRecursionStopsAtTheNameLimit) {
     EXPECT_LT(t.Seconds, 0.5 * slowdown()) << tuple;
   }
 }
+
+// Each enum here has three variants holding the one before it, so the
+// innermost of 20 is reached by 3^20 paths.  Whether a field holds its
+// struct in place was asked along each, which took 4 s at 15 enums and
+// three times as long for each more; each enum is looked into once per
+// question now, and the 20 take 0.01 s.
+TEST(Scaling, AnEnumReachedByManyPathsIsLookedIntoOnce) {
+  ScratchDir dir("enums");
+  std::string src =
+      "import ::io;\nenum E0 { A(x: int), B(y: int), C(z: int) }\n";
+  for (int k = 1; k <= 20; ++k)
+    src += numbered("enum E# { ", k) + numbered("A(x: E#), ", k - 1) +
+           numbered("B(y: E#), ", k - 1) + numbered("C(z: E#) }\n", k - 1);
+  src += "fn f(e: E20) -> Str {\n  return \"\";\n}\n"
+         "fn main() -> int { return 0; }\n";
+  const std::string path = dir.write("enums.pkn", src);
+  Timed t = timed(std::string(kPaykan) + " --check-only " + path + " 2>&1");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_LT(t.Seconds, 1 * slowdown());
+}

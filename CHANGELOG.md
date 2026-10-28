@@ -1531,6 +1531,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     diagnostics is unchanged (the bounds were already checked before every body)
     (docs/language/13-generics.md, "How generic code is checked"; 06-traits.md, "Semantic
     Checks").
+  - Checking that a struct, or an enum's variant, does not hold itself in place looked into
+    an enum once for each path to it, so a graph of enums each with three variants holding
+    the one before (`enum E1 { A(x: E0), B(y: E0), C(z: E0) }`, and so on) took three
+    times as long for each enum more: 13 of them 0.45 s under `--check-only`, 15 4 s, 16
+    13.3 s, and 20 more than 2 minutes.  Each question looks into a type once now: 20 enums
+    take 0.01 s, and 400 take 0.14 s.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
