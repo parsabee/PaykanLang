@@ -291,7 +291,9 @@ each program's `--emit-c` output and the runtime (`src/Runtime/*.c`) are
 compiled with `-std=c11 -pedantic-errors -Wall -Wextra -Werror` at `-O0` and
 `-O2`, linked and run, and every executable must print the same stdout and
 stderr, exit with the same status and leave the same live heap blocks (none)
-as `paykan run --track-heap`.  The *Strict C11* CI job runs it with both GCC
+as `paykan run --track-heap`, apart from the heap statistics and from the
+warnings `paykan run` prints as it compiles the program, which the
+executable, compiled already, never prints.  The *Strict C11* CI job runs it with both GCC
 and Clang required.  MSVC (`clang-cl`) and TinyCC are a goal, not yet checked:
 no CI runner provides them.
 
