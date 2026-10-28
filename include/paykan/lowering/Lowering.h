@@ -28,11 +28,15 @@ namespace paykan::lowering {
 /// import by its module path -- never by a file path, so the program is the
 /// same wherever its sources live.  Diagnostics for internal
 /// errors (states Sema should have ruled out) are written to @p errs; returns
-/// false when any occurred.  @p mainName names the main module (its file
-/// stem, module_name::mainModuleName, unless the driver says otherwise).
-/// A module the resolver (@p resolver, the driver's, or else the one Sema
-/// made: SemaContext::Resolver) loaded from a `.pkm` file contributes its
-/// decoded CODE instead of a lowered AST.
+/// false when any occurred.  Its warnings go there too, in Sema's form
+/// (`<file>:<line>:<column>: warning: ...`, then the source lines): a
+/// slice's elements copied to the heap because a later argument may write
+/// them, once per place (docs/language/02-basics.md, "Evaluation order").
+/// @p mainName names the main module (its file stem,
+/// module_name::mainModuleName, unless the driver says otherwise).  A module
+/// the resolver (@p resolver, the driver's, or else the one Sema made:
+/// SemaContext::Resolver) loaded from a `.pkm` file contributes its decoded
+/// CODE instead of a lowered AST.
 ///
 /// Every module lowers its own copy of each instantiation of another
 /// module's template it uses (`Box<int>` of `lib::gen`), so that what a

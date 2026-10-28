@@ -1541,6 +1541,11 @@ const Sema::ModuleTemplates *Sema::foreignOrigin(const ast::Decl *tmpl) const {
   return it == ForeignTemplates.end() ? nullptr : it->second;
 }
 
+void Sema::noteForeignSource(const ast::Decl *d,
+                             const ModuleTemplates &origin) {
+  ForeignInstantiationSources[d] = {origin.File, origin.Lines, origin.Owner};
+}
+
 Sema::OriginSource::OriginSource(Sema &s, const ModuleTemplates *origin)
     : S(s), SavedOrigin(s.CurrentOrigin), SavedName(s.Diags.getSourceName()),
       SavedLines(s.Diags.getSourceLines()), Active(origin != nullptr) {
@@ -1760,6 +1765,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedClassDecls : InstantiatedClassDecls)
       .push_back(clone);
+  if (origin)
+    noteForeignSource(clone, *origin);
   declareInstantiationStatics(instName, ct, pending);
   return ct;
 }
@@ -1806,6 +1813,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
       queueInstantiation(std::move(p));
       (base.Origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
           .push_back(fn);
+      if (base.Origin)
+        noteForeignSource(fn, *base.Origin);
     }
   }
   InstantiationStack.pop_back();
@@ -1920,6 +1929,8 @@ std::string Sema::instantiateFunction(const std::string &name,
   queueInstantiation(std::move(pending));
   (origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
       .push_back(clone);
+  if (origin)
+    noteForeignSource(clone, *origin);
   return instName;
 }
 

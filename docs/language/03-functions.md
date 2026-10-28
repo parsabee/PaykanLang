@@ -509,6 +509,10 @@ argument was evaluated, which the caller copies when a later argument may write 
 - another variable, or another field of the same one: `look(two.x, bump(two.y))`;
 - the operands of `==` and `!=` (`p == P(bump(p) + 9)`).
 
+The copy of a slice's elements is made on the heap, and the compiler warns where it is made:
+`'reset' in a later argument may write the elements of slice 'xs': they are copied to the
+heap before the call to 'total'` ([Evaluation order](02-basics.md#evaluation-order)).
+
 Outside a borrow, an expression may read a variable and also pass it to an `inout`
 parameter of a call inside it. Its operands are evaluated left to right, and a value read
 before the call is the one used, even when the call replaces what the variable holds:

@@ -670,12 +670,14 @@ naming that storage is an error instead ([Exclusivity](03-functions.md#exclusivi
 their copies are taken for a write through an object or a function value. A slice parameter
 passed on to another names its caller's array, and is copied the same way when a later
 argument may write the array: its elements, as many as the slice has when the program runs,
-into memory allocated for the call and freed after it. Where no later operand may write it,
-as in almost every call, nothing more is copied: a later call given only values that reach
-no object, or whose code stores into nothing its caller holds, cannot, and nor can one whose
-code stores only into objects' fields that cannot hold the value (`f(c.p, counter.next())`,
-where `next` stores only a counter's `int` field). A call through a function value runs code
-the caller does not know, so a value read before it is copied.
+into memory allocated for the call and freed after it, which the compiler warns about where
+the slice is passed ([Evaluation order](02-basics.md#evaluation-order)). Where no later
+operand may write it, as in almost every call, nothing more is copied: a later call given
+only values that reach no object, or whose code stores into nothing its caller holds,
+cannot, and nor can one whose code stores only into objects' fields that cannot hold the
+value (`f(c.p, counter.next())`, where `next` stores only a counter's `int` field). A call
+through a function value runs code the caller does not know, so a value read before it is
+copied.
 
 ## `None`
 

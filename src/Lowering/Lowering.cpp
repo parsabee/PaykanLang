@@ -27,7 +27,7 @@ ModuleLowering::ModuleLowering(ProgramLowering &program,
                                const sema::SemaContext &semaCtx,
                                std::string moduleName, std::string canonical)
     : PL(program), Canonical(std::move(canonical)), ASTCtx(*semaCtx.ASTCtx),
-      SemaCtx(semaCtx), Errs(program.Errs) {
+      SemaCtx(semaCtx), Errs(program.Errs), Source(&semaCtx.Source) {
   Mod.Name = std::move(moduleName);
 }
 
@@ -584,12 +584,25 @@ Val ModuleLowering::visitTranslationUnit(ast::TranslationUnit *node) {
   // no field of a class this module declares, as its type arguments are
   // that module's (readImportedCopies).
   readImportedCopies();
-  for (auto *sd : structs)
+  // Each body points into its own module's file, or into its template's
+  // module's (warnings say where).
+  auto from = [&](const ast::Decl *d) {
+    auto it = SemaCtx.ForeignSources.find(d);
+    Source = it == SemaCtx.ForeignSources.end() ? &SemaCtx.Source : &it->second;
+  };
+  for (auto *sd : structs) {
+    from(sd);
     visitStructDecl(sd);
-  for (auto *cls : classes)
+  }
+  for (auto *cls : classes) {
+    from(cls);
     visitClassDecl(cls);
-  for (auto *fn : funcs)
+  }
+  for (auto *fn : funcs) {
+    from(fn);
     visitFuncDecl(fn);
+  }
+  Source = &SemaCtx.Source;
   return Val();
 }
 

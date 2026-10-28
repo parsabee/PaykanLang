@@ -711,6 +711,93 @@ TEST(Pkm, NoModuleCacheNeverReadsOrWrites) {
   EXPECT_TRUE(contains(r.out, "module base: cache not read")) << r.out;
 }
 
+// A slice's elements copied to the heap are warned about when the code is
+// compiled (docs/language/02-basics.md, "Evaluation order"): a module, when
+// it is compiled from its source, and not when its cache entry or its
+// prebuilt file is read; an instantiation of its generic function, with
+// the module that uses it, once though two modules do (`main` and
+// `other`), pointing into the template's file, whose lines a module file
+// does not hold.  `--check-only` compiles nothing and warns of nothing.
+TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
+  REQUIRE_BACKEND();
+  const fs::path dir =
+      fs::temp_directory_path() / ("pkm_slicecopy_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib/slices.pkn",
+            "class C { a: int[3]; }\n"
+            "fn reset(c: C) -> int { c.a = [9, 9, 9]; return 0; }\n"
+            "fn total(xs: view int[], x: int) -> int => xs[0];\n"
+            "fn plain(xs: view int[], c: C) -> int => total(xs, reset(c));\n"
+            "fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
+            "fn generic<T>(xs: view T[], c: C) -> int => first(xs, "
+            "reset(c));\n");
+  writeFile(dir / "lib/other.pkn",
+            "import lib::slices;\n"
+            "fn more(c: slices::C) -> int => slices::generic(c.a, c);\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\nimport lib::slices;\nimport lib::other;\n"
+            "fn main() -> int {\n"
+            "  let c = slices::C([1, 2, 3]);\n"
+            "  let n = slices::plain(c.a, c);\n"
+            "  io::println(Str(n) + \" \" + Str(slices::generic(c.a, c) + "
+            "other::more(c)));\n"
+            "  return 0;\n}\n");
+  writeFile(dir / "plain.pkn", "import ::io;\nimport lib::slices;\n"
+                               "fn main() -> int {\n"
+                               "  let c = slices::C([1, 2, 3]);\n"
+                               "  io::println(Str(slices::plain(c.a, c)));\n"
+                               "  return 0;\n}\n");
+  auto in = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  const std::string copied = " in a later argument may write the elements of "
+                             "slice 'xs': they are copied to the heap before "
+                             "the call to ";
+  const std::string plain =
+      "lib/slices.pkn:4:48: warning: 'reset'" + copied +
+      "'total'\n"
+      "  3 | fn total(xs: view int[], x: int) -> int => xs[0];\n"
+      "  4 | fn plain(xs: view int[], c: C) -> int => total(xs, reset(c));\n"
+      "    |                                                ^~\n"
+      "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n";
+  const std::string generic = "lib/slices.pkn:6:51: warning: "
+                              "'lib::slices::reset'" +
+                              copied + "'lib::slices::first<int>'\n";
+  const std::string genericLines =
+      "  5 | fn first<T>(xs: view T[], x: int) -> int => xs.len() + x;\n"
+      "  6 | fn generic<T>(xs: view T[], c: C) -> int => first(xs, "
+      "reset(c));\n"
+      "    |                                                   ^~\n";
+  // Built from source: both; from the cache entries, the instantiation
+  // `main` makes, whose template comes from the entry.
+  auto r = in("main.pkn");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, plain + generic + genericLines + "1 6\n");
+  r = in("main.pkn");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, generic + "1 6\n");
+  r = in("--rebuild-modules main.pkn");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, plain + generic + genericLines + "1 6\n");
+  r = in("--check-only main.pkn");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, "");
+  // A prebuilt module file: written from source, with the warning; read,
+  // without one.
+  fs::create_directories(dir / "pre/lib");
+  r = in("--emit-pkm lib/slices.pkn -o pre/lib/slices.pkm");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, plain);
+  fs::remove(dir / "lib/slices.pkn");
+  r = in("--module-path=pre plain.pkn");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, "1\n");
+  r = in("--module-path=pre --rebuild-modules main.pkn");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, generic + "1 6\n");
+  fs::remove_all(dir);
+}
+
 // A cache entry is written from moved code (docs/pir.md §12; pkm.md §5.13):
 // the run that builds the module counts the moves at last use made in its
 // code, and the run that reuses the entry makes none of them again, with

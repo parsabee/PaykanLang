@@ -780,12 +780,33 @@ bool ModuleLowering::emitSliceArg(ast::Expr *arg, std::vector<Val> &args) {
     return true;
   }
   Val len = emitSliceLength(arg);
-  if (SnapshotReads.count(arg))
+  if (auto snap = SnapshotReads.find(arg); snap != SnapshotReads.end()) {
+    // The elements, as many as the slice has when the call runs, in memory
+    // allocated for the call: the one copy of a value read where it is that
+    // costs an allocation, so the program is told where it is made, once a
+    // place (ProgramLowering::warn).
+    PL.warn(*Source, arg->getLocation(),
+            callLabel(snap->second.Writer) +
+                " in a later argument may write the elements of slice '" +
+                ast::cast<ast::Identifier>(arg)->getName() +
+                "': they are copied to the heap before the call to " +
+                callLabel(snap->second.User));
     addr = copySliceToTemporary(
         addr, len, ast::cast<ast::SliceType>(arg->getResolvedType()));
+  }
   args.push_back(addr);
   args.push_back(len);
   return true;
+}
+
+std::string ModuleLowering::callLabel(const ast::Expr *e) {
+  if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e))
+    return "'" + sema::Sema::displayName(ce->getCalleeName()) + "'";
+  if (const auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e))
+    return "'" + mc->getMethodName() + "'";
+  if (const auto *be = ast::dyn_cast<ast::BinaryExpr>(e))
+    return "'" + std::string(be->getOpcodeStr()) + "'";
+  return "a function value";
 }
 
 Val ModuleLowering::emitSliceLength(ast::Expr *e) {

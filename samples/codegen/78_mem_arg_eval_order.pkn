@@ -12,15 +12,16 @@
 //            function value (one a field holds too), for an argument under
 //            an `inout` result and one before a closure that writes it, and
 //            for a slice parameter passed on to another (copied by its
-//            length when the program runs; to a function, a function
-//            value, a method and a constructor); a later call that writes
-//            it through an `inout` local, a `match` arm's binding or a
-//            field holding it, and no copy where no later operand may
-//            write it (a call storing into another field).  A `view` or
-//            slice parameter and the receiver of a struct's `view fn` are
-//            written through an object here: an `inout` argument or a
-//            method that may change them, in a later argument, is an error
-//            (docs/language/03-functions.md, "Exclusivity").
+//            length when the program runs, which the compiler warns about;
+//            to a function, a function value, a method and a constructor);
+//            a later call that writes it through an `inout` local, a
+//            `match` arm's binding or a field holding it, and no copy where
+//            no later operand may write it (a call storing into another
+//            field).  A `view` or slice parameter and the receiver of a
+//            struct's `view fn` are written through an object here: an
+//            `inout` argument or a method that may change them, in a later
+//            argument, is an error (docs/language/03-functions.md,
+//            "Exclusivity").
 // expect-stdout: field: 1 1
 // expect-stdout: inout: 1 1 1 A(n: 1)
 // expect-stdout: equality: False True False

@@ -43,6 +43,15 @@ ProgramLowering::lookupImportContext(const std::string &canonical) {
   return it == Contexts.end() ? nullptr : it->second;
 }
 
+void ProgramLowering::warn(const sema::SemaContext::SourceFile &file,
+                           ast::SourceLocation loc, const std::string &msg) {
+  if (!Warned.insert({file.Name, loc.getLineStart(), loc.getColumnStart()})
+           .second)
+    return;
+  Warnings.setSourceInfo(file.Name, file.Lines);
+  Warnings.warning(loc, msg);
+}
+
 std::string ProgramLowering::claimName(const std::string &name) {
   std::string unique = name;
   for (unsigned n = 2; !UsedNames.insert(unique).second; ++n)

@@ -971,21 +971,28 @@ shared fn @"Box<int>.get"(%self.1: obj) -> i64 {
   EXPECT_EQ(text.find("pkvt_lib_SBox"), std::string::npos) << text;
 }
 
-/// The PIR of a source file, as `paykan --emit-pir` prints it.
-std::string emitPIR(const std::filesystem::path &src, std::string &err) {
-  std::string cmd =
-      std::string(PAYKAN_BIN) + " --emit-pir \"" + src.string() + "\" 2>&1";
+/// What @p cmd prints, and whether it exits with status 0.
+bool readCommand(const std::string &cmd, std::string &out) {
   FILE *fp = popen(cmd.c_str(), "r");
   if (!fp) {
-    err = "cannot run " + cmd;
-    return "";
+    out = "cannot run " + cmd;
+    return false;
   }
-  std::string out;
   std::array<char, 4096> buf{};
   while (fgets(buf.data(), buf.size(), fp))
     out += buf.data();
-  if (pclose(fp) != 0) {
-    err = out;
+  return pclose(fp) == 0;
+}
+
+/// The PIR of a source file, as `paykan --emit-pir` prints it on standard
+/// output; its warnings (a slice's elements copied to the heap) are on
+/// standard error, and so are its errors, which @p err gets.
+std::string emitPIR(const std::filesystem::path &src, std::string &err) {
+  const std::string cmd =
+      std::string(PAYKAN_BIN) + " --emit-pir \"" + src.string() + "\"";
+  std::string out;
+  if (!readCommand(cmd + " 2>/dev/null", out)) {
+    readCommand(cmd + " 2>&1 >/dev/null", err);
     return "";
   }
   return out;

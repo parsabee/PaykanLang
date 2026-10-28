@@ -36,6 +36,7 @@ struct Lowered {
   std::string Error;
   std::string Text; // printed PIR of the whole program
   pir::Program Program;
+  std::string Warnings; // what the lowering printed: its warnings
 };
 
 /// Parse, check, lower, verify and print @p source (@p projectRoot for
@@ -66,6 +67,7 @@ Lowered lower(const std::string &source, const std::string &projectRoot = "",
     l.Error = "lowering failed: " + errs.str();
     return l;
   }
+  l.Warnings = errs.str();
   auto errors = pir::verify(l.Program);
   if (!errors.empty()) {
     l.Error = "verifier: " + pir::formatErrors(errors) + "\n" +
@@ -2071,6 +2073,172 @@ TEST(Lowering, ASlicePassedOnIsCopiedByItsLengthWhenALaterOperandMayWriteIt) {
   const std::string safe = function(l.Text, "safe");
   EXPECT_EQ(count(safe, "Paykan_malloc"), 0u) << safe;
   EXPECT_EQ(count(safe, "%snap."), 0u) << safe;
+}
+
+namespace {
+
+/// The warnings in @p out, each as `<line>:<column>: warning: <message>`:
+/// without the file name, and without the source lines shown under it.
+std::vector<std::string> warnings(const std::string &out) {
+  std::vector<std::string> found;
+  std::istringstream in(out);
+  for (std::string line; std::getline(in, line);) {
+    const size_t at = line.find(": warning: ");
+    if (at == std::string::npos)
+      continue;
+    const size_t column = line.rfind(':', at - 1);
+    found.push_back(line.substr(line.rfind(':', column - 1) + 1));
+  }
+  return found;
+}
+
+} // namespace
+
+// A slice passed on whose elements a later operand may write is copied to
+// the heap (above), the one copy of a value read where it is that costs an
+// allocation, and the lowering warns where the slice is passed, naming the
+// call that may write it and the call it is passed to: a function storing
+// into the array field the slice names, a function value, a virtual call
+// whose override does, and a function writing it through a chain of
+// objects.  A struct's copy, and an array's (`total(c.a, reset(c))` copies
+// the field on the stack), are not warned about, and nor is a slice that
+// no later operand may write: one read before the call (`gsv`), passed to
+// a call that has returned (`gn`), with a later call storing only another
+// type's field (`gt`), or replacing the object the elements are in, which
+// the caller holds (`gc`).
+TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutWhereTheSliceIsPassed) {
+  // The handoff's probe: only `gs` copies a slice.
+  auto probe = lower(R"(
+    import ::io;
+    struct P { a: int; }
+    class C { p: P; a: int[3]; }
+    fn look(p: view P, x: int) -> int => p.a;
+    fn first(p: P, x: int) -> int => p.a;
+    fn total(xs: view int[], x: int) -> int => xs[0];
+    fn reset(c: C) -> int { c.p = P(9); c.a = [9, 9, 9]; return 0; }
+    fn gv(p: view P, c: C) -> int => look(p, reset(c));
+    fn gp(p: view P, c: C) -> int => first(p, reset(c));
+    fn gs(xs: view int[], c: C) -> int => total(xs, reset(c));
+    fn gsv(xs: view int[], c: C) -> int => xs[0] + reset(c) + xs[0];
+    fn main() -> int {
+      let c = C(P(1), [1, 2, 3]);
+      io::println(Str(gv(c.p, c)) + " " + Str(gp(c.p, c)));
+      let d = C(P(1), [1, 2, 3]);
+      io::println(Str(gs(d.a, d)) + " " + Str(total(d.a, reset(d))));
+      return 0;
+    }
+  )",
+                     "", lowering::Copies::Shared, lowering::World::Closed);
+  ASSERT_TRUE(probe.Ok) << probe.Error;
+  EXPECT_EQ(warnings(probe.Warnings),
+            std::vector<std::string>{
+                "11:49: warning: 'reset' in a later argument may write the "
+                "elements of slice 'xs': they are copied to the heap before "
+                "the call to 'total'"})
+      << probe.Warnings;
+
+  auto l = lower(R"(
+    struct P { a: int; }
+    class C { p: P; a: int[3]; }
+    class D { c: C; }
+    class W { view fn touch(c: C) -> int => 0; }
+    class X : W { view fn touch(c: C) -> int { c.a = [7, 7, 7]; return 1; } }
+    class Ticker { t: int; fn next() -> int { self.t += 1; return self.t; } }
+    fn look(p: view P, x: int) -> int => p.a;
+    fn first(p: P, x: int) -> int => p.a;
+    fn total(xs: view int[], x: int) -> int => xs[0];
+    fn reset(c: C) -> int { c.p = P(9); c.a = [9, 9, 9]; return 0; }
+    fn wipe(d: D) -> int { d.c.a = [9, 9, 9]; return 0; }
+    fn swap(d: D) -> int { d.c = C(P(9), [9, 9, 9]); return 0; }
+    fn gs(xs: view int[], c: C) -> int => total(xs, reset(c));
+    fn gf(xs: view int[], f: () -> int) -> int => total(xs, f());
+    fn gw(xs: view int[], w: W, c: C) -> int => total(xs, w.touch(c));
+    fn gd(xs: view int[], d: D) -> int => total(xs, wipe(d));
+    fn gv(p: view P, c: C) -> int => look(p, reset(c));
+    fn gp(p: view P, c: C) -> int => first(p, reset(c));
+    fn gsv(xs: view int[], c: C) -> int => xs[0] + reset(c) + xs[0];
+    fn gn(xs: view int[], c: C) -> int => total(xs, 0) + reset(c);
+    fn gt(xs: view int[], t: Ticker) -> int => total(xs, t.next());
+    fn gc(xs: view int[], d: D) -> int => total(xs, swap(d));
+    fn main() -> int {
+      let c = C(P(1), [1, 2, 3]);
+      let d = D(C(P(1), [1, 2, 3]));
+      let w: W = X();
+      let t = Ticker(0);
+      let f = fn() -> int => reset(c);
+      return gs(c.a, c) + gf(c.a, f) + gw(c.a, w, c) + gd(d.c.a, d) +
+          gv(c.p, c) + gp(c.p, c) + gsv(c.a, c) + gn(c.a, c) + gt(c.a, t) +
+          gc(d.c.a, d) + total(c.a, reset(c));
+    }
+  )",
+                 "", lowering::Copies::Shared, lowering::World::Closed);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string copied = " in a later argument may write the elements of "
+                             "slice 'xs': they are copied to the heap before "
+                             "the call to 'total'";
+  EXPECT_EQ(warnings(l.Warnings),
+            (std::vector<std::string>{"14:49: warning: 'reset'" + copied,
+                                      "15:57: warning: 'f'" + copied,
+                                      "16:55: warning: 'touch'" + copied,
+                                      "17:49: warning: 'wipe'" + copied}))
+      << l.Warnings;
+  // Each warning is where a copy is made, and there only.
+  for (const char *fn : {"gs", "gf", "gw", "gd"})
+    EXPECT_EQ(count(function(l.Text, fn), "call @$rt.Paykan_malloc(%snap."), 1u)
+        << function(l.Text, fn);
+  for (const char *fn : {"gv", "gp", "gsv", "gn", "gt", "gc", "main"})
+    EXPECT_EQ(count(function(l.Text, fn), "Paykan_malloc"), 0u)
+        << function(l.Text, fn);
+  for (const char *fn : {"gv", "gp", "main"})
+    EXPECT_NE(function(l.Text, fn).find("mem.copy %snap.addr."),
+              std::string::npos)
+        << function(l.Text, fn);
+}
+
+// A place is warned about once, however many instantiations of the generic
+// function it is in copy a slice there; a program that copies none is not
+// warned about.
+TEST(Lowering, AHiddenHeapCopyOfASliceIsWarnedAboutOncePerPlace) {
+  auto l = lower(R"(
+    class C { a: int[3]; s: Str[2]; }
+    fn reset(c: C) -> int { c.a = [9, 9, 9]; c.s = ["x", "y"]; return 0; }
+    fn count<T>(xs: view T[], x: int) -> int => xs.len() + x;
+    fn gs<T>(xs: view T[], c: C) -> int => count(xs, reset(c));
+    fn main() -> int {
+      let c = C([1, 2, 3], ["a", "b"]);
+      let u: u8[1] = [7];
+      return gs(c.a, c) + gs(c.s, c) + gs(u, c) + gs(c.a, c);
+    }
+  )",
+                 "", lowering::Copies::Shared, lowering::World::Closed);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_EQ(warnings(l.Warnings),
+            std::vector<std::string>{
+                "5:50: warning: 'reset' in a later argument may write the "
+                "elements of slice 'xs': they are copied to the heap before "
+                "the call to 'count<int>'"})
+      << l.Warnings;
+  // Two of the three instantiations copy (`reset` writes no `u8`).
+  for (const char *fn : {"gs<int>", "gs<Str>"})
+    EXPECT_EQ(count(function(l.Text, fn), "call @$rt.Paykan_malloc(%snap."), 1u)
+        << function(l.Text, fn);
+  EXPECT_EQ(count(function(l.Text, "gs<u8>"), "Paykan_malloc"), 0u)
+      << function(l.Text, "gs<u8>");
+
+  auto none = lower(R"(
+    class C { a: int[3]; n: int; }
+    fn total(xs: view int[], x: int) -> int => xs[0];
+    fn tick(c: C) -> int { c.n += 1; return c.n; }
+    fn g(xs: view int[], c: C) -> int => total(xs, tick(c)) + total(xs, 0);
+    fn main() -> int {
+      let c = C([1, 2, 3], 0);
+      return g(c.a, c);
+    }
+  )",
+                    "", lowering::Copies::Shared, lowering::World::Closed);
+  ASSERT_TRUE(none.Ok) << none.Error;
+  EXPECT_EQ(none.Warnings, "");
+  EXPECT_EQ(count(none.Text, "Paykan_malloc"), 0u) << none.Text;
 }
 
 // A string's character: the string is read before its index is computed,

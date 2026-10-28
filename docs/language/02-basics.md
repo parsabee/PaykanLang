@@ -1035,6 +1035,60 @@ True
 (21, 2)
 ```
 
+The value read is copied only where a later operand may write it. A struct, a tuple, a
+fixed-size array or a tagged union is copied on the stack, as a plain parameter's value is.
+The elements a slice parameter names are copied to the heap, as many as the slice has when
+the program runs, each time the call runs. So the compiler warns where a slice passed on is
+copied, naming the call in a later argument that may write its elements and the call it is
+passed to:
+
+```pkn
+import ::io;
+
+class Counts {
+  xs: int[3];
+}
+
+fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2] + x;
+
+fn reset(c: Counts) -> int {
+  c.xs = [0, 0, 0];
+  return 0;
+}
+
+fn sum(xs: view int[], c: Counts) -> int => total(xs, reset(c)); // xs as passed
+
+fn main() -> int {
+  let c = Counts([1, 2, 3]);
+  io::println(Str(sum(c.xs, c)) + " " + Str(sum(c.xs, c)));
+  return 0;
+}
+```
+
+Output:
+
+```
+6 0
+```
+
+`paykan counts.pkn` prints this on standard error before the program runs, with the line
+and the lines around it and a caret under `xs`, as for an error:
+
+```
+counts.pkn:14:51: warning: 'reset' in a later argument may write the elements of slice 'xs': they are copied to the heap before the call to 'total'
+```
+
+The warning comes once for each place a slice is copied, however many instantiations of a
+generic function reach it, and no option turns it off. A call that need not see the
+elements as they were can be made first (`k = reset(c);`, then `total(xs, k)`), which copies
+nothing and reads what `reset` wrote. The other copies are not warned about, and neither is
+a slice that no later operand may write. The warning comes from compiling the program, not
+from checking it: `--check-only` does not print it, and an imported module read from its
+cache entry or from a prebuilt module file is not compiled again, so its warnings come only
+when it is compiled from its source. An instantiation of another module's generic function
+or class is compiled with the module that uses it, and warns when that module is compiled
+([The paykan command](17-the-paykan-command.md)).
+
 ---
 
 ## Statements

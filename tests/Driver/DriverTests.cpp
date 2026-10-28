@@ -4350,3 +4350,78 @@ TEST(Driver, ABorrowALaterArgumentWritesIsASemaError) {
   EXPECT_FALSE(std::filesystem::exists(exe));
   std::filesystem::remove_all(dir);
 }
+
+// A slice's elements copied to the heap are warned about by every command
+// that compiles the program, on standard error and in the form of every
+// diagnostic (docs/language/02-basics.md, "Evaluation order", whose example
+// this is): `run`, `build`, `--emit-pkm`, `--list-modules` and the
+// `--emit-*` options that print code; `--check-only`, `--emit-ast` and
+// `--dump-ast` compile nothing and warn of nothing; at -O0 and at -O2 alike.
+// The program reads the elements as they were passed, run and built.
+TEST(Driver, ACopiedSliceIsWarnedAboutWhereverTheProgramIsCompiled) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("slice_copy_warning");
+  const auto src = (dir / "counts.pkn").string();
+  std::ofstream(src)
+      << "import ::io;\n"
+         "\n"
+         "class Counts {\n"
+         "  xs: int[3];\n"
+         "}\n"
+         "\n"
+         "fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2] + "
+         "x;\n"
+         "\n"
+         "fn reset(c: Counts) -> int {\n"
+         "  c.xs = [0, 0, 0];\n"
+         "  return 0;\n"
+         "}\n"
+         "\n"
+         "fn sum(xs: view int[], c: Counts) -> int => total(xs, reset(c)); "
+         "// xs as passed\n"
+         "\n"
+         "fn main() -> int {\n"
+         "  let c = Counts([1, 2, 3]);\n"
+         "  io::println(Str(sum(c.xs, c)) + \" \" + Str(sum(c.xs, c)));\n"
+         "  return 0;\n"
+         "}\n";
+  const std::string warning =
+      src +
+      ":14:51: warning: 'reset' in a later argument may write the elements "
+      "of slice 'xs': they are copied to the heap before the call to "
+      "'total'\n"
+      " 13 | \n"
+      " 14 | fn sum(xs: view int[], c: Counts) -> int => total(xs, reset(c)); "
+      "// xs as passed\n"
+      "    |                                                   ^~\n"
+      " 15 | \n";
+  const std::string exe = (dir / "counts").string();
+  const std::string pkm = (dir / "counts.pkm").string();
+  for (const char *opt : {" -O0", " -O2"}) {
+    for (const std::string &mode :
+         {std::string(" "), " build -o " + shellWord(exe) + " ",
+          std::string(" --emit-c "), std::string(" --emit-llvm "),
+          std::string(" --emit-mlir=pir "), std::string(" --emit-pir "),
+          std::string(" --list-modules "),
+          " --emit-pkm -o " + shellWord(pkm) + " "}) {
+      auto r =
+          run(paykanRun() + opt + mode + shellWord(src) + " 2>&1 >/dev/null");
+      EXPECT_EQ(r.exitCode, 0) << opt << mode << r.out;
+      EXPECT_EQ(r.out, warning) << opt << mode;
+    }
+    for (const char *mode :
+         {" --check-only ", " --emit-ast ", " --dump-ast "}) {
+      auto r =
+          run(paykanRun() + opt + mode + shellWord(src) + " 2>&1 >/dev/null");
+      EXPECT_EQ(r.exitCode, 0) << opt << mode << r.out;
+      EXPECT_EQ(r.out, "") << opt << mode;
+    }
+    auto ran = run(paykanRun() + opt + " " + shellWord(src) + " 2>/dev/null");
+    EXPECT_EQ(ran.exitCode, 0) << opt << ran.out;
+    EXPECT_EQ(ran.out, "6 0\n") << opt;
+    auto built = run(shellWord(exe) + " 2>&1");
+    EXPECT_EQ(built.exitCode, 0) << opt << built.out;
+    EXPECT_EQ(built.out, "6 0\n") << opt;
+  }
+  std::filesystem::remove_all(dir);
+}

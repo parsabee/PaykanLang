@@ -58,6 +58,13 @@ first 20 errors, and after them `note: stopping after 20 errors, the error limit
 (--error-limit=N sets it, and --error-limit=0 shows every error)` and no more diagnostics;
 warnings and notes do not count, and the exit status is 1 whatever the limit. (A file that
 does not parse still ends with `parsing failed with N error(s)`, which counts every error.)
+A warning is printed the same way and stops nothing. Most come from checking the program,
+and `--check-only` prints them too; the one for a slice's elements copied to the heap
+([Evaluation order](02-basics.md#evaluation-order)) comes from compiling it: `run`, `build`,
+`--emit-pkm`, `--list-modules` and the `--emit-*` options but `--emit-ast` print it, and
+`--check-only` never does. An imported module prints it only when it is compiled from its
+source, not when it is read from its cache entry or a prebuilt module file. No option turns
+a warning off.
 Each error shows its line with a caret under the place, and the lines above and below it. A
 line longer than 120 characters is shown in 120 around the caret, `...` standing for what
 is cut before or after; a line above or below it that fits in 120 is shown whole, a longer

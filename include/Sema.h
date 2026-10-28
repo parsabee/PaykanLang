@@ -70,6 +70,17 @@ struct SemaContext {
   std::vector<ast::ClassDecl *> ForeignClasses;
   std::vector<ast::FuncDecl *> ForeignFunctions;
   std::vector<ast::StructDecl *> ForeignStructs;
+  /// A file an AST's source locations point into: its name as diagnostics
+  /// show it, and its lines (null when its source is not at hand, as for
+  /// the templates of a module file), which Owner keeps alive.
+  struct SourceFile {
+    std::string Name;
+    const std::vector<std::string> *Lines = nullptr;
+    std::shared_ptr<void> Owner;
+  };
+  /// The file each of ForeignClasses, ForeignFunctions and ForeignStructs
+  /// points into: its template's module's, whose locations a clone keeps.
+  std::unordered_map<const ast::Decl *, SourceFile> ForeignSources;
   /// The resolver Sema made when its caller set none (one without a
   /// cache), which the lowering then reads the modules loaded from `.pkm`
   /// files through; null when the caller's was used.
@@ -87,6 +98,9 @@ struct SemaContext {
   /// §4.8).  Nothing of them is lowered.
   std::vector<ast::ClassDecl *> ImportedInstanceClasses;
   std::vector<ast::StructDecl *> ImportedInstanceStructs;
+  /// The module's own file, which its other declarations' locations point
+  /// into (the lowering's warnings name it).
+  SourceFile Source;
 
   explicit operator bool() const { return Ok; }
 };
@@ -1987,6 +2001,12 @@ private:
   /// SemaContext::ForeignClasses).
   std::vector<ast::ClassDecl *> ForeignInstantiatedClassDecls;
   std::vector<ast::FuncDecl *> ForeignInstantiatedFuncDecls;
+  /// See SemaContext::ForeignSources.
+  std::unordered_map<const ast::Decl *, SemaContext::SourceFile>
+      ForeignInstantiationSources;
+  /// Record that @p d, an instantiation of a template of @p origin's
+  /// module, points into that module's file.
+  void noteForeignSource(const ast::Decl *d, const ModuleTemplates &origin);
   /// See SemaContext::ImportedNatives.
   StringSet ImportedNatives;
   /// See SemaContext::ImportedInstanceClasses.

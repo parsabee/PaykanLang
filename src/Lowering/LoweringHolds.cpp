@@ -132,16 +132,26 @@ private:
   struct PendingRead {
     const ast::Expr *Read;
     Storage Where;
+    /// The call (or the `==`) that uses it.
+    const ast::Expr *User;
   };
   std::vector<PendingRead> Pending;
-  /// @p e is read where it is and used once the later operands have run.
-  void pend(const ast::Expr *e);
-  /// A call made while reads are pending writes what @p place names.
-  void writes(const ast::Expr *place);
-  /// A call made while reads are pending, which does @p effect, may store
-  /// into the storage it reaches through an object, which its caller's
-  /// names may name too.
-  void writesThroughObjects(const Effect &effect);
+  /// @p e is read where it is and used by @p user once the later operands
+  /// have run.
+  void pend(const ast::Expr *e, const ast::Expr *user);
+  /// A call @p by, made while reads are pending, writes what @p place
+  /// names.
+  void writes(const ast::Expr *place, const ast::Expr *by);
+  /// A call @p by (or an `==`), made while reads are pending, which does
+  /// @p effect, may store into the storage it reaches through an object,
+  /// which its caller's names may name too.
+  void writesThroughObjects(const Effect &effect, const ast::Expr *by);
+  /// @p p's read may be written by @p by before it is used: it is copied
+  /// where it is read.
+  void snapshot(const PendingRead &p, const ast::Expr *by) {
+    L.SnapshotReads.try_emplace(p.Read,
+                                ModuleLowering::SnapshotRead{p.User, by});
+  }
 
   /// What the links of a chain below the expression being evaluated left,
   /// evaluated innermost first (evalChainBelow) and not taken yet.
@@ -165,17 +175,17 @@ private:
     f();
     Live.resize(n);
   }
-  /// A call is made that does @p effect: every read in use whose reference
-  /// it may let go of takes one of its own.  A read of storage the function
-  /// never hands on whose reference it cannot let go of, though it may let
-  /// go of others (replaces), is read by a `stable` load (isStableRead).  A
-  /// read of LentReads already has a reference of its own, its argument's
-  /// copy, which the callee is not lent if the call may let go of it.  When
-  /// it is given what reaches an object (@p reaches), it may also store
-  /// into what a pending read reads (writesThroughObjects).
-  void call(const Effect &effect, bool reaches = true) {
+  /// A call @p by (or an `==`) is made that does @p effect: every read in
+  /// use whose reference it may let go of takes one of its own.  A read of
+  /// storage the function never hands on whose reference it cannot let go of,
+  /// though it may let go of others (replaces), is read by a `stable` load
+  /// (isStableRead).  A read of LentReads already has a reference of its own,
+  /// its argument's copy, which the callee is not lent if the call may let go
+  /// of it.  When it is given what reaches an object (@p reaches), it may also
+  /// store into what a pending read reads (writesThroughObjects).
+  void call(const Effect &effect, const ast::Expr *by, bool reaches = true) {
     if (reaches)
-      writesThroughObjects(effect);
+      writesThroughObjects(effect, by);
     for (const ast::Expr *read : Live)
       if (L.LentReads.count(read)) {
         if (replaces(effect, read, /*forLending=*/true))
@@ -201,11 +211,10 @@ private:
   void binary(ast::BinaryExpr *be);
   Use callExpr(ast::CallExpr *ce, bool place);
   Use methodCall(ast::MethodCallExpr *mc, bool place);
-  std::vector<const ast::Expr *> arguments(const std::vector<ast::Expr *> &args,
-                                           Callee callee, bool given,
-                                           const Effect &effect,
-                                           const ast::Expr *self = nullptr,
-                                           bool selfBorrowed = false);
+  std::vector<const ast::Expr *>
+  arguments(const ast::Expr *site, const std::vector<ast::Expr *> &args,
+            Callee callee, bool given, const Effect &effect,
+            const ast::Expr *self = nullptr, bool selfBorrowed = false);
   static Use result(const ast::Expr *call, bool place,
                     std::vector<const ast::Expr *> owners);
 };
@@ -427,7 +436,8 @@ bool ModuleLowering::BorrowedReads::overlaps(const Storage &r,
   return true;
 }
 
-void ModuleLowering::BorrowedReads::pend(const ast::Expr *e) {
+void ModuleLowering::BorrowedReads::pend(const ast::Expr *e,
+                                         const ast::Expr *user) {
   // A value made where it is evaluated (a literal, a call's result, an
   // optional a value is wrapped into) is a temporary already, and a read
   // the statement holds (noteHeldReads) a copy.  A slice passed on is read
@@ -439,17 +449,19 @@ void ModuleLowering::BorrowedReads::pend(const ast::Expr *e) {
   std::optional<Storage> where = storageOf(e);
   if (!where || (where->Var && L.isHeldRead(where->Var)))
     return;
-  Pending.push_back({e, std::move(*where)});
+  Pending.push_back({e, std::move(*where), user});
 }
 
-void ModuleLowering::BorrowedReads::writes(const ast::Expr *place) {
+void ModuleLowering::BorrowedReads::writes(const ast::Expr *place,
+                                           const ast::Expr *by) {
   std::optional<Storage> w = storageOf(place);
   for (const PendingRead &p : Pending)
     if (!w || overlaps(p.Where, *w))
-      L.SnapshotReads.insert(p.Read);
+      snapshot(p, by);
 }
 
-void ModuleLowering::BorrowedReads::writesThroughObjects(const Effect &effect) {
+void ModuleLowering::BorrowedReads::writesThroughObjects(const Effect &effect,
+                                                         const ast::Expr *by) {
   if (!effect.Unknown && !effect.Stores)
     return;
   for (const PendingRead &p : Pending) {
@@ -476,7 +488,7 @@ void ModuleLowering::BorrowedReads::writesThroughObjects(const Effect &effect) {
       break;
     }
     if (written)
-      L.SnapshotReads.insert(p.Read);
+      snapshot(p, by);
   }
 }
 
@@ -609,19 +621,20 @@ void ModuleLowering::BorrowedReads::binary(ast::BinaryExpr *be) {
         (!none && (ast::isFunctionValue(lt) || ast::isMemOptional(lt)))) {
       Use a = eval(lhs);
       const size_t pending = Pending.size();
-      pend(lhs);
+      pend(lhs, be);
       within(a.Owners, [&] {
         Use b = eval(rhs);
         Pending.resize(pending);
-        within(b.Owners,
-               [&] { call(L.valueMethodEffect(lt, names::kMethodEquals)); });
+        within(b.Owners, [&] {
+          call(L.valueMethodEffect(lt, names::kMethodEquals), be);
+        });
       });
       return;
     }
     eval(lhs);
     eval(rhs);
     if (!none && ast::isRefType(lt))
-      call(L.valueMethodEffect(lt, names::kMethodEquals));
+      call(L.valueMethodEffect(lt, names::kMethodEquals), be);
     return;
   }
   const bool refs = lt && rt && ast::isRefType(lt) && ast::isRefType(rt);
@@ -634,8 +647,9 @@ void ModuleLowering::BorrowedReads::binary(ast::BinaryExpr *be) {
     within(holds(a), [&] {
       Use b = eval(rhs);
       if (eq)
-        within(lendable(b),
-               [&] { call(L.valueMethodEffect(lt, names::kMethodEquals)); });
+        within(lendable(b), [&] {
+          call(L.valueMethodEffect(lt, names::kMethodEquals), be);
+        });
     });
     return;
   }
@@ -643,19 +657,20 @@ void ModuleLowering::BorrowedReads::binary(ast::BinaryExpr *be) {
   eval(rhs);
 }
 
-// The arguments @p args of a call, evaluated in order, then the call, which
-// does @p effect when it may replace borrowed storage at all: through what
-// else it is given (@p given: a receiver or a closure that reaches an
-// object; @p self, a struct's receiver it may change, when @p selfBorrowed
-// says it is storage the function does not own), or what an argument
-// gives.  Each argument's holds are in use while the later ones are
+// The arguments @p args of the call @p site, evaluated in order, then the
+// call, which does @p effect when it may replace borrowed storage at all:
+// through what else it is given (@p given: a receiver or a closure that
+// reaches an object; @p self, a struct's receiver it may change, when
+// @p selfBorrowed says it is storage the function does not own), or what an
+// argument gives.  Each argument's holds are in use while the later ones are
 // computed; a reference the callee borrows, the place of an `inout`
 // argument and a value read where it is stay in use through the call.  The
 // result is what the `inout` arguments' storage is held by, which an `inout`
 // result may be part of.
 std::vector<const ast::Expr *> ModuleLowering::BorrowedReads::arguments(
-    const std::vector<ast::Expr *> &args, Callee callee, bool given,
-    const Effect &effect, const ast::Expr *self, bool selfBorrowed) {
+    const ast::Expr *site, const std::vector<ast::Expr *> &args, Callee callee,
+    bool given, const Effect &effect, const ast::Expr *self,
+    bool selfBorrowed) {
   const size_t n = Live.size();
   const size_t pending = Pending.size();
   std::vector<const ast::Expr *> through;
@@ -667,7 +682,7 @@ std::vector<const ast::Expr *> ModuleLowering::BorrowedReads::arguments(
   if (self && self->isChangedByCall())
     changed.push_back(self);
   else if (self)
-    pend(self);
+    pend(self, site);
   bool mayReplace = given || selfBorrowed;
   // A native function changes only what it is given to change; any other
   // callee reaches what an object it is given reaches.
@@ -681,7 +696,7 @@ std::vector<const ast::Expr *> ModuleLowering::BorrowedReads::arguments(
     if (arg->isChangedByCall())
       changed.push_back(arg);
     else
-      pend(arg);
+      pend(arg, site);
     std::vector<const ast::Expr *> h = holds(u);
     // A reference the callee reads where it is: a builtin method's argument,
     // a native function's variable or `x.f` (emitBorrowedBox).
@@ -725,10 +740,10 @@ std::vector<const ast::Expr *> ModuleLowering::BorrowedReads::arguments(
   Pending.resize(pending);
   if (effect.Unknown || effect.Stores)
     for (const ast::Expr *place : changed)
-      writes(place);
+      writes(place, site);
   within(through, [&] {
     if (mayReplace)
-      call(effect, reaches);
+      call(effect, site, reaches);
   });
   return places;
 }
@@ -768,12 +783,12 @@ ModuleLowering::BorrowedReads::callExpr(ast::CallExpr *ce, bool place) {
   // A function value's code and closure are read first, and `__super__`
   // is given `self`.
   if (ce->calleeIsValue() || name == names::kMethodSuper) {
-    arguments(args, Callee::Program, /*given=*/true, Effect::unknown());
+    arguments(ce, args, Callee::Program, /*given=*/true, Effect::unknown());
     return {};
   }
   const ast::FuncDecl *native = L.localNative(name);
   std::vector<const ast::Expr *> owners = arguments(
-      args, native ? Callee::Native : Callee::Program,
+      ce, args, native ? Callee::Native : Callee::Program,
       /*given=*/false,
       native ? L.nativeEffect(*native, args) : L.calleeEffect(name, args));
   return result(ce, place, std::move(owners));
@@ -787,7 +802,7 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
   // A function value in a field: its code and closure are read first.
   if (mc->isFieldCall()) {
     eval(recv);
-    arguments(mc->getArguments(), Callee::Program, /*given=*/true,
+    arguments(mc, mc->getArguments(), Callee::Program, /*given=*/true,
               Effect::unknown());
     return {};
   }
@@ -814,7 +829,7 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
       // A `view fn`'s receiver is read where it is through the call, and
       // one with an `inout` result is the storage that result names.
       std::vector<const ast::Expr *> places = arguments(
-          mc->getArguments(), Callee::Program, reachesObject(st),
+          mc, mc->getArguments(), Callee::Program, reachesObject(st),
           L.effectOf(L.bodyOf(st->getName() + names::kNameSep + name)),
           recv->isChangedByCall() || !mc->isInoutResult() ? recv : nullptr,
           recv->isChangedByCall() && r.Borrowed);
@@ -829,7 +844,7 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
        ast::isa<ast::EnumType>(rt) || ast::isa<ast::BuiltinType>(rt))) {
     Use r = eval(recv);
     within(holds(r),
-           [&] { call(L.valueMethodEffect(rt, names::kMethodToString)); });
+           [&] { call(L.valueMethodEffect(rt, names::kMethodToString), mc); });
     return {};
   }
   // A class's method: the receiver is in use until it returns.
@@ -838,7 +853,7 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
   std::vector<const ast::Expr *> owners = holds(r);
   within(holds(r), [&] {
     std::vector<const ast::Expr *> places = arguments(
-        mc->getArguments(),
+        mc, mc->getArguments(),
         ct && ct->isBuiltin() ? Callee::Builtin : Callee::Program,
         reachesObject(rt), ct ? L.methodEffect(ct, name) : Effect::unknown());
     owners.insert(owners.end(), places.begin(), places.end());
@@ -910,7 +925,7 @@ ModuleLowering::BorrowedReads::eval(ast::Expr *e, bool place) {
     return methodCall(mc, place);
   if (auto *cv = ast::dyn_cast<ast::CallValueExpr>(e)) {
     eval(cv->getCallee());
-    arguments(cv->getArguments(), Callee::Program, /*given=*/true,
+    arguments(cv, cv->getArguments(), Callee::Program, /*given=*/true,
               Effect::unknown());
     return {};
   }

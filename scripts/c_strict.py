@@ -12,7 +12,9 @@ library's, the program's cache entries and prebuilt modules', as archives),
 and run.  One more program imports a module only as a prebuilt module file,
 from a --module-path directory: the 13_pkm sample's.  Every executable must
 exit like `paykan run --track-heap` does, print the same stdout and stderr
-(apart from the heap statistics) and end with 0 live heap blocks.
+(apart from the heap statistics, and from the warnings `paykan run` prints
+while it compiles the program, before running it: the executable, compiled
+already, prints none) and end with 0 live heap blocks.
 
 Usage:
     c_strict.py --paykan build/bin/paykan --cc gcc --cc clang \\
@@ -21,6 +23,7 @@ Usage:
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -36,6 +39,12 @@ ROOT = sp.ROOT
 RUNTIME = ROOT / "src" / "Runtime"
 STRICT_FLAGS = ["-std=c11", "-pedantic-errors", "-Wall", "-Wextra", "-Werror"]
 EXTRA = []  # --cflag
+# What `paykan run` prints as it compiles the program, before running it:
+# its warnings (a hidden copy of a slice's elements, docs/language/
+# 02-basics.md "Evaluation order"), each with its notes, source lines and
+# carets.
+WARNINGS_RE = re.compile(r"\A(?:[^\n]*\d+:\d+: (?:warning|note): [^\n]*\n"
+                         r"(?:[ \d]* \| [^\n]*\n)*)+")
 
 
 def corpus():
@@ -154,6 +163,7 @@ def check_sample(args, sample, idx, runtimes, outdir, flags):
     objects = sp.object_flags(sample, outdir)
     ref_p = tool([args.paykan, "--track-heap", *flags, *objects, str(sample),
                   *sp.sample_args(sample, outdir)])
+    ref_p.stderr = WARNINGS_RE.sub("", ref_p.stderr, count=1)
     ref = sp.normalise(ref_p)
     if ref[3] not in (0, None):  # None: a panic aborts before the report
         return [("reference run", [f"live blocks {ref[3]} (exit {ref[0]})"])]

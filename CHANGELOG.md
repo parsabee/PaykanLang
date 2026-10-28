@@ -352,6 +352,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `>>` is two `>` written together, so `Box<Box<int>>` closes as before.
   - The AST interchange format names them `bitand bitor bitxor shl shr` and `bitnot`
     (docs/plugins/ast-format.md); a template using them is kept in a `.pkm`'s TMPL.
+- **Stability sweep: expressions, places, borrows and closures.**
+  - A warning for each hidden heap copy of a slice (docs/language/02-basics.md,
+    "Evaluation order").  A slice parameter passed on to another, while a call in a later
+    argument may write its elements where the exclusivity rule cannot see it (a function
+    storing into the array field the slice names, a function value, a virtual call whose
+    override does, a function writing through a chain of objects), has its elements copied
+    to the heap where it is passed, an allocation each time the call runs.  The compiler
+    now says so there, naming the call that may write them and the call they are passed
+    to, with the line and a caret as for any diagnostic: `counts.pkn:14:51: warning:
+    'reset' in a later argument may write the elements of slice 'xs': they are copied to
+    the heap before the call to 'total'`.
+    - Once per place, however many instantiations of a generic function reach it and
+      however many modules lower a copy of one; an instantiation of another module's
+      template points into that module's file.
+    - None for the copies of a struct, a tuple, a fixed-size array or a tagged union (on
+      the stack, as a plain parameter's value), and none where nothing is copied.  No
+      option turns it off.
+    - The lowering reports it, through a diagnostics engine of its own: `run`, `build`,
+      `--emit-pkm`, `--list-modules` and the `--emit-*` options that print code print it on
+      standard error.  `--check-only` never lowers, so never warns, and an imported module
+      read from its cache entry or a prebuilt module file is not lowered again, so it
+      warns only when it is compiled from its source
+      (docs/language/17-the-paykan-command.md).
+    - `scripts/c_strict.py` leaves the warnings `paykan run` prints before the program
+      runs out of the standard error it compares with the C executable's.
+      `samples/codegen/78_mem_arg_eval_order.pkn` has five such copies, and the new
+      `samples/codegen/88_hidden_slice_copies.pkn` four, next to the copies that are not
+      warned about.
 
 ### Changed
 
@@ -937,7 +965,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     before: a plain parameter (`first(p, bump(p))`), a write through an object
     (`look(c.p, reset(c))`) or a function value, a write before the borrow or after it has
     ended (`add(look(p, 0), bump(p))`), another field (`look(two.x, bump(two.y))`), a
-    lambda's body, and the operands of `==`.
+    lambda's body, and the operands of `==`; a slice's copy is warned about (see Added).
 
 ### Removed
 
@@ -977,7 +1005,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     static counts recorded here do not move.  The receiver of a struct method that may
     change `self` is still its storage, as an `inout` argument is.  (For a `view` or slice
     parameter and the receiver of a struct's `view fn`, an `inout` argument or a method
-    that may change it, in a later argument, is now an error: see Changed.)
+    that may change it, in a later argument, is now an error: see Changed.  A slice's copy
+    is now warned about: see Added.)
     `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape on every path, with
     `__super__`'s arguments, a function value a field holds, an argument under an `inout`
     result, one before a closure that writes it, slices passed on to a function, a
