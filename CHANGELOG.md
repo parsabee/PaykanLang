@@ -1351,7 +1351,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     in two wordings.  Each is now one error, and the value's own errors are still
     reported (`xs[y] += zw` is two, `us["a"] <<= zw` reported no `zw` before), unless the
     target names no variable or no field, which ends the check as for `=` (`q.n += zw`
-    with no `q` is one error, for `q`, as on base).  An index
+    with no `q` is one error, for `q`, as before).  An index
     of another type in an assignment is said as in a read: `array index must be 'int',
     got 'Str'`, where it was `array index must be int` (docs/language/02-basics.md,
     "Compound assignment"; docs/grammar.md).
