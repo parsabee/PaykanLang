@@ -1055,7 +1055,9 @@ operators](#bitwise-operators) (`flags |= 0b100`, `x >>= 1`). The target is any 
 assignment, so the same rules apply: the operator must be defined for the types (`s += "!"`
 appends to a `Str`, `s -= "!"` is `operator '-' is not defined for types 'Str' and 'Str'`,
 and `i >>= 1` with `i: int` is the `>>` error), a `let` variable or a `view` parameter cannot
-be the target, and a sized integer wraps as `+` does.
+be the target, and a sized integer wraps as `+` does. An error in the target is reported
+once, though the target is read as well as written (`xs[y] += 1` with no `y` is one `use of
+undeclared variable 'y'`), and the value's own errors still are.
 
 ```pkn
 import ::io;

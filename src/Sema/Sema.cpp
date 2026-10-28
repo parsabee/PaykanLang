@@ -5223,10 +5223,55 @@ bool Sema::checkWeakType(ast::Type *ty, ast::SourceLocation loc,
   return false;
 }
 
+namespace {
+
+/// Whether @p copy is a copy of @p e made where @p e is: the same kind of
+/// node at the same place in the source.
+bool isCopyOf(const ast::Expr *copy, const ast::Expr *e) {
+  const ast::SourceLocation a = copy->getLocation();
+  const ast::SourceLocation b = e->getLocation();
+  return copy->getKind() == e->getKind() && a.isValid() &&
+         a.getLineStart() == b.getLineStart() &&
+         a.getColumnStart() == b.getColumnStart() &&
+         a.getLineEnd() == b.getLineEnd() &&
+         a.getColumnEnd() == b.getColumnEnd();
+}
+
+/// A compound assignment `t op= v` is the assignment `t = t' op v`, where
+/// `t'` is a copy of the target the parser made, at the target's place
+/// (Parser::cloneTarget).  These are its `v`, or null for a plain
+/// assignment: a subscript's `xs[i] op= v`, and a field's `r.f op= v`.
+ast::Expr *compoundOperand(const ast::SubscriptAssignStmt *node) {
+  const auto *be = ast::dyn_cast<ast::BinaryExpr>(node->getValue());
+  const auto *se =
+      be ? ast::dyn_cast<ast::SubscriptExpr>(be->getLHS()) : nullptr;
+  return se && isCopyOf(se->getArray(), node->getArray()) &&
+                 isCopyOf(se->getIndex(), node->getIndex())
+             ? be->getRHS()
+             : nullptr;
+}
+
+ast::Expr *compoundOperand(const ast::MemberAssignStmt *node) {
+  const auto *be = ast::dyn_cast<ast::BinaryExpr>(node->getValue());
+  const auto *ma =
+      be ? ast::dyn_cast<ast::MemberAccessExpr>(be->getLHS()) : nullptr;
+  return ma && ma->getFieldName() == node->getFieldName() &&
+                 isCopyOf(ma->getReceiver(), node->getReceiver())
+             ? be->getRHS()
+             : nullptr;
+}
+
+} // namespace
+
 bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
+  const unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
   auto *recvTy = resolveExprType(node->getReceiver());
   if (!recvTy)
     return false;
+  // An error inside the receiver (an argument of a call it makes) leaves
+  // its type known.
+  const bool recvFailed =
+      Diags.getErrorCount() + SuppressedFollowOns != errorsBefore;
 
   // A field cannot be assigned through an optional receiver (it may be None).
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
@@ -5307,6 +5352,12 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                        node->getLocation()))
     return false;
 
+  // The copy of the target in a compound assignment's value would report
+  // the receiver's errors again: only the other operand is checked then.
+  if (ast::Expr *operand = compoundOperand(node); operand && recvFailed) {
+    resolveExprType(operand, fieldTy);
+    return false;
+  }
   auto *valTy = resolveExprType(node->getValue(), fieldTy);
   if (!valTy)
     return false;
@@ -5323,6 +5374,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 }
 
 bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
+  const unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
   auto *arrTy = resolveExprType(node->getArray());
   if (!arrTy)
     return false;
@@ -5341,10 +5393,13 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   auto *idxTy = resolveExprType(node->getIndex());
   if (idxTy && idxTy != Ctx.getIntTy()) {
     error(node->getIndex()->getLocation(),
-          "array index must be int, got '" + typeName(idxTy) + "'");
+          "array index must be 'int', got '" + typeName(idxTy) + "'");
   } else if (idxTy && fixed && !checkFixedIndex(fixed, node->getIndex())) {
     return false;
   }
+  // An error in the array or the index, as a read of them reports it.
+  const bool targetFailed =
+      Diags.getErrorCount() + SuppressedFollowOns != errorsBefore;
   // A fixed-size array's elements are its value: a `let` one keeps them.
   if (fixed)
     if (std::string let = letValueRoot(node->getArray()); !let.empty()) {
@@ -5358,6 +5413,11 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                        node->getLocation()))
     return false;
   ast::Type *elemTy = fixed ? fixed->getElementType() : slice->getElementType();
+  // As for a field: the copy of the target is not checked again.
+  if (ast::Expr *operand = compoundOperand(node); operand && targetFailed) {
+    resolveExprType(operand, elemTy);
+    return false;
+  }
   auto *valTy = resolveExprType(node->getValue(), elemTy);
   if (!valTy)
     return false;

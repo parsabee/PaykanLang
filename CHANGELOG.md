@@ -1277,6 +1277,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `match c { -'a' { } _ { } }` was `unexpected '-'; expected a type`.  It is now one
     error at what follows the `-`, `unexpected character literal; expected a number after
     '-' in a match pattern` (docs/language/08-match.md, "Matching values").
+  - A compound assignment whose target had an error reported it twice, once for the
+    target and once for the copy of it that reads it (the parser builds `t op= v` as `t =
+    t op v`): `xs[y] += 1` with no `y`, and `mk(zzq).n += 1` with no `zzq`, were two
+    `use of undeclared variable` errors, which a debug build then aborted on (`internal
+    compiler error: the same diagnostic was reported twice`), for each of `+=`, `-=`,
+    `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=` and `>>=`; and `xs["a"] += 1` was two errors
+    in two wordings.  Each is now one error, and the value's own errors are still
+    reported (`xs[y] += zw` is two, `us["a"] <<= zw` reported no `zw` before).  An index
+    of another type in an assignment is said as in a read: `array index must be 'int',
+    got 'Str'`, where it was `array index must be int` (docs/language/02-basics.md,
+    "Compound assignment"; docs/grammar.md).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
