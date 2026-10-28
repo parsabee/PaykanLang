@@ -1288,6 +1288,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     of another type in an assignment is said as in a read: `array index must be 'int',
     got 'Str'`, where it was `array index must be int` (docs/language/02-basics.md,
     "Compound assignment"; docs/grammar.md).
+  - A local borrow, or a `match` arm's binding that borrows the subject, stayed live until
+    the last statement naming it, whatever that name meant there: a later lambda's
+    parameter, `for` loop's variable, `match` arm's binding or declaration in an inner
+    block of the same name kept it live, so a valid program was rejected (`r: inout = k; r
+    = 5; io::println(Str(k)); f = fn(r: int) => r * 2;` was `'k' is borrowed by 'inout'
+    local 'r' until 'r' is last used`).  A use is now of the name where it means the
+    borrow; a use in a lambda, before an inner declaration hides the name, or in its
+    initializer still is one.  An `inout` arm's binding goes back to the subject after its
+    last use counted so, before a statement that names another variable of its name
+    (docs/language/02-basics.md, "Local borrows").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

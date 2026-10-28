@@ -788,6 +788,57 @@ TEST(LocalBorrow, InoutArmsGoBackAtTheirLastUse) {
   guard.expectNoLeaks("inout arms written back at their last use");
 }
 
+// A borrow's last use is of the name that means it: a binder of the same
+// name further on (a lambda's parameter, a `for` loop's variable, a
+// declaration in a block) is another variable.  So an `inout` arm's binding
+// goes back to the subject before it, and the arm reads what it wrote; a
+// `view` local's string, and a `view` arm's object, are replaced after
+// their last use.  (Sema kept each borrow live: `'b' is borrowed by 'inout'
+// local 'r' until 'r' is last used`.)
+TEST(LocalBorrow, ABorrowEndsBeforeABinderOfItsName) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(import ::io;
+    enum E { A, R(w: int, s: Str) }
+    class B { e: E; }
+    class N { s: Str; }
+    fn main() -> int {
+      let b = B(E::R(1, "a" + "b"));
+      match b.e {
+        r: inout R {
+          r.w += 100;
+          r.s = r.s + "!";
+          io::print(Str(b.e) + " ");
+          let f = fn(r: int) -> int => r * 2;
+          for r in 0..2 { io::print(Str(r + f(3)) + " "); }
+          { let r = "x" + "y"; io::print(r + " "); }
+          b.e = E::A;
+        }
+        A { }
+      }
+      io::println(Str(b.e));
+      s = "o" + "rig";
+      v: view = s;
+      io::print(v + " ");
+      s = "changed";
+      let g = fn(v: Str) -> Str => v + "?";
+      on: N? = N("n" + "1");
+      match on {
+        n: view N {
+          io::print(n.s + " ");
+          on = N("n" + "2");
+          let h = fn(n: N?) -> Str => if n == None then "-" else "+";
+          io::println(g(s) + " " + h(on));
+        }
+        None { }
+      }
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "R(w: 101, s: ab!) 6 7 xy A\norig n1 changed? +\n");
+  guard.expectNoLeaks("borrows ending before a binder of their name");
+}
+
 // The subject of a `match` with an `inout` arm is found once, before any arm
 // runs: a call on the way to it (a method with an `inout` result, a function
 // returning an object) runs once, and the binding goes back where its value

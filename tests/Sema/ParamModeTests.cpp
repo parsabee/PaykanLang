@@ -1016,6 +1016,104 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
 }
 
+// A borrow is live to the last statement that uses it, by the name that
+// means it there: a binder of the same name further on is another variable
+// and keeps it live no longer.  So the borrowed variable can be used after
+// the borrow's last use, ahead of a lambda's parameter, a `for` loop's
+// variable, a `match` arm's binding or a declaration in an inner block of
+// that name.  (Each kept the borrow live: `'k' is borrowed by 'inout' local
+// 'r' until 'r' is last used`.)
+TEST(LocalBorrow, ABinderOfTheSameNameIsAnotherVariable) {
+  auto program = [](const std::string &later) {
+    return R"(import ::io;
+fn main() -> int {
+  k = 1;
+  o: int? = 5;
+  r: inout = k;
+  r = 5;
+  io::println(Str(k));
+  )" + later +
+           R"(
+  return 0;
+})";
+  };
+  for (const char *later :
+       {"f = fn(r: int) => r * 2; io::println(Str(f(3)));",
+        "{ r: int = 7; io::println(Str(r)); }",
+        "{ let r = 7; io::println(Str(r)); }",
+        "{ r: int, q: int = (7, 8); io::println(Str(r + q)); }",
+        "for r in 0..2 { io::println(Str(r)); }",
+        "match o { r: int { io::println(Str(r)); } None { } }",
+        "if k > 0 { while k > 4 { r: int = 3; io::println(Str(r)); k = 0; } }",
+        "f = fn(n: int) -> int { r: int = n; return r; };",
+        "g = fn(q: int) -> int { for r in 0..q { } return q; };"}) {
+    auto ok = semaCheck(program(later));
+    EXPECT_TRUE(ok.Ok) << later << "\n" << ok.Diagnostics;
+  }
+  // A `view` local, and a `match` arm's binding that borrows the subject.
+  auto ok = semaCheck(R"(import ::io;
+enum E { A, R(w: int) }
+class B { e: E; }
+class N { s: Str; }
+fn main() -> int {
+  s = "orig";
+  v: view = s;
+  io::println(v);
+  s = "changed";
+  g = fn(v: int) => v + 1;
+  b = B(E::R(1));
+  match b.e {
+    r: inout R {
+      r.w += 100;
+      io::println(b.e);
+      h = fn(r: int) -> int => r * 2;
+      for r in 0..2 { }
+      { let r = 7; }
+    }
+    A { }
+  }
+  on: N? = N("a");
+  match on {
+    n: view N {
+      io::println(n.s);
+      on = N("b");
+      m = fn(n: int) -> int => n + 1;
+    }
+    None { }
+  }
+  return g(1);
+})");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  // A use of the borrow before a binder hides it, or where none does, is
+  // one: in a lambda, a loop's range or body, another arm, a declaration's
+  // initializer, an inner block before its declaration, and a destructuring
+  // target without a type, which assigns the borrow.
+  const char *const kBorrowed = ":7:19: error: 'k' is borrowed by 'inout' "
+                                "local 'r' until 'r' is last used";
+  for (const char *later :
+       {"{ io::println(Str(r)); r: int = 7; }",
+        "{ r: int = r + 1; io::println(Str(r)); }",
+        "{ r: int, q: int = (r, 8); io::println(Str(q)); }",
+        "{ r, q = (7, 8); io::println(Str(q)); }", "for i in 0..r { }",
+        "for q in 0..2 { io::println(Str(r)); }",
+        "match o { r: int { } None { io::println(Str(r)); } }",
+        "while o == None { q: int = r; }"}) {
+    auto r = semaCheck(program(later));
+    expectErrors(r, {kBorrowed});
+    EXPECT_EQ(r.ErrorCount, 1u) << later << "\n" << r.Diagnostics;
+  }
+  // A lambda that uses it captures the borrow, an error of its own.
+  for (const char *later :
+       {"f = fn(q: int) => r * q;",
+        "f = fn(q: int) -> int { { r: int = 2; } return r * q; };",
+        "{ g = fn() -> int { return r; }; r: int = 1; }"}) {
+    auto r = semaCheck(program(later));
+    expectErrors(r, {kBorrowed, "error: 'r' is an 'inout' parameter or local; "
+                                "a function cannot capture a borrow"});
+    EXPECT_EQ(r.ErrorCount, 2u) << later << "\n" << r.Diagnostics;
+  }
+}
+
 // A `match` arm's `n: view T` is a `view` local of the subject, whatever the
 // subject is: nothing changes through it, it passes on only to `view`
 // parameters, and the subject's variable cannot change until its last use.

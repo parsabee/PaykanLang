@@ -287,6 +287,12 @@ used; a function cannot capture it`, and for a `view` local of an object, a stri
 array, `'h' is viewed by 'view' local 'v' until 'v' is last used; a function cannot
 capture it (it could change it through its copy)`.
 
+A use is of the name where it means the borrow. A binder of the same name further on is
+another variable, so a statement that names only that one does not keep the borrow live: a
+lambda's parameter (`f = fn(x: int) => x * 2;` after `x = 5;`), a `for` loop's variable, a
+`match` arm's binding, and a declaration in an inner block, from there to the block's end
+(a use in the block before it, or in its initializer, is of the borrow).
+
 A local borrow always has an initializer, declares one variable (not a destructuring
 target), and is never `let`: `let x: view = e;` is an error, `a local borrow cannot be
 'let'`. Written before the name, `view x = e;`, the mode is a syntax error that shows the
