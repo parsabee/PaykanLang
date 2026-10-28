@@ -1233,6 +1233,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     lexer (a segmentation fault), far below the 256 MiB a source may have, since it called
     itself once per character it skipped.  It skips them in a loop: 100,000 `$` in a row
     are 100,000 `invalid character '$'` errors, 20 of them printed, and exit status 1.
+- **Stability sweep: expressions, places, borrows and closures.**
+  - A lambda inside a lambda captured a `weak` variable strongly: only the outermost
+    closure held the object weakly.  So the closure an outer one returned kept the object
+    alive and read it as such after its last owner let go of it (`weak me = b; outer =
+    fn() -> () -> Str { return fn() -> Str => if me == None then "gone" else "alive"; };`
+    printed `alive` once `b` was assigned another object), and one stored in the object
+    formed a cycle that leaked it (2 blocks, 56 bytes), on every path.  Every lambda
+    inside now captures it weakly too, however deeply nested, and it stays read-only there
+    as any capture is (docs/language/16-memory.md, "Weak References").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

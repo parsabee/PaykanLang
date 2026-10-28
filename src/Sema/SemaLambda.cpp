@@ -6,7 +6,8 @@
 // in a scope of its own whose parent is the scope it is written in: a name
 // used inside that is bound outside is captured, by copy, and declared in
 // the lambda's scope as a read-only Captured variable (so a nested lambda
-// captures the copy).  A named function used as a value has the function
+// captures the copy), CapturedWeak for a `weak` one (which a nested lambda
+// captures weakly too).  A named function used as a value has the function
 // type of its signature.  A call through a function value checks its
 // arguments against the function type's parameters, modes included.
 
@@ -112,6 +113,7 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
     case VarKind::Let:
     case VarKind::ForVar:
     case VarKind::Captured:
+    case VarKind::CapturedWeak:
     case VarKind::Weak:
       break;
     }
@@ -160,10 +162,12 @@ bool Sema::captureVariable(const std::string &name, ast::Type *ty, Scope *owner,
         lc.OuterUse->ChangesSelf = true; // the closure may change it later
     }
     // A `weak` variable is captured as a weak reference: the closure holds
-    // the object weakly too, and a call reads it as the variable reads.
-    lc.Node->addCapture(Ctx.intern(name), ty, kind == VarKind::Weak);
+    // the object weakly too, and a call reads it as the variable reads.  So
+    // is an outer lambda's weak capture, by a lambda inside it.
+    const bool weak = kind == VarKind::Weak || kind == VarKind::CapturedWeak;
+    lc.Node->addCapture(Ctx.intern(name), ty, weak);
     lc.Boundary->declare(name, ty);
-    lc.Boundary->Kinds[name] = VarKind::Captured;
+    lc.Boundary->Kinds[name] = weak ? VarKind::CapturedWeak : VarKind::Captured;
     owner = lc.Boundary;
   }
   return true;

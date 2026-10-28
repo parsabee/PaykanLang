@@ -123,6 +123,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// A variable of an enclosing function, captured by copy by a lambda
     /// (docs/language/14-function-types.md): read-only inside it.
     Captured,
+    /// A `weak` variable of an enclosing function, captured weakly by a
+    /// lambda: read-only inside it, as Captured is, and captured weakly by a
+    /// lambda inside it, as Weak is.
+    CapturedWeak,
     /// A `weak` local (docs/language/16-memory.md): it holds a weak
     /// reference, so no `inout` may name it.
     Weak,

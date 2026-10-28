@@ -4121,6 +4121,7 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
                    "' is the variable of a 'for' loop and cannot be assigned");
     return false;
   case VarKind::Captured:
+  case VarKind::CapturedWeak:
     error(loc, "cannot assign to '" + name +
                    "': the function captures it by copy, and the copy is "
                    "read-only (assign it before the function is made, or "

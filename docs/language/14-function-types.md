@@ -277,7 +277,8 @@ Output:
 ```
 
 A lambda inside a lambda captures the outer lambda's copy, so a closure returned from a
-closure holds what the outer one held.
+closure holds what the outer one held: the object of a `weak` variable weakly, as the outer
+one does, however deeply the lambdas are nested.
 
 ## Calling a Function Value
 

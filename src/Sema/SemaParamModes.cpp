@@ -133,7 +133,9 @@ std::string Sema::inoutPlaceError(const ast::Expr *place,
            "' is the variable of a 'for' loop and "
            "cannot be " +
            use;
-  if (id && varKind(id->getName()) == VarKind::Captured)
+  // A capture, a weak one too, is the lambda's read-only copy: said first.
+  if (id && (varKind(id->getName()) == VarKind::Captured ||
+             varKind(id->getName()) == VarKind::CapturedWeak))
     return "'" + id->getName() +
            "' is captured by copy by the function, and the copy is read-only; "
            "it cannot be " +

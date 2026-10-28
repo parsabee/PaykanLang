@@ -87,6 +87,51 @@ TEST(Weak, IsNotAnInoutPlace) {
                 "arm 'n'"});
 }
 
+// A lambda inside a lambda captures the outer one's weak capture, weakly,
+// and it is read-only there as any capture is: it is not assigned, passed
+// to an `inout` parameter, named by an `inout` local or bound by an `inout`
+// arm.  It is read as any `T?` is.
+TEST(Weak, NestedCaptureIsReadOnly) {
+  auto r = semaCheck(R"(
+    class B { n: int; }
+    fn reset(p: inout B?) { p = None; }
+    fn look(p: view B?) -> int { return 0; }
+    fn main() -> int {
+      let b = B(1);
+      weak me = b;
+      let bad = fn() -> () -> int {
+        return fn() -> int {
+          me = None;
+          reset(me);
+          r: inout B? = me;
+          match me { n: inout B { n.n = 2; } None { } }
+          return 0;
+        };
+      };
+      let ok = fn() -> () -> B? {
+        return fn() -> B? {
+          let n = look(me);
+          let keep: B? = me;
+          v: view B? = me;
+          match me { x: B { x.n = x.n + n; } None { } }
+          return if me == None then keep else me;
+        };
+      };
+      return 0;
+    }
+  )");
+  EXPECT_FALSE(r.Ok);
+  expectAll(r, {"cannot assign to 'me': the function captures it by copy, and "
+                "the copy is read-only",
+                "'me' is captured by copy by the function, and the copy is "
+                "read-only; it cannot be passed to 'inout' parameter 'p'",
+                "'me' is captured by copy by the function, and the copy is "
+                "read-only; it cannot be named by 'inout' local 'r'",
+                "'me' is captured by copy by the function, and the copy is "
+                "read-only; it cannot be bound by 'inout' arm 'n'"});
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+}
+
 // A `weak` local may name what a `view` names (a `view` parameter, part of
 // `self` in a `view fn`): it takes no reference, so the view is not copied,
 // and a `view fn` can walk a chain of nodes through one, reading each node.

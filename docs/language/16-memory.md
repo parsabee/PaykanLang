@@ -337,7 +337,11 @@ with `== None`, passed, returned, or stored in a strong variable or field, which
 object alive. Assigning a `T` or a `T?` to a `weak` variable or field makes it refer to that
 object (or to nothing, for `None`) without retaining it. A lambda that captures a `weak`
 variable captures it weakly, so a closure can refer to the object that stores it without
-forming a cycle (see [Captures](14-function-types.md#captures)).
+forming a cycle (see [Captures](14-function-types.md#captures)). So does a lambda written
+inside that lambda, however deeply nested: a closure that an outer closure returns
+(`outer = fn() -> () -> Str { return fn() -> Str => if me == None then "gone" else
+"alive"; };`) holds the object weakly too, and reads `None` once it is gone. Inside the
+lambda the captured variable is read-only, as any capture is.
 
 A weak reference is not a place a strong reference could be written to, so it cannot be passed
 to an `inout` parameter, named by an `inout` local, or bound by an `inout` match arm. It can be
