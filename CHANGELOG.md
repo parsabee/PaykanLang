@@ -386,6 +386,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `samples/codegen/78_mem_arg_eval_order.pkn` has five such copies, and the new
       `samples/codegen/88_hidden_slice_copies.pkn` four, next to the copies that are not
       warned about.
+- **Stability sweep: runtime, standard library and tests.**
+  - `scripts/let_check.py`, run by the new ctest `LetDecls`, checks that every local that is
+    never reassigned is declared with `let` in the samples (`samples/**/*.pkn`), the
+    examples of docs/language and docs/stdlib, and the standard library (`stdlib/*.pkn`). A
+    local declared without it (`x = e;` where that declares `x`, or `x: T = e;`) must be
+    reassigned or compound-assigned, passed to an `inout` parameter or arm, or, for a
+    struct, tuple or fixed-size array, have a field or element assigned or a method that may
+    change it called on it. `paykan` decides: the script makes every other declaration of a
+    program `let`, takes back each one the compiler then refuses, and reports those left
+    when the program keeps its diagnostics and its `--emit-pir` byte for byte. An
+    assignment in an inner block to a variable of an enclosing one is not a declaration
+    (`let` there would declare another variable), and a program Sema rejects keeps its
+    errors. `--apply` makes the declarations it reports `let`. There is no compiler warning
+    for it.
+    - Not checked: borrows, `weak` locals, destructuring, `for` variables and declarations
+      without an initializer, which cannot be `let`; a generic body that the program never
+      instantiates, which Sema checks for each instantiation only (the standard library's
+      generic code is checked through the programs of tests/Stdlib, compiled against the
+      changed sources); and a docs example whose fence follows the line
+      `<!-- let_check: plain -->`, as the three of docs/language/02-basics.md that show the
+      plain declaration itself do.
+    - The tree follows it: 1,450 declarations are `let` now (832 in samples/codegen and
+      samples/leak-check, 376 in samples/sema and samples/imports, 211 in the docs'
+      examples, 31 in the standard library), and the `--emit-pir` of no program changed.
 
 ### Changed
 
