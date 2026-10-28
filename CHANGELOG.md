@@ -1595,6 +1595,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the Buffer's internal message, `buffer index 1 out of bounds (len=0)` (exit 134). The
     length is read again for each element, so such an `equals` makes them find nothing
     (`None`, `False`, `False`) (docs/stdlib/collections.md, "List<T>").
+  - The C path and the runtime round an `f32` value through a C `float`, but `Runtime.h`
+    checked only that `double` is IEEE 754 binary64. It also checks now that `float` is
+    binary32 (`FLT_MANT_DIG == 24`, `FLT_MAX_EXP == 128`, `FLT_MIN_EXP == -125`), so a
+    target whose `float` is another format fails to compile instead of rounding `f32`
+    values wrongly (docs/c-backend.md, "Target assumptions"). Every supported target's is.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

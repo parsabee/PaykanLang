@@ -92,6 +92,11 @@ PAYKAN_STATIC_ASSERT(sizeof(double) == 8 && sizeof(int64_t) == sizeof(double),
 PAYKAN_STATIC_ASSERT(FLT_RADIX == 2 && DBL_MANT_DIG == 53 &&
                          DBL_MAX_EXP == 1024 && DBL_MIN_EXP == -1021,
                      "Paykan needs IEEE 754 binary64 doubles");
+// IEEE 754 binary32 floats: an f32 value is a double rounded through a C
+// float (the C path's `(float)` casts, Paykan_int_to_f32, `s.toF32()`).
+PAYKAN_STATIC_ASSERT(FLT_MANT_DIG == 24 && FLT_MAX_EXP == 128 &&
+                         FLT_MIN_EXP == -125,
+                     "Paykan needs IEEE 754 binary32 floats");
 // Two's complement, and an out-of-range conversion to a signed type wraps
 // modulo 2^N (C11 6.3.1.3p3 leaves it implementation-defined): integer
 // arithmetic is done in uint64_t and converted back to int64_t.
