@@ -1114,12 +1114,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     type reported under both of the import's names, which stopped a debug build with `the
     same diagnostic was reported twice`), or it built a program that crashed when it ran
     (an empty vtable slot, a constructor returning nothing) or crashed the mlir backend (a
-    `void` parameter).  Now, when the file is loaded, its interface is checked for
+    `void` parameter) or rc-elimination (a function whose next value id is not above its
+    ids, which sizes the pass's tables: `std::out_of_range` or a heap overflow).  Now, when the file is loaded, its interface is checked for
     consistency (each superclass a class it describes, whose virtual methods begin its
     subclass's; every class and struct has an initializer), for types it does not
     describe, and against the modules whose types it records; its CODE is decoded,
-    verified (a `void` parameter is an error, and so is a class whose fields do not begin
-    with its superclass's) and checked against the interface: each class the module
+    verified (a `void` parameter is an error, and so are a class whose fields do not begin
+    with its superclass's and a value id at or past its function's next one) and checked against the interface: each class the module
     defines with its superclass, its own fields, its vtable's slots (none empty) and its
     constructor, each method of each of its structs and each function, and their PIR types
     wherever the interface's types decide them (an integer or floating-point type, `bool`,

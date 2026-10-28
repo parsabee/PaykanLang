@@ -1444,6 +1444,32 @@ fn @main() -> i64 {
       << with("x");
 }
 
+// A function's value ids are below its next free one, which the passes
+// size their tables by: a module file whose CODE gave a function a smaller
+// one (its hashes made to match) passed the verifier, and rc-elimination
+// then read past its tables.  The text format has no such field (the
+// parser counts the ids), so the test lowers it in the parsed module.
+TEST(PIRVerifier, RejectsAValueIdPastTheNextFreeOne) {
+  ParseError err;
+  auto m = parseModule(R"(module "m"
+fn @f(%a.1: i64) -> i64 {
+  %b.2 = add %a.1, %a.1
+  ret %b.2
+}
+)",
+                       err);
+  ASSERT_TRUE(m) << err.str();
+  ASSERT_EQ(m->Functions[0].NextValueId, 3u);
+  EXPECT_EQ(formatErrors(verify(*m)), "");
+  m->Functions[0].NextValueId = 2;
+  const std::string errs = formatErrors(verify(*m));
+  EXPECT_NE(errs.find("m:@f: value '%2' is not below the function's next "
+                      "value id 2"),
+            std::string::npos)
+      << errs;
+  EXPECT_EQ(errs.find("value '%1'"), std::string::npos) << errs;
+}
+
 // The cross-module checks of one module, against the modules at hand: an
 // extern naming a module whose PIR is not at hand is not checked, one
 // naming no module of the program is an error.

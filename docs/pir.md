@@ -1303,6 +1303,9 @@ The verifier rejects a program when:
 
 * a value is used before its definition or outside the block that defines it;
   a `local` is loaded/stored with the wrong type or used without a declaration;
+  a value's id is not below its function's next free id (what a binary
+  module records, §5.7 of docs/design/pkm.md; the text format counts the
+  ids), which the passes size their tables by;
 * an instruction's operand types do not match the op (arithmetic type mismatch,
   `cmp` on different types or on optionals, a disallowed `cast` pair,
   non-`bool` condition, `some` of anything but `i64`/`f64`/`bool`/`char`,

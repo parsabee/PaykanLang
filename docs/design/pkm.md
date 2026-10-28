@@ -955,7 +955,7 @@ FunctionRec
   uleb nConventions ; nConventions × u8   always 0 (#98 part 2 retired the per-parameter convention: §5.5's ownership of each call's arguments)
   uleb nParams ; nParams × (uleb id ; type ; str name)
   uleb nLocals ; nLocals × (str name ; [u8 18] ; slot type)   18 before the slot type: a view local (docs/pir.md §3)
-  uleb nextValueId
+  uleb nextValueId       above every id of a parameter or a result (the verifier checks it)
   Block body
 ClassRec
   str name ; u32 flags (bit0 extern ; bit1 final #18 ; bit2 abstract #18 ; bit3 singleton (obsolete, written 0: #168 is not planned) ; bit4 hasClassObj (obsolete, written 0: §4.5) ; bits5-6 linkage ; bit7 linkonce reserved)

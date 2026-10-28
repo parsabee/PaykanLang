@@ -431,6 +431,12 @@ private:
       }
       if (!EverDefined.insert(v.Id).second)
         error("value '%" + std::to_string(v.Id) + "' is defined twice");
+      // Ids are below the function's next free one, which the passes size
+      // their tables by.
+      if (v.Id >= F.NextValueId)
+        error("value '%" + std::to_string(v.Id) +
+              "' is not below the function's next value id " +
+              std::to_string(F.NextValueId));
       if (v.Ty == Type::Void || v.Ty == Type::Mem)
         error("value '%" + std::to_string(v.Id) + "' has type " +
               typeName(v.Ty));
