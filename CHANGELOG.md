@@ -1042,6 +1042,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     error: 0.03 s, 0.07 s and 0.2 s.  The longest
     instantiation name in the standard library is 26 characters, in the samples, the
     stdlib tests and the documentation's examples 55.
+- **Stability sweep: runtime, standard library and tests.**
+  - `File.readbytes(n)`'s `n` is a maximum, not a size it allocates before reading
+    (docs/stdlib/io.md, "File.readbytes"): a read with an `n` too large to allocate is no
+    longer `OutOfMemory`, but the bytes that are there, or `EndOfFile` when there are none
+    (`readbytes(1152921504606846976)` at the end of a file). It is `OutOfMemory` only when
+    the data it reads does not fit in memory.
 
 ### Removed
 
@@ -1582,8 +1588,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     runtime only gains a test hook, `Paykan_heap_total_allocs()`, the number of blocks the
     tracking allocator has allocated (Runtime.h).
   - `File.readbytes(n)` allocated `n` bytes before reading: `readbytes(1099511627776)` of a
-    5-byte file was `OutOfMemory` where the system does not overcommit memory (Linux) and
-    took 1 TB of address space where it does (macOS), and `readbytes(1000000000)` 1 GB.
+    5-byte file was `OutOfMemory` where the system refuses an allocation that large
+    (Linux) and took 1 TB of address space where it does not (macOS), and
+    `readbytes(1000000000)` 1 GB.
     `n` is a maximum: the buffer starts at 64 KiB (or `n` bytes, when that is less) and
     doubles as the data fills it: the tracking allocator's peak for either read of the
     5-byte file is 65,630 bytes, where it was 1,099,511,627,870 and 1,000,000,094

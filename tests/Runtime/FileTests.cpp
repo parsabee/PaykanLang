@@ -734,8 +734,8 @@ struct TrackingHeap {
 // readbytes(n)'s buffer starts at 64 KiB at most and grows as reads fill
 // it, so readbytes(2^40) of a 5-byte file allocates under 1 MB.  It
 // allocated the 2^40 bytes up front (SW-27): out of memory (ENOMEM) where
-// the system does not overcommit, and a 1 TB peak on the tracking heap
-// where it does.
+// the system refuses an allocation that large (Linux), and a 1 TB peak on
+// the tracking heap where it does not (macOS).
 TEST(FileReadbytes, AMaximumPastTheEndAllocatesWhatIsThere) {
   std::string path = makeTempFile("hello");
   ASSERT_FALSE(path.empty());
