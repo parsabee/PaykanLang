@@ -22,6 +22,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -35,6 +38,7 @@
 #include <utility>
 #include <vector>
 
+#include <poll.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -64,6 +68,69 @@ CmdResult run(const std::string &cmd) {
     out += buf.data();
   int rc = pclose(fp); // a macro on macOS: needs an lvalue
   return {WEXITSTATUS(rc), out};
+}
+
+/// `run`, but @p cmd and every process it starts are killed once it has run
+/// for @p seconds, so a command that blocks or reads for good fails the test
+/// instead of hanging it.  macOS has no `timeout` command, and a CPU limit
+/// would never stop a process blocked on a read.
+CmdResult runFor(const std::string &cmd, int seconds) {
+  int out[2];
+  if (pipe(out) != 0)
+    return {-1, "pipe failed"};
+  const pid_t pid = fork();
+  if (pid < 0)
+    return {-1, "fork failed"};
+  if (pid == 0) {
+    setpgid(0, 0); // a group of its own, which the kill below reaches whole
+    dup2(out[1], STDOUT_FILENO);
+    dup2(out[1], STDERR_FILENO);
+    close(out[0]);
+    close(out[1]);
+    execl("/bin/sh", "sh", "-c", cmd.c_str(), static_cast<char *>(nullptr));
+    _exit(127);
+  }
+  setpgid(pid, pid); // whichever of the two runs first
+  close(out[1]);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+  std::string text;
+  std::array<char, 4096> buf{};
+  bool killed = false;
+  for (;;) {
+    int wait = -1; // once killed, the pipe closes when the group is gone
+    if (!killed) {
+      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+          deadline - std::chrono::steady_clock::now());
+      if (left.count() > 0) {
+        wait = static_cast<int>(left.count());
+      } else {
+        kill(-pid, SIGKILL);
+        killed = true;
+      }
+    }
+    pollfd ready{};
+    ready.fd = out[0];
+    ready.events = POLLIN;
+    const int n = poll(&ready, 1, wait);
+    if (n == 0 || (n < 0 && errno == EINTR))
+      continue;
+    if (n < 0)
+      break;
+    const ssize_t got = read(out[0], buf.data(), buf.size());
+    if (got < 0 && errno == EINTR)
+      continue;
+    if (got <= 0)
+      break;
+    text.append(buf.data(), static_cast<size_t>(got));
+  }
+  close(out[0]);
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  if (killed)
+    text += "(killed after " + std::to_string(seconds) + " s)\n";
+  return {WIFEXITED(status) ? WEXITSTATUS(status) : -1, text};
 }
 
 bool hasBackend() {
@@ -158,6 +225,12 @@ struct Project {
                     const std::string &cmd = "") const {
     return run("cd " + Dir.string() + " && " +
                (cmd.empty() ? paykanCmd() : cmd) + " " + flags + " main.pkn");
+  }
+  /// `runMain`, killed after @p seconds (`runFor`).
+  CmdResult runMainFor(int seconds, const std::string &flags = "") const {
+    return runFor("cd " + Dir.string() + " && " + paykanCmd() + " " + flags +
+                      " main.pkn",
+                  seconds);
   }
   /// The .pkm cache entries (the backends keep their own files beside them).
   std::vector<std::string> pkmEntries() const {
@@ -496,15 +569,14 @@ TEST(Pkm, BitcodeCacheEntryThatIsNoRegularFileIsTranslatedAgain) {
   const std::string entry = "module ::io: bitcode cache "
                             ".paykan_cache/@system/io.bc ";
   // Bounded, so a compile that blocks or reads for good fails the test.
-  const std::string paykan = "timeout 60 " + paykanCmd();
   auto translatedAgain = [&](const std::string &what, const std::string &why) {
     SCOPED_TRACE(what);
-    auto r = p.runMain("--verbose", paykan);
+    auto r = p.runMainFor(60, "--verbose");
     EXPECT_EQ(r.exitCode, 42) << r.out;
     EXPECT_TRUE(contains(r.out, entry + why + "; translating it again\n"))
         << r.out;
     EXPECT_TRUE(fs::is_regular_file(fs::symlink_status(bc)));
-    r = p.runMain("--verbose", paykan);
+    r = p.runMainFor(60, "--verbose");
     EXPECT_EQ(r.exitCode, 42) << r.out;
     EXPECT_FALSE(contains(r.out, "bitcode cache")) << r.out;
   };
