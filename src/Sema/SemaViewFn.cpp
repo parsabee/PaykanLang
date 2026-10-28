@@ -114,10 +114,27 @@ void Sema::warnMissingViewFns() {
       }
     }
   }
-  // A generic class's instances share their template's locations: one
-  // warning each.
+  // A generic type's instances share their template's declarations: its
+  // method is one for all of them, warned about only when it could be a
+  // `view fn` in every instance (`Box<int>`'s `get` could, but `Box<Str>`'s
+  // returns a reference its caller may change), and then once.
+  auto templateOf = [&](ast::Type *t) -> const void * {
+    if (auto *ct = ast::dyn_cast<ast::ClassType>(t))
+      if (const InstantiationInfo *info = instantiationInfo(ct))
+        return info->Template;
+    if (auto *st = ast::dyn_cast<ast::StructType>(t))
+      if (const StructInstantiationInfo *info = structInstantiationInfo(st))
+        return info->Template;
+    return t; // not an instance: its own
+  };
+  std::set<std::pair<const void *, std::string>> cannot;
+  for (const auto &[family, members] : families)
+    if (!could.count(family))
+      cannot.insert({templateOf(family.first), family.second});
   std::set<std::pair<size_t, size_t>> warned;
   for (const Family &family : could) {
+    if (cannot.count({templateOf(family.first), family.second}))
+      continue;
     for (const MethodUse *m : families[family]) {
       if (ownerOf(*m) != family.first)
         continue;

@@ -1431,6 +1431,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     body is parsed.  The AST interchange reader gives the same error for a superclass
     such as `"Half<int>"`, where it said the name was not an identifier
     (docs/language/13-generics.md, docs/grammar.md, docs/plugins/ast-format.md).
+  - The warning that a method never changes `self` and should be a `view fn` was given for
+    a generic class's or struct's method when one instance could be one, though another
+    could not, so following it broke the program: with `impl Box<T> { fn get() -> T =>
+    self.v; }` used as `Box<int>` and `Box<Str>`, `Box<int>` gave `'get' never changes
+    'self': make it a 'view fn' ...`, and `view fn get` was then `'self' is read-only in
+    'view fn get', so part of it can only be returned as a 'view'` for `Box<Str>`.  The
+    method of a template is now one for all its instances, warned about once and only
+    when every instance could make it a `view fn` (docs/language/05-classes.md, "Methods
+    that don't change self").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

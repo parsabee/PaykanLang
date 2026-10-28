@@ -210,7 +210,9 @@ fn main() -> int { return show(Counter(), Fast()); }
 // method calling only such methods on `self` gets it too, in the same
 // compile; a method with an override that changes `self` does not, nor one
 // passing part of `self` to a parameter that is not `view`, and a generic
-// class's method gets one warning, not one per instance.
+// class's method gets one warning, not one per instance, when every
+// instance could make it a `view fn` (`count`; `Box<Str>`'s `get` returns
+// a `Str` of `self` its caller could change, see GenericMethodWarnsFor...).
 TEST(ViewFn, WarnsWhenSelfNeverChanges) {
   auto r = semaCheck(R"(class Shape {
   w: int;
@@ -232,12 +234,12 @@ class Square : Shape {
 impl Square {
   fn __init__() { __super__(); }
 }
-class Box<T> { v: T; fn get() -> T { return self.v; } }
-impl Box<T> { fn __init__(v: T) { self.v = v; } }
+class Box<T> { v: T; n: int; fn get() -> T { return self.v; } fn count() -> int { return self.n; } }
+impl Box<T> { fn __init__(v: T) { self.v = v; self.n = 1; } }
 fn main() -> int {
   b = Box<int>(1);
   c = Box<Str>("a");
-  return Shape().twice() + b.get() + c.get().len();
+  return Shape().twice() + b.get() + c.get().len() + b.count() + c.count();
 }
 fn twiceOf(n: int) -> int { return 2 * n; }
 )");
@@ -249,19 +251,62 @@ fn twiceOf(n: int) -> int { return 2 * n; }
             std::string::npos)
       << r.Diagnostics;
   for (const char *loc : {":3:3: warning: 'area' ", ":4:3: warning: 'twice' ",
-                          ":21:22: warning: 'get' "})
+                          ":21:63: warning: 'count' "})
     EXPECT_NE(r.Diagnostics.find(std::string(loc) + kSuffix), std::string::npos)
         << loc << "\n"
         << r.Diagnostics;
-  EXPECT_EQ(r.Diagnostics.find("'get' never"),
-            r.Diagnostics.rfind("'get' never"))
+  EXPECT_EQ(r.Diagnostics.find("'count' never"),
+            r.Diagnostics.rfind("'count' never"))
       << r.Diagnostics;
-  for (const char *quiet :
-       {"'grow'", "'grown'", "'hook'", "'done'", "'sized'", "'__init__'"})
+  for (const char *quiet : {"'grow'", "'grown'", "'hook'", "'done'", "'sized'",
+                            "'__init__'", "'get'"})
     EXPECT_EQ(r.Diagnostics.find(std::string("warning: ") + quiet),
               std::string::npos)
         << quiet << "\n"
         << r.Diagnostics;
+}
+
+// A generic type's method is one declaration for all its instances: it is
+// warned about only when it could be a `view fn` in every one.  `get`, which
+// returns `self.v`, could in `Box<int>` but not in `Box<Str>`, whose `Str`
+// its caller could change: following the warning `Box<int>` gave was "'self'
+// is read-only in 'view fn get', so part of it can only be returned as a
+// 'view'" for `Box<Str>`.  With `Box<int>` alone, or a method every
+// instance could make a `view fn`, the warning is given, once.
+TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
+  const std::string boxes =
+      "import ::io;\n"
+      "struct Box<T> { v: T; n: int; }\n"
+      "impl Box<T> { fn get() -> T => self.v; fn count() -> int => self.n; }\n"
+      "class Cell<T> { v: T; fn get() -> T { return self.v; } }\n"
+      "impl Cell<T> { fn __init__(v: T) { self.v = v; } }\n";
+  const std::string warning = "never changes 'self': make it a 'view fn'";
+  auto both =
+      semaCheck(boxes + "fn main() -> int {\n"
+                        "  a = Box<int>(1, 2); b = Box<Str>(\"x\", 3);\n"
+                        "  c = Cell<int>(4); d = Cell<Str>(\"y\");\n"
+                        "  io::println(Str(a.get() + a.count() + b.count() + "
+                        "c.get()) + b.get() + d.get());\n"
+                        "  return 0;\n"
+                        "}\n");
+  EXPECT_TRUE(both.Ok) << both.Diagnostics;
+  EXPECT_EQ(both.Diagnostics.find("'get' " + warning), std::string::npos)
+      << both.Diagnostics;
+  EXPECT_NE(both.Diagnostics.find(":3:40: warning: 'count' " + warning),
+            std::string::npos)
+      << both.Diagnostics;
+  EXPECT_EQ(both.Diagnostics.find("'count' never"),
+            both.Diagnostics.rfind("'count' never"))
+      << both.Diagnostics;
+  auto ints = semaCheck(boxes + "fn main() -> int {\n"
+                                "  a = Box<int>(1, 2); c = Cell<int>(4);\n"
+                                "  return a.get() + c.get();\n"
+                                "}\n");
+  EXPECT_TRUE(ints.Ok) << ints.Diagnostics;
+  for (const char *loc : {":3:15: warning: 'get' ", ":4:23: warning: 'get' "})
+    EXPECT_NE(ints.Diagnostics.find(loc + warning), std::string::npos)
+        << loc << "\n"
+        << ints.Diagnostics;
 }
 
 // A module's `view fn` markers are part of its interface: overrides in the
