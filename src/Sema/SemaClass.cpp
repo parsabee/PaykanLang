@@ -1016,6 +1016,8 @@ bool Sema::populateImplMethods(ast::ClassDecl *cd, ast::ClassType *ct) {
         ok = false;
         continue;
       }
+      std::optional<TypeParamScope> params;
+      implTypeParamScope(params, fn);
       if (auto *md = declareMethod(
               fn, ct, nullptr,
               init ? ast::MethodDecl::None : ast::MethodDecl::Impl, ok)) {
@@ -1044,25 +1046,25 @@ bool Sema::rejectReservedDestroy(const ast::FuncDecl *fn, ast::Type *owner) {
 void Sema::checkTemplateFieldNames(const ast::Decl *tmpl) {
   if (!TemplateFieldsChecked.insert(tmpl).second)
     return;
-  // Not under an instantiation (its notes would name one of many) nor a
-  // generic body's type parameters: the template's fields are checked as a
-  // struct's are.
+  // Not under an instantiation (its notes would name one of many): the
+  // template's fields are checked as a struct's are, its own type
+  // parameters being type names there (not a generic body's that uses it).
   std::vector<InstantiationFrame> frames =
       std::exchange(InstantiationStack, {});
-  const StringSet *typeParams = std::exchange(CurrentTypeParams, nullptr);
-  auto check = [&](const std::vector<ast::VarDecl *> &fields) {
+  auto check = [&](const std::vector<const std::string *> &typeParams,
+                   const std::vector<ast::VarDecl *> &fields) {
+    TypeParamScope params(*this, typeParams);
     for (const ast::VarDecl *field : fields)
       checkBinderName(field->getName(), field->getLocation(),
                       /*binds=*/false, "a field name");
   };
   if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
-    check(cd->getFields());
+    check(cd->getTypeParams(), cd->getFields());
   else if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
-    check(sd->getFields());
+    check(sd->getTypeParams(), sd->getFields());
   else if (const auto *ed = ast::dyn_cast<ast::EnumDecl>(tmpl))
     for (size_t v = 0; v < ed->getNumVariants(); ++v)
-      check(ed->getPayload(v));
-  CurrentTypeParams = typeParams;
+      check(ed->getTypeParams(), ed->getPayload(v));
   InstantiationStack = std::move(frames);
 }
 
@@ -1216,6 +1218,8 @@ bool Sema::visitClassDecl(ast::ClassDecl *node) {
   for (auto *method : node->getMethods()) {
     classCtx.MethodName = method->getName();
     classCtx.ViewMethod = method->isView();
+    std::optional<TypeParamScope> params;
+    implTypeParamScope(params, method);
 
     if (rejectReservedDestroy(method, ct)) {
       ok = false;
@@ -1583,6 +1587,26 @@ void Sema::noteForeignSource(const ast::Decl *d,
                                     origin.Module};
 }
 
+Sema::TypeParamScope::TypeParamScope(
+    Sema &s, const std::vector<const std::string *> &params)
+    : S(s), Saved(s.CurrentTypeParams) {
+  for (const std::string *p : params)
+    Params.insert(*p);
+  S.CurrentTypeParams = &Params;
+}
+
+void Sema::noteImplTypeParams(const ast::ImplDecl *im,
+                              const ast::ImplDecl *copy) {
+  for (const ast::FuncDecl *fn : copy->getMethods())
+    ImplMethodTypeParams[fn] = &im->getTypeParams();
+}
+
+void Sema::implTypeParamScope(std::optional<TypeParamScope> &scope,
+                              const ast::FuncDecl *fn) {
+  if (auto it = ImplMethodTypeParams.find(fn); it != ImplMethodTypeParams.end())
+    scope.emplace(*this, *it->second);
+}
+
 Sema::OriginSource::OriginSource(Sema &s, const ModuleTemplates *origin)
     : S(s), SavedOrigin(s.CurrentOrigin), SavedName(s.Diags.getSourceName()),
       SavedLines(s.Diags.getSourceLines()), Active(origin != nullptr) {
@@ -1723,6 +1747,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
         s[*im->getTypeParams()[i]] = args[i];
       ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
       impls.push_back(c.cloneImplDecl(im, instName));
+      noteImplTypeParams(im, impls.back());
     }
 
   const InstantiationFrame request = frameAt(instName, loc);
@@ -1768,10 +1793,13 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   if (origin)
     ImportedTypeOrigins[instName] = origin->Module;
 
-  if (!populateClassType(clone, ct))
-    ok = false;
-  if (ok)
-    declareConstructor(clone, ct);
+  {
+    TypeParamScope params(*this, tmpl->getTypeParams());
+    if (!populateClassType(clone, ct))
+      ok = false;
+    if (ok)
+      declareConstructor(clone, ct);
+  }
   for (auto *im : ImplsByClass[instName]) {
     if (!ok || !im->getTrait())
       continue;
@@ -1835,6 +1863,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
         continue;
       }
       fn->setName(Ctx.intern(name));
+      std::optional<TypeParamScope> params;
+      implTypeParamScope(params, fn);
       if (!declareFunctionSignature(fn))
         continue; // ErroneousNames has it
       // Another module's template's: the instantiation's, not this
@@ -1845,6 +1875,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
       p.Class = nullptr;
       p.Struct = nullptr;
       p.Func = fn;
+      if (params)
+        p.TypeParams = *CurrentTypeParams; // its body sees the block's names
       queueInstantiation(std::move(p));
       (base.Origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
           .push_back(fn);
@@ -1944,6 +1976,7 @@ std::string Sema::instantiateFunction(const std::string &name,
   bool ok;
   {
     OriginSource inOrigin(*this, origin);
+    TypeParamScope params(*this, tmpl->getTypeParams());
     ok = declareFunctionSignature(clone);
   }
   InstantiationStack.pop_back();

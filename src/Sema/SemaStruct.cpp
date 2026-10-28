@@ -337,6 +337,8 @@ bool Sema::populateImplMethods(ast::StructDecl *sd, ast::StructType *st) {
         ok = false;
         continue;
       }
+      std::optional<TypeParamScope> params;
+      implTypeParamScope(params, fn);
       if (auto *md =
               declareMethod(fn, st, nullptr,
                             name == names::kMethodInit ? ast::MethodDecl::None
@@ -524,6 +526,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
         s[*im->getTypeParams()[i]] = args[i];
       ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
       impls.push_back(c.cloneImplDecl(im, instName));
+      noteImplTypeParams(im, impls.back());
     }
 
   const InstantiationFrame request = frameAt(instName, loc);
@@ -538,9 +541,13 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   if (origin)
     ImportedTypeOrigins[instName] = origin->Module;
 
-  bool ok = populateStructType(clone, st);
-  if (ok)
-    declareConstructor(clone, st);
+  bool ok;
+  {
+    TypeParamScope params(*this, tmpl->getTypeParams());
+    ok = populateStructType(clone, st);
+    if (ok)
+      declareConstructor(clone, st);
+  }
   for (auto *im : impls) {
     if (!ok || !im->getTrait())
       continue;
@@ -690,11 +697,14 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
     payloads.emplace_back(sd, st);
   }
   bool ok = true;
-  for (auto [sd, st] : payloads)
-    if (!populateStructType(sd, st)) {
-      ErroneousClasses.insert(sd->getName());
-      ok = false;
-    }
+  {
+    TypeParamScope params(*this, tmpl->getTypeParams());
+    for (auto [sd, st] : payloads)
+      if (!populateStructType(sd, st)) {
+        ErroneousClasses.insert(sd->getName());
+        ok = false;
+      }
+  }
   InstantiationStack.pop_back();
 
   if (!ok) {
@@ -732,6 +742,8 @@ bool Sema::visitStructDecl(ast::StructDecl *node) {
   for (auto *method : node->getMethods()) {
     ctx.MethodName = method->getName();
     ctx.ViewMethod = method->isView();
+    std::optional<TypeParamScope> params;
+    implTypeParamScope(params, method);
 
     // The signature was resolved when the method joined the struct
     // (populateImplMethods); resolveType is idempotent.

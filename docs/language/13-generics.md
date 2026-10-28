@@ -460,7 +460,13 @@ default `__init__` ([The default `__init__`](05-classes.md#the-default-__init__)
 Inside a generic declaration `T` stands for the type argument and nothing
 else. It can be used in annotations, `T[3]`, `view T[]`, `Box<T>`, tuple types
 `(T, int)`, optional types `T?`, and `match` arms, but `y = T;` and `T()` are
-errors ("type parameter 'T' cannot be used as a value").
+errors ("type parameter 'T' cannot be used as a value"). Like any type's name,
+it names no field, parameter or local of the declaration: `class D<T> { T: int;
+v: T; }` is `'T' is a type name and cannot be used as a field name`, at the field
+(once, whether or not `D` is instantiated), and `fn g<T>(T: int, y: T)` is `... as a
+parameter name` (`T = 3;` in a body `... as a variable`), for each instantiation. An
+`impl` block's type parameters are the names it gives them: in `impl Box<U> { … }`,
+`U` is the type and `T` an ordinary name.
 
 Tuples and optionals work inside templates and as type arguments:
 
@@ -644,6 +650,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Type arguments on a non-generic | `f<int>(1)` where `f` is ordinary; `Str<int>` in a type position (`t: Str<int>`) — as an expression, `Str<int>(n)` is a conversion constructor ([Conversions](04-strings-and-conversions.md#conversions)) |
 | Missing type arguments | `b: Box = …` for a generic `Box` |
 | Type parameter used as a value | `y = T;`, `T()` inside a generic body |
+| Type parameter as a name | A field, a parameter (of a function, a method, a `static fn` or a lambda), a local or a `for` variable named like a type parameter of its declaration: `class D<T> { T: int; … }`, `fn g<T>(T: int, y: T)`, `T = 3;`: `'T' is a type name and cannot be used as a field name` (`... as a parameter name`, `... as a variable`) |
 | Duplicate / shadowing type parameter | `class P<T, T>`, `class Bar<Foo>` when `Foo` is a type, `impl Box<Foo>` |
 | `impl` type parameters | `impl Box` or `impl Box<T, U>` for a one-parameter `Box`, `impl A<T>` for a non-generic `A` |
 | Generic superclass | `class Full : Half<int> { … }`, `class Full<T> : Half<T> { … }` (a syntax error, at the `<`; the class body is still parsed): `a superclass cannot be generic: a class, generic or not, extends a class that has no type parameters` |

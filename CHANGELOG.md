@@ -989,6 +989,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     call, also when the superclass's `__init__` does nothing (which was accepted); where it
     has one it was `'__super__' must be the first statement of '__init__' in class 'C'`, at
     the method (docs/language/05-classes.md, "Inheritance" and "Semantic Checks").
+  - **Breaking:** a type parameter names no field, parameter or local of its declaration, as
+    a type's name names none anywhere (docs/language/13-generics.md, "Type Parameters Are
+    Types"; 02-basics.md, "Builtin Names Are Reserved").  A local named like one was already
+    an error (`fn h<T>(y: T) -> int { T = 3; return T; }` is `'T' is a type name and cannot
+    be used as a variable`), while a field and a parameter were accepted: `class D<T> { T:
+    int; v: T; }` and `fn g<T>(T: int, y: T) -> int { return T; }` ran.  The field is now
+    `'T' is a type name and cannot be used as a field name`, at the field, once (of a class,
+    a struct or an enum's variant, whether or not it is instantiated), and the parameter
+    `... as a parameter name` for each instantiation, a method's, an `impl` method's and a
+    `static fn`'s too.  An `impl` block's type parameters are the names it gives them: in
+    `impl R<U>`, `U` is the type parameter, in its methods' parameters and bodies, and `T`
+    an ordinary name (a body there was checked with the class's `T`, so `fn x(T: int) -> int
+    { T = T + 1; return T; }` was an error and `U = 1;` was not).  A template's declarations
+    are checked with its own type parameters, not those of a generic body that instantiates
+    it: `g<int>(3, 4)` inside `fn outer<T>`, with `fn g<U>(T: int, u: U)`, was `'T' is a
+    type name ...`.
 
 ### Removed
 

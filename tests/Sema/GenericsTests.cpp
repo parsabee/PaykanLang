@@ -394,6 +394,98 @@ TEST(Generics, TypeParamUsedAsValue) {
       << r2.Diagnostics;
 }
 
+// A type parameter is a type name throughout its declaration, as a class's
+// name is everywhere: a field, a parameter and a local named like it are
+// each an error.  A local was one already, while a field and a parameter
+// were accepted (`class D<T> { T: int; v: T; }`, `fn g<T>(T: int, y: T)`
+// ran).  The field is reported once, at the template, the others for each
+// instantiation; an `impl` block's names are its own (`impl R<U>`).
+TEST(Generics, ATypeParameterNamesNoFieldParameterOrLocal) {
+  auto expectErrors = [](const std::string &src,
+                         std::initializer_list<const char *> errors) {
+    auto r = semaCheck(src);
+    EXPECT_FALSE(r.Ok) << src;
+    EXPECT_EQ(r.ErrorCount, errors.size()) << src << "\n" << r.Diagnostics;
+    for (const char *e : errors)
+      EXPECT_TRUE(has(r.Diagnostics, e)) << e << "\n" << r.Diagnostics;
+  };
+  // The finding's program: the field once, the parameter at `g<Str>`, and
+  // `D<Str>(...).T` is a follow-on of the field's error.
+  expectErrors(
+      "class D<T> { T: int; v: T; }\n"
+      "fn g<T>(T: int, y: T) -> int { return T; }\n"
+      "fn main() -> int { return D<Str>(4, \"s\").T + g(3, \"x\"); }\n",
+      {":1:14: error: 'T' is a type name and cannot be used as a "
+       "field name",
+       ":2:9: error: 'T' is a type name and cannot be used as a "
+       "parameter name"});
+  expectErrors("struct S<T> { T: int; v: T; }\n"
+               "enum E<T> { A(T: int, v: T), B }\n"
+               "fn main() -> int { return 0; }\n",
+               {":1:15: error: 'T' is a type name and cannot be used as a "
+                "field name",
+                ":2:15: error: 'T' is a type name and cannot be used as a "
+                "field name"});
+  // A method's, an `impl` method's and a `static fn`'s parameter, each in
+  // its own class; a lambda's parameter and a `for` variable, as before.
+  expectErrors(
+      "class P<T> { v: T; fn q(T: int) -> int { return T; } }\n"
+      "class Q<T> { v: T; }\nimpl Q<T> { fn r(T: int) -> int { return T; } }\n"
+      "class W<T> { v: T; }\n"
+      "impl W<T> { static fn s(T: int) -> int { return T; } }\n"
+      "fn lam<T>(y: T) -> int { f = fn(T: int) -> int => T; return f(1); }\n"
+      "fn each<T>(y: T) -> int { for T in 0..2 { } return 0; }\n"
+      "fn main() -> int {\n"
+      "  p = P<int>(1); q = Q<int>(1); n = W<int>::s(1);\n"
+      "  return lam(1) + each(1);\n"
+      "}\n",
+      {":1:25: error: 'T' is a type name and cannot be used as a parameter "
+       "name",
+       ":3:18: error: 'T' is a type name and cannot be used as a parameter "
+       "name",
+       ":5:25: error: 'T' is a type name and cannot be used as a parameter "
+       "name",
+       ":6:33: error: 'T' is a type name and cannot be used as a parameter "
+       "name",
+       ":7:31: error: 'T' is a type name and cannot be used as a variable"});
+  // An `impl` block's own names are the type parameters there, in its
+  // methods' parameters and bodies: `U` is a type, `T` is not.  The body of
+  // `impl R<U>` was checked with the class's `T`.
+  expectErrors("class R<T> { v: T; }\n"
+               "impl R<U> { fn w() -> int { U = 1; return 0; } }\n"
+               "struct Q<T> { v: T; }\n"
+               "impl Q<U> { fn x(U: int) -> int { return 0; } }\n"
+               "fn main() -> int { r = R<int>(1); q = Q<int>(2); return 0; }\n",
+               {":2:29: error: 'U' is a type name and cannot be used as a "
+                "variable",
+                ":4:18: error: 'U' is a type name and cannot be used as a "
+                "parameter name"});
+  auto renamed = semaCheck(
+      "class R<T> { v: T; }\n"
+      "impl R<U> {\n"
+      "  fn x(T: int) -> int { T = T + 1; return T; }\n"
+      "  static fn s(T: int) -> int { return T; }\n"
+      "}\n"
+      "struct Q<T> { v: T; }\nimpl Q<U> { fn x(T: int) -> int { return T; } }\n"
+      "fn main() -> int {\n"
+      "  r = R<int>(1); q = Q<int>(2);\n"
+      "  return r.x(1) + R<int>::s(2) + q.x(3);\n"
+      "}\n");
+  EXPECT_TRUE(renamed.Ok) << renamed.Diagnostics;
+  // A template's declarations are checked with its own type parameters,
+  // not those of the generic body instantiating it: `g<int>` and
+  // `Holder<int>` in `outer<T>` have a parameter and a field `T`, which
+  // their own `U` leaves a name (`g<int>`'s parameter was an error there).
+  auto inner = semaCheck("class Holder<U> { T: int; v: U; }\n"
+                         "fn g<U>(T: int, u: U) -> int { return T; }\n"
+                         "fn outer<T>(x: T) -> int {\n"
+                         "  h = Holder<int>(1, 2);\n"
+                         "  return g<int>(3, 4) + h.T;\n"
+                         "}\n"
+                         "fn main() -> int { return outer(1); }\n");
+  EXPECT_TRUE(inner.Ok) << inner.Diagnostics;
+}
+
 TEST(Generics, DuplicateTypeParam) {
   auto r =
       semaCheck(withMain("class P<T, T> { a: T; }\n"

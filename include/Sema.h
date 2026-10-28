@@ -1747,6 +1747,14 @@ private:
   /// template.
   std::unordered_map<const ast::Decl *, std::vector<ast::ImplDecl *>>
       TemplateImpls;
+  /// The type parameters of the `impl` block an instantiation's method or
+  /// `static fn` was copied from, by that block's own names (`impl Box<U>`):
+  /// its declaration and its body are checked with those.
+  std::unordered_map<const ast::FuncDecl *,
+                     const std::vector<const std::string *> *>
+      ImplMethodTypeParams;
+  /// Record the methods of @p copy, an instantiation's copy of @p im, there.
+  void noteImplTypeParams(const ast::ImplDecl *im, const ast::ImplDecl *copy);
   /// Set once checkImplDecls has run (see PendingTraitImpls).
   bool ImplsChecked = false;
 
@@ -1995,9 +2003,31 @@ private:
   std::vector<PendingTraitImpl> PendingTraitImpls;
   static constexpr size_t kMaxInstantiationDepth = 16;
 
-  /// Type parameter names of the instantiation whose body is being checked
-  /// (nullptr outside one).  Used to diagnose a type parameter used as a value.
+  /// Type parameter names of the instantiation whose body or declarations
+  /// are being checked (nullptr outside one).  Used to diagnose a type
+  /// parameter used as a value, or as the name of a field, a parameter or a
+  /// local (isTypeNameForVariable).
   const StringSet *CurrentTypeParams = nullptr;
+  /// While alive, CurrentTypeParams is @p params: a template's declarations
+  /// (its fields, its parameters, its methods' and `static fn`s') are
+  /// checked with its own type parameters, not those of the generic body
+  /// that instantiates it.
+  class TypeParamScope {
+    Sema &S;
+    const StringSet *Saved;
+    StringSet Params;
+
+  public:
+    TypeParamScope(Sema &s, const std::vector<const std::string *> &params);
+    ~TypeParamScope() { S.CurrentTypeParams = Saved; }
+    TypeParamScope(const TypeParamScope &) = delete;
+    TypeParamScope &operator=(const TypeParamScope &) = delete;
+  };
+  /// Open in @p scope a TypeParamScope of the names of the `impl` block
+  /// @p fn was copied from, when it is an instantiation's (see
+  /// ImplMethodTypeParams); otherwise leave it empty.
+  void implTypeParamScope(std::optional<TypeParamScope> &scope,
+                          const ast::FuncDecl *fn);
 
   /// Classes constructed inside each class's method bodies (by name).  Used to
   /// order instantiated classes for the lowering: a constructor must be

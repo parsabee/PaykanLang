@@ -426,7 +426,9 @@ TEST(BinderName, FieldsRejectReservedNames) {
 // once: one never instantiated (a library's export compiled cleanly), one
 // instantiated twice (reported per instantiation), one instantiated by a
 // field declared before it; of a struct, a class and an enum.  A field
-// named like the template's own type parameter is not a type's name.
+// named like the template's own type parameter is one too, a type
+// parameter being a type name throughout its template (it was accepted);
+// one named like another template's is not.
 TEST(BinderName, ATemplatesFieldsAreCheckedAtTheTemplate) {
   const std::string field = "is a type name and cannot be used as a field name";
   auto r = semaCheck("struct Box<T> { u8: T; }\nclass G<T> { Str: T; }\n"
@@ -454,9 +456,13 @@ TEST(BinderName, ATemplatesFieldsAreCheckedAtTheTemplate) {
              wrapMain("h = H(Box<int>(1));"),
          "2:17: error: 'u8' "}})
     expectOneBinderError(src, at + field);
-  auto own = semaCheck("struct Box<T> { T: int; v: T; }\n" +
-                       wrapMain("b = Box<int>(1, 2); io::println(b.T);"));
-  EXPECT_TRUE(own.Ok) << own.Diagnostics;
+  expectOneBinderError("struct Box<T> { T: int; v: T; }\n" +
+                           wrapMain("b = Box<int>(1, 2); io::println(b.T);"),
+                       "1:17: error: 'T' " + field);
+  auto other = semaCheck("struct Box<T> { U: int; v: T; }\n"
+                         "fn f<U>(u: U) -> U { return u; }\n" +
+                         wrapMain("b = Box<int>(1, 2); io::println(b.U);"));
+  EXPECT_TRUE(other.Ok) << other.Diagnostics;
 }
 
 TEST(BinderName, MatchBindingsRejectReservedNames) {
