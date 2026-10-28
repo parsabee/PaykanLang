@@ -348,10 +348,11 @@ backend does no inheritance walk.
 * **Layout**: the 16-byte runtime header (vtable pointer, 32-bit strong
   count, 32-bit weak count; `struct PaykanObject` in `Runtime.h`: an object carries its
   own reference counts, so a `box` is the object's pointer) followed by
-  *all* fields in declaration order, ancestors first.  Field types are `i64
-  f64 bool char box weak`, the optionals and `mem(N, A)` (laid out at its
-  alignment, as C lays out the `uint8_t` array; reached through
-  `field.addr`).
+  *all* fields in declaration order, ancestors first: a class's fields begin
+  with its superclass's, the same names, types and layout (the verifier
+  checks it).  Field types are `i64 f64 bool char box weak`, the optionals
+  and `mem(N, A)` (laid out at its alignment, as C lays out the `uint8_t`
+  array; reached through `field.addr`).
 * **Vtable**: one entry per slot in slot order, each a function symbol (a
   function of this module, an `extern fn`, or `null` for an empty slot, which
   the lowering never emits: a pure virtual method's slot holds its trap,

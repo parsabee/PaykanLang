@@ -1343,9 +1343,16 @@ TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
                 "has an IFACE section that does not match its CODE: class "
                 "'Seg': its constructor is (i64, i64, i64, i64) -> void in "
                 "CODE, its initializer (obj, i64, i64, i64, i64) -> void");
+  expectNotUsed("inherited", code([](Module &m) {
+                  named(m.Classes, "Seg").Fields[0].Name = "";
+                }),
+                "has a bad CODE section: it does not verify:\nlib::b: class "
+                "'Seg': its fields do not begin with those of its superclass "
+                "'Line'\n");
+  // `lib::a`'s Shape, and the layouts that begin with it, changed alike.
   expectNotUsed("link", code([](Module &m) {
-                  named(m.Classes, "Shape").Fields[0].Ty =
-                      paykan::pir::Type::F64;
+                  for (const char *c : {"Shape", "Line", "Seg"})
+                    named(m.Classes, c).Fields[0].Ty = paykan::pir::Type::F64;
                 }),
                 "has a bad CODE section: it does not match the modules it "
                 "names:\nlib::b: extern class 'Shape' has a different layout "

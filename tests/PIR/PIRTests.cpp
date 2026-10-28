@@ -1411,6 +1411,39 @@ fn @main() -> i64 {
       << errs;
 }
 
+// A class's layout is its superclass's fields, then its own (docs/pir.md §5):
+// a module file whose CODE renamed an inherited field passed the verifier,
+// and its importers' copies of the class then disagreed with it.
+TEST(PIRVerifier, AClassBeginsWithItsSuperclassFields) {
+  const char *const shape = R"(module "m"
+extern class Shape module "lib" {
+  field n: i64
+  field m: i64
+}
+extern class Line : Shape module "lib" {
+  field %s: i64
+  field m: i64
+  field k: i64
+}
+fn @main() -> i64 {
+  ret 0
+}
+)";
+  auto with = [&](const char *name) {
+    std::string text = shape;
+    text.replace(text.find("%s"), 2, name);
+    ParseError err;
+    auto p = parseProgram(text, err);
+    return p ? formatErrors(verify(p->Modules.front()))
+             : "PARSE ERROR: " + err.str();
+  };
+  EXPECT_EQ(with("n"), "");
+  EXPECT_NE(with("x").find("class 'Line': its fields do not begin with those "
+                           "of its superclass 'Shape'"),
+            std::string::npos)
+      << with("x");
+}
+
 // The cross-module checks of one module, against the modules at hand: an
 // extern naming a module whose PIR is not at hand is not checked, one
 // naming no module of the program is an error.

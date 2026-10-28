@@ -6,6 +6,7 @@
 
 #include "paykan/pir/Printer.h"
 
+#include <algorithm>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -81,6 +82,12 @@ bool hasMem(const Signature &sig) {
     if (t == Type::Mem)
       return true;
   return false;
+}
+
+/// True when @p a and @p b are the same field: name, type and layout.
+bool sameField(const Field &a, const Field &b) {
+  return a.Name == b.Name && a.Ty == b.Ty && a.Size == b.Size &&
+         a.Align == b.Align;
 }
 
 /// True when @p sig takes a `void`, which is no value.
@@ -264,6 +271,16 @@ private:
       if (!c.Super.empty() && !Index.Classes.count(c.Super))
         error(where,
               "class '" + c.Name + "' extends unknown class '" + c.Super + "'");
+      // Its layout is its superclass's fields, then its own (§5).
+      else if (const Class *super =
+                   c.Super.empty() ? nullptr : Index.Classes.at(c.Super);
+               super && (c.Fields.size() < super->Fields.size() ||
+                         !std::equal(super->Fields.begin(), super->Fields.end(),
+                                     c.Fields.begin(), sameField)))
+        error(where, "class '" + c.Name +
+                         "': its fields do not begin with those of its "
+                         "superclass '" +
+                         c.Super + "'");
       if (c.IsExtern && c.Module.empty())
         error(where, "extern class '" + c.Name + "' names no module");
       std::unordered_set<std::string> fields;
@@ -1255,13 +1272,9 @@ void verifyModuleLinks(const Module &m, const LinkedModules &modules,
                                     "'"});
       continue;
     }
-    bool same = def->Fields.size() == c.Fields.size();
-    for (size_t i = 0; same && i < c.Fields.size(); ++i)
-      same = def->Fields[i].Name == c.Fields[i].Name &&
-             def->Fields[i].Ty == c.Fields[i].Ty &&
-             def->Fields[i].Size == c.Fields[i].Size &&
-             def->Fields[i].Align == c.Fields[i].Align;
-    if (!same)
+    if (def->Fields.size() != c.Fields.size() ||
+        !std::equal(c.Fields.begin(), c.Fields.end(), def->Fields.begin(),
+                    sameField))
       errors.push_back({m.Name, "extern class '" + c.Name +
                                     "' has a different layout than its "
                                     "definition in module '" +
