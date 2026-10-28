@@ -72,7 +72,8 @@ Status checkInterface(const pkm::Interface &iface);
 /// (every type an interface names has one: a scalar, a reference's `box`, an
 /// optional's, a value held in memory passed by its address, a slice as its
 /// address and length).  And each slot of each class @p code defines names
-/// the function an importer's subclass inherits for it.  The first
+/// the function an importer's subclass inherits for it, and a class's
+/// constructor and methods are shared exactly when the class is.  The first
 /// difference when not.
 Status checkCodeMatchesInterface(const pir::Module &code,
                                  const pkm::Interface &iface);

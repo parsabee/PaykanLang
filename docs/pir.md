@@ -1351,10 +1351,10 @@ The verifier rejects a program when:
   a `ret`, `unreachable`, terminating `if` or terminating `switch`);
 * a `switch`'s value is not an `i64`, `char` or `bool`, or a case is not a
   constant of its type or equals an earlier case;
-* a module-level symbol is defined twice, or a vtable entry's signature does not
-  match the named function's declaration as a machine function (§3: a slot
-  of a type with a `box` parameter takes the ownership mask, which a runtime
-  target spells out);
+* a module-level symbol or a class has an empty name or is defined twice, or a
+  vtable entry's signature does not match the named function's declaration as
+  a machine function (§3: a slot of a type with a `box` parameter takes the
+  ownership mask, which a runtime target spells out);
 * a call's argument ownership (§6) is not one per argument, or lends or
   passes on (`lent`, `owned(%o)`) an argument that is not a box parameter of
   a lending callee with a bit in the ownership mask (§3; never one of a

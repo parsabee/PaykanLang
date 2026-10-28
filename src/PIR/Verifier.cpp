@@ -196,7 +196,10 @@ private:
     // One @-namespace for functions and globals.
     std::unordered_set<std::string> symbols;
     auto define = [&](const std::string &name, const char *what) {
-      if (!symbols.insert(name).second)
+      // A symbol is linked by its name.
+      if (name.empty())
+        error(where, std::string(what) + " has an empty name");
+      else if (!symbols.insert(name).second)
         error(where, std::string(what) + " '@" + name + "' is defined twice");
     };
     for (const Function &f : m.Functions)
@@ -266,7 +269,9 @@ private:
 
     std::unordered_set<std::string> classes;
     for (const Class &c : m.Classes) {
-      if (!classes.insert(c.Name).second)
+      if (c.Name.empty())
+        error(where, "a class has an empty name");
+      else if (!classes.insert(c.Name).second)
         error(where, "class '" + c.Name + "' is defined twice");
       if (!c.Super.empty() && !Index.Classes.count(c.Super))
         error(where,

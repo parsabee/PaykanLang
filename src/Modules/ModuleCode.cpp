@@ -471,6 +471,20 @@ private:
   std::unordered_map<std::string_view, const pir::Class *> Classes;
 };
 
+/// Whether @p f, a function of the class @p cls (its constructor or a
+/// method `C.m`), links as the class does: the functions of a copy of an
+/// instantiation are shared, linked by names of their own, and those of a
+/// class of the module's are not (the module's compiled code calls them by
+/// those names).
+Status linksLikeItsClass(const pir::Function &f, const pir::Class &cls) {
+  if (f.Shared == cls.Shared)
+    return Status::ok();
+  return Status::error("function '@" + f.Name + "' is " +
+                       (f.Shared ? "" : "not ") +
+                       "shared in CODE, its class '" + cls.Name +
+                       (cls.Shared ? "' is" : "' is not"));
+}
+
 /// The runtime's implementation of the root class's method @p method
 /// (`$rt.PaykanObject_toString` for `toString`), or "" for a method the
 /// root does not have.
@@ -509,9 +523,11 @@ Status checkSlotTargets(const CodeIndex &index, const pir::Class &cls) {
       if (depth > code.Classes.size())
         return Status::error("class '" + cls.Name +
                              "' is its own ancestor in CODE");
-      if (const pir::Function *f = index.defined(x->Name + method))
+      if (const pir::Function *f = index.defined(x->Name + method)) {
+        if (Status s = linksLikeItsClass(*f, *x); !s)
+          return s;
         found = f->Name;
-      else
+      } else
         x = x->Super.empty() ? nullptr : index.cls(x->Super);
     }
     // The slot names another function, which @p why and @p function say.
@@ -703,9 +719,12 @@ Status checkCodeMatchesInterface(const pir::Module &code,
       const pir::Function *f = index.defined(function);
       if (!f && compiled && !slot)
         return Status::error("method '" + function + "' is not in CODE");
-      if (f)
+      if (f) {
+        if (Status s = linksLikeItsClass(*f, *cls); !s)
+          return s;
         if (Status s = checkSignature("method", function, *f, sig); !s)
           return s;
+      }
       for (size_t i = 0; i < slots.size(); ++i)
         if (slots[i] == m.Name && sig && !(cls->VTable[i].Sig == *sig))
           return Status::error(
@@ -725,6 +744,9 @@ Status checkCodeMatchesInterface(const pir::Module &code,
                                       });
     if (!ctor && compiled && !abstract)
       return Status::error(what + "its constructor is not in CODE");
+    if (ctor)
+      if (Status s = linksLikeItsClass(*ctor, *cls); !s)
+        return s;
     if (ctor && init &&
         (ctor->Sig.Ret != pir::Type::Box || init->Sig.Params.empty() ||
          !std::equal(ctor->Sig.Params.begin(), ctor->Sig.Params.end(),

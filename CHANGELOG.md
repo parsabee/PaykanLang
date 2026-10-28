@@ -1122,48 +1122,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     naming another function than the method an importer's subclass inherits, whose slot
     the importer then left empty; a constructor returning nothing) or crashed the mlir
     backend (a `void` parameter) or rc-elimination (a function whose next value id is not
-    above its ids, which sizes the pass's tables: `std::out_of_range` or a heap overflow).
-    Now, when the file is loaded, its interface is checked for consistency (each
-    superclass a class it describes, whose virtual methods begin its subclass's; every
-    class and struct has an initializer), for types it does not describe, and against the
-    modules whose types it records; its CODE is decoded, verified (a `void` parameter is
-    an error, and so are a class whose fields do not begin with its superclass's and a
-    value id at or past its function's next one) and checked against the interface: each
-    class the module defines with its superclass, its own fields in their order, its
-    vtable's slots, its initializer and `impl` methods (which an importer calls by their
-    names) and its constructor, each copy of an instantiation it holds for what it has,
-    each method of each of its structs and each function, a native one's too, all with the
-    PIR types the interface's types give them, which every type it can name now has (the
-    optional of a scalar or of an enum without payloads is its optional type, an enum
-    without payloads an `i64`, a tuple, a fixed-size array or a function value is passed
-    in memory); each slot of a class the module defines names the function an importer's
-    subclass inherits, the first `X.m` of the class and its ancestors; its externs are
-    checked against the CODE of the module files they name; and its templates are decoded.
-    So such a cache entry is rebuilt and such a prebuilt module is an error at the import,
-    `--check-only` included (`module 'm' (m.pkm) has a bad CODE section: binary PIR: bad
-    magic at byte 0. Rebuild it from source.`, `module 'lib::b' (pre/lib/b.pkm) has a bad
-    IFACE section: the vtable of class 'Line' does not start with the slots of its
-    superclass 'Shape'.`, `... has an IFACE section that does not match its CODE: method
-    'Shape.__init__' is not in CODE.`, `... class 'Shape': slot 4 ('scaled') of its vtable
-    names '@Rhape.scaled' in CODE, which is not the class's or an ancestor's method
-    'scaled'.`).  A cache entry that records a dependency no source or module file is
-    there for is rebuilt too, its source's own import saying where a dependency is missing
-    (`module 'bsae' not found` was reported at the import of the module the entry is of).
-    What CODE does not record is the layout of a value held in memory (a struct's fields,
-    a tagged union's variants and payloads, a tuple's or an array's elements), which a
-    signature passes by its address: like the compiled code, it is trusted once the file's
-    hashes match, so a file whose interface gives a struct with an initializer of its own
-    its fields in another order, its hashes made to match, is used, and the program reads
-    the wrong bytes (docs/design/pkm.md §8.4).  The module decoded then is the one the
-    program is lowered with, so nothing is decoded twice: `run` of a program importing
-    every module of the standard library takes 1% fewer instructions than it did and its
-    `--check-only` 1% more (1,196 million and 324 million where there were 1,208 million
-    and 320 million, in a debug build); in a chain of 60 modules each importing the one
-    before and defining a class, whose interfaces hold 1,830 class records in all, the
-    interface checks add 11% to `--check-only` (1,045 million instructions where there
-    were 938 million) and nothing to `run` (3,215 million where there were 3,228 million,
-    the compiled code being read once).  And the lowering stops at an import it cannot
-    lower, instead of lowering the importer without it (docs/design/pkm.md §8.4).
+    above its ids, which sizes the pass's tables: `std::out_of_range` or a heap overflow),
+    or did not link (`JIT session error: Symbols not found: [ pk__SBox_3Cint_3E ]`, for a
+    copy of an instantiation's constructor whose name CODE had lost, or which CODE no
+    longer had as `shared`).  Now, when the file is loaded, its interface is checked for
+    consistency (each superclass a class it describes, whose virtual methods begin its
+    subclass's; every class and struct has an initializer), for types it does not
+    describe, and against the modules whose types it records; its CODE is decoded,
+    verified (a `void` parameter is an error, and so are a class whose fields do not begin
+    with its superclass's, a value id at or past its function's next one and a function or
+    class with no name) and checked against the interface: each class the module defines
+    with its superclass, its own fields in their order, its vtable's slots, its
+    initializer and `impl` methods (which an importer calls by their names) and its
+    constructor, each copy of an instantiation it holds for what it has, each method of
+    each of its structs and each function, a native one's too, all with the PIR types the
+    interface's types give them, which every type it can name now has (the optional of a
+    scalar or of an enum without payloads is its optional type, an enum without payloads
+    an `i64`, a tuple, a fixed-size array or a function value is passed in memory); each
+    slot of a class the module defines names the function an importer's subclass inherits,
+    the first `X.m` of the class and its ancestors, and a class's functions are `shared`
+    exactly when the class is; its externs are checked against the CODE of the module
+    files they name; and its templates are decoded.  So such a cache entry is rebuilt and
+    such a prebuilt module is an error at the import, `--check-only` included (`module 'm'
+    (m.pkm) has a bad CODE section: binary PIR: bad magic at byte 0. Rebuild it from
+    source.`, `module 'lib::b' (pre/lib/b.pkm) has a bad IFACE section: the vtable of
+    class 'Line' does not start with the slots of its superclass 'Shape'.`, `... has an
+    IFACE section that does not match its CODE: method 'Shape.__init__' is not in CODE.`,
+    `... class 'Shape': slot 4 ('scaled') of its vtable names '@Rhape.scaled' in CODE,
+    which is not the class's or an ancestor's method 'scaled'.`).  A cache entry that
+    records a dependency no source or module file is there for is rebuilt too, its
+    source's own import saying where a dependency is missing (`module 'bsae' not found`
+    was reported at the import of the module the entry is of).  What CODE does not record
+    is the layout of a value held in memory (a struct's fields, a tagged union's variants
+    and payloads, a tuple's or an array's elements), which a signature passes by its
+    address: like the compiled code, it is trusted once the file's hashes match, so a file
+    whose interface gives a struct with an initializer of its own its fields in another
+    order, its hashes made to match, is used, and the program reads the wrong bytes
+    (docs/design/pkm.md §8.4).  The module decoded then is the one the program is lowered
+    with, so nothing is decoded twice: `run` of a program importing every module of the
+    standard library takes 1% fewer instructions than it did and its `--check-only` 1%
+    more (1,196 million and 324 million where there were 1,208 million and 320 million, in
+    a debug build); in a chain of 60 modules each importing the one before and defining a
+    class, whose interfaces hold 1,830 class records in all, the interface checks add 11%
+    to `--check-only` (1,045 million instructions where there were 938 million) and
+    nothing to `run` (3,215 million where there were 3,228 million, the compiled code
+    being read once).  And the lowering stops at an import it cannot lower, instead of
+    lowering the importer without it (docs/design/pkm.md §8.4).
   - `paykan pkm check` printed `usable` for files the compiler rejects or crashes on (a
     CODE section that does not decode, a TMPL section the importer rejects, compiled code
     that does not read or verify, an interface that does not match its CODE), and printed

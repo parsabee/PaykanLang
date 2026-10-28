@@ -1470,6 +1470,40 @@ fn @f(%a.1: i64) -> i64 {
   EXPECT_EQ(errs.find("value '%1'"), std::string::npos) << errs;
 }
 
+// A function, a global or a class is linked by its name, so it has one: a
+// module file whose CODE named a copy of an instantiation's constructor ""
+// (an index of its strings changed, its hashes made to match) passed the
+// verifier, and the program's link then missed the constructor the
+// module's compiled code calls.
+TEST(PIRVerifier, RejectsAnEmptyName) {
+  ParseError err;
+  auto m = parseModule(R"(module "m"
+cstr @s = "a" len 1
+class C {
+  vtable {
+    destroy = @C.destroy : (obj) -> void
+  }
+}
+fn @C.destroy(%self.1: obj) -> void {
+  ret
+}
+fn @f() -> i64 {
+  ret 0
+}
+)",
+                       err);
+  ASSERT_TRUE(m) << err.str();
+  EXPECT_EQ(formatErrors(verify(*m)), "");
+  m->Functions[1].Name.clear();
+  m->CStrs[0].Name.clear();
+  m->Classes[0].Name.clear();
+  const std::string errs = formatErrors(verify(*m));
+  EXPECT_NE(errs.find("m: symbol has an empty name"), std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("m: a class has an empty name"), std::string::npos)
+      << errs;
+}
+
 // The cross-module checks of one module, against the modules at hand: an
 // extern naming a module whose PIR is not at hand is not checked, one
 // naming no module of the program is an error.

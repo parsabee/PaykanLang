@@ -1349,7 +1349,9 @@ TEST(Pkm, AnInterfaceThatDisagreesIsNotUsed) {
 // not written through its last parameter or a class whose fields do not
 // begin with its superclass's (the program did not verify), an extern that
 // does not match the module it names, a function whose next value id is
-// not above its ids (rc-elimination read past its tables).
+// not above its ids (rc-elimination read past its tables), a function with
+// no name or a copy's constructor that is not shared (the link missed the
+// one the compiled code calls).
 TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
   REQUIRE_BACKEND();
   using paykan::pir::Module;
@@ -1403,6 +1405,18 @@ TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
   expectNotUsed("init", rename("Line.__init__", "Line.__inix__"),
                 "has an IFACE section that does not match its CODE: method "
                 "'Line.__init__' is not in CODE");
+  // The constructor of the copy of `Box<int>`, which `bx` calls, linked
+  // by another name than the one the compiled code calls: the program's
+  // link missed it.
+  expectNotUsed("unshared",
+                code([&](Module &m) { fn(m, "Box<int>").Shared = false; }),
+                "has an IFACE section that does not match its CODE: function "
+                "'@Box<int>' is not shared in CODE, its class 'Box<int>' is");
+  // Or by no name.
+  expectNotUsed("nameless",
+                code([&](Module &m) { fn(m, "Box<int>").Name.clear(); }),
+                "has a bad CODE section: it does not verify:\nlib::b: symbol "
+                "has an empty name\n");
   expectNotUsed("ids", code([&](Module &m) {
                   ASSERT_EQ(fn(m, "Box<int>.get").NextValueId, 4u);
                   fn(m, "Box<int>.get").NextValueId = 3;

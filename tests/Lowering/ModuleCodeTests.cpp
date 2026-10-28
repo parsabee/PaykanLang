@@ -322,6 +322,16 @@ TEST(ModuleCode, CodeMatchesTheInterfaceItsFileHolds) {
               i.Classes[0].Name = "Box<long>";
             }),
             "");
+  EXPECT_EQ(check([&](pkm::Interface &) {
+              for (pir::Function &f : code.Functions)
+                if (f.Name == "Box<int>.get")
+                  f.Shared = false;
+            }),
+            "function '@Box<int>.get' is not shared in CODE, its class "
+            "'Box<int>' is");
+  for (pir::Function &f : code.Functions)
+    if (f.Name == "Box<int>.get")
+      f.Shared = true;
   // So is one the interface does not describe: its vtable is the
   // program's, an empty slot a call of address 0.
   pir::Module emptied = parsed();
@@ -799,6 +809,23 @@ fn @Brick(%b.1: i64) -> box {
             "class 'Brick': slot 1 ('size') of its vtable names "
             "'@Brick.destroy' in CODE, which is not the class's or an "
             "ancestor's method 'size'");
+  // A class's functions link as the class does: a copy of an
+  // instantiation's are shared, the module's own class's are not (its
+  // compiled code calls them by those names).
+  auto fn = [](pir::Module &m, const std::string &name) -> pir::Function & {
+    return *std::find_if(
+        m.Functions.begin(), m.Functions.end(),
+        [&](const pir::Function &f) { return f.Name == name; });
+  };
+  EXPECT_EQ(check([&](pkm::Interface &, pir::Module &m) {
+              fn(m, "Shape.area").Shared = true;
+            }),
+            "function '@Shape.area' is shared in CODE, its class 'Shape' is "
+            "not");
+  EXPECT_EQ(check([&](pkm::Interface &, pir::Module &m) {
+              fn(m, "Square").Shared = true;
+            }),
+            "function '@Square' is shared in CODE, its class 'Square' is not");
   // A class of another module's is not one the module defines.
   EXPECT_EQ(check([](pkm::Interface &i, pir::Module &) {
               i.Classes[0].IsLocal = false;

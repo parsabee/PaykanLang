@@ -1491,8 +1491,9 @@ rebuilt and a prebuilt file is an error at the import, under
   through the resolver's `FrontendRead`).
 - `CODE` decoded, naming the module and verified (the verifier rejects a
   `void` parameter, an extern's or a vtable slot's too, a class whose
-  fields do not begin with its superclass's, and a value id at or past its
-  function's next one), and checked against `IFACE`
+  fields do not begin with its superclass's, a value id at or past its
+  function's next one, and a function, a global or a class with no name),
+  and checked against `IFACE`
   (`modules::checkCodeMatchesInterface`): each class the module defines,
   with its superclass, its own fields in the order an importer lays them
   out, its vtable's slots, its initializer and its `impl` methods (which an
@@ -1517,6 +1518,9 @@ rebuilt and a prebuilt file is an error at the import, under
   inherits for it (`ModuleLowering::findConcreteMethodFuncName`): `X.m` for
   the first class `X` from the class up that has one, past a class of
   another module a function of that module, past the root the runtime's.
+  A class's constructor and methods are `shared` exactly when the class is
+  (a copy of an instantiation's link by names of their own, which the
+  module's compiled code calls them by).
 - Against the files it depends on (by the resolver; `pkm check` reads the
   file alone): each record of another module's type (`IsLocal` false) is
   that module's record of it, but for an instantiation made elsewhere that
