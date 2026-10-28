@@ -2,13 +2,13 @@
 // Exercises: a template's declarations and bodies checked with its own type
 //            parameters (docs/language/13-generics.md, "Type Parameters Are
 //            Types").  An `impl` block's names are its own: in `impl R<U>`
-//            the class's `T` is an ordinary name, a parameter and a local of
-//            a method and a parameter of a `static fn`; a struct's too.  A
-//            template instantiated in another generic body keeps a field and
-//            a parameter named like that body's type parameter.  `impl R<U>`
-//            was checked with the class's `T` (`'T' is a type name and cannot
-//            be used as a variable`), and `g<int>` inside `outer<T>` was the
-//            same error for its parameter.
+//            the class's `T` is an ordinary name, a method's parameter, which
+//            its body assigns, and a parameter of a `static fn`; a struct's
+//            too.  A template instantiated in another generic body keeps a
+//            field and a parameter named like that body's type parameter.
+//            `impl R<U>` was checked with the class's `T` (`'T' is a type name
+//            and cannot be used as a variable`), and `g<int>` inside
+//            `outer<T>` was the same error for its parameter.
 // expect-stdout: 3 2 4
 // expect-stdout: 11 R(7)
 // expect-stdout: 6 1
