@@ -116,7 +116,7 @@ impl Buffer<T> {
 
   // Append `v` in a new slot: `OutOfMemory` when it cannot be allocated.
   fn push(v: view T) -> err::Error {
-    errno = _grow<T>(self.__data, 1);
+    let errno = _grow<T>(self.__data, 1);
     if errno != 0 {
       return err::fromErrno(errno);
     }
@@ -127,15 +127,15 @@ impl Buffer<T> {
   // Exchange slots `i` and `j`: `OutOfRange` when either is past the end,
   // `NotFound` when either was never set.
   fn swap(i: unsigned, j: unsigned) -> err::Error {
-    n = _len<T>(self.__data);
+    let n = _len<T>(self.__data);
     if i >= n || j >= n {
       return _errorOf(err::ErrorCode::OutOfRange);
     }
     if _isSet<T>(self.__data, i) == 0 || _isSet<T>(self.__data, j) == 0 {
       return _errorOf(err::ErrorCode::NotFound);
     }
-    a: T = _copy<T>(self.__data, i);
-    b: T = _copy<T>(self.__data, j);
+    let a: T = _copy<T>(self.__data, i);
+    let b: T = _copy<T>(self.__data, j);
     _set<T>(self.__data, i, b);
     _set<T>(self.__data, j, a);
     return err::none();
