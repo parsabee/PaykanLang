@@ -20,6 +20,7 @@
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 #include <tuple>
 #include <unordered_set>
@@ -547,41 +548,13 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
 Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
   // The types an importer reconstructs, by name, before it resolves a
   // signature (injectModule): every type an export names is a builtin or
-  // one the interface describes.
-  ast::ASTContext ctx;
-  for (const pkm::EnumRec &e : iface.Enums)
-    ctx.registerEnumType(e.Name, ast::SourceLocation());
-  for (const pkm::StructRec &st : iface.Structs)
-    ctx.registerStructType(st.Name, ast::SourceLocation());
-  // Superclass first (modules::checkInterface found each one described).
-  std::vector<const pkm::ClassRec *> pending;
-  pending.reserve(iface.Classes.size());
-  for (const pkm::ClassRec &c : iface.Classes)
-    pending.push_back(&c);
-  for (bool progress = true; progress && !pending.empty();) {
-    progress = false;
-    for (auto it = pending.begin(); it != pending.end();) {
-      ast::ClassType *super = (*it)->SuperClassName.empty()
-                                  ? ctx.getObjTy()
-                                  : ctx.lookupClassType((*it)->SuperClassName);
-      if (!super) {
-        ++it;
-        continue;
-      }
-      ctx.preRegisterClassType((*it)->Name, super);
-      it = pending.erase(it);
-      progress = true;
-    }
-  }
-  if (!pending.empty())
-    return Status::error("superclass '" + pending.front()->SuperClassName +
-                         "' of class '" + pending.front()->Name +
-                         "' is unknown");
-  // A builtin's name or a record's (an instantiation's too) is looked up
-  // as it is; only a type built of others (`T[]`, `T?`, a tuple, a function
-  // type) is parsed, each once.  A module's interface spells its imports'
-  // types again and again, and a diagnostic's text is made only for the one
-  // that does not resolve.
+  // one the interface describes.  A builtin's name or a record's (an
+  // instantiation's too) is looked up as it is; only a type built of others
+  // (`T[]`, `T?`, a tuple, a function type) is parsed, each once, in a
+  // context that knows the interface's types, made for the first one (most
+  // interfaces have none).  A module's interface spells its imports' types
+  // again and again, and a diagnostic's text is made only for the one that
+  // does not resolve.
   std::vector<std::string_view> described;
   for (const pkm::ClassRec &c : iface.Classes)
     described.push_back(c.Name);
@@ -590,6 +563,39 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
   for (const pkm::EnumRec &e : iface.Enums)
     described.push_back(e.Name);
   std::sort(described.begin(), described.end());
+  std::optional<ast::ASTContext> types;
+  auto context = [&]() -> ast::ASTContext & {
+    if (types)
+      return *types;
+    ast::ASTContext &ctx = types.emplace();
+    for (const pkm::EnumRec &e : iface.Enums)
+      ctx.registerEnumType(e.Name, ast::SourceLocation());
+    for (const pkm::StructRec &st : iface.Structs)
+      ctx.registerStructType(st.Name, ast::SourceLocation());
+    // Superclass first (modules::checkInterface found each one described,
+    // its ancestors ending at the root).
+    std::vector<const pkm::ClassRec *> pending;
+    pending.reserve(iface.Classes.size());
+    for (const pkm::ClassRec &c : iface.Classes)
+      pending.push_back(&c);
+    for (bool progress = true; progress && !pending.empty();) {
+      progress = false;
+      for (auto it = pending.begin(); it != pending.end();) {
+        ast::ClassType *super =
+            (*it)->SuperClassName.empty()
+                ? ctx.getObjTy()
+                : ctx.lookupClassType((*it)->SuperClassName);
+        if (!super) {
+          ++it;
+          continue;
+        }
+        ctx.preRegisterClassType((*it)->Name, super);
+        it = pending.erase(it);
+        progress = true;
+      }
+    }
+    return ctx;
+  };
   std::unordered_set<std::string_view> composite;
   auto unknown = [&](const std::string &type) {
     ast::BuiltinType::Kind kind;
@@ -602,7 +608,7 @@ Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
       return true;
     if (composite.count(type))
       return false;
-    if (!resolveExportedType(ctx, type))
+    if (!resolveExportedType(context(), type))
       return true;
     composite.insert(type);
     return false;
