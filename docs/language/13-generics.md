@@ -561,14 +561,19 @@ ever-growing argument (`inner: Bad<Bad<T>>`) stops with "exceeds the maximum
 instantiation depth (16)". An argument that grows faster, as a tuple of two or
 three of the last one (`n: C<(T, T, T)>?`), stops sooner: an instantiation
 requested inside an instantiation of its own template, directly or through
-other templates, a method's body or a function's included, has a name of at
-most 4,096 characters, and the one that passes it is "exceeds the maximum
-instantiation name length (4096 characters; this one has 4374)", the name cut
-to its first 60 characters ([the limits](../grammar.md#9-diagnostics-and-recovery)).
+other templates, a method's body or a function's included, with its type
+arguments nested more deeply than that one's, has a name of at most 4,096
+characters, and the one that passes it is "exceeds the maximum instantiation
+name length (4096 characters; this one has 4374)", the name cut to its first
+60 characters ([the limits](../grammar.md#9-diagnostics-and-recovery)).
 Templates that instantiate one another without returning to one are held to
 the depth only: ten classes each holding the next with a tuple of three of
 their argument (`class L0<T> { v: T; n: L1<(T, T, T)>?; }`, and so on) are
-accepted, the last name 354,296 characters long.
+accepted, the last name 354,296 characters long. So is a template that
+instantiates itself with its arguments swapped or repeated, however long they
+are: `fn swap() -> Pair<B, A>` and `fn dup() -> Pair<A, A>` in `impl Pair<A, B>`
+nest them no deeper, and the `Pair<B, A>` of a `Pair<B, A>` is the first one
+again.
 
 A type parameter used as a `match` arm (`T { … }`) is substituted first and then
 follows the ordinary arm rules, so in an instantiation with `T = int` the arm is
@@ -678,7 +683,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
 | Inference failure / ambiguity | see [Inference](#inference) |
 | Instantiation depth exceeded | self-instantiation with a growing argument, 17 deep: `instantiating 'Bad<…>' exceeds the maximum instantiation depth (16); a generic class may not instantiate itself with an ever-growing type argument` |
-| Instantiation name too long | an instantiation inside one of its own template with a name over 4,096 characters, `n: C<(T, T, T)>?`: `instantiating 'C<((((((int, …' inside an instantiation of 'C' exceeds the maximum instantiation name length (4096 characters; this one has 4374); a generic class may not instantiate itself with an ever-growing type argument` |
+| Instantiation name too long | an instantiation inside one of its own template's, with its type arguments nested more deeply, and a name over 4,096 characters, `n: C<(T, T, T)>?`: `instantiating 'C<((((((int, …' inside an instantiation of 'C' exceeds the maximum instantiation name length (4096 characters; this one has 4374); a generic class may not instantiate itself with an ever-growing type argument` |
 | Instantiation name clash | this module's `Box<Str>` and an imported template's (also one a library's private template makes, `::collections`' `_Node<int>`), or an imported class `Box<int>`: one error, at this module's own instantiation, with notes at the other template's declaration and instantiation, or at the import |
 
 ## Not Supported Yet

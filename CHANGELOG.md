@@ -1007,8 +1007,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     type name ...`.  `samples/codegen/89_type_parameter_names.pkn` runs the names these
     leave free.
   - An instantiation requested inside an instantiation of its own template, directly or
-    through other templates (a method's or a function's body included), has a name of at
-    most 4,096 characters as diagnostics spell it, a new limit (docs/grammar.md section 9,
+    through other templates (a method's or a function's body included), with its type
+    arguments nested more deeply than that one's, has a name of at most 4,096 characters as
+    diagnostics spell it, a new limit (docs/grammar.md section 9,
     docs/language/13-generics.md, "How Errors Are Reported").  A template instantiating
     itself with an ever-growing argument ran on until the depth limit (16):
     `class C<T> { v: T; n: C<(T, T, T)>?; }` with `C<int>(1, None)` was still checking
@@ -1022,7 +1023,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     each other.  Templates that instantiate one another without coming back to one are
     held to the depth only, whatever their names: ten classes each holding the next with a
     tuple of three of its argument (`class L0<T> { v: T; n: L1<(T, T, T)>?; }`, and so on)
-    are accepted, the last name 354,296 characters long.  They took 1.3 s to check, eleven
+    are accepted, the last name 354,296 characters long.  So is a template instantiating
+    itself with its arguments swapped or repeated, which grows nothing: `fn swap() ->
+    Pair<B, A>` and `fn dup() -> Pair<A, A>` in `impl Pair<A, B>`, or `g<B, A>` in `fn
+    g<A, B>`, with arguments of thousands of characters.  They took 1.3 s to check, eleven
     10.8 s and twelve 118 s, as each type a template is given (an argument put into it,
     a signature written back) was resolved again, element by element, and each element's
     description, holding the whole instantiation's name, built for its diagnostics.  A

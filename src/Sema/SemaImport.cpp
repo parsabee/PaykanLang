@@ -1813,7 +1813,8 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   const size_t cloned = methods.size();
   const InstantiationFrame request = frameAt(name, loc);
   InstantiationStack.push_back(request);
-  InstantiatingTemplates.push_back(tmpl);
+  const InstantiatingTemplate self{tmpl, argumentNesting(name)};
+  InstantiatingTemplates.push_back(self);
   bool ok;
   {
     OriginSource inOrigin(*this, origin);
@@ -1842,7 +1843,7 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   for (const std::string *p : params)
     pending.TypeParams.insert(*p);
   pending.Templates = InstantiatingTemplates;
-  pending.Templates.push_back(tmpl);
+  pending.Templates.push_back(self);
   PendingInstantiations.push_back(std::move(pending));
   // What letting go of one lets go of is read from what its fields hold.
   if (st)

@@ -548,11 +548,13 @@ TEST(Generics, InstantiationDepthGuard) {
 // Ten templates each instantiating the next with a tuple of three of its
 // argument end with an argument of 3^10 ints: each level resolved the
 // arguments it was given again, element by element, and built each
-// element's diagnostic context, and the chain took 26 s (SW-04).  No
-// template instantiates itself there, so it is accepted, however long the
-// names.  A template that does, with an ever-growing argument, stops once
-// the name passes 4,096 characters: at arity 3 that took 28 minutes, at
-// arity 2 the depth limit came first, with 900 KB of names in its notes.
+// element's diagnostic context, and the chain took 1.3 s, eleven 10.8 s
+// and twelve 118 s (SW-04).  No template instantiates itself there, so it
+// is accepted, however long the names.  A template that does, with an
+// ever-growing argument, stops once the name passes 4,096 characters: at
+// arity 3 that ran for more than 5 minutes, at arity 2 the depth limit
+// came first, with 900 KB of names in its notes.  One that instantiates
+// itself with its arguments swapped or repeated grows nothing.
 TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
   std::string chain;
   for (int k = 0; k < 10; ++k)
@@ -570,6 +572,53 @@ TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
   r = semaCheck("class Node<T> { v: T; next: Node<T>?; }\n"
                 "fn main() -> int { let n: Node<(" +
                 ints + ")>? = None; return 0; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+
+  // Nor with its arguments swapped or repeated, however long: the
+  // `Pair<B, A>` of a `Pair<B, A>` is the first one again.  Those names
+  // are 11,000 characters long.
+  std::string bools = "bool";
+  for (int i = 0; i < 1100; ++i)
+    bools += ", bool";
+  const std::string pair =
+      "class Pair<A, B> { a: A; b: B; }\n"
+      "impl Pair<A, B> {\n"
+      "  fn swap() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }\n"
+      "  fn dup() -> Pair<A, A> { return Pair<A, A>(self.a, self.a); }\n"
+      "}\n";
+  const std::vector<std::string> pairArgs = {"(" + ints + "), (" + bools + ")",
+                                             "(" + ints + "), bool"};
+  for (const std::string &args : pairArgs) {
+    std::string src = pair;
+    src += "fn main() -> int { let p: Pair<";
+    src += args;
+    src += ">? = None; return 0; }\n";
+    r = semaCheck(src);
+    EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  }
+  r = semaCheck("struct P<A, B> { a: A; b: B; }\n"
+                "impl P<A, B> { fn swap() -> P<B, A> "
+                "{ return P<B, A>(self.b, self.a); } }\n"
+                "fn take(p: P<(" +
+                ints + "), (" + bools +
+                ")>) -> int { return 0; }\n"
+                "fn main() -> int { return 0; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  r = semaCheck("fn g<A, B>(n: int) -> int {\n"
+                "  if n > 0 {\n    return g<B, A>(n - 1);\n  }\n"
+                "  return n;\n}\n"
+                "fn main() -> int { return g<(" +
+                ints + "), (" + bools + ")>(3); }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // The chain's eighth class holding a `Pair` of its argument (13,130
+  // characters) whose `swap` is the other way round.
+  std::string chain8;
+  for (int k = 0; k < 7; ++k)
+    chain8 += "class L" + std::to_string(k) + "<T> { v: T; n: L" +
+              std::to_string(k + 1) + "<(T, T, T)>?; }\n";
+  r = semaCheck(pair + chain8 +
+                "class L7<T> { v: T; p: Pair<T, int>?; }\n"
+                "fn main() -> int { let c = L0<int>(1, None); return c.v; }\n");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
   const std::string limit =
@@ -616,6 +665,12 @@ TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
        "fn main() -> int { let e = E<int>::Leaf(1); return 0; }\n",
        "' inside an instantiation of 'E" + limit +
            "4374); a generic enum may not"},
+      // A function type's arrow closes nothing.
+      {"class C<T> { v: T; n: C<(T) -> T>?; }\n"
+       "fn main() -> int { let s = C<int>(1, None); return 0; }\n",
+       "1:20: error: instantiating 'C<(((((((((int) -> int) -> (int) -> int) "
+       "-> ((int) -> int) -...' inside an instantiation of 'C" +
+           limit + "4605); a generic class"},
       {"fn grow<T>(x: T, n: int) -> int {\n"
        "  if n == 0 {\n    return 0;\n  }\n"
        "  return grow((x, x, x), n - 1);\n}\n"

@@ -1654,12 +1654,33 @@ std::string Sema::instanceNameOf(const ast::Decl *tmpl, const std::string &name,
                 : instantiationName(name, args);
 }
 
+// static
+size_t Sema::argumentNesting(const std::string &name) {
+  size_t open = 0;
+  size_t most = 0;
+  for (size_t i = 0; i < name.size(); ++i) {
+    const char c = name[i];
+    if (c == '(' || c == '<')
+      most = std::max(most, ++open);
+    else if (c == ')' || (c == '>' && (i == 0 || name[i - 1] != '-')))
+      --open; // a function type's `->` closes nothing
+  }
+  return most;
+}
+
 bool Sema::checkGrowingInstantiation(const ast::Decl *tmpl,
                                      const std::string &instName,
                                      ast::SourceLocation loc) {
-  if (instName.size() <= kMaxGrowingInstantiationName ||
-      std::find(InstantiatingTemplates.begin(), InstantiatingTemplates.end(),
-                tmpl) == InstantiatingTemplates.end())
+  if (instName.size() <= kMaxGrowingInstantiationName)
+    return true;
+  auto inner = std::find_if(
+      InstantiatingTemplates.rbegin(), InstantiatingTemplates.rend(),
+      [&](const InstantiatingTemplate &t) { return t.Template == tmpl; });
+  // Not inside one of its own, or with its arguments rearranged, not
+  // grown: `Pair<B, A>` inside `Pair<A, B>`, whose own `Pair<B, A>` is the
+  // first again.
+  if (inner == InstantiatingTemplates.rend() ||
+      argumentNesting(instName) <= inner->Nesting)
     return true;
   const std::string shown = displayName(instName);
   if (shown.size() <= kMaxGrowingInstantiationName)
@@ -1901,7 +1922,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
-  InstantiatingTemplates.push_back(tmpl);
+  const InstantiatingTemplate self{tmpl, argumentNesting(instName)};
+  InstantiatingTemplates.push_back(self);
   OriginSource inOrigin(*this, origin);
   bool ok = true;
 
@@ -1977,7 +1999,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
   pending.Templates = InstantiatingTemplates;
-  pending.Templates.push_back(tmpl);
+  pending.Templates.push_back(self);
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedClassDecls : InstantiatedClassDecls)
       .push_back(clone);
@@ -1996,7 +2018,7 @@ void Sema::declareInstantiationStatics(const std::string &instName,
   // Declared in the template's module, as the bodies are checked.
   InstantiationStack.push_back(
       {base.Name, base.RequestLoc, base.RequestFile, base.RequestLines});
-  std::vector<const ast::Decl *> savedTemplates =
+  std::vector<InstantiatingTemplate> savedTemplates =
       std::exchange(InstantiatingTemplates, base.Templates);
   OriginSource inOrigin(*this, base.Origin);
   for (auto *im : it->second) {
@@ -2133,7 +2155,8 @@ std::string Sema::instantiateFunction(const std::string &name,
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
-  InstantiatingTemplates.push_back(tmpl);
+  const InstantiatingTemplate self{tmpl, argumentNesting(instName)};
+  InstantiatingTemplates.push_back(self);
   bool ok;
   {
     OriginSource inOrigin(*this, origin);
@@ -2157,7 +2180,7 @@ std::string Sema::instantiateFunction(const std::string &name,
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
   pending.Templates = InstantiatingTemplates;
-  pending.Templates.push_back(tmpl);
+  pending.Templates.push_back(self);
   queueInstantiation(std::move(pending));
   (origin ? ForeignInstantiatedFuncDecls : InstantiatedFuncDecls)
       .push_back(clone);
@@ -2576,7 +2599,7 @@ bool Sema::checkPendingInstantiations() {
     CurrentTypeParams = &p.TypeParams;
     const size_t savedDepth = CurrentInstantiationDepth;
     CurrentInstantiationDepth = p.Depth;
-    std::vector<const ast::Decl *> savedTemplates =
+    std::vector<InstantiatingTemplate> savedTemplates =
         std::exchange(InstantiatingTemplates, p.Templates);
     bool r;
     if (p.Func && p.Func->hasInferredResult()) {

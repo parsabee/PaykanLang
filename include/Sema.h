@@ -1983,6 +1983,12 @@ private:
   /// other class.
   const InstantiationInfo *instantiationInfo(ast::ClassType *ct);
 
+  /// A template one of whose instantiations is in progress, and how deeply
+  /// that instantiation's name nests its type arguments (argumentNesting).
+  struct InstantiatingTemplate {
+    const ast::Decl *Template;
+    size_t Nesting;
+  };
   /// Instantiations whose bodies still have to be checked.
   struct PendingInstantiation {
     ast::ClassDecl *Class = nullptr; // exactly one of Class / Func / Struct
@@ -2003,7 +2009,7 @@ private:
     const std::vector<std::string> *RequestLines = nullptr;
     /// The templates its body is checked inside: InstantiatingTemplates
     /// where it was requested, then its own.
-    std::vector<const ast::Decl *> Templates;
+    std::vector<InstantiatingTemplate> Templates;
   };
   std::vector<PendingInstantiation> PendingInstantiations;
   /// Declare the `static fn`s of the `impl` blocks of the instantiation
@@ -2114,18 +2120,26 @@ private:
   std::vector<PendingTraitImpl> PendingTraitImpls;
   static constexpr size_t kMaxInstantiationDepth = 16;
   /// The longest name an instantiation made inside an instantiation of its
-  /// own template may have, as diagnostics spell it (OD-2): a longer one
-  /// is the ever-growing type argument the depth limit is for, stopped
-  /// before the names grow to 2^16 or 3^16 types (SW-04).
+  /// own template, with type arguments nested more deeply than that one's,
+  /// may have, as diagnostics spell it (OD-2): a longer one is the
+  /// ever-growing type argument the depth limit is for, stopped before the
+  /// names grow to 2^16 or 3^16 types (SW-04).
   static constexpr size_t kMaxGrowingInstantiationName = 4096;
   /// The templates of the instantiations in progress here, outermost
   /// first: those being declared or populated, and, in an instantiation's
   /// body, the ones it was requested inside (PendingInstantiation::Templates).
-  std::vector<const ast::Decl *> InstantiatingTemplates;
+  std::vector<InstantiatingTemplate> InstantiatingTemplates;
+  /// How deeply the instantiation name @p name nests its type arguments:
+  /// the most parentheses and angle brackets open at once.  Instantiating
+  /// a template with its arguments swapped or repeated (`Pair<B, A>`,
+  /// `Pair<A, A>`) keeps it; an argument built from them (`C<(T, T)>`)
+  /// adds to it.
+  static size_t argumentNesting(const std::string &name);
   /// False, after reporting it, when the instantiation @p instName of
   /// @p tmpl, requested at @p loc inside an instantiation of @p tmpl
-  /// (InstantiatingTemplates), has a name over kMaxGrowingInstantiationName
-  /// characters.
+  /// (InstantiatingTemplates, the innermost one), nests its type arguments
+  /// more deeply than that one and has a name over
+  /// kMaxGrowingInstantiationName characters.
   bool checkGrowingInstantiation(const ast::Decl *tmpl,
                                  const std::string &instName,
                                  ast::SourceLocation loc);

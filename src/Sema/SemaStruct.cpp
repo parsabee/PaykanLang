@@ -542,7 +542,8 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
-  InstantiatingTemplates.push_back(tmpl);
+  const InstantiatingTemplate self{tmpl, argumentNesting(instName)};
+  InstantiatingTemplates.push_back(self);
   OriginSource inOrigin(*this, origin);
 
   ast::StructType *st = Ctx.registerStructType(instName, loc);
@@ -588,7 +589,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   for (auto *p : tmpl->getTypeParams())
     pending.TypeParams.insert(*p);
   pending.Templates = InstantiatingTemplates;
-  pending.Templates.push_back(tmpl);
+  pending.Templates.push_back(self);
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedStructDecls : InstantiatedStructDecls)
       .push_back(clone);
@@ -675,7 +676,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
-  InstantiatingTemplates.push_back(tmpl);
+  InstantiatingTemplates.push_back({tmpl, argumentNesting(instName)});
   OriginSource inOrigin(*this, origin);
 
   // Cached before the fields are resolved: a field naming this very

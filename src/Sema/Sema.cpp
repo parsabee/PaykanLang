@@ -5053,7 +5053,7 @@ bool Sema::inferResultOf(const std::string &name, ast::SourceLocation loc) {
         {p->Name, p->RequestLoc, p->RequestFile, p->RequestLines});
     CurrentTypeParams = &p->TypeParams;
     CurrentInstantiationDepth = p->Depth;
-    std::vector<const ast::Decl *> savedTemplates =
+    std::vector<InstantiatingTemplate> savedTemplates =
         std::exchange(InstantiatingTemplates, p->Templates);
     {
       OriginSource inOrigin(*this, p->Origin);
