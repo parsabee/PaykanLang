@@ -371,6 +371,45 @@ TEST(Poison, UsesOfADeclarationNamedLikeAnImportedTypeAreSilent) {
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
 }
 
+// A class whose superclass is in error is registered on Obj, so it matches
+// no class it would have: a mismatch with another class, either way round,
+// is a follow-on of that error (SW-32).  An initializer, an assignment, an
+// argument (a method's too), a return value and an array element were each
+// "... of type 'Puppy' does not match ... 'Animal'".  A mismatch with a type
+// that is not a class is still reported.
+TEST(Poison, AClassThatLostItsSuperclassMismatchesNoClass) {
+  const std::string decls =
+      "import ::collections;\n"
+      "class Animal { view fn sound() -> Str { return \"?\"; } }\n"
+      "class Puppy : Nope {}\n"
+      "fn adopt(a: Animal) -> int { return 1; }\n";
+  expectOnly(decls + "fn make() -> Animal { return Puppy(); }\n"
+                     "fn main() -> int {\n"
+                     "  x: Animal = Puppy();\n"
+                     "  y: Animal? = Puppy();\n"
+                     "  x = Puppy();\n"
+                     "  n = adopt(Puppy());\n"
+                     "  a: Animal[2] = [Puppy(), Animal()];\n"
+                     "  l = collections::List<Animal>();\n"
+                     "  l.push(Puppy());\n"
+                     "  z: Puppy = Animal();\n"
+                     "  return n;\n"
+                     "}\n",
+             "3:1: error: superclass 'Nope' of class 'Puppy' is not defined");
+  auto r = semaCheck(decls + "fn main() -> int {\n"
+                             "  n: int = Puppy();\n"
+                             "  w: Animal = 3;\n"
+                             "  return n;\n"
+                             "}\n");
+  EXPECT_EQ(r.ErrorCount, 3u) << r.Diagnostics;
+  for (const char *d : {"6:3: error: initializer of type 'Puppy' does not "
+                        "match declared type 'int' for variable 'n'",
+                        "7:3: error: initializer of type 'int' does not match "
+                        "declared type 'Animal' for variable 'w'"})
+    EXPECT_NE(r.Diagnostics.find(d), std::string::npos) << d << "\n"
+                                                        << r.Diagnostics;
+}
+
 // Reserved binder names (#126): every binder rejects a type name (a builtin
 // one, `Str`, or the program's) with one error, through the same guard.
 

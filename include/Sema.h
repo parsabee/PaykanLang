@@ -443,6 +443,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   //     so the lowering materialises the `None` singleton for a null box;
   //   * a primitive flowing into an optional primitive slot (`int` ->
   //     `int?`) is marked with the optional so the lowering boxes it.
+  // A class against a class (or an optional of one) where either is
+  // erroneous is not checked: the error that lost it its superclass was
+  // reported, and the mismatch counts as a suppressed follow-on (SW-32).
   bool checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src);
 
   // An array or tuple literal flowing into a slot whose element types it

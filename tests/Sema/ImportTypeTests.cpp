@@ -464,6 +464,44 @@ fn main() -> int {
   std::filesystem::remove_all(tmp);
 }
 
+// ─── An importer's subclass of a failed module's class (SW-32) ──────────────
+//
+// `lib::d` has an error of its own, so the import fails and `Puppy : d::Dog`
+// loses its superclass; that `Puppy` is then no `a::Animal` is a follow-on.
+// Base added "initializer of type 'Puppy' does not match declared type
+// 'Animal' for variable 'x'".
+
+TEST(Module, ASubclassOfAFailedModulesClassMismatchesNoClass) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_failed_super").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/a.pkn",
+            "class Animal { view fn sound() -> Str { return \"?\"; } }\n");
+  writeFile(tmp, "lib/d.pkn",
+            "import lib::a;\n"
+            "class Dog : a::Animal { view fn sound() -> Str { return "
+            "\"woof\"; } }\n"
+            "fn broken() -> int { return \"x\"; }\n");
+  auto main = writeFile(tmp, "main.pkn", R"(import lib::a;
+import lib::d;
+class Puppy : d::Dog {}
+fn pet(x: a::Animal) -> Str => x.sound();
+fn main() -> int {
+  x: a::Animal = Puppy();
+  y: a::Animal = d::Dog();
+  s = pet(Puppy());
+  return 0;
+}
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "d.pkn:3:22: error: return value of type 'Str' does not match "
+            "function return type 'int'\n"
+            "main.pkn:2:1: note: in module 'lib::d' imported here\n")
+      << r.Diagnostics;
+  std::filesystem::remove_all(tmp);
+}
+
 // ─── A module-private initializer is constructed by its module only ─────────
 //
 // `___init__` (docs/language/15-modules.md): an importer cannot construct the

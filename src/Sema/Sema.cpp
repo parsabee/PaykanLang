@@ -354,8 +354,14 @@ bool Sema::checkAssignable(ast::Type *dst, ast::Type *srcTy, ast::Expr *src) {
   // into `int?[]`, `(None, "a")` into `(int?, Str)`, nested literals): retype
   // the literal and mark each element that is wrapped.
   srcTy = adoptLiteralElements(dst, srcTy, src);
-  if (!isAssignable(dst, srcTy))
-    return false;
+  if (!isAssignable(dst, srcTy)) {
+    auto *dstCT = ast::dyn_cast<ast::ClassType>(ast::stripOptional(dst));
+    auto *srcCT = ast::dyn_cast<ast::ClassType>(ast::stripOptional(srcTy));
+    if (!dstCT || !srcCT ||
+        (!isErroneousClass(dstCT) && !isErroneousClass(srcCT)))
+      return false;
+    ++SuppressedFollowOns;
+  }
   // `int` -> `int?` (and `int` -> `float?`): the lowering makes the value
   // the optional's present value.  A fixed-size array into a slice is
   // passed as its address and length.

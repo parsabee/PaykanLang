@@ -1469,6 +1469,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     returning the module's `Error` was taken to return `::error`'s, so `e::mk().code + 1`
     was `operator '+' is not defined for types 'ErrorCode' and 'int'` (docs/language/
     15-modules.md, "Type names are global" and "Semantic Checks").
+  - A class whose superclass is in error (`class Puppy : Nope {}`, or `class Puppy : d::Dog
+    {}` with `lib::d` an import that failed for an error of its own) is declared without it,
+    and each place it then met another class added a type mismatch: `x: Animal = Puppy()`
+    was `initializer of type 'Puppy' does not match declared type 'Animal' for variable
+    'x'`, and an assignment, an argument (a method's too), a return value, an optional and
+    an array element gave their own.  A class matched against a class where either is
+    erroneous is now a follow-on of that error, which is the one reported (the exit status
+    is still 1); a mismatch with a type that is not a class is still reported
+    (docs/language/05-classes.md, "Semantic Checks").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,
