@@ -219,6 +219,8 @@ int64_t Paykan_heap_live_bytes(void) { return g_stats.liveBytes; }
 
 int64_t Paykan_heap_total_reallocs(void) { return g_stats.totalReallocs; }
 
+int64_t Paykan_heap_total_allocs(void) { return g_stats.totalAllocs; }
+
 void Paykan_heap_dump(void) {
   // The program's output first, also when stdout is a pipe (fully buffered)
   // that stderr shares.

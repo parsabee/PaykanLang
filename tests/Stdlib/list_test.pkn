@@ -73,5 +73,23 @@ fn main() -> int {
   grid.push(collections::listOf([1, 2]));
   grid.push(collections::listOf([3]));
   io::println(Str(grid.get(0).len() + grid.get(1).len()));
+
+  // listToString appends each element's text to a string of its own: two
+  // calls give two strings, the one unchanged by an append to the other,
+  // and an empty list is "[]" each time.  100,000 elements take time linear
+  // in the text, where putting it together with `+` copied it per element.
+  let none = collections::List<int>();
+  io::println(collections::listToString(none)
+      + collections::listToString(none));
+  big = collections::List<int>();
+  for k in 0..100000 {
+    big.push(k);
+  }
+  let text = collections::listToString(big);
+  let again = collections::listToString(big);
+  text.concat("!");
+  io::println(Str(text.len()) + " " + Str(again.len()) + " "
+      + Str(collections::startsWith(text, "[0, 1, 2, ")) + " "
+      + Str(collections::endsWith(again, ", 99998, 99999]")));
   return 0;
 }

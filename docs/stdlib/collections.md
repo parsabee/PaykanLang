@@ -154,7 +154,10 @@ A new list of the elements of an array or a slice, in order:
 fn listToString<T: Show>(xs: view List<T>) -> Str
 ```
 
-The elements' `toString()`, in order, as `[a, b, c]`; `[]` for an empty list.
+The elements' `toString()`, in order, as `[a, b, c]`; `[]` for an empty list. The result is
+a string of its own, which each element's text is appended to with
+[`concat`](../language/04-strings-and-conversions.md#string-type), so the time is about
+linear in its length: a list of 400,000 ints takes a tenth of a second.
 
 ## `LinkedList<T>`
 
@@ -392,6 +395,7 @@ second. `startsWith` and `endsWith` compare the bytes of the prefix or the suffi
 `replace` finds the occurrences as `split` does. It and `join` put their pieces together in
 pairs, as a binary counter carries (two strings of one piece each make one of two, two of
 two make one of four, and so on), so each byte of a result of k pieces is copied about
-log2(k) times. Appending each piece to the result so far would copy that result once per
-piece. Replacing each of the million line feeds of a 10 MB string takes about a second.
-`repeat` doubles its string, so its time is linear in the length of the result.
+log2(k) times, whatever C's `realloc` does. Appending each piece to the result so far with
+`+` would copy that result once per piece. Replacing each of the million line feeds of a
+10 MB string takes about a second. `repeat` doubles its string, so its time is linear in the
+length of the result.

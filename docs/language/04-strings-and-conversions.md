@@ -126,6 +126,11 @@ Output:
 todo todo todo!
 ```
 
+`concat` grows the string's own memory with C's `realloc`, which extends it where it is when
+it can, so a string built by appending to it takes time about linear in its length: a
+million one-byte appends take well under a second. `s = s + t` makes a new string each time
+and copies `s` into it, so a loop of those takes time quadratic in the length.
+
 Searching, slicing and splitting are functions of the standard library's `::collections`
 ([Strings](../stdlib/collections.md#strings)): `split`, `join`, `lines`, `words`, `indexOf`,
 `contains`, `startsWith`, `endsWith`, `substring`, `trim`, `replace` and `repeat`. Like

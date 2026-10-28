@@ -234,16 +234,20 @@ fn listOf<T>(xs: view T[]) -> List<T> {
   return out;
 }
 
-// "[a, b, c]": the elements' toString, in order.
+// "[a, b, c]": the elements' toString, in order.  Each is appended to `out`
+// with `concat`, which grows it in place; `out = out + ...` would copy the
+// string so far for each element.  `out` is a string of its own (each use
+// of a literal is a new one), so the appends change no other.
 fn listToString<T: Show>(xs: view List<T>) -> Str {
-  out: Str = "[";
+  let out: Str = "[";
   i: unsigned = 0;
   while i < xs.len() {
-    if i > 0 { out = out + ", "; }
-    out = out + xs.at(i).toString();
+    if i > 0 { out.concat(", "); }
+    out.concat(xs.at(i).toString());
     i = i + 1;
   }
-  return out + "]";
+  out.concat("]");
+  return out;
 }
 
 // -- LinkedList ---------------------------------------------------------------
@@ -1077,8 +1081,10 @@ impl MaxPriorityQueue<T> {
 // take time linear in their input for a delimiter or a needle of a few
 // bytes, and at worst proportional to its length times the needle's.  join
 // and replace put their pieces together with a _Pieces, and repeat doubles
-// its string, never appending each piece to the result so far (`concat`
-// copies the whole string it appends to).
+// its string, never appending each piece to the result so far with `+`
+// (which copies it each time).  `concat` grows its string with C's realloc,
+// which copies the string only when it moves the block; a _Pieces bounds
+// the copies whatever realloc does.
 
 native fn _slice(s: view Str, from: unsigned, to: unsigned)
                  -> Str = "PaykanString_slice";

@@ -1568,6 +1568,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     times as long for each enum more: 13 of them 0.45 s under `--check-only`, 15 4 s, 16
     13.3 s, and 20 more than 2 minutes.  Each question looks into a type once now: 20 enums
     take 0.01 s, and 400 take 0.14 s.
+- **Stability sweep: runtime, standard library and tests.**
+  - Building a string by appending took time quadratic in its length: `s.concat(t)`
+    allocated a block for the whole string and copied it there at each append, and
+    `collections::listToString` put its result together with `+`, copying the text so far
+    for each element. Under `paykan run`, 1,600,000 one-byte appends took 16.4 s of
+    processor time and `listToString` of 400,000 ints 15.8 s (400,000 appends 1.1 s, and
+    100,000 ints 0.9 s). `concat` now grows the string's own block with C's `realloc`,
+    which can extend it where it is, and `listToString` appends each element's text to a
+    string of its own with `concat`: each of the two takes 0.14 s, compiling included
+    (docs/language/04-strings-and-conversions.md, "String Type"; docs/stdlib/collections.md,
+    "listToString"). `PaykanString` keeps its layout and the runtime ABI its version; the
+    runtime only gains a test hook, `Paykan_heap_total_allocs()`, the number of blocks the
+    tracking allocator has allocated (Runtime.h).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

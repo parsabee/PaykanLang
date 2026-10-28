@@ -907,6 +907,10 @@ int64_t Paykan_heap_live_bytes(void);
 /// container's resize policy is amortised).
 int64_t Paykan_heap_total_reallocs(void);
 
+/// Number of blocks allocated since the last reset, freed or not (e.g. to
+/// check that an operation grows a block instead of allocating another).
+int64_t Paykan_heap_total_allocs(void);
+
 /// Print the current heap statistics to stderr (a leak warning is appended if
 /// any blocks remain live), after flushing stdout, so that they follow what
 /// the program printed.  If tracking is disabled, prints a notice instead.
