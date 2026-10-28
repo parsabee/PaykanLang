@@ -158,11 +158,11 @@ impl List<T> {
     return v;
   }
 
-  // The index of the first element == v, or None.
+  // The index of the first element == v, or None.  The length is read for
+  // each element: an element's `equals` may change the list.
   view fn indexOf(v: view T) -> unsigned? {
     i: unsigned = 0;
-    n: unsigned = self.__items.len();
-    while i < n {
+    while i < self.__items.len() {
       if self.__items.at(i) == v {
         return i;
       }

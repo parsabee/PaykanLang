@@ -1590,6 +1590,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (docs/stdlib/io.md, "File.readbytes"). The runtime gains a test hook,
     `Paykan_heap_peak_bytes()`, the most bytes the tracking allocator has had live at once
     (Runtime.h).
+  - `List`'s `indexOf`, `contains` and `remove` read the list's length once, before the
+    walk: an element whose `equals` emptied the list made the next comparison panic with
+    the Buffer's internal message, `buffer index 1 out of bounds (len=0)` (exit 134). The
+    length is read again for each element, so such an `equals` makes them find nothing
+    (`None`, `False`, `False`) (docs/stdlib/collections.md, "List<T>").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

@@ -116,7 +116,9 @@ None
 
 A growable array, kept in a [`memory::Buffer<T>`](memory.md). `push` and `pop` at
 the end are amortised O(1); `insert` and `removeAt` move the elements after the index, and
-`indexOf`, `contains` and `remove` walk the list.
+`indexOf`, `contains` and `remove` walk the list, comparing each element with `==`. An
+element's `equals` may change the list: the walk goes on over the elements the list then
+has, so one that empties it makes the search find nothing.
 
 | Method | Does | When it fails |
 |--------|------|---------------|

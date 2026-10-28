@@ -1,6 +1,7 @@
 // ::collections List<T>: growth, indexing, insert/remove, search, copies.
 import ::io;
 import ::collections;
+import ::memory;
 
 class Point {
   x: int;
@@ -16,6 +17,29 @@ class Point {
       _ { return False; }
     }
   }
+}
+
+// An element equal to nothing, whose `equals` first calls its hook, if it
+// has one.
+class Hooked {
+  hook: (() -> int)?;
+  view fn equals(other: Obj) -> bool {
+    match self.hook {
+      h: () -> int { h(); }
+      None { }
+    }
+    return False;
+  }
+}
+
+// A list of two elements, the first of which empties the list when its
+// `equals` is called.
+fn emptiedByEquals() -> collections::List<Hooked> {
+  xs = collections::List<Hooked>();
+  let shared = memory::Box(xs);
+  xs.push(Hooked(fn() -> int { shared.get().clear(); return 0; }));
+  xs.push(Hooked(None));
+  return xs;
 }
 
 // The text of an index `indexOf` returns: the number, or "None".
@@ -91,5 +115,14 @@ fn main() -> int {
   io::println(Str(text.len()) + " " + Str(again.len()) + " "
       + Str(collections::startsWith(text, "[0, 1, 2, ")) + " "
       + Str(collections::endsWith(again, ", 99998, 99999]")));
+
+  // indexOf, contains and remove read the length again for each element,
+  // which the first element's `equals` sets to 0.
+  let a = emptiedByEquals();
+  let b = emptiedByEquals();
+  c = emptiedByEquals();
+  io::println(idx(a.indexOf(Hooked(None))) + " " + Str(b.contains(Hooked(None)))
+      + " " + Str(c.remove(Hooked(None))) + " "
+      + Str(a.len() + b.len() + c.len()));
   return 0;
 }
