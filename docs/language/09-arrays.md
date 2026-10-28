@@ -421,7 +421,7 @@ fn fill<T>(v: T) -> T[3] { return [v; 3]; }
 
 fn main() -> int {
   let x: int[_][_] = [[1, 2, 3], [4, 5, 6]];   // an int[2][3]
-  let z: float[_] = fill<float>(1.5);      // a float[3]
+  let z: float[_] = fill<float>(1.5);          // a float[3]
   io::println(Str(x.len()) + " " + Str(x[0].len()) + " " + Str(z.len()));
   return 0;
 }

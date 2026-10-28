@@ -6,11 +6,11 @@ fn main() -> int {
   let b: bool = True;
   let c: char = 'c';
   let s: Str = "12";
-  let s1: Str = Str(i);         // Str<int>
-  let s2: Str = Str(f);         // Str<float>
+  let s1: Str = Str(i);             // Str<int>
+  let s2: Str = Str(f);             // Str<float>
   let s3: Str = Str(b) + Str(c);    // Str<bool>, Str<char>
-  let s4: Str = Str(s);         // not a conversion: the Str constructor
-  let p1: int? = s.toInt();     // not a conversion: Str's parses
+  let s4: Str = Str(s);             // not a conversion: the Str constructor
+  let p1: int? = s.toInt();         // not a conversion: Str's parses
   let p2: float? = s.toFloat();
   let p3: bool? = s.toBool();
   let n1: int = int(f);         // int<float>

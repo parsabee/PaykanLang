@@ -66,7 +66,7 @@ class Button {
 }
 
 fn main() -> int {
-  let g: (int) -> int = square;      // a named function as a value
+  let g: (int) -> int = square;          // a named function as a value
   let log: (view Str) -> void = greet;   // the modes are part of the type
   let fs: ((int) -> int)[2] = [square, twice(square)];
   let pair: ((int) -> int, Str) = (g, "square");

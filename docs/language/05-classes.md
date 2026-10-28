@@ -797,7 +797,7 @@ class Named : Point {
 }
 
 fn main() -> int {
-  let p = Point(1, 2);    // x = 1, y = 2
+  let p = Point(1, 2);        // x = 1, y = 2
   let n = Named(3, 4, "n");   // Point's x and y, then name
   io::println(Str(p.x + p.y) + " " + n.name + Str(n.y));
   return 0;

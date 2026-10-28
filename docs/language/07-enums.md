@@ -540,9 +540,9 @@ fn orElse<T>(m: Maybe<T>, d: T) -> T {
 }
 
 fn main() -> int {
-  let a = Maybe::Just(3);         // a Maybe<int>, from the field
+  let a = Maybe::Just(3);             // a Maybe<int>, from the field
   let b: Maybe<int> = Maybe::Nothing; // from the variable's type
-  let c = Maybe<Str>::Nothing;    // written
+  let c = Maybe<Str>::Nothing;        // written
   io::println(a.toString() + " " + b.toString() + " " + c.toString());
   io::println(orElse(a, 0) + orElse(b, 10));
   match divide(7, 0) {

@@ -3,7 +3,7 @@
 // the same width.
 fn main() -> int {
   let u: unsigned = 7;
-  let a = int(u);    // error: no specialization of 'int' for 'unsigned': an 'unsigned' can be larger than any 'int'; its method 'toInt()' returns 'int?', None above 9223372036854775807
+  let a = int(u);        // error: no specialization of 'int' for 'unsigned': an 'unsigned' can be larger than any 'int'; its method 'toInt()' returns 'int?', None above 9223372036854775807
   let b = i32<u64>(u);   // error: no specialization of 'i32' for 'unsigned': an 'unsigned' can be larger than any 'i32'; 'i32(u32(...))' keeps its low 32 bits
   return 0;
 }

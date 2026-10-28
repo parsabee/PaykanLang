@@ -681,16 +681,39 @@ def comment_start(line, start):
     return -1
 
 
+def realign(was, lines, changed):
+    """Keep aligned comments aligned: each run of adjacent lines of @p was
+    whose `//` comments start in one column, around a line of @p changed,
+    has them in one column of @p lines again, the rightmost one's."""
+    done = set()
+    for n in sorted(changed):
+        col = comment_start(was[n], 0)
+        if col < 0 or n in done:
+            continue
+        lo, hi = n, n
+        while lo > 0 and comment_start(was[lo - 1], 0) == col:
+            lo -= 1
+        while hi + 1 < len(was) and comment_start(was[hi + 1], 0) == col:
+            hi += 1
+        run = range(lo, hi + 1)
+        done.update(run)
+        to = max(comment_start(lines[k], 0) for k in run)
+        for k in run:
+            at = comment_start(lines[k], 0)
+            lines[k] = lines[k][:at] + " " * (to - at) + lines[k][at:]
+
+
 def apply(decls):
     """Write @p decls' `let`s into their files.  A comment after one stays
-    in its column when there is room; the docs' excerpts of a changed file
-    follow it."""
+    in its column when there is room, and comments aligned with it stay so;
+    the docs' excerpts of a changed file follow it."""
     by_path, old = {}, {}
     for d in decls:
         by_path.setdefault(d.src.path, []).append(d)
     for path, ds in by_path.items():
         old[path] = read(path)
         lines = old[path].split("\n")
+        changed = set()
         for d in sorted(ds, key=lambda d: (d.src.line0 + d.line, -d.col)):
             n = d.src.line0 + d.line - 1
             raw = lines[n].encode()
@@ -699,6 +722,8 @@ def apply(decls):
             if at > 0 and line[at - len(LET) - 1:at].isspace():
                 line = line[:at - len(LET)] + line[at:]
             lines[n] = line
+            changed.add(n)
+        realign(old[path].split("\n"), lines, changed)
         path.write_text("\n".join(lines), encoding="utf-8")
     update_excerpts(old)
 

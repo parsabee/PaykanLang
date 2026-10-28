@@ -134,7 +134,7 @@ impl Doubler<T> {
 }
 
 fn main() -> int {
-  let a = Doubler<int>(21); // fine: int has +
+  let a = Doubler<int>(21);     // fine: int has +
   let s = Doubler<Str>("ab");   // fine: Str has + too
   let b = Doubler<bool>(True);  // bool does not
   return 0;

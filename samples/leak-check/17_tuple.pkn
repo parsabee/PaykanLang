@@ -27,9 +27,9 @@ fn mk() -> (Str, int) {
 }
 
 fn main() -> int {
-  let t = (1, "a");              // literal with a Str element
-  let s: Str = t.1;              // new owner of the element
-  str, n = mk();                 // destructure a returned temporary
+  let t = (1, "a");                  // literal with a Str element
+  let s: Str = t.1;                  // new owner of the element
+  str, n = mk();                     // destructure a returned temporary
   let nested = ((1, "x"), (2.5, t)); // nested tuple holding a copy of t
   io::println(nested);
   io::println(mk().0);               // call-rooted element read

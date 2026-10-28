@@ -331,10 +331,10 @@ fn main() -> int {
   let r = Range(10, 25);
   lo, hi = r.get();
   t = (1, "one");
-  let m = t;                             // a copy of t
-  t = (2, "two");                        // m is still (1, one)
+  let m = t;                                 // a copy of t
+  t = (2, "two");                            // m is still (1, one)
   let keys: (int, Str)[3] = [(0, "k"); 3];   // three copies of (0, k)
-  let b = Box<(Str, int)>(swap(m));      // a tuple type argument
+  let b = Box<(Str, int)>(swap(m));          // a tuple type argument
   io::println(Str(hi - lo) + " " + m.1 + " " + t.1 + " " + keys[2].1);
   io::println(b.get());
   return 0;
