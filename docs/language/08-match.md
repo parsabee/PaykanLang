@@ -116,6 +116,9 @@ Output:
 minus one, the smallest int, something else
 ```
 
+Only a number follows the `-`: `-'a' { ... }` is the error `unexpected character literal;
+expected a number after '-' in a match pattern`, at the `'a'`.
+
 An arm is any literal of the subject's type, a hexadecimal or binary one too, and on an
 `unsigned` the arms reach its whole range, up to `0xFFFF_FFFF_FFFF_FFFF`
 ([Basics](02-basics.md#literals)). An arm whose literal does not fit the subject's type is

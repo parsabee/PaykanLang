@@ -1262,6 +1262,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     error every other use of an optional gives, `cannot use optional '(int, int)?' as
     '(int, int)' without unwrapping (use match)` (docs/language/12-optionals.md,
     "Semantic Checks").
+  - A `-` in a match pattern followed by anything but a number said a type was expected:
+    `match c { -'a' { } _ { } }` was `unexpected '-'; expected a type`.  It is now one
+    error at what follows the `-`, `unexpected character literal; expected a number after
+    '-' in a match pattern` (docs/language/08-match.md, "Matching values").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

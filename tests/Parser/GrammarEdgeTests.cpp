@@ -489,8 +489,10 @@ TEST(GrammarEdge, CommonErrorsAreLocatedAlike) {
 // AST interchange format's `(int -1)`), with or without space between them;
 // `-9223372036854775808` (or `-0x8000_0000_0000_0000`) is INT64_MIN, and a
 // larger magnitude is out of range.  Anything else after a `-` is still not
-// a pattern.  It was `unexpected '-'; expected a type`, though the AST
-// interchange reader took `(int -1)` and Sema and the lowering ran it.
+// a pattern: the one error is at it, and asks for a number (it was
+// `unexpected '-'; expected a type`).  Before #51 a negative number was that
+// error too, though the AST interchange reader took `(int -1)` and Sema and
+// the lowering ran it.
 TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
   auto [ok, driver] = parse("fn main() -> int {\n"
                             "  match 1 { -1 { } - 2 { } 3 { } _ { } }\n"
@@ -525,12 +527,26 @@ TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
         << arm;
     EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 13u) << arm;
   }
-  for (const char *arm : {"-True", "--1", "-x", "-'a'", "-\"s\"", "-None"}) {
+  struct Case {
+    const char *Arm;
+    const char *Found;
+    unsigned Column;
+  };
+  for (const Case &c :
+       {Case{"-True", "'True'", 14}, Case{"--1", "'-'", 14},
+        Case{"-x", "identifier 'x'", 14}, Case{"-'a'", "character literal", 14},
+        Case{"- 'a'", "character literal", 15},
+        Case{"-\"s\"", "string literal", 14}, Case{"-None", "'None'", 14},
+        Case{"-(1)", "'('", 14}, Case{"-", "'{'", 15}}) {
     auto r = parseWithDiags(std::string("fn main() -> int {\n  match 1 { ") +
-                            arm + " { } _ { } }\n  return 0;\n}\n");
-    EXPECT_FALSE(r.Ok) << arm;
-    ASSERT_FALSE(r.Diags.empty()) << arm;
-    EXPECT_EQ(r.Diags[0].Message, "unexpected '-'; expected a type") << arm;
+                            c.Arm + " { } _ { } }\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << c.Arm;
+    ASSERT_EQ(r.Diags.size(), 1u) << c.Arm << "\n" << r.Text;
+    EXPECT_EQ(r.Diags[0].Message,
+              std::string("unexpected ") + c.Found +
+                  "; expected a number after '-' in a match pattern")
+        << c.Arm;
+    EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), c.Column) << c.Arm;
   }
 }
 
