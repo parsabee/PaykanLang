@@ -1663,6 +1663,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     not slower than at `fab0a56`, before or after: 10,485,740 objects allocated and freed
     (`make(18)` 20 times) take 0.296 s (0.301 s at `fab0a56`), and 3,000,000
     `Str(i) + "x"` 0.484 s (0.506 s).
+  - A generic function's instantiation whose signature is an error (an instance of a
+    generic native function binding a C symbol that another native function binds with a
+    different signature) was reported at its first call, and again at each later call whose
+    value initializes a declaration with `let` or with a type: after `let a =
+    absOf<int>(1);`, `let b = absOf<int>(2);` and `c: int = absOf<int>(3);` each added
+    `cannot determine type of initializer for variable ...` (`d = absOf<int>(4);` did not).
+    The error at the first call is the only one now. The standard library's `let`s (see
+    "Added") made a program clashing with an instance of `::memory`'s `_len` show it.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

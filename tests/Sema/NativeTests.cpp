@@ -292,6 +292,30 @@ fn main() -> int {
       << r.Diagnostics;
 }
 
+// An instantiation whose signature failed is reported at its first request
+// only: a later call of it is no error of its own, whatever its value
+// initializes (a `let` local, a declaration with a type or without).
+TEST(Native, ALaterCallOfAFailedInstantiationIsAFollowOn) {
+  auto r = semaCheck(R"(native fn first(x: int) -> int = "llabs";
+native fn absOf<T>(x: view T) -> int = "llabs";
+fn main() -> int {
+  let a = absOf<int>(1);
+  let b = absOf<int>(2);
+  c: int = absOf<int>(3);
+  d = absOf<int>(4);
+  return 0;
+})");
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find(":2:1: error: native function 'absOf<int>' "
+                               "binds C symbol 'llabs', which 'first' "
+                               "already binds"),
+            std::string::npos)
+      << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("cannot determine type of initializer"),
+            std::string::npos)
+      << r.Diagnostics;
+}
+
 // A native function may bind a C function of the runtime, which compiled
 // code calls with its own signature, only with that signature (finding
 // new-F3-1): `PaykanString_concat` is what `+` on strings calls, and
