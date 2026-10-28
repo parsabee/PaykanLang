@@ -1469,9 +1469,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     'view fn get', so part of it can only be returned as a 'view'` for `Box<Str>`.  The
     method of a template is now one for all its instances, warned about once and only
     when every instance could make it a `view fn`, whatever its type arguments: one that
-    returns part of `self` holding a type argument (`self.v` of a `T` field), or calls
-    such a method on `self`, gets no warning, also in a module that makes only a
-    `Box<int>`, where following the warning broke an importer's `Box<Str>`
+    returns part of `self` holding a type argument (`self.v` of a `T` field), or keeps it
+    in a local, an array or a tuple (`let x = self.v; return x;`, `[self.v, self.v]`,
+    `(self.v, 1)`, where a `view fn` is `'self' is read-only in 'view fn get'; it cannot be
+    stored ...` for `Box<Str>`), or calls such a method on `self`, gets no warning, also in
+    a module that makes only a `Box<int>`, where following the warning broke an
+    importer's `Box<Str>`
     (docs/language/05-classes.md, "Methods that don't change self").
   - A module of the program named like a library module could not be imported next to it,
     even with both imports aliased: with a `math.pkn`, `import ::math as cmath; import math

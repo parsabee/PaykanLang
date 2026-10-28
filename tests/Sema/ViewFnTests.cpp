@@ -314,6 +314,34 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   EXPECT_NE(ints.Diagnostics.find(":3:40: warning: 'count' " + warning),
             std::string::npos)
       << ints.Diagnostics;
+  // Nor when it keeps that part in a local, an array or a tuple, which a
+  // `view fn` of a `Box<Str>` cannot ("'self' is read-only in 'view fn
+  // kept'; it cannot be stored").
+  auto stores = semaCheck(
+      "struct Box<T> { v: T; n: int; }\n"
+      "impl Box<T> {\n"
+      "  fn kept() -> T { let x = self.v; return x; }\n"
+      "  fn put() -> T { x = self.v; return x; }\n"
+      "  fn both() -> int { let a = [self.v, self.v]; return 2; }\n"
+      "  fn pair() -> int { let p = (self.v, self.n); return p.1; }\n"
+      "  fn pick(c: bool) -> T { let x = if c then self.v else self.v; "
+      "return x; }\n"
+      "  fn count() -> int { let k = self.n; return k; }\n"
+      "}\n"
+      "fn main() -> int {\n"
+      "  a = Box<int>(1, 2);\n"
+      "  return a.kept() + a.put() + a.both() + a.pair() + a.pick(True) + "
+      "a.count();\n"
+      "}\n");
+  EXPECT_TRUE(stores.Ok) << stores.Diagnostics;
+  for (const char *quiet :
+       {"'kept' ", "'put' ", "'both' ", "'pair' ", "'pick' "})
+    EXPECT_EQ(stores.Diagnostics.find(quiet + warning), std::string::npos)
+        << quiet << "\n"
+        << stores.Diagnostics;
+  EXPECT_NE(stores.Diagnostics.find(":8:3: warning: 'count' " + warning),
+            std::string::npos)
+      << stores.Diagnostics;
 
   // A module's own instances are all it sees: its importer's `Box<Str>`
   // broke on `view fn get`, now in the module's file.
@@ -338,6 +366,21 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
       << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("box.pkn:2:40: warning: 'count' " + warning),
             std::string::npos)
+      << r.Diagnostics;
+  // Likewise for a `get` that keeps it in a local first.
+  writeModule(dir, "kept.pkn",
+              "struct Box<T> { v: T; }\n"
+              "impl Box<T> { fn get() -> T { let x = self.v; return x; } }\n"
+              "fn useIt() -> int { b = Box<int>(1); return b.get(); }\n");
+  r = semaCheckPath(writeModule(dir, "main2.pkn",
+                                "import ::io;\nimport kept;\n"
+                                "fn main() -> int {\n"
+                                "  s = kept::Box<Str>(\"x\");\n"
+                                "  io::println(s.get() + Str(kept::useIt()));\n"
+                                "  return 0;\n"
+                                "}\n"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("'get' " + warning), std::string::npos)
       << r.Diagnostics;
   std::filesystem::remove_all(dir);
 }

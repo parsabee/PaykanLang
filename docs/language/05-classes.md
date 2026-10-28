@@ -904,8 +904,10 @@ override that changes `self` gets no warning, and neither does its override. A m
 generic class or struct is one declaration for all its instances, and gets the warning,
 once, only when it could be a `view fn` in each of them, whatever its type arguments: `fn
 get() -> T { return self.v; }` gets none, since in a `Box<Str>` a `view fn get` would have
-to return that `Str` as a `view`, nor does a method that calls it on `self`. So it is in a
-module that makes only a `Box<int>`, whose importers may make a `Box<Str>`. The warning is
+to return that `Str` as a `view`; nor does one that keeps part of `self` holding a type
+argument in a local, an array or a tuple (`let x = self.v;`, `[self.v]`, `(self.v, 1)`),
+which a `view fn` of a `Box<Str>` cannot store, nor a method that calls either on `self`.
+So it is in a module that makes only a `Box<int>`, whose importers may make a `Box<Str>`. The warning is
 not given while the program has errors.
 
 ### `impl` Blocks

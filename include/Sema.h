@@ -294,10 +294,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     bool ChangesSelf = false; // writes `self`, calls a changing method on
                               // something reached through it, or returns
                               // part of it for its caller to change
-    /// Returns part of `self` that holds a type argument (`self.v` of a
-    /// `T` field): another instance's caller could change it, so whether
-    /// the template's method could be a `view fn` depends on the instance.
-    bool ReturnsTypeArgument = false;
+    /// Returns or stores a copy of part of `self` that holds a type
+    /// argument (`self.v` of a `T` field): another instance's would share
+    /// it, which a `view fn` cannot, so whether the template's method could
+    /// be one depends on the instance.
+    bool CopiesTypeArgument = false;
     std::vector<std::string> SelfCalls; // `self.m()` of a non-`view fn` m
   };
   std::deque<MethodUse> MethodUses; // stable addresses for CurrentMethodUse
@@ -1349,6 +1350,11 @@ private:
   /// a generic class or struct, holds a type argument: it is `self`, or
   /// starts with a field whose type in the template names a type parameter.
   bool holdsTypeArgument(const ast::Expr *e);
+  /// @p e, a value that shares nothing here, is copied (returned or
+  /// stored): in a method that is not a `view fn`, note when it is (or
+  /// either branch of a conditional is) part of `self` that holds a type
+  /// argument (MethodUse::CopiesTypeArgument).
+  void noteTypeArgumentCopy(const ast::Expr *e);
   /// While a `match` arm binds a name: whether the subject is a `view`, so
   /// that the name is one too.
   bool MatchSubjectIsView = false;

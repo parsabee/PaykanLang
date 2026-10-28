@@ -264,9 +264,12 @@ bool Sema::checkViewLocalNotConverted(const std::string &name,
 }
 
 bool Sema::checkViewNotStored(const ast::Expr *e, const ast::Type *ty) {
-  // A value type is copied, and the copy is the holder's own.
-  if (!sharesStorage(ty))
+  // A value type is copied, and the copy is the holder's own; for another
+  // instance, it may not be.
+  if (!sharesStorage(ty)) {
+    noteTypeArgumentCopy(e);
     return true;
+  }
   std::string msg = viewOf(e);
   if (msg.empty())
     return true;
@@ -359,15 +362,24 @@ bool Sema::holdsTypeArgument(const ast::Expr *e) {
   return false; // a superclass's
 }
 
+void Sema::noteTypeArgumentCopy(const ast::Expr *e) {
+  if (!CurrentMethodUse || !CurrentClassCtx || CurrentClassCtx->ViewMethod)
+    return;
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    noteTypeArgumentCopy(te->getTrueExpr());
+    noteTypeArgumentCopy(te->getFalseExpr());
+  } else if (holdsTypeArgument(e)) {
+    CurrentMethodUse->CopiesTypeArgument = true;
+  }
+}
+
 bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
   if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
     return checkViewNotReturned(te->getTrueExpr(), ty) &&
            checkViewNotReturned(te->getFalseExpr(), ty);
   if (!sharesStorage(ty)) {
     // A copy, for this instance; for another, it may not be.
-    if (CurrentMethodUse && CurrentClassCtx && !CurrentClassCtx->ViewMethod &&
-        holdsTypeArgument(e))
-      CurrentMethodUse->ReturnsTypeArgument = true;
+    noteTypeArgumentCopy(e);
     return true;
   }
   // Part of `self` is a `view` in a `view fn`, so it is returned as one

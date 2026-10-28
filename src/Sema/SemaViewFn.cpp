@@ -101,9 +101,10 @@ void Sema::warnMissingViewFns() {
   // A generic type's instances share their template's declarations: its
   // method is one for all of them, warned about only when it could be a
   // `view fn` in every instance, and then once.  So it is not when it
-  // returns part of `self` holding a type argument: `Box<int>`'s `get`
-  // could, but `Box<Str>`'s returns a reference its caller may change, and
-  // an importer of the module may make a `Box<Str>` the module never sees.
+  // returns or stores part of `self` holding a type argument: `Box<int>`'s
+  // `get` could, but `Box<Str>`'s returns a reference its caller may change
+  // (or keeps one in a local, an array or a tuple), and an importer of the
+  // module may make a `Box<Str>` the module never sees.
   auto templateOf = [&](ast::Type *t) -> const void * {
     if (auto *ct = ast::dyn_cast<ast::ClassType>(t))
       if (const InstantiationInfo *info = instantiationInfo(ct))
@@ -118,7 +119,7 @@ void Sema::warnMissingViewFns() {
   for (const auto &[family, members] : families)
     if (!could.count(family) ||
         std::any_of(members.begin(), members.end(),
-                    [](const MethodUse *m) { return m->ReturnsTypeArgument; }))
+                    [](const MethodUse *m) { return m->CopiesTypeArgument; }))
       cannot.insert({templateOf(family.first), family.second});
   // A family stays one only while its declaration does, and each `self.m()`
   // its members make calls one that stays.
