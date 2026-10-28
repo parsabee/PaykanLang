@@ -886,6 +886,84 @@ TEST(LocalBorrow, InoutArmsFindTheirSubjectOnce) {
   guard.expectNoLeaks("inout arms whose subject is reached through a call");
 }
 
+// A call's `inout` result is an `inout` arm's subject as a variable or a
+// field is: the call runs once, and the binding goes back to the storage it
+// returned, a variant, a subclass and an optional's value, on the arm's end,
+// `return`, `break` and `continue`; through a method of a class, of a
+// generic class and of a struct, on an `inout` parameter, and a function's.
+// The match keeps the object the storage is in, which another reference may
+// replace meanwhile.  (Sema rejected each: `'inout' arm 'r' needs a
+// variable or a field to match on`.)
+TEST(LocalBorrow, InoutArmsMatchAnInoutResult) {
+  LeakGuard guard;
+  auto r = compileAndRun(R"(import ::io;
+    enum E { A, R(w: int, s: Str) }
+    class Animal { n: int; }
+    impl Animal { fn __init__(n: int) { self.n = n; } }
+    class Dog : Animal {}
+    impl Dog { fn __init__(n: int) { __super__(n); } }
+    struct Q { y: Str; }
+    class B {
+      e: E; a: Animal; q: Q?; calls: int;
+      fn slot() -> inout E { self.calls += 1; return self.e; }
+      fn pet() -> inout Animal { self.calls += 1; return self.a; }
+      fn opt() -> inout Q? { self.calls += 1; return self.q; }
+    }
+    class Cell<T> { v: T; fn slot() -> inout T { return self.v; } }
+    struct S { e: E; }
+    impl S { fn slot() -> inout E { return self.e; } }
+    class H { b: B; s: S; }
+    fn pick(x: inout E, y: inout E, first: bool) -> inout E {
+      return if first then x else y;
+    }
+    fn early(b: B) -> Str {
+      match b.slot() { r: inout R { r.w += 1; return Str(r.w); } A { return "-"; } }
+    }
+    fn viaParam(b: inout B) { match b.slot() { r: inout R { r.w += 10; } A { } } }
+    fn reset(h: H) { h.b = B(E::A, Animal(0), None, 0); h.s = S(E::A); }
+    fn main() -> int {
+      let b = B(E::R(1, "a" + "b"), Dog(2), Q("p" + ""), 0);
+      match b.slot() { r: inout R { r.w += 100; r.s = r.s + "!"; } A { } }
+      io::println(Str(b.e) + " " + Str(b.calls));
+      match b.pet() { d: inout Dog { d = Dog(d.n + 5); } _ { } }
+      match b.opt() { q: inout Q { q.y = q.y + "?"; } None { } }
+      io::println(Str(b.a.n) + " " + Str(b.q) + " " + Str(b.calls));
+      io::println(early(b) + " " + Str(b.e) + " " + Str(b.calls));
+      b2 = B(E::R(2, "c" + ""), Animal(0), None, 0);
+      viaParam(b2);
+      i = 0;
+      while i < 3 {
+        i += 1;
+        match b2.slot() {
+          r: inout R { r.w += 1; if i == 2 { continue; } if i == 3 { break; } }
+          A { }
+        }
+      }
+      x = E::R(1, "x" + "");
+      y = E::A;
+      match pick(x, y, True) { r: inout R { r.w = 7; } A { } }
+      match pick(x, y, False) { r: inout R { r.w = 8; } A { io::print("A "); } }
+      io::println(Str(b2.e) + " " + Str(x) + " " + Str(y));
+      let c = Cell<E>(E::R(4, "c" + ""));
+      match c.slot() { r: inout R { r.w = 40; } A { } }
+      s = S(E::R(3, "s" + ""));
+      match s.slot() { r: inout R { r.w *= 2; } A { } }
+      let h = H(B(E::R(5, "h" + ""), Animal(0), None, 0), S(E::R(6, "t" + "")));
+      let g = h;
+      match h.b.slot() { r: inout R { g.b = B(E::A, Animal(1), None, 0); r.w = 9; } A { } }
+      match h.s.slot() { r: inout R { reset(g); r.w = 60; } A { } }
+      io::println(Str(c.v) + " " + Str(s.e) + " " + Str(h.b.e) + " " + Str(h.s.e));
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "R(w: 101, s: ab!) 1\n7 Q(y: p?) 3\n102 R(w: 102, s: "
+                      "ab!) 4\nA R(w: 15, s: c) R(w: 7, s: x) A\nR(w: 40, s: "
+                      "c) R(w: 6, s: s) A R(w: 60, s: t)\n");
+  EXPECT_EQ(r.ExitCode, 0);
+  guard.expectNoLeaks("inout arms matching an inout result");
+}
+
 // A borrowed result is returned like any other: part of `self` (a field, an
 // element) or of a `view` parameter, read by its caller, bound to a `view`
 // local and passed on to a `view` parameter.

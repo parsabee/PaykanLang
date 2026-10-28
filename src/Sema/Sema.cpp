@@ -1049,11 +1049,12 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
     // Reported.
   } else if (arm->getMode() == ast::ParamMode::Inout) {
     // `n: inout T` is another name for the subject's storage, as an `inout`
-    // local is for what it names; a T written through it fits there.
+    // local is for what it names, a call's `inout` result too; a T written
+    // through it fits there.
     const std::string what = "'inout' arm '" + name + "'";
     if (!ast::isa<ast::Identifier>(subject) &&
         !ast::isa<ast::MemberAccessExpr>(subject) &&
-        !ast::isa<ast::SubscriptExpr>(subject))
+        !ast::isa<ast::SubscriptExpr>(subject) && !isInoutResult(subject))
       msg = what + " needs a variable or a field to match on";
     else if (ast::isa<ast::BuiltinType>(bindTy) ||
              ast::isa<ast::EnumType>(bindTy))

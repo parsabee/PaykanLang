@@ -1298,6 +1298,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     initializer still is one.  An `inout` arm's binding goes back to the subject after its
     last use counted so, before a statement that names another variable of its name
     (docs/language/02-basics.md, "Local borrows").
+  - A `match` arm's `n: inout T` could not match a call's `inout` result, though an `inout`
+    argument and an `inout` local can name one: `match b.slot() { r: inout R { r.w +=
+    100; } A { } }`, with `slot` returning `inout`, was `'inout' arm 'r' needs a variable or
+    a field to match on`.  It is accepted, for a method's result (a class's, a generic
+    class's, a struct's) and a function's: the call runs once, the binding goes back to
+    the storage it returned on every way out of the arm, and what the call borrowed (its
+    receiver, its `inout` arguments) cannot be used but through the binding while it is
+    live (docs/language/08-match.md, "Borrowing the subject").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

@@ -453,13 +453,16 @@ Output:
 2
 ```
 
-- The subject must be a place an `inout` argument could be: a variable or a field, not an
+- The subject must be a place an `inout` argument could be: a variable, a field or a call's
+  `inout` result (`match b.slot() { … }`, with `slot` returning `inout`), not another
   expression (`'inout' arm 'd' needs a variable or a field to match on`), `self`, a `let`
   local or a `view` (`'v' is a 'view' parameter; it cannot be bound by 'inout' arm 'd'`).
+  While the binding is live, what the call borrowed (its receiver, its `inout` arguments)
+  is borrowed by it.
 - The subject's storage is found once, when the `match` starts, and the binding's value is
-  read there: a call on the way to it (`b.slot().a`, with `slot` returning `inout`, or
-  `mk().a`) runs once, and the binding goes back to that storage, wherever another call
-  would lead.
+  read there: a call on the way to it (`b.slot().a`, or `mk().a`), or the subject's own call
+  (`b.slot()`), runs once, and the binding goes back to that storage, wherever another
+  call would lead.
 - What is assigned to the binding has its type, `Dog`, which the subject's storage can
   hold: `d = Animal(1)` is an error.
 - While the binding is live, from the start of the arm to its last use there, the variable
