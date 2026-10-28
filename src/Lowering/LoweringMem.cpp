@@ -802,12 +802,19 @@ bool ModuleLowering::emitSliceArg(ast::Expr *arg, std::vector<Val> &args) {
 std::string ModuleLowering::callLabel(const ast::Expr *e) const {
   if (const auto *ce = ast::dyn_cast<ast::CallExpr>(e)) {
     // As Sema names it, though in another module's template, as the
-    // template's file does: its module's functions unqualified.
-    std::string name = sema::Sema::displayName(ce->getCalleeName());
-    if (const std::string own = Source->Module + "::";
-        !Source->Module.empty() && name.starts_with(own))
-      name.erase(0, own.size());
-    return "'" + name + "'";
+    // template's file does: that module's functions unqualified.  Another
+    // module's (a submodule's too) keep the module's full name, as Sema's
+    // errors in the instantiation give it: the qualifier the file imports
+    // it under is not known here.
+    const std::string &name = ce->getCalleeName();
+    if (!Source->Module.empty()) {
+      auto own = PL.ByCanonical.find(Source->Module);
+      std::string symbol;
+      if (own != PL.ByCanonical.end() && own->second &&
+          PL.hiddenOrigin(name, symbol) == own->second)
+        return "'" + symbol + "'";
+    }
+    return "'" + sema::Sema::displayName(name) + "'";
   }
   if (const auto *mc = ast::dyn_cast<ast::MethodCallExpr>(e))
     return "'" + mc->getMethodName() + "'";

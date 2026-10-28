@@ -52,6 +52,24 @@ void ProgramLowering::warn(const sema::SemaContext::SourceFile &file,
   Warnings.warning(loc, msg);
 }
 
+const pir::Module *ProgramLowering::hiddenOrigin(const std::string &name,
+                                                 std::string &symbol) const {
+  const std::string_view prefix(kHiddenQualPrefix);
+  if (!name.starts_with(prefix))
+    return nullptr;
+  // From the right, but not into the type arguments (`$m::f<lib::x::T>`).
+  for (size_t sep = name.rfind(kQualSep, name.find('<'));
+       sep != std::string::npos && sep > prefix.size();
+       sep = name.rfind(kQualSep, sep - 1)) {
+    auto it = ByCanonical.find(name.substr(prefix.size(), sep - prefix.size()));
+    if (it == ByCanonical.end() || !it->second)
+      continue;
+    symbol = name.substr(sep + std::string_view(kQualSep).size());
+    return it->second;
+  }
+  return nullptr;
+}
+
 std::string ProgramLowering::claimName(const std::string &name) {
   std::string unique = name;
   for (unsigned n = 2; !UsedNames.insert(unique).second; ++n)

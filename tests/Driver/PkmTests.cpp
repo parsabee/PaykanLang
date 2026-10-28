@@ -798,6 +798,75 @@ TEST(Pkm, ACopiedSliceIsWarnedAboutWhereItsModuleIsCompiled) {
   fs::remove_all(dir);
 }
 
+// In an instantiation of another module's template, the warning names that
+// module's own functions unqualified, as its file does, and another
+// module's by that module's full name, as an error in the instantiation
+// does: a submodule's too, whose name starts with the template's module's
+// (`lib::sl::inner::wipe`, not `inner::wipe`).  The file's plain function
+// names them as it writes them.  The same with the template read from its
+// module's cache entry.
+TEST(Pkm, ACopiedSliceInAnInstantiationNamesAnotherModulesFunctionsInFull) {
+  REQUIRE_BACKEND();
+  const fs::path dir = fs::temp_directory_path() /
+                       ("pkm_slicenames_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "lib/sl/inner.pkn",
+            "class C { a: int[3]; }\n"
+            "fn wipe(c: C) -> int { c.a = [0, 0, 0]; return 0; }\n"
+            "fn total(xs: view int[], x: int) -> int => xs[0] + x;\n");
+  writeFile(dir / "lib/sl.pkn",
+            "import lib::sl::inner as q;\n"
+            "fn own(xs: view int[], x: int) -> int => xs[0] + x;\n"
+            "fn plain(xs: view int[], c: q::C) -> int => q::total(xs, "
+            "q::wipe(c));\n"
+            "fn gen<T>(xs: view int[], c: q::C, t: T) -> int => q::total(xs, "
+            "q::wipe(c));\n"
+            "fn mine<T>(xs: view int[], c: q::C, t: T) -> int => own(xs, "
+            "q::wipe(c));\n");
+  writeFile(dir / "main.pkn",
+            "import ::io;\nimport lib::sl;\nimport lib::sl::inner;\n"
+            "fn main() -> int {\n"
+            "  let c = inner::C([1, 2, 3]);\n"
+            "  let a = sl::plain(c.a, c);\n"
+            "  c.a = [1, 2, 3];\n"
+            "  let b = sl::gen(c.a, c, 1);\n"
+            "  c.a = [1, 2, 3];\n"
+            "  io::println(Str(a) + \" \" + Str(b) + \" \" + "
+            "Str(sl::mine(c.a, c, 1)));\n"
+            "  return 0;\n}\n");
+  auto in = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  const std::string copied = " in a later argument may write the elements of "
+                             "slice 'xs': they are copied to the heap before "
+                             "the call to ";
+  const std::string line3 = "fn plain(xs: view int[], c: q::C) -> int => "
+                            "q::total(xs, q::wipe(c));\n";
+  const std::string line4 = "fn gen<T>(xs: view int[], c: q::C, t: T) -> int "
+                            "=> q::total(xs, q::wipe(c));\n";
+  const std::string line5 = "fn mine<T>(xs: view int[], c: q::C, t: T) -> int "
+                            "=> own(xs, q::wipe(c));\n";
+  const std::string plain =
+      "lib/sl.pkn:3:54: warning: 'q::wipe'" + copied + "'q::total'\n" +
+      "  2 | fn own(xs: view int[], x: int) -> int => xs[0] + x;\n" + "  3 | " +
+      line3 + "    | " + std::string(53, ' ') + "^~\n" + "  4 | " + line4;
+  const std::string gen = "lib/sl.pkn:4:61: warning: 'lib::sl::inner::wipe'" +
+                          copied + "'lib::sl::inner::total'\n";
+  const std::string genLines = "  3 | " + line3 + "  4 | " + line4 + "    | " +
+                               std::string(60, ' ') + "^~\n" + "  5 | " + line5;
+  const std::string mine =
+      "lib/sl.pkn:5:57: warning: 'lib::sl::inner::wipe'" + copied + "'own'\n";
+  const std::string mineLines = "  4 | " + line4 + "  5 | " + line5 + "    | " +
+                                std::string(56, ' ') + "^~\n";
+  auto r = in("main.pkn");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, plain + gen + genLines + mine + mineLines + "1 1 1\n");
+  r = in("main.pkn");
+  EXPECT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_EQ(r.out, gen + mine + "1 1 1\n");
+  fs::remove_all(dir);
+}
+
 // A cache entry is written from moved code (docs/pir.md §12; pkm.md §5.13):
 // the run that builds the module counts the moves at last use made in its
 // code, and the run that reuses the entry makes none of them again, with

@@ -370,7 +370,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       variable holding a function value), `'=='` for an `==` whose `equals` may write, and
       `a function value` for a call of another expression; in an instantiation of another
       module's template, that module's functions without the module, as its file writes
-      them.
+      them, and those of the modules it imports by their full names, a submodule's too
+      (`'lib::sl::inner::wipe'`), as an error in the instantiation names them.
     - None for the copies of a struct, a tuple, a fixed-size array or a tagged union (on
       the stack, as a plain parameter's value), and none where nothing is copied.  No
       option turns it off.

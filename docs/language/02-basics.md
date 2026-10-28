@@ -1082,7 +1082,9 @@ The calls are named as an error names them: a function, a method or a constructo
 name (`'reset'`, and `'first<int>'` for an instantiation of a generic function), a variable
 holding a function value by the variable's (`'f'`), an `==` whose `equals` may write as
 `'=='`, and a call of another expression as `a function value`. In another module's generic
-function, that module's functions are named as its file writes them, without the module.
+function, that module's functions are named as its file writes them, without the module,
+and those of the modules it imports by their full names, as an error in the instantiation
+names them (`'lib::sl::inner::wipe'` where the file writes `q::wipe`).
 
 The warning comes once for each place a slice is copied, however many instantiations of a
 generic function reach it, and no option turns it off. A call that need not see the

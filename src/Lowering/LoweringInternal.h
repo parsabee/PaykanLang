@@ -107,6 +107,14 @@ struct ProgramLowering {
   /// Lower (or, when the resolver loaded it from a `.pkm`, decode) the
   /// module of canonical name @p name once, and return it.
   pir::Module *lowerImport(const std::string &name);
+  /// The module @p name is of when it is under a hidden qualifier:
+  /// `$<module>::f`, named in the body of that module's template, or
+  /// `$<module>::T::f` for a `static fn` of one of its types.  That is the
+  /// longest prefix naming a lowered module (a submodule's name has its
+  /// parent's as a prefix), and @p symbol is set to the rest, the name
+  /// there; nullptr when no prefix does.
+  const pir::Module *hiddenOrigin(const std::string &name,
+                                  std::string &symbol) const;
 };
 
 /// Lowers ONE module (translation unit).  Imported modules get their own
@@ -1297,9 +1305,10 @@ private:
   bool emitSliceArg(ast::Expr *arg, std::vector<Val> &args);
   /// How the warning for a copy of a slice's elements names the call (or
   /// the `==`) @p e: its function's, method's or constructor's name as
-  /// Sema's messages name it, without the module of another module's
-  /// template the body is an instantiation of (Source), or "a function
-  /// value" for an expression called.
+  /// Sema's messages name it, though unqualified when it is of the module
+  /// of another module's template the body is an instantiation of
+  /// (Source, hiddenOrigin), or "a function value" for an expression
+  /// called.
   std::string callLabel(const ast::Expr *e) const;
   /// The number of elements of the slice parameter @p e names.
   Val emitSliceLength(ast::Expr *e);

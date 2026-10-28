@@ -407,21 +407,8 @@ pir::Function *ModuleLowering::lookupFunction(const std::string &name) {
     def = byName(fo->second); // another module emits this instantiation
   } else if (const std::string *co = typeOrigin(name)) {
     def = byName(*co); // the constructor of an instantiation there
-  } else if (name.starts_with(kHiddenQualPrefix)) {
-    // `$<module>::f`, named in the body of that module's template, or
-    // `$<module>::T::f` for a `static fn` of one of its types: the longest
-    // prefix that is a module.
-    std::string_view prefix(kHiddenQualPrefix);
-    for (size_t sep = name.rfind(kQualSep, name.find('<'));
-         sep != std::string::npos && sep > prefix.size() && !def;
-         sep = name.rfind(kQualSep, sep - 1)) {
-      auto it =
-          PL.ByCanonical.find(name.substr(prefix.size(), sep - prefix.size()));
-      if (it == PL.ByCanonical.end())
-        continue;
-      def = it->second;
-      symbol = name.substr(sep + std::string_view(kQualSep).size());
-    }
+  } else {
+    def = PL.hiddenOrigin(name, symbol); // named in a module's template
   }
   if (!def || def->Name == Mod.Name)
     return nullptr;
