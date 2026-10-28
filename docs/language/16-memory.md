@@ -338,7 +338,9 @@ object alive. Assigning a `T` or a `T?` to a `weak` variable or field makes it r
 object (or to nothing, for `None`) without retaining it. A `weak` local written without a type
 takes the class of its initializer (`weak u = a;` above is a `Node?`), and `None` has no class:
 `weak a = None;` is an error (`cannot infer the class of weak local 'a' from None; write 'weak
-a: T? = None'`), and `weak a: Node? = None;` starts it as nothing. A lambda that captures a
+a: T? = None'`), and `weak a: Node? = None;` starts it as nothing. An `Obj` that holds `None`
+is the `None` value, not nothing: `weak a = x;` after `x = None;` refers to it and never reads
+`None` ([Optionals](12-optionals.md#not-supported-yet)). A lambda that captures a
 `weak` variable captures it weakly, so a closure can refer to the object that stores it without
 forming a cycle (see [Captures](14-function-types.md#captures)). So does a lambda written
 inside that lambda, however deeply nested: a closure that an outer closure returns

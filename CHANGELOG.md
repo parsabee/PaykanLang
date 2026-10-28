@@ -938,7 +938,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     from None; write 'weak a: T? = None'`.  `None` has no class, and the local was a weak
     reference to the None value itself, which never read `None` (`Str(a == None)` printed
     `False`).  With its type written (`weak a: Node? = None;`) it starts as nothing, as
-    before (docs/language/16-memory.md, "Weak References").
+    before (docs/language/16-memory.md, "Weak References").  An `Obj` that holds `None`
+    (`x = None; weak a = x;`, or a function returning `Obj`) is still accepted and is
+    still a reference to the None value, as a strong `y: Obj? = x;` is: the conversion of
+    an `Obj` to an `Obj?` keeps the value (docs/language/12-optionals.md, "Not supported
+    yet").
   - An `-> inout T` result cannot be an element of a tuple, tuples being immutable:
     `return self.t.1;`, `return t.0;` with `t: inout (int, int)`, either branch of
     `return if c then t.0 else t.1;`, and an element of another call's `inout` result
