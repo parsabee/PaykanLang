@@ -1413,7 +1413,11 @@ global across an import graph, though ([Modules](15-modules.md)), so a program t
 or `ErrorCode` (`class 'File' conflicts with an imported type of the same name`, `enum
 'ErrorCode' ...`). A generic type of a module, such as `Result` or `List`, is named through
 its module (`res::Result<int, Str>`) and leaves its name free: a program may declare its
-own `Result`.
+own `Result`. The names of instantiations are global too, though: `::io` brings in
+`Result<Str, Error>`, so a program's own `Result<Str, err::Error>` is an error
+(`instantiation 'Result<Str, Error>' of 'Result' conflicts with an imported enum of the
+same name`), and so is its own `List<int>` next to `collections::List<int>` ([the standard
+library](../stdlib/index.md#quick-summary)).
 
 The same rule applies between user declarations: `fn Point()` next to `class Point` is
 rejected with `'Point' is already declared as a class`, and a function or class cannot
