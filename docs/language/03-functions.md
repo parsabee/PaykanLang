@@ -491,7 +491,7 @@ The other forms, with `look` and `bump` as above, are errors the same way:
 | `look(p, bumpN(p.a))` with `fn bumpN(n: inout int)` | `'p.a' is part of 'p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter 'n' of 'bumpN'` |
 | `look(c.p, c.change())`, `change` a method of `c`'s class that may change `self` | `'c' contains 'c.p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot call 'change' on it (not a 'view fn')` |
 | `Shown(p, bump(p))`, the `__init__` of `Shown` taking `p: view P` (and `__super__(p, bump(p))` likewise) | `'p' is passed to 'view' parameter 'p' of 'Shown'; a later argument of 'Shown' cannot pass it to 'inout' parameter 'p' of 'bump'` |
-| `g(p, bump(p))` with `g = look`, and `look(p, b(p))` with `b = bump` | `'p' is passed to 'view' parameter '1' of 'g'; a later argument of 'g' cannot pass it to 'inout' parameter 'p' of 'bump'`, `'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter '1' of 'b'` |
+| `g(p, bump(p))` with `let g = look;`, and `look(p, b(p))` with `let b = bump;` | `'p' is passed to 'view' parameter '1' of 'g'; a later argument of 'g' cannot pass it to 'inout' parameter 'p' of 'bump'`, `'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter '1' of 'b'` |
 | `look(p, id(bump(p)))`, `look(p, if k == 0 then bump(p) else 0)`: deeper in the argument | the error of `look(p, bump(p))` |
 
 What this does not see is accepted, and the callee is then given the value read where the
@@ -505,7 +505,8 @@ argument was evaluated, which the caller copies when a later argument may write 
 - a write before the borrow, or one after a borrow that has ended: `look2(bump(p), p)`
   with `fn look2(x: int, p: view P)`, and `add(look(p, 0), bump(p))`, where the call of
   `look` has returned;
-- a lambda's body: `look(p, apply(fn(p: inout P) -> int => bump(p)))`;
+- a lambda's body: `look(c.p, apply(fn() -> int => bump(c.p)))`, with
+  `fn apply(f: () -> int) -> int => f();`;
 - another variable, or another field of the same one: `look(two.x, bump(two.y))`;
 - the operands of `==` and `!=` (`p == P(bump(p) + 9)`).
 

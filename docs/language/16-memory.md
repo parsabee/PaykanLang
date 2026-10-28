@@ -342,7 +342,7 @@ a: T? = None'`), and `weak a: Node? = None;` starts it as nothing. A lambda that
 `weak` variable captures it weakly, so a closure can refer to the object that stores it without
 forming a cycle (see [Captures](14-function-types.md#captures)). So does a lambda written
 inside that lambda, however deeply nested: a closure that an outer closure returns
-(`outer = fn() -> () -> Str { return fn() -> Str => if me == None then "gone" else
+(`let outer = fn() -> () -> Str { return fn() -> Str => if me == None then "gone" else
 "alive"; };`) holds the object weakly too, and reads `None` once it is gone. Inside the
 lambda the captured variable is read-only, as any capture is.
 
