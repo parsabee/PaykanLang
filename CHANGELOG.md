@@ -1477,7 +1477,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     as mine;` was `import of module 'math': qualifier 'math' already names module '::math'
     (give one of them an alias with 'as')`, and every `mine::` use another error.  A system
     import's full path binds `math` only when no other import of the file binds that name to
-    another module (OD-8): its full path is `::math`, which never clashes, so the two
+    another module (OD-8): its full path is `::math`, which binds no qualifier code can write
+    (`::math::sqrt` does not parse) and so never clashes, so the two
     imports go together, and `math::` names the program's module, as it does with `import
     ::math as cmath; import math;`.  The path without the `::` still names the library's
     module when nothing else claims it (`collections::List<int>()` after `import

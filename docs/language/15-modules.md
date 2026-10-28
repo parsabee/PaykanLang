@@ -108,7 +108,8 @@ import's last path segment, or a full module path) names exactly one module, so
 'util' already names module 'a::util' (give one of them an alias with 'as')`, each module
 by its canonical name, `::io` for a system module); write `import b::util as bu;` instead.
 Importing the same module under a second qualifier is fine. A system import's full path is
-`::math`, which no other import spells (see [System Imports](#system-imports)).
+its canonical name, `::math`, which binds no qualifier code can write (`::math::sqrt` is a
+syntax error), so it clashes with no other import (see [System Imports](#system-imports)).
 
 ### Selective Import
 
@@ -161,8 +162,9 @@ library (`<prefix>/lib/paykan/stdlib/<version>/` next to the `paykan` executable
 ordinary module, and it is cached under `.paykan_cache/@system/` (see
 [Module Files](#module-files)).
 
-Its full path, the module's canonical name `::math`, never clashes with a module of the
-source root. The path without the `::` qualifies the module too (`math::sqrt` after
+Its full path is the module's canonical name `::math`, which binds no qualifier code can
+write (`::math::sqrt(16.0)` does not parse), so it never clashes with a module of the source
+root. The path without the `::` qualifies the module (`math::sqrt` after
 `import ::math as m;`), unless another import of the file binds that name: then it names
 that module. So a program with a module `math.pkn` of its own imports both when the system
 import has an alias, and `math::` is its own module:
