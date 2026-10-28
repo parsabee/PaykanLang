@@ -902,9 +902,11 @@ things a `view fn` cannot (returning part of `self` for its caller to change is 
 calls on `self` a method that does; a method with an
 override that changes `self` gets no warning, and neither does its override. A method of a
 generic class or struct is one declaration for all its instances, and gets the warning,
-once, only when it could be a `view fn` in each of them: `fn get() -> T { return self.v; }`
-gets none once `Box<Str>` is used, since a `view fn get` would have to return that `Str`
-as a `view`. The warning is not given while the program has errors.
+once, only when it could be a `view fn` in each of them, whatever its type arguments: `fn
+get() -> T { return self.v; }` gets none, since in a `Box<Str>` a `view fn get` would have
+to return that `Str` as a `view`, nor does a method that calls it on `self`. So it is in a
+module that makes only a `Box<int>`, whose importers may make a `Box<Str>`. The warning is
+not given while the program has errors.
 
 ### `impl` Blocks
 

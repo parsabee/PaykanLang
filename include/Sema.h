@@ -294,6 +294,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     bool ChangesSelf = false; // writes `self`, calls a changing method on
                               // something reached through it, or returns
                               // part of it for its caller to change
+    /// Returns part of `self` that holds a type argument (`self.v` of a
+    /// `T` field): another instance's caller could change it, so whether
+    /// the template's method could be a `view fn` depends on the instance.
+    bool ReturnsTypeArgument = false;
     std::vector<std::string> SelfCalls; // `self.m()` of a non-`view fn` m
   };
   std::deque<MethodUse> MethodUses; // stable addresses for CurrentMethodUse
@@ -1341,6 +1345,10 @@ private:
   /// @p e, of type @p ty, is being returned: not a `view` that shares what
   /// it holds, though part of `self` may be.
   bool checkViewNotReturned(const ast::Expr *e, const ast::Type *ty);
+  /// Whether the place @p e, part of `self` in a method of an instance of
+  /// a generic class or struct, holds a type argument: it is `self`, or
+  /// starts with a field whose type in the template names a type parameter.
+  bool holdsTypeArgument(const ast::Expr *e);
   /// While a `match` arm binds a name: whether the subject is a `view`, so
   /// that the name is one too.
   bool MatchSubjectIsView = false;

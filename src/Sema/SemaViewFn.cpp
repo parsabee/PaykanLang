@@ -98,26 +98,12 @@ void Sema::warnMissingViewFns() {
     if (introducedHere && !changes && intro && !intro->isView())
       could.insert(family);
   }
-  for (bool changed = true; changed;) {
-    changed = false;
-    for (auto it = could.begin(); it != could.end();) {
-      bool stays = true;
-      for (const MethodUse *m : families[*it])
-        for (const std::string &callee : m->SelfCalls)
-          if (!could.count(familyOf(*m, callee)))
-            stays = false;
-      if (stays) {
-        ++it;
-      } else {
-        it = could.erase(it);
-        changed = true;
-      }
-    }
-  }
   // A generic type's instances share their template's declarations: its
   // method is one for all of them, warned about only when it could be a
-  // `view fn` in every instance (`Box<int>`'s `get` could, but `Box<Str>`'s
-  // returns a reference its caller may change), and then once.
+  // `view fn` in every instance, and then once.  So it is not when it
+  // returns part of `self` holding a type argument: `Box<int>`'s `get`
+  // could, but `Box<Str>`'s returns a reference its caller may change, and
+  // an importer of the module may make a `Box<Str>` the module never sees.
   auto templateOf = [&](ast::Type *t) -> const void * {
     if (auto *ct = ast::dyn_cast<ast::ClassType>(t))
       if (const InstantiationInfo *info = instantiationInfo(ct))
@@ -127,14 +113,35 @@ void Sema::warnMissingViewFns() {
         return info->Template;
     return t; // not an instance: its own
   };
-  std::set<std::pair<const void *, std::string>> cannot;
+  using Declared = std::pair<const void *, std::string>;
+  std::set<Declared> cannot;
   for (const auto &[family, members] : families)
-    if (!could.count(family))
+    if (!could.count(family) ||
+        std::any_of(members.begin(), members.end(),
+                    [](const MethodUse *m) { return m->ReturnsTypeArgument; }))
       cannot.insert({templateOf(family.first), family.second});
+  // A family stays one only while its declaration does, and each `self.m()`
+  // its members make calls one that stays.
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (auto it = could.begin(); it != could.end();) {
+      const Declared declared{templateOf(it->first), it->second};
+      bool stays = !cannot.count(declared);
+      for (const MethodUse *m : families[*it])
+        for (const std::string &callee : m->SelfCalls)
+          if (!could.count(familyOf(*m, callee)))
+            stays = false;
+      if (stays) {
+        ++it;
+      } else {
+        cannot.insert(declared);
+        it = could.erase(it);
+        changed = true;
+      }
+    }
+  }
   std::set<std::pair<size_t, size_t>> warned;
   for (const Family &family : could) {
-    if (cannot.count({templateOf(family.first), family.second}))
-      continue;
     for (const MethodUse *m : families[family]) {
       if (ownerOf(*m) != family.first)
         continue;

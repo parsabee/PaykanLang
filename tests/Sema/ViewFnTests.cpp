@@ -212,7 +212,8 @@ fn main() -> int { return show(Counter(), Fast()); }
 // passing part of `self` to a parameter that is not `view`, and a generic
 // class's method gets one warning, not one per instance, when every
 // instance could make it a `view fn` (`count`; `Box<Str>`'s `get` returns
-// a `Str` of `self` its caller could change, see GenericMethodWarnsFor...).
+// a `Str` of `self` its caller could change, see
+// AGenericMethodIsWarnedAboutForEveryInstance).
 TEST(ViewFn, WarnsWhenSelfNeverChanges) {
   auto r = semaCheck(R"(class Shape {
   w: int;
@@ -271,13 +272,16 @@ fn twiceOf(n: int) -> int { return 2 * n; }
 // returns `self.v`, could in `Box<int>` but not in `Box<Str>`, whose `Str`
 // its caller could change: following the warning `Box<int>` gave was "'self'
 // is read-only in 'view fn get', so part of it can only be returned as a
-// 'view'" for `Box<Str>`.  With `Box<int>` alone, or a method every
-// instance could make a `view fn`, the warning is given, once.
+// 'view'" for `Box<Str>`.  So it is not warned about with `Box<int>` alone
+// either, which another file, an importer of the module, may make a
+// `Box<Str>` of; nor is `first`, which calls it.  A method every instance
+// could make a `view fn` is, once.
 TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
   const std::string boxes =
       "import ::io;\n"
       "struct Box<T> { v: T; n: int; }\n"
-      "impl Box<T> { fn get() -> T => self.v; fn count() -> int => self.n; }\n"
+      "impl Box<T> { fn get() -> T => self.v; fn count() -> int => self.n; "
+      "fn first() -> T => self.get(); }\n"
       "class Cell<T> { v: T; fn get() -> T { return self.v; } }\n"
       "impl Cell<T> { fn __init__(v: T) { self.v = v; } }\n";
   const std::string warning = "never changes 'self': make it a 'view fn'";
@@ -300,13 +304,42 @@ TEST(ViewFn, AGenericMethodIsWarnedAboutForEveryInstance) {
       << both.Diagnostics;
   auto ints = semaCheck(boxes + "fn main() -> int {\n"
                                 "  a = Box<int>(1, 2); c = Cell<int>(4);\n"
-                                "  return a.get() + c.get();\n"
+                                "  return a.get() + c.get() + a.first();\n"
                                 "}\n");
   EXPECT_TRUE(ints.Ok) << ints.Diagnostics;
-  for (const char *loc : {":3:15: warning: 'get' ", ":4:23: warning: 'get' "})
-    EXPECT_NE(ints.Diagnostics.find(loc + warning), std::string::npos)
-        << loc << "\n"
+  for (const char *quiet : {"'get' ", "'first' "})
+    EXPECT_EQ(ints.Diagnostics.find(quiet + warning), std::string::npos)
+        << quiet << "\n"
         << ints.Diagnostics;
+  EXPECT_NE(ints.Diagnostics.find(":3:40: warning: 'count' " + warning),
+            std::string::npos)
+      << ints.Diagnostics;
+
+  // A module's own instances are all it sees: its importer's `Box<Str>`
+  // broke on `view fn get`, now in the module's file.
+  auto dir = tempDir() / "view_fn_template_modules";
+  std::filesystem::remove_all(dir);
+  writeModule(dir, "box.pkn",
+              "struct Box<T> { v: T; n: int; }\n"
+              "impl Box<T> { fn get() -> T => self.v; "
+              "fn count() -> int => self.n; }\n"
+              "fn useIt() -> int { b = Box<int>(1, 2); "
+              "return b.get() + b.count(); }\n");
+  auto r = semaCheckPath(
+      writeModule(dir, "main.pkn",
+                  "import ::io;\nimport box;\n"
+                  "fn main() -> int {\n"
+                  "  s = box::Box<Str>(\"x\", 1);\n"
+                  "  io::println(s.get() + Str(box::useIt() + s.count()));\n"
+                  "  return 0;\n"
+                  "}\n"));
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.Diagnostics.find("'get' " + warning), std::string::npos)
+      << r.Diagnostics;
+  EXPECT_NE(r.Diagnostics.find("box.pkn:2:40: warning: 'count' " + warning),
+            std::string::npos)
+      << r.Diagnostics;
+  std::filesystem::remove_all(dir);
 }
 
 // A module's `view fn` markers are part of its interface: overrides in the

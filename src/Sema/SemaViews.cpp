@@ -275,12 +275,101 @@ bool Sema::checkViewNotStored(const ast::Expr *e, const ast::Type *ty) {
   return false;
 }
 
+namespace {
+
+/// Whether the type annotation @p ty names one of @p params.
+bool namesTypeParam(const ast::Type *ty,
+                    const std::vector<const std::string *> &params) {
+  if (!ty)
+    return false;
+  if (const auto *ct = ast::dyn_cast<ast::ClassType>(ty))
+    return std::any_of(params.begin(), params.end(), [&](const std::string *p) {
+      return *p == ct->getName();
+    });
+  if (const auto *gt = ast::dyn_cast<ast::GenericType>(ty))
+    return std::any_of(
+        gt->getArgs().begin(), gt->getArgs().end(),
+        [&](const ast::Type *a) { return namesTypeParam(a, params); });
+  if (const auto *at = ast::dyn_cast<ast::ArrayType>(ty))
+    return namesTypeParam(at->getElementType(), params);
+  if (const auto *ft = ast::dyn_cast<ast::FixedArrayType>(ty))
+    return namesTypeParam(ft->getElementType(), params);
+  if (const auto *st = ast::dyn_cast<ast::SliceType>(ty))
+    return namesTypeParam(st->getElementType(), params);
+  if (const auto *ot = ast::dyn_cast<ast::OptionalType>(ty))
+    return namesTypeParam(ot->getInnerType(), params);
+  if (const auto *fnt = ast::dyn_cast<ast::FunctionType>(ty)) {
+    for (size_t i = 0; i < fnt->getNumParams(); ++i)
+      if (namesTypeParam(fnt->getParamType(i), params))
+        return true;
+    return namesTypeParam(fnt->getReturnType(), params);
+  }
+  // A struct is named, not built from its fields.
+  if (ast::isa<ast::StructType>(ty))
+    return false;
+  if (const auto *tt = ast::dyn_cast<ast::TupleType>(ty))
+    return std::any_of(
+        tt->getElementTypes().begin(), tt->getElementTypes().end(),
+        [&](const ast::Type *e) { return namesTypeParam(e, params); });
+  return false;
+}
+
+} // namespace
+
+bool Sema::holdsTypeArgument(const ast::Expr *e) {
+  // The template's fields, and its type parameters.
+  const std::vector<ast::VarDecl *> *fields = nullptr;
+  const std::vector<const std::string *> *params = nullptr;
+  if (const InstantiationInfo *info =
+          CurrentMethodUse->Class ? instantiationInfo(CurrentMethodUse->Class)
+                                  : nullptr) {
+    fields = &info->Template->getFields();
+    params = &info->Template->getTypeParams();
+  } else if (const StructInstantiationInfo *sinfo =
+                 CurrentMethodUse->Struct
+                     ? structInstantiationInfo(CurrentMethodUse->Struct)
+                     : nullptr) {
+    fields = &sinfo->Template->getFields();
+    params = &sinfo->Template->getTypeParams();
+  } else {
+    return false; // not an instance
+  }
+  // The field of `self` the place starts with.
+  const ast::MemberAccessExpr *field = nullptr;
+  for (const ast::Expr *p = e;;) {
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(p)) {
+      field = ma;
+      p = ma->getReceiver();
+    } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(p)) {
+      p = se->getArray();
+    } else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(p)) {
+      p = ti->getTuple();
+    } else {
+      const auto *root = ast::dyn_cast<ast::Identifier>(p);
+      if (!root || root->getName() != names::kSelf)
+        return false;
+      break;
+    }
+  }
+  if (!field)
+    return true; // `self` itself
+  for (const ast::VarDecl *f : *fields)
+    if (f->getName() == field->getFieldName())
+      return namesTypeParam(f->getType(), *params);
+  return false; // a superclass's
+}
+
 bool Sema::checkViewNotReturned(const ast::Expr *e, const ast::Type *ty) {
   if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
     return checkViewNotReturned(te->getTrueExpr(), ty) &&
            checkViewNotReturned(te->getFalseExpr(), ty);
-  if (!sharesStorage(ty))
+  if (!sharesStorage(ty)) {
+    // A copy, for this instance; for another, it may not be.
+    if (CurrentMethodUse && CurrentClassCtx && !CurrentClassCtx->ViewMethod &&
+        holdsTypeArgument(e))
+      CurrentMethodUse->ReturnsTypeArgument = true;
     return true;
+  }
   // Part of `self` is a `view` in a `view fn`, so it is returned as one
   // (`-> view T`): as a copy, its caller could change it.  Another method
   // may return it, and so hands out a way to change `self`.  A `view`
