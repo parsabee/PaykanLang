@@ -1179,6 +1179,7 @@ created for that argument list. See [Generics](13-generics.md).
 | `view fn __init__` or a free `view fn` | `__init__` sets up `self`; a free function has no `self` |
 | `self` changed in a `view fn` | A `view fn` assigns `self`'s fields or elements, calls a method on `self` that is not a `view fn`, passes them to `inout`, or passes on or stores a reference reached through `self` |
 | Multiple bases | More than one `:` clause |
+| Superclass that is not a class | `class A : S` with `S` a struct, an enum, a builtin type, a function, a generic type named without type arguments or a generic class's own type parameter: `superclass 'S' of class 'A' is a struct, not a class`; a trait: `superclass 'T' of class 'C' is a trait, not a class: a class implements a trait with 'impl T for C { ... }'`; a name that is none of these: `superclass 'Nope' of class 'A' is not defined` |
 | `self` in parameter list | Writing `self` as an explicit method parameter |
 | Private member used outside its class | `c.__count`, `c.__bump()`, `self.__count` in a subclass, or in a free function: `'__count' is private to 'Counter': it is reachable only from its own methods` |
 | Module-private member used by an importer | `c._cache` or `m::Counter::_make()` outside the module that declares `Counter`: `'_cache' of 'Counter' is private to module 'm'` |

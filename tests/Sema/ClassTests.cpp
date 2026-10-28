@@ -1770,6 +1770,66 @@ TEST(ClassRecovery, UndefinedSuperclassStillDeclaresTheClass) {
   EXPECT_EQ(errorCount(r.Diagnostics), 1u) << r.Diagnostics;
 }
 
+// A superclass that names something other than a class says what it is (it
+// was "not defined"), a trait with the `impl` block that takes it, a generic
+// class's own type parameter included.  One error each, at the class; the
+// class still counts as declared.
+TEST(ClassRecovery, ASuperclassThatIsNoClassSaysWhatItIs) {
+  auto r = semaCheck("struct S { x: int; }\n"
+                     "enum E { X }\n"
+                     "trait T { view fn f() -> int; }\n"
+                     "struct GS<U> { x: U; }\n"
+                     "enum GE<U> { X(v: U) }\n"
+                     "class GC<U> { v: U; }\n"
+                     "fn fun() -> int { return 1; }\n"
+                     "fn gfun<U>(u: U) -> U { return u; }\n"
+                     "class A : S {}\n"           // 9
+                     "class B : E {}\n"           // 10
+                     "class C : T {}\n"           // 11
+                     "class D : int {}\n"         // 12
+                     "class F : GS {}\n"          // 13
+                     "class G : GE {}\n"          // 14
+                     "class H : GC {}\n"          // 15
+                     "class I : fun {}\n"         // 16
+                     "class J : gfun {}\n"        // 17
+                     "class K<U> : U { v: U; }\n" // 18
+                     "class L<U> : T { v: U; }\n" // 19
+                     "class M<U> : S { v: U; }\n" // 20
+                     "class N : Nope {}\n"        // 21
+                     "fn main() -> int {\n"
+                     "  k = K<int>(1); l = L<int>(1); m = M<int>(1);\n"
+                     "  a = A(); return 0;\n"
+                     "}\n");
+  EXPECT_FALSE(r.Ok);
+  for (const char *e :
+       {":9:1: error: superclass 'S' of class 'A' is a struct, not a class",
+        ":10:1: error: superclass 'E' of class 'B' is an enum, not a class",
+        ":11:1: error: superclass 'T' of class 'C' is a trait, not a class: a "
+        "class implements a trait with 'impl T for C { ... }'",
+        ":12:1: error: superclass 'int' of class 'D' is a builtin type, not a "
+        "class",
+        ":13:1: error: superclass 'GS' of class 'F' is a generic struct, not a "
+        "class",
+        ":14:1: error: superclass 'GE' of class 'G' is a generic enum, not a "
+        "class",
+        ":15:1: error: superclass 'GC' of class 'H' is a generic class: a "
+        "superclass cannot be generic",
+        ":16:1: error: superclass 'fun' of class 'I' is a function, not a "
+        "class",
+        ":17:1: error: superclass 'gfun' of class 'J' is a generic function, "
+        "not a class",
+        ":18:1: error: superclass 'U' of class 'K<int>' is a type parameter, "
+        "not a class",
+        ":19:1: error: superclass 'T' of class 'L<int>' is a trait, not a "
+        "class: a class implements a trait with 'impl T for L<U> { ... }'",
+        ":20:1: error: superclass 'S' of class 'M<int>' is a struct, not a "
+        "class",
+        ":21:1: error: superclass 'Nope' of class 'N' is not defined"})
+    EXPECT_NE(r.Diagnostics.find(e), std::string::npos) << e << "\n"
+                                                        << r.Diagnostics;
+  EXPECT_EQ(errorCount(r.Diagnostics), 13u) << r.Diagnostics;
+}
+
 TEST(ClassRecovery, BadMemberTypeIsReportedOnce) {
   auto r = semaCheck(
       withClasses("class A { x: Nope;\n"

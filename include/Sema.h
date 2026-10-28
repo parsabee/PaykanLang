@@ -1553,6 +1553,16 @@ private:
   /// a subclass need not call it.
   bool doesNothing(const ast::ClassType *ct) const;
 
+  /// Report that @p cls's superclass @p super, which names no class, is not
+  /// defined, or what it is instead: a struct, a trait, a builtin type, a
+  /// type parameter of @p tmpl (the template @p cls is an instance of, or
+  /// null), ...  A private import's name, or a failed import's, is not
+  /// reported again.
+  void reportUndefinedSuperclass(const std::string &super,
+                                 const std::string &cls,
+                                 const ast::ClassDecl *tmpl,
+                                 ast::SourceLocation loc);
+
   /// `x: int, s: Str`: the parameters of @p fn, for a diagnostic.
   static std::string paramList(const ast::FuncDecl *fn);
 

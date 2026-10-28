@@ -1395,6 +1395,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     self.k).n`, which `self.k.n` is too.  A conditional's struct or tuple is still a
     temporary, whose field or element no `inout` result is (docs/language/03-functions.md,
     "Borrowed results").
+- **Stability sweep: classes, generics and names across modules.**
+  - A superclass that names something other than a class says what it is: `class A : S`
+    with `S` a struct was `superclass 'S' of class 'A' is not defined`, and so were an
+    enum, a trait, a builtin type (`class D : int`), a function, a generic struct, enum,
+    class or function named without type arguments, a generic class's own type parameter
+    (`class K<U> : U`), and an imported struct or enum.  It is now `... is a struct, not a
+    class` (`an enum`, `a builtin type`, `a function`, `a generic struct`, `a type
+    parameter`, ...), for a generic class `... is a generic class: a superclass cannot be
+    generic`, and for a trait `superclass 'T' of class 'C' is a trait, not a class: a
+    class implements a trait with 'impl T for C { ... }'` (`impl T for Box<T>` for a
+    generic class); a name that is none of these is still `not defined`
+    (docs/language/05-classes.md, 06-traits.md and 11-structs.md, "Semantic Checks").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

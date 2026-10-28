@@ -10,6 +10,7 @@
 
 #include "StringMap.h"
 
+#include <algorithm>
 #include <functional>
 #include <unordered_map>
 
@@ -481,12 +482,9 @@ bool Sema::checkClassDecls(const std::vector<ast::ClassDecl *> &classDecls) {
         // Not declared in this module: the name must resolve through the
         // ASTContext registry — a built-in class type (Obj, Str) or an
         // imported class referenced by a registered alias (e.g.
-        // "tmp_import::helper::Adder").  A class of a failed import was
-        // reported with the import.
-        if (!reportPrivateImport(superName, cd->getLocation()) &&
-            !isFailedImportUse(superName))
-          error(cd->getLocation(), "superclass '" + superName + "' of class '" +
-                                       cd->getName() + "' is not defined");
+        // "tmp_import::helper::Adder").
+        reportUndefinedSuperclass(superName, cd->getName(), nullptr,
+                                  cd->getLocation());
         broken = true;
       }
       if (broken) {
@@ -694,6 +692,56 @@ bool Sema::doesNothing(const ast::ClassType *ct) const {
     if (!DefaultInits.count(ct->getName()) || ct->getNumFields())
       return false;
   return true;
+}
+
+void Sema::reportUndefinedSuperclass(const std::string &super,
+                                     const std::string &cls,
+                                     const ast::ClassDecl *tmpl,
+                                     ast::SourceLocation loc) {
+  if (reportPrivateImport(super, loc) || isFailedImportUse(super))
+    return;
+  const std::string head = "superclass '" + super + "' of class '" + cls + "' ";
+  if (Traits.count(super)) {
+    // How a class takes a trait: `impl T for A`, `impl T for Box<T>`.
+    std::string target = cls;
+    if (tmpl) {
+      target = tmpl->getName() + "<";
+      for (size_t i = 0; i < tmpl->getTypeParams().size(); ++i)
+        target += (i ? ", " : "") + *tmpl->getTypeParams()[i];
+      target += ">";
+    }
+    error(loc, head +
+                   "is a trait, not a class: a class implements a trait "
+                   "with 'impl " +
+                   super + " for " + target + " { ... }'");
+    return;
+  }
+  if (ClassTemplates.count(super)) {
+    error(loc, head + "is a generic class: a superclass cannot be generic");
+    return;
+  }
+  const char *what = nullptr;
+  if (ast::BuiltinType::Kind builtin; ast::builtinKindOfName(super, builtin))
+    what = "a builtin type";
+  else if (tmpl &&
+           std::any_of(tmpl->getTypeParams().begin(),
+                       tmpl->getTypeParams().end(),
+                       [&](const std::string *p) { return *p == super; }))
+    what = "a type parameter";
+  else if (Ctx.lookupStructType(super))
+    what = "a struct";
+  else if (Ctx.lookupEnumType(super))
+    what = "an enum";
+  else if (StructTemplates.count(super))
+    what = "a generic struct";
+  else if (EnumTemplates.count(super))
+    what = "a generic enum";
+  else if (FuncTemplates.count(super))
+    what = "a generic function";
+  else if (ModuleFunctionNames.count(super) || lookupFunction(super))
+    what = "a function"; // the module's are not declared yet
+  error(loc, head + (what ? "is " + std::string(what) + ", not a class"
+                          : std::string("is not defined")));
 }
 
 ast::FuncDecl *Sema::defaultInit(ast::ClassType *ct, ast::SourceLocation loc) {
@@ -1688,10 +1736,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     const auto &superName = clone->getSuperClassName();
     superClass = Ctx.lookupClassType(superName);
     if (!superClass) {
-      if (!isFailedImportUse(superName))
-        error(clone->getLocation(), "superclass '" + superName +
-                                        "' of class '" + instName +
-                                        "' is not defined");
+      reportUndefinedSuperclass(superName, instName, tmpl,
+                                clone->getLocation());
       ok = false;
     } else if (superClass->isFinal()) {
       error(clone->getLocation(),

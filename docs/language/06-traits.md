@@ -318,6 +318,7 @@ The standard library's `memory::Box<T: ValueType>` holds one in a shared object 
 | Trait of another module | A template of another module is bounded, directly or through a template it uses, by that module's own trait ([#147](https://github.com/parsabee/PaykanLang/issues/147); see below) |
 | Aggregate without a text | `io::println(s)`, `s.toString()` or `impl Show for S {}` for a tuple, struct, enum or optional holding a function value (the message names the part) |
 | Trait as a type | A trait is used where a type is expected |
+| Trait as a superclass | `class C : T` for a trait `T`: `superclass 'T' of class 'C' is a trait, not a class: a class implements a trait with 'impl T for C { ... }'` |
 
 ## Not Supported Yet
 

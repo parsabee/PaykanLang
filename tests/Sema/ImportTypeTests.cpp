@@ -652,6 +652,29 @@ fn main() -> int { return 0; }
   std::filesystem::remove_all(tmp);
 }
 
+// An imported struct or enum named as a superclass says what it is, as a
+// local one does; it was "not defined".  An imported class is a superclass.
+TEST(Module, ImportedStructAsSuperclassErr) {
+  auto tmp = (paykan::test::tempDir() / "pkn_ms_struct_super").string();
+  std::filesystem::remove_all(tmp);
+  writeFile(tmp, "lib/m.pkn",
+            "struct S { x: int; }\nenum E { X }\nclass K {}\n");
+  auto main = writeFile(tmp, "main.pkn", R"(import lib::m;
+class A : m::S {}
+class B : m::E {}
+class D : m::K {}
+fn main() -> int { d = D(); return 0; }
+)");
+  auto r = semaCheckFile(main, tmp);
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(diagSummary(r.Diagnostics),
+            "main.pkn:2:1: error: superclass 'm::S' of class 'A' is a struct, "
+            "not a class\n"
+            "main.pkn:3:1: error: superclass 'm::E' of class 'B' is an enum, "
+            "not a class\n");
+  std::filesystem::remove_all(tmp);
+}
+
 // Only the type's module declares its conformances.
 TEST(Module, ReimplementImportedConformanceErr) {
   auto tmp = (paykan::test::tempDir() / "pkn_ms_hashable_reimpl").string();

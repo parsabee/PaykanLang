@@ -654,7 +654,7 @@ Point(x: 4, y: 2) 6 True
 |-------|---------|
 | No fields | `struct A { }` |
 | Private member used outside the struct | `p.__n` or `p.__m()` outside the struct's methods: `'__n' is private to 'P': it is reachable only from its own methods` |
-| Superclass | `struct A : B { ... }` |
+| Superclass | `struct A : B { ... }`; a struct named as a class's superclass, `class C : A {}`: `superclass 'A' of class 'C' is a struct, not a class` |
 | Method in the body | `struct A { x: int; fn f() {} }` |
 | Duplicate field | `struct A { x: int; x: int; }` |
 | Field named like a type | `struct A { u8: int; }` or `struct A { Str: int; }`, with or without an `__init__`: `'u8' is a type name and cannot be used as a field name` |
