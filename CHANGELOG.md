@@ -1256,6 +1256,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     conversions redesign, and `65520` for `f16`), and one below the type's range is 0 or a
     subnormal of its sign, with no error (`h: f16 = 1e-9;` is `0`), where a `float`
     literal that rounds to zero (`1e-400`) is one.
+  - A tuple index on an optional tuple said the tuple was none: `t: (int, int)? = (1, 2);
+    return t.0;` was `tuple index '.0' applied to non-tuple type '(int, int)?'`, and
+    destructuring it, `a, b = t;`, `only tuples can be destructured`.  Both are now the
+    error every other use of an optional gives, `cannot use optional '(int, int)?' as
+    '(int, int)' without unwrapping (use match)` (docs/language/12-optionals.md,
+    "Semantic Checks").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

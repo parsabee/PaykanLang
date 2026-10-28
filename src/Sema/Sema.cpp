@@ -3223,6 +3223,12 @@ ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
                 "': a struct's fields are named (" + fields + ")");
     return nullptr;
   }
+  // An element cannot be read through an optional tuple (it may be None).
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy);
+      ot && ast::isa<ast::TupleType>(ot->getInnerType())) {
+    S.errorOptionalUnwrap(node->getLocation(), ot);
+    return nullptr;
+  }
   auto *tt = ast::dyn_cast<ast::TupleType>(recvTy);
   if (!tt) {
     S.error(node->getLocation(),
@@ -3298,6 +3304,12 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
   if (!valTy)
     return bindTargetsAfterError();
 
+  // Nor is an optional tuple destructured.
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(valTy);
+      ot && ast::isa<ast::TupleType>(ot->getInnerType())) {
+    errorOptionalUnwrap(node->getValue()->getLocation(), ot);
+    return bindTargetsAfterError();
+  }
   auto *tt = ast::dyn_cast<ast::TupleType>(valTy);
   if (!tt || ast::isa<ast::StructType>(valTy)) {
     error(node->getValue()->getLocation(),

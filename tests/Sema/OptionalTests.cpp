@@ -233,6 +233,29 @@ TEST(Optional, UnaryOnOptionalIsError) {
               "cannot use optional 'Str?' as 'Str'");
 }
 
+// An optional tuple's elements are read once it is unwrapped: a tuple index
+// on it, or destructuring it, says so (it said "non-tuple type"), once.  An
+// optional of anything else is still no tuple.
+TEST(Optional, TupleIndexOnOptionalTupleIsError) {
+  const char *unwrap = "cannot use optional '(int, int)?' as '(int, int)' "
+                       "without unwrapping (use match)";
+  for (const char *body : {"t: (int, int)? = (1, 2); x = t.0;",
+                           "t: (int, int)? = (1, 2); x = t.5;",
+                           "u: ((int, int)?, int) = ((1, 2), 3); x = u.0.1;",
+                           "t: (int, int)? = (1, 2); a, b = t;"}) {
+    auto r = semaCheck(withNode(body));
+    EXPECT_FALSE(r.Ok) << body;
+    EXPECT_NE(r.Diagnostics.find(unwrap), std::string::npos) << body << "\n"
+                                                             << r.Diagnostics;
+    EXPECT_EQ(r.ErrorCount, 1u) << body << "\n" << r.Diagnostics;
+  }
+  expectError(withNode(R"(s: Str? = "a"; x = s.0;)"),
+              "tuple index '.0' applied to non-tuple type 'Str?'");
+  expectOk(withNode("t: (int, int)? = (1, 2);\n"
+                    "match t { p: (int, int) { a, b = p; x = p.1 + a; } "
+                    "None { } }"));
+}
+
 // ─── equality ───────────────────────────────────────────────────────────────
 
 TEST(Optional, CompareAgainstNone) {
