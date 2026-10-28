@@ -1612,6 +1612,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     one file's for another's (chunk C moved `ModuleTests.cpp`'s, whose count was left
     unassigned that way). `ImportTypeTests.cpp`, `OptionalTests.cpp` and `TupleTests.cpp`
     define theirs in an anonymous namespace too.
+  - The language reference did not say that a native function's integer result crosses
+    as an `int64_t` whatever its Paykan type, so a C function returning a C `int` bound as
+    it is (`native fn rand() -> int = "rand";`) read the undefined upper half of the
+    register. docs/language/03-functions.md ("Native Functions") says so now, and shows
+    the wrapper returning an `int64_t` to bind instead (KF-9). Mapping `i32` and `u32`
+    natives to `int32_t` and `uint32_t` is left for a later release (OD-17).
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

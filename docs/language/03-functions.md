@@ -1118,6 +1118,21 @@ argument of a [generic native function](#generic-native-functions): `native fn
 f(t: view (int, int))` is an error (`parameter 't' of type '(int, int)' cannot
 cross into C`), and so is `native fn g(p: view Point)` for a struct `Point`.
 
+An integer crosses as an `int64_t`, whatever its Paykan type, so a native
+function returning `int`, `i32` or `u8` is bound to a C function that returns
+an `int64_t`.  A C function that returns a C `int`, such as the C library's
+`rand`, cannot be bound as it is: the upper 32 bits of what it returns are not
+defined, so `native fn rand() -> int = "rand";` can read a wrong number.  Wrap
+it in a C function that returns an `int64_t`, and bind that one
+(`native fn rand() -> int = "paykan_rand";`):
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+
+int64_t paykan_rand(void) { return rand(); }
+```
+
 The result can be a `view` of a `view` or `inout` parameter (`-> view T`);
 it is returned owned, like a copy.  A native function cannot be a method,
 cannot return `inout`, and cannot be `main`.
