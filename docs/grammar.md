@@ -725,11 +725,16 @@ has given more than that.  A module file is held to the same size
 Instantiations of generic classes, structs, enums and functions nest at
 most 16 deep (`instantiating 'X' exceeds the maximum instantiation depth
 (16)`), and one requested inside an instantiation of its own template,
-directly or through other templates, with its type arguments nested more
-deeply than that one's, has a name of at most 4,096 characters as
-diagnostics spell it (`C<(int, int)>`).  A template that instantiates
-itself with an ever-growing argument, `class C<T> { v: T; n: C<(T, T,
-T)>?; }`, stops where the name passes the limit, at
+directly or through other templates, that grows its type arguments from
+that one's has a name of at most 4,096 characters as diagnostics spell it
+(`C<(int, int)>`).  It grows them when one of its arguments holds one of
+that instantiation's, nested more deeply, and coming back the same way
+would deepen it again: `C<(T, T)>` in `C<T>`, or `P<B, (A, A)>` in `P<A,
+B>`.  What an argument holds is followed through the type arguments
+written at each request on the way (`X<T>` holds `T`, `L0<int>` nothing);
+an inferred one (`Box(x)`, `f(x)`) may hold any.  A template that
+instantiates itself with an ever-growing argument, `class C<T> { v: T; n:
+C<(T, T, T)>?; }`, stops where the name passes the limit, at
 `instantiating 'C<((((((int, int, int), (int, int, int), (int, int, int)),
 (...' inside an instantiation of 'C' exceeds the maximum instantiation name
 length (4096 characters; this one has 4374); a generic class may not
@@ -737,8 +742,10 @@ instantiate itself with an ever-growing type argument`, the name cut to its
 first 60 characters ([Generics](language/13-generics.md#how-errors-are-reported)).
 Different templates instantiating one another are held to the depth only,
 so their names may be longer, and so is a template instantiating itself
-with its arguments swapped or repeated (`Pair<B, A>` or `Pair<A, A>` in
-`impl Pair<A, B>`), which grows nothing.
+with arguments that do not grow: swapped or repeated (`Pair<B, A>` or
+`Pair<A, A>` in `impl Pair<A, B>`), grown from one it keeps (`Pair<A, (A,
+A)>`, whose own is itself), or holding none of its own (an `X<…>` reached
+from `X<int>` through a field `L0<int>`).
 
 A chain of more than 2048 links is rejected with `nesting too deep (more
 than 2048 levels)` by every frontend, for the same reason. Each binary

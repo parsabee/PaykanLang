@@ -442,7 +442,8 @@ bool Sema::holdsStruct(const ast::Type *ty, const ast::StructType *target,
 
 ast::StructType *Sema::instantiateStruct(const std::string &name,
                                          const std::vector<ast::Type *> &args,
-                                         ast::SourceLocation loc) {
+                                         ast::SourceLocation loc,
+                                         const ast::ASTNode *written) {
   auto tIt = StructTemplates.find(name);
   if (tIt == StructTemplates.end()) {
     // Only resolveType and resolveGenericCall come here, with a template.
@@ -517,7 +518,8 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     StructInstantiations[instName] = nullptr;
     return nullptr;
   }
-  if (!checkGrowingInstantiation(tmpl, instName, loc)) {
+  const std::vector<uint64_t> *argParams = writtenArgParams(written);
+  if (!checkGrowingInstantiation(tmpl, instName, argParams, loc)) {
     StructInstantiations[instName] = nullptr;
     return nullptr;
   }
@@ -528,6 +530,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::StructDecl *clone = cloner.cloneStructDecl(tmpl, instName);
   std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
   if (auto it = TemplateImpls.find(tmpl); it != TemplateImpls.end())
@@ -536,6 +539,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
       for (size_t i = 0; i < args.size(); ++i)
         s[*im->getTypeParams()[i]] = args[i];
       ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
+      c.recordTypeArgs(WrittenTypeArgs, im->getTypeParams(), instName);
       impls.push_back(c.cloneImplDecl(im, instName));
       noteImplTypeParams(im, impls.back());
     }
@@ -543,7 +547,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
-  const InstantiatingTemplate self{tmpl, &clone->getName()};
+  const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
   InstantiatingTemplates.push_back(self);
   OriginSource inOrigin(*this, origin);
 
@@ -602,7 +606,8 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
 
 ast::EnumType *Sema::instantiateEnum(const std::string &name,
                                      const std::vector<ast::Type *> &args,
-                                     ast::SourceLocation loc) {
+                                     ast::SourceLocation loc,
+                                     const ast::ASTNode *written) {
   auto tIt = EnumTemplates.find(name);
   if (tIt == EnumTemplates.end()) {
     // Only resolveType and a variant of a template come here, with one.
@@ -664,7 +669,8 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
     EnumInstantiations[instName] = nullptr;
     return nullptr;
   }
-  if (!checkGrowingInstantiation(tmpl, instName, loc)) {
+  const std::vector<uint64_t> *argParams = writtenArgParams(written);
+  if (!checkGrowingInstantiation(tmpl, instName, argParams, loc)) {
     EnumInstantiations[instName] = nullptr;
     return nullptr;
   }
@@ -673,12 +679,13 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::EnumDecl *clone = cloner.cloneEnumDecl(tmpl, instName);
 
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
-  InstantiatingTemplates.push_back({tmpl, &clone->getName()});
+  InstantiatingTemplates.push_back({tmpl, &clone->getName(), argParams});
   OriginSource inOrigin(*this, origin);
 
   // Cached before the fields are resolved: a field naming this very

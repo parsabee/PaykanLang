@@ -421,6 +421,62 @@ Type *ASTCloner::named(Type *ty, const std::string &name) {
   return Ctx.make<ClassType>(ty->getLocation(), in(spelled), nullptr);
 }
 
+void ASTCloner::recordTypeArgs(WrittenTypeArgMap &out,
+                               const std::vector<const std::string *> &params,
+                               const std::string &copy) {
+  if (params.size() > 64)
+    return;
+  Written = &out;
+  WrittenParams = params;
+  WrittenCopy = &in(copy);
+}
+
+uint64_t ASTCloner::paramsNamed(const Type *ty) const {
+  // As cloneType substitutes them.
+  if (!ty)
+    return 0;
+  if (const auto *ct = dyn_cast<ClassType>(ty)) {
+    for (size_t i = 0; i < WrittenParams.size(); ++i)
+      if (*WrittenParams[i] == ct->getName())
+        return uint64_t{1} << i;
+    return 0;
+  }
+  if (const auto *at = dyn_cast<ArrayType>(ty))
+    return paramsNamed(at->getElementType());
+  if (const auto *ft = dyn_cast<FixedArrayType>(ty))
+    return paramsNamed(ft->getElementType());
+  if (const auto *ot = dyn_cast<OptionalType>(ty))
+    return paramsNamed(ot->getInnerType());
+  uint64_t named = 0;
+  if (const auto *gt = dyn_cast<GenericType>(ty)) {
+    for (const Type *a : gt->getArgs())
+      named |= paramsNamed(a);
+  } else if (isa<StructType>(ty)) {
+    return 0; // named, not built from its fields
+  } else if (const auto *tt = dyn_cast<TupleType>(ty)) {
+    for (const Type *e : tt->getElementTypes())
+      named |= paramsNamed(e);
+  } else if (const auto *fnt = dyn_cast<FunctionType>(ty)) {
+    for (const Type *p : fnt->getParamTypes())
+      named |= paramsNamed(p);
+    named |= paramsNamed(fnt->getReturnType());
+  }
+  return named;
+}
+
+void ASTCloner::noteTypeArgs(const ASTNode *node,
+                             const std::vector<Type *> &args) {
+  if (!Written || args.empty())
+    return;
+  WrittenTypeArgs written{WrittenCopy, {}};
+  written.Params.reserve(args.size());
+  for (const Type *a : args)
+    written.Params.push_back(paramsNamed(a));
+  // A GenericType that names none is shared by every copy (cloneType),
+  // and names none in each: the first copy's entry stands.
+  Written->try_emplace(node, std::move(written));
+}
+
 Type *ASTCloner::cloneType(Type *ty) {
   if (!ty)
     return nullptr;
@@ -458,9 +514,11 @@ Type *ASTCloner::cloneType(Type *ty) {
       changed |= c != a;
       args.push_back(c);
     }
-    if (!changed)
-      return ty;
-    return Ctx.make<GenericType>(gt->getLocation(), in(name), std::move(args));
+    Type *copy = changed ? Ctx.make<GenericType>(gt->getLocation(), in(name),
+                                                 std::move(args))
+                         : ty;
+    noteTypeArgs(copy, gt->getArgs());
+    return copy;
   }
   if (auto *ot = dyn_cast<OptionalType>(ty)) {
     Type *inner = cloneType(ot->getInnerType());
@@ -591,8 +649,11 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     for (auto *t : c->getTypeArgs())
       typeArgs.push_back(cloneType(t));
     const std::string &callee = c->getCalleeName();
-    return Ctx.make<CallExpr>(loc, in(Names ? Names->callee(callee) : callee),
-                              std::move(args), std::move(typeArgs));
+    auto *copy =
+        Ctx.make<CallExpr>(loc, in(Names ? Names->callee(callee) : callee),
+                           std::move(args), std::move(typeArgs));
+    noteTypeArgs(copy, c->getTypeArgs());
+    return copy;
   }
   case ASTNode::NK_TernaryExpr: {
     auto *t = cast<TernaryExpr>(e);
@@ -618,8 +679,10 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
     const std::string spelled = !Names              ? en
                                 : ev->hasTypeArgs() ? Names->generic(en)
                                                     : Names->type(en);
-    return Ctx.make<EnumValueExpr>(loc, in(spelled), in(ev->getVariantName()),
-                                   std::move(typeArgs));
+    auto *copy = Ctx.make<EnumValueExpr>(
+        loc, in(spelled), in(ev->getVariantName()), std::move(typeArgs));
+    noteTypeArgs(copy, ev->getTypeArgs());
+    return copy;
   }
   case ASTNode::NK_TupleLiteralExpr: {
     auto *t = cast<TupleLiteralExpr>(e);

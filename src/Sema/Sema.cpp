@@ -916,10 +916,10 @@ ast::Type *Sema::resolveType(ast::Type *ty, ast::SourceLocation loc,
       args.push_back(arg);
     }
     if (StructTemplates.count(gt->getName()))
-      return instantiateStruct(gt->getName(), args, loc);
+      return instantiateStruct(gt->getName(), args, loc, gt);
     if (EnumTemplates.count(gt->getName()))
-      return instantiateEnum(gt->getName(), args, loc);
-    return instantiateClass(gt->getName(), args, loc);
+      return instantiateEnum(gt->getName(), args, loc, gt);
+    return instantiateClass(gt->getName(), args, loc, gt);
   }
 
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(ty)) {
@@ -1717,7 +1717,7 @@ ast::EnumType *Sema::ExprChecker::genericVariantEnum(
         return nullptr;
       typeArgs.push_back(t);
     }
-    return S.instantiateEnum(tmplName, typeArgs, loc);
+    return S.instantiateEnum(tmplName, typeArgs, loc, node);
   }
   // The slot's: `m: Maybe<int> = Maybe::Nothing` (or a `Maybe<int>?`).
   if (auto *ot =

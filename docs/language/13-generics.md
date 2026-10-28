@@ -563,19 +563,28 @@ ever-growing argument (`inner: Bad<Bad<T>>`) stops with "exceeds the maximum
 instantiation depth (16)". An argument that grows faster, as a tuple of two or
 three of the last one (`n: C<(T, T, T)>?`), stops sooner: an instantiation
 requested inside an instantiation of its own template, directly or through
-other templates, a method's body or a function's included, with its type
-arguments nested more deeply than that one's, has a name of at most 4,096
-characters, and the one that passes it is "exceeds the maximum instantiation
-name length (4096 characters; this one has 4374)", the name cut to its first
-60 characters ([the limits](../grammar.md#9-diagnostics-and-recovery)).
+other templates, a method's body or a function's included, that grows its
+type arguments from that one's has a name of at most 4,096 characters, and the
+one that passes it is "exceeds the maximum instantiation name length (4096
+characters; this one has 4374)", the name cut to its first 60 characters
+([the limits](../grammar.md#9-diagnostics-and-recovery)). It grows them when
+one of its arguments holds one of that instantiation's, nested more deeply,
+and coming back the same way would deepen it again: `C<(T, T)>` in `C<T>`,
+`P<B, (A, A)>` in `P<A, B>`. What an argument holds is followed through the
+type arguments written at each request on the way (`X<T>` holds `T`,
+`L0<int>` nothing); an inferred one (`Box(x)`, `f(x)`) may hold any, so a
+finite program that comes back through an inferred call still stops there.
 Templates that instantiate one another without returning to one are held to
 the depth only: ten classes each holding the next with a tuple of three of
 their argument (`class L0<T> { v: T; n: L1<(T, T, T)>?; }`, and so on) are
 accepted, the last name 354,296 characters long. So is a template that
-instantiates itself with its arguments swapped or repeated, however long they
-are: `fn swap() -> Pair<B, A>` and `fn dup() -> Pair<A, A>` in `impl Pair<A, B>`
-nest them no deeper, and the `Pair<B, A>` of a `Pair<B, A>` is the first one
-again.
+instantiates itself with arguments that do not grow, however long they are:
+`fn swap() -> Pair<B, A>` and `fn dup() -> Pair<A, A>` in `impl Pair<A, B>`
+nest them no deeper (the `Pair<B, A>` of a `Pair<B, A>` is the first one
+again), the `Pair<A, (A, A)>` of `fn grow() -> Pair<A, (A, A)>` is itself, and
+`class X<T> { c: L0<int>?; }`, with the chain's last class holding an `X<T>`,
+comes back to `X` with an argument that holds none of `X<int>`'s, whose own
+`L0<int>` is the first one.
 
 A type parameter used as a `match` arm (`T { … }`) is substituted first and then
 follows the ordinary arm rules, so in an instantiation with `T = int` the arm is
@@ -685,7 +694,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
 | Inference failure / ambiguity | see [Inference](#inference) |
 | Instantiation depth exceeded | self-instantiation with a growing argument, 17 deep: `instantiating 'Bad<…>' exceeds the maximum instantiation depth (16); a generic class may not instantiate itself with an ever-growing type argument` |
-| Instantiation name too long | an instantiation inside one of its own template's, with its type arguments nested more deeply, and a name over 4,096 characters, `n: C<(T, T, T)>?`: `instantiating 'C<((((((int, …' inside an instantiation of 'C' exceeds the maximum instantiation name length (4096 characters; this one has 4374); a generic class may not instantiate itself with an ever-growing type argument` |
+| Instantiation name too long | an instantiation inside one of its own template's that grows its type arguments from that one's, and a name over 4,096 characters, `n: C<(T, T, T)>?`: `instantiating 'C<((((((int, …' inside an instantiation of 'C' exceeds the maximum instantiation name length (4096 characters; this one has 4374); a generic class may not instantiate itself with an ever-growing type argument` |
 | Instantiation name clash | this module's `Box<Str>` and an imported template's (also one a library's private template makes, `::collections`' `_Node<int>`), or an imported class `Box<int>`: one error, at this module's own instantiation, with notes at the other template's declaration and instantiation, or at the import |
 
 ## Not Supported Yet

@@ -554,7 +554,9 @@ TEST(Generics, InstantiationDepthGuard) {
 // ever-growing argument, stops once the name passes 4,096 characters: at
 // arity 3 that ran for more than 5 minutes, at arity 2 the depth limit
 // came first, with 900 KB of names in its notes.  One that instantiates
-// itself with its arguments swapped or repeated grows nothing.
+// itself with its arguments swapped or repeated grows nothing, nor does one
+// whose deeper arguments it does not take back, or does not hold: a finite
+// program that comes back to `X` through `L0<int>` was the name error.
 TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
   std::string chain;
   for (int k = 0; k < 10; ++k)
@@ -620,6 +622,41 @@ TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
                 "class L7<T> { v: T; p: Pair<T, int>?; }\n"
                 "fn main() -> int { let c = L0<int>(1, None); return c.v; }\n");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // Back in its own template through a request that holds none of its
+  // type arguments, `L0<int>` in a field or a method's body: the `X<…>`
+  // the chain asks for (13,122 characters) asks for the same `L0<int>`.
+  const std::string toX = chain8 + "class L7<T> { v: T; x: X<T>?; }\n";
+  const std::string xs[] = {
+      "class X<T> { v: T; c: L0<int>?; }\n"
+      "fn main() -> int { let a = X<int>(1, None); return a.v; }\n",
+      "class X<T> { v: T; }\n"
+      "impl X<T> {\n"
+      "  view fn probe() -> int { let c = L0<int>(1, None); return c.v; }\n"
+      "}\n"
+      "fn main() -> int { let a = X<int>(1); return a.probe(); }\n"};
+  for (const std::string &x : xs) {
+    r = semaCheck(x + toX);
+    EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  }
+  // Nor through one that holds only the arguments it passes on as they
+  // are: `Y<A, B>` takes its `T` back, and its `U` from `M0<T, int>`.
+  std::string pairs;
+  for (int k = 0; k < 7; ++k)
+    pairs += "class M" + std::to_string(k) + "<A, B> { v: A; n: M" +
+             std::to_string(k + 1) + "<A, (B, B, B)>?; }\n";
+  r = semaCheck(pairs + "class Y<T, U> { v: T; c: M0<T, int>?; }\n"
+                        "class M7<A, B> { v: A; y: Y<A, B>?; }\n"
+                        "fn main() -> int { let y = Y<int, int>(1, None); "
+                        "return y.v; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  // Nor with an argument grown from one it keeps: the `Q<A, (A, A)>` of a
+  // `Q<A, (A, A)>` is itself.
+  r = semaCheck("class Q<A, B> { a: A; b: B; }\n"
+                "impl Q<A, B> { fn grow() -> Q<A, (A, A)> "
+                "{ return Q<A, (A, A)>(self.a, (self.a, self.a)); } }\n"
+                "fn main() -> int { let q: Q<(" +
+                ints + "), bool>? = None; return 0; }\n");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
 
   const std::string limit =
       "' exceeds the maximum instantiation name length (4096 characters; "
@@ -665,6 +702,14 @@ TEST(Generics, AnEverGrowingInstantiationStopsAtItsNameLength) {
        "fn main() -> int { let e = E<int>::Leaf(1); return 0; }\n",
        "' inside an instantiation of 'E" + limit +
            "4374); a generic enum may not"},
+      // Grown in one argument and taken back into the other.
+      {"class P<A, B> { a: A; b: B; }\n"
+       "impl P<A, B> { fn grow() -> P<B, (A, A, A)> "
+       "{ return P<B, (A, A, A)>(self.b, (self.a, self.a, self.a)); } }\n"
+       "fn main() -> int { let p: P<int, bool>? = None; return 0; }\n",
+       "2:16: error: instantiating 'P<(((((bool, bool, bool), (bool, bool, "
+       "bool), (bool, bool, b...' inside an instantiation of 'P" +
+           limit + "6074); a generic class"},
       // A function type's arrow closes nothing.
       {"class C<T> { v: T; n: C<(T) -> T>?; }\n"
        "fn main() -> int { let s = C<int>(1, None); return 0; }\n",

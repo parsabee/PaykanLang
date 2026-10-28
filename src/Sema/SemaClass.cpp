@@ -1654,33 +1654,152 @@ std::string Sema::instanceNameOf(const ast::Decl *tmpl, const std::string &name,
                 : instantiationName(name, args);
 }
 
+/// How many type parameters template @p tmpl declares.
+static size_t typeParamCount(const ast::Decl *tmpl) {
+  if (const auto *fn = ast::dyn_cast<ast::FuncDecl>(tmpl))
+    return fn->getTypeParams().size();
+  if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
+    return cd->getTypeParams().size();
+  if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
+    return sd->getTypeParams().size();
+  return ast::cast<ast::EnumDecl>(tmpl)->getTypeParams().size();
+}
+
+const std::vector<uint64_t> *
+Sema::writtenArgParams(const ast::ASTNode *written) const {
+  auto it = written ? WrittenTypeArgs.find(written) : WrittenTypeArgs.end();
+  if (it == WrittenTypeArgs.end())
+    return nullptr;
+  const ast::WrittenTypeArgs &w = it->second;
+  // Written with no type parameter (`L0<int>`), it names the same types
+  // wherever it is; with one, the parameters are its copy's, which must be
+  // the instantiation it is requested in.
+  if (std::all_of(w.Params.begin(), w.Params.end(),
+                  [](uint64_t p) { return p == 0; }) ||
+      (!InstantiatingTemplates.empty() &&
+       InstantiatingTemplates.back().Name == w.Copy))
+    return &w.Params;
+  return nullptr;
+}
+
 // static
-size_t Sema::argumentNesting(const std::string &name) {
+std::vector<size_t> Sema::argumentNestings(const std::string &name) {
+  std::vector<size_t> nestings;
+  const size_t args = name.find('<');
+  if (args == std::string::npos)
+    return nestings;
   size_t open = 0;
   size_t most = 0;
-  for (size_t i = 0; i < name.size(); ++i) {
+  // Up to the `>` that closes the arguments, the name's last character.
+  for (size_t i = args + 1; i + 1 < name.size(); ++i) {
     const char c = name[i];
-    if (c == '(' || c == '<')
+    if (c == '(' || c == '<') {
       most = std::max(most, ++open);
-    else if (c == ')' || (c == '>' && (i == 0 || name[i - 1] != '-')))
+    } else if (c == ')' || (c == '>' && name[i - 1] != '-')) {
       --open; // a function type's `->` closes nothing
+    } else if (c == ',' && open == 0) {
+      nestings.push_back(most);
+      most = 0;
+    }
   }
-  return most;
+  nestings.push_back(most);
+  return nestings;
+}
+
+bool Sema::argumentsGrow(size_t anchor, const std::string &instName,
+                         const std::vector<uint64_t> *argParams) const {
+  const std::vector<size_t> was =
+      argumentNestings(*InstantiatingTemplates[anchor].Name);
+  const std::vector<size_t> now = argumentNestings(instName);
+  const size_t n = now.size();
+  const size_t deepest =
+      was.empty() ? 0 : *std::max_element(was.begin(), was.end());
+  if (was.size() != n || n > 64)
+    return std::any_of(now.begin(), now.end(),
+                       [&](size_t d) { return d > deepest; });
+  // Which of the anchor's arguments each argument of the instantiations
+  // after it, and then of this one, holds: Known, through arguments
+  // written with the type parameters of the one before; Unknown, through
+  // one that was not (inferred, say), which may hold any of them.
+  struct Held {
+    uint64_t Known;
+    uint64_t Unknown;
+  };
+  const uint64_t all = n == 64 ? ~uint64_t{0} : (uint64_t{1} << n) - 1;
+  std::vector<Held> held(n);
+  for (size_t p = 0; p < n; ++p)
+    held[p] = {uint64_t{1} << p, 0};
+  auto pass = [&](const std::vector<uint64_t> *params, size_t count) {
+    std::vector<Held> next(count, Held{0, all});
+    if (params && params->size() == count)
+      for (size_t i = 0; i < count; ++i) {
+        next[i] = {0, 0};
+        for (size_t p = 0; p < held.size() && p < 64; ++p)
+          if ((*params)[i] >> p & 1) {
+            next[i].Known |= held[p].Known;
+            next[i].Unknown |= held[p].Unknown;
+          }
+      }
+    held = std::move(next);
+  };
+  for (size_t k = anchor + 1; k < InstantiatingTemplates.size(); ++k)
+    pass(InstantiatingTemplates[k].ArgParams,
+         typeParamCount(InstantiatingTemplates[k].Template));
+  pass(argParams, n);
+  // Argument p of the anchor goes into argument i of this one, and grew on
+  // the way when i is nested more deeply: than p, when i holds p as
+  // written, which puts p inside it; than every argument, when it may.
+  std::vector<uint64_t> into(n, 0);
+  std::vector<uint64_t> grew(n, 0);
+  for (size_t i = 0; i < n; ++i)
+    for (size_t p = 0; p < n; ++p) {
+      const bool known = held[i].Known >> p & 1;
+      const bool unknown = held[i].Unknown >> p & 1;
+      if (!known && !unknown)
+        continue;
+      into[p] |= uint64_t{1} << i;
+      if ((known && now[i] > was[p]) || (unknown && now[i] > deepest))
+        grew[p] |= uint64_t{1} << i;
+    }
+  // It grows ever when what grew goes back to where it came from: `C<(T,
+  // T)>` in `C<T>`, or `P<B, (A, A)>` in `P<A, B>`, but not `P<A, (A, A)>`,
+  // whose own is itself.  reach[i]: the arguments i goes into, at once or
+  // through others.
+  std::vector<uint64_t> reach = into;
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (size_t i = 0; i < n; ++i) {
+      uint64_t r = reach[i];
+      for (size_t j = 0; j < n; ++j)
+        if (reach[i] >> j & 1)
+          r |= reach[j];
+      changed |= r != reach[i];
+      reach[i] = r;
+    }
+  }
+  for (size_t p = 0; p < n; ++p)
+    for (size_t i = 0; i < n; ++i)
+      if ((grew[p] >> i & 1) && (i == p || (reach[i] >> p & 1)))
+        return true;
+  return false;
 }
 
 bool Sema::checkGrowingInstantiation(const ast::Decl *tmpl,
                                      const std::string &instName,
+                                     const std::vector<uint64_t> *argParams,
                                      ast::SourceLocation loc) {
   if (instName.size() <= kMaxGrowingInstantiationName)
     return true;
   auto inner = std::find_if(
       InstantiatingTemplates.rbegin(), InstantiatingTemplates.rend(),
       [&](const InstantiatingTemplate &t) { return t.Template == tmpl; });
-  // Not inside one of its own, or with its arguments rearranged, not
-  // grown: `Pair<B, A>` inside `Pair<A, B>`, whose own `Pair<B, A>` is the
-  // first again.
+  // Not inside one of its own, or not growing from it: its arguments
+  // rearranged (`Pair<B, A>` inside `Pair<A, B>`, whose own `Pair<B, A>`
+  // is the first again), or made of none of its (an `X<…>` reached from
+  // `X<int>` through `L0<int>`).
   if (inner == InstantiatingTemplates.rend() ||
-      argumentNesting(instName) <= argumentNesting(*inner->Name))
+      !argumentsGrow(InstantiatingTemplates.rend() - inner - 1, instName,
+                     argParams))
     return true;
   const std::string shown = displayName(instName);
   if (shown.size() <= kMaxGrowingInstantiationName)
@@ -1799,7 +1918,8 @@ void Sema::reportInstantiationClash(const ast::Decl *tmpl,
 
 ast::ClassType *Sema::instantiateClass(const std::string &name,
                                        const std::vector<ast::Type *> &args,
-                                       ast::SourceLocation loc) {
+                                       ast::SourceLocation loc,
+                                       const ast::ASTNode *written) {
   auto tIt = ClassTemplates.find(name);
   if (tIt == ClassTemplates.end()) {
     if (ErroneousNames.count(name) || isFailedImportUse(name))
@@ -1897,7 +2017,8 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     ClassInstantiations[instName] = nullptr;
     return nullptr;
   }
-  if (!checkGrowingInstantiation(tmpl, instName, loc)) {
+  const std::vector<uint64_t> *argParams = writtenArgParams(written);
+  if (!checkGrowingInstantiation(tmpl, instName, argParams, loc)) {
     ClassInstantiations[instName] = nullptr;
     return nullptr;
   }
@@ -1907,6 +2028,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::ClassDecl *clone = cloner.cloneClassDecl(tmpl, instName);
   // And its `impl` blocks, each by its own names for the type parameters.
   std::vector<ast::ImplDecl *> &impls = ImplsByClass[instName];
@@ -1916,6 +2038,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
       for (size_t i = 0; i < args.size(); ++i)
         s[*im->getTypeParams()[i]] = args[i];
       ast::ASTCloner c(Ctx, std::move(s), nullptr, origin != nullptr);
+      c.recordTypeArgs(WrittenTypeArgs, im->getTypeParams(), instName);
       impls.push_back(c.cloneImplDecl(im, instName));
       noteImplTypeParams(im, impls.back());
     }
@@ -1923,7 +2046,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
   const InstantiationFrame request = frameAt(instName, loc);
   recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
-  const InstantiatingTemplate self{tmpl, &clone->getName()};
+  const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
   InstantiatingTemplates.push_back(self);
   OriginSource inOrigin(*this, origin);
   bool ok = true;
@@ -2068,7 +2191,8 @@ void Sema::declareInstantiationStatics(const std::string &instName,
 
 std::string Sema::instantiateFunction(const std::string &name,
                                       const std::vector<ast::Type *> &args,
-                                      ast::SourceLocation loc) {
+                                      ast::SourceLocation loc,
+                                      const ast::ASTNode *written) {
   auto tIt = FuncTemplates.find(name);
   if (tIt == FuncTemplates.end()) {
     if (ErroneousNames.count(name) || isFailedImportUse(name))
@@ -2129,7 +2253,8 @@ std::string Sema::instantiateFunction(const std::string &name,
     FuncInstantiations[instName] = false;
     return "";
   }
-  if (!checkGrowingInstantiation(tmpl, instName, loc)) {
+  const std::vector<uint64_t> *argParams = writtenArgParams(written);
+  if (!checkGrowingInstantiation(tmpl, instName, argParams, loc)) {
     FuncInstantiations[instName] = false;
     return "";
   }
@@ -2138,6 +2263,7 @@ std::string Sema::instantiateFunction(const std::string &name,
   for (size_t i = 0; i < args.size(); ++i)
     subst[*tmpl->getTypeParams()[i]] = args[i];
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
+  cloner.recordTypeArgs(WrittenTypeArgs, tmpl->getTypeParams(), instName);
   ast::FuncDecl *clone = cloner.cloneFuncDecl(tmpl, instName);
   clone->setTypeArgs(args);
   if (tmpl->isNative()) {
@@ -2157,7 +2283,7 @@ std::string Sema::instantiateFunction(const std::string &name,
 
   const InstantiationFrame request = frameAt(instName, loc);
   InstantiationStack.push_back(request);
-  const InstantiatingTemplate self{tmpl, &clone->getName()};
+  const InstantiatingTemplate self{tmpl, &clone->getName(), argParams};
   InstantiatingTemplates.push_back(self);
   bool ok;
   {
@@ -2401,6 +2527,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
   const ast::SourceLocation loc = node->getLocation();
 
   // Explicit type arguments (`first<int>(xs)`) resolve like any annotation.
+  const ast::ASTNode *written = node->hasTypeArgs() ? node : nullptr;
   std::vector<ast::Type *> typeArgs;
   for (size_t i = 0; i < node->getTypeArgs().size(); ++i) {
     auto *t = resolveType(node->getTypeArgs()[i], loc,
@@ -2456,7 +2583,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
       if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
         return false;
     }
-    auto *ct = instantiateClass(callee, typeArgs, loc);
+    auto *ct = instantiateClass(callee, typeArgs, loc, written);
     if (!ct)
       return false;
     node->setCalleeName(ct->getName()); // interned by the ASTContext
@@ -2489,7 +2616,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
       if (!inferTypeArgs(callee, *params, paramTypes, argTypes, loc, typeArgs))
         return false;
     }
-    auto *st = instantiateStruct(callee, typeArgs, loc);
+    auto *st = instantiateStruct(callee, typeArgs, loc, written);
     if (!st)
       return false;
     node->setCalleeName(st->getName()); // interned by the ASTContext
@@ -2508,7 +2635,7 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
                          result ? here(tmpl, result) : nullptr, expected))
         return false;
     }
-    std::string inst = instantiateFunction(callee, typeArgs, loc);
+    std::string inst = instantiateFunction(callee, typeArgs, loc, written);
     if (inst.empty())
       return false;
     node->setCalleeName(Ctx.intern(inst));
@@ -2532,12 +2659,12 @@ bool Sema::resolveGenericCall(ast::CallExpr *node,
     }
     std::string instName;
     if (isClass) {
-      auto *ct = instantiateClass(owner, typeArgs, loc);
+      auto *ct = instantiateClass(owner, typeArgs, loc, node);
       if (!ct)
         return false;
       instName = ct->getName();
     } else {
-      auto *st = instantiateStruct(owner, typeArgs, loc);
+      auto *st = instantiateStruct(owner, typeArgs, loc, node);
       if (!st)
         return false;
       instName = st->getName();

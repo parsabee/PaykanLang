@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "ASTClone.h"
 #include "ASTContext.h"
 #include "ASTVisitor.h"
 #include "DiagEngine.h"
@@ -1745,10 +1746,12 @@ private:
   /// Instantiate struct template @p name with canonical @p args, or return
   /// the cached instantiation.  Registers the struct (stub, fields, `impl`
   /// methods, constructor) immediately and queues its bodies.  Returns
-  /// nullptr after reporting an error.
+  /// nullptr after reporting an error.  @p written is the type application
+  /// whose written arguments @p args are (writtenArgParams), if any.
   ast::StructType *instantiateStruct(const std::string &name,
                                      const std::vector<ast::Type *> &args,
-                                     ast::SourceLocation loc);
+                                     ast::SourceLocation loc,
+                                     const ast::ASTNode *written = nullptr);
   /// Whether a value of @p ty holds a @p target in place: it is one, or a
   /// tuple or a struct holding one.
   static bool holdsStruct(const ast::Type *ty, const ast::StructType *target);
@@ -1787,10 +1790,11 @@ private:
   /// Instantiate enum template @p name with canonical @p args, or return
   /// the cached instantiation.  Registers the enum and its variants' fields
   /// (the structs `Maybe<int>::Just`) immediately.  Returns nullptr after
-  /// reporting an error.
+  /// reporting an error.  @p written as for instantiateStruct.
   ast::EnumType *instantiateEnum(const std::string &name,
                                  const std::vector<ast::Type *> &args,
-                                 ast::SourceLocation loc);
+                                 ast::SourceLocation loc,
+                                 const ast::ASTNode *written = nullptr);
   /// The module's own instantiations, in creation order: they join the
   /// module's enums (injectInstantiations), which its interface exports.
   std::vector<ast::EnumDecl *> InstantiatedEnumDecls;
@@ -2013,6 +2017,11 @@ private:
   struct InstantiatingTemplate {
     const ast::Decl *Template;
     const std::string *Name;
+    /// Which type parameters of the instantiation before it, the one it was
+    /// requested in, each of its type arguments names as written at the
+    /// request (writtenArgParams); null when that is not known: inferred,
+    /// or asked for from elsewhere.
+    const std::vector<uint64_t> *ArgParams;
   };
   /// Instantiations whose bodies still have to be checked.
   struct PendingInstantiation {
@@ -2161,7 +2170,7 @@ private:
   std::vector<PendingTraitImpl> PendingTraitImpls;
   static constexpr size_t kMaxInstantiationDepth = 16;
   /// The longest name an instantiation made inside an instantiation of its
-  /// own template, with type arguments nested more deeply than that one's,
+  /// own template that would make it again with ever deeper type arguments
   /// may have, as diagnostics spell it (OD-2): a longer one is the
   /// ever-growing type argument the depth limit is for, stopped before the
   /// names grow to 2^16 or 3^16 types (SW-04).
@@ -2170,19 +2179,37 @@ private:
   /// first: those being declared or populated, and, in an instantiation's
   /// body, the ones it was requested inside (PendingInstantiation::Templates).
   std::vector<InstantiatingTemplate> InstantiatingTemplates;
-  /// How deeply the instantiation name @p name nests its type arguments:
-  /// the most parentheses and angle brackets open at once.  Instantiating
-  /// a template with its arguments swapped or repeated (`Pair<B, A>`,
-  /// `Pair<A, A>`) keeps it; an argument built from them (`C<(T, T)>`)
-  /// adds to it.
-  static size_t argumentNesting(const std::string &name);
+  /// Which type parameters the type arguments written in the copies of
+  /// the instantiations name (ASTCloner::recordTypeArgs).
+  ast::WrittenTypeArgMap WrittenTypeArgs;
+  /// Which type parameters of the innermost instantiation in progress the
+  /// type arguments of @p written, the type application a request was
+  /// written as, name: null when not known (no type application, or one
+  /// of another copy's that names a type parameter).
+  const std::vector<uint64_t> *
+  writtenArgParams(const ast::ASTNode *written) const;
+  /// How deeply each type argument of the instantiation name @p name nests
+  /// its types: the most parentheses and angle brackets open at once in
+  /// it.  An argument built from another (`(T, T)` of `T`) nests it once
+  /// more.
+  static std::vector<size_t> argumentNestings(const std::string &name);
+  /// Whether the instantiation @p instName, of the template of
+  /// InstantiatingTemplates[@p anchor] and requested with @p argParams
+  /// (writtenArgParams) inside it, would make it ever again with deeper
+  /// type arguments: one of its arguments holds one of that instantiation's
+  /// nested more deeply, and, through the arguments the instantiations
+  /// between pass on, goes back to where it was taken from.  By the same
+  /// way from @p instName, it deepens again.
+  bool argumentsGrow(size_t anchor, const std::string &instName,
+                     const std::vector<uint64_t> *argParams) const;
   /// False, after reporting it, when the instantiation @p instName of
-  /// @p tmpl, requested at @p loc inside an instantiation of @p tmpl
-  /// (InstantiatingTemplates, the innermost one), nests its type arguments
-  /// more deeply than that one and has a name over
-  /// kMaxGrowingInstantiationName characters.
+  /// @p tmpl, requested at @p loc with @p argParams inside an
+  /// instantiation of @p tmpl (InstantiatingTemplates, the innermost one),
+  /// grows its type arguments from that one's (argumentsGrow) and has a
+  /// name over kMaxGrowingInstantiationName characters.
   bool checkGrowingInstantiation(const ast::Decl *tmpl,
                                  const std::string &instName,
+                                 const std::vector<uint64_t> *argParams,
                                  ast::SourceLocation loc);
 
   /// Type parameter names of the instantiation whose body or declarations
@@ -2321,17 +2348,19 @@ private:
   /// Instantiate class template @p name with canonical @p args, or return the
   /// cached instantiation.  Registers the class (stub, fields, methods,
   /// constructor) immediately and queues its bodies.  Returns nullptr after
-  /// reporting an error.
+  /// reporting an error.  @p written as for instantiateStruct.
   ast::ClassType *instantiateClass(const std::string &name,
                                    const std::vector<ast::Type *> &args,
-                                   ast::SourceLocation loc);
+                                   ast::SourceLocation loc,
+                                   const ast::ASTNode *written = nullptr);
 
   /// Instantiate function template @p name with canonical @p args, or return
   /// the cached instantiation.  Returns the instantiation's function name, or
-  /// "" after reporting an error.
+  /// "" after reporting an error.  @p written as for instantiateStruct.
   std::string instantiateFunction(const std::string &name,
                                   const std::vector<ast::Type *> &args,
-                                  ast::SourceLocation loc);
+                                  ast::SourceLocation loc,
+                                  const ast::ASTNode *written = nullptr);
 
   /// Names of the module's own concrete classes (set by
   /// registerGenericTemplates) and of every class whose fields and method
