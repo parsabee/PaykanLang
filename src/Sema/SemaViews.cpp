@@ -18,6 +18,8 @@
 #include "Names.h"
 #include "Sema.h"
 
+#include <algorithm>
+
 namespace paykan {
 namespace sema {
 
