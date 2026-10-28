@@ -76,7 +76,7 @@ fn main() -> int {
   io::println("=== Str var per iteration (scope cleanup) ===");
   k: int = 0;
   while k < 3 {
-    label: Str = "iter-" + Str<int>(k);
+    let label: Str = "iter-" + Str<int>(k);
     io::println(label);
     k = k + 1;
   }

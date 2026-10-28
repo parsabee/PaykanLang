@@ -47,7 +47,7 @@ fn main() -> int {
   show(make(False));           // none — call temporary, no box to release
   show(make(True));            // 1 — call temporary released at match.end
   io::println(make(False));        // None — printed as the None singleton
-  head: Node = Node(10);
+  let head: Node = Node(10);
   head.next = Node(11);        // field owns the temporary
   head.next = None;            // releases Node(11)
   xs: Node?[3] = [None, Node(20), None];

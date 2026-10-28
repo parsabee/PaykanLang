@@ -127,8 +127,8 @@ fn keep(b: Big, k: int) -> Big {
 }
 
 fn main() -> int {
-  shapes = [Shape::Circle("c" + "1", "t"), Shape::Empty, Shape::Square("s", 2),
-      Shape::Label("x", "y", "z")];
+  let shapes = [Shape::Circle("c" + "1", "t"), Shape::Empty,
+      Shape::Square("s", 2), Shape::Label("x", "y", "z")];
   for i in 0..4 {
     io::println(pick(big("q", shapes[i]), 5));
   }
@@ -139,10 +139,10 @@ fn main() -> int {
   line += " " + pick(big("e", Shape::Empty), 4);
   line += " " + pick(big("v", Shape::Label("f", "g", "h")), 5);
   io::println(line);
-  w = Wide("a", "b", "c", "d", "e");
-  b = Box(Shape::Circle("u", "v"), w);
+  let w = Wide("a", "b", "c", "d", "e");
+  let b = Box(Shape::Circle("u", "v"), w);
   io::println(describe(b.shape) + " " + b.wide.e);
-  kept = keep(big("m", Shape::Label("p", "q", "r")), 5);
+  let kept = keep(big("m", Shape::Label("p", "q", "r")), 5);
   io::println(kept.w.p.a + " " + pick(kept, 5));
   h = Holder(Shape::Label("p", "q", "r"), 1);
   h.s = Shape::Square("t", 3);

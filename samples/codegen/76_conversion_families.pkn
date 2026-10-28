@@ -27,15 +27,15 @@ fn code(c: char) -> u8 {
 
 fn main() -> int {
   // The signed family: wrapping, exact, truncating, 1 or 0, a byte code.
-  b: u8 = 200;
-  w: u32 = 4294967295;
-  k: f32 = -2.75;
+  let b: u8 = 200;
+  let w: u32 = 4294967295;
+  let k: f32 = -2.75;
   io::println(Str(i8(300)) + " " + Str(i16(b)) + " " + Str(int(w)) + " "
       + Str(i32(w)) + " " + Str(i8(k)) + " " + Str(int(True)) + " "
       + Str(i8(char(233))));
 
   // The unsigned family: the low bits, 1 or 0, a byte code.
-  u = unsigned(-1);
+  let u = unsigned(-1);
   io::println(Str(u) + " " + Str(u8(u)) + " " + Str(u16(i8(-1))) + " "
       + Str(unsigned('A')) + " " + Str(u32(False)) + " " + Str(code('z')));
 
@@ -48,12 +48,12 @@ fn main() -> int {
       + Str(char(b - 135)) + Str(char(i32(66))) + Str(char(unsigned(67))));
 
   // A type from itself is the value.
-  n = -7;
+  let n = -7;
   io::println(Str(int(n)) + " " + Str(u8(b)) + " " + Str(float(2.5)) + " "
       + Str(char('x')) + " " + Str(bool(False)));
 
   // An unsigned's value as an int?, and the rewrites of the pairs left out.
-  big = u / 2 + 1;
+  let big = u / 2 + 1;
   io::println(Str(i32(u32(u))) + " " + unsigned(41).toInt().toString() + " "
       + big.toInt().toString() + " " + Str(unsigned(int(2.9))) + " "
       + Str(u8(int(255.5))));
@@ -63,8 +63,8 @@ fn main() -> int {
   }
 
   // An f32 of an int beyond 2^53 is rounded once.
-  m = 1152921573326323713;
-  x: f32 = 1152921573326323713;
+  let m = 1152921573326323713;
+  let x: f32 = 1152921573326323713;
   io::println(Str(int(f32(m))) + " " + Str(int(f32(1152921573326323713))) + " "
       + Str(int(x)) + " " + Str(f32(m) == x));
   return 0;

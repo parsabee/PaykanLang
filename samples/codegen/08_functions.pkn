@@ -95,7 +95,7 @@ fn fib(n: int) -> int {
 }
 fn gcd(a: int, b: int) -> int {
   while b != 0 {
-    tmp: int = b;
+    let tmp: int = b;
     b = a % b;
     a = tmp;
   }

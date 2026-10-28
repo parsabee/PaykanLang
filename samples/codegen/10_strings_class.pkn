@@ -47,36 +47,36 @@ fn main() -> int {
   io::println(s);               // hi!!!
 
   io::println("=== implicit Str decl from function call ===");
-  implicit_s = shprintln("bye");
+  let implicit_s = shprintln("bye");
   io::println(implicit_s);      // bye!!!
 
   io::println("=== Str rebind from ternary (no double-box) ===");
-  flag: bool = True;
+  let flag: bool = True;
   s = if flag then "yes" else "no";
   io::println(s);               // yes
   s = if !flag then "yes" else "no";
   io::println(s);               // no
 
   io::println("=== method: length() ===");
-  t: Str = "hello";
-  n: int = t.len();
+  let t: Str = "hello";
+  let n: int = t.len();
   io::println(Str<int>(n));    // 5
-  empty: Str = "";
+  let empty: Str = "";
   io::println(Str(empty.len()));  // 0
 
   io::println("=== method: concat() (in-place mutation) ===");
-  a: Str = "hello";
-  b: Str = " world";
+  let a: Str = "hello";
+  let b: Str = " world";
   a.concat(b);
   io::println(a);               // hello world
   // concat more
-  a2: Str = "hello";
+  let a2: Str = "hello";
   a2.concat(" !!");
   io::println(a2);              // hello !!
 
   io::println("=== method: toString() (class-typed return) ===");
-  e: Str = "paykan";
-  f: Str = e.toString();
+  let e: Str = "paykan";
+  let f: Str = e.toString();
   io::println(f);               // paykan
 
   io::println("=== string + operator ===");
@@ -86,15 +86,15 @@ fn main() -> int {
   io::println(g);               // abcdefabcdef
 
   io::println("=== Str<int> / Str<float> / Str<bool> builtins ===");
-  si: Str = Str<int>(255);
-  sf: Str = Str(3.14);
-  sb: Str = Str<bool>(True);
+  let si: Str = Str<int>(255);
+  let sf: Str = Str(3.14);
+  let sb: Str = Str<bool>(True);
   io::println(si);              // 255
   io::println(sf);              // 3.14
   io::println(sb);              // True
 
   io::println("=== Str passed to function ===");
-  base: Str = "hi";
+  let base: Str = "hi";
   io::println(shprintln(base));     // hi!!!
   io::println(repeat("ab", 4)); // abababab
 
@@ -103,27 +103,27 @@ fn main() -> int {
   io::println(longerOf("equal!", "equal!"));  // equal!
 
   io::println("=== many Str vars same scope (stress refcount) ===");
-  v0: Str = "s0";
-  v1: Str = "s1";
-  v2: Str = "s2";
-  v3: Str = "s3";
-  v4: Str = "s4";
+  let v0: Str = "s0";
+  let v1: Str = "s1";
+  let v2: Str = "s2";
+  let v3: Str = "s3";
+  let v4: Str = "s4";
   io::println(v0 + v1 + v2 + v3 + v4);   // s0s1s2s3s4
 
   io::println("=== Str vars in loop (scope cleanup per iteration) ===");
   i: int = 0;
   while i < 4 {
-    label: Str = "item-" + Str(i);
+    let label: Str = "item-" + Str(i);
     io::println(label);
     i = i + 1;
   }
 
   io::println("=== Str var in if/else branches ===");
   if True {
-    branch: Str = "true-branch";
+    let branch: Str = "true-branch";
     io::println(branch);
   } else {
-    branch: Str = "false-branch";
+    let branch: Str = "false-branch";
     io::println(branch);
   }
 

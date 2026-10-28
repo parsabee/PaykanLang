@@ -46,8 +46,8 @@ fn main() -> int {
       + describe("True"));
 
   // Parsing settings by key.
-  keys: Str[5] = ["retries", "ratio", "verbose", "color", "depth"];
-  vals: Str[5] = ["3", "0.75", "False", "yes", "deep"];
+  let keys: Str[5] = ["retries", "ratio", "verbose", "color", "depth"];
+  let vals: Str[5] = ["3", "0.75", "False", "yes", "deep"];
   line = "";
   valid = 0;
   k = 0;
@@ -97,7 +97,7 @@ fn main() -> int {
     }
   }
   out = "round trip:";
-  flags: bool[2] = [True, False];
+  let flags: bool[2] = [True, False];
   j = 0;
   while j < flags.len() {
     match Str(flags[j]).toBool() {
@@ -112,7 +112,7 @@ fn main() -> int {
   io::println(out);
 
   // A failed parse is None.
-  missing: int? = "4 2".toInt();
+  let missing: int? = "4 2".toInt();
   io::println(missing);
   io::println("".toBool());
   return 0;

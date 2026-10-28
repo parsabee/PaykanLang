@@ -87,19 +87,19 @@ fn describe(o: Obj) -> Str {
 }
 
 fn main() -> int {
-  bi: Box<int> = Box<int>(3);                 // explicit type argument
+  let bi: Box<int> = Box<int>(3);             // explicit type argument
   io::println(Str(bi.get()));                  // 3
-  bs = Box<Str>("hello");
+  let bs = Box<Str>("hello");
   bs.set("world");
   io::println(bs.get());                          // world
 
-  p: Pair<Str, int> = Pair<Str, int>("age", 42);
+  let p: Pair<Str, int> = Pair<Str, int>("age", 42);
   io::println(p.key() + "=" + Str<int>(p.value()));  // age=42
 
-  bb: Box<Box<int>> = Box<Box<int>>(bi);      // nested instantiation
+  let bb: Box<Box<int>> = Box<Box<int>>(bi);  // nested instantiation
   io::println(Str(bb.get().get()));            // 3
 
-  s: Stack<Str> = Stack<Str>("");
+  let s: Stack<Str> = Stack<Str>("");
   s.push("a");
   s.push("b");
   while !s.empty() {
@@ -110,13 +110,13 @@ fn main() -> int {
   io::println(first<Str>(["x", "y"]));            // x    (explicit)
   io::println(Str(unbox(Box<int>(7))));        // 7    (T inferred through Box<T>)
 
-  inferred = Box(5);                          // constructor-argument inference
+  let inferred = Box(5);                      // constructor-argument inference
   io::println(Str<int>(inferred.get()));            // 5
 
-  h: Holder = Holder(40);                     // instantiation as a field type
+  let h: Holder = Holder(40);                 // instantiation as a field type
   io::println(Str(h.get().get() + 2));         // 42
 
-  arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
+  let arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
   io::println(Str<int>(arr[1].get()));              // 2
 
   io::println(describe(bi));                      // Box<int> holding 3
@@ -126,7 +126,7 @@ fn main() -> int {
   io::println(Str(bi == Box<int>(3)));        // True  (== dispatches to equals)
   io::println(Str<bool>(bi == Box<int>(4)));  // False
 
-  shared: Box<int> = bi;                      // shares the box
+  let shared: Box<int> = bi;                  // shares the box
   io::println(Str(shared.get()));               // 3
   return 0;
 }

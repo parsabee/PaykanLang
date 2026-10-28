@@ -34,7 +34,7 @@ fn codes(s: Str, from: int, to: int) -> Str {
 }
 
 fn main() -> int {
-  s =
+  let s =
     "\\ \"quoted\" \0 \t tab \n é ü ? ' ??= end xxxxxxxxxxxxxxxxxxxxxxxxx"
     "01abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     "02abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

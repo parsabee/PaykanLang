@@ -24,29 +24,29 @@ fn main() -> int {
 
   io::println("=== short-circuit && ===");
   // The side effect counter verifies RHS is skipped when LHS is False.
-  counter: int = 0;
-  flag: bool = False && (counter == 0);  // RHS never executed
+  let counter: int = 0;
+  let flag: bool = False && (counter == 0);  // RHS never executed
   io::println("F&&(c==0)=" + Str(flag));   // False
   // counter stays 0 whether or not RHS ran (no side-effect possible in
   // this language without a call), but the path still exercises the
   // correct codegen branch structure.
 
   io::println("=== short-circuit || ===");
-  flag2: bool = True || False;           // RHS skipped
+  let flag2: bool = True || False;       // RHS skipped
   io::println("T||F=" + Str<bool>(flag2));  // True
 
   io::println("=== precedence && before || ===");
   // && binds tighter than ||
-  a: bool = True || False && False;     // True || (False && False) = True || F = True
-  b: bool = False && True || True;      // (False && True) || True = False || True = True
-  c: bool = False && True || False;     // (False && True) || False = False
+  let a: bool = True || False && False; // True || (False && False) = True || F = True
+  let b: bool = False && True || True;  // (False && True) || True = False || True = True
+  let c: bool = False && True || False; // (False && True) || False = False
   io::println("T||F&&F=" + Str(a));      // True
   io::println("F&&T||T=" + Str<bool>(b));  // True
   io::println("F&&T||F=" + Str(c));      // False
 
   io::println("=== unary negation (int) ===");
-  x: int = 5;
-  neg_x: int = 0 - x;
+  let x: int = 5;
+  let neg_x: int = 0 - x;
   io::println("-5=" + Str<int>(neg_x));   // -5
   io::println("-(3+2)=" + Str(0 - (3 + 2)));  // -5
 
@@ -54,10 +54,10 @@ fn main() -> int {
   io::println("-3.14=" + Str<float>(0.0 - 3.14));  // -3.14
 
   io::println("=== combined ===");
-  v: int = 7;
-  result: bool = v > 0 && v < 10 && v != 5;
+  let v: int = 7;
+  let result: bool = v > 0 && v < 10 && v != 5;
   io::println("7 in (0,10) and !=5:" + Str(result));  // True
-  result2: bool = v < 0 || v > 5 && v < 10;
+  let result2: bool = v < 0 || v > 5 && v < 10;
   io::println("7<0 or in (5,10):" + Str<bool>(result2));  // True
 
   return 0;

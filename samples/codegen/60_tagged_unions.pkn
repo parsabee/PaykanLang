@@ -62,7 +62,7 @@ fn getMyType(k: int) -> MyType {
   }
   b = mem::Buffer<int>();
   for i in 0..k - 1 {
-    e = b.push(i * i);
+    let e = b.push(i * i);
   }
   return MyType::WithStruct(b);
 }
@@ -120,9 +120,9 @@ fn main() -> int {
       + Str(e == MyType::NoElement) + " " + Str(e != getMyType(1)));
 
   // In a struct, a tuple, an optional, a fixed-size array and a List.
-  pin = Pin(Dir::North, MyType::WithPrimitive(1, 0.5), None);
+  let pin = Pin(Dir::North, MyType::WithPrimitive(1, 0.5), None);
   io::println(pin);
-  t = (Dir::South, MyType::NoElement);
+  let t = (Dir::South, MyType::NoElement);
   m: Maybe? = Maybe::Some(2);
   io::print(t.toString() + " " + m.toString() + " ");
   m = None;
@@ -134,13 +134,13 @@ fn main() -> int {
     list.push(xs[i]);
   }
   io::print(Str(list.len()) + " " + list.get(2).toString() + " | ");
-  check = fn() => xs[1] != MyType::NoElement;
+  let check = fn() => xs[1] != MyType::NoElement;
   io::println(if check() then "caught" else "missed");
 
   // Held by an object, and an enum without fields shown by name.
-  h = Holder(MyType::NoElement);
+  let h = Holder(MyType::NoElement);
   h.held = MyType::WithObject(Node(9), "held");
-  d = Dir::West;
+  let d = Dir::West;
   io::println(d.toString() + " " + Dir::East.toString() + " | "
       + h.held.toString());
   return 0;

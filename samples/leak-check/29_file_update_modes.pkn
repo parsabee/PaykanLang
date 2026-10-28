@@ -81,11 +81,11 @@ fn show(path: Str) {
 }
 
 fn main(args: view Str[]) -> int {
-  w = scratchPath(args, "pkn_update_w.txt");
+  let w = scratchPath(args, "pkn_update_w.txt");
   fill(w, "old\n");
   match io::open(w, "w+") {
     o: Ok {
-      f = o.value;
+      let f = o.value;
       io::println("w+ write: " + err::name(f.write("hello\n").code));
       io::println("w+ read: " + text(f.read()));
       io::println("w+ write: " + err::name(f.write("world\n").code));
@@ -95,11 +95,11 @@ fn main(args: view Str[]) -> int {
   }
   show(w);
 
-  r = scratchPath(args, "pkn_update_r.txt");
+  let r = scratchPath(args, "pkn_update_r.txt");
   fill(r, "abcdefgh\nijkl\n");
   match io::open(r, "r+") {
     o: Ok {
-      f = o.value;
+      let f = o.value;
       io::println("r+ write: " + err::name(f.write("XY").code));
       io::println("r+ readbytes: " + text(f.readbytes(2)));
       io::println("r+ write: " + err::name(f.write("Z").code));
@@ -112,11 +112,11 @@ fn main(args: view Str[]) -> int {
   }
   show(r);
 
-  a = scratchPath(args, "pkn_update_a.txt");
+  let a = scratchPath(args, "pkn_update_a.txt");
   fill(a, "abc\n");
   match io::open(a, "a+") {
     o: Ok {
-      f = o.value;
+      let f = o.value;
       io::println("a+ write: " + err::name(f.write("hello\n").code));
       io::println("a+ read: " + text(f.read()));
       io::println("a+ write: " + err::name(f.write("world\n").code));

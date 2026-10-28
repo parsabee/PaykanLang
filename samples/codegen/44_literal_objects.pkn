@@ -43,7 +43,7 @@ fn give() -> Str {
 }
 
 fn main() -> int {
-  c = "ab"[1];
+  let c = "ab"[1];
   io::println("\"ab\"[1]:     " + Str(c));
   letters: Str = "";
   i = 0;
@@ -63,16 +63,16 @@ fn main() -> int {
   io::println("Str<char>:   " + Str<char>("xy"[1]));
   io::println("len:         " + Str<int>("abc".len()));
 
-  v = "lit";
+  let v = "lit";
   io::println("binding:     " + v);
   io::print("println:     ");
   io::println("lit");
   io::println("argument:    " + Str<int>(consume("lit")));
-  s: Str = "typed";
+  let s: Str = "typed";
   io::println("typed:       " + s);
   io::println("concat:      " + ("lit" + "x"));
   io::println("return:      " + give());
-  k = Tagged();
+  let k = Tagged();
   k.name = "k2";
   match k.tag {
     t: Str {
@@ -83,15 +83,15 @@ fn main() -> int {
     }
   }
 
-  t = ("tup", 1);
-  m: (Str, Str) = ("m1", "m2");
+  let t = ("tup", 1);
+  let m: (Str, Str) = ("m1", "m2");
   io::println("tuple:       " + t.0 + " " + m.0 + m.1);
   a: Str[3] = ["x", "y", ""];
   a[0] = "z";
   a[2] = "w";
   io::println("array:       " + a[0] + a[1] + a[2] + " " + ["p", "q"][1]);
-  o: Str? = "opt";
-  o2: Str? = "opt2";
+  let o: Str? = "opt";
+  let o2: Str? = "opt2";
   match o {
     p: Str {
       match o2 {

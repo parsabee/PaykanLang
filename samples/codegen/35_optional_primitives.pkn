@@ -38,7 +38,7 @@ fn digit(c: char) -> int? {
 }
 
 fn digitValue(c: char) -> int {
-  digits: Str = "0123456789";
+  let digits: Str = "0123456789";
   i = 0;
   while i < 10 {
     if digits[i] == c { return i; }
@@ -85,7 +85,7 @@ fn mean(xs: view int[], count: int) -> float? {
 fn firstVowel(s: Str) -> char? {
   i = 0;
   while i < s.len() {
-    c = s[i];
+    let c = s[i];
     if c == 'a' || c == 'e' || c == 'i' || c == 'o' || c == 'u' {
       return c;
     }
@@ -124,8 +124,8 @@ fn main() -> int {
   io::println("parse 4x -> " + show(parse("4x")));
   io::println("parse  -> " + show(parse("")));
 
-  readings = [1, 2, 3, 4];
-  m = mean(readings, readings.len());
+  let readings = [1, 2, 3, 4];
+  let m = mean(readings, readings.len());
   match m {
     f: float {
       io::println("mean -> " + Str(f));
@@ -140,16 +140,16 @@ fn main() -> int {
   io::print("first vowel of 'paykan' -> ");
   io::println(firstVowel("paykan"));
 
-  q = Question("ready?");
+  let q = Question("ready?");
   q.answer = True;
   io::print("answered: ");
   io::println(q.answer);
-  q2 = Question("later?");
+  let q2 = Question("later?");
   io::print("unanswered: ");
   io::println(q2.answer);
 
-  a: int? = 7;
-  b: int? = parse("7");
+  let a: int? = 7;
+  let b: int? = parse("7");
   io::println("equal: " + Str<bool>(a == b));
   io::println("equal to None: " + Str(a == None));
 
@@ -162,7 +162,7 @@ fn main() -> int {
   io::print(" ");
   io::println(sparse[2]);
 
-  p: (int?, Str) = (1, "found");
+  let p: (int?, Str) = (1, "found");
   match p.0 {
     i: int {
       io::println("lookup: " + Str<int>(i) + " " + p.1);
@@ -170,14 +170,14 @@ fn main() -> int {
     None { }
   }
 
-  c = Cache<int>();
-  before = show(c.get());
+  let c = Cache<int>();
+  let before = show(c.get());
   c.put(square(7));
   io::println("cache: " + before + " then " + show(c.get()));
 
   n = 4;
   while n < 6 {
-    e = if n % 2 == 0 then n else None;
+    let e = if n % 2 == 0 then n else None;
     io::print("even? ");
     io::println(e);
     n = n + 1;

@@ -94,17 +94,18 @@ fn half(n: int) -> Maybe<int> {
 }
 
 fn main() -> int {
-  xs = [4, 8, 15, 16, 23, 42];
-  big = find(xs, fn(x: view int) => x > 20);
-  none = find(xs, fn(x: view int) => x > 50);
+  let xs = [4, 8, 15, 16, 23, 42];
+  let big = find(xs, fn(x: view int) => x > 20);
+  let none = find(xs, fn(x: view int) => x > 50);
   io::println(big.toString() + " " + none.toString() + " | "
       + Str(orElse(big, 0)) + " " + Str(orElse(none, -1)));
 
-  fruit = Maybe::Just("fig");
+  let fruit = Maybe::Just("fig");
   io::println(map(fruit, fn(w: view Str) => w.len()).toString() + " "
       + orElse(map(fruit, fn(w: view Str) => w + "!"), "?"));
 
-  quotients: Result<int, Str>[3] = [divide(7, 2), divide(1, 0), Result::Ok(5)];
+  let quotients: Result<int, Str>[3] =
+      [divide(7, 2), divide(1, 0), Result::Ok(5)];
   total = 0;
   for i in 0..3 {
     match quotients[i] {
@@ -113,13 +114,13 @@ fn main() -> int {
     }
   }
 
-  slot = Slot("answer", Maybe::Just(42));
-  reg = Registry(Maybe::Nothing);
+  let slot = Slot("answer", Maybe::Just(42));
+  let reg = Registry(Maybe::Nothing);
   reg.last = map(slot.value, fn(v: view int) => Str(v));
   io::println(slot.toString() + " " + reg.last.toString() + " "
       + Str(reg.last == Maybe::Just("42")));
 
-  l = List::Cons(Cell(1,
+  let l = List::Cons(Cell(1,
       List::Cons(Cell(2, List::Cons(Cell(3, List<int>::Empty))))));
   io::println(Str(sum(l)) + " " + Str(total) + " | " + half(3).toString() + " "
       + half(4).toString());

@@ -28,28 +28,28 @@ fn same(p: (int, float), q: (int, float)) -> bool {
 }
 
 fn main() -> int {
-  nan: float = 0.0 / 0.0;
-  t = (1, nan);
-  u = (1, nan);
-  alias = t;                                   // a copy of t
+  let nan: float = 0.0 / 0.0;
+  let t = (1, nan);
+  let u = (1, nan);
+  let alias = t;                               // a copy of t
   io::println("nan == nan:      " + Str(nan == nan));
   io::println("t == t:          " + Str(t == t));
   io::println("t != t:          " + Str<bool>(t != t));
   io::println("t == u:          " + Str(t == u));
   io::println("alias == t:      " + Str(same(alias, t)));
-  n = ((1, nan), "x");
+  let n = ((1, nan), "x");
   io::println("nested n == n:   " + Str(n == n));
-  o: (int, float?) = (1, nan);
+  let o: (int, float?) = (1, nan);
   io::println("(int, float?):   " + Str(o == o));
-  x: float? = nan;
+  let x: float? = nan;
   io::println("x == x (float?): " + Str(x == x));
   io::println("x != x (float?): " + Str<bool>(x != x));
-  ok = (1, 2.5, "s");
+  let ok = (1, 2.5, "s");
   io::println("ok == ok:        " + Str(ok == ok));
   io::println("ok != ok:        " + Str<bool>(ok != ok));
-  z = (-0.0, 1);
+  let z = (-0.0, 1);
   io::println("(-0.0) == (0.0): " + Str(z == (0.0, 1)));
-  y: float? = 2.5;
+  let y: float? = 2.5;
   io::println("y == y (float?): " + Str(y == y));
   return 0;
 }

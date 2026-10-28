@@ -79,7 +79,7 @@ fn main() -> int {
   // A tree whose children point back at their parent weakly.
   root = Node("root");
   a = Node("a");
-  b = Node("b");
+  let b = Node("b");
   root.add(a);
   a.add(b);
   io::println(b.path());
@@ -107,7 +107,7 @@ fn main() -> int {
   io::println(btn.click());
   btn.wire();
   io::println(btn.click());
-  f = btn.onClick;
+  let f = btn.onClick;
   btn = Button("another");
   io::println(f());
   return 0;

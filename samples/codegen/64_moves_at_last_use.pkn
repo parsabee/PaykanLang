@@ -78,7 +78,7 @@ impl Walker {
 
   /// Notes the current node, then moves on: `self` is used after `note`.
   fn step(next: Node) -> Str {
-    cur = self.at;
+    let cur = self.at;
     self.note(cur);
     return self.at.name + self.go(next);
   }
@@ -91,7 +91,7 @@ fn inner(n: view Node, w: view Watch) -> Str {
 /// A view: what it names lives as long as this function, also after it
 /// passes the view on.
 fn outer(n: view Node, w: view Watch) -> Str {
-  r = inner(n, w);
+  let r = inner(n, w);
   return r + " | back in outer: " + state(w);
 }
 
@@ -113,38 +113,38 @@ fn pass(n: Node) -> Str {
 /// be used: the read takes a reference of its own, so `x`, which also holds
 /// that node, need not keep it alive and is handed on to `name`.
 fn fieldRead() -> Str {
-  sl = Slot(Node("first" + Str(1)));
-  x = sl.node;
-  took = name(x);
-  got = sl.node.name + replace(sl);
+  let sl = Slot(Node("first" + Str(1)));
+  let x = sl.node;
+  let took = name(x);
+  let got = sl.node.name + replace(sl);
   return took + " " + got;
 }
 
 /// A view parameter keeps what it names until its function returns.
 fn viewed() -> Str {
-  q = Node("q");
-  wq = Watch(q);
+  let q = Node("q");
+  let wq = Watch(q);
   return outer(q, wq) + " | after: " + state(wq);
 }
 
 /// A new node, returned from a local.
 fn make(s: Str) -> Node {
-  n = Node(s);
+  let n = Node(s);
   return n;
 }
 
 fn main() -> int {
   // Read afterwards: a copy.  Not read afterwards: handed on.
-  a = Node("a");
-  w = Watch(a);
+  let a = Node("a");
+  let w = Watch(a);
   io::println("kept: " + name(a) + " | " + state(w));
   io::println("handed on: " + name(a) + " | " + state(w));
 
   // One branch hands the variable on; the other releases it at the end of
   // the scope, as before.
   for k in 0..2 {
-    v = Node(if k == 0 then "b" else "c");
-    wv = Watch(v);
+    let v = Node(if k == 0 then "b" else "c");
+    let wv = Watch(v);
     if k == 0 {
       io::print("then: " + name(v));
     } else {
@@ -156,8 +156,8 @@ fn main() -> int {
 
   // Some arms of a match hand it on.
   for k in 0..3 {
-    m = Node(if k == 0 then "d" else if k == 1 then "e" else "f");
-    wm = Watch(m);
+    let m = Node(if k == 0 then "d" else if k == 1 then "e" else "f");
+    let wm = Watch(m);
     out = "";
     match k {
       0 { out = name(m); }
@@ -170,8 +170,8 @@ fn main() -> int {
   io::println("");
 
   // A use inside a loop is a copy: the next iteration reads it again.
-  g = Node("g");
-  wg = Watch(g);
+  let g = Node("g");
+  let wg = Watch(g);
   io::print("loop:");
   for _ in 0..3 {
     io::print(" " + name(g));
@@ -186,40 +186,40 @@ fn main() -> int {
     io::print(" " + name(r));
     r = Node(if i == 0 then "i" else "j");
   }
-  wr = Watch(r);
+  let wr = Watch(r);
   io::println(" " + r.name + " | " + r.name + " " + state(wr));
 
   // f(a, a): the first is a copy, the second the transfer.
-  t = Node("k");
-  wt = Watch(t);
+  let t = Node("k");
+  let wt = Watch(t);
   io::println("twice: " + both(t, t) + " " + state(wt));
 
   // Stored in a field at its last use: the holder holds it now, and it
   // dies when the holder lets go.
-  f = Node("l");
-  wf = Watch(f);
+  let f = Node("l");
+  let wf = Watch(f);
   h = Holder(f);
   io::print("field: " + state(wf));
   h = Holder(None);
   io::println(" | let go: " + state(wf));
 
   // Returned from a local, then dropped at its last use.
-  made = make("m");
-  wmade = Watch(made);
+  let made = make("m");
+  let wmade = Watch(made);
   io::print("returned: " + made.name + " " + state(wmade));
   io::println(" | dropped: " + name(made) + " " + state(wmade));
 
   // `self` is never handed on: the caller's reference keeps it alive.
-  s = Node("n");
-  ws = Watch(s);
+  let s = Node("n");
+  let ws = Watch(s);
   io::print("self: ");
-  back = s.relay();
+  let back = s.relay();
   io::println(back.name + " | " + back.name + " " + state(ws));
 
   // A capture is a copy, even at the variable's last use: dropping the
   // closure leaves the variable's own reference.
-  c = Node("o");
-  wc = Watch(c);
+  let c = Node("o");
+  let wc = Watch(c);
   get = fn() -> Str { return c.name; };
   io::print("captured: " + get());
   get = fn() -> Str { return "none"; };
@@ -229,14 +229,14 @@ fn main() -> int {
   // hand-off keeps every hand-off before it, to the variable's release, a
   // copy.
   io::println("field read: " + fieldRead());
-  wk = Walker(Node("one" + Str(1)), "");
+  let wk = Walker(Node("one" + Str(1)), "");
   io::println("method: " + wk.step(Node("two" + Str(2))) + " | " + wk.log);
   io::println("view: " + viewed());
 
   // A weak local made from the variable itself keeps a hand-off in its
   // scope a copy, read or not: it reads the object until the variable's
   // scope ends.
-  p = Node("p");
+  let p = Node("p");
   weak wp = p;
   io::print("weak local: " + name(p));
   match wp {

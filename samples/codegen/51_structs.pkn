@@ -61,8 +61,8 @@ impl Line {
     self.label = "line";
   }
   view fn length2() -> int {
-    dx = self.b.x - self.a.x;
-    dy = self.b.y - self.a.y;
+    let dx = self.b.x - self.a.x;
+    let dy = self.b.y - self.a.y;
     return dx * dx + dy * dy;
   }
 }
@@ -125,11 +125,11 @@ fn main() -> int {
   l.a.y = 0;                               // a field of a field
   io::println(show(l) + " " + Str(l.length2()));
 
-  s = Shape(Point::origin());
+  let s = Shape(Point::origin());
   s.at.shift(3, 4);
   io::println(s.at.moved(1, 1));
 
-  item = Item("it", Node(1), (7, 8));
+  let item = Item("it", Node(1), (7, 8));
   copy = item;
   copy.name = "copy";                      // copy's own field
   copy.node.n = 2;                         // the shared object
@@ -143,9 +143,9 @@ fn main() -> int {
   normalize(far);                          // the caller's variable, replaced
   io::println(far);
 
-  pair = twice(p);                         // (Point, Point)
-  b = Box(Point(2, 3));
-  t: (Point, Str) = (b.get(), "boxed");
+  let pair = twice(p);                     // (Point, Point)
+  let b = Box(Point(2, 3));
+  let t: (Point, Str) = (b.get(), "boxed");
   io::println(Str(pair.1.sum()) + " " + Str(t.0.y) + " " + t.1 + " "
       + Str(hashOf(p) == Point(6, 2).hash()));
   return p.sum() + ps[2].x;

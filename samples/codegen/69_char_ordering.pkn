@@ -36,7 +36,7 @@ fn below(a: char, b: char) -> bool {
 fn bits(a: char, vs: int[11], op: int) -> Str {
   out = "";
   for i in 0..11 {
-    b = char(vs[i]);
+    let b = char(vs[i]);
     r = a >= b;
     if op == 0 { r = a < b; }
     if op == 1 { r = a <= b; }
@@ -48,21 +48,21 @@ fn bits(a: char, vs: int[11], op: int) -> Str {
 
 fn main() -> int {
   // Every pair of codes on both sides of 128, under each operator.
-  vs: int[11] = [0, 1, 65, 122, 127, 128, 129, 195, 200, 254, 255];
+  let vs: int[11] = [0, 1, 65, 122, 127, 128, 129, 195, 200, 254, 255];
   for i in 0..11 {
-    a = char(vs[i]);
+    let a = char(vs[i]);
     io::println(Str(vs[i]) + " " + bits(a, vs, 0) + " " + bits(a, vs, 1) + " "
         + bits(a, vs, 2) + " " + bits(a, vs, 3));
   }
 
   // The bytes of a string ("é" is C3 A9 in UTF-8), a field and a parameter.
-  e = "é";
-  z = Byte('z');
+  let e = "é";
+  let z = Byte('z');
   io::println(Str(e[0] > z.c) + " " + Str(e[1] > 'z') + " " + Str(e[0] > e[1])
       + " " + Str(below(z.c, e[1])));
 
   // The smallest and the largest byte of a string.
-  s = "aé~" + Str(char(127)) + Str(char(128));
+  let s = "aé~" + Str(char(127)) + Str(char(128));
   lo = s[0];
   hi = s[0];
   for i in 1..s.len() {
@@ -77,7 +77,7 @@ fn main() -> int {
   for i in 1..7 {
     j = i;
     while j > 0 && cs[j] < cs[j - 1] {
-      t = cs[j];
+      let t = cs[j];
       cs[j] = cs[j - 1];
       cs[j - 1] = t;
       j = j - 1;

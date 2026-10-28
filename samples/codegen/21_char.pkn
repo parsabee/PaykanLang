@@ -9,7 +9,7 @@ import ::io;
 
 fn main() -> int {
   // Basic literal and Str<char> conversion
-  c: char = 'A';
+  let c: char = 'A';
   io::println(Str<char>(c));                 // A
 
   // Escape sequences
@@ -18,15 +18,15 @@ fn main() -> int {
   io::println(Str<char>('\n') + "newline after");
 
   // Comparison
-  lo: char = 'a';
-  hi: char = 'z';
+  let lo: char = 'a';
+  let hi: char = 'z';
   if lo < hi { io::println("a < z"); }
   if lo != hi { io::println("a != z"); }
   if lo == lo { io::println("a == a"); }
   if hi > lo { io::println("z > a"); }
 
   // char in a variable used multiple times
-  sep: char = '-';
+  let sep: char = '-';
   io::println(Str(sep) + Str<char>(sep) + Str(sep));  // ---
 
   return 0;

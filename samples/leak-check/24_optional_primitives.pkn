@@ -48,11 +48,11 @@ fn main() -> int {
   a = None;
   io::println(twice(a));
   a = 3;
-  b = a;                       // a copy of the value
+  let b = a;                   // a copy of the value
   a = None;
   io::println(b);
 
-  h = Holder();
+  let h = Holder();
   h.n = 1;
   h.n = 2;
   h.f = 0.5;
@@ -62,11 +62,11 @@ fn main() -> int {
   xs[0] = 5;
   xs[1] = None;
 
-  t: (int?, bool?) = (4, True);
-  c: char? = 'x';
+  let t: (int?, bool?) = (4, True);
+  let c: char? = 'x';
   io::println(c);
 
-  s = Slot<int>();
+  let s = Slot<int>();
   s.set(1);
   s.set(2);
   io::println(s.v);

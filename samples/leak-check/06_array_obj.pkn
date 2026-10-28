@@ -6,6 +6,6 @@
 // released at end of scope).
 
 fn main() -> int {
-  a: Obj[1] = ["x"];
+  let a: Obj[1] = ["x"];
   return 0;
 }

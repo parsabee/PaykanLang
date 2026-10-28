@@ -116,9 +116,9 @@ fn row(name: Str, f: (int) -> int, xs: int[6]) {
 }
 
 fn main() -> int {
-  max = 9223372036854775807;
-  min = -max - 1;
-  xs: int[6] = [max, min, 0, 7, 1, max - 1];
+  let max = 9223372036854775807;
+  let min = -max - 1;
+  let xs: int[6] = [max, min, 0, 7, 1, max - 1];
   row("first", first, xs);
   row("second", second, xs);
   row("last", last, xs);
@@ -126,7 +126,7 @@ fn main() -> int {
   row("noDefault", noDefault, xs);
   row("assigns", assigns, xs);
   row("assignsNoDefault", assignsNoDefault, xs);
-  u: unsigned = 9223372036854775807;
+  let u: unsigned = 9223372036854775807;
   io::println("uns " + Str(uns(u)) + " " + Str(uns(u + 1)) + " " + Str(uns(1))
       + " " + Str(uns(u - 1)));
   io::println("loop " + Str(loop(xs)) + " "

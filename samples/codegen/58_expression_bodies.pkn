@@ -54,17 +54,17 @@ fn main() -> int {
       + " " + Str(doubled(1.5)) + " " + Str(half(9)) + " "
       + V::origin().shifted(5).toString() + " " + Str(V(3, 4).sum()));
 
-  dbl = fn(x: int) -> int => x * 2;
-  triple = fn(x: int) => x * 3;
-  greet = fn(s: view Str) => "hello " + s;
-  bump = fn(x: u8) => x + 10; // a u8 result: 250 + 10 wraps
-  pair = fn(x: int) => (x, Str(x));
-  k = 5;
-  addK = fn(x: int) => x + k;
+  let dbl = fn(x: int) -> int => x * 2;
+  let triple = fn(x: int) => x * 3;
+  let greet = fn(s: view Str) => "hello " + s;
+  let bump = fn(x: u8) => x + 10; // a u8 result: 250 + 10 wraps
+  let pair = fn(x: int) => (x, Str(x));
+  let k = 5;
+  let addK = fn(x: int) => x + k;
   io::println(Str(dbl(4)) + " " + Str(triple(4)) + " " + greet("pat") + " "
       + Str(bump(250)) + " " + pair(7).1 + " " + Str(addK(1)));
 
-  positive = fn(x: int) => if x > 0 then x else None;
+  let positive = fn(x: int) => if x > 0 then x else None;
   shown = "";
   match positive(-1) {
     n: int { shown = Str(n); }
@@ -72,7 +72,7 @@ fn main() -> int {
   }
   fs = c::List<(int) -> int>();
   for i in 0..3 { fs.push(fn(x: int) => x * i); }
-  add = fn(x: int) => fn(y: int) => x + y;
+  let add = fn(x: int) => fn(y: int) => x + y;
   io::println(shown + " " + Str(apply(fn(x: int) => x - 1, 10)) + " "
       + twice(fn(s: view Str) => s + "!", "hi") + " "
       + Str(Counter(100).adder()(1)) + " " + Str(fs.at(2)(10)) + " "

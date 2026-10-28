@@ -6,11 +6,11 @@ import ::io;
 
 fn main() -> int {
   // ---- Integer literals ----------------------------------------------------
-  a: int = 0;
-  b: int = 1;
-  c: int = 42;
-  d: int = 9223372036854775807;   // INT64_MAX
-  neg: int = 0 - 2147483648;     // large negative via unary-minus at runtime
+  let a: int = 0;
+  let b: int = 1;
+  let c: int = 42;
+  let d: int = 9223372036854775807;   // INT64_MAX
+  let neg: int = 0 - 2147483648; // large negative via unary-minus at runtime
   io::println("int 0:    " + Str<int>(a));
   io::println("int 1:    " + Str(b));
   io::println("int 42:   " + Str<int>(c));
@@ -18,18 +18,18 @@ fn main() -> int {
   io::println("neg large:" + Str<int>(neg));
 
   // ---- Float literals -------------------------------------------------------
-  f0: float = 0.0;
-  f1: float = 1.0;
-  pi: float = 3.14159;
-  neg_f: float = 0.0 - 2.718;
+  let f0: float = 0.0;
+  let f1: float = 1.0;
+  let pi: float = 3.14159;
+  let neg_f: float = 0.0 - 2.718;
   io::println("float 0:  " + Str(f0));
   io::println("float 1:  " + Str<float>(f1));
   io::println("pi:       " + Str(pi));
   io::println("neg float:" + Str<float>(neg_f));
 
   // ---- Bool literals --------------------------------------------------------
-  t: bool = True;
-  f: bool = False;
+  let t: bool = True;
+  let f: bool = False;
   io::println("True:     " + Str(t));
   io::println("False:    " + Str<bool>(f));
 
@@ -37,15 +37,15 @@ fn main() -> int {
   // Direct literal passed to println()
   io::println("raw literal");
   // Assigned to a Str variable (exercises VarDecl shared-box path)
-  s: Str = "hello world";
+  let s: Str = "hello world";
   io::println(s);
   // Empty string
-  empty: Str = "";
+  let empty: Str = "";
   io::println("empty='" + empty + "'");
 
   // ---- None literal ---------------------------------------------------------
   // None is an unowned class var; just declaring it must not crash.
-  n: Obj = None;
+  let n: Obj = None;
   io::println("none decl ok");
 
   return 0;

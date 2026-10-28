@@ -23,7 +23,7 @@ fn clamp(v: int, lo: int, hi: int) -> int {
 
 fn gcd(a: int, b: int) -> int {
   while b != 0 {
-    t: int = b;
+    let t: int = b;
     b = a % b;
     a = t;
   }
@@ -112,7 +112,7 @@ fn main() -> int {
 
   // ---------- Relational & logical -----------------------------------------
   io::println("\n--- Relational/Logical ---");
-  x: int = 7;
+  let x: int = 7;
   io::println("7 in [1,10]: " + Str<bool>(x >= 1 && x <= 10));  // True
   io::println("7 prime:     " + Str(isPrime(x)));  // True
   io::println("7 even:      " + Str<bool>(x % 2 == 0));  // False
@@ -120,16 +120,16 @@ fn main() -> int {
 
   // ---------- Float ---------------------------------------------------------
   io::println("\n--- Float ---");
-  pi: float = 3.14159;
+  let pi: float = 3.14159;
   io::println("pi^2=" + Str<float>(fsquare(pi)));  // ~9.8696
   io::println("avg=" + Str(favg(1.0, 3.0)));  // 2
   io::println("0.1+0.2=" + Str<float>(0.1 + 0.2));
 
   // ---------- Ternary -------------------------------------------------------
   io::println("\n--- Ternary ---");
-  grade: int = 83;
-  band: Str = if grade >= 90 then "A" else if grade >= 80 then "B" else if grade
-      >= 70 then "C" else "F";
+  let grade: int = 83;
+  let band: Str = if grade >= 90 then "A" else if grade >= 80 then "B"
+      else if grade >= 70 then "C" else "F";
   io::println("grade 83 -> " + band);   // B
 
   // ---------- Control flow --------------------------------------------------
@@ -158,9 +158,9 @@ fn main() -> int {
 
   // ---------- Str methods & ops --------------------------------------------
   io::println("\n--- Str methods ---");
-  hello: Str = "Hello";
-  world: Str = " World";
-  hw: Str = hello + world;
+  let hello: Str = "Hello";
+  let world: Str = " World";
+  let hw: Str = hello + world;
   io::println(hw);                          // Hello World
   io::println(Str<int>(hw.len()));      // 11
   io::println(hw.toString());               // Hello World
@@ -177,10 +177,10 @@ fn main() -> int {
   io::println("\n--- Scope stress ---");
   j: int = 0;
   while j < 4 {
-    row: Str = "row-" + Str<int>(j);
+    let row: Str = "row-" + Str<int>(j);
     col: int = 0;
     while col < 3 {
-      cell: Str = row + "-" + Str(col);
+      let cell: Str = row + "-" + Str(col);
       io::println(cell);
       col = col + 1;
     }

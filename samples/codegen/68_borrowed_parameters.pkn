@@ -122,30 +122,30 @@ fn keep(h: Holder, n: Node) {
 }
 
 fn handOffs() {
-  a = Node("a");
-  wa = Watcher(a);
+  let a = Node("a");
+  let wa = Watcher(a);
   outer(a, wa);              // a's last use: handed over
   report(wa, "in main, after outer");
 
-  b = Node("b");
-  wb = Watcher(b);
+  let b = Node("b");
+  let wb = Watcher(b);
   rebind(b, wb);
   report(wb, "in main, after rebind");
 
-  c = Node("c");
-  wc = Watcher(c);
-  h = Holder(None);
+  let c = Node("c");
+  let wc = Watcher(c);
+  let h = Holder(None);
   stash(h, c, wc);
   report(wc, "in main, after stash");
 
   // A temporary handed to outer: outer hands it on to inner.
-  wt = Watcher(None);
+  let wt = Watcher(None);
   outer(Node("t"), wt);
 
   // Lent to keep, which retains what it keeps.
-  k = Node("k");
-  wk = Watcher(k);
-  g = Holder(None);
+  let k = Node("k");
+  let wk = Watcher(k);
+  let g = Holder(None);
   keep(g, k);
   label = "";
   match g.n {
@@ -178,11 +178,11 @@ fn nameAndNode(s: Str, n: Node, w: view Watcher) {
 }
 
 fn hazards() {
-  p = Pair(None, "original " + "string");
+  let p = Pair(None, "original " + "string");
   clearThenRead(p.s, p);
 
-  x = Node("x" + "name");
-  wx = Watcher(x);
+  let x = Node("x" + "name");
+  let wx = Watcher(x);
   nameAndNode(x.name, x, wx);   // x's last use
   report(wx, "in main, after nameAndNode");
 }
@@ -236,8 +236,8 @@ fn toNone(n: Node?, w: view Watcher) {
 }
 
 fn writes() {
-  a = Node("a");
-  wa = Watcher(a);
+  let a = Node("a");
+  let wa = Watcher(a);
   io::println("copies:");
   assign(a, wa);
   compound(a.name);
@@ -248,23 +248,23 @@ fn writes() {
   inoutLocal(a, wa);
   io::println("after copies: a is " + state(wa) + ", a = " + a.name);
   io::println("moves:");
-  b = Node("b0");
-  wb = Watcher(b);
+  let b = Node("b0");
+  let wb = Watcher(b);
   assign(b, wb);
-  c = Node("c0");
-  wc = Watcher(c);
+  let c = Node("c0");
+  let wc = Watcher(c);
   viaInout(c, wc);
-  d = Node("d0");
-  wd = Watcher(d);
+  let d = Node("d0");
+  let wd = Watcher(d);
   toNone(d, wd);
-  e = Node("e0");
-  we = Watcher(e);
+  let e = Node("e0");
+  let we = Watcher(e);
   destructure(e, we);
-  f = Node("f0");
-  wf = Watcher(f);
+  let f = Node("f0");
+  let wf = Watcher(f);
   armInout(f, wf);
-  g = Node("g0");
-  wg = Watcher(g);
+  let g = Node("g0");
+  let wg = Watcher(g);
   inoutLocal(g, wg);
   io::println("after moves: " + state(wb) + " " + state(wc) + " " + state(wd)
       + " " + state(we) + " " + state(wf) + " " + state(wg));
@@ -339,23 +339,23 @@ fn gen<T>(m: T, h: Cell) -> T {
 }
 
 fn kinds() {
-  h = Cell(Node("a" + "1"));
+  let h = Cell(Node("a" + "1"));
   direct(h.n, h);
   h.n = Node("a" + "2");
-  b: Base = Derived();
+  let b: Base = Derived();
   b.take(h.n, h);
   h.n = Node("a" + "3");
-  k = Keeper(h.n, h);
+  let k = Keeper(h.n, h);
   h.n = Node("a" + "4");
-  s = S(1);
+  let s = S(1);
   s.meth(h.n, h);
   h.n = Node("a" + "5");
-  f = fn(m: Node) -> Str { h.n = Node("z"); return m.name; };
+  let f = fn(m: Node) -> Str { h.n = Node("z"); return m.name; };
   io::println("icall: " + f(h.n));
   h.n = Node("a" + "6");
   io::println("generic: " + gen(h.n, h).name);
   h.n = Node("a" + "7");
-  c = Child(h);
+  let c = Child(h);
   io::println("kept: " + k.m.name + " " + c.m.name);
 }
 
@@ -403,16 +403,16 @@ fn dropAndRead(n: Node, s: Slot, w: view Watcher) {
 fn movesLent() {
   io::println("nodes: " + Str(count(grow(3))));
 
-  m = Node("m");
-  wm = Watcher(m);
-  s = Slot(m);
+  let m = Node("m");
+  let wm = Watcher(m);
+  let s = Slot(m);
   match s.n {
     x: Node { dropAndRead(x, s, wm); }   // x's last use
     None { }
   }
   report(wm, "after the match");
 
-  t = Node("t");
+  let t = Node("t");
   u = t;
   inner(u);                  // u's last use: t keeps the node
   io::println("t still " + t.name);

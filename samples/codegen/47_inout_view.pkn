@@ -62,7 +62,7 @@ fn bumpTwice(n: inout int) {
 }
 
 fn swap(a: inout int, b: inout int) {
-  t = a;
+  let t = a;
   a = b;
   b = t;
 }
@@ -97,12 +97,12 @@ fn main() -> int {
   io::println("light = " + (if light == Light::Green then "Green" else "?")
       + ", x = " + Str(x));
 
-  stats = Stats();
+  let stats = Stats();
   stats.record(10);
   stats.record(k * 10);
   total = 0;
   start = 3;
-  m = Meter(start);
+  let m = Meter(start);
   m.add(total, 4);
   io::println("hits = " + Str(stats.hits) + ", total = " + Str(total));
 

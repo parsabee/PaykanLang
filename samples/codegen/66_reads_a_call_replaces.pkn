@@ -82,16 +82,16 @@ fn main() -> int {
   arr = [Node("x" + Str(1)), Node("y" + Str(1))];
   io::println("array: " + arr[0].greet(replArray(arr)) + " " + arr[0].name);
 
-  x = Node("old" + Str(1));
+  let x = Node("old" + Str(1));
   io::println("handed on: " + use(x));
 
-  x2 = Node("x" + Str(2));
+  let x2 = Node("x" + Str(2));
   y = x2;
   io::println("moved into: " + y.greet(replNode(y)) + " " + y.name);
 
-  a = "first" + Str(1);
+  let a = "first" + Str(1);
   s2 = a;
-  t = take(a);
+  let t = take(a);
   io::println("shared: " + t + " " + (s2 + repl(s2)) + " " + s2);
   return 0;
 }

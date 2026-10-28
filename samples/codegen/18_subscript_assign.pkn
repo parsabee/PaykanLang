@@ -88,10 +88,10 @@ fn loopOverwrite() -> int {
 
 fn strSubscript() -> int {
   io::println("=== str subscript ===");
-  s: Str = "paykan";
+  let s: Str = "paykan";
   io::println(Str<char>(s[0]));  // p (convert char to Str)
   io::println(Str(s[5]));  // n
-  c: Str = Str<char>(s[3]);  // k (convert char to Str)
+  let c: Str = Str<char>(s[3]);  // k (convert char to Str)
   io::println(c);
   return 0;
 }
@@ -100,8 +100,8 @@ fn strSubscript() -> int {
 
 fn iterString() -> int {
   io::println("=== iter string ===");
-  s: Str = "hello";
-  n: int = s.len();
+  let s: Str = "hello";
+  let n: int = s.len();
   i: int = 0;
   while i < n {
     io::println(Str(s[i]));  // convert char to Str
@@ -114,8 +114,8 @@ fn iterString() -> int {
 
 fn reverseFirstThree() -> int {
   io::println("=== reverse first three ===");
-  s: Str = "abcdef";
-  result: Str = Str<char>(s[2]) + Str(s[1]) + Str<char>(s[0]);
+  let s: Str = "abcdef";
+  let result: Str = Str<char>(s[2]) + Str(s[1]) + Str<char>(s[0]);
   io::println(result);  // cba
   return 0;
 }

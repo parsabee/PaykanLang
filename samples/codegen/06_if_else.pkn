@@ -19,7 +19,7 @@ fn fizzbuzz(n: int) -> Str {
 
 fn main() -> int {
   io::println("=== if no-else ===");
-  x: int = 5;
+  let x: int = 5;
   if x > 0 {
     io::println("positive");   // printed
   }
@@ -36,7 +36,7 @@ fn main() -> int {
   }
 
   io::println("=== if-else-if chain ===");
-  v: int = 42;
+  let v: int = 42;
   if v > 100 {
     io::println("large");
   } elif v > 50 {
@@ -48,8 +48,8 @@ fn main() -> int {
   }
 
   io::println("=== nested if ===");
-  a: int = 3;
-  b: int = 7;
+  let a: int = 3;
+  let b: int = 7;
   if a < b {
     if a > 0 {
       io::println("a: positive and less than b");  // printed
@@ -59,7 +59,7 @@ fn main() -> int {
   }
 
   io::println("=== if with complex condition ===");
-  p: int = 8;
+  let p: int = 8;
   if p > 0 && p % 2 == 0 {
     io::println("even positive");   // printed
   }
@@ -73,19 +73,19 @@ fn main() -> int {
   io::println(Str(sign(0)));     //  0
 
   io::println("=== str vars inside branches (scope cleanup) ===");
-  flag: bool = True;
+  let flag: bool = True;
   if flag {
-    msg: Str = "branch_true";
+    let msg: Str = "branch_true";
     io::println(msg);
   } else {
-    msg: Str = "branch_false";
+    let msg: Str = "branch_false";
     io::println(msg);
   }
   if !flag {
-    msg: Str = "branch_true";
+    let msg: Str = "branch_true";
     io::println(msg);
   } else {
-    msg: Str = "branch_false";
+    let msg: Str = "branch_false";
     io::println(msg);
   }
 

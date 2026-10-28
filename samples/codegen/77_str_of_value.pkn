@@ -51,13 +51,13 @@ fn show<T>(x: T) -> Str {
 
 fn main() -> int {
   // Optionals: "None", or the value's text.
-  o: int? = None;
-  p: int? = 5;
-  s: Str? = "hi";
-  t: Str? = None;
+  let o: int? = None;
+  let p: int? = 5;
+  let s: Str? = "hi";
+  let t: Str? = None;
   io::println(Str(o) + " " + Str(p) + " " + Str(s) + " " + Str(t));
-  a: Point? = Point(1, 2);
-  b: Point? = None;
+  let a: Point? = Point(1, 2);
+  let b: Point? = None;
   io::println(Str(a) + " " + Str(b) + " " + Str<Point>(Point(3, 4)));
 
   // Values held in place: a tuple's elements unquoted, as println prints
@@ -66,8 +66,8 @@ fn main() -> int {
       + Str(Heading::North) + " " + Str(Shape::Circle(1.5)));
 
   // Objects: their toString(), dispatched on what they are.
-  n = Named(5, 6, "n");
-  ob: Obj = Point(7, 8);
+  let n = Named(5, 6, "n");
+  let ob: Obj = Point(7, 8);
   io::println(Str(n) + " " + Str(ob) + " " + Str(None));
 
   // In a generic function, for each type it is instantiated with.
@@ -75,11 +75,11 @@ fn main() -> int {
       + show(o) + " " + show(Shape::Square(2)));
 
   // A Str is itself.
-  word = "same";
+  let word = "same";
   io::println(Str(word) + " " + Str<Str>(word) + " " + Str(Str(word) == word));
 
   // The same text as toString(), and as println prints it.
-  q = Plain(1);
+  let q = Plain(1);
   io::println(Str(Str(q) == q.toString()) + " " + Str(Str(Size(1, 1))
       == Size(1, 1).toString()) + " " + Str(Str(a) == a.toString()));
   return 0;

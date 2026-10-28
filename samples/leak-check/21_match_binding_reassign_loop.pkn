@@ -19,7 +19,7 @@ impl A {
 }
 
 fn main() -> int {
-  o: A? = A(0);
+  let o: A? = A(0);
   match o {
     a: A {
       i: int = 0;

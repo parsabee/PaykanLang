@@ -44,14 +44,14 @@ class H {
 }
 
 fn set(h: H) {
-  d = h.c;
+  let d = h.c;
   d.p = P(7, 8, 9);
 }
 
 fn setEach(hs: H[3]) -> int {
   n = 0;
   for i in 0..3 {
-    d = hs[i].c;
+    let d = hs[i].c;
     d.xs = [i, i, i];
     n = n + d.xs[1];
   }
@@ -96,7 +96,7 @@ struct S {
 enum U { A(c: C, k: int), B(n: int), }
 
 fn viaStructCopy(s: S) -> int {
-  s2 = s;
+  let s2 = s;
   s2.c.p = P(7, 8, 9);
   s2.c.xs = [4, 4, 4];
   return s2.c.p.b;
@@ -129,13 +129,13 @@ fn viaUnionInout(u: inout U) -> int {
 }
 
 fn viaTuple(t: (C, int)) -> int {
-  t2 = t;
+  let t2 = t;
   t2.0.p = P(3, 3, 3);
   return t2.0.p.a;
 }
 
 fn viaArray(arr: C[2]) -> int {
-  b = arr;
+  let b = arr;
   b[0].p = P(2, 2, 2);
   b[1].xs = [2, 2, 2];
   return b[0].p.a + b[1].xs[0];
@@ -152,7 +152,7 @@ fn viaOptStruct(os: S?) -> int {
 }
 
 fn viaClosure(s: S) -> int {
-  k = fn() -> int {
+  let k = fn() -> int {
     s.c.p = P(4, 4, 4);
     return s.c.p.a;
   };
@@ -160,8 +160,8 @@ fn viaClosure(s: S) -> int {
 }
 
 fn viaLocalStruct() -> int {
-  s = S(C(P(1, 1, 1), [1, 1, 1]), 1);
-  t = s;
+  let s = S(C(P(1, 1, 1), [1, 1, 1]), 1);
+  let t = s;
   t.c.p = P(9, 9, 9);
   return t.c.p.a + s.c.p.a;
 }
@@ -188,23 +188,23 @@ fn main() -> int {
   set(h);
   io::println("field: " + Str(h.c.p.b));
   c = h.c;
-  k = fn() { c.p = P(7, 8, 9); c.xs = [7, 8, 9]; };
+  let k = fn() { c.p = P(7, 8, 9); c.xs = [7, 8, 9]; };
   k();
   io::println("capture: " + Str(c.p.b) + " " + Str(c.xs[1]));
-  hs = [h, H(C(P(0, 0, 0), [0, 0, 0]), None), h];
+  let hs = [h, H(C(P(0, 0, 0), [0, 0, 0]), None), h];
   io::println("loop: " + Str(setEach(hs)));
-  none = H(C(P(0, 0, 0), [0, 0, 0]), None);
+  let none = H(C(P(0, 0, 0), [0, 0, 0]), None);
   io::println("optional: " + setOptional(h) + " " + setOptional(none));
   c = C(P(1, 1, 1), [1, 1, 1]);
   viaInout(c);
-  b = c.p.b;
+  let b = c.p.b;
   viaBinding(c);
-  x = c.xs[0];
+  let x = c.xs[0];
   viaRebind(c, C(P(0, 0, 0), [0, 0, 0]));
-  r = c.p.b;
-  f = fn(y: inout C) { d = y; d.p = P(7, 5, 9); };
+  let r = c.p.b;
+  let f = fn(y: inout C) { d = y; d.p = P(7, 5, 9); };
   f(c);
-  l = c.p.b;
+  let l = c.p.b;
   h = H(c, None);
   at: inout = held(h);
   q = at;
@@ -212,7 +212,7 @@ fn main() -> int {
   io::println("inout: " + Str(b) + " " + Str(x) + " " + Str(r) + " " + Str(l)
       + " " + Str(c.p.b));
   io::println("native: " + Str(opened("") == None));
-  s = S(fresh(), 1);
+  let s = S(fresh(), 1);
   u = U::A(fresh(), 1);
   io::println("held: " + Str(viaStructCopy(s)) + " " + Str(viaParam(s)) + " "
       + Str(viaUnion(u)) + " " + Str(viaUnionInout(u)) + " "

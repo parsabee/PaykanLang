@@ -65,11 +65,11 @@ fn main() -> int {
   io::println("Shape: " + err::name(shapes.swap(0, 1).code) + " "
       + shapes.at(0).toString() + " " + shapes.at(1).toString());
 
-  s = "abc";
+  let s = "abc";
   fns = memory::Buffer<() -> int>();
   fns.grow(2);
   fns.set(1, fn() => s.len());
-  f = fns.get(1);
+  let f = fns.get(1);
   io::println("fn: " + copied(fns, 0) + " " + copied(fns, 1) + " "
       + err::name(fns.swap(0, 1).code) + " " + Str(f()));
   fns.set(0, fn() => 4);
@@ -78,9 +78,9 @@ fn main() -> int {
 
   handlers = memory::Buffer<Handler>();
   handlers.grow(1);
-  first = copied(handlers, 0);
+  let first = copied(handlers, 0);
   handlers.set(0, Handler(4, fn() => 12));
-  h = handlers.get(0);
+  let h = handlers.get(0);
   io::println("Handler: " + first + " " + copied(handlers, 0) + " "
       + Str(h.run()));
 

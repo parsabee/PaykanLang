@@ -68,7 +68,7 @@ fn clear(l: List) -> int {
 fn cleared(l: List) -> Str {
   match l.head {
     n: Node {
-      k = clear(l);
+      let k = clear(l);
       return n.name + Str(k);
     }
     None { return "none"; }
@@ -110,7 +110,7 @@ fn swapIn(b: Bag) -> int {
 fn element(b: Bag) -> Str {
   match b.items[0] {
     n: Node {
-      k = swapIn(b);
+      let k = swapIn(b);
       return n.name + Str(k);
     }
     None { return "none"; }
@@ -189,28 +189,28 @@ fn early(a: Node) -> int {
 }
 
 fn main() -> int {
-  b = Node("b", 2, None);
-  wb = Watch(b);
-  a = Node("a", 1, b);
+  let b = Node("b", 2, None);
+  let wb = Watch(b);
+  let a = Node("a", 1, b);
   io::println("no call: " + Str(firstTwo(a)) + " | " + a.name + "'s next "
       + state(wb));
 
-  c = Node("c", 3, None);
-  wc = Watch(c);
-  a1 = Node("a", 1, Node("b", 2, c));
-  wa = Watch(a1);
+  let c = Node("c", 3, None);
+  let wc = Watch(c);
+  let a1 = Node("a", 1, Node("b", 2, c));
+  let wa = Watch(a1);
   io::println("cleared: " + cleared(List(a1)) + " | a " + state(wa) + ", c "
       + state(wc));
 
-  y = Node("y", 2, Node("z", 3, None));
-  wy = Watch(y);
-  x = Node("x", 1, y);
+  let y = Node("y", 2, Node("z", 3, None));
+  let wy = Watch(y);
+  let x = Node("x", 1, y);
   io::println("unlinked: " + unlink(x) + " | list: " + names(x) + " | y "
       + state(wy));
 
-  old = Node("old", 0, None);
-  wo = Watch(old);
-  bag = Bag([old, None]);
+  let old = Node("old", 0, None);
+  let wo = Watch(old);
+  let bag = Bag([old, None]);
   io::println("element: " + element(bag) + " | old " + state(wo) + ", "
       + firstName(bag));
 
@@ -218,18 +218,18 @@ fn main() -> int {
       + Str(iterate(Bag([Node("p", 7, None), Node("q", 9, None)]))));
 
   n = Node("w", 1, None);
-  wn = Watch(n);
+  let wn = Watch(n);
   io::print("weak: " + weakName(wn) + " of " + n.name);
   n = Node("other", 0, None);
   io::println(" | gone: " + weakName(wn) + ", " + n.name);
 
-  list = Node("h", 0, Node("i", 1,
+  let list = Node("h", 0, Node("i", 1,
       Node("j", 2, Node("k", 4, Node("l", 3, Node("m", 5, None))))));
   io::println("walk: " + walk(list));
 
-  e = Node("e", 0, Node("f", 2, None));
-  g = Node("g", 0, Node("h", -1, None));
-  we = Watch(e);
+  let e = Node("e", 0, Node("f", 2, None));
+  let g = Node("g", 0, Node("h", -1, None));
+  let we = Watch(e);
   io::println("early: " + Str(early(e)) + " | " + Str(early(g)) + " | " + e.name
       + " " + state(we));
   return 0;
