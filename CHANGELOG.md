@@ -1004,7 +1004,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     { T = T + 1; return T; }` was an error and `U = 1;` was not).  A template's declarations
     are checked with its own type parameters, not those of a generic body that instantiates
     it: `g<int>(3, 4)` inside `fn outer<T>`, with `fn g<U>(T: int, u: U)`, was `'T' is a
-    type name ...`.
+    type name ...`.  `samples/codegen/89_type_parameter_names.pkn` runs the names these
+    leave free.
 
 ### Removed
 
