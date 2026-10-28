@@ -240,6 +240,7 @@ configure downloads, so results match CI; otherwise they use the tools on the `P
 ```sh
 python3 scripts/clang_format.py --apply          # format the C and C++ sources
 python3 scripts/pkfmt.py --apply                 # format the .pkn sources
+python3 scripts/let_check.py --paykan build/bin/paykan --apply   # `let` for each local never reassigned
 python3 scripts/run_clang_tidy.py --build-dir build   # bug-focused clang-tidy gate
 python3 scripts/coverage.py --build-dir build-cov     # coverage report + floor gate
 python3 scripts/comment_metrics.py               # comment lines per source file
