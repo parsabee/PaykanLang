@@ -1478,6 +1478,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     erroneous is now a follow-on of that error, which is the one reported (the exit status
     is still 1); a mismatch with a type that is not a class is still reported
     (docs/language/05-classes.md, "Semantic Checks").
+  - A clash between two templates' instantiations of one name (type names are global,
+    OD-9 b) was reported where the second was made, so a program's own `_Node<int>`,
+    instantiated before a `collections::Stack<int>`, gave three errors in the library's
+    collections.pkn, one for each use of `_Node<T>` in `LinkedList<int>`,
+    and in the other order one error with no word of the other template.  It is now one
+    error, at the program's own instantiation, `instantiation '_Node<int>' of '_Node'
+    conflicts with the instantiation '_Node<int>' of '::collections::_Node'`, with notes at
+    the other template's declaration and at its instantiation and the requests that led to
+    it, in either order; a later clash of the name is not reported again.  An instantiation
+    clashing with one an import gave the program (`Result<Str, err::Error>` next to
+    `import ::io;`) names its template and has a note at the import it came through, and
+    at the other template's declaration when the program sees it.  docs/stdlib/index.md
+    said a program may declare its own `Result`: it now says that the program's
+    instantiations of it are global too, and lists the names `::collections` reserves,
+    `_Node`, `_Entry`, `_Table`, `_Heap` and `_Pieces` (docs/language/13-generics.md,
+    "Modules" and "Semantic Checks").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

@@ -893,8 +893,9 @@ fn main() -> int { b = Box<int>(1); return 0; }
 )");
   auto r2 = semaCheckFile(p2);
   EXPECT_FALSE(r2.Ok);
-  EXPECT_TRUE(has(r2.Diagnostics, "instantiation 'Box<int>' conflicts with an "
-                                  "imported class of the same name"))
+  EXPECT_TRUE(has(r2.Diagnostics, "instantiation 'Box<int>' of 'Box' "
+                                  "conflicts with an imported class of the "
+                                  "same name"))
       << r2.Diagnostics;
 
   // So would its own `Box<Str>` and the imported template's, either way
@@ -910,10 +911,137 @@ fn main() -> int { b = Box<int>(1); return 0; }
             body + " return 0; }\n"));
     EXPECT_FALSE(r3.Ok) << body;
     EXPECT_EQ(r3.ErrorCount, 1u) << r3.Diagnostics;
-    EXPECT_TRUE(has(r3.Diagnostics, "conflicts with another template's "
-                                    "instantiation of the same name"))
+    EXPECT_TRUE(has(r3.Diagnostics,
+                    "instantiation 'Box<Str>' of 'Box' conflicts with the "
+                    "instantiation 'Box<Str>' of 'lib::gen::Box'"))
         << r3.Diagnostics;
   }
+  std::filesystem::remove_all(dir);
+}
+
+// Instantiation names are global (OD-9 b): a program's own `_Node<int>`
+// clashes with the one `::collections` makes of its private `_Node<T>`, and
+// its own `Result<Str, Error>` with the one `::io` brings in.  The clash is
+// one error, in the program's file, at its own instantiation, with notes at
+// the other template's declaration and at its instantiation and the
+// requests that led there (SW-28).  Base reported it in collections.pkn,
+// the library's file, once per use of `_Node<T>` in LinkedList<int>, when
+// the program's instantiation came first, and with no note at all.
+TEST(Generics, AnInstantiationNamedLikeAnotherTemplatesIsOneError) {
+  auto dir = paykan::test::tempDir() / "pkn_sema_inst_clash";
+  std::filesystem::remove_all(dir);
+  auto check = [&](const std::string &src) {
+    return semaCheckFile(writeProjectFile(dir, "input.pkn", src));
+  };
+  // The errors and notes of @p diags, each with its file's last component.
+  auto summary = [](const std::string &diags) {
+    std::istringstream in(diags);
+    std::string out;
+    for (std::string line; std::getline(in, line);) {
+      size_t kind = line.find(": error: ");
+      if (kind == std::string::npos)
+        kind = line.find(": note: ");
+      if (kind == std::string::npos)
+        continue;
+      const size_t slash = line.rfind('/', kind);
+      out +=
+          (slash == std::string::npos ? line : line.substr(slash + 1)) + "\n";
+    }
+    return out;
+  };
+  // The library's files' line numbers are left out.
+  auto lineless = [](std::string s) {
+    for (std::string_view file : {"collections.pkn", "result.pkn"})
+      for (size_t at = 0;
+           (at = s.find(std::string(file) + ":", at)) != std::string::npos;) {
+        at += file.size();
+        s.erase(at, s.find(": ", at) - at);
+      }
+    return s;
+  };
+  const std::string node = "import ::io;\n"
+                           "import ::collections;\n"
+                           "class _Node<T> { value: T; }\n"
+                           "fn main() -> int {\n";
+  const std::string notes =
+      "collections.pkn: note: '::collections::_Node' is declared here\n"
+      "collections.pkn: note: '::collections::_Node' is instantiated as "
+      "'_Node<int>' here\n"
+      "collections.pkn: note: in instantiation of 'LinkedList<int>' requested "
+      "here\n";
+  const std::string clash =
+      ": error: instantiation '_Node<int>' of '_Node' conflicts with the "
+      "instantiation '_Node<int>' of '::collections::_Node' (type names are "
+      "global across imports)\n";
+  // Either order: the error at the program's `_Node<int>`, the request of
+  // the Stack<int> that led to the library's last.
+  struct Order {
+    const char *Body, *Error, *Stack;
+  };
+  for (const Order &o : {Order{"  let n = _Node<int>(1);\n"
+                               "  s = collections::Stack<int>();\n",
+                               "input.pkn:5:11", "input.pkn:6:7"},
+                         Order{"  s = collections::Stack<int>();\n"
+                               "  let n = _Node<int>(1);\n",
+                               "input.pkn:6:11", "input.pkn:5:7"}}) {
+    std::string expected = o.Error;
+    expected += clash;
+    expected += notes;
+    expected += o.Stack;
+    expected += ": note: in instantiation of 'Stack<int>' requested here\n";
+    auto r = check(node + o.Body +
+                   "  s.push(n.value);\n"
+                   "  io::println(s.peek());\n"
+                   "  return 0;\n"
+                   "}\n");
+    EXPECT_FALSE(r.Ok);
+    EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+    EXPECT_EQ(lineless(summary(r.Diagnostics)), expected) << r.Diagnostics;
+  }
+  // A struct template's instantiation against a class template's.
+  auto entry = check("import ::collections;\n"
+                     "struct _Entry<K, V> { k: K; v: V; }\n"
+                     "fn main() -> int {\n"
+                     "  m = collections::HashMap<int, int>();\n"
+                     "  m.put(1, 2);\n"
+                     "  let e = _Entry<int, int>(1, 2);\n"
+                     "  return e.k;\n"
+                     "}\n");
+  EXPECT_EQ(entry.ErrorCount, 1u) << entry.Diagnostics;
+  EXPECT_TRUE(has(summary(entry.Diagnostics),
+                  "input.pkn:6:11: error: instantiation '_Entry<int, int>' of "
+                  "'_Entry' conflicts with the instantiation '_Entry<int, "
+                  "int>' of '::collections::_Entry'"))
+      << entry.Diagnostics;
+  // An instantiation an import gives the program: the note is at the
+  // import, and at the template when the program sees it.
+  const std::string result =
+      "enum Result<T, E> { Ok(value: T), Err(error: E) }\n"
+      "fn main() -> int {\n"
+      "  let r = Result<Str, err::Error>::Ok(\"x\");\n"
+      "  match r { v: Ok { io::println(v.value); } e: Err { } }\n"
+      "  return 0;\n"
+      "}\n";
+  const std::string imported =
+      ": error: instantiation 'Result<Str, Error>' of 'Result' conflicts with "
+      "an imported enum of the same name (type names are global across "
+      "imports)\n";
+  const std::string through =
+      "input.pkn:1:1: note: the enum 'Result<Str, Error>' of module "
+      "'::result' comes in through this import\n";
+  auto r = check("import ::io;\nimport ::error as err;\n" + result);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_EQ(summary(r.Diagnostics), "input.pkn:5:11" + imported + through)
+      << r.Diagnostics;
+  r = check("import ::io;\nimport ::error as err;\n"
+            "import ::result as res;\n" +
+            result);
+  EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+  EXPECT_EQ(lineless(summary(r.Diagnostics)),
+            "input.pkn:6:11" + imported +
+                "result.pkn: note: '::result::Result' is declared here\n" +
+                through)
+      << r.Diagnostics;
   std::filesystem::remove_all(dir);
 }
 

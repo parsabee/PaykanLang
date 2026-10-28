@@ -59,9 +59,22 @@ What the modules have in common:
 - **Type names are global** across an import graph, so a program that imports `::io` (which
   imports `::error` and `::result`) cannot declare its own `File`, `Error` or `ErrorCode`
   (`class 'File' conflicts with an imported type of the same name`, `enum 'ErrorCode' ...`).
-  A generic type (`Result`, `List`, `HashMap`) is named through its module
-  (`res::Result<T, E>`), so a program may declare its own `Result`. The library's function
-  names are not reserved: a program may declare its own `fn print`.
+  A generic type's name (`Result`, `List`, `HashMap`) is not a type, so a program may
+  declare its own `Result`, a class or a generic `Result<T, E>`; but the names of
+  instantiations are global too. `::io` brings in `Result<Str, Error>` (what `readln`
+  returns), so a program's own `Result<Str, err::Error>` is an error, `instantiation
+  'Result<Str, Error>' of 'Result' conflicts with an imported enum of the same name`, and
+  so is a program's own `List<int>` next to `collections::List<int>`: give a generic type
+  of your own a name of its own.
+- **Reserved private names.** `::collections` declares the private templates `_Node`
+  (of `LinkedList`, `Stack` and `Queue`), `_Entry` and `_Table` (of `HashMap` and
+  `HashSet`) and `_Heap` (of the priority queues), and the private struct `_Pieces`. A
+  program that imports it cannot declare a `_Pieces`, and its own `_Node<int>` conflicts
+  with the one a `Stack<int>` uses: `instantiation '_Node<int>' of '_Node' conflicts with
+  the instantiation '_Node<int>' of '::collections::_Node'`, reported at the program's
+  instantiation, with notes at the library's declaration and where the library
+  instantiates it. The library's function names are not reserved: a program may declare
+  its own `fn print`.
 - **Sized numeric types** ([`u8`, `i32`, `unsigned`, `f32`, ...](../language/02-basics.md#sized-numeric-types))
   are elements and keys like `int` and `float` (`List<u8>`, `HashMap<u32, Str>`,
   `Box<f32>`), and a literal passed to a container's method takes the element or key type.

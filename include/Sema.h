@@ -1977,6 +1977,35 @@ private:
     const std::vector<std::string> *Lines = nullptr;
   };
   std::vector<InstantiationFrame> InstantiationStack;
+  /// Where each class, struct and enum instantiation made here was first
+  /// requested, by instantiation name: its template, the request, and the
+  /// instantiations it was requested in (InstantiationStack then).  Type
+  /// names are global, so another template's instantiation of the name
+  /// clashes with it (OD-9), and the clash is shown at both (SW-28).
+  struct InstantiationSite {
+    const ast::Decl *Template = nullptr;
+    InstantiationFrame Request;
+    std::vector<InstantiationFrame> Frames;
+  };
+  StringMap<InstantiationSite> InstantiationSites;
+  /// Records @p request, of an instantiation of @p tmpl, in
+  /// InstantiationSites.
+  void recordInstantiationSite(const ast::Decl *tmpl,
+                               const InstantiationFrame &request);
+  /// The instantiation names whose clash was reported: once per name.
+  StringSet ReportedInstantiationClashes;
+  /// Reports that @p instName, the instantiation of @p tmpl requested at
+  /// @p loc, has the name of another template's instantiation or of an
+  /// imported type, once per name (a later clash of the name is a suppressed
+  /// follow-on).  The error is at the request this module's own code made
+  /// (the other instantiation's, when only it is one), with notes at the
+  /// other template's declaration and its instantiation's request; for an
+  /// imported type, at the import it came in through.
+  void reportInstantiationClash(const ast::Decl *tmpl,
+                                const std::string &instName,
+                                ast::SourceLocation loc);
+  /// The import of this module each imported type came in through, by name.
+  StringMap<ast::SourceLocation> ImportedTypeImports;
   /// A bound check waiting for TraitImplsKnown.
   struct PendingBoundCheck {
     const ast::Decl *Template;

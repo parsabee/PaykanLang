@@ -612,7 +612,13 @@ d = gen::Box<int>(1);     // the same class as c's
 - Declaring your own `class Box<T>` and instantiating `Box<int>` in a module
   that also imports `lib::gen`'s `Box<int>`, or instantiating both your
   `Box<Str>` and `gen::Box<Str>`, is an error: type names are global across
-  the import graph.
+  the import graph. It is one error, at your module's own instantiation
+  (`instantiation 'Box<Str>' of 'Box' conflicts with the instantiation
+  'Box<Str>' of 'lib::gen::Box'`), also when the other is made inside
+  another module's template, with notes at the other template's declaration
+  and at where it is instantiated; for an instantiation an import brings in,
+  at that import. This holds for a library's private templates too
+  ([the standard library](../stdlib/index.md)).
 - A generic class's or struct's `impl` blocks go with it, `impl Trait for`
   blocks too, and each instantiation checks their methods as the module
   would check its own, whichever module makes it: an importer's
@@ -659,7 +665,7 @@ d = gen::Box<int>(1);     // the same class as c's
 | Error inside an instantiation | any ordinary error in a body, reported with the instantiation note |
 | Inference failure / ambiguity | see [Inference](#inference) |
 | Instantiation depth exceeded | self-instantiation with a growing argument |
-| Instantiation name clash | this module's `Box<Str>` and an imported template's, or an imported class `Box<int>` |
+| Instantiation name clash | this module's `Box<Str>` and an imported template's (also one a library's private template makes, `::collections`' `_Node<int>`), or an imported class `Box<int>`: one error, at this module's own instantiation, with notes at the other template's declaration and instantiation, or at the import |
 
 ## Not Supported Yet
 

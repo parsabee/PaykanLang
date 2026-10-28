@@ -1626,6 +1626,112 @@ Sema::InstantiationFrame Sema::frameAt(const std::string &name,
   return {name, loc, Diags.getSourceName(), Diags.getSourceLines()};
 }
 
+void Sema::recordInstantiationSite(const ast::Decl *tmpl,
+                                   const InstantiationFrame &request) {
+  InstantiationSites.try_emplace(
+      request.Name, InstantiationSite{tmpl, request, InstantiationStack});
+}
+
+/// The name template @p tmpl, a generic class, struct or enum, declares.
+static const std::string &templateDeclName(const ast::Decl *tmpl) {
+  if (const auto *cd = ast::dyn_cast<ast::ClassDecl>(tmpl))
+    return cd->getName();
+  if (const auto *sd = ast::dyn_cast<ast::StructDecl>(tmpl))
+    return sd->getName();
+  return ast::cast<ast::EnumDecl>(tmpl)->getName();
+}
+
+void Sema::reportInstantiationClash(const ast::Decl *tmpl,
+                                    const std::string &instName,
+                                    ast::SourceLocation loc) {
+  if (!ReportedInstantiationClashes.insert(instName).second) {
+    ++SuppressedFollowOns;
+    return;
+  }
+  // A template by its module's name, and the file its declaration is in.
+  auto shown = [&](const ast::Decl *t) {
+    const ModuleTemplates *origin = foreignOrigin(t);
+    return origin ? origin->Module + names::kQualSep + templateDeclName(t)
+                  : templateDeclName(t);
+  };
+  const std::string file = Diags.getSourceName();
+  const std::vector<std::string> *lines = Diags.getSourceLines();
+  auto noteDecl = [&](const ast::Decl *t) {
+    const ModuleTemplates *origin = foreignOrigin(t);
+    Diags.setSourceInfo(origin ? origin->File : OwnSourceName,
+                        origin ? origin->Lines : OwnSourceLines);
+    Diags.note(t->getLocation(), "'" + shown(t) + "' is declared here");
+  };
+  auto site = InstantiationSites.find(instName);
+  if (site == InstantiationSites.end() || site->second.Template == tmpl) {
+    // A type an import gave the program, an instantiation of a template of
+    // another module (::io's `Result<Str, Error>`, of ::result's).
+    const char *kind = Ctx.lookupClassType(instName)    ? "class"
+                       : Ctx.lookupStructType(instName) ? "struct"
+                       : Ctx.lookupEnumType(instName)   ? "enum"
+                                                        : "type";
+    error(loc, "instantiation '" + instName + "' of '" + shown(tmpl) +
+                   "' conflicts with an imported " + kind +
+                   " of the same name (type names are global across imports)");
+    auto origin = ImportedTypeOrigins.find(instName);
+    if (origin == ImportedTypeOrigins.end())
+      return;
+    const std::string base = instName.substr(0, instName.find('<'));
+    const std::string hidden =
+        hiddenQualifier(origin->second) + names::kQualSep + base;
+    const ast::Decl *other = nullptr;
+    if (auto c = ClassTemplates.find(hidden); c != ClassTemplates.end())
+      other = c->second;
+    else if (auto s = StructTemplates.find(hidden); s != StructTemplates.end())
+      other = s->second;
+    else if (auto e = EnumTemplates.find(hidden); e != EnumTemplates.end())
+      other = e->second;
+    if (other)
+      noteDecl(other);
+    if (auto at = ImportedTypeImports.find(instName);
+        at != ImportedTypeImports.end()) {
+      Diags.setSourceInfo(OwnSourceName, OwnSourceLines);
+      Diags.note(at->second, std::string("the ") + kind + " '" + instName +
+                                 "' of module '" + origin->second +
+                                 "' comes in through this import");
+    }
+    Diags.setSourceInfo(file, lines);
+    return;
+  }
+  // Another template's instantiation: the error is at a request this
+  // module's own code made, of its own template when it is one, and the
+  // notes at the other template's.
+  auto rank = [&](const InstantiationSite &s) {
+    const bool own =
+        s.Request.Lines == OwnSourceLines && s.Request.File == OwnSourceName;
+    return (own ? 2 : 0) + (foreignOrigin(s.Template) ? 0 : 1);
+  };
+  const InstantiationSite here{tmpl, frameAt(instName, loc),
+                               InstantiationStack};
+  const bool atOther = rank(site->second) > rank(here);
+  const InstantiationSite &subject = atOther ? site->second : here;
+  const InstantiationSite &rival = atOther ? here : site->second;
+  std::vector<InstantiationFrame> frames =
+      std::exchange(InstantiationStack, subject.Frames);
+  Diags.setSourceInfo(subject.Request.File, subject.Request.Lines);
+  error(subject.Request.RequestLoc,
+        "instantiation '" + instName + "' of '" + shown(subject.Template) +
+            "' conflicts with the instantiation '" + instName + "' of '" +
+            shown(rival.Template) + "' (type names are global across imports)");
+  InstantiationStack = std::move(frames);
+  noteDecl(rival.Template);
+  Diags.setSourceInfo(rival.Request.File, rival.Request.Lines);
+  Diags.note(rival.Request.RequestLoc, "'" + shown(rival.Template) +
+                                           "' is instantiated as '" + instName +
+                                           "' here");
+  for (auto it = rival.Frames.rbegin(); it != rival.Frames.rend(); ++it) {
+    Diags.setSourceInfo(it->File, it->Lines);
+    Diags.note(it->RequestLoc, "in instantiation of '" + displayName(it->Name) +
+                                   "' requested here");
+  }
+  Diags.setSourceInfo(file, lines);
+}
+
 ast::ClassType *Sema::instantiateClass(const std::string &name,
                                        const std::vector<ast::Type *> &args,
                                        ast::SourceLocation loc) {
@@ -1678,9 +1784,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
                             : ClassInstantiationInfo.end();
     if (info == ClassInstantiationInfo.end() || info->second.Template == tmpl)
       return cIt->second;
-    error(loc, "instantiation '" + instName + "' of '" + displayName(name) +
-                   "' conflicts with another template's instantiation of the "
-                   "same name (type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     return nullptr;
   }
 
@@ -1707,18 +1811,14 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
       copyImportedInstance(existing, loc);
       return existing;
     }
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported class of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     ClassInstantiations[instName] = nullptr;
     return nullptr;
   }
   if (Ctx.lookupType(instName)) {
     // A struct (or another type) of that name, from a template of another
     // module or declared outright: the same rule as for a struct template.
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported type of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     ClassInstantiations[instName] = nullptr;
     return nullptr;
   }
@@ -1751,6 +1851,7 @@ ast::ClassType *Sema::instantiateClass(const std::string &name,
     }
 
   const InstantiationFrame request = frameAt(instName, loc);
+  recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
   OriginSource inOrigin(*this, origin);
   bool ok = true;

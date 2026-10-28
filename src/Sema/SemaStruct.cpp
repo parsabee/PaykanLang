@@ -461,9 +461,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
                             : StructInstantiationInfos.end();
     if (info == StructInstantiationInfos.end() || info->second.Template == tmpl)
       return cIt->second;
-    error(loc, "instantiation '" + instName + "' of '" + displayName(name) +
-                   "' conflicts with another template's instantiation of the "
-                   "same name (type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     return nullptr;
   }
 
@@ -488,16 +486,12 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
       copyImportedInstance(existing, loc);
       return existing;
     }
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported struct of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     StructInstantiations[instName] = nullptr;
     return nullptr;
   }
   if (Ctx.lookupType(instName)) {
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported type of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     StructInstantiations[instName] = nullptr;
     return nullptr;
   }
@@ -530,6 +524,7 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
     }
 
   const InstantiationFrame request = frameAt(instName, loc);
+  recordInstantiationSite(tmpl, request);
   InstantiationStack.push_back(request);
   OriginSource inOrigin(*this, origin);
 
@@ -615,9 +610,7 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
                             : EnumInstantiationInfos.end();
     if (info == EnumInstantiationInfos.end() || info->second.Template == tmpl)
       return cIt->second;
-    error(loc, "instantiation '" + instName + "' of '" + displayName(name) +
-                   "' conflicts with another template's instantiation of the "
-                   "same name (type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     return nullptr;
   }
 
@@ -630,16 +623,12 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
       EnumInstantiationInfos[existing] = EnumInstantiationInfo{tmpl, args};
       return EnumInstantiations[instName] = existing;
     }
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported enum of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     EnumInstantiations[instName] = nullptr;
     return nullptr;
   }
   if (Ctx.lookupType(instName)) {
-    error(loc, "instantiation '" + instName +
-                   "' conflicts with an imported type of the same name "
-                   "(type names are global across imports)");
+    reportInstantiationClash(tmpl, instName, loc);
     EnumInstantiations[instName] = nullptr;
     return nullptr;
   }
@@ -659,7 +648,9 @@ ast::EnumType *Sema::instantiateEnum(const std::string &name,
   ast::ASTCloner cloner(Ctx, std::move(subst), nullptr, origin != nullptr);
   ast::EnumDecl *clone = cloner.cloneEnumDecl(tmpl, instName);
 
-  InstantiationStack.push_back(frameAt(instName, loc));
+  const InstantiationFrame request = frameAt(instName, loc);
+  recordInstantiationSite(tmpl, request);
+  InstantiationStack.push_back(request);
   OriginSource inOrigin(*this, origin);
 
   // Cached before the fields are resolved: a field naming this very

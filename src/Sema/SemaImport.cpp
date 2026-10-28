@@ -1014,8 +1014,12 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   };
   auto recordOrigin = [&](const std::string &name,
                           const std::string &originModule) {
-    if (!originModule.empty())
-      ImportedTypeOrigins.try_emplace(name, originModule);
+    if (originModule.empty())
+      return;
+    ImportedTypeOrigins.try_emplace(name, originModule);
+    // An import of this module's own file (not a template's request).
+    if (Diags.getSourceLines() == OwnSourceLines)
+      ImportedTypeImports.try_emplace(name, loc);
   };
   // A module with such a type injects nothing (SW-33): its functions', its
   // methods' and its fields' types, and its aliases, would name the other
