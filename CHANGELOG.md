@@ -1625,7 +1625,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     walk: an element whose `equals` emptied the list made the next comparison panic with
     the Buffer's internal message, `buffer index 1 out of bounds (len=0)` (exit 134). The
     length is read again for each element, so such an `equals` makes them find nothing
-    (`None`, `False`, `False`) (docs/stdlib/collections.md, "List<T>").
+    (`None`, `False`, `False`) (docs/stdlib/collections.md, "List<T>"). A buffer's length
+    is read in place, with no call of the runtime's `PaykanBuffer_len`: the LLVM path loads
+    it, and declares `PaykanBuffer_get` as writing no memory the program reaches, so a walk
+    whose `==` writes nothing (a `List<int>`'s) loads it once, before the loop, and one
+    whose `==` calls an `equals` loads it for each element; the C path calls `Runtime.h`'s
+    `PaykanBuffer_len_inline` (docs/c-backend.md, "Calls"). The call for each element had
+    made a search of a 1,000-int buffer 33% slower (`build -O2`, 200,000 searches, median
+    user CPU of 11 interleaved runs: 0.261 s against 0.196 s with the length read once) and
+    50,000 of a 1,000-`Str` buffer 13% (0.145 s against 0.128 s): they take 0.189 s and
+    0.127 s now.
   - The C path and the runtime round an `f32` value through a C `float`, but `Runtime.h`
     checked only that `double` is IEEE 754 binary64. It also checks now that `float` is
     binary32 (`FLT_MANT_DIG == 24`, `FLT_MAX_EXP == 128`, `FLT_MIN_EXP == -125`), so a

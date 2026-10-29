@@ -703,6 +703,12 @@ extern PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS];
 
 PaykanShared *PaykanBuffer_new(void *t, int64_t n); // owned box
 int64_t PaykanBuffer_len(void *t, PaykanObject *b);
+/// PaykanBuffer_len's body, which the backends read in place: the C path
+/// calls this, the LLVM path loads `len` itself (ToLLVM.cpp).
+static inline int64_t PaykanBuffer_len_inline(void *t, PaykanObject *b) {
+  (void)t;
+  return ((const PaykanBuffer *)b)->len;
+}
 /// The address of value @p i, valid until the buffer next changes.
 void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i);
 /// Copy value @p i to @p out (uninitialised), retaining its references.

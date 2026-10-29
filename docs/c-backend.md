@@ -202,7 +202,10 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   the same value call `Paykan_retain_nonnull_inline` and
   `Paykan_release_nonnull_inline`, which do the same with no test for
   `NULL`: a test would give GCC a path on which the object is `NULL`, which
-  `-Warray-bounds` follows into a later write of one of its fields.
+  `-Warray-bounds` follows into a later write of one of its fields.  A call
+  of the native function bound to `PaykanBuffer_len` (`memory::Buffer`'s
+  `len()`) calls `Runtime.h`'s `static inline` `PaykanBuffer_len_inline`,
+  which reads the buffer's `len` in place, as the LLVM path does.
   Native functions and other modules' functions are declared `extern` from
   their PIR signatures.
 * **Arithmetic.**  Integer arithmetic is done in `uint64_t` and converted
