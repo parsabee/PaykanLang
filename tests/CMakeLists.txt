@@ -135,6 +135,7 @@ add_executable(codegen_tests
     CodeGen/LeakTests.cpp
     CodeGen/ParseTests.cpp
     CodeGen/ConversionTests.cpp
+    CodeGen/StrOfValueTests.cpp
     CodeGen/ArgsTests.cpp
     CodeGen/EnumTests.cpp
     CodeGen/OwnershipTests.cpp

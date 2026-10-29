@@ -111,6 +111,19 @@ TEST(SizedTypes, ALiteralOutsideTheTypesRangeIsAnError) {
               "the literal 1e+39 does not fit in 'f32'");
 }
 
+// The midpoint above the largest f32, 2^128 - 2^103, is a tie that rounds to
+// even, which is infinity: the literal does not fit, as
+// `"3.4028235677973366e38".toF32()` is None.  Below it, a literal rounds to
+// the largest f32.
+TEST(SizedTypes, AnF32LiteralFitsBelowTheOverflowMidpoint) {
+  expectError(inMain("a: f32 = 3.4028235677973366e38;"),
+              "the literal 3.40282e+38 does not fit in 'f32'");
+  expectError(inMain("a: f32 = -3.4028235677973366e38;"),
+              "the literal -3.40282e+38 does not fit in 'f32'");
+  expectOk(inMain("a: f32 = 3.4028235e38; b: f32 = -3.4028235e38;"));
+  expectOk(inMain("a: f32 = 3.4028235677973362e38;"));
+}
+
 TEST(SizedTypes, OnlyALiteralAdapts) {
   // A compound expression of literals is an `int`; an `int` variable is one.
   expectError(inMain("a: i8 = 100 + 100;"),
@@ -180,35 +193,66 @@ TEST(SizedTypes, AnIndexIsAnInt) {
 
 // -- conversions
 
-TEST(SizedTypes, EveryNumericPairConverts) {
+// Each sized type takes its family's sources
+// (docs/language/04-strings-and-conversions.md, "Between numbers"; every
+// pair: Conversion.SourceSetsAreTheFamilies).
+TEST(SizedTypes, EachTypeConvertsFromItsFamilysSources) {
   expectOk(inMain(R"(
     i: int = 1;  f: float = 1.5;  u: unsigned = 2;
     a: i8 = 1;  b: i16 = 2;  c: i32 = 3;  d: u8 = 4;  e: u16 = 5;  g: u32 = 6;
-    h: f16 = 0.5;  k: f32 = 1.5;
-    a1: i8 = i8(i);  a2: i8 = i8(f);  a3: i8 = i8(u);  a4: i8 = i8(b);  a5: i8 = i8(k);
-    b1: u8 = u8(i);  b2: u8 = u8(a);  b3: u8 = u8(h);  b4: u8 = u8(g);
-    c1: int = int(a);  c2: int = int(d);  c3: int = int(u);  c4: int = int(k);
-    d1: unsigned = unsigned(i);  d2: unsigned = unsigned(f);  d3: unsigned = unsigned(a);
+    h: f16 = 0.5;  k: f32 = 1.5;  t: bool = True;  z: char = 'z';
+    a1: i8 = i8(i);  a2: i8 = i8(f);  a3: i8 = i8(d);  a4: i8 = i8(b);  a5: i8 = i8(k);
+    b1: u8 = u8(i);  b2: u8 = u8(a);  b3: u8 = u8(u);  b4: u8 = u8(g);
+    c1: int = int(a);  c2: int = int(d);  c3: int = int(g);  c4: int = int(k);
+    d1: unsigned = unsigned(i);  d2: unsigned = unsigned(d);  d3: unsigned = unsigned(a);
     e1: float = float(a);  e2: float = float(u);  e3: float = float(k);  e4: float = float(h);
     f1: f32 = f32(i);  f2: f32 = f32(f);  f3: f32 = f32(h);  f4: f32 = f32(u);
     g1: f16 = f16(f);  g2: f16 = f16(k);  g3: f16 = f16(a);
     h1: u32 = u32(c);  h2: i32 = i32(g);  h3: u16 = u16(b);  h4: i16 = i16(e);
+    // A bool and a char into every integer type, an integer into both.
+    l1: u8 = u8(z);  l2: i8 = i8(z);  l3: unsigned = unsigned(t);  l4: u16 = u16(t);
+    m1: bool = bool(d);  m2: bool = bool(u);  m3: char = char(d);  m4: char = char(c);
+    // Each type converts from itself.
+    n1: u8 = u8(d);  n2: f16 = f16(h);  n3: unsigned = unsigned(u);
     // The explicit form and the other spellings.
-    k1: i8 = i8<int>(i);  k2: unsigned = u64<float>(f);  k3: int = i64<u8>(d);
-    k4: float = f64<f32>(k);  k5: unsigned = unsigned<i8>(a);
+    k1: i8 = i8<int>(i);  k2: unsigned = u64<u8>(d);  k3: int = i64<u8>(d);
+    k4: float = f64<f32>(k);  k5: unsigned = unsigned<i8>(a);  k6: int = i64<int>(i);
   )"));
 }
 
-TEST(SizedTypes, ConversionsFromAndToStr) {
+TEST(SizedTypes, ConversionsToStr) {
   expectOk(inMain(R"(
-    a: i8 = 1;  u: unsigned = 2;  k: f32 = 1.5;  h: f16 = 0.5;  s: Str = "1";
+    a: i8 = 1;  u: unsigned = 2;  k: f32 = 1.5;  h: f16 = 0.5;
     s1: Str = Str(a) + Str(u) + Str(k) + Str(h) + Str<u16>(3) + Str<unsigned>(u);
-    p1: i8? = i8(s);  p2: unsigned? = unsigned(s);  p3: f32? = f32(s);
-    p4: u32? = u32<Str>(s);  p5: f16? = f16<Str>(s);  p6: unsigned? = u64(s);
+  )"));
+}
+
+// A sized type parses a `Str` with the method of its name, which the error
+// of the older conversion names, under the type's canonical name.
+TEST(SizedTypes, TheirParsesAreMethodsOfStr) {
+  const std::string s = "s: Str = \"1\"; ";
+  expectError(inMain(s + "p = i8(s);"),
+              "no specialization of 'i8' for 'Str': parse a 'Str' with its "
+              "method 'toI8()', which returns 'i8?'");
+  expectError(inMain(s + "p = u32<Str>(s);"),
+              "no specialization of 'u32' for 'Str': parse a 'Str' with its "
+              "method 'toU32()', which returns 'u32?'");
+  expectError(inMain(s + "p = u64(s);"),
+              "no specialization of 'unsigned' for 'Str': parse a 'Str' with "
+              "its method 'toUnsigned()', which returns 'unsigned?'");
+  expectError(inMain(s + "p = unsigned<Str>(s);"),
+              "no specialization of 'unsigned' for 'Str': parse a 'Str' with "
+              "its method 'toUnsigned()', which returns 'unsigned?'");
+  expectError(inMain(s + "p = f32(s);"),
+              "no specialization of 'f32' for 'Str': parse a 'Str' with its "
+              "method 'toF32()', which returns 'f32?'");
+  expectError(inMain(s + "p = f16<Str>(s);"),
+              "no specialization of 'f16' for 'Str': parse a 'Str' with its "
+              "method 'toF16()', which returns 'f16?'");
+  expectOk(inMain(s + R"(
+    p1: i8? = s.toI8();  p2: unsigned? = s.toUnsigned();  p3: f32? = s.toF32();
     match p1 { x: i8 { t: Str = Str(x); } None { } }
   )"));
-  expectError(inMain("s: Str = \"1\"; a: i8 = i8(s);"),
-              "cannot use optional 'i8?' as 'i8' without unwrapping");
 }
 
 // An explicit conversion expects one argument of its written source type:
@@ -224,22 +268,39 @@ TEST(SizedTypes, AnExplicitConversionWithExtraArgumentsIsAnArityError) {
 }
 
 TEST(SizedTypes, TheConversionSetIsClosedAndListed) {
-  expectError(inMain("a: u8 = u8('a');"),
-              "no specialization of 'u8' for 'char'; its specializations are "
-              "Str, int, float, i8, i16, i32, u16, u32, unsigned, f16, f32");
-  expectError(inMain("a: u8 = 1; b: u8 = u8(a);"),
-              "no specialization of 'u8' for 'u8'");
-  expectError(inMain("a: u8 = 1; b: bool = bool(a);"),
-              "no specialization of 'bool' for 'u8'; its specializations are "
-              "int, Str");
-  expectError(inMain("a: u8 = 1; c: char = char(a);"),
-              "no specialization of 'char' for 'u8'; its specializations are "
-              "int");
+  // Errors before the families, conversions now.
+  expectOk(inMain("a: u8 = u8('a'); b: u8 = u8(a); t: bool = bool(a); "
+                  "c: char = char(a);"));
+  // A pair the families leave out names the rewrite, under the canonical
+  // names (`u64` is `unsigned`, `i64` is `int`).
+  expectError(inMain("u: unsigned = 1; a: i8 = i8(u);"),
+              "no specialization of 'i8' for 'unsigned': an 'unsigned' can be "
+              "larger than any 'i8'; 'i8(u8(...))' keeps its low 8 bits\n");
+  expectError(inMain("u: u64 = 1; n: i64 = i64(u);"),
+              "no specialization of 'int' for 'unsigned': an 'unsigned' can be "
+              "larger than any 'int'; its method 'toInt()' returns 'int?', "
+              "None above 9223372036854775807\n");
+  expectError(inMain("k: f32 = 1.5; a: u16 = u16<f32>(k);"),
+              "no specialization of 'u16' for 'f32': convert the 'f32' to an "
+              "'int' first: 'u16(int(...))' truncates toward zero, then keeps "
+              "the low 16 bits\n");
+  expectError(inMain("a: u64 = u64(2.5);"),
+              "no specialization of 'unsigned' for 'float': convert the "
+              "'float' to an 'int' first: 'unsigned(int(...))' truncates "
+              "toward zero, then keeps the low 64 bits\n");
+  expectError(inMain("h: f16 = f16('a');"),
+              "no specialization of 'f16' for 'char': convert the 'char' to an "
+              "'int' first: 'f16(int(...))'\n");
+  expectError(inMain("h: f16 = 0.5; b: bool = bool(h);"),
+              "no specialization of 'bool' for 'f16'; its specializations are "
+              "int, i8, i16, i32, u8, u16, u32, unsigned, bool\n");
+  expectError(inMain("k: f32 = 0.5; c: char = char(k);"),
+              "no specialization of 'char' for 'f32'; its specializations are "
+              "int, i8, i16, i32, u8, u16, u32, unsigned, char\n");
   // A literal argument takes the written source type; a variable keeps its.
-  expectOk(inMain("b: int = int<u64>(5);"));
-  expectError(
-      inMain("n = 5; b: int = int<u64>(n);"),
-      "argument of 'int<unsigned>' has type 'int', expected 'unsigned'");
+  expectOk(inMain("b: int = int<u32>(5);"));
+  expectError(inMain("n = 5; b: int = int<u32>(n);"),
+              "argument of 'int<u32>' has type 'int', expected 'u32'");
   expectError(inMain("a: i8? = 1; b: int = int(a);"),
               "no specialization of 'int' for 'i8?'");
 }

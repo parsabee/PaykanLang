@@ -477,13 +477,16 @@ ModuleLowering::BorrowedReads::result(const ast::Expr *call, bool place,
 
 ModuleLowering::BorrowedReads::Use
 ModuleLowering::BorrowedReads::callExpr(ast::CallExpr *ce, bool place) {
+  // `Str(x)` of a value with a text is `x.toString()`.
+  if (ast::MethodCallExpr *show = L.showCallOf(ce))
+    return methodCall(show, place);
   const std::string &name = ce->getCalleeName();
   const std::vector<ast::Expr *> &args = ce->getArguments();
   // `Str(s)` is `s`.
   if (L.IdentityCtors.count(name) && args.size() == 1)
     return eval(args[0], place);
-  // A variant made in place, a conversion or a parse: no call of the
-  // program, each argument used at once.
+  // A variant made in place or a conversion: no call of the program, each
+  // argument used at once.
   ast::Type *target = nullptr;
   ast::Type *source = nullptr;
   if (ce->getVariantEnum() || L.FunctionTable.count(name) ||
@@ -518,11 +521,16 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
               Effect::unknown());
     return {};
   }
-  // An array's or a slice's length, a builtin hash: no call of the program.
+  // An array's or a slice's length, a builtin hash, a Str's parse (`toInt()`
+  // & co.), an `unsigned`'s `toInt()`: no call of the program.
+  ast::BuiltinType::Kind parsed = ast::BuiltinType::Void;
   if (ast::dyn_cast<ast::SliceType>(rt) ||
       ast::dyn_cast<ast::FixedArrayType>(rt) ||
       (name == names::kMethodHash &&
-       (ast::isa<ast::BuiltinType>(rt) || !reachesObject(rt)))) {
+       (ast::isa<ast::BuiltinType>(rt) || !reachesObject(rt))) ||
+      (rt == L.ASTCtx.getStrTy() && ast::strParseKind(name, parsed)) ||
+      (L.builtinKind(rt) == ast::BuiltinType::U64 &&
+       name == names::kMethodToInt)) {
     eval(recv);
     return {};
   }
@@ -948,11 +956,14 @@ void ModuleLowering::EffectScan::expr(ast::Expr *e) {
 }
 
 void ModuleLowering::EffectScan::call(ast::CallExpr *ce) {
+  // `Str(x)` of a value with a text is `x.toString()`.
+  if (ast::MethodCallExpr *show = L.showCallOf(ce))
+    return methodCall(show);
   const std::string &name = ce->getCalleeName();
   const std::vector<ast::Expr *> &args = ce->getArguments();
   exprs(args);
-  // `Str(s)`, a variant made in place, a conversion or a parse: the
-  // runtime's, given numbers and strings.
+  // `Str(s)`, a variant made in place or a conversion: the runtime's, given
+  // numbers and strings.
   ast::Type *target = nullptr;
   ast::Type *source = nullptr;
   if ((L.IdentityCtors.count(name) && args.size() == 1) || ce->getVariantEnum())

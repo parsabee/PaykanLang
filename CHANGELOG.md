@@ -266,6 +266,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the imports built from source and the prebuilt modules' (next to the source, in a
   `--module-path` directory or in `$PAYKAN_MODULE_PATH`).  They are the files whose objects
   `--emit-c`'s C is linked with, and docs/c-backend.md's build loops over them.
+- **Parsing is a method of `Str`** (docs/language/04-strings-and-conversions.md, "Parsing a
+  string").
+  - The methods are `s.toInt()`, `s.toI8()`, `s.toI16()`, `s.toI32()`, `s.toUnsigned()`,
+    `s.toU8()`, `s.toU16()`, `s.toU32()`, `s.toFloat()`, `s.toF16()`, `s.toF32()` and
+    `s.toBool()`.
+  - Each gives an optional of its type, and `None` when the whole string is not a value of
+    it.
+  - A text parses exactly when it is a valid literal of the type, and gives the literal's
+    value. On top of that, a sign is allowed for the signed and float types, and
+    `toFloat()` accepts what C's `strtod` accepts, `"inf"` and `"nan"` included.
+  - The methods are builtins, not `Str` vtable slots, so the runtime ABI does not change.
+- **`Str(x)` takes every value that has a text** and gives the text `x.toString()` gives:
+  - an optional (`"None"` or its value's text), `Str?` included;
+  - a tuple, a struct, an enum;
+  - an object (its `toString()`) and `None`.
+
+  A `Str` is the string itself, the same object, in both forms (`Str(s)`, `Str<Str>(s)`),
+  so neither takes a `view` of one; `s.toString()` is a copy. A value without a text is an
+  error that names the part without one: `'Str' cannot convert a value of type 'F', which
+  does not implement trait 'Show': its field 'f' has type '(int) -> int', which does not
+  implement it`.
+- **New conversions:**
+  - `i8` … `u32`, `int` and `unsigned` convert from `bool` (0 or 1) and from `char` (its
+    code: `u8(c)` is the byte, `i8(c)` its signed reading).
+  - `bool(x)` converts from every integer type (`x != 0`).
+  - `char(x)` converts from every integer type, and never panics from a `u8`.
+  - `T(x)` of a `T` is the value itself (`i64(n)` with an `int` `n`, `float(2.5)`).
+  - `u.toInt()` gives an `unsigned`'s value as an `int?`, `None` above
+    9223372036854775807.
 
 ### Changed
 
@@ -732,6 +761,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   traits.  An importer that declared a `trait Named` of its own satisfied
   `lib::greet<T: Named>` with it, whatever the trait's methods.  That is now the #147
   error under Fixed, with a note at the importer's trait.
+- **Breaking:** a primitive type no longer parses a `Str`. `int(s)`, `float(s)`, `bool(s)`,
+  `unsigned(s)`, `i8(s)` … `f32(s)` and their explicit forms (`int<Str>(s)` …) are errors
+  that name the method: `no specialization of 'int' for 'Str': parse a 'Str' with its
+  method 'toInt()', which returns 'int?'`. Migration: `T(s)` and `T<Str>(s)` become
+  `s.toT()` (`int`/`i64`: `toInt`, `unsigned`/`u64`: `toUnsigned`, `float`/`f64`:
+  `toFloat`, `bool`: `toBool`, `u8`: `toU8` …).
+- **Breaking:** the conversions follow the target's family
+  (docs/language/04-strings-and-conversions.md, "Between numbers"):
+  - `int`, `i8`, `i16` and `i32` no longer convert from `unsigned` (`int(unsigned(-1))`
+    was `-1`). Write `u.toInt()`, an `int?`; or `i32(u32(u))`, which gives what `i32(u)`
+    gave; or keep the arithmetic `unsigned`.
+  - `unsigned`, `u8`, `u16` and `u32` no longer convert from a float (`u8(255.5)` was
+    `255`). Write `u8(int(f))`, after checking the range: it wraps where the old conversion
+    panicked.
+  - Every conversion that remains gives the result it gave in 0.2.0, except the fixes
+    below.
+  - The lists in `no specialization of …; its specializations are …` change accordingly.
+- An `f32` or `f16` from a text with a fraction or an exponent (a literal, or `toF32()` and
+  `toF16()`) is documented as the `float` nearest the text rounded to the type, as C's
+  `(float)strtod(s)` is. For a text of 13 or more significant digits very close to a point
+  halfway between two values of the type, this can differ from rounding the text once
+  (`1.0000000596046448` is `1` as an `f32`). A literal and the parse of its text always
+  agree.
 
 ### Removed
 
@@ -1552,6 +1604,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A bounded generic enum used before the `impl` blocks were checked (a class field `m:
   Maybe<int>` of `enum Maybe<T: Hashable>`) crashed the compiler.  It is now checked like
   a generic class.
+- `u8`, `u16` and `u32` parses accepted a sign where `unsigned` did not (`u32("+1")` was
+  `1`, `u8("-0")` was `0`). Every unsigned width now rejects one: `"+1".toU8()` is `None`.
+- `f16` and `f32` parses gave `inf` for finite text out of their range (`f16("70000")`,
+  `f32("1e39")`). The parse is now `None`, as the literal of that text is an error. Text
+  below the type's range still rounds to 0, as the literal does.
+- The `f32` literal `3.4028235677973366e38`, the midpoint above the largest `f32`, compiled
+  and was `inf`. It is now `the literal 3.40282e+38 does not fit in 'f32'`.
+- `f32(n)` of an `int` or `unsigned` above 2^53, such an integer literal in an `f32` slot,
+  and the `f32` parse of such an integer text (`f32("1152921573326323713")`), were rounded
+  twice, through `float` (`f32(1152921573326323713)` was 2^60). They are now rounded once
+  (2^60+2^37), as docs/design/sized-types.md says; `s.toF32()` rounds an integer text of
+  any size once (`"9223372586610589697".toF32()` is 2^63+2^40, where it was 2^63).
 
 ## [0.2.0] - 2026-10-20
 

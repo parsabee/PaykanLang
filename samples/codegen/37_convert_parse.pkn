@@ -1,5 +1,5 @@
-// 37 — parsing with int<Str> and float<Str> (#64)
-// Exercises: `int<Str>(s)` -> `int?` and `float<Str>(s)` -> `float?`, which
+// 37 — parsing with toInt() and toFloat() (#64)
+// Exercises: `s.toInt()` -> `int?` and `s.toFloat()` -> `float?`, which
 //            are None for an invalid string; unwrapping with `match` (the arm
 //            binds a plain int / float), `!= None`, the int64 limits, what
 //            counts as invalid (whitespace, trailing junk, overflow) and the
@@ -19,7 +19,7 @@
 import ::io;
 
 fn describe(s: Str) -> Str {
-  match int<Str>(s) {
+  match s.toInt() {
     n: int {
       return "'" + s + "' is " + Str<int>(n);
     }
@@ -35,7 +35,7 @@ fn main() -> int {
   invalid = 0;
   i = 0;
   while i < inputs.len() {
-    match int(inputs[i]) {
+    match inputs[i].toInt() {
       n: int { sum = sum + n; }
       None { invalid = invalid + 1; }
     }
@@ -44,13 +44,13 @@ fn main() -> int {
   io::println("sum of the valid numbers: " + Str(sum) + " (" + Str<int>(invalid)
       + " invalid)");
 
-  match int<Str>("-9223372036854775808") {
+  match "-9223372036854775808".toInt() {
     n: int {
       io::println(Str(n) + " is the smallest int");
     }
     None { }
   }
-  if int("9223372036854775808") == None {
+  if "9223372036854775808".toInt() == None {
     io::println("9223372036854775808 is not an int");
   }
   io::println(describe(" 7"));
@@ -62,7 +62,7 @@ fn main() -> int {
   count = 0;
   i = 0;
   while i < readings.len() {
-    match float<Str>(readings[i]) {
+    match readings[i].toFloat() {
       f: float {
         total = total + f;
         count = count + 1;
@@ -77,7 +77,7 @@ fn main() -> int {
   specials: Str[3] = ["nan", "inf", "-0"];
   i = 0;
   while i < specials.len() {
-    match float(specials[i]) {
+    match specials[i].toFloat() {
       f: float { out = out + Str(f); }
       None { out = out + "?"; }
     }
@@ -85,9 +85,9 @@ fn main() -> int {
     i = i + 1;
   }
   io::println(out);
-  if float<Str>("1e999") == None {
+  if "1e999".toFloat() == None {
     io::println("'1e999' is not a float");
   }
-  io::println(int("12abc"));      // an int? prints as its value or None
+  io::println("12abc".toInt());  // an int? prints as its value or None
   return 0;
 }

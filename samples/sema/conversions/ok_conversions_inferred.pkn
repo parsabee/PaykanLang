@@ -10,9 +10,9 @@ fn main() -> int {
   s2: Str = Str(f);             // Str<float>
   s3: Str = Str(b) + Str(c);    // Str<bool>, Str<char>
   s4: Str = Str(s);             // not a conversion: the Str constructor
-  p1: int? = int(s);            // int<Str>
-  p2: float? = float(s);        // float<Str>
-  p3: bool? = bool(s);          // bool<Str>
+  p1: int? = s.toInt();         // not a conversion: Str's parses
+  p2: float? = s.toFloat();
+  p3: bool? = s.toBool();
   n1: int = int(f);             // int<float>
   n2: float = float(i);         // float<int>
   n3: bool = bool(i);           // bool<int>

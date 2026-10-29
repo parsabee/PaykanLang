@@ -182,7 +182,7 @@ fn main() -> int {
           digits = digits + Str(line[i]);
           i = i + 1;
         }
-        match int(digits) {
+        match digits.toInt() {
           n: int { total = total + n; }
           None   { bad = bad + 1; }
         }
@@ -253,7 +253,7 @@ path of the executable for a program made with `paykan build`. The real argument
 `paykan greet.pkn --help` passes `--help` to `greet`, not to `paykan`.
 
 The arguments are a `view`, so `main` reads them but does not keep them: an argument can be
-printed, compared, parsed (`int(args[1])`), passed to a `view` parameter or joined into a new
+printed, compared, parsed (`args[1].toInt()`), passed to a `view` parameter or joined into a new
 string, but `name = args[1];` is an error (`'args' is a 'view' parameter; it cannot be
 stored, only read or passed to a 'view' parameter`). To keep one, take a string of the
 program's own: `name = args[1].toString();`.
@@ -521,7 +521,7 @@ fn main(args: view Str[]) -> int {
     }
     "done" {
       if args.len() != 3 { return usage(); }
-      match int(args[2]) {
+      match args[2].toInt() {
         n: int {
           if !tasks.complete(n) {
             io::printerrln("no task " + args[2]);

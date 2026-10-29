@@ -2647,6 +2647,67 @@ TEST(Driver, ABufferSlotNeverSetPanicsOnEveryPath) {
   std::filesystem::remove_all(dir);
 }
 
+// `char(x)` of an integer type other than `int` panics outside 0..255 with
+// the source named, an unsigned value printed unsigned; `char<int>` keeps
+// its message, and a `u8` is always in range.  On every path, at -O0 and
+// -O2: `run`, `build`, and the C `--emit-c` prints.
+TEST(Driver, CharOfASizedIntegerPanicsNamingItsSource) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_char_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "chars.pkn").string();
+  std::ofstream(src)
+      << "import ::io;\n"
+         "fn main(args: view Str[]) -> int {\n"
+         "  io::println(\"start\");\n"
+         "  n: int = 300;  w: i32 = 300;  b: i8 = -1;\n"
+         "  h: u16 = 256;  u = unsigned(-1);  y: u8 = 200;\n"
+         "  if args[1] == \"int\" { io::println(char(n)); }\n"
+         "  if args[1] == \"i32\" { io::println(char(w)); }\n"
+         "  if args[1] == \"i8\" { io::println(char(b)); }\n"
+         "  if args[1] == \"u16\" { io::println(char(h)); }\n"
+         "  if args[1] == \"unsigned\" { io::println(char(u)); "
+         "}\n"
+         "  if args[1] == \"u8\" { io::println(int(char(y))); }\n"
+         "  return 0;\n"
+         "}\n";
+  CPath cpath(dir);
+  const std::string tail = "): the value is outside the char range 0..255";
+  auto expectEach = [&](const std::string &how, const std::string &cmd) {
+    auto expect = [&](const std::string &what, const std::string &message) {
+      auto r = run(cmd + " " + what + " 2>&1");
+      EXPECT_EQ(r.exitCode, 134) << how << " " << what << ": " << r.out;
+      // (Then the shell's note of the abort, for an executable.)
+      EXPECT_EQ(r.out.rfind("start\npaykan: " + message + tail + "\n", 0), 0U)
+          << how << " " << what << ": " << r.out;
+    };
+    expect("int", "char<int>(300");
+    expect("i32", "char<i32>(300");
+    expect("i8", "char<i8>(-1");
+    expect("u16", "char<u16>(256");
+    expect("unsigned", "char<unsigned>(18446744073709551615");
+    auto r = run(cmd + " u8 2>&1");
+    EXPECT_EQ(r.exitCode, 0) << how << " u8: " << r.out;
+    EXPECT_EQ(r.out, "start\n200\n") << how << " u8";
+  };
+  auto everyPath = [&](const std::string &opt) {
+    expectEach("run " + opt, paykanRun() + " " + opt + " " + shellWord(src));
+    auto exe = (dir / ("chars" + opt)).string();
+    auto built = run(paykanRun() + " " + opt + " -o " + shellWord(exe) +
+                     " build " + shellWord(src) + " 2>&1");
+    ASSERT_EQ(built.exitCode, 0) << opt << ": " << built.out;
+    expectEach("build " + opt, shellWord(exe));
+    auto cexe = (dir / ("chars-c" + opt)).string();
+    auto c = cpath.build(src, opt, cexe);
+    ASSERT_EQ(c.exitCode, 0) << opt << ": " << c.out;
+    expectEach("C " + opt, shellWord(cexe));
+  };
+  everyPath("-O0");
+  everyPath("-O2");
+  std::filesystem::remove_all(dir);
+}
+
 // A native function of an import bound to a C function that compiled code
 // calls as one of the runtime's (fmod for a float's `%`, Paykan_panic_index
 // for an index check, Paykan_heap_dump in C's main()) is declared once,

@@ -278,7 +278,7 @@ native fn bl(b: view Obj) -> int = "PaykanBuffer_len";
 fn main() -> int {
   xs = collections::List<int>();
   xs.push(1);
-  return int(xs.len());
+  return int(u32(xs.len()));
 })");
   EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
   EXPECT_NE(r.Diagnostics.find("memory.pkn:"), std::string::npos)
@@ -335,7 +335,7 @@ TEST(Native, RuntimeSymbolsKeepTheirSignature) {
       xs = collections::List<int>();
       xs.push(1);
       io::println(math::sqrt(rem(9.0, 7.0)));
-      return len("ab") + int(xs.len());
+      return len("ab") + int(u32(xs.len()));
     }
   )");
   EXPECT_TRUE(r.Ok) << r.Diagnostics;

@@ -93,6 +93,8 @@ inline std::string_view untypedParamOf(std::string_view typeParam) {
 
 inline constexpr const char *kMethodDestroy = "destroy";
 inline constexpr const char *kMethodToString = "toString";
+/// Str's parse into an `int`, and an `unsigned`'s value as an `int?`.
+inline constexpr const char *kMethodToInt = "toInt";
 inline constexpr const char *kMethodEquals = "equals";
 
 // Traits
@@ -137,6 +139,24 @@ inline constexpr const char *kTypeF16 = "f16";
 inline constexpr const char *kTypeF32 = "f32";
 inline constexpr const char *kTypeF64 = "f64";
 
+/// A parse method of `Str` and the type it parses into, by the type's
+/// keyword (ast::builtinKindOfName resolves it).
+struct StrParseMethod {
+  const char *Method;
+  const char *Target;
+};
+/// The parse methods of `Str` (docs/language/04-strings-and-conversions.md,
+/// "Parsing a string"), one per primitive that parses: each gives the
+/// optional of its type.  Builtins, not vtable slots.
+inline constexpr StrParseMethod kStrParseMethods[] = {
+    {kMethodToInt, kTypeInt},      {"toI8", kTypeI8},
+    {"toI16", kTypeI16},           {"toI32", kTypeI32},
+    {"toUnsigned", kTypeUnsigned}, {"toU8", kTypeU8},
+    {"toU16", kTypeU16},           {"toU32", kTypeU32},
+    {"toFloat", kTypeFloat},       {"toF16", kTypeF16},
+    {"toF32", kTypeF32},           {"toBool", kTypeBool},
+};
+
 // Conversion constructors `Target<Source>(value)` (#64, #88): the closed set
 // of specializations of the builtin types.  Sema rebinds a conversion call's
 // callee to its spelled form, which is what the lowering dispatches on.
@@ -144,15 +164,12 @@ inline constexpr const char *kConvStrInt = "Str<int>";
 inline constexpr const char *kConvStrFloat = "Str<float>";
 inline constexpr const char *kConvStrBool = "Str<bool>";
 inline constexpr const char *kConvStrChar = "Str<char>";
-inline constexpr const char *kConvIntStr = "int<Str>";
-inline constexpr const char *kConvFloatStr = "float<Str>";
 inline constexpr const char *kConvIntFloat = "int<float>";
 inline constexpr const char *kConvFloatInt = "float<int>";
 inline constexpr const char *kConvIntBool = "int<bool>";
 inline constexpr const char *kConvBoolInt = "bool<int>";
 inline constexpr const char *kConvIntChar = "int<char>";
 inline constexpr const char *kConvCharInt = "char<int>";
-inline constexpr const char *kConvBoolStr = "bool<Str>";
 
 // -- Runtime C symbol names
 
@@ -176,6 +193,8 @@ inline constexpr const char *kPaykanStringParseInt = "PaykanString_parse_int";
 inline constexpr const char *kPaykanStringParseFloat =
     "PaykanString_parse_float";
 inline constexpr const char *kPaykanStringParseBool = "PaykanString_parse_bool";
+inline constexpr const char *kPaykanStringParseF32 = "PaykanString_parse_f32";
+inline constexpr const char *kPaykanStringParseF16 = "PaykanString_parse_f16";
 inline constexpr const char *kPaykanStringFromFloat = "PaykanString_from_float";
 inline constexpr const char *kPaykanStringFromBool = "PaykanString_from_bool";
 inline constexpr const char *kPaykanStringToString = "PaykanString_toString";
@@ -267,6 +286,8 @@ inline constexpr const char *kPaykanPanicDivOverflow =
 inline constexpr const char *kPaykanPanicFloatToInt =
     "Paykan_panic_float_to_int";
 inline constexpr const char *kPaykanPanicIntToChar = "Paykan_panic_int_to_char";
+/// The panic of `char<S>` for a source other than `int`, which it names
+inline constexpr const char *kPaykanPanicToChar = "Paykan_panic_to_char";
 inline constexpr const char *kPaykanPanicFloatToType =
     "Paykan_panic_float_to_type";
 inline constexpr const char *kPaykanPanicForStep = "Paykan_panic_for_step";
@@ -274,6 +295,9 @@ inline constexpr const char *kPaykanPanicPureVirtual =
     "Paykan_panic_pure_virtual";
 /// `f16` rounding (docs/design/sized-types.md)
 inline constexpr const char *kPaykanRoundF16 = "Paykan_round_f16";
+/// `f32<int>` and `f32<unsigned>`, rounded once
+inline constexpr const char *kPaykanIntToF32 = "Paykan_int_to_f32";
+inline constexpr const char *kPaykanUintToF32 = "Paykan_uint_to_f32";
 inline constexpr const char *kPaykanPanicIndex = "Paykan_panic_index";
 
 // Reference counting
@@ -396,6 +420,7 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanPanicFloatToInt,
     kPaykanPanicFloatToType,
     kPaykanPanicIntToChar,
+    kPaykanPanicToChar,
     kPaykanPanicIndex,
     kPaykanPanicForStep,
     kPaykanPanicPureVirtual,
@@ -413,8 +438,12 @@ inline constexpr const char *kCodeGenRequiredSymbols[] = {
     kPaykanStringParseUint,
     kPaykanStringParseFloat,
     kPaykanStringParseBool,
+    kPaykanStringParseF32,
+    kPaykanStringParseF16,
     // Sized numeric types
     kPaykanRoundF16,
+    kPaykanIntToF32,
+    kPaykanUintToF32,
     // Hash
     kPaykanIntHash,
     kPaykanStringHash,

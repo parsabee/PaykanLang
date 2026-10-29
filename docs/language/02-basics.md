@@ -408,26 +408,34 @@ Output:
   parameter, a field, an element, a `match` arm, or the other operand of an operator — has
   that type when it fits it (`x: u8 = 255`, `x + 1`, `x == 0`), and is an error when it does
   not (`the literal 256 does not fit in 'u8' (0 to 255)`).  A float literal (or an integer
-  literal) flowing into an `f32` or `f16` slot is that float.  Only a literal adapts: `100 +
+  literal) flowing into an `f32` or `f16` slot is that float: an integer literal rounded to
+  the type once, as `f32(n)` is, and a float literal as its text is (see [Parsing a
+  string](04-strings-and-conversions.md#parsing-a-string)).  Only a literal adapts: `100 +
   100` is an `int` expression, so `q: i8 = 100 + 100;` is an error.  Without a context an
   integer literal is an `int` and a float literal a `float`.
 - **`f16` and `f32` arithmetic** is computed in `float` precision and rounded to the type
   after each operation, which gives the correctly rounded `f32` or `f16` result;
   comparisons are IEEE as for `float`.  A value too large for the type is its infinity:
   `f16(70000.0)` is `inf`, and `65504` is the largest finite `f16`.
-- **Conversions** between any two numeric types use the conversion constructors
-  (`u8(300)` is `44`, `i8(200)` is `-56`, `int(unsigned(-1))` is `-1`, `i32(-1.5)` is `-1`,
-  `f16(0.1)` is `0.0999756`): see [Conversions](04-strings-and-conversions.md#conversions).
-  `Str(x)` prints any numeric value (an `unsigned` without a sign), and `u8(s)`,
-  `unsigned(s)`, `f32(s)` … parse a `Str` into a `u8?`, `unsigned?`, `f32?` …, `None` when
-  the text is not a number of that type (`u8("256")` is `None`).
+- **Conversions** between the numeric types use the conversion constructors, each type
+  taking the sources of its family (`u8(300)` is `44`, `i8(200)` is `-56`,
+  `i32(u32(unsigned(-1)))` is `-1`, `i32(-1.5)` is `-1`, `f16(0.1)` is `0.0999756`,
+  `u8('a')` is `97`): see [Between numbers](04-strings-and-conversions.md#between-numbers).
+  A signed type takes no `unsigned` (`u.toInt()` is its value as an `int?`) and an unsigned
+  type no float (`u8(int(f))`).
+  `Str(x)` prints any numeric value (an `unsigned` without a sign), and `s.toU8()`,
+  `s.toUnsigned()`, `s.toF32()` … parse a `Str` into a `u8?`, `unsigned?`, `f32?` …, `None`
+  when the text is not a number of that type (`"256".toU8()` and `"+1".toU8()` are `None`):
+  see [Parsing a string](04-strings-and-conversions.md#parsing-a-string).  An `f32` or `f16`
+  from a text with a fraction or an exponent, a literal's or a parse's, is the `float`
+  nearest the text rounded to the type.
 - **Methods and traits.**  Every numeric type has `toString()` and is `Show` and
   `ValueType`; the integer types have `hash()` and are `Hashable`, so a `u32` is a
-  `HashMap` key.  A sized type has an optional (`u8?`), is a `match` subject with literal
+  `HashMap` key; an `unsigned` also has `u.toInt()`, its value as an `int?` (`None` above
+  9223372036854775807).  A sized type has an optional (`u8?`), is a `match` subject with literal
   arms, and is a type argument like any value type (`Box<u8>`, `List<f32>`).
 - **Not yet:** bitwise operators and shifts, literal suffixes (`1u8`), hexadecimal
-  literals, `char` conversions to the sized types (`u8(int(c))` spells a byte), and
-  implicit widening (`i32` to `int`).  The design is in
+  literals, and implicit widening (`i32` to `int`).  The design is in
   [`design/sized-types.md`](../design/sized-types.md).
 
 ### Arrays

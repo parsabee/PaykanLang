@@ -669,11 +669,11 @@ match io::open("/tmp/data.txt", "r") {
 
 ### Unwrapping parsed primitives
 
-`int<Str>(s)` / `float<Str>(s)` return an `int?` / `float?`: `None` when `s` is not a valid
+`s.toInt()` / `s.toFloat()` return an `int?` / `float?`: `None` when `s` is not a valid
 number. They are unwrapped in optional mode, and the arm binds a plain `int`:
 
 ```pkn
-match int<Str>(s) {
+match s.toInt() {
   n: int { return "ok: " + Str<int>(n); }
   None   { return "not a number: " + s; }
 }

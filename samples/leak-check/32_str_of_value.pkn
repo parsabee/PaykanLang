@@ -1,0 +1,141 @@
+// Isolates: `Str(x)` of every value with a text, each the box its
+// `toString()` gives:
+//   * an optional (`int?`, `Str?`, a class's), present and None; a tuple
+//     holding a `Str` and an object; a struct holding a `Str`; an enum
+//     variant holding a `Str`; an object, an `Obj` and `None`;
+//   * of a call's result, a field, a list's element and a generic value,
+//     kept in a variable, a field and a tuple, joined with `+` and dropped;
+//   * an object whose `toString()` replaces the only field that holds it
+//     (through a closure it calls), read as `Str(h.c)`, `Str(a.b.c)` and
+//     `Str(self.c)`: each stays alive until its `toString()` returns, as
+//     it does for `h.c.toString()`.
+//
+// Runtime sites: the Strs each `toString()` builds (PaykanString_new,
+// PaykanTuple_toString), the objects, and the object a `toString()`
+// replaces, released once it returns.
+//
+// Expected under --track-heap: live blocks : 0.
+
+import ::io;
+import ::collections;
+
+// expect-stdout: None 7 s1 None n2 None
+// expect-stdout: (t3, n4) Tag(label: g5) Some(text: v6) n7 n0 None
+// expect-stdout: n8 n9 n10 (n11, 12) n13
+// expect-stdout: kept n14 n15
+// expect-stdout: two1. two2.
+// expect-stdout: four3. four4.
+// expect-stdout: two5. two6.
+// expect-stdout: two7. two8.
+
+class Node {
+  name: Str;
+  view fn toString() -> Str { return self.name + ""; }
+}
+
+struct Tag {
+  label: Str;
+}
+
+enum Maybe { Some(text: Str), Empty, }
+
+class Box {
+  node: Node;
+  text: Str;
+}
+
+fn make(n: int) -> Node {
+  return Node("n" + Str(n));
+}
+
+fn show<T>(x: T) -> Str {
+  return Str(x);
+}
+
+// A `toString()` that calls `fire`, which may replace the field holding it.
+class C {
+  name: Str;
+  fire: () -> void;
+  view fn toString() -> Str {
+    self.fire();
+    y = C("y" + Str(9), fn() {});
+    return self.name + ".";
+  }
+}
+
+class H {
+  c: C;
+  view fn show() -> Str { return Str(self.c); }
+  view fn told() -> Str { return self.c.toString(); }
+}
+
+class B {
+  c: C;
+}
+
+class A {
+  b: B;
+}
+
+// The next `toString()` of `h.c` replaces `h.c`, which holds it alone.
+fn arm(h: H, n: int) {
+  v = h;
+  h.c = C("two" + Str(n), fn() { v.c = C("three" + Str(n), fn() {}); });
+}
+
+fn armB(b: B, n: int) {
+  v = b;
+  b.c = C("four" + Str(n), fn() { v.c = C("five" + Str(n), fn() {}); });
+}
+
+fn main() -> int {
+  // Every shape.
+  o: int? = None;
+  p: int? = 7;
+  s: Str? = "s" + Str(1);
+  t: Str? = None;
+  q: Node? = make(2);
+  r: Node? = None;
+  io::println(Str(o) + " " + Str(p) + " " + Str(s) + " " + Str(t) + " " + Str(q)
+      + " " + Str(r));
+  ob: Obj = make(0);
+  io::println(Str(("t" + Str(3), make(4))) + " " + Str(Tag("g" + Str(5))) + " "
+      + Str(Maybe::Some("v" + Str(6))) + " " + Str(make(7)) + " " + Str(ob)
+      + " " + Str(None));
+
+  // Of a call, a field, a list's element and a generic value.
+  bx = Box(make(9), "x");
+  xs = collections::List<Node>();
+  xs.push(make(10));
+  io::println(Str(make(8)) + " " + Str(bx.node) + " " + Str(xs.at(0)) + " "
+      + show((make(11), 12)) + " " + show(make(13)));
+
+  // Kept in a variable, a field and a tuple, then dropped.
+  kept = Str(make(14));
+  bx.text = Str(make(15));
+  pair = (Str(make(16)), 1);
+  pair = ("kept", 2);
+  io::println(pair.0 + " " + kept + " " + bx.text);
+
+  // An object its own toString() lets go of.
+  h = H(C("one" + Str(1), fn() {}));
+  arm(h, 1);
+  first = Str(h.c);
+  arm(h, 2);
+  io::println(first + " " + h.c.toString());
+  a = A(B(C("one" + Str(1), fn() {})));
+  armB(a.b, 3);
+  third = Str(a.b.c);
+  armB(a.b, 4);
+  io::println(third + " " + a.b.c.toString());
+  arm(h, 5);
+  fifth = h.show();
+  arm(h, 6);
+  io::println(fifth + " " + h.told());
+  arm(h, 7);
+  held = (Str(h.c), 1);
+  arm(h, 8);
+  c: C? = h.c;
+  io::println(held.0 + " " + Str(c));
+  return 0;
+}

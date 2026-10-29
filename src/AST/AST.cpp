@@ -218,6 +218,21 @@ bool builtinKindOfName(std::string_view name, BuiltinType::Kind &kind) {
   return false;
 }
 
+bool strParseKind(std::string_view method, BuiltinType::Kind &kind) {
+  for (const names::StrParseMethod &m : names::kStrParseMethods)
+    if (method == m.Method)
+      return builtinKindOfName(m.Target, kind);
+  return false;
+}
+
+const char *strParseMethod(BuiltinType::Kind kind) {
+  for (const names::StrParseMethod &m : names::kStrParseMethods)
+    if (BuiltinType::Kind k = BuiltinType::Void;
+        builtinKindOfName(m.Target, k) && k == kind)
+      return m.Method;
+  return nullptr;
+}
+
 void BuiltinType::initOps() {
   switch (TypeKind) {
   case U8:

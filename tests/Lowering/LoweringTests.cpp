@@ -989,7 +989,7 @@ TEST(Lowering, ContainerMethodsHoldTheirStateOnlyForWhatTheyMayLetGo) {
       q.push("x", 1);
       f = c::Stack<() -> int>();
       f.push(fn() => 2);
-      return s.pop() + int(m.len()) + int(d.len()) + q.pop().len() +
+      return s.pop() + int(u32(m.len())) + int(u32(d.len())) + q.pop().len() +
              f.pop()();
     }
   )");
@@ -1070,7 +1070,7 @@ TEST(Lowering, TheMainModuleOfAProgramKnowsItsClassesOverrides) {
       d.put("d", Dog("rex"));
       k = c::HashMap<Str, Cat>();
       k.put("k", Cat("tom"));
-      return int(d.len() + k.len());
+      return int(u32(d.len() + k.len()));
     }
   )";
   struct Case {
@@ -3055,13 +3055,153 @@ TEST(Lowering, OtherNumericConversionsAreInline) {
   EXPECT_EQ(count(l.Text, "call @$rt.Paykan_panic"), 0u) << l.Text;
 }
 
+// `f32<int>` and `f32<unsigned>` round once, in the runtime, and a constant
+// folds to the same f32, as does an integer literal in an `f32` slot
+// (new-F3c-2); a narrower source is exact in an f64, so its `itof` and
+// `fround32` are one rounding too.
+TEST(Lowering, F32OfAWideIntegerIsRoundedOnce) {
+  auto l = lower(R"(
+    fn a(n: int) -> f32 { return f32(n); }
+    fn b(u: unsigned) -> f32 { return f32(u); }
+    fn k() -> f32 { return f32(1152921573326323713); }
+    fn d() -> f32 { x: f32 = 1152921573326323713; return x; }
+    fn e(n: i32) -> f32 { return f32(n); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string a = function(l.Text, "a");
+  EXPECT_NE(a.find("call @$rt.Paykan_int_to_f32(%n."), std::string::npos) << a;
+  EXPECT_EQ(a.find("itof"), std::string::npos) << a;
+  EXPECT_EQ(a.find("fround32"), std::string::npos) << a;
+  std::string b = function(l.Text, "b");
+  EXPECT_NE(b.find("call @$rt.Paykan_uint_to_f32(%u."), std::string::npos) << b;
+  EXPECT_EQ(b.find("utof"), std::string::npos) << b;
+  // 2^60 + 2^37, the f32 nearest 2^60 + 2^36 + 1 (through the f64, 2^60).
+  for (const char *fn : {"k", "d"}) {
+    std::string f = function(l.Text, fn);
+    EXPECT_NE(f.find("1.1529216420458004e+18"), std::string::npos) << f;
+    EXPECT_EQ(f.find("call "), std::string::npos) << f;
+  }
+  std::string e = function(l.Text, "e");
+  EXPECT_NE(e.find("itof"), std::string::npos) << e;
+  EXPECT_NE(e.find("fround32"), std::string::npos) << e;
+  EXPECT_EQ(e.find("call "), std::string::npos) << e;
+}
+
+// `char<S>` checks the byte range on the slot and names its source in the
+// panic, printed unsigned for an unsigned one; a `u8` is always in range.
+TEST(Lowering, CharOfASizedIntegerNamesItsSource) {
+  auto l = lower(R"(
+    fn a(n: i32) -> char { return char(n); }
+    fn b(u: unsigned) -> char { return char(u); }
+    fn d(x: u8) -> char { return char(x); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_NE(l.Text.find("= \"i32\" len 3"), std::string::npos) << l.Text;
+  EXPECT_NE(l.Text.find("= \"unsigned\" len 8"), std::string::npos) << l.Text;
+  std::string a = function(l.Text, "a");
+  EXPECT_NE(a.find("call @$rt.Paykan_panic_to_char(%n."), std::string::npos)
+      << a;
+  EXPECT_NE(a.find(", 0, @.str"), std::string::npos) << a;
+  EXPECT_NE(a.find(", 3)"), std::string::npos) << a;
+  std::string b = function(l.Text, "b");
+  EXPECT_NE(b.find("call @$rt.Paykan_panic_to_char(%u."), std::string::npos)
+      << b;
+  EXPECT_NE(b.find(", 1, @.str"), std::string::npos) << b;
+  EXPECT_NE(b.find(", 8)"), std::string::npos) << b;
+  std::string d = function(l.Text, "d");
+  EXPECT_EQ(d.find("call "), std::string::npos) << d;
+  EXPECT_NE(d.find("to char"), std::string::npos) << d;
+  EXPECT_EQ(count(l.Text, "Paykan_panic_int_to_char"), 0u) << l.Text;
+}
+
+// The pairs of the families with a `bool` or a `char` and identity are
+// inline, `u.toInt()` is a compare and a `select`, and no conversion
+// produces an `ftou` (an unsigned target takes no float).
+TEST(Lowering, TheFamiliesPairsAreInline) {
+  auto l = lower(R"(
+    fn a(k: char) -> u8 { return u8(k); }
+    fn b(k: char) -> i8 { return i8(k); }
+    fn d(x: bool) -> u16 { return u16(x); }
+    fn e(x: u8) -> bool { return bool(x); }
+    fn f(n: int) -> int { return int(n); }
+    fn g(u: unsigned) -> int? { return u.toInt(); }
+    fn h(x: float) -> unsigned { return unsigned(int(x)); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  std::string a = function(l.Text, "a");
+  EXPECT_NE(a.find("to i64"), std::string::npos) << a;
+  EXPECT_NE(a.find("mask 8"), std::string::npos) << a;
+  std::string b = function(l.Text, "b");
+  EXPECT_NE(b.find("to i64"), std::string::npos) << b;
+  EXPECT_NE(b.find("wrap 8"), std::string::npos) << b;
+  EXPECT_NE(function(l.Text, "d").find("to i64"), std::string::npos) << l.Text;
+  EXPECT_NE(function(l.Text, "e").find("cmp ne"), std::string::npos) << l.Text;
+  std::string f = function(l.Text, "f");
+  EXPECT_EQ(count(f, " = "), 1u) << f; // the load of `n`, returned
+  std::string g = function(l.Text, "g");
+  EXPECT_NE(g.find("cmp ge %u."), std::string::npos) << g;
+  EXPECT_NE(g.find("some %u."), std::string::npos) << g;
+  EXPECT_NE(g.find("select"), std::string::npos) << g;
+  EXPECT_NE(function(l.Text, "h").find("ftoi"), std::string::npos) << l.Text;
+  EXPECT_EQ(count(l.Text, "ftou"), 0u) << l.Text;
+  EXPECT_EQ(count(l.Text, "call @$rt."), 1u) << l.Text; // h's panic
+}
+
+// `Str(x)` of a value no runtime conversion takes is `x.toString()` (the
+// lowering's showCallOf): an object's `toString` slot, a tuple's runtime
+// text, an optional's "None" or its value's, held as `h.p.toString()`
+// holds `h.p`.  It is the code of the call it stands for, and no `Str<...>`
+// callee reaches the PIR.  `Str<Str>(s)` is `s`.
+TEST(Lowering, StrOfAValueIsItsToString) {
+  const std::string decls = R"(
+    class P { x: int; view fn toString() -> Str { return "P"; } }
+    class H { p: P; }
+    fn main() -> int { return 0; }
+  )";
+  auto l = lower(decls + R"(
+    fn a(p: P) -> Str { return Str(p); }
+    fn b(t: (int, Str)) -> Str { return Str(t); }
+    fn c(o: int?) -> Str { return Str(o); }
+    fn d(h: H) -> Str { return Str(h.p); }
+    fn e(s: Str) -> Str { return Str<Str>(s); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  EXPECT_EQ(count(l.Text, "Str<"), 0u) << l.Text;
+  std::string a = function(l.Text, "a");
+  EXPECT_NE(a.find("= vcall %p.obj."), std::string::npos) << a;
+  EXPECT_NE(a.find(" : P [1] ()"), std::string::npos) << a;
+  EXPECT_NE(function(l.Text, "b").find("call @$rt.PaykanTuple_toString("),
+            std::string::npos)
+      << l.Text;
+  std::string c = function(l.Text, "c");
+  EXPECT_NE(c.find("is_some %o."), std::string::npos) << c;
+  EXPECT_NE(c.find("call @$rt.PaykanString_from_int("), std::string::npos) << c;
+  std::string d = function(l.Text, "d");
+  EXPECT_NE(d.find("retain %p."), std::string::npos) << d;
+  EXPECT_NE(d.find(" : P [1] ()"), std::string::npos) << d;
+  EXPECT_EQ(count(function(l.Text, "e"), "call "), 0u) << l.Text;
+  auto t = lower(decls + R"(
+    fn a(p: P) -> Str { return p.toString(); }
+    fn b(t: (int, Str)) -> Str { return t.toString(); }
+    fn c(o: int?) -> Str { return o.toString(); }
+    fn d(h: H) -> Str { return h.p.toString(); }
+    fn e(s: Str) -> Str { return s; }
+  )");
+  ASSERT_TRUE(t.Ok) << t.Error;
+  for (const char *fn : {"a", "b", "c", "d"})
+    EXPECT_EQ(fullFunction(l.Text, fn), fullFunction(t.Text, fn)) << fn;
+}
+
 TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalValue) {
   // The runtime parses into a local; the result is that value as the
   // present optional, or None (#96): no box.
   auto l = lower(R"(
-    fn p(s: Str) -> int? { return int<Str>(s); }
-    fn q(s: Str) -> float? { return float<Str>(s); }
-    fn t(s: Str) -> bool? { return bool<Str>(s); }
+    fn p(s: Str) -> int? { return s.toInt(); }
+    fn q(s: Str) -> float? { return s.toFloat(); }
+    fn t(s: Str) -> bool? { return s.toBool(); }
     fn main() -> int { return 0; }
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
@@ -3078,6 +3218,66 @@ TEST(Lowering, ParsesCallTheRuntimeAndReturnAnOptionalValue) {
     EXPECT_NE(fn.find(e[2]), std::string::npos) << fn;
     EXPECT_EQ(fn.find(" = box "), std::string::npos) << fn;
   }
+}
+
+TEST(Lowering, StrParseMethodsCallTheRuntimeParseOfTheirType) {
+  // `s.toInt()` & co. are the same parse: an unsigned width reads no sign
+  // (parse_uint) and a narrow one is range-checked; a sized float is the
+  // runtime's value of the type, not rounded again; the receiver is
+  // borrowed, a temporary one released after the parse.
+  auto l = lower(R"(
+    fn a(s: Str) -> int? { return s.toInt(); }
+    fn b(s: Str) -> i8? { return s.toI8(); }
+    fn c(s: Str) -> unsigned? { return s.toUnsigned(); }
+    fn d(s: Str) -> u8? { return s.toU8(); }
+    fn e(s: Str) -> float? { return s.toFloat(); }
+    fn f(s: Str) -> f32? { return s.toF32(); }
+    fn g(s: Str) -> f16? { return s.toF16(); }
+    fn h(s: Str) -> bool? { return s.toBool(); }
+    fn k(s: Str) -> u32? { return s.toU32(); }
+    fn t(s: Str) -> u16? { return (s + "0").toU16(); }
+    fn main() -> int { return 0; }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const char *expected[][3] = {
+      {"a", "PaykanString_parse_int(", "none opt_i64"},
+      {"b", "PaykanString_parse_int(", "none opt_i64"},
+      {"c", "PaykanString_parse_uint(", "none opt_i64"},
+      {"d", "PaykanString_parse_uint(", "none opt_i64"},
+      {"e", "PaykanString_parse_float(", "none opt_f64"},
+      {"f", "PaykanString_parse_f32(", "none opt_f64"},
+      {"g", "PaykanString_parse_f16(", "none opt_f64"},
+      {"h", "PaykanString_parse_bool(", "none opt_bool"},
+      {"k", "PaykanString_parse_uint(", "none opt_i64"},
+      {"t", "PaykanString_parse_uint(", "none opt_i64"},
+  };
+  for (const auto &e : expected) {
+    std::string fn = function(l.Text, e[0]);
+    EXPECT_EQ(count(fn, "call @$rt.PaykanString_parse_"), 1u) << fn;
+    EXPECT_NE(fn.find(std::string("call @$rt.") + e[1]), std::string::npos)
+        << fn;
+    EXPECT_NE(fn.find(" = some "), std::string::npos) << fn;
+    EXPECT_NE(fn.find(e[2]), std::string::npos) << fn;
+    EXPECT_EQ(fn.find(" = box "), std::string::npos) << fn;
+    // No rounding after the parse, nor a range check of a 64-bit one.
+    EXPECT_EQ(fn.find("fround32"), std::string::npos) << fn;
+    EXPECT_EQ(fn.find("Paykan_round_f16"), std::string::npos) << fn;
+  }
+  for (const char *narrow : {"b", "d", "k", "t"}) {
+    std::string fn = function(l.Text, narrow);
+    EXPECT_NE(fn.find("cmp ge"), std::string::npos) << fn;
+    EXPECT_NE(fn.find("cmp le"), std::string::npos) << fn;
+  }
+  for (const char *wide : {"a", "c", "e", "f", "g", "h"})
+    EXPECT_EQ(function(l.Text, wide).find("cmp le"), std::string::npos)
+        << function(l.Text, wide);
+  // The concatenation the receiver is, disposed of after the parse.
+  std::string t = function(l.Text, "t");
+  const size_t parse = t.find("PaykanString_parse_uint(%concat");
+  ASSERT_NE(parse, std::string::npos) << t;
+  EXPECT_NE(t.find("call @$rt.Paykan_dispose(%concat", parse),
+            std::string::npos)
+      << t;
 }
 
 // -- Moves at last use (docs/pir.md §12): a copy at a variable's last use is
@@ -3466,7 +3666,7 @@ TEST(LoweringMoves, AStableReadOfAContainersStateKeepsTheHandOff) {
       m.put("c", 1);
       h = c::HashSet<Str>();
       h.add("d");
-      return int(s.len() + q.len() + m.len() + h.len());
+      return int(u32(s.len() + q.len() + m.len() + h.len()));
     }
   )"),
                  stats);

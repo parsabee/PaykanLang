@@ -1,0 +1,86 @@
+// 77 — Str(x) of every value with a text
+// Exercises: `Str(x)` and `Str<T>(x)` for every type that has a text
+//            (docs/language/04-strings-and-conversions.md, "To a string"),
+//            the text `x.toString()` gives: an optional, present and None
+//            (`int?`, `Str?`, a class's), a tuple, a struct, an enum with
+//            and without fields, an object (its own `toString()`, or one
+//            inherited from a superclass), an `Obj` and `None`; in a generic
+//            function, for each type it is instantiated with; and `Str(s)`
+//            and `Str<Str>(s)` of a `Str`, which are the string itself.
+// expect-stdout: None 5 hi None
+// expect-stdout: Point(1, 2) None Point(3, 4)
+// expect-stdout: (1, a, 2.5) Size(w: 2, h: 3) North Circle(r: 1.5)
+// expect-stdout: Point(5, 6) Point(7, 8) None
+// expect-stdout: Point(9, 9) (1, x) 42 None Square(side: 2)
+// expect-stdout: same same True
+// expect-stdout: True True True
+
+import ::io;
+
+class Point {
+  x: int;
+  y: int;
+  view fn toString() -> Str {
+    return "Point(" + Str(self.x) + ", " + Str(self.y) + ")";
+  }
+}
+
+class Named : Point {
+  name: Str;
+}
+
+struct Size {
+  w: int;
+  h: int;
+}
+
+enum Heading { North, South }
+
+enum Shape {
+  Circle(r: float),
+  Square(side: int),
+}
+
+class Plain {
+  n: int;
+}
+
+fn show<T>(x: T) -> Str {
+  return Str(x);
+}
+
+fn main() -> int {
+  // Optionals: "None", or the value's text.
+  o: int? = None;
+  p: int? = 5;
+  s: Str? = "hi";
+  t: Str? = None;
+  io::println(Str(o) + " " + Str(p) + " " + Str(s) + " " + Str(t));
+  a: Point? = Point(1, 2);
+  b: Point? = None;
+  io::println(Str(a) + " " + Str(b) + " " + Str<Point>(Point(3, 4)));
+
+  // Values held in place: a tuple's elements unquoted, as println prints
+  // them; a struct's fields; an enum's variant and its fields.
+  io::println(Str((1, "a", 2.5)) + " " + Str(Size(2, 3)) + " "
+      + Str(Heading::North) + " " + Str(Shape::Circle(1.5)));
+
+  // Objects: their toString(), dispatched on what they are.
+  n = Named(5, 6, "n");
+  ob: Obj = Point(7, 8);
+  io::println(Str(n) + " " + Str(ob) + " " + Str(None));
+
+  // In a generic function, for each type it is instantiated with.
+  io::println(show(Point(9, 9)) + " " + show((1, "x")) + " " + show(42) + " "
+      + show(o) + " " + show(Shape::Square(2)));
+
+  // A Str is itself.
+  word = "same";
+  io::println(Str(word) + " " + Str<Str>(word) + " " + Str(Str(word) == word));
+
+  // The same text as toString(), and as println prints it.
+  q = Plain(1);
+  io::println(Str(Str(q) == q.toString()) + " " + Str(Str(Size(1, 1))
+      == Size(1, 1).toString()) + " " + Str(Str(a) == a.toString()));
+  return 0;
+}

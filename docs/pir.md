@@ -478,7 +478,8 @@ an operation, and give `unsigned` (`u64`) its unsigned semantics:
 %r = ucmp lt %a, %b | le | gt | ge | eq | ne   ; i64 -> bool: unsigned comparison
 %r = utof %a                                   ; i64 -> f64: the unsigned reading of the bits
 %r = ftou %a                                   ; f64 -> i64: toward zero, as uint64 bits; only for
-                                               ; %a in [0, 2^64): the lowering guards the range
+                                               ; %a in [0, 2^64) (the lowering no longer emits it:
+                                               ; no unsigned type converts from a float)
 %r = fround32 %a                               ; f64 -> f64: rounded to the nearest f32
 ```
 
@@ -1022,13 +1023,21 @@ CodeGen enforced, now in one place.
   in the array's `mem` (16 bytes for `int?` and `float?`, 2 for `bool?` and
   `char?`), read and written in place, and so is an `int?` element of a
   tuple, at its offset.
-* **Conversions** (`Target<Source>(value)`, #64): `Str<…>` calls
-  `PaykanString_from_int` & co. (an owned string temporary); `int<Str>` /
-  `float<Str>` / `bool<Str>` call `PaykanString_parse_int` /
-  `PaykanString_parse_float` / `PaykanString_parse_bool` with the
-  `local.addr` of a local the value is parsed into, and are the `select` of
-  `some` of that value (a valid string) or `none` (`bool<Str>` accepts
-  exactly `"True"` and `"False"`).  The numeric ones are inline: `int<float>` checks
+* **Conversions** (`Target<Source>(value)`, #64): `Str<…>` of a scalar
+  calls `PaykanString_from_int` & co. (an owned string temporary).  `Str<T>`
+  of any other type with a text is `x.toString()`, lowered as that call is
+  (an object's `vcall` of its `toString` slot, `PaykanTuple_toString` & co.,
+  an optional's branch; a fresh box), and `Str<Str>(s)` is `s`: no `Str<…>`
+  callee reaches the PIR.  A parse,
+  `s.toInt()` / `s.toFloat()` / `s.toBool()` & co. (no conversion parses a
+  `Str`), calls `PaykanString_parse_int` / `PaykanString_parse_float` /
+  `PaykanString_parse_bool` on the borrowed string with the `local.addr` of
+  a local the value is parsed into, and is the `select` of `some` of that
+  value (a valid string) or `none` (`toBool()` accepts exactly `"True"` and
+  `"False"`).  Every unsigned width calls `PaykanString_parse_uint`, which
+  takes no sign; `toF32()` and `toF16()` call `PaykanString_parse_f32` /
+  `PaykanString_parse_f16`, whose value is already the type's, with no
+  `fround32` or rounding call after it.  The numeric ones are inline: `int<float>` checks
   `cmp ge %f, -2^63` and `cmp lt %f, 2^63` (both false for NaN) and calls
   `@$rt.Paykan_panic_float_to_int(%f)` then `unreachable` otherwise, before the
   `ftoi`; `float<int>` is `itof`; `int<bool>` and `int<char>` are `cast`s to
@@ -1036,7 +1045,7 @@ CodeGen enforced, now in one place.
   `cmp ne %n, 0`; `char<int>` panics outside 0..255
   (`@$rt.Paykan_panic_int_to_char`) and maps 128..255 to the same byte's signed
   value before the truncating `cast`, so no backend converts an out-of-range
-  value.
+  value.  A conversion of a type to itself (`int<int>`) is its operand.
 * **Division**: integer `div` is preceded by `if %b == 0 { call @$rt.Paykan_panic_div_by_zero(); unreachable }`
   and the `INT64_MIN / -1` check; `rem` replaces a `-1` divisor by `1`.
 * **Sized numeric types**: an arithmetic result of a narrow type is followed
@@ -1044,12 +1053,23 @@ CodeGen enforced, now in one place.
   `@$rt.Paykan_round_f16` call (`f16`); an `unsigned` uses `udiv`, `urem`
   and `ucmp`, and the `INT64_MIN / -1` check is only emitted for `int`.  The
   conversions between numeric types are the same instructions (`u8<int>` is
-  `mask 8`, `float<unsigned>` is `utof`, `unsigned<float>` guards `[0, 2^64)`
-  then `ftou`, `i8<float>` guards `(-129, 128)` and calls
-  `@$rt.Paykan_panic_float_to_type(%f, @.strN, 2)` otherwise, then `ftoi`);
-  `Str<unsigned>` and `unsigned<Str>` call `PaykanString_from_uint` /
-  `PaykanString_parse_uint`, and a parse into a narrow integer compares the
-  parsed `i64` against the type's range before the `some`.
+  `mask 8`, `float<unsigned>` is `utof`, `i8<float>` guards `(-129, 128)` and
+  calls `@$rt.Paykan_panic_float_to_type(%f, @.strN, 2)` otherwise, then
+  `ftoi`; no unsigned type converts from a float, so no `ftou` is emitted).
+  `f32<int>` and `f32<unsigned>` call `@$rt.Paykan_int_to_f32` /
+  `@$rt.Paykan_uint_to_f32`, which round the integer once (an `itof` would
+  round it first to an `f64`), and a constant operand folds to that `f32`;
+  an integer literal in an `f32` slot is that constant.  A narrower integer
+  into `f32`, and every integer into `f16`, is `itof`/`utof` then the
+  rounding, exact before it.  A `bool` into an integer type is a `cast` to
+  `i64`, a `char` a `cast` then the `wrap`/`mask` of the type, an integer
+  into `bool` a `cmp ne %n, 0`; `char<S>` of an integer type other than
+  `int` checks 0..255 as `char<int>` does (none for `u8`) and calls
+  `@$rt.Paykan_panic_to_char(%n, unsigned, @.strN, len)` with the source's
+  name.  `u.toInt()` on an `unsigned` is `cmp ge %u, 0` and the `select` of
+  `some %u` or `none`.  `Str<unsigned>` calls `PaykanString_from_uint`, and a
+  parse into a narrow integer compares the parsed `i64` against the type's
+  range before the `some`.
 
 ## 8. Runtime ABI (extern declarations the lowering may emit)
 
@@ -1077,9 +1097,12 @@ Paykan_panic_float_to_int(f64) -> void  Paykan_panic_int_to_char(i64) -> void
 Paykan_panic_index(i64, i64) -> void    ; the index, the length
 Paykan_panic_for_step() -> void         ; a `for` loop's computed step is 0
 Paykan_panic_float_to_type(f64, ptr, i64) -> void   ; the value, the target type's name and its length
+Paykan_panic_to_char(i64, i64, ptr, i64) -> void    ; `char<S>`: the value, whether S is unsigned, S's name and its length
 Paykan_panic_pure_virtual(ptr, i64, ptr, i64) -> void ; a pure virtual method's trap: the class's name and the method's, each with its length
 ; sized numeric types
 Paykan_round_f16(f64) -> f64            ; rounded to the nearest f16
+Paykan_int_to_f32(i64) -> f64           Paykan_uint_to_f32(i64) -> f64
+                                        ; the int / the uint64 of the bits, rounded once to the nearest f32
 ; strings
 PaykanString_new(ptr, i64) -> obj       PaykanString_destroy(obj) -> void
 PaykanString_concat(obj, obj) -> obj    PaykanString_char_at(obj, i64) -> char
@@ -1089,7 +1112,9 @@ PaykanString_equals(obj, box, i64) -> i64   PaykanString_toString(obj) -> box
 PaykanString_length(obj) -> i64
 PaykanString_parse_int(obj, ptr) -> i64     PaykanString_parse_float(obj, ptr) -> i64
 PaykanString_parse_bool(obj, ptr) -> i64    ; 1 and the value at ptr, or 0 (and 0 there)
-PaykanString_from_uint(i64) -> obj      PaykanString_parse_uint(obj, ptr) -> i64   ; `unsigned`
+PaykanString_from_uint(i64) -> obj      PaykanString_parse_uint(obj, ptr) -> i64   ; `unsigned`, no sign
+PaykanString_parse_f32(obj, ptr) -> i64     PaykanString_parse_f16(obj, ptr) -> i64
+                                        ; the f64 slot of the f32 / f16 value; 0 when finite text rounds to infinity
 ; hash (the builtin Hashable's `hash()`)
 PaykanInt_hash(i64) -> i64              PaykanString_hash(obj) -> i64
 ; tuples: the address of the value (of both, for equals), then its layout

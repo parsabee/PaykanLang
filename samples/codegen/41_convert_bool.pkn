@@ -1,8 +1,8 @@
-// 41 — bool<Str> and parsing settings into optionals (#88)
-// Exercises: int<Str> / float<Str> / bool<Str>, which parse into an
+// 41 — toBool() and parsing settings into optionals (#88)
+// Exercises: toInt() / toFloat() / toBool(), which parse into an
 //            optional value (`int?` & co., None for an invalid string), and
 //            Str<int> / Str<float> / Str<bool>, which format the unwrapped
-//            value; bool<Str> accepts exactly "True" / "False" and so
+//            value; toBool() accepts exactly "True" / "False" and so
 //            round-trips Str<bool>.  Both spellings appear: the inferred
 //            `Str(n)` (the specialization for the argument's exact type) and
 //            the explicit `Str<int>(n)`.
@@ -19,19 +19,19 @@
 import ::io;
 
 fn describe(s: Str) -> Str {
-  match int(s) {
+  match s.toInt() {
     n: int {
       return "int " + Str<int>(n);
     }
     None { }
   }
-  match float(s) {
+  match s.toFloat() {
     f: float {
       return "float " + Str(f);
     }
     None { }
   }
-  match bool(s) {
+  match s.toBool() {
     b: bool {
       return "bool " + Str<bool>(b);
     }
@@ -54,15 +54,14 @@ fn main() -> int {
   while k < keys.len() {
     text = "";
     if keys[k] == "ratio" {
-      match float<Str>(vals[k]) {
+      match vals[k].toFloat() {
         x: float {
           text = Str<float>(x);
         }
         None { }
       }
     } elif keys[k] == "verbose" || keys[k] == "color" {
-      match bool(vals[k]) {
-        // bool<Str>
+      match vals[k].toBool() {
         x: bool { text = Str<bool>(x); }
         None { }
       }
@@ -70,7 +69,7 @@ fn main() -> int {
         io::println("'" + vals[k] + "' is not a bool");
       }
     } else {
-      match int(vals[k]) {
+      match vals[k].toInt() {
         x: int { text = Str(x); }
         None { }
       }
@@ -88,8 +87,8 @@ fn main() -> int {
       + " valid");
   io::println(line);
 
-  // bool<Str> takes exactly the spellings Str<bool> prints.
-  match bool<Str>("true") {
+  // toBool() takes exactly the spellings Str<bool> prints.
+  match "true".toBool() {
     v: bool {
       io::println("parsed " + Str<bool>(v));
     }
@@ -101,8 +100,8 @@ fn main() -> int {
   flags: bool[2] = [True, False];
   j = 0;
   while j < flags.len() {
-    match bool(Str(flags[j])) {
-      // bool<Str>(Str<bool>(...))
+    match Str(flags[j]).toBool() {
+      // Str<bool>(...).toBool()
       v: bool {
         out = out + " " + Str<bool>(v);
       }
@@ -113,8 +112,8 @@ fn main() -> int {
   io::println(out);
 
   // A failed parse is None.
-  missing: int? = int<Str>("4 2");
+  missing: int? = "4 2".toInt();
   io::println(missing);
-  io::println(bool(""));
+  io::println("".toBool());
   return 0;
 }

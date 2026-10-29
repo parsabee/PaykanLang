@@ -96,7 +96,10 @@ You use a built-in trait every time you print: `io::println` is declared
   -> int; }` is not `Show` (`'S' does not implement trait 'Show', which 'io::println'
   requires of 'T': its field 'f' has type '(int) -> int', which does not implement it`, and
   `s.toString()` is an error), nor is `(1, f)` or an enum with such a variant. The
-  standard library's print functions (`io::println<T: Show>`) take any `Show` value.
+  standard library's print functions (`io::println<T: Show>`) take any `Show` value, and
+  `Str(x)` gives the text `x.toString()` gives for every `Show` value `x` (see
+  [To a string](04-strings-and-conversions.md#to-a-string): `Str(s)` of a `Str` is `s`
+  itself, so it takes no `view` of one).
 - The built-in trait `Hashable` (`view fn hash() -> int`) is implemented by `int`, `bool`,
   `char` and `Str`, every sized integer type, and by a class or a struct with an
   `impl Hashable for` block. The standard library's hash tables take `Hashable` keys (see

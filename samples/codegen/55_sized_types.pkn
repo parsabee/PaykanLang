@@ -2,8 +2,8 @@
 // Exercises: i8/i16/i32, u8/u16/u32, unsigned (u64), f16/f32: literals taking
 //            the type their context expects, arithmetic wrapping to the
 //            width, unsigned division, remainder and ordering, f32/f16
-//            rounding after each operation, the conversions between every
-//            numeric type (wrapping, truncating with a range panic, rounding),
+//            rounding after each operation, the conversions of each family
+//            (wrapping, truncating with a range panic, rounding),
 //            Str(...) and toString(), parsing into T?, hash(), sized fields
 //            of a struct, elements of a tuple and a fixed-size array, a
 //            generic class over a sized type, an optional and a match.
@@ -58,7 +58,7 @@ fn main() -> int {
   // unsigned: the same bits as int, read unsigned.
   u: unsigned = unsigned(-1);
   io::println(Str(u) + " " + Str(u / 2) + " " + Str(u % 10) + " " + Str(u > 1)
-      + " " + Str(int(u)));
+      + " " + Str(i32(u32(u))));
 
   // f32 and f16 round after each operation.
   x: f32 = 0.1;
@@ -69,11 +69,12 @@ fn main() -> int {
 
   // Conversions: wrapping, truncating, rounding.
   n: i8 = -128;
-  io::println(Str(u8(300)) + " " + Str(i8(200)) + " " + Str(i32(-1.5)) + " " +
-      Str(float(u)) + " " + Str(u64(1.5)) + " " + Str(-n) + " " + Str(n / -1));
+  io::println(Str(u8(300)) + " " + Str(i8(200)) + " " + Str(i32(-1.5)) + " "
+      + Str(float(u)) + " " + Str(u64(int(1.5))) + " " + Str(-n) + " "
+      + Str(n / -1));
 
   // Parsing into T?, printed through println's optional rendering.
-  p: u16? = u16("65535");
+  p: u16? = "65535".toU16();
   match p {
     v: u16 {
       match v {
@@ -83,11 +84,11 @@ fn main() -> int {
     }
     None { io::print("none "); }
   }
-  q: u8? = u8("256");
-  r: i8? = i8("-128");
-  s: unsigned? = unsigned("18446744073709551615");
-  t: unsigned? = unsigned("-1");
-  w: f32? = f32("0.1");
+  q: u8? = "256".toU8();
+  r: i8? = "-128".toI8();
+  s: unsigned? = "18446744073709551615".toUnsigned();
+  t: unsigned? = "-1".toUnsigned();
+  w: f32? = "0.1".toF32();
   io::print(q);
   io::print(" ");
   io::print(r);

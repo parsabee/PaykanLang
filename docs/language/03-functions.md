@@ -280,7 +280,7 @@ keep what it shares. With `fn keep(c: Counter)` and `v: view = Counter()`, `keep
 error: `'v' is a 'view' local; it can only be passed to a 'view' parameter, and parameter 1
 of 'keep' is not one`. The fix is to make that parameter `view` too. The builtin methods
 only read, and so do the standard library's print functions (`io::println(v)` takes a
-`view T`). `Str(s)` with a `Str` returns `s`
+`view T`). `Str(s)` with a `Str`, like `Str<Str>(s)`, returns `s`
 itself, so it takes no `view`.
 
 A value type read through a `view` -- an `int` parameter `n: view int`, a local `k: view =

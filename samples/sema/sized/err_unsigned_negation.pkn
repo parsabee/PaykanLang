@@ -1,7 +1,8 @@
-// An unsigned type has no negation, and a conversion needs a numeric source.
+// An unsigned type has no negation, and takes no float: the error names the
+// conversion through `int`.
 fn main() -> int {
   a: u16 = 3;
   b = -a;           // error: unary '-' is not defined for type 'u16'
-  c = u8('a');      // error: no specialization of 'u8' for 'char'; its specializations are Str, int, float, i8, i16, i32, u16, u32, unsigned, f16, f32
+  c = u8(2.5);      // error: no specialization of 'u8' for 'float': convert the 'float' to an 'int' first: 'u8(int(...))' truncates toward zero, then keeps the low 8 bits
   return 0;
 }

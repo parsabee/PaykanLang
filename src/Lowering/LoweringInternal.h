@@ -662,6 +662,13 @@ private:
 
   /// A `Str<...>` conversion: returns an owned PaykanString temporary.
   static bool isStrConversion(const std::string &callee);
+  /// `Str(x)` of a value no runtime conversion takes (a `Str<T>` callee
+  /// Sema's textConversion rebinds it to, which FunctionTable does not
+  /// hold): the call `x.toString()` it is, built once per call; nullptr for
+  /// any other call.  The emitter and both hold analyses (BorrowedReads,
+  /// EffectScan) take it in place of the call, so they agree on what it runs.
+  ast::MethodCallExpr *showCallOf(ast::CallExpr *ce);
+  std::unordered_map<const ast::CallExpr *, ast::MethodCallExpr *> ShowCalls;
 
   // -- Optionals
 
@@ -779,9 +786,11 @@ private:
     /// yet.
     std::unordered_map<const ast::Expr *, Val> ChainValues;
 
-    /// `int<Str>`, `float<Str>`, `bool<Str>`: the optional value of the
-    /// runtime's parse; an invalid Val for any other call.
-    Val emitParse(ast::CallExpr *node);
+    /// The optional value of the runtime's parse of the string object
+    /// @p str into @p target, the core of `s.toInt()` & co.; @p owned, a
+    /// temporary @p str is part of, is released after the parse.
+    Val emitParseOf(const Val &str, const ExprValue &owned,
+                    ast::BuiltinType::Kind target);
 
     Val emitIdentityCtor(ast::CallExpr *node);
     Val emitConversion(ast::CallExpr *node);
@@ -806,11 +815,15 @@ private:
     Val emitStructMethodCall(ast::MethodCallExpr *node, ast::StructType *st,
                              bool wantAddress);
     /// visitMethodCallExpr's kinds of call, each in a frame of its own: a
-    /// field's function value, `hash()`, an optional's `toString()`, a
-    /// tuple's, a struct's, an enum's or a builtin type's, and a class's
-    /// method.
+    /// field's function value, `hash()`, a Str's parse into @p target
+    /// (`s.toInt()` & co.), an `unsigned`'s `toInt()`, an optional's
+    /// `toString()`, a tuple's, a struct's, an enum's or a builtin type's,
+    /// and a class's method.
     Val emitFieldCall(ast::MethodCallExpr *node);
     Val emitHashCall(ast::MethodCallExpr *node);
+    Val emitStrParseCall(ast::MethodCallExpr *node,
+                         ast::BuiltinType::Kind target);
+    Val emitUnsignedToInt(ast::MethodCallExpr *node);
     Val emitOptionalToStringCall(ast::MethodCallExpr *node);
     Val emitShowCall(ast::MethodCallExpr *node);
     Val emitClassMethodCall(ast::MethodCallExpr *node, bool wantAddress);

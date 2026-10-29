@@ -558,11 +558,11 @@ way, with the same AST.
 ### Conversion constructors
 
 A conversion `Target<Source>(value)` (`Str<int>(n)`, `int<float>(f)`,
-`int<Str>(s)`, ..., see [`language/02-basics.md`](language/02-basics.md)) is not
+`bool<int>(n)`, ..., see [`language/02-basics.md`](language/02-basics.md)) is not
 a separate production: it is the generic-call form above. The builtin type
 names `int`, `float`, `bool`, `char`, `void` and the sized numeric types
 (`u8`, `i32`, `unsigned`, `f32`, ...) are ordinary `IDENT`s (they are
-resolved as type names, not reserved by the scanner), so `int<Str>(s)`
+resolved as type names, not reserved by the scanner), so `int<float>(f)`
 parses exactly like `Box<int>(1)`. Every frontend builds a `CallExpr` whose
 callee is the target name, with one type argument and one argument. Sema
 tells a conversion apart from a generic constructor by its callee.

@@ -1179,14 +1179,34 @@ std::string floatText(double value) {
   return buf;
 }
 
+/// The hint for a parse method of `Str` spelled with another name of its
+/// type (`toI64` for `toInt`): there is one method per type, under its
+/// canonical name.  Empty for any other method.
+std::string parseAliasHint(const std::string &method) {
+  struct Alias {
+    const char *Method;
+    const char *Hint;
+  };
+  static constexpr Alias kAliases[] = {
+      {"toI64", " (an 'i64' is an 'int': parse it with 'toInt()')"},
+      {"toU64", " (a 'u64' is an 'unsigned': parse it with 'toUnsigned()')"},
+      {"toF64", " (an 'f64' is a 'float': parse it with 'toFloat()')"},
+  };
+  for (const Alias &a : kAliases)
+    if (method == a.Method)
+      return a.Hint;
+  return {};
+}
+
 /// Whether the finite @p value, rounded to the float kind @p k, stays finite.
 bool floatFits(ast::BuiltinType::Kind k, double value) {
   if (std::isinf(value) || std::isnan(value))
     return true; // `inf` and `nan` are not literals; nothing to check
   switch (k) {
   case ast::BuiltinType::F32:
-    return std::fabs(value) <= 3.4028235677973366e+38; // the f32 maximum,
-                                                       // plus half an ulp
+    // Below 2^128 - 2^103, the f32 maximum plus half an ulp: that midpoint
+    // itself is a tie, which rounds to even, that is to infinity.
+    return std::fabs(value) < 0x1.ffffffp+127;
   case ast::BuiltinType::F16:
     return std::fabs(value) < 65520.0; // rounds to the f16 maximum, 65504
   default:
@@ -1816,11 +1836,22 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
     return nullptr;
   }
 
+  // `+` joins two strings: of a `Str` and another value with a text, the
+  // error says how to make the other one a `Str`.
+  auto concatHint = [&]() -> std::string {
+    if (node->getOpcode() != ast::BinaryOpcode::Add ||
+        (lhsTy == S.Ctx.getStrTy()) == (rhsTy == S.Ctx.getStrTy()))
+      return {};
+    ast::Type *other = lhsTy == S.Ctx.getStrTy() ? rhsTy : lhsTy;
+    if (!S.hasText(other))
+      return {};
+    return " (convert the '" + typeName(other) + "' with 'Str(...)')";
+  };
   if (!lhsTy->hasBinaryOp(node->getOpcode(), rhsTy)) {
     S.error(node->getLocation(),
             "operator '" + std::string(node->getOpcodeStr()) +
                 "' is not defined for types '" + typeName(lhsTy) + "' and '" +
-                typeName(rhsTy) + "'");
+                typeName(rhsTy) + "'" + concatHint());
     return nullptr;
   }
 
@@ -1872,11 +1903,9 @@ ast::Type *Sema::ExprChecker::visitBinaryExpr(ast::BinaryExpr *node) {
       return S.Ctx.getStrTy();
     // `+` is both Str's and the numbers', but never between them.
     if (lhsTy == S.Ctx.getStrTy() || rhsTy == S.Ctx.getStrTy()) {
-      ast::Type *other = lhsTy == S.Ctx.getStrTy() ? rhsTy : lhsTy;
       S.error(node->getLocation(), "operator '+' is not defined for types '" +
                                        typeName(lhsTy) + "' and '" +
-                                       typeName(rhsTy) + "' (convert the '" +
-                                       typeName(other) + "' with 'Str(...)')");
+                                       typeName(rhsTy) + "'" + concatHint());
       return nullptr;
     }
     [[fallthrough]];
@@ -2282,9 +2311,12 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
   // `n.toString()` on an int, float, bool or char, on a tuple or a struct,
   // or on an enum (its variant, and its fields), each part of which has a
   // text: the builtin `Show`; `n.hash()` on an int, bool or char, and
-  // `s.hash()` on a Str: the builtin `Hashable`.
+  // `s.hash()` on a Str: the builtin `Hashable`; `s.toInt()` & co. on a Str:
+  // its parses, each the optional of its type; `u.toInt()` on an `unsigned`:
+  // its value as an `int?`, None above the `int` range.
   const std::string &mname = node->getMethodName();
   ast::Type *builtinResult = nullptr;
+  ast::BuiltinType::Kind parsed = ast::BuiltinType::Void;
   if (!ct &&
       ((ast::isa<ast::BuiltinType>(recvTy) && recvTy != S.Ctx.getVoidTy()) ||
        ast::isa<ast::TupleType>(recvTy) || ast::isa<ast::EnumType>(recvTy)) &&
@@ -2300,6 +2332,11 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                 recvTy == S.Ctx.getBoolTy() || recvTy == S.Ctx.getCharTy())) ||
               ct == S.Ctx.getStrTy())) {
     builtinResult = S.Ctx.getIntTy();
+  } else if (ct == S.Ctx.getStrTy() && ast::strParseKind(mname, parsed)) {
+    builtinResult = S.Ctx.getOptionalType(S.Ctx.getBuiltinType(parsed));
+  } else if (recvTy == S.Ctx.getBuiltinType(ast::BuiltinType::U64) &&
+             mname == names::kMethodToInt) {
+    builtinResult = S.Ctx.getOptionalType(S.Ctx.getIntTy());
   }
   if (builtinResult) {
     if (node->getNumArguments() != 0) {
@@ -2356,8 +2393,11 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   "', which is not a function type)");
       return nullptr;
     }
-    S.error(node->getLocation(), "no method '" + node->getMethodName() +
-                                     "' on type '" + ownerName + "'");
+    S.error(node->getLocation(),
+            "no method '" + node->getMethodName() + "' on type '" + ownerName +
+                "'" +
+                (ct == S.Ctx.getStrTy() ? parseAliasHint(node->getMethodName())
+                                        : std::string()));
     return nullptr;
   }
 
@@ -3080,7 +3120,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
   // Register type-conversion builtins (take unique builtin types — no ownership
   // check needed).
   auto *StrTy = Ctx.getStrTy();
-  // The conversions (`Str<int>(n)`, `int<Str>(s)`, ...) are not functions:
+  // The conversions (`Str<int>(n)`, `int<float>(x)`, ...) are not functions:
   // checkConversion handles them (#64).
   declareFunction(names::kString, StrTy, {StrTy}, true);
 
@@ -3140,71 +3180,107 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
 
 // -- Conversion constructors (#64, #88)
 //
-// `Target<Source>(value)` converts between the primitives and `Str`.  Each
-// builtin target has a fixed, closed set of specializations (the valid
-// sources), and no other type, builtin or user-defined, can be one. The source
-// is written (`Str<int>(n)`, checkConversion) or inferred from the argument's
-// exact type (`Str(n)`, inferConversion).  The semantics live in the lowering
-// (Lowering/LoweringExpr.cpp, emitConversion and the runtime table), which both
-// backends inherit.
+// `Target<Source>(value)` converts a value to a primitive or to `Str`.  Each
+// primitive target has a fixed, closed set of specializations (the valid
+// sources), and no other type, builtin or user-defined, can be one.  `Str`
+// takes every type that has a text (hasText): a scalar through the runtime,
+// any other type as its `toString()` (the lowering's showCallOf), and a `Str`
+// is itself.  The source is written (`Str<int>(n)`, checkConversion) or
+// inferred from the argument's exact type (`Str(n)`, inferConversion).  The
+// numeric targets take the sources of their family
+// (docs/language/04-strings-and-conversions.md, "Between numbers"), and the
+// error of a pair a family leaves out names the rewrite.  The semantics live
+// in the lowering (Lowering/LoweringExpr.cpp, emitConversion and the runtime
+// table), which both backends inherit.  A primitive does not parse a `Str`:
+// that is a method of the string (`s.toInt()`), which the error names.
 
 struct ConversionPair {
   std::string Target;
   std::string Source;
   std::string Spelled; // the rebound callee the lowering dispatches on
-  bool Parses;         // a parse of a Str: the result is the optional target
 };
 
 namespace {
 
+/// The primitive sources, in the order a diagnostic lists them.
+constexpr ast::BuiltinType::Kind kConversionSources[] = {
+    ast::BuiltinType::Int, ast::BuiltinType::Float, ast::BuiltinType::I8,
+    ast::BuiltinType::I16, ast::BuiltinType::I32,   ast::BuiltinType::U8,
+    ast::BuiltinType::U16, ast::BuiltinType::U32,   ast::BuiltinType::U64,
+    ast::BuiltinType::F16, ast::BuiltinType::F32,   ast::BuiltinType::Bool,
+    ast::BuiltinType::Char};
+
+/// Whether `t(x)` takes an `s` (docs/language/04-strings-and-conversions.md,
+/// "Between numbers"): every primitive its own value; the float family every
+/// number; the unsigned family every integer, `bool` and `char`; the signed
+/// family the same but `unsigned`, and every float; `bool` and `char` every
+/// integer.
+bool convertsFrom(ast::BuiltinType::Kind t, ast::BuiltinType::Kind s) {
+  using B = ast::BuiltinType;
+  if (t == s)
+    return true;
+  if (B::isFloatKind(t))
+    return B::isNumericKind(s);
+  if (B::isUnsignedKind(t))
+    return B::isIntegerKind(s) || s == B::Bool || s == B::Char;
+  if (B::isIntegerKind(t))
+    return (B::isIntegerKind(s) && s != B::U64) || B::isFloatKind(s) ||
+           s == B::Bool || s == B::Char;
+  if (t == B::Bool || t == B::Char)
+    return B::isIntegerKind(s);
+  return false;
+}
+
 /// The conversions, grouped by target, each group in the order its
-/// diagnostics list it: `Str` from every scalar; `int`, `float` and the
-/// sized numeric types from a `Str` (a parse) and from every other numeric
-/// type; `bool` and `char` from `int` only (docs/design/sized-types.md).
+/// diagnostics list it: `Str` from every scalar (the runtime's; any other
+/// type with a text is Sema::textConversion's), and each primitive from the
+/// sources convertsFrom gives it, in kConversionSources' order.
 const std::vector<ConversionPair> &conversions() {
   static const std::vector<ConversionPair> kTable = [] {
     using ast::BuiltinType;
     std::vector<ConversionPair> t;
-    auto add = [&](const std::string &target, const std::string &source,
-                   bool parses) {
-      t.push_back({target, source, target + "<" + source + ">", parses});
+    auto add = [&](const std::string &target, const std::string &source) {
+      t.push_back({target, source, target + "<" + source + ">"});
     };
-    // The numeric types, in the order the diagnostics list them.
-    std::vector<std::string> numerics;
-    for (BuiltinType::Kind k :
-         {BuiltinType::Int, BuiltinType::Float, BuiltinType::I8,
-          BuiltinType::I16, BuiltinType::I32, BuiltinType::U8, BuiltinType::U16,
-          BuiltinType::U32, BuiltinType::U64, BuiltinType::F16,
-          BuiltinType::F32})
-      numerics.push_back(ast::builtinKindName(k));
-    add(names::kString, names::kTypeInt, false);
-    add(names::kString, names::kTypeFloat, false);
-    add(names::kString, names::kTypeBool, false);
-    add(names::kString, names::kTypeChar, false);
-    for (size_t i = 2; i < numerics.size(); ++i)
-      add(names::kString, numerics[i], false);
-    for (const std::string &target : numerics) {
-      add(target, names::kString, true);
-      for (const std::string &source : numerics)
-        if (source != target)
-          add(target, source, false);
-      // `int` also converts the two non-numeric scalars, as before the sized
-      // types (so its list reads `Str, float, bool, char, i8, ...`).
-      if (target == names::kTypeInt) {
-        ConversionPair boolPair{target, names::kTypeBool,
-                                target + "<" + names::kTypeBool + ">", false};
-        ConversionPair charPair{target, names::kTypeChar,
-                                target + "<" + names::kTypeChar + ">", false};
-        auto at = t.end() - static_cast<long>(numerics.size() - 2);
-        t.insert(at, {boolPair, charPair});
-      }
-    }
-    add(names::kTypeBool, names::kTypeInt, false);
-    add(names::kTypeBool, names::kString, true);
-    add(names::kTypeChar, names::kTypeInt, false);
+    for (BuiltinType::Kind source : kConversionSources)
+      add(names::kString, ast::builtinKindName(source));
+    for (BuiltinType::Kind target : kConversionSources)
+      for (BuiltinType::Kind source : kConversionSources)
+        if (convertsFrom(target, source))
+          add(ast::builtinKindName(target), ast::builtinKindName(source));
     return t;
   }();
   return kTable;
+}
+
+/// The rewrite of a pair the families leave out, after the target and the
+/// source: an `unsigned` into the signed family, a float into the unsigned
+/// family, a `bool` or a `char` into the float family.  Empty for any other
+/// pair.
+std::string conversionHint(const std::string &target,
+                           const std::string &source) {
+  using B = ast::BuiltinType;
+  B::Kind t = B::Void;
+  B::Kind s = B::Void;
+  if (!ast::builtinKindOfName(target, t) || !ast::builtinKindOfName(source, s))
+    return {};
+  const std::string bits = std::to_string(B::integerBits(t));
+  if (B::isIntegerKind(t) && !B::isUnsignedKind(t) && s == B::U64) {
+    if (t == B::Int)
+      return ": an 'unsigned' can be larger than any 'int'; its method '" +
+             std::string(names::kMethodToInt) +
+             "()' returns 'int?', None above 9223372036854775807";
+    return ": an 'unsigned' can be larger than any '" + target + "'; '" +
+           target + "(u" + bits + "(...))' keeps its low " + bits + " bits";
+  }
+  if (B::isUnsignedKind(t) && B::isFloatKind(s))
+    return ": convert the '" + source + "' to an 'int' first: '" + target +
+           "(int(...))' truncates toward zero, then keeps the low " + bits +
+           " bits";
+  if (B::isFloatKind(t) && (s == B::Bool || s == B::Char))
+    return ": convert the '" + source + "' to an 'int' first: '" + target +
+           "(int(...))'";
+  return {};
 }
 
 /// The specialization set of @p target, for a diagnostic: "int, float, ...".
@@ -3225,11 +3301,37 @@ const ConversionPair *findConversion(const std::string &target,
   return nullptr;
 }
 
-/// The no-match error, for the explicit and the inferred form alike.
+/// The error of a parse written as a conversion (`int(s)`, `u8<Str>(s)`):
+/// no primitive parses a `Str`, the method of `Str` that parses into
+/// @p target does (docs/language/04-strings-and-conversions.md, "Parsing a
+/// string").  Empty when @p source is not `Str` or @p target has no parse.
+std::string parseMovedMessage(const std::string &target,
+                              const std::string &source) {
+  ast::BuiltinType::Kind kind = ast::BuiltinType::Void;
+  if (source != names::kString || !ast::builtinKindOfName(target, kind))
+    return {};
+  const char *method = ast::strParseMethod(kind);
+  if (!method)
+    return {};
+  return "no specialization of '" + target +
+         "' for 'Str': parse a 'Str' with its method '" + method +
+         "()', which returns '" + target + "?'";
+}
+
+/// The no-match error, for the explicit and the inferred form alike: a
+/// parse's names its method, a pair a family leaves out its rewrite
+/// (conversionHint), any other lists the target's specializations.
+/// Either way the call has no type, so nothing built on it is reported
+/// again: a program written for the older parse gets one error at each.
 std::string noSpecializationMessage(const std::string &target,
                                     const std::string &source) {
-  return "no specialization of '" + target + "' for '" + source +
-         "'; its specializations are " + specializationList(target);
+  if (std::string moved = parseMovedMessage(target, source); !moved.empty())
+    return moved;
+  const std::string miss =
+      "no specialization of '" + target + "' for '" + source + "'";
+  if (std::string hint = conversionHint(target, source); !hint.empty())
+    return miss + hint;
+  return miss + "; its specializations are " + specializationList(target);
 }
 
 /// The conversion target of a callee: the target itself (`int`), or the
@@ -3262,11 +3364,28 @@ bool Sema::isStrConstruction(ast::CallExpr *node,
   // already in error is reported.
   if (argTypes.size() != 1 || !argTypes[0])
     return true;
-  // A `Str`, or a `Str?` (reported by the constructor as an unwrap).
-  ast::Type *inner = argTypes[0];
-  if (auto *ot = ast::dyn_cast<ast::OptionalType>(inner))
-    inner = ot->getInnerType();
-  return typesEqual(inner, Ctx.getStrTy());
+  // A `Str` is itself; a `Str?` has a text, "None" or the string.
+  return typesEqual(argTypes[0], Ctx.getStrTy());
+}
+
+bool Sema::textConversion(ast::Type *source, ast::SourceLocation loc,
+                          ConversionPair &pair) {
+  const std::string name = typeName(source);
+  // `Str<Str>(s)` is `s`: the constructor.
+  if (typesEqual(source, Ctx.getStrTy())) {
+    pair = {names::kString, name, names::kString};
+    return true;
+  }
+  if (!hasText(source)) {
+    const std::string why = noTextReason(source);
+    error(loc, std::string("'") + names::kString +
+                   "' cannot convert a value of type '" + name +
+                   "', which does not implement trait '" + names::kTraitShow +
+                   "'" + (why.empty() ? "" : ": " + why));
+    return false;
+  }
+  pair = {names::kString, name, std::string(names::kString) + "<" + name + ">"};
+  return true;
 }
 
 ast::Type *Sema::inferConversion(ast::CallExpr *node,
@@ -3285,6 +3404,12 @@ ast::Type *Sema::inferConversion(ast::CallExpr *node,
   // widening (an `int` is not a `float`), no unwrapping of an optional.
   const std::string sourceName = typeName(argTy);
   const ConversionPair *pair = findConversion(target, sourceName);
+  ConversionPair text;
+  if (!pair && target == names::kString) {
+    if (!textConversion(argTy, node->getLocation(), text))
+      return nullptr;
+    pair = &text;
+  }
   if (!pair) {
     error(node->getLocation(), noSpecializationMessage(target, sourceName));
     return nullptr;
@@ -3294,11 +3419,7 @@ ast::Type *Sema::inferConversion(ast::CallExpr *node,
 
 ast::Type *Sema::applyConversion(ast::CallExpr *node,
                                  const ConversionPair *pair) {
-  // The result is the target type; a parse (`int<Str>`, `bool<Str>`, ...) can
-  // fail, so it returns the optional (None for an invalid string).
   ast::Type *result = Ctx.lookupType(pair->Target);
-  if (pair->Parses)
-    result = Ctx.getOptionalType(result);
   node->setCalleeName(Ctx.intern(pair->Spelled));
   node->setResolvedType(result);
   return result;
@@ -3323,9 +3444,16 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
   const std::string sourceName = typeName(source);
   const std::string spelled = target + "<" + sourceName + ">";
 
-  // The specializations are a closed set: any other type argument, a user
-  // class included, is an error (`toString()` stringifies an object).
+  // A primitive's specializations are a closed set: any other type
+  // argument, a user class included, is an error.  `Str` takes every type
+  // with a text.
   const ConversionPair *pair = findConversion(target, sourceName);
+  ConversionPair text;
+  if (!pair && target == names::kString) {
+    if (!textConversion(source, node->getLocation(), text))
+      return nullptr;
+    pair = &text;
+  }
   if (!pair) {
     error(node->getLocation(), noSpecializationMessage(target, sourceName));
     return nullptr;
@@ -3352,6 +3480,13 @@ ast::Type *Sema::checkConversion(ast::CallExpr *node,
           "argument of '" + spelled + "' has type '" + typeName(argTy) +
               "', expected '" + sourceName + "'");
     return nullptr;
+  }
+  // `Str<Str>(s)` is the `Str` constructor, which returns `s` itself and so
+  // takes no `view`, as `Str(s)` takes none.
+  if (pair->Spelled == names::kString) {
+    const FunctionSig *ctor = lookupFunction(names::kString);
+    checkViewArgs(ctor->Modes, ctor->ParamTypes, node->getArguments(),
+                  names::kString);
   }
 
   return applyConversion(node, pair);

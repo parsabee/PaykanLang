@@ -212,6 +212,11 @@ struct LeakGuard {
   }
 };
 
+/// Whether @p source parses and passes Sema, without running it.
+inline bool checks(const std::string &source) {
+  return detail::analyse(source, "").Ok;
+}
+
 inline RunResult compileAndRun(const std::string &source,
                                const std::string &projectRoot = "") {
   auto a = detail::analyse(source, projectRoot);

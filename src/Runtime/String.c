@@ -71,10 +71,10 @@ PaykanString *PaykanString_from_char(int8_t c) {
   return PaykanString_new((const char *)&c, 1);
 }
 
-// -- Parses (`int<Str>`, `float<Str>`, `bool<Str>`)
+// -- Parses (Str's toInt() & co.)
 
 /// True when @p s starts with a character strtoll / strtod would skip as
-/// leading whitespace, which `int<Str>` / `float<Str>` reject.
+/// leading whitespace, which every parse rejects.
 static int string_starts_with_space(const PaykanString *s) {
   return s->len > 0 && isspace((unsigned char)s->data[0]);
 }
@@ -126,6 +126,119 @@ int64_t PaykanString_parse_float(PaykanObject *str, double *out) {
   if (errno != 0 && (errno != ERANGE || isinf(val) || val == 0.0))
     return 0;
   *out = val;
+  return 1;
+}
+
+/// Whether @p s is an integer text: an optional sign, then digits, the
+/// whole string.
+static int string_is_integer(const PaykanString *s) {
+  int64_t i = s->len > 0 && (s->data[0] == '+' || s->data[0] == '-');
+  if (i == s->len)
+    return 0;
+  for (; i < s->len; ++i)
+    if (s->data[i] < '0' || s->data[i] > '9')
+      return 0;
+  return 1;
+}
+
+/// Bit @p b of the little-endian 32-bit limbs @p limb.
+static unsigned limb_bit(const uint32_t *limb, int b) {
+  return (limb[b / 32] >> (b % 32)) & 1u;
+}
+
+/// The integer text @p s (string_is_integer) rounded once to the nearest
+/// f32, ties to even, as `f32(n)` rounds an integer, at any magnitude:
+/// through its f64 it could be rounded twice from 2^53 on.  Refused (0) when
+/// it rounds to infinity in f32; "-0" is -0, as strtod reads it.
+static int64_t string_integer_to_f32(const PaykanString *s, double *out) {
+  enum { kLimbs = 5 }; // 160 bits hold every magnitude of 39 digits
+  uint32_t limb[kLimbs] = {0};
+  const int negative = s->data[0] == '-';
+  int64_t i = negative || s->data[0] == '+';
+  while (i < s->len && s->data[i] == '0')
+    ++i;
+  // 40 digits are at least 10^39, beyond the f32 range.
+  if (s->len - i > 39) {
+    *out = 0.0;
+    return 0;
+  }
+  for (; i < s->len; ++i) {
+    uint64_t carry = (uint64_t)(s->data[i] - '0');
+    for (int k = 0; k < kLimbs; ++k) {
+      uint64_t v = (uint64_t)limb[k] * 10u + carry;
+      limb[k] = (uint32_t)v;
+      carry = v >> 32;
+    }
+  }
+  // The magnitude's top 24 bits, rounded on the bit after them and the
+  // bits below that.
+  int bits = 32 * kLimbs;
+  while (bits > 0 && !limb_bit(limb, bits - 1))
+    --bits;
+  int shift = bits > 24 ? bits - 24 : 0;
+  uint32_t mantissa = 0;
+  for (int b = bits - 1; b >= shift; --b)
+    mantissa = mantissa << 1 | limb_bit(limb, b);
+  if (shift > 0 && limb_bit(limb, shift - 1)) {
+    unsigned below = 0;
+    for (int b = 0; b < shift - 1 && !below; ++b)
+      below = limb_bit(limb, b);
+    if (below || (mantissa & 1u)) {
+      ++mantissa;
+      if (mantissa == (UINT32_C(1) << 24)) {
+        mantissa >>= 1;
+        ++shift;
+      }
+    }
+  }
+  // The largest f32 is (2^24 - 1) * 2^104.
+  if (shift > 104) {
+    *out = 0.0;
+    return 0;
+  }
+  double value = ldexp((double)mantissa, shift);
+  *out = negative ? -value : value;
+  return 1;
+}
+
+/// `s.toF32()`: an integer text is that integer rounded once (as `f32(n)`);
+/// any other text is PaykanString_parse_float's value rounded to f32 (C's
+/// (float)strtod).  Finite text whose value rounds to infinity in f32 is
+/// refused; "inf" and "nan" are kept; a value below the f32 range is 0 or a
+/// subnormal, as an f32 literal is.
+int64_t PaykanString_parse_f32(PaykanObject *str, double *out) {
+  if (string_is_integer((PaykanString *)str))
+    return string_integer_to_f32((PaykanString *)str, out);
+  double d;
+  if (!PaykanString_parse_float(str, &d)) {
+    *out = 0.0;
+    return 0;
+  }
+  // From 2^128 - 2^103, the midpoint above FLT_MAX (a tie, rounded to even,
+  // that is up), a value rounds to infinity; the guard also keeps the
+  // conversion below in range, as C11 6.3.1.5 requires.
+  if (!isinf(d) && !isnan(d) && fabs(d) >= 0x1.ffffffp+127) {
+    *out = 0.0;
+    return 0;
+  }
+  *out = isinf(d) || isnan(d) ? d : (double)(float)d;
+  return 1;
+}
+
+/// `s.toF16()`: PaykanString_parse_float's value rounded to f16
+/// (Paykan_round_f16); finite text that rounds to infinity is refused.
+int64_t PaykanString_parse_f16(PaykanObject *str, double *out) {
+  double d;
+  if (!PaykanString_parse_float(str, &d)) {
+    *out = 0.0;
+    return 0;
+  }
+  double r = Paykan_round_f16(d);
+  if (isinf(r) && !isinf(d)) {
+    *out = 0.0;
+    return 0;
+  }
+  *out = r;
   return 1;
 }
 

@@ -415,7 +415,7 @@ TEST(StringConcatInplace, ResultIsNulTerminated) {
   Paykan_dispose((PaykanObject *)b);
 }
 
-// -- PaykanString_parse_int / _float / _bool (`int<Str>` & co.)
+// -- PaykanString_parse_int / _float / _bool (Str's `toInt()` & co.)
 
 namespace {
 
