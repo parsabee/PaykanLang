@@ -1095,6 +1095,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     had read is lost and the next read starts after it, where the read that could not
     allocate `n` bytes failed before reading anything (docs/stdlib/io.md, "End of file,
     failed reads and buffering", which says so for all three now).
+  - The traits chapter no longer lists trait objects as "not supported yet": there are none
+    by design, since a trait is a bound on a type parameter and a class hierarchy is what
+    dispatches at run time (docs/language/06-traits.md).
 
 ### Removed
 

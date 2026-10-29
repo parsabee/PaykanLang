@@ -371,4 +371,8 @@ a struct or an enum. An `impl Named for Box<T>` block of the module gives an imp
 `lib::Box<Str>` its methods, not the trait.
 
 Also not supported yet: `impl ... for` a built-in type, an enum or a class of another
-module, default methods, `static fn` requirements, and trait objects.
+module, default methods and `static fn` requirements.
+
+There are no trait objects, by design: a trait is a bound on a type parameter, never a
+type of its own, and a class hierarchy is what dispatches at run time (see
+[Inheritance and virtual methods](05-classes.md#inheritance-and-virtual-methods)).
