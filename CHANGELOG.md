@@ -1692,19 +1692,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the wrapper returning an `int64_t` to bind instead (KF-9). Mapping `i32` and `u32`
     natives to `int32_t` and `uint32_t` is left for a later release (OD-17).
   - A checked read of a `memory::Buffer` slot (`at`, `get`, `copy`) of a type whose zero
-    bytes are no value, such as an enum whose first variant holds a `Str`, tested that the
-    slot was set with a call to the runtime's `PaykanType_isUnset`, and a runtime compiled
-    by GCC (CMake's C compiler on Linux) saved and reloaded the read's registers around
-    that call. Setting 1,000,000 such slots and reading them 9,000,000 times (the
-    `buffer_union` program of the allocation slowdown, `build -O2`, median user CPU of 11
-    interleaved runs on an Apple M3 Max, with the runtime built by GCC 16 at CMake's
-    Release flags) took 0.113 s, against 0.106 s at `fab0a56`, before the test was added.
-    The read tests the slot's words itself now, with no call: 0.103 s with GCC, and 0.103 s
-    with Apple clang's runtime (0.111 s before, 0.114 s at `fab0a56`), 8.6% fewer
-    instructions (1.906 billion, from 2.084). The other two programs of the slowdown were
-    not slower than at `fab0a56`, before or after: 10,485,740 objects allocated and freed
-    (`make(18)` 20 times) take 0.296 s (0.301 s at `fab0a56`), and 3,000,000
-    `Str(i) + "x"` 0.484 s (0.506 s).
+    bytes are no value (a `Str`, an object, an enum whose first variant holds a `Str`)
+    tested that the slot was set with a call to the runtime's `PaykanType_isUnset`, and a
+    runtime compiled by GCC (CMake's C compiler on Linux) saved and reloaded the read's
+    registers around that call. The read tests the slot's words itself now, with no call,
+    laid out of line so that the read of a type whose zero bytes are a value (an `int`)
+    still takes no branch for it. `build -O2`, median user CPU of 11 interleaved runs on an
+    Apple M3 Max, with the runtime built by GCC 16 at CMake's Release flags (Apple clang's,
+    a Release build's, in brackets):
+    - 100,000,000 reads of a 1,000-`Str` buffer: 0.271 s before, 0.191 s now (0.244 s,
+      0.191 s);
+    - 200,000,000 reads of a 1,000-`int` buffer: 0.164 s, as before (0.216 s, as before);
+    - setting 1,000,000 slots of `enum Shape { Named(s: Str), Circle(r: int), Empty }` and
+      reading them 9,000,000 times (the `buffer_union` program of the allocation
+      slowdown): 0.113 s before, 0.105 s now, and 0.107 s at `fab0a56`, before the test was
+      added (0.109 s, 0.104 s, and 0.113 s at `fab0a56`), with 1.913 billion instructions
+      retired, from 2.063 (1.937 billion, from 2.062);
+    - the other two programs of the slowdown, which read no buffer, were not slower than
+      at `fab0a56`, before or after: 10,485,740 objects allocated and freed (`make(18)` 20
+      times) take 0.296 s (0.301 s at `fab0a56`), and 3,000,000 `Str(i) + "x"` 0.484 s
+      (0.508 s), with Apple clang's runtime.
   - A generic function's instantiation whose signature is an error (an instance of a
     generic native function binding a C symbol that another native function binds with a
     different signature) was reported at its first call, and again at each later call whose

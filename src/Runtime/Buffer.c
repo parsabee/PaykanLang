@@ -55,6 +55,14 @@ static PaykanBuffer *buffer_at(const void *box) {
   return (PaykanBuffer *)PaykanShared_get_inline(*(PaykanShared *const *)box);
 }
 
+/// Whether the value at @p v of type @p t was never set.  Only a type with
+/// words that tell (`nunset`) is looked at.  The hint lays that look out of
+/// line, not because such a type is rare: a read of a type whose zero bytes
+/// are a value (an int, a Str?) then takes no branch.
+static int buffer_unset(const PaykanType *t, const void *v) {
+  return PAYKAN_UNLIKELY(t->nunset != 0) && PaykanType_unsetWords_inline(t, v);
+}
+
 static void buffer_check_index(const PaykanBuffer *buf, int64_t i) {
   if (i < 0 || i >= buf->len)
     Paykan_runtime_panic("buffer index %llu out of bounds (len=%llu)",
@@ -133,7 +141,7 @@ void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i) {
   PaykanBuffer *buf = (PaykanBuffer *)b;
   buffer_check_index(buf, i);
   void *v = buffer_value(buf, i);
-  if (PaykanType_isUnset_inline((const PaykanType *)t, v))
+  if (buffer_unset((const PaykanType *)t, v))
     Paykan_runtime_panic("buffer value %llu was never set",
                          (unsigned long long)i);
   return v;
@@ -142,8 +150,7 @@ void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i) {
 int64_t PaykanBuffer_isSet(void *t, PaykanObject *b, int64_t i) {
   PaykanBuffer *buf = (PaykanBuffer *)b;
   return i >= 0 && i < buf->len &&
-         !PaykanType_isUnset_inline((const PaykanType *)t,
-                                    buffer_value(buf, i));
+         !buffer_unset((const PaykanType *)t, buffer_value(buf, i));
 }
 
 void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i) {

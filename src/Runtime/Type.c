@@ -31,5 +31,5 @@ void PaykanType_drop(const PaykanType *type, void *value) {
 }
 
 int PaykanType_isUnset(const PaykanType *type, const void *value) {
-  return PaykanType_isUnset_inline(type, value);
+  return type->nunset != 0 && PaykanType_unsetWords_inline(type, value);
 }
