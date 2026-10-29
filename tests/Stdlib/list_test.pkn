@@ -19,26 +19,43 @@ class Point {
   }
 }
 
-// An element equal to nothing, whose `equals` first calls its hook, if it
-// has one.
+// An element equal to another of its `id`, whose `equals` first calls its
+// hook, if it has one.
 class Hooked {
+  id: int;
   hook: (() -> int)?;
+  view fn toString() -> Str { return Str(self.id); }
   view fn equals(other: Obj) -> bool {
     match self.hook {
       h: () -> int { h(); }
       None { }
     }
-    return False;
+    match other {
+      o: Hooked { return o.id == self.id; }
+      _ { return False; }
+    }
   }
 }
 
-// A list of two elements, the first of which empties the list when its
-// `equals` is called.
+// A list of two elements, 1 and 2, the first of which empties the list when
+// its `equals` is called.
 fn emptiedByEquals() -> collections::List<Hooked> {
   xs = collections::List<Hooked>();
   let shared = memory::Box(xs);
-  xs.push(Hooked(fn() -> int { shared.get().clear(); return 0; }));
-  xs.push(Hooked(None));
+  xs.push(Hooked(1, fn() -> int { shared.get().clear(); return 0; }));
+  xs.push(Hooked(2, None));
+  return xs;
+}
+
+// A list of 1, 2 and 3, whose 2 removes the first element when its `equals`
+// is called.  Its hook holds the list: clear it when done, or the list holds
+// itself.
+fn shrunkByEquals() -> collections::List<Hooked> {
+  xs = collections::List<Hooked>();
+  let shared = memory::Box(xs);
+  xs.push(Hooked(1, None));
+  xs.push(Hooked(2, fn() -> int { shared.get().removeAt(0); return 0; }));
+  xs.push(Hooked(3, None));
   return xs;
 }
 
@@ -121,8 +138,18 @@ fn main() -> int {
   let a = emptiedByEquals();
   let b = emptiedByEquals();
   c = emptiedByEquals();
-  io::println(idx(a.indexOf(Hooked(None))) + " " + Str(b.contains(Hooked(None)))
-      + " " + Str(c.remove(Hooked(None))) + " "
-      + Str(a.len() + b.len() + c.len()));
+  io::println(idx(a.indexOf(Hooked(0, None))) + " "
+      + Str(b.contains(Hooked(0, None))) + " " + Str(c.remove(Hooked(0, None)))
+      + " " + Str(a.len() + b.len() + c.len()));
+
+  // remove removes nothing when the `equals` that found the element changed
+  // the list's length: the index it was found at names 3 once 1 is gone,
+  // and no element once the list is empty.
+  d = shrunkByEquals();
+  e = emptiedByEquals();
+  io::println(Str(d.remove(Hooked(2, None))) + " "
+      + collections::listToString(d) + " " + Str(e.remove(Hooked(1, None)))
+      + " " + collections::listToString(e));
+  d.clear();
   return 0;
 }

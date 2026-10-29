@@ -1635,6 +1635,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     user CPU of 11 interleaved runs: 0.261 s against 0.196 s with the length read once) and
     50,000 of a 1,000-`Str` buffer 13% (0.145 s against 0.128 s): they take 0.189 s and
     0.127 s now.
+  - `List.remove(v)` removed the element at the index `indexOf` found, also when the
+    `equals` that found it changed the list: one that removed an earlier element made
+    `remove` take out the element after the one that matched (`True`, `[1, 2, 3]` left as
+    `[2]`), and one that emptied the list made it panic, `List index 0 out of range (len=0)`
+    (exit 134). It removes nothing and is `False` when that `equals` changed the list's
+    length, whose index may then name another element or none (docs/stdlib/collections.md,
+    "List<T>").
   - The C path and the runtime round an `f32` value through a C `float`, but `Runtime.h`
     checked only that `double` is IEEE 754 binary64. It also checks now that `float` is
     binary32 (`FLT_MANT_DIG == 24`, `FLT_MAX_EXP == 128`, `FLT_MIN_EXP == -125`), so a

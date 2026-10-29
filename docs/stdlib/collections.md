@@ -118,7 +118,10 @@ A growable array, kept in a [`memory::Buffer<T>`](memory.md). `push` and `pop` a
 the end are amortised O(1); `insert` and `removeAt` move the elements after the index, and
 `indexOf`, `contains` and `remove` walk the list, comparing each element with `==`. An
 element's `equals` may change the list: the walk goes on over the elements the list then
-has, so one that empties it makes the search find nothing.
+has, so one that empties it makes the search find nothing. `indexOf` is the index the
+element had when its `==` was `True`. When the `equals` that found it changed the list's
+length, that index may name another element or none, so `remove` then removes nothing and
+is `False`.
 
 | Method | Does | When it fails |
 |--------|------|---------------|
@@ -135,7 +138,7 @@ has, so one that empties it makes the search find nothing.
 | `fn removeAt(i: unsigned) -> T` | Removes and returns element `i` | panics as `at` |
 | `view fn indexOf(v: view T) -> unsigned?` | The index of the first element `== v` | `None` when there is none |
 | `view fn contains(v: view T) -> bool` | Whether some element is `== v` | |
-| `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | |
+| `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | `False`, removing nothing, when the `equals` that found it changed the list's length |
 | `fn swap(i: unsigned, j: unsigned)` | Exchanges elements `i` and `j` | panics as `at` |
 | `fn reverse()` | Reverses the order of the elements | |
 | `fn clear()` | Removes every element | |

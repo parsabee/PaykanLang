@@ -174,15 +174,24 @@ impl List<T> {
   // True when some element == v.
   view fn contains(v: view T) -> bool { return self.indexOf(v) != None; }
 
-  // Remove the first element == v; True if there was one.
+  // Remove the first element == v; True if there was one.  The walk is
+  // indexOf's.  When the `equals` that found the element changed the
+  // list's length, the index it was found at may name another element, or
+  // none: then nothing is removed, and the result is False.
   fn remove(v: view T) -> bool {
-    match self.indexOf(v) {
-      i: unsigned {
+    i: unsigned = 0;
+    while i < self.__items.len() {
+      let n: unsigned = self.__items.len();
+      if self.__items.at(i) == v {
+        if self.__items.len() != n {
+          return False;
+        }
         self.removeAt(i);
         return True;
       }
-      None { return False; }
+      i = i + 1;
     }
+    return False;
   }
 
   // Reverse the order of the elements.
