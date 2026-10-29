@@ -20,11 +20,15 @@ namespace sema {
 namespace {
 
 /// The place @p e as it is written, for a diagnostic: `self.c`, `n.t.0`,
-/// `self.xs[2]`, `a[i]`, `self.slot().c` (an index other than a number or a
-/// name, or a call's arguments, as `...`).
+/// `self.xs[2]`, `a[i]`, `self.slot().c`, `(if ... then a else b).c` (an
+/// index other than a number or a name, a call's arguments, or a
+/// condition, as `...`).
 std::string placeText(const ast::Expr *e) {
   if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
     return id->getName();
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return "(if ... then " + placeText(te->getTrueExpr()) + " else " +
+           placeText(te->getFalseExpr()) + ")";
   if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
     return placeText(ma->getReceiver()) + "." + ma->getFieldName();
   if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e))
@@ -164,10 +168,10 @@ const Sema::BorrowResult *Sema::borrowResultOf(const ast::Expr *e) const {
   return it == BorrowResults.end() ? nullptr : &it->second;
 }
 
-std::string Sema::borrowedResultError(const ast::Expr *e) {
+std::string Sema::borrowedResultError(const ast::Expr *e, bool holder) {
   if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
-    std::string why = borrowedResultError(te->getTrueExpr());
-    return why.empty() ? borrowedResultError(te->getFalseExpr()) : why;
+    std::string why = borrowedResultError(te->getTrueExpr(), holder);
+    return why.empty() ? borrowedResultError(te->getFalseExpr(), holder) : why;
   }
   const bool inout = CurrentResult.Mode == ast::ParamMode::Inout;
   const std::string what =
@@ -175,11 +179,31 @@ std::string Sema::borrowedResultError(const ast::Expr *e) {
               "parameter"
             : "a 'view' result must be part of 'self' or of a 'view' or "
               "'inout' parameter";
-  // A borrow of what a call borrowed: each of those must be ours to lend.
+  // A field or element of a conditional's object, `(if c then a else b).n`,
+  // is in what one of its branches holds: each must hold what may be
+  // returned.  Whether it is an `inout` place is checked once, of the whole
+  // place: a conditional's struct, tuple or array is a temporary, and a
+  // field of its object is in the object (frozenPlace looks at each
+  // branch).
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(placeBase(e))) {
+    if (inout && !holder)
+      if (std::string why = inoutPlaceError(e, "returned 'inout'");
+          !why.empty())
+        return why;
+    std::string why = borrowedResultError(te->getTrueExpr(), /*holder=*/true);
+    return why.empty() ? borrowedResultError(te->getFalseExpr(), true) : why;
+  }
+  // A borrow of what a call borrowed: each of those must be ours to lend,
+  // and the place in the call's `inout` result one an `inout` could name
+  // (not an element of a tuple or a character of a string).
   if (const BorrowResult *r = borrowResultOf(e)) {
     if (inout && r->Mode != ast::ParamMode::Inout)
       return "the result of '" + r->Callee +
              "' is a 'view'; it cannot be returned 'inout'";
+    if (inout && !holder)
+      if (std::string why = inoutPlaceError(e, "returned 'inout'");
+          !why.empty())
+        return why;
     for (const ast::Expr *from : r->From) {
       // `self` is not returned when it is the receiver: what the call
       // returns is part of it.
@@ -192,7 +216,7 @@ std::string Sema::borrowedResultError(const ast::Expr *e) {
     return "";
   }
   // The storage an `inout` result names is an `inout` argument's.
-  if (inout)
+  if (inout && !holder)
     if (std::string why = inoutPlaceError(e, "returned 'inout'"); !why.empty())
       return why;
   const auto *id = ast::dyn_cast<ast::Identifier>(placeBase(e));
@@ -236,6 +260,18 @@ int Sema::inoutReach(const ast::Expr *e, const ast::Expr *&past,
     return inoutReach(ti->getTuple(), past, via);
   if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e))
     return inoutReach(se->getArray(), past, via);
+  // A conditional's is either branch's: as far as the farther.
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e)) {
+    int reach = inoutReach(te->getTrueExpr(), past, via);
+    const ast::Expr *p = nullptr;
+    const BorrowResult *v = nullptr;
+    if (const int other = inoutReach(te->getFalseExpr(), p, v); other < reach) {
+      reach = other;
+      past = p;
+      via = v;
+    }
+    return reach;
+  }
   // A call's `inout` result is in what it borrowed, or in an object one
   // reference past it: as far from what the caller keeps alive as the
   // farthest of those.

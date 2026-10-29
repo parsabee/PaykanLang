@@ -70,6 +70,22 @@ struct SemaContext {
   std::vector<ast::ClassDecl *> ForeignClasses;
   std::vector<ast::FuncDecl *> ForeignFunctions;
   std::vector<ast::StructDecl *> ForeignStructs;
+  /// A file an AST's source locations point into: its name as diagnostics
+  /// show it, and its lines (null when its source is not at hand, as for
+  /// the templates of a module file), which Owner keeps alive.  For an
+  /// instantiation of another module's template, Module is that module's
+  /// canonical name, which qualifies its functions where the bodies call
+  /// them (`lib::m::f`, written `f` in the file); empty for the module's
+  /// own file.
+  struct SourceFile {
+    std::string Name;
+    const std::vector<std::string> *Lines = nullptr;
+    std::shared_ptr<void> Owner;
+    std::string Module;
+  };
+  /// The file each of ForeignClasses, ForeignFunctions and ForeignStructs
+  /// points into: its template's module's, whose locations a clone keeps.
+  std::unordered_map<const ast::Decl *, SourceFile> ForeignSources;
   /// The resolver Sema made when its caller set none (one without a
   /// cache), which the lowering then reads the modules loaded from `.pkm`
   /// files through; null when the caller's was used.
@@ -87,6 +103,9 @@ struct SemaContext {
   /// §4.8).  Nothing of them is lowered.
   std::vector<ast::ClassDecl *> ImportedInstanceClasses;
   std::vector<ast::StructDecl *> ImportedInstanceStructs;
+  /// The module's own file, which its other declarations' locations point
+  /// into (the lowering's warnings name it).
+  SourceFile Source;
 
   explicit operator bool() const { return Ok; }
 };
@@ -123,6 +142,10 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
     /// A variable of an enclosing function, captured by copy by a lambda
     /// (docs/language/14-function-types.md): read-only inside it.
     Captured,
+    /// A `weak` variable of an enclosing function, captured weakly by a
+    /// lambda: read-only inside it, as Captured is, and captured weakly by a
+    /// lambda inside it, as Weak is.
+    CapturedWeak,
     /// A `weak` local (docs/language/16-memory.md): it holds a weak
     /// reference, so no `inout` may name it.
     Weak,
@@ -213,13 +236,13 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// cannot be a function value, and returns false.
   bool errorGenericFunctionValue(const std::string &name,
                                  ast::SourceLocation loc);
-  /// Check a call of the function value of type @p fnt (`f(args)`, a call
-  /// through a variable or a field) named @p what in diagnostics: the
-  /// arguments' types and modes.  The result type, or nullptr.
+  /// Check @p call, a call of the function value of type @p fnt (`f(args)`,
+  /// a call through a variable or a field) named @p what in diagnostics:
+  /// the arguments' types and modes.  The result type, or nullptr.
   ast::Type *checkFunctionValueCall(ast::FunctionType *fnt,
                                     const std::vector<ast::Expr *> &args,
                                     const std::string &what,
-                                    ast::SourceLocation loc);
+                                    const ast::Expr *call);
 
   /// The kind of variable @p name where it is bound (innermost first).
   VarKind varKind(std::string_view name) const;
@@ -1307,7 +1330,10 @@ private:
   /// Why @p e cannot be returned as the current function's borrowed result;
   /// "" when it is part of `self` or of a `view` / `inout` parameter (an
   /// `inout` one, and an `inout` argument's place, for an `inout` result).
-  std::string borrowedResultError(const ast::Expr *e);
+  /// With @p holder, @p e is not what is returned but what holds it, a
+  /// conditional's branch (`a` in `(if c then a else b).n`): what it may
+  /// lend is checked, not that it is a place.
+  std::string borrowedResultError(const ast::Expr *e, bool holder = false);
   /// How many more references the place @p e, one an `inout` result may
   /// borrow (borrowedResultError), could follow and stay in what the
   /// function's caller keeps alive: the object a class's `self` is, and the
@@ -1381,18 +1407,36 @@ private:
   /// An override @p method keeps each parameter's mode of @p base.
   bool checkOverrideModes(const ast::FuncDecl *method,
                           const ast::MethodDecl *base);
-  /// The arguments @p args of a call of @p callee whose parameters have the
-  /// modes @p modes and the types @p paramTys: an `inout` parameter takes a
-  /// variable or a field of exactly its type, never a `view` parameter or a
-  /// `let` local, and what it takes shares no storage with another `inout`
-  /// or `view` argument, nor with the @p receiver of a method call of
-  /// @p method.  Arguments of the wrong type were reported already.
-  bool checkInoutArgs(const ast::ParamModes &modes,
+  /// The arguments @p args of @p call, a call of @p callee whose parameters
+  /// have the modes @p modes and the types @p paramTys: an `inout`
+  /// parameter takes a variable or a field of exactly its type, never a
+  /// `view` parameter or a `let` local, and what it takes shares no storage
+  /// with another `inout` or `view` argument, nor with the @p receiver of a
+  /// method call of @p method.  Nor does a call in a later argument write
+  /// what a `view` argument, or the receiver of a struct's `view fn`,
+  /// borrows (CallWrites).  Arguments of the wrong type were reported
+  /// already.
+  bool checkInoutArgs(const ast::Expr *call, const ast::ParamModes &modes,
                       const std::vector<ast::Type *> &paramTys,
                       const std::vector<ast::Expr *> &args,
                       const std::string &callee,
                       const ast::Expr *receiver = nullptr,
                       const ast::MethodDecl *method = nullptr);
+  /// A place a call writes, named as its caller names it: one passed to an
+  /// `inout` parameter, or the receiver of a method that may change it.
+  struct CallWrite {
+    std::string Path;
+    /// The call's callee, and the `inout` parameter (none for the receiver).
+    std::string Callee;
+    std::optional<std::string> Param;
+    /// The argument or the receiver naming it, where a conflict is reported.
+    const ast::Expr *At = nullptr;
+    /// Whether a call it is nested in reported it already.
+    bool Reported = false;
+  };
+  /// What each call checkInoutArgs checked writes, for the calls whose
+  /// arguments it is nested in.
+  std::unordered_map<const ast::Expr *, std::vector<CallWrite>> CallWrites;
   /// The places passing @p e borrows, as `checkInoutArgs` compares them: a
   /// variable or a chain of fields on one; an element borrows its array, a
   /// conditional both branches, a borrowed result what its call borrowed.
@@ -1962,6 +2006,12 @@ private:
   /// SemaContext::ForeignClasses).
   std::vector<ast::ClassDecl *> ForeignInstantiatedClassDecls;
   std::vector<ast::FuncDecl *> ForeignInstantiatedFuncDecls;
+  /// See SemaContext::ForeignSources.
+  std::unordered_map<const ast::Decl *, SemaContext::SourceFile>
+      ForeignInstantiationSources;
+  /// Record that @p d, an instantiation of a template of @p origin's
+  /// module, points into that module's file.
+  void noteForeignSource(const ast::Decl *d, const ModuleTemplates &origin);
   /// See SemaContext::ImportedNatives.
   StringSet ImportedNatives;
   /// See SemaContext::ImportedInstanceClasses.

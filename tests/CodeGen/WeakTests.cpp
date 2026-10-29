@@ -139,6 +139,36 @@ TEST(Weak, LambdasCaptureWeakly) {
   g.expectNoLeaks("weak captures");
 }
 
+// A lambda inside a lambda captures a `weak` variable weakly too, however
+// deep it is: the closure an outer one returns sees None once the object is
+// gone, and one stored in the object forms no cycle.  (Each inner closure
+// held the object strongly: `alive`, and two blocks leaked.)
+TEST(Weak, NestedLambdasCaptureWeakly) {
+  LeakGuard g;
+  auto r = compileAndRun(R"(import ::io;
+    class B { n: int; f: (() -> Str)?; }
+    fn state(w: B?) -> Str => if w == None then "gone" else "alive";
+    fn main() -> int {
+      b = B(1, None);
+      weak me = b;
+      let outer = fn() -> () -> Str { return fn() -> Str => state(me); };
+      let three = fn() -> () -> () -> Str {
+        return fn() -> () -> Str { return fn() -> Str => state(me); };
+      };
+      let inner = outer();
+      let deep = three()();
+      io::println(inner() + " " + deep());
+      b.f = outer();
+      b = B(2, None);
+      io::println(inner() + " " + deep() + " " + three()()());
+      return 0;
+    }
+  )");
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.StdOut, "alive alive\ngone gone gone\n");
+  g.expectNoLeaks("nested weak captures");
+}
+
 // A weak reference goes everywhere a `T?` goes: passed by value and as a
 // `view`, returned, stored in a strong or a weak field, taken from a weak
 // field, and assigned by destructuring.

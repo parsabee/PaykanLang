@@ -116,6 +116,9 @@ Output:
 minus one, the smallest int, something else
 ```
 
+Only a number follows the `-`: `-'a' { ... }` is the error `unexpected character literal;
+expected a number after '-' in a match pattern`, at the `'a'`.
+
 An arm is any literal of the subject's type, a hexadecimal or binary one too, and on an
 `unsigned` the arms reach its whole range, up to `0xFFFF_FFFF_FFFF_FFFF`
 ([Basics](02-basics.md#literals)). An arm whose literal does not fit the subject's type is
@@ -450,13 +453,16 @@ Output:
 2
 ```
 
-- The subject must be a place an `inout` argument could be: a variable or a field, not an
+- The subject must be a place an `inout` argument could be: a variable, a field or a call's
+  `inout` result (`match b.slot() { … }`, with `slot` returning `inout`), not another
   expression (`'inout' arm 'd' needs a variable or a field to match on`), `self`, a `let`
   local or a `view` (`'v' is a 'view' parameter; it cannot be bound by 'inout' arm 'd'`).
+  While the binding is live, what the call borrowed (its receiver, its `inout` arguments)
+  is borrowed by it.
 - The subject's storage is found once, when the `match` starts, and the binding's value is
-  read there: a call on the way to it (`b.slot().a`, with `slot` returning `inout`, or
-  `mk().a`) runs once, and the binding goes back to that storage, wherever another call
-  would lead.
+  read there: a call on the way to it (`b.slot().a`, or `mk().a`), or the subject's own call
+  (`b.slot()`), runs once, and the binding goes back to that storage, wherever another
+  call would lead.
 - What is assigned to the binding has its type, `Dog`, which the subject's storage can
   hold: `d = Animal(1)` is an error.
 - While the binding is live, from the start of the arm to its last use there, the variable
@@ -741,7 +747,7 @@ match f.readln() {
 | Binding redeclaration | An arm body redeclares the arm's binding name |
 | Binding named `self` | In a method's body, an arm's binding is named `self`, which names the method's object or receiver (`'self' cannot be used as a variable name in method 'm' of class 'C'; it is the implicit receiver`) |
 | `view` binding changed or passed on | A `name: view T` binding is assigned, written through, passed to a parameter that is not `view`, or stored; or the subject's variable changes while it is live |
-| `inout` binding of something else | A `name: inout T` arm's subject is not a variable or a field, is `self`, a `let` local, a `view` or a `weak` reference, or is an optional primitive or enum; or the subject's variable is used while the binding is live |
+| `inout` binding of something else | A `name: inout T` arm's subject is not a variable, a field or a call's `inout` result, is `self`, a `let` local, a `view` or a `weak` reference, or is an optional primitive or enum; or the subject's variable is used while the binding is live |
 | Arm body type error | Any type error inside an arm body |
 | Wildcard not last | A `_` arm is followed by another arm |
 | Non-exhaustive match | A `match` leaves cases uncovered where every path must produce a value |

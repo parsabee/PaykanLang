@@ -414,9 +414,11 @@ A shift whose count is an integer literal at or above the value's width is
 valid and always 0; Sema warns: `the shift count 8 is not less than the
 width of 'u8' (8 bits): the result is always 0`.  A location is warned
 about once, though several instantiations of a generic reach it.  The
-warning goes to standard error, which the strict C check compares with the
-C program's (`scripts/c_strict.py`), so the samples and the documentation's
-examples shift by variables when they show an overshift.
+warning goes to standard error as the program compiles, so `paykan run`
+prints it before the program runs.  The strict C check
+(`scripts/c_strict.py`), which compares that run's standard error with the
+C program's, leaves it out, as it does every warning the compiler prints:
+the C program, compiled already, prints none.
 
 ## Semantics
 

@@ -1,0 +1,118 @@
+// 85 — a borrow ends at its last use, whatever later binders are named
+// Exercises: a local borrow, and a `match` arm's binding that borrows the
+//            subject, are live to the last statement that uses them
+//            (docs/language/02-basics.md, "Local borrows"); a binder of
+//            the same name further on is another variable: a lambda's
+//            parameter, a `for` loop's variable, a `match` arm's binding,
+//            an annotated destructuring target and a declaration in an
+//            inner block.  After the borrow's last use its variable is
+//            used and assigned, and an `inout` arm's binding is written
+//            back to the subject before the statement that names another
+//            `r`.  Each binder of the same name kept the borrow live, so
+//            each use of the variable after it was an error.
+// expect-stdout: 5 6
+// expect-stdout: 5 7
+// expect-stdout: 5 0 1
+// expect-stdout: 5 5
+// expect-stdout: 5 15
+// expect-stdout: orig changed 2
+// expect-stdout: R(w: 101) 6 0 1 7
+// expect-stdout: R(w: 101)
+// expect-stdout: a b 2
+// expect-stdout: b
+
+import ::io;
+
+enum E { A, R(w: int) }
+
+class B {
+  e: E;
+}
+
+class N {
+  s: Str;
+}
+
+fn main() -> int {
+  let o: int? = 5;
+  k = 1;
+  {
+    r: inout = k;
+    r = 5;
+    io::print(Str(k) + " ");
+    let f = fn(r: int) -> int => r + 3;
+    io::println(Str(f(3)));
+  }
+  {
+    r: inout = k;
+    r = 5;
+    io::print(Str(k) + " ");
+    { let r = 7; io::println(Str(r)); }
+  }
+  {
+    r: inout = k;
+    r = 5;
+    io::print(Str(k));
+    for r in 0..2 { io::print(" " + Str(r)); }
+    io::println("");
+  }
+  {
+    r: inout = k;
+    r = 5;
+    io::print(Str(k) + " ");
+    match o {
+      r: int { io::println(Str(r)); }
+      None { }
+    }
+  }
+  {
+    r: inout = k;
+    r = 5;
+    io::print(Str(k) + " ");
+    {
+      r: int, q: int = (7, 8);
+      io::println(Str(r + q));
+    }
+  }
+  // A `view` local, and the string it held replaced after its last use.
+  s = "orig";
+  v: view = s;
+  io::print(v + " ");
+  s = "changed";
+  let g = fn(v: int) -> int => v + 1;
+  io::println(s + " " + Str(g(1)));
+  // An `inout` arm's binding goes back to the subject after its last use,
+  // before the statements that name another `r`.
+  let b = B(E::R(1));
+  match b.e {
+    r: inout R {
+      r.w += 100;
+      io::print(Str(b.e) + " ");
+      let h = fn(r: int) -> int => r * 2;
+      io::print(Str(h(3)));
+      for r in 0..2 { io::print(" " + Str(r)); }
+      { let r = 7; io::println(" " + Str(r)); }
+    }
+    A { }
+  }
+  io::println(Str(b.e));
+  // A `view` arm's subject replaced after the binding's last use.
+  on: N? = N("a");
+  match on {
+    n: view N {
+      io::print(n.s + " ");
+      on = N("b");
+      let m = fn(n: int) -> int => n + 1;
+      match on {
+        x: N { io::println(x.s + " " + Str(m(1))); }
+        None { }
+      }
+    }
+    None { }
+  }
+  match on {
+    x: N { io::println(x.s); }
+    None { }
+  }
+  return 0;
+}

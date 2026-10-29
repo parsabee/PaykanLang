@@ -10,7 +10,7 @@ type-checking (no codegen or JIT execution).
 |------------|---------------------------------------------------|
 | `arrays/`  | Array types `T[n]`, slice parameters, literals, subscript, `len()` |
 | `classes/` | Class declarations, fields, methods, inheritance, `__super__` |
-| `functions/` | Free-function declarations and top-level name collisions |
+| `functions/` | Free-function declarations, top-level name collisions, a `view` argument borrowed until its call runs |
 | `match/`   | `match` statement — arms, bindings, wildcards     |
 | `enums/`   | `enum` declarations, variant access, equality, enum match |
 | `generics/` | Generic classes / functions: instantiation, inference, diagnostics |

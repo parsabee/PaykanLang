@@ -446,10 +446,85 @@ The check is conservative: it compares how the arguments are written. Two differ
 paths that reach the same object at run time (`a.n` and `b.n` after `b = a`) are
 accepted, and the callee then sees one storage through both parameters.
 
-Exclusivity is a rule of one call. An expression may read a variable and also pass it to
-an `inout` parameter of a call inside it. Its operands are evaluated left to right, and a
-value read before the call is the one used, even when the call replaces what the variable
-holds:
+A borrow lasts until its call runs. The callee reads what is passed to a `view` parameter
+(a slice parameter, `view T[]`, among them), and the receiver of a struct's `view fn`, where
+it is, and it runs only once its later arguments are evaluated. So a call anywhere in a
+later argument cannot write it either: pass it, what holds it or a part of it to an
+`inout` parameter, or call a method on it that may change `self`. This holds for every
+call, as the one that borrows and as the one that writes: a function's, a method's, a
+constructor's, `__super__`'s and a function value's (whose parameters are named by
+number). A lambda's body is not part of it, since it runs only when the lambda is called.
+
+```pkn
+struct P {
+  a: int;
+}
+
+fn look(p: view P, x: int) -> int => p.a;
+
+fn bump(p: inout P) -> int {
+  p = P(9);
+  return 0;
+}
+
+fn main() -> int {
+  p = P(1);
+  return look(p, bump(p));
+}
+```
+
+Error:
+
+```
+error: 'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter 'p' of 'bump'
+```
+
+The other forms, with `look` and `bump` as above, are errors the same way:
+
+| Call | Error |
+|---|---|
+| `sum(arr, bumpA(arr))` with `fn sum(xs: view int[], k: int)` and `fn bumpA(a: inout int[3])` | `'arr' is passed to 'view' parameter 'xs' of 'sum'; a later argument of 'sum' cannot pass it to 'inout' parameter 'a' of 'bumpA'` |
+| `sum(xs, clear(xs))` in `fn e4(xs: inout int[])`, with `fn clear(xs: inout int[])` | `'xs' is passed to 'view' parameter 'xs' of 'sum'; a later argument of 'sum' cannot pass it to 'inout' parameter 'xs' of 'clear'` |
+| `p.show(bump(p))`, `show` a `view fn` of `P` | `'p' is the receiver of 'view fn show'; an argument of 'show' cannot pass it to 'inout' parameter 'p' of 'bump'` |
+| `look(p, p.reset())`, `reset` a method of `P` that may change `self` | `'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot call 'reset' on it (not a 'view fn')` |
+| `look(h.p, bumpH(h))` with `fn bumpH(h: inout H)` | `'h' contains 'h.p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter 'h' of 'bumpH'` |
+| `look(p, bumpN(p.a))` with `fn bumpN(n: inout int)` | `'p.a' is part of 'p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter 'n' of 'bumpN'` |
+| `look(c.p, c.change())`, `change` a method of `c`'s class that may change `self` | `'c' contains 'c.p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot call 'change' on it (not a 'view fn')` |
+| `Shown(p, bump(p))`, the `__init__` of `Shown` taking `p: view P` (and `__super__(p, bump(p))` likewise) | `'p' is passed to 'view' parameter 'p' of 'Shown'; a later argument of 'Shown' cannot pass it to 'inout' parameter 'p' of 'bump'` |
+| `g(p, bump(p))` with `let g = look;`, and `look(p, b(p))` with `let b = bump;` | `'p' is passed to 'view' parameter '1' of 'g'; a later argument of 'g' cannot pass it to 'inout' parameter 'p' of 'bump'`, `'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter '1' of 'b'` |
+| `look(p, id(bump(p)))`, `look(p, if k == 0 then bump(p) else 0)`: deeper in the argument | the error of `look(p, bump(p))` |
+| `look(h.p, bump(h.slot()))`, `slot` a method of `H` returning `inout P` | `'h' contains 'h.p', passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot call 'slot' on it (not a 'view fn')`: the call returning an `inout` result is what writes it, not the call it is passed to |
+
+Each write is one error, given by the innermost call that borrows what it writes, and none
+when the call making it reports it already, as sharing storage with another of its own
+arguments. `look(p, two(p, p.a))` with `fn two(p: inout P, n: inout int)` is two errors:
+`'p.a' is part of 'p', passed to 'inout' parameter 'p'; it cannot also be passed to 'inout'
+parameter 'n'`, at `p.a`, and `'p' is passed to 'view' parameter 'p' of 'look'; a later
+argument of 'look' cannot pass it to 'inout' parameter 'p' of 'two'`, at `two`'s `p`.
+
+What this does not see is accepted, and the callee is then given the value read where the
+argument was evaluated, which the caller copies when a later argument may write it
+([Evaluation order](02-basics.md#evaluation-order)):
+
+- a plain parameter, a copy: `first(p, bump(p))` with `fn first(p: P, x: int)`;
+- a write through an object, or by code the call cannot see: `look(c.p, reset(c))` with
+  `reset` storing into `c.p`, a call through a function value (`look(c.p, f())`), a
+  method whose override writes;
+- a write before the borrow, or one after a borrow that has ended: `look2(bump(p), p)`
+  with `fn look2(x: int, p: view P)`, and `add(look(p, 0), bump(p))`, where the call of
+  `look` has returned;
+- a lambda's body: `look(c.p, apply(fn() -> int => bump(c.p)))`, with
+  `fn apply(f: () -> int) -> int => f();`;
+- another variable, or another field of the same one: `look(two.x, bump(two.y))`;
+- the operands of `==` and `!=` (`p == P(bump(p) + 9)`).
+
+The copy of a slice's elements is made on the heap, and the compiler warns where it is made:
+`'reset' in a later argument may write the elements of slice 'xs': they are copied to the
+heap before the call to 'total'` ([Evaluation order](02-basics.md#evaluation-order)).
+
+Outside a borrow, an expression may read a variable and also pass it to an `inout`
+parameter of a call inside it. Its operands are evaluated left to right, and a value read
+before the call is the one used, even when the call replaces what the variable holds:
 
 ```pkn
 import ::io;
@@ -602,9 +677,11 @@ hello 4
 - What a `-> view T` function returns must be part of `self` or of a `view` or `inout`
   parameter: the parameter itself, a field or an element reached from it, a `match` arm's
   name for a `view` of one (`match self.head { n: Node { return n.v; } ... }`), or the
-  borrowed result of another call that borrows only those. A new value, a copy parameter or a local
-  is an error: `'d' is a copy: a 'view' result must be part of 'self' or of a 'view' or
-  'inout' parameter`.
+  borrowed result of another call that borrows only those. A conditional is one when each
+  branch is, and a field of a conditional's object when it is one on each branch
+  (`return (if c then a else b).name;` with `a` and `b` `view` parameters). A new value, a
+  copy parameter or a local is an error: `'d' is a copy: a 'view' result must be part of
+  'self' or of a 'view' or 'inout' parameter`.
 - The caller sees the result as a `view` ([A `view` stays a `view`](#a-view-of-a-reference-stays-a-view)):
   it can be read, passed on to a `view` parameter or bound to a `view` local, and a value
   type can be copied out (`k = b.num();`); nothing changes through it and one that shares
@@ -670,8 +747,16 @@ Output:
 
 - What it returns is a place an `inout` argument could be: part of `self` (not `self`
   itself) or of an `inout` parameter, not a `view`, a copy or a local, not an array element
-  yet, of exactly the result's type (`an 'inout' result has type 'Animal', but what it
-  returns has type 'Dog'`). A `view fn` cannot return one.
+  yet, not an element of a tuple or a field of a struct held in one (`an element of a tuple
+  cannot be returned 'inout': tuples are immutable`), of exactly the result's type (`an
+  'inout' result has type 'Animal', but what it returns has type 'Dog'`). A `view fn`
+  cannot return one.
+- A conditional of two such places is one (`return if first then a else b;`), and so is a
+  field of a conditional's object when it is one on each branch (`return (if c then a else
+  b).n;` with `a` and `b` `inout` parameters of a class): it is in what the chosen branch
+  holds. A conditional's struct or tuple is a temporary, whose field or element is not (`a
+  field of a struct that is not a variable or a field (a temporary, which dies with the
+  statement) cannot be returned 'inout'`).
 - The caller binds it to an `inout` local, passes it on to an `inout` parameter, calls a
   method on it or reads it (`y = b.num() + 1;` copies). It borrows the receiver and the
   arguments to the call's `inout` parameters, as an `inout` local of them would: while a
@@ -690,15 +775,17 @@ Output:
 An `inout` result can only point into storage its caller keeps alive while the result is
 used:
 
-- Into `self`: a field of a class's `self`, or a field of a struct or an element of a tuple
-  held in it, at any depth (`return self.k;`, `return self.pos.x;`). A struct's `self` is
-  the receiver's storage, as an `inout` parameter's is.
+- Into `self`: a field of a class's `self`, or a field of a struct held in it, at any depth
+  (`return self.k;`, `return self.pos.x;`). A struct's `self` is the receiver's storage, as
+  an `inout` parameter's is.
 - Into what an `inout` parameter names: its storage (`return n;`, `return s.x;`), and the
   object a reference held there refers to: the object of a class-typed one (`return n.k;`
   with `n: inout Node`), or one that a struct, a tuple or a fixed-size array holds
   (`return s.b.k;` with `s: inout S` and `b` a class-typed field, `return a[5].k;` with
   `a: inout B[6]`). Not an object in a slice (`a: inout B[]`): its caller keeps none of
   them alive.
+- Wherever both branches of a conditional can point, for a field of its object: `return
+  (if c then n else self.c).k;` is an error, as `return self.c.k;` is (below).
 - Wherever another call's `inout` result can point, when all of it is allowed here: the
   storage of the call's receiver and of each of its `inout` arguments, and the object a
   reference held there refers to when that object can hold the result (the receiver's
@@ -1147,6 +1234,7 @@ backend](../c-backend.md)).
 | Write to a `view` parameter | Assigning or destructuring into it |
 | A `view` changed, passed on or kept | Writing a field or element of what it holds, calling a method on it that is not a `view fn`, passing it to a parameter that is not `view`, or storing or returning one that shares what it holds |
 | Bad `inout` argument | Not a variable or field, not exactly the parameter's type, a `view` parameter or `let` local, an array element, a string's character, or the same place twice in one call |
+| A borrow written by a later argument | A `view` or slice argument, or the receiver of a struct's `view fn`, that a call in a later argument passes (or what holds it, or a part of it) to an `inout` parameter, or calls a method on that may change `self`: `look(p, bump(p))` (see [Exclusivity](#exclusivity)) |
 | Override changes a mode | An override that drops, adds or changes a parameter's `view`/`inout`, or returns a borrow where the method it overrides returns a copy (or the other way) |
 | A `view` result of something else | A `-> view T` function returns a new value, a copy parameter or a local, not part of `self` or of a `view` / `inout` parameter |
 | An `inout` result of something else | A `-> inout T` function returns what an `inout` argument could not be, or what is not part of `self` or of an `inout` parameter, or another type; it returns storage in a separate object, reached through a field of `self` or past the object an `inout` parameter refers to (see [Where an `inout` result can point](#where-an-inout-result-can-point)); a `view fn` returns `inout`; the receiver of a method returning `inout` is not a variable or a field |

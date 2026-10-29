@@ -432,10 +432,10 @@ True
 | Error | Trigger |
 |-------|---------|
 | Index out of range | `t.2` on a 2-tuple |
-| Index on non-tuple | `x.0` where `x` is not a tuple |
+| Index on non-tuple | `x.0` where `x` is not a tuple; on an optional tuple, the unwrap error of [Optionals](12-optionals.md#semantic-checks) |
 | Immutable | `t.0 = v` |
 | Arity mismatch | `a, b, c = (1, 2)`; `f((1, 2, 3))` where `f` takes `(int, Str)` |
-| Not a tuple | `a, b = 42` |
+| Not a tuple | `a, b = 42`; an optional tuple is the unwrap error, as for an index |
 | Target type mismatch | `a: Str, b: int = (1, 2)` |
 | Duplicate target | `a, a = (1, 2)` |
 | No element promotion | `t: (float, int) = (1, 2)` |

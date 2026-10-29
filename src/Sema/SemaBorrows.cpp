@@ -14,7 +14,11 @@
 // borrows what the call borrowed: its receiver and the arguments to its
 // `view` / `inout` parameters.  A lambda's body and a call through a
 // function value use the names they hold, no others; a lambda capturing a
-// borrowed variable uses it (captureVariable).
+// borrowed variable uses it (captureVariable).  A name is a use only where
+// it means the borrow: a binder of the same name inside a statement (a
+// lambda's parameter, a `for` loop's variable, a `match` arm's binding, a
+// declaration in a block, from there to the block's end) starts another
+// variable, which the names in its reach are.
 
 #include "Sema.h"
 
@@ -28,8 +32,9 @@ namespace {
 
 bool mentions(const ast::Stmt *s, const std::string &name);
 
-/// Whether @p e uses the name @p name.  A kind it does not know counts as a
-/// use, which can only keep a borrow live longer.
+/// Whether @p e uses the name @p name, as the variable it means where @p e
+/// is: not where a binder inside @p e of the same name hides it.  A kind it
+/// does not know counts as a use, which can only keep a borrow live longer.
 bool mentions(const ast::Expr *e, const std::string &name) {
   if (!e)
     return false;
@@ -65,9 +70,15 @@ bool mentions(const ast::Expr *e, const std::string &name) {
     const auto *c = ast::cast<ast::CallValueExpr>(e);
     return mentions(c->getCallee(), name) || any(c->getArguments());
   }
-  case ast::ASTNode::NK_LambdaExpr:
-    // What its body names (a borrow itself is never captured).
-    return mentions(ast::cast<ast::LambdaExpr>(e)->getBody(), name);
+  case ast::ASTNode::NK_LambdaExpr: {
+    // What its body names (a borrow itself is never captured), unless a
+    // parameter of the same name hides it there.
+    const auto *l = ast::cast<ast::LambdaExpr>(e);
+    for (const ast::Param &p : l->getParams())
+      if (p.getName() == name)
+        return false;
+    return mentions(l->getBody(), name);
+  }
   case ast::ASTNode::NK_MethodCallExpr: {
     const auto *m = ast::cast<ast::MethodCallExpr>(e);
     return mentions(m->getReceiver(), name) || any(m->getArguments());
@@ -95,10 +106,37 @@ bool mentions(const ast::Expr *e, const std::string &name) {
   }
 }
 
+/// Whether @p s declares a variable named @p name in its block: a local, or
+/// a destructuring target with a type (a fresh declaration).  @p before is
+/// then what @p s evaluates before the variable exists.
+bool declares(const ast::Stmt *s, const std::string &name,
+              const ast::Expr *&before) {
+  if (const auto *ds = ast::dyn_cast<ast::DeclStmt>(s)) {
+    const auto *vd = ast::dyn_cast<ast::VarDecl>(ds->getDecl());
+    if (!vd || vd->getName() != name)
+      return false;
+    before = vd->getInitExpr();
+    return true;
+  }
+  if (const auto *d = ast::dyn_cast<ast::DestructureStmt>(s))
+    for (const auto &t : d->getTargets())
+      if (t.DeclType && t.getName() == name) {
+        before = d->getValue();
+        return true;
+      }
+  return false;
+}
+
+/// The statements of a block, in order: a declaration of @p name there
+/// hides the variable outside from its initializer on.
 bool mentions(const std::vector<ast::Stmt *> &stmts, const std::string &name) {
-  for (const ast::Stmt *s : stmts)
+  for (const ast::Stmt *s : stmts) {
+    const ast::Expr *before = nullptr;
+    if (declares(s, name, before))
+      return mentions(before, name);
     if (mentions(s, name))
       return true;
+  }
   return false;
 }
 
@@ -132,10 +170,12 @@ bool mentions(const ast::Stmt *s, const std::string &name) {
     return mentions(w->getCondition(), name) || mentions(w->getBody(), name);
   }
   case ast::ASTNode::NK_ForStmt: {
+    // The range and the step are evaluated outside the loop's variable; the
+    // body names that variable by its name.
     const auto *f = ast::cast<ast::ForStmt>(s);
-    return f->getVar()->getName() == name || mentions(f->getStart(), name) ||
-           mentions(f->getEnd(), name) || mentions(f->getStep(), name) ||
-           mentions(f->getBody(), name);
+    return mentions(f->getStart(), name) || mentions(f->getEnd(), name) ||
+           mentions(f->getStep(), name) ||
+           (f->getVar()->getName() != name && mentions(f->getBody(), name));
   }
   case ast::ASTNode::NK_BreakStmt:
   case ast::ASTNode::NK_ContinueStmt:
@@ -153,8 +193,9 @@ bool mentions(const ast::Stmt *s, const std::string &name) {
     const auto *m = ast::cast<ast::MatchStmt>(s);
     if (mentions(m->getSubject(), name))
       return true;
+    // An arm's binding of the same name hides it in the arm's body.
     for (const ast::MatchArm *arm : m->getArms())
-      if (mentions(arm->getBody(), name))
+      if (arm->getBinding() != name && mentions(arm->getBody(), name))
         return true;
     return false;
   }

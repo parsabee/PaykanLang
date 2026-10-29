@@ -1,0 +1,68 @@
+// 84 — a weak variable captured by a lambda inside a lambda
+// Exercises: a `weak` local captured two and three lambdas deep, which
+//            each closure holds weakly (docs/language/16-memory.md, "Weak
+//            References"): the innermost reads the object while it is
+//            alive and None once it is gone, however late it was made; an
+//            outer lambda that reads the capture itself too; and a
+//            method's `weak me = self` captured two lambdas deep in a
+//            closure stored in the object, which forms no cycle.  Each
+//            inner closure held the object strongly: it read as alive
+//            after its last owner let go of it, and the stored closure
+//            leaked the object.
+// expect-stdout: alive alive/alive
+// expect-stdout: gone alive/gone gone gone/gone
+// expect-stdout: gone
+// expect-stdout: B7
+
+import ::io;
+
+class B {
+  n: int;
+  f: (() -> Str)?;
+
+  fn wire() {
+    weak me = self;
+    let mk = fn() -> () -> Str {
+      return fn() -> Str {
+        match me {
+          b: B { return "B" + Str(b.n); }
+          None { return "none"; }
+        }
+      };
+    };
+    self.f = mk();
+  }
+}
+
+fn state(w: B?) -> Str => if w == None then "gone" else "alive";
+
+fn main() -> int {
+  b = B(1, None);
+  weak me = b;
+  // Three lambdas deep: each closure holds the object weakly.
+  let three = fn() -> () -> () -> Str {
+    return fn() -> () -> Str { return fn() -> Str => state(me); };
+  };
+  // The outer lambda reads the capture before the inner one captures it.
+  let both = fn() -> () -> Str {
+    let first = state(me);
+    return fn() -> Str => first + "/" + state(me);
+  };
+  let mid = three();
+  let inner = mid();
+  let pair = both();
+  io::println(inner() + " " + pair());
+  b = B(2, None);
+  io::println(inner() + " " + pair() + " " + mid()() + " " + both()());
+  // A closure made once the object is gone captures None, weakly.
+  let late = three()();
+  io::println(late());
+  // A method's `weak me = self`, captured two lambdas deep, in self.
+  let c = B(7, None);
+  c.wire();
+  match c.f {
+    g: () -> Str { io::println(g()); }
+    None { }
+  }
+  return 0;
+}

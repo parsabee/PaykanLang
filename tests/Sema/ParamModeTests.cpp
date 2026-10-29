@@ -457,6 +457,374 @@ fn main() -> int {
           "'m'"});
 }
 
+// A `view` argument (a slice's too) and the receiver of a struct's `view
+// fn` are borrowed until the call runs: a call in a later argument cannot
+// pass what shares their storage to an `inout` parameter, nor call a method
+// on it that may change it, a class's included.
+TEST(ParamMode, ABorrowLastsUntilItsCallRuns) {
+  auto r = semaCheck(R"(struct P { a: int; }
+impl P {
+  view fn show(x: int) -> int => self.a;
+  fn reset() -> int { self.a = 0; return 0; }
+}
+struct H { p: P; }
+class C { p: P; fn change() -> int { self.p = P(0); return 0; } }
+class K { n: int; fn tick() -> int { self.n = self.n + 1; return 0; } }
+fn sum(xs: view int[], k: int) -> int => xs[0] + k;
+fn bump(a: inout int[3]) -> int { a = [9, 9, 9]; return 0; }
+fn clear(xs: inout int[]) -> int { xs[0] = 0; return 0; }
+fn e4(xs: inout int[]) -> int => sum(xs, clear(xs));
+fn bumpP(p: inout P) -> int { p = P(9); return 0; }
+fn bumpH(h: inout H) -> int { h = H(P(9)); return 0; }
+fn bumpN(n: inout int) -> int { n = 9; return 0; }
+fn bumpK(k: inout K) -> int { k = K(0); return 0; }
+fn look(p: view P, x: int) -> int => p.a;
+fn showK(k: view K, x: int) -> int => k.n;
+fn main() -> int {
+  arr = [1, 2, 3];
+  p = P(1);
+  h = H(P(1));
+  c = C(P(1));
+  k = K(1);
+  n = sum(arr, bump(arr));
+  n = look(p, bumpP(p));
+  n = p.show(bumpP(p));
+  n = look(p, p.reset());
+  n = look(h.p, bumpH(h));
+  n = look(p, bumpN(p.a));
+  n = look(c.p, c.change());
+  n = showK(k, k.tick());
+  n = showK(k, bumpK(k));
+  return n;
+})");
+  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
+  expectErrors(
+      r,
+      {":12:48: error: 'xs' is passed to 'view' parameter 'xs' of 'sum'; a "
+       "later argument of 'sum' cannot pass it to 'inout' parameter 'xs' of "
+       "'clear'",
+       ":25:21: error: 'arr' is passed to 'view' parameter 'xs' of 'sum'; a "
+       "later argument of 'sum' cannot pass it to 'inout' parameter 'a' of "
+       "'bump'",
+       ":26:21: error: 'p' is passed to 'view' parameter 'p' of 'look'; a "
+       "later argument of 'look' cannot pass it to 'inout' parameter 'p' of "
+       "'bumpP'",
+       ":27:20: error: 'p' is the receiver of 'view fn show'; an argument of "
+       "'show' cannot pass it to 'inout' parameter 'p' of 'bumpP'",
+       ":28:15: error: 'p' is passed to 'view' parameter 'p' of 'look'; a "
+       "later argument of 'look' cannot call 'reset' on it (not a 'view fn')",
+       ":29:23: error: 'h' contains 'h.p', passed to 'view' parameter 'p' of "
+       "'look'; a later argument of 'look' cannot pass it to 'inout' "
+       "parameter 'h' of 'bumpH'",
+       ":30:21: error: 'p.a' is part of 'p', passed to 'view' parameter 'p' "
+       "of 'look'; a later argument of 'look' cannot pass it to 'inout' "
+       "parameter 'n' of 'bumpN'",
+       ":31:17: error: 'c' contains 'c.p', passed to 'view' parameter 'p' of "
+       "'look'; a later argument of 'look' cannot call 'change' on it (not a "
+       "'view fn')",
+       ":32:16: error: 'k' is passed to 'view' parameter 'k' of 'showK'; a "
+       "later argument of 'showK' cannot call 'tick' on it (not a 'view fn')",
+       ":33:22: error: 'k' is passed to 'view' parameter 'k' of 'showK'; a "
+       "later argument of 'showK' cannot pass it to 'inout' parameter 'k' of "
+       "'bumpK'"});
+}
+
+// The same in every kind of call, as the borrowing call and as the one
+// that writes: a method, a struct's method on `self`, a constructor,
+// `__super__`, and a function value (a variable's, a field's, an
+// expression's), whose parameters are named by number.
+TEST(ParamMode, ABorrowLastsUntilItsCallRunsInEveryKindOfCall) {
+  auto r = semaCheck(R"(struct P { a: int; }
+impl P {
+  view fn show(x: int) -> int => self.a;
+  fn again() -> int => self.show(bumpP(self));
+}
+class Reader { view fn look(p: view P, x: int) -> int => p.a; }
+class Base { a: int; }
+impl Base { fn __init__(p: view P, x: int) { self.a = p.a; } }
+class D : Base { y: int; }
+impl D { fn __init__(p: P) { __super__(p, bumpP(p)); self.y = 0; } }
+class Shown { a: int; }
+impl Shown { fn __init__(p: view P, x: int) { self.a = p.a; } }
+class Maker { a: int; }
+impl Maker { fn __init__(p: inout P) { self.a = p.a; } }
+class Holder { f: (view P, int) -> int; }
+fn bumpP(p: inout P) -> int { p = P(9); return 0; }
+fn look(p: view P, x: int) -> int => p.a;
+fn pick() -> (view P, int) -> int => look;
+fn main() -> int {
+  p = P(1);
+  g = look;
+  bumpV = bumpP;
+  holder = Holder(look);
+  n = Reader().look(p, bumpP(p));
+  n = Shown(p, bumpP(p)).a;
+  n = g(p, bumpP(p));
+  n = holder.f(p, bumpP(p));
+  n = pick()(p, bumpP(p));
+  n = look(p, Maker(p).a);
+  n = look(p, bumpV(p));
+  return n;
+})");
+  EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
+  expectErrors(
+      r,
+      {":4:40: error: 'self' is the receiver of 'view fn show'; an argument "
+       "of 'show' cannot pass it to 'inout' parameter 'p' of 'bumpP'",
+       ":10:49: error: 'p' is passed to 'view' parameter 'p' of '__super__'; "
+       "a later argument of '__super__' cannot pass it to 'inout' parameter "
+       "'p' of 'bumpP'",
+       ":24:30: error: 'p' is passed to 'view' parameter 'p' of 'look'; a "
+       "later argument of 'look' cannot pass it to 'inout' parameter 'p' of "
+       "'bumpP'",
+       ":25:22: error: 'p' is passed to 'view' parameter 'p' of 'Shown'; a "
+       "later argument of 'Shown' cannot pass it to 'inout' parameter 'p' of "
+       "'bumpP'",
+       ":26:18: error: 'p' is passed to 'view' parameter '1' of 'g'; a later "
+       "argument of 'g' cannot pass it to 'inout' parameter 'p' of 'bumpP'",
+       ":27:25: error: 'p' is passed to 'view' parameter '1' of 'f'; a later "
+       "argument of 'f' cannot pass it to 'inout' parameter 'p' of 'bumpP'",
+       ":28:23: error: 'p' is passed to 'view' parameter '1' of '(view P, "
+       "int) -> int'; a later argument of '(view P, int) -> int' cannot pass "
+       "it to 'inout' parameter 'p' of 'bumpP'",
+       ":29:21: error: 'p' is passed to 'view' parameter 'p' of 'look'; a "
+       "later argument of 'look' cannot pass it to 'inout' parameter 'p' of "
+       "'Maker'",
+       ":30:21: error: 'p' is passed to 'view' parameter 'p' of 'look'; a "
+       "later argument of 'look' cannot pass it to 'inout' parameter '1' of "
+       "'bumpV'"});
+}
+
+// The writing call may be anywhere in a later argument: under other calls,
+// a conditional's branch, an operator, a literal, a subscript or a tuple
+// index.  A borrowed conditional borrows both branches.  A write is
+// reported once, by the innermost call borrowing what it writes.
+TEST(ParamMode, ACallAnywhereInALaterArgumentCounts) {
+  auto r = semaCheck(R"(struct P { a: int; }
+fn bumpP(p: inout P) -> int { p = P(9); return 0; }
+fn look(p: view P, x: int) -> int => p.a;
+fn pair(p: view P, q: view P, x: int) -> int => p.a + q.a;
+fn id(x: int) -> int => x;
+fn main() -> int {
+  p = P(1);
+  q = P(2);
+  n = look(p, id(id(bumpP(p))));
+  n = look(p, if n == 0 then bumpP(p) else 0);
+  n = look(if n == 0 then p else q, bumpP(q));
+  n = pair(p, q, bumpP(p) + bumpP(q));
+  n = look(p, look(p, bumpP(p)));
+  n = look(p, -bumpP(p));
+  n = look(p, [1, 2][bumpP(p)]);
+  n = look(p, [bumpP(p)][0]);
+  n = look(p, (bumpP(p), 1).1);
+  return n;
+})");
+  EXPECT_EQ(r.ErrorCount, 10u) << r.Diagnostics;
+  const std::string later =
+      "is passed to 'view' parameter 'p' of 'look'; a later argument of "
+      "'look' cannot pass it to 'inout' parameter 'p' of 'bumpP'";
+  for (const char *at :
+       {":9:27", ":10:36", ":13:29", ":14:22", ":15:28", ":16:22", ":17:22"})
+    EXPECT_NE(r.Diagnostics.find(std::string(at) + ": error: 'p' " + later),
+              std::string::npos)
+        << at << "\n"
+        << r.Diagnostics;
+  expectErrors(
+      r, {(":11:43: error: 'q' " + later).c_str(),
+          ":12:24: error: 'p' is passed to 'view' parameter 'p' of 'pair'; a "
+          "later argument of 'pair' cannot pass it to 'inout' parameter 'p' of "
+          "'bumpP'",
+          ":12:35: error: 'q' is passed to 'view' parameter 'q' of 'pair'; a "
+          "later argument of 'pair' cannot pass it to 'inout' parameter 'p' of "
+          "'bumpP'"});
+}
+
+// One write, one error.  A call in a later argument that reports a conflict
+// of its own arguments (`two(p, p.a)`) is not reported again for it, only
+// for its other writes.  And an `inout` result passed on to an `inout`
+// parameter is written by the call that returns it, which is the error, not
+// the call it is passed to: a method that is not a `view fn` (a struct's or
+// a class's), or a function through its `inout` parameter.  (Each was a
+// second error, at the same place or at the argument around it.)
+TEST(ParamMode, ACallInALaterArgumentIsReportedOncePerWrite) {
+  auto r = semaCheck(R"(struct P { a: int; }
+struct H { p: P; q: P; }
+impl H { fn slotP() -> inout P { return self.p; } }
+class K { p: P; fn slotK() -> inout P { return self.p; } }
+fn slot(h: inout H) -> inout P { return h.p; }
+fn look(p: view P, x: int) -> int => p.a;
+fn bump(p: inout P) -> int { p = P(9); return 0; }
+fn bumpN(n: inout int) -> int { n = 9; return 0; }
+fn two(p: inout P, n: inout int) -> int => 0;
+fn main() -> int {
+  p = P(1);
+  h = H(P(1), P(2));
+  k = K(P(1));
+  n = look(p, two(p, p.a));
+  n = look(h.p, bump(h.slotP()));
+  n = look(h.p, bumpN(h.slotP().a));
+  n = look(k.p, bump(k.slotK()));
+  n = look(h.p, bump(slot(h)));
+  n = look(h.q, look(h.p, bump(h.slotP())));
+  return n;
+})");
+  EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
+  const std::string slotP =
+      "'h' contains 'h.p', passed to 'view' parameter 'p' of 'look'; a later "
+      "argument of 'look' cannot call 'slotP' on it (not a 'view fn')";
+  for (const char *at : {":15:22", ":16:23", ":19:32"})
+    EXPECT_NE(r.Diagnostics.find(std::string(at) + ": error: " + slotP),
+              std::string::npos)
+        << at << "\n"
+        << r.Diagnostics;
+  expectErrors(
+      r,
+      {":14:22: error: 'p.a' is part of 'p', passed to 'inout' parameter 'p'; "
+       "it cannot also be passed to 'inout' parameter 'n'",
+       ":14:19: error: 'p' is passed to 'view' parameter 'p' of 'look'; a "
+       "later argument of 'look' cannot pass it to 'inout' parameter 'p' of "
+       "'two'",
+       ":17:22: error: 'k' contains 'k.p', passed to 'view' parameter 'p' of "
+       "'look'; a later argument of 'look' cannot call 'slotK' on it (not a "
+       "'view fn')",
+       ":18:27: error: 'h' contains 'h.p', passed to 'view' parameter 'p' of "
+       "'look'; a later argument of 'look' cannot pass it to 'inout' "
+       "parameter 'h' of 'slot'"});
+}
+
+// What the rule does not see stays accepted, the caller copying what a later
+// argument may write (docs/language/02-basics.md, "Evaluation order"): a
+// plain parameter, a write through an object (by a function, a function
+// value, a virtual method) or by a lambda's body, a borrow after the write
+// or in a call that has returned, another variable or another field, and
+// `==`'s operands.
+TEST(ParamMode, ALaterArgumentMayWriteWhatNoBorrowNames) {
+  auto r = semaCheck(R"(struct P { a: int; }
+impl P { view fn show(x: int) -> int => self.a; }
+struct Two { x: P; y: P; }
+class C { p: P; xs: int[3]; }
+class V { n: int; view fn write(c: C) -> int => 0; }
+class W : V {
+  n2: int;
+  view fn write(c: C) -> int { c.xs = [9, 9, 9]; return 0; }
+}
+fn sum(xs: view int[], k: int) -> int => xs[0] + k;
+fn bumpP(p: inout P) -> int { p = P(9); return 0; }
+fn look(p: view P, x: int) -> int => p.a;
+fn look2(x: int, p: view P) -> int => p.a;
+fn first(p: P, x: int) -> int => p.a;
+fn add(a: int, b: int) -> int => a + b;
+fn resetC(c: C) -> int { c.p = P(9); c.xs = [9, 9, 9]; return 0; }
+fn applyP(f: (inout P) -> int) -> int { q = P(0); return f(q); }
+fn gs(xs: view int[], f: () -> int) -> int => sum(xs, f());
+fn gv(p: view P, c: C) -> int => look(p, resetC(c));
+fn gw(xs: view int[], v: V, c: C) -> int => sum(xs, v.write(c));
+fn main() -> int {
+  p = P(1);
+  q = P(2);
+  two = Two(P(1), P(2));
+  c = C(P(1), [1, 2, 3]);
+  f = fn() -> int => resetC(c);
+  n = first(p, bumpP(p));
+  n = first(c.p, resetC(c));
+  n = look(c.p, resetC(c));
+  n = sum(c.xs, resetC(c));
+  n = c.p.show(resetC(c));
+  n = look(c.p, f());
+  n = gs(c.xs, f) + gv(c.p, c) + gw(c.xs, W(0, 0), c);
+  n = look2(bumpP(p), p);
+  n = add(look(p, 0), bumpP(p));
+  n = look(p, applyP(fn(p: inout P) -> int => bumpP(p)));
+  n = look(two.x, bumpP(two.y));
+  n = look(p, bumpP(q));
+  b = p == P(bumpP(p) + 9);
+  return n + (if b then 1 else 0);
+})");
+  EXPECT_TRUE(r.Ok) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 0u) << r.Diagnostics;
+}
+
+// The samples/sema programs of the shapes samples/codegen/78 no longer runs,
+// each rejected with exactly the error its ERROR line names.
+TEST(ParamMode, TheSamplesOfABorrowALaterArgumentWrites) {
+  struct Sample {
+    const char *Source;
+    const char *Error;
+  };
+  const Sample samples[] = {
+      {R"(// ERROR: 'p' is passed to 'view' parameter 'p' of 'look'; a later argument of 'look' cannot pass it to 'inout' parameter 'p' of 'bump'
+// A `view` parameter is borrowed until the call runs, so a call in a later
+// argument cannot write it (docs/language/03-functions.md, "Exclusivity").
+struct P {
+  a: int;
+}
+
+fn look(p: view P, x: int) -> int => p.a;
+
+fn bump(p: inout P) -> int {
+  p = P(9);
+  return 0;
+}
+
+fn main() -> int {
+  p = P(1);
+  return look(p, bump(p));
+}
+)",
+       ":17:23: error: 'p' is passed to 'view' parameter 'p' of 'look'; a "
+       "later argument of 'look' cannot pass it to 'inout' parameter 'p' of "
+       "'bump'"},
+      {R"(// ERROR: 'arr' is passed to 'view' parameter 'xs' of 'total'; a later argument of 'total' cannot pass it to 'inout' parameter 'a' of 'bumpA'
+// A slice parameter is borrowed until the call runs, so a call in a later
+// argument cannot write its array (docs/language/03-functions.md,
+// "Exclusivity").
+fn total(xs: view int[], x: int) -> int => xs[0];
+
+fn bumpA(a: inout int[3]) -> int {
+  a = [9, 9, 9];
+  return 0;
+}
+
+fn main() -> int {
+  arr = [1, 2, 3];
+  return total(arr, bumpA(arr));
+}
+)",
+       ":14:27: error: 'arr' is passed to 'view' parameter 'xs' of 'total'; a "
+       "later argument of 'total' cannot pass it to 'inout' parameter 'a' of "
+       "'bumpA'"},
+      {R"(// ERROR: 'counter' is the receiver of 'view fn get'; an argument of 'get' cannot pass it to 'inout' parameter 'c' of 'bumpCounter'
+// The receiver of a struct's `view fn` is borrowed until the method runs,
+// so a call in its arguments cannot write it
+// (docs/language/03-functions.md, "Exclusivity").
+struct Counter {
+  k: int;
+}
+
+impl Counter {
+  view fn get(x: int) -> int => self.k;
+}
+
+fn bumpCounter(c: inout Counter) -> int {
+  c = Counter(9);
+  return 0;
+}
+
+fn main() -> int {
+  counter = Counter(1);
+  return counter.get(bumpCounter(counter));
+}
+)",
+       ":20:34: error: 'counter' is the receiver of 'view fn get'; an argument "
+       "of 'get' cannot pass it to 'inout' parameter 'c' of 'bumpCounter'"},
+  };
+  for (const Sample &s : samples) {
+    auto r = semaCheck(s.Source);
+    EXPECT_EQ(r.ErrorCount, 1u) << r.Diagnostics;
+    expectErrors(r, {s.Error});
+  }
+}
+
 // Modes travel with a module's exports: an override in another module keeps
 // them, and calls into it are checked like local ones.
 TEST(ParamMode, ModesAcrossModules) {
@@ -1014,6 +1382,104 @@ fn main() -> int {
                    "is last used; a function cannot capture it (it could "
                    "change it through its copy)"});
   EXPECT_EQ(r.ErrorCount, 2u) << r.Diagnostics;
+}
+
+// A borrow is live to the last statement that uses it, by the name that
+// means it there: a binder of the same name further on is another variable
+// and keeps it live no longer.  So the borrowed variable can be used after
+// the borrow's last use, ahead of a lambda's parameter, a `for` loop's
+// variable, a `match` arm's binding or a declaration in an inner block of
+// that name.  (Each kept the borrow live: `'k' is borrowed by 'inout' local
+// 'r' until 'r' is last used`.)
+TEST(LocalBorrow, ABinderOfTheSameNameIsAnotherVariable) {
+  auto program = [](const std::string &later) {
+    return R"(import ::io;
+fn main() -> int {
+  k = 1;
+  o: int? = 5;
+  r: inout = k;
+  r = 5;
+  io::println(Str(k));
+  )" + later +
+           R"(
+  return 0;
+})";
+  };
+  for (const char *later :
+       {"f = fn(r: int) => r * 2; io::println(Str(f(3)));",
+        "{ r: int = 7; io::println(Str(r)); }",
+        "{ let r = 7; io::println(Str(r)); }",
+        "{ r: int, q: int = (7, 8); io::println(Str(r + q)); }",
+        "for r in 0..2 { io::println(Str(r)); }",
+        "match o { r: int { io::println(Str(r)); } None { } }",
+        "if k > 0 { while k > 4 { r: int = 3; io::println(Str(r)); k = 0; } }",
+        "f = fn(n: int) -> int { r: int = n; return r; };",
+        "g = fn(q: int) -> int { for r in 0..q { } return q; };"}) {
+    auto ok = semaCheck(program(later));
+    EXPECT_TRUE(ok.Ok) << later << "\n" << ok.Diagnostics;
+  }
+  // A `view` local, and a `match` arm's binding that borrows the subject.
+  auto ok = semaCheck(R"(import ::io;
+enum E { A, R(w: int) }
+class B { e: E; }
+class N { s: Str; }
+fn main() -> int {
+  s = "orig";
+  v: view = s;
+  io::println(v);
+  s = "changed";
+  g = fn(v: int) => v + 1;
+  b = B(E::R(1));
+  match b.e {
+    r: inout R {
+      r.w += 100;
+      io::println(b.e);
+      h = fn(r: int) -> int => r * 2;
+      for r in 0..2 { }
+      { let r = 7; }
+    }
+    A { }
+  }
+  on: N? = N("a");
+  match on {
+    n: view N {
+      io::println(n.s);
+      on = N("b");
+      m = fn(n: int) -> int => n + 1;
+    }
+    None { }
+  }
+  return g(1);
+})");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  // A use of the borrow before a binder hides it, or where none does, is
+  // one: in a lambda, a loop's range or body, another arm, a declaration's
+  // initializer, an inner block before its declaration, and a destructuring
+  // target without a type, which assigns the borrow.
+  const char *const kBorrowed = ":7:19: error: 'k' is borrowed by 'inout' "
+                                "local 'r' until 'r' is last used";
+  for (const char *later :
+       {"{ io::println(Str(r)); r: int = 7; }",
+        "{ r: int = r + 1; io::println(Str(r)); }",
+        "{ r: int, q: int = (r, 8); io::println(Str(q)); }",
+        "{ r, q = (7, 8); io::println(Str(q)); }", "for i in 0..r { }",
+        "for q in 0..2 { io::println(Str(r)); }",
+        "match o { r: int { } None { io::println(Str(r)); } }",
+        "while o == None { q: int = r; }"}) {
+    auto r = semaCheck(program(later));
+    expectErrors(r, {kBorrowed});
+    EXPECT_EQ(r.ErrorCount, 1u) << later << "\n" << r.Diagnostics;
+  }
+  // A lambda that uses it captures the borrow, an error of its own.
+  for (const char *later :
+       {"f = fn(q: int) => r * q;",
+        "f = fn(q: int) -> int { { r: int = 2; } return r * q; };",
+        "{ g = fn() -> int { return r; }; r: int = 1; }"}) {
+    auto r = semaCheck(program(later));
+    expectErrors(r, {kBorrowed, "error: 'r' is an 'inout' parameter or local; "
+                                "a function cannot capture a borrow"});
+    EXPECT_EQ(r.ErrorCount, 2u) << later << "\n" << r.Diagnostics;
+  }
 }
 
 // A `match` arm's `n: view T` is a `view` local of the subject, whatever the

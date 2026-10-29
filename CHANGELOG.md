@@ -352,6 +352,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `>>` is two `>` written together, so `Box<Box<int>>` closes as before.
   - The AST interchange format names them `bitand bitor bitxor shl shr` and `bitnot`
     (docs/plugins/ast-format.md); a template using them is kept in a `.pkm`'s TMPL.
+- **Stability sweep: expressions, places, borrows and closures.**
+  - A warning for each hidden heap copy of a slice (docs/language/02-basics.md,
+    "Evaluation order").  A slice parameter passed on to another, while a call in a later
+    argument may write its elements where the exclusivity rule cannot see it (a function
+    storing into the array field the slice names, a function value, a virtual call whose
+    override does, a function writing through a chain of objects), has its elements copied
+    to the heap where it is passed, an allocation each time the call runs.  The compiler
+    now says so there, naming the call that may write them and the call they are passed
+    to, with the line and a caret as for any diagnostic: `counts.pkn:14:51: warning:
+    'reset' in a later argument may write the elements of slice 'xs': they are copied to
+    the heap before the call to 'total'`.
+    - Once per place, however many instantiations of a generic function reach it and
+      however many modules lower a copy of one; an instantiation of another module's
+      template points into that module's file.
+    - The calls are named as an error names them (`'reset'`, `'first<int>'`, `'f'` for a
+      variable holding a function value), `'=='` for an `==` whose `equals` may write, and
+      `a function value` for a call of another expression; in an instantiation of another
+      module's template, that module's functions without the module, as its file writes
+      them, and those of the modules it imports by their full names, a submodule's too
+      (`'lib::sl::inner::wipe'`), as an error in the instantiation names them.
+    - None for the copies of a struct, a tuple, a fixed-size array or a tagged union (on
+      the stack, as a plain parameter's value), and none where nothing is copied.  No
+      option turns it off.
+    - The lowering reports it, through a diagnostics engine of its own: `run`, `build`,
+      `--emit-pkm`, `--list-modules` and the `--emit-*` options that print code print it on
+      standard error.  `--check-only` never lowers, so never warns, and an imported module
+      read from its cache entry or a prebuilt module file is not lowered again, so it
+      warns only when it is compiled from its source
+      (docs/language/17-the-paykan-command.md).
+    - `scripts/c_strict.py` leaves the warnings `paykan run` prints before the program
+      runs out of the standard error it compares with the C executable's.
+      `samples/codegen/78_mem_arg_eval_order.pkn` has five such copies, and the new
+      `samples/codegen/88_hidden_slice_copies.pkn` four, next to the copies that are not
+      warned about.
 
 ### Changed
 
@@ -455,11 +489,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   always 0 (docs/design/pkm.md §3.5, §5.9).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive
   while the result is used (docs/language/03-functions.md, "Where an `inout` result can
-  point"): into `self` (a field of a class's `self`, or a field of a struct or an element
-  of a tuple held in it; a struct's `self` counts as an `inout` parameter), or into what an
-  `inout` parameter names and the object a reference held there refers to (`return n.k;`
-  with `n: inout Node`, `return s.b.k;` with `s: inout S`, `return a[5].k;` with
-  `a: inout B[6]`).  One in a separate object, reached through a field of `self` or past
+  point"): into `self` (a field of a class's `self`, or a field of a struct held in it; a
+  struct's `self` counts as an `inout` parameter), or into what an `inout` parameter
+  names and the object a reference held there refers to (`return n.k;` with `n: inout
+  Node`, `return s.b.k;` with `s: inout S`, `return a[5].k;` with `a: inout B[6]`).
+  One in a separate object, reached through a field of `self` or past
   the object a parameter refers to, wrote to freed memory when another reference replaced
   that field while the result was in use, and is now an error:
   `fn e() -> inout Str => self.c.k;` is `'e' returns an 'inout' reference into 'self.c',
@@ -899,6 +933,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     notes, since a cache entry whose imports nest too deep is built from its source.  The
     nested Sema is on the heap, which halves the stack each level takes (2.9 KB in a debug
     build).
+- **Stability sweep: expressions, places, borrows and closures.**
+  - `weak a = None;`, a `weak` local with no type whose initializer is `None` (or a
+    conditional of two `None`s), is an error: `cannot infer the class of weak local 'a'
+    from None; write 'weak a: T? = None'`.  `None` has no class, and the local was a weak
+    reference to the None value itself, which never read `None` (`Str(a == None)` printed
+    `False`).  With its type written (`weak a: Node? = None;`) it starts as nothing, as
+    before (docs/language/16-memory.md, "Weak References").  An `Obj` that holds `None`
+    (`x = None; weak a = x;`, or a function returning `Obj`) is still accepted and is
+    still a reference to the None value, as a strong `y: Obj? = x;` is: the conversion of
+    an `Obj` to an `Obj?` keeps the value (docs/language/12-optionals.md, "Not supported
+    yet").
+  - An `-> inout T` result cannot be an element of a tuple, tuples being immutable:
+    `return self.t.1;`, `return t.0;` with `t: inout (int, int)`, either branch of
+    `return if c then t.0 else t.1;`, and an element of another call's `inout` result
+    (`return self.slot().0;`) are `an element of a tuple cannot be returned 'inout':
+    tuples are immutable`.  The docs said such a result could point into "an element of a
+    tuple", Sema accepted it, and `run`, `build` and `--emit-c` then stopped with
+    `internal compiler error: an 'inout' argument is not a variable or a field`.  A place
+    in another call's `inout` result is now checked as any other: a field of a struct in a
+    tuple there (`return self.slot().0.n;`), and a character of a string
+    (`return self.str()[1];`), are the errors they are elsewhere, where they too were
+    internal errors (docs/language/03-functions.md, "Borrowed results").
+  - **Breaking:** a borrow lasts until its call runs (docs/language/03-functions.md,
+    "Exclusivity").  What a call passes to a `view` parameter (a slice parameter too), and
+    the receiver of a struct's `view fn`, no call anywhere in a later argument may write:
+    pass it, what holds it or a part of it to an `inout` parameter, or call a method on
+    it that may change `self`.  With `look(p: view P, x: int)` and `bump(p: inout P)`,
+    `look(p, bump(p))` is `'p' is passed to 'view' parameter 'p' of 'look'; a later
+    argument of 'look' cannot pass it to 'inout' parameter 'p' of 'bump'`, and so are
+    `sum(arr, bumpA(arr))` with `sum(xs: view int[], k: int)`, `sum(xs, clear(xs))` with
+    `xs` an `inout int[]`, `look(h.p, bumpH(h))` (`'h' contains 'h.p', ...`),
+    `p.show(bump(p))` with `show` a `view fn` (`'p' is the receiver of 'view fn show'; an
+    argument of 'show' cannot pass it to ...`) and `look(p, p.reset())` (`... cannot call
+    'reset' on it (not a 'view fn')`), a class's method that may change `self` included.
+    Every call borrows and writes alike: a function's, a method's, a constructor's,
+    `__super__`'s and a function value's; a lambda's body is not part of the call.  Each
+    write is one error: an `inout` result passed on is written by the call returning it
+    (`look(h.p, bump(h.slot()))` is the error for `slot`), and a write its own call
+    reports, as sharing storage with another of its arguments (`two(p, p.a)`), is not
+    reported again.  Exclusivity was a rule of one call, and these programs ran, the callee given a copy of
+    the value read; `samples/codegen/78_mem_arg_eval_order.pkn` had three of them, now
+    `samples/sema` error files.  What the rule does not see is accepted and copied as
+    before: a plain parameter (`first(p, bump(p))`), a write through an object
+    (`look(c.p, reset(c))`) or a function value, a write before the borrow or after it has
+    ended (`add(look(p, 0), bump(p))`), another field (`look(two.x, bump(two.y))`), a
+    lambda's body, and the operands of `==`; a slice's copy is warned about (see Added).
 
 ### Removed
 
@@ -936,7 +1016,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     field) leaves the value where it is, as base did, and the samples and the standard
     library's tests lower to the same PIR as before, with and without the passes, so the
     static counts recorded here do not move.  The receiver of a struct method that may
-    change `self` is still its storage, as an `inout` argument is.
+    change `self` is still its storage, as an `inout` argument is.  (For a `view` or slice
+    parameter and the receiver of a struct's `view fn`, an `inout` argument or a method
+    that may change it, in a later argument, is now an error: see Changed.  A slice's copy
+    is now warned about: see Added.)
     `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape on every path, with
     `__super__`'s arguments, a function value a field holds, an argument under an `inout`
     result, one before a closure that writes it, slices passed on to a function, a
@@ -1233,6 +1316,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     lexer (a segmentation fault), far below the 256 MiB a source may have, since it called
     itself once per character it skipped.  It skips them in a loop: 100,000 `$` in a row
     are 100,000 `invalid character '$'` errors, 20 of them printed, and exit status 1.
+- **Stability sweep: expressions, places, borrows and closures.**
+  - A lambda inside a lambda captured a `weak` variable strongly: only the outermost
+    closure held the object weakly.  So the closure an outer one returned kept the object
+    alive and read it as such after its last owner let go of it (`weak me = b; outer =
+    fn() -> () -> Str { return fn() -> Str => if me == None then "gone" else "alive"; };`
+    printed `alive` once `b` was assigned another object), and one stored in the object
+    formed a cycle that leaked it (2 blocks, 56 bytes), on every path.  Every lambda
+    inside now captures it weakly too, however deeply nested, and it stays read-only there
+    as any capture is (docs/language/16-memory.md, "Weak References").
+  - The docs did not say how an `f32` or `f16` literal meets the ends of its type.  They
+    now do (docs/language/02-basics.md, "Sized numeric types" and "Literals";
+    docs/design/sized-types.md): one that rounds to infinity is an error, the midpoint
+    above the largest value included (`3.4028235677973366e38` for `f32`, an error since the
+    conversions redesign, and `65520` for `f16`), and one below the type's range is 0 or a
+    subnormal of its sign, with no error (`h: f16 = 1e-9;` is `0`), where a `float`
+    literal that rounds to zero (`1e-400`) is one.
+  - A tuple index on an optional tuple said the tuple was none: `t: (int, int)? = (1, 2);
+    return t.0;` was `tuple index '.0' applied to non-tuple type '(int, int)?'`, and
+    destructuring it, `a, b = t;`, `only tuples can be destructured`.  Both are now the
+    error every other use of an optional gives, `cannot use optional '(int, int)?' as
+    '(int, int)' without unwrapping (use match)` (docs/language/12-optionals.md,
+    "Semantic Checks").
+  - A `-` in a match pattern followed by anything but a number said a type was expected:
+    `match c { -'a' { } _ { } }` was `unexpected '-'; expected a type`.  It is now one
+    error at what follows the `-`, `unexpected character literal; expected a number after
+    '-' in a match pattern` (docs/language/08-match.md, "Matching values").
+  - A compound assignment whose target had an error reported it twice, once for the
+    target and once for the copy of it that reads it (the parser builds `t op= v` as `t =
+    t op v`): `xs[y] += 1` with no `y`, and `mk(zzq).n += 1` with no `zzq`, were two
+    `use of undeclared variable` errors, which a debug build then aborted on (`internal
+    compiler error: the same diagnostic was reported twice`), for each of `+=`, `-=`,
+    `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=` and `>>=`; and `xs["a"] += 1` was two errors
+    in two wordings.  Each is now one error, and the value's own errors are still
+    reported (`xs[y] += zw` is two, `us["a"] <<= zw` reported no `zw` before), unless the
+    target names no variable or no field, which ends the check as for `=` (`q.n += zw`
+    with no `q` is one error, for `q`, as before).  An index
+    of another type in an assignment is said as in a read: `array index must be 'int',
+    got 'Str'`, where it was `array index must be int` (docs/language/02-basics.md,
+    "Compound assignment"; docs/grammar.md).
+  - A local borrow, or a `match` arm's binding that borrows the subject, stayed live until
+    the last statement naming it, whatever that name meant there: a later lambda's
+    parameter, `for` loop's variable, `match` arm's binding or declaration in an inner
+    block of the same name kept it live, so a valid program was rejected (`r: inout = k; r
+    = 5; io::println(Str(k)); f = fn(r: int) => r * 2;` was `'k' is borrowed by 'inout'
+    local 'r' until 'r' is last used`).  A use is now of the name where it means the
+    borrow; a use in a lambda, before an inner declaration hides the name, or in its
+    initializer still is one.  An `inout` arm's binding goes back to the subject after its
+    last use counted so, before a statement that names another variable of its name
+    (docs/language/02-basics.md, "Local borrows").
+  - A `match` arm's `n: inout T` could not match a call's `inout` result, though an `inout`
+    argument and an `inout` local can name one: `match b.slot() { r: inout R { r.w +=
+    100; } A { } }`, with `slot` returning `inout`, was `'inout' arm 'r' needs a variable or
+    a field to match on`.  It is accepted, for a method's result (a class's, a generic
+    class's, a struct's) and a function's: the call runs once, the binding goes back to
+    the storage it returned on every way out of the arm, and what the call borrowed (its
+    receiver, its `inout` arguments) cannot be used but through the binding while it is
+    live (docs/language/08-match.md, "Borrowing the subject").
+  - A field of a conditional's object could not be a borrowed result, though a conditional
+    of two places can: `return (if c then a else b).n;` with `a` and `b` `inout`
+    parameters of a class, as an `-> inout int`, and `return (if c then a else b).s;` with
+    `view` parameters, as a `-> view Str`, were `... must be part of 'self' or of ...
+    parameter, not a new value`.  Each is accepted when it is one on each branch, nested
+    conditionals and an object in a tuple included; the `inout` result is the field of
+    the object the chosen branch holds, which the caller keeps alive while the result is
+    used.  A branch that is not one gives its own error: a copy, a local, a `view` for an
+    `inout` result, and an object reached through a field of another, `(if c then o else
+    self.k).n`, which `self.k.n` is too.  A conditional's struct or tuple is still a
+    temporary, whose field or element no `inout` result is (docs/language/03-functions.md,
+    "Borrowed results").
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

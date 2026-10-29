@@ -12,11 +12,16 @@
 //            function value (one a field holds too), for an argument under
 //            an `inout` result and one before a closure that writes it, and
 //            for a slice parameter passed on to another (copied by its
-//            length when the program runs; to a function, a function
-//            value, a method and a constructor); a later call that writes
-//            it through an `inout` local, a `match` arm's binding or a
-//            field holding it, and no copy where no later operand may
-//            write it (a call storing into another field).
+//            length when the program runs, which the compiler warns about;
+//            to a function, a function value, a method and a constructor);
+//            a later call that writes it through an `inout` local, a
+//            `match` arm's binding or a field holding it, and no copy where
+//            no later operand may write it (a call storing into another
+//            field).  A `view` or slice parameter and the receiver of a
+//            struct's `view fn` are written through an object here: an
+//            `inout` argument or a method that may change them, in a later
+//            argument, is an error (docs/language/03-functions.md,
+//            "Exclusivity").
 // expect-stdout: field: 1 1
 // expect-stdout: inout: 1 1 1 A(n: 1)
 // expect-stdout: equality: False True False
@@ -57,6 +62,10 @@ struct Counter {
 
 impl Counter {
   view fn get(x: int) -> int => self.k;
+}
+
+class Counted {
+  counter: Counter;
 }
 
 class Holder {
@@ -227,8 +236,8 @@ fn bumpN(n: inout int) -> int {
   return 0;
 }
 
-fn bumpCounter(c: inout Counter) -> int {
-  c = Counter(9);
+fn recount(c: Counted) -> int {
+  c.counter = Counter(9);
   return 0;
 }
 
@@ -266,8 +275,8 @@ fn main() -> int {
   r = Reader(0);
   h = fresh();
   m1 = r.first(h.p, reset(h));
-  counter = Counter(1);
-  m2 = counter.get(bumpCounter(counter));
+  let counted = Counted(Counter(1));
+  let m2 = counted.counter.get(recount(counted));
   pair = Pair(P(1), P(2));
   m3 = first(pair.q, pair.bumpQ()) - 1;
   io::println("method: " + Str(m1) + " " + Str(m2) + " " + Str(m3));
@@ -291,10 +300,10 @@ fn main() -> int {
   io::println("function value: " + Str(f1) + " " + Str(f2) + " " + Str(f3));
 
   // A `view` parameter and a slice see the value read too.
-  p = P(1);
-  v1 = look(p, bump(p));
-  arr = [1, 2, 3];
-  v2 = total(arr, bumpA(arr));
+  h = fresh();
+  let v1 = look(h.p, reset(h));
+  arrs = arrays();
+  let v2 = total(arrs.xs, resetArrays(arrs));
   io::println("view: " + Str(v1) + " " + Str(v2));
 
   // The copy keeps what its references share alive, and lets it go.

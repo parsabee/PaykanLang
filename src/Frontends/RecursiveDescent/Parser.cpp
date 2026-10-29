@@ -2098,6 +2098,11 @@ MatchArm *Parser::parseMatchArm() {
                                          static_cast<int64_t>(0 - t.IntValue));
     } else
       pattern = Ctx.make<FloatLiteral>(span(start), -t.FloatValue);
+  } else if (at(Tok::Minus)) {
+    // A `-` starts no other pattern (and no type): what follows it is wrong.
+    consume(); // '-'
+    errorAtCurrent("expected a number after '-' in a match pattern");
+    return nullptr;
   } else {
     if ((at(Tok::KwView) || at(Tok::KwInout)) && kind(1) == Tok::Ident &&
         kind(2) == Tok::Colon) {

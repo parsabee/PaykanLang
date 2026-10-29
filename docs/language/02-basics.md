@@ -287,6 +287,12 @@ used; a function cannot capture it`, and for a `view` local of an object, a stri
 array, `'h' is viewed by 'view' local 'v' until 'v' is last used; a function cannot
 capture it (it could change it through its copy)`.
 
+A use is of the name where it means the borrow. A binder of the same name further on is
+another variable, so a statement that names only that one does not keep the borrow live: a
+lambda's parameter (`let f = fn(x: int) => x * 2;` after `x = 5;`), a `for` loop's
+variable, a `match` arm's binding, and a declaration in an inner block, from there to the
+block's end (a use in the block before it, or in its initializer, is of the borrow).
+
 A local borrow always has an initializer, declares one variable (not a destructuring
 target), and is never `let`: `let x: view = e;` is an error, `a local borrow cannot be
 'let'`. Written before the name, `view x = e;`, the mode is a syntax error that shows the
@@ -410,7 +416,11 @@ Output:
   not (`the literal 256 does not fit in 'u8' (0 to 255)`).  A float literal (or an integer
   literal) flowing into an `f32` or `f16` slot is that float: an integer literal rounded to
   the type once, as `f32(n)` is, and a float literal as its text is (see [Parsing a
-  string](04-strings-and-conversions.md#parsing-a-string)).  Only a literal adapts: `100 +
+  string](04-strings-and-conversions.md#parsing-a-string)).  One that rounds to infinity in
+  the type is an error (`the literal 1e+39 does not fit in 'f32'`), the midpoint above the
+  largest value included (`3.4028235677973366e38` for `f32`, `65520` for `f16`, which round
+  to even, to infinity); one below the type's range is 0 or a subnormal of its sign, and no
+  error (`h: f16 = 1e-9;` is `0`, `t: f32 = -1e-50;` is `-0`).  Only a literal adapts: `100 +
   100` is an `int` expression, so `q: i8 = 100 + 100;` is an error.  Without a context an
   integer literal is an `int` and a float literal a `float`.
 - **`f16` and `f32` arithmetic** is computed in `float` precision and rounded to the type
@@ -635,7 +645,10 @@ and `-9223372036854775808` is the most negative `int` ([Match](08-match.md#match
 A float literal must name a finite `float`. One too large (`1e999` would be infinity) or too
 small (`1e-400`: not zero, but rounds to zero) is a compile-time error. Subnormal values
 such as `5e-324` are fine, as is zero written with any exponent (`0e-999`). Infinities and
-NaN are computed, not written: `1.0e308 * 10.0`, `0.0 * (1.0e308 * 10.0)`.
+NaN are computed, not written: `1.0e308 * 10.0`, `0.0 * (1.0e308 * 10.0)`. In an `f32` or
+`f16` slot the literal is then rounded to that type: one that rounds to infinity there is an
+error, and one below its range is 0 or a subnormal, without one ([Sized numeric
+types](#sized-numeric-types)).
 
 ### Arithmetic
 
@@ -982,7 +995,11 @@ to another too), compared with `==` or `!=`, or the receiver of a struct's `view
 value it had where it was evaluated, whatever a later argument or the right operand writes to
 where it came from: through an `inout` argument, a method that may change it, or a call given
 the object it is in. The receiver of a struct's method that may change `self` is its storage,
-as an `inout` argument is: the method sees what the arguments wrote to it.
+as an `inout` argument is: the method sees what the arguments wrote to it. A `view` or slice
+parameter and the receiver of a struct's `view fn` are borrows, which no later argument may
+write through an `inout` argument or a method that may change it
+([Exclusivity](03-functions.md#exclusivity)): what they are given is the value read when a
+later call writes it through the object it is in, or through a function value.
 
 ```pkn
 import ::io;
@@ -1018,6 +1035,68 @@ True
 (21, 2)
 ```
 
+The value read is copied only where a later operand may write it. A struct, a tuple, a
+fixed-size array or a tagged union is copied on the stack, as a plain parameter's value is.
+The elements a slice parameter names are copied to the heap, as many as the slice has when
+the program runs, each time the call runs. So the compiler warns where a slice passed on is
+copied, naming the call in a later argument that may write its elements and the call it is
+passed to:
+
+```pkn
+import ::io;
+
+class Counts {
+  xs: int[3];
+}
+
+fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2] + x;
+
+fn reset(c: Counts) -> int {
+  c.xs = [0, 0, 0];
+  return 0;
+}
+
+fn sum(xs: view int[], c: Counts) -> int => total(xs, reset(c)); // xs as passed
+
+fn main() -> int {
+  let c = Counts([1, 2, 3]);
+  io::println(Str(sum(c.xs, c)) + " " + Str(sum(c.xs, c)));
+  return 0;
+}
+```
+
+Output:
+
+```
+6 0
+```
+
+`paykan counts.pkn` prints this on standard error before the program runs, with the line
+and the lines around it and a caret under `xs`, as for an error:
+
+```
+counts.pkn:14:51: warning: 'reset' in a later argument may write the elements of slice 'xs': they are copied to the heap before the call to 'total'
+```
+
+The calls are named as an error names them: a function, a method or a constructor by its
+name (`'reset'`, and `'first<int>'` for an instantiation of a generic function), a variable
+holding a function value by the variable's (`'f'`), an `==` whose `equals` may write as
+`'=='`, and a call of another expression as `a function value`. In another module's generic
+function, that module's functions are named as its file writes them, without the module,
+and those of the modules it imports by their full names, as an error in the instantiation
+names them (`'lib::sl::inner::wipe'` where the file writes `q::wipe`).
+
+The warning comes once for each place a slice is copied, however many instantiations of a
+generic function reach it, and no option turns it off. A call that need not see the
+elements as they were can be made first (`let k = reset(c);`, then `total(xs, k)`), which
+copies nothing and reads what `reset` wrote. The other copies are not warned about, and neither is
+a slice that no later operand may write. The warning comes from compiling the program, not
+from checking it: `--check-only` does not print it, and an imported module read from its
+cache entry or from a prebuilt module file is not compiled again, so its warnings come only
+when it is compiled from its source. An instantiation of another module's generic function
+or class is compiled with the module that uses it, and warns when that module is compiled
+([The paykan command](17-the-paykan-command.md)).
+
 ---
 
 ## Statements
@@ -1048,7 +1127,11 @@ operators](#bitwise-operators) (`flags |= 0b100`, `x >>= 1`). The target is any 
 assignment, so the same rules apply: the operator must be defined for the types (`s += "!"`
 appends to a `Str`, `s -= "!"` is `operator '-' is not defined for types 'Str' and 'Str'`,
 and `i >>= 1` with `i: int` is the `>>` error), a `let` variable or a `view` parameter cannot
-be the target, and a sized integer wraps as `+` does.
+be the target, and a sized integer wraps as `+` does. An error in the target is reported
+once, though the target is read as well as written (`xs[y] += 1` with no `y` is one `use of
+undeclared variable 'y'`), and the value's own errors still are (`xs[y] += z` with no `z`
+is two). A target that names no variable or no field ends the check, as for `=`: `q.n += z`
+with no `q` is only the error for `q`.
 
 ```pkn
 import ::io;

@@ -135,8 +135,10 @@ fn main() -> int {
 
 // A method's arguments, a constructor's (of a class and of a struct, which
 // take a value held in memory by address), `__super__`'s, and the receiver
-// of a struct's `view fn`; a method that may change `self` runs on the
-// receiver's storage, as an `inout` argument does.
+// of a struct's `view fn`, which a later call writes through the object it
+// is in (an `inout` argument writing it is an error); a method that may
+// change `self` runs on the receiver's storage, as an `inout` argument
+// does.
 TEST(EvalOrder, MethodsConstructorsAndReceivers) {
   expectOutput("methods", R"(class Reader {
   base: int;
@@ -148,6 +150,8 @@ impl Counter {
   fn take(x: int) -> int => self.k;
 }
 fn bumpCounter(c: inout Counter) -> int { c = Counter(9); return 0; }
+class Counted { k: Counter; }
+fn recount(c: Counted) -> int { c.k = Counter(9); return 0; }
 class Shown { p: P; x: int; }
 struct Made { p: P; x: int; }
 class Base { p: P; }
@@ -165,8 +169,8 @@ fn main() -> int {
   r = Reader(0);
   c = fresh();
   io::println(Str(r.first(c.p, reset(c))));
-  k = Counter(1);
-  io::println(Str(k.get(bumpCounter(k))));
+  counted = Counted(Counter(1));
+  io::println(Str(counted.k.get(recount(counted))));
   k = Counter(1);
   io::println(Str(k.take(bumpCounter(k))));
   c = fresh();
@@ -182,21 +186,23 @@ fn main() -> int {
                "1\n1\n9\n1\n1\n1\n2\n");
 }
 
-// A `view` parameter and a slice are given the value read, and so is an
-// argument nested in another call's arguments, or given through an
-// `inout` result.
+// A `view` parameter and a slice are given the value read, when a later
+// call writes it through the object it is in (an `inout` argument writing
+// it is an error), and so is an argument nested in another call's
+// arguments, or given through an `inout` result.
 TEST(EvalOrder, ViewsSlicesAndNesting) {
   expectOutput("views", R"(fn look(p: view P, x: int) -> int => p.a;
 fn total(xs: view int[], x: int) -> int => xs[0] + xs[2];
-fn bumpA(a: inout int[3]) -> int { a = [9, 9, 9]; return 0; }
+class Arr { a: int[3]; }
+fn resetArr(h: Arr) -> int { h.a = [9, 9, 9]; return 0; }
 fn apply(f: () -> int) -> int => f();
 struct Slot { p: P; q: P; }
 impl Slot { fn slot() -> inout P { return self.p; } }
 fn main() -> int {
-  p = P(1);
-  io::println(Str(look(p, bump(p))));
-  a = [1, 2, 3];
-  io::println(Str(total(a, bumpA(a))));
+  c = fresh();
+  io::println(Str(look(c.p, reset(c))));
+  h = Arr([1, 2, 3]);
+  io::println(Str(total(h.a, resetArr(h))));
   c = fresh();
   io::println(Str(first(c.p, first(c.p, reset(c)))));
   c = fresh();

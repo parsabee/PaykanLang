@@ -82,13 +82,14 @@ std::string Sema::frozenPlace(const ast::Expr *e, bool borrows, bool copy) {
     return "'" + name + "' is bound to a 'view'";
   case VarKind::WeakView:
     return "'" + name + "' is a 'weak' local of a 'view'";
-  case VarKind::Captured: {
+  case VarKind::Captured:
+  case VarKind::CapturedWeak: {
     // The lambda's own copy, which its body must not change (the program
     // could not see it); what a captured reference names is an object,
     // changed through it as through any other reference, whether the copy
-    // is the reference or holds it (a struct's or a tuple's field).  A copy
-    // of it holds its references as the capture does, so it may be stored,
-    // returned or passed on.
+    // is the reference or holds it (a struct's or a tuple's field), a weak
+    // one included.  A copy of it holds its references as the capture does,
+    // so it may be stored, returned or passed on.
     if (copy)
       break;
     for (const ast::Expr *p = e;;) {

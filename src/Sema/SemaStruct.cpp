@@ -570,6 +570,8 @@ ast::StructType *Sema::instantiateStruct(const std::string &name,
   PendingInstantiations.push_back(pending);
   (origin ? ForeignInstantiatedStructDecls : InstantiatedStructDecls)
       .push_back(clone);
+  if (origin)
+    noteForeignSource(clone, *origin);
   declareInstantiationStatics(instName, st, pending);
   return st;
 }

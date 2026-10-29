@@ -1,0 +1,21 @@
+// ERROR: 'counter' is the receiver of 'view fn get'; an argument of 'get' cannot pass it to 'inout' parameter 'c' of 'bumpCounter'
+// The receiver of a struct's `view fn` is borrowed until the method runs,
+// so a call in its arguments cannot write it
+// (docs/language/03-functions.md, "Exclusivity").
+struct Counter {
+  k: int;
+}
+
+impl Counter {
+  view fn get(x: int) -> int => self.k;
+}
+
+fn bumpCounter(c: inout Counter) -> int {
+  c = Counter(9);
+  return 0;
+}
+
+fn main() -> int {
+  counter = Counter(1);
+  return counter.get(bumpCounter(counter));
+}

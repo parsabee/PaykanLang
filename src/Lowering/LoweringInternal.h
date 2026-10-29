@@ -23,6 +23,7 @@
 #include <ostream>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -83,12 +84,22 @@ struct ProgramLowering {
   bool Indexed = false;
   /// What the main module's code may know of the program (lowerProgram).
   World MainWorld = World::Open;
+  /// Prints the lowering's warnings to Errs, as Sema prints its own.
+  sema::DiagEngine Warnings;
+  /// The places (file, line, column) warned about: once each, though
+  /// several instantiations of a generic body reach one, and every module
+  /// that uses an instantiation of another module's template lowers a copy
+  /// of it.
+  std::set<std::tuple<std::string, size_t, size_t>> Warned;
 
   ProgramLowering(const sema::SemaContext &top, std::string projectRoot,
                   std::ostream &errs, modules::ModuleResolver *resolver)
       : Top(top), ProjectRoot(std::move(projectRoot)), Errs(errs),
-        Resolver(resolver) {}
+        Resolver(resolver), Warnings(errs) {}
 
+  /// Warn @p msg at @p loc of @p file, unless that place was warned about.
+  void warn(const sema::SemaContext::SourceFile &file, ast::SourceLocation loc,
+            const std::string &msg);
   const sema::SemaContext *lookupImportContext(const std::string &canonical);
   /// Reserve @p name for a module, or `name.2`, `name.3`, ... when another
   /// module already has it.
@@ -96,6 +107,14 @@ struct ProgramLowering {
   /// Lower (or, when the resolver loaded it from a `.pkm`, decode) the
   /// module of canonical name @p name once, and return it.
   pir::Module *lowerImport(const std::string &name);
+  /// The module @p name is of when it is under a hidden qualifier:
+  /// `$<module>::f`, named in the body of that module's template, or
+  /// `$<module>::T::f` for a `static fn` of one of its types.  That is the
+  /// longest prefix naming a lowered module (a submodule's name has its
+  /// parent's as a prefix), and @p symbol is set to the rest, the name
+  /// there; nullptr when no prefix does.
+  const pir::Module *hiddenOrigin(const std::string &name,
+                                  std::string &symbol) const;
 };
 
 /// Lowers ONE module (translation unit).  Imported modules get their own
@@ -130,6 +149,10 @@ private:
   ast::ASTContext &ASTCtx;
   const sema::SemaContext &SemaCtx;
   std::ostream &Errs;
+  /// The file the declaration being lowered points into: the module's, or
+  /// for an instantiation of another module's template, that module's
+  /// (SemaContext::ForeignSources).
+  const sema::SemaContext::SourceFile *Source;
 
   /// Functions reachable through this module's imports: the qualified name
   /// used at call sites (`helper::add`, `path::to::helper::add`) -> the
@@ -463,7 +486,15 @@ private:
   /// storage.  Each is copied into a temporary where it is read
   /// (emitMemValue), so it is the value it had then, as a box read or a
   /// number is (docs/language/02-basics.md, "Evaluation order").
-  std::unordered_set<const ast::Expr *> SnapshotReads;
+  struct SnapshotRead {
+    /// The call (or the `==`) that uses the value read.
+    const ast::Expr *User;
+    /// The first operand after it found that may write it: a call (of a
+    /// function, a method, a constructor or a function value) or an `==`
+    /// whose `equals` may.
+    const ast::Expr *Writer;
+  };
+  std::unordered_map<const ast::Expr *, SnapshotRead> SnapshotReads;
   /// Whether the box read @p e, an argument of a lending callee (or the
   /// argument `Str(e)` is), may be lent: in LentReads, of none of whose
   /// calls in use it is NotLendable, and not held (isHeldRead).
@@ -1268,8 +1299,17 @@ private:
   /// Sema took for one, or a slice passed on.
   static bool isSliceArg(const ast::Expr *arg);
   /// Push what @p arg passes for a slice parameter: the address of its
-  /// elements and their number.  False when it failed.
+  /// elements and their number.  False when it failed.  A slice passed on
+  /// that a later operand may write (SnapshotReads) passes a copy of its
+  /// elements in memory of its own, which is warned about.
   bool emitSliceArg(ast::Expr *arg, std::vector<Val> &args);
+  /// How the warning for a copy of a slice's elements names the call (or
+  /// the `==`) @p e: its function's, method's or constructor's name as
+  /// Sema's messages name it, though unqualified when it is of the module
+  /// of another module's template the body is an instantiation of
+  /// (Source, hiddenOrigin), or "a function value" for an expression
+  /// called.
+  std::string callLabel(const ast::Expr *e) const;
   /// The number of elements of the slice parameter @p e names.
   Val emitSliceLength(ast::Expr *e);
 

@@ -383,6 +383,50 @@ fn main() -> int {
   EXPECT_EQ(r.ErrorCount, 9u) << r.Diagnostics;
 }
 
+// A tuple is immutable, so no `inout` result names an element of one: in
+// `self`, in an `inout` parameter (or a struct field of one), in either
+// branch of a conditional, or in another call's `inout` result, where a
+// string's character is no place either.  Each passed Sema and stopped the
+// lowering with an internal error ("an 'inout' argument is not a variable
+// or a field").  A struct field in a tuple element was already an error;
+// an object a tuple element refers to is a separate object.
+TEST(BorrowedResult, InoutResultsAreNoTupleElements) {
+  auto r = semaCheck(R"(struct S { n: int; }
+struct P { t: (int, int); }
+class B {
+  t: (int, int); u: (S, int); s: Str;
+  fn e() -> inout int { return self.t.1; }
+  fn slot() -> inout (int, int) { return self.t; }
+  fn viaSlot() -> inout int { return self.slot().0; }
+  fn sslot() -> inout (S, int) { return self.u; }
+  fn viaSslot() -> inout int { return self.sslot().0.n; }
+  fn str() -> inout Str { return self.s; }
+  fn ch() -> inout char { return self.str()[1]; }
+}
+fn f(t: inout (int, int)) -> inout int { return t.0; }
+fn g(t: inout (int, int), c: bool) -> inout int {
+  return if c then t.0 else t.1;
+}
+fn h(t: inout ((int, int), int)) -> inout (int, int) { return t.0; }
+fn k(p: inout P) -> inout int { return p.t.1; }
+fn whole(t: inout (int, int)) -> inout (int, int) { return t; }
+fn main() -> int { return 0; }
+)");
+  const char *tuple = "error: an element of a tuple cannot be returned "
+                      "'inout': tuples are immutable";
+  for (const char *at :
+       {":5:32:", ":7:38:", ":13:49:", ":15:10:", ":17:63:", ":18:40:"})
+    EXPECT_NE(r.Diagnostics.find(std::string(at) + " " + tuple),
+              std::string::npos)
+        << at << "\n"
+        << r.Diagnostics;
+  expectErrors(r, {":9:39: error: a field of a struct held in a tuple cannot "
+                   "be returned 'inout': tuples are immutable",
+                   ":11:34: error: a character of a string cannot be returned "
+                   "'inout'"});
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
+}
+
 // An `inout` result points into storage its caller keeps alive: a class's
 // `self` is the object the caller holds, so a reference reached through one
 // of its fields leads to a separate object, which the caller does not keep
@@ -476,6 +520,87 @@ fn main() -> int { return 0; }
                                                            << r.Diagnostics;
   EXPECT_FALSE(r.Ok);
   EXPECT_EQ(r.ErrorCount, 14u) << r.Diagnostics;
+}
+
+// A field of a conditional's object, `(if c then a else b).n`, is a field of
+// what either branch holds: a borrowed result when it is one on each branch
+// (of `self`, of an `inout` parameter's object, of a `view` parameter's for
+// a `view` result), nested conditionals and an object in a tuple included.
+// (Each was `... must be part of 'self' or of ... parameter, not a new
+// value`.)  A branch that is not one makes it an error: a copy, a local, a
+// `view` for an `inout` result, and an object reached through a field of
+// another (`self.k1`), which the caller does not keep alive.  A
+// conditional's struct or tuple is a temporary, whose field or element no
+// `inout` result is.
+TEST(BorrowedResult, AFieldOfAConditionalIsOneOnEachBranch) {
+  auto ok = semaCheck(R"(class K { n: int; s: Str; }
+class T {
+  n: int; k: K;
+  fn either(o: inout T, c: bool) -> inout int { return (if c then self else o).n; }
+  view fn name(o: view T, c: bool) -> view Str { return (if c then self else o).k.s; }
+}
+struct P { x: int; s: Str; }
+fn pick(a: inout K, b: inout K, c: bool) -> inout int { return (if c then a else b).n; }
+fn nest(a: inout K, b: inout K, d: inout K, c: bool, e: bool) -> inout int {
+  return (if c then (if e then a else b) else d).n;
+}
+fn tup(t: inout (K, int), u: inout (K, int), c: bool) -> inout int {
+  return (if c then t else u).0.n;
+}
+fn pv(a: view K, b: view K, c: bool) -> view Str { return (if c then a else b).s; }
+fn mixed(a: inout K, b: view K, c: bool) -> view Str { return (if c then a else b).s; }
+fn pvs(a: view P, b: view P, c: bool) -> view Str { return (if c then a else b).s; }
+fn main() -> int { return 0; }
+)");
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  auto r = semaCheck(R"(class K { n: int; s: Str; }
+class H {
+  n: int; k1: K; k2: K;
+  fn far(c: bool) -> inout int { return (if c then self.k1 else self.k2).n; }
+  fn half(o: inout K, c: bool) -> inout int { return (if c then o else self.k1).n; }
+}
+struct P { x: int; s: Str; }
+fn copy(a: K, b: inout K, c: bool) -> inout int { return (if c then a else b).n; }
+fn loc(b: inout K, c: bool) -> inout int {
+  k = K(1, "");
+  return (if c then b else k).n;
+}
+fn vf(a: view K, b: inout K, c: bool) -> inout int { return (if c then b else a).n; }
+fn sp(a: inout P, b: inout P, c: bool) -> inout int { return (if c then a else b).x; }
+fn tp(t: inout (int, int), u: inout (int, int), c: bool) -> inout int {
+  return (if c then t else u).0;
+}
+fn vc(a: view K, b: K, c: bool) -> view Str { return (if c then a else b).s; }
+fn main() -> int { return 0; }
+)");
+  auto into = [](const char *at, const char *fn, const char *place) {
+    return std::string(at) + " error: '" + fn +
+           "' returns an 'inout' reference into '" + place +
+           "', a separate object: an 'inout' result can only point into "
+           "'self' or into an 'inout' parameter's storage; return a copy, or "
+           "call an accessor on '" +
+           place + "' directly";
+  };
+  for (const std::string &diag :
+       {into(":4:41:", "far", "(if ... then self.k1 else self.k2)"),
+        into(":5:54:", "half", "(if ... then o else self.k1)"),
+        std::string(":8:58: error: 'a' is a copy: an 'inout' result must be "
+                    "part of 'self' or of an 'inout' parameter"),
+        std::string(":11:10: error: 'k' is a local: an 'inout' result must be "
+                    "part of 'self' or of an 'inout' parameter"),
+        std::string(":13:61: error: 'a' is a 'view' parameter; it cannot be "
+                    "returned 'inout'"),
+        std::string(":14:62: error: a field of a struct that is not a variable "
+                    "or a field (a temporary, which dies with the statement) "
+                    "cannot be returned 'inout'"),
+        std::string(":16:10: error: an element of a tuple cannot be returned "
+                    "'inout': tuples are immutable"),
+        std::string(":18:54: error: 'b' is a copy: a 'view' result must be "
+                    "part of 'self' or of a 'view' or 'inout' parameter")})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_FALSE(r.Ok);
+  EXPECT_EQ(r.ErrorCount, 8u) << r.Diagnostics;
 }
 
 // What an `inout` parameter names stays alive with the object a reference
@@ -721,11 +846,12 @@ fn main() -> int {
 // subclass can return a field of its own).  So `self.s.me()`,
 // `self.s.ref()`, `self.w.get()`, `first(self.t)`, `s.ref().k` and
 // `s.me().c.k` stay in what they borrowed, as `self.s.c` and `s.c.k` do: a
-// `C` holds no `S` and no `C`.  Not `self.sv.get()` or `self.sv.px()` (a
-// method of `V` returns a `Str`, or a `P` holding an `int`), `self.sl.ref()`
-// or `s.ref().k` (an `L` holds an `L`), or `deep(n).k` (a `Node` holds a
-// `C`).  A reference followed from a call's result is named by the call and
-// where its result can point.
+// `C` holds no `S` and no `C`.  (`first` itself returns a tuple's element,
+// which is an error of its own: its call is checked by its signature.)  Not
+// `self.sv.get()` or `self.sv.px()` (a method of `V` returns a `Str`, or a `P`
+// holding an `int`), `self.sl.ref()` or `s.ref().k` (an `L` holds an `L`), or
+// `deep(n).k` (a `Node` holds a `C`).  A reference followed from a call's
+// result is named by the call and where its result can point.
 TEST(BorrowedResult, InoutResultsPastWhatACallBorrowedHoldItsType) {
   auto r = semaCheck(R"(class C { k: Str; n: int; }
 struct S { c: C; n: int; }
@@ -801,11 +927,13 @@ fn main() -> int {
            past(":26:47:", "outer<Node>", "deep<Node>", "'n'"),
            std::string(":46:14: note: in instantiation of 'outer<Node>' "
                        "requested here"),
+           std::string(":27:49: error: an element of a tuple cannot be "
+                       "returned 'inout': tuples are immutable"),
        })
     EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
                                                            << r.Diagnostics;
   EXPECT_FALSE(r.Ok);
-  EXPECT_EQ(r.ErrorCount, 6u) << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 7u) << r.Diagnostics;
 }
 
 // The rule is checked where the function is defined: an importer of the

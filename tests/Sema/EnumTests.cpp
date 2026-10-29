@@ -258,6 +258,65 @@ TEST(Enum, VariantsMadeAndMatched) {
   EXPECT_TRUE(r.Ok) << r.Diagnostics;
 }
 
+// An `inout` arm matches a call's `inout` result as it does a variable or a
+// field: a method's (of a class, through a field, of a struct) and a
+// function's.  What the call borrowed stays borrowed while the binding is
+// live.  A call with a plain or a `view` result is no storage.  (Each
+// `inout` result was `'inout' arm 'b' needs a variable or a field to match
+// on`.)
+TEST(Enum, AnInoutArmMatchesAnInoutResult) {
+  const std::string decls = std::string(kTagged) + R"(
+class K {
+  e: E;
+  fn slot() -> inout E { return self.e; }
+  view fn peek() -> view E { return self.e; }
+}
+class H { k: K; }
+struct S { e: E; }
+impl S {
+  fn slot() -> inout E { return self.e; }
+}
+fn pick(x: inout E, y: inout E, first: bool) -> inout E {
+  return if first then x else y;
+}
+fn mk() -> E { return E::A; }
+)";
+  auto ok = semaCheck(decls + wrapMain(R"(
+    k = K(E::B(1, "a"));
+    match k.slot() { b: inout B { b.x += 100; b.s = b.s + "!"; } _ { } }
+    h = H(K(E::A));
+    match h.k.slot() { b: inout B { b.x = 2; } _ { } }
+    s = S(E::B(3, "s"));
+    match s.slot() { b: inout B { b.x *= 2; } A { } C { } }
+    x = E::B(4, "x");
+    y: E = E::A;
+    match pick(x, y, True) { b: inout B { b.x = 7; } _ { } }
+    match k.slot() { b: inout B { b.x += 1; } _ { } }
+    io::println(k.e);
+  )"));
+  EXPECT_TRUE(ok.Ok) << ok.Diagnostics;
+  auto r = semaCheck(decls + wrapMain(R"(
+    k = K(E::B(1, "a"));
+    match k.slot() { b: inout B { io::println(k.e); b.x = 1; } _ { } }
+    match mk() { b: inout B { } _ { } }
+    match k.peek() { b: inout B { } _ { } }
+    x = E::B(4, "x");
+    y: E = E::A;
+    match pick(x, y, True) { b: inout B { y = E::A; b.x = 2; } _ { } }
+  )"));
+  for (
+      const char *diag :
+      {":20:47: error: 'k' is borrowed by 'inout' local 'b' until 'b' is "
+       "last used",
+       ":21:11: error: 'inout' arm 'b' needs a variable or a field to match on",
+       ":22:11: error: 'inout' arm 'b' needs a variable or a field to match on",
+       ":25:43: error: 'y' is borrowed by 'inout' local 'b' until 'b' is "
+       "last used"})
+    EXPECT_NE(r.Diagnostics.find(diag), std::string::npos) << diag << "\n"
+                                                           << r.Diagnostics;
+  EXPECT_EQ(r.ErrorCount, 4u) << r.Diagnostics;
+}
+
 // A variant's fields name a type, `E::B`, which a match arm's binding has.
 TEST(Enum, VariantFieldsNameAType) {
   auto r = semaCheck(std::string(kTagged) + R"(

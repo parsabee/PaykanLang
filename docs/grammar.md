@@ -411,8 +411,10 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   `target = target op value`, built by the parser: its value is a
   `BinaryExpr` (`+=` is `+`, ..., `%=` is `%`, `&=` is `&`, ..., `>>=` is
   `>>`) spanning `target op= value`, whose left operand is a copy of the
-  target's expression and whose right operand is `value` whole (`k *= k + 1`
-  is `k = k * (k + 1)`).  The target is checked as `=`'s is (`left-hand side
+  target's expression, at the target's locations, and whose right operand is
+  `value` whole (`k *= k + 1` is `k = k * (k + 1)`).  Sema knows the copy by
+  its locations: an error in the target is reported once, not again for the
+  copy.  The target is checked as `=`'s is (`left-hand side
   of '+=' must be ...`), and is evaluated twice, once to read it and once to
   assign it: `xs[f()] += 1` calls `f` twice.  `>>=` is a `>` directly
   followed by a `>=` (§1), where the target's expression ends: `a < b >>= c;`

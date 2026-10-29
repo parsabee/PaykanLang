@@ -1,0 +1,101 @@
+// 88 — a slice passed on whose elements a later argument may write
+// Exercises: the elements a slice parameter names, passed on to another
+//            function while a call in a later argument may write them
+//            where the compiler cannot see it by the arguments' paths: a
+//            function storing into the array field the slice names, a
+//            function value, a virtual call whose override does, and a
+//            function writing them through a chain of objects.  Each slice
+//            is copied to the heap where it is passed, and the compiler
+//            warns there (docs/language/02-basics.md, "Evaluation order"):
+//            the callee reads the elements as they were passed.  A
+//            struct's copy and a fixed-size array's are made on the stack
+//            and not warned about, and nor is a slice no later operand may
+//            write: one read before the call, or whose elements are in an
+//            object a later call replaces, which its caller holds.
+// expect-stdout: 1 9
+// expect-stdout: 6 27
+// expect-stdout: 6 27
+// expect-stdout: 6 21
+// expect-stdout: 6 24
+// expect-stdout: 6 18
+// expect-stdout: 10
+
+import ::io;
+
+struct P {
+  a: int;
+}
+
+class C {
+  p: P;
+  a: int[3];
+}
+
+class D {
+  c: C;
+}
+
+class W {
+  view fn touch(c: C) -> int => 0;
+}
+
+class X : W {
+  view fn touch(c: C) -> int { c.a = [7, 7, 7]; return 1; }
+}
+
+fn look(p: view P, x: int) -> int => p.a;
+fn first(p: P, x: int) -> int => p.a;
+fn total(xs: view int[], x: int) -> int => xs[0] + xs[1] + xs[2];
+
+fn reset(c: C) -> int {
+  c.p = P(9);
+  c.a = [9, 9, 9];
+  return 0;
+}
+
+fn wipe(d: D) -> int {
+  d.c.a = [8, 8, 8];
+  return 0;
+}
+
+fn swap(d: D) -> int {
+  d.c = C(P(6), [6, 6, 6]);
+  return 0;
+}
+
+fn gv(p: view P, c: C) -> int => look(p, reset(c));
+fn gp(p: view P, c: C) -> int => first(p, reset(c));
+fn gs(xs: view int[], c: C) -> int => total(xs, reset(c));
+fn gsv(xs: view int[], c: C) -> int => xs[0] + reset(c) + xs[0];
+fn gf(xs: view int[], f: () -> int) -> int => total(xs, f());
+fn gw(xs: view int[], w: W, c: C) -> int => total(xs, w.touch(c));
+fn gd(xs: view int[], d: D) -> int => total(xs, wipe(d));
+fn gc(xs: view int[], d: D) -> int => total(xs, swap(d));
+
+fn main() -> int {
+  // A struct copied on the stack, then a slice copied to the heap and an
+  // array copied on the stack.
+  let c = C(P(1), [1, 2, 3]);
+  io::println(Str(gv(c.p, c)) + " " + Str(gp(c.p, c)));
+  let d = C(P(1), [1, 2, 3]);
+  io::println(Str(gs(d.a, d)) + " " + Str(total(d.a, reset(d))));
+
+  // Written by a function value, a virtual call's override and through a
+  // chain of objects.
+  let e = C(P(1), [1, 2, 3]);
+  let f = fn() -> int => reset(e);
+  io::println(Str(gf(e.a, f)) + " " + Str(total(e.a, 0)));
+  let w: W = X();
+  let g = C(P(1), [1, 2, 3]);
+  io::println(Str(gw(g.a, w, g)) + " " + Str(total(g.a, 0)));
+  let h = D(C(P(1), [1, 2, 3]));
+  io::println(Str(gd(h.c.a, h)) + " " + Str(total(h.c.a, 0)));
+
+  // No copy: the object replaced is held, and a read before the call is
+  // the value read then.
+  let k = D(C(P(1), [1, 2, 3]));
+  io::println(Str(gc(k.c.a, k)) + " " + Str(total(k.c.a, 0)));
+  let m = C(P(1), [1, 2, 3]);
+  io::println(Str(gsv(m.a, m)));
+  return 0;
+}

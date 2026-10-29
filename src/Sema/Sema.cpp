@@ -1049,11 +1049,12 @@ bool Sema::bindArmName(ast::MatchArm *arm, const ast::Expr *subject,
     // Reported.
   } else if (arm->getMode() == ast::ParamMode::Inout) {
     // `n: inout T` is another name for the subject's storage, as an `inout`
-    // local is for what it names; a T written through it fits there.
+    // local is for what it names, a call's `inout` result too; a T written
+    // through it fits there.
     const std::string what = "'inout' arm '" + name + "'";
     if (!ast::isa<ast::Identifier>(subject) &&
         !ast::isa<ast::MemberAccessExpr>(subject) &&
-        !ast::isa<ast::SubscriptExpr>(subject))
+        !ast::isa<ast::SubscriptExpr>(subject) && !isInoutResult(subject))
       msg = what + " needs a variable or a field to match on";
     else if (ast::isa<ast::BuiltinType>(bindTy) ||
              ast::isa<ast::EnumType>(bindTy))
@@ -1526,8 +1527,8 @@ ast::Type *Sema::ExprChecker::visitCallValueExpr(ast::CallValueExpr *node) {
     return nullptr;
   }
   // Named by its type: the callee is an expression.
-  ast::Type *ret = S.checkFunctionValueCall(fnt, node->getArguments(),
-                                            typeName(fnt), node->getLocation());
+  ast::Type *ret =
+      S.checkFunctionValueCall(fnt, node->getArguments(), typeName(fnt), node);
   if (!ret)
     return nullptr;
   node->setResolvedType(ret);
@@ -2286,8 +2287,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
                                        "cannot be called");
       return nullptr;
     }
-    ast::Type *ret = S.checkFunctionValueCall(fnt, node->getArguments(), name,
-                                              node->getLocation());
+    ast::Type *ret =
+        S.checkFunctionValueCall(fnt, node->getArguments(), name, node);
     if (!ret)
       return nullptr;
     node->setCalleeIsValue(true);
@@ -2407,7 +2408,7 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
       }
     }
     if (superInit && argTypes.size() == expectedParams.size()) {
-      S.checkInoutArgs(superInit->getParamModes(), expectedParams,
+      S.checkInoutArgs(node, superInit->getParamModes(), expectedParams,
                        node->getArguments(), names::kMethodSuper);
       S.checkViewArgs(superInit->getParamModes(), expectedParams,
                       node->getArguments(), names::kMethodSuper);
@@ -2545,7 +2546,8 @@ ast::Type *Sema::ExprChecker::visitCallExpr(ast::CallExpr *node) {
     }
   }
   const std::string callee = displayName(node->getCalleeName());
-  S.checkInoutArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
+  S.checkInoutArgs(node, sig->Modes, sig->ParamTypes, node->getArguments(),
+                   callee);
   S.checkViewArgs(sig->Modes, sig->ParamTypes, node->getArguments(), callee);
   S.noteBorrowResult(node, callee, sig->Modes, sig->ParamTypes, sig->ReturnType,
                      node->getArguments(), nullptr);
@@ -2668,9 +2670,8 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                                   : static_cast<ast::Type *>(st),
                                node->getMethodName(), node->getLocation()))
         return nullptr;
-      ast::Type *ret =
-          S.checkFunctionValueCall(fnt, node->getArguments(),
-                                   node->getMethodName(), node->getLocation());
+      ast::Type *ret = S.checkFunctionValueCall(fnt, node->getArguments(),
+                                                node->getMethodName(), node);
       if (!ret)
         return nullptr;
       node->setFieldCall(true);
@@ -2749,8 +2750,9 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
                   sliceArgNote(paramTys[i], argTy));
     }
   }
-  S.checkInoutArgs(method->getParamModes(), paramTys, node->getArguments(),
-                   node->getMethodName(), node->getReceiver(), method);
+  S.checkInoutArgs(node, method->getParamModes(), paramTys,
+                   node->getArguments(), node->getMethodName(),
+                   node->getReceiver(), method);
   // A builtin method reads its arguments; `equals`, like `==`, only
   // compares.
   if (!(ct && ct->isBuiltin()) && node->getMethodName() != names::kMethodEquals)
@@ -3223,6 +3225,12 @@ ast::Type *Sema::ExprChecker::visitTupleIndexExpr(ast::TupleIndexExpr *node) {
                 "': a struct's fields are named (" + fields + ")");
     return nullptr;
   }
+  // An element cannot be read through an optional tuple (it may be None).
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy);
+      ot && ast::isa<ast::TupleType>(ot->getInnerType())) {
+    S.errorOptionalUnwrap(node->getLocation(), ot);
+    return nullptr;
+  }
   auto *tt = ast::dyn_cast<ast::TupleType>(recvTy);
   if (!tt) {
     S.error(node->getLocation(),
@@ -3298,6 +3306,12 @@ bool Sema::visitDestructureStmt(ast::DestructureStmt *node) {
   if (!valTy)
     return bindTargetsAfterError();
 
+  // Nor is an optional tuple destructured.
+  if (auto *ot = ast::dyn_cast<ast::OptionalType>(valTy);
+      ot && ast::isa<ast::TupleType>(ot->getInnerType())) {
+    errorOptionalUnwrap(node->getValue()->getLocation(), ot);
+    return bindTargetsAfterError();
+  }
   auto *tt = ast::dyn_cast<ast::TupleType>(valTy);
   if (!tt || ast::isa<ast::StructType>(valTy)) {
     error(node->getValue()->getLocation(),
@@ -3467,10 +3481,12 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      std::move(ForeignInstantiatedClassDecls),
                      std::move(ForeignInstantiatedFuncDecls),
                      std::move(ForeignInstantiatedStructDecls),
+                     std::move(ForeignInstantiationSources),
                      OwnedResolver,
                      std::move(ImportedNatives),
                      std::move(ImportedInstanceClassDecls),
-                     std::move(ImportedInstanceStructDecls)};
+                     std::move(ImportedInstanceStructDecls),
+                     {OwnSourceName, OwnSourceLines, nullptr, ""}};
   // The sets live in this frame: a Sema is run once.
   if (ImportStack == &localImportStack)
     ImportStack = nullptr;
@@ -4121,6 +4137,7 @@ bool Sema::checkReassignable(const std::string &name, ast::SourceLocation loc) {
                    "' is the variable of a 'for' loop and cannot be assigned");
     return false;
   case VarKind::Captured:
+  case VarKind::CapturedWeak:
     error(loc, "cannot assign to '" + name +
                    "': the function captures it by copy, and the copy is "
                    "read-only (assign it before the function is made, or "
@@ -5023,6 +5040,18 @@ bool Sema::rejectInferredMethods(ast::TranslationUnit *tu) {
   return ok;
 }
 
+namespace {
+
+/// Whether @p e is `None`, or a conditional each of whose branches is: a
+/// value of no class.
+bool isNoneValue(const ast::Expr *e) {
+  if (const auto *te = ast::dyn_cast<ast::TernaryExpr>(e))
+    return isNoneValue(te->getTrueExpr()) && isNoneValue(te->getFalseExpr());
+  return ast::isa<ast::NoneLiteral>(e);
+}
+
+} // namespace
+
 bool Sema::visitVarDecl(ast::VarDecl *node) {
   // The name must not shadow a type, a function or a reserved name (#126);
   // a function's is poisoned, as in visitAssignStmt.
@@ -5148,8 +5177,18 @@ bool Sema::visitVarDecl(ast::VarDecl *node) {
   }
 
   // A `weak` local holds a weak reference: its type is `T?` of a class `T`
-  // (`weak y = x;` with `x: T` or `x: T?` infers `T?`).
+  // (`weak y = x;` with `x: T` or `x: T?` infers `T?`).  `None` names no
+  // class: inferred, it would be a weak reference to the None value itself,
+  // which never reads None.
   if (node->isWeak()) {
+    if (!node->getType() && node->getInitExpr() &&
+        isNoneValue(node->getInitExpr())) {
+      error(node->getLocation(),
+            "cannot infer the class of weak local '" + node->getName() +
+                "' from None; write 'weak " + node->getName() + ": T? = None'");
+      declarePoisoned(CurrentScope, node->getName());
+      return false;
+    }
     if (!node->getType() && !ast::isa<ast::OptionalType>(declTy) &&
         ast::isa<ast::ClassType>(declTy))
       declTy = Ctx.getOptionalType(declTy);
@@ -5188,10 +5227,55 @@ bool Sema::checkWeakType(ast::Type *ty, ast::SourceLocation loc,
   return false;
 }
 
+namespace {
+
+/// Whether @p copy is a copy of @p e made where @p e is: the same kind of
+/// node at the same place in the source.
+bool isCopyOf(const ast::Expr *copy, const ast::Expr *e) {
+  const ast::SourceLocation a = copy->getLocation();
+  const ast::SourceLocation b = e->getLocation();
+  return copy->getKind() == e->getKind() && a.isValid() &&
+         a.getLineStart() == b.getLineStart() &&
+         a.getColumnStart() == b.getColumnStart() &&
+         a.getLineEnd() == b.getLineEnd() &&
+         a.getColumnEnd() == b.getColumnEnd();
+}
+
+/// A compound assignment `t op= v` is the assignment `t = t' op v`, where
+/// `t'` is a copy of the target the parser made, at the target's place
+/// (Parser::cloneTarget).  These are its `v`, or null for a plain
+/// assignment: a subscript's `xs[i] op= v`, and a field's `r.f op= v`.
+ast::Expr *compoundOperand(const ast::SubscriptAssignStmt *node) {
+  const auto *be = ast::dyn_cast<ast::BinaryExpr>(node->getValue());
+  const auto *se =
+      be ? ast::dyn_cast<ast::SubscriptExpr>(be->getLHS()) : nullptr;
+  return se && isCopyOf(se->getArray(), node->getArray()) &&
+                 isCopyOf(se->getIndex(), node->getIndex())
+             ? be->getRHS()
+             : nullptr;
+}
+
+ast::Expr *compoundOperand(const ast::MemberAssignStmt *node) {
+  const auto *be = ast::dyn_cast<ast::BinaryExpr>(node->getValue());
+  const auto *ma =
+      be ? ast::dyn_cast<ast::MemberAccessExpr>(be->getLHS()) : nullptr;
+  return ma && ma->getFieldName() == node->getFieldName() &&
+                 isCopyOf(ma->getReceiver(), node->getReceiver())
+             ? be->getRHS()
+             : nullptr;
+}
+
+} // namespace
+
 bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
+  const unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
   auto *recvTy = resolveExprType(node->getReceiver());
   if (!recvTy)
     return false;
+  // An error inside the receiver (an argument of a call it makes) leaves
+  // its type known.
+  const bool recvFailed =
+      Diags.getErrorCount() + SuppressedFollowOns != errorsBefore;
 
   // A field cannot be assigned through an optional receiver (it may be None).
   if (auto *ot = ast::dyn_cast<ast::OptionalType>(recvTy)) {
@@ -5272,6 +5356,12 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
                        node->getLocation()))
     return false;
 
+  // The copy of the target in a compound assignment's value would report
+  // the receiver's errors again: only the other operand is checked then.
+  if (ast::Expr *operand = compoundOperand(node); operand && recvFailed) {
+    resolveExprType(operand, fieldTy);
+    return false;
+  }
   auto *valTy = resolveExprType(node->getValue(), fieldTy);
   if (!valTy)
     return false;
@@ -5288,6 +5378,7 @@ bool Sema::visitMemberAssignStmt(ast::MemberAssignStmt *node) {
 }
 
 bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
+  const unsigned errorsBefore = Diags.getErrorCount() + SuppressedFollowOns;
   auto *arrTy = resolveExprType(node->getArray());
   if (!arrTy)
     return false;
@@ -5306,10 +5397,13 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
   auto *idxTy = resolveExprType(node->getIndex());
   if (idxTy && idxTy != Ctx.getIntTy()) {
     error(node->getIndex()->getLocation(),
-          "array index must be int, got '" + typeName(idxTy) + "'");
+          "array index must be 'int', got '" + typeName(idxTy) + "'");
   } else if (idxTy && fixed && !checkFixedIndex(fixed, node->getIndex())) {
     return false;
   }
+  // An error in the array or the index, as a read of them reports it.
+  const bool targetFailed =
+      Diags.getErrorCount() + SuppressedFollowOns != errorsBefore;
   // A fixed-size array's elements are its value: a `let` one keeps them.
   if (fixed)
     if (std::string let = letValueRoot(node->getArray()); !let.empty()) {
@@ -5323,6 +5417,11 @@ bool Sema::visitSubscriptAssignStmt(ast::SubscriptAssignStmt *node) {
                        node->getLocation()))
     return false;
   ast::Type *elemTy = fixed ? fixed->getElementType() : slice->getElementType();
+  // As for a field: the copy of the target is not checked again.
+  if (ast::Expr *operand = compoundOperand(node); operand && targetFailed) {
+    resolveExprType(operand, elemTy);
+    return false;
+  }
   auto *valTy = resolveExprType(node->getValue(), elemTy);
   if (!valTy)
     return false;
