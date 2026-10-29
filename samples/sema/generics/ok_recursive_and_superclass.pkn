@@ -29,9 +29,9 @@ impl Node<T> {
 }
 
 fn main() -> int {
-  w: Wrap<Str> = Wrap<Str>("a", 5);
-  b: Base = w;
-  a: Node<int> = Node<int>(1);
+  let w: Wrap<Str> = Wrap<Str>("a", 5);
+  let b: Base = w;
+  let a: Node<int> = Node<int>(1);
   a.link(Node<int>(2));
   return b.num() + w.num();
 }

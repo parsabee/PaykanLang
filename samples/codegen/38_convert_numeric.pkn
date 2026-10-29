@@ -38,12 +38,12 @@ fn main() -> int {
   io::println(Str(int<float>(2.9)) + " " + Str<int>(int(-2.9)) + " "
       + Str(int<float>(0.4)) + " " + Str<int>(int(-0.0)));
 
-  sum = 1 + 2 + 3 + 4;
+  let sum = 1 + 2 + 3 + 4;
   io::println(Str(float<int>(sum) / 4.0 + 1.0) + " average of 1..4");
-  odd = 9007199254740993;              // 2^53 + 1 has no exact double
+  let odd = 9007199254740993;          // 2^53 + 1 has no exact double
   io::println(Str<int>(odd) + " -> " + Str(int(float<int>(odd))));
 
-  checks: bool[3] = [1 < 2, 2 < 1, 3 == 3];
+  let checks: bool[3] = [1 < 2, 2 < 1, 3 == 3];
   passed = 0;
   i = 0;
   while i < checks.len() {
@@ -56,7 +56,7 @@ fn main() -> int {
 
   io::println("a=" + Str(int('a')) + " 0=" + Str<int>(int<char>('0')));
   year = 0;
-  text = "2026";
+  let text = "2026";
   i = 0;
   while i < text.len() {
     year = year * 10 + (int(text[i]) - int<char>('0'));
@@ -64,7 +64,7 @@ fn main() -> int {
   }
   io::println("digits: " + Str(year));
   io::println("caesar: " + caesar("Hello", 3));
-  e = "é";
+  let e = "é";
   io::println(e + " is " + Str<int>(int(e[0])) + " " + Str(int<char>(e[1])));
   return 0;
 }

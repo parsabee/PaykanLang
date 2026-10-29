@@ -34,9 +34,9 @@ fn origin() -> geometry::point::Point {
 
 fn main() -> int {
   // Qualified type as a variable annotation.
-  p: point::Point = point::Point(15, 27);
-  b = Box(p);
-  o = origin();
+  let p: point::Point = point::Point(15, 27);
+  let b = Box(p);
+  let o = origin();
   io::println(o.toString());
   return describe(p) + b.total();  // 42 + 42 = 84
 }

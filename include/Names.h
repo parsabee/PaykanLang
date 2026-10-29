@@ -230,6 +230,10 @@ inline constexpr const char *kPaykanBufferIsSet = "PaykanBuffer_isSet";
 inline constexpr const char *kPaykanBufferTryGrow = "PaykanBuffer_tryGrow";
 inline constexpr const char *kPaykanBufferTryReserve =
     "PaykanBuffer_tryReserve";
+/// PaykanBuffer_len's body, a static inline function of Runtime.h (not an
+/// ABI symbol): what the C of --emit-c calls instead.  The LLVM path reads
+/// the buffer's `len` itself (src/Backends/MLIR/ToLLVM/ToLLVM.cpp).
+inline constexpr const char *kPaykanBufferLenInline = "PaykanBuffer_len_inline";
 /// What each Buffer function may do to the values a buffer holds: drop some
 /// of them, of its type argument's type (the one it overwrites, the ones it
 /// shrinks away), or none.  None of them replaces the buffer an `inout Obj`
@@ -481,6 +485,15 @@ inline constexpr const char *kNoReturnRuntimeFunctions[] = {
     kPaykanPanicFloatToType, kPaykanPanicIntToChar,   kPaykanPanicToChar,
     kPaykanPanicIndex,       kPaykanPanicForStep,     kPaykanPanicPureVirtual,
     kPaykanPanicMessage,     kPaykanPanicValue,       kPaykanUnreachableView,
+};
+/// The runtime functions that write no memory a program can reach: they
+/// read memory, and the panic of a bad index or an unset slot writes only
+/// the C library's (its streams, errno) before it aborts.  The LLVM path
+/// declares them so (`memory(read, inaccessiblemem: readwrite, errnomem:
+/// readwrite)`) and `nounwind`, so that a loop that only reads a buffer
+/// reads its length once: a walk of a List<int> comparing each element.
+inline constexpr const char *kReadOnlyRuntimeFunctions[] = {
+    kPaykanBufferGet,
 };
 /// @p symbol is one of kNoReturnRuntimeFunctions.
 inline bool isNoReturnRuntimeFunction(std::string_view symbol) {

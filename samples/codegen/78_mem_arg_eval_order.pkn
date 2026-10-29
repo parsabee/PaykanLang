@@ -147,7 +147,7 @@ fn resetArrays(a: Arrays) -> int {
 fn sumOn(xs: view int[], a: Arrays) -> int => sum(xs, resetArrays(a));
 fn endsOn(ss: view Str[], a: Arrays) -> Str => ends(ss, resetArrays(a));
 fn firstOn(ss: view Str[], a: Arrays) -> Str {
-  f = fn(ts: view Str[], x: int) -> Str => ts[0] + "";
+  let f = fn(ts: view Str[], x: int) -> Str => ts[0] + "";
   return f(ss, resetArrays(a));
 }
 
@@ -246,57 +246,57 @@ fn fresh() -> Holder => Holder(P(1), Named("a" + Str(1), 1), 1);
 fn main() -> int {
   // Read through an object that a later call, given the object, writes.
   h = fresh();
-  a = first(h.p, reset(h));
+  let a = first(h.p, reset(h));
   h = fresh();
-  c = first(h.p, first(h.p, reset(h)));
+  let c = first(h.p, first(h.p, reset(h)));
   io::println("field: " + Str(a) + " " + Str(c));
 
   // A variable a later `inout` argument writes.
   p = P(1);
-  i1 = first(p, bump(p));
+  let i1 = first(p, bump(p));
   t = (1, 2);
-  i2 = firstT(t, bumpT(t));
+  let i2 = firstT(t, bumpT(t));
   arr = [1, 2, 3];
-  i3 = firstA(arr, bumpA(arr));
+  let i3 = firstA(arr, bumpA(arr));
   e = E::A(1);
-  i4 = tag(e, bumpE(e));
+  let i4 = tag(e, bumpE(e));
   io::println("inout: " + Str(i1) + " " + Str(i2) + " " + Str(i3) + " " + i4);
 
   // The left operand of `==` and `!=` is the value read first.
   q = P(1);
-  e1 = q == P(bump(q) + 9);
+  let e1 = q == P(bump(q) + 9);
   t = (1, 2);
-  e2 = t != (bumpT(t) + 9, 9);
+  let e2 = t != (bumpT(t) + 9, 9);
   h = fresh();
-  e3 = h.p == P(reset(h) + 9);
+  let e3 = h.p == P(reset(h) + 9);
   io::println("equality: " + Str(e1) + " " + Str(e2) + " " + Str(e3));
 
   // A method's arguments, and the receiver of a struct's `view fn`.
-  r = Reader(0);
+  let r = Reader(0);
   h = fresh();
-  m1 = r.first(h.p, reset(h));
+  let m1 = r.first(h.p, reset(h));
   let counted = Counted(Counter(1));
   let m2 = counted.counter.get(recount(counted));
   pair = Pair(P(1), P(2));
-  m3 = first(pair.q, pair.bumpQ()) - 1;
+  let m3 = first(pair.q, pair.bumpQ()) - 1;
   io::println("method: " + Str(m1) + " " + Str(m2) + " " + Str(m3));
 
   // A constructor's arguments, of a class and of a struct.
   h = fresh();
-  shown = Shown(h.p, reset(h));
+  let shown = Shown(h.p, reset(h));
   h = fresh();
-  made = Made(h.p, reset(h));
+  let made = Made(h.p, reset(h));
   io::println("constructor: " + Str(shown.p.a) + " " + Str(made.p.a));
 
   // A function value's arguments; a closure that reaches the object.
-  g = first;
+  let g = first;
   h = fresh();
-  f1 = g(h.p, reset(h));
+  let f1 = g(h.p, reset(h));
   p = P(1);
-  f2 = g(p, bump(p));
+  let f2 = g(p, bump(p));
   h = fresh();
-  later = fn() -> int => reset(h);
-  f3 = first(h.p, later());
+  let later = fn() -> int => reset(h);
+  let f3 = first(h.p, later());
   io::println("function value: " + Str(f1) + " " + Str(f2) + " " + Str(f3));
 
   // A `view` parameter and a slice see the value read too.
@@ -308,60 +308,60 @@ fn main() -> int {
 
   // The copy keeps what its references share alive, and lets it go.
   h = fresh();
-  s1 = label(h.named, reset(h));
+  let s1 = label(h.named, reset(h));
   h = fresh();
-  s2 = label(h.named, first(h.p, reset(h)));
+  let s2 = label(h.named, first(h.p, reset(h)));
   io::println("shared: " + s1 + " " + s2);
 
   // As before: a number is read where it is evaluated, and a later call
   // that writes another part leaves the value alone (and takes no copy).
   h = fresh();
-  u1 = firstN(h.n, bumpN(h.n));
+  let u1 = firstN(h.n, bumpN(h.n));
   pair = Pair(P(1), P(2));
-  u2 = first(pair.q, bump(pair.p));
+  let u2 = first(pair.q, bump(pair.p));
   io::println("unchanged: " + Str(u1) + " " + Str(h.n) + " " + Str(u2));
 
   // `__super__`'s arguments, a function value a field holds, an argument
   // under an `inout` result, and one before a closure that writes it.
   h = fresh();
-  d = Derived(h);
-  o = Calls(first);
+  let d = Derived(h);
+  let o = Calls(first);
   h = fresh();
-  o1 = o.f(h.p, reset(h));
+  let o1 = o.f(h.p, reset(h));
   slot = Slot(P(1), P(2));
-  o2 = first(slot.slot(), bump(slot.p));
+  let o2 = first(slot.slot(), bump(slot.p));
   h = fresh();
-  o3 = first(h.p, apply(fn() -> int => reset(h)));
+  let o3 = first(h.p, apply(fn() -> int => reset(h)));
   io::println("more: " + Str(d.p.a) + " " + Str(o1) + " " + Str(o2) + " "
       + Str(o3));
 
   // A slice parameter passed on to another: the elements read.
   arrs = arrays();
-  l1 = sumOn(arrs.xs, arrs);
+  let l1 = sumOn(arrs.xs, arrs);
   arrs = arrays();
-  l2 = endsOn(arrs.ss, arrs);
+  let l2 = endsOn(arrs.ss, arrs);
   arrs = arrays();
-  l3 = firstOn(arrs.ss, arrs);
+  let l3 = firstOn(arrs.ss, arrs);
   io::println("slice passed on: " + Str(l1) + " " + l2 + " " + l3 + " "
       + arrs.ss[0]);
   arrs = arrays();
-  l4 = pickOn(arrs.ss, arrs);
+  let l4 = pickOn(arrs.ss, arrs);
   arrs = arrays();
-  l5 = keptOn(arrs.ss, arrs);
+  let l5 = keptOn(arrs.ss, arrs);
   io::println("to a method and a constructor: " + l4 + " " + l5);
 
   // A method that writes a field through an `inout` local or a `match`
   // arm's binding, one that writes the field holding a `view` parameter's
   // value, and one that writes another object's field (no copy).
   b = boxed();
-  y1 = first(b.p, b.viaLocal());
+  let y1 = first(b.p, b.viaLocal());
   b = boxed();
-  y2 = tag(b.e, b.viaArm());
+  let y2 = tag(b.e, b.viaArm());
   b = boxed();
-  y3 = lookOn(b.w.p, b);
+  let y3 = lookOn(b.w.p, b);
   b = boxed();
-  ticker = Ticker(0);
-  y4 = first(b.p, ticker.next());
+  let ticker = Ticker(0);
+  let y4 = first(b.p, ticker.next());
   io::println("through a name for a field: " + Str(y1) + " " + y2 + " "
       + Str(y3) + " " + Str(y4));
   return 0;

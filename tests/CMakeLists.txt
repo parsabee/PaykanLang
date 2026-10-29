@@ -744,18 +744,32 @@ if(PAYKAN_TEST_SUITE_configure AND NOT PAYKAN_COVERAGE)
 endif()
 
 # --- Documentation: every relative link in the Markdown files resolves -------
-# --- (scripts/check_links.py), and every doc example that states its output --
-# --- prints it (scripts/doc_examples.py). MarkdownLinks is not in a coverage
-# --- build: it runs no instrumented code, and scripts/coverage.py requires
-# --- every test to write a profile. (docs)
+# --- (scripts/check_links.py), every doc example that states its output -----
+# --- prints it (scripts/doc_examples.py), and every local of the samples, ----
+# --- the docs' examples and the standard library that is never reassigned ---
+# --- is declared with `let` (scripts/let_check.py). MarkdownLinks and ------
+# --- LetDeclsWithoutAnAST are not in a coverage build: they run no ---------
+# --- instrumented code, and scripts/coverage.py requires every test to -----
+# --- write a profile. (docs)
 paykan_test_suite(docs PAYKAN_TEST_SUITE_docs)
 if(PAYKAN_TEST_SUITE_docs AND NOT PAYKAN_COVERAGE)
     paykan_add_python_test(MarkdownLinks check_links.py)
+    # A "compiler" that prints no AST (Python, given paykan's options) makes
+    # the check fail, not pass with nothing checked: its exit status and its
+    # message are both checked (LetDeclsWithoutAnAST.cmake).
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME LetDeclsWithoutAnAST
+            COMMAND ${CMAKE_COMMAND}
+                    -DPYTHON=${Python3_EXECUTABLE}
+                    -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/LetDeclsWithoutAnAST.cmake)
+    endif()
 endif()
 paykan_test_suite(docs PAYKAN_TEST_SUITE_docs)
 if(PAYKAN_TEST_SUITE_docs AND PAYKAN_SAMPLES_BACKENDS)
     paykan_add_python_test(DocExamples doc_examples.py
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    paykan_add_python_test(LetDecls let_check.py --paykan $<TARGET_FILE:paykan>)
 endif()
 
 # --- Loadable plugins against an installed PaykanLang: install this tree, ----

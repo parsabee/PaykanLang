@@ -8,7 +8,7 @@ impl Node {
 }
 
 fn main() -> int {
-  a: Node? = None;
-  b: Node = a;   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
+  let a: Node? = None;
+  let b: Node = a;   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
   return 0;
 }

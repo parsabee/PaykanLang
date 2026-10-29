@@ -1,7 +1,7 @@
 // ERROR: initializer of type '() -> int' does not match declared type 'Obj'
 // A closure is a reference, but not an object: it has no toString and no class.
 fn main() -> int {
-  f = fn() -> int { return 1; };
-  o: Obj = f;
+  let f = fn() -> int { return 1; };
+  let o: Obj = f;
   return 0;
 }

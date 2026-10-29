@@ -35,7 +35,7 @@ fn pick(o: A?) -> A {
 }
 
 fn main() -> int {
-  o: A? = A("z");
+  let o: A? = A("z");
   io::println(pick(o).s);
   io::println(pick(None).s);
   match o {

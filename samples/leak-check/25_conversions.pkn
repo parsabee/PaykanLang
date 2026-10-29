@@ -42,7 +42,7 @@ fn main() -> int {
   }
   io::println(line);
 
-  words: Str[7] = ["1", "2", "x", "3", "", "4", "5"];
+  let words: Str[7] = ["1", "2", "x", "3", "", "4", "5"];
   total = 0;
   i = 0;
   while i < words.len() {
@@ -51,7 +51,7 @@ fn main() -> int {
   }
   io::println(Str<int>(total));
 
-  c = Cell();
+  let c = Cell();
   c.label = Str(2.5);
   c.value = "7".toInt();
   c.value = "nope".toInt();
@@ -60,7 +60,7 @@ fn main() -> int {
 
   f = "1.25".toFloat();
   f = "bad".toFloat();
-  n = int<float>(7.9) + int(False) + int<char>(char(0));
+  let n = int<float>(7.9) + int(False) + int<char>(char(0));
   io::println(Str<bool>(bool<int>(n)) + " " + Str(char(97)) + " "
       + Str<int>(n));
   return 0;

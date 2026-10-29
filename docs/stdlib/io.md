@@ -19,7 +19,7 @@ fn main() -> int {
   io::println(42);
   io::println((1, "one"));
   io::println(Point(3, 4));
-  n: int? = None;
+  let n: int? = None;
   io::println(n);
   io::print("no newline, ");
   io::println(True);
@@ -60,7 +60,7 @@ import ::error as err;
 fn main() -> int {
   match io::open("notes.txt", "w") {
     w: Ok {
-      f = w.value;
+      let f = w.value;
       f.write("first line\n");
       f.write("second line\n");
     }
@@ -131,7 +131,7 @@ fn main() -> int {
 
   match io::open("shopping.txt", "r") {
     r: Ok {
-      f = r.value;
+      let f = r.value;
       n = 0;
       while True {
         match f.readln() {
@@ -174,7 +174,7 @@ fn main() -> int {
   while True {
     match io::stdin().readln() {
       read: Ok {
-        line = read.value;
+        let line = read.value;
         // drop the trailing newline before parsing
         digits = "";
         i = 0;
@@ -303,8 +303,8 @@ class Task {
   priority: Priority;
 
   view fn toString() -> Str {
-    box = if self.done then "[x] " else "[ ] ";
-    marker = if self.priority == Priority::High then " !" else "";
+    let box = if self.done then "[x] " else "[ ] ";
+    let marker = if self.priority == Priority::High then " !" else "";
     return box + self.title + marker;
   }
 }
@@ -420,7 +420,7 @@ import ::io;
 import tasks::{task, text, list};
 
 fn load(path: Str) -> list::TaskList {
-  tasks = list::TaskList();
+  let tasks = list::TaskList();
   match io::open(path, "r") {
     r: Ok {
       while True {
@@ -442,7 +442,7 @@ fn addLine(tasks: list::TaskList, line: Str) {
     io::printerrln("skipping bad line: " + line);
     return;
   }
-  t = task::Task(title, task::parsePriority(priority));
+  let t = task::Task(title, task::parsePriority(priority));
   t.done = done == "1";
   if !tasks.addTask(t) { io::printerrln("the list is full, skipping: " + line); }
 }
@@ -450,10 +450,10 @@ fn addLine(tasks: list::TaskList, line: Str) {
 fn save(tasks: list::TaskList, path: Str) -> bool {
   match io::open(path, "w") {
     w: Ok {
-      f = w.value;
+      let f = w.value;
       i = 0;
       while i < tasks.count {
-        t = tasks.tasks[i];
+        let t = tasks.tasks[i];
         f.write((if t.done then "1" else "0") + "|"
                 + task::priorityName(t.priority) + "|" + t.title + "\n");
         i = i + 1;
@@ -506,8 +506,8 @@ fn titleFrom(args: view Str[], from: int) -> (Str, task::Priority) {
 
 fn main(args: view Str[]) -> int {
   if args.len() < 2 { return usage(); }
-  path = "tasks.txt";
-  tasks: list::TaskList = store::load(path);
+  let path = "tasks.txt";
+  let tasks: list::TaskList = store::load(path);
   changed = False;
   match args[1] {
     "add" {
@@ -699,7 +699,9 @@ view fn readbytes(n: int) -> res::Result<Str, err::Error>
 ```
 
 The next `n` bytes, or fewer at the end of the file. `InvalidArgument` when `n` is not
-positive.
+positive. `n` is a maximum, not a size to allocate: the read's buffer starts at 64 KiB (or
+`n` bytes, when that is less) and doubles as the data fills it, so a large `n` takes about
+as much memory as there is left to read.
 
 #### `File.read`
 
@@ -716,6 +718,9 @@ returns an empty `Str`: `read()` of an empty file, or of one already read to the
 is `EndOfFile` too. A read that the operating system fails has the code of its `errno`
 (`IsADirectory` for a directory, `Io`, ...). Reading a file opened only to write fails with
 `InvalidArgument` (`Bad file descriptor`), as writing to one opened only to read does.
+A read whose text does not fit in memory fails with `OutOfMemory`, and what it had read
+by then is lost: the next read starts after it. `read`, `readln` and `readbytes` all grow
+their buffer as the data comes, so a large `n` alone does not make `readbytes` run out.
 
 Writes are buffered by the C library: what `write` reports is whether the data was taken,
 and the data is on disk once the file is closed, or once a read of the same `File` follows
@@ -733,6 +738,7 @@ file is closed, it is not reported to the program.
 | `open` with a mode `fopen` rejects | `InvalidArgument` |
 | `open` of a path, or with a mode, holding a NUL byte (`"\0"`) | `InvalidArgument` |
 | a read with nothing left | `EndOfFile` |
+| a read whose text does not fit in memory (what it read is lost) | `OutOfMemory` |
 | `readbytes(n)` with `n <= 0` | `InvalidArgument` |
 | `write` to a file not open for writing (`stdin()`, a `"r"` file) | `InvalidArgument` |
 | a read of a directory opened with `"r"` | `IsADirectory` |

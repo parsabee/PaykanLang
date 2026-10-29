@@ -119,9 +119,9 @@ fn f(n: int, s: Str, p: P) {
 }
 
 fn main() -> int {
-  n = 1;
-  s = "mine";
-  p = P();
+  let n = 1;
+  let s = "mine";
+  let p = P();
   f(n, s, p);
   io::println(Str(n) + " " + s + " " + Str(p.x));
   return 0;
@@ -258,7 +258,7 @@ fn show(c: view Counter, label: view Str) {
 }
 
 fn main() -> int {
-  c = Counter();
+  let c = Counter();
   c.tick();
   show(c, "ticks");
   return 0;
@@ -323,7 +323,7 @@ the caller's variable holds.
 import ::io;
 
 fn swap(a: inout Str, b: inout Str) {
-  t = a;
+  let t = a;
   a = b;
   b = t;
 }
@@ -387,7 +387,7 @@ fn hit(n: inout int, c: Counter) {
 }
 
 fn main() -> int {
-  c = Counter();
+  let c = Counter();
   hit(c.hits, c);
   io::println(Str(c.hits));
   return 0;
@@ -411,7 +411,7 @@ storage (`p` and `p.x`, `self` and `self.n`); two fields of one variable don't (
 
 ```pkn
 fn swap(a: inout int, b: inout int) {
-  t = a;
+  let t = a;
   a = b;
   b = t;
 }
@@ -536,7 +536,7 @@ fn shout(s: inout Str) -> Str {
 
 fn main() -> int {
   s = "hi";
-  t = s + shout(s); // the s read before shout changes it
+  let t = s + shout(s); // the s read before shout changes it
   io::println(t + " " + s);
   return 0;
 }
@@ -570,8 +570,8 @@ fn swap(s: Shelf) -> Str {
 }
 
 fn main() -> int {
-  shelf = Shelf(Box("old"));
-  t = shelf.box.label + swap(shelf); // the label read before swap replaces the box
+  let shelf = Shelf(Box("old"));
+  let t = shelf.box.label + swap(shelf); // the label read before swap replaces the box
   io::println(t + " " + shelf.box.label);
   return 0;
 }
@@ -661,7 +661,7 @@ fn longer(a: view Str, b: view Str) -> view Str {
 }
 
 fn main() -> int {
-  b = Box();
+  let b = Box();
   v: view = b.peek();
   io::println(longer("hello", "hi") + " " + Str(v.get()));
   return 0;
@@ -726,7 +726,7 @@ fn pick(a: inout int, b: inout int, first: bool) -> inout int {
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  b = Box();
+  let b = Box();
   x: inout = b.num();
   x = x + 10;      // writes b.k
   bump(b.num());   // passed on as b.k's storage
@@ -854,7 +854,7 @@ fn countOf(c: inout Counter) -> inout int { return c.n; }
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  p = Panel(Counter(1), 10);
+  let p = Panel(Counter(1), 10);
   bump(p.total());        // in p
   bump(p.c.count());      // in p.c, the receiver
   bump(countOf(p.c));     // in the object the argument refers to
@@ -1117,6 +1117,21 @@ Any other type, a tuple or a struct for one, crosses only as a type parameter's
 argument of a [generic native function](#generic-native-functions): `native fn
 f(t: view (int, int))` is an error (`parameter 't' of type '(int, int)' cannot
 cross into C`), and so is `native fn g(p: view Point)` for a struct `Point`.
+
+An integer crosses as an `int64_t`, whatever its Paykan type, so a native
+function returning `int`, `i32` or `u8` is bound to a C function that returns
+an `int64_t`.  A C function that returns a C `int`, such as the C library's
+`rand`, cannot be bound as it is: the upper 32 bits of what it returns are not
+defined, so `native fn rand() -> int = "rand";` can read a wrong number.  Wrap
+it in a C function that returns an `int64_t`, and bind that one
+(`native fn rand() -> int = "paykan_rand";`):
+
+```c
+#include <stdint.h>
+#include <stdlib.h>
+
+int64_t paykan_rand(void) { return rand(); }
+```
 
 The result can be a `view` of a `view` or `inout` parameter (`-> view T`);
 it is returned owned, like a copy.  A native function cannot be a method,

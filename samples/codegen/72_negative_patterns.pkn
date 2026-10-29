@@ -38,13 +38,13 @@ fn byteName(b: i8) -> Str {
 }
 
 fn main() -> int {
-  min = -9223372036854775807 - 1;
+  let min = -9223372036854775807 - 1;
   io::println(name(-1) + ", " + name(-2) + ", " + name(min) + ", "
       + name(9223372036854775807) + ", " + name(2));
   io::println(floatName(-2.5) + ", " + floatName(0.0) + ", " + floatName(2.5));
-  lo: i8 = -128;
-  hi: i8 = 127;
-  zero: i8 = 0;
+  let lo: i8 = -128;
+  let hi: i8 = 127;
+  let zero: i8 = 0;
   io::println(byteName(lo) + ", " + byteName(hi) + ", " + byteName(zero));
   return 0;
 }

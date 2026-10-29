@@ -32,7 +32,7 @@ fn main() -> int {
   io::println("");
   io::println("done (" + Str(i - 1) + " steps)");
 
-  maybe: Str? = None;
+  let maybe: Str? = None;
   io::println(maybe);              // an absent optional prints None
   io::println((1, "two"));         // a tuple prints its elements
   io::printerr("printerr adds no newline; ");

@@ -30,7 +30,7 @@ fn main() -> int {
   io::println(describe<bool>(True));
   io::println(describe<char>('k'));
   io::println(describe<Point>(Point(1)));
-  nothing: Point? = None;
+  let nothing: Point? = None;
   io::println(describe<Point?>(nothing));
   io::println(describe<(int, Str)>((1, "a")));
   io::println(Str<int>(pick<int>(True, 1, 2)));

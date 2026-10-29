@@ -1,6 +1,7 @@
 // ::collections List<T>: growth, indexing, insert/remove, search, copies.
 import ::io;
 import ::collections;
+import ::memory;
 
 class Point {
   x: int;
@@ -16,6 +17,57 @@ class Point {
       _ { return False; }
     }
   }
+}
+
+// An element equal to another of its `id`, whose `equals` first calls its
+// hook, if it has one.
+class Hooked {
+  id: int;
+  hook: (() -> int)?;
+  view fn toString() -> Str { return Str(self.id); }
+  view fn equals(other: Obj) -> bool {
+    match self.hook {
+      h: () -> int { h(); }
+      None { }
+    }
+    match other {
+      o: Hooked { return o.id == self.id; }
+      _ { return False; }
+    }
+  }
+}
+
+// A list of two elements, 1 and 2, the first of which empties the list when
+// its `equals` is called.
+fn emptiedByEquals() -> collections::List<Hooked> {
+  xs = collections::List<Hooked>();
+  let shared = memory::Box(xs);
+  xs.push(Hooked(1, fn() -> int { shared.get().clear(); return 0; }));
+  xs.push(Hooked(2, None));
+  return xs;
+}
+
+// A list of 1, 2 and 3, whose 2 removes the first element when its `equals`
+// is called.  Its hook holds the list: clear it when done, or the list holds
+// itself.
+fn shrunkByEquals() -> collections::List<Hooked> {
+  xs = collections::List<Hooked>();
+  let shared = memory::Box(xs);
+  xs.push(Hooked(1, None));
+  xs.push(Hooked(2, fn() -> int { shared.get().removeAt(0); return 0; }));
+  xs.push(Hooked(3, None));
+  return xs;
+}
+
+// A list of 1, 2 and 3, whose 2 swaps itself with the 3 after it when its
+// `equals` is called.  Its hook holds the list: clear it when done.
+fn swappedByEquals() -> collections::List<Hooked> {
+  xs = collections::List<Hooked>();
+  let shared = memory::Box(xs);
+  xs.push(Hooked(1, None));
+  xs.push(Hooked(2, fn() -> int { shared.get().swap(1, 2); return 0; }));
+  xs.push(Hooked(3, None));
+  return xs;
 }
 
 // The text of an index `indexOf` returns: the number, or "None".
@@ -73,5 +125,49 @@ fn main() -> int {
   grid.push(collections::listOf([1, 2]));
   grid.push(collections::listOf([3]));
   io::println(Str(grid.get(0).len() + grid.get(1).len()));
+
+  // listToString appends each element's text to a string of its own: two
+  // calls give two strings, the second "[]" too, unchanged by an append to
+  // the first.  100,000 elements take time linear in the text, where putting
+  // it together with `+` copied it per element.
+  let none = collections::List<int>();
+  let first = collections::listToString(none);
+  let second = collections::listToString(none);
+  first.concat("!");
+  io::println(first + " " + second);
+  big = collections::List<int>();
+  for k in 0..100000 {
+    big.push(k);
+  }
+  let text = collections::listToString(big);
+  io::println(Str(text.len()) + " "
+      + Str(collections::startsWith(text, "[0, 1, 2, ")) + " "
+      + Str(collections::endsWith(text, ", 99998, 99999]")));
+
+  // indexOf, contains and remove read the length again for each element,
+  // which the first element's `equals` sets to 0.
+  let a = emptiedByEquals();
+  let b = emptiedByEquals();
+  c = emptiedByEquals();
+  io::println(idx(a.indexOf(Hooked(0, None))) + " "
+      + Str(b.contains(Hooked(0, None))) + " " + Str(c.remove(Hooked(0, None)))
+      + " " + Str(a.len() + b.len() + c.len()));
+
+  // remove removes nothing when the `equals` that found the element changed
+  // the list's length: the index it was found at names 3 once 1 is gone,
+  // and no element once the list is empty.
+  d = shrunkByEquals();
+  e = emptiedByEquals();
+  io::println(Str(d.remove(Hooked(2, None))) + " "
+      + collections::listToString(d) + " " + Str(e.remove(Hooked(1, None)))
+      + " " + collections::listToString(e));
+  d.clear();
+
+  // An `equals` that changes the list but not its length goes unseen:
+  // remove takes out the element then at the index it was found at, the 3.
+  f = swappedByEquals();
+  io::println(Str(f.remove(Hooked(2, None))) + " "
+      + collections::listToString(f));
+  f.clear();
   return 0;
 }

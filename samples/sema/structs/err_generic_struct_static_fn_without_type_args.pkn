@@ -8,6 +8,6 @@ impl Pair<A, B> {
   static fn mk(a: A, b: B) -> Pair<A, B> { return Pair<A, B>(a, b); }
 }
 fn main() -> int {
-  p = Pair::mk(1, "a");
+  let p = Pair::mk(1, "a");
   return 0;
 }

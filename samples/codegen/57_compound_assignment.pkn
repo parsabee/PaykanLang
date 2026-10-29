@@ -37,7 +37,7 @@ fn main() -> int {
   s += "b" + "c";
   io::println(Str(n) + " " + Str(k) + " " + Str(b) + " " + Str(f) + " " + s);
 
-  p = P(1, "p");
+  let p = P(1, "p");
   p.bump(40);
   p.x += 1;
   p.s += "!";
@@ -47,7 +47,7 @@ fn main() -> int {
   xs[1] += 40;
   total = 0;
   for i in 0..5 { total += i; }
-  list = c::listOf([1, 2, 3, 4, 5]);
+  let list = c::listOf([1, 2, 3, 4, 5]);
   sum = 0;
   for i in 0..list.len() { sum += list.at(i); }
   io::println(Str(p.x) + " " + p.s + " " + Str(q.a) + " [" + Str(xs[0]) + ", "

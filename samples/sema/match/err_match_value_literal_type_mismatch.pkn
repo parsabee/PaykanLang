@@ -1,6 +1,6 @@
 // ERROR: a value-mode literal arm must have the same type as the subject.
 fn main() -> int {
-  n: int = 2;
+  let n: int = 2;
   match n {
     1 { }
     "two" { }   // sema error: Str literal does not match int subject

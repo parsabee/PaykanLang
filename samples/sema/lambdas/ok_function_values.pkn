@@ -26,22 +26,22 @@ struct Op {
 }
 
 fn main() -> int {
-  n = 10;
-  add = fn(x: int) -> int {
+  let n = 10;
+  let add = fn(x: int) -> int {
     return x + n;
   };  // captures n
-  g: (int) -> int = square;
-  fs: ((int) -> int)[2] = [square, twice(add)];
-  b = Button("ok", fn(l: Str) { io::println(l); });
+  let g: (int) -> int = square;
+  let fs: ((int) -> int)[2] = [square, twice(add)];
+  let b = Button("ok", fn(l: Str) { io::println(l); });
   b.onClick("clicked");
-  o = Op("add", fn(a: int, b: int) -> int { return a + b; });
-  v = fn(s: view Str, c: inout int) -> bool {
+  let o = Op("add", fn(a: int, b: int) -> int { return a + b; });
+  let v = fn(s: view Str, c: inout int) -> bool {
     c = c + s.len();
     return c > 3;
   };
   m = 0;
-  ok = v("abc", m);
-  opt: (() -> int)? = fn() -> int {
+  let ok = v("abc", m);
+  let opt: (() -> int)? = fn() -> int {
     return 1;
   };
   match opt {

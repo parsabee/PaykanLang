@@ -6,6 +6,7 @@
 // generic native functions, and telling storage never set from a value.
 
 #include "Runtime.h"
+#include "RuntimeInternal.h"
 
 #include <string.h>
 
@@ -30,11 +31,5 @@ void PaykanType_drop(const PaykanType *type, void *value) {
 }
 
 int PaykanType_isUnset(const PaykanType *type, const void *value) {
-  for (int64_t k = 0; k < type->nunset; ++k) {
-    int64_t word;
-    memcpy(&word, (const char *)value + PaykanType_unset(type, k), sizeof word);
-    if (word)
-      return 0;
-  }
-  return type->nunset != 0;
+  return type->nunset != 0 && PaykanType_unsetWords_inline(type, value);
 }

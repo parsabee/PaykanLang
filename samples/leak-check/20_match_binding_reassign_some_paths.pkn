@@ -19,8 +19,8 @@ impl A {
 }
 
 fn main() -> int {
-  o: A? = A(7);
-  k: int = 0;
+  let o: A? = A(7);
+  let k: int = 0;
   match o {
     a: A {
       if k == 1 { a = A(1); }

@@ -1,32 +1,32 @@
 // Every conversion constructor `Target<Source>(value)` with its result type,
 // and Str's parses, which give the optional of their type.
 fn main() -> int {
-  i: int = 1;
-  f: float = 1.5;
-  b: bool = True;
-  c: char = 'c';
-  s: Str = "12";
-  s1: Str = Str<int>(i);
-  s2: Str = Str<float>(f);
-  s3: Str = Str<bool>(b);
-  s4: Str = Str<char>(c);
-  p1: int? = s.toInt();         // None for an invalid string
-  p2: float? = s.toFloat();
-  n1: int = int<float>(f);
-  n2: float = float<int>(i);
-  n3: int = int<bool>(b);
-  n4: bool = bool<int>(i);
-  n5: int = int<char>(c);
-  n6: char = char<int>(i);
-  q1: bool? = s.toBool();       // exactly "True" / "False"
+  let i: int = 1;
+  let f: float = 1.5;
+  let b: bool = True;
+  let c: char = 'c';
+  let s: Str = "12";
+  let s1: Str = Str<int>(i);
+  let s2: Str = Str<float>(f);
+  let s3: Str = Str<bool>(b);
+  let s4: Str = Str<char>(c);
+  let p1: int? = s.toInt();     // None for an invalid string
+  let p2: float? = s.toFloat();
+  let n1: int = int<float>(f);
+  let n2: float = float<int>(i);
+  let n3: int = int<bool>(b);
+  let n4: bool = bool<int>(i);
+  let n5: int = int<char>(c);
+  let n6: char = char<int>(i);
+  let q1: bool? = s.toBool();   // exactly "True" / "False"
   // A parsed optional is unwrapped before it is formatted.
   match p1 {
-    x: int { t: Str = Str<int>(x); }
+    x: int { let t: Str = Str<int>(x); }
     None { }
   }
-  cq: char? = c;
+  let cq: char? = c;
   match cq {
-    x: char { t: Str = Str<char>(x); }
+    x: char { let t: Str = Str<char>(x); }
     None { }
   }
   return 0;

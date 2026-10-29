@@ -101,7 +101,7 @@ fn matMul(A: view int[2][], B: view int[2][]) -> int[2][2] {
 fn main() -> int {
   // --- 1. Int array literal (constant elements) ------------------------------
   io::println("=== int array ===");
-  nums: int[5] = [10, 20, 30, 40, 50];
+  let nums: int[5] = [10, 20, 30, 40, 50];
   io::println(Str(nums.len()));          // 5
   io::println(Str<int>(nums[0]));            // 10
   io::println(Str(nums[2]));            // 30
@@ -109,13 +109,13 @@ fn main() -> int {
 
   // --- 2. Float array literal -----------------------------------------------
   io::println("=== float array ===");
-  fs: float[3] = [1.5, 2.5, 3.5];
+  let fs: float[3] = [1.5, 2.5, 3.5];
   io::println(Str(fs.len()));            // 3
   io::println(Str<float>(fs[1]));            // 2.5
 
   // --- 3. Bool array literal ------------------------------------------------
   io::println("=== bool array ===");
-  bs: bool[4] = [1 == 1, 1 == 0, 1 == 1, 1 == 1];
+  let bs: bool[4] = [1 == 1, 1 == 0, 1 == 1, 1 == 1];
   io::println(Str(bs.len()));            // 4
   io::println(Str<bool>(bs[0]));             // True
   io::println(Str(bs[1]));             // False
@@ -123,7 +123,7 @@ fn main() -> int {
 
   // --- 4. Str array literal (object array) ----------------------------------
   io::println("=== str array ===");
-  words: Str[3] = ["hello", "world", "paykan"];
+  let words: Str[3] = ["hello", "world", "paykan"];
   io::println(Str(words.len()));         // 3
   io::println(words[0]);                      // hello
   io::println(words[1]);                      // world
@@ -131,14 +131,14 @@ fn main() -> int {
 
   // --- 5. Method call on Str array element ----------------------------------
   io::println("=== str element method ===");
-  strs: Str[_] = ["foo", "bar", "baz"];
+  let strs: Str[_] = ["foo", "bar", "baz"];
   io::println(strs[0].toString());            // foo
   io::println(Str<int>(strs[1].len()));    // 3
   io::println(Str(strs[2].len()));   // 3
 
   // --- 6. User-class array --------------------------------------------------
   io::println("=== Point array ===");
-  pts: Point[3] = [Point(0, 0), Point(3, 4), Point(6, 8)];
+  let pts: Point[3] = [Point(0, 0), Point(3, 4), Point(6, 8)];
   io::println(Str<int>(pts.len()));           // 3
   io::println(pts[0].toString());             // (0,0)
   io::println(pts[1].toString());             // (3,4)
@@ -151,44 +151,45 @@ fn main() -> int {
 
   // --- 8. len() -------------------------------------------------------------
   io::println("=== len ===");
-  a1: int[_] = [1, 2, 3];
-  a2: int[_] = [1, 2, 3, 4, 5, 6, 7];
+  let a1: int[_] = [1, 2, 3];
+  let a2: int[_] = [1, 2, 3, 4, 5, 6, 7];
   io::println(Str(a1.len()));            // 3
   io::println(Str<int>(a2.len()));            // 7
 
   // --- 9. Array as function parameter (a slice) ------------------------------
   io::println("=== array param ===");
-  data: int[5] = [1, 2, 3, 4, 5];
+  let data: int[5] = [1, 2, 3, 4, 5];
   io::println(Str(sumArray(data)));     // 15
 
-  arr2: int[3] = [10, 20, 30];
+  let arr2: int[3] = [10, 20, 30];
   io::println(Str<int>(sumArray(arr2)));     // 60
   io::println(Str(sumArray([7, 8])));   // 15
 
   // --- 10. Array as function return value -----------------------------------
   io::println("=== array return ===");
-  returned: Point[3] = makePoints();
+  let returned: Point[3] = makePoints();
   io::println(Str(returned.len()));      // 3
   io::println(returned[0].toString());        // (1,2)
   io::println(returned[2].toString());        // (5,6)
 
   // --- 11. Str array helpers ------------------------------------------------
   io::println("=== str array helpers ===");
-  greetings: Str[3] = ["hi", "hey", "hello"];
+  let greetings: Str[3] = ["hi", "hey", "hello"];
   io::println(firstStr(greetings));           // hi
   io::println(concatAll(greetings));          // hiheyhello
 
   // --- 12. Int array with non-constant elements (via variables) -------------
   io::println("=== computed int array ===");
-  base: int = 5;
-  computed: int[4] = [base, base + 1, base + 2, base + 3];
+  let base: int = 5;
+  let computed: int[4] = [base, base + 1, base + 2, base + 3];
   io::println(Str<int>(computed.len()));       // 4
   io::println(Str(computed[0]));         // 5
   io::println(Str<int>(computed[3]));         // 8
 
   // --- 13. Labeled class array with describe() calls -----------------------
   io::println("=== Labeled array ===");
-  labels: Labeled[3] = [Labeled("x", 10), Labeled("y", 20), Labeled("z", 30)];
+  let labels: Labeled[3] =
+      [Labeled("x", 10), Labeled("y", 20), Labeled("z", 30)];
   i: int = 0;
   while i < labels.len() {
     io::println(labels[i].describe());
@@ -198,32 +199,32 @@ fn main() -> int {
 
   // --- 14. Array subscript in expressions -----------------------------------
   io::println("=== subscript in expressions ===");
-  ns: int[5] = [3, 7, 2, 8, 1];
+  let ns: int[5] = [3, 7, 2, 8, 1];
   io::println(Str<int>(ns[0] + ns[1]));      // 10
   io::println(Str(ns[3] - ns[2]));      // 6
   io::println(Str<bool>(ns[4] < ns[0]));     // True
 
   // --- 15. Two arrays with the same constant elements -----------------------
   io::println("=== same constant arrays ===");
-  ia1: int[3] = [100, 200, 300];
-  ia2: int[3] = [100, 200, 300];
+  let ia1: int[3] = [100, 200, 300];
+  let ia2: int[3] = [100, 200, 300];
   io::println(Str(ia1[0] + ia2[0]));    // 200
   io::println(Str<int>(ia1.len() + ia2.len()));  // 6
 
   // --- 16. Str.concat() via vtable (in-place mutation) ---
   io::println("=== str concat vtable ===");
-  ca: Str = "hello";
-  cb: Str = " world";
+  let ca: Str = "hello";
+  let cb: Str = " world";
   ca.concat(cb);
   io::println(ca);                            // hello world
   io::println(Str(ca.len()));        // 11
 
   // --- 17. Multidimensional arrays (int[3][3]) ------------------------------
   io::println("=== 2D int array ===");
-  row0: int[3] = [1, 2, 3];
-  row1: int[3] = [4, 5, 6];
-  row2: int[3] = [7, 8, 9];
-  matrix: int[3][3] = [row0, row1, row2];
+  let row0: int[3] = [1, 2, 3];
+  let row1: int[3] = [4, 5, 6];
+  let row2: int[3] = [7, 8, 9];
+  let matrix: int[3][3] = [row0, row1, row2];
   io::println(Str<int>(matrix.len()));        // 3
   io::println(Str(matrix[0][0]));        // 1
   io::println(Str<int>(matrix[1][1]));        // 5
@@ -251,9 +252,9 @@ fn main() -> int {
 
   // --- 20. Array of Str arrays (Str[2][3]) ----------------------------------
   io::println("=== 2D Str array ===");
-  s0: Str[3] = ["a", "b", "c"];
-  s1: Str[3] = ["d", "e", "f"];
-  grid: Str[2][3] = [s0, s1];
+  let s0: Str[3] = ["a", "b", "c"];
+  let s1: Str[3] = ["d", "e", "f"];
+  let grid: Str[2][3] = [s0, s1];
   io::println(Str(grid.len()));          // 2
   io::println(grid[0][0]);                    // a
   io::println(grid[1][2]);                    // f
@@ -262,9 +263,9 @@ fn main() -> int {
   // A = [[1,2],[3,4]]   B = [[5,6],[7,8]]
   // C = [[19,22],[43,50]]
   io::println("=== mat mul ===");
-  MA: int[2][2] = [[1, 2], [3, 4]];
-  MB: int[_][_] = [[5, 6], [7, 8]];
-  C: int[2][2] = matMul(MA, MB);
+  let MA: int[2][2] = [[1, 2], [3, 4]];
+  let MB: int[_][_] = [[5, 6], [7, 8]];
+  let C: int[2][2] = matMul(MA, MB);
   io::println(Str<int>(C[0][0]));   // 19
   io::println(Str(C[0][1]));   // 22
   io::println(Str<int>(C[1][0]));   // 43
@@ -272,9 +273,9 @@ fn main() -> int {
 
   // --- 22. 2D array of Point rows (Point[2][2]) ------------------------------
   io::println("=== 2D Point array ===");
-  pr0: Point[2] = [Point(0, 0), Point(1, 0)];
-  pr1: Point[2] = [Point(0, 1), Point(1, 1)];
-  grid2: Point[2][2] = [pr0, pr1];
+  let pr0: Point[2] = [Point(0, 0), Point(1, 0)];
+  let pr1: Point[2] = [Point(0, 1), Point(1, 1)];
+  let grid2: Point[2][2] = [pr0, pr1];
   io::println(Str<int>(grid2.len()));         // 2
   io::println(grid2[0][0].toString());        // (0,0)
   io::println(grid2[1][1].toString());        // (1,1)

@@ -13,6 +13,10 @@ suites are known:
 * each file of a sample a driver test reads (DriverTests.cpp's
   RunLoadsAnArchiveOfNativeObjects builds samples/imports/14_native and
   checks what it prints) picks the driver suite;
+* what LetDecls depends on besides the docs, samples and standard library
+  picks the docs suite: scripts/let_check.py, the programs of tests/Stdlib
+  it compiles the standard library with, and the AST interchange writer,
+  whose `--emit-ast` it reads;
 * the standard library's build (stdlib/CMakeLists.txt), the selection's own
   script and rules, and a path no rule names pick every suite.
 
@@ -42,6 +46,10 @@ PICK_ALL = ["stdlib/CMakeLists.txt", "scripts/affected_tests.py",
 
 # The samples the driver tests read (tests/Driver/DriverTests.cpp).
 DRIVER_SAMPLES = ["samples/imports/14_native"]
+
+# What scripts/let_check.py (LetDecls, the docs suite) reads or runs.
+LET_CHECK_INPUTS = ["scripts/let_check.py", "tests/Stdlib/list_test.pkn",
+                    "src/ASTInterchange/Writer.cpp"]
 
 
 def picked(path):
@@ -90,10 +98,18 @@ def main():
         got = picked(path)
         if got != "all" and "driver" not in got.split(";"):
             failures.append(f"{path} picks '{got}', without driver")
+    for path in LET_CHECK_INPUTS:
+        if not (ROOT / path).is_file():
+            failures.append(f"no {path} to check")
+            continue
+        got = picked(path)
+        if got != "all" and "docs" not in got.split(";"):
+            failures.append(f"{path} picks '{got}', without docs")
 
     for failure in failures:
         print(f"FAIL: {failure}")
-    checked = len(sources) + len(PICK_ALL) + len(driver_files)
+    checked = len(sources) + len(PICK_ALL) + len(driver_files) + \
+        len(LET_CHECK_INPUTS)
     print(f"{checked - len(failures)}/{checked} paths pick their suites")
     return 1 if failures else 0
 

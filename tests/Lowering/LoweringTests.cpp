@@ -218,6 +218,49 @@ TEST(Lowering, OwnedVariablesAreReleasedInReverseOrderAtScopeExit) {
   EXPECT_LT(loadB, loadA);
 }
 
+// A first assignment `x = y;` of a variable that holds a box (a Str, an
+// object, an optional object) declares x as `let x = y;` does: x shares y's
+// box, which is loaded once, and y's value is not read besides (it was, by
+// an unbox no one used, before the box was loaded again).  So a local that
+// is never reassigned keeps its function's PIR when it is made `let`, which
+// scripts/let_check.py relies on (LET-1).
+TEST(Lowering, AFirstAssignmentOfAVariableLowersAsItsLetDeclaration) {
+  const std::string program = R"(
+    class C { n: int; }
+    fn maybe(k: int) -> C? {
+      if k > 0 { return C(k); }
+      return None;
+    }
+    fn total(s: view Str, c: view C, o: C?) -> int {
+      if o == None { return 0; }
+      return s.len() + c.n;
+    }
+    fn main() -> int {
+      let s = "a";
+      let c = C(1);
+      let o = maybe(2);
+      @t = s;
+      @d = c;
+      @p = o;
+      return total(t, d, p);
+    }
+  )";
+  auto declared = [&](const std::string &with) {
+    std::string text = program;
+    for (size_t at = text.find('@'); at != std::string::npos;
+         at = text.find('@', at))
+      text.replace(at, 1, with);
+    return lower(text);
+  };
+  auto plain = declared(""), let = declared("let ");
+  ASSERT_TRUE(plain.Ok) << plain.Error;
+  ASSERT_TRUE(let.Ok) << let.Error;
+  const std::string m = fullFunction(plain.Text, "main");
+  ASSERT_FALSE(m.empty()) << plain.Text;
+  EXPECT_EQ(m, fullFunction(let.Text, "main"));
+  EXPECT_EQ(count(m, "unbox "), 0u) << m;
+}
+
 // A retain of a value whose type is a class that is not optional, which is
 // never null, is a `retain nonnull` (docs/pir.md §6): a field read into a
 // variable, a variable captured, a capture copied into the closure's call;

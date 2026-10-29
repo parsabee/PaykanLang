@@ -8,10 +8,10 @@ import ::io;
 
 fn main() -> int {
   io::println("=== explicit typed declarations ===");
-  a: int = 42;
-  b: float = 3.14;
-  c: bool = True;
-  d: Str = "hello";
+  let a: int = 42;
+  let b: float = 3.14;
+  let c: bool = True;
+  let d: Str = "hello";
   io::println(Str<int>(a));    // 42
   io::println(Str(b));  // 3.14
   io::println(Str<bool>(c));   // True
@@ -19,10 +19,10 @@ fn main() -> int {
 
   io::println("=== implicit (inferred) declarations ===");
   // No type annotation — CodeGen infers from RHS value
-  x = 100;
-  y = 2.718;
-  z = False;
-  w = "world";
+  let x = 100;
+  let y = 2.718;
+  let z = False;
+  let w = "world";
   io::println(Str(x));    // 100
   io::println(Str<float>(y));  // 2.718
   io::println(Str(z));   // False
@@ -70,22 +70,22 @@ fn main() -> int {
 
   io::println("=== multiple vars same scope ===");
   p: int = 1;
-  q: int = 2;
-  r: int = 3;
+  let q: int = 2;
+  let r: int = 3;
   p = p + q + r;
   io::println(Str(p));    // 6
 
   io::println("=== nested scope variable access ===");
   outer: int = 10;
   if True {
-    inner: int = 20;
+    let inner: int = 20;
     outer = outer + inner;   // outer accessible from inner scope
     io::println(Str<int>(outer));   // 30
   }
   io::println(Str(outer));     // 30 (modified by inner scope)
 
   io::println("=== None initialised var ===");
-  n: Obj = None;   // None has type Obj, not Str
+  let n: Obj = None;   // None has type Obj, not Str
   io::println("none ok");  // just checking it doesn't crash
 
   return 0;

@@ -155,6 +155,16 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
   the same value, carry the attribute `pir.nonnull`: the LLVM path makes no
   test for null there, and the C path calls
   `Paykan_retain_nonnull_inline` or `Paykan_release_nonnull_inline`.
+* **A buffer's length** (`memory::Buffer`'s `len()`, the native function
+  bound to `PaykanBuffer_len`) is read in place: the LLVM path loads the
+  buffer's `len`, and the C path calls Runtime.h's `static inline`
+  `PaykanBuffer_len_inline`.  The LLVM path also declares
+  `PaykanBuffer_get` as writing no memory the program reaches
+  (`names::kReadOnlyRuntimeFunctions`: it reads, and the panic of a bad
+  index writes only the C library's streams before it aborts), so LLVM
+  reads the length once for a loop that writes no memory: a walk of a
+  `List<int>` comparing each element loads it before the loop, where a
+  walk whose `==` calls an `equals` loads it for each element.
 * **Objects.**  Every class's layout is computed once, as C lays out the
   object (docs/pir.md §5: the 16-byte header, then the fields at their
   alignment): a field access is the object's address plus the field's

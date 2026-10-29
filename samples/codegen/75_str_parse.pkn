@@ -54,7 +54,7 @@ fn same(x: f32, o: f32?) -> Str {
 }
 
 fn main() -> int {
-  inputs: Str[5] = ["10", "x", "20", "", "30"];
+  let inputs: Str[5] = ["10", "x", "20", "", "30"];
   sum = 0;
   invalid = 0;
   for i in 0..inputs.len() {
@@ -108,8 +108,8 @@ fn main() -> int {
       + same(3.4028235e38, "340282356779733661637539395458142568447".toF32()));
 
   // Any receiver: it is borrowed for the parse, a temporary one released.
-  r = Reading("200");
-  s = Sensor("65535");
+  let r = Reading("200");
+  let s = Sensor("65535");
   names = collections::List<Str>();
   names.push("True");
   io::println(r.text.toU8().toString() + " " + s.label.toU16().toString() + " "

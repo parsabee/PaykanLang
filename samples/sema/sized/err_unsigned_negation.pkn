@@ -1,8 +1,8 @@
 // An unsigned type has no negation, and takes no float: the error names the
 // conversion through `int`.
 fn main() -> int {
-  a: u16 = 3;
-  b = -a;           // error: unary '-' is not defined for type 'u16'
-  c = u8(2.5);      // error: no specialization of 'u8' for 'float': convert the 'float' to an 'int' first: 'u8(int(...))' truncates toward zero, then keeps the low 8 bits
+  let a: u16 = 3;
+  let b = -a;       // error: unary '-' is not defined for type 'u16'
+  let c = u8(2.5);  // error: no specialization of 'u8' for 'float': convert the 'float' to an 'int' first: 'u8(int(...))' truncates toward zero, then keeps the low 8 bits
   return 0;
 }

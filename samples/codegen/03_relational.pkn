@@ -32,16 +32,16 @@ fn main() -> int {
   io::println("3>2.9:" + Str(3 > 2.9));    // True
 
   io::println("=== equality in variables ===");
-  a: int = 10;
-  b: int = 10;
-  c: int = 20;
+  let a: int = 10;
+  let b: int = 10;
+  let c: int = 20;
   io::println("a==b:" + Str<bool>(a == b));  // True
   io::println("a==c:" + Str(a == c));        // False
   io::println("a!=c:" + Str<bool>(a != c));  // True
 
   // Comparisons used in assignments
-  big: bool = a > 5;
-  small: bool = c < 5;
+  let big: bool = a > 5;
+  let small: bool = c < 5;
   io::println("big:  " + Str(big));          // True
   io::println("small:" + Str<bool>(small));  // False
 

@@ -58,9 +58,9 @@ fn main() -> int {
   f = "";
   for i in 5..=0 step -2 { f = f + Str(i) + " "; }
   // Empty: the end is passed already, or the step runs away from it.
-  empty = "[" + seq(5, 0, 1) + "] [" + seq(0, 5, -1) + "] [" + seq(3, 3, 1)
+  let empty = "[" + seq(5, 0, 1) + "] [" + seq(0, 5, -1) + "] [" + seq(3, 3, 1)
       + "]";
-  n: unsigned = 3;
+  let n: unsigned = 3;
   g = "";
   for k in n..=0 step -1 { g = g + Str(k) + " "; }
   io::println(e + "| " + f + "| " + empty + " | " + g + ".");
@@ -71,7 +71,7 @@ fn main() -> int {
   for _: i8 in -128..=127 { small = small + 1; }
   top = 0;
   for _ in 9223372036854775800..=9223372036854775807 { top = top + 1; }
-  hi = unsigned(-1);
+  let hi = unsigned(-1);
   seen = 0;
   last: unsigned = 0;
   for u in hi - 3..=hi {
@@ -110,8 +110,8 @@ fn main() -> int {
   for i in 0..3 {
     for j in i..3 { p = p + Str(i) + Str(j) + " "; }
   }
-  by = -3;
-  counter = Counter(0);
+  let by = -3;
+  let counter = Counter(0);
   counter.addUpTo(3);
   io::println(p + "| " + times("ab", 3) + " | " + seq(10, 0, by) + "| "
       + Str(counter.n));

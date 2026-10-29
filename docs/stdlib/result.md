@@ -25,7 +25,7 @@ fn parsePort(s: Str) -> res::Result<int, err::Error> {
 }
 
 fn main() -> int {
-  inputs: Str[3] = ["8080", "99999", "http"];
+  let inputs: Str[3] = ["8080", "99999", "http"];
   for i in 0..3 {
     match parsePort(inputs[i]) {
       p: Ok  { io::println("port " + Str(p.value)); }

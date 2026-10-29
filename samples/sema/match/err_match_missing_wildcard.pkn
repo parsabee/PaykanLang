@@ -4,7 +4,7 @@ class Dog {}
 class Cat {}
 
 fn main() -> int {
-  x: Obj = Dog();
+  let x: Obj = Dog();
   match x {
     Dog { return 0; }
     Cat { return 1; }

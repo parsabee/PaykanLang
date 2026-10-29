@@ -10,3 +10,8 @@
 [(1,2), (3,4)] True None
 2 True
 3
+[]! []
+688890 True True
+None False False 0
+False [2, 3] False []
+True [1, 2]

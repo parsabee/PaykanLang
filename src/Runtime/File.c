@@ -176,14 +176,36 @@ PaykanShared *PaykanFile_readln(PaykanObject *self) {
   return file_read_result(buf, used);
 }
 
+/// The most bytes PaykanFile_readbytes allocates before any are read.
+#define PAYKAN_READBYTES_FIRST ((size_t)64 * 1024)
+
 PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n) {
   PaykanFile *f = (PaykanFile *)self;
   if (file_closed(f, "readbytes") || n <= 0 || file_start_read(f))
     return PaykanShared_new(&PaykanObject_None);
-  char *buf = (char *)Paykan_tryMalloc((size_t)n);
+  // @p n is a maximum: the buffer starts at 64 KiB at most and doubles each
+  // time a read fills it, up to n, so a large n on a short file allocates
+  // about what is there.  fread gives fewer bytes than asked for only at the
+  // end of the file or on an error, and nothing more is read after it (on a
+  // terminal another read would wait for more input).
+  size_t want = (size_t)n;
+  size_t cap = want < PAYKAN_READBYTES_FIRST ? want : PAYKAN_READBYTES_FIRST;
+  size_t used = 0;
+  char *buf = (char *)Paykan_tryMalloc(cap);
   if (!buf)
     return file_read_no_memory(buf);
-  return file_read_result(buf, fread(buf, 1, (size_t)n, f->handle));
+  for (;;) {
+    used += fread(buf + used, 1, cap - used, f->handle);
+    if (used < cap || used == want)
+      break;
+    size_t grown = cap <= want / 2 ? cap * 2 : want;
+    char *more = (char *)Paykan_tryRealloc(buf, grown);
+    if (!more)
+      return file_read_no_memory(buf);
+    buf = more;
+    cap = grown;
+  }
+  return file_read_result(buf, used);
 }
 
 PaykanShared *PaykanFile_read(PaykanObject *self) {

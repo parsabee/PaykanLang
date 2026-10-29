@@ -9,6 +9,6 @@ impl Bad<T> {
 }
 
 fn main() -> int {
-  b: Bad<int> = Bad<int>();
+  let b: Bad<int> = Bad<int>();
   return 0;
 }

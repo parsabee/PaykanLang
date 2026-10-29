@@ -37,7 +37,7 @@ import ::io;
 fn main() -> int {
   io::println("this message is far too long "
               "to fit on one line");
-  usage = "usage: tool <file>\n"
+  let usage = "usage: tool <file>\n"
           "  -o <file>   output\n"   // a comment between the pieces is fine
           "  -q          quiet\n";
   io::print(usage);
@@ -74,8 +74,8 @@ The operations on strings:
 import ::io;
 
 fn main() -> int {
-  first = "Paykan";
-  full = first + "Lang";
+  let first = "Paykan";
+  let full = first + "Lang";
   io::println(full + " has " + Str(full.len()) + " characters");
   io::println("it starts with " + Str(full[0]) + " and ends with " + Str(full[full.len() - 1]));
   io::println(Str(full == "Paykan" + "Lang"));
@@ -111,10 +111,10 @@ fn'`):
 import ::io;
 
 fn main() -> int {
-  s = "to";
-  t = s;              // t and s name one string
+  let s = "to";
+  let t = s;          // t and s name one string
   s.concat("do");     // changes that string in place
-  u = s + "!";        // a new string; s is unchanged
+  let u = s + "!";    // a new string; s is unchanged
   io::println(s + " " + t + " " + u);
   return 0;
 }
@@ -125,6 +125,11 @@ Output:
 ```
 todo todo todo!
 ```
+
+`concat` grows the string's own memory with C's `realloc`, which extends it where it is when
+it can, so a string built by appending to it takes time about linear in its length: a
+million one-byte appends take well under a second. `s = s + t` makes a new string each time
+and copies `s` into it, so a loop of those takes time quadratic in the length.
 
 Searching, slicing and splitting are functions of the standard library's `::collections`
 ([Strings](../stdlib/collections.md#strings)): `split`, `join`, `lines`, `words`, `indexOf`,
@@ -291,9 +296,9 @@ struct Size { w: int; h: int; }
 enum Shape { Circle(r: float), Square(side: int) }
 
 fn main() -> int {
-  o: int? = None;
-  s: Str? = "hi";
-  p = Point(1, 2);
+  let o: int? = None;
+  let s: Str? = "hi";
+  let p = Point(1, 2);
   io::println(Str(o) + " " + Str(s) + " " + Str(p) + " " + Str(None));
   io::println(Str((1, "a", 2.5)) + " " + Str(Size(2, 3)) + " " + Str(Shape::Circle(1.5)));
   io::println(Str(p) == p.toString());
@@ -329,7 +334,7 @@ struct F {
 }
 
 fn main() -> int {
-  s = Str(F(1, fn(x: int) => x * 2));
+  let s = Str(F(1, fn(x: int) => x * 2));
   return 0;
 }
 ```
@@ -412,7 +417,7 @@ one of these conversions (see [Sized numeric types](02-basics.md#sized-numeric-t
 import ::io;
 
 fn main() -> int {
-  b: u8 = 200;
+  let b: u8 = 200;
   io::println(Str(u8(300)) + " " + Str(int(b) + 100) + " " + Str(b + 100));
   io::println(Str(unsigned(-1)) + " " + Str(f32(0.1)));
   io::println(Str(u8('a')) + " " + Str(bool(b)) + " " + Str(char(u8(65))));
@@ -440,8 +445,8 @@ Three kinds of pair are left out, and the error of each names the way to write i
 
 ```pkn
 fn main() -> int {
-  u: unsigned = 7;
-  n = int(u);
+  let u: unsigned = 7;
+  let n = int(u);
   return 0;
 }
 ```
@@ -456,7 +461,7 @@ no specialization of 'int' for 'unsigned': an 'unsigned' can be larger than any 
 import ::io;
 
 fn main() -> int {
-  u = unsigned(-1);
+  let u = unsigned(-1);
   io::println(unsigned(42).toInt());
   io::println(u.toInt());
   io::println(Str(i32(u32(u))) + " " + Str(u8(int(255.9))));
@@ -484,7 +489,7 @@ a number or `None`. You get the number out with `match`:
 import ::io;
 
 fn main() -> int {
-  inputs = ["42", "-8", "12abc", " 7", "9223372036854775808"];
+  let inputs = ["42", "-8", "12abc", " 7", "9223372036854775808"];
   i = 0;
   while i < inputs.len() {
     match inputs[i].toInt() {
@@ -551,8 +556,8 @@ error that names the method, and so are `u8(s)`, `float(s)`, `bool(s)` and the o
 
 ```pkn
 fn main() -> int {
-  s = "12";
-  n = int(s);
+  let s = "12";
+  let n = int(s);
   return 0;
 }
 ```
@@ -574,7 +579,7 @@ compiler check it:
 import ::io;
 
 fn main() -> int {
-  n = 5;
+  let n = 5;
   io::println(Str<int>(n) + " " + Str<float>(2.5) + " " + Str<bool>(n > 3));
   return 0;
 }

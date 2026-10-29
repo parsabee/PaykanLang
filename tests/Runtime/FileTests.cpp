@@ -10,6 +10,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <string>
 #include <unistd.h>
@@ -406,8 +407,8 @@ TEST(FileRoundTrip, WriteAndReadBack) {
     PaykanObject *l2 = strObj("second line\n");
     PaykanFile_write(fObj, l1);
     PaykanFile_write(fObj, l2);
-    PaykanString_destroy(l1);
-    PaykanString_destroy(l2);
+    Paykan_dispose(l1);
+    Paykan_dispose(l2);
 
     Paykan_release(fShared);
     Paykan_dispose((PaykanObject *)pathStr);
@@ -710,6 +711,113 @@ TEST(FileUpdate, AWriteThatCannotBeWrittenOutFailsTheReadAfterIt) {
       << got.size() << " bytes: " << got.substr(0, 16);
   EXPECT_EQ(Paykan_error_code(ENOSPC), PAYKAN_ERROR_NO_SPACE);
   Paykan_release(f);
+}
+
+// -- readbytes(n): n is a maximum
+
+namespace {
+
+// RAII: the tracking allocator with zeroed counters; no live blocks at the
+// end.
+struct TrackingHeap {
+  TrackingHeap() {
+    Paykan_heap_set_tracking(1);
+    Paykan_heap_reset();
+  }
+  ~TrackingHeap() {
+    EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+    Paykan_heap_set_tracking(0);
+  }
+};
+
+} // namespace
+
+// readbytes(n)'s buffer starts at 64 KiB at most and grows as reads fill
+// it, so readbytes(2^40) of a 5-byte file allocates under 1 MB.  It
+// allocated the 2^40 bytes up front (SW-27): out of memory (ENOMEM) where
+// the system refuses an allocation that large (Linux), and a 1 TB peak on
+// the tracking heap where it does not (macOS).
+TEST(FileReadbytes, AMaximumPastTheEndAllocatesWhatIsThere) {
+  std::string path = makeTempFile("hello");
+  ASSERT_FALSE(path.empty());
+  {
+    TrackingHeap heap;
+    PaykanShared *f = ioOpen(path, "r");
+    ASSERT_NE(f, nullptr);
+    EXPECT_EQ(ioReadbytes(f, int64_t{1} << 40), "hello");
+    EXPECT_EQ(ioReadbytes(f, int64_t{1} << 40), "EOF");
+    Paykan_release(f);
+    EXPECT_LT(Paykan_heap_peak_bytes(), 1 << 20);
+  }
+  std::remove(path.c_str());
+}
+
+// A read past the first 64 KiB doubles the buffer until it holds n bytes or
+// the file ends, also where the end is a doubling's boundary.
+TEST(FileReadbytes, ALongReadGrowsItsBufferUpToN) {
+  std::string text;
+  for (int i = 0; text.size() < 200000; ++i)
+    text += std::to_string(i) + ",";
+  text.resize(200000);
+  std::string path = makeTempFile(text.c_str());
+  ASSERT_FALSE(path.empty());
+  PaykanShared *f = ioOpen(path, "r");
+  ASSERT_NE(f, nullptr);
+  // (Not EXPECT_EQ, which would print the bytes.)
+  auto expectRead = [&f](int64_t n, const std::string &want) {
+    std::string got = ioReadbytes(f, n);
+    EXPECT_TRUE(got == want) << "readbytes(" << n << "): " << got.size()
+                             << " bytes, not " << want.size();
+  };
+  expectRead(65536, text.substr(0, 65536));
+  expectRead(65537, text.substr(65536, 65537));
+  expectRead(int64_t{1} << 40, text.substr(131073));
+  expectRead(1, "EOF");
+  Paykan_release(f);
+  std::remove(path.c_str());
+
+  path = makeTempFile(text.substr(0, 131072).c_str());
+  ASSERT_FALSE(path.empty());
+  f = ioOpen(path, "r");
+  ASSERT_NE(f, nullptr);
+  expectRead(int64_t{1} << 40, text.substr(0, 131072));
+  expectRead(1, "EOF");
+  Paykan_release(f);
+  std::remove(path.c_str());
+}
+
+// A read whose text does not fit in memory fails with ENOMEM (::io's
+// OutOfMemory), frees what it allocated and panics nowhere: readbytes, read
+// and readln each, out of memory partway through a line of 300,000 bytes
+// with the tracking heap held to 200 KiB.  What it had read is gone, as
+// docs/stdlib/io.md says: each fails growing its buffer from 128 KiB, and
+// the next read starts after those 131,072 bytes.
+TEST(FileRead, OutOfMemoryPartwayLosesWhatWasRead) {
+  std::string text;
+  for (int i = 0; text.size() < 300000; ++i)
+    text += std::to_string(i) + ",";
+  text.resize(300000);
+  std::string path = makeTempFile(text.c_str());
+  ASSERT_FALSE(path.empty());
+  const std::pair<const char *, std::function<std::string(PaykanShared *)>>
+      reads[] = {
+          {"readbytes",
+           [](PaykanShared *f) { return ioReadbytes(f, int64_t{1} << 20); }},
+          {"read", ioRead},
+          {"readln", ioReadln},
+      };
+  for (const auto &[name, read] : reads) {
+    TrackingHeap heap;
+    PaykanShared *f = ioOpen(path, "r");
+    ASSERT_NE(f, nullptr) << name;
+    Paykan_heap_set_limit(int64_t{200} * 1024);
+    EXPECT_EQ(read(f), "errno " + std::to_string(ENOMEM)) << name;
+    Paykan_heap_set_limit(0);
+    EXPECT_EQ(ioReadbytes(f, 8), text.substr(131072, 8)) << name;
+    Paykan_release(f);
+  }
+  EXPECT_EQ(Paykan_error_code(ENOMEM), PAYKAN_ERROR_OUT_OF_MEMORY);
+  std::remove(path.c_str());
 }
 
 // -- PaykanFile_Stdin singleton safety

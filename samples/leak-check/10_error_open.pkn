@@ -7,7 +7,7 @@
 import ::io;
 
 fn func1() {
-  r = io::open("/nonexistent/paykan/leak-check/path.txt", "r");
+  let r = io::open("/nonexistent/paykan/leak-check/path.txt", "r");
   match r {
     f: Ok { }
     e: Err { }
@@ -17,7 +17,7 @@ fn func1() {
 fn func2() {
   match io::open("/nonexistent/paykan/leak-check/path.txt", "r") {
     e: Err {
-      msg: Obj = e.error.message();
+      let msg: Obj = e.error.message();
       match msg {
         s: Str { }
         _ { }

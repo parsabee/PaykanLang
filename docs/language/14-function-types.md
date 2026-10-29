@@ -26,7 +26,7 @@ fn apply(f: (int) -> int, x: int) -> int {
 
 fn main() -> int {
   step = 3;
-  addStep = fn(x: int) -> int { return x + step; };   // uses `step` from main
+  let addStep = fn(x: int) -> int { return x + step; };   // uses `step` from main
   io::println(Str(apply(double, 5)) + " " + Str(apply(addStep, 5)));
   step = 100;
   io::println(Str(addStep(5)));                           // still 8: the lambda copied `step`
@@ -66,10 +66,10 @@ class Button {
 }
 
 fn main() -> int {
-  g: (int) -> int = square;          // a named function as a value
-  log: (view Str) -> void = greet;   // the modes are part of the type
-  fs: ((int) -> int)[2] = [square, twice(square)];
-  pair: ((int) -> int, Str) = (g, "square");
+  let g: (int) -> int = square;          // a named function as a value
+  let log: (view Str) -> void = greet;   // the modes are part of the type
+  let fs: ((int) -> int)[2] = [square, twice(square)];
+  let pair: ((int) -> int, Str) = (g, "square");
   log("there");
   io::println(Str(apply(g, 3)) + " " + Str(fs[1](2)) + " " + Str(pair.0(5)) + " " + pair.1);
   return 0;
@@ -119,11 +119,11 @@ A **lambda** is a function without a name, written where a value goes:
 import ::io;
 
 fn main() -> int {
-  n = 10;
-  add = fn(x: int) -> int { return x + n; };          // captures n
-  log = fn(s: view Str) { io::println(s); };              // returns void
-  cmp = fn(a: view Str, b: view Str) -> bool { return a.len() < b.len(); };
-  make = fn() -> () -> int { return fn() -> int { return n * 2; }; };
+  let n = 10;
+  let add = fn(x: int) -> int { return x + n; };      // captures n
+  let log = fn(s: view Str) { io::println(s); };          // returns void
+  let cmp = fn(a: view Str, b: view Str) -> bool { return a.len() < b.len(); };
+  let make = fn() -> () -> int { return fn() -> int { return n * 2; }; };
   log("start");
   io::println(Str(add(1)) + " " + Str(cmp("a", "bb")) + " " + Str(make()()));
   return 0;
@@ -158,10 +158,10 @@ import ::io;
 fn apply(f: (int) -> int, x: int) -> int { return f(x); }
 
 fn main() -> int {
-  double = fn(x: int) => x * 2;
-  n = 10;
-  addN = fn(x: int) -> int => x + n;        // captures n, as a block would
-  add = fn(x: int) => fn(y: int) => x + y;   // a lambda returning a lambda
+  let double = fn(x: int) => x * 2;
+  let n = 10;
+  let addN = fn(x: int) -> int => x + n;    // captures n, as a block would
+  let add = fn(x: int) => fn(y: int) => x + y;   // a lambda returning a lambda
   io::println(Str(double(4)) + " " + Str(addN(1)) + " " + Str(add(1)(2)) + " "
       + Str(apply(fn(x: int) => x - 1, 10)));
   return 0;
@@ -211,9 +211,9 @@ struct P { x: int; }
 
 fn main() -> int {
   n = 1;
-  c = Counter(1);
+  let c = Counter(1);
   p = P(1);
-  f = fn() -> int { c.n = c.n + 1; return n + p.x + c.n; };   // n, p copied; c shared
+  let f = fn() -> int { c.n = c.n + 1; return n + p.x + c.n; };   // n, p copied; c shared
   n = 100;
   p.x = 100;
   io::println(Str(f()) + " " + Str(f()) + " " + Str(c.n));
@@ -261,9 +261,9 @@ class Counter {
 }
 
 fn main() -> int {
-  c = Counter(5);
-  add = c.adder();
-  get = c.reader();
+  let c = Counter(5);
+  let add = c.adder();
+  let get = c.reader();
   add(10);
   io::println(Str(get()) + " " + Str(c.n));
   return 0;
@@ -301,8 +301,8 @@ class Handler { cb: ((Str) -> Str)?; }
 fn plus(a: int, b: int) -> int { return a + b; }
 
 fn main() -> int {
-  ops: Op[2] = [Op("plus", plus), Op("times", fn(a: int, b: int) -> int { return a * b; })];
-  h = Handler(None);
+  let ops: Op[2] = [Op("plus", plus), Op("times", fn(a: int, b: int) -> int { return a * b; })];
+  let h = Handler(None);
   h.cb = fn(s: Str) -> Str { return s + "!"; };
   match h.cb {
     f: (Str) -> Str { io::println(f(ops[0].name) + " " + f(ops[1].name)); }
@@ -379,8 +379,8 @@ impl Handler<T> {
 }
 
 fn main() -> int {
-  n = mapFirst([1, 2], fn(x: view int) -> int { return x + 1; });
-  h = Handler(fn(s: Str) -> Str { return s + "!"; });
+  let n = mapFirst([1, 2], fn(x: view int) -> int { return x + 1; });
+  let h = Handler(fn(s: Str) -> Str { return s + "!"; });
   fs = collections::List<(int) -> int>();
   fs.push(fn(x: int) -> int { return x * 2; });
   fs.push(fn(x: int) -> int { return x + 2; });
@@ -417,8 +417,8 @@ import ::io;
 import ops;
 
 fn main() -> int {
-  t = ops::twice(ops::square);
-  b = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
+  let t = ops::twice(ops::square);
+  let b = ops::Button("b", fn(l: Str) -> Str { return l + "!"; });
   io::println(Str(t(3)) + " " + b.click());
   return 0;
 }

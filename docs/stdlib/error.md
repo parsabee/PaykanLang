@@ -30,7 +30,7 @@ fn main() -> int {
     f: Ok  { io::println("opened"); }
     e: Err { io::println(e.error); }
   }
-  b = err::none();
+  let b = err::none();
   io::println(Str(b.isOk()) + " " + b.message());
   return 0;
 }

@@ -53,13 +53,13 @@ fn show(c: C) {
 }
 
 fn main() -> int {
-  arr: C[2] = [C(1), C(2)];
+  let arr: C[2] = [C(1), C(2)];
   x: C = C(9);
   x = arr[idx()];
   io::println(Str(x.v));
   x = arrs()[1];
   io::println(Str<int>(x.v));
-  y: C = arr[idx()];
+  let y: C = arr[idx()];
   io::println(Str(y.v));
   x = make().c;
   io::println(Str<int>(x.v));

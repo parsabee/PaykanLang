@@ -51,14 +51,14 @@ fn describe(o: Obj) -> Str {
 }
 
 fn main() -> int {
-  h: Holder = Holder();
-  n: int = unbox(h.get());
-  m: int = unbox<int>(Box<Box<int>>(Box<int>(1)).get());
-  arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
+  let h: Holder = Holder();
+  let n: int = unbox(h.get());
+  let m: int = unbox<int>(Box<Box<int>>(Box<int>(1)).get());
+  let arr: Box<int>[2] = [Box<int>(1), Box<int>(2)];
   k: view Str = Pair<Str, int>("a", 1).key();
   s: view Str = first(["x"]);
-  i: int = first<int>([3]);
-  inferred = Box(5);
+  let i: int = first<int>([3]);
+  let inferred = Box(5);
   io::println(describe(inferred));
   return n + m + i;
 }

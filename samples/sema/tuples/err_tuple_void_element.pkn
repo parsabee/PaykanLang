@@ -2,6 +2,6 @@
 fn nothing() { }
 
 fn main() -> int {
-  t = (nothing(), 1);
+  let t = (nothing(), 1);
   return 0;
 }

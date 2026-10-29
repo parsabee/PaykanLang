@@ -329,7 +329,7 @@ TEST(Scaling, StringFunctionsTakeLinearTime) {
 // join and replace put their pieces together in pairs, as a binary counter
 // carries, so each byte of the result is copied about log2 of the number of
 // pieces times, and repeat doubles its string.  They appended each piece
-// with `concat`, which copies the whole string so far: replacing the line
+// with `concat`, which then copied the whole string so far: replacing the line
 // feeds of a 720 KB string took 9 s, so the million of a 10 MB string would
 // take about 40 minutes, and the join of its lines over ten.  The three,
 // with the split, take 2.2 s of processor time under `run -O0`, compiling
@@ -350,6 +350,48 @@ TEST(Scaling, StringFunctionsThatBuildAStringMergeItsPieces) {
   ASSERT_EQ(t.ExitCode, 0) << t.Out;
   EXPECT_EQ(t.Out, "11534336\n11534336\nTrue\n");
   EXPECT_LT(t.Seconds, 20 * slowdown());
+}
+
+// `s.concat(t)` grows the block of `s` with a realloc, which the C library
+// does where the block is when it can, and collections::listToString
+// appends each element's text with it (SW-15).  An append allocated a block
+// for the whole string and copied it there, and listToString put its result
+// together with `+`: 1,600,000 one-byte appends took 16 s of processor time
+// under `paykan run`, as did listToString of 400,000 ints, and each takes
+// 0.15 s now, compiling included.  ASan's and TSan's realloc moves every
+// block it grows, so in their builds the appends copy the string again.
+TEST(Scaling, AppendingToAStringGrowsItWhereItIs) {
+#ifdef PAYKAN_TEST_SHADOW_SANITIZER
+  GTEST_SKIP() << "this sanitizer's realloc moves every block it grows";
+#endif
+  ScratchDir dir("concat");
+  const std::string appends =
+      dir.write("appends.pkn", "import ::io;\n"
+                               "fn main() -> int {\n"
+                               "  let s = \"\";\n"
+                               "  for _ in 0..1600000 {\n"
+                               "    s.concat(\"x\");\n"
+                               "  }\n"
+                               "  io::println(s.len());\n"
+                               "  return 0;\n}\n");
+  Timed t = timed(std::string(kPaykan) + " run " + appends + " 2>&1");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_EQ(t.Out, "1600000\n");
+  EXPECT_LT(t.Seconds, 3 * slowdown());
+
+  const std::string list =
+      dir.write("list.pkn", "import ::io;\nimport ::collections as c;\n"
+                            "fn main() -> int {\n"
+                            "  xs = c::List<int>();\n"
+                            "  for i in 0..400000 {\n"
+                            "    xs.push(i);\n"
+                            "  }\n"
+                            "  io::println(c::listToString(xs).len());\n"
+                            "  return 0;\n}\n");
+  t = timed(std::string(kPaykan) + " run " + list + " 2>&1");
+  ASSERT_EQ(t.ExitCode, 0) << t.Out;
+  EXPECT_EQ(t.Out, "3088890\n");
+  EXPECT_LT(t.Seconds, 3 * slowdown());
 }
 
 // Each imported module's code is cached under a key made from its MLIR,

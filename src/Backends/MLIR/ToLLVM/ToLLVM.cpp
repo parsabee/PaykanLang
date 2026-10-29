@@ -3,8 +3,9 @@
 // The LLVM path of the mlir backend.  scf becomes cf (upstream), then one
 // conversion takes func, cf and arith to the LLVM dialect with upstream
 // patterns and the pir ops the shared lowering keeps with the patterns
-// below, and the calls of Paykan_retain and Paykan_release get their fast
-// paths inline: the only part of the backend written for LLVM alone.
+// below, the calls of Paykan_retain and Paykan_release get their fast paths
+// inline, and a buffer's length is read in place: the only part of the
+// backend written for LLVM alone.
 //
 // Types: every pir pointer (box, obj, ptr, weak) is !llvm.ptr; an optional
 // is the literal struct { i1 present, payload }, passed by value as C passes
@@ -532,14 +533,29 @@ struct ConvertToLLVMPass
       if (failed(applyFullConversion(m, target, frozen)))
         return signalPassFailure();
     // The runtime's panics never return, as Runtime.h declares them: a panic
-    // guard's branch ends at its call.
-    llvm::StringSet<> noReturn;
+    // guard's branch ends at its call.  The read-only functions write no
+    // memory a program can reach (names::kReadOnlyRuntimeFunctions).
+    llvm::StringSet<> noReturn, readOnly;
     for (const char *name : names::kNoReturnRuntimeFunctions)
       noReturn.insert(name);
+    for (const char *name : names::kReadOnlyRuntimeFunctions)
+      readOnly.insert(name);
+    using LLVM::ModRefInfo;
+    auto reads = LLVM::MemoryEffectsAttr::get(
+        ctx, {/*other=*/ModRefInfo::Ref, /*argMem=*/ModRefInfo::Ref,
+              /*inaccessibleMem=*/ModRefInfo::ModRef,
+              /*errnoMem=*/ModRefInfo::ModRef, /*targetMem0=*/ModRefInfo::Ref,
+              /*targetMem1=*/ModRefInfo::Ref});
     getOperation().walk([&](LLVM::LLVMFuncOp f) {
-      if (f.isExternal() && noReturn.contains(f.getName()))
+      if (!f.isExternal())
+        return;
+      if (noReturn.contains(f.getName()))
         f.setPassthroughAttr(
             ArrayAttr::get(ctx, {StringAttr::get(ctx, "noreturn")}));
+      if (readOnly.contains(f.getName())) {
+        f.setMemoryEffectsAttr(reads);
+        f.setNoUnwind(true);
+      }
     });
   }
 
@@ -691,6 +707,47 @@ struct InlineReferenceCountsPass
   }
 };
 
+// -- A buffer's length
+
+/// Each call of PaykanBuffer_len reads the buffer's `len` in place, as
+/// Runtime.h's PaykanBuffer_len_inline, which the C path calls.  LLVM then
+/// sees a load where it saw a call that may write anything, and reads it
+/// once for a loop that writes no memory: a walk of a List<int> whose
+/// comparisons call only PaykanBuffer_get (names::kReadOnlyRuntimeFunctions)
+/// reads its length before the loop, not for each element.  At every -O.
+struct InlineBufferLengthsPass
+    : public PassWrapper<InlineBufferLengthsPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(InlineBufferLengthsPass)
+
+  StringRef getArgument() const override { return "pir-inline-buffer-lengths"; }
+  StringRef getDescription() const override {
+    return "Read a buffer's length in place of calling PaykanBuffer_len";
+  }
+
+  void runOnOperation() override {
+    std::vector<LLVM::CallOp> calls;
+    getOperation().walk([&](LLVM::CallOp call) {
+      std::optional<StringRef> callee = call.getCallee();
+      if (callee && *callee == names::kPaykanBufferLen)
+        calls.push_back(call);
+    });
+    for (LLVM::CallOp call : calls) {
+      // PaykanBuffer_len(type, buffer): the type is not read.
+      OpBuilder b(call);
+      Location loc = call.getLoc();
+      Value at =
+          LLVM::GEPOp::create(b, loc, llvmPtr(b.getContext()), b.getI8Type(),
+                              call.getArgOperands()[1],
+                              ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(
+                                  offsetof(PaykanBuffer, len))});
+      Value len = LLVM::LoadOp::create(b, loc, call.getResult().getType(), at,
+                                       alignof(int64_t));
+      call.getResult().replaceAllUsesWith(len);
+      call.erase();
+    }
+  }
+};
+
 } // namespace
 
 void loadLLVMDialects(MLIRContext &ctx) {
@@ -707,6 +764,7 @@ void addLLVMDialectPasses(PassManager &pm) {
   pm.addPass(std::make_unique<ConvertToLLVMPass>());
   pm.addPass(createReconcileUnrealizedCastsPass());
   pm.addPass(std::make_unique<InlineReferenceCountsPass>());
+  pm.addPass(std::make_unique<InlineBufferLengthsPass>());
 }
 
 StatusOr<std::unique_ptr<llvm::Module>>

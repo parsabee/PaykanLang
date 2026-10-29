@@ -20,7 +20,7 @@ fn describe(n: int) -> Str {
 }
 
 fn main() -> int {
-  c = circle::make(3);
+  let c = circle::make(3);
   io::println(name() + " " + circle::name() + " " + f::name());
   io::println(circle::describe(c) + " " + f::describe(4) + " " + describe(5));
   io::println(f::both(c));

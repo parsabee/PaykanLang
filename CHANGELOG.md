@@ -386,6 +386,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       `samples/codegen/78_mem_arg_eval_order.pkn` has five such copies, and the new
       `samples/codegen/88_hidden_slice_copies.pkn` four, next to the copies that are not
       warned about.
+- **Stability sweep: runtime, standard library and tests.**
+  - `scripts/let_check.py`, run by the new ctest `LetDecls`, checks that every local that is
+    never reassigned is declared with `let` in the samples (`samples/**/*.pkn`), the
+    examples of docs/language and docs/stdlib, and the standard library (`stdlib/*.pkn`). A
+    local declared without it (`x = e;` where that declares `x`, or `x: T = e;`) must be
+    reassigned or compound-assigned, passed to an `inout` parameter or arm, or, for a
+    struct, tuple or fixed-size array, have a field or element assigned or a method that may
+    change it called on it. `paykan` decides: the script makes every other declaration of a
+    program `let`, takes back each one the compiler then refuses, and reports those left
+    when the program keeps its diagnostics and its `--emit-pir` byte for byte. An
+    assignment in an inner block to a variable of an enclosing one is not a declaration
+    (`let` there would declare another variable), and a program Sema rejects keeps its
+    errors. `let` is Sema's alone, so a declaration that Sema accepts as `let` but whose
+    `let` changes the program's `--emit-pir` is an error of the check: the two forms are
+    lowered differently. A program that must compile and does not is an error too (a sample
+    that is not an `err_` one, a docs example that shows its output, the standard library
+    with the programs of tests/Stdlib), so a compiler that prints no AST fails the check
+    instead of leaving everything unchecked, as the ctest `LetDeclsWithoutAnAST` shows: it
+    checks that the script then exits with status 1 and says that no program parses.
+    `--apply` makes the declarations it reports `let`. There is no compiler warning for
+    it. CI runs it (the `docs` suite) for a pull request that changes the samples, the
+    docs, the standard library, a program of tests/Stdlib, the script, or the AST
+    interchange writer (`src/ASTInterchange/*`) whose `--emit-ast` it reads
+    (tests/suites.json; `TestSelection` checks the last three).
+    - A first assignment `x = y;` of a variable `y` holding a box (a `Str`, an object, an
+      optional) read `y`'s value, with an `unbox` no one used, before it loaded the box `x`
+      shares, which `let x = y;` loads alone: so `let` changed such a program's PIR, and
+      the check took every such local for one that needs to be plain. It reads the box
+      alone now, as `let x = y;` does.
+    - Not checked: borrows, `weak` locals, destructuring, `for` variables and declarations
+      without an initializer, which cannot be `let`; a generic body that the program never
+      instantiates, which Sema checks for each instantiation only (the standard library's
+      generic code is checked through the programs of tests/Stdlib, compiled against the
+      changed sources); a docs block that is not a whole program and does not parse alone,
+      86 of them (63 in docs/language, 23 in docs/stdlib), which are statements with no `fn
+      main` and still have declarations without `let` that look never reassigned
+      (`maybe: Node? = None;` in 12-optionals.md); the 7 `err_` samples of samples/sema
+      that do not parse; and a docs example whose fence follows the line
+      `<!-- let_check: plain -->`, as the three of docs/language/02-basics.md that show the
+      plain declaration itself do.
+    - The tree follows it: 1,462 declarations are `let` now (840 in samples/codegen and
+      samples/leak-check, 376 in samples/sema and samples/imports, 215 in the docs'
+      examples, 31 in the standard library), and making them `let` changed the
+      `--emit-pir` of no program.
 
 ### Changed
 
@@ -1042,6 +1086,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     error: 0.03 s, 0.07 s and 0.2 s.  The longest
     instantiation name in the standard library is 26 characters, in the samples, the
     stdlib tests and the documentation's examples 55.
+- **Stability sweep: runtime, standard library and tests.**
+  - `File.readbytes(n)`'s `n` is a maximum, not a size it allocates before reading
+    (docs/stdlib/io.md, "File.readbytes"): a read with an `n` too large to allocate is no
+    longer `OutOfMemory`, but the bytes that are there, or `EndOfFile` when there are none
+    (`readbytes(1152921504606846976)` at the end of a file). It is `OutOfMemory` only when
+    the data it reads does not fit in memory, and then, as for `read` and `readln`, what it
+    had read is lost and the next read starts after it, where the read that could not
+    allocate `n` bytes failed before reading anything (docs/stdlib/io.md, "End of file,
+    failed reads and buffering", which says so for all three now).
+  - The traits chapter no longer lists trait objects as "not supported yet": there are none
+    by design, since a trait is a bound on a type parameter and a class hierarchy is what
+    dispatches at run time (docs/language/06-traits.md).
 
 ### Removed
 
@@ -1568,6 +1624,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     times as long for each enum more: 13 of them 0.45 s under `--check-only`, 15 4 s, 16
     13.3 s, and 20 more than 2 minutes.  Each question looks into a type once now: 20 enums
     take 0.01 s, and 400 take 0.14 s.
+- **Stability sweep: runtime, standard library and tests.**
+  - Building a string by appending took time quadratic in its length: `s.concat(t)`
+    allocated a block for the whole string and copied it there at each append, and
+    `collections::listToString` put its result together with `+`, copying the text so far
+    for each element. Under `paykan run`, 1,600,000 one-byte appends took 16.4 s of
+    processor time and `listToString` of 400,000 ints 15.8 s (400,000 appends 1.1 s, and
+    100,000 ints 0.9 s). `concat` now grows the string's own block with C's `realloc`,
+    which can extend it where it is, and `listToString` appends each element's text to a
+    string of its own with `concat`: each of the two takes 0.14 s, compiling included
+    (docs/language/04-strings-and-conversions.md, "String Type"; docs/stdlib/collections.md,
+    "listToString"). `PaykanString` keeps its layout and the runtime ABI its version; the
+    runtime only gains a test hook, `Paykan_heap_total_allocs()`, the number of blocks the
+    tracking allocator has allocated (Runtime.h).
+  - `File.readbytes(n)` allocated `n` bytes before reading: `readbytes(1099511627776)` of a
+    5-byte file was `OutOfMemory` where the system refuses an allocation that large
+    (Linux) and took 1 TB of address space where it does not (macOS), and
+    `readbytes(1000000000)` 1 GB.
+    `n` is a maximum: the buffer starts at 64 KiB (or `n` bytes, when that is less) and
+    doubles as the data fills it: the tracking allocator's peak for either read of the
+    5-byte file is 65,630 bytes, where it was 1,099,511,627,870 and 1,000,000,094
+    (docs/stdlib/io.md, "File.readbytes"). The runtime gains two test hooks (Runtime.h):
+    `Paykan_heap_peak_bytes()`, the most bytes the tracking allocator has had live at once,
+    and `Paykan_heap_set_limit(bytes)`, which makes it fail an allocation that would take
+    its live bytes past `bytes`: `FileTests` runs `readbytes`, `read` and `readln` out of
+    memory partway through a file with it, which no test did once `readbytes` stopped
+    allocating `n` bytes first.
+  - `List`'s `indexOf`, `contains` and `remove` read the list's length once, before the
+    walk: an element whose `equals` emptied the list made the next comparison panic with
+    the Buffer's internal message, `buffer index 1 out of bounds (len=0)` (exit 134). The
+    length is read again for each element, so such an `equals` makes them find nothing
+    (`None`, `False`, `False`) (docs/stdlib/collections.md, "List<T>"). A buffer's length
+    is read in place, with no call of the runtime's `PaykanBuffer_len`: the LLVM path loads
+    it, and declares `PaykanBuffer_get` as writing no memory the program reaches, so a walk
+    whose `==` writes nothing (a `List<int>`'s) loads it once, before the loop, and one
+    whose `==` calls an `equals` loads it for each element; the C path calls `Runtime.h`'s
+    `PaykanBuffer_len_inline` (docs/c-backend.md, "Calls"). The call for each element had
+    made a search of a 1,000-int buffer 33% slower (`build -O2`, 200,000 searches, median
+    user CPU of 11 interleaved runs: 0.261 s against 0.196 s with the length read once) and
+    50,000 of a 1,000-`Str` buffer 13% (0.145 s against 0.128 s): they take 0.189 s and
+    0.127 s now.
+  - `List.remove(v)` removed the element at the index `indexOf` found, also when the
+    `equals` that found it changed the list: one that removed an earlier element made
+    `remove` take out the element after the one that matched (`True`, `[1, 2, 3]` left as
+    `[2]`), and one that emptied the list made it panic, `List index 0 out of range (len=0)`
+    (exit 134). It removes nothing and is `False` when that `equals` changed the list's
+    length, whose index may then name another element or none (docs/stdlib/collections.md,
+    "List<T>"). An `equals` that changes the list but keeps its length (a `swap` or a
+    `set`) still goes unseen, as the docs say: `remove` takes out the element then at that
+    index, which may be another one (`True`, with a 2 that swaps itself with the 3 after
+    it, `[1, 2, 3]` left as `[1, 2]`). Seeing it would take a count of the changes in the
+    storage every copy of the list shares, which each change would pay for.
+  - The C path and the runtime round an `f32` value through a C `float`, but `Runtime.h`
+    checked only that `double` is IEEE 754 binary64. It also checks now that `float` is
+    binary32 (`FLT_MANT_DIG == 24`, `FLT_MAX_EXP == 128`, `FLT_MIN_EXP == -125`), so a
+    target whose `float` is another format fails to compile instead of rounding `f32`
+    values wrongly (docs/c-backend.md, "Target assumptions"). Every supported target's is.
+  - The runtime's unit tests leaked: the helpers of `NumericTests` and a round trip of
+    `FileTests` freed each string's bytes with `PaykanString_destroy` and never the string,
+    and the two `DestroyViaVtable` cases never freed their object, 20,106 blocks (965,072
+    bytes) in all under macOS's `leaks --atExit` (LeakSanitizer on Linux failed
+    `RuntimeTests` with them). They free each string with `Paykan_dispose`, and an object
+    whose destroy they call through its vtable with `Paykan_free` after it, as
+    `Paykan_release` does: `leaks` finds none in the tests it runs, which are all but the
+    death tests (`leaks` stops the child each of those forks).
+  - Four files of `sema_tests` defined a `struct SemaFileResult` at namespace scope, not all
+    with the same members, which broke C++'s one-definition rule: the linker could take
+    one file's for another's: `ModuleTests.cpp`'s count was left unassigned that way, and
+    so its struct was in an anonymous namespace already. `ImportTypeTests.cpp`,
+    `OptionalTests.cpp` and `TupleTests.cpp` define theirs in an anonymous namespace too.
+  - The language reference did not say that a native function's integer result crosses
+    as an `int64_t` whatever its Paykan type, so a C function returning a C `int` bound as
+    it is (`native fn rand() -> int = "rand";`) read the undefined upper half of the
+    register. docs/language/03-functions.md ("Native Functions") says so now, and shows
+    the wrapper returning an `int64_t` to bind instead (KF-9). Mapping `i32` and `u32`
+    natives to `int32_t` and `uint32_t` is left for a later release (OD-17).
+  - A checked read of a `memory::Buffer` slot (`at`, `get`, `copy`) of a type whose zero
+    bytes are no value (a `Str`, an object, an enum whose first variant holds a `Str`)
+    tested that the slot was set with a call to the runtime's `PaykanType_isUnset`, and a
+    runtime compiled by GCC (CMake's C compiler on Linux) saved and reloaded the read's
+    registers around that call. The read tests the slot's words itself now, with no call,
+    laid out of line so that the read of a type whose zero bytes are a value (an `int`)
+    still takes no branch for it. `build -O2`, median user CPU of 11 interleaved runs on an
+    Apple M3 Max, with the runtime built by GCC 16 at CMake's Release flags (Apple clang's,
+    a Release build's, in brackets):
+    - 100,000,000 reads of a 1,000-`Str` buffer: 0.271 s before, 0.191 s now (0.244 s,
+      0.191 s);
+    - 200,000,000 reads of a 1,000-`int` buffer: 0.164 s, as before (0.216 s, as before);
+    - setting 1,000,000 slots of `enum Shape { Named(s: Str), Circle(r: int), Empty }` and
+      reading them 9,000,000 times (the `buffer_union` program of the allocation
+      slowdown): 0.113 s before, 0.105 s now, and 0.107 s at `fab0a56`, before the test was
+      added (0.109 s, 0.104 s, and 0.113 s at `fab0a56`), with 1.913 billion instructions
+      retired, from 2.063 (1.937 billion, from 2.062);
+    - the other two programs of the slowdown, which read no buffer, were not slower than
+      at `fab0a56`, before or after: 10,485,740 objects allocated and freed (`make(18)` 20
+      times) take 0.296 s (0.301 s at `fab0a56`), and 3,000,000 `Str(i) + "x"` 0.484 s
+      (0.508 s), with Apple clang's runtime.
+  - A generic function's instantiation whose signature is an error (an instance of a
+    generic native function binding a C symbol that another native function binds with a
+    different signature) was reported at its first call, and again at each later call whose
+    value initializes a declaration with `let` or with a type: after `let a =
+    absOf<int>(1);`, `let b = absOf<int>(2);` and `c: int = absOf<int>(3);` each added
+    `cannot determine type of initializer for variable ...` (`d = absOf<int>(4);` did not).
+    The error at the first call is the only one now. The standard library's `let`s (see
+    "Added") made a program clashing with an instance of `::memory`'s `_len` show it.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

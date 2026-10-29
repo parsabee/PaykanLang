@@ -58,7 +58,7 @@ class C {
   fire: () -> void;
   view fn toString() -> Str {
     self.fire();
-    y = C("y" + Str(9), fn() {});
+    let y = C("y" + Str(9), fn() {});
     return self.name + ".";
   }
 }
@@ -79,63 +79,63 @@ class A {
 
 // The next `toString()` of `h.c` replaces `h.c`, which holds it alone.
 fn arm(h: H, n: int) {
-  v = h;
+  let v = h;
   h.c = C("two" + Str(n), fn() { v.c = C("three" + Str(n), fn() {}); });
 }
 
 fn armB(b: B, n: int) {
-  v = b;
+  let v = b;
   b.c = C("four" + Str(n), fn() { v.c = C("five" + Str(n), fn() {}); });
 }
 
 fn main() -> int {
   // Every shape.
-  o: int? = None;
-  p: int? = 7;
-  s: Str? = "s" + Str(1);
-  t: Str? = None;
-  q: Node? = make(2);
-  r: Node? = None;
+  let o: int? = None;
+  let p: int? = 7;
+  let s: Str? = "s" + Str(1);
+  let t: Str? = None;
+  let q: Node? = make(2);
+  let r: Node? = None;
   io::println(Str(o) + " " + Str(p) + " " + Str(s) + " " + Str(t) + " " + Str(q)
       + " " + Str(r));
-  ob: Obj = make(0);
+  let ob: Obj = make(0);
   io::println(Str(("t" + Str(3), make(4))) + " " + Str(Tag("g" + Str(5))) + " "
       + Str(Maybe::Some("v" + Str(6))) + " " + Str(make(7)) + " " + Str(ob)
       + " " + Str(None));
 
   // Of a call, a field, a list's element and a generic value.
-  bx = Box(make(9), "x");
+  let bx = Box(make(9), "x");
   xs = collections::List<Node>();
   xs.push(make(10));
   io::println(Str(make(8)) + " " + Str(bx.node) + " " + Str(xs.at(0)) + " "
       + show((make(11), 12)) + " " + show(make(13)));
 
   // Kept in a variable, a field and a tuple, then dropped.
-  kept = Str(make(14));
+  let kept = Str(make(14));
   bx.text = Str(make(15));
   pair = (Str(make(16)), 1);
   pair = ("kept", 2);
   io::println(pair.0 + " " + kept + " " + bx.text);
 
   // An object its own toString() lets go of.
-  h = H(C("one" + Str(1), fn() {}));
+  let h = H(C("one" + Str(1), fn() {}));
   arm(h, 1);
-  first = Str(h.c);
+  let first = Str(h.c);
   arm(h, 2);
   io::println(first + " " + h.c.toString());
-  a = A(B(C("one" + Str(1), fn() {})));
+  let a = A(B(C("one" + Str(1), fn() {})));
   armB(a.b, 3);
-  third = Str(a.b.c);
+  let third = Str(a.b.c);
   armB(a.b, 4);
   io::println(third + " " + a.b.c.toString());
   arm(h, 5);
-  fifth = h.show();
+  let fifth = h.show();
   arm(h, 6);
   io::println(fifth + " " + h.told());
   arm(h, 7);
-  held = (Str(h.c), 1);
+  let held = (Str(h.c), 1);
   arm(h, 8);
-  c: C? = h.c;
+  let c: C? = h.c;
   io::println(held.0 + " " + Str(c));
   return 0;
 }

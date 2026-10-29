@@ -41,37 +41,37 @@ fn none<T>() -> Maybe<T> => Maybe::Nothing;
 fn ok<T, E>(v: T) -> Res<T, E> => Res::Ok(v);
 
 fn main() -> int {
-  x = Maybe::Just(5);
-  n = 2;
+  let x = Maybe::Just(5);
+  let n = 2;
   io::println(Str(Maybe::Nothing == x) + " " + Str(x == Maybe::Nothing) + " "
       + Str(Maybe::Nothing != x) + " " + Str(x != Maybe::Nothing));
-  b = if n > 0 then Maybe::Nothing else Maybe::Just(n);
-  c = if n > 5 then Maybe::Nothing else Maybe::Just(n);
+  let b = if n > 0 then Maybe::Nothing else Maybe::Just(n);
+  let c = if n > 5 then Maybe::Nothing else Maybe::Just(n);
   io::println(b.toString() + " " + c.toString());
   io::println(Str(b == x) + " " + Str(c == Maybe::Just(2)));
-  d = if n > 5 then Maybe::Nothing else if n > 1 then Maybe::Nothing
+  let d = if n > 5 then Maybe::Nothing else if n > 1 then Maybe::Nothing
       else Maybe::Just(n);
-  e = if n > 5 then Maybe::Nothing else if n > 3 then Maybe::Just(n)
+  let e = if n > 5 then Maybe::Nothing else if n > 3 then Maybe::Just(n)
       else Maybe::Nothing;
-  f = if n > 5 then Maybe::Nothing else if n > 1 then Maybe::Just(n)
+  let f = if n > 5 then Maybe::Nothing else if n > 1 then Maybe::Just(n)
       else Maybe::Nothing;
   io::println(d.toString() + " " + e.toString() + " " + f.toString());
   io::println(Str(Maybe::Nothing == (if n > 1 then x else Maybe::Nothing)) + " "
       + Str(x != (if n > 1 then Maybe::Nothing else Maybe::Nothing)));
-  r = Res<int, Str>::Ok(1);
-  small: Maybe<u8> = Maybe::Just(200);
+  let r = Res<int, Str>::Ok(1);
+  let small: Maybe<u8> = Maybe::Just(200);
   io::println(Str(Res::Ok(1) == r) + " " + Str(Res::Err("no") == r) + " "
       + Str(Maybe::Just(200) == small));
   io::println(Str(Maybe::Just(1) == none()) + " " + Str(none() != x) + " "
       + Str(ok(1) == r) + " " + Str(r != ok(1)));
-  g = if n > 0 then Maybe::Just(n) else none();
-  h = if n > 0 then none() else Maybe::Just(n);
-  i = if n > 0 then ok(1) else r;
-  j = if n > 5 then Maybe::Just(n) else (if n > 1 then none() else none());
+  let g = if n > 0 then Maybe::Just(n) else none();
+  let h = if n > 0 then none() else Maybe::Just(n);
+  let i = if n > 0 then ok(1) else r;
+  let j = if n > 5 then Maybe::Just(n) else (if n > 1 then none() else none());
   io::println(g.toString() + " " + h.toString() + " " + i.toString() + " "
       + j.toString());
-  k = if n > 0 then Two::Left(1) else Two::Both(1, "s");
-  l = if n > 0 then Maybe::Just(Maybe::Nothing)
+  let k = if n > 0 then Two::Left(1) else Two::Both(1, "s");
+  let l = if n > 0 then Maybe::Just(Maybe::Nothing)
       else Maybe::Just(Maybe::Just(n));
   io::println(Str(Two::Left(1) == Two::Both(1, "s")) + " " + k.toString() + " "
       + Str(Maybe::Just(Maybe::Nothing) == Maybe::Just(Maybe::Just(n))) + " "

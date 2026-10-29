@@ -43,8 +43,8 @@ fn K_2Ew() -> int {
 }
 
 fn main() -> int {
-  k: K = K("k");
-  b: K = D();
+  let k: K = K("k");
+  let b: K = D();
   io::println(Str<int>(k.w() + K_w()));
   io::println(K_destroy(k) + " " + K_destroy(b));
   io::println(Str<int>(k.vtable()) + " " + Str<int>(b.vtable()) + " "

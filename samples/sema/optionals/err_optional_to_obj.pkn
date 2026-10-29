@@ -9,7 +9,7 @@ impl Node {
 }
 
 fn main() -> int {
-  n: Node? = Node(1);
-  o: Obj = n;   // error: cannot use optional 'Node?' as 'Obj': an optional is not an object; unwrap it with match
+  let n: Node? = Node(1);
+  let o: Obj = n;   // error: cannot use optional 'Node?' as 'Obj': an optional is not an object; unwrap it with match
   return 0;
 }

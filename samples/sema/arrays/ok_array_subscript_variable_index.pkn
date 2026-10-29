@@ -1,7 +1,7 @@
 // OK: subscript with a variable index
 fn main() -> int {
-  a: float[3] = [1.0, 2.0, 3.0];
-  i: int = 1;
-  x: float = a[i];
+  let a: float[3] = [1.0, 2.0, 3.0];
+  let i: int = 1;
+  let x: float = a[i];
   return 0;
 }

@@ -20,10 +20,10 @@ number of elements:
 import ::io;
 
 fn main() -> int {
-  primes = [2, 3, 5, 7];               // int[4]
-  names: Str[2] = ["Ada", "Grace"];
-  sizes: float[_] = [1.5, 2, 4];       // float[3]: _ takes the literal's length
-  zeros = [0; 6];                      // int[6]: six copies of 0
+  let primes = [2, 3, 5, 7];           // int[4]
+  let names: Str[2] = ["Ada", "Grace"];
+  let sizes: float[_] = [1.5, 2, 4];   // float[3]: _ takes the literal's length
+  let zeros = [0; 6];                  // int[6]: six copies of 0
   io::println(Str(primes.len()) + " primes, " + Str(names.len()) + " names, "
           + Str(sizes.len()) + " sizes, " + Str(zeros.len()) + " zeros");
   io::println("the first prime is " + Str(primes[0]));
@@ -127,7 +127,7 @@ fn join(xs: view int[], sep: Str) -> Str {
 
 fn main() -> int {
   a = [1, 2, 3];
-  b = a;                 // a copy
+  let b = a;             // a copy
   doubleAll(a);
   io::println(join(a, ", ") + " / " + join(b, ", "));
   io::println(join([7, 8, 9, 10], "-"));
@@ -209,7 +209,7 @@ fn main() -> int {
   grid[1][2] = 60;
   io::println("row 1 has " + Str(grid[1].len()) + " cells, the last is " + Str(grid[1][2]));
 
-  cities = [City("Tehran", 9000000), City("Lyon", 520000), City("Oslo", 700000)];
+  let cities = [City("Tehran", 9000000), City("Lyon", 520000), City("Oslo", 700000)];
   biggest = cities[0];
   i = 1;
   while i < cities.len() {
@@ -298,7 +298,7 @@ class TaskList {
       }
       i = i + 1;
     }
-    removed = self.count - kept;
+    let removed = self.count - kept;
     self.count = kept;
     return removed;
   }
@@ -321,7 +321,7 @@ impl TaskList {
 }
 
 fn main() -> int {
-  list = TaskList();
+  let list = TaskList();
   list.add("buy milk");
   list.add("fix the leak");
   list.add("call mum");
@@ -381,9 +381,9 @@ elements each need their own object from the start is filled in a loop.
 import ::io;
 
 fn main() -> int {
-  nums: int[3] = [10, 20, 30];
-  words = ["hello", "world"];      // a Str[2]
-  mixed = [1, 2.5];                // a float[2]: the int promotes
+  let nums: int[3] = [10, 20, 30];
+  let words = ["hello", "world"];  // a Str[2]
+  let mixed = [1, 2.5];            // a float[2]: the int promotes
   io::println(Str(nums[2]) + " " + words[1] + " " + Str(mixed[0]));
   return 0;
 }
@@ -420,8 +420,8 @@ import ::io;
 fn fill<T>(v: T) -> T[3] { return [v; 3]; }
 
 fn main() -> int {
-  x: int[_][_] = [[1, 2, 3], [4, 5, 6]];   // an int[2][3]
-  z: float[_] = fill<float>(1.5);          // a float[3]
+  let x: int[_][_] = [[1, 2, 3], [4, 5, 6]];   // an int[2][3]
+  let z: float[_] = fill<float>(1.5);          // a float[3]
   io::println(Str(x.len()) + " " + Str(x[0].len()) + " " + Str(z.len()));
   return 0;
 }
@@ -448,8 +448,8 @@ into a `T[n]`, `v` takes the element type `T` (`[0; 4]` into a `float[4]` is fou
 import ::io;
 
 fn main() -> int {
-  zeros: float[4] = [0; 4];          // the int 0 becomes 0.0
-  slots: int?[8] = [None; 8];
+  let zeros: float[4] = [0; 4];      // the int 0 becomes 0.0
+  let slots: int?[8] = [None; 8];
   grid: int[_][_] = [[0; 3]; 2];     // an int[2][3]
   grid[1][2] = 7;
   io::println(Str(zeros.len()) + " " + Str(slots[5] == None) + " " + Str(grid[0][2]) + " "
@@ -647,8 +647,8 @@ import ::io;
 class Counter { n: int; }
 
 fn main() -> int {
-  cs: Counter[2] = [Counter(1), Counter(2)];
-  copy = cs;               // the same two counters
+  let cs: Counter[2] = [Counter(1), Counter(2)];
+  let copy = cs;           // the same two counters
   copy[0].n = 10;
   names: Str[2] = ["ann", "bob"];
   names[1] = names[0] + "!";
@@ -681,7 +681,7 @@ class Point {
 }
 
 fn main() -> int {
-  pts = [Point(0, 0), Point(1, 2), Point(-3, 4)];
+  let pts = [Point(0, 0), Point(1, 2), Point(-3, 4)];
   i = 0;
   while i < pts.len() {
     io::println(pts[i].toString());
@@ -744,7 +744,7 @@ import ::io;
 class Board { cells: char[3][3]; }
 
 fn main() -> int {
-  b = Board([['.'; 3]; 3]);
+  let b = Board([['.'; 3]; 3]);
   b.cells[1][1] = 'x';
   io::println(Str(b.cells[1][1]) + " " + Str(b.cells.len()));
   return 0;
@@ -780,7 +780,7 @@ fn clear(xs: inout int[3]) {
 
 fn main() -> int {
   a: int[3] = [1, 2, 3];
-  b = bumped(a);
+  let b = bumped(a);
   clear(a);
   io::println(Str(a[0]) + " " + Str(b[0]));
   return 0;
@@ -824,7 +824,7 @@ fn scale(xs: inout int[], by: int) {
 fn main() -> int {
   a: int[3] = [1, 2, 3];
   scale(a, 10);
-  grid: int[2][2] = [[1, 2], [3, 4]];
+  let grid: int[2][2] = [[1, 2], [3, 4]];
   io::println(Str(sum(a)) + " " + Str(sum([5, 6])) + " " + Str(sum(grid[1])));
   return 0;
 }

@@ -5,8 +5,8 @@
 // Expected under --track-heap: live blocks : 0.
 
 fn main() -> int {
-  a: Str = "foo";
-  b: Str = "bar";
-  c: Str = a + b;
+  let a: Str = "foo";
+  let b: Str = "bar";
+  let c: Str = a + b;
   return 0;
 }

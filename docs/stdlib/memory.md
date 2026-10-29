@@ -181,12 +181,12 @@ import ::memory;
 fn bump(n: inout int) { n = n + 1; }
 
 fn main() -> int {
-  hits = memory::Box(0);
-  alias = hits;
+  let hits = memory::Box(0);
+  let alias = hits;
   bump(hits.get());
   n: inout int = alias.get();
   n = n * 10;
-  pair = memory::Box((1, "one"));
+  let pair = memory::Box((1, "one"));
   p: inout (int, Str) = pair.get();
   p = (2, "two");
   io::println(Str(hits.get()) + " " + pair.get().1);

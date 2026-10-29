@@ -56,10 +56,11 @@ static PaykanBuffer *buffer_at(const void *box) {
 }
 
 /// Whether the value at @p v of type @p t was never set.  Only a type with
-/// words that tell (`nunset`) is looked at, so a type whose zero bytes are a
-/// value (an int, a Str?) pays for no call.
+/// words that tell (`nunset`) is looked at.  The hint lays that look out of
+/// line, not because such a type is rare: a read of a type whose zero bytes
+/// are a value (an int, a Str?) then takes no branch.
 static int buffer_unset(const PaykanType *t, const void *v) {
-  return t->nunset && PaykanType_isUnset(t, v);
+  return PAYKAN_UNLIKELY(t->nunset != 0) && PaykanType_unsetWords_inline(t, v);
 }
 
 static void buffer_check_index(const PaykanBuffer *buf, int64_t i) {

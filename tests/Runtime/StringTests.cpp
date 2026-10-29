@@ -272,7 +272,9 @@ TEST(StringVtable, LengthViaVtable) {
 TEST(StringVtable, DestroyViaVtable) {
   PaykanString *s = PaykanString_new("bye", 3);
   vtDestroy(s)((PaykanObject *)s);
-  // Should not crash.
+  // Should not crash.  The destroy frees what the string holds; the object
+  // itself is freed after it, as Paykan_release frees one.
+  Paykan_free(s);
 }
 
 // -- PaykanString_at
@@ -413,6 +415,55 @@ TEST(StringConcatInplace, ResultIsNulTerminated) {
   EXPECT_EQ(a->data[4], '\0');
   Paykan_dispose((PaykanObject *)a);
   Paykan_dispose((PaykanObject *)b);
+}
+
+// `s.concat(s)`: the bytes appended are the string's own, read where the
+// realloc left them.
+TEST(StringConcatInplace, AppendItself) {
+  PaykanString *a = PaykanString_new("abc", 3);
+  PaykanString_concat_inplace((PaykanObject *)a, (PaykanObject *)a);
+  EXPECT_EQ(std::string(a->data, (size_t)a->len), "abcabc");
+  EXPECT_EQ(a->data[6], '\0');
+  Paykan_dispose((PaykanObject *)a);
+}
+
+namespace {
+
+// RAII: the tracking allocator with zeroed counters; no live blocks at the
+// end.
+struct TrackingHeap {
+  TrackingHeap() {
+    Paykan_heap_set_tracking(1);
+    Paykan_heap_reset();
+  }
+  ~TrackingHeap() {
+    EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+    Paykan_heap_set_tracking(0);
+  }
+};
+
+} // namespace
+
+// An append grows the string's own block, one realloc each, and allocates
+// none: 100,000 one-byte appends allocated a block for the whole string and
+// copied it there each time, time quadratic in the appends (SW-15).
+TEST(StringConcatInplace, GrowsTheStringsBlockAndAllocatesNone) {
+  TrackingHeap heap;
+  PaykanString *s = PaykanString_new("", 0);
+  PaykanString *x = PaykanString_new("x", 1);
+  const int64_t allocs = Paykan_heap_total_allocs();
+  const int64_t reallocs = Paykan_heap_total_reallocs();
+  const int kAppends = 100000;
+  for (int i = 0; i < kAppends; ++i)
+    PaykanString_concat_inplace((PaykanObject *)s, (PaykanObject *)x);
+  EXPECT_EQ(Paykan_heap_total_reallocs() - reallocs, kAppends);
+  EXPECT_EQ(Paykan_heap_total_allocs(), allocs);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 4); // the two strings and their bytes
+  EXPECT_EQ(std::string(s->data, (size_t)s->len),
+            std::string((size_t)kAppends, 'x'));
+  EXPECT_EQ(s->data[kAppends], '\0');
+  Paykan_dispose((PaykanObject *)s);
+  Paykan_dispose((PaykanObject *)x);
 }
 
 // -- PaykanString_parse_int / _float / _bool (Str's `toInt()` & co.)

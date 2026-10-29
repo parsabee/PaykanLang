@@ -15,34 +15,34 @@ fn pickStr(flag: bool, a: Str, b: Str) -> Str {
 
 fn main() -> int {
   io::println("=== int ternary ===");
-  x: int = if True then 10 else 20;
-  y: int = if False then 10 else 20;
+  let x: int = if True then 10 else 20;
+  let y: int = if False then 10 else 20;
   io::println("True  ->" + Str<int>(x));    // 10
   io::println("False ->" + Str(y));    // 20
 
   io::println("=== float ternary ===");
-  f: float = if 1 < 2 then 1.5 else 2.5;
+  let f: float = if 1 < 2 then 1.5 else 2.5;
   io::println("1<2 ->" + Str<float>(f));    // 1.5
 
   io::println("=== bool ternary ===");
-  b: bool = if True then False else True;
+  let b: bool = if True then False else True;
   io::println("bool ->" + Str(b));    // False
 
   io::println("=== nested ternary ===");
-  grade: int = 85;
-  label: int = if grade >= 90 then 1 else if grade >= 80 then 2 else if grade
-      >= 70 then 3 else 4;
+  let grade: int = 85;
+  let label: int = if grade >= 90 then 1 else if grade >= 80 then 2
+      else if grade >= 70 then 3 else 4;
   io::println("grade 85 -> band" + Str<int>(label));  // 2
 
   io::println("=== ternary with relational condition ===");
-  a: int = 7;
+  let a: int = 7;
   io::println("max(7,3)=" + Str(if a > 3 then a else 3));  // 7
   io::println("min(7,3)=" + Str<int>(if a < 3 then a else 3));  // 3
 
   io::println("=== Str ternary (class branches) ===");
   // Both branches produce Str — exercises the isClassResult path which
   // calls emitAsShared on each branch.
-  cond: bool = True;
+  let cond: bool = True;
   s: Str = if cond then "yes" else "no";
   io::println(s);           // yes
   s = if !cond then "yes" else "no";
@@ -60,8 +60,8 @@ fn main() -> int {
   io::println(classify(0));    // zero
 
   io::println("=== ternary with owned Str variables as branches ===");
-  p: Str = "alpha";
-  q: Str = "beta";
+  let p: Str = "alpha";
+  let q: Str = "beta";
   r: Str = pickStr(True, p, q);
   io::println(r);           // alpha
   r = pickStr(False, p, q);

@@ -2,12 +2,12 @@
 // that module would check it: the error is reported in its file, with a note
 // at the request here.
 //   text/show.pkn:3:10: error: method call on non-class type 'int'
-//   main.pkn:11:7: note: in instantiation of 'text::show::show<int>' requested
+//   main.pkn:11:11: note: in instantiation of 'text::show::show<int>' requested
 //   here
 import text::show;
 
 fn main() -> int {
   // ERROR: int has no method 'label'
-  s = show::show(3);
+  let s = show::show(3);
   return 0;
 }

@@ -108,13 +108,13 @@ impl Player {
 fn main() -> int {
   // 1. Declaration & variant access.
   io::println("== basics ==");
-  d: Direction = Direction::East;
+  let d: Direction = Direction::East;
   io::println(dirName(d));                       // East
 
   // 2. Implicit ordering: variants are 0,1,2,3 in declaration order, so the
   //    later a variant is declared the later this chain reaches it.
   io::println("== ordering ==");
-  probe: Direction = Direction::South;       // index 2
+  let probe: Direction = Direction::South;   // index 2
   if probe == Direction::North {
     io::println("0");
   }
@@ -159,7 +159,7 @@ fn main() -> int {
 
   // 7. Enum field in a class, mutated via a method.
   io::println("== class field ==");
-  p: Player = Player(Direction::North);
+  let p: Player = Player(Direction::North);
   io::println(p.report());                       // North
   p.turnAround();
   io::println(p.report());                       // South

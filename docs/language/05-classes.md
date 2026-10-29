@@ -36,7 +36,7 @@ impl Counter {
 }
 
 fn main() -> int {
-  c = Counter("visitors");
+  let c = Counter("visitors");
   c.increment();
   c.increment();
   io::println(c.report());
@@ -99,7 +99,7 @@ fn show(a: view Account) {
 }
 
 fn main() -> int {
-  a = Account(10);
+  let a = Account(10);
   a.deposit(5);
   show(a);
   return 0;
@@ -171,8 +171,8 @@ fn bump(b: Box) {
 }
 
 fn main() -> int {
-  a = Box(1);
-  b = a;           // b and a are the same object
+  let a = Box(1);
+  let b = a;       // b and a are the same object
   b.value = 5;
   bump(a);
   io::println(Str(a.value) + " " + Str(b.value));
@@ -235,7 +235,7 @@ impl Cat {
 }
 
 fn main() -> int {
-  pets: Animal[3] = [Dog("Rex"), Cat("Tom"), Animal("Generic")];
+  let pets: Animal[3] = [Dog("Rex"), Cat("Tom"), Animal("Generic")];
   i = 0;
   while i < pets.len() {
     io::println(pets[i].speak());
@@ -334,7 +334,7 @@ fn total(shapes: view Shape[]) -> float {
 }
 
 fn main() -> int {
-  shapes: Shape[2] = [Square(2.0), Rect(2.0, 3.0)];
+  let shapes: Shape[2] = [Square(2.0), Rect(2.0, 3.0)];
   io::println(shapes[0].describe());
   io::println(shapes[1].describe());
   io::println("total " + Str(total(shapes)));
@@ -368,8 +368,8 @@ class Line : Shape {
 }
 
 fn main() -> int {
-  s = Shape();
-  l = Line(3.0);
+  let s = Shape();
+  let l = Line(3.0);
   return 0;
 }
 ```
@@ -423,8 +423,8 @@ impl Point {
 }
 
 fn main() -> int {
-  a = Point(1, 2);
-  b = Point(1, 2);
+  let a = Point(1, 2);
+  let b = Point(1, 2);
   io::println(a);
   io::println("a == b: " + Str(a == b));
   io::println("a != Point(2, 1): " + Str(a != Point(2, 1)));
@@ -545,8 +545,8 @@ impl DeadlineTask {
 }
 
 fn main() -> int {
-  milk = Task("buy milk");
-  taxes: Task = DeadlineTask("file taxes", "April 15");
+  let milk = Task("buy milk");
+  let taxes: Task = DeadlineTask("file taxes", "April 15");
   milk.complete();
   io::println(milk);
   io::println(taxes);
@@ -702,7 +702,7 @@ impl Dog {
 }
 
 fn main() -> int {
-  d = Dog("Rex", True);
+  let d = Dog("Rex", True);
   io::println(d.sound());
   return 0;
 }
@@ -737,7 +737,7 @@ class Counter {
 }
 
 fn main() -> int {
-  c = Counter(0, 2);                               // the private field is a constructor argument
+  let c = Counter(0, 2);                           // the private field is a constructor argument
   c.tick();
   c.tick();
   io::println(Str(c.value()) + " " + Str(c.step));
@@ -797,8 +797,8 @@ class Named : Point {
 }
 
 fn main() -> int {
-  p = Point(1, 2);        // x = 1, y = 2
-  n = Named(3, 4, "n");   // Point's x and y, then name
+  let p = Point(1, 2);        // x = 1, y = 2
+  let n = Named(3, 4, "n");   // Point's x and y, then name
   io::println(Str(p.x + p.y) + " " + n.name + Str(n.y));
   return 0;
 }
@@ -819,7 +819,7 @@ class Point {
 }
 
 fn main() -> int {
-  p = Point(1);
+  let p = Point(1);
   return p.x;
 }
 ```
@@ -930,7 +930,7 @@ impl Point {
 }
 
 fn main() -> int {
-  p = Point::origin();
+  let p = Point::origin();
   p.shift(3);
   return p.lengthSquared();   // 18
 }
@@ -1103,7 +1103,7 @@ impl Square {
 }
 
 fn main() -> int {
-  s: Shape = Square(3.0);
+  let s: Shape = Square(3.0);
   io::println(s.report());
   return 0;
 }

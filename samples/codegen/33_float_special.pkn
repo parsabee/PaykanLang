@@ -29,12 +29,12 @@ import ::io;
 // expect-stdout: nan -inf
 
 fn main() -> int {
-  big: float = 1.0e308;
-  inf: float = big * 10.0;
-  ninf: float = 0.0 - inf;
-  nan1: float = inf - inf;
-  nan2: float = 0.0 * inf;
-  nan3: float = 0.0 - nan1;
+  let big: float = 1.0e308;
+  let inf: float = big * 10.0;
+  let ninf: float = 0.0 - inf;
+  let nan1: float = inf - inf;
+  let nan2: float = 0.0 * inf;
+  let nan3: float = 0.0 - nan1;
   io::println("inf:  " + Str<float>(inf));
   io::println("-inf: " + Str(ninf));
   io::println("nan:  " + Str<float>(nan1));
@@ -50,7 +50,7 @@ fn main() -> int {
   io::println("nan > 1:    " + Str<bool>(nan1 > 1.0));
   io::println("nan >= nan: " + Str(nan1 >= nan1));
   io::println("inf > big:  " + Str<bool>(inf > big));
-  t: (float, float, float) = (nan1, inf, ninf);
+  let t: (float, float, float) = (nan1, inf, ninf);
   io::println(t);                                  // (nan, inf, -inf)
   io::println(Str(t.0) + " " + Str<float>(t.2));
   return 0;

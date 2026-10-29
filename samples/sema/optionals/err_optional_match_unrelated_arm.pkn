@@ -8,7 +8,7 @@ impl Node {
 }
 
 fn main() -> int {
-  a: Node? = None;
+  let a: Node? = None;
   match a {
     s: Str { }   // error: type 'Str' is not a subclass of 'Node' (the match subject has type 'Node?')
     _ { }

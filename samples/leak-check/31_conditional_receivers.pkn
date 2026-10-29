@@ -57,18 +57,18 @@ fn shout(s: inout Str) {
 }
 
 fn main() -> int {
-  a = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
-  b = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
+  let a = Node("a", 1, (10, "ta"), Point(1, 2), None, None);
+  let b = Node("b", 2, (20, "tb"), Point(3, 4), None, None);
   b.back = a;
   for k in 1..=2 {
-    x = (if k == 1 then a else b).name;
+    let x = (if k == 1 then a else b).name;
     io::println(x + " " + (if k == 1 then a else b).name);
     io::println((if k == 1 then a
         else Node("c", 3, (30, "tc"), Point(5, 6), None, None)).name + Str(k));
     io::println((if k == 1 then a else b).t.1
         + Str((if k == 1 then a else b).t.0));
-    t = (if k == 1 then a else b).t;
-    p = (if k == 1 then a else b).p;
+    let t = (if k == 1 then a else b).t;
+    let p = (if k == 1 then a else b).p;
     io::println(t.1 + Str(p.y) + Str((if k == 1 then a else b).p.x));
     io::println((if k == 1 then a else b).back == None);
     io::println((if k == 1 then a else b).greet(k));

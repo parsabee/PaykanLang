@@ -1,5 +1,5 @@
 // ERROR: bare [] — an array has at least one element, so [] has no type
 fn main() -> int {
-  a = [];  // sema error: an empty array literal has no type
+  let a = [];  // sema error: an empty array literal has no type
   return 0;
 }

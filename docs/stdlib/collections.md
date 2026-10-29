@@ -116,7 +116,14 @@ None
 
 A growable array, kept in a [`memory::Buffer<T>`](memory.md). `push` and `pop` at
 the end are amortised O(1); `insert` and `removeAt` move the elements after the index, and
-`indexOf`, `contains` and `remove` walk the list.
+`indexOf`, `contains` and `remove` walk the list, comparing each element with `==`. An
+element's `equals` may change the list: the walk goes on over the elements the list then
+has, so one that empties it makes the search find nothing. `indexOf` is the index the
+element had when its `==` was `True`, and `remove` removes the element at that index. When
+the `equals` that found it changed the list's length, that index may name another element
+or none, so `remove` then removes nothing and is `False`. A change that keeps the length (a
+`swap` or a `set`) goes unseen: `remove` then removes the element at that index, which may
+be another one, and is `True`.
 
 | Method | Does | When it fails |
 |--------|------|---------------|
@@ -133,7 +140,7 @@ the end are amortised O(1); `insert` and `removeAt` move the elements after the 
 | `fn removeAt(i: unsigned) -> T` | Removes and returns element `i` | panics as `at` |
 | `view fn indexOf(v: view T) -> unsigned?` | The index of the first element `== v` | `None` when there is none |
 | `view fn contains(v: view T) -> bool` | Whether some element is `== v` | |
-| `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | |
+| `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | `False`, removing nothing, when the `equals` that found it changed the list's length; the element then at its index when that `equals` changed the list but not its length |
 | `fn swap(i: unsigned, j: unsigned)` | Exchanges elements `i` and `j` | panics as `at` |
 | `fn reverse()` | Reverses the order of the elements | |
 | `fn clear()` | Removes every element | |
@@ -154,7 +161,10 @@ A new list of the elements of an array or a slice, in order:
 fn listToString<T: Show>(xs: view List<T>) -> Str
 ```
 
-The elements' `toString()`, in order, as `[a, b, c]`; `[]` for an empty list.
+The elements' `toString()`, in order, as `[a, b, c]`; `[]` for an empty list. The result is
+a string of its own, which each element's text is appended to with
+[`concat`](../language/04-strings-and-conversions.md#string-type), so the time is about
+linear in its length: a list of 400,000 ints takes a tenth of a second.
 
 ## `LinkedList<T>`
 
@@ -392,6 +402,7 @@ second. `startsWith` and `endsWith` compare the bytes of the prefix or the suffi
 `replace` finds the occurrences as `split` does. It and `join` put their pieces together in
 pairs, as a binary counter carries (two strings of one piece each make one of two, two of
 two make one of four, and so on), so each byte of a result of k pieces is copied about
-log2(k) times. Appending each piece to the result so far would copy that result once per
-piece. Replacing each of the million line feeds of a 10 MB string takes about a second.
-`repeat` doubles its string, so its time is linear in the length of the result.
+log2(k) times, whatever C's `realloc` does. Appending each piece to the result so far with
+`+` would copy that result once per piece. Replacing each of the million line feeds of a
+10 MB string takes about a second. `repeat` doubles its string, so its time is linear in the
+length of the result.

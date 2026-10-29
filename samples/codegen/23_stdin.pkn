@@ -18,13 +18,13 @@ fn main() -> int {
   while True {
     match io::stdin().readln() {
       read: Ok {
-        line = read.value;
+        let line = read.value;
         // strip trailing newline for display
-        n: int = line.len();
+        let n: int = line.len();
         display: Str = "";
         j: int = 0;
         while j < n {
-          c: char = line[j];
+          let c: char = line[j];
           if c != '\n' {
             display = display + Str<char>(c);
           }

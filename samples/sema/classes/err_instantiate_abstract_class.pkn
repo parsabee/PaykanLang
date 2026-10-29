@@ -13,7 +13,7 @@ class Polygon : Shape {
 }
 
 fn main() -> int {
-  s = Shape();
-  p = Polygon();
+  let s = Shape();
+  let p = Polygon();
   return 0;
 }

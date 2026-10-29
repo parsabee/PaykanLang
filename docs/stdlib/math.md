@@ -13,7 +13,7 @@ import ::io;
 import ::math;
 
 fn main() -> int {
-  r = 2.0;
+  let r = 2.0;
   io::println("area " + Str(math::pi() * math::pow(r, 2.0)));
   io::println("hypot " + Str(math::hypot(3.0, 4.0)) + ", 45 degrees is "
           + Str(math::atan2(1.0, 1.0)) + " radians");

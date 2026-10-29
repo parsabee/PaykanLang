@@ -23,7 +23,7 @@ fn scratchPath(args: view Str[], name: Str) -> Str {
 fn writelines(path: Str) -> int {
   match io::open(path, "w") {
     w: Ok {
-      f = w.value;
+      let f = w.value;
       f.write("line one\n");
       f.write("line two\n");
       f.write("line three\n");
@@ -60,7 +60,7 @@ fn showToString(path: Str) {
       io::printerrln("showToString: " + e.error.message());
     }
     r: Ok {
-      s: Str = r.value.toString();
+      let s: Str = r.value.toString();
       io::println(s);   // File@0x...
     }
   }
@@ -77,7 +77,7 @@ fn showEquals(path: Str) {
           io::printerrln("showEquals inner: " + e2.error.message());
         }
         r2: Ok {
-          eq: bool = r.value.equals(r2.value);
+          let eq: bool = r.value.equals(r2.value);
           io::println(Str<bool>(eq));  // False — different handles
         }
       }
@@ -86,7 +86,7 @@ fn showEquals(path: Str) {
 }
 
 fn main(args: view Str[]) -> int {
-  path: Str = scratchPath(args, "paykan_sample_17.txt");
+  let path: Str = scratchPath(args, "paykan_sample_17.txt");
 
   // --- 1. open for writing, write lines ------------------------------------
   io::println("=== write lines ===");

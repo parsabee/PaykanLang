@@ -44,6 +44,7 @@ fn main() -> int {
 
 A variable is declared with a name, a colon, a type and an initial value:
 
+<!-- let_check: plain -->
 ```pkn
 import ::io;
 
@@ -68,6 +69,7 @@ True
 Every variable needs an initial value: there are no uninitialised variables. When the type
 is obvious from the value, leave it out and the compiler **infers** it from the initializer:
 
+<!-- let_check: plain -->
 ```pkn
 import ::io;
 
@@ -180,7 +182,7 @@ left off; it is the initializer's:
 import ::io;
 
 fn main() -> int {
-  k = 3;
+  let k = 3;
   v: view = k + 1;     // a read-only local
   w: view float = k;
   io::println(Str(v) + " " + Str(w));
@@ -222,7 +224,7 @@ impl Account {
 }
 
 fn main() -> int {
-  a = Account();
+  let a = Account();
   b: inout = a.balance;
   b = b + 10;
   names = ["x", "y"];
@@ -351,7 +353,7 @@ strings with `Str(...)` and join the pieces with `+`:
 import ::io;
 
 fn main() -> int {
-  n = 6;
+  let n = 6;
   io::println("n squared is " + Str(n * n));
   io::print("no newline, ");
   io::println("then a newline");
@@ -386,9 +388,9 @@ import ::io;
 fn main() -> int {
   a: u8 = 250;
   a = a + 10;                        // wraps to 4: a u8 holds 0 to 255
-  n: i8 = -128;
-  big: unsigned = unsigned(-1);      // 18446744073709551615
-  half: f32 = 0.1;
+  let n: i8 = -128;
+  let big: unsigned = unsigned(-1);  // 18446744073709551615
+  let half: f32 = 0.1;
   io::println(Str(a) + " " + Str(n - 1) + " " + Str(big / 2) + " " + Str(half));
   return 0;
 }
@@ -869,9 +871,9 @@ Comparisons do not chain: `1 < x < 10` is a syntax error, so write `1 < x && x <
 import ::io;
 
 fn main() -> int {
-  x = 7;
-  inRange = 1 < x && x < 10;
-  odd = x % 2 != 0;
+  let x = 7;
+  let inRange = 1 < x && x < 10;
+  let odd = x % 2 != 0;
   io::println(Str(inRange) + " " + Str(odd) + " " + Str(!odd || x > 100));
   return 0;
 }
@@ -892,8 +894,8 @@ otherwise. It chains naturally:
 import ::io;
 
 fn main() -> int {
-  score = 84;
-  grade = if score >= 90 then "A" else if score >= 80 then "B" else "C";
+  let score = 84;
+  let grade = if score >= 90 then "A" else if score >= 80 then "B" else "C";
   io::println("grade: " + grade);
   return 0;
 }
@@ -969,7 +971,7 @@ fn tag(name: Str, v: int) -> int {
 
 fn main() -> int {
   xs = [10, 20, 30];
-  n = tag("a", 1) + tag("b", 2) * tag("c", 3);
+  let n = tag("a", 1) + tag("b", 2) * tag("c", 3);
   xs[tag("index", 0)] = tag("value", n);
   io::println(Str(xs[0]));
   return 0;
@@ -1174,7 +1176,7 @@ blocks in braces, and further conditions are tested with `elif`:
 import ::io;
 
 fn main() -> int {
-  temperature = 23;
+  let temperature = 23;
   if temperature > 30 {
     io::println("hot");
   } elif temperature > 15 {
@@ -1364,6 +1366,7 @@ enums.
   variable, `match` binding or destructuring target can be named `self`, which always
   names what the method was called on (see [Classes](05-classes.md#declaration)).
 
+<!-- let_check: plain -->
 ```pkn
 import ::io;
 
@@ -1452,7 +1455,7 @@ fn percent(done: int, total: int) -> int {
 
 // A bar of `width` cells, filled in proportion to done/total: [####------]
 fn progressBar(done: int, total: int, width: int) -> Str {
-  filled = if total == 0 then 0 else done * width / total;
+  let filled = if total == 0 then 0 else done * width / total;
   bar = "[";
   i = 0;
   while i < width {

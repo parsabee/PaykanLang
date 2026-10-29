@@ -12,7 +12,7 @@ impl Node {
 }
 
 fn main() -> int {
-  n: Node = Node(1);
+  let n: Node = Node(1);
   match n.next {
     x: Node { io::println("has next"); }
     None { io::println("tail"); }

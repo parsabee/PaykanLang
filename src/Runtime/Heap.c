@@ -60,6 +60,18 @@ typedef struct PaykanHeapHeader {
 
 static PaykanHeapStats g_stats;
 
+/// Paykan_heap_set_limit's: the most payload bytes the tracking back-end
+/// keeps live, 0 for no limit.
+static int64_t g_limit;
+
+/// An allocation of @p more payload bytes takes the live ones past the
+/// limit.
+static int heap_over_limit(size_t more) {
+  const int64_t room =
+      g_limit > g_stats.liveBytes ? g_limit - g_stats.liveBytes : 0;
+  return g_limit && more > (uint64_t)room;
+}
+
 static void heap_record_alloc(uint64_t size) {
   g_stats.liveBlocks += 1;
   g_stats.liveBytes += (int64_t)size;
@@ -87,7 +99,7 @@ static PaykanHeapHeader *heap_header_of(void *payload) {
 
 static void *tracking_malloc(size_t size) {
   PaykanHeapHeader *h =
-      size <= PAYKAN_HEAP_MAX_PAYLOAD
+      size <= PAYKAN_HEAP_MAX_PAYLOAD && !heap_over_limit(size)
           ? (PaykanHeapHeader *)malloc(PAYKAN_HEAP_HEADER_SIZE + size)
           : NULL;
   if (!h)
@@ -107,7 +119,8 @@ static void *tracking_realloc(void *ptr, size_t size) {
   uint64_t oldSize = oldH->size;
 
   PaykanHeapHeader *newH =
-      size <= PAYKAN_HEAP_MAX_PAYLOAD
+      size <= PAYKAN_HEAP_MAX_PAYLOAD &&
+              (size <= oldSize || !heap_over_limit(size - oldSize))
           ? (PaykanHeapHeader *)realloc(oldH, PAYKAN_HEAP_HEADER_SIZE + size)
           : NULL;
   if (!newH)
@@ -218,6 +231,12 @@ int64_t Paykan_heap_live_blocks(void) { return g_stats.liveBlocks; }
 int64_t Paykan_heap_live_bytes(void) { return g_stats.liveBytes; }
 
 int64_t Paykan_heap_total_reallocs(void) { return g_stats.totalReallocs; }
+
+int64_t Paykan_heap_total_allocs(void) { return g_stats.totalAllocs; }
+
+int64_t Paykan_heap_peak_bytes(void) { return g_stats.peakBytes; }
+
+void Paykan_heap_set_limit(int64_t bytes) { g_limit = bytes; }
 
 void Paykan_heap_dump(void) {
   // The program's output first, also when stdout is a pipe (fully buffered)

@@ -27,7 +27,7 @@ fn writeSource(path: Str) -> int {
       return 1;
     }
     w: Ok {
-      f = w.value;
+      let f = w.value;
       f.write("first line\n");
       f.write("second line\n");
       f.write("third line\n");
@@ -89,8 +89,8 @@ fn printFile(path: Str) -> int {
 }
 
 fn main(args: view Str[]) -> int {
-  src: Str = scratchPath(args, "paykan_copy_src.txt");
-  dst: Str = scratchPath(args, "paykan_copy_dst.txt");
+  let src: Str = scratchPath(args, "paykan_copy_src.txt");
+  let dst: Str = scratchPath(args, "paykan_copy_dst.txt");
 
   writeSource(src);    // write & close src
   printFile(src);

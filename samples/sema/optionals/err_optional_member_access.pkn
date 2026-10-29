@@ -8,6 +8,6 @@ impl Node {
 }
 
 fn main() -> int {
-  a: Node? = Node(1);
+  let a: Node? = Node(1);
   return a.v;   // error: cannot use optional 'Node?' as 'Node' without unwrapping (use match)
 }

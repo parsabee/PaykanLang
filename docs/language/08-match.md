@@ -69,7 +69,7 @@ fn main() -> int {
   io::println(command("add"));
   io::println(command("list"));
   io::println(command("frobnicate"));
-  n = 2;
+  let n = 2;
   match n * 3 {
     0 { io::println("zero"); }
     6 { io::println("six"); }
@@ -203,8 +203,8 @@ class Task {
   fn complete() { self.done = True; }
 
   view fn toString() -> Str {
-    box = if self.done then "[x]" else "[ ]";
-    marker = if self.priority == Priority::High then " !" else "";
+    let box = if self.done then "[x]" else "[ ]";
+    let marker = if self.priority == Priority::High then " !" else "";
     return box + " " + self.title + marker;
   }
 }
@@ -218,9 +218,9 @@ impl Task {
 }
 
 fn main() -> int {
-  a = Task("water the plants", parsePriority("low"));
-  b = Task("fix the leak", parsePriority("!"));
-  c = Task("read a book", parsePriority("whenever"));
+  let a = Task("water the plants", parsePriority("low"));
+  let b = Task("fix the leak", parsePriority("!"));
+  let c = Task("read a book", parsePriority("whenever"));
   b.complete();
   io::println(a);
   io::println(b);
@@ -665,7 +665,7 @@ case (via `_`, all enum variants, both `bool` values, or `T` and `None` on an op
 
 ```pkn
 fn main() -> int {
-  x: Obj = Dog();
+  let x: Obj = Dog();
   match x {
     Dog { return 0; }
     Cat { return 1; }

@@ -24,7 +24,7 @@ impl Node {
 // ---- List operations -------------------------------------------------------
 
 fn push_front(head: Node?, v: int) -> Node {
-  n: Node = Node(v);
+  let n: Node = Node(v);
   n.next = head;               // Node? field accepts a Node? value
   return n;
 }
@@ -91,9 +91,9 @@ fn main() -> int {
   io::println(Str<bool>(find(head, 3) != None));  // True
 
   io::println("=== printing an optional ===");
-  maybe: Node? = None;
+  let maybe: Node? = None;
   io::println(maybe);                            // None
-  s: Str? = "text";
+  let s: Str? = "text";
   io::println(s);                                // text
 
   io::println("=== array of optionals ===");
@@ -104,9 +104,9 @@ fn main() -> int {
   io::println(describe(slots[1]));               // not found
 
   io::println("=== two optionals ===");
-  a: Str? = "same";
-  b: Str? = "same";
-  c: Str? = None;
+  let a: Str? = "same";
+  let b: Str? = "same";
+  let c: Str? = None;
   io::println(Str(a == b));                  // True  (content equality)
   io::println(Str<bool>(a == c));                  // False (one is None)
   io::println(Str(c == None));               // True

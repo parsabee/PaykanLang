@@ -203,7 +203,7 @@ fn makeAdult(n: Str) -> Person {
 fn main() -> int {
   // --- Counter ---
   io::println("=== Counter ===");
-  c: Counter = Counter(0);
+  let c: Counter = Counter(0);
   c.increment();
   c.increment();
   c.increment();
@@ -215,36 +215,36 @@ fn main() -> int {
 
   // --- Counter via helper functions ---
   io::println("=== Counter via helpers ===");
-  c2: Counter = makeCounter(10);
+  let c2: Counter = makeCounter(10);
   printCounterValue(c2);        // 10
   c2.increment();
   printCounterValue(c2);        // 11
 
   // --- Greeter with field mutation ---
   io::println("=== Greeter ===");
-  g: Greeter = Greeter("World");
+  let g: Greeter = Greeter("World");
   io::println(g.greet());               // Hello, World!
   g.rename("PaykanLang");
   io::println(g.greet());               // Hello, PaykanLang!
 
   // --- Rectangle ---
   io::println("=== Rectangle ===");
-  r: Rectangle = Rectangle(4, 5);
+  let r: Rectangle = Rectangle(4, 5);
   io::println(Str(r.area()));     // 20
   io::println(Str<int>(r.perimeter())); // 18
   io::println(r.describe());            // rectangle
 
   // --- Square (3-level inheritance) ---
   io::println("=== Square ===");
-  sq: Square = Square(6);
+  let sq: Square = Square(6);
   io::println(Str(sq.area()));    // 36
   io::println(Str<int>(sq.perimeter())); // 24
   io::println(sq.describe());           // square
 
   // --- sumAreas ---
   io::println("=== sumAreas ===");
-  r2 = Rectangle(3, 7);
-  sq2 = Square(4);
+  let r2 = Rectangle(3, 7);
+  let sq2 = Square(4);
   io::println(Str(sumAreas(r2, sq2)));  // 21 + 16 = 37
 
   // --- Polymorphism: Animal base variable holds Dog / Cat subclass ----------
@@ -256,35 +256,35 @@ fn main() -> int {
 
   // --- Inherited method calls through base variable ---
   io::println("=== Animal describe (inherited + override) ===");
-  d: Animal = Dog();
+  let d: Animal = Dog();
   io::println(d.describe());            // animal: woof
-  cat: Animal = Cat();
+  let cat: Animal = Cat();
   io::println(cat.describe());          // animal: meow
 
   // --- Person (mixed fields, method, Str return) ---
   io::println("=== Person ===");
-  p: Person = Person("Alice", 29);
+  let p: Person = Person("Alice", 29);
   io::println(p.toString());            // Alice (age 29)
   p.birthday();
   io::println(p.toString());            // Alice (age 30)
   describePerson(p);            // Alice (age 30)
 
-  adult = makeAdult("Bob");
+  let adult = makeAdult("Bob");
   io::println(adult.toString());        // Bob (age 18)
 
   // --- Vehicle hierarchy ---
   io::println("=== Vehicle hierarchy ===");
-  v: Vehicle = Car(120);
+  let v: Vehicle = Car(120);
   io::println(v.kind());                // car
   io::println(Str<int>(v.topSpeed())); // 120
 
-  sc = SportsCar(180, 40);
+  let sc = SportsCar(180, 40);
   io::println(sc.kind());               // sports car
   io::println(Str(sc.topSpeed())); // 220
 
   // --- Summer (loop inside method) ---
   io::println("=== Summer ===");
-  sm = Summer();
+  let sm = Summer();
   sm.sumTo(10);
   io::println(Str<int>(sm.total));     // 55
   sm.reset();
@@ -293,7 +293,7 @@ fn main() -> int {
 
   // --- Sign (if/else inside method) ---
   io::println("=== Sign ===");
-  sg = Sign();
+  let sg = Sign();
   io::println(sg.of(7));                // positive
   io::println(sg.of(-3));               // negative
   io::println(sg.of(0));                // zero

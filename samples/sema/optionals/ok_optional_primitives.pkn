@@ -8,11 +8,11 @@ fn half(n: int) -> int? {
 }
 
 fn main() -> int {
-  a: int? = half(4);
-  f: float? = 3;          // int -> float, then boxed
-  b: bool? = None;
-  c: char? = 'c';
-  xs: int?[3] = [1, 2, None];
+  let a: int? = half(4);
+  let f: float? = 3;      // int -> float, then boxed
+  let b: bool? = None;
+  let c: char? = 'c';
+  let xs: int?[3] = [1, 2, None];
   match a {
     n: int {
       io::println(Str<int>(n + 1));

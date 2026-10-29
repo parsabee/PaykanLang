@@ -810,6 +810,8 @@ private:
   void emitScopeCleanup(Scope &scope, bool wayOut);
   void emitAllScopesCleanup();
   void emitLoopScopesCleanup();
+  /// Declare @p name by its first assignment, `name = rhsExpr`, of the value
+  /// @p val, which for a variable holding a box is the box itself.
   Val emitImplicitVarDecl(const std::string &name, ast::Expr *rhsExpr,
                           const Val &val);
   void emitClassVarRebind(const std::string &name, ast::Expr *rhsExpr,

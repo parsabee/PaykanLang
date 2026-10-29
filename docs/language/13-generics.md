@@ -29,11 +29,11 @@ impl Pair<A, B> {
 }
 
 fn main() -> int {
-  p = Pair<Str, int>("answer", 42);
-  q = p.swap();                     // Pair<int, Str>
+  let p = Pair<Str, int>("answer", 42);
+  let q = p.swap();                 // Pair<int, Str>
   io::println(q.second + " = " + Str(q.first));
 
-  r = Pair(2.5, True);              // Pair<float, bool>, inferred
+  let r = Pair(2.5, True);          // Pair<float, bool>, inferred
   io::println(Str(r.first) + " " + Str(r.second));
   return 0;
 }
@@ -82,7 +82,7 @@ fn main() -> int {
   io::println(lastOf(["x", "y"]));
   io::println(indexOf(["a", "b", "c"], "c"));
   io::println(indexOf([1, 2], 5));
-  words = three<Str>("ab");          // a Str[3]
+  let words = three<Str>("ab");      // a Str[3]
   io::println(Str(words.len()) + " " + lastOf(words));
   io::println(Str(three(7)[1] + 1 == 8));
   return 0;
@@ -134,9 +134,9 @@ impl Doubler<T> {
 }
 
 fn main() -> int {
-  a = Doubler<int>(21);     // fine: int has +
-  s = Doubler<Str>("ab");   // fine: Str has + too
-  b = Doubler<bool>(True);  // bool does not
+  let a = Doubler<int>(21);     // fine: int has +
+  let s = Doubler<Str>("ab");   // fine: Str has + too
+  let b = Doubler<bool>(True);  // bool does not
   return 0;
 }
 ```
@@ -173,7 +173,7 @@ class Stack<T> {
   fn pop() -> T? {
     if self.count == 0 { return None; }
     self.count = self.count - 1;
-    top = self.items[self.count];
+    let top = self.items[self.count];
     self.items[self.count] = None;
     return top;
   }
@@ -250,7 +250,7 @@ impl TaskList {
 }
 
 fn main() -> int {
-  list = TaskList();
+  let list = TaskList();
   list.add(Task("buy milk"));
   list.add(Task("fix the leak"));
   list.add(Task("call mum"));
@@ -262,10 +262,10 @@ fn main() -> int {
   list.undo();
   list.undo();
 
-  numbers = Stack<int>();       // the same Stack, for ints
+  let numbers = Stack<int>();   // the same Stack, for ints
   numbers.push(1);
   numbers.push(2);
-  size = numbers.size();
+  let size = numbers.size();
   match numbers.pop() {
     top: int { io::println(Str(size) + " numbers, top " + Str(top)); }
     None     { }
@@ -527,13 +527,13 @@ impl Slot<T> {
 }
 
 fn main() -> int {
-  a = Slot<int>();
+  let a = Slot<int>();
   a.put(3);
-  b = Slot<(int, Str)>();
+  let b = Slot<(int, Str)>();
   b.put((1, "one"));
-  c = Slot<Color>();
+  let c = Slot<Color>();
   c.put(Color::Green);
-  d = Slot<int?>();                // its v is an int?, not an int??
+  let d = Slot<int?>();            // its v is an int?, not an int??
   io::println(a.v.toString() + " " + b.v.toString() + " " + d.v.toString());
   match c.v {
     k: Color { io::println(k == Color::Green); }

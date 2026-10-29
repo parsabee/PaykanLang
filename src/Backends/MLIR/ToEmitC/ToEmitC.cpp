@@ -324,6 +324,17 @@ StringRef calledRuntime(func::CallOp op) {
   return callee;
 }
 
+/// The function a call @p op of a native function calls: for
+/// PaykanBuffer_len, Runtime.h's body of it, PaykanBuffer_len_inline, which
+/// reads the buffer's length in place as the LLVM path does; the function
+/// itself for any other.
+StringRef calledNative(func::CallOp op) {
+  StringRef callee = op.getCallee();
+  return callee == names::kPaykanBufferLen
+             ? StringRef(names::kPaykanBufferLenInline)
+             : callee;
+}
+
 /// A call, by name.  A runtime function's pointer arguments go as `void *`
 /// and its pointer result is cast; an unread result is not kept (C would
 /// warn about the variable), but a native function's is, cast to void: C
@@ -352,7 +363,7 @@ struct CallLowering : CPattern<func::CallOp> {
         runtime && result && isa<emitc::PointerType>(result) ? ptr() : result;
     auto call = emitc::CallOpaqueOp::create(
         r, loc, callResult ? TypeRange{callResult} : TypeRange{},
-        runtime ? calledRuntime(op) : op.getCallee(), args);
+        runtime ? calledRuntime(op) : calledNative(op), args);
     if (voided)
       emitc::VerbatimOp::create(r, loc, r.getStringAttr("(void){};"),
                                 call.getResults());

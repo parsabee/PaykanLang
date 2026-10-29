@@ -559,10 +559,15 @@ static std::string writeFile(const std::string &dir, const std::string &relPath,
   return full.string();
 }
 
+namespace {
+// This file's own: several files of sema_tests define a SemaFileResult,
+// not all alike (ModuleTests.cpp's has a count), and one name shared by
+// them would break the one-definition rule.
 struct SemaFileResult {
   bool Ok;
   std::string Diagnostics;
 };
+} // namespace
 
 static SemaFileResult semaCheckFile(const std::string &filePath,
                                     const std::string &projectRoot) {

@@ -55,23 +55,23 @@ fn name(h: Holder) -> Str {
 }
 
 fn main() -> int {
-  h = Holder(None);
-  a = Node("a");
+  let h = Holder(None);
+  let a = Node("a");
   keep(h, a);
   io::println("kept: " + a.name + " " + name(h));
-  b = Node("b");
+  let b = Node("b");
   handOn(h, b);
   io::println("handed on: " + b.name + " " + name(h));
-  c = Node("c");
-  r = read(c);
+  let c = Node("c");
+  let r = read(c);
   io::println("read: " + c.name + " " + r);
-  d = Node("d");
-  e = same(d);
+  let d = Node("d");
+  let e = same(d);
   io::println("returned: " + d.name + " " + e.name);
   keep(h, Node("t1"));
-  t1 = name(h);
+  let t1 = name(h);
   handOn(h, Node("t2"));
-  t2 = name(h);
+  let t2 = name(h);
   io::println("temporaries: " + t1 + " " + t2 + " " + read(Node("t3")) + " "
       + same(Node("t4")).name);
   return 0;

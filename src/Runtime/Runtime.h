@@ -92,6 +92,11 @@ PAYKAN_STATIC_ASSERT(sizeof(double) == 8 && sizeof(int64_t) == sizeof(double),
 PAYKAN_STATIC_ASSERT(FLT_RADIX == 2 && DBL_MANT_DIG == 53 &&
                          DBL_MAX_EXP == 1024 && DBL_MIN_EXP == -1021,
                      "Paykan needs IEEE 754 binary64 doubles");
+// IEEE 754 binary32 floats: an f32 value is a double rounded through a C
+// float (the C path's `(float)` casts, Paykan_int_to_f32, `s.toF32()`).
+PAYKAN_STATIC_ASSERT(FLT_MANT_DIG == 24 && FLT_MAX_EXP == 128 &&
+                         FLT_MIN_EXP == -125,
+                     "Paykan needs IEEE 754 binary32 floats");
 // Two's complement, and an out-of-range conversion to a signed type wraps
 // modulo 2^N (C11 6.3.1.3p3 leaves it implementation-defined): integer
 // arithmetic is done in uint64_t and converted back to int64_t.
@@ -698,6 +703,12 @@ extern PaykanMethod PaykanBuffer_vtable[PAYKAN_OBJECT_SLOTS];
 
 PaykanShared *PaykanBuffer_new(void *t, int64_t n); // owned box
 int64_t PaykanBuffer_len(void *t, PaykanObject *b);
+/// PaykanBuffer_len's body, which the backends read in place: the C path
+/// calls this, the LLVM path loads `len` itself (ToLLVM.cpp).
+static inline int64_t PaykanBuffer_len_inline(void *t, PaykanObject *b) {
+  (void)t;
+  return ((const PaykanBuffer *)b)->len;
+}
 /// The address of value @p i, valid until the buffer next changes.
 void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i);
 /// Copy value @p i to @p out (uninitialised), retaining its references.
@@ -906,6 +917,20 @@ int64_t Paykan_heap_live_bytes(void);
 /// Number of Paykan_realloc calls since the last reset (e.g. to check that a
 /// container's resize policy is amortised).
 int64_t Paykan_heap_total_reallocs(void);
+
+/// Number of blocks allocated since the last reset, freed or not (e.g. to
+/// check that an operation grows a block instead of allocating another).
+int64_t Paykan_heap_total_allocs(void);
+
+/// The most payload bytes live at once since the last reset (e.g. to check
+/// that an operation allocates no more than it needs).
+int64_t Paykan_heap_peak_bytes(void);
+
+/// Fail, as when the memory is not there, every allocation and growth that
+/// would take the live payload bytes past @p bytes; 0 (the start-up value)
+/// for no limit.  It outlasts a reset (e.g. to make a read of a file run out
+/// of memory partway).
+void Paykan_heap_set_limit(int64_t bytes);
 
 /// Print the current heap statistics to stderr (a leak warning is appended if
 /// any blocks remain live), after flushing stdout, so that they follow what

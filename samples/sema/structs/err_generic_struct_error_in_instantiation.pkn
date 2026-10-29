@@ -8,6 +8,6 @@ impl Box<T> {
   view fn bad() -> int { return self.v; }
 }
 fn main() -> int {
-  b = Box("s");
+  let b = Box("s");
   return b.bad();
 }

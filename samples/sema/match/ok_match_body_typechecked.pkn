@@ -11,10 +11,10 @@ impl Dog {
 }
 
 fn main() -> int {
-  x: Obj = Dog("Rex");
+  let x: Obj = Dog("Rex");
   match x {
     d: Dog {
-      sound: Str = d.bark();
+      let sound: Str = d.bark();
       io::println(sound);
     }
     _ { }

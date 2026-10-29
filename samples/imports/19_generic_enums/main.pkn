@@ -15,18 +15,18 @@ struct Point {
 }
 
 fn main() -> int {
-  http = options::parsePort("http");
-  gopher = options::parsePort("gopher");
-  ports: options::Maybe<int>[3] = [http, gopher, options::Maybe::Just(443)];
+  let http = options::parsePort("http");
+  let gopher = options::parsePort("gopher");
+  let ports: options::Maybe<int>[3] = [http, gopher, options::Maybe::Just(443)];
   io::println(http.toString() + " " + gopher.toString() + " "
       + Str(options::orElse(ports[2], 0)) + " | " + Str(options::total(ports)));
 
-  none: options::Maybe<Str> = options::Maybe::Nothing;
+  let none: options::Maybe<Str> = options::Maybe::Nothing;
   io::println(options::wrap("hi").toString() + " "
       + options::firstOf(none, options::Maybe::Just("two")).toString() + " "
       + options::orElse(options::Maybe<Str>::Nothing, "one"));
 
-  p = options::wrap(Point(1, 2));
+  let p = options::wrap(Point(1, 2));
   match p {
     j: Just { io::println(p.toString() + " " + Str(j.value.x + j.value.y)); }
     Nothing {}

@@ -1,5 +1,5 @@
 // OK: float[3] declared and initialised
 fn main() -> int {
-  a: float[3] = [1.0, 2.5, 3.14];
+  let a: float[3] = [1.0, 2.5, 3.14];
   return 0;
 }

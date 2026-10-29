@@ -337,7 +337,7 @@ fn area(s: Shape) -> float {
 }
 
 fn main() -> int {
-  shapes = [Shape::Circle(1.5), Shape::Rect(2, 3), Shape::Label("hi"), Shape::Empty];
+  let shapes = [Shape::Circle(1.5), Shape::Rect(2, 3), Shape::Label("hi"), Shape::Empty];
   for i in 0..4 {
     io::println(shapes[i].toString() + " has area " + Str(area(shapes[i])));
   }
@@ -476,8 +476,8 @@ fn eval(e: Expr) -> int {
 
 fn main() -> int {
   // (2 + 3) * 4
-  sum = Expr::Add(Pair(Expr::Num(2), Expr::Num(3)));
-  e = Expr::Mul(Pair(sum, Expr::Num(4)));
+  let sum = Expr::Add(Pair(Expr::Num(2), Expr::Num(3)));
+  let e = Expr::Mul(Pair(sum, Expr::Num(4)));
   io::println(eval(e));
   return 0;
 }
@@ -540,9 +540,9 @@ fn orElse<T>(m: Maybe<T>, d: T) -> T {
 }
 
 fn main() -> int {
-  a = Maybe::Just(3);             // a Maybe<int>, from the field
-  b: Maybe<int> = Maybe::Nothing; // from the variable's type
-  c = Maybe<Str>::Nothing;        // written
+  let a = Maybe::Just(3);             // a Maybe<int>, from the field
+  let b: Maybe<int> = Maybe::Nothing; // from the variable's type
+  let c = Maybe<Str>::Nothing;        // written
   io::println(a.toString() + " " + b.toString() + " " + c.toString());
   io::println(orElse(a, 0) + orElse(b, 10));
   match divide(7, 0) {

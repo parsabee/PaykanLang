@@ -2252,6 +2252,76 @@ fn main() -> int {
   std::filesystem::remove(src);
 }
 
+// A List's walk reads the buffer's length in place.  The LLVM path loads
+// `len` (it calls no PaykanBuffer_len) and declares PaykanBuffer_get as
+// writing no memory the program reaches, so at -O2 List<int>.indexOf loads
+// the length once, before its loop, and makes one call for each element,
+// PaykanBuffer_get's.  A List<Hooked>'s walk, whose `==` calls an `equals`
+// that may change the list, loads it again for each element (SW-41).  The
+// C path calls Runtime.h's PaykanBuffer_len_inline.
+TEST(Driver, AListWalkReadsItsLengthInPlace) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(R"(import ::io;
+import ::collections;
+class Hooked {
+  view fn equals(other: Obj) -> bool { return False; }
+}
+fn main() -> int {
+  xs = collections::List<int>();
+  for i in 0..10 {
+    xs.push(i);
+  }
+  hs = collections::List<Hooked>();
+  hs.push(Hooked());
+  io::println(Str(xs.contains(7)) + " " + Str(xs.contains(70)) + " "
+      + Str(hs.contains(Hooked())));
+  return 0;
+}
+)");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, "True False False\n");
+  auto [irRc, ir] = run(paykanRun() + " -O2 --emit-llvm " + src + " 2>&1");
+  ASSERT_EQ(irRc, 0) << ir;
+  auto indexOf = [&](const std::string &element) {
+    const size_t start = ir.find("@pk__SList_3C" + element + "_3E_2EindexOf(");
+    return start == std::string::npos
+               ? std::string()
+               : ir.substr(start, ir.find("\n}\n", start) - start);
+  };
+  // Where @p f loads a buffer's `len` (offset 32), and where its first block
+  // after the entry, its loop's head, starts.
+  auto lengthLoad = [](const std::string &f) {
+    std::istringstream lines(f);
+    size_t at = 0;
+    for (std::string line; std::getline(lines, line); at += line.size() + 1)
+      if (line.find("getelementptr i8, ptr %") != std::string::npos &&
+          line.find(", i64 32") != std::string::npos)
+        return at;
+    return std::string::npos;
+  };
+  const std::string ints = indexOf("int"), hooked = indexOf("Hooked");
+  ASSERT_FALSE(ints.empty()) << ir;
+  ASSERT_FALSE(hooked.empty()) << ir;
+  EXPECT_EQ(ir.find("call i64 @PaykanBuffer_len("), std::string::npos) << ir;
+  EXPECT_LT(lengthLoad(ints), ints.find("; preds = ")) << ints;
+  size_t calls = 0;
+  for (size_t at = ints.find("call "); at != std::string::npos;
+       at = ints.find("call ", at + 1))
+    ++calls;
+  EXPECT_EQ(calls, 1u) << ints;
+  EXPECT_NE(ints.find("call ptr @PaykanBuffer_get("), std::string::npos)
+      << ints;
+  const size_t reread = lengthLoad(hooked);
+  ASSERT_NE(reread, std::string::npos) << hooked;
+  EXPECT_GT(reread, hooked.find("; preds = ")) << hooked;
+  auto [cRc, code] = run(paykanRun() + " --emit-c " + src + " 2>&1");
+  ASSERT_EQ(cRc, 0) << code;
+  EXPECT_NE(code.find("= PaykanBuffer_len_inline("), std::string::npos) << code;
+  EXPECT_EQ(code.find("= PaykanBuffer_len("), std::string::npos) << code;
+  std::filesystem::remove(src);
+}
+
 // A char ordered against a number is Sema's error on every path, as `==`
 // on the pair is: `run`, `build` and `--emit-c` each report it and stop.
 // `c < n` got past Sema and failed PIR verification (`cmp operands have

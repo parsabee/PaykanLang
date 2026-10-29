@@ -58,8 +58,8 @@ trait Named { view fn name() -> Str; }
 fn greet<T: Named>(x: view T) -> Str { return "hello, " + x.name(); }
 
 fn main() -> int {
-  s = greet("world");
-  n: Named = "x";
+  let s = greet("world");
+  let n: Named = "x";
   return 0;
 }
 ```
@@ -288,8 +288,8 @@ enum Suit { Hearts, Spades }
 fn twice<T: ValueType>(x: T) -> (T, T) { return (x, x); }
 
 fn main() -> int {
-  p = twice((1, "one"));
-  s = twice(Suit::Spades);
+  let p = twice((1, "one"));
+  let s = twice(Suit::Spades);
   io::println(Str(twice(2).1) + " " + p.1.1 + " " + Str(s.0 == Suit::Spades));
   return 0;
 }
@@ -371,4 +371,8 @@ a struct or an enum. An `impl Named for Box<T>` block of the module gives an imp
 `lib::Box<Str>` its methods, not the trait.
 
 Also not supported yet: `impl ... for` a built-in type, an enum or a class of another
-module, default methods, `static fn` requirements, and trait objects.
+module, default methods and `static fn` requirements.
+
+There are no trait objects, by design: a trait is a bound on a type parameter, never a
+type of its own, and a class hierarchy is what dispatches at run time (see
+[Inheritance and virtual methods](05-classes.md#inheritance-and-virtual-methods)).

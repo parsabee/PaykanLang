@@ -92,7 +92,7 @@ import ::collections;
 
 fn main() -> int {
   counts = collections::HashMap<Str, int>();
-  words: Str[5] = ["to", "be", "or", "not", "to"];
+  let words: Str[5] = ["to", "be", "or", "not", "to"];
   i: int = 0;
   while i < words.len() {
     counts.put(words[i], counts.getOr(words[i], 0) + 1);

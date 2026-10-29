@@ -19,8 +19,8 @@ impl Counter {
 }
 
 fn main() -> int {
-  a: Counter = Counter();
-  c: Counter = a.bump().bump().bump();  // each hop retains the same box
+  let a: Counter = Counter();
+  let c: Counter = a.bump().bump().bump();  // each hop retains the same box
   io::println(Str<int>(c.n));                 // 3
   return 0;
 }

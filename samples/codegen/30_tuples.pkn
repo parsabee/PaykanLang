@@ -64,7 +64,7 @@ fn tag(t: (int, Obj)) -> Str {
 
 fn main() -> int {
   // Literals and element access.
-  t = (1, "a", 2.5, True);
+  let t = (1, "a", 2.5, True);
   io::println(t);                             // (1, a, 2.5, True)
   io::println(Str<int>(t.0));                   // 1
   io::println(t.1);                           // a
@@ -79,7 +79,7 @@ fn main() -> int {
   io::println(Str(q) + " " + Str<int>(r));  // 3 2
 
   // Nesting and chained access.
-  nested = ((1, 2), ("x", (3, "y")));
+  let nested = ((1, 2), ("x", (3, "y")));
   io::println(nested);                        // ((1, 2), (x, (3, y)))
   io::println(nested.1.1.1);                  // y
 
@@ -92,30 +92,30 @@ fn main() -> int {
   // Tuples holding objects, as fields, and returned from methods.
   name, pt = label(Point(1, 2));
   io::println(name + " " + pt.toString());  // point P(1,2)
-  rg: Range = Range(10, 25);
+  let rg: Range = Range(10, 25);
   io::println(Str<int>(rg.width()));            // 15
   lo, hi = rg.get();
   io::println(Str(lo) + ".." + Str<int>(hi));  // 10..25
 
   // Equality is element-wise (Str by content, objects by their `equals`).
   a = (1, "s");
-  b = (1, "s");
+  let b = (1, "s");
   io::println(Str(a == b));               // True
   io::println(Str<bool>(a != (2, "s")));        // True
   io::println(Str(label(pt) == label(pt)));  // True  (same Point object)
 
   // A copy is its own value; re-assigning the source leaves the copy intact.
-  m = a;
+  let m = a;
   a = (0, "reset");
   io::println(m.1 + a.1);                     // sreset
 
   // Filled arrays, generic type arguments and `Show`.
-  keys: (int, Str)[3] = [(0, "k"); 3];
+  let keys: (int, Str)[3] = [(0, "k"); 3];
   io::println(keys[2]);                       // (0, k)
-  bx = Box<(Str, int)>(("seven", 7));
+  let bx = Box<(Str, int)>(("seven", 7));
   io::println(bx.get());                      // (seven, 7)
   io::println(bracket((q, r)));               // [(3, 2)]
-  s: Str = (q, r).toString();
+  let s: Str = (q, r).toString();
   io::println(s + "!");                       // (3, 2)!
 
   // Covariant elements: a `(int, Str)` passed where `(int, Obj)` is expected.

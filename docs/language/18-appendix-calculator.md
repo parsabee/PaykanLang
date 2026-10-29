@@ -142,7 +142,7 @@ added:
         return False;
       }
       None {
-        b: int = self.indexFor(key);
+        let b: int = self.indexFor(key);
         match self.buckets[b] {
           first: Entry {
             first.append(Entry(key, value));
@@ -168,7 +168,7 @@ bucket, any other by `Entry.unlink`, which links the entry before it to the one 
 ```pkn
 // from: samples/imports/12_calc/calc/hashmap.pkn
   fn remove(key: Str) -> bool {
-    b: int = self.indexFor(key);
+    let b: int = self.indexFor(key);
     match self.buckets[b] {
       first: Entry {
         if first.key.equals(key) {
@@ -269,10 +269,10 @@ chained conditional expression:
     result: float = self.parseFactor();
     self.skipWs();
     while !self.done() && (self.atIs('*') || self.atIs('/') || self.atIs('%')) {
-      op: Op = if self.atIs('*') then Op::Mul else if self.atIs('/')
+      let op: Op = if self.atIs('*') then Op::Mul else if self.atIs('/')
           then Op::Div else Op::Mod;
       self.advance();
-      rhs: float = self.parseFactor();
+      let rhs: float = self.parseFactor();
       result = applyOp(op, result, rhs);
       self.skipWs();
     }
@@ -286,7 +286,7 @@ A factor that is a name is looked up in the variable store. The `match` names th
 ```pkn
 // from: samples/imports/12_calc/calc/parser.pkn
     if self.atIsIdentStart() {
-      name: Str = self.parseIdent();
+      let name: Str = self.parseIdent();
       match self.env.lookup(name) {
         e: hashmap::Entry {
           return e.value;
@@ -309,22 +309,22 @@ its type, since a bare `None` in a tuple literal with no declared destination wo
 // from: samples/imports/12_calc/calc/parser.pkn
   fn parseStatement() -> (Str?, float) {
     self.skipWs();
-    start: int = self.pos;
+    let start: int = self.pos;
     if self.atIsIdentStart() {
-      name: Str = self.parseIdent();
+      let name: Str = self.parseIdent();
       self.skipWs();
       if self.atAssign() {
         self.advance(); // consume '='
-        v: float = self.parseExpr();
+        let v: float = self.parseExpr();
         self.skipWs();
-        target: Str? = name;
+        let target: Str? = name;
         return (target, v);
       }
       self.pos = start; // not an assignment — rewind and parse as an expression
     }
-    v: float = self.parseExpr();
+    let v: float = self.parseExpr();
     self.skipWs();
-    noName: Str? = None;
+    let noName: Str? = None;
     return (noName, v);
   }
 ```
@@ -377,7 +377,7 @@ statement:
 
 ```pkn
 // from: samples/imports/12_calc/main.pkn
-  history: Ring<(Str, float)> = Ring<(Str, float)>(("", 0.0));
+  let history: Ring<(Str, float)> = Ring<(Str, float)>(("", 0.0));
 ```
 
 ### Evaluating a statement
@@ -390,7 +390,7 @@ between printing an assignment and printing an expression's value:
 // from: samples/imports/12_calc/main.pkn
 fn evalStatement(src: Str, env: hashmap::HashMap, history: Ring<(Str, float)>,
                  quiet: bool) {
-  p: parser::Parser = parser::Parser(src, env);
+  let p: parser::Parser = parser::Parser(src, env);
   target, value = p.parseStatement();
 
   match p.error {

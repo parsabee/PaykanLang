@@ -31,12 +31,12 @@ fn probe(a: A) {
 }
 
 fn main() -> int {
-  o: Obj = A();
-  h: Holder = Holder(A());
+  let o: Obj = A();
+  let h: Holder = Holder(A());
   match o {
     b: A {
       probe(b);      // consumed argument: retains the subject's box
-      c: A = b;      // new owner: shares the same box
+      let c: A = b;  // new owner: shares the same box
       h.a = b;       // field slot: releases old box, retains subject's
       io::println(Str(c.x + h.a.x));  // 10
     }

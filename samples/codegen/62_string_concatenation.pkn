@@ -27,7 +27,7 @@ fn main() -> int {
   io::println("this message is far too long to fit on one line, so it is "
               "split across two");
 
-  usage = "usage: tool [options] <file>\n"
+  let usage = "usage: tool [options] <file>\n"
           "  -o <file>   write the output to <file>\n"  // one piece per line
           "  -O<n>       optimise at level <n>\n";      // of the output
   io::print(usage);

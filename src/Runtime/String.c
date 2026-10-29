@@ -314,16 +314,19 @@ PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other) {
   return (PaykanObject *)s;
 }
 
+// `s.concat(t)`.  Every string's bytes are a block of its own from
+// Paykan_malloc (string_alloc; a literal's use is a copy of its bytes), so
+// the block grows by a realloc, which the C library can often do where it
+// is: appending to a string does not copy it each time.  @p other may be
+// @p self, whose bytes are read after the realloc.
 void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other) {
   PaykanString *lhs = (PaykanString *)self;
   PaykanString *rhs = (PaykanString *)other;
-  int64_t newLen = lhs->len + rhs->len;
-  char *newData = (char *)Paykan_malloc((size_t)newLen + 1);
-  memcpy(newData, lhs->data, (size_t)lhs->len);
-  memcpy(newData + lhs->len, rhs->data, (size_t)rhs->len);
-  newData[newLen] = '\0';
-  Paykan_free(lhs->data);
-  lhs->data = newData;
+  int64_t oldLen = lhs->len;
+  int64_t newLen = oldLen + rhs->len;
+  lhs->data = (char *)Paykan_realloc(lhs->data, (size_t)newLen + 1);
+  memcpy(lhs->data + oldLen, rhs->data, (size_t)(newLen - oldLen));
+  lhs->data[newLen] = '\0';
   lhs->len = newLen;
 }
 

@@ -1004,9 +1004,8 @@ Val ModuleLowering::emitImplicitVarDecl(const std::string &name,
       val = takeSharedOwnership(rhsExpr, val);
     } else if (auto *id = ast::dyn_cast<ast::Identifier>(rhsExpr);
                id && holdsBox(id->getName())) {
-      // A variable holding a box: visitIdentifier already unwrapped it; load
-      // the box itself and retain it.
-      val = loadVarBox(id->getName());
+      // A variable holding a box: @p valIn is the box itself, which
+      // visitAssignStmt loaded; retain it.
       emitRetain(val, /*lend=*/false,
                  CurrentScope->lookupASTType(id->getName()));
     } else {
@@ -1075,7 +1074,16 @@ Val ModuleLowering::visitAssignStmt(ast::AssignStmt *node) {
     emitMemAssign(dst, node->getValue());
     return Val();
   }
-  Val val = emitExpr(node->getValue());
+  // `x = y` declaring x, y a variable holding a box: x shares y's box, which
+  // is all that is read (emitImplicitVarDecl), as `let x = y` reads it
+  // (visitVarDecl).  Reading y's value as well left a load and an unbox no
+  // one used, and so `let` changed the PIR of a local never reassigned.
+  auto *rhsVar = ast::dyn_cast<ast::Identifier>(node->getValue());
+  const bool sharesBox = rhsVar && holdsBox(rhsVar->getName()) &&
+                         !exprAlreadyShared(rhsVar) &&
+                         !CurrentScope->findOwner(node->getVarName());
+  Val val =
+      sharesBox ? loadVarBox(rhsVar->getName()) : emitExpr(node->getValue());
   if (!val)
     return val;
 

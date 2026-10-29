@@ -54,13 +54,13 @@ fn main() -> int {
       + " " + add("ab", "cd") + " " + Str(add(1.5, 2.0)) + " | "
       + Str(quadruple(42)) + " " + Str(useEarly(2.5)));
 
-  pair = swapped((1, "b"));
+  let pair = swapped((1, "b"));
   io::print("(" + pair.0 + ", " + Str(pair.1) + ") | " + repeat("ab", 3)
       + " | ");
   io::print(Str(larger(3, 9, "max")) + " | ");
-  n: unsigned = 2;
+  let n: unsigned = 2;
   io::print(Str(count(3)) + " " + Str(count(n)) + " | ");
-  p = Point(3, 4);
+  let p = Point(3, 4);
   io::print(Str(taxicab(p)) + " " + p.toString() + " | ");
   io::println(Str(larger<float, Str>(0.5, 1.5, "float")) + " "
       + Str(add<int, int>(10, 20)) + ".");

@@ -17,11 +17,11 @@ fn describe(c: color::Color) -> Str {
 
 fn main() -> int {
   // Qualified enum type as a variable annotation + variant access.
-  c: color::Color = color::Color::Green;
+  let c: color::Color = color::Color::Green;
   io::println(describe(c));                       // green
 
   // Imported function returning an enum.
-  f: color::Color = color::favorite();
+  let f: color::Color = color::favorite();
   io::println(color::name(f));                    // blue
 
   // Equality against an imported variant (same enum only).

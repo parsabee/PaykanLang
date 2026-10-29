@@ -163,8 +163,8 @@ impl Line {
 }
 
 fn main() -> int {
-  p = Point(1, 2);                 // the fields in order
-  l = Line(p, Point(3, 4));        // through __init__
+  let p = Point(1, 2);             // the fields in order
+  let l = Line(p, Point(3, 4));    // through __init__
   io::println(p);
   io::println(l);
   return 0;
@@ -205,11 +205,11 @@ fn main() -> int {
   p.x = 5;                         // in place
   l = Line(p, Point(3, 4));
   l.a.y = 0;                       // a field of a field
-  s = Shape(Point(0, 0));
+  let s = Shape(Point(0, 0));
   s.at.x = 7;                      // a struct field of an object
   ps: Point[2] = [p, l.b];
   ps[1].x = 9;                     // an element's field
-  t = (p, "p");
+  let t = (p, "p");
   io::println(Str(p.x + l.a.y + s.at.x + ps[1].x + t.0.x));
   return 0;
 }
@@ -271,11 +271,11 @@ struct Item { name: Str; node: Node; }
 fn rename(it: Item) -> Item { it.name = it.name + "'"; return it; }   // its own copy
 
 fn main() -> int {
-  a = Item("a", Node(1));
+  let a = Item("a", Node(1));
   b = a;                           // a copy: the same Node
   b.name = "b";
   b.node.n = 2;                    // the shared object
-  c = rename(a);
+  let c = rename(a);
   io::println(a);
   io::println(b);
   io::println(c.name + " " + Str(a == b) + " " + Str(a == Item("a", a.node)));
@@ -402,7 +402,7 @@ fn main() -> int {
   c.tick();
   c.tickTwice();                   // a method calling methods on self
   bump(c.slot());                  // an inout result: c.n
-  b = Box(c);                      // a copy in the field
+  let b = Box(c);                  // a copy in the field
   b.c.tick();                      // the field's struct
   d = c;                           // a copy
   d.n = 9;
@@ -467,8 +467,8 @@ fn greet<T: Named>(x: view T) -> Str { return x.name(); }
 fn sameHash<T: Hashable>(a: view T, b: view T) -> bool { return a.hash() == b.hash(); }
 
 fn main() -> int {
-  p = Point(1, 2);
-  pair = twice(p);
+  let p = Point(1, 2);
+  let pair = twice(p);
   io::println(show(p) + " " + greet(p) + " " + Str(pair.1.y) + " " +
           Str(sameHash(p, Point(1, 2))) + " " + Str(p == Point(1, 2)) + " " +
           Str(p != pair.0));
@@ -541,7 +541,7 @@ struct Pair<A, B> {
 
 impl Pair<A, B> {
   view fn first() -> view A { return self.a; }
-  fn swapWith(other: inout Pair<A, B>) { t = self.a; self.a = other.a; other.a = t; }
+  fn swapWith(other: inout Pair<A, B>) { let t = self.a; self.a = other.a; other.a = t; }
   fn flipped() -> Pair<B, A> { return Pair<B, A>(self.b, self.a); }
 }
 
@@ -566,8 +566,8 @@ fn main() -> int {
   p = Pair(1, "one");                    // Pair<int, Str>, inferred
   q: Pair<int, Str> = Pair<int, Str>(2, "two");
   p.swapWith(q);
-  f = p.flipped();                       // Pair<Str, int>
-  b = Box(Pair(3, 4));                   // Box<Pair<int, int>>, through __init__
+  let f = p.flipped();                   // Pair<Str, int>
+  let b = Box(Pair(3, 4));               // Box<Pair<int, int>>, through __init__
   bs: Box<int>[2] = [Box(1), Box(2)];
   bs[1].v = 7;
   io::println(p);
@@ -635,7 +635,7 @@ import geo;
 fn main() -> int {
   p = geo::Point(1, 2);
   p.shift(3);
-  o: geo::Point = geo::Point::origin();
+  let o: geo::Point = geo::Point::origin();
   io::println(p.toString() + " " + Str(p.sum()) + " " + Str(o == geo::make(0)));
   return 0;
 }

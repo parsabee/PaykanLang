@@ -50,7 +50,7 @@ fn main() -> int {
   io::println("PaykanString_new(2) = " + Str<int>(PaykanString_new(2)));
   io::println("Paykan_println(6, 7) = " + Str<int>(Paykan_println(6, 7)));
   io::println("PaykanString_concat() = " + Str<int>(PaykanString_concat()));
-  nothing: Str? = None;
+  let nothing: Str? = None;
   io::print("PaykanObject_None() = " + Str<int>(PaykanObject_None()) + ", ");
   io::println(nothing);
   Paykan_panic_div_by_zero();

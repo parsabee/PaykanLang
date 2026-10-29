@@ -195,7 +195,7 @@ compilation with a message that points at the problem:
 
 ```pkn
 fn main() -> int {
-  count: int = "three";
+  let count: int = "three";
   return 0;
 }
 ```

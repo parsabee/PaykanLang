@@ -7,30 +7,30 @@ import ::io;
 
 fn innerWork(flag: bool) -> Str {
   // Str declared before the conditional return — must be released on BOTH paths.
-  prefix: Str = "result";
+  let prefix: Str = "result";
   if flag {
-    suffix: Str = "-yes";
+    let suffix: Str = "-yes";
     return prefix + suffix;   // emitAllScopesCleanup releases prefix+suffix
   }
   return prefix + "-no";      // emitAllScopesCleanup releases only prefix
 }
 
 fn multiReturn(n: int) -> int {
-  a: Str = "a";
+  let a: Str = "a";
   if n < 0 { return 0 - 1; }
-  b: Str = "b";
+  let b: Str = "b";
   if n == 0 { return 0; }
-  c: Str = "c";
+  let c: Str = "c";
   return n * 2;
 }
 
 fn main() -> int {
   io::println("=== simple nested scopes ===");
-  s0: Str = "outer";
+  let s0: Str = "outer";
   if True {
-    s1: Str = "inner1";
+    let s1: Str = "inner1";
     if True {
-      s2: Str = "inner2";
+      let s2: Str = "inner2";
       io::println(s2);        // inner2  — s2 released when this block ends
     }
     io::println(s1);          // inner1  — s1 released when if block ends
@@ -42,7 +42,7 @@ fn main() -> int {
   i: int = 0;
   total: int = 0;
   while i < 5 {
-    x: Str = Str<int>(i);
+    let x: Str = Str<int>(i);
     total = total + x.len();
     i = i + 1;
   }
@@ -60,13 +60,13 @@ fn main() -> int {
 
   io::println("=== deeply nested scopes ===");
   // 4 levels of if-nesting each with a Str var; all must be cleaned up.
-  level0: Str = "L0";
+  let level0: Str = "L0";
   if True {
-    level1: Str = "L1";
+    let level1: Str = "L1";
     if True {
-      level2: Str = "L2";
+      let level2: Str = "L2";
       if True {
-        level3: Str = "L3";
+        let level3: Str = "L3";
         io::println(level3);    // L3
       }
       io::println(level2);      // L2
@@ -86,7 +86,7 @@ fn main() -> int {
   io::println("=== scope stress: many short-lived Strs ===");
   j: int = 0;
   while j < 10 {
-    tmp: Str = "t" + Str(j);
+    let tmp: Str = "t" + Str(j);
     io::println(tmp);
     j = j + 1;
   }

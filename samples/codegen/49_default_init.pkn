@@ -84,23 +84,23 @@ fn scoreText(s: int?) -> Str {
 }
 
 fn main() -> int {
-  p = Point(1, 2);
-  l = Labeled(3, 4, "origin");
+  let p = Point(1, 2);
+  let l = Labeled(3, 4, "origin");
   io::println(p.show() + " " + l.show() + " " + l.label);
 
-  c = Car(5, "car");
+  let c = Car(5, "car");
   io::println(c.kind + " at " + Str(c.speed));
 
   io::println(chain(Node("a", Node("b", None))));
 
-  inv = Inventory(["x", "y", "z"], (1, "one"), None);
+  let inv = Inventory(["x", "y", "z"], (1, "one"), None);
   io::println(Str(inv.items.len()) + " items, first " + inv.first.toString()
       + ", score " + scoreText(inv.score));
 
-  s: Shape = Square(3);
+  let s: Shape = Square(3);
   io::println("square " + Str(s.area()));
 
-  b = Box(7);
+  let b = Box(7);
   io::println("box of " + Str(b.v));
   return 0;
 }

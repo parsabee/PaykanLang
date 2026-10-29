@@ -1,6 +1,6 @@
 // ERROR: a type parameter names a type; it cannot be read or constructed.
 fn make<T>(x: T) -> T {
-  y = T;
+  let y = T;
   return x;
 }
 

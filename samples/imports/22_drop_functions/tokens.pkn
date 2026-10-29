@@ -38,9 +38,9 @@ enum Token {
 }
 
 fn wide(s: Str) -> Wide {
-  four = Four(s, s, s, s);
-  sixteen = Sixteen(four, four, four, four);
-  sixtyFour = SixtyFour(sixteen, sixteen, sixteen, sixteen);
+  let four = Four(s, s, s, s);
+  let sixteen = Sixteen(four, four, four, four);
+  let sixtyFour = SixtyFour(sixteen, sixteen, sixteen, sixteen);
   return Wide(sixtyFour, sixtyFour, sixtyFour, sixtyFour, s + "!");
 }
 
@@ -74,7 +74,7 @@ fn kept(n: int) -> Str {
 // The text of token @p i, from a returning arm: another module's copy of
 // name<T> drops the token by that module's drop function.
 fn name<T>(tag: T, i: int) -> Str {
-  t = make(i);
+  let t = make(i);
   match t {
     w: Word { return w.s + Str(tag); }
     b: Block { return b.w.c.b.a.d + Str(tag); }

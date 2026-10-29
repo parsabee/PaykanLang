@@ -70,7 +70,7 @@ fn crunch(a: int, b: int, i: int, m: u8, n: u8) -> Str {
   q += a / b + a / b + a / b + a / b;
   q += a / b + a / b + a / b + a / b;
   q += a / b + a / b + a / b + a / b;
-  xs: int[4] = [1, 2, 3, 4];
+  let xs: int[4] = [1, 2, 3, 4];
   r = 0;
   r += xs[i] + xs[i] + xs[i] + xs[i];
   r += xs[i] + xs[i] + xs[i] + xs[i];

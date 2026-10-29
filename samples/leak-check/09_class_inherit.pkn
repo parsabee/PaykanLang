@@ -17,6 +17,6 @@ impl Derived {
 }
 
 fn main() -> int {
-  d: Derived = Derived();
+  let d: Derived = Derived();
   return 0;
 }

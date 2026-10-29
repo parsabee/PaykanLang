@@ -2227,8 +2227,12 @@ std::string Sema::instantiateFunction(const std::string &name,
                                 : instantiationName(name, args);
   noteInstantiationRequest(instName);
   if (auto fIt = FuncInstantiations.find(instName);
-      fIt != FuncInstantiations.end())
-    return fIt->second ? instName : "";
+      fIt != FuncInstantiations.end()) {
+    if (fIt->second)
+      return instName;
+    ++SuppressedFollowOns; // reported at its first request
+    return "";
+  }
 
   if (!origin && lookupFunction(instName)) {
     error(loc, "instantiation '" + instName +

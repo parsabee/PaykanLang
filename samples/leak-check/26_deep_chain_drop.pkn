@@ -60,7 +60,7 @@ impl Chain {
 }
 
 fn leaf() -> Tree {
-  t = Tree();
+  let t = Tree();
   t.leaves = Node(0);
   return t;
 }
@@ -69,7 +69,7 @@ fn list(n: int) -> int {
   head: Node? = None;
   i = 0;
   while i < n {
-    node = Node(i);
+    let node = Node(i);
     node.next = head;
     head = node;
     i = i + 1;
@@ -81,8 +81,8 @@ fn tree(depth: int) -> int {
   root: Tree? = None;
   i = 0;
   while i < depth {
-    t = Tree();
-    side = Tree();
+    let t = Tree();
+    let side = Tree();
     side.left = leaf();
     side.right = leaf();
     t.left = side;

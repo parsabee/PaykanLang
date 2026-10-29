@@ -88,7 +88,7 @@ fn main() -> int {
   // =========================================================================
 
   // --- A1: basic no-binding dispatch ---
-  a: Animal = Dog();
+  let a: Animal = Dog();
   match a {
     Dog { io::println("A1: Dog"); }
     Cat { io::println("A1: Cat"); }
@@ -97,13 +97,13 @@ fn main() -> int {
   }
 
   // --- A2: wildcard-only arm ---
-  b: Animal = Cat();
+  let b: Animal = Cat();
   match b {
     _ { io::println("A2: wildcard"); }
   }
 
   // --- A3: binding + field access ---
-  d: Animal = Labrador();
+  let d: Animal = Labrador();
   match d {
     lab: Labrador {
       io::println("A3: " + lab.name);
@@ -117,7 +117,7 @@ fn main() -> int {
   }
 
   // --- A4: binding + method call (dispatch through the binding) ---
-  plainDog: Animal = Dog();
+  let plainDog: Animal = Dog();
   match plainDog {
     dog: Dog {
       io::println("A4: " + dog.speak());
@@ -128,7 +128,7 @@ fn main() -> int {
   }
 
   // --- A5: exact-type comparison — a Labrador does NOT match the Dog arm ---
-  e: Animal = Labrador();
+  let e: Animal = Labrador();
   match e {
     Cat { io::println("A5: cat"); }
     Dog { io::println("A5: Dog"); }
@@ -141,7 +141,7 @@ fn main() -> int {
   }
 
   // --- A6: no arm matches -> wildcard ---
-  f: Animal = Bird();
+  let f: Animal = Bird();
   match f {
     Dog { io::println("A6: dog"); }
     Cat { io::println("A6: cat"); }
@@ -160,7 +160,7 @@ fn main() -> int {
   // =========================================================================
 
   // --- B1: Str literal match (content comparison) ---
-  greeting: Str = "World";
+  let greeting: Str = "World";
   match greeting {
     "Hello" {
       io::println("B1: got Hello");
@@ -174,7 +174,7 @@ fn main() -> int {
   }
 
   // --- B2: Str match falls through to wildcard ---
-  nope: Str = "Nope";
+  let nope: Str = "Nope";
   match nope {
     "Hello" {
       io::println("B2: got Hello");
@@ -188,7 +188,7 @@ fn main() -> int {
   }
 
   // --- B3: int literal match ---
-  n: int = 2;
+  let n: int = 2;
   match n {
     1 { io::println("B3: one"); }
     2 { io::println("B3: two"); }
@@ -197,7 +197,7 @@ fn main() -> int {
   }
 
   // --- B4: float literal match ---
-  pi: float = 2.5;
+  let pi: float = 2.5;
   match pi {
     1.0 { io::println("B4: one"); }
     2.5 {
@@ -207,7 +207,7 @@ fn main() -> int {
   }
 
   // --- B5: char literal match ---
-  ch: char = 'b';
+  let ch: char = 'b';
   match ch {
     'a' { io::println("B5: a"); }
     'b' { io::println("B5: b"); }
@@ -215,7 +215,7 @@ fn main() -> int {
   }
 
   // --- B6: bool literal match — exhaustive, no wildcard needed ---
-  flag: bool = False;
+  let flag: bool = False;
   match flag {
     True { io::println("B6: yes"); }
     False { io::println("B6: no"); }

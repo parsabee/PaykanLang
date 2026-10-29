@@ -26,8 +26,11 @@ class Counter {
 }
 
 impl Counter {
-  static fn make(n: int) -> Counter
-                               { c = Counter(0, n); c.__count = 10; return c; }
+  static fn make(n: int) -> Counter {
+    let c = Counter(0, n);
+    c.__count = 10;
+    return c;
+  }
   fn copyFrom(o: view Counter) { self.__count = o.__count; }
 }
 
@@ -80,24 +83,24 @@ impl Box<T> {
 }
 
 fn main() -> int {
-  c = Counter::make(3);
+  let c = Counter::make(3);
   c.tick();
-  d = Counter(0, 1);
+  let d = Counter(0, 1);
   d.copyFrom(c);
-  add = c.adder();
+  let add = c.adder();
   io::println(Str(c.value()) + " " + Str(d.value()) + " " + c.name() + " "
       + Str(add(5)));
 
   p = P::origin();
   p.bump();
-  q = P(2, 3);                              // the private field, as a constructor argument
+  let q = P(2, 3);                          // the private field, as a constructor argument
   io::println(Str(p.x()) + " " + Str(q.x()) + " " + q.toString() + " "
       + Str(p == P(2, 0)));
 
-  chain = _Node(1, _Node(2, _Node(3, None)));
-  b = Box("s");
+  let chain = _Node(1, _Node(2, _Node(3, None)));
+  let b = Box("s");
   b.set("t");
-  o = Box("u");
+  let o = Box("u");
   b.take(o);
   io::println(Str(_sum(chain)) + " " + b.get() + " " + Str(chain._len()));
   return 0;
