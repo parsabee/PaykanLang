@@ -119,9 +119,11 @@ the end are amortised O(1); `insert` and `removeAt` move the elements after the 
 `indexOf`, `contains` and `remove` walk the list, comparing each element with `==`. An
 element's `equals` may change the list: the walk goes on over the elements the list then
 has, so one that empties it makes the search find nothing. `indexOf` is the index the
-element had when its `==` was `True`. When the `equals` that found it changed the list's
-length, that index may name another element or none, so `remove` then removes nothing and
-is `False`.
+element had when its `==` was `True`, and `remove` removes the element at that index. When
+the `equals` that found it changed the list's length, that index may name another element
+or none, so `remove` then removes nothing and is `False`. A change that keeps the length (a
+`swap` or a `set`) goes unseen: `remove` then removes the element at that index, which may
+be another one, and is `True`.
 
 | Method | Does | When it fails |
 |--------|------|---------------|
@@ -138,7 +140,7 @@ is `False`.
 | `fn removeAt(i: unsigned) -> T` | Removes and returns element `i` | panics as `at` |
 | `view fn indexOf(v: view T) -> unsigned?` | The index of the first element `== v` | `None` when there is none |
 | `view fn contains(v: view T) -> bool` | Whether some element is `== v` | |
-| `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | `False`, removing nothing, when the `equals` that found it changed the list's length |
+| `fn remove(v: view T) -> bool` | Removes the first element `== v`; `True` if there was one | `False`, removing nothing, when the `equals` that found it changed the list's length; the element then at its index when that `equals` changed the list but not its length |
 | `fn swap(i: unsigned, j: unsigned)` | Exchanges elements `i` and `j` | panics as `at` |
 | `fn reverse()` | Reverses the order of the elements | |
 | `fn clear()` | Removes every element | |

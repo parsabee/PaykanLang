@@ -59,6 +59,17 @@ fn shrunkByEquals() -> collections::List<Hooked> {
   return xs;
 }
 
+// A list of 1, 2 and 3, whose 2 swaps itself with the 3 after it when its
+// `equals` is called.  Its hook holds the list: clear it when done.
+fn swappedByEquals() -> collections::List<Hooked> {
+  xs = collections::List<Hooked>();
+  let shared = memory::Box(xs);
+  xs.push(Hooked(1, None));
+  xs.push(Hooked(2, fn() -> int { shared.get().swap(1, 2); return 0; }));
+  xs.push(Hooked(3, None));
+  return xs;
+}
+
 // The text of an index `indexOf` returns: the number, or "None".
 fn idx(i: unsigned?) -> Str {
   match i {
@@ -151,5 +162,12 @@ fn main() -> int {
       + collections::listToString(d) + " " + Str(e.remove(Hooked(1, None)))
       + " " + collections::listToString(e));
   d.clear();
+
+  // An `equals` that changes the list but not its length goes unseen:
+  // remove takes out the element then at the index it was found at, the 3.
+  f = swappedByEquals();
+  io::println(Str(f.remove(Hooked(2, None))) + " "
+      + collections::listToString(f));
+  f.clear();
   return 0;
 }

@@ -14,3 +14,4 @@
 688890 True True
 None False False 0
 False [2, 3] False []
+True [1, 2]

@@ -1666,7 +1666,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `[2]`), and one that emptied the list made it panic, `List index 0 out of range (len=0)`
     (exit 134). It removes nothing and is `False` when that `equals` changed the list's
     length, whose index may then name another element or none (docs/stdlib/collections.md,
-    "List<T>").
+    "List<T>"). An `equals` that changes the list but keeps its length (a `swap` or a
+    `set`) still goes unseen, as the docs say: `remove` takes out the element then at that
+    index, which may be another one (`True`, with a 2 that swaps itself with the 3 after
+    it, `[1, 2, 3]` left as `[1, 2]`). Seeing it would take a count of the changes in the
+    storage every copy of the list shares, which each change would pay for.
   - The C path and the runtime round an `f32` value through a C `float`, but `Runtime.h`
     checked only that `double` is IEEE 754 binary64. It also checks now that `float` is
     binary32 (`FLT_MANT_DIG == 24`, `FLT_MAX_EXP == 128`, `FLT_MIN_EXP == -125`), so a
