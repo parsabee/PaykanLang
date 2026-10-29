@@ -33,7 +33,7 @@
     "samples":         {"gtest": false, "disabled": false, "description": "scripts/samples_parity.py, cache_race.py, runtime_lookup.py: SamplesParity*, CacheRace, RuntimeLookup"},
     "stdlib":          {"gtest": false, "disabled": false, "description": "scripts/stdlib_tests.py: StdlibTests, StdlibTestsBuild, StdlibTestsC (tests/Stdlib on the standard library the build stages)"},
     "c-strict":        {"gtest": false, "disabled": false, "description": "scripts/c_strict.py: CStrictC11 (the mlir backend's --emit-c)"},
-    "docs":            {"gtest": false, "disabled": false, "description": "scripts/check_links.py, doc_examples.py, let_check.py: MarkdownLinks, DocExamples, LetDecls"},
+    "docs":            {"gtest": false, "disabled": false, "description": "scripts/check_links.py, doc_examples.py, let_check.py: MarkdownLinks, DocExamples, LetDecls, LetDeclsWithoutAnAST"},
     "configure":       {"gtest": false, "disabled": false, "description": "tests/DefaultConfigure.cmake, scripts/test_selection.py: DefaultConfigure, TestSelection"},
     "out-of-tree":     {"gtest": true,  "disabled": false, "description": "tests/OutOfTree: PrintPIROutOfTree, PluginCompatOutOfTree, FrontendTestsOutOfTree"}
   },

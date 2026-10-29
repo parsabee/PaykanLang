@@ -400,8 +400,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`let` there would declare another variable), and a program Sema rejects keeps its
     errors. `let` is Sema's alone, so a declaration that Sema accepts as `let` but whose
     `let` changes the program's `--emit-pir` is an error of the check: the two forms are
-    lowered differently. `--apply` makes the declarations it reports `let`. There is no
-    compiler warning for it.
+    lowered differently. A program that must compile and does not is an error too (a sample
+    that is not an `err_` one, a docs example that shows its output, the standard library
+    with the programs of tests/Stdlib), so a compiler that prints no AST fails the check
+    instead of leaving everything unchecked, as the ctest `LetDeclsWithoutAnAST` shows.
+    `--apply` makes the declarations it reports `let`. There is no compiler warning for
+    it.
     - A first assignment `x = y;` of a variable `y` holding a box (a `Str`, an object, an
       optional) read `y`'s value, with an `unbox` no one used, before it loaded the box `x`
       shares, which `let x = y;` loads alone: so `let` changed such a program's PIR, and
@@ -411,7 +415,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       without an initializer, which cannot be `let`; a generic body that the program never
       instantiates, which Sema checks for each instantiation only (the standard library's
       generic code is checked through the programs of tests/Stdlib, compiled against the
-      changed sources); and a docs example whose fence follows the line
+      changed sources); a docs block that is not a whole program and does not parse alone,
+      86 of them (63 in docs/language, 23 in docs/stdlib), which are statements with no `fn
+      main` and still have declarations without `let` that look never reassigned
+      (`maybe: Node? = None;` in 12-optionals.md); the 7 `err_` samples of samples/sema
+      that do not parse; and a docs example whose fence follows the line
       `<!-- let_check: plain -->`, as the three of docs/language/02-basics.md that show the
       plain declaration itself do.
     - The tree follows it: 1,462 declarations are `let` now (840 in samples/codegen and

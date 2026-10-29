@@ -49,11 +49,18 @@ Not covered:
 - a declaration in the body of a generic function or type that the program
   never instantiates: Sema checks such a body for each of its
   instantiations only;
-- a module of a sample that its program does not import, a docs block
-  that is not a whole program and that `--check-only` rejects, and a file
-  that does not parse;
+- a module of a sample that its program does not import, and a docs
+  block that is not a whole program (statements alone, with no `fn main`)
+  that does not parse or that `--check-only` rejects;
+- an `err_` sample that does not parse, and a docs example whose `Error:`
+  is the parser's;
 - a docs example whose opening fence follows the line
   `<!-- let_check: plain -->`: one that shows the plain declaration itself.
+
+A program that must compile and does not is an error too, so that a
+compiler that cannot print the AST checks nothing and fails: a sample that
+is not an `err_` one, a docs example that shows its output, and the
+standard library with the programs of tests/Stdlib.
 
 Usage:
     let_check.py --paykan build/bin/paykan [-j N] [--apply] [-v] [path ...]
@@ -380,13 +387,16 @@ class Program:
     """What one compiler run checks: @p sources, written in a directory of
     their own, and the @p entries compiled there.  For the standard library
     the sources are $PAYKAN_STDLIB and the entries the programs of
-    tests/Stdlib."""
+    tests/Stdlib.  A program that @p compiles (a sample that is not an
+    `err_` one, a docs example of a whole program that shows no `Error:`,
+    the standard library) is an error when it does not."""
 
     def __init__(self, name, sources, entries, stdlib=False,
-                 error_lines=None):
+                 error_lines=None, compiles=False):
         self.name, self.sources, self.entries = name, sources, entries
         self.stdlib = stdlib
         self.error_lines = error_lines  # a docs example's Error: block
+        self.compiles = compiles
         self.mode = None                # --emit-pir or --check-only
         self.notes = []                 # why declarations were not checked
         self.errors = []                # what fails the check besides them
@@ -414,11 +424,18 @@ def sample_programs(paths):
             entries = ["main.pkn"] if (top / "main.pkn").is_file() else \
                 [s.rel for s in sources]
             programs.append(Program(top.relative_to(ROOT).as_posix(),
-                                    sources, entries))
+                                    sources, entries,
+                                    compiles=not is_error_sample(top)))
         else:
             programs.append(Program(f.relative_to(ROOT).as_posix(),
-                                    [Source(f.name, read(f), f)], [f.name]))
+                                    [Source(f.name, read(f), f)], [f.name],
+                                    compiles=not is_error_sample(f)))
     return programs
+
+
+def is_error_sample(path):
+    """@p path is a sample that shows an error: `err_...`."""
+    return path.name.startswith("err_")
 
 
 def docs_programs(md):
@@ -459,7 +476,8 @@ def docs_programs(md):
         error_lines = [ln.strip() for ln in fences[nxt][2]
                        if ln.strip()] if err else None
         programs.append(Program(name, modules + [src], [src.rel],
-                                error_lines=error_lines))
+                                error_lines=error_lines,
+                                compiles=error_lines is None))
         modules = []
     return programs
 
@@ -469,7 +487,7 @@ def stdlib_program():
                for f in sorted((ROOT / "stdlib").glob("*.pkn"))]
     tests = sorted(STDLIB_TESTS.glob("*.pkn")) + \
         sorted((STDLIB_TESTS / "panics").glob("*.pkn"))
-    return Program("stdlib", sources, tests, stdlib=True)
+    return Program("stdlib", sources, tests, stdlib=True, compiles=True)
 
 
 def read(path):
@@ -578,7 +596,8 @@ def check_program(args, program):
     for src in program.sources:
         src.walker = ast_of(args, src)
         if src.walker is None:
-            program.notes.append(f"{src.label(1)}: does not parse")
+            (program.errors if program.compiles else program.notes).append(
+                f"{src.label(1)}: does not parse")
         elif src.plain:
             program.notes.append(f"{src.label(1)}: shows plain declarations")
         else:
@@ -590,11 +609,14 @@ def check_program(args, program):
     base = compile_program(args, program, [])
     if base.pir is None:
         if program.stdlib:
-            program.notes.append("stdlib: a program of tests/Stdlib does "
-                                 "not compile")
+            program.errors.append("stdlib: a program of tests/Stdlib does "
+                                  "not compile")
             return []
         program.mode = "--check-only"
         base = compile_program(args, program, [])
+        if program.compiles and any(d[3] == "error" for d in base.diags):
+            program.errors.append(f"{program.name}: does not compile")
+            return []
     decls = reached(args, program, base, decls)
     active = list(decls)
     for _ in range(MAX_ROUNDS):
@@ -812,6 +834,8 @@ def main():
               "with 'let'")
     notes = [n for p in programs for n in p.notes]
     errors = [e for p in programs for e in p.errors]
+    if programs and not any(s.walker for p in programs for s in p.sources):
+        errors.append(f"no program parses with {args.paykan}")
     for e in errors:
         print(f"error: {e}")
     if args.verbose:
