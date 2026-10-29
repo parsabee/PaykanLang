@@ -75,6 +75,12 @@ int64_t alignTo(int64_t n, int64_t align) {
 /// Up to this many slots are visited one by one; more in a loop.
 constexpr int64_t kUnrolledSlots = 4;
 
+/// A value of up to this many references is released in place wherever it
+/// is released; one of more, on a way out of a scope or as a temporary, by
+/// a call of its type's drop function once the function has written
+/// kWayOutReleasesInPlace such releases in place (emitMemDrop).
+constexpr size_t kReleasesInPlace = 4;
+
 /// Whether @p e is a literal whose value is all zero bits.
 bool isZeroLiteral(const ast::Expr *e) {
   if (const auto *i = ast::dyn_cast<ast::IntegerLiteral>(e))
@@ -148,6 +154,49 @@ void ModuleLowering::emitMemOptionalWrap(ast::Expr *e, const Val &dst) {
 }
 
 ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
+  MemValue v = emitMemRead(e);
+  // A slice's elements are copied by their number (emitSliceArg).
+  if (!v.Addr || v.Temp || !SnapshotReads.count(e) ||
+      ast::isa<ast::SliceType>(e->getResolvedType()))
+    return v;
+  // Read where it is, and used once operands after it have run, which may
+  // write it (noteBorrowedReads): the value it has now, in a temporary.
+  return {copyToTemporary(v.Addr, memTypeOf(e), "snap"), /*Temp=*/true};
+}
+
+Val ModuleLowering::copyToTemporary(const Val &addr, ast::Type *ty,
+                                    const std::string &name) {
+  MemLayout l = memLayout(ty);
+  pir::LocalId tmp = B.addMemLocal(name, l.Size, l.Align);
+  Val copy = B.localAddr(tmp, name + ".addr");
+  B.memCopy(copy, addr, Val::i64(l.Size));
+  emitMemRetain(copy, ty);
+  return copy;
+}
+
+Val ModuleLowering::copySliceToTemporary(const Val &addr, const Val &len,
+                                         ast::SliceType *st) {
+  ast::Type *elemTy = st->getElementType();
+  const int64_t stride = memLayout(elemTy).Size;
+  Val size = B.binary(Opcode::Mul, len, Val::i64(stride), "snap.size");
+  Val copy = callRuntime(names::kPaykanMalloc, {size}, "snap.elems");
+  B.memCopy(copy, addr, size);
+  if (holdsRef(elemTy))
+    forEachSlotUpTo(copy, 0, len, stride,
+                    [&](const Val &at) { emitMemRetain(at, elemTy); });
+  MemTemps.emplace_back(copy, st, len);
+  return copy;
+}
+
+void ModuleLowering::releaseSliceCopy(const Val &copy, const Val &len,
+                                      ast::SliceType *st) {
+  if (ast::Type *elemTy = st->getElementType(); holdsRef(elemTy))
+    forEachSlotUpTo(copy, 0, len, memLayout(elemTy).Size,
+                    [&](const Val &at) { emitMemRelease(at, elemTy); });
+  callRuntime(names::kPaykanFree, {copy});
+}
+
+ModuleLowering::MemValue ModuleLowering::emitMemRead(ast::Expr *e) {
   // A tuple or a struct made the present value of its optional: the
   // optional, in a temporary.
   if (isMemOptionalWrap(e) && e != UnwrappedExpr) {
@@ -199,13 +248,9 @@ ModuleLowering::MemValue ModuleLowering::emitMemValue(ast::Expr *e) {
       return {addr};
     // A read its statement may change the variable under (noteHeldReads):
     // a copy of its own, in a temporary.
-    ast::Type *ty = CurrentScope->lookupASTType(id->getName());
-    MemLayout l = memLayout(ty);
-    pir::LocalId tmp = B.addMemLocal("held", l.Size, l.Align);
-    Val copy = B.localAddr(tmp, "held.addr");
-    B.memCopy(copy, addr, Val::i64(l.Size));
-    emitMemRetain(copy, ty);
-    return {copy, /*Temp=*/true};
+    return {copyToTemporary(addr, CurrentScope->lookupASTType(id->getName()),
+                            "held"),
+            /*Temp=*/true};
   }
   // An element, or a struct's field, in the bytes of the value it is part
   // of, at its offset: the whole's address first, then each part's in it,
@@ -308,25 +353,28 @@ Val ModuleLowering::emitMemAddress(ast::Expr *e) {
 
 void ModuleLowering::releaseMemTemps(size_t mark) {
   while (MemTemps.size() > mark) {
-    auto [v, ty] = MemTemps.back();
+    auto [v, ty, len] = MemTemps.back();
     MemTemps.pop_back();
-    if (ty)
-      emitMemRelease(v, ty);
+    if (auto *st = ty ? ast::dyn_cast<ast::SliceType>(ty) : nullptr)
+      releaseSliceCopy(v, len, st);
+    else if (ty)
+      emitMemDrop(v, ty);
     else
       emitRelease(v);
   }
 }
 
-void ModuleLowering::forEachMemRef(const Val &addr, ast::Type *ty,
-                                   const std::function<void(Val)> &fn) {
+void ModuleLowering::forEachMemRef(
+    const Val &addr, ast::Type *ty,
+    const std::function<void(Val, ast::Type *)> &fn, bool set) {
   if (!addr || !holdsRef(ty))
     return;
   if (ast::Type *shape = memShapeOf(ty); shape != ty) {
-    forEachMemRef(addr, shape, fn);
+    forEachMemRef(addr, shape, fn, /*set=*/false);
     return;
   }
   if (ast::isRefType(ty)) {
-    fn(B.ptrLoad(addr, Type::Box, "elem"));
+    fn(B.ptrLoad(addr, Type::Box, "elem"), set ? ty : nullptr);
     return;
   }
   if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
@@ -336,14 +384,14 @@ void ModuleLowering::forEachMemRef(const Val &addr, ast::Type *ty,
       int64_t off = tupleElementOffset(tt, i);
       forEachMemRef(off == 0 ? addr
                              : B.ptrAdd(addr, Val::i64(off), "elem.addr"),
-                    tt->getElementType(i), fn);
+                    tt->getElementType(i), fn, set);
     }
     return;
   }
   const auto inner = innermostElements(ast::cast<ast::FixedArrayType>(ty));
   ast::Type *elemTy = inner.first;
   forEachSlot(addr, 0, inner.second, memLayout(elemTy).Size,
-              [&](const Val &at) { forEachMemRef(at, elemTy, fn); });
+              [&](const Val &at) { forEachMemRef(at, elemTy, fn, set); });
 }
 
 void ModuleLowering::forEachSlot(const Val &base, int64_t from, int64_t to,
@@ -354,11 +402,17 @@ void ModuleLowering::forEachSlot(const Val &base, int64_t from, int64_t to,
       fn(i == 0 ? base : B.ptrAdd(base, Val::i64(i * stride), "elem.addr"));
     return;
   }
+  forEachSlotUpTo(base, from, Val::i64(to), stride, fn);
+}
+
+void ModuleLowering::forEachSlotUpTo(const Val &base, int64_t from,
+                                     const Val &to, int64_t stride,
+                                     const std::function<void(Val)> &fn) {
   pir::LocalId i = B.addLocal("i", Type::I64);
   B.store(i, Val::i64(from));
   pir::While *w = B.openWhile();
   B.enter(*w->CondBlock);
-  B.setWhileCond(w, B.cmp(CmpPred::Lt, B.load(i, "i"), Val::i64(to), "more"));
+  B.setWhileCond(w, B.cmp(CmpPred::Lt, B.load(i, "i"), to, "more"));
   B.leave();
   B.enterLoopBody(*w->Body);
   Val iv = B.load(i, "i");
@@ -369,11 +423,107 @@ void ModuleLowering::forEachSlot(const Val &base, int64_t from, int64_t to,
 }
 
 void ModuleLowering::emitMemRetain(const Val &addr, ast::Type *ty) {
-  forEachMemRef(addr, ty, [&](const Val &box) { emitRetain(box); });
+  // A class value of a set value's is never null (neverNull).
+  forEachMemRef(addr, ty, [&](const Val &box, ast::Type *refTy) {
+    emitRetain(box, /*lend=*/false, refTy);
+  });
 }
 
 void ModuleLowering::emitMemRelease(const Val &addr, ast::Type *ty) {
-  forEachMemRef(addr, ty, [&](const Val &box) { emitRelease(box); });
+  forEachMemRef(addr, ty,
+                [&](const Val &box, ast::Type *) { emitRelease(box); });
+}
+
+void ModuleLowering::emitMemDrop(const Val &local, ast::Type *ty) {
+  const size_t n = memReleaseCount(ty);
+  if (local && n > kReleasesInPlace) {
+    if (n > ReleasesInPlaceLeft) {
+      B.call(dropFunction(ty), {{Type::Ptr}, Type::Void}, {local});
+      return;
+    }
+    ReleasesInPlaceLeft -= n;
+  }
+  emitMemRelease(local, ty);
+}
+
+size_t ModuleLowering::memReleaseCount(ast::Type *ty) {
+  if (!holdsRef(ty))
+    return 0;
+  if (auto it = MemReleaseCounts.find(ty); it != MemReleaseCounts.end())
+    return it->second;
+  size_t n = 0;
+  if (ast::Type *shape = memShapeOf(ty); shape != ty) {
+    n = memReleaseCount(shape);
+  } else if (ast::isRefType(ty)) {
+    n = 1;
+  } else if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    for (ast::Type *e : tt->getElementTypes())
+      n += memReleaseCount(e);
+  } else {
+    const auto inner = innermostElements(ast::cast<ast::FixedArrayType>(ty));
+    const size_t each = memReleaseCount(inner.first);
+    n = inner.second <= kUnrolledSlots
+            ? static_cast<size_t>(inner.second) * each
+            : each;
+  }
+  MemReleaseCounts[ty] = n;
+  return n;
+}
+
+std::string ModuleLowering::dropFunction(ast::Type *ty) {
+  const std::string name = std::string(pir::kDropPrefix) + ast::typeName(ty);
+  if (FuncByName.count(name))
+    return name;
+  pir::Function *fn = getOrCreateFunction(name, {{Type::Ptr}, Type::Void});
+  fn->Params[0].Name = "at";
+  FunctionStateGuard fnState(*this, fn, nullptr, nullptr);
+  emitMemReleaseByTag(Val(pir::Operand::value(fn->Params[0]), Type::Ptr), ty);
+  B.emitRetVoid();
+  return name;
+}
+
+void ModuleLowering::emitMemReleaseByTag(const Val &addr, ast::Type *ty) {
+  if (!holdsRef(ty))
+    return;
+  if (ast::isPayloadEnum(ty)) {
+    // The tag's variant only: every other one's fields are zeros.
+    auto *et = ast::cast<ast::EnumType>(ty);
+    pir::Switch *s = B.openSwitch(B.ptrLoad(addr, Type::I64, "tag"));
+    for (size_t i = 0; i < et->getNumVariants(); ++i) {
+      ast::StructType *payload = et->getPayload(i);
+      if (!payload || !holdsRef(payload))
+        continue;
+      B.enter(B.addCase(s, Val::i64(static_cast<int64_t>(i))));
+      emitMemReleaseByTag(
+          B.ptrAdd(addr, Val::i64(variantPayloadOffset(et, i)), "variant.addr"),
+          payload);
+      B.leave();
+    }
+    return;
+  }
+  if (ast::Type *shape = memShapeOf(ty); shape != ty) {
+    emitMemReleaseByTag(addr, shape);
+    return;
+  }
+  if (ast::isRefType(ty)) {
+    emitRelease(B.ptrLoad(addr, Type::Box, "elem"));
+    return;
+  }
+  if (auto *tt = ast::dyn_cast<ast::TupleType>(ty)) {
+    for (size_t i = 0; i < tt->getArity(); ++i) {
+      if (!holdsRef(tt->getElementType(i)))
+        continue;
+      const int64_t off = tupleElementOffset(tt, i);
+      emitMemReleaseByTag(off == 0 ? addr
+                                   : B.ptrAdd(addr, Val::i64(off), "elem.addr"),
+                          tt->getElementType(i));
+    }
+    return;
+  }
+  const auto inner = innermostElements(ast::cast<ast::FixedArrayType>(ty));
+  ast::Type *elemTy = inner.first;
+  forEachSlot(addr, 0, inner.second, memLayout(elemTy).Size,
+              [&](const Val &at) { emitMemReleaseByTag(at, elemTy); });
 }
 
 ast::Expr *ModuleLowering::wholeOf(ast::Expr *e) {
@@ -466,7 +616,7 @@ Val ModuleLowering::emitElementLoad(const Val &addr, ast::Type *ty,
 Val ModuleLowering::ownElementRead(ast::Expr *node, const Val &elem,
                                    size_t mark) {
   if (elem.Ty == Type::Box && exprProducesFreshBox(node))
-    emitRetain(elem);
+    emitRetain(elem, /*lend=*/false, node->getResolvedType());
   releaseMemTemps(mark);
   return elem;
 }
@@ -572,7 +722,7 @@ void ModuleLowering::emitFixedRepeat(ast::Expr *elem, ast::FixedArrayType *ft,
     }
     B.ptrStore(at, v);
     if (ref) // each slot owns a reference
-      emitRetain(v);
+      emitRetain(v, /*lend=*/false, elemTy);
   });
 }
 
@@ -618,15 +768,23 @@ bool ModuleLowering::isSliceArg(const ast::Expr *arg) {
 
 bool ModuleLowering::emitSliceArg(ast::Expr *arg, std::vector<Val> &args) {
   // A fixed-size array's bytes (a temporary is released after the call),
-  // or the elements of the slice passed on.
+  // or the elements of the slice passed on: a copy of them, released after
+  // the call too, when an argument after it may write them (SnapshotReads),
+  // as an array's are copied (emitMemValue).
   Val addr = emitMemAddress(arg);
   if (!addr)
     return false;
-  args.push_back(addr);
-  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(arg->getResolvedType()))
+  if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(arg->getResolvedType())) {
+    args.push_back(addr);
     args.push_back(Val::i64(ft->getLength()));
-  else
-    args.push_back(emitSliceLength(arg));
+    return true;
+  }
+  Val len = emitSliceLength(arg);
+  if (SnapshotReads.count(arg))
+    addr = copySliceToTemporary(
+        addr, len, ast::cast<ast::SliceType>(arg->getResolvedType()));
+  args.push_back(addr);
+  args.push_back(len);
   return true;
 }
 

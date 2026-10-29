@@ -220,6 +220,11 @@ private:
         if (!f.Symbol.empty())
           programName(f.Symbol, "extern function symbol");
       }
+      // A drop function takes a mem local's address and returns nothing
+      // (§7).
+      if (isDropName(f.Name) && !(f.Sig == Signature{{Type::Ptr}, Type::Void}))
+        error(where, "drop function '@" + f.Name + "' is " + sigStr(f.Sig) +
+                         ", not (ptr) -> void");
     }
     // A native extern and the runtime's of one C symbol name one C
     // function, which has one signature (as two modules' must,
@@ -383,6 +388,8 @@ private:
     /// a copy of everything visible.
     std::vector<std::pair<ValueId, std::optional<Type>>> Scopes;
     std::unordered_set<ValueId> EverDefined;
+    /// The values a `local.addr` of a mem local defined.
+    std::unordered_set<ValueId> MemLocalAddrs;
 
     void error(const std::string &msg) { MV.error(Where, msg); }
 
@@ -568,6 +575,9 @@ private:
               "have one)");
       if (in.Lend && in.Op != Opcode::Retain)
         error(std::string("a lend '") + opName(in) + "' (only a retain lends)");
+      if (in.NonNull && in.Op != Opcode::Retain)
+        error(std::string("a nonnull '") + opName(in) +
+              "' (only a retain is marked nonnull)");
       switch (in.Op) {
       case Opcode::Add:
       case Opcode::Sub:
@@ -705,6 +715,12 @@ private:
         expectArgs(in.Args, 0, it->second->Sig, "'@" + in.Callee + "'");
         expectOwnership(in, it->second->Sig, lends(*it->second),
                         "'@" + in.Callee + "'");
+        // A drop function is given a whole mem local (§7).
+        if (isDropName(in.Callee) && in.Args.size() == 1 &&
+            (!in.Args[0].isValue() ||
+             !MemLocalAddrs.count(in.Args[0].valueId())))
+          error("call to drop function '@" + in.Callee + "' is given " +
+                operandStr(in.Args[0]) + ", not the local.addr of a mem local");
         result(in, it->second->Sig.Ret);
         break;
       }
@@ -902,6 +918,8 @@ private:
                 std::string(typeName(F.Locals[in.Local].Ty)) +
                 " (only i64, f64, bool, char, optional, box and mem slots "
                 "have addresses)");
+        else if (F.Locals[in.Local].Ty == Type::Mem)
+          MemLocalAddrs.insert(in.Result.Id);
         result(in, Type::Ptr);
         break;
       case Opcode::FieldAddr: {
@@ -1033,16 +1051,15 @@ private:
         error("switch on " + operandStr(sw.Value) + " of type " + typeName(t) +
               ", expected i64, char or bool");
       bool terminated = sw.Default != nullptr;
-      for (size_t i = 0; i < sw.Cases.size(); ++i) {
-        const Switch::Case &c = sw.Cases[i];
+      CaseSet seen;
+      for (const Switch::Case &c : sw.Cases) {
         if (c.Value.isValue()) {
           error("switch case " + operandStr(c.Value) + " is not a constant");
         } else {
           if (t != Type::Void)
             expect(c.Value, t, "switch case");
-          for (size_t j = 0; j < i; ++j)
-            if (sameConstant(sw.Cases[j].Value, c.Value))
-              error("switch case " + operandStr(c.Value) + " listed twice");
+          if (!seen.insert(c.Value))
+            error("switch case " + operandStr(c.Value) + " listed twice");
         }
         if (!c.Body) {
           error("switch case without a block");

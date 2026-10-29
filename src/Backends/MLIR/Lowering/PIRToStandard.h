@@ -27,10 +27,21 @@ inline constexpr const char *kMainModuleAttr = "pir.main";
 /// has none: it is declared from its signature.
 inline constexpr const char *kRuntimeAttr = "pir.runtime";
 
+/// The attribute the lowering puts on a call of Paykan_retain or
+/// Paykan_release whose box is never null: a `retain nonnull`'s
+/// (docs/pir.md §6), or a release of the value one retains.  The inline
+/// fast path of each target makes no test for null.
+inline constexpr const char *kNonNullAttr = "pir.nonnull";
+
 /// The attribute the lowering puts on a native function's declaration
 /// (`$c.<symbol>`, #198): the C path declares it from its signature, out of
 /// the way of a C header's declaration of the symbol.
 inline constexpr const char *kNativeAttr = "pir.native";
+
+/// The attribute the lowering puts on a drop function (docs/pir.md §7), a
+/// definition or another module's: the LLVM path gives its call a copy of
+/// the local it releases (ToLLVM.cpp, copyDroppedLocals).
+inline constexpr const char *kDropAttr = "pir.drop";
 
 /// The attribute the import puts on a shared function or class (an
 /// instantiation of a template, pir::Function::Shared): it links under a

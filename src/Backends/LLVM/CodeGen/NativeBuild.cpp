@@ -122,6 +122,16 @@ Status addEntryPoint(llvm::Module &module) {
   return Status::ok();
 }
 
+llvm::CodeGenOptLevel codeGenOptLevel(unsigned optLevel) {
+  static const llvm::CodeGenOptLevel levels[] = {
+      llvm::CodeGenOptLevel::None,
+      llvm::CodeGenOptLevel::Less,
+      llvm::CodeGenOptLevel::Default,
+      llvm::CodeGenOptLevel::Aggressive,
+  };
+  return levels[optLevel < 4 ? optLevel : 3];
+}
+
 StatusOr<std::unique_ptr<llvm::TargetMachine>>
 createHostTargetMachine(unsigned optLevel) {
   llvm::InitializeNativeTarget();
@@ -136,16 +146,10 @@ createHostTargetMachine(unsigned optLevel) {
   for (const auto &f : llvm::sys::getHostCPUFeatures())
     features.AddFeature(f.first(), f.second);
 
-  static const llvm::CodeGenOptLevel levels[] = {
-      llvm::CodeGenOptLevel::None,
-      llvm::CodeGenOptLevel::Less,
-      llvm::CodeGenOptLevel::Default,
-      llvm::CodeGenOptLevel::Aggressive,
-  };
   llvm::TargetOptions options;
   std::unique_ptr<llvm::TargetMachine> tm(target->createTargetMachine(
       triple, llvm::sys::getHostCPUName(), features.getString(), options,
-      llvm::Reloc::PIC_, std::nullopt, levels[optLevel < 4 ? optLevel : 3]));
+      llvm::Reloc::PIC_, std::nullopt, codeGenOptLevel(optLevel)));
   if (!tm)
     return Status::error("cannot create an LLVM target machine for '" +
                          triple.str() + "'");
@@ -182,7 +186,7 @@ StatusOr<int> runInProcess(std::unique_ptr<llvm::Module> module,
                            std::unique_ptr<llvm::LLVMContext> ctx,
                            std::span<const std::string> args,
                            const std::vector<std::string> &objects,
-                           bool trackHeap) {
+                           unsigned optLevel, bool trackHeap) {
   // Select the tracking allocator before any program allocation happens,
   // so that every block is allocated and freed by the same back-end.
   if (trackHeap) {
@@ -190,8 +194,8 @@ StatusOr<int> runInProcess(std::unique_ptr<llvm::Module> module,
     Paykan_heap_reset();
   }
   std::vector<std::string> progArgs(args.begin(), args.end());
-  auto result =
-      jit::runModule(std::move(module), std::move(ctx), progArgs, objects);
+  auto result = jit::runModule(std::move(module), std::move(ctx), progArgs,
+                               objects, codeGenOptLevel(optLevel));
   if (trackHeap)
     Paykan_heap_dump();
   if (!result)

@@ -28,7 +28,7 @@
     "ast-interchange": {"gtest": true,  "disabled": false, "description": "tests/AST: ASTInterchangeTests"},
     "plugin":          {"gtest": true,  "disabled": false, "description": "tests/Plugin: PluginTests, PluginLoaderTests"},
     "runtime":         {"gtest": true,  "disabled": false, "description": "tests/Runtime: RuntimeTests"},
-    "driver":          {"gtest": true,  "disabled": false, "description": "tests/Driver: DriverTests.<backend>, PkmTests.<backend>"},
+    "driver":          {"gtest": true,  "disabled": false, "description": "tests/Driver: DriverTests.<backend>, PkmTests.<backend>, DriverScaling"},
     "frontend":        {"gtest": true,  "disabled": false, "description": "tests/Frontend: FrontendTests"},
     "samples":         {"gtest": false, "disabled": false, "description": "scripts/samples_parity.py, cache_race.py, runtime_lookup.py: SamplesParity*, CacheRace, RuntimeLookup"},
     "stdlib":          {"gtest": false, "disabled": false, "description": "scripts/stdlib_tests.py: StdlibTests, StdlibTestsBuild, StdlibTestsC (tests/Stdlib on the standard library the build stages)"},

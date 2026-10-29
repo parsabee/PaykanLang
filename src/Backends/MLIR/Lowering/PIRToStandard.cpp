@@ -22,6 +22,9 @@
 //   the flag being 0, a loop's condition stops the loop once it is set, and
 //   a returned value goes into a slot the function returns at its end.  A
 //   function whose returns are all in tail position needs none of it.
+//   `unreachable` is no exit: it follows a call that does not return (a
+//   panic), so what follows a panic guard runs in the guard's block, not
+//   under an `scf.if` of its own.
 // * A switch becomes scf.index_switch, which each target makes its own
 //   switch; a case of INT64_MAX or INT64_MIN, which its set of cases cannot
 //   hold, is an scf.if around it.
@@ -122,7 +125,8 @@ struct ClassLayout {
 };
 
 /// What a statement may leave by: the exits of an enclosing construct it
-/// does not complete.
+/// does not complete.  `unreachable` leaves by none: the noreturn call
+/// before it never comes back to it.
 enum Exit : unsigned { kNone = 0, kBreak = 1, kContinue = 2, kReturn = 4 };
 
 /// The exit flag's values.
@@ -384,9 +388,13 @@ LogicalResult ModuleLowering::run() {
       // A native function of the runtime's symbol is the runtime's.
       if (native && !decl->hasAttr(kRuntimeAttr))
         decl->setAttr(kNativeAttr, UnitAttr::get(Ctx));
+      if (::paykan::pir::isDropName(f.getSymName()))
+        decl->setAttr(kDropAttr, UnitAttr::get(Ctx));
       continue;
     }
     auto fn = func::FuncOp::create(B, Loc, link, f.getFunctionType());
+    if (::paykan::pir::isDropName(f.getSymName()))
+      fn->setAttr(kDropAttr, UnitAttr::get(Ctx));
     bodies.emplace_back(f, fn);
   }
   for (auto &[src, dst] : bodies)
@@ -426,7 +434,7 @@ unsigned FunctionLowering::exits(Operation *op) {
     e = kBreak;
   else if (isa<P::ContinueOp>(op))
     e = kContinue;
-  else if (isa<P::ReturnOp, P::UnreachableOp>(op))
+  else if (isa<P::ReturnOp>(op))
     e = kReturn;
   else if (auto i = dyn_cast<P::IfOp>(op))
     e = exits(i.getThenRegion()) | exits(i.getElseRegion());
@@ -549,7 +557,10 @@ Value FunctionLowering::lowerTail(Block &b) {
     auto i = dyn_cast<P::IfOp>(op);
     if (!i || exits(i) == kNone) {
       lowerOp(&op);
-      return Value(); // a void function falls off its end
+      // A void function falls off its end; a non-void one's last statement
+      // is then an `if` or a `switch` whose every branch ends in
+      // `unreachable`, so nothing returns from here.
+      return RetType ? zeroOf(RetType) : Value();
     }
     auto branches =
         scf::IfOp::create(B, Loc, RetType ? TypeRange(RetType) : TypeRange(),
@@ -583,7 +594,7 @@ void FunctionLowering::lowerBlock(Block &b) {
     lowerOp(&op);
     if (&op == &b.back() || exits(&op) == kNone)
       continue;
-    if (isa<P::BreakOp, P::ContinueOp, P::ReturnOp, P::UnreachableOp>(op))
+    if (isa<P::BreakOp, P::ContinueOp, P::ReturnOp>(op))
       break; // nothing follows these in PIR
     auto rest = scf::IfOp::create(B, Loc, flagIs(kRunning),
                                   /*withElseRegion=*/false);
@@ -751,7 +762,7 @@ void FunctionLowering::lowerOp(Operation *op) {
     return setFlag(kReturning);
   }
   if (isa<P::UnreachableOp>(op))
-    return setFlag(kReturning);
+    return; // the noreturn call before it does not come back
   lowerInstr(op);
 }
 
@@ -1010,11 +1021,20 @@ void FunctionLowering::lowerInstr(Operation *op) {
                P::FnAddrOp::create(B, Loc, M.functionLinkName(o.getCallee())));
       })
       // ARC and objects.
-      .Case([&](P::RetainOp) {
-        callRuntime(names::kPaykanRetain, {box}, {}, {operand(0)});
+      // A box a `retain nonnull` retains is never null, at that retain and
+      // at a release of the same value.
+      .Case([&](P::RetainOp o) {
+        auto call = callRuntime(names::kPaykanRetain, {box}, {}, {operand(0)});
+        if (o.getNonnull())
+          call->setAttr(kNonNullAttr, B.getUnitAttr());
       })
-      .Case([&](P::ReleaseOp) {
-        callRuntime(names::kPaykanRelease, {box}, {}, {operand(0)});
+      .Case([&](P::ReleaseOp o) {
+        auto call = callRuntime(names::kPaykanRelease, {box}, {}, {operand(0)});
+        if (llvm::any_of(o.getBox().getUsers(), [](Operation *user) {
+              auto retain = dyn_cast<P::RetainOp>(user);
+              return retain && retain.getNonnull();
+            }))
+          call->setAttr(kNonNullAttr, B.getUnitAttr());
       })
       .Case([&](P::BoxOp) {
         define(op, resultOf(callRuntime(names::kPaykanSharedNew, {obj}, {box},

@@ -31,6 +31,7 @@
 #include "Names.h"
 #include "ToolchainNames.h"
 
+#include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/MapVector.h>
 #include <llvm/ADT/StringSet.h>
 #include <llvm/ADT/Twine.h>
@@ -143,6 +144,48 @@ std::string cStringLiteral(StringRef data) {
     }
   }
   return out + "\"";
+}
+
+/// The longest string literal C11 requires a compiler to accept (5.2.4.1,
+/// counted after adjacent literals are joined).
+constexpr size_t kMaxCStringLiteral = 4095;
+
+/// `'<c>'`: a C character constant of the byte @p c, as cStringLiteral
+/// spells it in a string; one past ASCII is an octal escape, whose value
+/// converts back to the same byte in a `char`.
+std::string cCharConstant(unsigned char c) {
+  switch (c) {
+  case '\\':
+    return "'\\\\'";
+  case '\'':
+    return "'\\''";
+  case '\n':
+    return "'\\n'";
+  case '\t':
+    return "'\\t'";
+  case '\r':
+    return "'\\r'";
+  default:
+    if (c >= 0x20 && c < 0x7f)
+      return std::string{'\'', static_cast<char>(c), '\''};
+    char buf[8];
+    std::snprintf(buf, sizeof buf, "'\\%03o'", c);
+    return buf;
+  }
+}
+
+/// The initializer of the `char` array holding @p data and its terminating
+/// 0: a string literal, or, past the longest literal C11 promises, the
+/// bytes as character constants in braces, sixteen to a line.
+std::string cStringInitializer(StringRef data) {
+  if (data.size() <= kMaxCStringLiteral)
+    return cStringLiteral(data);
+  std::string out = "{";
+  for (size_t i = 0; i < data.size(); ++i) {
+    out += i % 16 == 0 ? "\n  " : " ";
+    out += cCharConstant(static_cast<unsigned char>(data[i])) + ",";
+  }
+  return out + " 0\n}";
 }
 
 /// An array initializer: `{a, b, ...}`, `{0}` when empty (C11 has no `{}`).
@@ -264,14 +307,19 @@ struct RuntimeDeclLowering : CPattern<func::FuncOp> {
   }
 };
 
-/// The function a call of runtime function @p callee calls: Runtime.h's
-/// inline fast path of Paykan_retain and Paykan_release, the function
-/// itself for any other.
-StringRef calledRuntime(StringRef callee) {
+/// The function a call @p op of a runtime function calls: Runtime.h's
+/// inline fast path of Paykan_retain and Paykan_release, with no test for
+/// null when the shared lowering marks the box never null (kNonNullAttr);
+/// the function itself for any other.
+StringRef calledRuntime(func::CallOp op) {
+  StringRef callee = op.getCallee();
+  const bool nonnull = op->hasAttr(kNonNullAttr);
   if (callee == names::kPaykanRetain)
-    return names::kPaykanRetainInline;
+    return nonnull ? names::kPaykanRetainNonNullInline
+                   : names::kPaykanRetainInline;
   if (callee == names::kPaykanRelease)
-    return names::kPaykanReleaseInline;
+    return nonnull ? names::kPaykanReleaseNonNullInline
+                   : names::kPaykanReleaseInline;
   return callee;
 }
 
@@ -303,7 +351,7 @@ struct CallLowering : CPattern<func::CallOp> {
         runtime && result && isa<emitc::PointerType>(result) ? ptr() : result;
     auto call = emitc::CallOpaqueOp::create(
         r, loc, callResult ? TypeRange{callResult} : TypeRange{},
-        runtime ? calledRuntime(op.getCallee()) : op.getCallee(), args);
+        runtime ? calledRuntime(op) : op.getCallee(), args);
     if (voided)
       emitc::VerbatimOp::create(r, loc, r.getStringAttr("(void){};"),
                                 call.getResults());
@@ -723,7 +771,7 @@ struct CStrLowering : CPattern<P::CStrOp> {
   LogicalResult matchAndRewrite(P::CStrOp op, OpAdaptor,
                                 ConversionPatternRewriter &r) const override {
     constantArray(r, op, op.getSymName(), opaque(getContext(), "char"),
-                  op.getValue().size() + 1, cStringLiteral(op.getValue()));
+                  op.getValue().size() + 1, cStringInitializer(op.getValue()));
     return success();
   }
 };
@@ -823,7 +871,15 @@ std::vector<ModuleOp> modulesOf(ModuleOp top) {
 /// What the conversion needs to know of @p m before it starts, and the
 /// changes that make it C: unread constants dropped (C warns about an
 /// unused static const), and the program's main renamed for C's main().
+/// The symbols @p m reads are collected in one walk of it: a walk for each
+/// constant is quadratic in a function of many string literals.
 void prepare(ModuleOp m, Unit &u) {
+  std::optional<SymbolTable::UseRange> uses =
+      SymbolTable::getSymbolUses(&m.getBodyRegion());
+  llvm::DenseSet<StringAttr> read;
+  if (uses)
+    for (const SymbolTable::SymbolUse &use : *uses)
+      read.insert(use.getSymbolRef().getRootReference());
   std::vector<Operation *> unused;
   for (Operation &op : *m.getBody()) {
     if (auto f = dyn_cast<func::FuncOp>(op)) {
@@ -839,7 +895,7 @@ void prepare(ModuleOp m, Unit &u) {
       continue;
     }
     if (isa<P::CStrOp, P::DataOp, P::BytesOp>(op)) {
-      if (SymbolTable::symbolKnownUseEmpty(&op, m)) {
+      if (uses && !read.contains(SymbolTable::getSymbolName(&op))) {
         unused.push_back(&op);
         continue;
       }

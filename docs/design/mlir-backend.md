@@ -22,7 +22,7 @@ this repository, always built and the default; other backends are plugins
 | Modules | a module's `.pkm` keeps its copies of instantiations as PIR and the rest of its code as LLVM bitcode (`compileModule`), which a program links on demand; shared copies link under names without their module |
 | The shared lowering | `pir` → `func` + `scf` + `arith`, and the few `pir` memory ops neither upstream path covers; one pass, used by both targets (`--emit-mlir=scf`) |
 | Where the targets part | after the shared lowering, at the MLIR level: upstream conversions take `func`, `scf` and `arith` to the `llvm` dialect and to EmitC; the remaining `pir` ops get one small pattern set per target |
-| LLVM | the `llvm` dialect (`--emit-mlir=llvm`), translated to LLVM IR, then the existing JIT, native object build, bitcode cache and `--emit-llvm` |
+| LLVM | the `llvm` dialect (`--emit-mlir=llvm`), translated to LLVM IR, then the existing JIT, native object build, bitcode cache and `--emit-llvm`; on the way `scf` becomes `cf` by upstream's patterns (the backend's own for `scf.index_switch`), each op lowered once and a block's last first, so the work and the memory grow with the function's length, not its square |
 | C | EmitC, printed by MLIR's C emitter (`--emit-c`) |
 | Options | `--emit-mlir=<stage>`, `pir`, `scf`, `llvm` or `emitc`: the program after that stage, on stdout |
 | Backends | `mlir` alone, always built and the default; it replaced `c` and `llvm`, whose `PAYKAN_BACKENDS` names now build it, with a warning (step 6) |
@@ -103,7 +103,10 @@ never starts `_S`, so the two never meet).
 Each module's PIR (the main module whole, an imported one its copies and
 declarations) is then lowered and its LLVM IR cached as before, under the
 text of what is left of it: another program's use of a module leaves
-another part of it, which is cached afresh.
+another part of it, which is cached afresh.  That text is the module's
+imported MLIR printed on its own (the program is verified once, when it is
+imported), so the keys of a program's modules cost time in proportion to
+the program, not to its size times its modules.
 
 `--emit-c` prints the C of the program's PIR; a compiled module's code is
 not C, and is linked as an object (`paykan pkm extract --object`), so for
@@ -117,7 +120,11 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
   the statements after one that may have set it run under `scf.if` on the
   flag being clear, and a loop's condition region stops the loop once it is
   set.  A `return`'s value goes into a local the function returns at its
-  end.  LLVM's optimiser removes the flag again; C keeps it.
+  end.  LLVM's optimiser removes the flag again; C keeps it.  `unreachable`
+  sets no flag: it follows a call of one of the runtime's panics, which
+  never return (`noreturn` on the LLVM path, `_Noreturn` in `Runtime.h`),
+  so what follows a panic check runs beside it, not under an `scf.if` of
+  its own.
 * **Switches.**  A PIR `switch` (a `match` on an enum, or on integer,
   `char` or `bool` literals) becomes an `scf.index_switch` on its value as
   an index (a `char` or `bool` zero-extended, as its cases are).  Upstream
@@ -136,7 +143,11 @@ not C, and is linked as an object (`paykan pkm extract --object`), so for
   §12): the LLVM path expands each call into the count's test, its
   increment or decrement in place, and the call for the rest; the C path
   calls Runtime.h's `static inline` `Paykan_retain_inline` and
-  `Paykan_release_inline`, which do the same.
+  `Paykan_release_inline`, which do the same.  A `retain nonnull`'s call
+  (`pir.retain nonnull`, of a box that is never null), and a release of
+  the same value, carry the attribute `pir.nonnull`: the LLVM path makes no
+  test for null there, and the C path calls
+  `Paykan_retain_nonnull_inline` or `Paykan_release_nonnull_inline`.
 * **Objects.**  Every class's layout is computed once, as C lays out the
   object (docs/pir.md §5: the 16-byte header, then the fields at their
   alignment): a field access is the object's address plus the field's
@@ -188,7 +199,8 @@ there, at the MLIR level:
   `run` does; unread values are dropped (canonicalisation) and unread
   parameters marked `(void)`, so C warns about no unused variable; and an
   empty parameter list is printed `(void)`, not the C++ `()` of MLIR's
-  emitter.
+  emitter; and a string constant longer than the 4095 characters C11
+  promises in a literal is a braced array of character constants.
 
 ## Steps
 

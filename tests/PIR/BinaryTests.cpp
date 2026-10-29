@@ -754,6 +754,49 @@ TEST(PIRBinary, AStableLoadKeepsItsMark) {
   }
 }
 
+// A `retain nonnull` is written with the code 57 before its opcode, after
+// a lend mark when it is both; the text and the binary form keep it, and a
+// reader takes the mark only before a retain.
+TEST(PIRBinary, ANonNullRetainKeepsItsMark) {
+  Program p = parse(R"(module "n"
+fn @f(%a.1: box, %b.2: box) -> void {
+  retain nonnull %a.1
+  retain lend nonnull %b.2
+  retain %b.2
+  release %a.1
+  release %b.2
+  release %b.2
+  ret
+}
+)");
+  ASSERT_EQ(p.Modules.size(), 1u);
+  const auto &body = p.Modules[0].Functions[0].Body.Stmts;
+  EXPECT_TRUE(std::get<Instr>(body[0]).NonNull);
+  EXPECT_FALSE(std::get<Instr>(body[0]).Lend);
+  EXPECT_TRUE(std::get<Instr>(body[1]).NonNull);
+  EXPECT_TRUE(std::get<Instr>(body[1]).Lend);
+  EXPECT_FALSE(std::get<Instr>(body[2]).NonNull);
+  expectRoundTrip(p.Modules[0]);
+  std::vector<uint8_t> good = binary::encode(p.Modules[0]);
+  const uint8_t retain = opcodeEntry(Opcode::Retain).Code;
+  auto at = [&](const std::vector<uint8_t> &piece) {
+    auto it = std::search(good.begin(), good.end(), piece.begin(), piece.end());
+    return it == good.end() ? std::string::npos
+                            : static_cast<size_t>(it - good.begin());
+  };
+  const size_t n = at({kNonNullCode, retain});
+  ASSERT_NE(n, std::string::npos);
+  EXPECT_NE(at({kLendCode, kNonNullCode, retain}), std::string::npos);
+  std::vector<uint8_t> bad = good;
+  bad[n + 1] = opcodeEntry(Opcode::Release).Code;
+  auto d = binary::decode(bad);
+  ASSERT_FALSE(d.isOk());
+  EXPECT_NE(d.status().message().find(
+                "a nonnull mark before an instruction that is no retain"),
+            std::string::npos)
+      << d.status().message();
+}
+
 // The ownership of a call's arguments that are not owned, and a `retain
 // lend`, are written after a mark before the opcode (codes 55 and 56), which
 // no opcode has; a call whose arguments are all owned is written without

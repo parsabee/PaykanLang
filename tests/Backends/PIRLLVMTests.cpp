@@ -509,6 +509,52 @@ fn @main() -> i64 {
   EXPECT_EQ(r.ExitCode, 3);
 }
 
+// The runtime's panics are declared noreturn, as Runtime.h declares them, so
+// a panic guard's branch ends at its call: the division after the guard is
+// what follows the `if`, not the call (SW-02).
+TEST(PIRLLVM, PanicsAreNoreturn) {
+  const char *src = R"(module "t"
+extern fn @$rt.Paykan_panic_div_by_zero() -> void
+extern fn @$rt.Paykan_panic_index(i64, i64) -> void
+fn @quot(%a: i64, %b: i64) -> i64 {
+  %z = cmp eq %b, 0
+  if %z {
+    call @$rt.Paykan_panic_div_by_zero()
+    unreachable
+  }
+  %q = div %a, %b
+  %neg = cmp lt %q, 0
+  if %neg {
+    call @$rt.Paykan_panic_index(%q, 0)
+    unreachable
+  }
+  ret %q
+}
+fn @main() -> i64 {
+  %r = call @quot(84, 2)
+  ret %r
+}
+)";
+  std::string err;
+  std::string ir = translatePIR(src, err);
+  ASSERT_FALSE(ir.empty()) << err;
+  for (const char *panic :
+       {"@Paykan_panic_div_by_zero(", "@Paykan_panic_index("}) {
+    auto decls = linesWith(ir, std::string("declare void ") + panic);
+    ASSERT_EQ(decls.size(), 1u) << panic << "\n" << ir;
+    const size_t at = ir.find(decls.front());
+    const size_t attrs = ir.rfind("; Function Attrs:", at);
+    ASSERT_NE(attrs, std::string::npos) << panic << "\n" << ir;
+    EXPECT_EQ(ir.find('\n', attrs) + 1, at) << panic << "\n" << ir;
+    EXPECT_NE(ir.substr(attrs, at - attrs).find("noreturn"), std::string::npos)
+        << panic << "\n"
+        << ir;
+  }
+  auto r = runPIR(src);
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 42);
+}
+
 // -- Reference counts
 //
 // `retain` and `release` have their fast paths inline (ToLLVM.cpp,
@@ -688,6 +734,150 @@ fn @main() -> i64 {
   // ... and the runtime for the rest.
   EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 1u) << ir;
   EXPECT_EQ(linesWith(ir, "call void @Paykan_release(").size(), 2u) << ir;
+}
+
+// A `retain nonnull`, of a box that is never null (docs/pir.md §6), and a
+// release of the same value test no box for null; a release of another
+// value, a load of the slot the box was stored in, still does (SW-14).
+TEST(PIRLLVM, ANonNullRetainTestsNoBoxForNull) {
+  auto program = [](const char *retain) {
+    return std::string(kCounted) + R"(
+fn @main() -> i64 {
+  local %l: box
+  %o = new C
+  %b = box %o
+  )" + retain +
+           R"( %b
+  %two = call @strong(%b)
+  release %b
+  store %l, %b
+  %c = load %l
+  release %c
+  %r = mul %two, 10
+  ret %r
+}
+)";
+  };
+  std::string err;
+  std::string ir = translatePIR(program("retain nonnull"), err);
+  ASSERT_FALSE(ir.empty()) << err;
+  EXPECT_EQ(linesWith(ir, "icmp eq ptr").size(), 1u) << ir;
+  // The counts as before: a test of each, the call for the rest.
+  EXPECT_EQ(linesWith(ir, "icmp ne i32 ").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "icmp sgt i32 ").size(), 2u) << ir;
+  EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "call void @Paykan_release(").size(), 2u) << ir;
+  EXPECT_EQ(ir.find("nonnull"), std::string::npos) << ir;
+  ir = translatePIR(program("retain"), err);
+  ASSERT_FALSE(ir.empty()) << err;
+  EXPECT_EQ(linesWith(ir, "icmp eq ptr").size(), 3u) << ir;
+
+  auto r = runPIR(program("retain nonnull"));
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 20);
+  EXPECT_EQ(r.Out, "destroyed\n");
+}
+
+// A drop function links like its module's other functions (docs/pir.md §7):
+// a template's copy lowered with the module may call it from the code of
+// another, which links to it by its name.
+TEST(PIRLLVM, ADropFunctionLinksLikeItsModulesOtherFunctions) {
+  const std::string program = std::string(kCounted) + R"(
+fn @.drop.Pair(%at: ptr) -> void {
+  %a = ptr.load box, %at
+  release %a
+  %second = ptr.add %at, 8
+  %b = ptr.load box, %second
+  release %b
+  ret
+}
+
+fn @main() -> i64 {
+  local %p: mem(16, 8)
+  %o1 = new C
+  %b1 = box %o1
+  %o2 = new C
+  %b2 = box %o2
+  %first = local.addr %p
+  ptr.store %first, %b1
+  %second = ptr.add %first, 8
+  ptr.store %second, %b2
+  %at = local.addr %p
+  call @.drop.Pair(%at)
+  ret 0
+}
+)";
+  std::string err;
+  std::string ir = translatePIR(program, err);
+  ASSERT_FALSE(ir.empty()) << err;
+  EXPECT_TRUE(linesWith(ir, "define internal").empty()) << ir;
+  const std::vector<std::string> drop = linesWith(ir, "drop_2EPair(");
+  ASSERT_FALSE(drop.empty()) << ir;
+  EXPECT_EQ(drop.front().rfind("define void @", 0), 0u) << ir;
+
+  auto r = runPIR(program);
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.Out, "destroyed\ndestroyed\n");
+}
+
+// A drop function's call is given a copy of the local it releases, in a
+// slot of its own: LLVM keeps a local whose address a call takes in memory
+// throughout its function, which a loop that drops the local at one of its
+// ways out would otherwise run with every field read from memory.
+TEST(PIRLLVM, ADropFunctionIsGivenACopyOfTheLocal) {
+  const std::string program = std::string(kCounted) + R"(
+fn @.drop.Pair(%at: ptr) -> void {
+  %a = ptr.load box, %at
+  release %a
+  %second = ptr.add %at, 8
+  %b = ptr.load box, %second
+  release %b
+  ret
+}
+
+fn @main() -> i64 {
+  local %p: mem(16, 8)
+  %o1 = new C
+  %b1 = box %o1
+  %o2 = new C
+  %b2 = box %o2
+  %first = local.addr %p
+  ptr.store %first, %b1
+  %second = ptr.add %first, 8
+  ptr.store %second, %b2
+  %at = local.addr %p
+  call @.drop.Pair(%at)
+  ret 0
+}
+)";
+  std::string err;
+  std::string ir = translatePIR(program, err);
+  ASSERT_FALSE(ir.empty()) << err;
+  // The call's argument is the destination of a copy from the local, a
+  // slot of the local's size, not the local.
+  const std::vector<std::string> calls =
+      linesWith(ir, "call void @pk_t_S_2Edrop");
+  ASSERT_EQ(calls.size(), 1u) << ir;
+  const size_t open = calls.front().find("(ptr ");
+  ASSERT_NE(open, std::string::npos) << calls.front();
+  const std::string arg =
+      calls.front().substr(open + 5, calls.front().find(')', open) - open - 5);
+  const std::vector<std::string> copies = linesWith(ir, "@llvm.memmove");
+  const auto copy =
+      std::find_if(copies.begin(), copies.end(), [&](const auto &l) {
+        return l.find("(ptr " + arg + ", ptr ") != std::string::npos;
+      });
+  ASSERT_NE(copy, copies.end()) << ir;
+  EXPECT_NE(copy->find(", i64 16,"), std::string::npos) << *copy;
+  EXPECT_EQ(copy->find("(ptr " + arg + ", ptr " + arg + ","), std::string::npos)
+      << *copy;
+  EXPECT_EQ(linesWith(ir, "alloca [16 x i8]").size(), 2u) << ir;
+
+  auto r = runPIR(program);
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.Out, "destroyed\ndestroyed\n");
 }
 
 TEST(PIRLLVM, InlineRetainsAndReleasesCountAndTheLastOneDestroys) {

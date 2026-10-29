@@ -1,0 +1,83 @@
+// The tokens main.pkn and names.pkn use: a union whose release takes 258
+// `release`s, so that a function whose ways out release two of them
+// releases the second by the union's drop function (docs/pir.md §7).
+import ::collections;
+
+struct Four {
+  a: Str;
+  b: Str;
+  c: Str;
+  d: Str;
+}
+
+struct Sixteen {
+  a: Four;
+  b: Four;
+  c: Four;
+  d: Four;
+}
+
+struct SixtyFour {
+  a: Sixteen;
+  b: Sixteen;
+  c: Sixteen;
+  d: Sixteen;
+}
+
+struct Wide {
+  a: SixtyFour;
+  b: SixtyFour;
+  c: SixtyFour;
+  d: SixtyFour;
+  name: Str;
+}
+
+enum Token {
+  Word(s: Str),
+  Block(w: Wide),
+}
+
+fn wide(s: Str) -> Wide {
+  four = Four(s, s, s, s);
+  sixteen = Sixteen(four, four, four, four);
+  sixtyFour = SixtyFour(sixteen, sixteen, sixteen, sixteen);
+  return Wide(sixtyFour, sixtyFour, sixtyFour, sixtyFour, s + "!");
+}
+
+fn make(i: int) -> Token {
+  if i % 2 == 0 {
+    return Token::Word("w" + Str(i));
+  }
+  return Token::Block(wide("b" + Str(i)));
+}
+
+// A list of tokens, its first removed: List<Token>.removeAt swaps two of
+// them (Buffer<Token>.swap), a copy of the standard library's template
+// that this module's .pkm keeps, which drops the second by the drop
+// function this module's compiled code defines.
+fn kept(n: int) -> Str {
+  l = collections::List<Token>();
+  for i in 0..n {
+    l.push(make(i));
+  }
+  l.removeAt(unsigned(0));
+  out = Str(l.len());
+  for i in 0..n - 1 {
+    match l.get(unsigned(i)) {
+      w: Word { out += " " + w.s; }
+      b: Block { out += " " + b.w.name; }
+    }
+  }
+  return out;
+}
+
+// The text of token @p i, from a returning arm: another module's copy of
+// name<T> drops the token by that module's drop function.
+fn name<T>(tag: T, i: int) -> Str {
+  t = make(i);
+  match t {
+    w: Word { return w.s + Str(tag); }
+    b: Block { return b.w.c.b.a.d + Str(tag); }
+  }
+  return "none";
+}

@@ -784,6 +784,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   halfway between two values of the type, this can differ from rounding the text once
   (`1.0000000596046448` is `1` as an `f32`). A literal and the parse of its text always
   agree.
+- `paykan run` generates code at the level `paykan build` does for the same `-O`: LLVM's
+  code generator does no optimisation at `-O0` (its fast instruction selector), and works
+  at its least at `-O1`, its default at `-O2` and its most at `-O3`
+  (docs/language/17-the-paykan-command.md).  The JIT used LLVM's default level at every
+  `-O` before, so `run -O0` and `run -O1` now generate less optimised code than they did,
+  `run -O3` more optimised code, and `run -O2` the same.  The samples print the same at
+  `run -O1` and `run -O3` as at `run -O2`, with the same heap statistics.
 
 ### Removed
 
@@ -798,6 +805,167 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stability sweep: lowering and backends.**
+  - A struct, a tuple, a fixed-size array or a tagged union passed as an argument, or as the
+    left operand of `==` or `!=`, was read only once the later operands had run, so one that
+    wrote its storage changed the value the callee or the comparison saw: with `reset(c)`
+    storing into `c.p` and `bump(p: inout P)`, `first(c.p, reset(c))`, `first(p, bump(p))`
+    and `q == P(bump(q) + 9)` used the values written (9, 9, `True`), not those read (1, 1,
+    `False`), on every path, and so did a method's, a constructor's, `__super__`'s and a
+    function value's arguments, a `view` or slice parameter (an array given to one, and a
+    slice parameter passed on to another) and the receiver of a struct's `view fn`.  Such a
+    value is passed by address, and its callee copies it (or reads it where it is) when the
+    call starts.  Now, when an operand after it may write its storage (an `inout` argument
+    naming it or a part of it, a struct method that may change it, a call given what
+    reaches the object it is in whose code may store into a field of that name, or into a
+    field whose value may hold the caller's storage it names, or a call through a function
+    value, whose code is not known), the caller copies it where it is evaluated, into a
+    temporary whose references it releases after the use; a slice passed on, by the length
+    it has when the program runs, into memory allocated for the call and freed after it
+    (docs/language/02-basics.md, "Evaluation order"; docs/pir.md §7, "Reads a call may
+    replace").  No other value is copied: a later call storing only into other fields
+    (`first(c.p, counter.next())`, `at(xs, rng.next())` with `next` storing an `int`
+    field) leaves the value where it is, as base did, and the samples and the standard
+    library's tests lower to the same PIR as before, with and without the passes, so the
+    static counts recorded here do not move.  The receiver of a struct method that may
+    change `self` is still its storage, as an `inout` argument is.
+    `samples/codegen/78_mem_arg_eval_order.pkn` runs each shape on every path, with
+    `__super__`'s arguments, a function value a field holds, an argument under an `inout`
+    result, one before a closure that writes it, slices passed on to a function, a
+    function value, a method and a constructor, and methods writing the value through an
+    `inout` local, a `match` arm's binding and a field holding it.
+  - The `lending` pass took time quadratic in the arguments it lent in one block: it
+    removed the retain of each copy it lent one at a time, and each removal moved the rest
+    of the block.  A function of 3000 statements `r += first(p, bump(p)) + first(c.p,
+    reset(c));`, each lending `reset` its `c` beside the copies of `p` and `c.p` above,
+    took 37 s to reach `--emit-pir` (31 s without those copies).  A block's retains now go
+    in one pass over it: 2.5 s, for the same PIR.
+  - Every check that panics on a bad operand (an integer `/` or `%`, an index into a
+    fixed-size array, a conversion's range, a `for` loop's step) nested the rest of its
+    function one level deeper, under an `scf.if` on the function's exit flag and so in the
+    C: Clang rejected the C of a function with 128 integer divisions (`bracket nesting
+    level exceeded maximum of 256`), and the compile time grew with the square of the
+    checks on every path (3000 divisions in one function took 75 to 86 s to reach
+    `--emit-mlir=scf`, and take 1.3 s now).  A check ends in `unreachable` after a panic,
+    which never returns, so it is no exit now: what follows it runs beside it, and the
+    runtime's panics are declared `noreturn` on the LLVM path, as `Runtime.h` declares them
+    `_Noreturn` for the C (docs/c-backend.md, "Control flow").  An early `return`, a
+    `break`, a `continue` and an `elif` still nest what follows them, so Clang's default
+    limit still rejects a function with more than about 250 of them (documented there).
+    `samples/codegen/79_many_guards.pkn` makes 920 checks in one function.
+  - A `match` with many literal arms compiled in time quadratic in its arms: the lowering
+    and PIR's verifier compared each case of its switch with every case before it, to drop
+    or reject one listed twice (20000 arms took 46 s to reach `--emit-pir`, and take 0.5 s
+    now).  Both keep a set of the cases seen, which holds two cases as one exactly when the
+    comparison did (`pir::CaseSet`, with `pir::sameConstant`'s equality: an `i64`, a `char`
+    or a `bool` constant of the same value, and never a float).  And `run -O0` generated
+    code at LLVM's default level from a module it had not optimised, which took 49 s for a
+    5000-armed match whose `build -O0` took 3 s: the JIT now generates code at the
+    level a native build does for the same `-O` (under Changed), and takes 0.3 s.
+  - The LLVM path's lowering of `scf` to `cf` took time and memory quadratic in the number
+    of `if`s in one function's block (a long run of `if` statements, or a `match` on a
+    `Str` or a float with many arms, which tests each in turn): a function of 3000 `if`s
+    beside a 2000-armed `Str` match took 24 s and 1.3 GB to reach `--emit-mlir=llvm`,
+    for `run` and `build`.  Lowering an `scf.if` splits its block after it, and the
+    conversion driver recorded every op each split moved, so that it could undo it, while
+    each split moved everything after it.  The same patterns now run on each op once, a
+    block's last first and an op before those in its regions, with nothing to undo: 2 s
+    and 0.1 GB (docs/design/mlir-backend.md).  The C path, which lowers `scf` to EmitC
+    and not to `cf`, took time quadratic in a module's string constants instead, one for
+    each arm of a `match` on a `Str`: it drops a constant nothing reads, and looked for
+    each constant's readers with a walk of the whole module.  The same program took 38 s
+    to reach `--emit-c`, and a 2000-armed `Str` match alone 32 s; one walk of the module
+    finds every constant's readers now, and they take 2.2 s and 1.5 s, for the same C.
+  - Compiling a program took time quadratic in its number of modules on the LLVM path: each
+    imported module's cached LLVM IR is keyed on the module's MLIR as text, and printing a
+    module nested in the program verified and numbered the whole program each time.  A
+    program of 400 small modules took 19 s of processor time to print its LLVM IR from
+    the cache, and takes 1 s now: a module prints on its own, the program verified once,
+    when it is imported.  The keys' text changes, so every cached `.bc` is rebuilt once.
+  - `--emit-c` wrote a string constant as one C string literal, however long, but C11
+    promises a compiler only 4095 characters in a literal, counted after adjacent literals
+    are joined, so the C of a program with a longer string (which adjacent literals make
+    easily) failed the strict build docs/c-backend.md promises: `-std=c11
+    -pedantic-errors` reported `string length '4096' is greater than the length '4095'
+    ISO C99 compilers are required to support`.  A longer string is now written as its
+    bytes, character constants in braces, then the terminating `0`.  docs/c-backend.md
+    ("Standard C") names the limits the C does not keep within: those only a program's own
+    size passes, such as an object of more than 65,535 bytes, and the initial characters
+    C11 promises are significant in a name (31 in an external one, 63 in another), which
+    the generated names, a module's name and a symbol's in full, often run past.
+    `samples/codegen/80_long_string_literal.pkn` holds a string of 4096 bytes.
+  - The C of a program that assigned a struct or a fixed-size array field of an object it
+    held in a variable or a lambda's capture (`d = h.c; d.p = P(7, 8, 9);`, `k = fn() {
+    c.p = P(7, 8, 9); };`, `d = c; d.p = P(7, 8, 9);` with `c: inout C`) failed the strict
+    build at GCC's `-O1` and above: `-Werror` reported `'__builtin_memcpy' offset [0, 23]
+    is out of the bounds [0, 0] [-Warray-bounds]`.  The retain that made the variable's
+    reference tested the box for `NULL`, and GCC followed that path into the field's write.
+    A value whose type is a class that is not optional is never `NULL` (Sema reads one only
+    once it is set, and a native function never returns one as `NULL`), so the lowering
+    now marks each retain of one `retain nonnull` (docs/pir.md §6, a new mark in PIR's text
+    and binary forms, code 57): a variable's, an `inout` parameter's, a field's or an
+    element's value read, or copied into another variable, a field or the slots of `[v;
+    n]`, a capture into a closure and out of it, a tuple's element taken apart, an `inout`
+    result and the object it is in, a native function's `view` result, and a `match`
+    arm's binding of a subject that is not optional and its write-back.  Both paths
+    retain it, and release the same value, with no test for null: Runtime.h's new
+    `Paykan_retain_nonnull_inline` and `Paykan_release_nonnull_inline` on the C path
+    (docs/c-backend.md).  The mark is of the value, wherever it is used: a type arm's
+    retain of an optional subject's box (`match _open(...) { h: Obj {...} None {...} }`)
+    keeps its test, since the same box, null, is released on the way to `None`.  A
+    release of a variable's slot keeps its test too, since the moves at last use may have
+    emptied the slot.  The same failed through an object a value held in memory held (a
+    struct parameter, a copy of a struct, a tuple or an array, a union's variant bound by
+    a `match`, `inout` too, an optional struct's, a lambda's captured struct: `fn set(s:
+    S) { s.c.p = P(5, 6, 7); }`): a copy of such a value retains each class reference it
+    holds with no test now, but those of an optional's payload, a tagged union's variants
+    (whose other variants are zeros) and a function value's closure.
+    `samples/codegen/81_field_struct_store_retained.pkn` writes such fields through a
+    variable, a capture, a loop's variable, a copy of an `inout` parameter (a lambda's
+    too), of another variable and of an `inout` result, and through each value above, and
+    matches a native function's `Obj?` result to its `None` arm; its C builds strictly
+    with GCC and Clang at `-O0` to `-O3`.
+  - A `match` on a tagged union whose arms return took time quadratic in the union's
+    variants to compile: each way out of a scope (every `return`, `break` and `continue`)
+    released every reference of every variant of each value the scope held in memory, one
+    release per slot written out in full.  Matched by 100 returning arms, a union of 100
+    variants lowered to 14,766 lines of PIR and took 4.6 s to `run`, and one of 200
+    variants to 55,862 lines and 28 to 30 s.  Such a value is still released in place
+    at the end of its scope, and at a way out or as a statement's temporary until its
+    function's ways out and temporaries have written 512 releases in place.  After that, a
+    struct, a tuple, a fixed-size array or a tagged union whose release takes more than
+    four `release`s (an array of more than four elements counting its element's once, for
+    the loop that visits them, and a union every variant's fields) is released there by one
+    call of its type's drop function, `@.drop.<type>(ptr)`, which the lowering writes once
+    per type in the module (docs/pir.md §7) and which releases a tagged union's references
+    by its tag, the current variant's fields only.  A drop function links like the module's
+    other functions: a template's copy the module lowered, which a program may keep from
+    the module's `.pkm` (a standard library container's method, or a generic function the
+    module instantiates), calls it from the program's code
+    (`samples/imports/22_drop_functions`).  On the LLVM path a drop function's call is
+    given a copy of the local, in a slot of its own: LLVM keeps a local whose address a
+    call takes in memory throughout its function, so once a function's ways out had used
+    the 512 releases (90 earlier statements each dropping a struct of six `Str`s), a loop
+    of 30 million `w = mk(k, i); if w.n % 2 == 0 { continue; }` read every field of `w`
+    from memory and ran in 0.57 s at `build -O2` against base's 0.30 s; it takes 0.31 s
+    now, and a function of 45 early returns dropping two such structs 0.39 s against base's
+    0.37 s (0.49 s).  A release of an empty slot does nothing, so a value whose references
+    were handed on, or whose bytes are all zero, is safe to drop.
+    The 100 variants take 2,811 lines and 0.42 s, the 200 4,467 lines and 0.70 s.  The
+    moves at last use count a drop function's call as the release of each of its local's
+    references, and PIR's verifier checks that a drop function is `(ptr) -> void` and is
+    given the whole of a `mem` local (docs/pir.md §9).  Any other release of a value held
+    in memory (an assignment's old value, an object's field when the object is destroyed)
+    is in place as before.  Of the 147 programs of the samples and the standard library's
+    tests (`samples/codegen`, `samples/leak-check`, `samples/imports` and `tests/Stdlib`),
+    only `samples/leak-check/33_drop_by_tag.pkn` and `samples/imports/22_drop_functions`,
+    written to reach them, call a drop function: every other lowers to the PIR it did
+    without them, so the static counts recorded here do not move, and its loops run as fast
+    (a loop of 50 million `m = mk(); match m {...}` on a union of five references takes
+    0.25 s at `build -O2`, as it did, where a drop call at the end of its body took
+    0.75 s).  Sample 33 drops each kind of value in place and by its drop function, a
+    union's by each of its variants and a parameter's whose references were handed on,
+    with no live block left on every path.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

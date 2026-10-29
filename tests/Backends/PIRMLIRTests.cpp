@@ -24,6 +24,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <filesystem>
@@ -430,6 +431,291 @@ TEST(PIRMLIR, DenseSetKeyCasesAreIfs) {
   expectOnlyEmitCOps(*mod);
   for (const char *text : {"INT64_MIN", "9223372036854775807", "switch ("})
     EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
+}
+
+/// One panic guard on dividing %a by %b, as the lowering emits them
+/// (docs/pir.md §7), adding the quotient to the local %s; `#` stands for
+/// the guard's number.
+const char *const kDivisionGuard = R"(  %z# = cmp eq %b, 0
+  if %z# {
+    call @$rt.Paykan_panic_div_by_zero()
+    unreachable
+  }
+  %q# = div %a, %b
+  %t# = load %s
+  %u# = add %t#, %q#
+  store %s, %u#
+)";
+
+/// @p n division guards.
+std::string divisionGuards(int n) {
+  std::string s;
+  for (int i = 0; i < n; ++i)
+    for (const char *c = kDivisionGuard; *c; ++c) {
+      if (*c == '#')
+        s += std::to_string(i);
+      else
+        s += *c;
+    }
+  return s;
+}
+
+/// A program of panic guards: @guards has @p n of them; @early returns
+/// early, then has @p n; @loop has one in a loop's body; @never only
+/// panics.
+std::string panicGuards(int n) {
+  return R"(module "main"
+extern fn @$rt.Paykan_panic_div_by_zero() -> void
+
+fn @guards(%a: i64, %b: i64) -> i64 {
+  local %s: i64
+  store %s, 0
+)" + divisionGuards(n) +
+         R"(  %r = load %s
+  ret %r
+}
+
+fn @early(%a: i64, %b: i64) -> i64 {
+  local %s: i64
+  store %s, 0
+  %neg = cmp lt %a, 0
+  if %neg {
+    ret 0
+  }
+)" + divisionGuards(n) +
+         R"(  %r = load %s
+  ret %r
+}
+
+fn @loop(%n: i64) -> i64 {
+  local %i: i64
+  store %i, 1
+  while {
+    %c = load %i
+    %le = cmp le %c, %n
+    cond %le
+  } {
+    %j = load %i
+    %z = cmp eq %j, 0
+    if %z {
+      call @$rt.Paykan_panic_div_by_zero()
+      unreachable
+    }
+    %q = div 100, %j
+    %k = add %j, %q
+    store %i, %k
+  }
+  %r = load %i
+  ret %r
+}
+
+fn @never() -> i64 {
+  call @$rt.Paykan_panic_div_by_zero()
+  unreachable
+}
+
+fn @main() -> i64 {
+  %g = call @guards(10, 2)
+  %e = call @early(10, 2)
+  %l = call @loop(3)
+  %ge = add %g, %e
+  %r = add %ge, %l
+  ret %r
+}
+)";
+}
+
+/// The deepest nesting of braces in @p c.
+int braceDepth(const std::string &c) {
+  int depth = 0, deepest = 0;
+  for (char ch : c) {
+    if (ch == '{')
+      deepest = std::max(deepest, ++depth);
+    else if (ch == '}')
+      --depth;
+  }
+  return deepest;
+}
+
+// A panic guard's `if` ends in `unreachable` after its call, which does not
+// return: no exit, so what follows the guard runs beside it, under no
+// `scf.if` on an exit flag (SW-02).  Only @early, whose early return sets
+// the flag, has one, tested once after the return's `if`; @loop's condition
+// does not test it.  The C is as deep for twelve guards as for one: clang
+// rejects C nested past 256 brackets.
+TEST(PIRMLIR, PanicGuardsAreNoExits) {
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  std::string scf = scfText(panicGuards(12), *ctx, err);
+  ASSERT_FALSE(scf.empty()) << err;
+  expectRoundTrip(scf, *ctx);
+  size_t flag = scf.find("pir.alloca \"exit\"");
+  ASSERT_NE(flag, std::string::npos) << scf;
+  EXPECT_EQ(scf.find("pir.alloca \"exit\"", flag + 1), std::string::npos)
+      << scf;
+  EXPECT_LT(scf.find("func.func @pk_main_Searly"), flag) << scf;
+  EXPECT_GT(scf.find("func.func @pk_main_Sloop"), flag) << scf;
+  // The flag (the only i8 slot) is read once: by the `if` around what
+  // follows the return.
+  size_t reads = 0;
+  std::istringstream lines(scf);
+  for (std::string line; std::getline(lines, line);)
+    reads += line.find("pir.ptr_load") != std::string::npos &&
+             line.ends_with(": i8");
+  EXPECT_EQ(reads, 1u) << scf;
+
+  // Each module before the context it is in: emitCText makes a new one.
+  std::unique_ptr<mlir::MLIRContext> ctx1, ctx12;
+  mlir::OwningOpRef<mlir::ModuleOp> mod1, mod12;
+  std::string one = emitCText(panicGuards(1), ctx1, mod1, err);
+  ASSERT_FALSE(one.empty()) << err;
+  std::string twelve = emitCText(panicGuards(12), ctx12, mod12, err);
+  ASSERT_FALSE(twelve.empty()) << err;
+  expectOnlyEmitCOps(*mod12);
+  EXPECT_EQ(braceDepth(twelve), braceDepth(one)) << twelve;
+}
+
+// A `retain nonnull`, of a box that is never null (docs/pir.md §6), and a
+// release of the same value call Runtime.h's fast paths that test no box
+// for null; a release of another value, a load of the slot the box was
+// stored in, calls the one that does (SW-14).
+TEST(PIRMLIR, ANonNullRetainCallsTheFastPathsWithNoNullTest) {
+  const char *const text = R"(module "main"
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+cstr @.s = "s" len 1
+
+fn @main() -> i64 {
+  local %l: box
+  %o = call @$rt.PaykanString_new(@.s, 1)
+  %b = box %o
+  retain nonnull %b
+  release %b
+  store %l, %b
+  %c = load %l
+  release %c
+  ret 0
+}
+)";
+  auto count = [](const std::string &in, const std::string &what) {
+    size_t n = 0;
+    for (size_t at = in.find(what); at != std::string::npos;
+         at = in.find(what, at + what.size()))
+      ++n;
+    return n;
+  };
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  std::string scf = scfText(text, *ctx, err);
+  ASSERT_FALSE(scf.empty()) << err;
+  expectRoundTrip(scf, *ctx);
+  EXPECT_EQ(count(scf, "{pir.nonnull}"), 2u) << scf;
+
+  std::unique_ptr<mlir::MLIRContext> cctx;
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string c = emitCText(text, cctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod);
+  EXPECT_EQ(count(c, "Paykan_retain_nonnull_inline("), 1u) << c;
+  EXPECT_EQ(count(c, "Paykan_release_nonnull_inline("), 1u) << c;
+  EXPECT_EQ(count(c, "Paykan_release_inline("), 1u) << c;
+  EXPECT_EQ(count(c, "Paykan_retain_inline("), 0u) << c;
+}
+
+// A drop function links like its module's other functions (docs/pir.md §7):
+// a template's copy lowered with the module may call it from another
+// module's C, so it is not `static`.
+TEST(PIRMLIR, ADropFunctionLinksLikeItsModulesOtherFunctionsInC) {
+  const char *const text = R"(module "main"
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+cstr @.s = "s" len 1
+
+fn @.drop.P(%at: ptr) -> void {
+  %a = ptr.load box, %at
+  release %a
+  ret
+}
+
+fn @main() -> i64 {
+  local %p: mem(8, 8)
+  %o = call @$rt.PaykanString_new(@.s, 1)
+  %b = box %o
+  %addr = local.addr %p
+  ptr.store %addr, %b
+  %at = local.addr %p
+  call @.drop.P(%at)
+  ret 0
+}
+)";
+  std::unique_ptr<mlir::MLIRContext> ctx;
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string err;
+  std::string c = emitCText(text, ctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod);
+  size_t dropLines = 0;
+  std::istringstream in(c);
+  for (std::string line; std::getline(in, line);)
+    if (line.find("drop") != std::string::npos &&
+        line.find("void ") != std::string::npos) {
+      ++dropLines;
+      EXPECT_EQ(line.rfind("void ", 0), 0u) << line;
+    }
+  // Its declaration and its definition.
+  EXPECT_EQ(dropLines, 2u) << c;
+}
+
+/// A program that prints a string of @p n bytes: `a`, 0x80 and `'` over
+/// and over.
+std::string printsLongString(size_t n) {
+  const char *const pieces[] = {"a", "\\x80", "'"};
+  std::string text;
+  for (size_t i = 0; i < n; ++i)
+    text += pieces[i % 3];
+  return R"(module "main"
+cstr @.str0 = ")" +
+         text + "\" len " + std::to_string(n) + R"(
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.Paykan_println(obj) -> void
+extern fn @$rt.PaykanString_destroy(obj) -> void
+
+fn @main() -> i64 {
+  %s.1 = call @$rt.PaykanString_new(@.str0, )" +
+         std::to_string(n) + R"()
+  call @$rt.Paykan_println(%s.1)
+  call @$rt.PaykanString_destroy(%s.1)
+  ret 0
+}
+)";
+}
+
+// A string constant is a C string literal up to the 4095 characters C11
+// promises a compiler accepts in one (5.2.4.1, counted after adjacent
+// literals are joined), and past them its bytes as character constants in
+// braces, sixteen to a line, then the terminating 0 (SW-13).
+TEST(PIRMLIR, StringsPastTheLongestLiteralAreBraced) {
+  // Each module before the context it is in: emitCText makes a new one.
+  std::unique_ptr<mlir::MLIRContext> ctx4095, ctx4096;
+  mlir::OwningOpRef<mlir::ModuleOp> mod4095, mod4096;
+  std::string err;
+  std::string c = emitCText(printsLongString(4095), ctx4095, mod4095, err);
+  ASSERT_FALSE(c.empty()) << err;
+  size_t at = c.find("static const char pk_main_S_2Estr0[4096] = \"a\\200'");
+  ASSERT_NE(at, std::string::npos) << c;
+  EXPECT_EQ(c.find("'a',", at), std::string::npos) << c;
+
+  c = emitCText(printsLongString(4096), ctx4096, mod4096, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod4096);
+  at = c.find("static const char pk_main_S_2Estr0[4097] = {\n"
+              "  'a', '\\200', '\\'', 'a',");
+  ASSERT_NE(at, std::string::npos) << c;
+  size_t end = c.find(';', at);
+  ASSERT_NE(end, std::string::npos) << c;
+  std::string init = c.substr(at, end - at);
+  EXPECT_EQ(init.find('"'), std::string::npos) << init;
+  // 4096 bytes are 256 lines of sixteen, and the 0 closes the last.
+  EXPECT_EQ(std::count(init.begin(), init.end(), '\n'), 257) << init;
+  EXPECT_TRUE(init.ends_with("'a', 0\n}")) << init;
 }
 
 // Native functions bound to C library functions a header declares with

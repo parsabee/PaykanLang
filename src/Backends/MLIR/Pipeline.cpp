@@ -12,6 +12,7 @@
 
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/IR/Diagnostics.h>
+#include <mlir/IR/OperationSupport.h>
 #include <mlir/Pass/PassManager.h>
 
 namespace paykan::mlir_backend {
@@ -102,9 +103,13 @@ StatusOr<std::unique_ptr<llvm::Module>> compileProgram(
   return llvm_codegen::compileProgram(
       program, ctx, moduleName, projectRoot, kCache,
       [&](size_t index) {
+        // The module alone: printing a nested op otherwise verifies, and
+        // numbers, the whole program each time, which importProgram has
+        // verified once already.
         std::string text;
         llvm::raw_string_ostream os(text);
-        modules[index]->print(os);
+        modules[index]->print(
+            os, mlir::OpPrintingFlags().useLocalScope().assumeVerified());
         return text;
       },
       [&](size_t index) -> StatusOr<std::unique_ptr<llvm::Module>> {

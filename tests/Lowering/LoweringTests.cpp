@@ -165,13 +165,21 @@ bool stableLoad(const std::string &f, const std::string &what) {
   return line.ends_with(" stable");
 }
 
+/// Where @p f first retains the box @p value with the marks @p marks
+/// (`lend `, or none), and `nonnull` or not (docs/pir.md §6): npos when it
+/// does not.
+size_t findRetain(const std::string &f, const std::string &value,
+                  const std::string &marks = "") {
+  return std::min(f.find("retain " + marks + value + "\n"),
+                  f.find("retain " + marks + "nonnull " + value + "\n"));
+}
+
 /// Whether the box @p value is retained before the first @p call of @p f and
 /// released after it: a reference of its own while the call runs.
 bool heldAcross(const std::string &f, const std::string &value,
                 const std::string &call) {
   const size_t c = f.find(call);
-  return !value.empty() && c != std::string::npos &&
-         f.find("retain " + value + "\n") < c &&
+  return !value.empty() && c != std::string::npos && findRetain(f, value) < c &&
          f.find("release " + value + "\n", c) != std::string::npos;
 }
 
@@ -205,6 +213,331 @@ TEST(Lowering, OwnedVariablesAreReleasedInReverseOrderAtScopeExit) {
   EXPECT_NE(loadB, std::string::npos) << m;
   EXPECT_NE(loadA, std::string::npos) << m;
   EXPECT_LT(loadB, loadA);
+}
+
+// A retain of a value whose type is a class that is not optional, which is
+// never null, is a `retain nonnull` (docs/pir.md §6): a field read into a
+// variable, a variable captured, a capture copied into the closure's call;
+// a retain of an optional's value is a plain one (SW-14).
+TEST(Lowering, ARetainOfAClassValueIsNonNull) {
+  Lowered l = lower(R"(
+struct P {
+  a: int;
+}
+
+class C {
+  p: P;
+}
+
+class H {
+  c: C;
+  o: C?;
+}
+
+fn set(h: H) -> int {
+  d = h.c;
+  d.p = P(7);
+  e = h.o;
+  k = fn() -> int { return d.p.a; };
+  return k();
+}
+
+fn main() -> int {
+  h = H(C(P(1)), None);
+  return set(h);
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string set = function(l.Text, "set");
+  EXPECT_EQ(count(set, "retain nonnull %c."), 1u) << set;
+  EXPECT_EQ(count(set, "retain nonnull %d."), 1u) << set;
+  EXPECT_EQ(count(set, "retain %o."), 1u) << set;
+  EXPECT_EQ(count(set, "retain nonnull"), 2u) << set;
+  const std::string call = function(l.Text, "fn.main.0.call");
+  EXPECT_EQ(count(call, "retain nonnull %d."), 1u) << call;
+}
+
+// So is the retain of a variable's class value copied into another variable
+// (SW-14): from an `inout` parameter, as a variable's new value, as a
+// field's new value, and the object an `inout` result is in; an
+// optional's is not.
+TEST(Lowering, ARetainOfAVariablesClassValueIsNonNull) {
+  Lowered l = lower(R"(
+struct P {
+  a: int;
+}
+
+class C {
+  p: P;
+}
+
+class H {
+  c: C;
+  o: C?;
+}
+
+fn held(h: inout H) -> inout C {
+  return h.c;
+}
+
+fn copy(c: inout C, o: C?, h: H) -> int {
+  d = c;
+  e = o;
+  f = d;
+  f = c;
+  h.c = d;
+  g = o;
+  g = e;
+  at: inout = held(h);
+  return d.p.a + f.p.a + at.p.a;
+}
+
+fn main() -> int {
+  c = C(P(1));
+  return copy(c, None, H(c, None));
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string copy = function(l.Text, "copy");
+  EXPECT_EQ(count(copy, "retain nonnull %c."), 2u) << copy;
+  EXPECT_EQ(count(copy, "retain nonnull %d."), 2u) << copy;
+  EXPECT_EQ(count(copy, "retain nonnull %held.obj."), 1u) << copy;
+  EXPECT_EQ(count(copy, "retain %o."), 2u) << copy;
+  EXPECT_EQ(count(copy, "retain %e."), 1u) << copy;
+}
+
+// So is a class reference's of a value held in memory, which a copy retains
+// slot by slot (SW-14): a struct's field, a tuple's element, an array's
+// element, the fields of a union's variant once a `match` binds it.  An
+// optional's payload, a union's variants copied as the union, and the
+// optional fields keep their test: those are zeros where unset.
+TEST(Lowering, ACopyOfAValueRetainsItsClassReferencesNonNull) {
+  Lowered l = lower(R"(
+struct P {
+  a: int;
+}
+
+class C {
+  p: P;
+}
+
+struct S {
+  c: C;
+  o: C?;
+}
+
+enum U {
+  A(c: C),
+  B,
+}
+
+fn copyStruct(s: S, t: (C, int), a: C[2]) -> int {
+  s2 = s;
+  t2 = t;
+  a2 = a;
+  return s2.c.p.a + t2.0.p.a + a2[1].p.a;
+}
+
+fn copyUnion(u: U) -> int {
+  v = u;
+  match v {
+    x: A { return x.c.p.a; }
+    B { return 0; }
+  }
+}
+
+fn copyOptional(os: S?) -> int {
+  t = os;
+  match t {
+    s: S { return s.c.p.a; }
+    None { return 0; }
+  }
+}
+
+fn main() -> int {
+  c = C(P(1));
+  s = S(c, None);
+  return copyStruct(s, (c, 1), [c, c]) + copyUnion(U::A(c)) +
+      copyOptional(s);
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  // The struct's c, the tuple's element and the array's two, and the
+  // struct's o, in the parameters' copies the function makes when it
+  // starts and in the variables' copies.
+  const std::string copy = function(l.Text, "copyStruct");
+  EXPECT_EQ(count(copy, "retain nonnull %elem."), 2u * 4) << copy;
+  EXPECT_EQ(count(copy, "retain %elem."), 2u * 1) << copy;
+  // The union's copy tests its variant's field; the arm's copy does not.
+  const std::string un = function(l.Text, "copyUnion");
+  const size_t arm = un.find("switch ");
+  ASSERT_NE(arm, std::string::npos) << un;
+  EXPECT_EQ(count(un.substr(0, arm), "retain nonnull"), 0u) << un;
+  EXPECT_EQ(count(un.substr(arm), "retain nonnull %elem."), 1u) << un;
+  // The optional's copy tests; its present value's copy tests only o.
+  const std::string opt = function(l.Text, "copyOptional");
+  EXPECT_EQ(count(opt, "retain nonnull %elem."), 1u) << opt;
+}
+
+// A type arm's binding retains the subject's box, the subject's own value:
+// `nonnull` for a class subject, but not for an optional one, whose box is
+// null on the way to its `None` arm, where the same value is released.
+TEST(Lowering, AnOptionalSubjectsArmRetainsItsBoxWithATest) {
+  Lowered l = lower(R"(
+struct P {
+  a: int;
+}
+
+class C {
+  p: P;
+}
+
+fn pick(o: C?) -> C? {
+  return o;
+}
+
+fn same(c: C) -> C {
+  return c;
+}
+
+fn arm(o: C?, c: C) -> int {
+  match pick(o) {
+    x: C { return x.p.a; }
+    None { }
+  }
+  match same(c) {
+    y: C { return y.p.a; }
+  }
+  return 0;
+}
+
+fn main() -> int {
+  return arm(None, C(P(1)));
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string arm = function(l.Text, "arm");
+  const size_t pick = arm.find("call @pick(");
+  const size_t same = arm.find("call @same(");
+  ASSERT_NE(pick, std::string::npos) << arm;
+  ASSERT_NE(same, std::string::npos) << arm;
+  const std::string optional = arm.substr(pick, same - pick);
+  EXPECT_EQ(count(optional, "retain %call."), 1u) << arm;
+  EXPECT_EQ(count(optional, "retain nonnull"), 0u) << arm;
+  EXPECT_EQ(count(arm.substr(same), "retain nonnull %call."), 1u) << arm;
+}
+
+namespace {
+
+/// A tagged union of @p n variants, every third one with a field holding a
+/// reference, and a function returning from a `match` arm of each.
+std::string unionOfMany(int n) {
+  std::string src = "enum Many { ";
+  for (int i = 0; i < n; ++i)
+    src += (i ? ", V" : "V") + std::to_string(i) +
+           (i % 3 == 0 ? "(a: int, s: Str)" : "");
+  src += " }\nfn name(m: Many) -> Str {\n  match m {\n";
+  for (int i = 0; i < n; ++i)
+    src += "    V" + std::to_string(i) + " { return \"V" + std::to_string(i) +
+           "\"; }\n";
+  return src + "  }\n}\nfn main() -> int {\n"
+               "  return int(name(Many::V3(1, \"q\")).len());\n}\n";
+}
+
+} // namespace
+
+// A value held in memory with more than four references is released, on a
+// way out of a scope, in place while its function has written fewer than
+// 512 such releases at its ways out, and by one call of its type's drop
+// function after that (SW-03): a `match` returning from each arm of a union
+// grows with its variants, not with its variants times their fields (3.7
+// times the code for twice the variants when each way out released every
+// variant's fields).  The union's drop function switches on the tag and
+// releases the fields of the variant it names; a value of four references
+// is released in place, and so is every value at the end of its scope.
+TEST(Lowering, ALargeValueIsReleasedByOneCallAtEachWayOut) {
+  Lowered l50 = lower(unionOfMany(50));
+  Lowered l100 = lower(unionOfMany(100));
+  ASSERT_TRUE(l50.Ok) << l50.Error;
+  ASSERT_TRUE(l100.Ok) << l100.Error;
+  const std::string f50 = function(l50.Text, "name");
+  const std::string f100 = function(l100.Text, "name");
+  EXPECT_LT(count(f100, "\n"), 2.5 * count(f50, "\n"));
+  // Each of the 100 arms' returns releases the subject's copy and the
+  // parameter's, 34 references each: the first 15 values in place (510 of
+  // the 512 releases), the other 185 by a call.  The ends of the match's
+  // scope and of the function's, which no arm reaches, release the two in
+  // place.
+  EXPECT_EQ(count(f100, "release "), (15u + 2) * 34) << f100;
+  EXPECT_EQ(count(f100, "call @.drop.Many("), 2u * 100 - 15) << f100;
+  const std::string drop = fullFunction(l100.Text, ".drop.Many");
+  EXPECT_NE(drop.find("fn @.drop.Many(%at.1: ptr) -> void {\n"
+                      "  %tag.2 = ptr.load i64, %at.1\n"
+                      "  switch %tag.2 {\n    case 0 {\n"),
+            std::string::npos)
+      << drop;
+  EXPECT_EQ(count(drop, "    case "), 34u) << drop;
+  EXPECT_EQ(count(drop, "release "), 34u) << drop;
+  EXPECT_EQ(count(drop, "default"), 0u) << drop;
+  // Four references: released in place.
+  Lowered small = lower(unionOfMany(10));
+  ASSERT_TRUE(small.Ok) << small.Error;
+  EXPECT_EQ(small.Text.find(".drop."), std::string::npos) << small.Text;
+  EXPECT_EQ(count(function(small.Text, "name"), "release "), 2u * 11 * 4)
+      << function(small.Text, "name");
+}
+
+// A struct of many references is released by its drop function too, once
+// its function's ways out have written 512 releases in place, and a union
+// nested in it by a switch on its tag inside that function.
+TEST(Lowering, ADropFunctionReleasesANestedUnionByItsTag) {
+  std::string exits;
+  for (int i = 0; i < 90; ++i)
+    exits += "  if k == " + std::to_string(i) + " { return w.a.len(); }\n";
+  Lowered l = lower(R"(
+enum Two { A(s: Str), B(t: Str, u: Str) }
+struct Wide {
+  a: Str;
+  b: Str;
+  c: Str;
+  two: Two;
+}
+fn len(w: Wide, k: int) -> int {
+)" + exits + R"(
+  return w.c.len();
+}
+fn main() -> int {
+  return len(Wide("a", "b", "c", Two::A("s")), 1);
+}
+)");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  // 6 references: the first 85 of the 91 returns release w in place.
+  const std::string len = function(l.Text, "len");
+  EXPECT_EQ(count(len, "release "), 85u * 6) << len;
+  EXPECT_EQ(count(len, "call @.drop.Wide("), 6u) << len;
+  const std::string drop = fullFunction(l.Text, ".drop.Wide");
+  EXPECT_EQ(count(drop, "release "), 6u) << drop;
+  EXPECT_EQ(count(drop, "switch "), 1u) << drop;
+  EXPECT_EQ(l.Text.find(".drop.Two"), std::string::npos) << l.Text;
+  // A function of a few ways out releases w in place at each.
+  Lowered few = lower(R"(
+enum Two { A(s: Str), B(t: Str, u: Str) }
+struct Wide {
+  a: Str;
+  b: Str;
+  c: Str;
+  two: Two;
+}
+fn len(w: Wide, k: int) -> int {
+  if k == 0 { return w.a.len(); }
+  return w.c.len();
+}
+fn main() -> int {
+  return len(Wide("a", "b", "c", Two::A("s")), 1);
+}
+)");
+  ASSERT_TRUE(few.Ok) << few.Error;
+  EXPECT_EQ(few.Text.find(".drop."), std::string::npos) << few.Text;
 }
 
 TEST(Lowering, StringTemporaryPassedToBuiltinIsDestroyedAfterTheCall) {
@@ -568,11 +901,13 @@ TEST(Lowering, AReadACallMayReplaceHasAReferenceOfItsOwn) {
     const size_t call =
         f.find(std::string(fn) == "joined" ? "call @repl(" : "call @replNode(");
     ASSERT_NE(call, std::string::npos) << f;
-    // The read's retain comes before the call, its release after it.
+    // The read's retain comes before the call, its release after it.  The
+    // read is of a class value that is not optional: `nonnull` (SW-14).
     EXPECT_EQ(count(f.substr(0, call), "retain "), 1u) << f;
-    const size_t retain = f.find("retain ");
+    const size_t retain = f.find("retain nonnull ");
+    ASSERT_NE(retain, std::string::npos) << f;
     const std::string read =
-        f.substr(retain + 7, f.find('\n', retain) - retain - 7);
+        f.substr(retain + 15, f.find('\n', retain) - retain - 15);
     const size_t release = f.find("release " + read + "\n");
     ASSERT_NE(release, std::string::npos) << f;
     EXPECT_GT(release, call) << f;
@@ -1338,7 +1673,7 @@ TEST(Lowering, StorageInAnObjectACallMayReplaceKeepsTheObject) {
     const size_t hold = f.find(std::string("store %") + b.Local + ".obj.");
     ASSERT_NE(hold, std::string::npos) << f;
     const std::string store = f.substr(hold, f.find('\n', hold) - hold);
-    EXPECT_LT(f.find("retain " + a + "\n"), hold) << f;
+    EXPECT_LT(findRetain(f, a), hold) << f;
     EXPECT_EQ(store.substr(store.size() - a.size()), a) << f;
   }
 }
@@ -1386,7 +1721,7 @@ TEST(Lowering, StrOfAFieldIsRetainedWhenHandedOn) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "Gen.show");
   const std::string v = defined(f, ", Gen.v");
-  EXPECT_LT(f.find("retain " + v + "\n"), f.find("ret " + v)) << f;
+  EXPECT_LT(findRetain(f, v), f.find("ret " + v)) << f;
 }
 
 // An `inout` result used after its call may be in the object an `inout`
@@ -1428,6 +1763,187 @@ TEST(Lowering, AnInoutResultHoldsWhatItsInoutArgumentsHold) {
   ASSERT_NE(call, std::string::npos) << f;
   EXPECT_LT(call, f.find("mem.copy %held.addr.")) << f;
   EXPECT_LT(call, f.find("mem.copy %y.obj.addr.")) << f;
+}
+
+// A value held in memory passed by address, a struct's `view fn` receiver
+// and the left operand of `==` are copied where they are evaluated (into a
+// `snap` temporary, its references retained) only when an operand after
+// them may write their storage (docs/pir.md §7, "Reads a call may
+// replace"): an `inout` argument naming it or a part of it, a struct method
+// that may change it, a call given the object it is in that may store into
+// storage its caller holds.  A later call that writes another part, writes
+// nothing its caller holds, or is given nothing that reaches it, a write
+// before the read and the call's own `inout` arguments (its callee copies
+// its parameters first) take no copy.
+TEST(Lowering, AValueReadWhereItIsIsCopiedOnlyWhenALaterOperandMayWriteIt) {
+  const std::string decls = R"(
+    struct P { a: int; }
+    struct Pair { p: P; q: P; }
+    impl Pair {
+      fn bumpQ() -> int { self.q = P(7); return 0; }
+      view fn get(x: int) -> int => self.p.a;
+    }
+    class C { p: P; n: int; }
+    fn first(p: P, x: int) -> int => p.a;
+    fn both(p: P, q: inout P) -> int => p.a;
+    fn reset(c: C) -> int { c.p = P(9); return 0; }
+    fn reads(c: C) -> int => c.p.a;
+    fn make(c: C) -> C => C(c.p, 0);
+    fn bump(p: inout P) -> int { p = P(9); return 0; }
+    fn bumpN(n: inout int) -> int { n = 9; return 0; }
+    fn bumpPair(s: inout Pair) -> int { s = Pair(P(9), P(9)); return 0; }
+    fn k() -> int => 0;
+  )";
+  struct Case {
+    const char *Name;
+    const char *Body;
+    size_t Copies;
+  };
+  const Case cases[] = {
+      {"fieldReset", "c = C(P(1), 1); return first(c.p, reset(c));", 1},
+      {"localInout", "p = P(1); return first(p, bump(p));", 1},
+      {"equality", "q = P(1); return if q == P(bump(q)) then 1 else 0;", 1},
+      {"partWritten", "s = Pair(P(1), P(2)); return first(s.q, s.bumpQ());", 1},
+      {"viewReceiver", "s = Pair(P(1), P(2)); return s.get(bumpPair(s));", 1},
+      {"nested", "c = C(P(1), 1); return first(c.p, first(c.p, reset(c)));", 2},
+      {"otherPart", "s = Pair(P(1), P(2)); return first(s.q, bump(s.p));", 0},
+      {"otherField", "c = C(P(1), 1); return first(c.p, bumpN(c.n));", 0},
+      {"readsOnly", "c = C(P(1), 1); return first(c.p, reads(c));", 0},
+      {"makesNew", "c = C(P(1), 1); return first(c.p, make(c).n);", 0},
+      {"givenNothing", "c = C(P(1), 1); return first(c.p, k());", 0},
+      {"writtenBefore", "p = P(1); return bump(p) + first(p, 0);", 0},
+      {"ownArgument", "p = P(1); return both(p, p);", 0},
+  };
+  for (const Case &c : cases) {
+    auto l = lower(decls + "fn " + c.Name + "() -> int { " + c.Body +
+                       " }\nfn main() -> int { return 0; }",
+                   "", lowering::Copies::Shared, lowering::World::Closed);
+    ASSERT_TRUE(l.Ok) << c.Name << ": " << l.Error;
+    const std::string f = function(l.Text, c.Name);
+    EXPECT_EQ(count(f, "mem.copy %snap.addr."), c.Copies) << c.Name << "\n"
+                                                          << f;
+  }
+}
+
+// A later call that stores into objects' fields writes a value read where
+// it is only when the value may be in such a field: one in an object's
+// field of the same name, or storage of the caller's of a type a stored
+// field's value may hold (docs/pir.md §7).  A method of another object
+// storing another field (an RNG's or a counter's `next`), a free function
+// storing one, or the receiver of a struct's `view fn` read from another
+// field take no copy; a store through an `inout` local or a `match` arm's
+// binding is a store into the field it names.
+TEST(Lowering, ACallStoringAnotherFieldWritesNoValueReadWhereItIs) {
+  const std::string decls = R"(
+    struct P { a: Str; n: int; }
+    impl P { view fn plus(k: int) -> int => self.n + k; }
+    struct Wrap { p: P; m: int; }
+    enum Two { A(p: P), B }
+    class C { p: P; n: int; w: Wrap; two: Two; }
+    impl C {
+      fn resetP() -> int { self.p = P("z", 9); return 0; }
+      fn viaLocal() -> int { q: inout = self.p; q = P("z", 9); return 0; }
+      fn viaLocalN() -> int { k: inout = self.n; k = 9; return 0; }
+      fn viaArm() -> int {
+        match self.two { a: inout A { a.p = P("z", 9); } _ {} }
+        return 0;
+      }
+      fn resetW() -> int { self.w = Wrap(P("z", 9), 9); return 0; }
+    }
+    class Counter { v: int; }
+    impl Counter { fn next() -> int { self.v = self.v + 1; return self.v; } }
+    class Log { n: int; }
+    fn logit(l: Log, i: int) -> int { l.n = l.n + i; return 0; }
+    fn first(p: P, x: int) -> int => p.n;
+    fn firstTwo(t: Two, x: int) -> int => 0;
+    fn look(p: view P, x: int) -> int => p.n;
+    fn at(xs: view int[], x: int) -> int => xs[x % 3];
+    class Arrays { xs: int[3]; }
+    fn resetXs(a: Arrays) -> int { a.xs = [9, 9, 9]; return 0; }
+  )";
+  struct Case {
+    const char *Name;
+    const char *Params;
+    const char *Body;
+    size_t Copies;
+  };
+  const Case cases[] = {
+      {"counter", "c: C, ctr: Counter", "return first(c.p, ctr.next());", 0},
+      {"logged", "c: C, l: Log", "return first(c.p, logit(l, 1));", 0},
+      {"element", "c: C, ctr: Counter", "return first(c.w.p, ctr.next());", 0},
+      {"viewRecv", "c: C, ctr: Counter", "return c.p.plus(ctr.next());", 0},
+      {"viewParam", "p: view P, ctr: Counter", "return look(p, ctr.next());",
+       0},
+      {"sliceParam", "xs: view int[], ctr: Counter",
+       "return at(xs, ctr.next());", 0},
+      {"otherLocal", "c: C", "return first(c.p, c.viaLocalN());", 0},
+      {"method", "c: C", "return first(c.p, c.resetP());", 1},
+      {"inoutLocal", "c: C", "return first(c.p, c.viaLocal());", 1},
+      {"armBinding", "c: C", "return firstTwo(c.two, c.viaArm());", 1},
+      {"partOfField", "p: view P, c: C", "return look(p, c.resetW());", 1},
+      {"sliceOfField", "xs: view int[], a: Arrays",
+       "return at(xs, resetXs(a));", 1},
+  };
+  for (const Case &c : cases) {
+    auto l = lower(decls + "fn " + c.Name + "(" + c.Params + ") -> int { " +
+                       c.Body + " }\nfn main() -> int { return 0; }",
+                   "", lowering::Copies::Shared, lowering::World::Closed);
+    ASSERT_TRUE(l.Ok) << c.Name << ": " << l.Error;
+    const std::string f = function(l.Text, c.Name);
+    EXPECT_EQ(count(f, "mem.copy %snap.addr.") +
+                  count(f, "mem.copy %snap.elems."),
+              c.Copies)
+        << c.Name << "\n"
+        << f;
+  }
+}
+
+// A slice parameter passed on to another is the caller's array: when an
+// operand after it may write the array, its elements are copied where it is
+// evaluated, by the length the slice has when the program runs, into
+// memory of its own (Paykan_malloc), their references retained, and
+// released and freed after the call.  With no such operand nothing is
+// copied.
+TEST(Lowering, ASlicePassedOnIsCopiedByItsLengthWhenALaterOperandMayWriteIt) {
+  auto l = lower(R"(
+    class A { xs: int[3]; ss: Str[3]; }
+    fn total(xs: view int[], x: int) -> int => xs[0];
+    fn names(ss: view Str[], x: int) -> int => ss[0].len();
+    fn reset(a: A) -> int { a.xs = [9, 9, 9]; a.ss = ["x", "y", "z"]; return 0; }
+    fn reads(a: A) -> int => a.xs[0];
+    fn hazard(xs: view int[], a: A) -> int => total(xs, reset(a));
+    fn refs(ss: view Str[], a: A) -> int => names(ss, reset(a));
+    fn safe(xs: view int[], a: A) -> int => total(xs, reads(a));
+    fn main() -> int {
+      a = A([1, 2, 3], ["a", "b", "c"]);
+      return hazard(a.xs, a) + refs(a.ss, a) + safe(a.xs, a);
+    }
+  )",
+                 "", lowering::Copies::Shared, lowering::World::Closed);
+  ASSERT_TRUE(l.Ok) << l.Error;
+  for (const char *fn : {"hazard", "refs"}) {
+    const std::string f = function(l.Text, fn);
+    const size_t malloc = f.find("call @$rt.Paykan_malloc(");
+    const size_t copy = f.find("mem.copy %snap.elems.");
+    const size_t call =
+        f.find(std::string(fn) == "hazard" ? "call @total(" : "call @names(");
+    const size_t free = f.find("call @$rt.Paykan_free(%snap.elems.");
+    ASSERT_NE(malloc, std::string::npos) << f;
+    ASSERT_NE(call, std::string::npos) << f;
+    EXPECT_LT(malloc, copy) << f;
+    EXPECT_LT(copy, f.find("call @reset(")) << f;
+    EXPECT_LT(call, free) << f;
+    EXPECT_NE(f.find("(%snap.elems."), std::string::npos) << f;
+  }
+  // Each copied Str is retained in a loop over the slice's length, and
+  // released in another after the call.
+  const std::string refs = function(l.Text, "refs");
+  EXPECT_EQ(count(refs, "while "), 2u) << refs;
+  EXPECT_EQ(count(function(l.Text, "hazard"), "while "), 0u)
+      << function(l.Text, "hazard");
+  const std::string safe = function(l.Text, "safe");
+  EXPECT_EQ(count(safe, "Paykan_malloc"), 0u) << safe;
+  EXPECT_EQ(count(safe, "%snap."), 0u) << safe;
 }
 
 // A string's character: the string is read before its index is computed,
@@ -3180,7 +3696,7 @@ TEST(Lowering, StrOfAValueIsItsToString) {
   EXPECT_NE(c.find("is_some %o."), std::string::npos) << c;
   EXPECT_NE(c.find("call @$rt.PaykanString_from_int("), std::string::npos) << c;
   std::string d = function(l.Text, "d");
-  EXPECT_NE(d.find("retain %p."), std::string::npos) << d;
+  EXPECT_NE(d.find("retain nonnull %p."), std::string::npos) << d;
   EXPECT_NE(d.find(" : P [1] ()"), std::string::npos) << d;
   EXPECT_EQ(count(function(l.Text, "e"), "call "), 0u) << l.Text;
   auto t = lower(decls + R"(
@@ -3520,11 +4036,16 @@ TEST(LoweringMoves, AFieldReadInUseAcrossALaterCallKeepsTheCopy) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "kept");
-  EXPECT_EQ(count(f, "retain lend %x."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend nonnull %x."), 1u) << f;
   for (const char *fn : {"held", "moved"}) {
     f = function(l.Text, fn);
-    EXPECT_EQ(count(f, "retain %x."), 0u) << fn << "\n" << f;
-    EXPECT_EQ(count(f, "retain lend %x."), 0u) << fn << "\n" << f;
+    EXPECT_EQ(count(f, "retain %x.") + count(f, "retain nonnull %x."), 0u)
+        << fn << "\n"
+        << f;
+    EXPECT_EQ(count(f, "retain lend %x.") + count(f, "retain lend nonnull %x."),
+              0u)
+        << fn << "\n"
+        << f;
   }
   f = function(l.Text, "held");
   EXPECT_TRUE(heldAcross(f, defined(f, ", Named.name"), "call @replace(")) << f;
@@ -3557,7 +4078,7 @@ TEST(LoweringMoves, AMethodKeepsACopyWhileItStillUsesSelf) {
   // The fields' first values replace nothing (docs/pir.md §7).
   EXPECT_EQ(count(f, "release %"), 0u) << f;
   f = function(l.Text, "Named.give");
-  EXPECT_EQ(count(f, "retain lend %n."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend nonnull %n."), 1u) << f;
 }
 
 TEST(LoweringMoves, AViewIsNeverHandedOn) {
@@ -3575,9 +4096,9 @@ TEST(LoweringMoves, AViewIsNeverHandedOn) {
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string f = function(l.Text, "outer");
   EXPECT_NE(f.find(": box view"), std::string::npos) << f;
-  EXPECT_EQ(count(f, "retain lend %n."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend nonnull %n."), 1u) << f;
   f = function(l.Text, "local");
-  EXPECT_EQ(count(f, "retain lend %v."), 1u) << f;
+  EXPECT_EQ(count(f, "retain lend nonnull %v."), 1u) << f;
   f = function(l.Text, "plain");
   EXPECT_EQ(count(f, "retain"), 0u) << f;
 }
@@ -3623,6 +4144,42 @@ TEST(LoweringMoves, HeldValuesCopiedWholeAtTheirLastUseMove) {
 // is a `Str` of a `Lbl`): without it the read would be borrowed across the
 // call, and `x` would stay a copy at take(), dying at the end of f instead
 // of when take returns (docs/pir.md §7).
+// A value of more than four references a loop's body holds is released in
+// place at the end of the body, so a copy of it whole at its last use (a
+// match's subject) leaves no release of it at all, as for one of fewer
+// references: a call of its drop function there kept the local in memory
+// and its copy's slots stored null on every iteration (SW-03).
+TEST(LoweringMoves, AWholeCopyOfALargeValueAtItsLastUseLeavesNoDrop) {
+  auto l = lowerMoved(R"(
+    enum Msg { Text(a: Str, b: Str), Pair(a: Str, b: Str), Other(s: Str) }
+    fn mk(k: Str, i: int) -> Msg {
+      if i % 3 == 0 { return Msg::Text(k, k); }
+      if i % 3 == 1 { return Msg::Pair(k, k); }
+      return Msg::Other(k);
+    }
+    fn work(n: int) -> int {
+      t = 0;
+      k = "x";
+      for i in 0..n {
+        m = mk(k, i);
+        match m {
+          x: Text { t += x.a.len(); }
+          p: Pair { t += 2; }
+          Other { t += 3; }
+        }
+      }
+      return t;
+    }
+    fn main() -> int { return work(3); }
+  )");
+  ASSERT_TRUE(l.Ok) << l.Error;
+  const std::string work = function(l.Text, "work");
+  EXPECT_EQ(work.find(".drop."), std::string::npos) << work;
+  EXPECT_EQ(work.find("null box"), std::string::npos) << work;
+  // The subject's five slots, released in place after the match.
+  EXPECT_EQ(count(work, "release "), 2u + 2 + 5 + 1) << work;
+}
+
 TEST(LoweringMoves, AReadRootedInAParameterKeepsTheHandOffBeforeIt) {
   auto l = lowerMoved(R"(
     class Gen<T> { v: T; }
@@ -3725,9 +4282,9 @@ std::string argCopy(const std::string &f, const std::string &call,
     args = args.substr(args.find(", ") + 2);
   const std::string v = args.substr(0, args.find(", "));
   const std::string before = f.substr(0, c);
-  if (before.find("retain lend " + v + "\n") != std::string::npos)
+  if (findRetain(before, v, "lend ") != std::string::npos)
     return "lend";
-  if (before.find("retain " + v + "\n") != std::string::npos)
+  if (findRetain(before, v) != std::string::npos)
     return "copy";
   return "";
 }
@@ -3837,7 +4394,7 @@ TEST(LoweringLend, BoxParametersPastTheSixtyFourthAreAlwaysHandedOver) {
     expected.push_back("%p" + std::to_string(i) + "." + std::to_string(i + 1));
   EXPECT_EQ(prologueOf(l.Text, "wide"), expected) << l.Text;
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "retain lend %s."), 64u) << m;
+  EXPECT_EQ(count(m, "retain lend nonnull %s."), 64u) << m;
   EXPECT_EQ(argCopy(m, "call @wide(", 63), "lend") << m;
   EXPECT_EQ(argCopy(m, "call @wide(", 64), "copy") << m;
 }
@@ -3883,8 +4440,8 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
   auto l = lower(source);
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "retain lend %a."), 4u) << m;
-  EXPECT_EQ(count(m, "retain lend %h."), 1u) << m;
+  EXPECT_EQ(count(m, "retain lend nonnull %a."), 4u) << m;
+  EXPECT_EQ(count(m, "retain lend nonnull %h."), 1u) << m;
   EXPECT_EQ(count(m, "retain "), 5u) << m;
   EXPECT_EQ(argCopy(m, "call @show(%call."), "") << m;
   std::string f = function(l.Text, "show");
@@ -3893,21 +4450,23 @@ TEST(LoweringLend, ACopyMadeOnlyToHandAnArgumentOverIsMarked) {
   EXPECT_EQ(argCopy(f, "call @show("), "lend") << f;
   f = function(l.Text, "keep");
   EXPECT_EQ(count(f, "retain lend "), 0u) << f;
-  EXPECT_EQ(count(f, "retain %n."), 1u) << f;
+  // `n` is a `Node`, never null, though the field it goes to is optional.
+  EXPECT_EQ(count(f, "retain nonnull %n."), 1u) << f;
+  EXPECT_EQ(count(f, "retain "), 1u) << f;
 
   pir::Statistics stats;
   auto mv = moved(lower(source), stats);
   ASSERT_TRUE(mv.Ok) << mv.Error;
   m = function(mv.Text, "main");
-  EXPECT_NE(m.find("  retain lend %a.4\n"
+  EXPECT_NE(m.find("  retain lend nonnull %a.4\n"
                    "  call @show(%a.4)\n"),
             std::string::npos)
       << m;
-  EXPECT_NE(m.find("  retain lend %a.5\n"
+  EXPECT_NE(m.find("  retain lend nonnull %a.5\n"
                    "  call @pass(%a.5)\n"),
             std::string::npos)
       << m;
-  EXPECT_NE(m.find("  retain lend %a.8\n"
+  EXPECT_NE(m.find("  retain lend nonnull %a.8\n"
                    "  call @keep(%h.7, %a.8)\n"),
             std::string::npos)
       << m;
@@ -4050,13 +4609,17 @@ TEST(LoweringLend, NoKindOfCallIsLentAReadItMayLetGo) {
   )");
   ASSERT_TRUE(l.Ok) << l.Error;
   std::string m = function(l.Text, "main");
-  EXPECT_EQ(count(m, "retain %n."), 6u) << m;
-  EXPECT_EQ(count(m, "retain lend %n."), 0u) << m;
-  EXPECT_EQ(count(m, "retain lend %h."), 6u) << m;
+  EXPECT_EQ(count(m, "retain nonnull %n."), 6u) << m;
+  EXPECT_EQ(count(m, "retain lend %n.") + count(m, "retain lend nonnull %n."),
+            0u)
+      << m;
+  EXPECT_EQ(count(m, "retain lend nonnull %h."), 6u) << m;
   std::string c = function(l.Text, "Child.__init__");
-  EXPECT_EQ(count(c, "retain %n."), 1u) << c;
-  EXPECT_EQ(count(c, "retain lend %n."), 0u) << c;
-  EXPECT_EQ(count(c, "retain lend %h."), 1u) << c;
+  EXPECT_EQ(count(c, "retain nonnull %n."), 1u) << c;
+  EXPECT_EQ(count(c, "retain lend %n.") + count(c, "retain lend nonnull %n."),
+            0u)
+      << c;
+  EXPECT_EQ(count(c, "retain lend nonnull %h."), 1u) << c;
   EXPECT_NE(argCopy(m, "call @f("), "lend") << m;
   EXPECT_NE(argCopy(m, "call @Q.set(", 1), "lend") << m;
   EXPECT_NE(argCopy(m, "call @Q.set(", 2), "lend") << m;

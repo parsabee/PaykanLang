@@ -14,9 +14,12 @@
 #include "ToLLVM.h"
 
 #include "Dialect/PIRDialect.h"
+#include "Lowering/PIRToStandard.h"
 #include "Names.h"
 #include "Runtime.h"
 
+#include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/StringSet.h>
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/Conversion/ArithToLLVM/ArithToLLVM.h>
 #include <mlir/Conversion/ControlFlowToLLVM/ControlFlowToLLVM.h>
@@ -32,7 +35,9 @@
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/Dialect/SCF/IR/SCF.h>
 #include <mlir/IR/BuiltinAttributes.h>
+#include <mlir/IR/Iterators.h>
 #include <mlir/Pass/Pass.h>
+#include <mlir/Rewrite/PatternApplicator.h>
 #include <mlir/Target/LLVMIR/Dialect/Builtin/BuiltinToLLVMIRTranslation.h>
 #include <mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h>
 #include <mlir/Target/LLVMIR/Export.h>
@@ -428,7 +433,17 @@ struct IndexSwitchLowering : OpRewritePattern<scf::IndexSwitchOp> {
   }
 };
 
-/// Upstream's SCF to cf conversion, but for scf.index_switch.
+/// Upstream's SCF to cf patterns, but for scf.index_switch, applied to each
+/// scf op once, in an order that keeps the work linear in the function's
+/// size.  Lowering an op splits its block after it, moving what follows it
+/// to a new block: the ops of a block are lowered from its last to its
+/// first, so that what follows each is only what precedes the next one
+/// lowered.  And an op before those in its regions, which then become
+/// blocks of its parent's region: a pattern sees its op's regions as the
+/// shared lowering built them (a loop's condition one block ending in
+/// scf.condition).  No pattern rolls back, so nothing is recorded to undo:
+/// the conversion driver, which records every op a split moves, took
+/// time and memory quadratic in the number of ops in a block (SW-17).
 struct SCFToCFPass : public PassWrapper<SCFToCFPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(SCFToCFPass)
 
@@ -445,14 +460,35 @@ struct SCFToCFPass : public PassWrapper<SCFToCFPass, OperationPass<ModuleOp>> {
     RewritePatternSet patterns(ctx);
     populateSCFToControlFlowConversionPatterns(patterns);
     patterns.add<IndexSwitchLowering>(ctx, /*benefit=*/2);
-    ConversionTarget target(*ctx);
-    target
-        .addIllegalOp<scf::ForallOp, scf::ForOp, scf::IfOp, scf::IndexSwitchOp,
-                      scf::ParallelOp, scf::WhileOp, scf::ExecuteRegionOp>();
-    target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
-    if (failed(applyPartialConversion(getOperation(), target,
-                                      std::move(patterns))))
-      signalPassFailure();
+    FrozenRewritePatternSet frozen(std::move(patterns));
+    PatternApplicator applicator(frozen);
+    applicator.applyDefaultCostModel();
+    PatternRewriter rewriter(ctx);
+    // A pattern may make scf ops of its own (a parallel loop's are for
+    // loops): those are lowered in another round.
+    for (std::vector<Operation *> ops = scfOps(); !ops.empty();
+         ops = scfOps()) {
+      for (Operation *op : ops) {
+        rewriter.setInsertionPoint(op);
+        if (failed(applicator.matchAndRewrite(op, rewriter))) {
+          op->emitError("cannot lower '") << op->getName() << "' to cf";
+          return signalPassFailure();
+        }
+      }
+    }
+  }
+
+  /// The scf ops left, each before those in its regions, a block's last
+  /// first.
+  std::vector<Operation *> scfOps() {
+    std::vector<Operation *> ops;
+    getOperation().walk<WalkOrder::PreOrder, ReverseIterator>(
+        [&](Operation *op) {
+          if (isa<scf::SCFDialect>(op->getDialect()) &&
+              !op->hasTrait<OpTrait::IsTerminator>())
+            ops.push_back(op);
+        });
+    return ops;
   }
 };
 
@@ -488,11 +524,64 @@ struct ConvertToLLVMPass
              BytesLowering, ExternGlobalLowering<P::ExternObjectOp>,
              ExternGlobalLowering<P::ExternVTableOp>, VTableLowering>(types,
                                                                       ctx);
+    for (ModuleOp m : modules())
+      copyDroppedLocals(m);
     // Each nested module (one per PIR module) on its own.
     FrozenRewritePatternSet frozen(std::move(patterns));
     for (ModuleOp m : modules())
       if (failed(applyFullConversion(m, target, frozen)))
         return signalPassFailure();
+    // The runtime's panics never return, as Runtime.h declares them: a panic
+    // guard's branch ends at its call.
+    llvm::StringSet<> noReturn;
+    for (const char *name : names::kNoReturnRuntimeFunctions)
+      noReturn.insert(name);
+    getOperation().walk([&](LLVM::LLVMFuncOp f) {
+      if (f.isExternal() && noReturn.contains(f.getName()))
+        f.setPassthroughAttr(
+            ArrayAttr::get(ctx, {StringAttr::get(ctx, "noreturn")}));
+    });
+  }
+
+  /// A drop function's call given a local's address (docs/pir.md §7) is
+  /// given a copy of the local instead, in a slot of the function's for the
+  /// local's size, one for every such call: LLVM keeps a local whose address
+  /// a call takes in memory everywhere in its function, where it would keep
+  /// the fields of one it does not in registers.  The local is not used
+  /// again once it is dropped, and the drop function only reads it.
+  void copyDroppedLocals(ModuleOp m) {
+    llvm::StringSet<> drops;
+    for (auto f : m.getOps<func::FuncOp>())
+      if (f->hasAttr(kDropAttr))
+        drops.insert(f.getSymName());
+    if (drops.empty())
+      return;
+    for (auto f : m.getOps<func::FuncOp>()) {
+      llvm::DenseMap<std::pair<int64_t, int64_t>, Value> copies;
+      f.walk([&](func::CallOp call) {
+        if (call.getNumOperands() != 1 || !drops.contains(call.getCallee()))
+          return;
+        auto local = call.getOperand(0).getDefiningOp<P::AllocaOp>();
+        if (!local)
+          return;
+        const std::pair<int64_t, int64_t> key{
+            static_cast<int64_t>(local.getSize()),
+            static_cast<int64_t>(local.getAlign())};
+        Value &copy = copies[key];
+        OpBuilder b(local);
+        if (!copy) {
+          b.setInsertionPointAfter(local);
+          copy = P::AllocaOp::create(b, local.getLoc(), key.first, key.second,
+                                     "dropped")
+                     .getResult();
+        }
+        b.setInsertionPoint(call);
+        Value bytes = arith::ConstantOp::create(b, call.getLoc(),
+                                                b.getI64IntegerAttr(key.first));
+        P::MemCopyOp::create(b, call.getLoc(), copy, local.getResult(), bytes);
+        call->setOperand(0, copy);
+      });
+    }
   }
 
   /// The modules to convert: the operated-on one, or each one nested in it.
@@ -514,8 +603,10 @@ struct ConvertToLLVMPass
 /// C path calls: a null box does nothing, a retain of a count below the
 /// limit increments the object's strong count, and a release of a count
 /// above one decrements it.  Anything else makes the call, which panics at
-/// the limit or destroys the object.  At every -O: the code is there
-/// before LLVM optimises anything.
+/// the limit or destroys the object.  A call the shared lowering marks
+/// kNonNullAttr, of a box that is never null, makes no test for null, as
+/// Paykan_retain_nonnull_inline and Paykan_release_nonnull_inline.  At
+/// every -O: the code is there before LLVM optimises anything.
 struct InlineReferenceCountsPass
     : public PassWrapper<InlineReferenceCountsPass, OperationPass<ModuleOp>> {
   MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(InlineReferenceCountsPass)
@@ -546,6 +637,8 @@ struct InlineReferenceCountsPass
   ///   fast:  store n +/- 1; br done
   ///   slow:  call; br done
   ///   done:  rest
+  ///
+  /// with `head: ...; br check` for a call marked kNonNullAttr.
   static void expand(LLVM::CallOp call, bool retain) {
     MLIRContext *ctx = call.getContext();
     Location loc = call.getLoc();
@@ -562,11 +655,15 @@ struct InlineReferenceCountsPass
     Block *fast = b.createBlock(slow);
 
     b.setInsertionPointToEnd(head);
-    Value null = LLVM::ZeroOp::create(b, loc, ptr);
-    Value isNull =
-        LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::eq, box, null);
-    LLVM::CondBrOp::create(b, loc, isNull, ValueRange(), ValueRange(),
-                           DenseI32ArrayAttr(), done, check);
+    if (call->removeAttr(kNonNullAttr)) {
+      LLVM::BrOp::create(b, loc, ValueRange(), check);
+    } else {
+      Value null = LLVM::ZeroOp::create(b, loc, ptr);
+      Value isNull =
+          LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::eq, box, null);
+      LLVM::CondBrOp::create(b, loc, isNull, ValueRange(), ValueRange(),
+                             DenseI32ArrayAttr(), done, check);
+    }
 
     b.setInsertionPointToEnd(check);
     Value at = LLVM::GEPOp::create(b, loc, ptr, b.getI8Type(), box,

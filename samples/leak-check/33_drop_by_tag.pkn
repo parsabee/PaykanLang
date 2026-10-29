@@ -1,0 +1,151 @@
+// Isolates: values held in memory with more than four references among
+// their parts, released at a way out of a scope:
+//   * in place while the function's ways out have written fewer than 512
+//     such releases, and after that by one call of the type's drop
+//     function (docs/pir.md §7): a struct's each of its fields, and the
+//     union in it by its tag (the first variant's fields, a later one's,
+//     one with no fields); and a parameter whose references were handed on
+//     at its last use, its slots null when its drop runs;
+//   * in place at the end of a scope, in a class's field (its `destroy`),
+//     and the old value an assignment replaces.
+//
+// Runtime sites: the Strs each variant and struct holds, the object, and
+// the Strs the matches build.
+//
+// Expected under --track-heap: live blocks : 0.
+
+import ::io;
+
+// expect-stdout: circle c1
+// expect-stdout: empty
+// expect-stdout: square s2
+// expect-stdout: label xyz
+// expect-stdout: a0 b1 c2 d3 e4 label fgh
+// expect-stdout: circle u e
+// expect-stdout: m label pqr
+// expect-stdout: square t3
+
+enum Shape {
+  Circle(name: Str, tag: Str),
+  Empty,
+  Square(name: Str, side: int),
+  Label(a: Str, b: Str, c: Str)
+}
+
+struct Wide {
+  a: Str;
+  b: Str;
+  c: Str;
+  d: Str;
+  e: Str;
+}
+
+// 20 references.
+struct Quad {
+  p: Wide;
+  q: Wide;
+  r: Wide;
+  s: Wide;
+}
+
+// 106 references: 4 releases of it in place are the most a function's
+// ways out write before they call its drop function.
+struct Big {
+  w: Quad;
+  x: Quad;
+  y: Quad;
+  z: Quad;
+  v: Quad;
+  shape: Shape;
+}
+
+struct Holder {
+  s: Shape;
+  n: int;
+}
+
+class Box {
+  shape: Shape;
+  wide: Wide;
+}
+
+fn wide(s: Str) -> Wide => Wide(s, s, s, s, s);
+
+fn quad(s: Str) -> Quad => Quad(wide(s), wide(s), wide(s), wide(s));
+
+fn big(s: Str, shape: Shape) -> Big {
+  return Big(quad(s), quad(s), quad(s), quad(s), quad(s), shape);
+}
+
+fn describe(s: Shape) -> Str {
+  match s {
+    c: Circle { return "circle " + c.name; }
+    Empty { return "empty"; }
+    q: Square { return "square " + q.name + Str(q.side); }
+    l: Label { return "label " + l.a + l.b + l.c; }
+  }
+}
+
+// Six ways out: the first four release b in place, the last two by a call.
+fn pick(b: Big, k: int) -> Str {
+  if k == 0 {
+    return b.w.p.a + "0";
+  }
+  if k == 1 {
+    return b.x.q.b + "1";
+  }
+  if k == 2 {
+    return b.y.r.c + "2";
+  }
+  if k == 3 {
+    return b.z.s.d + "3";
+  }
+  if k == 4 {
+    return b.v.p.e + "4";
+  }
+  return describe(b.shape);
+}
+
+// The last way out hands b on, then drops it: its slots are null.
+fn keep(b: Big, k: int) -> Big {
+  if k == 0 {
+    return big("k0", Shape::Empty);
+  }
+  if k == 1 {
+    return big("k1", Shape::Empty);
+  }
+  if k == 2 {
+    return big("k2", Shape::Empty);
+  }
+  if k == 3 {
+    return big("k3", Shape::Empty);
+  }
+  if k == 4 {
+    return big("k4", Shape::Empty);
+  }
+  return b;
+}
+
+fn main() -> int {
+  shapes = [Shape::Circle("c" + "1", "t"), Shape::Empty, Shape::Square("s", 2),
+      Shape::Label("x", "y", "z")];
+  for i in 0..4 {
+    io::println(pick(big("q", shapes[i]), 5));
+  }
+  line = pick(big("a", Shape::Empty), 0);
+  line += " " + pick(big("b", Shape::Circle("n", "t")), 1);
+  line += " " + pick(big("c", Shape::Square("n", 1)), 2);
+  line += " " + pick(big("d", Shape::Label("x", "y", "z")), 3);
+  line += " " + pick(big("e", Shape::Empty), 4);
+  line += " " + pick(big("v", Shape::Label("f", "g", "h")), 5);
+  io::println(line);
+  w = Wide("a", "b", "c", "d", "e");
+  b = Box(Shape::Circle("u", "v"), w);
+  io::println(describe(b.shape) + " " + b.wide.e);
+  kept = keep(big("m", Shape::Label("p", "q", "r")), 5);
+  io::println(kept.w.p.a + " " + pick(kept, 5));
+  h = Holder(Shape::Label("p", "q", "r"), 1);
+  h.s = Shape::Square("t", 3);
+  io::println(describe(h.s));
+  return 0;
+}

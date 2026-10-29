@@ -426,14 +426,31 @@ LendCounts lendArgumentsIn(Function &f, const Callees &callees) {
       l.Call->Own.resize(l.Call->Args.size());
     l.Call->Own[l.Arg].K = ArgOwnership::Lent;
   }
-  // The retains go last, the later first in each block, so that the
-  // places and the calls found stay right until then.
-  std::sort(loans.begin(), loans.end(), [](const Loan &a, const Loan &b) {
-    return a.Mark.Index > b.Mark.Index;
-  });
-  for (const Loan &l : loans)
-    l.Mark.B->Stmts.erase(l.Mark.B->Stmts.begin() +
-                          static_cast<std::ptrdiff_t>(l.Mark.Index));
+  // The retains go last, so that the places and the calls found stay
+  // right until then: each block's in one pass over it, as an erase of
+  // each would move the rest of its block every time.
+  std::unordered_map<Block *, std::vector<bool>> gone;
+  std::vector<Block *> blocks; // in the order of their first loan
+  for (const Loan &l : loans) {
+    auto [at, fresh] = gone.try_emplace(l.Mark.B);
+    if (fresh) {
+      blocks.push_back(l.Mark.B);
+      at->second.resize(l.Mark.B->Stmts.size());
+    }
+    at->second[l.Mark.Index] = true;
+  }
+  for (Block *b : blocks) {
+    const std::vector<bool> &g = gone[b];
+    size_t kept = 0;
+    for (size_t i = 0; i < b->Stmts.size(); ++i)
+      if (!g[i]) {
+        if (kept != i)
+          b->Stmts[kept] = std::move(b->Stmts[i]);
+        ++kept;
+      }
+    b->Stmts.erase(b->Stmts.begin() + static_cast<std::ptrdiff_t>(kept),
+                   b->Stmts.end());
+  }
   return counts;
 }
 

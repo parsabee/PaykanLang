@@ -508,6 +508,10 @@ Output:
 old! new
 ```
 
+A struct, a tuple, a fixed-size array or a tagged union read before such a call is passed, or
+compared with `==`, as the value read too, whether it is a variable's or a field's
+([Evaluation order](02-basics.md#evaluation-order)).
+
 ### Where modes apply
 
 - To a parameter of any type: value types, strings, arrays, tuples, optionals, objects,

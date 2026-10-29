@@ -410,6 +410,8 @@ private:
     case Opcode::Retain:
       if (in.Lend)
         OS << " lend";
+      if (in.NonNull)
+        OS << " nonnull";
       [[fallthrough]];
     default:
       if (!in.Args.empty()) {

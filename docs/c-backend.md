@@ -194,6 +194,12 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   `Paykan_release_inline`: the object's count is incremented, or decremented
   while it stays above zero, in place, and `Paykan_retain` or
   `Paykan_release` is called only at the limit or to destroy the object.
+  The retain of a value whose type is a class that is not optional, which
+  is never `NULL` (a `retain nonnull`, docs/pir.md §6), and a release of
+  the same value call `Paykan_retain_nonnull_inline` and
+  `Paykan_release_nonnull_inline`, which do the same with no test for
+  `NULL`: a test would give GCC a path on which the object is `NULL`, which
+  `-Warray-bounds` follows into a later write of one of its fields.
   Native functions and other modules' functions are declared `extern` from
   their PIR signatures.
 * **Arithmetic.**  Integer arithmetic is done in `uint64_t` and converted
@@ -204,13 +210,26 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   `cast` between `f64` and `i64` reinterprets the bits with `memcpy`.
 * **Constants.**  Strings and data are `static const` arrays
   (`static const char pk_hello_S_2Estr0[3] = "hi";`), an empty one `{0}` of
-  one element; a `?` in a string is escaped, so no trigraph forms.
+  one element; a `?` in a string is escaped, so no trigraph forms.  A
+  string longer than 4095 bytes, the longest string literal C11 requires a
+  compiler to accept (counted after adjacent literals are joined, so
+  splitting one would not help), is written as its bytes instead: character
+  constants in braces, sixteen to a line, then the terminating `0`
+  (`{'a', '\303', ..., 0}`).
 * **Control flow** is structured, as PIR is.  An `if` is C's `if`; a `while`
   is a `do { ... } while (cond);` whose body evaluates the condition and runs
   the loop's body under an `if` on it.  `break`, `continue` and an early
   `return` set the function's exit flag; the statements after one that may
   have set it run under an `if` on the flag being clear, a loop stops once it
-  is set, and the function returns its result from a local at its end.
+  is set, and the function returns its result from a local at its end.  A
+  panic check (a division's, an index's, a conversion's) is no such exit:
+  the runtime's panics are `_Noreturn`, so what follows a check runs beside
+  it, and a function of a thousand checks is no deeper than one of none.
+  Each early exit and each `elif` does nest what follows it one block
+  deeper, so a function with more than about 250 of them nests past the 256
+  levels of brackets Clang accepts by default (`bracket nesting level
+  exceeded maximum of 256`; GCC sets no limit): compile its C with
+  `-fbracket-depth=N`, or split the function.
 * **C's `main`** sets the runtime up as `paykan run` does: with
   `PAYKAN_TRACK_HEAP` set, the tracking allocator before the program and the
   heap statistics after it; the command-line arguments as the Paykan `main`'s
@@ -237,6 +256,24 @@ conversion between function and object pointers except through `uintptr_t`,
 no type punning except through `memcpy`, and no reserved identifiers (every
 generated name starts with a lowercase prefix: `pk_`, `pkvt_`, `pkicall_`,
 `pkrt_`, `paykan_main`, `v<n>`).
+
+The exception is a program large enough to pass one of the minimum limits
+C11 sets for every compiler (its section 5.2.4.1): a strictly conforming
+program stays within them, and GCC and Clang accept far more.  The C keeps
+within the 4095 characters of a string literal (see Constants above), but
+not within the limits a program's own size sets: an object of more than
+65,535 bytes (a string constant or a fixed-size array that large), more than
+127 nested blocks (see Control flow above), a `switch` of more than 1023
+cases (a `match` with that many arms) or a source line of more than 4095
+characters (a long string literal's).  Nor do its names keep within the
+initial characters C11 promises are significant in an identifier, 31 in
+one with external linkage and 63 in one without: a generated name spells
+its module's name and its symbol's in full, escaped
+(`pk_68__borrowed__parameters_S...`), so the names of one module's
+functions, which have external linkage, often run past 31 characters and
+share their first 31 (in the C of 118 of the samples corpus's 130
+programs), and some run past 63, such as a drop function's for a long
+type.  GCC and Clang take every character of a name as significant.
 
 The `CStrictC11` ctest (`scripts/c_strict.py`) enforces this over the runnable
 programs of the samples corpus (`samples/codegen`, `samples/leak-check` and

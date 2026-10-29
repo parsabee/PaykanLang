@@ -9,12 +9,14 @@
 
 #pragma once
 
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -186,6 +188,24 @@ inline std::string externCSymbol(std::string_view name) {
   return runtimeSymbol(name);
 }
 
+// -- Drop functions
+
+/// A module's drop function (`@.drop.<type>`, a name no Paykan identifier
+/// can spell) takes the address of a whole `mem` local, `(ptr) -> void`,
+/// and releases the references of the value held there (docs/pir.md §7):
+/// what the lowering calls, at a way out of a scope once its function has
+/// written many releases in place, instead of a release of each of many
+/// references.  It links like the module's other functions: a template's
+/// copy the module lowered may call it from another module's code.  Each
+/// call of one is given a `local.addr`, so the moves at last use read it as
+/// the release of each of the local's references.
+inline constexpr std::string_view kDropPrefix = ".drop.";
+
+/// True when @p name is a drop function's.
+inline bool isDropName(std::string_view name) {
+  return name.size() > kDropPrefix.size() && name.starts_with(kDropPrefix);
+}
+
 /// The signature of the runtime C function @p symbol: what a `$rt.` extern
 /// of it declares, or for one a backend calls itself (for `new`, `free`,
 /// the weak references and a float's `rem`; an executable's entry code; the
@@ -256,6 +276,22 @@ struct Operand {
 /// Whether @p a and @p b are the same i64, char or bool constant (two cases
 /// of a switch that are one).
 bool sameConstant(const Operand &a, const Operand &b);
+
+/// The cases of a switch seen so far, one the same as another exactly when
+/// sameConstant says so, so that a case listed twice is found in time
+/// linear in the cases: an i64, a char or a bool constant is one already
+/// seen when the set holds that constant of that kind, and no other operand
+/// (a float, a value) ever is.
+class CaseSet {
+public:
+  /// Adds @p c: false when the set already holds the same constant.
+  bool insert(const Operand &c);
+
+private:
+  std::unordered_set<int64_t> I64s;
+  std::bitset<256> Chars;
+  std::bitset<2> Bools;
+};
 
 // -- Instructions
 
@@ -368,6 +404,10 @@ struct Instr {
   /// argument over, which the lending pass may lend instead.  Every other
   /// pass and every backend reads it as a plain retain.
   bool Lend = false;
+  /// Retain: a `retain nonnull`, of a box that is never null, a value of
+  /// a class type that is not optional (docs/pir.md §6): a backend
+  /// retains it, and releases the same value, with no test for null.
+  bool NonNull = false;
 
   /// The ownership of argument @p i (Owned when Own says nothing).
   ArgOwnership::Kind ownership(size_t i) const {

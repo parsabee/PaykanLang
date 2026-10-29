@@ -592,6 +592,98 @@ fn @main() -> i64 {
       << errs;
 }
 
+// A case is listed twice when it is the same constant as an earlier one
+// (sameConstant), however many cases come between: an i64, a char or a
+// bool.  A float case is not of the switch's type, and no two floats are
+// one case: neither NaN twice nor 0.0 and -0.0.
+TEST(PIRVerifier, RejectsEveryCaseListedTwice) {
+  std::string src = R"(module "m"
+fn @main() -> i64 {
+  %n.1 = add 1, 2
+  switch %n.1 {
+)";
+  for (int i = 0; i < 3000; ++i)
+    src += "    case " + std::to_string(i) + " {\n    }\n";
+  src += R"(    case 7 {
+    }
+    case nan {
+    }
+    case nan {
+    }
+    case 0.0 {
+    }
+    case -0.0 {
+    }
+  }
+  switch 'b' {
+    case 'a' {
+    }
+    case 'b' {
+    }
+    case 'a' {
+    }
+  }
+  switch true {
+    case true {
+    }
+    case false {
+    }
+    case true {
+    }
+  }
+  ret 0
+}
+)";
+  std::string errs = verifyText(src);
+  for (const char *e :
+       {"switch case 7 listed twice", "switch case 'a' listed twice",
+        "switch case true listed twice", "switch case nan has type f64",
+        "switch case -0.0 has type f64"})
+    EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+  size_t twice = 0;
+  for (size_t at = errs.find("listed twice"); at != std::string::npos;
+       at = errs.find("listed twice", at + 1))
+    ++twice;
+  EXPECT_EQ(twice, 3u) << errs;
+}
+
+// A CaseSet holds two operands as one exactly when sameConstant does, on
+// every pair of operands of every kind.
+TEST(PIR, ACaseSetHoldsTheSameConstantsAsSameConstant) {
+  const double nan = std::numeric_limits<double>::quiet_NaN();
+  const std::vector<Operand> ops = {Operand::i64(0),
+                                    Operand::i64(1),
+                                    Operand::i64(-1),
+                                    Operand::i64(INT64_MIN),
+                                    Operand::i64(INT64_MAX),
+                                    Operand::i64(97),
+                                    Operand::chr('a'),
+                                    Operand::chr('\0'),
+                                    Operand::chr('\xff'),
+                                    Operand::chr('\x01'),
+                                    Operand::boolean(true),
+                                    Operand::boolean(false),
+                                    Operand::f64(0.0),
+                                    Operand::f64(-0.0),
+                                    Operand::f64(nan),
+                                    Operand::f64(1.0),
+                                    Operand::value(ValueId{1}),
+                                    Operand::null(Type::Box),
+                                    Operand::symbol("s")};
+  auto text = [](const Operand &op) {
+    std::ostringstream os;
+    print(op, os);
+    return os.str();
+  };
+  for (const Operand &a : ops)
+    for (const Operand &b : ops) {
+      CaseSet set;
+      EXPECT_TRUE(set.insert(a));
+      EXPECT_EQ(set.insert(b), !sameConstant(a, b))
+          << text(a) << " then " << text(b);
+    }
+}
+
 // A non-void function cannot end in a switch without a default, or one
 // with a case that falls through.
 TEST(PIRVerifier, ASwitchEndsAFunctionOnlyWhenEveryBranchDoes) {
@@ -1020,7 +1112,8 @@ fn @main() -> i64 {
   EXPECT_EQ(errs.find("box parameter 63"), std::string::npos) << errs;
 
   // Only a call's arguments have an ownership, as many as it has
-  // arguments, and only a retain lends: what the text cannot write.
+  // arguments, and only a retain lends or is nonnull: what the text cannot
+  // write.
   ParseError err;
   auto p = parseProgram(R"(module "m"
 fn @f(%a: box) -> void {
@@ -1040,14 +1133,63 @@ fn @main() -> i64 {
   auto &body = p->Modules[0].Functions[0].Body.Stmts;
   std::get<Instr>(body[0]).Own.resize(2);
   std::get<Instr>(body[1]).Lend = true;
+  std::get<Instr>(body[1]).NonNull = true;
   std::get<Instr>(body[2]).Own.resize(2);
   errs = formatErrors(verify(*p));
   for (const char *e :
        {"'add' gives its operands an ownership (only a call's arguments have "
         "one)",
         "a lend 'release' (only a retain lends)",
+        "a nonnull 'release' (only a retain is marked nonnull)",
         "call to '@f' gives the ownership of 2 argument(s), but passes 1"})
     EXPECT_NE(errs.find(e), std::string::npos) << e << "\n" << errs;
+}
+
+// A drop function (docs/pir.md §7) is `(ptr) -> void`, and every call of
+// one is given the `local.addr` of a mem local: the whole value it releases.
+TEST(PIRVerifier, ADropFunctionIsGivenAWholeMemLocal) {
+  const std::string drop = R"(module "m"
+fn @.drop.Pair(%at: ptr) -> void {
+  %e = ptr.load box, %at
+  release %e
+  ret
+}
+)";
+  std::string errs = verifyText(drop + R"(fn @f(%p: ptr) -> void {
+  local %t: mem(16, 8)
+  local %n: i64
+  %ta = local.addr %t
+  call @.drop.Pair(%ta)
+  %t8 = ptr.add %ta, 8
+  call @.drop.Pair(%t8)
+  call @.drop.Pair(%p)
+  %na = local.addr %n
+  call @.drop.Pair(%na)
+  ret
+}
+fn @main() -> i64 {
+  ret 0
+}
+)");
+  // The calls given %t8, %p and %na; not the one given %ta.
+  size_t given = 0;
+  for (size_t at = errs.find("not the local.addr of a mem local");
+       at != std::string::npos;
+       at = errs.find("not the local.addr of a mem local", at + 1))
+    ++given;
+  EXPECT_EQ(given, 3u) << errs;
+  errs = verifyText(R"(module "m"
+fn @.drop.Pair(%at: ptr) -> i64 {
+  ret 0
+}
+fn @main() -> i64 {
+  ret 0
+}
+)");
+  EXPECT_NE(errs.find("drop function '@.drop.Pair' is (ptr) -> i64, not (ptr) "
+                      "-> void"),
+            std::string::npos)
+      << errs;
 }
 
 // A vtable slot's target is the same machine function: a lending slot type

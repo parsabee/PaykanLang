@@ -42,6 +42,12 @@
 // references, but not of its slot's, by a `stable` load, which the moves at
 // last use count as held by the slot (docs/pir.md §6), as they counted the
 // hold.
+//
+// A value held in memory read where it is but used only once the operands
+// after it have run (an argument passed by address, a struct's `view fn`
+// receiver, the left operand of `==`) is copied where it is evaluated when
+// one of them may write its storage (SnapshotReads, "Reads the later
+// operands may write" below).
 
 #include "LoweringInternal.h"
 #include "Names.h"
@@ -88,6 +94,55 @@ struct ModuleLowering::BorrowedReads {
   Use eval(ast::Expr *e, bool place = false);
 
 private:
+  /// Where the storage of a place is, as far as what may write it goes.
+  struct Storage {
+    enum class Kind {
+      /// A variable of the function's own (or a part of one held in
+      /// memory), which only a place naming it is written through.
+      Own,
+      /// What a name for storage the function does not own names (an
+      /// `inout` or `view` parameter or local, a struct method's `self`),
+      /// or a slice's element: storage of the caller's, which may be an
+      /// object's field.
+      Caller,
+      /// A field of an object (or a part of one held in memory).
+      Object,
+      /// What a call's `inout` result names: any of these.
+      Anywhere,
+    };
+    Kind K = Kind::Anywhere;
+    /// The variable (Own, Caller) or the object's field (Object) it is in.
+    std::string Root;
+    /// The parts of the root it is, outward: a field's name, a tuple
+    /// element's `.<i>`, an empty name for any element of an array.
+    std::vector<std::string> Path;
+    /// The variable, when the root is one.
+    const ast::Identifier *Var = nullptr;
+  };
+  /// The storage @p place is in; none for a temporary's.
+  std::optional<Storage> storageOf(const ast::Expr *place) const;
+  /// Whether a write to @p w may change what @p r reads.
+  static bool overlaps(const Storage &r, const Storage &w);
+  /// A value held in memory, read where it is, that is used only once the
+  /// operands after it have run: an argument passed by address (copied by
+  /// its callee, or read where it is, when the call is made), the receiver
+  /// of a struct's `view fn`, the left operand of `==`.  One that an
+  /// operand after it may write is copied where it is read
+  /// (SnapshotReads).
+  struct PendingRead {
+    const ast::Expr *Read;
+    Storage Where;
+  };
+  std::vector<PendingRead> Pending;
+  /// @p e is read where it is and used once the later operands have run.
+  void pend(const ast::Expr *e);
+  /// A call made while reads are pending writes what @p place names.
+  void writes(const ast::Expr *place);
+  /// A call made while reads are pending, which does @p effect, may store
+  /// into the storage it reaches through an object, which its caller's
+  /// names may name too.
+  void writesThroughObjects(const Effect &effect);
+
   /// What the links of a chain below the expression being evaluated left,
   /// evaluated innermost first (evalChainBelow) and not taken yet.
   std::unordered_map<const ast::Expr *, Use> Evaluated;
@@ -115,8 +170,12 @@ private:
   /// never hands on whose reference it cannot let go of, though it may let
   /// go of others (replaces), is read by a `stable` load (isStableRead).  A
   /// read of LentReads already has a reference of its own, its argument's
-  /// copy, which the callee is not lent if the call may let go of it.
-  void call(const Effect &effect) {
+  /// copy, which the callee is not lent if the call may let go of it.  When
+  /// it is given what reaches an object (@p reaches), it may also store
+  /// into what a pending read reads (writesThroughObjects).
+  void call(const Effect &effect, bool reaches = true) {
+    if (reaches)
+      writesThroughObjects(effect);
     for (const ast::Expr *read : Live)
       if (L.LentReads.count(read)) {
         if (replaces(effect, read, /*forLending=*/true))
@@ -144,7 +203,9 @@ private:
   Use methodCall(ast::MethodCallExpr *mc, bool place);
   std::vector<const ast::Expr *> arguments(const std::vector<ast::Expr *> &args,
                                            Callee callee, bool given,
-                                           const Effect &effect);
+                                           const Effect &effect,
+                                           const ast::Expr *self = nullptr,
+                                           bool selfBorrowed = false);
   static Use result(const ast::Expr *call, bool place,
                     std::vector<const ast::Expr *> owners);
 };
@@ -274,6 +335,184 @@ bool ModuleLowering::isLentRead(const ast::Expr *e) const {
   return LentReads.count(e) && !NotLendable.count(e) && !isHeldRead(e);
 }
 
+// -- Reads the later operands may write
+//
+// A value held in memory is passed by address, and its callee copies it
+// when the call starts (or reads it where it is, for a `view` parameter, a
+// slice, a native function's); a struct's `view fn` reads its receiver where
+// it is, and `==` compares two such values where they are.  Each is used
+// only once the operands after it have run, which may write its storage:
+// an `inout` argument naming it or a part of it, a struct method that may
+// change it, or a call that reaches it through an object (`first(c.p,
+// reset(c))`).  The value used would then be the one written, not the one
+// read, which a box read or a number would be (docs/language/02-basics.md,
+// "Evaluation order").  So such a read is copied into a temporary where it
+// is evaluated (SnapshotReads), only when a later operand may write it: a
+// call given only values that reach no object, or whose code stores into
+// nothing its caller may hold (Effect::Stores), writes no storage of its
+// caller's but through the places it is given to change.  One that stores
+// into objects' fields (Effect::StoredFields) writes a read in an object's
+// field of another name only through those places too, and one of the
+// caller's storage only when that storage may be a part of what such a
+// field holds (Effect::StoredParts): `at(xs, rng.next())`, whose `next`
+// stores an `int` field of its object, cannot write the elements of the
+// slice `xs`, nor `first(c.p, ctr.next())` the field `p`.
+
+std::optional<ModuleLowering::BorrowedReads::Storage>
+ModuleLowering::BorrowedReads::storageOf(const ast::Expr *place) const {
+  Storage s;
+  for (const ast::Expr *e = place;;) {
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(e)) {
+      if (id->isFunctionRef() || !L.CurrentScope->hasLocal(id->getName()))
+        return std::nullopt;
+      s.K = L.CurrentScope->inoutType(id->getName()) == Type::Void
+                ? Storage::Kind::Own
+                : Storage::Kind::Caller;
+      s.Root = id->getName();
+      s.Var = id;
+      break;
+    }
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+      if (!L.getExprStructType(ma->getReceiver())) {
+        s.K = Storage::Kind::Object;
+        s.Root = ma->getFieldName();
+        break;
+      }
+      s.Path.push_back(ma->getFieldName());
+      e = ma->getReceiver();
+    } else if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+      s.Path.push_back("." + std::to_string(ti->getIndex()));
+      e = ti->getTuple();
+    } else if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e)) {
+      ast::Type *arrTy = se->getArray()->getResolvedType();
+      if (ast::isa<ast::SliceType>(arrTy)) {
+        s.K = Storage::Kind::Caller; // the caller's array
+        break;
+      }
+      if (!ast::isa<ast::FixedArrayType>(arrTy))
+        return std::nullopt; // a string's character
+      s.Path.emplace_back();
+      e = se->getArray();
+    } else if (e->isInoutResult() && (ast::isa<ast::CallExpr>(e) ||
+                                      ast::isa<ast::MethodCallExpr>(e) ||
+                                      ast::isa<ast::CallValueExpr>(e))) {
+      s.K = Storage::Kind::Anywhere;
+      break;
+    } else {
+      return std::nullopt; // a temporary's
+    }
+  }
+  std::reverse(s.Path.begin(), s.Path.end());
+  return s;
+}
+
+// Two variables are separate storage, and so are two fields of objects of
+// different names.  A name for the caller's storage may name any other
+// storage of the caller's or any object's field, and an `inout` result
+// anything.  In one storage, two parts are separate unless one is in the
+// other: different fields or tuple elements; any two elements of an array
+// may be the same one.
+bool ModuleLowering::BorrowedReads::overlaps(const Storage &r,
+                                             const Storage &w) {
+  using Kind = Storage::Kind;
+  if (r.K == Kind::Anywhere || w.K == Kind::Anywhere)
+    return true;
+  if (r.K != w.K || r.Root != w.Root)
+    return r.K != Kind::Own && w.K != Kind::Own &&
+           !(r.K == Kind::Object && w.K == Kind::Object);
+  const size_t n = std::min(r.Path.size(), w.Path.size());
+  for (size_t i = 0; i < n; ++i)
+    if (!r.Path[i].empty() && !w.Path[i].empty() && r.Path[i] != w.Path[i])
+      return false;
+  return true;
+}
+
+void ModuleLowering::BorrowedReads::pend(const ast::Expr *e) {
+  // A value made where it is evaluated (a literal, a call's result, an
+  // optional a value is wrapped into) is a temporary already, and a read
+  // the statement holds (noteHeldReads) a copy.  A slice passed on is read
+  // where it is too, its elements in the caller's array (emitSliceArg).
+  ast::Type *t = e->getResolvedType();
+  if ((!ast::isMemType(t) && !ast::isa<ast::SliceType>(t)) ||
+      isMemOptionalWrap(e))
+    return;
+  std::optional<Storage> where = storageOf(e);
+  if (!where || (where->Var && L.isHeldRead(where->Var)))
+    return;
+  Pending.push_back({e, std::move(*where)});
+}
+
+void ModuleLowering::BorrowedReads::writes(const ast::Expr *place) {
+  std::optional<Storage> w = storageOf(place);
+  for (const PendingRead &p : Pending)
+    if (!w || overlaps(p.Where, *w))
+      L.SnapshotReads.insert(p.Read);
+}
+
+void ModuleLowering::BorrowedReads::writesThroughObjects(const Effect &effect) {
+  if (!effect.Unknown && !effect.Stores)
+    return;
+  for (const PendingRead &p : Pending) {
+    bool written = effect.Unknown || effect.StoresElsewhere;
+    switch (p.Where.K) {
+    case Storage::Kind::Own:
+      continue;
+    case Storage::Kind::Object:
+      // A field of an object, of that name.
+      written = written || effect.StoredFields.count(p.Where.Root) > 0;
+      break;
+    case Storage::Kind::Caller: {
+      // Storage of the caller's, which may be a part of what a field holds.
+      ast::Type *ty = p.Read->getResolvedType();
+      const auto *slice = ast::dyn_cast<ast::SliceType>(ty);
+      written =
+          written || effect.StoredParts.count(
+                         slice ? sliceKey(slice->getElementType())
+                               : ast::typeName(L.canonicalizeDeclType(ty))) > 0;
+      break;
+    }
+    case Storage::Kind::Anywhere:
+      written = written || !effect.StoredFields.empty();
+      break;
+    }
+    if (written)
+      L.SnapshotReads.insert(p.Read);
+  }
+}
+
+std::string ModuleLowering::sliceKey(ast::Type *elem) {
+  return "[]" + ast::typeName(elem);
+}
+
+const std::unordered_set<std::string> &
+ModuleLowering::memPartKeys(ast::Type *ty) {
+  if (auto it = MemPartKeys.find(ty); it != MemPartKeys.end())
+    return it->second;
+  std::unordered_set<std::string> keys;
+  std::vector<ast::Type *> work = {ty};
+  while (!work.empty()) {
+    ast::Type *t = canonicalizeDeclType(work.back());
+    work.pop_back();
+    if (!keys.insert(ast::typeName(t)).second)
+      continue;
+    if (auto *ot = ast::dyn_cast<ast::OptionalType>(t)) {
+      work.push_back(ot->getInnerType());
+    } else if (auto *et = ast::dyn_cast<ast::EnumType>(t)) {
+      for (size_t i = 0; i < et->getNumVariants(); ++i)
+        if (ast::StructType *p = et->getPayload(i))
+          work.push_back(p);
+    } else if (auto *tt = ast::dyn_cast<ast::TupleType>(t)) {
+      // A struct's fields too.
+      work.insert(work.end(), tt->getElementTypes().begin(),
+                  tt->getElementTypes().end());
+    } else if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(t)) {
+      keys.insert(sliceKey(ft->getElementType()));
+      work.push_back(ft->getElementType());
+    }
+  }
+  return MemPartKeys[ty] = std::move(keys);
+}
+
 ModuleLowering::BorrowedReads::Use
 ModuleLowering::BorrowedReads::variable(ast::Identifier *id) const {
   // The function's own variables are another rule's (noteHeldReads), and a
@@ -369,8 +608,11 @@ void ModuleLowering::BorrowedReads::binary(ast::BinaryExpr *be) {
     if (ast::isa<ast::TupleType>(lt) || ast::isPayloadEnum(lt) ||
         (!none && (ast::isFunctionValue(lt) || ast::isMemOptional(lt)))) {
       Use a = eval(lhs);
+      const size_t pending = Pending.size();
+      pend(lhs);
       within(a.Owners, [&] {
         Use b = eval(rhs);
+        Pending.resize(pending);
         within(b.Owners,
                [&] { call(L.valueMethodEffect(lt, names::kMethodEquals)); });
       });
@@ -403,24 +645,43 @@ void ModuleLowering::BorrowedReads::binary(ast::BinaryExpr *be) {
 
 // The arguments @p args of a call, evaluated in order, then the call, which
 // does @p effect when it may replace borrowed storage at all: through what
-// else it is given (@p given: a receiver, a closure), or what an argument
+// else it is given (@p given: a receiver or a closure that reaches an
+// object; @p self, a struct's receiver it may change, when @p selfBorrowed
+// says it is storage the function does not own), or what an argument
 // gives.  Each argument's holds are in use while the later ones are
 // computed; a reference the callee borrows, the place of an `inout`
 // argument and a value read where it is stay in use through the call.  The
 // result is what the `inout` arguments' storage is held by, which an `inout`
 // result may be part of.
-std::vector<const ast::Expr *>
-ModuleLowering::BorrowedReads::arguments(const std::vector<ast::Expr *> &args,
-                                         Callee callee, bool given,
-                                         const Effect &effect) {
+std::vector<const ast::Expr *> ModuleLowering::BorrowedReads::arguments(
+    const std::vector<ast::Expr *> &args, Callee callee, bool given,
+    const Effect &effect, const ast::Expr *self, bool selfBorrowed) {
   const size_t n = Live.size();
+  const size_t pending = Pending.size();
   std::vector<const ast::Expr *> through;
   std::vector<const ast::Expr *> places;
-  bool mayReplace = given;
+  // What the call is given to change: its `inout` arguments, and the
+  // receiver of a struct's method that may change `self`; a `view fn`'s
+  // receiver is read where it is.
+  std::vector<const ast::Expr *> changed;
+  if (self && self->isChangedByCall())
+    changed.push_back(self);
+  else if (self)
+    pend(self);
+  bool mayReplace = given || selfBorrowed;
+  // A native function changes only what it is given to change; any other
+  // callee reaches what an object it is given reaches.
+  bool reaches = given;
   for (ast::Expr *arg : args) {
     mayReplace = mayReplace || gives(arg, callee);
+    reaches = reaches || (callee != Callee::Native &&
+                          reachesObject(arg->getResolvedType()));
     const bool mem = ast::isMemType(arg->getResolvedType()) || isSliceArg(arg);
     Use u = eval(arg, /*place=*/arg->isChangedByCall());
+    if (arg->isChangedByCall())
+      changed.push_back(arg);
+    else
+      pend(arg);
     std::vector<const ast::Expr *> h = holds(u);
     // A reference the callee reads where it is: a builtin method's argument,
     // a native function's variable or `x.f` (emitBorrowedBox).
@@ -433,7 +694,9 @@ ModuleLowering::BorrowedReads::arguments(const std::vector<ast::Expr *> &args,
     };
     // By address, a value is read where it is through the call, unless a
     // parameter without a mode copies it when the call starts (a native
-    // function reads every one where it is).
+    // function reads every one where it is): either way it is read only
+    // once the later arguments have run, and one they may write is copied
+    // where it is evaluated instead (pend, SnapshotReads).
     const bool inPlace = arg->isChangedByCall() ||
                          (mem ? callee == Callee::Native ||
                                     arg->isViewedByCall() || isSliceArg(arg)
@@ -456,9 +719,16 @@ ModuleLowering::BorrowedReads::arguments(const std::vector<ast::Expr *> &args,
       places.insert(places.end(), h.begin(), h.end());
   }
   Live.resize(n);
+  // The call itself copies what it is given by address, or reads it where
+  // it is, before it writes anything: only the reads pending outside it
+  // are written before they are used.
+  Pending.resize(pending);
+  if (effect.Unknown || effect.Stores)
+    for (const ast::Expr *place : changed)
+      writes(place);
   within(through, [&] {
     if (mayReplace)
-      call(effect);
+      call(effect, reaches);
   });
   return places;
 }
@@ -541,10 +811,13 @@ ModuleLowering::BorrowedReads::methodCall(ast::MethodCallExpr *mc, bool place) {
     Use r = eval(recv);
     std::vector<const ast::Expr *> owners = r.Owners;
     within(r.Owners, [&] {
+      // A `view fn`'s receiver is read where it is through the call, and
+      // one with an `inout` result is the storage that result names.
       std::vector<const ast::Expr *> places = arguments(
-          mc->getArguments(), Callee::Program,
-          reachesObject(st) || (recv->isChangedByCall() && r.Borrowed),
-          L.effectOf(L.bodyOf(st->getName() + names::kNameSep + name)));
+          mc->getArguments(), Callee::Program, reachesObject(st),
+          L.effectOf(L.bodyOf(st->getName() + names::kNameSep + name)),
+          recv->isChangedByCall() || !mc->isInoutResult() ? recv : nullptr,
+          recv->isChangedByCall() && r.Borrowed);
       owners.insert(owners.end(), places.begin(), places.end());
     });
     return result(mc, place, std::move(owners));
@@ -727,6 +1000,10 @@ void ModuleLowering::noteBorrowedReads(ast::Stmt *s) {
 void ModuleLowering::Effect::add(const Effect &other) {
   Unknown = Unknown || other.Unknown;
   Releases = Releases || other.Releases;
+  Stores = Stores || other.Stores;
+  StoredFields.insert(other.StoredFields.begin(), other.StoredFields.end());
+  StoredParts.insert(other.StoredParts.begin(), other.StoredParts.end());
+  StoresElsewhere = StoresElsewhere || other.StoresElsewhere;
   Types.insert(other.Types.begin(), other.Types.end());
 }
 
@@ -739,10 +1016,14 @@ struct ModuleLowering::EffectScan {
   /// Storage the function does not own, as a store through a name for it
   /// lets go of: a value of type Value (null when not known), from a slot
   /// of type Slot or, for a class, of one of its superclasses (a `match`
-  /// arm `n: inout T` names a field of a superclass as a T).
+  /// arm `n: inout T` names a field of a superclass as a T).  Names is the
+  /// place an `inout` local or a `match` arm's binding was declared to
+  /// name; null for an `inout` parameter's or a struct method's `self`,
+  /// which is the caller's place, given to the call to change.
   struct Place {
     ast::Type *Value;
     ast::Type *Slot;
+    const ast::Expr *Names;
   };
   /// Its names for such storage: `self` (a struct's), its `inout`
   /// parameters and locals, its `match` arms' `n: inout T`, each with every
@@ -764,6 +1045,40 @@ struct ModuleLowering::EffectScan {
   }
   void store(const std::string &name);
   void storeField(ast::Expr *recv, const std::string &field);
+  /// A store its caller may see into what @p place names: an object's
+  /// field (Effect::StoredFields), or storage the function cannot name
+  /// (Effect::StoresElsewhere).  A name for storage it does not own stands
+  /// for the places it was declared to name (storesThrough), followed @p
+  /// depth deep.
+  void storesInto(const ast::Expr *place, unsigned depth = 0);
+  void storesThrough(const std::string &name, unsigned depth = 0);
+  /// A store into the field @p field, of type @p ty, of an object.
+  void storesIntoField(const std::string &field, ast::Type *ty);
+  /// How deep storesInto follows names declared to name others.
+  static constexpr unsigned kNamesFollowed = 8;
+  /// Whether @p place, which the function stores into or gives a call to
+  /// change, is storage of its own: a variable (or a part of one held in
+  /// memory) that names no storage it does not own, or what an `__init__`
+  /// makes, a new object or a struct's result, which nothing else holds
+  /// yet.  A store into any other is one its caller may see
+  /// (Effect::Stores).
+  bool ownPlace(const ast::Expr *place) const;
+  /// The same for the field of what @p recv evaluates to.
+  bool ownField(const ast::Expr *recv) const;
+  /// Whether @p e is the `self` of an `__init__`: what it makes.
+  bool isMade(const ast::Expr *e) const {
+    const auto *self = ast::dyn_cast<ast::Identifier>(e);
+    return self && self->getName() == names::kSelf &&
+           Fn->getName() == names::kMethodInit && L.BodyOwners.count(Fn);
+  }
+  /// The calls given @p args change what an `inout` argument names.
+  void changes(const std::vector<ast::Expr *> &args) {
+    for (const ast::Expr *a : args)
+      if (a->isChangedByCall() && !ownPlace(a)) {
+        Out.Stores = true;
+        storesInto(a);
+      }
+  }
   /// Whether a value of type @p ty holds a reference that storing another
   /// releases.
   static bool holdsReference(const ast::Type *ty) {
@@ -803,6 +1118,8 @@ struct ModuleLowering::EffectScan {
 };
 
 void ModuleLowering::EffectScan::store(const std::string &name) {
+  Out.Stores = true;
+  storesThrough(name);
   for (const Place &p : NotOwned.at(name)) {
     drop(p.Value);
     for (auto *c = ast::dyn_cast<ast::ClassType>(L.slotType(p.Slot)); c;
@@ -811,8 +1128,93 @@ void ModuleLowering::EffectScan::store(const std::string &name) {
   }
 }
 
+void ModuleLowering::EffectScan::storesInto(const ast::Expr *place,
+                                            unsigned depth) {
+  for (const ast::Expr *e = place;;) {
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(e)) {
+      if (NotOwned.count(id->getName()) && !isMade(id))
+        storesThrough(id->getName(), depth);
+      return; // else a variable of its own
+    }
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e)) {
+      if (ast::isa<ast::StructType>(typeOf(ma->getReceiver()))) {
+        e = ma->getReceiver();
+        continue;
+      }
+      if (!isMade(ma->getReceiver()))
+        storesIntoField(ma->getFieldName(),
+                        fieldType(ma->getReceiver(), ma->getFieldName()));
+      return;
+    }
+    if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+      e = ti->getTuple();
+      continue;
+    }
+    if (const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e);
+        se && ast::isa<ast::FixedArrayType>(typeOf(se->getArray()))) {
+      e = se->getArray();
+      continue;
+    }
+    // A slice's element, what a call's `inout` result names.
+    Out.StoresElsewhere = true;
+    return;
+  }
+}
+
+void ModuleLowering::EffectScan::storesThrough(const std::string &name,
+                                               unsigned depth) {
+  for (const Place &p : NotOwned.at(name)) {
+    if (!p.Names)
+      continue; // the caller's place, given to the call to change
+    if (depth == kNamesFollowed)
+      Out.StoresElsewhere = true;
+    else
+      storesInto(p.Names, depth + 1);
+  }
+}
+
+void ModuleLowering::EffectScan::storesIntoField(const std::string &field,
+                                                 ast::Type *ty) {
+  Out.StoredFields.insert(field);
+  if (!ty) {
+    Out.StoresElsewhere = true;
+    return;
+  }
+  const std::unordered_set<std::string> &parts = L.memPartKeys(ty);
+  Out.StoredParts.insert(parts.begin(), parts.end());
+}
+
+bool ModuleLowering::EffectScan::ownPlace(const ast::Expr *place) const {
+  for (const ast::Expr *e = place;;) {
+    if (const auto *id = ast::dyn_cast<ast::Identifier>(e))
+      return !NotOwned.count(id->getName()) || isMade(id);
+    if (const auto *ma = ast::dyn_cast<ast::MemberAccessExpr>(e))
+      return ownField(ma->getReceiver());
+    if (const auto *ti = ast::dyn_cast<ast::TupleIndexExpr>(e)) {
+      e = ti->getTuple();
+      continue;
+    }
+    const auto *se = ast::dyn_cast<ast::SubscriptExpr>(e);
+    if (!se || !ast::isa<ast::FixedArrayType>(typeOf(se->getArray())))
+      return false; // a slice's element, or a call's result
+    e = se->getArray();
+  }
+}
+
+bool ModuleLowering::EffectScan::ownField(const ast::Expr *recv) const {
+  return ast::isa<ast::StructType>(typeOf(recv)) ? ownPlace(recv)
+                                                 : isMade(recv);
+}
+
 void ModuleLowering::EffectScan::storeField(ast::Expr *recv,
                                             const std::string &field) {
+  if (!ownField(recv)) {
+    Out.Stores = true;
+    if (ast::isa<ast::StructType>(typeOf(recv)))
+      storesInto(recv);
+    else
+      storesIntoField(field, fieldType(recv, field));
+  }
   ast::Type *rt = typeOf(recv);
   if (auto *ct = ast::dyn_cast<ast::ClassType>(rt);
       ct && ct->isWeakField(field)) {
@@ -846,7 +1248,8 @@ void ModuleLowering::EffectScan::stmt(ast::Stmt *s) {
     if (!vd)
       return unknown();
     if (vd->getMode() == ast::ParamMode::Inout)
-      NotOwned[vd->getName()].push_back({vd->getType(), vd->getType()});
+      NotOwned[vd->getName()].push_back(
+          {vd->getType(), vd->getType(), vd->getInitExpr()});
     expr(vd->getInitExpr());
   } else if (auto *x = ast::dyn_cast<ast::AssignStmt>(s)) {
     if (NotOwned.count(x->getVarName()))
@@ -858,6 +1261,13 @@ void ModuleLowering::EffectScan::stmt(ast::Stmt *s) {
     expr(x->getValue());
   } else if (auto *x = ast::dyn_cast<ast::SubscriptAssignStmt>(s)) {
     ast::Type *arr = typeOf(x->getArray());
+    if (!ast::isa<ast::FixedArrayType>(arr) || !ownPlace(x->getArray())) {
+      Out.Stores = true;
+      if (ast::isa<ast::FixedArrayType>(arr))
+        storesInto(x->getArray());
+      else
+        Out.StoresElsewhere = true; // a slice's element
+    }
     ast::Type *elem = nullptr;
     if (auto *ft = ast::dyn_cast<ast::FixedArrayType>(arr))
       elem = ft->getElementType();
@@ -895,8 +1305,8 @@ void ModuleLowering::EffectScan::stmt(ast::Stmt *s) {
       if (arm->hasBinding() && arm->getMode() == ast::ParamMode::Inout) {
         ast::Type *subject = typeOf(x->getSubject());
         std::vector<Place> &places = NotOwned[arm->getBinding()];
-        places.push_back({arm->getBindType(), subject});
-        places.push_back({subject, subject});
+        places.push_back({arm->getBindType(), subject, x->getSubject()});
+        places.push_back({subject, subject, x->getSubject()});
       }
       stmt(arm->getBody());
     }
@@ -962,6 +1372,7 @@ void ModuleLowering::EffectScan::call(ast::CallExpr *ce) {
   const std::string &name = ce->getCalleeName();
   const std::vector<ast::Expr *> &args = ce->getArguments();
   exprs(args);
+  changes(args);
   // `Str(s)`, a variant made in place or a conversion: the runtime's, given
   // numbers and strings.
   ast::Type *target = nullptr;
@@ -1003,6 +1414,12 @@ void ModuleLowering::EffectScan::methodCall(ast::MethodCallExpr *mc) {
   const std::string &name = mc->getMethodName();
   expr(recv);
   exprs(mc->getArguments());
+  changes(mc->getArguments());
+  // A struct's method that may change `self` changes the receiver.
+  if (recv->isChangedByCall() && !ownPlace(recv)) {
+    Out.Stores = true;
+    storesInto(recv);
+  }
   if (mc->isFieldCall()) // a function value in a field
     return unknown();
   ast::Type *rt = typeOf(recv);
@@ -1051,10 +1468,10 @@ ModuleLowering::effectOf(const ast::FuncDecl *fn) {
   auto *st = owner == BodyOwners.end()
                  ? nullptr
                  : ast::dyn_cast<ast::StructType>(owner->second);
-  scan.NotOwned[names::kSelf].push_back({st, st});
+  scan.NotOwned[names::kSelf].push_back({st, st, nullptr});
   for (const ast::Param &p : fn->getParams())
     if (p.Mode == ast::ParamMode::Inout)
-      scan.NotOwned[p.getName()].push_back({p.ParamType, p.ParamType});
+      scan.NotOwned[p.getName()].push_back({p.ParamType, p.ParamType, nullptr});
   scan.stmt(fn->getBody());
   Effect &effect = Effects[fn];
   effect = std::move(scan.Out);

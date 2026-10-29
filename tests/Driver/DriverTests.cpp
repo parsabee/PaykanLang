@@ -1533,7 +1533,8 @@ TEST(Driver, PirSkipLeavesPassesOut) {
       << skip.out;
   EXPECT_EQ(skip.out.find("  lending "), std::string::npos) << skip.out;
   EXPECT_EQ(skip.out.find("  rc-elimination "), std::string::npos) << skip.out;
-  EXPECT_NE(skip.out.find("  retain lend %a."), std::string::npos) << skip.out;
+  EXPECT_NE(skip.out.find("  retain lend nonnull %a."), std::string::npos)
+      << skip.out;
   EXPECT_NE(skip.out.find("  if %x.lent.3 {\n    retain %x.1\n  }\n"),
             std::string::npos)
       << skip.out;

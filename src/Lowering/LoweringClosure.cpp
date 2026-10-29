@@ -232,7 +232,7 @@ void ModuleLowering::emitLambdaBody(ast::LambdaExpr *node) {
           CurrentScope->declare(cname, local, ty);
         } else if (ast::isRefType(ty)) {
           Val box = B.fieldLoad(self, name, field, Type::Box, cname);
-          emitRetain(box);
+          emitRetain(box, /*lend=*/false, ty);
           pir::LocalId local = B.addLocal(cname, Type::Box);
           B.store(local, box);
           CurrentScope->declare(cname, local, ty);

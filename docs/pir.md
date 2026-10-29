@@ -540,6 +540,7 @@ names the mask.
 ```
 retain %b            ; box -> void              Paykan_retain
 retain lend %b       ; the same: a copy made only to hand an argument over
+retain nonnull %b    ; the same, of a box that is never null
 release %b           ; box -> void              Paykan_release (null-safe)
 %b = box %o          ; obj -> box               PaykanShared_new: the object, strong +1
 %o = unbox %b        ; box -> obj               the identity (null -> null)
@@ -560,6 +561,22 @@ A `retain lend` is a retain the lowering makes only so that a box argument
 is handed over, which a pass may make a lent argument instead; every other
 pass and every backend reads it as a plain `retain`, and a module may
 contain none (the lowering's marks are cleared before code is kept).
+
+A `retain nonnull` (`retain lend nonnull` with both marks) retains a box
+that is never null: the lowering marks a retain of a value whose type is a
+class that is not optional, which Sema reads only once it is set and a
+native function never returns as null, and so the retain a copy of a value
+held in memory makes of each such reference it holds, but one in an
+optional's payload, in a tagged union's variants (whose other variants are
+zeros) or a function value's closure.  A backend retains it with no test
+for null, and releases the same value (`release %b` of that `%b`) with
+none either, wherever that release is; a `release` of anything else, such
+as a load of a local's slot the moves at last use (§12) may have emptied,
+keeps its test.  So the mark is of the value, not of the place it is
+retained in: a `match` arm binding a class retains an optional subject's
+box with a plain `retain`, as that box is null on the way to `None`.
+Without the mark a retain promises nothing, so a module written before the
+mark existed reads as before.
 
 A `field.load` or a `ptr.load` of a `box` may end in `stable`: the slot
 it reads keeps its reference for as long as the statement it is part of
@@ -648,12 +665,39 @@ CodeGen enforced, now in one place.
 * **Scope exit** releases the scope's owned variables in reverse declaration
   order, then any pending temporaries (a match subject), on every path:
   fall-through, `ret` (all scopes), `break`/`continue` (scopes inside the loop).
+  A value held in memory is released in place at the end of its scope.  At
+  a `ret`, `break` or `continue`, and as a statement's temporary, one whose
+  release takes more than four `release`s (a struct, a tuple, an array or a
+  tagged union with more than four references, an array of more than four
+  elements counting its element's once, for the loop that visits them, a
+  union every variant's fields) is released in place until the function's
+  ways out and temporaries have written 512 such releases, and after that
+  by one call of its type's **drop function**, `fn @.drop.<type>(%at: ptr)
+  -> void`, which the module makes once and calls with the `local.addr` of
+  the local or temporary holding the value.  So a function's code grows with
+  its ways out, not with them times the references they release (each `ret`
+  of each arm of a `match` on a union of a hundred variants releasing every
+  variant's fields), while one of a few ways out keeps each value's
+  releases where later passes can remove them.  A union's drop function
+  `switch`es on its tag and releases the fields of that variant only: the
+  others' are zeros, and a union all zeros (never set, or whose references
+  were handed on) releases null references.  A drop function links like
+  its module's other functions: a template's copy the module lowered (a
+  `shared fn`, §3) may call it from the code of another module that keeps
+  the copy, as it calls them.  The local is not used once it is dropped
+  and a drop function only reads it, so a backend may give the call a copy
+  of it: the LLVM path does, as LLVM keeps a local whose address a call
+  takes in memory throughout its function.  Any other release of a value
+  held in memory (an assignment's old value, an object's field in its
+  `destroy`) stays in place.
 * **Moves at last use** (§12) then change both rules for a variable handed
   on at its last use: the copy takes no reference of its own, and the
-  variable owns nothing from there on.  Its release is gone from the paths
-  through the copy (or, where an `if` or a `switch` joins them with paths
-  that kept the variable, moved to the end of the one arm that did), and its
-  slot may keep the pointer it handed on, which nothing reads again.
+  variable owns nothing from there on (a drop function's call counts as the
+  release of each reference of the local it is given).  Its release is gone
+  from the paths through the copy (or, where an `if` or a `switch` joins
+  them with paths that kept the variable, moved to the end of the one arm
+  that did), and its slot may keep the pointer it handed on, which nothing
+  reads again.
 * **Reference-count elimination** (§12) then removes a `retain` with the
   releases that end the reference it made where something else keeps the
   object alive: a variable whose retain went (a match binding inside its
@@ -983,6 +1027,38 @@ CodeGen enforced, now in one place.
   read in use where no such call is made is read in place, with no
   `retain`.
 
+  A value held in memory that is read where it is but used only once
+  the operands after it have run (an argument passed by address, which
+  its callee copies when the call starts or reads where it is; the
+  receiver of a struct's `view fn`; the left operand of `==` and `!=`)
+  is copied where it is evaluated, into a temporary of the caller's
+  (`mem.copy` into a `snap` local and a `retain` of each reference,
+  released once it is used), when an operand after it may write its
+  storage: an `inout` argument naming it or a part of it (not another
+  part, `s.q` of `s.p`, nor another field of an object), a struct
+  method that may change it, or a call given what reaches an object
+  whose code may store into a field of an object (but the one an
+  `__init__` makes, or a part of what the field holds, directly or
+  through an `inout` local or a `match` arm's binding naming it) that
+  may hold the value, or into storage it cannot name (a slice's element,
+  what a call's `inout` result names): read from the code as the classes
+  above are, "not known" counting.  A value in an object's field may be
+  in a stored field of the same name; one the function's caller holds
+  (a `view`, `inout` or slice parameter's) in a stored field whose value
+  holds a value of its type in memory (a slice's elements, a fixed-size
+  array of them), whatever its name.  The callee's own stores through
+  its `inout` parameters and a struct method's `self` are the call's
+  arguments' above.  A slice parameter passed on to
+  another, the caller's array, is copied the same way by the length it
+  has when the program runs: into memory of its own (a `call` of
+  `$rt.Paykan_malloc` for the length times the element's size, a
+  `mem.copy` and a loop retaining each element's references), passed in
+  its place, and released and freed (`$rt.Paykan_free`) after the call.
+  The call's own `inout` arguments write nothing it is given by value
+  before its callee copies it.  So `first(c.p, reset(c))` passes the
+  `c.p` read before `reset` stored into it; every other such value is
+  passed or compared where it is.
+
   A call's `inout` result used where it is (bound to an `inout` local,
   passed to an `inout` parameter, a value held in memory) may also be in
   an object that one of the call's `inout` arguments holds, or that a
@@ -1083,7 +1159,9 @@ crossing into the runtime is `cast` to `i64` first.
 ; release's fast path is inline (§12): the LLVM path emits it and calls
 ; Paykan_retain or Paykan_release for the rest, the C path calls Runtime.h's
 ; static inline Paykan_retain_inline and Paykan_release_inline, which do the
-; same.  `unbox` is the identity on both: neither calls PaykanShared_get.
+; same (Paykan_retain_nonnull_inline and Paykan_release_nonnull_inline, with
+; no test for null, for a `retain nonnull`'s box, §6).  `unbox` is the
+; identity on both: neither calls PaykanShared_get.
 ; Paykan_malloc never returns NULL: it panics when the memory is not there.
 Paykan_malloc(i64) -> ptr        Paykan_free(ptr) -> void
 Paykan_retain(box) -> void       Paykan_release(box) -> void
@@ -1156,8 +1234,9 @@ list; the mlir backend's JIT symbol table must cover it, and an executable links
 `libpaykan_runtime.a`.  `pir::runtimeSignature` (`include/paykan/pir/PIR.h`)
 holds the signatures above in PIR types (a `size_t` an `i64`), the C path's
 `Paykan_retain_inline(box) -> void` and `Paykan_release_inline(box) ->
-void`, and C's `fmod(f64, f64) -> f64`, which a backend calls for an `f64`
-`rem`; none for the three that take a C `int`, which no PIR type is
+void` (and their `_nonnull_` variants), and C's `fmod(f64, f64) -> f64`,
+which a backend calls for an `f64` `rem`; none for the three that take a C
+`int`, which no PIR type is
 (`Paykan_args_new`, `Paykan_heap_set_tracking`, `memset`).  A native
 function bound to one of these symbols (`pir::isRuntimeSymbol`) must have
 its signature (§3), which for those three no native function has.
@@ -1234,13 +1313,15 @@ The verifier rejects a program when:
   a lending callee with a bit in the ownership mask (§3; never one of a
   runtime or native extern), or passes a bit that is not a `bool` value; an
   instruction other than a call has an argument ownership, or one other than
-  a `retain` is `lend`; `owned` names anything but a box parameter of its
-  function with a bit in the mask;
+  a `retain` is `lend` or `nonnull`; `owned` names anything but a box
+  parameter of its function with a bit in the mask;
 * a runtime extern (`extern fn` without a `module`, `extern obj`, `extern
   vtable`) is not named `$rt.<symbol>` (a module-less `extern fn` may instead
   be a native `$c.<symbol>`), or anything else (a function, a module extern's
   `symbol`, a `cstr`/`data`/`bytes` global) has either name;
 * `@main` has a signature other than `() -> i64` or `(ptr, i64) -> i64`;
+* a drop function (`@.drop.<type>`, §7) is not `(ptr) -> void`, or a call
+  of one is given anything but the `local.addr` of a `mem` local;
 * a function that is not a compiled declaration has `uses`, or a `uses`
   names nothing the module declares; a runtime extern is `shared`.
 
@@ -1264,8 +1345,8 @@ versioned, by the release like every format: `PAYKAN_PIR_TEXT_VERSION` in
 `include/paykan/plugin_api.h` is the release version packed as
 major * 10000 + minor * 100 + patch (300 for 0.3.0), the same number the binary
 form stores.  0.3.0's adds a call argument's ownership (`lent`,
-`owned(%o)`), `owned` and `retain lend` (§6), and with them the ownership
-mask a lending function takes (§3).
+`owned(%o)`), `owned`, `retain lend` and `retain nonnull` (§6), and with
+them the ownership mask a lending function takes (§3).
 
 ```
 module "01"
@@ -1315,11 +1396,12 @@ opcode codes, records, determinism) and §6.1 (the symbol index); in short:
 - **Codes.** Types and opcodes are written as the fixed codes of
   `include/paykan/pir/Codes.h`, the one table that also holds the mnemonics
   of §10, never as the C++ enumerator's value; a reader rejects a code it
-  does not know.  Four codes mark what follows them: 18 a `view` local's
+  does not know.  Five codes mark what follows them: 18 a `view` local's
   slot type (§3), 53 a `stable` load's opcode (§6), 55 a call's opcode
   after the ownership of its arguments that are not handed over (each one's
-  index, `lent` or `owned(%o)` and its bit), 56 a `retain lend`'s opcode; a
-  record without one reads as before the mark existed, unmarked.  `owned`
+  index, `lent` or `owned(%o)` and its bit), 56 a `retain lend`'s opcode,
+  57 a `retain nonnull`'s opcode (after a 56 when it is both); a record
+  without one reads as before the mark existed, unmarked.  `owned`
   is opcode 54.
 - **Functions** are length-prefixed records, so a reader can skip or decode
   one function on its own (`decodeFunction`), and the symbol index
@@ -1430,22 +1512,24 @@ It is the slot's **last use** when every path from the copy reaches the
 slot's release before anything else happens to the slot, or ends in
 `unreachable`.  The release is a `load` or `ptr.load` of the slot whose one
 use is the `release` right after it: a scope exit's, or the one an
-assignment makes of the value it replaces.  Anything else on the way is a
-use: another read of the slot; a write to it; a `ret` or the end of the
-function (a slot that is never released does not own its value); or a use
-of an *alias*, a value that refers to the slot's object without a
-reference of its own: a box loaded from the slot before the copy, the
-object unboxed from it, a field read or an address computed from it, a
-`weak.new` of it and the `weak` local holding that.  A value whose only
-other use is a `retain` earlier in the same block holds a reference of its
-own, and its use is none of these: the box the copy hands its consumer,
+assignment makes of the value it replaces; or, for a `mem` local's slot, a
+`call` of a drop function given the local's `local.addr` (§7), which
+releases every reference of the local, the nulls a move left included.
+Anything else on the way is a use: another read of the slot; a write to it;
+a `ret` or the end of the function (a slot that is never released does not
+own its value); or a use of an *alias*, a value that refers to the slot's
+object without a reference of its own: a box loaded from the slot before the
+copy, the object unboxed from it, a field read or an address computed from
+it, a `weak.new` of it and the `weak` local holding that.  A value whose
+only other use is a `retain` earlier in the same block holds a reference of
+its own, and its use is none of these: the box the copy hands its consumer,
 and an earlier copy of the slot wherever it is used afterwards.  So in
 `f(a, a)` only the second argument can move: a copy made after the slot's
-reads the slot first.  Loops are paths like any other: a variable read
-again on the next iteration is still in use; one reassigned first is
-released by the assignment.  An absent `else` or `default` is a path too,
-the one on which no case matches, unless the cases of a `switch` are both
-values of a `bool`.
+reads the slot first.  Loops are paths like any other: a variable read again
+on the next iteration is still in use; one reassigned first is released by
+the assignment.  An absent `else` or `default` is a path too, the one on
+which no case matches, unless the cases of a `switch` are both values of a
+`bool`.
 
 A last use is moved only when no **borrowed reference** may depend on the
 slot's object.  After a move the destination may let the object go before
@@ -1868,14 +1952,15 @@ The driver runs it on every program right after the lending pass, and on
 a module's code before its `.pkm` is written, after the lending pass; on
 its own output, and after the moves again, it changes nothing.
 
-**What is left is cheap.**  Each backend has the fast path of a `retain`
-and a `release` inline: a null box is skipped, a retain of a count below
+**What is left is cheap.**  Each backend has the fast path of a `retain` and
+a `release` inline: a null box is skipped (with no test at all for the box
+of a `retain nonnull`, §6, and a release of it), a retain of a count below
 the limit increments the header's 32-bit count, and a release of a count
 above one decrements it; only the rest calls `Paykan_retain` (which panics
-at the limit) or `Paykan_release` (which destroys the object), so each
-does what the call did, at every count.  The LLVM path emits that code for
-every call at every `-O` (`src/Backends/MLIR/ToLLVM/ToLLVM.cpp`, the
-common case weighted as likely), the module code in a `.pkm` included; the
-C path calls Runtime.h's `static inline` `Paykan_retain_inline` and
-`Paykan_release_inline`, which the runtime uses too.  The functions stay
-the ABI (§8).
+at the limit) or `Paykan_release` (which destroys the object), so each does
+what the call did, at every count.  The LLVM path emits that code for every
+call at every `-O` (`src/Backends/MLIR/ToLLVM/ToLLVM.cpp`, the common case
+weighted as likely), the module code in a `.pkm` included; the C path calls
+Runtime.h's `static inline` `Paykan_retain_inline` and
+`Paykan_release_inline`, which the runtime uses too.  The functions stay the
+ABI (§8).

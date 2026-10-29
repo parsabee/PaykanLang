@@ -640,6 +640,32 @@ retains and releases the references it holds as a tuple does. Assigning a field 
 (`p.name = s`) retains the new reference and releases the one it replaces. A method's `self`
 is the receiver's storage, so a method allocates nothing to be called. See [Structs](11-structs.md).
 
+A tagged union is held in place too, its tag followed by every variant's fields, only the
+current variant's set ([Held in place](07-enums.md#held-in-place)), and it retains and releases
+the references its current variant holds. A value of one of these types is released in place
+at the end of its scope. At a `return`, `break` or `continue` leaving it, and as a statement's
+temporary, one whose references take more than four releases (an array's elements counting
+once, for the loop that visits them) is released in place too until its function has written
+512 such releases, and after that by one call of a function the compiler writes once for the
+type, which releases a tagged union's references by its tag: a function's code does not grow
+with its ways out times the references its values' types can hold.
+
+An array, a tuple, a struct or a tagged union is passed by address: the callee copies a plain
+parameter when the call starts, and reads a `view` parameter where it is. So a call with an
+argument that may write that storage after it is read (`f(p, bump(p))` with `bump(p: inout
+Point)`, `f(c.p, reset(c))` with `reset` storing into `c.p`) gives the callee a copy the caller
+takes where the argument is evaluated, its references retained and released after the call,
+as `==` does with its left operand: the value passed or compared is the one read
+([Evaluation order](02-basics.md#evaluation-order)). A slice parameter passed on to another
+names its caller's array, and is copied the same way when a later argument may write the
+array: its elements, as many as the slice has when the program runs, into memory allocated for
+the call and freed after it. Where no later operand may write it, as in almost every call,
+nothing more is copied: a later call given only values that reach no object, or whose code
+stores into nothing its caller holds, cannot, and nor can one whose code stores only into
+objects' fields that cannot hold the value (`f(c.p, counter.next())`, where `next` stores
+only a counter's `int` field). A call through a function value runs code the caller does not
+know, so a value read before it is copied.
+
 ## `None`
 
 `None` is a singleton `Obj` representing the absence of a value. Because it is a shared global

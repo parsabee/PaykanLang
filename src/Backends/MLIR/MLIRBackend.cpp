@@ -144,7 +144,7 @@ public:
     if (Status s = llvm_codegen::prepareForJIT(**module, in.OptLevel); !s)
       return s;
     return llvm_codegen::runInProcess(std::move(*module), std::move(ctx), args,
-                                      in.Objects, opts.TrackHeap);
+                                      in.Objects, in.OptLevel, opts.TrackHeap);
   }
 
 private:

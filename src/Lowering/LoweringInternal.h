@@ -384,6 +384,7 @@ private:
     ast::ClassType *SavedMethodClassType;
     std::unordered_set<pir::ValueId> SavedStringTemps;
     std::vector<LoopContext> SavedLoops;
+    size_t SavedReleasesInPlace = 0;
     FunctionStateGuard(ModuleLowering &l, pir::Function *fn,
                        ast::Type *retASTType, ast::ClassType *methodClassTy);
     ~FunctionStateGuard();
@@ -452,6 +453,15 @@ private:
   /// The reads of LentReads in use where a call is made that may let go of
   /// what they read: their copy is the caller's (not lent).
   std::unordered_set<const ast::Expr *> NotLendable;
+  /// The values held in memory, read where they are, that noteBorrowedReads
+  /// found the statement may write before they are used: an argument
+  /// passed by address (which its callee copies, or reads, only once the
+  /// later arguments have run), a struct's `view fn` receiver, the left
+  /// operand of `==` or `!=`, when an operand after it may write its
+  /// storage.  Each is copied into a temporary where it is read
+  /// (emitMemValue), so it is the value it had then, as a box read or a
+  /// number is (docs/language/02-basics.md, "Evaluation order").
+  std::unordered_set<const ast::Expr *> SnapshotReads;
   /// Whether the box read @p e, an argument of a lending callee (or the
   /// argument `Str(e)` is), may be lent: in LentReads, of none of whose
   /// calls in use it is NotLendable, and not held (isHeldRead).
@@ -460,6 +470,16 @@ private:
   bool isStableRead(const ast::Expr *e) const {
     return StableReads.count(e) > 0 && !isHeldRead(e);
   }
+  /// The keys of the types a value of type @p ty holds in memory, its own
+  /// among them: each one's ast::typeName, and for a fixed-size array of
+  /// elements of type E also that of the slices of E, `[]E` (sliceKey),
+  /// whose elements it may be.  A value read of a type whose key is not
+  /// one of them is no part of such a value.
+  const std::unordered_set<std::string> &memPartKeys(ast::Type *ty);
+  std::unordered_map<const ast::Type *, std::unordered_set<std::string>>
+      MemPartKeys;
+  /// The key of the elements of a slice of elements of type @p elem.
+  static std::string sliceKey(ast::Type *elem);
   /// Whether a value of type @p ty may reach an object (any class but Str,
   /// a function value, or what holds one): given it, a call can change
   /// whatever the object reaches.
@@ -482,12 +502,29 @@ private:
     /// may hold one, or makes a call that may (the rule without the types,
     /// which a read rooted in the function's own variables keeps).
     bool Releases = false;
+    /// It may store into storage its caller may hold, a reference or not:
+    /// a field of an object (but the one an `__init__` makes), an element
+    /// of such storage, what an `inout` name or a struct method's `self`
+    /// names.
+    bool Stores = false;
+    /// Of those stores, the ones into an object's field (or a part of what
+    /// it holds), by the field's name: what a pending read in another
+    /// object's field of the same name, or of a value of one of
+    /// StoredParts, may see written (BorrowedReads::writesThroughObjects).
+    /// Its stores through its own `inout` parameters and a struct method's
+    /// `self` are its callers', who give it what they name to change.
+    std::unordered_set<std::string> StoredFields;
+    /// What the values of StoredFields hold in memory (memPartKeys).
+    std::unordered_set<std::string> StoredParts;
+    /// It may store into storage it does not name: a slice's element, what
+    /// a call's `inout` result names.
+    bool StoresElsewhere = false;
     /// The classes of the slots whose references it may let go of: the
     /// ones it may store into, and every one an object or a value it lets
     /// go of may hold (whose dying may let them go).
     std::unordered_set<const ast::Type *> Types;
 
-    static Effect unknown() { return {true, true, {}}; }
+    static Effect unknown() { return {true, true, true, {}, {}, true, {}}; }
     void add(const Effect &other);
   };
   /// What a call of @p fn does: Unknown for null or a function without a
@@ -626,8 +663,24 @@ private:
   /// (takeInoutResult).
   using InoutPlaces = std::vector<std::pair<Val, ast::Type *>>;
 
-  void emitRetain(const Val &shared, bool lend = false) {
-    B.retain(shared, lend);
+  /// `retain`: with @p lend a `retain lend`, and a `retain nonnull` when
+  /// @p ty, the type of the value retained, says it is never null
+  /// (neverNull).
+  void emitRetain(const Val &shared, bool lend = false,
+                  ast::Type *ty = nullptr) {
+    B.retain(shared, lend, neverNull(ty));
+  }
+  /// Whether a box of type @p ty is never null: a class value that is not
+  /// optional.  Sema reads such a value only once it is set (a variable
+  /// once assigned, a field once its `__init__` has stored it), and a
+  /// native function never returns null for one; only a slot the moves at
+  /// last use emptied, or memory never set (a tagged union's other
+  /// variants), holds null, and neither is read as a value.  @p ty is the
+  /// type of the value retained, wherever it is used (a backend releases
+  /// the same value with no test either): an optional's box is not
+  /// marked in the arm that knows it is set.
+  static bool neverNull(ast::Type *ty) {
+    return ast::isRefType(ty) && !ast::isa<ast::OptionalType>(ty);
   }
   void emitRelease(const Val &shared) { B.release(shared); }
   Val emitSharedNew(const Val &raw, std::string name = "shared");
@@ -709,7 +762,10 @@ private:
 
   // -- Statements
 
-  void emitScopeCleanup(Scope &scope);
+  /// Release what @p scope holds: at its end (@p wayOut false), each value
+  /// held in memory in place; on a way out of it (a `return`, `break` or
+  /// `continue`, @p wayOut true) by emitMemDrop.
+  void emitScopeCleanup(Scope &scope, bool wayOut);
   void emitAllScopesCleanup();
   void emitLoopScopesCleanup();
   Val emitImplicitVarDecl(const std::string &name, ast::Expr *rhsExpr,
@@ -1012,8 +1068,22 @@ private:
   };
   /// The bytes of @p e, an expression of a type held in memory: a
   /// variable's own (or, for an `inout` one, the value it names), an
-  /// element's or a field's, or a temporary.
+  /// element's or a field's, or a temporary; for a read of SnapshotReads, a
+  /// copy of them taken now, in a temporary.
   MemValue emitMemValue(ast::Expr *e);
+  /// emitMemValue, without the copy a read of SnapshotReads takes.
+  MemValue emitMemRead(ast::Expr *e);
+  /// A temporary named @p name holding a copy of the value of type @p ty at
+  /// @p addr, its references retained: its address.
+  Val copyToTemporary(const Val &addr, ast::Type *ty, const std::string &name);
+  /// A copy of the @p len elements at @p addr of a slice of type @p st, its
+  /// references retained, in memory of its own (Paykan_malloc): its
+  /// address, which goes to MemTemps with @p st and @p len, for
+  /// releaseSliceCopy.
+  Val copySliceToTemporary(const Val &addr, const Val &len, ast::SliceType *st);
+  /// Release the references of the @p len elements of the copy at @p copy
+  /// copySliceToTemporary made of a slice of type @p st, and free it.
+  void releaseSliceCopy(const Val &copy, const Val &len, ast::SliceType *st);
   /// The expression emitMemValue(@p e) passes to visit() before it emits
   /// anything else, or null: a call itself, the object of a class's field,
   /// and for an element or a struct's field, the same for the whole it is
@@ -1027,23 +1097,67 @@ private:
   Val emitMemAddress(ast::Expr *e);
   /// What addresses handed out depend on: temporaries holding references
   /// (with their type), and +1 boxes of the objects holding fields (with
-  /// none).
-  std::vector<std::pair<Val, ast::Type *>> MemTemps;
+  /// none).  A copy of a slice's elements (copySliceToTemporary) comes
+  /// with the slice's type and its length.
+  struct MemTemp {
+    Val V;
+    ast::Type *Ty = nullptr;
+    Val Len;
+    MemTemp() = default;
+    MemTemp(Val v, ast::Type *ty, Val len = Val())
+        : V(std::move(v)), Ty(ty), Len(std::move(len)) {}
+  };
+  std::vector<MemTemp> MemTemps;
   /// Release what was added to MemTemps since its size was @p mark.
   void releaseMemTemps(size_t mark);
   /// Retain, or release, every reference held by the value of type @p ty at
   /// @p addr (nothing for one of plain values).
   void emitMemRetain(const Val &addr, ast::Type *ty);
   void emitMemRelease(const Val &addr, ast::Type *ty);
+  /// emitMemRelease of the value of type @p ty a whole `mem` local holds,
+  /// at @p local, its `local.addr`: on a way out of a scope, or when a
+  /// temporary is done with.  A value of more than kReleasesInPlace
+  /// references is released in place while the function's
+  /// ReleasesInPlaceLeft lasts, and by a call of its type's drop function
+  /// once it does not: a function's ways out, each of which releases
+  /// everything its scopes hold, cost it code linear in their number.
+  void emitMemDrop(const Val &local, ast::Type *ty);
+  /// The releases a function's ways out and temporaries may write in place
+  /// for its values of more than kReleasesInPlace references
+  /// (FunctionStateGuard starts each function with this many), and what is
+  /// left of them in the current one.
+  static constexpr size_t kWayOutReleasesInPlace = 512;
+  size_t ReleasesInPlaceLeft = kWayOutReleasesInPlace;
+  /// The releases emitMemRelease writes in place for a value of type @p ty:
+  /// one per reference, an array's element's once when a loop visits them,
+  /// and every variant's fields of a tagged union.
+  size_t memReleaseCount(ast::Type *ty);
+  std::unordered_map<const ast::Type *, size_t> MemReleaseCounts;
+  /// The module's drop function of @p ty, `.drop.<ty>(ptr)` (docs/pir.md
+  /// §7), made once: its name.  It releases the references of the value at
+  /// the address it takes as emitMemReleaseByTag does.
+  std::string dropFunction(ast::Type *ty);
+  /// Release the references of the value of type @p ty at @p addr, those of
+  /// a tagged union's current variant only, by a `switch` on its tag: the
+  /// other variants' fields are zeros, and a union all zeros (never set, or
+  /// whose references were handed on) releases null references.
+  void emitMemReleaseByTag(const Val &addr, ast::Type *ty);
   /// Call @p fn with the box in each reference slot of the value of type
-  /// @p ty at @p addr.
+  /// @p ty at @p addr, and the type of the reference the slot holds, or
+  /// null for one that may hold null even in a value that is set: an
+  /// optional's payload, a tagged union's variants (the other variants'
+  /// are zeros), a function value's closure (@p set false below them).
   void forEachMemRef(const Val &addr, ast::Type *ty,
-                     const std::function<void(Val)> &fn);
+                     const std::function<void(Val, ast::Type *)> &fn,
+                     bool set = true);
   /// Call @p fn with the address of each of the slots @p from to @p to
   /// (exclusive), @p stride bytes apart, of the memory at @p base: one by
   /// one for a few, in a loop for more.
   void forEachSlot(const Val &base, int64_t from, int64_t to, int64_t stride,
                    const std::function<void(Val)> &fn);
+  /// forEachSlot's loop, up to @p to slots known when the program runs.
+  void forEachSlotUpTo(const Val &base, int64_t from, const Val &to,
+                       int64_t stride, const std::function<void(Val)> &fn);
   /// The address of element @p index of the fixed-size array @p array,
   /// after a bounds check.
   Val emitFixedElementAddress(ast::Expr *array, ast::Expr *index);

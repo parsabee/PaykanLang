@@ -439,11 +439,17 @@ void ModuleLowering::holdObjects(const std::string &name, std::vector<Val> keep,
   // The objects of a struct's field and of an `inout` result's storage
   // (noteBorrowedReads, takeInoutResult) come in MemTemps past @p mark and
   // are held the same way; a copy of a value held in memory there
-  // (holdObjectsIn) moves into a hidden local of its own.
+  // (holdObjectsIn) moves into a hidden local of its own.  A copy of a
+  // slice's elements an argument took (copySliceToTemporary) is no part of
+  // the storage, which is never a `view` parameter's: it goes now.
   for (size_t i = mark; i < MemTemps.size(); ++i) {
-    const auto &[v, ty] = MemTemps[i];
+    const auto &[v, ty, len] = MemTemps[i];
     if (!ty) {
       keep.push_back(v);
+      continue;
+    }
+    if (auto *st = ast::dyn_cast<ast::SliceType>(ty)) {
+      releaseSliceCopy(v, len, st);
       continue;
     }
     MemLayout l = memLayout(ty);
@@ -521,10 +527,11 @@ Val ModuleLowering::loadInoutResult(const Val &addr, ast::Type *astTy) {
   // A value held in memory is used by its address, as a variable's is.
   if (ast::isMemType(astTy))
     return addr;
-  Type t = toPIRType(canonicalizeDeclType(astTy));
+  ast::Type *ty = canonicalizeDeclType(astTy);
+  Type t = toPIRType(ty);
   Val v = B.ptrLoad(addr, t, "res");
   if (t == Type::Box)
-    emitRetain(v);
+    emitRetain(v, /*lend=*/false, ty);
   return v;
 }
 
@@ -558,7 +565,7 @@ void ModuleLowering::holdObjectsIn(const Val &addr, ast::Type *ty) {
     return;
   if (!ast::isMemType(ty)) {
     Val box = B.ptrLoad(addr, Type::Box, "held.obj");
-    emitRetain(box);
+    emitRetain(box, /*lend=*/false, ty);
     MemTemps.emplace_back(box, nullptr);
     return;
   }
@@ -665,7 +672,7 @@ void ModuleLowering::emitWriteBack(const Scope::WriteBack &wb) {
     // A reference: the binding's object replaces the one there (taken
     // before the old one goes, which may be the same).
     Val box = B.load(wb.Binding, "arm.box");
-    emitRetain(box);
+    emitRetain(box, /*lend=*/false, wb.BindTy);
     emitRelease(B.ptrLoad(place, Type::Box, "old.box"));
     B.ptrStore(place, box);
     return;

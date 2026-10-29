@@ -509,7 +509,8 @@ Val ModuleLowering::lowerMemberAssignStmt(ast::MemberAssignStmt *node) {
     if (auto *rhsId = ast::dyn_cast<ast::Identifier>(node->getValue())) {
       if (CurrentScope && holdsBox(rhsId->getName())) {
         newShared = loadVarBox(rhsId->getName());
-        emitRetain(newShared);
+        emitRetain(newShared, /*lend=*/false,
+                   CurrentScope->lookupASTType(rhsId->getName()));
       }
     }
     if (!newShared) {
@@ -602,7 +603,7 @@ Val ModuleLowering::lowerMemberAccessExpr(ast::MemberAccessExpr *node) {
   // box (exprProducesFreshBox).
   if (ast::isRefType(fieldASTTy) && !weak &&
       (recv.Owned.isOwned() || isHeldRead(node)))
-    emitRetain(fieldVal);
+    emitRetain(fieldVal, /*lend=*/false, fieldASTTy);
   releaseIfOwned(recv.Owned);
   return fieldVal;
 }
