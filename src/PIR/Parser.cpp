@@ -934,26 +934,42 @@ private:
     }
   }
 
-  bool parseOperandList(std::vector<Operand> &args, Tok close) {
-    while (Cur.Kind != close) {
+  /// A call's argument list, `(a, lent b, owned(%o) c)`, appended to
+  /// @p in's Args (after the callee or receiver already there), with the
+  /// ownership of each argument in Own when one is not the default
+  /// (docs/pir.md §6).
+  bool parseArgs(Instr &in) {
+    if (!expect(Tok::LParen, "'('"))
+      return false;
+    std::vector<ArgOwnership> own(in.Args.size());
+    bool marked = false;
+    while (Cur.Kind != Tok::RParen) {
+      ArgOwnership o;
+      if (isWord("lent")) {
+        advance();
+        o.K = ArgOwnership::Lent;
+      } else if (isWord("owned")) {
+        advance();
+        o.K = ArgOwnership::Passed;
+        if (!expect(Tok::LParen, "'(' after 'owned'") || !parseOperand(o.Bit) ||
+            !expect(Tok::RParen, "')'"))
+          return false;
+      }
       Operand op;
       if (!parseOperand(op))
         return false;
-      args.push_back(op);
+      marked = marked || o.K != ArgOwnership::Owned;
+      in.Args.push_back(op);
+      own.push_back(std::move(o));
       if (Cur.Kind == Tok::Comma)
         advance();
-      else if (Cur.Kind != close)
+      else if (Cur.Kind != Tok::RParen)
         return error("expected ','");
     }
     advance();
+    if (marked)
+      in.Own = std::move(own);
     return true;
-  }
-
-  /// `(a, b)` argument list.
-  bool parseArgs(std::vector<Operand> &args) {
-    if (!expect(Tok::LParen, "'('"))
-      return false;
-    return parseOperandList(args, Tok::RParen);
   }
 
   /// `a, b, c` to the end of the instruction (no closing token: operands are
@@ -1220,7 +1236,7 @@ private:
       resultTy = in.CastTo;
       break;
     case Opcode::Call:
-      if (!parseSymbol(in.Callee) || !parseArgs(in.Args))
+      if (!parseSymbol(in.Callee) || !parseArgs(in))
         return false;
       needsFixup = true;
       break;
@@ -1235,7 +1251,7 @@ private:
           !parseSignature(in.Sig))
         return false;
       in.Args.push_back(fn);
-      if (!parseArgs(in.Args))
+      if (!parseArgs(in))
         return false;
       resultTy = in.Sig.Ret;
       break;
@@ -1258,12 +1274,20 @@ private:
       if (slot < 0)
         return error("negative vtable slot");
       in.Slot = static_cast<uint32_t>(slot);
-      if (!parseArgs(in.Args))
+      if (!parseArgs(in))
         return false;
       needsFixup = true;
       break;
     }
     case Opcode::Retain:
+      // `retain lend %v` (docs/pir.md §6).
+      if (isWord("lend")) {
+        advance();
+        in.Lend = true;
+      }
+      if (!parseCommaOperands(in.Args, 1))
+        return false;
+      break;
     case Opcode::Release:
     case Opcode::Free:
       if (!parseCommaOperands(in.Args, 1))
@@ -1394,6 +1418,7 @@ private:
         return error("none of a type that is not an optional");
       break;
     case Opcode::IsSome:
+    case Opcode::Owned:
       if (!parseCommaOperands(in.Args, 1))
         return false;
       resultTy = Type::Bool;

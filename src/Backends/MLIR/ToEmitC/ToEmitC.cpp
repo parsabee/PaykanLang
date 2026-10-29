@@ -10,7 +10,8 @@
 // Types are C's as Runtime.h spells them: a box is `PaykanShared *`, an
 // obj `PaykanObject *`, a weak `PaykanWeak *` and a ptr `void *` (what a
 // native function's prototype in Runtime.h uses); an optional is the
-// struct `pkrt_opt_<payload>`, `{ bool present; <payload> value; }`.  A
+// struct `pkrt_opt_<payload>`, `{ bool present; <payload> value; }`; the
+// ownership mask (ui64) is a `uint64_t`, as Runtime.h's `owned`.  A
 // runtime function is called through Runtime.h's prototype, whose pointer
 // types may be more precise than PIR's: its pointer arguments are passed
 // as `void *` and its pointer result is cast, so no table of the runtime's
@@ -575,6 +576,54 @@ struct Int64MinLowering : CPattern<arith::ConstantOp> {
   }
 };
 
+// -- The ownership mask: a uint64_t
+
+/// `UINT64_C(<v>)`: a mask constant, which C spells with its type.
+Value maskConstant(ConversionPatternRewriter &r, Location loc, Type t,
+                   uint64_t v) {
+  return emitc::LiteralOp::create(r, loc, t,
+                                  "UINT64_C(" + std::to_string(v) + ")");
+}
+
+/// `pir.owned %m[k]`: (m & 2^k) != 0.
+struct OwnedLowering : CPattern<P::OwnedOp> {
+  using CPattern::CPattern;
+  LogicalResult matchAndRewrite(P::OwnedOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
+    Location loc = op.getLoc();
+    Type t = a.getMask().getType();
+    Value set = emitc::BitwiseAndOp::create(
+        r, loc, t, a.getMask(),
+        maskConstant(r, loc, t, uint64_t{1} << op.getBit()));
+    r.replaceOpWithNewOp<emitc::CmpOp>(op, r.getI1Type(),
+                                       emitc::CmpPredicate::ne, set,
+                                       maskConstant(r, loc, t, 0));
+    return success();
+  }
+};
+
+/// `pir.ownership`: the owned bits, or each passed bit while its bool is
+/// true.
+struct OwnershipLowering : CPattern<P::OwnershipOp> {
+  using CPattern::CPattern;
+  LogicalResult matchAndRewrite(P::OwnershipOp op, OpAdaptor a,
+                                ConversionPatternRewriter &r) const override {
+    Location loc = op.getLoc();
+    Type t = convert(op.getType());
+    if (!t)
+      return failure();
+    Value mask = maskConstant(r, loc, t, op.getOwned());
+    for (auto [k, passed] : llvm::zip(op.getPassedBits(), a.getPassed())) {
+      Value set = emitc::ConditionalOp::create(
+          r, loc, t, passed, maskConstant(r, loc, t, uint64_t{1} << k),
+          maskConstant(r, loc, t, 0));
+      mask = emitc::BitwiseOrOp::create(r, loc, t, mask, set);
+    }
+    r.replaceOp(op, mask);
+    return success();
+  }
+};
+
 // -- Optionals: the struct { bool present; <payload> value; }
 
 struct SomeLowering : CPattern<P::SomeOp> {
@@ -952,10 +1001,10 @@ struct ConvertToEmitCPass
     patterns.add<ICallLowering, FnAddrLowering, AllocaLowering, PtrLoadLowering,
                  PtrStoreLowering, PtrAddLowering, MemCopyLowering,
                  MemZeroLowering, AddressOfLowering, NullLowering, CastLowering,
-                 BitcastLowering, SomeLowering, NoneLowering, IsSomeLowering,
-                 UnwrapLowering, CStrLowering, DataLowering, BytesLowering,
-                 VTableLowering, ExternVTableLowering, ExternObjectLowering>(
-        types, ctx, u);
+                 BitcastLowering, OwnedLowering, OwnershipLowering,
+                 SomeLowering, NoneLowering, IsSomeLowering, UnwrapLowering,
+                 CStrLowering, DataLowering, BytesLowering, VTableLowering,
+                 ExternVTableLowering, ExternObjectLowering>(types, ctx, u);
     if (failed(applyFullConversion(top, target, std::move(patterns))))
       return signalPassFailure();
 

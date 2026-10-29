@@ -370,6 +370,16 @@ public:
     return emit(std::move(i));
   }
 
+  /// `owned %p`: whether the caller handed the box parameter @p param over
+  /// (its bit of the ownership mask, docs/pir.md §3), a `bool`.
+  Val owned(const Val &param, std::string name = "") {
+    Instr i;
+    i.Op = Opcode::Owned;
+    i.Result = newValue(Type::Bool, std::move(name));
+    i.Args = {param.Op};
+    return emit(std::move(i));
+  }
+
   /// The address of function @p callee, a `ptr`.
   Val fnAddr(const std::string &callee, std::string name = "") {
     Instr i;
@@ -392,10 +402,13 @@ public:
     return emit(std::move(i));
   }
 
-  void retain(const Val &box) {
+  /// `retain %b`, or with @p lend `retain lend %b`: a copy made only to hand
+  /// an argument over (docs/pir.md §6).
+  void retain(const Val &box, bool lend = false) {
     Instr i;
     i.Op = Opcode::Retain;
     i.Args = {box.Op};
+    i.Lend = lend;
     emit(std::move(i));
   }
   void release(const Val &box) {

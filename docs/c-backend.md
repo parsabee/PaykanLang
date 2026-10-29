@@ -97,6 +97,15 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   payload, `typedef struct { bool present; <payload> value; }
   pkrt_opt_<payload>;` (`pkrt_opt_i64`, `_f64`, `_bool`, `_char`), passed and
   returned by value.
+* **The ownership mask.**  A function that takes a box, other than a
+  runtime or native one, takes the mask after its parameters, a `uint64_t`
+  as `Runtime.h`'s `owned` is ([PIR](pir.md) §3): `void pk_m_Sshow(PaykanShared*
+  v1, uint64_t v2)`.  So does every vtable slot and function value whose
+  type takes a box, the runtime's `equals` included.  A call passes the
+  mask its arguments' ownership makes, a constant (`pk_m_Sshow(v19,
+  UINT64_C(1))`) or the bits a function hands on, `v5 & UINT64_C(2)`
+  tested and `v8 ? UINT64_C(1) : UINT64_C(0)` passed; an unused one is
+  `(void)` like any parameter.
 * **Names.**  Every symbol a module defines has the link name the shared
   lowering gives it, the same in the C and in the LLVM IR: `pk_<module>_S<name>`,
   and `pkvt_<module>_S<class>` for a class's vtable; a copy of an
@@ -133,6 +142,11 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
   ```c
   static int64_t pkicall_0(void *fn, PaykanObject * a0, int64_t a1) { return ((int64_t (*)(PaykanObject *, int64_t))(uintptr_t)fn)(a0, a1); }
   ```
+
+  The mask's type is the runtime's, so a virtual call of an `equals` the
+  runtime implements, and the runtime's of one a program overrides, call the
+  function through its own type: `int64_t (*)(PaykanObject *, PaykanShared *,
+  uint64_t)`.
 
 * **Locals.**  Each local slot of the shared lowering (a PIR `local`, an exit
   flag, a function's result) is a zeroed array of the unsigned integer of the

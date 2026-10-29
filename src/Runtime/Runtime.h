@@ -43,7 +43,21 @@ extern "C" {
 // .pkm module file record it (docs/design/pkm.md §2.2, tag 0x09).  It is
 // spelled out here, for C, and the compiler checks it is its own release's
 // (kVersionNumber, a static_assert in src/Modules/ModuleResolver.cpp).
-#define PAYKAN_RUNTIME_ABI_VERSION 200 /* 0.2.0 */
+#define PAYKAN_RUNTIME_ABI_VERSION 300 /* 0.3.0 */
+
+// -- The ownership mask
+//
+// A function of the generated code that takes a reference (a box parameter,
+// PaykanShared *) takes one more argument after its own: `uint64_t owned`,
+// the ownership mask.  Bit k is about the k-th box parameter, counting box
+// parameters only: set, the caller hands its reference over (the callee
+// releases it, keeps it or hands it on); clear, the caller lends it, keeping
+// the object alive until the call returns (the callee releases nothing and
+// retains what it keeps).  The 65th box parameter and those after it have no
+// bit: they are always handed over.  A vtable slot or a function value that
+// takes a box takes the mask too (PAYKAN_SLOT_EQUALS); the runtime's own
+// functions and a native function's C function take none, and borrow what
+// they are given (docs/pir.md §3, §8).
 
 // -- Target assumptions
 //
@@ -134,7 +148,8 @@ enum {
   // Object (every class)
   PAYKAN_SLOT_DESTROY = 0,   // void (*)(PaykanObject *self)
   PAYKAN_SLOT_TO_STRING = 1, // PaykanShared *(*)(PaykanObject *self)
-  PAYKAN_SLOT_EQUALS = 2,    // int64_t (*)(PaykanObject *self, PaykanShared *)
+  PAYKAN_SLOT_EQUALS = 2,    // int64_t (*)(PaykanObject *self,
+                             //   PaykanShared *other, uint64_t owned)
   PAYKAN_OBJECT_SLOTS = 3,
   // String
   PAYKAN_SLOT_STRING_LENGTH = 3, // int64_t (*)(PaykanObject *self)
@@ -174,10 +189,13 @@ static inline PaykanMethod *Paykan_vtable_of(const void *obj) {
 // class machinery, never through this symbol.
 PaykanObject *PaykanObject_new(void);
 
-// Default method implementations.
+// Default method implementations.  Every `*_equals` takes `other` as its
+// slot does: a box that bit 0 of `owned` says is handed over (released by
+// the call) or lent.
 void PaykanObject_destroy(PaykanObject *self);
 PaykanShared *PaykanObject_toString(PaykanObject *self);
-int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other);
+int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other,
+                            uint64_t owned);
 
 // Global vtable instance.
 extern PaykanMethod PaykanObject_vtable[PAYKAN_OBJECT_SLOTS];
@@ -227,7 +245,8 @@ int8_t PaykanString_char_at(PaykanObject *self, int64_t idx);
 // Method implementations.
 void PaykanString_destroy(PaykanObject *self);
 PaykanShared *PaykanString_toString(PaykanObject *self);
-int64_t PaykanString_equals(PaykanObject *self, PaykanShared *other);
+int64_t PaykanString_equals(PaykanObject *self, PaykanShared *other,
+                            uint64_t owned);
 int64_t PaykanString_length(PaykanObject *self);
 PaykanObject *PaykanString_concat(PaykanObject *self, PaykanObject *other);
 void PaykanString_concat_inplace(PaykanObject *self, PaykanObject *other);
@@ -259,7 +278,8 @@ PaykanShared *PaykanFile_open(PaykanObject *path, PaykanObject *mode,
                               int64_t *err);
 void PaykanFile_destroy(PaykanObject *self);
 PaykanShared *PaykanFile_toString(PaykanObject *self);
-int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other);
+int64_t PaykanFile_equals(PaykanObject *self, PaykanShared *other,
+                          uint64_t owned);
 void PaykanFile_write(PaykanObject *self, PaykanObject *str);
 PaykanShared *PaykanFile_readln(PaykanObject *self);
 PaykanShared *PaykanFile_readbytes(PaykanObject *self, int64_t n);

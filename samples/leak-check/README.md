@@ -41,3 +41,4 @@ line each; the samples parity check (`scripts/samples_parity.py`, ctest
 | `24_optional_primitives.pkn` | `int?` / `float?` / `bool?` / `char?` values in every sink (inline, no allocation), rebinding, copies, `T?` with T = int | the instances and strings only |
 | `25_conversions.pkn` | `Str<...>` temporaries, `int<Str>` / `float<Str>` optionals (present and None), numeric conversions | `PaykanString_from_*` (`String.c`) |
 | `26_deep_chain_drop.pkn` | dropping a 1,000,000-node list, a deep wide tree, a 200,000-link chain through array fields and a 200,000-link chain of objects through tuple fields (#118) | iterative destroy in `Paykan_release` (`Shared.c`) |
+| `27_borrowed_parameters.pkn` | a box parameter lent and handed over: kept in a field, handed on to the field that keeps it, only read, returned (#98) | the retain at a lent parameter's keep (`Paykan_retain_inline`, `Runtime.h`) |

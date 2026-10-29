@@ -764,7 +764,9 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
       }
       // The base __init__ consumes ref-typed parameters: pass a +1 box.
       if (paramTy == Type::Box) {
-        Val v = L.emitAsShared(argExpr);
+        Val v = L.emitAsShared(argExpr, hasOwnershipBit(superFn->Sig,
+                                                        pir::lends(*superFn),
+                                                        initArgs.size()));
         if (!v)
           return Val();
         initArgs.push_back(v);
@@ -850,7 +852,8 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     }
     if (paramTy == Type::Box) {
       // Callee-consumes ABI: a +1 box for every expression form.
-      Val v = L.emitAsShared(arg);
+      Val v = L.emitAsShared(
+          arg, hasOwnershipBit(callee->Sig, pir::lends(*callee), args.size()));
       if (!v)
         return Val();
       args.push_back(v);
@@ -1188,7 +1191,9 @@ bool ModuleLowering::ExprEmitter::emitMethodArgs(
     bool isClassParam = ast::isRefType(paramASTTy) &&
                         (userDefined || node->getMethodName() == kMethodEquals);
     if (isClassParam) {
-      Val v = L.emitAsShared(argExpr);
+      // A method, a vtable slot or a struct's method: it lends.
+      Val v = L.emitAsShared(argExpr,
+                             hasOwnershipBit(sig, pir::lendsType(sig), at));
       if (!v)
         return false;
       args.push_back(v);

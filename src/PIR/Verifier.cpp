@@ -261,12 +261,20 @@ private:
           error(where, "class '" + c.Name + "' vtable slot " +
                            std::to_string(i) + " ('" + e.Slot +
                            "') names undeclared function '@" + e.Target + "'");
-        } else if (!(it->second->Sig == e.Sig)) {
+        } else if (const Signature slot =
+                       machineSignature(e.Sig, lendsType(e.Sig));
+                   !(machineSignature(*it->second) == slot)) {
+          // A slot's and its target's machine functions are the same: a
+          // runtime target spells out the ownership mask a slot's type
+          // implies (`$rt.PaykanObject_equals(obj, box, i64)` for `(obj,
+          // box)`, §3).
           error(where, "class '" + c.Name + "' vtable slot " +
                            std::to_string(i) + " ('" + e.Slot +
-                           "') has signature " + sigStr(e.Sig) + " but '@" +
+                           "') has signature " + sigStr(e.Sig) +
+                           " (a machine function " + sigStr(slot) + ") but '@" +
                            e.Target + "' is declared " +
-                           sigStr(it->second->Sig));
+                           sigStr(it->second->Sig) + " (a machine function " +
+                           sigStr(machineSignature(*it->second)) + ")");
         }
       }
     }
@@ -423,6 +431,57 @@ private:
                ("argument " + std::to_string(i) + " of " + callee).c_str());
     }
 
+    /// The ownership of a call's arguments (§3, §6): none, or one for each
+    /// argument, lent or passed only for a box parameter of a lending
+    /// callee that has a bit in the ownership mask, a passed one's bit a
+    /// `bool` value.
+    void expectOwnership(const Instr &in, const Signature &sig, bool lend,
+                         const std::string &callee) {
+      if (in.Own.empty())
+        return;
+      if (in.Own.size() != in.Args.size()) {
+        error("call to " + callee + " gives the ownership of " +
+              std::to_string(in.Own.size()) + " argument(s), but passes " +
+              std::to_string(in.Args.size()));
+        return;
+      }
+      const size_t first = firstParamArg(in);
+      for (size_t i = 0; i < in.Own.size(); ++i) {
+        const ArgOwnership &o = in.Own[i];
+        if (o.K == ArgOwnership::Owned)
+          continue;
+        const std::string what =
+            i < first
+                ? "the callee of " + callee
+                : "argument " + std::to_string(i - first) + " of " + callee;
+        if (!lend) {
+          std::string msg = what;
+          msg += " is lent or passed, but ";
+          msg += callee;
+          msg += " does not lend (a runtime or native function, or one "
+                 "without a box parameter)";
+          error(msg);
+          continue;
+        }
+        if (i < first || i - first >= sig.Params.size() ||
+            sig.Params[i - first] != Type::Box) {
+          error(what + " is lent or passed, but is no box parameter");
+          continue;
+        }
+        if (size_t k = boxIndex(sig, i - first); k >= kOwnershipBits)
+          error(what + " is lent or passed, but is box parameter " +
+                std::to_string(k) +
+                ", which the ownership mask has no bit for (it is always "
+                "owned)");
+        if (o.K == ArgOwnership::Passed) {
+          if (!o.Bit.isValue())
+            error("the passed bit of " + what + " is not a value");
+          else
+            expect(o.Bit, Type::Bool, ("passed bit of " + what).c_str());
+        }
+      }
+    }
+
     bool arity(const Instr &in, size_t n) {
       if (in.Args.size() != n) {
         error(std::string("'") + opName(in) + "' takes " + std::to_string(n) +
@@ -459,6 +518,15 @@ private:
            in.Result.Ty != Type::Box))
         error(std::string("a stable '") + opName(in) +
               "' (only a field.load or a ptr.load of a box is stable)");
+      // Only a call's arguments are lent or passed, and only a retain
+      // lends (§6).
+      if (!in.Own.empty() && in.Op != Opcode::Call && in.Op != Opcode::VCall &&
+          in.Op != Opcode::ICall)
+        error(std::string("'") + opName(in) +
+              "' gives its operands an ownership (only a call's arguments "
+              "have one)");
+      if (in.Lend && in.Op != Opcode::Retain)
+        error(std::string("a lend '") + opName(in) + "' (only a retain lends)");
       switch (in.Op) {
       case Opcode::Add:
       case Opcode::Sub:
@@ -594,6 +662,8 @@ private:
           break;
         }
         expectArgs(in.Args, 0, it->second->Sig, "'@" + in.Callee + "'");
+        expectOwnership(in, it->second->Sig, lends(*it->second),
+                        "'@" + in.Callee + "'");
         result(in, it->second->Sig.Ret);
         break;
       }
@@ -627,10 +697,11 @@ private:
           break;
         }
         // The slot's signature includes the receiver.
-        expectArgs(
-            in.Args, 0, sig,
+        const std::string slot =
             "vcall slot " + std::to_string(in.Slot) +
-                (in.ClassName.empty() ? "" : " of '" + in.ClassName + "'"));
+            (in.ClassName.empty() ? "" : " of '" + in.ClassName + "'");
+        expectArgs(in.Args, 0, sig, slot);
+        expectOwnership(in, sig, lendsType(sig), slot);
         result(in, sig.Ret);
         break;
       }
@@ -648,6 +719,7 @@ private:
         }
         expect(in.Args[0], Type::Ptr, "callee of icall");
         expectArgs(in.Args, 1, in.Sig, "icall");
+        expectOwnership(in, in.Sig, lendsType(in.Sig), "icall");
         result(in, in.Sig.Ret);
         break;
       case Opcode::Retain:
@@ -884,7 +956,31 @@ private:
           result(in, isOptional(a) ? optionalPayload(a) : in.Result.Ty);
         break;
       }
+      case Opcode::Owned:
+        if (!arity(in, 1))
+          break;
+        verifyOwned(in.Args[0]);
+        result(in, Type::Bool);
+        break;
       }
+    }
+
+    /// `owned %p` (§3): %p a box parameter of the function (which then
+    /// lends) that has a bit in the ownership mask.
+    void verifyOwned(const Operand &p) {
+      size_t at = F.Params.size();
+      for (size_t i = 0; i < F.Params.size(); ++i)
+        if (p.isValue() && F.Params[i].Id == p.valueId())
+          at = i;
+      if (at == F.Params.size() || F.Params[at].Ty != Type::Box) {
+        error("'owned' of " + operandStr(p) +
+              ", which is no box parameter of the function");
+        return;
+      }
+      if (size_t k = boxIndex(F.Sig, at); k >= kOwnershipBits)
+        error("'owned' of box parameter " + std::to_string(k) +
+              ", which the ownership mask has no bit for (it is always "
+              "owned)");
     }
 
     /// Verifies a switch; returns true when control cannot fall out of it

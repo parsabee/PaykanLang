@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <iterator>
 #include <ostream>
 #include <string_view>
 
@@ -57,6 +58,11 @@ constexpr Flag kFlags[] = {
     {"trace-scanner", &Options::TraceScanning,
      "Enable the frontend's scanner debug traces, if it has them"},
 };
+
+/// The PIR passes the driver runs (docs/pir.md §12), which --pir-skip may
+/// name.
+constexpr std::string_view kPassNames[] = {"dead-code", "moves-at-last-use",
+                                           "lending", "rc-elimination"};
 
 /// Strip one or two leading dashes; returns false if @p arg is not an option
 /// (no dash, a bare "-", or "--").
@@ -219,6 +225,25 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       }
       continue;
     }
+    if (std::string list;
+        valueOption(name, "pir-skip", i, argc, argv, list, r.Error)) {
+      if (!r.Error.empty())
+        return r;
+      for (size_t start = 0; start <= list.size();) {
+        size_t comma = std::min(list.find(',', start), list.size());
+        std::string pass = list.substr(start, comma - start);
+        if (std::find(std::begin(kPassNames), std::end(kPassNames), pass) ==
+            std::end(kPassNames)) {
+          r.Error = "--pir-skip: no PIR pass is named '" + pass +
+                    "' (dead-code, moves-at-last-use, lending, "
+                    "rc-elimination)";
+          return r;
+        }
+        o.SkipPasses.push_back(std::move(pass));
+        start = comma + 1;
+      }
+      continue;
+    }
     if (std::string dir;
         valueOption(name, "module-path", i, argc, argv, dir, r.Error)) {
       if (!r.Error.empty())
@@ -294,6 +319,14 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     o.EmitSource = true;
     if (emitC)
       o.EmitStage = "c";
+  }
+  if (!o.SkipPasses.empty()) {
+    if (o.EmitPkm) {
+      r.Error = "--pir-skip cannot be used with --emit-pkm: a .pkm keeps "
+                "the code every PIR pass made";
+      return r;
+    }
+    o.NoModuleCache = true;
   }
   if (!o.ModuleName.empty()) {
     if (!o.EmitPkm) {

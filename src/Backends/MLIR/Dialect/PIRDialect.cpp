@@ -66,6 +66,18 @@ LogicalResult SwitchOp::verify() {
   return success();
 }
 
+// -- pir.ownership: one bit per passed bool, each of the mask's 64
+
+LogicalResult OwnershipOp::verify() {
+  if (getPassedBits().size() != getPassed().size())
+    return emitOpError("has ") << getPassedBits().size() << " passed bits for "
+                               << getPassed().size() << " passed values";
+  for (int64_t bit : getPassedBits())
+    if (bit < 0 || bit >= 64)
+      return emitOpError("passes bit ") << bit << ", outside the mask";
+  return success();
+}
+
 // -- pir.local: printed with the local's name
 
 void LocalOp::getAsmResultNames(

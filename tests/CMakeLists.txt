@@ -158,6 +158,7 @@ add_executable(codegen_tests
     CodeGen/ImplTests.cpp
     CodeGen/TraitTests.cpp
     CodeGen/PureVirtualTests.cpp
+    CodeGen/BorrowedParamTests.cpp
 )
 target_include_directories(codegen_tests
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -259,6 +260,7 @@ if(PAYKAN_TEST_SUITE_pir)
 add_executable(pir_tests
     PIR/BinaryTests.cpp
     PIR/DeadCodeTests.cpp
+    PIR/LendTests.cpp
     PIR/MoveAtLastUseTests.cpp
     PIR/PIRTests.cpp
     PIR/RCEliminationTests.cpp

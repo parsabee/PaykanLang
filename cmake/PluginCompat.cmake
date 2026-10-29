@@ -43,8 +43,8 @@ endif()
 set(PAYKAN_PLUGIN_COMPATIBLE_VERSIONS
     "${PAYKAN_VERSION}"
     # Older versions this release still accepts go here, one per line.
-    # (None in 0.2.0: the AST a frontend sees, PIR and the runtime ABI all
-    # changed incompatibly since 0.1.)
+    # (None in 0.3.0: PIR and the runtime ABI changed incompatibly since
+    # 0.2, a lending function taking the ownership mask.)
 )
 
 # The plugin API is versioned by the release, like every format

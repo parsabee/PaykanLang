@@ -192,6 +192,51 @@ fn @f(%a: box) -> void {
   EXPECT_EQ(m.Counts.Releases, 1u);
 }
 
+// A lent argument is no hand-off (docs/pir.md §3): the callee keeps no
+// reference of the caller's, so the copy made for it is not the slot's
+// reference to move.  An argument passed `owned(%o)` is handed over when an
+// owned one is, and a `retain lend` is a retain like any other.
+TEST(MoveAtLastUse, ALentArgumentIsNoHandOffAndAPassedOneIs) {
+  const std::string lent = R"(
+fn @f(%a: box) -> void {
+  local %x: box
+  store %x, %a
+  %v = load %x
+  retain %v
+  call @use(lent %v)
+  %w = load %x
+  release %w
+  ret
+}
+)";
+  Moved m = move(lent);
+  EXPECT_EQ(m.Counts.Transfers, 0u);
+  EXPECT_EQ(count(f(m), "retain %v"), 1u) << f(m);
+  Moved passed = move(R"(
+fn @f(%a: box) -> void {
+  local %x: box
+  %o = owned %a
+  store %x, %a
+  %v = load %x
+  retain lend %v
+  call @use(owned(%o) %v)
+  %w = load %x
+  release %w
+  ret
+}
+)");
+  EXPECT_EQ(f(passed), R"(fn @f(%a.1: box) -> void {
+  local %x.0: box
+  %o.2 = owned %a.1
+  store %x.0, %a.1
+  %v.3 = load %x.0
+  call @use(owned(%o.2) %v.3)
+  ret
+}
+)");
+  EXPECT_EQ(passed.Counts.Transfers, 1u);
+}
+
 TEST(MoveAtLastUse, OnlyTheSecondOfTwoUsesInOneCallMoves) {
   // f(a, a): the first copy is followed by a read of the slot, the second
   // by its release.

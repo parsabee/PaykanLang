@@ -1085,6 +1085,109 @@ TEST(Driver, StatsCountTheReferenceCountElimination) {
       << lib.out;
 }
 
+// The lending pass lends the copies the lowering made only to hand an
+// argument over that the moves at last use left where the caller's
+// reference outlives the call (`lending marks`, `lending arguments lent`,
+// `lending copies kept for the window`; here the first `take(a)`'s), and
+// clears their mark (docs/pir.md §6, §12); and it lends the box parameters
+// their bodies never write (`lending parameters lent`, `handed on`, `owned
+// on entry`, `retains at keeps`; here take's x, whose release then asks the
+// bit).  --pir-skip=<pass>[,<pass>] (not in --help) leaves passes out: here
+// the lending pass, whose marks and prologues then stay in what --emit-pir
+// prints, and the reference-count elimination.  It leaves them out of the
+// code the run lowers only: code a `.pkm` holds went through them when it
+// was written, as the shared `ok<Str, Error>` the standard library's io
+// made did (the program's own `println<Str>` keeps its prologue).  A name
+// no pass has, and --emit-pkm, are refused.
+TEST(Driver, PirSkipLeavesPassesOut) {
+  REQUIRE_BACKEND();
+  auto src =
+      writeTmp("class N { n: int; }\n"
+               "fn take(x: N) -> int { return x.n; }\n"
+               "fn main() -> int { a = N(7); return take(a) + take(a); }\n");
+  const std::string paykan = kPaykan;
+  auto all = run(paykan + " --stats --emit-pir " + src + " 2>&1");
+  EXPECT_EQ(all.exitCode, 0) << all.out;
+  EXPECT_NE(all.out.find("  moves-at-last-use transfers : 1\n"
+                         "  moves-at-last-use retains removed : 1\n"
+                         "  moves-at-last-use releases removed : 1\n"
+                         "  lending marks : 1\n"
+                         "  lending arguments lent : 1\n"
+                         "  lending copies kept for the window : 0\n"
+                         "  lending parameters lent : 1\n"
+                         "  lending parameters handed on : 0\n"
+                         "  lending parameters owned on entry : 0\n"
+                         "  lending retains at keeps : 0\n"
+                         "  rc-elimination retains removed : 0\n"),
+            std::string::npos)
+      << all.out;
+  EXPECT_EQ(all.out.find("retain lend "), std::string::npos) << all.out;
+  EXPECT_NE(all.out.find("call @take(lent %a."), std::string::npos) << all.out;
+  EXPECT_NE(all.out.find("  if %x.own.2 {\n    release %7\n  }\n"),
+            std::string::npos)
+      << all.out;
+  EXPECT_EQ(all.out.find("retain %x.1"), std::string::npos) << all.out;
+  auto skip =
+      run(paykan + " --stats --pir-skip=lending,rc-elimination --emit-pir " +
+          src + " 2>&1");
+  EXPECT_EQ(skip.exitCode, 0) << skip.out;
+  EXPECT_NE(skip.out.find("  moves-at-last-use transfers : 1\n"),
+            std::string::npos)
+      << skip.out;
+  EXPECT_EQ(skip.out.find("  lending "), std::string::npos) << skip.out;
+  EXPECT_EQ(skip.out.find("  rc-elimination "), std::string::npos) << skip.out;
+  EXPECT_NE(skip.out.find("  retain lend %a."), std::string::npos) << skip.out;
+  EXPECT_NE(skip.out.find("  if %x.lent.3 {\n    retain %x.1\n  }\n"),
+            std::string::npos)
+      << skip.out;
+  EXPECT_EQ(run(paykanRun() + " --pir-skip=lending " + src).exitCode, 14);
+  auto reads = writeTmp("import ::io;\n"
+                        "fn main() -> int {\n"
+                        "  match io::stdin().readln() {\n"
+                        "    line: Ok { io::println(line.value); return 1; }\n"
+                        "    _ { return 0; }\n"
+                        "  }\n"
+                        "}\n");
+  auto imported =
+      run(paykan + " --pir-skip=lending --emit-pir " + reads + " 2>&1");
+  std::filesystem::remove(reads);
+  EXPECT_EQ(imported.exitCode, 0) << imported.out;
+  const size_t ok =
+      imported.out.find("shared fn @\"$::result::ok<Str, Error>\"(");
+  const size_t println =
+      imported.out.find("shared fn @\"$::io::println<Str>\"(");
+  ASSERT_NE(ok, std::string::npos) << imported.out;
+  ASSERT_NE(println, std::string::npos) << imported.out;
+  const std::string okBody =
+      imported.out.substr(ok, imported.out.find("\n}\n", ok) - ok);
+  const std::string printlnBody = imported.out.substr(
+      println, imported.out.find("\n}\n", println) - println);
+  EXPECT_EQ(okBody.find("    retain %value.1\n"), std::string::npos) << okBody;
+  EXPECT_NE(okBody.find("  if %value.lent.4 {\n    retain %value.6\n  }\n"),
+            std::string::npos)
+      << okBody;
+  EXPECT_NE(printlnBody.find("  if %value.lent.3 {\n    retain %value.1\n"),
+            std::string::npos)
+      << printlnBody;
+  auto unknown =
+      run(paykan + " --pir-skip=lending,folding --check-only " + src + " 2>&1");
+  EXPECT_NE(unknown.exitCode, 0);
+  EXPECT_NE(unknown.out.find("--pir-skip: no PIR pass is named 'folding'"),
+            std::string::npos)
+      << unknown.out;
+  std::string pkm = src + ".pkm";
+  auto lib = run(paykan + " --pir-skip=lending --emit-pkm -o " + pkm + " " +
+                 src + " 2>&1");
+  std::filesystem::remove(src);
+  EXPECT_NE(lib.exitCode, 0);
+  EXPECT_NE(lib.out.find("--pir-skip cannot be used with --emit-pkm"),
+            std::string::npos)
+      << lib.out;
+  EXPECT_FALSE(std::filesystem::exists(pkm));
+  auto help = run(paykan + " --help 2>&1");
+  EXPECT_EQ(help.out.find("pir-skip"), std::string::npos) << help.out;
+}
+
 TEST(Driver, EmitCPrintsCSource) {
   REQUIRE_BACKEND();
   auto src = writeTmp("class P { x: int; }\n"

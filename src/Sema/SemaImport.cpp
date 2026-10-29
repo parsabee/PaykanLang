@@ -419,6 +419,7 @@ Sema::ModuleInfo Sema::exportModuleInfo(ast::TranslationUnit *tu,
     for (auto *pty : sig.ParamTypes)
       fi.ParamTypeNames.push_back(ast::typeName(pty));
     fi.Modes = sig.Modes;
+    fi.Native = sig.Native;
     info.ExportedFunctions.push_back(std::move(fi));
   }
   sortModuleInfo(info);
@@ -462,8 +463,8 @@ static ast::ParamModes fromModeRecs(const pkm::ModeRecs &recs) {
 pkm::Interface Sema::toInterface(const ModuleInfo &info) {
   pkm::Interface iface;
   for (auto &fi : info.ExportedFunctions)
-    iface.Functions.push_back(
-        {fi.Name, fi.ReturnTypeName, fi.ParamTypeNames, toModeRecs(fi.Modes)});
+    iface.Functions.push_back({fi.Name, fi.ReturnTypeName, fi.ParamTypeNames,
+                               toModeRecs(fi.Modes), fi.Native});
   for (auto &ci : info.ExportedClasses) {
     pkm::ClassRec cr;
     cr.Name = ci.Name;
@@ -499,8 +500,8 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
   ModuleInfo info;
   for (auto &fr : iface.Functions)
     info.ExportedFunctions.push_back({fr.Name, fr.ReturnTypeName,
-                                      fr.ParamTypeNames,
-                                      fromModeRecs(fr.Modes)});
+                                      fr.ParamTypeNames, fromModeRecs(fr.Modes),
+                                      fr.Native});
   for (auto &cr : iface.Classes) {
     ModuleInfo::ClassInfo ci;
     ci.Name = cr.Name;
@@ -1082,7 +1083,11 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
     if (!sigOk)
       return false;
     declareFunction(name, retTy, std::move(params), /*isBuiltin=*/true);
-    FunctionTable[name].Modes = fi.Modes;
+    FunctionSig &sig = FunctionTable[name];
+    sig.Modes = fi.Modes;
+    sig.Native = fi.Native;
+    if (fi.Native)
+      ImportedNatives.insert(name);
     return true;
   };
 

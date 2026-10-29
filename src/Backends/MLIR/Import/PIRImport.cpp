@@ -16,6 +16,8 @@
 #include <mlir/IR/Diagnostics.h>
 #include <mlir/IR/Verifier.h>
 
+#include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -35,6 +37,8 @@ public:
         Loc(UnknownLoc::get(&ctx)) {}
 
   StatusOr<OwningOpRef<ModuleOp>> run() {
+    for (const P::Function &f : M.Functions)
+      Functions.emplace(f.Name, &f);
     OwningOpRef<ModuleOp> mod = ModuleOp::create(Loc, M.Name);
     if (IsMain)
       (*mod)->setAttr(kMainModuleAttr, UnitAttr::get(&Ctx));
@@ -57,6 +61,8 @@ private:
   OpBuilder B;
   Location Loc;
   std::string Error;
+  /// The module's functions by name, for the callee of a call.
+  std::unordered_map<std::string, const P::Function *> Functions;
 
   // -- Types
 
@@ -99,11 +105,19 @@ private:
     return type(t);
   }
 
-  FunctionType functionType(const P::Signature &sig) {
+  /// The ownership mask's type (docs/pir.md §3): the unsigned 64-bit
+  /// integer, C's uint64_t.
+  Type maskType() { return IntegerType::get(&Ctx, 64, IntegerType::Unsigned); }
+
+  /// The function type of @p sig, and the ownership mask after its
+  /// parameters when it lends (@p lend).
+  FunctionType functionType(const P::Signature &sig, bool lend) {
     std::vector<Type> params;
-    params.reserve(sig.Params.size());
+    params.reserve(sig.Params.size() + 1);
     for (P::Type t : sig.Params)
       params.push_back(type(t));
+    if (lend)
+      params.push_back(maskType());
     std::vector<Type> results;
     if (sig.Ret != P::Type::Void)
       results.push_back(type(sig.Ret));
@@ -144,7 +158,7 @@ private:
       SlotOp::create(B, Loc, e.Slot,
                      e.Target.empty() ? FlatSymbolRefAttr()
                                       : FlatSymbolRefAttr::get(&Ctx, e.Target),
-                     functionType(e.Sig));
+                     functionType(e.Sig, P::lendsType(e.Sig)));
   }
 
   // -- Functions
@@ -153,10 +167,13 @@ private:
   std::unordered_map<P::ValueId, Value> Values;
   std::vector<Value> Locals;
   const P::Function *Fn = nullptr;
+  /// The function's ownership mask, when it lends.
+  Value Mask;
 
   void importFunction(const P::Function &f) {
+    const bool lend = P::lends(f);
     auto fn = FuncOp::create(
-        B, Loc, f.Name, functionType(f.Sig),
+        B, Loc, f.Name, functionType(f.Sig, lend),
         /*sym_visibility=*/StringAttr(),
         /*arg_attrs=*/ArrayAttr(),
         /*res_attrs=*/ArrayAttr(),
@@ -177,6 +194,8 @@ private:
     B.setInsertionPointToEnd(entry);
     for (size_t i = 0; i < f.Params.size(); ++i)
       Values[f.Params[i].Id] = entry->getArgument(static_cast<unsigned>(i));
+    Mask = lend ? entry->getArgument(static_cast<unsigned>(f.Params.size()))
+                : Value();
     for (const P::Local &l : f.Locals)
       Locals.push_back(LocalOp::create(
           B, Loc, LocalType::get(&Ctx, slotType(l.Ty, l.Size, l.Align)),
@@ -293,6 +312,53 @@ private:
     return vs;
   }
 
+  /// A call's operands: its arguments, then the ownership mask when its
+  /// callee, of signature @p sig, lends (@p lend).  Bit k is set for the
+  /// k-th box parameter when its argument is owned, or passed and its bit
+  /// is true; a box parameter past the mask's bits is always owned
+  /// (docs/pir.md §3).
+  std::vector<Value> callOperands(const P::Instr &in, size_t from,
+                                  const P::Signature &sig, bool lend) {
+    std::vector<Value> vs = operands(in, from);
+    if (!lend)
+      return vs;
+    uint64_t owned = 0;
+    SmallVector<int64_t> bits;
+    SmallVector<Value> passed;
+    const size_t first = P::firstParamArg(in);
+    size_t k = 0;
+    for (size_t p = 0; p < sig.Params.size(); ++p) {
+      if (sig.Params[p] != P::Type::Box)
+        continue;
+      if (k < P::kOwnershipBits) {
+        switch (in.ownership(first + p)) {
+        case P::ArgOwnership::Owned:
+          owned |= uint64_t{1} << k;
+          break;
+        case P::ArgOwnership::Lent:
+          break;
+        case P::ArgOwnership::Passed:
+          bits.push_back(static_cast<int64_t>(k));
+          passed.push_back(operand(in.Own[first + p].Bit));
+          break;
+        }
+      }
+      ++k;
+    }
+    vs.push_back(OwnershipOp::create(B, Loc, maskType(), owned, bits, passed));
+    return vs;
+  }
+
+  /// The box index of parameter @p p of the function, or none when it is
+  /// no box parameter.
+  std::optional<size_t> boxParam(const P::Operand &p) const {
+    if (p.isValue())
+      for (size_t i = 0; i < Fn->Params.size(); ++i)
+        if (Fn->Params[i].Id == p.valueId() && Fn->Params[i].Ty == P::Type::Box)
+          return P::boxIndex(Fn->Sig, i);
+    return std::nullopt;
+  }
+
   void define(const P::Instr &in, Value v) {
     if (in.Result.Id != P::kNoValue)
       Values[in.Result.Id] = v;
@@ -382,16 +448,35 @@ private:
       return define(in, WrapOp::create(B, Loc, arg(0), in.Slot));
     case P::Opcode::Mask:
       return define(in, MaskOp::create(B, Loc, arg(0), in.Slot));
-    case P::Opcode::Call:
-      return define(in, resultOf(CallOp::create(B, Loc, results(in), in.Callee,
-                                                operands(in))));
+    case P::Opcode::Call: {
+      auto callee = Functions.find(in.Callee);
+      if (callee == Functions.end()) {
+        fail("call to undeclared function '@" + in.Callee + "'");
+        return;
+      }
+      const P::Function &f = *callee->second;
+      return define(in, resultOf(CallOp::create(
+                            B, Loc, results(in), in.Callee,
+                            callOperands(in, 0, f.Sig, P::lends(f)))));
+    }
     case P::Opcode::VCall:
       return define(in,
-                    resultOf(VCallOp::create(B, Loc, results(in), in.ClassName,
-                                             in.Slot, operands(in))));
+                    resultOf(VCallOp::create(
+                        B, Loc, results(in), in.ClassName, in.Slot,
+                        callOperands(in, 0, in.Sig, P::lendsType(in.Sig)))));
     case P::Opcode::ICall:
-      return define(in, resultOf(ICallOp::create(B, Loc, results(in), arg(0),
-                                                 operands(in, 1))));
+      return define(in,
+                    resultOf(ICallOp::create(
+                        B, Loc, results(in), arg(0),
+                        callOperands(in, 1, in.Sig, P::lendsType(in.Sig)))));
+    case P::Opcode::Owned: {
+      std::optional<size_t> k = boxParam(in.Args[0]);
+      if (!Mask || !k || *k >= P::kOwnershipBits) {
+        fail("'owned' of no box parameter with a bit in the ownership mask");
+        return;
+      }
+      return define(in, OwnedOp::create(B, Loc, Mask, *k));
+    }
     case P::Opcode::FnAddr:
       return define(in, FnAddrOp::create(B, Loc, in.Callee));
     case P::Opcode::Retain:

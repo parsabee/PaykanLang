@@ -342,7 +342,14 @@ parameters).  A borrowed result (`-> view T`) adds a `u8` result mode
 after a `FUNC` record's modes, and one per method after a `CLASS` record's
 lists, written only when a result is a borrow (the modes lists are then
 written too, with `n` 0 where a signature has none).  A record without them
-reads as having no modes and returning copies.  Each field of a `CLASS`
+reads as having no modes and returning copies.  A `FUNC` record of a
+`native fn` (docs/language/03-functions.md, "Native Functions") adds a
+`u8` flags byte after its result mode, bit 0 for a native function (its
+modes and its result mode are then written too); a reader rejects any
+other bit, and a record without it is no native's.  It tells an importer
+what a call of the function does though another module compiles it: it
+keeps nothing it is lent and changes only what its `inout` arguments name,
+so a field read given to it may be lent (#98 part 2, docs/pir.md §7).  Each field of a `CLASS`
 record carries a flags byte after its type name (bit 0: a `weak` field,
 docs/design/weak-references.md); a `STRUCT` record's fields have none.  A
 method of a `CLASS` or `STRUCT` record carries one after its signature,
@@ -409,7 +416,7 @@ Common pieces:
 ```
 Vis        u8    0 public, 1 protected (`_name`, members only), 2 private (`__name`, members only), 3 hidden (§3.6)
 MFlags     u8    1 STATIC (#167), 2 MUT_SELF (#167/#169), 4 FINAL (#18), 8 OVERRIDE (#18), 16 PURE (#18), 32 DEFAULT (trait default; body in TMPL)
-Sig        Ty ret, uleb n, params[n] { Str name; Ty type; u8 conv }      conv: 0 owned (only value today), 1 borrowed (#98)
+Sig        Ty ret, uleb n, params[n] { Str name; Ty type; u8 conv }      conv: 0, the only value (#98 part 2 retired it: a call chooses per argument whether it hands it over or lends it, in CODE, §5.5)
 Attrs      uleb n, attrs[n] { Str name; uleb m; params[m] { Str name; Const value } }   #171, exported attributes only
 Const      u8 tag: 0 none, 1 int sleb, 2 float f64, 3 bool u8, 4 char u8, 5 enum (Ty, uleb variant), 6 tuple (uleb n, Const[n]), 7 str Str (attribute parameters only)
 Bounds     uleb n, traits[n] { Mod; Str trait; uleb k; Ty[k] }           #147; empty today
@@ -764,13 +771,23 @@ printer uses and these codes, with a test that every enumerator has both.
 
 ```
 Operand := u8 kind ; payload     0 value (uleb id ≥ 1) | 1 i64 sleb | 2 f64 | 3 bool u8 | 4 char u8 | 5 null box | 6 null obj | 7 symbol str
-InstrRec := [u8 53] ; u8 opcode ; uleb result id (0 = none) ; [type result type ; str result name] ; per-opcode fields ; uleb nArgs ; Operand[nArgs]
+InstrRec := [Mark] ; u8 opcode ; uleb result id (0 = none) ; [type result type ; str result name] ; per-opcode fields ; uleb nArgs ; Operand[nArgs]
+Mark     := u8 53 | u8 56 | u8 55 ; uleb n ; n × (uleb argIndex ; u8 kind ; [kind 2] Operand)     kind: 1 lent, 2 passed (its bit follows)
 ```
 
 A `stable` `field.load` or `ptr.load` (docs/pir.md §6) is written with
 the code 53 before its opcode, which no opcode has; a load without it is
 not stable, so a record written before the mark existed reads the same.
-A reader rejects the mark before any other opcode.
+A reader rejects the mark before any other opcode.  Likewise a `retain
+lend` is written with the code 56 before its opcode, and a call, vcall or
+icall that lends or passes on an argument (docs/pir.md §3, §6) with the
+code 55 and the ownership of those arguments, at least one, by increasing
+index into the arguments (a vcall's receiver and an icall's callee are
+arguments 0), before its opcode; every other argument is handed over, so
+a call whose arguments all are has no mark and is written as before.  A
+reader rejects 56 before anything but a `retain`, 55 before anything but
+a call, an empty or unordered list, an index past the arguments and a
+kind other than 1 or 2.
 
 | op | PIR | per-opcode fields | args |
 |---|---|---|---|
@@ -808,7 +825,10 @@ A reader rejects the mark before any other opcode.
 | 51 | `icall` | `sig` | n (the callee first) |
 | 52 | `vtable.store` (docs/pir.md §5) | `str` class | 1 |
 | 53 | `stable`: marks the `field.load` or `ptr.load` whose opcode follows as stable (docs/pir.md §6); only there | | |
-| 53–255 | reserved | | |
+| 54 | `owned` (docs/pir.md §3): whether the box parameter operand was handed over | — | 1 |
+| 55 | the ownership of the call, vcall or icall whose opcode follows (docs/pir.md §6), its list after it; only there | | |
+| 56 | `lend`: marks the `retain` whose opcode follows as a `retain lend` (docs/pir.md §6); only there | | |
+| 57–255 | reserved | | |
 
 Unused `Instr` extras are not written; a decoded `Instr` has the defaults
 of `PIR.h`, as the text parser produces, so round-trip equality holds. An
@@ -840,7 +860,7 @@ FunctionRec
   [bit1] str module ; [bit2] str symbol ; [bit6] uleb nHiddenParams ; [bit11] str cName
   [bit12] uleb nAttrs ; nAttrs × (str key ; str value)        forward-compatible bag for plugin-namespaced attributes (#171)
   -- definitions only --
-  uleb nConventions ; nConventions × u8   per-parameter convention (#98): 0 owned, 1 borrowed; nConventions == nParams or 0
+  uleb nConventions ; nConventions × u8   always 0 (#98 part 2 retired the per-parameter convention: §5.5's ownership of each call's arguments)
   uleb nParams ; nParams × (uleb id ; type ; str name)
   uleb nLocals ; nLocals × (str name ; [u8 18] ; slot type)   18 before the slot type: a view local (docs/pir.md §3)
   uleb nextValueId
@@ -891,10 +911,16 @@ prints what source prints; the expensive part is cached by payloads
 anyway. The moves at last use (#186) and the reference-count elimination
 (#98 part 1, docs/pir.md §12) run at every `-O`, so they run on the
 module's code before it is written (§5.13), and again on the program,
-which leaves their code as it is. They rewrite bodies only. What is
-**not** a pass artefact and therefore is in `CODE`: per-parameter calling
-conventions (#98 part 2 changes what a *caller in another module* emits,
-so they are signature data; a change is an ABI bump). The `pass level` flag bits are
+which leaves their code as it is. They rewrite bodies only. Whether a
+call hands an argument over or lends it (#98 part 2, docs/pir.md §3) is
+chosen at the call, in the code, and the ownership mask a lending
+function takes is part of the runtime ABI, so it is no interface data: a
+callee's code may lend what it did not without an interface change, and
+a caller in another module lends to it what its own code chooses.  So is
+what a body does with a parameter it may be lent: every lending body asks
+its mask (`owned`, or the prologue that retains a lent parameter on
+entry, docs/pir.md §3), in `CODE` and in `OBJ` alike, so any caller may
+lend it any box argument with a bit. The `pass level` flag bits are
 reserved for a later post-pass variant (PR #104 §5.4 option C); storing
 post-pass PIR per `-O` was rejected (N copies per file).
 
@@ -932,7 +958,7 @@ the same PR as the codec** so `--emit-pir` stays a complete view of `CODE`
 A `hidden` symbol may not be `extern`; an `erased` function has at least
 `nHiddenParams` leading `ptr` params; a `ClassObjRec` names a defined
 instantiation class; a constant `SlotRec` has an init of its type;
-`nConventions` is 0 or the arity and `borrowed` marks only `box` params; an
+`nConventions` is 0; an
 `internal` symbol is never named by another module's extern; a vtable slot
 target of an `external` class is `external` or `hidden`. The verifier stays
 the single rulebook for text and binary.
@@ -958,9 +984,11 @@ splits it
   `m2`, a `Pair<int, bool>` only `hidden()` uses keeps `first`, its
   constructor and `__init__`, and loses `second`.
 - **Moves.** The code passes every program goes through (docs/pir.md §12:
-  moves at last use, then reference-count elimination) run on what the
-  trim left, and what they make is verified, so the compiled code and the
-  copies in `CODE` are both made by them; a program that imports the
+  moves at last use, the lending pass, then reference-count elimination)
+  run on what the trim left, and what they make is verified, so the
+  compiled code and the copies in `CODE` are both made by them, no
+  `retain lend` mark is kept, and each parameter the lending pass lent
+  asks its bit where its body lets go of it; a program that imports the
   module runs them on its copies again, which changes nothing more.
 - **Split.** The module's shared copies of instantiations stay PIR in
   `CODE`: a program keeps one of each and drops what its `main` does not
@@ -1584,7 +1612,7 @@ Reserved now so no later major bump is needed:
 | #147 traits | `TRAIT`, `IMPL`, `Bounds`, `T_TRAIT_OBJ`, trait default bodies in `TMPL` |
 | #160 generics | `TMPL` section, `INST` part, `ERASABLE`, `erased`/`nHiddenParams`, `ClassObjRec`, `$class` spelling |
 | #96 inline optionals, #99 weak (done: type code 16, opcodes 30, 31 and 49, a class field's flags byte) | type codes 8–16, opcodes 26–31, `T_WEAK` |
-| #98 borrowed params | `Sig.conv` per parameter; `nConventions` |
+| #98 borrowed params | per-call ownership in `CODE` (opcode 54, marks 55 and 56, §5.5); the ownership mask in the runtime ABI, asked by every lending body in `CODE` and `OBJ`; `Sig.conv` and `nConventions` retired (0); a `FUNC` record's native flag (§3.5) |
 | #93 one allocation | header kind is a property of `runtime_abi`, nothing per class |
 | #153 runtime as library | manifest `runtime_abi` + `libraries` (`RUNTIME`, `ALLOCATOR`); payload flag bit 5 |
 | #21 C FFI | `cExport`/`cName`; `EXPORTS_C`; `C_LIBRARY` entries |

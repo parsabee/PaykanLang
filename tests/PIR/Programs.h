@@ -42,7 +42,7 @@ extern fn @$rt.PaykanString_new(ptr, i64) -> obj
 extern fn @$rt.Paykan_println(obj) -> void
 extern fn @$rt.PaykanString_destroy(obj) -> void
 extern fn @$rt.PaykanObject_toString(obj) -> box
-extern fn @$rt.PaykanObject_equals(obj, box) -> i64
+extern fn @$rt.PaykanObject_equals(obj, box, i64) -> i64
 extern fn @helper(i64) -> i64 module "lib"
 
 fn @Point_destroy(%self.1: obj) -> void {
@@ -75,6 +75,16 @@ fn @opt(%o.1: opt_i64) -> opt_f64 {
   %s.11 = some %f.10
   %r.12 = select %has.2, %s.11, %n.9
   ret %r.12
+}
+
+fn @lend(%a.1: box, %b.2: box, %p.3: obj, %fp.4: ptr) -> void {
+  %oa.5 = owned %a.1
+  %ob.6 = owned %b.2
+  retain lend %a.1
+  call @lend(lent %a.1, owned(%ob.6) %b.2, %p.3, %fp.4)
+  %eq.7 = vcall %p.3 : Point [2] (lent %b.2)
+  icall %fp.4 : (box, box) -> void (owned(%oa.5) %a.1, %b.2)
+  ret
 }
 
 fn @main() -> i64 {

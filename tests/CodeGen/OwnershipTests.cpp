@@ -1735,6 +1735,88 @@ TEST(Ownership, AnInitsStoreIntoAnotherObjectIsNoConstruction) {
   g.expectNoLeaks("AnInitsStoreIntoAnotherObjectIsNoConstruction");
 }
 
+// An `__init__`'s first assignment of a field releases no old value (the
+// object is new, docs/pir.md §7); every other one does, so what it
+// replaces dies there: a field assigned a second time, a field `fill`
+// assigns once `self` is given to it, and a superclass's field, which
+// `__super__(...)` assigned.  Each replaced node is reported gone right
+// after its replacement, and nothing leaks, through every pass the driver
+// runs.
+TEST(Ownership, WhatAnInitReplacesDiesWhereItIsReplaced) {
+  LeakGuard g;
+  paykan::pir::Statistics stats;
+  auto r = compilePassesAndRun(R"(import ::io;
+    class Node { name: Str; }
+    class Watcher { weak target: Node?; }
+    fn report(w: view Watcher, tag: view Str) {
+      match w.target {
+        t: Node { io::println(tag + ": alive"); }
+        None { io::println(tag + ": gone"); }
+      }
+    }
+    class Pair { a: Node; b: Node?; weak c: Node?; }
+    class Twice { n: Node; }
+    impl Twice {
+      fn __init__(first: Node, second: Node, w: view Watcher) {
+        self.n = first;
+        self.n = second;
+        report(w, "twice");
+      }
+    }
+    class Late { a: int; o: Node?; }
+    fn fill(l: Late, n: Node) -> Node { l.o = n; return Node("result"); }
+    impl Late {
+      fn __init__(n: Node, w: view Watcher) {
+        self.a = 1;
+        self.o = fill(self, n);
+        report(w, "late");
+      }
+    }
+    class Base { s: Node; }
+    class Kid : Base { t: Node; }
+    impl Kid {
+      fn __init__(a: Node, b: Node, w: view Watcher) {
+        __super__(a);
+        self.t = b;
+        self.s = b;
+        report(w, "kid");
+      }
+    }
+    fn main() -> int {
+      x = Node("x");
+      wx = Watcher(x);
+      p = Pair(x, Node("y"), x);
+      match p.c {
+        c: Node { io::println(p.a.name + " " + c.name); }
+        None { io::println("no c"); }
+      }
+      p = Pair(Node("z"), None, None);
+      report(wx, "pair");
+      f = Node("first");
+      wf = Watcher(f);
+      t = Twice(f, Node("second"), wf);
+      m = Node("m");
+      wm = Watcher(m);
+      l = Late(m, wm);
+      a = Node("a");
+      wa = Watcher(a);
+      k = Kid(a, Node("b"), wa);
+      io::println(t.n.name + " " + k.s.name + " " + k.t.name);
+      match l.o {
+        o: Node { io::println(o.name); }
+        None { io::println("no o"); }
+      }
+      return 0;
+    }
+  )",
+                               stats);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "x x\npair: gone\ntwice: gone\nlate: gone\nkid: gone\n"
+                      "second b b\nresult\n");
+  g.expectNoLeaks("WhatAnInitReplacesDiesWhereItIsReplaced");
+}
+
 // A string's character is read from the string as it was before its index
 // was computed, as an array's element is, though the call computing it
 // replaces the string (and makes a new one where it was).
@@ -1777,6 +1859,80 @@ TEST(Ownership, AStringIsReadBeforeItsIndex) {
 
 // Boxing the same object twice gives the same pointer (the object's own) with
 // a bumped strong count -- what makes every raw-alias boxing site safe.
+// A parameter lent to its callee (#98 part 2, docs/pir.md §12) is the
+// caller's: the callee releases nothing of it, retains what it keeps, and
+// hands it on with its bit.  Kept in a field, it lives as long as the field
+// after the caller let go of it; handed on through a method to the field of
+// another object, the same; handed over at the caller's last use, the
+// object dies with its last keeper.  A read the callee's call replaces
+// (`self.a.b.name` while `g` assigns `x.a`) stays alive for the read.
+TEST(Ownership, ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper) {
+  LeakGuard g;
+  paykan::pir::Statistics stats;
+  auto r = compilePassesAndRun(R"(import ::io;
+    class Node { name: Str; }
+    class Probe { weak p: Node?; }
+    impl Probe {
+      view fn state() -> Str {
+        match self.p {
+          Node { return "alive"; }
+          None { return "gone"; }
+        }
+      }
+    }
+    class Holder { n: Node?; }
+    impl Holder {
+      fn take(n: Node) { self.n = n; }
+      view fn relay(n: Node, other: Holder) { other.take(n); }
+    }
+    class B { name: Str; }
+    class A { b: B; }
+    class X {
+      a: A;
+      fn m() -> Str { return self.a.b.name + g(self); }
+    }
+    fn g(x: X) -> Str {
+      x.a = A(B("new"));
+      return "!";
+    }
+    fn main() -> int {
+      h = Holder(None);
+      k = Holder(None);
+      n = Node("n");
+      probe = Probe(n);
+      h.take(n);
+      h.relay(n, k);
+      io::println(n.name + " " + probe.state());
+      n = Node("m");
+      io::println("dropped: " + probe.state());
+      h.n = None;
+      io::println("h let go: " + probe.state());
+      k.n = None;
+      io::println("k let go: " + probe.state());
+      last = Node("last");
+      lastProbe = Probe(last);
+      h.take(last);
+      h.n = None;
+      io::println("handed over: " + lastProbe.state() + " " + n.name);
+      x = X(A(B("old" + "name")));
+      io::println(x.m() + " now " + x.a.b.name);
+      return 0;
+    }
+  )",
+                               stats);
+  ASSERT_TRUE(r.CompileOk) << r.StdErr;
+  EXPECT_EQ(r.ExitCode, 0);
+  EXPECT_EQ(r.StdOut, "n alive\n"
+                      "dropped: alive\n"
+                      "h let go: alive\n"
+                      "k let go: gone\n"
+                      "handed over: gone m\n"
+                      "oldname! now new\n");
+  EXPECT_GT(stats.get("lending", "parameters handed on"), 0u);
+  EXPECT_GT(stats.get("lending", "retains at keeps"), 0u);
+  g.expectNoLeaks("ALentParameterTheCalleeKeepsLivesAsLongAsItsKeeper");
+}
+
 TEST(Ownership, SharedNewRetainsTheObject) {
   PaykanObject *obj = PaykanObject_new();
   PaykanShared *first = PaykanShared_new(obj);

@@ -302,6 +302,9 @@ public:
       }
       for (const Operand &o : in.Args)
         use(o, i);
+      for (const ArgOwnership &o : in.Own)
+        if (o.K == ArgOwnership::Passed)
+          use(o.Bit, i);
     }
   }
 
@@ -1260,8 +1263,9 @@ public:
   }
 
   /// Whether node @p c takes the reference %v as its own: a call's
-  /// argument (the callee releases it), a store into a local, a field (not
-  /// a closure's capture) or memory, or the value returned.
+  /// argument it does not lend (the callee releases it, or hands on what
+  /// its caller handed over), a store into a local, a field (not a
+  /// closure's capture) or memory, or the value returned.
   bool consumes(uint32_t c, ValueId v) const {
     const Node &node = G.Nodes[c];
     if (node.K == Node::Return)
@@ -1270,12 +1274,15 @@ public:
     if (!in)
       return false;
     switch (in->Op) {
-    case Opcode::Call:
     case Opcode::Store:
       return true;
+    case Opcode::Call:
     case Opcode::VCall:
     case Opcode::ICall:
-      return !sameValue(in->Args[0], v);
+      for (size_t i = in->Op == Opcode::Call ? 0 : 1; i < in->Args.size(); ++i)
+        if (sameValue(in->Args[i], v) && in->ownership(i) != ArgOwnership::Lent)
+          return true;
+      return false;
     case Opcode::FieldStore:
       return sameValue(in->Args[1], v) && !isClosureClass(in->ClassName);
     case Opcode::PtrStore:

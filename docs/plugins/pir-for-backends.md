@@ -55,7 +55,11 @@ The text form is line-oriented and made for this:
 function and module-level item (§3, §4), class layout (§5), statement and
 instruction (§6), and the runtime ABI, the `$rt.` externs the generated code
 calls (§8); [§10](../pir.md#10-text-format-summary) summarises the text
-format.
+format.  A function that takes a `box` (other than a runtime or native one)
+takes one argument more than its PIR signature lists, the ownership mask
+([`pir.md` §3](../pir.md#3-functions-and-locals)): the backend gives it the
+parameter, passes every call the mask its arguments' ownership (`lent`,
+`owned(%o)`, handed over when bare) makes, and reads `owned %p` from it.
 The runtime library and header a native program links against come from the
 host: `host->runtime_library(session)` and
 `host->runtime_include_dir(session)`. The object files named with

@@ -1048,10 +1048,10 @@ void FunctionLowering::lowerInstr(Operation *op) {
                               lookup(o.getValue()));
       })
       .Case([&](P::LocalAddrOp o) { define(op, lookup(o.getSlot())); })
-      // Memory and optionals: as they are.
+      // Memory, optionals and the ownership mask: as they are.
       .Case<P::PtrLoadOp, P::PtrStoreOp, P::PtrAddOp, P::MemCopyOp,
-            P::MemZeroOp, P::SomeOp, P::NoneOp, P::IsSomeOp, P::UnwrapOp>(
-          [&](auto) { B.clone(*op, Map); })
+            P::MemZeroOp, P::SomeOp, P::NoneOp, P::IsSomeOp, P::UnwrapOp,
+            P::OwnedOp, P::OwnershipOp>([&](auto) { B.clone(*op, Map); })
       .Default([&](Operation *o) {
         M.fail("unexpected op '" + o->getName().getStringRef() +
                "' in function '@" + Src.getSymName() + "'");

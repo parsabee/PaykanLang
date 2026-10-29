@@ -3,15 +3,13 @@
 //
 // Test helper for the equals ABI.
 //
-// The vtable `equals` slot takes its `other` argument as a PaykanShared box and
-// consumes it (releases one reference), matching how class-typed method
-// arguments are passed in generated code. These unit tests, however, retain
-// ownership of `other` and destroy it themselves. This helper wraps a call so
-// the test keeps `other`: it boxes the argument, adds an extra retain to offset
-// the callee's release, invokes equals, then frees the box shell — leaving the
-// underlying object untouched. Freeing the shell also detaches the object
-// (clears its unique-box backpointer and the box's object pointer) so a later
-// boxing of the same object starts fresh instead of acquiring the freed shell.
+// The vtable `equals` slot takes its `other` argument as a PaykanShared box
+// and an ownership mask whose bit 0 says whether the call releases it, as a
+// Paykan function's box parameter is passed (Runtime.h, "The ownership
+// mask").  These unit tests keep `other` and dispose of it themselves, so
+// this helper lends it: it boxes the argument, calls equals with mask 0,
+// then drops the box's reference without destroying the object (the count
+// goes back to what it was).
 
 #ifndef PAYKAN_RUNTIME_EQUALS_HELPER_H
 #define PAYKAN_RUNTIME_EQUALS_HELPER_H
@@ -20,13 +18,11 @@ extern "C" {
 #include "Runtime.h"
 }
 
-inline int64_t paykanTestEquals(int64_t (*fn)(PaykanObject *, PaykanShared *),
+inline int64_t paykanTestEquals(int64_t (*fn)(PaykanObject *, PaykanShared *,
+                                              uint64_t),
                                 PaykanObject *self, PaykanObject *other) {
   PaykanShared *box = PaykanShared_new(other);
-  Paykan_retain(box); // offset the release performed by the callee
-  int64_t result = fn(self, box);
-  // Drop the extra reference without destroying `other` (the test owns it,
-  // and disposes of it itself): the count goes back to what it was.
+  int64_t result = fn(self, box, 0); // lent: equals releases nothing
   if (other)
     --other->strong;
   return result;

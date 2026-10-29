@@ -42,8 +42,11 @@ Sema::ModuleInfo sampleInfo() {
   solid.OriginModule = "geometry::shapes";
   solid.Fields = {{"rgb", "int"}};
   info.ExportedStructs = {solid};
-  info.ExportedFunctions = {{"Shape", "Shape", {"int", "int"}, viewH},
-                            {"area", "float", {"Shape"}, {}}};
+  // `_width` a native function, `native fn _width(s: view Str) -> int`.
+  const paykan::ast::ParamModes viewS{{ParamMode::View}, {"s"}};
+  info.ExportedFunctions = {{"Shape", "Shape", {"int", "int"}, viewH, false},
+                            {"_width", "int", {"Str"}, viewS, true},
+                            {"area", "float", {"Shape"}, {}, false}};
   return info;
 }
 
@@ -56,6 +59,8 @@ TEST(InterfaceConversion, RoundTripIsExact) {
             std::vector<uint8_t>{paykan::pkm::kModeInout});
   EXPECT_EQ(iface.Functions[0].Modes.Names,
             (std::vector<std::string>{"w", "h"}));
+  EXPECT_FALSE(iface.Functions[0].Native);
+  EXPECT_TRUE(iface.Functions[1].Native);
   EXPECT_EQ(iface.Enums[0].Variants,
             (std::vector<std::string>{"Red", "Green"}));
   EXPECT_EQ(iface.Enums[1].PayloadVariants,

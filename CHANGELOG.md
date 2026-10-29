@@ -263,6 +263,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** the runtime ABI and PIR are 0.3.0's (the version is `0.3.0-dev`,
+  `PAYKAN_RUNTIME_ABI_VERSION` 300), for borrowed box parameters (#98): a function that
+  takes a reference, a `box` parameter, now also takes an ownership mask after its
+  parameters, a `uint64_t` whose bit k says whether the caller hands its k-th box argument
+  over (the callee releases it, keeps it or hands it on, as before) or lends it, keeping
+  the object alive until the call returns (docs/pir.md §3; Runtime.h, "The ownership
+  mask").  The 65th box parameter and those after it have no bit and are always handed
+  over.  So does every vtable slot and function value that takes a box; the runtime's
+  own functions and a native function's C function take none.  The runtime's `equals`
+  are `int64_t PaykanObject_equals(PaykanObject *self, PaykanShared *other, uint64_t
+  owned)` (and `PaykanString_equals`, `PaykanFile_equals`), which release `other` only
+  when bit 0 is set, and their PIR externs spell the mask out (`(obj, box, i64) -> i64`).
+  PIR writes a call's lent arguments and the ones a function hands on as its caller gave
+  them (`call @f(%a, lent %b, owned(%o) %c)`, in a `vcall` and an `icall` too), reads a
+  parameter's bit (`%o = owned %p`) and marks a copy the lowering makes only to hand an
+  argument over (`retain lend %v`, a plain retain to every pass but the one that will
+  lend it); in binary PIR they are the opcode 54 and the marks 55 and 56 (docs/pir.md §6,
+  §11; docs/design/pkm.md §5.5), and a vtable's target is checked against its slot as a
+  machine function.  An out-of-tree backend must give every lending function, slot and
+  function value its mask, pass each call's from its arguments' ownership and read `owned`
+  from it (docs/writing-a-backend.md); C code calling a runtime `equals` passes a mask;
+  `.pkm` files, cache entries and plugins of 0.2.0 are not accepted.  Each body the
+  lowering makes of a function that takes a box starts with a prologue that retains each
+  parameter its caller lent (docs/pir.md §3), so it owns it either way.  The lowering
+  marks the copies a callee could be lent instead (a variable's, or a field's no call in
+  use may let go of, docs/pir.md §7), and a new pass, `lending`, lends on both sides of a
+  call (docs/pir.md §12).  It lends each marked copy whose object the caller keeps alive
+  through the call: the copy's retain goes and the argument is `lent`, unless a statement
+  between the read and the call, or one in an `&&`, `||`, `?:` or `match` among them, may
+  let the object go, as in `f(x, x)`, `f(x.name, x)` or `f(x.name, c && g(x))` at `x`'s
+  last use.  And it lends each box parameter its body never writes: the prologue's
+  retain goes, and the body releases the parameter only when it was handed over (`if
+  %p.own { release %v }`), hands it on with its own bit (`owned(%p.own) %v`: a chain
+  `push -> pushFront -> Node(v) -> __init__` retains `v` once, at the field store, and
+  only when the outermost caller lent it), and retains it where it keeps it (in a field,
+  a variable or memory, as its result, for a callee without its bit) only when it was
+  lent.  A parameter the body assigns or gives to an `inout` parameter, or uses in a way
+  the pass does not follow, keeps its prologue (`--stats`: `lending marks`, `lending
+  arguments lent`, `lending copies kept for the window`, `lending parameters lent`,
+  `lending parameters handed on`, `lending parameters owned on entry`, `lending retains
+  at keeps`).  The reference-count elimination (#98 part 1) then lends a variable at its
+  last use where another reference the function holds keeps the object alive through
+  the call (docs/pir.md §12, "Moves lent"): a `match` binding passed on in its arm, which
+  the matched value holds, or a copy of a variable read again (`u = t; count(u)`).  The
+  copy's retain goes, and with it the release the callee made of what it was handed,
+  which was never the last (`--stats`: `rc-elimination moves lent`).  And a native
+  function's IFACE record says it is one (a flags byte after its result mode,
+  docs/design/pkm.md §3.5; `pkm dump` prints `native func`), so an importer knows that a
+  call of it changes nothing but its `inout` arguments, and lends it a field read as the
+  module's own calls do.  In the 122 programs of the corpus that compile (samples, leak
+  checks, standard library tests, imports) the lending pass lends 296 of the 297 marks
+  (keeping one for the window, `both(t, t)`) and 727 parameters (165 of them handed on),
+  with 128 retains at keeps, and leaves one parameter owned from its entry (sample 66's
+  `use(p)`, which passes `p` to an `inout` parameter); the reference-count elimination
+  removes 251 retains and 276 releases, one of each more than the 250 and 275 it removed
+  before (in `tests/Stdlib/box_test.pkn`, `alias = total`'s, now that `Counter(total)`
+  is lent `total` instead of handed a copy of it), and lends 2 moves (samples 49 and 54),
+  whose retains go too (`--stats`: `rc-elimination retains removed` 253).  No program of
+  the corpus gives a field read to another module's native function (the print family's
+  were lent already, `println<Str>` being given nothing that reaches an object), so the
+  flag changes nothing there.  And an `__init__`'s first assignment of a field releases
+  no old value (docs/pir.md §7): the object is new, and nothing else reaches its fields
+  while `self` is only the place they are assigned in or the values assigned are
+  variables, so every assignment of a default `__init__` is one, and so are the leading
+  ones of most written ones (141 releases in the corpus, 25 of them `weak.release`s).
+  The keeps had made such an `__init__` too large for the backend to inline into its
+  constructor, which then paid a call and a test of each old value where it had paid
+  neither (binary trees' `Node.__init__` with gcc, a stack's or queue's
+  `_Node<Str>.__init__` with LLVM).  So the retains in `--emit-pir` fall from PR #340's
+  1385 to 1232 (−11%: 1089 copies, 142 keeps, one prologue) and, after the
+  reference-count elimination, from 1135 to 979 (−14%); the releases from 4407 to 4291
+  and from 4132 to 4015 (−3%), 672 of them asking a parameter's bit.  A program makes fewer
+  retains and as many fewer releases when it runs (in the probes' own code, `show(a);
+  pass(a); keep(h, a)` makes 1 retain and 8 releases instead of 7 and 14, a chain of
+  hand-offs 0 and 40 instead of 10 and 50, the writes of `w1_written` 12 and 110 instead
+  of 44 and 143; binary trees' count of a tree costs each child the matched value's
+  retain and release, 2 operations where it cost 4: 4094 retains and 8190 releases
+  instead of 6140 and 10236 at depth 10, 4.19 and 8.39 million instead of 6.29 and 10.49
+  million at depth 20), and every object dies where it did: the corpus prints and frees
+  memory as before on every backend at `-O0`, `-O1` and `-O2`, and the moves at last use
+  make the same moves.  The generated code of a function that neither takes a box nor
+  inlines one that does is unchanged: fib's, and the dispatch benchmark's `area`
+  methods, constructors and destructors (its `main` passes `List<Shape>.push` the mask,
+  and LLVM now inlines that push into it).  At `-O2`, against the part 1 and 4 build,
+  callgrind counts the same instructions for fib, 0.2% fewer for dispatch, 1.8% fewer
+  for binary trees, 0.5 to 3.0% fewer for the hash map and set loops, 1.3 to 6.9% fewer
+  for the stacks and queues of ints and strings, and as many for the priority queues.
+  The C path (`--emit-c`, gcc `-O2`) counts as many for fib, dispatch and a virtual
+  call loop, and 1.1% more for binary trees, whose constructor tests the two bits of the
+  mask `make` passes it.  (While an `__init__`'s first assignments still released the
+  old values, binary trees' C counted 6.7% more, and a stack and a queue of strings 4.9%
+  and 1.1% more.)  CPU times (median of 5 runs, pinned to one CPU) moved by −15% to +9%
+  on the container loops and by −11% to +8% on binary trees, dispatch and fib, within
+  what repeated runs differ by on this machine (fib's LLVM build, whose code is the
+  same, measured −8%; binary trees', which cachegrind finds making fewer instructions and
+  data accesses and the same cache misses, +5%).
+  Per-parameter conventions in the interface (`Sig.conv`, `nConventions`) are retired,
+  always 0 (docs/design/pkm.md §3.5, §5.9).
 - **Breaking:** an `-> inout T` result can only point into storage its caller keeps alive
   while the result is used (docs/language/03-functions.md, "Where an `inout` result can
   point"): into `self` (a field of a class's `self`, or a field of a struct or an element
@@ -643,6 +741,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   method 'm' of class 'A'; it is the implicit receiver`, as a parameter named `self` is
   (docs/language/05-classes.md, "Declaration").  A lambda written in a method may still
   name its parameter `self`, and a free function's variables may take the name.
+- The `==` and `toString()` of a tuple, a struct or a tagged union called an element's
+  `equals` or `toString` without holding the element, which the value only borrows from the
+  storage it is in: an override that replaced that storage while it ran (through a closure
+  assigning the field holding the tuple, `h.t = (Item("z"), 2)`) freed its own object, and
+  read freed memory after (`self.tag` printed garbage).  The runtime now holds the element
+  while its `equals` or `toString` runs, as a call's receiver is held, so such an element
+  dies right after the call returns instead of during it: a later death, only in a program
+  that used freed memory.  Each reference element of a tuple, struct or tagged union
+  compared or printed costs one retain and one release more.
 
 ## [0.2.0] - 2026-10-20
 

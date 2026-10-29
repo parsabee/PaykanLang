@@ -352,7 +352,8 @@ TEST(PIRRCElimination, EveryCorpusProgramCountsNoMoreReferencesAfterThePass) {
     ASSERT_TRUE(error.empty()) << path << ": " << error;
     const ReferenceCounting after(program);
     // Nothing is added; a retain goes with a release on each path out of
-    // its range, so at least as many releases go as retains.
+    // its range, or with the release its callee makes of a move it is lent
+    // instead, so at least as many releases go as retains.
     ASSERT_LE(after.Retains, before.Retains) << path;
     ASSERT_LE(after.Releases, before.Releases) << path;
     const uint64_t gone = stats.get("rc-elimination", "retains removed");
@@ -360,7 +361,9 @@ TEST(PIRRCElimination, EveryCorpusProgramCountsNoMoreReferencesAfterThePass) {
     EXPECT_EQ(before.Releases - after.Releases,
               stats.get("rc-elimination", "releases removed"))
         << path;
-    EXPECT_LE(before.Retains - after.Retains, before.Releases - after.Releases)
+    EXPECT_LE(before.Retains - after.Retains,
+              before.Releases - after.Releases +
+                  stats.get("rc-elimination", "moves lent"))
         << path;
     if (gone > 0)
       ++fewer;

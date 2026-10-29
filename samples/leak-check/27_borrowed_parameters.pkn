@@ -1,0 +1,78 @@
+// Isolates: box parameters a caller lends (#98 part 2).  A caller that
+// keeps a reference of its own for the whole call lends it, and a callee
+// that never writes the parameter asks its ownership mask instead of
+// retaining it on entry: it releases the parameter only when it was handed
+// over, hands it on with its own bit, and retains it only where it keeps
+// it.  Each shape below runs lent (the caller reads the variable again)
+// and handed over (the variable's last use, or a temporary):
+//   * a parameter kept in a field (its retain at the keep);
+//   * one handed on through two calls to the field that keeps it;
+//   * one only read (released at the callee's exit when handed over);
+//   * one returned (retained at the `ret` when lent).
+//
+// Runtime allocation sites: the Node and Holder instances, PaykanString_new
+// (String.c).
+//
+// Expected under --track-heap: live blocks : 0.
+
+import ::io;
+
+// expect-stdout: kept: a a
+// expect-stdout: handed on: b b
+// expect-stdout: read: c c
+// expect-stdout: returned: d d
+// expect-stdout: temporaries: t1 t2 t3 t4
+
+class Node {
+  name: Str;
+}
+
+class Holder {
+  n: Node?;
+}
+
+fn keep(h: Holder, n: Node) {
+  h.n = n;
+}
+
+fn handOn(h: Holder, n: Node) {
+  keep(h, n);
+}
+
+fn read(n: Node) -> Str {
+  return n.name;
+}
+
+fn same(n: Node) -> Node {
+  return n;
+}
+
+fn name(h: Holder) -> Str {
+  match h.n {
+    n: Node { return n.name; }
+    None { return "none"; }
+  }
+}
+
+fn main() -> int {
+  h = Holder(None);
+  a = Node("a");
+  keep(h, a);
+  io::println("kept: " + a.name + " " + name(h));
+  b = Node("b");
+  handOn(h, b);
+  io::println("handed on: " + b.name + " " + name(h));
+  c = Node("c");
+  r = read(c);
+  io::println("read: " + c.name + " " + r);
+  d = Node("d");
+  e = same(d);
+  io::println("returned: " + d.name + " " + e.name);
+  keep(h, Node("t1"));
+  t1 = name(h);
+  handOn(h, Node("t2"));
+  t2 = name(h);
+  io::println("temporaries: " + t1 + " " + t2 + " " + read(Node("t3")) + " "
+      + same(Node("t4")).name);
+  return 0;
+}

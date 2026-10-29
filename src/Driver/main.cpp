@@ -20,6 +20,7 @@
 #include "paykan/modules/ModuleResolver.h"
 #include "paykan/pir/Binary.h"
 #include "paykan/pir/DeadCode.h"
+#include "paykan/pir/Lend.h"
 #include "paykan/pir/MoveAtLastUse.h"
 #include "paykan/pir/Pass.h"
 #include "paykan/pir/Printer.h"
@@ -35,6 +36,7 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -63,13 +65,23 @@ paykan::pir::Module copyOf(const paykan::pir::Module &m) {
   return copy ? std::move(*copy) : paykan::pir::Module();
 }
 
+/// Add @p pass to @p passes unless @p skip names it (--pir-skip).
+void addPass(paykan::pir::PassManager &passes,
+             std::unique_ptr<paykan::pir::Pass> pass,
+             const std::vector<std::string> &skip) {
+  if (std::find(skip.begin(), skip.end(), pass->name()) == skip.end())
+    passes.add(std::move(pass));
+}
+
 /// The passes that make code better, run on every program before a backend
 /// sees it and on every module's code before its `.pkm` is written
-/// (docs/pir.md §12): the standard library's compiled code is made by them
-/// too.
-void addCodePasses(paykan::pir::PassManager &passes) {
-  passes.add(paykan::pir::createMovesAtLastUsePass());
-  passes.add(paykan::pir::createRCEliminationPass());
+/// (docs/pir.md §12), in this order, but those @p skip names: the
+/// standard library's compiled code is made by them too.
+void addCodePasses(paykan::pir::PassManager &passes,
+                   const std::vector<std::string> &skip) {
+  addPass(passes, paykan::pir::createMovesAtLastUsePass(), skip);
+  addPass(passes, paykan::pir::createLendingPass(), skip);
+  addPass(passes, paykan::pir::createRCEliminationPass(), skip);
 }
 
 /// Whether the program is verified after each PIR pass, so that a pass
@@ -89,20 +101,22 @@ struct WrittenCode {
 };
 
 /// @p module (as lowered) trimmed to what it and its importers (whose view
-/// of it is @p iface) reach, through the code passes (what they did added
-/// to @p stats) and verified, and with a backend that compiles modules,
-/// split into its CODE and the code @p backend compiles.
+/// of it is @p iface) reach, through the code passes but those @p skip
+/// names (what they did added to @p stats) and verified, and with a backend
+/// that compiles modules, split into its CODE and the code @p backend
+/// compiles.
 paykan::StatusOr<WrittenCode>
 moduleCode(paykan::pir::Module module, const pkm::Interface &iface,
            paykan::backend::Backend *backend,
            const paykan::backend::Capabilities &caps,
+           const std::vector<std::string> &skip,
            paykan::pir::Statistics &stats) {
   paykan::modules::trimModuleCode(module, iface);
   {
     paykan::pir::Program code;
     code.Modules.push_back(std::move(module));
     paykan::pir::PassManager passes;
-    addCodePasses(passes);
+    addCodePasses(passes, skip);
     if (paykan::Status s = passes.run(code, stats); !s)
       return s;
     module = std::move(code.Modules.front());
@@ -698,7 +712,8 @@ int main(int argc, char *argv[]) {
     const pkm::Interface *iface = resolver.builtInterface(name);
     if (mod == program.Modules.end() || !iface)
       continue;
-    auto written = moduleCode(copyOf(*mod), *iface, backend.get(), caps, stats);
+    auto written = moduleCode(copyOf(*mod), *iface, backend.get(), caps,
+                              opts.SkipPasses, stats);
     if (!written)
       return fail("cannot write the cache entry of module '" + name +
                   "': " + written.status().message());
@@ -735,7 +750,7 @@ int main(int argc, char *argv[]) {
     pkm::Interface iface =
         paykan::sema::Sema::toInterface(sema.exportModuleInfo(root, mainName));
     auto written = moduleCode(std::move(program.Modules.front()), iface,
-                              backend.get(), caps, stats);
+                              backend.get(), caps, opts.SkipPasses, stats);
     if (!written)
       return fail("cannot write " + out.string() + ": " +
                   written.status().message());
@@ -774,8 +789,9 @@ int main(int argc, char *argv[]) {
                        const paykan::pir::Class &c) { return m.isCompiled(c); };
   }
   paykan::pir::PassManager passes(kVerifyPasses);
-  passes.add(paykan::pir::createDeadCodePass(std::move(roots)));
-  addCodePasses(passes);
+  addPass(passes, paykan::pir::createDeadCodePass(std::move(roots)),
+          opts.SkipPasses);
+  addCodePasses(passes, opts.SkipPasses);
   if (paykan::Status s = passes.run(program, stats); !s)
     return fail(s.message());
   if (opts.Stats)

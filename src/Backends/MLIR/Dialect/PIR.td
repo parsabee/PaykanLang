@@ -10,9 +10,9 @@
 // upstream dialect lowers to both LLVM and EmitC: the globals (pir.cstr,
 // pir.data, pir.bytes, pir.vtable and the externs), the memory ops
 // (pir.alloca, pir.ptr_load, pir.ptr_store, pir.ptr_add, pir.memcopy,
-// pir.memzero, pir.addressof, pir.null, pir.fn_addr, pir.icall, pir.cast)
-// and the optionals (!pir.opt, pir.some, pir.none, pir.is_some,
-// pir.unwrap).
+// pir.memzero, pir.addressof, pir.null, pir.fn_addr, pir.icall, pir.cast),
+// the optionals (!pir.opt, pir.some, pir.none, pir.is_some, pir.unwrap)
+// and the ownership mask's (pir.owned, pir.ownership).
 //
 // Every region of a pir op is a structured block, like PIR's: a `pir.func`
 // body, the branches of `pir.if`, the condition and body of `pir.while`.
@@ -92,6 +92,11 @@ def PIR_Scalar : AnyTypeOf<[I64, F64, PIR_Bool, PIR_Char]>;
 def PIR_Value : AnyTypeOf<[I64, F64, PIR_Bool, PIR_Char, PIR_BoxType,
                            PIR_ObjType, PIR_PtrType, PIR_WeakType,
                            PIR_OptType]>;
+// The ownership mask a lending function takes after its parameters (docs/
+// pir.md §3): unsigned, C's uint64_t, as the runtime's `uint64_t owned`.
+def PIR_Mask : UI<64>;
+// What a call passes: a value, or the ownership mask.
+def PIR_Arg : AnyTypeOf<[PIR_Value, PIR_Mask]>;
 def PIR_Number : AnyTypeOf<[I64, F64]>;
 
 //===----------------------------------------------------------------------===//
@@ -414,7 +419,7 @@ def PIR_MaskOp : PIR_BitsOp<"mask"> {
 //===----------------------------------------------------------------------===//
 
 def PIR_CallOp : PIR_Op<"call"> {
-  let arguments = (ins FlatSymbolRefAttr:$callee, Variadic<PIR_Value>:$args);
+  let arguments = (ins FlatSymbolRefAttr:$callee, Variadic<PIR_Arg>:$args);
   let results = (outs Optional<PIR_Value>:$result);
   let assemblyFormat = [{
     $callee `(` $args `)` attr-dict `:` functional-type($args, results)
@@ -424,7 +429,7 @@ def PIR_CallOp : PIR_Op<"call"> {
 def PIR_VCallOp : PIR_Op<"vcall"> {
   let summary = "call a vtable slot of the receiver, args[0] (an obj)";
   let arguments = (ins StrAttr:$class_name, I64Attr:$slot,
-                       Variadic<PIR_Value>:$args);
+                       Variadic<PIR_Arg>:$args);
   let results = (outs Optional<PIR_Value>:$result);
   let assemblyFormat = [{
     $class_name `[` $slot `]` `(` $args `)` attr-dict `:`
@@ -434,7 +439,7 @@ def PIR_VCallOp : PIR_Op<"vcall"> {
 
 def PIR_ICallOp : PIR_Op<"icall"> {
   let summary = "call the function whose address is `callee`";
-  let arguments = (ins PIR_PtrType:$callee, Variadic<PIR_Value>:$args);
+  let arguments = (ins PIR_PtrType:$callee, Variadic<PIR_Arg>:$args);
   let results = (outs Optional<PIR_Value>:$result);
   let assemblyFormat = [{
     $callee `(` $args `)` attr-dict `:` functional-type($args, results)
@@ -446,6 +451,31 @@ def PIR_FnAddrOp : PIR_Op<"fn_addr", [Pure]> {
   let arguments = (ins FlatSymbolRefAttr:$callee);
   let results = (outs PIR_PtrType:$result);
   let assemblyFormat = "$callee attr-dict";
+}
+
+//===----------------------------------------------------------------------===//
+// The ownership mask (docs/pir.md §3): bit k says whether the k-th box
+// parameter of a lending function was handed over
+//===----------------------------------------------------------------------===//
+
+def PIR_OwnedOp : PIR_Op<"owned", [Pure]> {
+  let summary = "whether bit `bit` of an ownership mask is set (PIR's `owned`)";
+  let arguments = (ins PIR_Mask:$mask, I64Attr:$bit);
+  let results = (outs PIR_Bool:$result);
+  let assemblyFormat = "$mask `[` $bit `]` attr-dict";
+}
+
+def PIR_OwnershipOp : PIR_Op<"ownership", [Pure]> {
+  let summary = "the ownership mask a call passes";
+  let description = [{
+    The bits of `owned`, and bit `passed_bits[i]` when `passed[i]` is true
+    (an argument passed `owned(%o)`).
+  }];
+  let arguments = (ins I64Attr:$owned, DenseI64ArrayAttr:$passed_bits,
+                       Variadic<PIR_Bool>:$passed);
+  let results = (outs PIR_Mask:$result);
+  let assemblyFormat = "$owned $passed_bits `(` $passed `)` attr-dict";
+  let hasVerifier = 1;
 }
 
 //===----------------------------------------------------------------------===//

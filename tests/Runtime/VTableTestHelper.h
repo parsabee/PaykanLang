@@ -20,7 +20,7 @@ template <typename Fn> Fn vtSlot(const void *obj, int slot) {
 
 using PaykanDestroyFn = void (*)(PaykanObject *);
 using PaykanToStringFn = PaykanShared *(*)(PaykanObject *);
-using PaykanEqualsFn = int64_t (*)(PaykanObject *, PaykanShared *);
+using PaykanEqualsFn = int64_t (*)(PaykanObject *, PaykanShared *, uint64_t);
 using PaykanLengthFn = int64_t (*)(PaykanObject *);
 
 inline PaykanDestroyFn vtDestroy(const void *obj) {

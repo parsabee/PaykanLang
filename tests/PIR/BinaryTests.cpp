@@ -232,6 +232,7 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::FRound32:
     case Opcode::FnAddr:
     case Opcode::ICall:
+    case Opcode::Owned:
       check(e.Id);
     }
   }
@@ -263,8 +264,9 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
   for (unsigned c = 26; c < 256; ++c) {
     // some none is_some unwrap weak.load weak.new; local.addr field.addr
     // ptr.load ptr.store ptr.add mem.copy mem.zero; wrap mask udiv urem
-    // ucmp utof ftou fround32 weak.release; fn.addr icall; vtable.store
-    bool used = c <= 31 || (c >= 34 && c <= 52);
+    // ucmp utof ftou fround32 weak.release; fn.addr icall; vtable.store;
+    // owned
+    bool used = c <= 31 || (c >= 34 && c <= 52) || c == 54;
     EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
   }
   for (unsigned c = 8; c < 256; ++c) {
@@ -560,7 +562,7 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
     b[retType] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "type code " << int(code);
   }
-  for (uint8_t code : {32, 33, 53, 255}) {
+  for (uint8_t code : {32, 33, 53, 55, 56, 255}) {
     std::vector<uint8_t> b = good;
     b[opcode] = code;
     EXPECT_FALSE(binary::decode(b).isOk()) << "opcode " << int(code);
@@ -749,6 +751,89 @@ TEST(PIRBinary, AStableLoadKeepsItsMark) {
                   "a stable mark before an instruction that is no load"),
               std::string::npos)
         << bad.status().message();
+  }
+}
+
+// The ownership of a call's arguments that are not owned, and a `retain
+// lend`, are written after a mark before the opcode (codes 55 and 56), which
+// no opcode has; a call whose arguments are all owned is written without
+// one, as before the mask existed.  A reader takes the marks only before
+// their instructions, and the ownership list only as the writer writes it.
+TEST(PIRBinary, ArgumentOwnershipKeepsItsMarks) {
+  const char *src = R"(module "o"
+fn @f(%a.1: box, %b.2: box) -> void {
+  %oa.3 = owned %a.1
+  retain lend %b.2
+  call @f(lent %a.1, owned(%oa.3) %b.2)
+  call @f(%a.1, %b.2)
+  ret
+}
+)";
+  Program p = parse(src);
+  ASSERT_EQ(p.Modules.size(), 1u);
+  expectRoundTrip(p.Modules[0]);
+  std::vector<uint8_t> good = binary::encode(p.Modules[0]);
+
+  // An all-owned ownership is no ownership: the same bytes.
+  Program owned = parse(src);
+  std::get<Instr>(owned.Modules[0].Functions[0].Body.Stmts[3]).Own.resize(2);
+  EXPECT_EQ(binary::encode(owned.Modules[0]), good);
+
+  // The marks: 56 then the retain's opcode; 55, two entries (argument 0
+  // lent, argument 1 passed with the bit %3), then the call's opcode.
+  const std::vector<uint8_t> lend = {kLendCode,
+                                     opcodeEntry(Opcode::Retain).Code};
+  const std::vector<uint8_t> own = {
+      kOwnershipCode, 2, 0, 1, 1, 2, 0, 3, opcodeEntry(Opcode::Call).Code};
+  auto at = [&](const std::vector<uint8_t> &b,
+                const std::vector<uint8_t> &piece) {
+    auto it = std::search(b.begin(), b.end(), piece.begin(), piece.end());
+    return it == b.end() ? std::string::npos
+                         : static_cast<size_t>(it - b.begin());
+  };
+  const size_t l = at(good, lend), o = at(good, own);
+  ASSERT_NE(l, std::string::npos);
+  ASSERT_NE(o, std::string::npos);
+  const size_t length = binary::index(good).front().Offset;
+  auto rejected = [](const std::vector<uint8_t> &b, const char *why) {
+    auto d = binary::decode(b);
+    ASSERT_FALSE(d.isOk()) << why;
+    EXPECT_NE(d.status().message().find(why), std::string::npos)
+        << d.status().message();
+  };
+  {
+    std::vector<uint8_t> b = good;
+    b[l + 1] = opcodeEntry(Opcode::Release).Code;
+    rejected(b, "a lend mark before an instruction that is no retain");
+  }
+  {
+    std::vector<uint8_t> b = good;
+    b[o + 8] = opcodeEntry(Opcode::Unbox).Code;
+    rejected(b, "an ownership mark before an instruction that is no call");
+  }
+  {
+    std::vector<uint8_t> b = good;
+    b[o + 3] = 3;
+    rejected(b, "reserved argument ownership");
+  }
+  {
+    std::vector<uint8_t> b = good;
+    b[o + 4] = 0;
+    rejected(b, "arguments' ownership out of order");
+  }
+  {
+    std::vector<uint8_t> b = good;
+    b[o + 4] = 2;
+    rejected(b, "an argument's ownership names no argument");
+  }
+  {
+    // No entry: the call writes no mark then.
+    std::vector<uint8_t> b = good;
+    b[o + 1] = 0;
+    b.erase(b.begin() + static_cast<std::ptrdiff_t>(o + 2),
+            b.begin() + static_cast<std::ptrdiff_t>(o + 8));
+    b[length] -= 6;
+    rejected(b, "a call whose arguments are all owned has no ownership mark");
   }
 }
 

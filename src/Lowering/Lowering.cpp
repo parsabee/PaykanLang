@@ -65,7 +65,9 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanStringParseInt, {{kObj, kPtr}, kI64}},
     {kPaykanStringParseFloat, {{kObj, kPtr}, kI64}},
     {kPaykanStringParseBool, {{kObj, kPtr}, kI64}},
-    {kPaykanStringEquals, {{kObj, kBox}, kI64}},
+    // The vtable `equals`s spell out their slot's ownership mask
+    // (docs/pir.md §3, §8).
+    {kPaykanStringEquals, {{kObj, kBox, kI64}, kI64}},
     {kPaykanStringToString, {{kObj}, kBox}},
     {kPaykanStringLength, {{kObj}, kI64}},
     {kPaykanIntHash, {{kI64}, kI64}},
@@ -78,7 +80,7 @@ const RuntimeSig kRuntimeSigs[] = {
     {kPaykanEnumEquals, {{kPtr, kPtr, kPtr}, kI64}},
     {kPaykanObjectDestroy, {{kObj}, kVoid}},
     {kPaykanObjectToString, {{kObj}, kBox}},
-    {kPaykanObjectEquals, {{kObj, kBox}, kI64}},
+    {kPaykanObjectEquals, {{kObj, kBox, kI64}, kI64}},
 };
 
 const RuntimeSig *findRuntimeSig(const std::string &name) {
@@ -241,6 +243,7 @@ ModuleLowering::FunctionStateGuard::FunctionStateGuard(
   std::swap(SavedStringTemps, L.OwnedStringTemps);
   std::swap(SavedLoops, L.LoopStack);
   L.B.setFunction(fn);
+  L.emitParamPrologue(*fn);
 }
 
 ModuleLowering::FunctionStateGuard::~FunctionStateGuard() {
@@ -823,11 +826,12 @@ bool ModuleLowering::exprProducesFreshBox(ast::Expr *expr) const {
   return false;
 }
 
-Val ModuleLowering::takeSharedOwnership(ast::Expr *expr, const Val &val) {
+Val ModuleLowering::takeSharedOwnership(ast::Expr *expr, const Val &val,
+                                        bool lend) {
   // Fresh +1 boxes are owned as-is; a borrowed box (plain ref-typed field
   // read) is retained because its slot keeps its own reference.
   if (!exprProducesFreshBox(expr))
-    emitRetain(val);
+    emitRetain(val, lend && isLentRead(expr));
   return val;
 }
 
@@ -1921,7 +1925,7 @@ Val ModuleLowering::emitOptionalEquality(ast::BinaryExpr *node) {
   return B.load(result, "eq");
 }
 
-Val ModuleLowering::emitAsShared(ast::Expr *expr) {
+Val ModuleLowering::emitAsShared(ast::Expr *expr, bool lend) {
   // `None` into a `T?` slot is the null box (no allocation at all).
   if (isNoneForOptional(expr))
     return Val::null(Type::Box);
@@ -1930,7 +1934,13 @@ Val ModuleLowering::emitAsShared(ast::Expr *expr) {
     reportInternalError("an optional value where a box is due");
     return Val();
   }
-  return emitAsSharedRaw(expr);
+  return emitAsSharedRaw(expr, lend);
+}
+
+bool ModuleLowering::hasOwnershipBit(const pir::Signature &sig, bool lends,
+                                     size_t param) {
+  return lends && param < sig.Params.size() && sig.Params[param] == Type::Box &&
+         pir::boxIndex(sig, param) < pir::kOwnershipBits;
 }
 
 Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
@@ -1960,13 +1970,17 @@ Val ModuleLowering::emitBorrowedBox(ast::Expr *arg, std::vector<Val> &keep) {
   return box;
 }
 
-Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
-  // Owned identifier: retain + return the existing box.
+Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr, bool lend) {
+  // Owned identifier: retain + return the existing box.  The copy of an
+  // argument may be lent (docs/pir.md §6) unless a later part of the
+  // statement may replace the variable (noteHeldReads); what an `inout`
+  // parameter names, the caller's storage, only as a read of LentReads.
   if (auto *id = ast::dyn_cast<ast::Identifier>(expr)) {
     bool declared = CurrentScope->hasLocal(id->getName());
     if (declared && holdsBox(id->getName())) {
       Val sharedPtr = loadVarBox(id->getName());
-      emitRetain(sharedPtr);
+      const bool inout = CurrentScope->inoutType(id->getName()) == Type::Box;
+      emitRetain(sharedPtr, lend && (inout ? isLentRead(id) : !isHeldRead(id)));
       return sharedPtr;
     }
   }
@@ -1979,7 +1993,7 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
       ast::isa<ast::SubscriptExpr>(expr)) {
     if (expr->getResolvedType() && ast::isRefType(expr->getResolvedType())) {
       Val box = emitExpr(expr);
-      return takeSharedOwnership(expr, box);
+      return takeSharedOwnership(expr, box, lend);
     }
   }
 
@@ -1988,7 +2002,7 @@ Val ModuleLowering::emitAsSharedRaw(ast::Expr *expr) {
   // field's).
   if (exprAlreadyShared(expr)) {
     Val box = emitExpr(expr);
-    return box ? takeSharedOwnership(expr, box) : box;
+    return box ? takeSharedOwnership(expr, box, lend) : box;
   }
 
   // Everything else (a string literal is already a Str temporary): emit

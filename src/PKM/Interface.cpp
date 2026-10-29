@@ -173,11 +173,15 @@ std::vector<uint8_t> writeInterface(const Interface &iface) {
     record(decls, static_cast<uint64_t>(DeclTag::Func), [&](ByteWriter &v) {
       v.uleb(strs.intern(f->Name));
       writeSig(v, strs, f->ReturnTypeName, f->ParamTypeNames);
-      bool result = f->Modes.Result != kModeValue;
+      // The modes, the result's and the flags, each written when it or
+      // what follows says anything.
+      const bool result = f->Native || f->Modes.Result != kModeValue;
       if (!f->Modes.Modes.empty() || result)
         writeModes(v, strs, f->Modes);
       if (result)
         v.u8(f->Modes.Result);
+      if (f->Native)
+        v.u8(kFuncNative);
     });
   for (const StructRec *s : sortedByName(iface.Structs))
     record(decls, static_cast<uint64_t>(DeclTag::Struct), [&](ByteWriter &v) {
@@ -297,6 +301,17 @@ private:
       return false;
     if (out.Result > kModeInout)
       return r.fail("unknown result mode " + std::to_string(out.Result));
+    return true;
+  }
+  /// A FUNC record's flags, after its result mode: known bits only.
+  bool funcFlags(ByteReader &r, FuncRec &out) {
+    uint8_t flags;
+    if (!r.u8(flags))
+      return false;
+    if (flags & ~kFuncKnownFlags)
+      return r.fail("function '" + out.Name + "' has unknown flags " +
+                    detail::hex(flags & ~kFuncKnownFlags));
+    out.Native = flags & kFuncNative;
     return true;
   }
   /// `uleb count` then records; @p body gets (tag, payload reader) for a
@@ -560,9 +575,11 @@ Status Reader::readDecls(Interface &out) {
           FuncRec f;
           if (str(v, f.Name) && str(v, f.ReturnTypeName) &&
               strList(v, f.ParamTypeNames) &&
-              (v.remaining() == 0 || // the modes, then the result's
+              (v.remaining() == 0 || // the modes, the result's, the flags
                (modes(v, f.ParamTypeNames.size(), f.Modes) &&
-                (v.remaining() == 0 || result(v, f.Modes)))) &&
+                (v.remaining() == 0 ||
+                 (result(v, f.Modes) &&
+                  (v.remaining() == 0 || funcFlags(v, f)))))) &&
               ordered(tag, f.Name))
             out.Functions.push_back(std::move(f));
           return true;

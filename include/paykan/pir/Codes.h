@@ -80,7 +80,10 @@ inline constexpr OpcodeEntry kOpcodeTable[] = {
     {Opcode::ICall, 51, "icall"},
     // An object's class while its `__init__` runs (docs/pir.md §5).
     {Opcode::VTableStore, 52, "vtable.store"},
-    // 53 kStableLoadCode, 54-255 reserved.
+    // 53 kStableLoadCode.
+    // Whether a box parameter was handed over (docs/pir.md §3).
+    {Opcode::Owned, 54, "owned"},
+    // 55 kOwnershipCode, 56 kLendCode, 57-255 reserved.
 };
 
 struct TypeEntry {
@@ -109,6 +112,15 @@ inline constexpr uint8_t kViewSlotCode = 18;
 /// the load is `stable` (docs/pir.md §6): no opcode has it.
 inline constexpr uint8_t kStableLoadCode = 53;
 
+/// The code written before a call's, a vcall's or an icall's opcode when
+/// one of its arguments is `lent` or `owned(%o)` (docs/pir.md §6), and the
+/// arguments' ownership after it: no opcode has it.
+inline constexpr uint8_t kOwnershipCode = 55;
+
+/// The code written before a `retain`'s opcode when it is a `retain lend`
+/// (docs/pir.md §6): no opcode has it.
+inline constexpr uint8_t kLendCode = 56;
+
 namespace detail {
 
 /// True when no two rows share an enumerator, a code or a name.
@@ -133,7 +145,7 @@ template <typename T, size_t N> constexpr bool rowsUnique(const T (&table)[N]) {
 // The enumerators are dense from 0, so a complete table has exactly one row
 // per enumerator up to the last one.  Adding an enumerator without a row
 // fails here or in the exhaustive switch of tests/PIR/BinaryTests.cpp.
-static_assert(std::size(kOpcodeTable) == static_cast<size_t>(Opcode::ICall) + 1,
+static_assert(std::size(kOpcodeTable) == static_cast<size_t>(Opcode::Owned) + 1,
               "every Opcode needs a row in kOpcodeTable");
 static_assert(std::size(kTypeTable) == static_cast<size_t>(Type::Weak) + 1,
               "every Type needs a row in kTypeTable");
