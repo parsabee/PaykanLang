@@ -437,9 +437,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking:** the runtime ABI and PIR are 0.3.0's (`PAYKAN_RUNTIME_ABI_VERSION` 300),
   for borrowed box parameters (#98): a function that takes a reference, a `box`
-  parameter, now also takes an ownership mask after its parameters, a `uint64_t` whose
-  bit k says whether the caller hands its k-th box argument
-  over (the callee releases it, keeps it or hands it on, as before) or lends it, keeping
+  parameter, now also takes an ownership mask after its parameters, a `uint64_t`
+  whose bit k says whether the caller hands its k-th box argument over (the
+  callee releases it, keeps it or hands it on, as before) or lends it, keeping
   the object alive until the call returns (docs/pir.md §3; Runtime.h, "The ownership
   mask").  The 65th box parameter and those after it have no bit and are always handed
   over.  So does every vtable slot and function value that takes a box; the runtime's
