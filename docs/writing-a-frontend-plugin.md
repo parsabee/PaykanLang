@@ -90,8 +90,11 @@ PAYKAN_PLUGIN_EXPORT const PaykanPlugin *paykan_plugin_init(const PaykanHost *h)
 - Nothing may escape the call: a C++ frontend built with exceptions catches
   them all, a Rust one wraps the call in `catch_unwind`.
 - Input nested deeper than `in->max_nesting` (512, `frontend::kMaxNesting`)
-  is rejected with `nesting too deep (more than 512 levels)`, as every
-  frontend does.
+  is rejected with `nesting too deep (more than 512 levels)`, and a chain
+  of operators and postfix suffixes longer than 2048 links
+  (`frontend::kMaxChain`) with `nesting too deep (more than 2048 levels)`,
+  as every frontend does ([`grammar.md`](grammar.md) section 9). The
+  AST interchange reader checks both again.
 - `in->trace_parsing` / `in->trace_scanning` carry `--trace-parser` /
   `--trace-scanner`, for a frontend with debug traces (write them with
   `host->write_output`).

@@ -533,6 +533,13 @@ if(PAYKAN_ASAN OR PAYKAN_TSAN)
     target_compile_definitions(driver_tests PRIVATE
                                PAYKAN_TEST_SHADOW_SANITIZER=1)
 endif()
+# A sanitizer build's frames are 2 to 4 times larger: the programs at the
+# frontend's limits are compiled with the default stack there, and with a
+# quarter of it in any other build, half in an unoptimised clang one
+# (atLimitStack() in DriverTests.cpp).
+if(PAYKAN_SANITIZER_FLAGS)
+    target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_SANITIZED=1)
+endif()
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).
 foreach(be IN LISTS PAYKAN_RUN_BACKENDS)
     add_test(NAME DriverTests.${be} COMMAND driver_tests)

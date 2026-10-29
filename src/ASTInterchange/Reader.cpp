@@ -12,12 +12,17 @@
 //
 // The text comes from a plugin: nothing in it is trusted.  Every failure is
 // a ReadError with a position, never an assertion; nesting is bounded
-// (kMaxDepth), and so is every recursion here.
+// (kMaxDepth lists), and so is every recursion here.  The AST is held to the
+// frontends' own limits too, nesting (frontend::kMaxNesting) and chains
+// (frontend::kMaxChain), counted as the recursive-descent frontend counts
+// them, so that an AST from a plugin can make the passes after it recurse no
+// deeper than a parsed program can.
 
 #include "Names.h"
 #include "paykan/Frontend.h"
 #include "paykan/ast/Interchange.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <charconv>
 #include <cmath>
@@ -27,10 +32,14 @@
 #include <memory>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 namespace paykan::ast::interchange {
+
+static_assert(kMaxDepth == 4 * frontend::kMaxNesting + frontend::kMaxChain + 16,
+              "kMaxDepth fits every AST within the frontends' limits");
 
 std::string ReadError::str() const {
   if (!Line)
@@ -52,6 +61,27 @@ struct SExpr {
   std::string Text;
   /// A list's elements after the tag.
   std::vector<SExpr> Items;
+
+  SExpr() = default;
+  SExpr(SExpr &&) = default;
+  SExpr &operator=(SExpr &&) = default;
+  SExpr(const SExpr &) = delete;
+  SExpr &operator=(const SExpr &) = delete;
+  /// The lists in the list are taken apart in a loop, not by a recursion a
+  /// level per list: they nest up to kMaxDepth deep.
+  ~SExpr() {
+    if (Items.empty())
+      return;
+    std::vector<std::vector<SExpr>> pending;
+    pending.push_back(std::move(Items));
+    while (!pending.empty()) {
+      std::vector<SExpr> items = std::move(pending.back());
+      pending.pop_back();
+      for (SExpr &item : items)
+        if (!item.Items.empty())
+          pending.push_back(std::move(item.Items));
+    }
+  }
 };
 
 class Lexer {
@@ -65,7 +95,7 @@ public:
       return fail("the text is empty: expected (paykan-ast ...)");
     if (Text[Pos] != '(')
       return fail("expected (paykan-ast ...)");
-    if (!list(out, 1))
+    if (!list(out))
       return false;
     skipSpace();
     if (Pos < Text.size())
@@ -116,10 +146,8 @@ private:
            c == '\t' || c == '\n' || c == '\r';
   }
 
-  bool list(SExpr &out, unsigned depth) {
-    if (depth > kMaxDepth)
-      return fail("nesting too deep (more than " + std::to_string(kMaxDepth) +
-                  " levels)");
+  /// The list at Pos, '(' on: its tag, then its items.
+  bool openList(SExpr &out) {
     out.K = SExpr::List;
     out.Line = Line;
     out.Column = Column;
@@ -132,22 +160,39 @@ private:
     if (tag.K != SExpr::Symbol)
       return fail("expected a tag after '(', not '" + tag.Text + "'");
     out.Text = std::move(tag.Text);
-    for (;;) {
+    return true;
+  }
+
+  /// The list at Pos into @p out, and the lists in it: in a loop, the
+  /// lists open innermost last in a stack of their own (each one's address
+  /// holds until it is closed, as only the innermost gets items), not by a
+  /// recursion a level per list.
+  bool list(SExpr &out) {
+    if (!openList(out))
+      return false;
+    std::vector<SExpr *> open{&out};
+    while (!open.empty()) {
+      SExpr &list = *open.back();
       skipSpace();
       if (Pos >= Text.size())
-        return fail("unterminated list (" + out.Text + " ...) from " +
-                    std::to_string(out.Line) + ":" +
-                    std::to_string(out.Column));
+        return fail("unterminated list (" + list.Text + " ...) from " +
+                    std::to_string(list.Line) + ":" +
+                    std::to_string(list.Column));
       char c = Text[Pos];
       if (c == ')') {
         advance();
-        return true;
+        open.pop_back();
+        continue;
       }
-      out.Items.emplace_back();
-      SExpr &item = out.Items.back();
+      list.Items.emplace_back();
+      SExpr &item = list.Items.back();
       if (c == '(') {
-        if (!list(item, depth + 1))
+        if (open.size() >= kMaxDepth)
+          return fail("nesting too deep (more than " +
+                      std::to_string(kMaxDepth) + " levels)");
+        if (!openList(item))
           return false;
+        open.push_back(&item);
       } else if (c == '"') {
         if (!string(item))
           return false;
@@ -155,6 +200,7 @@ private:
         atom(item);
       }
     }
+    return true;
   }
 
   static int hexDigit(char c) {
@@ -247,7 +293,8 @@ private:
 /// unwinds by returning null.
 class Builder {
 public:
-  Builder(ASTContext &ctx, ReadError &err) : Ctx(ctx), Err(err) {}
+  Builder(ASTContext &ctx, ReadError &err, Origin origin)
+      : Ctx(ctx), Err(err), From(origin) {}
 
   TranslationUnit *top(const SExpr &form) {
     if (form.Text != "paykan-ast")
@@ -268,8 +315,69 @@ public:
 private:
   ASTContext &Ctx;
   ReadError &Err;
+  /// Who wrote the text: a frontend's names are the grammar's.
+  Origin From;
+  /// The levels of nesting (frontend::kMaxNesting) around what is built.
+  unsigned Depth = 0;
+  /// The chain links (frontend::kMaxChain) on the deepest path down what
+  /// was built since the innermost Link began.
+  unsigned ChainHeight = 0;
 
   bool failed() const { return !Err.Message.empty(); }
+
+  /// One level of nesting, as the frontends count them (docs/grammar.md
+  /// section 9), around the fields read while it lives: a block's
+  /// statements, a declaration body's members, a match's arms, an operand
+  /// of a prefix operator or a conditional, the arguments of a call, an
+  /// array's or a tuple's elements, a subscript's index, a lambda's result
+  /// type, a type's arguments, elements, parameters, result or the type a
+  /// suffix wraps.  The AST has no parentheses, so a parenthesised
+  /// expression's level is not there to count: what a frontend parsed
+  /// within the limit is within it here.
+  class Nested {
+  public:
+    Nested(Builder &b, const SExpr &at) : B(b) {
+      if (++B.Depth > frontend::kMaxNesting)
+        B.fail(at, "nesting too deep (more than " +
+                       std::to_string(frontend::kMaxNesting) + " levels)");
+    }
+    ~Nested() { --B.Depth; }
+    Nested(const Nested &) = delete;
+    Nested &operator=(const Nested &) = delete;
+    /// False when this level is one too many.
+    bool ok() const { return B.Depth <= frontend::kMaxNesting; }
+
+  private:
+    Builder &B;
+  };
+
+  /// A link of a chain, as the frontends count them (docs/grammar.md
+  /// section 9): a `binary`, and a `call-value`, `member`, `method-call`,
+  /// `tuple-index` or `subscript` (also as the target of a
+  /// `member-assign` or a `subscript-assign`), one level of the chain over
+  /// the deepest of the fields built while it lives.
+  class Link {
+  public:
+    Link(Builder &b, const SExpr &at)
+        : B(b), At(at), Outer(std::exchange(b.ChainHeight, 0)) {}
+    ~Link() { B.ChainHeight = std::max(Outer, B.ChainHeight); }
+    Link(const Link &) = delete;
+    Link &operator=(const Link &) = delete;
+    /// Count the link, once its fields are built: false (failed) when it is
+    /// one too many.
+    bool ok() {
+      if (++B.ChainHeight <= frontend::kMaxChain)
+        return true;
+      B.fail(At, "nesting too deep (more than " +
+                     std::to_string(frontend::kMaxChain) + " levels)");
+      return false;
+    }
+
+  private:
+    Builder &B;
+    const SExpr &At;
+    unsigned Outer;
+  };
 
   void fail(const SExpr &at, const std::string &msg) {
     if (failed())
@@ -278,8 +386,87 @@ private:
     Err.Column = at.Column;
     Err.Message = msg;
   }
+  /// fail() with a literal: the string is made here, not in the frame of a
+  /// builder that a deep AST may hold hundreds of times over.
+  void fail(const SExpr &at, const char *msg) { fail(at, std::string(msg)); }
 
   const std::string &intern(const std::string &s) { return Ctx.intern(s); }
+
+  /// What a NAME may be where it stands, as the grammar writes it there
+  /// (docs/grammar.md sections 1 and 5).
+  enum class NameKind {
+    Ident,     ///< an identifier: anything declared, a member, a local
+    Path,      ///< identifiers joined by `::`: a callee, an enum, a type
+    TypeParam, ///< an identifier, or an untyped parameter's `typeof(x)`
+    TypeName,  ///< a Path, or an untyped parameter's `typeof(x)`
+    Member,    ///< an identifier, or a tuple index (`t.0 = e`)
+  };
+
+  static bool isPath(std::string_view s) {
+    for (size_t at = 0;;) {
+      size_t sep = s.find("::", at);
+      if (!frontend::isIdentifier(s.substr(at, sep - at)))
+        return false;
+      if (sep == std::string_view::npos)
+        return true;
+      at = sep + 2;
+    }
+  }
+
+  static bool isName(std::string_view s, NameKind kind) {
+    auto untyped = [&] {
+      return frontend::isIdentifier(names::untypedParamOf(s));
+    };
+    switch (kind) {
+    case NameKind::Ident:
+      return frontend::isIdentifier(s);
+    case NameKind::Path:
+      return isPath(s);
+    case NameKind::TypeParam:
+      return frontend::isIdentifier(s) || untyped();
+    case NameKind::TypeName:
+      return isPath(s) || untyped();
+    case NameKind::Member:
+      // A tuple index as the parser reads it: digits without a leading
+      // zero, at most INT64_MAX.
+      return frontend::isIdentifier(s) ||
+             (!s.empty() &&
+              s.find_first_not_of("0123456789") == std::string_view::npos &&
+              (s.size() == 1 || s[0] != '0') &&
+              (s.size() < 19 ||
+               (s.size() == 19 && s <= "9223372036854775807")));
+    }
+    return false;
+  }
+
+  static const char *nameKindText(NameKind kind) {
+    switch (kind) {
+    case NameKind::Ident:
+      return "an identifier";
+    case NameKind::Path:
+      return "an identifier or a qualified name (a::b)";
+    case NameKind::TypeParam:
+      return "an identifier or an untyped parameter's typeof(x)";
+    case NameKind::TypeName:
+      return "an identifier, a qualified name (a::b) or an untyped "
+             "parameter's typeof(x)";
+    case NameKind::Member:
+      return "an identifier or a tuple index";
+    }
+    return "";
+  }
+
+  /// Fail at @p at unless @p s is a NAME of @p kind (@p what is the
+  /// field's role, for the message), in a frontend's text.
+  bool checkName(const SExpr &at, const std::string &s, NameKind kind,
+                 const std::string &what) {
+    if (From != Origin::Frontend || isName(s, kind))
+      return true;
+    // Quoted as the format writes it: a plugin's name can hold any byte.
+    fail(at, "expected " + std::string(nameKindText(kind)) + ": " + what +
+                 ", not " + quote(s));
+    return false;
+  }
 
   /// The fields of one list, read left to right.
   class Fields {
@@ -338,16 +525,28 @@ private:
       return &B.intern(e->Text);
     }
 
-    /// A non-empty string.
-    const std::string *name(const char *what) {
+    /// A NAME of @p kind.
+    const std::string *name(const char *what, NameKind kind = NameKind::Ident) {
       const SExpr *at = atEnd() ? nullptr : &L.Items[I];
       const std::string *s = string(what);
       if (s && s->empty()) {
         B.fail(*at, std::string("empty name: ") + what);
         return nullptr;
       }
-      return s;
+      return s && B.checkName(*at, *s, kind, what) ? s : nullptr;
     }
+
+    /// A NAME of @p kind, or "" for none.
+    const std::string *optionalName(const char *what,
+                                    NameKind kind = NameKind::Ident) {
+      const SExpr *at = atEnd() ? nullptr : &L.Items[I];
+      const std::string *s = string(what);
+      return s && (s->empty() || B.checkName(*at, *s, kind, what)) ? s
+                                                                   : nullptr;
+    }
+
+    /// The field read last (the caller read one).
+    const SExpr &last() const { return L.Items[I - 1]; }
 
     const SExpr *symbol(const char *what) {
       const SExpr *e = next(what);
@@ -542,6 +741,9 @@ private:
     const SExpr *fl = f.list("fields");
     if (!fl)
       return nullptr;
+    Nested body(*this, *fl);
+    if (!body.ok())
+      return nullptr;
     for (const SExpr &v : fl->Items) {
       if (v.K != SExpr::List || v.Text != "var")
         return fail(v, "expected a field: (var ...)"), nullptr;
@@ -570,7 +772,7 @@ private:
   ImplDecl *implDecl(const SExpr &e) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
-    const std::string *typeName = f.string("the type's name");
+    const std::string *typeName = f.name("the type's name", NameKind::Path);
     if (!typeName)
       return nullptr;
     // `impl Box<T>`: (type-params NAME...) after the type's name.
@@ -579,6 +781,8 @@ private:
       for (const SExpr &item : tl->Items) {
         if (item.K != SExpr::String || item.Text.empty())
           return fail(item, "expected a type parameter name"), nullptr;
+        if (!checkName(item, item.Text, NameKind::Ident, "a type parameter"))
+          return nullptr;
         params.push_back(&intern(item.Text));
       }
       if (params.empty())
@@ -593,7 +797,12 @@ private:
         return nullptr;
     }
     std::vector<FuncDecl *> methods;
-    if (!methodList(f, methods, FuncKind::ImplMethod) || !f.done())
+    {
+      Nested body(*this, e);
+      if (!body.ok() || !methodList(f, methods, FuncKind::ImplMethod))
+        return nullptr;
+    }
+    if (!f.done())
       return nullptr;
     return Ctx.make<ImplDecl>(loc, *typeName, std::move(methods), trait,
                               std::move(params));
@@ -610,7 +819,12 @@ private:
     if (!bounds.empty())
       return fail(e, "a trait's type parameters cannot have bounds"), nullptr;
     std::vector<FuncDecl *> methods;
-    if (!methodList(f, methods, FuncKind::Requirement) || !f.done())
+    {
+      Nested body(*this, e);
+      if (!body.ok() || !methodList(f, methods, FuncKind::Requirement))
+        return nullptr;
+    }
+    if (!f.done())
       return nullptr;
     return Ctx.make<TraitDecl>(loc, *name, std::move(tparams),
                                std::move(methods));
@@ -648,7 +862,7 @@ private:
     bool system = false;
     if (!f.boolean("whether the import is a system import (::name)", system))
       return nullptr;
-    const std::string *base = f.string("the base path");
+    const std::string *base = f.optionalName("the base path", NameKind::Path);
     if (!base)
       return nullptr;
     std::vector<ImportDecl::Module> modules;
@@ -657,7 +871,7 @@ private:
         return fail(*m, "expected (module \"name\" \"alias\")"), nullptr;
       Fields mf(*this, *m);
       const std::string *name = mf.name("the module's name");
-      const std::string *alias = name ? mf.string("the alias") : nullptr;
+      const std::string *alias = name ? mf.optionalName("the alias") : nullptr;
       if (!alias || !mf.done())
         return nullptr;
       modules.push_back({name, alias});
@@ -717,6 +931,9 @@ private:
       variants.push_back(v);
       payloads.emplace_back();
     }
+    // The check the grammar makes (docs/grammar.md).
+    if (variants.empty())
+      return fail(e, "an enum needs at least one variant"), nullptr;
     auto *ed = Ctx.make<EnumDecl>(loc, *name, std::move(variants),
                                   std::move(payloads), std::move(params));
     ed->setTypeParamBounds(std::move(bounds));
@@ -736,7 +953,7 @@ private:
       const std::string *p = nullptr;
       if (item.K == SExpr::List && item.Text == "bound") {
         Fields bf(*this, item);
-        p = bf.name("a type parameter");
+        p = bf.name("a type parameter", NameKind::TypeParam);
         if (!p)
           return false;
         while (!bf.atEnd()) {
@@ -749,6 +966,9 @@ private:
           return fail(item, "(bound ...) needs at least one trait"), false;
         anyBound = true;
       } else if (item.K == SExpr::String && !item.Text.empty()) {
+        if (!checkName(item, item.Text, NameKind::TypeParam,
+                       "a type parameter"))
+          return false;
         p = &intern(item.Text);
       } else {
         return fail(item, "expected a type parameter: \"T\" or "
@@ -767,7 +987,8 @@ private:
     Fields f(*this, e);
     SourceLocation loc = f.location();
     const std::string *name = f.name("the class's name");
-    const std::string *super = name ? f.string("the superclass") : nullptr;
+    const std::string *super =
+        name ? f.optionalName("the superclass", NameKind::Path) : nullptr;
     std::vector<const std::string *> params;
     TypeParamBounds bounds;
     if (!super || !typeParams(f, params, bounds))
@@ -776,6 +997,9 @@ private:
     std::vector<FuncDecl *> methods;
     const SExpr *fl = f.list("fields");
     if (!fl)
+      return nullptr;
+    Nested body(*this, *fl);
+    if (!body.ok())
       return nullptr;
     for (const SExpr &v : fl->Items) {
       if (v.K != SExpr::List || v.Text != "var")
@@ -848,7 +1072,10 @@ private:
                            "top-level function can (a 'native fn')"),
                nullptr;
       Fields nf(*this, *nl);
-      const std::string *symbol = nf.name("the C symbol");
+      // Any C symbol, which is no NAME of the grammar's.
+      const std::string *symbol = nf.string("the C symbol");
+      if (symbol && symbol->empty())
+        return fail(nf.last(), "empty name: the C symbol"), nullptr;
       if (!symbol || !nf.done() || !f.done())
         return nullptr;
       auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, nullptr,
@@ -891,6 +1118,12 @@ private:
       return fail(e, "function '" + *name +
                          "' has (qual static): only an 'impl' block's "
                          "method can (a 'static fn')"),
+             nullptr;
+    // Only a free function is generic, as the grammar has it.
+    if (!tparams.empty() &&
+        (kind == FuncKind::ClassMethod || kind == FuncKind::ImplMethod))
+      return fail(e, std::string(isStatic ? frontend::kGenericStaticFn
+                                          : frontend::kGenericMethod)),
              nullptr;
     // `fn double(x: int) => x * 2;`: a trailing (inferred), as a lambda's.
     const SExpr *inferred = f.optionalList("inferred");
@@ -941,9 +1174,9 @@ private:
   VarDecl *varDecl(const SExpr &e, bool discardable = false) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
-    const std::string *name = discardable
-                                  ? f.string("the variable's name (\"\" for _)")
-                                  : f.name("the variable's name");
+    const std::string *name =
+        discardable ? f.optionalName("the variable's name (\"\" for _)")
+                    : f.name("the variable's name");
     if (!name)
       return nullptr;
     Type *ty = nullptr;
@@ -1003,7 +1236,7 @@ private:
     Fields f(*this, e);
     SourceLocation loc = f.location();
     if (e.Text == "named-type") {
-      const std::string *name = f.name("the type's name");
+      const std::string *name = f.name("the type's name", NameKind::TypeName);
       if (!name || !f.done())
         return nullptr;
       // As the recursive-descent frontend does: a builtin (int, ...) or a
@@ -1016,13 +1249,18 @@ private:
       return Ctx.make<ClassType>(loc, *name, nullptr);
     }
     if (e.Text == "array-type") {
-      Type *elem = type(f, "the element type");
+      Nested inner(*this, e);
+      Type *elem = inner.ok() ? type(f, "the element type") : nullptr;
       if (!elem || !f.done())
         return nullptr;
       return Ctx.make<ArrayType>(loc, elem);
     }
     if (e.Text == "fixed-array-type") {
-      Type *elem = type(f, "the element type");
+      Type *elem = nullptr;
+      {
+        Nested inner(*this, e);
+        elem = inner.ok() ? type(f, "the element type") : nullptr;
+      }
       if (!elem)
         return nullptr;
       // `_`: a length the declaration infers (docs/grammar.md).
@@ -1046,7 +1284,11 @@ private:
       return Ctx.make<FixedArrayType>(loc, elem, n);
     }
     if (e.Text == "optional-type") {
-      Type *inner = type(f, "the inner type");
+      Type *inner = nullptr;
+      {
+        Nested level(*this, e);
+        inner = level.ok() ? type(f, "the inner type") : nullptr;
+      }
       if (!inner || !f.done())
         return nullptr;
       // The checks the grammar makes (docs/grammar.md).
@@ -1060,6 +1302,9 @@ private:
       return Ctx.make<OptionalType>(loc, inner);
     }
     if (e.Text == "tuple-type") {
+      Nested inner(*this, e);
+      if (!inner.ok())
+        return nullptr;
       std::vector<Type *> elems;
       while (!f.atEnd()) {
         Type *t = type(f, "an element type");
@@ -1073,7 +1318,9 @@ private:
       return Ctx.make<TupleType>(loc, std::move(elems));
     }
     if (e.Text == "fn-type") {
-      const SExpr *pl = f.list("params");
+      // The parameters and the result, one level in.
+      Nested inner(*this, e);
+      const SExpr *pl = inner.ok() ? f.list("params") : nullptr;
       if (!pl)
         return nullptr;
       std::vector<Type *> params;
@@ -1096,8 +1343,10 @@ private:
                                     ret);
     }
     if (e.Text == "generic-type") {
-      const std::string *name = f.name("the generic type's name");
-      if (!name)
+      const std::string *name =
+          f.name("the generic type's name", NameKind::Path);
+      Nested inner(*this, e);
+      if (!name || !inner.ok())
         return nullptr;
       std::vector<Type *> args;
       while (!f.atEnd()) {
@@ -1143,6 +1392,9 @@ private:
     const std::string &t = e.Text;
     Stmt *out = nullptr;
     if (t == "block") {
+      Nested inner(*this, e);
+      if (!inner.ok())
+        return nullptr;
       std::vector<Stmt *> stmts;
       while (!f.atEnd()) {
         Stmt *s = stmt(f, "a statement");
@@ -1173,6 +1425,12 @@ private:
       VarDecl *vd = v ? varDecl(*v) : nullptr;
       if (!vd)
         return nullptr;
+      // The check the grammar makes (docs/grammar.md): a local starts with
+      // its initialiser's value, a `weak` one without one as None.
+      if (!vd->getInitExpr() && !vd->isWeak())
+        return fail(*v, "a local declaration has an initialiser (only a "
+                        "(weak) one may leave it out)"),
+               nullptr;
       out = Ctx.make<DeclStmt>(loc, vd);
     } else if (t == "expr") {
       Expr *x = expr(f, "the expression");
@@ -1192,7 +1450,13 @@ private:
         if (x->Text != "block" && x->Text != "if")
           return fail(*x, "the else branch is a (block ...) or an (if ...)"),
                  nullptr;
-        els = stmt(*x);
+        if (x->Text == "if") {
+          // An `elif`: a level of nesting, as the frontends count it.
+          Nested level(*this, *x);
+          els = level.ok() ? stmt(*x) : nullptr;
+        } else {
+          els = stmt(*x);
+        }
         if (!els)
           return nullptr;
       }
@@ -1238,15 +1502,28 @@ private:
     } else if (t == "continue") {
       out = Ctx.make<ContinueStmt>(loc);
     } else if (t == "member-assign") {
-      Expr *recv = expr(f, "the receiver");
-      const std::string *field = recv ? f.name("the field's name") : nullptr;
+      Expr *recv = nullptr;
+      {
+        Link target(*this, e); // the `recv.field` assigned to
+        recv = operand(f, e, "the receiver", Operand::Receiver);
+        if (recv && !target.ok())
+          return nullptr;
+      }
+      const std::string *field =
+          recv ? f.name("the field's name", NameKind::Member) : nullptr;
       Expr *v = field ? expr(f, "the assigned value") : nullptr;
       if (!v)
         return nullptr;
       out = Ctx.make<MemberAssignStmt>(loc, recv, *field, v);
     } else if (t == "subscript-assign") {
-      Expr *arr = expr(f, "the array");
-      Expr *idx = arr ? expr(f, "the index") : nullptr;
+      Expr *arr = nullptr, *idx = nullptr;
+      {
+        Link target(*this, e); // the `arr[idx]` assigned to
+        arr = operand(f, e, "the array", Operand::Receiver);
+        idx = arr ? nestedExpr(f, e, "the index") : nullptr;
+        if (idx && !target.ok())
+          return nullptr;
+      }
       Expr *v = idx ? expr(f, "the assigned value") : nullptr;
       if (!v)
         return nullptr;
@@ -1256,12 +1533,18 @@ private:
       if (!subject)
         return nullptr;
       std::vector<MatchArm *> arms;
+      Nested inner(*this, e);
+      if (!inner.ok())
+        return nullptr;
       for (const SExpr *a : f.rest()) {
         MatchArm *arm = matchArm(*a);
         if (!arm)
           return nullptr;
         arms.push_back(arm);
       }
+      // The check the grammar makes (docs/grammar.md).
+      if (arms.empty())
+        return fail(e, "a match needs at least one arm"), nullptr;
       out = Ctx.make<MatchStmt>(loc, subject, std::move(arms));
     } else if (t == "destructure") {
       const SExpr *tl = f.list("targets");
@@ -1273,7 +1556,8 @@ private:
           return fail(te, "expected (target \"name\" TYPE-or-_)"), nullptr;
         Fields tf(*this, te);
         SourceLocation tloc = tf.location();
-        const std::string *name = tf.string("the target's name (\"\" for _)");
+        const std::string *name =
+            tf.optionalName("the target's name (\"\" for _)");
         if (!name)
           return nullptr;
         Type *ty = nullptr;
@@ -1298,14 +1582,30 @@ private:
     return f.done() ? out : nullptr;
   }
 
+  /// Whether @p tag is a literal's, the nodes a value arm's pattern is.
+  static bool literalTag(const std::string &tag) {
+    for (const char *t : {"int", "float", "bool", "char", "string", "none"})
+      if (tag == t)
+        return true;
+    return false;
+  }
+
   MatchArm *matchArm(const SExpr &e) {
     if (e.K != SExpr::List)
       return fail(e, "expected a match arm"), nullptr;
     Fields f(*this, e);
     SourceLocation loc = f.location();
-    const std::string *binding = f.string("the arm's binding (\"\" for none)");
+    const std::string *binding =
+        f.optionalName("the arm's binding (\"\" for none)");
     if (!binding)
       return nullptr;
+    // The checks the grammar makes (docs/grammar.md): only a type arm binds
+    // the subject.
+    if (!binding->empty() && e.Text != "type-arm")
+      return fail(f.last(), "(" + e.Text +
+                                " ...) has no binding: its "
+                                "binding is \"\""),
+             nullptr;
     MatchArm *arm = nullptr;
     if (e.Text == "type-arm") {
       Type *ty = type(f, "the matched type");
@@ -1320,7 +1620,14 @@ private:
         arm->setMode(mode);
       }
     } else if (e.Text == "value-arm") {
-      Expr *pattern = expr(f, "the matched value");
+      // The check the grammar makes (docs/grammar.md): the pattern is a
+      // literal, a negative number's (`(int -1)`) included.
+      const SExpr *pe = f.anyList("the matched value");
+      if (pe && !literalTag(pe->Text))
+        return fail(*pe, "a value arm's pattern is a literal (int, float, "
+                         "bool, char, string or none)"),
+               nullptr;
+      Expr *pattern = pe ? expr(*pe) : nullptr;
       CompoundStmt *body = pattern ? block(f, "the arm's body") : nullptr;
       if (body)
         arm = Ctx.make<MatchArm>(loc, *binding, pattern, body);
@@ -1349,12 +1656,141 @@ private:
     return e ? expr(*e) : nullptr;
   }
 
-  bool exprs(Fields &f, std::vector<Expr *> &out) {
+  /// expr(@p f, @p what) one level of nesting inside @p parent.
+  Expr *nestedExpr(Fields &f, const SExpr &parent, const char *what) {
+    Nested inner(*this, parent);
+    return inner.ok() ? expr(f, what) : nullptr;
+  }
+
+  /// Where an operand stands: a binary operator's left or right operand, a
+  /// prefix operator's, the expression a suffix applies to (a call of a
+  /// function value, a field, a method call, a tuple index, a subscript, or
+  /// the target of an assignment to one), or a conditional's condition.
+  enum class Operand { Left, Right, Prefix, Receiver, Condition };
+
+  /// The precedence the grammar gives @p op (docs/grammar.md section 6):
+  /// 1 for `||` up to 5 for `*`, `/` and `%`; the relational operators'
+  /// (kRelational) do not chain.
+  static int precedence(BinaryOpcode op) {
+    switch (op) {
+    case BinaryOpcode::Or:
+      return 1;
+    case BinaryOpcode::And:
+      return 2;
+    case BinaryOpcode::Lt:
+    case BinaryOpcode::Gt:
+    case BinaryOpcode::Le:
+    case BinaryOpcode::Ge:
+    case BinaryOpcode::Eq:
+    case BinaryOpcode::Ne:
+      return kRelational;
+    case BinaryOpcode::Add:
+    case BinaryOpcode::Sub:
+      return 4;
+    case BinaryOpcode::Mul:
+    case BinaryOpcode::Div:
+    case BinaryOpcode::Mod:
+      return 5;
+    case BinaryOpcode::Count:
+      break;
+    }
+    return 0;
+  }
+  static constexpr int kRelational = 3;
+
+  /// Whether the operand @p e, at @p where of a binary operator of
+  /// precedence @p prec, is one the grammar writes in parentheses there:
+  /// a conditional anywhere; a binary operator's of lower precedence on the
+  /// left (or a comparison's of a comparison), of the same or lower on the
+  /// right, and any as the operand of a prefix operator or what a suffix
+  /// applies to; a prefix operator's as what a suffix applies to; and a
+  /// lambda with an expression body (`fn() => e`, (inferred)) on the left
+  /// or before a suffix, where its body would take what follows.  The AST
+  /// has no parentheses, but such an operand is a level of nesting, as its
+  /// parenthesis is for the frontends (docs/grammar.md section 9): the AST
+  /// of a program is held to the nesting its source has.
+  static bool operandNests(const SExpr &e, Operand where, int prec) {
+    if (e.K != SExpr::List)
+      return false;
+    if (e.Text == "ternary")
+      return true;
+    if (e.Text == "lambda")
+      return (where == Operand::Left || where == Operand::Receiver) &&
+             !e.Items.empty() && e.Items.back().K == SExpr::List &&
+             e.Items.back().Text == "inferred";
+    if (e.Text == "unary")
+      return where == Operand::Receiver;
+    const int q = binaryPrecedenceOf(e);
+    if (!q)
+      return false;
+    switch (where) {
+    case Operand::Left:
+      return q < prec || (q == prec && prec == kRelational);
+    case Operand::Right:
+      return q <= prec;
+    case Operand::Prefix:
+    case Operand::Receiver:
+      return true;
+    case Operand::Condition:
+      return false;
+    }
+    return false;
+  }
+
+  /// The precedence of the operator of the `binary` @p e, or 0 when @p e is
+  /// not one with an operator the format names.
+  static int binaryPrecedenceOf(const SExpr &e) {
+    if (e.K != SExpr::List || e.Text != "binary")
+      return 0;
+    size_t at = !e.Items.empty() && e.Items[0].K == SExpr::Location ? 1 : 0;
+    BinaryOpcode op{};
+    if (at >= e.Items.size() || e.Items[at].K != SExpr::Symbol ||
+        !binaryOp(e.Items[at].Text, op))
+      return 0;
+    return precedence(op);
+  }
+
+  /// expr(@p f, @p what), the operand of @p parent at @p where (of a binary
+  /// operator of precedence @p prec): one level of nesting inside
+  /// @p parent when the grammar writes it in parentheses (operandNests).
+  Expr *operand(Fields &f, const SExpr &parent, const char *what, Operand where,
+                int prec = 0) {
+    if (!f.atEnd() && operandNests(*f.peekList(), where, prec))
+      return nestedExpr(f, parent, what);
+    return expr(f, what);
+  }
+
+  /// The remaining fields, expressions (the arguments of a call, the
+  /// elements of an array or a tuple), one level of nesting inside
+  /// @p parent when there are any.
+  bool exprs(Fields &f, const SExpr &parent, std::vector<Expr *> &out) {
+    if (f.atEnd())
+      return true;
+    Nested inner(*this, parent);
+    if (!inner.ok())
+      return false;
     while (!f.atEnd()) {
       Expr *x = expr(f, "an expression");
       if (!x)
         return false;
       out.push_back(x);
+    }
+    return true;
+  }
+
+  /// The type arguments in @p list into @p out, one level of nesting
+  /// inside it.
+  bool typeArgs(const SExpr &list, std::vector<Type *> &out) {
+    Nested inner(*this, list);
+    if (!inner.ok())
+      return false;
+    for (const SExpr &ta : list.Items) {
+      if (ta.K != SExpr::List)
+        return fail(ta, "expected a type"), false;
+      Type *ty = type(ta);
+      if (!ty)
+        return false;
+      out.push_back(ty);
     }
     return true;
   }
@@ -1376,7 +1812,73 @@ private:
     return false;
   }
 
+  /// The list a link of a chain builds first, its operand (a `binary`'s
+  /// left operand; the function value, receiver, tuple or array of a
+  /// suffix), when @p e is a link with one; else null.
+  /// An operand written in parentheses (operandNests) is not one: it is
+  /// built inside its level of nesting, by its link.
+  static const SExpr *chainOperand(const SExpr &e) {
+    if (e.K != SExpr::List)
+      return nullptr;
+    size_t at = !e.Items.empty() && e.Items[0].K == SExpr::Location ? 1 : 0;
+    const int prec = binaryPrecedenceOf(e);
+    if (e.Text == "binary")
+      ++at; // the operator
+    else if (e.Text != "call-value" && e.Text != "member" &&
+             e.Text != "method-call" && e.Text != "tuple-index" &&
+             e.Text != "subscript")
+      return nullptr;
+    if (at >= e.Items.size() || e.Items[at].K != SExpr::List ||
+        operandNests(e.Items[at], prec ? Operand::Left : Operand::Receiver,
+                     prec))
+      return nullptr;
+    return &e.Items[at];
+  }
+
+  /// The expressions, and their chain heights, of the links of a chain
+  /// below the one being built, built innermost first (buildChainBelow)
+  /// and not taken yet.
+  std::unordered_map<const SExpr *, std::pair<Expr *, unsigned>> ChainBuilt;
+
+  /// When @p e is a link of a chain whose operand is a link too: build the
+  /// links below @p e, innermost first, so that reading a chain of any
+  /// length recurses no deeper than a few links.  Each link builds its
+  /// operand first, so that is the order they are built in anyway; a link
+  /// counts in the chain height of the link above it when that takes it.
+  void buildChainBelow(const SExpr &e) {
+    const SExpr *operand = chainOperand(e);
+    if (!operand || !chainOperand(*operand) || ChainBuilt.count(operand))
+      return;
+    std::vector<const SExpr *> links;
+    for (const SExpr *x = operand; chainOperand(*x); x = chainOperand(*x))
+      links.push_back(x);
+    for (auto it = links.rbegin(); it != links.rend(); ++it) {
+      const unsigned outer = std::exchange(ChainHeight, 0);
+      Expr *built = node(**it);
+      ChainBuilt[*it] = {built, ChainHeight};
+      ChainHeight = outer;
+    }
+  }
+
   Expr *expr(const SExpr &e) {
+    if (failed())
+      return nullptr;
+    if (!ChainBuilt.empty()) {
+      auto built = ChainBuilt.find(&e);
+      if (built != ChainBuilt.end()) {
+        auto [x, height] = built->second;
+        ChainBuilt.erase(built);
+        ChainHeight = std::max(ChainHeight, height);
+        return x;
+      }
+    }
+    buildChainBelow(e);
+    return node(e);
+  }
+
+  /// expr(@p e) of a link whose operand was built already, and of
+  /// everything else.
+  Expr *node(const SExpr &e) {
     Fields f(*this, e);
     SourceLocation loc = f.location();
     const std::string &t = e.Text;
@@ -1430,7 +1932,9 @@ private:
         return fail(*op,
                     "unknown unary operator '" + op->Text + "' (neg, not)"),
                nullptr;
-      Expr *x = expr(f, "the operand");
+      Nested inner(*this, e);
+      Expr *x =
+          inner.ok() ? operand(f, e, "the operand", Operand::Prefix) : nullptr;
       if (!x)
         return nullptr;
       out = Ctx.make<UnaryExpr>(
@@ -1442,9 +1946,12 @@ private:
         return nullptr;
       if (!binaryOp(op->Text, bop))
         return fail(*op, "unknown binary operator '" + op->Text + "'"), nullptr;
-      Expr *lhs = expr(f, "the left operand");
-      Expr *rhs = lhs ? expr(f, "the right operand") : nullptr;
-      if (!rhs)
+      Link link(*this, e);
+      const int prec = precedence(bop);
+      Expr *lhs = operand(f, e, "the left operand", Operand::Left, prec);
+      Expr *rhs = lhs ? operand(f, e, "the right operand", Operand::Right, prec)
+                      : nullptr;
+      if (!rhs || !link.ok())
         return nullptr;
       out = Ctx.make<BinaryExpr>(loc, bop, lhs, rhs);
     } else if (t == "ident") {
@@ -1453,50 +1960,48 @@ private:
         return nullptr;
       out = Ctx.make<Identifier>(loc, *name);
     } else if (t == "call") {
-      const std::string *callee = f.name("the callee's name");
+      const std::string *callee = f.name("the callee's name", NameKind::Path);
       const SExpr *tl = callee ? f.list("type-args") : nullptr;
       if (!tl)
         return nullptr;
       std::vector<Type *> targs;
-      for (const SExpr &ta : tl->Items) {
-        if (ta.K != SExpr::List)
-          return fail(ta, "expected a type"), nullptr;
-        Type *ty = type(ta);
-        if (!ty)
-          return nullptr;
-        targs.push_back(ty);
-      }
+      if (!tl->Items.empty() && !typeArgs(*tl, targs))
+        return nullptr;
       std::vector<Expr *> args;
-      if (!exprs(f, args))
+      if (!exprs(f, e, args))
         return nullptr;
       out = Ctx.make<CallExpr>(loc, *callee, std::move(args), std::move(targs));
     } else if (t == "method-call") {
-      Expr *recv = expr(f, "the receiver");
+      Link link(*this, e);
+      Expr *recv = operand(f, e, "the receiver", Operand::Receiver);
       const std::string *name = recv ? f.name("the method's name") : nullptr;
       std::vector<Expr *> args;
-      if (!name || !exprs(f, args))
+      if (!name || !exprs(f, e, args) || !link.ok())
         return nullptr;
       out = Ctx.make<MethodCallExpr>(loc, recv, *name, std::move(args));
     } else if (t == "ternary") {
-      Expr *c = expr(f, "the condition");
+      Nested inner(*this, e);
+      Expr *c = inner.ok() ? operand(f, e, "the condition", Operand::Condition)
+                           : nullptr;
       Expr *a = c ? expr(f, "the value if true") : nullptr;
       Expr *b = a ? expr(f, "the value if false") : nullptr;
       if (!b)
         return nullptr;
       out = Ctx.make<TernaryExpr>(loc, c, a, b);
     } else if (t == "member") {
-      Expr *recv = expr(f, "the receiver");
+      Link link(*this, e);
+      Expr *recv = operand(f, e, "the receiver", Operand::Receiver);
       const std::string *name = recv ? f.name("the field's name") : nullptr;
-      if (!name)
+      if (!name || !link.ok())
         return nullptr;
       out = Ctx.make<MemberAccessExpr>(loc, recv, *name);
     } else if (t == "array") {
       std::vector<Expr *> elems;
-      if (!exprs(f, elems))
+      if (!exprs(f, e, elems))
         return nullptr;
       out = Ctx.make<ArrayLiteralExpr>(loc, std::move(elems));
     } else if (t == "array-repeat") {
-      Expr *v = expr(f, "the repeated value");
+      Expr *v = nestedExpr(f, e, "the repeated value");
       int64_t n = 0;
       if (!v || !f.integer("the count", n))
         return nullptr;
@@ -1504,27 +2009,22 @@ private:
         return fail(e, "an array has at least one element"), nullptr;
       out = Ctx.make<ArrayLiteralExpr>(loc, std::vector<Expr *>{v}, n);
     } else if (t == "subscript") {
-      Expr *arr = expr(f, "the array");
-      Expr *idx = arr ? expr(f, "the index") : nullptr;
-      if (!idx)
+      Link link(*this, e);
+      Expr *arr = operand(f, e, "the array", Operand::Receiver);
+      Expr *idx = arr ? nestedExpr(f, e, "the index") : nullptr;
+      if (!idx || !link.ok())
         return nullptr;
       out = Ctx.make<SubscriptExpr>(loc, arr, idx);
     } else if (t == "enum-value") {
-      const std::string *en = f.name("the enum's name");
+      const std::string *en = f.name("the enum's name", NameKind::Path);
       const std::string *v = en ? f.name("the variant's name") : nullptr;
       if (!v)
         return nullptr;
       // A generic enum's (type-args TYPE...), `Option<int>::Nothing`.
       std::vector<Type *> targs;
       if (const SExpr *tl = f.optionalList("type-args")) {
-        for (const SExpr &ta : tl->Items) {
-          if (ta.K != SExpr::List)
-            return fail(ta, "expected a type"), nullptr;
-          Type *ty = type(ta);
-          if (!ty)
-            return nullptr;
-          targs.push_back(ty);
-        }
+        if (!typeArgs(*tl, targs))
+          return nullptr;
         if (targs.empty())
           return fail(*tl, "(type-args) of an enum value needs a type"),
                  nullptr;
@@ -1534,16 +2034,13 @@ private:
       return fail(e, "(mov ...): " + std::string(frontend::kMovRemoved)),
              nullptr;
     } else if (t == "call-value") {
-      Expr *callee = expr(f, "the function value");
+      Link link(*this, e);
+      Expr *callee = operand(f, e, "the function value", Operand::Receiver);
       if (!callee)
         return nullptr;
       std::vector<Expr *> args;
-      while (!f.atEnd()) {
-        Expr *a = expr(f, "an argument");
-        if (!a)
-          return nullptr;
-        args.push_back(a);
-      }
+      if (!exprs(f, e, args) || !link.ok())
+        return nullptr;
       return Ctx.make<CallValueExpr>(loc, callee, std::move(args));
     } else if (t == "lambda") {
       const SExpr *pl = f.list("params");
@@ -1563,7 +2060,8 @@ private:
       }
       Type *ret = nullptr;
       if (!f.absent()) {
-        ret = type(f, "the result type or _");
+        Nested inner(*this, e);
+        ret = inner.ok() ? type(f, "the result type or _") : nullptr;
         if (!ret)
           return nullptr;
       }
@@ -1592,15 +2090,16 @@ private:
       return lambda;
     } else if (t == "tuple") {
       std::vector<Expr *> elems;
-      if (!exprs(f, elems))
+      if (!exprs(f, e, elems))
         return nullptr;
       if (elems.size() < 2)
         return fail(e, "a tuple needs at least two elements"), nullptr;
       out = Ctx.make<TupleLiteralExpr>(loc, std::move(elems));
     } else if (t == "tuple-index") {
-      Expr *tup = expr(f, "the tuple");
+      Link link(*this, e);
+      Expr *tup = operand(f, e, "the tuple", Operand::Receiver);
       int64_t idx = 0;
-      if (!tup || !f.integer("the index", idx))
+      if (!tup || !f.integer("the index", idx) || !link.ok())
         return nullptr;
       if (idx < 0)
         return fail(e, "a tuple index is not negative"), nullptr;
@@ -1614,8 +2113,8 @@ private:
 
 } // namespace
 
-TranslationUnit *read(std::string_view text, ASTContext &ctx,
-                      ReadError &error) {
+TranslationUnit *read(std::string_view text, ASTContext &ctx, ReadError &error,
+                      Origin origin) {
   error = ReadError();
   Lexer lexer(text);
   SExpr form;
@@ -1623,7 +2122,7 @@ TranslationUnit *read(std::string_view text, ASTContext &ctx,
     error = lexer.Err;
     return nullptr;
   }
-  Builder b(ctx, error);
+  Builder b(ctx, error, origin);
   TranslationUnit *tu = b.top(form);
   if (!error.Message.empty())
     return nullptr;

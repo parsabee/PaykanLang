@@ -2342,6 +2342,29 @@ public:
   }
 };
 
+/// The operand of a link of a chain (paykan::frontend::kMaxChain), which the
+/// link's visitors take first: a binary operator's left operand, and the
+/// expression a postfix suffix applies to (a call of a function value, a
+/// field or method access, a tuple index, a subscript); null for any other
+/// expression.  A long chain nests its links down these operands, so a pass
+/// over it walks them in a loop (Sema's and the lowering's visitors type and
+/// emit a long chain from its innermost link out).
+inline Expr *chainOperand(const Expr *e) {
+  if (const auto *b = dyn_cast<BinaryExpr>(e))
+    return b->getLHS();
+  if (const auto *m = dyn_cast<MethodCallExpr>(e))
+    return m->getReceiver();
+  if (const auto *m = dyn_cast<MemberAccessExpr>(e))
+    return m->getReceiver();
+  if (const auto *t = dyn_cast<TupleIndexExpr>(e))
+    return t->getTuple();
+  if (const auto *s = dyn_cast<SubscriptExpr>(e))
+    return s->getArray();
+  if (const auto *c = dyn_cast<CallValueExpr>(e))
+    return c->getCallee();
+  return nullptr;
+}
+
 /// Returns true for an enum whose variants carry fields, a tagged union
 /// (`enum E { A, B(x: int) }`): a value held in memory, its tag and then
 /// each payload in place.  An enum without fields is a 64-bit integer.

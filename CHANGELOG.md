@@ -525,8 +525,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A `match` on an enum, or on integer, `char` or `bool` literals, is a `switch` statement in
   PIR (docs/pir.md §6), a case per value and the wildcard its default, instead of an if-else
-  chain; one on floats, classes, optionals or strings stays a chain.  Both targets switch on
-  it: the LLVM IR at every optimisation level (`switch i64`), and `--emit-c`'s C (`switch`).
+  chain.  One on floats, classes, optionals or strings tests its arms in turn, each only
+  while none before it held, then switches on the index of the first that held (*Fixed*).
+  Both targets switch on it: the LLVM IR at every optimisation level (`switch i64`), and
+  `--emit-c`'s C (`switch`).
 - LLVM is 22.1.8 (was 17.0.6, for the llvm backend), whose prebuilt release includes MLIR.
   Only what PaykanLang uses is extracted (headers, the LLVM and MLIR libraries and the tools
   the build and the scripts run), about 2 GB of the archive's 12.  The prebuilt LLVM links
@@ -571,6 +573,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `stdlib/CMakeLists.txt`, which stages it, runs every suite (tests/suites.json,
   `scripts/affected_tests.py`).  The `TestSelection` test (`configure` suite,
   `scripts/test_selection.py`) checks both picks.
+- A method or a `static fn` with type parameters of its own is a syntax error, on every
+  frontend: `a method cannot have type parameters of its own: only a free function is
+  generic (the methods of a generic class or struct use its type parameters)`, and `a
+  'static fn' cannot have type parameters of its own: ...` (`frontend::kGenericMethod`,
+  `kGenericStaticFn`), at the `<`.  They were parsed and ignored: `class A { fn f<T>(x:
+  int) -> int { ... } }` compiled as if `T` were not there, `static fn id<T>(y: T) -> T` in
+  an `impl` block was `return type has unknown class type 'T'`, and `fn map<U>(x: U) -> U`
+  in a generic class `unknown class type 'U'`.  The AST interchange reader rejects a
+  class's or an `impl` block's method with `(type-params ...)` alike
+  (docs/grammar.md section 4, docs/language/13-generics.md, "Declaring a Generic Function").
+- Two new limits hold a program to what the passes after the frontend can take on a
+  quarter of the default stack (*Fixed*, docs/grammar.md section 9), on every frontend and
+  in the AST interchange reader:
+  - A chain of more than 2048 links is `nesting too deep (more than 2048 levels)`
+    (`frontend::kMaxChain`): each binary operator, call, field, method call, tuple index
+    and subscript is a link, counted along any path down the expression, so `x = 1 + 1 +
+    ...` with 3000 terms, which compiled, is rejected.  Split such a chain with locals
+    (`a = x0 + ... + x999; b = a + x1000 + ...;`).
+  - An `elif` is a level of nesting, as the `if` of an `else` block, so an `if` takes up
+    to 510 of them in a function's body, and more are `nesting too deep (more than 512
+    levels)` (`frontend::kMaxNesting`).  Write a longer chain as a `match`, which takes any
+    number of arms, or as `if`s in turn that each `return`.
+  - The AST interchange format nests up to 4112 lists (`kMaxDepth`, was 2048), and its
+    reader counts the levels and links the frontends count, an operand the grammar writes
+    in parentheses (`a + (b + c)`, `(a == b) == c`) as the level its parenthesis is
+    (docs/plugins/ast-format.md section 3): a frontend plugin's AST deeper than the
+    frontends parse is rejected.
 - Tests: the standard library's tests (`tests/Stdlib`, `scripts/stdlib_tests.py`) run on
   every path at -O0 and -O2, where they ran only with `paykan run` at -O2: `paykan run`
   (`StdlibTests`), `paykan build` (`StdlibTestsBuild`, `--build`) and the C `--emit-c`
@@ -851,6 +880,163 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   C code of a generic native function is compiled against 0.3.0's `Runtime.h`.  A type
   that names no such word (`int`, `Str?`) costs no more on `at`, `get`, `copy` and
   `swap`: the buffer looks at `nunset` before it calls `PaykanType_isUnset`.
+- Deeply nested lambda bodies, function-type results and array type suffixes did not count
+  toward the nesting limit, and overflowed the stack: `fn() => fn() => ... 0` 5000 deep
+  and `() -> () -> ... int` 10000 deep crashed the parser (exit status 139), 3000 nested
+  lambdas crashed `paykan run`, and `int[][]...` 20000 deep crashed Sema.  A lambda's and
+  a function's `=>` body (as the block it stands for), a lambda's result type, a function
+  type's result and each `[]`, `[N]` and `?` suffix, around the levels of the type it
+  wraps, are now a level each, and 513 of them are `nesting too deep (more than 512
+  levels)` (docs/grammar.md section 9).  The AST interchange reader, which reads the AST
+  of a frontend plugin and the `ast-text` frontend's input, held an AST only to its 2048
+  lists, so it took 600 nested blocks or 600 nested lambdas, which no frontend parses.  It
+  now counts the levels the frontends count, in the AST, and rejects one more with the same
+  message (docs/plugins/ast-format.md section 3).
+- Recovering from `nesting too deep` in nested arrays of arrays took time quadratic in their
+  depth: `[[[...0; 1]; 1]; 1]` 20000 deep took 38 seconds and reported 20001 errors (and
+  parentheses, subscripts and calls inside such arrays one minute), each printing the
+  whole line, as the statement's recovery stopped at the `;` of each `[v; n]` left open.
+  The brackets, parentheses or arguments one level too deep are now skipped whole, through
+  their closer, as a block one level too deep is: the limit is the only error, in 0.1
+  seconds, and the statement after them is parsed (docs/grammar.md section 9).
+- Long chains of operators and postfix suffixes overflowed the stack on valid programs:
+  `x = 1 + 1 + ...` with 10000 terms, `True && ...` and `x - x - ...` crashed Sema (exit
+  status 139), `"a".toString().toString()...` 5000 deep crashed the lowering, `x.0.0...`
+  and `x[0][0]...` 20000 deep crashed Sema, and 20000 `elif`s crashed `paykan run`.  The
+  recursive-descent frontend took ASTs that the AST interchange format could not hold (3000
+  terms, 3000 `elif`s, or 511 nested `let f = fn() { ... };`: `paykan --emit-ast` failed
+  with `nesting too deep (more than 2048 levels)`), so no frontend plugin could hand them to
+  `paykan`.  Now:
+  - A chain of more than 2048 links along any path down the AST is `nesting too deep (more
+    than 2048 levels)` on every frontend: each binary operator is a link over its two
+    operands, each call, field, method call, tuple index and subscript over the expression
+    it applies to and its arguments, and `x += e` over `x` and `e`, counted through
+    parentheses, operands and arguments (docs/grammar.md section 9,
+    `frontend::kMaxChain`).  An `elif` is a level of nesting, as the `if` of an `else`
+    block: an `if` takes up to 510 of them in a function's body, and past them the rest
+    of the chain is skipped after the block one level too deep, so the limit is its only
+    error.
+  - Sema, the lowering (with its analyses of the reads a call may replace) and the copies of
+    a generic's body take a chain from its innermost link out, in a loop, and the lowering's
+    address of a field of a struct, an element of a tuple or of an array in a chain of them
+    is one loop too, through the calls in such a chain as well: a struct's methods
+    (`p.m().m()...`, generic structs' too), a field's function value (`c.f().f()...`), and
+    the element, the field or the function value of a call's result (`c.t().0.t().0...`,
+    `p.a()[0]...`, `c.g()()...`).  A lambda in a lambda's body is lowered after that body,
+    in a loop too, and the parser, the AST interchange reader (which reads its text's lists
+    in a loop) and the lowering of method calls hold the frames a nesting recurses through
+    small: a level of `let f = fn() { ... };` took about 16 KB of an AddressSanitizer
+    build's stack (without its fake stack for use after return) in the parser and 17 KB in
+    the lowering, which overflowed 8 MB at 511 levels, and takes 6 KB in the parser and none
+    in the lowering.  Every chain and nesting within the limits, and the deepest mixes of
+    them (2048 links in 511 levels of lambdas), compiles and runs on every path (`paykan
+    run`, `paykan build`, `--emit-c`) with a quarter of the default stack, 2 MB, in a GCC
+    debug build, and with half of it, 4 MB, in a clang one, whose unoptimised frames can be
+    4 times larger (4 KB, not 0.9 KB, for a binary operator in the lowering), and the test
+    suite checks that it does.
+  - The AST interchange format nests up to 4112 lists (`kMaxDepth`), which holds every AST
+    within the limits, and its reader counts the links and the levels as the frontends do,
+    so an AST from a plugin, or the `ast-text` frontend's input, is held to the same limits
+    (docs/plugins/ast-format.md section 3).  An operand the grammar writes in parentheses
+    is the level its parenthesis is, though the AST has none: a right operand of the same
+    or a lower precedence (`a + (b + c)`), a comparison compared (`(a == b) == c`), an
+    operation under a prefix operator or before a suffix (`-(a + b)`, `(a + b).m()`), a
+    conditional as an operand.  So the reader takes no `(binary add (int 1) (binary add
+    ...))` 2048 deep, which no frontend can write and which overflowed Sema at 2 MB, an `==`
+    chain the lowering took a level a link, or an `&&` nesting 2048 regions for `--emit-c`.
+- A `match` on strings, floats or classes with thousands of arms overflowed the stack on a
+  valid program: 3000 string arms crashed `--emit-pir`, `paykan run`, `paykan build` and
+  `--emit-c` (exit status 139) with a quarter of the default stack, 2 MB, and 10000 with the
+  default 8 MB, as the lowering nested each arm's test in the `else` of the one before, a
+  block an arm, which the passes and backends recurse through.  The lowering tests the arms
+  in turn, each only while none before it held, as before, then switches on the index of the
+  first that held (docs/pir.md section 6): two blocks deep however many arms there are.
+- A frontend plugin's AST, or the `ast-text` frontend's input, could declare a local without
+  an initial value, which the grammar has no way to write (`x: int;` is not a statement):
+  `(decl (var "s" (named-type "Str") _))` passed every check and `io::println(s)` crashed
+  (exit status 139) on a null reference.  The AST interchange reader now rejects a `decl`
+  without an initialiser that is not `weak` (`a local declaration has an initialiser (only
+  a (weak) one may leave it out)`, docs/plugins/ast-format.md), and Sema rejects such a
+  local whichever frontend built it (`variable 's' needs an initial value (only a 'weak'
+  local starts without one, as None)`), so none reaches the lowering.  A `weak` local
+  without one (`weak w: Node?;`, which starts as `None`) and a `for` loop's variable stay
+  as they are.
+- A frontend plugin's AST, or the `ast-text` frontend's input, could give a `match` arm on a
+  number, a character or a string a pattern that is not a literal, which the grammar has
+  no way to write: `(value-arm "" (ident "k") ...)` or `(binary add (int 1) (int 2))`
+  passed `--check-only` and failed PIR verification at run time (`switch case %1 is not a
+  constant`).  The AST interchange reader now rejects it (`a value arm's pattern is a
+  literal (int, float, bool, char, string or none)`, docs/plugins/ast-format.md), and Sema
+  rejects such an arm whichever frontend built it (`a value-match arm's pattern must be a
+  literal (a number, a character, a string, True, False or None)`).  A negative number's
+  literal, `(int -1)`, stays a pattern.
+- A negative number could not be a `match` pattern: `match n { -1 { ... } _ { ... } }` was
+  `unexpected '-'; expected a type`, though the AST interchange format's `(int -1)` was one,
+  and docs/language/08-match.md did not say so.  `-` and an integer or a float, together
+  or apart (`-1`, `- 2.5`), is now one literal of the negated value (docs/grammar.md
+  section 6), which takes a sized subject's type when it fits as an assigned one does: `-1`
+  on an `unsigned` is `the literal -1 does not fit in 'unsigned' (0 to
+  18446744073709551615)`.  The smallest `int` is the pattern `-9223372036854775808`: the
+  lexer takes that magnitude right after a `-`, and the parser rejects it anywhere else
+  with the error it had (`integer is out of range: 9223372036854775808`), so an expression
+  still writes it `-9223372036854775807 - 1`.  The C `--emit-c` prints spelled such a
+  `switch` case `case -9223372036854775808:`, which a C compiler rejects as a constant too
+  large for any signed type (from an AST plugin's `(int -9223372036854775808)` pattern
+  too); it is `case INT64_MIN:`.  `samples/codegen/72_negative_patterns.pkn` runs them.
+- The AST interchange reader took ASTs the grammar has no way to write, from a frontend
+  plugin or as the `ast-text` frontend's input: an enum without a variant and a `match`
+  without an arm (both checked and ran), a binding on a wildcard arm (dropped: `use of
+  undeclared variable 'w'` where it was used) or a value arm, and names that are not the
+  grammar's: a local `"a b"` ran, an assignment to `"io::x"`, a destructuring target
+  `"io::a"`, an import alias `"a::b"` or a module `"../../etc/passwd"` passed `--check-only`,
+  and a call of `"$::result::Result::Ok"` named what only the compiler's renamed templates
+  name.  It now rejects each, with its position (`an enum needs at least one variant`, `a
+  match needs at least one arm`, `(wildcard-arm ...) has no binding: its binding is ""`,
+  `expected an identifier: the variable's name, not "a b"`, the name quoted as the format
+  writes a string, so a NUL in it prints as `\x00`): a name is an identifier, not a
+  keyword or `_`, and a qualified one only where the grammar writes a module path (a
+  callee, an enum, a type, a superclass, an `impl`'s type, an import's base)
+  (docs/plugins/ast-format.md sections 2 and 3).  The grammar's keywords are
+  `frontend::kKeywords` (`include/paykan/Frontend.h`, with `frontend::isIdentifier`), which
+  the recursive-descent lexer's table matches.  A `.pkm`'s templates, whose renamed bodies
+  name `$::module::name`, are read with `interchange::Origin::Templates`
+  (`include/paykan/ast/Interchange.h`), which keeps those names.
+- A debug build of `paykan` aborted (`internal compiler error: the same diagnostic was
+  reported twice`, exit status 134) on a frontend plugin's AST, or the `ast-text` frontend's
+  input, with no locations or coarse ones: two calls of an undeclared function whose nodes
+  had no location, or shared `@1:1-1:5`, gave the same error twice, which the guard against
+  a construct reported twice (`DiagEngine.h`) took for one repeat.  The guard no longer
+  checks a diagnostic without a location, and is off for a frontend plugin's AST
+  (`DiagEngine::setExactLocations`), whose locations may be coarse
+  (docs/plugins/ast-format.md): both errors are printed and the check fails with status 1,
+  as in a release build.
+- `paykan --dump-tokens` exited with status 0 on a lexical error, which it printed in a
+  format of its own without the file (`error @1.26: invalid character '$'`), and so did a
+  frontend plugin's `dump_tokens` that failed or reported an error.  A lexical error is now
+  reported as a syntax error is (`l.pkn:1:26: error: invalid character '$'`, with the
+  source line and a caret, docs/grammar.md section 9), the listing is still printed whole,
+  and `paykan` exits with status 1 (docs/language/17-the-paykan-command.md,
+  docs/plugins/plugin-api.md).  A static C++ frontend's `Frontend::dumpTokens`
+  (`include/paykan/Frontend.h`) takes the driver's `sema::DiagEngine &` to report them
+  through, as `parse` does, so such a frontend is rebuilt for it, as the 0.3.0 version
+  requires anyway.
+- A `mov` in the operand of another was reported first: `u = mov mov s;` gave the inner
+  `'mov' was removed in v0.2.0; ownership transfers are inferred` (at 1:37) before the
+  outer one (1:33), though every frontend reports its errors in source order
+  (docs/grammar.md section 9), and `mov` before an operand that does not parse (`b = mov
+  ;`) was not reported at all.  The removal is now reported at the `mov`, before its
+  operand is parsed, and a run of them (`mov mov s`), which was an error a `mov`, is one
+  error at the first.
+- `impl Box<int> { }` was `error: expected a type parameter name in 'impl Box<...>', not
+  the type 'int'` with no position, so no file, line or caret: a builtin type (`int`,
+  `Str`, ...) in a type parameter's place has no location of its own.  It is now reported
+  at the argument (`impl.pkn:2:10: error: ...`).  docs/grammar.md and
+  docs/language/03-functions.md gave a native function's parameter without a type the
+  message of a lambda's or a method's; they now give the one the frontends report,
+  `parameter 'x' needs a type ('x: int'): a native function's parameters have types`.
+- docs/grammar.md's `implMember` gave a `static fn` a block body only, though `static fn
+  f() -> int => 1;` is accepted, and documented in docs/language/03-functions.md: it ends
+  with `( block | "=>" expression ";" )`, as a `funcDecl` does.
 - A field of a conditional `(if c then a else b)` of class type was compiled wrong, though
   the program checked: `io::println((if k == 1 then a else b).name);` printed nothing, `x =
   (if k == 1 then a else b).name;` left `x` undeclared (a later use of it failed an assertion

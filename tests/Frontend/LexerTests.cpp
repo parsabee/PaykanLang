@@ -3,12 +3,14 @@
 // Recursive-descent frontend lexer tests, through the --dump-tokens output (one
 // token per line: `line:col-line:col KIND text`).
 
+#include "paykan/Frontend.h"
 #include "paykan/frontends/RecursiveDescent.h"
 
 #include <gtest/gtest.h>
 
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace paykan::frontend::recursive_descent;
@@ -227,5 +229,37 @@ TEST(Lexer, IntegerRange) {
   auto d = dump("9223372036854775807 9223372036854775808");
   EXPECT_EQ(d.Errors, 1u);
   EXPECT_NE(d.Diags.find("integer is out of range: 9223372036854775808"),
+            std::string::npos);
+}
+
+// The lexer's keywords are the grammar's, frontend::kKeywords, which the
+// AST interchange reader holds a plugin's names to: each lexes as a keyword
+// (the lexer's table has as many, a static_assert in Lexer.cpp checks).
+TEST(Lexer, KeywordsAreTheFrontendsList) {
+  for (std::string_view k : paykan::frontend::kKeywords) {
+    auto d = dump(std::string(k));
+    ASSERT_EQ(d.Lines.size(), 2u) << k;
+    EXPECT_EQ(d.Lines[0].find(" IDENT "), std::string::npos)
+        << k << ": " << d.Lines[0];
+    EXPECT_FALSE(paykan::frontend::isIdentifier(k)) << k;
+  }
+  for (const char *ident : {"x", "_x", "X9", "__init__", "typeof", "self"})
+    EXPECT_TRUE(paykan::frontend::isIdentifier(ident)) << ident;
+  for (const char *other : {"", "9x", "a b", "a::b", "a-b", "$x"})
+    EXPECT_FALSE(paykan::frontend::isIdentifier(other)) << other;
+}
+
+// Right after a `-`, INT64_MIN's magnitude is an INT, for the match pattern
+// `-9223372036854775808` (the parser rejects it anywhere else); one more is
+// out of range there too.
+TEST(Lexer, Int64MinMagnitudeAfterAMinus) {
+  auto d = dump("-9223372036854775808 - 09223372036854775808");
+  EXPECT_EQ(d.Errors, 0u) << d.Diags;
+  ASSERT_EQ(d.Lines.size(), 5u);
+  EXPECT_EQ(d.Lines[1], "1:2-1:21 INT 9223372036854775808");
+  EXPECT_EQ(d.Lines[3], "1:24-1:44 INT 09223372036854775808");
+  auto more = dump("-9223372036854775809");
+  EXPECT_EQ(more.Errors, 1u);
+  EXPECT_NE(more.Diags.find("integer is out of range: 9223372036854775809"),
             std::string::npos);
 }

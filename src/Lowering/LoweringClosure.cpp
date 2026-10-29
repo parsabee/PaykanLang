@@ -152,21 +152,49 @@ const std::string &ModuleLowering::lowerLambda(ast::LambdaExpr *node) {
   const std::string name = std::string(kClosureClassPrefix) + Mod.Name +
                            kNameSep + std::to_string(NextClosureId++);
   auto *fnt = ast::cast<ast::FunctionType>(node->getResolvedType());
+  const auto &captures = node->getCaptures();
+  if (!captures.empty()) {
+    std::vector<ast::Type *> captureTys;
+    std::vector<bool> captureWeak;
+    for (const auto &cap : captures) {
+      captureTys.push_back(cap.Ty);
+      captureWeak.push_back(cap.Weak);
+    }
+    declareClosureClass(name, captureTys, captureWeak);
+  }
+  pir::Function *call = getOrCreateFunction(name + kNameSep + kClosureCall,
+                                            closureSignature(fnt));
+  call->Params[0].Name = captures.empty() ? "closure" : kSelf;
+  nameParams(*call, 1, node->getParams());
+  if (ast::isMemType(fnt->getReturnType()))
+    call->Params.back().Name = "result";
+  const std::string &code = LambdaCode[node] = name;
+  // The body, now; but a lambda's in another lambda's body after that body,
+  // in this loop, not in a recursion a level per lambda: lambdas nest 511
+  // deep (docs/grammar.md section 9), and each level was about 17 KB of a
+  // sanitizer build's stack.  A body sees no enclosing locals, so it is
+  // lowered alike whenever it is.
+  PendingLambdas.push_back(node);
+  if (!LoweringLambdaBodies) {
+    LoweringLambdaBodies = true;
+    for (size_t i = 0; i < PendingLambdas.size(); ++i)
+      emitLambdaBody(PendingLambdas[i]);
+    PendingLambdas.clear();
+    LoweringLambdaBodies = false;
+  }
+  return code;
+}
+
+void ModuleLowering::emitLambdaBody(ast::LambdaExpr *node) {
+  const std::string &name = LambdaCode.at(node);
+  auto *fnt = ast::cast<ast::FunctionType>(node->getResolvedType());
+  pir::Function *call = FuncByName.at(name + kNameSep + kClosureCall);
   std::vector<ast::Type *> captureTys;
   std::vector<bool> captureWeak;
   for (const auto &cap : node->getCaptures()) {
     captureTys.push_back(cap.Ty);
     captureWeak.push_back(cap.Weak);
   }
-  const bool hasClosure = !captureTys.empty();
-  if (hasClosure)
-    declareClosureClass(name, captureTys, captureWeak);
-  pir::Function *call = getOrCreateFunction(name + kNameSep + kClosureCall,
-                                            closureSignature(fnt));
-  call->Params[0].Name = hasClosure ? kSelf : "closure";
-  nameParams(*call, 1, node->getParams());
-  if (ast::isMemType(fnt->getReturnType()))
-    call->Params.back().Name = "result";
 
   // The body: the captures as owned locals of their names (a copy of the
   // closure's copy, so the closure may be released during the call), then
@@ -226,9 +254,8 @@ const std::string &ModuleLowering::lowerLambda(ast::LambdaExpr *node) {
     MemTemps = std::move(savedTemps);
     CurrentScope = savedScope;
   }
-  if (hasClosure)
+  if (!captureTys.empty())
     emitClosureDestructor(name, captureTys, captureWeak);
-  return LambdaCode[node] = name;
 }
 
 namespace {

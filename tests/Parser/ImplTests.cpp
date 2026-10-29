@@ -47,6 +47,38 @@ TEST(Impl, MalformedBlocksAreRejected) {
   }
 }
 
+// A type where a type parameter's name goes is reported at the argument,
+// a builtin type too, whose type node is shared and has no location of its
+// own (the error had no position, so no file, line or caret).
+TEST(Impl, TypeInPlaceOfAParameterIsLocated) {
+  struct Case {
+    const char *Src;
+    unsigned Column;
+    const char *Type;
+  };
+  for (const Case &c : {Case{"impl Box<int> { }", 10, "int"},
+                        Case{"impl Box<Str> { }", 10, "Str"},
+                        Case{"impl Box<T[2]> { }", 10, "T[2]"},
+                        Case{"impl Show for Box<T, float> { }", 22, "float"},
+                        Case{"impl Box<List<int>> { }", 10, "List<int>"}}) {
+    auto r = parseWithDiags(std::string("class Box<T> { v: T; }\n") + c.Src +
+                            "\nfn main() -> int => 0;\n");
+    EXPECT_FALSE(r.Ok) << c.Src;
+    ASSERT_EQ(r.Diags.size(), 1u) << c.Src << r.Text;
+    EXPECT_EQ(r.Diags[0].Message,
+              std::string("expected a type parameter name in 'impl Box<...>', "
+                          "not the type '") +
+                  c.Type + "'")
+        << c.Src;
+    const paykan::ast::SourceLocation &loc = r.Diags[0].Loc;
+    EXPECT_EQ(loc.getLineStart(), 2u) << c.Src;
+    EXPECT_EQ(loc.getColumnStart(), c.Column) << c.Src;
+    EXPECT_NE(r.Text.find(":2:" + std::to_string(c.Column) + ": error: "),
+              std::string::npos)
+        << r.Text;
+  }
+}
+
 // A generic type's `impl` block names its type parameters, in either form.
 TEST(Impl, GenericBlockNamesItsTypeParameters) {
   auto [ok, driver] = parse(R"(
@@ -72,4 +104,29 @@ TEST(Impl, GenericBlockNamesItsTypeParameters) {
 TEST(Impl, StaticCallParsesAsAQualifiedCall) {
   auto [ok, driver] = parse("fn main() -> int { a = A::make(); return 0; }");
   ASSERT_TRUE(ok);
+}
+
+// An `impl` block's method or `static fn` cannot have type parameters of
+// its own: they were parsed and ignored (`static fn id<T>(y: T) -> T` was
+// `unknown class type 'T'`).  Only a free function is generic; the methods
+// of a generic type's `impl` block use the block's.
+TEST(Impl, MethodsAndStaticFnsAreNotGeneric) {
+  auto r = parseWithDiags("impl A {\n"
+                          "  fn f<T>(x: T) {}\n"
+                          "  static fn id<T>(y: T) -> T { return y; }\n"
+                          "  view fn g() -> int => 1;\n"
+                          "}\n"
+                          "fn main() -> int { return 0; }\n");
+  EXPECT_FALSE(r.Ok);
+  ASSERT_EQ(r.Diags.size(), 2u) << r.Text;
+  EXPECT_EQ(r.Diags[0].Message, paykan::frontend::kGenericMethod);
+  EXPECT_EQ(r.Diags[0].Loc.getLineStart(), 2u);
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 7u);
+  EXPECT_EQ(r.Diags[1].Message, paykan::frontend::kGenericStaticFn);
+  EXPECT_EQ(r.Diags[1].Loc.getLineStart(), 3u);
+  EXPECT_EQ(r.Diags[1].Loc.getColumnStart(), 15u);
+  auto [ok, _] = parse("impl Box<T> { static fn of(v: T) -> Box<T> { return "
+                       "Box<T>(v); } view fn get() -> T { return self.v; } }\n"
+                       "fn main() -> int { return 0; }\n");
+  EXPECT_TRUE(ok);
 }

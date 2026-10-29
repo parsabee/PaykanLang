@@ -519,6 +519,32 @@ TEST(Driver, DumpTokensPrintsTheTokenStream) {
   EXPECT_NE(out.find("4:1-4:1 EOF\n"), std::string::npos) << out;
 }
 
+// A lexical error is reported as the frontend's other diagnostics are, with
+// the file, the position and a snippet (docs/grammar.md section 9), and
+// fails the dump, which is still written whole (the bad bytes skipped).
+TEST(Driver, DumpTokensReportsLexicalErrors) {
+  auto src = writeTmp("fn main() -> int { x = 1 $ 2; return \"abc; }\n");
+  auto [rc, err] =
+      run(std::string(kPaykan) + " --dump-tokens " + src + " 2>&1 >/dev/null");
+  auto [rcOut, out] =
+      run(std::string(kPaykan) + " --dump-tokens " + src + " 2>/dev/null");
+  std::filesystem::remove(src);
+  EXPECT_EQ(rc, 1) << err;
+  EXPECT_EQ(err, src +
+                     ":1:26: error: invalid character '$'\n"
+                     "  1 | fn main() -> int { x = 1 $ 2; return \"abc; }\n"
+                     "    |                          ^\n" +
+                     src +
+                     ":1:38: error: unterminated string literal (string "
+                     "literals cannot span multiple lines; use \\n)\n"
+                     "  1 | fn main() -> int { x = 1 $ 2; return \"abc; }\n"
+                     "    |                                      ^~~~~~~\n");
+  EXPECT_EQ(rcOut, 1);
+  EXPECT_NE(out.find("1:24-1:25 INT 1\n1:28-1:29 INT 2\n"), std::string::npos)
+      << out;
+  EXPECT_NE(out.find("2:1-2:1 EOF\n"), std::string::npos) << out;
+}
+
 TEST(Driver, DumpTokensFailsOnUnreadableFile) {
   auto [rc, out] = run(std::string(kPaykan) +
                        " --dump-tokens /nonexistent/paykan_no_such.pkn 2>&1");
@@ -964,6 +990,326 @@ TEST(Driver, IntDivNonZeroSucceeds) {
   auto [rc, _] = run(paykanRun() + " " + src + " 2>&1");
   std::filesystem::remove(src);
   EXPECT_EQ(rc, 3); // 17 / 5 == 3, returned as the process exit code
+}
+
+// -- The chain limit (#17)
+
+// A chain at the limit, 2048 links (docs/grammar.md section 9), compiles and
+// runs, on every path, and its AST is written (--emit-ast); one link more is
+// the frontend's error.  Typing and lowering such a chain overflowed the
+// stack, and its AST could not be written.
+TEST(Driver, ChainAtTheLimitRunsAndWritesItsAST) {
+  REQUIRE_BACKEND();
+  auto program = [](int links) {
+    std::string sum = "1", str = "\"a\"";
+    for (int i = 0; i < links; ++i) {
+      sum += " + 1";
+      str += ".toString()";
+    }
+    return "import ::io;\nfn main() -> int {\n  x: int = " + sum +
+           ";\n  s = " + str + ";\n  io::println(x.toString() + s);\n" +
+           "  return 0;\n}\n";
+  };
+  auto src = writeTmp(program(2048));
+  auto [rc, out] = run(paykanRun() + " -O0 " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out.substr(0, 2000);
+  EXPECT_EQ(out, "2049a\n");
+  auto exe = src + ".bin";
+  auto [brc, bout] =
+      run(paykanRun() + " -O2 build " + src + " -o " + exe + " 2>&1 && " + exe);
+  EXPECT_EQ(brc, 0) << bout.substr(0, 2000);
+  EXPECT_EQ(bout, "2049a\n");
+  auto [crc, c] = run(paykanRun() + " -O0 --emit-c " + src + " 2>&1");
+  EXPECT_EQ(crc, 0) << c.substr(0, 2000);
+  auto [arc, ast] = run(std::string(kPaykan) + " --emit-ast " + src);
+  EXPECT_EQ(arc, 0);
+  EXPECT_EQ(ast.rfind("(paykan-ast ", 0), 0u) << ast.substr(0, 2000);
+  auto longer = writeTmp(program(2049));
+  auto [lrc, lout] =
+      run(std::string(kPaykan) + " --check-only " + longer + " 2>&1");
+  EXPECT_EQ(lrc, 1);
+  EXPECT_NE(lout.find("error: nesting too deep (more than 2048 levels)"),
+            std::string::npos)
+      << lout.substr(0, 2000);
+  for (const std::string &f : {src, exe, longer})
+    std::filesystem::remove(f);
+}
+
+// The stack the programs at the frontend's limits are compiled with: a
+// quarter of the default 8 MB, so that a pass recursing once per link of a
+// chain, or deeper than it should per level of nesting, fails here in every
+// build; half of it in an unoptimised clang build, whose frames can be 4
+// times GCC's (clang -O0 gives every local a slot of its own: the lowering's
+// frame for a binary operator is 4 KB, not 0.9 KB, so 511 levels of operands
+// take 2 MB in it alone); in a sanitizer build, whose frames are 2 to 4 times
+// larger still, the default itself.
+static std::string atLimitStack() {
+#if defined(PAYKAN_TEST_SANITIZED)
+  return "ulimit -s 8192 && ";
+#elif defined(__clang__) && !defined(__OPTIMIZE__)
+  return "ulimit -s 4096 && ";
+#else
+  return "ulimit -s 2048 && ";
+#endif
+}
+
+// A chain of @p links links: @p head, @p step repeated, padded with the
+// one-link @p pad, and the one-link @p end, if any.
+static std::string chainOf(int links, const std::string &head,
+                           const std::vector<std::string> &step,
+                           const std::string &pad,
+                           const std::string &end = "") {
+  const int body = links - (end.empty() ? 0 : 1);
+  const int steps = body / static_cast<int>(step.size());
+  std::string out = head;
+  for (int i = 0; i < steps; ++i)
+    for (const std::string &s : step)
+      out += s;
+  for (int i = steps * static_cast<int>(step.size()); i < body; ++i)
+    out += pad;
+  return out + end;
+}
+
+// One function a chain of each kind, @p links links long: binary operators,
+// and each suffix on each kind of receiver that is emitted before the
+// suffix, a struct's, a generic struct's and a class's method, field, tuple
+// element, array element and function value, and a string's character.
+static std::string everyChainKind(int links) {
+  struct Kind {
+    const char *Name;
+    std::string Chain;
+  };
+  const Kind kinds[] = {
+      {"c_sum", chainOf(links, "1", {" + 1"}, " + 1")},
+      {"c_and", chainOf(links, "True", {" && True"}, " && True")},
+      {"c_str",
+       chainOf(links, "\"a\"", {".toString()"}, ".toString()", ".len()")},
+      {"c_chr", chainOf(links, "\"ab\"", {"[0]", ".toString()"}, ".toString()",
+                        ".len()")},
+      {"c_smc", chainOf(links, "P(0)", {".m()"}, ".m()", ".x")},
+      {"c_gsmc", chainOf(links, "G<int>(0)", {".m()"}, ".m()", ".x")},
+      {"c_stup", chainOf(links, "P(0)", {".t()", ".0"}, ".m()", ".x")},
+      {"c_ssub", chainOf(links, "P(0)", {".a()", "[0]"}, ".m()", ".x")},
+      {"c_scv", chainOf(links, "P(0)", {".g()", "()"}, ".m()", ".x")},
+      {"c_sfc", chainOf(links, "smk(0)", {".f()"}, ".f()", ".x")},
+      {"c_cmc", chainOf(links, "mk(0)", {".m()"}, ".m()", ".x")},
+      {"c_ctup", chainOf(links, "mk(0)", {".t()", ".0"}, ".m()", ".x")},
+      {"c_csub", chainOf(links, "mk(0)", {".a()", "[0]"}, ".m()", ".x")},
+      {"c_ccv", chainOf(links, "mk(0)", {".g()", "()"}, ".m()", ".x")},
+      {"c_cfc", chainOf(links, "mk(0)", {".f()"}, ".f()", ".x")},
+      {"c_cps", chainOf(links, "mk(0)", {".p", ".c()"}, ".m()", ".x")},
+  };
+  std::string src =
+      "import ::io;\n"
+      "struct P { x: int; }\n"
+      "impl P {\n"
+      "  view fn m() -> P { return P(self.x + 1); }\n"
+      "  view fn t() -> (P, int) { return (P(self.x + 1), 0); }\n"
+      "  view fn a() -> P[1] { return [P(self.x + 1)]; }\n"
+      "  view fn g() -> () -> P { n = self.x; return fn() -> P { return "
+      "P(n + 1); }; }\n"
+      "  view fn c() -> C { return mk(self.x + 1); }\n"
+      "}\n"
+      "struct G<T> { x: T; }\n"
+      "impl G<T> { view fn m() -> G<T> { return G<T>(self.x); } }\n"
+      "struct S { f: () -> S; x: int; }\n"
+      "class C { x: int; f: () -> C; p: P;\n"
+      "  view fn m() -> C { return mk(self.x + 1); }\n"
+      "  view fn t() -> (C, int) { return (mk(self.x + 1), 0); }\n"
+      "  view fn a() -> C[1] { return [mk(self.x + 1)]; }\n"
+      "  view fn g() -> () -> C { n = self.x; return fn() -> C { return "
+      "mk(n + 1); }; }\n"
+      "}\n"
+      "fn mk(x: int) -> C { return C(x, fn() -> C { return mk(x + 1); }, "
+      "P(x)); }\n"
+      "fn smk(x: int) -> S { return S(fn() -> S { return smk(x + 1); }, x); "
+      "}\n";
+  std::string print;
+  for (const Kind &k : kinds) {
+    src += "fn " + std::string(k.Name) + "() => " + k.Chain + ";\n";
+    print += std::string(print.empty() ? "" : " + \" \" + ") + k.Name +
+             "().toString()";
+  }
+  return src + "fn main() -> int {\n  io::println(" + print +
+         ");\n  return 0;\n}\n";
+}
+
+// A chain of each kind takes the value of each of its links in turn, and at
+// the limit, 2048 links, is typed, lowered and optimised in a quarter of
+// the default stack (atLimitStack): each link's operand is emitted before
+// it in a loop, not by a recursion a level per link (#17).
+TEST(Driver, ChainsOfEveryKindAtTheLimitFitAQuarterOfTheStack) {
+  REQUIRE_BACKEND();
+  auto small = writeTmp(everyChainKind(12));
+  auto [rc, out] = run(paykanRun() + " -O0 run " + small + " 2>&1");
+  EXPECT_EQ(rc, 0) << out.substr(0, 2000);
+  EXPECT_EQ(out, "13 True 1 1 11 0 6 6 6 11 11 6 6 6 11 6\n");
+  auto src = writeTmp(everyChainKind(2048));
+  auto [prc, pir] = run(atLimitStack() + std::string(kPaykan) +
+                        " -O2 --emit-pir " + src + " 2>&1");
+  EXPECT_EQ(prc, 0) << pir.substr(0, 2000);
+  EXPECT_NE(pir.find("fn @c_smc("), std::string::npos) << pir.substr(0, 2000);
+  for (const std::string &f : {small, src})
+    std::filesystem::remove(f);
+}
+
+// One function a kind of nesting, @p levels deep in its body (as
+// docs/grammar.md section 9 counts them, the body a level of its own): blocks,
+// statements and expressions of each kind, a type, lambdas, and the deepest
+// mix, lambdas in lambdas' blocks around a chain of @p links links.
+static std::string everyNestingKind(int levels, int links) {
+  auto rep = [](const std::string &s, int n) {
+    std::string out;
+    for (int i = 0; i < n; ++i)
+      out += s;
+    return out;
+  };
+  std::string chain = "1";
+  for (int i = 0; i < links; ++i)
+    chain += " + 1";
+  const int n = levels;
+  const std::pair<const char *, std::string> kinds[] = {
+      {"k_blocks", rep("{ ", n) + "x = 1;" + rep(" }", n)},
+      {"k_ifs", "a = True; " + rep("if a { ", n) + "x = 1;" + rep(" }", n)},
+      {"k_whiles",
+       "a = False; " + rep("while a { ", n) + "x = 1;" + rep(" }", n)},
+      {"k_matches", "x = 1; " + rep("match x { 1 { ", n / 2) + "y = 1;" +
+                        rep(" } _ { } }", n / 2)},
+      {"k_parens", "x = " + rep("(", n) + "1" + rep(")", n) + ";"},
+      {"k_operands", "x = " + rep("1 + (", n) + "1" + rep(")", n) + ";"},
+      {"k_arrays", "x = " + rep("[", n) + "1" + rep("]", n) + ";"},
+      {"k_calls", "x = " + rep("id(", n) + "1" + rep(")", n) + ";"},
+      {"k_arguments",
+       "o = O(); x = " + rep("o.m(", n) + "1" + rep(")", n) + ";"},
+      {"k_prefix", "a = 1; x = " + rep("-", n) + "a;"},
+      {"k_conditionals", "a = True; x = " + rep("if a then 1 else ", n) + "2;"},
+      {"k_types",
+       "x: " + rep("B<", n - 1) + "int" + rep(">", n - 1) + "? = None;"},
+      {"k_lambdas", "let f = " + rep("fn() => ", n) + "0;"},
+      {"k_deepest", "let f = " + rep("fn() { ", n - 1) + "x = " + chain + ";" +
+                        rep(" };", n - 1)},
+  };
+  std::string src = "import ::io;\n"
+                    "class B<T> { v: T; }\n"
+                    "class O { view fn m(x: int) -> int { return x; } }\n"
+                    "fn id(x: int) -> int { return x; }\n";
+  std::string sum;
+  for (const auto &[name, body] : kinds) {
+    src += "fn " + std::string(name) + "() -> int { " + body + " return 0; }\n";
+    sum += std::string(sum.empty() ? "" : " + ") + name + "()";
+  }
+  return src + "fn main() -> int {\n  io::println((" + sum +
+         ").toString());\n  return 0;\n}\n";
+}
+
+// Each kind of nesting at the limit, 511 levels in a function's body, and
+// the deepest mix of nesting and a chain, compile and run on every path in
+// a quarter of the default stack (atLimitStack): `run`, which takes the
+// MLIR backend's regions to the JIT, and `--emit-c`, whose translation
+// recurses once a region (#17).
+TEST(Driver, NestingOfEveryKindAtTheLimitFitsAQuarterOfTheStack) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(everyNestingKind(511, 2048));
+  auto [rc, out] =
+      run(atLimitStack() + paykanRun() + " -O0 run " + src + " 2>/dev/null");
+  EXPECT_EQ(rc, 0);
+  EXPECT_EQ(out, "0\n");
+  auto [prc, pir] = run(atLimitStack() + std::string(kPaykan) +
+                        " -O2 --emit-pir " + src + " 2>&1");
+  EXPECT_EQ(prc, 0) << pir.substr(0, 2000);
+  auto [crc, c] =
+      run(atLimitStack() + paykanRun() + " -O0 --emit-c " + src + " 2>&1");
+  EXPECT_EQ(crc, 0) << c.substr(0, 2000);
+  // One level more is the frontend's error.
+  auto deeper = writeTmp(everyNestingKind(512, 0));
+  auto [drc, dout] =
+      run(std::string(kPaykan) + " --check-only " + deeper + " 2>&1");
+  EXPECT_EQ(drc, 1);
+  EXPECT_NE(dout.find("error: nesting too deep (more than 512 levels)"),
+            std::string::npos)
+      << dout.substr(0, 2000);
+  for (const std::string &f : {src, deeper})
+    std::filesystem::remove(f);
+}
+
+// -- Negative numbers as match patterns (#51)
+
+// `-1`, `- 7`, `-2.5`, `-0.0` and INT64_MIN, `-9223372036854775808`, are
+// match patterns (docs/grammar.md section 6), on every path, at -O0 and
+// -O2: `run`, `build`, and the strict C11 `--emit-c` prints, in which
+// INT64_MIN is no literal a case can be.  The exit status has a bit for
+// each call that took its arm.  A `-1` pattern on an unsigned subject is the
+// error a `-1` assigned to one is, on every path.
+TEST(Driver, NegativeNumbersAreMatchPatternsOnEveryPath) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_negpat_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "negpat.pkn").string();
+  std::ofstream(src) << "fn ints(n: int) -> int {\n"
+                        "  match n {\n"
+                        "    -1 { return 1; }\n"
+                        "    -9223372036854775808 { return 2; }\n"
+                        "    - 7 { return 4; }\n"
+                        "    7 { return 0; }\n"
+                        "    _ { return 8; }\n"
+                        "  }\n"
+                        "}\n"
+                        "fn floats(x: float) -> int {\n"
+                        "  match x {\n"
+                        "    -2.5 { return 16; }\n"
+                        "    -0.0 { return 32; }\n"
+                        "    _ { return 0; }\n"
+                        "  }\n"
+                        "}\n"
+                        "fn main() -> int {\n"
+                        "  return ints(-1) + ints(-9223372036854775807 - 1) +\n"
+                        "         ints(-7) + ints(1) + floats(-2.5) +\n"
+                        "         floats(0.0);\n"
+                        "}\n";
+  auto everyPath = [&](const std::string &opt) {
+    auto ran = run(paykanRun() + " " + opt + " " + src + " 2>&1");
+    EXPECT_EQ(ran.exitCode, 63) << opt << ": " << ran.out;
+    auto exe = (dir / ("negpat" + opt)).string();
+    auto built =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    ASSERT_EQ(built.exitCode, 0) << opt << ": " << built.out;
+    EXPECT_EQ(run(exe).exitCode, 63) << opt;
+    auto c = (dir / ("negpat" + opt + ".c")).string();
+    auto emitted = run(std::string(kPaykan) + " " + opt + " --emit-c " + src +
+                       " > " + c + " 2>&1");
+    ASSERT_EQ(emitted.exitCode, 0) << opt;
+    auto cexe = (dir / ("negpat-c" + opt)).string();
+    auto cc =
+        run("cc -std=c11 -pedantic-errors -Wall -Wextra -Werror " + opt +
+            " -I " PAYKAN_RUNTIME_SOURCE_DIR " " + c +
+            " " PAYKAN_RUNTIME_SOURCE_DIR "/*.c -lm -o " + cexe + " 2>&1");
+    ASSERT_EQ(cc.exitCode, 0) << opt << ": " << cc.out;
+    EXPECT_EQ(run(cexe).exitCode, 63) << opt;
+  };
+  everyPath("-O0");
+  everyPath("-O2");
+  const std::string message = "error: the literal -1 does not fit in "
+                              "'unsigned' (0 to 18446744073709551615)";
+  auto pattern = (dir / "unsigned.pkn").string();
+  std::ofstream(pattern) << "fn main() -> int {\n"
+                            "  u: unsigned = 5;\n"
+                            "  match u { -1 { } _ { } }\n"
+                            "  v: unsigned = -1;\n"
+                            "  return 0;\n"
+                            "}\n";
+  auto rejects = [&](const std::string &how) {
+    auto r = run(paykanRun() + how + pattern + " 2>&1");
+    EXPECT_EQ(r.exitCode, 1) << how << ": " << r.out;
+    EXPECT_NE(r.out.find(":3:13: " + message), std::string::npos)
+        << how << ": " << r.out;
+    EXPECT_NE(r.out.find(":4:17: " + message), std::string::npos)
+        << how << ": " << r.out;
+  };
+  rejects(" run ");
+  rejects(" -o " + (dir / "unsigned").string() + " build ");
+  rejects(" --emit-c ");
+  std::filesystem::remove_all(dir);
 }
 
 // -- The --dump-ast flag

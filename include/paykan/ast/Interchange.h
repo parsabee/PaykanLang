@@ -38,17 +38,27 @@ namespace paykan::ast::interchange {
 /// dotted version (`0.2.0`).
 inline constexpr uint32_t kFormatVersion = kVersionNumber;
 
-/// The deepest list nesting read() accepts.  Deep enough for any program
-/// within the frontends' nesting limit (frontend::kMaxNesting levels, each a
-/// few lists deep); it bounds the reader's recursion, and so what an AST from
-/// a plugin can make Sema recurse through.
-inline constexpr unsigned kMaxDepth = 2048;
+/// The deepest list nesting read() accepts and write() writes: 4 x 512 + 2048
+/// + 16.  Every AST within the frontends' limits fits: each of their 512
+/// levels of nesting (frontend::kMaxNesting) is at most four lists deep (a
+/// block, then `(decl (var ... (lambda ...)))` around the next block), each
+/// of 2048 links of a chain (frontend::kMaxChain) is one, and the
+/// declarations around them are a few.  It bounds the reader's recursion
+/// over the text; read() then holds the AST to the frontends' limits
+/// themselves, counted as they count them, and so bounds what an AST from a
+/// plugin can make Sema recurse through.
+inline constexpr unsigned kMaxDepth = 4112;
 
 /// Write @p unit in the interchange format.  Returns false, with the reason
 /// in @p error, for a node no frontend produces (a type Sema resolved, say):
 /// only a parsed, unchecked AST can be written; and for a tree nested deeper
 /// than kMaxDepth lists, which read() would not accept.
 bool write(const TranslationUnit &unit, std::ostream &os, std::string &error);
+
+/// @p s as the format writes a string: in double quotes, with `\"`, `\\`,
+/// `\n`, `\t`, `\r`, and `\xHH` for every other byte outside printable
+/// ASCII.
+std::string quote(std::string_view s);
 
 /// Where and why read() failed.
 struct ReadError {
@@ -61,10 +71,23 @@ struct ReadError {
   std::string str() const;
 };
 
+/// What wrote the text read() reads, which decides the names it takes.
+enum class Origin {
+  /// A frontend (a plugin's AST): every NAME is one the grammar writes where
+  /// it stands, an identifier, a qualified name, ...
+  /// (docs/plugins/ast-format.md section 3).
+  Frontend,
+  /// The compiler, the templates of a module (a `.pkm`'s TMPL section),
+  /// whose names are the canonical ones it gives what a module declares
+  /// (`$::io::_print`), which no program writes.
+  Templates,
+};
+
 /// Parse @p text into @p ctx and return its translation unit, or null with
 /// @p error set.  The text must be one `(paykan-ast <version> (unit ...))`
 /// form of a supported version, with nothing but whitespace and comments
-/// after it.
-TranslationUnit *read(std::string_view text, ASTContext &ctx, ReadError &error);
+/// after it, written as @p origin says.
+TranslationUnit *read(std::string_view text, ASTContext &ctx, ReadError &error,
+                      Origin origin = Origin::Frontend);
 
 } // namespace paykan::ast::interchange

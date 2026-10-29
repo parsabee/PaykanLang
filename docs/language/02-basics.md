@@ -579,7 +579,8 @@ enums.
 An integer literal must fit in a signed 64-bit integer; a larger one (above
 `9223372036854775807`) is a compile-time error. `-17` is unary minus applied to the literal
 `17`, so the most negative `int` cannot be written directly — compute it as
-`-9223372036854775807 - 1`.
+`-9223372036854775807 - 1`. A `match` pattern is the exception: there `-17` is one literal,
+and `-9223372036854775808` is the most negative `int` ([Match](08-match.md#matching-values)).
 
 A float literal must name a finite `float`. One too large (`1e999` would be infinity) or too
 small (`1e-400`: not zero, but rounds to zero) is a compile-time error. Subnormal values

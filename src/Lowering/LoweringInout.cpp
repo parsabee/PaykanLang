@@ -100,6 +100,20 @@ void forEachOperand(ast::Expr *e, const std::function<void(ast::Expr *)> &fn) {
   }
 }
 
+/// Calls @p fn with @p e and with every expression it evaluates, in no
+/// particular order.  A worklist, not recursion: an operator chain may be
+/// thousands of operands deep (frontend::kMaxChain).
+void forEachEvaluated(ast::Expr *e,
+                      const std::function<void(ast::Expr *)> &fn) {
+  std::vector<ast::Expr *> work{e};
+  while (!work.empty()) {
+    ast::Expr *x = work.back();
+    work.pop_back();
+    fn(x);
+    forEachOperand(x, [&](ast::Expr *operand) { work.push_back(operand); });
+  }
+}
+
 } // namespace
 
 ast::Identifier *ModuleLowering::storageRoot(ast::Expr *place) {
@@ -157,23 +171,22 @@ void ModuleLowering::noteHeldReads(ast::Stmt *s) {
   // statement assigns to in place (a struct's field, an element).
   std::unordered_set<std::string> changed;
   std::unordered_set<const ast::Expr *> places;
-  std::function<void(ast::Expr *)> findChanges = [&](ast::Expr *e) {
+  auto findChanges = [&](ast::Expr *e) {
     if (e->isChangedByCall())
       if (ast::Identifier *root = storageRoot(e)) {
         changed.insert(root->getName());
         places.insert(root);
       }
-    forEachOperand(e, findChanges);
   };
   for (ast::Expr *e : exprs)
-    findChanges(e);
+    forEachEvaluated(e, findChanges);
   HeldVars = changed;
   if (changed.empty())
     return;
   for (ast::Expr *t : targets)
     if (ast::Identifier *root = storageRoot(t))
       places.insert(root);
-  std::function<void(ast::Expr *)> findReads = [&](ast::Expr *e) {
+  auto findReads = [&](ast::Expr *e) {
     if (auto *id = ast::dyn_cast<ast::Identifier>(e);
         id && !id->isFunctionRef() && changed.count(id->getName()) &&
         !places.count(id)) {
@@ -181,10 +194,9 @@ void ModuleLowering::noteHeldReads(ast::Stmt *s) {
       if (ast::isRefType(ty) || (ast::isMemType(ty) && memHoldsRefs(ty)))
         HeldReads.insert(id);
     }
-    forEachOperand(e, findReads);
   };
   for (ast::Expr *e : exprs)
-    findReads(e);
+    forEachEvaluated(e, findReads);
 }
 
 void ModuleLowering::Scope::declareInout(const std::string &name,

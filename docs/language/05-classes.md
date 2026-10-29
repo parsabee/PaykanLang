@@ -1174,5 +1174,6 @@ created for that argument list. See [Generics](13-generics.md).
 | Assigning `self` | `self = C(1)` in a method: `self` names the object the method was called on (`cannot assign to 'self'`) |
 | Binding `self` | A declaration, `for` loop variable, `match` binding (`self: C { … }`) or destructuring target named `self` in a method's body (`'self' cannot be used as a variable name in method 'm' of class 'C'; it is the implicit receiver`) |
 | `__init__` in the class body | `class A { fn __init__() { … } }`; it goes in `impl A { … }` |
+| Generic method | A method or a `static fn` declares type parameters of its own, `fn map<U>(x: U) -> U` (a syntax error): `a method cannot have type parameters of its own: only a free function is generic (the methods of a generic class or struct use its type parameters)`, or `a 'static fn' cannot ...` ([Generics](13-generics.md#declaring-a-generic-function)) |
 | `impl` method name taken | An `impl` method or `static fn` has the name of a method of the class or a superclass, or a subclass declares one with an `impl` method's name |
 | `impl` for another type | The block names a built-in type, an enum, or a class of another module |

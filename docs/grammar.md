@@ -78,7 +78,9 @@ Any other byte is a lexical error (`invalid character 'X'`).
 - `INT` is a 64-bit signed integer. The scanner never sees a sign (`-` is a
   separate token), so `9223372036854775808` is out of range
   (`integer is out of range: ...`); `INT64_MIN` is written as the expression
-  `-9223372036854775807 - 1`.
+  `-9223372036854775807 - 1`.  Right after a `-`, the scanner takes that
+  magnitude too, for the match pattern `-9223372036854775808` (§6), which is
+  `INT64_MIN`; the parser rejects it anywhere else, with the same error.
 - `FLOAT` is converted with `strtod` and must denote a finite float:
   a literal that overflows to infinity (`1e999`) or a nonzero one that
   underflows to zero (`1e-400`) is an error (`float is out of range: ...`).
@@ -151,8 +153,8 @@ name; for the list form the whole path is the base path.
 ```
 classDecl   ::= "class" IDENT typeParams? ( ":" modulePath )?
                 "{" classMember* "}"
-classMember ::= "weak"? varDecl ";" | funcDecl
-              | "view"? "fn" IDENT typeParams? "(" paramList? ")"
+classMember ::= "weak"? varDecl ";" | funcDecl      -- funcDecl without typeParams
+              | "view"? "fn" IDENT "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )? ";"   -- pure virtual
 typeParams  ::= "<" typeParam ( "," typeParam )* ">"
 typeParam   ::= IDENT ( ":" typeAnnotation ( "+" typeAnnotation )* )?
@@ -169,8 +171,10 @@ traitMember ::= "view"? "fn" IDENT "(" paramList? ")"
 
 implDecl    ::= "impl" ( typeAnnotation "for" )? modulePath
                 ( "<" IDENT ( "," IDENT )* ">" )? "{" implMember* "}"
-implMember  ::= funcDecl | "static" "fn" IDENT typeParams? "(" paramList? ")"
-                ( "->" ( "view" | "inout" )? typeAnnotation )? block
+implMember  ::= funcDecl                          -- funcDecl without typeParams
+              | "static" "fn" IDENT "(" paramList? ")"
+                ( "->" ( "view" | "inout" )? typeAnnotation )?
+                ( block | "=>" expression ";" )
 
 funcDecl    ::= "view"? "fn" IDENT typeParams? "(" paramList? ")"
                 ( "->" ( "view" | "inout" )? typeAnnotation )?
@@ -199,6 +203,12 @@ block`, `a struct has no superclass`), and so is an empty body (`struct 'S'
 has no fields: a struct has at least one`).
 A class, struct, enum or function with `typeParams` is generic (a template that
 Sema instantiates); the superclass of a generic class is a plain class name.
+Only a free function is generic: a method in a class body or an `impl` block,
+pure virtual or not, and a `static fn` have no `typeParams` of their own (the
+methods of a generic class or struct use its), and `<` after their name is a
+syntax error there (`a method cannot have type parameters of its own: only a
+free function is generic ...`, `a 'static fn' cannot have type parameters of
+its own: ...`, `frontend::kGenericMethod` and `kGenericStaticFn`).
 A type parameter's bounds (`T: Show + Into<int>`) name the traits its type
 argument must implement.  `impl Show for A` implements trait `Show` for `A`.
 A function or method written `=> expression ;` has for its body a block of one
@@ -213,10 +223,11 @@ body starts with '=>', not '='`).  A trait method's signature has neither
 A free function's parameter may be its name alone, `fn double(x) => x * 2;`:
 the parser gives it the type parameter `typeof(x)`, after the written type
 parameters (`fn double<typeof(x)>(x: typeof(x)) => x * 2;`, a name no program
-can write), so the function is generic.  A lambda's, method's, `static fn`'s,
-trait method's or native function's parameter without a type is a syntax error
-(`parameter 'x' needs a type ('x: int'): only a free function's parameters can
-leave it out`).
+can write), so the function is generic.  A lambda's, method's, `static fn`'s
+or trait method's parameter without a type is a syntax error (`parameter 'x'
+needs a type ('x: int'): only a free function's parameters can leave it
+out`), and so is a native function's (`parameter 'x' needs a type ('x: int'):
+a native function's parameters have types`).
 The `impl` block of a generic type names its type parameters: `impl Box<T>`.
 A trait's methods are signatures that end with `;`.
 Methods are `funcDecl`s inside a class body.  `view fn` marks a method that
@@ -345,6 +356,7 @@ matchStmt ::= "match" expression "{" matchArm+ "}"
 matchArm  ::= typeAnnotation block
             | IDENT ":" ( "view" | "inout" )? typeAnnotation block
             | literal block
+            | "-" ( INT | FLOAT ) block          -- a negative number
             | "_" block
 literal   ::= INT | FLOAT | BOOL | CHAR | stringLiteral | NONE
 stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
@@ -366,7 +378,10 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   evaluated twice, once to read it and once to assign it: `xs[f()] += 1`
   calls `f` twice.
 - `varDecl "=" expression` is a declaration with an initializer; a bare
-  `x: int;` is not a statement.
+  `x: int;` is not a statement.  Only a `weakDecl` may leave out its
+  initializer, and Sema rejects a `DeclStmt` of any other `VarDecl` without
+  one, whichever frontend built it (`variable 'x' needs an initial value
+  ...`).
 - `letDecl` declares one local that cannot be reassigned
   (`VarDecl::isLet`); its type, when not written, is its initializer's.
   The `VarDecl` and its `DeclStmt` start at `let`.  `let` starts nothing
@@ -403,8 +418,14 @@ stringLiteral ::= STRING+                  -- adjacent pieces, joined (§1)
   range, one spelled `step` right after the range's end starts the step,
   and anywhere else each is an ordinary name (`for in in 0..step step step {`
   parses).  The step is null in the AST when it is not written.
-- Match arms: a wildcard `_`, a literal pattern (bare literal tokens only,
-  so `-1` is not a pattern), a type with an optional binding, in any order.
+- Match arms: a wildcard `_`, a literal pattern, a type with an optional
+  binding, in any order.  A literal pattern is a literal, or a negative
+  number: `-` and an `INT` or a `FLOAT` (`-1`, `- 2.5`) is one
+  `IntegerLiteral` or `FloatLiteral` of the negated value, spanning both
+  tokens, not a `UnaryExpr`; `-9223372036854775808` is `INT64_MIN` (§1).
+  Anything else after the `-` is a syntax error (`unexpected '-'; expected
+  a type`).  Sema rejects a pattern that is not a literal, whichever
+  frontend built it (`a value-match arm's pattern must be a literal ...`).
   A binding may borrow the subject, `n: view T` or `n: inout T`
   (`MatchArm::getMode`); with
   the mode before the name (`view n: T`) the syntax error shows the fix.
@@ -484,8 +505,9 @@ branch may be another ternary without them.
 
 `mov` is reserved but no longer part of the grammar (removed in v0.2.0).
 A frontend reports `'mov' was removed in v0.2.0; ownership transfers are
-inferred` (`frontend::kMovRemoved`) once per use and keeps parsing the
-operand after it, so that is the only error.
+inferred` (`frontend::kMovRemoved`) once per use, and once for a run of
+them (`mov mov s`), and keeps parsing the operand after it, so that is the
+only error.
 
 A parenthesised expression is just the inner expression (no node is
 created); `(a)` is a 1-tuple nowhere. A tuple literal has at least two
@@ -562,6 +584,8 @@ column, as `--dump-ast` prints them. Rules that every frontend follows:
 
 Diagnostics go through `DiagEngine` in the clang-style
 `file:line:col: error: message` format with a source snippet and caret.
+So do the lexical errors `--dump-tokens` finds: it lists every token, then
+fails.
 The messages listed in this document are binding (tests assert on them);
 the wording of other syntax errors (`unexpected X; expected Y`) is up to
 each frontend, and the differential check compares ASTs and accept/reject,
@@ -573,14 +597,45 @@ on the way), at the next class, struct, `impl` or trait member (`fn`,
 `view fn`, `static`, `;`, `}`) and at the next top-level declaration
 (`import`, `class`, `struct`, `enum`, `trait`, `impl`, `fn`, `view fn`,
 `native`), so one file can
-report several independent errors. Another frontend may recover less (for
-example only at `;` inside a block). Any error makes the parse fail; a file
-with errors is never handed to Sema.
+report several independent errors. Past the nesting limit it skips the
+block, the brackets or the parentheses one level too deep whole, through
+their closer, and after an `if`'s or an `elif`'s block one level too deep
+the rest of its `elif` and `else` branches, deeper still, so the limit is
+the only error the construct gives. Another
+frontend may recover less (for example only at `;` inside a block). Any
+error makes the parse fail; a file with errors is never handed to Sema.
 
-Nesting (blocks, parentheses, brackets, type applications, prefix
-operators and conditional expressions) deeper than 512 levels is rejected
-with `nesting too deep` by every frontend, so pathological inputs cannot
-overflow the stack of the parser or of the passes after it.
+Nesting deeper than 512 levels is rejected with `nesting too deep (more
+than 512 levels)` by every frontend, so that pathological input can
+overflow the stack neither of the parser nor of the passes after it. Each
+of these is a level: a block, and a function's or a lambda's `=>` body,
+which stands for one; an `elif`, which is the `if` of an else branch (so
+an `if` takes at most 510 `elif`s in a function's body); a class, struct,
+`impl` or trait body; the arms of a `match`; a parenthesised expression or
+a tuple's elements; the arguments
+of a call and the elements of an array literal; a subscript's index; the
+operand of a prefix operator; a conditional expression; a type
+application's arguments; a tuple type's elements; a function type's
+parameters and its result, and a lambda's result type; and each type
+suffix (`[]`, `[N]`, `?`), around the levels of the type it wraps, so that
+`B<int>[][]` is three levels deep, as its AST is. The AST interchange
+reader counts the same levels in the AST it reads, which has no
+parentheses: there an operand that needs them where it stands (`a + (b +
+c)`, `(a == b) == c`, `-(a + b)`, `(a + b).m()`, `(if c then a else b) +
+d`) is the level its parenthesis is
+([`plugins/ast-format.md`](plugins/ast-format.md) section 3).
+
+A chain of more than 2048 links is rejected with `nesting too deep (more
+than 2048 levels)` by every frontend, for the same reason. Each binary
+operator is a link over its two operands, and each postfix suffix (a call
+`(...)`, a field `.f`, a method call `.m(...)`, a tuple index `.0`, a
+subscript `[i]`) over the expression it applies to and its arguments or
+index; `x += e` is a link over `x` and `e`. The links are counted along
+every path down the AST, through parentheses, operands and arguments, and
+the levels of nesting are not: `1 + 1 + ...` takes 2049 terms, `s.trim()
+.trim()...` 2048 calls, and `(a + b + ...) + c + ...` counts the links on
+both sides of the parenthesis together. The AST interchange reader counts
+the same links.
 
 Every frontend reports lexical and syntax errors in source order, and
 locate the common ones alike (a tuple index with leading zeros at its `.`,

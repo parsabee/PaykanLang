@@ -85,6 +85,10 @@ public:
 
   Expr *cloneExpr(Expr *e);
   Stmt *cloneStmt(Stmt *s);
+  /// The copy of the link of a chain @p link (chainOperand) whose operand's
+  /// copy is @p operand.  cloneExpr copies a chain from its innermost link
+  /// out, in a loop, so that a chain of any length costs no stack.
+  Expr *cloneLink(Expr *link, Expr *operand);
   CompoundStmt *cloneCompound(CompoundStmt *cs);
 
   /// Copy a function (or method) under a new name.  The copy has no type
