@@ -1,10 +1,10 @@
 # Standard library
 
 The standard library is written in Paykan and ships with the compiler. It has six
-modules: printing and files, errors, results, the containers, the storage the containers
-are built on, and the C library's math functions. This page says how to import them, what
-they have in common, and where the compiler finds them; each module has a page of its own
-that documents every name it declares.
+modules: printing and files, errors, results, the containers and functions on strings, the
+storage the containers are built on, and the C library's math functions. This page says
+how to import them, what they have in common, and where the compiler finds them; each
+module has a page of its own that documents every name it declares.
 
 ---
 
@@ -34,7 +34,7 @@ Printing is not one of them: a program that prints imports `::io`.
 | [`::io`](io.md) | Printing any `Show` value (`print`, `println`, `printerr`, `printerrln`), files (`open` and the class `File`) and the standard input (`stdin()`) |
 | [`::error`](error.md) | Errors as values: `ErrorCode`, the standard set of errors; `Error`, a code and a message; `none` and `fromErrno`, which make them |
 | [`::result`](result.md) | `Result<T, E>`, the value an operation made (`Ok`) or the error saying why it could not (`Err`); `ok` and `fail`, which make them |
-| [`::collections`](collections.md) | The containers `List<T>`, `LinkedList<T>`, `Stack<T>`, `Queue<T>`, `HashMap<K, V>`, `HashSet<K>`, `MinPriorityQueue<T>` and `MaxPriorityQueue<T>`, and `listOf` and `listToString` |
+| [`::collections`](collections.md) | The containers `List<T>`, `LinkedList<T>`, `Stack<T>`, `Queue<T>`, `HashMap<K, V>`, `HashSet<K>`, `MinPriorityQueue<T>` and `MaxPriorityQueue<T>`, and `listOf` and `listToString`; functions on strings: `split`, `join`, `lines`, `words`, `indexOf`, `contains`, `startsWith`, `endsWith`, `substring`, `trim`, `replace` and `repeat` |
 | [`::memory`](memory.md) | `Buffer<T>`, the growable run of slots the containers keep their elements in, and `Box<T: ValueType>`, one value in a shared object |
 | [`::math`](math.md) | The C library's `<math.h>` functions on `float` (`sqrt`, `pow`, `exp`, `log`, `sin`, `atan2`, `floor`, `round`, `gamma`, ...), the constants `pi()`, `e()`, `inf()`, `nan()`, and `isNaN`, `isInf`, `isFinite` |
 

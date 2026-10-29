@@ -273,10 +273,11 @@ for every dependency (zero for one without templates) and checked whatever
 the flags: a module's `CODE` holds its own copy of every instantiation of
 another module's template it uses (§4.8), which may come from a dependency's
 template or, through a template body, from one of that dependency's
-dependencies.  The second case is covered because `IFACE`'s `MODS` records
-both hashes of each dependency (§3.3): a template edit in `::memory` changes
-the `IFACE` of `::collections` once it is rebuilt, and so the `iface_hash`
-an importer of `::collections` checks.
+dependencies; and so may the copy it checks of an instantiation a
+dependency's interface gives (§4.8).  The second case is covered because
+`IFACE`'s `MODS` records both hashes of each dependency (§3.3): a template
+edit in `::memory` changes the `IFACE` of `::collections` once it is
+rebuilt, and so the `iface_hash` an importer of `::collections` checks.
 
 ### 2.4 `Lib` (#153, #21, #23)
 
@@ -737,6 +738,42 @@ without erasure or `INST` (§4.5 stays the plan for erased copies):
   name without its module, so a module's compiled code calls whichever copy
   the program kept. Copies are not merged by the linker: strict C11 has no
   COMDAT (#62).
+- **What an imported instantiation's methods do.** An instantiation an
+  imported module's interface gives (the `List<Str>` of
+  `collections::split`, `IFACE`'s `List<Str> [local from "::collections"]`,
+  and its `Buffer<Str>`) is that module's: an importer uses the type as it
+  is and makes no copy of its own, so the program links the module's.
+  What a call of one of its methods may let go of, which the lowering
+  reads from the code a call runs (docs/pir.md §7, "Reads a call may
+  replace"), is still known: each method is its template's body with the
+  instantiation's type arguments.  Where an importer would make an
+  instantiation of its own, it checks a copy of the module's from the
+  template, in the `TMPL` of the template's module: where its code names
+  the type (`Sema::instantiateStruct`, `instantiateClass`) or calls one of
+  its methods, and then for the instantiations the copy's fields hold
+  (`Sema::copyImportedInstance`, `SemaContext::ImportedInstanceClasses`
+  and `ImportedInstanceStructs`).  The template's module may be one the
+  importer neither imports nor sees through an import's templates: a
+  module whose interface gives `cells::Cell<Str>` (`fn labelled(s: Str)
+  -> cells::Cell<Str>`) with no template of its own.  It is a dependency
+  of that import, which the import's resolution loaded already, and the
+  importer registers it under its hidden qualifier then
+  (`Sema::seeTemplatesOf`).  The lowering reads the copy's methods as its
+  own copies' and emits nothing of them.  The copy is the code the module
+  compiled, read with what the importer knows, which is never more than
+  the module knew: a call it makes of the module's own functions stays
+  unknown, as in the importer's own copy.  The format gains nothing: the
+  copy depends only on the templates and the interfaces, whose hashes an
+  importer's entry records (§2.3), the hashes of a module it does not
+  import through the `MODS` of the import's `IFACE` (§3.3), so an edit of a
+  template that changes what a method does rebuilds the importers that
+  read it.  (A summary of each method's effect written in the exporting
+  module's `IFACE` would not: that `IFACE` and its hash are taken when
+  Sema reports the module, before it is lowered, and an importer rebuilt
+  against the hash would keep a summary that changed without it.)  An
+  importer that uses none of a module's instantiations checks no copy; one
+  that does checks what it would have instantiated itself, whether or not
+  it imports the template's module.
 - **Caching.** A module with templates, or with copies of another module's
   instantiations, is cached like any other. Its importers record its
   `tmpl_hash` as well as its `iface_hash` (§2.3), so an edit of a template's

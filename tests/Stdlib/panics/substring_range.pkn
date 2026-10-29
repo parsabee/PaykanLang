@@ -1,0 +1,8 @@
+// expect-panic: string slice 2..7 out of bounds (len=3)
+import ::io;
+import ::collections;
+
+fn main() -> int {
+  io::println(collections::substring("abc", 2, 7));
+  return 0;
+}

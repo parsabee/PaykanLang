@@ -960,6 +960,12 @@ Val ModuleLowering::ExprEmitter::visitCallExpr(ast::CallExpr *node) {
     if (ast::isMemType(node->getResolvedType()))
       memResult = L.emitMemResultSlot(node->getResolvedType());
     Val result = L.emitNativeCall(*native, args, memResult);
+    // A runtime function that never returns (`_panic`'s): nothing after
+    // its call runs, so nothing its arguments hold is released after it.
+    if (isNoReturnRuntimeFunction(native->getNativeSymbol())) {
+      L.MemTemps.resize(mark);
+      return result;
+    }
     L.releaseAfterCall(keep);
     L.releaseMemTemps(mark);
     return result;

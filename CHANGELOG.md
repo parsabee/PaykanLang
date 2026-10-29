@@ -295,6 +295,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `T(x)` of a `T` is the value itself (`i64(n)` with an `int` `n`, `float(2.5)`).
   - `u.toInt()` gives an `unsigned`'s value as an `int?`, `None` above
     9223372036854775807.
+- **Functions on strings in `::collections`** (docs/stdlib/collections.md, "Strings"):
+  - `split(s, delim) -> List<Str>`: every field, empty ones kept (`"a,,b"` gives `["a",
+    "", "b"]`, `""` gives `[""]`), so `join(split(s, d), d) == s`; an empty delimiter
+    panics (`split: the delimiter is empty`).
+  - `join(parts, sep) -> Str`.
+  - `lines(s) -> List<Str>`: split at each `\n`, one `\r` dropped from the end of each line,
+    and no empty last line for a `\n` at the end (`""` has none).
+  - `words(s) -> List<Str>`: the runs between ASCII whitespace, never an empty one.
+  - `indexOf(s, needle) -> unsigned?`, `contains`, `startsWith` and `endsWith`.
+  - `substring(s, from, to) -> Str`, which panics unless `from <= to <= s.len()` (`string
+    slice 2..7 out of bounds (len=3)`), `trim(s)`, `replace(s, from, to)` (every
+    occurrence; an empty `from` panics: `replace: the text to replace is empty`) and
+    `repeat(s, n)`.
+
+  They count bytes, as `s.len()` and `s[i]` do, with every index and size an `unsigned`,
+  take their strings as `view`s and return new ones. Two new runtime functions,
+  `PaykanString_find` (C's `memchr` and `memcmp`) and `PaykanString_slice`, search and copy
+  for them (Runtime.h; the runtime ABI only gains them, and keeps its version), so
+  `split`, `lines`, `words`, `indexOf` and `contains` take time linear in the string for a
+  delimiter or a needle of a few bytes, and at worst proportional to the string's length
+  times the needle's. `join` and `replace` put their pieces together in pairs, which
+  copies each byte of a result of k pieces about log2(k) times, and `repeat` doubles its
+  string: replacing each of the million line feeds of a 10 MB string takes about a
+  second. The language reference's strings chapter, which said the standard library had
+  no such functions, points to them.
 
 ### Changed
 
@@ -435,8 +460,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a virtual call on one of its classes does what the implementations it may run do
   (`shapes[i].area()` of a `view Shape[]`, the `equals` of a map's `Point` keys), and an
   object of one that dies lets go of what their fields hold (a `Dog` holding a string).  A
-  class of another module, and a method it compiles, stay unknown.  A field no code stores
-  into once its object is made (only `self.f = v` in an `__init__`, where `self` is always
+  class of another module, and a method it compiles, stay unknown, but for the methods of an
+  instantiation an imported module's interface gives (the `List<Str>` of
+  `collections::split`, its `Buffer<Str>`), which an importer uses as that module's copy:
+  Sema checks a copy of each from its template, in the `TMPL` of the template's module,
+  which the program need not import, and the lowering reads what they do from it as from
+  its own copies (docs/design/pkm.md §4.8), so a `MinPriorityQueue<Str>`'s `pop` holds
+  nothing, as when the program makes `Buffer<Str>` itself.  A field no code stores into
+  once its object is made (only `self.f = v` in an `__init__`, where `self` is always
   the new object (*Fixed*), and no assignment, `inout` argument, local or `match` arm,
   `-> inout` result or lambda anywhere else) keeps what its `__init__` gave it, so a read of
   one of `self`, at any depth, needs no reference of its own across any call, one of a
@@ -791,6 +822,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-O` before, so `run -O0` and `run -O1` now generate less optimised code than they did,
   `run -O3` more optimised code, and `run -O2` the same.  The samples print the same at
   `run -O1` and `run -O3` as at `run -O2`, with the same heap statistics.
+- A call a module makes of its own `native fn` bound to a runtime function that never
+  returns (`Paykan_panic_message`, `Paykan_panic_value`, `Paykan_unreachable_view`: the
+  `_panic` and `_fail` of `::collections`) releases nothing its arguments made after it,
+  where no path went (docs/pir.md §3, "Native names"): the `List<Str>.__check` a program
+  links from `::collections` releases no message after the panic, as one the program makes
+  itself does not, and the standard library's code has up to 9 fewer `release`s in a
+  program's `--emit-pir`.
 
 ### Removed
 

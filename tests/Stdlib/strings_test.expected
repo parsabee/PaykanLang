@@ -1,0 +1,78 @@
+-- split, join
+split("a,b,c", ",") = ["a", "b", "c"] 3 True
+split("a,,b", ",") = ["a", "", "b"] 3 True
+split("", ",") = [""] 1 True
+split("abc", ",") = ["abc"] 1 True
+split(",a,", ",") = ["", "a", ""] 3 True
+split(",", ",") = ["", ""] 2 True
+split(",,", ",") = ["", "", ""] 3 True
+split("a::b::::c", "::") = ["a", "b", "", "c"] 4 True
+split("a:b", "::") = ["a:b"] 1 True
+split("ab", "abc") = ["ab"] 1 True
+split("ab", "ab") = ["", ""] 2 True
+split("aaa", "aa") = ["", "a"] 2 True
+split("one two  three", " ") = ["one", "two", "", "three"] 4 True
+split("x\r\ny\r\n", "\r\n") = ["x", "y", ""] 3 True
+join([], ",") = ""
+join([""], ",") = ""
+join(["", ""], ",") = ","
+join(abc, ", ") = "a, b, c", "abc"
+-- lines
+lines("") = []
+lines("a") = ["a"]
+lines("a\n") = ["a"]
+lines("a\nb") = ["a", "b"]
+lines("a\n\nb\n") = ["a", "", "b"]
+lines("\n") = [""]
+lines("\n\n") = ["", ""]
+lines("a\r\nb\r\n") = ["a", "b"]
+lines("a\r\r\n") = ["a\r"]
+lines("a\rb\r") = ["a\rb"]
+lines("\r\n") = [""]
+lines("\r") = [""]
+lines("last\nno newline") = ["last", "no newline"]
+-- words
+words("") = []
+words("   ") = []
+words("one") = ["one"]
+words("  one two\tthree\n\nfour\r\n") = ["one", "two", "three", "four"]
+words("a\vb\fc") = ["a", "b", "c"]
+words("x,y z") = ["x,y", "z"]
+-- indexOf, contains, startsWith, endsWith
+"hello" "l": indexOf 2, contains True, startsWith False, endsWith False
+"hello" "lo": indexOf 3, contains True, startsWith False, endsWith True
+"hello" "he": indexOf 0, contains True, startsWith True, endsWith False
+"hello" "hello": indexOf 0, contains True, startsWith True, endsWith True
+"hello" "x": indexOf None, contains False, startsWith False, endsWith False
+"hello" "el": indexOf 1, contains True, startsWith False, endsWith False
+"hello" "": indexOf 0, contains True, startsWith True, endsWith True
+"" "": indexOf 0, contains True, startsWith True, endsWith True
+"" "a": indexOf None, contains False, startsWith False, endsWith False
+"ab" "abc": indexOf None, contains False, startsWith False, endsWith False
+"abab" "ab": indexOf 0, contains True, startsWith True, endsWith True
+"aaab" "aab": indexOf 1, contains True, startsWith False, endsWith True
+3 6
+-- substring
+"ell" "hello" "" "" "" ""
+-- trim
+"a b" "" "" "x" "x" "é"
+"v" 1
+-- replace
+replace("a-b-c", "-", "+") = "a+b+c"
+replace("hello", "l", "") = "heo"
+replace("hello", "x", "y") = "hello"
+replace("aaa", "aa", "b") = "ba"
+replace("abc", "abc", "") = ""
+replace("", "a", "b") = ""
+replace("ab", "ab", "abab") = "abab"
+replace("a.b.", ".", "..") = "a..b.."
+replace("one, two, three", ", ", "/") = "one/two/three"
+replace("aaaa", "a", "b") = "bbbb"
+replace("abab", "ab", "") = ""
+-- repeat
+"ababab" "" "" "x" 40 "" 3000
+-- join, replace and repeat against +
+0 mismatches
+-- every result is a new string
+text text text! text? text# text$ text% text^ text&
+new new new* new@

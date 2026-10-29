@@ -2429,6 +2429,9 @@ ast::Type *Sema::ExprChecker::visitMethodCallExpr(ast::MethodCallExpr *node) {
 
   // Only a `view fn` may be called on a `view`.
   S.checkMethodReceiver(node, method);
+  // Another module's instantiation: what the method does is read from its
+  // template.
+  S.copyImportedInstance(recvTy, node->getLocation());
 
   // Type-check arguments (receiver is implicit — not in getArguments()).
   const auto &paramTys = method->getParamTypes();
@@ -3169,7 +3172,9 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
                      std::move(ForeignInstantiatedFuncDecls),
                      std::move(ForeignInstantiatedStructDecls),
                      OwnedResolver,
-                     std::move(ImportedNatives)};
+                     std::move(ImportedNatives),
+                     std::move(ImportedInstanceClassDecls),
+                     std::move(ImportedInstanceStructDecls)};
   // The sets live in this frame: a Sema is run once.
   if (ImportStack == &localImportStack)
     ImportStack = nullptr;

@@ -1,4 +1,4 @@
-// ::collections: the standard containers.
+// ::collections: the standard containers, and functions on strings.
 //
 //   List<T>                  a growable array
 //   LinkedList<T>            a doubly linked list
@@ -8,6 +8,9 @@
 //                            hash tables of Hashable keys
 //   MinPriorityQueue<T>, MaxPriorityQueue<T>
 //                            binary heaps ordered by an int priority
+//   split, join, lines, words, indexOf, contains, startsWith, endsWith,
+//   substring, trim, replace, repeat
+//                            functions on Str ("Strings", at the end)
 //
 // List, Stack, Queue, HashMap, HashSet and the priority queues are structs,
 // each holding one object that keeps all of its state (LinkedList is that
@@ -26,8 +29,9 @@
 //
 // Names starting with `_` are private (docs/language/15-modules.md,
 // "Private to the module"): `_Entry`, `_Table`, `_Heap`, `_panic`, `_fail`,
-// `_bucket` and the buffer helpers are the module's own, and a `__` field or method is reachable
-// only from its type's methods.
+// `_bucket`, the buffer helpers and the strings' (`_slice`, `_find`,
+// `_isSpace`, `_isAt`, `_Pieces`) are the module's own, and a `__` field or
+// method is reachable only from its type's methods.
 
 import ::error as err;
 import ::memory as mem;
@@ -1061,4 +1065,244 @@ impl MaxPriorityQueue<T> {
 
   // Remove every element.
   fn clear()                        { self.__heap.clear(); }
+}
+
+// -- Strings ------------------------------------------------------------------
+//
+// Functions on Str.  They count bytes, as `s.len()` and `s[i]` do, and take
+// and return an index or a size as an `unsigned`.  A search is the runtime's
+// (_find: C's memchr for the needle's first byte, memcmp for the rest of it
+// where that byte is), and a part of a string is copied out whole (_slice),
+// never built a byte at a time: split, lines, words, indexOf and contains
+// take time linear in their input for a delimiter or a needle of a few
+// bytes, and at worst proportional to its length times the needle's.  join
+// and replace put their pieces together with a _Pieces, and repeat doubles
+// its string, never appending each piece to the result so far (`concat`
+// copies the whole string it appends to).
+
+native fn _slice(s: view Str, from: unsigned, to: unsigned)
+                 -> Str = "PaykanString_slice";
+native fn _find(s: view Str, needle: view Str, from: unsigned)
+                -> int = "PaykanString_find";
+
+// Whether `c` is ASCII whitespace: a space, or a tab, a line feed, a vertical
+// tab, a form feed or a carriage return (the codes 9 to 13).
+fn _isSpace(c: char) -> bool {
+  return c == ' ' || (c >= '\t' && c <= '\r');
+}
+
+// Whether `part` is in `s` at index `at`, which leaves room for it.
+fn _isAt(s: view Str, part: view Str, at: int) -> bool {
+  for i in 0..part.len() {
+    if s[at + i] != part[i] {
+      return False;
+    }
+  }
+  return True;
+}
+
+// A string put together from pieces added in order, for join and replace.
+// Appending each piece to the string so far would copy that string each
+// time, k times for k pieces.  Instead two strings of 2^b pieces each are
+// merged into one of 2^(b+1), as a binary counter carries: the stack holds
+// a string for each bit set in the count of pieces, the one of the most
+// pieces at the bottom, and take() puts them together from the top.  A
+// byte of a string of 2^b pieces has been copied by b merges, and take()
+// copies it once for each string from there to the top, b + 1 at most:
+// fewer than 2 log2(k) + 2 times in all (about log2(k) + 1 times for pieces
+// of one length), so a result of n bytes takes time proportional to
+// n log2(k).
+struct _Pieces {
+  __stack: List<Str>;
+  __count: unsigned;
+}
+
+impl _Pieces {
+  // No pieces.
+  fn __init__() { self.__stack = List<Str>(); self.__count = 0; }
+
+  // Add `piece` after the others ("" adds nothing).
+  fn add(piece: view Str) {
+    if piece.len() == 0 {
+      return;
+    }
+    self.__stack.push(piece);
+    self.__count = self.__count + 1;
+    carry = self.__count;
+    while carry % 2 == 0 {
+      let top = self.__stack.pop();
+      let below = self.__stack.pop();
+      self.__stack.push(below + top);
+      carry = carry / 2;
+    }
+  }
+
+  // The pieces, in order, as a new string ("" for none); the stack is left
+  // empty.
+  fn take() -> Str {
+    out = "";
+    while !self.__stack.isEmpty() {
+      out = self.__stack.pop() + out;
+    }
+    return out;
+  }
+}
+
+// The fields of `s` between the occurrences of `delim`, in order, empty ones
+// included: split("a,,b", ",") is ["a", "", "b"], and a string without
+// `delim` is one field, itself ("" too).  join(split(s, d), d) == s.  An
+// empty `delim` panics.
+fn split(s: view Str, delim: view Str) -> List<Str> {
+  if delim.len() == 0 {
+    _panic("split: the delimiter is empty");
+  }
+  out = List<Str>();
+  let step = unsigned(delim.len());
+  from: unsigned = 0;
+  at = _find(s, delim, 0);
+  while at >= 0 {
+    let end = unsigned(at);
+    out.push(_slice(s, from, end));
+    from = end + step;
+    at = _find(s, delim, from);
+  }
+  out.push(_slice(s, from, unsigned(s.len())));
+  return out;
+}
+
+// The elements of `parts` with `sep` between each two: "" for no elements.
+fn join(parts: view List<Str>, sep: view Str) -> Str {
+  out = _Pieces();
+  for i in 0..parts.len() {
+    if i > 0 {
+      out.add(sep);
+    }
+    out.add(parts.at(i));
+  }
+  return out.take();
+}
+
+// The lines of `s`: the text before each "\n", and after the last one when
+// that is not the end of `s`, each without one "\r" it ends with.  "" has
+// no lines.
+fn lines(s: view Str) -> List<Str> {
+  out = List<Str>();
+  let n = s.len();
+  let newline = "\n";
+  from = 0;
+  while from < n {
+    let at = _find(s, newline, unsigned(from));
+    let stop = if at < 0 then n else at;
+    let end = if stop > from && s[stop - 1] == '\r' then stop - 1 else stop;
+    out.push(_slice(s, unsigned(from), unsigned(end)));
+    from = stop + 1;
+  }
+  return out;
+}
+
+// The words of `s`: its runs of bytes other than ASCII whitespace, in order.
+fn words(s: view Str) -> List<Str> {
+  out = List<Str>();
+  let n = s.len();
+  i = 0;
+  while i < n {
+    if _isSpace(s[i]) {
+      i = i + 1;
+    } else {
+      let start = i;
+      while i < n && !_isSpace(s[i]) {
+        i = i + 1;
+      }
+      out.push(_slice(s, unsigned(start), unsigned(i)));
+    }
+  }
+  return out;
+}
+
+// The index of the first occurrence of `needle` in `s`, or None; an empty
+// needle is at 0.
+fn indexOf(s: view Str, needle: view Str) -> unsigned? {
+  let at = _find(s, needle, 0);
+  if at < 0 {
+    return None;
+  }
+  return unsigned(at);
+}
+
+// Whether `needle` occurs in `s`; an empty one does in every string.
+fn contains(s: view Str, needle: view Str) -> bool {
+  return _find(s, needle, 0) >= 0;
+}
+
+// Whether `s` starts with `prefix`.
+fn startsWith(s: view Str, prefix: view Str) -> bool {
+  return prefix.len() <= s.len() && _isAt(s, prefix, 0);
+}
+
+// Whether `s` ends with `suffix`.
+fn endsWith(s: view Str, suffix: view Str) -> bool {
+  return suffix.len() <= s.len() && _isAt(s, suffix, s.len() - suffix.len());
+}
+
+// The bytes of `s` from index `from` up to, not including, `to`, as a new
+// string; unless from <= to <= s.len(), it panics.
+fn substring(s: view Str, from: unsigned, to: unsigned) -> Str {
+  return _slice(s, from, to);
+}
+
+// `s` without the ASCII whitespace at its start and at its end, as a new
+// string.
+fn trim(s: view Str) -> Str {
+  start = 0;
+  end = s.len();
+  while start < end && _isSpace(s[start]) {
+    start = start + 1;
+  }
+  while end > start && _isSpace(s[end - 1]) {
+    end = end - 1;
+  }
+  return _slice(s, unsigned(start), unsigned(end));
+}
+
+// `s` with every occurrence of `from` replaced by `to`, as a new string.  The
+// occurrences are found from the start, each after the one before it ends:
+// replace("aaa", "aa", "b") is "ba".  An empty `from` panics.
+fn replace(s: view Str, from: view Str, to: view Str) -> Str {
+  if from.len() == 0 {
+    _panic("replace: the text to replace is empty");
+  }
+  out = _Pieces();
+  let step = unsigned(from.len());
+  start: unsigned = 0;
+  at = _find(s, from, 0);
+  while at >= 0 {
+    let end = unsigned(at);
+    out.add(_slice(s, start, end));
+    out.add(to);
+    start = end + step;
+    at = _find(s, from, start);
+  }
+  out.add(_slice(s, start, unsigned(s.len())));
+  return out.take();
+}
+
+// `s` `n` times over, as a new string: "" for n == 0.  `block` is `s` 2^b
+// times over at bit b of `n`, doubled from the one before, and `out` takes
+// it in where that bit is set: each byte of the result is copied a few
+// times at most, and the loop runs once for each bit of `n` up to its
+// highest one set.
+fn repeat(s: view Str, n: unsigned) -> Str {
+  out = "";
+  block = s.toString();
+  rest = n;
+  while rest > 0 {
+    if rest % 2 == 1 {
+      out = out + block;
+    }
+    rest = rest / 2;
+    if rest > 0 {
+      block = block + block;
+    }
+  }
+  return out;
 }

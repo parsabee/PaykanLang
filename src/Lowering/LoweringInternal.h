@@ -486,7 +486,16 @@ private:
   static bool reachesObject(const ast::Type *ty);
   /// This module's functions and the methods of the classes and structs it
   /// defines, by PIR name (`f`, `C.m`, `S.m`): the bodies effectOf reads.
+  /// Those of the copies of the instantiations its imports export too
+  /// (readImportedCopies), which another module compiles.
   std::unordered_map<std::string, const ast::FuncDecl *> Bodies;
+  /// The instantiations an import exports whose copies Sema checked
+  /// (SemaContext::ImportedInstanceClasses), by name: every method of one
+  /// is in Bodies, though this module emits none of them.
+  std::unordered_set<std::string> ImportedCopies;
+  /// Put the methods of those copies in Bodies, as declareStruct and
+  /// declareClass put this module's.
+  void readImportedCopies();
   /// The class or struct whose method each body of Bodies is.
   std::unordered_map<const ast::FuncDecl *, ast::Type *> BodyOwners;
   /// The function or method named @p name in Bodies, or null.

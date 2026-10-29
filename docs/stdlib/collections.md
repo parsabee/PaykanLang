@@ -7,7 +7,9 @@ on [`::memory`](memory.md)'s buffers: `LinkedList` is a generic class, and the o
 generic [structs](../language/11-structs.md), each holding the one object that keeps its
 state. A program imports the module with
 `import ::collections;` (or an alias, `import ::collections as c;`) and names a container
-with its qualifier: `collections::List<int>()`.
+with its qualifier: `collections::List<int>()`. The module also has
+[functions on strings](#strings): `split`, `join`, `lines`, `words`, `indexOf`, `contains`,
+`startsWith`, `endsWith`, `substring`, `trim`, `replace` and `repeat`.
 
 ```pkn
 import ::io;
@@ -291,3 +293,105 @@ Output:
 ```
 [250, 4] big
 ```
+
+---
+
+## Strings
+
+Functions on `Str`, named with the module's qualifier like its containers:
+`collections::split(s, ",")`, or `c::split(s, ",")` after `import ::collections as c;`.
+Like `s.len()` and `s[i]`, they count **bytes**: an index or a length is a number of bytes,
+an `unsigned`, and a character outside ASCII is more than one (`"é"` is two).
+**Whitespace** is ASCII's: a space, `\t`, `\n`, `\r`, and the vertical tab and the form
+feed (`char(11)`, `char(12)`). Each takes its strings as `view`s, so a variable, a field
+or an element read with `at` is passed as it is, and returns new ones: a result is a
+string of its own, or a `List<Str>` of them, never one of the arguments, so a `concat` on
+it changes nothing else.
+
+```pkn
+import ::io;
+import ::collections as c;
+
+fn main() -> int {
+  let fields = c::split("name,qty,,price", ",");
+  io::println(Str(fields.len()) + " fields: " + c::join(fields, " | "));
+  let ls = c::lines("first\r\nsecond\n\nlast\n");
+  for i in 0..ls.len() {
+    io::println(Str(i) + ": [" + ls.at(i) + "]");
+  }
+  io::println(c::join(c::words("  to  be\tor not\n"), "_"));
+  return 0;
+}
+```
+
+Output:
+
+```
+4 fields: name | qty |  | price
+0: [first]
+1: [second]
+2: []
+3: [last]
+to_be_or_not
+```
+
+| Function | Does | When it fails |
+|----------|------|---------------|
+| `fn split(s: view Str, delim: view Str) -> List<Str>` | The fields of `s` between the occurrences of `delim`, in order, empty ones kept: `split("a,,b", ",")` is `["a", "", "b"]`, `split("", ",")` is `[""]`, and a string without `delim` is the one field `[s]`. `join(split(s, d), d) == s` | panics `split: the delimiter is empty` when `delim` is `""` |
+| `fn join(parts: view List<Str>, sep: view Str) -> Str` | The elements of `parts`, in order, with `sep` between each two: `""` for no elements | |
+| `fn lines(s: view Str) -> List<Str>` | The lines of `s`: the text before each `\n`, and after the last one, each without one `\r` it ends with. A `\n` at the end of `s` ends its last line and starts no other: `lines("a\r\nb\n")` is `["a", "b"]`, `lines("a\n\n")` is `["a", ""]`, and `lines("")` is `[]` | |
+| `fn words(s: view Str) -> List<Str>` | The runs of bytes that are not whitespace, in order: `words(" a  b\tc\n")` is `["a", "b", "c"]`. No word is empty, and a string of whitespace has none | |
+| `fn indexOf(s: view Str, needle: view Str) -> unsigned?` | The index of the first occurrence of `needle` in `s`: `indexOf("hello", "lo")` is `3`, and an empty `needle` is at `0` | `None` when `needle` does not occur |
+| `fn contains(s: view Str, needle: view Str) -> bool` | Whether `needle` occurs in `s`; an empty `needle` does in every string | |
+| `fn startsWith(s: view Str, prefix: view Str) -> bool` | Whether `s` starts with `prefix` (`""` starts every string) | |
+| `fn endsWith(s: view Str, suffix: view Str) -> bool` | Whether `s` ends with `suffix` (`""` ends every string) | |
+| `fn substring(s: view Str, from: unsigned, to: unsigned) -> Str` | The bytes of `s` from index `from` up to, not including, `to`: `substring("hello", 1, 4)` is `"ell"`, and `from == to` gives `""` | panics `string slice <from>..<to> out of bounds (len=<n>)` unless `from <= to <= s.len()` |
+| `fn trim(s: view Str) -> Str` | `s` without the whitespace at its start and at its end | |
+| `fn replace(s: view Str, from: view Str, to: view Str) -> Str` | `s` with every occurrence of `from` replaced by `to`. The occurrences are found from the start, each after the one before it ends, and a `to` put in is not searched again: `replace("aaa", "aa", "b")` is `"ba"` | panics `replace: the text to replace is empty` when `from` is `""` |
+| `fn repeat(s: view Str, n: unsigned) -> Str` | `s`, `n` times over: `repeat("ab", 3)` is `"ababab"`, and `n == 0` gives `""` | |
+
+```pkn
+import ::io;
+import ::collections as c;
+
+fn main() -> int {
+  let p = c::trim("  /usr/local/bin/paykan \n");
+  io::println("[" + p + "]");
+  io::println(Str(c::startsWith(p, "/usr")) + " " + Str(c::endsWith(p, ".pkn")) + " "
+      + Str(c::contains(p, "local")));
+  match c::indexOf(p, "/bin") {
+    i: unsigned {
+      io::println(c::substring(p, 0, i) + " then " + c::substring(p, i + 1, unsigned(p.len())));
+    }
+    None { io::println("no /bin"); }
+  }
+  io::println(c::replace(p, "/", "\\"));
+  io::println(c::repeat("=-", 5) + "=");
+  return 0;
+}
+```
+
+Output:
+
+```
+[/usr/local/bin/paykan]
+True False True
+/usr/local then bin/paykan
+\usr\local\bin\paykan
+=-=-=-=-=-=
+```
+
+A search is the runtime's: C's `memchr` finds each place the first byte of the delimiter
+or the needle is, and `memcmp` compares the rest of it there. Each part is copied out once,
+never built a byte at a time, so `split`, `lines`, `words`, `indexOf` and `contains` take
+time linear in the length of `s` for a delimiter or a needle of a few bytes. A long one
+costs more where its first byte recurs in `s`: at worst, the time is proportional to the
+length of `s` times the needle's. A 10 MB string of a million lines splits in well under a
+second. `startsWith` and `endsWith` compare the bytes of the prefix or the suffix only.
+
+`replace` finds the occurrences as `split` does. It and `join` put their pieces together in
+pairs, as a binary counter carries (two strings of one piece each make one of two, two of
+two make one of four, and so on), so each byte of a result of k pieces is copied about
+log2(k) times. Appending each piece to the result so far would copy that result once per
+piece. Replacing each of the million line feeds of a 10 MB string takes about a second.
+`repeat` doubles its string, so its time is linear in the length of the result.

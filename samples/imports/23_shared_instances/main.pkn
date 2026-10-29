@@ -1,0 +1,37 @@
+// OK: the methods of another module's copies of instantiations (Cell<Str>
+// and Slot<Str>, which cells exports) are read from their templates: a
+// string read from a cell or a slot is in use across `size`, which lets go
+// of nothing, without a reference of its own, and across `put` and `set`,
+// which let go of it, with one (docs/pir.md §7).
+// expect-stdout: old?1
+// expect-stdout: old?0
+// expect-stdout: new!1
+// expect-stdout: first.1
+// expect-stdout: first.0
+// expect-stdout: other?1
+import ::io;
+import cells;
+
+class Holder {
+  slot: cells::Slot<Str>;
+}
+
+fn reads(c: cells::Cell<Str>) -> Str => c.v + Str(c.size());
+
+fn replaces(c: cells::Cell<Str>) -> Str => c.v + Str(c.put("new" + "!"));
+
+fn readsSlot(h: Holder) -> Str => h.slot.v + Str(h.slot.size());
+
+fn setsSlot(h: Holder) -> Str => h.slot.v + Str(h.slot.set("other" + "?"));
+
+fn main() -> int {
+  let c = cells::cellOf("old" + "?");
+  io::println(reads(c));
+  io::println(replaces(c));
+  io::println(reads(c));
+  let h = Holder(cells::slotOf("first" + "."));
+  io::println(readsSlot(h));
+  io::println(setsSlot(h));
+  io::println(readsSlot(h));
+  return 0;
+}

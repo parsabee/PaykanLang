@@ -387,21 +387,22 @@ of a loop (a variable assigned a new value before it is read again is not). So d
 function follows, before the variable's scope ends, with a call or the release of a reference (the
 one an assignment replaces, say) while it uses an object it holds no reference to: a field's value
 reached through another variable, or anything reached through `self`.
-In `x = h.node; take(x); s = h.node.name + label(1);` the hand-off to `take` stays a copy:
-`label` runs while the name read from `h.node` is still to be used, and `x` may be what keeps that
-node alive (a transfer treats any call as one that may release a reference). A read that a call
-could replace keeps what it read alive itself until it is used, which the compiler decides from
-what the call is given and, when it compiles the function called, from what that function does:
-with `replace(h)`, which is given `h` and assigns `h.node`, in place of `label(1)`, the name has a
-reference of its own, and the hand-off is a transfer. In a method, a hand-off therefore stays a
-copy when `self` is
-used by or after a call or a release that follows it, the call it is passed to included (not in
-`__init__`, whose object the constructor holds). Where one branch of an `if` or one arm of a `match` hands the
-variable on and another does not, the other releases it when its scope ends, as before. In
-`f(a, a)` the first `a` is a copy and the second a transfer. `self`, `inout` parameters and locals,
-fields, array elements and the members of a tuple or struct, and `view` parameters and variables,
-are never transferred, and a lambda's captures are always copies. The compiler's `--stats` option
-counts the transfers it made ([docs/pir.md §12](../pir.md#12-passes) has the details).
+In `x = h.node; take(x); s = h.node.name + label(1);` the hand-off to `take` stays a copy: `label`
+runs while the name read from `h.node` is still to be used, and `x` may be what keeps that node
+alive (a transfer treats any call as one that may release a reference). A read that a call could
+replace keeps what it read alive itself until it is used, which the compiler decides from what the
+call is given and, when it compiles the function called or has its template (a method of the
+`List<Str>` an imported module makes, whose code that module compiles), from what that function
+does: with `replace(h)`, which is given `h` and assigns `h.node`, in place of `label(1)`, the name
+has a reference of its own, and the hand-off is a transfer. In a method, a hand-off therefore stays
+a copy when `self` is used by or after a call or a release that follows it, the call it is passed to
+included (not in `__init__`, whose object the constructor holds). Where one branch of an `if` or one
+arm of a `match` hands the variable on and another does not, the other releases it when its scope
+ends, as before. In `f(a, a)` the first `a` is a copy and the second a transfer. `self`, `inout`
+parameters and locals, fields, array elements and the members of a tuple or struct, and `view`
+parameters and variables, are never transferred, and a lambda's captures are always copies. The
+compiler's `--stats` option counts the transfers it made ([docs/pir.md §12](../pir.md#12-passes) has
+the details).
 
 A transfer releases nothing early: the destination holds the reference and releases it at the
 end of *its* scope, as it would a copy: a parameter when its function returns, a variable when

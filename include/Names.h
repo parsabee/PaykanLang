@@ -260,6 +260,9 @@ inline constexpr const char *kPaykanIoStdin = "Paykan_io_stdin";
 // ... and ::error's (stdlib/error.pkn)
 inline constexpr const char *kPaykanErrorCode = "Paykan_error_code";
 inline constexpr const char *kPaykanErrorText = "Paykan_error_text";
+// ... and ::collections's string functions (stdlib/collections.pkn)
+inline constexpr const char *kPaykanStringSlice = "PaykanString_slice";
+inline constexpr const char *kPaykanStringFind = "PaykanString_find";
 
 // Reached only through a `native fn` of the standard library
 inline constexpr const char *kPaykanPanicMessage = "Paykan_panic_message";
@@ -479,6 +482,13 @@ inline constexpr const char *kNoReturnRuntimeFunctions[] = {
     kPaykanPanicIndex,       kPaykanPanicForStep,     kPaykanPanicPureVirtual,
     kPaykanPanicMessage,     kPaykanPanicValue,       kPaykanUnreachableView,
 };
+/// @p symbol is one of kNoReturnRuntimeFunctions.
+inline bool isNoReturnRuntimeFunction(std::string_view symbol) {
+  for (std::string_view name : kNoReturnRuntimeFunctions)
+    if (name == symbol)
+      return true;
+  return false;
+}
 
 // -- Kinds of values
 //

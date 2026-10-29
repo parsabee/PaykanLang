@@ -1520,6 +1520,164 @@ TEST(Pkm, ANativeFunctionAcrossModulesIsLentAFieldRead) {
   fs::remove_all(dir);
 }
 
+// The instantiations a module's interface gives (Cell<Str> and Slot<Str> of
+// cells), which its importers use as its copies, are read from their
+// templates whatever the module comes from (docs/design/pkm.md §4.8): its
+// source with --no-module-cache, its cache entry, cold then warm, and a
+// prebuilt file without its source.  A string read from a cell or a slot
+// is held across `put` and `set`, which let go of it, and not across
+// `size`, which does not; and the program runs and builds without a leak.
+// So in a program that imports only `labels`, whose interface gives
+// Cell<Str> without a template of its own: cells' template is read there
+// too, though the program imports no module that names cells.
+TEST(Pkm, ImportedInstantiationsAreReadFromTheirTemplates) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_instances_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "cells.pkn",
+            "class Cell<T> { v: T; }\n"
+            "impl Cell<T> {\n"
+            "  fn put(x: T) -> int { self.v = x; return 0; }\n"
+            "  view fn size() -> int => 1;\n"
+            "}\n"
+            "struct Slot<T> { v: T; }\n"
+            "impl Slot<T> {\n"
+            "  fn set(x: T) -> int { self.v = x; return 0; }\n"
+            "  view fn size() -> int => 1;\n"
+            "}\n"
+            "fn cellOf(s: Str) -> Cell<Str> => Cell<Str>(s);\n"
+            "fn slotOf(s: Str) -> Slot<Str> => Slot<Str>(s);\n");
+  writeFile(
+      dir / "main.pkn",
+      "import ::io;\n"
+      "import cells;\n"
+      "class Holder { slot: cells::Slot<Str>; }\n"
+      "fn reads(c: cells::Cell<Str>) -> Str => c.v + Str(c.size());\n"
+      "fn replaces(c: cells::Cell<Str>) -> Str =>\n"
+      "  c.v + Str(c.put(\"new\" + \"!\"));\n"
+      "fn readsSlot(h: Holder) -> Str => h.slot.v + Str(h.slot.size());\n"
+      "fn setsSlot(h: Holder) -> Str =>\n"
+      "  h.slot.v + Str(h.slot.set(\"other\" + \"?\"));\n"
+      "fn main() -> int {\n"
+      "  let c = cells::cellOf(\"old\" + \"?\");\n"
+      "  io::println(reads(c) + \" \" + replaces(c) + \" \" + reads(c));\n"
+      "  let h = Holder(cells::slotOf(\"first\" + \".\"));\n"
+      "  io::println(readsSlot(h) + \" \" + setsSlot(h) + \" \" +\n"
+      "              readsSlot(h));\n"
+      "  return 0;\n"
+      "}\n");
+  writeFile(dir / "labels.pkn", "import cells;\n"
+                                "fn labelled(s: Str) -> cells::Cell<Str> =>\n"
+                                "  cells::Cell<Str>(\"#\" + s);\n");
+  writeFile(dir / "through.pkn",
+            "import ::io;\n"
+            "import labels;\n"
+            "class Box { s: Str; }\n"
+            "fn sized(b: Box) -> Str {\n"
+            "  let c = labels::labelled(\"x\");\n"
+            "  return b.s + Str(c.size());\n"
+            "}\n"
+            "fn stored(b: Box) -> Str {\n"
+            "  let c = labels::labelled(\"x\");\n"
+            "  return b.s + Str(c.put(\"y\"));\n"
+            "}\n"
+            "fn main() -> int {\n"
+            "  let b = Box(\"b\" + \"!\");\n"
+            "  io::println(sized(b) + \" \" + stored(b));\n"
+            "  return 0;\n"
+            "}\n");
+  const std::string output = "old?1 old?0 new!1\nfirst.1 first.0 other?1\n";
+  auto in = [&](const std::string &cmd) {
+    return run("cd " + dir.string() + " && " + cmd);
+  };
+  // The PIR of @p program, @p flags given.
+  auto pirOf = [&](const std::string &flags, const char *program,
+                   const std::string &how) {
+    auto pir = in(paykanCmd() + " " + flags + " --emit-pir " + program);
+    EXPECT_EQ(pir.exitCode, 0) << how << ":\n" << pir.out;
+    EXPECT_TRUE(contains(pir.out, "extern shared fn @Cell<Str>.put("))
+        << how << ":\n"
+        << pir.out;
+    return pir.out;
+  };
+  // Its function @p fn.
+  auto body = [](const std::string &pir, const std::string &fn) {
+    const size_t at = pir.find("\nfn @" + fn + "(");
+    return at == std::string::npos ? std::string()
+                                   : pir.substr(at, pir.find("\n}\n", at) - at);
+  };
+  // The programs' PIR, @p flags given: each read held where it must be.
+  auto holds = [&](const std::string &flags, const std::string &how) {
+    const std::string pir = pirOf(flags, "main.pkn", how);
+    for (const char *fn : {"reads", "readsSlot"})
+      EXPECT_FALSE(contains(body(pir, fn), "retain"))
+          << how << ", " << fn << ":\n"
+          << body(pir, fn);
+    EXPECT_TRUE(contains(body(pir, "replaces"), "retain nonnull %v."))
+        << how << ":\n"
+        << body(pir, "replaces");
+    EXPECT_TRUE(contains(body(pir, "setsSlot"), "retain nonnull %elem."))
+        << how << ":\n"
+        << body(pir, "setsSlot");
+    const std::string through = pirOf(flags, "through.pkn", how);
+    EXPECT_FALSE(contains(body(through, "sized"), "retain"))
+        << how << ":\n"
+        << body(through, "sized");
+    EXPECT_TRUE(contains(body(through, "stored"), "retain nonnull %s."))
+        << how << ":\n"
+        << body(through, "stored");
+  };
+  // `paykan [flags] <program>` prints what it must without a leak.
+  auto runs = [&](const std::string &flags, const std::string &how) {
+    auto prints = [&](const char *program, const std::string &out) {
+      auto r = in(paykanCmd() + " " + flags + " --track-heap " + program);
+      EXPECT_EQ(r.exitCode, 0) << how << ", " << program << ":\n" << r.out;
+      EXPECT_TRUE(contains(r.out, out)) << how << ", " << program << ":\n"
+                                        << r.out;
+      EXPECT_TRUE(contains(r.out, "live blocks       : 0"))
+          << how << ", " << program << ":\n"
+          << r.out;
+    };
+    prints("main.pkn", output);
+    prints("through.pkn", "b!1 b!0\n");
+  };
+
+  holds("--no-module-cache", "from source");
+  runs("--no-module-cache", "from source");
+  holds("", "cold cache");
+  auto warm = in(paykanCmd() + " --verbose --emit-pir main.pkn");
+  EXPECT_TRUE(contains(warm.out, "module cells: cache ")) << warm.out;
+  holds("", "warm cache");
+  runs("", "warm cache");
+  for (const char *opt : {"-O0", "-O2"}) {
+    auto b = in(paykanCmd() + " " + opt + " build -o prog main.pkn");
+    ASSERT_EQ(b.exitCode, 0) << opt << ":\n" << b.out;
+    auto ran = in("./prog");
+    EXPECT_EQ(ran.exitCode, 0) << opt;
+    EXPECT_EQ(ran.out, output) << opt;
+  }
+
+  // Prebuilt: cells and labels .pkm files on the module path, their
+  // sources gone.
+  fs::create_directories(dir / "pk");
+  auto emit = in(paykanCmd() + " --emit-pkm -o pk/cells.pkm cells.pkn");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  emit = in(paykanCmd() +
+            " --module-path=pk --emit-pkm -o pk/labels.pkm labels.pkn");
+  ASSERT_EQ(emit.exitCode, 0) << emit.out;
+  fs::rename(dir / "cells.pkn", dir / "cells.away");
+  fs::rename(dir / "labels.pkn", dir / "labels.away");
+  fs::remove_all(dir / ".paykan_cache");
+  auto pre =
+      in(paykanCmd() + " --verbose --module-path=pk --emit-pir through.pkn");
+  EXPECT_TRUE(contains(pre.out, "module cells: prebuilt pk/")) << pre.out;
+  EXPECT_TRUE(contains(pre.out, "module labels: prebuilt pk/")) << pre.out;
+  holds("--module-path=pk", "prebuilt");
+  runs("--module-path=pk", "prebuilt");
+  fs::remove_all(dir);
+}
+
 // `pkm extract --object` writes a module's compiled code as an object the
 // system linker takes (what a program's --emit-c C links with).
 TEST(Pkm, ExtractWritesTheCompiledCodeAsAnObject) {

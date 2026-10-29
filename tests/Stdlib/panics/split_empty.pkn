@@ -1,0 +1,9 @@
+// expect-panic: split: the delimiter is empty
+import ::io;
+import ::collections;
+
+fn main() -> int {
+  let parts = collections::split("a,b", "");
+  io::println(Str(parts.len()));
+  return 0;
+}

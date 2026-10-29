@@ -126,10 +126,34 @@ Output:
 todo todo todo!
 ```
 
-There are no built-in methods for searching, slicing or splitting yet, and the standard
-library has none either, but they are short loops over `len()` and `[]`, as
-[the project below](#project-text-helpers-for-tasks) shows. How strings are shared and
-freed is in [Memory](16-memory.md#strings-arrays-and-tuples).
+Searching, slicing and splitting are functions of the standard library's `::collections`
+([Strings](../stdlib/collections.md#strings)): `split`, `join`, `lines`, `words`, `indexOf`,
+`contains`, `startsWith`, `endsWith`, `substring`, `trim`, `replace` and `repeat`. Like
+`len()` and `[]`, they count bytes:
+
+```pkn
+import ::io;
+import ::collections as c;
+
+fn main() -> int {
+  let line = "  milk,eggs,,bread \n";
+  let items = c::split(c::trim(line), ",");
+  io::println(Str(items.len()) + " items: " + c::join(items, " / "));
+  io::println(c::indexOf(line, "eggs"));
+  io::println(c::replace("a-b-c", "-", "+") + " " + c::substring("PaykanLang", 6, 10));
+  return 0;
+}
+```
+
+Output:
+
+```
+4 items: milk / eggs /  / bread
+7
+a+b+c Lang
+```
+
+How strings are shared and freed is in [Memory](16-memory.md#strings-arrays-and-tuples).
 
 ### Characters and bytes
 
@@ -725,3 +749,10 @@ Call the plumber
 
 `padRight` builds its result with `+`, not `concat`: `out = s` makes `out` the caller's
 string, and `out.concat(" ")` would change that string too.
+
+The helpers are written out here to show the loops. A program can use the standard
+library's instead ([Strings](../stdlib/collections.md#strings)), with `split`, `lines`,
+`words`, `replace` and more beside them. `::collections` has a `trim`, which strips the
+vertical tab and the form feed as well, and a `substring`, which takes the bytes `slice`
+takes but checks its `unsigned` indexes: unless `from <= to <= s.len()` it panics, where
+`slice` gives `""` for a `from` after `to`.
