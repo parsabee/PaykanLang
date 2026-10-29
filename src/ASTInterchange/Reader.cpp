@@ -1078,6 +1078,10 @@ private:
         return fail(nf.last(), "empty name: the C symbol"), nullptr;
       if (!symbol || !nf.done() || !f.done())
         return nullptr;
+      if (std::string_view why = names::cSymbolProblem(*symbol); !why.empty())
+        return fail(*nl, "the C symbol '" + *symbol + "' of native function '" +
+                             *name + "' " + std::string(why)),
+               nullptr;
       auto *fn = Ctx.make<FuncDecl>(loc, *name, std::move(params), ret, nullptr,
                                     std::move(tparams));
       fn->setNativeSymbol(*symbol);

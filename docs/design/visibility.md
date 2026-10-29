@@ -1,7 +1,7 @@
 # Private names: the `_` and `__` prefixes
 
 The design behind the visibility rules in `docs/language/05-classes.md`,
-`14-structs.md` and `06-modules.md`: which names an underscore prefix makes
+`11-structs.md` and `15-modules.md`: which names an underscore prefix makes
 private, from where they can be reached, and how a private name crosses a
 module boundary.  There are two levels, each spelled by its prefix and neither
 by a keyword: two underscores make a member private to its class or struct,
@@ -104,8 +104,8 @@ gets the module's interface with every name in it, but a *written* qualified
 reference to a private name is an error:
 
 ```
-'collections::_bucket' is private to module 'collections'
-'collections::_Entry' is private to module 'collections'
+'collections::_bucket' is private to module '::collections'
+'collections::_Entry' is private to module '::collections'
 ```
 
 This covers calls, function values, type annotations, instantiations
@@ -164,7 +164,7 @@ Each with the default taken here.
 4. **Should private names be left out of the `.pkm` interface?**  No: a
    private field is part of the layout and a private function or type may be
    reached by an exported template.  Leaving them out would need a layout
-   record of its own in the format, which stays fixed until 0.2.0.
+   record of its own in the format.
 5. **Should a single underscore mean anything?**  Yes: private to the
    module.  A top-level `__` name is an error rather than a synonym, so each
    prefix has one meaning.
@@ -172,4 +172,5 @@ Each with the default taken here.
    names are global across an import graph (one canonical name per type, as
    `docs/language/15-modules.md` says), so two modules still cannot both
    declare a `_Node`.  Privacy here is about reach, not naming; module-local
-   canonical names are a 0.2.0 change (`docs/design/pkm.md` §3.6).
+   canonical names would be a change of their own (`docs/design/pkm.md`
+   §3.6).

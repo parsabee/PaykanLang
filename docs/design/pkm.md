@@ -65,10 +65,15 @@ map onto three *classes* of section rather than three literal sections:
 | 2. "loadable by Sema for semantic analysis" | **sema** | `IFACE`, `TMPL` | Sema (and the lowering, to declare externs) |
 | 3. "everything not needed for semantic analysis; binary" | **binary** | `CODE`, `OBJ`, `SYMIDX`, `DEBUG`, `PAYLOAD`* | the driver (PIR) and the active backend (compiled code, payload) |
 
-A file with **no `PAYLOAD`** is the **portable** form: it is complete, and
-any backend whose PIR version and runtime ABI match regenerates native
-code from `CODE`. A payload is only ever a cache of `CODE` for one backend,
-target and configuration.
+A file with **no `OBJ`** and no `PAYLOAD` is the **portable** form: its
+`CODE` holds all of the module's code, and any backend whose PIR version
+and runtime ABI match generates native code from it. A file with `OBJ`,
+which a backend that compiles modules writes (the mlir backend's files,
+the standard library's among them), keeps the compiled code only there,
+and `CODE` declares it (§5.13): only a backend that links what that
+backend made can use the file, though its interface and the PIR it keeps
+are backend-neutral. A payload is only ever a cache of `CODE` for one
+backend, target and configuration.
 
 Terms: *canonical name* is the module identity (`include/ModuleName.h`:
 `geometry::shapes`, `::io`, main's stem); *interface* is what Sema sees;
@@ -233,13 +238,13 @@ G = gating (a mismatch yields a verdict), I = informational.
 | `0x01` | `module` | `str` | G | canonical module name; must equal the name the importer resolved |
 | `0x03` | `contents` | `u32` bitset | G | bit 0 `HAS_CODE`, 1 `HAS_TEMPLATES`, 2 `HAS_MAIN`, 3 `SYSTEM` (name starts with `::`), 4 `HAS_STATIC_INIT` (#170 lazily initialised storage), 5 `EXPORTS_C` (#21), 6 `HAS_OBJECT` (the module's code is compiled, §5.13). Must agree with the section table |
 | `0x05` | `core` | `{str version; u32 major, minor, patch; str prerelease; str build}` | G | the PaykanLang that produced the file (`include/Version.h.in`). `build` is `""` for a release (configured with `-DPAYKAN_RELEASE=ON`, which the release workflow and the Homebrew formula pass); for every other build, a development build of the last release's version included, it is the build ID: a hash of the contents of `src/` and `include/`, recomputed on every build (`kBuildId` in the generated `BuildId.h`, `cmake/BuildId.cmake`; never an executable size/mtime). For a development build, a cache entry of another build is Stale (#188) and a prebuilt file of another build is `Rejected(Toolchain)`; a release takes a prebuilt file of any build of a version it accepts (§8.2) |
-| `0x07` | `format_versions` | `{u32 iface_version, tmpl_version, pir_version, code_encoding, debug_version}` | G | `iface_version` and `pir_version` are the release's (§11), like `PAYKAN_PIR_TEXT_VERSION`, so text, binary and manifest agree by construction. `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
+| `0x07` | `format_versions` | `{u32 iface_version, tmpl_version, pir_version, code_encoding, debug_version}` | G | `iface_version` and `pir_version` are the release's (§11), like `PAYKAN_PIR_TEXT_VERSION`, so text, binary and manifest agree by construction. `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR (§5, [pir.md §11](../pir.md#11-binary-form)) |
 | `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, defined in `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this): the release version, like every format (§11) |
 | `0x0B` | `target` | `{u8 pointer_size, slot_size, endianness, int_width, float_width}` | G | the abstract target PIR assumes: `8, 8, 1, 64, 64` (`Runtime.h` LP64 LE asserts). Not a triple: PIR and interface are the same for every LP64 LE triple; the triple belongs to a payload |
 | `0x0D` | `deps` | `list<Dep>` | G | direct imports only, sorted by canonical name; §2.3 |
 | `0x0F` | `source` | `{hash sha256; u64 size}` | G (cache) / I (prebuilt) | the module's source file exactly as read. Absent for generated modules |
 | `0x11` | `libraries` | `list<Lib>` | G (link) | §2.4 |
-| `0x20` | `frontend` | `{str name, version, plugin}` | I | which frontend parsed the source. **Decision: recorded, not gating.** Frontends must produce identical ASTs (differential tests enforce it); the record answers "who produced this" when they do not |
+| `0x20` | `frontend` | `{str name, version, plugin}` | I | which frontend parsed the source: a built-in frontend's name, the core version and an empty `plugin`, or a plugin's frontend's name, the plugin's own version and the plugin's name (its descriptor's, else its file's). **Decision: recorded, not gating.** Frontends must produce identical ASTs (differential tests enforce it); the record answers "who produced this" when they do not |
 | `0x22` | `producer` | `{str tool, version}` | I | `"paykan"`, `kVersion`; a third-party writer names itself |
 | `0x24` | `plugin_api` | `u32` | I | `PAYKAN_PLUGIN_API_VERSION` of the producer; gating per payload, not per module |
 | `0x26` | `opt_pipeline` | `str` | I | `""` in v0.2.0 (`CODE` is pre-pass PIR, §5.9). Reserved for #97 |
@@ -592,6 +597,12 @@ spelling has a space after commas (`Pair<Str, int>`); **open question 3.**
 
 ### 4.5 Hybrid erasure and the `INST` part (#160)
 
+**Obsolete.** #160 closed without erasure: every instantiation is compiled
+on its own (§4.8), and one copy shared by class-type arguments would only be
+an optimisation no program can observe.  The format keeps what this section
+reserved (the `INST` part, the `erased` and `hasClassObj` bits, `ClassObjRec`),
+written as zero or empty; the design is kept as the record of the choice.
+
 #160: class-type arguments share one **erased** copy compiled by the
 defining module (runtime class passed as a hidden argument); value-type
 arguments get a **specialised** copy; mixed lists specialise over the value
@@ -732,7 +743,7 @@ CODE blob
   --- string table: uleb count ; count × bytes (UTF-8, no NUL; entry 0 = "") ---
   str  module name   (canonical)
   --- item tables, fixed order, each `uleb n` then n records ---
-  ExternGlobalRec*  CStrRec*  DataRec*  BytesRec*  SlotRec* (#170; 0 today)  ClassObjRec* (#160; 0 today)  ClassRec*  FunctionRec*
+  ExternGlobalRec*  CStrRec*  DataRec*  BytesRec*  SlotRec* (#170; 0 today)  ClassObjRec* (obsolete, always 0: §4.5)  ClassRec*  FunctionRec*
   u32  trailer "BRIP"   (a truncated blob never ends here)
 ```
 
@@ -766,7 +777,7 @@ for that reason; the lowering is deterministic already.
 | 5 | `box` | | 18 | `view`: marks the local whose slot type follows as a `view`'s (docs/pir.md §3); only there |
 | | | | 19–255 | reserved |
 
-A reader of codec 1.x rejects reserved codes. A `static_assert`-checked
+A reader of this codec version rejects reserved codes. A `static_assert`-checked
 table in `include/paykan/pir/Codes.h` holds both the opcode names the
 printer uses and these codes, with a test that every enumerator has both.
 
@@ -857,7 +868,7 @@ FunctionRec
   uleb recordLength      bytes that follow (lets SYMIDX point here and a reader skip or decode one function)
   str  name
   u32  flags             bit0 extern ; bit1 hasModule ; bit2 hasSymbol ; bits3-4 linkage (0 external, 1 hidden, 2 internal; §9.3)
-                         bit5 linkonce (reserved, written 0; §4.5 makes it unnecessary) ; bit6 erased (nHiddenParams follows; #160)
+                         bit5 linkonce (reserved, written 0; §4.5 makes it unnecessary) ; bit6 erased (obsolete, written 0: §4.5)
                          bit7 noreturn ; bit8 inline ; bit9 noinline ; bit10 cold (#171) ; bit11 cExport (cName follows; #21) ; bit12 hasAttrs
   sig  signature
   [bit1] str module ; [bit2] str symbol ; [bit6] uleb nHiddenParams ; [bit11] str cName
@@ -869,7 +880,7 @@ FunctionRec
   uleb nextValueId
   Block body
 ClassRec
-  str name ; u32 flags (bit0 extern ; bit1 final #18 ; bit2 abstract #18 ; bit3 singleton #168 ; bit4 hasClassObj #160 ; bits5-6 linkage ; bit7 linkonce reserved)
+  str name ; u32 flags (bit0 extern ; bit1 final #18 ; bit2 abstract #18 ; bit3 singleton (obsolete, written 0: #168 is not planned) ; bit4 hasClassObj (obsolete, written 0: §4.5) ; bits5-6 linkage ; bit7 linkonce reserved)
   str super ("" = root) ; [bit0] str module
   uleb nFields ; nFields × (str name ; slot type)           layout order, ancestors first
   uleb nSlots  ; nSlots  × (str slot ; str target ("" = null) ; sig)
@@ -877,8 +888,8 @@ ExternGlobalRec  str name ; u8 kind (0 obj, 1 vtable)        always $rt.
 CStrRec          str name ; bytes                            no NUL stored
 DataRec          str name ; uleb n ; n × sleb
 BytesRec         str name ; bytes                            raw constant bytes, any values
-SlotRec (#170)   str name ; u32 flags (bits0-1 linkage ; bit2 constant ; bit3 lazy ; bit4 singletonInstance #168) ; type ; [bit2] Operand init
-ClassObjRec (#160) str name ; str class ; uleb nTypeArgs ; nTypeArgs × str
+SlotRec (#170)   str name ; u32 flags (bits0-1 linkage ; bit2 constant ; bit3 lazy ; bit4 singletonInstance, obsolete: #168 is not planned) ; type ; [bit2] Operand init
+ClassObjRec (obsolete, never written: §4.5) str name ; str class ; uleb nTypeArgs ; nTypeArgs × str
 ```
 
 The reader checks that a function body ends exactly at `recordLength`
@@ -928,6 +939,9 @@ reserved for a later post-pass variant (PR #104 §5.4 option C); storing
 post-pass PIR per `-O` was rejected (N copies per file).
 
 ### 5.10 Generics in `CODE` (#160)
+
+The erased body and the class object below are obsolete (§4.5); a module's
+copies of instantiations are ordinary records (§4.8).
 
 | Piece | Representation | Linkage |
 |---|---|---|
@@ -1145,8 +1159,9 @@ Rejected: backend-written sidecar files (#106 B: two files to keep in sync,
 integrity has to bind them) and backend-embedded interfaces (#106 A: a
 bitcode/ELF parser in the core).
 
-**C plugin API** (append-only; `PAYKAN_PLUGIN_API_VERSION` stays 1 with
-`struct_size` gating). To keep `PaykanBackend` small and leave room for
+**C plugin API** (append-only, with `struct_size` gating;
+`PAYKAN_PLUGIN_API_VERSION` is the release version, §11, so a loadable
+plugin is rebuilt for each release). To keep `PaykanBackend` small and leave room for
 #25's `load_symbol`, the callbacks live in their own descriptor reached
 through one appended pointer field:
 
@@ -1616,7 +1631,7 @@ Reserved now so no later major bump is needed:
 | #167 explicit self / static methods | `MFlags.STATIC`, `MUT_SELF`; `direct[]` |
 | #18 override/final/pure | `MFlags.FINAL/OVERRIDE/PURE`; `cflags.FINAL`; class `abstract` bit (pure virtual methods done: the prototype's method flags byte, bit 4, §3.2; abstractness is recomputed, never stored) |
 | #147 traits | `TRAIT`, `IMPL`, `Bounds`, `T_TRAIT_OBJ`, trait default bodies in `TMPL` |
-| #160 generics | `TMPL` section, `INST` part, `ERASABLE`, `erased`/`nHiddenParams`, `ClassObjRec`, `$class` spelling |
+| #160 generics | `TMPL` section (in use, §4.8); obsolete, §4.5: `INST` part, `ERASABLE`, `erased`/`nHiddenParams`, `ClassObjRec`, `$class` spelling |
 | #96 inline optionals, #99 weak (done: type code 16, opcodes 30, 31 and 49, a class field's flags byte) | type codes 8–16, opcodes 26–31, `T_WEAK` |
 | #98 borrowed params | per-call ownership in `CODE` (opcode 54, marks 55 and 56, §5.5); the ownership mask in the runtime ABI, asked by every lending body in `CODE` and `OBJ`; `Sig.conv` and `nConventions` retired (0); a `FUNC` record's native flag (§3.5) |
 | #93 one allocation | header kind is a property of `runtime_abi`, nothing per class |
@@ -1671,8 +1686,13 @@ any payload code.
 Landed so far: A1 (header-only, `include/paykan/support/`, and without
 `AtomicFile`), A2 (without the linkage and
 attribute flags), A3 and A4, and A6 and B1 in the prototype form the status
-at the top describes (no `PAYKAN_PKM_COMPATIBLE_VERSIONS` list yet). A5, B2
-and phases C and D have not landed.
+at the top describes (no `PAYKAN_PKM_COMPATIBLE_VERSIONS` list yet); D1 in
+the form §4.8 describes (templates in `TMPL` as renamed interchange text,
+and each module's own copies of the instantiations it uses, with no `INST`
+part and no erased copies); and of C3, a module's compiled code, held in its
+`OBJ` section (§5.13) rather than in a payload, with the C backend's
+`.c/.o/.key` cache gone with that backend. A5, B2 and the rest of phases C
+and D have not landed.
 
 | PR | Lands | Depends on |
 |---|---|---|

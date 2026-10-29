@@ -3,12 +3,14 @@
 
 #include "Options.h"
 
+#include "ModuleName.h"
+
 #include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <iterator>
 #include <ostream>
 #include <string_view>
+#include <utility>
 
 namespace paykan::driver {
 
@@ -30,7 +32,7 @@ constexpr Flag kFlags[] = {
     {"emit-ast", &Options::EmitAST,
      "Print the parsed AST in the AST interchange format and exit"},
     {"emit-source", &Options::EmitSource,
-     "Write the backend's source output (C, LLVM IR, ...) to stdout"},
+     "Print the backend's source output (C, LLVM IR, ...) and exit"},
     {"emit-pir", &Options::EmitPIR,
      "Print the program's PIR (the backend-neutral IR) and exit"},
     {"emit-pkm", &Options::EmitPkm,
@@ -40,6 +42,9 @@ constexpr Flag kFlags[] = {
      "List the available frontends and exit"},
     {"list-backends", &Options::ListBackends,
      "List the available backends and exit"},
+    {"list-modules", &Options::ListModules,
+     "Print the module file of each module whose compiled code the program "
+     "links (the objects --emit-c's C needs), one per line, and exit"},
     {"no-plugins", &Options::NoPlugins,
      "Don't search the plugin directories (--plugin files still load)"},
     {"rebuild-modules", &Options::RebuildModules,
@@ -51,8 +56,8 @@ constexpr Flag kFlags[] = {
     {"stats", &Options::Stats,
      "Report what the PIR passes did (on stderr), after the last one ran"},
     {"track-heap", &Options::TrackHeap,
-     "Track runtime heap allocations and dump statistics (incl. leaks) at "
-     "exit"},
+     "Run with heap tracking and dump statistics (incl. leaks) at exit; "
+     "a built program tracks its heap under PAYKAN_TRACK_HEAP"},
     {"trace-parser", &Options::TraceParsing,
      "Enable the frontend's parser debug traces, if it has them"},
     {"trace-scanner", &Options::TraceScanning,
@@ -93,11 +98,15 @@ bool parseLevel(std::string_view text, unsigned &level) {
   return true;
 }
 
+/// The stages of the mlir backend --emit-mlir=<stage> names.
+constexpr std::string_view kMLIRStages[] = {"pir", "scf", "llvm", "emitc"};
+
 /// `--<key>=<value>` or `--<key> <value>`.  Returns true when @p name is this
-/// option; @p value is then set, or @p error on a missing value.
-bool valueOption(std::string_view name, const char *key, int &i, int argc,
-                 const char *const *argv, std::string &value,
-                 std::string &error) {
+/// option; @p value is then set, or @p error on a missing value, which names
+/// the option as it was @p spelled (`-o`, `--frontend`).
+bool valueOption(std::string_view name, std::string_view spelled,
+                 const char *key, int &i, int argc, const char *const *argv,
+                 std::string &value, std::string &error) {
   std::string_view k(key);
   if (name != k &&
       !(name.size() > k.size() && name.starts_with(k) && name[k.size()] == '='))
@@ -108,9 +117,49 @@ bool valueOption(std::string_view name, const char *key, int &i, int argc,
   else if (i + 1 < argc)
     v = argv[++i];
   if (v.empty())
-    error = std::string("option '--") + key + "' requires a value";
+    error = "option '" + std::string(spelled) + "' requires a value";
   value = std::string(v);
   return true;
+}
+
+/// The option of the backend's source output that was given: --emit-llvm,
+/// --emit-c, --emit-mlir or --emit-source; null for none.
+const char *sourceOption(const Options &o, bool emitLLVM, bool emitC,
+                         bool emitMLIR) {
+  if (emitLLVM)
+    return "--emit-llvm";
+  if (emitC)
+    return "--emit-c";
+  if (emitMLIR)
+    return "--emit-mlir";
+  return o.EmitSource ? "--emit-source" : nullptr;
+}
+
+/// What the command line asks for other than `run`, the default, in this
+/// order: `build`, `pkm <verb>`, and the options that print or write
+/// something and stop (@p source: sourceOption's).  A command line asks
+/// for one thing.
+std::vector<std::string> givenModes(const Options &o, bool sawVerb,
+                                    const char *source) {
+  std::vector<std::string> modes;
+  if (o.Cmd == Command::Build)
+    modes.emplace_back("`build`");
+  if (o.Cmd == Command::Pkm)
+    modes.emplace_back(!sawVerb                   ? "`pkm`"
+                       : o.Verb == PkmVerb::Dump  ? "`pkm dump`"
+                       : o.Verb == PkmVerb::Check ? "`pkm check`"
+                                                  : "`pkm extract`");
+  for (const auto &[given, option] :
+       {std::pair{o.CheckOnly, "--check-only"},
+        std::pair{o.DumpTokens, "--dump-tokens"},
+        std::pair{o.DumpAST, "--dump-ast"}, std::pair{o.EmitAST, "--emit-ast"},
+        std::pair{o.EmitPIR, "--emit-pir"}, std::pair{o.EmitPkm, "--emit-pkm"},
+        std::pair{o.ListModules, "--list-modules"}})
+    if (given)
+      modes.emplace_back(option);
+  if (source)
+    modes.emplace_back(source);
+  return modes;
 }
 
 } // namespace
@@ -121,17 +170,23 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   bool optionsEnded = false;
   bool sawCommand = false;
   bool sawVerb = false;
+  bool explicitRun = false;
   bool emitLLVM = false;
   bool emitC = false;
   bool emitMLIR = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
+    // The option as given, for its messages (`-o`, `--frontend`).
+    std::string_view spelled = arg.substr(0, arg.find('='));
 
     // For `run`, everything after the source file belongs to the program.
-    // `build`, `pkm` and `--emit-pkm` have no program arguments, so their
+    // `build`, `pkm` and the options that print or write something and stop
+    // (--emit-pkm, --check-only, ...) have no program arguments, so their
     // options may follow the file.
-    if (!o.InputFilename.empty() && o.Cmd == Command::Run && !o.EmitPkm) {
+    if (!o.InputFilename.empty() && o.Cmd == Command::Run &&
+        givenModes(o, sawVerb, sourceOption(o, emitLLVM, emitC, emitMLIR))
+            .empty()) {
       o.ProgramArgs.emplace_back(arg);
       continue;
     }
@@ -146,6 +201,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         o.Cmd = arg == "build" ? Command::Build
                 : arg == "pkm" ? Command::Pkm
                                : Command::Run;
+        explicitRun = arg == "run";
         sawCommand = true;
         continue;
       }
@@ -166,9 +222,15 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
         continue;
       }
       if (!o.InputFilename.empty()) {
-        r.Error = "unexpected argument '" + std::string(arg) + "' (`" +
-                  (o.Cmd == Command::Pkm ? "pkm" : "build") +
-                  "` takes one file and no program arguments)";
+        // What the command line asks for: under `run`, the rest is the
+        // program's.
+        std::string mode =
+            givenModes(o, sawVerb, sourceOption(o, emitLLVM, emitC, emitMLIR))
+                .front();
+        r.Error = "unexpected argument '" + std::string(arg) + "' (" + mode +
+                  (o.Cmd == Command::Pkm
+                       ? " takes one module file)"
+                       : " takes one file and no program arguments)");
         return r;
       }
       o.InputFilename = std::string(arg);
@@ -192,16 +254,33 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
 
-    if (std::string stage;
-        valueOption(name, "emit-mlir", i, argc, argv, stage, r.Error)) {
+    // `--emit-mlir <stage>` takes a stage's name only: in `--emit-mlir
+    // prog.pkn` the file is not one.
+    if (name == "emit-mlir" &&
+        (i + 1 >= argc ||
+         std::find(std::begin(kMLIRStages), std::end(kMLIRStages),
+                   std::string_view(argv[i + 1])) == std::end(kMLIRStages))) {
+      r.Error = "option '" + std::string(arg) +
+                "' needs a stage: --emit-mlir=<stage> (pir, scf, llvm or "
+                "emitc)";
+      return r;
+    }
+    if (std::string stage; valueOption(name, spelled, "emit-mlir", i, argc,
+                                       argv, stage, r.Error)) {
       if (!r.Error.empty())
         return r;
+      if (std::find(std::begin(kMLIRStages), std::end(kMLIRStages), stage) ==
+          std::end(kMLIRStages)) {
+        r.Error = "unknown MLIR stage '" + stage +
+                  "' (expected pir, scf, llvm or emitc)";
+        return r;
+      }
       emitMLIR = true;
       o.EmitStage = std::move(stage);
       continue;
     }
     if (std::string plugin;
-        valueOption(name, "plugin", i, argc, argv, plugin, r.Error)) {
+        valueOption(name, spelled, "plugin", i, argc, argv, plugin, r.Error)) {
       if (!r.Error.empty())
         return r;
       o.Plugins.push_back(std::move(plugin));
@@ -214,7 +293,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
     if (std::string list;
-        valueOption(name, "object", i, argc, argv, list, r.Error)) {
+        valueOption(name, spelled, "object", i, argc, argv, list, r.Error)) {
       if (!r.Error.empty())
         return r;
       for (size_t start = 0; start <= list.size();) {
@@ -226,7 +305,7 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       continue;
     }
     if (std::string list;
-        valueOption(name, "pir-skip", i, argc, argv, list, r.Error)) {
+        valueOption(name, spelled, "pir-skip", i, argc, argv, list, r.Error)) {
       if (!r.Error.empty())
         return r;
       for (size_t start = 0; start <= list.size();) {
@@ -244,32 +323,38 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       }
       continue;
     }
-    if (std::string dir;
-        valueOption(name, "module-path", i, argc, argv, dir, r.Error)) {
+    if (std::string dir; valueOption(name, spelled, "module-path", i, argc,
+                                     argv, dir, r.Error)) {
       if (!r.Error.empty())
         return r;
       o.ModulePath.push_back(std::move(dir));
       continue;
     }
-    if (valueOption(name, "frontend", i, argc, argv, o.Frontend, r.Error) ||
-        valueOption(name, "backend", i, argc, argv, o.Backend, r.Error) ||
-        valueOption(name, "section", i, argc, argv, o.PkmSection, r.Error) ||
-        valueOption(name, "module-name", i, argc, argv, o.ModuleName,
+    if (valueOption(name, spelled, "frontend", i, argc, argv, o.Frontend,
                     r.Error) ||
-        valueOption(name, "o", i, argc, argv, o.OutputPath, r.Error)) {
+        valueOption(name, spelled, "backend", i, argc, argv, o.Backend,
+                    r.Error) ||
+        valueOption(name, spelled, "section", i, argc, argv, o.PkmSection,
+                    r.Error) ||
+        valueOption(name, spelled, "module-name", i, argc, argv, o.ModuleName,
+                    r.Error) ||
+        valueOption(name, spelled, "o", i, argc, argv, o.OutputPath, r.Error)) {
       if (!r.Error.empty())
         return r;
       continue;
     }
 
-    // -O<n>, -O=<n>, and -O <n>.
-    if (name.size() >= 1 && name[0] == 'O') {
-      std::string_view level = name.substr(1);
+    // -O<n>, -O=<n>, and -O <n>: `-Ofast` or `--Output` is no level.
+    if (std::string_view level = name.substr(1);
+        name[0] == 'O' && (level.empty() || level[0] == '=' ||
+                           std::all_of(level.begin(), level.end(), [](char c) {
+                             return c >= '0' && c <= '9';
+                           }))) {
       if (!level.empty() && level[0] == '=')
         level.remove_prefix(1);
       if (level.empty()) {
         if (i + 1 >= argc) {
-          r.Error = "option '-O' requires a value";
+          r.Error = "option '" + std::string(spelled) + "' requires a value";
           return r;
         }
         level = argv[++i];
@@ -320,6 +405,37 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     if (emitC)
       o.EmitStage = "c";
   }
+  // One thing asked for, and only options that apply to it.
+  const char *source = sourceOption(o, emitLLVM, emitC, emitMLIR);
+  std::vector<std::string> modes = givenModes(o, sawVerb, source);
+  if (explicitRun)
+    modes.insert(modes.begin(), "`run`");
+  if (modes.size() > 1) {
+    r.Error = modes[0] + " and " + modes[1] + " exclude each other";
+    return r;
+  }
+  const std::string mode = modes.empty() ? "`run`" : modes.front();
+  bool writes = o.Cmd == Command::Build ||
+                (o.Cmd == Command::Pkm && o.Verb == PkmVerb::Extract) ||
+                o.EmitPkm || o.EmitAST || o.EmitPIR || source;
+  if (!o.OutputPath.empty() && !writes) {
+    r.Error = "-o does not apply to " + mode;
+    return r;
+  }
+  if (!o.PkmSection.empty() &&
+      (o.Cmd != Command::Pkm || o.Verb != PkmVerb::Dump)) {
+    r.Error = "--section applies to `pkm dump`";
+    return r;
+  }
+  if (o.TrackHeap && o.Cmd == Command::Build) {
+    r.Error = "--track-heap applies to `run`: to track the heap of a program "
+              "`build` wrote, run it with PAYKAN_TRACK_HEAP set";
+    return r;
+  }
+  if (o.TrackHeap && mode != "`run`") {
+    r.Error = "--track-heap applies to `run`, not to " + mode;
+    return r;
+  }
   if (!o.SkipPasses.empty()) {
     if (o.EmitPkm) {
       r.Error = "--pir-skip cannot be used with --emit-pkm: a .pkm keeps "
@@ -333,23 +449,8 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
       r.Error = "--module-name names the module --emit-pkm writes";
       return r;
     }
-    // `a::b`, or `::a` for a module of the standard library: identifiers
-    // separated by `::`.
-    std::string_view rest(o.ModuleName);
-    if (rest.starts_with("::"))
-      rest.remove_prefix(2);
-    bool valid = !rest.empty();
-    for (size_t start = 0; valid && start <= rest.size();) {
-      size_t sep = std::min(rest.find("::", start), rest.size());
-      std::string_view part = rest.substr(start, sep - start);
-      valid =
-          !part.empty() && !std::isdigit(static_cast<unsigned char>(part[0]));
-      for (char c : part)
-        valid =
-            valid && (std::isalnum(static_cast<unsigned char>(c)) || c == '_');
-      start = sep + 2;
-    }
-    if (!valid) {
+    // `a::b`, or `::a` for a module of the standard library.
+    if (!module_name::isModuleName(o.ModuleName)) {
       r.Error = "--module-name: '" + o.ModuleName +
                 "' is not a module name (identifiers separated by '::')";
       return r;
@@ -366,14 +467,25 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
   return r;
 }
 
+std::string pkmDumpSectionList(std::string_view sep, std::string_view lastSep) {
+  std::string out;
+  const size_t n = std::size(kPkmDumpSections);
+  for (size_t i = 0; i < n; ++i) {
+    if (i > 0)
+      out += i + 1 == n ? lastSep : sep;
+    out += kPkmDumpSections[i];
+  }
+  return out;
+}
+
 void printUsage(std::ostream &os, const char *argv0) {
   os << "OVERVIEW: Paykan language compiler\n\n"
      << "USAGE: " << argv0
      << " [options] [run] <source-file> [program arguments]\n"
-     << "       " << argv0 << " [options] build <source-file> -o <output>\n"
+     << "       " << argv0 << " [options] build <source-file> [-o <output>]\n"
      << "       " << argv0
-     << " pkm dump <file.pkm> [--section=manifest|sections|iface|symidx|"
-        "code|obj|payloads]\n"
+     << " pkm dump <file.pkm> [--section=" << pkmDumpSectionList("|", "|")
+     << "]\n"
      << "       " << argv0 << " pkm check <file.pkm>\n"
      << "       " << argv0
      << " pkm extract --object <file.pkm> [-o <file.o>]\n\n"
@@ -382,11 +494,11 @@ void printUsage(std::ostream &os, const char *argv0) {
     os << "  --" << f.Name
        << std::string(16 - std::string_view(f.Name).size(), ' ') << "- "
        << f.Help << "\n";
-  os << "  --emit-llvm       - Emit the program's LLVM IR to stdout "
+  os << "  --emit-llvm       - Print the program's LLVM IR and exit "
         "(--emit-source)\n"
-     << "  --emit-c          - Emit the program's C to stdout\n"
-     << "  --emit-mlir=<stage> - Emit MLIR at a stage of the mlir backend to "
-        "stdout\n"
+     << "  --emit-c          - Print the program's C and exit\n"
+     << "  --emit-mlir=<stage> - Print MLIR at a stage of the mlir backend and "
+        "exit\n"
      << "                      (pir: the imported PIR dialect; scf: after "
         "the shared\n"
      << "                      lowering; llvm: the LLVM dialect; emitc: "
@@ -405,7 +517,10 @@ void printUsage(std::ostream &os, const char *argv0) {
         "(comma-separated;\n"
      << "                      repeatable): they define the native "
         "functions\n"
-     << "  -o <file>         - Output file of `build` or `--emit-pkm`\n"
+     << "  -o <file>         - Output file of `build`, `--emit-pkm`, `pkm "
+        "extract` and\n"
+     << "                      what the --emit-* options print (stdout "
+        "without it)\n"
      << "  --module-name=<name> - The module `--emit-pkm` writes "
         "(`a::b`, or `::name`\n"
      << "                      for a module of the standard library)\n"

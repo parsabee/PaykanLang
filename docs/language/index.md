@@ -97,8 +97,6 @@ Tuples ([Tuples](10-tuples.md)), optional types ([Optionals](12-optionals.md), o
 primitives and optional-mode `match` included) and generics ([Generics](13-generics.md))
 are **stable**: the syntax and semantics this reference documents for them are covered by
 the compatibility promise for the 0.2 series, so a program that follows the reference keeps
-its meaning in every 0.2.x release. The limitations each chapter lists stay limitations; in
-particular a generic class or function cannot be imported from a prebuilt `.pkm` module;
-importing one from source works. An optional primitive is a value, not a box, and no
-optional converts to `Obj` ([#96](https://github.com/parsabee/PaykanLang/issues/96); see
-[Optionals](12-optionals.md)).
+its meaning in every 0.2.x release. The limitations each chapter lists stay limitations. An
+optional primitive is a value, not a box, and no optional converts to `Obj`
+([#96](https://github.com/parsabee/PaykanLang/issues/96); see [Optionals](12-optionals.md)).

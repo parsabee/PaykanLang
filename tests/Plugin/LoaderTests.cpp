@@ -139,6 +139,7 @@ protected:
     std::string cmd = "cd " + quote(Cwd().string()) +
                       " && env -u PAYKAN_NO_PLUGINS -u PAYKAN_PLUGIN_PATH "
                       "-u PAYKAN_PLUGIN_DEBUG -u PAYKAN_TEST_PLUGIN_FAIL "
+                      "-u PAYKAN_TEST_PLUGIN_RUN "
                       "HOME=" +
                       quote(Home().string()) +
                       " PAYKAN_TEST_MARKER_DIR=" + quote(Markers().string()) +
@@ -254,12 +255,37 @@ TEST_F(PluginLoader, BackendBuildsAndRunsThroughTheHost) {
   auto r = paykan("--no-plugins " + flag("plugin", good) +
                   " --backend=test-good run " + quote(kSample) + " a b");
   EXPECT_EQ(r.Code, 3) << r.Err; // argc
-  EXPECT_EQ(r.Out,
-            "arg 0: " + kSample + "\narg 1: a\narg 2: b\ntrack-heap: off\n");
+  EXPECT_EQ(r.Out, "arg 0: " + kSample +
+                       "\narg 1: a\narg 2: b\nargs slice: 3 (no-args variable "
+                       "unset)\ntrack-heap: off\n");
   auto t = paykan("--no-plugins " + flag("plugin", good) +
                   " --backend=test-good --track-heap run " + quote(kSample));
   EXPECT_EQ(t.Code, 1) << t.Err;
   EXPECT_TRUE(hasLine(t.Out, "track-heap: 1")) << t.Out;
+}
+
+// run_executable with no arguments gives the program one empty argv[0] on
+// every system (finding 81: the documentation promised argc == 0, which Linux
+// turns into an empty argv[0] and other systems refuse), which the runtime
+// gives a Paykan main as no argument; the private variable that says so is
+// unset once read (finding 76), so the program's own children never see it.
+// An executable that cannot be started is an error, where the host reported
+// it as exit status 127.
+TEST_F(PluginLoader, RunExecutableWithNoArgumentsOrNoExecutable) {
+  std::string good = plugin("good", "good");
+  std::string cmd = "--no-plugins " + flag("plugin", good) +
+                    " --backend=test-good run " + quote(kSample) + " a b";
+  auto none = paykan(cmd, "PAYKAN_TEST_PLUGIN_RUN=no-args");
+  EXPECT_EQ(none.Code, 1) << none.Err; // argc
+  EXPECT_EQ(none.Out, "arg 0: \nargs slice: 0 (no-args variable unset)\n"
+                      "track-heap: off\n");
+  auto missing = paykan(cmd, "PAYKAN_TEST_PLUGIN_RUN=missing");
+  EXPECT_EQ(missing.Code, 1) << missing.Err;
+  EXPECT_EQ(missing.Out, "");
+  EXPECT_NE(missing.Err.find("cannot run '"), std::string::npos) << missing.Err;
+  EXPECT_NE(missing.Err.find("/missing': No such file or directory"),
+            std::string::npos)
+      << missing.Err;
 }
 
 TEST_F(PluginLoader, BackendDiagnosticsAndFailures) {
@@ -282,6 +308,32 @@ TEST_F(PluginLoader, BackendDiagnosticsAndFailures) {
   auto debug = paykan(cmd, "PAYKAN_PLUGIN_DEBUG=1");
   EXPECT_EQ(debug.Code, 0) << debug.Err;
   EXPECT_EQ(debug.Err, "paykan: plugin: debug from the test plugin\n");
+}
+
+// An --emit-* option writes -o's file once the backend printed all of it:
+// a backend that fails, even after some output, leaves what -o names as it
+// was, where the file was emptied and then removed, and a symbolic link
+// given as -o was removed with its file emptied.
+TEST_F(PluginLoader, AFailedEmitLeavesItsOutputFileAlone) {
+  std::string cmd = "--no-plugins " + flag("plugin", plugin("good", "good")) +
+                    " --backend=test-good --emit-source " + quote(kSample);
+  std::ofstream(Cwd() / "keep.txt") << "keep";
+  std::ofstream(Cwd() / "target.txt") << "keep";
+  fs::create_symlink("target.txt", Cwd() / "link.txt");
+  for (const char *mode : {"diag", "partial"})
+    for (const char *output : {"keep.txt", "link.txt"}) {
+      auto r = paykan(cmd + " -o " + output,
+                      std::string("PAYKAN_TEST_PLUGIN_FAIL=") + mode);
+      EXPECT_EQ(r.Code, 1) << mode << " " << output << ": " << r.Err;
+      EXPECT_EQ(r.Out, "") << mode << " " << output;
+    }
+  EXPECT_EQ(slurp(Cwd() / "keep.txt"), "keep");
+  EXPECT_TRUE(fs::is_symlink(Cwd() / "link.txt"));
+  EXPECT_EQ(slurp(Cwd() / "target.txt"), "keep");
+  // A backend that succeeds writes the file whole.
+  auto ok = paykan(cmd + " -o keep.txt");
+  EXPECT_EQ(ok.Code, 0) << ok.Err;
+  EXPECT_NE(slurp(Cwd() / "keep.txt").find("module "), std::string::npos);
 }
 
 TEST_F(PluginLoader, PluginPathIsSearchedButNeverTheWorkingDirectory) {
@@ -653,6 +705,25 @@ TEST_F(FrontendPlugin, ListedWithItsFile) {
                                  " (test-fe-plugin 0.1): frontend test-fe"))
       << v.Out;
   EXPECT_FALSE(ran("test-fe", ".called"));
+}
+
+// A module file names the frontend that parsed its source, with the
+// version and the plugin it came from (finding 103: the version and the
+// plugin were always empty).
+TEST_F(FrontendPlugin, ModuleFilesNameThePluginsFrontend) {
+  fs::path lib = Scratch / "lib.pkn";
+  std::ofstream(Scratch / "lib.src")
+      << "fn twice(x: int) -> int { return 2 * x; }\n";
+  emitAST((Scratch / "lib.src").string(), lib);
+  auto w = paykan(withFe("--emit-pkm --module-name=lib " + quote(lib.string()) +
+                         " -o " + quote((Scratch / "lib.pkm").string())));
+  ASSERT_EQ(w.Code, 0) << w.Err;
+  auto d = paykan("pkm dump --section=manifest " +
+                  quote((Scratch / "lib.pkm").string()));
+  ASSERT_EQ(d.Code, 0) << d.Err;
+  EXPECT_TRUE(hasLine(d.Out, "  frontend \"test-fe\" \"0.1\" plugin "
+                             "\"test-fe-plugin\""))
+      << d.Out;
 }
 
 // The whole corpus that needs no imports: --emit-ast through the plugin

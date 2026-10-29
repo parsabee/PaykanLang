@@ -972,15 +972,15 @@ void addEntryPoint(Unit &u) {
   b.setInsertionPointToEnd(m.getBody());
   std::ostringstream c;
   c << "int main(int argc, char **argv) {\n"
-    << "  int track = getenv(\"PAYKAN_TRACK_HEAP\") != NULL;\n"
+    << "  int track = getenv(\"" << names::kPaykanTrackHeapEnv
+    << "\") != NULL;\n"
     << "  if (track) {\n"
     << "    " << names::kPaykanHeapSetTracking << "(1);\n"
     << "    " << names::kPaykanHeapReset << "();\n"
     << "  }\n";
   std::string call = std::string(kPaykanMain) + "()";
   if (u.MainTakesArgs) {
-    // args: view Str[], a slice of the arguments' strings (Paykan_args_new,
-    // which also honours PAYKAN_NO_ARGS).
+    // args: view Str[], a slice of the arguments' strings (Paykan_args_new).
     c << "  int64_t args_len;\n"
       << "  PaykanShared **args = " << names::kPaykanArgsNew
       << "(argc, argv, &args_len);\n";

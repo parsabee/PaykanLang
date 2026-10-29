@@ -32,12 +32,19 @@
 #include "paykan/plugin_api.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cerrno>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
+#include <sstream>
+#include <streambuf>
 #include <string>
 #include <vector>
 
@@ -221,6 +228,29 @@ void printVersion(const paykan::plugin::LoadReport &plugins) {
   printRejected(plugins);
 }
 
+/// Record in @p opts the frontend @p name that parses the program, as its
+/// module files keep it (docs/design/pkm.md §2.2, tag 0x20): a built-in
+/// frontend has this paykan's version and no plugin; a plugin's frontend
+/// has the plugin's own version, and the plugin is named by its descriptor
+/// (else by its file's name).
+void recordFrontend(const std::string &name,
+                    const paykan::plugin::LoadReport &plugins,
+                    paykan::modules::ResolverOptions &opts) {
+  opts.FrontendName = name;
+  const auto *e = paykan::frontend::Registry::get().find(name);
+  if (!e || e->Path.empty()) {
+    opts.FrontendVersion = paykan::kVersion;
+    return;
+  }
+  for (const auto &f : plugins.Files)
+    if (f.Path == e->Path) {
+      opts.FrontendVersion = f.Version;
+      opts.FrontendPlugin =
+          f.Name.empty() ? std::filesystem::path(f.Path).filename().string()
+                         : f.Name;
+    }
+}
+
 // --list-frontends / --list-backends: one line per plugin,
 // "<name>[ (default)][: <description>][ [<file>]]",
 // "<name> (incompatible: <why>)[ [<file>]]" for a plugin this paykan does
@@ -275,6 +305,157 @@ int fail(const std::string &msg) {
 int failBackend(const paykan::Status &s) {
   std::cerr << s.message() << "\n";
   return EXIT_FAILURE;
+}
+
+/// What std::cout writes through: C's stdout, as the stream synchronised
+/// with stdio does, keeping the reason the first write that failed gave.
+/// A stream that failed takes no more output, and a later call may change
+/// errno before finishStdout reports the failure.
+class StdoutBuffer : public std::streambuf {
+public:
+  /// The errno of the first write or flush that failed, or 0.
+  int firstError() const { return FirstError; }
+
+protected:
+  int_type overflow(int_type c) override {
+    if (traits_type::eq_int_type(c, traits_type::eof()))
+      return traits_type::not_eof(c);
+    char ch = traits_type::to_char_type(c);
+    return put(&ch, 1) ? c : traits_type::eof();
+  }
+  std::streamsize xsputn(const char *s, std::streamsize n) override {
+    return put(s, static_cast<size_t>(n)) ? n : 0;
+  }
+  int sync() override {
+    errno = 0;
+    if (std::fflush(stdout) == 0)
+      return 0;
+    note(errno);
+    return -1;
+  }
+
+private:
+  bool put(const char *s, size_t n) {
+    errno = 0;
+    if (std::fwrite(s, 1, n, stdout) == n)
+      return true;
+    note(errno);
+    return false;
+  }
+  void note(int error) {
+    if (FirstError == 0)
+      FirstError = error != 0 ? error : EIO;
+  }
+  int FirstError = 0;
+};
+
+/// The one StdoutBuffer, which std::cout writes through from the start of
+/// main.  It is never destroyed: std::cout is flushed once more at exit.
+StdoutBuffer &stdoutBuffer() {
+  static auto *buffer = new StdoutBuffer;
+  return *buffer;
+}
+
+/// @p status for a command that wrote to standard output, once what it
+/// wrote is flushed, or EXIT_FAILURE with a message when some of it could
+/// not be written (a full disk, say): a stream that failed takes no more
+/// output, so the error is reported here, at the end, with the reason the
+/// first write that failed gave (StdoutBuffer).
+int finishStdout(int status) {
+  bool failed = !std::cout;
+  std::cout.clear();
+  std::cout.flush();
+  if (!failed && std::cout && !std::ferror(stdout))
+    return status;
+  std::cerr << "paykan: cannot write to standard output";
+  if (int error = stdoutBuffer().firstError(); error != 0)
+    std::cerr << ": " << std::strerror(error);
+  std::cerr << "\n";
+  return EXIT_FAILURE;
+}
+
+/// Whether @p a and @p b are one file, however each is spelled: through
+/// `.`, `..` or repeated slashes, a symbolic or a hard link, or in another
+/// case on a case-insensitive file system.  A path that names no file is no
+/// other file.
+bool sameFile(const std::filesystem::path &a, const std::filesystem::path &b) {
+  std::error_code ec;
+  return std::filesystem::equivalent(a, b, ec) && !ec;
+}
+
+/// Why the driver must not write @p output: it is a file the command reads
+/// (the source file, or the module file of `pkm`, an --object file, or a
+/// file @p resolver, when given, read for the imports: a source or a
+/// module file); "" when it is none of them.
+std::string
+overwritesInput(const std::string &output, const Options &opts,
+                const paykan::modules::ModuleResolver *resolver = nullptr) {
+  std::vector<std::string> inputs{opts.InputFilename};
+  inputs.insert(inputs.end(), opts.Objects.begin(), opts.Objects.end());
+  if (resolver)
+    for (const std::filesystem::path &file : resolver->filesRead())
+      inputs.push_back(file.string());
+  for (const std::string &input : inputs) {
+    if (!sameFile(output, input))
+      continue;
+    std::string why = "the output '";
+    why += output;
+    why += "' is the input file '";
+    why += input;
+    why += "' (choose another with -o)";
+    return why;
+  }
+  return {};
+}
+
+/// The executable `build` writes without -o, in the current directory.  A
+/// source file named with a `.pkn` (or `.pk`) extension gives its name
+/// without it (`prog.pkn` gives `prog`), unless what is left still has
+/// one, in either case for a file system that ignores case; that name and
+/// any other get `.out` added (`prog` gives `prog.out`, `prog.pkn.bak`
+/// `prog.pkn.bak.out` and `main.pkn.pkn` `main.pkn.pkn.out`), so the
+/// executable never takes the name of another source.
+std::string defaultExecutable(const std::string &input) {
+  std::filesystem::path name = std::filesystem::path(input).filename();
+  auto sourceExtension = [](const std::filesystem::path &p, bool anyCase) {
+    std::string ext = p.extension().string();
+    if (anyCase)
+      std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+      });
+    return ext == ".pkn" || ext == ".pk";
+  };
+  if (sourceExtension(name, false) && !sourceExtension(name.stem(), true))
+    return name.stem().string();
+  return name.string() + ".out";
+}
+
+/// What @p print returns (EXIT_SUCCESS, or the status of a failure it
+/// reported), run on where an --emit-* option prints: -o's file, or
+/// standard output without -o.  The file is never one the command reads
+/// (overwritesInput, with @p resolver when the imports were resolved), and
+/// is written once all of it was printed, as a module file is
+/// (pkm::writeFileAtomically): a failure leaves what the path names as it
+/// was.
+template <typename Print>
+int printOutput(const Options &opts,
+                const paykan::modules::ModuleResolver *resolver,
+                Print &&print) {
+  if (opts.OutputPath.empty()) {
+    int status = print(std::cout);
+    return status == EXIT_SUCCESS ? finishStdout(status) : status;
+  }
+  const std::string &path = opts.OutputPath;
+  if (std::string why = overwritesInput(path, opts, resolver); !why.empty())
+    return fail(why);
+  std::ostringstream text;
+  if (int status = print(text); status != EXIT_SUCCESS)
+    return status;
+  const std::string bytes = std::move(text).str();
+  paykan::Status s = pkm::writeFileAtomically(
+      path,
+      std::span(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+  return s ? EXIT_SUCCESS : fail("cannot write '" + path + "': " + s.message());
 }
 
 /// Selecting a plugin this paykan does not accept (#103), an ambiguous
@@ -371,6 +552,8 @@ int pkmTool(const Options &opts) {
                                                     .replace_extension(".o")
                                                     .string()
                                               : opts.OutputPath;
+    if (std::string why = overwritesInput(out, opts); !why.empty())
+      return fail(why);
     if (paykan::Status s =
             backend->emitModuleObject(toBackend(*object), opts.optLevel(), out);
         !s)
@@ -399,7 +582,7 @@ int pkmTool(const Options &opts) {
     std::ostream nowhere(nullptr);
     if (!codeText(nowhere))
       ok = false;
-    return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+    return finishStdout(ok ? EXIT_SUCCESS : EXIT_FAILURE);
   }
   pkm::DumpOptions dopts;
   using S = pkm::DumpOptions::Section;
@@ -422,9 +605,8 @@ int pkmTool(const Options &opts) {
   else if (sec == "payloads")
     dopts.Which = S::Payloads;
   else if (!codeOnly)
-    return fail("unknown section '" + sec +
-                "' (expected manifest, sections, iface, tmpl, code, "
-                "symidx, obj, payloads or all)");
+    return fail("unknown section '" + sec + "' (expected " +
+                paykan::driver::pkmDumpSectionList(", ", " or ") + ")");
   if (!codeOnly)
     pkm::dump(*file, std::cout, dopts);
   bool ok = true;
@@ -433,20 +615,22 @@ int pkmTool(const Options &opts) {
       std::cout << "pir:\n";
     ok = codeText(std::cout);
   }
-  std::cout.flush();
-  return ok ? EXIT_SUCCESS : EXIT_FAILURE;
+  return finishStdout(ok ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
 /// The canonical name of the main module and the root its imports are
 /// resolved against.  Normally the file's stem and its directory.  For
 /// `--emit-pkm` of a module given by a relative path inside the project
-/// (`geometry/shapes.pkn`, run from the project root), the module is named
-/// by that path (`geometry::shapes`) and the root is the current directory,
-/// so the file is what an importer of `geometry::shapes` expects.
-/// --module-name names it outright (the standard library's build names its
-/// modules `::name`).
-void mainModuleIdentity(const Options &opts, std::string &name,
-                        std::string &projectRoot) {
+/// (`geometry/shapes.pkn`, or `./geometry/shapes.pkn`, run from the project
+/// root), the module is named by that path made normal (`geometry::shapes`)
+/// and the root is the current directory, so the file is what an importer
+/// of `geometry::shapes` expects; one given by an absolute path or one
+/// that goes up (`/src/shapes.pkn`, `../shapes.pkn`) is named by its
+/// stem.  Each part of the name --emit-pkm gives a module must be an
+/// identifier, which an import can name.  --module-name names it outright
+/// (the standard library's build names its modules `::name`).
+paykan::Status mainModuleIdentity(const Options &opts, std::string &name,
+                                  std::string &projectRoot) {
   std::filesystem::path input(opts.InputFilename);
   name = paykan::module_name::mainModuleName(opts.InputFilename);
   projectRoot = input.parent_path().string();
@@ -454,20 +638,37 @@ void mainModuleIdentity(const Options &opts, std::string &name,
     // --module-name: as given (its imports still resolve against the
     // file's directory).
     name = opts.ModuleName;
-    return;
+    return paykan::Status::ok();
   }
-  if (!opts.EmitPkm || input.is_absolute() || !input.has_parent_path())
-    return;
-  std::string nested;
-  for (const auto &c : input.parent_path()) {
-    std::string part = c.string();
-    if (part == "." || part == ".." || part.empty() ||
-        part.find("::") != std::string::npos)
-      return;
-    nested += part + "::";
+  if (!opts.EmitPkm)
+    return paykan::Status::ok();
+  std::filesystem::path normal = input.lexically_normal();
+  std::vector<std::string> parts;
+  if (!normal.is_absolute())
+    for (const auto &c : normal.parent_path()) {
+      if (c == "..") {
+        parts.clear();
+        break;
+      }
+      parts.push_back(c.string());
+    }
+  parts.push_back(normal.stem().string());
+  for (const std::string &part : parts)
+    if (!paykan::module_name::isIdentifier(part))
+      return paykan::Status::error(
+          "cannot name the module of '" + opts.InputFilename +
+          "' after its path: '" + part +
+          "' is not an identifier (name it with --module-name)");
+  if (parts.size() > 1) {
+    name.clear();
+    for (const std::string &part : parts) {
+      if (!name.empty())
+        name += paykan::module_name::kSep;
+      name += part;
+    }
+    projectRoot = "";
   }
-  name = nested + name;
-  projectRoot = "";
+  return paykan::Status::ok();
 }
 
 /// The --module-path directories, then $PAYKAN_MODULE_PATH's.
@@ -491,13 +692,17 @@ std::vector<std::string> modulePath(const Options &opts) {
 } // namespace
 
 int main(int argc, char *argv[]) {
+  std::cout.rdbuf(&stdoutBuffer());
   auto parsed = paykan::driver::parseCommandLine(argc, argv);
   const Options &opts = parsed.Opts;
   if (opts.ShowHelp && !opts.ShowVersion) {
     paykan::driver::printUsage(std::cout, argv[0]);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
-  if (opts.Cmd == Command::Pkm) {
+  // `pkm` loads no plugin, but --version and --list-* (which need them)
+  // still answer after it.
+  if (opts.Cmd == Command::Pkm &&
+      !(opts.ShowVersion || opts.ListFrontends || opts.ListBackends)) {
     if (!parsed.Error.empty())
       return fail(parsed.Error + ". Try: '" + argv[0] + " --help'");
     return pkmTool(opts);
@@ -521,15 +726,15 @@ int main(int argc, char *argv[]) {
       paykan::plugin::loadPlugins(discovery);
   if (opts.ShowVersion) {
     printVersion(plugins);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   if (opts.ListFrontends) {
     listFrontends(plugins);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   if (opts.ListBackends) {
     listBackends(plugins);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   if (!parsed.Error.empty())
     return fail(parsed.Error + ". Try: '" + argv[0] + " --help'");
@@ -582,8 +787,9 @@ int main(int argc, char *argv[]) {
   driver.setDiagEngine(&diag);
 
   if (opts.DumpTokens)
-    return driver.dumpTokens(opts.InputFilename, std::cout) == 0 ? EXIT_SUCCESS
-                                                                 : EXIT_FAILURE;
+    return finishStdout(driver.dumpTokens(opts.InputFilename, std::cout) == 0
+                            ? EXIT_SUCCESS
+                            : EXIT_FAILURE);
 
   if (driver.parseFile(opts.InputFilename) != 0) {
     std::cerr << "parsing failed with " << driver.getErrorCount()
@@ -595,15 +801,16 @@ int main(int argc, char *argv[]) {
   if (opts.DumpAST) {
     paykan::ast::ASTPrinter printer(std::cout);
     printer.visit(root);
-    return EXIT_SUCCESS;
+    return finishStdout(EXIT_SUCCESS);
   }
   if (opts.EmitAST) {
     // What a frontend plugin returns (docs/plugins/ast-format.md).
-    std::string error;
-    if (!paykan::ast::interchange::write(*root, std::cout, error))
-      return fail("cannot write the AST: " + error);
-    std::cout.flush();
-    return EXIT_SUCCESS;
+    return printOutput(opts, nullptr, [&](std::ostream &os) {
+      std::string error;
+      if (!paykan::ast::interchange::write(*root, os, error))
+        return fail("cannot write the AST: " + error);
+      return EXIT_SUCCESS;
+    });
   }
 
   // -- Backend
@@ -628,13 +835,14 @@ int main(int argc, char *argv[]) {
 
   // -- Semantic analysis
   std::string mainName, projectRoot;
-  mainModuleIdentity(opts, mainName, projectRoot);
+  if (paykan::Status s = mainModuleIdentity(opts, mainName, projectRoot); !s)
+    return fail(s.message());
   // Imports go through the resolver: a source module's `.pkm` cache entry
   // under <root>/.paykan_cache when it is fresh, a prebuilt `.pkm` when
   // there is no source, the source otherwise (docs/design/pkm.md §8).
   paykan::modules::ResolverOptions resolverOpts;
   resolverOpts.ProjectRoot = projectRoot;
-  resolverOpts.FrontendName = driver.getFrontendName();
+  recordFrontend(driver.getFrontendName(), plugins, resolverOpts);
   resolverOpts.ModulePath = modulePath(opts);
   resolverOpts.ReadCache = !opts.RebuildModules && !opts.NoModuleCache;
   resolverOpts.WriteCache = !opts.NoModuleCache;
@@ -734,6 +942,9 @@ int main(int argc, char *argv[]) {
                                     ? std::filesystem::path(opts.InputFilename)
                                           .replace_extension(".pkm")
                                     : std::filesystem::path(opts.OutputPath);
+    if (std::string why = overwritesInput(out.string(), opts, &resolver);
+        !why.empty())
+      return fail(why);
     std::vector<std::string> deps;
     for (auto *imp : root->getImports())
       for (auto &m : imp->getModules())
@@ -798,11 +1009,11 @@ int main(int argc, char *argv[]) {
     return fail(s.message());
   if (opts.Stats)
     stats.print(std::cerr);
-  if (opts.EmitPIR) {
-    paykan::pir::print(program, std::cout);
-    std::cout.flush();
-    return EXIT_SUCCESS;
-  }
+  if (opts.EmitPIR)
+    return printOutput(opts, &resolver, [&](std::ostream &os) {
+      paykan::pir::print(program, os);
+      return EXIT_SUCCESS;
+    });
   in.Program = &program;
   // The compiled code of the modules loaded from a `.pkm` that has some.
   if (caps.CompileModules)
@@ -811,23 +1022,45 @@ int main(int argc, char *argv[]) {
         compiled.try_emplace(m.Name, toBackend(*o));
   for (const auto &[name, o] : compiled)
     in.Compiled[name] = &o;
+  if (opts.ListModules) {
+    // The files the C of --emit-c needs as objects: it declares the
+    // functions of these modules (docs/c-backend.md).
+    std::vector<std::string> files;
+    for (const auto &[name, o] : compiled) {
+      std::string file = resolver.moduleFile(name);
+      if (file.empty())
+        return fail("the compiled code of module '" + name +
+                    "' is in no module file: its cache entry could not be "
+                    "written");
+      files.push_back(std::move(file));
+    }
+    for (const std::string &file : files)
+      std::cout << file << "\n";
+    return finishStdout(EXIT_SUCCESS);
+  }
 
   if (opts.EmitSource) {
     if (!caps.EmitSource)
       return fail("backend '" + backendName + "' has no source output");
     paykan::backend::EmitOptions eo;
     eo.SourceStage = opts.EmitStage;
-    paykan::Status s =
-        backend->emit(in, paykan::backend::EmitKind::Source, eo, std::cout);
-    std::cout.flush();
-    return s ? EXIT_SUCCESS : failBackend(s);
+    return printOutput(opts, &resolver, [&](std::ostream &os) {
+      paykan::Status s =
+          backend->emit(in, paykan::backend::EmitKind::Source, eo, os);
+      return s ? EXIT_SUCCESS : failBackend(s);
+    });
   }
 
   if (opts.Cmd == Command::Build) {
     if (!caps.EmitExecutable)
       return fail("backend '" + backendName + "' cannot build executables");
     paykan::backend::EmitOptions eo;
-    eo.OutputPath = opts.OutputPath;
+    eo.OutputPath = opts.OutputPath.empty()
+                        ? defaultExecutable(opts.InputFilename)
+                        : opts.OutputPath;
+    if (std::string why = overwritesInput(eo.OutputPath, opts, &resolver);
+        !why.empty())
+      return fail(why);
     paykan::Status s =
         backend->emit(in, paykan::backend::EmitKind::Executable, eo, std::cout);
     return s ? EXIT_SUCCESS : failBackend(s);
@@ -841,7 +1074,8 @@ int main(int argc, char *argv[]) {
   progArgs.insert(progArgs.end(), opts.ProgramArgs.begin(),
                   opts.ProgramArgs.end());
   paykan::backend::RunOptions ro;
-  ro.TrackHeap = opts.TrackHeap;
+  ro.TrackHeap = opts.TrackHeap ||
+                 std::getenv(paykan::names::kPaykanTrackHeapEnv) != nullptr;
   auto result = backend->run(in, progArgs, ro);
   if (!result)
     return failBackend(result.status());

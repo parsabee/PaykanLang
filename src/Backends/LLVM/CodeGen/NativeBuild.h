@@ -25,8 +25,8 @@ namespace paykan::llvm_codegen {
 /// view Str[]` slice) is renamed and made internal, and a `int main(int argc,
 /// char **argv)` is added that does what the C path's main() does
 /// (ToEmitC/): honour PAYKAN_TRACK_HEAP (tracking allocator + heap dump at
-/// exit), pass argv as the slice (Paykan_args_new, which honours
-/// PAYKAN_NO_ARGS), and return the program's result as the exit status.
+/// exit), pass argv as the slice (Paykan_args_new), and return the
+/// program's result as the exit status.
 Status addEntryPoint(llvm::Module &module);
 
 /// A TargetMachine for the host (default triple, host CPU and features,

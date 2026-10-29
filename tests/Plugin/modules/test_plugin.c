@@ -27,10 +27,14 @@
  *
  * The full backend (the default variant) exercises the whole host table:
  * emit(SOURCE) writes the PIR; emit(EXECUTABLE) and run() write a small C
- * program that prints its arguments and $PAYKAN_TRACK_HEAP and exits with
- * argc, and link it with the host's link_executable (run() then runs it with
+ * program that prints its arguments, the size of the args slice the runtime
+ * gives a Paykan main and $PAYKAN_TRACK_HEAP and exits with argc, and link
+ * it with the host's link_executable (run() then runs it with
  * run_executable).  $PAYKAN_TEST_PLUGIN_FAIL makes emit fail: "diag" with an
- * error diagnostic (and a warning first), anything else silently (status 5).
+ * error diagnostic (and a warning first), "partial" with one after some
+ * output, anything else silently (status 5).
+ * $PAYKAN_TEST_PLUGIN_RUN changes what run() runs: "no-args" the program
+ * with num_args 0, "missing" a file that does not exist.
  */
 
 #include "paykan/plugin_api.h"
@@ -84,8 +88,14 @@ static const char *write_program(PaykanSession *s, char *buf, size_t size) {
       "#include \"Runtime.h\"\n"
       "int main(int argc, char **argv) {\n"
       "  const char *track = getenv(\"PAYKAN_TRACK_HEAP\");\n"
+      "  int64_t count = 0;\n"
+      "  PaykanShared **args = Paykan_args_new(argc, argv, &count);\n"
       "  for (int i = 0; i < argc; ++i)\n"
       "    printf(\"arg %d: %s\\n\", i, argv[i]);\n"
+      "  printf(\"args slice: %lld (no-args variable %s)\\n\",\n"
+      "         (long long)count,\n"
+      "         getenv(\"__PAYKAN_HOST_NO_ARGS\") ? \"set\" : \"unset\");\n"
+      "  Paykan_args_free(args, count);\n"
       "  printf(\"track-heap: %s\\n\", track ? track : \"off\");\n"
       "  return argc;\n"
       "}\n";
@@ -121,6 +131,11 @@ __attribute__((unused)) static int test_emit(void *data, PaykanSession *s,
       say(s, PAYKAN_DIAG_ERROR, "other.pkn", 0, 0, "and a second error");
       return PAYKAN_ERROR;
     }
+    if (strcmp(fail, "partial") == 0) {
+      host->write_output(s, "partial output\n", 15);
+      say(s, PAYKAN_DIAG_ERROR, NULL, 0, 0, "failed after some output");
+      return PAYKAN_ERROR;
+    }
     return 5;
   }
   host->log(PAYKAN_LOG_DEBUG, "debug from the test plugin", 26);
@@ -147,6 +162,7 @@ __attribute__((unused)) static int test_run(void *data, PaykanSession *s,
                                             const PaykanBackendInput *in,
                                             const PaykanRunRequest *req,
                                             int *exit_code) {
+  const char *mode = getenv("PAYKAN_TEST_PLUGIN_RUN");
   char exe[4096];
   const char *dir;
   (void)data;
@@ -154,11 +170,18 @@ __attribute__((unused)) static int test_run(void *data, PaykanSession *s,
   dir = host->temp_dir(s);
   if (!dir)
     return PAYKAN_ERROR;
+  if (mode && strcmp(mode, "missing") == 0) {
+    snprintf(exe, sizeof(exe), "%s/missing", dir);
+    return host->run_executable(s, exe, req->args, req->num_args,
+                                req->track_heap, exit_code);
+  }
   snprintf(exe, sizeof(exe), "%s/program", dir);
   if (test_emit(&host, s, in, PAYKAN_EMIT_EXECUTABLE, exe) != PAYKAN_OK)
     return PAYKAN_ERROR;
-  return host->run_executable(s, exe, req->args, req->num_args, req->track_heap,
-                              exit_code);
+  return host->run_executable(
+      s, exe, req->args,
+      mode && strcmp(mode, "no-args") == 0 ? 0 : req->num_args,
+      req->track_heap, exit_code);
 }
 
 #ifndef TP_PLUGIN_SIZE

@@ -5,8 +5,8 @@ is, what it may capture, how it is called, and how it is laid out at run time.
 The decisions were made to fit the language as it is (values held in place,
 objects behind reference-counted boxes, `view` / `inout` borrows checked at
 compile time).  They add two PIR instructions, `fn.addr` and `icall`, and no
-change to the runtime ABI or the `.pkm` format; the versions stay fixed until
-0.2.0.  The open questions at
+change to the runtime ABI or the `.pkm` format; every format is versioned by
+the release (`docs/design/pkm.md` §11).  The open questions at
 the end record the alternatives; each has the default this implementation
 takes.
 

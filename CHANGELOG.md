@@ -130,7 +130,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `toString()` and `io::println` show `Rect(w: 2, h: 3)`; `==` and `!=`
     compare the variant and its fields.
   - A variant cannot hold its own enum (hold it in a class instead), a field
-    is not a fixed-size array yet, and a tagged union does not cross into C.
+    is not a fixed-size array yet, and a tagged union does not cross into C
+    other than as a type argument of a generic native function.
   - Imported tagged unions work from a source and from a `.pkm`: an `ENUM`
     record lists its variants with fields, whose fields are `STRUCT` records
     (docs/design/pkm.md). The AST interchange format writes such a variant as
@@ -167,10 +168,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `fn(x: int) => x * 2`, the result type is the expression's. Sema infers a
     function's before checking any other body, so it may be used before its
     declaration; a generic function's is inferred for each instantiation.
-  - An expression with no value, and a function whose expression depends on
-    its own result type (`fn fact(n: int) => ... fact(n - 1)`), are errors that
-    ask for the result type. A method writes its result type (`fn area() ->
-    int => ...`); a `static fn` infers.
+  - An expression with no value is an error that asks for a braced body, and
+    a function whose expression depends on its own result type (`fn fact(n:
+    int) => ... fact(n - 1)`) is one that asks for the result type. A method
+    writes its result type (`fn area() -> int => ...`); a `static fn` infers.
   - The AST interchange format marks such a function or lambda with
     `(inferred)` (docs/plugins/ast-format.md), so a template in a `.pkm` keeps
     it.
@@ -260,6 +261,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows who compiled it.  `paykan --version` names the standard library's directory.
 - Backends may compile modules (the `CompileModules` capability: `compileModule`,
   `objectKind`, `emitModuleObject`, and `Input::Compiled`, docs/writing-a-backend.md).
+- `paykan --list-modules prog.pkn` prints the module file of each imported module whose
+  compiled code the program links, one per line: the standard library's, the cache entries
+  of the imports built from source and the prebuilt modules' (next to the source, in a
+  `--module-path` directory or in `$PAYKAN_MODULE_PATH`).  They are the files whose objects
+  `--emit-c`'s C is linked with, and docs/c-backend.md's build loops over them.
 
 ### Changed
 
@@ -605,6 +611,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`StdlibTests`), `paykan build` (`StdlibTestsBuild`, `--build`) and the C `--emit-c`
   prints, compiled with the runtime's sources (`StdlibTestsC`, `--cc <compiler>`).  The
   samples corpus is built at -O0 too (`SamplesParityBuildO0`).
+- `paykan build --track-heap` is an error (``--track-heap applies to `run`: to track the
+  heap of a program `build` wrote, run it with PAYKAN_TRACK_HEAP set``), where it was
+  accepted and did nothing: the executable tracks its heap when it runs with
+  `PAYKAN_TRACK_HEAP` set (docs/language/17-the-paykan-command.md,
+  docs/language/16-memory.md).
+- A command line asks for one thing, and `-o`, `--section` and `--track-heap` are errors
+  where they do nothing, where they were ignored: two of `run`, `build`, `pkm`,
+  `--check-only`, `--emit-pkm` and the options that print the program (`--emit-c
+  --emit-pir` printed PIR, `--check-only --emit-pir` printed nothing, `build --emit-c`
+  printed C and built nothing), `-o` under `run`, `--check-only`, `--dump-*`,
+  `--list-modules` or `pkm dump|check`, `--section` outside `pkm dump`, and `--track-heap`
+  outside `run`.  Other options are still accepted where they change nothing (`-O3` and
+  `--stats` with `--check-only`).  The error names what clashes (`--check-only and
+  --emit-pir exclude each other`, ``-o does not apply to `run` ``, ``--section applies to
+  `pkm dump` ``).  The options that print the program take no program arguments, as
+  `build` and `--emit-pkm` do, so their options may follow the file, and an extra argument
+  names the option it is extra to (`unexpected argument 'extra' (--check-only takes one
+  file and no program arguments)`, where `--emit-pkm hello.pkn extra` said `` `build`
+  takes one file``).  Under `run`, everything after the source file is still the program's
+  (docs/language/17-the-paykan-command.md, "Commands").
+- `-o <file>` names the file an `--emit-*` option (`--emit-c`, `--emit-llvm`,
+  `--emit-mlir`, `--emit-source`, `--emit-pir`, `--emit-ast`) writes what it prints, where
+  `paykan --emit-c f.pkn -o f.c` printed the C and wrote no `f.c`; like every file the
+  driver writes, it is never the source file.  The file is written once all of it was
+  printed, as a module file is, so a backend that fails leaves what `-o` names as it was.
+  Without `-o` they print to standard output.
 
 ### Removed
 
@@ -1148,6 +1180,148 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   MB to `--emit-pir`, most of it spent printing 96 MB of indented PIR, and 7.8 s and 82 MB
   to `build`, most of it in the MLIR and LLVM pipelines.  The verifier reports what it did
   before, and the samples compile as fast as they did.
+- `paykan build` could write its executable over the source file, and `--emit-pkm` and
+  `pkm extract --object` their output over their input, each with exit status 0: `build
+  noext` replaced `noext`, `build main.pkn.bak` replaced `main.pkn` (another source), and
+  `build same.pkn -o ./same.pkn`, `--emit-pkm lib.pkn -o lib.pkn` and `pkm extract
+  --object lib.pkm -o lib.pkm` replaced the file they read, as `build main.pkn -o lib.pkn`
+  and `--emit-c main.pkn -o lib.pkn` replaced the source of a module `main.pkn` imports
+  and `--emit-pkm main.pkn -o geometry/shapes.pkm` a prebuilt one.  The driver now writes
+  over none of the command's input: the source file, the sources and module files of the
+  modules it imports (the standard library's too), the module file of `pkm extract` and
+  the `--object` files, whatever path names it (`./a.pkn`, `d//a.pkn`, `sub/../a.pkn`, a
+  symbolic or a hard link, or another case on a case-insensitive file system): `paykan:
+  the output './same.pkn' is the input file 'same.pkn' (choose another with -o)`, exit
+  status 1.  `build`'s default output drops only a `.pkn` or `.pk` extension and adds
+  `.out` to a name with neither (`noext.out`, `main.pkn.bak.out`) and to one that would
+  still end in one (`main.pkn.pkn.out`, where `build main.pkn.pkn` replaced `main.pkn`);
+  the driver names it, so the backends have no default of their own
+  (docs/language/17-the-paykan-command.md, "Commands").
+- `paykan pkm dump`, `pkm check` and `pkm extract --object` aborted on a directory
+  (`terminate called after throwing an instance of 'std::__ios_failure'`, exit status 134).
+  A directory is now an error, `paykan: 'd.pkm' is a directory, not a file`, exit status 1,
+  and a module file is read with `istream::read`, which reports a failed read rather than
+  throwing: a regular file whole, and a pipe or a device to its end (`cat lib.pkm | paykan
+  pkm dump /dev/stdin`).
+- `--emit-pkm ./geometry/shapes.pkn` (and `geometry/./shapes.pkn`) named the module
+  `shapes`, not `geometry::shapes` as `geometry/shapes.pkn` does, so an importer of
+  `geometry::shapes` rejected the file (`names module 'shapes'. Rebuild it from source.`);
+  and a path with a part that is no identifier gave a module no import can name
+  (`--emit-pkm 1bad/x.pkn` wrote `module 1bad::x`).  The path is now made normal first, and
+  each part of the name it gives must be an identifier: `paykan: cannot name the module of
+  '1bad/x.pkn' after its path: '1bad' is not an identifier (name it with --module-name)`,
+  exit status 1.  An absolute path, or one that goes up (`../shapes.pkn`), still names the
+  module by its file name (docs/language/17-the-paykan-command.md, `--emit-pkm`).
+- `--emit-pkm -o <path>` made every missing directory of the path, even at the file
+  system's root (`-o /nonexistent/x.pkm` made `/nonexistent`), where `build -o` and `pkm
+  extract -o` fail.  Only the module cache makes its directories now: `paykan: cannot write
+  nd/sub/x.pkm: the directory 'nd/sub' does not exist`, exit status 1.  The standard
+  library's build makes its staging directory before it writes the modules there.
+- `--emit-pkm -o <path>` replaced what the path named with a regular file when it was not
+  one: `-o /dev/null` made `/dev/null` a regular file (for the whole system, when run as
+  root), and a FIFO or a symbolic link was replaced, the link's file left as it was, where
+  `build -o` and `pkm extract -o` write into it.  A module file is now written through a
+  temporary file and a rename only over a regular file or a path that names nothing, so
+  that no reader sees half of it, and in place otherwise: a link's file gets the module
+  file, and a device or a FIFO stays one.  A module file that cannot be written says why
+  (`paykan: cannot write lib.pkm: No space left on device`), where the message named the
+  temporary file and gave no reason.
+- A command whose standard output could not be written exited with status 0, its output
+  lost: `paykan --emit-c hello.pkn > /dev/full`, and the same for `--emit-pir`,
+  `--emit-llvm`, `--emit-mlir`, `--emit-ast`, `--dump-ast`, `--dump-tokens`, `--help`,
+  `--version`, `--list-*`, `pkm dump` and `pkm check`.  Each now checks standard output once
+  it is done: `paykan: cannot write to standard output: No space left on device`, the reason
+  the first write that failed gave, exit status 1.  A file `-o` names that cannot be
+  written says why too (`paykan: cannot write 'out.c': No space left on device`).
+- `PAYKAN_TRACK_HEAP=1 paykan run hello.pkn` printed no heap statistics: only an executable
+  `build` wrote read the variable, though the documentation says every program does.  `run`
+  now tracks the heap when it is set, as under `--track-heap`.
+- `paykan pkm --version`, `pkm -v`, `pkm --list-backends` and `pkm --list-frontends`
+  failed with `paykan: cannot open ''`: the `pkm` command ran before the information
+  options, which it took for a module file's.  They now answer after `pkm` as they do
+  without it, as `pkm --help` already did.
+- Malformed command lines got misleading errors: `--emit-mlir hello.pkn` took the file for
+  the stage and said `no source file specified`, `--Output hello.pkn` said `invalid
+  optimization level 'utput'`, and `build hello.pkn -o ""` said `option '--o' requires a
+  value`.  `--emit-mlir <stage>` now takes only a stage's name (``option '--emit-mlir'
+  needs a stage: --emit-mlir=<stage> (pir, scf, llvm or emitc)``), only `-O`, `-O<n>` and
+  `-O=<n>` are an optimization level (`unknown command line argument '--Output'`), a
+  message names an option as it was spelled (`option '-o' requires a value`), and the
+  stage of `--emit-mlir=<stage>` is checked as the command line is read (`unknown MLIR
+  stage 'bogus' (expected pir, scf, llvm or emitc)`).
+- `paykan --object=libtext.a main.pkn` failed with `JIT error: The file was not recognized
+  as a valid object file`, though `--object` takes archives and `build` linked the same
+  one: the JIT took object files only.  `run` now loads an archive's members as a linker
+  does, each when it defines a symbol the program still needs, searching the archives
+  before the C library; a file that is neither is named (`JIT error: cannot load 'x.o':
+  The file was not recognized as a valid object file`), and one that cannot be read says
+  why (`cannot read 'x.a': No such file or directory`).
+- A program that could not be started was taken for one that ran and exited with status
+  127: a backend plugin's `host->run_executable` of a missing file returned `PAYKAN_OK`
+  with exit code 127 (after `exec of '...' failed` on standard error), and `paykan build`
+  with a C compiler that is not there said `linking failed (nosuchcc exited with 127)`.
+  The child now reports a failed exec through a close-on-exec pipe: `run_executable`
+  returns `PAYKAN_ERROR` with `cannot run '<path>': No such file or directory`, and
+  `build` says `cannot run 'nosuchcc': No such file or directory`, also when `paykan`'s
+  parent left `SIGCHLD` ignored (no wait for a child then succeeds, and `waitpid failed: No
+  child processes` was all it said).  The child's environment is made before the fork, so
+  between the fork and the exec the child calls only what is safe there, where it called
+  `setenv`.  `run_executable` with no arguments was documented to run the program with
+  `argc == 0`, which Linux turns into one empty `argv[0]` and other systems refuse; it now
+  passes one empty `argv[0]` on every system, as docs/plugins/plugin-api.md now says.
+- `CC='ccache cc' paykan build` and `CC='gcc -m64' paykan build` failed (`exec of 'gcc
+  -m64' failed: No such file or directory`): the whole of `$CC` was taken for the
+  program's name.  As with `make`, its first word is now the program and the others its
+  first arguments, the value split at white space with no quoting; the linker's flags
+  follow them, before the objects (docs/language/17-the-paykan-command.md, "Environment
+  variables").
+- An executable lost all its arguments, `args[0]` included, when `PAYKAN_NO_ARGS` was set
+  in its environment, to any value: `PAYKAN_NO_ARGS=0 ./prog x y` gave `main` an empty
+  `args`, and `args[0]` panicked.  The variable, meant only for the plugin host's
+  `run_executable` with no arguments, was public, and every program the executable
+  started inherited it.  The host now sets a private one, and the runtime takes away only
+  the one empty `argv[0]` the host starts such a program with, and unsets the variable
+  once it has read it (on the systems that have `unsetenv`).
+- The documented build of `--emit-c`'s C failed for a program that imports a prebuilt
+  module (`undefined reference to pk_geometry_3A_3Ashapes_Sarea`): it linked the objects of
+  the standard library's module files and the cache entries only, and a prebuilt module has
+  neither.  It now links those of the files `paykan --list-modules` names
+  (docs/c-backend.md), and the `CStrictC11` test builds every sample that way, and the 13_pkm
+  sample with its module prebuilt in a `--module-path` directory.
+- A module file's frontend record named the frontend only: its version and its plugin were
+  always empty (`frontend "recursive-descent" "" plugin ""`).  It now has the built-in
+  frontend's version, the `paykan` version that wrote the file (`frontend
+  "recursive-descent" "0.3.0-dev" plugin ""` from a development build), or a plugin
+  frontend's plugin, by its descriptor's name, and that plugin's version (docs/design/pkm.md
+  §2.2).  The `ast-text` example frontend names the AST format versions it reads and is
+  given (for example `ast-text reads AST format 0.3.0 only, not 0.2.0`), where it said
+  `format 1`.
+- A native function's C symbol was not checked: `native fn f() -> int = "a b";` was
+  accepted, and gave C that did not compile (`extern int64_t a b(void);`) and a link that
+  failed (`JIT session error: Symbols not found: [ a b ]`); `""` failed PIR verification.
+  The parser and the AST reader now take only a C identifier that is not a C keyword, and
+  Sema checks it again for an AST made another way: `the C symbol 'a b' of native function
+  'f' is not a C identifier`, `the C symbol 'int' of native function 'f' is a C keyword`
+  (docs/language/03-functions.md, "Native Functions").
+- The Debian package's description still said it held "the C backend, which compiles
+  programs with the system C compiler", a backend that is gone.  It now names the mlir
+  backend, which runs programs with LLVM's JIT, builds executables (linking them with the
+  system C compiler) and prints C11 with `--emit-c`.  Comments in the build files and the
+  scripts that named the c and llvm backends or LLVM 17 name the mlir backend and LLVM 22.
+- `paykan --help` showed `build <source-file> -o <output>`, though `-o` is optional, and
+  listed `pkm dump`'s sections without `tmpl` and `all`, which the command takes.  It now
+  shows `build <source-file> [-o <output>]` and
+  `--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads|all`, the list the error
+  for an unknown section prints, both made from one table.  The lines of the `--emit-*`
+  options say they print, not that they write to stdout: `-o` names where.
+- The plugin documentation said the plugin API version changes only when `plugin_api.h`
+  changes incompatibly, and that a plugin built against an older header keeps loading into a
+  newer `paykan`.  The version is the release's, and a `paykan` loads only plugins of its
+  own: a loadable plugin is rebuilt for each release, and this one rejects a plugin built
+  for 0.2.0 (`built for plugin API 0.2.0; this paykan supports plugin API 0.3.0`) whatever
+  the plugin compatibility list holds.  docs/writing-a-backend.md §7,
+  docs/plugins/overview.md, docs/plugins/pir-for-backends.md and docs/design/pkm.md now say
+  so, and docs/pir.md gives the binary PIR codec's version as the release's, not 1.0.
 
 ## [0.2.0] - 2026-10-20
 
@@ -1508,7 +1682,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `let` local declarations: `let n = 3;` and `let s: Str = "a";` declare a variable
   that cannot be reassigned (`'n' is declared with 'let' and cannot be reassigned`),
   neither by assignment nor by destructuring.  `let` needs an initializer and applies to
-  local declarations only; it fixes the variable, not the object it refers to.  `let` is
+  local declarations only; it fixes the variable, not the object a class-typed one refers
+  to (an array's elements and a struct's fields are part of its value).  `let` is
   a reserved word now.  In the AST interchange format a `let` local carries `(let)`.
 
 - Imported modules are compiled to `.pkm` module files (docs/design/pkm.md, prototype of
@@ -1558,7 +1733,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table of a `HashMap` or a `HashSet` is a private class of its own), so a copy, a parameter
   or a field still names the same container. As structs they are `ValueType`s and not
   `Obj`s: put one in a `memory::Box` where an `Obj` is needed. A container in a `let`
-  variable can no longer be changed, and printing one shows the struct's fields.
+  variable can no longer be changed through it (a copy of it, the same container, still
+  can), and printing one shows the struct's fields.
   `LinkedList` stays a class.
 - The documentation has one language reference: the manual's chapters and the reference's
   are merged, a chapter per feature that teaches it and then gives its precise rules

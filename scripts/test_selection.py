@@ -10,6 +10,9 @@ suites are known:
 * each standard library source (stdlib/*.pkn) picks every suite whose
   programs import the copy the build stages: sema, lowering, pir-mlir and
   every suite of the end-to-end group;
+* each file of a sample a driver test reads (DriverTests.cpp's
+  RunLoadsAnArchiveOfNativeObjects builds samples/imports/14_native and
+  checks what it prints) picks the driver suite;
 * the standard library's build (stdlib/CMakeLists.txt), the selection's own
   script and rules, and a path no rule names pick every suite.
 
@@ -36,6 +39,9 @@ IMPORT_THE_STDLIB = ["sema", "lowering", "pir-mlir", "codegen", "driver",
 
 PICK_ALL = ["stdlib/CMakeLists.txt", "scripts/affected_tests.py",
             "tests/suites.json", "no-rule-names-this/file.txt"]
+
+# The samples the driver tests read (tests/Driver/DriverTests.cpp).
+DRIVER_SAMPLES = ["samples/imports/14_native"]
 
 
 def picked(path):
@@ -73,10 +79,21 @@ def main():
         got = picked(path)
         if got != "all":
             failures.append(f"{path} picks '{got}', not all")
+    driver_files = []
+    for sample in DRIVER_SAMPLES:
+        files = sorted(p.relative_to(ROOT).as_posix()
+                       for p in (ROOT / sample).iterdir() if p.is_file())
+        if not files:
+            failures.append(f"no files in {sample} to check")
+        driver_files += files
+    for path in driver_files:
+        got = picked(path)
+        if got != "all" and "driver" not in got.split(";"):
+            failures.append(f"{path} picks '{got}', without driver")
 
     for failure in failures:
         print(f"FAIL: {failure}")
-    checked = len(sources) + len(PICK_ALL)
+    checked = len(sources) + len(PICK_ALL) + len(driver_files)
     print(f"{checked - len(failures)}/{checked} paths pick their suites")
     return 1 if failures else 0
 

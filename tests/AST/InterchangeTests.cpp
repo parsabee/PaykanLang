@@ -1928,6 +1928,25 @@ TEST(Interchange, OnlyAClassMethodHasNoBody) {
   }
 }
 
+// As the parser does, the reader takes only a C identifier that is not a C
+// keyword for a native function's C symbol.
+TEST(Interchange, NativeSymbolIsACIdentifier) {
+  for (const auto &[symbol, why] : {std::pair{"a b", "is not a C identifier"},
+                                    std::pair{"9x", "is not a C identifier"},
+                                    std::pair{"return", "is a C keyword"}}) {
+    ast::ASTContext ctx;
+    std::string error;
+    std::string text = std::string("(paykan-ast 1 (unit (fn \"f\" "
+                                   "(type-params) (params) _ (native \"") +
+                       symbol + "\"))))";
+    EXPECT_EQ(read(text, ctx, error), nullptr) << symbol;
+    EXPECT_NE(error.find(std::string("the C symbol '") + symbol +
+                         "' of native function 'f' " + why),
+              std::string::npos)
+        << symbol << ": " << error;
+  }
+}
+
 // As in the recursive-descent grammar, only a top-level function is native
 // and only an `impl` block's method is a `static fn`: a class body's
 // method with either is not read as a pure virtual or a virtual method.

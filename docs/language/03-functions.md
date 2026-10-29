@@ -968,8 +968,9 @@ cannot express itself, such as the standard library's file I/O (#198,
 native fn _write(file: view Obj, s: view Str) -> int = "Paykan_io_write";
 ```
 
-The string is the C symbol.  The rest of the program calls the function like
-any other.
+The string is the C symbol, a C identifier other than a C keyword (`= "a b"`
+is an error: `the C symbol 'a b' of native function 'f' is not a C
+identifier`).  The rest of the program calls the function like any other.
 
 A C symbol names one C function, with one C signature: the C types the
 table below gives the native function's parameters and result.  Native
@@ -999,7 +1000,8 @@ call never shares a reference with C, so it costs no reference counting
 bool, char, a sized numeric type and an enum without fields cross into C by
 value`).  Only these
 types cross, with the runtime's own convention (an enum whose variants have
-fields, [a tagged union](07-enums.md#variants-with-fields), does not):
+fields, [a tagged union](07-enums.md#variants-with-fields), does not, other than as a type
+argument of a [generic native function](#generic-native-functions)):
 
 | Paykan | C | Notes |
 |--------|---|-------|
@@ -1098,8 +1100,9 @@ paykan --object=text.o,more.o main.pkn          # run (the JIT loads the objects
 paykan build --object=text.o main.pkn -o main   # an executable
 ```
 
-`run` loads the objects into the JIT, so build them position-independent
-(`-fPIC`).  There, the C code may call the C library and the runtime functions
+`run` loads the objects into the JIT, and of an archive the members that
+define a symbol the program needs, as a linker does, so build them
+position-independent (`-fPIC`).  There, the C code may call the C library and the runtime functions
 compiled code uses (`PaykanString_new`, `PaykanShared_new`, `Paykan_retain`,
 `Paykan_release`, ...); `build` links the objects into the executable, which
 can call any runtime function.  `Runtime.h`'s `static inline`

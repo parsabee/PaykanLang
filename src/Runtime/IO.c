@@ -3,6 +3,13 @@
 //
 // Paykan runtime — I/O builtins and the program's arguments.
 
+// unsetenv is POSIX, not C: declared on the systems that have it, by the
+// feature-test macro their headers read.
+#if (defined(__unix__) || defined(__APPLE__)) && !defined(_POSIX_C_SOURCE)
+// NOLINTNEXTLINE(bugprone-reserved-identifier)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "RuntimeInternal.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,8 +45,23 @@ void Paykan_flush(void) { fflush(stdout); }
 
 // -- Program arguments
 
+/// Set by the plugin host for a program it runs with no arguments, which it
+/// starts with one empty argv[0] (paykan::names::kPaykanHostNoArgsEnv in
+/// include/Names.h).
+#define PAYKAN_HOST_NO_ARGS "__PAYKAN_HOST_NO_ARGS"
+
 PaykanShared **Paykan_args_new(int argc, char **argv, int64_t *count) {
-  int64_t n = getenv("PAYKAN_NO_ARGS") ? 0 : argc;
+  int64_t n = argc;
+  if (getenv(PAYKAN_HOST_NO_ARGS)) {
+    // The empty argv[0] the host supplied is no argument.  The variable says
+    // nothing about a program started with arguments, and is unset where
+    // the system can, so the programs this one starts do not inherit it.
+    if (argc == 1 && argv[0][0] == '\0')
+      n = 0;
+#if defined(__unix__) || defined(__APPLE__)
+    unsetenv(PAYKAN_HOST_NO_ARGS);
+#endif
+  }
   PaykanShared **args = (PaykanShared **)Paykan_malloc((size_t)(n > 0 ? n : 1) *
                                                        sizeof(PaykanShared *));
   for (int64_t i = 0; i < n; ++i)

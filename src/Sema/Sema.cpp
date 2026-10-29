@@ -4067,6 +4067,13 @@ bool Sema::checkNativeSignature(ast::FuncDecl *node, ast::Type *retTy,
 // twice is fine.
 bool Sema::checkNativeSymbol(const ast::FuncDecl *node) {
   const std::string &symbol = node->getNativeSymbol();
+  // The frontends reject such a symbol; an AST made another way may not.
+  if (std::string_view why = names::cSymbolProblem(symbol); !why.empty()) {
+    error(node->getLocation(),
+          "the C symbol '" + symbol + "' of native function '" +
+              displayName(node->getName()) + "' " + std::string(why));
+    return false;
+  }
   const pir::Signature sig = nativeSignature(Ctx, *node);
   if (pir::isRuntimeSymbol(symbol)) {
     if (const pir::Signature *rt = pir::runtimeSignature(symbol);

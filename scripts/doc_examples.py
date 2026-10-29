@@ -48,7 +48,7 @@ page has no untested code.  Elsewhere a ```pkn block that is none of them (a
 fragment, such as a grammar form or part of a program) is skipped.
 
 Usage:
-    doc_examples.py --paykan build/bin/paykan [--backend c ...] [file.md ...]
+    doc_examples.py --paykan build/bin/paykan [--backend mlir ...] [file.md ...]
 
 Without files it scans README.md and every Markdown file under docs/.
 """
@@ -274,7 +274,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--paykan", required=True, help="the paykan binary")
     ap.add_argument("--backend", action="append",
-                    help="a backend to run (repeatable; default: c)")
+                    help="a backend to run (repeatable; default: mlir)")
     ap.add_argument("files", nargs="*", help="Markdown files to scan")
     args = ap.parse_args()
     backends = args.backend or ["mlir"]
