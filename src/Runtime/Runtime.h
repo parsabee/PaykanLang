@@ -261,11 +261,23 @@ extern PaykanMethod PaykanString_vtable[PAYKAN_STRING_SLOTS];
 // Inherits Object.  The first three vtable slots match Object's layout;
 // File-specific slots follow (PAYKAN_SLOT_FILE_*).
 
+/// What a file's stream did last.  C lets a read follow a write on a stream
+/// opened for update ("r+", "w+", "a+") only after an fflush, and a write
+/// follow a read only after a file positioning call (C11 7.21.5.3); File.c's
+/// reads and writes make that call when the stream switches, so a program
+/// mixes the two freely.  Generated code never reads it.
+typedef enum PaykanFileOp {
+  PAYKAN_FILE_OP_NONE = 0, // opened, or positioned since the last read
+  PAYKAN_FILE_OP_READ = 1,
+  PAYKAN_FILE_OP_WRITE = 2, // its output may still be in C's buffer
+} PaykanFileOp;
+
 typedef struct PaykanFile {
   PaykanMethod *vtable; // points to PaykanFile_vtable
   int32_t strong;       // object header (see PaykanObject)
   int32_t weak;
-  FILE *handle; // underlying C file handle (NULL if closed)
+  FILE *handle;        // underlying C file handle (NULL if closed)
+  PaykanFileOp lastOp; // what the stream did last
 } PaykanFile;
 
 // Constructor / destructor.
@@ -273,7 +285,8 @@ PaykanFile *PaykanFile_new(void);
 
 /// Open a file at `path` with the given `mode` string (e.g. "r", "w").
 /// Returns a PaykanShared* wrapping a PaykanFile on success, or NULL with
-/// C's errno in `*err` on failure.
+/// C's errno in `*err` on failure: EINVAL for a path or a mode holding a NUL
+/// byte, which fopen would read only up to it.
 PaykanShared *PaykanFile_open(PaykanObject *path, PaykanObject *mode,
                               int64_t *err);
 void PaykanFile_destroy(PaykanObject *self);
@@ -297,7 +310,9 @@ extern PaykanFile PaykanFile_Stdin;
 // errno (Runtime.h, "Errors"): a write returns it, 0 when it succeeded; a
 // read returns a fresh Str, or NULL with the errno in `*err`, 0 there meaning
 // the end of the file.  `err` is an int64_t, the native's `inout int`, passed
-// as the address the native ABI gives it.
+// as the address the native ABI gives it.  Reads and writes mix in any order
+// (PaykanFileOp): a read after a write first writes out what the write left
+// in C's buffer, and fails with the errno when that fails.
 
 /// `fopen(path, mode)`: the file (owned +1), or NULL with C's errno in
 /// `*err`.
@@ -343,7 +358,8 @@ enum {
 /// The ErrorCode (its ordinal) of the C `errno` @p err; 0 is `Ok`, and an
 /// errno with no code of its own is `Other`.
 int64_t Paykan_error_code(int64_t err);
-/// C's `strerror` text for @p err, as a fresh Str (owned +1).
+/// C's `strerror` text for @p err, as a fresh Str (owned +1), or for a value
+/// outside C's int, which strerror cannot take, `Unknown error <err>`.
 PaykanShared *Paykan_error_text(int64_t err);
 
 // -- Shared: strong and weak references to a PaykanObject
@@ -456,10 +472,25 @@ static inline PaykanObject *PaykanShared_get_inline(PaykanShared *shared) {
 // it does for a non-generic native function.
 //
 // A PaykanType describes a value of the type as it is stored: its size and
-// alignment, its kind, and where it holds references (PaykanShared* boxes),
-// which a copy retains and a drop releases.  The compiler emits one per
-// type, as constant data; the kind codes must match
+// alignment, its kind, where it holds references (PaykanShared* boxes),
+// which a copy retains and a drop releases, and how storage that was never
+// set, all zero bytes, differs from every value.  The compiler emits one
+// per type, as constant data; the kind codes must match
 // paykan::names::NativeTypeKind in include/Names.h.
+//
+// All zero bytes is a value of most types: 0, 0.0, False, char 0, None, an
+// enum's first variant, and a tuple, a struct or a tagged union's first
+// variant whose fields' zero bytes are values.  It is no value of a
+// reference that may not be None (a class, Str, Obj), of a function value
+// (its code word, the address of its code, is 0 only in None), or of a
+// tuple, a struct or a tagged union's first variant with a field of such a
+// type.  For one of those the PaykanType lists `nunset` words of the value,
+// each 8 bytes at a byte offset, that are all 0 only in storage never set:
+// every value has one of them nonzero.  For a reference or a function value
+// it is the reference or the code word; for a tuple or a struct, those of
+// one field whose zero bytes are no value; for a tagged union, the tag and
+// then those of its first variant's fields (a value of another variant has
+// a nonzero tag).  A type whose zero bytes are a value lists none.
 
 typedef enum PaykanTypeKind {
   PAYKAN_KIND_INT = 0,      // int64_t (also enum values)
@@ -483,17 +514,26 @@ typedef enum PaykanTypeKind {
 } PaykanTypeKind;
 
 /// Followed in memory by `nrefs` int64_t words, one per reference: its byte
-/// offset in the value << 1, | 1 if it may be NULL (PaykanType_ref).
+/// offset in the value << 1, | 1 if it may be NULL (PaykanType_ref); then by
+/// `nunset` words, the byte offsets of the words that are all 0 only in
+/// storage never set (PaykanType_unset).
 typedef struct PaykanType {
-  int64_t size;  ///< bytes of a value
-  int64_t align; ///< its alignment
-  int64_t kind;  ///< PaykanTypeKind
-  int64_t nrefs; ///< references in a value
+  int64_t size;   ///< bytes of a value
+  int64_t align;  ///< its alignment
+  int64_t kind;   ///< PaykanTypeKind
+  int64_t nrefs;  ///< references in a value
+  int64_t nunset; ///< words telling storage never set; 0: zeros are a value
 } PaykanType;
 
 /// The word of the @p k-th reference of a @p type value.
 static inline int64_t PaykanType_ref(const PaykanType *type, int64_t k) {
   return ((const int64_t *)(type + 1))[k];
+}
+
+/// The byte offset of the @p k-th word that tells a @p type value from
+/// storage never set.
+static inline int64_t PaykanType_unset(const PaykanType *type, int64_t k) {
+  return ((const int64_t *)(type + 1))[type->nrefs + k];
 }
 
 /// Make @p dst (uninitialised storage for a @p type value) a copy of the
@@ -502,8 +542,9 @@ void PaykanType_copy(const PaykanType *type, void *dst, const void *src);
 /// Release the references the @p type value at @p value holds; the storage
 /// is then uninitialised.
 void PaykanType_drop(const PaykanType *type, void *value);
-/// True if a reference the @p type value at @p value holds that may not be
-/// NULL is: storage that was never set.
+/// True if @p value is storage that was never set: @p type has words that
+/// tell it (`nunset`), and they are all 0 there.  Never for a type whose
+/// zero bytes are a value.
 int PaykanType_isUnset(const PaykanType *type, const void *value);
 
 // -- Tuples
@@ -578,10 +619,13 @@ int64_t PaykanEnum_equals(const void *a, const void *b, const int64_t *layout);
 // (a `view Obj`), or one that changes it as the address of its box (an
 // `inout Obj`).  They are declared with the C types the backends give a
 // native function's parameters: `void *` for a PaykanType and any other
-// address.  A new value is all zero bytes: 0, False or None.  Destroying the
-// buffer drops the values.  An index out of bounds, a negative count,
-// shrinking by more than len and reading a never-set reference of a type
-// that may not be NULL panic.
+// address.  An index or a count is the program's `unsigned` in an int64_t,
+// so one of 2^63 or more is negative here.  A new value is all zero bytes:
+// 0, False or None, or for a type whose zero bytes are no value (above),
+// storage never set.  Destroying the buffer drops the values.  An index out
+// of bounds, a count the memory is not there for (2^63 or more never is),
+// shrinking by more than len and reading a value never set panic, with the
+// index or count printed unsigned.
 
 typedef struct PaykanBuffer {
   PaykanMethod *vtable; // points to PaykanBuffer_vtable
@@ -601,17 +645,18 @@ int64_t PaykanBuffer_len(void *t, PaykanObject *b);
 void *PaykanBuffer_get(void *t, PaykanObject *b, int64_t i);
 /// Copy value @p i to @p out (uninitialised), retaining its references.
 void PaykanBuffer_copy(void *t, void *out, PaykanObject *b, int64_t i);
-/// 1 when value @p i is in range and set (a reference slot that may not be
-/// None is unset until stored), else 0: what a checked read tests first.
+/// 1 when value @p i is in range and set (a slot of a type whose zero bytes
+/// are no value is unset until stored: PaykanType_isUnset), else 0: what a
+/// checked read tests first.
 int64_t PaykanBuffer_isSet(void *t, PaykanObject *b, int64_t i);
 void PaykanBuffer_set(void *t, void *b, int64_t i, void *v);
 void PaykanBuffer_reserve(void *t, void *b, int64_t n);
 void PaykanBuffer_grow(void *t, void *b, int64_t by);
 void PaykanBuffer_shrink(void *t, void *b, int64_t by);
 /// PaykanBuffer_grow and PaykanBuffer_reserve that report a failure
-/// instead of panicking: 0, or C's errno (ENOMEM when the memory, or the
-/// size, is not there) with the buffer unchanged.  The standard library's
-/// memory::Buffer turns it into an Error.
+/// instead of panicking: 0, or ENOMEM (the memory, or the size, is not
+/// there) with the buffer unchanged.  The standard library's memory::Buffer
+/// turns it into an Error.
 int64_t PaykanBuffer_tryGrow(void *t, void *b, int64_t by);
 int64_t PaykanBuffer_tryReserve(void *t, void *b, int64_t n);
 
@@ -731,6 +776,13 @@ void Paykan_args_free(PaykanShared **args, int64_t count);
 // The back-end is selected once at start-up (--track-heap in the driver, or
 // the test harness), before any allocation.  Immortal singletons (None,
 // Stdin) are static and never pass through here.
+//
+// An allocation never returns NULL: when the memory is not there the program
+// panics (`paykan: out of memory allocating <size> bytes`, after flushing
+// stdout like every panic).  Generated code uses the block unchecked.  The
+// runtime's own callers that report running out of memory instead
+// (memory::Buffer's OutOfMemory, an io::File read's) allocate through
+// internal functions that return NULL (RuntimeInternal.h).
 
 typedef struct PaykanHeapStats {
   int64_t liveBlocks;    // currently-allocated blocks (alloc - free)
@@ -741,11 +793,13 @@ typedef struct PaykanHeapStats {
   int64_t peakBytes;     // high-water mark of liveBytes
 } PaykanHeapStats;
 
-/// Allocate `size` bytes.  Returns NULL on failure.
+/// Allocate `size` bytes (a block of its own for 0 too), or panic when the
+/// memory is not there.
 void *Paykan_malloc(size_t size);
 
-/// Resize a block previously returned by Paykan_malloc/Paykan_realloc.
-/// Passing NULL behaves like Paykan_malloc.
+/// Resize a block previously returned by Paykan_malloc/Paykan_realloc to
+/// `size` bytes, or panic when the memory is not there.  Passing NULL
+/// behaves like Paykan_malloc.
 void *Paykan_realloc(void *ptr, size_t size);
 
 /// Free a block previously returned by Paykan_malloc/Paykan_realloc.
@@ -781,7 +835,8 @@ int64_t Paykan_heap_live_bytes(void);
 int64_t Paykan_heap_total_reallocs(void);
 
 /// Print the current heap statistics to stderr (a leak warning is appended if
-/// any blocks remain live).  If tracking is disabled, prints a notice instead.
+/// any blocks remain live), after flushing stdout, so that they follow what
+/// the program printed.  If tracking is disabled, prints a notice instead.
 void Paykan_heap_dump(void);
 
 // Every object struct starts with PaykanObject's header (the vtable, then the

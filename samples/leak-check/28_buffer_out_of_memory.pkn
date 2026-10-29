@@ -1,0 +1,35 @@
+// Isolates: a memory::Buffer asked for more memory than there is, under the
+// tracking allocator, whose header is allocated with every block.  2^61 - 1
+// ints are 2^64 - 8 bytes, which C's size_t holds but not with the header
+// beside them: each request is OutOfMemory, as without --track-heap, and
+// the buffer is unchanged.
+//   * reserve on a buffer with no allocation yet (a malloc);
+//   * reserve and grow on one with an allocation (a realloc), which keeps
+//     its values.
+//
+// Runtime allocation sites: buffer_try_realloc (Buffer.c) through
+// Paykan_tryRealloc (Heap.c), the Buffer objects and the strings.
+//
+// Expected under --track-heap: live blocks : 0.
+
+import ::io;
+import ::error as err;
+import ::memory as mem;
+
+// expect-stdout: empty: OutOfMemory 0
+// expect-stdout: reserve: OutOfMemory 2 7
+// expect-stdout: grow: OutOfMemory 2 7
+
+fn main() -> int {
+  empty = mem::Buffer<int>();
+  io::println("empty: " + err::name(empty.reserve(2305843009213693951).code)
+      + " " + Str(empty.len()));
+  b = mem::Buffer<int>();
+  e = b.push(7);
+  e = b.push(8);
+  io::println("reserve: " + err::name(b.reserve(2305843009213693951).code) + " "
+      + Str(b.len()) + " " + Str(b.get(0)));
+  io::println("grow: " + err::name(b.grow(2305843009213693949).code) + " "
+      + Str(b.len()) + " " + Str(b.get(0)));
+  return 0;
+}

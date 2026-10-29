@@ -31,10 +31,10 @@
     "driver":          {"gtest": true,  "disabled": false, "description": "tests/Driver: DriverTests.<backend>, PkmTests.<backend>"},
     "frontend":        {"gtest": true,  "disabled": false, "description": "tests/Frontend: FrontendTests"},
     "samples":         {"gtest": false, "disabled": false, "description": "scripts/samples_parity.py, cache_race.py, runtime_lookup.py: SamplesParity*, CacheRace, RuntimeLookup"},
-    "stdlib":          {"gtest": false, "disabled": false, "description": "scripts/stdlib_tests.py: StdlibTests (tests/Stdlib on the standard library the build stages)"},
+    "stdlib":          {"gtest": false, "disabled": false, "description": "scripts/stdlib_tests.py: StdlibTests, StdlibTestsBuild, StdlibTestsC (tests/Stdlib on the standard library the build stages)"},
     "c-strict":        {"gtest": false, "disabled": false, "description": "scripts/c_strict.py: CStrictC11 (the mlir backend's --emit-c)"},
     "docs":            {"gtest": false, "disabled": false, "description": "scripts/check_links.py, doc_examples.py: MarkdownLinks, DocExamples"},
-    "configure":       {"gtest": false, "disabled": false, "description": "tests/DefaultConfigure.cmake: DefaultConfigure"},
+    "configure":       {"gtest": false, "disabled": false, "description": "tests/DefaultConfigure.cmake, scripts/test_selection.py: DefaultConfigure, TestSelection"},
     "out-of-tree":     {"gtest": true,  "disabled": false, "description": "tests/OutOfTree: PrintPIROutOfTree, PluginCompatOutOfTree, FrontendTestsOutOfTree"}
   },
   "groups": {
@@ -92,7 +92,9 @@
     ["scripts/runtime_lookup.py", ["samples"]],
     ["scripts/c_strict.py", ["c-strict"]],
     ["scripts/stdlib_tests.py", ["stdlib"]],
-    ["stdlib/*", ["stdlib"]],
+    ["scripts/test_selection.py", ["configure"]],
+    ["stdlib/CMakeLists.txt", "all"],
+    ["stdlib/*", ["sema", "lowering", "pir-mlir", "@e2e"]],
     ["scripts/check_links.py", ["docs"]],
     ["scripts/doc_examples.py", ["docs"]],
     ["docs/*", ["docs"]],

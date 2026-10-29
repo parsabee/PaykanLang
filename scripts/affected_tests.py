@@ -16,7 +16,10 @@ The suites and the path rules live in tests/suites.json, the one list that
 CMake (cmake/PaykanTests.cmake) reads too.  The rules are deliberately
 conservative: a file in a library the whole compiler uses (the AST, the
 frontends, the plugin interfaces, the public headers, the build system)
-affects every suite, and a file no rule names does too.
+affects every suite, and a file no rule names does too.  A standard library
+source (stdlib/*.pkn) affects every suite whose programs import the copy
+the build stages (sema, lowering, pir-mlir and the end-to-end group), and
+the standard library's build (stdlib/CMakeLists.txt) every suite.
 
 CI (.github/workflows/ci.yml) builds only these suites on a pull request,
 and every suite on a push.

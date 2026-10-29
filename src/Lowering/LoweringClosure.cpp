@@ -9,7 +9,9 @@
 // i64, then the box of its closure, the object holding its captures, or
 // null when it captures nothing.  So it is copied, retained, released,
 // compared and described to the runtime as that tuple is, and an optional
-// one is the same 16 bytes, None a zero code word.
+// one is the same 16 bytes, None a zero code word.  Only a value's code word
+// is never 0, so a type descriptor names it as the word that tells storage
+// never set (functionCodeOffset).
 //
 // The code of a lambda is a function `fn.<module>.N.call(closure, params...)`
 // and its closure an object of the class `fn.<module>.N`, one field per
@@ -51,6 +53,9 @@ ast::TupleType *ModuleLowering::functionValueShape() {
   return ASTCtx.getTupleType(
       {ASTCtx.getIntTy(), ASTCtx.getOptionalType(ASTCtx.getObjTy())});
 }
+
+// static
+int64_t ModuleLowering::functionCodeOffset() { return kCodeOffset; }
 
 ast::Type *ModuleLowering::memShapeOf(ast::Type *ty) {
   if (ast::isFunctionValue(ty))

@@ -9,7 +9,9 @@
 
 #include "Names.h"
 
+#include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -39,16 +41,19 @@ struct TrackingHeap {
   }
 };
 
+// A type holding one reference: its word, then (when it may not be NULL)
+// the reference again, as the word that tells storage never set.
 struct RefType {
   PaykanType head;
   int64_t ref;
+  int64_t unset;
 };
 
 // Not const: the PaykanBuffer_* functions take a PaykanType as a `void *`.
-PaykanType kInt = {8, 8, PAYKAN_KIND_INT, 0};
-PaykanType kFloat = {8, 8, PAYKAN_KIND_FLOAT, 0};
-RefType kStr = {{8, 8, PAYKAN_KIND_OBJECT, 1}, 0};
-RefType kOpt = {{8, 8, PAYKAN_KIND_OPTIONAL, 1}, 1}; // may be NULL
+PaykanType kInt = {8, 8, PAYKAN_KIND_INT, 0, 0};
+PaykanType kFloat = {8, 8, PAYKAN_KIND_FLOAT, 0, 0};
+RefType kStr = {{8, 8, PAYKAN_KIND_OBJECT, 1, 1}, 0, 0};
+RefType kOpt = {{8, 8, PAYKAN_KIND_OPTIONAL, 1, 0}, 1, 0}; // may be NULL
 
 // A 24-byte value with a reference in the middle, as a struct would be.
 struct Wide {
@@ -56,8 +61,54 @@ struct Wide {
   PaykanShared *ref;
   bool flag;
 };
-RefType kWide = {{sizeof(Wide), alignof(Wide), PAYKAN_KIND_OBJECT, 1},
-                 (int64_t)offsetof(Wide, ref) << 1};
+RefType kWide = {{sizeof(Wide), alignof(Wide), PAYKAN_KIND_OBJECT, 1, 1},
+                 (int64_t)offsetof(Wide, ref) << 1,
+                 (int64_t)offsetof(Wide, ref)};
+
+// `enum F { B(s: Str), A }` as the compiler lays it out: the tag, then B's
+// Str, NULL in an A.  Zeros are B with a NULL Str, no value: the tag and the
+// Str tell storage never set.
+struct Union {
+  int64_t tag;
+  PaykanShared *s;
+};
+struct UnionType {
+  PaykanType head;
+  int64_t ref;
+  int64_t unset[2];
+};
+UnionType kUnion = {
+    {sizeof(Union), alignof(Union), PAYKAN_KIND_TUPLE, 1, 2},
+    (int64_t)offsetof(Union, s) << 1 | 1,
+    {(int64_t)offsetof(Union, tag), (int64_t)offsetof(Union, s)}};
+
+// A function value, `() -> int`: its code word, never 0 in a value, then
+// its closure, NULL when it captures nothing.
+struct Function {
+  int64_t code;
+  PaykanShared *closure;
+};
+RefType kFunction = {
+    {sizeof(Function), alignof(Function), PAYKAN_KIND_TUPLE, 1, 1},
+    (int64_t)offsetof(Function, closure) << 1 | 1,
+    (int64_t)offsetof(Function, code)};
+
+// `enum G { A(n: int, s: Str?), B(s: Str) }`: zeros are A(0, None), a
+// value, so no word tells.
+struct Valued {
+  int64_t tag;
+  int64_t n;
+  PaykanShared *a;
+  PaykanShared *b;
+};
+struct ValuedType {
+  PaykanType head;
+  int64_t refs[2];
+};
+ValuedType kValued = {
+    {sizeof(Valued), alignof(Valued), PAYKAN_KIND_TUPLE, 2, 0},
+    {(int64_t)offsetof(Valued, a) << 1 | 1,
+     (int64_t)offsetof(Valued, b) << 1 | 1}};
 
 PaykanObject *obj(PaykanShared *buf) { return PaykanShared_get(buf); }
 
@@ -226,12 +277,48 @@ TEST(Buffer, AllocationGrowsGeometricallyAndShrinks) {
   Paykan_release(buf);
 }
 
+// 2^61 - 1 ints are 2^64 - 8 bytes, which a size_t holds but not with the
+// tracking allocator's header: ENOMEM, as without tracking, and the buffer
+// is unchanged, whether it had no allocation (malloc) or one (realloc).
+TEST(Buffer, ValuesWithNoRoomForTheTrackingHeaderAreOutOfMemory) {
+  TrackingHeap heap;
+  const int64_t most = (INT64_C(1) << 61) - 1;
+  PaykanShared *buf = PaykanBuffer_new(&kInt, 0);
+  EXPECT_EQ(PaykanBuffer_tryReserve(&kInt, &buf, most), ENOMEM);
+  EXPECT_EQ(PaykanBuffer_len(&kInt, obj(buf)), 0);
+  EXPECT_EQ(cap(buf), 0);
+  PaykanBuffer_grow(&kInt, &buf, 1);
+  setInt(&buf, 0, 7);
+  EXPECT_EQ(PaykanBuffer_tryGrow(&kInt, &buf, most - 1), ENOMEM);
+  EXPECT_EQ(PaykanBuffer_tryReserve(&kInt, &buf, most), ENOMEM);
+  EXPECT_EQ(PaykanBuffer_len(&kInt, obj(buf)), 1);
+  EXPECT_EQ(intAt(buf, 0), 7);
+  Paykan_release(buf);
+}
+
 TEST(BufferDeath, OutOfBoundsPanics) {
   PaykanShared *buf = PaykanBuffer_new(&kInt, 3);
   EXPECT_DEATH(PaykanBuffer_get(&kInt, obj(buf), 3),
                "buffer index 3 out of bounds \\(len=3\\)");
   EXPECT_DEATH(PaykanBuffer_get(&kInt, obj(buf), -1), "out of bounds");
   EXPECT_DEATH(setInt(&buf, 5, 1), "out of bounds");
+  Paykan_release(buf);
+}
+
+// An index is the standard library's `unsigned`, in an int64_t: one of 2^63
+// or more is negative here, and a panic prints it as the program wrote it.
+TEST(BufferDeath, AnIndexPastINT64MaxPanicsUnsigned) {
+  PaykanShared *buf = PaykanBuffer_new(&kInt, 3);
+  EXPECT_DEATH(PaykanBuffer_get(&kInt, obj(buf), -1),
+               "buffer index 18446744073709551615 out of bounds \\(len=3\\)");
+  EXPECT_DEATH(PaykanBuffer_get(&kInt, obj(buf), INT64_MIN),
+               "buffer index 9223372036854775808 out of bounds \\(len=3\\)");
+  int64_t out = 0;
+  EXPECT_DEATH(PaykanBuffer_copy(&kInt, &out, obj(buf), INT64_MIN),
+               "buffer index 9223372036854775808 out of bounds \\(len=3\\)");
+  EXPECT_DEATH(setInt(&buf, -2, 1),
+               "buffer index 18446744073709551614 out of bounds \\(len=3\\)");
+  EXPECT_EQ(PaykanBuffer_isSet(&kInt, obj(buf), INT64_MIN), 0);
   Paykan_release(buf);
 }
 
@@ -245,14 +332,96 @@ TEST(BufferDeath, NeverSetReferencePanics) {
   Paykan_release(buf);
 }
 
+// A slot of a tagged union whose first variant holds a reference is unset
+// until stored: zeros are that variant with a NULL reference.  A value of
+// another variant, the reference NULL in it, is set.
+TEST(Buffer, ANeverSetTaggedUnionIsUnset) {
+  TrackingHeap heap;
+  PaykanShared *buf = PaykanBuffer_new(&kUnion.head, 3);
+  for (int64_t i = 0; i < 3; ++i)
+    EXPECT_EQ(PaykanBuffer_isSet(&kUnion.head, obj(buf), i), 0) << i;
+  Union named = {0, str("x")};
+  PaykanBuffer_set(&kUnion.head, &buf, 0, &named);
+  Union other = {1, nullptr};
+  PaykanBuffer_set(&kUnion.head, &buf, 1, &other);
+  EXPECT_EQ(PaykanBuffer_isSet(&kUnion.head, obj(buf), 0), 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kUnion.head, obj(buf), 1), 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kUnion.head, obj(buf), 2), 0);
+  Union got = {};
+  PaykanBuffer_copy(&kUnion.head, &got, obj(buf), 1);
+  EXPECT_EQ(got.tag, 1);
+  EXPECT_EQ(got.s, nullptr);
+  PaykanBuffer_copy(&kUnion.head, &got, obj(buf), 0);
+  EXPECT_EQ(got.s, named.s);
+  EXPECT_EQ(named.s->strong, 3); // named, the slot and got
+  PaykanType_drop(&kUnion.head, &got);
+  PaykanType_drop(&kUnion.head, &named);
+  Paykan_release(buf);
+}
+
+// A function value's slot is unset until stored: its code word is 0.  One
+// that captures nothing (a NULL closure) is set.
+TEST(Buffer, ANeverSetFunctionValueIsUnset) {
+  TrackingHeap heap;
+  PaykanShared *buf = PaykanBuffer_new(&kFunction.head, 2);
+  EXPECT_EQ(PaykanBuffer_isSet(&kFunction.head, obj(buf), 0), 0);
+  Function f = {0x1000, nullptr};
+  PaykanBuffer_set(&kFunction.head, &buf, 0, &f);
+  EXPECT_EQ(PaykanBuffer_isSet(&kFunction.head, obj(buf), 0), 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kFunction.head, obj(buf), 1), 0);
+  Function got = {};
+  PaykanBuffer_copy(&kFunction.head, &got, obj(buf), 0);
+  EXPECT_EQ(got.code, 0x1000);
+  Paykan_release(buf);
+}
+
+// A type whose zeros are a value has no slot that is unset: a new one reads
+// as that value, even with references that are NULL in it.
+TEST(Buffer, ZerosAreAValueOfATypeThatNamesNoWord) {
+  TrackingHeap heap;
+  PaykanShared *buf = PaykanBuffer_new(&kValued.head, 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kValued.head, obj(buf), 0), 1);
+  Valued got = {1, 2, nullptr, nullptr};
+  PaykanBuffer_copy(&kValued.head, &got, obj(buf), 0);
+  EXPECT_EQ(got.tag, 0);
+  EXPECT_EQ(got.n, 0);
+  EXPECT_EQ(got.a, nullptr);
+  EXPECT_EQ(got.b, nullptr);
+  PaykanShared *opts = PaykanBuffer_new(&kOpt.head, 1);
+  EXPECT_EQ(PaykanBuffer_isSet(&kOpt.head, obj(opts), 0), 1);
+  Paykan_release(opts);
+  Paykan_release(buf);
+}
+
+TEST(BufferDeath, NeverSetTaggedUnionOrFunctionValuePanics) {
+  PaykanShared *buf = PaykanBuffer_new(&kUnion.head, 1);
+  EXPECT_DEATH(PaykanBuffer_get(&kUnion.head, obj(buf), 0),
+               "buffer value 0 was never set");
+  Union out = {};
+  EXPECT_DEATH(PaykanBuffer_copy(&kUnion.head, &out, obj(buf), 0),
+               "buffer value 0 was never set");
+  Paykan_release(buf);
+  PaykanShared *fns = PaykanBuffer_new(&kFunction.head, 2);
+  EXPECT_DEATH(PaykanBuffer_get(&kFunction.head, obj(fns), 1),
+               "buffer value 1 was never set");
+  Paykan_release(fns);
+}
+
+// A count is an `unsigned` too: one of 2^63 or more (negative here) is more
+// values than there is memory for (PaykanBuffer_tryGrow's ENOMEM), and the
+// panics print it unsigned.
 TEST(BufferDeath, BadCountsPanic) {
   PaykanShared *buf = PaykanBuffer_new(&kInt, 3);
-  EXPECT_DEATH(PaykanBuffer_new(&kInt, -1), "cannot be negative");
+  EXPECT_DEATH(PaykanBuffer_new(&kInt, -1),
+               "out of memory growing a buffer to 18446744073709551615 values");
   EXPECT_DEATH(PaykanBuffer_grow(&kInt, &buf, -2),
-               "buffer grow by -2: the count cannot be negative");
-  EXPECT_DEATH(PaykanBuffer_reserve(&kInt, &buf, -1), "cannot be negative");
+               "out of memory growing a buffer by 18446744073709551614 values");
+  EXPECT_DEATH(PaykanBuffer_reserve(&kInt, &buf, INT64_MIN),
+               "out of memory growing a buffer to 9223372036854775808 values");
   EXPECT_DEATH(PaykanBuffer_shrink(&kInt, &buf, 4),
                "buffer shrink by 4: it has only 3 values");
+  EXPECT_DEATH(PaykanBuffer_shrink(&kInt, &buf, -1),
+               "buffer shrink by 18446744073709551615: it has only 3 values");
   Paykan_release(buf);
 }
 

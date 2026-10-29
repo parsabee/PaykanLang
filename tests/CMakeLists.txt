@@ -478,6 +478,7 @@ add_executable(runtime_tests
     Runtime/WeakTests.cpp
     Runtime/FileTests.cpp
     Runtime/ErrorTests.cpp
+    Runtime/HeapTests.cpp
     Runtime/OptionalNullTests.cpp
     Runtime/TupleTests.cpp
     Runtime/StructTests.cpp
@@ -512,6 +513,7 @@ add_executable(driver_tests
 target_compile_definitions(driver_tests
     PRIVATE PAYKAN_BIN="$<TARGET_FILE:paykan>"
             PAYKAN_INCOMPATIBLE_PLUGINS_BIN="$<TARGET_FILE:paykan_incompatible_plugins>"
+            PAYKAN_RUNTIME_SOURCE_DIR="${CMAKE_SOURCE_DIR}/src/Runtime"
             PAYKAN_TEST_ACCEPTED_VERSIONS="${PAYKAN_TEST_ACCEPTED_VERSIONS}"
             PAYKAN_EXPECTED_DEFAULT_BACKEND="${PAYKAN_DEFAULT_BACKEND}"
 )
@@ -524,6 +526,12 @@ target_link_libraries(driver_tests
 add_dependencies(driver_tests paykan paykan_incompatible_plugins paykan_build_id)
 if(PAYKAN_COVERAGE)
     target_compile_definitions(driver_tests PRIVATE PAYKAN_TEST_COVERAGE=1)
+endif()
+# The programs a sanitizer build links map ASan's or TSan's shadow memory,
+# more address space than the out-of-memory test's RLIMIT_AS leaves them.
+if(PAYKAN_ASAN OR PAYKAN_TSAN)
+    target_compile_definitions(driver_tests PRIVATE
+                               PAYKAN_TEST_SHADOW_SANITIZER=1)
 endif()
 # Once per backend that runs programs (see backendFlag() in DriverTests.cpp).
 foreach(be IN LISTS PAYKAN_RUN_BACKENDS)
@@ -567,16 +575,18 @@ if(PAYKAN_TEST_SUITE_samples AND PAYKAN_SAMPLES_BACKENDS)
     # executables.
     paykan_add_python_test(SamplesParityBuild samples_parity.py --build
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
-    # The corpus at -O0 too (the default is -O2), which keeps the
-    # unoptimised code paths of both backends covered.
+    # The corpus at -O0 too (the default is -O2), run and built, which keeps
+    # the unoptimised code paths of both backends covered.
     paykan_add_python_test(SamplesParityO0 samples_parity.py -O 0
+                --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+    paykan_add_python_test(SamplesParityBuildO0 samples_parity.py --build -O 0
                 --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     # They compile the same import samples through the same per-project
     # object / bitcode caches (samples/imports/*/.paykan_cache): one at a
     # time.
     if(TEST SamplesParity)
         set_tests_properties(SamplesParity SamplesParityBuild SamplesParityO0
-            PROPERTIES RESOURCE_LOCK paykan_samples_cache)
+            SamplesParityBuildO0 PROPERTIES RESOURCE_LOCK paykan_samples_cache)
     endif()
 
     # Concurrent builds with different flags (-O0 / -O2, plain / ASan) of one
@@ -604,11 +614,22 @@ endif()
 
 # The standard library's tests (tests/Stdlib) on every backend that runs
 # programs, against the standard library the build staged next to `paykan`
-# (stdlib/CMakeLists.txt, scripts/stdlib_tests.py) (stdlib).
+# (stdlib/CMakeLists.txt, scripts/stdlib_tests.py), at -O0 and -O2 on every
+# path: `paykan run`, `paykan build` and the C `--emit-c` prints, compiled
+# with the runtime's sources by `cc`, as the driver tests' C path is.  Not
+# by this build's C compiler: that can be one only CMake drives right (the
+# coverage job's prebuilt clang finds the macOS SDK's headers only through
+# the -isysroot CMake adds) (stdlib).
 paykan_test_suite(stdlib PAYKAN_TEST_SUITE_stdlib)
 if(PAYKAN_TEST_SUITE_stdlib AND PAYKAN_SAMPLES_BACKENDS)
     if(TARGET paykan_stdlib)
-        paykan_add_python_test(StdlibTests stdlib_tests.py
+        paykan_add_python_test(StdlibTests stdlib_tests.py -O 0 -O 2
+                    --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+        paykan_add_python_test(StdlibTestsBuild stdlib_tests.py --build
+                    -O 0 -O 2
+                    --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
+        paykan_add_python_test(StdlibTestsC stdlib_tests.py
+                    --cc cc -O 0 -O 2
                     --paykan $<TARGET_FILE:paykan> ${PAYKAN_SAMPLES_BACKENDS})
     else()
         message(STATUS "The stdlib tests are skipped: the build compiles no "
@@ -667,11 +688,15 @@ endif()
 
 # A plain configure (no options but this build's LLVM) is the core build:
 # recursive-descent + mlir, nothing downloaded, no third-party/ or _deps/
-# (#123).  Configure only, in a scratch directory of its own.  Not in a
-# coverage build: it runs no instrumented code, and scripts/coverage.py
-# requires every test to write a profile.  (configure)
+# (#123).  Configure only, in a scratch directory of its own.  And the suites
+# CI picks for a change (scripts/affected_tests.py) include every suite the
+# change can affect: a standard library source picks every suite that
+# imports it (scripts/test_selection.py).  Not in a coverage build: they run
+# no instrumented code, and scripts/coverage.py requires every test to write
+# a profile.  (configure)
 paykan_test_suite(configure PAYKAN_TEST_SUITE_configure)
 if(PAYKAN_TEST_SUITE_configure AND NOT PAYKAN_COVERAGE)
+    paykan_add_python_test(TestSelection test_selection.py)
     add_test(NAME DefaultConfigure
         COMMAND ${CMAKE_COMMAND}
                 -DSOURCE_DIR=${CMAKE_SOURCE_DIR}

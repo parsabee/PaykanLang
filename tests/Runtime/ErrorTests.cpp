@@ -4,6 +4,8 @@
 // library failure's errno means to the standard library's ::error.
 
 #include <cerrno>
+#include <climits>
+#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <string>
@@ -49,4 +51,34 @@ TEST(ErrorText, IsStrerror) {
   EXPECT_EQ(std::string(str->data, (size_t)str->len), strerror(ENOENT));
   EXPECT_EQ(s->strong, 1);
   Paykan_release(s);
+}
+
+/// The text of @p err, released.
+static std::string errorText(int64_t err) {
+  PaykanShared *s = Paykan_error_text(err);
+  auto *str = (PaykanString *)PaykanShared_get(s);
+  std::string text(str->data, (size_t)str->len);
+  Paykan_release(s);
+  return text;
+}
+
+// strerror takes an int: a value outside C's int is no errno, and its text
+// is not that of the value it would be truncated to (2^32 + ENOENT is not
+// "No such file or directory", nor 2^32 "Success"), but its own number.
+TEST(ErrorText, AValueOutsideCIntIsAnUnknownError) {
+  const int64_t two32 = INT64_C(1) << 32;
+  EXPECT_EQ(errorText(two32 + ENOENT), "Unknown error 4294967298");
+  EXPECT_EQ(errorText(two32), "Unknown error 4294967296");
+  EXPECT_EQ(errorText((int64_t)INT_MAX + 1), "Unknown error 2147483648");
+  EXPECT_EQ(errorText((int64_t)INT_MIN - 1), "Unknown error -2147483649");
+  EXPECT_EQ(errorText(INT64_MIN), "Unknown error -9223372036854775808");
+  EXPECT_EQ(errorText(INT64_MAX), "Unknown error 9223372036854775807");
+  // The code is the full value's too: none of these is an errno.
+  EXPECT_EQ(Paykan_error_code(two32 + ENOENT), PAYKAN_ERROR_OTHER);
+  // In C's int, the text is still strerror's (copied before the next call
+  // of strerror, which may reuse the buffer of an unknown errno's text).
+  const std::string intMax = strerror(INT_MAX);
+  EXPECT_EQ(errorText(INT_MAX), intMax);
+  const std::string intMin = strerror(INT_MIN);
+  EXPECT_EQ(errorText(INT_MIN), intMin);
 }

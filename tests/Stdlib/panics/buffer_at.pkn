@@ -1,0 +1,11 @@
+// expect-panic: buffer index 18446744073709551615 out of bounds (len=1)
+import ::io;
+import ::memory;
+
+fn main() -> int {
+  b = memory::Buffer<int>();
+  b.push(1);
+  max = unsigned(9223372036854775807) * unsigned(2) + unsigned(1);
+  io::println(Str(b.at(max)));
+  return 0;
+}

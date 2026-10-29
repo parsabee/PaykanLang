@@ -564,6 +564,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: the "Barebones | Linux x86-64" job, which built without LLVM, is replaced by "Install |
   Linux x86-64": a plain configure, installed, with plugins loaded into the installed
   `paykan`.  Every job builds the defaults.
+- CI: a pull request that changes the standard library's sources (`stdlib/*.pkn`) builds
+  and runs every suite whose programs import the copy the build stages: `sema`, `lowering`,
+  `pir-mlir` and the end-to-end group (`codegen`, `driver`, `plugin`, `samples`, `stdlib`,
+  `c-strict`, `docs`, `out-of-tree`), where it ran only `stdlib`; one that changes
+  `stdlib/CMakeLists.txt`, which stages it, runs every suite (tests/suites.json,
+  `scripts/affected_tests.py`).  The `TestSelection` test (`configure` suite,
+  `scripts/test_selection.py`) checks both picks.
+- Tests: the standard library's tests (`tests/Stdlib`, `scripts/stdlib_tests.py`) run on
+  every path at -O0 and -O2, where they ran only with `paykan run` at -O2: `paykan run`
+  (`StdlibTests`), `paykan build` (`StdlibTestsBuild`, `--build`) and the C `--emit-c`
+  prints, compiled with the runtime's sources (`StdlibTestsC`, `--cc <compiler>`).  The
+  samples corpus is built at -O0 too (`SamplesParityBuildO0`).
 
 ### Removed
 
@@ -750,6 +762,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dies right after the call returns instead of during it: a later death, only in a program
   that used freed memory.  Each reference element of a tuple, struct or tagged union
   compared or printed costs one retain and one release more.
+- The heap statistics of `paykan run --track-heap`, and of a built program run with
+  `PAYKAN_TRACK_HEAP` set, came before the program's own output when standard output was a
+  pipe or a file that standard error shared (`paykan run --track-heap hello.pkn 2>&1 | cat`
+  printed `paykan heap stats:` first).  The runtime now flushes standard output before it
+  prints them (`Paykan_heap_dump`), on all three paths.
+- A `memory::Buffer` panic printed an index of 2^63 or more, an `unsigned` the program
+  passed, as a negative number: `b.at(unsigned(9223372036854775807) + unsigned(1))` panicked
+  with `buffer index -9223372036854775808 out of bounds (len=1)`.  The runtime's Buffer
+  panics now print indices and counts unsigned (`buffer index 9223372036854775808 out of
+  bounds (len=1)`).  A count of 2^63 or more given to the runtime's `PaykanBuffer_new`,
+  `PaykanBuffer_reserve` or `PaykanBuffer_grow` panics with `out of memory growing a buffer
+  to <n> values` (or `by <n> values`), as `PaykanBuffer_tryGrow` and `PaykanBuffer_tryReserve`
+  report `ENOMEM` for it, instead of `the count cannot be negative`, and `PaykanBuffer_shrink`
+  with one with `buffer shrink by <n>: it has only <len> values`.
+- `err::fromErrno` gave a value outside C's `int` the code of the whole value but the text
+  of the `int` it was truncated to: `fromErrno(4294967298)` (2^32 + `ENOENT`) was `Other`
+  with `No such file or directory`, and `fromErrno(4294967296)` was `Other` with
+  `Success`.  Such a value, which `strerror` cannot take, now has the text `Unknown error
+  <errno>` (`Paykan_error_text`; docs/stdlib/error.md).
+- `io::open` cut a path or a mode short at a NUL byte, as C's `fopen` reads them:
+  `io::open("nul\0trunc.txt", "w")` opened and wrote a file named `nul`, and
+  `io::open("three.txt", "w\0garbage")` opened `three.txt` to write.  A path or a mode
+  holding a NUL byte is now not opened: `Err` with `InvalidArgument` (`EINVAL`), and no file
+  is made (`PaykanFile_open`; docs/stdlib/io.md).
+- A program that ran out of memory crashed with a segmentation fault, and lost what it had
+  printed to a pipe or a file: an allocation outside `memory::Buffer` (an object, a string,
+  a `HashMap`'s entry, a `Queue`'s node) was used without a check.  `Paykan_malloc` and
+  `Paykan_realloc`, which the generated code and the runtime allocate with, now never return
+  NULL: when the memory is not there the program panics with `paykan: out of memory
+  allocating <n> bytes`, after flushing its output, and exits with status 134.  A
+  `memory::Buffer` and an `io::File` read still report `OutOfMemory`, through internal
+  allocations that return NULL with `ENOMEM` and leave the old block as it was
+  (`Paykan_tryMalloc`, `Paykan_tryRealloc`).  An allocation of 0 bytes is a block of its
+  own on every platform, so NULL always means out of memory (C lets `malloc(0)` return
+  NULL and `realloc(p, 0)` free `p`).  An allocation that succeeds pays only the test of
+  its result: without tracking, `Paykan_malloc` and `Paykan_free` call libc's `malloc` and
+  `free` with no wrapper between, and what a NULL needs is out of line.  Instructions
+  (callgrind, `build -O2` and the C path) of 20 binary trees of 32,767 objects and of
+  300,000 string concatenations, against the runtime before the check: +0.00% and +0.00%
+  with a GCC-built runtime, +0.60% and +0.71% with a Clang-built one and on the C path
+  (Clang).
+- Under `--track-heap` (or `PAYKAN_TRACK_HEAP`), a `memory::Buffer` asked for nearly all of
+  memory overflowed the heap: `reserve(2305843009213693951)` of a `Buffer<int>`, 2^64 - 8
+  bytes, crashed with a segmentation fault and `grow` with `heap corruption or invalid free`,
+  where without tracking both are `OutOfMemory`.  The tracking allocator added its 16-byte
+  header to the size, which wrapped around to a block of 8 bytes.  A size with no room
+  for the header is now out of memory before anything is allocated, so these are
+  `OutOfMemory` too, the buffer unchanged (`Heap.c`).
+- A file opened for update (`"r+"`, `"w+"`, `"a+"`) lost a write that a read followed:
+  `f.write("hello\n"); f.read(); f.write("world\n");` on a `"w+"` file left only
+  `world\n` in it, though the first write had reported `Ok`.  C lets a read follow a write
+  on such a stream only after an `fflush`, and a write follow a read only after a file
+  positioning call (C11 7.21.5.3), and glibc drops what a write left in its buffer under a
+  read longer than the buffer.  Each `io::File` now remembers whether it last read or
+  wrote, flushes its stream before a read that follows a write, and positions it
+  (`fseek(f, 0, SEEK_CUR)`) before a write that follows a read: a read after a write starts
+  where the write ended, a write after a read where the read stopped (at the end in
+  `"a+"`), and a read fails with the error of writing out the data before it (`NoSpace`
+  on a full disk) instead of reading past it (`PaykanFile.lastOp`; docs/stdlib/io.md).
+- A development build of `paykan` (one with a build ID) used a prebuilt `.pkm` module that
+  another development build of the same version wrote, though two such builds may lay out
+  what they compile differently: given the standard library of another 0.3.0-dev build
+  (`PAYKAN_STDLIB`), or a library one of them built, a program misread that code, and one
+  using a `memory::Buffer` instantiation compiled before the `PaykanType` change below
+  crashed.  Such a file is now an error naming both builds (`module 'lib' (lib.pkm) was
+  compiled by paykan 0.3.0-dev (...); build ID b7d975d89acc6d2b; this paykan is development
+  build 91da536eca5b47fb and takes only files of its own build. Rebuild it from source.`).
+  A cache entry of another build is rebuilt, as it was, and a release takes a prebuilt file
+  of any build of a version it accepts (docs/language/15-modules.md, "Prebuilt modules";
+  docs/design/pkm.md §2.2, §8.2).
+- A `memory::Buffer` slot never set was taken for a value when zero bytes are no value of
+  its type but a reference among them may be null: a tagged union whose first variant holds
+  a `Str`, a class or a function value, and a function value itself.  With `enum F { B(s:
+  Str), A }`, `copy(0)` of a new slot gave `Ok` and a `B` whose `Str` was a null reference
+  (a segmentation fault once read, `B(s: None)` printed), `swap` with it succeeded, and a
+  new `() -> int` slot's `get` gave a function value whose call jumped to address 0.  Such
+  a slot is now unset, as a `Str`'s is: `copy` and `swap` give `NotFound`, and `at` and
+  `get` panic with `buffer value <i> was never set` (docs/stdlib/memory.md).  So is one of
+  a struct or a tuple holding a function value, of a tagged union whose first variant holds
+  such a tagged union, and of a generic one's instantiation (`Maybe<Str>`); a type whose
+  zero bytes are a value has no unset slot (`int`, an optional, `enum G { A(n: int, s:
+  Str?), B(s: Str) }`, whose new slot is `A(n: 0, s: None)`).  A `PaykanType` has a fifth
+  word, `nunset`, and after its references names the words of a value that are all 0 only
+  in storage never set: a reference that cannot be `None`, a function value's code word,
+  or a tagged union's tag and its first variant's words (`PaykanType_unset`; Runtime.h,
+  "Generic native functions"; docs/pir.md §4).  It is part of 0.3.0's runtime ABI, so
+  C code of a generic native function is compiled against 0.3.0's `Runtime.h`.  A type
+  that names no such word (`int`, `Str?`) costs no more on `at`, `get`, `copy` and
+  `swap`: the buffer looks at `nunset` before it calls `PaykanType_isUnset`.
 
 ## [0.2.0] - 2026-10-20
 

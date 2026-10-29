@@ -7,22 +7,34 @@
 // tracking one (a size header before every block, plus live counters).  The
 // mode must not change while blocks are live: a block is freed by the
 // back-end that allocated it.
+//
+// A NULL from a back-end means out of memory: its realloc gives a block for
+// a size of 0 (C lets realloc(p, 0) free p and return NULL), and the entry
+// points ask for 1 byte when malloc(0) gives NULL, which C allows too.  Then
+// Paykan_malloc and Paykan_realloc panic, and Paykan_tryMalloc and
+// Paykan_tryRealloc (RuntimeInternal.h) return the NULL with errno ENOMEM
+// (C does not promise that libc sets it) to a caller that reports it.
+//
+// Every object, string and closure is allocated here, so an allocation that
+// succeeds pays one test of the result: the passthrough back-end is libc's
+// malloc and free themselves, called with no wrapper, and what a NULL needs
+// is out of line.
 
 #include "Runtime.h"
 #include "RuntimeInternal.h"
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// -- Passthrough back-end
+// -- Passthrough back-end: libc's malloc and free, and its realloc asked for
+// at least 1 byte
 
-static void *passthrough_malloc(size_t size) { return malloc(size); }
 static void *passthrough_realloc(void *p, size_t size) {
-  return realloc(p, size);
+  return realloc(p, size ? size : 1);
 }
-static void passthrough_free(void *p) { free(p); }
 
 // -- Tracking back-end
 //
@@ -39,6 +51,12 @@ typedef struct PaykanHeapHeader {
 // Bytes reserved before the payload.  Rounded up to 16 for alignment.
 #define PAYKAN_HEAP_HEADER_SIZE                                                \
   ((sizeof(PaykanHeapHeader) + 15UL) & ~((size_t)15UL))
+
+// The largest payload whose block, header included, a size_t can measure.
+// A larger one is out of memory: the sum would wrap around to a small block
+// (2^64 - 8 bytes, a memory::Buffer of 2^61 - 1 ints, to 8) that the header
+// and the payload overflow, or to 0, which realloc may take as a free.
+#define PAYKAN_HEAP_MAX_PAYLOAD (SIZE_MAX - PAYKAN_HEAP_HEADER_SIZE)
 
 static PaykanHeapStats g_stats;
 
@@ -69,7 +87,9 @@ static PaykanHeapHeader *heap_header_of(void *payload) {
 
 static void *tracking_malloc(size_t size) {
   PaykanHeapHeader *h =
-      (PaykanHeapHeader *)malloc(PAYKAN_HEAP_HEADER_SIZE + size);
+      size <= PAYKAN_HEAP_MAX_PAYLOAD
+          ? (PaykanHeapHeader *)malloc(PAYKAN_HEAP_HEADER_SIZE + size)
+          : NULL;
   if (!h)
     return NULL;
   h->magic = PAYKAN_HEAP_MAGIC;
@@ -87,7 +107,9 @@ static void *tracking_realloc(void *ptr, size_t size) {
   uint64_t oldSize = oldH->size;
 
   PaykanHeapHeader *newH =
-      (PaykanHeapHeader *)realloc(oldH, PAYKAN_HEAP_HEADER_SIZE + size);
+      size <= PAYKAN_HEAP_MAX_PAYLOAD
+          ? (PaykanHeapHeader *)realloc(oldH, PAYKAN_HEAP_HEADER_SIZE + size)
+          : NULL;
   if (!newH)
     return NULL; // original block left intact, counters unchanged
 
@@ -112,16 +134,63 @@ static void tracking_free(void *ptr) {
 
 // -- Dispatch table (the passthrough back-end until tracking is requested)
 
-static void *(*g_malloc)(size_t) = passthrough_malloc;
+static void *(*g_malloc)(size_t) = malloc;
 static void *(*g_realloc)(void *, size_t) = passthrough_realloc;
-static void (*g_free)(void *) = passthrough_free;
+static void (*g_free)(void *) = free;
 
 static int g_tracking_enabled = 0;
 
-// -- Entry points
+// -- Entry points (a NULL from the back-end goes to the cold functions, out
+// of the path of an allocation that succeeds)
 
-void *Paykan_malloc(size_t size) { return g_malloc(size); }
-void *Paykan_realloc(void *ptr, size_t size) { return g_realloc(ptr, size); }
+// The block for @p size after the back-end's malloc gave NULL: 1 byte's for
+// a size of 0, or NULL with errno ENOMEM.
+PAYKAN_COLD static void *heap_malloc_failed(size_t size) {
+  void *p = size == 0 ? g_malloc(1) : NULL;
+  if (!p)
+    errno = ENOMEM;
+  return p;
+}
+
+PAYKAN_COLD PAYKAN_NORETURN static void heap_out_of_memory(size_t size) {
+  Paykan_runtime_panic("out of memory allocating %zu bytes", size);
+}
+
+PAYKAN_COLD static void *heap_malloc_or_panic(size_t size) {
+  void *p = heap_malloc_failed(size);
+  if (!p)
+    heap_out_of_memory(size);
+  return p;
+}
+
+void *Paykan_malloc(size_t size) {
+  void *p = g_malloc(size);
+  if (PAYKAN_UNLIKELY(!p))
+    return heap_malloc_or_panic(size);
+  return p;
+}
+
+void *Paykan_realloc(void *ptr, size_t size) {
+  void *p = g_realloc(ptr, size);
+  if (PAYKAN_UNLIKELY(!p))
+    heap_out_of_memory(size);
+  return p;
+}
+
+void *Paykan_tryMalloc(size_t size) {
+  void *p = g_malloc(size);
+  if (PAYKAN_UNLIKELY(!p))
+    return heap_malloc_failed(size);
+  return p;
+}
+
+void *Paykan_tryRealloc(void *ptr, size_t size) {
+  void *p = g_realloc(ptr, size);
+  if (PAYKAN_UNLIKELY(!p))
+    errno = ENOMEM;
+  return p;
+}
+
 void Paykan_free(void *ptr) { g_free(ptr); }
 
 // -- Mode selection / diagnostics
@@ -133,9 +202,9 @@ void Paykan_heap_set_tracking(int enable) {
     g_free = tracking_free;
     g_tracking_enabled = 1;
   } else {
-    g_malloc = passthrough_malloc;
+    g_malloc = malloc;
     g_realloc = passthrough_realloc;
-    g_free = passthrough_free;
+    g_free = free;
     g_tracking_enabled = 0;
   }
 }
@@ -151,6 +220,9 @@ int64_t Paykan_heap_live_bytes(void) { return g_stats.liveBytes; }
 int64_t Paykan_heap_total_reallocs(void) { return g_stats.totalReallocs; }
 
 void Paykan_heap_dump(void) {
+  // The program's output first, also when stdout is a pipe (fully buffered)
+  // that stderr shares.
+  fflush(stdout);
   if (!g_tracking_enabled) {
     fprintf(stderr, "paykan heap: allocation tracking is disabled "
                     "(pass the tracking flag to enable it)\n");

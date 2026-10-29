@@ -34,6 +34,19 @@ static inline int64_t Paykan_vcall_equals(PaykanObject *self,
               Paykan_vtable_of(self)[PAYKAN_SLOT_EQUALS])(self, other, owned);
 }
 
+// -- branch hints
+//
+// PAYKAN_UNLIKELY(x) is x, telling the compiler it is seldom true;
+// PAYKAN_COLD marks a function only such a branch calls, kept out of line.
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PAYKAN_UNLIKELY(x) __builtin_expect(!!(x), 0)
+#define PAYKAN_COLD __attribute__((cold, noinline))
+#else
+#define PAYKAN_UNLIKELY(x) (x)
+#define PAYKAN_COLD
+#endif
+
 // -- panics
 
 #if defined(__GNUC__) || defined(__clang__)
@@ -51,6 +64,17 @@ static inline int64_t Paykan_vcall_equals(PaykanObject *self,
 /// the newline), and abort().
 PAYKAN_NORETURN void Paykan_runtime_panic(const char *fmt, ...)
     PAYKAN_PRINTF_FORMAT(1, 2);
+
+// -- allocations that may fail
+//
+// Paykan_malloc and Paykan_realloc panic when the memory is not there.
+// These are the same allocations for the callers that report it instead
+// (memory::Buffer's OutOfMemory, an io::File read's): NULL with errno ENOMEM,
+// a realloc's @p ptr then still valid and unchanged.  A size of 0 gives a
+// block too, so NULL always means out of memory.
+
+void *Paykan_tryMalloc(size_t size);
+void *Paykan_tryRealloc(void *ptr, size_t size);
 
 // -- equals helpers
 //

@@ -31,12 +31,6 @@
 
 enum { kDying = -1, kPending = -2 };
 
-#if defined(__GNUC__) || defined(__clang__)
-#define PAYKAN_UNLIKELY(x) __builtin_expect(!!(x), 0)
-#else
-#define PAYKAN_UNLIKELY(x) (x)
-#endif
-
 PAYKAN_NORETURN static void count_overflow(const char *kind) {
   Paykan_runtime_panic("too many %s references to one object (the limit is "
                        "%d)",

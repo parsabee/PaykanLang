@@ -7,6 +7,7 @@
 42
 OutOfRange OutOfRange InvalidArgument OutOfRange 3
 OutOfMemory 3
+OutOfMemory OutOfMemory OutOfMemory 0 3 9
 1 s0 s42
 NotFound NotFound
 True False here

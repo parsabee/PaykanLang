@@ -52,6 +52,13 @@ fn main() -> int {
   io::println(code(n.set(10, 1)) + " " + code(n.swap(0, 10)) + " "
       + code(n.shrink(10)) + " " + codeOf(n.copy(10)) + " " + Str(n.len()));
   io::println(code(n.grow(9223372036854775807)) + " " + Str(n.len()));
+  // 2^61 - 1 ints are 2^64 - 8 bytes: they fit in C's size_t, but not with
+  // --track-heap's header beside them.
+  empty = mem::Buffer<int>();
+  io::println(code(empty.reserve(2305843009213693951)) + " "
+      + code(n.reserve(2305843009213693951)) + " "
+      + code(n.grow(2305843009213693948)) + " " + Str(empty.len()) + " "
+      + Str(n.len()) + " " + Str(n.get(1)));
 
   s = mem::Buffer<Str>();
   i: int = 0;

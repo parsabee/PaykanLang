@@ -288,21 +288,38 @@ TEST(Pkm, CacheEntryOfAnotherBuildIsRebuilt) {
   EXPECT_EQ(coreBuildOf(p.entry("base")), paykan::kBuildId);
 }
 
-/// A prebuilt module is judged by its version alone: one written by another
-/// build of an accepted version is used.
-TEST(Pkm, PrebuiltModuleOfAnotherBuildIsUsed) {
+/// A development build takes a prebuilt module of its own build only: two
+/// builds of one version may lay out what the runtime reads differently (a
+/// type's PaykanType did, within 0.3.0-dev), so another's file is an error
+/// naming both builds, not a program that misreads it.  Its own is used.
+TEST(Pkm, PrebuiltModuleOfAnotherDevelopmentBuildIsRejected) {
   REQUIRE_BACKEND();
   Project p("build_id_prebuilt");
   ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
                 " --emit-pkm base.pkn")
                 .exitCode,
             0);
+  fs::remove(p.Dir / "base.pkn");
+  auto own = p.runMain();
+  ASSERT_EQ(own.exitCode, 0) << own.out;
+  EXPECT_TRUE(contains(own.out, kExpected)) << own.out;
+  if (std::string(paykan::kBuildId).empty())
+    GTEST_SKIP() << "a release build takes another build's prebuilt files";
   rewriteManifest(p.Dir / "base.pkm",
                   [](paykan::pkm::Manifest &m) { m.Core.Build = "elsewhere"; });
-  fs::remove(p.Dir / "base.pkn");
-  auto r = p.runMain();
-  ASSERT_EQ(r.exitCode, 0) << r.out;
-  EXPECT_TRUE(contains(r.out, kExpected)) << r.out;
+  fs::remove_all(p.cache());
+  auto other = p.runMain();
+  EXPECT_NE(other.exitCode, 0) << other.out;
+  EXPECT_FALSE(contains(other.out, kExpected)) << other.out;
+  EXPECT_TRUE(contains(other.out, "module 'base' (base.pkm) was compiled by "
+                                  "paykan "))
+      << other.out;
+  EXPECT_TRUE(contains(other.out, "); build ID elsewhere; this paykan is "
+                                  "development build " +
+                                      std::string(paykan::kBuildId) +
+                                      " and takes only files of its own "
+                                      "build. Rebuild it from source."))
+      << other.out;
 }
 
 TEST(Pkm, BodyEditRebuildsThatModuleOnly) {

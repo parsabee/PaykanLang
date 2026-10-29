@@ -231,7 +231,7 @@ G = gating (a mismatch yields a verdict), I = informational.
 |---|---|---|---|---|
 | `0x01` | `module` | `str` | G | canonical module name; must equal the name the importer resolved |
 | `0x03` | `contents` | `u32` bitset | G | bit 0 `HAS_CODE`, 1 `HAS_TEMPLATES`, 2 `HAS_MAIN`, 3 `SYSTEM` (name starts with `::`), 4 `HAS_STATIC_INIT` (#170 lazily initialised storage), 5 `EXPORTS_C` (#21), 6 `HAS_OBJECT` (the module's code is compiled, §5.13). Must agree with the section table |
-| `0x05` | `core` | `{str version; u32 major, minor, patch; str prerelease; str build}` | G | the PaykanLang that produced the file (`include/Version.h.in`). `build` is `""` for a release (configured with `-DPAYKAN_RELEASE=ON`, which the release workflow and the Homebrew formula pass); for every other build, a development build of the last release's version included, it is the build ID: a hash of the contents of `src/` and `include/`, recomputed on every build (`kBuildId` in the generated `BuildId.h`, `cmake/BuildId.cmake`; never an executable size/mtime). A cache entry of another build is Stale (#188) |
+| `0x05` | `core` | `{str version; u32 major, minor, patch; str prerelease; str build}` | G | the PaykanLang that produced the file (`include/Version.h.in`). `build` is `""` for a release (configured with `-DPAYKAN_RELEASE=ON`, which the release workflow and the Homebrew formula pass); for every other build, a development build of the last release's version included, it is the build ID: a hash of the contents of `src/` and `include/`, recomputed on every build (`kBuildId` in the generated `BuildId.h`, `cmake/BuildId.cmake`; never an executable size/mtime). For a development build, a cache entry of another build is Stale (#188) and a prebuilt file of another build is `Rejected(Toolchain)`; a release takes a prebuilt file of any build of a version it accepts (§8.2) |
 | `0x07` | `format_versions` | `{u32 iface_version, tmpl_version, pir_version, code_encoding, debug_version}` | G | `iface_version` and `pir_version` are the release's (§11), like `PAYKAN_PIR_TEXT_VERSION`, so text, binary and manifest agree by construction. `code_encoding`: 0 none, 1 PIR text (development escape hatch only), 2 binary PIR v1 |
 | `0x09` | `runtime_abi` | `u32` | G | `PAYKAN_RUNTIME_ABI_VERSION`, defined in `src/Runtime/Runtime.h` with a C++ alias `paykan::kRuntimeABIVersion` (#153 asks for exactly this): the release version, like every format (§11) |
 | `0x0B` | `target` | `{u8 pointer_size, slot_size, endianness, int_width, float_width}` | G | the abstract target PIR assumes: `8, 8, 1, 64, 64` (`Runtime.h` LP64 LE asserts). Not a triple: PIR and interface are the same for every LP64 LE triple; the triple belongs to a payload |
@@ -1307,7 +1307,7 @@ source required), in this order:
 | `pir_version ≠ pir::kPIRVersion` (the release's) | `Rejected(PIR)` |
 | `runtime_abi ≠ kRuntimeABIVersion` (the release's) | `Rejected(ABI)` |
 | `target` ≠ host abstract target | `Rejected(Target)` |
-| `core.version` (+ `build`) | **cache:** ≠ `kVersion`/build id ⇒ `Stale` (a rebuild is free and protects against codegen fixes between versions with unchanged PIR/ABI numbers). **prebuilt:** not on `PAYKAN_PKM_COMPATIBLE_VERSIONS` (new, in `cmake/PluginCompat.cmake`, generated into `PluginCompat.h`, the #103 mechanism #113 and #153 ask to reuse) ⇒ `Rejected(Toolchain)` |
+| `core.version` (+ `build`) | **cache:** ≠ `kVersion`/build id ⇒ `Stale` (a rebuild is free and protects against codegen fixes between versions with unchanged PIR/ABI numbers). **prebuilt:** not on `PAYKAN_PKM_COMPATIBLE_VERSIONS` (new, in `cmake/PluginCompat.cmake`, generated into `PluginCompat.h`, the #103 mechanism #113 and #153 ask to reuse) ⇒ `Rejected(Toolchain)`; for a development build (one with a build id), also another build id ⇒ `Rejected(Toolchain)`: its formats and runtime ABI are its sources', which two builds of one version may not share (a `PaykanType` gained a word within 0.3.0-dev) |
 | no `CODE` and no usable payload | `Usable` for `--check-only`; `NoCode` when code is needed |
 | `source` hash (when a source is found) | `Stale` |
 | each `Dep`: current `iface_hash` or `tmpl_hash` differs (§2.3) | `Stale`; dependency not found ⇒ `Rejected(MissingDependency)` |
@@ -1763,7 +1763,10 @@ everywhere.
    portable unless `--with-payload`. Confirm.
 6. ~~Pre-release build id.~~ **Decided (#188):** a hash of the contents of
    `src/` and `include/`, recomputed on every build (`cmake/BuildId.cmake`,
-   §2.2), empty for a release; gating only in the cache tier.
+   §2.2), empty for a release.  A development build gates on it in both
+   tiers: a cache entry of another build is Stale, a prebuilt file of
+   another build is rejected (§8.2), since two builds of one version may
+   lay out what they compile differently.
 7. **`--prefer-pkm`** for vendored user modules shipped with sources:
    flag, default off (proposed), or a project setting?
 8. **Backend caches:** delete `.bc` and `.c/.o/.key` once C3/C4 land

@@ -634,12 +634,17 @@ fn open(path: view Str, mode: view Str) -> res::Result<File, err::Error>
 
 Opens the file at `path` with C's `fopen` and the mode `mode`: `"r"` to read, `"w"` to
 write (creating the file, or emptying it), `"a"` to append, and C's other modes (`"r+"`,
-`"w+"`, `"a+"`, ...). A relative `path` is relative to the current
+`"w+"`, `"a+"`, ...). A file opened for update (a mode with `+`) is read and written in
+any order: a read starts where the write before it ended, and a write where the read before
+it stopped, except in `"a+"`, which writes at the end of the file like `"a"` (where a read
+before the first write starts is the C library's: the start of the file on Linux, the end
+on macOS). A relative `path` is relative to the current
 directory of the process. The result is `Ok` with the `File` as its `value`, or `Err` when
 the file could not be opened; then its `error` has the code of C's `errno` and C's
 `strerror` text as its message: `NotFound` (`No such file or directory`),
 `PermissionDenied`, `IsADirectory` (a directory opened to write), `InvalidArgument` (a mode
-`fopen` does not take), and the rest of [the mapping](error.md#errorcode). Opening a directory to read succeeds on Linux; its
+`fopen` does not take, or a path or a mode holding a NUL byte, `"\0"`, which C would read
+only up to it), and the rest of [the mapping](error.md#errorcode). Opening a directory to read succeeds on Linux; its
 reads then fail with `IsADirectory`.
 
 #### `stdin`
@@ -710,8 +715,10 @@ is `EndOfFile` too. A read that the operating system fails has the code of its `
 `InvalidArgument` (`Bad file descriptor`), as writing to one opened only to read does.
 
 Writes are buffered by the C library: what `write` reports is whether the data was taken,
-and the data is on disk once the file is closed. An error the operating system reports only
-then, when the buffer is written out (a full disk, say), is not reported to the program.
+and the data is on disk once the file is closed, or once a read of the same `File` follows
+the write. An error the operating system reports only when the buffer is written out (a full
+disk, say) is the error of that read (`NoSpace`, ...), which then reads nothing; when the
+file is closed, it is not reported to the program.
 
 #### Errors at a glance
 
@@ -721,8 +728,10 @@ then, when the buffer is written out (a full disk, say), is not reported to the 
 | `open` without the permission | `PermissionDenied` |
 | `open` of a directory to write | `IsADirectory` |
 | `open` with a mode `fopen` rejects | `InvalidArgument` |
+| `open` of a path, or with a mode, holding a NUL byte (`"\0"`) | `InvalidArgument` |
 | a read with nothing left | `EndOfFile` |
 | `readbytes(n)` with `n <= 0` | `InvalidArgument` |
 | `write` to a file not open for writing (`stdin()`, a `"r"` file) | `InvalidArgument` |
 | a read of a directory opened with `"r"` | `IsADirectory` |
+| a read after a write whose data cannot be written out (a full disk) | the code of its `errno` (`NoSpace`, ...) |
 | any other failure | the code of its `errno` ([`ErrorCode`](error.md#errorcode)) |

@@ -117,7 +117,8 @@ native fn _code(errno: int) -> ErrorCode = "Paykan_error_code";
 native fn _text(errno: int) -> Str = "Paykan_error_text";
 
 /// The Error of a C library failure whose `errno` is @p errno: its code and
-/// C's `strerror` text, or `none()` for 0.
+/// C's `strerror` text (`Unknown error <errno>` for one outside C's int), or
+/// `none()` for 0.
 fn fromErrno(errno: int) -> Error {
   if errno == 0 { return none(); }
   return Error(_code(errno), _text(errno));

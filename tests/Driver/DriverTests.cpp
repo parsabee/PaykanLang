@@ -1531,6 +1531,312 @@ TEST(Driver, RunForwardsArgumentsAndTracksTheHeap) {
   EXPECT_NE(out.find("live blocks       : 0"), std::string::npos) << out;
 }
 
+// @p word as one word of a shell command, whatever it holds.
+static std::string shellWord(const std::string &word) {
+  std::string out = "'";
+  for (char c : word)
+    out += c == '\'' ? std::string("'\\''") : std::string(1, c);
+  return out + "'";
+}
+
+// @p cmd with its stdout and stderr one pipe, which makes stdout fully
+// buffered, and then its own exit status, which a pipeline's is not:
+// "exit <status>" on a line after its output.
+static std::string inAPipe(const std::string &cmd) {
+  return "{ " + cmd + " 2>&1; echo \"exit $?\"; } | cat";
+}
+
+// The C path of a program: the C `paykan --emit-c` prints, compiled at an -O
+// level with the runtime's sources and linked with the standard library's
+// compiled code (`paykan pkm extract --object` of each module file, done
+// once, into the directory the C path is given).
+class CPath {
+public:
+  explicit CPath(const std::filesystem::path &dir) {
+    for (const auto &e :
+         std::filesystem::directory_iterator(PAYKAN_TEST_STDLIB_DIR)) {
+      auto obj = dir / (e.path().stem().string() + ".o");
+      auto x = run(std::string(kPaykan) + " pkm extract --object " +
+                   shellWord(e.path().string()) + " -o " +
+                   shellWord(obj.string()) + " 2>&1");
+      EXPECT_TRUE(x.exitCode == 0 ||
+                  x.out.find("has no compiled code") != std::string::npos)
+          << x.out;
+      if (x.exitCode == 0)
+        Stdlib += " " + shellWord(obj.string());
+    }
+  }
+
+  // Builds @p src at @p opt into the executable @p exe; the emitted C is
+  // <exe>.c.  The output of the step that failed, or of the C compiler.
+  CmdResult build(const std::string &src, const std::string &opt,
+                  const std::string &exe) const {
+    auto c = shellWord(exe + ".c");
+    auto emitted = run(std::string(kPaykan) + " " + opt + " --emit-c " +
+                       shellWord(src) + " > " + c + " 2>&1");
+    if (emitted.exitCode != 0)
+      return emitted;
+    std::string runtime = shellWord(PAYKAN_RUNTIME_SOURCE_DIR);
+    return run("cc -std=c11 " + opt + " -I " + runtime + " " + c + " " +
+               runtime + "/*.c" + Stdlib + " -lm -o " + shellWord(exe) +
+               " 2>&1");
+  }
+
+private:
+  std::string Stdlib;
+};
+
+// The heap statistics come after the program's own output, also when stdout
+// is a pipe (fully buffered) and stderr is the same pipe: the runtime flushes
+// stdout before printing them.  Checked on every path, at -O0 and -O2: `paykan
+// run --track-heap`, and a program built with `paykan build` and on the C
+// path run with PAYKAN_TRACK_HEAP; each exits 0.
+TEST(Driver, HeapStatisticsFollowTheProgramsOutputInAPipe) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_heap_order_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "hello.pkn").string();
+  std::ofstream(src)
+      << "import ::io; fn main() -> int { io::println(\"Hello, world!\"); "
+         "return 0; }";
+  auto expectOrder = [](const std::string &what, const std::string &cmd) {
+    auto r = run(inAPipe(cmd));
+    size_t hello = r.out.find("Hello, world!\n");
+    size_t stats = r.out.find("paykan heap stats:");
+    ASSERT_NE(hello, std::string::npos) << what << ": " << r.out;
+    ASSERT_NE(stats, std::string::npos) << what << ": " << r.out;
+    EXPECT_LT(hello, stats) << what << ": " << r.out;
+    EXPECT_NE(r.out.find("live blocks       : 0"), std::string::npos)
+        << what << ": " << r.out;
+    EXPECT_TRUE(r.out.ends_with("\nexit 0\n")) << what << ": " << r.out;
+  };
+  CPath cpath(dir);
+  auto everyPath = [&](const std::string &opt) {
+    expectOrder("run " + opt,
+                paykanRun() + " " + opt + " --track-heap " + shellWord(src));
+    auto exe = (dir / ("hello" + opt)).string();
+    auto built = run(paykanRun() + " " + opt + " -o " + shellWord(exe) +
+                     " build " + shellWord(src) + " 2>&1");
+    ASSERT_EQ(built.exitCode, 0) << opt << ": " << built.out;
+    expectOrder("build " + opt, "PAYKAN_TRACK_HEAP=1 " + shellWord(exe));
+    auto cexe = (dir / ("hello-c" + opt)).string();
+    auto c = cpath.build(src, opt, cexe);
+    ASSERT_EQ(c.exitCode, 0) << opt << ": " << c.out;
+    expectOrder("C " + opt, "PAYKAN_TRACK_HEAP=1 " + shellWord(cexe));
+  };
+  everyPath("-O0");
+  everyPath("-O2");
+  std::filesystem::remove_all(dir);
+}
+
+// A program that runs out of memory panics (exit 134) with a message that
+// says so, after what it printed: here under a 96 MB address-space limit, with
+// stdout a pipe, a HashMap, a string and a chain of objects that grow until
+// an allocation fails.  Built with `paykan build` and on the C path, at -O0
+// and -O2 (not run with `paykan run`: the compiler itself cannot start under
+// the limit).  Linux only: macOS does not limit allocations by RLIMIT_AS,
+// and an ASan or TSan runtime cannot start under it.
+TEST(Driver, AProgramOutOfMemoryPanicsAfterItsOutput) {
+#if !defined(__linux__)
+  GTEST_SKIP() << "RLIMIT_AS limits allocations on Linux only";
+#elif defined(PAYKAN_TEST_SHADOW_SANITIZER)
+  GTEST_SKIP() << "an ASan or TSan runtime cannot start under a low RLIMIT_AS";
+#else
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_oom_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "oom.pkn").string();
+  std::ofstream(src) << "import ::collections; import ::io;\n"
+                        "class Node { next: Node?; }\n"
+                        "fn main(args: view Str[]) -> int {\n"
+                        "  io::println(\"start\");\n"
+                        "  if args[1] == \"map\" {\n"
+                        "    m = collections::HashMap<int, int>(); i = 0;\n"
+                        "    while True { m.put(i, i); i = i + 1; }\n"
+                        "  }\n"
+                        "  if args[1] == \"str\" {\n"
+                        "    s = \"x\";\n"
+                        "    while True { s = s + s; }\n"
+                        "  }\n"
+                        "  head: Node? = None;\n"
+                        "  while True { head = Node(head); }\n"
+                        "  return 0;\n"
+                        "}\n";
+  auto runOutOfMemory = [](const std::string &exe, const std::string &what) {
+    auto r = run("ulimit -v 98304 && " + shellWord(exe) + " " + what + " 2>&1");
+    EXPECT_EQ(r.exitCode, 134) << exe << " " << what << ": " << r.out;
+    EXPECT_EQ(r.out.rfind("start\n", 0), 0U)
+        << exe << " " << what << ": " << r.out;
+    // A HashMap's buckets are a memory::Buffer, which fails with
+    // OutOfMemory ("out of memory: Cannot allocate memory"); every other
+    // allocation is Paykan_malloc's.
+    EXPECT_NE(r.out.find(what == "map" ? "\npaykan: out of memory"
+                                       : "\npaykan: out of memory allocating "),
+              std::string::npos)
+        << exe << " " << what << ": " << r.out;
+  };
+  CPath cpath(dir);
+  auto buildAndRun = [&](const std::string &opt) {
+    auto exe = (dir / ("oom" + opt)).string();
+    auto built = run(paykanRun() + " " + opt + " -o " + shellWord(exe) +
+                     " build " + shellWord(src) + " 2>&1");
+    ASSERT_EQ(built.exitCode, 0) << opt << ": " << built.out;
+    auto cexe = (dir / ("oom-c" + opt)).string();
+    auto c = cpath.build(src, opt, cexe);
+    ASSERT_EQ(c.exitCode, 0) << opt << ": " << c.out;
+    for (const auto &what : {"map", "str", "objects"}) {
+      runOutOfMemory(exe, what);
+      runOutOfMemory(cexe, what);
+    }
+  };
+  buildAndRun("-O0");
+  buildAndRun("-O2");
+  std::filesystem::remove_all(dir);
+#endif
+}
+
+// A file opened for update ("w+", "r+", "a+") keeps a write that a read
+// follows, and each read and write starts where the other stopped: C needs
+// an fflush or a file positioning call between the two (C11 7.21.5.3),
+// which the runtime makes when the stream switches.  Each read's result is
+// written back into the file, so the files say what was read.  Run and
+// built at -O0 and -O2; the files are checked byte for byte.
+TEST(Driver, FileUpdateModesKeepEveryWrite) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_update_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "update.pkn").string();
+  std::ofstream(src)
+      << "import ::io; import ::error as err; import ::result as res;\n"
+         "fn shown(r: res::Result<Str, err::Error>) -> Str {\n"
+         "  match r {\n"
+         "    s: Ok { return \"<\" + s.value + \">\"; }\n"
+         "    e: Err { return \"<\" + err::name(e.error.code) + \">\"; }\n"
+         "  }\n"
+         "}\n"
+         "fn update(path: Str, mode: Str) {\n"
+         "  match io::open(path, \"w\") {\n"
+         "    f: Ok { f.value.write(\"abc\\ndef\\nghi\\n\"); }\n"
+         "    _ { }\n"
+         "  }\n"
+         "  match io::open(path, mode) {\n"
+         "    u: Ok {\n"
+         "      f = u.value;\n"
+         "      f.write(\"one\\n\");\n"
+         "      f.write(shown(f.readbytes(2)));\n"
+         "      f.write(shown(f.read()));\n"
+         "      f.write(\"two\\n\");\n"
+         "    }\n"
+         "    _ { }\n"
+         "  }\n"
+         "}\n"
+         "fn main(args: view Str[]) -> int {\n"
+         "  update(args[1] + \"/w.txt\", \"w+\");\n"
+         "  update(args[1] + \"/r.txt\", \"r+\");\n"
+         "  update(args[1] + \"/a.txt\", \"a+\");\n"
+         "  return 0;\n"
+         "}\n";
+  auto contents = [](const std::filesystem::path &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>());
+  };
+  auto expectFiles = [&](const std::string &what, const std::string &cmd) {
+    auto out = dir / what;
+    std::filesystem::create_directories(out);
+    auto r = run(cmd + " " + out.string() + " 2>&1");
+    EXPECT_EQ(r.exitCode, 0) << what << ": " << r.out;
+    // "w+" empties the file: both reads find the end.
+    EXPECT_EQ(contents(out / "w.txt"), "one\n<EndOfFile><EndOfFile>two\n")
+        << what;
+    // "r+" writes over the start, reads on after it, writes on after that.
+    EXPECT_EQ(contents(out / "r.txt"), "one\nde<de>i\n<i\n>two\n") << what;
+    // "a+" writes at the end, where the reads after the writes start.
+    EXPECT_EQ(contents(out / "a.txt"),
+              "abc\ndef\nghi\none\n<EndOfFile><EndOfFile>two\n")
+        << what;
+  };
+  auto runAndBuild = [&](const std::string &opt) {
+    expectFiles("run" + opt, paykanRun() + " " + opt + " " + src);
+    auto exe = (dir / ("update" + opt)).string();
+    auto [rc, out] =
+        run(paykanRun() + " " + opt + " -o " + exe + " build " + src + " 2>&1");
+    ASSERT_EQ(rc, 0) << opt << ": " << out;
+    expectFiles("build" + opt, exe);
+  };
+  runAndBuild("-O0");
+  runAndBuild("-O2");
+  std::filesystem::remove_all(dir);
+}
+
+// A memory::Buffer slot never set, of a type whose zero bytes are no value,
+// panics when at() or get() reads it, after what the program printed: a
+// tagged union whose first variant holds a Str, a function value, and a
+// struct holding one.  Before, at() lent the zeros as that first variant and
+// get() gave a function value whose call jumped to address 0.  On every
+// path, at -O0 and -O2: `run`, `build`, and the C `--emit-c` prints, linked
+// with the runtime's sources and the standard library's compiled code.
+TEST(Driver, ABufferSlotNeverSetPanicsOnEveryPath) {
+  REQUIRE_BACKEND();
+  auto dir = std::filesystem::temp_directory_path() /
+             ("drv_unset_" + std::to_string(getpid()));
+  std::filesystem::create_directories(dir);
+  auto src = (dir / "unset.pkn").string();
+  std::ofstream(src) << "import ::io; import ::memory;\n"
+                        "enum Shape { Named(s: Str), Empty }\n"
+                        "struct Handler { id: int; run: () -> int; }\n"
+                        "fn main(args: view Str[]) -> int {\n"
+                        "  io::println(\"start\");\n"
+                        "  if args[1] == \"union\" {\n"
+                        "    b = memory::Buffer<Shape>(); b.grow(1);\n"
+                        "    io::println(b.at(0));\n"
+                        "  }\n"
+                        "  if args[1] == \"function\" {\n"
+                        "    b = memory::Buffer<() -> int>();\n"
+                        "    b.push(fn() => 1); b.grow(1);\n"
+                        "    f = b.get(1); io::println(f());\n"
+                        "  }\n"
+                        "  if args[1] == \"struct\" {\n"
+                        "    b = memory::Buffer<Handler>(); b.grow(1);\n"
+                        "    h = b.get(0); io::println(h.run());\n"
+                        "  }\n"
+                        "  return 0;\n"
+                        "}\n";
+  CPath cpath(dir);
+  // Each of the program's cases panics after printing "start".
+  auto expectPanics = [](const std::string &how, const std::string &cmd) {
+    auto expect = [&](const std::string &what, const std::string &message) {
+      auto r = run(cmd + " " + what + " 2>&1");
+      EXPECT_EQ(r.exitCode, 134) << how << " " << what << ": " << r.out;
+      EXPECT_EQ(r.out.rfind("start\n", 0), 0U)
+          << how << " " << what << ": " << r.out;
+      EXPECT_NE(r.out.find("\npaykan: " + message + "\n"), std::string::npos)
+          << how << " " << what << ": " << r.out;
+    };
+    expect("union", "buffer value 0 was never set");
+    expect("function", "buffer value 1 was never set");
+    expect("struct", "buffer value 0 was never set");
+  };
+  auto everyPath = [&](const std::string &opt) {
+    expectPanics("run " + opt, paykanRun() + " " + opt + " " + shellWord(src));
+    auto exe = (dir / ("unset" + opt)).string();
+    auto built = run(paykanRun() + " " + opt + " -o " + shellWord(exe) +
+                     " build " + shellWord(src) + " 2>&1");
+    ASSERT_EQ(built.exitCode, 0) << opt << ": " << built.out;
+    expectPanics("build " + opt, shellWord(exe));
+    auto cexe = (dir / ("unset-c" + opt)).string();
+    auto c = cpath.build(src, opt, cexe);
+    ASSERT_EQ(c.exitCode, 0) << opt << ": " << c.out;
+    expectPanics("C " + opt, shellWord(cexe));
+  };
+  everyPath("-O0");
+  everyPath("-O2");
+  std::filesystem::remove_all(dir);
+}
+
 // Reproducible output (#102): modules are named by their canonical module
 // names, so nothing the compiler produces depends on where the sources live
 // or on the directory it runs in.
