@@ -1675,12 +1675,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     bytes) in all under macOS's `leaks --atExit` (LeakSanitizer on Linux failed
     `RuntimeTests` with them). They free each string with `Paykan_dispose`, and an object
     whose destroy they call through its vtable with `Paykan_free` after it, as
-    `Paykan_release` does: `leaks` finds none.
+    `Paykan_release` does: `leaks` finds none in the tests it runs, which are all but the
+    death tests (`leaks` stops the child each of those forks).
   - Four files of `sema_tests` defined a `struct SemaFileResult` at namespace scope, not all
     with the same members, which broke C++'s one-definition rule: the linker could take
-    one file's for another's (chunk C moved `ModuleTests.cpp`'s, whose count was left
-    unassigned that way). `ImportTypeTests.cpp`, `OptionalTests.cpp` and `TupleTests.cpp`
-    define theirs in an anonymous namespace too.
+    one file's for another's: `ModuleTests.cpp`'s count was left unassigned that way, and
+    so its struct was in an anonymous namespace already. `ImportTypeTests.cpp`,
+    `OptionalTests.cpp` and `TupleTests.cpp` define theirs in an anonymous namespace too.
   - The language reference did not say that a native function's integer result crosses
     as an `int64_t` whatever its Paykan type, so a C function returning a C `int` bound as
     it is (`native fn rand() -> int = "rand";`) read the undefined upper half of the
