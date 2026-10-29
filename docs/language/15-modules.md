@@ -636,8 +636,8 @@ so use prebuilt modules only from a source you trust.
 A prebuilt file is used only when this `paykan` can: a file written by another release
 (every format, PIR and the runtime ABI included, is versioned by the release), or built
 against another interface of a module it imports, is an error naming what differs
-(`module 'a::b' (lib/a/b.pkm) was written by another paykan release: format 0.3.0; this
-paykan reads 0.2.0. Rebuild it from source.`), never a silent mismatch. A development build
+(`module 'a::b' (lib/a/b.pkm) was written by another paykan release: format 0.2.0; this
+paykan reads 0.3.0. Rebuild it from source.`), never a silent mismatch. A development build
 of `paykan`, which has a build ID (see the cache's validity above), uses only the prebuilt
 files it wrote itself: two development builds of one version may lay out what they compile
 differently.

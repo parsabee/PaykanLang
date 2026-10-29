@@ -435,8 +435,8 @@ PaykanLang version it was **built with**, and each release carries an explicit
 - **The plugin API version.** A loadable plugin also declares the
   `PAYKAN_PLUGIN_API_VERSION` it is built for; a `paykan` that does not
   support it rejects the file (`rejected plugin <file>: built for plugin API
-  N; ...`). It is the release version, packed like every format's (200 for
-  0.2.0, [`plugins/plugin-api.md`](plugins/plugin-api.md)), and a `paykan`
+  N; ...`). It is the release version, packed like every format's (300 for
+  0.3.0, [`plugins/plugin-api.md`](plugins/plugin-api.md)), and a `paykan`
   supports only its own, so every release changes it: a loadable plugin
   built against another release's `plugin_api.h` is rejected whatever the
   list below holds, and is rebuilt for each release. The list's older
@@ -460,9 +460,9 @@ PaykanLang version it was **built with**, and each release carries an explicit
   ```text
   $ paykan --list-backends
   mlir (default): MLIR 22.1.8
-  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]
+  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.3.0 accepts 0.3.0) [/home/me/.paykan/plugins/0.3.0/libmine.so]
   $ paykan --backend=mine program.pkn
-  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]
+  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.3.0 accepts 0.3.0) [/home/me/.paykan/plugins/0.3.0/libmine.so]
   $ echo $?
   2
   ```
@@ -478,8 +478,8 @@ PaykanLang version it was **built with**, and each release carries an explicit
 
   ```text
   Paykan backend plugin 'paykan_backend_mine' is incompatible: built with
-  PaykanLang 0.0.9; the installed PaykanLang 0.2.0 (<prefix>/lib/cmake/Paykan)
-  accepts 0.2.0
+  PaykanLang 0.0.9; the installed PaykanLang 0.3.0 (<prefix>/lib/cmake/Paykan)
+  accepts 0.3.0
   ```
 
   That version is the installation's own (`PAYKAN_TOOLCHAIN_VERSION`) unless

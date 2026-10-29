@@ -79,7 +79,7 @@ it back out unchanged.
 
 ## Stability
 
-`PAYKAN_PIR_TEXT_VERSION` is the release version (200 for 0.2.0), like
+`PAYKAN_PIR_TEXT_VERSION` is the release version (300 for 0.3.0), like
 every format's, so each release changes it. A backend should refuse (report
 an error through `host->diagnostic`) a `pir_text_version` it does not know.
 When the text form changes incompatibly (a construct is removed or changes

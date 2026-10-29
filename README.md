@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml/badge.svg)](https://github.com/parsabee/PaykanLang/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
 
 PaykanLang (`.pkn`) is a high-performance language for building applications on modern,
 heterogeneous machines. The goal is application development across many cores and, 
@@ -81,8 +81,8 @@ any language that exposes C functions. `paykan` loads the files named with
 
 ```sh
 paykan --plugin=./libpaykan_backend_print_pir.so --backend=print-pir --emit-source hello.pkn
-mkdir -p ~/.paykan/plugins/0.2.0
-cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.2.0/   # or `cmake --install` it
+mkdir -p ~/.paykan/plugins/0.3.0
+cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.3.0/   # or `cmake --install` it
 paykan --backend=print-pir --emit-source hello.pkn
 paykan --list-backends    # every backend, with the file a plugin came from
 paykan --no-plugins ...   # only the built-in plugins (and --plugin files)

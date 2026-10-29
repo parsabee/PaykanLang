@@ -116,7 +116,7 @@ host state; the writer has exactly one encoding of a given module
 | Off | Size | Field | Value |
 |---|---|---|---|
 | 0 | 8 | `magic` | `89 50 4B 4D 0D 0A 1A 0A` (`\x89PKM\r\n\x1a\n`, PNG-style: catches text-mode damage) |
-| 8 | 4 | `format_version` | The release version (§11): 200 for 0.2.0. A reader accepts exactly its own |
+| 8 | 4 | `format_version` | The release version (§11): 300 for 0.3.0. A reader accepts exactly its own |
 | 12 | 4 | `header_size` | 64 |
 | 16 | 4 | `section_count` | 1..1024 |
 | 20 | 4 | `section_entry_size` | 64 |
@@ -250,7 +250,7 @@ G = gating (a mismatch yields a verdict), I = informational.
 | `0x20` | `frontend` | `{str name, version, plugin}` | I | which frontend parsed the source: a built-in frontend's name, the core version and an empty `plugin`, or a plugin's frontend's name, the plugin's own version and the plugin's name (its descriptor's, else its file's). **Decision: recorded, not gating.** Frontends must produce identical ASTs (differential tests enforce it); the record answers "who produced this" when they do not |
 | `0x22` | `producer` | `{str tool, version}` | I | `"paykan"`, `kVersion`; a third-party writer names itself |
 | `0x24` | `plugin_api` | `u32` | I | `PAYKAN_PLUGIN_API_VERSION` of the producer; gating per payload, not per module |
-| `0x26` | `opt_pipeline` | `str` | I | `""` in v0.2.0 (`CODE` is pre-pass PIR, §5.9). Reserved for #97 |
+| `0x26` | `opt_pipeline` | `str` | I | `""` in v0.3.0 (`CODE` is pre-pass PIR, §5.9). Reserved for #97 |
 | `0x28` | `attributes` | `list<str>` | I | module-level attribute spellings (#171). Reserved, empty |
 
 Required tags: `module`, `contents`, `core`, `format_versions`,
@@ -292,7 +292,7 @@ Lib := { u8 kind;      1 RUNTIME, 2 ALLOCATOR, 3 C_LIBRARY, 4 PAYKAN_LIBRARY
          u32 flags }   bit 0 REQUIRED_AT_LINK (#21), bit 1 PREFER_STATIC (#171 advisory)
 ```
 
-v0.2.0 writes one entry, `RUNTIME`; the allocator is a link/run-time choice
+v0.3.0 writes one entry, `RUNTIME`; the allocator is a link/run-time choice
 and is not recorded by a module; `C_LIBRARY` entries arrive with #21/#171
 (`@link(name=…)`); `PAYKAN_LIBRARY` is reserved for #23.
 
@@ -1421,8 +1421,8 @@ source required), in this order:
 `Rejected` without source is an error naming what differs:
 
 ```
-error: module 'a::b' (lib/a/b.pkm) was written by another paykan release: format 0.3.0;
-       this paykan reads 0.2.0. Rebuild it from source.
+error: module 'a::b' (lib/a/b.pkm) was written by another paykan release: format 0.2.0;
+       this paykan reads 0.3.0. Rebuild it from source.
 ```
 
 Consequences: a body edit rebuilds one module; a signature edit rebuilds its
@@ -1794,7 +1794,7 @@ section, the IFACE blob, PIR (`pir::kPIRVersion`, the `CODE` codec and the
 text a backend plugin receives), the runtime ABI
 (`PAYKAN_RUNTIME_ABI_VERSION`), the plugin API and the AST interchange format
 all carry one number, the release version packed as
-`major * 10000 + minor * 100 + patch` (`kVersionNumber`, 200 for 0.2.0,
+`major * 10000 + minor * 100 + patch` (`kVersionNumber`, 300 for 0.3.0,
 computed from `project(... VERSION ...)` in `CMakeLists.txt`), stored as a
 `u32` where the formats had a `u16` major and minor. A reader accepts exactly
 its own release's: a file or a plugin of another release is rejected, and a

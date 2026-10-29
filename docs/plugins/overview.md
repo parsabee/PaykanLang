@@ -38,12 +38,12 @@ paykan --plugin=./libpaykan_backend_print_pir.so --backend=print-pir --emit-sour
 
 # Install it for everyone using this paykan (the plugin's own build does this
 # with `cmake --install`):
-cp libpaykan_backend_print_pir.so "$(dirname "$(command -v paykan)")/../lib/paykan/plugins/0.2.0/"
+cp libpaykan_backend_print_pir.so "$(dirname "$(command -v paykan)")/../lib/paykan/plugins/0.3.0/"
 paykan --backend=print-pir --emit-source hello.pkn
 
 # Or just for you:
-mkdir -p ~/.paykan/plugins/0.2.0
-cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.2.0/
+mkdir -p ~/.paykan/plugins/0.3.0
+cp libpaykan_backend_print_pir.so ~/.paykan/plugins/0.3.0/
 ```
 
 `paykan --list-frontends` / `--list-backends` show each loaded plugin with
@@ -54,7 +54,7 @@ file with what it provides. Include `paykan --version` in bug reports.
 ```text
 $ paykan --list-backends
 mlir (default): MLIR 22.1.8
-print-pir: prints the Paykan IR [/usr/local/lib/paykan/plugins/0.2.0/libpaykan_backend_print_pir.so]
+print-pir: prints the Paykan IR [/usr/local/lib/paykan/plugins/0.3.0/libpaykan_backend_print_pir.so]
 ```
 
 ## Where `paykan` looks
@@ -127,9 +127,9 @@ rejected plugin, the first exists and the second never does.
   ```text
   $ paykan --list-backends
   mlir (default): MLIR 22.1.8
-  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]
+  mine (incompatible: built with PaykanLang 0.0.9; this paykan 0.3.0 accepts 0.3.0) [/home/me/.paykan/plugins/0.3.0/libmine.so]
   $ paykan --backend=mine program.pkn
-  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.2.0 accepts 0.2.0) [/home/me/.paykan/plugins/0.2.0/libmine.so]
+  paykan: cannot use backend 'mine' (incompatible: built with PaykanLang 0.0.9; this paykan 0.3.0 accepts 0.3.0) [/home/me/.paykan/plugins/0.3.0/libmine.so]
   $ echo $?
   2
   ```
@@ -140,7 +140,7 @@ rejected plugin, the first exists and the second never does.
   with one line per rejected file:
 
   ```text
-  rejected plugin /home/me/.paykan/plugins/0.2.0/libold.so: built for plugin API 0.1.9; this paykan supports plugin API 0.2.0
+  rejected plugin /home/me/.paykan/plugins/0.3.0/libold.so: built for plugin API 0.1.9; this paykan supports plugin API 0.3.0
   ```
 
   A rejected file named with `--plugin` stops a compile with status 2
@@ -164,7 +164,7 @@ rejected plugin, the first exists and the second never does.
 ## Compatibility and stability
 
 - **The plugin API** (`plugin_api.h`, `PAYKAN_PLUGIN_API_VERSION`) is a
-  versioned C contract. Its version is the release's (200 for 0.2.0), and
+  versioned C contract. Its version is the release's (300 for 0.3.0), and
   `paykan` loads only plugins of its own, so a loadable plugin is rebuilt for
   each release. Every struct starts with `struct_size`, and the reader never
   looks past it.

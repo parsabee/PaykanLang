@@ -8,7 +8,7 @@ produce from any language, easy to read in a diff.
 
 The format's version is the PaykanLang release's, like every format's
 (`PAYKAN_AST_FORMAT_VERSION` in `plugin_api.h`, the release version packed as
-major * 10000 + minor * 100 + patch); the text spells it dotted, `0.2.0`. The core's
+major * 10000 + minor * 100 + patch); the text spells it dotted, `0.3.0`. The core's
 writer and reader are [`include/paykan/ast/Interchange.h`](../../include/paykan/ast/Interchange.h);
 `paykan --emit-ast program.pkn` prints any program in this format, which is
 the quickest way to see what a frontend must produce.
@@ -21,7 +21,7 @@ fn main() -> int {
   return 0;
 }
 $ paykan --emit-ast hello.pkn
-(paykan-ast 0.2.0
+(paykan-ast 0.3.0
   (unit @1:1-5:2
     (import @1:1-1:13 true ""
       (module "io" ""))
@@ -70,7 +70,7 @@ The whole text is one list:
 ```
 
 `VERSION` is the dotted release version, and the reader accepts exactly its
-own (`0.2.0` for paykan 0.2.0). Nothing but whitespace and comments may follow.
+own (`0.3.0` for paykan 0.3.0). Nothing but whitespace and comments may follow.
 
 ## 2. Nodes
 
