@@ -1,0 +1,10 @@
+// A literal is a value in every base, checked against the type its context
+// gives it; one above 9223372036854775807 needs an unsigned or float context,
+// and the most negative `int` is still written as an expression.
+fn main() -> int {
+  let a: u8 = 0x100;             // error: the literal 256 does not fit in 'u8' (0 to 255)
+  let b: i8 = 0xFF;              // error: the literal 255 does not fit in 'i8' (-128 to 127)
+  let c = 0xFFFF_FFFF_FFFF_FFFF; // error: the literal 18446744073709551615 does not fit in 'int' (-9223372036854775808 to 9223372036854775807; a literal above 9223372036854775807 needs an unsigned context, as in 'u: unsigned = 18446744073709551615')
+  let d = -9223372036854775808;  // error: the literal 9223372036854775808 does not fit in 'int' (-9223372036854775808 to 9223372036854775807; write the most negative 'int' as '-9223372036854775807 - 1')
+  return 0;
+}

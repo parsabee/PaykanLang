@@ -116,6 +116,37 @@ Output:
 minus one, the smallest int, something else
 ```
 
+An arm is any literal of the subject's type, a hexadecimal or binary one too, and on an
+`unsigned` the arms reach its whole range, up to `0xFFFF_FFFF_FFFF_FFFF`
+([Basics](02-basics.md#literals)). An arm whose literal does not fit the subject's type is
+the error an assignment of it is: `0xFF { ... }` on an `i8` is `the literal 255 does not fit
+in 'i8' (-128 to 127)`.
+
+```pkn
+import ::io;
+
+fn bits(u: unsigned) -> Str {
+  match u {
+    0 { return "none"; }
+    0b1 { return "the lowest"; }
+    0x8000_0000_0000_0000 { return "the highest"; }
+    0xFFFF_FFFF_FFFF_FFFF { return "all of them"; }
+    _ { return "some"; }
+  }
+}
+
+fn main() -> int {
+  io::println(bits(1) + ", " + bits(0x8000_0000_0000_0000) + ", " + bits(unsigned(-1)) + ", " + bits(6));
+  return 0;
+}
+```
+
+Output:
+
+```
+the lowest, the highest, all of them, some
+```
+
 A `bool` match with both `True` and `False` arms is exhaustive. On numbers and strings
 there are always values you did not list, so a `match` that must produce a result needs a
 `_` arm.

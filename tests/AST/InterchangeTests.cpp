@@ -14,6 +14,7 @@
 
 #include "ASTPrinter.h"
 #include "ParserDriver.h"
+#include "Sema.h"
 #include "paykan/ast/Interchange.h"
 
 #include <algorithm>
@@ -23,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -373,7 +375,7 @@ TEST(ASTInterchange, RejectsMalformedInput) {
        "1:67: (frob ...) is not an expression"},
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
        "(expr (unary minus (int 1)))))))",
-       "1:74: unknown unary operator 'minus' (neg, not)"},
+       "1:74: unknown unary operator 'minus' (neg, not, bitnot)"},
       {"(paykan-ast 1 (unit (fn \"f\" (type-params) (params) _ (block "
        "(expr (binary plus (int 1) (int 2)))))))",
        "1:75: unknown binary operator 'plus'"},
@@ -652,6 +654,24 @@ TEST(ASTInterchange, NestingLimitIsTheFrontends) {
                              " (ident \"b\"))", n) +
                         ")");
        }},
+      // Shifts do not chain either (docs/grammar.md section 7).
+      {"shifts of shifts",
+       [](int n) {
+         return mainOf("x = " + nest("(", "a << b", ") << b", n) + ";");
+       },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(binary shl ",
+                             "(binary shl (ident \"a\") (ident \"b\"))",
+                             " (ident \"b\"))", n) +
+                        ")");
+       }},
+      {"complements",
+       [](int n) { return mainOf("x = " + repeat("~", n) + "a;"); },
+       [](int n) {
+         return mainAst("(assign (ident \"x\") " +
+                        nest("(unary bitnot ", "(ident \"a\")", ")", n) + ")");
+       }},
       // `-(a + ...)`: the prefix operator and the parenthesis, two levels.
       {"operations under a prefix operator",
        [](int n) {
@@ -728,6 +748,13 @@ TEST(ASTInterchange, ChainLimitIsTheFrontends) {
          return mainAst("(assign (ident \"x\") " +
                         nest("(binary add ", "(ident \"a\")", " (int 1))", n) +
                         ")");
+       }},
+      {"& chains",
+       [](int n) { return mainOf("x = a" + repeat(" & 1", n) + ";"); },
+       [](int n) {
+         return mainAst(
+             "(assign (ident \"x\") " +
+             nest("(binary bitand ", "(ident \"a\")", " (int 1))", n) + ")");
        }},
       {"method calls",
        [](int n) { return mainOf("x = a" + repeat(".m()", n) + ";"); },
@@ -2085,4 +2112,115 @@ TEST(Interchange, OnlyAFreeFunctionIsGeneric) {
                  ctx, error),
             nullptr)
       << error;
+}
+
+// An `(int ...)` value spans 64 bits (docs/plugins/ast-format.md): an int64,
+// or one without a sign up to 18446744073709551615, a literal above
+// INT64_MAX that the writer writes back as it reads it.  The other integer
+// fields stay int64s.  Sema checks a wide literal as the frontend's
+// (docs/design/bitwise.md): under a `-`, INT64_MIN's magnitude is the
+// error that names `-9223372036854775807 - 1`.
+TEST(ASTInterchange, IntegersSpanSixtyFourBits) {
+  // `fn main() -> int { STMTS return 0; }`.
+  auto mainOf = [](const std::string &stmts) {
+    return "(paykan-ast 1 (unit (fn @1:1-4:2 \"main\" (type-params) (params) "
+           "(named-type \"int\") (block " +
+           stmts + " (return (int 0))))))";
+  };
+  {
+    ast::ASTContext ctx;
+    std::string error;
+    ast::TranslationUnit *tu = read(
+        mainOf("(decl (var \"u\" (named-type \"unsigned\") "
+               "(int @2:15-2:35 18446744073709551615))) "
+               "(decl (var \"m\" _ (int @3:7-3:27 -9223372036854775808)))"),
+        ctx, error);
+    ASSERT_NE(tu, nullptr) << error;
+    const std::string printed = dump(tu);
+    EXPECT_NE(printed.find("IntegerLiteral <2:15-2:35> 18446744073709551615\n"),
+              std::string::npos)
+        << printed;
+    EXPECT_NE(printed.find("IntegerLiteral <3:7-3:27> -9223372036854775808\n"),
+              std::string::npos)
+        << printed;
+    const std::string text = write(*tu);
+    EXPECT_NE(text.find("(int @2:15-2:35 18446744073709551615)"),
+              std::string::npos)
+        << text;
+    ast::ASTContext again;
+    ast::TranslationUnit *back = read(text, again, error);
+    ASSERT_NE(back, nullptr) << error;
+    EXPECT_EQ(write(*back), text);
+    EXPECT_EQ(dump(back), printed);
+  }
+  for (const char *bad :
+       {"(expr (int 18446744073709551616))",
+        "(expr (int -9223372036854775809))",
+        "(expr (array-repeat (array (int 1)) 9223372036854775808))",
+        "(expr (tuple-index (ident \"t\") 18446744073709551615))"}) {
+    ast::ASTContext ctx;
+    std::string error;
+    EXPECT_EQ(read(mainOf(bad), ctx, error), nullptr) << bad;
+    EXPECT_NE(error.find("not a 64-bit integer: "), std::string::npos)
+        << bad << "\n"
+        << error;
+  }
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *tu =
+      read(mainOf("(decl (var \"x\" _ (unary @2:7-2:28 neg "
+                  "(int @2:8-2:28 9223372036854775808))))"),
+           ctx, error);
+  ASSERT_NE(tu, nullptr) << error;
+  std::ostringstream diagOS;
+  sema::DiagEngine diag(diagOS);
+  sema::Sema sema(ctx, diag);
+  EXPECT_FALSE(sema.run(tu).Ok);
+  EXPECT_NE(diagOS.str().find(
+                "2:8: error: the literal 9223372036854775808 does not fit in "
+                "'int' (-9223372036854775808 to 9223372036854775807; write "
+                "the most negative 'int' as '-9223372036854775807 - 1')"),
+            std::string::npos)
+      << diagOS.str();
+}
+
+// The bitwise operators are written by name (docs/plugins/ast-format.md):
+// `~` is `bitnot`, never `not`, and each reads back to its operator, the
+// compound assignments as the binary operators they are.
+TEST(Interchange, BitwiseOperatorsRoundTrip) {
+  auto parsed = parseSource(mainOf("x = (~a & b | c ^ d) << 1;\n"
+                                   "  y = !p;\n"
+                                   "  y = (a >> b) > c;\n"
+                                   "  z &= 1; z |= 2; z ^= 3; z <<= 4; "
+                                   "z >>= 5;"));
+  ASSERT_NE(parsed, nullptr);
+  const std::string text = write(*parsed->getRoot());
+  // The text on one line, without its locations.
+  const std::string bare =
+      std::regex_replace(std::regex_replace(text, std::regex("\\s+"), " "),
+                         std::regex("@[0-9]+:[0-9]+-[0-9]+:[0-9]+ "), "");
+  const char *first =
+      "(binary shl (binary bitxor (binary bitor (binary bitand (unary bitnot "
+      "(ident \"a\")) (ident \"b\")) (ident \"c\")) (ident \"d\")) (int 1))";
+  for (const char *form :
+       {first, "(unary not (ident \"p\"))",
+        "(binary gt (binary shr (ident \"a\") (ident \"b\")) (ident \"c\"))",
+        "(binary bitand (ident \"z\") (int 1))",
+        "(binary bitor (ident \"z\") (int 2))",
+        "(binary bitxor (ident \"z\") (int 3))",
+        "(binary shl (ident \"z\") (int 4))",
+        "(binary shr (ident \"z\") (int 5))"})
+    EXPECT_NE(bare.find(form), std::string::npos) << form << "\n" << bare;
+  // `!` is still `not`, and only it.
+  size_t nots = 0;
+  for (size_t at = bare.find("(unary not "); at != std::string::npos;
+       at = bare.find("(unary not ", at + 1))
+    ++nots;
+  EXPECT_EQ(nots, 1u) << bare;
+  ast::ASTContext ctx;
+  std::string error;
+  ast::TranslationUnit *back = read(text, ctx, error);
+  ASSERT_NE(back, nullptr) << error;
+  EXPECT_EQ(dump(back), dump(parsed->getRoot()));
+  EXPECT_EQ(write(*back), text);
 }

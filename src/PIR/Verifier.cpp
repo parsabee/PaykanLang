@@ -677,6 +677,23 @@ private:
         expect(in.Args[1], Type::I64, "operand of udiv / urem");
         result(in, Type::I64);
         break;
+      case Opcode::And:
+      case Opcode::Or:
+      case Opcode::Xor:
+        if (!arity(in, 2))
+          break;
+        expect(in.Args[0], Type::I64, "operand of and / or / xor");
+        expect(in.Args[1], Type::I64, "operand of and / or / xor");
+        result(in, Type::I64);
+        break;
+      case Opcode::Shl:
+      case Opcode::Shr:
+        if (!arity(in, 2))
+          break;
+        expect(in.Args[0], Type::I64, "operand of shl / shr");
+        expect(in.Args[1], Type::I64, "operand of shl / shr");
+        result(in, Type::I64);
+        break;
       case Opcode::UCmp:
         if (!arity(in, 2))
           break;

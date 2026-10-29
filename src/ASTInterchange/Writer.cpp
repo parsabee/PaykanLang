@@ -565,10 +565,35 @@ private:
     case BinaryOpcode::And:
       return "and";
     case BinaryOpcode::Or:
+      return "or";
+    case BinaryOpcode::BitAnd:
+      return "bitand";
+    case BinaryOpcode::BitOr:
+      return "bitor";
+    case BinaryOpcode::BitXor:
+      return "bitxor";
+    case BinaryOpcode::Shl:
+      return "shl";
+    case BinaryOpcode::Shr:
+      return "shr";
     case BinaryOpcode::Count:
       break;
     }
-    return "or";
+    __builtin_unreachable();
+  }
+
+  static const char *unaryName(UnaryOpcode op) {
+    switch (op) {
+    case UnaryOpcode::Neg:
+      return "neg";
+    case UnaryOpcode::Not:
+      return "not";
+    case UnaryOpcode::BitNot:
+      return "bitnot";
+    case UnaryOpcode::Count:
+      break;
+    }
+    __builtin_unreachable();
   }
 
   void floating(double v) {
@@ -597,11 +622,17 @@ private:
       return;
     }
     switch (e->getKind()) {
-    case ASTNode::NK_IntegerLiteral:
+    case ASTNode::NK_IntegerLiteral: {
+      // A literal above INT64_MAX is written as the unsigned value it is.
+      const auto *lit = cast<IntegerLiteral>(e);
       open("int", e);
-      OS << " " << cast<IntegerLiteral>(e)->getValue();
+      if (lit->isAboveInt64Max())
+        OS << " " << lit->getUnsignedValue();
+      else
+        OS << " " << lit->getValue();
       close();
       return;
+    }
     case ASTNode::NK_FloatLiteral:
       open("float", e);
       floating(cast<FloatLiteral>(e)->getValue());
@@ -631,7 +662,7 @@ private:
     case ASTNode::NK_UnaryExpr: {
       const auto *u = cast<UnaryExpr>(e);
       open("unary", u);
-      sym(u->getOpcode() == UnaryOpcode::Neg ? "neg" : "not");
+      sym(unaryName(u->getOpcode()));
       expr(u->getOperand());
       close();
       return;

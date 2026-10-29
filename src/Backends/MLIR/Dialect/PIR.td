@@ -333,6 +333,12 @@ def PIR_DivOp : PIR_BinaryOp<"div", PIR_Number>;
 def PIR_RemOp : PIR_BinaryOp<"rem", PIR_Number>;
 def PIR_UDivOp : PIR_BinaryOp<"udiv", I64>;
 def PIR_URemOp : PIR_BinaryOp<"urem", I64>;
+// Bit operations (docs/design/bitwise.md): a shift's count is read mod 64.
+def PIR_AndOp : PIR_BinaryOp<"and", I64>;
+def PIR_OrOp : PIR_BinaryOp<"or", I64>;
+def PIR_XorOp : PIR_BinaryOp<"xor", I64>;
+def PIR_ShlOp : PIR_BinaryOp<"shl", I64>;
+def PIR_ShrOp : PIR_BinaryOp<"shr", I64>;
 
 def PIR_NegOp : PIR_Op<"neg", [Pure, SameOperandsAndResultType]> {
   let arguments = (ins PIR_Number:$value);

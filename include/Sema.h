@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -723,20 +724,30 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
       return visit(e);
     }
 
-    /// Whether @p e is an integer or float literal, or the negation of one.
+    /// Whether @p e is an integer or float literal, the negation of one, or
+    /// the complement of an integer literal (`~0x0F`).
     static bool isNumericLiteral(const ast::Expr *e);
     /// The sized numeric type a literal @p e flowing into a slot of type
     /// @p expected (or a `T?` of it) takes, nullptr when @p expected is not
     /// one or @p e is not a numeric literal.  `int` and `float` slots leave
-    /// a literal its own type.
+    /// a literal its own type, but for a `float` one an integer literal
+    /// above INT64_MAX takes, and only an unsigned slot gives the
+    /// complement of a literal a type (docs/design/bitwise.md).
     static ast::Type *sizedLiteralTarget(const ast::Expr *e,
                                          ast::Type *expected);
-    /// The type of the literal @p node with the value @p value flowing into
-    /// the sized type @p target: @p target when the value fits it, else an
-    /// error (`the literal 256 does not fit in 'u8' (0 to 255)`).
+    /// The type of the literal @p node flowing into the sized type
+    /// @p target: @p target when its value fits it, else an error (`the
+    /// literal 256 does not fit in 'u8' (0 to 255)`).  An integer literal's
+    /// value is a sign and a @p magnitude up to 2^64-1, a float literal's
+    /// @p floatValue.
     ast::Type *checkSizedLiteral(ast::Expr *node, ast::Type *target,
-                                 bool isInteger, int64_t intValue,
-                                 double floatValue);
+                                 bool isInteger, bool negative,
+                                 uint64_t magnitude, double floatValue);
+    /// `x << n` and `x >> n` (visitBinaryExpr's): the value typed first,
+    /// on its own, a literal count as an `unsigned` when the value is
+    /// unsigned; both unsigned, of any widths; the value's type.  A literal
+    /// count at or above the width is a warning (docs/design/bitwise.md).
+    ast::Type *visitShift(ast::BinaryExpr *node);
     /// visit(@p operand) of a binary operator whose other operand has type
     /// @p otherTy: a numeric literal takes the other operand's sized type,
     /// and a generic enum's variant its type arguments (`m ==
@@ -805,6 +816,11 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// The slot type the array / tuple literal about to be visited flows into
   /// (set by visitExpecting, taken by the literal's visitor).
   ast::Type *LiteralExpectation = nullptr;
+
+  /// The places (file, line, column) of the literal shift counts warned
+  /// about (ExprChecker::visitShift): once each, though several
+  /// instantiations of a generic body reach one.
+  std::set<std::tuple<std::string, size_t, size_t>> WarnedShiftCounts;
 
   // Value-mode match checking (primitive / Str subject with literal arms).
   bool checkValueMatch(ast::MatchStmt *node, ast::Type *subjectTy);

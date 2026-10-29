@@ -1,0 +1,49 @@
+// 82 — hexadecimal, binary and wide integer literals
+// Exercises: `0x` and `0b` literals with `_` between digits, typed by their
+//            context as a decimal literal is (docs/design/bitwise.md); a
+//            literal of 2^63 or more in an `unsigned` slot, compared and
+//            divided unsigned; a match on an `unsigned` whose arms reach
+//            0xFFFF_FFFF_FFFF_FFFF (INT64_MIN's bits among them); a generic
+//            body's wide literal, kept by each instantiation; a wide literal
+//            in an `f32` and a `float` slot, rounded once; a wide literal as a
+//            conversion's argument, an `unsigned`; and `-0x80` as an `i8`.
+// expect-stdout: 255 255 10 485
+// expect-stdout: 18446744073709551615 9223372036854775808 4294967295
+// expect-stdout: True 4611686018427387904
+// expect-stdout: max top one zero miss
+// expect-stdout: 1.84467e+19 1.84467e+19 255 -128
+
+import ::io;
+
+fn arm(u: unsigned) -> Str {
+  match u {
+    0 { return "zero"; }
+    1 { return "one"; }
+    0x8000_0000_0000_0000 { return "top"; }
+    0xFFFF_FFFF_FFFF_FFFF { return "max"; }
+    _ { return "miss"; }
+  }
+}
+
+fn widest<T>(x: T) -> unsigned => 0xFFFF_FFFF_FFFF_FFFF;
+
+fn main() -> int {
+  let a: u8 = 0xFF;
+  let b: u16 = 0b1111_1111;
+  let c = 0b1010;
+  let d = 0x1e5;
+  io::println(Str(a) + " " + Str(b) + " " + Str(c) + " " + Str(d));
+  let m: unsigned = 18446744073709551615;
+  let top: unsigned = 0x8000_0000_0000_0000;
+  let w: u32 = 0xFFFF_FFFF;
+  io::println(Str(m) + " " + Str(top) + " " + Str(w));
+  io::println(Str(top > 1) + " " + Str(top / 2));
+  io::println(arm(widest(1)) + " " + arm(top) + " " + arm(1) + " " + arm(0)
+      + " " + arm(7));
+  let f: f32 = 18446744073709551615;
+  let g: float = 0xFFFF_FFFF_FFFF_FFFF;
+  let e: i8 = -0x80;
+  io::println(Str(f) + " " + Str(g) + " " + Str(u8(0xFFFF_FFFF_FFFF_FFFF)) + " "
+      + Str(e));
+  return 0;
+}

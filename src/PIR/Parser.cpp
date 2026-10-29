@@ -1195,6 +1195,11 @@ private:
     }
     case Opcode::UDiv:
     case Opcode::URem:
+    case Opcode::And:
+    case Opcode::Or:
+    case Opcode::Xor:
+    case Opcode::Shl:
+    case Opcode::Shr:
       if (!parseCommaOperands(in.Args, 2))
         return false;
       resultTy = Type::I64;

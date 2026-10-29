@@ -313,16 +313,28 @@ TEST(Arith, IntLiteralMaxAccepted) {
   EXPECT_TRUE(ok);
 }
 
-TEST(Arith, IntLiteralOverflowRejected) {
-  // INT64_MAX + 1: strtoll saturates and sets ERANGE.
+// An integer literal reaches 2^64-1 (docs/design/bitwise.md): the upper
+// half of `unsigned` is written directly, and only 2^64 or more is the
+// lexer's error.  Sema checks a literal against its context's type.
+TEST(Arith, IntLiteralsReachTheUnsignedRange) {
+  auto [ok, _] = parse(R"(
+    fn main() -> int {
+      let u: unsigned = 18446744073709551615;
+      let v: unsigned = 9223372036854775808;
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(ok);
   auto r = parseWithDiags("fn main() -> int {\n"
-                          "  x: int = 9223372036854775808;\n"
+                          "  let x = 18446744073709551616;\n"
                           "  return 0;\n"
                           "}\n");
   ASSERT_FALSE(r.Ok);
-  ASSERT_FALSE(r.Diags.empty());
-  EXPECT_NE(r.Diags[0].Message.find("integer is out of range"),
-            std::string::npos);
+  ASSERT_EQ(r.Diags.size(), 1u) << r.Text;
+  EXPECT_EQ(r.Diags[0].Message, "integer is out of range: "
+                                "18446744073709551616 (an integer literal is "
+                                "at most 18446744073709551615)");
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 11u);
 }
 
 // A float literal must denote a finite float (#73): overflow to +-inf and a
@@ -359,18 +371,50 @@ TEST(Arith, FloatLiteralSubnormalAccepted) {
   EXPECT_TRUE(ok);
 }
 
-TEST(Arith, IntLiteralMinMagnitudeRejected) {
-  // Deliberate: `-` is a separate token, so -9223372036854775808 lexes as
-  // MINUS + the bare magnitude, which overflows.  INT64_MIN must be written
-  // as an expression (e.g. -9223372036854775807 - 1).
-  auto r = parseWithDiags("fn main() -> int {\n"
-                          "  x: int = -9223372036854775808;\n"
-                          "  return 0;\n"
-                          "}\n");
-  ASSERT_FALSE(r.Ok);
-  ASSERT_FALSE(r.Diags.empty());
-  EXPECT_NE(r.Diags[0].Message.find("integer is out of range"),
-            std::string::npos);
+// `-` is a separate token, so -9223372036854775808 is MINUS and the bare
+// magnitude, which parses; Sema rejects it in an `int` context, where
+// INT64_MIN is written as an expression, `-9223372036854775807 - 1`
+// (tests/Sema/SizedTypeTests.cpp).
+TEST(Arith, IntLiteralMinMagnitudeParses) {
+  auto [ok, _] = parse(R"(
+    fn main() -> int {
+      let x: int = -9223372036854775808;
+      return 0;
+    }
+  )");
+  EXPECT_TRUE(ok);
+}
+
+// Hexadecimal and binary literals are values, in every place an integer
+// literal is: an expression, a fixed-size array's length and a repeat
+// count, where one above INT64_MAX is out of range.
+TEST(Arith, HexAndBinaryLiteralValues) {
+  std::string ast = dumpAST(R"(
+    fn main() -> int {
+      let a = 0xFF;
+      let b = 0x1e5;
+      let c = 0b1010;
+      let d: unsigned = 0xFFFF_FFFF_FFFF_FFFF;
+      let e: int[0x4] = [0; 0b11];
+      return 0;
+    }
+  )");
+  for (const char *line :
+       {"IntegerLiteral <3:15-3:19> 255\n", "IntegerLiteral <4:15-4:20> 485\n",
+        "IntegerLiteral <5:15-5:21> 10\n",
+        "IntegerLiteral <6:25-6:46> 18446744073709551615\n",
+        "FixedArrayType <7:14-7:22> 4\n", "<7:25-7:34> 3 copies\n"})
+    EXPECT_NE(ast.find(line), std::string::npos) << line << ast;
+  for (const char *decl : {"let e: int[0x8000_0000_0000_0000] = [0];",
+                           "let e = [0; 0x8000_0000_0000_0000];"}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  ") + decl +
+                            "\n  return 0;\n}\n");
+    ASSERT_FALSE(r.Ok) << decl;
+    ASSERT_EQ(r.Diags.size(), 1u) << decl << "\n" << r.Text;
+    EXPECT_EQ(r.Diags[0].Message,
+              "integer is out of range: 0x8000_0000_0000_0000")
+        << decl;
+  }
 }
 
 TEST(Arith, IntLiteralMinAsExpressionAccepted) {
@@ -385,17 +429,123 @@ TEST(Arith, IntLiteralMinAsExpressionAccepted) {
 
 // -- Lexical errors (C11 + catch-all)
 
-TEST(Arith, AmpersandIsLexicalError) {
-  // '&' had a dead AMP token no grammar rule consumed; it is now a plain
-  // lexical error.
-  auto r = parseWithDiags("fn main() -> int {\n"
-                          "  x: int = 1 & 2;\n"
-                          "  return 0;\n"
-                          "}\n");
-  ASSERT_FALSE(r.Ok);
+namespace {
+
+// @p e with each operator's operands in parentheses: `(a + (b << 2))`.
+std::string grouped(const paykan::ast::Expr *e) {
+  using namespace paykan::ast;
+  if (const auto *b = dyn_cast<BinaryExpr>(e))
+    return "(" + grouped(b->getLHS()) + " " + b->getOpcodeStr() + " " +
+           grouped(b->getRHS()) + ")";
+  if (const auto *u = dyn_cast<UnaryExpr>(e))
+    return u->getOpcodeStr() + grouped(u->getOperand());
+  if (const auto *id = dyn_cast<Identifier>(e))
+    return id->getName();
+  if (const auto *lit = dyn_cast<IntegerLiteral>(e))
+    return std::to_string(lit->getValue());
+  return "?";
+}
+
+// The grouping of the expression @p expr, assigned in a function's body.
+std::string groupingOf(const std::string &expr) {
+  auto [ok, driver] =
+      parse("fn main() -> int {\n  x = " + expr + ";\n  return 0;\n}\n");
+  if (!ok)
+    return "parse error";
+  auto *body = driver->getRoot()->getFuncDecls()[0]->getBody();
+  return grouped(
+      paykan::ast::cast<paykan::ast::AssignStmt>(body->getStatements()[0])
+          ->getValue());
+}
+
+// The first diagnostic of a function whose body is @p body.
+std::string firstError(const std::string &body) {
+  auto r = parseWithDiags("fn main() -> int {\n" + body + "\n  return 0;\n}\n");
+  if (r.Ok || r.Diags.empty())
+    return "no error";
+  return r.Diags[0].Message;
+}
+
+} // namespace
+
+// Swift's precedence (docs/design/bitwise.md): `<< >>` above `* / % &`,
+// above `+ - | ^`, above the comparisons.  Each row groups differently in
+// C, which the reference lists.
+TEST(Arith, BitwisePrecedenceIsSwifts) {
+  const std::pair<const char *, const char *> rows[] = {
+      {"a + b << 2", "(a + (b << 2))"},
+      {"1 << n - 1", "((1 << n) - 1)"},
+      {"a & b * c", "((a & b) * c)"},
+      {"a + b & c", "(a + (b & c))"},
+      {"a | b + c", "((a | b) + c)"},
+      {"a | b ^ c", "((a | b) ^ c)"},
+      {"x & m == 0", "((x & m) == 0)"},
+      {"~a & b", "(~a & b)"},
+      {"a >> b > c", "((a >> b) > c)"},
+      {"a > b >> c", "(a > (b >> c))"},
+      {"a < b >> c", "(a < (b >> c))"},
+      {"-a << b", "(-a << b)"},
+      {"a & b << c", "(a & (b << c))"},
+      {"a ^ b | c & d", "((a ^ b) | (c & d))"},
+      {"a & b & c", "((a & b) & c)"},
+      {"~~a", "~~a"},
+      {"x & ~0 != 0 && y | z == w", "(((x & ~0) != 0) && ((y | z) == w))"},
+      {"(a << b) << c", "((a << b) << c)"},
+      {"a << (b << c)", "(a << (b << c))"},
+  };
+  for (const auto &[src, expected] : rows)
+    EXPECT_EQ(groupingOf(src), expected) << src;
+}
+
+// Shifts do not associate, as Swift's (docs/grammar.md section 7): the
+// mechanism of the comparisons' `a < b < c`.
+TEST(Arith, ShiftsDoNotChain) {
+  const std::pair<const char *, const char *> rows[] = {
+      {"a << b << c", "'<<'"},     {"a << b >> c", "'>>'"},
+      {"a >> b >> c", "'>>'"},     {"a >> b << c", "'<<'"},
+      {"a + b << c << d", "'<<'"},
+  };
+  for (const auto &[src, found] : rows)
+    EXPECT_EQ(firstError(std::string("  x = ") + src + ";"),
+              std::string("unexpected ") + found +
+                  "; shift operators cannot be chained; parenthesise the "
+                  "shift")
+        << src;
+  // At the second shift, its first token.
+  auto r = parseWithDiags("fn main() -> int {\n  x = a >> b >> c;\n"
+                          "  return 0;\n}\n");
   ASSERT_FALSE(r.Diags.empty());
-  EXPECT_NE(r.Diags[0].Message.find("invalid character '&'"),
-            std::string::npos);
+  EXPECT_EQ(r.Diags[0].Loc.getLineStart(), 2u);
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 14u);
+  // A shift of a shift's value is another operator's operand.
+  EXPECT_EQ(groupingOf("a << b * c << d"), "((a << b) * (c << d))");
+}
+
+// `>>` is a `>` directly followed by another, and `>>=` a `>` directly
+// followed by `>=` (docs/design/bitwise.md): with anything between them
+// they are a comparison and an error, whose message says so.
+TEST(Arith, ShiftRightIsTwoAdjacentGreaters) {
+  EXPECT_EQ(groupingOf("a >> b"), "(a >> b)");
+  EXPECT_EQ(groupingOf("a > b"), "(a > b)");
+  EXPECT_EQ(groupingOf("a >= b"), "(a >= b)");
+  EXPECT_EQ(firstError("  x = a > > b;"),
+            "unexpected '>'; expected an expression ('>>' is written "
+            "without a space)");
+  EXPECT_EQ(firstError("  x = a >\n  > b;"),
+            "unexpected '>'; expected an expression ('>>' is written "
+            "without a space)");
+  EXPECT_EQ(firstError("  x > >= 1;"),
+            "unexpected '>='; expected an expression ('>>=' is written "
+            "without a space)");
+  EXPECT_EQ(firstError("  x = a >>> b;"),
+            "unexpected '>'; expected an expression (there is no '>>>': "
+            "'>>' of an unsigned value shifts in zeros)");
+  EXPECT_EQ(firstError("  f(x >>= 1);"),
+            "unexpected '>>='; expected ')' to close the argument list");
+  EXPECT_EQ(firstError("  x = a >>= 1;"),
+            "unexpected '>>='; expected ';' after the assignment");
+  EXPECT_EQ(firstError("  x = a > ;"),
+            "unexpected ';'; expected an expression");
 }
 
 TEST(Arith, InvalidCharacterRejected) {

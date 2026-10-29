@@ -2188,6 +2188,68 @@ TEST(Driver, FloatNotEqualIsUnordered) {
   std::filesystem::remove(src);
 }
 
+// A shift by a constant takes no overshift guard (docs/design/bitwise.md,
+// "How each layer gives 0"), at -O0 as at -O2: xorshift's three shifts are
+// one `shl` or `lshr` each, with no comparison with 64, no `select` and no
+// branch.  A variable count's guard is a `select`, never a branch, and the
+// masked rotate idiom is LLVM's funnel shift at -O2.
+TEST(Driver, ConstantShiftsHaveNoGuard) {
+  REQUIRE_BACKEND();
+  auto src = writeTmp(R"(import ::io;
+fn xorshift(s: unsigned) -> unsigned {
+  x = s;
+  x ^= x << 13;
+  x ^= x >> 7;
+  x ^= x << 17;
+  return x;
+}
+fn shift(x: unsigned, n: unsigned) -> unsigned => x << n;
+fn rotl(x: unsigned, k: unsigned) -> unsigned
+    => (x << (k & 63)) | (x >> ((0 - k) & 63));
+fn main() -> int {
+  let s = xorshift(88172645463325252);
+  io::println(Str(s) + " " + Str(shift(s, 70)) + " " + Str(rotl(1, 65)));
+  return 0;
+}
+)");
+  auto [rc, out] = run(paykanRun() + " " + src + " 2>&1");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, "8748534153485358512 0 2\n");
+  auto function = [](const std::string &ir, const std::string &name) {
+    const size_t start = ir.find("@" + name + "(");
+    const size_t end = ir.find("\n}\n", start);
+    return start == std::string::npos ? std::string()
+                                      : ir.substr(start, end - start);
+  };
+  for (const char *opt : {" -O0", " -O2"}) {
+    auto [irRc, ir] = run(paykanRun() + opt + " --emit-llvm " + src + " 2>&1");
+    ASSERT_EQ(irRc, 0) << opt << ": " << ir;
+    const std::string mangled = ir.substr(0, ir.find("Sxorshift("));
+    const std::string prefix = mangled.substr(mangled.rfind('@') + 1);
+    const std::string xs = function(ir, prefix + "Sxorshift");
+    ASSERT_FALSE(xs.empty()) << opt << ": " << ir;
+    EXPECT_NE(xs.find(", 13\n"), std::string::npos) << opt << ": " << xs;
+    EXPECT_NE(xs.find("= shl i64 %"), std::string::npos) << opt << ": " << xs;
+    EXPECT_NE(xs.find("= lshr i64 %"), std::string::npos) << opt << ": " << xs;
+    EXPECT_NE(xs.find(", 7\n"), std::string::npos) << opt << ": " << xs;
+    EXPECT_NE(xs.find(", 17\n"), std::string::npos) << opt << ": " << xs;
+    for (const char *absent : {"icmp", "select", "br ", ", 64"})
+      EXPECT_EQ(xs.find(absent), std::string::npos)
+          << opt << " " << absent << ": " << xs;
+    const std::string sh = function(ir, prefix + "Sshift");
+    EXPECT_NE(sh.find("icmp ult i64 %"), std::string::npos)
+        << opt << ": " << sh;
+    EXPECT_NE(sh.find("select i1"), std::string::npos) << opt << ": " << sh;
+    EXPECT_EQ(sh.find("br "), std::string::npos) << opt << ": " << sh;
+    if (std::string(opt) == " -O2") {
+      EXPECT_NE(function(ir, prefix + "Srotl").find("@llvm.fshl.i64"),
+                std::string::npos)
+          << ir;
+    }
+  }
+  std::filesystem::remove(src);
+}
+
 // A char ordered against a number is Sema's error on every path, as `==`
 // on the pair is: `run`, `build` and `--emit-c` each report it and stop.
 // `c < n` got past Sema and failed PIR verification (`cmp operands have

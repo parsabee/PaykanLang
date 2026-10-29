@@ -580,6 +580,18 @@ private:
       return B.integer(*e, out);
     }
 
+    /// The value of an `(int ...)`: B.literalInteger of the next field.
+    bool literalInteger(const char *what, int64_t &bits, bool &above) {
+      const SExpr *e = next(what);
+      if (!e)
+        return false;
+      if (e->K != SExpr::Number) {
+        B.fail(*e, std::string("expected an integer: ") + what);
+        return false;
+      }
+      return B.literalInteger(*e, bits, above);
+    }
+
     /// The next field, which must be a list tagged @p tag.
     const SExpr *list(const char *tag) {
       const SExpr *e = next(tag);
@@ -652,6 +664,26 @@ private:
       return false;
     }
     return true;
+  }
+
+  /// An integer literal's value (docs/plugins/ast-format.md): an int64, or a
+  /// value without a sign up to 2^64-1, whose bits go to @p bits with
+  /// @p above set (a literal above INT64_MAX, docs/design/bitwise.md).
+  bool literalInteger(const SExpr &e, int64_t &bits, bool &above) {
+    const char *first = e.Text.data(), *last = first + e.Text.size();
+    above = false;
+    if (auto [p, ec] = std::from_chars(first, last, bits);
+        ec == std::errc() && p == last)
+      return true;
+    uint64_t value = 0;
+    if (auto [p, ec] = std::from_chars(first, last, value);
+        ec == std::errc() && p == last) {
+      bits = static_cast<int64_t>(value);
+      above = true;
+      return true;
+    }
+    fail(e, "not a 64-bit integer: " + e.Text);
+    return false;
   }
 
   /// @L:C-L:C
@@ -1682,9 +1714,9 @@ private:
   /// the target of an assignment to one), or a conditional's condition.
   enum class Operand { Left, Right, Prefix, Receiver, Condition };
 
-  /// The precedence the grammar gives @p op (docs/grammar.md section 6):
-  /// 1 for `||` up to 5 for `*`, `/` and `%`; the relational operators'
-  /// (kRelational) do not chain.
+  /// The precedence the grammar gives @p op (docs/grammar.md section 7):
+  /// 1 for `||` up to 6 for the shifts; neither the relational operators'
+  /// (kRelational) nor the shifts' (kShift) chain.
   static int precedence(BinaryOpcode op) {
     switch (op) {
     case BinaryOpcode::Or:
@@ -1700,29 +1732,37 @@ private:
       return kRelational;
     case BinaryOpcode::Add:
     case BinaryOpcode::Sub:
+    case BinaryOpcode::BitOr:
+    case BinaryOpcode::BitXor:
       return 4;
     case BinaryOpcode::Mul:
     case BinaryOpcode::Div:
     case BinaryOpcode::Mod:
+    case BinaryOpcode::BitAnd:
       return 5;
+    case BinaryOpcode::Shl:
+    case BinaryOpcode::Shr:
+      return kShift;
     case BinaryOpcode::Count:
       break;
     }
     return 0;
   }
   static constexpr int kRelational = 3;
+  static constexpr int kShift = 6;
 
   /// Whether the operand @p e, at @p where of a binary operator of
   /// precedence @p prec, is one the grammar writes in parentheses there:
   /// a conditional anywhere; a binary operator's of lower precedence on the
-  /// left (or a comparison's of a comparison), of the same or lower on the
-  /// right, and any as the operand of a prefix operator or what a suffix
-  /// applies to; a prefix operator's as what a suffix applies to; and a
-  /// lambda with an expression body (`fn() => e`, (inferred)) on the left
-  /// or before a suffix, where its body would take what follows.  The AST
-  /// has no parentheses, but such an operand is a level of nesting, as its
-  /// parenthesis is for the frontends (docs/grammar.md section 9): the AST
-  /// of a program is held to the nesting its source has.
+  /// left (or a comparison's of a comparison, a shift's of a shift), of the
+  /// same or lower on the right, and any as the operand of a prefix operator
+  /// or what a suffix applies to; a prefix operator's as what a suffix
+  /// applies to; and a lambda with an expression body (`fn() => e`,
+  /// (inferred)) on the left or before a suffix, where its body would take
+  /// what follows.  The AST has no parentheses, but such an operand is a
+  /// level of nesting, as its parenthesis is for the frontends
+  /// (docs/grammar.md section 9): the AST of a program is held to the
+  /// nesting its source has.
   static bool operandNests(const SExpr &e, Operand where, int prec) {
     if (e.K != SExpr::List)
       return false;
@@ -1739,7 +1779,7 @@ private:
       return false;
     switch (where) {
     case Operand::Left:
-      return q < prec || (q == prec && prec == kRelational);
+      return q < prec || (q == prec && (prec == kRelational || prec == kShift));
     case Operand::Right:
       return q <= prec;
     case Operand::Prefix:
@@ -1811,13 +1851,15 @@ private:
 
   static bool binaryOp(const std::string &s, BinaryOpcode &op) {
     static const std::pair<const char *, BinaryOpcode> ops[] = {
-        {"add", BinaryOpcode::Add}, {"sub", BinaryOpcode::Sub},
-        {"mul", BinaryOpcode::Mul}, {"div", BinaryOpcode::Div},
-        {"mod", BinaryOpcode::Mod}, {"lt", BinaryOpcode::Lt},
-        {"gt", BinaryOpcode::Gt},   {"le", BinaryOpcode::Le},
-        {"ge", BinaryOpcode::Ge},   {"eq", BinaryOpcode::Eq},
-        {"ne", BinaryOpcode::Ne},   {"and", BinaryOpcode::And},
-        {"or", BinaryOpcode::Or}};
+        {"add", BinaryOpcode::Add},     {"sub", BinaryOpcode::Sub},
+        {"mul", BinaryOpcode::Mul},     {"div", BinaryOpcode::Div},
+        {"mod", BinaryOpcode::Mod},     {"lt", BinaryOpcode::Lt},
+        {"gt", BinaryOpcode::Gt},       {"le", BinaryOpcode::Le},
+        {"ge", BinaryOpcode::Ge},       {"eq", BinaryOpcode::Eq},
+        {"ne", BinaryOpcode::Ne},       {"and", BinaryOpcode::And},
+        {"or", BinaryOpcode::Or},       {"bitand", BinaryOpcode::BitAnd},
+        {"bitor", BinaryOpcode::BitOr}, {"bitxor", BinaryOpcode::BitXor},
+        {"shl", BinaryOpcode::Shl},     {"shr", BinaryOpcode::Shr}};
     for (const auto &[name, o] : ops)
       if (s == name) {
         op = o;
@@ -1899,9 +1941,10 @@ private:
     Expr *out = nullptr;
     if (t == "int") {
       int64_t v = 0;
-      if (!f.integer("the value", v))
+      bool above = false;
+      if (!f.literalInteger("the value", v, above))
         return nullptr;
-      out = Ctx.make<IntegerLiteral>(loc, v);
+      out = Ctx.make<IntegerLiteral>(loc, v, above);
     } else if (t == "float") {
       const SExpr *v = f.next("the value");
       if (!v)
@@ -1939,20 +1982,26 @@ private:
         return nullptr;
       out = Ctx.make<StringLiteral>(loc, *v);
     } else if (t == "unary") {
-      const SExpr *op = f.symbol("the operator (neg or not)");
+      const SExpr *op = f.symbol("the operator (neg, not or bitnot)");
       if (!op)
         return nullptr;
-      if (op->Text != "neg" && op->Text != "not")
-        return fail(*op,
-                    "unknown unary operator '" + op->Text + "' (neg, not)"),
+      UnaryOpcode uop{};
+      if (op->Text == "neg")
+        uop = UnaryOpcode::Neg;
+      else if (op->Text == "not")
+        uop = UnaryOpcode::Not;
+      else if (op->Text == "bitnot")
+        uop = UnaryOpcode::BitNot;
+      else
+        return fail(*op, "unknown unary operator '" + op->Text +
+                             "' (neg, not, bitnot)"),
                nullptr;
       Nested inner(*this, e);
       Expr *x =
           inner.ok() ? operand(f, e, "the operand", Operand::Prefix) : nullptr;
       if (!x)
         return nullptr;
-      out = Ctx.make<UnaryExpr>(
-          loc, op->Text == "neg" ? UnaryOpcode::Neg : UnaryOpcode::Not, x);
+      out = Ctx.make<UnaryExpr>(loc, uop, x);
     } else if (t == "binary") {
       const SExpr *op = f.symbol("the operator");
       BinaryOpcode bop{};

@@ -897,6 +897,12 @@ private:
     /// division of `int` values (@p checkOverflow) INT64_MIN / -1.
     Val emitIntDivGuards(const Val &lhs, const Val &rhs, bool isDiv,
                          bool checkOverflow);
+    /// `value << count` (@p left) or `value >> count` of the unsigned type
+    /// @p resultTy, whose count is the expression @p countExpr: 0 for every
+    /// count at or above the width (docs/design/bitwise.md), the guard left
+    /// out where the count is a constant or known to be below 64.
+    Val emitShift(bool left, const Val &value, const Val &count,
+                  const ast::Expr *countExpr, ast::Type *resultTy);
 
 #define LW_EXPR(Kind, Name, Cast) Val visit##Name(ast::Cast *node);
     PAYKAN_EXPR_NODES(LW_EXPR)

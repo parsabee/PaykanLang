@@ -88,6 +88,64 @@ TEST(GrammarEdge, SubscriptComparisonIsNotAGenericCall) {
       parse("fn main() -> int { x: bool = xs[a < b] > (d); return 0; }").Ok);
 }
 
+// `>>` is two `>` tokens written together (docs/design/bitwise.md), so a
+// type argument list still closes with single `>` tokens, before any
+// expression parser sees them; where the speculation for a generic call
+// finds no `(` or `::` after its `>`, it rewinds, and the `>>` is a shift.
+TEST(GrammarEdge, ShiftRightNextToGenerics) {
+  auto [ok, driver] = parse("fn best<T: Cmp<T>>(x: T) -> T { return x; }\n"
+                            "fn main() -> int {\n"
+                            "  b: Box<Box<int>> = mk();\n"
+                            "  c = id<Box<Box<int>>>(a);\n"
+                            "  x: List<List<u8>> = l;\n"
+                            "  o = Option<Box<int>>::Nothing;\n"
+                            "  s = id<Box<u8>>(x) >> 2;\n"
+                            "  t = f<a>>(b);\n"
+                            "  u = a < b >> c;\n"
+                            "  return 0;\n"
+                            "}\n");
+  ASSERT_TRUE(ok);
+  FuncDecl *mainFn = nullptr;
+  for (FuncDecl *f : driver->getRoot()->getFuncDecls())
+    if (f->getName() == "main")
+      mainFn = f;
+  ASSERT_NE(mainFn, nullptr);
+  const auto &stmts = mainFn->getBody()->getStatements();
+  ASSERT_EQ(stmts.size(), 8u);
+  auto valueOf = [&](size_t i) {
+    return cast<AssignStmt>(stmts[i])->getValue();
+  };
+  auto *c = dyn_cast<CallExpr>(valueOf(1));
+  ASSERT_NE(c, nullptr);
+  EXPECT_EQ(c->getTypeArgs().size(), 1u);
+  EXPECT_TRUE(isa<EnumValueExpr>(valueOf(3)));
+  // A generic call, then a shift.
+  auto *s = dyn_cast<BinaryExpr>(valueOf(4));
+  ASSERT_NE(s, nullptr);
+  EXPECT_EQ(s->getOpcode(), BinaryOpcode::Shr);
+  auto *call = dyn_cast<CallExpr>(s->getLHS());
+  ASSERT_NE(call, nullptr);
+  EXPECT_TRUE(call->hasTypeArgs());
+  EXPECT_TRUE(isa<IntegerLiteral>(s->getRHS()));
+  // `f < (a >> b)` and `a < (b >> c)`: comparisons Sema types.
+  for (size_t i : {5u, 6u}) {
+    auto *lt = dyn_cast<BinaryExpr>(valueOf(i));
+    ASSERT_NE(lt, nullptr) << i;
+    EXPECT_EQ(lt->getOpcode(), BinaryOpcode::Lt) << i;
+    EXPECT_TRUE(isa<Identifier>(lt->getLHS())) << i;
+    auto *shr = dyn_cast<BinaryExpr>(lt->getRHS());
+    ASSERT_NE(shr, nullptr) << i;
+    EXPECT_EQ(shr->getOpcode(), BinaryOpcode::Shr) << i;
+  }
+  // `>=` directly after a type argument list's `>` is no `>>=`.
+  auto r = parseWithDiags(
+      "fn main() -> int {\n  a: Box<Box<int>>= v;\n  return 0;\n}\n");
+  ASSERT_FALSE(r.Ok);
+  ASSERT_FALSE(r.Diags.empty());
+  EXPECT_EQ(r.Diags[0].Message,
+            "unexpected '>='; expected '>' to close the type argument list");
+}
+
 // -- The nesting limit is the same on every frontend (#120)
 //
 // docs/grammar.md section 9: nesting deeper than 512 levels is rejected with
@@ -168,6 +226,14 @@ TEST(GrammarEdge, NestingLimitIsTheSameOnEveryFrontend) {
   });
   expectLimit("prefix operators",
               [](int n) { return inMain("x = " + repeat("!", n) + "a;"); });
+  expectLimit("complements",
+              [](int n) { return inMain("x = " + repeat("~", n) + "a;"); });
+  // A shift as a shift's operand is in parentheses, a level, as a
+  // comparison of a comparison is (neither chains).
+  expectLimit("shifts of shifts", [](int n) {
+    return inMain("x = " + repeat("(", n) + "a" + repeat(" << b)", n) +
+                  " << b;");
+  });
   expectLimit("unary minus", [](int n) {
     return inMain("x = a - " + repeat("- ", n) + "a;");
   });
@@ -265,6 +331,10 @@ TEST(GrammarEdge, ChainLimitIsTheSameOnEveryFrontend) {
   expectChainLimit("&& chains", [](int n) {
     return inMain("x = " + joined("a", " && ", n + 1) + ";");
   });
+  for (const char *op : {" & ", " | ", " ^ "})
+    expectChainLimit(op, [op](int n) {
+      return inMain("x = " + joined("a", op, n + 1) + ";");
+    });
   expectChainLimit("method calls", [](int n) {
     return inMain("x = s" + repeat(".m()", n) + ";");
   });
@@ -283,6 +353,9 @@ TEST(GrammarEdge, ChainLimitIsTheSameOnEveryFrontend) {
   // A field assigned to is a link, and `+=` is one more over it.
   expectChainLimit("compound assignments", [](int n) {
     return inMain("s" + repeat(".f", n - 1) + " += 1;");
+  });
+  expectChainLimit(">>= assignments", [](int n) {
+    return inMain("s" + repeat(".f", n - 1) + " >>= 1;");
   });
   // Links count along every path down the AST: through parentheses, the
   // operand of a higher precedence and the arguments of a call.
@@ -414,15 +487,17 @@ TEST(GrammarEdge, CommonErrorsAreLocatedAlike) {
 
 // `-` and a number is one literal of the negated value, spanning both (the
 // AST interchange format's `(int -1)`), with or without space between them;
-// INT64_MIN's magnitude is taken after the `-`, so `-9223372036854775808`
-// is INT64_MIN.  Anything else after a `-` is still not a pattern.  It was
-// `unexpected '-'; expected a type`, though the AST interchange reader took
-// `(int -1)` and Sema and the lowering ran it.
+// `-9223372036854775808` (or `-0x8000_0000_0000_0000`) is INT64_MIN, and a
+// larger magnitude is out of range.  Anything else after a `-` is still not
+// a pattern.  It was `unexpected '-'; expected a type`, though the AST
+// interchange reader took `(int -1)` and Sema and the lowering ran it.
 TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
   auto [ok, driver] = parse("fn main() -> int {\n"
                             "  match 1 { -1 { } - 2 { } 3 { } _ { } }\n"
                             "  match 1.5 { -2.5 { } -0.0 { } _ { } }\n"
                             "  match 1 { -9223372036854775808 { } _ { } }\n"
+                            "  match 1 { -0x80 { } -0x8000_0000_0000_0000 { } "
+                            "_ { } }\n"
                             "  return 0;\n"
                             "}\n");
   ASSERT_TRUE(ok);
@@ -432,9 +507,24 @@ TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
         "IntegerLiteral <2:28-2:29> 3\n",
         "FloatLiteral <3:15-3:19> -2.500000e+00\n",
         "FloatLiteral <3:24-3:28> -0.000000e+00\n",
-        "IntegerLiteral <4:13-4:33> -9223372036854775808\n"})
+        "IntegerLiteral <4:13-4:33> -9223372036854775808\n",
+        "IntegerLiteral <5:13-5:18> -128\n",
+        "IntegerLiteral <5:23-5:45> -9223372036854775808\n"})
     EXPECT_NE(dump.find(line), std::string::npos) << line << dump;
   EXPECT_EQ(dump.find("UnaryExpr"), std::string::npos) << dump;
+  for (const char *arm : {"-9223372036854775809", "-0x8000_0000_0000_0001",
+                          "- 0xFFFF_FFFF_FFFF_FFFF"}) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  match 1 { ") +
+                            arm + " { } _ { } }\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << arm;
+    ASSERT_FALSE(r.Diags.empty()) << arm;
+    std::string magnitude = arm + 1;
+    if (magnitude[0] == ' ')
+      magnitude.erase(0, 1);
+    EXPECT_EQ(r.Diags[0].Message, "integer is out of range: -" + magnitude)
+        << arm;
+    EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 13u) << arm;
+  }
   for (const char *arm : {"-True", "--1", "-x", "-'a'", "-\"s\"", "-None"}) {
     auto r = parseWithDiags(std::string("fn main() -> int {\n  match 1 { ") +
                             arm + " { } _ { } }\n  return 0;\n}\n");
@@ -444,19 +534,90 @@ TEST(GrammarEdge, NegativeNumbersAreMatchPatterns) {
   }
 }
 
-// INT64_MIN's magnitude is a pattern's only: anywhere else it is out of
-// range, as an INT after any other token is, also right after a `-` (where
-// the lexer takes it): an expression writes INT64_MIN as
-// `-9223372036854775807 - 1` (docs/grammar.md section 1).
-TEST(GrammarEdge, TheMagnitudeOfInt64MinIsOnlyAPatterns) {
+// Number literals in the forms of other languages are rejected (docs/grammar.md
+// section 10), each with one error at the literal, never read as a number
+// followed by an identifier.
+TEST(GrammarEdge, NumberLiteralsOfOtherLanguagesAreRejected) {
+  struct Case {
+    const char *Literal;
+    const char *Error;
+  };
+  const Case cases[] = {
+      {"0X1F", "the prefix of a hexadecimal literal is '0x', in lower case: "
+               "'0X1F'"},
+      {"0x_FF", "a '_' in a number must stand between two digits: '0x_FF'"},
+      {"1__0", "'_' separates digits only in hexadecimal and binary "
+               "literals: '1__0'"},
+      {"1_000", "'_' separates digits only in hexadecimal and binary "
+                "literals: '1_000'"},
+      {"1e1_0", "'_' separates digits only in hexadecimal and binary "
+                "literals: '1e1_0'"},
+      {"1_", "'_' separates digits only in hexadecimal and binary "
+             "literals: '1_'"},
+      {"1.5_", "'_' separates digits only in hexadecimal and binary "
+               "literals: '1.5_'"},
+      {"255u8", "there are no literal suffixes: '255u8' (a literal takes its "
+                "type from the context, as in 'x: u8 = 255')"},
+      {"0x1.5", "a hexadecimal literal has no fraction: '0x1.5'"},
+  };
+  for (const Case &c : cases) {
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  let x = ") +
+                            c.Literal + ";\n  return 0;\n}\n");
+    EXPECT_FALSE(r.Ok) << c.Literal;
+    ASSERT_EQ(r.Diags.size(), 1u) << c.Literal << "\n" << r.Text;
+    EXPECT_EQ(r.Diags[0].Message, c.Error) << c.Literal;
+    EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 11u) << c.Literal;
+  }
+  EXPECT_FALSE(parse("fn main() -> int {\n  let t = (1, 2);\n"
+                     "  let x = t.0x1;\n"
+                     "  return 0;\n}\n")
+                   .Ok);
+}
+
+// A literal above INT64_MAX parses wherever a literal does, on every
+// frontend alike: the magnitude of INT64_MIN after a `-` too.  Sema checks
+// it against its context's type (tests/Sema/SizedTypeTests.cpp,
+// LiteralRangesAtTheLimits and Int64MinIsStillWrittenAsAnExpression).
+TEST(GrammarEdge, WideLiteralsParseOnEveryFrontend) {
   for (const char *expr : {"-9223372036854775808", "5 - 9223372036854775808",
                            "9223372036854775808"}) {
-    auto r = parseWithDiags(std::string("fn main() -> int {\n  x = ") + expr +
-                            ";\n  return 0;\n}\n");
-    EXPECT_FALSE(r.Ok) << expr;
-    ASSERT_EQ(r.Diags.size(), 1u) << expr;
-    EXPECT_EQ(r.Diags[0].Message, "integer is out of range: "
-                                  "9223372036854775808")
+    auto r = parseWithDiags(std::string("fn main() -> int {\n  let x = ") +
+                            expr + ";\n  return 0;\n}\n");
+    EXPECT_TRUE(r.Ok) << expr << "\n" << r.Text;
+    EXPECT_TRUE(parse(std::string("fn main() -> int {\n  let x = ") + expr +
+                      ";\n  return 0;\n}\n")
+                    .Ok)
         << expr;
+  }
+}
+
+// A `>>` or `>>=` with anything between its two tokens, a `>>>`, and a chain
+// of shifts are rejected on every frontend (docs/grammar.md section 10),
+// each with the error that says why.
+TEST(GrammarEdge, ShiftFormsOfOtherLanguagesAreRejected) {
+  struct Case {
+    const char *Statement;
+    const char *Error;
+  };
+  const Case cases[] = {
+      {"x = a > > b;", "unexpected '>'; expected an expression ('>>' is "
+                       "written without a space)"},
+      {"x = a >\n  > b;", "unexpected '>'; expected an expression ('>>' is "
+                          "written without a space)"},
+      {"x > >= 1;", "unexpected '>='; expected an expression ('>>=' is "
+                    "written without a space)"},
+      {"x = a >>> b;", "unexpected '>'; expected an expression (there is no "
+                       "'>>>': '>>' of an unsigned value shifts in zeros)"},
+      {"x = a << b << c;", "unexpected '<<'; shift operators cannot be "
+                           "chained; parenthesise the shift"},
+  };
+  for (const Case &c : cases) {
+    const std::string src = std::string("fn main() -> int {\n  ") +
+                            c.Statement + "\n  return 0;\n}\n";
+    EXPECT_FALSE(parse(src).Ok) << c.Statement;
+    for (const auto &d : diagnosticsOfEveryFrontend(src))
+      EXPECT_NE(d.find(std::string("error: ") + c.Error), std::string::npos)
+          << c.Statement << "\n"
+          << d;
   }
 }

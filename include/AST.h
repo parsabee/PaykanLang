@@ -237,8 +237,9 @@ public:
 // -- Operator enums (at namespace scope so Type can reference them)
 
 enum class UnaryOpcode {
-  Neg, // -
-  Not, // !
+  Neg,    // -
+  Not,    // !
+  BitNot, // ~ (docs/design/bitwise.md)
   Count,
 };
 
@@ -259,8 +260,19 @@ enum class BinaryOpcode {
   // Logical
   And, // &&
   Or,  // ||
+  // Bitwise, on the unsigned types (docs/design/bitwise.md)
+  BitAnd, // &
+  BitOr,  // |
+  BitXor, // ^
+  Shl,    // <<
+  Shr,    // >>, logical
   Count,
 };
+
+// A type holds the operators it has as 32-bit masks (Type::UnaryOps and
+// Type::BinaryOps).
+static_assert(static_cast<unsigned>(UnaryOpcode::Count) <= 32 &&
+              static_cast<unsigned>(BinaryOpcode::Count) <= 32);
 
 // Base for all types
 class Type : public ASTNode {
@@ -840,12 +852,21 @@ public:
 class IntegerLiteral : public Expr {
 private:
   int64_t Value;
+  bool AboveInt64Max;
 
 public:
-  IntegerLiteral(SourceLocation loc, int64_t value)
-      : Expr(NK_IntegerLiteral, loc), Value(value) {}
+  /// @p value is the literal's bits.  A literal above INT64_MAX, which only
+  /// an unsigned or float context takes (docs/design/bitwise.md), is
+  /// flagged with @p aboveInt64Max: its value is getUnsignedValue(), 2^63 to
+  /// 2^64-1.  Any other is getValue(), signed (a negative one comes only
+  /// from a match pattern or the AST interchange format's `(int -5)`).
+  IntegerLiteral(SourceLocation loc, int64_t value, bool aboveInt64Max = false)
+      : Expr(NK_IntegerLiteral, loc), Value(value),
+        AboveInt64Max(aboveInt64Max) {}
 
   int64_t getValue() const { return Value; }
+  uint64_t getUnsignedValue() const { return static_cast<uint64_t>(Value); }
+  bool isAboveInt64Max() const { return AboveInt64Max; }
 
   static bool classof(const ASTNode *N) {
     return N->getKind() == NK_IntegerLiteral;

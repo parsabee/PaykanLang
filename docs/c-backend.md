@@ -205,9 +205,15 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
 * **Arithmetic.**  Integer arithmetic is done in `uint64_t` and converted
   back, so it never overflows a signed type; division by zero and
   `INT64_MIN / -1` are guarded by the lowering before they reach C, and
-  `INT64_MIN` is written as the macro.  A float comparison is C's operator,
-  `!=` unordered and the others ordered, as `docs/pir.md` defines `cmp`; a
-  `cast` between `f64` and `i64` reinterprets the bits with `memcpy`.
+  `INT64_MIN` is written as the macro.  A shift is a shift of the
+  `uint64_t` by its count masked with `& 63` (`(uint64_t)a << ((uint64_t)n &
+  63)`, a constant count masked as it is lowered), which is PIR's `shl` and
+  `shr` (docs/pir.md §6), so C never shifts by 64 or more; the language's
+  rule that a shift by the type's width or more gives 0 is a `?:` the
+  lowering asks for where the count is not known.  A float comparison is
+  C's operator, `!=` unordered and the others ordered, as `docs/pir.md`
+  defines `cmp`; a `cast` between `f64` and `i64` reinterprets the bits with
+  `memcpy`.
 * **Constants.**  Strings and data are `static const` arrays
   (`static const char pk_hello_S_2Estr0[3] = "hi";`), an empty one `{0}` of
   one element; a `?` in a string is escaped, so no trigraph forms.  A

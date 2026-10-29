@@ -224,7 +224,8 @@ TEST(PIRMLIR, SharedLoweringOfEveryItemAndInstruction) {
   for (const char *text :
        {"func.func private @PaykanString_new", "pir.vtable @pkvt_main_SPoint",
         "pir.extern_vtable @pkvt_lib_SAdder", "pk_main_SPoint__destroy",
-        "func.func private @pk_lib_Shelper", "scf.index_switch", "case 7 {"})
+        "func.func private @pk_lib_Shelper", "scf.index_switch", "case 7 {",
+        "arith.andi", "arith.ori", "arith.xori", "arith.shli", "arith.shrui"})
     EXPECT_NE(mlir.find(text), std::string::npos) << text << "\n" << mlir;
   expectRoundTrip(mlir, ctx);
 }
@@ -431,6 +432,139 @@ TEST(PIRMLIR, DenseSetKeyCasesAreIfs) {
   expectOnlyEmitCOps(*mod);
   for (const char *text : {"INT64_MIN", "9223372036854775807", "switch ("})
     EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
+}
+
+// The bit operations: `and`, `or` and `xor`, and shifts by a count only the
+// run knows, by a constant below 64 and by one of 64 or more (67, read as
+// 3), each count masked to its low six bits (docs/design/bitwise.md).
+const char *const kBits = R"(module "main"
+fn @bits(%a.1: i64, %n.2: i64) -> i64 {
+  %x.3 = and %a.1, %n.2
+  %y.4 = or %x.3, 1
+  %z.5 = xor %y.4, -1
+  %l.6 = shl %z.5, %n.2
+  %r.7 = shr %l.6, %n.2
+  %c.8 = shl %r.7, 67
+  %d.9 = shr %c.8, 3
+  ret %d.9
+}
+
+fn @main() -> i64 {
+  %r.1 = call @bits(12, 3)
+  ret %r.1
+}
+)";
+
+TEST(PIRMLIR, BitwiseInstructionsLowerToArith) {
+  auto ctx = mlir_backend::createContext();
+  std::string err;
+  std::string mlir = importText(kBits, *ctx, err);
+  ASSERT_FALSE(mlir.empty()) << err;
+  for (const char *op : {"= and %arg0, %arg1 : i64", "= or %0, %c1_i64 : i64",
+                         "= xor %1, %c-1_i64 : i64", "= shl %2, %arg1 : i64",
+                         "= shr %3, %arg1 : i64", "= shl %4, %c67_i64 : i64"})
+    EXPECT_NE(mlir.find(op), std::string::npos) << op << "\n" << mlir;
+  expectRoundTrip(mlir, *ctx);
+
+  std::string scf = scfText(kBits, *ctx, err);
+  ASSERT_FALSE(scf.empty()) << err;
+  const size_t from = scf.find("func.func @pk_main_Sbits(");
+  ASSERT_NE(from, std::string::npos) << scf;
+  const std::string bits = scf.substr(from, scf.find("func.func @main") - from);
+  for (const char *op :
+       {"arith.andi %arg0, %arg1 : i64", "arith.ori %0, %", "arith.xori %1, %"})
+    EXPECT_NE(bits.find(op), std::string::npos) << op << "\n" << bits;
+  EXPECT_EQ(bits.find("pir."), std::string::npos) << bits;
+  // What defines @p value in @bits, after its `<value> = `.
+  auto definition = [&](const std::string &value) {
+    const size_t at = bits.find(value + " = ");
+    if (at == std::string::npos)
+      return std::string();
+    const size_t text = at + value.size() + 3;
+    return bits.substr(text, bits.find('\n', at) - text);
+  };
+  // The operand after the comma of an `op %a, %b : type` line.
+  auto second = [](const std::string &line) {
+    const size_t comma = line.find(", ");
+    return line.substr(comma + 2, line.find(" :", comma) - comma - 2);
+  };
+  // Each shift's count, in order: %n & 63 for the first two, the constant
+  // 3 for `shl` by 67 and `shr` by 3.
+  std::vector<std::string> counts, shifts;
+  std::istringstream lines(bits);
+  for (std::string line; std::getline(lines, line);)
+    for (const char *shift : {"arith.shli ", "arith.shrui "})
+      if (line.find(shift) != std::string::npos) {
+        counts.push_back(second(line));
+        shifts.emplace_back(shift);
+      }
+  ASSERT_EQ(counts.size(), 4u) << bits;
+  EXPECT_EQ(shifts, (std::vector<std::string>{"arith.shli ", "arith.shrui ",
+                                              "arith.shli ", "arith.shrui "}))
+      << bits;
+  for (size_t i = 0; i < 2; ++i) {
+    const std::string mask = definition(counts[i]);
+    EXPECT_EQ(mask.rfind("arith.andi %arg1, %", 0), 0u) << mask << "\n" << bits;
+    EXPECT_EQ(definition(second(mask)), "arith.constant 63 : i64") << bits;
+  }
+  for (size_t i = 2; i < 4; ++i)
+    EXPECT_EQ(definition(counts[i]), "arith.constant 3 : i64") << bits;
+}
+
+// A shift by a masked count, or by a constant below 64, is one C shift of
+// the uint64_t, without the `n < 64 ? ... : 0` upstream's conversion puts
+// around a shift.
+TEST(PIRMLIR, AShiftIsOneCShift) {
+  const char *const text = R"(module "main"
+fn @shl(%a.1: i64, %n.2: i64) -> i64 {
+  %r.3 = shl %a.1, %n.2
+  ret %r.3
+}
+
+fn @shr(%a.1: i64) -> i64 {
+  %r.2 = shr %a.1, 3
+  ret %r.2
+}
+
+fn @main() -> i64 {
+  %l.1 = call @shl(1, 3)
+  %r.2 = call @shr(%l.1)
+  ret %r.2
+}
+)";
+  std::unique_ptr<mlir::MLIRContext> ctx;
+  mlir::OwningOpRef<mlir::ModuleOp> mod;
+  std::string err;
+  std::string c = emitCText(text, ctx, mod, err);
+  ASSERT_FALSE(c.empty()) << err;
+  expectOnlyEmitCOps(*mod);
+  auto body = [&](const std::string &signature) {
+    const size_t at = c.find(signature + " {\n");
+    EXPECT_NE(at, std::string::npos) << signature << "\n" << c;
+    if (at == std::string::npos)
+      return std::string();
+    return c.substr(at, c.find("\n}\n", at) - at);
+  };
+  auto count = [](const std::string &s, const std::string &needle) {
+    size_t n = 0;
+    for (size_t at = s.find(needle); at != std::string::npos;
+         at = s.find(needle, at + 1))
+      ++n;
+    return n;
+  };
+  const std::string shl = body("int64_t pk_main_Sshl(int64_t v1, int64_t v2)");
+  EXPECT_EQ(count(shl, " << "), 1u) << shl;
+  EXPECT_EQ(count(shl, " & "), 1u) << shl;
+  EXPECT_EQ(count(shl, " = 63;"), 1u) << shl;
+  const std::string shr = body("int64_t pk_main_Sshr(int64_t v1)");
+  EXPECT_EQ(count(shr, " >> "), 1u) << shr;
+  EXPECT_EQ(count(shr, " & "), 0u) << shr;
+  EXPECT_EQ(count(shr, " = 3;"), 1u) << shr;
+  for (const std::string *f : {&shl, &shr}) {
+    EXPECT_EQ(f->find('?'), std::string::npos) << *f;
+    EXPECT_EQ(f->find(" = 64;"), std::string::npos) << *f;
+    EXPECT_EQ(f->find("bool"), std::string::npos) << *f;
+  }
 }
 
 /// One panic guard on dividing %a by %b, as the lowering emits them

@@ -1,0 +1,24 @@
+// The bitwise operators are the unsigned types': a signed, `bool` or float
+// operand, two literals (two `int`s) or two unsigned types of different
+// widths are errors whose hint names the fix (docs/design/bitwise.md,
+// "Errors").
+fn main() -> int {
+  let a = 6;
+  let b = 3;
+  let c = a & b;                   // error: operator '&' is not defined for types 'int' and 'int' (the bitwise operators take unsigned operands: convert with 'unsigned(...)')
+  let x: u8 = 1;
+  let d = x | a;                   // error: operator '|' is not defined for types 'u8' and 'int' (the bitwise operators take unsigned operands: convert the 'int' with 'u8(...)')
+  let i: i32 = 1;
+  let j: i32 = 2;
+  let e = i ^ j;                   // error: operator '^' is not defined for types 'i32' and 'i32' (the bitwise operators take unsigned operands: convert with 'u32(...)'; '^' is exclusive or, not a power)
+  let f = ~a;                      // error: unary '~' is not defined for type 'int' (the bitwise operators take unsigned operands: convert with 'unsigned(...)')
+  let m: u32 = 1 << 5;             // error: operator '<<' is not defined for types 'int' and 'int' (two literals are 'int': give one a type, as in 'unsigned(1) << 5')
+  let p = True;
+  let q = False;
+  let g = p & q;                   // error: operator '&' is not defined for types 'bool' and 'bool' (for a logical and, write '&&')
+  let y: u16 = 2;
+  let h = x & y;                   // error: operator '&' is not defined for types 'u8' and 'u16' (the operands must have one type: convert one with 'u8(...)' or 'u16(...)')
+  let r = 1.5;
+  let k = r ^ 2.0;                 // error: operator '^' is not defined for types 'float' and 'float' ('^' is exclusive or, not a power)
+  return 0;
+}

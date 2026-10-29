@@ -43,6 +43,7 @@
 #include <mlir/Dialect/EmitC/Transforms/TypeConversions.h>
 #include <mlir/Dialect/Func/IR/FuncOps.h>
 #include <mlir/Dialect/SCF/IR/SCF.h>
+#include <mlir/IR/Matchers.h>
 #include <mlir/IR/SymbolTable.h>
 #include <mlir/Pass/Pass.h>
 #include <mlir/Target/Cpp/CppEmitter.h>
@@ -635,6 +636,43 @@ struct Int64MinLowering : CPattern<arith::ConstantOp> {
   }
 };
 
+/// Whether @p n, a shift's count, is below 64 by its definition: a constant
+/// of 0 to 63, or an `arith.andi` with one, which is how the shared lowering
+/// masks every count it does not know (`n & 63`).
+bool countBelow64(Value n) {
+  auto below = [](Value v) {
+    APInt c;
+    return matchPattern(v, m_ConstantInt(&c)) && c.ult(64);
+  };
+  if (below(n))
+    return true;
+  auto mask = n.getDefiningOp<arith::AndIOp>();
+  return mask && (below(mask.getLhs()) || below(mask.getRhs()));
+}
+
+/// A shift of an i64 by a count below 64 (countBelow64): C's shift of the
+/// uint64_t, `(uint64_t)a << (uint64_t)n`, without the `n < 64 ? ... : 0`
+/// upstream's pattern puts around every shift.  Any other count is left to
+/// upstream's pattern, which is correct too.
+template <typename Op, typename CShift> struct ShiftLowering : CPattern<Op> {
+  using CPattern<Op>::CPattern;
+  LogicalResult matchAndRewrite(Op op, typename Op::Adaptor a,
+                                ConversionPatternRewriter &r) const override {
+    Type t = this->convert(op.getType());
+    if (!t || !t.isInteger(64) || !countBelow64(op.getRhs()))
+      return failure();
+    Location loc = op.getLoc();
+    Type u64 = r.getIntegerType(64, /*isSigned=*/false);
+    Value value = this->castTo(r, loc, u64, a.getLhs());
+    Value count = this->castTo(r, loc, u64, a.getRhs());
+    r.replaceOpWithNewOp<emitc::CastOp>(
+        op, t, CShift::create(r, loc, u64, value, count));
+    return success();
+  }
+};
+using ShlLowering = ShiftLowering<arith::ShLIOp, emitc::BitwiseLeftShiftOp>;
+using ShrLowering = ShiftLowering<arith::ShRUIOp, emitc::BitwiseRightShiftOp>;
+
 // -- The ownership mask: a uint64_t
 
 /// `UINT64_C(<v>)`: a mask constant, which C spells with its type.
@@ -1108,7 +1146,8 @@ struct ConvertToEmitCPass
     populateArithToEmitCPatterns(types, patterns);
     // Ahead of the upstream patterns for the same ops.
     patterns.add<RuntimeDeclLowering, CallLowering, FloatCmpLowering,
-                 Int64MinLowering>(types, ctx, u, /*benefit=*/2);
+                 Int64MinLowering, ShlLowering, ShrLowering>(types, ctx, u,
+                                                             /*benefit=*/2);
     patterns.add<ICallLowering, FnAddrLowering, AllocaLowering, PtrLoadLowering,
                  PtrStoreLowering, PtrAddLowering, MemCopyLowering,
                  MemZeroLowering, AddressOfLowering, NullLowering, CastLowering,

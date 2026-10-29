@@ -26,6 +26,7 @@
 #include <span>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace paykan;
@@ -233,6 +234,11 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     case Opcode::FnAddr:
     case Opcode::ICall:
     case Opcode::Owned:
+    case Opcode::And:
+    case Opcode::Or:
+    case Opcode::Xor:
+    case Opcode::Shl:
+    case Opcode::Shr:
       check(e.Id);
     }
   }
@@ -265,8 +271,9 @@ TEST(PIRBinary, EveryEnumeratorHasACodeAndAName) {
     // some none is_some unwrap weak.load weak.new; local.addr field.addr
     // ptr.load ptr.store ptr.add mem.copy mem.zero; wrap mask udiv urem
     // ucmp utof ftou fround32 weak.release; fn.addr icall; vtable.store;
-    // owned
-    bool used = c <= 31 || (c >= 34 && c <= 52) || c == 54;
+    // owned; and or xor shl shr
+    bool used =
+        c <= 31 || (c >= 34 && c <= 52) || c == 54 || (c >= 58 && c <= 62);
     EXPECT_EQ(opcodeFromCode(static_cast<uint8_t>(c), op), used) << c;
   }
   for (unsigned c = 8; c < 256; ++c) {
@@ -597,6 +604,69 @@ TEST(PIRBinary, RejectsReservedCodesAndSlack) {
     b[rec] += 1;
     EXPECT_FALSE(binary::decode(b).isOk());
   }
+}
+
+// The bit operations' codes, 58 to 62 (docs/design/pkm.md §5.5): a function
+// using the five round-trips, each code decodes to its instruction and
+// encodes back to the same bytes, and 63, the next code, is reserved.
+TEST(PIRBinary, BitwiseOpcodeCodes) {
+  Program p = parse(R"(module "m"
+
+fn @bits(%x.1: i64, %n.2: i64) -> i64 {
+  %a.3 = and %x.1, 255
+  %o.4 = or %a.3, %n.2
+  %e.5 = xor %o.4, -1
+  %l.6 = shl %e.5, %n.2
+  %r.7 = shr %l.6, 3
+  ret %r.7
+}
+)");
+  ASSERT_EQ(p.Modules.size(), 1u);
+  expectRoundTrip(p.Modules[0]);
+
+  // `%1 = and 12, 10; ret %1`, its opcode byte at the offset of
+  // RejectsReservedCodesAndSlack's.
+  Module m;
+  m.Name = "r";
+  Function f;
+  f.Name = "f";
+  f.Sig.Ret = Type::I64;
+  Instr in;
+  in.Op = Opcode::And;
+  in.Result = {f.NextValueId++, Type::I64, ""};
+  in.Args.push_back(Operand::i64(12));
+  in.Args.push_back(Operand::i64(10));
+  f.Body.Stmts.push_back(std::move(in));
+  f.Body.Stmts.push_back(Return{Operand::value(1)});
+  m.Functions.push_back(std::move(f));
+  std::vector<uint8_t> good = binary::encode(m);
+  std::vector<binary::SymbolEntry> idx = binary::index(good);
+  ASSERT_EQ(idx.size(), 1u);
+  size_t opcode = idx[0].Offset + 1 + 1 + 4 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1;
+  ASSERT_EQ(good[opcode], 58u);
+  const std::pair<uint8_t, Opcode> codes[] = {{58, Opcode::And},
+                                              {59, Opcode::Or},
+                                              {60, Opcode::Xor},
+                                              {61, Opcode::Shl},
+                                              {62, Opcode::Shr}};
+  const char *const names[] = {"and", "or", "xor", "shl", "shr"};
+  for (size_t i = 0; i < std::size(codes); ++i) {
+    std::vector<uint8_t> b = good;
+    b[opcode] = codes[i].first;
+    auto d = binary::decode(b);
+    ASSERT_TRUE(d.isOk()) << d.status().message();
+    const Instr &op = std::get<Instr>((*d).Functions[0].Body.Stmts[0]);
+    EXPECT_EQ(op.Op, codes[i].second);
+    EXPECT_STREQ(opcodeName(op.Op), names[i]);
+    EXPECT_TRUE(verify(*d).empty()) << formatErrors(verify(*d));
+    EXPECT_EQ(binary::encode(*d), b);
+  }
+  std::vector<uint8_t> b = good;
+  b[opcode] = 63;
+  auto bad = binary::decode(b);
+  ASSERT_FALSE(bad.isOk());
+  EXPECT_NE(bad.status().message().find("reserved opcode"), std::string::npos)
+      << bad.status().message();
 }
 
 // `mem` is the type of a local or a field only: a reader rejects it as a

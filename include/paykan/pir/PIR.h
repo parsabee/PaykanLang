@@ -359,6 +359,12 @@ enum class Opcode : uint8_t {
   ICall,  // callee (ptr) = Args[0], Sig; Args[1..] = args
   // box parameters (docs/pir.md §3)
   Owned, // box parameter -> bool: whether the caller handed it over
+  // bit operations (docs/design/bitwise.md)
+  And, // i64, i64 -> i64: bitwise and
+  Or,  // i64, i64 -> i64: bitwise or
+  Xor, // i64, i64 -> i64: bitwise exclusive or
+  Shl, // i64, i64 -> i64: a << (b mod 64), the count's low six bits
+  Shr, // i64, i64 -> i64: a >> (b mod 64), zeros shifted in
 };
 
 enum class CmpPred : uint8_t { Eq, Ne, Lt, Le, Gt, Ge };

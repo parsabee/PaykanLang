@@ -43,6 +43,7 @@
 #include <mlir/Dialect/SCF/IR/SCF.h>
 #include <mlir/IR/Builders.h>
 #include <mlir/IR/IRMapping.h>
+#include <mlir/IR/Matchers.h>
 #include <mlir/IR/SymbolTable.h>
 
 #include <cstdio>
@@ -168,6 +169,14 @@ private:
   Value lookup(Value v) { return Map.lookup(v); }
   Value i64(int64_t v) {
     return arith::ConstantIntOp::create(B, Loc, B.getI64Type(), v);
+  }
+  /// A shift's count @p n mod 64: a constant below 64 itself, another
+  /// constant's low six bits, or `n & 63`.
+  Value shiftCount(Value n) {
+    APInt c;
+    if (!matchPattern(n, m_ConstantInt(&c)))
+      return arith::AndIOp::create(B, Loc, n, i64(63));
+    return c.ult(64) ? n : i64(static_cast<int64_t>(c.getZExtValue() & 63));
   }
   Value flagConst(int64_t v) {
     return arith::ConstantIntOp::create(B, Loc, B.getI8Type(), v);
@@ -853,6 +862,26 @@ void FunctionLowering::lowerInstr(Operation *op) {
       })
       .Case([&](P::URemOp) {
         define(op, arith::RemUIOp::create(B, Loc, operand(0), operand(1)));
+      })
+      // Bit operations.  A shift's count is its low six bits, which is PIR's
+      // definition: LLVM never sees a shift by 64 or more (its poison) and C
+      // never makes one (undefined behaviour).
+      .Case([&](P::AndOp) {
+        define(op, arith::AndIOp::create(B, Loc, operand(0), operand(1)));
+      })
+      .Case([&](P::OrOp) {
+        define(op, arith::OrIOp::create(B, Loc, operand(0), operand(1)));
+      })
+      .Case([&](P::XorOp) {
+        define(op, arith::XOrIOp::create(B, Loc, operand(0), operand(1)));
+      })
+      .Case([&](P::ShlOp) {
+        define(op, arith::ShLIOp::create(B, Loc, operand(0),
+                                         shiftCount(operand(1))));
+      })
+      .Case([&](P::ShrOp) {
+        define(op, arith::ShRUIOp::create(B, Loc, operand(0),
+                                          shiftCount(operand(1))));
       })
       .Case([&](P::NegOp) {
         Value a = operand(0);

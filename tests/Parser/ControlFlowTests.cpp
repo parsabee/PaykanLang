@@ -232,6 +232,56 @@ TEST(ControlFlow, CompoundAssignmentTargets) {
   EXPECT_FALSE(apart.Ok);
 }
 
+// The bitwise compound assignments desugar as `+=` does
+// (docs/design/bitwise.md); `>>=` is a `>` directly followed by `>=`.
+TEST(ControlFlow, BitwiseCompoundAssignments) {
+  auto [ok, driver] = parse(R"(fn main() -> int {
+  x &= 1;
+  x |= 2;
+  x ^= 3;
+  x <<= 4;
+  x >>= 5;
+  p.f >>= 1;
+  xs[i] <<= 1;
+  return 0;
+}
+)");
+  ASSERT_TRUE(ok);
+  std::string d = dumpAST(*driver);
+  for (const char *e :
+       {"AssignStmt <2:3-2:10> 'x'\n    | `-BinaryExpr <2:3-2:9> '&'\n"
+        "    |   |-Identifier <2:3-2:4> 'x'\n"
+        "    |   `-IntegerLiteral <2:8-2:9> 1\n",
+        "AssignStmt <3:3-3:10> 'x'\n    | `-BinaryExpr <3:3-3:9> '|'\n",
+        "AssignStmt <4:3-4:10> 'x'\n    | `-BinaryExpr <4:3-4:9> '^'\n",
+        "AssignStmt <5:3-5:11> 'x'\n    | `-BinaryExpr <5:3-5:10> '<<'\n"
+        "    |   |-Identifier <5:3-5:4> 'x'\n"
+        "    |   `-IntegerLiteral <5:9-5:10> 4\n",
+        "AssignStmt <6:3-6:11> 'x'\n    | `-BinaryExpr <6:3-6:10> '>>'\n"
+        "    |   |-Identifier <6:3-6:4> 'x'\n"
+        "    |   `-IntegerLiteral <6:9-6:10> 5\n",
+        "MemberAssignStmt 'f' <7:3-7:13>\n    | |-Identifier <7:3-7:4> 'p'\n"
+        "    | `-BinaryExpr <7:3-7:12> '>>'\n"
+        "    |   |-MemberAccessExpr 'f' <7:3-7:6>\n",
+        "SubscriptAssignStmt <8:3-8:15>\n    | |-Identifier <8:3-8:5> 'xs'\n"
+        "    | |-Identifier <8:6-8:7> 'i'\n"
+        "    | `-BinaryExpr <8:3-8:14> '<<'\n"
+        "    |   |-SubscriptExpr <8:3-8:8>\n"})
+    EXPECT_NE(d.find(e), std::string::npos) << e << "\n" << d;
+
+  // The target of `>>=` is the expression before it, a comparison here.
+  auto r =
+      parseWithDiags("fn main() -> int {\n  a < b >>= c;\n  return 0;\n}\n");
+  ASSERT_FALSE(r.Ok);
+  ASSERT_FALSE(r.Diags.empty());
+  EXPECT_EQ(r.Diags[0].Message, "left-hand side of '>>=' must be an "
+                                "identifier, field access, or subscript");
+  EXPECT_EQ(r.Diags[0].Loc.getColumnStart(), 3u);
+  // `>>` and `=` apart are a shift with no right operand.
+  EXPECT_FALSE(
+      parseWithDiags("fn main() -> int {\n  x >> = 1;\n  return 0;\n}\n").Ok);
+}
+
 // ─── logical operators ──────────────────────────────────────────────────────
 
 TEST(ControlFlow, LogicalAnd) {

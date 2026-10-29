@@ -94,6 +94,7 @@ add_executable(sema_tests
     Sema/FunctionTypeTests.cpp
     Sema/VisibilityTests.cpp
     Sema/SizedTypeTests.cpp
+    Sema/BitwiseTests.cpp
     Sema/PureVirtualTests.cpp
 )
 target_include_directories(sema_tests
@@ -149,6 +150,7 @@ add_executable(codegen_tests
     CodeGen/StructTests.cpp
     CodeGen/FunctionTypeTests.cpp
     CodeGen/SizedTypeTests.cpp
+    CodeGen/BitwiseTests.cpp
     CodeGen/RegressionTests.cpp
     CodeGen/LiteralObjectTests.cpp
     CodeGen/RuntimeNameTests.cpp
@@ -339,6 +341,7 @@ target_link_libraries(ast_interchange_tests
             paykan_ast_interchange
             paykan_frontend
             paykan_ast_printer
+            paykan_sema
             paykan_compile_options
 )
 paykan_link_plugins(ast_interchange_tests)

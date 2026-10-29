@@ -38,6 +38,16 @@ const char *BinaryExpr::getOpcodeStr() const {
     return "&&";
   case BinaryOpcode::Or:
     return "||";
+  case BinaryOpcode::BitAnd:
+    return "&";
+  case BinaryOpcode::BitOr:
+    return "|";
+  case BinaryOpcode::BitXor:
+    return "^";
+  case BinaryOpcode::Shl:
+    return "<<";
+  case BinaryOpcode::Shr:
+    return ">>";
   case BinaryOpcode::Count:
     break;
   }
@@ -84,7 +94,8 @@ std::optional<int64_t> ForStmt::constantStep() const {
   const auto *lit = dyn_cast<IntegerLiteral>(e);
   if (!lit)
     return std::nullopt;
-  // A literal is at most INT64_MAX (docs/grammar.md), so its negation fits.
+  // Sema rejects a literal above INT64_MAX in the `int` step
+  // (docs/design/bitwise.md), so its negation fits.
   return negated ? -lit->getValue() : lit->getValue();
 }
 
@@ -96,6 +107,8 @@ const char *UnaryExpr::getOpcodeStr() const {
     return "-";
   case UnaryOpcode::Not:
     return "!";
+  case UnaryOpcode::BitNot:
+    return "~";
   case UnaryOpcode::Count:
     break;
   }
@@ -239,7 +252,9 @@ void BuiltinType::initOps() {
   case U16:
   case U32:
   case U64:
-    // An unsigned type has no negation; otherwise the integer operators.
+    // An unsigned type has no negation; otherwise the integer operators,
+    // and the bitwise ones, which only the unsigned types have
+    // (docs/design/bitwise.md).
     addBinaryOp(BinaryOpcode::Add);
     addBinaryOp(BinaryOpcode::Sub);
     addBinaryOp(BinaryOpcode::Mul);
@@ -251,6 +266,12 @@ void BuiltinType::initOps() {
     addBinaryOp(BinaryOpcode::Ge);
     addBinaryOp(BinaryOpcode::Eq);
     addBinaryOp(BinaryOpcode::Ne);
+    addUnaryOp(UnaryOpcode::BitNot);
+    addBinaryOp(BinaryOpcode::BitAnd);
+    addBinaryOp(BinaryOpcode::BitOr);
+    addBinaryOp(BinaryOpcode::BitXor);
+    addBinaryOp(BinaryOpcode::Shl);
+    addBinaryOp(BinaryOpcode::Shr);
     break;
   case Int:
   case Float:
@@ -540,8 +561,11 @@ Expr *ASTCloner::cloneExpr(Expr *e) {
   }
   auto loc = e->getLocation();
   switch (e->getKind()) {
-  case ASTNode::NK_IntegerLiteral:
-    return Ctx.make<IntegerLiteral>(loc, cast<IntegerLiteral>(e)->getValue());
+  case ASTNode::NK_IntegerLiteral: {
+    const auto *lit = cast<IntegerLiteral>(e);
+    return Ctx.make<IntegerLiteral>(loc, lit->getValue(),
+                                    lit->isAboveInt64Max());
+  }
   case ASTNode::NK_FloatLiteral:
     return Ctx.make<FloatLiteral>(loc, cast<FloatLiteral>(e)->getValue());
   case ASTNode::NK_BoolLiteral:
