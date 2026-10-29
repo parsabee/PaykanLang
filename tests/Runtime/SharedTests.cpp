@@ -6,6 +6,9 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
+#include <initializer_list>
+
 extern "C" {
 #include "Runtime.h"
 }
@@ -145,4 +148,115 @@ TEST(SharedRelease, CallsVtableDestroy) {
   // str->data should still be valid here.
   EXPECT_STREQ(str->data, "hello");
   Paykan_release(s); // refcount = 0 — destroys str and frees box
+}
+
+// -- The inline fast paths
+//
+// Paykan_retain_inline, Paykan_release_inline and PaykanShared_get_inline
+// (what the generated code does) do exactly what their functions do, at
+// every count: the common case inline, the rest through the function.
+
+namespace {
+
+int gDestroys = 0;
+
+void Counted_destroy(PaykanObject *) { ++gDestroys; }
+
+PaykanMethod Counted_vtable[PAYKAN_OBJECT_SLOTS] = {
+    reinterpret_cast<PaykanMethod>(&Counted_destroy),
+    reinterpret_cast<PaykanMethod>(&PaykanObject_toString),
+    reinterpret_cast<PaykanMethod>(&PaykanObject_equals),
+};
+
+/// An object whose destroy counts in gDestroys, boxed (strong 1).
+PaykanShared *counted() {
+  auto *o = static_cast<PaykanObject *>(Paykan_malloc(sizeof(PaykanObject)));
+  std::memset(o, 0, sizeof *o);
+  o->vtable = Counted_vtable;
+  return PaykanShared_new(o);
+}
+
+} // namespace
+
+TEST(SharedInline, RetainIncrementsAsPaykanRetain) {
+  for (int32_t n : {1, 2, 1000, PAYKAN_REF_MAX - 1}) {
+    PaykanShared *a = counted();
+    PaykanShared *b = counted();
+    a->strong = n;
+    b->strong = n;
+    Paykan_retain_inline(a);
+    Paykan_retain(b);
+    EXPECT_EQ(a->strong, n + 1);
+    EXPECT_EQ(a->strong, b->strong);
+    a->strong = 1;
+    b->strong = 1;
+    Paykan_release(a);
+    Paykan_release(b);
+  }
+}
+
+TEST(SharedInlineDeathTest, ARetainPastTheLimitPanics) {
+  // The limit is the function's: the inline path calls it there.
+  PaykanShared *s = counted();
+  s->strong = PAYKAN_REF_MAX;
+  EXPECT_DEATH(Paykan_retain_inline(s), "too many strong references");
+  s->strong = 1;
+  Paykan_release(s);
+}
+
+TEST(SharedInline, AReleaseAboveOneOnlyDecrements) {
+  gDestroys = 0;
+  PaykanShared *s = counted();
+  Paykan_retain_inline(s);
+  Paykan_retain_inline(s);
+  EXPECT_EQ(s->strong, 3);
+  Paykan_release_inline(s);
+  Paykan_release_inline(s);
+  EXPECT_EQ(s->strong, 1);
+  EXPECT_EQ(gDestroys, 0);
+  Paykan_release_inline(s);
+  EXPECT_EQ(gDestroys, 1);
+}
+
+TEST(SharedInline, TheLastReleaseDestroysAndFrees) {
+  Paykan_heap_set_tracking(1);
+  Paykan_heap_reset();
+  gDestroys = 0;
+  PaykanShared *s = counted();
+  Paykan_release_inline(s);
+  EXPECT_EQ(gDestroys, 1);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+  // A string's destroy frees its data too.
+  Paykan_release_inline(
+      PaykanShared_new((PaykanObject *)PaykanString_new("bye", 3)));
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+  Paykan_heap_set_tracking(0);
+}
+
+TEST(SharedInline, AWeakReferenceOutlivesTheLastRelease) {
+  Paykan_heap_set_tracking(1);
+  Paykan_heap_reset();
+  gDestroys = 0;
+  PaykanShared *s = counted();
+  PaykanWeak *w = Paykan_weak_new(s);
+  Paykan_release_inline(s);
+  EXPECT_EQ(gDestroys, 1);
+  EXPECT_EQ(Paykan_weak_load(w), nullptr);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 1); // the zombie, until its weak goes
+  Paykan_weak_release(w);
+  EXPECT_EQ(Paykan_heap_live_blocks(), 0);
+  Paykan_heap_set_tracking(0);
+}
+
+TEST(SharedInline, NullIsANoOp) {
+  Paykan_retain_inline(nullptr);
+  Paykan_release_inline(nullptr);
+  EXPECT_EQ(PaykanShared_get_inline(nullptr), nullptr);
+}
+
+TEST(SharedInline, GetIsTheIdentity) {
+  PaykanShared *s = counted();
+  EXPECT_EQ(PaykanShared_get_inline(s), PaykanShared_get(s));
+  EXPECT_EQ(PaykanShared_get_inline(s), s);
+  Paykan_release(s);
 }

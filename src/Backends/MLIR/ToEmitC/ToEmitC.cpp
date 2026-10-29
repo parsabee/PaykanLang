@@ -14,9 +14,10 @@
 // runtime function is called through Runtime.h's prototype, whose pointer
 // types may be more precise than PIR's: its pointer arguments are passed
 // as `void *` and its pointer result is cast, so no table of the runtime's
-// C types is needed.  A function pointer is held as a `void *` through
-// uintptr_t (ISO C converts neither to the other directly), and called
-// through a helper per signature, `pkicall_<n>`.
+// C types is needed; Paykan_retain and Paykan_release are called through
+// Runtime.h's inline fast paths.  A function pointer is held as a `void *`
+// through uintptr_t (ISO C converts neither to the other directly), and
+// called through a helper per signature, `pkicall_<n>`.
 //
 // The output is strictly conforming C11 under Runtime.h's target
 // assumptions: nothing a `-std=c11 -pedantic-errors -Wall -Wextra -Werror`
@@ -258,6 +259,17 @@ struct RuntimeDeclLowering : CPattern<func::FuncOp> {
   }
 };
 
+/// The function a call of runtime function @p callee calls: Runtime.h's
+/// inline fast path of Paykan_retain and Paykan_release, the function
+/// itself for any other.
+StringRef calledRuntime(StringRef callee) {
+  if (callee == names::kPaykanRetain)
+    return names::kPaykanRetainInline;
+  if (callee == names::kPaykanRelease)
+    return names::kPaykanReleaseInline;
+  return callee;
+}
+
 /// A call, by name.  A runtime function's pointer arguments go as `void *`
 /// and its pointer result is cast; an unread result is not kept (C would
 /// warn about the variable).
@@ -282,7 +294,7 @@ struct CallLowering : CPattern<func::CallOp> {
         runtime && result && isa<emitc::PointerType>(result) ? ptr() : result;
     auto call = emitc::CallOpaqueOp::create(
         r, loc, callResult ? TypeRange{callResult} : TypeRange{},
-        op.getCallee(), args);
+        runtime ? calledRuntime(op.getCallee()) : op.getCallee(), args);
     if (!used) {
       r.eraseOp(op);
       return success();

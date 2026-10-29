@@ -212,7 +212,7 @@ static PaykanShared *io_read_result(PaykanFile *f, PaykanShared *r,
                                     int64_t *err) {
   if (r != &PaykanObject_None)
     return r;
-  Paykan_release(r);
+  Paykan_release_inline(r);
   if (ferror(f->handle))
     *err = errno ? errno : EIO;
   else

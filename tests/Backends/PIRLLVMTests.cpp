@@ -32,41 +32,50 @@ struct Run {
   bool Ok = false;
 };
 
-/// Parse, verify, translate and run a PIR program.
-Run runPIR(const std::string &text, const std::vector<std::string> &args = {}) {
-  Run r;
+/// Parse, verify and translate a PIR program, then run it in the JIT, its
+/// output going where the test's goes; its exit code, or -1 with the reason
+/// in @p err.
+int jitPIR(const std::string &text, const std::vector<std::string> &args,
+           std::string &err) {
   pir::ParseError perr;
   auto program = pir::parseProgram(text, perr);
   if (!program) {
-    r.Err = "parse error: " + perr.str();
-    return r;
+    err = "parse error: " + perr.str();
+    return -1;
   }
   auto verrs = pir::verify(*program);
   if (!verrs.empty()) {
-    r.Err = "verifier: " + pir::formatErrors(verrs);
-    return r;
+    err = "verifier: " + pir::formatErrors(verrs);
+    return -1;
   }
   auto ctx = std::make_unique<llvm::LLVMContext>();
   auto module = mlir_backend::compileProgram(*program, *ctx, "t", "");
   if (!module) {
-    r.Err = module.status().message();
-    return r;
+    err = module.status().message();
+    return -1;
   }
-  auto [savedOut, outPath] = test::redirectFdToTempFile(STDOUT_FILENO);
-  auto [savedErr, errPath] = test::redirectFdToTempFile(STDERR_FILENO);
   auto result = jit::runModule(std::move(*module), std::move(ctx), args);
   fflush(stdout);
   fflush(stderr);
+  if (!result) {
+    err = "JIT: " + llvm::toString(result.takeError());
+    return -1;
+  }
+  return *result;
+}
+
+/// Parse, verify, translate and run a PIR program.
+Run runPIR(const std::string &text, const std::vector<std::string> &args = {}) {
+  Run r;
+  std::string err;
+  auto [savedOut, outPath] = test::redirectFdToTempFile(STDOUT_FILENO);
+  auto [savedErr, errPath] = test::redirectFdToTempFile(STDERR_FILENO);
+  r.ExitCode = jitPIR(text, args, err);
   test::restoreFd(STDOUT_FILENO, savedOut);
   test::restoreFd(STDERR_FILENO, savedErr);
   r.Out = test::drainAndRemoveTempFile(outPath);
-  r.Err = test::drainAndRemoveTempFile(errPath);
-  if (!result) {
-    r.Err += "JIT: " + llvm::toString(result.takeError());
-    return r;
-  }
-  r.ExitCode = *result;
-  r.Ok = true;
+  r.Err = test::drainAndRemoveTempFile(errPath) + err;
+  r.Ok = err.empty();
   return r;
 }
 
@@ -494,4 +503,130 @@ fn @main() -> i64 {
 )");
   ASSERT_TRUE(r.Ok) << r.Err;
   EXPECT_EQ(r.ExitCode, 3);
+}
+
+// -- Reference counts
+//
+// `retain` and `release` have their fast paths inline (ToLLVM.cpp,
+// InlineReferenceCountsPass): a null box is skipped, a retain of a count
+// below the limit increments the header's 32-bit count at offset 8 and a
+// release of one above one decrements it; the runtime's Paykan_retain and
+// Paykan_release are called only for the rest, on the unlikely branch.
+
+/// A class C whose destroy prints "destroyed", and @strong(%b): the strong
+/// count of %b's object (its header's 64 bits at 8: the weak count, 0
+/// here, above the strong one).
+const char *const kCounted = R"(module "t"
+cstr @.d = "destroyed\n" len 10
+cstr @.k = "kept\n" len 5
+extern fn @$rt.PaykanObject_toString(obj) -> box
+extern fn @$rt.PaykanObject_equals(obj, box) -> i64
+extern fn @$rt.PaykanString_new(ptr, i64) -> obj
+extern fn @$rt.Paykan_print(obj) -> void
+extern fn @$rt.Paykan_dispose(obj) -> void
+
+class C {
+  vtable {
+    destroy = @C_destroy : (obj) -> void
+    toString = @$rt.PaykanObject_toString : (obj) -> box
+    equals = @$rt.PaykanObject_equals : (obj, box) -> i64
+  }
+}
+
+fn @say(%s: ptr, %n: i64) -> void {
+  %o = call @$rt.PaykanString_new(%s, %n)
+  call @$rt.Paykan_print(%o)
+  call @$rt.Paykan_dispose(%o)
+  ret
+}
+
+fn @C_destroy(%self: obj) -> void {
+  call @say(@.d, 10)
+  ret
+}
+
+fn @strong(%b: box) -> i64 {
+  %o = unbox %b
+  %p = cast %o to ptr
+  %at = ptr.add %p, 8
+  %n = ptr.load i64, %at
+  ret %n
+}
+)";
+
+TEST(PIRLLVM, RetainAndReleaseHaveTheirFastPathsInline) {
+  std::string err;
+  std::string ir = translatePIR(std::string(kCounted) + R"(
+fn @main() -> i64 {
+  %o = new C
+  %b = box %o
+  retain %b
+  release %b
+  release %b
+  ret 0
+}
+)",
+                                err);
+  ASSERT_FALSE(ir.empty()) << err;
+  // Each a test of the count, the common case weighted 2000 to 1 ...
+  EXPECT_EQ(linesWith(ir, "icmp ne i32 ").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, ", 2147483647").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "icmp sgt i32 ").size(), 2u) << ir;
+  EXPECT_EQ(linesWith(ir, "!prof").size(), 3u) << ir;
+  EXPECT_FALSE(linesWith(ir, "!{!\"branch_weights\", i32 2000, i32 1}").empty())
+      << ir;
+  // ... an increment or a decrement of the count in place ...
+  EXPECT_EQ(linesWith(ir, "load i32, ptr").size(), 3u) << ir;
+  EXPECT_EQ(linesWith(ir, "add i32 ").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "sub i32 ").size(), 2u) << ir;
+  EXPECT_EQ(linesWith(ir, "store i32 ").size(), 3u) << ir;
+  // ... and the runtime for the rest.
+  EXPECT_EQ(linesWith(ir, "call void @Paykan_retain(").size(), 1u) << ir;
+  EXPECT_EQ(linesWith(ir, "call void @Paykan_release(").size(), 2u) << ir;
+}
+
+TEST(PIRLLVM, InlineRetainsAndReleasesCountAndTheLastOneDestroys) {
+  auto r = runPIR(std::string(kCounted) + R"(
+fn @main() -> i64 {
+  local %l: box
+  %o = new C
+  %b = box %o
+  retain %b
+  retain %b
+  %three = call @strong(%b)
+  release %b
+  release %b
+  %one = call @strong(%b)
+  call @say(@.k, 5)
+  release %b
+  store %l, null box
+  %z = load %l
+  retain %z
+  release %z
+  %t = mul %three, 10
+  %r = add %t, %one
+  ret %r
+}
+)");
+  ASSERT_TRUE(r.Ok) << r.Err;
+  EXPECT_EQ(r.ExitCode, 31);
+  EXPECT_EQ(r.Out, "kept\ndestroyed\n");
+}
+
+TEST(PIRLLVMDeathTest, AnInlineRetainAtTheLimitCallsTheRuntime) {
+  // A count at the limit takes the call, which panics rather than wrap.
+  const std::string text = std::string(kCounted) + R"(
+fn @main() -> i64 {
+  %o = new C
+  %b = box %o
+  %p = cast %o to ptr
+  %at = ptr.add %p, 8
+  ptr.store %at, 2147483647
+  retain %b
+  ret 0
+}
+)";
+  std::string err;
+  EXPECT_DEATH(jitPIR(text, {}, err),
+               "too many strong references to one object");
 }

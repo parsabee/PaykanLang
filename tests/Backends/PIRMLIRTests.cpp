@@ -235,6 +235,12 @@ TEST(PIRMLIR, EmitCOfEveryItemAndInstruction) {
     EXPECT_NE(c.find(text), std::string::npos) << text << "\n" << c;
   // The runtime's functions are Runtime.h's: never declared here.
   EXPECT_EQ(c.find("PaykanString_new("), c.find("PaykanString_new(v")) << c;
+  // A retain and a release call Runtime.h's inline fast paths, which call
+  // the functions only for the rest.
+  EXPECT_NE(c.find("Paykan_retain_inline("), std::string::npos) << c;
+  EXPECT_NE(c.find("Paykan_release_inline("), std::string::npos) << c;
+  EXPECT_EQ(c.find("Paykan_retain("), std::string::npos) << c;
+  EXPECT_EQ(c.find("Paykan_release("), std::string::npos) << c;
   // C11 spells an empty parameter list (void): no declaration or
   // definition (a top-level line) has `()`.
   std::istringstream lines(c);

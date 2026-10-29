@@ -14,10 +14,10 @@ static void print_object(FILE *stream, PaykanObject *obj) {
   if (!obj)
     return;
   PaykanShared *shared = Paykan_vcall_toString(obj);
-  PaykanString *s = (PaykanString *)PaykanShared_get(shared);
+  PaykanString *s = (PaykanString *)PaykanShared_get_inline(shared);
   if (s && s->data)
     fwrite(s->data, 1, (size_t)s->len, stream);
-  Paykan_release(shared);
+  Paykan_release_inline(shared);
 }
 
 void Paykan_print(PaykanObject *obj) { print_object(stdout, obj); }
@@ -51,6 +51,6 @@ PaykanShared **Paykan_args_new(int argc, char **argv, int64_t *count) {
 
 void Paykan_args_free(PaykanShared **args, int64_t count) {
   for (int64_t i = 0; i < count; ++i)
-    Paykan_release(args[i]);
+    Paykan_release_inline(args[i]);
   Paykan_free(args);
 }

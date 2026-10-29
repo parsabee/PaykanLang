@@ -142,8 +142,13 @@ targets part (the design is in [the MLIR backend](design/mlir-backend.md)):
 * **Calls.**  A runtime function is called through `Runtime.h`'s prototype,
   which the unit never repeats: its pointer arguments are passed as `void *`
   and its pointer result is cast, so `Runtime.h`'s more precise pointer types
-  need no table in the compiler.  Native functions and other modules'
-  functions are declared `extern` from their PIR signatures.
+  need no table in the compiler.  A `retain` or `release` calls `Runtime.h`'s
+  `static inline` fast path, `Paykan_retain_inline` or
+  `Paykan_release_inline`: the object's count is incremented, or decremented
+  while it stays above zero, in place, and `Paykan_retain` or
+  `Paykan_release` is called only at the limit or to destroy the object.
+  Native functions and other modules' functions are declared `extern` from
+  their PIR signatures.
 * **Arithmetic.**  Integer arithmetic is done in `uint64_t` and converted
   back, so it never overflows a signed type; division by zero and
   `INT64_MIN / -1` are guarded by the lowering before they reach C, and
@@ -213,7 +218,7 @@ the same properties.
 | Function pointers are pointer-sized, and one converted to `uintptr_t` and back (6.3.2.3p5-6 again) is the same function | vtable slots are 8 bytes; a function value and a vtable slot are held as a `void *` through `uintptr_t` until a `pkicall_<n>` helper calls them | `_Static_assert` on the size; the conversion is documented, true of every LP64 ABI |
 | Two's complement, and converting an out-of-range value to a signed type wraps modulo 2^64 (6.3.1.3p3 leaves it implementation-defined) | `(int64_t)((uint64_t)a + (uint64_t)b)` and the other wrapping operations | `_Static_assert((int64_t)UINT64_MAX == -1 && ...)` |
 | IEEE 754 binary64 `double`, with NaN and infinities | float semantics, `cast` bit patterns, `NAN` / `INFINITY` | `_Static_assert` on `<float.h>` (`FLT_RADIX`, `DBL_MANT_DIG`, `DBL_MAX_EXP`, `DBL_MIN_EXP`) |
-| Every Paykan object, generated or the runtime's, starts with the same 16-byte header, so a pointer to it can be converted to and used as a `PaykanObject *` | the runtime's ARC and method calls see every object as a `PaykanObject`; the generated code reads an object's vtable pointer as the `PaykanMethod *` the header starts with | `_Static_assert` on the runtime structs' header offsets |
+| Every Paykan object, generated or the runtime's, starts with the same 16-byte header, so a pointer to it can be converted to and used as a `PaykanObject *` | the runtime's ARC and method calls see every object as a `PaykanObject`; the generated code reads an object's vtable pointer as the `PaykanMethod *` the header starts with, and its inline retains and releases change the 32-bit `strong` count after it | `_Static_assert` on the runtime structs' header offsets |
 
 `__STDC_IEC_559__` (full Annex F conformance) is deliberately not required:
 GCC and Clang on glibc define it, Apple's clang does not, and the generated

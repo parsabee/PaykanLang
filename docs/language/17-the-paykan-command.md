@@ -52,7 +52,7 @@ option prints a message suggesting `--help`, and also exits with 1.
 | `--rebuild-modules` | ignore the `.pkm` cache entries of the imported modules (they are rewritten) |
 | `--no-module-cache` | neither read nor write `.pkm` cache entries |
 | `--verbose` | print one line per imported module on standard error: where it came from (its source, a cache entry, a prebuilt file) and why a cache entry was not used; and one line per cache entry written |
-| `--stats` | print what the compiler's passes over PIR did on standard error, once the last of them ran: the [transfers](16-memory.md#ownership-transfers) the moves at last use made and the retains and releases they removed, in the program and in the modules built from source in this run ([PIR](../pir.md#12-passes)) |
+| `--stats` | print what the compiler's passes over PIR did on standard error, once the last of them ran: the [transfers](16-memory.md#ownership-transfers) the moves at last use made and the retains and releases they removed, and the retains and releases the [reference-count elimination](16-memory.md#reference-counts-the-compiler-removes) removed, in the program and in the modules built from source in this run ([PIR](../pir.md#12-passes)) |
 | `--object=<files>` | link these object files or archives (comma-separated; repeatable): they define the program's `native fn`s ([Native functions](03-functions.md#native-functions)) |
 | `--` | ends `paykan`'s options: a file name starting with `-` can follow |
 

@@ -3,7 +3,8 @@
 // The LLVM path of the mlir backend.  scf becomes cf (upstream), then one
 // conversion takes func, cf and arith to the LLVM dialect with upstream
 // patterns and the pir ops the shared lowering keeps with the patterns
-// below: the only part of the backend written for LLVM alone.
+// below, and the calls of Paykan_retain and Paykan_release get their fast
+// paths inline: the only part of the backend written for LLVM alone.
 //
 // Types: every pir pointer (box, obj, ptr, weak) is !llvm.ptr; an optional
 // is the literal struct { i1 present, payload }, passed by value as C passes
@@ -12,6 +13,8 @@
 #include "ToLLVM.h"
 
 #include "Dialect/PIRDialect.h"
+#include "Names.h"
+#include "Runtime.h"
 
 #include <llvm/Support/raw_ostream.h>
 #include <mlir/Conversion/ArithToLLVM/ArithToLLVM.h>
@@ -33,6 +36,12 @@
 #include <mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h>
 #include <mlir/Target/LLVMIR/Export.h>
 #include <mlir/Transforms/DialectConversion.h>
+
+#include <cstddef>
+#include <iterator>
+#include <optional>
+#include <utility>
+#include <vector>
 
 namespace paykan::mlir_backend {
 
@@ -462,6 +471,93 @@ struct ConvertToLLVMPass
   }
 };
 
+// -- Reference counts
+
+/// Each call of Paykan_retain or Paykan_release with its fast path inline,
+/// as Runtime.h's Paykan_retain_inline and Paykan_release_inline, which the
+/// C path calls: a null box does nothing, a retain of a count below the
+/// limit increments the object's strong count, and a release of a count
+/// above one decrements it.  Anything else makes the call, which panics at
+/// the limit or destroys the object.  At every -O: the code is there
+/// before LLVM optimises anything.
+struct InlineReferenceCountsPass
+    : public PassWrapper<InlineReferenceCountsPass, OperationPass<ModuleOp>> {
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(InlineReferenceCountsPass)
+
+  StringRef getArgument() const override {
+    return "pir-inline-reference-counts";
+  }
+  StringRef getDescription() const override {
+    return "Inline the fast paths of Paykan_retain and Paykan_release";
+  }
+
+  void runOnOperation() override {
+    std::vector<std::pair<LLVM::CallOp, bool>> calls; // (call, a retain's)
+    getOperation().walk([&](LLVM::CallOp call) {
+      std::optional<StringRef> callee = call.getCallee();
+      if (callee &&
+          (*callee == names::kPaykanRetain || *callee == names::kPaykanRelease))
+        calls.emplace_back(call, *callee == names::kPaykanRetain);
+    });
+    for (auto [call, retain] : calls)
+      expand(call, retain);
+  }
+
+  /// `head: ...; call; rest`, the call a retain's if @p retain, becomes
+  ///
+  ///   head:  ...; cond_br (box == null), done, check
+  ///   check: n = load i32 (box + 8); cond_br (fast), fast, slow
+  ///   fast:  store n +/- 1; br done
+  ///   slow:  call; br done
+  ///   done:  rest
+  static void expand(LLVM::CallOp call, bool retain) {
+    MLIRContext *ctx = call.getContext();
+    Location loc = call.getLoc();
+    Value box = call.getArgOperands().front();
+    Type ptr = llvmPtr(ctx);
+    Type count = IntegerType::get(ctx, 8 * sizeof(PaykanObject::strong));
+    Block *head = call->getBlock();
+    Block *slow = head->splitBlock(Block::iterator(call));
+    Block *done = slow->splitBlock(std::next(Block::iterator(call)));
+    OpBuilder b(ctx);
+    b.setInsertionPointToEnd(slow);
+    LLVM::BrOp::create(b, loc, ValueRange(), done);
+    Block *check = b.createBlock(slow);
+    Block *fast = b.createBlock(slow);
+
+    b.setInsertionPointToEnd(head);
+    Value null = LLVM::ZeroOp::create(b, loc, ptr);
+    Value isNull =
+        LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::eq, box, null);
+    LLVM::CondBrOp::create(b, loc, isNull, ValueRange(), ValueRange(),
+                           DenseI32ArrayAttr(), done, check);
+
+    b.setInsertionPointToEnd(check);
+    Value at = LLVM::GEPOp::create(b, loc, ptr, b.getI8Type(), box,
+                                   ArrayRef<LLVM::GEPArg>{static_cast<int32_t>(
+                                       offsetof(PaykanObject, strong))});
+    Value n = LLVM::LoadOp::create(b, loc, count, at);
+    auto constant = [&](int64_t v) -> Value {
+      return LLVM::ConstantOp::create(b, loc, count,
+                                      b.getIntegerAttr(count, v));
+    };
+    Value common = retain
+                       ? LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::ne,
+                                              n, constant(PAYKAN_REF_MAX))
+                       : LLVM::ICmpOp::create(b, loc, LLVM::ICmpPredicate::sgt,
+                                              n, constant(1));
+    // The call is the rare path: laid out away from the common one.
+    LLVM::CondBrOp::create(b, loc, common, ValueRange(), ValueRange(),
+                           b.getDenseI32ArrayAttr({2000, 1}), fast, slow);
+
+    b.setInsertionPointToEnd(fast);
+    Value next = retain ? Value(LLVM::AddOp::create(b, loc, n, constant(1)))
+                        : Value(LLVM::SubOp::create(b, loc, n, constant(1)));
+    LLVM::StoreOp::create(b, loc, next, at);
+    LLVM::BrOp::create(b, loc, ValueRange(), done);
+  }
+};
+
 } // namespace
 
 void loadLLVMDialects(MLIRContext &ctx) {
@@ -477,6 +573,7 @@ void addLLVMDialectPasses(PassManager &pm) {
   pm.addPass(std::make_unique<SCFToCFPass>());
   pm.addPass(std::make_unique<ConvertToLLVMPass>());
   pm.addPass(createReconcileUnrealizedCastsPass());
+  pm.addPass(std::make_unique<InlineReferenceCountsPass>());
 }
 
 StatusOr<std::unique_ptr<llvm::Module>>

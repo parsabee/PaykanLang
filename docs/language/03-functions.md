@@ -1065,8 +1065,12 @@ paykan build --object=text.o main.pkn -o main   # an executable
 (`-fPIC`).  There, the C code may call the C library and the runtime functions
 compiled code uses (`PaykanString_new`, `PaykanShared_new`, `Paykan_retain`,
 `Paykan_release`, ...); `build` links the objects into the executable, which
-can call any runtime function.  A `PaykanString`'s
-`data` and `len` may be read directly.  See `samples/imports/14_native`.
+can call any runtime function.  `Runtime.h`'s `static inline`
+`Paykan_retain_inline`, `Paykan_release_inline` and `PaykanShared_get_inline`
+do what `Paykan_retain`, `Paykan_release` and `PaykanShared_get` do, and call
+them only at the count's limit or to destroy the object.  A
+`PaykanString`'s `data` and `len` may be read directly.  See
+`samples/imports/14_native`.
 
 ---
 

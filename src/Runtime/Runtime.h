@@ -385,6 +385,44 @@ PaykanShared *Paykan_weak_load(PaykanWeak *weak);
 /// destroyed already and this was the last weak reference to it.
 void Paykan_weak_release(PaykanWeak *weak);
 
+// -- Inline fast paths
+//
+// What Paykan_retain, Paykan_release and PaykanShared_get do in the common
+// case, inline: a retain of a count below the limit is an increment, and a
+// release that leaves the object alive (its count above one) a decrement.
+// Anything else calls the function, which panics at the limit or destroys
+// the object, so each does exactly what its function does, at every count.
+// The C of --emit-c calls these, the LLVM path emits the same code
+// (src/Backends/MLIR/ToLLVM/ToLLVM.cpp), and the runtime calls them
+// everywhere but in Shared.c, which defines the functions.  The functions
+// above stay the ABI: the JIT's symbol table, compiled code that calls them
+// and native code may use either.
+
+/// Paykan_retain, inline.
+static inline void Paykan_retain_inline(PaykanShared *shared) {
+  if (shared) {
+    if (shared->strong != PAYKAN_REF_MAX)
+      ++shared->strong;
+    else
+      Paykan_retain(shared);
+  }
+}
+
+/// Paykan_release, inline while the object stays alive.
+static inline void Paykan_release_inline(PaykanShared *shared) {
+  if (shared) {
+    if (shared->strong > 1)
+      --shared->strong;
+    else
+      Paykan_release(shared);
+  }
+}
+
+/// PaykanShared_get, inline: the identity.
+static inline PaykanObject *PaykanShared_get_inline(PaykanShared *shared) {
+  return shared;
+}
+
 // -- Generic native functions
 //
 // An instance of a generic `native fn` (`native fn get<T>(b: view Obj, i: int)

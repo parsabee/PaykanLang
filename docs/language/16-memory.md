@@ -77,6 +77,11 @@ Two operations maintain the strong count:
 - **release** — decrements the count when a reference goes away (a variable leaves scope, a field
   or slot is overwritten, a temporary is discarded).
 
+Each is a few instructions in the compiled code, with no call: a retain adds one to the count in
+the object's header and a release subtracts one. Only a release that brings the count to zero,
+which destroys the object, and a retain at the limit, which stops the program, call into the
+runtime.
+
 The weak count is the number of `weak` variables and fields that refer to the object (see
 [Weak References](#weak-references)); it never keeps the object alive.
 
@@ -455,6 +460,64 @@ error: 'mov' was removed in v0.2.0; ownership transfers are inferred
 
 Drop the keyword: `t = mov s;` becomes `t = s;`. The program prints the same output and frees
 the same objects. The variable `s` simply stays readable afterwards.
+
+## Reference counts the compiler removes
+
+The compiler also removes a retain together with the releases that undo it, wherever
+something else keeps the object alive in between, so that no count changes where something
+could see the difference. A `match` on a field takes a reference of its own for the whole
+match (an arm may assign the field), and its binding takes another; the binding's goes, since
+the match's keeps the object alive until the match ends. The match's own goes too when
+nothing in it can let go of a reference (no function or method call, no assignment of a
+reference): then the field it read keeps the object. A reference read from a variable for one
+operation (an operand of `==`, say) needs none of its own while nothing reassigns the
+variable, and one read from a field none while nothing can let go of a reference.
+
+The compiler keeps a reference whenever code that may let the object go runs while it is in
+use: the match's when an arm calls code, which may assign the field the match read and drop
+the object the arm is using, and every reference a read through an object takes for a call
+([Reads a call may replace](../pir.md#7-what-the-lowering-makes-explicit-the-ownership-rules)).
+Here `clear` sets `l.head` to `None` while the arm still uses `n`, the node `l.head` held:
+
+```pkn
+import ::io;
+
+class Node {
+  name: Str;
+}
+
+class List {
+  head: Node?;
+}
+
+fn clear(l: List) -> int {
+  l.head = None;
+  return 0;
+}
+
+fn main() -> int {
+  l = List(Node("first"));
+  match l.head {
+    n: Node {
+      k = clear(l);
+      io::println(n.name + " " + Str(k));   // n lives until the match ends
+    }
+    None { }
+  }
+  return 0;
+}
+```
+
+Output:
+
+```
+first 0
+```
+
+Nothing else changes: an object is destroyed at the same point as without these removals, a
+`weak` reference reads what it would, and the program frees the same objects. `--stats`
+counts the retains and releases removed ([docs/pir.md §12](../pir.md#12-passes) has the
+rules).
 
 ## Strings, Arrays and Tuples
 

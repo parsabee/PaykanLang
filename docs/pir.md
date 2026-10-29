@@ -544,8 +544,13 @@ CodeGen enforced, now in one place.
   variable owns nothing from there on.  Its release is gone from the paths
   through the copy (or, where an `if` or a `switch` joins them with paths
   that kept the variable, moved to the end of the one arm that did), and its
-  slot may keep the pointer it handed on, which nothing reads again.  This
-  is what a backend receives.
+  slot may keep the pointer it handed on, which nothing reads again.
+* **Reference-count elimination** (§12) then removes a `retain` with the
+  releases that end the reference it made where something else keeps the
+  object alive: a variable whose retain went (a match binding inside its
+  subject's range) holds a borrowed reference and releases nothing, and a
+  field read held where nothing can let go of a reference (a match subject
+  whose arms call no code) takes none.  This is what a backend receives.
 * **Arguments** to user functions/methods, `__super__` and the virtual `equals`
   are owned (+1) boxes that the callee releases on exit (callee-consumes).
   Arguments to runtime builtins are borrowed; temporaries are released after the
@@ -907,7 +912,11 @@ name (`extern fn @$rt.Paykan_free(ptr) -> void`, `extern obj
 crossing into the runtime is `cast` to `i64` first.
 
 ```
-; memory / RC (first-class ops, listed for completeness)
+; memory / RC (first-class ops, listed for completeness).  A retain's and a
+; release's fast path is inline (§12): the LLVM path emits it and calls
+; Paykan_retain or Paykan_release for the rest, the C path calls Runtime.h's
+; static inline Paykan_retain_inline and Paykan_release_inline, which do the
+; same.  `unbox` is the identity on both: neither calls PaykanShared_get.
 Paykan_malloc(i64) -> ptr        Paykan_free(ptr) -> void
 Paykan_retain(box) -> void       Paykan_release(box) -> void
 PaykanShared_new(obj) -> box     PaykanShared_get(box) -> obj
@@ -1130,15 +1139,21 @@ standard error after the last pass ran:
 ```text
 $ paykan --stats run greet.pkn
 paykan pass stats:
-  moves-at-last-use transfers : 1
-  moves-at-last-use retains removed : 1
-  moves-at-last-use releases removed : 1
+  moves-at-last-use transfers : 2
+  moves-at-last-use retains removed : 2
+  moves-at-last-use releases removed : 2
+  rc-elimination retains removed : 1
+  rc-elimination releases removed : 1
 Hello, world!
 ```
 
-(`greet.pkn` passes a variable to `greet(name: Str)` at its last use; the
-counters are those of the passes this run ran, so a module built from its
-source in this run counts, and one loaded from its `.pkm` does not.)
+(`greet.pkn` makes a `Person(name: Str, next: Person?)`, whose `__init__`
+hands its two parameters to the fields at their last use, and matches a
+field, `match p.next { q: Person { greet(q.name); } None { greet(p.name); }
+}`, where the binding `q` needs no reference of its own inside the
+match's.  The counters are those of the passes this run ran, so a module
+built from its source in this run counts, and one loaded from its `.pkm`
+does not.)
 
 **The dead-code pass** (`include/paykan/pir/DeadCode.h`,
 `dropDeadCode` / `createDeadCodePass`) erases every function, class and
@@ -1350,3 +1365,127 @@ split (docs/design/pkm.md §5.13), so the standard library's compiled code
 is made of moved code too.  A module's `CODE` copies of instantiations go
 through it again in the program that imports them, which leaves them as
 they are: on its own output the pass changes nothing.
+
+**The reference-count elimination pass** (`include/paykan/pir/RCElimination.h`,
+`eliminateRedundantRC` / `createRCEliminationPass`) removes a `retain`
+together with the releases that end the reference it made, where something
+else keeps the object alive in between.  It counts the references a
+function makes by the value they were made on, the value's **tokens**:
+`retain %v` makes one on `%v`, and a value made with one has it: a call's,
+a `vcall`'s or an `icall`'s box (not a native function's), a `weak.load`'s,
+a `box`'s, and a box parameter (owned, §7).  A `field.load` or a
+`ptr.load` makes none, `stable` or not: the mark is the lowering's promise
+for its statement only (§6), not a reference.  A token ends at `release
+%v`, or where `%v` is handed on: an argument of any call, a `field.store`
+or `ptr.store` of it, a `store` into a local that owns what it holds, `ret
+%v`.  A box local owns what is stored into it unless every load of it only
+borrows: hands on and releases no more, in its own block, than it retained
+first (a local whose retain the pass removed is one, its releases gone).
+
+The **range** of a retain runs, on every path from it, to the first
+`release` of what it made: of `%v`; or, for a retain followed at once by
+the `store` of `%v` into a box local that nothing else stores into, whose
+address is never taken and whose every load either releases it (`%t = load
+%x`, `release %t`) or only borrows, to the first release of that local (a
+`release` of a load that retained first releases that load's own).  A
+retain and the releases that end its range are removed when the range is
+**balanced** — every path from the retain reaches exactly one of those
+releases, or `unreachable`, before it leaves the block that defines `%v`
+(at the block's end, at `ret`, or by a `break` or `continue` out of it),
+none of them is reached by a path that does not pass the retain, and no
+path reaches the retain again before its range ends — and when, at every
+point of the range, one of these **keeps the object alive**:
+
+- an **enclosing reference**: one more token on `%v`, not released or
+  handed on in the range: a match subject's retain around its binding's, a
+  `weak.load`'s or a call's box, a box parameter;
+- a **local**: `%v` was loaded from a box local whose address is never
+  taken, whose every store holds a reference of its own (a fresh value, a
+  parameter, `null`, or one the instruction before retained) and that is not
+  stored into, nor released, handed on or copied through another of its
+  loads (a move at last use hands it on; a copy retains and hands on), from
+  that load to the end of the range; and `%v`'s own tokens are not handed
+  on beyond the ones the range made.  A copy counts because the moves at
+  last use, run again on this pass's output (a module's code, in the
+  program that imports it), may make it a hand-off of the local's
+  reference: they follow what a load of the local refers to, but take a
+  local whose retain this pass removed for one holding a reference of its
+  own, and would not see that it depends on the local;
+- **nothing that can let go**: no `release` but of `%v`, no `free`, `vcall`
+  or `icall`, no call but of the runtime's string, hash, rounding,
+  allocation, disposal and panic helpers (`PaykanString_equals` releases
+  the box it is given), no `field.store` or `ptr.store` of a box, no
+  `mem.copy` or `mem.zero`; and `%v`'s tokens are not handed on beyond the
+  ones the range made.
+
+The pair goes with, for a local's, each release's load; the local holds a
+borrowed reference from then on.  The retains are judged from the last to
+the first, so that a pair nested in another goes before the other is
+judged, and the function is swept again until a sweep removes nothing.
+Each judgement is one walk of the structured body from `%v`'s definition
+to the statement of its block that holds the last use of `%v` (and of the
+local), following every path in three phases (before the retain, in its
+range, after it) with the fewest tokens each may hold; a `while` is walked
+until the phases at its head stop changing.
+
+**The field-load hazard.**  A box read from a field or an element
+(`field.load`, `ptr.load`) has no token of its own and no local holding it,
+so only the last rule can remove the retain it is given first.  In the
+match of the binary-trees benchmark, `match n.l { x: Node { c = c + count(x);
+} None { } }`:
+
+```
+%l = field.load %n.obj, Node.l
+retain %l                  ; the subject
+...
+  retain %l                ; the binding x
+  store %x, %l
+  %x1 = load %x
+  retain %x1               ; the argument: count releases it
+  %k = call @count(%x1)
+  ...
+  %t = load %x
+  release %t               ; the binding's
+release %l                 ; the subject's
+```
+
+the subject's retain stays, since `@count` may set `n.l` to `None` and free
+the node the arm still uses: whether a callee can write the field is not
+asked, any call that may run code keeps it.  So does every hold the
+lowering makes (§7, "Reads a call may replace"): a hold is the first retain
+of what it read, in use across a call that may let go of a reference, and
+the call stops the last rule.  The binding's retain and
+release go: the subject's token holds the node until the match ends.  With
+nothing in the arm that can let go (`c = c + x.v`), both pairs go, the
+binding's first.  In the program the driver compiles, the moves at last use
+run first and hand the binding's reference to `@count` (`x` is not read
+again): its retain is then the argument's, which an owned parameter needs,
+and the match keeps one retain more than the ideal, which borrowed
+parameters (#98 part 2) would remove.
+
+**Why it is right.**  Removing the pair lowers the object's count by one
+exactly in the range, on every path through it, and leaves it as it was
+everywhere else: the range is balanced.  In the range the object keeps a
+reference besides the one removed: a token of the function that nothing in
+the range ends, a local's that nothing in the range touches, or, where
+nothing in the range can release a reference or overwrite one, every
+reference it had at the retain.  So no count reaches zero at another point
+than before: every object is destroyed where it was, what its destruction
+does happens then, and a `weak` reference reads what it read.  No release
+is added or moved.
+
+The driver runs it on every program right after the moves at last use, and
+on a module's code before its `.pkm` is written, after the moves; on its
+own output, and after the moves again, it changes nothing.
+
+**What is left is cheap.**  Each backend has the fast path of a `retain`
+and a `release` inline: a null box is skipped, a retain of a count below
+the limit increments the header's 32-bit count, and a release of a count
+above one decrements it; only the rest calls `Paykan_retain` (which panics
+at the limit) or `Paykan_release` (which destroys the object), so each
+does what the call did, at every count.  The LLVM path emits that code for
+every call at every `-O` (`src/Backends/MLIR/ToLLVM/ToLLVM.cpp`, the
+common case weighted as likely), the module code in a `.pkm` included; the
+C path calls Runtime.h's `static inline` `Paykan_retain_inline` and
+`Paykan_release_inline`, which the runtime uses too.  The functions stay
+the ABI (§8).
