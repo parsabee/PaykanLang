@@ -926,6 +926,12 @@ int64_t Paykan_heap_total_allocs(void);
 /// that an operation allocates no more than it needs).
 int64_t Paykan_heap_peak_bytes(void);
 
+/// Fail, as when the memory is not there, every allocation and growth that
+/// would take the live payload bytes past @p bytes; 0 (the start-up value)
+/// for no limit.  It outlasts a reset (e.g. to make a read of a file run out
+/// of memory partway).
+void Paykan_heap_set_limit(int64_t bytes);
+
 /// Print the current heap statistics to stderr (a leak warning is appended if
 /// any blocks remain live), after flushing stdout, so that they follow what
 /// the program printed.  If tracking is disabled, prints a notice instead.

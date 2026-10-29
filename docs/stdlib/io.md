@@ -718,6 +718,9 @@ returns an empty `Str`: `read()` of an empty file, or of one already read to the
 is `EndOfFile` too. A read that the operating system fails has the code of its `errno`
 (`IsADirectory` for a directory, `Io`, ...). Reading a file opened only to write fails with
 `InvalidArgument` (`Bad file descriptor`), as writing to one opened only to read does.
+A read whose text does not fit in memory fails with `OutOfMemory`, and what it had read
+by then is lost: the next read starts after it. `read`, `readln` and `readbytes` all grow
+their buffer as the data comes, so a large `n` alone does not make `readbytes` run out.
 
 Writes are buffered by the C library: what `write` reports is whether the data was taken,
 and the data is on disk once the file is closed, or once a read of the same `File` follows
@@ -735,6 +738,7 @@ file is closed, it is not reported to the program.
 | `open` with a mode `fopen` rejects | `InvalidArgument` |
 | `open` of a path, or with a mode, holding a NUL byte (`"\0"`) | `InvalidArgument` |
 | a read with nothing left | `EndOfFile` |
+| a read whose text does not fit in memory (what it read is lost) | `OutOfMemory` |
 | `readbytes(n)` with `n <= 0` | `InvalidArgument` |
 | `write` to a file not open for writing (`stdin()`, a `"r"` file) | `InvalidArgument` |
 | a read of a directory opened with `"r"` | `IsADirectory` |

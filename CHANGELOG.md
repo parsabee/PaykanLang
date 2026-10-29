@@ -1087,7 +1087,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (docs/stdlib/io.md, "File.readbytes"): a read with an `n` too large to allocate is no
     longer `OutOfMemory`, but the bytes that are there, or `EndOfFile` when there are none
     (`readbytes(1152921504606846976)` at the end of a file). It is `OutOfMemory` only when
-    the data it reads does not fit in memory.
+    the data it reads does not fit in memory, and then, as for `read` and `readln`, what it
+    had read is lost and the next read starts after it, where the read that could not
+    allocate `n` bytes failed before reading anything (docs/stdlib/io.md, "End of file,
+    failed reads and buffering", which says so for all three now).
 
 ### Removed
 
@@ -1634,9 +1637,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `n` is a maximum: the buffer starts at 64 KiB (or `n` bytes, when that is less) and
     doubles as the data fills it: the tracking allocator's peak for either read of the
     5-byte file is 65,630 bytes, where it was 1,099,511,627,870 and 1,000,000,094
-    (docs/stdlib/io.md, "File.readbytes"). The runtime gains a test hook,
-    `Paykan_heap_peak_bytes()`, the most bytes the tracking allocator has had live at once
-    (Runtime.h).
+    (docs/stdlib/io.md, "File.readbytes"). The runtime gains two test hooks (Runtime.h):
+    `Paykan_heap_peak_bytes()`, the most bytes the tracking allocator has had live at once,
+    and `Paykan_heap_set_limit(bytes)`, which makes it fail an allocation that would take
+    its live bytes past `bytes`: `FileTests` runs `readbytes`, `read` and `readln` out of
+    memory partway through a file with it, which no test did once `readbytes` stopped
+    allocating `n` bytes first.
   - `List`'s `indexOf`, `contains` and `remove` read the list's length once, before the
     walk: an element whose `equals` emptied the list made the next comparison panic with
     the Buffer's internal message, `buffer index 1 out of bounds (len=0)` (exit 134). The

@@ -10,6 +10,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <string>
 #include <unistd.h>
@@ -782,6 +783,40 @@ TEST(FileReadbytes, ALongReadGrowsItsBufferUpToN) {
   expectRead(int64_t{1} << 40, text.substr(0, 131072));
   expectRead(1, "EOF");
   Paykan_release(f);
+  std::remove(path.c_str());
+}
+
+// A read whose text does not fit in memory fails with ENOMEM (::io's
+// OutOfMemory), frees what it allocated and panics nowhere: readbytes, read
+// and readln each, out of memory partway through a line of 300,000 bytes
+// with the tracking heap held to 200 KiB.  What it had read is gone, as
+// docs/stdlib/io.md says: each fails growing its buffer from 128 KiB, and
+// the next read starts after those 131,072 bytes.
+TEST(FileRead, OutOfMemoryPartwayLosesWhatWasRead) {
+  std::string text;
+  for (int i = 0; text.size() < 300000; ++i)
+    text += std::to_string(i) + ",";
+  text.resize(300000);
+  std::string path = makeTempFile(text.c_str());
+  ASSERT_FALSE(path.empty());
+  const std::pair<const char *, std::function<std::string(PaykanShared *)>>
+      reads[] = {
+          {"readbytes",
+           [](PaykanShared *f) { return ioReadbytes(f, int64_t{1} << 20); }},
+          {"read", ioRead},
+          {"readln", ioReadln},
+      };
+  for (const auto &[name, read] : reads) {
+    TrackingHeap heap;
+    PaykanShared *f = ioOpen(path, "r");
+    ASSERT_NE(f, nullptr) << name;
+    Paykan_heap_set_limit(int64_t{200} * 1024);
+    EXPECT_EQ(read(f), "errno " + std::to_string(ENOMEM)) << name;
+    Paykan_heap_set_limit(0);
+    EXPECT_EQ(ioReadbytes(f, 8), text.substr(131072, 8)) << name;
+    Paykan_release(f);
+  }
+  EXPECT_EQ(Paykan_error_code(ENOMEM), PAYKAN_ERROR_OUT_OF_MEMORY);
   std::remove(path.c_str());
 }
 
