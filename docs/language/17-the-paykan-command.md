@@ -27,13 +27,21 @@ paykan pkm extract --object <file.pkm> [-o <file.o>]
   prints it (`--section=manifest|sections|iface|tmpl|code|symidx|obj|payloads` prints one
   part and `--section=all`, the default, every one; `tmpl` adds the text of the generic
   templates, `code` is exactly the module's PIR text, and `obj` says who compiled its code,
-  for which target), `check` prints whether this
-  `paykan` can use it and exits with 0 when it can, and `extract --object` writes the
+  for which target), `check` reads it as a program that imports it would (its interface,
+  its templates, its PIR, verified and checked against its interface, and its compiled code,
+  which the backend that links it, the default one or `--backend`'s, reads and verifies;
+  code another backend or target compiled is `rejected`) and only then prints one line:
+  `usable`, or `stale: `, `rejected: ` or `corrupt: ` and why, exiting with 0 only when it
+  is usable; and `extract --object` writes the
   module's compiled code as a native object file (`-o <file>`, or the module file's name
   with `.o`, at the `-O<n>` level): what a program's `--emit-c` C is linked with.
 
 The source file is the program's **main file**. Its directory is the source root from which
-imports are resolved (see [Modules](15-modules.md)).
+imports are resolved (see [Modules](15-modules.md)). It may be a pipe or a device
+(`/dev/stdin`, `<(...)`), read to its end. A source file, and a module file `pkm` or an
+import reads, is at most 256 MiB: a larger one is an error (`'big.pkn' is too large for a
+source file (more than 256 MiB)`), refused before it is read, and a pipe or a device that
+gives more stops there ([the grammar](../grammar.md#9-diagnostics-and-recovery)).
 
 No command writes over its input. When the file that `build`, `--emit-pkm`, `pkm extract`
 or an `--emit-*` option is to write is the source file, the source or module file of a
@@ -42,7 +50,10 @@ reads or an `--object` file, under any name (another spelling of its path, such 
 `./prog.pkn`, or a symbolic or a hard link), `paykan` writes nothing, says so and exits
 with status 1.
 
-When compilation fails, `paykan` prints the errors and exits with status 1. It prints the
+When compilation fails, `paykan` prints the errors and exits with status 1. An error in an
+imported module names its file by the main file's directory as you gave it followed by the
+module's path from the source root (`tasks/tasks/text.pkn` for `paykan tasks/main.pkn`), a
+path that works from the directory `paykan` runs in, and so does `--verbose`. It prints the
 first 20 errors, and after them `note: stopping after 20 errors, the error limit
 (--error-limit=N sets it, and --error-limit=0 shows every error)` and no more diagnostics;
 warnings and notes do not count, and the exit status is 1 whatever the limit. (A file that
@@ -67,14 +78,14 @@ where they change nothing, as `-O<n>` and `--stats` are with `--check-only`.
 
 | Option | Effect |
 |--------|--------|
-| `-o <file>` | the output file of `build`, of `--emit-pkm`, of `pkm extract`, and of the `--emit-*` options, which print to standard output without it |
+| `-o <file>` | the output file of `build`, of `--emit-pkm`, of `pkm extract`, and of the `--emit-*` options, which print to standard output without it. It goes in a directory that exists, and is not one: `build` checks its executable before it compiles anything |
 | `-O<n>` | optimization level, `0` to `3` (also `-O <n>` and `-O=<n>`); the default is `2`, and `-O0` compiles fastest and is easiest to debug |
 | `--backend=<name>` | the backend to compile with (see below) |
 | `--frontend=<name>` | the parser to read the source with; the built-in one, `recursive-descent`, is the default |
 | `--track-heap` | run with heap tracking and print the allocation statistics to standard error at exit ([Memory](16-memory.md)). It applies to `run`, and `build` rejects it: an executable `build` wrote tracks its heap when it runs with `PAYKAN_TRACK_HEAP` set |
 | `--check-only` | parse and type-check, then stop: no code is generated and nothing runs. It also accepts a module that has no `main`, which makes it handy for checking a library module on its own |
-| `--emit-pkm` | compile one module and write its `.pkm` module file to `-o <file>`, in a directory that exists, or next to the source, then stop. The module may have no `main`. Like `build`, it takes no program arguments, so `-o` may follow the file. The module is named by its path from the current directory (`geometry/shapes.pkn`, or `./geometry/shapes.pkn`, is `geometry::shapes`), or by its file name when the path is absolute or goes up (`../shapes.pkn` is `shapes`); each part of the name must be an identifier, or `--module-name` must name it |
-| `--module-name=<name>` | with `--emit-pkm`: the canonical name the module file records, instead of the one its path gives it (`a::b`, or `::name` for a module of the standard library, as the library's build compiles them) |
+| `--emit-pkm` | compile one module and write its `.pkm` module file to `-o <file>`, in a directory that exists, or next to the source, then stop. The module may have no `main`. Like `build`, it takes no program arguments, so `-o` may follow the file. The module is named by its path from the current directory (`geometry/shapes.pkn`, or `./geometry/shapes.pkn`, is `geometry::shapes`), or by its file name when the path is absolute or goes up (`../shapes.pkn` is `shapes`); each part of the name must be an identifier, not a keyword (no import could name `x::if`), or `--module-name` must name it |
+| `--module-name=<name>` | with `--emit-pkm`: the canonical name the module file records, instead of the one its path gives it: identifiers, none a keyword, separated by `::` (`a::b`, or `::name` for a module of the standard library, as the library's build compiles them). The module's imports are resolved against the directory above the name's parts before its last when they are the last directories of the file's path (`--module-name=a::b src/a/b.pkn`, or `b.pkn` run in `src/a`, imports `a::c` from `src/a/c.pkn`, as a program in `src` does), and against the file's own directory otherwise |
 | `--module-path=<dir>` | a directory of prebuilt `.pkm` modules, searched for an import whose source is not found (repeatable; then the `:`-separated `$PAYKAN_MODULE_PATH`) |
 | `--rebuild-modules` | ignore the `.pkm` cache entries of the imported modules (they are rewritten) |
 | `--no-module-cache` | neither read nor write `.pkm` cache entries |
@@ -91,7 +102,9 @@ These print an intermediate form of the program, or what it is linked with, to s
 output and stop; the `--emit-*` ones write it to `-o <file>` when it is given. Like `build`, they take no program
 arguments, so their options may follow the file. `--emit-c`, `--emit-llvm` and `--emit-mlir`
 are the mlir backend's (with another `--backend` they are an error), and only one of them
-may be given:
+may be given. `--emit-source` names the backend's own output, so with `--emit-llvm` it asks
+for the same thing twice and is accepted, and with `--emit-c` or `--emit-mlir` it is an
+error:
 
 | Option | Prints |
 |--------|--------|
@@ -188,7 +201,10 @@ $ paykan --backend=mlir prog.pkn
 
 `build` needs the PaykanLang runtime (a static library and its header) to link programs
 against. An installed `paykan` finds it next to itself (`../lib` and `../include/paykan`);
-`PAYKAN_RUNTIME_DIR` points it elsewhere.
+`PAYKAN_RUNTIME_DIR` points it elsewhere, and when it is set it is the only place looked at,
+as `PAYKAN_STDLIB` is for the standard library: a `PAYKAN_RUNTIME_DIR` without
+`lib/libpaykan_runtime.a` or `include/paykan/Runtime.h` is an error that names the missing
+file, never a reason to link another runtime.
 
 ## The compilation cache
 
@@ -204,9 +220,9 @@ a class or a signature also recompiles the modules that use it. A module's entry
 generic templates too, and its own copies of the instantiations of other modules' templates
 it uses (`collections::List<int>`), so editing a generic body recompiles every module that
 imports its module, directly or not. Those copies stay PIR in the entry, and the mlir
-backend caches their LLVM IR there too, as bitcode (`.paykan_cache/a/b.bc`, and
-`.paykan_cache/@system/io.bc` for `::io`), translating them again only when the part of
-them the program uses or the compiler changed.
+backend caches their LLVM IR there too, as bitcode with a hash of it
+(`.paykan_cache/a/b.bc`, and `.paykan_cache/@system/io.bc` for `::io`), translating them
+again only when the part of them the program uses or the compiler changed.
 
 The cache is safe to share and to delete:
 
@@ -223,7 +239,7 @@ files, the cache and prebuilt modules in detail.
 | Variable | Effect |
 |----------|--------|
 | `CC` | the C compiler `build` links executables with (default `cc`); words after the first are its first arguments, as with `make` (`CC='ccache cc'`, `CC='gcc -m64'`), the value split at white space with no quoting |
-| `PAYKAN_RUNTIME_DIR` | where to find the runtime (`lib/` and `include/paykan/` under it) |
+| `PAYKAN_RUNTIME_DIR` | where to find the runtime (`lib/` and `include/paykan/` under it); when it is set, the only place `build` looks, so a runtime missing there is an error |
 | `PAYKAN_STDLIB` | the directory of system imports, `import ::name;`, instead of the installed standard library ([Modules](15-modules.md)) |
 | `PAYKAN_MODULE_PATH` | `:`-separated directories of prebuilt `.pkm` modules, searched after the `--module-path` directories |
 | `PAYKAN_PLUGIN_PATH` | more directories to load plugins from, separated by `:` |

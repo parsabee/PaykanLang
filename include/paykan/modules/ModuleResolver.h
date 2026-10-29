@@ -21,6 +21,7 @@
 #include "paykan/pkm/Object.h"
 
 #include <filesystem>
+#include <functional>
 #include <iosfwd>
 #include <map>
 #include <memory>
@@ -31,6 +32,44 @@
 #include <vector>
 
 namespace paykan::modules {
+
+/// How compiled code (an OBJ section) is checked before a program links it
+/// (Backend::checkModuleObject): ok, or why it cannot be linked.
+using ObjectCheck = std::function<Status(const pkm::Object &)>;
+
+/// How the frontend reads what only it understands of a module file of
+/// module @p canonical (Sema::readImport): the type names its interface
+/// @p iface spells, and its TMPL section @p templates (empty when it has
+/// none), into what the frontend keeps of them for the import (null for
+/// nothing), or why the file cannot be used.
+using FrontendRead = std::function<StatusOr<std::shared_ptr<void>>(
+    const pkm::Interface &iface, std::span<const uint8_t> templates,
+    const std::string &canonical)>;
+
+/// A module file's contents, decoded and checked as every importer checks
+/// them (docs/design/pkm.md §8.4).
+struct ModuleContents {
+  pkm::Interface Iface;
+  /// CODE, decoded and verified, defining what Iface says the module does.
+  pir::Module Code;
+  /// OBJ, when the file has compiled code.
+  std::optional<pkm::Object> Object;
+  /// What the FrontendRead made of the file (null without one).
+  std::shared_ptr<void> Frontend;
+};
+
+/// Read @p file, a module file of @p canonical, as an importer does: its
+/// IFACE (consistent: checkInterface), its CODE (decoded, naming the
+/// module, verified, and defining what IFACE says the module defines:
+/// checkCodeMatchesInterface), what @p readFrontend reads of it when that
+/// is given, and its OBJ when it has one (read, and checked by
+/// @p checkObject when that is given).  Or why the file cannot be used, as
+/// the resolver's diagnostics word it ("has a bad CODE section: ...").  The
+/// manifest's verdict and the dependencies are the caller's.
+StatusOr<ModuleContents> readModuleContents(const pkm::File &file,
+                                            const std::string &canonical,
+                                            const ObjectCheck &checkObject,
+                                            const FrontendRead &readFrontend);
 
 struct ResolverOptions {
   /// The source root imports are resolved against ("" = the current
@@ -60,6 +99,15 @@ struct ResolverOptions {
   /// and any will do.  A prebuilt file is used whoever compiled it (the
   /// backend reports one it cannot link).
   std::optional<pkm::Object> CompiledBy;
+  /// How the active backend checks compiled code of the CompiledBy kind
+  /// before a program links it (Backend::checkModuleObject), or unset: a
+  /// file whose code fails is unusable, so a cache entry is rebuilt and a
+  /// prebuilt file rejected.
+  ObjectCheck CheckObject;
+  /// How the frontend reads its part of a module file (FrontendRead), or
+  /// unset: that part is read when the module is imported, and a file it
+  /// is bad in is an error there, not unusable.
+  FrontendRead ReadFrontend;
 };
 
 /// The answer to resolve() (§8.1 DECIDE).
@@ -69,8 +117,9 @@ struct Resolution {
     /// calls built()).  Path may not be a regular file: Sema diagnoses that
     /// as before.
     Source,
-    /// Loaded from the `.pkm` at Path: Iface is the interface, the CODE is
-    /// available through loadCode().
+    /// Loaded from the `.pkm` at Path: Iface is the interface, the CODE
+    /// (decoded and verified when the file was loaded) is available
+    /// through loadCode().
     Loaded,
     /// A cache or prebuilt entry depends on module Dependency, which must be
     /// resolved (and built if need be) first; then ask again.
@@ -118,6 +167,11 @@ public:
              std::vector<uint8_t> templates = {});
   /// Sema could not build @p canonical (not found, not a file, errors).
   void failed(const std::string &canonical);
+  /// Build @p canonical from its source instead of the cache entry a
+  /// NeedDependency answer came from, @p why --verbose says (its source's
+  /// own imports then say where any of them fails).  False when the answer
+  /// came from a prebuilt file, which has no source.
+  bool buildFromSource(const std::string &canonical, const std::string &why);
   /// A module built() whose cache entry could not hold all an importer
   /// needs (its code uses an instantiation another module of this program
   /// lowered): writeCache leaves it out, so it is built from source again.
@@ -128,15 +182,23 @@ public:
   /// The direct dependencies of a Loaded module (manifest order).
   const std::vector<std::string> &
   dependencies(const std::string &canonical) const;
-  /// The PIR of a Loaded module: CODE decoded and verified (§8.4 step 5).
-  StatusOr<pir::Module> loadCode(const std::string &canonical) const;
+  /// The PIR of a Loaded module: its CODE, decoded and verified when the
+  /// file was loaded (§8.4 step 5) and handed over by the first call; a
+  /// later call decodes it again.
+  StatusOr<pir::Module> loadCode(const std::string &canonical);
+  /// What ReadFrontend made of the file of a Loaded module, handed over by
+  /// the first call (null after it, or when it made nothing).
+  std::shared_ptr<void> takeFrontendData(const std::string &canonical);
   /// The compiled code of a Loaded module (its OBJ section), or null when
   /// its CODE is all of it.
   const pkm::Object *object(const std::string &canonical) const;
   /// The TMPL section of a Loaded module (empty when it has none).
   std::span<const uint8_t> templates(const std::string &canonical) const;
-  /// The file a diagnostic names for a Loaded module (project-relative).
+  /// The file a diagnostic names for a Loaded module (shownPath).
   std::string displayPath(const std::string &canonical) const;
+  /// The source a Loaded cache entry of @p canonical was checked against,
+  /// as a diagnostic names it (shownPath); "" for a prebuilt file.
+  std::string cacheSource(const std::string &canonical) const;
   /// The module file of @p canonical as the driver can open it: the `.pkm`
   /// a Loaded module was read from, or the cache entry writeCacheEntry()
   /// wrote for a module built from source; "" for neither.
@@ -177,8 +239,12 @@ public:
                          const pkm::Object *object = nullptr);
 
   /// @p path relative to the project root when it lies under it, as given
-  /// otherwise (the same rule as Sema's diagnostics).
+  /// otherwise: what a module file records (module_utils::relativeToRoot).
   std::string relativeToRoot(const std::filesystem::path &path) const;
+  /// @p path as diagnostics and --verbose name it, a path that works from
+  /// the directory the compiler runs in (module_utils::displayPath, as
+  /// Sema's diagnostics do).
+  std::string shownPath(const std::filesystem::path &path) const;
 
 private:
   struct Entry;
@@ -187,14 +253,34 @@ private:
 
   Resolution resolveSource(const std::string &canonical,
                            const std::filesystem::path &source);
+  /// @p canonical built from @p source, @p why --verbose says.
+  Resolution fromSource(const std::string &canonical,
+                        const std::filesystem::path &source,
+                        const std::string &why);
   Resolution resolvePrebuilt(const std::string &canonical,
                              const std::filesystem::path &source);
-  /// Loads the file at @p path for @p canonical under @p policy up to the
-  /// dependency check; the outcome is Loaded, NeedDependency, or a Source /
-  /// Rejected / NotFound answer with the reason in Message.
+  /// The module files resolvePrebuilt() looks at for @p canonical, whose
+  /// source would be @p source, in order.
+  std::vector<std::filesystem::path>
+  prebuiltCandidates(const std::string &canonical,
+                     const std::filesystem::path &source) const;
+  /// Whether @p canonical has a source or a module file where resolve()
+  /// looks for it.
+  bool exists(const std::string &canonical) const;
+  /// Loads the file at @p path for @p canonical under @p policy: the
+  /// verdict, the dependencies, then its contents (readModuleContents); the
+  /// outcome is Loaded, NeedDependency, or a Source / Rejected / NotFound
+  /// answer with the reason in Message.
   Resolution load(const std::string &canonical,
                   const std::filesystem::path &path, pkm::Policy policy,
                   std::span<const uint8_t> sourceBytes);
+  /// Whether the types @p iface describes as other modules' are what
+  /// those modules describe (an importer that reaches one only through
+  /// this module builds it from this copy).
+  Status checkImportedTypes(const pkm::Interface &iface) const;
+  /// Whether the externs of @p code, a module's CODE, match the code of
+  /// the modules they name that were loaded (pir::verifyLinks).
+  Status checkLinks(const pir::Module &code) const;
   StatusOr<std::vector<uint8_t>>
   encodeFile(const std::string &canonical, const pkm::Interface &iface,
              const std::vector<std::string> &deps,

@@ -591,9 +591,21 @@ bool ModuleLowering::checkImportedSlot(ast::ClassType *ct, uint32_t slot,
   if (def && mod->second->defines(*def) && slot < def->VTable.size() &&
       def->VTable[slot].Sig == sig)
     return true;
-  reportInternalError("a call of slot " + std::to_string(slot) + " of '" +
-                      ct->getName() +
-                      "' does not match the class's definition in its module");
+  const std::string what = "a call of slot " + std::to_string(slot) + " of '" +
+                           ct->getName() +
+                           "' does not match the class's definition in its "
+                           "module";
+  // The types its interface gives disagree with its code in a way the
+  // file's load did not see (docs/design/pkm.md §8.4): the file's fault.
+  if (origin && PL.Resolver && PL.Resolver->isLoaded(*origin)) {
+    Errs << "error: module '" << *origin << "' ("
+         << PL.Resolver->displayPath(*origin)
+         << ") has an IFACE section that does not match its CODE: " << what
+         << ". Rebuild it from source.\n";
+    HadInternalError = true;
+    return false;
+  }
+  reportInternalError(what);
   return false;
 }
 

@@ -10,6 +10,7 @@
 
 #pragma once
 
+#include "paykan/Status.h"
 #include "paykan/pir/PIR.h"
 #include "paykan/pkm/Interface.h"
 
@@ -52,5 +53,29 @@ ModuleCode splitModuleCode(pir::Module module);
 /// of @p program declare from it: a program whose modules were lowered
 /// together may use a module's copy its CODE no longer has.
 bool providesFor(const pir::Module &code, const pir::Program &program);
+
+/// Whether the interface @p iface describes its types consistently
+/// (docs/design/pkm.md §8.4 step 4): no name is a class and a struct or an
+/// enum, and each class's superclass is a class it describes, whose vtable
+/// slots begin the class's.  The first inconsistency when not.
+Status checkInterface(const pkm::Interface &iface);
+
+/// Whether @p code, a module's CODE, defines (in its PIR or compiled) what
+/// the module's interface @p iface says it defines (docs/design/pkm.md §8.4
+/// step 7), and what an importer finds in it by name: each class of the
+/// module, with its superclass, its own fields in their order, the slots of
+/// its vtable, its initializer, its `impl` methods and its constructor,
+/// which takes what its initializer takes; each copy of an instantiation it
+/// holds (a `shared class`), for what it has; each method of each of its
+/// structs; and each function, a native one's too.  The fields, functions,
+/// methods and slots have the PIR types the interface's types give them
+/// (every type an interface names has one: a scalar, a reference's `box`, an
+/// optional's, a value held in memory passed by its address, a slice as its
+/// address and length).  And each slot of each class @p code defines names
+/// the function an importer's subclass inherits for it, and a class's
+/// constructor and methods are shared exactly when the class is.  The first
+/// difference when not.
+Status checkCodeMatchesInterface(const pir::Module &code,
+                                 const pkm::Interface &iface);
 
 } // namespace paykan::modules

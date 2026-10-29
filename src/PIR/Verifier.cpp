@@ -6,6 +6,7 @@
 
 #include "paykan/pir/Printer.h"
 
+#include <algorithm>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -79,6 +80,20 @@ bool hasMem(const Signature &sig) {
     return true;
   for (Type t : sig.Params)
     if (t == Type::Mem)
+      return true;
+  return false;
+}
+
+/// True when @p a and @p b are the same field: name, type and layout.
+bool sameField(const Field &a, const Field &b) {
+  return a.Name == b.Name && a.Ty == b.Ty && a.Size == b.Size &&
+         a.Align == b.Align;
+}
+
+/// True when @p sig takes a `void`, which is no value.
+bool hasVoidParam(const Signature &sig) {
+  for (Type t : sig.Params)
+    if (t == Type::Void)
       return true;
   return false;
 }
@@ -181,7 +196,10 @@ private:
     // One @-namespace for functions and globals.
     std::unordered_set<std::string> symbols;
     auto define = [&](const std::string &name, const char *what) {
-      if (!symbols.insert(name).second)
+      // A symbol is linked by its name.
+      if (name.empty())
+        error(where, std::string(what) + " has an empty name");
+      else if (!symbols.insert(name).second)
         error(where, std::string(what) + " '@" + name + "' is defined twice");
     };
     for (const Function &f : m.Functions)
@@ -251,11 +269,23 @@ private:
 
     std::unordered_set<std::string> classes;
     for (const Class &c : m.Classes) {
-      if (!classes.insert(c.Name).second)
+      if (c.Name.empty())
+        error(where, "a class has an empty name");
+      else if (!classes.insert(c.Name).second)
         error(where, "class '" + c.Name + "' is defined twice");
       if (!c.Super.empty() && !Index.Classes.count(c.Super))
         error(where,
               "class '" + c.Name + "' extends unknown class '" + c.Super + "'");
+      // Its layout is its superclass's fields, then its own (§5).
+      else if (const Class *super =
+                   c.Super.empty() ? nullptr : Index.Classes.at(c.Super);
+               super && (c.Fields.size() < super->Fields.size() ||
+                         !std::equal(super->Fields.begin(), super->Fields.end(),
+                                     c.Fields.begin(), sameField)))
+        error(where, "class '" + c.Name +
+                         "': its fields do not begin with those of its "
+                         "superclass '" +
+                         c.Super + "'");
       if (c.IsExtern && c.Module.empty())
         error(where, "extern class '" + c.Name + "' names no module");
       std::unordered_set<std::string> fields;
@@ -276,6 +306,10 @@ private:
         error(where, "class '" + c.Name + "': vtable slot 0 must be 'destroy'");
       for (size_t i = 0; i < c.VTable.size(); ++i) {
         const VTableEntry &e = c.VTable[i];
+        if (hasVoidParam(e.Sig))
+          error(where, "class '" + c.Name + "' vtable slot " +
+                           std::to_string(i) + " ('" + e.Slot +
+                           "') takes a void parameter");
         if (e.Target.empty())
           continue;
         auto it = Index.Functions.find(e.Target);
@@ -305,6 +339,8 @@ private:
       if (hasMem(f.Sig))
         error(where, "function '@" + f.Name +
                          "' takes or returns a mem (pass its address)");
+      if (hasVoidParam(f.Sig))
+        error(where, "function '@" + f.Name + "' takes a void parameter");
       if (!f.Uses.empty() && !m.isCompiled(f))
         error(where, "function '@" + f.Name +
                          "' has uses but is not a compiled declaration (an "
@@ -400,6 +436,12 @@ private:
       }
       if (!EverDefined.insert(v.Id).second)
         error("value '%" + std::to_string(v.Id) + "' is defined twice");
+      // Ids are below the function's next free one, which the passes size
+      // their tables by.
+      if (v.Id >= F.NextValueId)
+        error("value '%" + std::to_string(v.Id) +
+              "' is not below the function's next value id " +
+              std::to_string(F.NextValueId));
       if (v.Ty == Type::Void || v.Ty == Type::Mem)
         error("value '%" + std::to_string(v.Id) + "' has type " +
               typeName(v.Ty));
@@ -1187,74 +1229,88 @@ private:
   };
 };
 
+/// Every extern of @p m that names another module, checked against its
+/// definition in the module @p modules gives for that name (LinkedModules):
+/// there, shared when it is, with its signature or layout.  A compiled
+/// declaration, which names its own module, is checked against the module's
+/// compiled code, which PIR does not see.
+void verifyModuleLinks(const Module &m, const LinkedModules &modules,
+                       std::vector<VerifyError> &errors) {
+  for (const Function &f : m.Functions) {
+    if (!f.IsExtern || f.Module.empty() || m.isCompiled(f))
+      continue;
+    std::optional<const Module *> mod = modules(f.Module);
+    if (!mod) {
+      errors.push_back({m.Name, "extern fn '@" + f.Name + "' names module '" +
+                                    f.Module +
+                                    "', which is not in the program"});
+      continue;
+    }
+    if (!*mod)
+      continue;
+    const Function *def = (*mod)->findFunction(f.linkName());
+    if (!def || !(*mod)->defines(*def))
+      errors.push_back({m.Name, "extern fn '@" + f.linkName() +
+                                    "' is not defined in module '" + f.Module +
+                                    "'"});
+    else if (def->Shared != f.Shared)
+      errors.push_back({m.Name, "extern fn '@" + f.Name + "' is " +
+                                    (f.Shared ? "" : "not ") +
+                                    "shared but its definition in module '" +
+                                    f.Module + "' is" +
+                                    (def->Shared ? "" : " not")});
+    else if (!(def->Sig == f.Sig))
+      errors.push_back({m.Name, "extern fn '@" + f.Name + "' is declared " +
+                                    sigStr(f.Sig) + " but module '" + f.Module +
+                                    "' defines it " + sigStr(def->Sig)});
+  }
+  for (const Class &c : m.Classes) {
+    if (!c.IsExtern || m.isCompiled(c))
+      continue;
+    std::optional<const Module *> mod = modules(c.Module);
+    if (!mod) {
+      errors.push_back({m.Name, "extern class '" + c.Name + "' names module '" +
+                                    c.Module +
+                                    "', which is not in the program"});
+      continue;
+    }
+    if (!*mod)
+      continue;
+    const Class *def = (*mod)->findClass(c.Name);
+    if (!def || !(*mod)->defines(*def)) {
+      errors.push_back({m.Name, "extern class '" + c.Name +
+                                    "' is not defined in module '" + c.Module +
+                                    "'"});
+      continue;
+    }
+    if (def->Fields.size() != c.Fields.size() ||
+        !std::equal(c.Fields.begin(), c.Fields.end(), def->Fields.begin(),
+                    sameField))
+      errors.push_back({m.Name, "extern class '" + c.Name +
+                                    "' has a different layout than its "
+                                    "definition in module '" +
+                                    c.Module + "'"});
+  }
+}
+
 /// Cross-module checks: every extern that names another module must match
 /// a definition in that module (in its PIR or its compiled code), shared
-/// when it is.  A compiled declaration, which names its own module, is
-/// checked against the module's compiled code, which PIR does not see.
+/// when it is (verifyModuleLinks).
 void verifyProgramLinks(const Program &p, std::vector<VerifyError> &errors) {
   std::unordered_map<std::string, const Module *> modules;
   for (const Module &m : p.Modules) {
     if (!modules.emplace(m.Name, &m).second)
       errors.push_back({m.Name, "module appears twice in the program"});
   }
-  for (const Module &m : p.Modules) {
-    for (const Function &f : m.Functions) {
-      if (!f.IsExtern || f.Module.empty() || m.isCompiled(f))
-        continue;
-      auto it = modules.find(f.Module);
-      if (it == modules.end()) {
-        errors.push_back({m.Name, "extern fn '@" + f.Name + "' names module '" +
-                                      f.Module +
-                                      "', which is not in the program"});
-        continue;
-      }
-      const Function *def = it->second->findFunction(f.linkName());
-      if (!def || !it->second->defines(*def))
-        errors.push_back({m.Name, "extern fn '@" + f.linkName() +
-                                      "' is not defined in module '" +
-                                      f.Module + "'"});
-      else if (def->Shared != f.Shared)
-        errors.push_back({m.Name, "extern fn '@" + f.Name + "' is " +
-                                      (f.Shared ? "" : "not ") +
-                                      "shared but its definition in module '" +
-                                      f.Module + "' is" +
-                                      (def->Shared ? "" : " not")});
-      else if (!(def->Sig == f.Sig))
-        errors.push_back({m.Name, "extern fn '@" + f.Name + "' is declared " +
-                                      sigStr(f.Sig) + " but module '" +
-                                      f.Module + "' defines it " +
-                                      sigStr(def->Sig)});
-    }
-    for (const Class &c : m.Classes) {
-      if (!c.IsExtern || m.isCompiled(c))
-        continue;
-      auto it = modules.find(c.Module);
-      if (it == modules.end()) {
-        errors.push_back({m.Name, "extern class '" + c.Name +
-                                      "' names module '" + c.Module +
-                                      "', which is not in the program"});
-        continue;
-      }
-      const Class *def = it->second->findClass(c.Name);
-      if (!def || !it->second->defines(*def)) {
-        errors.push_back({m.Name, "extern class '" + c.Name +
-                                      "' is not defined in module '" +
-                                      c.Module + "'"});
-        continue;
-      }
-      bool same = def->Fields.size() == c.Fields.size();
-      for (size_t i = 0; same && i < c.Fields.size(); ++i)
-        same = def->Fields[i].Name == c.Fields[i].Name &&
-               def->Fields[i].Ty == c.Fields[i].Ty &&
-               def->Fields[i].Size == c.Fields[i].Size &&
-               def->Fields[i].Align == c.Fields[i].Align;
-      if (!same)
-        errors.push_back({m.Name, "extern class '" + c.Name +
-                                      "' has a different layout than its "
-                                      "definition in module '" +
-                                      c.Module + "'"});
-    }
-  }
+  const LinkedModules inProgram =
+      [&](const std::string &name) -> std::optional<const Module *> {
+    auto it = modules.find(name);
+    if (it == modules.end())
+      return std::nullopt;
+    return it->second;
+  };
+  for (const Module &m : p.Modules)
+    verifyModuleLinks(m, inProgram, errors);
   if (!p.Modules.empty() && !p.Modules.front().findFunction("main"))
     errors.push_back(
         {p.Modules.front().Name, "main module defines no '@main'"});
@@ -1291,6 +1347,13 @@ std::vector<CSymbolClash> cSymbolClashes(const Program &p) {
 std::vector<VerifyError> verify(const Module &m) {
   std::vector<VerifyError> errors;
   ModuleVerifier(m, errors).run();
+  return errors;
+}
+
+std::vector<VerifyError> verifyLinks(const Module &m,
+                                     const LinkedModules &modules) {
+  std::vector<VerifyError> errors;
+  verifyModuleLinks(m, modules, errors);
   return errors;
 }
 

@@ -700,6 +700,23 @@ c)`, `(a == b) == c`, `(a << b) << c`, `-(a + b)`, `(a + b).m()`, `(if c
 then a else b) + d`) is the level its parenthesis is
 ([`plugins/ast-format.md`](plugins/ast-format.md) section 3).
 
+Imports nest at most 256 modules deep: the main file's import is one
+level, an import in that module two, and an import 257 levels down is
+`imports nested too deep (more than 256 modules): 'c::m256' is imported 257
+modules deep`, reported at that import, whether the modules on the way are
+built from source (each is analysed while its importer is) or loaded from
+cache entries (each is checked against the modules it imports first, and
+one whose imports nest too deep is built from its source). A chain of
+prebuilt module files, which have no source, is reported at the import
+from source that leads to it.
+
+A source file larger than 256 MiB (268435456 bytes) is rejected with
+`'<file>' is too large for a source file (more than 256 MiB)` before it is
+parsed, whichever the frontend: a regular file by its size, before it is
+read, and a pipe or a device (`/dev/stdin`, `<(...)`, `/dev/zero`) once it
+has given more than that.  A module file is held to the same size
+([module files](design/pkm.md#16-limits)).
+
 A chain of more than 2048 links is rejected with `nesting too deep (more
 than 2048 levels)` by every frontend, for the same reason. Each binary
 operator is a link over its two operands, and each postfix suffix (a call

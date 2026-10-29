@@ -13,11 +13,18 @@
 
 #include "BuildId.h"
 #include "Version.h"
+#include "paykan/pir/Binary.h"
+#include "paykan/pir/PIR.h"
 #include "paykan/pkm/File.h"
 #include "paykan/pkm/Interface.h"
 #include "paykan/pkm/Manifest.h"
+#include "paykan/pkm/Object.h"
 
+#include <algorithm>
 #include <array>
+#include <cerrno>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -31,6 +38,8 @@
 #include <utility>
 #include <vector>
 
+#include <poll.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -59,6 +68,69 @@ CmdResult run(const std::string &cmd) {
     out += buf.data();
   int rc = pclose(fp); // a macro on macOS: needs an lvalue
   return {WEXITSTATUS(rc), out};
+}
+
+/// `run`, but @p cmd and every process it starts are killed once it has run
+/// for @p seconds, so a command that blocks or reads for good fails the test
+/// instead of hanging it.  macOS has no `timeout` command, and a CPU limit
+/// would never stop a process blocked on a read.
+CmdResult runFor(const std::string &cmd, int seconds) {
+  int out[2];
+  if (pipe(out) != 0)
+    return {-1, "pipe failed"};
+  const pid_t pid = fork();
+  if (pid < 0)
+    return {-1, "fork failed"};
+  if (pid == 0) {
+    setpgid(0, 0); // a group of its own, which the kill below reaches whole
+    dup2(out[1], STDOUT_FILENO);
+    dup2(out[1], STDERR_FILENO);
+    close(out[0]);
+    close(out[1]);
+    execl("/bin/sh", "sh", "-c", cmd.c_str(), static_cast<char *>(nullptr));
+    _exit(127);
+  }
+  setpgid(pid, pid); // whichever of the two runs first
+  close(out[1]);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
+  std::string text;
+  std::array<char, 4096> buf{};
+  bool killed = false;
+  for (;;) {
+    int wait = -1; // once killed, the pipe closes when the group is gone
+    if (!killed) {
+      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+          deadline - std::chrono::steady_clock::now());
+      if (left.count() > 0) {
+        wait = static_cast<int>(left.count());
+      } else {
+        kill(-pid, SIGKILL);
+        killed = true;
+      }
+    }
+    pollfd ready{};
+    ready.fd = out[0];
+    ready.events = POLLIN;
+    const int n = poll(&ready, 1, wait);
+    if (n == 0 || (n < 0 && errno == EINTR))
+      continue;
+    if (n < 0)
+      break;
+    const ssize_t got = read(out[0], buf.data(), buf.size());
+    if (got < 0 && errno == EINTR)
+      continue;
+    if (got <= 0)
+      break;
+    text.append(buf.data(), static_cast<size_t>(got));
+  }
+  close(out[0]);
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+  }
+  if (killed)
+    text += "(killed after " + std::to_string(seconds) + " s)\n";
+  return {WIFEXITED(status) ? WEXITSTATUS(status) : -1, text};
 }
 
 bool hasBackend() {
@@ -154,6 +226,12 @@ struct Project {
     return run("cd " + Dir.string() + " && " +
                (cmd.empty() ? paykanCmd() : cmd) + " " + flags + " main.pkn");
   }
+  /// `runMain`, killed after @p seconds (`runFor`).
+  CmdResult runMainFor(int seconds, const std::string &flags = "") const {
+    return runFor("cd " + Dir.string() + " && " + paykanCmd() + " " + flags +
+                      " main.pkn",
+                  seconds);
+  }
   /// The .pkm cache entries (the backends keep their own files beside them).
   std::vector<std::string> pkmEntries() const {
     std::vector<std::string> out;
@@ -188,6 +266,41 @@ void rewriteManifest(
   auto patched = w.finish();
   ASSERT_TRUE(patched) << patched.status().message();
   writeFile(path, std::string((*patched).begin(), (*patched).end()));
+}
+
+/// Rewrite section @p kind of the .pkm file at @p path with @p change, the
+/// section and table hashes made to match: what a file damaged past what
+/// the container checks looks like.
+void rewriteSection(const fs::path &path, paykan::pkm::Kind kind,
+                    const std::function<void(std::vector<uint8_t> &)> &change) {
+  std::string bytes = slurp(path);
+  auto file = paykan::pkm::File::read(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+  ASSERT_TRUE(file) << file.status().message();
+  paykan::pkm::Writer w;
+  bool found = false;
+  for (const auto &e : (*file).sections()) {
+    auto s = (*file).section(static_cast<paykan::pkm::Kind>(e.Kind));
+    std::vector<uint8_t> section(s.begin(), s.end());
+    if (e.Kind == static_cast<uint32_t>(kind)) {
+      change(section);
+      found = true;
+    }
+    w.add(e.Kind, e.Flags, std::move(section));
+  }
+  ASSERT_TRUE(found) << path << " has no section " << static_cast<int>(kind);
+  auto patched = w.finish();
+  ASSERT_TRUE(patched) << patched.status().message();
+  writeFile(path, std::string((*patched).begin(), (*patched).end()));
+}
+
+/// An OBJ section whose compiled code is cut in half: its framing reads,
+/// its bitcode does not.
+void truncateCompiledCode(std::vector<uint8_t> &section) {
+  auto object = paykan::pkm::readObject(section);
+  ASSERT_TRUE(object) << object.status().message();
+  (*object).Bytes.resize((*object).Bytes.size() / 2);
+  section = paykan::pkm::writeObject(*object);
 }
 
 /// The core.build the .pkm file at @p path records.
@@ -392,6 +505,179 @@ TEST(Pkm, CorruptCacheEntryIsRebuilt) {
       << r.out;
 }
 
+// The mlir backend's bitcode cache entries carry the SHA-256 of their
+// bitcode: one damaged byte, which LLVM's bitcode reader is not made for (a
+// crash, an assertion or `LLVM ERROR: Broken module found` at these
+// offsets of the entry this program writes when the file is the bare
+// bitcode), makes the entry a miss, translated and written again, and
+// --verbose says why.
+TEST(Pkm, DamagedBitcodeCacheEntryIsTranslatedAgain) {
+  REQUIRE_BACKEND();
+  Project p("bitcode");
+  writeFile(p.Dir / "main.pkn", "import ::io;\n"
+                                "fn main() -> int {\n"
+                                "  io::println(\"hi\");\n"
+                                "  return 42;\n"
+                                "}\n");
+  ASSERT_EQ(p.runMain().exitCode, 42);
+  const fs::path bc = p.cache() / "@system" / "io.bc";
+  ASSERT_TRUE(fs::is_regular_file(bc));
+  const std::string pristine = slurp(bc);
+  ASSERT_GT(pristine.size(), 1385u);
+  const std::string miss = "module ::io: bitcode cache "
+                           ".paykan_cache/@system/io.bc is corrupt (";
+  for (size_t offset : {275u, 1370u, 1385u}) {
+    std::string bytes = pristine;
+    bytes[offset] = bytes[offset] ? '\0' : '\xff';
+    writeFile(bc, bytes);
+    auto r = p.runMain("--verbose");
+    EXPECT_EQ(r.exitCode, 42) << offset << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, "hi\n")) << offset << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, miss + "its bitcode does not match its hash); "
+                                       "translating it again\n"))
+        << offset << ": " << r.out;
+    EXPECT_EQ(slurp(bc), pristine) << offset;
+  }
+  writeFile(bc, "not bitcode");
+  auto r = p.runMain("--verbose");
+  EXPECT_EQ(r.exitCode, 42) << r.out;
+  EXPECT_TRUE(contains(r.out, miss + "not a bitcode cache entry); "
+                                     "translating it again\n"))
+      << r.out;
+  // The entry written in its place is used, without a word.
+  r = p.runMain("--verbose");
+  EXPECT_EQ(r.exitCode, 42) << r.out;
+  EXPECT_FALSE(contains(r.out, "bitcode cache")) << r.out;
+}
+
+// A bitcode cache entry that is no regular file is not read but translated
+// again, and the entry written in its place is used: a FIFO blocked the
+// compile for good, and a symbolic link to /dev/zero was read until LLVM
+// ran out of memory (`LLVM ERROR: out of memory`).  An entry an older
+// paykan wrote, bitcode with no header, is stale, not corrupt.
+TEST(Pkm, BitcodeCacheEntryThatIsNoRegularFileIsTranslatedAgain) {
+  REQUIRE_BACKEND();
+  Project p("bitcodefifo");
+  writeFile(p.Dir / "main.pkn", "import ::io;\n"
+                                "fn main() -> int {\n"
+                                "  io::println(\"hi\");\n"
+                                "  return 42;\n"
+                                "}\n");
+  ASSERT_EQ(p.runMain().exitCode, 42);
+  const fs::path bc = p.cache() / "@system" / "io.bc";
+  const std::string pristine = slurp(bc);
+  const std::string entry = "module ::io: bitcode cache "
+                            ".paykan_cache/@system/io.bc ";
+  // Bounded, so a compile that blocks or reads for good fails the test.
+  auto translatedAgain = [&](const std::string &what, const std::string &why) {
+    SCOPED_TRACE(what);
+    auto r = p.runMainFor(60, "--verbose");
+    EXPECT_EQ(r.exitCode, 42) << r.out;
+    EXPECT_TRUE(contains(r.out, entry + why + "; translating it again\n"))
+        << r.out;
+    EXPECT_TRUE(fs::is_regular_file(fs::symlink_status(bc)));
+    r = p.runMainFor(60, "--verbose");
+    EXPECT_EQ(r.exitCode, 42) << r.out;
+    EXPECT_FALSE(contains(r.out, "bitcode cache")) << r.out;
+  };
+  fs::remove(bc);
+  ASSERT_EQ(mkfifo(bc.c_str(), 0600), 0);
+  translatedAgain("a FIFO", "is corrupt (not a regular file)");
+  fs::remove(bc);
+  fs::create_symlink("/dev/zero", bc);
+  translatedAgain("/dev/zero", "is corrupt (not a regular file)");
+  const size_t bitcode = pristine.find("BC\xC0\xDE");
+  ASSERT_NE(bitcode, std::string::npos);
+  writeFile(bc, pristine.substr(bitcode));
+  translatedAgain("no header",
+                  "is stale (an older paykan wrote it, with no header)");
+}
+
+// A cache entry whose compiled code (OBJ) does not read is rebuilt, though
+// every hash of the file matches: the backend reads the code it would link
+// when the entry is loaded, before anything is compiled.
+TEST(Pkm, CacheEntryWhoseCompiledCodeDoesNotReadIsRebuilt) {
+  REQUIRE_BACKEND();
+  Project p("objcache");
+  ASSERT_EQ(p.runMain().exitCode, 0);
+  rewriteSection(p.entry("base"), paykan::pkm::Kind::Object,
+                 truncateCompiledCode);
+  auto r = p.runMain("--verbose");
+  ASSERT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_TRUE(contains(r.out, kExpected)) << r.out;
+  EXPECT_TRUE(contains(r.out, "module base: cache .paykan_cache/base.pkm has "
+                              "a bad OBJ section: the compiled code does not "
+                              "read: "))
+      << r.out;
+  EXPECT_TRUE(builtFromSource(r.out, "base")) << r.out;
+  auto again = p.runMain("--verbose");
+  ASSERT_EQ(again.exitCode, 0) << again.out;
+  EXPECT_FALSE(builtFromSource(again.out, "base")) << again.out;
+}
+
+// A cache entry whose CODE does not decode is rebuilt, though every hash
+// of the file matches: CODE is decoded and verified when the entry is
+// loaded, not when the program is lowered (which went on without the
+// module and stopped at an assertion).
+TEST(Pkm, CacheEntryWhoseCodeDoesNotDecodeIsRebuilt) {
+  REQUIRE_BACKEND();
+  Project p("codecache");
+  ASSERT_EQ(p.runMain().exitCode, 0);
+  rewriteSection(p.entry("base"), paykan::pkm::Kind::Code,
+                 [](std::vector<uint8_t> &code) {
+                   std::fill(code.begin(), code.end(), 0);
+                 });
+  auto r = p.runMain("--verbose");
+  ASSERT_EQ(r.exitCode, 0) << r.out;
+  EXPECT_TRUE(contains(r.out, kExpected)) << r.out;
+  EXPECT_TRUE(contains(r.out, "module base: cache .paykan_cache/base.pkm has "
+                              "a bad CODE section: binary PIR: bad magic at "
+                              "byte 0; building from source\n"))
+      << r.out;
+}
+
+// A cache entry whose bytes pass its hashes but not what reads them later is
+// rebuilt too, as a damaged entry is promised: a TMPL section that does not
+// decode was an error at the import on every run (after `--verbose` called
+// the entry usable), and a dependency renamed to a module there is none of
+// was `module 'bsae' not found` at the import of the module the entry is of.
+TEST(Pkm, CacheEntryDamagedPastItsHashesIsRebuilt) {
+  REQUIRE_BACKEND();
+  Project p("pasthashes");
+  p.writeBase("1", "fn ident<T>(x: T) -> T { return x; }\n");
+  ASSERT_EQ(p.runMain().exitCode, 0);
+  auto rebuilt = [&](const std::string &module, const std::string &why) {
+    SCOPED_TRACE(module);
+    auto r = p.runMain("--verbose");
+    EXPECT_EQ(r.exitCode, 0) << r.out;
+    EXPECT_TRUE(contains(r.out, kExpected)) << r.out;
+    EXPECT_TRUE(contains(r.out, "module " + module + ": cache .paykan_cache/" +
+                                    module + ".pkm " + why))
+        << r.out;
+    EXPECT_TRUE(builtFromSource(r.out, module)) << r.out;
+    r = p.runMain("--verbose");
+    EXPECT_EQ(r.exitCode, 0) << r.out;
+    EXPECT_FALSE(builtFromSource(r.out, module)) << r.out;
+  };
+  rewriteSection(
+      p.entry("base"), paykan::pkm::Kind::Tmpl, [](std::vector<uint8_t> &tmpl) {
+        const std::string name = "ident";
+        auto at =
+            std::search(tmpl.begin(), tmpl.end(), name.begin(), name.end());
+        ASSERT_NE(at, tmpl.end());
+        *at = 0xff;
+      });
+  rebuilt("base",
+          "has a bad TMPL section: TMPL: string is not valid UTF-8 (at byte ");
+  rewriteManifest(p.entry("mid"), [](paykan::pkm::Manifest &m) {
+    for (auto &d : m.Deps)
+      if (d.Name == "base")
+        d.Name = "bsae";
+  });
+  rebuilt("mid", "depends on module 'bsae', which is not found; building "
+                 "from source\n");
+}
+
 TEST(Pkm, RebuildModulesIgnoresTheEntries) {
   REQUIRE_BACKEND();
   Project p("rebuild");
@@ -490,6 +776,60 @@ TEST(Pkm, PrebuiltModuleReplacesItsSourceOnEveryBackend) {
   // The prebuilt file is a module of its own: no cache entry is written for
   // it, and a stale cache entry does not shadow it.
   EXPECT_FALSE(fs::exists(p.entry("base")));
+}
+
+// A prebuilt module whose compiled code (OBJ) does not read is rejected
+// where it is imported, with the other reasons a file is unusable, by
+// every command that would link it: the backend reads it when the file is
+// loaded, not when the program is linked.
+TEST(Pkm, PrebuiltModuleWhoseCompiledCodeDoesNotReadIsRejected) {
+  REQUIRE_BACKEND();
+  Project p("objprebuilt");
+  ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                " --emit-pkm base.pkn")
+                .exitCode,
+            0);
+  fs::remove(p.Dir / "base.pkn");
+  rewriteSection(p.Dir / "base.pkm", paykan::pkm::Kind::Object,
+                 truncateCompiledCode);
+  for (const char *cmd : {"", "--emit-llvm", "build -o prog"}) {
+    auto r = p.runMain(cmd);
+    EXPECT_EQ(r.exitCode, 1) << cmd << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, "error: module 'base' (base.pkm) has a bad "
+                                "OBJ section: the compiled code does not "
+                                "read: "))
+        << cmd << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, ". Rebuild it from source.")) << cmd;
+  }
+  EXPECT_FALSE(fs::exists(p.Dir / "prog"));
+}
+
+// A prebuilt module whose CODE does not decode is rejected where it is
+// imported, by every command, `--check-only` too: CODE is decoded when the
+// file is loaded (the lowering went on without the module and stopped at
+// an assertion, and `--check-only` accepted it).
+TEST(Pkm, PrebuiltModuleWhoseCodeDoesNotDecodeIsRejected) {
+  REQUIRE_BACKEND();
+  Project p("codeprebuilt");
+  ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                " --emit-pkm base.pkn")
+                .exitCode,
+            0);
+  fs::remove(p.Dir / "base.pkn");
+  rewriteSection(p.Dir / "base.pkm", paykan::pkm::Kind::Code,
+                 [](std::vector<uint8_t> &code) {
+                   std::fill(code.begin(), code.end(), 0);
+                 });
+  for (const char *cmd :
+       {"", "--check-only", "--emit-pir", "--emit-c", "build -o prog"}) {
+    auto r = p.runMain(cmd);
+    EXPECT_EQ(r.exitCode, 1) << cmd << ": " << r.out;
+    EXPECT_TRUE(contains(r.out, "error: module 'base' (base.pkm) has a bad "
+                                "CODE section: binary PIR: bad magic at byte "
+                                "0. Rebuild it from source.\n"))
+        << cmd << ": " << r.out;
+    EXPECT_FALSE(contains(r.out, "internal compiler error")) << cmd;
+  }
 }
 
 TEST(Pkm, PrebuiltModulesAreFoundOnTheModulePath) {
@@ -663,8 +1003,10 @@ TEST(Pkm, CheckReportsTheVerdict) {
   writeFile(p.Dir / "junk.pkm", "PKM?junk");
   auto junk =
       run(std::string(kPaykan) + " pkm check " + (p.Dir / "junk.pkm").string());
-  EXPECT_NE(junk.exitCode, 0);
-  EXPECT_TRUE(contains(junk.out, "junk.pkm:")) << junk.out;
+  EXPECT_EQ(junk.exitCode, 1);
+  EXPECT_EQ(junk.out.rfind((p.Dir / "junk.pkm").string() + ": corrupt: ", 0),
+            0u)
+      << junk.out;
   auto none = run(std::string(kPaykan) + " pkm check " +
                   (p.Dir / "missing.pkm").string());
   EXPECT_NE(none.exitCode, 0);
@@ -672,6 +1014,140 @@ TEST(Pkm, CheckReportsTheVerdict) {
       run(std::string(kPaykan) + " pkm " + (p.Dir / "base.pkm").string());
   EXPECT_NE(noVerb.exitCode, 0);
   EXPECT_TRUE(contains(noVerb.out, "unknown pkm command")) << noVerb.out;
+}
+
+// `pkm check` reads a file as an importer does, and says `usable` only
+// once every section a program would read reads: IFACE, CODE (decoded,
+// verified, defining what IFACE says), TMPL and OBJ (read and verified by
+// the backend that would link it).  It printed `usable` for a file whose
+// CODE, TMPL or OBJ the compiler rejects (or crashes on), and printed it
+// before it decoded anything.
+TEST(Pkm, CheckReadsEverySectionAProgramReads) {
+  REQUIRE_BACKEND();
+  Project p("checksections");
+  writeFile(p.Dir / "gen.pkn", "fn ident<T>(x: T) -> T { return x; }\n"
+                               "fn one() -> int { return ident(1); }\n");
+  for (const char *module : {"base", "gen"})
+    ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                  " --emit-pkm " + module + ".pkn")
+                  .exitCode,
+              0)
+        << module;
+  const std::string base = slurp(p.Dir / "base.pkm");
+  auto check = [&](const std::string &file) {
+    return run(std::string(kPaykan) + " pkm check " + (p.Dir / file).string());
+  };
+  auto corrupt = [&](const std::string &file, const std::string &why) {
+    auto r = check(file);
+    EXPECT_EQ(r.exitCode, 1) << file << ": " << r.out;
+    EXPECT_EQ(r.out.rfind((p.Dir / file).string() + ": corrupt: " + why, 0), 0u)
+        << file << ": " << r.out;
+    EXPECT_FALSE(contains(r.out, "usable")) << file << ": " << r.out;
+  };
+  ASSERT_EQ(check("gen.pkm").out, (p.Dir / "gen.pkm").string() + ": usable\n");
+  rewriteSection(p.Dir / "base.pkm", paykan::pkm::Kind::Code,
+                 [](std::vector<uint8_t> &code) {
+                   std::fill(code.begin(), code.end(), 0);
+                 });
+  corrupt("base.pkm",
+          "has a bad CODE section: binary PIR: bad magic at byte 0\n");
+  writeFile(p.Dir / "base.pkm", base);
+  rewriteSection(p.Dir / "base.pkm", paykan::pkm::Kind::Object,
+                 truncateCompiledCode);
+  corrupt("base.pkm",
+          "has a bad OBJ section: the compiled code does not read: ");
+  // A template's name made invalid UTF-8.
+  rewriteSection(p.Dir / "gen.pkm", paykan::pkm::Kind::Tmpl,
+                 [](std::vector<uint8_t> &tmpl) {
+                   const std::string name = "ident";
+                   auto at = std::search(tmpl.begin(), tmpl.end(), name.begin(),
+                                         name.end());
+                   ASSERT_NE(at, tmpl.end());
+                   *at = 0xff;
+                 });
+  corrupt("gen.pkm", "has a bad TMPL section: TMPL: string is not valid "
+                     "UTF-8");
+}
+
+// `pkm check` judges the compiled code by the backend a program would link
+// it with, as `run` and `build` do: an unknown --backend (a typo such as
+// `MLIR`) is an error, as it is for `pkm extract`, and code another backend
+// or target compiled is rejected, as the link rejects it.  Both said
+// `usable`, the first without reading the code at all.
+TEST(Pkm, CheckJudgesTheCodeByTheBackendThatLinksIt) {
+  REQUIRE_BACKEND();
+  Project p("checkbackend");
+  ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                " --emit-pkm base.pkn")
+                .exitCode,
+            0);
+  const fs::path file = p.Dir / "base.pkm";
+  rewriteSection(file, paykan::pkm::Kind::Object, truncateCompiledCode);
+  for (const char *name : {"nosuch", "MLIR"}) {
+    auto r = run(std::string(kPaykan) + " pkm check --backend=" + name + " " +
+                 file.string());
+    EXPECT_EQ(r.exitCode, 1) << name << ": " << r.out;
+    EXPECT_EQ(r.out, "paykan: unknown backend '" + std::string(name) + "'\n");
+  }
+  ASSERT_EQ(run("cd " + p.Dir.string() + " && " + paykanCmd() +
+                " --emit-pkm base.pkn")
+                .exitCode,
+            0);
+  paykan::pkm::Object made;
+  rewriteSection(file, paykan::pkm::Kind::Object,
+                 [&](std::vector<uint8_t> &section) {
+                   auto object = paykan::pkm::readObject(section);
+                   ASSERT_TRUE(object) << object.status().message();
+                   made = *object;
+                   (*object).Target = "other-" + (*object).Target;
+                   section = paykan::pkm::writeObject(*object);
+                 });
+  auto r = run(std::string(kPaykan) + " pkm check " + file.string());
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  EXPECT_EQ(r.out, file.string() +
+                       ": rejected: its code was compiled by "
+                       "backend '" +
+                       made.Backend + "' (" + made.Producer + ", " +
+                       made.Format + " for other-" + made.Target +
+                       "); backend '" + made.Backend +
+                       "' links code it compiled itself (" + made.Producer +
+                       " for " + made.Target + ")\n");
+}
+
+// A module that failed once and is asked for again (here `x`, a prebuilt
+// file built against another interface of `y`, the module being compiled,
+// which imports it) names the file its import would be in the second
+// report, as before: it named none (`not found (tried )`), the path of the
+// resolver's failed entry, which has none.
+TEST(Pkm, AModuleThatFailedNamesTheFileItsImportWouldBe) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_tried_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "s1" / "y.pkn", "fn yv() -> int { return 1; }\n");
+  writeFile(dir / "s2" / "x.pkn",
+            "import y;\nfn xv() -> int { return y::yv() + 1; }\n");
+  writeFile(dir / "s3" / "y.pkn",
+            "import x;\nfn yv() -> int { return x::xv() + 40; }\n");
+  fs::create_directories(dir / "pre");
+  auto in = [&](const char *sub, const std::string &args) {
+    return run("cd " + (dir / sub).string() + " && " + paykanCmd() + " " +
+               args);
+  };
+  ASSERT_EQ(in("s1", "--emit-pkm y.pkn -o ../pre/y.pkm").exitCode, 0);
+  ASSERT_EQ(in("s2", "--module-path=../pre --emit-pkm x.pkn -o ../pre/x.pkm")
+                .exitCode,
+            0);
+  auto r = in("s3", "--module-path=../pre --no-module-cache --emit-pkm y.pkn "
+                    "-o ../y.pkm");
+  EXPECT_EQ(r.exitCode, 1) << r.out;
+  EXPECT_TRUE(contains(r.out, "error: module 'x' (../pre/x.pkm) was built "
+                              "against another interface of module 'y'"))
+      << r.out;
+  EXPECT_FALSE(contains(r.out, "(tried )")) << r.out;
+  EXPECT_TRUE(contains(r.out, "error: module 'x' not found (tried x.pkn)\n"))
+      << r.out;
+  fs::remove_all(dir);
 }
 
 // A directory is not a module file: every verb says so and exits with 1,
@@ -716,6 +1192,338 @@ TEST(Pkm, HelpDocumentsTheFlags) {
        {"--emit-pkm", "--module-path=<dir>", "--rebuild-modules",
         "--no-module-cache", "--verbose", "pkm dump", "pkm check"})
     EXPECT_TRUE(contains(r.out, flag)) << flag << "\n" << r.out;
+}
+
+// -- Interface and code that disagree
+
+namespace {
+
+/// `lib::b` derives `Line` from `lib::a`'s abstract `Shape` and `Seg` from
+/// `Line`, and has a struct and a function returning it, a function
+/// returning an instance of `lib::a`'s template `Box` (whose copy its CODE
+/// holds) and a native function; `main` uses them all (exit status 42).  Its
+/// file is tried with an IFACE or a CODE that disagrees with itself, with its
+/// CODE or with `lib::a`, every hash made to match: a cache entry is rebuilt, a
+/// prebuilt file rejected where it is imported, by `--check-only` too, and `pkm
+/// check` says `corrupt`.
+struct Hierarchy {
+  fs::path Dir;
+  explicit Hierarchy(const std::string &name) {
+    Dir = fs::temp_directory_path() /
+          ("pkm_hier_" + name + "_" + std::to_string(getpid()));
+    fs::remove_all(Dir);
+    writeFile(Dir / "lib" / "a.pkn",
+              "class Shape { n: int; m: int;\n"
+              "  view fn area() -> int;\n"
+              "  view fn perimeter() -> int { return self.n + self.m; } }\n"
+              "class Box<T> { v: T; view fn get() -> T { return self.v; } "
+              "}\n");
+    writeFile(Dir / "lib" / "b.pkn",
+              "import lib::a;\n"
+              "class Line : a::Shape { k: int;\n"
+              "  view fn extra() -> int { return self.k; } }\n"
+              "class Seg : Line { z: int;\n"
+              "  view fn area() -> int { return self.z; } }\n"
+              "struct S { q: int; }\n"
+              "impl S { view fn get() -> int { return self.q; } }\n"
+              "fn mk() -> S { return S(1); }\n"
+              "fn bx() -> a::Box<int> { return a::Box<int>(2); }\n"
+              "native fn absval(x: int) -> int = \"llabs\";\n");
+    writeFile(Dir / "main.pkn",
+              "import lib::b;\n"
+              "fn main() -> int {\n"
+              "  let s = b::Seg(1, 2, 3, 30);\n"
+              "  let t = b::mk();\n"
+              "  return s.perimeter() + s.area() + s.extra() + t.get() +\n"
+              "         b::bx().get() + b::absval(-3);\n"
+              "}\n");
+  }
+  ~Hierarchy() { fs::remove_all(Dir); }
+  CmdResult paykan(const std::string &args) const {
+    return run("cd " + Dir.string() + " && " + paykanCmd() + " " + args);
+  }
+  fs::path entry(const std::string &module) const {
+    return Dir / ".paykan_cache" / "lib" / (module + ".pkm");
+  }
+  /// The cache entries of `lib::a` and `lib::b` as prebuilt files in
+  /// pre/lib, the sources gone.
+  void prebuild() const {
+    fs::create_directories(Dir / "pre" / "lib");
+    for (const char *m : {"a", "b"})
+      fs::copy_file(entry(m), Dir / "pre" / "lib" / (std::string(m) + ".pkm"),
+                    fs::copy_options::overwrite_existing);
+    fs::remove_all(Dir / "lib");
+    fs::remove_all(Dir / ".paykan_cache");
+  }
+};
+
+/// Rewrite the IFACE section of the .pkm file at @p path with @p change.
+void rewriteIface(const fs::path &path, const std::string &module,
+                  const std::function<void(paykan::pkm::Interface &)> &change) {
+  std::string bytes = slurp(path);
+  auto file = paykan::pkm::File::read(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+  ASSERT_TRUE(file) << file.status().message();
+  auto iface = paykan::pkm::readInterface(
+      (*file).section(paykan::pkm::Kind::Iface), module);
+  ASSERT_TRUE(iface) << iface.status().message();
+  paykan::pkm::Interface changed = *iface;
+  change(changed);
+  paykan::pkm::Writer w;
+  for (const auto &e : (*file).sections()) {
+    auto s = (*file).section(static_cast<paykan::pkm::Kind>(e.Kind));
+    if (e.Kind == static_cast<uint32_t>(paykan::pkm::Kind::Iface))
+      w.add(e.Kind, e.Flags, paykan::pkm::writeInterface(changed));
+    else
+      w.add(e.Kind, e.Flags, std::vector<uint8_t>(s.begin(), s.end()));
+  }
+  auto patched = w.finish();
+  ASSERT_TRUE(patched) << patched.status().message();
+  writeFile(path, std::string((*patched).begin(), (*patched).end()));
+}
+
+/// Rewrite the CODE section of the module file at @p path, decoded, with
+/// @p change.
+void rewriteCode(const fs::path &path,
+                 const std::function<void(paykan::pir::Module &)> &change) {
+  rewriteSection(path, paykan::pkm::Kind::Code,
+                 [&](std::vector<uint8_t> &bytes) {
+                   auto code = paykan::pir::binary::decode(bytes);
+                   ASSERT_TRUE(code) << code.status().message();
+                   change(*code);
+                   bytes = paykan::pir::binary::encode(*code);
+                 });
+}
+
+template <typename Record>
+Record &named(std::vector<Record> &records, const std::string &name) {
+  auto it = std::find_if(records.begin(), records.end(),
+                         [&](const Record &r) { return r.Name == name; });
+  EXPECT_NE(it, records.end()) << name;
+  return *it;
+}
+
+/// What a damaged `lib::b` is tried on: @p damage applied to its cache
+/// entry, then to its prebuilt file, each time from a fresh project.
+/// @p why is what its load says; @p checkSeesIt whether `pkm check`,
+/// which reads the file without its dependencies, sees it too.
+void expectNotUsed(const std::string &name,
+                   const std::function<void(const fs::path &)> &damage,
+                   const std::string &why, bool checkSeesIt = true) {
+  SCOPED_TRACE(name);
+  {
+    Hierarchy h(name + "_cache");
+    ASSERT_EQ(h.paykan("main.pkn").exitCode, 42);
+    damage(h.entry("b"));
+    auto r = h.paykan("--verbose main.pkn");
+    EXPECT_EQ(r.exitCode, 42) << r.out;
+    EXPECT_TRUE(
+        contains(r.out, "module lib::b: cache .paykan_cache/lib/b.pkm " + why +
+                            "; building from source\n"))
+        << r.out;
+    // The entry written in its place is used.
+    r = h.paykan("--verbose main.pkn");
+    EXPECT_EQ(r.exitCode, 42) << r.out;
+    EXPECT_TRUE(contains(r.out, "module lib::b: cache .paykan_cache/lib/b.pkm "
+                                "usable\n"))
+        << r.out;
+  }
+  Hierarchy h(name + "_prebuilt");
+  ASSERT_EQ(h.paykan("main.pkn").exitCode, 42);
+  h.prebuild();
+  damage(h.Dir / "pre" / "lib" / "b.pkm");
+  for (const char *mode : {"", "--check-only ", "--emit-c "}) {
+    auto r = h.paykan(std::string("--module-path=pre --no-module-cache ") +
+                      mode + "main.pkn");
+    EXPECT_EQ(r.exitCode, 1) << mode << r.out;
+    EXPECT_TRUE(contains(r.out, "error: module 'lib::b' (pre/lib/b.pkm) " +
+                                    why + ". Rebuild it from source.\n"))
+        << mode << r.out;
+    EXPECT_FALSE(contains(r.out, "internal compiler error")) << mode << r.out;
+  }
+  auto check = h.paykan("pkm check pre/lib/b.pkm");
+  if (checkSeesIt) {
+    EXPECT_EQ(check.exitCode, 1) << check.out;
+    EXPECT_EQ(check.out, "pre/lib/b.pkm: corrupt: " + why + "\n");
+  } else {
+    EXPECT_EQ(check.out, "pre/lib/b.pkm: usable\n");
+  }
+}
+
+} // namespace
+
+// An IFACE that disagrees with itself, with its CODE or with the
+// interface of the module a type it records is from (its copy of a
+// superclass of its own classes): an importer reconstructs the types from
+// the file's records, and the lowering stopped with an internal compiler
+// error on the vtable it got, or Sema reported a signature's unknown type
+// twice and stopped (the duplicate-diagnostic guard), and a cache entry was
+// not rebuilt.
+TEST(Pkm, AnInterfaceThatDisagreesIsNotUsed) {
+  REQUIRE_BACKEND();
+  using paykan::pkm::Interface;
+  auto iface = [](const std::function<void(Interface &)> &change) {
+    return [change](const fs::path &file) {
+      rewriteIface(file, "lib::b", change);
+    };
+  };
+  expectNotUsed("slot", iface([](Interface &i) {
+                  named(i.Classes, "Shape").Methods[0].Name = "";
+                }),
+                "has a bad IFACE section: the vtable of class 'Line' does "
+                "not start with the slots of its superclass 'Shape'");
+  expectNotUsed("copy", iface([](Interface &i) {
+                  named(i.Classes, "Shape").Fields[0].TypeName = "Str";
+                }),
+                "has an IFACE section that does not match module 'lib::a': "
+                "its class 'Shape' is not the one that module describes",
+                /*checkSeesIt=*/false);
+  expectNotUsed("type", iface([](Interface &i) {
+                  named(i.Functions, "Line").ReturnTypeName = "";
+                }),
+                "has a bad IFACE section: return type of function 'Line' has "
+                "unknown type ''");
+  expectNotUsed("signature", iface([](Interface &i) {
+                  named(i.Functions, "mk").ReturnTypeName = "Seg";
+                }),
+                "has an IFACE section that does not match its CODE: function "
+                "'mk' is (ptr) -> void in CODE, () -> box by its types in "
+                "IFACE");
+  // Every type has its PIR type: the optional of an int is an opt_i64,
+  // which a subclass's initializer in an importer passed where CODE took
+  // an i64 (`internal compiler error: an optional value where a box is
+  // due` for a class's).
+  expectNotUsed("optional", iface([](Interface &i) {
+                  for (const char *c : {"Line", "Seg"})
+                    for (auto &m : named(i.Classes, c).Methods)
+                      if (m.Name == "__init__")
+                        m.ParamTypeNames[0] = "int?";
+                }),
+                "has an IFACE section that does not match its CODE: method "
+                "'Line.__init__' is (obj, i64, i64, i64) -> void in CODE, "
+                "(obj, opt_i64, i64, i64) -> void by its types in IFACE");
+  // A native function is the module's function that calls C.
+  expectNotUsed("native", iface([](Interface &i) {
+                  named(i.Functions, "absval").ReturnTypeName = "float";
+                }),
+                "has an IFACE section that does not match its CODE: function "
+                "'absval' is (i64) -> i64 in CODE, (i64) -> f64 by its types "
+                "in IFACE");
+}
+
+// A CODE that verifies on its own, and still is not one a program can use:
+// a `void` parameter (the mlir backend crashed on it), an empty vtable slot
+// of a class it defines or of a copy of an instantiation, a slot that names
+// another function than the one an importer's subclass inherits, or a
+// constructor returning nothing (the program built, and crashed when it
+// ran), a class's initializer an importer's subclass calls by its name
+// missing (an internal compiler error), a function whose struct result is
+// not written through its last parameter or a class whose fields do not
+// begin with its superclass's (the program did not verify), an extern that
+// does not match the module it names, a function whose next value id is
+// not above its ids (rc-elimination read past its tables), a function with
+// no name or a copy's constructor that is not shared (the link missed the
+// one the compiled code calls).
+TEST(Pkm, CodeAProgramCannotUseIsNotUsed) {
+  REQUIRE_BACKEND();
+  using paykan::pir::Module;
+  auto code = [](const std::function<void(Module &)> &change) {
+    return [change](const fs::path &file) { rewriteCode(file, change); };
+  };
+  auto fn = [](Module &m, const std::string &name) -> paykan::pir::Function & {
+    return named(m.Functions, name);
+  };
+  // The function @p from renamed @p to wherever CODE names it, as one
+  // changed byte of its strings does.
+  auto rename = [](const std::string &from, const std::string &to) {
+    return [=](const fs::path &file) {
+      rewriteCode(file, [&](Module &m) {
+        for (paykan::pir::Function &f : m.Functions) {
+          if (f.Name == from)
+            f.Name = to;
+          for (std::string &u : f.Uses)
+            if (u == from)
+              u = to;
+        }
+        for (paykan::pir::Class &c : m.Classes)
+          for (paykan::pir::VTableEntry &e : c.VTable)
+            if (e.Target == from)
+              e.Target = to;
+      });
+    };
+  };
+  expectNotUsed("void", code([&](Module &m) {
+                  fn(m, "Shape.__init__").Sig.Params[1] =
+                      paykan::pir::Type::Void;
+                }),
+                "has a bad CODE section: it does not verify:\nlib::b: "
+                "function '@Shape.__init__' takes a void parameter\n");
+  expectNotUsed("slot", code([](Module &m) {
+                  named(m.Classes, "Seg").VTable[3].Target.clear();
+                }),
+                "has an IFACE section that does not match its CODE: class "
+                "'Seg': slot 3 ('area') of its vtable is empty in CODE");
+  expectNotUsed("copy", code([](Module &m) {
+                  named(m.Classes, "Box<int>").VTable[0].Target.clear();
+                }),
+                "has an IFACE section that does not match its CODE: class "
+                "'Box<int>': slot 0 ('destroy') of its vtable is empty in "
+                "CODE");
+  expectNotUsed("target", rename("Line.extra", "Line.extrb"),
+                "has an IFACE section that does not match its CODE: class "
+                "'Line': slot 5 ('extra') of its vtable names '@Line.extrb' "
+                "in CODE, which is not the class's or an ancestor's method "
+                "'extra'");
+  expectNotUsed("init", rename("Line.__init__", "Line.__inix__"),
+                "has an IFACE section that does not match its CODE: method "
+                "'Line.__init__' is not in CODE");
+  // The constructor of the copy of `Box<int>`, which `bx` calls, linked
+  // by another name than the one the compiled code calls: the program's
+  // link missed it.
+  expectNotUsed("unshared",
+                code([&](Module &m) { fn(m, "Box<int>").Shared = false; }),
+                "has an IFACE section that does not match its CODE: function "
+                "'@Box<int>' is not shared in CODE, its class 'Box<int>' is");
+  // Or by no name.
+  expectNotUsed("nameless",
+                code([&](Module &m) { fn(m, "Box<int>").Name.clear(); }),
+                "has a bad CODE section: it does not verify:\nlib::b: symbol "
+                "has an empty name\n");
+  expectNotUsed("ids", code([&](Module &m) {
+                  ASSERT_EQ(fn(m, "Box<int>.get").NextValueId, 4u);
+                  fn(m, "Box<int>.get").NextValueId = 3;
+                }),
+                "has a bad CODE section: it does not verify:\nlib::b:@Box<int>"
+                ".get: value '%3' is not below the function's next value id "
+                "3\n");
+  expectNotUsed("ctor", code([&](Module &m) {
+                  fn(m, "Seg").Sig.Ret = paykan::pir::Type::Void;
+                }),
+                "has an IFACE section that does not match its CODE: class "
+                "'Seg': its constructor is (i64, i64, i64, i64) -> void in "
+                "CODE, its initializer (obj, i64, i64, i64, i64) -> void");
+  // A struct result is written where a last parameter points.
+  expectNotUsed("result", code([&](Module &m) {
+                  fn(m, "mk").Sig.Params[0] = paykan::pir::Type::Obj;
+                }),
+                "has an IFACE section that does not match its CODE: function "
+                "'mk' is (obj) -> void in CODE, (ptr) -> void by its types in "
+                "IFACE");
+  expectNotUsed("inherited", code([](Module &m) {
+                  named(m.Classes, "Seg").Fields[0].Name = "";
+                }),
+                "has a bad CODE section: it does not verify:\nlib::b: class "
+                "'Seg': its fields do not begin with those of its superclass "
+                "'Line'\n");
+  // `lib::a`'s Shape, and the layouts that begin with it, changed alike.
+  expectNotUsed("link", code([](Module &m) {
+                  for (const char *c : {"Shape", "Line", "Seg"})
+                    named(m.Classes, c).Fields[0].Ty = paykan::pir::Type::F64;
+                }),
+                "has a bad CODE section: it does not match the modules it "
+                "names:\nlib::b: extern class 'Shape' has a different layout "
+                "than its definition in module 'lib::a'\n",
+                /*checkSeesIt=*/false);
 }
 
 // -- Parameter modes across modules
@@ -2007,6 +2815,95 @@ TEST(Pkm, EmitPkmNamesTheModuleByItsNormalPath) {
   fs::remove_all(dir);
 }
 
+// A keyword is no identifier, so it is no part of a module name, given by
+// the path or by --module-name: `--emit-pkm x/y/if.pkn` wrote a module
+// `x::y::if` that no import can name (`import x::y::if;` is a syntax error),
+// and so did `--module-name=a::match` (SW-42).
+TEST(Pkm, EmitPkmRejectsAKeywordInTheModuleName) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_keyword_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  const std::string area = "fn area(w: int, h: int) -> int { return w * h; }\n";
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  for (const auto &[path, part] :
+       {std::pair{"x/y/if.pkn", "if"}, std::pair{"match/ok.pkn", "match"},
+        std::pair{"_/ok.pkn", "_"}}) {
+    writeFile(dir / path, area);
+    auto bad = paykan(std::string("--emit-pkm ") + path);
+    EXPECT_EQ(bad.exitCode, 1) << path << ": " << bad.out;
+    EXPECT_EQ(bad.out, std::string("paykan: cannot name the module of '") +
+                           path + "' after its path: '" + part +
+                           "' is a keyword, which no import can name (name "
+                           "it with --module-name)\n");
+    EXPECT_FALSE(fs::exists(fs::path(dir / path).replace_extension(".pkm")))
+        << path;
+  }
+  writeFile(dir / "x" / "y" / "ok.pkn", area);
+  for (const char *name : {"a::match", "::if", "fn::b"}) {
+    auto bad = paykan(std::string("--emit-pkm --module-name=") + name +
+                      " x/y/ok.pkn -o m.pkm");
+    EXPECT_EQ(bad.exitCode, 1) << name << ": " << bad.out;
+    EXPECT_TRUE(contains(bad.out, std::string("--module-name: '") + name +
+                                      "' is not a module name: '"))
+        << name << ": " << bad.out;
+    EXPECT_TRUE(contains(bad.out, "' is a keyword, which no import can name"))
+        << name << ": " << bad.out;
+    EXPECT_FALSE(fs::exists(dir / "m.pkm")) << name;
+  }
+  // A name that only starts like a keyword is an identifier.
+  auto ok = paykan("--emit-pkm --module-name=a::matches x/y/ok.pkn -o m.pkm");
+  EXPECT_EQ(ok.exitCode, 0) << ok.out;
+  fs::remove_all(dir);
+}
+
+// --module-name=a::b for `src/a/b.pkn` resolves the module's imports against
+// `src`, the directory above the name's parts before its last, so it finds
+// its sibling `a::c` where a program that imports it does; they were
+// resolved against `src/a`, where `a::c` is `src/a/a/c.pkn` (KF-7).  The
+// same from inside `src/a`; a name whose parts are not the file's
+// directories keeps the file's own directory.
+TEST(Pkm, ModuleNameFindsTheModulesSiblings) {
+  REQUIRE_BACKEND();
+  fs::path dir =
+      fs::temp_directory_path() / ("pkm_modroot_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  const std::string sibling = "fn g() -> int => 41;\n";
+  writeFile(dir / "src" / "a" / "b.pkn",
+            "import a::c;\nfn f() -> int => c::g() + 1;\n");
+  writeFile(dir / "src" / "a" / "c.pkn", sibling);
+  writeFile(dir / "use" / "a" / "c.pkn", sibling);
+  writeFile(dir / "use" / "main.pkn",
+            "import a::b;\nfn main() -> int => b::f();\n");
+  auto in = [&](const fs::path &cwd, const std::string &args) {
+    return run("cd " + cwd.string() + " && " + paykanCmd() + " " + args);
+  };
+  auto above =
+      in(dir, "--emit-pkm --module-name=a::b -o use/a/b.pkm src/a/b.pkn");
+  ASSERT_EQ(above.exitCode, 0) << above.out;
+  // The import's cache entry is the project's.
+  EXPECT_TRUE(fs::exists(dir / "src" / ".paykan_cache" / "a" / "c.pkm"));
+  EXPECT_FALSE(fs::exists(dir / "src" / "a" / ".paykan_cache"));
+  auto r = in(dir / "use", "main.pkn");
+  EXPECT_EQ(r.exitCode, 42) << r.out;
+  auto inside =
+      in(dir / "src" / "a", "--emit-pkm --module-name=a::b -o b.pkm b.pkn");
+  ASSERT_EQ(inside.exitCode, 0) << inside.out;
+  // The same file: it records its source by the path from the source root.
+  EXPECT_EQ(slurp(dir / "src" / "a" / "b.pkm"),
+            slurp(dir / "use" / "a" / "b.pkm"));
+  auto other = in(dir, "--emit-pkm --module-name=x::b -o x.pkm src/a/b.pkn");
+  EXPECT_EQ(other.exitCode, 1) << other.out;
+  EXPECT_TRUE(contains(other.out, "src/a/b.pkn:1:1: error: module 'a::c' not "
+                                  "found (tried src/a/a/c.pkn, "
+                                  "src/a/a/c.pkm)"))
+      << other.out;
+  EXPECT_FALSE(fs::exists(dir / "x.pkm"));
+  fs::remove_all(dir);
+}
+
 // A function type in a signature or a field keeps its spelling in a
 // prebuilt module, modes included; an importer passes closures in and calls
 // the ones it gets back, from the source and from the `.pkm` alike.
@@ -2826,35 +3723,6 @@ TEST(Pkm, AConformanceEditRebuildsTheImporter) {
   fs::remove_all(dir);
 }
 
-namespace {
-
-/// Rewrite the IFACE section of the .pkm file at @p path with @p change.
-void rewriteIface(const fs::path &path, const std::string &module,
-                  const std::function<void(paykan::pkm::Interface &)> &change) {
-  std::string bytes = slurp(path);
-  auto file = paykan::pkm::File::read(std::span<const uint8_t>(
-      reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
-  ASSERT_TRUE(file) << file.status().message();
-  auto iface = paykan::pkm::readInterface(
-      (*file).section(paykan::pkm::Kind::Iface), module);
-  ASSERT_TRUE(iface) << iface.status().message();
-  paykan::pkm::Interface changed = *iface;
-  change(changed);
-  paykan::pkm::Writer w;
-  for (const auto &e : (*file).sections()) {
-    auto s = (*file).section(static_cast<paykan::pkm::Kind>(e.Kind));
-    if (e.Kind == static_cast<uint32_t>(paykan::pkm::Kind::Iface))
-      w.add(e.Kind, e.Flags, paykan::pkm::writeInterface(changed));
-    else
-      w.add(e.Kind, e.Flags, std::vector<uint8_t>(s.begin(), s.end()));
-  }
-  auto patched = w.finish();
-  ASSERT_TRUE(patched) << patched.status().message();
-  writeFile(path, std::string((*patched).begin(), (*patched).end()));
-}
-
-} // namespace
-
 // A .pkm file whose interface claims a conformance it cannot have: the
 // reader rejects one to a trait an `impl` block cannot give, so a cache
 // entry is rebuilt from the source and a prebuilt file is an error, and the
@@ -2912,9 +3780,8 @@ TEST(Pkm, AForgedConformanceIsRejected) {
   EXPECT_TRUE(contains(named.out, notBuiltin)) << named.out;
   auto check = paykan("pkm check keys.pkm");
   EXPECT_NE(check.exitCode, 0) << check.out;
-  EXPECT_TRUE(contains(check.out, "DECLS: 'impl Named for Key': 'Named' is not "
-                                  "a built-in trait an 'impl' block "
-                                  "implements"))
+  EXPECT_EQ(check.out.rfind(std::string("keys.pkm: corrupt: ") + notBuiltin, 0),
+            0u)
       << check.out;
 
   writeFile(dir / "keys.pkm", pristine);
@@ -2928,6 +3795,139 @@ TEST(Pkm, AForgedConformanceIsRejected) {
                                   "'Hashable', but it has no method 'view fn "
                                   "hash() -> int'"))
       << plain.out;
+  fs::remove_all(dir);
+}
+
+// A module file whose interface does not match its CODE (a class, a
+// superclass, a vtable slot, a field or a function its CODE does not have)
+// is unusable: a prebuilt one is an error where it is imported, under
+// `--check-only` too, and a cache entry is rebuilt.  The importer was
+// lowered against the interface, and failed PIR's verifier or the
+// lowering's own checks (`internal compiler error`).
+TEST(Pkm, AnInterfaceThatDoesNotMatchItsCodeIsRejected) {
+  REQUIRE_BACKEND();
+  auto dir = fs::temp_directory_path() /
+             ("pkm_iface_code_" + std::to_string(getpid()));
+  fs::remove_all(dir);
+  writeFile(dir / "geo.pkn",
+            "class Shape { name: Str; view fn kind() -> Str { return "
+            "\"shape\"; } }\n"
+            "class Circle : Shape { r: int; d: int; view fn kind() -> Str { "
+            "return \"circle\"; } }\n"
+            "impl Circle { fn __init__(r: int) { __super__(\"c\"); self.r = "
+            "r; self.d = 2 * r; } }\n"
+            "fn area(c: view Circle) -> int { return 3 * c.r * c.r; }\n");
+  writeFile(dir / "main.pkn", "import geo;\n"
+                              "fn main() -> int {\n"
+                              "  let c = geo::Circle(2);\n"
+                              "  return geo::area(c) + c.kind().len();\n"
+                              "}\n");
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && " + paykanCmd() + " " + args);
+  };
+  ASSERT_EQ(paykan("main.pkn").exitCode, 18);
+  const std::string cached = slurp(dir / ".paykan_cache" / "geo.pkm");
+  ASSERT_EQ(paykan("--emit-pkm geo.pkn").exitCode, 0);
+  fs::rename(dir / "geo.pkn", dir / "geo.src");
+  const std::string pristine = slurp(dir / "geo.pkm");
+  auto classNamed = [](paykan::pkm::Interface &i,
+                       const std::string &name) -> paykan::pkm::ClassRec & {
+    for (auto &c : i.Classes)
+      if (c.Name == name)
+        return c;
+    ADD_FAILURE() << "no class " << name;
+    return i.Classes.front();
+  };
+  struct Case {
+    const char *What;
+    std::function<void(paykan::pkm::Interface &)> Change;
+    std::string Why;
+  };
+  const std::string mismatch =
+      "has an IFACE section that does not match its CODE: ";
+  auto renameSlot = [&](paykan::pkm::ClassRec &c) {
+    for (auto &m : c.Methods)
+      if (m.Name == "equals")
+        m.Name = "equal?";
+  };
+  const Case cases[] = {
+      {"a class renamed",
+       [&](paykan::pkm::Interface &i) {
+         classNamed(i, "Circle").Name = "Circle2";
+       },
+       mismatch + "class 'Circle2' is not in CODE"},
+      {"a superclass renamed",
+       [&](paykan::pkm::Interface &i) {
+         classNamed(i, "Circle").SuperClassName = "";
+       },
+       mismatch + "class 'Circle': its superclass is 'Shape' in CODE, '' "
+                  "in IFACE"},
+      {"a vtable slot renamed",
+       [&](paykan::pkm::Interface &i) {
+         renameSlot(classNamed(i, "Shape"));
+         renameSlot(classNamed(i, "Circle"));
+       },
+       mismatch + "class 'Circle': slot 2 of its vtable is 'equals' in "
+                  "CODE, 'equal?' in IFACE"},
+      {"a field renamed",
+       [&](paykan::pkm::Interface &i) {
+         classNamed(i, "Circle").Fields.front().FieldName = "radius";
+       },
+       mismatch + "class 'Circle': its own fields are (r, d) in CODE, "
+                  "(radius, d) in IFACE"},
+      // An importer lays a class out in the order of its fields.
+      {"fields reordered",
+       [&](paykan::pkm::Interface &i) {
+         auto &fields = classNamed(i, "Circle").Fields;
+         std::swap(fields[0], fields[1]);
+       },
+       mismatch + "class 'Circle': its own fields are (r, d) in CODE, (d, "
+                  "r) in IFACE"},
+      {"a function renamed",
+       [](paykan::pkm::Interface &i) {
+         for (auto &f : i.Functions)
+           if (f.Name == "area")
+             f.Name = "areas";
+       },
+       mismatch + "function 'areas' is not in CODE"},
+      // The interface's own records disagree: an importer builds a class's
+      // vtable from its superclass's.
+      {"a superclass it does not describe",
+       [&](paykan::pkm::Interface &i) {
+         classNamed(i, "Circle").SuperClassName = "ahape";
+       },
+       "has a bad IFACE section: class 'Circle' extends 'ahape', which it "
+       "does not describe"},
+      {"an inherited slot renamed in the subclass alone",
+       [&](paykan::pkm::Interface &i) { renameSlot(classNamed(i, "Circle")); },
+       "has a bad IFACE section: the vtable of class 'Circle' does not start "
+       "with the slots of its superclass 'Shape'"},
+  };
+  for (const Case &c : cases) {
+    writeFile(dir / "geo.pkm", pristine);
+    rewriteIface(dir / "geo.pkm", "geo", c.Change);
+    for (const char *cmd : {"main.pkn", "--check-only main.pkn"}) {
+      auto r = paykan(cmd);
+      EXPECT_EQ(r.exitCode, 1) << c.What << ", " << cmd << ": " << r.out;
+      EXPECT_TRUE(contains(r.out, "error: module 'geo' (geo.pkm) " + c.Why +
+                                      ". Rebuild it from source.\n"))
+          << c.What << ", " << cmd << ": " << r.out;
+    }
+    auto check = paykan("pkm check geo.pkm");
+    EXPECT_EQ(check.exitCode, 1) << c.What << ": " << check.out;
+    EXPECT_EQ(check.out, "geo.pkm: corrupt: " + c.Why + "\n") << c.What;
+  }
+  // The cache entry, with the source back: rebuilt.
+  fs::remove(dir / "geo.pkm");
+  fs::rename(dir / "geo.src", dir / "geo.pkn");
+  writeFile(dir / ".paykan_cache" / "geo.pkm", cached);
+  rewriteIface(dir / ".paykan_cache" / "geo.pkm", "geo", cases[2].Change);
+  auto rebuilt = paykan("--verbose main.pkn");
+  EXPECT_EQ(rebuilt.exitCode, 18) << rebuilt.out;
+  EXPECT_TRUE(contains(rebuilt.out, "module geo: cache .paykan_cache/geo.pkm " +
+                                        cases[2].Why +
+                                        "; building from source\n"))
+      << rebuilt.out;
   fs::remove_all(dir);
 }
 

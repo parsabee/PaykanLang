@@ -59,7 +59,8 @@ pir::Module *ProgramLowering::lowerImport(const std::string &name) {
   if (Resolver && Resolver->isLoaded(name)) {
     // A module loaded from a `.pkm`: its dependencies first (they are in
     // the program whether they were loaded or built), then its own CODE,
-    // verified (docs/design/pkm.md §8.4).  The decoded module carries the
+    // which the resolver decoded and verified when it loaded the file
+    // (docs/design/pkm.md §8.4).  The decoded module carries the
     // canonical name; a clash with a module already named so would be two
     // modules of one identity.
     for (const std::string &dep : Resolver->dependencies(name))
@@ -100,18 +101,16 @@ pir::Module *ProgramLowering::lowerImport(const std::string &name) {
   // One module per canonical name.  claimName() keeps the main module's
   // name apart should an import share it.
   ModuleLowering ml(*this, *modCtx, claimName(name), name);
-  if (!ml.run(modCtx->Root)) {
-    Errs << "internal compiler error: lowering failed for imported module '"
-         << name << "'\n";
-    return nullptr;
-  }
+  if (!ml.run(modCtx->Root))
+    return nullptr; // its importer reports it
+
   Modules.push_back(ml.takeModule());
   ByCanonical[name] = &Modules.back();
   ByName[Modules.back().Name] = &Modules.back();
   return &Modules.back();
 }
 
-void ModuleLowering::processImports(ast::TranslationUnit *tu) {
+bool ModuleLowering::processImports(ast::TranslationUnit *tu) {
   // Record where this module's own classes and structs live before anything
   // references them (instantiations count as local declarations).
   for (auto *cls : tu->getClassDecls()) {
@@ -132,9 +131,10 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
       DirectImports.push_back(canonical);
       pir::Module *defMod = PL.lowerImport(canonical);
       if (!defMod) {
+        // Nothing of this module can be lowered without it.
         reportInternalError("lowering failed for imported module '" +
                             canonical + "'");
-        continue;
+        return false;
       }
       // Every function the module defines is reachable under this import
       // site's qualifier and under the full module path.
@@ -175,6 +175,7 @@ void ModuleLowering::processImports(ast::TranslationUnit *tu) {
     PL.ForeignInstantiations.insert(sd->getName());
     ForeignStructs.push_back(sd);
   }
+  return true;
 }
 
 // -- One copy of each instantiation per program

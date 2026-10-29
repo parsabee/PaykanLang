@@ -3429,6 +3429,7 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     opts.FrontendName = FrontendName;
     opts.ReadCache = false;
     opts.WriteCache = false;
+    opts.ReadFrontend = readImport;
     OwnedResolver = std::make_shared<modules::ModuleResolver>(
         std::move(opts), modules::ModuleResolver::hostIdentity());
     Resolver = OwnedResolver.get();
@@ -3436,10 +3437,13 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
 
   // Process imports before local declarations.
   StringSet localImportStack, localFailedModules;
+  unsigned localImportDepth = 0;
   if (!ImportStack)
     ImportStack = &localImportStack;
   if (!FailedModules)
     FailedModules = &localFailedModules;
+  if (!ImportDepth)
+    ImportDepth = &localImportDepth;
   for (auto *imp : tu->getImports())
     processImport(imp);
 
@@ -3472,6 +3476,8 @@ SemaContext Sema::run(ast::TranslationUnit *tu) {
     ImportStack = nullptr;
   if (FailedModules == &localFailedModules)
     FailedModules = nullptr;
+  if (ImportDepth == &localImportDepth)
+    ImportDepth = nullptr;
   return result;
 }
 

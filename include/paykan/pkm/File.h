@@ -131,9 +131,15 @@ private:
 /// device`).
 Status writeFileAtomically(const std::filesystem::path &path,
                            std::span<const uint8_t> bytes);
+/// Largest file readFileBytes reads (docs/design/pkm.md §1.6), 256 MiB, as
+/// for a source file (frontend::kMaxSourceBytes).
+inline constexpr uint64_t kMaxFileBytes = uint64_t{256} << 20;
+
 /// The bytes of the file at @p path: a regular file's, or what a pipe or a
-/// device gives until its end; an error for a directory, and for a file
-/// that cannot be read.
+/// device gives until its end; an error for a directory, for a file that
+/// cannot be read, and for one larger than kMaxFileBytes (`'/dev/zero' is
+/// too large (more than 256 MiB)`), a regular file refused before it is
+/// read and a pipe or a device read only up to the limit.
 StatusOr<std::vector<uint8_t>> readFileBytes(const std::filesystem::path &path);
 
 } // namespace paykan::pkm

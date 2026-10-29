@@ -173,6 +173,9 @@ private:
   }
 
   void skipTrivia();
+  /// Scan the token at the current position into @p out; false when the
+  /// text there is no token (reported and skipped), and next() scans on.
+  bool lexToken(Token &out);
   Token make(Tok k, size_t start, size_t startLine, size_t startCol);
   Token lexNumber(size_t start, size_t line, size_t col, bool afterDot);
   Token lexPrefixedNumber(size_t start, size_t line, size_t col);

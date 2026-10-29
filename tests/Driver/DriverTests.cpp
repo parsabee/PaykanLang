@@ -660,8 +660,10 @@ TEST(Driver, ImportOfADirectoryIsRejected) {
   auto [rc, out] = run(std::string(kPaykan) + " --check-only " +
                        (dir / "main.pkn").string() + " 2>&1");
   EXPECT_EQ(rc, 1) << out;
-  EXPECT_NE(out.find("error: module 'lib::m': 'lib/m.pkn' is a directory, not "
-                     "a source file"),
+  // Named from the main file's directory as given (SW-34).
+  EXPECT_NE(out.find("error: module 'lib::m': '" +
+                     (dir / "lib" / "m.pkn").string() +
+                     "' is a directory, not a source file"),
             std::string::npos)
       << out;
   // One error: the use of `m::f` is not reported as well.
@@ -3418,6 +3420,214 @@ TEST(Driver, EmitPkmMakesNoDirectory) {
   std::filesystem::remove_all(dir);
 }
 
+// `build` checks the executable it writes before it compiles anything, and
+// says what is wrong as the other writers do (SW-43): into a directory that
+// does not exist, or onto a directory (-o's, or the default `hello` next to a
+// directory of that name), it compiled the whole program and then printed
+// the linker's `cannot open output file`.  The program here does not type
+// check, so a compile would say so first.
+TEST(Driver, BuildChecksItsExecutableBeforeCompiling) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("build_output");
+  std::ofstream(dir / "hello.pkn") << "fn main() -> int { return \"x\"; }\n";
+  std::filesystem::create_directories(dir / "adir");
+  std::filesystem::create_directories(dir / "hello");
+  const std::string isDir = strerror(EISDIR);
+  for (const auto &[args, message] :
+       {std::pair<std::string, std::string>{
+            " build hello.pkn -o nodir/hello",
+            "cannot write 'nodir/hello': the directory 'nodir' does not exist"},
+        {" build -o adir hello.pkn", "cannot write 'adir': " + isDir},
+        {" build hello.pkn", "cannot write 'hello': " + isDir}}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && " + paykanRun() + args + " 2>&1");
+    EXPECT_EQ(rc, 1) << args << ": " << out;
+    EXPECT_EQ(out, "paykan: " + message + "\n") << args;
+  }
+  EXPECT_FALSE(std::filesystem::exists(dir / "nodir"));
+  EXPECT_TRUE(std::filesystem::is_directory(dir / "adir"));
+  // With somewhere to write it, the program's own error comes.
+  auto [rc, out] = run("cd " + dir.string() + " && " + paykanRun() +
+                       " build hello.pkn -o adir/hello 2>&1");
+  EXPECT_EQ(rc, 1) << out;
+  EXPECT_NE(out.find("hello.pkn:1:"), std::string::npos) << out;
+  std::filesystem::remove_all(dir);
+}
+
+// A chain of imports is at most 256 modules deep (SW-07): each module built
+// from source is analysed by a Sema nested in its importer's, on the native
+// stack, so a chain of about 1460 modules overflowed it (SIGSEGV, no
+// diagnostic).  Here c::m0 .. c::m1999 each import the next: 256 modules from
+// c::m1744 down are accepted, and an import 257 deep is the error, reported
+// once at it, whatever the length of the chain.  With the 256 modules' cache
+// entries written, the same chain one module longer is still too deep: a
+// cache entry is checked against each module it imports, one level deeper.
+// It is reported where it is without them, with the same notes: the entry
+// whose imports nest too deep is built from its source.  It was reported at
+// the outermost import from source, with two notes a level there, each
+// naming a module that import does not import.
+TEST(Driver, ImportsNestedTooDeepAreAnError) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("import_depth");
+  std::filesystem::create_directories(dir / "c");
+  const int n = 2000;
+  for (int i = 0; i < n; ++i) {
+    std::ofstream f(dir / "c" / ("m" + std::to_string(i) + ".pkn"));
+    if (i + 1 < n)
+      f << "import c::m" << i + 1 << ";\nfn v() -> int { return m" << i + 1
+        << "::v() + 1; }\n";
+    else
+      f << "fn v() -> int { return 0; }\n";
+  }
+  auto importing = [&](const std::string &file, int first) {
+    std::ofstream(dir / file)
+        << "import c::m" << first << ";\nfn main() -> int { return m" << first
+        << "::v() % 256; }\n";
+  };
+  importing("deep.pkn", 0);
+  importing("at_limit.pkn", n - 256);
+  importing("over_limit.pkn", n - 257);
+  auto paykan = [&](const std::string &args) {
+    return run("cd " + dir.string() + " && ulimit -s 8192 && " + paykanRun() +
+               " " + args + " 2>&1");
+  };
+  const std::string tooDeep =
+      "error: imports nested too deep (more than 256 modules): ";
+  auto deep = paykan("--check-only --no-module-cache deep.pkn");
+  EXPECT_EQ(deep.exitCode, 1) << deep.out.substr(0, 2000);
+  EXPECT_EQ(deep.out.rfind("c/m255.pkn:1:1: " + tooDeep +
+                               "'c::m256' is imported 257 modules deep\n",
+                           0),
+            0U)
+      << deep.out.substr(0, 2000);
+  EXPECT_EQ(deep.out.find(tooDeep, deep.out.find(tooDeep) + 1),
+            std::string::npos);
+  auto atLimit = paykan("--emit-pir at_limit.pkn > /dev/null");
+  EXPECT_EQ(atLimit.exitCode, 0) << atLimit.out.substr(0, 2000);
+  EXPECT_TRUE(std::filesystem::is_regular_file(dir / ".paykan_cache" / "c" /
+                                               "m1744.pkm"));
+  auto over = paykan("--check-only over_limit.pkn");
+  EXPECT_EQ(over.exitCode, 1) << over.out.substr(0, 2000);
+  EXPECT_EQ(over.out.rfind("c/m1998.pkn:1:1: " + tooDeep +
+                               "'c::m1999' is imported 257 modules deep\n",
+                           0),
+            0U)
+      << over.out.substr(0, 2000);
+  auto notes = [](const std::string &out) {
+    size_t n = 0;
+    for (size_t at = out.find("note:"); at != std::string::npos;
+         at = out.find("note:", at + 1))
+      ++n;
+    return n;
+  };
+  auto cold = paykan("--check-only --no-module-cache over_limit.pkn");
+  EXPECT_EQ(cold.out.rfind("c/m1998.pkn:1:1: " + tooDeep, 0), 0U)
+      << cold.out.substr(0, 2000);
+  EXPECT_EQ(notes(over.out), notes(cold.out));
+  EXPECT_EQ(over.out.find("c/m1743.pkn:1:1: note: in module 'c::m1999'"),
+            std::string::npos)
+      << over.out.substr(0, 2000);
+  std::filesystem::remove_all(dir);
+}
+
+// A source file, and a module file, is at most 256 MiB (SW-12): a larger
+// regular file is refused by its size, before it is read (the files here are
+// sparse), and a pipe or a device stops at the limit.  `--check-only
+// /dev/zero` and `pkm dump /dev/zero` read until the allocation failed and
+// aborted with an uncaught std::bad_alloc.  /dev/zero, which never ends, is
+// read under an address-space limit where one stops a reader that does not
+// (Linux, but not under a sanitizer, whose runtime cannot start under one),
+// and elsewhere 300 MB of it come through a pipe.  A pipe is still read to
+// its end.
+TEST(Driver, AFileOver256MiBIsTooLarge) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("too_large");
+  std::filesystem::create_directories(dir / "lib");
+  const uintmax_t over = (uintmax_t{256} << 20) + 1;
+  for (const char *name : {"big.pkn", "big.pkm", "lib/big.pkn"}) {
+    std::ofstream(dir / name).close();
+    std::filesystem::resize_file(dir / name, over);
+  }
+  std::ofstream(dir / "main.pkn")
+      << "import lib::big;\nfn main() -> int { return 0; }\n";
+  std::ofstream(dir / "hello.pkn") << kHello;
+  auto in = [&](const std::string &cmd) {
+    return run("cd " + dir.string() + " && " + cmd + " 2>&1");
+  };
+  const std::string source =
+      "is too large for a source file (more than 256 MiB)";
+  auto big = in(std::string(kPaykan) + " --check-only big.pkn");
+  EXPECT_EQ(big.exitCode, 1) << big.out;
+  EXPECT_NE(big.out.find("'big.pkn' " + source), std::string::npos) << big.out;
+  // An import's file by the path every diagnostic in it uses (SW-34).
+  auto import = in(std::string(kPaykan) + " --check-only main.pkn");
+  EXPECT_EQ(import.exitCode, 1) << import.out;
+  EXPECT_NE(import.out.find("error: 'lib/big.pkn' " + source),
+            std::string::npos)
+      << import.out;
+  auto dump = in(std::string(kPaykan) + " pkm dump big.pkm");
+  EXPECT_EQ(dump.exitCode, 1) << dump.out;
+  EXPECT_EQ(dump.out, "paykan: 'big.pkm' is too large (more than 256 MiB)\n");
+#if defined(__linux__) && !defined(PAYKAN_TEST_SHADOW_SANITIZER)
+  const std::string zero = "ulimit -v 4194304 && " + std::string(kPaykan);
+  const std::string device = "/dev/zero";
+#else
+  const std::string zero =
+      "head -c 300000000 /dev/zero | " + std::string(kPaykan);
+  const std::string device = "/dev/stdin";
+#endif
+  auto check = in(zero + " --check-only " + device);
+  EXPECT_EQ(check.exitCode, 1) << check.out;
+  EXPECT_NE(check.out.find("'" + device + "' " + source), std::string::npos)
+      << check.out;
+  const std::string tooLarge =
+      "paykan: '" + device + "' is too large (more than 256 MiB)\n";
+  auto dumpDevice = in(zero + " pkm dump " + device);
+  EXPECT_EQ(dumpDevice.exitCode, 1) << dumpDevice.out;
+  EXPECT_EQ(dumpDevice.out, tooLarge);
+  auto checkPkm = in(zero + " pkm check " + device);
+  EXPECT_EQ(checkPkm.exitCode, 1) << checkPkm.out;
+  EXPECT_EQ(checkPkm.out, tooLarge);
+  auto piped = in("cat hello.pkn | " + paykanRun() + " /dev/stdin");
+  EXPECT_EQ(piped.exitCode, 0) << piped.out;
+  EXPECT_EQ(piped.out, "hello\n");
+  std::filesystem::remove_all(dir);
+}
+
+// $PAYKAN_RUNTIME_DIR, when it is set, is the only place `build` takes the
+// runtime from, as $PAYKAN_STDLIB is the only place of the standard library
+// (SW-44): one that does not exist, or that lacks the archive or the header,
+// was passed over for another runtime (here the build tree's) without a
+// word.  An empty one is not set.
+TEST(Driver, PaykanRuntimeDirIsTheOnlyRuntimeLookedAt) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("runtime_dir");
+  std::ofstream(dir / "hello.pkn") << kHello;
+  std::filesystem::create_directories(dir / "partial" / "lib");
+  std::ofstream(dir / "partial" / "lib" / "libpaykan_runtime.a").close();
+  for (const auto &[runtimeDir, message] :
+       {std::pair<std::string, std::string>{
+            "none", "cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR "
+                    "(none): none/lib/libpaykan_runtime.a and "
+                    "none/include/paykan/Runtime.h do not exist\n"},
+        {"partial", "cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR "
+                    "(partial): partial/include/paykan/Runtime.h does not "
+                    "exist\n"}}) {
+    auto [rc, out] =
+        run("cd " + dir.string() + " && PAYKAN_RUNTIME_DIR=" + runtimeDir +
+            " " + paykanRun() + " build hello.pkn -o h 2>&1");
+    EXPECT_EQ(rc, 1) << runtimeDir << ": " << out;
+    EXPECT_EQ(out, message) << runtimeDir;
+    EXPECT_FALSE(std::filesystem::exists(dir / "h")) << runtimeDir;
+  }
+  auto [rc, out] =
+      run("cd " + dir.string() + " && PAYKAN_RUNTIME_DIR= " + paykanRun() +
+          " build hello.pkn -o h 2>&1 && ./h");
+  EXPECT_EQ(rc, 0) << out;
+  EXPECT_EQ(out, "hello\n");
+  std::filesystem::remove_all(dir);
+}
+
 // --emit-pkm -o writes into what its path names, as `build -o` and `pkm
 // extract -o` do: a symbolic link keeps naming its file, which gets the
 // module file, and a device (here reached through a link) stays one, where
@@ -3547,6 +3757,12 @@ TEST(Driver, ConflictingOptionsAreRejected) {
                   "--check-only and --emit-pir exclude each other"},
         std::pair{"--emit-c --emit-pir hello.pkn",
                   "--emit-pir and --emit-c exclude each other"},
+        // Each names another output, where one was silently dropped
+        // (SW-35).
+        std::pair{"--emit-c --emit-source hello.pkn",
+                  "--emit-c and --emit-source exclude each other"},
+        std::pair{"--emit-source --emit-mlir=scf hello.pkn",
+                  "--emit-mlir and --emit-source exclude each other"},
         std::pair{"--dump-ast --emit-ast hello.pkn",
                   "--dump-ast and --emit-ast exclude each other"},
         std::pair{"build --emit-c hello.pkn -o bx",
@@ -3590,6 +3806,15 @@ TEST(Driver, ConflictingOptionsAreRejected) {
                   " hello.pkn --emit-c -o x 2>&1");
   EXPECT_EQ(args.exitCode, 0) << args.out;
   EXPECT_EQ(args.out, "hello\n");
+  // --emit-source is --emit-llvm's output: two names for one (SW-35).
+  auto llvm = run("cd " + dir.string() + " && " + kPaykan +
+                  " --emit-llvm hello.pkn 2>&1");
+  auto both = run("cd " + dir.string() + " && " + kPaykan +
+                  " --emit-llvm --emit-source hello.pkn 2>&1");
+  EXPECT_EQ(llvm.exitCode, 0) << llvm.out;
+  EXPECT_EQ(both.exitCode, 0) << both.out;
+  EXPECT_NE(llvm.out.find("define "), std::string::npos) << llvm.out;
+  EXPECT_EQ(both.out, llvm.out);
   std::filesystem::remove_all(dir);
 }
 
@@ -3873,6 +4098,37 @@ TEST(Driver, ListModulesNamesEveryModuleFileTheProgramLinks) {
   std::filesystem::remove_all(dir);
 }
 
+// An import built from source whose cache entry cannot be written has no
+// module file to link the C of --emit-c with, so its code stays in the C, as
+// under --no-module-cache (SW-23): with `.paykan_cache` a file, the C called
+// `pk_lib_3A_3Ax_Sv` and defined it nowhere, and the build recipe had no
+// object for it (`--list-modules` failed).
+TEST(Driver, EmitCKeepsAnImportWhoseCacheEntryCannotBeWritten) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("emitc_nocache");
+  std::filesystem::create_directories(dir / "lib");
+  std::ofstream(dir / "lib" / "x.pkn") << "fn v() -> int { return 7; }\n";
+  std::ofstream(dir / "main.pkn")
+      << "import ::io;\nimport lib::x;\n"
+         "fn main() -> int { io::println(Str(x::v())); return 0; }\n";
+  std::ofstream(dir / ".paykan_cache") << "not a directory\n";
+  CPath c(dir);
+  auto built =
+      c.build((dir / "main.pkn").string(), "-O0", (dir / "main").string());
+  ASSERT_EQ(built.exitCode, 0) << built.out;
+  auto ran = run(shellWord((dir / "main").string()) + " 2>&1");
+  EXPECT_EQ(ran.exitCode, 0) << ran.out;
+  EXPECT_EQ(ran.out, "7\n");
+  // The standard library's file only: lib::x is in the C.
+  auto list = run("cd " + dir.string() + " && " + kPaykan +
+                  " --list-modules main.pkn 2>&1");
+  EXPECT_EQ(list.exitCode, 0) << list.out;
+  EXPECT_NE(list.out.find("/io.pkm\n"), std::string::npos) << list.out;
+  EXPECT_EQ(list.out.find("x.pkm"), std::string::npos) << list.out;
+  EXPECT_TRUE(std::filesystem::is_regular_file(dir / ".paykan_cache"));
+  std::filesystem::remove_all(dir);
+}
+
 // A module file names the frontend that parsed its source with its version,
 // this paykan's for the built-in one (finding 103: the version was always
 // empty), in a cache entry and in an --emit-pkm file alike.
@@ -3932,5 +4188,93 @@ TEST(Driver, HelpListsEveryPkmDumpSection) {
   EXPECT_EQ(bad.out, "paykan: unknown section 'nope' (expected manifest, "
                      "sections, iface, tmpl, code, symidx, obj, payloads or "
                      "all)\n");
+  std::filesystem::remove_all(dir);
+}
+
+// An imported module's file is named by a path that works from the directory
+// paykan runs in (SW-34): the main file's directory as given, then the
+// file's path from the source root, for an error in the module, for an
+// error in a template's body (from source and from the cache entry), for
+// the files a missing import tried and in --verbose.  An absolute main file
+// gives absolute paths.  They were all named by the path from the source
+// root, which is not a file from anywhere else.
+TEST(Driver, ImportedModulePathsWorkFromTheCurrentDirectory) {
+  REQUIRE_BACKEND();
+  auto dir = freshDir("module_paths");
+  auto project = dir / "tasks";
+  std::filesystem::create_directories(project / "tasks");
+  std::ofstream(project / "tasks" / "text.pkn")
+      << "fn slice(s: Str) -> int { return s; }\n";
+  std::ofstream(project / "main.pkn")
+      << "import tasks::text;\nfn main() -> int { return 0; }\n";
+  const std::string here = "cd " + dir.string() + " && " + paykanRun();
+  const std::string error = ":1:27: error: return value of type 'Str'";
+  auto above = run(here + " --check-only tasks/main.pkn 2>&1");
+  EXPECT_EQ(above.exitCode, 1) << above.out;
+  EXPECT_EQ(above.out.rfind("tasks/tasks/text.pkn" + error, 0), 0u)
+      << above.out;
+  EXPECT_NE(above.out.find("\ntasks/main.pkn:1:1: note: in module "
+                           "'tasks::text' imported here\n"),
+            std::string::npos)
+      << above.out;
+  auto inside = run("cd " + project.string() + " && " + paykanRun() +
+                    " --check-only main.pkn 2>&1");
+  EXPECT_EQ(inside.exitCode, 1) << inside.out;
+  EXPECT_EQ(inside.out.rfind("tasks/text.pkn" + error, 0), 0u) << inside.out;
+  auto absolute = run(paykanRun() + " --check-only " +
+                      shellWord((project / "main.pkn").string()) + " 2>&1");
+  EXPECT_EQ(absolute.exitCode, 1) << absolute.out;
+  EXPECT_EQ(
+      absolute.out.rfind((project / "tasks" / "text.pkn").string() + error, 0),
+      0u)
+      << absolute.out;
+
+  // A template's body, from source, then from the cache entry.
+  std::ofstream(project / "tasks" / "box.pkn")
+      << "fn twice<T>(x: T) -> T => x + x;\nfn one() -> int => 1;\n";
+  std::ofstream(project / "warm.pkn")
+      << "import tasks::box;\nfn main() -> int => box::one() - 1;\n";
+  std::ofstream(project / "bad.pkn")
+      << "import tasks::box;\nstruct P { a: int; }\n"
+         "fn main() -> int {\n  let p = box::twice(P(1));\n  return 0;\n}\n";
+  const std::string bodyError =
+      "tasks/tasks/box.pkn:1:27: error: operator '+' is not defined";
+  auto cold = run(here + " --check-only tasks/bad.pkn 2>&1");
+  EXPECT_EQ(cold.exitCode, 1) << cold.out;
+  EXPECT_EQ(cold.out.rfind(bodyError, 0), 0u) << cold.out;
+  auto warm = run(here + " --verbose tasks/warm.pkn 2>&1");
+  EXPECT_EQ(warm.exitCode, 0) << warm.out;
+  EXPECT_NE(warm.out.find("module tasks::box: wrote "
+                          "tasks/.paykan_cache/tasks/box.pkm\n"),
+            std::string::npos)
+      << warm.out;
+  auto cached = run(here + " --verbose --check-only tasks/bad.pkn 2>&1");
+  EXPECT_EQ(cached.exitCode, 1) << cached.out;
+  EXPECT_NE(cached.out.find("module tasks::box: cache "
+                            "tasks/.paykan_cache/tasks/box.pkm usable\n" +
+                            bodyError),
+            std::string::npos)
+      << cached.out;
+  // The backend's bitcode cache, when it keeps one.
+  if (auto bc = project / ".paykan_cache" / "tasks" / "box.bc";
+      std::filesystem::exists(bc)) {
+    std::ofstream(bc, std::ios::trunc) << "not bitcode";
+    auto again = run(here + " --verbose tasks/warm.pkn 2>&1");
+    EXPECT_EQ(again.exitCode, 0) << again.out;
+    EXPECT_NE(again.out.find("module tasks::box: bitcode cache "
+                             "tasks/.paykan_cache/tasks/box.bc is corrupt"),
+              std::string::npos)
+        << again.out;
+  }
+
+  std::ofstream(project / "missing.pkn")
+      << "import tasks::nothere;\nfn main() -> int => 0;\n";
+  auto missing = run(here + " --check-only tasks/missing.pkn 2>&1");
+  EXPECT_EQ(missing.exitCode, 1) << missing.out;
+  EXPECT_NE(missing.out.find("module 'tasks::nothere' not found (tried "
+                             "tasks/tasks/nothere.pkn, "
+                             "tasks/tasks/nothere.pkm)"),
+            std::string::npos)
+      << missing.out;
   std::filesystem::remove_all(dir);
 }

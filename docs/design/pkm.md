@@ -177,7 +177,10 @@ not a parse error.
 
 ### 1.6 Limits
 
-File ≤ 2^40 bytes; `section_count` ≤ 1024; `MANIFEST` ≤ 1 MiB; a manifest
+File ≤ 2^40 bytes, of which `paykan` reads at most 256 MiB (a larger file,
+or a pipe or a device that gives more, is `'<file>' is too large (more than
+256 MiB)`, the limit of a source file too: docs/grammar.md section 9);
+`section_count` ≤ 1024; `MANIFEST` ≤ 1 MiB; a manifest
 string ≤ 64 KiB; a list ≤ 65 536 entries and ≤ remaining bytes; LEB128 ≤ 10
 bytes; nesting caps per section (§4: the AST interchange format's, 4112
 lists and the frontends' limits; §5: 512 PIR levels).
@@ -952,7 +955,7 @@ FunctionRec
   uleb nConventions ; nConventions × u8   always 0 (#98 part 2 retired the per-parameter convention: §5.5's ownership of each call's arguments)
   uleb nParams ; nParams × (uleb id ; type ; str name)
   uleb nLocals ; nLocals × (str name ; [u8 18] ; slot type)   18 before the slot type: a view local (docs/pir.md §3)
-  uleb nextValueId
+  uleb nextValueId       above every id of a parameter or a result (the verifier checks it)
   Block body
 ClassRec
   str name ; u32 flags (bit0 extern ; bit1 final #18 ; bit2 abstract #18 ; bit3 singleton (obsolete, written 0: #168 is not planned) ; bit4 hasClassObj (obsolete, written 0: §4.5) ; bits5-6 linkage ; bit7 linkonce reserved)
@@ -1322,8 +1325,14 @@ optimisation, `optLevel = 0xFFFFFFFF` (applied after loading, as today's
 `.bc`); `payloadFormat 2` = a target object (after #162 the plugin may
 prefer it). `backendVersion` = plugin build version + LLVM version; the
 executable size/mtime build id is dropped (host state; the manifest's
-`core.build` covers pre-release builds); the `paykan.abi.version` module
-flag and `paykan.cache.key` metadata go away with the key.
+`core.build` covers pre-release builds). Until then the mlir backend's
+`.bc` entry is a header (the magic `PKNBC001`, the key in hex and the
+SHA-256 of the bitcode) followed by the bitcode: an entry whose header
+does not match its bitcode is never parsed, and one whose module does not
+verify is not used; either is translated again (`--verbose` says why). An
+entry is read only when it is a regular file no larger than a module file
+may be (a FIFO, or a link to `/dev/zero`, is translated again, not read),
+and bare bitcode, an entry an older paykan wrote, is stale.
 `loadModulePayload` = `parseBitcodeFile` into the session context, kept for
 `linkParts`; JIT runs use the same bitcode.
 
@@ -1378,7 +1387,7 @@ paykan [run|build|--emit-pir|--emit-source|--check-only|--emit-pkm] main.pkn
         DECIDE  source exists → cache fresh? LOAD : BUILD → write → LOAD
                 no source     → first prebuilt candidate with verdict Usable → LOAD ; else "module not found (tried …)"
         BUILD   parse → Sema(dep, &graph) (its imports first) → lowerModule → verify → exportInterface → encode → AtomicFile
-        LOAD    readFile → verdict → readInterface → ensure deps' hashes match → LoadedModule{Name, Iface, hashes, Code (lazy), Payloads}
+        LOAD    readFile → verdict → ensure deps' hashes match → readInterface → decode + verify CODE, check it against IFACE → LoadedModule{Name, Iface, hashes, Code, Payloads}
       Sema reconstructs the interface into the importer's ASTContext (the typed-table twin of what SemaImport.cpp does with a ModuleInfo).
  4. lowerModule(main) → pir::Module; externs declared from interfaces (§9.1).
  5. graph.assembleProgram → pir::Program = [main] + post-order of the import DAG (children in import order, each once) + synthetic units; verify(Program).
@@ -1467,20 +1476,109 @@ defined class/function. 8. `PAYLOAD` per §7.2 (a failing payload is
 ignored, not an error). 9. `DEBUG` (advisory). 10. After assembly,
 `pir::verify(Program)` as today.
 
+**Implemented.** Steps 4, 5 and 7 and the compiled code's check run when
+a file is loaded (`modules::readModuleContents`, which `ModuleResolver`
+and `paykan pkm check` share), so a cache entry that fails any of them is
+rebuilt and a prebuilt file is an error at the import, under
+`--check-only` too:
+
+- `IFACE` read and consistent (`modules::checkInterface`): no name is a
+  class and a struct or an enum, each class's superclass is a class it
+  describes, ancestors end at the root, the superclass's vtable slots
+  begin the class's, and every class and struct (an enum variant's fields
+  aside) has an initializer. Every type its records name is a builtin or
+  one it describes, and no parameter is `void` (`Sema::checkInterfaceTypes`,
+  through the resolver's `FrontendRead`).
+- `CODE` decoded, naming the module and verified (the verifier rejects a
+  `void` parameter, an extern's or a vtable slot's too, a class whose
+  fields do not begin with its superclass's, a value id at or past its
+  function's next one, and a function, a global or a class with no name),
+  and checked against `IFACE`
+  (`modules::checkCodeMatchesInterface`): each class the module defines,
+  with its superclass, its own fields in the order an importer lays them
+  out, its vtable's slots, its initializer and its `impl` methods (which an
+  importer calls by their names, a subclass's initializer its
+  superclass's), and its constructor, which takes what its initializer
+  takes after the object and returns its box; each copy of an
+  instantiation the module holds (a `shared class`, whose vtable a program
+  may take for its own), for what it has; each method of each of its
+  structs; each function, a native one's too (the function that calls C).
+  They have the PIR types `IFACE`'s types give them, the derived
+  signatures of §9.1, which every type an interface names has: an integer
+  type is `i64`, a floating-point one `f64`, `bool`, `char` and `void`
+  their own, `Str`, `Obj` and a class `box`, an enum without payloads
+  `i64`, the optional of a reference `box` and of a scalar or such an enum
+  its optional type (`opt_i64`, ...), a `weak` field `weak`; a struct, a
+  tagged union, a tuple, a fixed-size array, a function value and the
+  optional of one are held in memory, so a parameter of one is its address
+  (`ptr`) and a result of one is written where a last `ptr` parameter
+  points, the function returning `void`; a slice parameter is its address
+  and its length, an `inout` parameter or result an address. And each slot
+  of each class `CODE` defines names the function an importer's subclass
+  inherits for it (`ModuleLowering::findConcreteMethodFuncName`): `X.m` for
+  the first class `X` from the class up that has one, past a class of
+  another module a function of that module, past the root the runtime's.
+  A class's constructor and methods are `shared` exactly when the class is
+  (a copy of an instantiation's link by names of their own, which the
+  module's compiled code calls them by).
+- Against the files it depends on (by the resolver; `pkm check` reads the
+  file alone): each record of another module's type (`IsLocal` false) is
+  that module's record of it, but for an instantiation made elsewhere that
+  the module does not describe; and each extern of `CODE` matches the
+  definition in the `CODE` of the module it names when that module was
+  loaded from a file (`pir::verifyLinks`, what `pir::verify(Program)` checks
+  for the whole program).
+- `TMPL` decoded (`Sema::decodeTemplates`, through `FrontendRead`), and
+  the decoded templates kept for the import.
+- `OBJ` read and, when the active backend links code of its kind, checked
+  by it (`Backend::checkModuleObject`); the mlir backend keeps the module
+  it read and verified for the program's link, so the bitcode is read once.
+
+The decoded `CODE` is kept for the lowering, so a module is decoded once.
+The lowering still checks a call through a vtable slot against the
+class's definition in its module's `CODE`, and reports a difference as the
+file's error (`module 'm' (m.pkm) has an IFACE section that does not match
+its CODE: a call of slot 3 of 'C' ...`).
+
+What `CODE` does not record is the layout of a value held in memory: a
+struct's fields, a tagged union's variants and their payloads, a tuple's
+or a fixed-size array's elements, a function value's, which `IFACE` gives
+and the compiled code was compiled with. A signature passes such a value
+by its address, so it does not show the layout, and nothing ties the two
+but the file's hashes: like the compiled code, the layouts `IFACE` gives
+are trusted once the hashes match. A file whose `IFACE` gives a struct
+its fields in another order or a tagged union another variant, its
+hashes made to match, passes these checks, and the program reads the
+wrong bytes or crashes, as with an `OBJ` changed alike. (A struct without
+an initializer of its own is checked as far as its default one goes,
+which takes its fields in their order.)
+
 Threat model: a `.pkm` is untrusted (hand-edited, truncated, hostile,
 stale). The reader never allocates from an unchecked count, caps recursion,
 range-checks every index and code, never links a payload whose hashes do
 not verify, and runs the PIR verifier on everything a backend will see, so
-backends keep assuming verified PIR. Payload bytes are the one thing the
-core cannot validate; they are bound to `CODE` by hash and validated by the
-backend (`verifyModule` after `parseBitcodeFile`; the linker for objects).
+backends keep assuming verified PIR. Compiled code (the `OBJ` section,
+§5.13, and later payloads) is the one thing the core cannot validate: the
+backend that links it reads and checks it when the file is loaded
+(`Backend::checkModuleObject`; the mlir backend runs `verifyModule` after
+`parseBitcodeFile`), so a cache entry whose code fails is rebuilt and a
+prebuilt file whose code fails is rejected. **Implemented trust model:**
+past that check, compiled code is trusted once the file's hashes match.
+The hashes catch damage, not a file made to pass them, and LLVM's bitcode
+reader is not hardened against crafted bytes (some crash it inside
+`parseBitcodeFile`), so a prebuilt module is as safe as where it came from.
+Reading untrusted compiled code in a child process, or never trusting it
+and compiling `CODE` again, are the alternatives. The modules the mlir
+backend writes as bitcode carry no "Debug Info Version" flag (they have no
+debug info): the reader verifies a module that has the flag while it reads
+it and stops the process when the module does not verify.
 
 ### 8.5 Driver flags and the `pkm` tool
 
 | Flag | Effect |
 |---|---|
 | `--emit-pkm [-o f.pkm]` | compile the input module and write its `.pkm`; portable by default |
-| `--module-name=<name>` | with `--emit-pkm`: the canonical name the file records (`::<name>` for the standard library's modules) |
+| `--module-name=<name>` | with `--emit-pkm`: the canonical name the file records, identifiers that are not keywords separated by `::` (`::<name>` for the standard library's modules); the source root is the directory above the name's other parts when they end the file's directory (`a::b` for `src/a/b.pkn`: `src`), else the file's directory |
 | `--with-payload[=<backend>]` (planned) | with `--emit-pkm`: also append the named (or default) backend's payload |
 | `--module-path=<dir>` | repeatable |
 | `--write-payloads={on,off}` (planned) | default on: after a build/run, add the active backend's payload to cached imports |
@@ -1494,7 +1592,10 @@ backend (`verifyModule` after `parseBitcodeFile`; the linker for objects).
 planned: `--section=debug` and `--symbol=<name>`; stable text;
 golden-tested; `--section=code` prints exactly `pir::print` of the decoded
 module, so it equals `--emit-pir` of the module when it was built),
-`check f.pkm` (verdict against this toolchain, exit status), `extract
+`check f.pkm` (the file read as an importer reads it, through the same
+`modules::readModuleContents`, plus `TMPL` and the verdict against this
+toolchain; then one line, `usable` or `stale:`/`rejected:`/`corrupt:` and
+why, and the exit status), `extract
 --object f.pkm [-o f.o]` (the module's compiled code, `OBJ`, as a native
 object for the host, at `-O<n>`; what a program's `--emit-c` C links with),
 and, planned, `strip`, `extract --payload`, `add-payload` (§7.7).
@@ -1506,6 +1607,15 @@ site, so #144's JSON output covers it. Diagnostics inside an imported
 module keep `file:line:col`: `DIAG` supplies the project-relative display
 file and declaration positions; `TMPL` nodes carry locations; `DEBUG`
 supplies statement positions for backends and tools.
+
+A file records paths from its source root, the same wherever the compiler
+runs; a diagnostic names a file of the project by the main file's
+directory as it was given followed by that path, which works from the
+directory the compiler runs in (`tasks/tasks/text.pkn` for
+`paykan tasks/main.pkn`, absolute for an absolute main file), and so do
+`--verbose` and an import's `tried` list.  The bodies of a cache entry's
+templates are named by the source the entry was checked against; a
+prebuilt file's by the path it records.
 
 ---
 ## 9. Linkage and mangling (both backends, one scheme)

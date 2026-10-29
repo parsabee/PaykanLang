@@ -430,6 +430,28 @@ std::string defaultExecutable(const std::string &input) {
   return name.string() + ".out";
 }
 
+/// The executable `build` writes: -o's, or defaultExecutable's.
+std::string executableOf(const Options &opts) {
+  return opts.OutputPath.empty() ? defaultExecutable(opts.InputFilename)
+                                 : opts.OutputPath;
+}
+
+/// Why a file cannot be written at @p path, or "" when nothing says so yet:
+/// it is a directory, or the directory it goes in does not exist, said as
+/// every writer says it (printOutput, pkm::writeFileAtomically).  `build`
+/// checks its executable before it compiles anything, where the linker
+/// found out last, in its own words (`cannot open output file`).
+std::string unwritablePath(const std::string &path) {
+  std::error_code ec;
+  if (std::filesystem::is_directory(path, ec))
+    return "cannot write '" + path + "': " + std::strerror(EISDIR);
+  if (std::filesystem::path dir = std::filesystem::path(path).parent_path();
+      !dir.empty() && !std::filesystem::is_directory(dir, ec))
+    return "cannot write '" + path + "': the directory '" + dir.string() +
+           "' does not exist";
+  return {};
+}
+
 /// What @p print returns (EXIT_SUCCESS, or the status of a failure it
 /// reported), run on where an --emit-* option prints: -o's file, or
 /// standard output without -o.  The file is never one the command reads
@@ -496,12 +518,79 @@ std::string unknownPlugin(const char *kind, const std::string &name,
 
 // -- `paykan pkm`
 
+/// `pkm check f.pkm`: the file read as an importer reads it (docs/design/
+/// pkm.md §8.4): the verdict against this toolchain (§8.2), then IFACE,
+/// CODE, TMPL and OBJ (modules::readModuleContents, the backend that would
+/// link the compiled code, the default one or --backend's, checking it, and
+/// rejecting code of another kind).  One line, printed once all of that is
+/// read: `usable`, or `stale: `, `rejected: ` or `corrupt: ` and why; exit
+/// status 0 when it is usable.  An unknown --backend is an error.
+int checkModuleFile(const Options &opts) {
+  namespace pkm = paykan::pkm;
+  const std::string &path = opts.InputFilename;
+  auto verdict = [&](const std::string &what) {
+    std::cout << path << ": " << what << "\n";
+    return finishStdout(what == "usable" ? EXIT_SUCCESS : EXIT_FAILURE);
+  };
+  auto bytes = pkm::readFileBytes(path);
+  if (!bytes)
+    return fail(bytes.status().message());
+  pkm::Error err;
+  auto file = pkm::File::read(*bytes, {}, &err);
+  if (!file)
+    return verdict((err.Code == pkm::ErrorCode::UnsupportedFormat
+                        ? "rejected: written by another paykan release: "
+                        : "corrupt: ") +
+                   err.str());
+  const pkm::Manifest &m = (*file).manifest();
+  pkm::Verdict v = pkm::checkCompatibility(
+      m, paykan::modules::ModuleResolver::hostIdentity(),
+      pkm::Policy::Prebuilt);
+  if (v.Outcome != pkm::Verdict::Kind::Usable)
+    return verdict(
+        (v.Outcome == pkm::Verdict::Kind::Stale ? "stale: " : "rejected: ") +
+        v.Message);
+  // The compiled code, read and verified by the backend a program would
+  // link it with, as a program's import does.
+  std::string backendName = opts.Backend.empty()
+                                ? std::string(paykan::backend::defaultBackend())
+                                : opts.Backend;
+  std::unique_ptr<paykan::backend::Backend> backend =
+      paykan::backend::Registry::get().create(backendName);
+  if (!backend)
+    return fail("unknown backend '" + backendName + "'");
+  const bool links = backend->capabilities().CompileModules;
+  const pkm::Object kind = links ? toPkm(backend->objectKind()) : pkm::Object{};
+  paykan::modules::ObjectCheck checkObject;
+  if (links)
+    checkObject = [&backend, &kind](const pkm::Object &o) {
+      return o.sameKind(kind) ? backend->checkModuleObject(toBackend(o))
+                              : paykan::Status::ok();
+    };
+  auto contents = paykan::modules::readModuleContents(
+      *file, m.Module, checkObject, paykan::sema::Sema::readImport);
+  if (!contents)
+    return verdict("corrupt: " + contents.status().message());
+  // The backend links only code it compiled itself: a program that imports
+  // the file is refused at the link.
+  if (const std::optional<pkm::Object> &o = (*contents).Object;
+      links && o && !o->sameKind(kind))
+    return verdict("rejected: its code was compiled by backend '" + o->Backend +
+                   "' (" + o->Producer + ", " + o->Format + " for " +
+                   o->Target + "); backend '" + backendName +
+                   "' links code it compiled itself (" + kind.Producer +
+                   " for " + kind.Target + ")");
+  return verdict("usable");
+}
+
 /// `pkm dump f.pkm [--section=...]`: the stable dump (pkm::dump) and, for
-/// the whole file or `--section=code`, the PIR text of CODE.  `pkm check
-/// f.pkm`: the verdict against this toolchain (docs/design/pkm.md §8.2) and
-/// whether IFACE and CODE decode; exit status 0 when the file is usable.
+/// the whole file or `--section=code`, the PIR text of CODE.  `pkm extract
+/// --object f.pkm`: its compiled code as an object.  `pkm check`:
+/// checkModuleFile.
 int pkmTool(const Options &opts) {
   namespace pkm = paykan::pkm;
+  if (opts.Verb == PkmVerb::Check)
+    return checkModuleFile(opts);
   const std::string &path = opts.InputFilename;
   auto bytes = pkm::readFileBytes(path);
   if (!bytes)
@@ -560,30 +649,6 @@ int pkmTool(const Options &opts) {
       return fail(path + ": " + s.message());
     return EXIT_SUCCESS;
   }
-  if (opts.Verb == PkmVerb::Check) {
-    pkm::Verdict v = pkm::checkCompatibility(
-        (*file).manifest(), paykan::modules::ModuleResolver::hostIdentity(),
-        pkm::Policy::Prebuilt);
-    bool ok = v.Outcome == pkm::Verdict::Kind::Usable;
-    std::cout << path << ": "
-              << (ok ? "usable"
-                     : (v.Outcome == pkm::Verdict::Kind::Stale ? "stale: "
-                                                               : "rejected: ") +
-                           v.Message)
-              << "\n";
-    auto iface = pkm::readInterface((*file).section(pkm::Kind::Iface),
-                                    (*file).manifest().Module);
-    if (!iface) {
-      std::cerr << "paykan: " << path
-                << ": IFACE does not decode: " << iface.status().message()
-                << "\n";
-      ok = false;
-    }
-    std::ostream nowhere(nullptr);
-    if (!codeText(nowhere))
-      ok = false;
-    return finishStdout(ok ? EXIT_SUCCESS : EXIT_FAILURE);
-  }
   pkm::DumpOptions dopts;
   using S = pkm::DumpOptions::Section;
   const std::string &sec = opts.PkmSection;
@@ -618,6 +683,49 @@ int pkmTool(const Options &opts) {
   return finishStdout(ok ? EXIT_SUCCESS : EXIT_FAILURE);
 }
 
+/// The source root of a module named @p name by --module-name, read from
+/// @p input: when the name's parts before its last are the last
+/// directories of the file's path (`a::b` for `src/a/b.pkn`, or for
+/// `b.pkn` in the directory `src/a`), the directory above them (`src`), as
+/// the path gives it, or absolute when it does not reach that far; the
+/// module's imports are then where a program importing it finds them.
+/// Otherwise, and for a module of the standard library (`::name`), the
+/// file's directory.
+std::string moduleNameRoot(const std::filesystem::path &input,
+                           const std::string &name) {
+  std::string dir = input.parent_path().string();
+  if (name.starts_with(paykan::module_name::kSep))
+    return dir;
+  std::vector<std::string_view> parts = paykan::module_name::components(name);
+  parts.pop_back();
+  if (parts.empty())
+    return dir;
+  // The directory above @p path's last directories when they are the
+  // name's parts, as a path with them taken off.
+  auto above = [&](const std::filesystem::path &path)
+      -> std::optional<std::filesystem::path> {
+    std::vector<std::filesystem::path> dirs(path.begin(), path.end());
+    if (dirs.size() < parts.size())
+      return std::nullopt;
+    const size_t keep = dirs.size() - parts.size();
+    for (size_t i = 0; i < parts.size(); ++i)
+      if (dirs[keep + i] != parts[i])
+        return std::nullopt;
+    std::filesystem::path root;
+    for (size_t i = 0; i < keep; ++i)
+      root /= dirs[i];
+    return root;
+  };
+  if (auto root = above(input.lexically_normal().parent_path()))
+    return root->string();
+  std::error_code ec;
+  std::filesystem::path abs = std::filesystem::absolute(input, ec);
+  if (!ec)
+    if (auto root = above(abs.lexically_normal().parent_path()))
+      return root->string();
+  return dir;
+}
+
 /// The canonical name of the main module and the root its imports are
 /// resolved against.  Normally the file's stem and its directory.  For
 /// `--emit-pkm` of a module given by a relative path inside the project
@@ -628,16 +736,16 @@ int pkmTool(const Options &opts) {
 /// that goes up (`/src/shapes.pkn`, `../shapes.pkn`) is named by its
 /// stem.  Each part of the name --emit-pkm gives a module must be an
 /// identifier, which an import can name.  --module-name names it outright
-/// (the standard library's build names its modules `::name`).
+/// (the standard library's build names its modules `::name`), and the
+/// root is moduleNameRoot's.
 paykan::Status mainModuleIdentity(const Options &opts, std::string &name,
                                   std::string &projectRoot) {
   std::filesystem::path input(opts.InputFilename);
   name = paykan::module_name::mainModuleName(opts.InputFilename);
   projectRoot = input.parent_path().string();
   if (!opts.ModuleName.empty()) {
-    // --module-name: as given (its imports still resolve against the
-    // file's directory).
     name = opts.ModuleName;
+    projectRoot = moduleNameRoot(input, name);
     return paykan::Status::ok();
   }
   if (!opts.EmitPkm)
@@ -654,11 +762,14 @@ paykan::Status mainModuleIdentity(const Options &opts, std::string &name,
     }
   parts.push_back(normal.stem().string());
   for (const std::string &part : parts)
-    if (!paykan::module_name::isIdentifier(part))
-      return paykan::Status::error(
-          "cannot name the module of '" + opts.InputFilename +
-          "' after its path: '" + part +
-          "' is not an identifier (name it with --module-name)");
+    if (!paykan::frontend::isIdentifier(part))
+      return paykan::Status::error("cannot name the module of '" +
+                                   opts.InputFilename + "' after its path: '" +
+                                   part + "' is " +
+                                   (paykan::frontend::isKeyword(part)
+                                        ? "a keyword, which no import can name"
+                                        : "not an identifier") +
+                                   " (name it with --module-name)");
   if (parts.size() > 1) {
     name.clear();
     for (const std::string &part : parts) {
@@ -772,6 +883,10 @@ int main(int argc, char *argv[]) {
       }
   }
 
+  if (opts.Cmd == Command::Build)
+    if (std::string why = unwritablePath(executableOf(opts)); !why.empty())
+      return fail(why);
+
   // -- Frontend
   // One DiagEngine shared by every pass, wired into the parser up front so
   // syntax errors come out in the same rich source-located format as sema
@@ -851,6 +966,11 @@ int main(int argc, char *argv[]) {
   if (backend)
     resolverOpts.CompiledBy =
         caps.CompileModules ? toPkm(backend->objectKind()) : pkm::Object{};
+  if (caps.CompileModules)
+    resolverOpts.CheckObject = [&backend](const pkm::Object &o) {
+      return backend->checkModuleObject(toBackend(o));
+    };
+  resolverOpts.ReadFrontend = paykan::sema::Sema::readImport;
   paykan::modules::ModuleResolver resolver(
       resolverOpts, paykan::modules::ModuleResolver::hostIdentity());
   // Sema reuses the DiagEngine constructed above (already carrying the
@@ -876,6 +996,7 @@ int main(int argc, char *argv[]) {
   in.ProjectRoot = projectRoot;
   in.OptLevel = opts.optLevel();
   in.Objects = opts.Objects;
+  in.Verbose = opts.Verbose ? &std::cerr : nullptr;
   // -- Lowering
   // Every backend reads PIR: lower the program (the single home of the
   // ownership semantics), verify it, and hand it over.  --emit-pir prints it
@@ -914,6 +1035,11 @@ int main(int argc, char *argv[]) {
   std::map<std::string, paykan::backend::ModuleObject> compiled;
   // What the PIR passes do, to the modules' code and to the program's.
   paykan::pir::Statistics stats;
+  // The C of --emit-c is linked with the compiled code of each module file
+  // --list-modules names: a module whose cache entry could not be written
+  // has none, so its code stays in the program, as under --no-module-cache.
+  const bool linksModuleFiles =
+      (opts.EmitSource && opts.EmitStage == "c") || opts.ListModules;
   for (const std::string &name : resolver.cacheable()) {
     // An import: the main module, first, is never cached (a program's
     // knows what no module that may be imported may know).
@@ -933,7 +1059,8 @@ int main(int argc, char *argv[]) {
     if (code.Object)
       object = toPkm(*code.Object);
     resolver.writeCacheEntry(name, code.Code, object ? &*object : nullptr);
-    if (code.Object && paykan::modules::providesFor(code.Code, program)) {
+    if (code.Object && paykan::modules::providesFor(code.Code, program) &&
+        (!linksModuleFiles || !resolver.moduleFile(name).empty())) {
       *mod = std::move(code.Code);
       compiled[name] = std::move(*code.Object);
     }
@@ -954,9 +1081,9 @@ int main(int argc, char *argv[]) {
     // Its templates, for importers to instantiate without its source.
     std::vector<uint8_t> templates;
     if (auto mt = sema.exportTemplates(root, mainName)) {
-      mt->File = resolver.relativeToRoot(opts.InputFilename);
       std::string why;
-      templates = paykan::sema::Sema::encodeTemplates(*mt, why);
+      templates = paykan::sema::Sema::encodeTemplates(
+          *mt, resolver.relativeToRoot(opts.InputFilename), why);
       if (templates.empty())
         return fail("cannot write the templates of " + opts.InputFilename +
                     ": " + why);
@@ -1025,18 +1152,10 @@ int main(int argc, char *argv[]) {
     in.Compiled[name] = &o;
   if (opts.ListModules) {
     // The files the C of --emit-c needs as objects: it declares the
-    // functions of these modules (docs/c-backend.md).
-    std::vector<std::string> files;
-    for (const auto &[name, o] : compiled) {
-      std::string file = resolver.moduleFile(name);
-      if (file.empty())
-        return fail("the compiled code of module '" + name +
-                    "' is in no module file: its cache entry could not be "
-                    "written");
-      files.push_back(std::move(file));
-    }
-    for (const std::string &file : files)
-      std::cout << file << "\n";
+    // functions of these modules (docs/c-backend.md).  Each compiled module
+    // has one (linksModuleFiles above).
+    for (const auto &[name, o] : compiled)
+      std::cout << resolver.moduleFile(name) << "\n";
     return finishStdout(EXIT_SUCCESS);
   }
 
@@ -1056,9 +1175,7 @@ int main(int argc, char *argv[]) {
     if (!caps.EmitExecutable)
       return fail("backend '" + backendName + "' cannot build executables");
     paykan::backend::EmitOptions eo;
-    eo.OutputPath = opts.OutputPath.empty()
-                        ? defaultExecutable(opts.InputFilename)
-                        : opts.OutputPath;
+    eo.OutputPath = executableOf(opts);
     if (std::string why = overwritesInput(eo.OutputPath, opts, &resolver);
         !why.empty())
       return fail(why);

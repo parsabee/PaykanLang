@@ -155,13 +155,20 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
     std::error_code ec;
     return !p.empty() && fs::exists(p, ec);
   };
-  if (tc.RuntimeLib.empty() || tc.RuntimeIncludeDir.empty()) {
+  const char *envDir = std::getenv(tcnames::kEnvRuntimeDir);
+  const bool fromEnv = envDir && envDir[0];
+  if (fromEnv) {
+    // 1. $PAYKAN_RUNTIME_DIR/{lib,include/paykan}: the explicit override,
+    //    and when it is set the only place looked at, as $PAYKAN_STDLIB is
+    //    for the standard library: a runtime missing there is an error
+    //    (below), never a reason to link another one.
+    if (tc.RuntimeLib.empty())
+      tc.RuntimeLib =
+          (fs::path(envDir) / "lib" / tcnames::kRuntimeLib).string();
+    if (tc.RuntimeIncludeDir.empty())
+      tc.RuntimeIncludeDir = (fs::path(envDir) / "include" / "paykan").string();
+  } else if (tc.RuntimeLib.empty() || tc.RuntimeIncludeDir.empty()) {
     std::vector<std::pair<std::string, std::string>> candidates;
-    // 1. $PAYKAN_RUNTIME_DIR/{lib,include/paykan}: the explicit override
-    if (const char *env = std::getenv(tcnames::kEnvRuntimeDir); env && env[0])
-      candidates.emplace_back(
-          (fs::path(env) / "lib" / tcnames::kRuntimeLib).string(),
-          (fs::path(env) / "include" / "paykan").string());
     // 2. the runtime of the installed package an out-of-tree driver was
     //    built against (paykan_add_driver)
     if (const auto &[lib, inc] = packageRuntime(); !lib.empty())
@@ -191,14 +198,25 @@ bool resolveToolchain(Toolchain &tc, std::ostream &errs) {
       }
     }
   }
-  if (!exists(tc.RuntimeLib) ||
-      !exists(tc.RuntimeIncludeDir + "/" + tcnames::kRuntimeHeader)) {
+  const std::string header =
+      tc.RuntimeIncludeDir + "/" + tcnames::kRuntimeHeader;
+  if (exists(tc.RuntimeLib) && exists(header))
+    return true;
+  if (!fromEnv) {
     errs << "cannot find the Paykan runtime (libpaykan_runtime.a and "
             "Runtime.h); set "
          << tcnames::kEnvRuntimeDir << "\n";
     return false;
   }
-  return true;
+  std::vector<std::string> missing;
+  for (const std::string &file : {tc.RuntimeLib, header})
+    if (!exists(file))
+      missing.push_back(file);
+  errs << "cannot find the Paykan runtime in $" << tcnames::kEnvRuntimeDir
+       << " (" << envDir << "): " << missing.front()
+       << (missing.size() > 1 ? " and " + missing.back() + " do not exist\n"
+                              : std::string(" does not exist\n"));
+  return false;
 }
 
 bool linkExecutable(const std::vector<std::string> &objects,

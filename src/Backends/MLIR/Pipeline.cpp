@@ -87,7 +87,9 @@ Status emitProgramC(const pir::Program &program, llvm::raw_ostream &os) {
 StatusOr<std::unique_ptr<llvm::Module>> compileProgram(
     const pir::Program &program, llvm::LLVMContext &ctx,
     const std::string &moduleName, const std::string &projectRoot,
-    const std::function<std::span<const uint8_t>(size_t)> &compiled) {
+    const std::function<StatusOr<std::unique_ptr<llvm::Module>>(size_t)>
+        &compiled,
+    std::ostream *verbose) {
   auto mlirCtx = createContext();
   auto top = importProgram(program, *mlirCtx);
   if (!top)
@@ -119,7 +121,7 @@ StatusOr<std::unique_ptr<llvm::Module>> compileProgram(
           return s;
         return translateToLLVMIR(mod.get(), ctx, program.Modules[index].Name);
       },
-      compiled);
+      compiled, verbose);
 }
 
 StatusOr<std::unique_ptr<llvm::Module>> compileModule(const pir::Module &module,
@@ -130,7 +132,10 @@ StatusOr<std::unique_ptr<llvm::Module>> compileModule(const pir::Module &module,
     return mod.status();
   if (Status s = lowerTo((*mod).get(), Stage::LLVM); !s)
     return s;
-  return translateToLLVMIR((*mod).get(), ctx, module.Name);
+  auto code = translateToLLVMIR((*mod).get(), ctx, module.Name);
+  if (code)
+    llvm_codegen::dropDebugInfoVersion(**code);
+  return code;
 }
 
 } // namespace paykan::mlir_backend

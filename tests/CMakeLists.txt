@@ -207,6 +207,7 @@ if(PAYKAN_TEST_SUITE_pir_llvm)
     target_include_directories(pir_llvm_tests
         PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                 ${CMAKE_SOURCE_DIR}/src/Backends/MLIR
+                ${CMAKE_SOURCE_DIR}/src/Backends/LLVM/CodeGen
     )
     target_include_directories(pir_llvm_tests SYSTEM
         PRIVATE ${LLVM_INCLUDE_DIRS} ${MLIR_INCLUDE_DIRS}
@@ -527,6 +528,7 @@ target_compile_definitions(driver_tests
 target_link_libraries(driver_tests
     PRIVATE gtest_main
             paykan_pkm
+            paykan_pir
             paykan_compile_options
 )
 # paykan_build_id: BuildId.h, the build ID the cache tests expect.

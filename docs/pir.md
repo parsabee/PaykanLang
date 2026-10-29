@@ -348,10 +348,11 @@ backend does no inheritance walk.
 * **Layout**: the 16-byte runtime header (vtable pointer, 32-bit strong
   count, 32-bit weak count; `struct PaykanObject` in `Runtime.h`: an object carries its
   own reference counts, so a `box` is the object's pointer) followed by
-  *all* fields in declaration order, ancestors first.  Field types are `i64
-  f64 bool char box weak`, the optionals and `mem(N, A)` (laid out at its
-  alignment, as C lays out the `uint8_t` array; reached through
-  `field.addr`).
+  *all* fields in declaration order, ancestors first: a class's fields begin
+  with its superclass's, the same names, types and layout (the verifier
+  checks it).  Field types are `i64 f64 bool char box weak`, the optionals
+  and `mem(N, A)` (laid out at its alignment, as C lays out the `uint8_t`
+  array; reached through `field.addr`).
 * **Vtable**: one entry per slot in slot order, each a function symbol (a
   function of this module, an `extern fn`, or `null` for an empty slot, which
   the lowering never emits: a pure virtual method's slot holds its trap,
@@ -1302,6 +1303,9 @@ The verifier rejects a program when:
 
 * a value is used before its definition or outside the block that defines it;
   a `local` is loaded/stored with the wrong type or used without a declaration;
+  a value's id is not below its function's next free id (what a binary
+  module records, §5.7 of docs/design/pkm.md; the text format counts the
+  ids), which the passes size their tables by;
 * an instruction's operand types do not match the op (arithmetic type mismatch,
   `cmp` on different types or on optionals, a disallowed `cast` pair,
   non-`bool` condition, `some` of anything but `i64`/`f64`/`bool`/`char`,
@@ -1347,10 +1351,10 @@ The verifier rejects a program when:
   a `ret`, `unreachable`, terminating `if` or terminating `switch`);
 * a `switch`'s value is not an `i64`, `char` or `bool`, or a case is not a
   constant of its type or equals an earlier case;
-* a module-level symbol is defined twice, or a vtable entry's signature does not
-  match the named function's declaration as a machine function (§3: a slot
-  of a type with a `box` parameter takes the ownership mask, which a runtime
-  target spells out);
+* a module-level symbol or a class has an empty name or is defined twice, or a
+  vtable entry's signature does not match the named function's declaration as
+  a machine function (§3: a slot of a type with a `box` parameter takes the
+  ownership mask, which a runtime target spells out);
 * a call's argument ownership (§6) is not one per argument, or lends or
   passes on (`lent`, `owned(%o)`) an argument that is not a box parameter of
   a lending callee with a bit in the ownership mask (§3; never one of a

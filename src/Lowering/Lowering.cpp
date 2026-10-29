@@ -548,7 +548,8 @@ void ModuleLowering::bootstrapBuiltins() {
 bool ModuleLowering::run(ast::TranslationUnit *tu) {
   CurrentScope = nullptr;
   bootstrapBuiltins();
-  processImports(tu);
+  if (!processImports(tu))
+    return false;
   visit(tu);
   markShared();
   return !HadInternalError;

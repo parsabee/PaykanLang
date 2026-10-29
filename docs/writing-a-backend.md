@@ -228,7 +228,11 @@ public:
   declares that code ([`design/pkm.md`](design/pkm.md) §5.13). A program
   then hands the backend each such module's code in `Input::Compiled` to
   link, and `emitModuleObject()` writes one as a native object (`paykan pkm
-  extract --object`). A backend without the capability gets only programs
+  extract --object`). `checkModuleObject()` says whether code of its kind
+  can be linked (the mlir backend parses the bitcode and verifies it): the
+  driver asks when it loads a module file, so a damaged cache entry is
+  rebuilt and a damaged prebuilt module rejected before anything is
+  compiled; the base class accepts any. A backend without the capability gets only programs
   whose PIR is all of their code from the modules it built, and the module
   files it writes keep all of it in PIR.
 - **Errors** are reported with `paykan::Status` / `paykan::StatusOr<T>`
@@ -246,6 +250,7 @@ public:
 | `OptLevel` | `-O<n>`, 0..3; what it means is the backend's choice |
 | `Objects` | the object files and archives of `--object`, which define the program's `native fn`s (the `$c.` externs, [`pir.md`](pir.md) §3); a native backend links them |
 | `Compiled` | for a backend with `CompileModules`: by module name, the code `compileModule` made of each module the program's PIR declares (compiled declarations, [`pir.md`](pir.md) §3); the backend links what the program uses of it |
+| `Verbose` | `--verbose`: where a backend with a cache of its own says, one line each, why it did not use an entry it found; null otherwise |
 
 A PIR program is a plain data structure
 ([`include/paykan/pir/PIR.h`](../include/paykan/pir/PIR.h)): modules hold

@@ -18,6 +18,7 @@
 #include "Names.h"
 #include "Runtime.h"
 #include "Version.h"
+#include "paykan/modules/ModuleCode.h"
 #include "paykan/pir/Binary.h"
 #include "paykan/pir/Verifier.h"
 #include "paykan/pir/Version.h"
@@ -45,10 +46,14 @@ struct ModuleResolver::Entry {
   enum class State { Source, Built, Loaded, Failed };
   State State = State::Failed;
   std::filesystem::path Path; ///< the source (Source, Built) or .pkm (Loaded)
+  /// Loaded from a cache entry: the source it was checked against.
+  std::filesystem::path Source;
   std::vector<uint8_t> SourceBytes; ///< Source, Built: for the manifest
   pkm::Interface Iface;             ///< Built, Loaded
-  std::vector<std::string> Deps;    ///< Built, Loaded: direct imports
-  support::Hash256 IfaceHash{};     ///< Built, Loaded
+  /// Loaded: its CODE, decoded and verified, until loadCode() takes it.
+  std::optional<pir::Module> Code;
+  std::vector<std::string> Deps; ///< Built, Loaded: direct imports
+  support::Hash256 IfaceHash{};  ///< Built, Loaded
   /// Built, Loaded: the TMPL section's hash (zero without one).  The
   /// interface hash covers the dependencies' (IFACE's MODS), so an edit of
   /// a template body reaches every module that may hold a copy of an
@@ -58,6 +63,9 @@ struct ModuleResolver::Entry {
   std::optional<pkm::File> File; ///< Loaded
   /// Loaded: its compiled code, when CODE declares it.
   std::optional<pkm::Object> Object;
+  /// Loaded: what ReadFrontend made of the file, until
+  /// takeFrontendData() takes it.
+  std::shared_ptr<void> Frontend;
   bool KeepUncached = false; ///< Built: not cacheable()
   /// Built: the cache entry writeCacheEntry() wrote ("" before, or when it
   /// could not be written).
@@ -102,6 +110,61 @@ std::string describeProducer(const pkm::File &f) {
 
 } // namespace
 
+StatusOr<ModuleContents> readModuleContents(const pkm::File &file,
+                                            const std::string &canonical,
+                                            const ObjectCheck &checkObject,
+                                            const FrontendRead &readFrontend) {
+  ModuleContents out;
+  StatusOr<pkm::Interface> iface =
+      pkm::readInterface(file.section(pkm::Kind::Iface), canonical);
+  if (!iface)
+    return Status::error("has a bad IFACE section: " +
+                         iface.status().message());
+  if (Status s = checkInterface(*iface); !s)
+    return Status::error("has a bad IFACE section: " + s.message());
+  out.Iface = std::move(*iface);
+  // CODE is read now, not when the program is lowered: a file whose code
+  // is bad is unusable (a cache entry is rebuilt, a prebuilt file rejected
+  // where it is imported, --check-only too), and the module decoded here
+  // is the one the lowering gets.
+  std::span<const uint8_t> codeBytes = file.section(pkm::Kind::Code);
+  if (!(file.manifest().Contents & pkm::kContentsHasCode) || codeBytes.empty())
+    return Status::error("has no CODE section");
+  StatusOr<pir::Module> code = pir::binary::decode(codeBytes);
+  if (!code)
+    return Status::error("has a bad CODE section: " + code.status().message());
+  if ((*code).Name != canonical)
+    return Status::error("has a bad CODE section: it names module '" +
+                         (*code).Name + "'");
+  if (auto errors = pir::verify(*code); !errors.empty())
+    return Status::error("has a bad CODE section: it does not verify:\n" +
+                         pir::formatErrors(errors));
+  if (Status s = checkCodeMatchesInterface(*code, out.Iface); !s)
+    return Status::error("has an IFACE section that does not match its CODE: " +
+                         s.message());
+  out.Code = std::move(*code);
+  // The type names and the templates are Sema's to read.
+  if (readFrontend) {
+    StatusOr<std::shared_ptr<void>> frontend =
+        readFrontend(out.Iface, file.section(pkm::Kind::Tmpl), canonical);
+    if (!frontend)
+      return frontend.status();
+    out.Frontend = std::move(*frontend);
+  }
+  if (file.manifest().Contents & pkm::kContentsHasObject) {
+    StatusOr<pkm::Object> object =
+        pkm::readObject(file.section(pkm::Kind::Object));
+    if (!object)
+      return Status::error("has a bad OBJ section: " +
+                           object.status().message());
+    if (checkObject)
+      if (Status s = checkObject(*object); !s)
+        return Status::error("has a bad OBJ section: " + s.message());
+    out.Object = std::move(*object);
+  }
+  return out;
+}
+
 ModuleResolver::ModuleResolver(ResolverOptions opts, pkm::HostIdentity host)
     : Opts(std::move(opts)), Host(std::move(host)) {}
 
@@ -130,20 +193,11 @@ void ModuleResolver::noteRead(const std::filesystem::path &path) {
 
 std::string
 ModuleResolver::relativeToRoot(const std::filesystem::path &path) const {
-  std::error_code ec;
-  auto root = std::filesystem::weakly_canonical(
-      Opts.ProjectRoot.empty() ? std::filesystem::path(".")
-                               : std::filesystem::path(Opts.ProjectRoot),
-      ec);
-  if (ec)
-    return path.string();
-  auto abs = std::filesystem::weakly_canonical(path, ec);
-  if (ec)
-    return path.string();
-  auto rel = abs.lexically_relative(root);
-  if (rel.empty() || *rel.begin() == "..")
-    return path.string();
-  return rel.generic_string();
+  return module_utils::relativeToRoot(Opts.ProjectRoot, path);
+}
+
+std::string ModuleResolver::shownPath(const std::filesystem::path &path) const {
+  return module_utils::displayPath(Opts.ProjectRoot, path);
 }
 
 std::filesystem::path
@@ -178,20 +232,26 @@ Resolution ModuleResolver::resolve(const std::string &canonical) {
   return resolvePrebuilt(canonical, source);
 }
 
+Resolution ModuleResolver::fromSource(const std::string &canonical,
+                                      const std::filesystem::path &source,
+                                      const std::string &why) {
+  auto e = std::make_unique<Entry>();
+  e->State = Entry::State::Source;
+  e->Path = source;
+  Entries[canonical] = std::move(e);
+  Awaiting.erase(canonical);
+  Pendings.erase(canonical);
+  log("module " + canonical + ": " + why + "; building from source");
+  Resolution r;
+  r.Outcome = Resolution::Kind::Source;
+  r.Path = source.string();
+  return r;
+}
+
 Resolution ModuleResolver::resolveSource(const std::string &canonical,
                                          const std::filesystem::path &source) {
   auto fromSource = [&](const std::string &why) {
-    auto e = std::make_unique<Entry>();
-    e->State = Entry::State::Source;
-    e->Path = source;
-    Entries[canonical] = std::move(e);
-    Awaiting.erase(canonical);
-    Pendings.erase(canonical);
-    log("module " + canonical + ": " + why + "; building from source");
-    Resolution r;
-    r.Outcome = Resolution::Kind::Source;
-    r.Path = source.string();
-    return r;
+    return this->fromSource(canonical, source, why);
   };
   if (!Opts.ReadCache)
     return fromSource("cache not read");
@@ -199,7 +259,7 @@ Resolution ModuleResolver::resolveSource(const std::string &canonical,
   std::error_code ec;
   if (!std::filesystem::is_regular_file(cache, ec))
     return fromSource("no cache entry");
-  std::string shown = relativeToRoot(cache);
+  std::string shown = shownPath(cache);
   std::vector<uint8_t> sourceBytes;
   if (auto it = Pendings.find(canonical); it == Pendings.end()) {
     noteRead(source);
@@ -212,14 +272,16 @@ Resolution ModuleResolver::resolveSource(const std::string &canonical,
   Resolution r = load(canonical, cache, pkm::Policy::Cache, sourceBytes);
   if (r.Outcome == Resolution::Kind::Rejected)
     return fromSource("cache " + shown + " " + r.Message);
-  if (r.Outcome == Resolution::Kind::Loaded)
+  if (r.Outcome == Resolution::Kind::Loaded) {
+    Entries[canonical]->Source = source;
     log("module " + canonical + ": cache " + shown + " usable");
+  }
   return r;
 }
 
-Resolution
-ModuleResolver::resolvePrebuilt(const std::string &canonical,
-                                const std::filesystem::path &source) {
+std::vector<std::filesystem::path>
+ModuleResolver::prebuiltCandidates(const std::string &canonical,
+                                   const std::filesystem::path &source) const {
   std::vector<std::filesystem::path> candidates;
   candidates.push_back(std::filesystem::path(source).replace_extension(".pkm"));
   std::filesystem::path rel =
@@ -227,15 +289,37 @@ ModuleResolver::resolvePrebuilt(const std::string &canonical,
   rel.replace_extension(".pkm");
   for (const std::string &dir : Opts.ModulePath)
     candidates.push_back(module_utils::appendPath(dir, rel));
+  return candidates;
+}
 
-  std::string tried = relativeToRoot(source);
+bool ModuleResolver::exists(const std::string &canonical) const {
+  std::filesystem::path source = module_utils::moduleFile(
+      Opts.ProjectRoot, isSystemName(canonical), modulePathOf(canonical));
+  std::error_code ec;
+  if (std::filesystem::exists(source, ec))
+    return true;
+  const std::vector<std::filesystem::path> candidates =
+      prebuiltCandidates(canonical, source);
+  return std::any_of(candidates.begin(), candidates.end(),
+                     [](const std::filesystem::path &c) {
+                       std::error_code ec;
+                       return std::filesystem::is_regular_file(c, ec);
+                     });
+}
+
+Resolution
+ModuleResolver::resolvePrebuilt(const std::string &canonical,
+                                const std::filesystem::path &source) {
+  const std::vector<std::filesystem::path> candidates =
+      prebuiltCandidates(canonical, source);
+  std::string tried = shownPath(source);
   for (const auto &c : candidates) {
-    tried += ", " + relativeToRoot(c);
+    tried += ", " + shownPath(c);
     std::error_code ec;
     if (!std::filesystem::is_regular_file(c, ec))
       continue;
     Resolution r = load(canonical, c, pkm::Policy::Prebuilt, {});
-    std::string shown = relativeToRoot(c);
+    std::string shown = shownPath(c);
     std::string line = "module ";
     line += canonical;
     line += ": prebuilt ";
@@ -317,9 +401,6 @@ Resolution ModuleResolver::load(const std::string &canonical,
                         : describeProducer(file) + "; " + v.Message);
   if (policy == pkm::Policy::Cache && !pkm::sourceMatches(m, p->SourceBytes))
     return unusable("is stale (the source changed)");
-  if (!(m.Contents & pkm::kContentsHasCode) ||
-      file.section(pkm::Kind::Code).empty())
-    return unusable("has no CODE section");
   // Every direct dependency must be resolved first, so its current
   // interface hash is known; a dependency that is itself waiting on this
   // module can only come from hand-edited files.
@@ -329,6 +410,11 @@ Resolution ModuleResolver::load(const std::string &canonical,
       if (Awaiting.count(d.Name))
         return unusable("depends on module '" + d.Name +
                         "', whose cache entry depends on it");
+      // A cache entry's: its source's own import of it says why, where it
+      // is (a prebuilt file has no source, and its import is the place).
+      if (policy == pkm::Policy::Cache && !exists(d.Name))
+        return unusable("depends on module '" + d.Name +
+                        "', which is not found");
       Awaiting.insert(canonical);
       Resolution r;
       r.Outcome = Resolution::Kind::NeedDependency;
@@ -353,35 +439,40 @@ Resolution ModuleResolver::load(const std::string &canonical,
               ? "is stale (the templates of module '" + d.Name + "' changed)"
               : "was built against other templates of module '" + d.Name + "'");
   }
-  StatusOr<pkm::Interface> iface =
-      pkm::readInterface(file.section(pkm::Kind::Iface), canonical);
-  if (!iface)
-    return unusable("has a bad IFACE section: " + iface.status().message());
-  std::optional<pkm::Object> object;
-  if (m.Contents & pkm::kContentsHasObject) {
-    StatusOr<pkm::Object> read =
-        pkm::readObject(file.section(pkm::Kind::Object));
-    if (!read)
-      return unusable("has a bad OBJ section: " + read.status().message());
-    const pkm::Object &o = *read;
-    // A cache entry's code is the active backend's, or it is built again
-    // (a prebuilt file's is checked by the backend that links it).
-    if (policy == pkm::Policy::Cache && Opts.CompiledBy &&
-        !o.sameKind(*Opts.CompiledBy))
-      return unusable("is stale (its code was compiled by backend '" +
-                      o.Backend + "' (" + o.Producer + " for " + o.Target +
-                      "), not by this one)");
-    object = std::move(*read);
-  }
+  // Code the active backend links must read and verify (docs/design/
+  // pkm.md §8.4): a backend's reader is not made for damaged input.
+  auto checkObject = [this](const pkm::Object &o) {
+    return Opts.CheckObject && Opts.CompiledBy && o.sameKind(*Opts.CompiledBy)
+               ? Opts.CheckObject(o)
+               : Status::ok();
+  };
+  StatusOr<ModuleContents> contents =
+      readModuleContents(file, canonical, checkObject, Opts.ReadFrontend);
+  if (!contents)
+    return unusable(contents.status().message());
+  if (Status s = checkImportedTypes((*contents).Iface); !s)
+    return unusable("has an IFACE section that does not match " + s.message());
+  if (Status s = checkLinks((*contents).Code); !s)
+    return unusable("has a bad CODE section: " + s.message());
+  // A cache entry's code is the active backend's, or it is built again
+  // (a prebuilt file's is checked by the backend that links it).
+  if (const std::optional<pkm::Object> &o = (*contents).Object;
+      o && policy == pkm::Policy::Cache && Opts.CompiledBy &&
+      !o->sameKind(*Opts.CompiledBy))
+    return unusable("is stale (its code was compiled by backend '" +
+                    o->Backend + "' (" + o->Producer + " for " + o->Target +
+                    "), not by this one)");
   auto e = std::make_unique<Entry>();
   e->State = Entry::State::Loaded;
   e->Path = path;
-  e->Iface = std::move(*iface);
+  e->Iface = std::move((*contents).Iface);
+  e->Code = std::move((*contents).Code);
   for (const pkm::Manifest::Dep &d : m.Deps)
     e->Deps.push_back(d.Name);
   e->IfaceHash = file.ifaceHash();
   e->TmplHash = file.tmplHash();
-  e->Object = std::move(object);
+  e->Object = std::move((*contents).Object);
+  e->Frontend = std::move((*contents).Frontend);
   e->File = std::move(p->File);
   Pendings.erase(canonical);
   Awaiting.erase(canonical);
@@ -391,6 +482,87 @@ Resolution ModuleResolver::load(const std::string &canonical,
   r.Iface = &e->Iface;
   Entries[canonical] = std::move(e);
   return r;
+}
+
+Status ModuleResolver::checkImportedTypes(const pkm::Interface &iface) const {
+  // A record of another module's type, against the one that module
+  // describes (as it was built or loaded): the same but for whose it is.
+  // An instantiation of the module's template made elsewhere (in this
+  // module, or another it imports) may be one it does not describe.
+  auto check = [&](const char *kind, const auto &records, auto theirs,
+                   auto same) -> Status {
+    for (const auto &r : records) {
+      if (r.IsLocal || r.OriginModule.empty())
+        continue;
+      auto it = Entries.find(r.OriginModule);
+      std::string why = "module '" + r.OriginModule + "': ";
+      if (it == Entries.end() || (it->second->State != Entry::State::Built &&
+                                  it->second->State != Entry::State::Loaded)) {
+        why += "it records ";
+        why += kind;
+        why += " '" + r.Name + "' of that module, which it does not depend on";
+        return Status::error(why);
+      }
+      // Sorted by name (readInterface, built()).
+      const auto &defs = theirs(it->second->Iface);
+      auto def = std::lower_bound(
+          defs.begin(), defs.end(), r.Name,
+          [](const auto &d, const std::string &n) { return d.Name < n; });
+      const bool found = def != defs.end() && def->Name == r.Name;
+      if (!found && r.Name.find('<') != std::string::npos)
+        continue;
+      if (!found || !same(r, *def)) {
+        why += "its ";
+        why += kind;
+        why += " '" + r.Name + "' is not the one that module describes";
+        return Status::error(why);
+      }
+    }
+    return Status::ok();
+  };
+  if (Status s = check(
+          "class", iface.Classes,
+          [](const pkm::Interface &i) -> const auto & { return i.Classes; },
+          [](const pkm::ClassRec &a, const pkm::ClassRec &b) {
+            return a.SuperClassName == b.SuperClassName &&
+                   a.Fields == b.Fields && a.Methods == b.Methods;
+          });
+      !s)
+    return s;
+  if (Status s = check(
+          "struct", iface.Structs,
+          [](const pkm::Interface &i) -> const auto & { return i.Structs; },
+          [](const pkm::StructRec &a, const pkm::StructRec &b) {
+            return a.Fields == b.Fields && a.Methods == b.Methods;
+          });
+      !s)
+    return s;
+  return check(
+      "enum", iface.Enums,
+      [](const pkm::Interface &i) -> const auto & { return i.Enums; },
+      [](const pkm::EnumRec &a, const pkm::EnumRec &b) {
+        return a.Variants == b.Variants &&
+               a.PayloadVariants == b.PayloadVariants;
+      });
+}
+
+Status ModuleResolver::checkLinks(const pir::Module &code) const {
+  // Every module the code may name was resolved before it (a dependency's
+  // own dependencies first); the code of one loaded from a file is at hand
+  // until the lowering takes it, one built from source has none yet.
+  const pir::LinkedModules resolved =
+      [&](const std::string &name) -> std::optional<const pir::Module *> {
+    auto it = Entries.find(name);
+    if (it == Entries.end() || it->second->State == Entry::State::Failed)
+      return std::nullopt;
+    const Entry &e = *it->second;
+    return e.State == Entry::State::Loaded && e.Code ? &*e.Code : nullptr;
+  };
+  std::vector<pir::VerifyError> errors = pir::verifyLinks(code, resolved);
+  if (errors.empty())
+    return Status::ok();
+  return Status::error("it does not match the modules it names:\n" +
+                       pir::formatErrors(errors));
 }
 
 // -- Sema's reports
@@ -422,6 +594,14 @@ void ModuleResolver::built(const std::string &canonical, pkm::Interface iface,
   if (StatusOr<std::vector<uint8_t>> bytes = pkm::readFileBytes(e.Path))
     e.SourceBytes = std::move(*bytes);
   e.IfaceHash = support::sha256(pkm::writeInterface(iface));
+  // By name, as a file's interface reads (checkImportedTypes).
+  auto byName = [](auto &records) {
+    std::sort(records.begin(), records.end(),
+              [](const auto &a, const auto &b) { return a.Name < b.Name; });
+  };
+  byName(iface.Classes);
+  byName(iface.Structs);
+  byName(iface.Enums);
   e.TmplHash =
       templates.empty() ? support::Hash256{} : support::sha256(templates);
   e.Tmpl = std::move(templates);
@@ -440,6 +620,22 @@ void ModuleResolver::failed(const std::string &canonical) {
   Pendings.erase(canonical);
 }
 
+bool ModuleResolver::buildFromSource(const std::string &canonical,
+                                     const std::string &why) {
+  // Only a cache entry is pending with a source next to it: a prebuilt
+  // file is looked for when there is none.
+  if (!Pendings.count(canonical) || Entries.count(canonical))
+    return false;
+  std::filesystem::path source = module_utils::moduleFile(
+      Opts.ProjectRoot, isSystemName(canonical), modulePathOf(canonical));
+  std::error_code ec;
+  if (!std::filesystem::exists(source, ec))
+    return false;
+  fromSource(canonical, source,
+             "cache " + shownPath(cachePath(canonical)) + " " + why);
+  return true;
+}
+
 // -- What the lowering reads
 
 bool ModuleResolver::isLoaded(const std::string &canonical) const {
@@ -454,14 +650,20 @@ ModuleResolver::dependencies(const std::string &canonical) const {
   return it == Entries.end() ? none : it->second->Deps;
 }
 
-StatusOr<pir::Module>
-ModuleResolver::loadCode(const std::string &canonical) const {
+StatusOr<pir::Module> ModuleResolver::loadCode(const std::string &canonical) {
   auto it = Entries.find(canonical);
   if (it == Entries.end() || it->second->State != Entry::State::Loaded)
     return Status::error("module '" + canonical +
                          "' was not loaded from a "
                          ".pkm file");
-  const Entry &e = *it->second;
+  Entry &e = *it->second;
+  if (e.Code) {
+    pir::Module code = std::move(*e.Code);
+    e.Code.reset();
+    return code;
+  }
+  // Handed over already: the bytes decoded and verified when they were
+  // loaded.
   std::string shown =
       "module '" + canonical + "' (" + displayPath(canonical) + ")";
   if (!e.File)
@@ -470,14 +672,16 @@ ModuleResolver::loadCode(const std::string &canonical) const {
       pir::binary::decode(e.File->section(pkm::Kind::Code));
   if (!mod)
     return Status::error(shown +
-                         ": CODE does not decode: " + mod.status().message());
-  const pir::Module &decoded = mod.value();
-  if (decoded.Name != canonical)
-    return Status::error(shown + ": CODE names module '" + decoded.Name + "'");
-  if (auto errors = pir::verify(decoded); !errors.empty())
-    return Status::error(shown + ": CODE does not verify:\n" +
-                         pir::formatErrors(errors));
+                         " has a bad CODE section: " + mod.status().message());
   return mod;
+}
+
+std::shared_ptr<void>
+ModuleResolver::takeFrontendData(const std::string &canonical) {
+  auto it = Entries.find(canonical);
+  if (it == Entries.end() || it->second->State != Entry::State::Loaded)
+    return nullptr;
+  return std::move(it->second->Frontend);
 }
 
 const pkm::Object *ModuleResolver::object(const std::string &canonical) const {
@@ -501,7 +705,14 @@ ModuleResolver::templates(const std::string &canonical) const {
 
 std::string ModuleResolver::displayPath(const std::string &canonical) const {
   auto it = Entries.find(canonical);
-  return it == Entries.end() ? std::string() : relativeToRoot(it->second->Path);
+  return it == Entries.end() ? std::string() : shownPath(it->second->Path);
+}
+
+std::string ModuleResolver::cacheSource(const std::string &canonical) const {
+  auto it = Entries.find(canonical);
+  return it == Entries.end() || it->second->Source.empty()
+             ? std::string()
+             : shownPath(it->second->Source);
 }
 
 std::string ModuleResolver::moduleFile(const std::string &canonical) const {
@@ -619,15 +830,14 @@ void ModuleResolver::writeCacheEntry(const std::string &canonical,
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     s = ec ? Status::error("cannot create directory '" +
-                           relativeToRoot(path.parent_path()) +
-                           "': " + ec.message())
+                           shownPath(path.parent_path()) + "': " + ec.message())
            : pkm::writeFileAtomically(path, *bytes);
   }
   if (s)
     entry.Written = path;
   log("module " + canonical + ": " +
-      (s ? "wrote " + relativeToRoot(path)
-         : "cannot write " + relativeToRoot(path) + ": " + s.message()));
+      (s ? "wrote " + shownPath(path)
+         : "cannot write " + shownPath(path) + ": " + s.message()));
 }
 
 Status ModuleResolver::writeModuleFile(

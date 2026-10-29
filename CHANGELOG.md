@@ -868,6 +868,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   expression is Sema's error with its `-9223372036854775807 - 1` hint.  The AST interchange
   format's `(int ...)` reads values up to 18446744073709551615.
 - `&`, `|`, `^` and `~` are tokens (no longer `invalid character`).
+- **Stability sweep: modules, pkm and driver.**
+  - `$PAYKAN_RUNTIME_DIR`, when it is set, is the only place `build` (and a plugin
+    backend's `runtime_library`) takes the runtime from, as `$PAYKAN_STDLIB` is the only
+    place of the standard library: one that does not exist, or that lacks
+    `lib/libpaykan_runtime.a` or `include/paykan/Runtime.h`, was passed over without a
+    word for the runtime next to the executable or in the build tree, so a program could
+    be linked with another runtime than the one asked for.  It is now an error naming
+    what is missing (`cannot find the Paykan runtime in $PAYKAN_RUNTIME_DIR
+    (/opt/rt): /opt/rt/include/paykan/Runtime.h does not exist`); an empty
+    `PAYKAN_RUNTIME_DIR` is not set (docs/language/17-the-paykan-command.md).
+  - A source file, and a module file `pkm` or an import reads, is at most 256 MiB, a new
+    limit (docs/grammar.md section 9, docs/design/pkm.md §1.6): `--check-only /dev/zero`
+    and `pkm dump /dev/zero` read until an allocation failed and aborted with an
+    uncaught `std::bad_alloc`, and a larger regular file was read whole first.  A regular
+    file over the limit is now refused by its size, before it is read, and a pipe or a
+    device is read only up to it: `'/dev/zero' is too large for a source file (more than
+    256 MiB)`, `paykan: '/dev/zero' is too large (more than 256 MiB)` from `pkm`, exit
+    status 1.  A pipe is still read to its end (`cat prog.pkn | paykan /dev/stdin`), and
+    the source is read through a buffer on the heap rather than 64 KB of the stack.
+  - A chain of imports is at most 256 modules deep, a new limit (docs/grammar.md section
+    9, docs/language/15-modules.md): a chain of about 1460 modules built from source
+    overflowed the stack (a segmentation fault, no diagnostic), since each is analysed by
+    a Sema nested in its importer's.  The import 257 levels down is now an error at that
+    import, `imports nested too deep (more than 256 modules): 'c::m256' is imported 257
+    modules deep`, exit status 1, however long the chain.  The levels are counted whether
+    the modules come from source or from module files (a cache entry is checked against
+    each module it imports, one level deeper), so a program is not accepted with a warm
+    cache and rejected with a cold one; and reported at the same import with the same
+    notes, since a cache entry whose imports nest too deep is built from its source.  The
+    nested Sema is on the heap, which halves the stack each level takes (2.9 KB in a debug
+    build).
 
 ### Removed
 
@@ -1043,6 +1074,165 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     0.75 s).  Sample 33 drops each kind of value in place and by its drop function, a
     union's by each of its variants and a parameter's whose references were handed on,
     with no live block left on every path.
+- **Stability sweep: modules, pkm and driver.**
+  - A damaged bitcode cache entry (`.paykan_cache/a/b.bc`, the mlir backend's LLVM IR of
+    an imported module) crashed every later compile of the program until the cache was
+    deleted, where a damaged entry is promised a rebuild: one changed byte of
+    `.paykan_cache/@system/io.bc` gave a segmentation fault, an LLVM assertion or `LLVM
+    ERROR: Broken module found`, since no hash covered the file and LLVM's bitcode reader
+    is not made for damaged input.  An entry is now a header (a magic number, the entry's
+    key and the SHA-256 of its bitcode) and the bitcode: one whose header does not match
+    its bitcode is not read, one whose module does not verify is not used, and either is
+    translated and written again, `--verbose` saying why (`module ::io: bitcode cache
+    .paykan_cache/@system/io.bc is corrupt (its bitcode does not match its hash);
+    translating it again`).  An entry that is no regular file is not read but translated
+    again too: a FIFO blocked the compile for good, and a link to `/dev/zero` was read
+    until LLVM ran out of memory (`LLVM ERROR: out of memory`).  An older compiler's
+    entries are translated again once (`... is stale (an older paykan wrote it, with no
+    header)`, not `corrupt`).  A module file's compiled code (its OBJ section) that did
+    not read or verify failed the compile that linked it, with `LLVM ERROR: Broken module
+    found` or an error at the link: the backend now reads and verifies it when the file is
+    loaded (`Backend::checkModuleObject`), so a cache entry's is rebuilt and a prebuilt
+    file's is an error where it is imported (`module 'm' (m.pkm) has a bad OBJ section:
+    the compiled code does not verify: ...`), and the program's LLVM IR is verified before
+    it is optimised or run.  The module the backend reads then is the one the program's
+    link takes, so the bitcode is read once: it was read again to link it, 4.4% of the
+    instructions of `run` in a program of 60 modules.  Past that check a module file's
+    compiled code is trusted once its hashes match: bytes crafted to pass them can still
+    crash LLVM's reader, so a prebuilt module is as safe as where it came from
+    (docs/design/pkm.md §8.4).  The modules the mlir backend writes as bitcode no longer
+    carry LLVM's "Debug Info Version" flag (they have no debug info), since the reader
+    verifies a module that has it and stops the process when that module does not verify.
+  - A module file whose CODE did not decode or verify was accepted when it was loaded and
+    reported only when the program was lowered, which then went on without the module and
+    stopped at an assertion (`Scope::lookup`, SIGABRT); `--check-only` accepted it, and a
+    cache entry of this kind was called usable and never rebuilt.  A file whose interface
+    did not match its CODE, its own records or the modules it imports, all its hashes made
+    to match, failed PIR's verifier (`extern class 'A' has a different layout than its
+    definition in module 'm'`, for a class whose fields its interface gave in another
+    order), the lowering's checks (`internal compiler error: a call of slot 6 of 'Seg'
+    does not match the class's definition in its module`, for a file whose copy of an
+    imported superclass lost a slot; `no function for 'Shape.__init__' called by
+    'Sq.__super__'`, in an importer deriving a class from one whose initializer CODE did
+    not have; `an optional value where a box is due`, for an initializer whose parameter
+    the interface gave as `int?`), or Sema (a signature's unknown type reported under both
+    of the import's names, which stopped a debug build with `the same diagnostic was
+    reported twice`), or it built a program that crashed when it ran (an empty vtable
+    slot, of a class of the module or of a copy of an instantiation it holds; a slot
+    naming another function than the method an importer's subclass inherits, whose slot
+    the importer then left empty; a constructor returning nothing) or crashed the mlir
+    backend (a `void` parameter) or rc-elimination (a function whose next value id is not
+    above its ids, which sizes the pass's tables: `std::out_of_range` or a heap overflow),
+    or did not link (`JIT session error: Symbols not found: [ pk__SBox_3Cint_3E ]`, for a
+    copy of an instantiation's constructor whose name CODE had lost, or which CODE no
+    longer had as `shared`).  Now, when the file is loaded, its interface is checked for
+    consistency (each superclass a class it describes, whose virtual methods begin its
+    subclass's; every class and struct has an initializer), for types it does not
+    describe, and against the modules whose types it records; its CODE is decoded,
+    verified (a `void` parameter is an error, and so are a class whose fields do not begin
+    with its superclass's, a value id at or past its function's next one and a function or
+    class with no name) and checked against the interface: each class the module defines
+    with its superclass, its own fields in their order, its vtable's slots, its
+    initializer and `impl` methods (which an importer calls by their names) and its
+    constructor, each copy of an instantiation it holds for what it has, each method of
+    each of its structs and each function, a native one's too, all with the PIR types the
+    interface's types give them, which every type it can name now has (the optional of a
+    scalar or of an enum without payloads is its optional type, an enum without payloads
+    an `i64`, a tuple, a fixed-size array or a function value is passed in memory); each
+    slot of a class the module defines names the function an importer's subclass inherits,
+    the first `X.m` of the class and its ancestors, and a class's functions are `shared`
+    exactly when the class is; its externs are checked against the CODE of the module
+    files they name; and its templates are decoded.  So such a cache entry is rebuilt and
+    such a prebuilt module is an error at the import, `--check-only` included (`module 'm'
+    (m.pkm) has a bad CODE section: binary PIR: bad magic at byte 0. Rebuild it from
+    source.`, `module 'lib::b' (pre/lib/b.pkm) has a bad IFACE section: the vtable of
+    class 'Line' does not start with the slots of its superclass 'Shape'.`, `... has an
+    IFACE section that does not match its CODE: method 'Shape.__init__' is not in CODE.`,
+    `... class 'Shape': slot 4 ('scaled') of its vtable names '@Rhape.scaled' in CODE,
+    which is not the class's or an ancestor's method 'scaled'.`).  A cache entry that
+    records a dependency no source or module file is there for is rebuilt too, its
+    source's own import saying where a dependency is missing (`module 'bsae' not found`
+    was reported at the import of the module the entry is of).  What CODE does not record
+    is the layout of a value held in memory (a struct's fields, a tagged union's variants
+    and payloads, a tuple's or an array's elements), which a signature passes by its
+    address: like the compiled code, it is trusted once the file's hashes match, so a file
+    whose interface gives a struct with an initializer of its own its fields in another
+    order, its hashes made to match, is used, and the program reads the wrong bytes
+    (docs/design/pkm.md §8.4).  The module decoded then is the one the program is lowered
+    with, so nothing is decoded twice: `run` of a program importing every module of the
+    standard library takes 1% fewer instructions than it did and its `--check-only` 1%
+    more (1,196 million and 324 million where there were 1,208 million and 320 million, in
+    a debug build); in a chain of 60 modules each importing the one before and defining a
+    class, whose interfaces hold 1,830 class records in all, the interface checks add 11%
+    to `--check-only` (1,045 million instructions where there were 938 million) and
+    nothing to `run` (3,215 million where there were 3,228 million, the compiled code
+    being read once).  And the lowering stops at an import it cannot lower, instead of
+    lowering the importer without it (docs/design/pkm.md §8.4).
+  - `paykan pkm check` printed `usable` for files the compiler rejects or crashes on (a
+    CODE section that does not decode, a TMPL section the importer rejects, compiled code
+    that does not read or verify, an interface that does not match its CODE), and printed
+    it before it decoded anything, followed by an error and exit status 1 for some of
+    them.  It now reads the file as a program that imports it does, through the code that
+    loads a module (`modules::readModuleContents`): the verdict against this `paykan`, the
+    interface, CODE (decoded, verified and checked against the interface), the compiled
+    code (read and verified by the backend that would link it: the default one, or
+    `--backend`'s) and the templates, and then prints one line, `usable`, or `stale: `,
+    `rejected: ` or `corrupt: ` and why (`m.pkm: corrupt: has a bad CODE section: binary
+    PIR: bad magic at byte 0`), exiting with 1 when the file is not usable.  A file that
+    is not a module file at all is `corrupt: ...` too, where it was an error on standard
+    error.  Compiled code another backend or target compiled, which the link refuses, is
+    `rejected: its code was compiled by backend 'mlir' (...)`, and an unknown `--backend`
+    (`MLIR`) is an error, as for `pkm extract`, where both said `usable`.
+  - `--emit-source` with `--emit-c` or `--emit-mlir` was accepted and one of the two
+    outputs dropped without a word (`--emit-c --emit-source` printed the C,
+    `--emit-source --emit-mlir=scf` the MLIR).  `--emit-source` is the backend's own
+    output, the mlir backend's LLVM IR, so with either of them it is now an error
+    (`--emit-c and --emit-source exclude each other`), as with `--emit-pir`; with
+    `--emit-llvm`, which names the same output, it is accepted.
+  - `--emit-pkm` named a module after a path with a keyword in it, and `--module-name`
+    took one: `--emit-pkm x/y/if.pkn` and `--module-name=a::match` wrote module files
+    no import can name (`import x::y::if;` is a syntax error).  Each part of a module
+    name is now an identifier as the grammar defines it, which no keyword is (the
+    frontends' list, `frontend::kKeywords`, now in `paykan/Keywords.h`): `cannot name
+    the module of 'x/y/if.pkn' after its path: 'if' is a keyword, which no import can
+    name (name it with --module-name)`, and `--module-name: 'a::match' is not a module
+    name: 'match' is a keyword, which no import can name`.
+  - `build -o` into a directory that does not exist, or onto a directory (or `build
+    hello.pkn` next to a directory `hello`), compiled the whole program and then failed
+    with the linker's own words (`/usr/bin/ld: cannot open output file nodir/hello: No
+    such file or directory`).  `build` now checks its executable before it compiles
+    anything and says so as the other writers do: `cannot write 'nodir/hello': the
+    directory 'nodir' does not exist`, `cannot write 'adir': Is a directory`.
+  - `--emit-c` exited 0 with C that could not be linked when an import built from source
+    could not get its cache entry (a read-only directory, `.paykan_cache` a file): the C
+    declared the module's compiled functions and defined them nowhere (`undefined
+    reference to pk_lib_3A_3Ax_Sv`), since that code was in no module file, and
+    `--list-modules` failed for it.  Such a module's code now stays in the C, as under
+    `--no-module-cache`, and `--list-modules` names the module files the C does need
+    (docs/c-backend.md).
+  - An error in an imported module named the module's file by its path from the source
+    root, which is not that file unless `paykan` runs there: `paykan --check-only
+    tasks/main.pkn` reported a mistake in `tasks/tasks/text.pkn` as `tasks/text.pkn:1:27:
+    error: ...`, and so did an error in a template's body, the files an import that is not
+    found tried (`not found (tried tasks/nothere.pkn, ...)`), an imported file that cannot
+    be read or is over the size limit (`'tasks/big.pkn' is too large for a source file`)
+    and `--verbose`'s cache entries.  Each is now named by the main file's directory as it
+    was given followed by that path (`tasks/tasks/text.pkn:1:27`,
+    `tasks/.paykan_cache/tasks/text.pkm`), a path that works from the directory `paykan`
+    runs in, and absolute for an absolute main file; the module files record the path from
+    the source root as before, so they are the same wherever `paykan` runs
+    (docs/language/15-modules.md, docs/design/pkm.md §8.6).
+  - `--emit-pkm --module-name=a::b src/a/b.pkn` resolved the module's imports against
+    `src/a`, the file's directory, so its sibling `a::c` was looked for as
+    `src/a/a/c.pkn` and not found.  When the name's parts before its last are the last
+    directories of the file's path, the module's imports are now resolved against the
+    directory above them (`src`), where a program that imports it finds them, run from
+    anywhere (`cd src/a && paykan --emit-pkm --module-name=a::b b.pkn` too); otherwise
+    against the file's directory, as before (docs/language/17-the-paykan-command.md).
+  - A line of some 20,000 invalid characters (`$`, NUL bytes) overflowed the stack in the
+    lexer (a segmentation fault), far below the 256 MiB a source may have, since it called
+    itself once per character it skipped.  It skips them in a loop: 100,000 `$` in a row
+    are 100,000 `invalid character '$'` errors, 20 of them printed, and exit status 1.
 - A value read from a variable could be freed while still in use when a call later in the
   same statement replaced the variable, through an `inout` parameter or a struct's method
   that may change `self`: `s + repl(s)` with `fn repl(x: inout Str)` joined freed memory,

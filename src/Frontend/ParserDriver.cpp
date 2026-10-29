@@ -11,6 +11,7 @@
 #include <memory>
 #include <sstream>
 #include <system_error>
+#include <vector>
 
 #ifndef PAYKAN_DEFAULT_FRONTEND
 #error "PAYKAN_DEFAULT_FRONTEND must be defined by the build"
@@ -136,6 +137,11 @@ bool ParserDriver::prepare(const std::string &filename, sema::DiagEngine &diag,
   if (!out.FE)
     return fail("unknown frontend '" + im.FrontendName + "'");
 
+  // The file by the name its diagnostics give it (an import's path as it
+  // is shown from where paykan runs), else as given.
+  const std::string &shown =
+      diag.getSourceName().empty() ? filename : diag.getSourceName();
+
   // Read the whole file; the frontend parses the text.  A file that cannot
   // be opened is a diagnostic with no location (there is no source to point
   // at) and a failed parse; library code never exit()s the process.
@@ -146,22 +152,37 @@ bool ParserDriver::prepare(const std::string &filename, sema::DiagEngine &diag,
   // whose read errors are reported rather than thrown.
   std::error_code ec;
   if (std::filesystem::is_directory(filename, ec))
-    return fail("'" + filename + "' is a directory, not a source file");
+    return fail("'" + shown + "' is a directory, not a source file");
   errno = 0;
   std::unique_ptr<std::FILE, int (*)(std::FILE *)> in(
       std::fopen(filename.c_str(), "rb"), &std::fclose);
   if (!in)
-    return fail("cannot open '" + filename + "': " + std::strerror(errno));
+    return fail("cannot open '" + shown + "': " + std::strerror(errno));
+  // At most frontend::kMaxSourceBytes: a regular file larger than that is
+  // refused before it is read, and a pipe or a device (/dev/stdin, `<(...)`,
+  // /dev/zero) is read only until it gives more.
+  const std::string tooLarge =
+      "'" + shown + "' is too large for a source file (more than " +
+      std::to_string(frontend::kMaxSourceBytes >> 20) + " MiB)";
+  if (std::filesystem::is_regular_file(filename, ec) &&
+      std::filesystem::file_size(filename, ec) > frontend::kMaxSourceBytes &&
+      !ec)
+    return fail(tooLarge);
   // A short read is the end of the file or an error (checked below): the
-  // stream is not read again after either.
-  char buf[1 << 16];
+  // stream is not read again after either.  The buffer is on the heap: an
+  // import is parsed in its importer's Sema, so the stack is the import
+  // chain's.
+  constexpr size_t kChunk = size_t{1} << 16;
+  std::vector<char> buf(kChunk);
   size_t n;
   do {
-    n = std::fread(buf, 1, sizeof buf, in.get());
-    out.Source.append(buf, n);
-  } while (n == sizeof buf);
+    n = std::fread(buf.data(), 1, kChunk, in.get());
+    if (out.Source.size() + n > frontend::kMaxSourceBytes)
+      return fail(tooLarge);
+    out.Source.append(buf.data(), n);
+  } while (n == kChunk);
   if (std::ferror(in.get()))
-    return fail("cannot read '" + filename + "': " + std::strerror(errno));
+    return fail("cannot read '" + shown + "': " + std::strerror(errno));
 
   std::istringstream lines(out.Source);
   std::string line;

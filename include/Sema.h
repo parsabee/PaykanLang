@@ -851,6 +851,36 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// detection).
   StringSet *ImportStack = nullptr;
 
+  /// How deep the import being followed is: the imports, from the main
+  /// file's down, whose modules are being located or loaded, shared like
+  /// ImportStack by every Sema of one compilation.  Each module built from
+  /// source on the way is analysed by a nested Sema on the native stack,
+  /// and each cache entry's dependency is located in a nested call, so a
+  /// chain deeper than kMaxImportDepth is an error (docs/grammar.md
+  /// section 9), whether its modules come from source or from module files.
+  unsigned *ImportDepth = nullptr;
+  static constexpr unsigned kMaxImportDepth = 256;
+  /// One more import followed (ImportDepth), for as long as it lives.
+  class ImportLevel {
+  public:
+    explicit ImportLevel(unsigned *depth) : Depth(depth) {
+      if (Depth)
+        ++*Depth;
+    }
+    ~ImportLevel() {
+      if (Depth)
+        --*Depth;
+    }
+    ImportLevel(const ImportLevel &) = delete;
+    ImportLevel &operator=(const ImportLevel &) = delete;
+
+  private:
+    unsigned *Depth;
+  };
+  /// Whether the import of @p canonical, the ImportLevel just entered, is
+  /// nested deeper than kMaxImportDepth; reported at @p loc when it is.
+  bool importTooDeep(const std::string &canonical, ast::SourceLocation loc);
+
   /// Canonical names (ModuleName.h) of the modules that failed to load in
   /// this compilation -- not found, not a source file, or with errors of
   /// their own.  Shared, like ImportStack, by every Sema of one compilation,
@@ -900,8 +930,9 @@ class Sema : public ast::ASTVisitor<Sema, bool> {
   /// They fail this module too: run() adds them to its error count.
   unsigned ImportedModuleErrors = 0;
 
-  /// @p path for a diagnostic: relative to ProjectRoot (the source root) when
-  /// it lies under it, as given otherwise.
+  /// @p path for a diagnostic (module_utils::displayPath): under the source
+  /// root, ProjectRoot as the main file's path gives it followed by the
+  /// path from the root; as given otherwise.
   std::string displayPath(const std::filesystem::path &path) const;
 
   /// Where imports come from: source files, cache entries or prebuilt
@@ -1074,15 +1105,34 @@ public:
   std::shared_ptr<ModuleTemplates>
   exportTemplates(ast::TranslationUnit *tu, const std::string &canonical);
   /// @p mt as the TMPL section of a .pkm (docs/design/pkm.md §4.3), and
-  /// back.  encodeTemplates returns no bytes, with the reason in @p error,
-  /// for a body the interchange format cannot write.  decodeTemplates
-  /// builds the bodies in an ASTContext of their own (Owner); Uses names
-  /// the modules, and the importer fills in the files they are cached
-  /// under; the bodies have no source lines.
+  /// back.  The section records @p file as the bodies' file: the source's
+  /// path from the source root (module_utils::relativeToRoot), not
+  /// mt.File, which diagnostics show from where the compiler runs.
+  /// encodeTemplates returns no bytes, with the reason in @p error, for a
+  /// body the interchange format cannot write.  decodeTemplates builds the
+  /// bodies in an ASTContext of their own (Owner); Uses names the modules,
+  /// and the importer fills in the files they are cached under; File is
+  /// the recorded one and the bodies have no source lines.
   static std::vector<uint8_t> encodeTemplates(const ModuleTemplates &mt,
+                                              const std::string &file,
                                               std::string &error);
   static StatusOr<std::shared_ptr<ModuleTemplates>>
   decodeTemplates(std::span<const uint8_t> bytes, const std::string &canonical);
+
+  /// Whether every type the interface @p iface names, in its fields and
+  /// signatures, is a builtin or one it describes, and no parameter is
+  /// `void`: what an importer needs to reconstruct them (injectModule).
+  /// The first that is not when not.
+  static Status checkInterfaceTypes(const pkm::Interface &iface);
+  /// What Sema reads of a module file of @p canonical when the file is
+  /// loaded (modules::FrontendRead): its interface's types
+  /// (checkInterfaceTypes) and its TMPL section @p templates, decoded
+  /// (decodeTemplates; the ModuleTemplates loadModule takes, null without
+  /// templates).  Or why the file cannot be used ("has a bad TMPL section:
+  /// ...").
+  static StatusOr<std::shared_ptr<void>>
+  readImport(const pkm::Interface &iface, std::span<const uint8_t> templates,
+             const std::string &canonical);
 
   /// Set the resolver imports go through (the driver's).  Child Semas
   /// inherit it.
@@ -1115,10 +1165,14 @@ private:
                     LocatedModule &out);
   /// The exports of module @p canonical: from ModuleCache, from the
   /// interface @p located holds, or by parsing and analysing its source.
-  /// Returns nullptr after reporting the failure.
+  /// Returns nullptr after reporting the failure, with a note that @p loc
+  /// imports the module unless @p importedHere is false (a cache entry's
+  /// dependency, loaded before the entry is used: the entry's importer
+  /// does not import it).
   const ModuleInfo *loadModule(const std::string &canonical,
                                const LocatedModule &located,
-                               ast::SourceLocation loc);
+                               ast::SourceLocation loc,
+                               bool importedHere = true);
   /// Make a module's exports visible under @p qualifier (and
   /// @p fullModulePath): reconstruct its types in Ctx and declare its
   /// functions.  Returns false after reporting a failure.

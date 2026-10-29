@@ -1384,6 +1384,165 @@ fn @helper(%a.1: i64) -> void {
       << errs;
 }
 
+// A parameter is a value, which `void` is not: a signature that takes one
+// is rejected wherever it is declared, an extern's or a vtable slot's too
+// (a module file whose CODE declared one crashed the mlir backend).
+TEST(PIRVerifier, RejectsVoidParameters) {
+  std::string errs = verifyText(R"(module "m"
+extern fn @other(i64, void) -> void module "lib"
+class C {
+  vtable {
+    destroy = @C.destroy : (obj, void) -> void
+  }
+}
+fn @C.destroy(%self.1: obj) -> void {
+  ret
+}
+fn @main() -> i64 {
+  ret 0
+}
+)");
+  EXPECT_NE(errs.find("function '@other' takes a void parameter"),
+            std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("class 'C' vtable slot 0 ('destroy') takes a void "
+                      "parameter"),
+            std::string::npos)
+      << errs;
+}
+
+// A class's layout is its superclass's fields, then its own (docs/pir.md §5):
+// a module file whose CODE renamed an inherited field passed the verifier,
+// and its importers' copies of the class then disagreed with it.
+TEST(PIRVerifier, AClassBeginsWithItsSuperclassFields) {
+  const char *const shape = R"(module "m"
+extern class Shape module "lib" {
+  field n: i64
+  field m: i64
+}
+extern class Line : Shape module "lib" {
+  field %s: i64
+  field m: i64
+  field k: i64
+}
+fn @main() -> i64 {
+  ret 0
+}
+)";
+  auto with = [&](const char *name) {
+    std::string text = shape;
+    text.replace(text.find("%s"), 2, name);
+    ParseError err;
+    auto p = parseProgram(text, err);
+    return p ? formatErrors(verify(p->Modules.front()))
+             : "PARSE ERROR: " + err.str();
+  };
+  EXPECT_EQ(with("n"), "");
+  EXPECT_NE(with("x").find("class 'Line': its fields do not begin with those "
+                           "of its superclass 'Shape'"),
+            std::string::npos)
+      << with("x");
+}
+
+// A function's value ids are below its next free one, which the passes
+// size their tables by: a module file whose CODE gave a function a smaller
+// one (its hashes made to match) passed the verifier, and rc-elimination
+// then read past its tables.  The text format has no such field (the
+// parser counts the ids), so the test lowers it in the parsed module.
+TEST(PIRVerifier, RejectsAValueIdPastTheNextFreeOne) {
+  ParseError err;
+  auto m = parseModule(R"(module "m"
+fn @f(%a.1: i64) -> i64 {
+  %b.2 = add %a.1, %a.1
+  ret %b.2
+}
+)",
+                       err);
+  ASSERT_TRUE(m) << err.str();
+  ASSERT_EQ(m->Functions[0].NextValueId, 3u);
+  EXPECT_EQ(formatErrors(verify(*m)), "");
+  m->Functions[0].NextValueId = 2;
+  const std::string errs = formatErrors(verify(*m));
+  EXPECT_NE(errs.find("m:@f: value '%2' is not below the function's next "
+                      "value id 2"),
+            std::string::npos)
+      << errs;
+  EXPECT_EQ(errs.find("value '%1'"), std::string::npos) << errs;
+}
+
+// A function, a global or a class is linked by its name, so it has one: a
+// module file whose CODE named a copy of an instantiation's constructor ""
+// (an index of its strings changed, its hashes made to match) passed the
+// verifier, and the program's link then missed the constructor the
+// module's compiled code calls.
+TEST(PIRVerifier, RejectsAnEmptyName) {
+  ParseError err;
+  auto m = parseModule(R"(module "m"
+cstr @s = "a" len 1
+class C {
+  vtable {
+    destroy = @C.destroy : (obj) -> void
+  }
+}
+fn @C.destroy(%self.1: obj) -> void {
+  ret
+}
+fn @f() -> i64 {
+  ret 0
+}
+)",
+                       err);
+  ASSERT_TRUE(m) << err.str();
+  EXPECT_EQ(formatErrors(verify(*m)), "");
+  m->Functions[1].Name.clear();
+  m->CStrs[0].Name.clear();
+  m->Classes[0].Name.clear();
+  const std::string errs = formatErrors(verify(*m));
+  EXPECT_NE(errs.find("m: symbol has an empty name"), std::string::npos)
+      << errs;
+  EXPECT_NE(errs.find("m: a class has an empty name"), std::string::npos)
+      << errs;
+}
+
+// The cross-module checks of one module, against the modules at hand: an
+// extern naming a module whose PIR is not at hand is not checked, one
+// naming no module of the program is an error.
+TEST(PIRVerifier, ChecksTheLinksOfOneModule) {
+  ParseError err;
+  auto p = parseProgram(R"(module "main"
+extern fn @helper(i64) -> i64 module "lib"
+extern fn @later() -> void module "built"
+extern fn @elsewhere() -> void module "nowhere"
+fn @main() -> i64 {
+  ret 0
+}
+module "lib"
+fn @helper(%a.1: i64) -> void {
+  ret
+}
+)",
+                        err);
+  ASSERT_TRUE(p) << err.str();
+  const Module &lib = p->Modules[1];
+  const LinkedModules modules =
+      [&](const std::string &name) -> std::optional<const Module *> {
+    if (name == "lib")
+      return &lib;
+    if (name == "built")
+      return nullptr;
+    return std::nullopt;
+  };
+  const std::string errs = formatErrors(verifyLinks(p->Modules[0], modules));
+  EXPECT_NE(errs.find("'@helper' is declared (i64) -> i64 but module 'lib' "
+                      "defines it (i64) -> void"),
+            std::string::npos)
+      << errs;
+  EXPECT_EQ(errs.find("later"), std::string::npos) << errs;
+  EXPECT_NE(errs.find("module 'nowhere', which is not in the program"),
+            std::string::npos)
+      << errs;
+}
+
 // #70: an extern's `symbol` is its name in the defining module, so the
 // importer can declare two modules' `@tag` (and define its own) side by side.
 TEST(PIRVerifier, ExternSymbolLinksSameNamedFunctionsOfTwoModules) {

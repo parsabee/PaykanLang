@@ -10,6 +10,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -85,6 +86,48 @@ inline std::string realPath(const std::filesystem::path &path) {
   if (ec)
     return "";
   return resolved.string();
+}
+
+/// @p path from the source root @p projectRoot ("" = the current
+/// directory) when it lies under it (`lib/m.pkn`), or nothing.
+inline std::optional<std::filesystem::path>
+pathUnderRoot(const std::string &projectRoot,
+              const std::filesystem::path &path) {
+  std::error_code ec;
+  auto root = std::filesystem::weakly_canonical(
+      projectRoot.empty() ? std::filesystem::path(".")
+                          : std::filesystem::path(projectRoot),
+      ec);
+  if (ec)
+    return std::nullopt;
+  auto abs = std::filesystem::weakly_canonical(path, ec);
+  if (ec)
+    return std::nullopt;
+  auto rel = abs.lexically_relative(root);
+  if (rel.empty() || *rel.begin() == "..")
+    return std::nullopt;
+  return rel;
+}
+
+/// @p path from the source root when it lies under it (pathUnderRoot), else
+/// as given: how a module file records its source (its DIAG and TMPL
+/// paths), the same wherever the compiler runs.
+inline std::string relativeToRoot(const std::string &projectRoot,
+                                  const std::filesystem::path &path) {
+  std::optional<std::filesystem::path> rel = pathUnderRoot(projectRoot, path);
+  return rel ? rel->generic_string() : path.string();
+}
+
+/// @p path as a diagnostic or `--verbose` names it, a path that works from
+/// the directory the compiler runs in: a file under the source root is the
+/// root as the main file's path gives it (@p projectRoot, "" for the
+/// current directory) followed by the file's path from the root, so
+/// `paykan tasks/main.pkn` names `tasks/lib/m.pkn`, and an absolute main
+/// file gives absolute paths; any other file is @p path as given.
+inline std::string displayPath(const std::string &projectRoot,
+                               const std::filesystem::path &path) {
+  std::optional<std::filesystem::path> rel = pathUnderRoot(projectRoot, path);
+  return rel ? appendPath(projectRoot, *rel).generic_string() : path.string();
 }
 
 } // namespace module_utils

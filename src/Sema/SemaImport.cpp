@@ -20,8 +20,10 @@
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 
 namespace paykan {
@@ -239,20 +241,7 @@ bool Sema::isFailedImportUse(std::string_view name) {
 }
 
 std::string Sema::displayPath(const std::filesystem::path &path) const {
-  if (path.is_relative())
-    return path.string();
-  // An empty root is the current directory (see module_utils::appendPath).
-  std::error_code ec;
-  auto root = std::filesystem::weakly_canonical(
-      ProjectRoot.empty() ? std::filesystem::path(".")
-                          : std::filesystem::path(ProjectRoot),
-      ec);
-  if (ec)
-    return path.string();
-  auto rel = path.lexically_relative(root);
-  if (rel.empty() || *rel.begin() == "..")
-    return path.string();
-  return rel.string();
+  return module_utils::displayPath(ProjectRoot, path);
 }
 
 // -- resolveModulePath
@@ -261,12 +250,7 @@ std::string Sema::resolveModulePath(const std::string &modulePath,
                                     bool isSystem, ast::SourceLocation loc) {
   std::filesystem::path file =
       module_utils::moduleFile(ProjectRoot, isSystem, modulePath);
-  // A project module is shown relative to the source root, like every
-  // imported file.
-  return checkModuleFile(file,
-                         isSystem
-                             ? displayPath(file)
-                             : module_utils::modulePathToRelative(modulePath),
+  return checkModuleFile(file, displayPath(file),
                          module_name::canonicalImportName(modulePath, isSystem),
                          isSystem ? "system module" : "module", loc);
 }
@@ -561,7 +545,165 @@ Sema::ModuleInfo Sema::fromInterface(const pkm::Interface &iface) {
   return info;
 }
 
+Status Sema::checkInterfaceTypes(const pkm::Interface &iface) {
+  // The types an importer reconstructs, by name, before it resolves a
+  // signature (injectModule): every type an export names is a builtin or
+  // one the interface describes.  A builtin's name or a record's (an
+  // instantiation's too) is looked up as it is; only a type built of others
+  // (`T[]`, `T?`, a tuple, a function type) is parsed, each once, in a
+  // context that knows the interface's types, made for the first one (most
+  // interfaces have none).  A module's interface spells its imports' types
+  // again and again, and a diagnostic's text is made only for the one that
+  // does not resolve.
+  std::vector<std::string_view> described;
+  described.reserve(iface.Classes.size() + iface.Structs.size() +
+                    iface.Enums.size());
+  for (const pkm::ClassRec &c : iface.Classes)
+    described.push_back(c.Name);
+  for (const pkm::StructRec &st : iface.Structs)
+    described.push_back(st.Name);
+  for (const pkm::EnumRec &e : iface.Enums)
+    described.push_back(e.Name);
+  std::sort(described.begin(), described.end());
+  std::optional<ast::ASTContext> types;
+  auto context = [&]() -> ast::ASTContext & {
+    if (types)
+      return *types;
+    ast::ASTContext &ctx = types.emplace();
+    for (const pkm::EnumRec &e : iface.Enums)
+      ctx.registerEnumType(e.Name, ast::SourceLocation());
+    for (const pkm::StructRec &st : iface.Structs)
+      ctx.registerStructType(st.Name, ast::SourceLocation());
+    // Superclass first (modules::checkInterface found each one described,
+    // its ancestors ending at the root).
+    std::vector<const pkm::ClassRec *> pending;
+    pending.reserve(iface.Classes.size());
+    for (const pkm::ClassRec &c : iface.Classes)
+      pending.push_back(&c);
+    for (bool progress = true; progress && !pending.empty();) {
+      progress = false;
+      for (auto it = pending.begin(); it != pending.end();) {
+        ast::ClassType *super =
+            (*it)->SuperClassName.empty()
+                ? ctx.getObjTy()
+                : ctx.lookupClassType((*it)->SuperClassName);
+        if (!super) {
+          ++it;
+          continue;
+        }
+        ctx.preRegisterClassType((*it)->Name, super);
+        it = pending.erase(it);
+        progress = true;
+      }
+    }
+    return ctx;
+  };
+  std::unordered_set<std::string_view> composite;
+  auto unknown = [&](const std::string &type) {
+    ast::BuiltinType::Kind kind;
+    if (std::binary_search(described.begin(), described.end(),
+                           std::string_view(type)) ||
+        ast::builtinKindOfName(type, kind) || type == names::kObj ||
+        type == names::kString)
+      return false;
+    if (type.find_first_of("[?(") == std::string::npos)
+      return true;
+    if (composite.count(type))
+      return false;
+    if (!resolveExportedType(context(), type))
+      return true;
+    composite.insert(type);
+    return false;
+  };
+  auto unknownType = [](const std::string &what, const std::string &type) {
+    return Status::error(what + " has unknown type '" + type + "'");
+  };
+  auto signature = [&](const auto &decl, const std::string &ret,
+                       const std::vector<std::string> &params) {
+    if (unknown(ret))
+      return unknownType("return type of " + decl(), ret);
+    for (size_t i = 0; i < params.size(); ++i) {
+      const bool isVoid = params[i] == names::kTypeVoid;
+      if (!isVoid && !unknown(params[i]))
+        continue;
+      const std::string what =
+          "parameter " + std::to_string(i + 1) + " of " + decl();
+      return isVoid ? Status::error(what + " is void")
+                    : unknownType(what, params[i]);
+    }
+    return Status::ok();
+  };
+  auto members = [&](const char *kind, const std::string &owner,
+                     const std::vector<pkm::ClassRec::Field> &fields,
+                     const std::vector<pkm::ClassRec::Method> &methods) {
+    for (const pkm::ClassRec::Field &f : fields)
+      if (unknown(f.TypeName)) {
+        std::string what = "field '" + f.FieldName + "' of ";
+        what += kind;
+        what += " '" + owner + "'";
+        return unknownType(what, f.TypeName);
+      }
+    for (const pkm::ClassRec::Method &m : methods)
+      if (Status s =
+              signature([&] { return "method '" + owner + "." + m.Name + "'"; },
+                        m.ReturnTypeName, m.ParamTypeNames);
+          !s)
+        return s;
+    return Status::ok();
+  };
+  // A record of another module's type is that module's record
+  // (ModuleResolver::checkImportedTypes), whose types were checked with it;
+  // but for an instantiation that module may not describe.
+  auto checked = [](const auto &record) {
+    return !record.IsLocal && !record.OriginModule.empty() &&
+           record.Name.find('<') == std::string::npos;
+  };
+  for (const pkm::ClassRec &c : iface.Classes)
+    if (Status s = checked(c) ? Status::ok()
+                              : members("class", c.Name, c.Fields, c.Methods);
+        !s)
+      return s;
+  for (const pkm::StructRec &st : iface.Structs)
+    if (Status s = checked(st)
+                       ? Status::ok()
+                       : members("struct", st.Name, st.Fields, st.Methods);
+        !s)
+      return s;
+  for (const pkm::FuncRec &f : iface.Functions)
+    if (Status s = signature([&] { return "function '" + f.Name + "'"; },
+                             f.ReturnTypeName, f.ParamTypeNames);
+        !s)
+      return s;
+  return Status::ok();
+}
+
+StatusOr<std::shared_ptr<void>>
+Sema::readImport(const pkm::Interface &iface,
+                 std::span<const uint8_t> templates,
+                 const std::string &canonical) {
+  if (Status s = checkInterfaceTypes(iface); !s)
+    return Status::error("has a bad IFACE section: " + s.message());
+  if (templates.empty())
+    return std::shared_ptr<void>();
+  auto decoded = decodeTemplates(templates, canonical);
+  if (!decoded)
+    return Status::error("has a bad TMPL section: " +
+                         decoded.status().message());
+  return std::shared_ptr<void>(std::move(*decoded));
+}
+
 // -- Locating and loading a module
+
+bool Sema::importTooDeep(const std::string &canonical,
+                         ast::SourceLocation loc) {
+  if (!ImportDepth || *ImportDepth <= kMaxImportDepth)
+    return false;
+  error(loc, "imports nested too deep (more than " +
+                 std::to_string(kMaxImportDepth) + " modules): '" + canonical +
+                 "' is imported " + std::to_string(*ImportDepth) +
+                 " modules deep");
+  return true;
+}
 
 bool Sema::locateModule(const std::string &canonical, bool isSystem,
                         const std::string &modulePath, ast::SourceLocation loc,
@@ -586,24 +728,41 @@ bool Sema::locateModule(const std::string &canonical, bool isSystem,
         Resolver->failed(dep);
         continue;
       }
+      // The dependency is imported one level deeper than this module.  A
+      // cache entry whose imports nest too deep is built from its source
+      // instead, whose import that is too deep is reported where it is.
+      ImportLevel level(ImportDepth);
+      if (ImportDepth && *ImportDepth > kMaxImportDepth &&
+          Resolver->buildFromSource(
+              canonical, "imports module '" + dep + "' more than " +
+                             std::to_string(kMaxImportDepth) + " modules deep"))
+        continue;
+      if (importTooDeep(dep, loc)) {
+        if (FailedModules)
+          FailedModules->insert(dep);
+        Resolver->failed(dep);
+        continue;
+      }
       bool depSystem = dep.starts_with(names::kQualSep);
       LocatedModule depLocated;
       if (locateModule(dep, depSystem, depSystem ? dep.substr(2) : dep, loc,
                        depLocated))
-        loadModule(dep, depLocated, loc);
+        loadModule(dep, depLocated, loc, /*importedHere=*/false);
       continue;
     }
-    case K::Source:
+    case K::Source: {
       // The resolver only checks that something is there; a directory or
-      // a special file is diagnosed as before.
-      out.Path = checkModuleFile(
-          r.Path,
-          isSystem ? displayPath(r.Path)
-                   : module_utils::modulePathToRelative(modulePath),
-          canonical, kind, loc);
+      // a special file is diagnosed as before.  A module that failed
+      // before has no path: the file its import would be.
+      std::filesystem::path file =
+          r.Path.empty()
+              ? module_utils::moduleFile(ProjectRoot, isSystem, modulePath)
+              : std::filesystem::path(r.Path);
+      out.Path = checkModuleFile(file, displayPath(file), canonical, kind, loc);
       if (out.Path.empty())
         Resolver->failed(canonical);
       return !out.Path.empty();
+    }
     case K::Loaded:
       out.Path = module_utils::realPath(r.Path);
       out.Iface = r.Iface;
@@ -623,7 +782,8 @@ bool Sema::locateModule(const std::string &canonical, bool isSystem,
 
 const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
                                          const LocatedModule &located,
-                                         ast::SourceLocation loc) {
+                                         ast::SourceLocation loc,
+                                         bool importedHere) {
   // Already built or loaded in this process.  The cache outlives a
   // compilation, so it is keyed by the file (a source or a .pkm), never by
   // the name alone: another compilation's module of the same name is
@@ -640,7 +800,13 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
     std::span<const uint8_t> tmpl =
         Resolver ? Resolver->templates(canonical) : std::span<const uint8_t>();
     if (!tmpl.empty()) {
-      auto templates = decodeTemplates(tmpl, canonical);
+      // Decoded when the file was loaded (readImport), unless the resolver
+      // had no ReadFrontend.
+      StatusOr<std::shared_ptr<ModuleTemplates>> templates =
+          std::static_pointer_cast<ModuleTemplates>(
+              Resolver->takeFrontendData(canonical));
+      if (!*templates)
+        templates = decodeTemplates(tmpl, canonical);
       if (!templates) {
         error(loc,
               "module '" + canonical + "' (" + displayPath(path) +
@@ -649,6 +815,12 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
           FailedModules->insert(canonical);
         return nullptr;
       }
+      // A cache entry's bodies are in the source it was checked against,
+      // named as every diagnostic names a file; a prebuilt file's are
+      // where it records them.
+      if (std::string source = Resolver->cacheSource(canonical);
+          !source.empty())
+        (*templates)->File = std::move(source);
       // The other modules the bodies name are dependencies of this one,
       // resolved before it: the files they are cached under.
       for (size_t i = 1; i < (*templates)->Uses.size(); ++i) {
@@ -709,7 +881,8 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
         // It failed only by importing a module whose failure was reported
         // already: that report covers it too.
         ++RepeatedImportFailures;
-        Diags.note(loc, "in module '" + canonical + "' imported here");
+        if (importedHere)
+          Diags.note(loc, "in module '" + canonical + "' imported here");
         return nullptr;
       }
       // Nothing was reported (should not happen): keep the failure visible.
@@ -717,7 +890,8 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
       return nullptr;
     }
     ImportedModuleErrors += moduleErrors;
-    Diags.note(loc, "in module '" + canonical + "' imported here");
+    if (importedHere)
+      Diags.note(loc, "in module '" + canonical + "' imported here");
     return nullptr;
   };
   if (importDriverPtr->parseFile(path) != 0) {
@@ -729,12 +903,17 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
   importDriverPtr->setDiagEngine(nullptr);
 
   // Run Sema on the imported module, reusing the same engine.
-  Sema importSema(importDriverPtr->getASTContext(), importDiag, ProjectRoot,
-                  moduleFrontend);
+  // On the heap: a chain of imports nests one of these per module, so the
+  // native stack holds only the calls (kMaxImportDepth).
+  auto importSemaPtr =
+      std::make_unique<Sema>(importDriverPtr->getASTContext(), importDiag,
+                             ProjectRoot, moduleFrontend);
+  Sema &importSema = *importSemaPtr;
   if (ImportStack)
     ImportStack->insert(canonical);
   importSema.ImportStack = ImportStack;
   importSema.FailedModules = FailedModules;
+  importSema.ImportDepth = ImportDepth;
   importSema.Resolver = Resolver;
 
   auto *importRoot = importDriverPtr->getRoot();
@@ -765,7 +944,9 @@ const Sema::ModuleInfo *Sema::loadModule(const std::string &canonical,
     std::vector<uint8_t> tmpl;
     if (info.Templates) {
       std::string why;
-      tmpl = encodeTemplates(*info.Templates, why);
+      tmpl =
+          encodeTemplates(*info.Templates,
+                          module_utils::relativeToRoot(ProjectRoot, path), why);
       if (tmpl.empty()) {
         error(loc, "internal compiler error: the templates of module '" +
                        canonical + "' cannot be written: " + why);
@@ -1173,10 +1354,11 @@ bool Sema::injectModule(const ModuleInfo &info, const std::string &qualifier,
   for (auto &fi : info.ExportedFunctions) {
     if (!hiddenInject && isModuleOwnName(fi.Name))
       continue; // the module's own: a private function or type's constructor
-    if (!injectFnAs(fi, qualifier + names::kQualSep + fi.Name))
-      ok = false;
-    if (qualifier != fullModulePath &&
-        !injectFnAs(fi, fullModulePath + names::kQualSep + fi.Name))
+    // A signature that does not resolve is reported once, under the first
+    // name.
+    if (!injectFnAs(fi, qualifier + names::kQualSep + fi.Name) ||
+        (qualifier != fullModulePath &&
+         !injectFnAs(fi, fullModulePath + names::kQualSep + fi.Name)))
       ok = false;
   }
   if (ok && info.Templates &&
@@ -1414,9 +1596,10 @@ Sema::exportTemplates(ast::TranslationUnit *tu, const std::string &canonical) {
 }
 
 std::vector<uint8_t> Sema::encodeTemplates(const ModuleTemplates &mt,
+                                           const std::string &file,
                                            std::string &error) {
   pkm::Templates t;
-  t.File = mt.File;
+  t.File = file;
   for (size_t i = 1; i < mt.Uses.size(); ++i)
     t.Uses.push_back(mt.Uses[i].first);
   // The `impl` blocks after the templates, each with the index of its own.
@@ -1613,9 +1796,8 @@ void Sema::copyImportedInstance(ast::Type *type, ast::SourceLocation loc) {
   else
     pending.Class =
         cloner.cloneClassDecl(const_cast<ast::ClassDecl *>(classTmpl), name);
-  std::vector<ast::FuncDecl *> methods = pending.Struct
-                                             ? pending.Struct->getMethods()
-                                             : pending.Class->getMethods();
+  std::vector<ast::FuncDecl *> methods =
+      structTmpl ? pending.Struct->getMethods() : pending.Class->getMethods();
   const size_t cloned = methods.size();
   const InstantiationFrame request = frameAt(name, loc);
   InstantiationStack.push_back(request);
@@ -1763,6 +1945,14 @@ bool Sema::processImport(ast::ImportDecl *node) {
                  "module '" + canonical +
                      "' failed to load; its errors are reported above");
       ++RepeatedImportFailures;
+      poison();
+      continue;
+    }
+    // The module is located and loaded one import deeper than this one.
+    ImportLevel level(ImportDepth);
+    if (importTooDeep(canonical, node->getLocation())) {
+      if (FailedModules)
+        FailedModules->insert(canonical);
       poison();
       continue;
     }

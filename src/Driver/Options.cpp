@@ -4,6 +4,7 @@
 #include "Options.h"
 
 #include "ModuleName.h"
+#include "paykan/Keywords.h"
 
 #include <algorithm>
 #include <cstdlib>
@@ -411,6 +412,13 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     r.Error = "--emit-llvm, --emit-c and --emit-mlir exclude each other";
     return r;
   }
+  // --emit-source is the backend's own output: --emit-llvm's, two names for
+  // one output, not --emit-c's or --emit-mlir's, which would drop one.
+  if (o.EmitSource && (emitC || emitMLIR)) {
+    r.Error = std::string(emitC ? "--emit-c" : "--emit-mlir") +
+              " and --emit-source exclude each other";
+    return r;
+  }
   if (emits == 1) {
     const char *flag =
         emitLLVM ? "--emit-llvm" : (emitC ? "--emit-c" : "--emit-mlir");
@@ -473,6 +481,13 @@ ParseResult parseCommandLine(int argc, const char *const *argv) {
     if (!module_name::isModuleName(o.ModuleName)) {
       r.Error = "--module-name: '" + o.ModuleName +
                 "' is not a module name (identifiers separated by '::')";
+      for (std::string_view part : module_name::components(o.ModuleName))
+        if (frontend::isKeyword(part)) {
+          r.Error = "--module-name: '" + o.ModuleName +
+                    "' is not a module name: '" + std::string(part) +
+                    "' is a keyword, which no import can name";
+          break;
+        }
       return r;
     }
   }

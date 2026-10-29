@@ -307,6 +307,12 @@ Circular imports are **not supported**: if `a` imports `b`, `b` cannot import `a
 or through other modules, and such a cycle is a compile-time error. Move what both need into
 a third module.
 
+A chain of imports is at most 256 modules deep: the main file may import a module that
+imports another, and so on, 256 modules down, and the import of a 257th is an error,
+`imports nested too deep (more than 256 modules): 'c::m256' is imported 257 modules deep`,
+whether the modules on the way are built from source or come from module files
+([the grammar](../grammar.md#9-diagnostics-and-recovery)).
+
 ## Project: `tasks` as a multi-file program
 
 `tasks` has outgrown a single file. It now has this layout:
@@ -506,6 +512,13 @@ always the main file's directory, and the compiled modules are cached in
 `tasks/.paykan_cache/`, so after a change only the modules affected by it are recompiled
 ([The compilation cache](#the-compilation-cache)).
 
+An error in a module names the module's file by a path that works from the directory you run
+`paykan` in: the main file's directory as you gave it, then the file's path from the source
+root. A mistake in `text.pkn` is `tasks/tasks/text.pkn:12:5: error: ...` for
+`paykan tasks/main.pkn`, and `tasks/text.pkn:12:5: error: ...` for `paykan main.pkn` run in
+`tasks/`; a main file given by an absolute path gives absolute paths. The files an import
+that is not found tried, and the files `--verbose` names, are given the same way.
+
 ## Module Files
 
 A compiled module is a **`.pkm` module file**: the module's interface (what the type checker
@@ -562,7 +575,9 @@ uses another module's holds its own copies of the instantiations it uses
 - **The backend's cache.** The mlir backend keeps the LLVM IR of each imported module's PIR
   (its copies of instantiations) in the cache too, as bitcode (`a/b/c.bc`; the main file's is
   never cached), validated by its own key (the part of that PIR the program uses, the
-  compiler and the runtime ABI) and shared between concurrent builds. A program compiles only
+  compiler and the runtime ABI) and by a hash of the bitcode, checked before the bitcode is
+  read, and shared between concurrent builds. An entry whose hash does not match, or whose
+  module does not verify, is compiled again (`--verbose` says why). A program compiles only
   the copies its `main` reaches, so two programs that use different ones of a module keep
   recompiling its entry; the module's other code is compiled once, in its module file. The
   cache options are summed up in
@@ -578,6 +593,25 @@ and linked from its code, so the program builds and runs identically without the
 (see [`samples/imports/13_pkm`](../../samples/imports/13_pkm/README.md)); its compiled code
 needs the backend that compiled it.
 
+Whichever way a module file reaches a program, it is checked when it is loaded, before
+anything is compiled: its interface must be consistent (each class's superclass described,
+its virtual methods first in the subclass's), name only types it describes, and describe the
+types it records from other modules as those modules do; its PIR is decoded, verified and
+checked against its interface (each class, with its superclass, its fields in their order,
+its virtual methods, its initializer and its constructor, each copy of an instantiation it
+holds, each struct method and each function the interface names must be in it, with the
+types the interface gives them, and each virtual method must be the one a subclass in
+another module inherits), and against the PIR of the module files it uses; its templates
+are decoded; and its compiled code is read and verified by the backend that links it. A
+cache entry that fails is rebuilt, and a prebuilt file is an error at the import (`module
+'m' (m.pkm) has a bad CODE section: ...`, `... has an IFACE section that does not match its
+CODE: ...`, `... has a bad OBJ section: the compiled code does not verify: ...`), its PIR
+and its interface under `--check-only` too. Past these checks the compiled code is trusted
+once the file's hashes match, and so is the layout of a struct, a tagged union, a tuple or
+an array that the interface gives, which the PIR does not record. The hashes catch damage,
+not a file made to pass them, and LLVM's bitcode reader is not hardened against such bytes,
+so use prebuilt modules only from a source you trust.
+
 A prebuilt file is used only when this `paykan` can: a file written by another release
 (every format, PIR and the runtime ABI included, is versioned by the release), or built
 against another interface of a module it imports, is an error naming what differs
@@ -591,9 +625,10 @@ differently.
 
 | Error | Trigger |
 |-------|---------|
-| Module not found | Neither the `.pkn` file nor a prebuilt `.pkm` of the module path exists: `module 'a::b' not found (tried a/b.pkn, a/b.pkm)` |
+| Module not found | Neither the `.pkn` file nor a prebuilt `.pkm` of the module path exists: `module 'a::b' not found (tried a/b.pkn, a/b.pkm)`, each path as given from where `paykan` runs (`tried proj/a/b.pkn, proj/a/b.pkm` for `paykan proj/main.pkn`) |
 | Unresolved name | Qualified name `Mod::name` where `name` is not in `Mod` (including names `Mod` merely imported) |
 | Circular import | Import graph contains a cycle |
+| Imports nested too deep | A chain of imports more than 256 modules deep: `imports nested too deep (more than 256 modules): 'c::m256' is imported 257 modules deep` |
 | Conflicting qualifier | Two imports bind the same qualifier (alias, last path segment or full path) to different modules |
 | Conflicting type name | Two modules in the import graph declare different classes/structs/enums under one name, or a file declares a type named like an imported one |
 | Unknown exported type | An import's export record names a type nothing provides (a compiler bug or corrupt cache — reported against the `import`, never silently degraded to `Obj`/`void`) |

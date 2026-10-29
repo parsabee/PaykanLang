@@ -83,6 +83,9 @@ struct Input {
   /// uses of it; any other gets none (the driver gives it modules lowered
   /// from source or loaded from a `.pkm` without compiled code).
   std::map<std::string, const ModuleObject *> Compiled;
+  /// --verbose: where a backend with a cache of its own says, one line
+  /// each, why it did not use an entry it found (null: say nothing).
+  std::ostream *Verbose = nullptr;
 };
 
 struct EmitOptions {
@@ -144,6 +147,17 @@ public:
   /// capabilities().CompileModules is set; the default fails.
   virtual Status emitModuleObject(const ModuleObject &code, unsigned optLevel,
                                   const std::string &path);
+
+  /// Whether @p code, one module's compiled code of the kind objectKind()
+  /// names, can be linked: read and checked as a program's link would use
+  /// it (the mlir backend parses the bitcode and runs LLVM's verifier).
+  /// The driver asks when it loads a module file whose code this backend
+  /// would link, so a damaged cache entry is rebuilt and a damaged prebuilt
+  /// module rejected before anything is compiled.  A backend may keep what
+  /// it read for the program it then links (the mlir backend does, so the
+  /// bitcode is read once).  Only called when capabilities().CompileModules
+  /// is set; the default accepts the code.
+  virtual Status checkModuleObject(const ModuleObject &code);
 };
 
 using Registry = plugin::Registry<Backend>;

@@ -28,4 +28,6 @@ Status Backend::emitModuleObject(const ModuleObject &, unsigned,
                        "' cannot compile modules");
 }
 
+Status Backend::checkModuleObject(const ModuleObject &) { return Status::ok(); }
+
 } // namespace paykan::backend

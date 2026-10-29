@@ -20,8 +20,10 @@
 #include "AST.h"
 #include "ASTContext.h"
 #include "DiagEngine.h"
+#include "paykan/Keywords.h"
 #include "paykan/Registry.h"
 
+#include <cstddef>
 #include <iosfwd>
 #include <memory>
 #include <string>
@@ -54,31 +56,11 @@ inline constexpr unsigned kMaxNesting = 512;
 /// links; the passes after parsing take a chain in a loop.
 inline constexpr unsigned kMaxChain = 2048;
 
-/// The grammar's keywords (docs/grammar.md section 1), which no identifier
-/// spells: an identifier, IDENT, is a letter or `_` followed by letters,
-/// digits and `_`, and is none of these.  The AST interchange reader holds a
-/// plugin's names to it (isIdentifier).
-inline constexpr std::string_view kKeywords[] = {
-    "import", "as",       "class", "struct", "enum", "match", "mov",   "fn",
-    "native", "return",   "if",    "then",   "else", "elif",  "while", "for",
-    "break",  "continue", "True",  "False",  "None", "_",     "view",  "inout",
-    "let",    "weak",     "impl",  "static", "trait"};
-
-/// Whether @p s is an identifier, the grammar's IDENT (kKeywords).
-inline bool isIdentifier(std::string_view s) {
-  auto letter = [](char c) {
-    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
-  };
-  if (s.empty() || !letter(s[0]))
-    return false;
-  for (char c : s)
-    if (!letter(c) && !(c >= '0' && c <= '9'))
-      return false;
-  for (std::string_view k : kKeywords)
-    if (s == k)
-      return false;
-  return true;
-}
+/// Largest source file the compiler reads (docs/grammar.md section 9),
+/// 256 MiB: a larger regular file is refused before it is read, and a pipe
+/// or a device (`/dev/stdin`, `<(...)`, `/dev/zero`) is read only up to it,
+/// with `'<file>' is too large for a source file (more than 256 MiB)`.
+inline constexpr size_t kMaxSourceBytes = size_t{256} << 20;
 
 /// The diagnostic every frontend reports at a `mov` keyword (#145).  `mov`
 /// stays reserved; the operand after it still parses.
